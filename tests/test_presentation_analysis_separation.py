@@ -303,7 +303,7 @@ class TestF19OutputFormatInvariance:
         # And the retired token is a usage error with no hidden alias.
         retired = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p), "-o", "json=-", "--view", "filtered"],
+            ["compare", str(old_p), str(new_p), "-o", "json=-", "--set", 'output.view=["filtered"]'],
         )
         assert retired.exit_code == 64, retired.output
 
@@ -356,7 +356,7 @@ class TestF20ExplainPatternsNeverChangesAnalysis:
 
         retired = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p), "-o", "json=-", "--view", "patterns"],
+            ["compare", str(old_p), str(new_p), "-o", "json=-", "--set", 'output.view=["patterns"]'],
         )
         assert retired.exit_code == 64, retired.output
 
@@ -415,15 +415,7 @@ class TestViewGrammar:
         old_p, new_p = _write_pair(tmp_path)
         result = CliRunner().invoke(
             main,
-            [
-                "compare",
-                str(old_p),
-                str(new_p),
-                "-o",
-                "markdown=-",
-                "--view",
-                "show=removed",
-            ],
+            ["compare", str(old_p), str(new_p), "-o", "markdown=-", "--set", 'output.view=["show=removed"]'],
         )
         assert result.exit_code == 4, result.output
         assert "api_removed" in result.output
@@ -441,17 +433,7 @@ class TestViewGrammar:
         old_p, new_p = _write_pair(tmp_path)
         result = CliRunner().invoke(
             main,
-            [
-                "compare",
-                str(old_p),
-                str(new_p),
-                "-o",
-                "markdown=-",
-                "--view",
-                "show=removed",
-                "--view",
-                "show=added",
-            ],
+            ["compare", str(old_p), str(new_p), "-o", "markdown=-", "--set", 'output.view=["show=removed", "show=added"]'],
         )
         assert result.exit_code == 4, result.output
         assert "api_removed" in result.output
@@ -479,17 +461,7 @@ class TestViewGrammar:
         old_p, new_p = _write_pair(tmp_path)
         result = CliRunner().invoke(
             main,
-            [
-                "compare",
-                str(old_p),
-                str(new_p),
-                "-o",
-                "markdown=-",
-                "--view",
-                "show=breaking",
-                "--view",
-                "show=added",
-            ],
+            ["compare", str(old_p), str(new_p), "-o", "markdown=-", "--set", 'output.view=["show=breaking", "show=added"]'],
         )
         assert result.exit_code == 4, result.output
         assert "api_removed" in result.output
@@ -498,7 +470,7 @@ class TestViewGrammar:
     def test_unknown_view_token_is_a_usage_error(self, tmp_path: Path) -> None:
         old_p, new_p = _write_pair(tmp_path)
         result = CliRunner().invoke(
-            main, ["compare", str(old_p), str(new_p), "--view", "nonsense"]
+            main, ["compare", str(old_p), str(new_p), "--set", 'output.view=["nonsense"]']
         )
         assert result.exit_code == 64, result.output
         assert "Unknown --view token" in result.output
@@ -507,7 +479,7 @@ class TestViewGrammar:
         old_p, new_p = _write_pair(tmp_path)
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p), "--view", "show=not_a_real_token"],
+            ["compare", str(old_p), str(new_p), "--set", 'output.view=["show=not_a_real_token"]'],
         )
         assert result.exit_code == 64, result.output
         assert "Unknown --view show= token" in result.output
@@ -529,19 +501,7 @@ class TestViewGrammar:
         )
         combined = CliRunner().invoke(
             main,
-            [
-                "compare",
-                str(old_p),
-                str(new_p),
-                "-o",
-                "json=-",
-                "--view",
-                "root-cause",
-                "--view",
-                "impact",
-                "--view",
-                "full",
-            ],
+            ["compare", str(old_p), str(new_p), "-o", "json=-", "--set", 'output.view=["full", "root-cause", "impact"]'],
         )
         assert baseline.exit_code == combined.exit_code == 4
         assert _canonical_facts(json.loads(baseline.stdout)) == _canonical_facts(
@@ -561,15 +521,7 @@ class TestViewGrammar:
         )
         narrowed = CliRunner().invoke(
             main,
-            [
-                "compare",
-                str(old_p),
-                str(new_p),
-                "-o",
-                "json=-",
-                "--view",
-                "show=breaking",
-            ],
+            ["compare", str(old_p), str(new_p), "-o", "json=-", "--set", 'output.view=["show=breaking"]'],
         )
         assert baseline.exit_code == narrowed.exit_code == 4
         base_payload = json.loads(baseline.stdout)
@@ -604,17 +556,7 @@ class TestShowOnlyCliHintIsReRunnable:
         old_p, new_p = _write_pair(tmp_path)
         result = CliRunner().invoke(
             main,
-            [
-                "compare",
-                str(old_p),
-                str(new_p),
-                "-o",
-                "markdown=-",
-                "--view",
-                "show=breaking",
-                "--view",
-                "show=added",
-            ],
+            ["compare", str(old_p), str(new_p), "-o", "markdown=-", "--set", 'output.view=["show=breaking", "show=added"]'],
         )
         assert result.exit_code == 4, result.output
         hint_line = next(
@@ -650,17 +592,7 @@ class TestShowOnlyCliHintIsReRunnable:
         old_p, new_p = _write_pair(tmp_path)
         result = CliRunner().invoke(
             main,
-            [
-                "compare",
-                str(old_p),
-                str(new_p),
-                "-o",
-                "html=-",
-                "--view",
-                "show=breaking",
-                "--view",
-                "show=added",
-            ],
+            ["compare", str(old_p), str(new_p), "-o", "html=-", "--set", 'output.view=["show=breaking", "show=added"]'],
         )
         assert result.exit_code == 4, result.output
         assert "Filtered by" in result.output
@@ -680,17 +612,7 @@ class TestShowOnlyCliHintIsReRunnable:
         old_p, new_p = _write_pair(tmp_path)
         result = CliRunner().invoke(
             main,
-            [
-                "compare",
-                str(old_p),
-                str(new_p),
-                "-o",
-                "html=-",
-                "--view",
-                "show=breaking,variables",
-                "--view",
-                "show=compatible,variables",
-            ],
+            ["compare", str(old_p), str(new_p), "-o", "html=-", "--set", 'output.view=["show=breaking,variables", "show=compatible,variables"]'],
         )
         assert result.exit_code == 4, result.output
         assert "No changes match the current filter" in result.output

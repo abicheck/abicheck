@@ -359,7 +359,7 @@ def _announce_exit_scheme(
             "1=the contract domain could not be closed on the evidence; with "
             ".abicheck.yml's assurance.require_complete: true, 1=incomplete analysis "
             "assurance -- both orthogonal axes that never lower a 2/4). "
-            "Set a severity setting (--severity-preset, a --pack, or "
+            "Set a severity setting (severity.preset, a --pack, or "
             ".abicheck.yml's severity: block) for the severity-aware scheme -- "
             "there is no manual scheme selector any more.",
             err=True,

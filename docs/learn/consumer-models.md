@@ -74,7 +74,7 @@ A **host loading plugins** states the entry points it will resolve by
 name, and the comparison is scoped to that explicit contract:
 
 ```bash
-abicheck compare old-host.so new-host.so --required-symbol plugin_init --required-symbol plugin_shutdown
+abicheck compare old-host.so new-host.so --set 'consumers.required_symbols=[plugin_init, plugin_shutdown]'
 ```
 
 The mechanics of both are owned by [Plugin Systems](../use/plugin-systems.md).

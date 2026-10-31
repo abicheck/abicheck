@@ -631,7 +631,7 @@ writes one complete per-library report plus `summary.json` into `reports/`,
 alongside whatever other export you asked for.
 
 When a library's list is actually truncated, the rendered entry sets
-`findings_truncated` (or, under `--view show=...`, `findings_view_truncated`
+`findings_truncated` (or, under `output.view: [show=...]`, `findings_view_truncated`
 swapped into that same key for the filtered display) and
 `findings_truncated_kinds` — a `ChangeKind -> count` map of what was cut
 from that library's *displayed* list, the same shape `scan --against`'s
@@ -641,7 +641,7 @@ findings themselves in full). The map is absent when nothing
 was truncated for the displayed view. (The release JSON's own top-level
 `release_filtered_summary` block separately carries the exact, uncapped
 total finding count across the whole release, for the aggregate case where
-`--view show=...` is active.)
+`output.view: [show=...]` is active.)
 
 ```json
 {

@@ -17,7 +17,7 @@ import pytest
 from click.testing import CliRunner
 
 from abicheck.cli import main
-from abicheck.cli_options import define_option, resolve_compile_context
+from abicheck.cli_options import resolve_compile_context
 from abicheck.model.macro_definition import define_spellings_from_tokens
 
 
@@ -31,8 +31,7 @@ def _resolve(tmp_path: Path, *, config: Path | None, defines: tuple[str, ...]):
     """The real resolver, under a real Click context."""
 
     @click.command()
-    @define_option
-    def _cmd(defines: tuple[str, ...]) -> None:  # pragma: no cover - never run
+    def _cmd() -> None:  # pragma: no cover - never run
         pass
 
     with _cmd.make_context("_cmd", []) as ctx:
@@ -46,74 +45,6 @@ def _resolve(tmp_path: Path, *, config: Path | None, defines: tuple[str, ...]):
             defines=defines,
         )
     return cc
-
-
-class TestGrammarThroughClick:
-    """Which spellings Click actually accepts -- asserted, never assumed."""
-
-    @pytest.mark.parametrize(
-        "argv,expected",
-        [
-            (["-DFOO"], ("FOO",)),
-            (["-D", "FOO"], ("FOO",)),
-            (["--define", "FOO"], ("FOO",)),
-            (["--define=FOO"], ("FOO",)),
-            (["-DFOO=1"], ("FOO=1",)),
-            (["-D", "FOO=1"], ("FOO=1",)),
-            (["--define=FOO=1"], ("FOO=1",)),
-            (["--define=NAME=A=B"], ("NAME=A=B",)),
-            (["-DA", "-DB=2", "--define", "C"], ("A", "B=2", "C")),
-            (["-DA=1", "-DA=2"], ("A=1", "A=2")),  # parse preserves; merge resolves
-            ([], ()),
-        ],
-    )
-    def test_accepted_spellings(
-        self, argv: list[str], expected: tuple[str, ...]
-    ) -> None:
-        seen: dict[str, tuple[str, ...]] = {}
-
-        @click.command()
-        @define_option
-        def _cmd(defines: tuple[str, ...]) -> None:
-            seen["defines"] = defines
-
-        result = CliRunner().invoke(_cmd, argv)
-        assert result.exit_code == 0, result.output
-        assert seen["defines"] == expected
-
-    @pytest.mark.parametrize(
-        "argv,expected",
-        [
-            (["--define=-DFOO"], "write -DFOO, not -D-DFOO"),
-            (["--define=-UFOO"], "no --undefine counterpart"),
-            (["--define=F(x)=1"], "function-like"),
-            (["--define=A B"], "whitespace"),
-            (["--define=1BAD"], "not a C identifier"),
-            (["--define="], "empty value"),
-            (["--define=@resp.txt"], "general compiler flags belong"),
-        ],
-    )
-    def test_rejected_spellings_are_usage_errors(
-        self, argv: list[str], expected: str
-    ) -> None:
-        @click.command()
-        @define_option
-        def _cmd(defines: tuple[str, ...]) -> None:  # pragma: no cover
-            pass
-
-        result = CliRunner().invoke(_cmd, argv)
-        assert result.exit_code == 2  # Click's own UsageError code standalone
-        assert expected in result.output
-
-    def test_missing_value_after_D_is_an_error(self) -> None:
-        @click.command()
-        @define_option
-        def _cmd(defines: tuple[str, ...]) -> None:  # pragma: no cover
-            pass
-
-        result = CliRunner().invoke(_cmd, ["-D"])
-        assert result.exit_code != 0
-        assert "requires an argument" in result.output or "Error" in result.output
 
 
 class TestPrecedenceFold:
@@ -189,72 +120,6 @@ class TestPrecedenceFold:
         assert cc.defines == ("A", "B=2")
 
 
-class TestHelpSurface:
-    @pytest.mark.parametrize("command", ["dump", "compare"])
-    def test_define_is_documented_on_plain_help(self, command: str) -> None:
-        result = CliRunner().invoke(main, [command, "--help"])
-        assert result.exit_code == 0
-        assert "--define" in result.output
-        assert "-D" in result.output
-
-    @pytest.mark.parametrize("command", ["dump", "compare"])
-    def test_define_is_also_in_help_all(self, command: str) -> None:
-        result = CliRunner().invoke(main, [command, "--help-all"])
-        assert result.exit_code == 0
-        assert "--define" in result.output
-
-    @pytest.mark.parametrize("command", ["dump", "compare"])
-    def test_general_compiler_option_flags_stay_unavailable(self, command: str) -> None:
-        """ADR-074's non-goal, kept executable: -D must not have dragged the
-        retired generic family back with it."""
-        result = CliRunner().invoke(main, [command, "--help-all"])
-        for gone in ("--gcc-options", "--compiler-option", "--gcc-option"):
-            assert gone not in result.output
-
-    @pytest.mark.parametrize(
-        "command,flag",
-        [
-            (c, f)
-            for c in ("dump", "compare")
-            for f in ("--gcc-options", "--compiler-option")
-        ],
-    )
-    def test_retired_flags_are_still_rejected(self, command: str, flag: str) -> None:
-        result = CliRunner().invoke(main, [command, "x", flag, "-DFOO"])
-        assert result.exit_code != 0
-        assert "No such option" in result.output
-
-    @pytest.mark.parametrize("sided", ["old=FOO", "new=FOO", "old:LABEL=FOO"])
-    def test_no_per_side_define_form(self, sided: str) -> None:
-        """D1: unlike -H/-I/--label, -D has no `old=`/`new=` spelling. The
-        operand is taken verbatim as a macro definition, so a sided attempt is
-        a loud usage error rather than a silent per-side macro context (which
-        would compare two different public surfaces).
-
-        Asserted against the option itself rather than through `compare`,
-        whose positional operands are validated before any option callback
-        runs -- that ordering would mask the very rejection under test."""
-
-        seen: dict[str, tuple[str, ...]] = {}
-
-        @click.command()
-        @define_option
-        def _cmd(defines: tuple[str, ...]) -> None:
-            seen["defines"] = defines
-
-        result = CliRunner().invoke(_cmd, [f"-D{sided}"])
-        if "=" in sided and sided.partition("=")[0].isidentifier():
-            # `-Dold=FOO` is the macro literally named `old` -- the honest
-            # reading, and the point: the `old=` prefix is never consumed as a
-            # side selector, so no invocation can produce an asymmetric macro
-            # context. The spelling round-trips verbatim.
-            assert result.exit_code == 0, result.output
-            assert seen["defines"] == (sided,)
-        else:
-            assert result.exit_code != 0
-            assert "not a C identifier" in result.output
-
-
 class TestDryRunReceiptsWithoutAToolchain:
     """The `--dry-run` receipts and the `--no-baseline` compile resolution,
     exercised as *unit* tests.
@@ -310,8 +175,8 @@ class TestDryRunReceiptsWithoutAToolchain:
                 str(self._artifact(tmp_path)),
                 "-H",
                 str(self._headers(tmp_path)),
-                "-DFEATURE_API",
-                "-DMODE=2",
+                "--set",
+                "compile.defines=[FEATURE_API, MODE=2]",
                 "--dry-run",
             ],
         )
@@ -336,9 +201,12 @@ class TestDryRunReceiptsWithoutAToolchain:
         assert result.exit_code == 0, result.output
         assert "defines:" not in result.output
 
-    def test_dump_dry_run_folds_config_and_cli_by_macro_name(
+    def test_dump_dry_run_set_replaces_the_config_define_list(
         self, tmp_path: Path
     ) -> None:
+        """ADR-091 Phase 5: `--define` (which folded by macro name) is gone; a
+        `--set compile.defines=[...]` replaces the configured list, as every
+        list-valued override does."""
         cfg = _write_config(
             tmp_path, "compile:\n  defines:\n    - FEATURE_API\n    - MODE=1\n"
         )
@@ -351,13 +219,14 @@ class TestDryRunReceiptsWithoutAToolchain:
                 str(self._headers(tmp_path)),
                 "--config",
                 str(cfg),
-                "-DMODE=2",
+                "--set",
+                "compile.defines=[MODE=2]",
                 "--dry-run",
             ],
         )
         assert result.exit_code == 0, result.output
-        # MODE overridden in place, FEATURE_API kept, exactly one entry each.
-        assert "defines: FEATURE_API, MODE=2" in result.output
+        assert "defines: MODE=2" in result.output
+        assert "FEATURE_API" not in result.output
 
     def test_compare_dry_run_states_the_pair_wide_defines_once(
         self, tmp_path: Path
@@ -373,7 +242,8 @@ class TestDryRunReceiptsWithoutAToolchain:
                 str(artifact),
                 "-H",
                 str(self._headers(tmp_path)),
-                "-DFEATURE_API",
+                "--set",
+                "compile.defines=[FEATURE_API]",
                 "--dry-run",
             ],
         )
@@ -388,7 +258,15 @@ class TestDryRunReceiptsWithoutAToolchain:
         (src / "include" / "x.h").write_text("int x(void);\n")
         (src / "x.c").write_text("int x(void){return 0;}\n")
         result = CliRunner().invoke(
-            main, ["dump", "--sources", str(src), "-DFEATURE_API", "--dry-run"]
+            main,
+            [
+                "dump",
+                "--sources",
+                str(src),
+                "--set",
+                "compile.defines=[FEATURE_API]",
+                "--dry-run",
+            ],
         )
         assert result.exit_code == 0, result.output
         assert "defines: FEATURE_API" in result.output
@@ -412,7 +290,8 @@ class TestDryRunReceiptsWithoutAToolchain:
                 str(self._artifact(tmp_path)),
                 "--dump-manifest",
                 str(manifest),
-                "-DFEATURE_API",
+                "--set",
+                "compile.defines=[FEATURE_API]",
                 "--dry-run",
             ],
         )
@@ -424,6 +303,9 @@ class TestDryRunReceiptsWithoutAToolchain:
         """The third dry-run receipt. It previews a run that really does parse
         headers, so omitting the macro set left the one receipt that could not
         tell you why a declaration would or would not appear."""
+        cfg = _write_config(
+            tmp_path, "compile:\n  defines:\n    - FEATURE_API\n    - MODE=2\n"
+        )
         result = CliRunner().invoke(
             main,
             [
@@ -432,8 +314,8 @@ class TestDryRunReceiptsWithoutAToolchain:
                 "--no-baseline",
                 "-H",
                 str(self._headers(tmp_path)),
-                "-DFEATURE_API",
-                "-DMODE=2",
+                "--config",
+                str(cfg),
                 "--dry-run",
             ],
         )
@@ -497,6 +379,9 @@ class TestDryRunReceiptsWithoutAToolchain:
             raise RuntimeError("resolution reached; no parse in this test")
 
         monkeypatch.setattr(nb, "resolve_no_baseline_candidate", _spy)
+        cfg = _write_config(
+            tmp_path, "compile:\n  defines:\n    - FEATURE_API\n    - MODE=2\n"
+        )
         result = CliRunner().invoke(
             main,
             [
@@ -505,8 +390,8 @@ class TestDryRunReceiptsWithoutAToolchain:
                 "--no-baseline",
                 "-H",
                 str(self._headers(tmp_path)),
-                "-DFEATURE_API",
-                "-DMODE=2",
+                "--config",
+                str(cfg),
             ],
         )
         assert result.exit_code != 0  # the spy aborts the run by design

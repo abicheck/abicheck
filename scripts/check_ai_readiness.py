@@ -2990,7 +2990,11 @@ _REQUIRED_FAMILY_DECORATORS: frozenset[str] = frozenset(
 
 #: (command, decorator) pairs allowed to be absent — a deliberate, reviewed
 #: subset (mirrors ``cli_options.INTENTIONAL_SUBSET``).
-_INTENTIONAL_SUBSET_DECORATORS: frozenset[tuple[str, str]] = frozenset()
+_INTENTIONAL_SUBSET_DECORATORS: frozenset[tuple[str, str]] = frozenset(
+    # ADR-091 Phase 5: `severity.preset` is config-only; mirrors
+    # ``cli_options.INTENTIONAL_SUBSET``.
+    {("compare", "severity_options")}
+)
 
 
 def _decorator_callable_name(node: ast.expr) -> str | None:

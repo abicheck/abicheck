@@ -173,7 +173,7 @@ def test_used_by_audit_gating_matches_the_exit(
 
     base = ["compare", str(old_p), str(new_p)]
     if severity:
-        base += ["--severity-preset", "default"]
+        base += ["--set", 'severity.preset=default']
 
     # The oracle: the same comparison with no consumer at all.
     plain_exit, plain_report, plain_gating = _run(base)

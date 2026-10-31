@@ -139,11 +139,11 @@ Beyond the core `compare`/`dump` flow:
 - [Evidence, Build-Context, and Debug Flags](dump-compare-flags.md) — language
   mode, cross-compilation, `compile_commands.json` (L3), evidence packs
   (L3/L4), debug artifact resolution, `--dry-run`.
-- [Output Formats](output-formats.md) — `--view show=...` filtering,
-  `-o oneline=...`'s one-line summary, `--view impact|root-cause`,
+- [Output Formats](output-formats.md) — `output.view` `show=...` filtering,
+  `-o oneline=...`'s one-line summary, `output.view` `impact`/`root-cause`,
   redundancy filtering, SARIF/JUnit output, evidence-tier confidence, JSON
   schema.
-- `--used-by`/`--required-symbol(s)` on `compare` scope the comparison to an
+- `--used-by`/`consumers.required_symbols` on `compare` scope the comparison to an
   application's actual imports or a plugin host's required entrypoints — see
   [Application Compatibility](appcompat.md) and [Plugin Systems](plugin-systems.md).
 - Generating/validating/diffing Debian `dpkg-gensymbols`-style symbols files is
@@ -164,7 +164,7 @@ independently instead:
 ```bash
 # What --profile ci-gate used to expand to
 abicheck compare old.json new.json --depth headers -o review=- \
-  --severity-preset default
+  --set severity.preset=default
 
 # What --profile release-cut used to expand to
 abicheck compare old.json new.json --depth source -o markdown=-
@@ -177,10 +177,10 @@ abicheck compare old.json new.json -o oneline=-
 A project that wants `ci-gate`'s behavior on every run states depth, view,
 and severity in `.abicheck.yml` instead of retyping a preset.
 
-> `--view show=...` filtering, `scope.show_redundant: true`, `-o oneline=...`'s
-> one-line summary format, and `--view impact|root-cause` are covered in full
-> on [Output Formats](output-formats.md). `--view show=...`/`show_redundant`/
-> `--view impact|root-cause` are display-only and do not affect the verdict or exit
+> `output.view` `show=...` filtering, `scope.show_redundant: true`, `-o oneline=...`'s
+> one-line summary format, and `output.view` `impact`/`root-cause` are covered in full
+> on [Output Formats](output-formats.md). `output.view`, `show_redundant`
+> and the report-mode tokens are display-only and do not affect the verdict or exit
 > code.
 
 ### 3) Mixed mode: snapshot baseline vs live build
@@ -260,8 +260,7 @@ and `[a, b]` have the same types they would have in the file. The value goes
 through the same schema as the file: an unknown key, a wrong type or a
 malformed assignment exits 64 and names the key. Precedence is explicit flag
 over `--set` over `.abicheck.yml` over the built-in default. A key that has its
-own flag (`compile.defines` is `--define`, `severity.preset` is
-`--severity-preset`, `contract` is `--contract`, `scope.exclude_headers` is
+own flag (`contract` is `--contract`, `scope.exclude_headers` is
 `--exclude-header`, and so on) is refused with the name of that flag, so each
 option keeps one spelling.
 

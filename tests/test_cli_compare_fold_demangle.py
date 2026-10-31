@@ -83,8 +83,8 @@ class TestScopedCompatFoldDemangle:
             str(new_p),
             "--required-symbol",
             _MANGLED,
-            "--view",
-            "no-demangle",
+            "--set",
+            'output.view=["no-demangle"]',
         )
         assert result.exit_code == 64, result.output
         assert "retired" in result.output

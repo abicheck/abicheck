@@ -83,7 +83,7 @@ abicheck compare --no-baseline build/libfoo.so -H include/ --policy pol.yaml
    `BREAKING` finding contributes nothing.
 
 Read as: an audit found something the policy calls breaking, and this run
-was configured not to act on it. Adding `--severity-preset default` makes
+was configured not to act on it. Adding `--set severity.preset=default` makes
 the same run exit `3`.
 
 Run B's `changes: []` and Run A's `changes: []` look identical to a consumer
@@ -142,7 +142,7 @@ With no severity setting in effect, `abicheck compare` exits with the
 | `4` | `BREAKING` | Binary ABI break |
 | `64` | — | Invalid invocation (bad args/options, unreadable input) — outside the verdict space |
 
-Passing `--severity-preset` (or setting a config `severity:` block) switches
+Passing `severity.preset` (or setting a config `severity:` block) switches
 `compare` to the severity-aware scheme — see
 [Severity Configuration](../use/severity.md) for the full mapping and policy
 recipes.
@@ -152,7 +152,7 @@ They fold with `max`, so they never lower a `2`/`4`:
 
 - `1` — incomplete `--contract` coverage, or incomplete analysis assurance
   under `.abicheck.yml`'s `assurance.require_complete: true`.
-- `3` — the `--no-baseline` audit gate, armed only by `--severity-preset`.
+- `3` — the `--no-baseline` audit gate, armed only by `severity.preset`.
 - A multi-library release compare can exit `8` when a library was removed
   with `gate.fail_on_removed_library: true`.
 
@@ -172,7 +172,7 @@ A `--no-baseline` run is an **audit of one build**, not a comparison:
   gate rejected this pair" and comes with a `reason`.
 - `changes` is always empty. **Read `findings`.**
 - It is a separate document with its own `audit_report_schema_version`.
-- Its findings are **advisory by default**. `--severity-preset` (any value
+- Its findings are **advisory by default**. `severity.preset` (any value
   other than `info-only`) is the sole switch that arms its gate, which
   contributes exit `3`. A `--policy` file that promotes a finding to `break`
   does **not** arm it.

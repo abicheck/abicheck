@@ -25,11 +25,11 @@ own decision tree rather than a display option.
 | Dial | Consumer shape | What it establishes |
 |---|---|---|
 | `--used-by CONSUMER` (repeatable) | an application or library that links the subject | the consumer's actually-imported symbol set, scanned from its own binary |
-| `--required-symbol SYM` (repeatable) | a plugin/host ABI contract | the entrypoints the host requires the subject to provide |
-| `--required-symbol @FILE` | the same, from a file | a maintained required-entrypoint list |
+| `consumers.required_symbols: [SYM, ...]` | a plugin/host ABI contract | the entrypoints the host requires the subject to provide |
+| `consumers.required_symbols: ["@FILE"]` | the same, from a file | a maintained required-entrypoint list |
 
 `--used-by` is evidence-driven: the consumer binary is read, and its imports
-become the scope. `--required-symbol` is declaration-driven: the caller
+become the scope. `consumers.required_symbols` is declaration-driven: the caller
 states the contract, because a plugin host's requirement is not recoverable
 from the plugin's own imports.
 
@@ -47,12 +47,12 @@ show the difference. Confirm `layer_coverage` reports the source layers
 ## Reading the result
 
 **`verdict` is always the library-wide answer, scoped run or not.** A
-`--used-by`/`--required-symbol(s)` run's own top-level `verdict`/`severity`/
+`--used-by`/`consumers.required_symbols` run's own top-level `verdict`/`severity`/
 `run_outcome`/`summary` describe the full library — exactly what an unscoped
 `compare` would report — and this run's exit code always comes from that
 result. The supplied consumer's own confirmed/potential/unresolved answer is
 reported *beside* it, never in place of it: `used_by` (per-app detail,
-`--used-by`) / `required_symbol_contract` (`--required-symbol(s)`), plus a
+`--used-by`) / `required_symbol_contract` (`consumers.required_symbols`), plus a
 `consumer_scope` object stating what that consumer's own assessment
 concluded (`consumer_scope.verdict`, and, under the severity exit-code
 scheme, `consumer_scope.exit_code`). Treating `verdict` as the *consumer's*

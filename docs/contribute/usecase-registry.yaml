@@ -1204,7 +1204,7 @@ use_cases:
       block, but `--policy` alone does not *gate*: verified live,
       `compare --no-baseline snapshot.abi.json --policy policy.yml`
       reclassifying a finding to `break` still exits `0` unless
-      `--severity-preset` (e.g. `default`) is also given, per
+      `severity.preset` (e.g. `default`) is also given, per
       `policy/audit_gate_exit.py`'s `audit_gate_enabled_for_severity_preset`
       -- a no-baseline audit only gates when a severity preset opted it in;
       `--policy`'s `overrides:` block only decides *what* a reclassified

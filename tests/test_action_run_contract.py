@@ -216,6 +216,21 @@ _NON_RUN_SH_INPUTS = {
     "old-version",
     "policy-file",
     "public-header-dir",
+    # ADR-091 D7 retirements (2026-10-30): retired from action.yml's run step.
+    # Only action/validate-inputs.sh consumes them; the removed set: names
+    # map to set: PATH=VALUE replacements that run.sh never receives.
+    "dso-only",
+    "include-private-dso",
+    "fail-on-removed-library",
+    "public-header-dirs",
+    "lang",
+    "frontend",
+    "compiler",
+    "compile-options",
+    "sysroot",
+    "nostdinc",
+    "severity-preset",
+    "allow-build-query",
 }
 
 

@@ -79,10 +79,10 @@ the severity-aware scheme).
 | `--debug-info-dir2 DIR` / `--d2` | `--debug-info new=DIR` | `--debug-info DIR` applies to both sides |
 | *(no equivalent)* | `.abicheck.yml` `debug.debuginfod: true` | Fetch debug info from a debuginfod server |
 | `--stat` | `-o oneline=-` | One-line summary instead of the full report; purely a rendering choice — pair with whatever `--depth` you already use, since the export format never changes coverage/findings |
-| `--leaf-changes-only` / `-l` | `--view root-cause` | Root-cause-grouped view (the older per-finding `leaf` mode was retired in favour of it -- measured over 129 real library pairs, see the plan's 7o measurement) |
-| `--impacted-interfaces` | `--view impact` | Impact summary appended to the report |
-| `--no-added-syms` | `--view show=removed,changed` | Display-only filter; verdict and exit code unchanged |
-| `--harmless` | *(default)* | Compatible changes are already reported; isolate them with `--view show=compatible` |
+| `--leaf-changes-only` / `-l` | `output.view: [root-cause]` | Root-cause-grouped view (the older per-finding `leaf` mode was retired in favour of it -- measured over 129 real library pairs, see the plan's 7o measurement) |
+| `--impacted-interfaces` | `output.view: [impact]` | Impact summary appended to the report |
+| `--no-added-syms` | `output.view: ["show=removed,changed"]` | Display-only filter; verdict and exit code unchanged |
+| `--harmless` | *(default)* | Compatible changes are already reported; isolate them with `output.view: [show=compatible]` |
 | `--exported-interfaces-only` | *(default)* | abicheck always analyses the exported ABI surface |
 | `--fail-no-debug-info` | *(no direct flag)* | abicheck degrades gracefully and reports the evidence it had — check `abicheck dump LIB --dry-run` or the report's evidence tier |
 | `--verbose` | `-v` / `--verbose` | |

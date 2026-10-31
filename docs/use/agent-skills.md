@@ -147,7 +147,7 @@ requires — the releases that actually provide the CLI surface it drives — an
 checks the installed version before doing anything else rather than degrading
 silently. The current portfolio targets **0.6.x and 0.7.x**: several commands and
 options these workflows depend on (`aggregate`, `project plan`,
-`--view root-cause`, `--diagnostic-comparison`,
+`output.view: [root-cause]`, `--diagnostic-comparison`,
 `--contract`) postdate the 0.5.0 release, so an older installation
 is refused up front instead of failing partway through a workflow.
 

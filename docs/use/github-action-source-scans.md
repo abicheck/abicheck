@@ -94,7 +94,7 @@ either:
 
     Live-verified against the G20 corpus: `case148_xcheck_header_build_
     mismatch`/`case149_xcheck_odr_variant` (`API_BREAK`-classified findings)
-    exit `3` under `compare --no-baseline --severity-preset default`, the
+    exit `3` under `compare --no-baseline --set severity.preset=default`, the
     same as legacy `scan`'s own exit `2` on the identical fixtures;
     `case143_audit_accidental_export` (`RISK`-classified) stays exit `0`
     either way.

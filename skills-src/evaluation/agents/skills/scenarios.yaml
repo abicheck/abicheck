@@ -46,7 +46,7 @@
 # accounting, including what remains deferred.
 #
 # The three named-consumer scenarios are the one exception: the flagship's
-# own workflow explicitly directs `--used-by`/`--required-symbol` for a
+# own workflow explicitly directs `--used-by`/`consumers.required_symbols` for a
 # named application, plugin, or host (Step 3 of `SKILL.md`, citing
 # `shared/consumer-scoping.md`) — that capability was *absorbed*, not
 # dropped, by the reset. Reassigned to `check-abi-compatibility` rather
@@ -55,7 +55,7 @@
 # reporting it alongside the library-wide `verdict`) still has coverage.
 #
 # Workstream D-S1 (vision-api-abi-evolution.md "D. Optional prebuilt-consumer
-# lifecycle") reverted `--used-by`/`--required-symbol(s)` from *replacing*
+# lifecycle") reverted `--used-by`/`consumers.required_symbols` from *replacing*
 # the compatibility gate to merely *enriching* it: `verdict` is now always
 # the library-wide result (never swapped for a supplied consumer's own
 # scoped result), and a supplied consumer's own result is reported under the
@@ -188,7 +188,7 @@ scenarios:
     invocation:
       required_symbols: ["plugin_register", "plugin_teardown"]
     expected:
-      # `--required-symbol` scopes the same way `--used-by` does, so this one
+      # `consumers.required_symbols` scopes the same way `--used-by` does, so this one
       # states both verdicts too.
       verdict: BREAKING
       consumer_verdict: BREAKING

@@ -226,11 +226,8 @@ concepts:
       - {id: run_dump(public_include_search_dirs), rule: name, rename: R19, note: python spelling breaks D1; the
           leaf is `include_dirs`}
   - concept: compile.defines
-    tier: core
+    tier: config
     renames: []
-    cli:
-      - compare --define
-      - dump --define
     config:
       - compile.defines
   - concept: compile.lang
@@ -896,18 +893,23 @@ concepts:
     renames: []
     cli:
       - compare --used-by
-      - compare --used-by-manifest
     action:
       - action:used-by
+  - concept: consumers.manifests
+    tier: config
+    renames:
+      - R21
+    config:
+      - consumers.manifests
+    action:
       - action:used-by-manifest
     exceptions:
-      - {id: compare --used-by-manifest, rule: name, rename: R21, note: cli spelling breaks D1; the leaf is `used_by`}
-      - {id: 'action:used-by-manifest', rule: name, rename: R20, note: action spelling breaks D1; the leaf is `used_by`}
-  - concept: required_symbol
-    tier: core
+      - {id: 'action:used-by-manifest', rule: name, rename: R20, note: action spelling breaks D1; the Action input is kept and forwards --set consumers.manifests=}
+  - concept: consumers.required_symbols
+    tier: config
     renames: []
-    cli:
-      - compare --required-symbol
+    config:
+      - consumers.required_symbols
     action:
       - action:required-symbol
       - action:required-symbols
@@ -1019,10 +1021,8 @@ concepts:
       - {id: run_compare(acknowledgment_breaks), rule: name, rename: R3, note: python spelling breaks D1; the leaf
           is `acknowledgments`}
   - concept: severity.preset
-    tier: core
+    tier: config
     renames: []
-    cli:
-      - compare --severity-preset
     config:
       - severity.preset
     action:
@@ -1039,7 +1039,6 @@ concepts:
       - {id: 'action:severity-preset', rule: name, rename: R20, note: action spelling breaks D1; the leaf is `preset`}
       - {id: 'actions/check-target:severity-preset', rule: name, rename: R20, note: action spelling breaks D1; the
           leaf is `preset`}
-      - {id: compare --severity-preset, rule: name, rename: R21, note: cli spelling breaks D1; the leaf is `preset`}
   - concept: severity.abi_breaking
     tier: config
     renames: []
@@ -1130,11 +1129,11 @@ concepts:
     exceptions:
       - {id: 'action:format', rule: name, rename: R11, note: action spelling breaks D1; the leaf is `output`}
       - {id: 'action:output-file', rule: name, rename: R11, note: action spelling breaks D1; the leaf is `output`}
-  - concept: view
-    tier: core
+  - concept: output.view
+    tier: config
     renames: []
-    cli:
-      - compare --view
+    config:
+      - output.view
   - concept: compression
     tier: config
     renames: []

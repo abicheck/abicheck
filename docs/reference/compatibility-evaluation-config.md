@@ -118,7 +118,7 @@ Rules that fall out of it:
   directly above the built-in default: a pack fills a field only when neither
   the user nor the project stated it ("explicit override >
   selected packs > base", read conservatively). "Stated" includes a value
-  *derived* from a statement: choosing `--severity-preset strict` states every
+  *derived* from a statement: choosing `--set severity.preset=strict` states every
   `gate.severity.*` category the preset expands into, so a gate pack cannot
   replace one of them — while a single `severity.addition: info` still refines
   the preset, which is not a conflict. A field stated this way is also exempt
@@ -158,7 +158,7 @@ the shadowed input is retained in the receipt
 | `policy.base` | `--policy` `base_policy`; legacy `--policy` | `policy` | — | — |
 | `policy.overrides` | `--policy` `overrides:` | — | — | `policy` |
 | `policy.packs` | *(pack paths)* | — | — | — |
-| `gate.preset` | `--severity-preset` | — | `severity.preset` | — |
+| `gate.preset` | `severity.preset` | — | `severity.preset` | — |
 | `gate.severity.*` | `severity.abi_breaking: error`, … | — | `severity.*` | `gate` |
 | `gate.packs` | *(pack paths)* | — | — | — |
 | `suppressions` | `--suppress` | `suppress` | — | — |
@@ -191,7 +191,7 @@ practice, exactly one field, `gate.preset` (`ci-gate` set it to `default`).
 replacing it (it bundled evidence depth, report rendering, and gate policy
 behind one word), and its own D7 amendment note removed the now-permanently-
 unpopulated `run_profile` tier along with it. `SelectorLayer` has five
-tiers today, not six. State `--severity-preset` (or `.abicheck.yml`'s
+tiers today, not six. State `severity.preset` (or `.abicheck.yml`'s
 `severity:` block) directly instead of relying on a preset bundle.
 
 ## Pack manifests
@@ -315,7 +315,7 @@ choice and is recorded as one.)
 
 !!! warning "Known gap: consumer scope is not in the resolved config"
 
-    `compare --used-by`/`--required-symbol` are authoritative: the scoping
+    `compare --used-by`/`consumers.required_symbols` are authoritative: the scoping
     pass rewrites the verdict and exit code from them. But no field of
     `CompatibilityEvaluationConfig` models a consumer scope, so a scoped run
     resolves the *same* object an unscoped one does, with
@@ -324,7 +324,7 @@ choice and is recorded as one.)
     *underlying* scheme is recorded instead — nothing in the resolved
     config indicates a consumer scope was in effect at all.
 
-    `--required-symbol` is a partial exception: a required-symbol contract
+    `consumers.required_symbols` is a partial exception: a required-symbol contract
     switches an untouched `--policy` to `plugin_abi`, and *that* is
     recorded via `policy_base_option`, leaving an indirect trace.
     `--used-by` has no such switch, so it leaves no trace at all.

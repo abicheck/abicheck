@@ -233,19 +233,6 @@
    "default": "<unset>"
   },
   {
-   "id": "compare --view",
-   "command": "compare",
-   "option": "--view",
-   "aliases": [],
-   "hidden": false,
-   "help_common": true,
-   "multiple": true,
-   "is_flag": false,
-   "type": "text",
-   "choices": null,
-   "default": "<unset>"
-  },
-  {
    "id": "compare --policy",
    "command": "compare",
    "option": "--policy",
@@ -282,49 +269,6 @@
    "is_flag": false,
    "type": "file",
    "choices": null,
-   "default": "<unset>"
-  },
-  {
-   "id": "compare --required-symbol",
-   "command": "compare",
-   "option": "--required-symbol",
-   "aliases": [],
-   "hidden": false,
-   "help_common": true,
-   "multiple": true,
-   "is_flag": false,
-   "type": "text",
-   "choices": null,
-   "default": "<unset>"
-  },
-  {
-   "id": "compare --used-by-manifest",
-   "command": "compare",
-   "option": "--used-by-manifest",
-   "aliases": [],
-   "hidden": false,
-   "help_common": true,
-   "multiple": true,
-   "is_flag": false,
-   "type": "file",
-   "choices": null,
-   "default": "<unset>"
-  },
-  {
-   "id": "compare --severity-preset",
-   "command": "compare",
-   "option": "--severity-preset",
-   "aliases": [],
-   "hidden": false,
-   "help_common": true,
-   "multiple": false,
-   "is_flag": false,
-   "type": "choice",
-   "choices": [
-    "default",
-    "strict",
-    "info-only"
-   ],
    "default": "<unset>"
   },
   {
@@ -391,21 +335,6 @@
    "type": "boolean",
    "choices": null,
    "default": "False"
-  },
-  {
-   "id": "compare --define",
-   "command": "compare",
-   "option": "--define",
-   "aliases": [
-    "-D"
-   ],
-   "hidden": false,
-   "help_common": true,
-   "multiple": true,
-   "is_flag": false,
-   "type": "text",
-   "choices": null,
-   "default": "<unset>"
   },
   {
    "id": "compare --search-path",
@@ -883,21 +812,6 @@
    "type": "boolean",
    "choices": null,
    "default": "False"
-  },
-  {
-   "id": "dump --define",
-   "command": "dump",
-   "option": "--define",
-   "aliases": [
-    "-D"
-   ],
-   "hidden": false,
-   "help_common": true,
-   "multiple": true,
-   "is_flag": false,
-   "type": "text",
-   "choices": null,
-   "default": "<unset>"
   },
   {
    "id": "dump --set",
@@ -1486,6 +1400,21 @@
    "default": "[]"
   },
   {
+   "id": "output.view",
+   "kind": "list",
+   "default": "[]"
+  },
+  {
+   "id": "consumers.manifests",
+   "kind": "list",
+   "default": "[]"
+  },
+  {
+   "id": "consumers.required_symbols",
+   "kind": "list",
+   "default": "[]"
+  },
+  {
    "id": "scope.show_redundant",
    "kind": "bool",
    "default": "None"
@@ -1764,7 +1693,7 @@
    "id": "action:dso-only",
    "action": "action",
    "input": "dso-only",
-   "status": "live",
+   "status": "retired",
    "required": false,
    "default": null
   },
@@ -1772,7 +1701,7 @@
    "id": "action:include-private-dso",
    "action": "action",
    "input": "include-private-dso",
-   "status": "live",
+   "status": "retired",
    "required": false,
    "default": null
   },
@@ -1780,7 +1709,7 @@
    "id": "action:fail-on-removed-library",
    "action": "action",
    "input": "fail-on-removed-library",
-   "status": "live",
+   "status": "retired",
    "required": false,
    "default": null
   },
@@ -1820,7 +1749,7 @@
    "id": "action:public-header-dirs",
    "action": "action",
    "input": "public-header-dirs",
-   "status": "live",
+   "status": "retired",
    "required": false,
    "default": null
   },
@@ -1876,15 +1805,15 @@
    "id": "action:lang",
    "action": "action",
    "input": "lang",
-   "status": "live",
+   "status": "retired",
    "required": false,
-   "default": "c++"
+   "default": null
   },
   {
    "id": "action:frontend",
    "action": "action",
    "input": "frontend",
-   "status": "live",
+   "status": "retired",
    "required": false,
    "default": null
   },
@@ -1892,7 +1821,7 @@
    "id": "action:compiler",
    "action": "action",
    "input": "compiler",
-   "status": "live",
+   "status": "retired",
    "required": false,
    "default": null
   },
@@ -1900,7 +1829,7 @@
    "id": "action:compile-options",
    "action": "action",
    "input": "compile-options",
-   "status": "live",
+   "status": "retired",
    "required": false,
    "default": null
   },
@@ -1908,7 +1837,7 @@
    "id": "action:sysroot",
    "action": "action",
    "input": "sysroot",
-   "status": "live",
+   "status": "retired",
    "required": false,
    "default": null
   },
@@ -1916,7 +1845,7 @@
    "id": "action:nostdinc",
    "action": "action",
    "input": "nostdinc",
-   "status": "live",
+   "status": "retired",
    "required": false,
    "default": "false"
   },
@@ -2036,7 +1965,7 @@
    "id": "action:jobs",
    "action": "action",
    "input": "jobs",
-   "status": "ignored",
+   "status": "retired",
    "required": false,
    "default": null
   },
@@ -2052,7 +1981,7 @@
    "id": "action:allow-build-query",
    "action": "action",
    "input": "allow-build-query",
-   "status": "ignored",
+   "status": "retired",
    "required": false,
    "default": "false"
   },
@@ -2316,7 +2245,7 @@
    "id": "action:severity-preset",
    "action": "action",
    "input": "severity-preset",
-   "status": "live",
+   "status": "retired",
    "required": false,
    "default": null
   },

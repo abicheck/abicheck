@@ -38,7 +38,7 @@ Every `ChangeKind` is assigned to exactly one of these categories:
 | **informational** | Findings that record that nothing a consumer can act on changed: a reconciliation proving a declaration identical (`declaration_identity_unchanged`, `declaration_coordinates_shifted`), or an aggregate roll-up of findings reported on their own (`public_surface_grew`, `public_surface_shrank`) | `info`, **fixed** |
 
 `informational` is not configurable. No preset, `severity:` key or override
-can make it an error, so `--severity-preset strict` never fails a run on it.
+can make it an error, so `--set severity.preset=strict` never fails a run on it.
 The `severity: {informational: …}` key is rejected as unknown (exit 64). The
 findings still appear in every report: the `changes` list,
 `summary.informational`, and `severity.categories.informational`.
@@ -63,18 +63,18 @@ Each configurable category can be set to one of three levels:
 
 ```bash
 # Use the default preset (explicit)
-abicheck compare old.json new.json --severity-preset default
+abicheck compare old.json new.json --set severity.preset=default
 
 # Strict: everything is an error (exits non-zero on any finding)
-abicheck compare old.json new.json --severity-preset strict
+abicheck compare old.json new.json --set severity.preset=strict
 
 # Info-only: purely informational (always exits 0)
-abicheck compare old.json new.json --severity-preset info-only
+abicheck compare old.json new.json --set severity.preset=info-only
 ```
 
 ### Per-category overrides
 
-`--severity-preset` is the whole per-run CLI surface. Individual categories
+`severity.preset` is the whole per-run CLI surface. Individual categories
 are set in `.abicheck.yml`'s `severity:` block — one spelling, not a flag and
 a config key saying the same thing — and a per-category value overrides
 whatever the preset assigns that category:
@@ -122,7 +122,7 @@ computation follows; this page only documents how to select and override it.
 
 ## Exit codes
 
-When any severity setting is active — `--severity-preset`, or a severity
+When any severity setting is active — `severity.preset`, or a severity
 value in `.abicheck.yml` — the exit code is computed from the severity
 configuration instead of the legacy verdict system. See
 [Severity-aware exit codes](../reference/exit-codes.md#severity-aware-exit-codes-with-any-severity-flag)
@@ -174,12 +174,12 @@ under `sdk_vendor`, kinds that are downgraded from `API_BREAK` to `COMPATIBLE`
 are reclassified from `potential_breaking` to `quality_issues` or `addition`
 accordingly.
 
-This means `--policy sdk_vendor --severity-preset default` will **not** exit
+This means `--policy sdk_vendor --set severity.preset=default` will **not** exit
 non-zero for changes that the `sdk_vendor` policy downgrades — for example,
 kinds moved from `potential_breaking` to `quality_issues` or `addition` are
 demoted to `warning` or `info` under the `default` preset. However, the
 `strict` preset maps **all** categories (including `quality_issues` and
-`addition`) to `error`, so `--policy sdk_vendor --severity-preset strict` will
+`addition`) to `error`, so `--policy sdk_vendor --set severity.preset=strict` will
 still exit non-zero for any detected changes, even those the policy downgrades.
 The one exception is the fixed `informational` category, which never gates.
 

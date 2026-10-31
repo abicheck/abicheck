@@ -64,7 +64,7 @@ off `dump`/`compare`'s CLI entirely — a stable project/toolchain property,
 not a per-run choice — so there is **no `--compiler`/`--compiler-prefix`/
 `--compiler-option`/`--sysroot`/`--nostdinc`/`--ast-frontend`/`--lang` flag
 left on any command at all. The two per-run inputs that remain are the
-operand-shaped ones: `-I/--include` (below) and `-D/--define` (covered under [Preprocessor macros](#preprocessor-macros-d-define)):
+operand-shaped ones: `-I/--include` (below) and `-D` (covered under [Preprocessor macros](#preprocessor-macros-d)):
 
 ```yaml
 # .abicheck.yml
@@ -77,7 +77,7 @@ compile:
   options: [-march=armv8-a]  # was the repeatable --compiler-option
   std: c++20                 # synthesizes -std=c++20
   defines: [FOO=1, NDEBUG]   # synthesizes -DFOO=1 -DNDEBUG; also settable
-                             # per run with -D/--define, merged by macro name
+                             # per run with -D, merged by macro name
   include_dirs: [include, third_party/inc]   # appended after -I roots
   sysroot: /opt/sysroots/aarch64
   nostdinc: false
@@ -125,9 +125,11 @@ override is gone too, since there is no CLI spelling left to be sided. A
 script still passing one of these flags exits `64` — see
 [Upgrading from 0.5 to 0.6 → compiler/frontend](../start/upgrading-to-0.6.md#c1-compiler-frontend).
 
-## Preprocessor macros: `-D` / `--define`
+## Preprocessor macros: `-D`
 
-The one L2 compile-context setting that kept a CLI spelling. It takes
+The one L2 compile-context setting that kept a CLI spelling (the long
+`--define` form was removed; use `-D`, or the config key `compile.defines` in
+`.abicheck.yml`, or `--set 'compile.defines=[NAME=VALUE]'`). It takes
 a **logical macro definition**, `NAME` or `NAME=VALUE`, never a compiler flag,
 and is repeatable on both `dump` and `compare`:
 
@@ -172,13 +174,14 @@ are refused as `profile_mismatch` rather than silently diffed.
 
 | Spelling | Result |
 |---|---|
-| `-DNAME`, `-D NAME`, `--define NAME`, `--define=NAME` | accepted |
-| `-DNAME=VALUE`, `--define=NAME=A=B` (split on the first `=` only) | accepted |
+| `-DNAME`, `-D NAME` | accepted |
+| `-DNAME=VALUE`, `-DNAME=A=B` (split on the first `=` only) | accepted |
 | `-DNAME=` (defined to an empty token sequence) | accepted, and distinct from `-DNAME` |
 | `-DNAME="text"` (shell quoting; abicheck never re-splits the operand) | accepted |
 | `-D"NAME=a b"` (whitespace in the value) | rejected — no portable GNU/MSVC spelling; use `compile.options` |
 | `-DF(x)=x+1` (function-like) | rejected — same reason |
-| `--define=-DFOO`, `--define=-Xclang`, `--define=@resp.txt` | rejected with a targeted hint |
+| `-D-DFOO`, `-D-Xclang`, `-D@resp.txt` | rejected with a targeted hint |
+| `--define NAME` (long form, removed) | usage error (exit 64); use `-D NAME` or `--set 'compile.defines=[NAME]'` |
 | `-U`/undefine | no CLI spelling; remove the entry from `compile.defines` |
 
 ### Exports declared only under an `#ifdef`

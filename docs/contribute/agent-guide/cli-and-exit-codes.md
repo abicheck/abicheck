@@ -123,7 +123,7 @@ Once a root command genuinely clears the bar above, pick the right home:
 ## Exit codes
 
 - `compare` command (legacy, with no severity setting in effect): 0 = compatible, 2 = source break, 4 = ABI break
-- `compare` command (severity-aware, with `--severity-preset` or a config `severity:` block): 0 = no error-level findings, 1 = error in addition/quality only, 2 = error in potential_breaking, 4 = error in abi_breaking
+- `compare` command (severity-aware, with `severity.preset` or a config `severity:` block): 0 = no error-level findings, 1 = error in addition/quality only, 2 = error in potential_breaking, 4 = error in abi_breaking
 - `scan` (including `scan --against`) was deleted by ADR-068 Phase 6; its baseline mode is `compare OLD NEW` and its audit mode is `compare --no-baseline NEW`, both covered by the `compare` rows above.
 - **Orthogonal contract-coverage axis (ADR-049 Phase 7), on `compare`
   (single-pair and directory/package alike):** under a stated domain (`--contract`,

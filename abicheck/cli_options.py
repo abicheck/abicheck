@@ -477,35 +477,6 @@ def policy_option(func: F) -> F:
     return func
 
 
-def severity_options(func: F) -> F:
-    """``--severity-preset``, the one visible severity control.
-
-    ADR-037 D4 demoted the four per-category overrides
-    (``--severity-abi-breaking``/``--severity-potential-breaking``/
-    ``--severity-quality-issues``/``--severity-addition``) into
-    ``.abicheck.yml``'s ``severity:`` block, and they have now been removed
-    from the CLI outright: a hidden flag that duplicates a config key is a
-    second way to say one thing, and the config block is the one that
-    survives across invocations. ``severity:`` in the project config is the
-    only per-category spelling; the preset stays on the CLI because it is a
-    genuine one-off coarse override.
-
-    Still a shared decorator across ``compare`` / ``compare-release`` /
-    ``appcompat`` so the contract gate (D10.2) sees it composed once, not
-    copy-pasted.
-    """
-    func = click.option(
-        "--severity-preset",
-        "severity_preset",
-        type=click.Choice(["default", "strict", "info-only"], case_sensitive=True),
-        default=None,
-        help="Severity preset: 'default', 'strict', or 'info-only'. "
-        "Controls exit codes and report labels. A project config's "
-        "severity: block overrides individual categories of the preset.",
-    )(func)
-    return func
-
-
 def snapshot_compression_option(func: F) -> F:
     """``--compression``, currently used by ``dump`` (ADR-059).
 
@@ -615,52 +586,6 @@ def dump_header_input_options(func: F) -> F:
         multiple=True,
         type=click.Path(exists=True, path_type=Path),
         help="Public header file or directory (repeat for multiple).",
-    )(func)
-    return func
-
-
-def define_option(func: F) -> F:
-    """``-D/--define NAME[=VALUE]`` -- ADR-074's narrow, per-invocation
-    preprocessor definition for the L2 header parse. Shared verbatim by
-    ``dump`` and ``compare`` so the two cannot drift (ADR-037 D3 parity).
-
-    This is deliberately **not** a reopening of the retired
-    ``--compiler-option``/``--gcc-options`` family (ADR-068 plan §4.2, "CLI
-    cleanup phase two" 7b): the operand is a *logical macro definition*,
-    parsed and revalidated into exactly one ``-D``-prefixed argv token, and
-    can never become a second compiler option. General compiler flags remain
-    config-only, under ``.abicheck.yml``'s ``compile.options``.
-
-    Why it earns a CLI spelling at all when ``compile.compiler``/
-    ``compile.std``/``compile.options`` did not: those name *toolchain
-    identity*, which is stable per project and belongs in reviewed
-    configuration. A feature macro that gates an opt-in public surface
-    (PVXS's ``PVXS_ENABLE_EXPERT_API``, pcre2's ``PCRE2_CODE_UNIT_WIDTH``)
-    selects *which surface is being analysed* -- the same question ``-H``
-    and ``-I`` answer, and both of those kept their CLI spelling for exactly
-    that reason.
-
-    On ``compare`` the definitions apply to **both** sides identically:
-    there is deliberately no ``old=``/``new=`` form, since two sides parsed
-    under different macro contexts are two different public surfaces and
-    every finding between them would be an artifact of the flags, not of the
-    change (ADR-074 D1).
-    """
-    func = click.option(
-        "-D",
-        "--define",
-        "defines",
-        multiple=True,
-        metavar="NAME[=VALUE]",
-        callback=_define_callback,
-        help="Define a preprocessor macro for the header parse (repeatable). "
-        "A one-off override for headers whose public surface is gated behind "
-        "a feature macro, e.g. -DPVXS_ENABLE_EXPERT_API or "
-        "-DPCRE2_CODE_UNIT_WIDTH=8. Applies to both sides of a compare. For "
-        "a stable project/CI contract prefer .abicheck.yml's "
-        "compile.defines:, which this overrides per macro name. Takes a "
-        "macro definition only -- general compiler flags stay in "
-        "compile.options.",
     )(func)
     return func
 

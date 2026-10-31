@@ -139,15 +139,15 @@ problem in CI.
 | Option | Description |
 |--------|-------------|
 | `OLD_INPUT` / `NEW_INPUT` | Old and new library (`.so`/`.dll`/`.dylib`, JSON snapshot, or ABICC dump) — same as plain `compare`. With `--used-by`, a JSON snapshot works only if it carries binary evidence (a `dump` of a real library, not headers-only) — its `elf`/`pe`/`macho` field is what the app's imports resolve against. |
-| `--used-by FILE` | Application binary whose imports/required symbol versions scope the comparison (repeatable). Mutually exclusive with `--required-symbol`. |
+| `--used-by FILE` | Application binary whose imports/required symbol versions scope the comparison (repeatable). Mutually exclusive with `consumers.required_symbols`. |
 | `-H` / `--header` | Public header file or directory (repeatable, side-aware with `old=`/`new=`) |
 | `-I` / `--include` | Extra include directory for castxml (repeatable, side-aware) |
 | `--lang` | Language mode: `c++` (default) or `c` |
 | `-o FORMAT=DESTINATION` | Export the report: `markdown` (default), `json`, `sarif`, `html`, `junit`, `review`; `-` is stdout, repeatable |
 | `-o` / `--output` | Write report to file |
 | `.abicheck.yml`'s `scope.public` | Restrict findings to the public-header ABI surface (on by default; `false` turns it off — config-only, the CLI flag pair was removed; `--contract all` turns it off for one run) |
-| `--severity-preset` | `default`, `strict`, or `info-only` (switches to the severity-aware exit scheme) |
-| `.abicheck.yml`'s `severity:` block | Per-category overrides (`abi_breaking`/`potential_breaking`/`quality_issues`/`addition`, each `error`/`warning`/`info`) — config-only; `--severity-preset` is the per-run CLI knob |
+| `severity.preset` | `default`, `strict`, or `info-only` (switches to the severity-aware exit scheme) |
+| `.abicheck.yml`'s `severity:` block | Per-category overrides (`abi_breaking`/`potential_breaking`/`quality_issues`/`addition`, each `error`/`warning`/`info`) — config-only; `severity.preset` is the per-run CLI knob |
 | `--suppress` | Suppression file (YAML) |
 | `--policy` | `NAME\|PATH` — a built-in profile (`strict_abi` (default), `sdk_vendor`, `plugin_abi`) or a policy document (a path, or a packaged built-in like `security`) |
 | `-v` / `--verbose` | Debug output |
@@ -168,7 +168,7 @@ automatic resolution as plain `compare` — see [The two exit-code
 schemes](ci-gating.md#the-two-exit-code-schemes) for the resolution rule
 (purely derived from whether any severity setting is active; there is no
 manual pin). Scoped and unscoped runs share that one resolution and the
-same exit code — supplying `--used-by`/`--required-symbol(s)` changes
+same exit code — supplying `--used-by`/`consumers.required_symbols` changes
 nothing about it.
 
 **Legacy scheme (no severity setting active):**
@@ -182,8 +182,8 @@ nothing about it.
 
 ### `--severity-*` flags apply the same way, scoped or not
 
-A `--used-by` (or `--required-symbol(s)`) run respects
-`--severity-*`/`--severity-preset` exactly the way plain `compare` does —
+A `--used-by` (or `consumers.required_symbols`) run respects
+`--severity-*`/`severity.preset` exactly the way plain `compare` does —
 computed over the full library's own changes, never a per-app subset. A
 supplied consumer's own missing-symbol/missing-entrypoint finding is
 still evaluated under the same severity config for *that consumer's own*
@@ -199,7 +199,7 @@ The JSON report keeps the two levels clearly separate:
   Never swapped for a consumer's own assessment.
 - `used_by` — per-app detail (`missing_symbols`/`missing_versions`/
   `relevant_change_count`, each app's own `verdict`), and
-  `required_symbol_contract` for `--required-symbol(s)`.
+  `required_symbol_contract` for `consumers.required_symbols`.
 - `consumer_scope` — one object stating what a consumer-only assessment
   would have concluded on its own (`verdict`, `scope`, and, under the
   severity scheme, `exit_code`/`exit_code_scheme`) — explicitly
@@ -212,7 +212,7 @@ is still folded into the top-level `changes`/`summary` arrays, since that
 *is* a genuine fact about the library from this consumer's point of view —
 it just never changes what verdict/exit code the run reports.
 
-Note that `--view show=...`/the JSON report alone, **without** `--used-by`,
+Note that `output.view: [show=...]`/the JSON report alone, **without** `--used-by`,
 cannot substitute for this: only `--used-by` actually reads the app's
 imports and computes the app-relevant subset in the first place — plain
 `compare` has no app to scope against, and its own gate (identical to a

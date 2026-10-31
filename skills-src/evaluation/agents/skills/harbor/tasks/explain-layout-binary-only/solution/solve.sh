@@ -3,7 +3,7 @@
 
 set -euo pipefail
 # No generic reference solution for explain-layout-binary-only: this Category B
-# fixture's correct invocation (a specific --used-by/--required-symbol/
+# fixture's correct invocation (a specific --used-by / consumers.required_symbols/
 # --contract choice, per tests/scenario.json's own "invocation" block) was
 # verified by hand when the scenario was promoted to `ready` but is not
 # recorded anywhere this generator can read it back from. Left

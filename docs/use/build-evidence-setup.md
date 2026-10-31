@@ -185,7 +185,7 @@ the schema version.
 
 ```yaml
 version: 1
-severity:                  # per-category overrides (CLI keeps only --severity-preset)
+severity:                  # per-category overrides (CLI keeps only severity.preset)
   preset: strict           # default | strict | info-only
   abi_breaking: error      # error | warning | info
   potential_breaking: warning
@@ -207,7 +207,7 @@ sources:
 There is no `exit_code_scheme:` key any more (CLI cleanup phase two PR G2
 removed it, along with `--exit-code-scheme`): the gate algorithm is fully
 automatic, determined by whether the `severity:` block above (or a
-`--severity-preset`/`kind: gate` pack) puts a severity setting in effect —
+`severity.preset`/`kind: gate` pack) puts a severity setting in effect —
 see [CI Gating → the two exit-code
 schemes](ci-gating.md#the-two-exit-code-schemes).
 

@@ -245,7 +245,7 @@ incomparable.
 
 1. Category A if `catalog/ground_truth.json` can answer it — name the case,
    never restate the expected verdict. Category B only when the question needs
-   `--used-by`, `--required-symbol`, a matrix, a broken comparability contract,
+   `--used-by`, `consumers.required_symbols`, a matrix, a broken comparability contract,
    a depth the question outruns, or an unclosable `--contract` domain.
 2. Write the prompt the way a user would ask it. **It must not name abicheck**
    — the skill has to be *found*, which is the thing being measured.

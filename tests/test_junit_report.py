@@ -1407,8 +1407,8 @@ class TestJUnitCLICompare:
                 str(tmp_path / "new.json"),
                 "-o",
                 "junit=-",
-                "--view",
-                "show=breaking",
+                "--set",
+                'output.view=["show=breaking"]',
             ],
         )
         assert result.exit_code == 4  # BREAKING

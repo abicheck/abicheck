@@ -209,7 +209,7 @@ run, folded with the same `max` discipline:
 
 | Axis | Contributes | When |
 |---|---|---|
-| Audit gate | `3` | `--severity-preset` (any value except `info-only`) opted the run into gating, and at least one candidate-side finding is `BREAKING`/`API_BREAK`-classified |
+| Audit gate | `3` | `severity.preset` (any value except `info-only`) opted the run into gating, and at least one candidate-side finding is `BREAKING`/`API_BREAK`-classified |
 | Analysis assurance | `1` | `.abicheck.yml`'s `assurance.require_complete: true` and `analysis_assurance.status` is not `complete`. On a directory/package (release) `compare`, `max` over every compared member's own contribution |
 | Contract coverage | `1` | `--contract` and the selected domain's required evidence is incomplete |
 | Evidence contract | `7` | `--depth build`/`--depth source` pinned, but this run's live extraction did not reach it |
@@ -240,15 +240,15 @@ audit mode derived a *verdict* from its own findings and gated at `2` on a
 hygiene finding whose kind is `BREAKING`/`API_BREAK`-classified.
 `compare --no-baseline` cannot reproduce that at `2`/`4` (D2 forbids it),
 so it reproduces the same partition through its own code, `3`, and the
-axis is **opt-in**: every invocation that omits `--severity-preset` stays
+axis is **opt-in**: every invocation that omits `severity.preset` stays
 exactly as it always was (exit `0` for a hygiene finding, unaffected by
-this axis's existence). Passing `--severity-preset default` (or `strict`)
-opts the run into gating; `--severity-preset info-only` is the explicit
+this axis's existence). Passing `--set severity.preset=default` (or `strict`)
+opts the run into gating; `--set severity.preset=info-only` is the explicit
 "don't gate" request and stays `0`. A `scan`-based gating CI job migrating
 to `compare --no-baseline` needs exactly one addition to keep gating:
-`--severity-preset default`. The axis's own rule reads
+`--set severity.preset=default`. The axis's own rule reads
 `BREAKING_KINDS`/`API_BREAK_KINDS` membership directly (the same sets
-`checker_policy.py`'s registry derives), not `--severity-preset`'s own
+`checker_policy.py`'s registry derives), not `severity.preset`'s own
 per-category severity mapping — that mapping's `potential_breaking` bucket
 merges `API_BREAK_KINDS` with `RISK_KINDS`, which would gate an advisory-
 only `RISK` finding the same as an `API_BREAK` one; the preset only
@@ -436,7 +436,7 @@ contributes anything positive, so `reasons` can carry `promoted_crosscheck`
 even when the crosscheck only *ties* — rather than exceeds — the baseline
 comparison's own exit code.
 
-`--used-by`/`--required-symbol(s)` scoping does not change
+`--used-by`/`consumers.required_symbols` scoping does not change
 `compatibility_contribution`/`reasons` at all (workstream D-S1,
 `docs/contribute/plans/vision-api-abi-evolution.md` "D. Optional
 prebuilt-consumer lifecycle"): they always describe the full-library
@@ -474,7 +474,7 @@ trigger yet — there is still no `--budget` flag — so it stays `0` on every
 
 `appcompat` and `plugin-check` are gone as standalone commands; their scoping
 folded into `compare` itself — see
-[Application- and plugin-scoped comparisons](#application-and-plugin-scoped-comparisons-compare-used-by-required-symbol)
+[Application- and plugin-scoped comparisons](#application--and-plugin-scoped-comparisons-compare---used-by--consumers)
 below. `baseline` (the push/pull/list/delete registry), `debian-symbols`,
 `collect`, `merge`, `inputs validate`, and `inputs compact` were removed
 outright with no CLI replacement — validating a build-emitted
@@ -488,7 +488,7 @@ below.
 
 ## `abicheck compare`
 
-### Legacy exit codes (default, no `--severity-*` flags)
+### Legacy exit codes (default, no `severity.*` setting)
 
 | Exit code | Meaning |
 |-----------|---------|
@@ -510,9 +510,9 @@ below.
 > to distinguish them (e.g. warn on deployment risk), use `-o json=...` and
 > read the `verdict` field — exit code alone is not sufficient.
 
-### Severity-aware exit codes (with any `--severity-*` flag)
+### Severity-aware exit codes (with any `severity.*` setting)
 
-When any `--severity-preset` or `--severity-*` option is provided, the exit code
+When `severity.preset` or any `severity:` key is set (`--set` or `.abicheck.yml`), the exit code
 is computed from the severity configuration rather than the verdict:
 
 | Exit code | Meaning |
@@ -533,8 +533,8 @@ preset or override. That category holds findings that record that nothing
 changed, such as `declaration_identity_unchanged` or the `public_surface_grew`
 roll-up.
 
-> **ℹ️ The two exit code paths are mutually exclusive.** Without `--severity-*`
-> flags, the legacy verdict-based path runs. With any `--severity-*` flag, the
+> **ℹ️ The two exit code paths are mutually exclusive.** Without a `severity.*`
+> setting, the legacy verdict-based path runs. With any `severity.*` setting, the
 > severity-aware path runs. They never both execute.
 
 ### Severity presets
@@ -575,7 +575,7 @@ ret=$?
 echo "OK"
 
 # Strict mode: all categories at error level
-abicheck compare old.json new.json --severity-preset strict
+abicheck compare old.json new.json --set severity.preset=strict
 
 # Permissive gate: fail only on binary breaks
 abicheck compare old.json new.json
@@ -584,7 +584,7 @@ ret=$?
 exit 0
 
 # Parse exact verdict from JSON (with severity info)
-abicheck compare old.json new.json -o json=- --severity-preset default -o result.json
+abicheck compare old.json new.json -o json=- --set severity.preset=default -o result.json
 verdict=$(python3 -c "import json,sys; d=json.load(open('result.json')); print(d['verdict'])" \
   || { echo "ERROR parsing result.json"; exit 1; })
 [ "$verdict" = "BREAKING" ] && exit 1
@@ -613,7 +613,7 @@ below, plus a dedicated code for removed libraries:
 
 On the release path the severity-aware code (`0/1/2/4`) replaces the
 verdict-based `2/4` mapping only when a severity *map* is actually in effect —
-that is, any `--severity-*` flag is passed **or** `.abicheck.yml` carries a
+that is, any `severity.*` setting is given **or** `.abicheck.yml` carries a
 `severity:` block (a preset or per-category levels). There is no manual
 override any more (CLI cleanup removed
 `--exit-code-scheme` and `.abicheck.yml`'s `exit_code_scheme:` key): the
@@ -693,12 +693,12 @@ ran a one-build audit/hygiene/source-consistency scan only; pass it and
 ### `scan --against` and severity (retired; mirrored `compare`)
 
 `scan --against` accepts the same severity surface as `compare` —
-`--severity-preset` and the hidden per-category `--severity-*` overrides
+`severity.preset` and the per-category `severity.*` keys
 (plus `.abicheck.yml`'s `severity:` block) — and, like `compare`, uses them
 to compute the `0`/`2`/`4` portion of
 the exit code above from `severity.compute_exit_code` instead of the raw
 verdict when the resolved scheme is `severity`. A `BREAKING` verdict under
-`--severity-preset info-only` can therefore exit `0`, exactly as it can with
+`--set severity.preset=info-only` can therefore exit `0`, exactly as it can with
 `compare`.
 
 Under the `severity` scheme the JSON report's `diff` block also carries a
@@ -747,7 +747,7 @@ codes — so the preview matches the run it is predicting.
 
 A gate pack (`--pack`) folds a `gate.*` assignment into a scan's severity
 the same way it does for `compare`, and cannot override a value that was
-actually stated — by an explicit `--severity-*` flag,
+actually stated — by an explicit `severity.*` setting,
 or by `.abicheck.yml`. Every flag in this family is a comparison-only flag (rejected as a
 usage error without `--against`, exit `64`) — see the table above. The
 budget (`5`), `NOT_COMPARABLE` (`6`), and evidence-contract-error exit codes
@@ -899,7 +899,7 @@ checked for. Neither block affects the exit code; the full field list is in
 
 ---
 
-## Application- and plugin-scoped comparisons (`compare --used-by`/`--required-symbol`)
+## Application- and plugin-scoped comparisons (`compare --used-by` / `consumers.*`)
 
 The standalone `appcompat` and `plugin-check` commands are gone.
 Their scoping now folds into `compare` itself:
@@ -908,9 +908,8 @@ Their scoping now folds into `compare` itself:
   real application binary; its actual imports/required symbol versions scope
   the comparison. `OLD`/`NEW` may be real library binaries or JSON snapshots
   that carry binary evidence (a `dump` of a real library, not headers-only).
-  Mutually exclusive with `--required-symbol`.
-- **`compare --required-symbol SYM`** (repeatable) / **`--required-symbol
-  @FILE`** — folds `plugin-check`. Scopes the comparison to an explicit
+  Mutually exclusive with `consumers.required_symbols`.
+- **`consumers.required_symbols: [SYM, ...]`** (or `--set 'consumers.required_symbols=[SYM]'`) / an **`@FILE`** entry — folds `plugin-check`. Scopes the comparison to an explicit
   dlopen/dlsym entrypoint contract instead of the full diff. Mutually
   exclusive with `--used-by`.
 
@@ -927,7 +926,7 @@ the supplied consumer's own informational assessment, separate from the
 library's own compatibility result. A library removal the consumer's own
 imports happen to name is still exactly as breaking as any other removal,
 through the ordinary compatibility axis — supplying `--used-by`/
-`--required-symbol` changes what is *reported*, never what the library's
+`consumers.required_symbols` changes what is *reported*, never what the library's
 own exit code *is*.
 
 ---
@@ -1027,15 +1026,14 @@ one of those.
 
 In the `scan` column, the value left of the `/` is the legacy (verdict-based)
 mapping — the default — and the value right of it applies once `scan
---against` resolves the `severity` scheme (any `--severity-preset`/
-`--severity-*`, or a config `severity:` block),
+--against` resolves the `severity` scheme (any `severity.preset` or `severity.*` key, or a config `severity:` block),
 where it follows the same `compare` exit (severity) column; see
 ["`scan --against` and severity"](#scan-against-and-severity-retired-mirrored-compare)
 above.
 
-App/plugin-scoped comparisons (`compare --used-by`/`--required-symbol`) reuse
+App/plugin-scoped comparisons (`compare --used-by` / `consumers.required_symbols`) reuse
 the `compare` columns above — see
-[Application- and plugin-scoped comparisons](#application-and-plugin-scoped-comparisons-compare-used-by-required-symbol).
+[Application- and plugin-scoped comparisons](#application--and-plugin-scoped-comparisons-compare---used-by--consumers).
 `aggregate` combines each report's own severity gate (`0`/`1`/`2`/`4`) over its
 analyzed targets and adds a coverage gate (a required gap exits `1`, never `4`) —
 see [`abicheck aggregate`](#abicheck-aggregate).
@@ -1045,10 +1043,9 @@ none of these rows — it always exits `0`/`1`/`64`; see
 
 \* Severity exit codes depend on the configuration, and the range covers the
 whole configuration space — **including demotion of a real break**. With
-`severity.addition: error`, additions exit `1`; with `--severity-preset
-info-only` every category is `info`, so *everything* exits `0`, a `BREAKING`
+`severity.addition: error`, additions exit `1`; with `--set severity.preset=info-only` every category is `info`, so *everything* exits `0`, a `BREAKING`
 comparison included. The default preset leaves `potential_breaking` at
-`warning`, so an `API_BREAK` exits `0` unless `--severity-preset strict` (or
+`warning`, so an `API_BREAK` exits `0` unless `--set severity.preset=strict` (or
 `severity.potential_breaking: error`) raises it to `2`. Read the report's
 own `severity` gate block — `exit_code`/`blocking`/`blocking_categories` —
 rather than inferring the cause from the code.
@@ -1063,9 +1060,9 @@ read the `verdict` field where available.
 default) collapses every compatible/advisory-only state (no break,
 deployment risk, additions, quality signals) to exit `0` — read `-o
 json` if your pipeline needs to distinguish them. Under a resolved
-`severity` scheme (`scan --against` with any `--severity-*` flag,
+`severity` scheme (`scan --against` with any `severity.*` setting,
 or a config `severity:` block) `scan` follows
 the `compare` exit (severity) column on the same `*` terms, in **both**
 directions: `severity.addition: error` exits `1` on an additions-only diff,
-and `--severity-preset info-only` exits `0` on a `BREAKING` one. See
+and `--set severity.preset=info-only` exits `0` on a `BREAKING` one. See
 ["`scan --against` and severity"](#scan-against-and-severity-retired-mirrored-compare).

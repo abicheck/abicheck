@@ -63,14 +63,13 @@ targets:
 ```
 
 `contract` (the check-target input; formerly `contract-file`) forwards to the root Action's `required-symbols` input
-(translated to the CLI's `--required-symbol @FILE`). See
+(translated to a `consumers.required_symbols` entry of `@FILE`). See
 [Plugin Systems](../../use/plugin-systems.md) for the full
-`--required-symbol`/`--policy plugin_abi` model.
+`consumers.required_symbols`/`--policy plugin_abi` model.
 
 ## Neither works with `channel: none`
 
-`compare`'s audit-only shape (`--no-baseline`) has no `--used-by`/
-`--required-symbol` equivalent — it rejects both outright, since consumer/
+`compare`'s audit-only shape (`--no-baseline`) has no `--used-by` or `consumers.required_symbols` equivalent — it rejects both outright, since consumer/
 entrypoint scoping needs two versions to compare and an audit has none. An
 app-consumer/plugin-contract check has no scope to audit without a baseline
 to compare against. Give it a real channel, or use `kind: library` for a

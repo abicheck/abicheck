@@ -90,8 +90,8 @@ It stops being enough the moment your deployment model allows any of these:
   update first in practice. See [Plugin Systems](../use/plugin-systems.md)
   for the two consumer-scoped checks that together cover one specific
   plugin/host pair: `compare --used-by` scopes the comparison to a
-  consumer's actual, statically-linked imports, while `compare
-  --required-symbol` checks the host's own required entrypoints — the ones
+  consumer's actual, statically-linked imports, while the
+  `consumers.required_symbols` key checks the host's own required entrypoints — the ones
   it resolves dynamically via `dlopen`/`dlsym` rather than importing at link
   time, which `--used-by` alone cannot see. A full plugin/host pair check
   needs both; either one run alone only covers its own half of the
@@ -125,10 +125,10 @@ imports*, so a forward consumer-scoped check needs a consumer binary that
 was actually built against the *new* contract — reusing an old consumer
 binary alongside reversed library arguments still only exercises what that
 old consumer imports, never a symbol or version a new-SDK consumer would
-use. The same applies to `--required-symbol`: the required-entrypoint set
+use. The same applies to `consumers.required_symbols`: the required-entrypoint set
 must match the host contract for the direction under test. See
 [Plugin Systems](../use/plugin-systems.md) for the consumer-scoped
-mechanics `compare --used-by`/`--required-symbol` build on.
+mechanics `compare --used-by`/`consumers.required_symbols` build on.
 
 There is no single "check every direction" flag, because which directions
 matter is a property of your deployment model, not something abicheck can

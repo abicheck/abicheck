@@ -54,17 +54,17 @@ own result is always this run's primary verdict/exit code; the supplied
 consumer's/host's own confirmed/potential/unresolved impact is reported
 alongside it, informational only, never in place of it.
 
-| Old command | New flag | What it scopes to |
+| Old command | New spelling | What it scopes to |
 |---|---|---|
-| `appcompat` | `compare --used-by APP` (repeatable) | An application binary's actual imports/required symbol versions. Mutually exclusive with `--required-symbol`. |
-| `plugin-check` | `compare --required-symbol SYM` (repeatable) / `--required-symbol @FILE` (one symbol per line, `#` comments ignored) | An explicit plugin-host entrypoint contract instead of the full diff. Mutually exclusive with `--used-by`. |
+| `appcompat` | `compare --used-by APP` (repeatable) | An application binary's actual imports/required symbol versions. Mutually exclusive with `consumers.required_symbols`. |
+| `plugin-check` | config `consumers.required_symbols: [SYM, ...]` (or `--set 'consumers.required_symbols=[SYM]'`); an `@FILE` entry reads one symbol per line, `#` comments ignored | An explicit plugin-host entrypoint contract instead of the full diff. Mutually exclusive with `--used-by`. |
 
 ```bash
 # Was: abicheck appcompat --app myapp old.so new.so
 abicheck compare old.so new.so -H include/ --used-by build/myapp
 
 # Was: abicheck plugin-check --required-symbol foo_init old.so new.so
-abicheck compare old.so new.so -H include/ --required-symbol foo_init
+abicheck compare old.so new.so -H include/ --set 'consumers.required_symbols=[foo_init]'
 ```
 
 See [Application Compatibility](appcompat.md) and [Plugin & Host
@@ -110,7 +110,7 @@ reports, the config schema, or GitHub Action inputs. Prefer `--depth`.
 | `pr` | diff-seeded L4 replay (per-PR gate) | `--depth source --since <ref>` — pin the rung; omitting `--depth` resolves to `headers` and collects no L4 evidence at all |
 | `pr-deep` | `pr` + the *whole-library* L5 reachability graph (`GRAPH`) | no exact `--depth` equivalent — the full graph is internal-only. `--depth source` gives the change-scoped edges; the full-graph preset is reachable only via the internal Python service API now |
 | `baseline` | whole-library replay of a release | `--depth source` with no `--since`/`--changed-path` seed (resolves to TARGET scope — the whole current library target) |
-| `audit` | intra-version hygiene lint, no baseline | `compare --no-baseline NEW` (the old standalone `--audit` flag was removed as redundant in the pre-1.0 CLI reset; `scan` with no `--against` then took its place, and 0.6 moved that onto `compare`). **Note the gate change**: `--severity-preset` is now required to make the audit gate — see [Upgrading to 0.6 §A2](../start/upgrading-to-0.6.md#a2-re-arming-an-audit-gate) |
+| `audit` | intra-version hygiene lint, no baseline | `compare --no-baseline NEW` (the old standalone `--audit` flag was removed as redundant in the pre-1.0 CLI reset; `scan` with no `--against` then took its place, and 0.6 moved that onto `compare`). **Note the gate change**: `severity.preset` is now required to make the audit gate — see [Upgrading to 0.6 §A2](../start/upgrading-to-0.6.md#a2-re-arming-an-audit-gate) |
 
 `--source-method auto`'s **risk-driven escalation is gone**, not relocated:
 0.6 retired it along with `--risk-rules`. Omitting `--depth` still means `auto`, but `auto` resolves
@@ -279,7 +279,7 @@ stays on by default, `--contract all` turns it off for one run, and
 defaults into one token. It was removed outright in 0.6: it bundled evidence depth, report rendering, and CI gate policy
 behind one word, and a rendering choice may never carry a gate setting.
 There is no direct config-key replacement — state `--depth`, `-o`,
-and `--severity-preset` (or `.abicheck.yml`'s `severity:` block)
+and `severity.preset` (or `.abicheck.yml`'s `severity:` block)
 independently. `quick`'s one-line summary survives as the first-class
 `-o oneline=...` choice; see [Output Formats](output-formats.md).
 
@@ -298,6 +298,6 @@ flags internally. No workflow edits were needed for Action users at the time.
 - **[Upgrading from 0.5 to 0.6](../start/upgrading-to-0.6.md) — the authoritative current migration**
 - [CLI Usage](cli-usage.md) — the core `dump`/`compare` flow
 - [Application Compatibility](appcompat.md) — `compare --used-by`
-- [Plugin & Host Systems](plugin-systems.md) — `compare --required-symbol(s)`
+- [Plugin & Host Systems](plugin-systems.md) — `consumers.required_symbols`
 - [Baseline Management](baseline-management.md) — storing/producing comparison baselines now that `baseline` is gone
 - [Debian Symbols](debian-symbols.md) — the surviving library-only API

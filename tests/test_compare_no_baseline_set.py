@@ -507,8 +507,8 @@ def test_the_exit_code_is_the_max_and_every_contributing_axis_is_listed(
         "public",
         "--policy",
         str(policy),
-        "--severity-preset",
-        "default",
+        "--set",
+        'severity.preset=default',
     )
     clean = _invoke("compare", "--no-baseline", str(root), "-o", "json=-", *args)
     doc = _json(clean)

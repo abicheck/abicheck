@@ -90,7 +90,7 @@
           "required": ["verdict"],
           "properties": {
             "verdict": {
-              "description": "compare's ordinal verdict, or null for a pair that cannot be compared. Always the library-wide result -- workstream D-S1 reverted --used-by/--required-symbol(s) to enrichment: the CLI's own verdict/severity/run_outcome/summary always describe the full-library comparison, exactly as an unscoped compare would produce, never swapped for a supplied consumer's own scoped result.",
+              "description": "compare's ordinal verdict, or null for a pair that cannot be compared. Always the library-wide result -- workstream D-S1 reverted --used-by/consumers.required_symbols to enrichment: the CLI's own verdict/severity/run_outcome/summary always describe the full-library comparison, exactly as an unscoped compare would produce, never swapped for a supplied consumer's own scoped result.",
               "enum": ["NO_CHANGE", "COMPATIBLE", "COMPATIBLE_WITH_RISK", "API_BREAK", "BREAKING", null]
             },
             "consumer_verdict": {

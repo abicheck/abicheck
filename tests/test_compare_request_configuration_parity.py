@@ -185,7 +185,7 @@ class TestPacksScoreTheSameOnBothSurfaces:
         """D8: a stated value beats a pack, so the pack must *not* move it."""
         old, new = removal_pair
         pack = _file(tmp_path, "gate.yml", GATE_PACK)
-        cli = _outcome_cli(old, new, "--pack", str(pack), "--severity-preset", "strict")
+        cli = _outcome_cli(old, new, "--pack", str(pack), "--set", 'severity.preset=strict')
         api = _outcome_api(old, new, pack_paths=(pack,), severity_preset="strict")
         assert cli == api
         assert cli[0] == 4

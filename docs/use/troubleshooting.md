@@ -54,7 +54,7 @@ If castxml runs but reports parse errors or an empty surface, the inputs usually
 don't match the build environment of the analyzed `.so`:
 
 - Pass the same include dirs the library was built with: `-I include/ -I deps/include/`.
-- Pass the same preprocessor macros with `-D/--define` (repeatable, and applied
+- Pass the same preprocessor macros with `-D` (repeatable, and applied
   to both sides of a `compare`): `-DFEATURE_X=1 -DNDEBUG`. For a stable
   project/CI contract, record them in `.abicheck.yml` instead — see
   [Headers that require a macro](#headers-that-require-a-macro-before-inclusion).
@@ -97,7 +97,7 @@ compile:
 The two compose: a CLI `-D` overrides the config entry **for that macro name
 only**, leaving every other `compile.defines` entry in force.
 
-`-D/--define` takes a *macro definition* (`NAME` or `NAME=VALUE`), not a
+`-D` takes a *macro definition* (`NAME` or `NAME=VALUE`), not a
 compiler flag. A value containing whitespace, a function-like definition
 (`F(x)=...`), and anything that is not a bare macro name are rejected with a
 message naming `compile.options`, which is where general compiler flags live.

@@ -391,8 +391,8 @@ class TestEndToEndJsonReport:
                 "public",
                 "-o",
                 "json=-",
-                "--severity-preset",
-                "strict",
+                "--set",
+                'severity.preset=strict',
             ],
         )
         ctx = json.loads(result.output)["contract_context"]["evaluation_context"]
@@ -1075,8 +1075,8 @@ class TestUsedByScopingStampsExplicitEvidence:
                 str(app),
                 "--contract",
                 "public",
-                "--view",
-                "root-cause",
+                "--set",
+                'output.view=["root-cause"]',
             ],
         )
         assert result.exit_code == 1, result.output
@@ -1109,8 +1109,8 @@ class TestUsedByScopingStampsExplicitEvidence:
                 str(new),
                 "--used-by",
                 str(app),
-                "--view",
-                "root-cause",
+                "--set",
+                'output.view=["root-cause"]',
             ],
         )
         assert result.exit_code == 0, result.output

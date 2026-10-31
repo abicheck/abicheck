@@ -41,12 +41,12 @@ show the difference. Confirm `layer_coverage` reports the source layers
 ## Reading the result
 
 **`verdict` is always the library-wide answer, scoped run or not.** A
-`--used-by`/`--required-symbol(s)` run's own top-level `verdict`/`severity`/
+`--used-by`/`consumers.required_symbols` run's own top-level `verdict`/`severity`/
 `run_outcome`/`summary` describe the full library — exactly what an unscoped
 `compare` would report — and this run's exit code always comes from that
 result. The supplied consumer's own confirmed/potential/unresolved answer is
 reported *beside* it, never in place of it: `used_by` (per-app detail,
-`--used-by`) / `required_symbol_contract` (`--required-symbol(s)`), plus a
+`--used-by`) / `required_symbol_contract` (`consumers.required_symbols`), plus a
 `consumer_scope` object stating what that consumer's own assessment
 concluded (`consumer_scope.verdict`, and, under the severity exit-code
 scheme, `consumer_scope.exit_code`). Treating `verdict` as the *consumer's*

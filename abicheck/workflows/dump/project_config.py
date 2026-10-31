@@ -109,6 +109,8 @@ DUMP_APPLIED_PATHS: frozenset[str] = (
     frozenset({path for path, _owner, _field, _attr in DUMP_TYPED_OVERRIDE_CHANNELS})
     | _DUMP_CLI_ONLY_PATHS
     | COMPILE_CONTEXT_OVERRIDE_PATHS
+    # ADR-091 Phase 5: `compile.defines` replaced `dump --define` (-D).
+    | {"compile.defines"}
 )
 
 

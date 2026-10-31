@@ -444,7 +444,7 @@ silently inert setting.
 
 Where each form is accepted follows from what a command has to configure:
 a `kind: gate` pack applies to `scan --against` the same way
-`--severity-preset` given directly already does — `scan`'s
+`severity.preset` given directly already does — `scan`'s
 exit code has honoured the resolved severity config since
 the fix that closed the "scan never consults severity" gap, and a gate pack
 is one more source for that same gate.

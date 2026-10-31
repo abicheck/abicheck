@@ -1277,76 +1277,20 @@ _old_library_is_stored_snapshot() {
   return 0
 }
 
-# The Action's compile-context inputs reach the CLI as `--set compile.*=…`
-# (ADR-091 D4, ADR-070 D2). The CLI owns the `compile:` schema, the trust gate
-# on `compile.compiler` and the precedence over `.abicheck.yml`, so this
-# function only translates input grammar: a string is written as a JSON
-# string (a YAML flow scalar, so `123` stays text and a backslash survives),
-# and `gcc-options` -- a shell-quoted line, or one token per line -- becomes
-# the list `compile.options` takes.
-#
-# $1: "true" to also forward `lang` (dump and compare).
-_compile_set_string() {
-  local value="$2"
-  value=${value//\\/\\\\}
-  value=${value//\"/\\\"}
-  printf '%s="%s"' "$1" "$value"
-}
-
-add_compile_context_flags() {
-  local include_lang="${1:-true}"
-  # `auto` is the documented no-op spelling of ast-frontend, and the `c++`
-  # lang default is not a user override: a run that configures nothing
-  # forwards nothing, so it keeps the CLI's own `.abicheck.yml` discovery.
-  local _ast_frontend_requested="${INPUT_FRONTEND:-}"
-  if [[ "$_ast_frontend_requested" == "auto" ]]; then
-    _ast_frontend_requested=""
-  fi
-  if [[ -z "${_ast_frontend_requested}${INPUT_COMPILER:-}${INPUT_COMPILE_OPTIONS:-}${INPUT_SYSROOT:-}" \
-        && "${INPUT_NOSTDINC:-false}" != "true" \
-        && ( "$include_lang" != "true" || -z "${INPUT_LANG:-}" || "${INPUT_LANG:-}" == "c++" ) ]]; then
-    return 0
-  fi
-  if [[ "$include_lang" == "true" && -n "${INPUT_LANG:-}" ]]; then
-    CMD+=(--set "$(_compile_set_string compile.lang "$INPUT_LANG")")
-  fi
-  if [[ -n "$_ast_frontend_requested" ]]; then
-    CMD+=(--set "$(_compile_set_string compile.frontend "$_ast_frontend_requested")")
-  fi
-  # compile.compiler takes a full compiler path or, ending in `-`, a
-  # cross-toolchain prefix (ADR-091 R5: the `compiler` input carries either).
-  local _compiler="${INPUT_COMPILER:-}"
-  if [[ -n "$_compiler" ]]; then
-    CMD+=(--set "$(_compile_set_string compile.compiler "$_compiler")")
-  fi
-  if [[ -n "${INPUT_COMPILE_OPTIONS:-}" ]]; then
-    if [[ -z "$_PY_BIN" ]]; then
-      _error_annotation "mode: ${MODE} needs a working Python interpreter on PATH to split gcc-options into compile.options (resolved interpreter: '${_PY_BIN:-<none found on PATH>}')."
-      exit 1
-    fi
-    # The raw value goes on stdin, not argv: a POSIX-looking value would be
-    # path-rewritten by Git Bash before it reached the interpreter. Run from
-    # the isolated $_PY_SAFE_DIR like every other inline-Python call here.
-    local _options_json _options_rc=0
-    _options_json=$(printf '%s' "$INPUT_COMPILE_OPTIONS" | (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c 'import json, shlex, sys
-text = sys.stdin.read()
-print(json.dumps([line for line in text.splitlines() if line] if "\n" in text else shlex.split(text)))')) || _options_rc=$?
-    # A Windows interpreter's print() ends its line with CRLF, and $(...)
-    # strips only the trailing LF, so a bare \r would otherwise reach
-    # `--set compile.options=` and corrupt the last JSON token.
-    _options_json=${_options_json//$'\r'/}
-    if [[ "$_options_rc" -ne 0 || -z "$_options_json" ]]; then
-      _error_annotation "mode: ${MODE} could not split gcc-options into compile.options (interpreter exit ${_options_rc}). Running without it would parse headers under the wrong compile context, so the step fails instead of continuing silently."
-      exit 1
-    fi
-    CMD+=(--set "compile.options=${_options_json}")
-  fi
-  if [[ -n "${INPUT_SYSROOT:-}" ]]; then
-    CMD+=(--set "$(_compile_set_string compile.sysroot "$INPUT_SYSROOT")")
-  fi
-  if [[ "${INPUT_NOSTDINC:-false}" == "true" ]]; then
-    CMD+=(--set compile.nostdinc=true)
-  fi
+# Whitespace-separated tokens -> a YAML flow list of double-quoted strings,
+# for a --set value (e.g. consumers.manifests=["a.json", "b.json"]). read -a
+# does not glob, so a token containing '*' stays literal.
+_yaml_flow_list() {
+  local -a _toks=()
+  read -r -a _toks <<<"$1"
+  local out="" sep="" tok
+  for tok in "${_toks[@]+"${_toks[@]}"}"; do
+    tok=${tok//\\/\\\\}
+    tok=${tok//\"/\\\"}
+    out+="${sep}\"${tok}\""
+    sep=", "
+  done
+  printf '[%s]' "$out"
 }
 
 # Phase 7d (one-comparison-product.md §4.1, ADR-068 D5): `compare`'s
@@ -1388,28 +1332,8 @@ add_release_topology_config_flags() {
   # key this function knows about. Both shapes overlay the same --config file,
   # so the assurance override reaches the CLI whichever branch the operand took.
   local _scope="${1:-release}"
-  local _dso_only="" _include_private_dso="" _fail_on_removed_library=""
-  if [[ "$_scope" != "scalar" ]]; then
-    _dso_only="${INPUT_DSO_ONLY:-}"
-    _include_private_dso="${INPUT_INCLUDE_PRIVATE_DSO:-}"
-    _fail_on_removed_library="${INPUT_FAIL_ON_REMOVED_LIBRARY:-}"
-  fi
   local _analysis_assurance_complete="${INPUT_REQUIRE_COMPLETE:-}"
-  # dso-only/include-private-dso/fail-on-removed-library deliberately carry
-  # no declared default in action.yml (Codex review, fresh evidence): an
-  # explicit `false` from the workflow must be able to override a
-  # discovered/explicit .abicheck.yml's own release.dso_only/
-  # release.include_private_dso/gate.fail_on_removed_library: true --
-  # collapsing "omitted" and "explicit false" onto the same value (the old
-  # `${INPUT_DSO_ONLY:-false}` shape, which also made this early return fire
-  # whenever all three read as "false") would make that override silently
-  # unreachable. So this guard -- and the overlay-generation below -- keys
-  # off whether each input was actually GIVEN (non-empty string) at all,
-  # never off its truthiness.
-  if [[ -z "$_dso_only" \
-        && -z "$_include_private_dso" \
-        && -z "$_fail_on_removed_library" \
-        && -z "$_analysis_assurance_complete" ]]; then
+  if [[ -z "$_analysis_assurance_complete" ]]; then
     return 0
   fi
   local _config_idx=-1 _i
@@ -1481,10 +1405,7 @@ add_release_topology_config_flags() {
   fi
   local _release_overlay_json
   _release_overlay_json=$(cd "$_PY_SAFE_DIR" \
-  && ABICHECK_RELEASE_DSO_ONLY="$_dso_only" \
-  ABICHECK_RELEASE_INCLUDE_PRIVATE_DSO="$_include_private_dso" \
-  ABICHECK_GATE_FAIL_ON_REMOVED_LIBRARY="$_fail_on_removed_library" \
-  ABICHECK_ASSURANCE_REQUIRE_COMPLETE="$_analysis_assurance_complete" \
+  &&   ABICHECK_ASSURANCE_REQUIRE_COMPLETE="$_analysis_assurance_complete" \
   PYTHONPATH= "$_PY_BIN" - <<'PYEOF'
 # Synthesizes a minimal .abicheck.yml `release:`/`gate:` block (as JSON, a
 # valid YAML subset abicheck's own yaml.safe_load parses identically) from
@@ -1499,27 +1420,7 @@ import json
 import os
 import sys
 
-# Each of these three env vars is "" (not "false") when the corresponding
-# Action input was never given at all -- action.yml deliberately declares
-# no default for any of them (Codex review, fresh evidence) so that an
-# explicit `false` from the workflow can still override a discovered/
-# explicit .abicheck.yml's own true value, instead of being silently
-# indistinguishable from "not set". Only an explicitly-given value (either
-# spelling) is written into the overlay; omitted means "let whatever the
-# base config already says stand", not "force false".
 doc: dict[str, object] = {}
-release_blk: dict[str, object] = {}
-_dso_only = os.environ.get("ABICHECK_RELEASE_DSO_ONLY", "")
-if _dso_only:
-    release_blk["dso_only"] = _dso_only == "true"
-_include_private_dso = os.environ.get("ABICHECK_RELEASE_INCLUDE_PRIVATE_DSO", "")
-if _include_private_dso:
-    release_blk["include_private_dso"] = _include_private_dso == "true"
-if release_blk:
-    doc["release"] = release_blk
-_fail_on_removed = os.environ.get("ABICHECK_GATE_FAIL_ON_REMOVED_LIBRARY", "")
-if _fail_on_removed:
-    doc["gate"] = {"fail_on_removed_library": _fail_on_removed == "true"}
 # analysis-assurance-complete: the tri-state per-job override of
 # assurance.require_complete. Same rule as every key above: written only when
 # given, so "omitted" leaves the base config's own value standing, and an
@@ -3506,14 +3407,9 @@ if [[ "$MODE" == "dump" ]]; then
 
   add_flag "-H" "${INPUT_HEADER:-}"
   add_flag "-H" "${INPUT_NEW_HEADER:-}"
-  # `public-header-dir` has no dedicated dump flag any more -- `dump` derives
-  # declaration provenance from -H/--header itself (a directory entry tags
-  # everything under it public), so forward it as one more -H root.
-  add_flag "-H" "${INPUT_PUBLIC_HEADER_DIRS:-}"
   add_flag "-I" "${INPUT_INCLUDE:-}"
   add_flag "-I" "${INPUT_NEW_INCLUDE:-}"
   _extra_args_names_label || add_single_flag "--label" "${INPUT_NEW_LABEL:-}"
-  add_compile_context_flags true
 
   if [[ "${INPUT_FOLLOW_DEPS:-false}" == "true" ]]; then
     CMD+=(--follow-deps)
@@ -3640,7 +3536,6 @@ elif [[ "$MODE" == "compare" ]]; then
   if [[ "$_NO_BASELINE" == "true" ]]; then
     add_flag "-H" "${INPUT_HEADER:-}"
     add_flag "-H" "${INPUT_NEW_HEADER:-}"
-    add_flag "-H" "${INPUT_PUBLIC_HEADER_DIRS:-}"
     add_flag "-I" "${INPUT_INCLUDE:-}"
     add_flag "-I" "${INPUT_NEW_INCLUDE:-}"
     _extra_args_names_label || add_sided_scalar_flag "--label" "new" "${INPUT_NEW_LABEL:-}"
@@ -3673,7 +3568,6 @@ elif [[ "$MODE" == "compare" ]]; then
   # so there is no sided per-side override left for it to refuse. This
   # Action folds `ast-frontend` & co. into one both-sides `compile:` block,
   # which the release fan-out threads to every library pair.
-  add_compile_context_flags true
 
   # Build/source evidence (--depth build/source) — new (candidate) side only.
   # The old side's evidence, if any, already lives in whatever
@@ -3906,20 +3800,6 @@ elif [[ "$MODE" == "compare" ]]; then
   # .abicheck.yml is not; see add_compile_context_flags' overlay strip).
   add_single_flag "--acknowledgments" "${INPUT_ACKNOWLEDGMENTS:-}"
 
-  # Severity configuration. Audit-only: --severity-preset is ALSO the
-  # ADR-068 2026-09-10 amendment's audit-gate opt-in (`compare --no-baseline`
-  # only gates on a candidate-side finding when a preset other than
-  # `info-only` is in effect). Unlike an earlier draft of this migration,
-  # this step never injects a preset on the caller's behalf: the ADR-068
-  # 2026-09-11 amendment states the audit-gate opt-in is the *caller's*
-  # migration step, not something `run.sh` does implicitly (a job that
-  # relied on legacy `mode: scan`'s own default gating must itself pass
-  # `severity-preset: default` when migrating -- see the amendment's
-  # "audit-gate trap" section). So this is the exact same pass-through as
-  # the baseline shape below: forward whatever preset the caller asked for
-  # (the dedicated input, `extra-args --severity-preset ...`, or neither),
-  # and change nothing else.
-  add_single_flag "--severity-preset" "${INPUT_SEVERITY_PRESET:-}"
   add_set_flags
   # --budget: time guard (e.g. 15m, 900s, 1h); the step FAILS on overflow
   # (exit 5) -- a budget never silently shrinks scope. Baseline shape only --
@@ -3940,14 +3820,24 @@ elif [[ "$MODE" == "compare" ]]; then
   # exclusivity (a UsageError, surfaced as VERDICT=ERROR below via the
   # generic CLI-error detection) -- not re-validated here.
   add_flag "--used-by" "${INPUT_USED_BY:-}"
-  add_flag "--used-by-manifest" "${INPUT_USED_BY_MANIFEST:-}"
-  add_flag "--required-symbol" "${INPUT_REQUIRED_SYMBOL:-}"
-  # ADR-068 D5 / plan Phase 7h: the CLI's own --required-symbols FILE flag
-  # is gone -- --required-symbol now accepts '@FILE' as one of its
-  # repeatable values. The Action's required-symbols input is unchanged;
-  # only its translation to the CLI moves.
-  if [[ -n "${INPUT_REQUIRED_SYMBOLS:-}" ]]; then
-    CMD+=(--required-symbol "@${INPUT_REQUIRED_SYMBOLS}")
+  # The CLI's --used-by-manifest and --required-symbol flags are gone; their
+  # content is the consumers: config block, reached through --set (ADR-091 D4).
+  # Both spellings keep their input and behaviour: only the carrier changes.
+  if [[ -n "${INPUT_USED_BY_MANIFEST:-}" ]]; then
+    CMD+=(--set "consumers.manifests=$(_yaml_flow_list "${INPUT_USED_BY_MANIFEST}")")
+  fi
+  # required-symbol (one symbol) and required-symbols (a .syms file, sent as
+  # '@FILE') share one consumers.required_symbols list, so they are merged
+  # into a single --set rather than setting the same path twice.
+  if [[ -n "${INPUT_REQUIRED_SYMBOL:-}" || -n "${INPUT_REQUIRED_SYMBOLS:-}" ]]; then
+    _required_items=""
+    if [[ -n "${INPUT_REQUIRED_SYMBOL:-}" ]]; then
+      _required_items="${INPUT_REQUIRED_SYMBOL}"
+    fi
+    if [[ -n "${INPUT_REQUIRED_SYMBOLS:-}" ]]; then
+      _required_items="${_required_items:+${_required_items} }@${INPUT_REQUIRED_SYMBOLS}"
+    fi
+    CMD+=(--set "consumers.required_symbols=$(_yaml_flow_list "$_required_items")")
   fi
 
   # Package-specific options — only meaningful (and only forwarded) when
@@ -3979,7 +3869,6 @@ elif [[ "$MODE" == "deps-tree" ]]; then
   CMD+=(deps tree)
   CMD+=("${INPUT_NEW_LIBRARY:?new-library is required for deps-tree mode}")
 
-  add_single_flag "--root" "${INPUT_SYSROOT:-}"
   add_flag "--search-path" "${INPUT_SEARCH_PATH:-}"
   add_single_flag "--ld-library-path" "${INPUT_LD_LIBRARY_PATH:-}"
 

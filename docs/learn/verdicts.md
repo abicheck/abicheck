@@ -176,7 +176,7 @@ pipeline ordering: [CI Gating](../use/ci-gating.md).
 
 A related simplification worth retiring: in severity-aware mode, the
 run-level *verdict* and the configured *severity gate* can deliberately
-diverge. A scoped comparison (`compare --used-by`/`--required-symbol`) can
+diverge. A scoped comparison (`compare --used-by`/`consumers.required_symbols`) can
 report a `BREAKING` verdict while a severity gate configured to only fail on
 `abi_breaking`-category findings elsewhere in the run still exits `0` if
 that particular category is set to `info`/`warning` rather than `error` —
@@ -210,7 +210,7 @@ the severity of the findings) becomes the process **exit code** your CI reads:
 **`default`** preset (`abi_breaking=error`, everything else `warning`/`info`),
 only `BREAKING` reaches an error level, so the other rows exit `0` unless you
 raise their category — e.g. `severity.addition: error` makes an
-additions-only `COMPATIBLE` exit `1`, and `--severity-preset strict` makes
+additions-only `COMPATIBLE` exit `1`, and `--set severity.preset=strict` makes
 `API_BREAK`/`COMPATIBLE_WITH_RISK` exit `2`.
 
 > **Exit `0` is not one verdict.** In legacy mode, `NO_CHANGE`, `COMPATIBLE`,
@@ -231,7 +231,7 @@ exit code is the verdict itself, mapped `0/2/4`:
 - `4` — `BREAKING` (binary ABI break)
 
 **Severity-aware — opt-in.** The severity-aware path runs when **any**
-`--severity-preset` or `--severity-*` flag is passed (or an equivalent
+`severity.preset` or `--severity-*` flag is passed (or an equivalent
 `severity:` block is set in config). The exit code is then computed from the
 *severity* of findings, not the verdict — the highest applicable code wins:
 
@@ -254,7 +254,7 @@ It has no configurable level and never contributes to the exit code. Configuring
 For every other command (`deps`, multi-library/release
 inputs) and the full summary matrix, see the authoritative
 [Exit Codes](../reference/exit-codes.md) reference. App- and plugin-scoped
-comparisons (`compare --used-by APP` / `compare --required-symbol SYM`) fold
+comparisons (`compare --used-by APP` / `consumers.required_symbols: [SYM]`) fold
 into `compare`'s own exit-code scheme above — the worst app/plugin-scoped
 result becomes the primary verdict/exit code.
 Worked gate patterns beyond the templates below — strict production gates,

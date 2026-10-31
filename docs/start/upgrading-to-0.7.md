@@ -93,6 +93,19 @@ that moves to this release.
 | `policy-file` | `policy` | `policy` takes either a built-in profile name or a policy file path. |
 | `requested-depth` (`check-target`) | `depth` | |
 | `contract-file` (`check-target`) | `contract` | |
+| `dso-only` | `set: release.dso_only=true` | Config key `release.dso_only`. |
+| `include-private-dso` | `set: release.include_private_dso=true` | Config key `release.include_private_dso`. |
+| `fail-on-removed-library` | `set: gate.fail_on_removed_library=true` | Config key `gate.fail_on_removed_library`. |
+| `public-header-dirs` | `set: scope.public_header_dirs=[<dir>, ...]` | A YAML list. |
+| `lang` | `set: compile.lang=<value>` | Applies to `check-target` through its own `lang` input. |
+| `frontend` | `set: compile.frontend=<value>` | |
+| `compiler` | `set: compile.compiler=<value>` | Takes a compiler path or a cross-toolchain prefix. |
+| `compile-options` | `set: compile.options=[<flag>, ...]` | A YAML list, one flag per element. |
+| `sysroot` | `set: compile.sysroot=<dir>` | For `mode: deps-tree`, which `set:` does not reach, use `extra-args: --root <dir>`. |
+| `nostdinc` | `set: compile.nostdinc=true` | |
+| `severity-preset` | `set: severity.preset=<value>` | |
+| `jobs` | none | Removed with no replacement. The worker count is controlled by the runner or workflow. |
+| `allow-build-query` | none | Removed with no replacement. abicheck runs its inferred compile-database query whenever a sources input needs build context. A trusted query is set through `build-config`'s `build.query`. |
 
 `check-target`'s `analysis-assurance-complete`, `ast-frontend`, `gcc-path`,
 `gcc-options`, `gcc-prefix` and `policy-file` map to the same new names as the

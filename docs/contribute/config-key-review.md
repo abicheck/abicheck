@@ -70,7 +70,7 @@ change for `compare-release` callers that relied on unscoped output — pass
 
 ### 🔴 2.2 Severity system was `compare`-only ✅ resolved (additive + explicit)
 
-Originally `--severity-preset` and the four `--severity-*` category flags were
+Originally `severity.preset` and the four `--severity-*` category flags were
 **`compare`-only**. `compare-release` and `appcompat` — both of which run the
 same diff engine — had no severity control and fell back to verdict-based exit
 codes. Worse, on `compare` the scheme switched **silently**: passing *any*
@@ -78,7 +78,7 @@ codes. Worse, on `compare` the scheme switched **silently**: passing *any*
 severity scheme with no signal.
 
 **Resolution (implemented, see §7 do-first #2):**
-- The `--severity-preset`/`--severity-*` option group was added to
+- The `severity.preset`/`--severity-*` option group was added to
   `compare-release` (aggregated across per-library, bundle, and matrix findings,
   honoring per-library `--policy` overrides; removed-library exit `8` still
   wins) and `appcompat` (full-compare mode only; app-scoped to `breaking_for_app`,
@@ -310,7 +310,7 @@ categories. Coherent. The only issue is reach (§2.2), not the schema.
    (§2.1)
 2. ✅ **Done (explicit-messaging form).** `compare` now prints the active
    exit-code scheme to stderr instead of switching silently, and `--severity-*`
-   /`--severity-preset` were added to `compare-release` and `appcompat`. Exit
+   /`severity.preset` were added to `compare-release` and `appcompat`. Exit
    numbers are unchanged: a literal "legacy preset" can't be reproduced through
    the severity engine because API_BREAK and RISK share `POTENTIAL_BREAKING`
    while the verdict path maps `COMPATIBLE_WITH_RISK`→0, so forcing

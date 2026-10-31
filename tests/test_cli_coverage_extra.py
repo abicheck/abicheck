@@ -270,8 +270,8 @@ class TestShowOnlyValidation:
                 "compare",
                 str(old),
                 str(new),
-                "--view",
-                "show=invalid_token_xyz",
+                "--set",
+                'output.view=["show=invalid_token_xyz"]',
             ],
         )
         assert result.exit_code != 0
@@ -403,7 +403,7 @@ class TestRenderOutputFormats:
 
         runner = CliRunner()
         result = runner.invoke(
-            main, ["compare", str(old_f), str(new_f), "--view", "impact"]
+            main, ["compare", str(old_f), str(new_f), "--set", 'output.view=["impact"]']
         )
         assert result.exit_code == 4  # breaking (struct size changed)
         assert "Impact Summary" in result.output or "impact" in result.output.lower()
@@ -460,7 +460,7 @@ class TestRenderOutputFormats:
 
         runner = CliRunner()
         result = runner.invoke(
-            main, ["compare", str(old_f), str(new_f), "--view", "root-cause"]
+            main, ["compare", str(old_f), str(new_f), "--set", 'output.view=["root-cause"]']
         )
         assert result.exit_code == 4
         assert "Cfg" in result.output

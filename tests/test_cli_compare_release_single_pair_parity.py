@@ -130,7 +130,7 @@ def _axis_suppress(tmp_path: Path) -> list[str]:
 
 
 def _axis_severity_preset_strict(tmp_path: Path) -> list[str]:
-    return ["--severity-preset", "strict"]
+    return ["--set", 'severity.preset=strict']
 
 
 def _axis_no_scope_public_headers(tmp_path: Path) -> list[str]:

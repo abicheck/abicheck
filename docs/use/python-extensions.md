@@ -137,7 +137,7 @@ effective verdict directly — or move the run onto the severity scheme
 instead:
 
 ```console
-$ abicheck compare foo.abi3.so foo.abi3.so --abi3-floor 3.9 --severity-preset strict
+$ abicheck compare foo.abi3.so foo.abi3.so --abi3-floor 3.9 --set severity.preset=strict
 ```
 
 which raises the exit code to `2`. Either way, exit `0` = clean or
@@ -163,7 +163,7 @@ breaks depends on the *target interpreter*, not on the module's own consumers.
     These four are **compare-time** kinds. Like every `RISK` change they are
     advisory in `compare` by default; gate them through `compare`'s severity /
     policy configuration (e.g. a policy profile that escalates the kind, or
-    `--severity-preset`). `python_stable_abi_violation` from the single-module
+    `severity.preset`). `python_stable_abi_violation` from the single-module
     `--abi3-floor` audit gates the same way — see [Gating](#1-audit-a-single-module-compare-abi3-floor)
     above. The retired `scan`'s separate `--crosscheck KEY=LEVEL` switch had no
     replacement flag; both the audit finding and these four compare-time kinds

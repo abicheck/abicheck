@@ -396,7 +396,7 @@ jobs:
         with:
           mode: compare
           new-library: catalog/cases/case148_xcheck_header_build_mismatch/snapshot.abi.json
-          severity-preset: default
+          set: severity.preset=default
           install-deps: false
 
       - name: '[audit-gate] Verify the run gates at exit 3 (AUDIT_GATE) with severity-preset set'

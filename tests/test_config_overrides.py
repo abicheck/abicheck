@@ -157,8 +157,16 @@ def test_a_core_option_is_refused_and_the_error_names_its_flag(
 
 
 def test_core_refusal_also_applies_to_the_typed_api() -> None:
-    with pytest.raises(CompareSettingsError, match="--severity-preset"):
-        _with_config_overrides(_request(config_overrides={"severity.preset": "strict"}))
+    with pytest.raises(CompareSettingsError, match="--contract"):
+        _with_config_overrides(_request(config_overrides={"contract": "public"}))
+
+
+def test_severity_preset_override_reaches_the_typed_request() -> None:
+    """severity.preset is a config key now (--severity-preset is gone), so the typed channel applies it."""
+    applied = _with_config_overrides(
+        _request(config_overrides={"severity.preset": "strict"})
+    )
+    assert applied.severity_preset == "strict"
 
 
 def test_core_set_keys_are_exactly_the_registry_core_config_members() -> None:

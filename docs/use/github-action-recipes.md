@@ -484,7 +484,7 @@ severity-config category (`addition` or `quality_issues`) is set to `error`
 `--contract` run's own coverage-failure ledger
 (`contract_coverage_failures`): its `contract_coverage_exit_contribution`
 folds into the real exit code regardless of any other axis, including a
-`--used-by`/`--required-symbol` scoped verdict — a scoped-compatible run
+`--used-by`/`consumers.required_symbols` scoped verdict — a scoped-compatible run
 whose contract coverage also failed still renders the blocking headline,
 not "✅ Compatible (scoped)".
 
@@ -667,7 +667,7 @@ build-id resolution:
         with:
           old-library: sdk-2.0.tar.gz
           new-library: sdk-2.1.tar.gz
-          dso-only: true
+          set: release.dso_only=true
 ```
 
 ## Compare conda packages

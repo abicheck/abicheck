@@ -103,6 +103,31 @@ if TYPE_CHECKING:
 
 
 @run_scoped_digest_cache
+def _resolve_config_path(item: str, cfg_path: Path | None) -> Path:
+    """A ``consumers.manifests`` entry: relative to the config file that names it."""
+    path = Path(item)
+    if path.is_absolute() or cfg_path is None:
+        return path
+    return cfg_path.parent / path
+
+
+def _resolve_config_required_symbol(item: str, cfg_path: Path | None) -> str:
+    """A ``consumers.required_symbols`` entry; ``@FILE`` resolves like ``_resolve_config_path``."""
+    if not item.startswith("@"):
+        return item
+    return "@" + str(_resolve_config_path(item[1:], cfg_path))
+
+
+def _parse_config_view(tokens: list[str]) -> dict[str, object]:
+    """``output.view`` tokens, parsed with the grammar the removed ``--view`` used."""
+    from .frontends.cli.options.compare_view import parse_view_tokens
+
+    try:
+        return parse_view_tokens(tuple(tokens))
+    except ValueError as exc:
+        raise click.UsageError(f"output.view: {exc}") from exc
+
+
 def run_compare(
     ctx: click.Context,
     *,
@@ -241,6 +266,35 @@ def run_compare(
     # once `resolved_cfg` exists (Codex review: computing this before that
     # resolution silently discarded every config-set `compile.lang`).
 
+    # ADR-037 D4: load the project config and merge CLI flags over it
+    # (precedence CLI > config > built-in default) *before* dispatch, so both the
+    # single-file and the directory/package fan-out paths share one resolution.
+    # It comes first now: the consumer manifests, the required-symbol contract
+    # and the rendering view are config keys, read from it below.
+    cfg_path, project_cfg, resolved_cfg, cfg_sha = resolve_project_compare_config(
+        config=config,
+        severity_preset=severity_preset,
+        config_overrides=config_overrides,
+    )
+    # Paths in a config file resolve against that file, as every other key does.
+    if project_cfg is not None:
+        used_by_manifests = (
+            tuple(
+                _resolve_config_path(item, cfg_path)
+                for item in project_cfg.used_by_manifests
+            )
+            or used_by_manifests
+        )
+        required_symbols_opt = (
+            tuple(
+                _resolve_config_required_symbol(item, cfg_path)
+                for item in project_cfg.required_symbols
+            )
+            or required_symbols_opt
+        )
+    if project_cfg is not None and project_cfg.output_view:
+        view = _parse_config_view(project_cfg.output_view)
+        report_mode, show_only = view["report_mode"], view["show_only"]
     # Workstream D-S1: merge --used-by-manifest-named consumers into the same
     # --used-by pipeline before anything else looks at used_by_apps -- every
     # downstream consumer (the mutual-exclusivity check just below, the
@@ -250,11 +304,14 @@ def run_compare(
     if used_by_manifests:
         from .model.consumer_spec import parse_consumer_manifest
 
-        manifest_specs: tuple[ConsumerAppInput, ...] = tuple(
-            spec
-            for manifest_path_ in used_by_manifests
-            for spec in parse_consumer_manifest(manifest_path_)
-        )
+        try:
+            manifest_specs: tuple[ConsumerAppInput, ...] = tuple(
+                spec
+                for manifest_path_ in used_by_manifests
+                for spec in parse_consumer_manifest(manifest_path_)
+            )
+        except ValueError as exc:
+            raise click.UsageError(f"consumers.manifests: {exc}") from exc
         used_by_apps = (*used_by_apps, *manifest_specs)
 
     with compare_settings_usage_errors():
@@ -286,11 +343,6 @@ def run_compare(
     # ADR-037 D4: load the project config and merge CLI flags over it
     # (precedence CLI > config > built-in default) *before* dispatch, so both the
     # single-file and the directory/package fan-out paths share one resolution.
-    cfg_path, project_cfg, resolved_cfg, cfg_sha = resolve_project_compare_config(
-        config=config,
-        severity_preset=severity_preset,
-        config_overrides=config_overrides,
-    )
     exclude_headers = config_exclude_headers(exclude_headers, project_cfg)
     # One-comparison-product Phase 9b: no CLI flag any more -- scope.public
     # (or its built-in True) is the whole answer for a run with no --contract.

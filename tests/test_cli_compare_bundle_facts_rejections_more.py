@@ -157,8 +157,8 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--view",
-            "demangle",
+            "--set",
+            'output.view=["demangle"]',
             "-o",
             "markdown=-",
         )
@@ -211,8 +211,8 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--view",
-            "patterns",
+            "--set",
+            'output.view=["patterns"]',
             "-o",
             "markdown=-",
         )
@@ -256,8 +256,8 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--view",
-            "root-cause",
+            "--set",
+            'output.view=["root-cause"]',
             "-o",
             "json=-",
         )

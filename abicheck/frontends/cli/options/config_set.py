@@ -60,6 +60,7 @@ _RELEASE_APPLIED_PATHS: frozenset[str] = frozenset(
         "severity.potential_breaking",
         "severity.quality_issues",
         "severity.addition",
+        "severity.preset",
         "deployment",
     }
     | COMPILE_CONTEXT_OVERRIDE_PATHS

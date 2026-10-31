@@ -57,6 +57,7 @@ from ....workflows.no_baseline_compare import (
 from ..options.contract import resolve_contract_domain, resolve_contract_evaluation
 from ..options.params import _load_suppression_and_policy
 from .no_baseline_rulings import (
+    _reject_config_scoping_for_no_baseline,
     _reject_old_sided_inputs,
     _reject_unsupported_options,
 )
@@ -316,6 +317,13 @@ def resolve_no_baseline_invocation(
     _discovered_config = resolve_project_config(
         kwargs.get("config"), search_from=Path.cwd()
     ).path
+    if "compile.defines" in (kwargs.get("config_overrides") or {}):
+        # The audit's compile context is read from the config file; a --set
+        # value would be dropped, so it is refused rather than ignored.
+        raise click.UsageError(
+            "--set compile.defines is not available with --no-baseline: set "
+            "compile.defines in .abicheck.yml for this run"
+        )
     compile_context, merged_includes = resolve_compile_context(
         ctx,
         sysroot=None,
@@ -323,7 +331,7 @@ def resolve_no_baseline_invocation(
         header_backend="auto",
         includes=tuple(includes),
         build_config=_discovered_config,
-        defines=tuple(kwargs.get("defines") or ()),
+        defines=(),
         config_explicit=kwargs.get("config") is not None,
     )
     includes = list(merged_includes)
@@ -343,15 +351,16 @@ def resolve_no_baseline_invocation(
     # code of its own here.
     from ..project_config import resolve_project_compare_config
 
-    _cfg_path, _project_cfg, resolved_cfg, _cfg_sha = resolve_project_compare_config(
+    _cfg_path, project_cfg, resolved_cfg, _cfg_sha = resolve_project_compare_config(
         config=kwargs.get("config"),
         severity_preset=None,
         config_overrides=kwargs.get("config_overrides"),
     )
+    _reject_config_scoping_for_no_baseline(project_cfg)
     from ....workflows.compare.project_inputs import note_unapplied_post_manifest
 
     note_unapplied_post_manifest(
-        _project_cfg,
+        project_cfg,
         route="a --no-baseline audit",
         reason="an overlay scopes a contract across two sides",
         notify=lambda message: click.echo(message, err=True),

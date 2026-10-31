@@ -379,7 +379,7 @@ removals get reported as BREAKING.
 not a flag** — the toolchain a project's headers parse under is a stable
 property of the project, not a per-run decision. Both commands take exactly two per-run compile-context inputs on the
 CLI: `-I/--include DIR` (an include root, repeatable — searched before the
-configured `include_dirs`) and `-D/--define NAME[=VALUE]` (a preprocessor
+configured `include_dirs`) and `-D NAME[=VALUE]` (a preprocessor
 macro, repeatable — merged with `defines` by macro name, the CLI value winning).
 Everything else lives in the `compile:` block:
 
@@ -400,7 +400,7 @@ These are config-only: the general compiler/frontend CLI family
 (`--ast-frontend`, `--compiler-option`, `--compiler`/`--compiler-prefix`,
 `--sysroot`, `--nostdinc`, `--lang`) was removed, and the retired `scan`
 command took the last of those spellings with it. The one exception is
-`defines`, which also has a per-invocation `-D/--define NAME[=VALUE]` on
+`defines`, which also has a per-invocation `-D NAME[=VALUE]` on
 `dump`/`compare`, merged with this key by macro name. The full key
 reference is
 [Config Keys](../reference/config-keys-reference.md); the `compile:` block's
@@ -510,7 +510,7 @@ below by `tests/parity/test_no_baseline_audit_corpus_parity.py`.
 so the L3/L4-dependent checks further down this section no longer need
 `scan`. By default a hygiene finding never gates CI; migrating a
 `scan`-based **gating** job needs exactly one addition —
-`--severity-preset default` (or `strict`) — to keep gating on a
+`--set severity.preset=default` (or `strict`) — to keep gating on a
 `BREAKING`/`API_BREAK`-classified finding (exit `3`, the orthogonal
 audit-gate axis, never `2`/`4`); a non-gating job needs no change. See
 [Scenario S5](../integration/scenarios/single-build-audit.md) for the full

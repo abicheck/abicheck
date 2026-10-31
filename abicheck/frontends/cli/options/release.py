@@ -252,9 +252,12 @@ def debug_resolution_options(func: F) -> F:
 
 
 def app_usage_scope_options(func: F) -> F:
-    """Add the ADR-043 app-usage/required-symbol scoping options to ``compare``.
+    """Add the ADR-043 app-usage scoping option to ``compare``.
 
-    ``--used-by`` and ``--required-symbol`` are mutually exclusive scoping
+    ``--used-by`` is the command-line consumer spelling. The consumer manifests
+    and the required-symbol contract that used to sit beside it are
+    ``consumers.manifests``/``consumers.required_symbols`` in ``.abicheck.yml``
+    now. Those keys and ``--used-by`` are mutually exclusive scoping
     mechanisms folding the former standalone ``appcompat``/``plugin-check``
     commands into ``compare``. Decorators apply bottom-up, so they are
     listed here in reverse of their displayed order.
@@ -277,35 +280,6 @@ def app_usage_scope_options(func: F) -> F:
     inline form always fed the identical contract (see
     :func:`~abicheck.workflows.compare_configuration.load_required_symbols`).
     """
-    func = click.option(
-        "--used-by-manifest",
-        "used_by_manifests",
-        multiple=True,
-        type=click.Path(exists=True, dir_okay=False, path_type=Path),
-        help="A JSON document naming one or more consumer binaries "
-        "(repeatable), each with optional 'digest'/'platform'/'profile'/"
-        "'provider_baseline' provenance and a 'requirement': "
-        "'required' (default, an unreadable consumer aborts the run, "
-        "same as --used-by) or 'advisory' (an unreadable consumer is "
-        "skipped and reported, never aborts the run). Merged into the "
-        "same scoping pipeline as --used-by; every listed consumer counts "
-        "toward the reported 'N of M consumers affected' summary. "
-        "Mutually exclusive with --required-symbol.",
-    )(func)
-    func = click.option(
-        "--required-symbol",
-        "required_symbols_opt",
-        multiple=True,
-        help="An exported linker symbol a plugin host resolves via dlopen/dlsym "
-        "and requires (repeatable; folds `plugin-check`). '@FILE' reads "
-        "required symbols from FILE, one per line (blank lines and '#' "
-        "comments ignored) -- combinable with plain symbol values, but "
-        "at most one '@FILE' per invocation. The full library comparison "
-        "always determines this run's own verdict/exit code; this "
-        "contract's own confirmed/potential/unresolved impact is reported "
-        "alongside it (informational), never in place of it. Mutually "
-        "exclusive with --used-by.",
-    )(func)
     func = click.option(
         "--used-by",
         "used_by_apps",

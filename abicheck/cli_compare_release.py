@@ -38,7 +38,6 @@ from .cli_options import (
     lang_option,
     policy_options,
     release_input_options,
-    severity_options,
     verbose_option,
 )
 from .errors import (
@@ -255,8 +254,7 @@ _ENGINE_FORMATS = sorted(RELEASE_FORMATS)
     metavar="VARIANT_ID",
     help="The --old-variant counterpart for NEW_DIR.",
 )
-# ── Severity (shared family, ADR-037 D3; mirrors `compare`) ───────────────────
-@severity_options
+# ── Severity: `.abicheck.yml`'s severity.preset and severity: block (ADR-037 D3)
 def compare_release_cmd(
     old_dir: Path,
     new_dir: Path,
@@ -293,7 +291,7 @@ def compare_release_cmd(
     include_dependencies: bool,
     probe_matrix_old: Path | None,
     probe_matrix_new: Path | None,
-    severity_preset: str | None,
+    severity_preset: str | None = None,
     # One-comparison-product Phase 9b: --scope-public-headers/--no- are no
     # longer CLI spellings, so this is a plain keyword parameter like
     # `on_incomplete_scope` below. `compare`'s fan-out passes the resolved
@@ -314,7 +312,7 @@ def compare_release_cmd(
     # Not Click options: `compare`'s directory/package fan-out `ctx.invoke`s
     # this engine with the *already-merged* per-category severity levels it
     # resolved from `.abicheck.yml` (the four `--severity-<category>` CLI
-    # flags were removed -- see `cli_options.severity_options`). Plain
+    # flags were removed; the preset is `.abicheck.yml`'s `severity.preset`). Plain
     # keyword parameters, so the fan-out can still state them without
     # re-exposing a user-facing flag on an unregistered internal command.
     severity_abi_breaking: str | None = None,

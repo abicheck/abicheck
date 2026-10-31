@@ -102,7 +102,7 @@ don't exactly match what was compiled, results will be unreliable.
   ```
   (`abicheck dump libfoo.so -H foo.h -I include/ --config .abicheck.yml`; see
   [Compile context for header parsing](../use/evidence-depth.md#compile-context-for-header-parsing-l2))
-- To fail CI on any change, including compatible ones, use `--severity-preset strict`.
+- To fail CI on any change, including compatible ones, use `--set severity.preset=strict`.
 
 ### System-include auto-detection (and what it does *not* fix)
 
@@ -173,7 +173,7 @@ ABI-sensitive types you want to guarantee are tracked.
 A bare `compare` never fails on
 `COMPATIBLE`/addition findings at all (legacy exit scheme: `0` compatible,
 `2` source break, `4` ABI break — additions don't raise either). To block
-on them, set any severity value — `--severity-preset`, or a per-category key
+on them, set any severity value — `severity.preset`, or a per-category key
 in `.abicheck.yml`'s `severity:` block (e.g. `addition: error`) — which
 switches `compare` to the severity-aware exit scheme and makes an
 error-level addition finding exit `1`. The switch is unconditional: there is

@@ -235,6 +235,9 @@ KEY_TABLE = KeyTable(
             "scope.collapse_versioned_symbols", Kind.BOOL, "collapse_versioned_symbols"
         ),
         KeySpec("scope.public_symbols", Kind.LIST, "public_symbols", []),
+        KeySpec("output.view", Kind.LIST, "output_view", []),
+        KeySpec("consumers.manifests", Kind.LIST, "used_by_manifests", []),
+        KeySpec("consumers.required_symbols", Kind.LIST, "required_symbols", []),
         KeySpec("scope.show_redundant", Kind.BOOL, "scope_show_redundant"),
         KeySpec("scope.public_header_dirs", Kind.LIST, "public_header_dirs", []),
         KeySpec("scope.exclude_headers", Kind.LIST, "exclude_headers", []),
@@ -443,6 +446,14 @@ class BuildConfig:
     scope_public: bool | None = None
     collapse_versioned_symbols: bool | None = None
     public_symbols: list[str] = field(default_factory=list)
+    #: ``output.view``: the ``compare`` rendering selector tokens (the same
+    #: grammar as the removed ``--view``), applied when the run has one.
+    output_view: list[str] = field(default_factory=list)
+    #: ``consumers.manifests``/``consumers.required_symbols``: the ADR-043
+    #: scoped-gate inputs that ``--used-by-manifest``/``--required-symbol``
+    #: used to carry on the command line. Paths resolve against the config.
+    used_by_manifests: list[str] = field(default_factory=list)
+    required_symbols: list[str] = field(default_factory=list)
     #: ``scope.public_header_dirs`` (ADR-068 plan §5 P4): directories
     #: (project-root-relative or absolute) whose headers are this project's
     #: public/internal boundary for the boundary-dependent cross-source checks

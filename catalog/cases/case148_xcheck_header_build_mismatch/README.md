@@ -12,12 +12,12 @@ against, so it never emits `2`/`4`, the compatibility family's
 own break codes. Gating on a hygiene finding like this one is opt-in via the
 orthogonal audit-gate axis
 :
-adding `--severity-preset default` (or `strict`) reproduces legacy `scan`'s
+adding `--set severity.preset=default` (or `strict`) reproduces legacy `scan`'s
 gating decision on this exact finding, but through its own exit code `3`,
 never `2`, so a hygiene gate can't be mistaken for a real compatibility
 break — measured live: `abicheck compare --no-baseline snapshot.abi.json`
 exits `0`, `abicheck compare --no-baseline snapshot.abi.json
---severity-preset default` exits `3`. The finding: the public headers
+--set severity.preset=default` exits `3`. The finding: the public headers
 were parsed **without** the build's actual ABI-relevant flags
 (`glibcxx_use_cxx11_abi`, `-DBIG_BUFFERS`), so the layout a context-free
 header parse reports is not the layout the shipped binary actually has. A

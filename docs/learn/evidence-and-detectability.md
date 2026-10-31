@@ -86,7 +86,7 @@ of five of these — runtime evidence is structurally out of reach for any
 | Build evidence | `L3` |
 | Source evidence | `L4` |
 | *(derived from L3/L4, not itself provided)* | `L5` |
-| Consumer evidence | *(named contract only — see [`--used-by`/`--required-symbol`](../use/appcompat.md))* |
+| Consumer evidence | *(named contract only — see [`--used-by`/`consumers.required_symbols`](../use/appcompat.md))* |
 | Runtime evidence | *(not modeled — see [Assurance Beyond Static Checking](assurance-methods.md))* |
 
 The rest of this page, and every other page that cites "`L0`–`L5`," is

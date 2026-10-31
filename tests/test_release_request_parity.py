@@ -133,8 +133,8 @@ class TestTheApiAndTheCliResolveTheSameRequest:
             str(new_dir),
             "-o",
             "json=-",
-            "--severity-preset",
-            "default",
+            "--set",
+            'severity.preset=default',
         )
         api_plan = service.resolve_release_compare(
             service.ReleaseCompareRequest(

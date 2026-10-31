@@ -14,12 +14,12 @@ doesn't fully capture on its own:
 
 | Concern | Tool |
 |---------|------|
-| Does plugin **v2** still satisfy the host's required entrypoints? | `abicheck compare --required-symbol` |
+| Does plugin **v2** still satisfy the host's required entrypoints? | `consumers.required_symbols` in `.abicheck.yml` (or `--set 'consumers.required_symbols=[...]'`) |
 | Downgrade in-process-only ABI noise to the right severity | `--policy plugin_abi` |
 
 > **History note:** this used to be a standalone `abicheck plugin-check`
 > command. The pre-1.0 CLI reset folded it into
-> `compare --required-symbol` — the full
+> `compare` with `consumers.required_symbols` — the full
 > library comparison runs once, and its own result is always the primary
 > verdict/exit code (workstream D-S1); the entrypoint contract's own
 > confirmed/potential/unresolved impact is reported alongside it,
@@ -28,20 +28,26 @@ doesn't fully capture on its own:
 
 ---
 
-## `compare --required-symbol` — the host's load contract
+## `consumers.required_symbols` — the host's load contract
 
 Give the old and new plugin (binary **or** JSON snapshot) plus the host's
-required entrypoints, and `--required-symbol` reports
+required entrypoints, and the `consumers.required_symbols` key reports
 whether the new plugin still satisfies the host — the plugin-load mirror of
-`--used-by`.
+`--used-by`. The key lives in `.abicheck.yml` (or is set per run with
+`--set`); the command line takes no entrypoint flag.
 
 ```bash
-# Entrypoints listed inline (repeatable flag):
+# Entrypoints listed inline:
 abicheck compare plugin.v1.so plugin.v2.so \
-  --required-symbol plugin_init --required-symbol plugin_run
+  --set 'consumers.required_symbols=[plugin_init, plugin_run]'
 
 # …or from a file (one symbol per line, '#' comments allowed):
-abicheck compare plugin.v1.so plugin.v2.so --required-symbol @host.syms
+abicheck compare plugin.v1.so plugin.v2.so \
+  --set 'consumers.required_symbols=["@host.syms"]'
+
+# The same contract, reviewed in .abicheck.yml:
+#   consumers:
+#     required_symbols: ["@host.syms"]
 ```
 
 A `host.syms` file is just the symbols the host resolves:
@@ -52,8 +58,8 @@ plugin_run     # core entrypoint
 plugin_shutdown
 ```
 
-`--required-symbol` values combine: a plain symbol name and an `@FILE`
-value merge into one required-entrypoint set.
+`consumers.required_symbols` entries combine: a plain symbol name and an
+`@FILE` entry merge into one required-entrypoint set.
 
 ### What it reports
 
@@ -72,7 +78,7 @@ whole point.
 
 ### Exit codes
 
-`compare --required-symbol` uses the same exit codes as
+A run with `consumers.required_symbols` set uses the same exit codes as
 plain `compare` (see [Exit Codes](../reference/exit-codes.md)), computed from
 the worst of the full-library verdict and the entrypoint-scoped verdict:
 
@@ -94,7 +100,7 @@ host/plugin pair are weighted appropriately:
 ```bash
 abicheck compare plugin.v1.so plugin.v2.so --policy plugin_abi
 abicheck compare plugin.v1.so plugin.v2.so \
-  --required-symbol plugin_init --policy plugin_abi
+  --set 'consumers.required_symbols=[plugin_init]' --policy plugin_abi
 ```
 
 See [Policy Profiles](policies.md) for the full policy model.

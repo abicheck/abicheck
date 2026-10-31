@@ -88,4 +88,21 @@ REMOVED_IN_0_7: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         ),
         frozenset({"start/upgrading-to-0.7.md"}),
     ),
+    (
+        "root Action inputs retired by ADR-091 D7 to set: replacements or removed"
+        " outright (dso-only, include-private-dso, fail-on-removed-library,"
+        " public-header-dirs, allow-build-query). Setting one fails the"
+        " run before analysis.",
+        (
+            "dso-only:",
+            "include-private-dso:",
+            "fail-on-removed-library:",
+            "public-header-dirs:",
+            "allow-build-query:",
+        ),
+        frozenset({
+            "start/upgrading-to-0.7.md",
+            "reference/github-action-inputs.md",
+        }),
+    ),
 )

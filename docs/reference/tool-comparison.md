@@ -590,6 +590,6 @@ python3 scripts/benchmark_comparison.py --tools abicheck abidiff
 | Scenario | Recommended |
 |----------|-------------|
 | New CI pipeline, full accuracy | `abicheck compare` |
-| Strict gate (any addition = fail) | `abicheck compare --severity-preset strict` |
+| Strict gate (any addition = fail) | `abicheck compare --set severity.preset=strict` |
 | Debug build available, DWARF check | `abicheck compare` (castxml already better) |
 | Quick ELF-only sanity check | `abidiff` (fast, 28% (21/74) but catches symbol removals) |

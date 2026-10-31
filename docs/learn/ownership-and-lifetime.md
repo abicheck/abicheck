@@ -67,11 +67,11 @@ its own recurring bug shapes, and its own design patterns.
   who owns the `void* user_data` (or equivalent) passed at registration
   time, and who is responsible for freeing it when the callback is
   unregistered or the host shuts down, is a contract that exists nowhere in
-  the function pointer's type. `compare --used-by`/`--required-symbol` (see
+  the function pointer's type. `compare --used-by`/`consumers.required_symbols` (see
   [plugin/callback contracts](../use/plugin-systems.md)) narrows an ABI/
   symbol-availability comparison to one specific plugin/host pair — two
   different ways: `--used-by` derives what's required from a supplied
-  consumer binary's *actual* imports, while `--required-symbol` checks an
+  consumer binary's *actual* imports, while `consumers.required_symbols` checks an
   explicit, hand-specified entrypoint list (the host's own `dlopen`/`dlsym`
   contract, which no import table records). Either is real and useful for
   that narrower question — but neither executes the registration/unregister/
@@ -147,9 +147,9 @@ enough to treat as proof:
   contract intact can go out as a patch or minor release.
 - **For plugin/callback boundaries**, document the ownership contract
   (who owns `user_data`, who frees it, and when) directly alongside the
-  entrypoint declarations `--required-symbol` checks
+  entrypoint declarations `consumers.required_symbols` checks
   — see [Plugin Systems](../use/plugin-systems.md). abicheck itself has no
-  ownership-aware check to run here (`--required-symbol` verifies only
+  ownership-aware check to run here (`consumers.required_symbols` verifies only
   entrypoint *availability*, not the contract around it, per "What abicheck
   can and cannot see" above) — the point is to put the contract somewhere a
   reviewer changing that boundary will actually see it, not to have it

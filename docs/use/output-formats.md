@@ -211,19 +211,25 @@ active):
 per-finding fields, camelCased; `reason` included when known), present only
 when scoping is active.
 
-## `--view show=...` filter
+## `output.view` display filter (`show=...`)
 
 Limit displayed changes by severity, element, or action (AND across dimensions,
-OR within each). Does not affect the verdict or exit codes. Repeat `--view
-show=...` to OR further groups of tokens together.
+OR within each). Does not affect the verdict or exit codes. Set it with the
+config key `output: {view: [...]}` in `.abicheck.yml`, or per run with
+`--set 'output.view=[...]'`. Repeat the `show=` token to OR further groups of
+tokens together.
 
 ```bash
-abicheck compare old.json new.json --view show=breaking,functions,removed
+abicheck compare old.json new.json --set 'output.view=["show=breaking,functions,removed"]'
+
+# or in .abicheck.yml
+# output:
+#   view: ["show=breaking,functions,removed"]
 ```
 
 **Markdown / JSON / HTML**: Changes are filtered before rendering. A note shows
 how many changes matched: `> Filtered by: --view show=... (5 of 42 changes
-shown)` (each OR'd `--view show=...` group renders as its own token).
+shown)` (each OR'd `show=` group renders as its own token).
 
 **SARIF**: The `show_only` parameter filters which results appear in the SARIF
 output.
@@ -297,7 +303,7 @@ total is `total_changes`, and the standing inventory is its own
 NO_CHANGE: no compatibility changes, 32 header/binary consistency (32 total); hygiene: 32 persistent
 ```
 
-## `--view root-cause`
+## `output.view: [root-cause]`
 
 Groups findings that share a root cause under one entry, instead of listing
 every change individually — e.g. an internal helper's `func_removed` finding
@@ -312,7 +318,7 @@ a future slice (G29 Phase 6) will additionally correlate consumer-overlay
 findings that don't share a `caused_by_type` today.
 
 ```bash
-abicheck compare old.json new.json --view root-cause -o json=-
+abicheck compare old.json new.json --set 'output.view=[root-cause]' -o json=-
 ```
 
 ```json
@@ -334,7 +340,7 @@ The Markdown/text rendering groups the same way, one `### root` heading per
 group instead of the default full mode's severity-bucketed sections:
 
 ```bash
-abicheck compare old.json new.json --view root-cause
+abicheck compare old.json new.json --set 'output.view=[root-cause]'
 ```
 
 ```markdown
@@ -352,7 +358,7 @@ SARIF/code-scanning consumer keeps working unchanged) but adds
 yourself by `rootCauseId` if you want the same buckets JSON/markdown show:
 
 ```bash
-abicheck compare old.so new.so --view root-cause -o sarif=-
+abicheck compare old.so new.so --set 'output.view=[root-cause]' -o sarif=-
 ```
 
 ```json
@@ -365,16 +371,16 @@ abicheck compare old.so new.so --view root-cause -o sarif=-
 }
 ```
 
-## `--view impact`
+## `output.view: [impact]`
 
 Renders the `full` report plus an impact summary table showing root changes and
 how many interfaces each affects. Available in Markdown and HTML formats.
 
 ```bash
-abicheck compare old.json new.json --view impact
+abicheck compare old.json new.json --set 'output.view=[impact]'
 ```
 
-On a directory/package comparison, `--view impact` computes one impact
+On a directory/package comparison, `output.view: [impact]` computes one impact
 table per library (JSON's per-library `impact_table` field; a Markdown
 "Impact" section under each library's own findings) instead of the
 single-comparison table above — there is no one aggregate table across
@@ -403,7 +409,7 @@ abicheck compare old.json new.json \
   silently overwrite the first, so it is a usage error, caught before the
   comparison runs.
 - Every export renders the same document under the same display options.
-  A `--view show=...` filter applies to all of them; the complete
+  A `show=` token in `output.view` applies to all of them; the complete
   disposition, suppression and `filtered_summary` accounting stays in every
   machine projection regardless, so nothing is hidden by narrowing what is
   displayed.
@@ -533,7 +539,7 @@ by design.
 Each finding in `changes[]` also carries:
 
 - **`operation`** — a structured `"added"` / `"removed"` / `"modified"`
-  classification, derived from the same kind-suffix rule `--view show=...`'s
+  classification, derived from the same kind-suffix rule the `show=`
   `added`/`removed`/`changed` tokens already use. Lets a consumer group or
   filter findings by operation without hand-maintaining its own list of
   `_added`/`_removed` kind-name suffixes.
@@ -990,7 +996,7 @@ lists both and is still one finding in every count.
   reach the finding -- absence of proof, not proof the finding is harmless.
 - The key is absent entirely without `--use-cases`, so other reports are
   unchanged.
-- Under `--view show=...` both the block and the per-finding lists describe
+- Under an `output.view` `show=` filter both the block and the per-finding lists describe
   only the displayed findings.
 
 The Markdown report adds an `Affects use cases: ...` note under each
@@ -1000,7 +1006,7 @@ whose findings a use case reaches, and its fallback impacted-symbol list appends
 
 ### Consumer scope (`used_by`/`required_symbol_contract`/`consumer_scope`)
 
-A `--used-by`/`--required-symbol(s)` compare gates its exit code and
+A `--used-by` or `consumers.required_symbols` compare gates its exit code and
 `verdict`/`severity`/`run_outcome`/`summary` on the full library, exactly as
 an unscoped compare would (workstream D-S1, since schema 3.0) — a supplied
 consumer's own confirmed/potential/unresolved impact is reported *beside*
@@ -1008,8 +1014,8 @@ that result, never in place of it:
 
 - `used_by` — a list of per-app summaries (`app`, `verdict`, `missing_symbols`,
   `missing_versions`, `relevant_change_count`, `symbol_coverage`), one per
-  `--used-by`/`--used-by-manifest` consumer. A consumer named through
-  `--used-by-manifest` (Workstream D-S1) additionally carries whichever of
+  `--used-by` or `consumers.manifests` consumer. A consumer named through
+  `consumers.manifests` (Workstream D-S1) additionally carries whichever of
   `platform`/`profile`/`provider_baseline`/`digest` its manifest entry
   supplied, `requirement` (`"required"`/`"advisory"`, omitted when
   `"required"` — the default, matching a bare `--used-by` consumer), and,
@@ -1024,7 +1030,7 @@ that result, never in place of it:
   is no verdict to call affected or not); `affected` counts an evaluated
   consumer whose own verdict is neither `NO_CHANGE` nor `COMPATIBLE`.
 - `required_symbol_contract` — the equivalent single object for
-  `--required-symbol(s)`.
+  `consumers.required_symbols`.
 - `consumer_scope` — one object stating what a consumer-only assessment would
   have concluded on its own: `verdict`, `scope` (`"used_by"` or
   `"required_symbol"`), and, when the run resolved to the severity exit-code

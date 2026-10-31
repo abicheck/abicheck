@@ -136,6 +136,21 @@ _TOMBSTONES_THAT_MUST_STAY_DECLARED = frozenset(
         "old-version",
         "policy-file",
         "public-header-dir",
+        # ADR-091 D7 retirements (2026-10-30): inputs retired to set: replacements,
+        # and the two previously-ignored inputs that now fail the run.
+        "jobs",
+        "dso-only",
+        "include-private-dso",
+        "fail-on-removed-library",
+        "public-header-dirs",
+        "lang",
+        "frontend",
+        "compiler",
+        "compile-options",
+        "sysroot",
+        "nostdinc",
+        "severity-preset",
+        "allow-build-query",
     }
 )
 

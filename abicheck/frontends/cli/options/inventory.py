@@ -58,9 +58,9 @@ FAMILY_FLAGS: dict[str, frozenset[str]] = {
         }
     ),
     "policy": frozenset({"--policy", "--suppress"}),
-    # Only ``--severity-preset``: the four per-category overrides were hidden
-    # duplicates of ``.abicheck.yml``'s ``severity:`` block and have been
-    # removed from the CLI (see ``cli_options.severity_options``).
+    # ADR-091 Phase 5: the severity preset moved to `severity.preset` in
+    # .abicheck.yml. The family's flag is kept here so INTENTIONAL_SUBSET can
+    # name the omission as a real gap.
     "severity": frozenset({"--severity-preset"}),
     # The "scope" family (--scope-public-headers/--no-) was deleted in
     # one-comparison-product Phase 9b; --contract is the one contract
@@ -128,7 +128,11 @@ VERDICT_EMITTING_COMMANDS: dict[str, str] = {
 #: (command, family) → reason. A deliberate, reviewed omission of a shared
 #: family from a verdict-emitting command (ADR-037 D3: opt out *explicitly*).
 #: Empty today — every verdict-emitting command carries the full required set.
-INTENTIONAL_SUBSET: dict[tuple[str, str], str] = {}
+INTENTIONAL_SUBSET: dict[tuple[str, str], str] = {
+    # ADR-091 Phase 5: the severity preset is the `severity.preset` config key,
+    # not a CLI option family. No `compare` command carries the decorator now.
+    ("compare", "severity"): "the severity preset is config-only (severity.preset, ADR-091 D4)",
+}
 
 #: ADR-037 D10.5's per-command visible-option ceiling. **Superseded shape**
 #: (plan Phase 7k): this was ``COMPARE_FLAG_BUDGET_BASE + len(

@@ -140,6 +140,7 @@ schema. Each command applies only the keys it reads and refuses the others; see
 `build:`, `sources:`, `severity:`, `scope:`, `suppression:`, `source:`,
 `compile:`, `debug:`, `bundle:`, `python:`, `gate:`, `release:`,
 `assurance:`, `deployment:`, `resource_limits:`, `performance:`, `policy:`, `version:`,
+`output:`, `consumers:`,
 `risk_rules:`, `crosschecks:`, `targets:`, `bundles:`, `profiles:`,
 `baseline:`, `bundle_variants:`, and `contract:` are the recognized top-level keys.
 See the
@@ -179,6 +180,44 @@ Per-category severity map consumed by `compare`: a baseline `preset`
 `error`/`warning`/`info`) — per-category levels override the preset. When any
 severity value is in effect, `compare` uses the severity-aware exit-code path.
 See [Severity](../use/severity.md) and [Exit codes](exit-codes.md).
+The preset is also settable for one run as `--set severity.preset=strict`.
+
+---
+
+### `output:`
+
+Rendering selectors for `compare`. `view:` is a list of tokens: one report mode
+(`full`, `impact` or `root-cause`; the last one given wins) and any number of
+`show=<tokens>` display filters (AND across dimensions, OR within one; a token
+holding a comma must be quoted). These are display-only: they never change the
+verdict, the findings or the exit code. The per-run form is
+`--set 'output.view=[root-cause]'`.
+
+```yaml
+output:
+  view: [root-cause, "show=breaking,functions,removed"]
+```
+
+---
+
+### `consumers:`
+
+Consumer scoping for `compare`, the config spelling of the application and
+plugin scope that `--used-by` carries on the command line (`--used-by` itself
+stays a flag).
+
+- `manifests:` — paths to consumer-manifest JSON documents (relative to the
+  config file). Each manifest names one or more consumer binaries and merges into
+  the same scoping pipeline as `--used-by`.
+- `required_symbols:` — exported symbols a plugin host resolves with
+  dlopen/dlsym. An entry `@FILE` reads one symbol per line from that file (`#`
+  comments allowed). Mutually exclusive with `--used-by` and with
+  `consumers.manifests` — see [Application Compatibility](../use/appcompat.md)
+  and [Plugin & Host Systems](../use/plugin-systems.md).
+
+`--no-baseline` and the stored-BundleFacts route reject both `consumers.*` and
+`output.view` with a usage error: an audit cannot honour them, and a silent
+drop would read as taken.
 
 ---
 
@@ -411,8 +450,8 @@ for the flag→key mapping.
   them). Was `--ast-frontend` on compare/dump.
 - `std:` — C/C++ standard, e.g. `c++17`.
 - `include_dirs:`/`defines:` — lists. `defines:` is the **stable** half of a
-  pair: `dump`/`compare` also accept a per-invocation `-D/--define NAME[=VALUE]`
- , which merges with this list **by macro name** — the CLI value wins
+  pair: `dump`/`compare` also accept a per-invocation `-D NAME[=VALUE]`,
+  which merges with this list **by macro name** — the CLI value wins
   for the macro it names and every other entry here stays in force. Prefer this
   key for CI and baseline generation; use `-D` for one-off runs and
   experiments. It is one of two `compile:` fields with a per-run CLI
@@ -794,7 +833,7 @@ it rather than reading as an unfixable refusal.
 There is no `exit_code_scheme:` key (CLI cleanup phase two PR G2 removed
 it, along with the `--exit-code-scheme` CLI flag): the exit-code scheme is
 `severity` when a severity map is in effect (this file's `severity:` block,
-a `--severity-preset`, or a `kind: gate` pack's `gate.severity.<category>`),
+a `severity.preset`, or a `kind: gate` pack's `gate.severity.<category>`),
 otherwise `legacy`. There is no way to force one scheme regardless of
 whether a severity setting is present.
 
@@ -905,6 +944,13 @@ severity:
   abi_breaking: error
   potential_breaking: warning
   addition: info
+
+# Rendering selectors and consumer scoping (compare)
+output:
+  view: [root-cause]
+consumers:
+  manifests: [consumers/myapp.json]
+  required_symbols: [plugin_init, "@host.syms"]
 
 # Public-surface scoping (false-positive control)
 scope:

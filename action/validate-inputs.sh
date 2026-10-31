@@ -642,10 +642,39 @@ fi
 # no per-mode "inert" state left to warn about (build-config is
 # unconditionally forwarded for every mode that can reach it).
 if [[ -n "${INPUT_JOBS:-}" ]]; then
-  _warn "jobs ('${INPUT_JOBS}') was removed and has no effect: abicheck's release fan-out auto-detects its worker count and clamps it to available memory, and the -j/--jobs flag it forwarded no longer exists. Remove jobs from your workflow. Expect higher wall time and peak RSS than a manually capped run."
+  _fail "jobs is RETIRED and no longer accepted: abicheck no longer takes a worker count from the workflow. Its release fan-out auto-detects the CPU count and clamps it to available memory, so concurrency is controlled by the runner or workflow itself. Remove jobs from your workflow."
 fi
 if [[ -n "${INPUT_BUNDLE_SYSTEM_PROVIDERS:-}" ]]; then
   _fail "bundle-system-providers ('${INPUT_BUNDLE_SYSTEM_PROVIDERS}') was removed and is no longer forwarded — leaving it set would silently analyse with a different system-provider allow-list than you asked for. Move the list to your .abicheck.yml's \`bundle.system_providers:\` block and pass that file as build-config, then remove this input."
+fi
+# ADR-091 D7 retirements that name a set: replacement (2026-10-30 no-transition
+# decision, tests/test_action_retired_inputs_contract.py). Setting any of these
+# fails the run before analysis. The rejection names the replacement line.
+_retired_to_set=(
+  "dso-only|INPUT_DSO_ONLY|any|set: release.dso_only=true"
+  "include-private-dso|INPUT_INCLUDE_PRIVATE_DSO|any|set: release.include_private_dso=true"
+  "fail-on-removed-library|INPUT_FAIL_ON_REMOVED_LIBRARY|any|set: gate.fail_on_removed_library=true"
+  "public-header-dirs|INPUT_PUBLIC_HEADER_DIRS|any|set: scope.public_header_dirs=[<dir>, ...]"
+  "lang|INPUT_LANG|any|set: compile.lang=<value>"
+  "frontend|INPUT_FRONTEND|any|set: compile.frontend=<value>"
+  "compiler|INPUT_COMPILER|any|set: compile.compiler=<value>"
+  "compile-options|INPUT_COMPILE_OPTIONS|any|set: compile.options=[<flag>, ...]"
+  "sysroot|INPUT_SYSROOT|any|set: compile.sysroot=<dir> (for mode: deps-tree use extra-args: --root <dir>)"
+  "nostdinc|INPUT_NOSTDINC|bool|set: compile.nostdinc=true"
+  "severity-preset|INPUT_SEVERITY_PRESET|any|set: severity.preset=<value>"
+)
+for _entry in "${_retired_to_set[@]}"; do
+  IFS='|' read -r _old_name _old_var _kind _repl <<<"$_entry"
+  _value="${!_old_var:-}"
+  if [[ "$_kind" == "bool" && "$_value" == "false" ]]; then
+    continue
+  fi
+  if [[ -n "$_value" ]]; then
+    _fail "${_old_name} is RETIRED and no longer accepted. Replace it in your workflow with \`${_repl}\` (the set: input takes one PATH=VALUE per line), then remove ${_old_name}."
+  fi
+done
+if [[ -n "${INPUT_ALLOW_BUILD_QUERY:-}" && "${INPUT_ALLOW_BUILD_QUERY}" != "false" ]]; then
+  _fail "allow-build-query is RETIRED and no longer accepted. There is no replacement: abicheck always runs its own inferred compile-database query when a sources input needs build context, and a trusted build query is set through build-config (build.query). Remove allow-build-query from your workflow."
 fi
 # ADR-091 renames (2026-10-30, no transition period): each old Action input
 # is a RETIRED tombstone that fails the run before any analysis and names its

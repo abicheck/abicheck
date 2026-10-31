@@ -395,8 +395,8 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--severity-preset",
-            "strict",
+            "--set",
+            'severity.preset=strict',
             "-o",
             "json=-",
         )
@@ -1150,8 +1150,8 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--view",
-            "show=breaking",
+            "--set",
+            'output.view=["show=breaking"]',
             "-o",
             "json=-",
         )

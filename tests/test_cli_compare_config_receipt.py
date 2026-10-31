@@ -224,7 +224,7 @@ class TestCanonicalResolverIsWhatRuns:
         (Codex review, fresh evidence). The receipt names the flag that really
         selected it.
         """
-        ctx = _context(tmp_path, "--required-symbol", "api_b")
+        ctx = _context(tmp_path, "--set", 'consumers.required_symbols=["api_b"]')
         assert ctx["resolved_config"]["policy"]["base"]["id"] == "plugin_abi"
         prov = ctx["field_provenance"]["policy.base"]
         assert prov["selected_by"][0]["option"] == "--required-symbol"
@@ -286,7 +286,7 @@ class TestCanonicalResolverIsWhatRuns:
     def test_typed_policy_still_wins_over_the_required_symbol_default(self, tmp_path):
         """The derivation is gated on the flag being untouched, so a typed
         ``--policy`` must be reported as the selector, not overwritten."""
-        ctx = _context(tmp_path, "--required-symbol", "api_b", "--policy", "sdk_vendor")
+        ctx = _context(tmp_path, "--set", 'consumers.required_symbols=["api_b"]', "--policy", "sdk_vendor")
         assert ctx["resolved_config"]["policy"]["base"]["id"] == "sdk_vendor"
         assert (
             ctx["field_provenance"]["policy.base"]["selected_by"][0]["option"]

@@ -37,7 +37,6 @@ from ....cli_dump_helpers import (
 from ....cli_options import (
     LANG_DEFAULT,
     build_source_dump_options,
-    define_option,
     dump_header_input_options,
     exclude_header_option,
     include_dependencies_option,
@@ -113,7 +112,6 @@ def _load_dump_manifest_or_reject(
 # to its own -H list). The --public-header/--public-header-dir pair said the
 # same thing a second way.
 @include_dependencies_option
-@define_option
 @config_set_option_for(DUMP_APPLIED_PATHS, "dump")
 @dump_label_option
 @click.option(
@@ -201,7 +199,6 @@ def dump_cmd(
     exclude_headers: tuple[str, ...],
     includes: tuple[Path, ...],
     include_dependencies: bool,
-    defines: tuple[str, ...],
     version: str,
     output: Path | None,
     snapshot_compression: str,
@@ -419,7 +416,7 @@ def dump_cmd(
         compiler_path=None,
         compiler_prefix=None,
         compiler_option_tokens=(),
-        defines=defines,
+        defines=(),
         config_overrides=config_overrides,
     )
     gcc_path, gcc_prefix, gcc_options = _cc.gcc_path, _cc.gcc_prefix, _cc.gcc_options
