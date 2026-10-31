@@ -16,6 +16,14 @@ re-verification status line (2026-10-09, `456989f`). Do not re-open an
 entry from here without reproducing it on current `main`; record a new
 gap on the main page instead.
 
+### Per-side `--debug-info` transports had no config home (closed 2026-10-31)
+
+**Status (2026-10-31): CLOSED.** `debug.info` is the config home of `--debug-info`: a list of entries in the flag's own `[old=|new=|both=]PATH` grammar, relative paths resolved against the config file. The flag stays and replaces the list for a run; `--set debug.info=[...]` (and the Action's `set:`) overrides the file; the typed `config_overrides` fills each side's `InputSpec.debug_roots`. One resolver, `abicheck/workflows/config_run_inputs.py`, serves `compare`, `dump` and both typed requests. ADR-091 D4's 2026-10-31 amendment records the shape and the `set_paths` registry field. Tests: `tests/test_config_run_input_homes.py`. [Full write-up](../known-gaps/per-side-debug-info-not-in-config-tier.md)
+
+### Some `deps.*` keys had no config home (closed 2026-10-31)
+
+**Status (2026-10-31): CLOSED.** `deps.follow`, `deps.search_paths` and `deps.ld_library_path` are the config homes of `--follow-deps`, `--search-path` and `--ld-library-path` on `compare` and `dump`, with `--set` and typed `config_overrides` spellings. `deps.root` gets no key: it is the operand of the `deps` commands, which read no `.abicheck.yml`. Tests: `tests/test_config_run_input_homes.py`. [Full write-up](../known-gaps/deps-keys-without-config-home.md)
+
 ### A large export shrink with no declared surface emitted no finding in header mode (closed 2026-10-24)
 
 **Status (re-verified 2026-10-25): CLOSED (no longer reproduces; pinned).** The premise was wrong: header-aware dumps already report each lost undeclared export as `func_removed_elf_only`/`var_removed_elf_only` (`compare.undeclared_exports._export_only_removals`, #1308), BREAKING by default per ADR-063. Now pinned by `tests/test_undeclared_export_shrink.py` and its `_integration` sibling. [Full write-up](../known-gaps/a-large-export-shrink-with-no-declared-surface-emits-nothing.md)

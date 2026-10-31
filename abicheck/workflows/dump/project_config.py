@@ -45,6 +45,14 @@ from ..compile_config import (
     fold_typed_compile_overrides,
     scope_compile_config_env_toggles,
 )
+from ..config_run_inputs import (
+    CONFIG_RUN_INPUT_PATHS,
+    DepsSettings,
+    dump_debug_roots,
+    fold_dump_run_inputs,
+    resolve_debug_info,
+    resolve_deps_settings,
+)
 from ..evidence_transport import (
     unsided_debug_packages,
     unsupported_detached_debug_message,
@@ -56,6 +64,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "DUMP_APPLIED_PATHS",
+    "DepsSettings",
     "DUMP_TYPED_OVERRIDE_CHANNELS",
     "DebugOperandError",
     "DumpConfigError",
@@ -106,11 +115,13 @@ _DUMP_CLI_ONLY_PATHS: frozenset[str] = frozenset(
     {"compile.ast_frontend_fallback", "compile.allow_unsupported_castxml"}
 )
 
-#: Every key ``dump --set`` applies.
+#: Every key ``dump --set`` applies; ``debug.info``/``deps.*`` are resolved by
+#: :mod:`~abicheck.workflows.config_run_inputs`.
 DUMP_APPLIED_PATHS: frozenset[str] = (
     frozenset({path for path, _owner, _field, _attr in DUMP_TYPED_OVERRIDE_CHANNELS})
     | _DUMP_CLI_ONLY_PATHS
     | COMPILE_CONTEXT_OVERRIDE_PATHS
+    | CONFIG_RUN_INPUT_PATHS
 )
 
 
@@ -368,6 +379,40 @@ class DumpProjectConfig:
     compile_db_filter: Any
     exclude_headers: tuple[str, ...]
     debug: DumpDebugConfig
+    #: ``--debug-info``, else ``debug.info``; ``--follow-deps``/``--search-path``/
+    #: ``--ld-library-path``, else ``deps.*`` (``workflows/config_run_inputs.py``).
+    debug_roots: tuple[Path, ...] = ()
+    deps: DepsSettings = DepsSettings()
+
+
+def _dump_run_inputs(
+    ref_path: Path | None,
+    config_overrides: Mapping[str, object] | None,
+    debug_roots: tuple[Path, ...],
+    deps: DepsSettings,
+) -> tuple[tuple[Path, ...], DepsSettings]:
+    """``dump``'s debug roots and dependency-walk inputs after the config fold."""
+    bc = _dump_build_config(ref_path, config_overrides)
+    try:
+        roots = dump_debug_roots(
+            resolve_debug_info((("both", p) for p in debug_roots), bc, ref_path)
+        )
+    except ValueError as exc:
+        raise DumpConfigError(str(exc)) from exc
+    settings = resolve_deps_settings(
+        bc,
+        ref_path,
+        follow=deps.follow,
+        search_paths=deps.search_paths,
+        ld_library_path=deps.ld_library_path,
+    )
+    missing = [str(p) for p in settings.search_paths if not p.exists()]
+    if missing:
+        raise DumpConfigError(
+            f"deps.search_paths: {', '.join(missing)} does not exist "
+            "(the same check --search-path applies)"
+        )
+    return roots, settings
 
 
 def resolve_dump_project_config(
@@ -381,6 +426,7 @@ def resolve_dump_project_config(
     resolved_debug: DumpDebugConfig | None,
     debug_roots: tuple[Path, ...],
     config_overrides: Mapping[str, object] | None = None,
+    deps: DepsSettings | None = None,
 ) -> DumpProjectConfig:
     """Select ``dump``'s project config once and resolve every config-sourced
     field from it.
@@ -391,6 +437,10 @@ def resolve_dump_project_config(
     run from its checkout exactly as it does to ``compare``. Only an explicit
     ``--config`` is *trusted* (``explicit``): a discovered one contributes
     passive settings but never runs ``build.query``.
+
+    ``debug.info``/``deps.*`` fold in only for ``dump``'s own run
+    (*resolved_debug* ``None``); ``compare``'s inline embed has resolved its
+    per-side debug roots already.
     """
     from ...config_paths import resolve_project_config
     from ..extraction import validate_config_overrides
@@ -410,6 +460,11 @@ def resolve_dump_project_config(
         lang_default=lang_default,
         config_overrides=config_overrides,
     )
+    stated_deps = deps or DepsSettings()
+    if resolved_debug is None:
+        debug_roots, stated_deps = _dump_run_inputs(
+            ref.path, config_overrides, tuple(debug_roots), stated_deps
+        )
     return DumpProjectConfig(
         path=ref.path,
         explicit=ref.explicit,
@@ -432,6 +487,8 @@ def resolve_dump_project_config(
             debug_roots=debug_roots,
             config_overrides=config_overrides,
         ),
+        debug_roots=tuple(debug_roots),
+        deps=stated_deps,
     )
 
 
@@ -535,9 +592,11 @@ def with_dump_config_overrides(request: DumpRequest) -> DumpRequest:
     cfg = _dump_build_config(None, request.config_overrides)
     if cfg is None:  # pragma: no cover -- overrides are non-empty here
         return request
-    channel_paths = {
-        path for path, _owner, _field, _attr in DUMP_TYPED_OVERRIDE_CHANNELS
-    } | COMPILE_CONTEXT_OVERRIDE_PATHS
+    channel_paths = (
+        {path for path, _owner, _field, _attr in DUMP_TYPED_OVERRIDE_CHANNELS}
+        | COMPILE_CONTEXT_OVERRIDE_PATHS
+        | CONFIG_RUN_INPUT_PATHS
+    )
     unsupported = sorted(set(request.config_overrides) - channel_paths)
     if unsupported:
         raise ConfigOverrideError(
@@ -546,8 +605,7 @@ def with_dump_config_overrides(request: DumpRequest) -> DumpRequest:
         )
     request_defaults = {f.name: f.default for f in dataclasses.fields(request)}
     input_defaults = {f.name: f.default for f in dataclasses.fields(request.input)}
-    request_updates: dict[str, Any] = {}
-    input_updates: dict[str, Any] = {}
+    request_updates, input_updates = fold_dump_run_inputs(request, cfg)
     for path, owner, field_name, attr in DUMP_TYPED_OVERRIDE_CHANNELS:
         if path not in request.config_overrides:
             continue

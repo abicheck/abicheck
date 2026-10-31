@@ -406,6 +406,11 @@ concepts:
       - dump --debug-info
     config:
       - debug.pdb_path
+      - debug.info
+    # ADR-091 D4 (2026-10-31 amendment): the flag's config home, which --set
+    # accepts too; the flag still wins over both.
+    set_paths:
+      - debug.info
     action:
       - action:old-debug-info
       - action:new-debug-info
@@ -647,6 +652,10 @@ concepts:
     cli:
       - compare --follow-deps
       - dump --follow-deps
+    config:
+      - deps.follow
+    set_paths:
+      - deps.follow
     action:
       - action:follow-deps
     python:
@@ -666,6 +675,8 @@ concepts:
       - dump --search-path
       - deps compare --search-path
       - deps tree --search-path
+    config:
+      - deps.search_paths
     action:
       - action:search-path
     python:
@@ -685,6 +696,8 @@ concepts:
       - dump --ld-library-path
       - deps compare --ld-library-path
       - deps tree --ld-library-path
+    config:
+      - deps.ld_library_path
     action:
       - action:ld-library-path
     python:

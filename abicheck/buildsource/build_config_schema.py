@@ -336,3 +336,24 @@ class KeyTable:
                 else:
                     out[spec.path] = _plain(value)
         return out
+
+
+#: The side qualifiers of a ``debug.info`` entry: the ``--debug-info`` grammar
+#: (``SidedPathParam``); ``both=`` escapes a path that starts ``old=``/``new=``.
+DEBUG_INFO_SIDES: tuple[str, ...] = ("old", "new", "both")
+
+
+def parse_debug_info_entry(entry: str) -> tuple[str, str]:
+    """``(side, path)`` for one ``debug.info`` entry; a bare entry is both sides.
+
+    Raises :class:`ValueError` for an entry that names no path.
+    """
+    text = str(entry).strip()
+    side, raw = "both", text
+    for candidate in DEBUG_INFO_SIDES:
+        if text.startswith(f"{candidate}="):
+            side, raw = candidate, text[len(candidate) + 1 :]
+            break
+    if not raw.strip():
+        raise ValueError(f"debug.info: entry {entry!r} names no path")
+    return side, raw.strip()

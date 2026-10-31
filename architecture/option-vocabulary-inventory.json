@@ -1617,6 +1617,26 @@
    "default": "None"
   },
   {
+   "id": "debug.info",
+   "kind": "list",
+   "default": "[]"
+  },
+  {
+   "id": "deps.follow",
+   "kind": "bool",
+   "default": "None"
+  },
+  {
+   "id": "deps.search_paths",
+   "kind": "list",
+   "default": "[]"
+  },
+  {
+   "id": "deps.ld_library_path",
+   "kind": "str",
+   "default": "None"
+  },
+  {
    "id": "bundle.system_providers",
    "kind": "list",
    "default": "[]"

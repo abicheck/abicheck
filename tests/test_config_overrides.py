@@ -12,6 +12,7 @@ import hashlib
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import click
 import pytest
@@ -161,22 +162,52 @@ def test_core_refusal_also_applies_to_the_typed_api() -> None:
         _with_config_overrides(_request(config_overrides={"severity.preset": "strict"}))
 
 
-def test_core_set_keys_are_exactly_the_registry_core_config_members() -> None:
-    """The refusal list must match ADR-091 D4's core tier in the registry."""
-    registry = yaml.safe_load(
+def _registry() -> dict[str, Any]:
+    return yaml.safe_load(
         (
             Path(__file__).resolve().parents[1]
             / "architecture"
             / "option-vocabulary.yaml"
         ).read_text(encoding="utf-8")
     )
+
+
+def test_core_set_keys_are_exactly_the_registry_core_config_members() -> None:
+    """The refusal list must match ADR-091 D4's core tier in the registry.
+
+    A core concept's ``set_paths`` (D4's 2026-10-31 amendment: a flag's config
+    home that ``--set`` also reaches) are the only core config keys it accepts.
+    """
     core_config = {
         path
-        for concept in registry["concepts"]
+        for concept in _registry()["concepts"]
         if concept["tier"] == "core"
         for path in concept.get("config", [])
+        if path not in concept.get("set_paths", [])
     }
     assert set(CORE_CONFIG_FLAGS) == core_config
+
+
+def test_registry_set_paths_are_config_members_that_set_accepts() -> None:
+    """Each ``set_paths`` entry is one of its concept's config keys, and both
+    ``compare --set`` and ``dump --set`` accept it."""
+    from abicheck.workflows.dump.project_config import DUMP_APPLIED_PATHS
+
+    set_paths = [
+        (concept["concept"], path)
+        for concept in _registry()["concepts"]
+        for path in concept.get("set_paths", [])
+    ]
+    assert set_paths, "the registry records no set_paths"
+    for concept, path in set_paths:
+        members = next(
+            c.get("config", [])
+            for c in _registry()["concepts"]
+            if c["concept"] == concept
+        )
+        assert path in members, (concept, path)
+        assert path not in CORE_CONFIG_FLAGS
+        assert path in DUMP_APPLIED_PATHS
 
 
 # ── loader: the file, then the overrides, then the one schema ──────────────

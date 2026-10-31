@@ -4,7 +4,7 @@
 
 Every `.abicheck.yml` top-level key and block sub-key that `abicheck.buildsource.build_config.BuildConfig` itself validates, with its exact required YAML type — generated directly from `BuildConfig`'s strict-schema registries (an unknown key or a wrong-typed value is a hard error). "Other recognized top-level keys" below are also accepted but parsed by a sibling module instead, so no type is claimed for them here. See [Config File Reference](../reference/config-file.md) for effective defaults, CLI-override precedence, and a worked example; this page is the exhaustive key/type list for `BuildConfig`'s own schema only.
 
-The last column gives the same option on the other surfaces, read from `architecture/option-vocabulary.yaml`. `--set PATH=VALUE` is the escape hatch for a `.abicheck.yml` key, not the primary spelling; a core option has no `--set` form. A `RETIRED` input is a fail-closed tombstone: it fails the run and names its replacement, or the reason it has none.
+The last column gives the same option on the other surfaces, read from `architecture/option-vocabulary.yaml`. `--set PATH=VALUE` is the escape hatch for a `.abicheck.yml` key, not the primary spelling; a core option has no `--set` form unless its flag has a config home. A `RETIRED` input is a fail-closed tombstone: it fails the run and names its replacement, or the reason it has none.
 
 ## Blocks
 
@@ -63,7 +63,16 @@ The last column gives the same option on the other surfaces, read from `architec
 | `debuginfod_url` | str | --set: `--set debug.debuginfod_url=VALUE` |
 | `dwarf_only` | bool | --set: `--set debug.dwarf_only=VALUE` |
 | `format` | str | --set: `--set debug.format=VALUE` |
-| `pdb_path` | str | CLI: `compare --debug-info`, `dump --debug-info`; Action: `old-debug-info`, `new-debug-info` |
+| `info` | list[str] (or a single str) | CLI: `compare --debug-info`, `dump --debug-info`; Action: `old-debug-info`, `new-debug-info`; --set: `--set debug.info=VALUE` |
+| `pdb_path` | str | CLI: `compare --debug-info`, `dump --debug-info`; Action: `old-debug-info`, `new-debug-info`; --set: `--set debug.info=VALUE` |
+
+### `deps:`
+
+| Sub-key | Type | Same option on other surfaces |
+|---|---|---|
+| `follow` | bool | CLI: `compare --follow-deps`, `dump --follow-deps`; Action: `follow-deps`; --set: `--set deps.follow=VALUE` |
+| `ld_library_path` | str | CLI: `compare --ld-library-path`, `dump --ld-library-path`, `deps compare --ld-library-path`, `deps tree --ld-library-path`; Action: `ld-library-path`; --set: `--set deps.ld_library_path=VALUE` |
+| `search_paths` | list[str] (or a single str) | CLI: `compare --search-path`, `dump --search-path`, `deps compare --search-path`, `deps tree --search-path`; Action: `search-path`; --set: `--set deps.search_paths=VALUE` |
 
 ### `gate:`
 

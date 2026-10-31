@@ -58,12 +58,12 @@ Next, unranked (the `--no-baseline` one-sided-detector gap, the target-platform 
 ### Option vocabulary (ADR-091 follow-ups)
 
 The option-vocabulary migration is complete (ADR-091, Accepted and
-implemented). These three candidates were deliberately left out of the
-surface budget and are not ADR-091 rules; each needs its own decision.
+implemented). The per-side `--debug-info` and `deps.*` config homes were
+added on 2026-10-31 (closed, see the archive); `--sources` is the remaining
+candidate.
 
-- `hygiene` — **Status (2026-10-31): OPEN.** Per-side `--debug-info` transports stay CLI flags, because no per-side config home exists yet. [Full write-up](known-gaps/per-side-debug-info-not-in-config-tier.md)
-- `hygiene` — **Status (2026-10-31): OPEN.** Some `deps.*` keys (dependency settings reachable only from the CLI) have no `.abicheck.yml` spelling yet. [Full write-up](known-gaps/deps-keys-without-config-home.md)
-- `hygiene` — **Status (2026-10-31): OPEN.** `--sources` cannot move to `.abicheck.yml` until the config discovery rule for the sources tree is defined. [Full write-up](known-gaps/sources-needs-config-discovery-rule.md)
+- `hygiene` — **Status (2026-10-31): OPEN, decision pending.** `--sources` has no `.abicheck.yml` home: the config discovery rule for a config-named source tree is a product decision with materially different options (no chaining, chained discovery, explicit `--config` only, or by design). [Full write-up](known-gaps/sources-needs-config-discovery-rule.md)
+- `false-clean` — **Status (2026-10-31): OPEN.** A directory/package `compare` silently ignores `--follow-deps`, `--search-path`, `--ld-library-path` and a directory or detached-file `--debug-info`: the release fan-out takes none of them. `--set deps.*` is refused on that route. [Full write-up](known-gaps/release-compare-drops-dependency-walk-and-debug-roots.md)
 
 ### Report and detector coverage
 

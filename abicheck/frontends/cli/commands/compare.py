@@ -572,4 +572,8 @@ def _compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
         )
         if {old_kind, new_kind} & {"directory", "package"}:
             reject_unforwarded_release_overrides(kwargs["config_overrides"])
+    # ADR-091 D4 (2026-10-31): debug.info/deps.* back their flags; flag wins.
+    from ..compare_config_run_inputs import fold_config_run_inputs
+
+    fold_config_run_inputs(kwargs)
     run_compare(ctx, **kwargs)

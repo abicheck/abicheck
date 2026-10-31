@@ -441,8 +441,9 @@ def test_sub_action_plumbing_is_not_listed_as_a_public_surface() -> None:
 def test_the_core_config_keys_are_exactly_the_keys_set_refuses(
     registry: dict[str, Any],
 ) -> None:
-    """A core concept keeps one spelling: the keys ``--set`` refuses are exactly
-    the config keys of the core-tier concepts (ADR-091 D4/D6)."""
+    """The keys ``--set`` refuses are exactly the config keys of the core-tier
+    concepts (ADR-091 D4/D6), less each flag's config home a concept lists in
+    ``set_paths`` (D4's 2026-10-31 amendment)."""
     from abicheck.buildsource.build_config_overrides import CORE_CONFIG_FLAGS
 
     core_keys = {
@@ -450,19 +451,34 @@ def test_the_core_config_keys_are_exactly_the_keys_set_refuses(
         for concept in registry["concepts"]
         if concept["tier"] == "core"
         for key in concept.get("config", [])
+        if key not in concept.get("set_paths", [])
     }
     assert core_keys == set(CORE_CONFIG_FLAGS), core_keys ^ set(CORE_CONFIG_FLAGS)
 
 
 def test_no_generated_cell_offers_set_for_a_core_key(registry: dict[str, Any]) -> None:
-    """A row of a core concept never names ``--set``: the validator would refuse it."""
+    """A row of a core concept names ``--set`` only for a key in its ``set_paths``,
+    since the validator refuses every other core key; and it does name those."""
+    from abicheck.buildsource.build_config_overrides import CORE_CONFIG_FLAGS
+
+    offered_core: set[str] = set()
     for kind, rows in _rendered_docs().items():
         for member, cell in rows.items():
             found = _owner_surface(registry, member)
             if found is None:
                 continue
             _, concept = found
-            if concept["tier"] == "core":
-                assert "--set" not in cell and "set:" not in cell, (
-                    f"{kind} row {member} is core but its cell offers an override: {cell}"
-                )
+            if concept["tier"] != "core":
+                continue
+            for key in concept.get("config", []):
+                named = f"--set {key}=" in cell or f"`{key}=VALUE`" in cell
+                if key in CORE_CONFIG_FLAGS:
+                    assert not named, (
+                        f"{kind} row {member} offers --set for refused core key {key}: {cell}"
+                    )
+                elif named:
+                    offered_core.add(key)
+    set_paths = {
+        key for concept in registry["concepts"] for key in concept.get("set_paths", [])
+    }
+    assert offered_core == set_paths

@@ -412,6 +412,18 @@ def _reject_config_scoping_for_no_baseline(project_cfg: Any) -> None:
                 "rejected rather than silently ignored so a CI job never "
                 "believes it took effect."
             )
+    # The config homes of --debug-info/--follow-deps/--search-path/
+    # --ld-library-path, refused for the reasons _UNSUPPORTED_OPTIONS gives.
+    from ....workflows.config_run_inputs import configured_run_input_keys
+
+    keys = configured_run_input_keys(project_cfg)
+    if keys:
+        raise click.UsageError(
+            f"{', '.join(keys)} is not available with --no-baseline: separate "
+            "debug-info resolution and the dependency walk are not wired to "
+            "this path yet. It is rejected rather than silently ignored so a "
+            "CI job never believes it took effect."
+        )
 
 
 def _reject_unsupported_options(

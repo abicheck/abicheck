@@ -15,7 +15,9 @@ spelling of that key. A generator's own surface is not repeated in its own
 cell: a CLI row names the Action input, not the CLI flag again. ``--set`` is
 the escape hatch for a config key, not the primary spelling, and a core
 concept has no ``--set`` form: ``--set`` refuses every core key (ADR-091 D4/D6,
-``abicheck.buildsource.build_config_overrides.CORE_CONFIG_FLAGS``).
+``abicheck.buildsource.build_config_overrides.CORE_CONFIG_FLAGS``) except a
+flag's config home the concept lists under ``set_paths`` (D4's 2026-10-31
+amendment).
 
 ``actions/*`` sub-action inputs (the composite ``check-target`` plumbing the
 reusable workflows call) are not a public surface, so they are not listed.
@@ -55,7 +57,7 @@ LEGEND = (
     "The last column gives the same option on the other surfaces, read from "
     "`architecture/option-vocabulary.yaml`. `--set PATH=VALUE` is the escape "
     "hatch for a `.abicheck.yml` key, not the primary spelling; a core option "
-    "has no `--set` form. A `RETIRED` input is a fail-closed tombstone: it "
+    "has no `--set` form unless its flag has a config home. A `RETIRED` input is a fail-closed tombstone: it "
     "fails the run and names its replacement, or the reason it has none."
 )
 
@@ -127,8 +129,11 @@ class CrossRefs:
             if items:
                 parts.append(f"{label}: {', '.join(items)}")
         config = concept.get("config", [])
-        # --set refuses every core key: a core concept keeps its one flag.
-        if config and concept.get("tier") != "core":
+        # --set refuses a core key, except the flag's config home a core
+        # concept records in `set_paths` (ADR-091 D4, 2026-10-31 amendment).
+        if concept.get("tier") == "core":
+            config = [key for key in config if key in concept.get("set_paths", [])]
+        if config:
             # An Action row names the Action's own input (`set:`), never the CLI
             # flag; every other row names the flag.
             if own == "action":
