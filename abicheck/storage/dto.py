@@ -41,7 +41,7 @@ version this build cannot reach is refused rather than silently accepted.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Protocol, TypeVar
 
@@ -292,7 +292,7 @@ class SectionDTO:
     #: reader must understand before comparing this section, and a map of
     #: canonical JSON extension values (`storage/wire_extensions.py`).
     must_understand: tuple[str, ...] = ()
-    extensions: Mapping[str, Any] = MappingProxyType({})
+    extensions: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
 
     def __post_init__(self) -> None:
         names = tuple(self.must_understand)
