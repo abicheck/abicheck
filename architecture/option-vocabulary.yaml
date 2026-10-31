@@ -33,6 +33,18 @@
 #           "<function>(<param>)").
 schema_version: 1
 out_of_scope:
+  - pattern: workflow:*:*-artifact-name
+    reason: Reusable-workflow artifact staging names (run-plan, candidate, baseline, report), no analysis counterpart.
+    until: permanent
+  - pattern: workflow:*:*-artifact-prefix
+    reason: Reusable-workflow artifact staging prefixes, no analysis counterpart.
+    until: permanent
+  - pattern: workflow:check-project.yml:config-path
+    reason: check-project's own project-plan config location, not an analysis option (the project plan reads it before any check).
+    until: permanent
+  - pattern: workflow:check-project.yml:toolchain-bindings-path
+    reason: Toolchain bindings file location for the project plan step, not an analysis option.
+    until: permanent
   - pattern: actions/baseline:*
     reason: Baseline transport, no CLI counterpart.
     until: permanent
@@ -54,6 +66,8 @@ out_of_scope:
 concepts:
   - concept: operands
     tier: core
+    workflow:
+      - workflow:check-single.yml:new-library
     renames: []
     action:
       - action:old-library
@@ -69,18 +83,18 @@ concepts:
       - run_dump(path)
       - run_dump(binary_fmt)
     exceptions:
-      - {id: 'action:old-library', rule: name, rename: R20, note: action spelling breaks D1; the leaf is `operands`}
-      - {id: 'action:new-library', rule: name, rename: R20, note: action spelling breaks D1; the leaf is `operands`}
-      - {id: 'actions/check-target:new-library', rule: name, rename: R20, note: action spelling breaks D1; the leaf
+      - {id: 'action:old-library', rule: name, accepted: true, rename: R20, note: action spelling breaks D1; the leaf is `operands`}
+      - {id: 'action:new-library', rule: name, accepted: true, rename: R20, note: action spelling breaks D1; the leaf is `operands`}
+      - {id: 'actions/check-target:new-library', rule: name, accepted: true, rename: R20, note: action spelling breaks D1; the leaf
           is `operands`}
-      - {id: InputSpec.path, rule: name, rename: R19, note: python spelling breaks D1; the leaf is `operands`}
-      - {id: CompareRequest.old, rule: name, rename: R19, note: python spelling breaks D1; the leaf is `operands`}
-      - {id: CompareRequest.new, rule: name, rename: R19, note: python spelling breaks D1; the leaf is `operands`}
-      - {id: DumpRequest.input, rule: name, rename: R19, note: python spelling breaks D1; the leaf is `operands`}
-      - {id: run_compare(old_input), rule: name, rename: R19, note: python spelling breaks D1; the leaf is `operands`}
-      - {id: run_compare(new_input), rule: name, rename: R19, note: python spelling breaks D1; the leaf is `operands`}
-      - {id: run_dump(path), rule: name, rename: R19, note: python spelling breaks D1; the leaf is `operands`}
-      - {id: run_dump(binary_fmt), rule: name, rename: R19, note: python spelling breaks D1; the leaf is `operands`}
+      - {id: InputSpec.path, rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf is `operands`}
+      - {id: CompareRequest.old, rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf is `operands`}
+      - {id: CompareRequest.new, rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf is `operands`}
+      - {id: DumpRequest.input, rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf is `operands`}
+      - {id: run_compare(old_input), rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf is `operands`}
+      - {id: run_compare(new_input), rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf is `operands`}
+      - {id: run_dump(path), rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf is `operands`}
+      - {id: run_dump(binary_fmt), rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf is `operands`}
   - concept: no_baseline
     tier: core
     renames: []
@@ -133,17 +147,19 @@ concepts:
       - run_compare(pack_policy_overrides)
       - run_compare(pack_internal_namespaces)
     exceptions:
-      - {id: CompareRequest.pack_paths, rule: name, rename: R19, note: python spelling breaks D1; the leaf is `pack`}
-      - {id: CompareRequest.pack_policy_overrides, rule: name, rename: R19, note: python spelling breaks D1; the
+      - {id: CompareRequest.pack_paths, rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf is `pack`}
+      - {id: CompareRequest.pack_policy_overrides, rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the
           leaf is `pack`}
-      - {id: CompareRequest.pack_internal_namespaces, rule: name, rename: R19, note: python spelling breaks D1;
+      - {id: CompareRequest.pack_internal_namespaces, rule: name, accepted: true, rename: R19, note: python spelling breaks D1;
           the leaf is `pack`}
-      - {id: run_compare(pack_policy_overrides), rule: name, rename: R19, note: python spelling breaks D1; the leaf
+      - {id: run_compare(pack_policy_overrides), rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf
           is `pack`}
-      - {id: run_compare(pack_internal_namespaces), rule: name, rename: R19, note: python spelling breaks D1; the
+      - {id: run_compare(pack_internal_namespaces), rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the
           leaf is `pack`}
   - concept: depth
     tier: core
+    workflow:
+      - workflow:check-single.yml:depth
     renames: []
     cli:
       - compare --depth
@@ -157,6 +173,13 @@ concepts:
       - run_compare(depth)
   - concept: headers
     tier: core
+    workflow:
+      - workflow:check-single.yml:header
+      - workflow:check-single.yml:old-header
+      - workflow:check-single.yml:new-header
+      - workflow:check-project.yml:header
+      - workflow:check-project.yml:old-header
+      - workflow:check-project.yml:new-header
     renames:
       - R17
     cli:
@@ -188,6 +211,13 @@ concepts:
       - {id: run_dump(public_headers), rule: name, rename: R18, note: python spelling breaks D1; the leaf is `headers`}
   - concept: compile.include_dirs
     tier: core
+    workflow:
+      - workflow:check-single.yml:include
+      - workflow:check-single.yml:old-include
+      - workflow:check-single.yml:new-include
+      - workflow:check-project.yml:include
+      - workflow:check-project.yml:old-include
+      - workflow:check-project.yml:new-include
     renames: []
     cli:
       - compare --include
@@ -208,22 +238,22 @@ concepts:
       - run_dump(includes)
       - run_dump(public_include_search_dirs)
     exceptions:
-      - {id: compare --include, rule: name, rename: R21, note: cli spelling breaks D1; the leaf is `include_dirs`}
-      - {id: dump --include, rule: name, rename: R21, note: cli spelling breaks D1; the leaf is `include_dirs`}
-      - {id: 'action:include', rule: name, rename: R20, note: action spelling breaks D1; the leaf is `include_dirs`}
-      - {id: 'action:old-include', rule: name, rename: R20, note: action spelling breaks D1; the leaf is `include_dirs`}
-      - {id: 'action:new-include', rule: name, rename: R20, note: action spelling breaks D1; the leaf is `include_dirs`}
-      - {id: 'actions/check-target:include', rule: name, rename: R20, note: action spelling breaks D1; the leaf
+      - {id: compare --include, rule: name, accepted: true, rename: R21, note: cli spelling breaks D1; the leaf is `include_dirs`}
+      - {id: dump --include, rule: name, accepted: true, rename: R21, note: cli spelling breaks D1; the leaf is `include_dirs`}
+      - {id: 'action:include', rule: name, accepted: true, rename: R20, note: action spelling breaks D1; the leaf is `include_dirs`}
+      - {id: 'action:old-include', rule: name, accepted: true, rename: R20, note: action spelling breaks D1; the leaf is `include_dirs`}
+      - {id: 'action:new-include', rule: name, accepted: true, rename: R20, note: action spelling breaks D1; the leaf is `include_dirs`}
+      - {id: 'actions/check-target:include', rule: name, accepted: true, rename: R20, note: action spelling breaks D1; the leaf
           is `include_dirs`}
-      - {id: 'actions/check-target:old-include', rule: name, rename: R20, note: action spelling breaks D1; the leaf
+      - {id: 'actions/check-target:old-include', rule: name, accepted: true, rename: R20, note: action spelling breaks D1; the leaf
           is `include_dirs`}
-      - {id: 'actions/check-target:new-include', rule: name, rename: R20, note: action spelling breaks D1; the leaf
+      - {id: 'actions/check-target:new-include', rule: name, accepted: true, rename: R20, note: action spelling breaks D1; the leaf
           is `include_dirs`}
-      - {id: InputSpec.includes, rule: name, rename: R19, note: python spelling breaks D1; the leaf is `include_dirs`}
-      - {id: run_compare(old_includes), rule: name, rename: R19, note: python spelling breaks D1; the leaf is `include_dirs`}
-      - {id: run_compare(new_includes), rule: name, rename: R19, note: python spelling breaks D1; the leaf is `include_dirs`}
-      - {id: run_dump(includes), rule: name, rename: R19, note: python spelling breaks D1; the leaf is `include_dirs`}
-      - {id: run_dump(public_include_search_dirs), rule: name, rename: R19, note: python spelling breaks D1; the
+      - {id: InputSpec.includes, rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf is `include_dirs`}
+      - {id: run_compare(old_includes), rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf is `include_dirs`}
+      - {id: run_compare(new_includes), rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf is `include_dirs`}
+      - {id: run_dump(includes), rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf is `include_dirs`}
+      - {id: run_dump(public_include_search_dirs), rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the
           leaf is `include_dirs`}
   - concept: compile.defines
     tier: core
@@ -235,6 +265,9 @@ concepts:
       - compile.defines
   - concept: compile.lang
     tier: config
+    workflow:
+      - workflow:check-single.yml:lang
+      - workflow:check-project.yml:lang
     renames: []
     config:
       - compile.lang
@@ -251,13 +284,16 @@ concepts:
       - run_dump(lang)
       - run_dump(lang_explicit)
     exceptions:
-      - {id: CompareRequest.lang_explicit, rule: name, rename: R19, note: python spelling breaks D1; the leaf is
+      - {id: CompareRequest.lang_explicit, rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf is
           `lang`}
-      - {id: DumpRequest.lang_explicit, rule: name, rename: R19, note: python spelling breaks D1; the leaf is `lang`}
-      - {id: run_compare(lang_explicit), rule: name, rename: R19, note: python spelling breaks D1; the leaf is `lang`}
-      - {id: run_dump(lang_explicit), rule: name, rename: R19, note: python spelling breaks D1; the leaf is `lang`}
+      - {id: DumpRequest.lang_explicit, rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf is `lang`}
+      - {id: run_compare(lang_explicit), rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf is `lang`}
+      - {id: run_dump(lang_explicit), rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf is `lang`}
   - concept: compile.frontend
     tier: config
+    workflow:
+      - workflow:check-single.yml:frontend
+      - workflow:check-project.yml:frontend
     renames:
       - R4
     config:
@@ -281,6 +317,9 @@ concepts:
       - DumpRequest.frontend_context
   - concept: compile.compiler
     tier: config
+    workflow:
+      - workflow:check-single.yml:compiler
+      - workflow:check-project.yml:compiler
     renames:
       - R5
     config:
@@ -291,6 +330,9 @@ concepts:
       - actions/collect-facts:compiler
   - concept: compile.options
     tier: config
+    workflow:
+      - workflow:check-single.yml:compile-options
+      - workflow:check-project.yml:compile-options
     renames:
       - R5
     config:
@@ -303,6 +345,9 @@ concepts:
       - {id: 'actions/check-target:compile-options', rule: name, rename: R5, note: ADR-091 R5 names this spelling; the bare leaf `options` is not ambiguous, so the block prefix is a recorded deviation}
   - concept: compile.sysroot
     tier: config
+    workflow:
+      - workflow:check-single.yml:sysroot
+      - workflow:check-project.yml:sysroot
     renames: []
     config:
       - compile.sysroot
@@ -339,15 +384,17 @@ concepts:
       - run_compare(compile_context)
       - run_dump(compile)
     exceptions:
-      - {id: run_compare(compile_context), rule: name, rename: R19, note: python spelling breaks D1; the leaf is
+      - {id: run_compare(compile_context), rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf is
           `compile`}
   - concept: consumer
     tier: action
+    workflow:
+      - workflow:check-single.yml:consumer-binary
     renames: []
     action:
-      - actions/check-target:consumer-ast-frontend
-      - actions/check-target:consumer-gcc-path
-      - actions/check-target:consumer-gcc-options
+      - actions/check-target:consumer-frontend
+      - actions/check-target:consumer-compiler
+      - actions/check-target:consumer-compile-options
       - actions/check-target:consumer-compile-active
       - actions/check-target:consumer-binary
   - concept: debug_info
@@ -372,16 +419,16 @@ concepts:
       - run_dump(pdb_path)
       - run_dump(debug_roots)
     exceptions:
-      - {id: InputSpec.pdb, rule: name, rename: R19, note: python spelling breaks D1; the leaf is `debug_info`}
-      - {id: InputSpec.debug_roots, rule: name, rename: R19, note: python spelling breaks D1; the leaf is `debug_info`}
-      - {id: run_compare(old_pdb_path), rule: name, rename: R19, note: python spelling breaks D1; the leaf is `debug_info`}
-      - {id: run_compare(new_pdb_path), rule: name, rename: R19, note: python spelling breaks D1; the leaf is `debug_info`}
-      - {id: run_compare(old_debug_roots), rule: name, rename: R19, note: python spelling breaks D1; the leaf is
+      - {id: InputSpec.pdb, rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf is `debug_info`}
+      - {id: InputSpec.debug_roots, rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf is `debug_info`}
+      - {id: run_compare(old_pdb_path), rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf is `debug_info`}
+      - {id: run_compare(new_pdb_path), rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf is `debug_info`}
+      - {id: run_compare(old_debug_roots), rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf is
           `debug_info`}
-      - {id: run_compare(new_debug_roots), rule: name, rename: R19, note: python spelling breaks D1; the leaf is
+      - {id: run_compare(new_debug_roots), rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf is
           `debug_info`}
-      - {id: run_dump(pdb_path), rule: name, rename: R19, note: python spelling breaks D1; the leaf is `debug_info`}
-      - {id: run_dump(debug_roots), rule: name, rename: R19, note: python spelling breaks D1; the leaf is `debug_info`}
+      - {id: run_dump(pdb_path), rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf is `debug_info`}
+      - {id: run_dump(debug_roots), rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf is `debug_info`}
   - concept: debug.format
     tier: config
     renames: []
@@ -392,10 +439,10 @@ concepts:
       - DumpRequest.debug_format
       - run_dump(debug_format)
     exceptions:
-      - {id: run_dump(debug_format), rule: name, rename: R19, note: python spelling breaks D1; the leaf is `format`}
-      - {id: CompareRequest.debug_format, rule: name, rename: R19, note: python spelling breaks D1; the leaf is
+      - {id: run_dump(debug_format), rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf is `format`}
+      - {id: CompareRequest.debug_format, rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf is
           `format`}
-      - {id: DumpRequest.debug_format, rule: name, rename: R19, note: python spelling breaks D1; the leaf is `format`}
+      - {id: DumpRequest.debug_format, rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf is `format`}
   - concept: debug.dwarf_only
     tier: config
     renames: []
@@ -429,6 +476,11 @@ concepts:
       - run_dump(debuginfod_url)
   - concept: build_info
     tier: core
+    workflow:
+      - workflow:check-single.yml:build-info
+      - workflow:check-single.yml:compile-db
+      - workflow:check-project.yml:build-info
+      - workflow:check-project.yml:compile-db
     renames: []
     cli:
       - compare --build-info
@@ -445,12 +497,12 @@ concepts:
       - CompareRequest.old_probe_matrix
       - CompareRequest.new_probe_matrix
     exceptions:
-      - {id: 'action:compile-db', rule: name, rename: R20, note: action spelling breaks D1; the leaf is `build_info`}
-      - {id: 'actions/check-target:compile-db', rule: name, rename: R20, note: action spelling breaks D1; the leaf
+      - {id: 'action:compile-db', rule: name, accepted: true, rename: R20, note: action spelling breaks D1; the leaf is `build_info`}
+      - {id: 'actions/check-target:compile-db', rule: name, accepted: true, rename: R20, note: action spelling breaks D1; the leaf
           is `build_info`}
-      - {id: CompareRequest.old_probe_matrix, rule: name, rename: R19, note: python spelling breaks D1; the leaf
+      - {id: CompareRequest.old_probe_matrix, rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf
           is `build_info`}
-      - {id: CompareRequest.new_probe_matrix, rule: name, rename: R19, note: python spelling breaks D1; the leaf
+      - {id: CompareRequest.new_probe_matrix, rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf
           is `build_info`}
   - concept: build.compile_db_filter
     tier: config
@@ -467,7 +519,7 @@ concepts:
     python:
       - CompareRequest.allow_build_query
     exceptions:
-      - {id: CompareRequest.allow_build_query, rule: name, rename: R19, note: python spelling breaks D1; the leaf
+      - {id: CompareRequest.allow_build_query, rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf
           is `query`}
   - concept: build.system
     tier: config
@@ -478,9 +530,9 @@ concepts:
       - actions/check-target:build-system
       - actions/check-target:build-generator
     exceptions:
-      - {id: 'actions/check-target:build-generator', rule: name, rename: R20, note: action spelling breaks D1; the
+      - {id: 'actions/check-target:build-generator', rule: name, accepted: true, rename: R20, note: action spelling breaks D1; the
           leaf is `system`}
-      - {id: 'actions/check-target:build-system', rule: name, rename: R20, note: action spelling breaks D1; the
+      - {id: 'actions/check-target:build-system', rule: name, accepted: true, rename: R20, note: action spelling breaks D1; the
           leaf is `system`}
   - concept: build.targets
     tier: config
@@ -490,9 +542,12 @@ concepts:
     python:
       - InputSpec.build_targets
     exceptions:
-      - {id: InputSpec.build_targets, rule: name, rename: R19, note: python spelling breaks D1; the leaf is `targets`}
+      - {id: InputSpec.build_targets, rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf is `targets`}
   - concept: sources
     tier: core
+    workflow:
+      - workflow:check-single.yml:sources
+      - workflow:check-project.yml:sources
     renames: []
     cli:
       - compare --sources
@@ -506,8 +561,8 @@ concepts:
       - CompareRequest.has_sources
       - DumpRequest.has_sources
     exceptions:
-      - {id: CompareRequest.has_sources, rule: name, rename: R19, note: python spelling breaks D1; the leaf is `sources`}
-      - {id: DumpRequest.has_sources, rule: name, rename: R19, note: python spelling breaks D1; the leaf is `sources`}
+      - {id: CompareRequest.has_sources, rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf is `sources`}
+      - {id: DumpRequest.has_sources, rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf is `sources`}
   - concept: sources.method
     tier: config
     renames:
@@ -531,6 +586,9 @@ concepts:
       - sources.graph
   - concept: config
     tier: core
+    workflow:
+      - workflow:check-single.yml:build-config
+      - workflow:check-project.yml:build-config
     renames: []
     cli:
       - compare --config
@@ -542,10 +600,10 @@ concepts:
     python:
       - InputSpec.build_config
     exceptions:
-      - {id: 'action:build-config', rule: name, rename: R20, note: action spelling breaks D1; the leaf is `config`}
-      - {id: 'actions/check-target:build-config', rule: name, rename: R20, note: action spelling breaks D1; the
+      - {id: 'action:build-config', rule: name, accepted: true, rename: R20, note: action spelling breaks D1; the leaf is `config`}
+      - {id: 'actions/check-target:build-config', rule: name, accepted: true, rename: R20, note: action spelling breaks D1; the
           leaf is `config`}
-      - {id: InputSpec.build_config, rule: name, rename: R19, note: python spelling breaks D1; the leaf is `config`}
+      - {id: InputSpec.build_config, rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf is `config`}
   - concept: config.version
     tier: config
     renames: []
@@ -614,10 +672,10 @@ concepts:
       - CompareRequest.dependency_search_paths
       - DumpRequest.dependency_search_paths
     exceptions:
-      - {id: 'action:search-path', rule: name, rename: R20, note: action spelling breaks D1; the leaf is `search_paths`}
-      - {id: CompareRequest.dependency_search_paths, rule: name, rename: R19, note: python spelling breaks D1; the
+      - {id: 'action:search-path', rule: name, accepted: true, rename: R20, note: action spelling breaks D1; the leaf is `search_paths`}
+      - {id: CompareRequest.dependency_search_paths, rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the
           leaf is `search_paths`}
-      - {id: DumpRequest.dependency_search_paths, rule: name, rename: R19, note: python spelling breaks D1; the
+      - {id: DumpRequest.dependency_search_paths, rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the
           leaf is `search_paths`}
   - concept: deps.ld_library_path
     tier: config
@@ -644,6 +702,8 @@ concepts:
       - action:new-root
   - concept: bundle
     tier: config
+    workflow:
+      - workflow:check-single.yml:bundle-members
     renames: []
     cli:
       - compare --instantiation-manifest
@@ -656,12 +716,12 @@ concepts:
     action:
       - actions/check-target:bundle-members
     exceptions:
-      - {id: compare --instantiation-manifest, rule: name, rename: R21, note: cli spelling breaks D1; the leaf is
+      - {id: compare --instantiation-manifest, rule: name, accepted: true, rename: R21, note: cli spelling breaks D1; the leaf is
           `bundle`}
-      - {id: compare --bundle-facts-out, rule: name, rename: R21, note: cli spelling breaks D1; the leaf is `bundle`}
-      - {id: compare --bundle-facts-library-manifest, rule: name, rename: R21, note: cli spelling breaks D1; the
+      - {id: compare --bundle-facts-out, rule: name, accepted: true, rename: R21, note: cli spelling breaks D1; the leaf is `bundle`}
+      - {id: compare --bundle-facts-library-manifest, rule: name, accepted: true, rename: R21, note: cli spelling breaks D1; the
           leaf is `bundle`}
-      - {id: 'actions/check-target:bundle-members', rule: name, rename: R20, note: action spelling breaks D1; the
+      - {id: 'actions/check-target:bundle-members', rule: name, accepted: true, rename: R20, note: action spelling breaks D1; the
           leaf is `bundle`}
   - concept: python.abi3_floor
     tier: config
@@ -682,8 +742,8 @@ concepts:
       - CompareRequest.env_matrix
       - run_compare(env_matrix)
     exceptions:
-      - {id: CompareRequest.env_matrix, rule: name, rename: R19, note: python spelling breaks D1; the leaf is `deployment`}
-      - {id: run_compare(env_matrix), rule: name, rename: R19, note: python spelling breaks D1; the leaf is `deployment`}
+      - {id: CompareRequest.env_matrix, rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf is `deployment`}
+      - {id: run_compare(env_matrix), rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf is `deployment`}
   - concept: release.dso_only
     tier: config
     renames: []
@@ -720,7 +780,7 @@ concepts:
     python:
       - CompareRequest.changed_paths
     exceptions:
-      - {id: 'action:changed-path', rule: name, rename: R20, note: action spelling breaks D1; the leaf is `changed_paths`}
+      - {id: 'action:changed-path', rule: name, accepted: true, rename: R20, note: action spelling breaks D1; the leaf is `changed_paths`}
   - concept: budget
     tier: config
     renames: []
@@ -731,7 +791,7 @@ concepts:
     python:
       - CompareRequest.budget_s
     exceptions:
-      - {id: CompareRequest.budget_s, rule: name, rename: R19, note: python spelling breaks D1; the leaf is `budget`}
+      - {id: CompareRequest.budget_s, rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf is `budget`}
   - concept: config.override
     tier: config
     renames: []
@@ -778,9 +838,9 @@ concepts:
     python:
       - CompareRequest.performance_profile
     exceptions:
-      - {id: CompareRequest.performance_profile, rule: name, rename: R19, note: python spelling breaks D1; the leaf
+      - {id: CompareRequest.performance_profile, rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf
           is `profile`}
-      - {id: compare --performance-profile, rule: name, rename: R21, note: cli spelling breaks D1; the leaf is `profile`}
+      - {id: compare --performance-profile, rule: name, accepted: true, rename: R21, note: cli spelling breaks D1; the leaf is `profile`}
   - concept: resource_limits.max_bundle_facts_decode_nodes
     tier: config
     renames: []
@@ -795,9 +855,9 @@ concepts:
       - CompareRequest.scope_public
       - run_compare(scope_to_public_surface)
     exceptions:
-      - {id: run_compare(scope_to_public_surface), rule: name, rename: R19, note: python spelling breaks D1; the
+      - {id: run_compare(scope_to_public_surface), rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the
           leaf is `public`}
-      - {id: CompareRequest.scope_public, rule: name, rename: R19, note: python spelling breaks D1; the leaf is
+      - {id: CompareRequest.scope_public, rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf is
           `public`}
   - concept: scope.public_header_dirs
     tier: config
@@ -879,6 +939,8 @@ concepts:
       - scope
   - concept: contract
     tier: core
+    workflow:
+      - workflow:check-single.yml:contract
     renames:
       - R10
     cli:
@@ -939,6 +1001,9 @@ concepts:
       - run_compare(pattern_verdicts)
   - concept: policy
     tier: core
+    workflow:
+      - workflow:check-single.yml:policy
+      - workflow:check-project.yml:policy
     renames:
       - R2
     cli:
@@ -960,12 +1025,15 @@ concepts:
       - CompareRequest.project_policy_overrides
       - run_compare(project_policy_overrides)
     exceptions:
-      - {id: CompareRequest.project_policy_overrides, rule: name, rename: R19, note: python spelling breaks D1;
+      - {id: CompareRequest.project_policy_overrides, rule: name, accepted: true, rename: R19, note: python spelling breaks D1;
           the leaf is `overrides`}
-      - {id: run_compare(project_policy_overrides), rule: name, rename: R19, note: python spelling breaks D1; the
+      - {id: run_compare(project_policy_overrides), rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the
           leaf is `overrides`}
   - concept: suppress
     tier: core
+    workflow:
+      - workflow:check-single.yml:suppress
+      - workflow:check-project.yml:suppress
     renames: []
     cli:
       - compare --suppress
@@ -983,7 +1051,7 @@ concepts:
     python:
       - CompareRequest.strict_suppressions
     exceptions:
-      - {id: CompareRequest.strict_suppressions, rule: name, rename: R19, note: python spelling breaks D1; the leaf
+      - {id: CompareRequest.strict_suppressions, rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf
           is `strict`}
   - concept: suppression.require_justification
     tier: config
@@ -1020,6 +1088,9 @@ concepts:
           is `acknowledgments`}
   - concept: severity.preset
     tier: core
+    workflow:
+      - workflow:check-single.yml:severity-preset
+      - workflow:check-project.yml:severity-preset
     renames: []
     cli:
       - compare --severity-preset
@@ -1032,14 +1103,14 @@ concepts:
       - CompareRequest.severity_preset
       - run_compare(severity_preset)
     exceptions:
-      - {id: run_compare(severity_preset), rule: name, rename: R19, note: python spelling breaks D1; the leaf is
+      - {id: run_compare(severity_preset), rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf is
           `preset`}
-      - {id: CompareRequest.severity_preset, rule: name, rename: R19, note: python spelling breaks D1; the leaf
+      - {id: CompareRequest.severity_preset, rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf
           is `preset`}
-      - {id: 'action:severity-preset', rule: name, rename: R20, note: action spelling breaks D1; the leaf is `preset`}
-      - {id: 'actions/check-target:severity-preset', rule: name, rename: R20, note: action spelling breaks D1; the
+      - {id: 'action:severity-preset', rule: name, accepted: true, rename: R20, note: action spelling breaks D1; the leaf is `preset`}
+      - {id: 'actions/check-target:severity-preset', rule: name, accepted: true, rename: R20, note: action spelling breaks D1; the
           leaf is `preset`}
-      - {id: compare --severity-preset, rule: name, rename: R21, note: cli spelling breaks D1; the leaf is `preset`}
+      - {id: compare --severity-preset, rule: name, accepted: true, rename: R21, note: cli spelling breaks D1; the leaf is `preset`}
   - concept: severity.abi_breaking
     tier: config
     renames: []
@@ -1048,7 +1119,7 @@ concepts:
     python:
       - CompareRequest.severity_abi_breaking
     exceptions:
-      - {id: CompareRequest.severity_abi_breaking, rule: name, rename: R19, note: python spelling breaks D1; the
+      - {id: CompareRequest.severity_abi_breaking, rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the
           leaf is `abi_breaking`}
   - concept: severity.potential_breaking
     tier: config
@@ -1058,7 +1129,7 @@ concepts:
     python:
       - CompareRequest.severity_potential_breaking
     exceptions:
-      - {id: CompareRequest.severity_potential_breaking, rule: name, rename: R19, note: python spelling breaks D1;
+      - {id: CompareRequest.severity_potential_breaking, rule: name, accepted: true, rename: R19, note: python spelling breaks D1;
           the leaf is `potential_breaking`}
   - concept: severity.quality_issues
     tier: config
@@ -1068,7 +1139,7 @@ concepts:
     python:
       - CompareRequest.severity_quality_issues
     exceptions:
-      - {id: CompareRequest.severity_quality_issues, rule: name, rename: R19, note: python spelling breaks D1; the
+      - {id: CompareRequest.severity_quality_issues, rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the
           leaf is `quality_issues`}
   - concept: severity.addition
     tier: config
@@ -1078,7 +1149,7 @@ concepts:
     python:
       - CompareRequest.severity_addition
     exceptions:
-      - {id: CompareRequest.severity_addition, rule: name, rename: R19, note: python spelling breaks D1; the leaf
+      - {id: CompareRequest.severity_addition, rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the leaf
           is `addition`}
   - concept: gate.fail_on_removed_library
     tier: config
@@ -1099,10 +1170,12 @@ concepts:
     python:
       - CompareRequest.require_complete_analysis
     exceptions:
-      - {id: CompareRequest.require_complete_analysis, rule: name, rename: R19, note: python spelling breaks D1;
+      - {id: CompareRequest.require_complete_analysis, rule: name, accepted: true, rename: R19, note: python spelling breaks D1;
           the leaf is `require_complete`}
   - concept: action.gate
     tier: action
+    workflow:
+      - workflow:check-single.yml:gate-mode
     renames:
       - R15
     action:
@@ -1143,7 +1216,7 @@ concepts:
     action:
       - action:snapshot-compression
     exceptions:
-      - {id: 'action:snapshot-compression', rule: name, rename: R20, note: action spelling breaks D1; the leaf is
+      - {id: 'action:snapshot-compression', rule: name, accepted: true, rename: R20, note: action spelling breaks D1; the leaf is
           `compression`}
   - concept: verbose
     tier: core
@@ -1190,6 +1263,23 @@ concepts:
       - actions/aggregate:gate
   - concept: project
     tier: core
+    workflow:
+      - workflow:check-single.yml:kind
+      - workflow:check-single.yml:target-kind
+      - workflow:check-single.yml:name
+      - workflow:check-single.yml:profile
+      - workflow:check-single.yml:candidate-build-output
+      - workflow:check-single.yml:explicit-id
+      - workflow:check-single.yml:project
+      - workflow:check-single.yml:head-sha
+      - workflow:check-single.yml:base-ref
+      - workflow:check-single.yml:evidence-producer
+      - workflow:check-single.yml:evidence-pack-path
+      - workflow:check-project.yml:project
+      - workflow:check-project.yml:head-sha
+      - workflow:check-project.yml:base-ref
+      - workflow:check-project.yml:evidence-producer
+      - workflow:check-project.yml:evidence-pack-path
     renames: []
     cli:
       - project plan --build-output
@@ -1218,6 +1308,16 @@ concepts:
     naming_reason: 'ADR-091 Out of scope: project option names beyond --version and -o'
   - concept: action.baseline
     tier: action
+    workflow:
+      - workflow:check-single.yml:baseline-target
+      - workflow:check-single.yml:baseline-channel
+      - workflow:check-single.yml:baseline-path
+      - workflow:check-single.yml:baseline-required
+      - workflow:check-single.yml:expected-project-ref
+      - workflow:check-single.yml:expected-baseline-generation
+      - workflow:check-single.yml:allow-new-target
+      - workflow:check-project.yml:expected-project-ref
+      - workflow:check-project.yml:expected-baseline-generation
     renames: []
     action:
       - action:abi-baseline
@@ -1239,6 +1339,15 @@ concepts:
       - actions/check-target:allow-new-target
   - concept: action.runtime
     tier: action
+    workflow:
+      - workflow:check-single.yml:extra-args
+      - workflow:check-single.yml:python-version
+      - workflow:check-single.yml:install-deps
+      - workflow:check-single.yml:dependency-source
+      - workflow:check-project.yml:python-version
+      - workflow:check-project.yml:extra-args
+      - workflow:check-project.yml:install-deps
+      - workflow:check-project.yml:dependency-source
     renames: []
     action:
       - action:mode
@@ -1282,9 +1391,25 @@ concepts:
       - actions/collect-facts:library
   - concept: retired
     tier: retired
+    workflow:
+      - workflow:check-single.yml:requested-depth
+      - workflow:check-single.yml:ast-frontend
+      - workflow:check-single.yml:gcc-path
+      - workflow:check-single.yml:gcc-prefix
+      - workflow:check-single.yml:gcc-options
+      - workflow:check-single.yml:contract-file
+      - workflow:check-single.yml:policy-file
+      - workflow:check-project.yml:ast-frontend
+      - workflow:check-project.yml:gcc-path
+      - workflow:check-project.yml:gcc-prefix
+      - workflow:check-project.yml:gcc-options
+      - workflow:check-project.yml:policy-file
     renames:
       - R14
     action:
+      - actions/check-target:consumer-ast-frontend
+      - actions/check-target:consumer-gcc-options
+      - actions/check-target:consumer-gcc-path
       - action:analysis-assurance-complete
       - action:ast-frontend
       - action:debug-info1

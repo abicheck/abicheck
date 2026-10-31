@@ -41,7 +41,7 @@ REPO = Path(__file__).resolve().parent.parent
 REGISTRY = REPO / "architecture" / "option-vocabulary.yaml"
 INVENTORY = REPO / "architecture" / "option-vocabulary-inventory.json"
 ADR = REPO / "docs" / "contribute" / "adr" / "091-one-option-vocabulary.md"
-SURFACES = ("cli", "config", "action", "python")
+SURFACES = ("cli", "config", "action", "workflow", "python")
 TIERS = {"core", "config", "action", "python", "internal", "retired"}
 #: Tiers the D1 name rule applies to: concepts reachable from a config path.
 NAMED_TIERS = {"core", "config"}
@@ -300,16 +300,45 @@ def test_retired_tier_is_exactly_the_dead_inputs(
     """A fail-closed tombstone or an ignored input behaves nothing like the live
     option it once was, so it may not share a concept with it (ADR-091 D2)."""
     dead = {
-        r["id"] for r in inventory["action"] if r["status"] in {"retired", "ignored"}
+        r["id"]
+        for s in ("action", "workflow")
+        for r in inventory[s]
+        if r["status"] in {"retired", "ignored"}
     }
     in_tier = {
         i
         for c in registry["concepts"]
         if c["tier"] == "retired"
-        for i in c.get("action", [])
+        for s in ("action", "workflow")
+        for i in c.get(s, [])
     }
     assert in_tier - dead == set(), "live inputs filed under the retired tier"
     assert dead - in_tier == set(), "retired/ignored inputs filed under a live concept"
+
+
+def test_workflow_inputs_share_the_concept_of_the_action_input_they_mirror(
+    registry: dict, inventory: dict
+) -> None:
+    """A reusable workflow forwards its inputs to check-target under the same
+    names, so a workflow input that spells a check-target input must sit in that
+    input's concept (ADR-091 D2: one concept, one behavior, on every surface)."""
+    concept_of = {
+        i: c["concept"]
+        for c in registry["concepts"]
+        for i in c.get("action", [])
+    }
+    claimed = {
+        i: c["concept"]
+        for c in registry["concepts"]
+        for i in c.get("workflow", [])
+    }
+    problems = []
+    for row in inventory["workflow"]:
+        mirror = f"actions/check-target:{row['input']}"
+        if row["id"] in claimed and mirror in concept_of:
+            if claimed[row["id"]] != concept_of[mirror]:
+                problems.append(f"{row['id']} is not in {concept_of[mirror]}")
+    assert not problems, "\n".join(problems)
 
 
 def test_retired_status_matches_the_tombstone_contract(inventory: dict) -> None:
@@ -439,6 +468,14 @@ def test_budget_excludes_only_the_generic_override() -> None:
     assert analysis == ["action:lang"]
 
 
+def _adr_row_accepts(adr: str, rename: str) -> bool:
+    """True when ADR-091's own table row for ``rename`` records its deviations as
+    ACCEPTED (an accepted exception needs no rename of its own, only the row that
+    accepts it; ADR-091 maintainer rule, 2026-10-31)."""
+    rows = [line for line in adr.splitlines() if line.startswith(f"| {rename} |")]
+    return bool(rows) and "ACCEPTED" in rows[0]
+
+
 def test_every_exception_is_well_formed(registry: dict, inventory: dict) -> None:
     """Each exception names a real row, a known rule, an R-id the ADR states, and a
     note; the budget exceptions name a surface."""
@@ -461,6 +498,13 @@ def test_every_exception_is_well_formed(registry: dict, inventory: dict) -> None
                 problems.append(f"{e['rename']} is not in ADR-091 {where}")
             if not e.get("note"):
                 problems.append(f"no note {where}")
+            if "accepted" in e and not isinstance(e["accepted"], bool):
+                problems.append(f"accepted must be true or false {where}")
+            if e.get("accepted") and not _adr_row_accepts(adr, e.get("rename", "")):
+                problems.append(
+                    f"accepted exception {where} is not accepted by its ADR-091 row "
+                    f"{e.get('rename')}"
+                )
     for b in registry.get("budget_exceptions", []):
         where = f"budget {b}"
         if not re.search(rf"\b{b.get('rename')}\b", adr):

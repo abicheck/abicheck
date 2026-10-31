@@ -6,6 +6,9 @@ Surfaces read live, never transcribed:
 - ``cli``     -- every option of every command in the click tree (hidden ones too);
 - ``config``  -- every ``.abicheck.yml`` key in ``build_config.KEY_TABLE``;
 - ``action``  -- every input of ``action.yml`` and ``actions/*/action.yml``;
+- ``workflow`` -- every ``workflow_call`` input of the public reusable workflows
+  (``check-single.yml``, ``check-project.yml``), which mirror the Action's own
+  vocabulary and are a caller-facing surface of their own (ADR-091 D6);
 - ``python``  -- the fields of ``CompareRequest``/``DumpRequest``/``InputSpec``
   and the keyword parameters of ``run_compare``/``run_dump``.
 
@@ -301,6 +304,36 @@ def _python_rows() -> list[dict[str, Any]]:
     return rows
 
 
+#: The public reusable workflows whose ``workflow_call`` inputs are inventoried.
+WORKFLOW_FILES = (".github/workflows/check-single.yml", ".github/workflows/check-project.yml")
+
+
+def _workflow_rows() -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for rel in WORKFLOW_FILES:
+        f = REPO_DIR / rel
+        doc = yaml.safe_load(f.read_text(encoding="utf-8")) or {}
+        # PyYAML reads the bare key `on` as the boolean True (YAML 1.1).
+        on = doc.get(True) or doc.get("on") or {}
+        inputs = ((on.get("workflow_call") or {}).get("inputs")) or {}
+        for name, spec in inputs.items():
+            desc = str((spec or {}).get("description", ""))
+            default = (spec or {}).get("default")
+            rows.append(
+                {
+                    "id": f"workflow:{f.name}:{name}",
+                    "workflow": f.name,
+                    "input": name,
+                    "status": _input_status(desc),
+                    "required": bool((spec or {}).get("required", False)),
+                    "default": default
+                    if default is None or isinstance(default, (bool, int, str))
+                    else str(default),
+                }
+            )
+    return rows
+
+
 def render() -> str:
     if str(REPO_DIR) not in sys.path:
         sys.path.insert(0, str(REPO_DIR))
@@ -309,6 +342,7 @@ def render() -> str:
         "cli": _cli_rows(),
         "config": _config_rows(),
         "action": _action_rows(),
+        "workflow": _workflow_rows(),
         "python": _python_rows(),
     }
     return json.dumps(doc, indent=1, sort_keys=False) + "\n"
