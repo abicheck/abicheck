@@ -27,6 +27,12 @@ from typing import TYPE_CHECKING
 
 from ..errors import ValidationError
 from ..model import AbiSnapshot
+from ..report.dependency_section import (
+    MARKDOWN_DEPS_STYLE,
+    PLAIN_DEPS_STYLE,
+    dependency_info_fields,
+    dependency_section,
+)
 from ..report.diff_report import (
     to_json,
     to_stat as to_stat,  # re-exported; see service.py's own note
@@ -555,24 +561,18 @@ def _render_json_output(
         )
     if follow_deps and (old.dependency_info or (new and new.dependency_info)):
         import json
-        from dataclasses import asdict
 
         d = json.loads(base)
-        if old.dependency_info:
-            d["old_dependency_info"] = asdict(old.dependency_info)
-        if new and new.dependency_info:
-            d["new_dependency_info"] = asdict(new.dependency_info)
+        d.update(dependency_info_fields(old, new))
         return json.dumps(d, indent=2)
     return base
 
 
-#: How a dependency section decorates its headings and values. The section's
-#: *content* is identical across projections -- only the markup differs -- so
-#: the walk is written once and takes the style. The Markdown form was being
-#: appended verbatim to the plain-text terminal projection, which emits no
-#: `#`, `**` or backticks anywhere else (CodeRabbit review).
-_MARKDOWN_DEPS_STYLE = ("## ", "### ", "**{}**", "`{}`")
-_PLAIN_DEPS_STYLE = ("", "", "{}", "{}")
+#: How a dependency section decorates its headings and values; the one
+#: renderer lives in ``report/dependency_section.py``, shared with the
+#: directory/package release report.
+_MARKDOWN_DEPS_STYLE = MARKDOWN_DEPS_STYLE
+_PLAIN_DEPS_STYLE = PLAIN_DEPS_STYLE
 
 
 def _render_deps_section(
@@ -581,58 +581,14 @@ def _render_deps_section(
     style: tuple[str, str, str, str] = _MARKDOWN_DEPS_STYLE,
 ) -> str:
     """The dependency summary for *old*/*new*, decorated per *style*."""
-    section, subsection, field, code_fmt = style
-
-    def code(text: object) -> str:
-        return code_fmt.format(text)
-
-    def bold(text: str) -> str:
-        return field.format(text)
-
-    lines: list[str] = ["", f"{section}Dependency Analysis", ""]
-
-    for label, snap in [("Old", old), ("New", new)]:
-        if snap is None or snap.dependency_info is None:
-            continue
-        info = snap.dependency_info
-        lines.append(f"{subsection}{label} version ({code(snap.version)})")
-        lines.append("")
-
-        if info.nodes:
-            lines.append(f"{bold('Dependencies')}: {len(info.nodes)} resolved DSOs")
-            for node in info.nodes:
-                raw_depth = node.get("depth", 0)
-                depth = raw_depth if isinstance(raw_depth, int) else 0
-                indent = "  " * depth
-                reason = node.get("resolution_reason", "")
-                lines.append(f"  {indent}- {code(node.get('soname', '?'))} ({reason})")
-            lines.append("")
-
-        if info.bindings_summary:
-            lines.append(f"{bold('Bindings')}:")
-            for status, count in sorted(info.bindings_summary.items()):
-                lines.append(f"  - {code(status)}: {count}")
-            lines.append("")
-
-        if info.unresolved:
-            lines.append(f"{bold('Unresolved libraries')}:")
-            for u in info.unresolved:
-                lines.append(
-                    f"  - {code(u.get('soname', '?'))} needed by "
-                    f"{code(u.get('consumer', '?'))}"
-                )
-            lines.append("")
-
-        if info.missing_symbols:
-            lines.append(f"{bold('Missing symbols')}: {len(info.missing_symbols)}")
-            for ms in info.missing_symbols[:10]:
-                ver = f"@{ms['version']}" if ms.get("version") else ""
-                lines.append(f"  - {code(str(ms['symbol']) + ver)}")
-            if len(info.missing_symbols) > 10:
-                lines.append(f"  - ... +{len(info.missing_symbols) - 10} more")
-            lines.append("")
-
-    return "\n".join(lines)
+    return dependency_section(
+        (
+            (f"{label} version", snap.version, snap.dependency_info)
+            for label, snap in (("Old", old), ("New", new))
+            if snap is not None
+        ),
+        style,
+    )
 
 
 def _render_deps_section_md(old: AbiSnapshot, new: AbiSnapshot | None) -> str:

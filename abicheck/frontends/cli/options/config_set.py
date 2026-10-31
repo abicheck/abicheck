@@ -64,8 +64,9 @@ _COMPARE_APPLIED_PATHS: frozenset[str] = (
 
 #: The keys a directory/package (release) compare forwards to its members. The
 #: release request carries no public-symbol, suppression, assurance or debug
-#: field, so every other ``--set`` key is refused on that route rather than
-#: accepted and not applied.
+#: settings field, so every other ``--set`` key is refused on that route rather
+#: than accepted and not applied. The non-core ``deps.*`` keys are folded into
+#: the walk inputs every member takes (``ReleaseMemberRunInputs``).
 _RELEASE_APPLIED_PATHS: frozenset[str] = frozenset(
     {
         "scope.public",
@@ -78,6 +79,7 @@ _RELEASE_APPLIED_PATHS: frozenset[str] = frozenset(
     }
     | COMPILE_CONTEXT_OVERRIDE_PATHS
     | RELEASE_TOPOLOGY_OVERRIDE_PATHS
+    | CONFIG_RUN_INPUT_SET_PATHS
 )
 
 __all__ = [

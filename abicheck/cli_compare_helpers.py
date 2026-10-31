@@ -580,6 +580,7 @@ def run_compare(
         # ADR-068 §3 #23: also thread policy.overrides to the release fan-out.
         from .frontends.cli.commands.compare_routing import _dispatch_release_compare
         from .pack_application import resolve_release_project_policy_overrides
+        from .workflows.release_member_request import ReleaseMemberRunInputs
 
         # ADR-075: every member dump and the release surface are classified
         # under the one project config (a run-scoped rule, like crosschecks).
@@ -622,9 +623,7 @@ def run_compare(
                 dso_only=resolved_cfg.release_dso_only,  # Phase 7d: config-only, no CLI kwarg
                 fail_on_removed=resolved_cfg.fail_on_removed_library,
                 on_incomplete_scope=resolved_cfg.on_incomplete_scope,
-                # ADR-071: the release fan-out honors assurance.require_complete
-                # now (it folds every compared member's own assurance with max),
-                # so the resolved value is forwarded instead of being rejected.
+                # ADR-071: folded over every compared member's assurance (max).
                 require_complete_analysis=require_complete_analysis,
                 support_promise=resolved_cfg.release_support_promise,  # Phase 7: config-only, no CLI kwarg
                 select=select,
@@ -658,20 +657,21 @@ def run_compare(
                 public_header_dirs=project_config_public_header_dirs(project_cfg),
                 collapse_versioned_symbols=collapse_versioned_symbols,
                 env_matrix=resolved_cfg.deployment,  # ADR-020b: config-only, no CLI kwarg
-                # Codex review (PR #1154 follow-up): output.view's derived values were
-                # silently dropped from this dispatch -- forwarded raw
-                # (unnormalized against `fmt`/`report_mode`'s "impact" sugar);
-                # _dispatch_release_compare resolves and validates them.
+                # output.view's derived values, raw; _dispatch_release_compare
+                # resolves and validates them (PR #1154 follow-up).
                 report_mode=report_mode,
                 show_only=show_only,
-                # The canonical exclusion rules -- the same tuple the scalar
-                # path below hands `_resolve_compare_snapshots`. Forwarded
-                # rather than dropped: a directory operand accepted
-                # `--exclude-header` and silently ignored it, so a release tree
-                # that cannot be parsed whole (Intel MKL's FFTW2/FFTW3 typedef
-                # clash) failed every member under the exact arguments that made
-                # the single-file comparison succeed.
+                # Forwarded, never dropped: the scalar path's exclusion rules,
+                # dependency walk and debug roots (each once accepted here and
+                # silently ignored -- a false clean for every member).
                 exclude_headers=tuple(exclude_headers or ()),
+                run_inputs=ReleaseMemberRunInputs(
+                    follow_deps=bool(follow_deps),
+                    dependency_search_paths=tuple(search_paths),
+                    ld_library_path=ld_library_path,
+                    old_debug_roots=tuple(resolved_old_debug),
+                    new_debug_roots=tuple(resolved_new_debug),
+                ),
             )
         return
     # Single-file/snapshot inputs: the set-only fan-out flags do not apply.

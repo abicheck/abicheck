@@ -655,12 +655,14 @@ concepts:
     python:
       - CompareRequest.follow_deps
       - DumpRequest.follow_deps
+      - run_compare(follow_deps)
     exceptions:
       - {id: compare --follow-deps, rule: name, rename: R8, note: cli spelling breaks D1; the leaf is `follow`}
       - {id: dump --follow-deps, rule: name, rename: R8, note: cli spelling breaks D1; the leaf is `follow`}
       - {id: 'action:follow-deps', rule: name, rename: R8, note: action spelling breaks D1; the leaf is `follow`}
       - {id: CompareRequest.follow_deps, rule: name, rename: R8, note: R8 names follow_deps; the leaf `follow` alone is ambiguous across the deps block, so the block-prefixed python spelling stands}
       - {id: DumpRequest.follow_deps, rule: name, rename: R8, note: R8 names follow_deps; the leaf `follow` alone is ambiguous across the deps block, so the block-prefixed python spelling stands}
+      - {id: run_compare(follow_deps), rule: name, rename: R8, note: same spelling as CompareRequest.follow_deps; the keyword shim mirrors the typed request field}
   - concept: deps.search_paths
     tier: config
     renames: []
@@ -676,12 +678,15 @@ concepts:
     python:
       - CompareRequest.dependency_search_paths
       - DumpRequest.dependency_search_paths
+      - run_compare(dependency_search_paths)
     exceptions:
       - {id: 'action:search-path', rule: name, accepted: true, rename: R20, note: action spelling breaks D1; the leaf is `search_paths`}
       - {id: CompareRequest.dependency_search_paths, rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the
           leaf is `search_paths`}
       - {id: DumpRequest.dependency_search_paths, rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the
           leaf is `search_paths`}
+      - {id: run_compare(dependency_search_paths), rule: name, accepted: true, rename: R19, note: python spelling breaks D1; the
+          leaf is `search_paths`; mirrors CompareRequest.dependency_search_paths}
   - concept: deps.ld_library_path
     tier: config
     renames: []
@@ -697,6 +702,7 @@ concepts:
     python:
       - CompareRequest.ld_library_path
       - DumpRequest.ld_library_path
+      - run_compare(ld_library_path)
   - concept: deps.root
     tier: core
     renames:

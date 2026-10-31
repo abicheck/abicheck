@@ -291,6 +291,10 @@ def run_compare(
     acknowledgment_breaks: str | None = None,
     # ADR-091 D4: appended last, same rule as every parameter above.
     config_overrides: Mapping[str, object] | None = None,
+    # The dependency walk, as on `CompareRequest`; appended last.
+    follow_deps: bool = _declared_default(CompareRequest, "follow_deps"),
+    dependency_search_paths: tuple[Path, ...] = (),
+    ld_library_path: str = _declared_default(CompareRequest, "ld_library_path"),
 ) -> CompareResult:
     """Compare two ABI inputs and return the classified diff result.
 
@@ -383,6 +387,11 @@ def run_compare(
     comparison collapsed it. ``False`` (the default) is a no-op, matching
     every pre-existing caller.
 
+    ``follow_deps``/``dependency_search_paths``/``ld_library_path``: the
+    ``--follow-deps`` walk, forwarded onto ``CompareRequest``'s identically
+    named fields, so every setting a release member carries is one a
+    single-pair keyword caller can pass too. Off by default.
+
     Returns:
         A :class:`~abicheck.workflows.service_requests.CompareResult`. This returned the bare
         ``(DiffResult, old, new)`` tuple before 0.6; ``.as_tuple()`` gives that
@@ -452,5 +461,8 @@ def run_compare(
         acknowledgments=acknowledgments,
         acknowledgment_unacknowledged_additions=acknowledgment_unacknowledged_additions,
         acknowledgment_breaks=acknowledgment_breaks,
+        follow_deps=follow_deps,
+        dependency_search_paths=tuple(dependency_search_paths),
+        ld_library_path=ld_library_path,
     )
     return run_compare_request(request)

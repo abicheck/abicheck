@@ -431,7 +431,8 @@ def _release_md_suppression_audit(
 def finish_release_markdown(
     md: str, library_results: list[dict[str, object]], *, demangle: bool
 ) -> str:
-    """Apply the release document's demangle pass, then append the audit.
+    """Apply the release document's demangle pass, then append each member's
+    dependency section (``--follow-deps``) and the suppression audit.
 
     `escape_table_pipes`: the document contains real tables (the library
     summary, the disposed-findings ledger), and demangling can introduce a
@@ -449,6 +450,11 @@ def finish_release_markdown(
             max_demangled=DEMANGLED_NAME_LIMIT,
             markdown=md_text,
         )
+    # The --follow-deps walk per member, from the scalar report's renderer.
+    from .dependency_section import release_member_dependency_section
+
+    for lib in library_results:
+        md += release_member_dependency_section(lib)
     audit_lines = _release_md_suppression_audit(library_results, demangle=demangle)
     return md + "\n".join(audit_lines) if audit_lines else md
 

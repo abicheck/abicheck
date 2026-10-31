@@ -198,6 +198,7 @@ def compare_release_member(key: str, ctx: ReleaseMemberContext) -> dict[str, obj
                 old_path=old_path,
                 compared=compare_result,
                 scoped=request.scope_to_public_surface,
+                follow_deps=request.follow_deps,
             ),
         )
         memory_trace.mark("release.member.project:done", key=key)

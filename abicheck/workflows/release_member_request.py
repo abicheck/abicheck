@@ -55,6 +55,7 @@ if TYPE_CHECKING:
 __all__ = [
     "MemberDelta",
     "ReleaseMemberCompareRequest",
+    "ReleaseMemberRunInputs",
     "member_compare_request",
     "member_request",
 ]
@@ -105,6 +106,38 @@ class ReleaseMemberCompareRequest:
     acknowledgments_path: Path | None = None
     acknowledgment_unacknowledged_additions: str | None = None
     acknowledgment_breaks: str | None = None
+    #: :class:`ReleaseMemberRunInputs`' fields: the dependency walk and the
+    #: per-side debug roots, applied to every member as the scalar compare
+    #: applies them to its one pair.
+    follow_deps: bool = False
+    dependency_search_paths: tuple[Path, ...] = ()
+    ld_library_path: str = ""
+    old_debug_roots: tuple[Path, ...] = ()
+    new_debug_roots: tuple[Path, ...] = ()
+
+
+@dataclass(frozen=True)
+class ReleaseMemberRunInputs:
+    """The run inputs a release hands every member unchanged.
+
+    ``--follow-deps``/``--search-path``/``--ld-library-path`` (or their
+    ``deps.*`` config homes) and the directory/detached-file ``--debug-info``
+    roots (or ``debug.info``), resolved once by the front end exactly as for a
+    single-pair compare. A debug root is a ``.build-id`` tree or a detached
+    file looked up per binary, so one root serves every member of its side.
+    A debug *package* is not here: the plan unpacks it and resolves each
+    member's file (:class:`MemberDelta`'s ``*_pdb_path``).
+    """
+
+    follow_deps: bool = False
+    dependency_search_paths: tuple[Path, ...] = ()
+    ld_library_path: str = ""
+    old_debug_roots: tuple[Path, ...] = ()
+    new_debug_roots: tuple[Path, ...] = ()
+
+    def request_fields(self) -> dict[str, Any]:
+        """These inputs as :class:`ReleaseMemberCompareRequest` keywords."""
+        return {f.name: getattr(self, f.name) for f in dataclasses.fields(self)}
 
 
 @dataclass(frozen=True)
@@ -167,6 +200,11 @@ _MAPPED_FIELDS = frozenset(
         "acknowledgments_path",
         "acknowledgment_unacknowledged_additions",
         "acknowledgment_breaks",
+        "follow_deps",
+        "dependency_search_paths",
+        "ld_library_path",
+        "old_debug_roots",
+        "new_debug_roots",
     }
 )
 
@@ -194,9 +232,11 @@ def member_compare_request(request: ReleaseMemberCompareRequest) -> CompareReque
     - ``pack_policy_overrides``, ``project_policy_overrides`` -> a tuple of
       pairs, or ``None`` when empty
     - ``scope_to_public_surface`` -> ``CompareRequest.scope_public``
+    - ``old_debug_roots``/``new_debug_roots`` -> that side's
+      ``InputSpec.debug_roots``
     - the remaining fields carry over under their own names
 
-    ``frontend``, ``debug_roots``, ``enable_debuginfod``,
+    ``frontend``, ``debuginfod``,
     ``diagnostic_comparison``, ``severity_preset`` and the other keyword-only
     defaults are not release fields: both routes leave them at the
     ``CompareRequest`` default.
@@ -221,7 +261,7 @@ def member_compare_request(request: ReleaseMemberCompareRequest) -> CompareReque
             includes=tuple(request.old_includes or ()),
             version=request.old_version,
             pdb=request.old_pdb_path,
-            debug_roots=(),
+            debug_roots=tuple(request.old_debug_roots),
             exclude_headers=tuple(request.exclude_headers or ()),
             include_system_declarations=request.include_dependencies,
             compile=request.compile_context,
@@ -233,7 +273,7 @@ def member_compare_request(request: ReleaseMemberCompareRequest) -> CompareReque
             includes=tuple(request.new_includes or ()),
             version=request.new_version,
             pdb=request.new_pdb_path,
-            debug_roots=(),
+            debug_roots=tuple(request.new_debug_roots),
             exclude_headers=tuple(request.exclude_headers or ()),
             include_system_declarations=request.include_dependencies,
             compile=request.compile_context,
@@ -271,6 +311,9 @@ def member_compare_request(request: ReleaseMemberCompareRequest) -> CompareReque
             request.acknowledgment_unacknowledged_additions
         ),
         acknowledgment_breaks=request.acknowledgment_breaks,
+        follow_deps=request.follow_deps,
+        dependency_search_paths=tuple(request.dependency_search_paths),
+        ld_library_path=request.ld_library_path,
     )
 
 

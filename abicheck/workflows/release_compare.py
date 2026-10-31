@@ -62,6 +62,7 @@ from ..model.scope_acquisition import AcquisitionState
 from ..model.symbol_inventory import SymbolInventory
 from .gate import resolve_scope_decision, worse_release_verdict
 from .release_compare_reporter import ReleaseCompareReporter, SilentReleaseReporter
+from .release_member_request import ReleaseMemberRunInputs
 from .release_scope import (
     DIRECT_PAIR_KEY,
     StrandedLibraryResolution,
@@ -127,6 +128,8 @@ class ReleaseCompareOptions:
     acknowledgments_path: Path | None = None
     acknowledgment_unacknowledged_additions: str | None = None
     acknowledgment_breaks: str | None = None
+    #: The dependency walk and debug roots every member takes, as scalar does.
+    run_inputs: ReleaseMemberRunInputs = ReleaseMemberRunInputs()
     #: ADR-065 D1/S3: the support-promise contract (``off`` emits nothing).
     support_promise: str = "off"
     manifest_path: Path | None = None
@@ -357,6 +360,7 @@ def execute_release_compare(
                 acknowledgments_path=o.acknowledgments_path,
                 acknowledgment_unacknowledged_additions=o.acknowledgment_unacknowledged_additions,
                 acknowledgment_breaks=o.acknowledgment_breaks,
+                **o.run_inputs.request_fields(),
             ),
             old_map=old_map,
             new_map=new_map,

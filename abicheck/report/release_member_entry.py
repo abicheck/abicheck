@@ -92,6 +92,14 @@ class ReleaseMemberEntryProjection(SilentReleaseReporter):
         entry["dependencies"] = member_dependency_facts(
             compared.old_snapshot, compared.new_snapshot
         )
+        # Release schema 2.6: the --follow-deps walk, under the keys and shape
+        # the single-pair JSON report uses, only when the walk was requested.
+        if member.follow_deps:
+            from .dependency_section import dependency_info_fields
+
+            entry.update(
+                dependency_info_fields(compared.old_snapshot, compared.new_snapshot)
+            )
         # ADR-067's structured half; see `reporter.disposition_ledger_blocks`.
         entry.update(disposition_ledger_blocks(result))
 

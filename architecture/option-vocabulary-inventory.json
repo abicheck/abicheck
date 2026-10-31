@@ -5898,6 +5898,30 @@
    "default": "None"
   },
   {
+   "id": "run_compare(follow_deps)",
+   "owner": "run_compare",
+   "name": "follow_deps",
+   "annotation": "bool",
+   "choices": null,
+   "default": "False"
+  },
+  {
+   "id": "run_compare(dependency_search_paths)",
+   "owner": "run_compare",
+   "name": "dependency_search_paths",
+   "annotation": "tuple[Path, ...]",
+   "choices": null,
+   "default": "[]"
+  },
+  {
+   "id": "run_compare(ld_library_path)",
+   "owner": "run_compare",
+   "name": "ld_library_path",
+   "annotation": "str",
+   "choices": null,
+   "default": "''"
+  },
+  {
    "id": "run_dump(path)",
    "owner": "run_dump",
    "name": "path",

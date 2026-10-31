@@ -555,7 +555,8 @@ directory of the config file; one given with `--set` (or the typed
 `config_overrides`) is used as given, relative to the current directory. `--no-follow-deps` turns a configured `follow: true`
 off for one run, as `--follow-deps` turns it on; with neither flag the key
 decides. `compare` and `dump` read
-these keys; the `deps tree`/`deps compare` commands read no `.abicheck.yml`,
+these keys, and a directory/package `compare` applies them to every member
+exactly as to a single pair; the `deps tree`/`deps compare` commands read no `.abicheck.yml`,
 since the environment they inspect is their operand. As with the flags, the
 walk is not wired to `--no-baseline` or a stored BundleFacts operand, which
 refuse the keys by name.

@@ -56,13 +56,16 @@ class ComparedMember:
 
     *scoped* is whether the release scoped members to the public surface
     (the release request's ``scope_to_public_surface``), which decides
-    whether a filtered-surface ledger exists to report.
+    whether a filtered-surface ledger exists to report. *follow_deps* is
+    whether the member's comparison ran the dependency walk, which decides
+    whether its graph is reported (as the scalar ``--follow-deps`` report does).
     """
 
     key: str
     old_path: Path
     compared: CompareResult
     scoped: bool
+    follow_deps: bool = False
 
 
 class ReleaseCompareReporter(Protocol):

@@ -58,12 +58,10 @@ Next, unranked (the `--no-baseline` one-sided-detector gap, the target-platform 
 ### Option vocabulary (ADR-091 follow-ups)
 
 The option-vocabulary migration is complete (ADR-091, Accepted and
-implemented). Its three follow-ups were closed on 2026-10-31 (see the
-archive): the `--debug-info` and `deps.*` config homes were added, and
-`--sources` stays a flag only, by design. One gap found while adding the
-homes remains:
-
-- `false-clean` — **Status (2026-10-31): OPEN.** A directory/package `compare` silently ignores `--follow-deps`, `--search-path`, `--ld-library-path` and a directory or detached-file `--debug-info`: the release fan-out takes none of them. `--set deps.*` is refused on that route. [Full write-up](known-gaps/release-compare-drops-dependency-walk-and-debug-roots.md)
+implemented). Its follow-ups were closed on 2026-10-31 (see the archive):
+the `--debug-info` and `deps.*` config homes were added, `--sources` stays a
+flag only, by design, and a directory/package `compare` now applies the
+dependency walk and debug roots to every member. No open gap remains.
 
 ### Report and detector coverage
 

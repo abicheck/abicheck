@@ -292,4 +292,12 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       the old keys (``mode``, ``libraries`` as a keyed object,
 #:       ``per_library_verdict``, ``old_bundle_facts``, ``new_is_stored``) must
 #:       read the live keys instead. The live document's own content is unchanged.
-RELEASE_SCHEMA_VERSION = "2.5"
+#: - ``2.6`` adds ``libraries[].old_dependency_info``/``new_dependency_info``:
+#:       the member's ``--follow-deps`` walk (``nodes``, ``edges``,
+#:       ``unresolved``, ``bindings_summary``, ``missing_symbols``), under the
+#:       keys and shape a single-pair ``compare --follow-deps`` JSON report
+#:       carries. Present only when the walk was requested (``--follow-deps``
+#:       or ``deps.follow``) and that side's snapshot carries a graph; absent
+#:       otherwise, never an empty graph. Before 2.6 a directory/package
+#:       compare did not run the walk at all. Additive.
+RELEASE_SCHEMA_VERSION = "2.6"
