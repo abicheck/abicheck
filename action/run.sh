@@ -3838,18 +3838,12 @@ elif [[ "$MODE" == "compare" ]]; then
   # ADR-067 D5: this run's acknowledgment records. Operator-named, like
   # `suppress`, so the CLI trusts it to supply records (a discovered
   # .abicheck.yml is not; see add_compile_context_flags' overlay strip).
-  # severity-preset is a live input: the CLI has no --severity-preset flag any
-  # more, so it reaches the CLI as its config key, the same as `set:`.
-  if [[ -n "${INPUT_SEVERITY_PRESET:-}" ]]; then
-    CMD+=(--set "$(_compile_set_string severity.preset "$INPUT_SEVERITY_PRESET")")
-  fi
+  # severity-preset is a core flag (--severity-preset, ADR-068): forwarded as-is.
+  add_single_flag "--severity-preset" "${INPUT_SEVERITY_PRESET:-}"
   add_single_flag "--acknowledgments" "${INPUT_ACKNOWLEDGMENTS:-}"
 
-  # severity-preset is a live input: the CLI has no --severity-preset flag any
-  # more, so it reaches the CLI as its config key, the same as `set:`.
-  if [[ -n "${INPUT_SEVERITY_PRESET:-}" ]]; then
-    CMD+=(--set "$(_compile_set_string severity.preset "$INPUT_SEVERITY_PRESET")")
-  fi
+  # severity-preset is a core flag (--severity-preset, ADR-068): forwarded as-is.
+  add_single_flag "--severity-preset" "${INPUT_SEVERITY_PRESET:-}"
   add_set_flags
   # --budget: time guard (e.g. 15m, 900s, 1h); the step FAILS on overflow
   # (exit 5) -- a budget never silently shrinks scope. Baseline shape only --
