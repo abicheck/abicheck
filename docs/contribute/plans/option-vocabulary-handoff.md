@@ -33,7 +33,7 @@ Status: Phases 0, 1, 2, 4 done. Phase 6 collapsed into each rename (no transitio
 | Work | Session | Branch | State |
 |---|---|---|---|
 | Phase 3: R15 + R11 pinning tests + R11 "kept" amendment | session_01Wg6N1aRJHe25fPZAWJqjHm | feat/adr091-phase3-action-output-gate | PR #1867 open (see its "State / remaining work") |
-| Phase 5: balanced surface cut | session_01Wg6N1Zr3YmNyAFWmUkbnwW | feat/adr091-phase5-surface-budget | told to push + open PR |
+| Phase 5: balanced surface cut | session_01Wg6N1Zr3YmNyAFWmUkbnwW | feat/adr091-phase5-surface-budget | PR #1869 open (budgets now 17 compare / 42 Action; see its "State / remaining work") |
 
 Phase 5 approved scope:
 - CLI to config tier ONLY: `--used-by-manifest`→`consumers.manifests`, `--required-symbol`→`consumers.required_symbols` (@FILE kept), `--view`→`output.view` (new keys). Keep `--define`, `--severity-preset`, `--sources`, `--build-info`.
