@@ -62,15 +62,15 @@ class TestValidateInputsAssuranceBundleInteraction:
             {
                 **_BASE_IDENTITY,
                 "INPUT_KIND": "bundle",
-                "INPUT_REQUESTED_DEPTH": "binary",
+                "INPUT_DEPTH": "binary",
                 "INPUT_BASELINE_PATH": "./b",
                 "INPUT_BUNDLE_MEMBERS": '["libpvxs", "libpvxsIoc"]',
-                "INPUT_ANALYSIS_ASSURANCE_COMPLETE": "true",
+                "INPUT_REQUIRE_COMPLETE": "true",
             },
             tmp_path,
         )
         assert result.returncode == 0, result.stdout + result.stderr
-        assert "analysis-assurance-complete is not supported" not in (
+        assert "require-complete is not supported" not in (
             result.stdout + result.stderr
         )
 
@@ -82,10 +82,10 @@ class TestValidateInputsAssuranceBundleInteraction:
             {
                 **_BASE_IDENTITY,
                 "INPUT_KIND": "bundle",
-                "INPUT_REQUESTED_DEPTH": "binary",
+                "INPUT_DEPTH": "binary",
                 "INPUT_BASELINE_PATH": "./b",
                 "INPUT_BUNDLE_MEMBERS": '["libpvxs", "libpvxsIoc"]',
-                "INPUT_ANALYSIS_ASSURANCE_COMPLETE": "false",
+                "INPUT_REQUIRE_COMPLETE": "false",
             },
             tmp_path,
         )
@@ -129,12 +129,12 @@ class TestValidateInputsAnalysisAssuranceCompleteEnumValidation:
             {
                 **_BASE_IDENTITY,
                 "INPUT_BASELINE_PATH": "./b",
-                "INPUT_ANALYSIS_ASSURANCE_COMPLETE": bad_value,
+                "INPUT_REQUIRE_COMPLETE": bad_value,
             },
             tmp_path,
         )
         assert result.returncode == 64
-        assert f"analysis-assurance-complete '{bad_value}' is not recognized" in (
+        assert f"require-complete '{bad_value}' is not recognized" in (
             result.stdout + result.stderr
         )
 
@@ -144,7 +144,7 @@ class TestValidateInputsAnalysisAssuranceCompleteEnumValidation:
             {
                 **_BASE_IDENTITY,
                 "INPUT_BASELINE_PATH": "./b",
-                "INPUT_ANALYSIS_ASSURANCE_COMPLETE": "true",
+                "INPUT_REQUIRE_COMPLETE": "true",
             },
             tmp_path,
         )
@@ -156,7 +156,7 @@ class TestValidateInputsAnalysisAssuranceCompleteEnumValidation:
             {
                 **_BASE_IDENTITY,
                 "INPUT_BASELINE_PATH": "./b",
-                "INPUT_ANALYSIS_ASSURANCE_COMPLETE": "false",
+                "INPUT_REQUIRE_COMPLETE": "false",
             },
             tmp_path,
         )
@@ -206,7 +206,7 @@ class TestAssuranceOverlayEscapesWorkflowCommandInjection:
             {
                 **_BASE_IDENTITY,
                 "INPUT_BASELINE_PATH": "./b",
-                "INPUT_ANALYSIS_ASSURANCE_COMPLETE": evil_value,
+                "INPUT_REQUIRE_COMPLETE": evil_value,
             },
             tmp_path,
         )

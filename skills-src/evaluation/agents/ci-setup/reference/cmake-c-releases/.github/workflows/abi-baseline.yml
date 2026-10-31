@@ -28,7 +28,7 @@ jobs:
           new-library: build/libgeom.so
           header: include/
           lang: c
-          new-version: ${{ env.TAG }}
+          new-label: ${{ env.TAG }}
           output-file: libgeom.abicheck.json
       - name: Attach snapshot to the release (write-once)
         run: |

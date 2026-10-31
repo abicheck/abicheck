@@ -1745,33 +1745,17 @@
    "default": null
   },
   {
-   "id": "action:debug-info1",
+   "id": "action:old-debug-info",
    "action": "action",
-   "input": "debug-info1",
+   "input": "old-debug-info",
    "status": "live",
    "required": false,
    "default": null
   },
   {
-   "id": "action:debug-info2",
+   "id": "action:new-debug-info",
    "action": "action",
-   "input": "debug-info2",
-   "status": "live",
-   "required": false,
-   "default": null
-  },
-  {
-   "id": "action:devel-pkg1",
-   "action": "action",
-   "input": "devel-pkg1",
-   "status": "live",
-   "required": false,
-   "default": null
-  },
-  {
-   "id": "action:devel-pkg2",
-   "action": "action",
-   "input": "devel-pkg2",
+   "input": "new-debug-info",
    "status": "live",
    "required": false,
    "default": null
@@ -1801,9 +1785,9 @@
    "default": null
   },
   {
-   "id": "action:analysis-assurance-complete",
+   "id": "action:require-complete",
    "action": "action",
-   "input": "analysis-assurance-complete",
+   "input": "require-complete",
    "status": "live",
    "required": false,
    "default": null
@@ -1833,9 +1817,9 @@
    "default": null
   },
   {
-   "id": "action:public-header-dir",
+   "id": "action:public-header-dirs",
    "action": "action",
-   "input": "public-header-dir",
+   "input": "public-header-dirs",
    "status": "live",
    "required": false,
    "default": null
@@ -1873,17 +1857,17 @@
    "default": null
   },
   {
-   "id": "action:old-version",
+   "id": "action:old-label",
    "action": "action",
-   "input": "old-version",
+   "input": "old-label",
    "status": "live",
    "required": false,
    "default": "old"
   },
   {
-   "id": "action:new-version",
+   "id": "action:new-label",
    "action": "action",
-   "input": "new-version",
+   "input": "new-label",
    "status": "live",
    "required": false,
    "default": "new"
@@ -1897,33 +1881,25 @@
    "default": "c++"
   },
   {
-   "id": "action:ast-frontend",
+   "id": "action:frontend",
    "action": "action",
-   "input": "ast-frontend",
+   "input": "frontend",
    "status": "live",
    "required": false,
    "default": null
   },
   {
-   "id": "action:gcc-path",
+   "id": "action:compiler",
    "action": "action",
-   "input": "gcc-path",
+   "input": "compiler",
    "status": "live",
    "required": false,
    "default": null
   },
   {
-   "id": "action:gcc-prefix",
+   "id": "action:compile-options",
    "action": "action",
-   "input": "gcc-prefix",
-   "status": "live",
-   "required": false,
-   "default": null
-  },
-  {
-   "id": "action:gcc-options",
-   "action": "action",
-   "input": "gcc-options",
+   "input": "compile-options",
    "status": "live",
    "required": false,
    "default": null
@@ -2265,14 +2241,6 @@
    "default": "strict_abi"
   },
   {
-   "id": "action:policy-file",
-   "action": "action",
-   "input": "policy-file",
-   "status": "live",
-   "required": false,
-   "default": null
-  },
-  {
    "id": "action:suppress",
    "action": "action",
    "input": "suppress",
@@ -2455,6 +2423,110 @@
    "status": "live",
    "required": false,
    "default": "${{ github.token }}"
+  },
+  {
+   "id": "action:ast-frontend",
+   "action": "action",
+   "input": "ast-frontend",
+   "status": "retired",
+   "required": false,
+   "default": null
+  },
+  {
+   "id": "action:gcc-path",
+   "action": "action",
+   "input": "gcc-path",
+   "status": "retired",
+   "required": false,
+   "default": null
+  },
+  {
+   "id": "action:gcc-options",
+   "action": "action",
+   "input": "gcc-options",
+   "status": "retired",
+   "required": false,
+   "default": null
+  },
+  {
+   "id": "action:analysis-assurance-complete",
+   "action": "action",
+   "input": "analysis-assurance-complete",
+   "status": "retired",
+   "required": false,
+   "default": null
+  },
+  {
+   "id": "action:public-header-dir",
+   "action": "action",
+   "input": "public-header-dir",
+   "status": "retired",
+   "required": false,
+   "default": null
+  },
+  {
+   "id": "action:debug-info1",
+   "action": "action",
+   "input": "debug-info1",
+   "status": "retired",
+   "required": false,
+   "default": null
+  },
+  {
+   "id": "action:debug-info2",
+   "action": "action",
+   "input": "debug-info2",
+   "status": "retired",
+   "required": false,
+   "default": null
+  },
+  {
+   "id": "action:old-version",
+   "action": "action",
+   "input": "old-version",
+   "status": "retired",
+   "required": false,
+   "default": null
+  },
+  {
+   "id": "action:new-version",
+   "action": "action",
+   "input": "new-version",
+   "status": "retired",
+   "required": false,
+   "default": null
+  },
+  {
+   "id": "action:policy-file",
+   "action": "action",
+   "input": "policy-file",
+   "status": "retired",
+   "required": false,
+   "default": null
+  },
+  {
+   "id": "action:gcc-prefix",
+   "action": "action",
+   "input": "gcc-prefix",
+   "status": "retired",
+   "required": false,
+   "default": null
+  },
+  {
+   "id": "action:devel-pkg1",
+   "action": "action",
+   "input": "devel-pkg1",
+   "status": "retired",
+   "required": false,
+   "default": null
+  },
+  {
+   "id": "action:devel-pkg2",
+   "action": "action",
+   "input": "devel-pkg2",
+   "status": "retired",
+   "required": false,
+   "default": null
   },
   {
    "id": "actions/aggregate:checks",
@@ -2809,9 +2881,9 @@
    "default": "false"
   },
   {
-   "id": "actions/check-target:requested-depth",
+   "id": "actions/check-target:depth",
    "action": "actions/check-target",
-   "input": "requested-depth",
+   "input": "depth",
    "status": "live",
    "required": true,
    "default": null
@@ -2953,33 +3025,25 @@
    "default": "c++"
   },
   {
-   "id": "actions/check-target:ast-frontend",
+   "id": "actions/check-target:frontend",
    "action": "actions/check-target",
-   "input": "ast-frontend",
+   "input": "frontend",
    "status": "live",
    "required": false,
    "default": null
   },
   {
-   "id": "actions/check-target:gcc-path",
+   "id": "actions/check-target:compiler",
    "action": "actions/check-target",
-   "input": "gcc-path",
+   "input": "compiler",
    "status": "live",
    "required": false,
    "default": null
   },
   {
-   "id": "actions/check-target:gcc-prefix",
+   "id": "actions/check-target:compile-options",
    "action": "actions/check-target",
-   "input": "gcc-prefix",
-   "status": "live",
-   "required": false,
-   "default": null
-  },
-  {
-   "id": "actions/check-target:gcc-options",
-   "action": "actions/check-target",
-   "input": "gcc-options",
+   "input": "compile-options",
    "status": "live",
    "required": false,
    "default": null
@@ -3065,9 +3129,9 @@
    "default": null
   },
   {
-   "id": "actions/check-target:contract-file",
+   "id": "actions/check-target:contract",
    "action": "actions/check-target",
-   "input": "contract-file",
+   "input": "contract",
    "status": "live",
    "required": false,
    "default": null
@@ -3079,14 +3143,6 @@
    "status": "live",
    "required": false,
    "default": "strict_abi"
-  },
-  {
-   "id": "actions/check-target:policy-file",
-   "action": "actions/check-target",
-   "input": "policy-file",
-   "status": "live",
-   "required": false,
-   "default": null
   },
   {
    "id": "actions/check-target:suppress",
@@ -3113,9 +3169,9 @@
    "default": "false"
   },
   {
-   "id": "actions/check-target:analysis-assurance-complete",
+   "id": "actions/check-target:require-complete",
    "action": "actions/check-target",
-   "input": "analysis-assurance-complete",
+   "input": "require-complete",
    "status": "live",
    "required": false,
    "default": null
@@ -3183,6 +3239,70 @@
    "status": "live",
    "required": false,
    "default": ""
+  },
+  {
+   "id": "actions/check-target:requested-depth",
+   "action": "actions/check-target",
+   "input": "requested-depth",
+   "status": "retired",
+   "required": false,
+   "default": null
+  },
+  {
+   "id": "actions/check-target:contract-file",
+   "action": "actions/check-target",
+   "input": "contract-file",
+   "status": "retired",
+   "required": false,
+   "default": null
+  },
+  {
+   "id": "actions/check-target:ast-frontend",
+   "action": "actions/check-target",
+   "input": "ast-frontend",
+   "status": "retired",
+   "required": false,
+   "default": null
+  },
+  {
+   "id": "actions/check-target:gcc-path",
+   "action": "actions/check-target",
+   "input": "gcc-path",
+   "status": "retired",
+   "required": false,
+   "default": null
+  },
+  {
+   "id": "actions/check-target:gcc-options",
+   "action": "actions/check-target",
+   "input": "gcc-options",
+   "status": "retired",
+   "required": false,
+   "default": null
+  },
+  {
+   "id": "actions/check-target:analysis-assurance-complete",
+   "action": "actions/check-target",
+   "input": "analysis-assurance-complete",
+   "status": "retired",
+   "required": false,
+   "default": null
+  },
+  {
+   "id": "actions/check-target:gcc-prefix",
+   "action": "actions/check-target",
+   "input": "gcc-prefix",
+   "status": "retired",
+   "required": false,
+   "default": null
+  },
+  {
+   "id": "actions/check-target:policy-file",
+   "action": "actions/check-target",
+   "input": "policy-file",
+   "status": "retired",
+   "required": false,
+   "default": null
   },
   {
    "id": "actions/collect-facts:phase",

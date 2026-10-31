@@ -150,7 +150,7 @@ use, so a GCC profile's cell and a Clang profile's cell in one run genuinely
 invoke different frontends. The field is still projected onto a `bundle`
 check (it records what the profile resolved to), but not applied there: a
 bundle cell's operand is the `bundle-staging` directory it stages members
-into, and the root Action rejects every non-`auto` `ast-frontend` for a
+into, and the root Action rejects every non-`auto` `frontend` for a
 directory/package operand, since the per-library fan-out never threads an L2
 compile context to each pair's header dump.
 `consumer_compile_ast_frontend` is forwarded only to check-target's

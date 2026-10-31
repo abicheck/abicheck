@@ -52,7 +52,7 @@ _EXPR_RE = re.compile(r"^\s*\$\{\{(.*)\}\}\s*$", re.DOTALL)
 _TOKEN_RE = re.compile(
     r"""
     (?P<ws>\s+)
-    |(?P<op>&&|\|\||!=|==|\(|\))
+    |(?P<op>&&|\|\||!=|==|\(|\)|,)
     |(?P<string>'(?:[^'\\]|\\.)*')
     |(?P<ident>[A-Za-z_][A-Za-z0-9_.-]*)
     """,
@@ -128,6 +128,22 @@ class _Parser:
             return _Eq(left, right, negate=(op == "!="))
         return left
 
+    def _call(self, name: str) -> _Node:
+        """``startsWith``/``endsWith`` only: the two GHA string functions the
+        check-target expressions use. Anything else fails loudly."""
+        if name not in ("startsWith", "endsWith"):
+            raise GhaExpressionError(f"unsupported function {name!r}")
+        self._advance()  # '('
+        args = [self._or_expr()]
+        while self._peek() == ",":
+            self._advance()
+            args.append(self._or_expr())
+        if self._advance() != ")":
+            raise GhaExpressionError("expected ')' after function arguments")
+        if len(args) != 2:
+            raise GhaExpressionError(f"{name} takes exactly two arguments")
+        return _Call(name, args[0], args[1])
+
     def _primary(self) -> _Node:
         tok = self._peek()
         if tok == "(":
@@ -143,6 +159,8 @@ class _Parser:
             return _Literal(tok[1:-1].replace("\\'", "'"))
         if re.match(r"^[A-Za-z_][A-Za-z0-9_.-]*$", tok):
             self._advance()
+            if self._peek() == "(":
+                return self._call(tok)
             return _Ref(tok)
         raise GhaExpressionError(f"unexpected token {tok!r}")
 
@@ -217,6 +235,22 @@ def _truthy(value: Any) -> bool:
     truthy. Matches what every ``&&``/``||`` short-circuit in this
     repo's own workflow/action YAML relies on."""
     return bool(value)
+
+
+class _Call(_Node):
+    """``startsWith``/``endsWith``: GHA compares these case-insensitively."""
+
+    def __init__(self, name: str, haystack: _Node, needle: _Node) -> None:
+        self._name = name
+        self._haystack = haystack
+        self._needle = needle
+
+    def eval(self, contexts: dict[str, Any]) -> bool:
+        hay = str(self._haystack.eval(contexts)).lower()
+        needle = str(self._needle.eval(contexts)).lower()
+        if self._name == "endsWith":
+            return hay.endswith(needle)
+        return hay.startswith(needle)
 
 
 class _And(_Node):

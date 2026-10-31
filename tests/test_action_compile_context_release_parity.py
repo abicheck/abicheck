@@ -122,7 +122,7 @@ class TestCompareReleaseStyleOperandCompileContext:
             {
                 "INPUT_OLD_LIBRARY": str(RUN_SH.parent),
                 "INPUT_NEW_LIBRARY": "new.so",
-                "INPUT_AST_FRONTEND": "auto",
+                "INPUT_FRONTEND": "auto",
             },
             _COMPARE_COMPILE_CONTEXT_START,
         )
@@ -133,7 +133,7 @@ class TestCompareReleaseStyleOperandCompileContext:
             {
                 "INPUT_OLD_LIBRARY": "old.so",
                 "INPUT_NEW_LIBRARY": "new.so",
-                "INPUT_AST_FRONTEND": "auto",
+                "INPUT_FRONTEND": "auto",
             },
             _COMPARE_COMPILE_CONTEXT_START,
         )
@@ -151,7 +151,7 @@ class TestCompareReleaseStyleOperandCompileContext:
             {
                 "INPUT_OLD_LIBRARY": str(RUN_SH.parent),
                 "INPUT_NEW_LIBRARY": "new.so",
-                "INPUT_AST_FRONTEND": "clang",
+                "INPUT_FRONTEND": "clang",
             },
             _COMPARE_COMPILE_CONTEXT_START,
         )

@@ -466,7 +466,7 @@ jobs:
           expected-project-ref: ${{ inputs.expected-project-ref }}
           expected-baseline-generation: ${{ inputs.expected-baseline-generation }}
           allow-new-target: ${{ inputs.allow-new-target }}
-          requested-depth: ${{ inputs.requested-depth }}
+          depth: ${{ inputs.requested-depth }}
           explicit-id: ${{ inputs.explicit-id }}
           gate-mode: ${{ inputs.gate-mode }}
           project: ${{ inputs.project != '' && inputs.project || github.repository }}
@@ -482,19 +482,17 @@ jobs:
           old-include: ${{ inputs.old-include }}
           new-include: ${{ inputs.new-include }}
           lang: ${{ inputs.lang }}
-          ast-frontend: ${{ inputs.ast-frontend }}
-          gcc-path: ${{ inputs.gcc-path }}
-          gcc-prefix: ${{ inputs.gcc-prefix }}
-          gcc-options: ${{ inputs.gcc-options }}
+          frontend: ${{ inputs.ast-frontend }}
+          compiler: ${{ inputs.gcc-path || inputs.gcc-prefix }}
+          compile-options: ${{ inputs.gcc-options }}
           sysroot: ${{ inputs.sysroot }}
           sources: ${{ inputs.sources }}
           build-info: ${{ inputs.build-info }}
           compile-db: ${{ inputs.compile-db }}
           build-config: ${{ inputs.build-config }}
           consumer-binary: ${{ inputs.consumer-binary }}
-          contract-file: ${{ inputs.contract-file }}
-          policy: ${{ inputs.policy }}
-          policy-file: ${{ inputs.policy-file }}
+          contract: ${{ inputs.contract-file }}
+          policy: ${{ inputs.policy-file || inputs.policy }}
           suppress: ${{ inputs.suppress }}
           severity-preset: ${{ inputs.severity-preset }}
           extra-args: ${{ inputs.extra-args }}

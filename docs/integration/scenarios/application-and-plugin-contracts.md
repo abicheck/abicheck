@@ -62,7 +62,7 @@ targets:
         depth: binary
 ```
 
-`contract-file` forwards to the root Action's `required-symbols` input
+`contract` (the check-target input; formerly `contract-file`) forwards to the root Action's `required-symbols` input
 (translated to the CLI's `--required-symbol @FILE`). See
 [Plugin Systems](../../use/plugin-systems.md) for the full
 `--required-symbol`/`--policy plugin_abi` model.

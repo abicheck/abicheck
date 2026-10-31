@@ -200,6 +200,22 @@ _NON_RUN_SH_INPUTS = {
     # exempting them here loses no coverage.
     "jobs",
     "bundle-system-providers",
+    # ADR-091 rename tombstones (2026-10-30). The renamed-to input is what
+    # the run step forwards; the old name is only consumed by
+    # action/validate-inputs.sh, which rejects it before any analysis.
+    "analysis-assurance-complete",
+    "ast-frontend",
+    "debug-info1",
+    "debug-info2",
+    "devel-pkg1",
+    "devel-pkg2",
+    "gcc-options",
+    "gcc-path",
+    "gcc-prefix",
+    "new-version",
+    "old-version",
+    "policy-file",
+    "public-header-dir",
 }
 
 

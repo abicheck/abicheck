@@ -566,7 +566,7 @@ NEW_MUTATIONS = [
     (
         "cross-aarch64",
         ".github/workflows/abi-check.yml",
-        lambda t: t.replace("          gcc-prefix: aarch64-linux-gnu-\n", ""),
+        lambda t: t.replace("          compiler: aarch64-linux-gnu-\n", ""),
         "cross_toolchain",
     ),
 ]
@@ -592,7 +592,7 @@ def test_cross_toolchain_accepts_a_native_arm_runner(tmp_path: Path):
     work = _workspace(tmp_path, "cross-aarch64")
     rel = ".github/workflows/abi-check.yml"
     text = (work / rel).read_text(encoding="utf-8")
-    text = text.replace("          gcc-prefix: aarch64-linux-gnu-\n", "").replace(
+    text = text.replace("          compiler: aarch64-linux-gnu-\n", "").replace(
         "runs-on: ubuntu-24.04", "runs-on: ubuntu-24.04-arm"
     )
     _write(work, rel, text)

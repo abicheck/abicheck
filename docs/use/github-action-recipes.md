@@ -76,7 +76,7 @@ jobs:
 
 ## Cross-compilation check (dump mode)
 
-Cross-compilation flags (`gcc-prefix`, `sysroot`, `gcc-options`) are only supported
+Cross-compilation flags (`compiler`, `sysroot`, `compile-options`) are only supported
 in `dump` mode. Use `mode: dump` to generate a baseline from a cross-compiled binary,
 then compare with a separate step.
 
@@ -87,7 +87,7 @@ then compare with a separate step.
           mode: dump
           new-library: build-arm64/libfoo.so
           header: include/foo.h
-          gcc-prefix: aarch64-linux-gnu-
+          compiler: aarch64-linux-gnu-
           sysroot: /usr/aarch64-linux-gnu
           lang: c
           output-file: baseline-arm64.json
@@ -643,8 +643,8 @@ build-id resolution:
         with:
           old-library: libfoo-1.0.rpm
           new-library: libfoo-1.1.rpm
-          debug-info1: libfoo-debuginfo-1.0.rpm
-          debug-info2: libfoo-debuginfo-1.1.rpm
+          old-debug-info: libfoo-debuginfo-1.0.rpm
+          new-debug-info: libfoo-debuginfo-1.1.rpm
 ```
 
 ## Compare Deb packages with development headers
@@ -655,8 +655,8 @@ build-id resolution:
         with:
           old-library: libfoo1_1.0-1_amd64.deb
           new-library: libfoo1_1.1-1_amd64.deb
-          devel-pkg1: libfoo-dev_1.0-1_amd64.deb
-          devel-pkg2: libfoo-dev_1.1-1_amd64.deb
+          old-header: libfoo-dev_1.0-1_amd64.deb
+          new-header: libfoo-dev_1.1-1_amd64.deb
 ```
 
 ## Compare tar archives (DSOs only)

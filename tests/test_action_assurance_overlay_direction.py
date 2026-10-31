@@ -67,7 +67,7 @@ class TestRootAssuranceOverlayBothDirections:
             "assurance:\n  require_complete: true\n", encoding="utf-8"
         )
         result = _run_bash_script(
-            _script(scope), {"INPUT_ANALYSIS_ASSURANCE_COMPLETE": "false"}, cwd=tmp_path
+            _script(scope), {"INPUT_REQUIRE_COMPLETE": "false"}, cwd=tmp_path
         )
         assert result.returncode == 0, result.stderr
         doc = _read_config_overlay(result.stdout.splitlines())
@@ -79,7 +79,7 @@ class TestRootAssuranceOverlayBothDirections:
             "assurance:\n  require_complete: false\n", encoding="utf-8"
         )
         result = _run_bash_script(
-            _script(scope), {"INPUT_ANALYSIS_ASSURANCE_COMPLETE": "true"}, cwd=tmp_path
+            _script(scope), {"INPUT_REQUIRE_COMPLETE": "true"}, cwd=tmp_path
         )
         assert result.returncode == 0, result.stderr
         doc = _read_config_overlay(result.stdout.splitlines())
@@ -91,7 +91,7 @@ class TestRootAssuranceOverlayBothDirections:
         self, tmp_path: Path, scope: str, value: str
     ) -> None:
         result = _run_bash_script(
-            _script(scope), {"INPUT_ANALYSIS_ASSURANCE_COMPLETE": value}, cwd=tmp_path
+            _script(scope), {"INPUT_REQUIRE_COMPLETE": value}, cwd=tmp_path
         )
         assert result.returncode == 0, result.stderr
         doc = _read_config_overlay(result.stdout.splitlines())
@@ -135,7 +135,7 @@ class TestRootAssuranceOverlayBothDirections:
         result = _run_bash_script(
             _script("scalar"),
             {
-                "INPUT_ANALYSIS_ASSURANCE_COMPLETE": "true",
+                "INPUT_REQUIRE_COMPLETE": "true",
                 "INPUT_DSO_ONLY": "true",
                 "INPUT_INCLUDE_PRIVATE_DSO": "true",
                 "INPUT_FAIL_ON_REMOVED_LIBRARY": "true",
@@ -196,11 +196,11 @@ class TestRootValidatesTheTriState:
             {
                 "INPUT_MODE": "compare",
                 "INPUT_NEW_LIBRARY": "libfoo.so",
-                "INPUT_ANALYSIS_ASSURANCE_COMPLETE": value,
+                "INPUT_REQUIRE_COMPLETE": value,
             },
         )
         assert result.returncode == 0, _combined(result)
-        assert "analysis-assurance-complete" not in _combined(result)
+        assert "require-complete" not in _combined(result)
 
     @pytest.mark.parametrize("value", ["True", "yes", "1"])
     def test_other_values_are_refused_not_read_as_inherit(self, value: str) -> None:
@@ -209,13 +209,11 @@ class TestRootValidatesTheTriState:
             {
                 "INPUT_MODE": "compare",
                 "INPUT_NEW_LIBRARY": "libfoo.so",
-                "INPUT_ANALYSIS_ASSURANCE_COMPLETE": value,
+                "INPUT_REQUIRE_COMPLETE": value,
             },
         )
         assert result.returncode != 0
-        assert f"analysis-assurance-complete '{value}' is not recognized" in _combined(
-            result
-        )
+        assert f"require-complete '{value}' is not recognized" in _combined(result)
 
     def test_non_compare_mode_warns_and_does_not_fail(self) -> None:
         result = _run_script(
@@ -223,13 +221,11 @@ class TestRootValidatesTheTriState:
             {
                 "INPUT_MODE": "dump",
                 "INPUT_NEW_LIBRARY": "libfoo.so",
-                "INPUT_ANALYSIS_ASSURANCE_COMPLETE": "true",
+                "INPUT_REQUIRE_COMPLETE": "true",
             },
         )
         assert result.returncode == 0, _combined(result)
-        assert "analysis-assurance-complete is set but has no effect" in _combined(
-            result
-        )
+        assert "require-complete is set but has no effect" in _combined(result)
 
 
 def _argv_recording_stub(tmp_path: Path) -> tuple[Path, Path]:
@@ -304,9 +300,7 @@ class TestRootOverrideReachesTheCli:
         )
         bindir, config_seen = _argv_recording_stub(tmp_path)
 
-        _run_action(
-            tmp_path, {**env, "INPUT_ANALYSIS_ASSURANCE_COMPLETE": "false"}, bindir
-        )
+        _run_action(tmp_path, {**env, "INPUT_REQUIRE_COMPLETE": "false"}, bindir)
 
         argv = (tmp_path / "argv.txt").read_text(encoding="utf-8").splitlines()
         assert "--config" in argv, argv

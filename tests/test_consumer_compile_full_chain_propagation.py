@@ -25,7 +25,7 @@ fixture never set ``consumer_compile.frontend`` at all, so
 ``consumer-ast-frontend`` was only ever evaluated as an empty string and
 never carried to hop 4's ``--ast-frontend`` argument or checked against the
 root-action env mapping. A regression in ``consumer-ast-frontend``'s own
-expression, or a swap of ``INPUT_AST_FRONTEND`` with another declared
+expression, or a swap of ``INPUT_FRONTEND`` with another declared
 input, could therefore have gone undetected by this file even though
 ``frontend`` is part of the concern the registry now declares closed. Fixed
 by threading a second, distinct sentinel for ``frontend`` through the
@@ -58,7 +58,7 @@ from `check-project.yml`/`check-target/action.yml`, chained:
          resolved to their real INPUT_* env var names via the real
          "Run abicheck" step's own, isolated env block
          (test_action_run_contract.py's `_step_env_mapping`) -- never a
-         hardcoded `INPUT_GCC_PATH` guess
+         hardcoded `INPUT_COMPILER` guess
       -> root action.yml's run.sh [real bash execution, via the existing
          test_action_compile_context_parity.py harness]
 
@@ -72,7 +72,7 @@ the first cut evaluated only the consumer-context step's `with:` values,
 never its own `if:` scheduling guard -- a `||`-to-`&&` regression in that
 guard would still leave every `with:`-level assertion green while the
 step (and therefore the whole consumer-context dump) silently never runs
-at all. (2) the first cut also hardcoded `INPUT_GCC_PATH`/`INPUT_GCC_
+at all. (2) the first cut also hardcoded `INPUT_COMPILER`/`INPUT_GCC_
 OPTIONS` as the env var names fed to `run.sh`, disconnecting hop 3 (the
 resolved `inputs.gcc-path`/`inputs.gcc-options` values) from hop 4 (which
 env vars `run.sh` actually reads) -- a swap of those two mappings in root
@@ -341,13 +341,13 @@ def test_sentinel_consumer_gcc_path_survives_config_to_check_target_input(
     )
 
     final_gcc_path = eval_gha_expression(
-        consumer_step["with"]["gcc-path"], inputs=hop3_inputs
+        consumer_step["with"]["compiler"], inputs=hop3_inputs
     )
     final_gcc_options = eval_gha_expression(
-        consumer_step["with"]["gcc-options"], inputs=hop3_inputs
+        consumer_step["with"]["compile-options"], inputs=hop3_inputs
     )
     final_ast_frontend = eval_gha_expression(
-        consumer_step["with"]["ast-frontend"], inputs=hop3_inputs
+        consumer_step["with"]["frontend"], inputs=hop3_inputs
     )
     assert final_gcc_path == _SENTINEL_CONSUMER_GCC_PATH
     assert final_gcc_options == "-std=gnu++20 -stdlib=libc++"
@@ -540,13 +540,13 @@ def test_partial_overlay_falls_back_to_workflow_global_per_field(
     assert guard is True
 
     final_gcc_path = eval_gha_expression(
-        consumer_step["with"]["gcc-path"], inputs=hop3_inputs
+        consumer_step["with"]["compiler"], inputs=hop3_inputs
     )
     final_gcc_options = eval_gha_expression(
-        consumer_step["with"]["gcc-options"], inputs=hop3_inputs
+        consumer_step["with"]["compile-options"], inputs=hop3_inputs
     )
     final_ast_frontend = eval_gha_expression(
-        consumer_step["with"]["ast-frontend"], inputs=hop3_inputs
+        consumer_step["with"]["frontend"], inputs=hop3_inputs
     )
     assert final_gcc_path == _FALLBACK_GCC_PATH
     assert final_gcc_options == _FALLBACK_GCC_OPTIONS
@@ -649,13 +649,13 @@ def test_partial_overlay_without_frontend_falls_back_to_workflow_global_frontend
     assert guard is True
 
     final_gcc_path = eval_gha_expression(
-        consumer_step["with"]["gcc-path"], inputs=hop3_inputs
+        consumer_step["with"]["compiler"], inputs=hop3_inputs
     )
     final_gcc_options = eval_gha_expression(
-        consumer_step["with"]["gcc-options"], inputs=hop3_inputs
+        consumer_step["with"]["compile-options"], inputs=hop3_inputs
     )
     final_ast_frontend = eval_gha_expression(
-        consumer_step["with"]["ast-frontend"], inputs=hop3_inputs
+        consumer_step["with"]["frontend"], inputs=hop3_inputs
     )
     assert final_gcc_path == _SENTINEL_CONSUMER_GCC_PATH
     assert final_gcc_options == "-std=gnu++20"
@@ -761,13 +761,13 @@ def test_no_baseline_channel_activates_the_consumer_step_via_its_own_arm() -> No
     )
 
     final_gcc_path = eval_gha_expression(
-        consumer_step["with"]["gcc-path"], inputs=hop3_inputs
+        consumer_step["with"]["compiler"], inputs=hop3_inputs
     )
     final_gcc_options = eval_gha_expression(
-        consumer_step["with"]["gcc-options"], inputs=hop3_inputs
+        consumer_step["with"]["compile-options"], inputs=hop3_inputs
     )
     final_ast_frontend = eval_gha_expression(
-        consumer_step["with"]["ast-frontend"], inputs=hop3_inputs
+        consumer_step["with"]["frontend"], inputs=hop3_inputs
     )
     # Not carried through hop 4 (`_assert_reaches_real_dump_cli_invocation`
     # unconditionally asserts `--compiler`/`--compiler-option` are present,
@@ -815,8 +815,8 @@ def _assert_reaches_real_dump_cli_invocation(
     """Hop 4: the values resolved at the end of hops 1-3, mapped to their REAL
     INPUT_* env var names via root action.yml's own "Run abicheck" step's
     OWN, isolated `env:` block (`_step_env_mapping("Run abicheck")`, from
-    test_action_run_contract.py -- never a hardcoded `INPUT_GCC_PATH`/
-    `INPUT_AST_FRONTEND` guess, so a swap of that mapping would be caught
+    test_action_run_contract.py -- never a hardcoded `INPUT_COMPILER`/
+    `INPUT_FRONTEND` guess, so a swap of that mapping would be caught
     here). Deliberately the step-scoped mapping, not the whole-file
     `_action_yml_env_mapping()`: action.yml's earlier "Validate mode/input
     combination" step duplicates some of these same INPUT_* names in its
@@ -838,17 +838,16 @@ def _assert_reaches_real_dump_cli_invocation(
     deleted that branch, which is what surfaced the mismatch)."""
     _assert_run_abicheck_step_invokes_run_sh()
     env_by_input = {inp: var for var, inp in _step_env_mapping("Run abicheck").items()}
-    for name in ("gcc-path", "gcc-options", "ast-frontend", "gcc-prefix", "sysroot"):
+    for name in ("compiler", "compile-options", "frontend", "sysroot"):
         assert name in env_by_input, (
             f"root action.yml's env block no longer maps input {name!r} to "
             f"an INPUT_* var -- test_action_run_contract.py's own contract "
             f"tests should already have failed"
         )
     env = {
-        env_by_input["ast-frontend"]: ast_frontend,
-        env_by_input["gcc-path"]: gcc_path,
-        env_by_input["gcc-prefix"]: "",
-        env_by_input["gcc-options"]: gcc_options,
+        env_by_input["frontend"]: ast_frontend,
+        env_by_input["compiler"]: gcc_path,
+        env_by_input["compile-options"]: gcc_options,
         env_by_input["sysroot"]: "",
         "INPUT_NOSTDINC": "false",
     }

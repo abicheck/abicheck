@@ -78,7 +78,7 @@ meaningful when `kind: target` (never `kind: bundle`):
 |---|---|---|
 | `library` (default) | A plain `compare`. | — |
 | `app-consumer` | `compare --used-by` (S22, application compatibility). | `consumer-binary` |
-| `plugin-contract` | `compare --required-symbol @FILE` (S23, plugin/dlopen contract). | `contract-file` — a `.syms` file, one required linker symbol per line, `#` comments allowed; **not** YAML |
+| `plugin-contract` | `compare --required-symbol @FILE` (S23, plugin/dlopen contract). | `contract` — a `.syms` file, one required linker symbol per line, `#` comments allowed; **not** YAML |
 
 **The "library redirect":** `app-consumer`/`plugin-contract`
 targets have no binary/baseline of their own — they resolve *through* the
@@ -141,11 +141,11 @@ path that does not exist — not a documentation choice:
 
 | Rejected | Why |
 |---|---|
-| `requested-depth: headers\|build\|source` | A bundle's baseline is staged raw binaries with no historical per-member header/build/source evidence. Only `binary` is supported. Use `kind: target` to compare one library at a deeper rung. |
+| `depth: headers\|build\|source` | A bundle's baseline is staged raw binaries with no historical per-member header/build/source evidence. Only `binary` is supported. Use `kind: target` to compare one library at a deeper rung. |
 | `baseline-channel: none` | There is no no-baseline bundle audit path: a bundle always compares directories, which `compare`'s audit-only shape cannot do. |
 | `allow-new-target: true` | A bundle comparison needs one coherent release where every member already coexisted. Scope a new member with its own `kind: target` check. |
 
-`analysis-assurance-complete` is **not** in that list — see its row in
+`require-complete` is **not** in that list — see its row in
 [Inputs](#inputs). Supporting a release-level assurance gate is a different
 capability from supporting historical header-aware bundle capture; the first
 landed, the second has not.
@@ -165,7 +165,7 @@ landed, the second has not.
 | `baseline-required` | no | `true` | Forwarded to `resolve-baseline`'s `required`. |
 | `candidate-build-output` | no | `''` | Forwarded to `resolve-baseline`'s `incompatible_evidence` check. |
 | `allow-new-target` | no | `false` | Forwarded to `resolve-baseline`'s `allow-new-target` — `false` means a target absent from an otherwise-resolved baseline-set always fails `ambiguous`; `true` opts this check into the `new_target` outcome instead, an advisory, non-fatal lifecycle state for a target checked before it has ever been published in a baseline-set (e.g. a new library's first release). Only meaningful for `kind: target`; rejected outright for `kind: bundle` (a bundle comparison needs one coherent release where every member already coexisted). Pair with `baseline-required: false`, or a required-coverage gate would still block on the target's first appearance. |
-| `requested-depth` | yes | — | `binary` \| `headers` \| `build` \| `source` — for `kind: bundle`, only `binary` is supported (`headers`/`build`/`source` are all rejected: a bundle's baseline is always raw binaries with no historical header/build/source evidence staged per member). |
+| `depth` | yes | — | `binary` \| `headers` \| `build` \| `source` — for `kind: bundle`, only `binary` is supported (`headers`/`build`/`source` are all rejected: a bundle's baseline is always raw binaries with no historical header/build/source evidence staged per member). |
 | `explicit-id` | no | `''` | (G42 "Explicit check identifiers") This check's `checks[].id`, if the project declared one — folded into `check-id`'s `~<explicit_id>` tail so two checks sharing (`name`, `profile`, `baseline-channel`, `requested-depth`) but declaring different analysis method/policy/assurance each produce a distinct, non-colliding `check-id`/report. Omit (default) for the pre-G42, unqualified `check-id` shape. |
 | `build-system` / `build-generator` | no | `''` | (WS-A) This cell's `build-output.json` `profile.build_system` name and generator. When `build-system` is set the report envelope carries `profile_build_system: {name, generator}` (report schema 5.11) in every mode, so the cell's findings name the build lane that produced them. `check-project.yml` forwards them from the run-plan cell. |
 | `gate-mode` | no | `local` | `local` \| `deferred` \| `advisory`. |
@@ -176,10 +176,12 @@ landed, the second has not.
 | `evidence-pack-path` | no | `abicheck_inputs` | Must match an earlier `collect-facts phase: prepare` step's own output path (`wrapper`/`clang-plugin` only). |
 | `new-library` | yes | — | Candidate binary (`kind: target`) or directory of candidate member binaries (`kind: bundle`). |
 | `consumer-binary` | when `target-kind: app-consumer` | — | Forwarded as `--used-by`. |
-| `contract-file` | when `target-kind: plugin-contract` | — | Forwarded as the root Action's `required-symbols` input (translated to the CLI's `--required-symbol @FILE`). |
+| `contract` | when `target-kind: plugin-contract` | — | Forwarded as the root Action's `required-symbols` input (translated to the CLI's `--required-symbol @FILE`). |
 | `require-complete-analysis` | no | `false` | RETIRED (rulings.py deferred-option followup — hard removal, no deprecation window, mirroring the root Action's own `require-complete-analysis` retirement, which this input forwarded to). The root Action's input it mapped onto is gone: P0.4's orthogonal `ANALYSIS_INCOMPLETE` axis is config-only now, `.abicheck.yml`'s `assurance.require_complete: true`, with no CLI or Action-input override. Still declared so a workflow that sets it gets an explicit `::error::` instead of a silently-ignored input. See `analysis-assurance-complete` below for how `checks[].analysis.assurance: complete` (product-gaps audit §3) is now enforced instead. |
-| `analysis-assurance-complete` | no | — | Tri-state per-job override of `.abicheck.yml`'s `assurance.require_complete`, mirroring the root Action's own input. Unset (the default) inherits the config and generates no overlay; `'true'` and `'false'` both write an `assurance` overlay, so `'false'` lifts a floor the discovered or build-config `.abicheck.yml` sets. Any other value is refused. `'true'` is what a cell that declared `checks[].analysis.assurance: complete` (`RunPlanCheck.analysis_assurance`, validated at run-plan generation time by `project_targets.py`'s `analysis_assurance_gate.py`, which still accepts only `'complete'`). This is the config-overlay replacement `require-complete-analysis` names as its successor: since neither a CLI flag nor an Action input can carry `assurance.require_complete` any more, this Action merges an `assurance: {require_complete: true}` fragment into whichever `build-config` the internal analysis step would otherwise read — the same config-only mechanism a project author's own `.abicheck.yml` line would produce. `check-project.yml` is the intended caller; a direct `check-target` caller may also set it explicitly. **Supported for `kind: bundle` too**: the release fan-out a bundle check runs folds every compared member's own `analysis_assurance` with `max` into the same exit axis a single-library check uses, so a one-member bundle gates identically to a `kind: target` check and any member that fell short floors the whole bundle. It used to be rejected outright for a bundle; that guard is retired. |
-| `header`, `old-header`, `new-header`, `include`, `old-include`, `new-include`, `lang`, `ast-frontend`, `gcc-path`, `gcc-prefix`, `gcc-options`, `sysroot`, `sources`, `build-info`, `compile-db`, `build-config`, `policy`, `policy-file`, `suppress`, `severity-preset`, `severity-addition`, `extra-args`, `python-version`, `install-deps`, `dependency-source` | no | (mirror the root Action) | Forwarded straight through to the internal analysis step. `dependency-source` (G34 Phase C) is what `check-project.yml` sets per cell from the profile's own `dependency_source:`; the root Action owns its accepted-value list and its fallback to `install-deps`. |
+| `require-complete` | no | — | Tri-state per-job override of `.abicheck.yml`'s `assurance.require_complete`, mirroring the root Action's own input. Unset (the default) inherits the config and generates no overlay; `'true'` and `'false'` both write an `assurance` overlay, so `'false'` lifts a floor the discovered or build-config `.abicheck.yml` sets. Any other value is refused. `'true'` is what a cell that declared `checks[].analysis.assurance: complete` (`RunPlanCheck.analysis_assurance`, validated at run-plan generation time by `project_targets.py`'s `analysis_assurance_gate.py`, which still accepts only `'complete'`). This is the config-overlay replacement `require-complete-analysis` names as its successor: since neither a CLI flag nor an Action input can carry `assurance.require_complete` any more, this Action merges an `assurance: {require_complete: true}` fragment into whichever `build-config` the internal analysis step would otherwise read — the same config-only mechanism a project author's own `.abicheck.yml` line would produce. `check-project.yml` is the intended caller; a direct `check-target` caller may also set it explicitly. **Supported for `kind: bundle` too**: the release fan-out a bundle check runs folds every compared member's own `analysis_assurance` with `max` into the same exit axis a single-library check uses, so a one-member bundle gates identically to a `kind: target` check and any member that fell short floors the whole bundle. It used to be rejected outright for a bundle; that guard is retired. |
+| `header`, `old-header`, `new-header`, `include`, `old-include`, `new-include`, `lang`, `frontend`, `compiler`, `compile-options`, `sysroot`, `sources`, `build-info`, `compile-db`, `build-config`, `policy`, `suppress`, `severity-preset`, `severity-addition`, `extra-args`, `python-version`, `install-deps`, `dependency-source` | no | (mirror the root Action) | Forwarded straight through to the internal analysis step. `dependency-source` (G34 Phase C) is what `check-project.yml` sets per cell from the profile's own `dependency_source:`; the root Action owns its accepted-value list and its fallback to `install-deps`. |
+
+Renamed inputs: `requested-depth` is now `depth`, `contract-file` is now `contract`, `analysis-assurance-complete` is now `require-complete`, and the root-Action-forwarded inputs `ast-frontend`, `gcc-path`/`gcc-prefix`, `gcc-options` and `policy-file` are now `frontend`, `compiler`, `compile-options` and `policy`. The old names are retired: setting one fails the run with an `::error::` naming its replacement.
 
 ## Outputs
 
@@ -248,7 +250,7 @@ ever ran.
     profile: linux-x86_64-gcc13-release
     baseline-channel: accepted-main
     baseline-path: ./restored-baseline # staged by an earlier actions/cache step
-    requested-depth: headers
+    depth: headers
     gate-mode: local
     new-library: build/lib/libpvxs.so
     header: headers/pvxs/*.h
@@ -262,7 +264,7 @@ ever ran.
     name: libpvxs
     profile: linux-x86_64-gcc13-release
     baseline-channel: none
-    requested-depth: headers
+    depth: headers
     gate-mode: advisory
     new-library: build/lib/libpvxs.so
     header: headers/pvxs/*.h
