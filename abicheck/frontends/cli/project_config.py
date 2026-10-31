@@ -41,7 +41,7 @@ import click
 from ...workflows.compare_configuration import CompareSettingsError
 
 if TYPE_CHECKING:
-    from ...buildsource.build_config import BuildConfig
+    from ...workflows.extraction import BuildConfig
     from ...workflows.compare_configuration import ResolvedCompareConfig
 
 __all__ = [

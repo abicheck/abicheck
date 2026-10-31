@@ -860,17 +860,6 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "tests/test_action_compile_context_parity.py",
-      "baseline_lines": 1580,
-      "target": "tests/unit-or-contract ownership matching production migration",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "adr062_new_capability_growth",
-      "owner": "tests",
-      "rationale": "Restored by ADR-091 Phase 2d review: the compile-context parity tests were ported to the --set path (ADR-091 D4) instead of deleted. Their behaviour assertions survive; only the overlay-mechanism classes (mktemp anchoring, stdin piping) were dropped. Baseline is the measured length after the port. Split by behaviour axis with the production migration.",
-      "review_by": "2026-11-30"
-    },
-    {
       "path": "tests/test_action_coverage_verdict.py",
       "baseline_lines": 1560,
       "target": "tests/unit-or-contract ownership matching production migration",
@@ -894,7 +883,7 @@
     },
     {
       "path": "tests/test_action_validate_inputs.py",
-      "baseline_lines": 1318,
+      "baseline_lines": 1287,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",

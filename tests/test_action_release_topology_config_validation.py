@@ -92,7 +92,9 @@ class TestReleaseTopologyOverlayValidatesTheBaseConfigBeforeMerging:
         self, tmp_path: Path
     ) -> None:
         (tmp_path / ".abicheck.yml").write_text("release: []\n", encoding="utf-8")
-        result = _run_bash_script(_harness(), {"INPUT_REQUIRE_COMPLETE": "true"}, cwd=tmp_path)
+        result = _run_bash_script(
+            _harness(), {"INPUT_REQUIRE_COMPLETE": "true"}, cwd=tmp_path
+        )
         assert result.returncode != 0
         assert "release must be a mapping" in result.stderr
         assert "failed to merge" in result.stdout
@@ -104,7 +106,9 @@ class TestReleaseTopologyOverlayValidatesTheBaseConfigBeforeMerging:
         (tmp_path / ".abicheck.yml").write_text(
             "release:\n  dso_only: false\nnot_a_real_key: 1\n", encoding="utf-8"
         )
-        result = _run_bash_script(_harness(), {"INPUT_REQUIRE_COMPLETE": "true"}, cwd=tmp_path)
+        result = _run_bash_script(
+            _harness(), {"INPUT_REQUIRE_COMPLETE": "true"}, cwd=tmp_path
+        )
         assert result.returncode != 0
         assert "unknown .abicheck.yml key 'not_a_real_key'" in result.stderr
         assert "--config" not in result.stdout

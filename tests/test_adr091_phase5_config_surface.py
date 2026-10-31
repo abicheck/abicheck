@@ -74,7 +74,9 @@ def test_moved_keys_are_accepted_by_compare_set(
     parse_set_assignments((assignment,))
 
 
-@pytest.mark.parametrize("assignment", ["severity.preset=default", "compile.defines=[A]"])
+@pytest.mark.parametrize(
+    "assignment", ["severity.preset=default", "compile.defines=[A]"]
+)
 def test_core_option_keys_stay_refused_by_set(assignment: str) -> None:
     """severity.preset and compile.defines keep their flags, so --set refuses them."""
     from abicheck.frontends.cli.options.config_set import parse_set_assignments

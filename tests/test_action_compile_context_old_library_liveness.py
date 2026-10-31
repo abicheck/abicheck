@@ -55,9 +55,13 @@ def _fresh(base: Path, name: str) -> Path:
 
 
 @pytest.mark.parametrize("kind", ["binary", "snapshot"])
-def test_compile_pairs_do_not_depend_on_the_old_operand_kind(tmp_path, kind: str) -> None:
+def test_compile_pairs_do_not_depend_on_the_old_operand_kind(
+    tmp_path, kind: str
+) -> None:
     """Whichever kind the old side is, the same inputs forward the same pairs."""
-    baseline = _compile_pairs(_run(_fresh(tmp_path, "reference"), "compare", **_CONTEXT))
+    baseline = _compile_pairs(
+        _run(_fresh(tmp_path, "reference"), "compare", **_CONTEXT)
+    )
     argv = _run(
         _fresh(tmp_path, kind),
         "compare",

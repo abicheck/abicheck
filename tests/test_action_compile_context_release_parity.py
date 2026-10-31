@@ -50,7 +50,9 @@ class TestCompareReleaseStyleOperandCompileContext:
     def test_set_lines_reach_a_release_operand_like_a_single_pair(
         self, tmp_path
     ) -> None:
-        single = _set_pairs(_run(_fresh(tmp_path, "single"), "compare", INPUT_SET=_COMPILE_SET))
+        single = _set_pairs(
+            _run(_fresh(tmp_path, "single"), "compare", INPUT_SET=_COMPILE_SET)
+        )
         release_dir = _release_operand(_fresh(tmp_path, "release"))
         release = _set_pairs(
             _run(

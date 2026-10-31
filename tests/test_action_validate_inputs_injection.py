@@ -123,7 +123,9 @@ class TestAnnotationInjection:
         annotation still has to tell the caller *what* they set, or the
         tombstone stops being actionable."""
         result = _run_validate({"INPUT_MODE": "compare", "INPUT_JOBS": "1\n2"})
-        assert result.returncode == 1, result.stdout + result.stderr  # jobs is a fail-closed tombstone
+        assert result.returncode == 1, (
+            result.stdout + result.stderr
+        )  # jobs is a fail-closed tombstone
         assert "jobs ('1 2')" in result.stdout
 
     @pytest.mark.parametrize("payload", _ESCAPE_PAYLOADS)
@@ -147,7 +149,9 @@ class TestAnnotationInjection:
             bash_options=["-O", "xpg_echo"] if xpg_echo else [],
         )
 
-        assert result.returncode == 1, result.stdout + result.stderr  # jobs is a fail-closed tombstone
+        assert result.returncode == 1, (
+            result.stdout + result.stderr
+        )  # jobs is a fail-closed tombstone
         emitted = [ln for ln in result.stdout.splitlines() if ln.startswith("::")]
         assert len(emitted) == 1, (
             f"payload {payload!r} produced {len(emitted)} annotation lines "
@@ -175,7 +179,9 @@ class TestAnnotationInjection:
         """
         result = _run_validate({"INPUT_MODE": "compare", "INPUT_JOBS": payload})
 
-        assert result.returncode == 1, result.stdout + result.stderr  # jobs is a fail-closed tombstone
+        assert result.returncode == 1, (
+            result.stdout + result.stderr
+        )  # jobs is a fail-closed tombstone
         emitted = [ln for ln in result.stdout.splitlines() if ln.startswith("::")]
         assert len(emitted) == 1, result.stdout
         # No raw `%0A`/`%0D` may reach the runner: every `%` is escaped, so
@@ -192,7 +198,9 @@ class TestAnnotationInjection:
         a `%` the escape has already passed over."""
         result = _run_validate({"INPUT_MODE": "compare", "INPUT_JOBS": "a%b\nc"})
 
-        assert result.returncode == 1, result.stdout + result.stderr  # jobs is a fail-closed tombstone
+        assert result.returncode == 1, (
+            result.stdout + result.stderr
+        )  # jobs is a fail-closed tombstone
         emitted = [ln for ln in result.stdout.splitlines() if ln.startswith("::")]
         assert len(emitted) == 1, result.stdout
         assert "a%25b" in emitted[0], emitted[0]

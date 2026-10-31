@@ -144,7 +144,9 @@ def test_old_header_forwards_as_sided_header_flag(tmp_path: Path) -> None:
     assert "old=v1.h" in headers
 
 
-def test_public_header_dirs_is_retired_and_not_forwarded_as_a_header_root(tmp_path: Path) -> None:
+def test_public_header_dirs_is_retired_and_not_forwarded_as_a_header_root(
+    tmp_path: Path,
+) -> None:
     """`public-header-dirs` is RETIRED to `set: scope.public_header_dirs=[...]`
     (ADR-091 D7): run.sh no longer forwards it as a -H root."""
     bindir, log = _logging_abicheck(tmp_path)

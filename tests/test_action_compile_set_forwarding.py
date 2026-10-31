@@ -47,9 +47,7 @@ def _validate(**inputs: str) -> subprocess.CompletedProcess:
     """Run the pre-install validator, the first gate a real run hits."""
     require_bash()
     env = {k: v for k, v in os.environ.items() if not k.startswith("INPUT_")}
-    env.update(
-        {"INPUT_MODE": "compare", "INPUT_NEW_LIBRARY": "libfoo.so", **inputs}
-    )
+    env.update({"INPUT_MODE": "compare", "INPUT_NEW_LIBRARY": "libfoo.so", **inputs})
     return subprocess.run(
         [bash_executable(), str(VALIDATE_SH)],
         capture_output=True,
@@ -106,7 +104,9 @@ def test_prefix_form_compiler_set_line_is_forwarded(tmp_path: Path) -> None:
 
 
 def test_options_list_set_line_is_forwarded_verbatim(tmp_path: Path) -> None:
-    argv = _run(tmp_path, INPUT_SET='compile.options=["-DNAME=\\"x\\"", "-fno-exceptions"]\n')
+    argv = _run(
+        tmp_path, INPUT_SET='compile.options=["-DNAME=\\"x\\"", "-fno-exceptions"]\n'
+    )
     (value,) = [v for v in _set_pairs(argv) if v.startswith("compile.options=")]
     assert json.loads(value.removeprefix("compile.options=")) == [
         '-DNAME="x"',
@@ -175,7 +175,7 @@ def test_no_overlay_temp_file_is_written_for_set_compile_lines(tmp_path: Path) -
     runner_temp.mkdir()
     argv = _run(
         tmp_path,
-        INPUT_SET="compile.compiler=/usr/bin/g++\ncompile.sysroot=\"/opt/sysroot\"\n",
+        INPUT_SET='compile.compiler=/usr/bin/g++\ncompile.sysroot="/opt/sysroot"\n',
         RUNNER_TEMP=str(runner_temp),
     )
     assert not any(

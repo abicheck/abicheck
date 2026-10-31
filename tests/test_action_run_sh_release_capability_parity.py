@@ -532,9 +532,7 @@ class TestNoOpInputsSynthesizeNoOverlay:
     #: Values documented as resolving to exactly what "unset" resolves to.
     #: `lang: c++` is action.yml's own declared default, so an omitted
     #: `lang` arrives as this and must not count as a request either.
-    _NO_OP_INPUTS: tuple[tuple[str, str], ...] = (
-        ("INPUT_LANG", "c++"),
-    )
+    _NO_OP_INPUTS: tuple[tuple[str, str], ...] = (("INPUT_LANG", "c++"),)
 
     @pytest.mark.parametrize("var,value", _NO_OP_INPUTS)
     @pytest.mark.parametrize("shape", ("single", *_RELEASE_OPERAND_SHAPES))
