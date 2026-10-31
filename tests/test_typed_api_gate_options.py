@@ -174,7 +174,7 @@ class TestCompareRequestGateOptions:
                 str(old),
                 str(new),
                 "--set",
-                'severity.preset=info-only',
+                "severity.preset=info-only",
                 "-o",
                 "json=-",
             ],

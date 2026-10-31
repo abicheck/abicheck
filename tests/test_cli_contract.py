@@ -785,9 +785,7 @@ def test_gate_flags_missing_decorator(
         for fam in ("severity_options", "scope_options", "export_options")
         if any(fam in m and "compare" in m for m in msgs)
     }
-    # severity is allowlisted (ADR-091 Phase 5: severity.preset is config-only),
-    # so only the output family is still reported missing.
-    assert missing == {"export_options"}, msgs
+    assert missing == {"export_options"}, msgs  # severity: ADR-091 Phase 5
 
 
 def test_gate_flags_missing_command(

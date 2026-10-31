@@ -31,10 +31,8 @@ from typing import Any
 import click
 import yaml
 
-from ....workflows.compare_configuration import (
-    CLI_ONLY_OVERRIDE_PATHS,
-    TYPED_OVERRIDE_CHANNELS,
-)
+from ....workflows.compare.override_channels import TYPED_OVERRIDE_CHANNELS
+from ....workflows.compare_configuration import CLI_ONLY_OVERRIDE_PATHS
 from ....workflows.compile_config import COMPILE_CONTEXT_OVERRIDE_PATHS
 from ....workflows.extraction import ConfigOverrideError, validate_config_overrides
 

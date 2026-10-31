@@ -584,8 +584,20 @@ class TestEvidenceReading:
         "argv",
         [
             ["compare", "old.so", "new.so", "--used-by", "app"],
-            ["compare", "old.so", "new.so", "--set", 'consumers.required_symbols=["sym"]'],
-            ["compare", "old.so", "new.so", "--set", 'consumers.required_symbols=["@syms.txt"]'],
+            [
+                "compare",
+                "old.so",
+                "new.so",
+                "--set",
+                'consumers.required_symbols=["sym"]',
+            ],
+            [
+                "compare",
+                "old.so",
+                "new.so",
+                "--set",
+                'consumers.required_symbols=["@syms.txt"]',
+            ],
         ],
     )
     def test_is_consumer_scoped_recognizes_every_dial(self, argv):
@@ -775,13 +787,27 @@ class TestEvidenceReading:
         no recorded cwd at all, must not raise and must not fabricate a
         match."""
         no_cwd = ev.consumer_scope_targets(
-            {"argv": ["compare", "a", "b", "--set", 'consumers.required_symbols=["@syms.txt"]']}
+            {
+                "argv": [
+                    "compare",
+                    "a",
+                    "b",
+                    "--set",
+                    'consumers.required_symbols=["@syms.txt"]',
+                ]
+            }
         )
         assert no_cwd == frozenset()
 
         missing_file = ev.consumer_scope_targets(
             {
-                "argv": ["compare", "a", "b", "--set", 'consumers.required_symbols=["@syms.txt"]'],
+                "argv": [
+                    "compare",
+                    "a",
+                    "b",
+                    "--set",
+                    'consumers.required_symbols=["@syms.txt"]',
+                ],
                 "cwd": str(tmp_path / "gone"),
             }
         )

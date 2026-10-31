@@ -333,7 +333,7 @@
     },
     {
       "path": "abicheck/cli_options.py",
-      "baseline_lines": 1081,
+      "baseline_lines": 1006,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -630,7 +630,7 @@
     },
     {
       "path": "abicheck/frontends/cli/commands/dump.py",
-      "baseline_lines": 874,
+      "baseline_lines": 871,
       "target": "frontends (already home; the header-only branch's own body already delegates to frontends/cli/dump_execute.py -- only the dispatch/is_header_only_evidence check stays here)",
       "rule": "no_growth",
       "disposition": "migrate",

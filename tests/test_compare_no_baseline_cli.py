@@ -199,7 +199,11 @@ def test_a_bare_sources_value_is_accepted(candidate: Path, tmp_path: Path) -> No
 def test_a_view_token_is_refused(candidate: Path) -> None:
     """An audit has no root-cause graph or findings filter for --view."""
     result = invoke_cli(
-        "compare", "--no-baseline", str(candidate), "--set", 'output.view=["report-mode=leaf"]'
+        "compare",
+        "--no-baseline",
+        str(candidate),
+        "--set",
+        'output.view=["report-mode=leaf"]',
     )
     assert result.exit_code == _EXIT_USAGE, result.output
     assert "output.view" in result.output

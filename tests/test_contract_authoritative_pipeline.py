@@ -668,7 +668,7 @@ class TestExplicitScopeReachesTheGateBeforeItComputes:
             "--set",
             'consumers.required_symbols=["_Z5pub_bi"]',
             "--set",
-            'severity.preset=default',
+            "severity.preset=default",
             *extra,
         ]
         return CliRunner().invoke(main, argv).exit_code
@@ -744,7 +744,7 @@ class TestExplicitScopeReachesTheGateBeforeItComputes:
         "extra_flags",
         [
             pytest.param((), id="legacy"),
-            pytest.param(("--set", 'severity.preset=default'), id="severity"),
+            pytest.param(("--set", "severity.preset=default"), id="severity"),
         ],
     )
     def test_a_missing_label_carries_the_whole_canonical_shape(

@@ -39,6 +39,10 @@ from typing import TYPE_CHECKING, Any
 import click
 
 from .cli_compare_fold import _exit_on_budget_overflow, report_not_comparable_and_exit
+from .frontends.cli.compare_config_scope import (
+    config_scope_inputs,
+    consumer_manifest_specs,
+)
 from .cli_compare_options import (
     _reject_bundle_facts_out_for_single_pair,
     _resolve_debug_roots,
@@ -103,31 +107,6 @@ if TYPE_CHECKING:
 
 
 @run_scoped_digest_cache
-def _resolve_config_path(item: str, cfg_path: Path | None) -> Path:
-    """A ``consumers.manifests`` entry: relative to the config file that names it."""
-    path = Path(item)
-    if path.is_absolute() or cfg_path is None:
-        return path
-    return cfg_path.parent / path
-
-
-def _resolve_config_required_symbol(item: str, cfg_path: Path | None) -> str:
-    """A ``consumers.required_symbols`` entry; ``@FILE`` resolves like ``_resolve_config_path``."""
-    if not item.startswith("@"):
-        return item
-    return "@" + str(_resolve_config_path(item[1:], cfg_path))
-
-
-def _parse_config_view(tokens: list[str]) -> dict[str, object]:
-    """``output.view`` tokens, parsed with the grammar the removed ``--view`` used."""
-    from .frontends.cli.options.compare_view import parse_view_tokens
-
-    try:
-        return parse_view_tokens(tuple(tokens))
-    except ValueError as exc:
-        raise click.UsageError(f"output.view: {exc}") from exc
-
-
 def run_compare(
     ctx: click.Context,
     *,
@@ -276,43 +255,12 @@ def run_compare(
         severity_preset=severity_preset,
         config_overrides=config_overrides,
     )
-    # Paths in a config file resolve against that file, as every other key does.
-    if project_cfg is not None:
-        used_by_manifests = (
-            tuple(
-                _resolve_config_path(item, cfg_path)
-                for item in project_cfg.used_by_manifests
-            )
-            or used_by_manifests
-        )
-        required_symbols_opt = (
-            tuple(
-                _resolve_config_required_symbol(item, cfg_path)
-                for item in project_cfg.required_symbols
-            )
-            or required_symbols_opt
-        )
-    if project_cfg is not None and project_cfg.output_view:
-        view = _parse_config_view(project_cfg.output_view)
-        report_mode, show_only = view["report_mode"], view["show_only"]
-    # Workstream D-S1: merge --used-by-manifest-named consumers into the same
-    # --used-by pipeline before anything else looks at used_by_apps -- every
-    # downstream consumer (the mutual-exclusivity check just below, the
-    # release-fan-out rejection, the dry-run preview, and the real scoped
-    # gate) then sees one combined tuple and needs no manifest-specific
-    # branch of its own.
-    if used_by_manifests:
-        from .model.consumer_spec import parse_consumer_manifest
-
-        try:
-            manifest_specs: tuple[ConsumerAppInput, ...] = tuple(
-                spec
-                for manifest_path_ in used_by_manifests
-                for spec in parse_consumer_manifest(manifest_path_)
-            )
-        except ValueError as exc:
-            raise click.UsageError(f"consumers.manifests: {exc}") from exc
-        used_by_apps = (*used_by_apps, *manifest_specs)
+    # Consumer scope and view come from .abicheck.yml (ADR-091 Phase 5).
+    used_by_manifests, required_symbols_opt, config_view = config_scope_inputs(
+        project_cfg, cfg_path, used_by_manifests, required_symbols_opt
+    )
+    report_mode, show_only = config_view or (report_mode, show_only)
+    used_by_apps = (*used_by_apps, *consumer_manifest_specs(used_by_manifests))
 
     with compare_settings_usage_errors():
         (

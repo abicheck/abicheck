@@ -460,7 +460,8 @@ class TestRenderOutputFormats:
 
         runner = CliRunner()
         result = runner.invoke(
-            main, ["compare", str(old_f), str(new_f), "--set", 'output.view=["root-cause"]']
+            main,
+            ["compare", str(old_f), str(new_f), "--set", 'output.view=["root-cause"]'],
         )
         assert result.exit_code == 4
         assert "Cfg" in result.output

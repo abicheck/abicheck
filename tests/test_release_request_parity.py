@@ -134,7 +134,7 @@ class TestTheApiAndTheCliResolveTheSameRequest:
             "-o",
             "json=-",
             "--set",
-            'severity.preset=default',
+            "severity.preset=default",
         )
         api_plan = service.resolve_release_compare(
             service.ReleaseCompareRequest(

@@ -129,7 +129,7 @@ class TestReleaseCompareRequestParity:
                 "-o",
                 "json=-",
                 "--set",
-                'severity.preset=strict',
+                "severity.preset=strict",
             )
         assert code in (
             0,

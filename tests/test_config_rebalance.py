@@ -989,7 +989,8 @@ class TestExitSchemeExplicit:
         # A severity setting flips the scheme to severity, so an API_BREAK
         # (potential_breaking=warning) yields exit 0.
         auto = CliRunner().invoke(
-            main, ["compare", str(old_f), str(new_f), "--set", 'severity.preset=default']
+            main,
+            ["compare", str(old_f), str(new_f), "--set", "severity.preset=default"],
         )
         assert auto.exit_code == 0
 
@@ -1002,7 +1003,7 @@ class TestExitSchemeExplicit:
                 str(old_f),
                 str(new_f),
                 "--set",
-                'severity.preset=default',
+                "severity.preset=default",
                 "--exit-code-scheme",
                 "legacy",
             ],
@@ -1025,7 +1026,7 @@ class TestExitSchemeExplicit:
                 "--config",
                 str(cfg),
                 "--set",
-                'severity.preset=default',
+                "severity.preset=default",
             ],
         )
         # The unrecognized `exit_code_scheme:` key is a hard error, same as

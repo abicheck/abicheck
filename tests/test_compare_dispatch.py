@@ -538,7 +538,11 @@ class TestCompareDispatch:
         _write_snap(old_dir / "libfoo.json", _snap())
         _write_snap(new_dir / "libfoo.json", _snap())
         code, out, err = _invoke(
-            "compare", str(old_dir), str(new_dir), "--set", 'consumers.required_symbols=["_Z3foov"]'
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--set",
+            'consumers.required_symbols=["_Z3foov"]',
         )
         assert code != 0
         msg = out + err

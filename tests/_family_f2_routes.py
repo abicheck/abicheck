@@ -386,7 +386,7 @@ AXES: tuple[Axis, ...] = (
     ),
     Axis(
         "severity_strict",
-        lambda t: ["--set", 'severity.preset=strict'],
+        lambda t: ["--set", "severity.preset=strict"],
         lambda t: {"severity_preset": "strict"},
         ("severity_preset",),
         ("severity_preset",),

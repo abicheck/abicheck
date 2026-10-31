@@ -206,7 +206,7 @@ def test_strict_gates_a_compatible_kind_iff_its_category_is_configurable(
     did not widen into "COMPATIBLE never gates".
     """
     inject.append(ChangeKind(kind))
-    code, doc = _compare(tmp_path, "--set", 'severity.preset=strict')
+    code, doc = _compare(tmp_path, "--set", "severity.preset=strict")
     expected_cat = _oracle_category(kind)
     assert code == (0 if expected_cat is None else 1)
     assert doc["severity"]["blocking_categories"] == (
@@ -232,7 +232,7 @@ def test_markdown_report_discloses_it_outside_quality_issues(
         )
         paths.append(str(p))
     res = CliRunner().invoke(
-        main, ["compare", *paths, "-o", "markdown=-", "--set", 'severity.preset=strict']
+        main, ["compare", *paths, "-o", "markdown=-", "--set", "severity.preset=strict"]
     )
     assert res.exit_code == 0
     assert "Informational (no material change)" in res.stdout

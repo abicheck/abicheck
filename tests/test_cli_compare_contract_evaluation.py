@@ -392,7 +392,7 @@ class TestEndToEndJsonReport:
                 "-o",
                 "json=-",
                 "--set",
-                'severity.preset=strict',
+                "severity.preset=strict",
             ],
         )
         ctx = json.loads(result.output)["contract_context"]["evaluation_context"]

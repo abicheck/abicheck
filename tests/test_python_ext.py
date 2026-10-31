@@ -634,7 +634,7 @@ def _compare_abi3(path: str, *args: str) -> object:
 #: `compare` has no scan-only `--crosscheck` promotion mechanism, but a
 #: strict severity preset gates a risk-severity finding to exit 2 the same
 #: way `--crosscheck ...=error` used to.
-_GATE = ("--set", 'severity.preset=strict')
+_GATE = ("--set", "severity.preset=strict")
 
 
 def test_scan_abi3_flags_above_floor(tmp_path: object) -> None:

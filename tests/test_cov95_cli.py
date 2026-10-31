@@ -733,7 +733,7 @@ class TestCompareCommand:
             str(old_f),
             str(new_f),
             "--set",
-            'severity.preset=default',
+            "severity.preset=default",
         )
         assert result.exit_code == 4
 
@@ -746,7 +746,7 @@ class TestCompareCommand:
             str(old_f),
             str(new_f),
             "--set",
-            'severity.preset=info-only',
+            "severity.preset=info-only",
         )
         assert result.exit_code == 0
 
@@ -1103,7 +1103,7 @@ class TestCompareReleaseCommand:
             str(old_dir),
             str(new_dir),
             "--set",
-            'severity.preset=default',
+            "severity.preset=default",
         )
         assert result.exit_code == 4
 
@@ -1120,7 +1120,7 @@ class TestCompareReleaseCommand:
             str(old_dir),
             str(new_dir),
             "--set",
-            'severity.preset=info-only',
+            "severity.preset=info-only",
         )
         assert result.exit_code == 0
 
@@ -1455,7 +1455,7 @@ class TestUsedByScoping:
             "--used-by",
             str(app),
             "--set",
-            'severity.preset=default',
+            "severity.preset=default",
         )
         assert result.exit_code == 0
 
@@ -1487,7 +1487,7 @@ class TestUsedByScoping:
             "-o",
             "json=-",
             "--set",
-            'severity.preset=default',
+            "severity.preset=default",
         )
         assert result.exit_code == 0
         data = json.loads(result.stdout)
@@ -1576,7 +1576,7 @@ class TestUsedByScoping:
             "--used-by",
             str(app),
             "--set",
-            'severity.preset=default',
+            "severity.preset=default",
         )
         assert result.exit_code == 0
 
@@ -1600,7 +1600,7 @@ class TestUsedByScoping:
             "-o",
             "json=-",
             "--set",
-            'severity.preset=default',
+            "severity.preset=default",
         )
         assert result.exit_code == 0
         data = json.loads(result.stdout)
@@ -1633,7 +1633,7 @@ class TestUsedByScoping:
             "--used-by",
             str(app),
             "--set",
-            'severity.preset=info-only',
+            "severity.preset=info-only",
         )
         assert result.exit_code == 0
 
@@ -1686,7 +1686,7 @@ class TestUsedByScoping:
             "--used-by",
             str(app2),
             "--set",
-            'severity.preset=info-only',
+            "severity.preset=info-only",
             "-o",
             "json=-",
         )
@@ -1748,7 +1748,7 @@ class TestUsedByScoping:
             "--used-by",
             str(app2),
             "--set",
-            'severity.preset=default',
+            "severity.preset=default",
             "-o",
             "json=-",
         )
@@ -1804,7 +1804,7 @@ class TestUsedByScoping:
             "--used-by",
             str(app2),
             "--set",
-            'severity.preset=default',
+            "severity.preset=default",
             "-o",
             "json=-",
         )
@@ -1827,7 +1827,7 @@ class TestUsedByScoping:
             "--used-by",
             str(app),
             "--set",
-            'severity.preset=default',
+            "severity.preset=default",
         )
         assert result.exit_code == 0
 
@@ -2160,7 +2160,7 @@ class TestUsedByScoping:
             "-o",
             "markdown=-",
             "--set",
-            'severity.preset=info-only',
+            "severity.preset=info-only",
         )
         assert result.exit_code == 0
         assert "Consumer-scoped verdict: BREAKING" in result.stdout
@@ -2215,7 +2215,7 @@ class TestUsedByScoping:
             "-o",
             "json=-",
             "--set",
-            'severity.preset=default',
+            "severity.preset=default",
         )
         assert result.exit_code == 4
         data = json.loads(result.stdout)

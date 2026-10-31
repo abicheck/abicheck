@@ -190,7 +190,7 @@ def test_audit_gate_axis_fires_only_for_api_break_fixtures(
         "-o",
         "json=-",
         "--set",
-        'severity.preset=default',
+        "severity.preset=default",
     )
     report = json.loads(result.stdout)
     if case_name in _AUDIT_GATE_SHOULD_FIRE:
@@ -241,7 +241,7 @@ def test_audit_gate_axis_disabled_by_info_only_preset() -> None:
             "-o",
             "json=-",
             "--set",
-            'severity.preset=info-only',
+            "severity.preset=info-only",
         )
         assert result.exit_code == 0, (
             f"{case_name}: --severity-preset info-only must not gate "
@@ -275,7 +275,7 @@ def test_audit_gate_axis_honors_a_policy_promoted_verdict(tmp_path: Path) -> Non
         "-o",
         "json=-",
         "--set",
-        'severity.preset=default',
+        "severity.preset=default",
     )
     assert baseline.exit_code == 0, baseline.output
     assert json.loads(baseline.stdout)["exit_axes"]["audit_gate"] == 0
@@ -288,7 +288,7 @@ def test_audit_gate_axis_honors_a_policy_promoted_verdict(tmp_path: Path) -> Non
         "-o",
         "json=-",
         "--set",
-        'severity.preset=default',
+        "severity.preset=default",
         "--policy",
         str(policy_path),
     )

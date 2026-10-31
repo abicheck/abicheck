@@ -396,13 +396,13 @@ class TestCompareOldBundleFactsEarlyRejections:
             str(facts_path),
             str(new_dir),
             "--set",
-            'severity.preset=strict',
+            "severity.preset=strict",
             "-o",
             "json=-",
         )
 
         assert code == 64
-        assert "severity.preset" in out
+        assert "--set is not supported on a comparison of a stored BundleFacts" in out
 
     def test_exit_code_scheme_is_rejected(self, tmp_path: Path) -> None:
         facts_path = tmp_path / "old.bundlefacts.json"
@@ -1157,7 +1157,7 @@ class TestCompareOldBundleFactsEarlyRejections:
         )
 
         assert code == 64
-        assert "output.view" in out
+        assert "--set is not supported on a comparison of a stored BundleFacts" in out
 
     def test_config_scope_show_redundant_is_rejected(self, tmp_path: Path) -> None:
         # Codex review: BuildConfig's scope: block parses show_redundant as

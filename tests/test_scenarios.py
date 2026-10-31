@@ -452,7 +452,7 @@ def test_sc_ci_strict_informational(tmp_path: Path) -> None:
         old,
         new,
         "--set",
-        'severity.preset=strict',
+        "severity.preset=strict",
         "--config",
         str(cfg),
         "-o",

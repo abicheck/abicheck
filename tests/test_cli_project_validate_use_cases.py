@@ -396,7 +396,15 @@ class TestUseCaseImpactOnCompare:
         # `--show-only removed` displays no findings here (the only change is
         # an addition), so the block must attribute none either.
         scoped = _json_report(
-            _compare(manifest, old, new, "-o", "json=-", "--set", 'output.view=["show=removed"]')
+            _compare(
+                manifest,
+                old,
+                new,
+                "-o",
+                "json=-",
+                "--set",
+                'output.view=["show=removed"]',
+            )
         )
         block = scoped["use_case_impact"]
         assert block["by_use_case"] == {}
@@ -420,7 +428,13 @@ class TestUseCaseImpactOnCompare:
         assert "training workflow: 1 change(s)" in full.output, full.output
 
         scoped = _compare(
-            manifest, old, new, "-o", "markdown=-", "--set", 'output.view=["show=removed"]'
+            manifest,
+            old,
+            new,
+            "-o",
+            "markdown=-",
+            "--set",
+            'output.view=["show=removed"]',
         )
         # The only change is an addition, so `--show-only removed` displays
         # nothing -- and the section must attribute nothing to match. The use
