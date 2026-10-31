@@ -53,6 +53,7 @@ post-Phase-5 invariant this file states.
 
 from __future__ import annotations
 
+import html
 import itertools
 import json
 import os
@@ -635,7 +636,11 @@ class TestShowOnlyCliHintIsReRunnable:
         )
         # No internal transport separator ever reaches rendered text.
         assert ";" not in hint_line
-        tokens = tuple(re.findall(r"--view (\S+?)(?=[`\s]|$)", hint_line))
+        # The hint is a literal `--set 'output.view=[...]'` whose YAML list
+        # carries one `show=` item per OR'd group.
+        listed = re.search(r"output\.view=(\[[^\]]*\])", hint_line)
+        assert listed, hint_line
+        tokens = tuple(json.loads(listed.group(1)))
         assert tokens.count("show=breaking") == 1
         assert tokens.count("show=added") == 1
         parsed = parse_view_tokens(tokens)
@@ -676,8 +681,11 @@ class TestShowOnlyCliHintIsReRunnable:
         assert "Filtered by" in result.output
         filter_section = result.output[result.output.index("Filtered by") :]
         filter_section = filter_section[: filter_section.index("</div>")]
-        assert ";" not in filter_section
-        assert filter_section.count("--view show=") == 2
+        # HTML escaping adds ';' entities, so judge the unescaped text: a
+        # joined `show=a;b` / `show=x;show=y` transport form is still refused.
+        unescaped = html.unescape(filter_section)
+        assert ";" not in unescaped
+        assert unescaped.count('"show=') == 2
 
     def test_html_empty_filter_state_hint_has_no_internal_separator(
         self, tmp_path: Path
@@ -706,8 +714,9 @@ class TestShowOnlyCliHintIsReRunnable:
             result.output.index("No changes match the current filter") :
         ]
         note_section = note_section[: note_section.index("</p>")]
-        assert ";" not in note_section
-        assert note_section.count("--view show=") == 2
+        unescaped = html.unescape(note_section)
+        assert ";" not in unescaped
+        assert unescaped.count('"show=') == 2
 
 
 class TestSurfaceMetricsAreUnconditional:

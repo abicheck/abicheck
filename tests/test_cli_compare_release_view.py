@@ -552,8 +552,8 @@ class TestReleaseViewShowOnly:
         assert result.exit_code == 4, result.output
         assert "api_b" not in result.output
         assert (
-            "> Filtered by: `--view show=variables` (0 of 2 findings shown)"
-            in result.output
+            "> Filtered by: `--set 'output.view=[\"show=variables\"]'` "
+            "(0 of 2 findings shown)" in result.output
         )
 
     def test_release_markdown_omits_the_filter_note_without_view_show(
