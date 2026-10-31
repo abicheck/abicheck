@@ -296,12 +296,12 @@ def strip_untrusted_execution_keys(base: dict[str, object]) -> dict[str, object]
     # here would launder a pull-request-planted records file (which can accept
     # its own additions, and under `breaks: accept` its own breaks) into that
     # trusted status. `unacknowledged_additions` only tightens, so it stays.
-    acknowledgment = base.get("acknowledgment")
+    acknowledgment = base.get("acknowledgments")
     if isinstance(acknowledgment, dict) and (
         "file" in acknowledgment or "breaks" in acknowledgment
     ):
         dropped = sorted(k for k in ("file", "breaks") if k in acknowledgment)
-        base["acknowledgment"] = {
+        base["acknowledgments"] = {
             k: v for k, v in acknowledgment.items() if k not in ("file", "breaks")
         }
         print(
@@ -417,9 +417,9 @@ def rebase_relative_config_paths(
     # ADR-067 D5: `acknowledgment.file` resolves against the config's project
     # root (`workflows/compare/project_inputs.py`'s `_records_path`), so a
     # relocated overlay must carry the absolute path, not a scratch-relative one.
-    acknowledgment = base.get("acknowledgment")
+    acknowledgment = base.get("acknowledgments")
     if isinstance(acknowledgment, dict) and isinstance(acknowledgment.get("file"), str):
-        base["acknowledgment"] = {
+        base["acknowledgments"] = {
             **acknowledgment,
             "file": _abs(acknowledgment["file"]),
         }
@@ -538,6 +538,7 @@ def apply_sources_root_config_blocks(
     *,
     blocks: tuple[str, ...],
     merge_compile: bool = False,
+    sources_method_from_sources_root: bool = True,
 ) -> dict[str, object]:
     """Return a COPY of *base* with each key in *blocks* updated from
     whatever *sources_doc* defines for that same top-level key.
@@ -691,6 +692,7 @@ def apply_sources_root_config_blocks(
     :func:`rebase_relative_config_paths`'s own copy-on-write convention.
     """
     base = dict(base)
+    checkout_sources = base.get("sources")
     doc = sources_doc if isinstance(sources_doc, dict) else {}
     for key in blocks:
         if key == "compile" and merge_compile:
@@ -709,4 +711,23 @@ def apply_sources_root_config_blocks(
             base[key] = doc[key]
         else:
             base.pop(key, None)
+    if "sources" in blocks and not sources_method_from_sources_root:
+        # ADR-091 R13: `sources.method` was the singular `source:` block, which
+        # a compare-shaped caller never promotes from the sources root. Keep the
+        # checkout's method and drop the sources root's, so the rename changes
+        # no result.
+        kept = (
+            checkout_sources.get("method")
+            if isinstance(checkout_sources, dict)
+            else None
+        )
+        promoted = base.get("sources")
+        promoted = dict(promoted) if isinstance(promoted, dict) else {}
+        promoted.pop("method", None)
+        if kept is not None:
+            promoted["method"] = kept
+        if promoted:
+            base["sources"] = promoted
+        else:
+            base.pop("sources", None)
     return base

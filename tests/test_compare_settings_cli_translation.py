@@ -64,7 +64,7 @@ def _snapshots(tmp_path: Path) -> tuple[Path, Path]:
 
 def _bad_source_method(tmp_path: Path) -> tuple[list[str], Callable[[], object]]:
     cfg = tmp_path / ".abicheck.yml"
-    cfg.write_text("source:\n  method: not-a-method\n", encoding="utf-8")
+    cfg.write_text("sources:\n  method: not-a-method\n", encoding="utf-8")
     return (
         ["--config", str(cfg)],
         lambda: cc.resolve_compare_collect_mode(
@@ -110,7 +110,7 @@ def _non_utf8_required_file(tmp_path: Path) -> tuple[list[str], Callable[[], obj
 
 
 _CASES = {
-    "invalid source.method": _bad_source_method,
+    "invalid sources.method": _bad_source_method,
     "malformed .abicheck.yml": _malformed_config,
     "missing @FILE": _missing_required_file,
     "two @FILE values": _two_required_files,

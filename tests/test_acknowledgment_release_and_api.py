@@ -75,7 +75,7 @@ def test_release_fan_out(tmp_path, monkeypatch, action, acknowledged, break_it) 
         (tmp_path / side).mkdir()
         save_snapshot(snap, tmp_path / side / "libx.so.1.json")
     _records(tmp_path / "acks.yml", acknowledged)
-    block = "acknowledgment:\n  file: acks.yml\n"
+    block = "acknowledgments:\n  file: acks.yml\n"
     if action is not None:
         block += f"  unacknowledged_additions: {action}\n"
     (tmp_path / "cfg.yml").write_text(block)
@@ -98,7 +98,7 @@ def test_release_discovered_config_does_not_load_records(tmp_path, monkeypatch) 
         save_snapshot(snap, tmp_path / side / "libx.so.1.json")
     _records(tmp_path / "acks.yml", True)
     (tmp_path / ".abicheck.yml").write_text(
-        "acknowledgment:\n  file: acks.yml\n  unacknowledged_additions: block\n"
+        "acknowledgments:\n  file: acks.yml\n  unacknowledged_additions: block\n"
     )
     res = CliRunner().invoke(main, ["compare", "old", "new"])
     # The gate tightens from a discovered config; the records cannot accept.

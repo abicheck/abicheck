@@ -131,7 +131,7 @@ class TestDumpClearsSourcesRootBlocksWhenItHasNoOwnConfig:
             "severity:\n  abi_breaking: error\n"
             "build:\n  system: make\n"
             "sources:\n  graph: full\n"
-            "source:\n  method: headers\n"
+            "sources:\n  method: headers\n"
             "debug:\n  format: btf\n"
             "compile:\n  sysroot: /opt/checkout-sysroot\n",
             encoding="utf-8",

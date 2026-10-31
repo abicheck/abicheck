@@ -195,7 +195,7 @@ def _document(lang, fmt, dwarf_only, debuginfod, url, pdb, public, method) -> di
     if public is not None:
         doc.setdefault("scope", {})["public_symbols"] = public
     if method is not None:
-        doc["source"] = {"method": method}
+        doc.setdefault("sources", {})["method"] = method
     return doc
 
 

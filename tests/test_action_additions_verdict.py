@@ -58,7 +58,7 @@ def _real_report(tmp_path: Path, *, action: str, break_it: bool) -> tuple[int, d
         new,
     )
     cfg = tmp_path / "cfg.abicheck.yml"
-    cfg.write_text(f"acknowledgment:\n  unacknowledged_additions: {action}\n")
+    cfg.write_text(f"acknowledgments:\n  unacknowledged_additions: {action}\n")
     out = tmp_path / "real.json"
     res = CliRunner().invoke(
         main, ["compare", str(old), str(new), "--config", str(cfg), "-o", f"json={out}"]
