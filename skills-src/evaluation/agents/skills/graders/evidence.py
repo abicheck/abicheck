@@ -32,9 +32,24 @@ import json
 import re
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any
 
 from .claim import VERDICT_ORDER
+from .consumer_scope import (  # noqa: F401 -- re-exported for dimensions.py and the tests
+    _BINARY_SUFFIX_RE,
+    CONSUMER_SCOPE_FLAGS,
+    SET_REQUIRED_SYMBOLS_KEY,
+    SET_SEVERITY_PRESET_KEY,
+    ScopeTargets,
+    _consumer_scope_set_items,
+    _flow_list_items,
+    _required_symbols_file_targets,
+    _set_overrides,
+    _stripped_binary_names,
+    consumer_scope_targets,
+    consumer_scope_targets_by_kind,
+    is_consumer_scoped,
+)
 
 #: Verbs that *can* compare two sides. Whether a given call actually did is a
 #: second question — see `comparison_command`. `dump` is absent at both levels:
@@ -449,22 +464,6 @@ def suppression_flags(call: dict) -> list[str]:
         used.append("--severity-preset")
     return sorted(set(used))
 
-
-from .consumer_scope import (  # noqa: F401 -- re-exported for dimensions.py and the tests
-    _set_overrides,
-    _flow_list_items,
-    _consumer_scope_set_items,
-    is_consumer_scoped,
-    _stripped_binary_names,
-    _required_symbols_file_targets,
-    ScopeTargets,
-    consumer_scope_targets_by_kind,
-    consumer_scope_targets,
-    CONSUMER_SCOPE_FLAGS,
-    SET_REQUIRED_SYMBOLS_KEY,
-    SET_SEVERITY_PRESET_KEY,
-    _BINARY_SUFFIX_RE,
-)
 
 def _artifact_texts(run_dir: Path, call: dict) -> list[str]:
     """Everything this call produced that could carry a verdict."""
