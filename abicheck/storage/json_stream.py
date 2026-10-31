@@ -159,16 +159,6 @@ def _shallow(obj: dict[str, Any] | list[Any], depth: int) -> bool:
     return True
 
 
-def _descend_first(value: Any) -> bool:
-    """Whether a wide container's element is streamed on its own rather than
-    joining a batch: a :class:`LazyItems` (which ``json.dumps`` cannot
-    encode, and must not materialise) or a container wide enough to be
-    batched itself."""
-    return isinstance(value, LazyItems) or (
-        type(value) in (dict, list) and len(value) > _DESCEND_LEN
-    )
-
-
 def _batch_body(fragment: str, pad: str) -> str:
     """The elements of a whole-container ``json.dumps`` fragment, without
     its brackets, re-indented one level below *pad*.
@@ -199,7 +189,12 @@ def _iter_container(
     while i < n:
         item = items[i]
         value = item[1] if is_dict else item
-        if _descend_first(value):
+        # Streamed on its own rather than batched: a LazyItems (json.dumps
+        # cannot encode it) or a container wide enough to batch itself.
+        # Inline, since it runs once per element of every wide container.
+        if isinstance(value, LazyItems) or (
+            type(value) in (dict, list) and len(value) > _DESCEND_LEN
+        ):
             head = ("" if first else ",") + "\n" + pad + step
             if is_dict:
                 head += json.dumps(item[0]) + ": "
@@ -211,7 +206,10 @@ def _iter_container(
         stop = i + 1
         while stop < n and stop - i < batch:
             nxt = items[stop]
-            if _descend_first(nxt[1] if is_dict else nxt):
+            nv = nxt[1] if is_dict else nxt
+            if isinstance(nv, LazyItems) or (
+                type(nv) in (dict, list) and len(nv) > _DESCEND_LEN
+            ):
                 break
             stop += 1
         chunk = items[i:stop]
