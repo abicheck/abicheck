@@ -148,7 +148,7 @@ def test_show_only_filter_ignores_empty_tokens_and_case() -> None:
 
 
 def test_show_only_filter_rejects_unknown_token() -> None:
-    with pytest.raises(ValueError, match="Unknown --view show= token"):
+    with pytest.raises(ValueError, match="Unknown output.view show= token"):
         ShowOnlyFilter.parse("nonsense")
 
 
@@ -159,10 +159,13 @@ def test_parse_show_only_groups_splits_on_separator() -> None:
 
 
 def test_render_show_only_cli_hint_one_view_per_group() -> None:
-    assert render_show_only_cli_hint("breaking") == "--view show=breaking"
+    assert (
+        render_show_only_cli_hint("breaking")
+        == "--set 'output.view=[\"show=breaking\"]'"
+    )
     assert (
         render_show_only_cli_hint(f"breaking{SHOW_ONLY_GROUP_SEP}removed")
-        == "--view show=breaking --view show=removed"
+        == '--set \'output.view=["show=breaking", "show=removed"]\''
     )
 
 

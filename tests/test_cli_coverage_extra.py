@@ -276,7 +276,7 @@ class TestShowOnlyValidation:
         )
         assert result.exit_code != 0
         assert (
-            "Unknown --view show= token" in result.output
+            "Unknown output.view show= token" in result.output
             or "Invalid value" in result.output
         )
 

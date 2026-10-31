@@ -288,7 +288,7 @@ class TestShowOnlyFilter:
         assert f.actions == frozenset({"removed"})
 
     def test_parse_unknown_token_raises(self):
-        with pytest.raises(ValueError, match="Unknown --view show= token"):
+        with pytest.raises(ValueError, match="Unknown output.view show= token"):
             ShowOnlyFilter.parse("bogus")
 
     def test_severity_filter_breaking(self):

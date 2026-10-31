@@ -85,7 +85,7 @@ def _malformed_config(tmp_path: Path) -> tuple[list[str], Callable[[], object]]:
 def _missing_required_file(tmp_path: Path) -> tuple[list[str], Callable[[], object]]:
     missing = tmp_path / "absent.txt"
     return (
-        ["--required-symbol", f"@{missing}"],
+        ["--set", f'consumers.required_symbols=["@{missing}"]'],
         lambda: cc.load_required_symbols((f"@{missing}",)),
     )
 
@@ -95,7 +95,7 @@ def _two_required_files(tmp_path: Path) -> tuple[list[str], Callable[[], object]
     one.write_text("a\n", encoding="utf-8")
     two.write_text("b\n", encoding="utf-8")
     return (
-        ["--required-symbol", f"@{one}", "--required-symbol", f"@{two}"],
+        ["--set", f'consumers.required_symbols=["@{one}", "@{two}"]'],
         lambda: cc.load_required_symbols((f"@{one}", f"@{two}")),
     )
 
@@ -104,7 +104,7 @@ def _non_utf8_required_file(tmp_path: Path) -> tuple[list[str], Callable[[], obj
     listed = tmp_path / "latin1.txt"
     listed.write_bytes("caf\u00e9_sym\n".encode("latin-1"))
     return (
-        ["--required-symbol", f"@{listed}"],
+        ["--set", f'consumers.required_symbols=["@{listed}"]'],
         lambda: cc.load_required_symbols((f"@{listed}",)),
     )
 
@@ -206,7 +206,14 @@ def test_required_symbol_file_read_failure_is_a_usage_error(
 
     old, new = _snapshots(tmp_path)
     result = CliRunner().invoke(
-        main, ["compare", str(old), str(new), "--required-symbol", arg]
+        main,
+        [
+            "compare",
+            str(old),
+            str(new),
+            "--set",
+            f'consumers.required_symbols=["{arg}"]',
+        ],
     )
     assert result.exit_code == 64, result.output
     assert isinstance(result.exception, SystemExit), repr(result.exception)

@@ -106,7 +106,7 @@ def test_required_symbol_on_the_command_line_selects_plugin_abi() -> None:
         required_symbols_from_file=(),
         required_symbols_path=None,
         required_symbols_sha=None,
-    ) == ("plugin_abi", "--required-symbol", None, None)
+    ) == ("plugin_abi", "consumers.required_symbols", None, None)
 
 
 def test_required_symbol_file_that_contributed_records_its_path_and_digest(
@@ -120,7 +120,7 @@ def test_required_symbol_file_that_contributed_records_its_path_and_digest(
         required_symbols_from_file=("foo",),
         required_symbols_path=path,
         required_symbols_sha="abc123",
-    ) == ("plugin_abi", "--required-symbol", Path(path), "abc123")
+    ) == ("plugin_abi", "consumers.required_symbols", Path(path), "abc123")
 
 
 def test_required_symbol_file_that_parsed_empty_records_no_path() -> None:
@@ -133,4 +133,4 @@ def test_required_symbol_file_that_parsed_empty_records_no_path() -> None:
         required_symbols_from_file=(),
         required_symbols_path="symbols.txt",
         required_symbols_sha="abc123",
-    ) == ("plugin_abi", "--required-symbol", None, None)
+    ) == ("plugin_abi", "consumers.required_symbols", None, None)

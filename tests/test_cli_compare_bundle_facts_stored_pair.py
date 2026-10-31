@@ -493,7 +493,7 @@ class TestStoredPairEarlyRejections:
         code, out = _invoke("compare", str(old_path), str(new_path))
 
         assert code == 64, out
-        assert "cannot parse build config" in out
+        assert "bundle.system_providers must be a string or list of strings" in out
 
     def test_explicit_malformed_config_is_rejected(self, tmp_path: Path) -> None:
         """The explicit-`--config` sibling of the ambient case above --
@@ -510,7 +510,7 @@ class TestStoredPairEarlyRejections:
         )
 
         assert code == 64, out
-        assert "cannot parse build config" in out
+        assert "bundle.system_providers must be a string or list of strings" in out
 
 
 class TestStoredPairEndToEnd:

@@ -319,8 +319,8 @@ class TestConsumerImpactSummary:
             str(new),
             "--used-by",
             str(app1),
-            "--used-by-manifest",
-            str(manifest),
+            "--set",
+            f'consumers.manifests=["{manifest}"]',
             "-o",
             "json=-",
         )

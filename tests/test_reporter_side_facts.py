@@ -170,8 +170,8 @@ class TestEvidenceDepthOutOfBandPack:
                     str(new_p),
                     "-o",
                     "json=-",
-                    "--view",
-                    mode,
+                    "--set",
+                    f'output.view=["{mode}"]',
                 ],
             )
             assert result.exit_code in (0, 1, 2, 4), result.output

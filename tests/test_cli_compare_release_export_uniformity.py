@@ -31,7 +31,7 @@ def _view_config(tmp_path: Path, view: str) -> str:
     """A ``.abicheck.yml`` selecting ``output.view`` (a directory compare
     refuses ``--set output.view``, so the rendering selector travels by config)."""
     cfg = tmp_path / f"view-{abs(hash(view))}.abicheck.yml"
-    cfg.write_text(f"output:\n  view: {view}\n")
+    cfg.write_text(f"output:\n  view: {view}\n", encoding="utf-8")
     return str(cfg)
 
 

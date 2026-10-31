@@ -480,10 +480,16 @@ class TestNoBaselineRejectsViewTokens:
         path = self._snapshot_path(tmp_path)
         result = CliRunner().invoke(
             main,
-            ["compare", "--no-baseline", str(path), "--view", view_token],
+            [
+                "compare",
+                "--no-baseline",
+                str(path),
+                "--set",
+                f'output.view=["{view_token}"]',
+            ],
         )
         assert result.exit_code == 64, result.output
-        assert "--view is not available together with --no-baseline" in (result.output)
+        assert "output.view is not available with --no-baseline" in result.output
 
     @pytest.mark.parametrize(
         "retired_token",
@@ -492,8 +498,9 @@ class TestNoBaselineRejectsViewTokens:
     def test_a_retired_token_is_still_a_usage_error_here(
         self, tmp_path: Path, retired_token: str
     ) -> None:
-        """A token retired in plan slice 7o fails at parse time, before the
-        no-baseline rejection -- exit 64 either way, with no hidden alias."""
+        """A token retired in plan slice 7o is refused here too -- exit 64
+        either way, with no hidden alias. The no-baseline rejection runs
+        before the token is parsed, so the message names the view itself."""
         from click.testing import CliRunner
 
         from abicheck.cli import main
@@ -501,10 +508,16 @@ class TestNoBaselineRejectsViewTokens:
         path = self._snapshot_path(tmp_path)
         result = CliRunner().invoke(
             main,
-            ["compare", "--no-baseline", str(path), "--view", retired_token],
+            [
+                "compare",
+                "--no-baseline",
+                str(path),
+                "--set",
+                f'output.view=["{retired_token}"]',
+            ],
         )
         assert result.exit_code == 64, result.output
-        assert "retired" in result.output
+        assert "output.view is not available with --no-baseline" in result.output
 
     def test_no_view_flag_still_succeeds(self, tmp_path: Path) -> None:
         from click.testing import CliRunner
