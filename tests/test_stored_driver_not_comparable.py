@@ -44,7 +44,7 @@ def _invoke(*args: str) -> tuple[int, str]:
     from abicheck.cli import main
 
     result = CliRunner().invoke(main, list(args))
-    return result.exit_code, result.output
+    return result.exit_code, result.stdout
 
 
 class TestNotComparableMemberIsRecordedNotRaised:

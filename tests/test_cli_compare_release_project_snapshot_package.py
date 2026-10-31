@@ -141,6 +141,14 @@ def _invoke(*args: str) -> tuple[int, str]:
     return result.exit_code, result.output
 
 
+def _invoke_stdout(*args: str) -> tuple[int, str]:
+    """``_invoke`` reading stdout only, for a caller that parses it as JSON."""
+    from abicheck.cli import main
+
+    result = CliRunner().invoke(main, list(args))
+    return result.exit_code, result.stdout
+
+
 _Outcome = tuple[str, int, int, int, int, int]
 
 
@@ -212,7 +220,7 @@ class TestStoredVersusLiveReleaseParity:
         # never be a vacuous "every library reported NO_CHANGE" false
         # positive.
         paths = self._fixture(tmp_path)
-        ec, out = _invoke(
+        ec, out = _invoke_stdout(
             "compare",
             str(paths["old_dir"]),
             str(paths["new_dir"]),
@@ -724,7 +732,7 @@ class TestMultiVariantSingleArtifactClassification:
         self._single_artifact_two_variant_package(old_pkg)
         _write_directory(new_pkg, {"liba.so": new_libs["liba.so"]})
 
-        ec, out = _invoke(
+        ec, out = _invoke_stdout(
             "compare",
             str(old_pkg),
             str(new_pkg),

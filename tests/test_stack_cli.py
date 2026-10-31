@@ -76,7 +76,7 @@ class TestDepsCommand:
         binary = _pick_elf()
         result = CliRunner().invoke(main, ["deps", "tree", str(binary), "-o", "json=-"])
         assert result.exit_code == 0
-        return json.loads(result.output)
+        return json.loads(result.stdout)
 
     def test_deps_markdown(self, runner, real_binary):
         result = runner.invoke(main, ["deps", "tree", str(real_binary)])

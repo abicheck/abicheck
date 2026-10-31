@@ -616,11 +616,6 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 **Status (2026-10-23): PARTIAL.** Closed: a directory/package `compare` now renders `sarif` (one run per library, each result stamped with `properties.releaseMember`) and `review` (a release digest rendered from the release JSON), so `RELEASE_FORMATS` is the full compare set minus `terminal`. Still open: BundleSpec has no scope-policy keys (`bundles:` cannot state scope policy at bundle level).  
 `hygiene` — `bundles:` has no scope-policy keys. [Full write-up](known-gaps/a-directorypackage-compare-cannot-render-sarifreview-bundles.md)
 
-#### Release-fan-out CLI tests JSON-parse `CliRunner.output`, which the memory-clamp note can join
-
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** The clamp note is still a stderr line: `workflows/release_members.compare_release_members` emits it through the reporter's `notice`, which the CLI echoes with `err=True`. tests/test_release_package_inventory_cli.py:92-99 still does `json.loads(CliRunner().invoke(...).output)`, as do test_release_evaluation_config.py:712,730.  
-`hygiene` — The memory-clamp note goes to stderr, and several release CLI tests `json.loads(CliRunner(...).output)`, which can mix the two streams. [Full write-up](known-gaps/release-fan-out-cli-tests-json-parse-clirunneroutput-which-the.md)
-
 #### Source-read licence: enforced at the one consumer, not repo-wide (2026-09-12)
 
 **Status (re-verified 2026-10-09 at `456989f`): OPEN.** Both deliberate residuals are still open: scripts/check_ai_readiness.py has no source-read licence gate (grep 'licen' finds only license-header checks), and there are no per-input content digests. The third residual is recorded as closed.  

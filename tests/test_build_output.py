@@ -1332,7 +1332,7 @@ class TestBuildOutputCLI:
         root = self._valid_dir(tmp_path)
         res = self._run([str(root), "-o", "json=-"])
         assert res.exit_code == 0, res.output
-        payload = json.loads(res.output)
+        payload = json.loads(res.stdout)
         assert payload["ok"] is True
         assert payload["errors"] == []
 

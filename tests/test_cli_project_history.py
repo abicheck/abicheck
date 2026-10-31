@@ -54,7 +54,7 @@ class TestJsonOutput:
 
         res = _run([p1, p2, p3])
         assert res.exit_code == 0, res.output
-        doc = json.loads(res.output)
+        doc = json.loads(res.stdout)
         assert doc["schema"] == "abicheck.longitudinal-history/v1"
         assert doc["library"] == "libmath.so"
         assert len(doc["entries"]) == 3
@@ -69,7 +69,7 @@ class TestJsonOutput:
 
         res = _run([p1, p2])
         assert res.exit_code == 0, res.output
-        doc = json.loads(res.output)
+        doc = json.loads(res.stdout)
         assert doc["coverage"]["gaps"] == [
             {
                 "from_version": "1.0.0",
@@ -86,7 +86,7 @@ class TestJsonOutput:
 
         res = _run([p1, p2, "--label", "1.0.0", "--label", "1.1.0", "-o", "json=-"])
         assert res.exit_code == 0, res.output
-        doc = json.loads(res.output)
+        doc = json.loads(res.stdout)
         assert [e["version"] for e in doc["entries"]] == ["1.0.0", "1.1.0"]
 
     def test_output_flag_writes_file(self, tmp_path: Path) -> None:
@@ -130,7 +130,7 @@ class TestUsageErrors:
         p1 = _snapshot(tmp_path, "1.0.0", ["add"])
         res = _run([p1])
         assert res.exit_code == 0, res.output
-        doc = json.loads(res.output)
+        doc = json.loads(res.stdout)
         assert len(doc["entries"]) == 1
         assert all(e["event"] == "first_observed" for e in doc["events"])
 

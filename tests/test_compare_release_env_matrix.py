@@ -59,7 +59,7 @@ def _write_snap(path: Path, snap: AbiSnapshot) -> Path:
 
 def _invoke(*args: str) -> tuple[int, str]:
     result = CliRunner().invoke(main, list(args))
-    return result.exit_code, result.output
+    return result.exit_code, result.stdout
 
 
 class TestReleaseJsonEnvMatrixDigest:

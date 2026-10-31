@@ -697,7 +697,7 @@ class TestStackCheckCommand:
                 ],
             )
             assert result.exit_code == 0
-            data = json.loads(result.output)
+            data = json.loads(result.stdout)
             # Check for any expected top-level key from stack report
             assert isinstance(data, dict)
             assert len(data) > 0

@@ -49,7 +49,7 @@ class TestAnalysisAssuranceCliIntegration:
     ) -> None:
         res = compare_cli(tmp_path, header_pair(), "-o", "json=-")
         assert res.exit_code == 0, res.output
-        payload = json.loads(res.output[res.output.index("{") :])
+        payload = json.loads(res.stdout[res.stdout.index("{") :])
         aa = payload["analysis_assurance"]
         assert aa["schema_version"] == ANALYSIS_ASSURANCE_SCHEMA_VERSION
         assert aa["status"] in ASSURANCE_STATUS_VALUES
@@ -65,7 +65,7 @@ class TestAnalysisAssuranceCliIntegration:
         res = compare_cli(tmp_path, elf_only_pair())
         assert res.exit_code == 0, res.output
         payload_res = compare_cli(tmp_path, elf_only_pair(), "-o", "json=-")
-        payload = json.loads(payload_res.output[payload_res.output.index("{") :])
+        payload = json.loads(payload_res.stdout[payload_res.stdout.index("{") :])
         # Sanity: this fixture really is a non-"complete" case, so the next
         # assertion (flag raises it to 1) is actually testing something.
         assert payload["analysis_assurance"]["status"] != "complete"
@@ -267,7 +267,7 @@ class TestScopedExitFloorAppliedBeforeRendering:
             ],
         )
         assert res.exit_code == 0, res.output
-        out = res.output
+        out = res.stdout
         doc = json.loads(out[out.index("{") :])
         scoped_gate = doc["runs"][0]["properties"]["scopedGate"]
         assert scoped_gate["gateExitCode"] == 0

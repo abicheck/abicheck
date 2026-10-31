@@ -99,7 +99,7 @@ def test_dump_baseline_feeds_the_comparability_gate(
         args += ["--exclude-header", pattern]
     result = CliRunner().invoke(main, args)
     if comparable:
-        doc = json.loads(result.output[result.output.index("{") :])
+        doc = json.loads(result.stdout[result.stdout.index("{") :])
         assert doc["verdict"] == "NO_CHANGE", result.output
     else:
         assert "--exclude-header patterns differ" in result.output, result.output

@@ -312,7 +312,7 @@ def test_sc_scan_sarif(tmp_path: Path) -> None:
         "sarif=-",
     )
     assert res.exit_code == 4
-    doc = json.loads(res.output)
+    doc = json.loads(res.stdout)
     assert doc.get("version") == "2.1.0"
     assert doc.get("runs"), "SARIF must contain runs"
     driver = doc["runs"][0]["tool"]["driver"]
@@ -328,7 +328,7 @@ def test_sc_release_recommendation(tmp_path: Path) -> None:
         "json=-",
     )
     assert res.exit_code == 4
-    doc = json.loads(res.output)
+    doc = json.loads(res.stdout)
     # No platform/elf metadata on either side → no binary evidence → state
     # "unavailable" and version_bump null (schema 2.20); see
     # test_sc_linux_elf_baseline below for the binary-evidence-present case.
@@ -423,7 +423,7 @@ def test_sc_baseline_pin(tmp_path: Path) -> None:
     v2 = _save(_lib("2", [_fn("a")]), tmp_path / "v2.json")
     res = _cli("compare", v1, v2, "-o", "json=-")
     assert res.exit_code == 4
-    payload = json.loads(res.output)
+    payload = json.loads(res.stdout)
     assert payload["verdict"] == "BREAKING"
 
 
@@ -715,7 +715,7 @@ def test_sc_consume_json(tmp_path: Path) -> None:
         "json=-",
     )
     assert res.exit_code == 4
-    doc = json.loads(res.output)
+    doc = json.loads(res.stdout)
     assert doc["report_schema_version"]  # versioned contract
     assert doc["verdict"] == "BREAKING"
     assert isinstance(doc["changes"], list) and doc["changes"]
@@ -814,7 +814,7 @@ def test_sc_c_struct_layout(tmp_path: Path) -> None:
     )
     res = _compare(tmp_path, old, new)
     assert res.exit_code == 4
-    doc = json.loads(_compare(tmp_path, old, new, "-o", "json=-").output)
+    doc = json.loads(_compare(tmp_path, old, new, "-o", "json=-").stdout)
     assert doc["verdict"] == "BREAKING"
     assert any(c["kind"] == "type_size_changed" for c in doc["changes"])
 
@@ -849,7 +849,7 @@ def test_sc_cpp_vtable_break(tmp_path: Path) -> None:
     )
     res = _compare(tmp_path, old, new, *no_scope_config_args(tmp_path), "-o", "json=-")
     assert res.exit_code == 4
-    doc = json.loads(res.output)
+    doc = json.loads(res.stdout)
     assert doc["verdict"] == "BREAKING"
     assert any(c["kind"] == "type_vtable_changed" for c in doc["changes"])
 
@@ -861,7 +861,7 @@ def test_sc_exported_var_removed(tmp_path: Path) -> None:
     new = _lib("2", [_fn("a")], variables=[])
     res = _compare(tmp_path, old, new, *no_scope_config_args(tmp_path), "-o", "json=-")
     assert res.exit_code == 4
-    doc = json.loads(res.output)
+    doc = json.loads(res.stdout)
     assert doc["verdict"] == "BREAKING"
     assert any(c["kind"] == "var_removed" for c in doc["changes"])
 
@@ -882,7 +882,7 @@ def test_sc_dual_abi_flip(tmp_path: Path) -> None:
         "json=-",
     )
     assert res.exit_code == 4
-    doc = json.loads(res.output)
+    doc = json.loads(res.stdout)
     assert doc["verdict"] == "BREAKING"
     assert any(c["kind"] == "glibcxx_dual_abi_flip_detected" for c in doc["changes"])
 
@@ -895,7 +895,7 @@ def test_sc_integer_model_flip(tmp_path: Path) -> None:
     new = _lib("2", [_fn("solve")], typedefs={"MKL_INT": "int64_t"})
     res = _compare(tmp_path, old, new, *no_scope_config_args(tmp_path), "-o", "json=-")
     assert res.exit_code == 4
-    doc = json.loads(res.output)
+    doc = json.loads(res.stdout)
     assert doc["verdict"] == "BREAKING"
     assert any(c["kind"] == "integer_model_changed" for c in doc["changes"])
 
@@ -914,7 +914,7 @@ def test_sc_toolchain_flag_drift(tmp_path: Path) -> None:
     new = _lib("2", [_fn("a")], dwarf_advanced=_adv({"-fno-exceptions", "-ffast-math"}))
     res = _compare(tmp_path, old, new, *no_scope_config_args(tmp_path), "-o", "json=-")
     assert res.exit_code == 0
-    doc = json.loads(res.output)
+    doc = json.loads(res.stdout)
     assert doc["verdict"] == "COMPATIBLE"
     assert any(c["kind"] == "toolchain_flag_drift" for c in doc["changes"])
 
@@ -978,7 +978,7 @@ def test_sc_linux_elf_baseline(tmp_path: Path) -> None:
     new = _lib("2", [_fn("a")], platform="elf", elf=ElfMetadata(soname="libfoo.so.1"))
     res = _compare(tmp_path, old, new, "-o", "json=-")
     assert res.exit_code == 4
-    doc = json.loads(res.output)
+    doc = json.loads(res.stdout)
     assert doc["verdict"] == "BREAKING"
     assert doc["release_recommendation"]["version_bump"] == "major"
 

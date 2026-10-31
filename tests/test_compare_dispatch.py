@@ -217,7 +217,7 @@ class TestLooksLikeApplication:
 
 def _invoke(*args: str) -> tuple[int, str, str]:
     result = CliRunner().invoke(main, list(args))
-    return result.exit_code, result.output, (result.stderr or "")
+    return result.exit_code, result.stdout, (result.stderr or "")
 
 
 # ── classifier ────────────────────────────────────────────────────────────────
@@ -670,7 +670,7 @@ class TestReleaseFanoutParity:
             main, ["compare", str(old_dir), str(new_dir), "-o", "json=-"]
         )
         assert rel.exit_code == cmp.exit_code == 4
-        assert json.loads(rel.output) == json.loads(cmp.output)
+        assert json.loads(rel.stdout) == json.loads(cmp.stdout)
 
     def test_output_dir_fanout_preserved(self, tmp_path: Path) -> None:
         old_dir = tmp_path / "old"

@@ -631,7 +631,7 @@ class TestShowOnlyCliHintIsReRunnable:
         assert result.exit_code == 4, result.output
         hint_line = next(
             line
-            for line in result.output.splitlines()
+            for line in result.stdout.splitlines()
             if line.startswith("> Filtered by:")
         )
         # No internal transport separator ever reaches rendered text.

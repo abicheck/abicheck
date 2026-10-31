@@ -182,7 +182,7 @@ class TestAnalysisAssuranceOutOfBandPack:
             ],
         )
         assert res.exit_code in (0, 1, 2, 4), res.output
-        payload = json.loads(res.output[res.output.index("{") :])
+        payload = json.loads(res.stdout[res.stdout.index("{") :])
         aa = payload["analysis_assurance"]
         # Finding 1's actual claim: the *out-of-band* pack's incompleteness
         # (7 of 10 compile units never parsed) must be visible here, even

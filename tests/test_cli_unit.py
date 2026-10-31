@@ -133,7 +133,7 @@ class TestCompareJson:
             main, ["compare", str(old_p), str(new_p), "-o", "json=-"]
         )
         assert result.exit_code == 0
-        parsed = json.loads(result.output)
+        parsed = json.loads(result.stdout)
         assert "verdict" in parsed
 
 

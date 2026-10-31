@@ -179,7 +179,7 @@ class TestBaselinePresenceIsAnInput:
             "compare", "--no-baseline", str(_candidate_path()), "-o", "json=-"
         )
         assert result.exit_code == 0, result.output
-        report = json.loads(result.output)
+        report = json.loads(result.stdout)
 
         assert report["verdict"] is None
         assert report["changes"] == []
@@ -368,7 +368,7 @@ class TestTheMachineDocumentIsNotImplicitlyTruncated:
         old_dir, new_dir = _many_removals_pair(tmp_path, count=25)
         result = _invoke("compare", str(old_dir), str(new_dir), "-o", "json=-")
         assert result.exit_code == 4, result.output
-        lib = json.loads(result.output)["libraries"][0]
+        lib = json.loads(result.stdout)["libraries"][0]
         assert len(lib["findings"]) == 26  # 25 removals + public_surface_shrank
         assert "findings_truncated" not in lib
 
@@ -406,7 +406,7 @@ class TestTheMachineDocumentIsNotImplicitlyTruncated:
         old_dir, new_dir = _many_removals_pair(tmp_path, count=25)
         result = _invoke("compare", str(old_dir), str(new_dir), "-o", "json=-")
         assert result.exit_code == 4, result.output
-        lib = json.loads(result.output)["libraries"][0]
+        lib = json.loads(result.stdout)["libraries"][0]
         assert len(lib["findings"]) == 26
         assert "findings_truncated" not in lib
         assert "findings_truncated_kinds" not in lib

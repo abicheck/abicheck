@@ -81,7 +81,7 @@ def _member(doc: dict, name: str) -> dict:
 
 def _invoke(*args: str) -> tuple[int, str]:
     result = CliRunner().invoke(main, list(args))
-    return result.exit_code, result.output
+    return result.exit_code, result.stdout
 
 
 def _invoke_stdout(*args: str) -> tuple[int, str]:

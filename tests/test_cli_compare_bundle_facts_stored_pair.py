@@ -61,6 +61,12 @@ def _invoke(*args: str) -> tuple[int, str]:
     return result.exit_code, result.output
 
 
+def _invoke_stdout(*args: str) -> tuple[int, str]:
+    """``_invoke`` reading stdout only, for a caller that parses it as JSON."""
+    result = CliRunner().invoke(main, list(args))
+    return result.exit_code, result.stdout
+
+
 def _write_stub(tmp_path: Path, name: str) -> Path:
     path = tmp_path / name
     path.write_text(_STUB_BUNDLE_FACTS_JSON)
@@ -109,7 +115,9 @@ class TestBundleCompareOperandRouting:
         old_path = _write_stub(tmp_path, "old.bundlefacts.json")
         new_path = _write_stub(tmp_path, "new.bundlefacts.json")
 
-        code, out = _invoke("compare", str(old_path), str(new_path), "-o", "json=-")
+        code, out = _invoke_stdout(
+            "compare", str(old_path), str(new_path), "-o", "json=-"
+        )
 
         assert code != 64
         # ADR-065 D7 (Codex review, thirtieth round): a zero-pair run with a
@@ -528,7 +536,9 @@ class TestStoredPairEndToEnd:
             tmp_path, "new.bundlefacts.json", "new", Visibility.HIDDEN
         )
 
-        code, out = _invoke("compare", str(old_path), str(new_path), "-o", "json=-")
+        code, out = _invoke_stdout(
+            "compare", str(old_path), str(new_path), "-o", "json=-"
+        )
 
         data = json.loads(out)
         assert data["release_schema_version"] == RELEASE_SCHEMA_VERSION
@@ -545,7 +555,9 @@ class TestStoredPairEndToEnd:
             tmp_path, "new.bundlefacts.json", "new", Visibility.PUBLIC
         )
 
-        code, out = _invoke("compare", str(old_path), str(new_path), "-o", "json=-")
+        code, out = _invoke_stdout(
+            "compare", str(old_path), str(new_path), "-o", "json=-"
+        )
 
         data = json.loads(out)
         assert data["verdict"] == "NO_CHANGE"
@@ -573,7 +585,7 @@ class TestStoredPairEndToEnd:
         cfg = tmp_path / ".abicheck.yml"
         cfg.write_text("scope:\n  on_incomplete: block\n", encoding="utf-8")
 
-        code, out = _invoke(
+        code, out = _invoke_stdout(
             "compare",
             str(old_path),
             str(new_path),
@@ -643,7 +655,7 @@ class TestStoredPairEndToEnd:
             tmp_path, "new.bundlefacts.json", "new", Visibility.PUBLIC
         )
 
-        code, out = _invoke(
+        code, out = _invoke_stdout(
             "compare",
             str(old_path),
             str(new_path),
@@ -788,7 +800,9 @@ class TestStoredPairEndToEnd:
         save_bundle_facts(capture_bundle_facts({"libcore.so": old_snapshot}), old_path)
         save_bundle_facts(capture_bundle_facts({"libcore.so": new_snapshot}), new_path)
 
-        code, out = _invoke("compare", str(old_path), str(new_path), "-o", "json=-")
+        code, out = _invoke_stdout(
+            "compare", str(old_path), str(new_path), "-o", "json=-"
+        )
 
         assert code == 16
         assert "not comparable" in out

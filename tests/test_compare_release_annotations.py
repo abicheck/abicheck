@@ -84,6 +84,12 @@ def _invoke(*args: str) -> tuple[int, str]:
     return result.exit_code, result.output
 
 
+def _invoke_stdout(*args: str) -> tuple[int, str]:
+    """``_invoke`` reading stdout only, for a caller that parses it as JSON."""
+    result = CliRunner().invoke(main, list(args))
+    return result.exit_code, result.stdout
+
+
 class TestReleaseAnnotationsPersistence:
     """CLI cleanup phase two, PR E (release-operand half): each library
     entry in a release JSON report carries its own uncapped ``annotations``
@@ -102,7 +108,9 @@ class TestReleaseAnnotationsPersistence:
         old_foo, new_foo = _breaking_pair("libfoo.so")
         _write_snap(old_dir / "libfoo.json", old_foo)
         _write_snap(new_dir / "libfoo.json", new_foo)
-        code, out = _invoke("compare", str(old_dir), str(new_dir), "-o", "json=-")
+        code, out = _invoke_stdout(
+            "compare", str(old_dir), str(new_dir), "-o", "json=-"
+        )
         assert code == 4
         data = json.loads(out)
         [lib] = data["libraries"]
@@ -122,7 +130,9 @@ class TestReleaseAnnotationsPersistence:
         snap = _snap()
         _write_snap(old_dir / "libfoo.json", snap)
         _write_snap(new_dir / "libfoo.json", snap)
-        code, out = _invoke("compare", str(old_dir), str(new_dir), "-o", "json=-")
+        code, out = _invoke_stdout(
+            "compare", str(old_dir), str(new_dir), "-o", "json=-"
+        )
         assert code == 0
         data = json.loads(out)
         [lib] = data["libraries"]

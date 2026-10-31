@@ -109,7 +109,7 @@ def test_depth_binary_reports_dwarf_layout_breaks_without_headers(
             "json=-",
         ],
     )
-    doc = json.loads(result.output[result.output.index("{") :])
+    doc = json.loads(result.stdout[result.stdout.index("{") :])
     kinds = {c["kind"] for c in doc["changes"]}
     # Every case is a real layout change; the rung must not read as clean.
     assert doc["verdict"] != "NO_CHANGE", kinds
