@@ -231,14 +231,35 @@ inputs:
   compile-options:
     description: 'Extra compiler flags passed through to the header frontend (the CLI --compiler-option). Forwarded to the internal analysis step.'
     required: false
-  consumer-ast-frontend:
+  consumer-frontend:
     description: 'Consumer-only L2 header frontend. When set, candidate headers are extracted in a separate pass against the same producer binary.'
     required: false
-  consumer-gcc-path:
+  consumer-compiler:
     description: 'Consumer-only compiler executable used by the separate candidate header extraction pass.'
     required: false
-  consumer-gcc-options:
+  consumer-compile-options:
     description: 'Consumer-only compiler options used by the separate candidate header extraction pass.'
+    required: false
+  consumer-ast-frontend:
+    description: >
+      RETIRED (no transition period): renamed to `consumer-frontend`.
+      Setting this input fails the run before any analysis with an
+      `::error::` naming `consumer-frontend`. Replace `consumer-ast-frontend` with `consumer-frontend`, then
+      remove `consumer-ast-frontend`.
+    required: false
+  consumer-gcc-path:
+    description: >
+      RETIRED (no transition period): renamed to `consumer-compiler`.
+      Setting this input fails the run before any analysis with an
+      `::error::` naming `consumer-compiler`. Replace `consumer-gcc-path` with `consumer-compiler`, then
+      remove `consumer-gcc-path`.
+    required: false
+  consumer-gcc-options:
+    description: >
+      RETIRED (no transition period): renamed to `consumer-compile-options`.
+      Setting this input fails the run before any analysis with an
+      `::error::` naming `consumer-compile-options`. Replace `consumer-gcc-options` with `consumer-compile-options`, then
+      remove `consumer-gcc-options`.
     required: false
   consumer-compile-active:
     description: >-
@@ -246,8 +267,8 @@ inputs:
       (independent of whether it resolved any of the three fields above to
       a non-empty value -- e.g. an overlay naming only a `binding:` with no
       matching --toolchain-bindings entry). Forces the separate candidate
-      consumer-context dump below to run even when consumer-ast-frontend/
-      consumer-gcc-path/consumer-gcc-options are all empty, so a declared
+      consumer-context dump below to run even when consumer-frontend/
+      consumer-compiler/consumer-compile-options are all empty, so a declared
       overlay always isolates the candidate's header parse from the
       producer's own compiler options rather than silently falling back to
       them (Codex review).
@@ -492,6 +513,9 @@ runs:
         INPUT_GCC_PREFIX: ${{ inputs.gcc-prefix }}
         INPUT_GCC_OPTIONS: ${{ inputs.gcc-options }}
         INPUT_POLICY_FILE: ${{ inputs.policy-file }}
+        INPUT_CONSUMER_AST_FRONTEND: ${{ inputs.consumer-ast-frontend }}
+        INPUT_CONSUMER_GCC_PATH: ${{ inputs.consumer-gcc-path }}
+        INPUT_CONSUMER_GCC_OPTIONS: ${{ inputs.consumer-gcc-options }}
         INPUT_ANALYSIS_ASSURANCE_COMPLETE: ${{ inputs.analysis-assurance-complete }}
         INPUT_KIND: ${{ inputs.kind }}
         INPUT_TARGET_KIND: ${{ inputs.target-kind }}
@@ -661,7 +685,7 @@ runs:
       id: consumer_context
       if: |
         inputs.kind == 'target' &&
-        (inputs.consumer-compile-active == 'true' || inputs.consumer-ast-frontend != '' || inputs.consumer-gcc-path != '' || inputs.consumer-gcc-options != '') &&
+        (inputs.consumer-compile-active == 'true' || inputs.consumer-frontend != '' || inputs.consumer-compiler != '' || inputs.consumer-compile-options != '') &&
         (inputs.baseline-channel == 'none' || steps.resolve.outputs.outcome == 'resolved') &&
         steps.collect_verify.outcome != 'failure' &&
         steps.collect_replay.outcome != 'failure'
@@ -683,13 +707,13 @@ runs:
         header: ${{ inputs.new-header != '' && inputs.new-header || inputs.header }}
         include: ${{ inputs.new-include != '' && inputs.new-include || inputs.include }}
         lang: ${{ inputs.lang }}
-        frontend: ${{ inputs.consumer-ast-frontend }}
+        frontend: ${{ inputs.consumer-frontend }}
         # The caller's gcc-prefix reached this dump before ADR-091 R5 folded it
         # into `compiler`. Only a prefix (ends with '-', the same rule
         # abicheck/buildsource/compile_config.py uses) falls back here, so a
         # full compiler path never reaches the consumer context dump.
-        compiler: ${{ inputs.consumer-gcc-path || (endsWith(inputs.compiler, '-') && inputs.compiler || '') }}
-        compile-options: ${{ inputs.consumer-gcc-options }}
+        compiler: ${{ inputs.consumer-compiler || (endsWith(inputs.compiler, '-') && inputs.compiler || '') }}
+        compile-options: ${{ inputs.consumer-compile-options }}
         sysroot: ${{ inputs.sysroot }}
         sources: ${{ inputs.sources != '' && inputs.sources || (inputs.evidence-producer == 'replay' && '.' || '') }}
         build-info: ${{ (inputs.evidence-producer == 'wrapper' || inputs.evidence-producer == 'clang-plugin') && inputs.evidence-pack-path || inputs.build-info }}

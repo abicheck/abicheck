@@ -22,9 +22,9 @@ A third Codex review round (PR #906) found the sentinel chain covered only
 ``consumer_compile``'s ``binding``/``standard``/``stdlib`` fields (the
 compiler path/options), never its ``frontend`` field -- even though the
 fixture never set ``consumer_compile.frontend`` at all, so
-``consumer-ast-frontend`` was only ever evaluated as an empty string and
+``consumer-frontend`` was only ever evaluated as an empty string and
 never carried to hop 4's ``--ast-frontend`` argument or checked against the
-root-action env mapping. A regression in ``consumer-ast-frontend``'s own
+root-action env mapping. A regression in ``consumer-frontend``'s own
 expression, or a swap of ``INPUT_FRONTEND`` with another declared
 input, could therefore have gone undetected by this file even though
 ``frontend`` is part of the concern the registry now declares closed. Fixed
@@ -74,7 +74,7 @@ guard would still leave every `with:`-level assertion green while the
 step (and therefore the whole consumer-context dump) silently never runs
 at all. (2) the first cut also hardcoded `INPUT_COMPILER`/`INPUT_GCC_
 OPTIONS` as the env var names fed to `run.sh`, disconnecting hop 3 (the
-resolved `inputs.gcc-path`/`inputs.gcc-options` values) from hop 4 (which
+resolved `inputs.compiler`/`inputs.compile-options` values) from hop 4 (which
 env vars `run.sh` actually reads) -- a swap of those two mappings in root
 action.yml's own env block would have gone undetected.
 
@@ -239,9 +239,9 @@ def _hop3_inputs_from(
         "kind": kind,
         "baseline-channel": baseline_channel,
         "consumer-compile-active": consumer_compile_active,
-        "consumer-ast-frontend": consumer_ast_frontend,
-        "consumer-gcc-path": consumer_gcc_path,
-        "consumer-gcc-options": consumer_gcc_options,
+        "consumer-frontend": consumer_ast_frontend,
+        "consumer-compiler": consumer_gcc_path,
+        "consumer-compile-options": consumer_gcc_options,
     }
 
 
@@ -287,18 +287,20 @@ def test_sentinel_consumer_gcc_path_survives_config_to_check_target_input(
     # it (this sentinel, not the expected one, would appear). Same for
     # `ast-frontend`, with its own distinct workflow-global value.
     workflow_inputs = {
-        "gcc-path": _WORKFLOW_GLOBAL_GCC_PATH,
-        "gcc-options": "",
-        "ast-frontend": _WORKFLOW_GLOBAL_AST_FRONTEND,
+        "compiler": _WORKFLOW_GLOBAL_GCC_PATH,
+        "compile-options": "",
+        "frontend": _WORKFLOW_GLOBAL_AST_FRONTEND,
     }
     consumer_gcc_path = eval_gha_expression(
-        run_step["with"]["consumer-gcc-path"], matrix=matrix, inputs=workflow_inputs
+        run_step["with"]["consumer-compiler"], matrix=matrix, inputs=workflow_inputs
     )
     consumer_gcc_options = eval_gha_expression(
-        run_step["with"]["consumer-gcc-options"], matrix=matrix, inputs=workflow_inputs
+        run_step["with"]["consumer-compile-options"],
+        matrix=matrix,
+        inputs=workflow_inputs,
     )
     consumer_ast_frontend = eval_gha_expression(
-        run_step["with"]["consumer-ast-frontend"], matrix=matrix, inputs=workflow_inputs
+        run_step["with"]["consumer-frontend"], matrix=matrix, inputs=workflow_inputs
     )
     consumer_compile_active = eval_gha_expression(
         run_step["with"]["consumer-compile-active"], matrix=matrix, inputs={}
@@ -365,8 +367,8 @@ def test_marker_only_overlay_activates_the_consumer_step_without_any_field() -> 
     a substring match against the real hop-2 expression). This proves the
     same invariant by actually evaluating the chain: the consumer-context
     step's own scheduling `if:` guard must still fire from the overlay's
-    presence alone, with `consumer-ast-frontend`/`consumer-gcc-path`/
-    `consumer-gcc-options` all genuinely empty -- exactly the scenario
+    presence alone, with `consumer-frontend`/`consumer-compiler`/
+    `consumer-compile-options` all genuinely empty -- exactly the scenario
     `_hop3_inputs_from`'s fix above targets, since a `"true" if ... else
     "false"` re-coercion bug would have masked a real regression here too
     (every string is Python-truthy, so it could never actually observe
@@ -397,15 +399,17 @@ def test_marker_only_overlay_activates_the_consumer_step_without_any_field() -> 
 
     run_step = _run_check_step("Run check-target")
     _assert_run_check_target_step_guard_fires(run_step)
-    workflow_inputs = {"gcc-path": "", "gcc-options": "", "ast-frontend": ""}
+    workflow_inputs = {"compiler": "", "compile-options": "", "frontend": ""}
     consumer_gcc_path = eval_gha_expression(
-        run_step["with"]["consumer-gcc-path"], matrix=matrix, inputs=workflow_inputs
+        run_step["with"]["consumer-compiler"], matrix=matrix, inputs=workflow_inputs
     )
     consumer_gcc_options = eval_gha_expression(
-        run_step["with"]["consumer-gcc-options"], matrix=matrix, inputs=workflow_inputs
+        run_step["with"]["consumer-compile-options"],
+        matrix=matrix,
+        inputs=workflow_inputs,
     )
     consumer_ast_frontend = eval_gha_expression(
-        run_step["with"]["consumer-ast-frontend"], matrix=matrix, inputs=workflow_inputs
+        run_step["with"]["consumer-frontend"], matrix=matrix, inputs=workflow_inputs
     )
     consumer_compile_active = eval_gha_expression(
         run_step["with"]["consumer-compile-active"], matrix=matrix, inputs={}
@@ -454,14 +458,14 @@ def test_partial_overlay_falls_back_to_workflow_global_per_field(
     exercises. The main test's overlay resolves every field itself; the
     marker-only test's overlay resolves NO field and pairs it with empty
     workflow-globals. Neither can catch a regression in the real per-field
-    fallback (`matrix.consumer_compile_gcc_path || inputs.gcc-path`, not a
+    fallback (`matrix.consumer_compile_gcc_path || inputs.compiler`, not a
     blanket `|| ''`): an ACTIVE overlay that sets only `frontend:` -- a
     real, common shape (pin the consumer's header frontend, reuse the
     caller's own workflow-global compiler for the rest) -- must fall back
     to the workflow-global `gcc-path`/`gcc-options` for the two fields it
     left unset, while still keeping its own `frontend` value rather than
-    the workflow-global's. Deleting `inputs.gcc-path`/`inputs.gcc-options`/
-    `inputs.ast-frontend` from any of the three real fallback expressions
+    the workflow-global's. Deleting `inputs.compiler`/`inputs.compile-options`/
+    `inputs.frontend` from any of the three real fallback expressions
     would leave every other test in this file green while this exact
     scenario silently loses its compiler context."""
     raw = {
@@ -493,18 +497,20 @@ def test_partial_overlay_falls_back_to_workflow_global_per_field(
     # frontend sentinel and from every other sentinel in this module, so a
     # leaked or wrongly-sourced value is unambiguous either way.
     workflow_inputs = {
-        "gcc-path": _FALLBACK_GCC_PATH,
-        "gcc-options": _FALLBACK_GCC_OPTIONS,
-        "ast-frontend": _WORKFLOW_GLOBAL_AST_FRONTEND,
+        "compiler": _FALLBACK_GCC_PATH,
+        "compile-options": _FALLBACK_GCC_OPTIONS,
+        "frontend": _WORKFLOW_GLOBAL_AST_FRONTEND,
     }
     consumer_gcc_path = eval_gha_expression(
-        run_step["with"]["consumer-gcc-path"], matrix=matrix, inputs=workflow_inputs
+        run_step["with"]["consumer-compiler"], matrix=matrix, inputs=workflow_inputs
     )
     consumer_gcc_options = eval_gha_expression(
-        run_step["with"]["consumer-gcc-options"], matrix=matrix, inputs=workflow_inputs
+        run_step["with"]["consumer-compile-options"],
+        matrix=matrix,
+        inputs=workflow_inputs,
     )
     consumer_ast_frontend = eval_gha_expression(
-        run_step["with"]["consumer-ast-frontend"], matrix=matrix, inputs=workflow_inputs
+        run_step["with"]["consumer-frontend"], matrix=matrix, inputs=workflow_inputs
     )
     consumer_compile_active = eval_gha_expression(
         run_step["with"]["consumer-compile-active"], matrix=matrix, inputs={}
@@ -562,14 +568,14 @@ def test_partial_overlay_without_frontend_falls_back_to_workflow_global_frontend
 ) -> None:
     """Codex review (PR #906): the sibling test above only omits `frontend:`
     from the overlay, so its own `matrix.consumer_compile_ast_frontend ||
-    inputs.ast-frontend` fallback is never reached -- every scenario in
+    inputs.frontend` fallback is never reached -- every scenario in
     this file up to now either sets the overlay's own `frontend` or pairs
     an empty overlay with an empty workflow-global. This exercises the
     fallback in the OTHER direction: an active overlay setting `binding`/
     `standard` (so gcc-path/gcc-options resolve from the overlay itself)
     but no `frontend`, paired with a nonempty workflow-global `ast-
-    frontend` -- the consumer-ast-frontend expression's own `||
-    inputs.ast-frontend` arm must carry it through, while gcc-path/
+    frontend` -- the consumer-frontend expression's own `||
+    inputs.frontend` arm must carry it through, while gcc-path/
     gcc-options keep the overlay's own values rather than a distinct
     workflow-global that must NOT leak through for those two fields."""
     raw = {
@@ -601,18 +607,20 @@ def test_partial_overlay_without_frontend_falls_back_to_workflow_global_frontend
     # (the overlay already set its own); ast-frontend is the "must fall
     # back" sentinel (the overlay set no frontend of its own).
     workflow_inputs = {
-        "gcc-path": _WORKFLOW_GLOBAL_GCC_PATH,
-        "gcc-options": _WORKFLOW_GLOBAL_GCC_OPTIONS,
-        "ast-frontend": _WORKFLOW_GLOBAL_AST_FRONTEND,
+        "compiler": _WORKFLOW_GLOBAL_GCC_PATH,
+        "compile-options": _WORKFLOW_GLOBAL_GCC_OPTIONS,
+        "frontend": _WORKFLOW_GLOBAL_AST_FRONTEND,
     }
     consumer_gcc_path = eval_gha_expression(
-        run_step["with"]["consumer-gcc-path"], matrix=matrix, inputs=workflow_inputs
+        run_step["with"]["consumer-compiler"], matrix=matrix, inputs=workflow_inputs
     )
     consumer_gcc_options = eval_gha_expression(
-        run_step["with"]["consumer-gcc-options"], matrix=matrix, inputs=workflow_inputs
+        run_step["with"]["consumer-compile-options"],
+        matrix=matrix,
+        inputs=workflow_inputs,
     )
     consumer_ast_frontend = eval_gha_expression(
-        run_step["with"]["consumer-ast-frontend"], matrix=matrix, inputs=workflow_inputs
+        run_step["with"]["consumer-frontend"], matrix=matrix, inputs=workflow_inputs
     )
     consumer_compile_active = eval_gha_expression(
         run_step["with"]["consumer-compile-active"], matrix=matrix, inputs={}
@@ -714,15 +722,17 @@ def test_no_baseline_channel_activates_the_consumer_step_via_its_own_arm() -> No
 
     run_step = _run_check_step("Run check-target")
     _assert_run_check_target_step_guard_fires(run_step)
-    workflow_inputs = {"gcc-path": "", "gcc-options": "", "ast-frontend": ""}
+    workflow_inputs = {"compiler": "", "compile-options": "", "frontend": ""}
     consumer_gcc_path = eval_gha_expression(
-        run_step["with"]["consumer-gcc-path"], matrix=matrix, inputs=workflow_inputs
+        run_step["with"]["consumer-compiler"], matrix=matrix, inputs=workflow_inputs
     )
     consumer_gcc_options = eval_gha_expression(
-        run_step["with"]["consumer-gcc-options"], matrix=matrix, inputs=workflow_inputs
+        run_step["with"]["consumer-compile-options"],
+        matrix=matrix,
+        inputs=workflow_inputs,
     )
     consumer_ast_frontend = eval_gha_expression(
-        run_step["with"]["consumer-ast-frontend"], matrix=matrix, inputs=workflow_inputs
+        run_step["with"]["consumer-frontend"], matrix=matrix, inputs=workflow_inputs
     )
     consumer_compile_active = eval_gha_expression(
         run_step["with"]["consumer-compile-active"], matrix=matrix, inputs={}
@@ -868,9 +878,9 @@ def test_bundle_kind_and_no_overlay_never_leak_the_workflow_global_path() -> Non
     cases that must resolve empty regardless of what the workflow-global
     input carries: a bundle-kind cell (never gets consumer fields at all),
     and a non-overlay profile (`consumer_compile_active` false).
-    `consumer-gcc-options` was previously left unchecked here even though
+    `consumer-compile-options` was previously left unchecked here even though
     its own expression has the identical `matrix.consumer_compile_active
-    && ... || inputs.gcc-options || ''` shape -- a regression there could
+    && ... || inputs.compile-options || ''` shape -- a regression there could
     have let an inactive/bundle cell's workflow-global option leak through
     while every other assertion in this test stayed green.
 
@@ -890,9 +900,9 @@ def test_bundle_kind_and_no_overlay_never_leak_the_workflow_global_path() -> Non
     falsy."""
     run_step = _run_check_step("Run check-target")
     _assert_run_check_target_step_guard_fires(run_step)
-    gcc_path_expr = run_step["with"]["consumer-gcc-path"]
-    gcc_options_expr = run_step["with"]["consumer-gcc-options"]
-    ast_frontend_expr = run_step["with"]["consumer-ast-frontend"]
+    gcc_path_expr = run_step["with"]["consumer-compiler"]
+    gcc_options_expr = run_step["with"]["consumer-compile-options"]
+    ast_frontend_expr = run_step["with"]["consumer-frontend"]
     active_expr = run_step["with"]["consumer-compile-active"]
     kind_expr = run_step["with"]["kind"]
     baseline_channel_expr = run_step["with"]["baseline-channel"]
@@ -911,9 +921,9 @@ def test_bundle_kind_and_no_overlay_never_leak_the_workflow_global_path() -> Non
         "consumer_compile_ast_frontend": _SENTINEL_CONSUMER_AST_FRONTEND,
     }
     bundle_inputs = {
-        "gcc-path": _WORKFLOW_GLOBAL_GCC_PATH,
-        "gcc-options": _WORKFLOW_GLOBAL_GCC_OPTIONS,
-        "ast-frontend": _WORKFLOW_GLOBAL_AST_FRONTEND,
+        "compiler": _WORKFLOW_GLOBAL_GCC_PATH,
+        "compile-options": _WORKFLOW_GLOBAL_GCC_OPTIONS,
+        "frontend": _WORKFLOW_GLOBAL_AST_FRONTEND,
     }
     assert (
         eval_gha_expression(gcc_path_expr, matrix=bundle_matrix, inputs=bundle_inputs)
@@ -953,9 +963,9 @@ def test_bundle_kind_and_no_overlay_never_leak_the_workflow_global_path() -> Non
 
     no_overlay_matrix = {"kind": "target", "consumer_compile_active": False}
     no_overlay_inputs = {
-        "gcc-path": _WORKFLOW_GLOBAL_GCC_PATH,
-        "gcc-options": _WORKFLOW_GLOBAL_GCC_OPTIONS,
-        "ast-frontend": _WORKFLOW_GLOBAL_AST_FRONTEND,
+        "compiler": _WORKFLOW_GLOBAL_GCC_PATH,
+        "compile-options": _WORKFLOW_GLOBAL_GCC_OPTIONS,
+        "frontend": _WORKFLOW_GLOBAL_AST_FRONTEND,
     }
     assert (
         eval_gha_expression(
@@ -1017,7 +1027,7 @@ def test_mutating_the_real_hop2_gate_leaks_the_workflow_global_path() -> None:
 
     This constructs the identical single-character class of mutation
     (`&&` -> `||` in the activation gate) against the REAL, unmodified
-    `consumer-gcc-path` expression text pulled live from check-project.yml
+    `consumer-compiler` expression text pulled live from check-project.yml
     -- the same text every other test in this file evaluates -- and proves
     the mutated text evaluates DIFFERENTLY from the real text for an
     inactive, no-overlay cell paired with a nonempty workflow-global path:
@@ -1027,10 +1037,10 @@ def test_mutating_the_real_hop2_gate_leaks_the_workflow_global_path() -> None:
     proof the harness would have caught #860/#883 before merge -- not
     merely that a hand-written comparison helper works in isolation."""
     run_step = _run_check_step("Run check-target")
-    real_expr = run_step["with"]["consumer-gcc-path"]
+    real_expr = run_step["with"]["consumer-compiler"]
     gate = "matrix.kind != 'bundle' && matrix.consumer_compile_active"
     assert gate in real_expr, (
-        "the real consumer-gcc-path expression no longer contains the "
+        "the real consumer-compiler expression no longer contains the "
         "exact activation gate this mutation targets -- update the "
         "mutation to match the real expression's current text"
     )
@@ -1043,7 +1053,7 @@ def test_mutating_the_real_hop2_gate_leaks_the_workflow_global_path() -> None:
     # test_bundle_kind_and_no_overlay_never_leak_the_workflow_global_path
     # already pins the REAL expression's correct ("") answer for.
     matrix = {"kind": "target", "consumer_compile_active": False}
-    inputs = {"gcc-path": _WORKFLOW_GLOBAL_GCC_PATH}
+    inputs = {"compiler": _WORKFLOW_GLOBAL_GCC_PATH}
 
     real_result = eval_gha_expression(real_expr, matrix=matrix, inputs=inputs)
     mutated_result = eval_gha_expression(mutated_expr, matrix=matrix, inputs=inputs)

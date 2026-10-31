@@ -1,6 +1,6 @@
 # Option vocabulary unification: implementation plan
 
-**Status:** Phases 0 and 1 done (Phase 0 2026-10-30; Phase 1 is #1850). Phase 2 done: the CLI `--set` half for `compare`, `dump` and `project capture-variants` (#1851, #1857), the Action `set:` input (#1854), and the compile-context keys with the Action's `compile:` overlay replacement (this change). The typed API still refuses `compile.*` (see the Result below). Phase 4 CLI part done (#1852), its Action and Python parts not started. Phases 3, 5–7 not started. Implements
+**Status:** Phases 0, 1, 2 done (Phase 0 2026-10-30; Phase 1 is #1850; Phase 2: the CLI `--set` half for `compare`, `dump` and `project capture-variants` (#1851, #1857), the Action `set:` input (#1854), and the compile-context keys replacing the Action's `compile:` overlay (#1861); the typed API still refuses `compile.*`, see the Result below). Phase 4 done for the CLI (#1852), the Action (#1860), the typed request and `run_compare` shim, and the reusable workflows (this change). Phase 4 is done for the typed API. The Tier-1 `checker.compare()` keywords (`contract_evaluation`, `contract_mode`) are an accepted exception (ADR-091 R10). Open review item, not a blocker: `run_dump(public_headers)`. Phase 3 (R11, R15) and Phase 5 (budget) in progress. Phase 6 is collapsed into each rename (D7 amendment). Phase 7 not started. Implements
 [ADR-091](../adr/091-one-option-vocabulary.md). Each phase is one PR, ordered
 so that the parity gate lands before any rename. Every rename lands with its
 migration row and no alias: the 2026-10-30 policy (ADR-091 D7 amendment)
@@ -323,9 +323,11 @@ stay, per the ADR text); R3 `acknowledgments`; R7 `public_symbols`; R8
 (`InputSpec`, `run_compare`, `run_dump`); R9 `debuginfod`; R10 `contract`; R18
 `run_dump(frontend=)`. Each old spelling is in `scripts/retired_surfaces_0_7.py`
 and the typed-API table of `docs/start/upgrading-to-0.7.md`. The gate's exceptions
-for these ids are removed. Not done here, each recorded in the gate: R19 (the
-flattened and sided Python names, whose leaf-versus-full-path mapping needs a
-decision per name), `run_dump(public_headers)` (R18 review: `run_dump` already has
+for these ids are removed. R19 (the flattened and sided Python names) is
+resolved as ACCEPTED on 2026-10-31 under the maintainer rule: the registry
+records each as an `accepted: true` exception against the R19 row, and no
+Python name in it remains a planned rename. Phase 4 is done for the typed API. `checker.compare()`'s `contract_evaluation` and
+`contract_mode` stay as the documented Tier-1 raw building block (docs/use/python-api.md), not the typed request surface, and are an accepted exception (ADR-091 R10). Open review item, not a blocker: `run_dump(public_headers)` (R18 review: `run_dump` already has
 a `headers` parameter, so `headers` would collide), `ReleaseCompareRequest` and
 `ReleaseMemberCompareRequest` (they keep their own spellings and translate at the
 boundary), and the `resolve_input`/`compare_snapshots`/`load_suppression_and_policy`
@@ -370,7 +372,23 @@ reusable workflows keep their own `workflow_call` input names, which this
 change does not rename; they forward to the new Action names. The in-repo
 workflows, the Action test suites and the docs use the new names;
 `docs/start/upgrading-to-0.7.md` has the rename table. Python (R2, R3, R7–R10,
-R18 `run_dump`) and check-target's own sub-action docs are the rest of Phase 4.
+R18 `run_dump`) were the rest of Phase 4 at the time of that PR. The Python
+typed-request part has since landed (see the Python note above); what remains is
+listed in the Phase 4 Python paragraph.
+
+**Result (reusable workflows, ADR-091 R4–R7/R17/R18 for `workflow_call`).**
+`check-single.yml` and `check-project.yml` rename their inputs to the Action's
+vocabulary: `depth`, `frontend`, `compiler`, `compile-options`, `contract`,
+`policy`. `actions/check-target` renames its consumer inputs to
+`consumer-frontend`, `consumer-compiler` and `consumer-compile-options`. The old
+names stay declared as empty tombstones. This is a fail-closed choice, not a
+confirmed GitHub behavior: the reusable-workflow docs do not say what an
+undeclared `with:` key does, so each workflow's first step (`plan` in
+check-project, `check` in check-single) rejects a non-empty tombstone and names
+the replacement before any analysis runs. `tests/test_reusable_workflow_retired_inputs.py`
+executes that step. The `workflow:` inventory (`scripts/gen_option_vocabulary.py`)
+claims each input under its concept; artifact-staging names and the project-plan
+config location are `out_of_scope`.
 
 ## Phase 5 — Surface budget (D4)
 
@@ -409,8 +427,9 @@ CLI spellings, and `docs/start/upgrading-to-0.7.md` now says "removed" in
 place of "deprecated". In-repo callers (tests, benchmark and corpus scripts,
 skills-src validation harnesses, the Action shell's extra-args checks and
 messages, the test-action workflow's flag-shaped extra-args case) moved to
-`--label` or `--root`. Still open: the Python keyword and config key halves of
-Phase 4, and the Action tombstones, each land with their own renames.
+`--label` or `--root`. The Action tombstones (#1860) and the reusable-workflow tombstones
+(this change) have landed. Still open: the Tier-1 `checker.compare()` keywords
+of Phase 4.
 
 ## Phase 7 — Generate the references from the registry (optional)
 

@@ -120,10 +120,14 @@ on:
         type: string
         default: 'abicheck-check-single-report-'
 
-      requested-depth:
+      depth:
         description: 'Evidence-depth this check asks for: binary, headers, build, or source -- required.'
         type: string
         required: true
+      requested-depth:
+        description: 'RETIRED (no transition period): renamed to `depth`. Setting it fails the run before any analysis.'
+        type: string
+        default: ''
       explicit-id:
         description: >
           Forwarded to check-target's explicit-id input (G42 "Explicit
@@ -192,20 +196,32 @@ on:
         description: 'Language mode for header AST parsing: "c++" or "c".'
         type: string
         default: 'c++'
-      ast-frontend:
+      frontend:
         description: 'L2 header-AST frontend: auto, castxml, clang, or hybrid.'
         type: string
         default: ''
+      compiler:
+        description: 'Cross-compiler: a path to the GCC/G++ binary, or a cross-toolchain prefix ending in ''-'' (e.g. aarch64-linux-gnu-).'
+        type: string
+        default: ''
+      compile-options:
+        description: 'Extra compiler flags passed through to castxml.'
+        type: string
+        default: ''
+      ast-frontend:
+        description: 'RETIRED (no transition period): renamed to `frontend`. Setting it fails the run before any analysis.'
+        type: string
+        default: ''
       gcc-path:
-        description: 'Path to GCC/G++ cross-compiler binary.'
+        description: 'RETIRED (no transition period): renamed to `compiler`. Setting it fails the run before any analysis.'
         type: string
         default: ''
       gcc-prefix:
-        description: 'Cross-toolchain prefix, e.g. aarch64-linux-gnu-.'
+        description: 'RETIRED (no transition period): renamed to `compiler`. Setting it fails the run before any analysis.'
         type: string
         default: ''
       gcc-options:
-        description: 'Extra compiler flags passed through to castxml.'
+        description: 'RETIRED (no transition period): renamed to `compile-options`. Setting it fails the run before any analysis.'
         type: string
         default: ''
       sysroot:
@@ -232,16 +248,20 @@ on:
         description: 'target-kind: app-consumer only. Consumer binary/binaries whose imports scope the comparison.'
         type: string
         default: ''
-      contract-file:
+      contract:
         description: 'target-kind: plugin-contract only. A .syms file (one required linker symbol per line).'
         type: string
         default: ''
       policy:
-        description: 'Built-in policy profile: strict_abi (default), sdk_vendor, plugin_abi.'
+        description: 'Built-in policy profile name (strict_abi default, sdk_vendor, plugin_abi), or a path to a YAML policy file with per-kind verdict overrides.'
         type: string
         default: 'strict_abi'
+      contract-file:
+        description: 'RETIRED (no transition period): renamed to `contract`. Setting it fails the run before any analysis.'
+        type: string
+        default: ''
       policy-file:
-        description: 'Path to a YAML policy file with per-kind verdict overrides.'
+        description: 'RETIRED (no transition period): renamed to `policy`. Setting it fails the run before any analysis.'
         type: string
         default: ''
       suppress:
@@ -326,6 +346,33 @@ jobs:
         ${{ steps.run.outputs.report-path != '' &&
             format('{0}{1}', inputs.report-artifact-prefix, steps.sanitized.outputs.id) || '' }}
     steps:
+      # Each retired name is still a declared input (an empty tombstone), so a
+      # stale caller's value is seen here and fails the run before any analysis.
+      - name: Reject retired workflow inputs
+        env:
+          RETIRED_REQUESTED_DEPTH: ${{ inputs.requested-depth }}
+          RETIRED_AST_FRONTEND: ${{ inputs.ast-frontend }}
+          RETIRED_GCC_PATH: ${{ inputs.gcc-path }}
+          RETIRED_GCC_PREFIX: ${{ inputs.gcc-prefix }}
+          RETIRED_GCC_OPTIONS: ${{ inputs.gcc-options }}
+          RETIRED_CONTRACT_FILE: ${{ inputs.contract-file }}
+          RETIRED_POLICY_FILE: ${{ inputs.policy-file }}
+        run: |
+          status=0
+          reject() {
+            if [ -n "$2" ]; then
+              echo "::error::input '$1' is retired; set '$3' instead" >&2
+              status=1
+            fi
+          }
+          reject requested-depth "$RETIRED_REQUESTED_DEPTH" depth
+          reject ast-frontend "$RETIRED_AST_FRONTEND" frontend
+          reject gcc-path "$RETIRED_GCC_PATH" compiler
+          reject gcc-prefix "$RETIRED_GCC_PREFIX" compiler
+          reject gcc-options "$RETIRED_GCC_OPTIONS" compile-options
+          reject contract-file "$RETIRED_CONTRACT_FILE" contract
+          reject policy-file "$RETIRED_POLICY_FILE" policy
+          exit "$status"
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           persist-credentials: false
@@ -466,7 +513,7 @@ jobs:
           expected-project-ref: ${{ inputs.expected-project-ref }}
           expected-baseline-generation: ${{ inputs.expected-baseline-generation }}
           allow-new-target: ${{ inputs.allow-new-target }}
-          depth: ${{ inputs.requested-depth }}
+          depth: ${{ inputs.depth }}
           explicit-id: ${{ inputs.explicit-id }}
           gate-mode: ${{ inputs.gate-mode }}
           project: ${{ inputs.project != '' && inputs.project || github.repository }}
@@ -482,17 +529,17 @@ jobs:
           old-include: ${{ inputs.old-include }}
           new-include: ${{ inputs.new-include }}
           lang: ${{ inputs.lang }}
-          frontend: ${{ inputs.ast-frontend }}
-          compiler: ${{ inputs.gcc-path || inputs.gcc-prefix }}
-          compile-options: ${{ inputs.gcc-options }}
+          frontend: ${{ inputs.frontend }}
+          compiler: ${{ inputs.compiler }}
+          compile-options: ${{ inputs.compile-options }}
           sysroot: ${{ inputs.sysroot }}
           sources: ${{ inputs.sources }}
           build-info: ${{ inputs.build-info }}
           compile-db: ${{ inputs.compile-db }}
           build-config: ${{ inputs.build-config }}
           consumer-binary: ${{ inputs.consumer-binary }}
-          contract: ${{ inputs.contract-file }}
-          policy: ${{ inputs.policy-file || inputs.policy }}
+          contract: ${{ inputs.contract }}
+          policy: ${{ inputs.policy }}
           suppress: ${{ inputs.suppress }}
           severity-preset: ${{ inputs.severity-preset }}
           extra-args: ${{ inputs.extra-args }}
