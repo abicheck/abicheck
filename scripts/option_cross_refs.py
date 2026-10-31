@@ -48,6 +48,10 @@ CELL_SURFACES = (
     ("config", ".abicheck.yml"),
 )
 SET_LABEL = "--set"
+#: CLI commands that read no ``.abicheck.yml`` and take no ``--set``: their rows
+#: never offer the config or override spelling of their concept (the ``deps``
+#: commands inspect an environment that is their operand).
+NO_CONFIG_COMMANDS = ("deps compare ", "deps tree ")
 EMPTY = "—"
 
 #: Shown above each generated table so a reader knows what the column means.
@@ -120,13 +124,14 @@ class CrossRefs:
         if concept is None or concept.get("cross_refs") == "none":
             return EMPTY
         parts: list[str] = []
+        no_config = own == "cli" and member.startswith(NO_CONFIG_COMMANDS)
         for surface, label in CELL_SURFACES:
-            if surface == own:
+            if surface == own or (no_config and surface == "config"):
                 continue
             items = self._items(surface, concept.get(surface, []))
             if items:
                 parts.append(f"{label}: {', '.join(items)}")
-        config = concept.get("config", [])
+        config = [] if no_config else concept.get("config", [])
         # --set refuses every core key: a core concept keeps its one flag.
         if config and concept.get("tier") != "core":
             # An Action row names the Action's own input (`set:`), never the CLI

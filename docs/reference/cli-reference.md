@@ -112,8 +112,8 @@ Compare a binary's full dependency stack across two environments.
 | Option | Required | Default | Description | Same option on other surfaces |
 |---|:--:|---|---|---|
 | `--root` | no | — | Sysroot for one environment: 'old=PATH' (the baseline) or 'new=PATH' (the candidate). A bare PATH sets both. Each side defaults to '/'. | Action: `old-root`, `new-root` |
-| `--search-path` | no | — | Additional directory to search for shared libraries. | Action: `search-path`; .abicheck.yml: `deps.search_paths`; --set: `--set deps.search_paths=VALUE` |
-| `--ld-library-path` | no | `` | Simulated LD\_LIBRARY\_PATH (colon-separated). | Action: `ld-library-path`; .abicheck.yml: `deps.ld_library_path`; --set: `--set deps.ld_library_path=VALUE` |
+| `--search-path` | no | — | Additional directory to search for shared libraries. | Action: `search-path` |
+| `--ld-library-path` | no | `` | Simulated LD\_LIBRARY\_PATH (colon-separated). | Action: `ld-library-path` |
 | `--output`, `-o` | no | — | Export this run's report as FORMAT to DESTINATION. FORMAT is one of json/markdown/html; DESTINATION is a file path, or '-' for stdout. Repeatable: every export renders the same completed analysis, so the result never depends on which (or how many) you ask for. Default: markdown=-. | Action: `format`, `output-file` |
 | `--dry-run` | no | `False` | Show old/new roots, resolved binary paths, and search order without running per-library ABI diffs. Writes nothing; incompatible with any -o export to a file. | Action: `dry-run` |
 | `--verbose`, `-v` | no | `False` | Enable verbose/debug output. | Action: `verbose` |
@@ -132,9 +132,9 @@ Show the resolved dependency tree and symbol binding status.
 
 | Option | Required | Default | Description | Same option on other surfaces |
 |---|:--:|---|---|---|
-| `--search-path` | no | — | Additional directory to search for shared libraries. | Action: `search-path`; .abicheck.yml: `deps.search_paths`; --set: `--set deps.search_paths=VALUE` |
+| `--search-path` | no | — | Additional directory to search for shared libraries. | Action: `search-path` |
 | `--root` | no | — | Sysroot prefix for cross/container analysis. | Action: `old-root`, `new-root` |
-| `--ld-library-path` | no | `` | Simulated LD\_LIBRARY\_PATH (colon-separated). | Action: `ld-library-path`; .abicheck.yml: `deps.ld_library_path`; --set: `--set deps.ld_library_path=VALUE` |
+| `--ld-library-path` | no | `` | Simulated LD\_LIBRARY\_PATH (colon-separated). | Action: `ld-library-path` |
 | `--output`, `-o` | no | — | Export this run's report as FORMAT to DESTINATION. FORMAT is one of json/markdown/html; DESTINATION is a file path, or '-' for stdout. Repeatable: every export renders the same completed analysis, so the result never depends on which (or how many) you ask for. Default: markdown=-. | Action: `format`, `output-file` |
 | `--dry-run` | no | `False` | Show the resolved binary, sysroot, search order, and loader inputs without walking/checking the full stack. Writes nothing; incompatible with -o/--output. | Action: `dry-run` |
 | `--verbose`, `-v` | no | `False` | Enable verbose/debug output. | Action: `verbose` |

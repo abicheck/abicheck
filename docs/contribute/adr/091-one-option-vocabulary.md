@@ -150,7 +150,9 @@ does not move the option to the config tier, and the flag is not removed.
 Precedence is D2's rule: explicit flag or typed argument > `--set`/
 `config_overrides` (non-core keys only) > file > default. A stated flag
 replaces the configured value and is never merged with it. A relative path in
-the file resolves against the config file's directory. Homes added:
+the file, or in a `--set` value laid over it, resolves against the config
+file's directory (the `consumers.manifests` rule); with no file it resolves
+against the current directory. Homes added:
 
 - `debug.info` for `--debug-info`. A list of entries in the flag's own
   `[old=|new=|both=]PATH` grammar, so the per-side home is D3's side qualifier
