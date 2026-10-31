@@ -98,7 +98,7 @@ def test_explicit_policy_wins_over_a_required_symbol_contract() -> None:
     ) == ("strict_abi", None, None, None)
 
 
-def test_required_symbol_on_the_command_line_selects_plugin_abi() -> None:
+def test_required_symbols_from_the_config_select_plugin_abi() -> None:
     assert resolve_required_symbol_policy(
         "strict_abi",
         required_symbols=("foo",),

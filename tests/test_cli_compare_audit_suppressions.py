@@ -622,7 +622,7 @@ class TestJsonReport:
                 "-o",
                 "json=-",
                 "--set",
-                f'output.view=["{report_mode}"]',
+                f"output.view=[{report_mode}]",
             ],
         )
         assert result.exit_code == 4, result.output

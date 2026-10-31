@@ -27,6 +27,7 @@ its own call site, is checked too.
 from __future__ import annotations
 
 import ast
+import json
 from collections.abc import Callable
 from pathlib import Path
 
@@ -82,10 +83,17 @@ def _malformed_config(tmp_path: Path) -> tuple[list[str], Callable[[], object]]:
     )
 
 
+def _required(*items: str) -> list[str]:
+    """``consumers.required_symbols`` through ``--set``, the removed
+    ``--required-symbol``'s spelling (ADR-091 Phase 5). JSON is YAML, and it
+    quotes ``@FILE``, which a plain YAML scalar may not start with."""
+    return ["--set", "consumers.required_symbols=" + json.dumps(list(items))]
+
+
 def _missing_required_file(tmp_path: Path) -> tuple[list[str], Callable[[], object]]:
     missing = tmp_path / "absent.txt"
     return (
-        ["--set", f'consumers.required_symbols=["@{missing}"]'],
+        _required(f"@{missing}"),
         lambda: cc.load_required_symbols((f"@{missing}",)),
     )
 
@@ -95,7 +103,7 @@ def _two_required_files(tmp_path: Path) -> tuple[list[str], Callable[[], object]
     one.write_text("a\n", encoding="utf-8")
     two.write_text("b\n", encoding="utf-8")
     return (
-        ["--set", f'consumers.required_symbols=["@{one}", "@{two}"]'],
+        _required(f"@{one}", f"@{two}"),
         lambda: cc.load_required_symbols((f"@{one}", f"@{two}")),
     )
 
@@ -104,7 +112,7 @@ def _non_utf8_required_file(tmp_path: Path) -> tuple[list[str], Callable[[], obj
     listed = tmp_path / "latin1.txt"
     listed.write_bytes("caf\u00e9_sym\n".encode("latin-1"))
     return (
-        ["--set", f'consumers.required_symbols=["@{listed}"]'],
+        _required(f"@{listed}"),
         lambda: cc.load_required_symbols((f"@{listed}",)),
     )
 
@@ -205,16 +213,7 @@ def test_required_symbol_file_read_failure_is_a_usage_error(
     }[failure] in message
 
     old, new = _snapshots(tmp_path)
-    result = CliRunner().invoke(
-        main,
-        [
-            "compare",
-            str(old),
-            str(new),
-            "--set",
-            f'consumers.required_symbols=["{arg}"]',
-        ],
-    )
+    result = CliRunner().invoke(main, ["compare", str(old), str(new), *_required(arg)])
     assert result.exit_code == 64, result.output
     assert isinstance(result.exception, SystemExit), repr(result.exception)
     assert " ".join(message.split()) in " ".join(result.output.split())

@@ -705,7 +705,7 @@ def test_html_show_only_filter_excluding_everything() -> None:
     "no changes match the filter" message, not an empty page -- distinct
     from ``test_html_show_only_filter`` (test_report_filtering.py), which
     only exercises a *partial* filter (1 of 2 changes shown) and never
-    reaches this all-excluded branch. ``enums`` is a real ``--show-only``
+    reaches this all-excluded branch. ``enums`` is a real ``show=``
     element token (``ShowOnlyFilter.parse``); the fixture change is a
     function, so it matches nothing."""
     result = DiffResult(
@@ -717,7 +717,7 @@ def test_html_show_only_filter_excluding_everything() -> None:
     )
     html_out = generate_html_report(result, lib_name="libfoo.so", show_only="enums")
     assert "No changes match the current filter" in html_out
-    assert "output.view=[&quot;show=enums&quot;]" in html_out
+    assert "--set &#x27;output.view=[&quot;show=enums&quot;]&#x27;" in html_out
     assert "1 change(s) exist but are excluded by the filter" in html_out
 
 

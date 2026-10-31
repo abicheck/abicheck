@@ -493,6 +493,8 @@ class TestStoredPairEarlyRejections:
         code, out = _invoke("compare", str(old_path), str(new_path))
 
         assert code == 64, out
+        # The same refusal a single-pair compare gives for this config: the
+        # route resolves it up front to refuse consumers.*/output.view.
         assert "bundle.system_providers must be a string or list of strings" in out
 
     def test_explicit_malformed_config_is_rejected(self, tmp_path: Path) -> None:
@@ -510,6 +512,8 @@ class TestStoredPairEarlyRejections:
         )
 
         assert code == 64, out
+        # The same refusal a single-pair compare gives for this config: the
+        # route resolves it up front to refuse consumers.*/output.view.
         assert "bundle.system_providers must be a string or list of strings" in out
 
 

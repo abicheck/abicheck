@@ -211,3 +211,51 @@ def test_live_severity_preset_forwards_as_the_core_flag(tmp_path: Path) -> None:
     argv = _run(tmp_path, INPUT_SEVERITY_PRESET="strict")
     assert argv[argv.index("--severity-preset") + 1] == "strict"
     assert not any(v.startswith("severity.preset") for v in _set_pairs(argv))
+
+
+# Values whose YAML reading differs from the text when written unquoted: a
+# backslash path, digits, a YAML boolean, null, a quote, a cross prefix.
+_AWKWARD_VALUES = [
+    "C:\\sdk\\123",
+    "123",
+    "yes",
+    "~",
+    'a"b',
+    "aarch64-linux-gnu-",
+]
+
+
+@pytest.mark.parametrize("name", ["compiler", "sysroot"])
+@pytest.mark.parametrize("value", _AWKWARD_VALUES)
+def test_a_live_input_reaches_the_cli_as_the_same_string(
+    tmp_path: Path, name: str, value: str
+) -> None:
+    """The oracle is the CLI's own ``--set`` reader, not run.sh's escaper:
+    whatever the input held is the string compare receives."""
+    from abicheck.frontends.cli.options.config_set import parse_set_assignments
+
+    argv = _run(tmp_path, **{"INPUT_" + name.upper(): value})
+    pairs = tuple(v for v in _set_pairs(argv) if v.startswith(f"compile.{name}="))
+    assert parse_set_assignments(pairs) == {f"compile.{name}": value}
+
+
+@pytest.mark.parametrize("mode", ["compare", "dump"])
+def test_a_set_line_wins_over_the_input_derived_value(
+    tmp_path: Path, mode: str
+) -> None:
+    """Input-derived ``--set compile.*`` pairs come before the ``set:`` lines,
+    so under the CLI's last-wins rule an explicit ``set:`` line decides."""
+    from abicheck.frontends.cli.options.config_set import parse_set_assignments
+
+    argv = _run(
+        tmp_path,
+        mode,
+        INPUT_COMPILER="/opt/from-input/g++",
+        INPUT_SET="compile.compiler=/opt/from-set/g++\n",
+    )
+    pairs = tuple(v for v in _set_pairs(argv) if v.startswith("compile."))
+    assert len(pairs) == 2, pairs
+    resolved = parse_set_assignments(
+        pairs, frozenset({"compile.compiler"}), command=mode
+    )
+    assert resolved == {"compile.compiler": "/opt/from-set/g++"}
