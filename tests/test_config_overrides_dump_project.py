@@ -443,3 +443,23 @@ def test_resolve_dump_project_config_wraps_a_refused_override(tmp_path: Path) ->
     the same refusal as exit 64 (DumpConfigError), naming the core flag."""
     with pytest.raises(DumpConfigError, match="--exclude-header"):
         _resolve(None, overrides={"scope.exclude_headers": ["x.h"]})
+
+
+def test_run_dump_compile_override_refuses_a_non_context_compile_argument() -> None:
+    """A ``compile=`` that is not a ``CompileContext`` is refused, not folded."""
+    with pytest.raises(TypeError, match="CompileContext or None, got str"):
+        run_dump_override_arguments(
+            {"compile.std": "c++17"},
+            {"compile": "-std=c++20"},
+            {"frontend": "auto", "compile": None},
+        )
+
+
+def test_run_dump_compile_override_fills_frontend_and_compile() -> None:
+    filled = run_dump_override_arguments(
+        {"compile.std": "c++17", "compile.frontend": "clang"},
+        {},
+        {"frontend": "auto", "compile": None},
+    )
+    assert filled["frontend"] == "clang"
+    assert filled["compile"].gcc_option_tokens == ("-std=c++17",)

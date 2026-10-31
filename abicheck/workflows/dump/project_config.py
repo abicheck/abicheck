@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ...buildsource.build_config_overrides import ConfigOverrideError
+from ...compile_context import CompileContext
 from ...errors import ValidationError
 from ..compile_config import (
     COMPILE_CONTEXT_OVERRIDE_PATHS,
@@ -502,10 +503,13 @@ def _folded_compile_arguments(
     """
     frontend = arguments.get("frontend", defaults.get("frontend", "auto"))
     compile_ctx = arguments.get("compile", defaults.get("compile"))
+    if compile_ctx is not None and not isinstance(compile_ctx, CompileContext):
+        raise TypeError(
+            f"run_dump(compile=) must be a CompileContext or None, got "
+            f"{type(compile_ctx).__name__}"
+        )
     folded_frontend, (folded_compile,) = fold_typed_compile_overrides(
-        str(frontend),
-        (compile_ctx,),  # type: ignore[arg-type]
-        config_overrides,
+        str(frontend), (compile_ctx,), config_overrides
     )
     out: dict[str, object] = {}
     if folded_frontend != frontend:
