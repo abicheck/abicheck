@@ -1201,8 +1201,8 @@ concepts:
       - action:output-file
       - actions/aggregate:outputs
     exceptions:
-      - {id: 'action:format', rule: name, rename: R11, note: action spelling breaks D1; the leaf is `output`}
-      - {id: 'action:output-file', rule: name, rename: R11, note: action spelling breaks D1; the leaf is `output`}
+      - {id: 'action:format', rule: name, rename: R11, accepted: true, note: kept as-is (ADR-091 R11 amendment); the leaf is `output` but the two inputs stay}
+      - {id: 'action:output-file', rule: name, rename: R11, accepted: true, note: kept as-is (ADR-091 R11 amendment); the leaf is `output` but the two inputs stay}
   - concept: view
     tier: core
     renames: []
