@@ -27,7 +27,11 @@ import pytest
 
 from abicheck.dwarf_advanced import AdvancedDwarfMetadata, ToolchainInfo
 from abicheck.dwarf_metadata import DwarfMetadata, EnumInfo, FieldInfo, StructLayout
-from abicheck.pdb_metadata import _is_user_visible, parse_pdb_debug_info
+from abicheck.pdb_metadata import (
+    PdbParseError,
+    _is_user_visible,
+    parse_pdb_debug_info,
+)
 
 # Import test helpers from test_pdb_parser
 from tests.test_pdb_parser import (
@@ -249,16 +253,14 @@ class TestPdbToDwarfMetadata:
         assert f1.bit_offset == 3
 
     def test_missing_pdb(self, tmp_path: Path) -> None:
-        meta, adv = parse_pdb_debug_info(tmp_path / "nonexistent.pdb")
-        assert meta.has_dwarf is False
-        assert adv.has_dwarf is False
+        with pytest.raises(PdbParseError, match="nonexistent.pdb"):
+            parse_pdb_debug_info(tmp_path / "nonexistent.pdb")
 
     def test_invalid_pdb(self, tmp_path: Path) -> None:
         bad_file = tmp_path / "bad.pdb"
         bad_file.write_bytes(b"not a pdb file" + b"\x00" * 100)
-        meta, adv = parse_pdb_debug_info(bad_file)
-        assert meta.has_dwarf is False
-        assert adv.has_dwarf is False
+        with pytest.raises(PdbParseError, match="bad magic"):
+            parse_pdb_debug_info(bad_file)
 
 
 # ---------------------------------------------------------------------------

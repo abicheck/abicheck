@@ -175,7 +175,12 @@ from .sparse_section_codec import (
 from .surface_graph_codec import DeferredGraphPayload
 from .types_section_codec import TypesSection
 from .versioning import FactGenerations, StorageVersions
-from .wire_extensions import check_must_understand
+from .wire_extensions import (
+    WIRE_EXTENSIONS_KEY,
+    WireExtensions,
+    check_must_understand,
+    unknown_must_understand,
+)
 
 #: ADR-063 Track 4 (8B), third slice: one entry per `LEGACY_SECTION_KINDS`
 #: member that has its own dedicated DTO -- every one of them, as of this
@@ -239,6 +244,7 @@ _LEGACY_SECTION_DOCUMENT_CODECS: Mapping[str, Any] = {
 }
 
 __all__ = [
+    "CARRIERS_OBJECT_KIND",
     "export_legacy_snapshot",
     "import_legacy_snapshot",
 ]
@@ -252,6 +258,10 @@ __all__ = [
 #: re-derives the exclusion itself, it only relies on the same three names.
 
 
+#: `ObjectRef.kind` of the object `ArtifactRef.carriers` names.
+CARRIERS_OBJECT_KIND = "wire_carriers"
+
+
 def import_legacy_snapshot(
     legacy_document: Mapping[str, Any],
     *,
@@ -261,6 +271,7 @@ def import_legacy_snapshot(
     variant_id: str = "default",
     artifact_kind: str | None = None,
     generations: FactGenerations | None = None,
+    carriers: WireExtensions | None = None,
 ) -> PackageManifest:
     """Import *legacy_document* (a `snapshot_to_dict()`-shaped mapping) as a
     one-artifact, one-variant `ProjectSnapshot` package, writing its content
@@ -290,15 +301,27 @@ def import_legacy_snapshot(
     docstring's "A document newer than this build knows how to interpret is
     refused" section for why this module cannot default or derive it itself.
     Raises `ValueError` if the document's own `schema_version` exceeds it.
+
+    *carriers*: the ADR-062 D14/D15 carriers the snapshot holds
+    (`wire_extensions.extensions_of`). When non-empty they are stored as one
+    object named by `ArtifactRef.carriers`, every section they hold
+    undecoded (failed, blocked, kept verbatim) is left out of the artifact's
+    sections and `section_schema_versions` -- *legacy_document* holds only
+    defaults for it -- and they are hashed into the `evidence` digest.
     """
     if artifact_kind is None:
         artifact_kind = artifact_kind_for_document(legacy_document)
     source_schema_version, section_dtos = legacy_section_dtos(
         legacy_document, max_known_schema_version=max_known_schema_version
     )
+    if carriers is not None and carriers.is_empty():
+        carriers = None
+    dropped = carriers.dropped_sections() if carriers is not None else frozenset()
     sections: dict[str, ObjectRef] = {}
     section_schema_versions: dict[str, int] = {}
     for section_kind, dto_dict in section_dtos:
+        if section_kind in dropped:
+            continue
         sections[section_kind] = ObjectRef(
             kind=section_kind, digest=store.put(dto_dict)
         )
@@ -311,7 +334,15 @@ def import_legacy_snapshot(
         sections=sections,
         # ADR-062 D16: recorded beside the sections, never folded into a
         # stored digest; its consumer is the same-snapshot coverage note.
-        evidence_digest=evidence_digest_of_document(legacy_document),
+        evidence_digest=evidence_digest_of_document(
+            legacy_document,
+            extensions=carriers.evidence_form() if carriers is not None else None,
+        ),
+        carriers=(
+            ObjectRef(kind=CARRIERS_OBJECT_KIND, digest=store.put(carriers.to_wire()))
+            if carriers is not None
+            else None
+        ),
     )
     variant = VariantRef(variant_id=variant_id, artifact_ids=(artifact_id,))
     # *generations*: the producer's pair when the caller knows it (a fresh
@@ -705,7 +736,26 @@ def export_legacy_sections(
             continue
         dto = SectionDTO.from_dict(raw)
         _check_section_kind(dto, section_kind, artifact_id, locator)
-        check_must_understand(list(dto.must_understand), locator)  # ADR-062 D14
+        unknown = unknown_must_understand(list(dto.must_understand), locator)
+        if unknown:
+            # ADR-062 D14: a section-level name this build does not
+            # understand blocks that section's readers, as in a single-file
+            # document; it is kept verbatim for a re-save. The identity
+            # section, which every analysis reads, refuses.
+            if section_kind == PROVENANCE_SECTION_KIND:
+                check_must_understand(list(dto.must_understand), locator)
+            blocked = document.setdefault(WIRE_EXTENSIONS_KEY, WireExtensions())
+            blocked.passthrough_sections[section_kind] = raw
+            blocked.passthrough_versions[section_kind] = dto.section_schema_version
+            blocked.unreadable.append(
+                (
+                    section_kind,
+                    f"section {section_kind!r} requires must-understand "
+                    f"extension(s) {', '.join(repr(n) for n in unknown)} this "
+                    "build does not understand",
+                )
+            )
+            continue
         if section_kind == SEMANTIC_IR_SECTION_KIND:
             ir, conflicts = semantic_ir_from_dto(dto)
             document.update(semantic_ir_to_document(ir, conflicts))

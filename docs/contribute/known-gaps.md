@@ -261,51 +261,44 @@ current emitter, which is unchanged.
 
 #### ADR-062 D14-D18 data-evolution rules are partly implemented (2026-10-30)
 
-**Status (2026-10-30): PARTIAL.** D14, D15 and D17 are implemented (with
-the residuals below), and D16's `evidence` digest is implemented and
-consumed; D16's other roles are open and D18 is partial. Owner:
-`storage/`; per-item status in the
+**Status (2026-10-31): PARTIAL.** D14, D15 and D17 are implemented with
+the residuals below; D16's `evidence` and `transport` digests are
+implemented; D18 is partial. Owner: `storage/`; per-item status in the
 [storage format v2 plan](plans/storage-format-v2.md).
 
-- **D14 (implemented; residuals).** Unknown sections, header and record
-  `extensions` and unknown record fields are preserved; an unknown
-  must-understand name or a newer section version blocks only that
-  section's readers (not comparable). Residuals: only top-level fields of
-  function/variable/record-type/enum records are preserved (an unknown key
-  nested deeper, inside a parameter or an ELF symbol, is still dropped on
-  re-save), and a directory package refuses, rather than narrows, an
-  unknown must-understand name on a section object.
-- **D14/D15 residual: packages cannot carry the carriers (2026-10-31).** A
-  ProjectSnapshot package or bundle (document, archive, package) is built
-  from the flat `snapshot_to_dict` document, which has no place for a
-  failed/blocked section, an unknown section, header extensions or unknown
-  record fields. Writing a snapshot carrying any of them is refused
-  (`wire_extensions.refuse_package_flattening`) rather than stored as a
-  false clean; save it as a single-file snapshot. A caller that flattens
-  with `snapshot_to_dict` itself and passes the dict to
-  `write_legacy_snapshot_package` bypasses the check (the dict cannot say
-  what it lost); pass the `AbiSnapshot`. Closing it means carrying
-  availability/`must_understand`/`extensions` per section object or
-  `ArtifactRef` and folding them into the stored `evidence` digest.
-- **D16 (partial).** The `evidence` digest is implemented
-  (`storage/evidence_digest.py`), persisted as the optional
-  `ArtifactRef.evidence_digest`, and read by the same-snapshot coverage
-  note, without a second serialization on the bounded compare path (see
-  the plan's A1.9 status). Still open: `comparison_input`, which has no
-  consumer because no comparison-result cache exists, and `transport`. A
-  persisted evidence digest is used only against another persisted one: a
-  snapshot decoded from the stored document can differ from it after
-  load-time backfill, so mixing the two would read as "different" (the safe
-  direction).
-- **D15 (implemented; residual).** The field inventory is generated and
-  diffed, and section availability is a header table. Residual: no current
-  extractor reports a whole-section failure (each section aggregates
-  several extractors whose failures are fact-family `FactAvailability`), so
-  `record_section_failure` has no production caller yet; the inventory
-  expands only what the fixed corpus populates. A `not_collected` section
-  gives no assurance note when a detector reads it (decided in ADR-062 D15's
-  implementation decisions: it would fire on every pre-D15 document; the
-  fact-family availability already reports the missing evidence).
+- **D14 residual: bundle documents and archives refuse the carriers.** A
+  directory ProjectSnapshot package now carries every D14/D15 carrier
+  (`ArtifactRef.carriers`, closed 2026-10-31). A G38 bundle document, a G40
+  bundle archive and a bundle package are still built from the flat
+  `snapshot_to_dict` document per member, so a member snapshot with a
+  failed/blocked/unknown section or extensions is refused there
+  (`wire_extensions.refuse_package_flattening`); save it as a single-file
+  snapshot or a directory package. A flat mapping a caller made with
+  `snapshot_to_dict` and handed to `write_legacy_snapshot_package` cannot say
+  what it lost and is written as what it says; pass the `AbiSnapshot`.
+- **D14 residual: a newer `section_schema_version` in a package refuses.**
+  A single-file document blocks only that section; a directory package's
+  manifest-level version check refuses the package. An unknown section-level
+  must-understand name now blocks only its section in both.
+- **D15 residual: one producer records a whole-section failure.** The PE
+  dump records `debug` as `failed` when a located PDB fails to parse, on the
+  export-table path only. A header-scoped PE dump's `debug` section also
+  holds the header parse's provenance, so it is not failed wholesale (the
+  PDB failure is logged). No other extractor fails a whole section: each
+  section aggregates several extractors whose failures are fact-family
+  `FactAvailability`. The inventory expands only what the fixed corpus
+  populates. A `not_collected` section gives no assurance note when a
+  detector reads it (decided in ADR-062 D15's implementation decisions).
+- **D16 residual: `comparison_input`** has no consumer (no comparison-result
+  cache exists) and is not implemented. A persisted evidence digest is used
+  only against another persisted one: a snapshot decoded from the stored
+  document can differ from it after load-time backfill, so mixing the two
+  would read as "different" (the safe direction).
+- **D17 residual: no CLI for package GC, no platform validation.**
+  `workflows.package_gc.collect_package_garbage` is a Python API only (no
+  `project` subcommand maintains packages yet). The amendment's oneDAL/MKL,
+  macOS and real-Windows validation has not been run; the Windows lock path
+  is tested against a simulated `msvcrt`.
 - **D18 (partial; decode split and lazy declaration store landed
   2026-10-31).** `declarations`, `types` and debug layout now load lazily,
   together, as a pending `AbiSnapshot.semantic_ir` cell
@@ -328,17 +321,6 @@ consumed; D16's other roles are open and D18 is partial. Owner:
   decoded). Closing (3) needs a streamed or per-section parse so a raw
   section is not held as parsed JSON, and a release fan-out that loads
   members one pair at a time. Measurements: the plan's A1.9 D18 entry.
-- **D14 residual: a blocked `types` section also hides `func_removed`.** The
-  `functions` detector reads `types` (parameter/return type comparison in the
-  same pass), so it is wholly not comparable; splitting symbol-level presence
-  into its own detector needs its own registry entry, dedupe against
-  `functions` and a section-readers contract row, and was not done.
-- **D17 residuals.** Superseded refs and section objects are never
-  garbage-collected. Without `fcntl` (Windows) or in reference mode,
-  `cross_process_lock` does not lock. Writers are then not serialized, but
-  they still cannot mix packages, because each commits by one atomic rename
-  over immutable refs. The amendment's exit criteria (oneDAL/MKL corpus,
-  Windows and macOS runs) have not been run.
 
 ### False-positive risk
 

@@ -36,10 +36,8 @@ names it by `{id, ref_digest}`, so republishing never touches a live ref.
 A v1 package's refs at `refs/<kind>/<id>.json` are still read.
 
 `manifest.json` deliberately does **not** embed full `variant_refs`/
-`artifact_refs` records the way `PackageManifest.to_dict()` does — that
-in-memory convenience is explicitly what `package.py`'s own docstring flags
-as "premature" until a real writer exists to make the split meaningful. This
-module is that writer: `manifest.json` carries only `versions` plus one
+`artifact_refs` records the way `PackageManifest.to_dict()` does:
+`manifest.json` carries only `versions` plus one
 `{id, ref_digest}` entry per variant/artifact, and each full record lives
 at its own ref path, read
 lazily — `read_variant_ref`/`read_artifact_ref` load exactly one, and
@@ -51,9 +49,7 @@ convenience for a caller — a test, a one-shot inspection tool — that wants
 the whole thing at once; it is built from the same lazy primitives, not a
 second read path.
 
-The transport `.tar.zst` form D6 also describes is not implemented here —
-see `docs/contribute/adr/062-project-snapshot-storage-v2.md`'s Status for
-what remains open.
+The one-file transport is `storage/project_package_archive.py`.
 
 **Registers `docs/_meta/topics.yaml`'s `project-snapshot-storage` topic**
 (`docs/reference/project-snapshot-format.md`) — this is the module that
@@ -63,7 +59,9 @@ v2.md`'s "Documentation ownership" section names explicitly.
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
 from collections.abc import Mapping
 from pathlib import Path
 from types import MappingProxyType
@@ -140,6 +138,13 @@ def _object_raw_relpath(digest: str) -> str:
     json_relpath = object_relpath(digest)
     assert json_relpath.endswith(".json")
     return f"{json_relpath[: -len('.json')]}.bin.zst"
+
+
+def _touched(path: Path) -> bool:
+    """Refresh *path*'s mtime (a reused object is live again); `True`."""
+    with contextlib.suppress(OSError):
+        os.utime(path)
+    return True
 
 
 def _is_binary_buffer(value: Any) -> bool:
@@ -246,19 +251,14 @@ class DirectoryObjectStore:
             digest = raw_digest(payload, algorithm=algorithm)
             path = self._raw_path(digest)
             # Verify, never merely trust, an existing path before skipping
-            # the write: a previously stored object corrupted or partially
-            # replaced out from under this store -- on disk, not through
-            # `put()`/`get()` -- would otherwise let a `put()` for the
-            # *original*, correct content silently "succeed" over the
-            # known-bad file, publishing a manifest that references it; the
-            # corruption would then surface only once a later `get()` call
-            # happened to read it (Codex review). Idempotent either way:
-            # matching content is left alone, non-matching or unreadable
-            # content is overwritten with the content this call was
-            # actually asked to store.
+            # the write: a corrupted file would otherwise let `put()` of the
+            # correct content "succeed" over it (Codex review). A reused file
+            # gets a fresh mtime, so package GC's grace period protects an
+            # object a writer is re-staging (ADR-062 D17).
             if not (
                 path.exists()
                 and self._existing_raw_object_is_valid(path, digest, algorithm)
+                and _touched(path)
             ):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 write_snapshot_bytes(
@@ -274,6 +274,7 @@ class DirectoryObjectStore:
         if not (
             path.exists()
             and self._existing_json_object_is_valid(path, digest, algorithm)
+            and _touched(path)
         ):
             path.parent.mkdir(parents=True, exist_ok=True)
             _write_canonical_json_text(
@@ -335,19 +336,13 @@ class DirectoryObjectStore:
 
 def write_project_manifest(root: str | Path, manifest: PackageManifest) -> None:
     """Publish *manifest* at *root* (ADR-062 D17, package format v2): verify
-    every section object, write each ref document once to its digest-named
-    path, then replace `manifest.json` -- `{id, ref_digest}` per ref -- by
-    temp file plus atomic rename, the single commit point. Section objects
-    are the caller's to `put()` first (`DirectoryObjectStore.put`).
-
-    Raises `ValueError`, before writing anything, if any section digest
-    cannot be read back valid via `DirectoryObjectStore.get()`. No file the
-    live manifest names is ever rewritten, so a failed or interrupted
-    publish -- even a changed-content republish under the same ids -- leaves
-    the previous package readable. Writers to one *root* are serialized by
-    `cross_process_lock.single_flight`; where it cannot lock, interleaved
-    writers still cannot mix packages (one atomic rename over immutable refs
-    each). Superseded refs and objects stay behind as unnamed garbage.
+    every object it names (`put()` first), write each ref document once to
+    its digest-named path, then atomically replace `manifest.json`, the
+    single commit point. Raises `ValueError`, before writing, on an object
+    that does not read back valid. A failed or interrupted publish leaves
+    the previous package readable; writers to one *root* are serialized by
+    `cross_process_lock.single_flight`. Superseded refs and objects are
+    collected only by `project_package_gc.collect_package_garbage`.
     """
     from .storage.cross_process_lock import single_flight
 
@@ -357,6 +352,11 @@ def write_project_manifest(root: str | Path, manifest: PackageManifest) -> None:
         store = DirectoryObjectStore(root_path)
         owners = [
             (f"artifact {a.artifact_id!r}", a.sections) for a in manifest.artifact_refs
+        ]
+        owners += [  # ADR-062 D14/D15 carriers objects
+            (f"artifact {a.artifact_id!r}", {"carriers": a.carriers})
+            for a in manifest.artifact_refs
+            if a.carriers is not None
         ]
         owners += [
             (f"variant {v.variant_id!r}", v.sections) for v in manifest.variant_refs

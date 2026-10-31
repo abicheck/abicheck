@@ -27,7 +27,7 @@ Phases implemented:
 Public API
 ----------
 parse_pdb_debug_info(pdb_path)
-    → tuple[DwarfMetadata, AdvancedDwarfMetadata]
+    → tuple[DwarfMetadata, AdvancedDwarfMetadata]; raises PdbParseError
 
 Requires a PDB file path.  Use ``pdb_utils.locate_pdb()`` to find the PDB
 for a given PE binary.
@@ -167,25 +167,36 @@ def _is_user_visible(name: str | None, is_forward_ref: bool) -> bool:
 # ---------------------------------------------------------------------------
 
 
+class PdbParseError(ValueError):
+    """A located PDB could not be read into debug metadata.
+
+    Raised instead of returning empty metadata, so the caller records the
+    ``debug`` section as ``failed`` (ADR-062 D15) rather than writing a
+    default that reads as "this binary has no debug types".
+    """
+
+
 def parse_pdb_debug_info(
     pdb_path: Path,
 ) -> tuple[DwarfMetadata, AdvancedDwarfMetadata]:
     """Parse a PDB file and return (DwarfMetadata, AdvancedDwarfMetadata).
 
-    Returns ``(DwarfMetadata(), AdvancedDwarfMetadata())`` on any error.
-    Never raises.
+    Raises :class:`PdbParseError` when the file cannot be parsed (missing,
+    bad magic, truncated, corrupt stream directory), carries no TPI stream,
+    or a whole extraction phase fails. A phase that raises leaves its part
+    of the metadata unread, and a partly filled result would present that
+    gap as "no such types" -- so any phase failure fails the whole PDB
+    rather than returning partial facts. Individual records an extractor
+    deliberately skips (forward references, compiler-internal names) are
+    not failures.
     """
-    empty = DwarfMetadata(), AdvancedDwarfMetadata()
-
     try:
         pdb = parse_pdb(pdb_path)
     except (ValueError, OSError, struct.error) as exc:
-        log.warning("parse_pdb_debug_info: failed to parse %s: %s", pdb_path, exc)
-        return empty
+        raise PdbParseError(f"failed to parse {pdb_path.name}: {exc}") from exc
 
     if pdb.types is None:
-        log.debug("parse_pdb_debug_info: no TPI stream in %s", pdb_path)
-        return empty
+        raise PdbParseError(f"{pdb_path.name}: no TPI stream")
 
     meta = DwarfMetadata(has_dwarf=True)
     adv = AdvancedDwarfMetadata(has_dwarf=True)
@@ -194,20 +205,18 @@ def parse_pdb_debug_info(
     # the IPI stream. Empty when the PDB carries no IPI / source-line records.
     src_files = pdb.udt_source_files
 
-    try:
-        _extract_struct_layouts(pdb.types, meta, adv, src_files)
-    except Exception as exc:  # noqa: BLE001
-        log.warning("parse_pdb_debug_info: struct extraction failed: %s", exc)
-
-    try:
-        _extract_enums(pdb.types, meta, src_files)
-    except Exception as exc:  # noqa: BLE001
-        log.warning("parse_pdb_debug_info: enum extraction failed: %s", exc)
-
-    try:
-        _extract_toolchain_info(pdb, adv)
-    except Exception as exc:  # noqa: BLE001
-        log.warning("parse_pdb_debug_info: toolchain info extraction failed: %s", exc)
+    phases = (
+        ("struct", lambda: _extract_struct_layouts(pdb.types, meta, adv, src_files)),
+        ("enum", lambda: _extract_enums(pdb.types, meta, src_files)),
+        ("toolchain info", lambda: _extract_toolchain_info(pdb, adv)),
+    )
+    for phase, run in phases:
+        try:
+            run()
+        except Exception as exc:  # noqa: BLE001 -- any phase crash fails the PDB
+            raise PdbParseError(
+                f"{pdb_path.name}: {phase} extraction failed: {exc}"
+            ) from exc
 
     return meta, adv
 

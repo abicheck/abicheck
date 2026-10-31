@@ -646,8 +646,8 @@ class TestPeHeaderScoping:
             patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta),
             patch("abicheck.dumper._dump_pe", return_value=scoped),
             patch(
-                "abicheck.workflows.dump.pe.extract_pdb_debug",
-                return_value=(dwarf_meta, dwarf_adv),
+                "abicheck.workflows.dump.pe.extract_pdb_debug_outcome",
+                return_value=(dwarf_meta, dwarf_adv, None),
             ),
         ):
             result = extract_pe(p, "1.0", headers=[_mk_header(tmp_path)])

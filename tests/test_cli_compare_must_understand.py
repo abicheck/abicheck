@@ -126,6 +126,7 @@ def test_blocked_types_section_blocks_only_its_readers(
         if "not comparable" in (d.get("coverage_gap") or "")
     }
     assert blocked == {n for n, reads in DETECTOR_SECTIONS.items() if "types" in reads}
+    assert "function_presence" not in blocked
     assert all(
         needle in (d.get("coverage_gap") or "")
         for d in report["detectors"]
@@ -136,17 +137,18 @@ def test_blocked_types_section_blocks_only_its_readers(
     # type finding, and no false shrink of the public surface from defaults.
     assert not any(k.startswith("type_") for k in kinds)
     assert "public_surface_shrank" not in kinds
-    # `func_removed` comes from the `functions` detector, which reads
-    # `types` too, so it is not comparable either; a detector that reads only
-    # the binary section still runs and reports the new DT_NEEDED entry.
-    assert "func_removed" not in kinds
+    # The `functions` detector reads `types` too, so it is not comparable;
+    # `function_presence` (binary + declarations only) still reports the
+    # removal, once. A detector that reads only the binary section still
+    # runs and reports the new DT_NEEDED entry.
+    assert [c["kind"] for c in report["changes"]].count("func_removed") == 1
     assert "needed_added" in kinds, kinds
     assert report["analysis_assurance"]["status"] == "partial"
     assert any("'types'" in n for n in report["analysis_assurance"]["notes"])
     assert needle in md
-    # `needed_added` is compatible and a blocked section never fabricates a
-    # break: exit 0 under the default policy (exit-codes.md P0.4).
-    assert result.exit_code == 0, result.output
+    # The removal is a real ABI break, found from the sections that were
+    # comparable: exit 4.
+    assert result.exit_code == 4, result.output
 
 
 def test_a_clean_pair_with_a_blocked_section_exits_by_policy(tmp_path: Path) -> None:

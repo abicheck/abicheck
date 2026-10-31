@@ -191,6 +191,14 @@ DETECTOR_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
                 "func_return_pointee_qualifier_removed",
             }
         ),
+        "function_presence": frozenset(
+            {
+                "func_removed",
+                "func_removed_elf_only",
+                "func_visibility_changed",
+                "inline_function_removed",
+            }
+        ),
         "functions": frozenset(
             {
                 "calling_convention_changed",

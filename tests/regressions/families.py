@@ -311,6 +311,7 @@ FAMILIES: dict[str, Family] = {
 
 _F1 = (
     "storage.wire_extension_dropped_or_refused",
+    "compare.blocked_section_hides_presence",
     "scoping.dependency_internals_in_contract",
     "classification.non_entity_finding_feeds_contract_coverage",
     "detector.selector_axis_unstamped",
@@ -569,7 +570,13 @@ for _key, _ids in (
     ("F15", _F15),
     ("F16", _F16),
     ("F17", _F17),
-    ("F18", ("storage.republish_overwrites_live_ref",)),
+    (
+        "F18",
+        (
+            "storage.republish_overwrites_live_ref",
+            "storage.package_gc_or_lock_breaks_a_live_package",
+        ),
+    ),
     ("OTHER", tuple(OTHER_REASONS)),
 ):
     for _id in _ids:

@@ -550,7 +550,9 @@ class TestDumpPeFallbackBuildsPdbTypes:
         )
         # `extract_pe` (called below) resolves both of these names against
         # `abicheck.workflows.dump.pe`'s own module globals.
-        monkeypatch.setattr(pe_extract, "extract_pdb_debug", lambda p, pp: (meta, None))
+        monkeypatch.setattr(
+            pe_extract, "extract_pdb_debug_outcome", lambda p, pp: (meta, None, None)
+        )
         # Header scoping falls back (castxml/mangling gap).
         monkeypatch.setattr(
             pe_extract,

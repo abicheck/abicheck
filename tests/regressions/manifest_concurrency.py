@@ -282,4 +282,39 @@ CONCURRENCY_BUG_CLASSES: tuple[BugClass, ...] = (
             "frontend": ("castxml", "clang"),
         },
     ),
+    BugClass(
+        id="storage.package_gc_or_lock_breaks_a_live_package",
+        invariant=(
+            "Collecting a ProjectSnapshot package's superseded refs and "
+            "objects never removes a file the live manifest names, never "
+            "races a publish (it holds the publish lock), never cuts an "
+            "in-flight writer's staged or temporary file inside the grace "
+            "period, and a writer whose staged object was collected anyway "
+            "is refused rather than publishing a dangling reference; on "
+            "Windows, writers serialize on msvcrt.locking as on POSIX; a "
+            "packed archive member whose stored bytes changed is refused by "
+            "its transport digest before anything is unpacked."
+        ),
+        fixed_by=(1864,),
+        seed_tests=(
+            "tests/test_package_gc_and_locks.py",
+            "tests/test_package_immutable_publication.py",
+        ),
+        axes={
+            "republishes": ("0", "1", "3"),
+            "file_age": ("young", "old"),
+            "writer": ("published", "crashed-unpublished", "concurrent"),
+            "lock_backend": ("fcntl", "msvcrt-simulated", "unsupported"),
+            "transport": ("intact", "flipped-byte", "partial-set", "legacy-none"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The msvcrt lock path is exercised against a simulated "
+                    "msvcrt on POSIX; real-Windows validation is open."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
 )

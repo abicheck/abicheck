@@ -1139,5 +1139,9 @@ def test_wire_section_ablation_oracles(
     assert ablated_breaks <= full_breaks  # (b)
     if not ablated_breaks:  # (a): cleaner only with a stated gap
         assert ablated["analysis_assurance"]["status"] != "complete"
+    # ``compare.blocked_section_hides_presence``: a removal established by
+    # sections that were not blocked survives the ablation, exactly once.
+    if section not in ("binary", "declarations"):
+        assert [c["kind"] for c in ablated["changes"]].count("func_removed") == 1
     identical = _wire_compare(tmp_path, old, old, (section, cause))
     assert not {c["kind"] for c in identical["changes"]} & breaking  # (c)

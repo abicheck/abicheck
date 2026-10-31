@@ -76,6 +76,7 @@ DETECTOR_SECTIONS: Mapping[str, frozenset[str]] = {
     ),
     "field_renames": frozenset(["binary", "declarations", "provenance", "types"]),
     "fingerprint_renames": frozenset(["binary", "provenance"]),
+    "function_presence": frozenset(["binary", "declarations"]),
     "func_deprecated": frozenset(
         ["binary", "declarations", "layout", "provenance", "semantic_ir", "types"]
     ),
