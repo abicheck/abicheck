@@ -302,3 +302,45 @@ def test_a_non_binary_library_name_is_a_failed_member_on_both_routes(
             assert ("notes.so", "ERROR") in {
                 (e["library"], e["verdict"]) for e in report["libraries"]
             }
+
+
+def test_a_new_operand_with_no_supported_input_is_a_zero_comparison_run(
+    tmp_path: Path,
+) -> None:
+    """``discover_live_member_libraries`` returns no member when NEW holds
+    nothing to compare. The run must read as a zero-comparison run -- a
+    nonzero exit with ``no_comparison_completed`` -- never a clean pass."""
+    old_dir, _new_dir = _write_release(tmp_path, _SPECS["versioned"])
+    facts = _cli_captured_facts(tmp_path, old_dir)
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    (empty / "README.txt").write_text("not a library\n", encoding="utf-8")
+    code, report = _compare_json(tmp_path, facts, empty, "stored")
+    assert code != 0
+    assert report["comparison_scope"]["no_comparison_completed"] is True
+    assert report["run_outcome"]["operational"] == "no_comparison_completed"
+    assert report["run_outcome"]["compatibility"] is None
+    assert report["libraries"] == []
+
+
+def test_an_unreadable_new_only_member_is_unmatched_on_both_routes(
+    tmp_path: Path,
+) -> None:
+    """Pins current behaviour (a recorded known gap): a NEW-only member is
+    never extracted on either route, so an unreadable ``notes.so`` with no
+    OLD counterpart is an unmatched ``not_supplied`` member, not ``failed``.
+    The two routes agree; neither reads it as a clean comparison."""
+    old_dir, new_dir = _write_release(tmp_path, _SPECS["versioned"])
+    (new_dir / "notes.so").write_text("plain text\n", encoding="utf-8")
+    _live_code, live = _compare_json(tmp_path, old_dir, new_dir, "live")
+    facts = _cli_captured_facts(tmp_path, old_dir)
+    _stored_code, stored = _compare_json(tmp_path, facts, new_dir, "stored")
+    for report in (live, stored):
+        states = [
+            m["state"]
+            for m in report["comparison_scope"]["members"]
+            if m["name"] == "notes.so"
+        ]
+        assert states == ["not_supplied"]
+        assert report["unmatched_new"] == ["notes.so"]
+        assert "notes.so" not in {e["library"] for e in report["libraries"]}

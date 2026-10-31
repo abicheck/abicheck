@@ -1366,7 +1366,10 @@ class TestSuppressionsArray:
         # A hand-built result has no recorded rule, so only the collapsed
         # display label is knowable -- and no structured record is invented.
         assert result["suppressions"] == [
-            {"kind": "external", "justification": "intentional"}
+            {
+                "kind": "external",
+                "justification": "suppressed by an abicheck --suppress rule: intentional",
+            }
         ]
 
     def test_unsuppressed_result_carries_no_suppressions_key(self) -> None:

@@ -546,6 +546,11 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 **Status (2026-10-25): CLOSED for the document shape.** A stored `BundleFacts` comparison renders the live release document: its JSON is the live release document (release schema 2.5), and JSON, Markdown, JUnit, `oneline` and HTML all come from one live-shaped evaluation of the stored facts (`tests/unit/report/test_release_document.py`, `tests/test_cli_compare_stored_release_parity.py`). Fields a stored comparison cannot compute are explicit `unavailable` markers with a reason, and its receipt is marked `reconstructed_from_stored_facts`. Remaining limits, named rather than hidden: the stored JUnit omits the passing testcase for each unchanged symbol (no old-side inventory); `output.view` `show=`, `sarif` and `review` stay refused for a stored OLD_INPUT.  
 `hygiene` — Closed: the stored document now carries the live release shape (schema 2.5, breaking for the stored document). [Full write-up](known-gaps/release-report-live-and-stored-operands-render-different-documents.md) [Full write-up](known-gaps/release-report-live-and-stored-operands-render-different-documents.md)
 
+#### An unreadable NEW-only release member is reported unmatched, not unreadable (2026-10-31)
+
+**Status (recorded 2026-10-31): OPEN.** A release compare only extracts paired members, so a NEW-only file named like a library that no extractor can read (`notes.so`, text) is reported as `not_supplied` in `unmatched_new`, not `failed`. Both routes behave the same way (live/live and stored/live), and neither reads it as a clean comparison. Found while aligning stored→live member discovery with live/live (PR #1878).
+`hygiene` — An unreadable NEW-only member reads as a one-sided member rather than as an unreadable one. [Full write-up](known-gaps/an-unreadable-new-only-release-member-is-not-reported-unreadable.md)
+
 #### Public-surface graph: surface_graph vs L5 header_graph node-id namespaces not unified; type_reachability stdlib query unmigrated
 
 **Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** The traversal half is superseded: the closure walk moved to policy/public_surface_closure.py. Still true: abicheck/type_reachability.py is unmigrated, and the compare/surface_graph.py and header_graph node-id namespaces are not unified.  

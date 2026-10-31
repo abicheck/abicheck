@@ -251,7 +251,7 @@ class TestNothingRecorded:
     @pytest.mark.parametrize(
         ("label", "expected"),
         [
-            ("intentional", "intentional"),
+            ("intentional", "suppressed by an abicheck --suppress rule: intentional"),
             (None, "suppressed by an abicheck --suppress rule"),
         ],
     )

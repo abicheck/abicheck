@@ -331,13 +331,17 @@ def test_a_run_without_a_ledger_reports_no_provenance_rather_than_faking_one() -
         assert "properties" not in suppression, (
             "no ledger entry means no structured record to publish"
         )
-        assert suppression["justification"] == "audit-waiver-17"
+        assert suppression["justification"] == (
+            "suppressed by an abicheck --suppress rule: audit-waiver-17"
+        )
 
     junit = _junit_suite(render_no_baseline(result, "junit")[0])
     skipped = list(junit.iter("skipped"))
     assert skipped, "a suppressed finding must still be a skipped JUnit case"
     for element in skipped:
-        assert element.attrib["message"] == "suppressed: audit-waiver-17"
+        assert element.attrib["message"] == (
+            "suppressed: suppressed by an abicheck --suppress rule: audit-waiver-17"
+        )
         assert "suppression rule:" not in (element.text or ""), (
             "the structured block belongs only to a run that recorded one"
         )

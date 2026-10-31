@@ -75,7 +75,14 @@ def suppression_justification(change: Any, provenance: Mapping[str, Any] | None)
     """
     label = suppression_rule_label(change, provenance)
     if not provenance:
-        return str(label) if label else UNATTRIBUTED_SUPPRESSION
+        # No record: only the display label is knowable. Keep the mechanism
+        # in front of it, so the text still says where the suppression came
+        # from rather than reading as a bare word.
+        return (
+            f"{UNATTRIBUTED_SUPPRESSION}: {label}"
+            if label
+            else UNATTRIBUTED_SUPPRESSION
+        )
     rule_id = provenance.get("rule_id")
     # An id-less rule's `rule_id` is a derived digest (`rule_identity` is
     # then set): shown only when nothing a human wrote names the rule.
