@@ -6541,14 +6541,16 @@ else
   # compare mode: BREAKING/API_BREAK follow fail-on flags; REMOVED_LIBRARY
   # only appears when --fail-on-removed-library was passed to the CLI
   # (directory/package operands only).
-  if [[ "${GATE_TIER:-$VERDICT}" == "BREAKING" && "${INPUT_FAIL_ON_BREAKING:-true}" == "true" \
-        && "$ADVISORY_BREAK" != "true" ]]; then
+  # ADR-091 R15: the two fail-on-* inputs are a pure mapping of the CLI's own
+  # exit code (4 = ABI break, 2 = API break), never a re-derivation from the
+  # report. ADVISORY_BREAK is set only on the exit-0 path, so it cannot hold
+  # here; the operational branches above have already returned.
+  if [[ $ABICHECK_EXIT -eq 4 && "${INPUT_FAIL_ON_BREAKING:-true}" == "true" ]]; then
     echo "::error::ABI break detected. Set fail-on-breaking: false to continue despite breaks."
     FINAL_EXIT=1
   fi
 
-  if [[ "${GATE_TIER:-$VERDICT}" == "API_BREAK" && "${INPUT_FAIL_ON_API_BREAK:-false}" == "true" \
-        && "$ADVISORY_BREAK" != "true" ]]; then
+  if [[ $ABICHECK_EXIT -eq 2 && "${INPUT_FAIL_ON_API_BREAK:-false}" == "true" ]]; then
     echo "::error::API break detected. Set fail-on-api-break: false to ignore API-level breaks."
     FINAL_EXIT=1
   fi
