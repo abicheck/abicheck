@@ -130,3 +130,15 @@ def test_the_table_parser_reads_every_row() -> None:
         "ast-frontend",
         "gcc-options",
     ]
+
+
+def test_every_phase5_retirement_has_a_wiring_case() -> None:
+    from test_action_tombstone_replacements import PHASE5_RETIRED
+
+    root = {
+        name
+        for name, _var in _table_rows(
+            ROOT / "action" / "validate-inputs.sh", "_retired_to_set"
+        )
+    } | {name for name, _var in ROOT_SINGLE_TOMBSTONES}
+    assert PHASE5_RETIRED <= root

@@ -404,18 +404,6 @@ for _i in "${!_pkg_input_names[@]}"; do
   fi
 done
 
-_bool_input_names=(dso-only include-private-dso fail-on-removed-library)
-_bool_input_values=(
-  "${INPUT_DSO_ONLY:-false}"
-  "${INPUT_INCLUDE_PRIVATE_DSO:-false}"
-  "${INPUT_FAIL_ON_REMOVED_LIBRARY:-false}"
-)
-for _i in "${!_bool_input_names[@]}"; do
-  if [[ "${_bool_input_values[$_i]}" == "true" ]] && { [[ "$MODE" != "compare" ]] || [[ "$_RELEASE_STYLE_OPERAND" != "true" ]]; }; then
-    _warn "${_bool_input_names[$_i]} is set but has no effect: it only applies to mode: compare with a directory/package old-library/new-library operand (mode is '$MODE')."
-  fi
-done
-
 # require-complete: a tri-state, per-job override of
 # assurance.require_complete (action.yml's own description has the full
 # account). Unset inherits the config; 'true' and 'false' both overlay it, in
@@ -656,7 +644,7 @@ _retired_to_set=(
   "fail-on-removed-library|INPUT_FAIL_ON_REMOVED_LIBRARY|any|set: gate.fail_on_removed_library=true"
   "frontend|INPUT_FRONTEND|any|set: compile.frontend=<value>"
   "compile-options|INPUT_COMPILE_OPTIONS|any|set: compile.options=[<flag>, ...]"
-  "nostdinc|INPUT_NOSTDINC|bool|set: compile.nostdinc=true"
+  "nostdinc|INPUT_NOSTDINC|any|set: compile.nostdinc=true"
   # Renamed by ADR-091 Phase 4 to an input Phase 5 then retired: the hint names
   # the final replacement, never another tombstone.
   "ast-frontend|INPUT_AST_FRONTEND|any|set: compile.frontend=<value>"
@@ -682,7 +670,7 @@ for _entry in "public-header-dirs:INPUT_PUBLIC_HEADER_DIRS" "public-header-dir:I
     _fail "${_old_name} is RETIRED and no longer accepted. Replace it in your workflow with \`header: <dir> ...\` (it was forwarded as -H, which is what header does; use old-header/new-header for one side), then remove ${_old_name}."
   fi
 done
-if [[ -n "${INPUT_ALLOW_BUILD_QUERY:-}" && "${INPUT_ALLOW_BUILD_QUERY}" != "false" ]]; then
+if [[ -n "${INPUT_ALLOW_BUILD_QUERY:-}" ]]; then
   _fail "allow-build-query is RETIRED and no longer accepted. There is no replacement: abicheck always runs its own inferred compile-database query when a sources input needs build context, and a trusted build query is set through build-config (build.query). Remove allow-build-query from your workflow."
 fi
 # ADR-091 renames (2026-10-30, no transition period): each old Action input

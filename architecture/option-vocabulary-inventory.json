@@ -1894,7 +1894,7 @@
    "input": "nostdinc",
    "status": "retired",
    "required": false,
-   "default": "false"
+   "default": null
   },
   {
    "id": "action:follow-deps",
@@ -2030,7 +2030,7 @@
    "input": "allow-build-query",
    "status": "retired",
    "required": false,
-   "default": "false"
+   "default": null
   },
   {
    "id": "action:depth",

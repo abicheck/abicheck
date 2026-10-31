@@ -151,10 +151,23 @@ ADR091_TOMBSTONES = sorted(
 )
 
 
-def test_the_adr091_tombstone_set_is_not_empty() -> None:
-    assert {"dso-only", "frontend", "public-header-dirs", "gcc-path"} <= set(
-        ADR091_TOMBSTONES
-    )
+#: The inputs ADR-091 Phase 5 retired; each must be covered by name.
+PHASE5_RETIRED = {
+    "dso-only",
+    "include-private-dso",
+    "fail-on-removed-library",
+    "public-header-dirs",
+    "frontend",
+    "compile-options",
+    "nostdinc",
+    "jobs",
+    "allow-build-query",
+}
+
+
+def test_every_phase5_retirement_is_checked_here() -> None:
+    assert PHASE5_RETIRED <= set(ADR091_TOMBSTONES)
+    assert {"gcc-path", "ast-frontend"} <= set(ADR091_TOMBSTONES)
 
 
 @pytest.mark.parametrize("name", ADR091_TOMBSTONES)
@@ -166,3 +179,22 @@ def test_an_adr091_tombstone_gives_a_replacement_or_says_there_is_none(
         n == name for n, _ in INPUT_HINTS
     )
     assert hinted or "no replacement" in message, message
+
+
+@pytest.mark.parametrize("name", ["nostdinc", "allow-build-query"])
+@pytest.mark.parametrize("value", ["false", "true"])
+def test_a_boolean_tombstone_fails_on_any_supplied_value(name: str, value: str) -> None:
+    """These inputs carry no default, so an omitted input arrives empty and
+    any supplied value -- an explicit ``false`` too -- is a workflow still
+    naming a retired input, refused rather than passed silently."""
+    assert "default" not in RETIRED_INPUTS[name]
+    result = _run_script(
+        VALIDATE_SH,
+        {
+            "INPUT_MODE": "compare",
+            "INPUT_NEW_LIBRARY": "libfoo.so",
+            _input_env_var(name): value,
+        },
+    )
+    assert result.returncode != 0, result.stdout + result.stderr
+    assert name in result.stdout

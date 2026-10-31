@@ -1341,9 +1341,10 @@ add_compile_context_flags() {
 # `--dso-only`/`--include-private-dso`/`--fail-on-removed-library` are gone
 # entirely (CONFIG class, no CLI override -- `.abicheck.yml`'s `release:`/
 # `gate:` blocks are their only source now). This Action's own
-# dso-only/include-private-dso/fail-on-removed-library inputs still exist,
-# so forwarding them now means synthesizing a small config overlay the run
-# reads via --config, the same "--config is NOT one of the flags the
+# dso-only/include-private-dso/fail-on-removed-library inputs are RETIRED
+# tombstones since ADR-091 Phase 5 (validate-inputs.sh refuses them; their
+# replacement is a `set:` line), so the overlay synthesized here carries only
+# the remaining assurance key, read via --config, the same "--config is NOT one of the flags the
 # release fan-out rejects" precedent add_compile_context_flags already
 # established for the compile: block above. Called from the
 # release-style-operand branch in `mode: compare`, AFTER both
