@@ -39,10 +39,6 @@ from typing import TYPE_CHECKING, Any
 import click
 
 from .cli_compare_fold import _exit_on_budget_overflow, report_not_comparable_and_exit
-from .frontends.cli.compare_config_scope import (
-    config_scope_inputs,
-    consumer_manifest_specs,
-)
 from .cli_compare_options import (
     _reject_bundle_facts_out_for_single_pair,
     _resolve_debug_roots,
@@ -54,6 +50,10 @@ from .cli_options import (
     resolve_contract_evaluation,
 )
 from .cli_resolve import resolve_directory_compile_context
+from .frontends.cli.compare_config_scope import (
+    config_scope_inputs,
+    consumer_manifest_specs,
+)
 from .frontends.cli.compare_input_validation import (
     classify_and_reject_operands,
     enter_budget_scope,

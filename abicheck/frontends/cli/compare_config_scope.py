@@ -68,13 +68,20 @@ def config_scope_inputs(
     """
     if project_cfg is None:
         return used_by_manifests, required_symbols_opt, None
-    manifests = tuple(
-        _resolve_config_path(item, cfg_path) for item in project_cfg.used_by_manifests
-    ) or used_by_manifests
-    symbols = tuple(
-        _resolve_config_required_symbol(item, cfg_path)
-        for item in project_cfg.required_symbols
-    ) or required_symbols_opt
+    manifests = (
+        tuple(
+            _resolve_config_path(item, cfg_path)
+            for item in project_cfg.used_by_manifests
+        )
+        or used_by_manifests
+    )
+    symbols = (
+        tuple(
+            _resolve_config_required_symbol(item, cfg_path)
+            for item in project_cfg.required_symbols
+        )
+        or required_symbols_opt
+    )
     view = None
     if project_cfg.output_view:
         parsed = _parse_config_view(project_cfg.output_view)
