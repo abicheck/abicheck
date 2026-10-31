@@ -239,3 +239,32 @@ def test_action_forwards_an_explicit_false_as_no_follow_deps(
     assert argv[0] == mode
     walk_flags = {a for a in argv if a in ("--follow-deps", "--no-follow-deps")}
     assert walk_flags == _ACTION_FORWARDS[value]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX shell harness")
+@pytest.mark.parametrize(
+    "hostile",
+    [
+        "false; touch {sentinel}",
+        "$(touch {sentinel})",
+        "true`touch {sentinel}`",
+        "--no-follow-deps --set=deps.follow=true",
+    ],
+)
+def test_action_a_hostile_follow_deps_value_forwards_nothing_and_runs_nothing(
+    tmp_path: Path, hostile: str
+) -> None:
+    """Only the exact strings ``true``/``false`` forward a flag; anything else
+    is neither executed nor passed through as argv."""
+    sentinel = tmp_path / "pwned"
+    capture = tmp_path / "argv.txt"
+    bindir = _argv_capture_stub(tmp_path, capture)
+    env = {
+        **_compare_env(tmp_path),
+        "INPUT_FOLLOW_DEPS": hostile.format(sentinel=sentinel),
+    }
+    _run_action(tmp_path, env, bindir)
+    argv = capture.read_text(encoding="utf-8").splitlines()
+    assert argv[0] == "compare"
+    assert not {a for a in argv if "follow-deps" in a or a.startswith("--set")}
+    assert not sentinel.exists()

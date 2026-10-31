@@ -911,10 +911,22 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "argument list."
         ),
         fixed_by=(1391,),
-        seed_tests=("tests/test_release_lang_explicit.py",),
+        seed_tests=(
+            "tests/test_release_lang_explicit.py",
+            # The dependency walk and directory/detached debug roots, every
+            # spelling (flag, .abicheck.yml, --set), one and three members,
+            # plus real gcc-built libraries through the JSON report.
+            "tests/test_release_compare_run_inputs.py",
+        ),
         axes={
-            "field": ("lang_explicit",),
-            "cardinality": ("scalar", "one_member_release"),
+            "field": (
+                "lang_explicit",
+                "follow_deps",
+                "dependency_search_paths",
+                "ld_library_path",
+                "debug_roots",
+            ),
+            "cardinality": ("scalar", "one_member_release", "multi_member_release"),
         },
     ),
     BugClass(
