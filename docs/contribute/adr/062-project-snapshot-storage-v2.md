@@ -1,7 +1,7 @@
 # ADR-062: Project Snapshot Storage v2 — Content-Addressed Sections, Explicit Fact Availability, and Occurrence-Preserving Identity
 
 **Date:** 2026-08-26
-**Status:** Proposed — partially implemented; amended 2026-10-30 (D14-D18, rules accepted; D14, D15 and D17 implemented, D16 partially, D18 pending). Phase 0 primitives implemented (`abicheck/storage/`:
+**Status:** Proposed — partially implemented; amended 2026-10-30 (D14-D18, rules accepted; D14, D15 and D17 implemented, D16 partially, D18 pending; evaluated 2026-10-31, blocked on a per-section decode split -- see known-gaps). Phase 0 primitives implemented (`abicheck/storage/`:
 fact availability, entity/occurrence identity with conflict preservation,
 canonical encoding and semantic digest, and the separated version axes).
 Phase 1's A1.1-A1.3 are implemented: `abicheck/storage/package.py` carries

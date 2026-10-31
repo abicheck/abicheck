@@ -283,7 +283,27 @@ consumed; D16's other roles and D18 are open. Owner:
   several extractors whose failures are fact-family `FactAvailability`), so
   `record_section_failure` has no production caller yet; the inventory
   expands only what the fixed corpus populates.
-- **D18 (open).** Only the `graph` section decodes lazily.
+- **D18 (open, evaluated 2026-10-31).** Only the `graph` section decodes
+  lazily. Generalizing it is not a descriptor swap: `snapshot_codec.decode_snapshot`
+  derives fields across sections (`from_headers` inferred from
+  `declarations`, the legacy fact backfill over `declarations`/`types`/`debug`,
+  closure-identity renumbering), and `AbiSnapshot.__post_init__` funnels the
+  `declarations`, `types` and `debug` builder inputs into the one
+  `semantic_ir` store, so those sections cannot decode independently without
+  splitting that decode per section first. Measured on a 106 MiB synthetic
+  sectioned snapshot (20k functions, 2k records): `json.loads` 0.65 s, section
+  export 4.3 s, full load 16 s / 323 MiB peak; `declarations` is 44.8 MB of
+  the payload, `types` 13.0 MB, `binary` 3.5 MB, every other section under
+  1 KB -- and nearly every detector reads `binary`+`declarations`+`types`
+  (`compare/section_readers.DETECTOR_SECTIONS`), so a full compare would
+  decode them anyway. The win is limited to pairing-only paths (release/
+  package member pairing reading `binary`); no shared decoded-section cache
+  is built until such a path exists. Whole-document `json.loads` remains.
+- **D14 residual: a blocked `types` section also hides `func_removed`.** The
+  `functions` detector reads `types` (parameter/return type comparison in the
+  same pass), so it is wholly not comparable; splitting symbol-level presence
+  into its own detector needs its own registry entry, dedupe against
+  `functions` and a section-readers contract row, and was not done.
 - **D17 residuals.** Superseded refs and section objects are never
   garbage-collected. Without `fcntl` (Windows) or in reference mode,
   `cross_process_lock` does not lock. Writers are then not serialized, but

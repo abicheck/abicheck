@@ -972,6 +972,11 @@ A1.9), item by item. Open items are also listed in
   amendment but not built.
 - **D18, selective load: not implemented** beyond the `graph` section's
   deferred decode described under Phase 2 above.
+  Evaluated 2026-10-31: the cross-section decode in `decode_snapshot` and
+  the `semantic_ir` funnel in `AbiSnapshot.__post_init__` must be split per
+  section first; measurements and the blocker are in known-gaps "ADR-062
+  D14-D18". D14 follow-up landed the same day: the console summary of
+  `compare` states partial assurance and names each not-comparable section.
 
 ---
 

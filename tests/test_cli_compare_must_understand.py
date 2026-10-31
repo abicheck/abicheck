@@ -180,3 +180,30 @@ def test_an_unknown_document_level_name_is_a_usage_failure(tmp_path: Path) -> No
     result = CliRunner().invoke(main, ["compare", str(old), str(new)])
     assert result.exit_code != 0
     assert "x_whole" in result.output
+
+
+@pytest.mark.parametrize("section", ["types", "declarations", "debug"])
+def test_console_summary_names_the_not_comparable_section(
+    tmp_path: Path, section: str
+) -> None:
+    """The default console summary of a run whose analyses were blocked
+    never reads as a clean comparison: it states the partial assurance and
+    names the blocked section, as JSON and Markdown already do."""
+    old = tmp_path / "old.json"
+    new = tmp_path / "new.json"
+    old.write_text(snapshot_to_json(_snap("1", ["f"], 32)), encoding="utf-8")
+    document = json.loads(snapshot_to_json(_snap("2", ["f"], 32)))
+    document["sections"][section]["must_understand"] = ["x_layout_v2"]
+    new.write_text(json.dumps(document), encoding="utf-8")
+    result = CliRunner().invoke(main, ["compare", str(old), str(new)])
+    assert result.exit_code == 0, result.output
+    warning = next(
+        line
+        for line in result.output.splitlines()
+        if line.startswith("WARNING: Analysis assurance PARTIAL: not comparable")
+    )
+    assert f"'{section}'" in warning
+    assert "x_layout_v2" in warning
+    # A clean pair prints no such line.
+    clean = CliRunner().invoke(main, ["compare", str(old), str(old)])
+    assert "not comparable" not in clean.output
