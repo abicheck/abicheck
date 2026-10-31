@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING
 
 from ....extract import progress
 from ....model.execution_cache_scoped import DiskCache
+from . import declaring_headers
 
 if TYPE_CHECKING:
     from ....model import AbiSnapshot
@@ -115,17 +116,20 @@ def _read_entry(key: str, binary_path: Path, subdir: str = "") -> AbiSnapshot | 
         if not cache_file.exists():
             continue
         try:
-            snap = load_snapshot(cache_file)
+            snap = declaring_headers.attach(load_snapshot(cache_file), base, key)
         except Exception:
             _logger.debug(
                 "Cache read error for %s, treating as miss", key[:12], exc_info=True
             )
             continue
-        # Touch mtime for LRU
-        try:
-            cache_file.touch()
-        except OSError:
-            pass
+        if snap is None:  # header-derived entry without its attribution
+            continue
+        # Touch mtime for LRU (the sidecar too, so it ages with its entry)
+        for touched in (cache_file, declaring_headers.sidecar_path(base, key)):
+            try:
+                os.utime(touched)  # never creates a missing sidecar
+            except OSError:
+                pass
         _logger.debug("Cache hit: %s → %s", binary_path.name, key[:12])
         return snap
     return None
@@ -158,6 +162,7 @@ def _write_entry(
         base = _entry_dir(subdir)
         base.mkdir(parents=True, exist_ok=True)
         cache_file = base / f"{key}.json.zst"
+        declaring_headers.write_sidecar(snap, base, key)
         from ....snapshot_io import ZSTD_LEVEL_CACHE, SnapshotCompression
         from ....storage.snapshot_codec import write_snapshot_compact
 
@@ -201,7 +206,7 @@ def _evict_if_needed(base: Path | None = None, *, protect: str = "") -> None:
 
     evict_directory_to_quota(
         _CACHE_DIR if base is None else base,
-        suffixes=(".json.zst", ".json"),
+        suffixes=(".json.zst", ".json", declaring_headers.SIDECAR_SUFFIX),
         quota_bytes=MAX_BYTES,
         protected=(protect,) if protect else (),
     )
