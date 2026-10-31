@@ -686,6 +686,11 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
             # is checked against the live Click tree (not a list of retired
             # spellings), with a self-checking dead-code allowlist.
             "tests/test_diagnostics_name_live_flags.py",
+            # The registry-driven half: every spelling
+            # architecture/option-vocabulary.yaml records as removed or
+            # retired is banned from package strings, --help, the Action
+            # layer and current docs.
+            "tests/test_no_removed_option_spellings.py",
         ),
         public_surfaces=("cli",),
         axes={
