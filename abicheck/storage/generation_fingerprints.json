@@ -156,6 +156,7 @@
       "abicheck/extract/parse_failures.py": "2e87216b3af05b90487355abfe32f966cec0206e2ba1467005348994264abea4",
       "abicheck/extract/path_aliases.py": "e4df448bdadc691475adfca99c567df6aa76e5cb421d6faf5de1307d368d1560",
       "abicheck/extract/path_segments.py": "c96f59df6fc126e26c6ca2052c6040d3180aa49f6c1265029eeb7206f0466b22",
+      "abicheck/extract/pdb_fieldlist.py": "38b2a11c7f21eb447efb50d382e8933447727e8e07e64dd7971e4c74f4ed3be0",
       "abicheck/extract/pdb_procedure_spelling.py": "548f5ba703610142184fbc0fc49ce6a3bfe855638582d42c40718f1e895dac02",
       "abicheck/extract/pdb_scope.py": "d5c551c9ceec500c76670cf9ecf4a76f844e4aad2c4ed37f91ab7fc630988753",
       "abicheck/extract/pe_image.py": "39dbb1e2b0ddd22b8bc160f1e6713286eef1e38b83fc1c6d975f1bdcff93e939",
@@ -179,16 +180,16 @@
       "abicheck/macho_metadata.py": "9b3fa13cbbc127fcf981289c4b15ff2aaabc6dfd10d7747a7262fd3cfda3e69e",
       "abicheck/pdb_metadata.py": "374231d67b2f90ab9f9f98ce7f839b413aa4e17def57472cb1306fa9587cd103",
       "abicheck/pdb_model.py": "d79ccfac86f4889d8d9b2c745ee2dacd6132c1789c0ca77988aaf53bd50aea8a",
-      "abicheck/pdb_parser.py": "39a3adc50c47fabf52cb6f062de89118f75f266edfb00bc065362ca033fae244",
+      "abicheck/pdb_parser.py": "498bf0baa243b293d090f7910c467c9ce0988ea95edd6125de9692f07194a425",
       "abicheck/pdb_utils.py": "c170ddb97ffa41a4fd4add3057cbebedc032116408252453c65f3be3b7117817",
       "abicheck/pe_metadata.py": "3ec3675308f06bf355c99c408e1c917dcbae54f974fffb3dfb6a9a3445b6ec6f",
       "abicheck/sycl_metadata.py": "10d6bb8dbd898b6f43c66f898fd1a964790705cadb5addac9d5801e47b341758",
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "59da8a2d4c9c70d7e411e673a3510c1ff9e18020bfd559373daafcd2ffb17c74",
+    "fingerprint": "c9c38748894ae181c0930752d9638c6bd1e9a5bae81d1edd0d78d203edb5b331",
     "generation": 34,
-    "reason": "generation 34 is still unreleased (same PR #1876): this amends its own semantic change -- a truncated supported TPI record now also fails the PDB (PdbParseError) -- rather than introducing a new generation"
+    "reason": "generation 34 is still unreleased (same PR #1876): this amends its own semantic change -- any truncated supported TPI record or field-list sub-record, a dangling LF_INDEX, an enum whose list falls short of its count, or a TPI stream that ends before its declared type range now fails the PDB (PdbParseError) -- rather than introducing a new generation"
   },
   "resolver": {
     "files": {

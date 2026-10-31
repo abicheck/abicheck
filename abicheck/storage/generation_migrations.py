@@ -361,7 +361,7 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
     34: GenerationSpellingChange(
         "no stored spelling changes: a PE dump whose located PDB is malformed "
         "(truncated, bad magic, corrupt stream directory, no TPI stream, a "
-        "truncated supported TPI record) or whose "
+        "truncated supported TPI record or field-list sub-record) or whose "
         "struct/enum/toolchain extraction phase crashes now records the debug "
         "section as failed (pdb_metadata.PdbParseError) instead of present and "
         "empty or partial. A well-formed PDB records exactly what generation 33 "

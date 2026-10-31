@@ -696,7 +696,7 @@
     },
     {
       "path": "abicheck/pdb_parser.py",
-      "baseline_lines": 1448,
+      "baseline_lines": 1296,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
