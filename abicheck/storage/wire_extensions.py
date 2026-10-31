@@ -232,7 +232,7 @@ def refuse_package_flattening(snap: Any) -> None:
         "archive cannot represent yet -- a failed or blocked section, an "
         "unknown section, section/record extensions or a must-understand "
         f"list{detail}. Writing it would lose that state; save it as a "
-        "single-file snapshot instead (ADR-062 D14/D15)."
+        "single-file snapshot instead."
     )
 
 
