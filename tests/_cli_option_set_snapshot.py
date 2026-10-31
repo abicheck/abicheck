@@ -86,6 +86,7 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--contract",
         "--build-info",
         "--debug-info",
+        "--define",
         "--depth",
         "--diagnostic-comparison",
         "--dry-run",
@@ -109,6 +110,7 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--select",
         "--select-required",
         "--set",  # ADR-091 D4 (generic PATH=VALUE override); see rulings.py
+        "--severity-preset",
         "--since",
         "--sources",
         "--suppress",
@@ -118,6 +120,7 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--used-by",
         "--variant",
         "--verbose",
+        "-D",
         "-H",
         "-I",
         "-o",

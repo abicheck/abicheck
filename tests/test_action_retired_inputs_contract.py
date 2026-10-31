@@ -143,13 +143,9 @@ _TOMBSTONES_THAT_MUST_STAY_DECLARED = frozenset(
         "include-private-dso",
         "fail-on-removed-library",
         "public-header-dirs",
-        "lang",
         "frontend",
-        "compiler",
         "compile-options",
-        "sysroot",
         "nostdinc",
-        "severity-preset",
         "allow-build-query",
     }
 )

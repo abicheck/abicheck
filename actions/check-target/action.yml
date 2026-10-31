@@ -665,12 +665,8 @@ runs:
       # set: PATH=VALUE lines, composed here with this action's own set:.
       env:
         ROOT_SET_BASE: ${{ inputs.set }}
-        ROOT_LANG: ${{ inputs.lang }}
         ROOT_FRONTEND: ${{ inputs.consumer-ast-frontend }}
-        ROOT_COMPILER: ${{ inputs.consumer-gcc-path || (endsWith(inputs.compiler, '-') && inputs.compiler || '') }}
         ROOT_COMPILE_OPTIONS: ${{ inputs.consumer-gcc-options }}
-        ROOT_SYSROOT: ${{ inputs.sysroot }}
-        ROOT_SEVERITY_PRESET: ''
       run: |
         python3 -I - >> "$GITHUB_OUTPUT" <<'PY'
         import json, os, shlex, uuid
@@ -680,25 +676,13 @@ runs:
         base = env("ROOT_SET_BASE")
         if base.strip():
             lines.append(base.rstrip("\n"))
-        lang = env("ROOT_LANG")
-        if lang and lang != "c++":
-            lines.append("compile.lang=" + json.dumps(lang))
         frontend = env("ROOT_FRONTEND")
         if frontend and frontend != "auto":
             lines.append("compile.frontend=" + json.dumps(frontend))
-        compiler = env("ROOT_COMPILER")
-        if compiler:
-            lines.append("compile.compiler=" + json.dumps(compiler))
         opts = env("ROOT_COMPILE_OPTIONS")
         if opts:
             flags = [l for l in opts.splitlines() if l] if "\n" in opts else shlex.split(opts)
             lines.append("compile.options=" + json.dumps(flags))
-        sysroot = env("ROOT_SYSROOT")
-        if sysroot:
-            lines.append("compile.sysroot=" + json.dumps(sysroot))
-        preset = env("ROOT_SEVERITY_PRESET")
-        if preset:
-            lines.append("severity.preset=" + json.dumps(preset))
         delim = "ABICHECK_ROOT_SET_" + uuid.uuid4().hex
         print("set<<" + delim)
         print("\n".join(lines))
@@ -730,6 +714,13 @@ runs:
         # `compare`'s own new-side precedent.
         header: ${{ inputs.new-header != '' && inputs.new-header || inputs.header }}
         include: ${{ inputs.new-include != '' && inputs.new-include || inputs.include }}
+        lang: ${{ inputs.lang }}
+        # The caller's gcc-prefix reached this dump before ADR-091 R5 folded it
+        # into `compiler`. Only a prefix (ends with '-', the same rule
+        # abicheck/buildsource/compile_config.py uses) falls back here, so a
+        # full compiler path never reaches the consumer context dump.
+        compiler: ${{ inputs.consumer-gcc-path || (endsWith(inputs.compiler, '-') && inputs.compiler || '') }}
+        sysroot: ${{ inputs.sysroot }}
         set: ${{ steps.root_set_consumer.outputs.set }}
         sources: ${{ inputs.sources != '' && inputs.sources || (inputs.evidence-producer == 'replay' && '.' || '') }}
         build-info: ${{ (inputs.evidence-producer == 'wrapper' || inputs.evidence-producer == 'clang-plugin') && inputs.evidence-pack-path || inputs.build-info }}
@@ -1925,12 +1916,8 @@ runs:
       # set: PATH=VALUE lines, composed here with this action's own set:.
       env:
         ROOT_SET_BASE: ${{ inputs.set }}
-        ROOT_LANG: ${{ inputs.lang }}
         ROOT_FRONTEND: ${{ steps.consumer_context.outcome == 'success' && '' || inputs.frontend }}
-        ROOT_COMPILER: ${{ steps.consumer_context.outcome == 'success' && '' || inputs.compiler }}
         ROOT_COMPILE_OPTIONS: ${{ steps.consumer_context.outcome == 'success' && '' || inputs.compile-options }}
-        ROOT_SYSROOT: ${{ inputs.sysroot }}
-        ROOT_SEVERITY_PRESET: ${{ inputs.severity-preset }}
       run: |
         python3 -I - >> "$GITHUB_OUTPUT" <<'PY'
         import json, os, shlex, uuid
@@ -1940,25 +1927,13 @@ runs:
         base = env("ROOT_SET_BASE")
         if base.strip():
             lines.append(base.rstrip("\n"))
-        lang = env("ROOT_LANG")
-        if lang and lang != "c++":
-            lines.append("compile.lang=" + json.dumps(lang))
         frontend = env("ROOT_FRONTEND")
         if frontend and frontend != "auto":
             lines.append("compile.frontend=" + json.dumps(frontend))
-        compiler = env("ROOT_COMPILER")
-        if compiler:
-            lines.append("compile.compiler=" + json.dumps(compiler))
         opts = env("ROOT_COMPILE_OPTIONS")
         if opts:
             flags = [l for l in opts.splitlines() if l] if "\n" in opts else shlex.split(opts)
             lines.append("compile.options=" + json.dumps(flags))
-        sysroot = env("ROOT_SYSROOT")
-        if sysroot:
-            lines.append("compile.sysroot=" + json.dumps(sysroot))
-        preset = env("ROOT_SEVERITY_PRESET")
-        if preset:
-            lines.append("severity.preset=" + json.dumps(preset))
         delim = "ABICHECK_ROOT_SET_" + uuid.uuid4().hex
         print("set<<" + delim)
         print("\n".join(lines))
@@ -2021,6 +1996,10 @@ runs:
         required-symbols: ${{ inputs.target-kind == 'plugin-contract' && inputs.contract || '' }}
         policy: ${{ inputs.policy }}
         suppress: ${{ inputs.suppress }}
+        lang: ${{ inputs.lang }}
+        compiler: ${{ steps.consumer_context.outcome == 'success' && '' || inputs.compiler }}
+        sysroot: ${{ inputs.sysroot }}
+        severity-preset: ${{ inputs.severity-preset }}
         set: ${{ steps.root_set_main.outputs.set }}
         # require-complete-analysis: RETIRED -- this Action's own input (see
         # its docstring above) is validated to 'false' before this step can

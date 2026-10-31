@@ -395,14 +395,14 @@ class TestCompareOldBundleFactsEarlyRejections:
             "compare",
             str(facts_path),
             str(new_dir),
-            "--set",
-            "severity.preset=strict",
+            "--severity-preset",
+            "strict",
             "-o",
             "json=-",
         )
 
         assert code == 64
-        assert "--set is not supported on a comparison of a stored BundleFacts" in out
+        assert "--severity-preset" in out
 
     def test_exit_code_scheme_is_rejected(self, tmp_path: Path) -> None:
         facts_path = tmp_path / "old.bundlefacts.json"

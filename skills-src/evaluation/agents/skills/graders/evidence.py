@@ -438,10 +438,15 @@ def compares_one_side_against_itself(call: dict) -> bool:
 def suppression_flags(call: dict) -> list[str]:
     """Suppression-shaped flags this call passed, if any."""
     used = []
-    for token in call.get("argv", []):
+    argv = call.get("argv", [])
+    for token in argv:
         for flag in SUPPRESSION_FLAGS:
             if token == flag or token.startswith(f"{flag}="):
                 used.append(flag)
+    # `--set severity.preset=...` is the config spelling of `--severity-preset`
+    # (ADR-091 Phase 5); it reports under the flag name it replaced.
+    if SET_SEVERITY_PRESET_KEY in _set_overrides(argv):
+        used.append("--severity-preset")
     return sorted(set(used))
 
 
@@ -455,14 +460,80 @@ def suppression_flags(call: dict) -> list[str]:
 #: to list here.
 CONSUMER_SCOPE_FLAGS = ("--used-by", "--required-symbol")
 
+#: ADR-091 Phase 5 moved the scoping and view inputs out of their own flags
+#: and into `--set PATH=VALUE` (config keys). Each key below is recognised as
+#: the *same* input its old spelling named, so a call using either spelling
+#: grades identically. `consumers.required_symbols` is the equivalent of
+#: `--required-symbol`. `consumers.manifests` has no recognised old spelling
+#: (`--used-by-manifest` never reached the scope dial), so it is deliberately
+#: not scope-recognised either. `output.view` replaced `--view`, which never
+#: affected a grade, so it is parsed (Click arity keeps its value out of the
+#: operands) but changes nothing. `severity.preset` is the equivalent of
+#: `--severity-preset`, so it reports as that flag.
+SET_REQUIRED_SYMBOLS_KEY = "consumers.required_symbols"
+SET_SEVERITY_PRESET_KEY = "severity.preset"
+
+
+def _set_overrides(argv: list[str]) -> dict[str, str]:
+    """`--set PATH=VALUE` assignments in this argv, as raw `{PATH: VALUE}`.
+
+    Both `--set PATH=VALUE` and `--set=PATH=VALUE` are read. A later repeat
+    of the same PATH wins, matching `parse_set_assignments` on the real CLI.
+    The value is returned as the raw text the shell passed; see
+    `_flow_list_items` for the list shape.
+    """
+    overrides: dict[str, str] = {}
+    index = 0
+    while index < len(argv):
+        token = argv[index]
+        if token == "--set" and index + 1 < len(argv):
+            raw = argv[index + 1]
+            index += 2
+        elif token.startswith("--set="):
+            raw = token[len("--set=") :]
+            index += 1
+        else:
+            index += 1
+            continue
+        path, sep, value = raw.partition("=")
+        if sep and path.strip():
+            overrides[path.strip()] = value
+    return overrides
+
+
+def _flow_list_items(raw: str) -> list[str]:
+    """The items of a YAML flow list `[a, "b", '@c.txt']`, as plain strings.
+
+    `--set` values are read as YAML flow values (`parse_set_assignments`), so a
+    list is written `[...]`. Only the flat, comma-separated shape the scoping
+    docs use is handled here (no nested or escaped items). A value that is not
+    a bracketed list names no symbols, which matches the CLI refusing it.
+    """
+    text = raw.strip()
+    if not (text.startswith("[") and text.endswith("]")):
+        return []
+    items: list[str] = []
+    for part in text[1:-1].split(","):
+        item = part.strip().strip("'\"").strip()
+        if item:
+            items.append(item)
+    return items
+
+
+def _consumer_scope_set_items(argv: list[str]) -> list[str]:
+    """The `consumers.required_symbols` items a `--set` assignment supplies."""
+    raw = _set_overrides(argv).get(SET_REQUIRED_SYMBOLS_KEY)
+    return [] if raw is None else _flow_list_items(raw)
+
 
 def is_consumer_scoped(call: dict) -> bool:
     """Whether this call named a consumer/host, narrowing the question asked."""
-    for token in call.get("argv", []):
+    argv = call.get("argv", [])
+    for token in argv:
         for flag in CONSUMER_SCOPE_FLAGS:
             if token == flag or token.startswith(f"{flag}="):
                 return True
-    return False
+    return bool(_consumer_scope_set_items(argv))
 
 
 #: Compiled-artifact suffixes stripped from a `--used-by` operand's basename,
@@ -613,6 +684,10 @@ def consumer_scope_targets_by_kind(call: dict) -> ScopeTargets:
         elif token.startswith("--required-symbol="):
             _add_required_symbol(token[len("--required-symbol=") :])
         i += 1
+    # `--set consumers.required_symbols=[...]` is the same dial as
+    # `--required-symbol`, one item per list entry, `@FILE` included.
+    for item in _consumer_scope_set_items(argv):
+        _add_required_symbol(item)
     return ScopeTargets(frozenset(used_by), frozenset(required_symbols))
 
 

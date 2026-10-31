@@ -1293,6 +1293,44 @@ _yaml_flow_list() {
   printf '[%s]' "$out"
 }
 
+# The Action's compile-context inputs reach the CLI as `--set compile.*=…`
+# (ADR-091 D4, ADR-070 D2). The CLI owns the `compile:` schema, the trust gate
+# on `compile.compiler` and the precedence over `.abicheck.yml`, so this
+# function only translates input grammar: a string is written as a JSON
+# string (a YAML flow scalar, so `123` stays text and a backslash survives),
+# and `gcc-options` -- a shell-quoted line, or one token per line -- becomes
+# the list `compile.options` takes.
+#
+# $1: "true" to also forward `lang` (dump and compare).
+_compile_set_string() {
+  local value="$2"
+  value=${value//\\/\\\\}
+  value=${value//\"/\\\"}
+  printf '%s="%s"' "$1" "$value"
+}
+
+add_compile_context_flags() {
+  local include_lang="${1:-true}"
+  # A run that configures no compile-context input forwards nothing, so it
+  # keeps the CLI's own `.abicheck.yml` discovery. `c++` is the lang default
+  # and is not a user override.
+  if [[ -z "${INPUT_COMPILER:-}${INPUT_SYSROOT:-}" \
+        && ( "$include_lang" != "true" || -z "${INPUT_LANG:-}" || "${INPUT_LANG:-}" == "c++" ) ]]; then
+    return 0
+  fi
+  if [[ "$include_lang" == "true" && -n "${INPUT_LANG:-}" ]]; then
+    CMD+=(--set "$(_compile_set_string compile.lang "$INPUT_LANG")")
+  fi
+  # compile.compiler takes a full compiler path or, ending in `-`, a
+  # cross-toolchain prefix (ADR-091 R5: the `compiler` input carries either).
+  if [[ -n "${INPUT_COMPILER:-}" ]]; then
+    CMD+=(--set "$(_compile_set_string compile.compiler "$INPUT_COMPILER")")
+  fi
+  if [[ -n "${INPUT_SYSROOT:-}" ]]; then
+    CMD+=(--set "$(_compile_set_string compile.sysroot "$INPUT_SYSROOT")")
+  fi
+}
+
 # Phase 7d (one-comparison-product.md §4.1, ADR-068 D5): `compare`'s
 # `--dso-only`/`--include-private-dso`/`--fail-on-removed-library` are gone
 # entirely (CONFIG class, no CLI override -- `.abicheck.yml`'s `release:`/
@@ -3410,6 +3448,7 @@ if [[ "$MODE" == "dump" ]]; then
   add_flag "-I" "${INPUT_INCLUDE:-}"
   add_flag "-I" "${INPUT_NEW_INCLUDE:-}"
   _extra_args_names_label || add_single_flag "--label" "${INPUT_NEW_LABEL:-}"
+  add_compile_context_flags true
 
   if [[ "${INPUT_FOLLOW_DEPS:-false}" == "true" ]]; then
     CMD+=(--follow-deps)
@@ -3568,6 +3607,7 @@ elif [[ "$MODE" == "compare" ]]; then
   # so there is no sided per-side override left for it to refuse. This
   # Action folds `ast-frontend` & co. into one both-sides `compile:` block,
   # which the release fan-out threads to every library pair.
+  add_compile_context_flags true
 
   # Build/source evidence (--depth build/source) — new (candidate) side only.
   # The old side's evidence, if any, already lives in whatever
@@ -3798,8 +3838,18 @@ elif [[ "$MODE" == "compare" ]]; then
   # ADR-067 D5: this run's acknowledgment records. Operator-named, like
   # `suppress`, so the CLI trusts it to supply records (a discovered
   # .abicheck.yml is not; see add_compile_context_flags' overlay strip).
+  # severity-preset is a live input: the CLI has no --severity-preset flag any
+  # more, so it reaches the CLI as its config key, the same as `set:`.
+  if [[ -n "${INPUT_SEVERITY_PRESET:-}" ]]; then
+    CMD+=(--set "$(_compile_set_string severity.preset "$INPUT_SEVERITY_PRESET")")
+  fi
   add_single_flag "--acknowledgments" "${INPUT_ACKNOWLEDGMENTS:-}"
 
+  # severity-preset is a live input: the CLI has no --severity-preset flag any
+  # more, so it reaches the CLI as its config key, the same as `set:`.
+  if [[ -n "${INPUT_SEVERITY_PRESET:-}" ]]; then
+    CMD+=(--set "$(_compile_set_string severity.preset "$INPUT_SEVERITY_PRESET")")
+  fi
   add_set_flags
   # --budget: time guard (e.g. 15m, 900s, 1h); the step FAILS on overflow
   # (exit 5) -- a budget never silently shrinks scope. Baseline shape only --
@@ -3869,6 +3919,7 @@ elif [[ "$MODE" == "deps-tree" ]]; then
   CMD+=(deps tree)
   CMD+=("${INPUT_NEW_LIBRARY:?new-library is required for deps-tree mode}")
 
+  add_single_flag "--root" "${INPUT_SYSROOT:-}"
   add_flag "--search-path" "${INPUT_SEARCH_PATH:-}"
   add_single_flag "--ld-library-path" "${INPUT_LD_LIBRARY_PATH:-}"
 

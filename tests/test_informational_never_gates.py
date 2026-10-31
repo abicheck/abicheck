@@ -147,7 +147,7 @@ def test_informational_kind_never_gates_through_the_cli(
     tmp_path: Path, inject: list[ChangeKind], kind: str, preset: str | None
 ) -> None:
     inject.append(ChangeKind(kind))
-    args = ["--set", "severity.preset=" + str(preset)] if preset else []
+    args = ["--severity-preset", str(preset)] if preset else []
     code, doc = _compare(tmp_path, *args)
     assert code == 0
     # Recorded, not disposed of (ADR-067): the finding is still reported.
@@ -206,7 +206,7 @@ def test_strict_gates_a_compatible_kind_iff_its_category_is_configurable(
     did not widen into "COMPATIBLE never gates".
     """
     inject.append(ChangeKind(kind))
-    code, doc = _compare(tmp_path, "--set", "severity.preset=strict")
+    code, doc = _compare(tmp_path, "--severity-preset", "strict")
     expected_cat = _oracle_category(kind)
     assert code == (0 if expected_cat is None else 1)
     assert doc["severity"]["blocking_categories"] == (
@@ -232,7 +232,7 @@ def test_markdown_report_discloses_it_outside_quality_issues(
         )
         paths.append(str(p))
     res = CliRunner().invoke(
-        main, ["compare", *paths, "-o", "markdown=-", "--set", "severity.preset=strict"]
+        main, ["compare", *paths, "-o", "markdown=-", "--severity-preset", "strict"]
     )
     assert res.exit_code == 0
     assert "Informational (no material change)" in res.stdout

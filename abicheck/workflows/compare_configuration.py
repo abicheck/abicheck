@@ -140,7 +140,6 @@ CLI_ONLY_OVERRIDE_PATHS: frozenset[str] = frozenset(
         "scope.show_redundant",
         "source.method",
         "performance.profile",
-        "compile.defines",
         "output.view",
         "consumers.manifests",
         "consumers.required_symbols",

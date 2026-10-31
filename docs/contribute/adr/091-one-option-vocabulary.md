@@ -127,6 +127,25 @@ Each concept is either:
 Promoting a concept from config to core needs the ADR-054 admission
 argument. `--help-all` keeps listing everything.
 
+**Amendment (2026-10-31, maintainer decision): the budget is soft.** The
+15 and 25 figures are soft targets, not hard limits; usability wins. A
+concept stays a flag or an Action input, and is not moved to the config tier,
+if any of these holds: (a) it is per-side (`old=`/`new=`); (b) it varies per
+run or per CI matrix cell; (c) a first run without `.abicheck.yml` needs it;
+(d) it is a commonly used analysis setting. Only project-stable, rarely-set
+options move to the config tier, reached through `.abicheck.yml` or
+`--set`/`set:`. `--set` is the flexible escape hatch, not the primary
+interface. The same rule applies to the CLI and the Action. The recorded
+no-growth counts in `architecture/option-vocabulary.yaml` are the budget that
+the test enforces: `compare` 17 visible core options (`--used-by-manifest`,
+`--required-symbol` and `--view` moved to `consumers.manifests`,
+`consumers.required_symbols` and `output.view`), and the root Action 42
+analysis inputs (dso-only, include-private-dso, fail-on-removed-library,
+public-header-dirs, frontend, compile-options and nostdinc moved to `set:`).
+Remaining candidates, not yet moved and not part of this record: the
+`--debug-info` per-side transports, the `deps.*` keys that have no config
+home yet, and `--sources`, which needs a config discovery rule first.
+
 ### D5 — The specific changes
 
 | # | Concept | Change |

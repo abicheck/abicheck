@@ -580,6 +580,7 @@
       "disposition": "surfaced",
       "surfaces": [
         "action: severity-preset",
+        "cli: compare --severity-preset",
         "report: compare_report.exit"
       ],
       "use_cases": [
@@ -674,8 +675,11 @@
       "use_cases": []
     },
     "ADR-074": {
-      "disposition": "internal",
-      "surfaces": [],
+      "disposition": "surfaced",
+      "surfaces": [
+        "cli: compare --define",
+        "cli: dump --define"
+      ],
       "use_cases": [
         "UC-TC-header-scope-robustness"
       ]
@@ -698,6 +702,7 @@
     "ADR-078": {
       "disposition": "surfaced",
       "surfaces": [
+        "cli: compare --severity-preset",
         "report: compare_report.severity",
         "report: compare_report.summary"
       ],
@@ -905,6 +910,8 @@
     "ADR-072 report: format:review",
     "ADR-073 action: actions/report",
     "ADR-073 action: actions/verify-source-run",
+    "ADR-074 cli: compare --define",
+    "ADR-074 cli: dump --define",
     "ADR-078 report: compare_report.severity",
     "ADR-078 report: compare_report.summary",
     "ADR-084 report: compare_report.disposition_audit",

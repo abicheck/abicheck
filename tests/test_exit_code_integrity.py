@@ -150,7 +150,7 @@ class TestPairExitThroughCli:
         self, tmp_path: Path, case: str, preset: str | None
     ) -> None:
         new_names, verdict = _PAIR_CASES[case]
-        extra = ("--set", "severity.preset=" + str(preset)) if preset else ()
+        extra = ("--severity-preset", str(preset)) if preset else ()
         cli, report = _run_compare(tmp_path, new_names, *extra)
         assert report["verdict"] == verdict.value
         assert cli.exit_code == report["exit"]["code"]

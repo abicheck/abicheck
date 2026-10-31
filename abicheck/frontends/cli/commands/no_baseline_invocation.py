@@ -317,13 +317,6 @@ def resolve_no_baseline_invocation(
     _discovered_config = resolve_project_config(
         kwargs.get("config"), search_from=Path.cwd()
     ).path
-    if "compile.defines" in (kwargs.get("config_overrides") or {}):
-        # The audit's compile context is read from the config file; a --set
-        # value would be dropped, so it is refused rather than ignored.
-        raise click.UsageError(
-            "--set compile.defines is not available with --no-baseline: set "
-            "compile.defines in .abicheck.yml for this run"
-        )
     compile_context, merged_includes = resolve_compile_context(
         ctx,
         sysroot=None,
@@ -331,7 +324,7 @@ def resolve_no_baseline_invocation(
         header_backend="auto",
         includes=tuple(includes),
         build_config=_discovered_config,
-        defines=(),
+        defines=tuple(kwargs.get("defines") or ()),
         config_explicit=kwargs.get("config") is not None,
     )
     includes = list(merged_includes)

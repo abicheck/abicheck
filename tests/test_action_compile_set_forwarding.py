@@ -67,13 +67,9 @@ def _no_config_flag(argv: list[str]) -> None:
 
 # (input name, value a workflow would set, the set: line that replaces it)
 RETIRED_COMPILE_INPUTS = [
-    ("compiler", "/opt/gcc-14/bin/g++", "compile.compiler"),
     ("frontend", "clang", "compile.frontend"),
-    ("lang", "c", "compile.lang"),
     ("compile-options", "-DA=1", "compile.options"),
-    ("sysroot", "/opt/sysroot", "compile.sysroot"),
     ("nostdinc", "true", "compile.nostdinc"),
-    ("severity-preset", "default", "severity.preset"),
 ]
 
 
@@ -186,3 +182,25 @@ def test_no_overlay_temp_file_is_written_for_set_compile_lines(tmp_path: Path) -
         p.name.startswith("abicheck-compile-context") for p in runner_temp.iterdir()
     )
     _no_config_flag(argv)
+
+
+@pytest.mark.parametrize(
+    ("name", "value", "argv_value"),
+    [
+        ("compiler", "/opt/gcc-14/bin/g++", 'compile.compiler="/opt/gcc-14/bin/g++"'),
+        ("sysroot", "/opt/sysroot", 'compile.sysroot="/opt/sysroot"'),
+        ("lang", "c", 'compile.lang="c"'),
+    ],
+)
+def test_live_compile_input_still_forwards_as_a_set_pair(
+    tmp_path: Path, name: str, value: str, argv_value: str
+) -> None:
+    """compiler, sysroot and lang are live inputs (not retired): each still
+    reaches the CLI as its compile.* --set pair."""
+    argv = _run(tmp_path, **{"INPUT_" + name.upper(): value})
+    assert argv_value in _set_pairs(argv)
+
+
+def test_live_severity_preset_forwards_as_a_set_pair(tmp_path: Path) -> None:
+    argv = _run(tmp_path, INPUT_SEVERITY_PRESET="strict")
+    assert 'severity.preset="strict"' in _set_pairs(argv)

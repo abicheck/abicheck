@@ -272,6 +272,23 @@
    "default": "<unset>"
   },
   {
+   "id": "compare --severity-preset",
+   "command": "compare",
+   "option": "--severity-preset",
+   "aliases": [],
+   "hidden": false,
+   "help_common": true,
+   "multiple": false,
+   "is_flag": false,
+   "type": "choice",
+   "choices": [
+    "default",
+    "strict",
+    "info-only"
+   ],
+   "default": "<unset>"
+  },
+  {
    "id": "compare --config",
    "command": "compare",
    "option": "--config",
@@ -335,6 +352,21 @@
    "type": "boolean",
    "choices": null,
    "default": "False"
+  },
+  {
+   "id": "compare --define",
+   "command": "compare",
+   "option": "--define",
+   "aliases": [
+    "-D"
+   ],
+   "hidden": false,
+   "help_common": true,
+   "multiple": true,
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "compare --search-path",
@@ -812,6 +844,21 @@
    "type": "boolean",
    "choices": null,
    "default": "False"
+  },
+  {
+   "id": "dump --define",
+   "command": "dump",
+   "option": "--define",
+   "aliases": [
+    "-D"
+   ],
+   "hidden": false,
+   "help_common": true,
+   "multiple": true,
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "<unset>"
   },
   {
    "id": "dump --set",
@@ -1805,9 +1852,9 @@
    "id": "action:lang",
    "action": "action",
    "input": "lang",
-   "status": "retired",
+   "status": "live",
    "required": false,
-   "default": null
+   "default": "c++"
   },
   {
    "id": "action:frontend",
@@ -1821,7 +1868,7 @@
    "id": "action:compiler",
    "action": "action",
    "input": "compiler",
-   "status": "retired",
+   "status": "live",
    "required": false,
    "default": null
   },
@@ -1837,7 +1884,7 @@
    "id": "action:sysroot",
    "action": "action",
    "input": "sysroot",
-   "status": "retired",
+   "status": "live",
    "required": false,
    "default": null
   },
@@ -2245,7 +2292,7 @@
    "id": "action:severity-preset",
    "action": "action",
    "input": "severity-preset",
-   "status": "retired",
+   "status": "live",
    "required": false,
    "default": null
   },

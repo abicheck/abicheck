@@ -45,7 +45,7 @@ def parse_cli(mode: str, argv: list[str]) -> dict[str, Any]:
             arg, value = arg.split("=", 1)
         if arg in ("-H", "--header", "-o", "--output", "--config", "-I", "--include", "--version",
                    "--policy", "--suppress", "--severity-preset", "--depth", "--contract",
-                   "--used-by", "--sources", "--build-info", "--debug-info"):
+                   "--used-by", "--sources", "--build-info", "--debug-info", "--set"):
             if value is None:
                 i += 1
                 value = argv[i] if i < len(argv) else ""

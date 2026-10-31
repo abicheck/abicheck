@@ -1,12 +1,11 @@
-"""ADR-091 Phase 5: the moved compare options are config keys, and the old
-spellings are gone.
+"""ADR-091 Phase 5: the project-stable compare options that moved to `.abicheck.yml`.
 
-The moved spellings (`--define`/`-D`, `--severity-preset`, `--view`,
-`--used-by-manifest`, `--required-symbol`) are removed outright, so they fail as
-unknown options (exit 64). Their values are reachable through `.abicheck.yml`
-and `--set PATH=VALUE`. A config that sets a scoping or view key is refused, not
-ignored, on the routes that cannot honour it (`--no-baseline`, a stored
-BundleFacts operand).
+`--used-by-manifest`, `--required-symbol` and `--view` are removed outright (exit
+64 as unknown options). Their values are `consumers.manifests`,
+`consumers.required_symbols` and `output.view`, reachable through `.abicheck.yml`
+and `--set PATH=VALUE`. `--define` and `--severity-preset` stay flags; a `--set`
+of their config keys is refused as a core option. A config that sets a scoping
+or view key is refused, not ignored, on the routes that cannot honour it.
 """
 
 from __future__ import annotations
@@ -14,6 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import click
 from click.testing import CliRunner
 
 from abicheck.cli import main
@@ -39,8 +39,6 @@ def _snapshot(path: Path, version: str) -> Path:
 @pytest.mark.parametrize(
     "flag",
     [
-        "--define",
-        "--severity-preset",
         "--view",
         "--used-by-manifest",
         "--required-symbol",
@@ -54,17 +52,9 @@ def test_moved_compare_spellings_are_removed(tmp_path: Path, flag: str) -> None:
     assert "No such option" in result.output
 
 
-def test_dump_define_is_removed(tmp_path: Path) -> None:
-    result = CliRunner().invoke(main, ["dump", "x.so", "--define", "A"])
-    assert result.exit_code == 64, result.output
-    assert "No such option" in result.output
-
-
 @pytest.mark.parametrize(
     "assignment",
     [
-        "severity.preset=default",
-        "compile.defines=[A, B=2]",
         "output.view=[show=breaking]",
         "consumers.manifests=[m.json]",
         "consumers.required_symbols=[sym_a]",
@@ -84,10 +74,13 @@ def test_moved_keys_are_accepted_by_compare_set(
     parse_set_assignments((assignment,))
 
 
-def test_compile_defines_is_accepted_by_dump_set() -> None:
-    from abicheck.workflows.dump.project_config import DUMP_APPLIED_PATHS
+@pytest.mark.parametrize("assignment", ["severity.preset=default", "compile.defines=[A]"])
+def test_core_option_keys_stay_refused_by_set(assignment: str) -> None:
+    """severity.preset and compile.defines keep their flags, so --set refuses them."""
+    from abicheck.frontends.cli.options.config_set import parse_set_assignments
 
-    assert "compile.defines" in DUMP_APPLIED_PATHS
+    with pytest.raises(click.UsageError, match="core option"):
+        parse_set_assignments((assignment,))
 
 
 def test_config_consumer_keys_load_into_the_build_config(tmp_path: Path) -> None:
@@ -117,22 +110,6 @@ def test_no_baseline_refuses_config_consumer_and_view_keys(tmp_path: Path) -> No
     )
     assert result.exit_code == 64, result.output
     assert "output.view is not available with --no-baseline" in result.output
-
-
-def test_no_baseline_refuses_set_compile_defines(tmp_path: Path) -> None:
-    old = _snapshot(tmp_path / "old.json", "1.0")
-    result = CliRunner().invoke(
-        main,
-        [
-            "compare",
-            str(old),
-            "--no-baseline",
-            "--set",
-            "compile.defines=[A]",
-        ],
-    )
-    assert result.exit_code == 64, result.output
-    assert "--set compile.defines is not available with --no-baseline" in result.output
 
 
 def test_consumer_manifest_read_failure_is_a_usage_error(tmp_path: Path) -> None:

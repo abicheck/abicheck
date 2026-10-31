@@ -76,7 +76,7 @@ scenarios:
     title: A strict gate never fails on an informational, no-material-change finding
     persona: CI engineer
     narrative: >
-      A team runs with severity.preset: strict but keeps additions informational.
+      A team runs --severity-preset strict but keeps additions informational.
       Adding a function also emits public_surface_grew, an aggregate
       roll-up of the additions already reported. That roll-up is an
       informational outcome (ADR-078): it stays in the report under
@@ -84,11 +84,11 @@ scenarios:
       so the run exits 0 instead of failing on a restatement of an
       info-level addition.
     flow:
-      - abicheck compare old.json new.json --set severity.preset=strict --config additions-info.abicheck.yml
+      - abicheck compare old.json new.json --severity-preset strict --config additions-info.abicheck.yml
     expected:
       exit_code: 0
     surfaces:
-      - cli: compare --config
+      - cli: compare --severity-preset --config
     validates: UC-WF-compare
     automated: true
     test: test_sc_ci_strict_informational

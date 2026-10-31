@@ -655,13 +655,9 @@ _retired_to_set=(
   "include-private-dso|INPUT_INCLUDE_PRIVATE_DSO|any|set: release.include_private_dso=true"
   "fail-on-removed-library|INPUT_FAIL_ON_REMOVED_LIBRARY|any|set: gate.fail_on_removed_library=true"
   "public-header-dirs|INPUT_PUBLIC_HEADER_DIRS|any|set: scope.public_header_dirs=[<dir>, ...]"
-  "lang|INPUT_LANG|any|set: compile.lang=<value>"
   "frontend|INPUT_FRONTEND|any|set: compile.frontend=<value>"
-  "compiler|INPUT_COMPILER|any|set: compile.compiler=<value>"
   "compile-options|INPUT_COMPILE_OPTIONS|any|set: compile.options=[<flag>, ...]"
-  "sysroot|INPUT_SYSROOT|any|set: compile.sysroot=<dir> (for mode: deps-tree use extra-args: --root <dir>)"
   "nostdinc|INPUT_NOSTDINC|bool|set: compile.nostdinc=true"
-  "severity-preset|INPUT_SEVERITY_PRESET|any|set: severity.preset=<value>"
 )
 for _entry in "${_retired_to_set[@]}"; do
   IFS='|' read -r _old_name _old_var _kind _repl <<<"$_entry"

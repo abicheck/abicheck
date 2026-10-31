@@ -6,10 +6,10 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 
 | Disposition | ADRs |
 |---|---|
-| surfaced | 48 |
+| surfaced | 49 |
 | partial | 14 |
 | gap | 8 |
-| internal | 23 |
+| internal | 22 |
 
 ## ADRs
 
@@ -80,7 +80,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 | [ADR-061](../adr/061-responsibility-package-architecture.md) | internal | — | — | Internal package architecture and import direction. |
 | [ADR-062](../adr/062-project-snapshot-storage-v2.md) | partial | UC-WF-baseline | `api: abicheck.storage`<br>`cli: compare --require-same-generation` | Proposed; only Phase 0 primitives and the default single-artifact format are wired. |
 | [ADR-063](../adr/063-one-semantic-pipeline.md) | partial | UC-WF-analysis-assurance | `cli: compare` | Roadmap ADR; Phase 10 accounting remains open. |
-| [ADR-064](../adr/064-canonical-gate-algorithm-and-exit-decision.md) | surfaced | UC-WF-compare | `report: compare_report.exit`<br>`action: severity-preset` | — |
+| [ADR-064](../adr/064-canonical-gate-algorithm-and-exit-decision.md) | surfaced | UC-WF-compare | `cli: compare --severity-preset`<br>`report: compare_report.exit`<br>`action: severity-preset` | — |
 | [ADR-065](../adr/065-comparison-scope-selection-and-completeness.md) | surfaced | UC-WF-compare, UC-WF-scope-completeness | `cli: compare --select --select-required --dry-run`<br>`report: compare_report.comparison_scope`<br>`report: compare_report.run_outcome` | — |
 | [ADR-066](../adr/066-longitudinal-history-and-versioning-policy.md) | partial | UC-CHANGE-semver-recommendation, UC-WF-release-history | `cli: project history --policy`<br>`api: abicheck.workflows.history.build_longitudinal_history` | Proposed; only S1 and S2 are implemented. |
 | [ADR-067](../adr/067-change-intent-acknowledgment-and-disposition-audit.md) | partial | UC-WF-compare, UC-WF-acknowledgment | `cli: compare --suppress`<br>`cli: compare --acknowledgments`<br>`action: acknowledgments`<br>`report: compare_report.disposition_audit` | S4 is not implemented. The configured-rule inventory (every rule, including unused and expired acknowledgments, gets a disposition_audit row) and the unused_rules gate are implemented under ADR-067 P1. |
@@ -90,7 +90,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 | [ADR-071](../adr/071-release-analysis-assurance-fold.md) | surfaced | UC-WF-compare, UC-WF-scope-completeness | `action: analysis-assurance-complete`<br>`report: compare_report.analysis_assurance` | — |
 | [ADR-072](../adr/072-pr-comment-reporting-fidelity.md) | surfaced | UC-REP-markdown-html | `action: pr-comment-detail`<br>`report: format:review` | — |
 | [ADR-073](../adr/073-report-only-publication-and-the-trusted-reporter-boundary.md) | surfaced | — | `action: actions/report`<br>`action: actions/verify-source-run` | — |
-| [ADR-074](../adr/074-logical-macro-definitions-on-the-cli.md) | internal | UC-TC-header-scope-robustness | — | The -D/--define CLI spelling was removed by ADR-091 Phase 5; macros are the compile.defines config key, reached through --set. |
+| [ADR-074](../adr/074-logical-macro-definitions-on-the-cli.md) | surfaced | UC-TC-header-scope-robustness | `cli: compare --define`<br>`cli: dump --define` | — |
 | [ADR-075](../adr/075-target-ownership-and-extraction-scope.md) | gap | — | — | Accepted, not yet implemented; no ownership/extraction-scope surface exists. |
 | [ADR-076](../adr/076-adr-use-case-surface-traceability.md) | internal | — | — | Repository traceability contract and gate; not a product surface. |
 | [ADR-077](../adr/077-exposure-modes-and-change-sensitive-propagation.md) | gap | — | — | Proposed, not yet implemented; no exposure-mode or sensitivity surface exists. |
@@ -98,7 +98,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 | [ADR-083](../adr/083-closure-respelling-and-persistent-export-observations.md) | gap | — | — | Proposed, not yet implemented; D1 and D2 would change verdicts, exit codes and the cross-source report surface, pending acceptance. |
 | [ADR-084](../adr/084-binary-depth-source-contract-gate.md) | surfaced | UC-WF-compare | `report: compare_report.disposition_audit` | — |
 | [ADR-085](../adr/085-template-parameter-default-arguments.md) | gap | — | — | Proposed, not accepted or implemented; no template-parameter default fact, TEMPLATE_PARAM_DEFAULT_CHANGED kind, or castxml coverage gap exists. |
-| [ADR-078](../adr/078-informational-severity-category.md) | surfaced | UC-WF-compare | `report: compare_report.summary`<br>`report: compare_report.severity` | — |
+| [ADR-078](../adr/078-informational-severity-category.md) | surfaced | UC-WF-compare | `cli: compare --severity-preset`<br>`report: compare_report.summary`<br>`report: compare_report.severity` | — |
 | [ADR-079](../adr/079-partial-export-table-read-in-the-stored-snapshot.md) | gap | — | — | Proposed, not yet implemented; no per-platform export_read snapshot field exists. |
 | [ADR-080](../adr/080-persisting-the-advanced-dwarf-extraction-status.md) | internal | — | — | Persists the advanced-DWARF extraction status as the optional dwarf_advanced.extraction key (schema v68) so a stored snapshot reads the status a live run recorded. Users reach it only through dump/compare; the one report-visible change is an assurance note for a mixed-provenance pair, not a flag, field, or exit code. |
 | [ADR-082](../adr/082-declared-header-order-independent-extraction.md) | internal | — | — | Dump-time proof of declared-header order and the stored header_canonical contract field; users reach it only through dump/compare, and the change is a schema v59 contract field, not a flag, report field or exit code. |
@@ -232,6 +232,8 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 - ADR-072 report: format:review
 - ADR-073 action: actions/report
 - ADR-073 action: actions/verify-source-run
+- ADR-074 cli: compare --define
+- ADR-074 cli: dump --define
 - ADR-078 report: compare_report.severity
 - ADR-078 report: compare_report.summary
 - ADR-084 report: compare_report.disposition_audit

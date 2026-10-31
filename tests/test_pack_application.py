@@ -345,8 +345,8 @@ class TestD8Precedence:
             "json=-",
             "--pack",
             str(gate),
-            "--set",
-            "severity.preset=strict",
+            "--severity-preset",
+            "strict",
         )
         assert result.exit_code == 4, result.output
 

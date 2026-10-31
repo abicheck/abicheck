@@ -99,6 +99,7 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             "options": [
                 "--policy",
                 "--suppress",
+                "--severity-preset",
             ],
         },
         {
@@ -168,6 +169,7 @@ OPTION_GROUPS: dict[str, list[dict[str, object]]] = {
             "options": [
                 "--header",
                 "--include",
+                "--define",
                 "--label",
             ],
         },
@@ -306,6 +308,7 @@ COMPARE_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
         # ADR-074's -D/--define: an opt-in public surface that only exists
         # under a feature macro is unreachable without it, so it belongs
         # with -H/-I rather than behind --help-all.
+        "defines",
         # --lang has no Click dest here any more (Phase 7: compile.lang
         # config-only, one-comparison-product.md §4.1).
         # Output & reporting -- one dest ("exports") for the whole export
@@ -316,6 +319,7 @@ COMPARE_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
         "config",
         "policy",
         "suppress",
+        "severity_preset",
         # Scoped comparison (ADR-043) — headline feature, not a long-tail knob
         "used_by_apps",
         # Build & source evidence
@@ -483,6 +487,7 @@ DUMP_COMMON_OPTION_NAMES: frozenset[str] = frozenset(
         "includes",
         "version",
         # ADR-074's -D/--define -- see the note in COMPARE_COMMON_OPTION_NAMES.
+        "defines",
         # Build & source evidence (--depth build/source)
         "depth",
         "sources",

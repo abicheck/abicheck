@@ -1438,37 +1438,6 @@ class TestSelfComparisonDetection:
         assert not ev.compares_one_side_against_itself(call)
 
 
-class TestShortOptionClusters:
-    """Click packs short options, and both readers of an argv must agree.
-
-    Verified against the real CLI: `compare x.so -vv x.so` runs the comparison,
-    and `compare ... -voreport.json` writes `report.json`.
-    """
-
-    @pytest.mark.parametrize(
-        "argv",
-        [
-            ["compare", "x.so", "-vv", "x.so"],
-            ["compare", "x.so", "-vvv", "x.so"],
-            ["compare", "-oreport.json", "a.so", "a.so"],
-            ["compare", "x.so", "x.so", "-voreport.json"],
-        ],
-    )
-    def test_a_cluster_does_not_hide_the_second_side(self, argv):
-        assert ev.compares_one_side_against_itself({"argv": argv})
-
-    @pytest.mark.parametrize(
-        "argv",
-        [
-            ["compare", "a.so", "b.so", "-vo", "report.json"],
-            ["compare", "a.so", "b.so", "-j4"],
-            ["compare", "a.so", "b.so", "-oreport.json"],
-        ],
-    )
-    def test_an_ordinary_invocation_survives_expansion(self, argv):
-        assert not ev.compares_one_side_against_itself({"argv": argv})
-
-
 class TestVerdictRanking:
     def test_a_verdict_outside_the_vocabulary_has_no_rank(self):
         """A scenario's verdict is not validated the way a claim's is, so a

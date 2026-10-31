@@ -38,7 +38,7 @@ binaries, JSON snapshots, or a mix.
 | `--policy plugin_abi` / `--policy sdk_vendor` / `--policy DOCUMENT` | the project has its own view of what a given change kind means — [policies and suppressions](../../shared/policies-and-suppressions.md) |
 | `--contract exports` / `--contract public` / `--contract all` | the question names which surface the promise covers (the parent skill's step 1 table: "what we export" → `exports`, "our public API/headers" → `public`). Turns on per-finding contract relevance and that domain's coverage ledger (`contract_coverage_failures`); a non-empty ledger exits `1` even when the verdict is clean. See [public surface and scoping](../../shared/public-surface-and-scoping.md) |
 | `--suppress FILE` | the project already has a suppression file. Never author one here. |
-| `--used-by CONSUMER` / `consumers.required_symbols` | the question is about one named consumer rather than the library globally — see the parent skill's named-consumer step and [consumer scoping](../../shared/consumer-scoping.md) |
+| `--used-by CONSUMER` / `--set consumers.required_symbols=[...]` | the question is about one named consumer rather than the library globally — see the parent skill's named-consumer step and [consumer scoping](../../shared/consumer-scoping.md) |
 | `--depth build` / `--depth source`, with `--sources`/`--build-info` | flags, macros, or reachability are in question — [evidence and depth](../../shared/evidence-and-depth.md) |
 
 ## Named-consumer invocations
@@ -63,7 +63,7 @@ answer every consumer, but only the *per-app summary* is per app — the
 findings themselves are one deduplicated union across every named app, with
 no app-to-finding association.
 
-### Plugin / host boundary — `consumers.required_symbols`
+### Plugin / host boundary — `--set consumers.required_symbols=[...]`
 
 ```bash
 abicheck compare OLD NEW \

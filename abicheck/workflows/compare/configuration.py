@@ -68,11 +68,11 @@ def resolve_required_symbol_policy(
     if required_symbols_from_file:
         return (
             "plugin_abi",
-            "--required-symbol",
+            "consumers.required_symbols",
             Path(required_symbols_path) if required_symbols_path else None,
             required_symbols_sha,
         )
-    return "plugin_abi", "--required-symbol", None, None
+    return "plugin_abi", "consumers.required_symbols", None, None
 
 
 def fold_compare_collect_inputs(

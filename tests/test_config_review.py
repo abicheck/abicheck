@@ -225,7 +225,7 @@ class TestExitSchemeAnnouncement:
         old_p, new_p = _write_identical(tmp_path)
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p), "--set", "severity.preset=default"],
+            ["compare", str(old_p), str(new_p), "--severity-preset", "default"],
         )
         assert "Exit-code scheme: severity-aware" in result.stderr
         assert "Exit-code scheme" not in result.stdout
@@ -396,7 +396,7 @@ class TestCompareReleaseDefaults:
         old_p, new_p = _write_identical(tmp_path)
         accepted = CliRunner().invoke(
             main,
-            ["compare", str(old_p), str(new_p), "--set", "severity.preset=default"],
+            ["compare", str(old_p), str(new_p), "--severity-preset", "default"],
         )
         assert accepted.exit_code == 0
         retired = CliRunner().invoke(
@@ -441,8 +441,8 @@ class TestCompareReleaseSeverityExit:
                 "compare",
                 str(old_dir),
                 str(new_dir),
-                "--set",
-                "severity.preset=info-only",
+                "--severity-preset",
+                "info-only",
             ],
         )
         # info-only downgrades everything below error -> exit 0 despite the break.
@@ -452,7 +452,7 @@ class TestCompareReleaseSeverityExit:
         old_dir, new_dir = self._make_release(tmp_path)
         result = CliRunner().invoke(
             main,
-            ["compare", str(old_dir), str(new_dir), "--set", "severity.preset=default"],
+            ["compare", str(old_dir), str(new_dir), "--severity-preset", "default"],
         )
         assert result.exit_code == 4
 
@@ -484,11 +484,9 @@ class TestCompareReleaseSeverityExit:
             tmp_path, {lib: members[lib] for lib in member_order}
         )
         base = ["compare", str(old_dir), str(new_dir)]
-        default = CliRunner().invoke(main, [*base, "--set", "severity.preset=default"])
+        default = CliRunner().invoke(main, [*base, "--severity-preset", "default"])
         assert default.exit_code == 4
-        info_only = CliRunner().invoke(
-            main, [*base, "--set", "severity.preset=info-only"]
-        )
+        info_only = CliRunner().invoke(main, [*base, "--severity-preset", "info-only"])
         assert info_only.exit_code == 0
 
 
@@ -528,8 +526,8 @@ class TestScopedExitRespectsSeverity:
                 str(new_p),
                 "--set",
                 'consumers.required_symbols=["_Z3foov"]',
-                "--set",
-                "severity.preset=info-only",
+                "--severity-preset",
+                "info-only",
             ],
         )
         # Before the fix this always exited 4 (the legacy scoped-verdict
@@ -549,8 +547,8 @@ class TestScopedExitRespectsSeverity:
                 str(new_p),
                 "--set",
                 'consumers.required_symbols=["_Z3foov"]',
-                "--set",
-                "severity.preset=default",
+                "--severity-preset",
+                "default",
             ],
         )
         assert result.exit_code == 4
@@ -578,8 +576,8 @@ class TestScopedExitRespectsSeverity:
                 str(new_p),
                 "--set",
                 'consumers.required_symbols=["never_existed"]',
-                "--set",
-                "severity.preset=default",
+                "--severity-preset",
+                "default",
             ],
         )
         assert result.exit_code == 0
@@ -593,8 +591,8 @@ class TestScopedExitRespectsSeverity:
                     str(new_p),
                     "--set",
                     'consumers.required_symbols=["never_existed"]',
-                    "--set",
-                    "severity.preset=default",
+                    "--severity-preset",
+                    "default",
                     "-o",
                     "json=-",
                 ],
@@ -617,8 +615,8 @@ class TestScopedExitRespectsSeverity:
                 str(new_p),
                 "--set",
                 'consumers.required_symbols=["never_existed"]',
-                "--set",
-                "severity.preset=info-only",
+                "--severity-preset",
+                "info-only",
             ],
         )
         assert result.exit_code == 0
@@ -681,8 +679,8 @@ class TestScopedExitRespectsSeverity:
                 'consumers.required_symbols=["_Z10kept_entryv"]',
                 "-o",
                 "json=-",
-                "--set",
-                "severity.preset=default",
+                "--severity-preset",
+                "default",
             ],
         )
         assert result.exit_code == 4
@@ -841,8 +839,8 @@ class TestReleaseSeverityPolicyAndGlobal:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--set",
-            "severity.preset=default",
+            "--severity-preset",
+            "default",
         ]
         assert CliRunner().invoke(main, base).exit_code == 4
         overridden = CliRunner().invoke(main, [*base, "--policy", str(policy)])
@@ -883,8 +881,8 @@ class TestReleaseSeverityPolicyAndGlobal:
                 "compare",
                 str(old_dir),
                 str(new_dir),
-                "--set",
-                "severity.preset=default",
+                "--severity-preset",
+                "default",
                 "--policy",
                 str(policy),
             ],

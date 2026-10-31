@@ -34,6 +34,7 @@ from ....cli_options import (
     changed_path_options,
     contract_options,
     debug_resolution_options,
+    define_option,
     evidence_options,
     export_options,
     include_dependencies_option,
@@ -43,6 +44,7 @@ from ....cli_options import (
     reject_bundle_facts_manifest_without_old_bundle_facts,
     release_options,
     set_input_options,
+    severity_options,
     two_sided_input_options,
     verbose_option,
 )
@@ -84,7 +86,7 @@ from .compare_routing import _RELEASE_FORMATS
     "the 'declared_absent' acquisition state. Replaces `scan`'s "
     "audit-only mode (no --against): reports candidate-side facts only -- "
     "never an addition, a removal, or a compatibility verdict. "
-    "severity.preset is the sole switch that arms this audit's own gate: "
+    "--severity-preset is the sole switch that arms this audit's own gate: "
     "any preset other than 'info-only' contributes exit 3 the first time a "
     "finding is BREAKING/API_BREAK-classified; "
     "omit it, or pass 'info-only', to opt out.",
@@ -142,11 +144,12 @@ from .compare_routing import _RELEASE_FORMATS
 # with `--debug-root old=`/`new=`, which the resolver already searches.
 # ── Scoped comparison (ADR-043): app-usage and required-symbol contracts ─────
 @app_usage_scope_options
+@severity_options
 # Severity preset + per-category overrides (ADR-037 D3 / D4).
 # ── Project config (ADR-037 D4) ────────────────────────────────────────────
 # No manual --exit-code-scheme selector any more (CLI cleanup phase two PR
 # G2, ADR-064): the one automatic gate algorithm is fully determined by
-# whether a severity setting is in effect anywhere (severity.preset,
+# whether a severity setting is in effect anywhere (--severity-preset,
 # .abicheck.yml's severity: block, or a kind: gate pack's
 # gate.severity.<category>) -- no gate/severity policy configured means the
 # compatibility verdict decides 0/2/4; one in effect means the resolved
@@ -180,6 +183,7 @@ from .compare_routing import _RELEASE_FORMATS
     "bindings, and include a dependency-change section in the report. ELF only.",
 )
 @include_dependencies_option
+@define_option
 @click.option(
     "--search-path",
     "search_paths",
@@ -320,7 +324,7 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
       2  API_BREAK — source-level API break — recompilation required
       4  BREAKING — binary ABI break detected
     \b
-    Exit codes (severity-aware, with severity.preset or a config severity: block):
+    Exit codes (severity-aware, with --severity-preset or a config severity: block):
       0  No error-level findings
       1  Error-level findings in addition or quality_issues only
       2  Error-level findings in potential_breaking (but not abi_breaking)
@@ -349,13 +353,13 @@ def compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     \b
     A third, independent orthogonal axis:
     under --no-baseline, this becomes an audit rather than a comparison, and
-    severity.preset (any value other than 'info-only') opts that audit
+    --severity-preset (any value other than 'info-only') opts that audit
     into gating on its own findings, contributing exit 3
     (AUDIT_GATE_EXIT_CODE) the first time a finding's effective verdict is
     BREAKING or API_BREAK. Folded with the same max discipline as the axes
     above -- it raises a clean 0 to 3 and never emits, or is confused for,
     the compatibility family's own 2/4. Without --no-baseline, or with
-    severity.preset info-only or omitted, this axis never contributes.
+    --severity-preset info-only or omitted, this axis never contributes.
     See docs/reference/exit-codes.md.
     \b
     Invalid invocation (bad arguments/options, unreadable or unrecognised
@@ -473,7 +477,7 @@ def _compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     # (frontends.cli.options.compare_view) into the two dest names it still carries,
     # report_mode/show_only. No profile injects those dests.
     # run_compare replaces these with output.view when the project sets one.
-    kwargs.update(report_mode="full", show_only=None, severity_preset=None)
+    kwargs.update(report_mode="full", show_only=None)
 
     # ADR-068 D2 / plan §6 Phase 2e: `--no-baseline` is an explicit
     # declaration, never inferred from arity -- branch before the two-sided

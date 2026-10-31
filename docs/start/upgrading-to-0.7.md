@@ -97,13 +97,9 @@ that moves to this release.
 | `include-private-dso` | `set: release.include_private_dso=true` | Config key `release.include_private_dso`. |
 | `fail-on-removed-library` | `set: gate.fail_on_removed_library=true` | Config key `gate.fail_on_removed_library`. |
 | `public-header-dirs` | `set: scope.public_header_dirs=[<dir>, ...]` | A YAML list. |
-| `lang` | `set: compile.lang=<value>` | Applies to `check-target` through its own `lang` input. |
 | `frontend` | `set: compile.frontend=<value>` | |
-| `compiler` | `set: compile.compiler=<value>` | Takes a compiler path or a cross-toolchain prefix. |
 | `compile-options` | `set: compile.options=[<flag>, ...]` | A YAML list, one flag per element. |
-| `sysroot` | `set: compile.sysroot=<dir>` | For `mode: deps-tree`, which `set:` does not reach, use `extra-args: --root <dir>`. |
 | `nostdinc` | `set: compile.nostdinc=true` | |
-| `severity-preset` | `set: severity.preset=<value>` | |
 | `jobs` | none | Removed with no replacement. The worker count is controlled by the runner or workflow. |
 | `allow-build-query` | none | Removed with no replacement. abicheck runs its inferred compile-database query whenever a sources input needs build context. A trusted query is set through `build-config`'s `build.query`. |
 
@@ -117,17 +113,15 @@ now fails with exit 64. Change it to the new spelling (`--label 2.0`).
 
 ## Compare options moved to `.abicheck.yml`
 
-Five `compare` options are removed from the command line. Each now fails as an
-unknown option (exit 64). Set the same value in `.abicheck.yml`, or pass it once
-with `--set PATH=VALUE`, whose value is YAML.
+Three project-stable `compare` options are removed from the command line. Each
+now fails as an unknown option (exit 64). Set the same value in `.abicheck.yml`,
+or pass it once with `--set PATH=VALUE`, whose value is YAML.
 
 | 0.6 spelling | 0.7 spelling | Notes |
 |---|---|---|
-| `compare --define NAME[=VALUE]`, `-D NAME[=VALUE]` | `compile.defines` (`--set 'compile.defines=[NAME, ...]'`) | Also removed from `dump`, which takes the same `--set`. A `--set` list replaces the configured list; the old flag folded its macros into it by name. |
-| `compare --severity-preset P` | `severity.preset` (`--set severity.preset=P`) | Also removed from `compare-release`, which takes `severity.preset` from `.abicheck.yml` only. |
 | `compare --view TOKEN` | `output.view` (`--set 'output.view=["show=breaking"]'`) | A YAML list of the same tokens. |
 | `compare --used-by-manifest FILE` | `consumers.manifests` (`--set 'consumers.manifests=[FILE]'`) | Relative paths resolve against the config file. |
 | `compare --required-symbol NAME` | `consumers.required_symbols` (`--set 'consumers.required_symbols=[NAME]'`) | Entries may be `@FILE`. Still mutually exclusive with `--used-by`. |
 
-`--used-by` stays on the command line. `consumers.*` and `output.view` are
+`--used-by`, `--define` and `--severity-preset` stay on the command line. `consumers.*` and `output.view` are
 refused, not ignored, under `--no-baseline` and on a stored BundleFacts operand.

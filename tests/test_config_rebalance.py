@@ -947,12 +947,15 @@ class TestRemovedConfigDuplicates:
             and not getattr(p, "hidden", False)
             for opt in p.opts
         }
-        # one-comparison-product.md Phase 5 removed --show-filtered (the
-        # ledger it echoed is unconditional; `--view filtered` renders it),
-        # so `--view` is the coarse rendering override that stays visible.
+        # ADR-091 Phase 5: `--view` is removed from the CLI and its rendering
+        # selector is the `output.view` config key, reached through `--set`,
+        # which the curated help must list and must name that key.
+        assert "--view" not in visible
+        help_text = CliRunner().invoke(main, ["compare", "--help"]).output
+        assert "--set" in help_text, "the curated help must list --set"
+        assert "output.view" in help_text, "the curated help must name output.view"
         for flag in (
             "--severity-preset",
-            "--view",
             "--depth",
             # ADR-040 Lever 2 carve-out: the coarse debug-artifact
             # override stays visible (`--debug-root` merged into it, 7n).
@@ -990,7 +993,7 @@ class TestExitSchemeExplicit:
         # (potential_breaking=warning) yields exit 0.
         auto = CliRunner().invoke(
             main,
-            ["compare", str(old_f), str(new_f), "--set", "severity.preset=default"],
+            ["compare", str(old_f), str(new_f), "--severity-preset", "default"],
         )
         assert auto.exit_code == 0
 
@@ -1002,8 +1005,8 @@ class TestExitSchemeExplicit:
                 "compare",
                 str(old_f),
                 str(new_f),
-                "--set",
-                "severity.preset=default",
+                "--severity-preset",
+                "default",
                 "--exit-code-scheme",
                 "legacy",
             ],
@@ -1025,8 +1028,8 @@ class TestExitSchemeExplicit:
                 str(new_f),
                 "--config",
                 str(cfg),
-                "--set",
-                "severity.preset=default",
+                "--severity-preset",
+                "default",
             ],
         )
         # The unrecognized `exit_code_scheme:` key is a hard error, same as

@@ -73,7 +73,6 @@ RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
     (
         "compare options moved to .abicheck.yml (ADR-091 Phase 5)",
         (
-            "--severity-preset",
             "--used-by-manifest",
             "--required-symbol ",
             "--view show=",

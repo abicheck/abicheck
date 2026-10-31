@@ -128,8 +128,8 @@ class TestReleaseCompareRequestParity:
                 str(new_dir),
                 "-o",
                 "json=-",
-                "--set",
-                "severity.preset=strict",
+                "--severity-preset",
+                "strict",
             )
         assert code in (
             0,

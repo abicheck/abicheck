@@ -215,11 +215,9 @@ inputs:
 
   # ── Language & compiler ─────────────────────────────────────────────────────
   lang:
-    description: >
-      RETIRED (ADR-091 D7, no transition window). Setting this input fails the
-      run before any analysis. Replace it in your workflow with
-      `set: compile.lang=<value>` (the `set:` input takes one PATH=VALUE per line), then remove lang.
+    description: 'Language mode for header AST parsing: "c++" or "c".'
     required: false
+    default: 'c++'
   frontend:
     description: >
       RETIRED (ADR-091 D7, no transition window). Setting this input fails the
@@ -228,9 +226,16 @@ inputs:
     required: false
   compiler:
     description: >
-      RETIRED (ADR-091 D7, no transition window). Setting this input fails the
-      run before any analysis. Replace it in your workflow with
-      `set: compile.compiler=<value>` (the `set:` input takes one PATH=VALUE per line), then remove compiler.
+      Path to GCC/G++ (or clang) cross-compiler binary, or a cross-toolchain
+      prefix such as aarch64-linux-gnu- (a trailing - is read as a prefix,
+      anything else as a path). The Action passes each compile-context input
+      to the CLI as a --set compile.* argument (compile.compiler here), not
+      through a synthesized .abicheck.yml document or --config. The CLI owns
+      the compile: schema and its precedence over .abicheck.yml, so
+      build-config combines with these inputs without any merge step on the
+      Action's side. Applies to dump and compare mode, on single-pair and
+      directory/package (release) operands alike (same scope as frontend
+      above).
     required: false
   compile-options:
     description: >
@@ -239,12 +244,7 @@ inputs:
       `set: compile.options=[<flag>, ...]` (the `set:` input takes one PATH=VALUE per line), then remove compile-options.
     required: false
   sysroot:
-    description: >
-      RETIRED (ADR-091 D7, no transition window). Setting this input fails the
-      run before any analysis. Replace it in your workflow with
-      `set: compile.sysroot=<dir>` (the `set:` input takes one PATH=VALUE per line), then remove sysroot.
-      For mode: deps-tree, which the set: input does not reach, pass
-      `extra-args: --root <dir>` instead.
+    description: 'Alternative system root directory for cross-compilation. On dump and single-pair compare (including the audit-only shape) this is forwarded as a --set compile.sysroot argument (see compiler above) (deps-tree keeps its own direct --root CLI forwarding, unaffected -- it is not part of this compile-context group at all). Applies to dump, deps-tree, and compare mode, the latter on single-pair and directory/package (release) operands alike (same scope as frontend above).'
     required: false
   nostdinc:
     description: >
@@ -792,9 +792,14 @@ inputs:
     default: 'false'
   severity-preset:
     description: >
-      RETIRED (ADR-091 D7, no transition window). Setting this input fails the
-      run before any analysis. Replace it in your workflow with
-      `set: severity.preset=<value>` (the `set:` input takes one PATH=VALUE per line), then remove severity-preset.
+      Severity preset: 'default', 'strict', or 'info-only'.
+      Controls exit codes and report labels. Applies to compare mode --
+      both the two-sided shape and the audit-only shape, where it is also
+      the required opt-in for the AUDIT_GATE audit-gate axis: that axis is
+      inactive by default (see the AUDIT_GATE verdict entry below), so set
+      this to a value other than 'info-only' to gate an audit-only run on a
+      BREAKING/API_BREAK-classified finding. Does not apply to dump,
+      deps-tree, or deps-compare.
     required: false
   set:
     description: >
@@ -1630,6 +1635,10 @@ runs:
         INPUT_CROSSCHECK: ${{ inputs.crosscheck }}
         INPUT_RISK_RULES: ${{ inputs.risk-rules }}
         GH_TOKEN: ${{ inputs.github-token }}
+        INPUT_LANG: ${{ inputs.lang }}
+        INPUT_COMPILER: ${{ inputs.compiler }}
+        INPUT_SYSROOT: ${{ inputs.sysroot }}
+        INPUT_SEVERITY_PRESET: ${{ inputs.severity-preset }}
       run: bash "${{ github.action_path }}/action/run.sh"
 
     # ── 5. Upload SARIF ──────────────────────────────────────────────────────

@@ -1169,8 +1169,8 @@ class TestOutputDir:
             str(new_dir),
             "-o",
             f"json={out_dir}/",
-            "--set",
-            "severity.preset=strict",
+            "--severity-preset",
+            "strict",
         )
         assert code == 1
         report = json.loads((out_dir / "libfoo.json").read_text())

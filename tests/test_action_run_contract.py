@@ -223,13 +223,9 @@ _NON_RUN_SH_INPUTS = {
     "include-private-dso",
     "fail-on-removed-library",
     "public-header-dirs",
-    "lang",
     "frontend",
-    "compiler",
     "compile-options",
-    "sysroot",
     "nostdinc",
-    "severity-preset",
     "allow-build-query",
 }
 

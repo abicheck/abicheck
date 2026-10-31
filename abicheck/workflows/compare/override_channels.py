@@ -27,7 +27,6 @@ TYPED_OVERRIDE_CHANNELS: tuple[tuple[str, str, str], ...] = (
         "merged_severity_quality_issues",
     ),
     ("severity.addition", "severity_addition", "merged_severity_addition"),
-    ("severity.preset", "severity_preset", "merged_severity_preset"),
     ("suppression.strict", "strict_suppressions", "strict_suppressions"),
     (
         "suppression.require_justification",

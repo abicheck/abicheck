@@ -547,6 +547,7 @@ adrs:
     disposition: surfaced
     use_cases: [UC-WF-compare]
     surfaces:
+      - cli: compare --severity-preset
       - report: compare_report.exit
       - action: severity-preset
 
@@ -626,9 +627,11 @@ adrs:
 
   - id: ADR-074
     file: 074-logical-macro-definitions-on-the-cli.md
-    disposition: internal
-    reason: The -D/--define CLI spelling was removed by ADR-091 Phase 5; macros are the compile.defines config key, reached through --set.
+    disposition: surfaced
     use_cases: [UC-TC-header-scope-robustness]
+    surfaces:
+      - cli: compare --define
+      - cli: dump --define
 
   - id: ADR-075
     file: 075-target-ownership-and-extraction-scope.md
@@ -683,6 +686,7 @@ adrs:
     disposition: surfaced
     use_cases: [UC-WF-compare]
     surfaces:
+      - cli: compare --severity-preset
       - report: compare_report.summary
       - report: compare_report.severity
 

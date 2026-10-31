@@ -227,7 +227,7 @@ class TestCanonicalResolverIsWhatRuns:
         ctx = _context(tmp_path, "--set", 'consumers.required_symbols=["api_b"]')
         assert ctx["resolved_config"]["policy"]["base"]["id"] == "plugin_abi"
         prov = ctx["field_provenance"]["policy.base"]
-        assert prov["selected_by"][0]["option"] == "--required-symbol"
+        assert prov["selected_by"][0]["option"] == "consumers.required_symbols"
 
     def test_a_symbols_file_contract_names_the_file_and_the_option(self, tmp_path):
         """A `--required-symbol @FILE` run's receipt names the file and its
@@ -241,7 +241,7 @@ class TestCanonicalResolverIsWhatRuns:
         prov = ctx["field_provenance"]["policy.base"]
         assert prov["path"] == str(listed)
         hop = prov["selected_by"][0]
-        assert hop["option"] == "--required-symbol"
+        assert hop["option"] == "consumers.required_symbols"
         assert hop["path"] == str(listed)
         # The digest is over the file's raw bytes, from the same read that
         # parsed the symbols.
@@ -268,7 +268,7 @@ class TestCanonicalResolverIsWhatRuns:
 
         assert ctx["resolved_config"]["policy"]["base"]["id"] == "plugin_abi"
         prov = ctx["field_provenance"]["policy.base"]
-        assert prov["selected_by"][0]["option"] == "--required-symbol"
+        assert prov["selected_by"][0]["option"] == "consumers.required_symbols"
         assert prov.get("path") is None
 
     def test_project_config_provenance_carries_its_digest(self, tmp_path):
