@@ -37,6 +37,7 @@ from abicheck.storage.package import (
     VariantRef,
 )
 from abicheck.storage.package_publish import (
+    REF_SCHEMA_VERSION,
     REF_SCHEMA_VERSION_KEY,
     publish_lock_name,
     ref_digest_of,
@@ -415,7 +416,7 @@ class TestTheRefEntriesAreValidated:
             "variant", "cpu", summary.ref_digests["variant"]["cpu"]
         )
         document = json.loads(old.read_text(encoding="utf-8"))
-        document[REF_SCHEMA_VERSION_KEY] = 2
+        document[REF_SCHEMA_VERSION_KEY] = REF_SCHEMA_VERSION + 1
         digest = ref_digest_of(document)
         new = root / versioned_ref_relpath("variant", "cpu", digest)
         new.write_text(json.dumps(document), encoding="utf-8")

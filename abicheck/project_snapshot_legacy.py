@@ -52,11 +52,18 @@ from .storage.package import (
     ObjectRef,
     PackageManifest,
     VariantRef,
+    artifact_object_refs,
 )
 from .storage.sectioned_document import check_stated_section_version
 from .storage.snapshot_encode import snapshot_to_dict
 from .storage.versioning import FactGenerations
-from .storage.wire_extensions import refuse_package_flattening
+from .storage.wire_extensions import (
+    WIRE_EXTENSIONS_KEY,
+    WireExtensions,
+    carriers_for_reader,
+    extensions_of,
+    refuse_unwritable_extensions,
+)
 
 __all__ = [
     "is_project_snapshot_package_dir",
@@ -111,11 +118,13 @@ def write_legacy_snapshot_package(
     real, directory-backed `ProjectSnapshot` package at *root*, alongside
     whatever legacy `.abi.json` output the caller also writes.
 
-    Pass the `AbiSnapshot` itself rather than flattening it: a snapshot
-    loaded with a failed/blocked section, an unknown section or D14
-    extensions is then refused (`wire_extensions.refuse_package_flattening`)
-    instead of being stored as present and empty. A document the caller
-    flattened itself has already lost that state (known gap).
+    Pass the `AbiSnapshot` itself rather than flattening it: its ADR-062
+    D14/D15 carriers (a failed or blocked section, an unknown section,
+    header and record extensions) are then stored beside the sections
+    (`ArtifactRef.carriers`) and read back by
+    `read_stored_snapshot_document`. A document the caller flattened itself
+    has already lost that state, so a flat mapping is written as exactly what
+    it says (known gap: it cannot say what it lost).
 
     A thin composition of three already-independently-tested primitives —
     `storage.import_v1.import_legacy_snapshot` (build the manifest, populate
@@ -150,8 +159,10 @@ def write_legacy_snapshot_package(
             "drop. "
             "Pass a different, empty, or nonexistent directory."
         )
+    carriers: WireExtensions | None = None
     if isinstance(document, AbiSnapshot):
-        refuse_package_flattening(document)
+        refuse_unwritable_extensions(document)
+        carriers = extensions_of(document)
         document = snapshot_to_dict(document)
     staging = InMemoryObjectStore()
     manifest = import_legacy_snapshot(
@@ -162,10 +173,11 @@ def write_legacy_snapshot_package(
         variant_id=variant_id,
         artifact_kind=artifact_kind,
         generations=generations,
+        carriers=carriers,
     )
     directory_store = DirectoryObjectStore(root)
     for artifact in manifest.artifact_refs:
-        for ref in artifact.sections.values():
+        for ref in artifact_object_refs(artifact):
             directory_store.put(staging.get(ref.digest))
     write_project_manifest(root, manifest)
     return manifest
@@ -293,6 +305,18 @@ def read_stored_snapshot_document(
         store=store,
         source_schema_version=summary.versions.source_schema_version,
     )
+    if artifact.carriers is not None:
+        # ADR-062 D14/D15: what the sections alone cannot say, decided for
+        # this build; merged with any section the export itself blocked.
+        stored = carriers_for_reader(
+            store.get(artifact.carriers.digest), f"{root} artifact {artifact_id!r}"
+        )
+        blocked = document.get(WIRE_EXTENSIONS_KEY)
+        if isinstance(blocked, WireExtensions):
+            stored.passthrough_sections.update(blocked.passthrough_sections)
+            stored.passthrough_versions.update(blocked.passthrough_versions)
+            stored.unreadable.extend(blocked.unreadable)
+        document[WIRE_EXTENSIONS_KEY] = stored
     return document, artifact
 
 
@@ -495,7 +519,7 @@ def materialize_release_variant_artifacts(
             sub_dir,
             source_store,
             [
-                *artifact.sections.values(),
+                *artifact_object_refs(artifact),
                 *full_variant.sections.values(),
                 *summary.project_sections.values(),
             ],

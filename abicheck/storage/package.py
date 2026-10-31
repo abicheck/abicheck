@@ -94,6 +94,7 @@ __all__ = [
     "ObjectRef",
     "VariantRef",
     "ArtifactRef",
+    "artifact_object_refs",
     "PackageManifest",
     "ObjectStore",
     "InMemoryObjectStore",
@@ -447,10 +448,20 @@ class ArtifactRef:
     #: keeps its exact bytes and `ref_digest`; a reader that predates it
     #: ignores the key (and still verifies it, through `ref_digest`).
     evidence_digest: str | None = None
+    #: ADR-062 D14/D15: the object holding the snapshot's wire carriers
+    #: (`wire_extensions.WireExtensions.to_wire`) -- failed and blocked
+    #: section states, unknown sections, header and record extensions -- or
+    #: `None` when it has none. Written only when set, and a ref that sets it
+    #: is stored at `ref_schema_version` 2 (`package_publish.ref_document`),
+    #: so a reader that predates it refuses the ref instead of reading the
+    #: sections it leaves out as empty.
+    carriers: ObjectRef | None = None
 
     def __post_init__(self) -> None:
         if self.evidence_digest is not None:
             object_relpath(self.evidence_digest)  # refuses a malformed digest
+        if self.carriers is not None and not isinstance(self.carriers, ObjectRef):
+            raise TypeError("ArtifactRef.carriers must be an ObjectRef or None")
         # `_safe_ref_id`, not `_identity_text`: both ids become literal
         # filenames (this artifact's own `artifact_ref_relpath`, and its
         # owning variant's `variant_ref_relpath`), so a value either helper
@@ -486,6 +497,8 @@ class ArtifactRef:
             out["sections"] = {k: v.to_dict() for k, v in self.sections.items()}
         if self.evidence_digest is not None:
             out["evidence_digest"] = self.evidence_digest
+        if self.carriers is not None:
+            out["carriers"] = self.carriers.to_dict()
         return out
 
     @classmethod
@@ -503,7 +516,18 @@ class ArtifactRef:
             native_identity=data.get("native_identity", {}),
             sections=sections,
             evidence_digest=data.get("evidence_digest"),
+            carriers=(
+                None
+                if (carriers_raw := data.get("carriers")) is None
+                else ObjectRef.from_dict(carriers_raw)
+            ),
         )
+
+
+def artifact_object_refs(artifact: ArtifactRef) -> tuple[ObjectRef, ...]:
+    """Every object *artifact* names: its sections, then its carriers."""
+    refs = tuple(artifact.sections.values())
+    return (*refs, artifact.carriers) if artifact.carriers is not None else refs
 
 
 @dataclass(frozen=True)

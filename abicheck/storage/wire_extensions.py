@@ -34,10 +34,17 @@ runtime-only, ``compare=False`` ``wire_extensions`` field
 (:func:`attach`/:func:`extensions_of`), never serialized as itself, so a
 ``dataclasses.replace``/copy/pickle keeps it beside ``unreadable_sections``.
 
-**Package path.** A ProjectSnapshot package or bundle archive is built from
-the flat `snapshot_to_dict` document, which cannot carry any of this, so
-:func:`refuse_package_flattening` refuses such a snapshot there (a recorded
-gap) rather than storing a blocked section as present and empty.
+**Package path.** A ProjectSnapshot directory package stores the same
+carriers beside its sections: :meth:`WireExtensions.to_wire` is written as
+one content-addressed object named by ``ArtifactRef.carriers`` (that ref is
+then written at ``ref_schema_version`` 2, so a reader that predates it
+refuses rather than reads the dropped sections as empty), the blocked and
+failed sections are left out of ``ArtifactRef.sections``, and
+:func:`carriers_for_reader` re-decides on read what blocks *this* build. A
+G38 bundle document or G40 bundle archive is still built from the flat
+`snapshot_to_dict` document, so :func:`refuse_package_flattening` refuses
+such a snapshot there (a recorded gap) rather than storing a blocked
+section as present and empty.
 
 **What blocks.** A section of a known kind whose header names a
 ``must_understand`` entry this build does not understand, or which is
@@ -95,6 +102,7 @@ __all__ = [
     "WIRE_EXTENSIONS_KEY",
     "WireExtensions",
     "attach",
+    "carriers_for_reader",
     "check_must_understand",
     "extensions_of",
     "merge_wire_extensions",
@@ -102,6 +110,7 @@ __all__ = [
     "refuse_package_flattening",
     "refuse_unwritable_extensions",
     "split_wire_extensions",
+    "unknown_must_understand",
 ]
 
 MUST_UNDERSTAND_KEY = "must_understand"
@@ -171,6 +180,152 @@ class WireExtensions:
             }
         )
         return form
+
+    def dropped_sections(self) -> frozenset[str]:
+        """Known section kinds whose stored payload this snapshot does not
+        hold decoded: blocked, failed, not collected or kept verbatim. A package writer
+        leaves them out of ``ArtifactRef.sections``."""
+        return frozenset(
+            kind
+            for kind in (
+                {k for k, _ in self.unreadable}
+                | set(self.passthrough_versions)
+                | {k for k, v in self.availability.items() if v["status"] != "present"}
+            )
+            if kind in SECTION_SCHEMA_VERSIONS
+        )
+
+    def to_wire(self) -> dict[str, Any]:
+        """The JSON form a package stores (``ArtifactRef.carriers``). The
+        ``unreadable`` list is not stored: what blocks depends on the
+        reader's build, so :func:`carriers_for_reader` re-decides it."""
+        wire: dict[str, Any] = {
+            "passthrough_sections": self.passthrough_sections,
+            "passthrough_versions": self.passthrough_versions,
+            "header_extras": self.header_extras,
+            "record_extras": [
+                [kind, key, ident, ordinal, tree]
+                for (kind, key), items in sorted(self.record_extras.items())
+                for ident, ordinal, tree in items
+            ],
+            "availability": self.availability,
+            "document_must_understand": self.document_must_understand,
+        }
+        out: dict[str, Any] = canonical_form({k: v for k, v in wire.items() if v})
+        return out
+
+    @classmethod
+    def from_wire(cls, raw: Any) -> WireExtensions:
+        """The inverse of :meth:`to_wire`, refusing a malformed object."""
+        if not isinstance(raw, Mapping):
+            raise ValueError("stored wire carriers must be an object")
+        unknown = set(raw) - _WIRE_FIELDS
+        if unknown:
+            raise ValueError(
+                f"stored wire carriers carry unknown keys {sorted(unknown)}"
+            )
+        ext = cls()
+        for name in ("passthrough_sections", "passthrough_versions", "header_extras"):
+            value = raw.get(name, {})
+            if not isinstance(value, Mapping):
+                raise ValueError(f"stored wire carriers {name!r} must be an object")
+            setattr(ext, name, {k: value[k] for k in value})
+        for row in raw.get("record_extras", []):
+            if (
+                not isinstance(row, list)
+                or len(row) != 5
+                or not all(isinstance(x, str) for x in row[:3])
+                or not isinstance(row[3], int)
+                or not isinstance(row[4], Mapping)
+            ):
+                raise ValueError(f"stored wire carriers record_extras row {row!r}")
+            ext.record_extras.setdefault((row[0], row[1]), []).append(
+                (row[2], row[3], dict(row[4]))
+            )
+        ext.availability = _availability_table(
+            {AVAILABILITY_KEY: raw.get("availability", {})}
+        )
+        ext.document_must_understand = _names(
+            raw.get("document_must_understand"), "stored wire carriers"
+        )
+        return ext
+
+
+_WIRE_FIELDS = frozenset(
+    {
+        "passthrough_sections",
+        "passthrough_versions",
+        "header_extras",
+        "record_extras",
+        "availability",
+        "document_must_understand",
+    }
+)
+
+
+def carriers_for_reader(raw: Any, where: str) -> WireExtensions:
+    """Package carriers (:meth:`WireExtensions.to_wire`) with ``unreadable``
+    decided for this build, as the single-file reader decides it: a
+    ``failed`` section; a kept section of a known kind with an unknown
+    must-understand name or a newer version; a kept section of a kind this
+    build knows but the writer did not decode (its payload is not in the
+    decoded document, so its readers would see defaults); and a decoded
+    section whose header names a must-understand extension this build does
+    not understand. A document-level unknown name refuses the artifact."""
+    ext = WireExtensions.from_wire(raw)
+    check_must_understand(ext.document_must_understand, where)
+    for kind, entry in sorted(ext.availability.items()):
+        if entry["status"] == "failed":
+            if kind == IDENTITY_SECTION_KIND:
+                raise ValueError("the provenance section cannot be failed")
+            ext.unreadable.append(
+                (
+                    kind,
+                    f"section {kind!r} failed at extraction: "
+                    + "; ".join(entry.get("diagnostics", [])),
+                )
+            )
+    for kind in sorted(ext.passthrough_versions):
+        if kind not in SECTION_SCHEMA_VERSIONS or kind in ext.availability:
+            continue
+        if kind == IDENTITY_SECTION_KIND:
+            raise IncompatibleSnapshotSchemaError(
+                f"{where} keeps the provenance section undecoded; nothing can "
+                "be compared. Upgrade abicheck to read it."
+            )
+        section = ext.passthrough_sections.get(kind)
+        reason = _blocking_reason(kind, section, ext.passthrough_versions[kind])
+        ext.unreadable.append(
+            (
+                kind,
+                reason
+                or f"section {kind!r} was stored undecoded by a writer that "
+                "did not understand it",
+            )
+        )
+    for kind, extras in sorted(ext.header_extras.items()):
+        unknown = [
+            n
+            for n in _names(extras.get(MUST_UNDERSTAND_KEY), f"section {kind!r}")
+            if not _understood(n)
+        ]
+        if not unknown:
+            continue
+        if kind == IDENTITY_SECTION_KIND:
+            raise IncompatibleSnapshotSchemaError(
+                f"{where} section {kind!r} requires must-understand "
+                f"extension(s) {', '.join(repr(n) for n in unknown)}; it holds "
+                "the snapshot's identity. Upgrade abicheck to read it."
+            )
+        ext.unreadable.append(
+            (
+                kind,
+                f"section {kind!r} requires must-understand extension(s) "
+                f"{', '.join(repr(n) for n in unknown)} this build does not "
+                "understand",
+            )
+        )
+    return ext
 
 
 def attach(snap: Any, extensions: WireExtensions) -> None:
@@ -258,6 +413,15 @@ def record_section_failure(
     }
     ext.passthrough_versions[section_kind] = SECTION_SCHEMA_VERSIONS[section_kind]
     ext.passthrough_sections.pop(section_kind, None)
+    # The live snapshot blocks the same readers a reloaded one would, so a
+    # dump compared in-process and the stored dump agree.
+    reason = f"section {section_kind!r} failed at extraction: " + "; ".join(diagnostics)
+    ext.unreadable = [u for u in ext.unreadable if u[0] != section_kind]
+    ext.unreadable.append((section_kind, reason))
+    snap.unreadable_sections = (
+        *(u for u in getattr(snap, "unreadable_sections", ()) if u[0] != section_kind),
+        (section_kind, reason),
+    )
 
 
 def _names(raw: Any, where: str) -> list[str]:
@@ -270,6 +434,12 @@ def _names(raw: Any, where: str) -> list[str]:
 
 def _understood(name: str) -> bool:
     return name in UNDERSTOOD_EXTENSIONS or name in SECTION_SCHEMA_VERSIONS
+
+
+def unknown_must_understand(raw: Any, where: str) -> list[str]:
+    """The names in a section header's ``must_understand`` list this build
+    does not understand (a malformed list is refused)."""
+    return [n for n in _names(raw, where) if not _understood(n)]
 
 
 def check_must_understand(raw: Any, where: str) -> list[str]:
@@ -474,6 +644,12 @@ def merge_wire_extensions(
                 sections.pop(kind, None)
             versions[kind] = version
         availability.update(ext.availability)
+        for kind, entry in ext.availability.items():
+            if entry["status"] == "not_collected":
+                # Never collected: the snapshot holds only defaults for it,
+                # so it is written absent, as it was read (D15).
+                sections.pop(kind, None)
+                versions.pop(kind, None)
         if ext.document_must_understand:
             document[DOCUMENT_MUST_UNDERSTAND_KEY] = list(ext.document_must_understand)
     for kind in sections:
