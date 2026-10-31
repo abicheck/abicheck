@@ -273,3 +273,27 @@ def test_the_probe_answers_like_the_cli_routing(
     for path in [*operands.values(), new]:
         expected = 0 if looks_like_stored_bundle_facts(path) else 1
         assert probe.main(["probe", str(REPO), str(path)]) == expected, path
+
+
+def test_the_classifier_import_closure_is_the_standard_library() -> None:
+    """The pin the probe relies on: importing the classifier loads nothing
+    but the standard library and ``abicheck`` itself. A heavy import added
+    to that closure fails here, in CI, rather than turning every Action run
+    into a silent "cannot decide"."""
+    code = (
+        "import sys\n"
+        f"sys.path.insert(0, {str(REPO)!r})\n"
+        "before = set(sys.modules)\n"
+        "import abicheck.workflows.bundle_compare_operand\n"
+        "loaded = {m.split('.')[0] for m in set(sys.modules) - before}\n"
+        "extra = sorted(loaded - set(sys.stdlib_module_names) - {'abicheck'})\n"
+        "print(','.join(extra))\n"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-I", "-S", "-c", code],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "", f"non-stdlib imports: {proc.stdout.strip()}"
