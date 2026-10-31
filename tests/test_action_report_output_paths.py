@@ -54,7 +54,7 @@ def _recording_stub(tmp_path: Path) -> tuple[Path, Path]:
         "#!/usr/bin/env bash\n"
         f'for arg in "$@"; do printf \'%s\\n\' "$arg"; done >> "{log}"\n'
         f"printf -- '---\\n' >> \"{log}\"\n"
-        "report='{\"verdict\": \"COMPATIBLE\", \"changes\": []}'\n"
+        'report=\'{"verdict": "COMPATIBLE", "changes": []}\'\n'
         "prev=''\n"
         'for arg in "$@"; do\n'
         '  if [[ "$prev" == "-o" ]]; then\n'
