@@ -12,8 +12,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 import click
+import pytest
 from click.testing import CliRunner
 
 from abicheck.cli import main

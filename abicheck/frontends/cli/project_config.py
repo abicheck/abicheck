@@ -41,6 +41,7 @@ import click
 from ...workflows.compare_configuration import CompareSettingsError
 
 if TYPE_CHECKING:
+    from ...buildsource.build_config import BuildConfig
     from ...workflows.compare_configuration import ResolvedCompareConfig
 
 __all__ = [
@@ -71,7 +72,7 @@ def resolve_project_compare_config(
     config: Path | None,
     severity_preset: str | None,
     config_overrides: Mapping[str, object] | None = None,
-) -> tuple[Path | None, object, ResolvedCompareConfig, str | None]:
+) -> tuple[Path | None, BuildConfig | None, ResolvedCompareConfig, str | None]:
     """Load the project config and merge CLI flags over it (CLI > config > default).
 
     ADR-037 D4: resolved *before* dispatch so both the single-file and the

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """The ``.abicheck.yml`` keys a typed ``compare`` request applies, and their fields.
 
 Each row is ``(config path, CompareRequest field, resolved attribute)``. A

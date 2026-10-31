@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """The compare inputs ADR-091 Phase 5 moved from the command line into `.abicheck.yml`.
 
 `consumers.manifests` and `consumers.required_symbols` take the place of

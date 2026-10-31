@@ -26,8 +26,7 @@ the identical inputs, never against a hand-written constant.
 from __future__ import annotations
 
 import pytest
-from test_action_compile_set_forwarding import RETIRED_COMPILE_INPUTS, _validate
-from test_action_compile_set_forwarding import _run
+from test_action_compile_set_forwarding import RETIRED_COMPILE_INPUTS, _run, _validate
 from test_action_run_sh_set_input import _set_pairs
 
 _COMPILE_SET = 'compile.lang="c"\ncompile.compiler=/usr/bin/g++\n'
