@@ -90,6 +90,11 @@ def _rich_request(root: Path) -> ReleaseMemberCompareRequest:
         exclude_headers=("detail/*",),
         acknowledgments_path=root / "ack.yml",
         acknowledgment_unacknowledged_additions="warn",
+        follow_deps=True,
+        dependency_search_paths=(root / "deps",),
+        ld_library_path="/opt/lib",
+        old_debug_roots=(root / "dbg-old",),
+        new_debug_roots=(root / "dbg-new",),
     )
     return member_request(parent, _delta(root))
 
@@ -171,6 +176,11 @@ _SAMPLES: dict[str, Any] = {
     "acknowledgments_path": Path("a.yml"),
     "acknowledgment_unacknowledged_additions": "warn",
     "acknowledgment_breaks": "accept",
+    "follow_deps": True,
+    "dependency_search_paths": (Path("deps"),),
+    "ld_library_path": "/opt/lib",
+    "old_debug_roots": (Path("dbg-old"),),
+    "new_debug_roots": (Path("dbg-new"),),
 }
 
 

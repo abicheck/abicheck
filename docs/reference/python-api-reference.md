@@ -471,6 +471,9 @@ Compare two ABI inputs and return the classified diff result.
 | `acknowledgment_unacknowledged_additions` | `str \| None` | `None` |
 | `acknowledgment_breaks` | `str \| None` | `None` |
 | `config_overrides` | `Mapping[str, object] \| None` | `None` |
+| `follow_deps` | `bool` | `False` |
+| `dependency_search_paths` | `tuple[Path, ...]` | `()` |
+| `ld_library_path` | `str` | `''` |
 
 **Returns:** `CompareResult`
 

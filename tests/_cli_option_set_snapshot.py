@@ -101,6 +101,9 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         "--instantiation-manifest",
         "--ld-library-path",
         "--no-baseline",
+        # ADR-091 D4 (2026-10-31): the off half of --follow-deps, which turns
+        # a configured deps.follow: true off for one run.
+        "--no-follow-deps",
         "--output",
         "--pack",
         "--performance-profile",

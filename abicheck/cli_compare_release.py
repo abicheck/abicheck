@@ -61,6 +61,7 @@ from .workflows.release_compare import (
     ReleaseCompareOptions,
     ReleaseCompareOutcome,
 )
+from .workflows.release_member_request import ReleaseMemberRunInputs
 
 if TYPE_CHECKING:
     from .compile_context import CompileContext
@@ -417,6 +418,9 @@ def compare_release_cmd(
     acknowledgments_path: Path | None = None,
     acknowledgment_unacknowledged_additions: str | None = None,
     acknowledgment_breaks: str | None = None,
+    # The dependency walk and debug roots, resolved by `compare` exactly as for
+    # one pair and applied to every member. `None` is the scalar default.
+    run_inputs: ReleaseMemberRunInputs | None = None,
     # ADR-020b / ADR-068 D5: resolved once by the caller
     # (`cli_compare_helpers.run_compare`'s `resolved_cfg.deployment`, the
     # same place `collapse_versioned_symbols`/`public_header_dirs` above are
@@ -613,6 +617,7 @@ def compare_release_cmd(
                     acknowledgments_path=acknowledgments_path,
                     acknowledgment_unacknowledged_additions=acknowledgment_unacknowledged_additions,
                     acknowledgment_breaks=acknowledgment_breaks,
+                    run_inputs=run_inputs or ReleaseMemberRunInputs(),
                     support_promise=support_promise,
                     manifest_path=manifest_path,
                     bundle_system_providers=bundle_system_providers,

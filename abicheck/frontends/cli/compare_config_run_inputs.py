@@ -61,11 +61,13 @@ def fold_config_run_inputs(
     *kwargs* in place.
     """
     if project_cfg is None:
+        # Unset (neither --follow-deps nor --no-follow-deps) is the default, off.
+        kwargs["follow_deps"] = bool(kwargs.get("follow_deps"))
         return
     deps = resolve_deps_settings(
         project_cfg,
         cfg_path,
-        follow=bool(kwargs.get("follow_deps")),
+        follow=kwargs.get("follow_deps"),
         search_paths=kwargs.get("search_paths") or (),
         ld_library_path=kwargs.get("ld_library_path") or "",
         overridden=kwargs.get("config_overrides") or (),

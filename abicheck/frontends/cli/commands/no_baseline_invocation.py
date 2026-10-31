@@ -349,7 +349,9 @@ def resolve_no_baseline_invocation(
         severity_preset=None,
         config_overrides=kwargs.get("config_overrides"),
     )
-    _reject_config_scoping_for_no_baseline(project_cfg)
+    _reject_config_scoping_for_no_baseline(
+        project_cfg, follow_deps=kwargs.get("follow_deps")
+    )
     from ....workflows.compare.project_inputs import note_unapplied_post_manifest
 
     note_unapplied_post_manifest(

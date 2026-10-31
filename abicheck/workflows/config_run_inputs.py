@@ -31,7 +31,9 @@ keys, :data:`CONFIG_RUN_INPUT_SET_PATHS`, are also reached by ``--set`` and
 
 Precedence is the one ADR-091 D2 rule: an explicit flag or typed argument, then
 ``--set``/``config_overrides`` (non-core keys), then the file, then the
-built-in default. The flag replaces the configured value; the two are never
+built-in default. ``--follow-deps`` is a boolean pair: ``--no-follow-deps``
+turns a configured ``deps.follow: true`` off for one run, and neither half
+defers to the key. The flag replaces the configured value; the two are never
 merged, because the value names the run's evidence and a merged set would
 differ from what the command line says. A relative path written in the config
 file resolves against that file's directory; one given by ``--set`` or the
@@ -99,7 +101,10 @@ def resolve_debug_info(
 class DepsSettings:
     """The dependency walk's three inputs after precedence."""
 
-    follow: bool = False
+    #: ``None`` only on a *stated* settings value: ``--follow-deps`` and
+    #: ``--no-follow-deps`` were both omitted, so ``deps.follow`` decides.
+    #: :func:`resolve_deps_settings` always returns a ``bool``.
+    follow: bool | None = False
     search_paths: tuple[Path, ...] = ()
     ld_library_path: str = ""
 
@@ -108,7 +113,7 @@ def resolve_deps_settings(
     cfg: Any,
     cfg_path: Path | None,
     *,
-    follow: bool,
+    follow: bool | None,
     search_paths: Iterable[Path],
     ld_library_path: str,
     overridden: Iterable[str] = (),
@@ -119,8 +124,9 @@ def resolve_deps_settings(
     *cfg_path*'s directory; one set by ``--set``/``config_overrides`` (named in
     *overridden*) is used as given, relative to the current directory.
 
-    ``--follow-deps`` is an on-only flag, so a configured ``deps.follow: true``
-    cannot be turned off for one run; point ``--config`` at a config without it.
+    *follow* is ``True``/``False`` when ``--follow-deps``/``--no-follow-deps``
+    was given (either replaces ``deps.follow``) and ``None`` when neither was,
+    which defers to ``deps.follow`` and then to the built-in ``False``.
     """
     stated_paths = tuple(Path(p) for p in search_paths)
     if cfg is None:
@@ -133,23 +139,30 @@ def resolve_deps_settings(
     )
     cfg_ld = getattr(cfg, "deps_ld_library_path", None) or ""
     return DepsSettings(
-        follow=bool(follow) or bool(cfg_follow),
+        follow=bool(cfg_follow) if follow is None else bool(follow),
         search_paths=stated_paths or cfg_paths,
         ld_library_path=ld_library_path or cfg_ld,
     )
 
 
-def configured_run_input_keys(cfg: Any) -> tuple[str, ...]:
+def configured_run_input_keys(
+    cfg: Any, *, follow: bool | None = None
+) -> tuple[str, ...]:
     """The ``debug.info``/``deps.*`` keys *cfg* sets, in a stable order.
 
     A route that cannot honour them (``--no-baseline``, a stored BundleFacts
     operand) refuses a config that sets them, by name, as it refuses the flags.
+    No ``deps.*`` key is listed when *follow* is ``False``: ``--no-follow-deps``
+    turned the configured walk off for this run, and the two search keys are
+    inputs to that walk only, so the route drops nothing it was asked to do.
     """
     if cfg is None:
         return ()
     keys: list[str] = []
     if getattr(cfg, "debug_info", None):
         keys.append("debug.info")
+    if follow is False:
+        return tuple(keys)
     if getattr(cfg, "deps_follow", None):
         keys.append("deps.follow")
     if getattr(cfg, "deps_search_paths", None):

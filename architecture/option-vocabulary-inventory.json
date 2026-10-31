@@ -331,7 +331,9 @@
    "id": "compare --follow-deps",
    "command": "compare",
    "option": "--follow-deps",
-   "aliases": [],
+   "aliases": [
+    "--no-follow-deps"
+   ],
    "hidden": false,
    "help_common": false,
    "multiple": false,
@@ -923,7 +925,9 @@
    "id": "dump --follow-deps",
    "command": "dump",
    "option": "--follow-deps",
-   "aliases": [],
+   "aliases": [
+    "--no-follow-deps"
+   ],
    "hidden": false,
    "help_common": false,
    "multiple": false,
@@ -1922,7 +1926,7 @@
    "input": "follow-deps",
    "status": "live",
    "required": false,
-   "default": "false"
+   "default": ""
   },
   {
    "id": "action:old-root",
@@ -5892,6 +5896,30 @@
    "annotation": "Mapping[str, object] | None",
    "choices": null,
    "default": "None"
+  },
+  {
+   "id": "run_compare(follow_deps)",
+   "owner": "run_compare",
+   "name": "follow_deps",
+   "annotation": "bool",
+   "choices": null,
+   "default": "False"
+  },
+  {
+   "id": "run_compare(dependency_search_paths)",
+   "owner": "run_compare",
+   "name": "dependency_search_paths",
+   "annotation": "tuple[Path, ...]",
+   "choices": null,
+   "default": "[]"
+  },
+  {
+   "id": "run_compare(ld_library_path)",
+   "owner": "run_compare",
+   "name": "ld_library_path",
+   "annotation": "str",
+   "choices": null,
+   "default": "''"
   },
   {
    "id": "run_dump(path)",

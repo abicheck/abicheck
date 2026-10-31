@@ -176,11 +176,12 @@ from .compare_routing import _RELEASE_FORMATS
     "Overrides .abicheck.yml's acknowledgments.file.",
 )
 @click.option(
-    "--follow-deps",
-    is_flag=True,
-    default=False,
+    "--follow-deps/--no-follow-deps",
+    "follow_deps",
+    default=None,
     help="Resolve transitive dependencies for both old and new, compute symbol "
-    "bindings, and include a dependency-change section in the report. ELF only.",
+    "bindings, and include a dependency-change section in the report. ELF only. "
+    "Overrides .abicheck.yml's deps.follow; --no-follow-deps turns it off.",
 )
 @include_dependencies_option
 @define_option

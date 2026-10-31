@@ -1130,6 +1130,12 @@ snapshot. A side missing a fact family its snapshot predates names it in
 state: the page draws it without edges and says so, rather than reading it
 as having no dependencies.
 
+With `--follow-deps` (or `.abicheck.yml`'s `deps.follow`), each member also
+carries its transitive walk as `old_dependency_info`/`new_dependency_info`
+(release schema 2.6): the same keys and shape a single-pair `compare
+--follow-deps` JSON report has. The Markdown release report adds a
+"Dependency Analysis" section per member. A side with no walk has no key.
+
 The single-pair HTML report gains a **Surface changes** section with the
 same additions/removals/modifications grouping as Markdown and the same
 per-group cap (12 entries, omitted count stated).

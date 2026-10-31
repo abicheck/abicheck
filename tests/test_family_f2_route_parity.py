@@ -292,6 +292,16 @@ def _cli_built_in_config() -> Any:
     return resolve_compare_config(None, cli_severity_preset=None)
 
 
+def _cli_built_in_follow_deps() -> Any:
+    from abicheck.frontends.cli.compare_config_run_inputs import (
+        fold_config_run_inputs,
+    )
+
+    kwargs: dict[str, Any] = {"follow_deps": _click_params()["follow_deps"].default}
+    fold_config_run_inputs(kwargs, None, None)
+    return kwargs["follow_deps"]
+
+
 def _cli_built_in_scope_public() -> bool:
     return _cli_built_in_config().scope_public
 
@@ -310,6 +320,9 @@ CONFIG_DEFAULT_MAP: dict[str, tuple[tuple[str, str], Callable[[], Any]]] = {
         ("CompareRequest", "require_justification"),
         lambda: _cli_built_in_config().require_justification,
     ),
+    # `--follow-deps/--no-follow-deps` is unset (None) by default and defers
+    # to `deps.follow`; with no flag and no config the CLI's fold resolves it.
+    "deps.follow": (("CompareRequest", "follow_deps"), _cli_built_in_follow_deps),
 }
 
 #: Click dest -> ("CompareRequest"|"InputSpec", field) whose default must match.
@@ -320,7 +333,6 @@ DEFAULT_MAP: dict[str, tuple[str, str]] = {
     "severity_preset": ("CompareRequest", "severity_preset"),
     "diagnostic_comparison": ("CompareRequest", "diagnostic_comparison"),
     "contract_mode": ("CompareRequest", "contract"),
-    "follow_deps": ("CompareRequest", "follow_deps"),
     "search_paths": ("CompareRequest", "dependency_search_paths"),
     "ld_library_path": ("CompareRequest", "ld_library_path"),
     "depth": ("CompareRequest", "depth"),
@@ -350,6 +362,10 @@ DEFAULT_UNMAPPED: dict[str, str] = {
     "old_input": "required operand, no default",
     "new_input": "operand; InputSpec.path is required",
     "no_baseline": "no typed-API equivalent (audit mode)",
+    "follow_deps": (
+        "tri-state (unset defers to deps.follow); its resolved default is "
+        "checked by CONFIG_DEFAULT_MAP['deps.follow']"
+    ),
     "select": "release-only selection",
     "select_required": "release-only selection",
     "variant": "release-only selection",
