@@ -26,7 +26,7 @@ stable project properties, so they live in ``.abicheck.yml``::
 A relative ``file`` resolves against the project root
 (``config_paths.project_root_for_config``), like ``compile.include_dirs``.
 The gate's vocabulary is :mod:`abicheck.model.acknowledgment_policy`'s, the
-one the policy file's own ``acknowledgment:`` block is checked against.
+one the policy file's own ``acknowledgments:`` block is checked against.
 
 A sibling of ``build_config.py`` because that file sits at its ADR-061
 no-growth baseline: the block's schema, parse and serialization live here,

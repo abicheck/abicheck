@@ -230,7 +230,7 @@ class ExitReason(StrEnum):
     #: `0`.
     LOADABILITY = "loadability"
     #: ADR-067 D6: public additions a run's acknowledgment records do not
-    #: cover, under ``acknowledgment.unacknowledged_additions: block``. A
+    #: cover, under ``acknowledgments.unacknowledged_additions: block``. A
     #: ``0``/``1`` fold participant like ``CONTRACT_COVERAGE``: it raises a
     #: clean exit to ``1`` and never lowers a real ``2``/``4``, and it never
     #: reclassifies the addition itself (D6, "policy acceptance, never
@@ -684,7 +684,7 @@ def resolve_compare_exit_decision(
     assurance_contribution = analysis_assurance_exit_contribution(
         result, require_complete=gate.require_complete_analysis
     )
-    # ADR-067 `acknowledgment.breaks: accept`: an acknowledged break the run
+    # ADR-067 `acknowledgments.breaks: accept`: an acknowledged break the run
     # accepted is not in the population the compatibility exit is decided
     # over. Every run that did not opt in takes the pre-existing branches
     # below, unchanged.

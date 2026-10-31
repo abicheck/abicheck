@@ -1,4 +1,4 @@
-# Option vocabulary registry (ADR-091 D6; plan option-vocabulary-unification.md Phase 0).
+# Option vocabulary registry (ADR-091 D6; the plan is closed, see ADR-091).
 #
 # Every user-settable option on the four surfaces, grouped into concepts.
 # The rows themselves are generated into option-vocabulary-inventory.json by

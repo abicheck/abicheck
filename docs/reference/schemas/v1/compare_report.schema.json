@@ -760,7 +760,7 @@
         },
         "accepted_breaks": {
           "type": "array",
-          "description": "Schema 6.4 (ADR-067 D5): one entry per acknowledged break that acknowledgment.breaks: accept made non-gating (disposition non_gating, application point acknowledgment). The verdict is unchanged; empty when nothing was accepted.",
+          "description": "Schema 6.4 (ADR-067 D5): one entry per acknowledged break that acknowledgments.breaks: accept made non-gating (disposition non_gating, application point acknowledgment). The verdict is unchanged; empty when nothing was accepted.",
           "items": {
             "type": "object",
             "properties": {
@@ -2258,7 +2258,7 @@
         "additions_review_contribution": {
           "type": "integer",
           "enum": [0, 1],
-          "description": "schema 5.13 (ADR-067 D6): the additions-review floor -- 1 when public additions are not covered by the run's acknowledgment records and the resolved acknowledgment.unacknowledged_additions is block, else 0. A 0/1 fold participant like contract_coverage_contribution: it raises a clean exit to 1 and never lowers a 2/4."
+          "description": "schema 5.13 (ADR-067 D6): the additions-review floor -- 1 when public additions are not covered by the run's acknowledgment records and the resolved acknowledgments.unacknowledged_additions is block, else 0. A 0/1 fold participant like contract_coverage_contribution: it raises a clean exit to 1 and never lowers a 2/4."
         },
         "unused_rules_contribution": {
           "type": "integer",

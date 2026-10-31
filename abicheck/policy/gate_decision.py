@@ -75,7 +75,7 @@ def gate_decision_for_result(
     if severity_config is None:
         return None
     # The population the process exit is decided over: `result.changes` minus
-    # the breaks an `acknowledgment.breaks: accept` run accepted (ADR-067 D5),
+    # the breaks an `acknowledgments.breaks: accept` run accepted (ADR-067 D5),
     # the same population `exit_decision` folds, so the report's severity block
     # cannot state an exit the process did not take.
     return compute_gate_decision(

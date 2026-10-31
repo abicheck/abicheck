@@ -77,7 +77,7 @@ def resolve_compare_acknowledgments(
     configured_breaks: str | None = None,
 ) -> CompareAcknowledgments:
     """The run's records and gate policy (ADR-049 D7: a ``--policy`` file's
-    stated ``acknowledgment:`` block outranks the configured settings).
+    stated ``acknowledgments:`` block outranks the configured settings).
 
     *configured_action* is ``unacknowledged_additions``; *configured_breaks* is
     ADR-067 D5's ``breaks`` (``gate`` | ``accept``). Every surface -- the CLI's

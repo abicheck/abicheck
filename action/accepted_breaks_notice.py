@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ADR-067 D5 ``acknowledgment.breaks: accept``: the Action's notice line.
+"""ADR-067 D5 ``acknowledgments.breaks: accept``: the Action's notice line.
 
 ``python3 -I accepted_breaks_notice.py REPORT.json`` prints one
 ``::notice::`` naming the acknowledged breaks the run left non-gating
@@ -63,7 +63,7 @@ def notice(report: object) -> str | None:
     still = verdict if verdict in _VERDICTS else "a break"
     message = (
         f"abicheck accepted {len(rows)} acknowledged break(s) under "
-        f"acknowledgment.breaks: accept; the verdict is still {still}. "
+        f"acknowledgments.breaks: accept; the verdict is still {still}. "
         f"See disposition_audit in the JSON report. Accepted: {shown}"
     )
     return "::notice::" + command_escape(message)
