@@ -581,9 +581,9 @@ class PolicyFile:
             if versioning_stated
             else built_in_default_versioning_policy()
         )
-        acknowledgment_policy_stated = "acknowledgment" in raw
+        acknowledgment_policy_stated = "acknowledgments" in raw
         acknowledgment_policy = (
-            parse_acknowledgment_policy(raw["acknowledgment"], path)
+            parse_acknowledgment_policy(raw["acknowledgments"], path)
             if acknowledgment_policy_stated
             else built_in_default_acknowledgment_policy()
         )

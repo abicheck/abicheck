@@ -224,12 +224,12 @@ a table.
 
 ### Change acknowledgment and the additions review gate
 
-A policy file may also declare an `acknowledgment:` block,
+A policy file may also declare an `acknowledgments:` block,
 today with one control: `unacknowledged_additions` (`allow`, `warn`, or
 `block` — `allow` by default, so no existing run changes):
 
 ```yaml
-acknowledgment:
+acknowledgments:
   unacknowledged_additions: block
 ```
 

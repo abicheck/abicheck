@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ADR-067 D6 (plan workstream C-S3): ``policy_file.py``'s ``acknowledgment:``
+"""ADR-067 D6 (plan workstream C-S3): ``policy_file.py``'s ``acknowledgments:``
 YAML block parser.
 
 A sibling of ``policy_file.py``, for the identical reason
@@ -43,7 +43,7 @@ _ACKNOWLEDGMENT_KNOWN_KEYS = frozenset({"unacknowledged_additions", "breaks"})
 
 
 def parse_acknowledgment_policy(raw: Any, path: Path) -> AcknowledgmentPolicy:
-    """Validate and parse the ``acknowledgment:`` namespace (ADR-067 D6).
+    """Validate and parse the ``acknowledgments:`` namespace (ADR-067 D6).
 
     The only control today is ``unacknowledged_additions``
     (``allow``/``warn``/``block``, default ``allow`` — D6: "The default is
@@ -54,13 +54,13 @@ def parse_acknowledgment_policy(raw: Any, path: Path) -> AcknowledgmentPolicy:
     """
     if not isinstance(raw, dict):
         raise PolicyError(
-            f"'acknowledgment' must be a YAML mapping in {path}, got "
+            f"'acknowledgments' must be a YAML mapping in {path}, got "
             + type(raw).__name__
         )
     unknown = set(raw) - _ACKNOWLEDGMENT_KNOWN_KEYS
     if unknown:
         raise PolicyError(
-            f"acknowledgment in {path}: unknown key(s) {sorted(unknown)}. "
+            f"acknowledgments in {path}: unknown key(s) {sorted(unknown)}. "
             f"Valid keys: {sorted(_ACKNOWLEDGMENT_KNOWN_KEYS)}"
         )
     default = built_in_default_acknowledgment_policy()
@@ -74,14 +74,14 @@ def parse_acknowledgment_policy(raw: Any, path: Path) -> AcknowledgmentPolicy:
         or action not in VALID_UNACKNOWLEDGED_ADDITIONS_ACTIONS
     ):
         raise PolicyError(
-            f"acknowledgment.unacknowledged_additions in {path}: invalid "
+            f"acknowledgments.unacknowledged_additions in {path}: invalid "
             f"value {action!r}. Valid values: "
             f"{sorted(VALID_UNACKNOWLEDGED_ADDITIONS_ACTIONS)}"
         )
     breaks = raw.get("breaks", default.breaks)
     if not isinstance(breaks, str) or breaks not in VALID_ACKNOWLEDGMENT_BREAKS_ACTIONS:
         raise PolicyError(
-            f"acknowledgment.breaks in {path}: invalid value {breaks!r}. "
+            f"acknowledgments.breaks in {path}: invalid value {breaks!r}. "
             f"Valid values: {sorted(VALID_ACKNOWLEDGMENT_BREAKS_ACTIONS)}"
         )
     return AcknowledgmentPolicy(

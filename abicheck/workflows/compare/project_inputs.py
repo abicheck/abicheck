@@ -61,17 +61,17 @@ Sources, in the order they apply:
 
 - ``--acknowledgments FILE`` names the records for this run. It is an
   operator's own explicit input, so it is trusted, and it overrides
-  ``.abicheck.yml``'s ``acknowledgment.file``.
-- ``.abicheck.yml``'s ``acknowledgment.file`` applies **only from an
+  ``.abicheck.yml``'s ``acknowledgments.file``.
+- ``.abicheck.yml``'s ``acknowledgments.file`` applies **only from an
   explicitly named** ``--config``. A record accepts an addition or a break,
   which can lower a gating exit back to ``0``; an auto-discovered
   ``.abicheck.yml`` is one the pull request under review can edit, so it is
   not trusted to supply records. A discovered value is noted on stderr and
   not loaded -- the trust boundary the overlay section above states.
-- ``.abicheck.yml``'s ``acknowledgment.breaks`` (``gate``/``accept``) has the
+- ``.abicheck.yml``'s ``acknowledgments.breaks`` (``gate``/``accept``) has the
   same trust rule as the records: ``accept`` loosens the exit code, so only an
   explicit ``--config`` may set it.
-- ``acknowledgment.unacknowledged_additions`` applies from any config,
+- ``acknowledgments.unacknowledged_additions`` applies from any config,
   auto-discovered included: ``warn``/``block`` can only add a report section
   or raise a clean exit to ``1``, so a pull request setting it cannot hide
   anything.
@@ -218,7 +218,7 @@ def _records_path(
 def _configured_breaks(
     project_cfg: object, cfg_path: Path | None, *, config_explicit: bool, notify: Notify
 ) -> str | None:
-    """``acknowledgment.breaks`` when the config is explicit, else ``None``."""
+    """``acknowledgments.breaks`` when the config is explicit, else ``None``."""
     breaks = getattr(getattr(project_cfg, "acknowledgment", None), "breaks", None)
     if breaks is None:
         return None

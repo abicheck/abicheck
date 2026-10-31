@@ -184,7 +184,9 @@ def test_policy_file_block_outranks_configured_breaks(tmp_path: Path) -> None:
     from abicheck.policy_file import PolicyFile
 
     policy_path = tmp_path / "policy.yml"
-    policy_path.write_text("base_policy: strict_abi\nacknowledgment:\n  breaks: gate\n")
+    policy_path.write_text(
+        "base_policy: strict_abi\nacknowledgments:\n  breaks: gate\n"
+    )
     pf = PolicyFile.load(policy_path)
     resolved = resolve_compare_acknowledgments(
         None,
@@ -275,7 +277,7 @@ def test_cli_policy_breaks_accept_is_applied_when_explicit(
         "    change_kind: func_removed\n    reason: planned\n"
     )
     (tmp_path / "policy.yml").write_text(
-        "base_policy: strict_abi\nacknowledgment:\n  breaks: accept\n"
+        "base_policy: strict_abi\nacknowledgments:\n  breaks: accept\n"
     )
     code, _report = _cli_exit(
         [

@@ -162,7 +162,7 @@ class PairPolicyInputs:
     #: ADR-049: the evaluator always runs since Phase 7 (the CLI's own answer,
     #: and ``CompareRequest``'s default).
     contract_evaluation: bool = True
-    #: ``--acknowledgments``; ``acknowledgment.file`` is the config spelling.
+    #: ``--acknowledgments``; ``acknowledgments.file`` is the config spelling.
     acknowledgments: Path | None = None
     diagnostic_comparison: bool = False
     require_same_generation: bool = False

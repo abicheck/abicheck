@@ -14,4 +14,16 @@ RETIRED_CONFIG_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...]
             {"start/upgrading-to-0.7.md", "AGENTS.md", "contribute/known-gaps.md"}
         ),
     ),
+    (
+        "ADR-091 R3 policy-document key (a --policy file's top-level acknowledgment: -> acknowledgments:, no alias)",
+        ("acknowledgment:",),
+        frozenset(
+            {
+                "start/upgrading-to-0.7.md",
+                "AGENTS.md",
+                "contribute/known-gaps.md",
+                "contribute/adr/091-one-option-vocabulary.md",
+            }
+        ),
+    ),
 )

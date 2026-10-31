@@ -4283,7 +4283,7 @@ _scope_gated() {
 }
 
 # ADR-067 D6's additions-review axis (`.abicheck.yml`'s
-# `acknowledgment.unacknowledged_additions: block`, report schema 5.13): did
+# `acknowledgments.unacknowledged_additions: block`, report schema 5.13): did
 # public additions not covered by an acknowledgment record gate this run?
 # Read from the structured report only; a report without the key cannot say,
 # which is "not gated", the same rule as the sibling axes.
@@ -4882,7 +4882,7 @@ _blocking_gate_note() {
     echo "> ℹ️ Verdict escalated from the report: the compatibility finding above was demoted by the severity policy, and what actually produced this run's exit ${ABICHECK_EXIT} is the orthogonal unused-rules axis (a configured suppression/reclassify rule matched nothing under \`unused_rules: block\`). That is **not** an ABI/API break and **not** a severity-policy failure -- see \`disposition_audit.unused_rules_review\` in the JSON report."
   elif [[ "$GATE_TIER" == "ADDITIONS_UNACKNOWLEDGED" ]]; then
     # ADR-067 D6's additions-review axis, the same shape and reason.
-    echo "> ℹ️ Verdict escalated from the report: the compatibility finding above was demoted by the severity policy, and what actually produced this run's exit ${ABICHECK_EXIT} is the orthogonal additions-review axis (public additions no acknowledgment record covers, under \`acknowledgment.unacknowledged_additions: block\`). That is **not** an ABI/API break and **not** a severity-policy failure -- see \`disposition_audit.unacknowledged_additions_review\` in the JSON report."
+    echo "> ℹ️ Verdict escalated from the report: the compatibility finding above was demoted by the severity policy, and what actually produced this run's exit ${ABICHECK_EXIT} is the orthogonal additions-review axis (public additions no acknowledgment record covers, under \`acknowledgments.unacknowledged_additions: block\`). That is **not** an ABI/API break and **not** a severity-policy failure -- see \`disposition_audit.unacknowledged_additions_review\` in the JSON report."
   elif [[ -z "$_cats" ]] && _severity_gate_categories | grep -q 'promoted_crosscheck'; then
     # A promoted `--crosscheck KEY=error` raises the published gate the same
     # way a severity category does, but it is not one: `_severity_gate_
@@ -5069,10 +5069,10 @@ else
           elif _additions_gated; then
             # ADR-067 D6's additions-review axis alone: public additions no
             # acknowledgment record covers, under
-            # acknowledgment.unacknowledged_additions: block. Policy
+            # acknowledgments.unacknowledged_additions: block. Policy
             # acceptance, not a break -- the additions keep their verdict.
             VERDICT="ADDITIONS_UNACKNOWLEDGED"
-            echo "::warning::abicheck found public additions that no acknowledgment record covers, under acknowledgment.unacknowledged_additions: block (exit code 1). This is NOT an ABI/API break and NOT a severity-policy failure — the compatibility verdict is unchanged; see disposition_audit.unacknowledged_additions_review in the JSON report."
+            echo "::warning::abicheck found public additions that no acknowledgment record covers, under acknowledgments.unacknowledged_additions: block (exit code 1). This is NOT an ABI/API break and NOT a severity-policy failure — the compatibility verdict is unchanged; see disposition_audit.unacknowledged_additions_review in the JSON report."
             if _unused_rules_gated; then
               echo "::warning::abicheck also reports policy rules that matched nothing under unused_rules: block; see disposition_audit.unused_rules_review in the JSON report."
             fi
@@ -5469,7 +5469,7 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
         ;;
       ADDITIONS_UNACKNOWLEDGED)
         # ADR-067 D6's additions-review axis (exit code 1).
-        echo "> **Verdict: ADDITIONS_UNACKNOWLEDGED** ⚠️ — Public additions are not covered by an acknowledgment record, and \`acknowledgment.unacknowledged_additions\` is \`block\`. This is **not** an ABI/API break and **not** a severity-policy failure — the additions keep their verdict. Acknowledge them in the records file \`acknowledgment.file\` names, or relax the setting to \`warn\`; see \`disposition_audit.unacknowledged_additions_review\` in the JSON report."
+        echo "> **Verdict: ADDITIONS_UNACKNOWLEDGED** ⚠️ — Public additions are not covered by an acknowledgment record, and \`acknowledgments.unacknowledged_additions\` is \`block\`. This is **not** an ABI/API break and **not** a severity-policy failure — the additions keep their verdict. Acknowledge them in the records file \`acknowledgments.file\` names, or relax the setting to \`warn\`; see \`disposition_audit.unacknowledged_additions_review\` in the JSON report."
         ;;
       RULES_UNUSED)
         # The unused-rules review axis (exit code 1, `unused_rules: block`).
@@ -5969,7 +5969,7 @@ _post_pr_comment() {
     || _gh_pr_comment_fallback "$pr_number" "$body_file" "$repo"
 }
 
-# ADR-067 D5: `acknowledgment.breaks: accept` lets acknowledged breaks leave
+# ADR-067 D5: `acknowledgments.breaks: accept` lets acknowledged breaks leave
 # the exit code (exit 0) while the verdict stays a break. Say so on a passing
 # run rather than letting it read as clean. The line comes whole from
 # accepted_breaks_notice.py, which reads `disposition_audit.accepted_breaks`
@@ -6163,10 +6163,10 @@ else
   fi
 
   # ADR-067 D6's additions-review axis, unconditional for the same reason:
-  # `acknowledgment.unacknowledged_additions: block` is the project's own
+  # `acknowledgments.unacknowledged_additions: block` is the project's own
   # choice and no fail-on-* input governs it.
   if _additions_gated; then
-    echo "::error::abicheck found public additions that no acknowledgment record covers, under acknowledgment.unacknowledged_additions: block; see disposition_audit.unacknowledged_additions_review in the JSON report."
+    echo "::error::abicheck found public additions that no acknowledgment record covers, under acknowledgments.unacknowledged_additions: block; see disposition_audit.unacknowledged_additions_review in the JSON report."
     FINAL_EXIT=1
   fi
 

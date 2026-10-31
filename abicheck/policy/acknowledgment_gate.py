@@ -263,7 +263,7 @@ def effective_acknowledgment_policy(
     """The run's ADR-067 D5/D6 gate policy, or ``None`` when nothing states one.
 
     ADR-049 D7's tiers: a ``--policy`` file that states its own
-    ``acknowledgment:`` block outranks ``.abicheck.yml``'s
+    ``acknowledgments:`` block outranks ``.abicheck.yml``'s
     ``acknowledgment`` settings (*configured_action* for
     ``unacknowledged_additions``, *configured_breaks* for ``breaks``) as one
     whole block. ``None`` -- neither tier states anything -- keeps the review

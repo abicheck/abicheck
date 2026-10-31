@@ -105,7 +105,7 @@ def test_explicit_config(
     if policy_action is not None:
         pol = tmp_path / "policy.yml"
         pol.write_text(
-            f"acknowledgment:\n  unacknowledged_additions: {policy_action}\n"
+            f"acknowledgments:\n  unacknowledged_additions: {policy_action}\n"
         )
         args += ["--policy", str(pol)]
 
