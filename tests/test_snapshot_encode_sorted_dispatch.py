@@ -45,6 +45,7 @@ from abicheck.model import (
     Visibility,
 )
 from abicheck.storage import snapshot_encode as se
+from tests._whole_document_encoder import whole_sectioned_document
 
 
 def _oracle(obj: Any) -> Any:
@@ -183,9 +184,9 @@ def test_written_document_is_byte_identical_to_the_oracle_encoder(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     snap = _snapshot()
-    new = json.dumps(se.sectioned_document_for_write(snap), indent=2)
+    new = json.dumps(whole_sectioned_document(snap), indent=2)
     monkeypatch.setattr(se, "_encode_value_sorted", _oracle)
-    old = json.dumps(se.sectioned_document_for_write(snap), indent=2)
+    old = json.dumps(whole_sectioned_document(snap), indent=2)
     assert new == old
     assert '"fn3"' in new
 
