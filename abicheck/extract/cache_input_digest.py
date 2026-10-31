@@ -54,7 +54,6 @@ __all__ = [
     "env_include_material",
     "file_digest",
     "parse_include_search_dirs",
-    "reset_digest_memo",
     "search_dirs_material",
     "tree_digest",
 ]
@@ -73,13 +72,6 @@ _SEARCH_DIR_MEMO: dict[tuple[str, bool], tuple[str, ...]] = {}
 #: otherwise leave the signature unchanged ("racy git"). Two seconds covers
 #: the coarsest common filesystem granularity (FAT, some network mounts).
 _RACY_WINDOW_NS = 2_000_000_000
-
-
-def reset_digest_memo() -> None:
-    """Forget every memoized digest and probe (tests, benchmarks)."""
-    with _LOCK:
-        _FILE_MEMO.clear()
-        _SEARCH_DIR_MEMO.clear()
 
 
 def _signature(st: os.stat_result) -> tuple[int, ...]:

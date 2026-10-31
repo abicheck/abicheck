@@ -162,7 +162,8 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for var in ("CPATH", "C_INCLUDE_PATH", "CPLUS_INCLUDE_PATH"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
-    cache_input_digest.reset_digest_memo()
+    monkeypatch.setattr(cache_input_digest, "_FILE_MEMO", {})
+    monkeypatch.setattr(cache_input_digest, "_SEARCH_DIR_MEMO", {})
 
 
 @pytest.mark.parametrize("name", sorted(MUTATIONS))
