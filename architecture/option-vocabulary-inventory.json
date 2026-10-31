@@ -3025,10 +3025,34 @@
    "default": null
   },
   {
+   "id": "actions/check-target:consumer-frontend",
+   "action": "actions/check-target",
+   "input": "consumer-frontend",
+   "status": "live",
+   "required": false,
+   "default": null
+  },
+  {
+   "id": "actions/check-target:consumer-compiler",
+   "action": "actions/check-target",
+   "input": "consumer-compiler",
+   "status": "live",
+   "required": false,
+   "default": null
+  },
+  {
+   "id": "actions/check-target:consumer-compile-options",
+   "action": "actions/check-target",
+   "input": "consumer-compile-options",
+   "status": "live",
+   "required": false,
+   "default": null
+  },
+  {
    "id": "actions/check-target:consumer-ast-frontend",
    "action": "actions/check-target",
    "input": "consumer-ast-frontend",
-   "status": "live",
+   "status": "retired",
    "required": false,
    "default": null
   },
@@ -3036,7 +3060,7 @@
    "id": "actions/check-target:consumer-gcc-path",
    "action": "actions/check-target",
    "input": "consumer-gcc-path",
-   "status": "live",
+   "status": "retired",
    "required": false,
    "default": null
   },
@@ -3044,7 +3068,7 @@
    "id": "actions/check-target:consumer-gcc-options",
    "action": "actions/check-target",
    "input": "consumer-gcc-options",
-   "status": "live",
+   "status": "retired",
    "required": false,
    "default": null
   },
@@ -4012,6 +4036,800 @@
    "id": "actions/verify-source-run:abicheck-version",
    "action": "actions/verify-source-run",
    "input": "abicheck-version",
+   "status": "live",
+   "required": false,
+   "default": ""
+  }
+ ],
+ "workflow": [
+  {
+   "id": "workflow:check-single.yml:kind",
+   "workflow": "check-single.yml",
+   "input": "kind",
+   "status": "live",
+   "required": false,
+   "default": "target"
+  },
+  {
+   "id": "workflow:check-single.yml:target-kind",
+   "workflow": "check-single.yml",
+   "input": "target-kind",
+   "status": "live",
+   "required": false,
+   "default": "library"
+  },
+  {
+   "id": "workflow:check-single.yml:name",
+   "workflow": "check-single.yml",
+   "input": "name",
+   "status": "live",
+   "required": true,
+   "default": null
+  },
+  {
+   "id": "workflow:check-single.yml:baseline-target",
+   "workflow": "check-single.yml",
+   "input": "baseline-target",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-single.yml:bundle-members",
+   "workflow": "check-single.yml",
+   "input": "bundle-members",
+   "status": "live",
+   "required": false,
+   "default": "[]"
+  },
+  {
+   "id": "workflow:check-single.yml:profile",
+   "workflow": "check-single.yml",
+   "input": "profile",
+   "status": "live",
+   "required": true,
+   "default": null
+  },
+  {
+   "id": "workflow:check-single.yml:baseline-channel",
+   "workflow": "check-single.yml",
+   "input": "baseline-channel",
+   "status": "live",
+   "required": true,
+   "default": null
+  },
+  {
+   "id": "workflow:check-single.yml:baseline-path",
+   "workflow": "check-single.yml",
+   "input": "baseline-path",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-single.yml:baseline-required",
+   "workflow": "check-single.yml",
+   "input": "baseline-required",
+   "status": "live",
+   "required": false,
+   "default": true
+  },
+  {
+   "id": "workflow:check-single.yml:candidate-build-output",
+   "workflow": "check-single.yml",
+   "input": "candidate-build-output",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-single.yml:expected-project-ref",
+   "workflow": "check-single.yml",
+   "input": "expected-project-ref",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-single.yml:expected-baseline-generation",
+   "workflow": "check-single.yml",
+   "input": "expected-baseline-generation",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-single.yml:allow-new-target",
+   "workflow": "check-single.yml",
+   "input": "allow-new-target",
+   "status": "live",
+   "required": false,
+   "default": false
+  },
+  {
+   "id": "workflow:check-single.yml:candidate-artifact-name",
+   "workflow": "check-single.yml",
+   "input": "candidate-artifact-name",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-single.yml:baseline-artifact-name",
+   "workflow": "check-single.yml",
+   "input": "baseline-artifact-name",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-single.yml:build-output-artifact-name",
+   "workflow": "check-single.yml",
+   "input": "build-output-artifact-name",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-single.yml:report-artifact-prefix",
+   "workflow": "check-single.yml",
+   "input": "report-artifact-prefix",
+   "status": "live",
+   "required": false,
+   "default": "abicheck-check-single-report-"
+  },
+  {
+   "id": "workflow:check-single.yml:depth",
+   "workflow": "check-single.yml",
+   "input": "depth",
+   "status": "live",
+   "required": true,
+   "default": null
+  },
+  {
+   "id": "workflow:check-single.yml:requested-depth",
+   "workflow": "check-single.yml",
+   "input": "requested-depth",
+   "status": "retired",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-single.yml:explicit-id",
+   "workflow": "check-single.yml",
+   "input": "explicit-id",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-single.yml:gate-mode",
+   "workflow": "check-single.yml",
+   "input": "gate-mode",
+   "status": "live",
+   "required": false,
+   "default": "local"
+  },
+  {
+   "id": "workflow:check-single.yml:project",
+   "workflow": "check-single.yml",
+   "input": "project",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-single.yml:head-sha",
+   "workflow": "check-single.yml",
+   "input": "head-sha",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-single.yml:base-ref",
+   "workflow": "check-single.yml",
+   "input": "base-ref",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-single.yml:evidence-producer",
+   "workflow": "check-single.yml",
+   "input": "evidence-producer",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-single.yml:evidence-pack-path",
+   "workflow": "check-single.yml",
+   "input": "evidence-pack-path",
+   "status": "live",
+   "required": false,
+   "default": "abicheck_inputs"
+  },
+  {
+   "id": "workflow:check-single.yml:new-library",
+   "workflow": "check-single.yml",
+   "input": "new-library",
+   "status": "live",
+   "required": true,
+   "default": null
+  },
+  {
+   "id": "workflow:check-single.yml:header",
+   "workflow": "check-single.yml",
+   "input": "header",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-single.yml:old-header",
+   "workflow": "check-single.yml",
+   "input": "old-header",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-single.yml:new-header",
+   "workflow": "check-single.yml",
+   "input": "new-header",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-single.yml:include",
+   "workflow": "check-single.yml",
+   "input": "include",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-single.yml:old-include",
+   "workflow": "check-single.yml",
+   "input": "old-include",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-single.yml:new-include",
+   "workflow": "check-single.yml",
+   "input": "new-include",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-single.yml:lang",
+   "workflow": "check-single.yml",
+   "input": "lang",
+   "status": "live",
+   "required": false,
+   "default": "c++"
+  },
+  {
+   "id": "workflow:check-single.yml:frontend",
+   "workflow": "check-single.yml",
+   "input": "frontend",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-single.yml:compiler",
+   "workflow": "check-single.yml",
+   "input": "compiler",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-single.yml:compile-options",
+   "workflow": "check-single.yml",
+   "input": "compile-options",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-single.yml:ast-frontend",
+   "workflow": "check-single.yml",
+   "input": "ast-frontend",
+   "status": "retired",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-single.yml:gcc-path",
+   "workflow": "check-single.yml",
+   "input": "gcc-path",
+   "status": "retired",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-single.yml:gcc-prefix",
+   "workflow": "check-single.yml",
+   "input": "gcc-prefix",
+   "status": "retired",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-single.yml:gcc-options",
+   "workflow": "check-single.yml",
+   "input": "gcc-options",
+   "status": "retired",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-single.yml:sysroot",
+   "workflow": "check-single.yml",
+   "input": "sysroot",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-single.yml:sources",
+   "workflow": "check-single.yml",
+   "input": "sources",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-single.yml:build-info",
+   "workflow": "check-single.yml",
+   "input": "build-info",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-single.yml:compile-db",
+   "workflow": "check-single.yml",
+   "input": "compile-db",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-single.yml:build-config",
+   "workflow": "check-single.yml",
+   "input": "build-config",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-single.yml:consumer-binary",
+   "workflow": "check-single.yml",
+   "input": "consumer-binary",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-single.yml:contract",
+   "workflow": "check-single.yml",
+   "input": "contract",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-single.yml:policy",
+   "workflow": "check-single.yml",
+   "input": "policy",
+   "status": "live",
+   "required": false,
+   "default": "strict_abi"
+  },
+  {
+   "id": "workflow:check-single.yml:contract-file",
+   "workflow": "check-single.yml",
+   "input": "contract-file",
+   "status": "retired",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-single.yml:policy-file",
+   "workflow": "check-single.yml",
+   "input": "policy-file",
+   "status": "retired",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-single.yml:suppress",
+   "workflow": "check-single.yml",
+   "input": "suppress",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-single.yml:severity-preset",
+   "workflow": "check-single.yml",
+   "input": "severity-preset",
+   "status": "live",
+   "required": false,
+   "default": "default"
+  },
+  {
+   "id": "workflow:check-single.yml:extra-args",
+   "workflow": "check-single.yml",
+   "input": "extra-args",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-single.yml:python-version",
+   "workflow": "check-single.yml",
+   "input": "python-version",
+   "status": "live",
+   "required": false,
+   "default": "3.13"
+  },
+  {
+   "id": "workflow:check-single.yml:install-deps",
+   "workflow": "check-single.yml",
+   "input": "install-deps",
+   "status": "live",
+   "required": false,
+   "default": true
+  },
+  {
+   "id": "workflow:check-single.yml:dependency-source",
+   "workflow": "check-single.yml",
+   "input": "dependency-source",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-project.yml:config-path",
+   "workflow": "check-project.yml",
+   "input": "config-path",
+   "status": "live",
+   "required": false,
+   "default": ".abicheck.yml"
+  },
+  {
+   "id": "workflow:check-project.yml:build-output-artifact-prefix",
+   "workflow": "check-project.yml",
+   "input": "build-output-artifact-prefix",
+   "status": "live",
+   "required": false,
+   "default": "abicheck-build-"
+  },
+  {
+   "id": "workflow:check-project.yml:candidate-artifact-prefix",
+   "workflow": "check-project.yml",
+   "input": "candidate-artifact-prefix",
+   "status": "live",
+   "required": false,
+   "default": "abicheck-candidate-"
+  },
+  {
+   "id": "workflow:check-project.yml:baseline-artifact-prefix",
+   "workflow": "check-project.yml",
+   "input": "baseline-artifact-prefix",
+   "status": "live",
+   "required": false,
+   "default": "abicheck-baseline-"
+  },
+  {
+   "id": "workflow:check-project.yml:run-plan-artifact-name",
+   "workflow": "check-project.yml",
+   "input": "run-plan-artifact-name",
+   "status": "live",
+   "required": false,
+   "default": "run-plan"
+  },
+  {
+   "id": "workflow:check-project.yml:toolchain-bindings-path",
+   "workflow": "check-project.yml",
+   "input": "toolchain-bindings-path",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-project.yml:report-artifact-prefix",
+   "workflow": "check-project.yml",
+   "input": "report-artifact-prefix",
+   "status": "live",
+   "required": false,
+   "default": "abicheck-check-report-"
+  },
+  {
+   "id": "workflow:check-project.yml:aggregate-artifact-name",
+   "workflow": "check-project.yml",
+   "input": "aggregate-artifact-name",
+   "status": "live",
+   "required": false,
+   "default": "abicheck-aggregate-result"
+  },
+  {
+   "id": "workflow:check-project.yml:project",
+   "workflow": "check-project.yml",
+   "input": "project",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-project.yml:head-sha",
+   "workflow": "check-project.yml",
+   "input": "head-sha",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-project.yml:base-ref",
+   "workflow": "check-project.yml",
+   "input": "base-ref",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-project.yml:python-version",
+   "workflow": "check-project.yml",
+   "input": "python-version",
+   "status": "live",
+   "required": false,
+   "default": "3.13"
+  },
+  {
+   "id": "workflow:check-project.yml:header",
+   "workflow": "check-project.yml",
+   "input": "header",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-project.yml:old-header",
+   "workflow": "check-project.yml",
+   "input": "old-header",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-project.yml:new-header",
+   "workflow": "check-project.yml",
+   "input": "new-header",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-project.yml:include",
+   "workflow": "check-project.yml",
+   "input": "include",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-project.yml:old-include",
+   "workflow": "check-project.yml",
+   "input": "old-include",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-project.yml:new-include",
+   "workflow": "check-project.yml",
+   "input": "new-include",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-project.yml:lang",
+   "workflow": "check-project.yml",
+   "input": "lang",
+   "status": "live",
+   "required": false,
+   "default": "c++"
+  },
+  {
+   "id": "workflow:check-project.yml:frontend",
+   "workflow": "check-project.yml",
+   "input": "frontend",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-project.yml:compiler",
+   "workflow": "check-project.yml",
+   "input": "compiler",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-project.yml:compile-options",
+   "workflow": "check-project.yml",
+   "input": "compile-options",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-project.yml:ast-frontend",
+   "workflow": "check-project.yml",
+   "input": "ast-frontend",
+   "status": "retired",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-project.yml:gcc-path",
+   "workflow": "check-project.yml",
+   "input": "gcc-path",
+   "status": "retired",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-project.yml:gcc-prefix",
+   "workflow": "check-project.yml",
+   "input": "gcc-prefix",
+   "status": "retired",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-project.yml:gcc-options",
+   "workflow": "check-project.yml",
+   "input": "gcc-options",
+   "status": "retired",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-project.yml:sysroot",
+   "workflow": "check-project.yml",
+   "input": "sysroot",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-project.yml:evidence-producer",
+   "workflow": "check-project.yml",
+   "input": "evidence-producer",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-project.yml:evidence-pack-path",
+   "workflow": "check-project.yml",
+   "input": "evidence-pack-path",
+   "status": "live",
+   "required": false,
+   "default": "abicheck_inputs"
+  },
+  {
+   "id": "workflow:check-project.yml:sources",
+   "workflow": "check-project.yml",
+   "input": "sources",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-project.yml:build-info",
+   "workflow": "check-project.yml",
+   "input": "build-info",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-project.yml:compile-db",
+   "workflow": "check-project.yml",
+   "input": "compile-db",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-project.yml:build-config",
+   "workflow": "check-project.yml",
+   "input": "build-config",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-project.yml:policy",
+   "workflow": "check-project.yml",
+   "input": "policy",
+   "status": "live",
+   "required": false,
+   "default": "strict_abi"
+  },
+  {
+   "id": "workflow:check-project.yml:policy-file",
+   "workflow": "check-project.yml",
+   "input": "policy-file",
+   "status": "retired",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-project.yml:suppress",
+   "workflow": "check-project.yml",
+   "input": "suppress",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-project.yml:severity-preset",
+   "workflow": "check-project.yml",
+   "input": "severity-preset",
+   "status": "live",
+   "required": false,
+   "default": "default"
+  },
+  {
+   "id": "workflow:check-project.yml:extra-args",
+   "workflow": "check-project.yml",
+   "input": "extra-args",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-project.yml:install-deps",
+   "workflow": "check-project.yml",
+   "input": "install-deps",
+   "status": "live",
+   "required": false,
+   "default": true
+  },
+  {
+   "id": "workflow:check-project.yml:dependency-source",
+   "workflow": "check-project.yml",
+   "input": "dependency-source",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-project.yml:expected-project-ref",
+   "workflow": "check-project.yml",
+   "input": "expected-project-ref",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "workflow:check-project.yml:expected-baseline-generation",
+   "workflow": "check-project.yml",
+   "input": "expected-baseline-generation",
    "status": "live",
    "required": false,
    "default": ""

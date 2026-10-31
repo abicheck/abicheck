@@ -540,7 +540,7 @@ use_cases:
       with --sources at --depth then compares, collapsing the six-stage
       dump→collect→merge→compare sequence the oneDAL eval required into one
       command; option collapsing (rich-click groups M1, presets M2, vocab
-      unification M5); a cross-platform --gcc-option; and a fail-loud signal on
+      unification M5); a cross-platform --compiler-option; and a fail-loud signal on
       an empty requested layer (including empty-PARTIAL). The strict-mode honesty
       half (empty requested L4 => skipped) also shipped. Remaining (deferred as
       explicit opt-in per the P09 "warn, don't guess" design): header/source

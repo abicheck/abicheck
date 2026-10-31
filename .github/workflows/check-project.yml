@@ -95,10 +95,10 @@ on:
           P1 toolchain-profile audit) resolving profiles.<id>.compile.binding
           logical ids to exact executable paths, forwarded to `abicheck
           project plan --toolchain-bindings`. Empty (default) skips
-          binding resolution entirely -- every cell's gcc-path stays this
-          workflow's own gcc-path input, unchanged from before this option
+          binding resolution entirely -- every cell's compiler stays this
+          workflow's own compiler input, unchanged from before this option
           existed. A profile's compile.standard/stdlib/target/abi_macros/
-          args are composed into that cell's gcc-options regardless of this
+          args are composed into that cell's compile-options regardless of this
           input (they need no trusted-path resolution).
         type: string
         default: ''
@@ -137,7 +137,7 @@ on:
       # ── Shared analysis options, forwarded to every check-target cell ────
       # (a per-cell override of any of these is out of scope for this first
       # version -- see docs/reference/reusable-workflows.md. EXCEPTION:
-      # gcc-path/gcc-options below now get a per-cell override from that
+      # compiler/compile-options below now get a per-cell override from that
       # cell's profiles.<id>.compile overlay, via toolchain-bindings-path
       # above -- P1 toolchain-profile audit. Every other option here stays
       # workflow-global-only.)
@@ -162,16 +162,32 @@ on:
       lang:
         type: string
         default: 'c++'
+      frontend:
+        description: 'L2 header-AST frontend: auto, castxml, clang, or hybrid.'
+        type: string
+        default: ''
+      compiler:
+        description: 'Cross-compiler: a path to the GCC/G++ binary, or a cross-toolchain prefix ending in ''-'' (e.g. aarch64-linux-gnu-).'
+        type: string
+        default: ''
+      compile-options:
+        description: 'Extra compiler flags passed through to the header frontend.'
+        type: string
+        default: ''
       ast-frontend:
+        description: 'RETIRED (no transition period): renamed to `frontend`. Setting it fails the run before any analysis.'
         type: string
         default: ''
       gcc-path:
+        description: 'RETIRED (no transition period): renamed to `compiler`. Setting it fails the run before any analysis.'
         type: string
         default: ''
       gcc-prefix:
+        description: 'RETIRED (no transition period): renamed to `compiler`. Setting it fails the run before any analysis.'
         type: string
         default: ''
       gcc-options:
+        description: 'RETIRED (no transition period): renamed to `compile-options`. Setting it fails the run before any analysis.'
         type: string
         default: ''
       sysroot:
@@ -199,6 +215,7 @@ on:
         type: string
         default: 'strict_abi'
       policy-file:
+        description: 'RETIRED (no transition period): renamed to `policy`. Setting it fails the run before any analysis.'
         type: string
         default: ''
       suppress:
@@ -221,7 +238,7 @@ on:
           same name). Workflow-level default; a profile that declares its
           own `dependency_source:` overrides it for that profile's cells
           only (G34 Phase C), the same precedence `compile:`'s
-          gcc-path/gcc-options overlay already uses. Leave empty to keep the
+          compiler/compile-options overlay already uses. Leave empty to keep the
           legacy `install-deps` boolean deciding.
         type: string
         default: ''
@@ -275,6 +292,29 @@ jobs:
       has-checks: ${{ steps.plan.outputs.has-checks }}
       run-plan-artifact-name: ${{ inputs.run-plan-artifact-name }}
     steps:
+      # Retired names stay declared as empty tombstones so a stale caller's
+      # value reaches this guard and fails the run before any plan is built.
+      - name: Reject retired workflow inputs
+        env:
+          RETIRED_AST_FRONTEND: ${{ inputs.ast-frontend }}
+          RETIRED_GCC_PATH: ${{ inputs.gcc-path }}
+          RETIRED_GCC_PREFIX: ${{ inputs.gcc-prefix }}
+          RETIRED_GCC_OPTIONS: ${{ inputs.gcc-options }}
+          RETIRED_POLICY_FILE: ${{ inputs.policy-file }}
+        run: |
+          status=0
+          reject() {
+            if [ -n "$2" ]; then
+              echo "::error::input '$1' is retired; set '$3' instead" >&2
+              status=1
+            fi
+          }
+          reject ast-frontend "$RETIRED_AST_FRONTEND" frontend
+          reject gcc-path "$RETIRED_GCC_PATH" compiler
+          reject gcc-prefix "$RETIRED_GCC_PREFIX" compiler
+          reject gcc-options "$RETIRED_GCC_OPTIONS" compile-options
+          reject policy-file "$RETIRED_POLICY_FILE" policy
+          exit "$status"
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
         with:
           persist-credentials: false
@@ -1028,7 +1068,7 @@ jobs:
           # RunPlanCheck.header (run_plan.py's own field docstring): a
           # target's `public_headers:` (ADR-047's own worked example),
           # space-joined -- the same per-cell-first precedence as
-          # ast-frontend/gcc-path/gcc-options above/below (`matrix.header ||
+          # frontend/compiler/compile-options above/below (`matrix.header ||
           # inputs.header`, never merged with the workflow-global value).
           # Gated on `kind != 'bundle'` for the identical reason those three
           # already are: RunPlanCheck.header is never set for a bundle cell
@@ -1050,23 +1090,23 @@ jobs:
           # that makes a per-profile frontend real rather than projected: a
           # GCC profile's cell can resolve `castxml` while a Clang/DPC++
           # profile's cell in the same run resolves `clang`, which one
-          # workflow-global --ast-frontend cannot express.
+          # workflow-global `frontend` input cannot express.
           #
           # Gated on `kind != 'bundle'` (Codex review): a bundle cell's
           # new-library is the `bundle-staging` *directory* it stages its
           # members into, and the root Action rejects every non-`auto`
-          # ast-frontend for a directory/package operand outright
+          # frontend for a directory/package operand outright
           # (action/run.sh's `_is_release_style_operand` guard) because the
           # per-library fan-out never threads an L2 compile context to each
           # pair's header dump. Forwarding a profile's `frontend:` there
           # would turn a previously working bundle check into a hard
-          # operational error. Falling back to `inputs.ast-frontend` rather
+          # operational error. Falling back to `inputs.frontend` rather
           # than to the empty string is deliberate: it leaves a bundle
           # cell's behaviour exactly as it was before this line existed,
           # including that guard still firing loudly on a workflow-global
           # non-`auto` value -- declining to add a new source of the error
           # is this line's job, not silencing the existing one.
-          frontend: ${{ matrix.kind != 'bundle' && matrix.compile_ast_frontend || inputs.ast-frontend }}
+          frontend: ${{ matrix.kind != 'bundle' && matrix.compile_ast_frontend || inputs.frontend }}
           # An omitted consumer_compile FIELD defers to the caller's
           # workflow-global input, the same as an omitted producer compile
           # field does two lines up -- not to the empty string, which would
@@ -1078,16 +1118,16 @@ jobs:
           # independent of what its fields resolve to) rather than firing
           # whenever any of these three expressions is merely non-empty --
           # without that gate, a profile with NO consumer_compile: overlay
-          # at all would still get a non-empty consumer-ast-frontend/
-          # gcc-path/gcc-options the moment the caller sets any
-          # workflow-global --ast-frontend/--gcc-path/--gcc-options, which
+          # at all would still get a non-empty consumer-frontend/
+          # compiler/compile-options the moment the caller sets any
+          # workflow-global `frontend`, `compiler` or `compile-options` input, which
           # would activate check-target's separate consumer-context dump
           # (and its "replace the candidate snapshot" behavior) for every
           # cell, not just the ones that actually declare an overlay
           # (Codex review, second round).
-          consumer-ast-frontend: ${{ (matrix.kind != 'bundle' && matrix.consumer_compile_active) && (matrix.consumer_compile_ast_frontend || inputs.ast-frontend) || '' }}
-          consumer-gcc-path: ${{ (matrix.kind != 'bundle' && matrix.consumer_compile_active) && (matrix.consumer_compile_gcc_path || inputs.gcc-path) || '' }}
-          consumer-gcc-options: ${{ (matrix.kind != 'bundle' && matrix.consumer_compile_active) && (matrix.consumer_compile_gcc_options || inputs.gcc-options) || '' }}
+          consumer-frontend: ${{ (matrix.kind != 'bundle' && matrix.consumer_compile_active) && (matrix.consumer_compile_ast_frontend || inputs.frontend) || '' }}
+          consumer-compiler: ${{ (matrix.kind != 'bundle' && matrix.consumer_compile_active) && (matrix.consumer_compile_gcc_path || inputs.compiler) || '' }}
+          consumer-compile-options: ${{ (matrix.kind != 'bundle' && matrix.consumer_compile_active) && (matrix.consumer_compile_gcc_options || inputs.compile-options) || '' }}
           # An overlay declaring only e.g. `binding:` with no matching
           # --toolchain-bindings entry (and no workflow-global compiler
           # input to fall back to above) resolves all three fields above to
@@ -1112,9 +1152,9 @@ jobs:
           # block sees no behavior change at all.
           #
           # Also gated on `kind != 'bundle'`, for the identical reason
-          # ast-frontend above is: a bundle cell's operand is the
+          # frontend above is: a bundle cell's operand is the
           # bundle-staging *directory*, and the CLI once hard-rejected
-          # gcc-path/gcc-options for a directory/package compare (that
+          # compiler/compile-options for a directory/package compare (that
           # guard is gone with the compile-context flags themselves; the
           # gate stays so a bundle cell keeps the workflow-global
           # behaviour). Before this line, a profile that
@@ -1125,16 +1165,16 @@ jobs:
           # G34 producer/consumer-compiler-profile-separation plan
           # (Phase B) until this change. Falling back to the workflow-
           # global input for a bundle cell (rather than to the empty
-          # string) matches ast-frontend's own precedent exactly: it
+          # string) matches frontend's own precedent exactly: it
           # leaves a bundle cell's behaviour exactly as it was before any
           # per-cell overlay existed, including that a workflow-global
-          # non-default gcc-path/gcc-options still hard-errors a bundle
+          # non-default compiler/compile-options still hard-errors a bundle
           # cell loudly, same as it always has -- this line declines to
           # add a *new* source of the error via the per-cell mechanism, it
           # does not silence the pre-existing one.
           #
           # `sysroot` has no per-cell overlay field at all (unlike
-          # gcc-path/gcc-options, no `profiles.<id>.compile.sysroot` is
+          # compiler/compile-options, no `profiles.<id>.compile.sysroot` is
           # wired into RunPlanCheck), so its forwarding here is unchanged
           # by the P1 toolchain-profile audit and is deliberately left
           # unconditional rather than gated: gating it would be a new,
@@ -1144,8 +1184,8 @@ jobs:
           # "не молча удалять параметры" applies here as much as it does
           # to the per-cell fields above, so this fix does not invent a
           # third option beyond what was already reviewed.
-          compiler: ${{ matrix.kind != 'bundle' && matrix.compile_gcc_path || inputs.gcc-path || inputs.gcc-prefix }}
-          compile-options: ${{ matrix.kind != 'bundle' && matrix.compile_gcc_options || inputs.gcc-options }}
+          compiler: ${{ matrix.kind != 'bundle' && matrix.compile_gcc_path || inputs.compiler }}
+          compile-options: ${{ matrix.kind != 'bundle' && matrix.compile_gcc_options || inputs.compile-options }}
           sysroot: ${{ inputs.sysroot }}
           sources: ${{ inputs.sources }}
           # check-target's own build-info gate only converts evidence-pack-path
@@ -1169,7 +1209,7 @@ jobs:
           build-info: ${{ ((steps.candidate.outputs.evidence-producer || inputs.evidence-producer) != 'wrapper' && (steps.candidate.outputs.evidence-producer || inputs.evidence-producer) != 'clang-plugin' && steps.candidate.outputs.evidence-pack != '') && steps.candidate.outputs.evidence-pack || inputs.build-info }}
           compile-db: ${{ inputs.compile-db }}
           build-config: ${{ inputs.build-config }}
-          policy: ${{ inputs.policy-file || inputs.policy }}
+          policy: ${{ inputs.policy }}
           suppress: ${{ inputs.suppress }}
           severity-preset: ${{ inputs.severity-preset }}
           extra-args: ${{ inputs.extra-args }}

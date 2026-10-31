@@ -1675,7 +1675,7 @@
     },
     {
       "path": "tests/test_reusable_workflows.py",
-      "baseline_lines": 1946,
+      "baseline_lines": 1945,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",

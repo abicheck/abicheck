@@ -113,10 +113,29 @@ that moves to this release.
 | `nostdinc` | `set: compile.nostdinc=true` | |
 | `jobs` | none | Removed with no replacement. The worker count is controlled by the runner or workflow. |
 | `allow-build-query` | none | Removed with no replacement. abicheck runs its inferred compile-database query whenever a sources input needs build context. A trusted query is set through `build-config`'s `build.query`. |
+| `consumer-ast-frontend` (`check-target`) | `consumer-frontend` | |
+| `consumer-gcc-path` (`check-target`) | `consumer-compiler` | |
+| `consumer-gcc-options` (`check-target`) | `consumer-compile-options` | |
 
 `check-target`'s `analysis-assurance-complete`, `ast-frontend`, `gcc-path`,
 `gcc-options`, `gcc-prefix` and `policy-file` map to the same new names as the
-root Action. Its `consumer-*` inputs are unchanged.
+root Action.
+
+## Reusable workflow input renames
+
+`check-single.yml` and `check-project.yml` take the Action's vocabulary, with no
+transition period. Each old `workflow_call` input is still declared as an empty
+tombstone, and a non-empty value fails the run before any analysis with an
+`::error::` that names the replacement.
+
+| 0.6 input | 0.7 input | Workflows |
+|---|---|---|
+| `requested-depth` | `depth` | `check-single.yml` |
+| `ast-frontend` | `frontend` | both |
+| `gcc-path`, `gcc-prefix` | `compiler` | both |
+| `gcc-options` | `compile-options` | both |
+| `contract-file` | `contract` | `check-single.yml` |
+| `policy-file` | `policy` | both |
 
 The `extra-args` input is passed to the CLI as raw arguments. A workflow
 that passes a retired spelling there, for example `extra-args: --version 2.0`,

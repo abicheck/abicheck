@@ -383,7 +383,7 @@ in CI, not after.
    substantially to a single snapshot's size (call/type-graph nodes and
    edges scale with the codebase, not just the public ABI surface) — keep
    deep-evidence dumps to the specific libraries/profiles whose checks are
-   configured to use `requested-depth: source`, rather than uniformly across
+   configured to use `depth: source`, rather than uniformly across
    every profile in a matrix.
 3. **Split a very large multi-library release into more than one
    baseline-set archive** (e.g. by subsystem) rather than one archive

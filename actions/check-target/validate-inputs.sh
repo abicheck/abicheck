@@ -60,6 +60,9 @@ _renamed_inputs=(
   "gcc-options:INPUT_GCC_OPTIONS:compile-options"
   "policy-file:INPUT_POLICY_FILE:policy"
   "analysis-assurance-complete:INPUT_ANALYSIS_ASSURANCE_COMPLETE:require-complete"
+  "consumer-ast-frontend:INPUT_CONSUMER_AST_FRONTEND:consumer-frontend"
+  "consumer-gcc-path:INPUT_CONSUMER_GCC_PATH:consumer-compiler"
+  "consumer-gcc-options:INPUT_CONSUMER_GCC_OPTIONS:consumer-compile-options"
 )
 for _entry in "${_renamed_inputs[@]}"; do
   IFS=: read -r _old_name _old_var _new_name <<<"$_entry"
