@@ -547,6 +547,19 @@ def test_warm_repeat_matches_fresh(release: tuple[Path, Path]) -> None:
     _assert_same(warm, fresh, "release.warm")
 
 
+def test_release_lazy_section_decode_matches_eager(
+    release: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR-062 D18 (bug class storage.lazy_decode_diverges_from_eager): the
+    lazily decoded declaration store gives the eager decoder's report."""
+    from abicheck.storage import snapshot_codec
+
+    old, new = release
+    lazy = _run(str(old), str(new))
+    monkeypatch.setattr(snapshot_codec, "lazy_ir_eligible", lambda d, sv: False)
+    _assert_same(lazy, _run(str(old), str(new)), "release.lazy_sections")
+
+
 # ── (c) threads=1 vs threads=8 ──────────────────────────────────────────────
 
 

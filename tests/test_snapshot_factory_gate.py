@@ -27,6 +27,7 @@ FACTORY = "abicheck/workflows/snapshot_factory.py"
 ALLOWED_CONSTRUCTORS: dict[str, str] = {
     FACTORY: "factory: the one production constructor",
     "abicheck/storage/snapshot_codec.py": "decoder: abicheck's own JSON snapshot document",
+    "abicheck/storage/snapshot_lazy_decode.py": "decoder: the lazily loaded snapshot and the eager snapshot its deferred store rebuilds",
 }
 
 _CLASS = "AbiSnapshot"

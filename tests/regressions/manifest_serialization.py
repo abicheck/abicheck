@@ -347,6 +347,7 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=(
             "tests/unit/storage/test_snapshot_lazy_decode.py",
             "tests/test_lazy_graph_loading.py",
+            "tests/test_family_f5_optimization_reference.py",
         ),
         public_surfaces=("python-api", "cli"),
         axes={

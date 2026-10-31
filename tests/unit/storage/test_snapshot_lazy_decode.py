@@ -47,7 +47,11 @@ from abicheck.serialization import load_snapshot, snapshot_from_dict, snapshot_t
 from abicheck.storage import fact_backfill, snapshot_lazy_decode
 from abicheck.storage.evidence_digest import evidence_digest_of_document
 from abicheck.storage.snapshot_codec import write_snapshot
-from abicheck.storage.snapshot_encode import snapshot_content_digest, snapshot_to_dict
+from abicheck.storage.snapshot_encode import (
+    sectioned_document_for_write,
+    snapshot_content_digest,
+    snapshot_to_dict,
+)
 from abicheck.storage.snapshot_lazy_decode import (
     LEGACY_BACKFILL_FLOOR,
     eager_section_decode,
@@ -346,8 +350,8 @@ def test_deferred_load_steps_run_in_the_cell(tmp_path: Path) -> None:
 def test_a_corrupt_deferred_section_raises_the_eager_error_at_every_access(
     tmp_path: Path,
 ) -> None:
-    source = _FIXTURES / "contract_context_v1" / "old.json"
-    doc = json.loads(source.read_text())
+    source = _quiet_load(_FIXTURES / "contract_context_v1" / "old.json", eager=True)
+    doc = sectioned_document_for_write(source)
     doc["sections"]["declarations"]["payload"]["functions"] = [{"name": 7}]
     path = tmp_path / "bad.json"
     path.write_text(json.dumps(doc))
