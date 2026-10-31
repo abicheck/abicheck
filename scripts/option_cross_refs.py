@@ -124,9 +124,14 @@ class CrossRefs:
                 parts.append(f"{label}: {', '.join(items)}")
         config = concept.get("config", [])
         if config:
-            parts.append(
-                f"{SET_LABEL}: " + ", ".join(f"`--set {key}=VALUE`" for key in config)
-            )
+            # An Action row names the Action's own input (`set:`), never the CLI
+            # flag; every other row names the flag.
+            if own == "action":
+                spelled = ", ".join(f"`{key}=VALUE`" for key in config)
+                parts.append(f"set: {spelled}")
+            else:
+                spelled = ", ".join(f"`--set {key}=VALUE`" for key in config)
+                parts.append(f"{SET_LABEL}: {spelled}")
         return "; ".join(parts) or EMPTY
 
     def retired_cell(self, member: str) -> str:

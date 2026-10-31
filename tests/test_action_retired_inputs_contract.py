@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import itertools
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -286,6 +287,58 @@ def test_setting_a_retired_input_fails_preflight_validation(name: str) -> None:
             f"a workflow author cannot tell which input to remove.\n"
             f"{combined}"
         )
+
+
+def _registry_replacement_tokens() -> list[tuple[str, str]]:
+    """(retired input, the token its rejection must name) from the option registry.
+
+    The registry's ``replacements:`` block is the one place a tombstone's live
+    replacement is recorded. An ``action:<input>`` target is named by its input
+    name; a config-key target by its dotted path. A null replacement or a
+    sub-action target has no root-Action token and is not listed here.
+    """
+    registry = _yaml_fast.safe_load(
+        (REPO_ROOT / "architecture" / "option-vocabulary.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+    tokens: list[tuple[str, str]] = []
+    for entry in registry.get("replacements", []):
+        name = entry["id"].removeprefix("action:")
+        target = entry["replaced_by"]
+        if name not in RETIRED_INPUTS or target is None or ":" in name:
+            continue
+        if target.startswith("action:"):
+            tokens.append((name, target.removeprefix("action:")))
+        elif ":" not in target:
+            tokens.append((name, target))
+    return sorted(tokens)
+
+
+@pytest.mark.parametrize(("name", "token"), _registry_replacement_tokens())
+def test_a_rejection_names_the_registry_replacement_as_an_exact_token(
+    name: str, token: str
+) -> None:
+    """The rejection tells the user what to type instead, and names it exactly.
+
+    A substring match would pass on ``header`` inside ``old-header`` or on
+    ``policy`` inside ``policy-file``, so the token must stand on its own.
+    """
+    result = _run_script(
+        VALIDATE_SH,
+        {
+            "INPUT_MODE": "compare",
+            "INPUT_NEW_LIBRARY": "libfoo.so",
+            _input_env_var(name): _meaningful_value(RETIRED_INPUTS[name]),
+        },
+    )
+    combined = result.stdout + result.stderr
+    pattern = re.compile(r"(?<![\w.-])" + re.escape(token) + r"(?![\w.-])")
+    assert pattern.search(combined), (
+        f"{name} is RETIRED with replacement {token!r} in architecture/"
+        f"option-vocabulary.yaml, but its rejection never names that token:\n"
+        f"{combined}"
+    )
 
 
 @pytest.mark.parametrize("name", sorted(RETIRED_INPUTS))

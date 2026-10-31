@@ -453,7 +453,7 @@ Python".
 **Result (2026-10-31).** The three references carry a "Same option on other
 surfaces" column computed by `scripts/option_cross_refs.py` from the registry:
 CLI flag, Action input, reusable-workflow input, `.abicheck.yml` key and the
-`--set` path. Python is not in the column; its spellings stay in the registry.
+`--set` path. Python is not in the column: the ADR-091 cross-reference tables cover the CLI, Action, reusable-workflow and config surfaces, so the Python spellings stay in the registry and in the Python API reference only.
 The registry's `replacements:` block names the live row of each of the 56
 retired or deprecated Action and workflow inputs, so a tombstone reads
 `RETIRED` (or `DEPRECATED`) with its replacement, never as live.

@@ -142,7 +142,10 @@ def _expected_substrings(concept: dict[str, Any], own: str) -> list[str]:
                 wanted.append(f"`{member.split(':', 1)[1]}`")
             else:
                 wanted.append(f"`{member}`")
-    wanted += [f"`--set {key}=VALUE`" for key in concept.get("config", [])]
+    if own == "action":
+        wanted += [f"`{key}=VALUE`" for key in concept.get("config", [])]
+    else:
+        wanted += [f"`--set {key}=VALUE`" for key in concept.get("config", [])]
     return wanted
 
 
@@ -264,6 +267,17 @@ def test_replacements_cover_exactly_the_retired_and_deprecated_inputs(
         ), entry
 
 
+def _names(text: str, token: str) -> bool:
+    """True when ``token`` appears as a whole token, not inside a longer name.
+
+    ``header`` must not match ``old-header`` or ``headers``; ``compile.frontend``
+    must not match ``compile.frontend_context``.
+    """
+    return (
+        re.search(r"(?<![\w.-])" + re.escape(token) + r"(?![\w.-])", text) is not None
+    )
+
+
 def test_each_replacement_is_a_live_row_its_tombstone_names(
     registry: dict[str, Any],
 ) -> None:
@@ -288,7 +302,7 @@ def test_each_replacement_is_a_live_row_its_tombstone_names(
         )
         leaf = target if "." in target and ":" not in target else target.split(":")[-1]
         text = descriptions[entry["id"]]
-        assert leaf in text, (
+        assert _names(text, leaf), (
             f"{entry['id']}'s description does not name {leaf!r}: {text[:160]}"
         )
 
@@ -322,6 +336,27 @@ def test_cell_excludes_its_own_surface_and_adds_set_for_a_config_key() -> None:
     assert refs.cell("compile.include_dirs", own="config") == (
         "CLI: `compare --include`; Action: `include`; Reusable workflow: `include` (check-single.yml); "
         "--set: `--set compile.include_dirs=VALUE`"
+    )
+
+
+def test_an_action_row_spells_the_override_as_its_own_set_input() -> None:
+    """An Action row names the Action's ``set:`` input, never the CLI's ``--set``."""
+    reg = {
+        "concepts": [
+            {
+                "concept": "compile.include_dirs",
+                "tier": "core",
+                "cli": ["compare --include"],
+                "action": ["action:include"],
+                "workflow": ["workflow:check-single.yml:include"],
+                "config": ["compile.include_dirs"],
+            }
+        ],
+        "replacements": [],
+    }
+    assert _cross_refs(reg).cell("action:include", own="action") == (
+        "CLI: `compare --include`; Reusable workflow: `include` (check-single.yml); "
+        ".abicheck.yml: `compile.include_dirs`; set: `compile.include_dirs=VALUE`"
     )
 
 
