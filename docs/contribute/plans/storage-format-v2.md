@@ -809,7 +809,8 @@ listing/report, even where no resolution graph can place it.
   - D16, partially implemented: the `evidence` digest, persisted on
     `ArtifactRef` and consumed by the same-snapshot coverage note.
     `comparison_input` and `transport` are not implemented.
-  - D18, not implemented beyond the `graph` section's deferred decode.
+  - D18, step 1 implemented (per-section decode split, no new laziness);
+    lazy loading beyond the `graph` section is not.
   - Exit: one regression test per amendment probe (D14's and D17's exist), the oneDAL/MKL corpus, Windows and macOS, and
     concurrent-publisher serialization (tested on Linux).
 
@@ -970,8 +971,45 @@ A1.9), item by item. Open items are also listed in
   probes in `tests/unit/storage/test_extension_preservation_gap.py`. The
   carriers (`must_understand` list, `extensions` map) are specified by the
   amendment but not built.
-- **D18, selective load: not implemented** beyond the `graph` section's
-  deferred decode described under Phase 2 above.
+- **D18, selective load: step 1 (decode split) implemented 2026-10-31;
+  lazy loading not implemented** beyond the `graph` section's deferred
+  decode described under Phase 2 above.
+
+  *Design of the split.* `storage/snapshot_section_decode.DECODE_STEPS`
+  lists every decode step with `reads` (the raw sections it may look at)
+  and `after` (the steps whose decoded output it consumes). Each step gets a
+  `SectionView` of the flat document holding only its sections' keys
+  (`legacy_sections.section_of_field`); reading another section's key raises
+  `UndeclaredSectionRead`, so the declarations are enforced on every load.
+  `snapshot_codec.decode_snapshot` composes the steps; the result is
+  byte-identical (save bytes, `publication` and `evidence` digests) to the
+  single-function decoder on the 51-document fixture corpus.
+
+  | Step | Reads | After | Kind |
+  |---|---|---|---|
+  | prelude: unwrap, D14 carriers, `migrate_and_describe`, schema gate | whole document | -- | whole-document |
+  | `declarations`, `types`, `binary`, `debug`, `build`, `layout`, `provenance`, `semantic_ir` | own section | -- | per-section |
+  | `from_headers` | `debug` | `binary`, `declarations`, `types` | join (inference for a legacy document without the key) |
+  | `reliability_flags` | `debug` | `from_headers` | join |
+  | `legacy_fact_backfill` | `declarations`, `types`, `debug`, `binary` | `declarations`, `types`, `from_headers`, `reliability_flags` | join; rewrites decoded entities in place |
+  | `graph` | `graph`, `build` | `build` | join (already lazy, `PendingGraph`) |
+  | `extraction_scope` | `layout` | `declarations`, `types` | join (ownership attaches to entities) |
+  | `finalize_semantic_ir` | -- | `declarations`, `types`, `debug`, `semantic_ir` | join |
+  | tail: ELF-binding backfill, closure-identity renumbering (`finalize_snapshot`) | -- | whole snapshot | whole-snapshot |
+
+  *Next step (not done).* A section may load lazily only when every join
+  that reads or rewrites it is a no-op for the document: extractor
+  generation current (no spelling migration), `from_headers` recorded, every
+  reliability flag recorded and the schema past the backfill thresholds.
+  `semantic_ir` assembly is deferred by making `AbiSnapshot.semantic_ir` a
+  `PendingGraph`-style cell whose loader forces the `declarations`/`types`/
+  `debug` cells first and then runs `finalize_snapshot_semantic_ir`; the
+  closure-identity renumbering must move into that cell or be proven a
+  no-op for current documents. `debug` was not made lazy in this step: the
+  `from_headers`, reliability-flag and backfill joins read it on every load.
+  Timing: the split costs nothing measurable (161 MiB synthetic flat
+  document, 20k functions/4k records/2k variables, `snapshot_from_dict`
+  best of 3: 7.27 s before, 7.13 s after).
   Evaluated 2026-10-31: the cross-section decode in `decode_snapshot` and
   the `semantic_ir` funnel in `AbiSnapshot.__post_init__` must be split per
   section first; measurements and the blocker are in known-gaps "ADR-062
