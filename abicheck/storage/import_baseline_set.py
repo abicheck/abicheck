@@ -362,6 +362,7 @@ def import_baseline_set(
             kind=artifact.kind,
             native_identity=native_identity,
             sections=artifact.sections,
+            evidence_digest=artifact.evidence_digest,
         )
         artifact_refs.append(artifact)
         section_schema_versions.update(member_manifest.versions.section_schema_versions)

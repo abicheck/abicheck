@@ -31,6 +31,7 @@ import pytest
 from hypothesis import given, settings, strategies as st
 
 from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.storage.evidence_digest import VOLATILE_CAPTURE_FIELDS
 from abicheck.storage.snapshot_digest_cache import digest_scope
 from abicheck.storage.snapshot_encode import (
     _VERBATIM_STR_FIELDS,
@@ -107,8 +108,15 @@ def test_identical_content_still_gets_both_digests() -> None:
 
 @pytest.mark.parametrize("field", _VERBATIM_STR_FIELDS)
 def test_a_differing_field_skips_both_digests(field: str) -> None:
-    assert snapshot_identity_digests(_snap(**{field: "a"}), _snap(**{field: "b"})) == (
-        None,
-        None,
-    )
+    # `same_persisted_content` (publication role) is unchanged: any differing
+    # verbatim field means different content, decided with no serialization.
     assert not same_persisted_content(_snap(**{field: "a"}), _snap(**{field: "b"}))
+    old_digest, new_digest = snapshot_identity_digests(
+        _snap(**{field: "a"}), _snap(**{field: "b"})
+    )
+    if field in VOLATILE_CAPTURE_FIELDS:
+        # ADR-062 D16: the same-snapshot note asks the evidence question, and
+        # capture metadata is not evidence.
+        assert old_digest is not None and old_digest == new_digest
+    else:
+        assert (old_digest, new_digest) == (None, None)

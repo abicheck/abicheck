@@ -678,7 +678,7 @@ class TestNoteIfSameBinaryCompared:
         )
         (warning,) = [w for w in result.coverage_warnings if "byte-identical" in w]
         assert "binaries" not in warning
-        assert "canonical serialization" in warning
+        assert "snapshots' evidence is" in warning  # ADR-062 D16 evidence role
 
     def test_snapshot_digest_fallback_is_a_noop_when_digests_differ(self):
         from abicheck.confidence import note_if_same_binary_compared

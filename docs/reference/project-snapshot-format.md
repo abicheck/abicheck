@@ -67,6 +67,11 @@ its `ref_digest` is the semantic digest of the whole document; a reader
 recomputes it and refuses a document that does not match. Section content
 (declarations, types, layout, ...) is never embedded in a ref — it is a
 separate, content-addressed object under `objects/`, referenced by digest.
+An artifact ref may carry `evidence_digest`: the evidence
+digest of the artifact's snapshot document (capture metadata such as
+`created_at` excluded, identity-matched record lists in a stable order). It
+is optional; a reader that does not know it ignores it, and it is covered
+by `ref_digest` like every other field.
 A package format v1 package kept each ref at a mutable
 `refs/variants/<id>.json`/`refs/artifacts/<id>.json` path and listed bare
 ids; it is still read.
@@ -115,6 +120,13 @@ legacy-import provenance axes (D2) — none of them the single overloaded
 `package_format_version` and `comparison_contract_version` fail closed: an
 unstated or unrecognized value refuses to load rather than being treated as
 "this build's own version". The rest are informational.
+
+`manifest.json` may also carry an optional `must_understand` list, written
+only when non-empty: an unknown name refuses the package. A
+section object's own header may carry `must_understand` and `extensions`; in
+a directory package an unknown must-understand name on a section is refused
+(fail closed). The single-file `.abi.json` reader blocks only that section's
+analyses instead (see [snapshot format](snapshot-format.md#extensions-and-must-understand-sections)).
 
 ## Sections
 

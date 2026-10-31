@@ -441,8 +441,16 @@ class ArtifactRef:
     kind: str
     native_identity: Mapping[str, str] = field(default_factory=dict)
     sections: Mapping[str, ObjectRef] = field(default_factory=dict)
+    #: ADR-062 D16's `evidence` digest of the document these sections hold
+    #: (`storage.evidence_digest`), or `None` when the writer recorded none.
+    #: Optional and ignorable: written only when set, so a ref without it
+    #: keeps its exact bytes and `ref_digest`; a reader that predates it
+    #: ignores the key (and still verifies it, through `ref_digest`).
+    evidence_digest: str | None = None
 
     def __post_init__(self) -> None:
+        if self.evidence_digest is not None:
+            object_relpath(self.evidence_digest)  # refuses a malformed digest
         # `_safe_ref_id`, not `_identity_text`: both ids become literal
         # filenames (this artifact's own `artifact_ref_relpath`, and its
         # owning variant's `variant_ref_relpath`), so a value either helper
@@ -476,6 +484,8 @@ class ArtifactRef:
             out["native_identity"] = dict(self.native_identity)
         if self.sections:
             out["sections"] = {k: v.to_dict() for k, v in self.sections.items()}
+        if self.evidence_digest is not None:
+            out["evidence_digest"] = self.evidence_digest
         return out
 
     @classmethod
@@ -492,6 +502,7 @@ class ArtifactRef:
             kind=_required_field(data, "kind", "an artifact reference"),
             native_identity=data.get("native_identity", {}),
             sections=sections,
+            evidence_digest=data.get("evidence_digest"),
         )
 
 
@@ -527,9 +538,17 @@ class PackageManifest:
     #: byte-identical shared evidence collapses to one stored object across
     #: every artifact that references it (digest addressing, no extra dedup).
     project_sections: Mapping[str, ObjectRef] = field(default_factory=dict)
+    #: ADR-062 D14: names a reader must understand before using this package
+    #: for comparison. Written only when non-empty; an unknown name refuses
+    #: the package (`wire_extensions.check_must_understand`).
+    must_understand: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         _instance_of(self.versions, StorageVersions, "versions")
+        names = tuple(self.must_understand)
+        if not all(isinstance(n, str) and n for n in names):
+            raise ValueError("PackageManifest.must_understand must hold names")
+        object.__setattr__(self, "must_understand", tuple(sorted(set(names))))
 
         variants = _row_sequence(self.variant_refs, "variant_refs")
         for index, variant in enumerate(variants):
@@ -620,6 +639,8 @@ class PackageManifest:
             out["project_sections"] = {
                 key: ref.to_dict() for key, ref in self.project_sections.items()
             }
+        if self.must_understand:
+            out["must_understand"] = list(self.must_understand)
         return out
 
     @classmethod
@@ -637,6 +658,9 @@ class PackageManifest:
                 key: ObjectRef.from_dict(value)
                 for key, value in raw_project_sections.items()
             },
+            must_understand=tuple(
+                _row_sequence(data.get("must_understand", ()), "must_understand")
+            ),
         )
 
 

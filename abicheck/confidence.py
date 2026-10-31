@@ -759,7 +759,8 @@ def note_if_same_binary_compared(
                 "intended -- verify the correct snapshot files were provided"
             )
         result.coverage_warnings.append(
-            f"old and new abi snapshots' canonical serialization is "
-            f"{SAME_BINARY_WARNING_MARKER} (sha256 "
-            f"{old_snapshot_digest[:12]}...); {detection_note}"
+            f"old and new abi snapshots' evidence is "
+            f"{SAME_BINARY_WARNING_MARKER} (digest "
+            f"{old_snapshot_digest.removeprefix('sha256:')[:12]}...); "
+            f"{detection_note}"
         )

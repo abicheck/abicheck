@@ -62,6 +62,12 @@ from ..errors import IncompatibleSnapshotSchemaError
 from .canonical import CAPTURE_METADATA_KEY
 from .dto import SECTION_SCHEMA_VERSIONS, migration_source_versions
 from .import_v1 import export_legacy_sections, legacy_section_dtos
+from .wire_extensions import (
+    WIRE_EXTENSIONS_KEY,
+    WireExtensions,
+    merge_wire_extensions,
+    split_wire_extensions,
+)
 
 __all__ = [
     "SECTION_SCHEMA_VERSIONS_KEY",
@@ -116,6 +122,7 @@ def to_sectioned_document(
     *,
     max_known_schema_version: int,
     document_encoded_here: bool = False,
+    extensions: WireExtensions | None = None,
 ) -> dict[str, Any]:
     """*legacy_document* (a `serialization.snapshot_to_dict()`-shaped
     mapping) repackaged into this module's single-file sectioned shape.
@@ -127,6 +134,10 @@ def to_sectioned_document(
 
     *document_encoded_here*: see `import_v1.legacy_section_dtos` -- only
     for a document whose IR keys `snapshot_to_dict` just encoded.
+
+    *extensions*: the ADR-062 D14/D15 carriers a load of this snapshot kept
+    (`wire_extensions.extensions_of`), written back unchanged. Every written
+    section also gets a `section_availability` entry (D15).
     """
     # Encoded directly, not through a throwaway object store: the store
     # canonicalized, hashed and deep-copied every section only for this
@@ -157,13 +168,16 @@ def to_sectioned_document(
             if key != CAPTURE_METADATA_KEY
         }
         del dto_dict
-    return {
-        "schema_version": source_schema_version,
-        SECTIONS_KEY: sections,
-        SECTION_SCHEMA_VERSIONS_KEY: {
-            kind: SECTION_SCHEMA_VERSIONS[kind] for kind in sections
+    return merge_wire_extensions(
+        {
+            "schema_version": source_schema_version,
+            SECTIONS_KEY: sections,
+            SECTION_SCHEMA_VERSIONS_KEY: {
+                kind: SECTION_SCHEMA_VERSIONS[kind] for kind in sections
+            },
         },
-    }
+        extensions,
+    )
 
 
 def _check_section_version_readable(section_kind: str, version: int) -> None:
@@ -270,7 +284,10 @@ def _check_section_versions(
 
 
 def from_sectioned_document(
-    document: Mapping[str, Any], *, defer_graph: bool = False
+    document: Mapping[str, Any],
+    *,
+    defer_graph: bool = False,
+    carry_extensions: bool = False,
 ) -> dict[str, Any]:
     """The inverse of `to_sectioned_document`: *document*'s sections
     reassembled into the flat `snapshot_to_dict()`-shaped document
@@ -295,7 +312,18 @@ def from_sectioned_document(
     *defer_graph*: see `import_v1.export_legacy_sections` -- only for a
     caller that hands the result straight to `snapshot_from_dict`/
     `decode_snapshot`, which decode the graph on first access.
+
+    ADR-062 D14/D15: an unknown section kind, a blocked known section (an
+    unknown `must_understand` name, a newer `section_schema_version`, a
+    `failed` availability entry), header `extensions` and unknown record
+    fields are first split off by `wire_extensions.split_wire_extensions`.
+    The checks below see only the sections this build decodes. Only a caller
+    that hands the result to `decode_snapshot` sets *carry_extensions*: the
+    carriers then travel under `WIRE_EXTENSIONS_KEY` (not JSON) for the
+    decoder to attach to the snapshot.
     """
+    document = split_wire_extensions(document)
+    carried = document.get(WIRE_EXTENSIONS_KEY)
     sections_raw = document.get(SECTIONS_KEY)
     if not isinstance(sections_raw, Mapping):
         raise ValueError(
@@ -342,7 +370,7 @@ def from_sectioned_document(
     # fetch it back by that digest bought nothing and cost a full
     # canonicalization, surrogate walk, serialization and deep copy of the
     # whole document (the largest single term of a stored-baseline load).
-    return export_legacy_sections(
+    flat = export_legacy_sections(
         (
             (section_kind, f"{SECTIONS_KEY}[{section_kind!r}]", dto_dict)
             for section_kind, dto_dict in sections_raw.items()
@@ -351,3 +379,6 @@ def from_sectioned_document(
         source_schema_version=schema_version,
         defer_graph=defer_graph,
     )
+    if carried is not None and carry_extensions:
+        flat[WIRE_EXTENSIONS_KEY] = carried
+    return flat

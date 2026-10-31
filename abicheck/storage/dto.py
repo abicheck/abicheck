@@ -41,7 +41,7 @@ version this build cannot reach is refused rather than silently accepted.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Protocol, TypeVar
 
@@ -288,8 +288,19 @@ class SectionDTO:
     section_kind: str
     section_schema_version: int
     payload: Mapping[str, Any]
+    #: ADR-062 D14 header carriers, written only when non-empty: names a
+    #: reader must understand before comparing this section, and a map of
+    #: canonical JSON extension values (`storage/wire_extensions.py`).
+    must_understand: tuple[str, ...] = ()
+    extensions: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}))
 
     def __post_init__(self) -> None:
+        names = tuple(self.must_understand)
+        if not all(isinstance(n, str) and n for n in names):
+            raise ValueError("SectionDTO.must_understand must hold names")
+        object.__setattr__(self, "must_understand", names)
+        _mapping(self.extensions, "extensions")
+        object.__setattr__(self, "extensions", _freeze(canonical_form(self.extensions)))
         object.__setattr__(
             self, "section_kind", _identity_text(self.section_kind, "section_kind")
         )
@@ -336,6 +347,12 @@ class SectionDTO:
             "section_kind": self.section_kind,
             "section_schema_version": self.section_schema_version,
             "payload": _unfreeze(self.payload),
+            **(
+                {"must_understand": list(self.must_understand)}
+                if self.must_understand
+                else {}
+            ),
+            **({"extensions": _unfreeze(self.extensions)} if self.extensions else {}),
         }
 
     @classmethod
@@ -352,6 +369,8 @@ class SectionDTO:
                 "section_schema_version",
             ),
             payload=_required_field(data, "payload", "a section DTO"),
+            must_understand=tuple(data.get("must_understand") or ()),
+            extensions=data.get("extensions") or {},
         )
 
 

@@ -261,14 +261,21 @@ def snapshot_identity_digest(snap: AbiSnapshot) -> str:
 def snapshot_identity_digests(
     old: AbiSnapshot, new: AbiSnapshot
 ) -> tuple[str | None, str | None]:
-    """Both sides' :func:`snapshot_identity_digest`, or ``(None, None)`` when
-    the two provably serialize differently -- which is what the digests would
-    have said, since their one consumer only asks whether they are equal."""
-    from ..storage.snapshot_encode import persisted_content_provably_differs
+    """Two digests for :func:`note_if_same_binary_compared`'s snapshot
+    fallback: equal exactly when *old* and *new* carry the same *evidence*
+    (ADR-062 D16's `evidence` role), or ``(None, None)`` when they provably
+    do not.
 
-    if persisted_content_provably_differs(old, new):
-        return None, None
-    return snapshot_identity_digest(old), snapshot_identity_digest(new)
+    Since D16 this answers "same evidence?", not "same publication?": two
+    dumps of one binary that differ only in ``created_at``, the dump path,
+    the CI build id or producer list order now get the same-snapshot note,
+    which the `publication` digest (:func:`snapshot_identity_digest`,
+    unchanged) used to withhold. The work and its order are owned by
+    ``storage.snapshot_digest_cache.evidence_identity_digests``.
+    """
+    from ..storage.snapshot_evidence import evidence_identity_digests
+
+    return evidence_identity_digests(old, new)
 
 
 def effective_gate_for_resolved_compare_config(

@@ -49,6 +49,7 @@ from ._result import AnalysisAssurance, AssuranceStatus
 from ._target_accounting import _target_accounting
 from ._template_defaults import template_default_gap
 from ._translation_units import _translation_units
+from ._unreadable_sections import unreadable_section_gap
 
 if TYPE_CHECKING:
     from ...buildsource.pack import BuildSourcePack
@@ -203,6 +204,8 @@ def compute_analysis_assurance(
     notes.extend(template_notes)
     projection_gap, projection_notes = depth_projection_gap(old, new)
     notes.extend(projection_notes)
+    unreadable_gap, unreadable_notes = unreadable_section_gap(old, new)
+    notes.extend(unreadable_notes)
 
     # -- manifest-level layer incompleteness ----------------------------------
     # The one check below that reads the pack MANIFEST directly (D7/D8's own
@@ -264,6 +267,7 @@ def compute_analysis_assurance(
         or is_comparability_bounded(result.comparability_assurance)
         or template_defaults_gap
         or projection_gap
+        or unreadable_gap
     ):
         status = "partial"
     elif nothing_requested:

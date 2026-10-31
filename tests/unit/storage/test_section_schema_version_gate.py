@@ -38,7 +38,12 @@ from pathlib import Path
 import pytest
 
 from abicheck.errors import IncompatibleSnapshotSchemaError
-from abicheck.serialization import SCHEMA_VERSION, snapshot_from_dict, snapshot_to_dict
+from abicheck.serialization import (
+    SCHEMA_VERSION,
+    snapshot_from_dict,
+    snapshot_to_dict,
+    snapshot_to_json,
+)
 from abicheck.storage.canonical import canonical_form
 from abicheck.storage.dto import (
     BASELINE_SET_SECTION_KIND,
@@ -51,6 +56,7 @@ from abicheck.storage.sectioned_document import (
     SECTIONS_KEY,
     to_sectioned_document,
 )
+from abicheck.storage.wire_extensions import IDENTITY_SECTION_KIND
 
 # The committed fixture is a real sectioned dump (schema 48); loading it warns
 # that it predates this build -- the documented, expected older-schema path.
@@ -111,28 +117,47 @@ def test_current_version_of_every_section_loads(kind: str) -> None:
 
 @pytest.mark.parametrize("kind", _SNAPSHOT_KINDS)
 def test_inventory_claiming_a_too_new_section_version_is_refused(kind: str) -> None:
-    """The reported case (D5): the inventory says 99 for a section whose own
-    DTO is current. Refused through the public load path, with the same
-    upgrade wording as the top-level `schema_version` check."""
+    """The reported case (D5): the inventory says a newer version for a
+    section whose own DTO is current. The document contradicts itself, so it
+    is refused as corrupt, never decoded and never blocked as "newer"."""
     document = _current_document()
     newer = SECTION_SCHEMA_VERSIONS[kind] + 1
     document[SECTION_SCHEMA_VERSIONS_KEY][kind] = newer
-    with pytest.raises(
-        IncompatibleSnapshotSchemaError, match="Upgrade abicheck"
-    ) as info:
+    with pytest.raises(ValueError, match="section_schema_version") as info:
         _load(document)
     assert kind in str(info.value)
     assert str(newer) in str(info.value)
 
 
-@pytest.mark.parametrize("kind", _SNAPSHOT_KINDS)
-def test_section_written_at_a_too_new_version_is_refused(kind: str) -> None:
-    """A writer newer than this build stamps both the inventory and the
-    section's own DTO with the new version: still refused, not decoded."""
+@pytest.mark.parametrize(
+    "kind", [k for k in _SNAPSHOT_KINDS if k != IDENTITY_SECTION_KIND]
+)
+def test_section_written_at_a_too_new_version_blocks_only_its_readers(
+    kind: str,
+) -> None:
+    """ADR-062 D14: a writer newer than this build stamps both the inventory
+    and the section's own DTO with the new version. The section is not
+    decoded; it is kept verbatim, named in `unreadable_sections`, and
+    written back unchanged -- the rest of the document still loads."""
     document = _current_document()
     newer = SECTION_SCHEMA_VERSIONS[kind] + 1
     document[SECTION_SCHEMA_VERSIONS_KEY][kind] = newer
     document[SECTIONS_KEY][kind]["section_schema_version"] = newer
+    snap = _load(document)
+    assert [section for section, _ in snap.unreadable_sections] == [kind]
+    assert str(newer) in snap.unreadable_sections[0][1]
+    resaved = json.loads(snapshot_to_json(snap))
+    assert resaved[SECTIONS_KEY][kind] == document[SECTIONS_KEY][kind]
+    assert resaved[SECTION_SCHEMA_VERSIONS_KEY][kind] == newer
+
+
+def test_a_too_new_identity_section_refuses_the_document() -> None:
+    """`provenance` holds the identity every analysis reads: blocking it
+    would leave nothing comparable, so the document is refused."""
+    document = _current_document()
+    newer = SECTION_SCHEMA_VERSIONS[IDENTITY_SECTION_KIND] + 1
+    document[SECTION_SCHEMA_VERSIONS_KEY][IDENTITY_SECTION_KIND] = newer
+    document[SECTIONS_KEY][IDENTITY_SECTION_KIND]["section_schema_version"] = newer
     with pytest.raises(IncompatibleSnapshotSchemaError, match="Upgrade abicheck"):
         _load(document)
 
