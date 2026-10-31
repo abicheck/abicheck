@@ -95,19 +95,19 @@ inputs:
     required: false
   dso-only:
     description: >
-      RETIRED (ADR-091 D7, no transition window). Setting this input fails the
+      RETIRED (no transition period). Setting this input fails the
       run before any analysis. Replace it in your workflow with
       `set: release.dso_only=true` (the `set:` input takes one PATH=VALUE per line), then remove dso-only.
     required: false
   include-private-dso:
     description: >
-      RETIRED (ADR-091 D7, no transition window). Setting this input fails the
+      RETIRED (no transition period). Setting this input fails the
       run before any analysis. Replace it in your workflow with
       `set: release.include_private_dso=true` (the `set:` input takes one PATH=VALUE per line), then remove include-private-dso.
     required: false
   fail-on-removed-library:
     description: >
-      RETIRED (ADR-091 D7, no transition window). Setting this input fails the
+      RETIRED (no transition period). Setting this input fails the
       run before any analysis. Replace it in your workflow with
       `set: gate.fail_on_removed_library=true` (the `set:` input takes one PATH=VALUE per line), then remove fail-on-removed-library.
     required: false
@@ -144,7 +144,7 @@ inputs:
     required: false
   public-header-dirs:
     description: >
-      RETIRED (ADR-091 D7, no transition window). Setting this input fails the
+      RETIRED (no transition period). Setting this input fails the
       run before any analysis. Replace it in your workflow with
       `header: <dir> ...` (it was forwarded as -H, which is what header does; use old-header/new-header for one side), then remove public-header-dirs.
     required: false
@@ -220,7 +220,7 @@ inputs:
     default: 'c++'
   frontend:
     description: >
-      RETIRED (ADR-091 D7, no transition window). Setting this input fails the
+      RETIRED (no transition period). Setting this input fails the
       run before any analysis. Replace it in your workflow with
       `set: compile.frontend=<value>` (the `set:` input takes one PATH=VALUE per line), then remove frontend.
     required: false
@@ -239,7 +239,7 @@ inputs:
     required: false
   compile-options:
     description: >
-      RETIRED (ADR-091 D7, no transition window). Setting this input fails the
+      RETIRED (no transition period). Setting this input fails the
       run before any analysis. Replace it in your workflow with
       `set: compile.options=[<flag>, ...]` (the `set:` input takes one PATH=VALUE per line), then remove compile-options.
     required: false
@@ -248,7 +248,7 @@ inputs:
     required: false
   nostdinc:
     description: >
-      RETIRED (ADR-091 D7, no transition window). Setting this input fails the
+      RETIRED (no transition period). Setting this input fails the
       run before any analysis. Replace it in your workflow with
       `set: compile.nostdinc=true` (the `set:` input takes one PATH=VALUE per line), then remove nostdinc.
     required: false
@@ -388,7 +388,7 @@ inputs:
     required: false
   jobs:
     description: >
-      RETIRED (ADR-091 D7, no transition window). Setting this input fails the run
+      RETIRED (no transition period). Setting this input fails the run
       before any analysis. There is no replacement: the worker count is no longer a
       workflow setting. abicheck's release fan-out auto-detects the CPU count and
       clamps it to available memory, so concurrency is controlled by the runner or
@@ -411,7 +411,7 @@ inputs:
     required: false
   allow-build-query:
     description: >
-      RETIRED (ADR-091 D7, no transition window). Setting this input fails the run
+      RETIRED (no transition period). Setting this input fails the run
       before any analysis. There is no replacement: abicheck always runs its own
       inferred compile-database query when a sources input needs build context, and
       a trusted build query is set through build-config (build.query). Remove

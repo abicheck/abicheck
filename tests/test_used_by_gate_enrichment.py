@@ -259,7 +259,7 @@ class TestCliExitCodeInvariantToConsumerScope:
 
 class TestConsumerImpactSummary:
     """Workstream D-S1: "N of M consumers affected" over every supplied
-    ``--used-by``/``--used-by-manifest`` consumer, and ``--used-by-manifest``
+    ``--used-by``/``consumers.manifests`` consumer, and ``consumers.manifests``
     parity with a bare ``--used-by`` path."""
 
     def _write_binaries(self, tmp_path):
@@ -319,8 +319,8 @@ class TestConsumerImpactSummary:
             str(new),
             "--used-by",
             str(app1),
-            "--used-by-manifest",
-            str(manifest),
+            "--set",
+            "consumers.manifests=" + json_mod.dumps([str(manifest)]),
             "-o",
             "json=-",
         )
@@ -336,7 +336,7 @@ class TestConsumerImpactSummary:
         used_by_apps = {entry["app"]: entry for entry in payload["used_by"]}
         assert used_by_apps[str(app1)]["verdict"] == "BREAKING"
         assert used_by_apps[str(app2)]["verdict"] == "COMPATIBLE"
-        # A bare --used-by/--used-by-manifest consumer with no provenance
+        # A bare --used-by/consumers.manifests consumer with no provenance
         # carries none of the new optional fields (byte-identical shape to
         # before Workstream D-S1).
         assert "platform" not in used_by_apps[str(app2)]

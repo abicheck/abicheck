@@ -61,8 +61,8 @@ def test_a_plain_request_validates_with_no_config(tmp_path: Path) -> None:
         ({"dry_run": True}, "--dry-run is not supported"),
         ({"contract_mode": "strict"}, "--contract is not supported"),
         ({"severity_preset": "default"}, "--severity-preset/--pack"),
-        ({"used_by_apps": ("app",)}, "--used-by/--used-by-manifest is not supported"),
-        ({"required_symbols": ("sym",)}, "--required-symbol is not supported"),
+        ({"used_by_apps": ("app",)}, "--used-by/consumers.manifests is not supported"),
+        ({"required_symbols": ("sym",)}, "consumers.required_symbols is not supported"),
         (
             {"use_cases_manifest": Path("uc.yml")},
             "--use-cases is not supported",
@@ -92,8 +92,8 @@ def test_a_plain_request_validates_with_no_config(tmp_path: Path) -> None:
         ({"debug_roots_given": True}, "--debug-info is not supported"),
         ({"depth": "build"}, "--depth build is not supported"),
         ({"depth": "source"}, "--depth source is not supported"),
-        ({"show_only": True}, "--view show=... is not supported"),
-        ({"report_mode": "filtered"}, "--view <mode> is not supported"),
+        ({"show_only": True}, "output.view show=... is not supported"),
+        ({"report_mode": "filtered"}, "output.view <mode> is not supported"),
         (
             {"old_headers_only": (Path("h"),)},
             "--header old=.../--include old=...",

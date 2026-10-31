@@ -621,7 +621,7 @@ class TestShowOnlyFilter:
 
     # Invalid token
     def test_invalid_token_raises(self):
-        with pytest.raises(ValueError, match="Unknown --view show= token"):
+        with pytest.raises(ValueError, match="Unknown output.view show= token"):
             ShowOnlyFilter.parse("nonsense")
 
     # Empty severities (no filter)
