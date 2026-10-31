@@ -130,3 +130,43 @@ def test_consumer_manifest_read_failure_is_a_usage_error(tmp_path: Path) -> None
     )
     assert result.exit_code == 64, result.output
     assert "consumers.manifests" in result.output
+
+
+@pytest.mark.parametrize(
+    "config_body",
+    [
+        "consumers:\n  manifests: [apps/app.json]\n",
+        "consumers:\n  required_symbols: [plugin_init]\n",
+        'output:\n  view: ["show=breaking"]\n',
+    ],
+    ids=["manifests", "required_symbols", "view"],
+)
+def test_stored_bundle_route_refuses_config_consumer_and_view_keys(
+    tmp_path: Path, config_body: str
+) -> None:
+    """A config that sets a consumer or view key is refused on a stored BundleFacts
+    operand, which runs neither the consumer scoping nor the rendering view."""
+    from test_cli_compare_bundle_facts_rejections import _STUB_BUNDLE_FACTS_JSON
+
+    facts_path = tmp_path / "old.bundlefacts.json"
+    facts_path.write_text(_STUB_BUNDLE_FACTS_JSON)
+    new_dir = tmp_path / "new"
+    new_dir.mkdir()
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text(config_body, encoding="utf-8")
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "compare",
+            str(facts_path),
+            str(new_dir),
+            "--config",
+            str(cfg),
+            "-o",
+            "json=-",
+        ],
+    )
+
+    assert result.exit_code == 64, result.output
+    assert "are not supported on a comparison of a stored BundleFacts" in result.output
