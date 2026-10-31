@@ -63,7 +63,7 @@ compiler context:
 ```
 
 `check-project.yml` forwards `compile_gcc_path`/`compile_gcc_options` as
-that cell's `gcc-path`/`gcc-options` inputs (ahead of the workflow's own
+that cell's `compiler`/`compile-options` inputs (ahead of the workflow's own
 global values) when its `toolchain-bindings-path` input is set — see
 [`docs/reference/reusable-workflows.md`](../../../../docs/reference/reusable-workflows.md#shared-analysis-options).
 

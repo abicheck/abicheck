@@ -171,6 +171,7 @@ on:
         type: string
         default: ''
       compile-options:
+        description: 'Extra compiler flags passed through to the header frontend.'
         type: string
         default: ''
       ast-frontend:
@@ -1089,7 +1090,7 @@ jobs:
           # that makes a per-profile frontend real rather than projected: a
           # GCC profile's cell can resolve `castxml` while a Clang/DPC++
           # profile's cell in the same run resolves `clang`, which one
-          # workflow-global the `frontend` input cannot express.
+          # workflow-global `frontend` input cannot express.
           #
           # Gated on `kind != 'bundle'` (Codex review): a bundle cell's
           # new-library is the `bundle-staging` *directory* it stages its
@@ -1119,7 +1120,7 @@ jobs:
           # without that gate, a profile with NO consumer_compile: overlay
           # at all would still get a non-empty consumer-frontend/
           # compiler/compile-options the moment the caller sets any
-          # workflow-global the `frontend` input/the `compiler` input/the `compile-options` input, which
+          # workflow-global `frontend`, `compiler` or `compile-options` input, which
           # would activate check-target's separate consumer-context dump
           # (and its "replace the candidate snapshot" behavior) for every
           # cell, not just the ones that actually declare an overlay
