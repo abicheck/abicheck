@@ -34,12 +34,12 @@ reports ``NO_CHANGE``/exit 0 today — verified live, not from documentation.
 path its own copy: it recomputes the same floor `enforce_requested_depth`
 already checks (``evidence_depth.depth_rank``/``gated_source_label``, the
 identical primitives), but — mirroring ``workflows.abi3_audit.
-record_abi3_evidence_contract_error``'s existing pattern for the `--abi3`
+record_abi3_evidence_contract_error``'s existing pattern for the `--abi3-floor`
 evidence-contract case — records the failure as ADR-064's *exit-7 axis*
 (``DiffResult.evidence_contract_error``) rather than raising. That is a
 deliberate, narrower behavior than ``enforce_requested_depth``'s hard
 ``ValidationError``: this function runs *after* classification has already
-produced a `DiffResult` (the same point the `--abi3` axis is recorded), so it
+produced a `DiffResult` (the same point the `--abi3-floor` axis is recorded), so it
 reports the same "the evidence contract this run pinned was not met" signal
 through the one axis every `compare` front end already resolves through
 `resolve_compare_exit_decision_with_abort_axes` — exit ``7``, not ``64`` —
@@ -153,7 +153,7 @@ def record_depth_evidence_contract_error(
     ``result.changes`` already carries is unaffected either way -- this is
     "the evidence this run promised itself was insufficient", not a
     detector's own verdict). Additive with any other exit-7 cause already
-    recorded on *result* (e.g. a failed ``--abi3`` audit) -- never clears a
+    recorded on *result* (e.g. a failed ``--abi3-floor`` audit) -- never clears a
     flag another caller already set.
     """
     if not depth_evidence_contract_satisfied(

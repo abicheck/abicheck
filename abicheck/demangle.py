@@ -587,7 +587,7 @@ def base_name(symbol: str) -> str:
 # suffix -- `my_Z3foov` -- matched `_Z3foov` inside itself and rendered as
 # `myfoo() [_Z3foov]`, with the real symbol `my_Z3foov` appearing nowhere in
 # the output and unrecoverable from it (Codex review, PR #1284; reproduced
-# directly). This slice retires `--view no-demangle` and makes every human
+# directly). This slice retires the `no-demangle` view token and makes every human
 # format demangle, which is what turned a latent corruption into an
 # unavoidable one and makes it this PR's to fix. The right edge needs no such
 # guard: `[A-Za-z0-9_$]+` is greedy, so a trailing run is swallowed into the
@@ -710,7 +710,7 @@ def demangle_text(
     **Every successfully demangled token keeps its exact mangled spelling**,
     appended in brackets: ``_ZN3Foo3barEi`` renders as
     ``Foo::bar(int) [_ZN3Foo3barEi]``. That is what let slice 7o retire the
-    ``--view demangle``/``no-demangle`` decision entirely: the only reason
+    ``demangle``/``no-demangle`` view-token decision entirely: the only reason
     to ask for the mangled form was that demangling *replaced* it, leaving
     nothing to paste into ``nm``/``objdump``, a suppression rule's selector,
     or a bug report. Both names are now always present, so human output

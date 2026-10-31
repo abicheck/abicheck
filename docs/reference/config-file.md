@@ -603,8 +603,7 @@ as candidate-side enrichment, in the same report as the comparison itself.
 The findings are advisory (`RISK`): gate them through `--policy` /
 `policy.overrides`. A candidate that is not a recognisable CPython extension
 module is an evidence-contract error (exit `7`), since the audit that was
-asked for cannot be performed at all. `scan --abi3` accepts the identical
-version spelling.
+asked for cannot be performed at all.
 
 ---
 

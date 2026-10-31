@@ -337,7 +337,7 @@ def _render_native_html_document(d: Mapping[str, Any]) -> str:
     if show_only:
         # Codex review (PR #1154 second follow-up: "Render repeated show
         # groups as repeated view options") -- render each `;`-joined
-        # internal group as its own `--view show=...` token, the same
+        # internal group as its own `output.view show=...` token, the same
         # helper the Markdown "Filtered by" notes use.
         from .view import render_show_only_cli_hint
 

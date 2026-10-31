@@ -518,7 +518,7 @@ def displayed_with_scoped_only(
 ) -> list[Change]:
     """The findings this report will actually list, scoped-only ones included.
 
-    `--used-by`/`--required-symbol` scoping synthesizes fresh `Change`
+    `--used-by`/`consumers.required_symbols` scoping synthesizes fresh `Change`
     objects onto `result.scoped_only_changes` (e.g. `PE_ORDINAL_RETARGETED`),
     and `_fold_scoped_compat_into_text` appends them to the rendered report's
     own `changes` array afterwards. Any block projected onto "what is

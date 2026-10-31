@@ -75,7 +75,7 @@ OPTION_SET_SNAPSHOT: dict[str, tuple[str, ...]] = {
         # contract.overlays.post_manifest (Phase 9c) is its only spelling.
         "--abi3-floor",
         # ADR-067 D5: this run's acknowledgment records; overrides
-        # .abicheck.yml's acknowledgment.file (the config key stays the
+        # .abicheck.yml's acknowledgments.file (the config key stays the
         # spelling a project commits).
         "--acknowledgments",
         "--budget",

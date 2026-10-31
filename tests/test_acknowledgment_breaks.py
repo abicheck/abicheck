@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ADR-067 D5 ``acknowledgment.breaks``: an acknowledged break's exit contribution.
+"""ADR-067 D5 ``acknowledgments.breaks``: an acknowledged break's exit contribution.
 
 ``gate`` (default) is what every run did before the setting existed: an
 acknowledged break still gates. ``accept`` drops the acknowledged break -- and

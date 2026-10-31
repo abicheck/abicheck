@@ -53,7 +53,7 @@ _VIEW_DEFAULTS: dict[str, object] = {
 
 
 def _reject_view_tokens_for_no_baseline(kwargs: dict[str, Any]) -> None:
-    """Reject any non-default ``--view`` token for a ``--no-baseline`` audit.
+    """Reject any non-default ``output.view`` token for a ``--no-baseline`` audit.
 
     Codex review, fresh evidence ("Reject unsupported views for no-baseline
     audits"): a `--no-baseline` report is a self-diff audit against nothing

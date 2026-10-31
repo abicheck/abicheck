@@ -227,7 +227,7 @@ if [[ "$TARGET_KIND" == "plugin-contract" && -z "$CONTRACT_FILE" ]]; then
 fi
 if [[ "$BASELINE_CHANNEL" == "none" && "$TARGET_KIND" != "library" ]]; then
   # baseline-channel: none routes the analysis step to `scan` (a one-build
-  # audit), but the root Action's --used-by/--required-symbol contract
+  # audit), but the root Action's --used-by/consumers.required_symbols contract
   # scoping only exists in its `compare` branch -- `scan` has no equivalent
   # flag at all. Without this check, an app-consumer/plugin-contract check
   # with no baseline would silently run as a plain unscoped scan under the

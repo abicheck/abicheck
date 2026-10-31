@@ -126,7 +126,7 @@ class CommentModel:
     # general `incomplete_blocking` because this one axis is documented as
     # *always* additive to the real exit code (AGENTS.md: "no fail-on-*
     # condition... folded with max... on compare and scan --against alike"),
-    # even ahead of a `--used-by`/`--required-symbol` scoped verdict — a
+    # even ahead of a `--used-by`/`consumers.required_symbols` scoped verdict — a
     # scoped-COMPATIBLE run whose contract coverage also failed must not
     # render "✅ Compatible (scoped)" as if that were the whole story
     # (Codex review; see `_header`'s scoped_verdict branch).
@@ -162,7 +162,7 @@ class CommentModel:
     scope_notice: str | None = None
     scope_blocking: bool = False
     no_comparison_completed: bool = False
-    # compare --used-by/--required-symbol(s) (ADR-043; workstream D-S1
+    # compare --used-by/consumers.required_symbols (ADR-043; workstream D-S1
     # reverted the earlier "headline follows the scoped verdict" design): a
     # supplied consumer's own confirmed/potential/unresolved assessment
     # (`scoped_verdict`) is purely informational, rendered beside the

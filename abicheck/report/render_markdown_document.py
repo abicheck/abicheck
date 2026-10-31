@@ -560,7 +560,7 @@ def render_markdown_document(doc: ReportDocument) -> str:
         note = d["show_only_note"]
         # Codex review (PR #1154 second follow-up: "Render repeated show
         # groups as repeated view options") -- render each `;`-joined
-        # internal group as its own `--view show=...` token rather than
+        # internal group as its own `output.view show=...` token rather than
         # echoing the raw internal separator into a suggested invocation.
         cli_hint = render_show_only_cli_hint(note["show_only"])
         lines.append(

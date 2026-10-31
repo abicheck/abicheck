@@ -530,7 +530,7 @@ def legacy_exit_code(verdict: Verdict) -> int:
 def missing_contract_exit_code(config: SeverityConfig) -> int:
     """Severity-aware exit code floor for a scoped contract missing outright.
 
-    A ``--used-by``/``--required-symbol(s)`` scope can be BREAKING because a
+    A ``--used-by``/``consumers.required_symbols`` scope can be BREAKING because a
     required symbol/version/entrypoint is simply absent from the new
     library -- there is no resolution to compare against, so nothing reaches
     the diff and ``compute_exit_code`` never sees a ``Change`` to classify.

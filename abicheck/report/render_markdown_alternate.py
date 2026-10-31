@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Markdown's ``--view root-cause`` ``ReportDocument`` pair.
+"""Markdown's ``output.view root-cause`` ``ReportDocument`` pair.
 
 ADR-061 Phase 2 item 1's last two Markdown views. Split out of
 ``render_markdown_document.py`` once that module (review digest + full mode
@@ -129,7 +129,7 @@ def _render_view_preamble(d: Mapping[str, Any]) -> list[str]:
         note = d["show_only_note"]
         # Codex review (PR #1154 second follow-up: "Render repeated show
         # groups as repeated view options") -- render each `;`-joined
-        # internal group as its own `--view show=...` token.
+        # internal group as its own `output.view show=...` token.
         cli_hint = render_show_only_cli_hint(note["show_only"])
         lines.append(
             f"> Filtered by: {md_text(cli_hint, code=True)} "

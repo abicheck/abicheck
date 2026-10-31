@@ -1546,3 +1546,37 @@ replacements:
   - {id: workflow:check-project.yml:gcc-prefix, status: retired, replaced_by: workflow:check-project.yml:compiler}
   - {id: workflow:check-project.yml:gcc-options, status: retired, replaced_by: workflow:check-project.yml:compile-options}
   - {id: workflow:check-project.yml:policy-file, status: retired, replaced_by: workflow:check-project.yml:policy}
+# removed: ADR-091 D7 (no transition window). Every CLI option, config key and
+# typed-API keyword a rename deleted outright: the old spelling now fails as
+# an unknown option (exit 64), an unknown key, or an unexpected keyword.
+# Action inputs are not listed here; a retired Action input stays declared as
+# a tombstone and is listed under `replacements:` instead.
+#   spelling:    the dead spelling, in the inventory's id form; it must not be
+#                a live inventory row.
+#   replaced_by: the live inventory row that replaces it.
+#   match:       the regular expression tests/test_no_removed_option_spellings.py
+#                bans in user-visible text and current docs. It is narrower than
+#                the bare spelling where that is a prefix of a live one
+#                (`--abi3` of `--abi3-floor`, `--version` of the root option).
+removed:
+  - {surface: cli, spelling: compare --used-by-manifest, replaced_by: consumers.manifests, match: '--used-by-manifest\b'}
+  - {surface: cli, spelling: compare --required-symbol, replaced_by: consumers.required_symbols, match: '--required-symbols?(?![\w-])'}
+  - {surface: cli, spelling: compare --view, replaced_by: output.view, match: '--view(?![\w-])'}
+  - {surface: cli, spelling: compare --version, replaced_by: compare --label, match: '\bcompare\b[^\n`|]*?--version\b|--version[ =](?:old|new)='}
+  - {surface: cli, spelling: dump --version, replaced_by: dump --label, match: '\bdump\b[^\n`|]*?--version\b'}
+  - {surface: cli, spelling: project history --version, replaced_by: project history --label, match: '\bhistory\b[^\n`|]*?--version\b'}
+  - {surface: cli, spelling: compare --abi3, replaced_by: compare --abi3-floor, match: '--abi3(?![\w-])'}
+  - {surface: cli, spelling: deps compare --old-root, replaced_by: deps compare --root, match: '--old-root\b'}
+  - {surface: cli, spelling: deps compare --new-root, replaced_by: deps compare --root, match: '--new-root\b'}
+  - {surface: cli, spelling: deps tree --sysroot, replaced_by: deps tree --root, match: '\bdeps tree\b[^\n`|]*?--sysroot\b'}
+  - {surface: config, spelling: acknowledgment, replaced_by: acknowledgments, match: '(?m)^\s*acknowledgment:|(?<![\w./])acknowledgment\.(?:file|breaks|unacknowledged_additions)\b'}
+  - {surface: config, spelling: source.method, replaced_by: sources.method, match: '(?<![\w.])source\.method\b'}
+  - {surface: python, spelling: run_compare(old_version), replaced_by: run_compare(old_label), match: '\bold_version='}
+  - {surface: python, spelling: run_compare(new_version), replaced_by: run_compare(new_label), match: '\bnew_version='}
+  - {surface: python, spelling: run_compare(policy_file_path), replaced_by: run_compare(policy), match: '\bpolicy_file_path='}
+  - {surface: python, spelling: run_compare(acknowledgments_path), replaced_by: run_compare(acknowledgments), match: '\backnowledgments_path='}
+  - {surface: python, spelling: run_compare(force_public_symbols), replaced_by: run_compare(public_symbols), match: '\bforce_public_symbols='}
+  - {surface: python, spelling: run_compare(enable_debuginfod), replaced_by: run_compare(debuginfod), match: '\benable_debuginfod='}
+  - {surface: python, spelling: CompareRequest.follow_dependencies, replaced_by: CompareRequest.follow_deps, match: '\bfollow_dependencies='}
+  - {surface: python, spelling: run_compare(contract_mode), replaced_by: run_compare(contract), match: '\bcontract_mode='}
+  - {surface: python, spelling: run_dump(header_backend), replaced_by: run_dump(frontend), match: '\bheader_backend='}

@@ -102,7 +102,7 @@ class ComparedOperands:
     *old_path*/*new_path* feed operand metadata and the same-binary note;
     *old_live*/*new_live* decide whether the ``--depth build|source`` floor
     applies to a side (``input_resolution.side_is_live``);
-    *candidate_name* names the candidate in an ``--abi3`` precondition
+    *candidate_name* names the candidate in an ``--abi3-floor`` precondition
     message: the candidate operand's file name, on every route.
     """
 
@@ -132,7 +132,7 @@ class ClassifiedPair:
 
     *old*/*new* are the depth-projected views the result was classified from
     (what every later reader -- scoping, rendering -- must use);
-    *abi3_failure* is the ``--abi3`` precondition message, already recorded on
+    *abi3_failure* is the ``--abi3-floor`` precondition message, already recorded on
     ``result.evidence_contract_error``, for a front end that also prints it.
     """
 
@@ -154,8 +154,8 @@ def classify_resolved_pair(
     In order: cap both sides to ``request.depth`` (a view, never a mutation
     of ``pair.old``/``pair.new``); fold the pair's evidence (probe matrix,
     L0 hard removals, embedded build-source facts, the candidate-side
-    ``--abi3`` audit) into ``extra_changes`` so policy scores it; classify
-    through ``compare_snapshots``; record ADR-064's ``--abi3`` and
+    ``--abi3-floor`` audit) into ``extra_changes`` so policy scores it; classify
+    through ``compare_snapshots``; record ADR-064's ``--abi3-floor`` and
     ``--depth`` evidence-contract axes; then attach operand metadata, the
     same-binary note, ``requested_depth``, analysis assurance and evidence
     depths -- the report fields every pairwise route owes.

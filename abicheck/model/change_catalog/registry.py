@@ -187,7 +187,7 @@ class ChangeKindMeta:
     # ``EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT`` are emitted by
     # ``diff_namespaces`` for both functions and types (Codex review, PR
     # #1284): declaring either as ``TYPE`` excluded a graduated *function*
-    # from ``--view show=functions`` and serialized a wrong ``entity``.
+    # from ``output.view show=functions`` and serialized a wrong ``entity``.
     #
     # Names the ``Change`` attribute whose value spells the entity for this
     # finding (a ``ChangeEntity`` value such as ``"function"``). Resolution

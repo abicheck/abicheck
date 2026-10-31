@@ -185,7 +185,7 @@ _SUPPORTED_FORMATS = frozenset(
 
 #: Every format whose output a person reads. Plan slice 7o: demangling is
 #: resolved from this set alone -- there is no user-facing
-#: ``--view demangle``/``no-demangle`` decision any more, because there is no
+#: ``demangle``/``no-demangle`` view-token decision any more, because there is no
 #: longer a reason to make one (see :func:`~abicheck.demangle.demangle_text`:
 #: a demangled name carries its exact mangled spelling with it, and every
 #: machine projection carries both names).

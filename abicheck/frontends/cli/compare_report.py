@@ -230,7 +230,7 @@ def _render_compare_report(
     )
     # Plan slice 7o: unconditional. `result.suppression_audit` is attached
     # whenever suppression was given, and every machine format has always
-    # emitted it; `--view suppressions` gated only whether the markdown/
+    # emitted it; the retired `suppressions` view token gated only whether the markdown/
     # text/review render echoed it. ADR-067's record-before-disposing rule
     # says a suppressed finding may not be invisible because a token was
     # not typed, so the fold now runs on the field itself -- a no-op, as

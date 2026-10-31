@@ -306,7 +306,7 @@ case "$MODE" in
       # comment previously rejected every audit-only invocation, since
       # INPUT_OLD_LABEL is never actually empty).
       if [[ -n "${INPUT_OLD_LABEL:-}" && "${INPUT_OLD_LABEL}" != "old" ]]; then
-        _fail "mode: compare without a baseline (old-library/abi-baseline both omitted) does not support old-label -- there is no OLD side to label, and the CLI rejects an explicitly OLD-scoped --version outright rather than silently dropping it (abicheck/frontends/cli/commands/no_baseline_rulings.py's _reject_old_sided_inputs). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports old-label, or drop old-label for this audit-only run."
+        _fail "mode: compare without a baseline (old-library/abi-baseline both omitted) does not support old-label -- there is no OLD side to label, and the CLI rejects an explicitly OLD-scoped --label outright rather than silently dropping it (abicheck/frontends/cli/commands/no_baseline_rulings.py's _reject_old_sided_inputs). Set old-library (or abi-baseline) to run a real two-sided comparison, which supports old-label, or drop old-label for this audit-only run."
       fi
     fi
     # compare's full renderable-format set (behind `-o FORMAT=DESTINATION`)
@@ -419,8 +419,8 @@ if [[ -n "${INPUT_REQUIRE_COMPLETE:-}" && "$MODE" != "compare" ]]; then
 fi
 
 # used-by/required-symbol/required-symbols: compare mode only
-# (ADR-043 scoped-comparison contracts). --used-by and --required-symbol/
-# --required-symbols are mutually exclusive on the CLI itself, but that
+# (ADR-043 scoped-comparison contracts). --used-by and consumers.required_symbols
+# are mutually exclusive on the CLI itself, but that
 # UsageError only surfaces after Python setup/dependency install/pip
 # install -- fail here instead, before any of that, matching this script's
 # whole reason for existing (G30 P1.3, resolving the S22/S23 root-Action

@@ -266,7 +266,7 @@ def _fail_on_removed_library_str_from_gate(gate: EffectiveGate) -> str:
 
 def _gate_scope_str_from_gate(gate: EffectiveGate) -> str:
     """Canonical encoding of *gate*'s own ADR-043 scoped-gate selection
-    (``--used-by``/``--required-symbol(s)``), so two runs selecting
+    (``--used-by``/``consumers.required_symbols``), so two runs selecting
     different consumers/entrypoints don't collide on the digest (Codex
     review, PR #803, fresh evidence, and PR #1192's follow-up: this reads
     ``gate.scope`` -- the one typed value both ``add_effective_config_

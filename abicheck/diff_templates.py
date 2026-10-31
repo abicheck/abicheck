@@ -1028,7 +1028,7 @@ def detect_mandatory_template_param_added(
         subject_is_public = old_public.has(stem) or new_public.has(stem)
         # The entity this finding is about, when the evidence says so
         # unambiguously. A stem observed only as a class template is a type
-        # finding and belongs under `--view show=types`; one observed only
+        # finding and belongs under `output.view show=types`; one observed only
         # through function templates is a function finding. A stem both
         # contributed to is genuinely both, so it states nothing and falls
         # back to the kind's declared entity rather than guessing.

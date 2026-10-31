@@ -493,7 +493,7 @@ def build_root_cause_document(
         envelope=envelope,
     )
 
-    # G29 Phase 3 slice 3 follow-up: merge --used-by/--required-symbol
+    # G29 Phase 3 slice 3 follow-up: merge --used-by/consumers.required_symbols
     # scoped-only findings into the same root-cause groups (see
     # reporter_markdown._to_markdown_root_cause's own note) -- resolved
     # before the severity table so a scoped run whose only gating issue is
@@ -533,7 +533,7 @@ def build_root_cause_document(
         "report_mode": "root-cause",
         # This builder assembles its own document rather than reusing
         # `build_report_document`'s, so a field carried there is not carried
-        # here for free -- which is why `--view root-cause` rendered an
+        # here for free -- which is why `output.view root-cause` rendered an
         # accepted result naming neither the rule that demoted its findings
         # nor the reason (Codex review, PR #1284). Same key and same rows as
         # the full document, so the two projections cannot disagree.

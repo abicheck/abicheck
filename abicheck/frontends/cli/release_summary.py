@@ -306,7 +306,7 @@ def _finalize_release_output(
     only ever called for the **primary** ``--format`` render (the secondary
     ``-o`` render is a separate call in ``cli_compare_release.py`` that
     never passes it), so it is the one caller allowed to forward the
-    release's ``--view show=`` selection into the rendered text.
+    release's ``output.view show=`` selection into the rendered text.
     """
     text = render_release_summary(
         fmt,

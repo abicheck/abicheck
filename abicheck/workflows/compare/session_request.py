@@ -18,7 +18,7 @@
 :func:`abicheck.workflows.compare.session.run_pair_session` takes a
 :class:`PairSessionRequest` and returns a :class:`PairSessionOutcome`. The
 request is *resolved input*: every value a front end read from its own
-syntax (sided flags, ``-o``, ``--view``) and from the project config's
+syntax (sided flags, ``-o``, ``output.view``) and from the project config's
 run settings is already a plain value here; nothing in it is re-derived from
 a Click context. The one trace of the command line it keeps is
 :attr:`PairSessionRequest.stated_options`, the option names the invocation
@@ -134,7 +134,7 @@ class PairEvidenceInputs:
     #: ``--since``/``--changed-path`` (the changed-path seed, ADR-043 D7).
     since: str | None = None
     changed_paths: tuple[str, ...] = ()
-    #: ``--abi3`` as typed; ``python.abi3_floor`` supplies the default.
+    #: ``--abi3-floor`` as typed; ``python.abi3_floor`` supplies the default.
     abi3: str | None = None
     #: A development package given for a side (only warned about here).
     old_devel_package: Path | None = None
@@ -221,5 +221,5 @@ class PairSessionOutcome:
     suppression: Any
     #: The resolved gate's severity map (``None`` under the legacy scheme).
     report_severity: Any
-    #: Why the ``--abi3`` evidence contract failed, if it did (ADR-064 exit 7).
+    #: Why the ``--abi3-floor`` evidence contract failed, if it did (ADR-064 exit 7).
     abi3_failure: str | None = None

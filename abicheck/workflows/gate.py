@@ -304,12 +304,12 @@ def effective_gate_for_resolved_compare_config(
     axes ``cfg`` alone cannot (Codex review, PR #1192: leaving these at their
     default regardless of the real run made two invocations that genuinely
     gate differently -- e.g. differing only in ``--require-complete-
-    analysis`` or ``--required-symbol`` -- produce an *equal* ``EffectiveGate``,
+    analysis`` or ``consumers.required_symbols`` -- produce an *equal* ``EffectiveGate``,
     defeating the type's purpose). *require_complete_analysis* is the
     identically-named CLI/API flag, known before any comparison runs.
     *result* is the completed comparison's ``DiffResult`` (or ``None`` when
     called before one exists, e.g. resolution-only/dry-run code); the scoped-
-    gate selection (``--used-by``/``--required-symbol``) it may have recorded
+    gate selection (``--used-by``/``consumers.required_symbols``) it may have recorded
     is read via :func:`~abicheck.policy.effective_gate.
     scoped_gate_selection_from_result`. Both default to "no effect" so a
     caller that genuinely has neither (a bare config-only comparison, as

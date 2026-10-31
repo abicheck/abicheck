@@ -50,7 +50,7 @@ resolved here too, so no front end needs a CLI module to read them:
 * :func:`resolve_compare_collect_mode` -- the source/build collect mode:
   ``--depth`` over ``sources.method`` over the evidence inputs given.
 * :func:`load_required_symbols` / :func:`resolve_force_public_scope` -- the
-  ``--required-symbol`` contract and the forced-public symbol set, each read
+  ``consumers.required_symbols`` contract and the forced-public symbol set, each read
   once so a receipt names the content that scored the run.
 
 They raise :class:`CompareSettingsError`, which the CLI reports as a usage
@@ -123,7 +123,7 @@ class CompareSettingsError(CompareConfigurationError):
     """A compare setting from a flag or the project file is unusable.
 
     An unreadable or invalid ``.abicheck.yml``, an invalid ``sources.method``,
-    or a ``--required-symbol @FILE`` that is missing or given twice. The CLI
+    or a ``consumers.required_symbols @FILE`` that is missing or given twice. The CLI
     reports it as a usage error (exit 64) with this message.
     """
 
@@ -585,7 +585,7 @@ def load_and_resolve_compare_config(
 def load_required_symbols(
     symbols: tuple[str, ...],
 ) -> tuple[tuple[str, ...], tuple[str, ...], str | None, str | None]:
-    """Combine ``--required-symbol`` values, expanding any ``@FILE`` entry
+    """Combine ``consumers.required_symbols`` values, expanding any ``@FILE`` entry
     (ADR-068 D5 / plan Phase 7h merged ``--required-symbols FILE`` into this
     form: one symbol per line, ``#`` comments ignored, ADR-043; at most one
     ``@FILE`` per invocation, matching the singular flag it replaces).
@@ -718,7 +718,7 @@ def resolve_compare_collect_mode(
             collect_mode_for_depth("build"),
             "build (inferred: --build-info old=/new= given, no --depth)",
         )
-    return "off", "off -- no L3-L5 source/build evidence (no --depth, no --sources/--build-info, no source.method)"  # fmt: skip
+    return "off", "off -- no L3-L5 source/build evidence (no --depth, no --sources/--build-info, no sources.method)"  # fmt: skip
 
 
 def _pair_wide_dialect_override(

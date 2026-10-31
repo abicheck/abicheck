@@ -330,7 +330,7 @@ class Change:
     # ADR-049 Phase 3's provider-evidence ledger (plan Section 4.1): ids of
     # the `contract_evidence` provider records this finding's decision rests
     # on, or a run-level reference (`RUN_LEVEL_EVIDENCE_REFS`) for a decision
-    # made outside `compare()` (the `--used-by`/`--required-symbol` stamp).
+    # made outside `compare()` (the `--used-by`/`consumers.required_symbols` stamp).
     # `None` when not requested; `()` = "consulted no provider". Flat tuple,
     # same circular-import reason as above.
     contract_evidence_refs: tuple[str, ...] | None = None
@@ -443,7 +443,7 @@ class Change:
         default=None, kw_only=True
     )
     # ADR-068 D3 (plan §6 Phase 2d): this finding comes from a check that is
-    # meaningful only on the *candidate* (NEW) side -- today the ``--abi3``
+    # meaningful only on the *candidate* (NEW) side -- today the ``--abi3-floor``
     # stable-ABI audit (workflows/abi3_audit.py) -- so it rides the same
     # result document as the comparison it enriches, "marked as such" rather
     # than split into a second result. Never set for a two-sided finding.

@@ -299,7 +299,7 @@ def _result_for(
     id (see :func:`~abicheck.root_cause_evidence.impact_assessment_lookups`).
     ``None`` falls back to *impact_root_cause*'s id.
 
-    *relevant_ids*, when not ``None``, means a ``--used-by``/``--required-symbol``
+    *relevant_ids*, when not ``None``, means a ``--used-by``/``consumers.required_symbols``
     consumer was supplied: ``properties.relevantToConsumerScope`` records
     whether *change* is relevant to that consumer (:func:`finding_id` present
     in the set), purely informational. Workstream D-S1 (vision-api-abi-
@@ -474,7 +474,7 @@ def _missing_contract_result(
     """Synthesize a SARIF result for a missing required symbol/version/entrypoint.
 
     A required contract member absent from the new library (--used-by's
-    ``missing_symbols``/``missing_versions``, or --required-symbol's
+    ``missing_symbols``/``missing_versions``, or consumers.required_symbols's
     ``missing_entrypoints``) has no backing diff ``Change`` -- it was never in
     ``result.changes`` to begin with, so :func:`_result_for` never emits it.
     Without a synthetic result this real, consumer-specific fact would be
@@ -513,7 +513,7 @@ def _missing_contract_result(
             "text": f"Required symbol/version '{label}' is missing from the new library.",
         },
         # relevantToGate is always true here -- a missing-contract member is
-        # in the --used-by/--required-symbol scope by construction, distinct
+        # in the --used-by/consumers.required_symbols scope by construction, distinct
         # from whether severity config makes it block (`blocksGate`). The two
         # axes are orthogonal: severity decides blocking, not scope
         # membership (CodeRabbit review).
@@ -522,7 +522,7 @@ def _missing_contract_result(
 
 
 def _scoped_gate_properties(result: DiffResult) -> dict[str, Any] | None:
-    """Build a ``scopedGate`` block when ``--used-by``/``--required-symbol(s)``
+    """Build a ``scopedGate`` block when ``--used-by``/``consumers.required_symbols``
     scoping was requested (ADR-043).
 
     **Purely informational (workstream D-S1).** ``invocations[0].exitCode``
@@ -781,7 +781,7 @@ def to_sarif(
         )
         return root_cause_id_for_key(key), root_display
 
-    # When --used-by/--required-symbol scoping is active, relevant_ids makes
+    # When --used-by/consumers.required_symbols scoping is active, relevant_ids makes
     # each result's own level follow the scoped gate rather than the full
     # library verdict (CLI-audit P1 fix); None means no scoping is active, so
     # _result_for's existing full-library severity computation is unchanged.
@@ -989,7 +989,7 @@ def to_sarif(
                         # via exitCodeDescription only. When severity_config *is*
                         # given, the exit code instead follows the severity-aware
                         # gate (severityGate.exitCode below). A supplied
-                        # --used-by/--required-symbol consumer's own result
+                        # --used-by/consumers.required_symbols consumer's own result
                         # (scopedGate, above) never changes this number (workstream
                         # D-S1) — it always matches what the CLI process itself
                         # exits with, consumer or no consumer supplied.

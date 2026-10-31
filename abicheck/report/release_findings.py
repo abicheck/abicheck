@@ -107,7 +107,7 @@ def release_display_buckets(
     fan-out's own `findings`/`findings_view` display pool used the same
     restricted buckets -- so a `func_added`/other COMPATIBLE finding could
     never appear in a directory/package release's own findings list (nor
-    be reachable via `--view show=compatible`/`show=added`), even though
+    be reachable via `output.view show=compatible`/`show=added`), even though
     the identical single-pair `compare` for that same library displays it.
     This function is the unrestricted counterpart: every category, always,
     regardless of what's blocking -- the same "full diff, not the gate's
@@ -150,7 +150,7 @@ def release_display_buckets(
         # NOT_EVALUATED (unknown/unproven/proven-out-of-contract relevance).
         # Without this bucket, the severity_config-is-None branch above (the
         # legacy, non-severity-aware release path) is the one place such a
-        # finding disappears entirely from `findings`/`--view show=...`: the
+        # finding disappears entirely from `findings`/`output.view show=...`: the
         # severity_config branch above categorizes `diff.changes` directly
         # (kind-based, relevance-blind), so it never drops them in the first
         # place, and the equivalent scalar `compare` JSON/per-library
@@ -302,7 +302,7 @@ def project_release_library_results(
     ``effective_verdict`` overrides) is available for a library, so it is
     where a ``show_only``-filtered *view* of the findings is computed --
     but ``entry["findings"]`` itself always stays the **full**, unfiltered
-    projection, exactly as it would with no ``--view show=`` in effect. The
+    projection, exactly as it would with no ``output.view show=`` in effect. The
     filtered view is stashed under the private ``findings_view``/
     ``findings_view_truncated`` keys, consumed (and stripped) by
     :func:`abicheck.report.release_document.release_findings_for_render`
@@ -311,7 +311,7 @@ def project_release_library_results(
     (mirroring single-pair ``compare``'s own ``-o`` behaviour), so it
     must never see this filtered view. Computing the view here rather than
     re-filtering ``entry["findings"]`` downstream is deliberate: the
-    severity dimension of ``--view show=`` resolves through
+    severity dimension of ``output.view show=`` resolves through
     ``effective_verdict_for_change`` (frozen-namespace/reclassify/policy-
     file overrides), which needs the live ``Change`` objects this function
     is the last place to see before they are discarded for memory.

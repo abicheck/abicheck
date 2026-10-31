@@ -204,7 +204,7 @@ def headline(model: CommentModel) -> tuple[str, str]:
     """The comment's one-line claim, in strict priority order.
 
     Workstream D-S1 (vision-api-abi-evolution.md "D. Optional
-    prebuilt-consumer lifecycle"): a supplied --used-by/--required-symbol
+    prebuilt-consumer lifecycle"): a supplied --used-by/consumers.required_symbols
     consumer's own scoped verdict (`model.scoped_verdict`) does not override
     this headline -- it is reported separately (`_scoped_notes`). The
     headline always follows the full-library bucket counts and the

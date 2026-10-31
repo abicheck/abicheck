@@ -60,7 +60,7 @@ Nothing here shells out, re-parses a binary, or re-runs an extractor.
   _report_compare_result`` copies its own Click-validated ``--depth``
   string onto ``DiffResult.requested_depth`` before recomputing this block
   (never an *inferred* depth from bare ``--sources``/``--build-info`` or
-  ``.abicheck.yml``'s ``source.method`` -- only an explicit flag is this
+  ``.abicheck.yml``'s ``sources.method`` -- only an explicit flag is this
   comparison's stated request in the same on-the-record way). That fix was
   CLI-only, though the underlying gap was not (P2 review,
   ``discussion_r3787839902``): ``service.run_compare_request()`` -- the

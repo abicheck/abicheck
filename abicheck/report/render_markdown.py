@@ -274,7 +274,7 @@ def render_out_of_surface_note(note: OutOfSurfaceNote | None) -> list[str]:
     return [
         "",
         f"> ℹ️ {note.count} finding(s) filtered as non-public ABI surface "
-        "(public-header scoping). Pass `--view filtered` to list them.",
+        "(public-header scoping). `compare` lists them on stderr and in `-o json=...`'s `out_of_surface_changes`.",
     ]
 
 

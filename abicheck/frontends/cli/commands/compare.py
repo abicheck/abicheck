@@ -173,7 +173,7 @@ from .compare_routing import _RELEASE_FORMATS
     default=None,
     help="Acknowledgment records (YAML) for this run: intentional, "
     "reviewed changes, each named by finding_id, or by symbol with change_kind. "
-    "Overrides .abicheck.yml's acknowledgment.file.",
+    "Overrides .abicheck.yml's acknowledgments.file.",
 )
 @click.option(
     "--follow-deps",
@@ -202,7 +202,7 @@ from .compare_routing import _RELEASE_FORMATS
 # default, or .abicheck.yml's scope.public); `--contract all` is the
 # measured replacement for --no-scope-public-headers (Phase 9a).
 # ADR-068 D4 / Phase 5: --show-filtered is gone; the ledger it echoed has
-# been unconditional since ADR-067 S1, so `--view filtered` is its spelling.
+# been unconditional since ADR-067 S1 (the `filtered` view token is retired too).
 # One-comparison-product Phase 9d: --post-manifest is gone. A POST manifest
 # is a stable project property: .abicheck.yml's contract.overlays.
 # post_manifest (Phase 9c, workflows/compare/project_inputs.py) is its only
@@ -220,7 +220,7 @@ from .compare_routing import _RELEASE_FORMATS
 @debug_resolution_options
 @evidence_options  # --depth, --sources, --build-info
 @changed_path_options  # ADR-068 Phase 2c: --since/--changed-path (scoping only)
-@abi3_option  # ADR-068 Phase 2d: --abi3 candidate-side stable-ABI audit
+@abi3_option  # ADR-068 Phase 2d: --abi3-floor candidate-side stable-ABI audit
 # ADR-068 D4 / Phase 5: --surface-metrics is gone -- ADR-027's metric-drift
 # findings are computed on every comparison and merged into result.changes,
 # so nothing was left for the flag to select, not even a rendering choice.
@@ -277,7 +277,7 @@ from .compare_routing import _RELEASE_FORMATS
     "the reason 'extractor-generation drift; re-dump baseline'. "
     "Single-pair comparisons only.",
 )
-@contract_options  # ADR-049: --contract (--audit-suppressions is gone -- `--view suppressions`)
+@contract_options  # ADR-049: --contract (--audit-suppressions is gone; the suppression audit is always disclosed)
 @pack_option  # ADR-049 D8: --pack
 @click.option(
     "--use-cases",
@@ -474,7 +474,7 @@ def _compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
         ]
     )
 
-    # ADR-068 D4/Phase 5, rewritten by plan slice 7o: resolve --view
+    # ADR-068 D4/Phase 5, rewritten by plan slice 7o: resolve output.view
     # (frontends.cli.options.compare_view) into the two dest names it still carries,
     # report_mode/show_only. No profile injects those dests.
     # run_compare replaces these with output.view when the project sets one.

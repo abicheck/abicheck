@@ -17,7 +17,7 @@
 separately-built report documents", release slice).
 
 A release report used to be assembled four times over, once per format, by the retired ``cli_compare_release_helpers``' ``_format_release_{summary,json,markdown,
-junit}`` -- each re-deriving the display projection, the ``--view show=``
+junit}`` -- each re-deriving the display projection, the ``output.view show=``
 filtered counts, the exit block and the disposition audit on its own. This
 module computes all of it **once**:
 
@@ -123,7 +123,7 @@ class ReleaseEvaluation:
 class ReleaseReport:
     """The typed release view every live-release renderer reads.
 
-    ``display_*`` are the ``--view show=``-filtered projections (equal to the
+    ``display_*`` are the ``output.view show=``-filtered projections (equal to the
     full ones when *show_only* is ``None``); ``filtered_counts`` is the
     ``release_filtered_summary`` both JSON and Markdown state, ``None`` when
     no filter is active. ``exit``/``outcome``/``disposition_audit`` are the
@@ -154,8 +154,8 @@ def release_findings_for_render(
     ``report.release_findings.project_release_library_results``
     stashes private per-library keys beside the always-full ``findings``/
     ``findings_truncated`` pair: ``findings_view``/``findings_view_truncated``/
-    ``findings_view_truncated_kinds`` (present only when a ``--view show=``
-    filter was active), ``impact_table_view`` (``--view impact``) and the
+    ``findings_view_truncated_kinds`` (present only when a ``output.view show=``
+    filter was active), ``impact_table_view`` (``output.view: [impact]``) and the
     uncapped ``findings_total_count``/``findings_total_count_view``
     accounting. When *show_only* is given the filtered view replaces the full
     one (the kind ledger with it, so a filtered list never carries the full
@@ -208,7 +208,7 @@ def _release_filtered_summary_counts(
     displayed_matrix_count: int,
 ) -> dict[str, int]:
     """``{"displayed", "total"}`` finding counts across every projection a
-    ``--view show=`` selection was applied to (JSON's
+    ``output.view`` ``show=`` selection was applied to (JSON's
     ``release_filtered_summary``, Markdown's ``> Filtered by:`` note).
 
     A separately-named field from scalar ``compare``'s ``filtered_summary``:

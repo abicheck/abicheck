@@ -205,7 +205,7 @@ def test_required_symbol_scoped_breaking_reported_beside_compatible_headline():
     assert (
         "plugin_init" not in body.split("Consumer-scoped verdict")[0]
     )  # only in the note
-    assert "--required-symbol" in body
+    assert "consumers.required_symbols" in body
 
 
 def test_release_shape_detected_and_summed():

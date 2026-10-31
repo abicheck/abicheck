@@ -239,7 +239,7 @@ def add_effective_config_digest(
 
     # The one per-run `EffectiveGate` this comparison resolved: *severity_config*,
     # *require_complete_analysis* and *result*'s own recorded scoped-gate
-    # selection (`--used-by`/`--required-symbol`). Built in one place
+    # selection (`--used-by`/`consumers.required_symbols`). Built in one place
     # (`effective_config_fields_from_raw`) so the digest cannot be computed
     # from a second projection of the same raw inputs.
     ec_fields = effective_config_fields_from_raw(
@@ -493,7 +493,7 @@ def render_json_with_side_facts(
     ``_ScopedFold.into_json`` used to make over the rendered text. It is a
     no-op for every caller whose *result* carries no ``used_by``/
     ``required_symbols`` (i.e. every render that isn't a
-    ``--used-by``/``--required-symbol`` compare).
+    ``--used-by``/``consumers.required_symbols`` compare).
 
     *helpers* is forwarded verbatim to ``apply_scoped_gate`` -- the six
     ``reporter``/``reporter_markdown`` per-change functions it needs

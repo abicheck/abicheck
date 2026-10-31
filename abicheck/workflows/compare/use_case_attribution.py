@@ -77,7 +77,7 @@ def attach_use_case_impact(
 
     # Scoped-only findings included, for the same reason
     # `_attach_suppression_audit` below includes them: this runs *after*
-    # --used-by/--required-symbol scoping, which synthesizes fresh Change
+    # --used-by/consumers.required_symbols scoping, which synthesizes fresh Change
     # objects onto `scoped_only_changes` (e.g. PE_ORDINAL_RETARGETED) that
     # `_fold_scoped_compat_into_text` then appends to the rendered report's
     # own findings list. Attributing only `result.changes` left

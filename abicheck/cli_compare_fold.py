@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Scoped-gate (``--used-by``/``--required-symbol(s)``) summary fold-in for
+"""Scoped-gate (``--used-by``/``consumers.required_symbols``) summary fold-in for
 the ``compare`` command's rendered report text.
 
 Size-split from :mod:`abicheck.cli_compare_helpers` (AI-readiness file-size
@@ -114,7 +114,7 @@ def _fold_scoped_compat_into_text(
     *,
     demangle: bool = False,
 ) -> str:
-    """Fold ``--used-by``/``--required-symbol(s)`` summaries into the rendered text.
+    """Fold ``--used-by``/``consumers.required_symbols`` summaries into the rendered text.
 
     JSON is left untouched here (``fmt == "json"`` falls straight through to
     the final ``return text``): ``reporter.to_json``/``to_stat_json`` already
@@ -310,12 +310,12 @@ class _ScopedFold:
         return lines
 
     def _required_symbols_lines(self) -> list[str]:
-        """The ``--required-symbol(s)`` entrypoint-contract summary."""
+        """The ``consumers.required_symbols`` entrypoint-contract summary."""
         required_symbols = self.required_symbols
         if required_symbols is None:
             return []
         lines = [
-            "## Scoped to --required-symbol(s) contract",
+            "## Scoped to consumers.required_symbols contract",
             f"- verdict: {required_symbols['verdict']} "
             f"(missing {len(required_symbols['missing_entrypoints'])} of "
             f"{len(required_symbols['required_entrypoints'])} required "

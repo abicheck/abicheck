@@ -65,7 +65,7 @@ def backfill_python_ext_from_evidence(snap: AbiSnapshot, d: dict[str, Any]) -> N
     would audit *zero* CPython imports and certify the module clean, and
     `compare` would treat every import re-captured from the new binary as
     newly gained. So when a Mach-O snapshot never recorded its imports, leave
-    ``python_ext`` as ``None`` (unknown) — `--abi3` then honestly reports the
+    ``python_ext`` as ``None`` (unknown) — `--abi3-floor` then honestly reports the
     artifact must be re-dumped rather than silently passing.
     """
     python_ext_key_absent = "python_ext" not in d

@@ -127,7 +127,7 @@ class AppCompatResult:
     symbol_coverage: float = 100.0  # % of app's required symbols present in new lib
 
     # Consumer-specification provenance (Workstream D-S1: a ConsumerSpec's
-    # optional identity, e.g. via --used-by-manifest), reported purely as
+    # optional identity, e.g. via consumers.manifests), reported purely as
     # provenance -- see model.consumer_spec.
     platform: str | None = None
     profile: str | None = None
@@ -512,7 +512,7 @@ def _promote_scoped_contract(
     code* from these lists immediately, so a promotion that ran afterwards
     left the gate scoring a weaker ``UNKNOWN_UNRESOLVED`` while the same run
     rendered the finding as ``IN_CONTRACT`` with a ``BREAKING`` decision
-    (Codex review, confirmed via ``--required-symbol`` under
+    (Codex review, confirmed via ``consumers.required_symbols`` under
     ``--contract exports``).
 
     Deliberately limited to findings that *already carry* a contract
@@ -611,8 +611,8 @@ def scope_diff_to_required_symbols(
 ) -> PluginHostContractResult:
     """Scope an already-computed diff to an explicit required-symbol contract.
 
-    This is the generic-scoped-comparison core ``compare --required-symbol(s)``
-    calls (ADR-043) — the plugin-host mirror of :func:`scope_diff_to_app`. The
+    This is the generic-scoped-comparison core a ``compare`` run with
+    ``consumers.required_symbols`` calls (ADR-043) — the plugin-host mirror of :func:`scope_diff_to_app`. The
     full old/new comparison runs exactly once (by the caller); this function
     only intersects the given ``required_entrypoints`` with that diff. See
     :func:`check_plugin_host_contract` for the standalone convenience wrapper

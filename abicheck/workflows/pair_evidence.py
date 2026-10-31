@@ -13,7 +13,7 @@ The fold happens here once, in one order:
 1. hard ELF-only removals a header-scoped pair hides (case97,
    :func:`~abicheck.l0_export_delta.fold_l0_hard_removals`);
 2. build-info/source facts (ADR-028/033) diffed into ``extra_changes``;
-3. the candidate-only ``--abi3`` audit folded in (ADR-068 D3) -- before
+3. the candidate-only ``--abi3-floor`` audit folded in (ADR-068 D3) -- before
    classification, so policy, suppression, the disposition ledger and the
    verdict all score it.
 

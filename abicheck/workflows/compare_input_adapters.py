@@ -84,7 +84,7 @@ def compare_cli_inputs(
 
     *policy_base_option* names the option that selected ``policy`` when it was
     not ``--policy``: ``compare`` switches an untouched ``--policy`` to
-    ``plugin_abi`` for a ``--required-symbol``
+    ``plugin_abi`` for a ``consumers.required_symbols``
     contract, and that value is read as stated regardless of
     *explicit_parameters* (it was not typed, but it was chosen -- see
     :attr:`ExplicitCompatibilityInputs.policy_base_option`).
@@ -294,7 +294,7 @@ def cli_configuration_inputs(
     data -- the same stated-settings set a typed caller puts in
     ``CompareRequest.stated_settings``).
     *policy_option* names the flag that selected ``policy`` when it was not
-    ``--policy`` -- ``--required-symbol``, whose contract switches an
+    ``--policy`` -- ``consumers.required_symbols``, whose contract switches an
     untouched ``--policy`` to ``plugin_abi``, with *policy_path*/
     *policy_sha256* identifying the ``@FILE`` form's list file when used.
     *project_sha256* is the digest of the ``.abicheck.yml`` bytes

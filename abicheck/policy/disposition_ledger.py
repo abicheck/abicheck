@@ -522,7 +522,7 @@ class DispositionLedger:
     def refresh_promoted(self, result: DiffResult) -> None:
         """Re-answer any record whose finding an explicit scope *promoted*.
 
-        ADR-049 §4.3: a run given ``--used-by``/``--required-symbol`` has been
+        ADR-049 §4.3: a run given ``--used-by``/``consumers.required_symbols`` has been
         *told* what the contract is, and
         ``contract_scoped_promotion.stamp_scoped_changes`` promotes a finding
         the ``--contract`` evaluator had ruled ``PROVEN_OUT_OF_CONTRACT`` (or
@@ -584,7 +584,7 @@ class DispositionLedger:
     def apply_scope(self, in_scope: Iterable[object]) -> None:
         """Narrow the gating set to the findings the *scoped* gate scores.
 
-        ``compare --used-by``/``--required-symbol`` gates on a consumer's own
+        ``compare --used-by``/``consumers.required_symbols`` gates on a consumer's own
         subset, and that scoped decision — not the whole-library verdict — is
         what produces the run's exit code. Without this, a breaking removal
         the consumer never calls stays ``gating`` and inflates

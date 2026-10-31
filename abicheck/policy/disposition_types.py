@@ -105,7 +105,7 @@ class DispositionRecord:
     reason_code: str | None = None
     #: Set when something *other than severity* already put this finding
     #: outside the gate that decides the run: a consumer scope
-    #: (``--used-by``/``--required-symbol``) judged it irrelevant, ADR-039
+    #: (``--used-by``/``consumers.required_symbols``) judged it irrelevant, ADR-039
     #: build-context reconciliation proved it a header-parse artifact, or the
     #: opaque-handle downgrade excluded it from the verdict on its own merits.
     #:
@@ -124,7 +124,7 @@ class DispositionRecord:
     #: does not control", not "which mechanism withheld it" (that is the
     #: application point).
     gate_excluded: bool = False
-    #: Set when a *consumer scope* (``--used-by``/``--required-symbol``)
+    #: Set when a *consumer scope* (``--used-by``/``consumers.required_symbols``)
     #: ruled on this finding -- **in scope or out**, not only out.
     #:
     #: It marks which *gate* decided the record, which is why it is separate

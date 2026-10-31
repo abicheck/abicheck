@@ -15,7 +15,7 @@
 """``pr-comment`` — GitHub Action-only PR-comment renderer (ADR-043 D1).
 
 Renders a sticky GitHub PR-comment body from a JSON report produced by
-``compare`` (including its ``--used-by``/``--required-symbol(s)`` scoped
+``compare`` (including its ``--used-by``/``consumers.required_symbols`` scoped
 output). This is deliberately NOT a public ``abicheck`` subcommand -- it is
 Action/library-only tooling, invoked as ``python -m abicheck.cli_pr_comment``
 (see ``action/run.sh``), never as ``abicheck pr-comment``. Kept as a Click
@@ -135,7 +135,7 @@ def pr_comment_cmd(
     """Render a sticky PR-comment body from a JSON REPORT.
 
     REPORT is a JSON file from 'abicheck compare -o json=...' (directory/
-    package fan-out and --used-by/--required-symbol(s) scoped reports all
+    package fan-out and --used-by/consumers.required_symbols scoped reports all
     produce a compatible shape) or 'abicheck compare --no-baseline ...
     -o json=...' (recognised by its own 'audit_report_schema_version' key,
     or 'audit_set_report_schema_version' for a directory/package of

@@ -523,7 +523,7 @@ def resolve_exit_decision(
     compatibility-gate exit code -- either `severity.legacy_exit_code`
     (verdict-based, no severity config in effect) or
     `severity.compute_exit_code` (a severity map is in effect), or (Codex
-    review) the *pre-fold* `--used-by`/`--required-symbol(s)` scoped gate
+    review) the *pre-fold* `--used-by`/`consumers.required_symbols` scoped gate
     contribution -- never an already-folded value, or a tie with coverage/
     assurance would be silently hidden behind whichever reason this slot is
     labelled. This function does not choose between the unscoped
@@ -641,7 +641,7 @@ def resolve_compare_exit_decision(
     `--crosscheck` promotion axis has no producer left (see
     :class:`ExitReason.PROMOTED_CROSSCHECK`).
 
-    **`--used-by`/`--required-symbol(s)` scoped gating no longer overrides
+    **Consumer scoping (`--used-by`/`consumers.required_symbols`) no longer overrides
     the compatibility axis (workstream D-S1, vision-api-abi-evolution.md
     "D. Optional prebuilt-consumer lifecycle" -- reverting the behavior an
     earlier revision of this function introduced).** A supplied consumer's
@@ -651,7 +651,7 @@ def resolve_compare_exit_decision(
     full-library compatibility result, never a substitute for it: this
     function always derives `compatibility_contribution` from
     `result.verdict`/the resolved severity config, exactly as it would for a
-    run with no `--used-by`/`--required-symbol` at all. `ExitReason.
+    run with no `--used-by`/`consumers.required_symbols` at all. `ExitReason.
     SCOPED_GATE` is kept as a reason value (still reachable from historical
     persisted reports/tests) but is no longer produced by this resolver.
 

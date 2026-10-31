@@ -66,13 +66,13 @@ CAPABILITIES: dict[str, dict[str, str]] = {
     },
     "acknowledgment.breaks": {
         "config": "acknowledgments.breaks",
-        "policy_file": "acknowledgment.breaks",
+        "policy_file": "acknowledgments.breaks",
         "api": "acknowledgment_breaks",
         "report": "disposition_audit.acknowledgments",
     },
     "acknowledgment.unacknowledged_additions": {
         "config": "acknowledgments.unacknowledged_additions",
-        "policy_file": "acknowledgment.unacknowledged_additions",
+        "policy_file": "acknowledgments.unacknowledged_additions",
         "api": "acknowledgment_unacknowledged_additions",
         "report": "disposition_audit.unacknowledged_additions_review",
     },

@@ -15,7 +15,7 @@
 
 """Typed facts for application/plugin compatibility checking (ADR-005).
 
-The consumer-scoping check (``compare --used-by``, ``--required-symbol``)
+The consumer-scoping check (``compare --used-by``, ``consumers.required_symbols``)
 splits into three ADR-061 owners, and these are the values that cross
 between them:
 

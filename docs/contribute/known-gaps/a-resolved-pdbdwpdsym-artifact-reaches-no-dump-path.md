@@ -51,7 +51,7 @@ rejections above are unchanged in substance and still keyed on the
 generated destinations (`devel_pkg2`, `probe_matrix_*`, ...), which is what
 made them survive the rename; only the spelling each message names moved.
 Writing the test found one the manual audit had missed
-(`--used-by-manifest`), which is the argument for the mechanism in one line.
+(the compare flag that is now the `consumers.manifests` config key), which is the argument for the mechanism in one line.
 
 The whole compute/render split is new in this pass too:
 `report/no_baseline.py` now follows `abicheck/report/AGENTS.md`'s convention

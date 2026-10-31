@@ -247,11 +247,11 @@ REQUEST_ROUTING: dict[str, tuple[str, Any]] = {
     ),
     "acknowledgment_breaks": (
         _UC,
-        ".abicheck.yml acknowledgment.breaks (explicit --config or a --policy block); CLI/release/API parity is test_acknowledgment_breaks.py",
+        ".abicheck.yml acknowledgments.breaks (explicit --config or a --policy block); CLI/release/API parity is test_acknowledgment_breaks.py",
     ),
     "acknowledgment_unacknowledged_additions": (
         _UC,
-        ".abicheck.yml acknowledgment.unacknowledged_additions; CLI/release/API parity is test_acknowledgment_release_and_api.py",
+        ".abicheck.yml acknowledgments.unacknowledged_additions; CLI/release/API parity is test_acknowledgment_release_and_api.py",
     ),
     "depth": (_UC, "needs live extraction"),
     "budget_s": (_UC, "nondeterministic"),

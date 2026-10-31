@@ -32,7 +32,7 @@ Two internal axes drive resolution (ADR-035 D1), but only one is public:
   the *how* — six cost-ordered techniques that produce L3-L5 evidence, used
   internally to resolve a depth into a concrete collection mode. The S→L map
   is **lossy** (``build``→S1 not S2, and S3 has no ``--depth`` form); only
-  ``.abicheck.yml``'s ``source.method`` names an S-method directly. The
+  ``.abicheck.yml``'s ``sources.method`` names an S-method directly. The
   ``scan`` ``--mode`` presets and their precedence resolver went with
   ``scan`` (ADR-068 Phase 6).
 
