@@ -130,9 +130,23 @@ def _encode_statuses(snap: AbiSnapshot) -> dict[str, list[list[Any]]]:
 
 def decode_extraction_scope(d: Mapping[str, Any], snap: AbiSnapshot) -> None:
     """Attach the recorded scope and per-entity decisions to *snap*."""
+    decode_extraction_scope_record(d, snap)
+    attach_extraction_scope_ownership(d, snap)
+
+
+def decode_extraction_scope_record(d: Mapping[str, Any], snap: AbiSnapshot) -> None:
+    """Only the recorded :class:`ExtractionScope` (a snapshot field). Reads
+    no declaration, so a lazily loaded snapshot decodes it eagerly."""
     block = d.get(_KEY)
     if isinstance(block, Mapping):
         snap.extraction_scope = ExtractionScope.from_dict(block)
+
+
+def attach_extraction_scope_ownership(d: Mapping[str, Any], snap: AbiSnapshot) -> None:
+    """Only the per-entity decisions, attached to *snap*'s declarations --
+    the half a lazily loaded snapshot defers with its declaration store."""
+    block = d.get(_KEY)
+    if isinstance(block, Mapping):
         _attach_ownership(block.get("entity_ownership"), snap)
         return
     unscoped = d.get(_UNSCOPED_KEY)
