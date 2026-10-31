@@ -197,6 +197,15 @@ def parse_pdb_debug_info(
 
     if pdb.types is None:
         raise PdbParseError(f"{pdb_path.name}: no TPI stream")
+    if pdb.types.parse_failures:
+        # A supported record that failed to parse is missing from the type
+        # database; accepting the rest would present it as "no such type".
+        shown = "; ".join(pdb.types.parse_failures[:3])
+        more = len(pdb.types.parse_failures) - 3
+        raise PdbParseError(
+            f"{pdb_path.name}: {len(pdb.types.parse_failures)} TPI record(s) "
+            f"failed to parse: {shown}" + (f" (+{more} more)" if more > 0 else "")
+        )
 
     meta = DwarfMetadata(has_dwarf=True)
     adv = AdvancedDwarfMetadata(has_dwarf=True)

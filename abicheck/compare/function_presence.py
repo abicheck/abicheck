@@ -106,7 +106,7 @@ def _diff_function_presence(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             if decided is not None:
                 changes.extend(decided)
                 continue
-        elif template_absence.instance_still_exported(mangled):
+        elif template_absence.undecided_without_graph(mangled, f_old, elf_only_mode):
             record_declined(
                 mangled,
                 "template instance absent from the new declarations but still "

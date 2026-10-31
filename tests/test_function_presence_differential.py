@@ -38,9 +38,11 @@ from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.model import AbiSnapshot
 from abicheck.model.declarations import Function
 from abicheck.model.elf_facts import SymbolBinding, SymbolType
+from abicheck.model.explicit_instantiation import ExplicitInstantiation
 from abicheck.model.fact import Fact
 
 _OWNED = {
+    "func_export_added",
     "func_removed",
     "func_removed_elf_only",
     "func_visibility_changed",
@@ -134,7 +136,22 @@ def _pairs() -> list[tuple[str, AbiSnapshot, AbiSnapshot]]:
                 )
             )
         pairs.append((f"template_omitted_exported={still_exported}", old, new))
+    # An instance the old header spelled explicitly, omitted from the new
+    # header while the binary still exports it: a removed declaration.
+    old = _snap("1", [_explicit(_fn(_TEMPLATE, True, True))], graph=True)
+    new = _snap("2", [], graph=True)
+    new.elf.symbols.append(
+        ElfSymbol(name=_TEMPLATE, binding=SymbolBinding.WEAK, sym_type=SymbolType.FUNC)
+    )
+    pairs.append(("explicit_instance_omitted_exported", old, new))
     return pairs
+
+
+def _explicit(f: Function) -> Function:
+    f.explicit_instantiation_fact = Fact.present(
+        ExplicitInstantiation.DECLARATION, producer="test"
+    )
+    return f
 
 
 @pytest.mark.parametrize("blocked_side", ["old", "new"])
@@ -185,3 +202,28 @@ def test_template_instance_with_unreadable_graph_is_never_removed_on_omission(
     else:
         assert got == {("func_removed", _TEMPLATE)}
         assert declined == []
+
+
+@pytest.mark.parametrize("unreadable_side", ["old", "new"])
+def test_explicit_instance_removal_is_reported_with_an_unreadable_graph(
+    unreadable_side: str,
+) -> None:
+    """The header graph only decides an *implicit* instance. One the old
+    header spelled explicitly and the new header dropped is a removed
+    declaration, so it is reported as ``functions`` would report it even
+    while the graph is unreadable and the binary still exports it."""
+    old = _snap("1", [_explicit(_fn(_TEMPLATE, True, True))], graph=False)
+    new = _snap("2", [], graph=False)
+    new.elf.symbols.append(
+        ElfSymbol(name=_TEMPLATE, binding=SymbolBinding.WEAK, sym_type=SymbolType.FUNC)
+    )
+    oracle = _owned(_diff_functions(old, new))
+    block = {"unreadable_sections": (("graph", "failed"),)}
+    if unreadable_side == "old":
+        old = dataclasses.replace(old, **block)
+    else:
+        new = dataclasses.replace(new, **block)
+    with declined_scope() as declined:
+        got = _owned(_diff_function_presence(old, new))
+    assert got == oracle == {("func_removed", _TEMPLATE)}
+    assert declined == []

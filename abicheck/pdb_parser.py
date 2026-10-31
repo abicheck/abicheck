@@ -787,6 +787,8 @@ class TypeDatabase:
         self._name_cache: dict[int, str] = {}
         self._size_cache: dict[int, int] = {}
         self._parsed = False
+        #: Supported records that failed to parse -- missing here, not absent.
+        self.parse_failures: list[str] = []
 
     def parse_all(self) -> None:
         """Parse all TPI records into structured objects."""
@@ -798,11 +800,8 @@ class TypeDatabase:
             try:
                 self._parse_record(rec)
             except (struct.error, IndexError, ValueError) as exc:
-                log.debug(
-                    "Failed to parse TPI record ti=0x%x leaf=0x%x: %s",
-                    rec.type_index,
-                    rec.leaf,
-                    exc,
+                self.parse_failures.append(
+                    f"TPI record ti=0x{rec.type_index:x} leaf=0x{rec.leaf:x}: {exc}"
                 )
 
         self._fwd_to_def = _link_forward_refs(self._structs) | _link_forward_refs(
@@ -846,12 +845,12 @@ class TypeDatabase:
         """
         if is_union:
             if len(d) < 8:
-                return
+                raise ValueError(f"truncated LF_UNION record ({len(d)} bytes)")
             (count, prop, field_ti) = struct.unpack_from("<HHI", d, 0)
             pos = 8
         else:
             if len(d) < 16:
-                return
+                raise ValueError(f"truncated LF_STRUCTURE record ({len(d)} bytes)")
             (count, prop, field_ti, _derived_ti, _vshape_ti) = struct.unpack_from(
                 "<HHIII", d, 0
             )
@@ -871,7 +870,7 @@ class TypeDatabase:
 
     def _parse_enum(self, ti: int, d: bytes) -> None:
         if len(d) < 12:
-            return
+            raise ValueError(f"truncated LF_ENUM record ({len(d)} bytes)")
         (count, prop, utype_ti, field_ti) = struct.unpack_from("<HHII", d, 0)
         name, _ = _read_cstring(d, 12)
         self._enums[ti] = CvEnum(
@@ -1080,7 +1079,7 @@ class TypeDatabase:
 
     def _parse_procedure(self, ti: int, d: bytes) -> None:
         if len(d) < 12:
-            return
+            raise ValueError(f"truncated TPI record ({len(d)} bytes, need 12)")
         (rvtype, calltype, _funcattr, parmcount, arglist) = struct.unpack_from(
             "<IBBHI", d, 0
         )
@@ -1094,7 +1093,7 @@ class TypeDatabase:
 
     def _parse_mfunction(self, ti: int, d: bytes) -> None:
         if len(d) < 24:
-            return
+            raise ValueError(f"truncated TPI record ({len(d)} bytes, need 24)")
         (
             rvtype,
             classtype,
@@ -1118,7 +1117,7 @@ class TypeDatabase:
 
     def _parse_pointer(self, ti: int, d: bytes) -> None:
         if len(d) < 8:
-            return
+            raise ValueError(f"truncated TPI record ({len(d)} bytes, need 8)")
         (referent, attrs) = struct.unpack_from("<II", d, 0)
         size = (attrs >> 13) & 0x3F
         self._pointers[ti] = CvPointer(
@@ -1130,7 +1129,7 @@ class TypeDatabase:
 
     def _parse_array(self, ti: int, d: bytes) -> None:
         if len(d) < 8:
-            return
+            raise ValueError(f"truncated TPI record ({len(d)} bytes, need 8)")
         (elem_ti, idx_ti) = struct.unpack_from("<II", d, 0)
         pos = 8
         byte_size, pos = _read_numeric_leaf(d, pos)
@@ -1145,7 +1144,7 @@ class TypeDatabase:
 
     def _parse_modifier(self, ti: int, d: bytes) -> None:
         if len(d) < 6:
-            return
+            raise ValueError(f"truncated TPI record ({len(d)} bytes, need 6)")
         (mod_ti, attr) = struct.unpack_from("<IH", d, 0)
         self._modifiers[ti] = CvModifier(
             type_index=ti,
@@ -1157,7 +1156,7 @@ class TypeDatabase:
 
     def _parse_bitfield(self, ti: int, d: bytes) -> None:
         if len(d) < 6:
-            return
+            raise ValueError(f"truncated TPI record ({len(d)} bytes, need 6)")
         (underlying, length, position) = struct.unpack_from("<IBB", d, 0)
         self._bitfields[ti] = CvBitfield(
             type_index=ti,
@@ -1168,7 +1167,7 @@ class TypeDatabase:
 
     def _parse_arglist(self, ti: int, d: bytes) -> None:
         if len(d) < 4:
-            return
+            raise ValueError(f"truncated TPI record ({len(d)} bytes, need 4)")
         (count,) = struct.unpack_from("<I", d, 0)
         args = []
         pos = 4

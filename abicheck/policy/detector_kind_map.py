@@ -193,6 +193,7 @@ DETECTOR_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
         ),
         "function_presence": frozenset(
             {
+                "func_export_added",
                 "func_removed",
                 "func_removed_elf_only",
                 "func_visibility_changed",
