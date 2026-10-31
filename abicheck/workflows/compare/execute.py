@@ -162,8 +162,8 @@ def _with_config_overrides(request: CompareRequest) -> CompareRequest:
     :func:`~abicheck.workflows.compile_config.fold_typed_compile_overrides`,
     the resolver ``compare --set compile.*`` reaches; ``compile.lang`` fills
     ``lang``/``lang_explicit`` as the CLI's ``compile.lang`` does. The
-    ``debug.info``/``deps.*`` keys fill each side's ``debug_roots`` and the
-    dependency-walk fields (:mod:`~abicheck.workflows.config_run_inputs`).
+    non-core ``deps.*`` keys fill the dependency-walk fields
+    (:mod:`~abicheck.workflows.config_run_inputs`).
     """
     if not request.config_overrides:
         return request
@@ -172,7 +172,7 @@ def _with_config_overrides(request: CompareRequest) -> CompareRequest:
         COMPILE_CONTEXT_OVERRIDE_PATHS,
         fold_typed_compile_overrides,
     )
-    from ..config_run_inputs import CONFIG_RUN_INPUT_PATHS, fold_compare_run_inputs
+    from ..config_run_inputs import CONFIG_RUN_INPUT_SET_PATHS, fold_deps_overrides
     from .override_channels import TYPED_OVERRIDE_CHANNELS
 
     # Resolving first also validates the keys (a core option is refused there,
@@ -183,7 +183,7 @@ def _with_config_overrides(request: CompareRequest) -> CompareRequest:
         config_overrides=request.config_overrides,
     )
     channel_paths = {path for path, _field, _attr in TYPED_OVERRIDE_CHANNELS}
-    channel_paths |= COMPILE_CONTEXT_OVERRIDE_PATHS | CONFIG_RUN_INPUT_PATHS
+    channel_paths |= COMPILE_CONTEXT_OVERRIDE_PATHS | CONFIG_RUN_INPUT_SET_PATHS
     unsupported = sorted(set(request.config_overrides) - channel_paths)
     if unsupported:
         raise ConfigOverrideError(
@@ -209,8 +209,8 @@ def _with_config_overrides(request: CompareRequest) -> CompareRequest:
     ):
         updates["lang"] = resolved.compile_lang
         updates["lang_explicit"] = True
-    # debug.info/deps.* (ADR-091 D4, 2026-10-31 amendment): the flags' config homes.
-    updates.update(fold_compare_run_inputs(request, project_cfg))
+    # deps.search_paths/ld_library_path (ADR-091 D4, 2026-10-31 amendment).
+    updates.update(fold_deps_overrides(request, project_cfg))
     frontend, (old_compile, new_compile) = fold_typed_compile_overrides(
         request.frontend,
         (request.old.compile, request.new.compile),

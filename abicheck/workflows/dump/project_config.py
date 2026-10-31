@@ -46,10 +46,10 @@ from ..compile_config import (
     scope_compile_config_env_toggles,
 )
 from ..config_run_inputs import (
-    CONFIG_RUN_INPUT_PATHS,
+    CONFIG_RUN_INPUT_SET_PATHS,
     DepsSettings,
     dump_debug_roots,
-    fold_dump_run_inputs,
+    fold_deps_overrides,
     resolve_debug_info,
     resolve_deps_settings,
 )
@@ -115,13 +115,13 @@ _DUMP_CLI_ONLY_PATHS: frozenset[str] = frozenset(
     {"compile.ast_frontend_fallback", "compile.allow_unsupported_castxml"}
 )
 
-#: Every key ``dump --set`` applies; ``debug.info``/``deps.*`` are resolved by
-#: :mod:`~abicheck.workflows.config_run_inputs`.
+#: Every key ``dump --set`` applies; ``deps.search_paths``/``deps.ld_library_path``
+#: are resolved by :mod:`~abicheck.workflows.config_run_inputs`.
 DUMP_APPLIED_PATHS: frozenset[str] = (
     frozenset({path for path, _owner, _field, _attr in DUMP_TYPED_OVERRIDE_CHANNELS})
     | _DUMP_CLI_ONLY_PATHS
     | COMPILE_CONTEXT_OVERRIDE_PATHS
-    | CONFIG_RUN_INPUT_PATHS
+    | CONFIG_RUN_INPUT_SET_PATHS
 )
 
 
@@ -595,7 +595,7 @@ def with_dump_config_overrides(request: DumpRequest) -> DumpRequest:
     channel_paths = (
         {path for path, _owner, _field, _attr in DUMP_TYPED_OVERRIDE_CHANNELS}
         | COMPILE_CONTEXT_OVERRIDE_PATHS
-        | CONFIG_RUN_INPUT_PATHS
+        | CONFIG_RUN_INPUT_SET_PATHS
     )
     unsupported = sorted(set(request.config_overrides) - channel_paths)
     if unsupported:
@@ -605,7 +605,8 @@ def with_dump_config_overrides(request: DumpRequest) -> DumpRequest:
         )
     request_defaults = {f.name: f.default for f in dataclasses.fields(request)}
     input_defaults = {f.name: f.default for f in dataclasses.fields(request.input)}
-    request_updates, input_updates = fold_dump_run_inputs(request, cfg)
+    request_updates: dict[str, Any] = fold_deps_overrides(request, cfg)
+    input_updates: dict[str, Any] = {}
     for path, owner, field_name, attr in DUMP_TYPED_OVERRIDE_CHANNELS:
         if path not in request.config_overrides:
             continue

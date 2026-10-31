@@ -16,10 +16,11 @@
 """The config homes of ``--debug-info``/``--follow-deps``/``--search-path``/
 ``--ld-library-path`` (ADR-091 D4, 2026-10-31 amendment).
 
-Each concept has three spellings on the CLI -- the flag, ``.abicheck.yml``
-(``debug.info``, ``deps.follow``, ``deps.search_paths``,
-``deps.ld_library_path``) and ``--set`` -- and one on the typed request
-(``config_overrides``). The oracle is the *effective request* each spelling
+Each concept has the flag and an ``.abicheck.yml`` key (``debug.info``,
+``deps.follow``, ``deps.search_paths``, ``deps.ld_library_path``). The two
+non-core keys also have ``--set`` and the typed ``config_overrides``; the two
+core keys (``debug.info``, ``deps.follow``) refuse both, naming their flag, like
+every other core key. The oracle is the *effective request* each spelling
 produces at the boundary the front end hands to the workflow: the single-pair
 session request for ``compare``, the planner's ``DumpRequest`` for ``dump``.
 Every spelling of one value must produce the same effective request, and the
@@ -28,6 +29,7 @@ precedence is flag > ``--set`` > file > default.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -35,6 +37,7 @@ from typing import Any
 import pytest
 from click.testing import CliRunner
 
+from abicheck.buildsource.build_config_overrides import CORE_CONFIG_FLAGS
 from abicheck.cli import main
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.serialization import snapshot_to_json
@@ -202,12 +205,17 @@ def test_compare_flag_config_and_set_resolve_to_one_request(
     default = _compare_view(_run([*base, "--config", str(empty)], tmp_path))
     by_flag = _compare_view(_run([*base, "--config", str(empty), *flag], tmp_path))
     by_file = _compare_view(_run([*base, "--config", str(cfg)], tmp_path))
-    by_set = _compare_view(_run([*base, "--config", str(empty), *set_args], tmp_path))
 
     assert default == _DEFAULT_COMPARE
     assert by_flag == {**_DEFAULT_COMPARE, **expected}
     assert by_file == by_flag
-    assert by_set == by_flag
+    key = set_args[1].partition("=")[0]
+    if key in CORE_CONFIG_FLAGS:
+        out = _refused([*base, "--config", str(empty), *set_args], tmp_path)
+        assert key in out and CORE_CONFIG_FLAGS[key] in out
+    else:
+        by_set = _run([*base, "--config", str(empty), *set_args], tmp_path)
+        assert _compare_view(by_set) == by_flag
 
 
 @pytest.mark.usefixtures("capture_compare")
@@ -225,7 +233,6 @@ def test_compare_precedence_is_flag_then_set_then_file(
     set_args = [
         "--set", f"deps.search_paths=[{dirs['libs_b']}]",
         "--set", "deps.ld_library_path=/set",
-        "--set", f"debug.info=['{dirs['dbg_new']}']",
     ]  # fmt: skip
 
     file_only = _compare_view(_run(base, tmp_path))
@@ -248,22 +255,11 @@ def test_compare_precedence_is_flag_then_set_then_file(
     assert file_only["old_debug"] == file_only["new_debug"] == (dirs["dbg_old"],)
     assert with_set["search_paths"] == (dirs["libs_b"],)
     assert with_set["ld_library_path"] == "/set"
-    assert with_set["old_debug"] == with_set["new_debug"] == (dirs["dbg_new"],)
+    assert with_set["old_debug"] == with_set["new_debug"] == (dirs["dbg_old"],)
     # The flag replaces the configured value; it is never merged with it.
     assert with_flag["search_paths"] == (dirs["dbg_both"],)
     assert with_flag["ld_library_path"] == "/flag"
     assert with_flag["old_debug"] == with_flag["new_debug"] == (dirs["dbg_both"],)
-
-
-@pytest.mark.usefixtures("capture_compare")
-def test_set_turns_a_configured_follow_off(tmp_path: Path) -> None:
-    old = _snapshot(tmp_path / "old.json", "1")
-    new = _snapshot(tmp_path / "new.json", "2")
-    cfg = _config(tmp_path, "deps:\n  follow: true\n")
-    base = ["compare", str(old), str(new), "--config", str(cfg)]
-    assert _compare_view(_run(base, tmp_path))["follow"] is True
-    off = _run([*base, "--set", "deps.follow=false"], tmp_path)
-    assert _compare_view(off)["follow"] is False
 
 
 @pytest.mark.usefixtures("capture_compare")
@@ -331,7 +327,10 @@ def test_config_rejects_a_debug_info_entry_without_a_path(tmp_path: Path) -> Non
 # ── typed API parity ────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("case", sorted(_COMPARE_CASES))
+_SETTABLE = ["deps.ld_library_path", "deps.search_paths"]
+
+
+@pytest.mark.parametrize("case", _SETTABLE)
 def test_typed_compare_overrides_match_the_cli_request(
     case: str,
     tmp_path: Path,
@@ -379,24 +378,43 @@ def test_typed_compare_overrides_match_the_cli_request(
     } == cli
 
 
-def test_typed_argument_beats_the_override(
-    tmp_path: Path, dirs: dict[str, Path]
-) -> None:
+def test_typed_argument_beats_the_override(tmp_path: Path) -> None:
     from abicheck.workflows.compare.execute import _with_config_overrides
 
     request = CompareRequest(
-        old=InputSpec(path=tmp_path / "a.json", debug_roots=(dirs["dbg_both"],)),
+        old=InputSpec(path=tmp_path / "a.json"),
         new=InputSpec(path=tmp_path / "b.json"),
         ld_library_path="/typed",
         config_overrides={
             "deps.ld_library_path": "/set",
-            "debug.info": [str(dirs["dbg_old"])],
+            "deps.search_paths": [str(tmp_path)],
         },
     )
     out = _with_config_overrides(request)
     assert out.ld_library_path == "/typed"
-    assert out.old.debug_roots == (dirs["dbg_both"],)
-    assert out.new.debug_roots == (dirs["dbg_old"],)
+    assert out.dependency_search_paths == (tmp_path,)
+
+
+@pytest.mark.parametrize("key", ["debug.info", "deps.follow"])
+def test_typed_api_refuses_the_core_keys_naming_their_flag(
+    tmp_path: Path, key: str
+) -> None:
+    from abicheck.workflows.compare.execute import _with_config_overrides
+    from abicheck.workflows.dump.project_config import with_dump_config_overrides
+
+    value: object = ["dbg"] if key == "debug.info" else True
+    compare = CompareRequest(
+        old=InputSpec(path=tmp_path / "a.json"),
+        new=InputSpec(path=tmp_path / "b.json"),
+        config_overrides={key: value},
+    )
+    with pytest.raises(Exception, match=re.escape(CORE_CONFIG_FLAGS[key])):
+        _with_config_overrides(compare)
+    dump = DumpRequest(
+        input=InputSpec(path=tmp_path / "a.so"), config_overrides={key: value}
+    )
+    with pytest.raises(Exception, match=re.escape(CORE_CONFIG_FLAGS[key])):
+        with_dump_config_overrides(dump)
 
 
 # ── dump ────────────────────────────────────────────────────────────────────
@@ -438,11 +456,19 @@ def test_dump_flag_config_set_and_typed_resolve_to_one_request(
     default = _dump_view(_run([*base, "--config", str(empty)], tmp_path))
     by_flag = _dump_view(_run([*base, "--config", str(empty), *flag], tmp_path))
     by_file = _dump_view(_run([*base, "--config", str(cfg)], tmp_path))
-    by_set = _dump_view(_run([*base, "--config", str(empty), *set_args], tmp_path))
+
+    assert default == _DEFAULT_DUMP
+    assert by_flag == {**_DEFAULT_DUMP, **expected}
+    assert by_file == by_flag
 
     import yaml
 
     path, _, raw = set_args[1].partition("=")
+    if path in CORE_CONFIG_FLAGS:
+        out = _refused([*base, "--config", str(empty), *set_args], tmp_path)
+        assert path in out and CORE_CONFIG_FLAGS[path] in out
+        return
+    by_set = _dump_view(_run([*base, "--config", str(empty), *set_args], tmp_path))
     with pytest.raises(_Captured) as excinfo:
         run_dump_request(
             DumpRequest(
@@ -450,13 +476,8 @@ def test_dump_flag_config_set_and_typed_resolve_to_one_request(
                 config_overrides={path: yaml.safe_load(raw)},
             )
         )
-    typed = _dump_view(excinfo.value.value)
-
-    assert default == _DEFAULT_DUMP
-    assert by_flag == {**_DEFAULT_DUMP, **expected}
-    assert by_file == by_flag
     assert by_set == by_flag
-    assert typed == by_flag
+    assert _dump_view(excinfo.value.value) == by_flag
 
 
 def test_dump_refuses_a_side_scoped_debug_info_entry(tmp_path: Path) -> None:

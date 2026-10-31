@@ -407,10 +407,6 @@ concepts:
     config:
       - debug.pdb_path
       - debug.info
-    # ADR-091 D4 (2026-10-31 amendment): the flag's config home, which --set
-    # accepts too; the flag still wins over both.
-    set_paths:
-      - debug.info
     action:
       - action:old-debug-info
       - action:new-debug-info
@@ -653,8 +649,6 @@ concepts:
       - compare --follow-deps
       - dump --follow-deps
     config:
-      - deps.follow
-    set_paths:
       - deps.follow
     action:
       - action:follow-deps

@@ -519,8 +519,9 @@ with the flag's own grammar — a bare path applies to both sides, an `old=` or
 starts with `old=`/`new=`. A side's own entries replace the shared ones for
 that side, exactly as on the command line. A relative path resolves against
 the directory of the config file that names it. `--debug-info` on the command
-line replaces the whole list for that run (the two are never merged), and
-`--set debug.info=[...]` overrides the file. `dump` has one operand, so it
+line replaces the whole list for that run (the two are never merged). Like
+every key backing a core flag, it has no `--set` form: `--set debug.info=...`
+is refused, naming `--debug-info`. `dump` has one operand, so it
 reads only unscoped entries and refuses an `old=`/`new=` entry by name rather
 than applying it to the wrong side. Not available with `--no-baseline` or a
 stored BundleFacts operand, which refuse the key by name, as they refuse the
@@ -538,8 +539,10 @@ debug:
 ### `deps:`
 
 The config homes of the dependency walk's three flags, for a project whose walk does not change between runs. Each flag
-stays and wins: a stated flag replaces the configured value for that run, and
-`--set deps.<key>=...` overrides the file.
+stays and wins: a stated flag replaces the configured value for that run.
+`--set deps.search_paths=...` and `--set deps.ld_library_path=...` override
+the file; `deps.follow` backs a core flag, so `--set deps.follow=...` is
+refused, naming `--follow-deps`.
 
 | Key | Flag | Type |
 |---|---|---|
@@ -548,8 +551,9 @@ stays and wins: a stated flag replaces the configured value for that run, and
 | `ld_library_path` | `--ld-library-path` | string, a simulated `LD_LIBRARY_PATH` (default empty) |
 
 A relative `search_paths` entry resolves against the directory of the config
-file. `--follow-deps` can only turn the walk on, so `--set deps.follow=false`
-turns a configured `follow: true` off for one run. `compare` and `dump` read
+file. `--follow-deps` can only turn the walk on, so a configured
+`follow: true` is turned off by running with a `--config` that does not set
+it. `compare` and `dump` read
 these keys; the `deps tree`/`deps compare` commands read no `.abicheck.yml`,
 since the environment they inspect is their operand. As with the flags, the
 walk is not wired to `--no-baseline` or a stored BundleFacts operand, which
