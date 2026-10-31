@@ -38,6 +38,7 @@ import contextlib as _contextlib
 import re as _re
 import threading as _threading
 from collections.abc import (
+    Callable as _Callable,
     Iterable as _Iterable,
     Iterator as _Iterator,
     Mapping as _Mapping,
@@ -607,13 +608,64 @@ def _renumber_collected(
     flagged: set[int],
 ) -> _SnapshotT:
     """`renumber_anonymous_closure_identities`' body over one already-made
-    `_collect_marking` pass (`storage.closure_marking` reuses one)."""
+    `_collect_marking` pass (`storage.closure_marking` reuses one), then the
+    snapshot's graph against the same ordinals (`closure_graph_renumber`)."""
+    from .closure_graph_renumber import renumber_snapshot_graphs
+
+    ordinals: dict[tuple[str, str, int, int], int] = {}
+    try:
+        return _renumber_flat(snapshot, containers, all_strings, flagged, ordinals)
+    finally:
+        renumber_snapshot_graphs(snapshot, graph_rewrite_factory(ordinals))
+
+
+def graph_rewrite_factory(
+    flat_ordinals: _Mapping[tuple[str, str, int, int], int],
+) -> _Callable[[list[str]], _Callable[[str], str] | None]:
+    """The graph rewrite for *flat_ordinals* (`closure_graph_renumber`): a
+    raw ``(lambda at <path>...)`` spelling is stripped, a flat closure gets
+    its flat ordinal, and a closure only the graph names is numbered after
+    its group's flat ordinals (the conflict-only rule), so the graph never
+    moves a flat ordinal."""
+    flat = dict(flat_ordinals)
+
+    def make(strings: list[str]) -> _Callable[[str], str] | None:
+        from ..name_classification import (
+            has_anonymous_type_location,
+            strip_anonymous_type_location,
+        )
+
+        def normalized(text: str) -> str:
+            if has_anonymous_type_location(text):
+                return strip_anonymous_type_location(text)
+            return text
+
+        stripped = [normalized(s) for s in strings]
+        if stripped == strings and not any(
+            _anon_type_ordinal_matches(s) for s in stripped
+        ):
+            return None
+        ordinals = dict(flat)
+        _extend_ordinals_with_conflict_only_markers(ordinals, stripped)
+        return lambda text: apply_anonymous_type_ordinals(normalized(text), ordinals)
+
+    return make
+
+
+def _renumber_flat(
+    snapshot: _SnapshotT,
+    containers: list[object],
+    all_strings: list[str],
+    flagged: set[int],
+    ordinals: dict[tuple[str, str, int, int], int],
+) -> _SnapshotT:
+    """The flat fields' renumbering; fills *ordinals* with the map used."""
     collected = (containers, all_strings) if _has_any_marker(all_strings) else None
     conflict_strings = _conflict_only_marker_strings(snapshot)
     if collected is None and not _has_any_marker(conflict_strings):
         return snapshot
     containers, strings = collected if collected is not None else ([], [])
-    ordinals = collect_anonymous_type_ordinals(strings)
+    ordinals.update(collect_anonymous_type_ordinals(strings))
     # Extended AFTER real ordinals are assigned, and never mixed into their
     # own coordinate pool -- see _conflict_only_marker_strings()'s own
     # docstring for why a conflict-only marker must never participate in

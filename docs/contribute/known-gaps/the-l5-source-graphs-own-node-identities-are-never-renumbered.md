@@ -11,7 +11,7 @@ generated: false
 
 Index: [Known gaps](../known-gaps.md)
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** abicheck/storage/snapshot_load_normalization.py:123-138 docstring still says surface_graph node/edge identities are not renumbered. renumber_anonymous_closure_identities (storage/closure_identity.py) has no graph handling.
+**Status (2026-10-31): FIXED for every snapshot written from now on.** `storage/closure_graph_renumber.py` folds the graph's node/edge strings into the same strip-and-renumber pass (`closure_identity._renumber_collected`), on the dump path and on a stored graph's first decode. A graph-only closure is numbered after its `(marker, header)` group's flat ordinals, as a hybrid conflict-only marker is. Tested over generated graphs mixing flat-visible and graph-only, raw and stripped closures (`tests/unit/storage/test_graph_closure_renumbering.py`; oracle computed from the generated coordinates, lazy equal to eager). Residual: a baseline written before this fix with flat `#N` spellings and a `:line:col` graph cannot be reconciled; its graph closures are numbered as graph-only. The history below is kept for the record.
 
 `renumber_anonymous_closure_identities` rewrites a
 closure's `:<line>:<col>` discriminator to a stable `#N` ordinal across

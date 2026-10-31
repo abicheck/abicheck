@@ -387,8 +387,8 @@ per-item status in the
 
 #### The L5 source graph's own node identities are never renumbered alongside the flat snapshot's closure markers (Codex review on PR #868, fresh evidence)
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** abicheck/storage/snapshot_load_normalization.py:123-138 docstring still says surface_graph node/edge identities are not renumbered. renumber_anonymous_closure_identities (storage/closure_identity.py) has no graph handling.  
-`false-positive` — Closure markers in the flat snapshot are renumbered on load, but the L5 `surface_graph` node and edge identities are not, so the two disagree. [Full write-up](known-gaps/the-l5-source-graphs-own-node-identities-are-never-renumbered.md)
+**Status (2026-10-31): FIXED for every snapshot written from now on; residual for older baselines.** `storage/closure_graph_renumber.py` renumbers the graph's node ids, labels, edge endpoints and attributes with the flat fields' ordinals, on the dump path and on load (a stored graph on its first decode, so ADR-062 D18 laziness is kept). A graph-only closure is numbered after its group's flat ordinals, so the graph never moves a flat ordinal. Residual: a baseline written before this fix whose flat fields are already in `#N` form but whose graph still spells `:line:col` cannot be reconciled (the flat coordinates are gone), so its graph closures are numbered as graph-only.
+`false-positive` — a pre-fix baseline's graph closures can still be numbered differently from its flat ones. [Full write-up](known-gaps/the-l5-source-graphs-own-node-identities-are-never-renumbered.md)
 
 #### Declared-header order is still load-bearing because the driver TU is sequential
 

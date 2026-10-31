@@ -249,21 +249,6 @@ ANALYSIS_1_BUG_CLASSES: tuple[BugClass, ...] = (
         known_gaps=(
             KnownGap(
                 description=(
-                    "The L5 source graph's own node identities are not "
-                    "renumbered alongside the flat snapshot's closure "
-                    "markers (AGENTS.md, PR #868's own follow-up note). "
-                    "Phase 4 (bug-class-regression-testing.md) added a "
-                    "dedicated canary asserting this residual's own bound "
-                    "in tests/test_lambda_identity_ordinal.py's "
-                    "TestL5SourceGraphIdentitiesAreNotRenumbered — a real "
-                    "L5 fix now fails this test loudly instead of the gap "
-                    "silently closing or widening unnoticed."
-                ),
-                reference="PR #868",
-                canary_test="tests/test_lambda_identity_ordinal.py",
-            ),
-            KnownGap(
-                description=(
                     "The two original seed tests still feed a hand-built "
                     "AST-node/XML fragment into an internal parser class "
                     "directly. Phase 4 closed the real-subprocess/cross-"
