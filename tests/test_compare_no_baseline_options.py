@@ -208,13 +208,25 @@ def test_no_unsupported_entry_is_stale() -> None:
     assert not stale, f"_UNSUPPORTED_OPTIONS names non-existent options: {stale}"
 
 
+#: Boolean pairs whose *on* half is refused while the *off* half is read.
+#: ``--follow-deps`` is refused (the walk is not wired to an audit), and
+#: ``--no-follow-deps`` is read to turn a configured ``deps.follow: true`` off,
+#: so ``deps.*`` is not refused. The refusal guard tests a truthy value, so the
+#: read is reachable for ``False`` only. Both halves are driven through the CLI:
+#: ``test_every_declared_unsupported_option_really_is_rejected`` (on) and
+#: ``test_follow_deps_off_switch.test_no_baseline_accepts_a_configured_walk_turned_off``
+#: (off).
+_OFF_HALF_READ = frozenset({"follow_deps"})
+
+
 def test_no_unsupported_entry_is_also_read() -> None:
     """An option cannot be both wired and declared unsupported.
 
     If it were, the usage error would fire before the wiring ever ran — the
     wiring would be dead code, and the table would be lying about it.
     """
-    both = sorted(set(_UNSUPPORTED_OPTIONS) & _dests_read_by_module())
+    assert _OFF_HALF_READ <= set(_UNSUPPORTED_OPTIONS) & _dests_read_by_module()
+    both = sorted(set(_UNSUPPORTED_OPTIONS) & _dests_read_by_module() - _OFF_HALF_READ)
     assert not both, (
         f"these options are both read and declared unsupported: {both} — "
         "the usage error fires first, so the wiring is unreachable"
