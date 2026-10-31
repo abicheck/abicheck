@@ -13,6 +13,7 @@ the same readers, and the removal of a function is still reported.
 from __future__ import annotations
 
 import json
+import struct
 from pathlib import Path
 
 import pytest
@@ -103,3 +104,80 @@ def test_a_failed_pdb_blocks_debug_readers_and_still_reports_removal(
     assert blocked == {n for n, reads in DETECTOR_SECTIONS.items() if "debug" in reads}
     removed = [c.symbol for c in result.changes if c.kind.value == "func_removed"]
     assert removed == ["g"]
+
+
+def _corrupt_directory(data: bytes) -> bytes:
+    """Overwrite the stream directory's stream count with a value its own
+    byte length cannot hold."""
+    out = bytearray(data)
+    block_size, block_map_addr = (
+        struct.unpack_from("<I", out, 32)[0],
+        struct.unpack_from("<I", out, 52)[0],
+    )
+    directory_block = struct.unpack_from("<I", out, block_map_addr * block_size)[0]
+    struct.pack_into("<I", out, directory_block * block_size, 0x00FFFFFF)
+    return bytes(out)
+
+
+#: Real malformed PDB bytes, built from a valid minimal PDB.
+_MALFORMED = {
+    "truncated": lambda good: good[: len(good) // 2],
+    "bad_magic": lambda good: b"X" + good[1:],
+    "corrupt_stream_directory": _corrupt_directory,
+}
+
+
+@pytest.mark.parametrize("shape", sorted(_MALFORMED))
+def test_a_real_malformed_pdb_marks_debug_failed(
+    monkeypatch, tmp_path: Path, shape: str
+) -> None:
+    """The real parser, not a raising stand-in: a malformed PDB the dump
+    located fails the ``debug`` section instead of writing empty metadata."""
+    from tests.test_pdb_parser import _build_minimal_pdb
+
+    dll = tmp_path / "x.dll"
+    dll.write_bytes(b"MZ")
+    pdb = tmp_path / "x.pdb"
+    pdb.write_bytes(_MALFORMED[shape](_build_minimal_pdb(tpi_records=[])))
+    monkeypatch.setattr(
+        pe_metadata,
+        "parse_pe_metadata",
+        lambda path: PeMetadata(
+            machine="IMAGE_FILE_MACHINE_AMD64", exports=[PeExport(name="f", ordinal=1)]
+        ),
+    )
+    monkeypatch.setattr(
+        pdb_utils,
+        "locate_pdb",
+        lambda path, *, pdb_path_override, allow_network: pdb,
+    )
+    written = json.loads(snapshot_to_json(extract_pe(dll, "1.0")))
+    assert written["section_availability"]["debug"]["status"] == "failed"
+    assert "debug" not in written["sections"]
+    assert any(
+        "x.pdb" in d for d in written["section_availability"]["debug"]["diagnostics"]
+    )
+
+
+def test_a_valid_minimal_pdb_still_parses(monkeypatch, tmp_path: Path) -> None:
+    """The success path is unchanged: a well-formed PDB keeps ``debug`` present."""
+    from tests.test_pdb_parser import _build_minimal_pdb
+
+    dll = tmp_path / "x.dll"
+    dll.write_bytes(b"MZ")
+    pdb = tmp_path / "x.pdb"
+    pdb.write_bytes(_build_minimal_pdb(tpi_records=[]))
+    monkeypatch.setattr(
+        pe_metadata,
+        "parse_pe_metadata",
+        lambda path: PeMetadata(
+            machine="IMAGE_FILE_MACHINE_AMD64", exports=[PeExport(name="f", ordinal=1)]
+        ),
+    )
+    monkeypatch.setattr(
+        pdb_utils,
+        "locate_pdb",
+        lambda path, *, pdb_path_override, allow_network: pdb,
+    )
+    written = json.loads(snapshot_to_json(extract_pe(dll, "1.0")))
+    assert written["section_availability"]["debug"]["status"] == "present"

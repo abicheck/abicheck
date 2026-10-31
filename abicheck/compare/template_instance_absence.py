@@ -436,6 +436,18 @@ class TemplateInstanceAbsence:
             return None
         return self._judged(mangled, f_old, FUNCTION_SYMBOL_TYPES)
 
+    def instance_still_exported(self, mangled: str) -> bool:
+        """Whether *mangled* names a template instance the new export table
+        still carries -- the export evidence that keeps an instance the new
+        declarations omit from reading as removed when the header graph that
+        :meth:`changes_for` needs is unreadable."""
+        parsed, _scope = _spellings(mangled)
+        return (
+            _primary_stem_of(parsed) is not None
+            and self._export_table(FUNCTION_SYMBOL_TYPES).answer(mangled)
+            is EdgeAnswer.PRESENT
+        )
+
     def variable_changes_for(
         self, mangled: str, v_old: Variable
     ) -> list[Change] | None:

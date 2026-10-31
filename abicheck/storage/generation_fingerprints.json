@@ -177,7 +177,7 @@
       "abicheck/extract/unparseable_header_fallback.py": "a9aae1490ad88bb1f1bd9ddfe96681d4a3b9558436446305c66fb44f0003c2f6",
       "abicheck/extract/wheel_tags.py": "0a6eff34860223c9efb0fc2d62469804d50d59ae1825c726abafaf7c898789db",
       "abicheck/macho_metadata.py": "9b3fa13cbbc127fcf981289c4b15ff2aaabc6dfd10d7747a7262fd3cfda3e69e",
-      "abicheck/pdb_metadata.py": "79beb794904dd26afaf7d1fa8e9fdf74d4d4dfd21f5c09b9764c45b253a2dc1f",
+      "abicheck/pdb_metadata.py": "2d34ec592a199dbbe03f2cc9e034c870eaaac4334e1c224b7fc384c15d9a22f7",
       "abicheck/pdb_model.py": "d79ccfac86f4889d8d9b2c745ee2dacd6132c1789c0ca77988aaf53bd50aea8a",
       "abicheck/pdb_parser.py": "d03dd27cd9945b26a76d7169d1b0aa509b718791ee8d7a3a7eb7a693d035aca1",
       "abicheck/pdb_utils.py": "c170ddb97ffa41a4fd4add3057cbebedc032116408252453c65f3be3b7117817",
@@ -186,9 +186,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "6ff78629e03edef8f9576c7c3e23fb121fbc615330a3592dbb966b90aa88f295",
-    "generation": 33,
-    "reason": "merge of main: its dead-code cleanup (#1845) removed unread parameters, dead functions and unreachable code in extractor files, no extracted fact changes; generation 33 is this PR's clang ABI-target rule"
+    "fingerprint": "8488329f112ce57313b465026f031145655f3cdca436057b390328ce4c63e286",
+    "generation": 34,
+    "reason": "bumped to 34 for a semantic change"
   },
   "resolver": {
     "files": {

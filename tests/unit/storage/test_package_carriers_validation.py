@@ -31,6 +31,8 @@ _WHERE = "pkg artifact 'a'"
         {"passthrough_sections": []},
         {"passthrough_versions": "x"},
         {"header_extras": 3},
+        {"header_extras": {"types": 5}},  # per-section extras must be objects
+        {"header_extras": {"types": []}},
         {"record_extras": [["functions", "functions", "f"]]},  # short row
         {"record_extras": [["functions", "functions", "f", "0", {}]]},  # ordinal
         {"record_extras": [["functions", 1, "f", 0, {}]]},  # non-str key

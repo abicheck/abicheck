@@ -358,6 +358,15 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "generation-32 snapshot of such a DLL lacks those declarations, which no "
         "rewrite can supply, so it is re-dumped"
     ),
+    34: GenerationSpellingChange(
+        "no stored spelling changes: a PE dump whose located PDB is malformed "
+        "(truncated, bad magic, corrupt stream directory, no TPI stream) or whose "
+        "struct/enum/toolchain extraction phase crashes now records the debug "
+        "section as failed (pdb_metadata.PdbParseError) instead of present and "
+        "empty or partial. A well-formed PDB records exactly what generation 33 "
+        "did; a generation-33 snapshot of a malformed PDB carries an empty debug "
+        "section no rewrite can mark failed, so it is re-dumped"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

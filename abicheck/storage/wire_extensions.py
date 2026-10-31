@@ -229,6 +229,12 @@ class WireExtensions:
             value = raw.get(name, {})
             if not isinstance(value, Mapping):
                 raise ValueError(f"stored wire carriers {name!r} must be an object")
+            if name == "header_extras" and not all(
+                isinstance(extras, Mapping) for extras in value.values()
+            ):
+                raise ValueError(
+                    "stored wire carriers 'header_extras' values must be objects"
+                )
             setattr(ext, name, {k: value[k] for k in value})
         for row in raw.get("record_extras", []):
             if (
