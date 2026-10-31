@@ -546,20 +546,10 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 **Status (2026-10-25): CLOSED for the document shape.** A stored `BundleFacts` comparison renders the live release document: its JSON is the live release document (release schema 2.5), and JSON, Markdown, JUnit, `oneline` and HTML all come from one live-shaped evaluation of the stored facts (`tests/unit/report/test_release_document.py`, `tests/test_cli_compare_stored_release_parity.py`). Fields a stored comparison cannot compute are explicit `unavailable` markers with a reason, and its receipt is marked `reconstructed_from_stored_facts`. Remaining limits, named rather than hidden: the stored JUnit omits the passing testcase for each unchanged symbol (no old-side inventory); `output.view` `show=`, `sarif` and `review` stay refused for a stored OLD_INPUT.  
 `hygiene` — Closed: the stored document now carries the live release shape (schema 2.5, breaking for the stored document). [Full write-up](known-gaps/release-report-live-and-stored-operands-render-different-documents.md) [Full write-up](known-gaps/release-report-live-and-stored-operands-render-different-documents.md)
 
-#### A stored `BundleFacts` operand pairs versioned member names on one side only (2026-10-23)
-
-**Status (recorded 2026-10-23): OPEN.** A stored operand keys a member `libX.so.N` by its canonical `libX.so`, while a directory NEW side keys it by its file name `libX.so.N`, so `compare OLD.bundle-facts.json NEW_DIR` pairs no versioned member: it reports "no library pair was compared" (exit 1) where the live `compare OLD_DIR NEW_DIR` pairs them. Unversioned names pair on both sides. Found while proving the release `surface_changes` block (schema 2.2); that block's stored/live agreement is asserted in-process, not through this CLI path.
-`hygiene` — The stored and live operands key a versioned member name differently, so a stored comparison of a versioned directory compares nothing and reads as a no-comparison run. [Full write-up](known-gaps/a-stored-bundlefacts-operand-pairs-versioned-member-names-on-one-side-only.md)
-
 #### Public-surface graph: surface_graph vs L5 header_graph node-id namespaces not unified; type_reachability stdlib query unmigrated
 
 **Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** The traversal half is superseded: the closure walk moved to policy/public_surface_closure.py. Still true: abicheck/type_reachability.py is unmigrated, and the compare/surface_graph.py and header_graph node-id namespaces are not unified.  
 `hygiene` — The closure walk moved to `policy/public_surface_closure.py`, but `type_reachability.py` is unmigrated and the surface-graph and header-graph node-id namespaces are still separate. [Full write-up](known-gaps/public-surface-graph-surface-graph-vs-l5-header-graph-node-id.md)
-
-#### `action/run.sh`'s `extra-args` parsing performs pathname expansion (globbing), not just word-splitting, and no site disables it — investigated, deliberately not fixed (CodeRabbit review, PR #998, ADR-064's effective-format-override fix)
-
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** action/run.sh:2235 `set -- ${INPUT_EXTRA_ARGS:-}` and :3893 `CMD+=($INPUT_EXTRA_ARGS)` are unquoted, with no set -f around them. set -f appears only at :189 in _split_legacy_value.  
-`hygiene` — `extra-args` is split unquoted with no `set -f`, so glob characters in it expand against the runner's working directory. Deliberately not fixed. [Full write-up](known-gaps/actionrunshs-extra-args-parsing-performs-pathname-expansion.md)
 
 #### `BundleFacts` (and its G40 archive container) has no published JSON Schema, in either `abicheck/schemas/` or `docs/reference/schemas/`
 
@@ -575,11 +565,6 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 
 **Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** The engine half is gone: scan_engine.py/cli_scan*.py are deleted, policy/exit_decision.py:147-154 marks PROMOTED_CROSSCHECK a read-only retired producer, and resolve_exit_decision no longer takes it. Residue: ExitDecision still serializes crosscheck_promotion_contribution (exit_decision.py:327,442) and action/run.sh still reads promoted_crosscheck (re-verified 2026-10-25).  
 `hygiene` — The `--crosscheck` engine is gone, but `ExitDecision` still serializes `crosscheck_promotion_contribution` and `action/run.sh` still reads `promoted_crosscheck`. [Full write-up](known-gaps/retired-crosscheck-promotion-axis-still-serialized-in.md)
-
-#### SARIF suppression justification carries only the display label, not the full disposition record
-
-**Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** The cli_scan_baseline.py half is moot because the file was deleted. The sarif.py half is still open: abicheck/sarif.py:963 still interpolates only change.suppression_rule ('suppressed by --suppress rule: ...') and never reads DispositionLedger.rule_for.  
-`hygiene` — SARIF suppression justifications carry only the `--suppress` rule label, never the full `DispositionLedger` record. [Full write-up](known-gaps/sarif-suppression-justification-carries-only-the-display-label.md)
 
 #### `compare`'s migrated cross-source checks drop `--since`'s changed-path confidence boost
 
