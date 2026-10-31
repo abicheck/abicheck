@@ -50,6 +50,7 @@ from .declarations import Function, Variable
 from .dwarf_facts import AdvancedDwarfMetadata, DwarfMetadata
 from .entities import EnumType, RecordType
 from .identity import EntityId
+from .lazy_graph import resolve_pending
 
 __all__ = [
     "BUILDER_INPUTS",
@@ -164,7 +165,7 @@ def attach_declarations(
     same semantics ``replace`` had when these were plain fields.
     """
     given = dict(zip(_BUILDER_INPUT_ORDER, builder_inputs, strict=True))
-    ir = snapshot.__dict__.get("semantic_ir")
+    ir = resolve_pending(snapshot.__dict__.get("semantic_ir"))
     if ir is None:
         ir = empty_ir()
     base = ir.declarations
@@ -249,8 +250,12 @@ def guard_assignment(snapshot: Any, name: str, value: Any) -> Any:
             f"AbiSnapshot.{name} was removed; "
             f"assign snapshot.declarations.{STORE_ATTRIBUTE[name]} instead"
         )
-    current = snapshot.__dict__.get("semantic_ir")
-    if name == "semantic_ir" and current is not None:
+    if name != "semantic_ir":
+        return value
+    # A still-pending (lazily loaded, ADR-062 D18) IR is decoded first: the
+    # assignment keeps the declarations it would have held.
+    current = resolve_pending(snapshot.__dict__.get("semantic_ir"))
+    if current is not None:
         return reattach(current, value)
     return value
 

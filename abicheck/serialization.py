@@ -88,6 +88,7 @@ if TYPE_CHECKING:
     from .model.bundle_facts import BundleFacts
     from .snapshot_io import SnapshotWriteResult
 from .model import AbiSnapshot
+from .model.lazy_declarations import defer_declaration_step
 from .policy.analysis_assurance_degraded_facts import degraded_reliability_facts
 from .storage.sectioned_document import (
     from_sectioned_document as from_sectioned_document,
@@ -154,7 +155,9 @@ def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     # workflows/snapshot_load.py's own docstring.
     backfill_python_ext_from_evidence(snap, d)
     # Evidence-entity-model gap A1: the export-read rule, same as a live dump.
-    reconcile_stored_export_absence(snap)
+    # Rewrites declarations only: queued into a still-pending declaration
+    # store (ADR-062 D18) rather than decoding it here.
+    defer_declaration_step(snap, reconcile_stored_export_absence)
 
     # A degraded *_facts_reliable flag used to load with no signal at all --
     # the flag itself was computed correctly, but nothing ever told the

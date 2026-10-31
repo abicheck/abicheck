@@ -209,6 +209,16 @@ def decode_declarations_section(
     their sidecars, constants, and the language/platform blocks the
     section carries. Keys are ``AbiSnapshot`` field names, except the raw
     ``sidecar_entity_ids`` mapping."""
+    return {
+        **decode_declaration_store(d, schema_version),
+        **decode_declaration_blocks(d),
+    }
+
+
+def decode_declaration_store(d: dict[str, Any], schema_version: int) -> dict[str, Any]:
+    """The part of ``declarations`` that fills the snapshot's declaration
+    store (``model/declaration_store.py``), keyed by builder-input name --
+    what a lazily loaded snapshot defers (ADR-062 D18)."""
     decoded = decode_declaration_lists(d, schema_version)
     return {
         "functions": decoded.functions,
@@ -218,11 +228,18 @@ def decode_declarations_section(
         "typedefs_qualified": decoded.typedefs_qualified,
         "typedef_entity_ids": decoded.sidecar_entity_ids["typedef_entity_ids"],
         "constant_entity_ids": decoded.sidecar_entity_ids["constant_entity_ids"],
+        "constants": d.get("constants", {}),
+    }
+
+
+def decode_declaration_blocks(d: dict[str, Any]) -> dict[str, Any]:
+    """The language/platform blocks ``declarations`` carries beside the
+    store: small, ordinary snapshot fields, decoded eagerly in every mode."""
+    return {
         "sycl": _sub_block(sycl_from_dict, d.get("sycl")),
         "numpy_capi": _sub_block(numpy_capi_from_dict, d.get("numpy_capi")),
         "python_ext": _sub_block(python_ext_from_dict, d.get("python_ext")),
         "python_api": _sub_block(python_api_from_dict, d.get("python_api")),
-        "constants": d.get("constants", {}),
     }
 
 

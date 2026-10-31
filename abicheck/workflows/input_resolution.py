@@ -60,6 +60,7 @@ from ..extract.header_exclusions import (
 from ..model import AbiSnapshot, Function
 from ..model.change import LibraryMetadata
 from ..serialization import load_snapshot
+from ..storage.snapshot_lazy_decode import eager_section_decode
 from .dump.cache.api import cached_run_dump
 from .dump.cache.finished import Finisher, finish_material, offering
 from .dump.formats import emit_notice
@@ -624,7 +625,12 @@ def _resolve_input_impl(
 
     if fmt == "json":
         try:
-            return load_snapshot(path)
+            # ADR-062 D18: decode every section inside this boundary, so a
+            # malformed deferred section is translated to SnapshotError here
+            # rather than escaping at its first read mid-comparison. A CLI
+            # comparison reads those sections anyway.
+            with eager_section_decode():
+                return load_snapshot(path)
         # TypeError: a malformed nested field (e.g. a non-mapping/non-string
         # ExtractionContract.profile_fields/scope_fields) is rejected rather
         # than coerced at the storage boundary (storage AGENTS.md invariant

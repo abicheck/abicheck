@@ -329,4 +329,41 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="storage.lazy_decode_diverges_from_eager",
+        invariant=(
+            "A section decoded on first access (ADR-062 D18) is "
+            "indistinguishable from the eagerly decoded one: for every "
+            "document the lazy path accepts, equality, saved bytes, the "
+            "publication and evidence digests and compare results equal the "
+            "eager decode's under every access order, copy, deep copy, "
+            "pickle, dataclasses.replace and concurrent first access; a "
+            "decode error is raised at every access, never read as an empty "
+            "section; and an analysis that reads none of the deferred "
+            "sections never decodes them."
+        ),
+        # ADR-062 D18 step 1 (#1865) split the decode this builds on.
+        fixed_by=(1865,),
+        seed_tests=(
+            "tests/unit/storage/test_snapshot_lazy_decode.py",
+            "tests/test_lazy_graph_loading.py",
+            "tests/test_family_f5_optimization_reference.py",
+        ),
+        public_surfaces=("python-api", "cli"),
+        axes={
+            "cell": ("graph", "semantic_ir"),
+            "access": ("order-permutation", "threads", "copy", "pickle"),
+            "document": ("current", "legacy-eager-fallback", "corrupt"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Only declarations/types/debug layout/semantic_ir and the "
+                    "graph are deferred; a full compare decodes them anyway, "
+                    "and peak RSS is still set by the whole-document parse."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
 )
