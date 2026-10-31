@@ -13,183 +13,77 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""`mode: compare`'s compile-context region against a *release-style*
-operand (a directory or package), at the region level.
+"""Packaging an operand does not change the compile context (ADR-091 D4).
 
-Split out of `test_action_compile_context_parity.py` — that module asks
-whether each mode forwards the compile-context inputs at all, and its own
-`architecture/debt.yaml` `no_growth` baseline is why these cases live in a
-module of their own rather than growing it (AGENTS.md "Files that are
-large": move responsibility out to a properly-owned module, never trim the
-file to fit). It re-exports the region-extraction harness, which stays
-there with the region markers it reads.
-
-The question here is narrower and has one oracle: **packaging an operand
-does not change the compile context.** `run.sh` used to reject these
-inputs outright for a directory/package operand, citing a per-library
-fan-out that "never threads the L2 compile context to each pair's header
-dump" — untrue since `cli_resolve.resolve_directory_compile_context` made
-the identical `resolve_compile_context` call the single-pair path makes.
-So every case below measures the release-style run against the single-pair
-run for the same inputs, never against a hand-written expectation.
-
-The end-to-end half — the real `run.sh`, every input family, four release
-operand spellings — is
-`tests/test_action_run_sh_release_capability_parity.py`.
+The compile-context inputs were retired to ``set:`` lines (ADR-091 D7). The
+parity claim survives the retirement in its new form: a directory/package
+operand forwards the same ``--set compile.*`` lines a single pair does, and
+the retired input names are refused on the release shape exactly as on the
+single-pair shape. Every assertion compares against the single-pair run for
+the identical inputs, never against a hand-written constant.
 """
 
 from __future__ import annotations
 
-from test_action_compile_context_parity import (
-    _COMPARE_COMPILE_CONTEXT_START,
-    _COMPARE_MODE_MARKER,
-    _FULL_ENV,
-    RUN_SH,
-    _read_compile_config_overlay,
-    _run_region,
-)
+import pytest
+from test_action_compile_set_forwarding import RETIRED_COMPILE_INPUTS, _validate
+from test_action_run_sh_set_input import _run_compare, _set_pairs
+
+_COMPILE_SET = 'compile.lang="c"\ncompile.compiler=/usr/bin/g++\n'
+
+
+def _release_operand(tmp_path):
+    """A real directory: a package-style operand, not a file."""
+    release = tmp_path / "release-operand"
+    release.mkdir(exist_ok=True)
+    return release
 
 
 class TestCompareReleaseStyleOperandCompileContext:
-    def test_compare_forwards_compile_context_for_release_style_operand(
-        self,
+    def test_set_lines_reach_a_release_operand_like_a_single_pair(
+        self, tmp_path
     ) -> None:
-        """The inverse of the guard this case used to pin. The CLI does
-        thread the both-sides compile context through the per-library
-        release fan-out (``cli_resolve.resolve_directory_compile_context``
-        makes the identical ``resolve_compile_context`` call the single-pair
-        path makes), so rejecting these inputs here made a release
-        comparison through the Action strictly less capable than the same
-        comparison run through the CLI directly. The oracle is the
-        *single-pair* overlay for the identical inputs, not a pinned
-        constant: whatever the single pair synthesizes, the directory/
-        package operand must synthesize too."""
-        env = {
-            **_FULL_ENV,
-            "INPUT_OLD_LIBRARY": str(RUN_SH.parent),  # any real directory
-            "INPUT_NEW_LIBRARY": "new.so",
-        }
-        release_cmd, stderr = _run_region(
-            _COMPARE_MODE_MARKER, env, _COMPARE_COMPILE_CONTEXT_START
+        single = _set_pairs(_run_compare(tmp_path / "single", _COMPILE_SET))
+        release_dir = _release_operand(tmp_path / "release")
+        release = _set_pairs(
+            _run_compare(
+                tmp_path / "release-run",
+                _COMPILE_SET,
+                INPUT_OLD_LIBRARY=str(release_dir),
+                INPUT_NEW_LIBRARY=str(release_dir),
+            )
         )
-        assert "not support" not in stderr
-        assert "--set" in release_cmd
-        single_cmd, _ = _run_region(
-            _COMPARE_MODE_MARKER,
-            {**_FULL_ENV, "INPUT_OLD_LIBRARY": "old.so", "INPUT_NEW_LIBRARY": "new.so"},
-            _COMPARE_COMPILE_CONTEXT_START,
-        )
-        assert _read_compile_config_overlay(
-            release_cmd
-        ) == _read_compile_config_overlay(single_cmd)
+        assert single == ['compile.lang="c"', "compile.compiler=/usr/bin/g++"]
+        assert release == single
 
-    def test_compare_release_style_succeeds_when_context_unset(self) -> None:
-        """Companion: a plain directory/package compare with no compile-
-        context inputs configured synthesizes no overlay at all -- the same
-        early return the single-pair shape takes, not an empty compile:
-        block."""
-        cmd, stderr = _run_region(
-            _COMPARE_MODE_MARKER,
-            {
-                "INPUT_OLD_LIBRARY": str(RUN_SH.parent),
-                "INPUT_NEW_LIBRARY": "new.so",
-            },
-            _COMPARE_COMPILE_CONTEXT_START,
-        )
-        assert "not support" not in stderr
-        assert "--set" not in cmd
-
-    def test_compare_release_style_ast_frontend_auto_synthesizes_nothing(
-        self,
+    def test_release_operand_with_no_compile_set_forwards_no_compile_set(
+        self, tmp_path
     ) -> None:
-        """ "auto" is the documented no-op spelling of ast-frontend -- it
-        resolves to the same default castxml selection as leaving the input
-        unset entirely (see the input's description in action.yml), so it
-        synthesizes no overlay at all, on this operand shape exactly as on
-        a single pair.
-
-        This case used to assert only that the release overlay *equalled*
-        the single-pair one, which was true while both wrongly produced an
-        empty `{"compile": {}}` overlay -- parity held at the wrong value,
-        and a `--config` reached the CLI that a run configuring nothing
-        should never have put there (Codex review, PR #1233). The
-        end-to-end half, including the same equivalence for `lang: c++`,
-        is `tests/test_action_run_sh_release_capability_parity.py`'s
-        `TestNoOpInputsSynthesizeNoOverlay`.
-        """
-        release_cmd, stderr = _run_region(
-            _COMPARE_MODE_MARKER,
-            {
-                "INPUT_OLD_LIBRARY": str(RUN_SH.parent),
-                "INPUT_NEW_LIBRARY": "new.so",
-                "INPUT_FRONTEND": "auto",
-            },
-            _COMPARE_COMPILE_CONTEXT_START,
+        release_dir = _release_operand(tmp_path)
+        pairs = _set_pairs(
+            _run_compare(
+                tmp_path / "run",
+                "",
+                INPUT_OLD_LIBRARY=str(release_dir),
+                INPUT_NEW_LIBRARY=str(release_dir),
+            )
         )
-        assert "not support" not in stderr
-        assert "--set" not in release_cmd
-        single_cmd, _ = _run_region(
-            _COMPARE_MODE_MARKER,
-            {
-                "INPUT_OLD_LIBRARY": "old.so",
-                "INPUT_NEW_LIBRARY": "new.so",
-                "INPUT_FRONTEND": "auto",
-            },
-            _COMPARE_COMPILE_CONTEXT_START,
-        )
-        assert single_cmd == release_cmd
+        assert [p for p in pairs if p.startswith("compile.")] == []
 
-    def test_compare_release_style_ast_frontend_clang_reaches_the_overlay(
-        self,
+    @pytest.mark.parametrize(("name", "value", "replacement"), RETIRED_COMPILE_INPUTS)
+    def test_retired_compile_input_is_refused_on_a_release_operand(
+        self, tmp_path, name: str, value: str, replacement: str
     ) -> None:
-        """Companion: an actual, non-"auto" frontend choice is now
-        *forwarded* for a directory/package operand rather than rejected,
-        and lands in the synthesized compile: block exactly as it does for
-        a single pair."""
-        cmd, stderr = _run_region(
-            _COMPARE_MODE_MARKER,
-            {
-                "INPUT_OLD_LIBRARY": str(RUN_SH.parent),
-                "INPUT_NEW_LIBRARY": "new.so",
-                "INPUT_FRONTEND": "clang",
-            },
-            _COMPARE_COMPILE_CONTEXT_START,
+        """The refusal does not depend on the operand shape: the validator
+        names the replacement for a directory operand as for a file."""
+        release_dir = _release_operand(tmp_path)
+        env_name = "INPUT_" + name.upper().replace("-", "_")
+        result = _validate(
+            INPUT_OLD_LIBRARY=str(release_dir),
+            INPUT_NEW_LIBRARY=str(release_dir),
+            **{env_name: value},
         )
-        assert "not support" not in stderr
-        assert _read_compile_config_overlay(cmd).get("frontend") == "clang"
-
-    def test_compare_release_style_synthesizes_nothing_for_default_lang(
-        self,
-    ) -> None:
-        """The default INPUT_LANG=c++ is not a user override, so it
-        synthesizes no overlay at all -- for a directory/package operand
-        exactly as for a single pair (and exactly as for ``dump`` two cases
-        above)."""
-        cmd, stderr = _run_region(
-            _COMPARE_MODE_MARKER,
-            {
-                "INPUT_OLD_LIBRARY": str(RUN_SH.parent),
-                "INPUT_NEW_LIBRARY": "new.so",
-                "INPUT_LANG": "c++",
-            },
-            _COMPARE_COMPILE_CONTEXT_START,
-        )
-        assert "not support" not in stderr
-        assert "--set" not in cmd
-
-    def test_compare_release_style_forwards_non_default_lang(self) -> None:
-        """Companion: an actual, non-default lang choice reaches the
-        synthesized compile: block for a directory/package operand instead
-        of tripping a guard -- the release fan-out threads it like any
-        other both-sides compile-context value."""
-        cmd, stderr = _run_region(
-            _COMPARE_MODE_MARKER,
-            {
-                "INPUT_OLD_LIBRARY": str(RUN_SH.parent),
-                "INPUT_NEW_LIBRARY": "new.so",
-                "INPUT_LANG": "c",
-            },
-            _COMPARE_COMPILE_CONTEXT_START,
-        )
-        assert "not support" not in stderr
-        assert _read_compile_config_overlay(cmd)["lang"] == "c"
+        combined = result.stdout + result.stderr
+        assert result.returncode != 0, combined
+        assert name in combined, combined
+        assert f"set: {replacement}=" in combined, combined
