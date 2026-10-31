@@ -1220,10 +1220,16 @@ runs:
           # error the caller's own malformed input earns, rather than this
           # step fixing it for them.
           _ct_seen_end_of_options=""
-          # shellcheck disable=SC2086  # word-splitting is the point; mirrors
-          # run.sh's own identical `set -- ${INPUT_EXTRA_ARGS:-}` in
-          # `_extra_args_options`.
+          # Word-split on IFS exactly as run.sh's `_extra_args_split` does,
+          # with pathname expansion off for the split: a `*`/`?`/`[...]`
+          # token stays literal instead of matching files in the workspace.
+          # The prior noglob state is restored afterwards.
+          _ct_restore_glob=1
+          case $- in *f*) _ct_restore_glob=0 ;; esac
+          set -f
+          # shellcheck disable=SC2086  # word-splitting is the point.
           set -- ${EXTRA_ARGS}
+          [[ "$_ct_restore_glob" -eq 1 ]] && set +f
           for _ct_arg in "$@"; do
             if [[ -n "$_ct_pending" ]]; then
               if [[ "$_ct_pending" == "--config" ]]; then

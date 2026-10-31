@@ -81,7 +81,7 @@ mkdir -p "$(dirname "$install_dir")"
 rm -rf "$install_dir"
 mv "$extract_dir" "$install_dir"
 
-version_output="$($castxml_bin --version 2>&1)" || fail "Pinned CastXML failed its version probe."
+version_output="$("$castxml_bin" --version 2>&1)" || fail "Pinned CastXML failed its version probe."
 castxml_version="$(printf '%s\n' "$version_output" | sed -nE 's/^castxml version ([^[:space:]]+).*/\1/p' | head -1)"
 clang_version="$(printf '%s\n' "$version_output" | sed -nE 's/.*clang version ([^[:space:]]+).*/\1/p' | head -1)"
 clang_major="${clang_version%%.*}"
