@@ -65,7 +65,7 @@ def add_demangled_symbol_property(tc: ET.Element, change: Change) -> None:
     human formats demangle their text, machine formats keep the raw mangled
     symbol and carry the readable one in a field beside it. JUnit had no
     such field, so a JUnit-only consumer was left with the mangled name and
-    (the retired ``--view demangle`` gone) no way to ask for the other. The
+    (the retired ``demangle`` view token gone) no way to ask for the other. The
     testcase ``name`` stays the exact mangled symbol -- it is a stable test
     identity consumers key on across runs -- and the readable name travels
     as a property, which is JUnit's own extension point for exactly this.

@@ -139,7 +139,7 @@ def _release_md_pattern_modulations(
     nor the reason. The release fan-out carried this only as a private
     ``_pattern_modulations_text`` key that its caller pops and writes to
     stderr, so the requested artifact had nothing (Codex review, PR #1284);
-    a terminal log is not a report, and retiring ``--view patterns`` removed
+    a terminal log is not a report, and retiring the ``patterns`` view token removed
     the last way to ask for one.
 
     Reuses the scalar path's row renderer rather than re-spelling the table,

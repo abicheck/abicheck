@@ -1061,7 +1061,7 @@ def to_junit_xml_multi(
     reflect the failure.
 
     Always the ``full`` mode: the directory/package release fan-out, its one
-    caller, rejects ``--view leaf``/``root-cause`` before rendering
+    caller, rejects the ``leaf``/``root-cause`` view tokens before rendering
     (``reject_release_incompatible_view_mode``). *comparison_scope*: ADR-065's section (``report.junit_scope``). *env_matrix_source_sha256*: the release-wide deployment-floor digest -- see :func:`abicheck.report.junit_scope.append_env_matrix_suite`.
     """
     # A public entry point reaching ``_build_testsuite`` directly, so it

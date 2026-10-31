@@ -641,7 +641,7 @@ def resolve_compare_exit_decision(
     `--crosscheck` promotion axis has no producer left (see
     :class:`ExitReason.PROMOTED_CROSSCHECK`).
 
-    **`--used-by`/`--required-symbol(s)` scoped gating no longer overrides
+    **Consumer scoping (`--used-by`/`consumers.required_symbols`) no longer overrides
     the compatibility axis (workstream D-S1, vision-api-abi-evolution.md
     "D. Optional prebuilt-consumer lifecycle" -- reverting the behavior an
     earlier revision of this function introduced).** A supplied consumer's

@@ -44,7 +44,7 @@ def reject_release_incompatible_view_mode(report_mode: str) -> None:
     and ``impact`` (each library already has its own ``DiffResult`` to
     compute an impact table from) are the only accepted report modes here.
 
-    Plan slice 7o removed this predicate's second half. ``--view filtered``
+    Plan slice 7o removed this predicate's second half. The ``filtered`` view token
     used to be rejected here too, because the release engine never threaded
     ``show_filtered`` into its own renderer and so would have produced
     output identical to an invocation without the token. The token is gone

@@ -172,7 +172,7 @@ def _reject_set_input_flags(
     # gate` pack (gate.exit_code_scheme/gate.severity.*) is still rejected,
     # by that resolution itself, since the release fan-out has no resolved
     # gate-options wiring to apply one to yet.
-    # Plan slice 7o retired `--view suppressions`: the suppression audit is
+    # Plan slice 7o retired the `suppressions` view token: the suppression audit is
     # unconditional now, so there is no per-run *request* for it left to
     # reject here. `--suppress` itself stays supported on a release
     # comparison exactly as it was without the token -- and the per-library

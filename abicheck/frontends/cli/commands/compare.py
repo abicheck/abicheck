@@ -277,7 +277,7 @@ from .compare_routing import _RELEASE_FORMATS
     "the reason 'extractor-generation drift; re-dump baseline'. "
     "Single-pair comparisons only.",
 )
-@contract_options  # ADR-049: --contract (--audit-suppressions is gone -- `--view suppressions`)
+@contract_options  # ADR-049: --contract (--audit-suppressions is gone; the suppression audit is always disclosed)
 @pack_option  # ADR-049 D8: --pack
 @click.option(
     "--use-cases",

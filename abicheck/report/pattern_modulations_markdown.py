@@ -38,7 +38,7 @@ def render_pattern_modulations_from_mapping(
     A pattern rule that demotes a breaking finding is a *disposition*, so
     ADR-067's record-before-disposing rule applies to the report a user asked
     for, not only to the terminal: without this the rule and its reason
-    reached stderr alone, and retiring `--view patterns` removed the last way
+    reached stderr alone, and retiring the `patterns` view token removed the last way
     to request them in the document (Codex review, PR #1284).
 
     The canonical `ReportDocument` already carried `pattern_modulations` --

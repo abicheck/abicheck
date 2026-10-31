@@ -241,7 +241,7 @@ def debug_resolution_options(func: F) -> F:
 
 # ADR-068 D4 / one-comparison-product.md Phase 5: ``adr027_compare_options``
 # used to live here, carrying ``--explain-patterns`` and then, after that
-# moved into ``--view patterns``, only ``--surface-metrics``. Both are gone
+# moved into the ``patterns`` view token (now retired), only ``--surface-metrics``. Both are gone
 # now. ADR-027's public-surface metric-drift findings
 # (``public_surface_grew``/``public_surface_shrank``/
 # ``undocumented_export_ratio_increased``) are computed on every comparison

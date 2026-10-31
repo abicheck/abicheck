@@ -129,7 +129,7 @@ def _report_compare_result(
     )
 
     # Plan slice 7o: unconditional. The pattern-modulation ledger used to be
-    # gated on `--view patterns`; ADR-067's record-before-disposing rule makes
+    # gated on the `patterns` view token (now retired); ADR-067's record-before-disposing rule makes
     # a disposition's own reason part of the result, not a display preference.
     # Echoed only when there is something to disclose -- an unconditional
     # "no modulations applied" line on every run would be noise, not
@@ -259,7 +259,7 @@ def _report_compare_result(
         _write_or_echo(target_output, text)
 
     # Workstream D-S1: no early `sys.exit` on the scoped/consumer result here
-    # any more -- `--used-by`/`--required-symbol(s)` no longer float their own
+    # any more -- `--used-by`/`consumers.required_symbols` no longer float their own
     # exit code over the full-library one. Every run, scoped or not, exits
     # through the identical `_exit_with_severity_or_verdict` path below, so
     # the compatibility verdict a supplied consumer enriches can never be
