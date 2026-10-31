@@ -216,7 +216,7 @@ report the global verdict from step 5 and stop there.
 - **An application or library that links the subject** — scope with
   `--used-by CONSUMER` (repeatable), evidence-driven: the consumer binary is
   read and its actual imports become the scope.
-- **A plugin/host boundary** — scope with `consumers.required_symbols`
+- **A plugin/host boundary** — scope with `--set consumers.required_symbols=[...]`
   (a list; `@FILE` entries are read from a file), declaration-driven: the caller
   states the contract, because a host's requirement is not recoverable from
   the plugin's own imports.

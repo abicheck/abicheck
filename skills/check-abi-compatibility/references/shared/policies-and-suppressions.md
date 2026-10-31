@@ -29,7 +29,7 @@ grading whenever any of the sources below actually configure one.
 In the report, `severity.exit_code`, `severity.blocking`, and
 `severity.blocking_categories` express the gate decision. The block is present
 whenever severity-aware grading was **resolved from any source** —
-`severity.preset`, a `.abicheck.yml` `severity:` map,
+`--set severity.preset=...`, a `.abicheck.yml` `severity:` map,
 a run profile, or a gate pack — not only from a
 flag you passed. Absent means no gate was resolved anywhere and the exit code
 follows the legacy verdict mapping. (`policy_gate_decision` is an Action `check-target` field, not
