@@ -966,7 +966,7 @@ else:
     _sources_root_blocks = (
         ("build", "sources")
         if sources_pairwise or sources_merge_compile
-        else ("build", "sources", "compile", "source", "debug")
+        else ("build", "sources", "compile", "debug")
     )
     sources_root_env = os.environ.get("ABICHECK_SOURCES_ROOT", "")
     if sources_root_env:
@@ -1038,6 +1038,9 @@ else:
                 sources_loaded,
                 blocks=_sources_root_blocks,
                 merge_compile=sources_merge_compile,
+                sources_method_from_sources_root=not (
+                    sources_pairwise or sources_merge_compile
+                ),
             )
             # found_path is reassigned to sources_found ONLY when compile:
             # was actually sourced from it (the `dump`/`scan` single-
@@ -1091,6 +1094,9 @@ else:
                 None,
                 blocks=_sources_root_blocks,
                 merge_compile=sources_merge_compile,
+                sources_method_from_sources_root=not (
+                    sources_pairwise or sources_merge_compile
+                ),
             )
 
 # Discover mode's own base document is untrusted, repository-controlled

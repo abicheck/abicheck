@@ -1165,11 +1165,10 @@ class TestConfigStrictness:
             {
                 "version": 1,
                 "build": {"system": "cmake"},
-                "sources": {"public_headers": ["a.h"], "graph": "full"},
+                "sources": {"public_headers": ["a.h"], "graph": "full", "method": "s4"},
                 "severity": {"preset": "strict"},
                 "scope": {"public": True},
                 "suppression": {"strict": True},
-                "source": {"method": "s4"},
                 # Keys parsed by sibling modules must not trip the check.
                 "risk_rules": {},
                 "crosschecks": {},

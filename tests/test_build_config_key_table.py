@@ -70,16 +70,16 @@ DOCUMENTED: list[tuple[Path, Any, Any]] = [
     ),
     (("scope", "private_headers"), ["include/*/detail/**"], 123),
     (("scope", "private_namespaces"), ["detail"], 123),
-    # contract: and acknowledgment: (overlay and gate documents)
+    # contract: and acknowledgments: (overlay and gate documents)
     (("contract", "overlays", "post_manifest"), "python/abi/post.json", 123),
-    (("acknowledgment", "file"), "abi/acknowledgments.yml", 123),
-    (("acknowledgment", "unacknowledged_additions"), "block", "nope"),
-    (("acknowledgment", "breaks"), "gate", "nope"),
+    (("acknowledgments", "file"), "abi/acknowledgments.yml", 123),
+    (("acknowledgments", "unacknowledged_additions"), "block", "nope"),
+    (("acknowledgments", "breaks"), "gate", "nope"),
     # suppression:
     (("suppression", "strict"), True, "yes"),
     (("suppression", "require_justification"), False, "yes"),
-    # source: (precise S-axis)
-    (("source", "method"), "s6", 123),
+    # sources: (precise S-axis)
+    (("sources", "method"), "s6", 123),
     # compile: (stable L2 header compile context)
     (("compile", "frontend"), "castxml", "nope"),
     (("compile", "std"), "c++17", 123),

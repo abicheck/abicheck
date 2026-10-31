@@ -1,12 +1,12 @@
 """ADR-067 D5/D6 through the real ``compare`` CLI, configured from
-``.abicheck.yml``'s ``acknowledgment:`` block.
+``.abicheck.yml``'s ``acknowledgments:`` block.
 
 The oracle is written from the ADR's rules, not from the resolver:
 
 * the review gate fires (exit floor ``1``) only under ``block`` and only
   when some public addition is not covered by a loaded record;
 * it never lowers a real ``2``/``4`` (it is a ``max`` fold);
-* a ``--policy`` file that states its own ``acknowledgment:`` block outranks
+* a ``--policy`` file that states its own ``acknowledgments:`` block outranks
   ``.abicheck.yml`` (ADR-049 D7);
 * records load only from an explicitly named ``--config``; the gate setting
   applies from an auto-discovered one too, since it can only tighten.
@@ -99,7 +99,7 @@ def test_explicit_config(
         block["unacknowledged_additions"] = action
     cfg = tmp_path / "project.abicheck.yml"
     cfg.write_text(
-        "acknowledgment:\n" + "".join(f"  {k}: {v}\n" for k, v in block.items())
+        "acknowledgments:\n" + "".join(f"  {k}: {v}\n" for k, v in block.items())
     )
     args = ["compare", str(old), str(new), "--config", str(cfg)]
     if policy_action is not None:
@@ -138,7 +138,7 @@ def test_discovered_config_applies_the_gate_but_not_the_records(tmp_path, monkey
     old, new = _snapshots(tmp_path, break_it=False)
     _write_records(tmp_path / "acks.yml", acknowledge_g=True)
     (tmp_path / ".abicheck.yml").write_text(
-        "acknowledgment:\n  file: acks.yml\n  unacknowledged_additions: block\n"
+        "acknowledgments:\n  file: acks.yml\n  unacknowledged_additions: block\n"
     )
 
     code, doc, out = _run(tmp_path, ["compare", str(old), str(new)])
@@ -163,9 +163,9 @@ def test_unreadable_records_file_is_a_usage_error(tmp_path, monkeypatch):
     old, new = _snapshots(tmp_path, break_it=False)
     (tmp_path / "acks.yml").write_text("version: 2\n")
     cfg = tmp_path / "project.abicheck.yml"
-    cfg.write_text("acknowledgment:\n  file: acks.yml\n")
+    cfg.write_text("acknowledgments:\n  file: acks.yml\n")
     res = CliRunner().invoke(
         main, ["compare", str(old), str(new), "--config", str(cfg)]
     )
     assert res.exit_code == 64
-    assert "acknowledgment.file" in res.output
+    assert "acknowledgments.file" in res.output

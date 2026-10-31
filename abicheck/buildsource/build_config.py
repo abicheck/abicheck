@@ -269,7 +269,7 @@ KEY_TABLE = KeyTable(
             write=contract_block,
         ),
         KeySpec(
-            "acknowledgment",
+            "acknowledgments",
             Kind.WHOLE,
             "acknowledgment",
             validate=acknowledgment_findings,
@@ -282,7 +282,7 @@ KEY_TABLE = KeyTable(
             Kind.BOOL,
             "suppression_require_justification",
         ),
-        KeySpec("source.method", Kind.STR, "source_method"),
+        KeySpec("sources.method", Kind.STR, "source_method"),
         KeySpec(
             "compile.frontend",
             Kind.STR,
@@ -466,7 +466,7 @@ class BuildConfig:
     ownership: OwnershipRules = field(default_factory=OwnershipRules)
     #: ``contract.overlays.post_manifest`` (Phase 9c); see ``build_config_contract.py``.
     contract_post_manifest: str | None = None
-    #: ``acknowledgment:`` (ADR-067 D5/D6); see ``build_config_acknowledgment.py``.
+    #: ``acknowledgments:`` (ADR-067 D5/D6); see ``build_config_acknowledgment.py``.
     acknowledgment: AcknowledgmentConfig | None = None
     #: ``scope.show_redundant`` — a reporting/FP-tuning toggle demoted off the CLI
     #: (ADR-040 Lever 2). ``None`` = unset. The ``--show-filtered`` debugging view

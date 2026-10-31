@@ -137,7 +137,7 @@ schema. Each command applies only the keys it reads and refuses the others; see
 
 ## Top-level keys
 
-`build:`, `sources:`, `severity:`, `scope:`, `suppression:`, `source:`,
+`build:`, `sources:`, `severity:`, `scope:`, `suppression:`,
 `compile:`, `debug:`, `bundle:`, `python:`, `gate:`, `release:`,
 `assurance:`, `deployment:`, `resource_limits:`, `performance:`, `policy:`, `version:`,
 `risk_rules:`, `crosschecks:`, `targets:`, `bundles:`, `profiles:`,
@@ -347,7 +347,7 @@ apply it and say so on stderr (an unapplied narrowing overlay can only add
 findings, never hide one). A stored-bundle-facts baseline rejects the
 `contract:` block like the other blocks it cannot honour.
 
-### `acknowledgment:`
+### `acknowledgments:`
 
 Acknowledgment records and the gates over them. `file:` names the records
 document (a relative path resolves against the project root; `--acknowledgments`
@@ -356,7 +356,7 @@ overrides it). `unacknowledged_additions:` is `allow` (default), `warn` or
 break stops contributing to the exit code.
 
 ```yaml
-acknowledgment:
+acknowledgments:
   file: abi/acknowledgments.yml
   unacknowledged_additions: block
   breaks: gate
@@ -377,12 +377,12 @@ suppression entry. See [Suppressions](../use/suppressions.md).
 
 ---
 
-### `source:`
+### `sources.method`
 
-`method:` pins the precise S-axis (evidence method, `s0`..`s6`) for power
+`sources: {method: …}` pins the precise S-axis (evidence method, `s0`..`s6`) for power
 users.
 
-> **Use a concrete `s0`..`s6`, not `auto`.** When `compare` reads `source.method`
+> **Use a concrete `s0`..`s6`, not `auto`.** When `compare` reads `sources.method`
 > from the config (i.e. no `--depth` on the command line), the value must
 > resolve to a concrete method — `compare` rejects `auto` with a usage error. Pin
 > a specific level here, or leave the key unset and let `--depth`
@@ -391,7 +391,7 @@ users.
 
 See [Evidence depth](../use/evidence-depth.md) and the
 [`--depth` dial](../learn/evidence-and-detectability.md#the-depth-dial-how-much-evidence-to-collect).
-(`graph` is not a valid `source:` sub-key — a config with `source: {graph:
+(`graph` is not a valid key under the retired `source:` block — a config with `source: {graph:
 ...}` now fails with an unknown-key error. The L5 graph-detail knob is
 `sources.graph`, in the plural [`sources:`](#sources) block above.)
 
@@ -882,6 +882,8 @@ sources:
   exclude:
     - include/**/detail/**
   graph: summary
+  # Precise evidence method (optional; a concrete s0..s6, never `auto`)
+  method: s6
 
 # Stable L2 header compile context
 compile:
@@ -919,8 +921,4 @@ scope:
 suppression:
   strict: true
   require_justification: true
-
-# Precise evidence method (optional; a concrete s0..s6, never `auto`)
-source:
-  method: s6
 ```

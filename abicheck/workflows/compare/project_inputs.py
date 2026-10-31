@@ -110,7 +110,7 @@ __all__ = [
 Notify = Callable[[str], None]
 
 POST_MANIFEST_CONFIG_KEY = "contract.overlays.post_manifest"
-ACKNOWLEDGMENT_CONFIG_KEY = "acknowledgment"
+ACKNOWLEDGMENT_CONFIG_KEY = "acknowledgments"
 
 
 # ── POST-manifest contract overlay ──────────────────────────────────────────

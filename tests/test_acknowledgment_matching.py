@@ -181,7 +181,7 @@ def test_expired_record_gates_and_warns_through_the_cli(
         "    change_kind: func_removed\n    reason: x\n    expires: 2000-01-01\n"
     )
     cfg = tmp_path / "cfg.abicheck.yml"
-    cfg.write_text("acknowledgment:\n  file: acks.yml\n")
+    cfg.write_text("acknowledgments:\n  file: acks.yml\n")
     res = CliRunner().invoke(
         main, ["compare", str(old), str(new), "--config", str(cfg)]
     )
@@ -207,7 +207,7 @@ def test_cli_warns_on_an_unscoped_record(
         "    change_kind: func_added\n    reason: x\n"
     )
     cfg = tmp_path / "cfg.abicheck.yml"
-    cfg.write_text("acknowledgment:\n  file: acks.yml\n")
+    cfg.write_text("acknowledgments:\n  file: acks.yml\n")
     res = CliRunner().invoke(
         main, ["compare", str(old), str(new), "--config", str(cfg)]
     )

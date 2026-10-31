@@ -59,7 +59,7 @@ CORE_CONFIG_FLAGS: dict[str, str] = {
     "build.compile_db": "--build-info",
     "scope.exclude_headers": "--exclude-header",
     "contract": "--contract",
-    "acknowledgment": "--acknowledgments",
+    "acknowledgments": "--acknowledgments",
     "severity.preset": "--severity-preset",
 }
 

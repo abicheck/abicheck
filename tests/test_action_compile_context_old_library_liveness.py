@@ -315,7 +315,7 @@ class TestCompileContextPairwiseOldLibraryClassification:
         src_dir.mkdir()
         (src_dir / ".abicheck.yml").write_text(
             "compile:\n  sysroot: /opt/new-side-only-sysroot\n"
-            "source:\n  method: s6\n"
+            "sources:\n  method: s6\n"
             "debug:\n  format: dwarf\n",
             encoding="utf-8",
         )
@@ -388,7 +388,7 @@ class TestCompileContextPairwiseOldLibraryClassification:
         src_dir.mkdir()
         (src_dir / ".abicheck.yml").write_text(
             "compile:\n  sysroot: /opt/sources-root-sysroot\n"
-            "source:\n  method: s6\n"
+            "sources:\n  method: s6\n"
             "debug:\n  format: dwarf\n",
             encoding="utf-8",
         )
@@ -412,12 +412,12 @@ class TestCompileContextPairwiseOldLibraryClassification:
         """The checkout's own ``source:``/``debug:`` are the shared ones; the
         sources root's ``s6``/``dwarf`` never replace them."""
         (tmp_path / ".abicheck.yml").write_text(
-            "source:\n  method: headers\ndebug:\n  format: btf\n", encoding="utf-8"
+            "sources:\n  method: headers\ndebug:\n  format: btf\n", encoding="utf-8"
         )
         src_dir = tmp_path / "src"
         src_dir.mkdir()
         (src_dir / ".abicheck.yml").write_text(
-            "source:\n  method: s6\ndebug:\n  format: dwarf\n", encoding="utf-8"
+            "sources:\n  method: s6\ndebug:\n  format: dwarf\n", encoding="utf-8"
         )
         (tmp_path / "old.abicheck.json").write_bytes(b'{"schema_version": 1}')
         cmd, _ = _run_region_with_cwd(
@@ -474,7 +474,7 @@ class TestCompileContextPairwiseOldLibraryClassification:
         src_dir.mkdir()
         (src_dir / ".abicheck.yml").write_text(
             "compile:\n  sysroot: /opt/new-side-only-sysroot\n"
-            "source:\n  method: s6\n"
+            "sources:\n  method: s6\n"
             "debug:\n  format: dwarf\n",
             encoding="utf-8",
         )
@@ -508,7 +508,7 @@ class TestAuditOnlyCompareStaysSingleSidedUnconditionally:
         src_dir.mkdir()
         (src_dir / ".abicheck.yml").write_text(
             "compile:\n  sysroot: /opt/sources-root-sysroot\n"
-            "source:\n  method: s6\n"
+            "sources:\n  method: s6\n"
             "debug:\n  format: dwarf\n",
             encoding="utf-8",
         )
