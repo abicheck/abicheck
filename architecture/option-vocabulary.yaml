@@ -963,8 +963,8 @@ concepts:
       - action:used-by
       - action:used-by-manifest
     exceptions:
-      - {id: compare --used-by-manifest, rule: name, rename: R21, note: cli spelling breaks D1; the leaf is `used_by`}
-      - {id: 'action:used-by-manifest', rule: name, rename: R20, note: action spelling breaks D1; the leaf is `used_by`}
+      - {id: compare --used-by-manifest, rule: name, rename: R21, note: cli spelling breaks D1; the leaf is `used_by`; handled by Phase 5 (consumers.manifests, D4 balance amendment), drop this exception when Phase 5 lands}
+      - {id: 'action:used-by-manifest', rule: name, rename: R20, note: action spelling breaks D1; the leaf is `used_by`; handled by Phase 5 (consumers.manifests, D4 balance amendment), drop this exception when Phase 5 lands}
   - concept: required_symbol
     tier: core
     renames: []

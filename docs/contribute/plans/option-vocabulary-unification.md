@@ -1,6 +1,6 @@
 # Option vocabulary unification: implementation plan
 
-**Status:** Phases 0, 1, 2 done (Phase 0 2026-10-30; Phase 1 is #1850; Phase 2: the CLI `--set` half for `compare`, `dump` and `project capture-variants` (#1851, #1857), the Action `set:` input (#1854), and the compile-context keys replacing the Action's `compile:` overlay (#1861); the typed API still refuses `compile.*`, see the Result below). Phase 4 done for the CLI (#1852), the Action (#1860), the typed request and `run_compare` shim, and the reusable workflows (this change). Still open in Phase 4: the Tier-1 `checker.compare()` keywords (`contract_evaluation`, `contract_mode`) and the `run_dump(public_headers)` review. Phase 3 (R11, R15) and Phase 5 (budget) in progress. Phase 6 is collapsed into each rename (D7 amendment). Phase 7 not started. Implements
+**Status:** Phases 0, 1, 2 done (Phase 0 2026-10-30; Phase 1 is #1850; Phase 2: the CLI `--set` half for `compare`, `dump` and `project capture-variants` (#1851, #1857), the Action `set:` input (#1854), and the compile-context keys replacing the Action's `compile:` overlay (#1861); the typed API still refuses `compile.*`, see the Result below). Phase 4 done for the CLI (#1852), the Action (#1860), the typed request and `run_compare` shim, and the reusable workflows (this change). Phase 4 is done for the typed API. The Tier-1 `checker.compare()` keywords (`contract_evaluation`, `contract_mode`) are an accepted exception (ADR-091 R10). Open review item, not a blocker: `run_dump(public_headers)`. Phase 3 (R11, R15) and Phase 5 (budget) in progress. Phase 6 is collapsed into each rename (D7 amendment). Phase 7 not started. Implements
 [ADR-091](../adr/091-one-option-vocabulary.md). Each phase is one PR, ordered
 so that the parity gate lands before any rename. Every rename lands with its
 migration row and no alias: the 2026-10-30 policy (ADR-091 D7 amendment)
@@ -321,10 +321,8 @@ and the typed-API table of `docs/start/upgrading-to-0.7.md`. The gate's exceptio
 for these ids are removed. R19 (the flattened and sided Python names) is
 resolved as ACCEPTED on 2026-10-31 under the maintainer rule: the registry
 records each as an `accepted: true` exception against the R19 row, and no
-Python name in it remains a planned rename. Still open in Phase 4:
-`checker.compare()`'s `contract_evaluation` and `contract_mode` (the Tier-1 core
-keeps them; R10 renamed the typed request and `run_compare`),
-`run_dump(public_headers)` (R18 review: `run_dump` already has
+Python name in it remains a planned rename. Phase 4 is done for the typed API. `checker.compare()`'s `contract_evaluation` and
+`contract_mode` stay as the documented Tier-1 raw building block (docs/use/python-api.md), not the typed request surface, and are an accepted exception (ADR-091 R10). Open review item, not a blocker: `run_dump(public_headers)` (R18 review: `run_dump` already has
 a `headers` parameter, so `headers` would collide), `ReleaseCompareRequest` and
 `ReleaseMemberCompareRequest` (they keep their own spellings and translate at the
 boundary), and the `resolve_input`/`compare_snapshots`/`load_suppression_and_policy`
