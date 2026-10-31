@@ -31,6 +31,11 @@
 # cli/config/action/python: inventory ids (cli "<command> <--option>",
 #           action "<action>:<input>", python "<Class>.<field>" or
 #           "<function>(<param>)").
+# cross_refs:  none on a BROAD concept whose members are not one option (ADR-091
+#              D2): `bundle` groups facts output, cohorts and provider lists;
+#              `project` groups unrelated project-plan inputs. The generated
+#              references show no counterpart for those members rather than a
+#              wrong one, until the concept is split.
 schema_version: 1
 out_of_scope:
   - pattern: workflow:*:*-artifact-name
@@ -697,6 +702,7 @@ concepts:
       - action:new-root
   - concept: bundle
     tier: config
+    cross_refs: none
     workflow:
       - workflow:check-single.yml:bundle-members
     renames: []
@@ -1257,6 +1263,7 @@ concepts:
       - actions/aggregate:gate
   - concept: project
     tier: core
+    cross_refs: none
     workflow:
       - workflow:check-single.yml:kind
       - workflow:check-single.yml:target-kind

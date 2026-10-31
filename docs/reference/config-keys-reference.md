@@ -4,7 +4,7 @@
 
 Every `.abicheck.yml` top-level key and block sub-key that `abicheck.buildsource.build_config.BuildConfig` itself validates, with its exact required YAML type — generated directly from `BuildConfig`'s strict-schema registries (an unknown key or a wrong-typed value is a hard error). "Other recognized top-level keys" below are also accepted but parsed by a sibling module instead, so no type is claimed for them here. See [Config File Reference](../reference/config-file.md) for effective defaults, CLI-override precedence, and a worked example; this page is the exhaustive key/type list for `BuildConfig`'s own schema only.
 
-The last column gives the same option on the other surfaces, read from `architecture/option-vocabulary.yaml`. `--set PATH=VALUE` is the escape hatch for a `.abicheck.yml` key, not the primary spelling; a core option has no `--set` form. A `RETIRED` input is a fail-closed tombstone: it fails the run and names its replacement.
+The last column gives the same option on the other surfaces, read from `architecture/option-vocabulary.yaml`. `--set PATH=VALUE` is the escape hatch for a `.abicheck.yml` key, not the primary spelling; a core option has no `--set` form. A `RETIRED` input is a fail-closed tombstone: it fails the run and names its replacement, or the reason it has none.
 
 ## Blocks
 
@@ -18,7 +18,7 @@ The last column gives the same option on the other surfaces, read from `architec
 
 | Sub-key | Type | Same option on other surfaces |
 |---|---|---|
-| `compile_db` | str | CLI: `compare --build-info`, `dump --build-info`; Action: `build-info`, `compile-db`; Reusable workflow: `build-info` (check-single.yml, check-project.yml), `compile-db` (check-single.yml, check-project.yml); --set: `--set build.compile_db=VALUE` |
+| `compile_db` | str | CLI: `compare --build-info`, `dump --build-info`; Action: `build-info`, `compile-db`; Reusable workflow: `build-info` (check-single.yml, check-project.yml), `compile-db` (check-single.yml, check-project.yml) |
 | `compile_db_filter` | str | --set: `--set build.compile_db_filter=VALUE` |
 | `query` | str | --set: `--set build.query=VALUE` |
 | `system` | str | --set: `--set build.system=VALUE` |
@@ -28,8 +28,8 @@ The last column gives the same option on the other surfaces, read from `architec
 
 | Sub-key | Type | Same option on other surfaces |
 |---|---|---|
-| `cohorts` | list[str] (or a single str) | CLI: `compare --instantiation-manifest`, `compare --bundle-facts-out`, `compare --bundle-facts-library-manifest`; Reusable workflow: `bundle-members` (check-single.yml); --set: `--set bundle.system_providers=VALUE`, `--set bundle.cohorts=VALUE`, `--set bundle_variants=VALUE` |
-| `system_providers` | list[str] (or a single str) | CLI: `compare --instantiation-manifest`, `compare --bundle-facts-out`, `compare --bundle-facts-library-manifest`; Reusable workflow: `bundle-members` (check-single.yml); --set: `--set bundle.system_providers=VALUE`, `--set bundle.cohorts=VALUE`, `--set bundle_variants=VALUE` |
+| `cohorts` | list[str] (or a single str) | — |
+| `system_providers` | list[str] (or a single str) | — |
 
 ### `compile:`
 
@@ -38,10 +38,10 @@ The last column gives the same option on the other surfaces, read from `architec
 | `allow_unsupported_castxml` | bool | --set: `--set compile.allow_unsupported_castxml=VALUE` |
 | `ast_frontend_fallback` | bool | --set: `--set compile.ast_frontend_fallback=VALUE` |
 | `compiler` | str | Action: `compiler`; Reusable workflow: `compiler` (check-single.yml, check-project.yml); --set: `--set compile.compiler=VALUE` |
-| `defines` | list[str] (or a single str) | CLI: `compare --define`, `dump --define`; --set: `--set compile.defines=VALUE` |
+| `defines` | list[str] (or a single str) | CLI: `compare --define`, `dump --define` |
 | `frontend` | str | Reusable workflow: `frontend` (check-single.yml, check-project.yml); --set: `--set compile.frontend=VALUE` |
 | `frontend_context` | str | --set: `--set compile.frontend_context=VALUE` |
-| `include_dirs` | list[str] (or a single str) | CLI: `compare --include`, `dump --include`; Action: `include`, `old-include`, `new-include`; Reusable workflow: `include` (check-single.yml, check-project.yml), `old-include` (check-single.yml, check-project.yml), `new-include` (check-single.yml, check-project.yml); --set: `--set compile.include_dirs=VALUE` |
+| `include_dirs` | list[str] (or a single str) | CLI: `compare --include`, `dump --include`; Action: `include`, `old-include`, `new-include`; Reusable workflow: `include` (check-single.yml, check-project.yml), `old-include` (check-single.yml, check-project.yml), `new-include` (check-single.yml, check-project.yml) |
 | `lang` | str | Action: `lang`; Reusable workflow: `lang` (check-single.yml, check-project.yml); --set: `--set compile.lang=VALUE` |
 | `nostdinc` | bool | --set: `--set compile.nostdinc=VALUE` |
 | `options` | list[str] (or a single str) | Reusable workflow: `compile-options` (check-single.yml, check-project.yml); --set: `--set compile.options=VALUE` |
@@ -63,7 +63,7 @@ The last column gives the same option on the other surfaces, read from `architec
 | `debuginfod_url` | str | --set: `--set debug.debuginfod_url=VALUE` |
 | `dwarf_only` | bool | --set: `--set debug.dwarf_only=VALUE` |
 | `format` | str | --set: `--set debug.format=VALUE` |
-| `pdb_path` | str | CLI: `compare --debug-info`, `dump --debug-info`; Action: `old-debug-info`, `new-debug-info`; --set: `--set debug.pdb_path=VALUE` |
+| `pdb_path` | str | CLI: `compare --debug-info`, `dump --debug-info`; Action: `old-debug-info`, `new-debug-info` |
 
 ### `gate:`
 
@@ -116,7 +116,7 @@ The last column gives the same option on the other surfaces, read from `architec
 | `collapse_versioned_symbols` | bool | --set: `--set scope.collapse_versioned_symbols=VALUE` |
 | `dependencies` | list[{name: str, header_roots: list[str]}] | --set: `--set scope.dependencies=VALUE`, `--set scope.dependency_evidence=VALUE` |
 | `dependency_evidence` | str ('full') | --set: `--set scope.dependencies=VALUE`, `--set scope.dependency_evidence=VALUE` |
-| `exclude_headers` | list[str] (or a single str) | CLI: `compare --exclude-header`, `dump --exclude-header`; --set: `--set scope.exclude_headers=VALUE` |
+| `exclude_headers` | list[str] (or a single str) | CLI: `compare --exclude-header`, `dump --exclude-header` |
 | `on_incomplete` | str | --set: `--set scope.on_incomplete=VALUE` |
 | `private_headers` | list[str] (or a single str) | --set: `--set scope.private_headers=VALUE` |
 | `private_namespaces` | list[str] (or a single str) | --set: `--set scope.private_namespaces=VALUE` |
@@ -132,7 +132,7 @@ The last column gives the same option on the other surfaces, read from `architec
 | `abi_breaking` | str | --set: `--set severity.abi_breaking=VALUE` |
 | `addition` | str | --set: `--set severity.addition=VALUE` |
 | `potential_breaking` | str | --set: `--set severity.potential_breaking=VALUE` |
-| `preset` | str | CLI: `compare --severity-preset`; Action: `severity-preset`; Reusable workflow: `severity-preset` (check-single.yml, check-project.yml); --set: `--set severity.preset=VALUE` |
+| `preset` | str | CLI: `compare --severity-preset`; Action: `severity-preset`; Reusable workflow: `severity-preset` (check-single.yml, check-project.yml) |
 | `quality_issues` | str | --set: `--set severity.quality_issues=VALUE` |
 
 ### `sources:`

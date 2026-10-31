@@ -142,6 +142,8 @@ def _expected_substrings(concept: dict[str, Any], own: str) -> list[str]:
                 wanted.append(f"`{member.split(':', 1)[1]}`")
             else:
                 wanted.append(f"`{member}`")
+    if concept.get("cross_refs") == "none" or concept.get("tier") == "core":
+        return wanted  # a broad concept has no cell; a core key refuses --set
     if own == "action":
         wanted += [f"`{key}=VALUE`" for key in concept.get("config", [])]
     else:
@@ -184,6 +186,12 @@ def test_every_generated_row_names_its_counterparts(registry: dict[str, Any]) ->
             if found is None:
                 continue  # an option with no concept; the inventory test owns that
             own, concept = found
+            if concept.get("cross_refs") == "none":
+                assert cell == "—", (
+                    f"{member} is in a broad concept but has a cell: {cell}"
+                )
+                checked += 1
+                continue
             for needle in _expected_substrings(concept, own):
                 assert needle in cell, f"{member}: cell lacks {needle}: {cell}"
             checked += 1
@@ -319,7 +327,7 @@ def test_cell_excludes_its_own_surface_and_adds_set_for_a_config_key() -> None:
         "concepts": [
             {
                 "concept": "compile.include_dirs",
-                "tier": "core",
+                "tier": "config",
                 "cli": ["compare --include"],
                 "action": ["action:include", "actions/check-target:include"],
                 "workflow": ["workflow:check-single.yml:include"],
@@ -345,7 +353,7 @@ def test_an_action_row_spells_the_override_as_its_own_set_input() -> None:
         "concepts": [
             {
                 "concept": "compile.include_dirs",
-                "tier": "core",
+                "tier": "config",
                 "cli": ["compare --include"],
                 "action": ["action:include"],
                 "workflow": ["workflow:check-single.yml:include"],
@@ -428,3 +436,33 @@ def test_sub_action_plumbing_is_not_listed_as_a_public_surface() -> None:
         "replacements": [],
     }
     assert _cross_refs(reg).cell("action:header", own="action") == "—"
+
+
+def test_the_core_config_keys_are_exactly_the_keys_set_refuses(
+    registry: dict[str, Any],
+) -> None:
+    """A core concept keeps one spelling: the keys ``--set`` refuses are exactly
+    the config keys of the core-tier concepts (ADR-091 D4/D6)."""
+    from abicheck.buildsource.build_config_overrides import CORE_CONFIG_FLAGS
+
+    core_keys = {
+        key
+        for concept in registry["concepts"]
+        if concept["tier"] == "core"
+        for key in concept.get("config", [])
+    }
+    assert core_keys == set(CORE_CONFIG_FLAGS), core_keys ^ set(CORE_CONFIG_FLAGS)
+
+
+def test_no_generated_cell_offers_set_for_a_core_key(registry: dict[str, Any]) -> None:
+    """A row of a core concept never names ``--set``: the validator would refuse it."""
+    for kind, rows in _rendered_docs().items():
+        for member, cell in rows.items():
+            found = _owner_surface(registry, member)
+            if found is None:
+                continue
+            _, concept = found
+            if concept["tier"] == "core":
+                assert "--set" not in cell and "set:" not in cell, (
+                    f"{kind} row {member} is core but its cell offers an override: {cell}"
+                )

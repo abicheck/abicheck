@@ -14,14 +14,18 @@ reusable-workflow input, ``.abicheck.yml`` key, and the ``--set PATH=VALUE``
 spelling of that key. A generator's own surface is not repeated in its own
 cell: a CLI row names the Action input, not the CLI flag again. ``--set`` is
 the escape hatch for a config key, not the primary spelling, and a core
-concept (no config key) has no ``--set`` form (ADR-091 D4/D6).
+concept has no ``--set`` form: ``--set`` refuses every core key (ADR-091 D4/D6,
+``abicheck.buildsource.build_config_overrides.CORE_CONFIG_FLAGS``).
 
 ``actions/*`` sub-action inputs (the composite ``check-target`` plumbing the
 reusable workflows call) are not a public surface, so they are not listed.
 
 A retired or deprecated Action or workflow input gets no live counterpart: its
 cell says ``RETIRED`` (or ``DEPRECATED``) and names the row it was replaced by,
-so a tombstone never reads as a live option.
+or the reason it has none, so a tombstone never reads as a live option.
+
+A concept marked ``cross_refs: none`` (a broad concept whose members are not
+one option) gets no cell, rather than a wrong counterpart.
 """
 
 from __future__ import annotations
@@ -52,7 +56,7 @@ LEGEND = (
     "`architecture/option-vocabulary.yaml`. `--set PATH=VALUE` is the escape "
     "hatch for a `.abicheck.yml` key, not the primary spelling; a core option "
     "has no `--set` form. A `RETIRED` input is a fail-closed tombstone: it "
-    "fails the run and names its replacement."
+    "fails the run and names its replacement, or the reason it has none."
 )
 
 
@@ -107,13 +111,13 @@ class CrossRefs:
         """The cross-surface cell for ``member``, a row of the ``own`` surface.
 
         ``own`` is ``cli``, ``action``, ``workflow`` or ``config``; that
-        surface's own items are left out, and ``--set`` is shown for any
-        concept that has a config key.
+        surface's own items are left out, and the override spelling is shown for
+        a non-core concept that has a config key.
         """
         if member in self._replacements:
             return self.retired_cell(member)
         concept = self._concept.get(member)
-        if concept is None:
+        if concept is None or concept.get("cross_refs") == "none":
             return EMPTY
         parts: list[str] = []
         for surface, label in CELL_SURFACES:
@@ -123,7 +127,8 @@ class CrossRefs:
             if items:
                 parts.append(f"{label}: {', '.join(items)}")
         config = concept.get("config", [])
-        if config:
+        # --set refuses every core key: a core concept keeps its one flag.
+        if config and concept.get("tier") != "core":
             # An Action row names the Action's own input (`set:`), never the CLI
             # flag; every other row names the flag.
             if own == "action":
