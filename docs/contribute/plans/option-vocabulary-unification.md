@@ -382,6 +382,18 @@ R18 `run_dump`) and check-target's own sub-action docs are the rest of Phase 4.
 
 Size: M. Changelog: Changed.
 
+**Result (2026-10-31).** The soft budget (ADR-091 D4 amendment, 2026-10-31)
+replaces the hard 15/25 targets. Landed: `--used-by-manifest`, `--required-symbol`
+and `--view` are removed from `compare` and reached through the new
+`consumers.manifests`, `consumers.required_symbols` and `output.view` keys
+(`--set` or `.abicheck.yml`). The Action retires seven inputs to `set:`
+tombstones (`dso-only`, `include-private-dso`, `fail-on-removed-library`,
+`public-header-dirs`, `frontend`, `compile-options`, `nostdinc`) and converts
+`jobs` and `allow-build-query` into fail-closed tombstones. The recorded
+no-growth budgets are 17 visible `compare` options and 42 Action analysis
+inputs. Still open, not in this phase: the `--debug-info` per-side transports,
+`deps.*` keys without a config home, and a `--sources` discovery rule.
+
 ## Phase 6 — Remove aliases (collapsed into each rename, 2026-10-30)
 
 The 2026-10-30 policy (ADR-091 D7 amendment) withdraws the one-release
