@@ -820,7 +820,7 @@ Lazy loading, streaming encode, cache migration, indexes, transport, and
 the measurement work that sets D12's level table (D8's chunk size was
 withdrawn by ADR-062 D18).
 
-**Status: A2.1 partially implemented — the `graph` section only**
+**Status: A2.1 partially implemented — the `graph` section, and on eligible documents `declarations`/`types`/debug layout (ADR-062 D18 step 2, 2026-10-31; detail under A1.9's D18 entry)**
 (evidence-entity-model Phase 5a, with 5b/5c's compact encoding of the same
 section). Implemented *here*, as this plan's A2.1, not as a parallel
 mechanism:
@@ -971,9 +971,9 @@ A1.9), item by item. Open items are also listed in
   probes in `tests/unit/storage/test_extension_preservation_gap.py`. The
   carriers (`must_understand` list, `extensions` map) are specified by the
   amendment but not built.
-- **D18, selective load: step 1 (decode split) implemented 2026-10-31;
-  lazy loading not implemented** beyond the `graph` section's deferred
-  decode described under Phase 2 above.
+- **D18, selective load: steps 1 (decode split) and 2 (lazy declaration
+  store) implemented 2026-10-31;** per-pair release and the shared
+  decoded-section cache not built (step 2 and measurements below).
 
   *Design of the split.* `storage/snapshot_section_decode.DECODE_STEPS`
   lists every decode step with `reads` (the raw sections it may look at)
@@ -1016,6 +1016,39 @@ A1.9), item by item. Open items are also listed in
   semantic-IR assembly; measurements and the blocker are in known-gaps
   "ADR-062 D14-D18". D14 follow-up landed the same day: the console summary of
   `compare` states partial assurance and names each not-comparable section.
+
+  *Step 2 (implemented 2026-10-31).* `declarations`, `types` and debug
+  layout decode into `AbiSnapshot.semantic_ir`'s declaration store, so they
+  are deferred together: `semantic_ir` is a `LazyGraphField` and a lazily
+  loaded snapshot holds a `PendingGraph` whose decoder
+  (`model/lazy_declarations.DeferredSemanticIR`) rebuilds the eager snapshot
+  (store, `semantic_ir` section, extraction-scope ownership,
+  `finalize_snapshot_semantic_ir`) and yields its IR. Eligibility
+  (`storage/snapshot_lazy_decode.lazy_ir_eligible`): `from_headers`
+  recorded, `schema_version >= LEGACY_BACKFILL_FLOOR` (every legacy
+  fact-backfill rule skipped; a test derives the floor from the rules the
+  backfill passes), and the document text proven marker-free (closure
+  renumbering is a no-op). Other documents decode eagerly. The ELF-binding
+  backfill and the stored export-absence reconciliation are queued into the
+  cell. 41 of the 50 corpus documents load lazily; the 9 pre-`from_headers`
+  ones stay eager. `tests/unit/storage/test_snapshot_lazy_decode.py`
+  differentially tests lazy against eager (corpus, Hypothesis-generated
+  snapshots, compare results, copies, pickle, access-order permutations,
+  concurrent first access) and checks that each detector whose
+  `DETECTOR_SECTIONS` avoid the deferred sections leaves them undecoded.
+
+  *A2.5 measurement (2026-10-31, synthetic, `origin/main` vs this change,
+  same operands).* One 140 MiB snapshot (20k functions, 2k records, 2k
+  variables): load 3.9 s -> 2.4-2.8 s with the store pending; load plus
+  first access 4.4-5.2 s, the same as eager (4.4-5.2 s); peak RSS 419 MiB in
+  both, set by the whole-document `json.loads`. Project comparison
+  (`compare old/ new/`, 8 libraries per side, 42 MiB each, 6k functions):
+  29.7-30.2 s / 393 MiB before, 31.5-35.9 s / 391-406 MiB after, identical
+  JSON reports. **A2.5 is not met**: a full compare reads `declarations`/
+  `types` (nearly every detector does), so the cell is decoded anyway, and
+  the parsed document dominates the peak. Per-pair release and the shared
+  decoded-section cache were therefore not built: no consumer path reads a
+  section it could share or release early. What remains is in known-gaps.
 
 ---
 
@@ -1128,6 +1161,7 @@ satisfies for the one domain type it actually sections today
 | `abicheck/storage/evidence_digest.py` | `EVIDENCE_FORM_VERSION`, `UNORDERED_LISTS`, `VOLATILE_CAPTURE_FIELDS`, `evidence_digest_of_document` — ADR-062 D16's evidence digest over a snapshot document: volatile capture metadata dropped, identity-matched record lists stably sorted by identity, semantically ordered lists untouched, the form version hashed in. Internal, not re-exported by the package |
 | `abicheck/storage/wire_extensions.py` | `AVAILABILITY_KEY`, `DOCUMENT_MUST_UNDERSTAND_KEY`, `EXTENSIONS_KEY`, `IDENTITY_SECTION_KIND`, `MUST_UNDERSTAND_KEY`, `UNDERSTOOD_EXTENSIONS`, `WIRE_EXTENSIONS_KEY`, `WireExtensions`, `attach`, `check_must_understand`, `extensions_of`, `merge_wire_extensions`, `record_section_failure`, `refuse_package_flattening`, `refuse_unwritable_extensions`, `split_wire_extensions` — ADR-062 D14/D15 carriers of the sectioned document: unknown sections, header must-understand names and extension maps, the section availability table, and the sections a load must block, split off on read and merged back on write. Internal, not re-exported by the package |
 | `abicheck/storage/wire_record_extensions.py` | `RECORD_EXTENSIONS_KEY`, `RECORD_LISTS`, `RecordExtras`, `collect_record_extras`, `restore_record_extras` — ADR-062 D14 at record level: unknown fields of identity-matched records, kept by identity and ordinal and written back on re-save. Internal, not re-exported by the package |
+| `abicheck/storage/snapshot_lazy_decode.py` | `LEGACY_BACKFILL_FLOOR`, `decode_lazily`, `eager_section_decode`, `lazy_ir_eligible` — ADR-062 D18 step 2: a document on which every join touching the declarations, types and debug-layout sections is a no-op loads with them pending in the snapshot's semantic IR (model/lazy_declarations.py); any other document decodes eagerly. Internal, not re-exported by the package |
 | `abicheck/storage/wire_field_names.py` | `wire_field_names` — the keys the snapshot encoder writes for a dataclass record, shared by the encoder and the ADR-062 D14 record reader. Internal, not re-exported by the package |
 | `abicheck/storage/package_publish.py` | `REF_DIRS`, `REF_ENTRY_FIELDS`, `REF_SCHEMA_VERSION`, `REF_SCHEMA_VERSION_KEY`, `publish_lock_name`, `ref_digest_entries`, `ref_digest_of`, `ref_document`, `ref_record`, `versioned_ref_relpath` — ADR-062 D17's ref layout (amends D6): the immutable refs/&lt;kind&gt;/&lt;id&gt;/&lt;ref-digest&gt;.json path, the ref document with its own layout version, its ref digest (the semantic digest of the whole document), the package-format-v2 manifest entries naming each ref by id and ref digest, and the cross-process lock name serializing writers. Internal, not re-exported by the package |
 | `abicheck/storage/zip_member.py` | `deterministic_zipinfo` — the pinned zip member header shared by G40's bundle archive and the package transport. Internal, not re-exported by the package |

@@ -1,7 +1,7 @@
 # ADR-062: Project Snapshot Storage v2 — Content-Addressed Sections, Explicit Fact Availability, and Occurrence-Preserving Identity
 
 **Date:** 2026-08-26
-**Status:** Proposed — partially implemented; amended 2026-10-30 (D14-D18, rules accepted; D14, D15 and D17 implemented, D16 partially, D18 step 1 (per-section decode split) implemented 2026-10-31, lazy loading pending -- see known-gaps). Phase 0 primitives implemented (`abicheck/storage/`:
+**Status:** Proposed — partially implemented; amended 2026-10-30 (D14-D18, rules accepted; D14, D15 and D17 implemented, D16 partially, D18 steps 1-2 (per-section decode split; lazy `declarations`/`types`/debug layout via a deferred `semantic_ir` cell) implemented 2026-10-31, per-pair release and the shared decoded-section cache pending -- see known-gaps). Phase 0 primitives implemented (`abicheck/storage/`:
 fact availability, entity/occurrence identity with conflict preservation,
 canonical encoding and semantic digest, and the separated version axes).
 Phase 1's A1.1-A1.3 are implemented: `abicheck/storage/package.py` carries
@@ -854,6 +854,37 @@ split, is implemented; lazy loading of any further section is not.
   join touching it is a no-op; `semantic_ir` assembly is deferred into a
   cell that forces its input sections. The plan's A1.9 D18 entry holds the
   dependency table and the next step.
+
+**Implementation decisions (2026-10-31, step 2).** The `declarations`,
+`types` and debug-layout sections decode into one attribute,
+`AbiSnapshot.semantic_ir` (the IR owns the declaration store), so they are
+deferred together, with the `semantic_ir` section and the per-entity half of
+`extraction_scope`:
+
+- `AbiSnapshot.semantic_ir` is a `LazyGraphField`; a lazily loaded snapshot
+  holds a `PendingGraph` whose decoder (`model/lazy_declarations.
+  DeferredSemanticIR`) rebuilds the snapshot the eager decode would build
+  and yields its IR. `semantic_ir` assembly
+  (`finalize_snapshot_semantic_ir`) runs inside that cell.
+- Eligibility (`storage/snapshot_lazy_decode.lazy_ir_eligible`): recorded
+  `from_headers`; `schema_version` at or above every legacy fact-backfill
+  rule (so the backfill is a no-op); the document text scanned and free of
+  closure markers, which proves the closure-identity renumbering a no-op.
+  Any other document decodes eagerly. The generation spelling migration
+  runs on the whole document first in both modes.
+- The ELF-binding backfill and the stored export-absence reconciliation run
+  on every load and rewrite declarations, so they are queued into the cell
+  (`defer_declaration_step`) and run in their eager order when it decodes.
+- A decode error in a deferred section is raised at every access, the error
+  the eager load raises. A malformed deferred section is therefore reported
+  at first use, not at load; `eager_section_decode()` restores load-time
+  reporting.
+- Not built: per-pair release of decoded sections and the shared
+  decoded-section cache. Nearly every detector reads `declarations`/`types`,
+  so a full compare decodes the cell anyway, and the peak is set by the
+  whole-document `json.loads`, which lazy decoding does not remove. No real
+  consumer path would read the cache, so per D11 it is not built.
+  Measurements are in the plan's A1.9 D18 entry.
 
 ### Exit criteria and non-goals
 

@@ -255,7 +255,7 @@ current emitter, which is unchanged.
 
 **Status (2026-10-30): PARTIAL.** D14, D15 and D17 are implemented (with
 the residuals below), and D16's `evidence` digest is implemented and
-consumed; D16's other roles and D18 are open. Owner:
+consumed; D16's other roles are open and D18 is partial. Owner:
 `storage/`; per-item status in the
 [storage format v2 plan](plans/storage-format-v2.md).
 
@@ -298,31 +298,28 @@ consumed; D16's other roles and D18 are open. Owner:
   gives no assurance note when a detector reads it (decided in ADR-062 D15's
   implementation decisions: it would fire on every pre-D15 document; the
   fact-family availability already reports the missing evidence).
-- **D18 (open; decode split landed 2026-10-31).** Only the `graph` section
-  decodes lazily. The decode is now split per section
-  (`storage/snapshot_section_decode.DECODE_STEPS`: one decoder per section,
-  each reading the document only through a `SectionView` that raises on an
-  undeclared key, plus declared joins), byte-identical on the fixture corpus.
-  What still blocks lazy `declarations`/`types`/`debug`: the joins.
-  `from_headers` inference (legacy documents) reads the decoded
-  `declarations`/`types`; the reliability flags and the ADR-063 legacy fact
-  backfill read `debug` and rewrite decoded `declarations`/`types` in place;
-  `migrate_and_describe` rewrites spellings across the whole document for an
-  older extractor generation; `AbiSnapshot.__post_init__` and
-  `finalize_snapshot_semantic_ir` fold `declarations`/`types`/`debug` into
-  `semantic_ir`; closure-identity renumbering (`finalize_snapshot`) walks the
-  whole snapshot. A lazy section is only correct where every join touching it
-  is a no-op (current-generation, current-schema document with a recorded
-  `from_headers`) -- that gate, and a deferred `semantic_ir` assembly, are
-  the next step. Measured on a 106 MiB synthetic sectioned snapshot (20k
-  functions, 2k records): `json.loads` 0.65 s, section export 4.3 s, full
-  load 16 s / 323 MiB peak; `declarations` is 44.8 MB, `types` 13.0 MB,
-  `binary` 3.5 MB, every other section under 1 KB -- and nearly every
-  detector reads `binary`+`declarations`+`types`
-  (`compare/section_readers.DETECTOR_SECTIONS`), so a full compare decodes
-  them anyway. The win is limited to pairing-only paths (release/package
-  member pairing reading `binary`); no shared decoded-section cache is built
-  until such a path exists. Whole-document `json.loads` remains.
+- **D18 (partial; decode split and lazy declaration store landed
+  2026-10-31).** `declarations`, `types` and debug layout now load lazily,
+  together, as a pending `AbiSnapshot.semantic_ir` cell
+  (`storage/snapshot_lazy_decode.py`, `model/lazy_declarations.py`), on a
+  document with recorded `from_headers`, a schema past every legacy
+  fact-backfill rule, and text proven free of closure markers. Still open:
+  (1) every other document decodes eagerly, including every
+  `snapshot_from_dict(dict)` caller with no scanned text (bundle archive
+  blobs, project packages, matrix findings), whose load-time
+  `SnapshotError` translation a deferred error would bypass; (2) a malformed
+  deferred section is reported at first use, not at load, as for the graph;
+  (3) **A2.5 is not met** -- nearly every detector reads
+  `declarations`/`types` (`compare/section_readers.DETECTOR_SECTIONS`), so a
+  full compare decodes the cell anyway, and peak RSS is set by the
+  whole-document `json.loads` (140 MiB synthetic snapshot: 419 MiB peak
+  before and after; 8-library project compare 393 vs 391-406 MiB); (4)
+  per-pair release of decoded sections and the shared `evidence`-keyed
+  decoded-section cache are not built: no consumer path yet reads a section
+  it could share or release early (`BundleFacts` holds every member
+  decoded). Closing (3) needs a streamed or per-section parse so a raw
+  section is not held as parsed JSON, and a release fan-out that loads
+  members one pair at a time. Measurements: the plan's A1.9 D18 entry.
 - **D14 residual: a blocked `types` section also hides `func_removed`.** The
   `functions` detector reads `types` (parameter/return type comparison in the
   same pass), so it is wholly not comparable; splitting symbol-level presence
