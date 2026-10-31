@@ -172,7 +172,7 @@ def test_real_consumer_gcc_path_expression_from_check_project_yml(
     expr: str, matrix: dict, inputs: dict, expected: str
 ) -> None:
     """The exact expression text lifted from ``check-project.yml``'s own
-    ``consumer-gcc-path:`` line (see `test_consumer_compile_full_chain_
+    ``consumer-compiler:`` line (see `test_consumer_compile_full_chain_
     propagation.py`, which extracts it from the real file rather than
     retyping it here)."""
     assert eval_gha_expression(expr, matrix=matrix, inputs=inputs) == expected
@@ -190,11 +190,11 @@ def test_real_consumer_gcc_path_expression_from_check_project_yml(
 )
 def test_endswith_guard_passes_only_prefix_form(compiler: str, expected: str) -> None:
     expr = (
-        "${{ inputs.consumer-gcc-path || (endsWith(inputs.compiler, '-') "
+        "${{ inputs.consumer-compiler || (endsWith(inputs.compiler, '-') "
         "&& inputs.compiler || '') }}"
     )
     result = eval_gha_expression(
-        expr, inputs={"consumer-gcc-path": "", "compiler": compiler}
+        expr, inputs={"consumer-compiler": "", "compiler": compiler}
     )
     assert result == expected
 

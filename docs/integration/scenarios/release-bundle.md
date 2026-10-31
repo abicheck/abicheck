@@ -46,7 +46,7 @@ default).
 
 ## Depth is binary-only, by design
 
-A bundle-scoped check is restricted to `requested-depth: binary` — its
+A bundle-scoped check is restricted to `depth: binary` — its
 baseline is always the members' raw staged binaries (no per-member historical
 headers/build-context evidence exists in a bundle baseline today), so
 `headers`/`build`/`source` are rejected outright rather than silently

@@ -34,13 +34,12 @@ def test_consumer_compile_context_uses_a_separate_extraction() -> None:
         if step.get("name") == "Run check-target"
     )
     assert (
-        "matrix.consumer_compile_ast_frontend"
-        in run_step["with"]["consumer-ast-frontend"]
+        "matrix.consumer_compile_ast_frontend" in run_step["with"]["consumer-frontend"]
     )
-    assert "matrix.consumer_compile_gcc_path" in run_step["with"]["consumer-gcc-path"]
+    assert "matrix.consumer_compile_gcc_path" in run_step["with"]["consumer-compiler"]
     assert (
         "matrix.consumer_compile_gcc_options"
-        in run_step["with"]["consumer-gcc-options"]
+        in run_step["with"]["consumer-compile-options"]
     )
 
     target = _load(CHECK_TARGET)
@@ -52,7 +51,7 @@ def test_consumer_compile_context_uses_a_separate_extraction() -> None:
     )
     assert consumer["with"]["mode"] == "dump"
     assert consumer["with"]["new-library"] == "${{ inputs.new-library }}"
-    assert consumer["with"]["frontend"] == "${{ inputs.consumer-ast-frontend }}"
+    assert consumer["with"]["frontend"] == "${{ inputs.consumer-frontend }}"
     # gcc-path/gcc-options were the two fields this hop's own `if:` guard
     # already gated activation on (see test_consumer_dump_activates_from_
     # the_overlay_marker_alone) but never itself asserted forwarding for --
@@ -62,9 +61,11 @@ def test_consumer_compile_context_uses_a_separate_extraction() -> None:
     # even though ast-frontend's identically-shaped sibling line was.
     assert (
         consumer["with"]["compiler"]
-        == "${{ inputs.consumer-gcc-path || (endsWith(inputs.compiler, '-') && inputs.compiler || '') }}"
+        == "${{ inputs.consumer-compiler || (endsWith(inputs.compiler, '-') && inputs.compiler || '') }}"
     )
-    assert consumer["with"]["compile-options"] == "${{ inputs.consumer-gcc-options }}"
+    assert (
+        consumer["with"]["compile-options"] == "${{ inputs.consumer-compile-options }}"
+    )
     analysis = next(step for step in steps if step.get("name") == "Run analysis")
     assert "check-target-consumer.abi.json" in analysis["with"]["new-library"]
     assert "consumer_context.outcome == 'success'" in analysis["with"]["header"]
@@ -74,8 +75,8 @@ def test_consumer_dump_activates_from_the_overlay_marker_alone() -> None:
     """Codex review (P2): an overlay declaring only e.g. `binding:` with no
 
     matching --toolchain-bindings entry (and no workflow-global compiler
-    input to fall back to) resolves consumer-ast-frontend/consumer-gcc-path/
-    consumer-gcc-options all to the empty string even though the profile
+    input to fall back to) resolves consumer-frontend/consumer-compiler/
+    consumer-compile-options all to the empty string even though the profile
     genuinely declared a consumer_compile: overlay. Requiring one of those
     three to be non-empty before activating the separate candidate dump let
     such a cell silently skip it, leaking the producer's own compiler
@@ -194,7 +195,7 @@ def test_consumer_dump_forwards_gcc_prefix() -> None:
     # The consumer's own path wins; the caller's compiler input is used only
     # when it is a prefix (ends with '-'). A full path never falls back here.
     assert expr == (
-        "${{ inputs.consumer-gcc-path || (endsWith(inputs.compiler, '-') "
+        "${{ inputs.consumer-compiler || (endsWith(inputs.compiler, '-') "
         "&& inputs.compiler || '') }}"
     )
     assert "gcc-prefix" not in consumer["with"]
@@ -230,7 +231,7 @@ def test_consumer_compile_fields_fall_back_to_global_compiler_inputs() -> None:
     actually declares a consumer_compile: overlay. A second review round
     found the first fix used the global fallback unconditionally, so a
     profile with NO consumer_compile: overlay at all still got a non-empty
-    consumer-ast-frontend/gcc-path/gcc-options the moment the caller set
+    consumer-frontend/gcc-path/gcc-options the moment the caller set
     any workflow-global --ast-frontend/--gcc-path/--gcc-options -- which
     activates check-target's separate consumer-context dump for every
     cell, not just the ones with a real overlay. The fallback must be
@@ -242,7 +243,7 @@ def test_consumer_compile_fields_fall_back_to_global_compiler_inputs() -> None:
         for step in _steps(project["jobs"]["check"])
         if step.get("name") == "Run check-target"
     )
-    for field in ("consumer-ast-frontend", "consumer-gcc-path", "consumer-gcc-options"):
+    for field in ("consumer-frontend", "consumer-compiler", "consumer-compile-options"):
         expr = run_step["with"][field]
         assert "matrix.consumer_compile_active" in expr, field
         assert expr.rstrip().endswith("|| '' }}"), field
@@ -824,10 +825,10 @@ class TestConsumerCompilePropagationChainMutationCheck:
         _assert_step_input_forwards(
             step,
             "compiler",
-            "${{ inputs.consumer-gcc-path || (endsWith(inputs.compiler, '-') && inputs.compiler || '') }}",
+            "${{ inputs.consumer-compiler || (endsWith(inputs.compiler, '-') && inputs.compiler || '') }}",
         )
         _assert_step_input_forwards(
-            step, "compile-options", "${{ inputs.consumer-gcc-options }}"
+            step, "compile-options", "${{ inputs.consumer-compile-options }}"
         )
 
     def test_fails_and_names_the_field_when_the_edge_is_dropped(self) -> None:
@@ -839,19 +840,19 @@ class TestConsumerCompilePropagationChainMutationCheck:
         drop this specific edge."""
         step = self._consumer_context_step()
         mutated = dict(step)
-        mutated["with"] = {**step["with"], "compiler": "${{ inputs.gcc-path }}"}
+        mutated["with"] = {**step["with"], "compiler": "${{ inputs.compiler }}"}
 
         with pytest.raises(AssertionError) as excinfo:
             _assert_step_input_forwards(
                 mutated,
                 "compiler",
-                "${{ inputs.consumer-gcc-path || (endsWith(inputs.compiler, '-') && inputs.compiler || '') }}",
+                "${{ inputs.consumer-compiler || (endsWith(inputs.compiler, '-') && inputs.compiler || '') }}",
             )
 
         message = str(excinfo.value)
         assert "compiler" in message
-        assert "consumer-gcc-path" in message
-        assert "${{ inputs.gcc-path }}" in message
+        assert "consumer-compiler" in message
+        assert "${{ inputs.compiler }}" in message
 
     def test_fails_when_the_field_is_removed_entirely(self) -> None:
         """The other real shape a dropped edge takes: the key vanishes
@@ -864,5 +865,5 @@ class TestConsumerCompilePropagationChainMutationCheck:
 
         with pytest.raises(AssertionError, match="compile-options"):
             _assert_step_input_forwards(
-                mutated, "compile-options", "${{ inputs.consumer-gcc-options }}"
+                mutated, "compile-options", "${{ inputs.consumer-compile-options }}"
             )

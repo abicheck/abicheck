@@ -29,17 +29,20 @@ REMOVED_IN_0_7: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         " R1/R2/R3/R7/R8/R9/R10/R18 and removed outright by its D7 amendment (the"
         " old spelling raises TypeError; `policy` takes a profile or a document)",
         (
-            "contract_evaluation=",
             "contract_mode=",
             "acknowledgments_path=",
             "force_public_symbols=",
             "enable_debuginfod=",
             "follow_dependencies=",
-            "include_dependencies=",
             "header_backend=",
             "old_version=",
             "new_version=",
         ),
+        # contract_evaluation= is NOT listed: checker.compare() is the Tier-1 core
+        # building block and still takes it (ADR-091 R10 renamed the typed request
+        # and run_compare only). include_dependencies= is NOT listed either:
+        # ReleaseMemberCompareRequest keeps its own spelling by design (Phase 4
+        # Python result). Both stay spelled as they are in the code.
         # The explicit-inputs example in compatibility-evaluation-config.md names the
         # internal ExplicitCompatibilityInputs, whose contract_mode field is not a
         # typed-request spelling.

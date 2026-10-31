@@ -24,13 +24,13 @@ built on top of [`actions/check-target`](check-target.md):
 ## `check-single.yml`
 
 Most inputs mirror [`actions/check-target/action.yml`](check-target.md)'s
-input surface (same defaults), but not all names match. The workflow keeps its
-own input names, and it forwards them to the Action under the new names:
-`requested-depth` → `depth`, `contract-file` → `contract`, `ast-frontend` →
-`frontend`, `gcc-path` and `gcc-prefix` → `compiler`, `gcc-options` →
-`compile-options`, `analysis-assurance-complete` → `require-complete`, and
-`policy-file` → `policy`. The workflow inputs keep their names. See
-the [check-target page](check-target.md) for the full rationale behind each
+input surface, under the same names and defaults. The workflow's own inputs
+use the same vocabulary as the Action (`depth`, `contract`, `frontend`,
+`compiler`, `compile-options`, `policy`). The old spellings are retired and
+fail the run before any analysis: `requested-depth`, `contract-file`,
+`ast-frontend`, `gcc-path`, `gcc-prefix`, `gcc-options` and `policy-file`
+each name their replacement in the error. See the
+[check-target page](check-target.md) for the full rationale behind each
 one. Outputs are `check-target`'s own six
 outputs, forwarded unchanged, plus `report-artifact-name`.
 
@@ -68,7 +68,7 @@ jobs:
       profile: linux-x86_64-gcc13
       baseline-channel: accepted-main
       baseline-artifact-name: abicheck-baseline-accepted-main
-      requested-depth: headers
+      depth: headers
       candidate-artifact-name: my-build-output
       new-library: candidate/lib/libfoo.so
 ```
@@ -226,14 +226,14 @@ jobs:
 ### Shared analysis options
 
 `check-project.yml` accepts one project-wide value for every analysis option
-`check-target` supports (`header`/`policy`/`severity-preset`/`gcc-*`/...),
+`check-target` supports (`header`/`policy`/`severity-preset`/`compiler`/`compile-options`/...),
 forwarded unchanged to every matrix cell. **A per-cell override of any of
 these is out of scope for this first version** — if different targets need
 different policy/suppression files, run them through separate
 `check-project.yml` calls (one per differing option set) until a later
 iteration extends `run-plan.json`'s schema to carry per-cell overrides.
 
-**Exception: `gcc-path`/`gcc-options` do get a per-cell override**, from
+**Exception: `compiler`/`compile-options` do get a per-cell override**, from
 that cell's `.abicheck.yml` `profiles.<id>.compile` overlay (P1
 toolchain-profile audit — [`project-targets-schema.md`](project-targets-schema.md#profiles)),
 when `toolchain-bindings-path` is set. `abicheck project plan
@@ -244,9 +244,9 @@ path, and composes `compile.standard`/`stdlib`/`target`/`abi_macros`/`args`
 into one extra-flags string — both land on the generated cell as
 `compile_gcc_path`/`compile_gcc_options`
 ([`run-plan-schema.md`](run-plan-schema.md#runplancheck-fields)) and
-**replace** this workflow's own global `gcc-path`/`gcc-options` inputs for
+**replace** this workflow's own global `compiler`/`compile-options` inputs for
 that cell only — not merge with them. If the project relies on a flag set
-via the workflow's global `gcc-options` input (e.g. a universal `-fPIC`)
+via the workflow's global `compile-options` input (e.g. a universal `-fPIC`)
 *and* wants a per-profile `compile:` overlay too, that global flag will not
 carry over to overlaid cells; repeat it inside the overlay's `args` if it
 still needs to apply there. A profile with no `compile:` overlay (or a run
@@ -256,11 +256,11 @@ this. `compiler_family`/`compiler_version` are validated shape-wise but not
 yet projected into any forwarded flag (see `run-plan-schema.md`'s field
 table for why).
 
-**Exception: `ast-frontend` also gets a per-cell override**, on the same
+**Exception: `frontend` also gets a per-cell override**, on the same
 precedence rule (G34 Phase B). A profile's `compile.frontend:`
 ([`project-targets-schema.md`](project-targets-schema.md#compilefrontend-consumer_compilefrontend-per-profile-ast-frontend-g34-phase-b))
 reaches its cells as `compile_ast_frontend` and replaces this workflow's own
-`ast-frontend` input there — so a GCC profile's cell can parse headers with
+`frontend` input there — so a GCC profile's cell can parse headers with
 castxml while a Clang/DPC++ profile's cell in the same run uses
 `clang -ast-dump=json`, which one workflow-global value cannot express. A
 profile that sets no `frontend:` falls back to the global input unchanged.
@@ -272,14 +272,14 @@ directory/package operand outright — the per-library fan-out never threads an
 L2 compile context to each pair's header dump, so the requested frontend
 could not be applied and silently dropping it would parse headers under the
 wrong one. A bundle cell therefore keeps resolving the workflow-global
-`ast-frontend` input exactly as it did before this override existed.
+`frontend` input exactly as it did before this override existed.
 
 The sibling `consumer_compile.frontend`, compiler binding, and options are
 forwarded to a separate candidate dump. That invocation reads the same
 producer binary under the client header context, and the comparison consumes
 the materialized snapshot without reparsing candidate headers. An omitted
-field falls back to this same workflow's global input (`ast-frontend`/
-`gcc-path`/`gcc-options`), never to the empty string — an overlay that sets
+field falls back to this same workflow's global input (`frontend`/
+`compiler`/`compile-options`), never to the empty string — an overlay that sets
 only `standard:`, say, still uses the caller's selected frontend for the
 consumer dump rather than silently reverting to the CLI default.
 
@@ -315,7 +315,7 @@ own and redirects through its `library:` target's, the same way its
 `binary_pattern` already does. A target that declares none falls back to
 the workflow-global `header` input unchanged, so a project that only ever
 set the global value sees no behavior change. **`kind: bundle` cells are
-excluded from this override**, for the same reason `ast-frontend` is: a
+excluded from this override**, for the same reason `frontend` is: a
 bundle cell's candidate is the staged directory of every member's own
 binary, and there is no per-bundle-member header staging mechanism to give
 each member's binary its own header tree in that one directory comparison
