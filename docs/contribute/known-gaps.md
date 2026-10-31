@@ -558,8 +558,8 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 
 #### A snapshot is not byte-reproducible across processes
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** unverified: no cross-process determinism check was run. The entry says the producer of the surface_graph.nodes ordering drift was never identified.  
-`hygiene` — Unverified: a snapshot is not byte-reproducible across processes; the producer of the `surface_graph.nodes` ordering drift was never identified. [Full write-up](known-gaps/a-snapshot-is-not-byte-reproducible-across-processes.md)
+**Status (2026-10-31): NARROWED.** The graph section's node/edge rows are now written in canonical id order (`storage/graph_table_codec.encode_graph_table`), so the observed `surface_graph.nodes` drift cannot reach the bytes whatever its producer; `tests/test_snapshot_byte_reproducibility.py` checks permutation invariance and a cross-process dump under three `PYTHONHASHSEED` values. Residual: no oneDAL-scale corpus is in CI, so another section's ordering is proven only on the generated corpus.  
+`hygiene` — Graph rows are canonicalized; byte reproducibility of the other sections is proven only on a generated corpus, not on oneDAL scale. [Full write-up](known-gaps/a-snapshot-is-not-byte-reproducible-across-processes.md)
 
 #### Destructive test-helper resets are guarded one helper at a time (2026-09-30)
 
