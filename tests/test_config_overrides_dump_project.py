@@ -242,7 +242,7 @@ def test_cli_and_typed_dump_resolve_the_same_config(
     assert typed.input.compile_db_filter == cli.compile_db_filter
     assert typed.debug_format == cli.debug.format
     assert typed.dwarf_only == cli.debug.dwarf_only
-    assert typed.enable_debuginfod == cli.debug.debuginfod
+    assert typed.debuginfod == cli.debug.debuginfod
     assert typed.debuginfod_url == cli.debug.debuginfod_url
 
 

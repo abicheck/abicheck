@@ -186,7 +186,7 @@ def test_write_snapshot_output_accepts_a_resolve_time_embedded_snapshot(
             # prove both of its configurations actually ran" warns about.
             # Asking for the unfiltered surface here keeps the two states
             # genuinely distinct, so the flip is still real evidence.
-            include_dependencies=True,
+            include_system_declarations=True,
         ),
         depth="source",
     )

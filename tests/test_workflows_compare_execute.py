@@ -125,7 +125,7 @@ class TestRunCompare:
 
         params = list(inspect.signature(run_compare).parameters)
         assert params.index("scope_to_public_surface") == (
-            params.index("enable_debuginfod") + 1
+            params.index("debuginfod") + 1
         )
         assert (
             params.index("debuginfod_url")
@@ -448,7 +448,6 @@ class TestContractEvaluationThreading:
         request = CompareRequest(
             old=InputSpec(path=old_p),
             new=InputSpec(path=new_p),
-            contract_evaluation=True,
         )
         result, _, _ = run_compare_request(request).as_tuple()
         assert result.changes
@@ -456,7 +455,7 @@ class TestContractEvaluationThreading:
 
     def test_run_compare_shim_contract_evaluation_stamps_relevance(self, tmp_path):
         old_p, new_p = self._changed_pair(tmp_path)
-        result, _, _ = run_compare(old_p, new_p, contract_evaluation=True).as_tuple()
+        result, _, _ = run_compare(old_p, new_p).as_tuple()
         assert result.changes
         assert any(c.contract_relevance is not None for c in result.changes)
 
@@ -481,11 +480,10 @@ class TestContractEvaluationThreading:
         # docstring), then project_policy_overrides (findings-analysis-fixes
         # batch, second review round, defect 4: the release fan-out's own
         # `.abicheck.yml` `policy.overrides` gap), same rule.
-        assert params[-18:] == [
+        assert params[-17:] == [
             "diagnostic_comparison",
-            "contract_evaluation",
-            "include_dependencies",
-            "contract_mode",
+            "include_system_declarations",
+            "contract",
             "pack_policy_overrides",
             "pack_internal_namespaces",
             "compile_context",
@@ -503,7 +501,7 @@ class TestContractEvaluationThreading:
             "exclude_headers",
             # ADR-067 D5/D6's acknowledgment inputs for the release fan-out
             # and typed API, appended last by the same rule.
-            "acknowledgments_path",
+            "acknowledgments",
             "acknowledgment_unacknowledged_additions",
             # ADR-067 D5 `breaks: gate|accept`, appended last by the same rule.
             "acknowledgment_breaks",
@@ -536,9 +534,8 @@ class TestContractEvaluationThreading:
         for name in (
             "debuginfod_url",
             "diagnostic_comparison",
-            "contract_evaluation",
-            "include_dependencies",
-            "contract_mode",
+            "include_system_declarations",
+            "contract",
             "pack_policy_overrides",
             "pack_internal_namespaces",
             "compile_context",
@@ -825,7 +822,7 @@ class TestRunCompareRequestResolutionParity:
         run_compare_request(
             self._request(
                 tmp_path,
-                follow_dependencies=True,
+                follow_deps=True,
                 dependency_search_paths=(Path("/opt/lib"),),
                 ld_library_path="/usr/lib",
             )
@@ -855,7 +852,7 @@ class TestRunCompareRequestResolutionParity:
             CompareRequest(
                 old=InputSpec(path=old_p),
                 new=InputSpec(path=new_p),
-                follow_dependencies=True,
+                follow_deps=True,
             )
         )
         assert calls == []

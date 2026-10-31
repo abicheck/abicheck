@@ -317,7 +317,7 @@ class TestRunDumpRequest:
                 input=InputSpec(
                     path=snap_path,
                     compile=CompileContext(sysroot=Path("/opt/sysroot")),
-                    include_dependencies=False,
+                    include_system_declarations=False,
                 ),
                 frontend="clang",
                 dwarf_only=True,
@@ -438,7 +438,7 @@ class TestRunDumpRequest:
         service.run_dump_request(
             DumpRequest(
                 input=InputSpec(path=snap_path),
-                follow_dependencies=True,
+                follow_deps=True,
                 dependency_search_paths=(Path("/opt/lib"),),
                 ld_library_path="/usr/lib",
             )
@@ -1170,7 +1170,7 @@ class TestDependencySysrootIsForwarded:
                 input=InputSpec(
                     path=snap_path, compile=CompileContext(sysroot=Path("/opt/sysroot"))
                 ),
-                follow_dependencies=True,
+                follow_deps=True,
             )
         )
         assert resolved_sysroot["sysroot"] == Path("/opt/sysroot")
@@ -1181,7 +1181,7 @@ class TestDependencySysrootIsForwarded:
         from abicheck import service
 
         service.run_dump_request(
-            DumpRequest(input=InputSpec(path=snap_path), follow_dependencies=True)
+            DumpRequest(input=InputSpec(path=snap_path), follow_deps=True)
         )
         assert resolved_sysroot["sysroot"] is None
 

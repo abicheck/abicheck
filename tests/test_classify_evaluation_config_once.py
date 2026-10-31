@@ -68,10 +68,9 @@ VARIANTS = {
     "severity-default": {"severity_preset": "default"},
     "severity-strict": {"severity_preset": "strict"},
     "no-scope": {"scope_public": False},
-    "contract-exports": {"contract_evaluation": True, "contract_mode": "exports"},
+    "contract-exports": {"contract": "exports"},
     "contract-public-strict": {
-        "contract_evaluation": True,
-        "contract_mode": "public",
+        "contract": "public",
         "severity_preset": "strict",
     },
     "pack-forwarded": {"pack_policy_overrides": "PACK"},
@@ -124,7 +123,7 @@ def test_one_resolution_read_by_every_consumer(tmp_path, monkeypatch, name):
     # Independent oracle: the public resolver over the same loaded inputs
     # (pack folding reproduced through the same public helper the CLI uses).
     suppression, pf = load_suppression_and_policy(
-        request.suppress, request.policy, request.policy_file_path
+        request.suppress, request.policy_profile, request.policy_document
     )
     if request.pack_policy_overrides or request.pack_internal_namespaces is not None:
         from abicheck.pack_application import PackApplication, policy_file_with_packs

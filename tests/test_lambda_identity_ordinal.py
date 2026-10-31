@@ -774,7 +774,7 @@ class TestServiceRunDumpHybridAlsoDefersRenumbering:
             return castxml_snap
 
         with fake_format_adapter("elf", side_effect=_fake_dump_elf):
-            merged = run_dump(p, "elf", header_backend="hybrid")
+            merged = run_dump(p, "elf", frontend="hybrid")
 
         matched = [t for t in merged.declarations.types if t.name.startswith("Foo<")]
         assert len(matched) == 1, "the shared closure must merge into one type"

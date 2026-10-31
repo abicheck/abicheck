@@ -170,23 +170,23 @@ def compare_request_inputs(
     accepted; the file wins). ADR-075 D7: the new side's ``-H`` directories
     and ``InputSpec.ownership`` are the request's stated ownership inputs.
     """
-    if policy_file is None and request.policy_file_path is not None:
-        policy_file = _load_policy_file(request.policy_file_path)
+    if policy_file is None and request.policy_document is not None:
+        policy_file = _load_policy_file(request.policy_document)
     if suppression is None:
         suppression = SuppressionSource.from_paths(request.suppress)
     return ExplicitCompatibilityInputs(
-        contract_mode=request.contract_mode,
+        contract_mode=request.contract,
         # `scope_public=True` is the field's own default and, since ADR-049
         # Phase 7, states no domain: the evidence-adaptive built-in default
         # decides. Only `False` (the legacy alias for `all`) is a statement.
         scope_public_headers=None if request.scope_public else False,
         policy_base=(
-            stated_policy_base(request.policy, policy_file)
+            stated_policy_base(request.policy_profile, policy_file)
             if request.stated_settings is None or "policy" in request.stated_settings
             else None
         ),
         policy_file=policy_file,
-        public_symbols=tuple(sorted(request.force_public_symbols or ())),
+        public_symbols=tuple(sorted(request.public_symbols or ())),
         suppression=suppression,
         severity_preset=request.severity_preset,
         severity_abi_breaking=request.severity_abi_breaking,

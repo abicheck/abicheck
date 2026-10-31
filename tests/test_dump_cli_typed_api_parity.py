@@ -316,7 +316,7 @@ def _contract_profile_fields_via_typed_api(
             headers=(header,),
             sources=tmp_path,
             build_info=compile_db,
-            include_dependencies=False,
+            include_system_declarations=False,
             compile=CompileContext(frontend="clang"),
         ),
         frontend="clang",

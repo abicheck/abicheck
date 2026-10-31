@@ -51,9 +51,9 @@ This applies to a single-pair `compare` and to a directory/package comparison,
 where every library is reviewed against the same records and the release exits
 `1` if any library has an unacknowledged addition under `block`.
 
-From the typed Python API, set `CompareRequest(acknowledgments_path=...,
+From the typed Python API, set `CompareRequest(acknowledgments=...,
 acknowledgment_unacknowledged_additions="block", acknowledgment_breaks="accept")`.
-A `policy_file_path` document's own `acknowledgment:` block outranks the
+A `policy` document's own `acknowledgment:` block outranks the
 configured settings as one whole block, on the CLI and in the API alike.
 
 > Acknowledgment is **not** suppression. A suppressed finding disappears

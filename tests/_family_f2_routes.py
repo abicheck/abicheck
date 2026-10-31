@@ -339,9 +339,9 @@ AXES: tuple[Axis, ...] = (
     Axis(
         "policy_file",
         lambda t: ["--policy", str(_policy_file(t))],
-        lambda t: {"policy_file_path": _policy_file(t)},
+        lambda t: {"policy": _policy_file(t)},
         ("policy",),
-        ("policy_file_path",),
+        ("policy",),
     ),
     Axis(
         "suppress",
@@ -405,9 +405,9 @@ AXES: tuple[Axis, ...] = (
     Axis(
         "contract_exports",
         lambda t: ["--contract", "exports"],
-        lambda t: {"contract_evaluation": True, "contract_mode": "exports"},
+        lambda t: {"contract": "exports"},
         ("contract_mode",),
-        ("contract_evaluation", "contract_mode"),
+        ("contract",),
         render={"contract_evaluation": True},
     ),
 )

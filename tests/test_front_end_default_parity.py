@@ -63,6 +63,9 @@ from abicheck.workflows.run_dump_scope import wrap_run_dump_with_dependency_scop
 #: overriding the field default this test did check. Deriving closes that.
 SHARED_OPTIONS = (("include_dependencies", "dump"),)
 
+#: ADR-091 R8: the CLI destination whose typed field is spelled differently.
+_TYPED_NAME = {"include_dependencies": "include_system_declarations"}
+
 
 def _click_default(command: str, dest: str) -> object:
     cmd = main.commands[command]
@@ -81,9 +84,10 @@ def _declared_defaults(dest: str) -> dict[str, object]:
     moment it exists.
     """
     found: dict[str, object] = {}
+    typed = _TYPED_NAME.get(dest, dest)
 
     for field in dataclasses.fields(InputSpec):
-        if field.name == dest:
+        if field.name == typed:
             # `InputSpec()` needs `path`, and a fabricated one would make this
             # read depend on the fixture rather than the declaration.
             found["InputSpec.field"] = field.default
@@ -96,16 +100,16 @@ def _declared_defaults(dest: str) -> dict[str, object]:
             sig = inspect.signature(obj)
         except (TypeError, ValueError):  # pragma: no cover - builtins
             continue
-        param = sig.parameters.get(dest)
+        param = sig.parameters.get(typed)
         if param is not None and param.default is not inspect.Parameter.empty:
             found[f"service.{name}"] = param.default
 
-    of_param = inspect.signature(InputSpec.of).parameters.get(dest)
+    of_param = inspect.signature(InputSpec.of).parameters.get(typed)
     if of_param is not None and of_param.default is not inspect.Parameter.empty:
         found["InputSpec.of"] = of_param.default
 
     wrapped = wrap_run_dump_with_dependency_scope(lambda *a, **k: None)
-    sig_param = inspect.signature(wrapped).parameters.get(dest)
+    sig_param = inspect.signature(wrapped).parameters.get(typed)
     if sig_param is not None and sig_param.default is not inspect.Parameter.empty:
         found["run_dump.__signature__"] = sig_param.default
 

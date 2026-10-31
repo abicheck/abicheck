@@ -822,7 +822,7 @@ def resolve_compatibility_evaluation_config(
             _candidate(
                 layer,
                 coerce_contract_mode(explicit.contract_mode),
-                option=spell("--contract", "contract_mode"),
+                option=spell("--contract", "contract"),
                 source_kind="contract_mode",
             )
         )
@@ -905,7 +905,7 @@ def resolve_compatibility_evaluation_config(
         policy_file=explicit.policy_file,
         layer=layer,
         sha256=policy_source.sha256,
-        option=spell("--policy", "policy_file_path"),
+        option=spell("--policy", "policy"),
     )
     internal_namespaces, prov[INTERNAL_NAMESPACES_FIELD] = _resolve(
         INTERNAL_NAMESPACES_FIELD,
@@ -925,7 +925,7 @@ def resolve_compatibility_evaluation_config(
         # here can only have come from `.abicheck.yml` and a receipt naming a
         # flag would send a replay to an unknown option (Codex review). The
         # typed API still states both fields, and `spell` still names those.
-        symbol_option=spell("scope.public_symbols", "force_public_symbols"),
+        symbol_option=spell("scope.public_symbols", "public_symbols"),
         list_option=spell("scope.public_symbols", "public_symbols_list"),
     )
     ownership, ownership_prov = resolve_ownership_inputs(
@@ -960,7 +960,7 @@ def resolve_compatibility_evaluation_config(
             _candidate(
                 layer,
                 builtin_policy_identity(explicit.policy_file.base_policy),
-                option=spell("--policy", "policy_file_path"),
+                option=spell("--policy", "policy"),
                 source_kind="policy_file",
                 reference=explicit.policy_file.base_policy,
                 sha256=policy_source.sha256,
@@ -1054,7 +1054,7 @@ def resolve_compatibility_evaluation_config(
         policy_source=policy_source,
         pack_contributors=override_pack_contributors,
         pack_option=pack_option,
-        policy_file_option=spell("--policy", "policy_file_path"),
+        policy_file_option=spell("--policy", "policy"),
         explicit_overrides=policy_overrides_explicit,
         project_contributed=project_overrides_contributed,
         project_path=project.path if project is not None else None,
@@ -1219,7 +1219,7 @@ def resolve_compatibility_evaluation_config(
         policy_file=explicit.policy_file,
         layer=layer,
         sha256=policy_source.sha256,
-        option=spell("--policy", "policy_file_path"),
+        option=spell("--policy", "policy"),
     )
     versioning, prov[VERSIONING_POLICY_FIELD] = _resolve(
         VERSIONING_POLICY_FIELD,

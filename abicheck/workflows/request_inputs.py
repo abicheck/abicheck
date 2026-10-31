@@ -134,7 +134,7 @@ class InputSpec:
     # the CLI and a candidate with the typed API -- passing the flag on
     # neither, as the mismatch error itself advises -- got `scope_mismatch`
     # and no verdict. Aligning the default is what makes that advice true.
-    include_dependencies: bool = False
+    include_system_declarations: bool = False
     # ADR-055 D1: this side's inline build/source evidence (mirrors
     # `--sources`/`--build-info`, side-scoped like the CLI's own
     # `old=`/`new=` sided values) -- `run_compare_request` embeds them via
@@ -235,7 +235,7 @@ class InputSpec:
         version: str = "",
         pdb: Path | str | None = None,
         debug_roots: Iterable[Path | str] | None = None,
-        include_dependencies: bool = False,
+        include_system_declarations: bool = False,
         sources: Path | str | None = None,
         build_info: Path | str | None = None,
         build_targets: Iterable[str] | None = None,
@@ -257,7 +257,7 @@ class InputSpec:
             version=version,
             pdb=Path(pdb) if pdb is not None else None,
             debug_roots=_path_tuple(debug_roots),
-            include_dependencies=include_dependencies,
+            include_system_declarations=include_system_declarations,
             sources=Path(sources) if sources is not None else None,
             build_info=Path(build_info) if build_info is not None else None,
             build_targets=tuple(build_targets) if build_targets is not None else (),

@@ -396,7 +396,7 @@ class TestPathInputsAreNotSilentlyIgnored:
         request = CompareRequest(
             old=InputSpec(path=tmp_path / "old.so"),
             new=InputSpec(path=tmp_path / "new.so"),
-            policy_file_path=policy,
+            policy=policy,
             suppress=suppress,
         )
         cfg = compatibility_config_from_compare_request(request)
@@ -452,8 +452,7 @@ class TestReceiptMetadataIsCompared:
             CompareRequest(
                 old=InputSpec(path=tmp_path / "old.so"),
                 new=InputSpec(path=tmp_path / "new.so"),
-                policy_file_path=policy,
-                policy="strict_abi",
+                policy=policy,
             )
         )
         assert cross_front_end_differences(cli, api) == []
@@ -838,17 +837,15 @@ class TestReceiptNamesTheStatingFrontEnd:
         policy.write_text("base_policy: sdk_vendor\ninternal_namespaces: [detail]\n")
         cfg = self._api(
             tmp_path,
-            policy="plugin_abi",
-            policy_file_path=policy,
-            contract_mode="all",
-            contract_evaluation=True,
-            force_public_symbols=frozenset({"sym"}),
+            policy=policy,
+            contract="all",
+            public_symbols=frozenset({"sym"}),
         )
         assert [e.option for e in cfg.provenance[CONTRACT_MODE_FIELD].selected_by] == [
-            "contract_mode"
+            "contract"
         ]
         assert [e.option for e in cfg.provenance[POLICY_BASE_FIELD].selected_by] == [
-            "policy_file_path"
+            "policy"
         ]
         assert (
             cfg.provenance[POLICY_BASE_FIELD].shadowed_legacy.selected_by[0].option
@@ -856,9 +853,9 @@ class TestReceiptNamesTheStatingFrontEnd:
         )
         assert [
             e.option for e in cfg.provenance[INTERNAL_NAMESPACES_FIELD].selected_by
-        ] == ["policy_file_path"]
+        ] == ["policy"]
         assert [e.option for e in cfg.provenance[EXPLICIT_SCOPE_FIELD].selected_by] == [
-            "force_public_symbols"
+            "public_symbols"
         ]
 
     def test_api_suppression_names_the_request_field(self, tmp_path):

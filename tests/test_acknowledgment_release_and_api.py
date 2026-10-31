@@ -114,7 +114,7 @@ def test_typed_api(tmp_path, action, acknowledged, break_it) -> None:
     request = CompareRequest(
         old=InputSpec(path=tmp_path / "old.json"),
         new=InputSpec(path=tmp_path / "new.json"),
-        acknowledgments_path=_records(tmp_path / "acks.yml", acknowledged),
+        acknowledgments=_records(tmp_path / "acks.yml", acknowledged),
         acknowledgment_unacknowledged_additions=action,
     )
     result = run_compare_request(request)
@@ -128,7 +128,7 @@ def test_typed_api_rejects_an_unknown_action(tmp_path) -> None:
         old=InputSpec(path=tmp_path / "a"),
         new=InputSpec(path=tmp_path / "b"),
         acknowledgment_unacknowledged_additions="maybe",
-        acknowledgments_path=tmp_path / "missing.yml",
+        acknowledgments=tmp_path / "missing.yml",
     )
     with pytest.raises(ValidationError) as info:
         request.validate()

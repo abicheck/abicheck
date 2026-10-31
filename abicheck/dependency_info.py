@@ -16,7 +16,7 @@
 """Transitive ELF dependency resolution into a snapshot's ``DependencyInfo``.
 
 What ``compare --follow-deps`` (and ``run_compare_request``'s
-``follow_dependencies``) actually does. A leaf module on purpose: it depends
+``follow_deps``) actually does. A leaf module on purpose: it depends
 only on ``binder``/``model``/``resolver``, and both the CLI
 (``cli_resolve._populate_dependency_info`` (removed)) and the service layer
 (``service.run_compare_request``) need it — so neither has to import the
@@ -115,7 +115,7 @@ def populate_side_dependency_info(
     same as it is on the CLI.
 
     Whether to call this at all is the caller's opt-in
-    (``CompareRequest``/``DumpRequest``'s ``follow_dependencies``): populating
+    (``CompareRequest``/``DumpRequest``'s ``follow_deps``): populating
     it costs a full dependency-graph resolution.
 
     The sysroot comes from this input's own ``compile`` context. It is the only
@@ -138,13 +138,13 @@ def populate_pair_dependency_info(
     old_fmt: str | None,
     new_fmt: str | None,
 ) -> None:
-    """Apply ``CompareRequest.follow_dependencies`` to both resolved sides.
+    """Apply ``CompareRequest.follow_deps`` to both resolved sides.
 
     A no-op unless the request opts in — populating this costs a full
     dependency-graph resolution per side, so it stays opt-in for a typed
     caller exactly as ``--follow-deps`` is for the CLI.
     """
-    if not request.follow_dependencies:
+    if not request.follow_deps:
         return
     search_paths = list(request.dependency_search_paths)
     for snap, side, fmt in ((old, request.old, old_fmt), (new, request.new, new_fmt)):

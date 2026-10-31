@@ -37,7 +37,7 @@ class _AcknowledgmentFields(Protocol):
     def acknowledgment_breaks(self) -> str | None: ...
 
     @property
-    def acknowledgments_path(self) -> Path | None: ...
+    def acknowledgments(self) -> Path | None: ...
 
 
 def acknowledgment_errors(request: _AcknowledgmentFields) -> list[str]:
@@ -60,7 +60,7 @@ def acknowledgment_errors(request: _AcknowledgmentFields) -> list[str]:
             "acknowledgment_breaks must be one of "
             f"{sorted(VALID_ACKNOWLEDGMENT_BREAKS_ACTIONS)}; got {breaks!r}"
         )
-    path = request.acknowledgments_path
+    path = request.acknowledgments
     if path is not None and not Path(path).is_file():
         errors.append(f"acknowledgments file not found: {path}")
     return errors

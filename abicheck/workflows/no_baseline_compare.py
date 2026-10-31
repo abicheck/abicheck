@@ -196,7 +196,7 @@ def resolve_no_baseline_candidate(
         debug_roots=debug_roots or [],
         pdb=pdb,
         public_header_dirs=public_header_dirs or [],
-        include_dependencies=include_dependencies,
+        include_system_declarations=include_dependencies,
         compile=compile,
     )
     # Built through the *shared* resolver rather than by hand: it is what

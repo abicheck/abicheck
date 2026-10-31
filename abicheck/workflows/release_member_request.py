@@ -42,10 +42,11 @@ from __future__ import annotations
 import dataclasses
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
+from ..errors import ValidationError
 from .request_inputs import InputSpec
-from .service_requests import CompareRequest
+from .service_requests import CompareRequest, ContractDomain
 
 if TYPE_CHECKING:
     from ..compile_context import CompileContext
@@ -222,7 +223,7 @@ def member_compare_request(request: ReleaseMemberCompareRequest) -> CompareReque
             pdb=request.old_pdb_path,
             debug_roots=(),
             exclude_headers=tuple(request.exclude_headers or ()),
-            include_dependencies=request.include_dependencies,
+            include_system_declarations=request.include_dependencies,
             compile=request.compile_context,
             public_header_dirs=tuple(request.public_header_dirs or ()),
         ),
@@ -234,19 +235,23 @@ def member_compare_request(request: ReleaseMemberCompareRequest) -> CompareReque
             pdb=request.new_pdb_path,
             debug_roots=(),
             exclude_headers=tuple(request.exclude_headers or ()),
-            include_dependencies=request.include_dependencies,
+            include_system_declarations=request.include_dependencies,
             compile=request.compile_context,
             public_header_dirs=tuple(request.public_header_dirs or ()),
         ),
         lang=request.lang,
         lang_explicit=request.lang_explicit,
-        policy=request.policy,
-        policy_file_path=request.policy_file_path,
+        policy=(
+            request.policy_file_path
+            if request.policy_file_path is not None
+            else request.policy
+        ),
         suppress=request.suppress,
         scope_public=request.scope_to_public_surface,
         pattern_verdicts=request.pattern_verdicts,
-        contract_evaluation=request.contract_evaluation,
-        contract_mode=request.contract_mode,
+        contract=release_contract_domain(
+            request.contract_evaluation, request.contract_mode
+        ),
         pack_policy_overrides=(
             tuple(request.pack_policy_overrides.items())
             if request.pack_policy_overrides
@@ -261,9 +266,29 @@ def member_compare_request(request: ReleaseMemberCompareRequest) -> CompareReque
         depth=request.depth,
         collapse_versioned_symbols=request.collapse_versioned_symbols,
         env_matrix=request.env_matrix,
-        acknowledgments_path=request.acknowledgments_path,
+        acknowledgments=request.acknowledgments_path,
         acknowledgment_unacknowledged_additions=(
             request.acknowledgment_unacknowledged_additions
         ),
         acknowledgment_breaks=request.acknowledgment_breaks,
     )
+
+
+def release_contract_domain(
+    contract_evaluation: bool, contract_mode: str | None
+) -> ContractDomain | None:
+    """Map the release request's contract pair onto ``CompareRequest.contract``.
+
+    ADR-091 R10: ``contract_evaluation`` was an opt-out the CLI never exposed
+    (``--contract`` always evaluates), and the typed ``contract`` value set has
+    no way to say "do not evaluate". Refusing ``False`` keeps the removal loud
+    rather than silently ignoring the caller's request.
+    """
+    if not contract_evaluation:
+        raise ValidationError(
+            "contract_evaluation=False is no longer supported: contract relevance "
+            "is always evaluated, as the CLI does; pass contract='all' for the "
+            "rollback to judging every entity"
+        )
+    # A value outside the set is refused by CompareRequest.validation_errors.
+    return cast("ContractDomain | None", contract_mode)

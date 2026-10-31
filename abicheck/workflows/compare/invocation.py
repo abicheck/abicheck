@@ -29,7 +29,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from ..service_requests import CompareRequest
+from ..service_requests import CompareRequest, ContractDomain
 
 __all__ = ["build_resolved_compare_request"]
 
@@ -49,8 +49,7 @@ def build_resolved_compare_request(
     env_matrix: Any,
     diagnostic_comparison: bool,
     require_same_generation: bool,
-    contract_evaluation: bool,
-    contract_mode: str | None,
+    contract: ContractDomain | None,
     depth: str | None,
     probe_matrix_old: Any,
     probe_matrix_new: Any,
@@ -66,13 +65,12 @@ def build_resolved_compare_request(
     """
     return dataclasses.replace(
         resolution_request,
-        policy=policy,
-        policy_file_path=policy_file_path,
+        policy=policy_file_path if policy_file_path is not None else policy,
         suppress=suppress,
         strict_suppressions=strict_suppressions,
         require_justification=require_justification,
         scope_public=scope_public,
-        force_public_symbols=frozenset(force_public) if force_public else None,
+        public_symbols=frozenset(force_public) if force_public else None,
         public_surface_allowlist=(
             frozenset(post_manifest_allowlist)
             if post_manifest_allowlist is not None
@@ -83,8 +81,7 @@ def build_resolved_compare_request(
         env_matrix=env_matrix,
         diagnostic_comparison=diagnostic_comparison,
         require_same_generation=require_same_generation,
-        contract_evaluation=contract_evaluation,
-        contract_mode=contract_mode,
+        contract=contract,
         depth=depth,
         old_probe_matrix=probe_matrix_old,
         new_probe_matrix=probe_matrix_new,

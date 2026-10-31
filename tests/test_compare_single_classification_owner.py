@@ -62,13 +62,12 @@ from _family_f2_routes import (  # isort: skip
 CLASSIFICATION_FIELDS = (
     "policy",
     "scope_public",
-    "force_public_symbols",
+    "public_symbols",
     "public_surface_allowlist",
     "pattern_verdicts",
     "collapse_versioned_symbols",
     "env_matrix",
     "diagnostic_comparison",
-    "contract_evaluation",
     "depth",
     "lang",
     "abi3_floor",
@@ -142,11 +141,15 @@ def test_every_route_classifies_through_the_one_core(
 
 
 def _classification_settings(request: Any) -> dict[str, Any]:
-    settings = {f: getattr(request, f) for f in CLASSIFICATION_FIELDS}
+    settings = {f: getattr(request, f) for f in CLASSIFICATION_FIELDS if f != "policy"}
+    # ADR-091 R2: the policy is its profile and its document, however it was spelled.
+    settings["policy_profile"] = request.policy_profile
     # The same file reached by both routes; compare it by content, not spelling.
     for f in ("old_probe_matrix", "new_probe_matrix", "suppress"):
         p = getattr(request, f)
         settings[f] = None if p is None else Path(p).read_bytes()
+    document = request.policy_document
+    settings["policy_document"] = None if document is None else document.read_bytes()
     return settings
 
 
