@@ -19,7 +19,9 @@ import pytest
 from abicheck.model import AbiSnapshot, Function, Param, Visibility
 from abicheck.serialization import write_snapshot
 from abicheck.snapshot_io import read_snapshot_text
-from abicheck.storage.snapshot_encode import sectioned_document_for_write
+from tests._whole_document_encoder import (
+    whole_sectioned_document as sectioned_document_for_write,
+)
 
 
 def _snapshot(n: int) -> AbiSnapshot:

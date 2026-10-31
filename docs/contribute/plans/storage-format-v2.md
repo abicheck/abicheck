@@ -191,24 +191,18 @@ See "Landed in Phase 1" below.
   analyses read, one matched library pair at a time, through a digest-keyed
   (`evidence`) decoded-section cache.
 - **A2.2** Streaming object encoding replaces whole-document `asdict()` +
-  one JSON string. **Half implemented (status 2026-10-31).** The *string*
-  half is done: `write_snapshot`/`write_snapshot_compact`/bundle writes
-  stream `json_stream.iter_json_*` fragments through
-  `snapshot_stream_write.write_snapshot_text_stream`, so no whole JSON string
-  or its bytes is held (zstd one-shot only when the frame must declare its
-  size). The `asdict()` half has been replaced by `snapshot_encode`'s fused
-  per-class encoder, but it still builds the **whole document tree** before
-  serializing. Measured 2026-10-31 on a `libstdc++.so.6` dump (23.9 MB JSON,
-  `tracemalloc` peak): building the sectioned tree peaks at 39.8 MiB in
-  1.62 s, and the full uncompressed write peaks at 39.9 MiB in 3.53 s. The
-  streamed text stage adds about 0.1 MiB, and its output is byte-identical
-  to the stored file. All of the remaining write peak is the tree. Emitting
-  it per field would mean reordering about 12 whole-document post-passes
-  (`encode_entity_ids`, `encode_fact_fields`, `_compact_elf_symbols`,
-  `encode_surface_graph`, `to_sectioned_document`, ...), which read and
-  rewrite sibling keys, while keeping the output byte-identical. That is not
-  attempted here; see `known-gaps.md` "Snapshot write still builds the whole
-  document tree".
+  one JSON string. **Status (2026-10-31): text streamed; sections encoded
+  and written one at a time.** The *string* half: `write_snapshot`/
+  `write_snapshot_compact`/bundle writes stream `json_stream.iter_json_*`
+  fragments through `snapshot_stream_write.write_snapshot_text_stream`, so no
+  whole JSON string or its bytes is held (zstd one-shot only when the frame
+  must declare its size). The tree half: `storage/snapshot_section_stream.py`
+  encodes, packages and writes one section at a time, bytes unchanged. Peak
+  550 -> 286 MiB on a two-section synthetic, 39.8 -> 37.1 MiB on a
+  binary-only libstdc++ dump (23.9 MB JSON, one dominant section). The
+  record-level step remains: the largest section is still built whole before
+  it is written; see
+  [known gap](../known-gaps/snapshot-write-still-builds-the-whole-document-tree.md).
 - **A2.3** The snapshot cache moves onto the content-addressed store, keyed
   per ADR-062 D11, with a byte-quota LRU. **Eviction implemented
   (2026-10-31).** `storage/byte_quota_lru.py` replaces the dump cache's
@@ -901,7 +895,7 @@ mechanism:
   only: on real oneDAL `libonedal_core` it is ~10 MB instead of 79 MB.
 
 **Not implemented:** lazy loading of any other section, per-library-pair release of sections in a project
-comparison, A2.2 streaming object encoding, A2.3/A2.4, and the A2.5
+comparison, A2.2's record-level encoding (sections stream), A2.3/A2.4, and the A2.5
 measurement for a *project* comparison. A default stored-vs-stored
 `compare` still reads both graphs (the L5 source-graph diff, cross-source
 checks, assurance and the content digest all do), so on that path lazy
@@ -1253,6 +1247,8 @@ satisfies for the one domain type it actually sections today
 | `abicheck/storage/wire_record_extensions.py` | `RECORD_EXTENSIONS_KEY`, `RECORD_LISTS`, `RECORD_OBJECTS`, `RecordExtras`, `collect_record_extras`, `nested_record_classes`, `restore_record_extras` — ADR-062 D14 at record level: unknown fields of identity-matched records and of the binary section's metadata objects, at any nesting depth (parameters, record fields, enum members, ELF symbols/imports, PE/Mach-O exports), kept by identity, ordinal and nested position and written back on re-save. Internal, not re-exported by the package |
 | `abicheck/storage/snapshot_lazy_decode.py` | `LEGACY_BACKFILL_FLOOR`, `decode_lazily`, `eager_section_decode`, `lazy_ir_eligible` — ADR-062 D18 step 2: a document on which every join touching the declarations, types and debug-layout sections is a no-op loads with them pending in the snapshot's semantic IR (model/lazy_declarations.py); any other document decodes eagerly. Internal, not re-exported by the package |
 | `abicheck/storage/transport_digest.py` | `TRANSPORT_EXTRA_ID`, `stored_transport_digest`, `transport_digest`, `transport_extra` — ADR-062 D16's transport digest: the SHA-256 of a package-archive member's stored bytes, carried in its zip extra field and verified on unpack. Internal, not re-exported by the package |
+| `abicheck/storage/snapshot_section_stream.py` | `EncodeKeys`, `sectioned_document_stream` — storage plan A2.2: the sectioned snapshot document as a `json_stream.LazyItems` that encodes, packages and writes one section at a time (each section's keys through the restricted encoder, its D14/D15 carriers restored), so a write never holds the whole encoded tree. Reached through `snapshot_encode.streamed_sectioned_document`. Internal, not re-exported by the package |
+| `abicheck/storage/snapshot_record_compaction.py` | `compact_records` — the snapshot encoder's per-record omissions (uncaptured slot facts, default ELF version bindings, unobserved ODR conflicts, an unrecorded advanced-extraction status), moved out of the snapshot encoder. Internal, not re-exported by the package |
 | `abicheck/storage/wire_field_names.py` | `wire_field_names` — the keys the snapshot encoder writes for a dataclass record, shared by the encoder and the ADR-062 D14 record reader. Internal, not re-exported by the package |
 | `abicheck/storage/package_publish.py` | `REF_DIRS`, `REF_ENTRY_FIELDS`, `REF_SCHEMA_VERSION`, `REF_SCHEMA_VERSION_KEY`, `publish_lock_name`, `ref_digest_entries`, `ref_digest_of`, `ref_document`, `ref_record`, `versioned_ref_relpath` — ADR-062 D17's ref layout (amends D6): the immutable refs/&lt;kind&gt;/&lt;id&gt;/&lt;ref-digest&gt;.json path, the ref document with its own layout version, its ref digest (the semantic digest of the whole document), the package-format-v2 manifest entries naming each ref by id and ref digest, and the cross-process lock name serializing writers. Internal, not re-exported by the package |
 | `abicheck/storage/zip_member.py` | `deterministic_zipinfo` — the pinned zip member header shared by G40's bundle archive and the package transport. Internal, not re-exported by the package |
