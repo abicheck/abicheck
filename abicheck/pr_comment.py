@@ -116,7 +116,7 @@ from .pr_comment_render import (
     _header as _header,
     render_comment as render_comment,
 )
-from .report.change_summary import ChangeSummary, summarize_changes
+from .report.change_summary import release_change_summary, summarize_changes
 from .report.comparison_scope import comparison_scope_notice
 from .report.evidence_summary import evidence_summary
 
@@ -1173,43 +1173,6 @@ def _release_contract_coverage_findings(
     ], blocking
 
 
-def _release_change_summary(report: dict[str, object]) -> ChangeSummary | None:
-    """Entity-by-operation rollup over a release report's *sampled* findings.
-
-    Always ``exact=False``: the only itemized, kind-level view a release
-    report carries is each library's ``findings`` list, which
-    ``cli_compare_release.py`` caps (at most 10 per library, and the
-    bundle/matrix sections have their own). The authoritative per-library
-    integer counts next to it are compatibility-bucket counts, not
-    entity/operation ones, so they cannot reconstruct this table -- and
-    reconstructing one from the capped list while calling it a total is the
-    exact failure AGENTS.md names ("never reconstruct exact totals from an
-    already-truncated finding list"). Closing this needs an authoritative
-    per-entity/operation count in the release JSON schema itself, a
-    `cli_compare_release.py` change rather than a rendering-only one -- the
-    same shape of gap `_from_release`'s own docstring already records for
-    the evidence-kind bucket.
-    """
-    sampled: list[dict[str, object]] = []
-    libraries = report.get("libraries")
-    if isinstance(libraries, list):
-        for lib in libraries:
-            if isinstance(lib, dict):
-                sampled.extend(_changes_list(lib.get("findings")))
-    for key in ("bundle_findings", "matrix_findings"):
-        sampled.extend(_changes_list(report.get(key)))
-    if not sampled:
-        return None
-    return summarize_changes(
-        sampled,
-        exact=False,
-        inexact_reason=(
-            "counted from each library's capped findings sample, so these "
-            "are lower bounds"
-        ),
-    )
-
-
 def _from_release(
     report: dict[str, object], gate_api_break: bool = False
 ) -> CommentModel:
@@ -1353,13 +1316,9 @@ def _from_release(
         review_groups=review_groups,
         result_counts=result_counts or None,
         evidence=evidence_summary(report),
-        # ADR-065/AGENTS.md: a release report's per-library `findings` list
-        # is a cap of at most 10 per library (`cli_compare_release.py`), so
-        # a total reconstructed from it is a floor, never the truth. It is
-        # summarized anyway -- a floor with its limitation stated is more
-        # useful to a reviewer than no breakdown at all -- but `exact=False`
-        # makes it impossible for a renderer to present it as complete.
-        change_summary=_release_change_summary(report),
+        # Exact from the document's own `change_counts` (release schema
+        # 2.7); an older document is summarized as a disclosed floor.
+        change_summary=release_change_summary(report),
     )
 
 

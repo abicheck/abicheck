@@ -320,7 +320,11 @@ Beside the verdict headline and the breaking/needs-review/safe counts:
 * **What changed** — an entity-by-operation table (functions / variables /
   types / enums / …, removed / changed / added). It counts **findings**, not
   declarations and not unique symbols, and says so in its own header. The
-  counts come from the complete finding list, before any display cap.
+  counts come from the complete finding list, before any display cap. For a
+  directory/package comparison they are the release report's own
+  `change_counts` (release schema 2.7), so the table is exact; a report
+  older than 2.7 is summarized from its finding lists and labelled
+  "Not exact totals".
 * **Findings** — per-symbol rows with the change kind, description, old and
   new values (including one-sided, zero, `false` and empty-string values),
   source location and the kind's impact text. Standard detail groups related

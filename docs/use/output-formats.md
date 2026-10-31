@@ -1136,6 +1136,15 @@ carries its transitive walk as `old_dependency_info`/`new_dependency_info`
 --follow-deps` JSON report has. The Markdown release report adds a
 "Dependency Analysis" section per member. A side with no walk has no key.
 
+Every compared member also carries `change_counts` (release schema 2.7), and
+the document carries a top-level `change_counts` too: the number of findings
+per entity (`function`, `variable`, `type`, …) and operation (`removed`,
+`modified`, `added`), as `{"unit": "findings", "counted": N, "rows": [...]}`.
+A member's block counts all of its findings before any `output.view` `show=`
+filter, the same set its own single-pair `compare` report counts. The
+top-level block adds the members' blocks and every `bundle_findings` and
+`matrix_findings` entry. The PR comment's "What changed" table reads it.
+
 The single-pair HTML report gains a **Surface changes** section with the
 same additions/removals/modifications grouping as Markdown and the same
 per-group cap (12 entries, omitted count stated).

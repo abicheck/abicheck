@@ -3,15 +3,15 @@ doc_type: contributor
 audience:
   - contributor
 level: advanced
-lifecycle: active
+lifecycle: historical
 generated: false
 ---
 
 # A release/bundle report carries no authoritative entity-by-operation counts
 
-Index: [Known gaps](../known-gaps.md)
+Index: [Known gaps](../known-gaps.md) (closed; see the [archive](../archive/known-gaps-closed.md))
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** report/pr_comment_aggregate.py:575-588 still marks the release rollup exact=False when targets cannot be itemized. The release JSON has an `uncapped` findings path (cli_compare_release_matrix.py:634), but no authoritative entity-by-operation count field was found; pr_comment._release_change_summary named in the entry no longer exists under that name.
+**Status (2026-10-31): CLOSED.** The release JSON carries `change_counts` (release schema 2.7) on every compared `libraries[]` entry and at the top level: `{"unit": "findings", "counted", "rows": [{"entity", "removed", "modified", "added"}]}`. A member's block counts its complete finding pool before any `show=` view, classified per finding the way the scalar report's `entity`/`operation` fields are; the top-level block adds the complete bundle and matrix findings. `report/change_summary.release_change_summary` reads it as an exact rollup for the PR comment (and so for an `aggregate` fan-in of release documents); a document without a well-formed block (older than 2.7) is still summarized from its finding lists and marked `exact=False`. `pr_comment._release_change_summary` is gone. Tests: `tests/test_release_change_counts.py` (rollup == the document's complete finding lists classified from the change catalog, member == its scalar compare's rollup, a `show=` view leaves the counts unchanged, malformed blocks are not trusted). The evidence-kind bucket `_from_release`'s docstring records is a separate gap and is not closed here.
 
 
 `report/change_summary.py` can summarise a single comparison exactly,

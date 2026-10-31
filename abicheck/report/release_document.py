@@ -55,6 +55,13 @@ from ..workflows.gate import (
     resolve_release_exit_decision_for_report,
 )
 from . import release_change_inventory as _inventory
+from .change_summary import (
+    CHANGE_COUNTS_KEY,
+    change_counts_to_dict,
+    change_summary_from_counts,
+    fold_change_summaries,
+    summarize_change_objects,
+)
 from .comparison_scope import ComparisonScopeTerms
 from .document import ReportDocument
 from .release_assurance_section import ReleaseAssuranceTerms
@@ -584,7 +591,30 @@ def release_json_document(report: ReleaseReport) -> ReportDocument:
     summary["disposition_audit"] = report.disposition_audit
     # Schema 2.2: the same per-member surface block the stored operand carries.
     summary["surface_changes"] = report.surface_changes
+    summary[CHANGE_COUNTS_KEY] = _release_change_counts(ev)
     return ReportDocument.from_mapping(summary)
+
+
+def _release_change_counts(ev: ReleaseEvaluation) -> dict[str, object]:
+    """Release schema 2.7's top-level ``change_counts``: every member's own
+    block plus the complete bundle and matrix finding sets, each counted
+    before any ``show=`` view, folded by plain addition."""
+    parts = [
+        summary
+        for lib in ev.library_results
+        if isinstance(lib, dict)
+        and (summary := change_summary_from_counts(lib.get(CHANGE_COUNTS_KEY)))
+        is not None
+    ]
+    if ev.bundle_result is not None:
+        parts.append(
+            summarize_change_objects(
+                [f.to_change() for f in ev.bundle_result.bundle_findings]
+            )
+        )
+    if ev.matrix_result is not None:
+        parts.append(summarize_change_objects(ev.matrix_result.changes))
+    return change_counts_to_dict(fold_change_summaries(parts))
 
 
 def _stored_release_block(release: ReleaseEvaluation) -> dict[str, object]:

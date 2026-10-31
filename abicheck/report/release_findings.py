@@ -45,6 +45,11 @@ from ..workflows.gate import (
     effective_kind_sets,
     evaluate,
 )
+from .change_summary import (
+    CHANGE_COUNTS_KEY,
+    change_counts_to_dict,
+    summarize_change_objects,
+)
 from .diff_report import release_finding_entry
 from .markdown_sections import compute_impact_table
 from .release_display_limits import MAX_RELEASE_FINDINGS_PER_LIBRARY
@@ -361,6 +366,14 @@ def project_release_library_results(
             )
             if findings:
                 entry["findings"] = findings
+            # Release schema 2.7: the authoritative entity-by-operation count
+            # of this complete, pre-view pool, kept when a `show=` view later
+            # narrows `findings` (record before disposing).
+            entry[CHANGE_COUNTS_KEY] = change_counts_to_dict(
+                summarize_change_objects(
+                    [c for _, cat_changes in display_buckets for c in cat_changes]
+                )
+            )
             # Codex review, fresh evidence ("Count uncapped findings in
             # release filter totals"): the uncapped pool size behind
             # `findings` above -- `len(entry["findings"])` alone
