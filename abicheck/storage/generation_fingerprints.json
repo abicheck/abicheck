@@ -22,7 +22,8 @@
       "abicheck/extract/binary_identity.py": "4645eaf3dddd0a2230a5c694882548476406c57514275fa4c8c1bc152607ca88",
       "abicheck/extract/build_mode_capture.py": "7a46c5babcc5bf770a1a38d5a5d3abb49a2b7d9575bda2b210d2e2861ebfb51f",
       "abicheck/extract/builtin_abi.py": "aad1229f3a899920a43a88aff31b91904f37ef938480754382c34584d4e3315e",
-      "abicheck/extract/cache_header_scan.py": "4a944a4e6eff6b10de32c6aec2ad939b78e9ffc96e725791247431a0cc870684",
+      "abicheck/extract/cache_header_scan.py": "f49ff56e6c9237032383cbe8a25da51c3aee65079824d55d8b30eaaf6b0866bf",
+      "abicheck/extract/cache_input_digest.py": "37e643b340e46178f3179f03548450940a0a58e6d412d2a2a35b2b998cd9e61c",
       "abicheck/extract/castxml_compiler_emulation.py": "da713be283b31c31ab8c4c5486f0c70d4adf403365f630f88b718589ed03f763",
       "abicheck/extract/castxml_header_compat.py": "d0e78b90ad113be1cb89f05465f77fa9d9fc9546608275707cd7d15f18e2f518",
       "abicheck/extract/compile_header_inputs.py": "38655d35c5309694ebf12be60e5e4fcd3fa5c8ea7eb8a73a9b4ab2fcf46338b9",
@@ -74,13 +75,13 @@
       "abicheck/extract/header_scan_memo.py": "56f79b5316354b938b08a5f29779c3aaf40481892d947784ec2adb48ab5e83fb",
       "abicheck/extract/header_text.py": "b43a88d7bf1d2e601bb908c78f04cb07e552f9c59f03b678ecc85788b3d146e4",
       "abicheck/extract/headers/__init__.py": "70af0d3a16882783444077004b7a434a295505579fbbca219ce103f72074ad03",
-      "abicheck/extract/headers/ast_config.py": "f455e7472adf0fa421ff44c27a97d50e657bbb7980eb80bf64f4992cd9843519",
+      "abicheck/extract/headers/ast_config.py": "8dd367027d9b088b3efe65753335fd418bb1998b0c83b7d646191873ede49ee1",
       "abicheck/extract/headers/ast_config_cpp20_chains.py": "d497a5723d7675b48ced9019b766da88bf6c1a26f6edacffa0580d004a5c81ec",
       "abicheck/extract/headers/backend_plan.py": "1f02babf0ead52a65e4fa08dff8ce5b2a9d60feb1d02d22e7db30ee050cf8717",
       "abicheck/extract/headers/backend_protocol.py": "144cbe76456b6bceaf56f0edd0f3398f171178a222c8b968d53f8a17ee05a21b",
       "abicheck/extract/headers/castxml/__init__.py": "cebb319d35840200904dde9fe4ad16489124b02327a50d8351b086844ee19943",
       "abicheck/extract/headers/castxml/abi_fundamental.py": "21dc4646f178ebd85b1dfdd84a4aab54ad6792c45906950f7af45d632b1afdd7",
-      "abicheck/extract/headers/castxml/backend.py": "a8ff27cd915642a70d4c810537d4457b275cfddc7aebf0b894b3ba280c8c2388",
+      "abicheck/extract/headers/castxml/backend.py": "ae3d0af0c4994b18f24be70b3c0add301a05de1b47f55d03df0bc4046e799c5e",
       "abicheck/extract/headers/castxml/calling_convention.py": "147c4be1a5b417eb4a67156e92e8f03f09eef3b7b34703ac22a98ad86d5dde1d",
       "abicheck/extract/headers/castxml/context.py": "a2a9fc7c8b2f5f06fc122d1628b4681d2a22cd6fffd16f173a48f157ccc1b889",
       "abicheck/extract/headers/castxml/dumper.py": "e5082c2d5da488b9a1e07600408e9092420e97af6066652bcdcc81264c0e0ef6",
@@ -141,7 +142,7 @@
       "abicheck/extract/headers/manifest.py": "4f0e740bfeb88aa4363176f2defe422826a9e2cd91b03cd317f6f86f4eec5066",
       "abicheck/extract/headers/preprocessor_branches.py": "d3a409d126b0dd1b19a634d4aad25660d372dad931b310cfbaaefc9d769b244d",
       "abicheck/extract/headers/scope_segments.py": "d413edec257eb1334c829263770b66dc2eda3d263c765f699eac9f7e3ace9e65",
-      "abicheck/extract/headers/sysinc.py": "3a87c8a2cfcb4952d3bb47643e894293e19a800c30d30a5d5237d043a205e8f0",
+      "abicheck/extract/headers/sysinc.py": "f82bd29033ed9d21f2b2af9a29352eb2b52b9c01ba7a09f47509af89017a359a",
       "abicheck/extract/headers/template_default_scan.py": "3b56f9307028934aa2126de14fa9847333bdc990f0943445604b255e494060e8",
       "abicheck/extract/headers/toolchain.py": "be0be05950476ff2c0cb168727ebcde4859cc634c258f5ff23b1af1d2c50b754",
       "abicheck/extract/library_export_facts.py": "071b2a58f284753b57fa2e374680a57e9ce6897877b65a84fb92f420e7cf2ab7",
@@ -187,9 +188,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "c9c38748894ae181c0930752d9638c6bd1e9a5bae81d1edd0d78d203edb5b331",
+    "fingerprint": "69b466a592ee5dae8ecc676d24ce3cd4918c25e559ab0285d9017a92a7d17bb5",
     "generation": 34,
-    "reason": "generation 34 is still unreleased (same PR #1876): this amends its own semantic change -- any truncated supported TPI record or field-list sub-record, a dangling LF_INDEX, an enum whose list falls short of its count, or a TPI stream that ends before its declared type range now fails the PDB (PdbParseError) -- rather than introducing a new generation"
+    "reason": "S2 cache-key identity edits (content digests, declhdr sidecar); extracted facts unchanged"
   },
   "resolver": {
     "files": {
