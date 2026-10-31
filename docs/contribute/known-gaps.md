@@ -282,13 +282,19 @@ per-item status in the
   says; pass the `AbiSnapshot`.
 - **D15 residual: one producer records a whole-section failure.** The PE
   dump records `debug` as `failed` when a located PDB fails to parse, on the
-  export-table path only. A header-scoped PE dump's `debug` section also
-  holds the header parse's provenance, so it is not failed wholesale (the
-  PDB failure is logged). No other extractor fails a whole section: each
-  section aggregates several extractors whose failures are fact-family
-  `FactAvailability`. The inventory expands only what the fixed corpus
-  populates. A `not_collected` section gives no assurance note when a
-  detector reads it (decided in ADR-062 D15's implementation decisions).
+  export-table path only. Checked 2026-10-31 for every other extractor, and
+  none fails a whole section: a castxml failure aborts the dump (requested
+  headers that cannot be parsed are a dump error, not a section state); a
+  DWARF open/parse failure (`AdvancedExtractionStatus.FAILED`) does not
+  cover `debug` (which also holds the header AST's provenance, toolchain and
+  reliability facts) or `layout` (scope, contract and coherence facts), and
+  DWARF is an optional input on the binary path, so failing either section
+  would make an unrequested input lower a passing run's assurance; a
+  header-scoped PE dump's `debug` also holds the header parse's provenance.
+  Each stays a fact-family `FactAvailability`. The inventory expands only
+  what the fixed corpus populates. A `not_collected` section gives no
+  assurance note when a detector reads it (decided in ADR-062 D15's
+  implementation decisions).
 - **D16 residual: `comparison_input`** has no consumer (no comparison-result
   cache exists) and is not implemented. A persisted evidence digest is used
   only against another persisted one: a snapshot decoded from the stored
@@ -321,6 +327,18 @@ per-item status in the
   decoded). Closing (3) needs a streamed or per-section parse so a raw
   section is not held as parsed JSON, and a release fan-out that loads
   members one pair at a time. Measurements: the plan's A1.9 D18 entry.
+  2026-10-31 re-measurement: the release fan-out already loads one pair at
+  a time and keeps only compact per-member evidence
+  (`release_snapshot_retention`), yet peak RSS still grows with the member
+  count (53 MiB members, 6k functions: N=1 304 MiB, N=4 498 MiB, N=8
+  611 MiB). tracemalloc (1.5k-function members) shows about 5 MiB of live
+  memory kept per finished member, spread over parsed-JSON objects, decoded
+  ELF symbols, both sides' public-header type graphs
+  (`contract_evidence_collect.build_type_graph`) and execution-cache
+  entries (`elf_facts` alias index, `elf_symbol_filter`,
+  `diff_namespaces`); the rest of the growth is allocator high-water. Each
+  site needs its own owner decision (result data versus a cache that
+  outlives its pair) before A2.5 can be met.
 
 ### False-positive risk
 

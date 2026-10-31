@@ -1150,6 +1150,16 @@ A1.9), item by item. Open items are also listed in
   decoded-section cache were therefore not built: no consumer path reads a
   section it could share or release early. What remains is in known-gaps.
 
+  *A2.5 re-measurement (2026-10-31, synthetic directory release, 53 MiB
+  members with 6k functions, `compare old/ new/`).* Peak RSS N=1 304 MiB,
+  N=4 498 MiB, N=8 611 MiB: still growing with N although the fan-out loads
+  one pair at a time. tracemalloc attributes about 5 MiB of live memory per
+  finished member (1.5k-function members) to parsed-JSON objects, decoded
+  ELF symbols, public-header type graphs and execution-cache entries; site
+  list in known-gaps. **A2.5 still not met**; the per-section streamed
+  parse, `BundleFacts` lazy members and the evidence-keyed decoded-section
+  cache were not started, because the measured growth is not in the parse.
+
 ---
 
 ## Validation corpus

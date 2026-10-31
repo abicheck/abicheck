@@ -836,7 +836,13 @@ PDB's facts. A missing PDB is `not_collected` (optional inputs stay
 optional). Other sections aggregate several extractors whose failures are
 fact-family `FactAvailability` inside the payload, so no other extractor
 fails a whole section; a header-scoped PE dump's `debug` section also holds
-the header parse's provenance and is not failed wholesale (known gap). A
+the header parse's provenance and is not failed wholesale (known gap).
+Re-checked 2026-10-31 for castxml and DWARF: a castxml failure aborts the
+dump (requested headers are not optional), and a DWARF open/parse failure
+covers neither `debug` (which also holds the header AST's provenance and
+reliability facts) nor `layout` (scope and contract facts); DWARF is also an
+optional input on the binary path, so failing a section for it would let an
+unrequested input lower a passing run's assurance. Neither gets a producer. A
 `not_collected` entry is written back absent on re-save (it was re-saved as
 present, which made the document unreadable). A `not_collected` section adds no
 assurance note when a detector reads it, by decision: every pre-D15 document
