@@ -75,10 +75,10 @@ def _reject_view_tokens_for_no_baseline(kwargs: dict[str, Any]) -> None:
         value = kwargs.get(name, default)
         if value != default:
             raise click.UsageError(
-                "--view is not available together with --no-baseline: a "
+                "output.view is not available together with --no-baseline: a "
                 "no-baseline audit has no root-cause graph, findings list, "
-                "or pattern-modulation ledger for --view to act on (it "
-                "reports an empty change set by construction). Drop --view "
+                "or pattern-modulation ledger for output.view to act on (it "
+                "reports an empty change set by construction). Drop output.view "
                 "for this operand."
             )
 

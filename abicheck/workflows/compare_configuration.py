@@ -600,7 +600,7 @@ def load_required_symbols(
     files = [v[1:] for v in symbols if v.startswith("@")]
     if len(files) > 1:
         raise CompareSettingsError(
-            f"--required-symbol accepts at most one '@FILE' value; got {files}. "
+            f"consumers.required_symbols accepts at most one '@FILE' value; got {files}. "
             "Combine both files, or pass the extras as plain values."
         )
     from_file: list[str] = []
@@ -609,10 +609,10 @@ def load_required_symbols(
         candidate = Path(files[0])
         if candidate.is_dir():
             raise CompareSettingsError(
-                f"--required-symbol @{candidate}: is a directory, not a file."
+                f"consumers.required_symbols @{candidate}: is a directory, not a file."
             )
         if not candidate.is_file():
-            raise CompareSettingsError(f"--required-symbol @{candidate}: no such file.")
+            raise CompareSettingsError(f"consumers.required_symbols @{candidate}: no such file.")
         try:
             data = candidate.read_bytes()
         except OSError as exc:
@@ -620,7 +620,7 @@ def load_required_symbols(
             # error like a missing one, not an operational failure: it must reach
             # the CLI as the typed refusal (exit 64), never as a traceback.
             raise CompareSettingsError(
-                f"--required-symbol @{candidate}: cannot read file "
+                f"consumers.required_symbols @{candidate}: cannot read file "
                 f"({exc.strerror or exc})."
             ) from None
         digest, path = hashlib.sha256(data).hexdigest(), str(candidate)
@@ -628,7 +628,7 @@ def load_required_symbols(
             text = data.decode("utf-8")
         except UnicodeDecodeError as exc:
             raise CompareSettingsError(
-                f"--required-symbol @{candidate}: not UTF-8 text ({exc.reason} "
+                f"consumers.required_symbols @{candidate}: not UTF-8 text ({exc.reason} "
                 f"at byte {exc.start})."
             ) from None
         from_file = [

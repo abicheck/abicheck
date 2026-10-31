@@ -513,7 +513,7 @@ class TestViewGrammar:
             ["compare", str(old_p), str(new_p), "--set", 'output.view=["nonsense"]'],
         )
         assert result.exit_code == 64, result.output
-        assert "Unknown --view token" in result.output
+        assert "Unknown output.view token" in result.output
 
     def test_bad_show_filter_is_a_usage_error(self, tmp_path: Path) -> None:
         old_p, new_p = _write_pair(tmp_path)
@@ -528,7 +528,7 @@ class TestViewGrammar:
             ],
         )
         assert result.exit_code == 64, result.output
-        assert "Unknown --view show= token" in result.output
+        assert "Unknown output.view show= token" in result.output
 
     def test_combined_view_tokens_do_not_change_canonical_result(
         self, tmp_path: Path

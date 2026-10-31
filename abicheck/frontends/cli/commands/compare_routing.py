@@ -64,12 +64,12 @@ def reject_release_incompatible_view_mode(report_mode: str) -> None:
     """
     if report_mode not in ("full", "impact"):
         raise click.UsageError(
-            f"--view {report_mode} is not available when comparing directories "
+            f"output.view {report_mode} is not available when comparing directories "
             "or packages: 'leaf'/'root-cause' restructure a single comparison's "
             "own root-cause graph, and the release summary is an aggregate "
             "report across every library with no single such graph to "
             "restructure. Compare one library at a time (a single old/new "
-            f".so pair) to use --view {report_mode}."
+            f".so pair) to use output.view {report_mode}."
         )
 
 

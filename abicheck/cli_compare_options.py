@@ -127,17 +127,17 @@ def _reject_set_input_flags(
         )
     if used_by_apps:
         raise click.UsageError(
-            "--used-by/--used-by-manifest is not supported for "
+            "--used-by/consumers.manifests is not supported for "
             "directory/package (release) comparisons: the per-library "
             "fan-out has no per-app scoping. Compare the specific library "
-            "individually with --used-by/--used-by-manifest."
+            "individually with --used-by / consumers.manifests."
         )
     if required_symbols:
         raise click.UsageError(
-            "--required-symbol is not supported for "
+            "consumers.required_symbols is not supported for "
             "directory/package (release) comparisons: the per-library "
             "fan-out has no plugin-host-contract scoping. Compare the "
-            "specific library individually with --required-symbol."
+            "specific library individually with consumers.required_symbols."
         )
     if use_cases_manifest is not None:
         raise click.UsageError(

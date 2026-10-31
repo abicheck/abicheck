@@ -92,7 +92,7 @@ class ShowOnlyFilter:
             elif tok in action_tokens:
                 actions.add(tok)
             else:
-                raise ValueError(f"Unknown --view show= token: {tok!r}")
+                raise ValueError(f"Unknown output.view show= token: {tok!r}")
 
         return cls(
             severities=frozenset(severities),

@@ -667,7 +667,7 @@ class TestReleaseViewReportModeRejected:
             _view_config(tmp_path, '["root-cause"]'),
         )
         assert result.exit_code == 64, result.output
-        assert "--view root-cause is not available" in result.output
+        assert "output.view root-cause is not available" in result.output
 
     def test_full_and_impact_are_accepted_for_a_directory_operand(
         self, tmp_path: Path
@@ -727,7 +727,7 @@ class TestReleaseViewReportModeRejectedUnderDryRun:
             _view_config(tmp_path, '["root-cause"]'),
         )
         assert result.exit_code == 64, result.output
-        assert "--view root-cause is not available" in result.output
+        assert "output.view root-cause is not available" in result.output
 
     def test_full_and_impact_still_succeed_under_dry_run(self, tmp_path: Path) -> None:
         """Companion: the fix must not reject the two view modes a

@@ -271,7 +271,7 @@ def run_compare(
         ) = load_required_symbols(required_symbols_opt)
     if used_by_apps and required_symbols:
         raise click.UsageError(
-            "--used-by and --required-symbol are mutually "
+            "--used-by and consumers.required_symbols are mutually "
             "exclusive: scope the comparison to either application imports or "
             "an explicit required-symbol contract, not both."
         )

@@ -136,17 +136,17 @@ def parse_view_tokens(tokens: tuple[str, ...]) -> dict[str, object]:
             value = token[len(_SHOW_PREFIX) :]
             if not value:
                 raise ValueError(
-                    "--view show=... needs at least one token after 'show=' "
-                    "(e.g. --view show=breaking,functions)."
+                    "output.view show=... needs at least one token after 'show=' "
+                    "(e.g. --set 'output.view=[\"show=breaking,functions\"]')."
                 )
             show_only_parts.append(value)
         elif token in RETIRED_TOKENS:
             raise ValueError(
-                f"--view {token} was retired (plan slice 7o): {RETIRED_TOKENS[token]}"
+                f"output.view {token} was retired (plan slice 7o): {RETIRED_TOKENS[token]}"
             )
         else:
             raise ValueError(
-                f"Unknown --view token: {raw!r}. Expected one of "
+                f"Unknown output.view token: {raw!r}. Expected one of "
                 f"{', '.join(REPORT_MODES)} or 'show=<tokens>'."
             )
 
