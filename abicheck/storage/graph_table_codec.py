@@ -250,6 +250,14 @@ def _persisted_facts(entity: Any) -> list[Any]:
     return [f for f in facts if f.producer not in RECOMPUTABLE_FACT_PRODUCERS]
 
 
+def _node_order(node: Any) -> str:
+    return str(node.id)
+
+
+def _edge_order(edge: Any) -> tuple[str, str, str, str]:
+    return tuple(str(part) for part in edge.relation_key())  # type: ignore[return-value]
+
+
 def encode_graph_table(graph: SourceGraphSummary) -> dict[str, Any]:
     """*graph* in this module's encoding (see the module docstring).
 
@@ -261,7 +269,12 @@ def encode_graph_table(graph: SourceGraphSummary) -> dict[str, Any]:
     """
     table = _Interner()
     nodes: dict[str, list[Any]] = {name: [] for name in _NODE_COLUMNS}
-    for node in graph.nodes:
+    # Canonical row order (known gap "a snapshot is not byte-reproducible
+    # across processes"): the in-memory insertion order follows producer
+    # iteration that can vary between processes, while node ids and edge
+    # relation keys are unique, so sorting by them loses nothing and makes
+    # the rows -- and the interner indices they assign -- process-independent.
+    for node in sorted(graph.nodes, key=_node_order):
         facts = _persisted_facts(node)
         if not facts:
             continue
@@ -270,7 +283,7 @@ def encode_graph_table(graph: SourceGraphSummary) -> dict[str, Any]:
         nodes["label"].append(table.string(node.label))
         nodes["facts"].append(table.fact_list(facts))
     edges: dict[str, list[Any]] = {name: [] for name in _EDGE_COLUMNS}
-    for edge in graph.edges:
+    for edge in sorted(graph.edges, key=_edge_order):
         facts = _persisted_facts(edge)
         if not facts:
             continue
