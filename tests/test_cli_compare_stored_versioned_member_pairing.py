@@ -160,7 +160,9 @@ def _cli_captured_facts(tmp_path: Path, old_dir: Path) -> Path:
             "oneline=-",
         ],
     )
-    assert result.exit_code == 0, result.output
+    # An unreadable member makes the capturing self-compare exit 4, but the
+    # facts (with that member marked degraded) are still written.
+    assert facts.is_file(), result.output
     return facts
 
 
@@ -233,3 +235,70 @@ class TestFactsKeyedByMatchKey:
             }
         )
         assert facts_keyed_by_match_key(facts) is facts
+
+
+def test_file_name_keyed_facts_pair_with_the_canonical_live_side(
+    tmp_path: Path,
+) -> None:
+    """The typed-API capture keys members by file name (``libcore.so.1``),
+    the live NEW side by ``build_match_map``'s canonical key (``libcore.so``).
+    The document really is file-name keyed, and still pairs every member."""
+    spec = _SPECS["versioned"]
+    old_dir, new_dir = _write_release(tmp_path, spec)
+    facts = _api_captured_facts(tmp_path, old_dir, spec)
+    written = json.loads(facts.read_text(encoding="utf-8"))
+    assert sorted(written["per_library_snapshots"]) == sorted(spec)
+    code, report = _compare_json(tmp_path, facts, new_dir, "stored")
+    assert code == 4
+    assert sorted(e["library"] for e in report["libraries"]) == sorted(spec)
+    assert report["unmatched_old"] == [] and report["unmatched_new"] == []
+    assert {m["member"] for m in report["comparison_scope"]["members"]} == {
+        "libcore.so",
+        "libmid.so",
+        "libtop.so",
+    }
+
+
+@pytest.mark.parametrize(
+    "old_notes",
+    ["unreadable", "snapshot"],
+    ids=["unreadable-both-sides", "unreadable-new-only"],
+)
+def test_a_non_binary_library_name_is_a_failed_member_on_both_routes(
+    tmp_path: Path, old_notes: str
+) -> None:
+    """A text file named like a library (``notes.so``) is a member on both
+    routes, and on both it is an explicit ``failed`` member with an
+    operational extraction error -- never an empty, clean one (a failed
+    extractor is an error, not an empty surface)."""
+    old_dir, new_dir = _write_release(tmp_path, _SPECS["versioned"])
+    if old_notes == "snapshot":
+        (old_dir / "notes.so").write_text(
+            snapshot_to_json(_snap("notes.so", ["n"])), encoding="utf-8"
+        )
+    else:
+        (old_dir / "notes.so").write_text("plain text\n", encoding="utf-8")
+    (new_dir / "notes.so").write_text("plain text\n", encoding="utf-8")
+
+    def _notes_state(report: dict) -> list[str]:
+        return [
+            m["state"]
+            for m in report["comparison_scope"]["members"]
+            if m["name"] == "notes.so"
+        ]
+
+    live_code, live = _compare_json(tmp_path, old_dir, new_dir, "live")
+    facts = _cli_captured_facts(tmp_path, old_dir)
+    stored_code, stored = _compare_json(tmp_path, facts, new_dir, "stored")
+    for report in (live, stored):
+        assert _notes_state(report) == ["failed"]
+        assert report["run_outcome"]["scope"] == "incomplete"
+        assert report["comparison_scope"]["completeness"] != "complete"
+    assert live_code == stored_code == 4
+    if old_notes == "snapshot":
+        # NEW's extraction failed in this run on both routes.
+        for report in (live, stored):
+            assert report["run_outcome"]["operational"] == "extraction_error"
+            assert ("notes.so", "ERROR") in {
+                (e["library"], e["verdict"]) for e in report["libraries"]
+            }
