@@ -253,24 +253,22 @@ inputs:
     required: false
   compiler:
     description: >
-      Path to GCC/G++ (or clang) cross-compiler binary. Like dump and
-      single-pair compare (including the audit-only shape), it folds into
-      a synthesized .abicheck.yml compile: block forwarded via --config
-      (together with gcc-prefix, compile-options, sysroot, and nostdinc, when
-      any of those are also set). Applies to dump and compare mode, on
-      single-pair and directory/package (release) operands alike (same
-      scope as frontend above). Combining any of this group with
-      build-config
-      is supported: the synthesized compile: block is merged into a copy
-      of the named build-config, and this Action's input wins on a key
-      conflict.
+      Path to GCC/G++ (or clang) cross-compiler binary, or a cross-toolchain
+      prefix such as aarch64-linux-gnu- (a trailing - is read as a prefix,
+      anything else as a path). The Action passes each compile-context input
+      to the CLI as a --set compile.* argument (compile.compiler here), not
+      through a synthesized .abicheck.yml document or --config. The CLI owns
+      the compile: schema and its precedence over .abicheck.yml, so
+      build-config combines with these inputs without any merge step on the
+      Action's side. Applies to dump and compare mode, on single-pair and
+      directory/package (release) operands alike (same scope as frontend
+      above).
     required: false
   compile-options:
     description: >
-      Extra compiler flags passed through to the header frontend. Folds
-      into a synthesized compile.options list in the same synthesized
-      compile: block compiler describes above, on every mode that accepts
-      it. A single-line
+      Extra compiler flags passed through to the header frontend. Forwarded
+      as a --set compile.options=… list alongside compiler (see that input's
+      description), on every mode that accepts it. A single-line
       value is shell-quoting-aware split on whitespace into separate flags
       (a quoted segment such as -DMSG="hello world" stays one flag, but
       that one flag still contains a space internally); a multi-line
@@ -289,13 +287,13 @@ inputs:
       scope as frontend above).
     required: false
   sysroot:
-    description: 'Alternative system root directory for cross-compilation. On dump and single-pair compare (including the audit-only shape) this folds into the same synthesized compile: block compiler describes above (deps-tree keeps its own direct --root CLI forwarding, unaffected -- it is not part of this compile-context group at all). Applies to dump, deps-tree, and compare mode, the latter on single-pair and directory/package (release) operands alike (same scope as frontend above).'
+    description: 'Alternative system root directory for cross-compilation. On dump and single-pair compare (including the audit-only shape) this is forwarded as a --set compile.sysroot argument (see compiler above) (deps-tree keeps its own direct --root CLI forwarding, unaffected -- it is not part of this compile-context group at all). Applies to dump, deps-tree, and compare mode, the latter on single-pair and directory/package (release) operands alike (same scope as frontend above).'
     required: false
   nostdinc:
     description: >
-      Do not search standard system include paths. On dump and single-pair
-      compare this folds into the same synthesized compile: block compiler
-      describes above. Applies to dump and compare mode, on single-pair and
+      Do not search standard system include paths. On dump and compare
+      this is forwarded as a --set compile.nostdinc argument (see compiler
+      above). Applies to dump and compare mode, on single-pair and
       directory/package (release) operands alike (same scope as
       frontend above).
     required: false
