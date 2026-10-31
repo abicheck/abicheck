@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""``--view show=`` filtering of a release's release-global sections.
+"""``output.view show=`` filtering of a release's release-global sections.
 
 Bundle (cross-library) findings and the build-matrix result are not tied to
 one member's ``DiffResult``; the release document filters them here, once,
@@ -79,7 +79,7 @@ def filter_release_bundle_findings(
 def release_bundle_findings_for_view(
     bundle_result: BundleDiffResult, show_only: str | None
 ) -> list[Any]:
-    """Return *bundle_result*'s findings, ``--view show=``-filtered when active.
+    """Return *bundle_result*'s findings, ``output.view show=``-filtered when active.
 
     Codex review, PR #1154 second follow-up ("Apply release show filters
     inside each renderer"): shared by the release fan-out's JSON
@@ -108,7 +108,7 @@ def release_bundle_findings_for_view(
 def release_matrix_changes_for_view(
     matrix_result: DiffResult, show_only: str | None
 ) -> list[Change]:
-    """Return *matrix_result*'s changes, ``--view show=``-filtered when active.
+    """Return *matrix_result*'s changes, ``output.view show=``-filtered when active.
 
     Shared by the release fan-out's JSON and Markdown release-global matrix
     (build-configuration) sections, both called from ``report/release_document.py`` for the identical reason as

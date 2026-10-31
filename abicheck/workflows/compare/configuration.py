@@ -40,13 +40,13 @@ def resolve_required_symbol_policy(
     required_symbols_path: str | None,
     required_symbols_sha: str | None,
 ) -> tuple[str, str | None, Path | None, str | None]:
-    """Pick ``policy`` for a ``--required-symbol`` contract, and say what picked it.
+    """Pick ``policy`` for a ``consumers.required_symbols`` contract, and say what picked it.
 
     Required-symbol contracts default to the plugin-oriented policy unless the
     user explicitly picked one -- an explicit ``--policy`` always wins (ADR-043).
     Recorded, not just applied: the ADR-049 receipt has to name whatever really
     selected ``policy.base``, and this value was chosen by a typed
-    ``--required-symbol`` rather than by ``--policy`` or a built-in default
+    ``consumers.required_symbols`` rather than by ``--policy`` or a built-in default
     (Codex review, fresh evidence -- the receipt claimed ``strict_abi`` for a run
     that used ``plugin_abi``).
 

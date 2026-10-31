@@ -134,7 +134,7 @@ class GateSeverityState:
 
 @dataclass(frozen=True)
 class ScopedGateSelection:
-    """An ADR-043 scoped-gate selection (``--used-by``/``--required-symbol``)
+    """An ADR-043 scoped-gate selection (``--used-by``/``consumers.required_symbols``)
     -- which consumer or entrypoint narrowed the gate, and to what. Mirrors
     ``effective_config_digest._gate_scope_str``'s own encoding (``kind`` is
     ``"used_by"``/``"required_symbol"``; ``targets`` the resolved consumer
@@ -155,8 +155,8 @@ def scoped_gate_selection_from_result(result: Any) -> ScopedGateSelection | None
     Codex review (PR #1192): ``EffectiveGate``'s whole purpose is "the
     complete answer to whether two runs gate identically", so a caller that
     *has* a completed result must route through this rather than leaving
-    ``scope`` at its default -- two ``compare --required-symbol A``/
-    ``--required-symbol B`` runs against the same pair must not produce an
+    ``scope`` at its default -- two ``compare`` runs with
+    ``consumers.required_symbols: [A]`` and ``[B]`` against the same pair must not produce an
     equal ``EffectiveGate``.
 
     Reads the identical fields ``effective_config_digest._gate_scope_str``

@@ -21,7 +21,7 @@ The retired ``scan --dry-run`` projected L0-L5 evidence-collection cost via
 ``--dry-run`` branch); ``compare --dry-run`` had no equivalent preview. This
 module reuses :func:`~abicheck.dry_run_estimate.estimate_scan` directly -- no
 new cost model -- and adds only the compare-specific glue: resolving
-compare's own ``--depth``/``.abicheck.yml`` ``source.method``/
+compare's own ``--depth``/``.abicheck.yml`` ``sources.method``/
 ``--sources``/``--build-info`` precedence into the
 ``(SourceMethod, EvidenceDepth)`` pair ``estimate_scan``'s ``resolved_level``
 takes, building one :class:`~abicheck.workflows.service_requests.InputSpec` per side, and
@@ -61,7 +61,7 @@ def _resolve_compare_estimate_level(
 ) -> tuple[SourceMethod, EvidenceDepth]:
     """The (S-method, L-depth) pair a compare's cost-preview probes are priced
     at -- mirrors ``workflows.compare_configuration.resolve_compare_collect_mode``'s own
-    precedence (explicit ``--depth`` > ``.abicheck.yml`` ``source.method`` >
+    precedence (explicit ``--depth`` > ``.abicheck.yml`` ``sources.method`` >
     inferred from ``--sources``/``--build-info`` > off), but returns the
     resolved ``(SourceMethod, EvidenceDepth)`` pair rather than a
     collect-mode string -- the shape

@@ -241,7 +241,7 @@ def debug_resolution_options(func: F) -> F:
 
 # ADR-068 D4 / one-comparison-product.md Phase 5: ``adr027_compare_options``
 # used to live here, carrying ``--explain-patterns`` and then, after that
-# moved into ``--view patterns``, only ``--surface-metrics``. Both are gone
+# moved into the ``patterns`` view token (now retired), only ``--surface-metrics``. Both are gone
 # now. ADR-027's public-surface metric-drift findings
 # (``public_surface_grew``/``public_surface_shrank``/
 # ``undocumented_export_ratio_increased``) are computed on every comparison
@@ -262,7 +262,7 @@ def app_usage_scope_options(func: F) -> F:
     commands into ``compare``. Decorators apply bottom-up, so they are
     listed here in reverse of their displayed order.
 
-    ``--used-by-manifest`` (Workstream D-S1) is a third way to name a
+    ``consumers.manifests`` (Workstream D-S1) is a third way to name a
     consumer, additive to (never a replacement for) ``--used-by``: each
     manifest is a small JSON document naming one or more consumer binaries
     with optional digest/platform/profile/provider-baseline provenance and
@@ -271,13 +271,11 @@ def app_usage_scope_options(func: F) -> F:
     merged into the same ``--used-by`` pipeline -- they show up in the same
     ``used_by[]``/``consumer_scope`` report block, contribute to the same
     worst-wins scoped gate, and are still mutually exclusive with
-    ``--required-symbol``.
+    ``consumers.required_symbols``.
 
-    ADR-068 D5 / plan Phase 7h: ``--required-symbols FILE`` (the separate
-    file-only flag) is gone. ``--required-symbol`` now accepts ``@FILE`` as
-    one of its repeatable values -- two spellings of "name a required
-    symbol" collapse into one flag, matching how the file form and the
-    inline form always fed the identical contract (see
+    ``consumers.required_symbols`` takes symbol names and, as one of its
+    entries, ``@FILE`` (one symbol per line) -- the file form and the inline
+    form feed the identical contract (see
     :func:`~abicheck.workflows.compare_configuration.load_required_symbols`).
     """
     func = click.option(

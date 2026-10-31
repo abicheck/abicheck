@@ -172,7 +172,7 @@ class ReportEnvelope:
     #: fresh evidence).
     resolved_today: date
     #: Findings for the scoped-only changes a ``--used-by``/
-    #: ``--required-symbol`` pass synthesized outside ``result.changes``
+    #: ``consumers.required_symbols`` pass synthesized outside ``result.changes``
     #: (JUnit folds these into its own testcase tree; no other format does).
     scoped_only_findings: tuple[ReportFinding, ...] = ()
     #: Findings for ``result.suppressed_changes`` -- SARIF's own
@@ -182,7 +182,7 @@ class ReportEnvelope:
     #: an envelope is supposed to make read-only (Codex review, fresh
     #: evidence).
     suppressed_findings: tuple[ReportFinding, ...] = ()
-    #: The scoped-gate facts a ``--used-by``/``--required-symbol(s)`` run
+    #: The scoped-gate facts a ``--used-by``/``consumers.required_symbols`` run
     #: reports beside the full-library verdict; ``None`` for an unscoped run.
     #: Carried here rather than in ``document`` so the JSON projection, which
     #: serializes the document wholesale, keeps its published shape.

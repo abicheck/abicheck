@@ -29,7 +29,7 @@ RELEASE_FORMATS = frozenset(
 )
 
 #: The formats a stored-``BundleFacts`` ``compare`` renders. A stored OLD_INPUT
-#: has no per-member fan-out and no ``--view``. Every format here is rendered
+#: has no per-member fan-out and no ``output.view``. Every format here is rendered
 #: from one live-shaped release evaluation of the stored comparison (its receipt
 #: recomputed, its unknown fields explicit ``unavailable`` markers); JSON and
 #: Markdown keep the stored document's own shape and carry it as ``release``.

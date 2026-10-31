@@ -21,7 +21,7 @@ shape is retired, and every format comes from one `ReleaseEvaluation`.
 
 Still different by nature, not by shape: the stored operand has no old-side
 inventory, so its JUnit omits the passing testcase per unchanged symbol, and
-it has no HTML or `--view show=` projection.
+it has no HTML or `output.view` `show=` projection.
 
 The record below is the gap as it stood before the fix.
 
@@ -55,9 +55,9 @@ release comparison, but:
   comparison's own per-library entries
   (`frontends/cli/commands/compare_bundle_facts_release.py`); pinned against the
   live operand by `tests/test_cli_compare_stored_release_parity.py`. It still
-  has no HTML or `--view show=` projection: HTML is rendered from the JSON
+  has no HTML or `output.view` `show=` projection: HTML is rendered from the JSON
   document, which needs an effective-config receipt the stored path does not
-  resolve, and `--view` is rejected for a stored OLD_INPUT.
+  resolve, and `output.view` is rejected for a stored OLD_INPUT.
 - **JUnit detail.** The live JUnit emits a passing testcase for every unchanged
   symbol, because the live operand has the old-side inventory. The stored
   operand has none, so its JUnit omits those cases and its test counts differ.

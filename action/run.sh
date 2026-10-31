@@ -3405,8 +3405,8 @@ elif [[ "$MODE" == "compare" ]]; then
     add_single_flag "--ld-library-path" "${INPUT_LD_LIBRARY_PATH:-}"
   fi
 
-  # Scoped comparison (ADR-043): --used-by/--required-symbol contracts.
-  # The CLI itself enforces --used-by vs --required-symbol mutual
+  # Scoped comparison (ADR-043): --used-by/consumers.required_symbols contracts.
+  # The CLI itself enforces --used-by vs consumers.required_symbols mutual
   # exclusivity (a UsageError, surfaced as VERDICT=ERROR below via the
   # generic CLI-error detection) -- not re-validated here.
   add_flag "--used-by" "${INPUT_USED_BY:-}"
@@ -5382,7 +5382,7 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
         # Generic wording -- see the exit-1 dispatch's own comment on why
         # (two independent _EvidenceContractError raise sites, only one of
         # which is about a pinned depth/missing evidence).
-        echo "> **Verdict: EVIDENCE_CONTRACT_ERROR** 🛑 — This scan's evidence contract could not be satisfied. This is not a CLI usage error and not an ABI/API break; see the command's own error message above for the exact cause and remedy (e.g. supplying \`--sources\`/\`--build-info\` or dropping a \`--depth\` pin, or reconsidering an \`--abi3\` target that isn't a recognisable CPython extension module)."
+        echo "> **Verdict: EVIDENCE_CONTRACT_ERROR** 🛑 — This scan's evidence contract could not be satisfied. This is not a CLI usage error and not an ABI/API break; see the command's own error message above for the exact cause and remedy (e.g. supplying \`--sources\`/\`--build-info\` or dropping a \`--depth\` pin, or reconsidering an \`--abi3-floor\` target that isn't a recognisable CPython extension module)."
         ;;
       NOT_COMPARABLE)
         echo "> **Verdict: NOT_COMPARABLE** 🛑 — The candidate and \`--against\` baseline were not extracted under a comparable profile/scope contract, so no compatibility comparison ran. This is not an ABI/API break; see the JSON report's \`diff.reason\` for what mismatched."

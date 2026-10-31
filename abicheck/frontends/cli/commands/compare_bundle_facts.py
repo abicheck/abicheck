@@ -285,7 +285,7 @@ def _request_from_kwargs(
         old_devel_pkg_given=kwargs.get("devel_pkg1") is not None,
         manifest_path=kwargs.get("manifest_path"),
         bundle_facts_library_manifest=kwargs.get("bundle_facts_library_manifest"),
-        # A --used-by-manifest-named consumer is as unsupported as a bare
+        # A consumers.manifests-named consumer is as unsupported as a bare
         # --used-by one, so both spellings reach the same rule.
         used_by_apps=(
             tuple(kwargs.get("used_by_apps") or ())

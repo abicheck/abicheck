@@ -383,7 +383,7 @@ class CompareRequest:
     #: library target -- never a zero-TU no-op). Empty = no seed.
     changed_paths: tuple[str, ...] = field(default=(), kw_only=True)
     #: ADR-068 D3 / plan §3 #15 (Phase 2d): the target ``Py_LIMITED_API``
-    #: floor for the candidate-side stable-ABI audit (``compare --abi3``),
+    #: floor for the candidate-side stable-ABI audit (``compare --abi3-floor``),
     #: as ``(major, minor)``. ``None`` (the default) leaves the audit off,
     #: so every pre-existing request is unchanged.
     abi3_floor: tuple[int, int] | None = field(default=None, kw_only=True)
@@ -401,7 +401,7 @@ class CompareRequest:
     #: request's behavior unchanged.
     collapse_versioned_symbols: bool = field(default=False, kw_only=True)
     #: The build-source collect mode a front end already resolved for the pair
-    #: (the CLI's ``.abicheck.yml`` ``source.method`` and ``--since``
+    #: (the CLI's ``.abicheck.yml`` ``sources.method`` and ``--since``
     #: localization); wins over ``collect_mode_for``'s depth/input inference,
     #: like ``DumpRequest.resolved_collect_mode``. ``None``: infer it.
     resolved_collect_mode: str | None = field(default=None, kw_only=True)

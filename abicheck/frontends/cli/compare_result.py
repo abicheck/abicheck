@@ -129,7 +129,7 @@ def _report_compare_result(
     )
 
     # Plan slice 7o: unconditional. The pattern-modulation ledger used to be
-    # gated on `--view patterns`; ADR-067's record-before-disposing rule makes
+    # gated on the `patterns` view token (now retired); ADR-067's record-before-disposing rule makes
     # a disposition's own reason part of the result, not a display preference.
     # Echoed only when there is something to disclose -- an unconditional
     # "no modulations applied" line on every run would be noise, not
@@ -145,7 +145,7 @@ def _report_compare_result(
     )
 
     # Workstream D-S1 (vision-api-abi-evolution.md "D. Optional
-    # prebuilt-consumer lifecycle"): a supplied `--used-by`/`--required-symbol`
+    # prebuilt-consumer lifecycle"): a supplied `--used-by`/`consumers.required_symbols`
     # consumer used to *replace* the process's gate outright (`scoped_verdict`/
     # `gate_scope`, worst-app-wins, `sys.exit(scoped_exit_code)` below). That is
     # reverted -- a consumer's confirmed/potential/unresolved impact is
@@ -190,7 +190,7 @@ def _report_compare_result(
     _attach_use_case_impact(result, old, new, use_cases_manifest)
 
     # ADR-049 Phase 3 (Codex review, fresh evidence): --used-by/
-    # --required-symbol scoping above can add scoped_only_changes (fresh
+    # consumers.required_symbols scoping above can add scoped_only_changes (fresh
     # Change objects scope_diff_to_app/scope_diff_to_required_symbols
     # synthesize, e.g. PE_ORDINAL_RETARGETED) and mark existing
     # result.changes entries as relevant to the scoped contract -- neither
@@ -221,7 +221,7 @@ def _report_compare_result(
     # answer to "which of `-o json=a.json -o markdown=-` is the unfiltered
     # one", so a display selector now means the same thing for every export
     # it is rendered into. A reader wanting the complete document alongside a
-    # narrowed human view still has one: `--view show=` narrows what is
+    # narrowed human view still has one: `output.view show=` narrows what is
     # *displayed*, and every machine projection continues to carry the full
     # disposition/suppression accounting plus a `show_only_filter`/
     # `filtered_summary` block stating exactly what the filter did.
@@ -259,7 +259,7 @@ def _report_compare_result(
         _write_or_echo(target_output, text)
 
     # Workstream D-S1: no early `sys.exit` on the scoped/consumer result here
-    # any more -- `--used-by`/`--required-symbol(s)` no longer float their own
+    # any more -- `--used-by`/`consumers.required_symbols` no longer float their own
     # exit code over the full-library one. Every run, scoped or not, exits
     # through the identical `_exit_with_severity_or_verdict` path below, so
     # the compatibility verdict a supplied consumer enriches can never be

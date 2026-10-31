@@ -37,7 +37,7 @@ def attach_suppression_audit(result: Any, suppression: Any) -> None:
 
     A no-op when *suppression* is ``None`` (no suppression file in play).
     Otherwise audits the full pre-suppression change set -- kept plus
-    suppressed -- plus any ``--used-by``/``--required-symbol``
+    suppressed -- plus any ``--used-by``/``consumers.required_symbols``
     ``scoped_only_changes``, so a caller that scopes *after* classification
     (the native CLI) calls this once scoping has run and a rule matching
     only a scoping-synthesized finding is not misreported as stale. Known

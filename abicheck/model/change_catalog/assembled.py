@@ -96,7 +96,7 @@ def unanimous_entity_for(kind_values: Iterable[str]) -> str | None:
     changes: the overlay is about whatever they were about. ``internal_symbol_
     required_by_public_api`` is emitted for a removed internal function and
     equally for a removed internal global a public inline function references,
-    so one fixed entity hid the latter from ``--view show=variables`` (Codex
+    so one fixed entity hid the latter from ``output.view show=variables`` (Codex
     review, PR #1284).
 
     Unanimous-or-nothing rather than first-wins: a decl that changed several

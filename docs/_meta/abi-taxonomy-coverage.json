@@ -532,7 +532,7 @@
       "catalog_cases": ["case82_sycl_overload_set_removed"],
       "detector_kinds": ["consumer_required_symbol_removed", "sycl_plugin_added", "sycl_plugin_removed", "sycl_pi_entrypoint_added", "sycl_pi_entrypoint_removed", "sycl_overload_set_removed"],
       "status": "PARTIALLY_COVERED",
-      "reason": "The one demonstrated plugin boundary is SYCL's. A generic host/plugin ABI break -- third-party plugins outside the release, which is the case this leaf is about -- is reachable only through the explicit `--used-by`/`--required-symbol` consumer path (`consumer_required_symbol_removed`), with no case demonstrating it."
+      "reason": "The one demonstrated plugin boundary is SYCL's. A generic host/plugin ABI break -- third-party plugins outside the release, which is the case this leaf is about -- is reachable only through the explicit `--used-by`/`consumers.required_symbols` consumer path (`consumer_required_symbol_removed`), with no case demonstrating it."
     },
 
     "source-api.signature-change-source-only": {

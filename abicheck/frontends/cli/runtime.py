@@ -504,7 +504,7 @@ def _finalize_compare_result(
     if show_redundant and result.redundant_changes:
         _merge_redundant_changes(result)
     # Plan slice 7o: both ledgers are unconditional. They used to be gated
-    # on `--view filtered`, which made an exclusion invisible unless a token
+    # on the `filtered` view token, which made an exclusion invisible unless a token
     # was typed -- ADR-067's record-before-disposing accounting rule is that
     # a disposition is part of the result, not a display preference. Each
     # still renders nothing at all when its own collection is empty, so a

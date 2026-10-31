@@ -183,7 +183,7 @@ def run_compare(
     # both run unconditionally now (compare_snapshots() passes True for
     # both below). Plan slice 7o did the same to the three *disclosure*
     # tokens that used to gate rendering the ledgers those analyses produce
-    # (`--view patterns`/`filtered`/`suppressions`), so no parameter
+    # (the `patterns`/`filtered`/`suppressions` view tokens), so no parameter
     # corresponds to them here any more either.
     verbose: bool,
     use_cases_manifest: Path | None = None,
@@ -384,7 +384,7 @@ def run_compare(
             notify=_echo_err,
         )
         # Codex review, fresh evidence ("Validate release-only view
-        # restrictions before dry-run exit"): --view leaf/root-cause is
+        # restrictions before dry-run exit"): output.view leaf/root-cause is
         # rejected for a directory/package operand inside
         # _dispatch_release_compare, but that check never ran for
         # --dry-run (emit_dry_run raises SystemExit before dispatch is ever
@@ -658,7 +658,7 @@ def run_compare(
                 public_header_dirs=project_config_public_header_dirs(project_cfg),
                 collapse_versioned_symbols=collapse_versioned_symbols,
                 env_matrix=resolved_cfg.deployment,  # ADR-020b: config-only, no CLI kwarg
-                # Codex review (PR #1154 follow-up): --view's derived values were
+                # Codex review (PR #1154 follow-up): output.view's derived values were
                 # silently dropped from this dispatch -- forwarded raw
                 # (unnormalized against `fmt`/`report_mode`'s "impact" sugar);
                 # _dispatch_release_compare resolves and validates them.

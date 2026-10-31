@@ -13,12 +13,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Native scoped-gate (``--used-by``/``--required-symbol(s)``) JSON construction.
+"""Native scoped-gate (``--used-by``/``consumers.required_symbols``) JSON construction.
 
 **Workstream D-S1 (vision-api-abi-evolution.md "D. Optional prebuilt-consumer
 lifecycle") reverted this module's original design.** It used to make the
 JSON report describe the *scoped* gate (the one the process used to exit on
-under ``--used-by``/``--required-symbol``) *instead of* the full-library one
+under ``--used-by``/``consumers.required_symbols``) *instead of* the full-library one
 -- swapping ``verdict``/``severity``/``run_outcome``/``summary`` aside to
 ``full_*`` siblings and putting the scoped values in their place, and zeroing
 every out-of-scope finding's ``gate_contribution``. A supplied consumer's own
@@ -188,7 +188,7 @@ def apply_scoped_gate(
     contract_evaluation: bool = False,
     today: date | None = None,
 ) -> None:
-    """Fold ``--used-by``/``--required-symbol(s)`` *enrichment* into *payload*.
+    """Fold ``--used-by``/``consumers.required_symbols`` *enrichment* into *payload*.
 
     No-op unless *result* carries a stamped ``used_by``/``required_symbols``
     (set by ``cli_compare_helpers.py`` before rendering ever starts) --
@@ -214,7 +214,7 @@ def apply_scoped_gate(
     if used_by is not None:
         payload["used_by"] = used_by
         # Workstream D-S1: "N of M consumers affected" -- only meaningful for
-        # --used-by (a --required-symbol run has exactly one host contract,
+        # --used-by (a consumers.required_symbols run has exactly one host contract,
         # not a population of consumers to summarize).
         consumer_impact_summary = getattr(result, "consumer_impact_summary", None)
         if consumer_impact_summary is not None:
@@ -346,7 +346,7 @@ def _fold_findings_into_changes(
     # compatibility axis under `--contract`) is left exactly as computed for
     # the full-library result. A finding a supplied consumer does not happen
     # to use still gated the process the same way it would have without
-    # `--used-by`/`--required-symbol` -- consumer scoping is enrichment, not
+    # `--used-by`/`consumers.required_symbols` -- consumer scoping is enrichment, not
     # a second, narrower gate, so it no longer zeroes any full-diff finding's
     # contribution here (reverting the earlier "the scoped gate is what the
     # run exits on" design this fold used to implement).

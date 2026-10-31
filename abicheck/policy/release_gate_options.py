@@ -265,7 +265,7 @@ class GateOptions:
         ``ResolvedCompareConfig`` for single-pair ``compare``, so a caller holding either object can
         ask the identical question. The release fan-out resolves no
         ``--require-complete-analysis``/scoped-gate (``--used-by``/
-        ``--required-symbol``) concept of its own at this object's scope --
+        ``consumers.required_symbols``) concept of its own at this object's scope --
         those are per-library, single-pair facts -- so both stay at their
         default (``False``/``None``) here; a caller that does have one
         should build an :class:`EffectiveGate` directly via

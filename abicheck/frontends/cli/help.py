@@ -297,7 +297,7 @@ def configure_rich_help() -> None:
 #
 # Dest names (``click.Option.name``), not flag strings: a few options share
 # aliases (``-o``/``--output``) or are repeatable/tuple-valued (``-o``,
-# ``--view``,
+# ``output.view``,
 # ADR-068 D4/Phase 5's collapse of --report-mode/--show-only/--demangle/
 # --no-demangle/--explain-patterns into one dest) where only one dest exists
 # either way.

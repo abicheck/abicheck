@@ -306,7 +306,7 @@ def compute_gate_card(
 
     Workstream D-S1 (vision-api-abi-evolution.md "D. Optional
     prebuilt-consumer lifecycle") reverted the earlier design where a
-    supplied ``--used-by``/``--required-symbol(s)`` consumer's own scoped
+    supplied ``--used-by``/``consumers.required_symbols`` consumer's own scoped
     gate replaced this card: the CLI process always exits on the full-library
     gate this function reports, consumer or no consumer supplied. A
     consumer's own assessment is surfaced separately, see
@@ -331,7 +331,7 @@ def compute_gate_card(
 def compute_scoped_verdict(
     result: DiffResult, *, envelope: ReportEnvelope | None = None
 ) -> ScopedVerdictData | None:
-    """Collect the ``--used-by``/``--required-symbol(s)`` scoped-verdict box
+    """Collect the ``--used-by``/``consumers.required_symbols`` scoped-verdict box
     (ADR-043), or ``None`` when no consumer was supplied.
 
     Purely informational (workstream D-S1): the verdict box above this one is

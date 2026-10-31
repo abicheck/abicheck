@@ -28,7 +28,7 @@ ADR-068 D5, applied per flag:
 
 * ``--since``/``--changed-path`` are genuine **per-run** inputs (a PR's own
   diff changes every run), so they are CLI-only, exactly as on ``scan``.
-* the ``--abi3`` **floor** is a stable project property -- which
+* the ``--abi3-floor`` **floor** is a stable project property -- which
   ``Py_LIMITED_API`` version a project promises is reviewed in a PR, not
   chosen per invocation -- so ``.abicheck.yml``'s ``python.abi3_floor``
   supplies it and the flag is the per-run override on top
@@ -53,7 +53,7 @@ from ..run_input_errors import RunInputError
 
 @dataclass(frozen=True)
 class CompareEnrichmentInputs:
-    """The resolved ``--since``/``--changed-path``/``--abi3`` inputs."""
+    """The resolved ``--since``/``--changed-path``/``--abi3-floor`` inputs."""
 
     #: The changed-path seed (empty when none was given or git could not
     #: resolve the ref). Scoping only -- it produces no finding.
@@ -108,7 +108,7 @@ def resolve_compare_enrichment_inputs(
 
     *sources* is the tree the seed's ``git diff`` runs in
     (:func:`resolve_compare_changed_seed`). *project_cfg* is the loaded ``.abicheck.yml``, consulted only for the
-    ``--abi3`` floor's D5 config default.
+    ``--abi3-floor`` floor's D5 config default.
     """
     seed = resolve_compare_changed_seed(
         since, changed_paths_opt, sources, notify=notify
@@ -121,7 +121,7 @@ def resolve_compare_enrichment_inputs(
 
 
 def parse_abi3_floor(value: str | None) -> tuple[int, int] | None:
-    """Parse a ``--abi3 VERSION`` ``Py_LIMITED_API`` floor, ``None`` when off.
+    """Parse a ``--abi3-floor VERSION`` ``Py_LIMITED_API`` floor, ``None`` when off.
 
     The one accepted spelling for the flag and ``.abicheck.yml``'s
     ``python.abi3_floor``, so an invalid floor (non-3 major, implausible

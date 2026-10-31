@@ -16,7 +16,7 @@ plus what only the terminal-owning front end does while
   :meth:`settle` in member order, so parallel workers never interleave;
 * ``--output-dir``: each member's complete, *unfiltered* per-library report
   (the "always full" escape hatch a truncated aggregate report points to --
-  ``--view show=`` is deliberately not applied), and a ``not_comparable``
+  ``output.view show=`` is deliberately not applied), and a ``not_comparable``
   member's own document.
 """
 

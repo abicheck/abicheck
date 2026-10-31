@@ -368,7 +368,7 @@ def _suppression_note(model: CommentModel) -> list[str]:
 
 
 def _scoped_notes(model: CommentModel) -> list[str]:
-    """`compare --used-by`/`--required-symbol(s)` consumer summary (workstream
+    """`compare --used-by`/`consumers.required_symbols` consumer summary (workstream
     D-S1, vision-api-abi-evolution.md "D. Optional prebuilt-consumer
     lifecycle").
 
@@ -405,7 +405,7 @@ def _scoped_notes(model: CommentModel) -> list[str]:
             len(missing_entrypoints) if isinstance(missing_entrypoints, list) else 0
         )
         out.append(
-            f"- `--required-symbol` contract: **{escape_cell(rs.get('verdict'))}** "
+            f"- `consumers.required_symbols` contract: **{escape_cell(rs.get('verdict'))}** "
             f"(missing {n_missing_ep} "
             f"entrypoint(s), {rs.get('relevant_change_count', 0)} relevant change(s))"
         )

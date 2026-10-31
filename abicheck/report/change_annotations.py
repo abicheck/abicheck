@@ -96,7 +96,7 @@ def change_annotation_fields(c: Any) -> dict[str, Any]:
     # baseline), distinct from the cross-comparison-chain `evolution` field.
     if (cse := _cse(c)) is not None:
         out["cross_source_evolution"] = cse
-    # ADR-068 D3 — a candidate-only check's finding (the --abi3 audit) rides
+    # ADR-068 D3 — a candidate-only check's finding (the --abi3-floor audit) rides
     # this comparison's own result document, marked rather than split out.
     if getattr(c, "candidate_side_enrichment", False):
         out["candidate_side_enrichment"] = True

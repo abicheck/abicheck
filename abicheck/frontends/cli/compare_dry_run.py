@@ -33,7 +33,7 @@ PR #1154 merge-conflict follow-up (file-size hard cap): also hosts
 be ``cli_compare_helpers._render_compare_dry_run`` -- moved here (rather
 than to a new flat ``cli_*`` sibling, which ``architecture/modules.yaml``'s
 ``frozen-root-family`` rule forbids for new files) once merging this PR's
-own accounting-flags/``--view`` work with a parallel CONFIG-demotion phase
+own accounting-flags/``output.view`` work with a parallel CONFIG-demotion phase
 pushed ``cli_compare_helpers.py`` past the 2000-line hard cap with no
 ``architecture/debt.yaml`` baseline room to absorb the combined growth.
 Its depth/collect-mode resolution (``workflows.compare_configuration.
@@ -333,6 +333,6 @@ def build_compare_dry_run_result(
     if required_symbols:
         result.add(
             "Consumer/contract scoping",
-            f"--required-symbol(s): {len(required_symbols)} entrypoint(s) required",
+            f"consumers.required_symbols: {len(required_symbols)} entrypoint(s) required",
         )
     return result

@@ -190,7 +190,7 @@ def report_canonical_finding_id(c: object) -> str:
 def missing_contract_kind(gate_scope: object) -> str:
     """The synthetic finding kind a missing contract member is reported under.
 
-    ``--used-by`` and ``--required-symbol`` report the same event -- "this
+    ``--used-by`` and ``consumers.required_symbols`` report the same event -- "this
     label is required and the new library does not have it" -- under two
     different kind slugs, and every report format derives the slug from
     ``DiffResult.gate_scope`` the same way. Centralized here, alongside
@@ -209,7 +209,7 @@ def missing_contract_kind(gate_scope: object) -> str:
 class MissingContractFinding:
     """A missing contract member's identity, in ``Change``-compatible shape.
 
-    A missing ``--used-by``/``--required-symbol`` label has no backing
+    A missing ``--used-by``/``consumers.required_symbols`` label has no backing
     ``Change`` at all -- each report format synthesizes its own entry for it
     -- so there was nothing for :func:`report_finding_id` to read, and the
     emitted entry carried no ``finding_id`` a consumer could join to

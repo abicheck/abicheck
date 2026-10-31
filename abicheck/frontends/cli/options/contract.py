@@ -106,8 +106,9 @@ def contract_options(f: F) -> F:
     audit is computed on every run that was given ``--suppress`` and
     carried in ``-o json=...``/sarif/junit/html unconditionally, so the
     flag only ever chose whether the markdown/text/review render echoed it
-    -- a rendering selector, which is what ``--view suppressions`` is for
-    (:mod:`abicheck.frontends.cli.options.compare_view`).
+    -- a rendering selector. The audit is now always disclosed when
+    suppression was given (the ``suppressions`` view token is retired,
+    :mod:`abicheck.frontends.cli.options.compare_view`).
     """
     f = click.option(
         "--contract",
@@ -133,7 +134,7 @@ def contract_options(f: F) -> F:
         "a contract_assurance, rendered per finding in -o json=.../"
         "markdown, in sarif/junit properties, and as an html badge; "
         "-o review=...'s compact digest renders it only in the "
-        "--used-by/--required-symbol scoped-gate appendix. -o json=... "
+        "--used-by/consumers.required_symbols scoped-gate appendix. -o json=... "
         "additionally carries contract_evidence_refs per finding (which "
         "evidence records the decision rests on) and a top-level "
         "contract_context block (observed provider evidence, resolved "

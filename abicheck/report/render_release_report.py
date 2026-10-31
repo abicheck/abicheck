@@ -160,7 +160,7 @@ def _markdown_body(report: ReleaseReport) -> str:
         report.display_library_results, _VERDICT_EMOJI, library_results
     )
     if not report.show_only:
-        # Unfiltered by construction; a `--view show=` render lists only the
+        # Unfiltered by construction; a `output.view show=` render lists only the
         # findings its filter kept, so this section would contradict it.
         lines += render_release_public_api_markdown(report.display_library_results)
     lines += _release_md_coverage_warnings(library_results)

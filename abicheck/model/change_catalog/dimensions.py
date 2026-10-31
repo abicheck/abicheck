@@ -38,7 +38,7 @@ class ChangeEntity(StrEnum):
     the catalog states rather than re-deriving one from the kind's *name*.
     The superseded derivation lived in ``reporter_markdown`` as a table of
     name prefixes plus an exact-match escape list, and it silently mapped
-    238 of 407 kinds to *no* element at all -- so ``--view
+    238 of 407 kinds to *no* element at all -- so ``output.view
     show=functions,variables,types,enums,elf`` (every token the vocabulary
     had) hid 58% of the catalog. A kind added tomorrow cannot repeat that:
     the field is mandatory on the single registration.

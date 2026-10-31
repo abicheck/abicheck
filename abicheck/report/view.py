@@ -197,7 +197,7 @@ class ShowOnlyFilter:
 
 
 #: Separator between OR'd ``ShowOnlyFilter`` groups in a single ``show_only``
-#: string (CodeRabbit/Codex review, PR #1154). ``--view show=...`` is
+#: string (CodeRabbit/Codex review, PR #1154). ``output.view show=...`` is
 #: repeatable; each occurrence is one AND-across-dimensions/OR-within-
 #: dimension group (``ShowOnlyFilter``'s own pre-existing single-string
 #: grammar, unchanged), and repeat occurrences must OR *those groups*
@@ -398,7 +398,7 @@ def group_changes_by_root_cause(
 
     *extra_causes* folds in ``caused_by_type`` values from findings outside
     *changes* itself (e.g. JSON's scoped-only ``--used-by``/
-    ``--required-symbol`` changes, appended to the report only after this
+    ``consumers.required_symbols`` changes, appended to the report only after this
     grouping runs) -- without this, a change in *changes* whose symbol only
     became a real correlation via one of those later-appended findings would
     already be locked into its own singleton group, unable to join the
@@ -430,7 +430,7 @@ def group_changes_by_root_cause(
 
 
 # ---------------------------------------------------------------------------
-# Scoped gate (--used-by / --required-symbol)
+# Scoped gate (--used-by / consumers.required_symbols)
 # ---------------------------------------------------------------------------
 
 
@@ -440,7 +440,7 @@ def resolve_scoped_gate_findings(
     show_only: str | None,
 ) -> tuple[list[Change], list[str], bool, str]:
     """Resolve the scoped-only ``Change``s and missing-contract labels relevant
-    to the ``--used-by``/``--required-symbol`` gate, deduped against
+    to the ``--used-by``/``consumers.required_symbols`` gate, deduped against
     ``result.changes`` and filtered by ``--show-only``.
 
     Factored out of ``cli_compare_fold.py``'s JSON branch so markdown/text/

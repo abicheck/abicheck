@@ -28,7 +28,7 @@ table (essentially just the init function) but the *imported* CPython symbols
 plus whether the module is an ``abi3`` / ``Py_LIMITED_API`` build. This module
 recognises extension modules from a snapshot and captures that surface into
 :class:`PythonExtMetadata`, which :mod:`abicheck.diff_python` then diffs and
-``abicheck scan --abi3`` audits against :mod:`abicheck.stable_abi`.
+``abicheck compare --abi3-floor`` audits against :mod:`abicheck.stable_abi`.
 
 The recognition is uniform across builders: Cython/pybind11/nanobind/C all land
 here because they all emit the same ``PyInit_*`` export and link ``libpython``.
@@ -187,7 +187,7 @@ def _detect_soabi(
     tag, which is indistinguishable from a version-specific build — it cannot be
     recognised as abi3 from the file alone. When the ``cpXY-abi3`` tag *is*
     present in the name (it often is), it is honoured here and its floor
-    recovered. For a tagless artifact, run ``scan --abi3 <floor>`` (which flags
+    recovered. For a tagless artifact, run ``compare <module> <module> --abi3-floor <floor>`` (which flags
     private imports regardless of the limited-api flag) or give the tagged
     filename.
 

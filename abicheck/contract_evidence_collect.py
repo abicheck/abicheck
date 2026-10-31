@@ -148,7 +148,7 @@ DOMAIN_ROOT_PROVIDER: Mapping[ContractMode, str | None] = {
 
 #: Run-level evidence references that name a fact the *run* carries rather
 #: than a per-side provider entry in a :class:`ContractEvidenceBlock`. A
-#: finding stamped by ``--used-by``/``--required-symbol`` scoping
+#: finding stamped by ``--used-by``/``consumers.required_symbols`` scoping
 #: (``contract_evaluation.stamp_explicit_scope_contract_evaluation``) is
 #: decided after ``compare()`` already returned, by a caller that holds no
 #: evidence block at all, so its decision cites this constant instead of a
@@ -1042,7 +1042,7 @@ def evidence_refs_for_reason(
     - a non-entity (``NOT_APPLICABLE``) finding consults no provider at all,
       and correctly cites none -- its classification is a property of the
       ``ChangeKind``, not of any observation;
-    - a finding decided by ``--used-by``/``--required-symbol`` scoping cites
+    - a finding decided by ``--used-by``/``consumers.required_symbols`` scoping cites
       the run-level reference, since that decision is made outside any
       comparison that holds an evidence block;
     - every other entity decision cites the root provider for the selected

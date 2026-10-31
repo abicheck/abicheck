@@ -364,12 +364,12 @@ def compare_release_cmd(
     # usage error. `None` (the default) is a true no-op, matching every
     # pre-existing caller.
     depth: str | None = None,
-    # `compare`'s directory/package fan-out forwards --view's derived
+    # `compare`'s directory/package fan-out forwards output.view's derived
     # show_only here; `report_mode` is not accepted, since
     # `_dispatch_release_compare` already rejects every value but "full"
     # before this is ever called, so there is nothing left for this engine
     # to branch on. `None` (the default) is a true no-op, matching every
-    # pre-existing caller (this command has no `--view`/`--show-only` Click
+    # pre-existing caller (this command has no `output.view`/`--show-only` Click
     # option of its own). Demangling is not threaded at all any more (plan
     # slice 7o): this command's body resolves it from each destination's
     # own format, which is now the only input it has.
@@ -383,7 +383,7 @@ def compare_release_cmd(
     # dropped or rejected -- see `project_release_library_results`'s
     # own docstring for how each library's table is computed. `False` (the
     # default) is a true no-op, matching every pre-existing caller (this
-    # command has no `--view` option of its own; only `compare`'s
+    # command has no `output.view` option of its own; only `compare`'s
     # directory/package dispatch supplies a non-default value).
     show_impact: bool = False,
     # CodeRabbit review, PR #1138: a project's `.abicheck.yml`

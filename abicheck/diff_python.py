@@ -71,9 +71,9 @@ def audit_stable_abi_imports(
     above-floor — so callers should require a floor before certifying a module.
 
     The artifact's own ``cpXY-abi3`` tag is itself a hard floor: a ``cp39-abi3``
-    wheel is installed on 3.9/3.10 regardless of the ``--abi3`` the caller
+    wheel is installed on 3.9/3.10 regardless of the ``--abi3-floor`` the caller
     passes. So when the tag declares a floor **lower** than the requested one,
-    the audit certifies against the tag's floor — otherwise ``--abi3 3.12`` on a
+    the audit certifies against the tag's floor — otherwise ``--abi3-floor 3.12`` on a
     ``cp39-abi3`` build would wave through a 3.11-only symbol that breaks on the
     3.9 the tag still advertises. Only a genuine abi3 build carries a
     Limited-API floor here; a version-specific module's declared minor is the
@@ -135,7 +135,7 @@ def audit_stable_abi_imports(
             )
     # State the floor the above-floor group was judged against — especially when
     # it was pulled down to the artifact's declared `cpXY-abi3` tag, so a caller
-    # who passed a higher `--abi3` understands why a symbol newer than *their*
+    # who passed a higher `--abi3-floor` understands why a symbol newer than *their*
     # floor (but older than the tag's) is flagged.
     if above_floor:
         floor_note = (
@@ -316,7 +316,7 @@ def _diff_python_ext(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     dropped needs the module's declared ``Py_LIMITED_API`` floor, which a bare
     ``.abi3.so`` does not carry, so comparing the min-of-imports across versions
     would false-positive (e.g. a ``cp39-abi3`` build adding a 3.5 symbol drops no
-    3.9+ user). Floor conformance is checked by ``abicheck scan --abi3 <floor>``,
+    3.9+ user). Floor conformance is checked by ``abicheck compare --abi3-floor <floor>``,
     where the user supplies the target floor.
     """
     n = new.python_ext

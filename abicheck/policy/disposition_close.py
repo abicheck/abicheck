@@ -143,7 +143,7 @@ def record_consumer_overlay(
     suppression: object | None = None,
     application_point: str = "consumer_overlay",
 ) -> None:
-    """Record one ``--used-by``/``--required-symbol(s)`` overlay, deduped
+    """Record one ``--used-by``/``consumers.required_symbols`` overlay, deduped
     across consumers/hosts sharing one observation.
 
     ``appcompat.scope_diff_to_app``/``scope_diff_to_required_symbols`` each
@@ -160,7 +160,7 @@ def record_consumer_overlay(
     ``SuppressionOutcome.matched_rule`` that fired, or ``None`` for a kept
     overlay. *application_point* names which overlay mechanism produced the
     change -- ``"consumer_overlay"`` (default, ``--used-by``) or
-    ``"required_symbol_overlay"`` (``--required-symbol(s)``) -- so the audit
+    ``"required_symbol_overlay"`` (``consumers.required_symbols``) -- so the audit
     can tell the two apart the same way it already names every other
     suppression application point.
     """
@@ -441,7 +441,7 @@ def close_consumer_scope(
     * ``True`` -- the standalone ``check_appcompat``/
       ``check_plugin_host_contract`` APIs, whose verdict *is* the consumer's
       scoped one. The gating set narrows to *gating* (the relevant union).
-    * ``False`` -- ``compare --used-by``/``--required-symbol``. Workstream
+    * ``False`` -- ``compare --used-by``/``consumers.required_symbols``. Workstream
       D-S1 (``docs/reference/exit-codes.md``, "Application- and
       plugin-scoped comparisons"): the exit is always the full-library
       ``ExitDecision``; the consumer's assessment is reported beside it. No

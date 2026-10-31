@@ -20,7 +20,7 @@ Split out of ``reporter.py`` (AI-readiness file-size cap -- both it and
 ``reporter_markdown.py``, the more obvious home, were already at or near
 the 2000-line hard cap when this Phase 6 follow-up landed) rather than
 grown in place. Leaf module: only reaches ``reporter_markdown.py`` (the
-``--used-by``/``--required-symbol`` show-only filter and the per-finding
+``--used-by``/``consumers.required_symbols`` show-only filter and the per-finding
 root-cause-evidence lookup) and ``impact.correlation`` (the evidence rank
 order), so it introduces no new import-cycle risk.
 """
@@ -67,7 +67,7 @@ def scoped_only_evidence_lookup(
     filtered ``scoped_only_changes`` (G29 Phase 6, Codex review).
 
     A finding correlating only via a scoped-only (``--used-by``/
-    ``--required-symbol``) sibling needs that sibling in the same
+    ``consumers.required_symbols``) sibling needs that sibling in the same
     :func:`~abicheck.impact.correlation.correlate_root_causes` call to be
     recognized -- a lookup over *changes* alone under-correlates, unlike
     ``sarif.to_sarif``'s identical combined computation. Shared by a caller

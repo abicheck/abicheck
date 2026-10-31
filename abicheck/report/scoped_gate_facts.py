@@ -1,7 +1,7 @@
 # Copyright 2026 Nikolay Petrov
 # SPDX-License-Identifier: Apache-2.0
 
-"""Scoped-gate facts a ``--used-by``/``--required-symbol(s)`` run reports.
+"""Scoped-gate facts a ``--used-by``/``consumers.required_symbols`` run reports.
 
 A scoped run reports its consumer-scoped verdict *beside* the full-library
 verdict (ADR-043, workstream D-S1). These facts are computed exactly once per
@@ -33,7 +33,7 @@ class ScopedGateFacts:
     axis, so a renderer omits its row rather than writing an empty value.
     """
 
-    #: The ``--used-by``/``--required-symbol(s)`` scope label, when one was set.
+    #: The ``--used-by``/``consumers.required_symbols`` scope label, when one was set.
     gate_scope: str | None
     #: The consumer-scoped verdict value (``scoped_verdict``).
     gate_verdict: str
@@ -49,7 +49,7 @@ class ScopedGateFacts:
     gate_exit_code_scheme: object | None
     #: How many ``--used-by`` applications were scoped, or ``None`` if none.
     used_by_app_count: int | None
-    #: The ``--required-symbol(s)`` contract verdict text, or ``None`` if unset.
+    #: The ``consumers.required_symbols`` contract verdict text, or ``None`` if unset.
     required_symbol_contract_verdict: str | None
 
 

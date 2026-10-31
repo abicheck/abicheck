@@ -19,7 +19,7 @@
 declared contract" from *snapshot* evidence -- header surfaces, export
 tables, the type graph. This module answers the one question that evidence
 cannot: a run given a concrete consumer (``--used-by``) or an explicit
-entrypoint list (``--required-symbol``) has been *told* what the contract is,
+entrypoint list (``consumers.required_symbols``) has been *told* what the contract is,
 by the caller, and ADR-049 section 4.3 item 1 ranks that above anything the
 two snapshots can show on their own.
 
@@ -65,7 +65,7 @@ from .policy.classification import Verdict
 # compare CLI command -- both apply the identical override to the
 # identical class of finding (Codex review: originally private to
 # mcp_server.py only, leaving the CLI's own --contract +
-# --used-by/--required-symbol combination permanently unstamped).
+# --used-by/consumers.required_symbols combination permanently unstamped).
 #: The reason code stamp_explicit_scope_contract_evaluation always uses --
 #: hoisted so the two assignment branches below can't drift apart (CodeRabbit
 #: review). Defined in CONTRACT_REASON_CODES' own module rather than here,
@@ -180,7 +180,7 @@ def recompute_verdict_after_promotion(
     field state while ``verdict`` was frozen before the promotion. Left
     alone, one report said ``verdict: NO_CHANGE`` beside
     ``summary.breaking: 1`` (Codex review, confirmed via
-    ``--required-symbol`` under ``--contract exports``).
+    ``consumers.required_symbols`` under ``--contract exports``).
 
     Recomputing is the right direction rather than reverting the mutation:
     ADR-049 §4.3 ranks explicit consumer/required-symbol evidence *above*
@@ -238,7 +238,7 @@ def stamp_scoped_changes(
     """Promote an explicitly-scoped finding set, decisions included.
 
     The promotion half of :func:`stamp_scoped_result_findings`, callable on a
-    bare list — which is what the ``--used-by``/``--required-symbol`` paths
+    bare list — which is what the ``--used-by``/``consumers.required_symbols`` paths
     need, because they compute their *scoped exit code* from one app's or
     host's relevant changes before the aggregated ``result.scoped_*``
     collections those paths later expose even exist.
@@ -249,7 +249,7 @@ def stamp_scoped_changes(
     the scoped gate reads it. Promoting afterwards left the gate scoring a
     weaker `UNKNOWN_UNRESOLVED` the header/export path had reached, which
     could report a scoped exit of 0 beside a rendered finding whose own
-    decision says BREAKING (Codex review, confirmed via `--required-symbol`
+    decision says BREAKING (Codex review, confirmed via `consumers.required_symbols`
     under `--contract exports`).
     """
     promoted = list(changes)
@@ -323,7 +323,7 @@ def stamp_missing_contract_entry(
 ) -> None:
     """Complete ADR-049 D1's canonical shape on a missing-contract entry.
 
-    A missing ``--required-symbol``/``--used-by`` label has no backing
+    A missing ``consumers.required_symbols``/``--used-by`` label has no backing
     ``Change`` -- callers synthesize a plain dict and emit it directly in
     their ``changes`` array -- so nothing gives it the per-finding decision
     fields an ordinary finding gets from ``change_json.change_to_dict``. It
@@ -346,7 +346,7 @@ def stamp_missing_contract_entry(
 def stamp_scoped_result_findings(
     result: Any, *, finding_id: Callable[[Any], str]
 ) -> None:
-    """Stamp every ``--used-by``/``--required-symbol``-relevant finding on
+    """Stamp every ``--used-by``/``consumers.required_symbols``-relevant finding on
     *result* with the explicit-scope ``IN_CONTRACT`` decision
     (:func:`stamp_explicit_scope_contract_evaluation`).
 
@@ -386,7 +386,7 @@ def stamp_scoped_result_findings(
         promoted.extend(c for c in result.changes if finding_id(c) in relevant_ids)
     promoted.extend(getattr(result, "scoped_only_changes", ()) or ())
     # Idempotent by construction, and deliberately still called even though
-    # the `--used-by`/`--required-symbol` paths now promote their own set
+    # the `--used-by`/`consumers.required_symbols` paths now promote their own set
     # earlier (before their scoped exit code): this is the one place that
     # covers `result.changes` entries and the scoped-only overlay together,
     # and it is what refreshes the receipt below.
@@ -421,7 +421,7 @@ def refresh_contract_receipt(result: Any, *, finding_id: Callable[[Any], str]) -
     """Re-key *result*'s persisted decision receipt to its current decisions.
 
     ``checker.compare`` freezes the ``decision_receipt`` block before
-    returning, but ``--used-by``/``--required-symbol`` scoping runs *after*
+    returning, but ``--used-by``/``consumers.required_symbols`` scoping runs *after*
     that: it overwrites already-recorded findings with the stronger
     explicit-scope ``IN_CONTRACT`` decision and synthesizes fresh
     ``scoped_only_changes`` the receipt never saw. Left alone, the persisted

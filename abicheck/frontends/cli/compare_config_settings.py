@@ -55,7 +55,7 @@ class ConfigRunSettings:
     #: ``debug.pdb_path`` as written; two operands may reject it
     #: (``compare_pdb_config``), one candidate uses it as its PDB.
     pdb_path: str | None
-    #: ``source.method``, one rung of the collect-mode precedence
+    #: ``sources.method``, one rung of the collect-mode precedence
     #: (``workflows.compare_configuration.resolve_compare_collect_mode``).
     source_method: str | None
 

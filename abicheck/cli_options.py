@@ -937,7 +937,7 @@ def changed_path_options(func: F) -> F:
 
 
 def abi3_option(func: F) -> F:
-    """The ``--abi3 VERSION`` stable-ABI audit floor (ADR-068 D3, plan §3 #15).
+    """The ``--abi3-floor VERSION`` stable-ABI audit floor (ADR-068 D3, plan §3 #15).
 
     On ``compare`` this selects the candidate-side (NEW) enrichment stage: the
     audit is meaningful only on the candidate, so its findings ride the same

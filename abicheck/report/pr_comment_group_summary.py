@@ -18,7 +18,7 @@ MAX_COMMENT_REVIEW_GROUPS = 8
 
 def review_group_note(model: CommentModel) -> list[str]:
     counts = model.result_counts or {}
-    # Bail only when there is nothing to report *at all*. `--view show=` can
+    # Bail only when there is nothing to report *at all*. `output.view show=` can
     # filter every displayed group while `result_counts["review_groups"]`
     # stays positive, and returning early on the displayed list alone then
     # hid both the authoritative retained total and the omission disclosure
@@ -44,7 +44,7 @@ def review_group_note(model: CommentModel) -> list[str]:
         )
     # Measured against that same authoritative total, not against the list
     # this note happens to have been handed. `report/document_builder.py` builds
-    # `review_groups` from the *displayed* findings under `--view show=`,
+    # `review_groups` from the *displayed* findings under `output.view show=`,
     # while `result_counts` is computed over every retained finding -- so a
     # filtered list can be shorter than the headline with the display cap
     # never reached, and deriving the omission from the list alone then

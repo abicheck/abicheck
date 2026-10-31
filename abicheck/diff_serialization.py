@@ -170,7 +170,7 @@ def _collect_valued_declarations(snap: AbiSnapshot) -> dict[str, _Valued]:
     resolves to, carried per entry rather than decided once for the kind. A
     single declared entity cannot be right here: the pool spans constants,
     variables and enum members, and the kind declared ``type``, which is
-    wrong for all three at once -- so ``--view show=variables`` and
+    wrong for all three at once -- so ``output.view show=variables`` and
     ``show=enums`` both omitted real findings while the machine reports
     spelled them as types (Codex review, PR #1284). Constants share the
     ``variable`` entity with real variables, the way ``constant_changed``

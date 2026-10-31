@@ -3,7 +3,7 @@
 """Every report surface states the gating count the process exit was decided by.
 
 Bug class ``report.finding_entry_builder_parity`` (the derived gating count):
-an acknowledged break that ``acknowledgment.breaks: accept`` removes from the
+an acknowledged break that ``acknowledgments.breaks: accept`` removes from the
 gate was still counted as gating by the severity block (``severity.exit_code``,
 ``blocking``, SARIF's ``exitCode``, the HTML gate card), by the disposition
 ledger (``result_counts.gating``, the audit's ``effective_total``) and by the

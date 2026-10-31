@@ -99,7 +99,7 @@ def render_release_summary(
     """Render the release report as *fmt* (``json``/``markdown``/``junit``/
     ``html``/``oneline``).
 
-    *show_only* is the ``--view show=`` selection this render applies to its
+    *show_only* is the ``output.view show=`` selection this render applies to its
     own projection; *library_results* is never mutated, so the same list can
     feed several renders. *scope_terms*/*assurance_terms* default to an
     empty, setting-off decision for a direct (unit-test) caller.

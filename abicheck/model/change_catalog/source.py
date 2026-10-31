@@ -141,7 +141,7 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         # symbol type is discarded at collection, and the PE/Mach-O paths
         # retain no function/variable discriminator either. A required *data*
         # symbol is therefore indistinguishable from a required function
-        # here, so declaring FUNCTION hid such findings from `--view
+        # here, so declaring FUNCTION hid such findings from `output.view
         # show=variables` and serialized an entity the evidence does not
         # support. BINARY is the symbol-table-level fallback its exact
         # structural sibling `imported_symbol_removed` already uses.
@@ -387,7 +387,7 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         # FUNCTION, not SOURCE: `_diff_inline_bodies` iterates only
         # `reachable_inline_bodies` and uses the function's own qualified name
         # as the finding symbol, exactly like the sibling
-        # `inline_function_removed` -- so `--view show=functions` omitted a
+        # `inline_function_removed` -- so `output.view show=functions` omitted a
         # function-level finding and the machine reports spelled the wrong
         # entity (Codex review, PR #1284). `SOURCE` describes the *evidence
         # layer* the finding came from, which is not the display dimension.

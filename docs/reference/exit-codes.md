@@ -464,7 +464,7 @@ re-derived, so the two commands can never disagree on which axis wins when
 both apply. Phase 2d gave the evidence-contract axis its first
 CLI-reachable trigger on `compare`: **`compare --abi3-floor VERSION` against a
 candidate that is not a recognisable CPython extension module exits `7`**,
-exactly as `scan --abi3` does, since the stable-ABI audit the flag asks for
+exactly as the retired `scan` command's floor audit did, since the stable-ABI audit the flag asks for
 cannot be performed at all (the comparison's own findings are left as they
 were and still reported). `budget_overflow_contribution` has no `compare`
 trigger yet — there is still no `--budget` flag — so it stays `0` on every

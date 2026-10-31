@@ -279,7 +279,7 @@ def _to_json_root_cause(
     effective_policy = result.policy or "strict_abi"
 
     # G29 Phase 3 slice 3 follow-up (Codex review): the scoped-gate
-    # (--used-by/--required-symbol) fold-in in cli_compare_fold.py appends
+    # (--used-by/consumers.required_symbols) fold-in in cli_compare_fold.py appends
     # scoped-only changes to this report *after* this function has already
     # built root_causes -- without folding their caused_by_type into the
     # grouping here too, a change in `changes` that only correlates via one

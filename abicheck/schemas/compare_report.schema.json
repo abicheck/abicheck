@@ -157,7 +157,7 @@
     },
     "consumer_scope": {
       "type": "object",
-      "description": "Schema 3.0 (workstream D-S1). Present only when --used-by/--required-symbol(s) was given: a supplied consumer's own confirmed/potential/unresolved assessment, purely informational -- it never affects verdict/severity/run_outcome/summary or this run's exit code, which always describe the full-library result. Replaces the removed full_verdict/full_severity/full_run_outcome/full_summary swap (schema 2.9/2.9/ADR-063 Phase 7/2.9 respectively).",
+      "description": "Schema 3.0 (workstream D-S1). Present only when --used-by/consumers.required_symbols was given: a supplied consumer's own confirmed/potential/unresolved assessment, purely informational -- it never affects verdict/severity/run_outcome/summary or this run's exit code, which always describe the full-library result. Replaces the removed full_verdict/full_severity/full_run_outcome/full_summary swap (schema 2.9/2.9/ADR-063 Phase 7/2.9 respectively).",
       "properties": {
         "verdict": {
           "type": "string",
@@ -270,7 +270,7 @@
     },
     "consumer_impact_summary": {
       "type": "object",
-      "description": "Present only when --used-by/--used-by-manifest was given: \"N of M consumers affected\" statistics across every supplied consumer (Workstream D-S1). Purely informational.",
+      "description": "Present only when --used-by/consumers.manifests was given: \"N of M consumers affected\" statistics across every supplied consumer (Workstream D-S1). Purely informational.",
       "additionalProperties": true,
       "properties": {
         "total": {
@@ -295,7 +295,7 @@
     },
     "required_symbol_contract": {
       "type": "object",
-      "description": "Present only when --required-symbol(s) was given: the plugin-host entrypoint contract's own summary (ADR-043). Purely informational -- see consumer_scope.",
+      "description": "Present only when consumers.required_symbols was set: the plugin-host entrypoint contract's own summary (ADR-043). Purely informational -- see consumer_scope.",
       "additionalProperties": true,
       "properties": {
         "verdict": {
@@ -537,7 +537,7 @@
     },
     "root_causes": {
       "type": "array",
-      "description": "G29 Phase 3 (ADR-052 slices 3-4, schema 2.16): present only under `--view root-cause`. Groups `changes` (also present, flat, for backward compatibility) by Change.caused_by_type (falling back to the change's own symbol for an ungrouped, singleton finding); the same grouping also renders for -o markdown=... (the default rendered text output; slice 4) -- the full RootCauseCorrelator (G29 Phase 6) will additionally correlate consumer-overlay findings that don't share a caused_by_type today.",
+      "description": "G29 Phase 3 (ADR-052 slices 3-4, schema 2.16): present only under `output.view: [root-cause]`. Groups `changes` (also present, flat, for backward compatibility) by Change.caused_by_type (falling back to the change's own symbol for an ungrouped, singleton finding); the same grouping also renders for -o markdown=... (the default rendered text output; slice 4) -- the full RootCauseCorrelator (G29 Phase 6) will additionally correlate consumer-overlay findings that don't share a caused_by_type today.",
       "items": {
         "type": "object",
         "required": [
@@ -596,7 +596,7 @@
     "root_cause_count": {
       "type": "integer",
       "minimum": 0,
-      "description": "G29 Phase 3 (ADR-052 slice 3, schema 2.16): present only under `--view root-cause`. Length of `root_causes`."
+      "description": "G29 Phase 3 (ADR-052 slice 3, schema 2.16): present only under `output.view: [root-cause]`. Length of `root_causes`."
     },
     "finding_evolution": {
       "type": "object",
@@ -2187,12 +2187,12 @@
               "unused_rules"
             ]
           },
-          "description": "Every axis whose own contribution equals code -- \"clean\" alone when code is 0. \"incomplete_scope\"/\"no_comparison_completed\" (schema 2.50, ADR-065 S2) only ever appear on a directory/package release report. \"scoped_gate\" (schema < 3.0 only, kept in this enum for historical/persisted documents) used to replace \"compatibility_gate\" whenever --used-by/--required-symbol(s) scoping was in effect; as of schema 3.0 (workstream D-S1) this resolver never produces it -- \"compatibility_contribution\"/\"reasons\" always describe the full-library gate regardless of consumer scoping. \"promoted_crosscheck\" only ever appears on a scan --against report, and only when a maintainer-promoted --crosscheck KEY=error finding ties or determines code. \"evidence_contract_error\"/\"budget_overflow\" (schema 3.3, one-comparison-product.md P3) are shared by scan --against and native compare; neither is ever produced by a native compare report today (no CLI-reachable trigger yet), but the resolver's shared precedence rule can now name either when a caller's DiffResult sets evidence_contract_error/budget_overflow."
+          "description": "Every axis whose own contribution equals code -- \"clean\" alone when code is 0. \"incomplete_scope\"/\"no_comparison_completed\" (schema 2.50, ADR-065 S2) only ever appear on a directory/package release report. \"scoped_gate\" (schema < 3.0 only, kept in this enum for historical/persisted documents) used to replace \"compatibility_gate\" whenever --used-by/consumers.required_symbols scoping was in effect; as of schema 3.0 (workstream D-S1) this resolver never produces it -- \"compatibility_contribution\"/\"reasons\" always describe the full-library gate regardless of consumer scoping. \"promoted_crosscheck\" only ever appears on a scan --against report, and only when a maintainer-promoted --crosscheck KEY=error finding ties or determines code. \"evidence_contract_error\"/\"budget_overflow\" (schema 3.3, one-comparison-product.md P3) are shared by scan --against and native compare; neither is ever produced by a native compare report today (no CLI-reachable trigger yet), but the resolver's shared precedence rule can now name either when a caller's DiffResult sets evidence_contract_error/budget_overflow."
         },
         "compatibility_contribution": {
           "type": "integer",
           "minimum": 0,
-          "description": "The compatibility-gate exit code alone (severity.compute_exit_code under an effective severity map, else severity.legacy_exit_code from the verdict). As of schema 3.0 (workstream D-S1), this always describes the full-library gate -- --used-by/--required-symbol(s) scoping no longer substitutes the scoped application/plugin-host contract's own exit code here. A supplied consumer's own assessment is reported separately under the top-level consumer_scope object."
+          "description": "The compatibility-gate exit code alone (severity.compute_exit_code under an effective severity map, else severity.legacy_exit_code from the verdict). As of schema 3.0 (workstream D-S1), this always describes the full-library gate -- --used-by/consumers.required_symbols scoping no longer substitutes the scoped application/plugin-host contract's own exit code here. A supplied consumer's own assessment is reported separately under the top-level consumer_scope object."
         },
         "contract_coverage_contribution": {
           "type": "integer",
@@ -3368,7 +3368,7 @@
         },
         "operation": {
           "type": "string",
-          "description": "Structured classification of the finding: which of \"added\"/\"removed\"/\"modified\" the change catalog declares for this kind (`ChangeKindMeta.operation`, the same classification --view show=...'s added/removed/changed tokens resolve through). Schema 5.0: read off that single per-kind registration rather than derived from the kind name's own suffix -- a kind whose name ends in \"_added\" while naming a trait *gained by a persisting entity* (`func_noexcept_added`, `type_field_added`, `virtual_method_added`, ...) therefore reports \"modified\" where a suffix reading said \"added\". The catalog is the contract; the name never was. Schema 5.9: a cross-source hygiene finding whose `cross_source_evolution` was stated reads that state instead -- introduced -> \"added\", resolved -> \"removed\", persistent -> \"unchanged\" (the one value no kind declares).",
+          "description": "Structured classification of the finding: which of \"added\"/\"removed\"/\"modified\" the change catalog declares for this kind (`ChangeKindMeta.operation`, the same classification output.view's show=... added/removed/changed tokens resolve through). Schema 5.0: read off that single per-kind registration rather than derived from the kind name's own suffix -- a kind whose name ends in \"_added\" while naming a trait *gained by a persisting entity* (`func_noexcept_added`, `type_field_added`, `virtual_method_added`, ...) therefore reports \"modified\" where a suffix reading said \"added\". The catalog is the contract; the name never was. Schema 5.9: a cross-source hygiene finding whose `cross_source_evolution` was stated reads that state instead -- introduced -> \"added\", resolved -> \"removed\", persistent -> \"unchanged\" (the one value no kind declares).",
           "enum": [
             "added",
             "removed",
@@ -3378,7 +3378,7 @@
         },
         "entity": {
           "type": "string",
-          "description": "Schema 5.0: which kind of thing this finding is *about*, as the change catalog declares it (`ChangeKindMeta.entity`) -- the canonical element dimension --view show=...'s element tokens resolve through (`functions`/`variables`/`types`/`enums`/`elf` for the first five, plus `build`/`source`/`analysis`, which the superseded name-prefix classification could not express at all). Declared once per kind beside its verdict, never inferred from the kind's name. \"analysis\" marks a finding about the analysis itself (coverage, surface metrics, evidence gaps) rather than about one declaration.",
+          "description": "Schema 5.0: which kind of thing this finding is *about*, as the change catalog declares it (`ChangeKindMeta.entity`) -- the canonical element dimension output.view's show=... element tokens resolve through (`functions`/`variables`/`types`/`enums`/`elf` for the first five, plus `build`/`source`/`analysis`, which the superseded name-prefix classification could not express at all). Declared once per kind beside its verdict, never inferred from the kind's name. \"analysis\" marks a finding about the analysis itself (coverage, surface metrics, evidence gaps) rather than about one declaration.",
           "enum": [
             "function",
             "variable",
@@ -3586,7 +3586,7 @@
             },
             "root_cause_id": {
               "type": "string",
-              "description": "G29 Phase 3 follow-up (ADR-052, schema 2.19): a stable hash of this finding's root-cause grouping key -- the same computation `--view root-cause`'s own `root_causes[].root_cause_id` uses, surfaced per-finding regardless of report_mode. Present only when this finding has a real correlation signal (a `caused_by_type`, or its own symbol is referenced by another finding's `caused_by_type`); absent for an uncorrelated singleton finding."
+              "description": "G29 Phase 3 follow-up (ADR-052, schema 2.19): a stable hash of this finding's root-cause grouping key -- the same computation `output.view: [root-cause]`'s own `root_causes[].root_cause_id` uses, surfaced per-finding regardless of report_mode. Present only when this finding has a real correlation signal (a `caused_by_type`, or its own symbol is referenced by another finding's `caused_by_type`); absent for an uncorrelated singleton finding."
             },
             "root_cause_display": {
               "type": "string",
@@ -3790,7 +3790,7 @@
         },
         "contract_evidence_refs": {
           "type": "array",
-          "description": "ADR-049 Phase 3 (schema 2.25): the ids of the top-level contract_context.contract_evidence provider records this finding's contract decision rests on (e.g. 'public_header:old', 'export_table:new'). An empty array is a real value, not a missing one: a non-entity finding's relevance follows from its ChangeKind alone and consults no provider. A run-level reference ('run:explicit_consumer_or_required_symbol') appears instead when the decision was made by --used-by/--required-symbol scoping after the comparison returned, which holds no evidence block. Present only alongside contract_relevance.",
+          "description": "ADR-049 Phase 3 (schema 2.25): the ids of the top-level contract_context.contract_evidence provider records this finding's contract decision rests on (e.g. 'public_header:old', 'export_table:new'). An empty array is a real value, not a missing one: a non-entity finding's relevance follows from its ChangeKind alone and consults no provider. A run-level reference ('run:explicit_consumer_or_required_symbol') appears instead when the decision was made by --used-by/consumers.required_symbols scoping after the comparison returned, which holds no evidence block. Present only alongside contract_relevance.",
           "items": {
             "type": "string"
           }

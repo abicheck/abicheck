@@ -585,7 +585,7 @@ def prewarm_change_demangling(result: Any) -> None:
     # Every collection whose entries reach `change_to_dict`, not only the
     # headline one. `scoped_only_changes` is the one that is easy to miss:
     # `apply_scoped_gate` synthesizes it *after* the document is built, for
-    # a `--used-by`/`--required-symbol` run, and serializes it through the
+    # a `--used-by`/`consumers.required_symbols` run, and serializes it through the
     # same path -- so leaving it out put every consumer-required C++ symbol
     # back on the per-symbol subprocess it is the point of this function to
     # avoid (Codex review, PR #1284).

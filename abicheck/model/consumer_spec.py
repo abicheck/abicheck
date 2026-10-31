@@ -99,7 +99,7 @@ class ConsumerSpec:
 
     manifest:
         Path to the consumer-manifest document this spec was resolved from
-        (``--used-by-manifest``), when it did not come from a bare
+        (``consumers.manifests``), when it did not come from a bare
         ``--used-by <path>``. Provenance only -- never re-parsed here.
     digest:
         An expected content digest for *path*, ``"<algorithm>:<hexdigest>"``
@@ -244,7 +244,7 @@ def _consumer_spec_from_entry(
 
 
 def parse_consumer_manifest(manifest_path: Path) -> list[ConsumerSpec]:
-    """Parse a ``--used-by-manifest`` JSON document into consumer specs.
+    """Parse a ``consumers.manifests`` JSON document into consumer specs.
 
     Shape::
 
