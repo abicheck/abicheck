@@ -654,7 +654,6 @@ _retired_to_set=(
   "dso-only|INPUT_DSO_ONLY|any|set: release.dso_only=true"
   "include-private-dso|INPUT_INCLUDE_PRIVATE_DSO|any|set: release.include_private_dso=true"
   "fail-on-removed-library|INPUT_FAIL_ON_REMOVED_LIBRARY|any|set: gate.fail_on_removed_library=true"
-  "public-header-dirs|INPUT_PUBLIC_HEADER_DIRS|any|set: scope.public_header_dirs=[<dir>, ...]"
   "frontend|INPUT_FRONTEND|any|set: compile.frontend=<value>"
   "compile-options|INPUT_COMPILE_OPTIONS|any|set: compile.options=[<flag>, ...]"
   "nostdinc|INPUT_NOSTDINC|bool|set: compile.nostdinc=true"
@@ -669,6 +668,12 @@ for _entry in "${_retired_to_set[@]}"; do
     _fail "${_old_name} is RETIRED and no longer accepted. Replace it in your workflow with \`${_repl}\` (the set: input takes one PATH=VALUE per line), then remove ${_old_name}."
   fi
 done
+# public-header-dirs was forwarded as -H, exactly what `header:` does, so its
+# replacement is that input (`scope.public_header_dirs` is an ownership rule,
+# not a header root, and `--set` does not apply it).
+if [[ -n "${INPUT_PUBLIC_HEADER_DIRS:-}" ]]; then
+  _fail "public-header-dirs is RETIRED and no longer accepted. Replace it in your workflow with \`header: <dir> ...\` (it was forwarded as -H, which is what header does; use old-header/new-header for one side), then remove public-header-dirs."
+fi
 if [[ -n "${INPUT_ALLOW_BUILD_QUERY:-}" && "${INPUT_ALLOW_BUILD_QUERY}" != "false" ]]; then
   _fail "allow-build-query is RETIRED and no longer accepted. There is no replacement: abicheck always runs its own inferred compile-database query when a sources input needs build context, and a trusted build query is set through build-config (build.query). Remove allow-build-query from your workflow."
 fi

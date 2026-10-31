@@ -146,7 +146,7 @@ inputs:
     description: >
       RETIRED (ADR-091 D7, no transition window). Setting this input fails the
       run before any analysis. Replace it in your workflow with
-      `set: scope.public_header_dirs=[<dir>, ...]` (the `set:` input takes one PATH=VALUE per line), then remove public-header-dirs.
+      `header: <dir> ...` (it was forwarded as -H, which is what header does; use old-header/new-header for one side), then remove public-header-dirs.
     required: false
   build-target:
     description: >

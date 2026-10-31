@@ -981,14 +981,15 @@ class TestModeScopedInputWarnings:
 
     @pytest.mark.parametrize("mode", ["deps-tree", "deps-compare", "dump"])
     def test_public_header_dirs_is_refused_outside_compare(self, mode: str) -> None:
-        """RETIRED to ``set: scope.public_header_dirs=[...]`` (ADR-091 D7)."""
+        """RETIRED; its replacement is ``header:`` (it was forwarded as ``-H``)."""
         result = _run_validate(
             {"INPUT_MODE": mode, "INPUT_PUBLIC_HEADER_DIRS": "include/"}
         )
         assert result.returncode == 1, result.stdout + result.stderr
         assert "::error::" in result.stdout
         assert "public-header-dirs" in result.stdout
-        assert "set: scope.public_header_dirs=" in result.stdout
+        assert "header: <dir>" in result.stdout
+        assert "scope.public_header_dirs" not in result.stdout
 
     def test_public_header_dirs_is_refused_on_two_sided_and_audit_compare(self) -> None:
         for env in (

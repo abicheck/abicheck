@@ -107,7 +107,7 @@ that moves to this release.
 | `dso-only` | `set: release.dso_only=true` | Config key `release.dso_only`. |
 | `include-private-dso` | `set: release.include_private_dso=true` | Config key `release.include_private_dso`. |
 | `fail-on-removed-library` | `set: gate.fail_on_removed_library=true` | Config key `gate.fail_on_removed_library`. |
-| `public-header-dirs` | `set: scope.public_header_dirs=[<dir>, ...]` | A YAML list. |
+| `public-header-dirs` | `header: <dir> ...` | It was forwarded as `-H`, which is what `header` does. Use `old-header`/`new-header` for one side. |
 | `frontend` | `set: compile.frontend=<value>` | |
 | `compile-options` | `set: compile.options=[<flag>, ...]` | A YAML list, one flag per element. |
 | `nostdinc` | `set: compile.nostdinc=true` | |

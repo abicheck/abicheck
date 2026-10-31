@@ -11,7 +11,11 @@
 - **GitHub Action inputs moved to `set:` are retired.** `dso-only`,
   `include-private-dso`, `fail-on-removed-library`, `public-header-dirs`,
   `frontend`, `compile-options` and `nostdinc` fail the run before any
-  analysis and name their `set:` replacement. `jobs` and `allow-build-query`
+  analysis and name their replacement: a `set:` line, or for
+  `public-header-dirs` the `header` input (it was forwarded as `-H`).
+  `compare --set` now applies `release.dso_only`,
+  `release.include_private_dso` and `gate.fail_on_removed_library`, so those
+  `set:` replacements work. `jobs` and `allow-build-query`
   fail the same way with no replacement. `compiler`, `lang`, `sysroot`,
   `severity-preset`, `build-info` and `compile-db` stay.
 

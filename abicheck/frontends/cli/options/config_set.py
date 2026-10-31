@@ -36,6 +36,19 @@ from ....workflows.compare_configuration import CLI_ONLY_OVERRIDE_PATHS
 from ....workflows.compile_config import COMPILE_CONTEXT_OVERRIDE_PATHS
 from ....workflows.extraction import ConfigOverrideError, validate_config_overrides
 
+#: The release-topology and removed-library gate keys. ``resolve_compare_config``
+#: reads them off the override-applied config, so the directory/package and
+#: ``--no-baseline`` routes honour them the same way they honour the file. They
+#: are the ``set:`` replacements of the retired Action inputs ``dso-only``,
+#: ``include-private-dso`` and ``fail-on-removed-library`` (ADR-091 Phase 5).
+RELEASE_TOPOLOGY_OVERRIDE_PATHS: frozenset[str] = frozenset(
+    {
+        "release.dso_only",
+        "release.include_private_dso",
+        "gate.fail_on_removed_library",
+    }
+)
+
 #: The keys `compare --set` applies: the typed channels, the CLI-only ones and
 #: the compile-context keys (ADR-091 D4). Every other key (build.*, sources.*,
 #: ...) is refused with a usage error, because its loader does not yet take the
@@ -44,6 +57,7 @@ _COMPARE_APPLIED_PATHS: frozenset[str] = (
     frozenset({path for path, _field, _attr in TYPED_OVERRIDE_CHANNELS})
     | CLI_ONLY_OVERRIDE_PATHS
     | COMPILE_CONTEXT_OVERRIDE_PATHS
+    | RELEASE_TOPOLOGY_OVERRIDE_PATHS
 )
 
 #: The keys a directory/package (release) compare forwards to its members. The
@@ -61,6 +75,7 @@ _RELEASE_APPLIED_PATHS: frozenset[str] = frozenset(
         "deployment",
     }
     | COMPILE_CONTEXT_OVERRIDE_PATHS
+    | RELEASE_TOPOLOGY_OVERRIDE_PATHS
 )
 
 __all__ = [

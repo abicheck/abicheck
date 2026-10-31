@@ -97,7 +97,7 @@ def _run_cmd(env_extra: dict[str, str]) -> list[str]:
 @pytest.mark.skipif(not RUN_SH.is_file(), reason="action/run.sh not found")
 class TestAuditOnlyComparePublicHeaderDirForwardedAsDashH:
     def test_retired_public_header_dirs_is_not_forwarded_as_dash_h(self) -> None:
-        """RETIRED to set: scope.public_header_dirs (ADR-091 D7): run.sh no
+        """RETIRED (its replacement is the header input): run.sh no
         longer forwards it as a bare -H root; the validator refuses it."""
         # Audit-only shape (old-library/abi-baseline both omitted): no
         # `--public-header-dir` flag exists on `compare --no-baseline`
