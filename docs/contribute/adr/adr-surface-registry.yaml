@@ -59,7 +59,6 @@ adrs:
     use_cases: [UC-WF-appcompat]
     surfaces:
       - cli: compare --used-by
-      - cli: compare --required-symbol
       - api: abicheck.workflows.consumer_scope_standalone.check_appcompat
       - action: used-by
       - report: compare_report.used_by
@@ -455,7 +454,6 @@ adrs:
     disposition: surfaced
     use_cases: [UC-WF-appcompat]
     surfaces:
-      - cli: compare --used-by-manifest
       - report: compare_report.consumer_impact_summary
 
   - id: ADR-053
@@ -549,7 +547,6 @@ adrs:
     disposition: surfaced
     use_cases: [UC-WF-compare]
     surfaces:
-      - cli: compare --severity-preset
       - report: compare_report.exit
       - action: severity-preset
 
@@ -629,11 +626,9 @@ adrs:
 
   - id: ADR-074
     file: 074-logical-macro-definitions-on-the-cli.md
-    disposition: surfaced
+    disposition: internal
+    reason: The -D/--define CLI spelling was removed by ADR-091 Phase 5; macros are the compile.defines config key, reached through --set.
     use_cases: [UC-TC-header-scope-robustness]
-    surfaces:
-      - cli: compare --define
-      - cli: dump --define
 
   - id: ADR-075
     file: 075-target-ownership-and-extraction-scope.md
@@ -688,7 +683,6 @@ adrs:
     disposition: surfaced
     use_cases: [UC-WF-compare]
     surfaces:
-      - cli: compare --severity-preset
       - report: compare_report.summary
       - report: compare_report.severity
 

@@ -202,7 +202,7 @@ def test_a_view_token_is_refused(candidate: Path) -> None:
         "compare", "--no-baseline", str(candidate), "--set", 'output.view=["report-mode=leaf"]'
     )
     assert result.exit_code == _EXIT_USAGE, result.output
-    assert "--view" in result.output
+    assert "output.view" in result.output
 
 
 def test_an_unimplemented_option_is_refused_with_its_reason(

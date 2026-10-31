@@ -293,7 +293,7 @@ def app_usage_scope_options(func: F) -> F:
         "reported alongside it (informational), never in place of it. "
         "OLD/NEW may be real library binaries or JSON snapshots carrying "
         "binary evidence (a `dump` of a real library, not headers-only). "
-        "Mutually exclusive with --required-symbol.",
+        "Mutually exclusive with consumers.required_symbols (.abicheck.yml).",
     )(func)
     return func
 

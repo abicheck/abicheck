@@ -228,8 +228,9 @@ abicheck compare old.json new.json --set 'output.view=["show=breaking,functions,
 ```
 
 **Markdown / JSON / HTML**: Changes are filtered before rendering. A note shows
-how many changes matched: `> Filtered by: --view show=... (5 of 42 changes
-shown)` (each OR'd `show=` group renders as its own token).
+how many changes matched: `> Filtered by: --set 'output.view=["show=..."]' (5 of 42 changes
+shown)`. Each OR'd `show=` group is one item of that list, and the note is
+the `output.view` config key (`--set` or `.abicheck.yml`) that reproduces it.
 
 **SARIF**: The `show_only` parameter filters which results appear in the SARIF
 output.

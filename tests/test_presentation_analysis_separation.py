@@ -201,11 +201,9 @@ class TestF19OutputFormatInvariance:
                 f"{fmt}=-",
                 "--suppress",
                 str(suppress),
-                "--view",
-                view_mode,
+                "--set",
+                "output.view=" + json.dumps([view_mode, *([show] if show else [])]),
             ]
-            if show is not None:
-                args += ["--view", show]
             result = CliRunner().invoke(main, args)
             seen.append((tuple(args[3:]), result.exit_code))
 
@@ -580,7 +578,8 @@ class TestShowOnlyCliHintIsReRunnable:
                 str(new_p),
                 "-o",
                 "markdown=-",
-                *[f"--view={t}" for t in tokens],
+                "--set",
+                "output.view=" + json.dumps(tokens),
             ],
         )
         assert rerun.exit_code == result.exit_code
@@ -860,11 +859,9 @@ def _run_permutation(
         f"json={extractor}",
         "--suppress",
         str(suppress),
-        "--view",
-        mode,
+        "--set",
+        "output.view=" + json.dumps([mode, *([show] if show else [])]),
     ]
-    if show is not None:
-        args += ["--view", show]
     for i, extra_fmt in enumerate(extra):
         args += ["-o", f"{extra_fmt}={out_dir / f'extra{i}.out'}"]
     result = CliRunner().invoke(main, args)

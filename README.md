@@ -298,7 +298,7 @@ The action installs Python, castxml, and abicheck, runs the comparison, sets the
 | `8` | any | A library was **proven** removed from a multi-library release (NEW's inventory proven complete) and `.abicheck.yml`'s `gate.fail_on_removed_library` is set; under the default scheme, only when no `2`/`4` already applies. An unmatched library under an unproven inventory is an incomplete scope instead (exit `0`, or `1` with `scope.on_incomplete: block`; a run that completed no comparison exits `1`) |
 | `64` | usage error | Bad flags or inputs |
 
-`--severity-preset` (or a `severity:` block in `.abicheck.yml`) switches `compare` to a severity-based scheme where `1` means an error-level finding in the addition/quality categories. Opt-in `--contract` adds an orthogonal axis that raises a clean `0` to `1` when the declared contract's evidence is incomplete. `deps compare` adds per-command codes. Full matrix: [Exit Codes](https://abicheck.github.io/abicheck/reference/exit-codes/); how snapshots, policies, suppressions, and severity combine: [CI Gating](https://abicheck.github.io/abicheck/use/ci-gating/).
+`severity.preset` (or a `severity:` block) in `.abicheck.yml` switches `compare` to a severity-based scheme where `1` means an error-level finding in the addition/quality categories. Opt-in `--contract` adds an orthogonal axis that raises a clean `0` to `1` when the declared contract's evidence is incomplete. `deps compare` adds per-command codes. Full matrix: [Exit Codes](https://abicheck.github.io/abicheck/reference/exit-codes/); how snapshots, policies, suppressions, and severity combine: [CI Gating](https://abicheck.github.io/abicheck/use/ci-gating/).
 
 ### Policies and suppressions
 

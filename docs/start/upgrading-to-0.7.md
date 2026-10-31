@@ -114,3 +114,20 @@ root Action. Its `consumer-*` inputs are unchanged.
 The `extra-args` input is passed to the CLI as raw arguments. A workflow
 that passes a retired spelling there, for example `extra-args: --version 2.0`,
 now fails with exit 64. Change it to the new spelling (`--label 2.0`).
+
+## Compare options moved to `.abicheck.yml`
+
+Five `compare` options are removed from the command line. Each now fails as an
+unknown option (exit 64). Set the same value in `.abicheck.yml`, or pass it once
+with `--set PATH=VALUE`, whose value is YAML.
+
+| 0.6 spelling | 0.7 spelling | Notes |
+|---|---|---|
+| `compare --define NAME[=VALUE]`, `-D NAME[=VALUE]` | `compile.defines` (`--set 'compile.defines=[NAME, ...]'`) | Also removed from `dump`, which takes the same `--set`. A `--set` list replaces the configured list; the old flag folded its macros into it by name. |
+| `compare --severity-preset P` | `severity.preset` (`--set severity.preset=P`) | Also removed from `compare-release`, which takes `severity.preset` from `.abicheck.yml` only. |
+| `compare --view TOKEN` | `output.view` (`--set 'output.view=["show=breaking"]'`) | A YAML list of the same tokens. |
+| `compare --used-by-manifest FILE` | `consumers.manifests` (`--set 'consumers.manifests=[FILE]'`) | Relative paths resolve against the config file. |
+| `compare --required-symbol NAME` | `consumers.required_symbols` (`--set 'consumers.required_symbols=[NAME]'`) | Entries may be `@FILE`. Still mutually exclusive with `--used-by`. |
+
+`--used-by` stays on the command line. `consumers.*` and `output.view` are
+refused, not ignored, under `--no-baseline` and on a stored BundleFacts operand.

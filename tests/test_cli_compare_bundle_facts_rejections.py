@@ -402,7 +402,7 @@ class TestCompareOldBundleFactsEarlyRejections:
         )
 
         assert code == 64
-        assert "--severity-preset" in out
+        assert "severity.preset" in out
 
     def test_exit_code_scheme_is_rejected(self, tmp_path: Path) -> None:
         facts_path = tmp_path / "old.bundlefacts.json"
@@ -1157,7 +1157,7 @@ class TestCompareOldBundleFactsEarlyRejections:
         )
 
         assert code == 64
-        assert "--show-only" in out
+        assert "output.view" in out
 
     def test_config_scope_show_redundant_is_rejected(self, tmp_path: Path) -> None:
         # Codex review: BuildConfig's scope: block parses show_redundant as

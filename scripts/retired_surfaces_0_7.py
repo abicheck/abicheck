@@ -100,9 +100,11 @@ REMOVED_IN_0_7: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
             "public-header-dirs:",
             "allow-build-query:",
         ),
-        frozenset({
-            "start/upgrading-to-0.7.md",
-            "reference/github-action-inputs.md",
-        }),
+        frozenset(
+            {
+                "start/upgrading-to-0.7.md",
+                "reference/github-action-inputs.md",
+            }
+        ),
     ),
 )

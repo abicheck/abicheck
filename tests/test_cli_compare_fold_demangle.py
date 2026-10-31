@@ -66,7 +66,7 @@ class TestScopedCompatFoldDemangle:
     def test_missing_entrypoint_demangled_by_default(self, tmp_path) -> None:
         old_p, new_p = _write_pair(tmp_path)
         result = _invoke(
-            "compare", str(old_p), str(new_p), "--required-symbol", _MANGLED
+            "compare", str(old_p), str(new_p), "--set", f'consumers.required_symbols=["{_MANGLED}"]'
         )
         assert "## Scoped to --required-symbol(s) contract" in result.output
         # Plan slice 7o: demangled *and* carrying the exact symbol, which
@@ -81,8 +81,8 @@ class TestScopedCompatFoldDemangle:
             "compare",
             str(old_p),
             str(new_p),
-            "--required-symbol",
-            _MANGLED,
+            "--set",
+            f'consumers.required_symbols=["{_MANGLED}"]',
             "--set",
             'output.view=["no-demangle"]',
         )
@@ -95,8 +95,8 @@ class TestScopedCompatFoldDemangle:
             "compare",
             str(old_p),
             str(new_p),
-            "--required-symbol",
-            _MANGLED,
+            "--set",
+            f'consumers.required_symbols=["{_MANGLED}"]',
             "-o",
             "json=-",
         )

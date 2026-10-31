@@ -194,6 +194,14 @@ def _invoke(*args: str):
     return CliRunner().invoke(main, list(args))
 
 
+def _view_config(tmp_path: Path, view: str) -> str:
+    """A ``.abicheck.yml`` selecting ``output.view`` (a directory compare
+    refuses ``--set output.view``, so the rendering selector travels by config)."""
+    cfg = tmp_path / f"view-{abs(hash(view))}.abicheck.yml"
+    cfg.write_text(f"output:\n  view: {view}\n")
+    return str(cfg)
+
+
 def _write_matrix_pair(tmp_path: Path, old_std: int, new_std: int) -> tuple[Path, Path]:
     """A release-global (not per-library) probe-matrix pair whose only
     finding is a ``CXX_STANDARD_FLOOR_RAISED`` (default verdict API_BREAK,
@@ -234,8 +242,7 @@ class TestReleaseViewShowOnly:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--set",
-            'output.view=["show=variables"]',
+            "--config", _view_config(tmp_path, '["show=variables"]'),
         )
         assert result.exit_code == 4, result.output
         assert "api_b" not in result.output
@@ -251,8 +258,7 @@ class TestReleaseViewShowOnly:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--set",
-            'output.view=["show=functions"]',
+            "--config", _view_config(tmp_path, '["show=functions"]'),
         )
         assert result.exit_code == 4, result.output
         assert "## Per-Library Findings" in result.output
@@ -267,8 +273,7 @@ class TestReleaseViewShowOnly:
             str(new_dir),
             "-o",
             "json=-",
-            "--set",
-            'output.view=["show=variables"]',
+            "--config", _view_config(tmp_path, '["show=variables"]'),
         )
         assert result.exit_code == 4, result.output
         doc = json.loads(result.output)
@@ -292,8 +297,7 @@ class TestReleaseViewShowOnly:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--set",
-            'output.view=["show=variables"]',
+            "--config", _view_config(tmp_path, '["show=variables"]'),
         )
         assert baseline.exit_code == filtered.exit_code == 4
 
@@ -320,8 +324,7 @@ class TestReleaseViewShowOnly:
             str(new_dir),
             "-o",
             "json=-",
-            "--set",
-            'output.view=["show=variables"]',
+            "--config", _view_config(tmp_path, '["show=variables"]'),
         )
         assert result.exit_code == 4, result.output
         doc = json.loads(result.output)
@@ -380,8 +383,7 @@ class TestReleaseViewShowOnly:
             f"new={matrix_new}",
             "-o",
             "json=-",
-            "--set",
-            'output.view=["show=breaking"]',
+            "--config", _view_config(tmp_path, '["show=breaking"]'),
         )
         assert result.exit_code == 4, result.output
         doc = json.loads(result.output)
@@ -408,8 +410,7 @@ class TestReleaseViewShowOnly:
             str(new_dir),
             "-o",
             "json=-",
-            "--set",
-            'output.view=["show=functions"]',
+            "--config", _view_config(tmp_path, '["show=functions"]'),
         )
         assert result.exit_code == 4, result.output
         doc = json.loads(result.output)
@@ -444,8 +445,7 @@ class TestReleaseViewShowOnly:
             str(new_dir),
             "-o",
             "json=-",
-            "--set",
-            'output.view=["show=functions"]',
+            "--config", _view_config(tmp_path, '["show=functions"]'),
         )
         assert result.exit_code == 4, result.output
         lib = json.loads(result.output)["libraries"][0]
@@ -505,8 +505,7 @@ class TestReleaseViewShowOnly:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--set",
-            'output.view=["show=functions", "impact"]',
+            "--config", _view_config(tmp_path, '["show=functions", "impact"]'),
             "-o",
             f"json={out_dir}/",
         )
@@ -538,8 +537,7 @@ class TestReleaseViewShowOnly:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--set",
-            'output.view=["show=variables"]',
+            "--config", _view_config(tmp_path, '["show=variables"]'),
         )
         assert result.exit_code == 4, result.output
         assert "api_b" not in result.output
@@ -586,7 +584,13 @@ class TestReleaseViewDemangleIsAutomatic:
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
         for token in ("demangle", "no-demangle"):
-            result = _invoke("compare", str(old_dir), str(new_dir), "--view", token)
+            result = _invoke(
+                "compare",
+                str(old_dir),
+                str(new_dir),
+                "--config",
+                _view_config(tmp_path, f'["{token}"]'),
+            )
             assert result.exit_code == 64, (token, result.output)
 
 
@@ -608,7 +612,7 @@ class TestReleaseViewPatternsIsUnconditional:
     def test_the_retired_token_is_a_usage_error(self, tmp_path: Path) -> None:
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
-        result = _invoke("compare", str(old_dir), str(new_dir), "--set", 'output.view=["patterns"]')
+        result = _invoke("compare", str(old_dir), str(new_dir), "--config", _view_config(tmp_path, '["patterns"]'))
         assert result.exit_code == 64, result.output
 
 
@@ -627,8 +631,7 @@ class TestReleaseViewReportModeRejected:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--set",
-            'output.view=["leaf"]',
+            "--config", _view_config(tmp_path, '["leaf"]'),
         )
         assert result.exit_code == 64, result.output
         assert "retired" in result.output
@@ -643,8 +646,7 @@ class TestReleaseViewReportModeRejected:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--set",
-            'output.view=["root-cause"]',
+            "--config", _view_config(tmp_path, '["root-cause"]'),
         )
         assert result.exit_code == 64, result.output
         assert "--view root-cause is not available" in result.output
@@ -663,8 +665,8 @@ class TestReleaseViewReportModeRejected:
                 "compare",
                 str(old_dir),
                 str(new_dir),
-                "--view",
-                token,
+                "--config",
+                _view_config(tmp_path, f'["{token}"]'),
             )
             assert result.exit_code == 4, (token, result.output)
 
@@ -687,8 +689,7 @@ class TestReleaseViewReportModeRejectedUnderDryRun:
             str(old_dir),
             str(new_dir),
             "--dry-run",
-            "--set",
-            'output.view=["leaf"]',
+            "--config", _view_config(tmp_path, '["leaf"]'),
         )
         assert result.exit_code == 64, result.output
         assert "retired" in result.output
@@ -703,8 +704,7 @@ class TestReleaseViewReportModeRejectedUnderDryRun:
             str(old_dir),
             str(new_dir),
             "--dry-run",
-            "--set",
-            'output.view=["root-cause"]',
+            "--config", _view_config(tmp_path, '["root-cause"]'),
         )
         assert result.exit_code == 64, result.output
         assert "--view root-cause is not available" in result.output
@@ -720,8 +720,8 @@ class TestReleaseViewReportModeRejectedUnderDryRun:
                 str(old_dir),
                 str(new_dir),
                 "--dry-run",
-                "--view",
-                token,
+                "--config",
+                _view_config(tmp_path, f'["{token}"]'),
             )
             assert result.exit_code == 0, (token, result.output)
 
@@ -794,7 +794,7 @@ class TestReleaseViewFilteredRetired:
     def test_the_retired_token_is_a_usage_error(self, tmp_path: Path) -> None:
         old_dir, new_dir = _write_removed_function_pair(tmp_path)
 
-        result = _invoke("compare", str(old_dir), str(new_dir), "--set", 'output.view=["filtered"]')
+        result = _invoke("compare", str(old_dir), str(new_dir), "--config", _view_config(tmp_path, '["filtered"]'))
         assert result.exit_code == 64, result.output
         assert "retired" in result.output
 
@@ -824,8 +824,7 @@ class TestReleaseViewImpactAggregate:
             str(new_dir),
             "-o",
             "json=-",
-            "--set",
-            'output.view=["impact"]',
+            "--config", _view_config(tmp_path, '["impact"]'),
         )
         assert result.exit_code == 4, result.output
         data = json.loads(result.output)
@@ -862,8 +861,7 @@ class TestReleaseViewImpactAggregate:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--set",
-            'output.view=["impact"]',
+            "--config", _view_config(tmp_path, '["impact"]'),
         )
         assert result.exit_code == 4, result.output
         assert "**Impact**" in result.output
@@ -887,8 +885,7 @@ class TestReleaseViewImpactAggregate:
             "json=-",
             "-o",
             f"json={write_path}",
-            "--set",
-            'output.view=["impact", "show=variables"]',
+            "--config", _view_config(tmp_path, '["impact", "show=variables"]'),
         )
         assert result.exit_code == 4, result.output
         assert result.output.startswith("Report written to")
@@ -935,8 +932,7 @@ class TestReleaseViewImpactJUnitParity:
             str(new_dir),
             "-o",
             "junit=-",
-            "--set",
-            'output.view=["impact"]',
+            "--config", _view_config(tmp_path, '["impact"]'),
         )
         without_impact = _invoke(
             "compare",
@@ -960,8 +956,7 @@ class TestReleaseViewImpactJUnitParity:
             str(new_dir),
             "-o",
             "junit=-",
-            "--set",
-            'output.view=["impact"]',
+            "--config", _view_config(tmp_path, '["impact"]'),
         )
         assert result.exit_code == 4, result.output
         assert "<?xml" in result.output
@@ -988,8 +983,7 @@ class TestReleaseViewImpactJUnitParity:
             str(new_snap_path),
             "-o",
             "junit=-",
-            "--set",
-            'output.view=["impact"]',
+            "--config", _view_config(tmp_path, '["impact"]'),
         )
         assert single_pair.exit_code == 4, single_pair.output
         assert "<?xml" in single_pair.output
@@ -1018,8 +1012,7 @@ class TestReleaseViewShowOnlyJUnit:
             str(new_dir),
             "-o",
             "junit=-",
-            "--set",
-            'output.view=["show=variables"]',
+            "--config", _view_config(tmp_path, '["show=variables"]'),
         )
         # show_only is presentation-only -- the exit code (computed from the
         # real, unfiltered DiffResult) is unaffected even though the JUnit
@@ -1039,8 +1032,7 @@ class TestReleaseViewShowOnlyJUnit:
             str(new_dir),
             "-o",
             "junit=-",
-            "--set",
-            'output.view=["show=functions"]',
+            "--config", _view_config(tmp_path, '["show=functions"]'),
         )
         assert result.exit_code == 4, result.output
         assert 'failures="1"' in result.output
@@ -1070,8 +1062,7 @@ class TestReleaseViewShowOnlyReleaseGlobalFindings:
             f"new={matrix_new}",
             "-o",
             "json=-",
-            "--set",
-            'output.view=["show=api-break"]',
+            "--config", _view_config(tmp_path, '["show=api-break"]'),
         )
         assert result.exit_code == 4, result.output
         doc = json.loads(result.output)
@@ -1096,8 +1087,7 @@ class TestReleaseViewShowOnlyReleaseGlobalFindings:
             f"new={matrix_new}",
             "-o",
             "json=-",
-            "--set",
-            'output.view=["show=breaking"]',
+            "--config", _view_config(tmp_path, '["show=breaking"]'),
         )
         assert json_result.exit_code == 4, json_result.output
         doc = json.loads(json_result.output)
@@ -1114,8 +1104,7 @@ class TestReleaseViewShowOnlyReleaseGlobalFindings:
             f"old={matrix_old}",
             "--build-info",
             f"new={matrix_new}",
-            "--set",
-            'output.view=["show=breaking"]',
+            "--config", _view_config(tmp_path, '["show=breaking"]'),
         )
         assert md_result.exit_code == 4, md_result.output
         assert "Build-Configuration (Matrix) Findings" not in md_result.output
@@ -1163,8 +1152,7 @@ class TestReleaseViewShowOnlyOutputDirStaysFull:
             "compare",
             str(old_dir),
             str(new_dir),
-            "--set",
-            'output.view=["show=variables"]',
+            "--config", _view_config(tmp_path, '["show=variables"]'),
             "-o",
             f"json={output_dir}/",
         )

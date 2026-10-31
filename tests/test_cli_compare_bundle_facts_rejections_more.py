@@ -170,7 +170,7 @@ class TestCompareOldBundleFactsEarlyRejections:
         # than refused, and no information is lost: every machine
         # projection carries both the mangled and demangled names.
         assert code == 64
-        assert "retired" in out
+        assert "output.view" in out
 
     def test_default_demangle_is_not_rejected_by_itself(self, tmp_path: Path) -> None:
         # The silent default (None, "demangle ON") is left un-rejected,
@@ -218,7 +218,7 @@ class TestCompareOldBundleFactsEarlyRejections:
         )
 
         assert code == 64
-        assert "--view patterns" in out
+        assert "output.view" in out
 
     def test_default_explain_patterns_is_not_rejected_by_itself(
         self, tmp_path: Path
@@ -263,7 +263,7 @@ class TestCompareOldBundleFactsEarlyRejections:
         )
 
         assert code == 64
-        assert "--view <mode>" in out
+        assert "output.view" in out
 
     def test_show_filtered_is_rejected(self, tmp_path: Path) -> None:
         facts_path = tmp_path / "old.bundlefacts.json"

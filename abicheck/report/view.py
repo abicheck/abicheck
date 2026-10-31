@@ -225,7 +225,7 @@ def parse_show_only_groups(show_only: str) -> tuple[ShowOnlyFilter, ...]:
 
 
 def render_show_only_cli_hint(show_only: str) -> str:
-    """Render *show_only* back as a literally re-runnable ``--view show=...``
+    """Render *show_only* back as a literally re-runnable ``--set output.view=...``
     invocation.
 
     Codex review (PR #1154 second follow-up: "Render repeated show groups
@@ -241,7 +241,10 @@ def render_show_only_cli_hint(show_only: str) -> str:
     token, unchanged from before this function existed.
     """
     groups = show_only.split(SHOW_ONLY_GROUP_SEP)
-    return " ".join(f"--view show={group}" for group in groups)
+    # ADR-091 Phase 5: `--view` is the `output.view` config key now, reached
+    # through `--set`. One value carries every OR'd group, as a YAML list.
+    items = ", ".join(f'"show={group}"' for group in groups)
+    return f"--set 'output.view=[{items}]'"
 
 
 def show_only_matches(

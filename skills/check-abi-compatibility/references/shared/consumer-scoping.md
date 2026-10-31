@@ -19,11 +19,11 @@ own decision tree rather than a display option.
 | Dial | Consumer shape | What it establishes |
 |---|---|---|
 | `--used-by CONSUMER` (repeatable) | an application or library that links the subject | the consumer's actually-imported symbol set, scanned from its own binary |
-| `--required-symbol SYM` (repeatable) | a plugin/host ABI contract | the entrypoints the host requires the subject to provide |
-| `--required-symbol @FILE` | the same, from a file | a maintained required-entrypoint list |
+| `consumers.required_symbols: [SYM, ...]` | a plugin/host ABI contract | the entrypoints the host requires the subject to provide |
+| `consumers.required_symbols: ["@FILE"]` | the same, from a file | a maintained required-entrypoint list |
 
 `--used-by` is evidence-driven: the consumer binary is read, and its imports
-become the scope. `--required-symbol` is declaration-driven: the caller
+become the scope. `consumers.required_symbols` is declaration-driven: the caller
 states the contract, because a plugin host's requirement is not recoverable
 from the plugin's own imports.
 

@@ -542,8 +542,8 @@ class TestCompareDispatch:
         )
         assert code != 0
         msg = out + err
-        assert "not supported for directory/package" in msg
-        assert "--required-symbol" in msg
+        assert "does not apply consumers.required_symbols" in msg
+        assert "consumers.required_symbols" in msg
 
     def test_diagnostic_comparison_rejected_on_set_inputs(self, tmp_path: Path) -> None:
         # ADR-050 D2: the per-library release fan-out doesn't wire the

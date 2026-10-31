@@ -191,7 +191,10 @@ class TestPairExitThroughCli:
         full-library decision. An unaffected consumer of a breaking library
         still exits 4; an affected one reports its own 4 without narrowing."""
         cli, report = _run_compare(
-            tmp_path, _PAIR_CASES["removal"][0], "--required-symbol", required
+            tmp_path,
+            _PAIR_CASES["removal"][0],
+            "--set",
+            f'consumers.required_symbols=["{required}"]',
         )
         assert report["consumer_scope"]["exit_code"] == scoped_code
         assert cli.exit_code == report["exit"]["code"] == 4

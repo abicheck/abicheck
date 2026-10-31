@@ -71,6 +71,23 @@ class Findings(Protocol):
 # exact spelling.
 RETIRED_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
     (
+        "compare options moved to .abicheck.yml (ADR-091 Phase 5)",
+        (
+            "--severity-preset",
+            "--used-by-manifest",
+            "--required-symbol ",
+            "--view show=",
+            "--view full",
+        ),
+        frozenset(
+            {
+                "start/upgrading-to-0.7.md",
+                "contribute/known-gaps.md",
+                "AGENTS.md",
+            }
+        ),
+    ),
+    (
         "abicheck-mcp (MCP server, removed by #684)",
         (
             "abicheck-mcp",

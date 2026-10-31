@@ -36,7 +36,6 @@
       "surfaces": [
         "action: used-by",
         "api: abicheck.workflows.consumer_scope_standalone.check_appcompat",
-        "cli: compare --required-symbol",
         "cli: compare --used-by",
         "report: compare_report.used_by"
       ],
@@ -486,7 +485,6 @@
     "ADR-052": {
       "disposition": "surfaced",
       "surfaces": [
-        "cli: compare --used-by-manifest",
         "report: compare_report.consumer_impact_summary"
       ],
       "use_cases": [
@@ -582,7 +580,6 @@
       "disposition": "surfaced",
       "surfaces": [
         "action: severity-preset",
-        "cli: compare --severity-preset",
         "report: compare_report.exit"
       ],
       "use_cases": [
@@ -677,11 +674,8 @@
       "use_cases": []
     },
     "ADR-074": {
-      "disposition": "surfaced",
-      "surfaces": [
-        "cli: compare --define",
-        "cli: dump --define"
-      ],
+      "disposition": "internal",
+      "surfaces": [],
       "use_cases": [
         "UC-TC-header-scope-robustness"
       ]
@@ -704,7 +698,6 @@
     "ADR-078": {
       "disposition": "surfaced",
       "surfaces": [
-        "cli: compare --severity-preset",
         "report: compare_report.severity",
         "report: compare_report.summary"
       ],
@@ -806,7 +799,6 @@
     "ADR-004 report: compare_report.root_causes",
     "ADR-005 action: used-by",
     "ADR-005 api: abicheck.workflows.consumer_scope_standalone.check_appcompat",
-    "ADR-005 cli: compare --required-symbol",
     "ADR-005 report: compare_report.used_by",
     "ADR-006 action: devel-pkg1",
     "ADR-007 api: abicheck.btf_metadata",
@@ -888,7 +880,6 @@
     "ADR-049 report: compare_report.contract_coverage",
     "ADR-050 cli: compare --dump-manifest",
     "ADR-050 report: compare_report.comparability_assurance",
-    "ADR-052 cli: compare --used-by-manifest",
     "ADR-052 report: compare_report.consumer_impact_summary",
     "ADR-054 cli: project plan",
     "ADR-054 cli: project validate",
@@ -914,8 +905,6 @@
     "ADR-072 report: format:review",
     "ADR-073 action: actions/report",
     "ADR-073 action: actions/verify-source-run",
-    "ADR-074 cli: compare --define",
-    "ADR-074 cli: dump --define",
     "ADR-078 report: compare_report.severity",
     "ADR-078 report: compare_report.summary",
     "ADR-084 report: compare_report.disposition_audit",

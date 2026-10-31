@@ -133,7 +133,7 @@ def contract_options(f: F) -> F:
         "a contract_assurance, rendered per finding in -o json=.../"
         "markdown, in sarif/junit properties, and as an html badge; "
         "-o review=...'s compact digest renders it only in the "
-        "--used-by/--required-symbol scoped-gate appendix. -o json=... "
+        "--used-by/consumers.required_symbols scoped-gate appendix. -o json=... "
         "additionally carries contract_evidence_refs per finding (which "
         "evidence records the decision rests on) and a top-level "
         "contract_context block (observed provider evidence, resolved "

@@ -235,7 +235,7 @@ class TestCanonicalResolverIsWhatRuns:
         merged into this `@FILE` spelling)."""
         listed = tmp_path / "required.txt"
         listed.write_text("# contract\napi_b\n", encoding="utf-8")
-        ctx = _context(tmp_path, "--required-symbol", f"@{listed}")
+        ctx = _context(tmp_path, "--set", f'consumers.required_symbols=["@{listed}"]')
 
         assert ctx["resolved_config"]["policy"]["base"]["id"] == "plugin_abi"
         prov = ctx["field_provenance"]["policy.base"]
@@ -263,7 +263,7 @@ class TestCanonicalResolverIsWhatRuns:
         empty = tmp_path / "required.txt"
         empty.write_text("# nothing but a comment\n", encoding="utf-8")
         ctx = _context(
-            tmp_path, "--required-symbol", "api_b", "--required-symbol", f"@{empty}"
+            tmp_path, "--set", f'consumers.required_symbols=["api_b", "@{empty}"]'
         )
 
         assert ctx["resolved_config"]["policy"]["base"]["id"] == "plugin_abi"
