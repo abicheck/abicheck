@@ -87,3 +87,64 @@ def test_compare_shape_with_no_checkout_method_and_no_root_method_is_clear() -> 
     )
     assert "sources" not in out
     assert base == {"sources": {"graph": "summary"}}
+
+
+def test_sources_root_method_is_dropped_when_the_checkout_has_none() -> None:
+    """The sources root's method never reaches a compare-shaped overlay, even
+    when the checkout names none: the other sources keys still promote."""
+    out = apply_sources_root_config_blocks(
+        {"build": {"system": "bazel"}},
+        {"sources": {"method": "s6", "graph": "summary"}},
+        blocks=("build", "sources"),
+        sources_method_from_sources_root=False,
+    )
+    assert out["sources"] == {"graph": "summary"}
+
+
+def test_non_mapping_sources_root_keeps_only_the_checkout_method() -> None:
+    out = apply_sources_root_config_blocks(
+        _CHECKOUT,
+        ["not", "a", "mapping"],
+        blocks=("sources",),
+        sources_method_from_sources_root=False,
+    )
+    assert out["sources"] == {"method": "headers"}
+
+
+def test_acknowledgment_findings_name_the_current_block_key() -> None:
+    from abicheck.buildsource.build_config_acknowledgment import (
+        acknowledgment_findings,
+    )
+
+    findings = acknowledgment_findings(
+        {"file": 7, "unacknowledged_additions": "nope", "breaks": "nope", "bogus": 1}
+    )
+    assert any(f.startswith("acknowledgments.file must be") for f in findings)
+    assert any(
+        f.startswith("acknowledgments.unacknowledged_additions must be one of")
+        for f in findings
+    )
+    assert any(f.startswith("acknowledgments.breaks must be one of") for f in findings)
+    assert any(
+        "unknown .abicheck.yml key acknowledgments.'bogus'" in f for f in findings
+    )
+    assert not any(
+        "acknowledgment." in f and "acknowledgments." not in f for f in findings
+    )
+
+
+def test_invalid_sources_method_names_the_current_key() -> None:
+    from abicheck.workflows.compare_configuration import (
+        CompareSettingsError,
+        resolve_compare_collect_mode,
+    )
+
+    with pytest.raises(CompareSettingsError, match="sources.method in .abicheck.yml"):
+        resolve_compare_collect_mode(None, "s9", None, None, None, None)
+
+
+def test_valid_sources_method_labels_its_current_key() -> None:
+    from abicheck.workflows.compare_configuration import resolve_compare_collect_mode
+
+    _mode, label = resolve_compare_collect_mode(None, "s1", None, None, None, None)
+    assert label == "sources.method=s1 (.abicheck.yml)"
