@@ -123,7 +123,7 @@ one table that exists:
 -|-----------|---------|
 -| `0` | No error-level findings |
 -...
-+See [Severity-aware exit codes](../reference/exit-codes.md#severity-aware-exit-codes-with-any-severity-flag)
++See [Severity-aware exit codes](../reference/exit-codes.md#severity-aware-exit-codes-with-any-severity-setting)
 +for the exact code-to-condition table; the highest applicable code wins.
 ```
 

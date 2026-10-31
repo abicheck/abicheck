@@ -474,7 +474,7 @@ trigger yet — there is still no `--budget` flag — so it stays `0` on every
 
 `appcompat` and `plugin-check` are gone as standalone commands; their scoping
 folded into `compare` itself — see
-[Application- and plugin-scoped comparisons](#application--and-plugin-scoped-comparisons-compare---used-by--consumers)
+[Application- and plugin-scoped comparisons](#application-and-plugin-scoped-comparisons-compare-used-by-consumers)
 below. `baseline` (the push/pull/list/delete registry), `debian-symbols`,
 `collect`, `merge`, `inputs validate`, and `inputs compact` were removed
 outright with no CLI replacement — validating a build-emitted
@@ -1033,7 +1033,7 @@ above.
 
 App/plugin-scoped comparisons (`compare --used-by` / `consumers.required_symbols`) reuse
 the `compare` columns above — see
-[Application- and plugin-scoped comparisons](#application--and-plugin-scoped-comparisons-compare---used-by--consumers).
+[Application- and plugin-scoped comparisons](#application-and-plugin-scoped-comparisons-compare-used-by-consumers).
 `aggregate` combines each report's own severity gate (`0`/`1`/`2`/`4`) over its
 analyzed targets and adds a coverage gate (a required gap exits `1`, never `4`) —
 see [`abicheck aggregate`](#abicheck-aggregate).

@@ -125,7 +125,7 @@ computation follows; this page only documents how to select and override it.
 When any severity setting is active — `severity.preset`, or a severity
 value in `.abicheck.yml` — the exit code is computed from the severity
 configuration instead of the legacy verdict system. See
-[Severity-aware exit codes](../reference/exit-codes.md#severity-aware-exit-codes-with-any-severity-flag)
+[Severity-aware exit codes](../reference/exit-codes.md#severity-aware-exit-codes-with-any-severity-setting)
 for the exact code-to-condition table; the highest applicable code wins.
 Without any active severity setting (no `--severity-*` flag and no config
 severity value), the legacy verdict-based exit codes apply (see
