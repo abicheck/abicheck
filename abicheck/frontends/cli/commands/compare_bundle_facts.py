@@ -346,8 +346,16 @@ def dispatch(
     *compile_context* is resolved by the caller (``compare_cmd``), not here:
     this leaf module is kept out of ``cli_options``'s own import graph.
     """
+    from ....cli_compare_fold import _exit_on_budget_overflow
+    from ....deadline import DeadlineExceeded
+    from ....workflows.compare.budget import budget_deadline
+    from ..compare_input_validation import parse_budget_option
     from ..runtime import _exit_compare_release, _safe_write_output
 
+    # This route never reaches run_compare, so it bounds its own work: the
+    # stated --budget, else the 2-hour default (ADR-068's 2026-11 amendment).
+    budget = kwargs.get("budget")
+    budget_s = parse_budget_option(budget)
     request = _request_from_kwargs(
         kwargs,
         compile_context=compile_context,
@@ -356,9 +364,22 @@ def dispatch(
     )
     _reject_unrendered_formats(request)
     try:
-        outcome = execute_bundle_facts_compare(request)
+        with budget_deadline(budget_s):
+            outcome = execute_bundle_facts_compare(request)
     except BundleFactsCompareError as exc:
         raise _click_error(exc) from exc
+    except DeadlineExceeded as exc:
+        _exit_on_budget_overflow(
+            exc,
+            budget,
+            f"{request.old_facts_path} -> {request.new_input}",
+            Path(request.new_input).name,
+            "",
+            "",
+            fmt=request.fmt,
+            output=request.output,
+            secondary_writes=request.secondary_writes,
+        )
 
     scope_terms = comparison_scope_terms(outcome.scope_decision)
     result = outcome.result

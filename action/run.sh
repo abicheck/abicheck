@@ -5213,11 +5213,11 @@ else
       # arm existed, exit 5 fell into the generic `*) VERDICT="ERROR"`
       # case below, publishing `ERROR` instead of the documented
       # `BUDGET_OVERFLOW` and skipping the budget-specific summary/comment
-      # handling (Codex review, PR #1210, round 10 -- an audit-only
-      # request never reaches this exit code at all: `compare
-      # --no-baseline` rejects `--budget` outright, and this Action's own
-      # preflight rejects the input upfront for that shape before ever
-      # invoking the CLI).
+      # handling (Codex review, PR #1210, round 10). Since ADR-068's
+      # 2026-11 amendment every compare run has a deadline, the 2h default
+      # when no budget is stated, so an audit-only request reaches it too:
+      # `compare --no-baseline` still rejects `--budget` (and this Action's
+      # preflight the input), but exits 5 when the default runs out.
       VERDICT="BUDGET_OVERFLOW"
       echo "::warning::abicheck exceeded its time budget (exit code 5): the budget input, or the 2h default when budget is empty. No verdict was produced. Set a longer budget (e.g. budget: 4h) or pin a shallower --depth; a budget never silently shrinks scope."
       ;;
@@ -5401,7 +5401,7 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
         echo "> **Verdict: REMOVED_LIBRARY** — A library present in the old package is missing from the new package."
         ;;
       BUDGET_OVERFLOW)
-        echo "> **Verdict: BUDGET_OVERFLOW** ⏱️ — Scan exceeded the configured \`budget\`. Pin a shallower level (--depth) or raise the budget; a budget never silently shrinks scope."
+        echo "> **Verdict: BUDGET_OVERFLOW** ⏱️ — The run exceeded its time budget (the \`budget\` input, or the 2h default when it is empty). No verdict was produced. Set a longer \`budget\` or pin a shallower level (--depth); a budget never silently shrinks scope."
         ;;
       EVIDENCE_CONTRACT_ERROR)
         # Generic wording -- see the exit-1 dispatch's own comment on why

@@ -33,6 +33,7 @@ from click.testing import CliRunner
 from abicheck import deadline
 from abicheck.cli import main
 from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.model.change_catalog.registry import Verdict
 from abicheck.serialization import snapshot_to_json
 from abicheck.workflows import keyed_process_pool, run_deadline, side_isolation
 from abicheck.workflows.compare.budget import budget_deadline, parse_budget_seconds
@@ -242,7 +243,7 @@ def test_typed_api_budget(
     clock(elapsed)
     if not expect_overflow:
         result = run_compare_request(request)
-        assert result.diff.verdict is not None
+        assert result.diff.verdict == Verdict.NO_CHANGE
         return
     with pytest.raises(deadline.DeadlineExceeded) as info:
         run_compare_request(request)
@@ -535,4 +536,70 @@ def test_no_baseline_audit_exits_5_naming_the_default(
     result = CliRunner().invoke(main, ["compare", "--no-baseline", str(candidate)])
     assert result.exit_code == 5, result.output
     assert "the default 2h budget was exceeded while auditing" in result.output
+    assert "No verdict was produced" in result.output
+
+
+def _stored_facts_and_new_dir(tmp_path: Path) -> tuple[Path, Path]:
+    """A stored BundleFacts OLD side (captured by the CLI) and a live NEW dir."""
+    from abicheck.elf_metadata import ElfMetadata
+
+    old_dir, new_dir = tmp_path / "old", tmp_path / "new"
+    for d, version in ((old_dir, "1"), (new_dir, "2")):
+        d.mkdir()
+        snap = AbiSnapshot(
+            library="libm1.so",
+            version=version,
+            functions=[
+                Function(
+                    name="f",
+                    mangled="f",
+                    return_type="int",
+                    visibility=Visibility.PUBLIC,
+                )
+            ],
+            elf=ElfMetadata(soname="libm1.so"),
+        )
+        (d / "libm1.so").write_text(snapshot_to_json(snap), encoding="utf-8")
+    facts = tmp_path / "old.bundle-facts.json"
+    CliRunner().invoke(
+        main,
+        ["compare", str(old_dir), str(old_dir), "--bundle-facts-out", str(facts)],
+    )
+    assert facts.is_file()
+    return facts, new_dir
+
+
+@pytest.mark.parametrize(
+    ("budget_args", "expected_remaining", "expected_message"),
+    [
+        ([], TWO_HOURS, "the default 2h budget exceeded"),
+        (["--budget", "3h"], 3 * 3600.0, "--budget '3h' exceeded"),
+    ],
+)
+def test_stored_bundle_facts_compare_is_bounded(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    frozen: None,
+    budget_args: list[str],
+    expected_remaining: float,
+    expected_message: str,
+) -> None:
+    """The stored-BundleFacts route never reaches run_compare; it enters the
+    same budget scope itself and reports expiry as exit 5."""
+    from abicheck.frontends.cli.commands import compare_bundle_facts
+
+    facts, new_dir = _stored_facts_and_new_dir(tmp_path)
+    seen: list[float | None] = []
+
+    def expire(_request: Any) -> None:
+        seen.append(deadline.remaining())
+        raise deadline.DeadlineExceeded(-1.0)
+
+    monkeypatch.setattr(compare_bundle_facts, "execute_bundle_facts_compare", expire)
+    result = CliRunner().invoke(
+        main, ["compare", str(facts), str(new_dir), *budget_args]
+    )
+    assert seen == [expected_remaining]
+    assert result.exit_code == 5, result.output
+    assert expected_message in result.output
     assert "No verdict was produced" in result.output

@@ -513,11 +513,6 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 
 ### Hygiene
 
-#### A forked child that is alive but never answers blocks the parent's pipe read
-
-**Status (2026-11-01): CLOSED.** The maintainer chose one default time limit for an unbudgeted run (ADR-068's 2026-11 amendment). A `compare` with no stated budget (CLI, typed API, Action) runs under a 2h default (`workflows/run_deadline.DEFAULT_BUDGET_S`, the `budget` concept's `default` in `architecture/option-vocabulary.yaml`). The three waits (`side_isolation._run_children`, `keyed_process_pool`'s wait and read, `release_admission.admit`) now block for at most `run_deadline.wait_bound()`: the time left on the active deadline, or the default when none is active. A wait that times out raises `DeadlineExceeded` and stops the waited-on children. The run then exits `5` with a message that says how to set a longer budget, and never reads as a clean pass. A release `compare` now accepts `--budget` and aborts as a whole on expiry. `tests/test_budget_default.py` covers the default, an explicit override and each wait's expiry with an injected clock; `tests/test_unbounded_wait_gate.py` no longer lists any child-pipe gap. Remaining: `compare --no-baseline` runs under the default but still rejects an explicit `--budget`, so the default cannot be raised there, and its overflow prints the error without an aborted-run document.  
-`hygiene` — Closed: no wait on a child is unbounded, and an unbudgeted run stops at the 2h default with exit 5.
-
 #### `consumers.required_symbols` `@FILE` read errors are checked on the CLI route only
 
 **Status (recorded 2026-10-22): OPEN.** An unreadable `@FILE` is refused as a typed `CompareSettingsError` (exit 64, path named) by `workflows/compare_configuration.load_required_symbols`, pinned on the CLI and the typed function in `tests/test_compare_settings_cli_translation.py`. No bug-class harness covers it: the typed `CompareRequest` API does not accept `@FILE` required symbols, so there is no second route to compare against, and family F2's route-parity matrix has nothing to attach to.

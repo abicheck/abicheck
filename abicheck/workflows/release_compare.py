@@ -333,7 +333,10 @@ def execute_release_compare(
         else _resolve_typed_release_configuration(plan, o)
     )
 
-    with ast_acquisition_scope() as ast_scope:
+    # The caller's deadline (the CLI's --budget scope), else the 2-hour
+    # default, bounds the whole run: members, waits on them, and the
+    # surface/bundle/matrix stages; expiry raises DeadlineExceeded.
+    with budget_deadline(None), ast_acquisition_scope() as ast_scope:
         member_ctx = ReleaseMemberContext(
             request=release_parent_request(
                 pack_application,
@@ -383,13 +386,9 @@ def execute_release_compare(
                 bundle_facts_out=o.bundle_facts_out is not None,
             ),
         )
-        # The caller's deadline (the CLI's --budget scope), else the 2-hour
-        # default: every member and every wait on one is bounded, and an
-        # expired budget raises DeadlineExceeded out of the whole run.
-        with budget_deadline(None):
-            library_results, worst_verdict, junit_pairs = compare_release_members(
-                compare_keys, member_ctx, jobs=o.jobs, depth=o.depth
-            )
+        library_results, worst_verdict, junit_pairs = compare_release_members(
+            compare_keys, member_ctx, jobs=o.jobs, depth=o.depth
+        )
 
         # ADR-065 D8: a matched member a stored package marks degraded is not
         # compared (its snapshot is the ELF-only stand-in) but recorded
