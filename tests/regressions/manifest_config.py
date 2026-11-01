@@ -84,6 +84,44 @@ CONFIG_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="config.key_resolved_on_one_route_only",
+        invariant=(
+            "A config key the CLI applies through `--set`/`.abicheck.yml` is "
+            "resolved by one owner on every route that accepts it: the typed "
+            "`config_overrides` spelling refuses each unusable value with the "
+            "CLI's own error and message, before either side is read, and an "
+            "accepted value yields the same rendered result fields as the CLI "
+            "run."
+        ),
+        fixed_by=(1890,),
+        seed_tests=(
+            "tests/test_typed_required_symbols_route_parity.py",
+            # H2 cell: axis `required_symbols_file` (CLI vs typed API, whole
+            # report; the release route refuses the key).
+            "tests/test_family_f2_route_parity.py",
+            "tests/test_compare_settings_cli_translation.py",
+        ),
+        public_surfaces=("cli", "python-api"),
+        axes={
+            "key": ("consumers.required_symbols",),
+            "refusal": (
+                "missing-file",
+                "directory",
+                "unreadable",
+                "not-utf8",
+                "two-file-entries",
+            ),
+            "contract": (
+                "literal-only",
+                "file-only",
+                "literal-and-file",
+                "nothing-missing",
+                "empty-file",
+            ),
+            "policy": ("default", "strict_abi-stated", "sdk_vendor-stated"),
+        },
+    ),
+    BugClass(
         id="config.option_dropped_at_a_dispatch_branch",
         invariant=(
             "An option the front end accepts reaches every dispatch branch "
