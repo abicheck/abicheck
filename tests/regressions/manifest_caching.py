@@ -245,6 +245,7 @@ CACHING_BUG_CLASSES: tuple[BugClass, ...] = (
         fixed_by=(454,),
         seed_tests=(
             "tests/test_cache_identity_mutations.py",
+            "tests/test_cache_walk_excludes_own_cache.py",
             # its header_disk_cache_warm_after_touch cell (integration)
             "tests/test_family_f5_optimization_reference.py",
         ),

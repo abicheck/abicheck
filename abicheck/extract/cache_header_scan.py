@@ -31,6 +31,7 @@ while ``header_utils`` is the stdlib-only path/flag leaf every layer shares.
 from __future__ import annotations
 
 import os
+import tempfile
 import threading
 from pathlib import Path
 
@@ -174,6 +175,38 @@ def _path_suffix(name: str) -> str:
 #: commit (hashing it would make every warm entry under a checkout root miss).
 _SKIPPED_INPUT_DIRS = frozenset({".git", ".hg", ".svn", ".bzr", "__pycache__"})
 
+#: Name of abicheck's own cache root under every cache base.
+_OWN_CACHE_DIR_NAME = "abi_check"
+
+
+def _own_cache_roots() -> frozenset[str]:
+    """abicheck's own cache roots, normcased real paths, read at call time.
+
+    The content walk must never fold abicheck's own outputs: a cache root
+    under an include root (``XDG_CACHE_HOME`` inside a project tree) would
+    otherwise change the key while the parse writes its lock and AST files,
+    and the clang backend's stability check discards the parse. Mirrors the
+    bases ``storage.ast_cache_location.backend_cache_dir`` and the dump
+    cache's ``store._get_cache_dir`` resolve (including the temp fallback).
+    """
+    bases: list[str] = [tempfile.gettempdir()]
+    xdg = os.environ.get("XDG_CACHE_HOME")
+    if xdg:
+        bases.append(xdg)
+    local = os.environ.get("LOCALAPPDATA")
+    if local:
+        bases.append(local)
+    try:
+        home = os.path.expanduser("~")
+        bases.append(os.path.join(home, ".cache"))
+        bases.append(os.path.join(home, "AppData", "Local"))
+    except (OSError, RuntimeError):
+        pass
+    return frozenset(
+        os.path.normcase(os.path.realpath(os.path.join(b, _OWN_CACHE_DIR_NAME)))
+        for b in bases
+    )
+
 
 def _cache_header_rel_parts(
     directory: Path, *, all_files: bool = False
@@ -210,6 +243,7 @@ def _cache_header_rel_parts(
     """
     root = str(directory)
     stack: list[tuple[str, tuple[str, ...]]] = [(root, ())]
+    own_cache = _own_cache_roots() if all_files else frozenset()
     found: list[tuple[str, ...]] = []
     traversed = 0
     suffix_of = _path_suffix
@@ -237,8 +271,13 @@ def _cache_header_rel_parts(
                 is_dir = False
             if all_files:
                 if is_dir:
-                    if name not in _SKIPPED_INPUT_DIRS:
-                        stack.append((join(base, name), child_rel))
+                    child = join(base, name)
+                    if name in _SKIPPED_INPUT_DIRS or (
+                        name == _OWN_CACHE_DIR_NAME
+                        and os.path.normcase(os.path.realpath(child)) in own_cache
+                    ):
+                        continue
+                    stack.append((child, child_rel))
                 else:
                     found.append(child_rel)
                 continue
