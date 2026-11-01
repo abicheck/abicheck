@@ -35,10 +35,14 @@ __all__ = [
     "AGGREGATE_REPORT_SCHEMA_PATH",
     "AUDIT_REPORT_SCHEMA_PATH",
     "AUDIT_SET_REPORT_SCHEMA_PATH",
+    "BUNDLE_FACTS_ARCHIVE_MANIFEST_SCHEMA_PATH",
+    "BUNDLE_FACTS_SCHEMA_PATH",
     "COMPARE_REPORT_SCHEMA_PATH",
     "load_aggregate_report_schema",
     "load_audit_report_schema",
     "load_audit_set_report_schema",
+    "load_bundle_facts_archive_manifest_schema",
+    "load_bundle_facts_schema",
     "load_compare_report_schema",
 ]
 
@@ -57,6 +61,15 @@ AUDIT_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "audit_report.schema.json"
 #: Its own schema because its root is a set -- members, acquisition states, a
 #: folded exit code -- not one candidate's findings.
 AUDIT_SET_REPORT_SCHEMA_PATH = _SCHEMA_DIR / "audit_set_report.schema.json"
+#: The stored release (``dump RELEASE --bundle-facts-out``): the single-file
+#: JSON ``BundleFacts`` document, and the ``manifest.json`` of its G40 zip
+#: archive form. Two schemas because they are two documents: the archive
+#: stores members as content-addressed blobs and carries two versions (its
+#: own layout and the ``BundleFacts`` shape it encodes).
+BUNDLE_FACTS_SCHEMA_PATH = _SCHEMA_DIR / "bundle_facts.schema.json"
+BUNDLE_FACTS_ARCHIVE_MANIFEST_SCHEMA_PATH = (
+    _SCHEMA_DIR / "bundle_facts_archive_manifest.schema.json"
+)
 
 
 @memoized
@@ -87,5 +100,21 @@ def load_audit_set_report_schema() -> dict[str, Any]:
 def load_aggregate_report_schema() -> dict[str, Any]:
     """Return the parsed aggregate-report JSON Schema as a dict."""
     with AGGREGATE_REPORT_SCHEMA_PATH.open(encoding="utf-8") as fh:
+        data: dict[str, Any] = json.load(fh)
+    return data
+
+
+@memoized
+def load_bundle_facts_schema() -> dict[str, Any]:
+    """Return the parsed ``BundleFacts`` JSON-document schema as a dict."""
+    with BUNDLE_FACTS_SCHEMA_PATH.open(encoding="utf-8") as fh:
+        data: dict[str, Any] = json.load(fh)
+    return data
+
+
+@memoized
+def load_bundle_facts_archive_manifest_schema() -> dict[str, Any]:
+    """Return the parsed G40 bundle-archive ``manifest.json`` schema as a dict."""
+    with BUNDLE_FACTS_ARCHIVE_MANIFEST_SCHEMA_PATH.open(encoding="utf-8") as fh:
         data: dict[str, Any] = json.load(fh)
     return data
