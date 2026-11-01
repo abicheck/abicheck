@@ -178,7 +178,11 @@ def run_dump_bundle_facts(
 
 def _config_public_header_dirs(config_path: Path | None) -> list[Path]:
     """``scope.public_header_dirs`` of the project config ``dump`` resolved,
-    the list a directory ``compare`` hands its member dumps."""
+    the list a directory ``compare`` hands its member dumps.
+
+    A malformed config is a usage error, discovered or named, as it is for
+    ``compare``: the capture must not silently drop the config's public-header
+    scope that ``compare --bundle-facts-out`` would refuse to run without."""
     if config_path is None:
         return []
     from ....workflows.extraction import load_build_config
@@ -188,8 +192,10 @@ def _config_public_header_dirs(config_path: Path | None) -> list[Path]:
 
     try:
         cfg = load_build_config(config_path)
-    except ValueError:
-        return []
+    except ValueError as exc:
+        raise click.UsageError(
+            f"cannot parse build config {config_path}: {exc}"
+        ) from exc
     return project_config_public_header_dirs(cfg)
 
 

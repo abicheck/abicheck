@@ -370,6 +370,38 @@ def test_the_config_public_header_dirs_reach_the_capture_as_they_reach_compare(
     )
 
 
+@pytest.mark.parametrize("discovered", [False, True], ids=["named", "discovered"])
+@pytest.mark.parametrize(
+    "body",
+    ["scope:\n  public_header_dirs: 5\n", "scope: [unclosed\n  : :\n"],
+    ids=["schema-invalid", "unparseable"],
+)
+def test_a_malformed_config_is_refused_as_compare_refuses_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, discovered: bool, body: str
+) -> None:
+    """A malformed project config -- named with `--config` or discovered in
+    the working directory -- never yields a capture without its public-header
+    scope. Oracle: `compare --bundle-facts-out` on the same release and config
+    exits 64 and writes nothing; the capture must do the same."""
+    old, new = _release(tmp_path, "three-members")
+    work = tmp_path / "work"
+    work.mkdir()
+    cfg = work / (".abicheck.yml" if discovered else "bad.yml")
+    cfg.write_text(body, encoding="utf-8")
+    monkeypatch.chdir(work)
+    named = () if discovered else ("--config", str(cfg))
+    compared = tmp_path / "compared.json"
+    compare = _invoke(
+        "compare", str(old), str(new), *named, "--bundle-facts-out", str(compared)
+    )
+    assert compare.exit_code == 64, compare.output
+    assert not compared.exists()
+    dumped = tmp_path / "dumped.json"
+    result = _invoke("dump", str(old), *named, "--bundle-facts-out", str(dumped))
+    assert result.exit_code == compare.exit_code, result.output
+    assert not dumped.exists()
+
+
 def test_an_unknown_variant_is_a_usage_error_naming_it(tmp_path: Path) -> None:
     pkg = tmp_path / "pkg"
     _multi_variant_package(pkg)
