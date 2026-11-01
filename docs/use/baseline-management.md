@@ -49,9 +49,10 @@ breaking changes before they ship.
 > interdependent shared libraries — where a symbol one library imports
 > from a sibling disappearing is a real cross-DSO ABI break no
 > single-library `compare` can see — is compared with directory or
-> package `compare`, and `--bundle-facts-out` stores that release's
-> cross-library facts so a later release can be compared against it
-> without its binaries: see
+> package `compare`, and `--bundle-facts-out` (on that `compare`, or on
+> `dump RELEASE` to capture a release with no comparison) stores that
+> release's cross-library facts so a later release can be compared against
+> it without its binaries: see
 > [Comparing against a stored bundle baseline](multi-binary.md#comparing-against-a-stored-bundle-baseline-g38-phase-2).
 > (A library-only `abicheck.product_baseline` module once offered a second,
 > Python-only route; it had no CLI caller and was removed.)

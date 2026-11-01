@@ -328,14 +328,15 @@ COMPARE_OPTION_RULINGS: dict[str, OptionRuling] = {
         "per-run override."
     ),
     "--bundle-facts-out": _keep(
-        "Ruled in Phase 7d and re-affirmed: PATH names where *this "
-        "invocation's* evidence capture lands, exactly -o/--output's shape. "
-        "`dump` has no directory/package fan-out at all -- no dump "
-        "capability produces a multi-library BundleFacts document -- so "
-        "this is not a duplicate spelling of a dump capability, and there "
-        "is no config vocabulary to merge into without inventing one purely "
-        "to move a path string. Revisit only if dump grows a release "
-        "fan-out."
+        "Ruled in Phase 7d, re-ruled 2026-10-31 once `dump` grew the release "
+        "fan-out (`dump RELEASE --bundle-facts-out PATH`): PATH names where "
+        "*this invocation's* evidence capture lands, exactly -o/--output's "
+        "shape, and there is no config vocabulary to merge it into. On "
+        "`compare` it captures the OLD side the comparison already "
+        "extracted, at no second extraction; on `dump` it captures a "
+        "release with no comparison. One producer "
+        "(`workflows.release_bundle.write_bundle_facts_out`), two "
+        "legitimate triggers, so both spellings are kept."
     ),
     # ── Gate, contract and rendering surface ─────────────────────────────
     "--contract": _keep(
@@ -466,7 +467,20 @@ COMPARE_OPTION_RULINGS: dict[str, OptionRuling] = {
 #: points at ``compare``'s rather than restating it, and the two must move
 #: together.
 DUMP_OPTION_RULINGS: dict[str, OptionRuling] = {
+    "--variant": _keep(
+        "Same ruling as `compare --variant` (ADR-062 A1.7), for the one "
+        "operand a `--bundle-facts-out` capture reads: which VariantRef of a "
+        "stored ProjectSnapshot package declaring several. Unsided -- dump "
+        "has one operand -- and refused without --bundle-facts-out."
+    ),
     # ── Shared with compare, ruled identically (ADR-037 D8.1) ────────────
+    "--bundle-facts-out": _keep(
+        "Same ruling as `compare --bundle-facts-out` (re-ruled 2026-10-31): "
+        "PATH names where this invocation's release capture lands, a "
+        "per-run operand like -o/--output, which it replaces. Same spelling "
+        "and document as compare's, one producer; on dump it captures a "
+        "release with no comparison (the known gap closed that day)."
+    ),
     "--header": _keep(
         "Same ruling as `compare --header`: the canonical L2 evidence input."
     ),
