@@ -658,12 +658,11 @@ def test_unsupported_route_rejects_explicitly(
         ],
     )
     assert r.exit_code == 64, r.output
-    # A flag's capability guard says "not supported"; a `--set` key the
-    # fan-out does not forward is refused as "does not apply <key> yet"
-    # (`config_set.reject_unforwarded_release_overrides`).
-    assert "not supported" in r.output or (
-        "does not apply" in r.output and "yet" in r.output
-    ), r.output
+    # Each axis names its own refusal: a flag's capability guard says "not
+    # supported"; a `--set` key the fan-out does not forward is refused as
+    # "does not apply <key> yet" (`config_set.reject_unforwarded_release_overrides`).
+    expected = a.refusal_text.get(route, "not supported")
+    assert expected in " ".join(r.output.split()), r.output
 
 
 def test_release_reports_the_probe_matrix_at_release_level(tmp_path: Path) -> None:

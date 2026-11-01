@@ -259,6 +259,9 @@ class Axis:
     #: -- for a setting whose flag was retired into config (e.g.
     #: ``scope.public``, one-comparison-product Phase 9b).
     config_keys: tuple[str, ...] = ()
+    #: route -> the text its refusal must contain, when it is not the flag
+    #: capability guard's "not supported" (a refused ``--set`` key names itself).
+    refusal_text: Mapping[str, str] = field(default_factory=dict)
 
 
 def _suppress_file(tmp: Path) -> Path:
@@ -429,6 +432,9 @@ AXES: tuple[Axis, ...] = (
         unsupported={
             "release": "a directory/package compare refuses --set "
             "consumers.required_symbols (a contract scopes one library)"
+        },
+        refusal_text={
+            "release": "does not apply consumers.required_symbols yet",
         },
     ),
     Axis(

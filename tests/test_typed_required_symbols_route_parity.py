@@ -222,6 +222,25 @@ def test_typed_result_equals_the_cli_report(
     assert cli["policy"] == (policy or "plugin_abi")
 
 
+@pytest.mark.parametrize("entries", ["empty list", "empty file only"])
+def test_a_contract_stating_no_symbol_scopes_nothing_on_either_route(
+    tmp_path: Path, entries: str
+) -> None:
+    """The key is present but names no symbol: neither route records a
+    contract or moves the policy to plugin_abi."""
+    empty = tmp_path / "empty.syms"
+    empty.write_text("# nothing yet\n", encoding="utf-8")
+    values = [] if entries == "empty list" else [f"@{empty}"]
+    result, report = _cli(tmp_path, values)
+    assert result.exit_code in (0, 2, 4), result.output
+    cli = json.loads(report.read_text(encoding="utf-8"))
+    typed = json.loads(to_json(_typed(tmp_path, values).diff))
+    for name in _COMPARED_FIELDS:
+        assert typed.get(name) == cli.get(name), name
+    assert typed.get("required_symbol_contract") is None
+    assert typed["policy"] == "strict_abi"
+
+
 def test_no_contract_leaves_the_typed_result_unscoped(tmp_path: Path) -> None:
     """The negative control: without the key, neither route records a
     contract, and the typed policy stays the default."""
