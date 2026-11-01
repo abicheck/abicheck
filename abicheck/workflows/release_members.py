@@ -36,6 +36,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..buildsource.header_graph_ast_projection import header_graph_bisection_scope
 from ..checker_types import DiffResult
+from ..deadline import DeadlineExceeded
 from ..model.symbol_inventory import SymbolInventory
 from . import cache_counters, memory_trace, release_snapshot_retention
 from .crosscheck_ownership import release_level_checks, release_owned_checks_scope
@@ -249,6 +250,11 @@ def compare_release_member(key: str, ctx: ReleaseMemberContext) -> dict[str, obj
         reporter.persist(entry, result)
         memory_trace.mark("release.member.persist:done", key=key)
         return entry
+    except DeadlineExceeded:
+        # The run's budget is spent: not this member's failure but the
+        # whole run's, aborted by the front end (exit 5) -- recording it as
+        # one ERROR member would let the rest of the run read as evidence.
+        raise
     except Exception as exc:
         failure = classify_member_failure(exc, library=old_path.name)
         if failure.not_comparable_kind is not None:
@@ -504,6 +510,8 @@ def _compare_parallel(
     and memory admission reach every worker thread)."""
 
     def _on_error(exc: Exception, key: str) -> dict[str, object]:
+        if isinstance(exc, DeadlineExceeded):
+            raise exc  # the run's budget, see compare_release_member
         entry, notice = dispatch_failure_entry(exc, ctx.old_map[key].name)
         ctx.reporter.notice(notice)
         return entry

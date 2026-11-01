@@ -60,6 +60,11 @@ class _Pipe:
         self.outcome = outcome
         self.closed = False
 
+    def poll(self, timeout: float | None = None) -> bool:
+        # A pipe holding an answer, EOF or a broken frame polls readable, as a
+        # real multiprocessing Connection does.
+        return True
+
     def recv(self) -> object:
         if isinstance(self.outcome, BaseException):
             raise self.outcome

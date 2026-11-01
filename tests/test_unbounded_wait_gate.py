@@ -42,12 +42,10 @@ import pytest
 REPO = Path(__file__).resolve().parent.parent
 SCAN_ROOT = REPO / "abicheck"
 
-_CHILD_PIPE_GAP = (
-    "KNOWN GAP, docs/contribute/known-gaps.md: a child that is alive but never "
-    "answers or exits blocks this read indefinitely. Bounding it needs a time "
-    "policy for unbudgeted runs (a maintainer decision); under --budget the "
-    "deadline could bound it, but workflows may not import the unclassified "
-    "deadline module yet (architecture/dispositions.yaml)."
+_POLLED_FIRST = (
+    "read only after recv.poll(deadline.wait_bound(...)) reports data: bounded by "
+    "the run's deadline, or the 2-hour DEFAULT_BUDGET_S with none active "
+    "(ADR-068's 2026-11 amendment); tests/test_budget_default.py pins the expiry"
 )
 
 #: ``(relative path, call text) -> (exact site count, reason)``.
@@ -137,14 +135,8 @@ ALLOWED_UNBOUNDED: dict[tuple[str, str], tuple[int, str]] = {
         1,
         "as_completed yields only finished futures",
     ),
-    ("abicheck/workflows/release_admission.py", "self._cond.wait()"): (
-        1,
-        "waits for an in-flight member to release its budget; ends when that "
-        "member settles (see the child-pipe gap)",
-    ),
-    ("abicheck/workflows/keyed_process_pool.py", "recv.recv()"): (1, _CHILD_PIPE_GAP),
-    ("abicheck/workflows/keyed_process_pool.py", "wait_ready()"): (1, _CHILD_PIPE_GAP),
-    ("abicheck/workflows/side_isolation.py", "recv.recv()"): (1, _CHILD_PIPE_GAP),
+    ("abicheck/workflows/keyed_process_pool.py", "recv.recv()"): (1, _POLLED_FIRST),
+    ("abicheck/workflows/side_isolation.py", "recv.recv()"): (1, _POLLED_FIRST),
 }
 
 _WAIT_METHODS = frozenset(

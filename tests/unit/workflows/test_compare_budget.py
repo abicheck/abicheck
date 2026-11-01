@@ -20,6 +20,7 @@ from __future__ import annotations
 import click
 import pytest
 
+from abicheck import deadline
 from abicheck.deadline import current_deadline_ts
 from abicheck.frontends.cli.compare_input_validation import (
     enter_budget_scope,
@@ -67,9 +68,14 @@ def test_parse_budget_seconds_rejects_non_finite_or_negative(value: str) -> None
         parse_budget_seconds(value)
 
 
-def test_budget_deadline_is_unbounded_without_a_budget() -> None:
+def test_budget_deadline_defaults_to_two_hours_without_a_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # ADR-068's 2026-11 amendment: no stated budget is a 2h deadline, never none.
+    monkeypatch.setattr(deadline, "_clock", lambda: 100.0)
     with budget_deadline(None):
-        assert current_deadline_ts() is None
+        assert current_deadline_ts() == 100.0 + 7200.0
+    assert current_deadline_ts() is None
 
 
 def test_budget_deadline_bounds_the_block_and_releases_it() -> None:
@@ -89,11 +95,17 @@ def test_parse_budget_option_passes_valid_value_through() -> None:
     assert parse_budget_option("15m") == pytest.approx(900.0)
 
 
-def test_enter_budget_scope_is_a_no_op_without_a_budget() -> None:
+def test_enter_budget_scope_enters_the_default_without_a_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(deadline, "_clock", lambda: 50.0)
     ctx = click.Context(click.Command("compare"))
     enter_budget_scope(ctx, None)
+    try:
+        assert current_deadline_ts() == 50.0 + 7200.0
+    finally:
+        ctx.close()
     assert current_deadline_ts() is None
-    ctx.close()
 
 
 def test_enter_budget_scope_releases_on_context_close() -> None:

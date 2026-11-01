@@ -149,8 +149,13 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
                 "directories or packages. Choose one of: "
                 f"{', '.join(sorted(_RELEASE_FORMATS))}."
             )
+    from ....cli_compare_fold import _exit_on_budget_overflow
     from ....cli_compare_release import compare_release_cmd
+    from ....deadline import DeadlineExceeded
 
+    # The run's deadline (--budget, else the 2-hour default) is ambient; it
+    # is not a release-engine parameter.
+    budget = kwargs.pop("budget", None)
     assert compare_release_cmd.callback is not None
     try:
         compare_release_cmd.callback(**kwargs)
@@ -158,3 +163,18 @@ def _dispatch_release_compare(ctx: click.Context, **kwargs: Any) -> None:
         if exc.ctx is None:
             exc.ctx = ctx
         raise
+    except DeadlineExceeded as exc:
+        # The same exit-5 abort a single pair renders: the release is
+        # incomplete, never a clean pass (ADR-065).
+        old_dir, new_dir = kwargs["old_dir"], kwargs["new_dir"]
+        _exit_on_budget_overflow(
+            exc,
+            budget,
+            f"{old_dir} -> {new_dir}",
+            new_dir.name,
+            kwargs.get("old_version") or "",
+            kwargs.get("new_version") or "",
+            fmt=fmt,
+            output=kwargs.get("output"),
+            secondary_writes=secondary_writes,
+        )

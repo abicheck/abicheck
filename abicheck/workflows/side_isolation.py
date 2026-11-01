@@ -258,8 +258,12 @@ def _with_ast_sizes(fn: Callable[[], _T]) -> Callable[[], tuple[_T, int]]:
     return run
 
 
+_SIDE_WAIT = "a side-resolution child process"
+
+
 def _run_children(ctx: Any, fns: list[Callable[[], _T]]) -> list[_T]:
     from ..storage.ast_size_observer import report_ast_size
+    from .run_deadline import wait_bound, wait_expired
 
     started: list[tuple[Any, Any]] = [
         fork_child(ctx, _with_ast_sizes(fn)) for fn in fns
@@ -274,6 +278,12 @@ def _run_children(ctx: Any, fns: list[Callable[[], _T]]) -> list[_T]:
                 # Unpickling builds the whole snapshot graph at once; a gen-0
                 # collection every few hundred allocations would rescan it
                 # repeatedly for garbage it cannot contain yet.
+                # Bounded by the run's deadline (2 h by default): a child
+                # that is alive but never answers -- deadlocked on a lock its
+                # fork copied held -- fails the run instead of hanging it;
+                # the finally below terminates it.
+                if not recv.poll(wait_bound(_SIDE_WAIT)):
+                    raise wait_expired(_SIDE_WAIT)
                 with gc_paused():
                     status, value = recv.recv()
             except EOFError:

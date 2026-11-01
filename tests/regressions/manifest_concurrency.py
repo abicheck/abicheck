@@ -185,7 +185,10 @@ CONCURRENCY_BUG_CLASSES: tuple[BugClass, ...] = (
             "in: an abandoned child gets a bounded SIGTERM grace and is then "
             "SIGKILLed. A forked child inherits the parent's Python SIGTERM "
             "handler, which can block on a lock the fork copied held, so "
-            "reaping must never depend on SIGTERM alone."
+            "reaping must never depend on SIGTERM alone. A child that is "
+            "alive but never answers is waited on for at most the run's "
+            "deadline (the 2h default when no budget is stated), then "
+            "stopped, and the run exits 5."
         ),
         fixed_by=(1395,),
         seed_tests=(
@@ -195,6 +198,7 @@ CONCURRENCY_BUG_CLASSES: tuple[BugClass, ...] = (
             # the AST gate keeps new unbounded waits out of abicheck/.
             "tests/test_forked_child_bounded_reap.py",
             "tests/test_unbounded_wait_gate.py",
+            "tests/test_budget_default.py",
         ),
         public_surfaces=("cli",),
         axes={

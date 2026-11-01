@@ -5219,7 +5219,7 @@ else
       # preflight rejects the input upfront for that shape before ever
       # invoking the CLI).
       VERDICT="BUDGET_OVERFLOW"
-      echo "::warning::abicheck exceeded the configured --budget (exit code 5). Pin a shallower --depth or raise the budget; a budget never silently shrinks scope."
+      echo "::warning::abicheck exceeded its time budget (exit code 5): the budget input, or the 2h default when budget is empty. No verdict was produced. Set a longer budget (e.g. budget: 4h) or pin a shallower --depth; a budget never silently shrinks scope."
       ;;
     8) VERDICT="REMOVED_LIBRARY" ;;
     16) VERDICT="NOT_COMPARABLE" ;;
@@ -6121,7 +6121,7 @@ else
   # `FINAL_EXIT=1` check, so a budget overflow silently regressed from a
   # failing step to a passing one.
   if [[ "$VERDICT" == "BUDGET_OVERFLOW" ]]; then
-    echo "::error::abicheck exceeded the configured --budget (exit code 5). Pin a shallower --depth or raise the budget; a budget never silently shrinks scope."
+    echo "::error::abicheck exceeded its time budget (exit code 5): the budget input, or the 2h default when budget is empty. No verdict was produced. Set a longer budget (e.g. budget: 4h) or pin a shallower --depth; a budget never silently shrinks scope."
     FINAL_EXIT=1
   fi
 

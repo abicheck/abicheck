@@ -114,12 +114,31 @@ def maybe_dispatch_no_baseline_compare(
     from ....cli_resolve import classify_compare_operand
 
     kind = classify_compare_operand(candidate)
-    if kind in _SET_OPERAND_KINDS:
-        from .compare_no_baseline_set import run_no_baseline_set_cmd
+    # The 2-hour default deadline bounds the audit too; `--budget` itself
+    # is not wired to this route yet (no_baseline_rulings), so it cannot
+    # be raised here.
+    from ....deadline import DeadlineExceeded
+    from ....workflows.run_deadline import DEFAULT_BUDGET_TEXT
+    from ..compare_input_validation import enter_budget_scope
 
-        run_no_baseline_set_cmd(ctx, candidate, kind, kwargs)
-        return True
-    _run_no_baseline_compare_cmd(ctx, candidate, **kwargs)
+    enter_budget_scope(ctx, None)
+    try:
+        if kind in _SET_OPERAND_KINDS:
+            from .compare_no_baseline_set import run_no_baseline_set_cmd
+
+            run_no_baseline_set_cmd(ctx, candidate, kind, kwargs)
+            return True
+        _run_no_baseline_compare_cmd(ctx, candidate, **kwargs)
+    except DeadlineExceeded as exc:
+        click.echo(
+            f"Error: the default {DEFAULT_BUDGET_TEXT} budget was exceeded while "
+            f"auditing {candidate}: {exc}. No verdict was produced. "
+            "compare --no-baseline cannot raise it yet; split the candidate "
+            "into smaller audits, pin a shallower --depth, or run a two-sided "
+            "compare with a longer --budget.",
+            err=True,
+        )
+        sys.exit(5)
     return True
 
 

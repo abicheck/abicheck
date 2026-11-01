@@ -63,7 +63,6 @@ def _reject_set_input_flags(
     use_cases_manifest: Path | None = None,
     diagnostic_comparison: bool = False,
     include_labels: dict[Path, str] | None = None,
-    budget: str | None = None,
     pdb_path: Path | None = None,
 ) -> None:
     """Reject single-pair-only flags on a directory/package (release) compare.
@@ -190,15 +189,6 @@ def _reject_set_input_flags(
             "thread the include labels into its per-library "
             "dumps, so the label would be silently dropped. Compare the "
             "specific library individually to use it."
-        )
-    if budget is not None:
-        raise click.UsageError(
-            "--budget is not supported for directory/package (release) "
-            "comparisons yet: the per-library "
-            "fan-out dispatches each member through its own process/thread, "
-            "so a single ambient deadline set here would not reach any of "
-            "them, silently ignoring the budget instead of enforcing it. "
-            "Compare a specific library individually to use --budget."
         )
 
 

@@ -374,7 +374,6 @@ def run_compare(
             diagnostic_comparison=diagnostic_comparison,
             include_labels=include_labels,
             use_cases_manifest=use_cases_manifest,
-            budget=budget,
             pdb_path=pdb_path,
         )
         note_unapplied_post_manifest(
@@ -598,6 +597,7 @@ def run_compare(
                 )
             _dispatch_release_compare(
                 ctx,
+                budget=budget,
                 old_dir=old_input,
                 new_dir=new_input,
                 project_policy_overrides=project_policy_overrides,

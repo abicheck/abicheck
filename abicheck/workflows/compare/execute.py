@@ -130,21 +130,29 @@ def run_compare_request(request: CompareRequest) -> CompareResult:
     re-exported from ``service.py`` unchanged, the same pattern
     ``resolve_compare_request``/``classify_compare_pair`` already use.
 
-    ADR-068 §3 #19: ``request.budget_s`` (``None`` = unbounded) bounds both
-    phases under one ``deadline.deadline_scope``. A typed caller gets a
-    clear :class:`~abicheck.deadline.DeadlineExceeded` rather than a partial
+    ADR-068 §3 #19: ``request.budget_s`` bounds both phases under one
+    deadline; ``None`` is the 2-hour default, or the deadline already active
+    around this call (:func:`~abicheck.workflows.compare.budget.budget_deadline`).
+    A typed caller gets a clear :class:`~abicheck.deadline.DeadlineExceeded`
+    (with a note saying how to set a longer budget) rather than a partial
     result -- ``cli_compare_helpers.run_compare`` is what maps this axis
     onto exit 5 for the CLI, which needs an exit code instead.
     """
     import abicheck.deadline as deadline
 
+    from .budget import budget_deadline, budget_overflow_hint
+
     request = _with_config_overrides(request)
-    with deadline.deadline_scope(request.budget_s):
-        # deadline_scope never raises on entry -- check() before the work
-        # `resolve_compare_request` performs at its own top.
-        deadline.check()
-        pair = resolve_compare_request(request)
-        return classify_compare_pair(request, pair)
+    try:
+        with budget_deadline(request.budget_s):
+            # The scope never raises on entry -- check() before the work
+            # `resolve_compare_request` performs at its own top.
+            deadline.check()
+            pair = resolve_compare_request(request)
+            return classify_compare_pair(request, pair)
+    except deadline.DeadlineExceeded as exc:
+        exc.add_note(budget_overflow_hint(stated=request.budget_s is not None))
+        raise
 
 
 def _with_config_overrides(request: CompareRequest) -> CompareRequest:
