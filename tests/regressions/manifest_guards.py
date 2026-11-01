@@ -160,11 +160,13 @@ GUARD_BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=(
             "tests/test_exit_rank_table.py",
             "tests/test_exit_precedence_matrix.py",
+            # H2 cell: a refused pair exits 16 on the scalar and release routes.
+            "tests/test_family_f2_route_parity.py",
         ),
-        # `()`: the seed tests call the policy resolvers directly.
-        public_surfaces=(),
+        public_surfaces=("cli",),
         axes={
             "cardinality": ("scalar", "one_member_release"),
+            "route": ("policy_resolver", "cli_scalar", "cli_directory_release"),
             "scheme": ("legacy", "severity"),
             "dominant_axes": ("none", "every_subset_of_four"),
         },

@@ -383,6 +383,8 @@ _F2 = (
     "cli.default_format_unreachable_operand",
     "release.cartesian_product_contract",
     "gate.per_member_axis_fold",
+    # Two exit ladders spelled the dominant-axis order out separately.
+    "gate.dominant_axis_precedence_drift",
     "gating.consumer_scope_enrichment",
     "scoping.declaration_kind_forwarded_unfiltered",
     "scoping.aggregate_view_starvation",
