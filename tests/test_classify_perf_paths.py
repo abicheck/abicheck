@@ -861,9 +861,9 @@ class TestTheHeaderGraphGateSharesTheL2RunnerSafely:
         for flag in (
             "--baseline base_header_graph.json",
             "--regress-tolerance 0.3",
-            "--regress-min-delta-ms 90",
-            "--regress-min-delta-ms-dump 120",
-            "--regress-min-delta-ms-total 180",
+            "--regress-min-delta-ms 10",
+            "--regress-min-delta-ms-dump 30",
+            "--regress-min-delta-ms-total 40",
             "--regress-min-delta-ms-attach_peak_rss 48",
             "--regress-min-delta-ms-attach_end_rss 48",
             "--require-all-metrics",

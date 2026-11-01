@@ -865,30 +865,22 @@ jobs:
             ./hg_head_env/bin/python head/scripts/check_header_graph_perf.py \
               --sizes 25 100 400 --repeat 5 --require-castxml \
               --baseline base_header_graph.json \
-              --regress-tolerance 0.3 --regress-min-delta-ms 90 \
-              --regress-min-delta-ms-dump 120 \
-              --regress-min-delta-ms-total 180 \
+              --regress-tolerance 0.3 --regress-min-delta-ms 10 \
+              --regress-min-delta-ms-dump 30 \
+              --regress-min-delta-ms-total 40 \
               --regress-min-delta-ms-attach_peak_rss 48 \
               --regress-min-delta-ms-attach_end_rss 48 \
               --require-all-metrics \
               --json-out reports/perf/header_graph.json \
               | tee header_graph_regression.txt
-            # The time floors were raised (2026-11, ADR-062 D11) from 10/30/40 ms
-            # to 90/120/180 ms. Content-keyed caches hash every compiler system
-            # header (~4.3k files) on each cache-key derivation, and one dump +
-            # attach derives about three keys on purpose: the dump cache and the
-            # clang backend re-derive after the parse to refuse a result whose
-            # inputs changed mid-run, so that work cannot be memoized across the
-            # request. With stat-validated persistent digests it is a constant
-            # ~30 ms per derivation, independent of library size: measured on
-            # the 25-header fixture as dump +92 ms, attach +73 ms, total +137 ms,
-            # and within the 30% relative tolerance at 400 headers. The relative
-            # tolerance is unchanged, so a size-scaling regression still fails.
             # Every metric is gated independently: the three time ones
             # (dump_ms/attach_ms/total_ms) plus the two memory ones
             # (attach_peak_rss_mib/attach_end_rss_mib). The absolute floors
-            # differ per metric because the metrics differ in size: attach_ms
-            # is the smallest window, dump_ms and total_ms the larger ones.
+            # differ per metric because the metrics differ by roughly an order
+            # of magnitude in size: a shared 10ms floor is right for attach_ms
+            # but is well inside runner noise for the ~100ms+ dump and total
+            # windows, where it would reduce the gate to the relative
+            # tolerance alone.
             #
             # The two memory floors are in MiB (the flag keeps its historical
             # `-ms-` spelling; the value is read in the metric's own unit) and
