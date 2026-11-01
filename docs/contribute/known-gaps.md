@@ -50,8 +50,8 @@ Next, unranked (the `--no-baseline` one-sided-detector gap, the target-platform 
 
 ### Scalar and release `compare` still fold the exit code in two places (2026-10-07)
 
-**Status (2026-10-12): PARTIAL, narrowed further.** The evidence-contract precedence (exit 7) is decided by one owner, `policy/exit_decision_precedence.py::resolve_evidence_over_ordinary`, for both paths; `tests/test_exit_precedence_matrix.py` pins both resolvers' exit codes over their per-axis matrices. Two resolvers remain: `policy/exit_decision.py::resolve_compare_exit_decision` (scalar) and `policy/exit_decision_precedence.py::resolve_release_exit_decision` (release), which keeps the release-only axes (`not_comparable`, the mode-dependent removed-library rank, the operational floor, the release-global fold) separate.  
-`hygiene` — Scalar and release `compare` still use two precedence resolvers (`resolve_compare_exit_decision` and `resolve_release_exit_decision`), so the exit-code rules can drift between the two paths. [Full write-up](known-gaps/scalar-and-release-compare-still-fold-the-exit-code-in-two.md)
+**Status (2026-11-01): PARTIAL, one cell family awaiting a ruling.** Both ladders (`resolve_compare_exit_decision_with_abort_axes`, scalar; `resolve_release_exit_decision`, release) now delegate dominant-axis precedence to one rank table, `policy/exit_rank.py::COMPARE_EXIT_RANK`, tested on its own (`tests/test_exit_rank_table.py`). All 512 N=1 cells were enumerated; the ladders agree field for field except the 128 cells where a budget overflow (5) decides the scalar exit and the evidence contract does not fire: the release ladder has no budget input. That family is pinned by `tests/test_exit_precedence_matrix.py::TestOneMemberCellDiff` and awaits a maintainer ruling under ADR-064 before the scalar path can call the release ladder directly.  
+`hygiene` — Scalar and release `compare` still have two ladder entry points; they share one rank table, and at N=1 differ only on the budget-overflow axis the release ladder cannot express. [Full write-up](known-gaps/scalar-and-release-compare-still-fold-the-exit-code-in-two.md)
 
 ## Open and partially open gaps
 

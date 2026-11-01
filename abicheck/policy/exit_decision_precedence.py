@@ -44,10 +44,10 @@ generic contribution parameters with a plain ``max()`` (see
 
 from __future__ import annotations
 
-import dataclasses
 from typing import TYPE_CHECKING
 
 from .exit_decision import ExitDecision, ExitReason, resolve_exit_decision
+from .exit_rank import _dominant_decision, resolve_ranked
 
 if TYPE_CHECKING:
     from datetime import date
@@ -58,126 +58,6 @@ if TYPE_CHECKING:
     from ..policy_file import PolicyFile
     from .effective_gate import EffectiveGate
     from .severity import SeverityConfig
-
-#: Which of :class:`ExitDecision`'s four ADR-064 fields corresponds to each
-#: dominant :class:`ExitReason`. `_dominant_decision` uses this so exactly
-#: one of the four is ever set (to `code`), keeping `code == max()` over
-#: every field literally true rather than merely true "by convention."
-_DOMINANT_FIELD = {
-    ExitReason.EVIDENCE_CONTRACT_ERROR: "evidence_contract_error_contribution",
-    ExitReason.BUDGET_OVERFLOW: "budget_overflow_contribution",
-    ExitReason.NOT_COMPARABLE: "not_comparable_contribution",
-    ExitReason.REMOVED_REQUIRED_LIBRARY: "removed_required_library_contribution",
-}
-
-
-def _dominant_decision(
-    code: int,
-    reason: ExitReason,
-    *,
-    prior: ExitDecision | None = None,
-    compatibility_contribution: int = 0,
-    contract_coverage_contribution: int = 0,
-    analysis_assurance_contribution: int = 0,
-    evidence_contract_error_contribution: int = 0,
-    operational_error_contribution: int = 0,
-    incomplete_scope_contribution: int = 0,
-    no_comparison_completed_contribution: int = 0,
-    additions_review_contribution: int = 0,
-    unused_rules_contribution: int = 0,
-) -> ExitDecision:
-    """One of ADR-064's four axes overrides whatever the ordinary
-    gate/coverage/assurance fold would otherwise have decided.
-
-    Sets *reason*'s own dedicated field (`_DOMINANT_FIELD`) to *code* --
-    the only one of the four ADR-064 fields this decision ever sets to
-    nonzero -- so `ExitDecision`'s own `code == max()` invariant holds
-    literally, not merely "by convention," even though this decision was
-    reached by an early-return override rather than a flat fold.
-
-    *prior* is the ordinary :class:`ExitDecision` already computed for this
-    run before the dominant axis fired, when the caller has one available
-    (e.g. `scan`'s budget check runs *after* a comparable baseline compare
-    already built a full decision) -- its four PR-G1 contributions are
-    carried through so a report reader can see what the gate/coverage/
-    assurance/crosscheck axes actually were, even though they did not
-    decide `code`. The three `*_contribution` keywords are a narrower
-    escape hatch for a caller that has one or more already-computed
-    *values* available but no full prior `ExitDecision` object to pass
-    (the release fan-out's own removed-required-library and
-    not-comparable branches, which receive the aggregated verdict/severity
-    code and coverage floor as bare ints). Leave everything at its `0`
-    default -- genuinely "not asked," not "evaluated and came out clean"
-    -- only when nothing was computed at all (no `DiffResult` exists yet:
-    `scan`'s evidence-contract error).
-
-    Every dominant `code` this module produces (`1`/`5`/`6`/`8`/`16`) is
-    chosen so it always exceeds any contribution the ordinary fold or a
-    release's own severity/coverage axes can produce (`0`-`4`) -- so
-    carrying a prior/raw value through here can never make `code` stop
-    being the maximum contribution -- **enforced**, not merely assumed:
-    every caller's *_code default is safe today, but
-    :func:`resolve_scan_exit_decision` also accepts a caller-supplied custom
-    code (for a future command with the same axes but different numbering,
-    per ADR-064's "numbers are not unified across commands" rule), and a
-    custom code that does not exceed a preserved prior/raw contribution
-    would silently produce an object violating `ExitDecision`'s own
-    `code == max(contributions)` invariant and drop a genuinely tied axis
-    from `reasons` (Codex review, fresh evidence, with the exact
-    counter-example: a custom code of `1` alongside a preserved
-    compatibility contribution of `4`). Fail loudly instead.
-    """
-    dominant_field = _DOMINANT_FIELD[reason]
-    # One mapping feeds both the guard's `preserved` tuple and the built
-    # `ExitDecision`, so the two cannot disagree about which axes it carries
-    # (two earlier revisions listed them separately and dropped a field).
-    raw: dict[str, int] = {
-        "compatibility_contribution": compatibility_contribution,
-        "contract_coverage_contribution": contract_coverage_contribution,
-        "analysis_assurance_contribution": analysis_assurance_contribution,
-        "evidence_contract_error_contribution": evidence_contract_error_contribution,
-        "operational_error_contribution": operational_error_contribution,
-        "incomplete_scope_contribution": incomplete_scope_contribution,
-        "no_comparison_completed_contribution": no_comparison_completed_contribution,
-        "additions_review_contribution": additions_review_contribution,
-        "unused_rules_contribution": unused_rules_contribution,
-    }
-    # A field that is *also* the dominant axis is not a preserved value: it
-    # is set to `code` below. Generic, where this was a hand-written special
-    # case for the one field that then applied --
-    # `evidence_contract_error_contribution` is both preservable and
-    # dominant-capable.
-    if dominant_field in raw:
-        raw[dominant_field] = 0
-    preserved: tuple[int, ...]
-    if prior is not None:
-        # Every contribution *prior* carries except the dominant one, read
-        # off the dataclass: a hand-written list here dropped each axis added
-        # after it was written (the additions-review axis first).
-        preserved = tuple(
-            getattr(prior, f.name)
-            for f in dataclasses.fields(prior)
-            if f.name not in ("code", "reasons") and f.name != dominant_field
-        )
-    else:
-        preserved = tuple(raw.values())
-    if code <= max(preserved, default=0):
-        raise ValueError(
-            f"{reason.value}'s code ({code}) must strictly exceed every "
-            f"preserved contribution {preserved} -- a custom code that "
-            "only ties or falls below one would either violate "
-            "ExitDecision's own code == max(contributions) invariant "
-            "(if lower) or silently drop a genuinely tied axis from "
-            "`reasons` (if equal)"
-        )
-    if prior is not None:
-        return dataclasses.replace(
-            prior, code=code, reasons=(reason,), **{dominant_field: code}
-        )
-    contributions = dict(raw)
-    contributions[dominant_field] = code
-    return ExitDecision(code=code, reasons=(reason,), **contributions)
-
 
 #: ADR-064's exit code for a failed evidence contract, and ADR-037 D5's
 #: before it: a run that pinned evidence (`--depth build`/`--depth source`,
@@ -197,6 +77,9 @@ EXIT_EVIDENCE_CONTRACT_ERROR = 7
 #: (``gate.fail_on_removed_library``).
 EXIT_RELEASE_NOT_COMPARABLE = 16
 EXIT_REMOVED_REQUIRED_LIBRARY = 8
+
+#: ADR-064's budget-overflow code, shared by `scan` and the scalar `compare`.
+EXIT_BUDGET_OVERFLOW = 5
 
 
 def resolve_evidence_over_ordinary(
@@ -234,7 +117,7 @@ def resolve_scan_exit_decision(
     budget_overflow: bool = False,
     not_comparable: bool = False,
     evidence_contract_error_code: int = EXIT_EVIDENCE_CONTRACT_ERROR,
-    budget_overflow_code: int = 5,
+    budget_overflow_code: int = EXIT_BUDGET_OVERFLOW,
     not_comparable_code: int = 6,
     prior_decision: ExitDecision | None = None,
 ) -> ExitDecision | None:
@@ -335,25 +218,16 @@ def resolve_compare_exit_decision_with_abort_axes(
 
     Same signature and same ordinary gate/coverage/assurance fold as
     :func:`~abicheck.policy.exit_decision.resolve_compare_exit_decision` (in
-    fact calls it directly for that fold) -- this wrapper lives in this
-    sibling module, not that one, purely so it can call
-    :func:`resolve_scan_exit_decision` without `exit_decision.py` importing
-    *this* module back (this module already imports from `exit_decision.py`
-    at the top of the file; the reverse edge would be a fresh import cycle
-    the AI-readiness `import-cycle-growth` gate rejects -- "move shared
-    logic to a leaf module both sides can depend on" per `AGENTS.md`'s own
-    "Don't" list).
+    fact calls it directly for that fold), which lives in the sibling module
+    because that module may not import this one back (import cycle). The two
+    abort axes are ranked by the shared table
+    (:data:`~.exit_rank.COMPARE_EXIT_RANK`), the same one the release ladder
+    uses: the evidence contract (7) outranks the budget overflow (5), and the
+    ordinary fold is kept for explainability.
 
     `result.evidence_contract_error`/`.budget_overflow` default `False` on
-    every `DiffResult` any existing caller builds (`compare` has no
-    CLI-reachable trigger for either yet -- no `--budget` flag, and
-    ADR-037 D5's auto-strict `--depth`/`--source-method` enforcement remains
-    `scan`-only), so for every pre-existing invocation this returns exactly
-    what the wrapped ordinary fold does. When a `DiffResult` does carry one,
-    the ordinary fold is still computed first and passed through as
-    `resolve_scan_exit_decision`'s own `prior_decision` -- see that
-    function's own docstring for which of the two axes preserves it and
-    which does not; this wrapper does not alter either rule, only calls it.
+    every `DiffResult` any existing caller builds, so for those this returns
+    exactly the ordinary fold.
     *today*, forwarded to the ordinary fold, keeps this agreeing with an
     already-frozen ``ReportEnvelope`` (Codex review, fresh evidence).
 
@@ -368,18 +242,32 @@ def resolve_compare_exit_decision_with_abort_axes(
     ordinary = resolve_compare_exit_decision(result, gate, today=today)
     evidence_contract_error = getattr(result, "evidence_contract_error", False)
     budget_overflow = getattr(result, "budget_overflow", False)
-    if not (evidence_contract_error or budget_overflow):
-        return ordinary
-    # `resolve_scan_exit_decision` only returns `None` when none of its four
-    # axes apply -- unreachable here, since at least one of the two we pass
-    # is always `True` by the guard above.
-    dominant = resolve_scan_exit_decision(
-        evidence_contract_error=evidence_contract_error,
-        budget_overflow=budget_overflow,
-        prior_decision=ordinary,
+    # The shared rank table orders the evidence contract (7) above the budget
+    # overflow (5), the order `resolve_scan_exit_decision` applies, and keeps
+    # the ordinary fold for explainability.
+    return resolve_ranked(
+        {
+            ExitReason.EVIDENCE_CONTRACT_ERROR: (
+                EXIT_EVIDENCE_CONTRACT_ERROR if evidence_contract_error else 0
+            ),
+            ExitReason.BUDGET_OVERFLOW: EXIT_BUDGET_OVERFLOW if budget_overflow else 0,
+        },
+        ordinary=ordinary,
     )
-    assert dominant is not None
-    return dominant
+
+
+def resolve_compare_not_comparable_exit_decision() -> ExitDecision:
+    """The scalar ``compare``'s comparability refusal (ADR-050 D2), exit 16.
+
+    The refusal fires before any ``DiffResult`` exists, so nothing else was
+    computed: the decision is the shared rank table's ``not_comparable`` axis
+    over an empty fold, the same axis and code a release member's refusal
+    gets from :func:`resolve_release_exit_decision`.
+    """
+    return resolve_ranked(
+        {ExitReason.NOT_COMPARABLE: EXIT_RELEASE_NOT_COMPARABLE},
+        ordinary=resolve_exit_decision(compatibility_contribution=0),
+    )
 
 
 def resolve_release_exit_decision(
@@ -525,129 +413,32 @@ def resolve_release_exit_decision(
     from a raw set difference), so an unproven unmatched member reaches
     this resolver as the scope axis instead.
     """
-    if not_comparable:
-        # *verdict_or_severity_contribution*, *contract_coverage_
-        # contribution* and *operational_error_contribution* are all
-        # already-resolved parameters at this point regardless of which
-        # branch below would otherwise run -- `not_comparable` short-
-        # circuits *this* function's own choice among them, it does not
-        # mean nothing was computed upstream (a release's aggregated
-        # severity/coverage code is folded across every library before
-        # `_exit_compare_release` is even called). Carry them through for
-        # explainability; `16` always exceeds any of them (severity/verdict/
-        # operational-error codes cap at `4`, coverage at `1`), so
-        # `reasons` still names only `NOT_COMPARABLE`.
-        return _dominant_decision(
-            EXIT_RELEASE_NOT_COMPARABLE,
-            ExitReason.NOT_COMPARABLE,
-            compatibility_contribution=verdict_or_severity_contribution,
-            contract_coverage_contribution=contract_coverage_contribution,
-            analysis_assurance_contribution=analysis_assurance_contribution,
-            # The evidence branch below is unreachable once this returns, so
-            # without this a release that is `not_comparable` *and* short of
-            # its pinned rung would report `0` for the axis while the member
-            # entry and stderr both record it (Codex review). `16` > `7`, so
-            # `code`/`reasons` are unchanged; only the report gains the fact.
-            evidence_contract_error_contribution=evidence_contract_error_contribution,
-            operational_error_contribution=operational_error_contribution,
-            incomplete_scope_contribution=incomplete_scope_contribution,
-            no_comparison_completed_contribution=no_comparison_completed_contribution,
-            additions_review_contribution=additions_review_contribution,
-            unused_rules_contribution=unused_rules_contribution,
+    # Mode-dependent rank of a proven removed library (see above): active
+    # always under severity, under legacy only once the verdict/operational
+    # fold is `0`. This decides *whether* the axis fired; where it ranks
+    # (below `not_comparable`, above the evidence contract) is the shared
+    # table's (`exit_rank.COMPARE_EXIT_RANK`), the same one the scalar ladder
+    # uses. A proven removal (ADR-065 D6) rests on inventory completeness, not
+    # on the depth evidence the exit-7 axis reports short, so an unrelated
+    # depth shortfall must not hide it (Codex review, P2).
+    removal_is_active = removed_required_library and (
+        severity_scheme_active
+        or (
+            verdict_or_severity_contribution == 0
+            and operational_error_contribution == 0
         )
-
-    if evidence_contract_error_contribution:
-        # Below `not_comparable`, and below a *proven* removed library --
-        # which is a correction of this branch as first written (Codex
-        # review, P2). Two independent reasons, and the second is the
-        # stronger one:
-        #
-        # 1. A proven removal (ADR-065 D6: NEW's own inventory asserted
-        #    complete) does not rest on the depth evidence this axis
-        #    reports short. Depth governs change detection *within* a
-        #    library; the removal set comes from *inventory* completeness.
-        #    The first version of this branch justified outranking `8` on
-        #    the grounds that an unmet contract "never established what
-        #    changed, including whether the removal set is trustworthy" --
-        #    that conflates the two, and ADR-065 already refuses to emit
-        #    `8` at all on an unproven inventory, so the distrust it
-        #    guarded against cannot reach here.
-        # 2. It was not even representable. `_dominant_decision` requires
-        #    the dominant `code` to exceed every contribution it carries
-        #    (`ExitDecision`'s documented `code == max(...)` invariant,
-        #    pinned by `test_dominant_decisions_satisfy_the_code_equals_
-        #    max_invariant`), so "dominant `7`, preserved `8`" has no legal
-        #    encoding. Ranking evidence first therefore had to *drop* the
-        #    removal axis -- which dropped the exit from `8` to `7` and
-        #    turned `run_outcome.gate` from `abi_breaking` to `none`, so an
-        #    unrelated depth shortfall hid a removed library outright.
-        #
-        # `removed_required_library` alone is not enough to prefer it: its
-        # rank is mode-dependent (see this function's docstring), so it is
-        # only an active axis where the scheme below would actually have
-        # honoured it -- always under severity, and under legacy only once
-        # the verdict/operational fold is `0`. Where it is *not* active the
-        # evidence axis decides and carries no removal contribution, which
-        # is honest rather than lossy: the axis genuinely did not apply.
-        removal_is_active = removed_required_library and (
-            severity_scheme_active
-            or (
-                verdict_or_severity_contribution == 0
-                and operational_error_contribution == 0
-            )
-        )
-        if removal_is_active:
-            return _dominant_decision(
-                EXIT_REMOVED_REQUIRED_LIBRARY,
-                ExitReason.REMOVED_REQUIRED_LIBRARY,
-                compatibility_contribution=verdict_or_severity_contribution,
-                contract_coverage_contribution=contract_coverage_contribution,
-                analysis_assurance_contribution=analysis_assurance_contribution,
-                evidence_contract_error_contribution=evidence_contract_error_contribution,
-                operational_error_contribution=operational_error_contribution,
-                incomplete_scope_contribution=incomplete_scope_contribution,
-                no_comparison_completed_contribution=no_comparison_completed_contribution,
-                additions_review_contribution=additions_review_contribution,
-                unused_rules_contribution=unused_rules_contribution,
-            )
-        return resolve_evidence_over_ordinary(
-            code=evidence_contract_error_contribution,
-            ordinary=resolve_exit_decision(
-                compatibility_contribution=verdict_or_severity_contribution,
-                contract_coverage_contribution=contract_coverage_contribution,
-                analysis_assurance_contribution=analysis_assurance_contribution,
-                operational_error_contribution=operational_error_contribution,
-                incomplete_scope_contribution=incomplete_scope_contribution,
-                no_comparison_completed_contribution=no_comparison_completed_contribution,
-                additions_review_contribution=additions_review_contribution,
-                unused_rules_contribution=unused_rules_contribution,
+    )
+    return resolve_ranked(
+        {
+            ExitReason.NOT_COMPARABLE: (
+                EXIT_RELEASE_NOT_COMPARABLE if not_comparable else 0
             ),
-        )
-
-    if severity_scheme_active:
-        if removed_required_library:
-            # `contract_coverage_contribution`/`operational_error_
-            # contribution` are preserved even though today's real
-            # `_exit_compare_release` never reads them once this branch's
-            # own `sys.exit(8)` fires first -- both are already-computed,
-            # available values (the caller resolves them unconditionally
-            # before calling this function at all), and `8` always exceeds
-            # either (`0`/`1` and `0`/`4` respectively), so preserving them
-            # cannot affect `code`/`reasons`, only the report's
-            # explainability.
-            return _dominant_decision(
-                EXIT_REMOVED_REQUIRED_LIBRARY,
-                ExitReason.REMOVED_REQUIRED_LIBRARY,
-                compatibility_contribution=verdict_or_severity_contribution,
-                contract_coverage_contribution=contract_coverage_contribution,
-                analysis_assurance_contribution=analysis_assurance_contribution,
-                operational_error_contribution=operational_error_contribution,
-                incomplete_scope_contribution=incomplete_scope_contribution,
-                no_comparison_completed_contribution=no_comparison_completed_contribution,
-                additions_review_contribution=additions_review_contribution,
-                unused_rules_contribution=unused_rules_contribution,
-            )
-        return resolve_exit_decision(
+            ExitReason.REMOVED_REQUIRED_LIBRARY: (
+                EXIT_REMOVED_REQUIRED_LIBRARY if removal_is_active else 0
+            ),
+            ExitReason.EVIDENCE_CONTRACT_ERROR: evidence_contract_error_contribution,
+        },
+        ordinary=resolve_exit_decision(
             compatibility_contribution=verdict_or_severity_contribution,
             contract_coverage_contribution=contract_coverage_contribution,
             analysis_assurance_contribution=analysis_assurance_contribution,
@@ -656,44 +447,7 @@ def resolve_release_exit_decision(
             no_comparison_completed_contribution=no_comparison_completed_contribution,
             additions_review_contribution=additions_review_contribution,
             unused_rules_contribution=unused_rules_contribution,
-        )
-
-    # Legacy scheme: a nonzero fold of the verdict/severity and operational-
-    # error axes wins outright, ahead of removed-required-library -- checked
-    # only once both are 0.
-    if verdict_or_severity_contribution != 0 or operational_error_contribution != 0:
-        return resolve_exit_decision(
-            compatibility_contribution=verdict_or_severity_contribution,
-            contract_coverage_contribution=contract_coverage_contribution,
-            analysis_assurance_contribution=analysis_assurance_contribution,
-            operational_error_contribution=operational_error_contribution,
-            incomplete_scope_contribution=incomplete_scope_contribution,
-            no_comparison_completed_contribution=no_comparison_completed_contribution,
-            additions_review_contribution=additions_review_contribution,
-            unused_rules_contribution=unused_rules_contribution,
-        )
-    if removed_required_library:
-        # Both axes are 0 here by construction (the branch above already
-        # returned otherwise); coverage is preserved for the same reason
-        # as the severity-scheme branch above.
-        return _dominant_decision(
-            EXIT_REMOVED_REQUIRED_LIBRARY,
-            ExitReason.REMOVED_REQUIRED_LIBRARY,
-            contract_coverage_contribution=contract_coverage_contribution,
-            analysis_assurance_contribution=analysis_assurance_contribution,
-            incomplete_scope_contribution=incomplete_scope_contribution,
-            no_comparison_completed_contribution=no_comparison_completed_contribution,
-            additions_review_contribution=additions_review_contribution,
-            unused_rules_contribution=unused_rules_contribution,
-        )
-    return resolve_exit_decision(
-        compatibility_contribution=0,
-        contract_coverage_contribution=contract_coverage_contribution,
-        analysis_assurance_contribution=analysis_assurance_contribution,
-        incomplete_scope_contribution=incomplete_scope_contribution,
-        no_comparison_completed_contribution=no_comparison_completed_contribution,
-        additions_review_contribution=additions_review_contribution,
-        unused_rules_contribution=unused_rules_contribution,
+        ),
     )
 
 
