@@ -238,3 +238,14 @@ def test_a_recorded_path_identifies_by_its_last_component(tmp_path: Path) -> Non
 
     assert recorded_library_name(path) == "libfoo.so.1"
     assert path_identity("x.json", path) == "libfoo.so"
+
+
+def test_an_unopenable_path_has_no_recorded_library(tmp_path: Path) -> None:
+    """Never raises: a path that exists but cannot be read as a file (a
+    directory; an unreadable file reaches the same `SnapshotError` branch
+    of the compression probe) records no library and keys by its own name."""
+    directory = tmp_path / "libdir.so"
+    directory.mkdir()
+
+    assert recorded_library_name(directory) is None
+    assert path_identity("libdir.so", directory) == "libdir.so"

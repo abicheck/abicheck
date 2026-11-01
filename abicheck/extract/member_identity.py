@@ -52,6 +52,7 @@ _HEAD_BYTES = 64
 def _looks_like_json_document(path: Path) -> bool:
     """A plain JSON object on disk, or a recognizably compressed file (the
     snapshot reader decodes gzip/zstd by magic bytes, ADR-059)."""
+    from ..errors import SnapshotError
     from ..snapshot_io import SnapshotCompression, detect_snapshot_compression
 
     try:
@@ -59,7 +60,9 @@ def _looks_like_json_document(path: Path) -> bool:
             return True
         with open(path, "rb") as fh:
             head = fh.read(_HEAD_BYTES)
-    except (OSError, ValueError):
+    except (OSError, ValueError, SnapshotError):
+        # `detect_snapshot_compression` reports an unopenable path as
+        # `SnapshotError`; such a path is simply not a readable document.
         return False
     return head.lstrip().startswith(b"{")
 
