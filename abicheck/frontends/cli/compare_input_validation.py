@@ -45,18 +45,18 @@ def parse_budget_option(value: str | None) -> float | None:
 
 
 def enter_budget_scope(ctx: click.Context, budget_s: float | None) -> None:
-    """Set ``--budget``'s deadline for the rest of this Click invocation.
+    """Set the run's deadline for the rest of this Click invocation.
 
     Entered once, as early as possible -- inline ``--sources``/
     ``--build-info`` embedding included (Codex review: entering only around
     resolution left it unbounded). ``ctx.call_on_close`` (not a ``with``
     wrapping the rest of this function) releases it on every early exit
     Click already tears the context down for, so it never leaks into the
-    next ``CliRunner`` invocation in the same test process. A no-op for
-    ``budget_s is None`` (``--budget`` omitted) -- unbounded, as today.
+    next ``CliRunner`` invocation in the same test process.
+    ``budget_s is None`` (``--budget`` omitted) is the 2-hour default
+    (:func:`~abicheck.workflows.compare.budget.budget_deadline`), never
+    unbounded.
     """
-    if budget_s is None:
-        return
     scope = budget_deadline(budget_s)
     scope.__enter__()
     ctx.call_on_close(lambda: scope.__exit__(None, None, None))

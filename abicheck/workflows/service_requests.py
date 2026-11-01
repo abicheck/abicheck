@@ -232,7 +232,8 @@ class CompareRequest:
     # otherwise silently keep running L2.
     depth: str | None = None
     # ADR-068 §3 #19, absorbed from `ScanRequest.budget`: a wall-clock guard
-    # (seconds; `None` = unbounded); `run_compare_request` raises
+    # (seconds; `None` = the 2-hour default `deadline.DEFAULT_BUDGET_S`, or
+    # the deadline already active around the call); `run_compare_request` raises
     # `deadline.DeadlineExceeded` on overflow. `kw_only` (CodeRabbit review)
     # since it's inserted before positional fields below (`dwarf_only` etc).
     budget_s: float | None = field(default=None, kw_only=True)

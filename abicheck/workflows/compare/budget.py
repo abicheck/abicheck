@@ -23,10 +23,11 @@ finiteness rule live here so every front end parses a budget the same way.
 from __future__ import annotations
 
 import math
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, nullcontext
 
-from ...deadline import deadline_scope
+from ...deadline import current_deadline_ts, deadline_scope
 from ...errors import ValidationError
+from ..run_deadline import DEFAULT_BUDGET_S, DEFAULT_BUDGET_TEXT
 
 #: ADR-068 §3 #19: ``time``-style unit suffixes. A bare number is seconds.
 DURATION_UNITS: dict[str, int] = {"s": 1, "m": 60, "h": 3600}
@@ -39,7 +40,7 @@ class BudgetError(ValidationError):
 def parse_budget_seconds(value: str | None) -> float | None:
     """Parse a ``time``-style duration (``15m``/``900s``/``1h``) to seconds.
 
-    ``None``/empty means no budget. Raises :class:`BudgetError` for an
+    ``None``/empty means none was stated (the caller applies the default). Raises :class:`BudgetError` for an
     unparseable, non-finite, or negative value.
     """
     if not value:
@@ -71,9 +72,62 @@ def parse_budget_seconds(value: str | None) -> float | None:
     return seconds
 
 
-def budget_deadline(budget_s: float | None) -> AbstractContextManager[None]:
-    """The wall-clock scope a parsed ``--budget`` bounds, entered by the caller.
+__all__ = [
+    "DEFAULT_BUDGET_S",
+    "DEFAULT_BUDGET_TEXT",
+    "DURATION_UNITS",
+    "BudgetError",
+    "budget_deadline",
+    "budget_overflow_hint",
+    "budget_overflow_message",
+    "parse_budget_seconds",
+]
 
-    ``None`` (``--budget`` omitted) is an unbounded scope, as before.
+
+def budget_deadline(budget_s: float | None) -> AbstractContextManager[None]:
+    """The wall-clock scope a compare run is bounded by, entered by the caller.
+
+    An explicit *budget_s* is its own scope. ``None`` (no budget stated)
+    keeps a deadline already active -- a release member's comparison runs
+    under its release's budget, not a fresh one -- and otherwise is
+    :data:`~abicheck.workflows.run_deadline.DEFAULT_BUDGET_S` (2 hours; ADR-068's
+    2026-11 amendment). A compare run is never unbounded.
     """
-    return deadline_scope(budget_s)
+    if budget_s is not None:
+        return deadline_scope(budget_s)
+    if current_deadline_ts() is not None:
+        return nullcontext()
+    return deadline_scope(DEFAULT_BUDGET_S)
+
+
+def budget_overflow_hint(*, stated: bool) -> str:
+    """The actionable half of a budget-overflow message, for every surface.
+
+    Says whether a stated budget or the default ran out, and how to set a
+    longer one: ``--budget`` on the CLI, the Action's ``budget`` input, or
+    ``CompareRequest.budget_s`` in the typed API.
+    """
+    how = (
+        "`--budget 4h` on the CLI, the Action's `budget` input, or "
+        "CompareRequest.budget_s (seconds) in the typed API"
+    )
+    if not stated:
+        return (
+            f"no budget was set, so the default {DEFAULT_BUDGET_TEXT} applied; "
+            f"set a longer one with {how}"
+        )
+    return f"raise it with {how}, or pin a shallower --depth"
+
+
+def budget_overflow_message(budget: str | None, label: str, exc: Exception) -> str:
+    """The CLI's one-line budget-overflow error for *label*, *budget* being
+    ``--budget`` as typed (``None``: the default applied)."""
+    stated = (
+        f"--budget {budget!r}"
+        if budget
+        else f"the default {DEFAULT_BUDGET_TEXT} budget"
+    )
+    return (
+        f"Error: {stated} exceeded while comparing {label}: {exc}. No verdict "
+        f"was produced; {budget_overflow_hint(stated=bool(budget))}."
+    )

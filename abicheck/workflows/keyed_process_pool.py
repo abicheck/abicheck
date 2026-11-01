@@ -43,8 +43,10 @@ from collections.abc import Callable, Sequence
 from multiprocessing.connection import wait as wait_ready
 from typing import TYPE_CHECKING, Any, TypeVar
 
+from ..deadline import DeadlineExceeded
 from ..errors import SnapshotError
 from . import memory_trace
+from .run_deadline import recv_bounded, wait_bound, wait_expired
 from .side_isolation import _TERMINATE_GRACE_SECONDS, fork_child, reap_child
 
 if TYPE_CHECKING:
@@ -53,6 +55,8 @@ if TYPE_CHECKING:
 __all__ = ["run_keyed_in_processes"]
 
 _T = TypeVar("_T")
+
+_MEMBER_WAIT = "a release member process"
 
 
 def _child_body(fn: Callable[[str], _T], key: str) -> Callable[[], tuple[_T, int]]:
@@ -72,13 +76,19 @@ def _child_body(fn: Callable[[str], _T], key: str) -> Callable[[], tuple[_T, int
 
 
 def _receive(recv: Any, proc: Any) -> tuple[str, Any]:
-    """One child's answer: ``("ok", (value, ast_bytes))`` or ``("err", exc)``."""
-    from ..storage.acyclic_json import gc_paused
+    """One child's answer: ``("ok", (value, ast_bytes))`` or ``("err", exc)``.
 
+    Raises :class:`~abicheck.deadline.DeadlineExceeded` when the run's
+    deadline passes first.
+    """
+
+    # The whole frame is read under the run's deadline: a pipe reported
+    # ready can still hold only part of a frame from a child that stopped
+    # mid-send, and a plain recv() would block on the rest for ever.
     try:
-        # Unpickling builds a whole result graph at once; see side_isolation.
-        with gc_paused():
-            status, value = recv.recv()
+        status, value = recv_bounded(recv, _MEMBER_WAIT)
+    except DeadlineExceeded:
+        raise  # the run's budget, not this member's transfer failure
     except EOFError:
         # Bounded: a child that closed its pipe may still be alive; reap_child
         # in _settle (or the caller's finally) escalates to SIGKILL.
@@ -100,7 +110,16 @@ def _settle(
 ) -> tuple[_T, int]:
     """Collect one finished child: its value (or ``on_error``'s) and the
     header-AST bytes it reported."""
-    status, value = _receive(recv, proc)
+    try:
+        status, value = _receive(recv, proc)
+    except DeadlineExceeded:
+        # Already out of the caller's `running`, so its cleanup cannot see
+        # this child: stop it here.
+        if proc.is_alive():
+            proc.terminate()
+        recv.close()
+        reap_child(proc, escalate=True)
+        raise
     recv.close()
     reap_child(proc, escalate=status != "ok")
     if status == "ok":
@@ -143,7 +162,13 @@ def run_keyed_in_processes(
                 # Not daemonic: a member forks its own side children.
                 proc, recv = fork_child(ctx, _child_body(fn, key), daemon=False)
                 running[recv] = (key, proc, cost)
-            for recv in wait_ready(list(running)):
+            # Bounded by the run's deadline (2 h by default): members that
+            # are alive but never answer fail the run instead of hanging it;
+            # the finally below stops them.
+            ready = wait_ready(list(running), timeout=wait_bound(_MEMBER_WAIT))
+            if not ready:
+                raise wait_expired(_MEMBER_WAIT)
+            for recv in ready:
                 key, proc, cost = running.pop(recv)
                 ast_bytes = 0
                 try:

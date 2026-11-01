@@ -289,7 +289,7 @@
     },
     {
       "path": "abicheck/cli_compare_fold.py",
-      "baseline_lines": 922,
+      "baseline_lines": 919,
       "target": "workflows-or-frontends",
       "rule": "no_growth",
       "disposition": "migrate",

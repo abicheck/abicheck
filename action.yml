@@ -465,9 +465,11 @@ inputs:
     required: false
   budget:
     description: >
-      compare mode, two-sided shape only. Time guard (e.g. 15m, 900s, 1h).
-      The step FAILS on overflow (exit 5) — a budget never silently shrinks
-      scope. Maps to compare --budget. Rejected outright (step fails before
+      compare mode, two-sided shape only. Time guard (e.g. 15m, 900s, 1h);
+      empty means the 2h default, so no run is unbounded. The step FAILS on
+      overflow (exit 5) — a budget never silently shrinks scope. Set a
+      longer budget here when a large comparison needs more than 2h. Maps
+      to compare --budget. Rejected outright (step fails before
       any dependency install) for compare's audit-only shape (old-library
       and abi-baseline both omitted): compare --no-baseline does not wire
       the wall-clock guard to that path yet -- set old-library
@@ -1168,8 +1170,10 @@ outputs:
       so no comparison could run at all; this verdict fails the step
       unconditionally, since no fail-on-* input governs a run in which no
       comparison happened. Never reachable on the audit-only shape, which
-      has no baseline to mismatch against), BUDGET_OVERFLOW (two-sided
-      shape only, with the budget input), EVIDENCE_CONTRACT_ERROR
+      has no baseline to mismatch against), BUDGET_OVERFLOW (the run's time
+      budget ran out: the budget input on the two-sided shape, else the 2h
+      default; the audit-only shape runs under the 2h default and cannot
+      raise it), EVIDENCE_CONTRACT_ERROR
       (this run's evidence contract could not be satisfied
       -- so no comparison could run at all: a pinned --depth/--source-method
       whose required source evidence was never collected. Two-sided shape
@@ -1271,9 +1275,10 @@ outputs:
       --abi3-floor is rejected there upstream as an unsupported option (exit 64
       usage error), since stable-ABI auditing isn't wired to the
       no-baseline path yet -- see the verdict output's own description
-      above). budget/exit-5 does not apply to the audit-only shape
-      (rejected outright upstream, per the
-      budget input's own description).
+      above). 5 (budget overflow) applies to both shapes: the
+      two-sided shape's budget input, else the 2h default; the audit-only
+      shape rejects the budget input (per its own description) and runs
+      under the 2h default.
       deps-compare: 0 (pass), 1 (warn),
       4 (fail). deps-tree: 0 (ok), 1 (missing). Click CLI errors are mapped to
       VERDICT=ERROR.

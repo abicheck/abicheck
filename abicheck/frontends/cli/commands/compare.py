@@ -239,7 +239,7 @@ from .compare_routing import _RELEASE_FORMATS
     default=None,
     help="A wall-clock guard on this run's deadline-aware "
     "stages, so a CI job fails clearly (exit 5) instead of running "
-    "unbounded. A duration like 15m/900s/1h; unset means no budget.",
+    "unbounded. A duration like 15m/900s/1h; unset means the 2h default.",
 )
 @click.option(
     "--dry-run",

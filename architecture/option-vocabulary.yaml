@@ -28,6 +28,9 @@
 # renames:  the ADR-091 D5 change ids that will move members of this
 #           concept onto the canonical spelling; empty means already aligned
 #           or no change planned.
+# default:  the resolved built-in default where every surface leaves the
+#           option unset and the code supplies one value (D2: one default);
+#           a test pins it to the code's constant.
 # cli/config/action/python: inventory ids (cli "<command> <--option>",
 #           action "<action>:<input>", python "<Class>.<field>" or
 #           "<function>(<param>)").
@@ -797,6 +800,10 @@ concepts:
       - {id: 'action:changed-path', rule: name, accepted: true, rename: R20, note: action spelling breaks D1; the leaf is `changed_paths`}
   - concept: budget
     tier: config
+    # Resolved built-in default (ADR-068 2026-11 amendment): every surface
+    # leaves the option unset, and an unset budget resolves to this one value
+    # (abicheck.deadline.DEFAULT_BUDGET_S; pinned by tests/test_budget_default.py).
+    default: 2h
     renames: []
     cli:
       - compare --budget

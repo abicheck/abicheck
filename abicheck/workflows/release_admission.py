@@ -58,6 +58,9 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 
 from ..storage.ast_size_observer import observe_ast_sizes
+from .run_deadline import wait_bound, wait_expired
+
+_ADMISSION_WAIT = "memory admission (a running release member to finish)"
 
 __all__ = ["PEAK_PER_AST_BYTE", "MemoryAdmission"]
 
@@ -152,7 +155,11 @@ class MemoryAdmission:
                 and self._in_flight
                 and self._committed + cost > self._committable
             ):
-                self._cond.wait()
+                # Bounded by the run's deadline (2 h by default): a member
+                # that never settles fails the waiting one instead of
+                # hanging it.
+                if not self._cond.wait(timeout=wait_bound(_ADMISSION_WAIT)):
+                    raise wait_expired(_ADMISSION_WAIT)
                 cost = self._estimate()
             self._committed += cost
             self._in_flight += 1

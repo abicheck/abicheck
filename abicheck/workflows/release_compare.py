@@ -264,10 +264,13 @@ def execute_release_compare(
     :class:`~abicheck.errors.ReleaseOperandError` family for an unusable
     ``--manifest``/embedded manifest, ``--bundle-facts-out`` or one-sided
     probe matrix; a member's own failure never raises -- it becomes that
-    member's entry.
+    member's entry. An expired budget (the caller's deadline, else the
+    2-hour default) raises :class:`~abicheck.deadline.DeadlineExceeded`:
+    the whole run is incomplete, not one member.
     """
     from ..pack_application import resolve_bundle_policy_file
     from ..policy.release_outcome import apply_removed_member_floor
+    from .compare.budget import budget_deadline
     from .comparison_input_receipt import env_matrix_content_digest
     from .extraction import ast_acquisition_scope, resolve_package_debug_info
     from .header_exclusion_audit import observed_member_exclusion_identities
@@ -330,7 +333,10 @@ def execute_release_compare(
         else _resolve_typed_release_configuration(plan, o)
     )
 
-    with ast_acquisition_scope() as ast_scope:
+    # The caller's deadline (the CLI's --budget scope), else the 2-hour
+    # default, bounds the whole run: members, waits on them, and the
+    # surface/bundle/matrix stages; expiry raises DeadlineExceeded.
+    with budget_deadline(None), ast_acquisition_scope() as ast_scope:
         member_ctx = ReleaseMemberContext(
             request=release_parent_request(
                 pack_application,

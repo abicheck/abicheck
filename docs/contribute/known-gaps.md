@@ -513,11 +513,6 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 
 ### Hygiene
 
-#### A forked child that is alive but never answers blocks the parent's pipe read
-
-**Status (recorded 2026-10-28): OPEN.** The side-isolation receive (`side_isolation._run_children`, `recv.recv()`), the release member pool's receive (`keyed_process_pool`, `recv.recv()` and `wait_ready()`) and the release admission budget wait (`release_admission`, `self._cond.wait()`) return only when the child answers or its pipe reaches EOF. A child that is alive, deadlocked (for example on a lock its fork copied held) and never exits or closes its pipe therefore hangs the run when no `--budget` is set. The EOF and completed-child reap paths are bounded (R6, 2026-10-28), and `tests/test_unbounded_wait_gate.py` pins these three sites as the only unbounded waits left under `abicheck/`. Bounding them needs a time policy for an unbudgeted side (a maintainer decision). Under `--budget` the active deadline could bound them, but `workflows` may not import the unclassified `deadline` module yet (`architecture/dispositions.yaml`).  
-`hygiene` — A hang here is silent: the run neither fails nor finishes. Decide the unbudgeted time limit, then route these reads through the deadline.
-
 #### Release report: live and stored operands render different documents
 
 **Status (2026-10-25): CLOSED for the document shape.** A stored `BundleFacts` comparison renders the live release document: its JSON is the live release document (release schema 2.5), and JSON, Markdown, JUnit, `oneline` and HTML all come from one live-shaped evaluation of the stored facts (`tests/unit/report/test_release_document.py`, `tests/test_cli_compare_stored_release_parity.py`). Fields a stored comparison cannot compute are explicit `unavailable` markers with a reason, and its receipt is marked `reconstructed_from_stored_facts`. Remaining limits, named rather than hidden: the stored JUnit omits the passing testcase for each unchanged symbol (no old-side inventory); `output.view` `show=`, `sarif` and `review` stay refused for a stored OLD_INPUT.  
