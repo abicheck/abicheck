@@ -45,11 +45,14 @@ from ....workflows.extraction import ConfigOverrideError, validate_config_overri
 #: ``--no-baseline`` routes honour them the same way they honour the file. They
 #: are the ``set:`` replacements of the retired Action inputs ``dso-only``,
 #: ``include-private-dso`` and ``fail-on-removed-library`` (ADR-091 Phase 5).
+#: ``scope.on_incomplete`` is read the same way; ``check-target`` sets it from
+#: a ``bundles.<id>.on_incomplete`` policy.
 RELEASE_TOPOLOGY_OVERRIDE_PATHS: frozenset[str] = frozenset(
     {
         "release.dso_only",
         "release.include_private_dso",
         "gate.fail_on_removed_library",
+        "scope.on_incomplete",
     }
 )
 

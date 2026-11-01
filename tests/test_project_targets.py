@@ -32,10 +32,10 @@ import pytest
 from click.testing import CliRunner
 
 from abicheck.buildsource.inline import BuildConfig
+from abicheck.buildsource.project_bundles import BundleSpec
+from abicheck.buildsource.project_check_spec import CheckSpec
 from abicheck.buildsource.project_targets import (
     BaselineChannelSpec,
-    BundleSpec,
-    CheckSpec,
     ProfileSpec,
     ProjectTargetsConfig,
     TargetSpec,

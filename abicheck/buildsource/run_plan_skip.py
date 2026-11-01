@@ -34,7 +34,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from .project_targets import ProjectTargetsConfig
-from .run_plan_schema import RUN_PLAN_SCHEMA_SKIPPED
+from .run_plan_schema import RUN_PLAN_SCHEMA_BUNDLE_SCOPE, RUN_PLAN_SCHEMA_SKIPPED
 
 
 class DiagnosticSink(Protocol):
@@ -240,13 +240,16 @@ def schema_for_plan(
     has_gate: bool,
     skipped: bool,
     check_count: int,
+    bundle_scope: bool = False,
 ) -> str:
     """Which ``schema`` string a plan serializes under.
 
     Stamped in descending order of what an old reader must reject: ``skipped``
     is unreadable to a pre-v3 reader in a way that changes what the artifact
     means (see :data:`RUN_PLAN_SCHEMA_SKIPPED`), and a skipped plan has no
-    checks for a ``gate`` policy to apply to. *gate_schema* is passed in
+    checks for a ``gate`` policy to apply to. *bundle_scope* (a cell carries
+    a bundle scope policy) outranks ``gate``: v4 reads a gate block too.
+    *gate_schema* is passed in
     rather than imported so this module stays a leaf of ``run_plan`` instead
     of importing it back. *declared* (whatever the plan
     was constructed with) only survives when neither applies -- a
@@ -266,6 +269,10 @@ def schema_for_plan(
         )
     if skipped:
         return RUN_PLAN_SCHEMA_SKIPPED
+    if bundle_scope:
+        # v4 is a superset of v2's gate block, so it also covers a plan
+        # carrying both.
+        return RUN_PLAN_SCHEMA_BUNDLE_SCOPE
     if has_gate:
         return gate_schema
     return declared

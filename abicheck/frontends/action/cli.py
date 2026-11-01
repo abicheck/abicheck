@@ -571,6 +571,7 @@ def prepare_baseline_set_cmd(
 # the group and the shared helpers it uses are defined, the same way
 # `abicheck/cli.py` registers its own `cli_*` siblings.
 from . import (  # noqa: E402
+    cli_bundle_scope as _cli_bundle_scope,  # noqa: F401
     cli_integration as _cli_integration,  # noqa: F401
     cli_provenance as _cli_provenance,  # noqa: F401
 )

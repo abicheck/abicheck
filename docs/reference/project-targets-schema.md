@@ -143,7 +143,8 @@ This schema resolves it with two complementary mechanisms:
 
 ## `bundles:`
 
-A mapping of bundle id → `{targets: [...], checks: [...]}`. Every listed
+A mapping of bundle id → `{targets: [...], checks: [...], required: [...],
+on_incomplete: ...}`. Every listed
 target must be a declared `kind: library` target, and if that target itself
 sets a `bundle:` field, it must name this same bundle back — the validator
 flags a mismatch (e.g. a target claims `bundle: bundle-a` but only
@@ -166,6 +167,43 @@ and `channel` may not be `"none"` (a bundle's candidate is always a staged
 directory of member binaries, which `compare`'s audit-only shape — the
 no-baseline routing — rejects outright). Both are rejected at validation
 time.
+
+### Bundle scope policy: `required:` and `on_incomplete:`
+
+Two optional keys state which members a bundle check needs, so a project
+says it once in `.abicheck.yml` rather than on every invocation:
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `required` | non-empty list of member target ids | every member | The members that must be present. A subset of this bundle's `targets:`; a duplicate, an id outside `targets:`, or an explicit `[]` is refused when the config is parsed. |
+| `on_incomplete` | `fail` \| `warn` | the project's `scope.on_incomplete` (itself `warn` by default) | What a missing required member does to the check: `fail` floors its exit code at 1, `warn` reports it and leaves the exit code alone. |
+
+```yaml
+bundles:
+  release:
+    targets: [libcore, libio, libnet, libgpu, libcuda, librocm]
+    required: [libcore, libio, libnet, libgpu]  # libcuda/librocm may be missing
+    on_incomplete: fail
+    checks:
+      - {channel: release, depth: binary}
+```
+
+Declaring either key turns the policy on. The run plan's bundle cell then
+carries `bundle_required`/`bundle_on_incomplete` (run-plan schema
+[`v4`](run-plan-schema.md)), and [`check-target`](check-target.md) forwards
+the required members as `compare --select-required`, every other member as
+`--select`, and `on_incomplete` as `--set scope.on_incomplete=block|warn`.
+The selection keys are each member's canonical release key (its baseline
+binary's file name with the version suffix stripped, e.g. `libcore.so`), not
+the target id — `check-target` translates them from the resolved baseline.
+`check-project.yml` also stops refusing a bundle whose candidate is missing a
+member: it stages the members it finds and leaves the decision to the scope
+gate, which reports every missing member either way. A bundle with neither
+key behaves as before: every member must be staged on the candidate side.
+
+The baseline side is unchanged: a resolved bundle baseline still has every
+member (`resolve-baseline` reports `ambiguous` otherwise), so `required:`
+governs which candidate members may be absent, not which baseline members.
 
 **A bundle spanning multiple mandatory build-toolchain variants (e.g. a
 CPU build and a DPC++ build of the same release) must give its check an

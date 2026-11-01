@@ -142,14 +142,11 @@ from typing import Any
 from .build_output import BuildOutput
 from .build_output_profile import build_system_cell_fields
 from .check_report import build_check_id
+from .project_bundles import BundleSpec
+from .project_check_spec import CheckSpec
 from .project_profile_routing import DEFAULT_PROFILE_RUNNER_LABEL
-from .project_targets import (
-    TARGET_KIND_LIBRARY,
-    BundleSpec,
-    CheckSpec,
-    ProjectTargetsConfig,
-    TargetSpec,
-)
+from .project_targets import TARGET_KIND_LIBRARY, ProjectTargetsConfig, TargetSpec
+from .run_plan_gate import parse_run_plan_gate
 from .run_plan_profile_fields import (  # noqa: F401
     _compile_ast_frontend_for_profile,
     _compile_fields_for_profile,
@@ -172,6 +169,7 @@ from .run_plan_schema import (  # noqa: F401
     RUN_PLAN_SCHEMA_GATE,
     RUN_PLAN_SCHEMA_SKIPPED,
     _run_plan_schema_version,
+    reject_unversioned_bundle_scope,
 )
 from .run_plan_skip import (  # noqa: F401
     SKIP_CHECKS_DECLARED_NONE_RESOLVED,
@@ -190,76 +188,6 @@ RUN_PLAN_KIND_BUNDLE = "bundle"
 
 def _opt_str(value: Any, default: str = "") -> str:
     return str(value) if isinstance(value, str) and value else default
-
-
-def _parse_run_plan_gate(d: dict[str, Any]) -> tuple[str | None, str | None]:
-    """Validate a ``run-plan.json`` top-level ``gate`` block.
-
-    The key absent -> ``(None, None)``, same as everywhere else in this
-    module. Present but malformed -- not an object, an unknown key, or
-    a value outside :class:`~abicheck.workflows.aggregate.expected_targets.OnMissingRequired`/
-    :class:`~abicheck.workflows.aggregate.expected_targets.OnUnexpectedTarget` -- is a loud
-    :class:`~abicheck.workflows.aggregate.expected_targets.AggregateError`, not a silent
-    coercion to "no gate" (Codex review, fresh evidence: an earlier revision
-    treated any non-dict/malformed ``gate`` the same as an absent one, so a
-    corrupted or hand-authored v2 plan's requested policy could be silently
-    discarded and `aggregate` would fall back to the hard-coded defaults --
-    potentially reversing the requested CI outcome instead of failing loud).
-    Mirrors :func:`abicheck.workflows.aggregate.expected_targets._parse_manifest_gate`'s own
-    key/value validation exactly, kept as a separate function here (not a
-    shared call) since that function's own version check is shaped for the
-    manifest's ``MAJOR.MINOR`` scheme, not this module's ``vN`` one -- the
-    two callers already do their own, differently-shaped version checks.
-
-    Takes the whole top-level mapping (not a pre-extracted ``gate`` value)
-    so it can distinguish the key being absent from it being explicitly
-    present with a JSON ``null`` -- a plain ``.get("gate")`` on the caller's
-    side would conflate the two, and an explicit ``"gate": null`` (or a
-    sub-key like ``"missing_required": null``) is rejected outright rather
-    than silently treated the same as "not specified" (Codex review, fresh
-    evidence -- the same conflation the sibling manifest-side fix closes).
-    """
-    if "gate" not in d:
-        return None, None
-    gate_raw = d["gate"]
-    from ..workflows.aggregate import (
-        AggregateError,
-        OnMissingRequired,
-        OnUnexpectedTarget,
-    )
-
-    if gate_raw is None:
-        raise AggregateError("run-plan 'gate' must not be null")
-    if not isinstance(gate_raw, dict):
-        raise AggregateError("run-plan 'gate' must be an object")
-    unknown = sorted(set(gate_raw) - {"missing_required", "unexpected_target"})
-    if unknown:
-        raise AggregateError(f"run-plan 'gate': unknown key(s) {unknown!r}")
-    missing_required: str | None = None
-    if "missing_required" in gate_raw:
-        mr_raw = gate_raw["missing_required"]
-        if mr_raw is None:
-            raise AggregateError("run-plan 'gate.missing_required' must not be null")
-        try:
-            missing_required = OnMissingRequired(mr_raw).value
-        except ValueError as exc:
-            raise AggregateError(
-                f"run-plan 'gate.missing_required' {mr_raw!r} must be one of "
-                f"{[v.value for v in OnMissingRequired]}"
-            ) from exc
-    unexpected_target: str | None = None
-    if "unexpected_target" in gate_raw:
-        ut_raw = gate_raw["unexpected_target"]
-        if ut_raw is None:
-            raise AggregateError("run-plan 'gate.unexpected_target' must not be null")
-        try:
-            unexpected_target = OnUnexpectedTarget(ut_raw).value
-        except ValueError as exc:
-            raise AggregateError(
-                f"run-plan 'gate.unexpected_target' {ut_raw!r} must be one "
-                f"of {[v.value for v in OnUnexpectedTarget]}"
-            ) from exc
-    return missing_required, unexpected_target
 
 
 @dataclass
@@ -337,6 +265,13 @@ class RunPlanCheck:
     #: ``binary_pattern``, so a caller can stage a member-binaries directory
     #: without re-reading ``.abicheck.yml``.
     member_binary_patterns: dict[str, str] = field(default_factory=dict)
+    #: ``kind: bundle`` only -- the bundle's scope policy
+    #: (``project_bundles.BundleSpec``): the members forwarded as
+    #: ``--select-required`` (every other member as ``--select``), and
+    #: ``fail``/``warn`` for ``scope.on_incomplete``. ``[]``/``""`` = none
+    #: declared; a declared policy stamps ``RUN_PLAN_SCHEMA_BUNDLE_SCOPE``.
+    bundle_required: list[str] = field(default_factory=list)
+    bundle_on_incomplete: str = ""
     #: This cell's profile's ``compile.binding``, resolved to an exact
     #: executable path (P1 toolchain-profile audit) -- forwarded as
     #: ``check-target``'s ``gcc-path`` input. Empty unless the profile
@@ -427,6 +362,10 @@ class RunPlanCheck:
             d["bundle_members"] = list(self.bundle_members)
             if self.member_binary_patterns:
                 d["member_binary_patterns"] = dict(self.member_binary_patterns)
+            if self.bundle_required:
+                d["bundle_required"] = list(self.bundle_required)
+            if self.bundle_on_incomplete:
+                d["bundle_on_incomplete"] = self.bundle_on_incomplete
         else:
             d["target_kind"] = self.target_kind
             if self.baseline_target:
@@ -508,6 +447,10 @@ class RunPlanCheck:
                 str(x) for x in (d.get("bundle_members") or []) if isinstance(x, str)
             ],
             member_binary_patterns=member_patterns,
+            bundle_required=[
+                x for x in (d.get("bundle_required") or []) if isinstance(x, str)
+            ],
+            bundle_on_incomplete=_opt_str(d.get("bundle_on_incomplete")),
             compile_gcc_path=_opt_str(d.get("compile_gcc_path")),
             compile_gcc_options=_opt_str(d.get("compile_gcc_options")),
             consumer_compile_gcc_path=_opt_str(d.get("consumer_compile_gcc_path")),
@@ -560,7 +503,7 @@ class RunPlan:
 
     def _validated_gate(self) -> tuple[str | None, str | None]:
         """Validate :attr:`gate_missing_required`/:attr:`gate_unexpected_target`
-        against the same enum vocabulary :func:`_parse_run_plan_gate`
+        against the same enum vocabulary :func:`~.run_plan_gate.parse_run_plan_gate`
         enforces on read, so a direct construction (``RunPlan(...,
         gate_missing_required="bogus")``) cannot serialize an artifact this
         tool's own reader would reject (CodeRabbit review, fresh evidence --
@@ -606,6 +549,7 @@ class RunPlan:
             has_gate=has_gate,
             skipped=self.skipped is not None,
             check_count=len(self.checks),
+            bundle_scope=any(c.bundle_required for c in self.checks),
         )
         d: dict[str, Any] = {"schema": schema}
         if self.project:
@@ -643,7 +587,8 @@ class RunPlan:
                 "abicheck"
             )
         skipped = parse_skipped_block(d, schema=schema, version=version)
-        gate_missing_required, gate_unexpected_target = _parse_run_plan_gate(d)
+        reject_unversioned_bundle_scope(checks_raw, schema=schema, version=version)
+        gate_missing_required, gate_unexpected_target = parse_run_plan_gate(d)
         if "gate" in d and (version is None or version < 2):
             from ..workflows.aggregate import AggregateError
 
@@ -945,6 +890,10 @@ def _generate_bundle_checks(
                     gate_mode=check.gate_mode,
                     bundle_members=list(bundle.targets),
                     member_binary_patterns=member_patterns,
+                    bundle_required=(
+                        bundle.required_members if bundle.declares_scope_policy else []
+                    ),
+                    bundle_on_incomplete=bundle.on_incomplete,
                     compile_gcc_path=compile_gcc_path,
                     compile_gcc_options=compile_gcc_options,
                     consumer_compile_gcc_path=consumer_compile_gcc_path,

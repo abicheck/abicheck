@@ -39,6 +39,8 @@ TARGET_KIND="${INPUT_TARGET_KIND:-library}"
 NAME="${INPUT_NAME:-}"
 PROFILE="${INPUT_PROFILE:-}"
 BUNDLE_MEMBERS="${INPUT_BUNDLE_MEMBERS:-[]}"
+BUNDLE_REQUIRED="${INPUT_BUNDLE_REQUIRED:-}"
+BUNDLE_ON_INCOMPLETE="${INPUT_BUNDLE_ON_INCOMPLETE:-}"
 BASELINE_CHANNEL="${INPUT_BASELINE_CHANNEL:-}"
 BASELINE_PATH="${INPUT_BASELINE_PATH:-}"
 GATE_MODE="${INPUT_GATE_MODE:-local}"
@@ -203,6 +205,16 @@ if [[ "$KIND" == "bundle" ]]; then
   # abicheck/buildsource/project_targets.py's _check_issues is gone for the
   # same reason; there is nothing left for this guard to reject. The value
   # is still validated as a strict 'true'/'false' just below.
+fi
+# The bundle scope policy (bundles.<id>.required/on_incomplete). Its member
+# ids are checked against bundle-members by the 'Resolve bundle scope
+# selection' step, which has the baseline's binary-paths to translate them.
+case "$BUNDLE_ON_INCOMPLETE" in
+  '' | fail | warn) ;;
+  *) _fail "bundle-on-incomplete '$BUNDLE_ON_INCOMPLETE' is not recognized. Use 'fail' or 'warn', or leave it unset to inherit .abicheck.yml's scope.on_incomplete." ;;
+esac
+if [[ "$KIND" != "bundle" ]] && [[ ( -n "$BUNDLE_REQUIRED" && "$BUNDLE_REQUIRED" != "[]" ) || -n "$BUNDLE_ON_INCOMPLETE" ]]; then
+  _fail "bundle-required/bundle-on-incomplete apply only when kind is 'bundle' -- a target check has one member and no selection to state."
 fi
 case "$ALLOW_NEW_TARGET" in
   true | false) ;;

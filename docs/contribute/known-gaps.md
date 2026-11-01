@@ -558,11 +558,6 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 **Status (2026-10-22): PARTIAL.** The physical move and split landed: the detectors are in `compare/internal_leak.py`, the layout walk in `compare/internal_leak_paths.py`, the call-graph walk in `compare/internal_leak_graph.py`, and the subject classification in `compare/internal_leak_names.py`. Each is under the 800-line cap, and nothing re-exports from the old root path. Still open: `tests/test_internal_leak.py` (1933 lines) remains above the 1200-line test cap on its `no_growth` record.  
 `hygiene` — the leak rule is owned by `compare/` as four modules, but its main test module is still a `no_growth` grandfather and has not yet been split by behavior axis. [Full write-up](known-gaps/internal-leak-is-now-four-compare-modules-but-its-test.md)
 
-#### A directory/package `compare` cannot render sarif/review; `bundles:` cannot state scope policy
-
-**Status (2026-10-23): PARTIAL.** Closed: a directory/package `compare` now renders `sarif` (one run per library, each result stamped with `properties.releaseMember`) and `review` (a release digest rendered from the release JSON), so `RELEASE_FORMATS` is the full compare set minus `terminal`. Still open: BundleSpec has no scope-policy keys (`bundles:` cannot state scope policy at bundle level).  
-`hygiene` — `bundles:` has no scope-policy keys. [Full write-up](known-gaps/a-directorypackage-compare-cannot-render-sarifreview-bundles.md)
-
 #### Source-read licence: enforced at the one consumer, not repo-wide (2026-09-12)
 
 **Status (re-verified 2026-10-09 at `456989f`): OPEN.** Both deliberate residuals are still open: scripts/check_ai_readiness.py has no source-read licence gate (grep 'licen' finds only license-header checks), and there are no per-input content digests. The third residual is recorded as closed.  

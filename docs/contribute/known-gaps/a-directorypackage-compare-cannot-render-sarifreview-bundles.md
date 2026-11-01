@@ -11,7 +11,7 @@ generated: false
 
 Index: [Known gaps](../known-gaps.md)
 
-**Status (2026-10-23): PARTIAL.** The format set is closed: `sarif` and `review` now render for a directory/package `compare` (`abicheck/report/render_release_sarif.py`; `RELEASE_FORMATS` in `frontends/cli/commands/compare_routing.py`). Part 2 below (bundle-level scope policy) is still open.
+**Status (2026-11-01): CLOSED.** The format set closed on 2026-10-23: `sarif` and `review` render for a directory/package `compare` (`abicheck/report/render_release_sarif.py`; `RELEASE_FORMATS` in `frontends/cli/commands/compare_routing.py`). Part 2 (bundle-level scope policy) closed on 2026-11-01; see "How part 2 was closed" at the end. Archived in [closed known gaps](../archive/known-gaps-closed.md).
 
 
 Two halves of `one-comparison-product.md`'s bundle-parity item that this
@@ -68,3 +68,42 @@ config the Action reads. That is a `BundleSpec` schema addition plus a
 `check-target` input, in the ADR-047 project-targets layer — not a
 `compare` change, which is why it is listed separately from the format set
 above.
+
+## How part 2 was closed (2026-11-01)
+
+The maintainer chose option A: the scope policy lives on the `bundles:`
+entry, not on `checks:` and not as a new `check-target`-only knob.
+
+- `bundles.<id>.required` — a non-empty, duplicate-free subset of the
+  bundle's `targets:`; omitted means every member is required.
+  `bundles.<id>.on_incomplete` — `fail` or `warn`; omitted leaves the
+  project's `scope.on_incomplete` in charge. `fail` is the config spelling of
+  the CLI's `block` (one mapping, `model/release_selection.BUNDLE_ON_INCOMPLETE_TO_SCOPE`).
+- Owner: `buildsource/project_bundles.py` (`BundleSpec`). It was moved out of
+  `project_targets.py`, a no-growth file, together with `CheckSpec` and the
+  strict field readers (now the leaf `project_check_spec.py`), so the new
+  owner imports nothing back. `run_plan.py`'s gate-block parser moved to
+  `run_plan_gate.py` for the same reason; both files' debt baselines went
+  down.
+- Run plan: the bundle cell carries `bundle_required` (the effective
+  required members, so a consumer never has to re-derive the default) and
+  `bundle_on_incomplete`, and the plan is stamped `abicheck.run-plan/v4`.
+- Action: `check-target`'s `bundle-required`/`bundle-on-incomplete`. The one
+  non-obvious step is the key space: `--select-required` matches the
+  canonical release key of a member's *file* (`libfoo.so` for
+  `libfoo.so.1.2`), never the project target id, so passing target ids
+  through unchanged would have marked every present required member
+  expected-not-produced. `check-target` names each member by its baseline
+  binary (`resolve-baseline`'s `binary-paths`, complete for every resolved
+  bundle) and selects *every* member — required ones with
+  `--select-required`, the rest with `--select` — because a member left out
+  of a declared selection is out of scope and would not be compared at all.
+- `compare --set scope.on_incomplete=…` is now applied (it was refused).
+- `check-project.yml` stages the members it finds for a bundle that declares
+  a policy and leaves a missing one to the scope gate; without a policy every
+  member must still be staged.
+
+Not changed: a bundle baseline still needs every member
+(`baseline_set.resolve_bundle`), so `required:` governs which *candidate*
+members may be absent.
+

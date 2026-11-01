@@ -170,10 +170,11 @@ class TestSkippedBlockReadPath:
 
     def test_registry_reports_the_highest_schema_this_build_emits(self) -> None:
         """A registry still saying v2 tells a consumer it need only support
-        v2 against a build that can emit v3."""
+        v2 against a build that can emit v3 (and now v4, the bundle scope
+        policy)."""
         from abicheck import schemas
 
-        assert schemas.current("run-plan") == "abicheck.run-plan/v3"
+        assert schemas.current("run-plan") == "abicheck.run-plan/v4"
 
 
 class TestSkipEvidenceAgreesWithItsReason:

@@ -52,6 +52,26 @@ inputs:
       '["libpvxs", "libpvxsIoc"]'. Required when kind is bundle.
     required: false
     default: '[]'
+  bundle-required:
+    description: >
+      (kind: bundle only) JSON array of the member target ids that must be
+      present -- the bundle's `bundles.<id>.required` (run-plan
+      `bundle_required`). Each is forwarded to the analysis as
+      `--select-required <key>` and every other member as `--select <key>`,
+      where `<key>` is the canonical release key of the member's baseline
+      binary (resolve-baseline's `binary-paths`), not the target id. Empty
+      or '[]' (the default) means no scope policy was declared and nothing is
+      forwarded.
+    required: false
+    default: ''
+  bundle-on-incomplete:
+    description: >
+      (kind: bundle only) 'fail' or 'warn' -- the bundle's
+      `bundles.<id>.on_incomplete` (run-plan `bundle_on_incomplete`),
+      forwarded as `set: scope.on_incomplete=block|warn`. Empty (the
+      default) leaves `.abicheck.yml`'s own `scope.on_incomplete` in charge.
+    required: false
+    default: ''
   profile:
     description: 'The build profile.id this check runs under.'
     required: true
@@ -522,6 +542,8 @@ runs:
         INPUT_NAME: ${{ inputs.name }}
         INPUT_PROFILE: ${{ inputs.profile }}
         INPUT_BUNDLE_MEMBERS: ${{ inputs.bundle-members }}
+        INPUT_BUNDLE_REQUIRED: ${{ inputs.bundle-required }}
+        INPUT_BUNDLE_ON_INCOMPLETE: ${{ inputs.bundle-on-incomplete }}
         INPUT_BASELINE_CHANNEL: ${{ inputs.baseline-channel }}
         INPUT_BASELINE_PATH: ${{ inputs.baseline-path }}
         INPUT_GATE_MODE: ${{ inputs.gate-mode }}
@@ -1928,6 +1950,35 @@ runs:
           echo "$_extra_args_output_delim"
         } >> "$GITHUB_OUTPUT"
 
+    # ── Bundle scope policy (bundles.<id>.required/on_incomplete) ─────────
+    # Translates the declared required member ids into compare's selection
+    # arguments, keyed by each member's canonical release key -- the key
+    # space --select-required matches against, which a project target id is
+    # not part of (abicheck.workflows.bundle_scope_selection). A failure here
+    # stops the analysis: running the bundle without the declared policy
+    # would gate a missing member by whatever the project default says.
+    - name: Resolve bundle scope selection
+      id: bundle_selection
+      if: |
+        inputs.kind == 'bundle' &&
+        steps.resolve.outputs.outcome == 'resolved' &&
+        ((inputs.bundle-required != '' && inputs.bundle-required != '[]') || inputs.bundle-on-incomplete != '')
+      continue-on-error: true
+      shell: bash
+      env:
+        BUNDLE_MEMBERS: ${{ inputs.bundle-members }}
+        BUNDLE_REQUIRED: ${{ inputs.bundle-required }}
+        BUNDLE_ON_INCOMPLETE: ${{ inputs.bundle-on-incomplete }}
+        BUNDLE_BINARY_PATHS: ${{ steps.resolve.outputs.binary-paths }}
+      run: |
+        set -euo pipefail
+        PY="$(command -v python3 || command -v python)"
+        "$PY" -I -m abicheck.frontends.action.cli bundle-selection \
+          --members "$BUNDLE_MEMBERS" \
+          --required "${BUNDLE_REQUIRED:-[]}" \
+          --binary-paths "$BUNDLE_BINARY_PATHS" \
+          --on-incomplete "$BUNDLE_ON_INCOMPLETE" >> "$GITHUB_OUTPUT"
+
     - name: Compose root set overrides (analysis)
       id: root_set_main
       shell: bash
@@ -1938,6 +1989,7 @@ runs:
         ROOT_SET_BASE: ${{ inputs.set }}
         ROOT_FRONTEND: ${{ steps.consumer_context.outcome == 'success' && '' || inputs.frontend }}
         ROOT_COMPILE_OPTIONS: ${{ steps.consumer_context.outcome == 'success' && '' || inputs.compile-options }}
+        ROOT_BUNDLE_SCOPE_SET: ${{ steps.bundle_selection.outputs.set }}
       run: |
         python3 -I - >> "$GITHUB_OUTPUT" <<'PY'
         import json, os, shlex, uuid
@@ -1954,6 +2006,10 @@ runs:
         if opts:
             flags = [l for l in opts.splitlines() if l] if "\n" in opts else shlex.split(opts)
             lines.append("compile.options=" + json.dumps(flags))
+        # Last, so the bundle's declared policy wins over a caller's own
+        # scope.on_incomplete line (a later --set repeat wins).
+        if env("ROOT_BUNDLE_SCOPE_SET"):
+            lines.append(env("ROOT_BUNDLE_SCOPE_SET"))
         delim = "ABICHECK_ROOT_SET_" + uuid.uuid4().hex
         print("set<<" + delim)
         print("\n".join(lines))
@@ -1971,7 +2027,8 @@ runs:
         steps.collect_verify.outcome != 'failure' &&
         steps.collect_replay.outcome != 'failure' &&
         steps.consumer_context.outcome != 'failure' &&
-        steps.assurance_overlay.outcome != 'failure'
+        steps.assurance_overlay.outcome != 'failure' &&
+        steps.bundle_selection.outcome != 'failure'
       continue-on-error: true
       uses: ./.abicheck-check-target-src
       with:
@@ -2035,7 +2092,9 @@ runs:
         # forward its own `effective-extra-args` output in that case rather
         # than the raw input, so a since-merged `--config` doesn't ALSO
         # reach this invocation raw and collide with the overlay's own.
-        extra-args: ${{ steps.assurance_overlay.outcome == 'success' && steps.assurance_overlay.outputs.effective-extra-args || inputs.extra-args }}
+        # The bundle scope selection's `--select-required`/`--select` tokens
+        # (empty unless the bundle declared a policy) are appended last.
+        extra-args: ${{ format('{0} {1}', steps.assurance_overlay.outcome == 'success' && steps.assurance_overlay.outputs.effective-extra-args || inputs.extra-args, steps.bundle_selection.outputs.args) }}
         format: 'json'
         output-file: 'check-target-analysis.json'
         add-job-summary: 'false'
@@ -2078,5 +2137,6 @@ runs:
         COLLECT_REPLAY_OUTCOME: ${{ steps.collect_replay.outcome }}
         CONSUMER_CONTEXT_OUTCOME: ${{ steps.consumer_context.outcome }}
         ASSURANCE_OVERLAY_OUTCOME: ${{ steps.assurance_overlay.outcome }}
+        BUNDLE_SELECTION_OUTCOME: ${{ steps.bundle_selection.outcome }}
         ACTION_PATH: ${{ github.action_path }}
       run: bash "${{ github.action_path }}/run.sh"

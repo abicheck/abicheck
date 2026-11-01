@@ -29,18 +29,17 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .analysis_assurance_gate import analysis_assurance_issues
+from .project_bundles import BundleSpec
+from .project_check_spec import NO_BASELINE_CHANNEL, CheckSpec
 from .project_profile_routing import runner_label_for_os, unroutable_os_message
 from .project_targets import (
     BUNDLE_CHECK_DEPTHS,
     CHECK_DEPTHS,
     GATE_MODES,
-    NO_BASELINE_CHANNEL,
     TARGET_KIND_APP_CONSUMER,
     TARGET_KIND_LIBRARY,
     TARGET_KIND_PLUGIN_CONTRACT,
     BaselineChannelSpec,
-    BundleSpec,
-    CheckSpec,
     ProfileSpec,
     ProjectTargetsConfig,
     TargetSpec,

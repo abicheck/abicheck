@@ -2843,6 +2843,22 @@
    "default": "[]"
   },
   {
+   "id": "actions/check-target:bundle-required",
+   "action": "actions/check-target",
+   "input": "bundle-required",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "actions/check-target:bundle-on-incomplete",
+   "action": "actions/check-target",
+   "input": "bundle-on-incomplete",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
    "id": "actions/check-target:profile",
    "action": "actions/check-target",
    "input": "profile",

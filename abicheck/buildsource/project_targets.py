@@ -73,7 +73,9 @@ and deliberately left the choice to P1.5:
 target's) — the ADR-047 §5 run-plan emits a ``kind: "bundle"`` check
 alongside per-target ones (S14 bundle-scoped analysis), and that cell needs
 its own baseline-channel/depth/gate policy just like a target's does; see
-:class:`BundleSpec`.
+:class:`~.project_bundles.BundleSpec`, which also owns the bundle's scope
+policy (``required:``/``on_incomplete:``). ``CheckSpec`` and the strict
+field readers both parsers share live in :mod:`~.project_check_spec`.
 
 ``ProjectTargetsConfig.from_dict`` validates every top-level key in the raw
 mapping against :data:`~.build_config.KNOWN_TOP_LEVEL_KEYS` — the *full*
@@ -85,7 +87,7 @@ string (PyYAML's default resolver reads a bare ``on``/``off``/``yes``/``no``
 key as a bool and a bare digit key as an int; silently ``str()``-coercing
 either would mint an id the user never actually wrote). ``"none"`` is
 reserved and cannot be declared as a real ``baseline.channels`` id — it is
-:data:`NO_BASELINE_CHANNEL`, the sentinel a ``checks[].channel`` uses to
+:data:`~.project_check_spec.NO_BASELINE_CHANNEL`, the sentinel a ``checks[].channel`` uses to
 bypass ``resolve-baseline`` entirely (ADR-047 §6 S5); allowing a real
 channel of that name would make the sentinel ambiguous with an actual
 baseline lookup.
@@ -100,6 +102,14 @@ from typing import Any
 from ..model.evidence_depth_levels import USER_DEPTHS, EvidenceDepth
 from ..model.header_ast_frontends import HEADER_AST_FRONTENDS
 from .build_config import KNOWN_TOP_LEVEL_KEYS
+from .project_bundles import BundleSpec
+from .project_check_spec import (
+    CheckSpec,
+    opt_str_field,
+    parse_checks_list,
+    require_str_list,
+    unknown_keys,
+)
 from .project_compile_arg_guard import safe_profile_atom
 from .project_profile_routing import PROFILE_DEPENDENCY_SOURCES
 
@@ -143,65 +153,6 @@ CHECK_DEPTHS = frozenset(d.value for d in USER_DEPTHS)
 #: stages it); the candidate half does not -- see that module's docstring.
 BUNDLE_CHECK_DEPTHS = frozenset({EvidenceDepth.BINARY.value})
 
-#: Sentinel ``channel`` value for a ``baseline: none`` check (ADR-047 §6 S5
-#: correction) — ``check-target`` (P1.3) must skip ``resolve-baseline``
-#: entirely for a check carrying this value, never look it up as a declared
-#: channel name.
-NO_BASELINE_CHANNEL = "none"
-
-
-def _opt_str_field(d: dict[str, Any], key: str, *, where: str) -> str:
-    """A strictly-typed optional string field: absent/``None`` -> ``""``, any
-    non-string present value is a hard error (ADR-043 strict-config
-    convention — never silently coerced via ``str(...)``, unlike a bare
-    ``str(d.get(key, "") or "")`` which would turn e.g. a YAML list into the
-    synthetic string ``"['x']"``)."""
-    value = d.get(key)
-    if value is None:
-        return ""
-    if not isinstance(value, str):
-        raise ValueError(
-            f"{where}.{key} must be a string, got {type(value).__name__}: {value!r}"
-        )
-    return value
-
-
-def _require_str_list(d: dict[str, Any], key: str, *, where: str) -> list[str]:
-    """A strictly-typed optional list-of-strings field: absent -> ``[]``, a
-    non-list or a list containing a non-string element is a hard error."""
-    raw = d.get(key)
-    if raw is None:
-        return []
-    if not isinstance(raw, list):
-        raise ValueError(f"{where}.{key} must be a list of strings, got {raw!r}")
-    bad = [x for x in raw if not isinstance(x, str)]
-    if bad:
-        raise ValueError(f"{where}.{key} must be a list of strings, got {bad!r}")
-    return list(raw)
-
-
-def _parse_checks_list(d: dict[str, Any], *, where: str) -> list[CheckSpec]:
-    """Parse an optional ``checks:`` list, shared by ``TargetSpec``/
-    ``BundleSpec`` (both accept the identical shape — review finding)."""
-    checks_raw = d.get("checks")
-    if checks_raw is not None and not isinstance(checks_raw, list):
-        raise ValueError(f"{where}.checks must be a list")
-    checks: list[CheckSpec] = []
-    for i, c in enumerate(checks_raw or []):
-        if not isinstance(c, dict):
-            raise ValueError(f"{where}.checks[{i}] must be a mapping")
-        checks.append(CheckSpec.from_dict(c, where=f"{where}.checks[{i}]"))
-    return checks
-
-
-def _unknown_keys(d: dict[str, Any], known: set[str]) -> list[Any]:
-    """``sorted(set(d) - known)``, but safe when *d* carries a non-string key
-    (a bare PyYAML 1.1 ``on``/``off``/``yes``/``no`` mapping key parses as a
-    bool) alongside a string one -- plain ``sorted()`` would raise ``TypeError``
-    comparing ``bool``/``str`` instead of surfacing the documented ``ValueError``
-    usage error (Codex finding, mirrors the top-level key check's own fix)."""
-    return sorted(set(d) - known, key=repr)
-
 
 def _require_mapping(data: object, block: str) -> dict[str, Any]:
     if data is None:
@@ -218,214 +169,6 @@ def _require_mapping(data: object, block: str) -> dict[str, Any]:
         # target/bundle/profile/channel id the user never actually wrote.
         raise ValueError(f"{block}: key(s) must be strings, got {bad_keys!r}")
     return data
-
-
-def _parse_analysis_block(raw: object, *, where: str) -> tuple[str, str, str]:
-    """Parse an optional ``checks[].analysis:`` mapping (G42 "Explicit check
-    identifiers"): ``{evidence, policy, assurance}``, each an optional
-    non-empty string. Returns ``("", "", "")`` when *raw* is absent -- the
-    field is entirely optional, and every existing ``checks[]`` entry that
-    predates this block parses unchanged.
-
-    Only structural validity (mapping shape, known keys, non-empty string
-    values) is checked here -- same "parsing alone isn't validation" split
-    this module's own docstring documents elsewhere; the identifier-charset
-    check is deferred to :func:`_check_issues`, alongside every other
-    checks[]-level cross-reference/charset rule.
-    """
-    if raw is None:
-        return "", "", ""
-    if not isinstance(raw, dict):
-        raise ValueError(
-            f"{where}.analysis must be a mapping, got {type(raw).__name__}: {raw!r}"
-        )
-    unknown = _unknown_keys(raw, {"evidence", "policy", "assurance"})
-    if unknown:
-        raise ValueError(f"{where}.analysis: unknown key(s) {unknown}")
-    values: dict[str, str] = {}
-    for key in ("evidence", "policy", "assurance"):
-        if key not in raw:
-            continue
-        value = raw[key]
-        if not isinstance(value, str) or not value:
-            raise ValueError(f"{where}.analysis.{key} must be a non-empty string")
-        values[key] = value
-    return (
-        values.get("evidence", ""),
-        values.get("policy", ""),
-        values.get("assurance", ""),
-    )
-
-
-@dataclass
-class CheckSpec:
-    """One ``{channel, depth, required, gate_mode, profiles}`` tuple (ADR-047 §3).
-
-    Closes the gap ADR-047 §3 flags: ``baseline: channels:`` alone declares
-    which channels *exist*, not which channel/depth/policy a given target
-    actually runs — this is the per-check assignment that does.
-    """
-
-    channel: str = ""
-    depth: str = ""
-    required: bool = True
-    #: Direct-construction default is ``"local"`` (matching this field's own
-    #: default); ``from_dict`` instead derives an unset ``gate_mode`` from
-    #: ``channel`` — ``"advisory"`` for the ``NO_BASELINE_CHANNEL`` sentinel,
-    #: ``"local"`` otherwise (ADR-047 §8 S5: "Advisory by default").
-    gate_mode: str = "local"
-    #: Explicit profile-id selector (see module docstring). Empty = every
-    #: ``contract: true`` profile, filtered against ``build-output.json`` by
-    #: G30 P1.4's run-plan generator — not resolved here.
-    profiles: list[str] = field(default_factory=list)
-    #: Forwarded to ``check-target``'s own ``allow-new-target`` input (and,
-    #: through it, ``resolve-baseline``'s) — ``False`` (default) means a
-    #: target absent from this check's otherwise-resolved baseline-set
-    #: always fails ``ambiguous``; ``True`` opts this specific check into
-    #: the ``new_target`` lifecycle state instead (a new library's first
-    #: release checked against a baseline-set that predates it). Rejected
-    #: outright on a bundle check by :func:`_check_issues` — a bundle
-    #: comparison needs one coherent release where every member already
-    #: coexisted, so "this member is new" has no well-defined old side (see
-    #: ``abicheck.buildsource.baseline_set.resolve_bundle``'s docstring).
-    allow_new_target: bool = False
-    #: G42 "Explicit check identifiers": an optional project-owned logical
-    #: id, appended to the generated ``check_id`` as a ``~<id>`` tail
-    #: (``abicheck.buildsource.check_report.build_check_id``). Lets two
-    #: checks that would otherwise generate the identical ``target@profile
-    #: #channel@depth`` string (e.g. two ``checks[]`` entries differing only
-    #: in ``analysis:``) each carry a distinct, non-colliding identity.
-    #: Empty (the default) means "no explicit id" -- the generated string is
-    #: unchanged from the pre-G42 shape.
-    id: str = ""
-    #: G42 "Explicit check identifiers": which extraction/comparison
-    #: *method* produced the facts this check consumes (e.g. "replay" vs.
-    #: "clang-plugin") -- see G39's per-finding evidence-provider
-    #: vocabulary. Purely a distinguishing/reporting label at this phase;
-    #: nothing downstream yet selects a different extraction pipeline based
-    #: on this value. Empty means "not declared".
-    analysis_evidence: str = ""
-    #: G42 "Explicit check identifiers": which policy profile this check's
-    #: analysis is evaluated under. References the same policy-profile
-    #: mechanism ``--policy``/``profiles.<id>`` already select -- this field
-    #: is the identity slot it's selected through, not a second mechanism.
-    #: Empty means "not declared".
-    analysis_policy: str = ""
-    #: Which assurance requirement this check must meet; "" = not declared.
-    #: Validated against ``analysis_assurance_gate``'s supported set.
-    analysis_assurance: str = ""
-
-    def to_dict(self) -> dict[str, Any]:
-        d: dict[str, Any] = {
-            "channel": self.channel,
-            "depth": self.depth,
-            "required": self.required,
-            "gate_mode": self.gate_mode,
-        }
-        if self.profiles:
-            d["profiles"] = list(self.profiles)
-        if self.allow_new_target:
-            d["allow_new_target"] = True
-        if self.id:
-            d["id"] = self.id
-        analysis: dict[str, Any] = {}
-        if self.analysis_evidence:
-            analysis["evidence"] = self.analysis_evidence
-        if self.analysis_policy:
-            analysis["policy"] = self.analysis_policy
-        if self.analysis_assurance:
-            analysis["assurance"] = self.analysis_assurance
-        if analysis:
-            d["analysis"] = analysis
-        return d
-
-    @classmethod
-    def from_dict(cls, d: dict[str, Any], *, where: str) -> CheckSpec:
-        known = {
-            "channel",
-            "depth",
-            "required",
-            "gate_mode",
-            "profiles",
-            "allow_new_target",
-            "id",
-            "analysis",
-        }
-        unknown = _unknown_keys(d, known)
-        if unknown:
-            raise ValueError(f"{where}: unknown key(s) {unknown}")
-        channel = d.get("channel")
-        if not isinstance(channel, str) or not channel:
-            raise ValueError(f"{where}.channel must be a non-empty string")
-        depth = d.get("depth")
-        if not isinstance(depth, str) or not depth:
-            raise ValueError(f"{where}.depth must be a non-empty string")
-        required = d.get("required", True)
-        if not isinstance(required, bool):
-            raise ValueError(
-                f"{where}.required must be a boolean, got "
-                f"{type(required).__name__}: {required!r}"
-            )
-        if "gate_mode" in d:
-            gate_mode = d["gate_mode"]
-            if not isinstance(gate_mode, str):
-                raise ValueError(
-                    f"{where}.gate_mode must be a string, got "
-                    f"{type(gate_mode).__name__}: {gate_mode!r}"
-                )
-        else:
-            # ADR-047 §8: a channel: "none" no-baseline audit (S5) defaults
-            # to advisory, not local -- unlike a real-channel check, it has
-            # no baseline-drift verdict to gate CI on in the first place, so
-            # defaulting it to a blocking gate would surprise a minimal
-            # `{channel: none, depth: ...}` entry into failing CI.
-            gate_mode = "advisory" if channel == NO_BASELINE_CHANNEL else "local"
-        if d.get("profiles") == []:
-            # `_require_str_list` can't distinguish an omitted `profiles:`
-            # key from an explicit `profiles: []` -- both parse to `[]` --
-            # but this field's own semantics (see the dataclass docstring)
-            # treat an empty selector as "every contract profile," so a
-            # config author who wrote `profiles: []` expecting "select
-            # nothing" would silently get the opposite (Codex review).
-            # Reject the explicit-empty spelling outright instead of
-            # reinterpreting it: omit the key for "every profile," or name
-            # at least one profile id.
-            raise ValueError(
-                f"{where}.profiles must not be an explicit empty list -- "
-                "omit the key entirely to run on every contract profile, "
-                "or list at least one profile id"
-            )
-        profiles = _require_str_list(d, "profiles", where=where)
-        allow_new_target = d.get("allow_new_target", False)
-        if not isinstance(allow_new_target, bool):
-            raise ValueError(
-                f"{where}.allow_new_target must be a boolean, got "
-                f"{type(allow_new_target).__name__}: {allow_new_target!r}"
-            )
-        check_id = ""
-        if "id" in d:
-            # Structural validity only -- the identifier-charset check is
-            # deferred to _check_issues, same split _parse_analysis_block's
-            # own docstring documents.
-            raw_id = d["id"]
-            if not isinstance(raw_id, str) or not raw_id:
-                raise ValueError(f"{where}.id must be a non-empty string")
-            check_id = raw_id
-        analysis_evidence, analysis_policy, analysis_assurance = _parse_analysis_block(
-            d.get("analysis"), where=where
-        )
-        return cls(
-            channel=channel,
-            depth=depth,
-            required=required,
-            gate_mode=gate_mode,
-            profiles=profiles,
-            allow_new_target=allow_new_target,
-            id=check_id,
-            analysis_evidence=analysis_evidence,
-            analysis_policy=analysis_policy,
-            analysis_assurance=analysis_assurance,
-        )
 
 
 @dataclass
@@ -487,7 +230,7 @@ class TargetSpec:
             "contract_file",
             "checks",
         }
-        unknown = _unknown_keys(d, known)
+        unknown = unknown_keys(d, known)
         if unknown:
             raise ValueError(f"{where}: unknown key(s) {unknown}")
         kind = d.get("kind", TARGET_KIND_LIBRARY)
@@ -498,64 +241,21 @@ class TargetSpec:
         bundle_only = d.get("bundle_only", False)
         if not isinstance(bundle_only, bool):
             raise ValueError(f"{where}.bundle_only must be a boolean")
-        checks = _parse_checks_list(d, where=where)
+        checks = parse_checks_list(d, where=where)
         return cls(
             id=name,
             kind=kind,
-            binary_pattern=_opt_str_field(d, "binary_pattern", where=where),
-            public_headers=_require_str_list(d, "public_headers", where=where),
-            bundle=_opt_str_field(d, "bundle", where=where),
+            binary_pattern=opt_str_field(d, "binary_pattern", where=where),
+            public_headers=require_str_list(d, "public_headers", where=where),
+            bundle=opt_str_field(d, "bundle", where=where),
             bundle_only=bundle_only,
-            consumer_binary_pattern=_opt_str_field(
+            consumer_binary_pattern=opt_str_field(
                 d, "consumer_binary_pattern", where=where
             ),
-            library=_opt_str_field(d, "library", where=where),
-            contract_file=_opt_str_field(d, "contract_file", where=where),
+            library=opt_str_field(d, "library", where=where),
+            contract_file=opt_str_field(d, "contract_file", where=where),
             checks=checks,
         )
-
-
-@dataclass
-class BundleSpec:
-    """One ``bundles:`` entry (ADR-047 §3) — a release group of library targets.
-
-    ``checks:`` (same ``{channel, depth, required, gate_mode, profiles}``
-    shape as a target's — review finding, ADR-047 §5): the run-plan example
-    emits a ``kind: "bundle"`` check entry alongside per-target ones (S14
-    bundle-scoped analysis), and that cell needs its own baseline-channel/
-    depth/gate policy just like a target's checks do — this plan's own
-    ``checks:`` design note says "per target, **or per bundle**", which an
-    earlier draft of this schema only implemented the target half of.
-    """
-
-    id: str = ""
-    targets: list[str] = field(default_factory=list)
-    checks: list[CheckSpec] = field(default_factory=list)
-
-    def to_dict(self) -> dict[str, Any]:
-        d: dict[str, Any] = {"targets": list(self.targets)}
-        if self.checks:
-            d["checks"] = [c.to_dict() for c in self.checks]
-        return d
-
-    @classmethod
-    def from_dict(cls, name: str, d: dict[str, Any]) -> BundleSpec:
-        where = f"bundles.{name}"
-        if not isinstance(d, dict):
-            raise ValueError(
-                f"{where} must be a mapping, got {type(d).__name__}: {d!r}"
-            )
-        unknown = _unknown_keys(d, {"targets", "checks"})
-        if unknown:
-            raise ValueError(f"{where}: unknown key(s) {unknown}")
-        targets = d.get("targets")
-        if not isinstance(targets, list) or not targets:
-            raise ValueError(f"{where}.targets must be a non-empty list of target ids")
-        bad = [t for t in targets if not isinstance(t, str)]
-        if bad:
-            raise ValueError(f"{where}.targets must be a list of strings, got {bad!r}")
-        checks = _parse_checks_list(d, where=where)
-        return cls(id=name, targets=[str(t) for t in targets], checks=checks)
 
 
 @dataclass
@@ -642,7 +342,7 @@ class ProfileCompileSpec:
             "abi_macros",
             "args",
         }
-        unknown = _unknown_keys(d, known)
+        unknown = unknown_keys(d, known)
         if unknown:
             raise ValueError(f"{where}: unknown key(s) {unknown}")
 
@@ -781,7 +481,7 @@ class ProfileSpec:
             raise ValueError(
                 f"{where} must be a mapping, got {type(d).__name__}: {d!r}"
             )
-        unknown = _unknown_keys(
+        unknown = unknown_keys(
             d,
             {
                 "contract",
@@ -859,7 +559,7 @@ class BaselineChannelSpec:
             raise ValueError(
                 f"{where} must be a mapping, got {type(d).__name__}: {d!r}"
             )
-        unknown = _unknown_keys(d, {"source", "asset_pattern", "key_prefix"})
+        unknown = unknown_keys(d, {"source", "asset_pattern", "key_prefix"})
         if unknown:
             raise ValueError(f"{where}: unknown key(s) {unknown}")
         source = d.get("source")
@@ -932,7 +632,7 @@ class AggregateGateSpec:
         malformed ``aggregate: gate: {missing_required: null}`` block
         silently fall back to the hard-coded ``fail``/``include`` defaults
         instead of failing closed on the typo. Mirrors
-        :func:`abicheck.buildsource.run_plan._parse_run_plan_gate`'s
+        :func:`abicheck.buildsource.run_plan_gate.parse_run_plan_gate`'s
         identical key/value distinction for the projected ``run-plan.json``
         ``gate`` block this class feeds.
         """
@@ -943,7 +643,7 @@ class AggregateGateSpec:
             raise ValueError(
                 f"{where} must be a mapping, got {type(d).__name__}: {d!r}"
             )
-        unknown = _unknown_keys(d, {"missing_required", "unexpected_target"})
+        unknown = unknown_keys(d, {"missing_required", "unexpected_target"})
         if unknown:
             raise ValueError(f"{where}: unknown key(s) {unknown}")
         missing_required: str | None = None

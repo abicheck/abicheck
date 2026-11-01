@@ -764,7 +764,13 @@ jobs:
                       sys.exit(1)
                   staged_by_basename[basename] = member
                   shutil.copy2(match, os.path.join(staging, basename))
-              if missing:
+              # A bundle that declares a scope policy (bundle_required,
+              # from bundles.<id>.required/on_incomplete) hands a missing
+              # member to compare's scope axis, which gates it per the
+              # declared policy; without one, every member must be staged.
+              if missing and cell.get('bundle_required') and staged_by_basename:
+                  print(f'::warning::bundle {cell[\"name\"]!r}: no candidate binary matched for member(s) {missing}; the declared scope policy decides whether that fails the check', file=sys.stderr)
+              elif missing:
                   print(f'::error::bundle {cell[\"name\"]!r}: no candidate binary matched for member(s) {missing}', file=sys.stderr)
                   sys.exit(1)
               print(f'new-library={staging}')
@@ -1021,6 +1027,10 @@ jobs:
           name: ${{ matrix.name }}
           baseline-target: ${{ matrix.baseline_target || '' }}
           bundle-members: ${{ toJSON(matrix.bundle_members || fromJSON('[]')) }}
+          # The bundle's scope policy (bundles.<id>.required/on_incomplete,
+          # run-plan v4); '[]'/'' when none was declared.
+          bundle-required: ${{ toJSON(matrix.bundle_required || fromJSON('[]')) }}
+          bundle-on-incomplete: ${{ matrix.bundle_on_incomplete || '' }}
           profile: ${{ matrix.profile_id }}
           baseline-channel: ${{ matrix.baseline_channel }}
           baseline-path: 'baseline-sets/${{ matrix.profile_id }}-${{ matrix.baseline_channel }}'

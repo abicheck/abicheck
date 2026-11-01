@@ -168,7 +168,7 @@
     },
     {
       "path": "abicheck/buildsource/project_targets.py",
-      "baseline_lines": 1106,
+      "baseline_lines": 806,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -179,7 +179,7 @@
     },
     {
       "path": "abicheck/buildsource/run_plan.py",
-      "baseline_lines": 1125,
+      "baseline_lines": 1074,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",

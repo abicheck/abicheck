@@ -52,7 +52,7 @@ RUN_PLAN_SCHEMA_GATE = "abicheck.run-plan/v2"
 
 #: Highest ``vN`` suffix this reader understands, parsed from the schema
 #: constants above.
-_RUN_PLAN_SCHEMA_MAX_SUPPORTED = 3
+_RUN_PLAN_SCHEMA_MAX_SUPPORTED = 4
 
 
 def _run_plan_schema_version(schema: str) -> int | None:
@@ -82,3 +82,38 @@ def _run_plan_schema_version(schema: str) -> int | None:
 #: checks keeps its existing ``v1``/``v2`` spelling; the bump is
 #: additive-only and scoped to this one capability.
 RUN_PLAN_SCHEMA_SKIPPED = "abicheck.run-plan/v3"
+
+
+#: Schema discriminator stamped whenever a ``kind: bundle`` cell carries a
+#: scope policy (``bundle_required``/``bundle_on_incomplete``, from
+#: ``bundles.<id>.required``/``on_incomplete``). Same MAJOR-bump reasoning
+#: as the two above: a pre-v4 reader drops both keys without error, so it
+#: would run the bundle with no selection and the project's default
+#: ``scope.on_incomplete`` -- a required member missing would then read as
+#: whatever that default says instead of what the bundle declared. A plan
+#: with no such cell keeps its existing spelling.
+RUN_PLAN_SCHEMA_BUNDLE_SCOPE = "abicheck.run-plan/v4"
+
+
+def reject_unversioned_bundle_scope(
+    checks: object, *, schema: str, version: int | None
+) -> None:
+    """Refuse a plan whose cells carry a bundle scope policy under a schema
+    older than :data:`RUN_PLAN_SCHEMA_BUNDLE_SCOPE` -- the read-side twin of
+    the stamp, so an artifact this tool would never write is also one it
+    refuses to read."""
+    if version is not None and version >= 4:
+        return
+    rows = checks if isinstance(checks, list) else []
+    if any(
+        isinstance(c, dict) and ("bundle_required" in c or "bundle_on_incomplete" in c)
+        for c in rows
+    ):
+        from ..workflows.aggregate import AggregateError
+
+        raise AggregateError(
+            "run-plan bundle scope policy (bundle_required/bundle_on_incomplete) "
+            f"requires 'schema' >= {RUN_PLAN_SCHEMA_BUNDLE_SCOPE!r} (got "
+            f"{schema!r}); an older reader would drop it and run the bundle "
+            "with no selection"
+        )

@@ -159,6 +159,8 @@ landed, the second has not.
 | `name` | yes | — | This check's own identity (`check_id`/`target_id`) — the target or bundle id. |
 | `baseline-target` | no | (= `name`) | Which target's baseline actually resolves — set to the referenced library for `app-consumer`/`plugin-contract`. Ignored for `kind: bundle`. |
 | `bundle-members` | when `kind: bundle` | `[]` | JSON array of the bundle's member target ids. |
+| `bundle-required` | no | `''` | (`kind: bundle` only) JSON array of the member target ids that must be present — run-plan `bundle_required`. After `resolve-baseline`, each member is named by its baseline binary's canonical release key (`binary-paths`), and the required ones are passed to `compare` as `--select-required`, the rest as `--select`. A translation failure (a member with no baseline binary, two members sharing a key) is an operational error and the analysis does not run. `''`/`[]` means no policy. |
+| `bundle-on-incomplete` | no | `''` | (`kind: bundle` only) `fail` \| `warn` — run-plan `bundle_on_incomplete`, passed as `set: scope.on_incomplete=block\|warn`. `''` leaves `.abicheck.yml`'s `scope.on_incomplete` in charge. |
 | `profile` | yes | — | The build `profile.id` this check runs under. |
 | `baseline-channel` | yes | — | A channel name, or the literal `none` for a no-baseline audit (S5) — `none` is rejected for `kind: bundle` (a bundle has no no-baseline audit path; it always compares directories, which `compare`'s audit-only shape cannot do). |
 | `baseline-path` | when channel ≠ `none` | `''` | Forwarded to `resolve-baseline`. |

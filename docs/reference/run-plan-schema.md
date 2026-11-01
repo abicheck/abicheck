@@ -98,6 +98,8 @@ dicts can forward each field through with no renaming.
 | `contract_file` | `target_kind: plugin-contract` | The `.syms` contract file path. |
 | `bundle_members` | `kind: bundle` | Member target ids. |
 | `member_binary_patterns` | `kind: bundle` | Member target id → that member's own `binary_pattern`, so a caller can stage a member-binaries directory without re-reading `.abicheck.yml`. |
+| `bundle_required` | `kind: bundle` that declares a [scope policy](project-targets-schema.md#bundle-scope-policy-required-and-on_incomplete) | The member target ids that must be present: the bundle's `required:`, or every member when only `on_incomplete:` was declared. Forwarded as `check-target`'s `bundle-required`. Stamps schema `v4`. |
+| `bundle_on_incomplete` | as above, when `on_incomplete:` is declared | `fail` \| `warn`, forwarded as `check-target`'s `bundle-on-incomplete`. |
 | `compile_gcc_path` | this cell's profile declares `compile.binding` *and* `--toolchain-bindings` was given | That binding, resolved to an exact executable path — forwarded as `check-target`'s `gcc-path` input. Empty (field omitted) when the profile has no `compile:` overlay, declares no `binding`, or `--toolchain-bindings` was omitted/the binding wasn't found in it — a caller then falls back to its own global `gcc-path`. |
 | `compile_gcc_options` | this cell's profile's `compile` overlay sets any of `standard`/`stdlib`/`target`/`abi_macros`/`args` | Those axes composed into one space-joined extra-flags string (`-std=<standard> -stdlib=<stdlib> --target=<target> -D<macro>[=<value>] ... <args...>`, macros sorted by name, `args` appended verbatim last) — forwarded as `check-target`'s `gcc-options` input. Not filtered by `compile.compiler_family`: the composed string is always consumed by a Clang-based frontend in this pipeline (castxml's internal bundled Clang, or the direct-clang backend), never a literal GCC binary, so `-stdlib=`/`--target=` are emitted regardless of the declared family — see `_compose_gcc_options`'s own docstring for why an earlier attempt to drop them for `compiler_family: gcc` was reverted. |
 | `consumer_compile_gcc_path` | this cell's profile declares `consumer_compile.binding` *and* `--toolchain-bindings` was given | Same resolution as `compile_gcc_path`, but from the profile's separate `consumer_compile:` overlay (G34 Phase 0) — never falls back to `compile_gcc_path`'s own resolved value when the profile has no `consumer_compile:`. `check-project.yml` forwards it to check-target's separate consumer-context candidate dump. |
@@ -261,6 +263,18 @@ tell a deliberate, explained skip from a plan whose every check failed to
 resolve, so it must reject the artifact rather than read it as the other
 case. A `skipped` block paired with a declared pre-v3 schema is rejected as
 malformed input, not silently honored.
+
+## Bundle scope policy and schema `v4`
+
+A plan in which any bundle cell carries `bundle_required` (its bundle
+declared `required:` or `on_incomplete:`) is stamped
+`"schema": "abicheck.run-plan/v4"`. A pre-v4 reader would drop both fields
+without error and run the bundle with no member selection, so a missing
+required member would be judged by the project's default
+`scope.on_incomplete` instead of the declared policy; the bump makes that
+reader refuse the plan instead. `v4` also accepts a `gate` block, so a plan
+carrying both is stamped `v4`. A plan whose cells carry either field under a
+declared pre-v4 schema is rejected as malformed input.
 
 ## CLI
 
