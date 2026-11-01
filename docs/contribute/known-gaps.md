@@ -228,10 +228,10 @@ current emitter, which is unchanged.
 **Status (re-verified 2026-10-25): OPEN.** `abicheck/dumper.py:1051` `_dump_pe` has no debug_roots parameter, and `dwp_path`/`dsym_path` are set only by `debug_resolver.py` and read only by `extract/debug_artifact.py`'s description (no dump consumer). The directory form still resolves PDB/DWP/dSYM artifacts that are then dropped.  
 `false-clean` — The directory form resolves PDB/DWP/dSYM artifacts, but no dump path consumes them, so the debug evidence is dropped. [Full write-up](known-gaps/a-resolved-pdbdwpdsym-artifact-reaches-no-dump-path.md)
 
-#### A labelled side-scoped `--include` appeared to suppress unlabelled global include roots
+#### A failed header parse on PE or Mach-O falls back to export-table mode and can exit 0 (2026-11-01)
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** unverified: the entry itself has no minimal reproduction. The labelled/unlabelled --include merge in frontends/cli/options/params.py:187+ was not exercised with castxml here.  
-`false-clean` — Unverified, no minimal reproduction: a labelled side-scoped `--include` appeared to drop unlabelled global include roots. [Full write-up](known-gaps/a-labelled-side-scoped-include-appeared-to-suppress-unlabelled.md)
+**Status (recorded 2026-11-01): OPEN.** `workflows/dump/header_scoped.py` catches any header-parse failure of a PE or Mach-O binary, warns `Falling back to export-table mode -- --header/--include were ignored`, and returns an export-table snapshot. The run then reads `requested_depth: binary` (implicit) and `header_context_status: not_evaluated`, and can exit 0, where the same failure on ELF fails the run. Found by the macOS lane of `tests/test_sided_include_labelled_composition.py`, whose negative control pins the current behaviour on darwin.
+`false-clean` — An explicitly supplied header that does not parse on PE/Mach-O is reported as a warning and a binary-depth run instead of a failed acquisition. [Full write-up](known-gaps/a-failed-header-parse-on-pe-or-mach-o-falls-back-to-export-table-mode.md)
 
 #### A stored snapshot keeps no record of a partial export-table read
 

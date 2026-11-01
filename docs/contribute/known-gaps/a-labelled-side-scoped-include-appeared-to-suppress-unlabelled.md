@@ -9,9 +9,9 @@ generated: false
 
 # A labelled side-scoped `--include` appeared to suppress unlabelled global include roots
 
-Index: [Known gaps](../known-gaps.md)
+Index: [Known gaps — closed and moot](../archive/known-gaps-closed.md)
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** unverified: the entry itself has no minimal reproduction. The labelled/unlabelled --include merge in frontends/cli/options/params.py:187+ was not exercised with castxml here.
+**Status (2026-11-01): CLOSED.** Reproduced with castxml and fixed by #1314's additive composition rule (`abicheck/model/sided_inputs.py`), which the labelled form reaches too. Pinned by `tests/test_sided_include_labelled_composition.py`; see the archive entry for the matrix and the not-comparable boundary for asymmetric labels.
 
 
 Observed once, on a real PVXS comparison, and **not yet reduced to a minimal
@@ -33,3 +33,20 @@ given for that side, or they are ordered such that castxml does not see them.
 `--include`'s own help text documents the two forms as composable, so if this
 reproduces it is a defect rather than a usage error. Next step: a minimal
 two-header fixture mixing one labelled and one unlabelled root.
+
+## Resolution (2026-11-01)
+
+The minimal reproduction is `tests/test_sided_include_labelled_composition.py`:
+each side's public header includes `sic_dep.h`, which exists only in a
+shared root and itself includes `sic_os.h` from a nested shared root (the
+`EPICS_INC` / `EPICS_INC/os/Linux` shape). Every combination of side
+spelling (`old=`/`new=`, `old:public=`/`new:public=`) and shared spelling
+(bare, `both=`, `both:support=`), in either argument order, parses both
+sides and reports the header-only parameter change. Switching
+`compose_sided_paths` back to replacement makes every cell fail, which is
+the PVXS symptom: the observation was bug class
+`config.sided_shared_input_dropped`, fixed in #1314 for every spelling.
+
+Labelling one side's root and not the other's is refused as not comparable
+(exit 16, `include_sequence`): a label is part of the extraction contract,
+so that is two contracts, not a dropped root.
