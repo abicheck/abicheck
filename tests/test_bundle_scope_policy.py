@@ -477,3 +477,44 @@ class TestStagedBundleMembersPairWithTheirBaseline:
         assert compared == sorted(m for m in _MEMBERS if m != missing)
         expected = 1 if missing in ("liba", "libb") else 0
         assert result.exit_code == expected, result.output
+
+
+class TestHostileMemberIdIsNotAPath:
+    """A member id becomes a staged file name, so an id that is a path must be
+    refused before anything is written -- executed, not text-asserted."""
+
+    @pytest.mark.parametrize("member", ["../escape", "a/b", ".hidden", "..", "x\ny"])
+    def test_staging_refuses_and_writes_nothing_outside(self, tmp_path, member):
+        import os
+        import subprocess
+
+        from _workflow_exec import bash_executable, require_bash
+
+        require_bash()
+        (tmp_path / "candidate").mkdir()
+        (tmp_path / "candidate" / "libx.so").write_bytes(b"x")
+        sentinel = tmp_path / "escape"
+        gh_out = tmp_path / "gh_out"
+        gh_out.write_text("")
+        matrix = {
+            "kind": "bundle",
+            "name": "rel",
+            "member_binary_patterns": {member: "libx.so"},
+        }
+        proc = subprocess.run(
+            [bash_executable(), "-c", _staging_script()],
+            cwd=tmp_path,
+            env={
+                **os.environ,
+                "MATRIX_JSON": json.dumps(matrix),
+                "GITHUB_OUTPUT": str(gh_out),
+            },
+            capture_output=True,
+            text=True,
+        )
+        assert proc.returncode != 0
+        assert "cannot be a staged file name" in proc.stderr
+        staging = tmp_path / "bundle-staging"
+        assert not sentinel.exists()
+        assert list(staging.iterdir()) == []
+        assert "new-library=" not in gh_out.read_text()
