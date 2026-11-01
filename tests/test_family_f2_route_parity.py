@@ -96,10 +96,7 @@ _RS = "route_specific"
 _UC = "uncovered"
 
 CLICK_ROUTING: dict[str, tuple[str, Any]] = {
-    "config_overrides": (
-        _UC,
-        "--set PATH=VALUE: parity is test_config_overrides.py (CLI vs typed API at the resolved config)",
-    ),
+    "config_overrides": ("covered", ("required_symbols_file",)),
     "policy": ("covered", ("policy_sdk_vendor", "policy_file")),
     "suppress": ("covered", ("suppress", "suppress_strict")),
     "acknowledgments": (
@@ -194,10 +191,7 @@ _SEVERITY_OVERRIDE = (
 )
 
 REQUEST_ROUTING: dict[str, tuple[str, Any]] = {
-    "config_overrides": (
-        _UC,
-        "config_overrides: parity is test_config_overrides.py (typed vs CLI at the resolved config)",
-    ),
+    "config_overrides": ("covered", ("required_symbols_file",)),
     "old": ("covered", ("default",)),
     "new": ("covered", ("default",)),
     "policy": ("covered", ("policy_sdk_vendor", "policy_file")),
@@ -664,7 +658,12 @@ def test_unsupported_route_rejects_explicitly(
         ],
     )
     assert r.exit_code == 64, r.output
-    assert "not supported" in r.output
+    # A flag's capability guard says "not supported"; a `--set` key the
+    # fan-out does not forward is refused as "does not apply <key> yet"
+    # (`config_set.reject_unforwarded_release_overrides`).
+    assert "not supported" in r.output or (
+        "does not apply" in r.output and "yet" in r.output
+    ), r.output
 
 
 def test_release_reports_the_probe_matrix_at_release_level(tmp_path: Path) -> None:

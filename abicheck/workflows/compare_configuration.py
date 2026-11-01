@@ -135,6 +135,8 @@ class CompareSettingsError(CompareConfigurationError):
 
 #: Further ``--set`` keys the CLI's ``compare`` applies from the resolved config
 #: or the run's own settings, which a typed comparison has no field for.
+#: (``consumers.required_symbols`` is applied by both routes:
+#: ``workflows/compare/required_symbol_contract.py``.)
 CLI_ONLY_OVERRIDE_PATHS: frozenset[str] = frozenset(
     {
         "scope.show_redundant",
@@ -142,7 +144,6 @@ CLI_ONLY_OVERRIDE_PATHS: frozenset[str] = frozenset(
         "performance.profile",
         "output.view",
         "consumers.manifests",
-        "consumers.required_symbols",
     }
 )
 

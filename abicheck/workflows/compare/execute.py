@@ -43,6 +43,13 @@ from ...serialization import run_scoped_digest_cache
 from ..compare_classify import ResolvedComparePair
 from ..request_inputs import InputSpec
 from ..service_requests import CompareRequest, CompareResult, ContractDomain
+from .required_symbol_contract import (
+    REQUIRED_SYMBOLS_OVERRIDE_PATH,
+    RequiredSymbolContract,
+    apply_required_symbol_contract,
+    required_symbol_contract,
+    with_required_symbol_policy,
+)
 from .resolve import resolve_compare_request
 
 __all__ = [
@@ -138,17 +145,32 @@ def run_compare_request(request: CompareRequest) -> CompareResult:
     """
     import abicheck.deadline as deadline
 
-    request = _with_config_overrides(request)
+    request, contract = _resolve_config_overrides(request)
+    request = with_required_symbol_policy(request, contract)
     with deadline.deadline_scope(request.budget_s):
         # deadline_scope never raises on entry -- check() before the work
         # `resolve_compare_request` performs at its own top.
         deadline.check()
         pair = resolve_compare_request(request)
-        return classify_compare_pair(request, pair)
+        result = classify_compare_pair(request, pair)
+    apply_required_symbol_contract(result, request, contract)
+    return result
 
 
 def _with_config_overrides(request: CompareRequest) -> CompareRequest:
     """*request* with its ``config_overrides`` resolved into the fields they set.
+
+    See :func:`_resolve_config_overrides`, which also returns the
+    ``consumers.required_symbols`` contract the overrides state.
+    """
+    return _resolve_config_overrides(request)[0]
+
+
+def _resolve_config_overrides(
+    request: CompareRequest,
+) -> tuple[CompareRequest, RequiredSymbolContract | None]:
+    """*request* with its ``config_overrides`` resolved into the fields they set,
+    and the ``consumers.required_symbols`` contract they state (``None`` if none).
 
     Resolved by :func:`~abicheck.workflows.compare_configuration.load_and_resolve_compare_config`,
     the function the CLI's ``compare --set`` calls, so the two read the same
@@ -163,10 +185,13 @@ def _with_config_overrides(request: CompareRequest) -> CompareRequest:
     the resolver ``compare --set compile.*`` reaches; ``compile.lang`` fills
     ``lang``/``lang_explicit`` as the CLI's ``compile.lang`` does. The
     non-core ``deps.*`` keys fill the dependency-walk fields
-    (:mod:`~abicheck.workflows.config_run_inputs`).
+    (:mod:`~abicheck.workflows.config_run_inputs`). ``consumers.required_symbols``
+    is expanded by the CLI's own loader
+    (:mod:`~abicheck.workflows.compare.required_symbol_contract`), so an
+    unreadable ``@FILE`` is refused here with the CLI's error.
     """
     if not request.config_overrides:
-        return request
+        return request, None
     from ..compare_configuration import load_and_resolve_compare_config
     from ..compile_config import (
         COMPILE_CONTEXT_OVERRIDE_PATHS,
@@ -184,12 +209,17 @@ def _with_config_overrides(request: CompareRequest) -> CompareRequest:
     )
     channel_paths = {path for path, _field, _attr in TYPED_OVERRIDE_CHANNELS}
     channel_paths |= COMPILE_CONTEXT_OVERRIDE_PATHS | CONFIG_RUN_INPUT_SET_PATHS
+    channel_paths.add(REQUIRED_SYMBOLS_OVERRIDE_PATH)
     unsupported = sorted(set(request.config_overrides) - channel_paths)
     if unsupported:
         raise ConfigOverrideError(
             f"{', '.join(unsupported)}: no typed CompareRequest field applies "
             "this key; set it in .abicheck.yml or use the CLI"
         )
+    contract = required_symbol_contract(
+        request.config_overrides,
+        tuple(project_cfg.required_symbols) if project_cfg is not None else (),
+    )
     defaults = {f.name: f.default for f in dataclasses.fields(CompareRequest)}
     updates: dict[str, Any] = {}
     for path, field_name, attr in TYPED_OVERRIDE_CHANNELS:
@@ -226,7 +256,7 @@ def _with_config_overrides(request: CompareRequest) -> CompareRequest:
         updates["new"] = dataclasses.replace(
             updates.get("new", request.new), compile=new_compile
         )
-    return dataclasses.replace(request, **updates) if updates else request
+    return (dataclasses.replace(request, **updates) if updates else request), contract
 
 
 def _declared_default(owner: type, name: str) -> Any:

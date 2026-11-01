@@ -327,6 +327,19 @@ def _policy_file(tmp: Path) -> Path:
     return p
 
 
+def _required_symbols_file(tmp: Path) -> Path:
+    """A ``consumers.required_symbols`` ``@FILE``: one symbol every corpus pair
+    keeps (``foo``), one it may lose (``gv``), and a comment line."""
+    p = tmp / "required.syms"
+    p.write_text("# host contract\nfoo\ngv\n", encoding="utf-8")
+    return p
+
+
+def _required_symbols_args(tmp: Path) -> list[str]:
+    entries = json.dumps([f"@{_required_symbols_file(tmp)}"])
+    return ["--set", f"consumers.required_symbols={entries}"]
+
+
 AXES: tuple[Axis, ...] = (
     Axis("default", lambda t: [], lambda t: {}, (), ()),
     Axis(
@@ -400,6 +413,22 @@ AXES: tuple[Axis, ...] = (
         unsupported={
             "release": "the per-library fan-out rejects --diagnostic-comparison "
             "with a usage error (capability guard, #1233 family)"
+        },
+    ),
+    Axis(
+        "required_symbols_file",
+        # The `--set` spelling of the config key, and its typed twin.
+        _required_symbols_args,
+        lambda t: {
+            "config_overrides": {
+                "consumers.required_symbols": [f"@{_required_symbols_file(t)}"]
+            }
+        },
+        ("config_overrides",),
+        ("config_overrides",),
+        unsupported={
+            "release": "a directory/package compare refuses --set "
+            "consumers.required_symbols (a contract scopes one library)"
         },
     ),
     Axis(
