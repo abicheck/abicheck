@@ -271,7 +271,7 @@ class TypeGraphSnapshot:
         it = iter(edge_ix)
         return tuple((names[a], names[b]) for a, b in zip(it, it))
 
-    def __setattr__(self, name: str, value: object) -> None:
+    def __setattr__(self, name: str, _value: object) -> None:
         raise AttributeError(f"TypeGraphSnapshot is immutable; cannot set {name!r}.")
 
     def __eq__(self, other: object) -> bool:
