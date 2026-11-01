@@ -471,3 +471,68 @@ def test_release_member_pool_stops_a_member_whose_read_expires(
             ["a"], lambda k: k, max_workers=1, on_error=lambda e, k: k
         )
     assert proc.terminated and pipe.closed and reaped == [True]
+
+
+@pytest.mark.parametrize("pool", ["threads", "processes"])
+def test_parallel_release_aborts_on_an_expired_budget(
+    monkeypatch: pytest.MonkeyPatch, pool: str
+) -> None:
+    """Both fan-outs hand a member's DeadlineExceeded to the same on_error,
+    which re-raises it, while any other member failure stays that member's
+    ERROR entry."""
+    from abicheck.workflows import release_member_processes, release_members
+
+    def member(key: str, _ctx: Any) -> dict[str, object]:
+        if key == "late":
+            raise deadline.DeadlineExceeded(-1.0)
+        raise ValueError(f"{key} failed on its own")
+
+    def fake_processes(keys, ctx, compare, *, max_workers, admission, on_error):
+        # The process path's contract: each failure reaches on_error in order.
+        entries = []
+        for key in keys:
+            try:
+                entries.append(compare(key, ctx))
+            except Exception as exc:  # noqa: BLE001 -- what the pool carries back
+                entries.append(on_error(exc, key))
+        return entries
+
+    monkeypatch.setattr(release_members, "compare_release_member", member)
+    monkeypatch.setattr(
+        release_member_processes,
+        "member_processes_apply",
+        lambda _n: pool == "processes",
+    )
+    monkeypatch.setattr(
+        release_member_processes, "compare_members_in_processes", fake_processes
+    )
+    notices: list[str] = []
+    ctx = SimpleNamespace(
+        old_map={"own": Path("old/libown.so"), "late": Path("old/liblate.so")},
+        reporter=SimpleNamespace(notice=notices.append),
+    )
+
+    entries = release_members._compare_parallel(["own"], ctx, max_workers=2)
+    assert [(e["library"], e["verdict"]) for e in entries] == [("libown.so", "ERROR")]
+    assert notices == ["Error comparing libown.so: ValueError: own failed on its own"]
+
+    with pytest.raises(deadline.DeadlineExceeded):
+        release_members._compare_parallel(["own", "late"], ctx, max_workers=2)
+
+
+def test_no_baseline_audit_exits_5_naming_the_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """compare --no-baseline runs under the 2h default and reports its expiry
+    as exit 5 with an actionable message, never a clean audit."""
+    from abicheck.frontends.cli.commands import compare_no_baseline
+
+    def expired(*_a: Any, **_k: Any) -> None:
+        raise deadline.DeadlineExceeded(-1.0)
+
+    monkeypatch.setattr(compare_no_baseline, "_run_no_baseline_compare_cmd", expired)
+    candidate, _ = _write_snapshots(tmp_path)
+    result = CliRunner().invoke(main, ["compare", "--no-baseline", str(candidate)])
+    assert result.exit_code == 5, result.output
+    assert "the default 2h budget was exceeded while auditing" in result.output
+    assert "No verdict was produced" in result.output
