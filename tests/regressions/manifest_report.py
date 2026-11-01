@@ -196,6 +196,9 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
             # block, the ledger, the review groups and every format's gating
             # line must state the count the process exit was decided by.
             "tests/unit/report/test_accepted_break_gating_surfaces.py",
+            # Two-sided SARIF's suppression justification against the JSON
+            # report's rule record, for every disposition source.
+            "tests/test_sarif_suppression_disposition_sources.py",
         ),
         axes={
             # Only what a seed test really drives -- and *all* of it. This
@@ -279,22 +282,17 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
             KnownGap(
                 description=(
-                    "Two open instances of this class outside the audit "
-                    "path, found by grepping every `suppression_rule` reader "
-                    "after the audit's own two were fixed -- recorded rather "
-                    "than fixed here, since neither is in the scope the PR "
-                    "that found them was opened for. (1) `sarif.py`'s "
-                    "two-sided suppression `justification` reads only "
-                    "`Change.suppression_rule`, the `label or reason` "
-                    "display collapse, while the same run's JSON already "
-                    "publishes the full ADR-067 record via "
-                    "`reporter.py`'s `suppressed_change_entry` -- the same "
-                    "between-formats split the audit's SARIF had. (2) "
-                    "`cli_scan_baseline.py`'s baseline `findings[]` entries "
-                    "carry the display label only, with no provenance field "
-                    "at all. Fixing either means routing "
-                    "`DispositionLedger.rule_for` to that builder, exactly "
-                    "as the audit now does."
+                    "FIXED (2026-10-31): both instances found by grepping "
+                    "every `suppression_rule` reader are closed. (1) "
+                    "Two-sided `sarif.py` now reads the run's "
+                    "`DispositionLedger.rule_for` record through "
+                    "`report.suppression_justification`, the same owner the "
+                    "audit's SARIF and JUnit use, so its justification names "
+                    "the rule, reason, source (suppression file, inline rule "
+                    "or abicheck policy) and expiry, and its `properties` "
+                    "equal the JSON `suppressed_changes[].rule` "
+                    "(tests/test_sarif_suppression_disposition_sources.py). "
+                    "(2) `cli_scan_baseline.py` was deleted with `scan`."
                 ),
                 reference="docs/contribute/known-gaps.md",
             ),

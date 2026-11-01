@@ -194,6 +194,22 @@ _split_legacy_value() {
   fi
 }
 
+# The one splitter of `extra-args`: word-splits `$INPUT_EXTRA_ARGS` on IFS
+# (space, tab, newline -- the semantics `extra-args` has always had) into the
+# global `_EXTRA_ARGS_TOKENS` array, with pathname expansion disabled via
+# `_split_legacy_value`'s scoped `set -f`. Every reader of `extra-args` -- the
+# real `CMD` append and each detection helper that predicts what that append
+# produces -- tokenizes through here, so they agree on the argv AND none of
+# them substitutes workspace file names for a `*`/`?`/`[...]` token (a file
+# named `--format=json` in the checkout could otherwise be injected as a real
+# flag). `tests/test_action_extra_args_noglob.py` runs the whole of run.sh
+# against a workspace with matching files and guards against a new unquoted
+# `$INPUT_*` expansion anywhere in the Action's shell.
+_extra_args_split() {
+  _split_legacy_value "${INPUT_EXTRA_ARGS:-}"
+  _EXTRA_ARGS_TOKENS=(${_SPLIT_ITEMS[@]+"${_SPLIT_ITEMS[@]}"})
+}
+
 add_flag() {
   local flag="$1"
   local value="$2"
@@ -256,8 +272,8 @@ add_sided_flag() {
 # passed through extra-args wins instead, as the last value does on the CLI.
 _extra_args_names_label() {
   local _tok
-  # shellcheck disable=SC2086  # word-split exactly as `CMD+=($INPUT_EXTRA_ARGS)` does.
-  for _tok in ${INPUT_EXTRA_ARGS:-}; do
+  _extra_args_split
+  for _tok in ${_EXTRA_ARGS_TOKENS[@]+"${_EXTRA_ARGS_TOKENS[@]}"}; do
     case "$_tok" in --label|--label=*) return 0 ;; esac
   done
   return 1
@@ -1480,13 +1496,12 @@ _extra_args_expand_short_clusters() {
 # empty value, rather than being silently dropped.
 #
 # Splits the same way the command line itself does, not by matching the raw
-# string: `CMD+=($INPUT_EXTRA_ARGS)` is an unquoted expansion, so bash
-# word-splits on IFS -- space, tab AND newline -- and an `extra-args: |`
-# YAML literal block (or anything with a tab) produces real, separate
+# string: the real `CMD` append word-splits `extra-args` on IFS -- space,
+# tab AND newline -- and an `extra-args: |` YAML literal block (or anything with a tab) produces real, separate
 # tokens a literal-space substring check would not see (Codex review,
-# historical). `set --` reuses that identical splitting, so this can never
-# disagree with the real argv about what a token is; it also inherits the
-# same pathname expansion, deliberately, for the same reason.
+# historical). Both this tokenizer and the real append go through
+# `_extra_args_split`, so they can never disagree about what a token is, and
+# neither performs pathname expansion: a `*`/`?`/`[...]` token stays literal.
 #
 # Still not full shell-quoting parsing (an exotically quoted option evades
 # this) and not aware of a short option's concatenated-value form (`-jVALUE`
@@ -1519,8 +1534,8 @@ _extra_args_expand_short_clusters() {
 # not already claimed as a preceding option's value.
 _extra_args_options() {
   local _arg _pending="" _cluster _line
-  # shellcheck disable=SC2086  # word-splitting is the point; see above.
-  set -- ${INPUT_EXTRA_ARGS:-}
+  _extra_args_split
+  set -- ${_EXTRA_ARGS_TOKENS[@]+"${_EXTRA_ARGS_TOKENS[@]}"}
   for _arg in "$@"; do
     if [[ -n "$_pending" ]]; then
       printf '%s\t%s\n' "$_pending" "$_arg"
@@ -3572,8 +3587,10 @@ if [[ -n "${INPUT_EXTRA_ARGS:-}" ]]; then
   # re-scoping: this Action keeps no compatible CLI-flag surface with the
   # now-removed `mode: scan`). Every mode appends `extra-args` the same
   # plain way.
-  # shellcheck disable=SC2206
-  CMD+=($INPUT_EXTRA_ARGS)
+  # Split through the one noglob splitter the detection helpers above
+  # also use, so a `*`/`?`/`[...]` token reaches the CLI literally.
+  _extra_args_split
+  CMD+=(${_EXTRA_ARGS_TOKENS[@]+"${_EXTRA_ARGS_TOKENS[@]}"})
 fi
 # --- END: extra-args append block ---
 # (CodeRabbit review, PR #1172, round 20: a dedicated, code-shaped sentinel

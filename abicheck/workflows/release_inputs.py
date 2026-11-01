@@ -396,35 +396,41 @@ def discover_files(
 
 
 def discover_live_member_libraries(
-    operand: Path, *, include_private: bool
+    operand: Path, *, include_private: bool, packaged: bool = False
 ) -> list[Path]:
-    """The native libraries a live operand of a stored-baseline compare holds.
+    """The members a live operand of a stored-baseline compare holds.
 
-    A single file is itself. A directory gets ``discover_shared_libraries``'s
-    ELF walk (with its public-library-path convention) **plus** every PE and
-    Mach-O binary the live release fan-out's own discovery
-    (:func:`collect_release_inputs`) accepts. The ELF walk alone found no
-    member at all in a directory of PE ``.dll``/Mach-O ``.dylib`` files, so a
-    stored-OLD/live-NEW comparison silently read every library as "not
-    supplied" while live/live on the same tree compared them -- and lost
-    NEW's header-versus-exports reconciliation with them (issue #1715 on
-    Windows).
+    The same set the live release fan-out discovers from the same operand
+    (:func:`resolve_release_side` via :func:`discover_files`), so a stored
+    OLD side pairs against exactly the NEW members a live OLD side would. A
+    single file is itself. A plain directory gets every supported compare
+    input (:func:`collect_release_inputs`): native ELF, PE and Mach-O
+    libraries, and stored per-library snapshots. A directory extracted from
+    a package (*packaged*) gets the package's shared-library walk, falling
+    back to the same collection. Members key by
+    ``binary_utils.build_match_map``'s canonical name on both routes.
+
+    This once ran its own native-only walk, so a NEW directory of stored
+    snapshots (``libcore.so.1`` holding a dumped snapshot) yielded no member
+    at all, and ``compare OLD.bundle-facts.json NEW_DIR`` compared nothing
+    (exit 1) where ``compare OLD_DIR NEW_DIR`` paired every library. An
+    operand holding nothing to compare is an empty member list here: the
+    scope record then reports the zero-comparison run, as live/live does.
     """
-    from ..binary_utils import detect_binary_format
     from ..extract.packages import discover_shared_libraries
-    from .extraction import is_supported_compare_input
 
     if not operand.is_dir():
         return [operand]
-    files = discover_shared_libraries(operand, include_private=include_private)
-    seen = {f.resolve() for f in files}
-    for path in sorted(operand.rglob("*")):
-        if path.is_symlink() or path.resolve() in seen:
-            continue
-        if detect_binary_format(path) in ("pe", "macho") and (
-            is_supported_compare_input(path)
-        ):
-            files.append(path)
+    try:
+        files = discover_files(
+            operand,
+            operand,
+            include_private,
+            discover_shared_libraries,
+            lambda _path: packaged,
+        )
+    except ReleaseOperandContentError:
+        return []
     return sorted(files, key=lambda p: p.name)
 
 

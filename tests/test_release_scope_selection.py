@@ -860,17 +860,9 @@ class TestStoredLiveDriverSurvivesAMemberExtractionFailure:
         [b"{not json", b'{"schema_version": 1}', b""],
         ids=["syntax", "missing-fields", "empty"],
     )
-    def test_sibling_comparisons_survive(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: bytes
-    ) -> None:
-        import abicheck.extract.packages as package
+    def test_sibling_comparisons_survive(self, tmp_path: Path, damage: bytes) -> None:
         from abicheck.bundle_side_input import compare_release_against_bundle_facts
 
-        monkeypatch.setattr(
-            package,
-            "discover_shared_libraries",
-            lambda d, include_private=False: sorted(Path(d).glob("*.json")),
-        )
         libs = {
             "libok.so": _lib("libok.so", exports=("ok_fn",)),
             "libbad.so": _lib("libbad.so", exports=("bad_fn",)),
@@ -878,7 +870,7 @@ class TestStoredLiveDriverSurvivesAMemberExtractionFailure:
         old = _facts_file(tmp_path, "old.bundlefacts.json", libs)
         new_dir = tmp_path / "new"
         _write(new_dir, "libok.so.json", libs["libok.so"])
-        (new_dir / "libbad.so.json").write_bytes(damage)
+        (new_dir / "libbad.so").write_bytes(damage)
         result = compare_release_against_bundle_facts(old, new_dir)
         assert [d.library for d in result.per_library] == ["libok.so"]
         assert any(
@@ -903,15 +895,10 @@ class TestStoredLiveExtractionFailureIsAnOperationalError:
     `degraded` marker stays a scope-axis matter (Codex review, nineteenth
     round)."""
 
-    @staticmethod
-    def _point_discovery_at_json(monkeypatch: pytest.MonkeyPatch) -> None:
-        import abicheck.extract.packages as package
-
-        monkeypatch.setattr(
-            package,
-            "discover_shared_libraries",
-            lambda d, include_private=False: sorted(Path(d).glob("*.json")),
-        )
+    # NEW is discovered by the live fan-out's own rule: valid snapshot files
+    # are members by content, and the damaged one is a member because it is
+    # *named* like a library (`libbad.so`) -- the shape a truncated or
+    # corrupted artifact has on a real runner.
 
     @pytest.mark.parametrize("policy", ["warn", "block"])
     @pytest.mark.parametrize(
@@ -920,11 +907,9 @@ class TestStoredLiveExtractionFailureIsAnOperationalError:
     def test_cli_floors_the_exit_and_names_the_failure(
         self,
         tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
         policy: str,
         damage: bytes,
     ) -> None:
-        self._point_discovery_at_json(monkeypatch)
         libs = {
             "libok.so": _lib("libok.so", exports=("ok_fn",)),
             "libbad.so": _lib("libbad.so", exports=("bad_fn",)),
@@ -932,7 +917,7 @@ class TestStoredLiveExtractionFailureIsAnOperationalError:
         old = _facts_file(tmp_path, "old.bundlefacts.json", libs)
         new_dir = tmp_path / "new"
         _write(new_dir, "libok.so.json", libs["libok.so"])
-        (new_dir / "libbad.so.json").write_bytes(damage)
+        (new_dir / "libbad.so").write_bytes(damage)
         cfg = _release_config(tmp_path, on_incomplete_scope=policy)
         code, doc = _invoke_json(
             "compare", str(old), str(new_dir), "--config", str(cfg)
@@ -957,11 +942,10 @@ class TestStoredLiveExtractionFailureIsAnOperationalError:
         )
 
     def test_a_stored_degraded_marker_is_not_an_extraction_error(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, tmp_path: Path
     ) -> None:
         """Control: the D8 marker records a *past* capture failure; it is
         gated by the completeness policy, not floored as this run's error."""
-        self._point_discovery_at_json(monkeypatch)
         libs = {
             "libok.so": _lib("libok.so", exports=("ok_fn",)),
             "libdeg.so": _lib("libdeg.so", exports=("deg_fn",)),
@@ -985,14 +969,13 @@ class TestStoredLiveExtractionFailureIsAnOperationalError:
         assert code == 1
 
     def test_every_member_failing_is_also_no_comparison_completed(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, tmp_path: Path
     ) -> None:
-        self._point_discovery_at_json(monkeypatch)
         libs = {"libbad.so": _lib("libbad.so", exports=("bad_fn",))}
         old = _facts_file(tmp_path, "old.bundlefacts.json", libs)
         new_dir = tmp_path / "new"
         new_dir.mkdir()
-        (new_dir / "libbad.so.json").write_bytes(b"{not json")
+        (new_dir / "libbad.so").write_bytes(b"{not json")
         code, doc = _invoke_json("compare", str(old), str(new_dir))
         assert code == 4, doc
         assert doc["comparison_scope"]["no_comparison_completed"] is True

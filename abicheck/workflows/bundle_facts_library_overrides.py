@@ -414,7 +414,7 @@ def load_bundle_facts_library_overrides(
 
 
 def known_libraries_for_new_side(
-    new_dir: Path, *, include_private_dso: bool = False
+    new_dir: Path, *, include_private_dso: bool = False, packaged: bool = False
 ) -> dict[str, Path]:
     """The canonical-name -> selected-Path match map a NEW-side directory
     resolves to.
@@ -462,7 +462,7 @@ def known_libraries_for_new_side(
     # every manifest library key as unknown even though the comparison
     # itself would succeed fine.
     new_files = discover_live_member_libraries(
-        new_dir, include_private=include_private_dso
+        new_dir, include_private=include_private_dso, packaged=packaged
     )
     new_map, _match_warnings = build_match_map(new_files)
     return new_map
