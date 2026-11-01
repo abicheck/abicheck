@@ -449,17 +449,19 @@ def _dump_cache_extra_key(
 
 
 def system_include_cache_field(compiler_bins: list[str], *, cpp: bool) -> str:
-    """Content digest of every built-in ``#include <...>`` directory the
-    resolved compilers search (closed gap "the cache keys do not hash system
-    include directories"). Those directories reach the parse without being
-    named in any input, so an updated system header under an unchanged path
-    must still move the key."""
+    """The built-in ``#include <...>`` directories the resolved compilers
+    search, by spelling and order. Their content is not key material: an
+    entry is served only while the system headers its parses actually read
+    are unchanged (the entry's dependency manifest,
+    :mod:`abicheck.extract.cache_dep_manifest`), which closes "an updated
+    system header under an unchanged path" without digesting every file
+    under the directories on each lookup."""
     dirs = list(
         dict.fromkeys(
             d for cc in compiler_bins for d in compiler_search_dirs(cc, cpp=cpp)
         )
     )
-    return "sysinc:" + "\x00".join(f"{d}={tree_digest(d)}" for d in dirs)
+    return "sysinc:" + "\x00".join(dirs)
 
 
 def env_include_cache_field() -> str:

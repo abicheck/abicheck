@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from .atomic_file import atomic_write
+from .cache_integrity import DEPS_SUFFIX
 from .guards import decision_key as _decision_key
 
 __all__ = ["TuParseStore", "content_key", "digest_file", "dep_digest"]
@@ -118,8 +119,10 @@ class TuParseStore:
         cannot be removed, it keeps missing, which costs a re-parse but never
         a failed lookup.
         """
+        path = self.path(key)
         try:
-            self.path(key).unlink(missing_ok=True)
+            path.unlink(missing_ok=True)
+            path.with_name(path.name + DEPS_SUFFIX).unlink(missing_ok=True)
         except OSError:
             pass
 

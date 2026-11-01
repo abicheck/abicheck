@@ -30,8 +30,9 @@ whole-snapshot key (``workflows.dump.cache.key``) and the header-AST keys
   under-approximation of the parse's inputs (the closed known gap "the cache
   keys walk include trees only over ``CACHE_HEADER_SUFFIXES``").
 * :func:`compiler_search_dirs` -- the compiler's own ``#include <...>``
-  search list (``-E -v``), memoized per tool identity, so the keys can hash
-  the system headers a parse reads without the caller naming them.
+  search list (``-E -v``), memoized per tool identity. The keys fold it by
+  spelling; the headers a parse read under it are validated by the entry's
+  dependency manifest (:mod:`.cache_dep_manifest`).
 """
 
 from __future__ import annotations
@@ -255,10 +256,12 @@ def compiler_search_dirs(cc_bin: str, *, cpp: bool) -> tuple[str, ...]:
 
 
 def search_dirs_material(cc_bin: str, *, cpp: bool) -> str:
-    """Key material: each built-in search dir of *cc_bin* and its content."""
-    return "\x00".join(
-        f"{d}={tree_digest(d)}" for d in compiler_search_dirs(cc_bin, cpp=cpp)
-    )
+    """Key material: *cc_bin*'s built-in search dirs, by spelling and order.
+
+    Their content is validated per entry by the dependency manifest
+    (:mod:`.cache_dep_manifest`): only the headers a parse read are checked,
+    never every file under the directories."""
+    return "\x00".join(compiler_search_dirs(cc_bin, cpp=cpp))
 
 
 def env_include_material() -> str:

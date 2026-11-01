@@ -41,6 +41,7 @@ file, so it never holds a multi-GB entry in memory.
 
 from __future__ import annotations
 
+import glob
 import hashlib
 import logging
 import os
@@ -48,9 +49,11 @@ import tempfile
 from pathlib import Path
 
 __all__ = [
+    "DEPS_SUFFIX",
     "digest_file",
     "entry_intact",
     "evict",
+    "evict_with_derived",
     "record_digest",
     "sidecar_path",
     "verify_entry",
@@ -59,6 +62,9 @@ __all__ = [
 log = logging.getLogger(__name__)
 
 _SUFFIX = ".sha256"
+#: An entry's dependency manifest (``extract.cache_dep_manifest``): evicted
+#: with its entry, so an orphan never outlives it.
+DEPS_SUFFIX = ".deps"
 _HEX = frozenset("0123456789abcdef")
 
 
@@ -118,9 +124,25 @@ def verify_entry(entry: Path) -> bool | None:
 
 
 def evict(entry: Path) -> None:
-    """Remove *entry* and its sidecar."""
+    """Remove *entry*, its digest sidecar and its dependency manifest."""
     entry.unlink(missing_ok=True)
     sidecar_path(entry).unlink(missing_ok=True)
+    entry.with_name(entry.name + DEPS_SUFFIX).unlink(missing_ok=True)
+
+
+def evict_with_derived(entry: Path) -> None:
+    """Remove *entry* and every ``<entry>.<suffix>`` file stored beside it
+    (its sidecars and the derived forms consumers stored for it): the entry's
+    inputs changed, so nothing computed from it may be served. Best-effort."""
+    try:
+        siblings = list(entry.parent.glob(glob.escape(entry.name) + ".*"))
+    except OSError:
+        siblings = []
+    for path in (entry, *siblings):
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def entry_intact(entry: Path) -> bool:

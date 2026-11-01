@@ -55,7 +55,10 @@ from .clang_header_argv import HeaderCompileContext, render_clang_header_argv
 #: Bumped to 4 when every clang AST pass started receiving
 #: `CLANG_GCC_HEADER_COMPAT_DEFINES`: an entry written before could hold an
 #: AST clang only partially recovered from GCC's `omp.h`.
-_CLANG_CACHE_SCHEMA_VERSION = 4
+#: Bumped to 5 when system include dirs entered the key by spelling only and
+#: an entry became valid only beside its dependency manifest
+#: (`extract.cache_dep_manifest`): an older entry has no manifest.
+_CLANG_CACHE_SCHEMA_VERSION = 5
 
 #: Salts every castxml header-parse cache key. Bumped to 2 when castxml's
 #: emulated compiler started receiving the run's standard/sysroot/target
@@ -78,7 +81,9 @@ _CLANG_CACHE_SCHEMA_VERSION = 4
 #: excluded declaration scan (`extract.headers.preprocessor_branches`).
 #: Bumped to 9 for complex/bit-int types, and to 10 for their pointer, array and
 #: typedef-chain forms: entries before them left those as ``Unimplemented``.
-_CASTXML_CACHE_SCHEMA_VERSION = 10
+#: Bumped to 11 when the entry's ``deps`` started carrying the parse's
+#: depfile manifest and system dirs left the key's content material.
+_CASTXML_CACHE_SCHEMA_VERSION = 11
 
 #: Which module constant salts each backend's header-parse cache key. Named,
 #: not copied, so the key always reads the constant's current value.
@@ -217,9 +222,12 @@ def _cache_key(
 
 
 def _system_includes_material(system_includes: tuple[str, ...]) -> str:
-    """The injected system dirs' spellings *and* contents (closed known gap:
-    a system header edited under an unchanged path reused the AST)."""
-    return json.dumps([[d, tree_digest(d)] for d in system_includes])
+    """The injected system dirs' spellings, in search order. Their *content*
+    is not key material: the headers a parse actually read under them are
+    validated at lookup by the entry's dependency manifest
+    (`extract.cache_dep_manifest`), so an edited system header still misses
+    without the key digesting every file under ``/usr/include``."""
+    return json.dumps(list(system_includes))
 
 
 def _castxml_store_key(

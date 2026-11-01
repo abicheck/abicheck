@@ -3,9 +3,13 @@
 Bug class ``cache.key_identity_must_equal_parse_input_content``: a header-parse
 cache key must change exactly when the bytes a parse could read change -- an
 explicit header, any file under an include root whatever its suffix, a file
-passed as an include, the compiler's built-in system directories, the
-directories ``CPATH``-style variables add -- or when an input's spelling (its
-path) changes, and must *not* change for a metadata-only touch.
+passed as an include, the directories ``CPATH``-style variables add -- or when
+an input's spelling (its path) changes, and must *not* change for a
+metadata-only touch. The compiler's built-in system directories enter the key
+by spelling only: the system headers a parse read are validated by the
+entry's dependency manifest instead (``extract.cache_dep_manifest``; see
+``tests/test_cache_dep_manifest_clang.py``), so an edit there must *not*
+move the key.
 
 The oracle is defined from the inputs, not from the key code: it walks the
 fixture tree with ``os.walk`` and records ``{(role, path, relpath): bytes}``
@@ -77,7 +81,8 @@ def _build(tmp_path: Path) -> Fixture:
 def _oracle_state(fx: Fixture) -> dict[object, object]:
     """Everything a parse can read, from the inputs (``os.walk``)."""
     state: dict[object, object] = {("header", str(fx.header)): fx.header.read_bytes()}
-    roots = [("inc", p) for p in fx.includes()] + [("sys", fx.sysdir)]
+    roots = [("inc", p) for p in fx.includes()]
+    state[("sys", str(fx.sysdir))] = True  # spelling only (manifest-validated)
     if fx.env_on:
         roots.append(("env", fx.envdir))
     for role, r in roots:

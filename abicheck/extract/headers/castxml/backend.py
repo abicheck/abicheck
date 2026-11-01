@@ -51,8 +51,9 @@ from ....storage.header_ast_cache import (
     run_ast_acquisition,
 )
 from ....storage.tu_parse_store import TuParseStore
-from ...cache_input_digest import search_dirs_material
-from ...castxml_header_compat import write_castxml_aggregate
+from ... import cache_dep_manifest
+from ...cache_input_digest import compiler_search_dirs, search_dirs_material
+from ...castxml_header_compat import is_aggregate_file, write_castxml_aggregate
 from ...path_aliases import absolutize_include_roots
 from ..ast_config import (
     _build_castxml_command,
@@ -249,7 +250,8 @@ def castxml_dump(
     cc_bin = shutil.which(cc_bin) or cc_bin
     frontend_identity = _tool_identity(castxml_bin)
     # The emulated compiler's built-in search dirs reach castxml's parse
-    # without being named anywhere: hash their content too (ADR-062 D11).
+    # without being named anywhere: the key folds their spelling, and the
+    # entry's dependency manifest the headers read under them (ADR-062 D11).
     compiler_identity = _tool_identity(cc_bin)
     compiler_key_identity = (
         compiler_identity + "\x00" + search_dirs_material(cc_bin, cpp=force_cpp)
@@ -345,14 +347,22 @@ def castxml_dump(
             return produced, produced_meta[-1]
 
         root, selected_meta = run_ast_acquisition("castxml", key, _produce)
+        served = store.path(key)
+        cache_dep_manifest.note(cache_dep_manifest.recall(str(served), served))
         if _selected_meta_out is not None:
             _selected_meta_out.append(selected_meta)
         # The coordinated producer already joined the vector spellings.
         return root
 
     check_deadline()
-    _cached_root = _read_castxml_cache(store, key)
+    entry = store.path(key)
+    if cache_dep_manifest.entry_valid(entry):
+        _cached_root = _read_castxml_cache(store, key)
+    else:
+        store.evict(key)  # a dependency changed (or none recorded): stale
+        _cached_root = None
     if _cached_root is not None:
+        cache_dep_manifest.note(cache_dep_manifest.recall(str(entry), entry))
         check_deadline()
         if _selected_meta_out is not None:
             _selected_meta_out.append((resolved_compiler, force_cpp))
@@ -362,6 +372,7 @@ def castxml_dump(
         out_xml = Path(tmp.name)
 
     final_force_cpp = force_cpp
+    parse_deps = cache_dep_manifest.ParseDeps()
     try:
         try:
             root = _run_castxml_attempt(
@@ -377,6 +388,7 @@ def castxml_dump(
                 force_cpp=force_cpp,
                 castxml_bin=castxml_bin,
                 run=run,
+                dep_args=parse_deps.args,
             )
         except SnapshotError as primary:
             if not _castxml_cpp_retry_allowed(
@@ -403,6 +415,7 @@ def castxml_dump(
                     force_cpp=True,
                     castxml_bin=castxml_bin,
                     run=run,
+                    dep_args=parse_deps.args,
                 )
                 final_force_cpp = True
             except SnapshotError as retry_exc:
@@ -417,12 +430,25 @@ def castxml_dump(
                     retry_exc
                 )
                 raise primary from None
+        manifest = parse_deps.manifest(
+            search_dirs=compiler_search_dirs(cc_bin, cpp=final_force_cpp),
+            exclude=is_aggregate_file,
+        )
+        cache_dep_manifest.note(manifest)
+        if manifest is not None:
+            cache_dep_manifest.remember(str(entry), manifest)
         if final_force_cpp == force_cpp:
             if _make_key() != key:
                 raise SnapshotError(
                     "header inputs changed while CastXML was acquiring L2 "
                     "evidence; discarding the unstable result"
                 )
+        # A dependency modified mid-parse leaves no manifest: store nothing.
+        if (
+            final_force_cpp == force_cpp
+            and manifest is not None
+            and cache_dep_manifest.write_sidecar(entry, manifest)
+        ):
             _write_castxml_cache(
                 store,
                 key,
@@ -437,6 +463,7 @@ def castxml_dump(
             _selected_meta_out.append((resolved_compiler, final_force_cpp))
         return _with_vectors(root)
     finally:
+        parse_deps.close()
         out_xml.unlink(missing_ok=True)
 
 
@@ -454,6 +481,7 @@ def _run_castxml_attempt(
     force_cpp: bool,
     castxml_bin: str = "castxml",
     run: CastxmlRunner = run_castxml,
+    dep_args: Callable[[], list[str]] = list,
 ) -> Element:
     """Run one castxml invocation in a fixed language mode and parse its output.
 
@@ -486,10 +514,13 @@ def _run_castxml_attempt(
         force_cpp20=force_cpp20,
         castxml_bin=castxml_bin,
     )
+    # The depfile request rides only on the parse run, not on the
+    # preprocessed-text replays derived from *cmd* below.
+    parse_cmd = [*cmd[:-1], *dep_args(), cmd[-1]]
 
     try:
         try:
-            result = run(cmd, timeout=120)
+            result = run(parse_cmd, timeout=120)
         except subprocess.TimeoutExpired as exc:
             stderr_snippet = ""
             if exc.stderr:

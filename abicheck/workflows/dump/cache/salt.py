@@ -35,7 +35,12 @@ from __future__ import annotations
 #: bare name disagree, where the old last-entry-wins map set them. A warm cache
 #: entry would keep replaying the last-alias values, so the bump forces
 #: re-extraction (the same precedent as v16 for ``elf_binding``).
-SNAPSHOT_CACHE_VERSION: str = "37"
+#:
+#: v38: system include dirs enter the key by spelling only and an entry is
+#: served only beside a valid dependency manifest (``<key>.deps``, ADR-062
+#: D11). An older entry has none and would read as a miss anyway; the bump
+#: keeps the two key derivations from ever sharing a name.
+SNAPSHOT_CACHE_VERSION: str = "38"
 # v35: header-derived snapshots now carry public_header_identifiers (schema
 # v55, extract/public_header_identifiers.py). The key also folds in the
 # snapshot schema version from this version on, so the next schema bump

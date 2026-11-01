@@ -60,14 +60,16 @@ def pinned_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 #: Binary content only: no headers, no includes, no version, default lang.
 #: Re-pinned for ``_SNAPSHOT_CACHE_VERSION`` 36 -> 37 (ElfSymbol.origin_lib now
 #: attributes std template local statics to the C++ runtime), a deliberate bump
-#: that changes every key.
-GOLDEN_BINARY_ONLY = "2162de29a1e921fa36b75e1a6d087a8d6e9c7339456e475886523bb4c0e0009f"
+#: that changes every key; again for 37 -> 38 (system include dirs keyed by
+#: spelling, entries validated by a dependency manifest, ADR-062 D11).
+GOLDEN_BINARY_ONLY = "9305fe74e277156dffad1ff974a34910f54e11e354112eab88940a6d375f2448"
 
 #: Every named input at once, so a change to any one of them shows here.
 #: Re-pinned when the derivation became content-only (ADR-062 D11: no mtime,
 #: every file under an include root whatever its suffix, a file include hashed
-#: as itself) -- a deliberate re-key of every header-bearing entry.
-GOLDEN_FULL = "bf4085b025d1d2ba05d592f93630696a8a02e837c1305fb39c7f7ff6fa763fd9"
+#: as itself) -- a deliberate re-key of every header-bearing entry; and for
+#: ``_SNAPSHOT_CACHE_VERSION`` 37 -> 38.
+GOLDEN_FULL = "32f864fcd3f898b9aab0b24854b33bfb69a8b26844b7745461ab0106d960beaa"
 
 
 def test_binary_only_key_is_pinned(pinned_inputs: Path) -> None:

@@ -74,11 +74,14 @@ builtin reads on x86-64.
 
 from __future__ import annotations
 
+import os
 import tempfile
 from collections.abc import Iterable
 from pathlib import Path
 
 __all__ = [
+    "AGGREGATE_DIR_PREFIX",
+    "is_aggregate_file",
     "CASTXML_HEADER_PREAMBLE",
     "FLOAT128_SPELLING",
     "FLOAT128_STANDIN",
@@ -90,6 +93,9 @@ __all__ = [
 #: Basename of the file the preamble is written to. Reserved: a declaration
 #: in a file of this name is synthetic, never part of any library's surface.
 PREAMBLE_FILENAME = "__abicheck_castxml_preamble.hpp"
+#: The private temp directory holding one run's aggregate and preamble; a
+#: dependency under it is the run's own file, never a cache input.
+AGGREGATE_DIR_PREFIX = "abicheck_castxml_"
 
 #: The record the preamble declares, and the spelling every reader reports
 #: in its place -- the one castxml's own builtin already reports on x86-64,
@@ -124,12 +130,18 @@ def write_castxml_aggregate(headers: Iterable[Path], suffix: str) -> Path:
     reserved basename, the aggregate as ``aggregate<suffix>`` -- so the caller
     removes the whole thing with ``shutil.rmtree(path.parent)``.
     """
-    agg_dir = Path(tempfile.mkdtemp(prefix="abicheck_castxml_"))
+    agg_dir = Path(tempfile.mkdtemp(prefix=AGGREGATE_DIR_PREFIX))
     preamble = agg_dir / PREAMBLE_FILENAME
     preamble.write_text(CASTXML_HEADER_PREAMBLE)
     agg_path = agg_dir / f"aggregate{suffix}"
     agg_path.write_text(castxml_aggregate_text(headers, preamble))
     return agg_path
+
+
+def is_aggregate_file(path: str) -> bool:
+    """Whether *path* is one run's aggregate or preamble: a file directly in
+    a :func:`write_castxml_aggregate` directory, never a parse input."""
+    return os.path.basename(os.path.dirname(path)).startswith(AGGREGATE_DIR_PREFIX)
 
 
 def castxml_aggregate_text(headers: Iterable[Path], preamble: Path) -> str:

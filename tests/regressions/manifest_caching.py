@@ -233,12 +233,16 @@ CACHING_BUG_CLASSES: tuple[BugClass, ...] = (
             "A header-parse cache key changes exactly when the bytes a parse "
             "could read change -- an explicit header, any file under an "
             "include root whatever its suffix, a file passed as an include, "
-            "the compiler's built-in system directories, the directories "
-            "CPATH-style variables add -- or when an input's path spelling "
-            "changes, and never for a metadata-only touch (ADR-062 D11). "
-            "Every key (whole-snapshot, clang AST, castxml AST) is checked "
-            "against an oracle built from the inputs with os.walk, not from "
-            "the key code."
+            "the directories CPATH-style variables add -- or when an input's "
+            "path spelling changes, and never for a metadata-only touch "
+            "(ADR-062 D11). The compiler's system directories enter by "
+            "spelling; a cached entry is served only while every system "
+            "header its parse read (the depfile manifest) is unchanged and "
+            "no file shadowing one has appeared, and a miss equals an "
+            "uncached parse. Every key (whole-snapshot, clang AST, castxml "
+            "AST) is checked against an oracle built from the inputs with "
+            "os.walk, and the manifest against the fixture's own include "
+            "structure and an uncached parse, not against the key code."
         ),
         # The suffix filter dates from #454; mtime-in-identity and the
         # unhashed system directories were recorded known gaps.
@@ -246,6 +250,8 @@ CACHING_BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=(
             "tests/test_cache_identity_mutations.py",
             "tests/test_cache_walk_excludes_own_cache.py",
+            "tests/test_cache_dep_manifest.py",
+            "tests/test_cache_dep_manifest_clang.py",
             # its header_disk_cache_warm_after_touch cell (integration)
             "tests/test_family_f5_optimization_reference.py",
         ),
@@ -258,6 +264,9 @@ CACHING_BUG_CLASSES: tuple[BugClass, ...] = (
                 "suffix-less",
                 "file-include",
                 "system-dir",
+                "system-dir-not-read",
+                "system-dir-shadow",
+                "system-dir-deleted",
                 "env-include",
                 "path-move",
                 "vcs-metadata",
