@@ -39,18 +39,24 @@ from __future__ import annotations
 
 import hashlib
 import itertools
+import json
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from abicheck.binary_utils import build_match_map
-from abicheck.extract.member_identity import recorded_library_name
+from abicheck.extract.member_identity import (
+    _single_library_value,
+    recorded_library_name,
+)
 from abicheck.model import AbiSnapshot
 from abicheck.model.bundle_facts import BundleFacts
 from abicheck.serialization import snapshot_to_json
 from abicheck.storage.snapshot_codec import save_snapshot
 from abicheck.workflows.release_member_pairing import (
     facts_paired_by_identity,
+    identity_renames,
     pair_path_maps_by_identity,
     path_identity,
 )
@@ -249,3 +255,101 @@ def test_an_unopenable_path_has_no_recorded_library(tmp_path: Path) -> None:
 
     assert recorded_library_name(directory) is None
     assert path_identity("libdir.so", directory) == "libdir.so"
+
+
+def _counting_identity(
+    calls: list[str], identities: dict[str, str]
+) -> Callable[[str], str]:
+    def identity(key: str) -> str:
+        calls.append(key)
+        return identities.get(key, key)
+
+    return identity
+
+
+def test_nothing_is_probed_when_every_member_pairs_by_name() -> None:
+    calls: list[str] = []
+    probe = _counting_identity(calls, {})
+
+    renames = identity_renames(
+        ["liba.so", "libb.so"],
+        ["liba.so", "libb.so"],
+        old_identity=probe,
+        new_identity=probe,
+    )
+
+    assert renames == {}
+    assert calls == []
+
+
+def test_paired_members_are_probed_only_for_a_matching_leftover_identity() -> None:
+    """Leftovers whose identities never meet across the sides cost nothing
+    on the name-paired members; a match costs one look at each of them."""
+    calls: list[str] = []
+    probe = _counting_identity(
+        calls, {"x.json": "libx.so", "y.json": "liby.so", "z.json": "libz.so"}
+    )
+
+    no_match = identity_renames(
+        ["paired.so", "x.json"],
+        ["paired.so", "y.json"],
+        old_identity=probe,
+        new_identity=probe,
+    )
+    assert no_match == {}
+    assert sorted(calls) == ["x.json", "y.json"]
+
+    calls.clear()
+    match = identity_renames(
+        ["paired.so", "z.json"],
+        ["paired.so", "libz.so"],
+        old_identity=probe,
+        new_identity=probe,
+    )
+    assert match == {"libz.so": "z.json"}
+    assert "paired.so" in calls
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (
+            '{"sections": {"provenance": {"payload": {"library": "libq.so.2"}}}}',
+            "libq.so.2",
+        ),
+        # A nested `library` with another value makes the scan ambiguous.
+        ('{"library": "libq.so.2", "sycl": [{"library": "libpi.so"}]}', None),
+        # An empty or null recorded library is not an identity.
+        ('{"library": "", "sycl": [{"library": "libpi.so"}]}', None),
+        ('{"library": null, "sycl": [{"library": "libpi.so"}]}', None),
+        # The key spelled inside a string value is not a member.
+        (
+            '{"note": "\\"library\\": \\"bogus.so\\"", "library": "libq.so.2"}',
+            "libq.so.2",
+        ),
+    ],
+    ids=[
+        "single",
+        "nested_other",
+        "empty_plus_nested",
+        "null_plus_nested",
+        "inside_string",
+    ],
+)
+def test_the_library_scan_answers_only_when_unambiguous(
+    text: str, expected: str | None
+) -> None:
+    assert _single_library_value(text) == expected
+
+
+def test_an_ambiguous_scan_falls_back_to_the_parsed_document(tmp_path: Path) -> None:
+    """A document whose scan is ambiguous is parsed in full: the recorded
+    top-level library still wins over a nested one."""
+    path = tmp_path / "doc.json"
+    document = json.loads(
+        snapshot_to_json(AbiSnapshot(library="libq.so.2", version="1"))
+    )
+    document["zz_nested"] = {"library": "libpi.so"}
+    path.write_text(json.dumps(document))
+
+    assert recorded_library_name(path) == "libq.so.2"

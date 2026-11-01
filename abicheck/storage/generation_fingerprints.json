@@ -148,7 +148,7 @@
       "abicheck/extract/macho_build_signals.py": "c277bfdd55f26aae61af66c8fa6c5cdc5fa45acc49a3ae513af5899417db88bb",
       "abicheck/extract/mangled_foreign_template_args.py": "58892490cdf5173d3e562a8f63abe3b55371beb30aaacbf79d9aecfcd08ca8bc",
       "abicheck/extract/manifest_semantic_ir.py": "9d8a6ddaa619a7d4b214bbeab5c2c0dfef681a6fd9dffd004760b19a62da3b15",
-      "abicheck/extract/member_identity.py": "68aa02ff9180e6fe41d16a29f2c23fdb3b00320a23f1dcbefc61edea2c03f6a7",
+      "abicheck/extract/member_identity.py": "7789b6eefb6f0f618aad176f04cfe1d9561ef72f56dec0f48e9cbb56892eb2b4",
       "abicheck/extract/metadata_attach.py": "a4d2cba939ecf96036f0c974e723c15e68699d9f5ce847c8e9f8b04f0440fa6d",
       "abicheck/extract/occurrence_dependency_scope.py": "d28ca573fecaecec3c67b784c9d44d516d039824e744179f852f5a89dc135d8e",
       "abicheck/extract/ownership.py": "9285bfc00b5dc3948749004cbe9881b5eb034696b59d405bd0e579f9664fb036",
@@ -188,9 +188,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "d4b927342125debf0b49e4a31dff1dbae19f6fa88e7c7066252c4b25630865a7",
+    "fingerprint": "765f96df5ab3254d994ce9d2506df98f7fd98ee0c5087dafca5728847d6286d7",
     "generation": 34,
-    "reason": "member_identity: an unopenable path is not a readable document (catch SnapshotError); no dumped field changes"
+    "reason": "member_identity: read a stored snapshot's recorded library with a key scan before a full parse; no dumped field changes"
   },
   "resolver": {
     "files": {

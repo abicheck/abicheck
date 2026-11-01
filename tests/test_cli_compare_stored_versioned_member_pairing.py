@@ -448,3 +448,103 @@ def test_an_unreadable_member_reads_the_same_paired_or_one_sided(
 
     for key in ("exit", "states", "library_verdicts", "operational", "scope"):
         assert paired[key] == one_sided[key], key
+
+
+#: The dry-run marker each real-run scope state corresponds to.
+_DRY_RUN_MARKER = {
+    "failed": "FAILED",
+    "not_supplied": "MISSING",
+    "available": "compare",
+}
+
+
+def _dry_run_markers(old_dir: Path, new_dir: Path) -> dict[str, str]:
+    """``{member name: marker}`` from the dry-run's comparison plan."""
+    result = CliRunner().invoke(
+        main, ["compare", str(old_dir), str(new_dir), "--dry-run"]
+    )
+    assert result.exit_code == 0, result.output
+    markers: dict[str, str] = {}
+    for line in result.output.splitlines():
+        marker, sep, rest = line.strip().partition(": ")
+        if sep and marker in _DRY_RUN_MARKER.values() and " -- " in rest:
+            markers[rest.split(" -- ", 1)[0]] = marker
+    return markers
+
+
+@pytest.mark.parametrize(
+    ("name", "content", "side"),
+    [
+        *((n, c, s) for n, c in _UNREADABLE.items() for s in ("old", "new")),
+        *((n, c, "new") for n, c in _READABLE_ONE_SIDED.items()),
+    ],
+)
+def test_the_dry_run_previews_what_the_real_run_records(
+    tmp_path: Path, name: str, content: bytes, side: str
+) -> None:
+    """Every member's dry-run marker matches the state the real run records
+    for it: compared, one-sided, or failed because no reader can open it."""
+    old_dir, new_dir = _write_release(tmp_path, _SPECS["versioned"])
+    ((new_dir if side == "new" else old_dir) / name).write_bytes(content)
+
+    markers = _dry_run_markers(old_dir, new_dir)
+    _code, report = _compare_json(tmp_path, old_dir, new_dir, "real")
+    states = {m["name"]: m["state"] for m in report["comparison_scope"]["members"]}
+
+    assert markers == {
+        member: _DRY_RUN_MARKER[state] for member, state in states.items()
+    }
+
+
+#: One unchanged member: nothing but the member under test moves the exit.
+_UNCHANGED: Spec = {"libtop.so.1.2.3": _member(["top"], ["top"])}
+
+
+@pytest.mark.parametrize("on_incomplete", ["warn", "block"])
+@pytest.mark.parametrize(
+    "shape", ["one_sided_unreadable", "paired_unreadable", "one_sided_readable"]
+)
+def test_the_exit_code_folds_the_operational_and_scope_axes(
+    tmp_path: Path, shape: str, on_incomplete: str
+) -> None:
+    """docs/reference/exit-codes.md: a member whose acquisition failed is an
+    operational error (4) on every `scope.on_incomplete` setting, and also
+    an incomplete-scope member (0 under warn, 1 under block). A one-sided
+    unreadable member reads exactly as the same file does paired; a readable
+    one-sided member contributes the scope axis alone."""
+    old_dir, new_dir = _write_release(tmp_path, _UNCHANGED)
+    if shape == "paired_unreadable":
+        (old_dir / "notes.so").write_text(
+            snapshot_to_json(_snap("notes.so", ["n"])), encoding="utf-8"
+        )
+    content = (
+        _READABLE_ONE_SIDED["libextra.so.5"]
+        if shape == "one_sided_readable"
+        else _UNREADABLE["notes.so"]
+    )
+    (
+        new_dir / ("libextra.so.5" if shape == "one_sided_readable" else "notes.so")
+    ).write_bytes(content)
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text(f"scope:\n  on_incomplete: {on_incomplete}\n", encoding="utf-8")
+    out = tmp_path / "r.json"
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--config",
+            str(cfg),
+            "-o",
+            f"json={out}",
+        ],
+    )
+    exit_block = json.loads(out.read_text(encoding="utf-8"))["exit"]
+
+    scope = 1 if on_incomplete == "block" else 0
+    operational = 0 if shape == "one_sided_readable" else 4
+    assert exit_block["incomplete_scope_contribution"] == scope
+    assert exit_block["operational_error_contribution"] == operational
+    assert result.exit_code == exit_block["code"] == max(scope, operational)

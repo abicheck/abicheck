@@ -62,18 +62,13 @@ def path_identity(key: str, path: Path) -> str:
 
 
 def _unique_by_identity(
-    members: Iterable[str],
-    leftover: set[str],
-    identity: Callable[[str], str],
-) -> tuple[dict[str, str], set[str]]:
-    """``({identity: key} for identities unique among *leftover*, identities
-    held by the paired members)``."""
+    leftover: set[str], identity: Callable[[str], str]
+) -> dict[str, str]:
+    """``{identity: key}`` for the identities exactly one *leftover* key has."""
     counts: dict[str, list[str]] = {}
     for key in leftover:
         counts.setdefault(identity(key), []).append(key)
-    unique = {ident: keys[0] for ident, keys in counts.items() if len(keys) == 1}
-    held = {identity(key) for key in members if key not in leftover}
-    return unique, held
+    return {ident: keys[0] for ident, keys in counts.items() if len(keys) == 1}
 
 
 def identity_renames(
@@ -88,17 +83,24 @@ def identity_renames(
     in this module's docstring). *old_identity*/*new_identity* give a member
     key's identity on that side. Only NEW keys are renamed, so a keyed stored
     document on the OLD side needs no rewrite; a leftover OLD key is by
-    definition absent on NEW, so a rename cannot collide."""
+    definition absent on NEW, so a rename cannot collide.
+
+    Cost: nothing is read unless both sides have leftovers, and a member the
+    file name already paired is read only when some leftover identity
+    matches across the sides -- then its identity is needed to keep that
+    pair from being displaced."""
     old_set, new_set = set(old_keys), set(new_keys)
     old_left, new_left = old_set - new_set, new_set - old_set
     if not old_left or not new_left:
         return {}
-    old_unique, old_held = _unique_by_identity(old_set, old_left, old_identity)
-    new_unique, new_held = _unique_by_identity(new_set, new_left, new_identity)
-    return {
-        new_unique[ident]: old_unique[ident]
-        for ident in sorted((set(old_unique) & set(new_unique)) - old_held - new_held)
-    }
+    old_unique = _unique_by_identity(old_left, old_identity)
+    new_unique = _unique_by_identity(new_left, new_identity)
+    candidates = set(old_unique) & set(new_unique)
+    for key in old_set & new_set:
+        if not candidates:
+            break
+        candidates -= {old_identity(key), new_identity(key)}
+    return {new_unique[ident]: old_unique[ident] for ident in sorted(candidates)}
 
 
 def pair_path_maps_by_identity(

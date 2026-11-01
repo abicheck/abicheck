@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -67,6 +68,38 @@ def _looks_like_json_document(path: Path) -> bool:
     return head.lstrip().startswith(b"{")
 
 
+#: Every ``"library": <string | null>`` member in a JSON text. A string
+#: inside another string has its quotes escaped, so it cannot match.
+_LIBRARY_MEMBER = re.compile(r'"library"\s*:\s*("(?:[^"\\]|\\.)*"|null)')
+
+
+def _single_library_value(text: str) -> str | None:
+    """The document's ``library`` string when a scan of *text* finds exactly
+    one ``"library"`` member, else ``None`` (the caller then parses the whole
+    document). Reading one field this way avoids building the full decoded
+    document: a sectioned snapshot stores ``library`` in its ``provenance``
+    section, after the declarations, so no bounded head read reaches it. A
+    nested ``library`` (a SYCL backend record) makes the scan ambiguous,
+    which falls back to the parse rather than guess."""
+    values: set[str] = set()
+    key = '"library"'
+    at = text.find(key)
+    while at != -1:
+        # `str.find` scans at memchr speed; the anchored match only runs
+        # where the key actually occurs.
+        m = _LIBRARY_MEMBER.match(text, at)
+        if m is not None and (at == 0 or text[at - 1] != "\\"):
+            values.add(m.group(1))
+        at = text.find(key, at + len(key))
+    if len(values) != 1:
+        return None
+    (raw,) = values
+    if raw == "null":
+        return None
+    decoded = json.loads(raw)
+    return decoded if isinstance(decoded, str) else None
+
+
 def recorded_library_name(path: Path) -> str | None:
     """The library file name a stored snapshot document at *path* records.
 
@@ -89,15 +122,18 @@ def recorded_library_name(path: Path) -> str | None:
     )
 
     try:
-        document = json.loads(read_snapshot_text(path))
-        if not isinstance(document, dict):
-            return None
-        if is_sectioned_document(document):
-            document = from_sectioned_document(document)
+        text = read_snapshot_text(path)
+        library = _single_library_value(text)
+        if library is None:
+            document = json.loads(text)
+            if not isinstance(document, dict):
+                return None
+            if is_sectioned_document(document):
+                document = from_sectioned_document(document)
+            library = document.get("library")
     except Exception as exc:  # noqa: BLE001 -- any undecodable document keys by name
         log.debug("member identity: %s is not a readable snapshot: %s", path, exc)
         return None
-    library = document.get("library")
     if not isinstance(library, str) or not library.strip():
         return None
     # The dumper records `Path.name`; a hand-written document may carry a
