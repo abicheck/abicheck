@@ -518,3 +518,71 @@ class TestHostileMemberIdIsNotAPath:
         assert not sentinel.exists()
         assert list(staging.iterdir()) == []
         assert "new-library=" not in gh_out.read_text()
+
+
+def _stage(tmp_path: Path, matrix: dict):
+    import os
+    import subprocess
+
+    from _workflow_exec import bash_executable, require_bash
+
+    require_bash()
+    gh_out = tmp_path / "gh_out"
+    gh_out.write_text("")
+    return subprocess.run(
+        [bash_executable(), "-c", _staging_script()],
+        cwd=tmp_path,
+        env={
+            **os.environ,
+            "MATRIX_JSON": json.dumps(matrix),
+            "GITHUB_OUTPUT": str(gh_out),
+        },
+        capture_output=True,
+        text=True,
+    )
+
+
+class TestStagingNamesMembersByTargetId:
+    """check-project.yml stages each member under its target id (the name
+    actions/baseline gives it in binaries/). Replaces the former
+    basename-collision test: two members whose files share a basename no
+    longer overwrite each other; two members resolving to one file are still
+    refused."""
+
+    def test_members_sharing_a_basename_stage_under_their_own_ids(self, tmp_path):
+        candidate = tmp_path / "candidate"
+        (candidate / "linux").mkdir(parents=True)
+        (candidate / "plugins").mkdir(parents=True)
+        (candidate / "linux" / "libfoo.so").write_bytes(b"core")
+        (candidate / "plugins" / "libfoo.so").write_bytes(b"plugin")
+        proc = _stage(
+            tmp_path,
+            {
+                "kind": "bundle",
+                "name": "mybundle",
+                "member_binary_patterns": {
+                    "core": "linux/libfoo.so",
+                    "plugin": "plugins/libfoo.so",
+                },
+            },
+        )
+        assert proc.returncode == 0, proc.stderr
+        staging = tmp_path / "bundle-staging"
+        assert sorted(p.name for p in staging.iterdir()) == ["core", "plugin"]
+        assert (staging / "core").read_bytes() == b"core"
+        assert (staging / "plugin").read_bytes() == b"plugin"
+
+    def test_two_members_resolving_to_one_file_are_refused(self, tmp_path):
+        candidate = tmp_path / "candidate"
+        candidate.mkdir()
+        (candidate / "libfoo.so").write_bytes(b"core")
+        proc = _stage(
+            tmp_path,
+            {
+                "kind": "bundle",
+                "name": "mybundle",
+                "member_binary_patterns": {"core": "libfoo.so", "alias": "libfoo*.so"},
+            },
+        )
+        assert proc.returncode != 0
+        assert "'core'" in proc.stderr and "'alias'" in proc.stderr
