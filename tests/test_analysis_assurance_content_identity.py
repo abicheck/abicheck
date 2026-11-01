@@ -157,7 +157,7 @@ def test_self_compare_of_stored_stale_snapshot_is_complete_end_to_end(
 
     result = CliRunner().invoke(main, ["compare", str(path), str(path), "-o", "json=-"])
     assert result.exit_code == 0, result.output
-    payload = json.loads(result.output)
+    payload = json.loads(result.stdout)
     assurance = payload["analysis_assurance"]
     assert assurance["schema_staleness_status"] == "clean", assurance
     assert assurance["status"] == "complete", assurance
@@ -185,7 +185,7 @@ def test_two_distinct_stored_snapshots_still_taint_end_to_end(tmp_path: Path) ->
     result = CliRunner().invoke(
         main, ["compare", str(old_p), str(new_p), "-o", "json=-"]
     )
-    payload = json.loads(result.output)
+    payload = json.loads(result.stdout)
     assurance = payload["analysis_assurance"]
     assert assurance["schema_staleness_status"] == "degraded", assurance
     assert assurance["status"] != "complete", assurance
@@ -213,7 +213,7 @@ def test_content_identical_compare_still_warns_it_can_detect_nothing(
     path.write_text(json.dumps(d))
 
     result = CliRunner().invoke(main, ["compare", str(path), str(path), "-o", "json=-"])
-    payload = json.loads(result.output)
+    payload = json.loads(result.stdout)
     assert payload["analysis_assurance"]["status"] == "complete"
     warnings_out = payload.get("coverage_warnings", [])
     assert any("byte-identical" in w for w in warnings_out), warnings_out

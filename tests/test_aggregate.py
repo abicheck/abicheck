@@ -1181,7 +1181,7 @@ class TestAggregateCLI:
             ]
         )
         assert res.exit_code == 4
-        assert json.loads(res.output)["compatibility"]["verdict"] == "BREAKING"
+        assert json.loads(res.stdout)["compatibility"]["verdict"] == "BREAKING"
 
     def test_no_expected_set_is_usage_error(self, tmp_path: Path):
         _write_report(tmp_path, LINUX, "COMPATIBLE")

@@ -127,6 +127,12 @@ def _run(*args: str) -> tuple[int, str]:
     return result.exit_code, result.output
 
 
+def _run_stdout(*args: str) -> tuple[int, str]:
+    """``_run`` reading stdout only, for a caller that parses it as JSON."""
+    result = CliRunner().invoke(main, list(args), catch_exceptions=False)
+    return result.exit_code, result.stdout
+
+
 def _stub_dump(path: Path, _item: VariantCaptureInput) -> AbiSnapshot:
     from abicheck.serialization import load_snapshot
 
@@ -325,7 +331,7 @@ def test_cli_required_variant_missing_is_usage_error_and_writes_nothing(
 def test_cli_dry_run_writes_nothing(tmp_path: Path) -> None:
     cfg = _config(tmp_path)
     x86 = _write_inputs(tmp_path / "in" / "x86", ["foo"])
-    code, out = _run(
+    code, out = _run_stdout(
         "project",
         "capture-variants",
         "--config",

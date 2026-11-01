@@ -95,7 +95,7 @@ def test_cli_report_surfaces_unknown_for_a_dropped_header(tmp_path: Path) -> Non
     save_snapshot(_snap("2", excluded=True, dependency_scope="filtered"), new_p)
     res = CliRunner().invoke(main, ["compare", str(old_p), str(new_p), "-o", "json=-"])
     assert res.exit_code in (0, 1, 2, 4), res.output
-    doc = json.loads(res.output)
+    doc = json.loads(res.stdout)
     new_debug = doc["edge_coverage"]["new"]["debug_type_of"]
     old_debug = doc["edge_coverage"]["old"]["debug_type_of"]
     assert new_debug["absence"] == "unknown"

@@ -92,7 +92,7 @@ def _context(tmp_path: Path, *args: str) -> dict:
         ],
     )
     assert result.exit_code in (1, 2, 4), result.output
-    return json.loads(result.output)["contract_context"]["evaluation_context"]
+    return json.loads(result.stdout)["contract_context"]["evaluation_context"]
 
 
 class TestCanonicalResolverIsWhatRuns:
@@ -186,12 +186,9 @@ class TestCanonicalResolverIsWhatRuns:
                     str(inc / "a.h"),
                 ],
             )
-        # The "-H ignored" warning precedes the document on the mixed stream.
-        out = result.output
-        ctx = json.loads(out[out.index("{\n") :])["contract_context"][
-            "evaluation_context"
-        ]
-        assert "ignored when both inputs are snapshots" in out
+        # The "-H ignored" warning is stderr; stdout is the document alone.
+        ctx = json.loads(result.stdout)["contract_context"]["evaluation_context"]
+        assert "ignored when both inputs are snapshots" in result.stderr
         assert seen["headers"] == ()
         assert (
             ctx["field_provenance"]["surface.ownership.header_dirs"]["layer"]
@@ -337,7 +334,7 @@ class TestProjectConfigOverridesReachTheReceipt:
                 *args,
             ],
         )
-        out = result.output
+        out = result.stdout
         i = out.find("{")
         payload = json.loads(out[i:] if i >= 0 else out)
         return result.exit_code, payload["contract_context"]["evaluation_context"]
@@ -785,7 +782,7 @@ class TestRequireCompleteAnalysisReceiptConsistency:
             ],
         )
         assert result.exit_code in (1, 2, 4), result.output
-        payload = json.loads(result.output)
+        payload = json.loads(result.stdout)
 
         top_level = payload["effective_config_fields"]["gate.require_complete_analysis"]
         contract_context_value = payload["contract_context"]["evaluation_context"][
@@ -819,7 +816,7 @@ class TestRequireCompleteAnalysisReceiptConsistency:
             ],
         )
         assert result.exit_code in (1, 2, 4), result.output
-        payload = json.loads(result.output)
+        payload = json.loads(result.stdout)
 
         top_level = payload["effective_config_fields"]["gate.require_complete_analysis"]
         contract_context_value = payload["contract_context"]["evaluation_context"][
@@ -864,7 +861,7 @@ class TestRequireCompleteAnalysisFieldProvenance:
             ],
         )
         assert result.exit_code in (1, 2, 4), result.output
-        payload = json.loads(result.output)
+        payload = json.loads(result.stdout)
 
         field_provenance = payload["contract_context"]["evaluation_context"][
             "field_provenance"
@@ -892,7 +889,7 @@ class TestRequireCompleteAnalysisFieldProvenance:
             ],
         )
         assert result.exit_code in (1, 2, 4), result.output
-        payload = json.loads(result.output)
+        payload = json.loads(result.stdout)
 
         field_provenance = payload["contract_context"]["evaluation_context"][
             "field_provenance"
@@ -925,7 +922,7 @@ class TestRequireCompleteAnalysisFieldProvenance:
             ],
         )
         assert result.exit_code in (1, 2, 4), result.output
-        payload = json.loads(result.output)
+        payload = json.loads(result.stdout)
 
         field_provenance = payload["contract_context"]["evaluation_context"][
             "field_provenance"
@@ -962,7 +959,7 @@ class TestRequireCompleteAnalysisFieldProvenance:
             ],
         )
         assert result.exit_code in (1, 2, 4), result.output
-        payload = json.loads(result.output)
+        payload = json.loads(result.stdout)
 
         gate = payload["contract_context"]["evaluation_context"]["resolved_config"][
             "gate"
@@ -1015,7 +1012,7 @@ class TestRequireCompleteAnalysisProvenanceIdentity:
             ],
         )
         assert result.exit_code in (1, 2, 4), result.output
-        payload = json.loads(result.output)
+        payload = json.loads(result.stdout)
 
         field_provenance = payload["contract_context"]["evaluation_context"][
             "field_provenance"
@@ -1061,7 +1058,7 @@ class TestRequireCompleteAnalysisProvenanceIdentity:
             ],
         )
         assert result.exit_code in (1, 2, 4), result.output
-        payload = json.loads(result.output)
+        payload = json.loads(result.stdout)
 
         field_provenance = payload["contract_context"]["evaluation_context"][
             "field_provenance"

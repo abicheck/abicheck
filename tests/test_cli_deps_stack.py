@@ -114,7 +114,7 @@ class TestDepsCommand:
         runner = CliRunner()
         result = runner.invoke(main, ["deps", "tree", str(binary), "-o", "json=-"])
         assert result.exit_code == 0, result.output
-        parsed = json.loads(result.output)
+        parsed = json.loads(result.stdout)
         assert parsed["root_binary"] == str(binary)
         assert parsed["verdict"]["loadability"] == "pass"
 
@@ -266,7 +266,7 @@ class TestStackCheckCommand:
             ],
         )
         assert result.exit_code == 0, result.output
-        parsed = json.loads(result.output)
+        parsed = json.loads(result.stdout)
         assert parsed["root_binary"] == binary_rel
         assert parsed["verdict"]["loadability"] == "pass"
         assert parsed["verdict"]["abi_risk"] == "pass"

@@ -62,6 +62,12 @@ def _invoke(*args: str) -> tuple[int, str]:
     return result.exit_code, result.output
 
 
+def _invoke_stdout(*args: str) -> tuple[int, str]:
+    """``_invoke`` reading stdout only, for a caller that parses it as JSON."""
+    result = CliRunner().invoke(main, list(args))
+    return result.exit_code, result.stdout
+
+
 class TestReleaseJsonEnvMatrixDigest:
     def test_carries_the_digest_per_library_and_at_the_envelope(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -81,7 +87,9 @@ class TestReleaseJsonEnvMatrixDigest:
         )
         monkeypatch.chdir(work)
 
-        code, out = _invoke("compare", str(old_dir), str(new_dir), "-o", "json=-")
+        code, out = _invoke_stdout(
+            "compare", str(old_dir), str(new_dir), "-o", "json=-"
+        )
         assert code == 0, out
         data = json.loads(out)
 
@@ -110,7 +118,9 @@ class TestReleaseJsonEnvMatrixDigest:
         _write_snap(new_dir / "libfoo.json", _snap())
         monkeypatch.chdir(work)
 
-        code, out = _invoke("compare", str(old_dir), str(new_dir), "-o", "json=-")
+        code, out = _invoke_stdout(
+            "compare", str(old_dir), str(new_dir), "-o", "json=-"
+        )
         assert code == 0, out
         data = json.loads(out)
 
@@ -147,7 +157,9 @@ class TestReleaseJsonEnvMatrixDigestWithNoCompletedComparison:
         )
         monkeypatch.chdir(work)
 
-        code, out = _invoke("compare", str(old_dir), str(new_dir), "-o", "json=-")
+        code, out = _invoke_stdout(
+            "compare", str(old_dir), str(new_dir), "-o", "json=-"
+        )
         data = json.loads(out)
 
         assert data["libraries"] == [], "fixture precondition: zero matched pairs"
@@ -173,7 +185,9 @@ class TestReleaseJsonEnvMatrixDigestWithNoCompletedComparison:
         _write_snap(zp_new / "libbar.json", _snap(library="libbar.so"))
         (zero_pair_work / ".abicheck.yml").write_text(deployment_yaml)
         monkeypatch.chdir(zero_pair_work)
-        _, zero_pair_out = _invoke("compare", str(zp_old), str(zp_new), "-o", "json=-")
+        _, zero_pair_out = _invoke_stdout(
+            "compare", str(zp_old), str(zp_new), "-o", "json=-"
+        )
         zero_pair_digest = json.loads(zero_pair_out)["env_matrix_source_sha256"]
 
         matched_work = tmp_path / "matched"
@@ -187,7 +201,7 @@ class TestReleaseJsonEnvMatrixDigestWithNoCompletedComparison:
         _write_snap(m_new / "libfoo.json", snap)
         (matched_work / ".abicheck.yml").write_text(deployment_yaml)
         monkeypatch.chdir(matched_work)
-        matched_code, matched_out = _invoke(
+        matched_code, matched_out = _invoke_stdout(
             "compare", str(m_old), str(m_new), "-o", "json=-"
         )
         assert matched_code == 0, matched_out

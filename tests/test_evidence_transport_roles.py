@@ -1156,8 +1156,8 @@ class TestTransportEquivalence:
 
 def _json_payload(res: Result) -> dict:
     """The report body, past any leading warning lines the CLI prints."""
-    start = res.output.index("{")
-    return json.loads(res.output[start:])
+    start = res.stdout.index("{")
+    return json.loads(res.stdout[start:])
 
 
 def _finding_kinds(res: Result) -> set[str]:

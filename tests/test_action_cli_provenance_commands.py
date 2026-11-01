@@ -586,7 +586,7 @@ class TestResolveTag:
         ref = _write(tmp_path / "ref.json", _ref("1.5.2", MERGE))
         result = runner.invoke(action_cli, ["resolve-tag", "1.5.2", str(ref)])
         assert result.exit_code == 0, result.output
-        assert json.loads(result.output)["commit_sha"] == MERGE
+        assert json.loads(result.stdout)["commit_sha"] == MERGE
 
 
 # ---------------------------------------------------------------------------

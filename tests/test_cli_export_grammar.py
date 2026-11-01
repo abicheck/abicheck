@@ -419,7 +419,7 @@ class TestExportsAreOneAnalysis:
         dest = tmp_path / "report.json"
         to_file = _run(["compare", str(old), str(new), "-o", f"json={dest}"])
         assert to_stdout.exit_code == to_file.exit_code
-        assert _canonical_result(to_stdout.output, "json") == _canonical_result(
+        assert _canonical_result(to_stdout.stdout, "json") == _canonical_result(
             dest.read_text(encoding="utf-8"), "json"
         )
 

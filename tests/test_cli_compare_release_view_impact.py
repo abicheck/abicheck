@@ -56,7 +56,7 @@ class TestReleaseViewImpactAggregate:
             _view_config(tmp_path, '["impact"]'),
         )
         assert result.exit_code == 4, result.output
-        data = json.loads(result.output)
+        data = json.loads(result.stdout)
         lib = data["libraries"][0]
         impact = lib["impact_table"]
         assert impact["root_entries"], impact
@@ -79,7 +79,7 @@ class TestReleaseViewImpactAggregate:
             "json=-",
         )
         assert result.exit_code == 4, result.output
-        data = json.loads(result.output)
+        data = json.loads(result.stdout)
         lib = data["libraries"][0]
         assert "impact_table" not in lib
 
@@ -120,8 +120,8 @@ class TestReleaseViewImpactAggregate:
         )
         assert result.exit_code == 4, result.output
         assert result.output.startswith("Report written to")
-        _, _, primary_json_text = result.output.partition("\n")
-        primary = json.loads(primary_json_text)
+        # The "Report written to" line is stderr; stdout is the document alone.
+        primary = json.loads(result.stdout)
         primary_lib = primary["libraries"][0]
         # "show=variables" matches no variable-element finding (the root
         # type change is a types-element finding), so the filtered primary
@@ -302,7 +302,7 @@ class TestReleaseViewShowOnlyReleaseGlobalFindings:
             _view_config(tmp_path, '["show=api-break"]'),
         )
         assert result.exit_code == 4, result.output
-        doc = json.loads(result.output)
+        doc = json.loads(result.stdout)
         assert len(doc["matrix_findings"]) == 1
         assert doc["matrix_findings"][0]["kind"] == "cxx_standard_floor_raised"
         # The real matrix verdict is unaffected by the display filter.
@@ -328,7 +328,7 @@ class TestReleaseViewShowOnlyReleaseGlobalFindings:
             _view_config(tmp_path, '["show=breaking"]'),
         )
         assert json_result.exit_code == 4, json_result.output
-        doc = json.loads(json_result.output)
+        doc = json.loads(json_result.stdout)
         assert doc["matrix_findings"] == []
         # The real matrix verdict (what actually gated the exit code) is
         # unaffected by the display filter -- "record before disposing".
@@ -365,7 +365,7 @@ class TestReleaseViewShowOnlyReleaseGlobalFindings:
             "json=-",
         )
         assert result.exit_code == 4, result.output
-        doc = json.loads(result.output)
+        doc = json.loads(result.stdout)
         assert len(doc["matrix_findings"]) == 1
 
 

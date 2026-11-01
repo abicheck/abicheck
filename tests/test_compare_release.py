@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 import json
 from pathlib import Path
 
@@ -126,18 +125,9 @@ def _api_break_pair(lib: str = "libfoo.so") -> tuple[AbiSnapshot, AbiSnapshot]:
 
 
 def _runner() -> CliRunner:
-    """A runner whose stdout is *only* stdout, on every supported Click.
-
-    `pyproject.toml` declares `click>=8.0`, and 8.0/8.1's `CliRunner` defaults
-    to `mix_stderr=True`, so `result.stdout` there carries stderr too and the
-    unconditional ledgers would land inside a `-o json=-` document again --
-    the same failure this file's `_invoke` was fixed for, just on a different
-    Click (CodeRabbit review, PR #1284). 8.2 removed the parameter and always
-    separates, so it is passed only where it exists, detected from the
-    signature rather than by parsing a version string.
-    """
-    if "mix_stderr" in inspect.signature(CliRunner.__init__).parameters:
-        return CliRunner(mix_stderr=False)  # type: ignore[call-arg]
+    """A runner whose stdout is *only* stdout: `click>=8.2` (the declared
+    floor) keeps stderr apart, so the unconditional ledgers never land inside
+    a `-o json=-` document (CodeRabbit review, PR #1284)."""
     return CliRunner()
 
 
