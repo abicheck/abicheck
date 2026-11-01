@@ -86,6 +86,7 @@ def _dump(
     fx: dict[str, Path], mp: pytest.MonkeyPatch, cache: Path, runner: _Runner
 ) -> list[tuple[str, str]] | type[SnapshotError]:
     mp.setenv("XDG_CACHE_HOME", str(cache))
+    mp.setenv("LOCALAPPDATA", str(cache))  # the Windows cache base
     mp.setattr(
         clang_backend,
         "_resolve_clang_system_includes",
@@ -234,6 +235,8 @@ def test_castxml_entry_records_and_checks_the_system_headers_it_read(
     header.write_text("#include <stddef.h>\nsize_t api_len(void);\n")
     os.utime(header, ns=(_OLD, _OLD))
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    # LOCALAPPDATA is the cache base Windows resolves instead of XDG_CACHE_HOME.
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "cache"))
     runs: list[int] = []
 
     def run(cmd: list[str], **kw: Any) -> Any:
