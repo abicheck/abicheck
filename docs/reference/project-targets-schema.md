@@ -193,12 +193,14 @@ carries `bundle_required`/`bundle_on_incomplete` (run-plan schema
 [`v4`](run-plan-schema.md)), and [`check-target`](check-target.md) forwards
 the required members as `compare --select-required`, every other member as
 `--select`, and `on_incomplete` as `--set scope.on_incomplete=block|warn`.
-The selection keys are each member's canonical release key (its baseline
-binary's file name with the version suffix stripped, e.g. `libcore.so`), not
-the target id — `check-target` translates them from the resolved baseline.
-`check-project.yml` also stops refusing a bundle whose candidate is missing a
-member: it stages the members it finds and leaves the decision to the scope
-gate, which reports every missing member either way. A bundle with neither
+The selection keys are the release keys `compare` pairs members by: each
+member's key is taken from the file the resolved baseline staged it under
+(`resolve-baseline`'s `binary-paths`), so `check-target` never guesses it.
+`check-project.yml` stages each candidate member under its target id, the
+same name `actions/baseline` gives it in `binaries/`, so the two sides pair
+member for member. It also stops refusing a bundle whose candidate is
+missing a member: it stages the members it finds and leaves the decision to
+the scope gate, which reports every missing member either way. A bundle with neither
 key behaves as before: every member must be staged on the candidate side.
 
 The baseline side is unchanged: a resolved bundle baseline still has every

@@ -183,9 +183,10 @@ class TestRunPlanCarriesThePolicy:
 _BASELINE_FILES = {
     "liba": "/b/liba.so.1.2.3",
     "libb": "/b/libB-core.so",
-    "libc": "/b/libc.so.7",
+    # The shape actions/baseline publishes: binaries/<target id>.
+    "libc": "/b/binaries/libc",
 }
-_EXPECTED_KEY = {"liba": "liba.so", "libb": "libB-core.so", "libc": "libc.so"}
+_EXPECTED_KEY = {"liba": "liba.so", "libb": "libB-core.so", "libc": "libc"}
 
 
 class TestTargetIdsBecomeReleaseKeys:
@@ -245,7 +246,7 @@ class TestTargetIdsBecomeReleaseKeys:
         )
         assert result.exit_code == 0, result.output
         assert result.output.splitlines() == [
-            "args=--select-required libc.so --select liba.so --select libB-core.so",
+            "args=--select-required libc --select liba.so --select libB-core.so",
             "set=scope.on_incomplete=block",
         ]
 
@@ -373,3 +374,106 @@ class TestActionForwardsThePolicy:
         assert "BUNDLE_SELECTION_OUTCOME" in finalize["env"]
         run_sh = (_REPO / "actions/check-target/run.sh").read_text(encoding="utf-8")
         assert '"$BUNDLE_SELECTION_OUTCOME" == "failure"' in run_sh
+
+
+def _staging_script() -> str:
+    import _yaml_fast
+
+    doc = _yaml_fast.safe_load(
+        (_REPO / ".github/workflows/check-project.yml").read_text(encoding="utf-8")
+    )
+    steps = doc["jobs"]["check"]["steps"]
+    return next(
+        s for s in steps if s.get("name") == "Resolve candidate binary/binaries"
+    )["run"]
+
+
+@pytest.mark.integration
+class TestStagedBundleMembersPairWithTheirBaseline:
+    """gcc-built members: actions/baseline's `binaries/<target id>` layout
+    against check-project's real staging step, through a real `compare`.
+
+    Before the fix the candidate was staged under its build basename
+    (`liba.so.1`), which never pairs with `binaries/liba`: every member read
+    one-sided and nothing was compared. Oracle: every present member is
+    compared, and the exit follows the declared policy."""
+
+    @pytest.mark.parametrize("missing", [None, "libb", "libc"])
+    def test_members_pair_and_the_policy_gates(self, tmp_path, missing):
+        import os
+        import shutil
+        import subprocess
+
+        from _workflow_exec import bash_executable, require_bash
+
+        if shutil.which("gcc") is None:
+            pytest.skip("gcc not available")
+        require_bash()
+        baseline = tmp_path / "baseline-binaries"
+        candidate = tmp_path / "candidate" / "lib"
+        baseline.mkdir()
+        candidate.mkdir(parents=True)
+        for m in _MEMBERS:
+            src = tmp_path / f"{m}.c"
+            src.write_text(f"int {m}_fn(void) {{ return 1; }}\n", encoding="utf-8")
+            built = tmp_path / f"{m}.so.1"
+            subprocess.run(
+                [
+                    "gcc",
+                    "-shared",
+                    "-fPIC",
+                    f"-Wl,-soname,{m}.so.1",
+                    "-o",
+                    str(built),
+                    str(src),
+                ],
+                check=True,
+            )
+            shutil.copy(built, baseline / m)  # actions/baseline: binaries/<id>
+            if m != missing:
+                shutil.copy(built, candidate / f"{m}.so.1")
+        matrix = {
+            "kind": "bundle",
+            "name": "rel",
+            "member_binary_patterns": {m: f"lib/{m}.so*" for m in _MEMBERS},
+            "bundle_required": ["liba", "libb"],
+        }
+        gh_out = tmp_path / "gh_out"
+        gh_out.write_text("")
+        proc = subprocess.run(
+            [bash_executable(), "-c", _staging_script()],
+            cwd=tmp_path,
+            env={
+                **os.environ,
+                "MATRIX_JSON": json.dumps(matrix),
+                "GITHUB_OUTPUT": str(gh_out),
+            },
+            capture_output=True,
+            text=True,
+        )
+        assert proc.returncode == 0, proc.stderr
+        staging = tmp_path / "bundle-staging"
+        sel = bundle_selection(
+            _MEMBERS,
+            ("liba", "libb"),
+            {m: str(baseline / m) for m in _MEMBERS},
+            "fail",
+        )
+        result = CliRunner().invoke(
+            main,
+            [
+                "compare",
+                str(baseline),
+                str(staging),
+                *sel.compare_args(),
+                "--set",
+                sel.set_line(),
+                "-o",
+                "json=-",
+            ],
+        )
+        doc = json.loads(result.stdout)
+        compared = sorted(lib["library"] for lib in doc["libraries"])
+        assert compared == sorted(m for m in _MEMBERS if m != missing)
+        expected = 1 if missing in ("liba", "libb") else 0
+        assert result.exit_code == expected, result.output

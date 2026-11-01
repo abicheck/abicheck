@@ -1811,13 +1811,13 @@ class TestCandidateResolverConfinesMatchesToTheArtifactRoot:
             "isn't a bug in the workflow script itself."
         ),
     )
-    def test_bundle_members_with_colliding_basenames_are_rejected(
+    def test_bundle_members_sharing_a_basename_stage_under_their_own_ids(
         self, tmp_path: Path
     ) -> None:
-        # Two distinct members resolving to files with the same basename
-        # (e.g. build/linux/libfoo.so vs. build/plugins/libfoo.so) would
-        # otherwise silently overwrite one another in the shared flat
-        # bundle-staging/ directory (Codex review).
+        # Members are staged under their target ids (the names
+        # actions/baseline gives them in binaries/), so two members whose
+        # files share a basename (build/linux/libfoo.so vs.
+        # build/plugins/libfoo.so) no longer overwrite each other.
         candidate = tmp_path / "candidate"
         (candidate / "linux").mkdir(parents=True)
         (candidate / "plugins").mkdir(parents=True)
@@ -1835,9 +1835,32 @@ class TestCandidateResolverConfinesMatchesToTheArtifactRoot:
                 },
             },
         )
+        assert result.returncode == 0, result.stderr
+        staging = tmp_path / "bundle-staging"
+        assert sorted(p.name for p in staging.iterdir()) == ["core", "plugin"]
+        assert (staging / "core").read_bytes() == b"core"
+        assert (staging / "plugin").read_bytes() == b"plugin"
+
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="needs a POSIX bash; see the sibling tests above.",
+    )
+    def test_two_members_resolving_to_one_file_are_rejected(
+        self, tmp_path: Path
+    ) -> None:
+        candidate = tmp_path / "candidate"
+        candidate.mkdir()
+        (candidate / "libfoo.so").write_bytes(b"core")
+        result = self._run_bash(
+            tmp_path,
+            {
+                "kind": "bundle",
+                "name": "mybundle",
+                "member_binary_patterns": {"core": "libfoo.so", "alias": "libfoo*.so"},
+            },
+        )
         assert result.returncode != 0
-        assert "libfoo.so" in result.stderr
-        assert "'core'" in result.stderr and "'plugin'" in result.stderr
+        assert "'core'" in result.stderr and "'alias'" in result.stderr
 
     @pytest.mark.skipif(
         sys.platform == "win32",
@@ -1919,7 +1942,7 @@ class TestCandidateResolverConfinesMatchesToTheArtifactRoot:
         )
         assert result.returncode == 0, result.stderr
         assert not (stale / "leftover.so").exists()
-        assert (stale / "libpvxs.so").exists()
+        assert (stale / "libpvxs").exists()
 
 
 class TestCheckTargetIdentityPassthrough:
