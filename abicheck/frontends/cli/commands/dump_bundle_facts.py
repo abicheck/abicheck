@@ -61,7 +61,7 @@ def dump_bundle_facts_out_option(func: F) -> F:
         "reads as its stored OLD side, and the same one `compare "
         "--bundle-facts-out` writes for its OLD side. A PATH ending in .zip "
         "writes the content-addressed zip archive form; any other name "
-        "writes the JSON document (compressed by a .gz/.zst suffix). "
+        "writes the JSON document (gzip- or zstd-compressed for a name ending in .json.gz or .json.zst). "
         "Replaces -o/--output.",
     )(func)
 

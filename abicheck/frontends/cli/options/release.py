@@ -137,7 +137,7 @@ def release_options(func: F) -> F:
         "Additive output alongside the ordinary live-vs-live comparison. "
         "(directory/package inputs only) A PATH ending in .zip writes the "
         "content-addressed zip archive form; any other name writes the JSON "
-        "document (compressed by a .gz/.zst suffix).\n\n"
+        "document (gzip- or zstd-compressed for a name ending in .json.gz or .json.zst).\n\n"
         "The same document `dump RELEASE --bundle-facts-out PATH` writes, "
         "by the same producer: this captures the OLD side as a by-product "
         "of a comparison that already extracted it; `dump` captures a "

@@ -282,8 +282,8 @@ def write_bundle_facts_out(
     """Persist the OLD side's per-library snapshots (plus manifest) to
     *bundle_facts_out* as a :class:`~abicheck.model.bundle_facts.BundleFacts`
     file (G38 Phase 2's ``--bundle-facts-out`` producer): the G40 archive
-    when its name ends in ``.zip``, else the JSON document (compressed by a
-    ``.gz``/``.zst`` suffix).
+    when its name ends in ``.zip``, else the JSON document (compressed only
+    for a name ending in ``.json.gz``/``.json.zst``).
 
     *diff_pairs* holds the OLD snapshots the run already has, each with the
     member it belongs to: a member file name (``release_old_member_snapshots``,
