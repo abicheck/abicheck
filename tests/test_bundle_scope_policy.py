@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -56,6 +57,18 @@ from abicheck.workflows.bundle_scope_selection import (
 )
 
 _MEMBERS = ("liba", "libb", "libc")
+
+#: The staging step runs under the runner's POSIX bash; on a Windows test
+#: host plain `bash -c` cannot run it (same skip as the sibling staging
+#: tests in tests/test_reusable_workflows.py).
+_POSIX_BASH = pytest.mark.skipif(
+    sys.platform == "win32", reason="needs a POSIX bash for the staging step"
+)
+#: A bundle check is ELF-only (run-plan generation refuses a non-Linux
+#: bundle profile), and the fixture links with GNU ld's -soname.
+_ELF_ONLY = pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="bundle checks are ELF-only"
+)
 _ON_INCOMPLETE = ("", "fail", "warn")
 
 
@@ -442,6 +455,7 @@ def _staging_script() -> str:
 
 
 @pytest.mark.integration
+@_ELF_ONLY
 class TestStagedBundleMembersPairWithTheirBaseline:
     """gcc-built members: actions/baseline's `binaries/<target id>` layout
     against check-project's real staging step, through a real `compare`.
@@ -532,6 +546,7 @@ class TestStagedBundleMembersPairWithTheirBaseline:
         assert result.exit_code == expected, result.output
 
 
+@_POSIX_BASH
 class TestHostileMemberIdIsNotAPath:
     """A member id becomes a staged file name, so an id that is a path must be
     refused before anything is written -- executed, not text-asserted."""
@@ -595,6 +610,7 @@ def _stage(tmp_path: Path, matrix: dict):
     )
 
 
+@_POSIX_BASH
 class TestStagingNamesMembersByTargetId:
     """check-project.yml stages each member under its target id (the name
     actions/baseline gives it in binaries/). Replaces the former
