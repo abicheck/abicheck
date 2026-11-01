@@ -444,7 +444,8 @@
         "action: actions/stage-baseline:attest",
         "action: expected-archive-digest",
         "action: verify-baseline-attestation",
-        "cli: aggregate"
+        "cli: aggregate",
+        "report: compare_report.baseline_provenance"
       ],
       "use_cases": [
         "UC-WF-baseline"
@@ -879,6 +880,7 @@
     "ADR-047 action: expected-archive-digest",
     "ADR-047 action: verify-baseline-attestation",
     "ADR-047 cli: aggregate",
+    "ADR-047 report: compare_report.baseline_provenance",
     "ADR-049 api: abicheck.workflows.service_requests.CompareRequest.pack_paths",
     "ADR-049 api: abicheck.workflows.service_requests.CompareRequest.stated_settings",
     "ADR-049 report: compare_report.contract_context",

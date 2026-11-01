@@ -312,4 +312,12 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       complete ``bundle_findings``/``matrix_findings`` sets. The PR comment
 #:       reads it as an exact rollup; before 2.7 it summarized the finding
 #:       lists as a disclosed floor. Additive.
-RELEASE_SCHEMA_VERSION = "2.7"
+#: - ``2.8`` adds the optional top-level ``baseline_provenance`` block: the
+#:       baseline operand's provenance (``source``, ``asset_name``,
+#:       ``project_ref``, ``generation``, ``profile``) as the caller asserted
+#:       it through ``report.baseline_provenance``, marked
+#:       ``asserted_by: "action"`` and ``applies_to: "baseline_operand"``
+#:       because the CLI did not verify it. Same shape as the compare
+#:       report's schema 6.8 block (``model/baseline_provenance.py``); absent
+#:       when the run was given none. Additive.
+RELEASE_SCHEMA_VERSION = "2.8"

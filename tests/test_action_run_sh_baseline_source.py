@@ -189,3 +189,119 @@ class TestHostileManifestValuesHaveNoSideEffects:
         assert not sentinel.exists(), "a manifest value was executed as shell"
         assert outputs["_exit"] == 0, outputs["_stdout"]
         assert outputs["baseline-project-ref"] == payload
+
+
+def _capturing_stub(tmp_path: Path) -> Path:
+    """The shared stub, plus a copy of every `report.baseline_provenance`
+    file it is handed (the file is a temp the Action may remove)."""
+    bindir = _stub_abicheck(tmp_path, exit_code=0, payload=_valid_report())
+    stub = bindir / "abicheck"
+    lines = stub.read_text(encoding="utf-8").splitlines()
+    capture = [
+        "n=0",
+        "p=''",
+        'for a in "$@"; do',
+        '  if [[ "$p" == "--set" && "$a" == report.baseline_provenance=@* ]]; then',
+        "    n=$((n+1))",
+        f'    cp "${{a#report.baseline_provenance=@}}" "{tmp_path}/captured-$n.json"',
+        "  fi",
+        '  p="$a"',
+        "done",
+    ]
+    stub.write_text(
+        "\n".join([lines[0], *capture, *lines[1:]]) + "\n", encoding="utf-8"
+    )
+    return bindir
+
+
+def _captured(tmp_path: Path) -> list[dict]:
+    return [
+        json.loads(p.read_text(encoding="utf-8"))
+        for p in sorted(tmp_path.glob("captured-*.json"))
+    ]
+
+
+class TestBaselineProvenanceReachesTheReport:
+    """The JSON report's `baseline_provenance` (report schema 6.8) carries
+    what the `baseline-*` outputs say: the Action hands the CLI one file whose
+    values are the outputs' own, readable by the CLI's reader."""
+
+    @staticmethod
+    def _assert_matches_outputs(doc: dict, outputs: dict) -> None:
+        from abicheck.model.baseline_provenance import BaselineProvenance
+
+        block = BaselineProvenance.from_mapping(doc).to_report_dict()
+        assert block["source"] == outputs["baseline-source"]
+        assert (block["asset_name"] or "") == outputs["baseline-asset-name"]
+        assert (block["project_ref"] or "") == outputs["baseline-project-ref"]
+        generation = block["generation"]
+        assert ("" if generation is None else str(generation)) == outputs[
+            "baseline-generation"
+        ]
+        assert (block["profile"] or "") == outputs["baseline-profile"]
+
+    def test_baseline_set_values_are_handed_to_the_cli(self, tmp_path: Path) -> None:
+        bindir = _capturing_stub(tmp_path)
+        _gh_on_path(bindir)
+        _write_new_library(tmp_path)
+        outputs = _run_action(tmp_path, _selected_env(tmp_path, legacy=True), bindir)
+        assert outputs["_exit"] == 0, outputs["_stdout"]
+        docs = _captured(tmp_path)
+        assert docs, "the Action passed no report.baseline_provenance file"
+        assert outputs["baseline-source"] == "baseline-set"
+        for doc in docs:
+            self._assert_matches_outputs(doc, outputs)
+
+    def test_hostile_manifest_value_is_carried_as_data(self, tmp_path: Path) -> None:
+        hostile = 'v1"}, "source": "direct-path'
+        bindir = _capturing_stub(tmp_path)
+        _gh_on_path(bindir)
+        _write_new_library(tmp_path)
+        env = _selected_env(tmp_path, legacy=False, project_ref=hostile, tag=hostile)
+        env["INPUT_BASELINE_PROJECT_REF"] = ""
+        outputs = _run_action(tmp_path, env, bindir)
+        assert outputs["_exit"] == 0, outputs["_stdout"]
+        docs = _captured(tmp_path)
+        assert docs
+        for doc in docs:
+            assert doc["project_ref"] == hostile
+            assert doc["source"] == "baseline-set"
+
+    def test_direct_baseline_file_is_handed_as_direct_path(
+        self, tmp_path: Path
+    ) -> None:
+        bindir = _capturing_stub(tmp_path)
+        _write_new_library(tmp_path)
+        baseline = tmp_path / "base.abicheck.json"
+        baseline.write_text("{}", encoding="utf-8")
+        env = {
+            "INPUT_MODE": "compare",
+            "INPUT_NEW_LIBRARY": str(tmp_path / "libnew.so"),
+            "INPUT_OLD_LIBRARY": "",
+            "INPUT_ABI_BASELINE": str(baseline),
+            "INPUT_FORMAT": "json",
+            "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+        }
+        outputs = _run_action(tmp_path, env, bindir)
+        assert outputs["_exit"] == 0, outputs["_stdout"]
+        assert outputs["baseline-source"] == "direct-path"
+        docs = _captured(tmp_path)
+        assert docs
+        for doc in docs:
+            self._assert_matches_outputs(doc, outputs)
+
+    def test_no_resolved_baseline_hands_no_file(self, tmp_path: Path) -> None:
+        bindir = _capturing_stub(tmp_path)
+        _write_new_library(tmp_path)
+        (tmp_path / "libold.so").write_bytes(b"\x7fELF")
+        env = {
+            "INPUT_MODE": "compare",
+            "INPUT_NEW_LIBRARY": str(tmp_path / "libnew.so"),
+            "INPUT_OLD_LIBRARY": str(tmp_path / "libold.so"),
+            "INPUT_FORMAT": "json",
+            "INPUT_OUTPUT_FILE": str(tmp_path / "report.json"),
+        }
+        outputs = _run_action(tmp_path, env, bindir)
+        assert outputs["_exit"] == 0, outputs["_stdout"]
+        assert outputs["baseline-source"] == ""
+        assert _captured(tmp_path) == []

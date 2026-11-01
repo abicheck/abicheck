@@ -415,6 +415,9 @@ def build_json_base(result: DiffResult) -> dict[str, object]:
     d["old_file"] = metadata_dict(getattr(result, "old_metadata", None))
     d["new_file"] = metadata_dict(getattr(result, "new_metadata", None))
     add_env_matrix_digest(d, result)
+    # Schema 6.8: asserted by the caller (the root Action), not verified.
+    if result.baseline_provenance is not None:
+        d["baseline_provenance"] = dict(result.baseline_provenance)
     d["summary"] = {
         "breaking": summary.breaking,
         "source_breaks": summary.source_breaks,

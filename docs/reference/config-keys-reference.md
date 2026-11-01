@@ -112,6 +112,12 @@ The last column gives the same option on the other surfaces, read from `architec
 | `include_private_dso` | bool | --set: `--set release.include_private_dso=VALUE` |
 | `support_promise` | str | --set: `--set release.support_promise=VALUE` |
 
+### `report:`
+
+| Sub-key | Type | Same option on other surfaces |
+|---|---|---|
+| `baseline_provenance` | str | --set: `--set report.baseline_provenance=VALUE` |
+
 ### `resource_limits:`
 
 | Sub-key | Type | Same option on other surfaces |

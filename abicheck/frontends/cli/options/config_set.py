@@ -31,6 +31,7 @@ from typing import Any
 import click
 import yaml
 
+from ....model.baseline_provenance import BASELINE_PROVENANCE_PATH
 from ....workflows.compare.override_channels import TYPED_OVERRIDE_CHANNELS
 from ....workflows.compare.required_symbol_contract import (
     REQUIRED_SYMBOLS_OVERRIDE_PATH,
@@ -64,7 +65,7 @@ _COMPARE_APPLIED_PATHS: frozenset[str] = (
     | COMPILE_CONTEXT_OVERRIDE_PATHS
     | RELEASE_TOPOLOGY_OVERRIDE_PATHS
     | CONFIG_RUN_INPUT_SET_PATHS
-    | {REQUIRED_SYMBOLS_OVERRIDE_PATH}
+    | {REQUIRED_SYMBOLS_OVERRIDE_PATH, BASELINE_PROVENANCE_PATH}
 )
 
 #: The keys a directory/package (release) compare forwards to its members. The
@@ -81,6 +82,7 @@ _RELEASE_APPLIED_PATHS: frozenset[str] = frozenset(
         "severity.quality_issues",
         "severity.addition",
         "deployment",
+        BASELINE_PROVENANCE_PATH,
     }
     | COMPILE_CONTEXT_OVERRIDE_PATHS
     | RELEASE_TOPOLOGY_OVERRIDE_PATHS
@@ -130,6 +132,11 @@ def parse_set_assignments(
         path = path.strip()
         if not sep or not path:
             raise click.UsageError(f"--set expects PATH=VALUE, got {item!r}")
+        if raw.startswith("@"):
+            # YAML reserves `@`, so `PATH=@FILE` could never parse; it is the
+            # file-reference spelling (`report.baseline_provenance=@prov.json`).
+            overrides[path] = raw
+            continue
         try:
             overrides[path] = yaml.safe_load(raw)
         except yaml.YAMLError as exc:
@@ -154,7 +161,8 @@ _SET_HELP: str = (
     "Set one .abicheck.yml key for this run, as PATH=VALUE, e.g. "
     "--set debug.dwarf_only=true, or --set 'output.view=[\"show=breaking\"]' "
     "for a list. Repeatable. PATH is the config path; VALUE "
-    "is read as YAML, so a list is [a, b]. Overrides the "
+    "is read as YAML, so a list is [a, b]; a VALUE starting with @ is "
+    "taken as written (a file reference, e.g. @prov.json). Overrides the "
     ".abicheck.yml file; an explicit flag still wins over both. A key this "
     "command does not apply, or a core option with its own flag, is refused "
     "with exit 64 and the refusal names the flag or the command."
