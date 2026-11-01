@@ -50,7 +50,7 @@ from abicheck.model.symbol_inventory import build_symbol_inventory
 from abicheck.workflows.release_snapshot_retention import (
     SnapshotRetention,
     release_junit_pairs,
-    release_old_snapshot_pairs,
+    release_old_member_snapshots,
     resolve_snapshot_retention,
     stash_member_evidence,
 )
@@ -261,7 +261,7 @@ class TestConsumerInventory:
         snapshot by construction (see the pair builder above).
         """
         src = (_ROOT / "workflows" / "release_bundle.py").read_text(encoding="utf-8")
-        assert "for diff, old_snapshot in diff_pairs:" in src
+        assert "for member, old_snapshot in diff_pairs:" in src
 
 
 class TestTheFoldSeesTheSameEvidence:
@@ -523,7 +523,8 @@ class TestStashMemberEvidence:
 
 
 class TestBaselinePairRecovery:
-    """``release_old_snapshot_pairs`` -- the ``--bundle-facts-out`` operand.
+    """``release_old_member_snapshots`` -- the ``--bundle-facts-out`` operand,
+    keyed by each member's own file name.
 
     Deliberately a *separate* list from the one JUnit gets: a baseline
     document cannot be reconstructed from the compact inventory, so the
@@ -550,10 +551,10 @@ class TestBaselinePairRecovery:
 
     def test_it_returns_the_full_snapshot_not_an_inventory(self):
         diff, old = self._pair_parts()
-        pairs = release_old_snapshot_pairs(
+        pairs = release_old_member_snapshots(
             [self._entry(_diff_result=diff, _old_snapshot=old)]
         )
-        assert pairs == [(diff, old)]
+        assert pairs == [("libfoo.so", old)]
         assert pairs[0][1] is old
         assert isinstance(pairs[0][1], AbiSnapshot)
 
@@ -566,7 +567,7 @@ class TestBaselinePairRecovery:
         stash_member_evidence(
             entry, "libfoo.so", old, old, resolve_snapshot_retention(junit=True)
         )
-        assert release_old_snapshot_pairs([entry]) == []
+        assert release_old_member_snapshots([entry]) == []
         assert release_junit_pairs([entry]) != []
 
     def test_a_bundle_facts_run_yields_a_pair_for_every_member(self):
@@ -582,13 +583,13 @@ class TestBaselinePairRecovery:
                 resolve_snapshot_retention(bundle_facts_out=True),
             )
             entries.append(entry)
-        assert len(release_old_snapshot_pairs(entries)) == 6
+        assert len(release_old_member_snapshots(entries)) == 6
 
     def test_a_member_whose_comparison_failed_contributes_no_pair(self):
         _diff, old = self._pair_parts()
-        assert release_old_snapshot_pairs([self._entry(_old_snapshot=old)]) == []
-        assert release_old_snapshot_pairs([self._entry()]) == []
-        assert release_old_snapshot_pairs([]) == []
+        assert release_old_member_snapshots([self._entry(_old_snapshot=old)]) == []
+        assert release_old_member_snapshots([self._entry()]) == []
+        assert release_old_member_snapshots([]) == []
 
     def test_both_consumers_can_be_served_from_one_run(self):
         """JUnit still gets the inventory even when the snapshot is kept,
@@ -602,5 +603,5 @@ class TestBaselinePairRecovery:
             old,
             resolve_snapshot_retention(junit=True, bundle_facts_out=True),
         )
-        assert release_old_snapshot_pairs([entry]) == [(diff, old)]
+        assert release_old_member_snapshots([entry]) == [("libfoo.so", old)]
         assert release_junit_pairs([entry]) == [(diff, build_symbol_inventory(old))]

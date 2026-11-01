@@ -137,18 +137,134 @@ def test_dump_writes_the_document_compare_writes(tmp_path: Path, shape: str) -> 
         (["-o", "x.json"], "-o/--output"),
         (["--dry-run"], "--dry-run"),
         (["--follow-deps"], "--follow-deps"),
-        (["--provenance", "git_tag=v1"], "--provenance"),
+        (["--provenance", "git-tag=v1"], "--provenance"),
+        (["--dump-manifest", "{manifest}"], "--dump-manifest"),
+        (["--sources", "{sources}"], "--sources"),
+        (["--build-info", "{build_info}"], "--build-info"),
+        (["--debug-info", "{debug}"], "--debug-info"),
     ],
 )
 def test_an_input_the_capture_does_not_apply_is_refused(
     tmp_path: Path, extra: list[str], named: str
 ) -> None:
     old, _new = _release(tmp_path, "one-member")
+    (tmp_path / "foo.h").write_text("int foo(void);\n", encoding="utf-8")
+    manifest = tmp_path / "tus.yaml"
+    manifest.write_text(
+        f"roots: [{tmp_path / 'foo.h'}]\ntranslation_units:\n"
+        f"  - name: main\n    forced_includes: [{tmp_path / 'foo.h'}]\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "src").mkdir()
+    (tmp_path / "debug").mkdir()
+    build_info = tmp_path / "compile_commands.json"
+    build_info.write_text("[]", encoding="utf-8")
+    paths = {
+        "manifest": manifest,
+        "sources": tmp_path / "src",
+        "build_info": build_info,
+        "debug": tmp_path / "debug",
+    }
+    args = [a.format(**paths) for a in extra]
     out = tmp_path / "dumped.json"
-    result = _invoke("dump", str(old), "--bundle-facts-out", str(out), *extra)
+    result = _invoke("dump", str(old), "--bundle-facts-out", str(out), *args)
     assert result.exit_code == 64, result.output
-    assert named in result.output
+    # The capture's own refusal, naming the input -- not some earlier parse
+    # error that merely mentions the flag.
+    assert "does not apply" in result.output
+    assert named in result.output.split("does not apply", 1)[1]
     assert not out.exists()
+
+
+def test_variant_is_refused_without_a_capture(tmp_path: Path) -> None:
+    old, _new = _release(tmp_path, "one-member")
+    result = _invoke("dump", str(old / "liba.json"), "--variant", "gcc13")
+    assert result.exit_code == 64, result.output
+    assert "--variant" in result.output and "--bundle-facts-out" in result.output
+
+
+def _multi_variant_package(root: Path) -> None:
+    from test_cli_compare_release_project_snapshot_package import (
+        TestVariantSelection,
+    )
+
+    TestVariantSelection()._multi_variant_package(root)
+
+
+def test_a_multi_variant_package_names_dumps_own_variant_spelling(
+    tmp_path: Path,
+) -> None:
+    pkg = tmp_path / "pkg"
+    _multi_variant_package(pkg)
+    out = tmp_path / "dumped.json"
+    result = _invoke("dump", str(pkg), "--bundle-facts-out", str(out))
+    assert result.exit_code == 64, result.output
+    # dump's own unsided spelling, never compare's `--variant old=ID`.
+    assert "--variant gcc" in result.output
+    assert "old=" not in result.output
+    assert not out.exists()
+
+
+def _variant_libraries(variant: str) -> list[str]:
+    """What the fixture wrote into each variant: `gcc12` holds one unchanged
+    library, `gcc13` the OLD side of `_old_new_libraries`."""
+    from test_cli_compare_release_project_snapshot_package import (
+        _old_new_libraries,
+    )
+
+    if variant == "gcc12":
+        return ["libunchanged.so"]
+    return sorted(snap.library for snap in _old_new_libraries()[0].values())
+
+
+@pytest.mark.parametrize("variant", ["gcc12", "gcc13"])
+def test_variant_selects_the_captured_variant(tmp_path: Path, variant: str) -> None:
+    """Oracle: the libraries the fixture wrote into that variant."""
+    members = _variant_libraries(variant)
+    pkg = tmp_path / "pkg"
+    _multi_variant_package(pkg)
+    out = tmp_path / "dumped.json"
+    result = _invoke(
+        "dump", str(pkg), "--variant", variant, "--bundle-facts-out", str(out)
+    )
+    assert result.exit_code == 0, result.output
+    doc = json.loads(out.read_text(encoding="utf-8"))
+    libraries = sorted(s["library"] for s in doc["per_library_snapshots"].values())
+    assert libraries == members
+
+
+def test_compare_keeps_the_snapshot_it_already_holds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A paired member's OLD snapshot is persisted as the run holds it, under
+    its member key, and never extracted a second time -- even when, as for a
+    JSON-snapshot member, its file name and its snapshot's `library` differ.
+    Only an unpaired member reaches the member-dump resolver."""
+    from abicheck.workflows import release_member_dump
+
+    dumped: list[str] = []
+    real = release_member_dump.dump_release_member
+
+    def _spy(path, ctx, *, notice):
+        dumped.append(path.name)
+        return real(path, ctx, notice=notice)
+
+    monkeypatch.setattr(release_member_dump, "dump_release_member", _spy)
+    old, new = _release(tmp_path, "old-only-member")
+    out = tmp_path / "compared.json"
+    result = _invoke(
+        "compare",
+        str(old),
+        str(new),
+        "--bundle-facts-out",
+        str(out),
+        "-o",
+        f"json={tmp_path / 'report.json'}",
+    )
+    assert result.exit_code in (0, 1, 2, 4), result.output
+    assert dumped == ["libgone.json"]
+    doc = json.loads(out.read_text(encoding="utf-8"))
+    assert sorted(doc["per_library_snapshots"]) == ["liba.json", "libgone.json"]
 
 
 def test_a_single_library_is_not_a_release(tmp_path: Path) -> None:

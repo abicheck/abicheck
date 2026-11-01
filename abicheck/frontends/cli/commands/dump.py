@@ -199,6 +199,7 @@ def dump_cmd(
     gcc_options: str | None = None,
     config_overrides: dict[str, object] | None = None,
     bundle_facts_out: Path | None = None,
+    variant: str | None = None,
 ) -> None:
     """Dump ABI snapshot of a shared library to JSON.
 
@@ -477,10 +478,11 @@ def dump_cmd(
     # the real path below still calls follow_linker_script itself for
     # that echo and the so_path reassignment (a no-op re-validation once
     # this has already passed).
-    if bundle_facts_out is not None:  # a release capture (dump_bundle_facts.py)
+    if bundle_facts_out is not None or variant is not None:  # dump_bundle_facts.py
         return run_dump_bundle_facts(
             so_path,
             bundle_facts_out,
+            variant=variant,
             unapplied={"output": output, "dry_run": dry_run, "sources": sources}
             | {"dump_manifest_path": dump_manifest_path, "build_info": build_info}
             | {"debug_roots": debug_roots, "provenance": provenance}
@@ -816,15 +818,10 @@ def dump_cmd(
             allow_build_query=True,
             compile_db=effective_compile_db,
             compile_db_filter=compile_db_filter,
-            # Codex review, two real regressions on the original ELF
-            # migration: `perform_elf_dump` always forwarded its own
-            # resolved collect mode to the L2 seed (running a zero-config
-            # inferred build query for a `--sources` tree with no compile
-            # database) and always replayed L4 source through the L3
-            # fold's own compiler once it applied -- both must be
-            # preserved here, exactly as `scan`'s own candidate resolution
-            # already does. Applies identically to PE/Mach-O, which shares
-            # this same tail.
+            # Codex review: the retired `perform_elf_dump` forwarded its
+            # resolved collect mode to the L2 seed and replayed L4 source
+            # through the L3 fold's own compiler once it applied; both are
+            # preserved here, for PE/Mach-O too (same tail).
             seed_collect_mode=_resolved.collect_mode,
             source_frontend_from_folded_context=True,
         ),

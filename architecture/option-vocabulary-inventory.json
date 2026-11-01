@@ -1095,6 +1095,19 @@
    "default": "<unset>"
   },
   {
+   "id": "dump --variant",
+   "command": "dump",
+   "option": "--variant",
+   "aliases": [],
+   "hidden": false,
+   "help_common": false,
+   "multiple": false,
+   "is_flag": false,
+   "type": "text",
+   "choices": null,
+   "default": "<unset>"
+  },
+  {
    "id": "project capture-variants --variant",
    "command": "project capture-variants",
    "option": "--variant",

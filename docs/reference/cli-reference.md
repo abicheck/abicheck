@@ -177,6 +177,7 @@ Dump ABI snapshot of a shared library to JSON.
 | `--config` | no | — | Path to the project `.abicheck.yml`: build system, query command, compile-DB location, plus the stable severity/scope/suppression/source settings. Defaults to `.abicheck.yml` at the --sources tree root for non-executing settings; build.query runs ONLY from an explicit --config -- an auto-discovered one never executes it, and no CLI flag can authorize it. | Action: `build-config`; Reusable workflow: `build-config` (check-single.yml, check-project.yml) |
 | `--depth` | no | — | Evidence-depth dial (same vocabulary as `compare --depth`): binary=symbols + binary metadata + DWARF types when present, headers=+header AST (default), build=+build context, source=+source replay & call graph. | Action: `depth`; Reusable workflow: `depth` (check-single.yml) |
 | `--bundle-facts-out` | no | — | Capture a directory or package release (SO\_PATH) as a BundleFacts document at PATH: every library's snapshot, the release's public surface from -H, and its instantiation manifest, if any. The document a later `compare BUNDLE\_FACTS NEW\_RELEASE` reads as its stored OLD side, and the same one `compare --bundle-facts-out` writes for its OLD side. Replaces -o/--output. | — |
+| `--variant` | no | — | With --bundle-facts-out: which build variant to capture when SO\_PATH is a stored ProjectSnapshot package declaring more than one (compare's --variant, unsided: dump has one operand). Defaults to the package's only variant; a usage error when it declares several. | — |
 
 ## `project`
 

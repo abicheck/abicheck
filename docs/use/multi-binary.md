@@ -850,9 +850,9 @@ abicheck dump release-1.0/ -H include/ --label 1.0 \
 ```
 
 It takes a directory, a package archive or a stored `ProjectSnapshot`
-package, applies `-H`/`--include`/`--exclude-header`/`--label` and the
-project config's compile settings to every library, and replaces
-`-o/--output`. Both commands write through one producer, so the documents
+package (pick one of several variants with `--variant ID`), applies
+`-H`/`--include`/`--exclude-header`/`--label` and the project config's
+compile settings to every library, and replaces `-o/--output`. Both commands write through one producer, so the documents
 are the same apart from capture metadata (file mtimes) and the label
 (`compare` labels its OLD side `old` unless told otherwise). A library that
 fails to dump is kept as a degraded member, as with `compare`.

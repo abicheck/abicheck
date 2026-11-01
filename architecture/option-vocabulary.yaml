@@ -139,6 +139,7 @@ concepts:
     renames: []
     cli:
       - compare --variant
+      - dump --variant
       - project capture-variants --variant
   - concept: pack
     tier: config

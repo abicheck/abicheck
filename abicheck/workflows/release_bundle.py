@@ -18,7 +18,7 @@ additive: its failures degrade to warnings through *notice*.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -266,7 +266,7 @@ def collect_bundle_result(
 
 def write_bundle_facts_out(
     bundle_facts_out: Path,
-    diff_pairs: list[tuple[DiffResult, AbiSnapshot]],
+    diff_pairs: Sequence[tuple[DiffResult | str, AbiSnapshot]],
     manifest_path: Path | None,
     old_map: dict[str, Path],
     *,
@@ -280,8 +280,11 @@ def write_bundle_facts_out(
     *bundle_facts_out* as a :class:`~abicheck.model.bundle_facts.BundleFacts`
     file (G38 Phase 2's ``--bundle-facts-out`` producer).
 
-    *diff_pairs* is ``release_old_snapshot_pairs(library_results)`` -- the
-    whole OLD snapshot, never JUnit's compact inventory. Each persisted entry
+    *diff_pairs* holds the OLD snapshots the run already has, each with the
+    member it belongs to: a member file name (``release_old_member_snapshots``,
+    what the comparison passes -- exact) or a ``DiffResult`` (matched by its
+    canonical library name). The whole OLD snapshot, never JUnit's compact
+    inventory; a snapshot the run holds is never extracted again. Each persisted entry
     is keyed by *old_map*'s **canonical** release-matching key (e.g.
     ``libfoo.so`` for ``libfoo.so.1.2``), the same identity a live
     ``build_bundle_snapshot(dict(old_map))`` uses -- keying by basename would
@@ -327,12 +330,18 @@ def write_bundle_facts_out(
         # `library`) is captured by the member resolver below under its real
         # key, never under an invented second one beside it.
         per_library_snapshots: dict[str, AbiSnapshot] = {}
-        for diff, old_snapshot in diff_pairs:
-            key = _canonical_library_key(Path(diff.library))
-            if key not in old_map:
-                key = Path(diff.library).name
-            if key in old_map:
-                per_library_snapshots[key] = old_snapshot
+        key_of_name = {path.name: key for key, path in old_map.items()}
+        for member, old_snapshot in diff_pairs:
+            if isinstance(member, str):
+                # The member's own file name: exact, whatever the snapshot
+                # inside says its library is.
+                found = key_of_name.get(member)
+            else:
+                found = _canonical_library_key(Path(member.library))
+                if found not in old_map:
+                    found = key_of_name.get(Path(member.library).name)
+            if found is not None and found in old_map:
+                per_library_snapshots[found] = old_snapshot
         # ADR-065 D8: a failed stranded dump is persisted *with* its failure.
         degraded_members: dict[str, str] = {
             k: v for k, v in (inherited_degraded or {}).items() if k in old_map

@@ -294,7 +294,7 @@ def execute_release_compare(
     )
     from .release_scope_notices import release_scope_warnings
     from .release_snapshot_retention import (
-        release_old_snapshot_pairs,
+        release_old_member_snapshots,
         resolve_snapshot_retention,
     )
     from .release_stored_inventory import stored_side_degraded_members
@@ -517,7 +517,7 @@ def execute_release_compare(
                 o.bundle_facts_out,
                 # The whole OLD snapshot `old_full` retention kept, not
                 # JUnit's compact inventory.
-                release_old_snapshot_pairs(library_results),
+                release_old_member_snapshots(library_results),
                 o.manifest_path,
                 old_map,
                 resolve_stranded_library=lambda old_path: _resolve_stranded_library(

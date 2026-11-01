@@ -467,6 +467,12 @@ COMPARE_OPTION_RULINGS: dict[str, OptionRuling] = {
 #: points at ``compare``'s rather than restating it, and the two must move
 #: together.
 DUMP_OPTION_RULINGS: dict[str, OptionRuling] = {
+    "--variant": _keep(
+        "Same ruling as `compare --variant` (ADR-062 A1.7), for the one "
+        "operand a `--bundle-facts-out` capture reads: which VariantRef of a "
+        "stored ProjectSnapshot package declaring several. Unsided -- dump "
+        "has one operand -- and refused without --bundle-facts-out."
+    ),
     # ── Shared with compare, ruled identically (ADR-037 D8.1) ────────────
     "--bundle-facts-out": _keep(
         "Same ruling as `compare --bundle-facts-out` (re-ruled 2026-10-31): "

@@ -38,7 +38,17 @@ F = TypeVar("F", bound=Callable[..., Any])
 
 def dump_bundle_facts_out_option(func: F) -> F:
     """``dump --bundle-facts-out PATH`` (the spelling ``compare`` uses for
-    the same document)."""
+    the same document) and its ``--variant ID`` selector."""
+    func = click.option(
+        "--variant",
+        "variant",
+        default=None,
+        metavar="ID",
+        help="With --bundle-facts-out: which build variant to capture when "
+        "SO_PATH is a stored ProjectSnapshot package declaring more than one "
+        "(compare's --variant, unsided: dump has one operand). Defaults to "
+        "the package's only variant; a usage error when it declares several.",
+    )(func)
     return click.option(
         "--bundle-facts-out",
         "bundle_facts_out",
@@ -82,8 +92,9 @@ def _reject_unapplied_inputs(stated: Mapping[str, object]) -> None:
 
 def run_dump_bundle_facts(
     so_path: Path | None,
-    bundle_facts_out: Path,
+    bundle_facts_out: Path | None,
     *,
+    variant: str | None = None,
     unapplied: Mapping[str, object],
     headers: tuple[Path, ...],
     includes: tuple[Path, ...],
@@ -113,6 +124,11 @@ def run_dump_bundle_facts(
         dump_release_bundle_facts,
     )
 
+    if bundle_facts_out is None:
+        raise click.UsageError(
+            "--variant selects the build variant a --bundle-facts-out capture "
+            "reads; it does nothing without --bundle-facts-out."
+        )
     _reject_unapplied_inputs(unapplied)
     if so_path is None or classify_compare_operand(so_path) not in (
         "directory",
@@ -136,13 +152,14 @@ def run_dump_bundle_facts(
         include_dependencies=include_dependencies,
         public_header_dirs=_config_public_header_dirs(config_path),
         exclude_headers=exclude_headers,
+        variant=variant,
     )
     try:
         result = dump_release_bundle_facts(
             request, notice=lambda text: click.echo(text, err=True)
         )
     except ReleaseOperandUsageError as exc:
-        raise click.UsageError(str(exc)) from exc
+        raise click.UsageError(_dump_variant_message(exc)) from exc
     except (
         ReleaseOperandContentError,
         AmbiguousLibraryMatchError,
@@ -174,3 +191,18 @@ def _config_public_header_dirs(config_path: Path | None) -> list[Path]:
     except ValueError:
         return []
     return project_config_public_header_dirs(cfg)
+
+
+def _dump_variant_message(exc: Exception) -> str:
+    """The resolution's message, with the variant example in ``dump``'s own
+    unsided spelling: the engine names no flag for an ambiguous package and
+    the two-sided release boundary appends ``--variant old=ID``, which
+    ``dump`` does not take."""
+    from ....errors import AmbiguousVariantSelectionError
+
+    cause = exc.__cause__
+    if isinstance(cause, AmbiguousVariantSelectionError):
+        ids = list(cause.variant_ids)
+        example = f" (e.g. --variant {ids[0]})" if ids else ""
+        return f"{cause}{example}"
+    return str(exc)

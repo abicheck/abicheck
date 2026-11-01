@@ -167,3 +167,52 @@ def test_the_label_names_every_member(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     doc = json.loads(dumped.read_text(encoding="utf-8"))
     assert {s["version"] for s in doc["per_library_snapshots"].values()} == {"9.9"}
+
+
+@pytest.mark.parametrize("with_headers", [False, True], ids=["binary", "headers"])
+def test_each_member_is_the_libraries_own_dump(
+    tmp_path: Path, with_headers: bool
+) -> None:
+    """Independent oracle: every captured member equals what a standalone
+    `abicheck dump <library>` writes for it under the same inputs -- a
+    document the capture's producer never touched -- apart from capture
+    metadata."""
+    from abicheck.serialization import (
+        load_bundle_facts,
+        load_snapshot,
+        snapshot_to_dict,
+    )
+
+    if with_headers and shutil.which("castxml") is None:
+        pytest.skip("castxml not available")
+    old_libs, old_inc = _build(tmp_path / "old", 0)
+    headers = ["-H", str(old_inc)] if with_headers else []
+    dumped = tmp_path / "dumped.json"
+    result = _invoke(
+        "dump",
+        str(old_libs),
+        *headers,
+        "--label",
+        "9.9",
+        "--bundle-facts-out",
+        str(dumped),
+    )
+    assert result.exit_code == 0, result.output
+    facts = load_bundle_facts(dumped)
+
+    # A standalone `dump` also stamps the run's provenance (git commit,
+    # `dump_provenance`, `workflows.provenance.stamp_provenance`); a release
+    # capture's members carry none, the same as `compare`'s.
+    stamped = _CAPTURE_FIELDS | {"git_commit", "git_tag", "dump_provenance"}
+
+    def _strip(snapshot) -> dict:
+        return {k: v for k, v in snapshot_to_dict(snapshot).items() if k not in stamped}
+
+    assert sorted(facts.per_library_snapshots) == [f"{name}.so" for name, *_ in _LIBS]
+    for key, member in facts.per_library_snapshots.items():
+        alone = tmp_path / f"{key}.alone.json"
+        single = _invoke(
+            "dump", str(old_libs / key), *headers, "--label", "9.9", "-o", str(alone)
+        )
+        assert single.exit_code == 0, single.output
+        assert _strip(member) == _strip(load_snapshot(alone)), key
