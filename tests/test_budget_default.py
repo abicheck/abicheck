@@ -157,43 +157,60 @@ def _write_snapshots(tmp_path: Path) -> tuple[Path, Path]:
     return paths[0], paths[1]
 
 
-@pytest.mark.parametrize(
-    ("elapsed", "budget_args", "expect_overflow"),
-    [
-        (TWO_HOURS + 1, [], True),  # the default applies and expires
-        (TWO_HOURS - 1, [], False),  # ... at 2 h, not before
-        (TWO_HOURS + 1, ["--budget", "3h"], False),  # a stated budget overrides it
-        (3 * 3600.0 + 1, ["--budget", "3h"], True),  # ... and is enforced itself
-        (61.0, ["--budget", "1m"], True),  # a shorter stated budget too
-    ],
-)
-def test_cli_compare_budget(
-    tmp_path: Path,
-    clock,
-    elapsed: float,
-    budget_args: list[str],
-    expect_overflow: bool,
-) -> None:
+def _cli_compare(tmp_path: Path, budget_args: list[str]) -> tuple[Any, Path]:
     old_p, new_p = _write_snapshots(tmp_path)
     out_p = tmp_path / "out.json"
-    clock(elapsed)
     result = CliRunner().invoke(
         main,
         ["compare", str(old_p), str(new_p), "-o", f"json={out_p}", *budget_args],
     )
-    if not expect_overflow:
-        assert result.exit_code != 5, result.output
-        return
+    return result, out_p
+
+
+@pytest.mark.parametrize(
+    ("elapsed", "budget_args", "expected_message"),
+    [
+        # The default applies and expires.
+        (TWO_HOURS + 1, [], "no budget was set, so the default 2h applied"),
+        # A stated budget is enforced itself, longer or shorter than the default.
+        (3 * 3600.0 + 1, ["--budget", "3h"], "--budget '3h' exceeded"),
+        (61.0, ["--budget", "1m"], "--budget '1m' exceeded"),
+    ],
+)
+def test_cli_compare_budget_overflow(
+    tmp_path: Path,
+    clock,
+    elapsed: float,
+    budget_args: list[str],
+    expected_message: str,
+) -> None:
+    clock(elapsed)
+    result, out_p = _cli_compare(tmp_path, budget_args)
     assert result.exit_code == 5, result.output
     doc = json.loads(out_p.read_text(encoding="utf-8"))
     assert doc["run_outcome"]["operational"] == "budget_overflow"
     assert "No verdict was produced" in result.output
     assert "--budget 4h" in result.output
-    if budget_args:
-        assert f"--budget {budget_args[1]!r} exceeded" in result.output
-    else:
-        assert "the default 2h budget exceeded" in result.output
-        assert "no budget was set, so the default 2h applied" in result.output
+    assert expected_message in result.output
+
+
+@pytest.mark.parametrize(
+    ("elapsed", "budget_args"),
+    [
+        (TWO_HOURS - 1, []),  # the default expires at 2 h, not before
+        (TWO_HOURS + 1, ["--budget", "3h"]),  # a stated budget overrides it
+    ],
+)
+def test_cli_compare_within_budget(
+    tmp_path: Path, clock, elapsed: float, budget_args: list[str]
+) -> None:
+    clock(elapsed)
+    result, out_p = _cli_compare(tmp_path, budget_args)
+    assert result.exit_code != 5, result.output
+    doc = json.loads(out_p.read_text(encoding="utf-8"))
+    # A finished comparison: a verdict, and no budget-overflow abort.
+    assert doc["verdict"] == "NO_CHANGE"
+    assert doc["exit"]["budget_overflow_contribution"] == 0
 
 
 @pytest.mark.parametrize(
