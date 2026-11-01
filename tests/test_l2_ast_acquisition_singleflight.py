@@ -22,6 +22,7 @@ import pytest
 from abicheck import dumper_clang_errors
 from abicheck.deadline import DeadlineExceeded, deadline_scope
 from abicheck.errors import SnapshotError
+from abicheck.extract import cache_dep_manifest
 from abicheck.extract.header_ast_fields import parse_header_ast_fields
 from abicheck.extract.headers.castxml import backend as castxml_backend
 from abicheck.extract.headers.clang import backend as clang_backend
@@ -374,16 +375,9 @@ def _stub_clang_resolution(monkeypatch: pytest.MonkeyPatch, cache: Path) -> None
     )
     monkeypatch.setattr(clang_backend, "_tool_identity", lambda *a, **k: "stable")
     monkeypatch.setattr(clang_backend, "_cache_path", lambda *a, **k: cache)
-
-
-def _seed_manifest(*entries: Path) -> None:
-    """A real publish writes each entry's dependency manifest first; these
-    tests seed entries by hand, so give each an empty (always-valid) one."""
-    from abicheck.extract import cache_dep_manifest
-    from abicheck.extract.cache_dep_manifest import DepManifest
-
-    for entry in entries:
-        cache_dep_manifest.write_sidecar(entry, DepManifest())
+    monkeypatch.setattr(
+        cache_dep_manifest, "entry_valid", lambda entry: True
+    )  # seeded by hand
 
 
 def _count_json_decodes(monkeypatch: pytest.MonkeyPatch) -> Callable[[], int]:
@@ -392,13 +386,8 @@ def _count_json_decodes(monkeypatch: pytest.MonkeyPatch) -> Callable[[], int]:
 
     def counted(value: object, *args: object, **kwargs: object) -> object:
         nonlocal decodes
-        result = original(value, *args, **kwargs)  # type: ignore[arg-type]
-        # Count AST payload decodes only: the entry's dependency-manifest
-        # sidecar (a small ``{"format": ..., "files": ...}`` document) is read
-        # through the same ``json`` module.
-        if not (isinstance(result, dict) and "format" in result and "files" in result):
-            decodes += 1
-        return result
+        decodes += 1
+        return original(value, *args, **kwargs)  # type: ignore[arg-type]
 
     monkeypatch.setattr(dumper_cache.json, "loads", counted)
     return lambda: decodes
@@ -466,7 +455,6 @@ def test_warm_clang_distinct_contexts_are_not_merged(
     device_cache = tmp_path / "device.json"
     host_cache.write_text('{"kind": "TranslationUnitDecl", "ctx": "host"}', "utf-8")
     device_cache.write_text('{"kind": "TranslationUnitDecl", "ctx": "device"}', "utf-8")
-    _seed_manifest(host_cache, device_cache)
     _stub_clang_resolution(monkeypatch, host_cache)
     monkeypatch.setattr(
         clang_backend,
@@ -512,7 +500,6 @@ def test_warm_clang_edited_header_is_not_served_stale(
     (tmp_path / "27.json").write_text(
         '{"decls": ["api", "appeared"]}', encoding="utf-8"
     )
-    _seed_manifest(tmp_path / "11.json", tmp_path / "27.json")
 
     with ast_acquisition_scope():
         before = clang_backend.clang_header_dump([header], [], lang="c++")
@@ -547,7 +534,6 @@ def test_warm_clang_failed_acquisition_is_retryable(
         # now finds the warm cache that meanwhile appeared) instead of
         # replaying the stored failure forever.
         cache.write_text('{"kind": "TranslationUnitDecl"}', encoding="utf-8")
-        _seed_manifest(cache)
         root, _kind, _force = clang_backend.clang_header_dump(
             [header], [], lang="c++", run_ast=flaky
         )
@@ -563,7 +549,9 @@ def test_warm_castxml_disk_hit_shares_producer_metadata(
     header.write_text("int api();\n", encoding="utf-8")
     store = TuParseStore(tmp_path / "store")
     store.publish("same", "<GCC_XML/>", ())
-    _seed_manifest(store.path("same"))
+    monkeypatch.setattr(
+        cache_dep_manifest, "entry_valid", lambda entry: True
+    )  # seeded by hand
     monkeypatch.setattr(
         castxml_backend, "_resolve_gated_castxml_bin", lambda value: "castxml"
     )

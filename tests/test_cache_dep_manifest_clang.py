@@ -247,7 +247,7 @@ def test_castxml_entry_records_and_checks_the_system_headers_it_read(
     cx.castxml_dump([header], [], "cc", lang="c", run=run)
     (side,) = (tmp_path / "cache").rglob("castxml/*.json.deps")
     doc = json.loads(side.read_text())
-    stddef = [p for p in doc["files"] if p.endswith("/stddef.h")]
+    stddef = [p for p in doc["files"] if Path(p).name == "stddef.h"]
     assert stddef, sorted(doc["files"])
     assert not any("abicheck_castxml_" in p for p in doc["files"])
     cx.castxml_dump([header], [], "cc", lang="c", run=run)

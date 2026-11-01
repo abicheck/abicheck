@@ -278,11 +278,16 @@ def build_manifest(
 
 
 def fallback_manifest(search_dirs: Iterable[str]) -> DepManifest:
-    """The pre-manifest identity for a parse with no depfile: every system
-    directory's full content digest."""
-    return DepManifest(
-        {}, frozenset(), {d: tree_digest(d) for d in _norm_dirs(search_dirs)}
-    )
+    """The identity for a parse whose frontend wrote no depfile: the system
+    directories by spelling only (they are already in the key), no content.
+
+    Hashing every file under them instead made such a dump walk whole SDK
+    trees (the Windows SDK and MSVC include dirs hold tens of thousands of
+    files) on every lookup. This reverts that case to the pre-manifest
+    behaviour, recorded in ``docs/contribute/known-gaps.md``.
+    """
+    del search_dirs
+    return DepManifest()
 
 
 def verify(manifest: DepManifest | None) -> bool:

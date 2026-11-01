@@ -22,7 +22,7 @@
       "abicheck/extract/binary_identity.py": "4645eaf3dddd0a2230a5c694882548476406c57514275fa4c8c1bc152607ca88",
       "abicheck/extract/build_mode_capture.py": "7a46c5babcc5bf770a1a38d5a5d3abb49a2b7d9575bda2b210d2e2861ebfb51f",
       "abicheck/extract/builtin_abi.py": "aad1229f3a899920a43a88aff31b91904f37ef938480754382c34584d4e3315e",
-      "abicheck/extract/cache_dep_manifest.py": "98970ce6a33ba1cd653cfbc6f3326ee5147258786163075f40c9d6675e39d945",
+      "abicheck/extract/cache_dep_manifest.py": "2c2a7ac1d5ebebe212da82e2b9b89520034d79d1e875e844d8c1895a9255aa08",
       "abicheck/extract/cache_digest_store.py": "c333f2bf9170d5c87c011f434d3638c944edf07e9670fd4cb84e2f73ac0775f1",
       "abicheck/extract/cache_header_scan.py": "04fc927afed680495c7f8112c230cf4f5d93966dd398a7472533648657eff994",
       "abicheck/extract/cache_input_digest.py": "aa0c4a7d058d297d0c9f295dbcb84934e41e753c275c3da4eb0fcbf7fab4a3d3",
@@ -191,9 +191,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "114eaf09077ba1b2bb3e75bb00c2ba32d99ec8d8474c8d398a1ddab7007299d8",
+    "fingerprint": "6520c73ab2fda3ea8dc6c0151fc4987645637c47f9b7b3fa7ea799ded73a5fad",
     "generation": 34,
-    "reason": "ADR-062 D11: header-parse caches validate system headers by a depfile dependency manifest instead of folding every system-dir file into the key; extracted facts are unchanged"
+    "reason": "S2: content-keyed caches with a dependency manifest; extracted facts unchanged"
   },
   "resolver": {
     "files": {
