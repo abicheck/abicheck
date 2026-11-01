@@ -46,6 +46,7 @@ import json
 import shutil
 import subprocess
 import sys
+import warnings
 from pathlib import Path
 
 import pytest
@@ -69,7 +70,14 @@ pytestmark = [
 _OS_HEADER = "typedef long sic_os_t;\n"
 #: Lives only in ``shared`` and itself needs the nested root.
 _DEP_HEADER = "#include <sic_os.h>\nstruct sic_dep { int a; sic_os_t t; };\n"
-_API_HEADER = "#include <sic_dep.h>\nint sic_api(struct sic_dep *d{extra});\n"
+#: Lives only under the side's own include root, never beside the API header,
+#: so only the side-specific ``--include`` can resolve it.
+_SIDE_HEADER = "typedef int sic_side_t;\n"
+_API_HEADER = (
+    "#include <side_only/sic_side.h>\n"
+    "#include <sic_dep.h>\n"
+    "int sic_api(struct sic_dep *d{extra});\n"
+)
 _SOURCE = (
     '#include "sic_api.h"\nint sic_api(struct sic_dep *d{extra}) {{ return d->a; }}\n'
 )
@@ -97,8 +105,15 @@ def _shared_roots(tmp: Path) -> tuple[Path, Path]:
 
 
 def _build(root: Path, shared: Path, nested: Path, extra: str = "") -> Path:
-    root.mkdir(parents=True)
-    (root / "sic_api.h").write_text(_API_HEADER.format(extra=extra), encoding="utf-8")
+    """``root`` is the side's include root (``side_only/sic_side.h``); the
+    public header sits apart in ``root/api``, whose own directory the header
+    parser searches, so it cannot stand in for the side root."""
+    (root / "api").mkdir(parents=True)
+    (root / "side_only").mkdir()
+    (root / "api" / "sic_api.h").write_text(
+        _API_HEADER.format(extra=extra), encoding="utf-8"
+    )
+    (root / "side_only" / "sic_side.h").write_text(_SIDE_HEADER, encoding="utf-8")
     src = root / "sic_api.c"
     src.write_text(_SOURCE.format(extra=extra), encoding="utf-8")
     so = root / "libsic.so"
@@ -107,6 +122,7 @@ def _build(root: Path, shared: Path, nested: Path, extra: str = "") -> Path:
             "gcc",
             f"-I{nested}",
             f"-I{shared}",
+            f"-I{root / 'api'}",
             f"-I{root}",
             "-fPIC",
             "-shared",
@@ -141,9 +157,9 @@ def _invoke(tree: dict[str, Path], include_args: list[str]) -> Result:
         str(tree["old_so"]),
         str(tree["new_so"]),
         "--header",
-        f"old={old_root / 'sic_api.h'}",
+        f"old={old_root / 'api' / 'sic_api.h'}",
         "--header",
-        f"new={new_root / 'sic_api.h'}",
+        f"new={new_root / 'api' / 'sic_api.h'}",
         "-o",
         "json=-",
     ]
@@ -230,18 +246,37 @@ def test_asymmetric_side_labels_are_refused_as_not_comparable(
     assert "sic_dep.h" not in output  # the shared roots were searched
 
 
-@pytest.mark.parametrize("side_spelling", list(_SIDE_SPELLINGS))
-def test_negative_control_without_shared_roots_fails_on_the_dependency(
-    fixture_tree: dict[str, Path], side_spelling: str
-) -> None:
-    """Same per-side roots, no shared roots: the header parse fails on the
-    dependency, exactly what the PVXS run saw. The matrix above passing is
-    therefore evidence the shared roots reached castxml, not that the
-    headers were never needed."""
-    exit_code, output = _run(
-        fixture_tree, _sided(fixture_tree, side_spelling, side_spelling)
-    )
+#: The header-scoped dump of a PE/Mach-O binary falls back to export-table
+#: mode, with this warning, when its header parse fails; ELF fails the run
+#: (known gap: a-failed-header-parse-on-pe-or-mach-o-falls-back-to-export-table-mode).
+_EXPORT_TABLE_FALLBACK = "Falling back to export-table mode"
 
-    assert exit_code not in (0, 4), output
-    assert "sic_dep.h" in output
+
+@pytest.mark.parametrize("dropped", ["shared", "side"])
+@pytest.mark.parametrize("side_spelling", list(_SIDE_SPELLINGS))
+def test_negative_control_without_a_root_the_headers_do_not_parse(
+    fixture_tree: dict[str, Path], side_spelling: str, dropped: str
+) -> None:
+    """Drop the shared roots (what the PVXS run lost) or the side roots: the
+    header parse cannot find ``sic_dep.h`` / ``side_only/sic_side.h``, so the
+    header-only parameter change is never reported. The matrix above passing
+    is therefore evidence both kinds of root reached castxml, not that the
+    headers were never needed."""
+    sided = _sided(fixture_tree, side_spelling, side_spelling)
+    shared = [str(fixture_tree["shared"]), str(fixture_tree["nested"])]
+    include_args = sided if dropped == "shared" else shared
+    missing = "sic_dep.h" if dropped == "shared" else "sic_side.h"
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        exit_code, output = _run(fixture_tree, include_args)
+
     assert "func_params_changed" not in output
+    if sys.platform == "darwin":
+        # Mach-O: the failed parse is a warned export-table fallback, so the
+        # run reads binary evidence only.
+        assert any(_EXPORT_TABLE_FALLBACK in str(w.message) for w in caught), output
+        assert '"new_evidence_depth": "binary"' in output
+    else:
+        assert exit_code not in (0, 4), output
+        assert missing in output
