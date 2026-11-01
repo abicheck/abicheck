@@ -34,12 +34,12 @@ unattributed hit, so a reload can never scope differently from a fresh run.
 
 from __future__ import annotations
 
-import dataclasses
 import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ....model.declaration_headers import HeaderAttributedMap
+from ....model.fact import replace_with_fact_sync
 from ....storage.atomic_file import atomic_write
 
 if TYPE_CHECKING:
@@ -100,4 +100,4 @@ def attach(snap: AbiSnapshot, base: Path, key: str) -> AbiSnapshot | None:
         updates[name] = HeaderAttributedMap(
             mapping, {k: tuple(v) for k, v in headers.items()}
         )
-    return dataclasses.replace(snap, **updates) if updates else snap
+    return replace_with_fact_sync(snap, **updates) if updates else snap
