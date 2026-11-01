@@ -436,6 +436,31 @@ class TemplateInstanceAbsence:
             return None
         return self._judged(mangled, f_old, FUNCTION_SYMBOL_TYPES)
 
+    def undecided_without_graph(
+        self, mangled: str, f_old: Function, elf_only_mode: bool
+    ) -> bool:
+        """Whether :meth:`changes_for` would have to decide *f_old* from the
+        header graph, and the new export table still carries it.
+
+        Applies :meth:`changes_for`'s own precedence: an export-table-only
+        record (``elf_only_mode``) and an instance the old header spelled
+        explicitly are never the graph's question -- the latter is a removed
+        declaration -- so they answer ``False`` and keep the removal path.
+        Otherwise it is an implicit instance whose absence from the new
+        declarations, while the binary still exports it, only the
+        (unreadable) header graph could explain.
+        """
+        if elf_only_mode and is_export_table_only_record(f_old):
+            return False
+        if _declared_explicitly(f_old):
+            return False
+        parsed, _scope = _spellings(mangled)
+        return (
+            _primary_stem_of(parsed) is not None
+            and self._export_table(FUNCTION_SYMBOL_TYPES).answer(mangled)
+            is EdgeAnswer.PRESENT
+        )
+
     def variable_changes_for(
         self, mangled: str, v_old: Variable
     ) -> list[Change] | None:

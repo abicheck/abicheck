@@ -1020,7 +1020,7 @@ class TestMsfParserExtended:
 
 class TestTpiParserExtended:
     def test_record_with_small_rec_len(self) -> None:
-        """Record with rec_len < 2 should stop parsing."""
+        """A record with rec_len < 2 is truncated: the TPI stream is refused."""
         # Build TPI header for 1 record
         ti_begin = 0x1000
         ti_end = 0x1001
@@ -1029,8 +1029,8 @@ class TestTpiParserExtended:
         rec_data += b"\x00" * 2  # padding
         header = struct.pack("<IIIII", 20040203, 56, ti_begin, ti_end, len(rec_data))
         header += b"\x00" * (56 - len(header))
-        tpi = parse_tpi_stream(header + rec_data)
-        assert len(tpi.records) == 0
+        with pytest.raises(ValueError, match="truncated TPI record"):
+            parse_tpi_stream(header + rec_data)
 
     def test_tpi_get_method(self) -> None:
         """TpiStream.get() returns records by type index."""
@@ -1204,12 +1204,12 @@ class TestTypeDatabaseExtended:
         assert db.type_name(0x1000) == "<ti:0x1000>"
 
     def test_arglist_truncated_entries(self) -> None:
-        """Arglist with count > available data should parse partial."""
+        """An arglist whose count exceeds its data is a parse failure."""
         # count=5 but only room for 2
         payload = struct.pack("<III", 5, 0x74, 0x74)
         db = self._make_db([(LF_ARGLIST, payload)])
-        args = db._arglists.get(0x1000, [])
-        assert len(args) == 2
+        assert 0x1000 not in db._arglists
+        assert db.parse_failures
 
 
 class TestFieldlistExtended:

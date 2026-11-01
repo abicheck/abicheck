@@ -97,6 +97,7 @@ _INTERNAL_MODULES = (
     "abicheck.storage.wire_field_names",
     "abicheck.storage.wire_record_extensions",
     "abicheck.storage.snapshot_lazy_decode",
+    "abicheck.storage.transport_digest",
 )
 
 

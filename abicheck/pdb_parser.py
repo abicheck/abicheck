@@ -40,6 +40,7 @@ from pathlib import Path
 from typing import Any
 
 from .errors import ValidationError
+from .extract.pdb_fieldlist import read_cstring, read_numeric_leaf, walk_fieldlist
 from .extract.pdb_procedure_spelling import _CC_NAMES, procedure_spelling
 
 log = logging.getLogger(__name__)
@@ -406,8 +407,8 @@ def parse_tpi_stream(data: bytes) -> TpiStream:
 
     while pos + 4 <= end and current_ti < ti_end:
         (rec_len,) = struct.unpack_from("<H", data, pos)
-        if rec_len < 2:
-            break
+        if rec_len < 2 or pos + 2 + rec_len > min(end, len(data)):
+            raise ValueError(f"truncated TPI record ti=0x{current_ti:x} at {pos}")
         (leaf,) = struct.unpack_from("<H", data, pos + 2)
         rec_data = data[pos + 4 : pos + 2 + rec_len]
         records.append(
@@ -421,6 +422,8 @@ def parse_tpi_stream(data: bytes) -> TpiStream:
         pos += 2 + rec_len
         pos = (pos + 3) & ~3
         current_ti += 1
+    if current_ti < ti_end:
+        raise ValueError(f"TPI stream ends at ti=0x{current_ti:x}, before 0x{ti_end:x}")
 
     return TpiStream(
         type_index_begin=ti_begin,
@@ -787,6 +790,8 @@ class TypeDatabase:
         self._name_cache: dict[int, str] = {}
         self._size_cache: dict[int, int] = {}
         self._parsed = False
+        #: Supported records that failed to parse -- missing here, not absent.
+        self.parse_failures: list[str] = []
 
     def parse_all(self) -> None:
         """Parse all TPI records into structured objects."""
@@ -798,16 +803,21 @@ class TypeDatabase:
             try:
                 self._parse_record(rec)
             except (struct.error, IndexError, ValueError) as exc:
-                log.debug(
-                    "Failed to parse TPI record ti=0x%x leaf=0x%x: %s",
-                    rec.type_index,
-                    rec.leaf,
-                    exc,
+                self.parse_failures.append(
+                    f"TPI record ti=0x{rec.type_index:x} leaf=0x{rec.leaf:x}: {exc}"
                 )
 
         self._fwd_to_def = _link_forward_refs(self._structs) | _link_forward_refs(
             self._enums
         )
+        # An enum's count is its enumerator count: a field list that ends early
+        # at a sub-record boundary still parses, so the count is the only check.
+        for cv in self._enums.values():
+            got = self._fieldlists.get(cv.field_list_ti)
+            if not cv.is_forward_ref and got is not None and len(got) != cv.count:
+                self.parse_failures.append(
+                    f"LF_ENUM ti=0x{cv.type_index:x}: {len(got)} of {cv.count} enumerators"
+                )
 
     def _parse_record(self, rec: TpiRecord) -> None:
         d = rec.data
@@ -846,18 +856,18 @@ class TypeDatabase:
         """
         if is_union:
             if len(d) < 8:
-                return
+                raise ValueError(f"truncated LF_UNION record ({len(d)} bytes)")
             (count, prop, field_ti) = struct.unpack_from("<HHI", d, 0)
             pos = 8
         else:
             if len(d) < 16:
-                return
+                raise ValueError(f"truncated LF_STRUCTURE record ({len(d)} bytes)")
             (count, prop, field_ti, _derived_ti, _vshape_ti) = struct.unpack_from(
                 "<HHIII", d, 0
             )
             pos = 16
-        byte_size, pos = _read_numeric_leaf(d, pos)
-        name, _pos = _read_cstring(d, pos)
+        byte_size, pos = read_numeric_leaf(d, pos)
+        name, _pos = read_cstring(d, pos)
         self._structs[ti] = CvStruct(
             type_index=ti,
             name=name,
@@ -871,9 +881,9 @@ class TypeDatabase:
 
     def _parse_enum(self, ti: int, d: bytes) -> None:
         if len(d) < 12:
-            return
+            raise ValueError(f"truncated LF_ENUM record ({len(d)} bytes)")
         (count, prop, utype_ti, field_ti) = struct.unpack_from("<HHII", d, 0)
-        name, _ = _read_cstring(d, 12)
+        name, _ = read_cstring(d, 12)
         self._enums[ti] = CvEnum(
             type_index=ti,
             name=name,
@@ -889,198 +899,35 @@ class TypeDatabase:
         d: bytes,
         _visited: set[int] | None = None,
     ) -> None:
+        """Parse an LF_FIELDLIST strictly (``extract/pdb_fieldlist.py``): a
+        truncated sub-record or a dangling ``LF_INDEX`` raises, so the
+        record is a parse failure rather than a list missing its tail."""
         if _visited is None:
             _visited = set()
         if ti in _visited:
             log.warning("Circular LF_INDEX reference at ti=0x%x, skipping", ti)
             return
         _visited.add(ti)
-
         members: list[Any] = []
-        pos = 0
-        while pos + 2 <= len(d):
-            # Detect single-byte padding (LF_PAD1..LF_PADn = 0xF1..0xFF) before
-            # consuming the 2-byte sub_leaf: a byte >= 0xF0 at pos is a pad byte,
-            # not the start of a sub-leaf record.
-            if d[pos] >= 0xF0:
-                skip = d[pos] & 0x0F  # lower nibble = total pad length
-                pos += skip if skip > 0 else 1
-                continue
-            (sub_leaf,) = struct.unpack_from("<H", d, pos)
-            pos += 2
-
-            if sub_leaf == LF_MEMBER:
-                new_pos = self._parse_lf_member(d, pos, members)
-            elif sub_leaf == LF_ENUMERATE:
-                new_pos = self._parse_lf_enumerate(d, pos, members)
-            elif sub_leaf == LF_INDEX:
-                new_pos = self._parse_lf_index(d, pos, members, _visited)
-            elif sub_leaf == LF_ONEMETHOD:
-                new_pos = self._parse_lf_onemethod(d, pos, members)
-            elif sub_leaf in (
-                LF_STMEMBER,
-                LF_NESTTYPE,
-                LF_VFUNCTAB,
-                LF_BCLASS,
-                LF_VBCLASS,
-                LF_IVBCLASS,
-                LF_METHOD,
-            ):
-                # Skip known sub-records we don't need
-                new_pos = self._skip_subrecord(sub_leaf, d, pos)
-            else:
-                # Unknown sub-record — can't safely continue
-                log.debug("Unknown fieldlist sub-leaf 0x%04x at pos %d", sub_leaf, pos)
-                break
-
-            if new_pos is None:  # truncated sub-record
-                break
-            # 4-byte alignment within fieldlist
-            pos = (new_pos + 3) & ~3
-
+        for e in walk_fieldlist(d):
+            if e.kind == "member":
+                members.append(CvMember(e.name, e.type_ti, e.value, e.attr & 0x03))
+            elif e.kind == "enumerate":
+                members.append(CvEnumerator(name=e.name, value=e.value))
+            elif e.kind == "onemethod":
+                if e.name:
+                    members.append(CvOneMethod(name=e.name, type_ti=e.type_ti))
+            else:  # LF_INDEX continuation
+                cont = self._tpi.get(e.type_ti)
+                if cont is None or cont.leaf != LF_FIELDLIST:
+                    raise ValueError(f"LF_INDEX to missing field list 0x{e.type_ti:x}")
+                self._parse_fieldlist(e.type_ti, cont.data, _visited)
+                members.extend(self._fieldlists.get(e.type_ti, []))
         self._fieldlists[ti] = members
-
-    def _parse_lf_member(
-        self,
-        d: bytes,
-        pos: int,
-        members: list[Any],
-    ) -> int | None:
-        """Parse an LF_MEMBER sub-record; return the new position, or None if truncated."""
-        if pos + 6 > len(d):
-            return None
-        (attr, type_ti) = struct.unpack_from("<HI", d, pos)
-        pos += 6
-        offset_val, pos = _read_numeric_leaf(d, pos)
-        name, pos = _read_cstring(d, pos)
-        members.append(
-            CvMember(
-                name=name,
-                type_ti=type_ti,
-                offset=offset_val,
-                access=attr & 0x03,
-            )
-        )
-        return pos
-
-    def _parse_lf_enumerate(
-        self,
-        d: bytes,
-        pos: int,
-        members: list[Any],
-    ) -> int | None:
-        """Parse an LF_ENUMERATE sub-record; return the new position, or None if truncated."""
-        if pos + 2 > len(d):
-            return None
-        (_attr,) = struct.unpack_from("<H", d, pos)
-        pos += 2
-        val, pos = _read_numeric_leaf(d, pos)
-        name, pos = _read_cstring(d, pos)
-        members.append(CvEnumerator(name=name, value=val))
-        return pos
-
-    def _parse_lf_index(
-        self,
-        d: bytes,
-        pos: int,
-        members: list[Any],
-        _visited: set[int],
-    ) -> int | None:
-        """Parse an LF_INDEX continuation sub-record; return the new position, or None if truncated."""
-        # LF_INDEX — continuation to another LF_FIELDLIST.
-        # Structure: 2-byte sub_leaf (already consumed) + 2-byte padding + 4-byte TI = 6 bytes total.
-        if pos + 6 > len(d):
-            return None
-        (cont_ti,) = struct.unpack_from("<I", d, pos + 2)
-        pos += 6
-        # Resolve continuation
-        cont_rec = self._tpi.get(cont_ti)
-        if cont_rec and cont_rec.leaf == LF_FIELDLIST:
-            self._parse_fieldlist(cont_ti, cont_rec.data, _visited)
-            cont_members = self._fieldlists.get(cont_ti, [])
-            members.extend(cont_members)
-        return pos
-
-    def _parse_lf_onemethod(
-        self,
-        d: bytes,
-        pos: int,
-        members: list[Any],
-    ) -> int | None:
-        """Parse an LF_ONEMETHOD sub-record; return the new position, or None if truncated."""
-        # attr(2) + type_ti(4) [+ vbaseoff(4) if intro virtual] + name.
-        # Parsed (not skipped) so the method's calling convention can
-        # be resolved by name via its LF_MFUNCTION type.
-        if pos + 6 > len(d):
-            return None
-        (attr, m_type_ti) = struct.unpack_from("<HI", d, pos)
-        pos += 6
-        mprop = (attr >> 2) & 0x07
-        if mprop in (4, 6):  # intro/pure intro virtual — has vbaseoff
-            pos += 4
-        m_name, pos = _read_cstring(d, pos)
-        if m_name:
-            members.append(CvOneMethod(name=m_name, type_ti=m_type_ti))
-        return pos
-
-    def _skip_subrecord(self, sub_leaf: int, d: bytes, pos: int) -> int:
-        """Skip known sub-record types we don't parse.
-
-        Returns the new position past the sub-record data.
-        """
-        if sub_leaf == LF_STMEMBER:
-            # attr(2) + type_ti(4) + name(variable)
-            if pos + 6 > len(d):
-                return len(d)
-            pos += 6
-            _, pos = _read_cstring(d, pos)
-            return pos
-
-        if sub_leaf == LF_NESTTYPE:
-            # padding(2) + type_ti(4) + name(variable)
-            if pos + 6 > len(d):
-                return len(d)
-            pos += 6
-            _, pos = _read_cstring(d, pos)
-            return pos
-
-        # LF_ONEMETHOD is dispatched to _parse_lf_onemethod by _parse_fieldlist
-        # before it reaches this fallback, so it is intentionally absent here.
-
-        if sub_leaf == LF_METHOD:
-            # count(2) + mlist_ti(4) + name(variable)
-            if pos + 6 > len(d):
-                return len(d)
-            pos += 6
-            _, pos = _read_cstring(d, pos)
-            return pos
-
-        if sub_leaf == LF_VFUNCTAB:
-            # padding(2) + type_ti(4)
-            return pos + 6
-
-        if sub_leaf == LF_BCLASS:
-            # attr(2) + type_ti(4) + offset(numeric leaf)
-            if pos + 6 > len(d):
-                return len(d)
-            pos += 6
-            _, pos = _read_numeric_leaf(d, pos)
-            return pos
-
-        if sub_leaf in (LF_VBCLASS, LF_IVBCLASS):
-            # attr(2) + direct_ti(4) + vbptr_ti(4) + vbpoff(numeric) + vbtableoff(numeric)
-            if pos + 10 > len(d):
-                return len(d)
-            pos += 10
-            _, pos = _read_numeric_leaf(d, pos)
-            _, pos = _read_numeric_leaf(d, pos)
-            return pos
-
-        return len(d)  # bail out — can't continue
 
     def _parse_procedure(self, ti: int, d: bytes) -> None:
         if len(d) < 12:
-            return
+            raise ValueError(f"truncated TPI record ({len(d)} bytes, need 12)")
         (rvtype, calltype, _funcattr, parmcount, arglist) = struct.unpack_from(
             "<IBBHI", d, 0
         )
@@ -1094,7 +941,7 @@ class TypeDatabase:
 
     def _parse_mfunction(self, ti: int, d: bytes) -> None:
         if len(d) < 24:
-            return
+            raise ValueError(f"truncated TPI record ({len(d)} bytes, need 24)")
         (
             rvtype,
             classtype,
@@ -1118,7 +965,7 @@ class TypeDatabase:
 
     def _parse_pointer(self, ti: int, d: bytes) -> None:
         if len(d) < 8:
-            return
+            raise ValueError(f"truncated TPI record ({len(d)} bytes, need 8)")
         (referent, attrs) = struct.unpack_from("<II", d, 0)
         size = (attrs >> 13) & 0x3F
         self._pointers[ti] = CvPointer(
@@ -1130,11 +977,11 @@ class TypeDatabase:
 
     def _parse_array(self, ti: int, d: bytes) -> None:
         if len(d) < 8:
-            return
+            raise ValueError(f"truncated TPI record ({len(d)} bytes, need 8)")
         (elem_ti, idx_ti) = struct.unpack_from("<II", d, 0)
         pos = 8
-        byte_size, pos = _read_numeric_leaf(d, pos)
-        name, _ = _read_cstring(d, pos)
+        byte_size, pos = read_numeric_leaf(d, pos)
+        name, _ = read_cstring(d, pos)
         self._arrays[ti] = CvArray(
             type_index=ti,
             element_type_ti=elem_ti,
@@ -1145,7 +992,7 @@ class TypeDatabase:
 
     def _parse_modifier(self, ti: int, d: bytes) -> None:
         if len(d) < 6:
-            return
+            raise ValueError(f"truncated TPI record ({len(d)} bytes, need 6)")
         (mod_ti, attr) = struct.unpack_from("<IH", d, 0)
         self._modifiers[ti] = CvModifier(
             type_index=ti,
@@ -1157,7 +1004,7 @@ class TypeDatabase:
 
     def _parse_bitfield(self, ti: int, d: bytes) -> None:
         if len(d) < 6:
-            return
+            raise ValueError(f"truncated TPI record ({len(d)} bytes, need 6)")
         (underlying, length, position) = struct.unpack_from("<IBB", d, 0)
         self._bitfields[ti] = CvBitfield(
             type_index=ti,
@@ -1168,13 +1015,13 @@ class TypeDatabase:
 
     def _parse_arglist(self, ti: int, d: bytes) -> None:
         if len(d) < 4:
-            return
+            raise ValueError(f"truncated TPI record ({len(d)} bytes, need 4)")
         (count,) = struct.unpack_from("<I", d, 0)
         args = []
         pos = 4
         for _ in range(count):
             if pos + 4 > len(d):
-                break
+                raise ValueError(f"truncated LF_ARGLIST ({count} args, {len(d)} bytes)")
             (arg_ti,) = struct.unpack_from("<I", d, pos)
             pos += 4
             args.append(arg_ti)

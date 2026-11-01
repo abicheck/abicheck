@@ -18,4 +18,6 @@ test_only_functions: []
 test_only_modules:
   - key: abicheck.workflows.consumer_scope_standalone
     reason: "public Python API: check_appcompat/check_plugin_host_contract (docs/use/appcompat.md, docs/use/plugin-systems.md) for library users; the CLI uses the pre-computed-diff path instead"
+  - key: abicheck.workflows.package_gc
+    reason: "public Python API: collect_package_garbage, ADR-062 D17's package garbage collection (docs/reference/project-snapshot-format.md); no CLI subcommand maintains packages yet (known-gaps D17 residual)"
 cross_module_exact_clones: []

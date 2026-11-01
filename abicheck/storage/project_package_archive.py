@@ -33,9 +33,13 @@ before writing anything, any member that is not exactly one of the D6 paths
 (so no ``..``, absolute path, backslash, directory entry or stray file can
 reach the filesystem), a symlink, a compressed member (a stored member's
 size is its real size, which is what makes the size limits meaningful), a
-duplicate name, or an archive over the member/size budgets. Object content
-is not re-hashed here: ``DirectoryObjectStore.get`` verifies every object's
-digest when it is read, so a substituted object fails at first use.
+duplicate name, or an archive over the member/size budgets. Every member's
+stored bytes are checked against the ADR-062 D16 ``transport`` digest the
+packer wrote into its extra field (`transport_digest.py`) before anything
+is written; an archive packed before that field existed carries none and is
+read as before. Object content is also verified at read:
+``DirectoryObjectStore.get`` checks every object's digest, so a substituted
+object fails at first use.
 """
 
 from __future__ import annotations
@@ -54,6 +58,11 @@ from .package import (
     variant_ref_relpath,
 )
 from .package_publish import REF_DIRS, versioned_ref_relpath
+from .transport_digest import (
+    stored_transport_digest,
+    transport_digest,
+    transport_extra,
+)
 from .zip_member import deterministic_zipinfo
 
 __all__ = [
@@ -157,7 +166,10 @@ def pack_project_package(package_dir: str | Path, out_path: str | Path) -> None:
                 deterministic_zipinfo(_MIMETYPE_MEMBER), MIMETYPE.encode("ascii")
             )
             for rel, path in members:
-                zf.writestr(deterministic_zipinfo(rel), path.read_bytes())
+                data = path.read_bytes()
+                info = deterministic_zipinfo(rel)
+                info.extra = transport_extra(data)  # ADR-062 D16 `transport`
+                zf.writestr(info, data)
         os.replace(tmp, out)
     finally:
         tmp.unlink(missing_ok=True)
@@ -211,6 +223,34 @@ def _check_member(info: zipfile.ZipInfo, archive: Path) -> None:
         raise SnapshotError(f"{archive}: member {name!r} exceeds the size budget")
 
 
+def _verify_transport_digests(
+    zf: zipfile.ZipFile, body: list[zipfile.ZipInfo], archive: Path
+) -> None:
+    """ADR-062 D16: every member's stored bytes against the `transport`
+    digest its extra field carries. All members carry one, or (an archive
+    written before it) none do; anything in between was altered."""
+    try:
+        stated = [stored_transport_digest(info.extra) for info in body]
+    except ValueError as exc:
+        raise SnapshotError(f"{archive}: {exc}") from None
+    if all(d is None for d in stated):
+        return
+    for info, digest in zip(body, stated, strict=True):
+        if digest is None:
+            raise SnapshotError(
+                f"{archive}: member {info.filename!r} carries no transport digest "
+                "while others do -- the archive was altered"
+            )
+        with zf.open(info) as member:
+            actual = transport_digest(iter(lambda: member.read(1 << 20), b""))
+        if actual != digest:
+            raise SnapshotError(
+                f"{archive}: member {info.filename!r} does not match its transport "
+                f"digest {digest!r} (recomputed {actual!r}) -- the archive is "
+                "corrupted or was altered"
+            )
+
+
 def unpack_project_package(archive_path: str | Path, dest_dir: str | Path) -> None:
     """Unpack *archive_path* into *dest_dir*, which must be empty or absent.
 
@@ -246,6 +286,7 @@ def unpack_project_package(archive_path: str | Path, dest_dir: str | Path) -> No
                     raise SnapshotError(f"{archive}: unpacked size exceeds the budget")
                 if MANIFEST_RELPATH not in seen:
                     raise SnapshotError(f"{archive}: no manifest.json member")
+                _verify_transport_digests(zf, body, archive)
                 dest.mkdir(parents=True, exist_ok=True)
                 for info in body:
                     target = dest / info.filename
