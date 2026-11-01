@@ -20,7 +20,7 @@ replaced by a fake clock.
 from __future__ import annotations
 
 import json
-import pickle
+import multiprocessing
 import threading
 from pathlib import Path
 from types import SimpleNamespace
@@ -122,9 +122,15 @@ def test_budget_deadline_inside_an_active_deadline(
 def test_deadline_exceeded_survives_the_child_result_pipe(
     waiting_for: str | None,
 ) -> None:
-    """A release member's failure crosses a forked child's pipe pickled."""
+    """A release member's failure crosses a forked child's result pipe."""
     exc = deadline.DeadlineExceeded(-2.5, waiting_for=waiting_for)
-    back = pickle.loads(pickle.dumps(exc))
+    recv, send = multiprocessing.Pipe(duplex=False)
+    try:
+        send.send(exc)
+        back = recv.recv()
+    finally:
+        send.close()
+        recv.close()
     assert type(back) is deadline.DeadlineExceeded
     assert (back.remaining_s, back.waiting_for, str(back)) == (
         -2.5,
