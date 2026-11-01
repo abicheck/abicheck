@@ -33,7 +33,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ..errors import PolicyError, SnapshotError
+from ..errors import PolicyError, ReleaseOperandUsageError, SnapshotError
 from ..model.bundle_facts import DEFAULT_MAX_JSON_OBJECT_NODES
 from ..policy.release_assurance import ReleaseAssuranceDecision
 from ..policy.scope_completeness import ScopeDecision
@@ -56,7 +56,11 @@ from .policy_file import (
     project_config_policy_downgrade_warnings,
 )
 from .release_assurance_members import release_assurance_from_results
-from .release_inputs import discover_include_roots, extract_if_package
+from .release_inputs import (
+    discover_include_roots,
+    extract_if_package,
+    resolve_release_package_side,
+)
 
 
 @dataclass(frozen=True)
@@ -278,6 +282,7 @@ def _compare_stored_against_live(
             # but collects every compare input from a plain directory; the
             # NEW side here discovers by the same rule.
             new_packaged = is_package(request.new_input)
+            new_members = _stored_package_members(request.new_input, _make_temp_dir)
             if header_dir is not None and request.depth != "binary":
                 if not headers:
                     headers = [header_dir]
@@ -331,7 +336,10 @@ def _compare_stored_against_live(
                 include_dependencies=bool(request.include_dependencies),
                 max_json_object_nodes=max_json_object_nodes,
                 env_matrix=env_matrix,
+                new_members=new_members,
             )
+        except ReleaseOperandUsageError as exc:
+            raise BundleFactsCompareError(str(exc), usage=True) from exc
         except BundleFactsLibraryOverridesError as exc:
             # A manifest entry that names no library, or a bad key, is a
             # malformed-input case, not an operational failure.
@@ -396,3 +404,32 @@ def _prepare_output_dir(
         raise BundleFactsCompareError(
             f"Cannot create {output_dir}: {exc}", usage=False
         ) from exc
+
+
+def _stored_package_members(
+    new_input: Path, make_temp_dir: Any
+) -> dict[str, Path] | None:
+    """A NEW stored ``ProjectSnapshot`` package's ``match key -> member``
+    map, unpacked by the live fan-out's own owner
+    (:func:`~abicheck.workflows.release_inputs.resolve_release_package_side`)
+    and keyed by the library each member records, as on every other route;
+    ``None`` when *new_input* is not such a package.
+
+    A member the capture recorded *degraded* (ADR-065 D8) is an ELF-only
+    stand-in that this driver has no channel to mark ``failed``, so such a
+    package is refused rather than compared as if complete.
+    """
+    from ..errors import ReleaseOperandUsageError
+    from .release_package import resolve_release_package_degraded_members
+
+    members = resolve_release_package_side(new_input, None, make_temp_dir, side="new")
+    if members is None:
+        return None
+    degraded = resolve_release_package_degraded_members(new_input, variant_id=None)
+    if degraded:
+        raise ReleaseOperandUsageError(
+            f"NEW_INPUT {new_input} is a stored package with degraded members "
+            f"({', '.join(sorted(degraded))}); a stored OLD baseline cannot be "
+            "compared against it. Compare the live NEW artifacts instead."
+        )
+    return members

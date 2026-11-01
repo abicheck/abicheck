@@ -325,4 +325,7 @@ def build_release_plan_from_directories(
     new_files = collect_release_inputs(new_dir)
     old_map, _old_warnings = build_match_map(old_files)
     new_map, _new_warnings = build_match_map(new_files)
+    from .release_member_pairing import pair_path_maps_by_identity
+
+    new_map = pair_path_maps_by_identity(old_map, new_map)
     return build_release_plan(old_map, new_map, selection=selection)

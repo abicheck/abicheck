@@ -363,3 +363,31 @@ def is_supported_compare_input(path: Path) -> bool:
         if result is not None:
             return result
     return False
+
+
+#: The pipeline's content classifiers: everything but the name-only accept
+#: and the debug-companion reject.
+_CONTENT_PIPELINE: list[FileClassifier] = [
+    c
+    for c in _PIPELINE
+    if not isinstance(c, (DebugCompanionClassifier, BinaryExtensionClassifier))
+]
+
+
+def is_content_recognized_compare_input(path: Path) -> bool:
+    """``True`` when *path*'s **content** identifies it as a compare input.
+
+    :func:`is_supported_compare_input` accepts ``libfoo.so``-style names on
+    the name alone (a text linker-script stub stays discoverable), so a
+    discovered member may still be a file no reader can open. This asks the
+    content classifiers only -- magic bytes, or a snapshot fingerprint -- so
+    a release's scope record can tell an unreadable member from a one-sided
+    one.
+    """
+    if not path.is_file():
+        return False
+    for classifier in _CONTENT_PIPELINE:
+        result = classifier.accepts(path)
+        if result is not None:
+            return result
+    return False

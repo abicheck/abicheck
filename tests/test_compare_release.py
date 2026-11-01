@@ -833,7 +833,7 @@ class TestDirVsDir:
         old_dir.mkdir()
         new_dir.mkdir()
         _write_snap(old_dir / "libfoo.json", _snap())
-        _write_snap(new_dir / "libbar.json", _snap())
+        _write_snap(new_dir / "libbar.json", _snap(library="libbar.so"))
         code, out = _invoke_combined("compare", str(old_dir), str(new_dir))
         assert code == 1
         assert "no matching" in out.lower() or "warning" in out.lower()
@@ -918,7 +918,7 @@ class TestBundleFactsOutStrandedLibraryWarning:
             "compare", str(old_dir), str(new_dir), "--bundle-facts-out", str(out_path)
         )
 
-        assert code == 0
+        assert code == 4  # an unreadable one-sided member is `failed`
         assert "libbroken.so" in out
         assert "ELF-only" in out
         assert out_path.exists()
