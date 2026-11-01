@@ -158,7 +158,9 @@ def test_a_core_option_is_refused_and_the_error_names_its_flag(
 
 def test_core_refusal_also_applies_to_the_typed_api() -> None:
     with pytest.raises(CompareSettingsError, match="--severity-preset"):
-        _with_config_overrides(_request(config_overrides={"severity.preset": "strict"}))
+        _with_config_overrides(
+            _request(config_overrides={"severity.preset": "strict"})
+        )[0]
 
 
 def test_core_set_keys_are_exactly_the_registry_core_config_members() -> None:
@@ -312,7 +314,7 @@ def test_a_key_with_no_typed_channel_is_refused_by_the_typed_api() -> None:
     with pytest.raises(ConfigOverrideError, match="scope.show_redundant"):
         _with_config_overrides(
             _request(config_overrides={"scope.show_redundant": True})
-        )
+        )[0]
 
 
 def test_every_typed_channel_is_applied_to_the_request() -> None:
@@ -328,7 +330,7 @@ def test_every_typed_channel_is_applied_to_the_request() -> None:
                 "debug.format": "dwarf",
             }
         )
-    )
+    )[0]
     assert resolved.strict_suppressions is True
     assert resolved.require_complete_analysis is True
     assert resolved.dwarf_only is True
@@ -350,7 +352,7 @@ def test_cli_and_typed_api_resolve_the_same_config(
         config=None, severity_preset=None, config_overrides=overrides
     )
     # The typed API: the same mapping on the request.
-    typed = _with_config_overrides(_request(config_overrides=overrides))
+    typed = _with_config_overrides(_request(config_overrides=overrides))[0]
 
     assert typed.collapse_versioned_symbols == cli_resolved.collapse_versioned_symbols
     assert typed.collapse_versioned_symbols is True
@@ -367,7 +369,7 @@ def test_cli_and_typed_api_resolve_the_same_config(
     _, _, cli_more, _ = resolve_project_compare_config(
         config=None, severity_preset=None, config_overrides=keys
     )
-    typed_more = _with_config_overrides(_request(config_overrides=keys))
+    typed_more = _with_config_overrides(_request(config_overrides=keys))[0]
     assert typed_more.strict_suppressions is cli_more.strict_suppressions is True
     assert (
         typed_more.require_complete_analysis
@@ -382,13 +384,13 @@ def test_a_typed_field_set_away_from_its_default_is_kept() -> None:
         severity_addition="warning",
         config_overrides={"severity.addition": "error"},
     )
-    assert _with_config_overrides(request).severity_addition == "warning"
+    assert _with_config_overrides(request)[0].severity_addition == "warning"
 
 
 def test_an_override_fills_a_field_left_at_its_default() -> None:
     request = _request(config_overrides={"scope.public": False})
     assert request.scope_public is True  # the default, before resolution
-    assert _with_config_overrides(request).scope_public is False
+    assert _with_config_overrides(request)[0].scope_public is False
 
 
 def test_config_overrides_default_is_an_immutable_empty_mapping() -> None:
@@ -515,7 +517,7 @@ def test_unset_acknowledgment_fields_have_no_errors() -> None:
 
 def test_a_request_without_overrides_is_returned_unchanged() -> None:
     request = _request()
-    assert _with_config_overrides(request) is request
+    assert _with_config_overrides(request)[0] is request
 
 
 def test_overrides_fill_the_request_fields_they_map_to() -> None:
@@ -527,7 +529,7 @@ def test_overrides_fill_the_request_fields_they_map_to() -> None:
                 "severity.addition": "error",
             }
         )
-    )
+    )[0]
     assert resolved.collapse_versioned_symbols is True
     assert resolved.public_symbols == frozenset({"foo"})
     assert resolved.severity_addition == "error"
@@ -539,7 +541,7 @@ def test_an_explicit_force_public_symbols_is_kept() -> None:
             public_symbols=frozenset({"bar"}),
             config_overrides={"scope.public_symbols": ["foo"]},
         )
-    )
+    )[0]
     assert resolved.public_symbols == frozenset({"bar"})
 
 
@@ -597,7 +599,7 @@ def test_deployment_and_require_justification_reach_the_request_and_the_cli() ->
     _, _, cli_resolved, _ = resolve_project_compare_config(
         config=None, severity_preset=None, config_overrides=overrides
     )
-    typed = _with_config_overrides(_request(config_overrides=overrides))
+    typed = _with_config_overrides(_request(config_overrides=overrides))[0]
     assert typed.require_justification is True
     assert cli_resolved.require_justification is True
     assert typed.env_matrix is not None

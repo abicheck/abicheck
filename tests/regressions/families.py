@@ -365,6 +365,9 @@ _F2 = (
     "serialization.persisted_field_not_decoded",
     "cardinality.member_request_drops_scalar_field",
     "config.front_end_default_divergence",
+    # `consumers.required_symbols` was resolved and refused on the CLI only;
+    # the typed `config_overrides` spelling now goes through the same owners.
+    "config.key_resolved_on_one_route_only",
     "config.propagation_completeness",
     "config.option_dropped_at_a_dispatch_branch",
     "config.sided_shared_input_dropped",

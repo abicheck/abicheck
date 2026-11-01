@@ -513,11 +513,6 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 
 ### Hygiene
 
-#### `consumers.required_symbols` `@FILE` read errors are checked on the CLI route only
-
-**Status (recorded 2026-10-22): OPEN.** An unreadable `@FILE` is refused as a typed `CompareSettingsError` (exit 64, path named) by `workflows/compare_configuration.load_required_symbols`, pinned on the CLI and the typed function in `tests/test_compare_settings_cli_translation.py`. No bug-class harness covers it: the typed `CompareRequest` API does not accept `@FILE` required symbols, so there is no second route to compare against, and family F2's route-parity matrix has nothing to attach to.
-`hygiene` — A harness cell becomes meaningful only if `@FILE` resolution is exposed on a second route; until then the CLI test is the guard. [Full write-up](known-gaps/required-symbol-file-read-errors-are-checked-on-the-cli-route-only.md)
-
 #### Release report: live and stored operands render different documents
 
 **Status (2026-10-25): CLOSED for the document shape.** A stored `BundleFacts` comparison renders the live release document: its JSON is the live release document (release schema 2.5), and JSON, Markdown, JUnit, `oneline` and HTML all come from one live-shaped evaluation of the stored facts (`tests/unit/report/test_release_document.py`, `tests/test_cli_compare_stored_release_parity.py`). Fields a stored comparison cannot compute are explicit `unavailable` markers with a reason, and its receipt is marked `reconstructed_from_stored_facts`. Remaining limits, named rather than hidden: the stored JUnit omits the passing testcase for each unchanged symbol (no old-side inventory); `output.view` `show=`, `sarif` and `review` stay refused for a stored OLD_INPUT.  
@@ -532,11 +527,6 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 
 **Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** The traversal half is superseded: the closure walk moved to policy/public_surface_closure.py. Still true: abicheck/type_reachability.py is unmigrated, and the compare/surface_graph.py and header_graph node-id namespaces are not unified.  
 `hygiene` — The closure walk moved to `policy/public_surface_closure.py`, but `type_reachability.py` is unmigrated and the surface-graph and header-graph node-id namespaces are still separate. [Full write-up](known-gaps/public-surface-graph-surface-graph-vs-l5-header-graph-node-id.md)
-
-#### `BundleFacts` (and its G40 archive container) has no published JSON Schema, in either `abicheck/schemas/` or `docs/reference/schemas/`
-
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** abicheck/model/bundle_facts.py:53 BUNDLE_FACTS_SCHEMA_VERSION = 4, but abicheck/schemas/ and docs/reference/schemas/v1/ hold no bundle_facts schema (only aggregate/audit/audit_set/build_evidence/build_source_pack/compare). The module path in the entry is stale (bundle_facts.py is now model/bundle_facts.py).  
-`hygiene` — `BundleFacts` (schema version 4) and its archive container have no published JSON Schema in `abicheck/schemas/` or `docs/reference/schemas/`. [Full write-up](known-gaps/bundlefacts-and-its-g40-archive-container-has-no-published-json.md)
 
 #### The weekly `Mutation testing` scheduled lane (`.github/workflows/mutation.yml`, job `mutmut (detector core)`) can outgrow its own job timeout before producing a receipt — investigated, partially mitigated, not fully fixed
 

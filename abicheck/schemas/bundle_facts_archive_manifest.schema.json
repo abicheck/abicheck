@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://abicheck.github.io/abicheck/reference/schemas/v1/bundle_facts_archive_manifest.schema.json",
+  "title": "abicheck BundleFacts archive manifest (G40)",
+  "description": "Schema for `manifest.json` inside the G40 zip archive form of BundleFacts (`dump RELEASE --bundle-facts-out FILE.zip`). The archive stores each distinct member snapshot, the instantiation manifest and the public surface once, as content-addressed blobs; this manifest maps library names to those blob hashes and carries the container's remaining fields inline. Two versions are recorded: `schema_version` is the archive container's own layout version, `bundle_facts_schema_version` is the BundleFacts shape it encodes (see bundle_facts.schema.json; 2 for a clean release, 3 with degraded members, 4 with a public surface). Both are required.",
+  "type": "object",
+  "required": [
+    "artifact_type",
+    "schema_version",
+    "bundle_facts_schema_version",
+    "library_blobs"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "artifact_type": {"const": "abicheck.bundle-facts-archive"},
+    "schema_version": {"type": "integer", "minimum": 1, "maximum": 1},
+    "bundle_facts_schema_version": {"type": "integer", "minimum": 1, "maximum": 4},
+    "variant_fingerprint": {"type": "string"},
+    "library_blobs": {
+      "description": "Library name to the content hash of its AbiSnapshot blob. Several names may share one blob.",
+      "type": "object",
+      "additionalProperties": {"$ref": "#/$defs/blob_hash"}
+    },
+    "manifest_blob": {
+      "description": "Content hash of the instantiation-manifest blob, or null when the release supplied none.",
+      "oneOf": [{"type": "null"}, {"$ref": "#/$defs/blob_hash"}]
+    },
+    "public_surface_blob": {
+      "description": "Content hash of the release's public-surface blob (bundle_facts_schema_version 4). Omitted, not null, when there is none.",
+      "$ref": "#/$defs/blob_hash"
+    },
+    "filesystem_aliases": {
+      "type": "object",
+      "additionalProperties": {"type": "array", "items": {"type": "string"}}
+    },
+    "library_filenames": {
+      "type": "object",
+      "additionalProperties": {"type": "string"}
+    },
+    "degraded_members": {
+      "type": "object",
+      "additionalProperties": {"type": "string"}
+    },
+    "inventory_complete": {"type": "boolean"}
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"degraded_members": {"minProperties": 1}},
+        "required": ["degraded_members"]
+      },
+      "then": {"properties": {"bundle_facts_schema_version": {"minimum": 3}}}
+    },
+    {
+      "if": {"required": ["public_surface_blob"]},
+      "then": {"properties": {"bundle_facts_schema_version": {"minimum": 4}}}
+    }
+  ],
+  "$defs": {
+    "blob_hash": {"type": "string", "minLength": 1}
+  }
+}

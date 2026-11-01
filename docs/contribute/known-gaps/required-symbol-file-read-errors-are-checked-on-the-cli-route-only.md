@@ -9,9 +9,11 @@ generated: false
 
 # `consumers.required_symbols` `@FILE` read errors are checked on the CLI route only
 
-Index: [Known gaps](../known-gaps.md)
+Index: [Known gaps](../known-gaps.md) — closed; see the [archive](../archive/known-gaps-closed.md).
 
-**Status (recorded 2026-10-22, spelling updated 2026-10-31): OPEN.**
+**Status (2026-11-01): CLOSED.** The typed API takes `consumers.required_symbols` in `CompareRequest.config_overrides` and resolves it through the same loader, policy fold and scoped gate as the CLI (`workflows/compare/required_symbol_contract.py`); `tests/test_typed_required_symbols_route_parity.py` is the route-parity harness the text below asked for. The text below is the history.
+
+Earlier status (recorded 2026-10-22, spelling updated 2026-10-31): OPEN.
 
 The `@FILE` form (one symbol per line, `#` comments ignored) is an entry of the
 `consumers.required_symbols` config key, set in `.abicheck.yml` or per run with

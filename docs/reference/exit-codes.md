@@ -1031,7 +1031,7 @@ one of those.
 | `WARN` (ABI risk) | — | — | — | — | `1` |
 | `API_BREAK` | `2` | `0`–`2`* | `2` / `0`–`2`*‡ | — | — |
 | `BREAKING` / `FAIL` | `4` | `0`–`4`* | `4` / `0`–`4`*‡ | — | `4` |
-| Budget overflow (`--budget`, else the 2h default) | `5` | `5` | `5` | — | — |
+| Budget overflow (`--budget`; on `compare`, else the 2h default) | `5` | `5` | `5` (explicit `--budget` only) | — | — |
 | Configured rule unused (`unused_rules: block`) | `1` floor | `1` floor | — | — | — |
 | Missing dependencies/symbols | — | — | — | `1` | — |
 | Load failure | — | — | — | — | `4` |
