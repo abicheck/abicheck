@@ -352,14 +352,16 @@ case "$MODE" in
     # live CLI to catch drift.
     # A stored BundleFacts OLD side renders the narrower generated
     # `stored-bundle-facts` set (STORED_RELEASE_FORMATS), checked first since
-    # it is a subset of the release set below. The OLD side is old-library,
-    # or a local-file abi-baseline (run.sh passes that file as OLD); a
-    # baseline fetched from a release does not exist yet and is left to the
-    # CLI.
+    # it is a subset of the release set below. The OLD side is the one run.sh
+    # compares: a set abi-baseline replaces old-library (run.sh assigns the
+    # resolved baseline file to INPUT_OLD_LIBRARY), so a local-file
+    # abi-baseline is probed and a release-named one -- not on disk yet --
+    # leaves the check to the CLI; otherwise old-library is.
     if [[ -n "$FORMAT" ]]; then
       _stored_old="$OLD_LIBRARY"
-      if [[ -z "$_stored_old" && -f "${INPUT_ABI_BASELINE:-}" ]]; then
-        _stored_old="$INPUT_ABI_BASELINE"
+      if [[ -n "${INPUT_ABI_BASELINE:-}" ]]; then
+        _stored_old=""
+        [[ -f "$INPUT_ABI_BASELINE" ]] && _stored_old="$INPUT_ABI_BASELINE"
       fi
       if _is_stored_bundle_facts_operand "$_stored_old" \
          && ! _cli_choice_allows stored-bundle-facts -o "$FORMAT"; then

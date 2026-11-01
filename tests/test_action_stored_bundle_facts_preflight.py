@@ -181,6 +181,42 @@ def test_a_stored_old_side_is_refused_before_any_release_fan_out(
     assert "stored BundleFacts old side" in result.stdout
 
 
+@pytest.mark.parametrize(
+    ("old_library", "abi_baseline", "refused"),
+    [
+        # run.sh replaces old-library with a set abi-baseline, so the
+        # baseline decides: a non-stored local baseline is not narrowed even
+        # beside a stored old-library, and a stored one is.
+        ("stored-json", "snapshot", False),
+        ("snapshot", "stored-json", True),
+        # A release-named baseline is not on disk at preflight: the CLI
+        # decides, so a stored old-library it replaces is not probed.
+        ("stored-json", "v1.0.0", False),
+    ],
+)
+def test_the_side_run_sh_compares_is_the_side_probed(
+    shapes: tuple[dict[str, Path], Path],
+    tmp_path: Path,
+    old_library: str,
+    abi_baseline: str,
+    refused: bool,
+) -> None:
+    operands, new = shapes
+    baseline = str(operands.get(abi_baseline, abi_baseline))
+    result = _validate(
+        {
+            "INPUT_MODE": "compare",
+            "INPUT_FORMAT": "sarif",
+            "INPUT_OLD_LIBRARY": str(operands[old_library]),
+            "INPUT_ABI_BASELINE": baseline,
+            "INPUT_NEW_LIBRARY": str(new),
+        },
+        cwd=tmp_path,
+    )
+    assert (result.returncode != 0) == refused, result.stdout + result.stderr
+    assert ("stored BundleFacts old side" in result.stdout) == refused
+
+
 def test_the_untrusted_checkout_cannot_shadow_the_classifier(
     shapes: tuple[dict[str, Path], Path], tmp_path: Path
 ) -> None:
