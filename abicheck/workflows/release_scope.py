@@ -508,6 +508,8 @@ def build_stored_baseline_scope_record(
     old_failed: Mapping[str, str] | None = None,
     new_failed: Mapping[str, str] | None = None,
     not_comparable: Mapping[str, str] | None = None,
+    old_paths: Mapping[str, Path] | None = None,
+    new_paths: Mapping[str, Path] | None = None,
 ) -> ScopeAcquisitionRecord:
     """The record for a stored-baseline driver (`bundle_side_input` /
     `bundle_stored_pair_compare`), through the same builder the live
@@ -540,9 +542,13 @@ def build_stored_baseline_scope_record(
     contracts disagree (ADR-050 D2's ``ProfileMismatchError``/
     ``ScopeMismatchError``) to the reason: the fan-out's own per-library
     ``not_comparable`` verdict, `failed` on the record (thirtieth round).
+    *old_paths*/*new_paths* give a key's real file (a live member's path, a
+    stored member's captured ``library_filenames`` spelling), so a member is
+    named on the record as the live fan-out names it -- ``libcore.so.1``,
+    not its match key ``libcore.so``; a key with none is named by itself.
     """
-    old_map = {k: Path(k) for k in old_keys}
-    new_map = {k: Path(k) for k in new_keys}
+    old_map = {k: (old_paths or {}).get(k, Path(k)) for k in old_keys}
+    new_map = {k: (new_paths or {}).get(k, Path(k)) for k in new_keys}
     matched = sorted(set(old_map) & set(new_map))
     unsupported = dict(unsupported or {})
     failed = dict(failed or {})
@@ -551,19 +557,31 @@ def build_stored_baseline_scope_record(
     results: list[Mapping[str, object]] = []
     for k in matched:
         if k in degraded:
-            results.append({"library": k, "verdict": "ERROR", "error": degraded[k]})
+            results.append(
+                {"library": old_map[k].name, "verdict": "ERROR", "error": degraded[k]}
+            )
         elif k in failed:
-            results.append({"library": k, "verdict": "ERROR", "error": failed[k]})
+            results.append(
+                {"library": old_map[k].name, "verdict": "ERROR", "error": failed[k]}
+            )
         elif k in not_comparable:
             results.append(
-                {"library": k, "verdict": "not_comparable", "reason": not_comparable[k]}
+                {
+                    "library": old_map[k].name,
+                    "verdict": "not_comparable",
+                    "reason": not_comparable[k],
+                }
             )
         elif k in unsupported:
             results.append(
-                {"library": k, "verdict": "unsupported", "reason": unsupported[k]}
+                {
+                    "library": old_map[k].name,
+                    "verdict": "unsupported",
+                    "reason": unsupported[k],
+                }
             )
         elif k in compared_set:
-            results.append({"library": k, "verdict": "NO_CHANGE"})
+            results.append({"library": old_map[k].name, "verdict": "NO_CHANGE"})
     evidence = ReleaseInventoryEvidence(
         old=_stored_facts_inventory(old_complete, old_provenance),
         new=_stored_facts_inventory(new_complete, new_provenance),

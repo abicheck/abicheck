@@ -39,8 +39,8 @@ from .cross_source_evolution import change_cross_source_evolution_field
 from .no_baseline_document import (
     NO_BASELINE_EXIT_AXIS_LABELS,
     suppression_provenance_of,
-    suppression_rule_label,
 )
+from .suppression_justification import sarif_suppression, suppression_justification
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -57,34 +57,6 @@ _SARIF_SCHEMA_URL = (
     "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master"
     "/Schemata/sarif-schema-2.1.0.json"
 )
-
-
-def _suppression_justification(
-    change: Any, provenance: Mapping[str, Any] | None
-) -> str:
-    """The human-readable half of a suppression, best information first.
-
-    ``label: reason`` when the rule states both, otherwise whichever single
-    field it states, otherwise a generic fallback.
-
-    The two sources are read separately and never mixed, which is the whole
-    point. ``Change.suppression_rule`` is ``label or reason`` -- one string
-    that does not say *which* it holds -- so treating it as a label whenever
-    provenance lacked one rendered a reason-only rule as
-    ``"<reason>: <reason>"``, presenting the reason as a separate rule label
-    (Codex review, P2). That is the shape ``suppression.require_justification``
-    actively encourages, so it is the common case, not an edge one.
-    The collapsed field is therefore consulted *only* when there is no
-    provenance at all -- the case where nothing better is knowable -- and
-    then stands alone rather than being paired with anything.
-    """
-    label = suppression_rule_label(change, provenance)
-    reason = (provenance or {}).get("reason")
-    if reason and label:
-        return f"{label}: {reason}"
-    if reason or label:
-        return str(reason or label)
-    return "suppressed by an abicheck --suppress rule"
 
 
 def _sarif_result(
@@ -125,20 +97,9 @@ def _sarif_result(
         },
     }
     if suppressed:
-        suppression: dict[str, Any] = {
-            "kind": "external",
-            # SARIF's `justification` is free text, so it carries the reason
-            # a human wrote when the rule states one -- that is the field's
-            # actual purpose -- and falls back to the label only when there
-            # is no reason to give.
-            "justification": _suppression_justification(change, provenance),
-        }
-        if provenance:
-            # The structured record too: `justification` is one string, and a
-            # consumer deciding whether a waiver still applies needs the
-            # source file and expiry as data, not prose.
-            suppression["properties"] = dict(provenance)
-        entry["suppressions"] = [suppression]
+        # The shared statement every renderer makes (rule, reason, source,
+        # expiry), plus the structured record as `properties`.
+        entry["suppressions"] = [sarif_suppression(change, provenance)]
     if change.source_location:
         uri, line, column = _parse_source_location(change.source_location)
         region: dict[str, Any] = {}
@@ -510,9 +471,7 @@ def _junit_finding_case(
         skipped = ET.SubElement(
             case,
             "skipped",
-            {
-                "message": f"suppressed: {_suppression_justification(change, provenance)}"
-            },
+            {"message": f"suppressed: {suppression_justification(change, provenance)}"},
         )
         # The structured record below the message, so a consumer can read the
         # source file and expiry as data rather than parsing prose out of an

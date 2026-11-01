@@ -91,6 +91,7 @@ def compare_release_against_bundle_facts(
     lang: str = "c++",
     lang_explicit: bool = False,
     include_private_dso: bool = False,
+    new_packaged: bool = False,
     manifest_path: Path | None = None,
     system_providers: list[str] | None = None,
     cohorts: list[str] | None = None,
@@ -107,8 +108,11 @@ def compare_release_against_bundle_facts(
     The concrete Python-API path ``abicheck.model.bundle_facts.
     compare_bundle_from_facts()`` was fully implemented and parity-tested
     (G38 Phase 2/12) for, but had no real driver exercising end to end: this
-    function discovers every ``.so`` under *new_dir*, matches it by canonical
-    library key against *old_facts_path*'s ``per_library_snapshots``, dumps
+    function discovers *new_dir*'s members exactly as the live release
+    fan-out does (``discover_live_member_libraries``; *new_packaged* says
+    *new_dir* was extracted from a package), matches each by canonical
+    library key against *old_facts_path*'s ``per_library_snapshots`` (re-keyed
+    by ``facts_keyed_by_match_key``, the same key), dumps
     and diffs each matched pair through the Tier-2 ``service`` chokepoints
     (never ``checker.compare``/``dumper.dump`` directly), and folds the
     result into one bundle-level comparison -- with a real NEW-side
@@ -260,6 +264,7 @@ def compare_release_against_bundle_facts(
         UnsupportedArtifactError,
     )
     from .serialization import load_bundle_facts
+    from .workflows.bundle_facts_capture import facts_keyed_by_match_key
     from .workflows.bundle_facts_compare import compare_bundle_from_facts
     from .workflows.bundle_facts_library_overrides import (
         validate_matched_library_overrides,
@@ -271,14 +276,16 @@ def compare_release_against_bundle_facts(
     from .workflows.release_inputs import discover_live_member_libraries
     from .workflows.release_public_surface import member_pass_scope
 
-    old_facts = load_bundle_facts(
-        old_facts_path, max_json_object_nodes=max_json_object_nodes
+    # Keyed by the same match key `build_match_map` gives the live NEW side
+    # below, so a member pairs however the document was captured.
+    old_facts = facts_keyed_by_match_key(
+        load_bundle_facts(old_facts_path, max_json_object_nodes=max_json_object_nodes)
     )
 
     # ELF, PE and Mach-O alike (issue #1715 on Windows): the ELF-only walk
     # found no member in a directory of `.dll`s.
     new_files = discover_live_member_libraries(
-        new_dir, include_private=include_private_dso
+        new_dir, include_private=include_private_dso, packaged=new_packaged
     )
     # Version-aware duplicate resolution (the same rule the live release
     # fan-out uses -- `binary_utils.build_match_map`, the primitive the CLI
@@ -483,6 +490,9 @@ def compare_release_against_bundle_facts(
             for k, v in old_facts.degraded_members.items()
             if k not in new_map
         },
+        # Named as the live fan-out names them: by file, not by match key.
+        old_paths={k: Path(v) for k, v in old_facts.library_filenames.items()},
+        new_paths=new_map,
     )
     # ADR-065 D2: the bundle graph sees matched members and proven
     # removals/additions only (Codex review) -- see bundle_analysis_members.
