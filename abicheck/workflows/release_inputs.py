@@ -375,6 +375,12 @@ def match_release_keys(
             {"__direct_pair__": new_files[0]},
         )
 
+    # A member the file name could not pair is paired by the library it
+    # records (release_member_pairing): a stored `libfoo.json` with the live
+    # `libfoo.so.1` it was dumped from.
+    from .release_member_pairing import pair_path_maps_by_identity
+
+    new_map = pair_path_maps_by_identity(old_map, new_map)
     return sorted(set(old_map) & set(new_map)), old_map, new_map
 
 
@@ -644,7 +650,8 @@ def prepare_release_inputs(
     else -- what an unpaired member means is decided once, by
     `workflows.release_scope.build_release_scope_record`. The two mappings
     before the inventories (D1) name the stored members `--dso-only` could
-    not classify; the trailing two (S3) are each side's declared **component
+    not classify and the unmatched members no reader can open
+    (`release_member_readability`); the trailing two (S3) are each side's declared **component
     inventory** when that side was a package archive this run unpacked --
     `None` for a directory operand, for a stored `ProjectSnapshot` package
     (whose own `inventory_complete` assertion governs), and for a file pair.
@@ -716,6 +723,12 @@ def prepare_release_inputs(
         new.files,
         is_package,
     )
+    # An unmatched member no reader can open is an acquisition failure, not
+    # a one-sided member (release_member_readability).
+    from .release_member_readability import unreadable_unmatched_members
+
+    old_unreadable = unreadable_unmatched_members(old_map, set(matched_keys))
+    new_unreadable = unreadable_unmatched_members(new_map, set(matched_keys))
     return (
         old.debug_dir,
         new.debug_dir,
@@ -727,8 +740,8 @@ def prepare_release_inputs(
         new_map,
         warning_msgs,
         matched_keys,
-        old.unclassified,
-        new.unclassified,
+        {**old.unclassified, **old_unreadable},
+        {**new.unclassified, **new_unreadable},
         old.inventory,
         new.inventory,
     )

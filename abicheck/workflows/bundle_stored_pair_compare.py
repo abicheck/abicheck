@@ -285,6 +285,11 @@ def compare_stored_bundle_facts_pair(
             "with --variant old=<name> --variant new=<name>)."
         )
 
+    # A member the file name could not pair is paired by the library it
+    # records (release_member_pairing), as on the live fan-out.
+    from .release_member_pairing import facts_paired_by_identity
+
+    new_facts = facts_paired_by_identity(old_facts, new_facts)
     matched_keys = sorted(
         set(old_facts.per_library_snapshots) & set(new_facts.per_library_snapshots)
     )
