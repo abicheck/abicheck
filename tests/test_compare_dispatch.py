@@ -217,6 +217,12 @@ class TestLooksLikeApplication:
 
 def _invoke(*args: str) -> tuple[int, str, str]:
     result = CliRunner().invoke(main, list(args))
+    return result.exit_code, result.output, (result.stderr or "")
+
+
+def _invoke_stdout(*args: str) -> tuple[int, str, str]:
+    """``_invoke`` reading stdout only, for a caller that parses it as JSON."""
+    result = CliRunner().invoke(main, list(args))
     return result.exit_code, result.stdout, (result.stderr or "")
 
 
@@ -388,7 +394,7 @@ class TestCompareDispatch:
         _write_snap(old_dir / "libfoo.json", old_foo)
         _write_snap(new_dir / "libfoo.json", new_foo)
 
-        code, out, _ = _invoke(
+        code, out, _ = _invoke_stdout(
             "compare", str(old_dir), str(new_dir), "--config", str(cfg), "-o", "json=-"
         )
 

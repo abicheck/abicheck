@@ -44,6 +44,14 @@ def _invoke(*args: str) -> tuple[int, str]:
     from abicheck.cli import main
 
     result = CliRunner().invoke(main, list(args))
+    return result.exit_code, result.output
+
+
+def _invoke_stdout(*args: str) -> tuple[int, str]:
+    """``_invoke`` reading stdout only, for a caller that parses it as JSON."""
+    from abicheck.cli import main
+
+    result = CliRunner().invoke(main, list(args))
     return result.exit_code, result.stdout
 
 
@@ -127,7 +135,7 @@ class TestNotComparableMemberIsRecordedNotRaised:
         old, new = self._write_pair(tmp_path)
         cfg = tmp_path / ".abicheck.yml"
         cfg.write_text(f"scope:\n  on_incomplete: {policy}\n")
-        code, out = _invoke(
+        code, out = _invoke_stdout(
             "compare",
             str(old),
             str(new),
@@ -177,7 +185,7 @@ class TestZeroOverlapPairRendersItsScope:
             ),
             new,
         )
-        code, out = _invoke("compare", str(old), str(new), "-o", "json=-")
+        code, out = _invoke_stdout("compare", str(old), str(new), "-o", "json=-")
         assert code == 1, out
         doc = json.loads(out[out.index("{") :])
         scope = doc["comparison_scope"]

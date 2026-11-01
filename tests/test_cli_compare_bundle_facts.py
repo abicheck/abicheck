@@ -81,7 +81,7 @@ def _member(doc: dict, name: str) -> dict:
 
 def _invoke(*args: str) -> tuple[int, str]:
     result = CliRunner().invoke(main, list(args))
-    return result.exit_code, result.stdout
+    return result.exit_code, result.output
 
 
 def _invoke_stdout(*args: str) -> tuple[int, str]:
@@ -154,7 +154,7 @@ class TestCompareOldBundleFacts:
             tmp_path, old_dir, old_dir / "libreal.so", "libreal.so"
         )
 
-        code, out = _invoke(
+        code, out = _invoke_stdout(
             "compare",
             str(facts_path),
             str(new_dir),
@@ -259,7 +259,7 @@ class TestCompareOldBundleFacts:
             tmp_path, old_dir, old_dir / "libreal.so", "libreal.so"
         )
 
-        code, out = _invoke(
+        code, out = _invoke_stdout(
             "compare",
             str(facts_path),
             str(new_dir),
@@ -322,7 +322,7 @@ class TestCompareOldBundleFacts:
             '    reason: "test suppression"\n'
         )
 
-        code, out = _invoke(
+        code, out = _invoke_stdout(
             "compare",
             str(facts_path),
             str(new_dir),
@@ -688,7 +688,7 @@ class TestCompareOldBundleFacts:
         with tarfile.open(archive_path, "w:gz") as tf:
             tf.add(new_dir / "libreal.so", arcname="libreal.so")
 
-        code, out = _invoke(
+        code, out = _invoke_stdout(
             "compare",
             str(facts_path),
             str(archive_path),
@@ -720,7 +720,7 @@ class TestCompareOldBundleFacts:
         )
         secondary_path = tmp_path / "secondary.md"
 
-        code, out = _invoke(
+        code, out = _invoke_stdout(
             "compare",
             str(facts_path),
             str(new_dir),
