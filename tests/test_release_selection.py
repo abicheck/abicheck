@@ -67,6 +67,12 @@ def _invoke(*args: str) -> tuple[int, str]:
     return result.exit_code, result.output
 
 
+def _invoke_stdout(*args: str) -> tuple[int, str]:
+    """``_invoke`` reading stdout only, for a caller that parses it as JSON."""
+    result = CliRunner().invoke(main, list(args))
+    return result.exit_code, result.stdout
+
+
 class TestReleaseSelection:
     def test_from_lists_required_wins_over_optional(self) -> None:
         sel = ReleaseSelection.from_lists(
@@ -384,7 +390,7 @@ class TestReleaseSelectionCli:
         code, _ = _invoke("compare", str(old_dir), str(new_dir))
         assert code == 4
         # --select libfoo.json alone excludes libbar.json entirely.
-        code, out = _invoke(
+        code, out = _invoke_stdout(
             "compare",
             str(old_dir),
             str(new_dir),
@@ -409,7 +415,7 @@ class TestReleaseSelectionCli:
         _write_snap(new_dir / "libfoo.json", _snap())
         cfg = tmp_path / ".abicheck.yml"
         cfg.write_text("scope:\n  on_incomplete: block\n")
-        code, out = _invoke(
+        code, out = _invoke_stdout(
             "compare",
             str(old_dir),
             str(new_dir),

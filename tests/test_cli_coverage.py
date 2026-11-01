@@ -136,7 +136,7 @@ class TestDumpCmdStdout:
         assert result.exit_code == 0
         from abicheck.storage.sectioned_document import from_sectioned_document
 
-        parsed = from_sectioned_document(json.loads(result.output))
+        parsed = from_sectioned_document(json.loads(result.stdout))
         assert parsed["library"] == "libfoo.so"
 
 

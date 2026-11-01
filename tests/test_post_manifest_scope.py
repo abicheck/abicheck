@@ -386,7 +386,7 @@ def test_compare_cli_post_manifest_flag_scopes_to_committed_surface(
         ],
     )
     assert res.exit_code == 0, res.output  # kernel churn demoted -> compatible
-    doc = json.loads(res.output[res.output.find("{") :])
+    doc = json.loads(res.stdout[res.stdout.find("{") :])
     demoted = json.dumps(doc.get("surface_scope", {}))
     assert "__pp_foo_impl" in demoted
 
@@ -436,7 +436,7 @@ def test_post_manifest_ledger_shown_even_with_no_scope_public_headers(
         ],
     )
     assert res.exit_code == 0, res.output
-    doc = json.loads(res.output[res.output.find("{") :])
+    doc = json.loads(res.stdout[res.stdout.find("{") :])
     assert "surface_scope" in doc, "ledger hidden despite manifest scoping"
     assert "__pp_foo_impl" in json.dumps(doc["surface_scope"])
 
@@ -491,7 +491,7 @@ def test_compare_cli_post_manifest_keeps_omitted_old_pp_symbol_in_scope(
         ],
     )
     assert res.exit_code == 4, res.output
-    doc = json.loads(res.output[res.output.find("{") :])
+    doc = json.loads(res.stdout[res.stdout.find("{") :])
     assert doc["verdict"] == "BREAKING"
     assert "pp_undeclared" in json.dumps(doc.get("changes", []))
     assert "pp_undeclared" not in json.dumps(doc.get("surface_scope", {}))
@@ -654,7 +654,7 @@ def test_compare_cli_removed_committed_wrapper_still_breaks(tmp_path: Path) -> N
         ],
     )
     assert res.exit_code != 0, res.output  # removed committed wrapper -> breaking
-    doc = json.loads(res.output[res.output.find("{") :])
+    doc = json.loads(res.stdout[res.stdout.find("{") :])
     # pp_removed must be a live finding, not demoted to the filtered ledger.
     assert "pp_removed" not in json.dumps(doc.get("surface_scope", {}))
 

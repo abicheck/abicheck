@@ -62,7 +62,7 @@ def _json_report(res: Result) -> dict:
     preamble there, so the report starts at the first line that is a bare
     ``{``.
     """
-    lines = res.output.splitlines()
+    lines = res.stdout.splitlines()
     start = next(i for i, line in enumerate(lines) if line.strip() == "{")
     return json.loads("\n".join(lines[start:]))
 
@@ -245,7 +245,7 @@ class TestStructuralValidationOnly:
         manifest = _write_manifest(tmp_path, "- use_case: x\n  entrypoints: [train]\n")
         res = _run([str(manifest), "-o", "json=-"])
         assert res.exit_code == 0, res.output
-        payload = json.loads(res.output)
+        payload = json.loads(res.stdout)
         assert payload["ok"] is True
         assert payload["use_case_count"] == 1
         # Structure only: resolving entrypoints against a real library is

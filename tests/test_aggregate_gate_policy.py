@@ -267,7 +267,7 @@ class TestGatePolicyCLI:
             ["--manifest", str(tmp_path / "m.json"), "-o", "json=-", str(tmp_path)]
         )
         assert res.exit_code == 0
-        payload = json.loads(res.output)
+        payload = json.loads(res.stdout)
         assert payload["effective_policy"] == {
             "missing_required": "warn",
             "unexpected_target": "include",

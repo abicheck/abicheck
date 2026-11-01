@@ -155,7 +155,7 @@ def _removal_changes(
         ["compare", str(old), str(new), "--suppress", str(suppress), "-o", "json=-"],
     )
     assert result.exit_code in (0, 2, 4), result.output
-    return json.loads(result.output[result.output.index("{") :])["changes"]
+    return json.loads(result.stdout[result.stdout.index("{") :])["changes"]
 
 
 def _elf_pair(tmp_path: Path) -> tuple[Path, Path]:

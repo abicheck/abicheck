@@ -715,7 +715,7 @@ class TestReleaseFanOutAcceptsContractUnresolvedPack:
         # coverage complete for these snapshots -- exit 1 from the
         # orthogonal coverage floor alone, not from any ABI break.
         assert without_pack.exit_code == 1, without_pack.output
-        without_lib = json.loads(without_pack.output)["libraries"][0]
+        without_lib = json.loads(without_pack.stdout)["libraries"][0]
         assert without_lib["contract_coverage_exit_contribution"] == 1
 
         with_pack = runner.invoke(
@@ -733,7 +733,7 @@ class TestReleaseFanOutAcceptsContractUnresolvedPack:
             ],
         )
         assert with_pack.exit_code == 0, with_pack.output
-        lib = json.loads(with_pack.output)["libraries"][0]
+        lib = json.loads(with_pack.stdout)["libraries"][0]
         # Zeroed by `contract.unresolved: warn` -- the failures themselves
         # stay in the ledger, unsuppressed (ADR-049 Section 6.2).
         assert lib["contract_coverage_exit_contribution"] == 0

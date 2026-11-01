@@ -381,7 +381,7 @@ def test_capture_set_reaches_the_dry_run_plan(tmp_path: Path) -> None:
         "json=-",
     )
     assert result.exit_code == 0, result.output
-    payload = json.loads(result.output[result.output.index("{") :])
+    payload = json.loads(result.stdout[result.stdout.index("{") :])
     assert payload["variants"]["x86"]["declared"]["target_triple"] == (
         "aarch64-linux-gnu"
     )

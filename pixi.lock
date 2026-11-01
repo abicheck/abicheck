@@ -5770,7 +5770,7 @@ packages:
 - pypi: ./
   name: abicheck
   requires_dist:
-  - click>=8.0
+  - click>=8.2
   - rich-click>=1.7
   - pyyaml>=6.0
   - defusedxml>=0.7.1

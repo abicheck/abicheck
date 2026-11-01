@@ -386,7 +386,7 @@ class TestBug6RemovedLibraryVerdict:
         new_pkg = tmp_path / "new_pkg"
         _write_stored_package(new_pkg, {"libbar.so": _snap(library="libbar.so")})
         result = _invoke("compare", str(old_dir), str(new_pkg), "-o", "json=-")
-        d = json.loads(result.output)
+        d = json.loads(result.stdout)
         assert d["comparison_scope"]["proven_removed"] == ["libfoo.so.json"]
         assert d["verdict"] == "COMPATIBLE_WITH_RISK"
 
@@ -410,7 +410,7 @@ class TestBug6RemovedLibraryVerdict:
             "-o",
             "json=-",
         )
-        d = json.loads(result.output)
+        d = json.loads(result.stdout)
         # Added-only should not elevate verdict beyond matched results
         assert d["verdict"] in ("NO_CHANGE", "COMPATIBLE")
 

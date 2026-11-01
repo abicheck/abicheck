@@ -7,7 +7,6 @@ error recovery, and stack-check command.
 
 from __future__ import annotations
 
-import inspect
 import json
 import struct
 from pathlib import Path
@@ -19,19 +18,10 @@ from click.testing import CliRunner
 
 from abicheck.cli import main
 
-#: Click <8.2's `CliRunner` merges stderr into stdout by default
-#: (`mix_stderr=True`), so `result.stdout` alone is not actually isolated
-#: from a stderr warning on those versions -- only `mix_stderr=False` (a
-#: parameter Click 8.2+ removed entirely, since it made stdout/stderr
-#: genuinely separate unconditionally) restores the isolation `result.stdout`
-#: is meant to provide here. `click>=8.0` is the declared floor (no upper
-#: bound), so this repo's test suite must tolerate both shapes (CodeRabbit
-#: review, fresh evidence).
-_ISOLATED_STDOUT_RUNNER_KWARGS = (
-    {"mix_stderr": False}
-    if "mix_stderr" in inspect.signature(CliRunner.__init__).parameters
-    else {}
-)
+#: Kept as the one spelling this module's runners take; `click>=8.2` (the
+#: declared floor) keeps stdout and stderr apart unconditionally, so no
+#: keyword is needed for `result.stdout` to be stdout alone.
+_ISOLATED_STDOUT_RUNNER_KWARGS: dict[str, object] = {}
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -697,7 +687,7 @@ class TestStackCheckCommand:
                 ],
             )
             assert result.exit_code == 0
-            data = json.loads(result.output)
+            data = json.loads(result.stdout)
             # Check for any expected top-level key from stack report
             assert isinstance(data, dict)
             assert len(data) > 0

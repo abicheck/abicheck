@@ -3,15 +3,15 @@ doc_type: contributor
 audience:
   - contributor
 level: advanced
-lifecycle: active
+lifecycle: historical
 generated: false
 ---
 
 # Release-fan-out CLI tests JSON-parse `CliRunner.output`, which the memory-clamp note can join
 
-Index: [Known gaps](../known-gaps.md)
+Index: [Known gaps](../known-gaps.md) (closed; see the [archive](../archive/known-gaps-closed.md))
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** The clamp note is still a stderr line: `workflows/release_members.compare_release_members` emits it through the reporter's `notice`, which the CLI echoes with `err=True`. tests/test_release_package_inventory_cli.py:92-99 still does `json.loads(CliRunner().invoke(...).output)`, as do test_release_evaluation_config.py:712,730.
+**Status (2026-10-31): CLOSED.** Every test that parses a `CliRunner` document now reads `result.stdout`, never the combined `result.output` stream (about 150 sites in 53 modules, the release CLI tests among them; shared `_invoke`/`_run` helpers whose other callers assert stderr text gained a `*_stdout` twin for the JSON callers). The clamp note stays a stderr diagnostic. `tests/test_cli_json_reads_stdout.py` scans `tests/` with an intra-module taint walk (direct `json.loads(r.output)`, a local bound from `.output`, or a helper returning it) and fails on a new combined-stream parse; its scanner is unit-tested on each shape. `tests/test_conftest_host_memory_pin.py` now shows, under a forced clamp, that the note precedes the document on `output` while `stdout` stays one JSON document. The declared floor is now `click>=8.2`: Click 8.0/8.1's default `CliRunner` merged stderr into `stdout` and has no separate `result.stderr`, so `stdout` alone was not the document there. The guard also follows a `.output` value into a helper that parses one of its parameters, and recognizes `from json import loads` and `json.load(StringIO(...))`.
 
 
 Found while verifying an unrelated change, reproduced on a clean tree, not
