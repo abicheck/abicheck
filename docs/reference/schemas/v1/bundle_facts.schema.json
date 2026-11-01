@@ -1,0 +1,155 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://abicheck.github.io/abicheck/reference/schemas/v1/bundle_facts.schema.json",
+  "title": "abicheck BundleFacts document",
+  "description": "Schema for the single-file JSON BundleFacts document (G38 Phase 2): the stored facts of a whole multi-library release, written by `dump RELEASE --bundle-facts-out FILE.json` and read back as a stored release baseline. `schema_version` is the document's own container version, independent of each member snapshot's `schema_version`: a writer declares the lowest version whose blocks it carries (2 for a clean document, 3 once `degraded_members` is non-empty, 4 once `public_surface` is present), and a reader refuses any version above its own maximum. Member snapshots are AbiSnapshot documents, whose own shape is versioned by the snapshot schema and only outlined here. The G40 zip archive form of the same facts is described by bundle_facts_archive_manifest.schema.json.",
+  "type": "object",
+  "required": ["schema_version", "per_library_snapshots"],
+  "additionalProperties": true,
+  "properties": {
+    "artifact_type": {
+      "description": "Self-describing document-type marker; mandatory from schema_version 2.",
+      "const": "abicheck.bundle-facts"
+    },
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4
+    },
+    "variant_fingerprint": {
+      "description": "Build-variant identity two stored sides must share to be compared; `default` when no multibuild variant applies.",
+      "type": "string"
+    },
+    "per_library_snapshots": {
+      "description": "One AbiSnapshot document per release member, keyed by library name.",
+      "type": "object",
+      "additionalProperties": {"$ref": "#/$defs/snapshot"}
+    },
+    "filesystem_aliases": {
+      "description": "Per library, the on-disk soname spellings (symlink names) captured with it.",
+      "type": "object",
+      "additionalProperties": {"type": "array", "items": {"type": "string"}}
+    },
+    "library_filenames": {
+      "description": "Per library, the basename of the file it was read from.",
+      "type": "object",
+      "additionalProperties": {"type": "string"}
+    },
+    "degraded_members": {
+      "description": "ADR-065 D8: members captured with degraded evidence, each mapped to its reason. Every key names a `per_library_snapshots` member. Non-empty only from schema_version 3.",
+      "type": "object",
+      "additionalProperties": {"type": "string"}
+    },
+    "inventory_complete": {
+      "description": "ADR-065 D2: the capture asserts its member inventory is complete, so a member absent on the other side may be read as removed.",
+      "type": "boolean"
+    },
+    "public_surface": {"$ref": "#/$defs/public_surface"},
+    "manifest": {
+      "description": "The release's instantiation manifest (`provides:` promises), or null when none was supplied.",
+      "oneOf": [{"type": "null"}, {"$ref": "#/$defs/instantiation_manifest"}]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"schema_version": {"minimum": 2}},
+        "required": ["schema_version"]
+      },
+      "then": {"required": ["artifact_type"]}
+    },
+    {
+      "if": {
+        "properties": {"schema_version": {"maximum": 1}},
+        "required": ["schema_version"]
+      },
+      "then": {"not": {"required": ["artifact_type"]}}
+    },
+    {
+      "if": {
+        "properties": {"degraded_members": {"minProperties": 1}},
+        "required": ["degraded_members"]
+      },
+      "then": {"properties": {"schema_version": {"minimum": 3}}}
+    },
+    {
+      "if": {"required": ["public_surface"]},
+      "then": {"properties": {"schema_version": {"minimum": 4}}}
+    }
+  ],
+  "$defs": {
+    "snapshot": {
+      "description": "An AbiSnapshot document (versioned independently by the snapshot schema).",
+      "type": "object",
+      "required": ["schema_version"],
+      "additionalProperties": true,
+      "properties": {
+        "schema_version": {"type": "integer", "minimum": 1},
+        "library": {"type": "string"},
+        "version": {"type": "string"}
+      }
+    },
+    "public_obligation": {
+      "type": "object",
+      "required": ["symbol", "name", "entity"],
+      "additionalProperties": false,
+      "properties": {
+        "symbol": {"type": "string"},
+        "name": {"type": "string"},
+        "entity": {"type": "string", "enum": ["function", "variable"]},
+        "source_location": {"type": "string"},
+        "outside_declared_surface": {"const": true}
+      }
+    },
+    "public_surface": {
+      "description": "The release side's one public contract and the acquisition identity it was acquired under (schema_version 4). Omitted, not null, when the capture recorded none.",
+      "type": "object",
+      "required": [
+        "acquisition_key",
+        "side",
+        "header_count",
+        "obligations",
+        "declared_symbols",
+        "type_names",
+        "resolvable"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "acquisition_key": {"type": "string"},
+        "side": {"type": "string", "enum": ["old", "new"]},
+        "header_count": {"type": "integer", "minimum": 0},
+        "obligations": {"type": "array", "items": {"$ref": "#/$defs/public_obligation"}},
+        "declared_symbols": {"type": "array", "items": {"type": "string"}},
+        "type_names": {"type": "array", "items": {"type": "string"}},
+        "resolvable": {"type": "boolean"},
+        "unresolved_reason": {"type": "string"}
+      }
+    },
+    "instantiation_manifest": {
+      "type": "object",
+      "required": ["provides"],
+      "properties": {
+        "provides": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["optional_provider"],
+            "properties": {
+              "optional_provider": {"type": "boolean"},
+              "library": {"type": "string"},
+              "symbol": {"type": "string"},
+              "pattern": {"type": "string"},
+              "template": {"type": "string"},
+              "instantiations": {"type": "array", "items": {"type": "object"}}
+            },
+            "oneOf": [
+              {"required": ["symbol"]},
+              {"required": ["pattern"]},
+              {"required": ["template", "instantiations"]}
+            ]
+          }
+        }
+      }
+    }
+  }
+}

@@ -9,9 +9,11 @@ generated: false
 
 # `BundleFacts` (and its G40 archive container) has no published JSON Schema, in either `abicheck/schemas/` or `docs/reference/schemas/`
 
-Index: [Known gaps](../known-gaps.md)
+Index: [Known gaps](../known-gaps.md) — closed; see the [archive](../archive/known-gaps-closed.md).
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** abicheck/model/bundle_facts.py:53 BUNDLE_FACTS_SCHEMA_VERSION = 4, but abicheck/schemas/ and docs/reference/schemas/v1/ hold no bundle_facts schema (only aggregate/audit/audit_set/build_evidence/build_source_pack/compare). The module path in the entry is stale (bundle_facts.py is now model/bundle_facts.py).
+**Status (2026-11-01): CLOSED.** `abicheck/schemas/bundle_facts.schema.json` and `abicheck/schemas/bundle_facts_archive_manifest.schema.json` are published under `docs/reference/schemas/v1/`; `tests/test_bundle_facts_schema.py` validates real writer output against them and checks they refuse what the reader refuses. The text below is the history.
+
+Earlier status (re-verified 2026-10-09 at `456989f`): OPEN. abicheck/model/bundle_facts.py:53 BUNDLE_FACTS_SCHEMA_VERSION = 4, but abicheck/schemas/ and docs/reference/schemas/v1/ hold no bundle_facts schema (only aggregate/audit/audit_set/build_evidence/build_source_pack/compare). The module path in the entry is stale (bundle_facts.py is now model/bundle_facts.py).
 
 —
 investigated, not fixed (Codex review, CLI cleanup phase two's PR I
