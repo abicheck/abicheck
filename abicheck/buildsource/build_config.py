@@ -244,6 +244,7 @@ KEY_TABLE = KeyTable(
         ),
         KeySpec("scope.public_symbols", Kind.LIST, "public_symbols", []),
         KeySpec("output.view", Kind.LIST, "output_view", []),
+        KeySpec("report.baseline_provenance", Kind.STR, "report_baseline_provenance"),
         KeySpec("consumers.manifests", Kind.LIST, "used_by_manifests", []),
         KeySpec("consumers.required_symbols", Kind.LIST, "required_symbols", []),
         KeySpec("scope.show_redundant", Kind.BOOL, "scope_show_redundant"),
@@ -463,6 +464,9 @@ class BuildConfig:
     #: ``output.view``: the ``compare`` rendering selector tokens (the same
     #: grammar as the removed ``--view``), applied when the run has one.
     output_view: list[str] = field(default_factory=list)
+    #: ``report.baseline_provenance``: a JSON file the root Action writes with
+    #: the baseline it resolved; copied into the report, not verified.
+    report_baseline_provenance: str | None = None
     #: ``consumers.manifests``/``consumers.required_symbols``: the ADR-043
     #: scoped-gate inputs that ``consumers.manifests``/``consumers.required_symbols``
     #: used to carry on the command line. Paths resolve against the config.

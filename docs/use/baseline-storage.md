@@ -180,7 +180,10 @@ check off. A mismatch fails the run with `outcome: wrong_project_ref`.
 
 The job summary's "Baseline source" block, and the `baseline-source`,
 `baseline-asset-name`, `baseline-project-ref`, `baseline-generation` and
-`baseline-profile` outputs, record which baseline was compared against.
+`baseline-profile` outputs, record which baseline was compared against. The
+JSON report carries the same values in its `baseline_provenance` block,
+marked `asserted_by: action` because the CLI does not verify them (see
+[Output formats](output-formats.md#baseline-provenance-baseline_provenance)).
 
 ## Recipe A2: Multi-Library Releases — the `baseline` Action (a generator, not a registry)
 

@@ -124,6 +124,9 @@ class ReleaseEvaluation:
     require_complete_analysis: bool = False
     public_surface: ReleasePublicSurfaceTerms | None = None
     effective_config: tuple[str, Mapping[str, str]] | None = None
+    #: Release schema 2.8: the caller-asserted ``baseline_provenance`` block
+    #: (``model/baseline_provenance.py``); ``None`` when the run was given none.
+    baseline_provenance: Mapping[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -493,6 +496,9 @@ def release_json_document(report: ReleaseReport) -> ReportDocument:
             scope=terms.completeness,
         ),
     }
+    if ev.baseline_provenance is not None:
+        # Schema 2.8: asserted by the caller (the root Action), not verified.
+        summary["baseline_provenance"] = dict(ev.baseline_provenance)
     if terms.section is not None:
         summary["comparison_scope"] = terms.section
     if (folded := _inventory.release_change_inventory(library_results)) is not None:

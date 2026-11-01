@@ -118,7 +118,9 @@ def _report_compare_result(
     round, second finding).
     """
     from ...cli_compare_receipt import record_resolved_config
+    from .baseline_provenance import current_baseline_provenance_block
 
+    result.baseline_provenance = current_baseline_provenance_block()
     record_resolved_config(
         result,
         resolved_cfg,
