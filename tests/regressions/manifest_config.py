@@ -221,11 +221,14 @@ CONFIG_BUG_CLASSES: tuple[BugClass, ...] = (
         fixed_by=(1314,),
         seed_tests=(
             "tests/test_sided_include_composition.py",
+            "tests/test_sided_include_labelled_composition.py",
             "tests/test_cov95_cli.py",
         ),
         public_surfaces=("compare", "compare --dry-run", "release fan-out"),
         axes={
             "role": ("--header", "--include"),
+            "side_spelling": ("old=/new=", "old:LABEL=/new:LABEL="),
+            "shared_spelling": ("bare", "both=", "both:LABEL="),
             "front_end": (
                 "single-pair compare",
                 "release/directory fan-out",
