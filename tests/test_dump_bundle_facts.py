@@ -305,3 +305,78 @@ def test_compare_keys_json_snapshot_members_once(tmp_path: Path) -> None:
         "libb.json",
         "libc.json",
     ]
+
+
+def test_a_member_that_fails_to_dump_is_kept_degraded_like_compare_keeps_it(
+    tmp_path: Path,
+) -> None:
+    """ADR-065 D8: a member whose dump fails is persisted as an ELF-only
+    stand-in carrying its failure, never dropped. Oracle: `compare
+    --bundle-facts-out`, which captures the same unpaired member through the
+    same resolver."""
+    old, new = _release(tmp_path, "one-member")
+    (old / "libbad.so").write_bytes(b"\x7fELF not really an ELF file")
+    dumped, compared = tmp_path / "dumped.json", tmp_path / "compared.json"
+    result = _invoke("dump", str(old), "--bundle-facts-out", str(dumped))
+    assert result.exit_code == 0, result.output
+    assert "1 degraded" in result.stderr
+    assert "degraded: libbad.so:" in result.stderr
+    compare = _invoke(
+        "compare",
+        str(old),
+        str(new),
+        "--bundle-facts-out",
+        str(compared),
+        "-o",
+        f"json={tmp_path / 'report.json'}",
+    )
+    assert compare.exit_code in (0, 1, 2, 4), compare.output
+    dumped_doc = json.loads(dumped.read_text(encoding="utf-8"))
+    assert dumped_doc == json.loads(compared.read_text(encoding="utf-8"))
+    assert sorted(dumped_doc["degraded_members"]) == ["libbad.so"]
+    assert "ELF-only degraded capture" in dumped_doc["degraded_members"]["libbad.so"]
+    assert dumped_doc["per_library_snapshots"]["libbad.so"]["elf_only_mode"] is True
+
+
+def test_the_config_public_header_dirs_reach_the_capture_as_they_reach_compare(
+    tmp_path: Path,
+) -> None:
+    """`scope.public_header_dirs` from `--config` is handed to every member
+    dump, as a directory `compare` hands it. Oracle: compare's document."""
+    old, new = _release(tmp_path, "three-members")
+    include = tmp_path / "include"
+    include.mkdir()
+    cfg = tmp_path / "abicheck.yml"
+    cfg.write_text(f"scope:\n  public_header_dirs: [{include}]\n", encoding="utf-8")
+    dumped, compared = tmp_path / "dumped.json", tmp_path / "compared.json"
+    result = _invoke(
+        "dump", str(old), "--config", str(cfg), "--bundle-facts-out", str(dumped)
+    )
+    assert result.exit_code == 0, result.output
+    compare = _invoke(
+        "compare",
+        str(old),
+        str(new),
+        "--config",
+        str(cfg),
+        "--bundle-facts-out",
+        str(compared),
+        "-o",
+        f"json={tmp_path / 'r.json'}",
+    )
+    assert compare.exit_code in (0, 1, 2, 4), compare.output
+    assert json.loads(dumped.read_text(encoding="utf-8")) == json.loads(
+        compared.read_text(encoding="utf-8")
+    )
+
+
+def test_an_unknown_variant_is_a_usage_error_naming_it(tmp_path: Path) -> None:
+    pkg = tmp_path / "pkg"
+    _multi_variant_package(pkg)
+    out = tmp_path / "dumped.json"
+    result = _invoke(
+        "dump", str(pkg), "--variant", "no-such-variant", "--bundle-facts-out", str(out)
+    )
+    assert result.exit_code == 64, result.output
+    assert "no-such-variant" in result.output
+    assert not out.exists()
