@@ -70,6 +70,8 @@ def _looks_like_json_document(path: Path) -> bool:
 
 #: Every ``"library": <string | null>`` member in a JSON text. A string
 #: inside another string has its quotes escaped, so it cannot match.
+#: Stands for a ``library`` value the scan cannot read (not a string/null).
+_UNREADABLE_VALUE = "\0unreadable"
 _LIBRARY_MEMBER = re.compile(r'"library"\s*:\s*("(?:[^"\\]|\\.)*"|null)')
 
 
@@ -87,14 +89,18 @@ def _single_library_value(text: str) -> str | None:
     while at != -1:
         # `str.find` scans at memchr speed; the anchored match only runs
         # where the key actually occurs.
-        m = _LIBRARY_MEMBER.match(text, at)
-        if m is not None and (at == 0 or text[at - 1] != "\\"):
-            values.add(m.group(1))
+        if at == 0 or text[at - 1] != "\\":
+            m = _LIBRARY_MEMBER.match(text, at)
+            # A `library` member whose value is not a string or null (a
+            # number, an object) is a value the scan cannot read: count it
+            # as its own value, so the scan is ambiguous and the caller
+            # parses the document instead of trusting a nested string.
+            values.add(m.group(1) if m is not None else _UNREADABLE_VALUE)
         at = text.find(key, at + len(key))
     if len(values) != 1:
         return None
     (raw,) = values
-    if raw == "null":
+    if raw in ("null", _UNREADABLE_VALUE):
         return None
     decoded = json.loads(raw)
     return decoded if isinstance(decoded, str) else None

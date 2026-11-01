@@ -37,6 +37,7 @@ canonicalizer under test. The end-to-end directory and package routes are
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import itertools
 import json
@@ -327,6 +328,9 @@ def test_paired_members_are_probed_only_for_a_matching_leftover_identity() -> No
             '{"note": "\\"library\\": \\"bogus.so\\"", "library": "libq.so.2"}',
             "libq.so.2",
         ),
+        # A string value ending in an escaped quote before `library"`: the
+        # key text matches at the escaped quote, which is not a member.
+        ('{"k": "say \\"library", "library": "libq.so.2"}', "libq.so.2"),
     ],
     ids=[
         "single",
@@ -334,6 +338,7 @@ def test_paired_members_are_probed_only_for_a_matching_leftover_identity() -> No
         "empty_plus_nested",
         "null_plus_nested",
         "inside_string",
+        "escaped_quote_before_key",
     ],
 )
 def test_the_library_scan_answers_only_when_unambiguous(
@@ -353,3 +358,65 @@ def test_an_ambiguous_scan_falls_back_to_the_parsed_document(tmp_path: Path) -> 
     path.write_text(json.dumps(document))
 
     assert recorded_library_name(path) == "libq.so.2"
+
+
+@pytest.mark.parametrize(
+    ("content", "why"),
+    [
+        ('{"library": null}', "a single null library"),
+        (
+            '[{"library": "liba.so"}, {"library": "libb.so"}]',
+            "an ambiguous non-object document",
+        ),
+        (
+            '{"library": 7, "x": {"library": "libb.so"}}',
+            "a non-string library after the parse",
+        ),
+        ('{"library": 7}', "a single non-string library"),
+    ],
+    ids=["null", "array", "non_string", "single_non_string"],
+)
+def test_a_document_without_a_string_library_records_none(
+    tmp_path: Path, content: str, why: str
+) -> None:
+    path = tmp_path / "doc.json"
+    if content.startswith("["):
+        # Only a compressed document reaches the parse without a leading
+        # `{`: the plain-text probe already rejects any other JSON value.
+        path = tmp_path / "doc.json.gz"
+        path.write_bytes(gzip.compress(content.encode()))
+    else:
+        path.write_text(content, encoding="utf-8")
+
+    assert recorded_library_name(path) is None, why
+    assert path_identity(path.name, path) == path.name
+
+
+def test_a_member_that_cannot_be_stat_ed_is_unreadable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Discovery listed it, so it exists; a `stat` that fails (permissions)
+    makes it unreadable rather than aborting the run."""
+    from abicheck.workflows.release_member_readability import (
+        unreadable_unmatched_members,
+    )
+
+    locked = tmp_path / "liblocked.so"
+    locked.write_bytes(b"\x7fELF" + b"\0" * 60)
+    real_is_file = Path.is_file
+
+    def is_file(self: Path) -> bool:
+        if self == locked:
+            raise PermissionError(self)
+        return real_is_file(self)
+
+    monkeypatch.setattr(Path, "is_file", is_file)
+    monkeypatch.setattr(
+        "abicheck.extract.member_identity.is_content_readable_member",
+        lambda path: path != locked,
+    )
+
+    unreadable = unreadable_unmatched_members({"liblocked.so": locked}, set())
+
+    assert set(unreadable) == {"liblocked.so"}
+    assert "liblocked.so" in unreadable["liblocked.so"]
