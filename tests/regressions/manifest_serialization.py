@@ -304,6 +304,10 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_cli_compare_must_understand.py",
             "tests/unit/storage/test_wire_contract.py",
             "tests/test_family_f1_evidence_ablation.py",
+            "tests/unit/storage/test_package_carriers_roundtrip.py",
+            "tests/unit/storage/test_extension_carriers_lifecycle.py",
+            "tests/test_blocked_section_compare_matrix.py",
+            "tests/test_pe_pdb_section_failure.py",
         ),
         public_surfaces=("cli",),
         axes={
@@ -314,16 +318,20 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
                 "must-understand",
                 "newer-section-version",
                 "failed-section",
+                "not-collected-section",
             ),
-            "level": ("record", "section", "document", "manifest"),
+            "level": ("record", "nested-record", "section", "document", "manifest"),
+            "container": ("single-file", "directory-package"),
+            "producer": ("imported-document", "pe-pdb-parse-failure"),
+            "side": ("old", "new"),
         },
         known_gaps=(
             KnownGap(
                 description=(
-                    "Unknown keys nested below a record's top level are still "
-                    "dropped on re-save, and a directory package refuses an "
-                    "unknown section-level must-understand name instead of "
-                    "narrowing it."
+                    "G38 bundle documents and G40 bundle archives still refuse "
+                    "a member snapshot carrying D14/D15 carriers, and a newer "
+                    "section_schema_version inside a directory package refuses "
+                    "the package instead of blocking the section."
                 ),
                 reference="docs/contribute/known-gaps.md",
             ),
@@ -365,5 +373,30 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
                 reference="docs/contribute/known-gaps.md",
             ),
         ),
+    ),
+    BugClass(
+        id="compare.blocked_section_hides_presence",
+        invariant=(
+            "A stored section that cannot be used blocks only the analyses "
+            "that read it: a function removed from the binary and the "
+            "declarations is still reported, exactly once and classified as "
+            "the full functions detector would, whenever neither of those "
+            "two sections is blocked."
+        ),
+        fixed_by=(1858,),
+        seed_tests=(
+            "tests/test_family_f1_evidence_ablation.py",
+            "tests/test_blocked_section_compare_matrix.py",
+            "tests/test_cli_compare_must_understand.py",
+            "tests/test_pe_pdb_section_failure.py",
+            "tests/test_section_readers_contract.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "section": ("binary", "build", "debug", "declarations", "layout", "types"),
+            "cause": ("must-understand", "newer-section-version", "failed"),
+            "side": ("old", "new"),
+            "operand": ("single-file", "directory-package", "live"),
+        },
     ),
 )

@@ -807,8 +807,15 @@ listing/report, even where no resolution graph can place it.
   - D15, implemented: a generated, CI-diffed field inventory, the
     byte-identity test, and the `section_availability` header table.
   - D16, partially implemented: the `evidence` digest, persisted on
-    `ArtifactRef` and consumed by the same-snapshot coverage note.
-    `comparison_input` and `transport` are not implemented.
+    `ArtifactRef` and consumed by the same-snapshot coverage note, and the
+    `transport` digest of each package-archive member (2026-10-31).
+    `comparison_input` is not implemented (no consumer).
+  - 2026-10-31 residual closure: packages carry the D14/D15 carriers
+    (`ArtifactRef.carriers`, ref schema 2), a package section's unknown
+    must-understand name blocks only that section, nested unknown record
+    keys are kept, the PE dump records a failed `debug` section, a
+    `function_presence` detector reports removals while `functions` is
+    blocked, package GC and a Windows publish lock; detail below.
   - D18, step 1 implemented (per-section decode split, no new laziness);
     lazy loading beyond the `graph` section is not.
   - Exit: one regression test per amendment probe (D14's and D17's exist), the oneDAL/MKL corpus, Windows and macOS, and
@@ -880,8 +887,20 @@ A1.9), item by item. Open items are also listed in
   - malformed `{id, ref_digest}` entries, a tampered ref document and a newer
     `ref_schema_version`.
 
-  Residual: superseded refs and objects are never collected, and the
-  amendment's oneDAL/MKL, Windows and macOS validation has not been run.
+  - Garbage collection (2026-10-31): `workflows/package_gc.collect_package_garbage`
+    removes the refs/objects the live manifest no longer names, under the
+    publish lock and past a grace period (ADR-062 D17's implementation
+    decisions); `DirectoryObjectStore.put` refreshes a reused object's
+    mtime. Windows writers serialize on `msvcrt.locking`.
+    `tests/test_package_gc_and_locks.py` enumerates republish counts x
+    file age x a crashed unpublished writer x dry run against a live set
+    parsed from the JSON on disk, GC racing writers, a writer whose staged
+    object was collected (refused, never dangling), and the `msvcrt` path
+    against a simulated `msvcrt` (exclusion, deadline, unsupported
+    filesystem).
+
+  Residual: no CLI for GC, and the amendment's oneDAL/MKL, real-Windows and
+  macOS validation has not been run.
 - **D16, digest roles: partially implemented.** `snapshot_content_digest`
   is the `publication` digest and is unchanged. The `evidence` digest
   (`storage/evidence_digest.py`, `evidence_digest_of_document`) is
@@ -915,8 +934,13 @@ A1.9), item by item. Open items are also listed in
     `compare(...).changes == []`; real changes including ordered-list
     reorders), the F3 harness cell, and the per-role bound in
     `tests/test_snapshot_digest_recomputation.py`.
+  - `transport` (2026-10-31): `storage/transport_digest.py`; the package
+    archive's packer writes each member's stored-bytes SHA-256 into its zip
+    extra field and the unpacker verifies every member before writing
+    (`tests/test_package_gc_and_locks.py`: a flipped byte in every member
+    position, a partial set, a legacy archive with none).
   - Open: `comparison_input` has no consumer (no comparison-result cache
-    exists), and no path hashes compressed bytes for `transport`.
+    exists).
 - **D14, optional and must-understand extensions: implemented.**
   `storage/wire_extensions.py` splits every carrier off a sectioned
   document before decode and merges it back on write
@@ -935,13 +959,26 @@ A1.9), item by item. Open items are also listed in
   `not comparable:` coverage gap, the surface-metric roll-up is skipped,
   and `analysis_assurance` reads `partial`. `provenance` and a document- or
   manifest-level unknown name refuse instead. `SectionDTO` and
-  `PackageManifest` carry the fields; a directory package refuses an unknown
-  section-level name. No version bump (each carrier is written only when
+  `PackageManifest` carry the fields; a directory package blocks a section
+  object with an unknown section-level name (refused before 2026-10-31). No version bump (each carrier is written only when
   non-empty; ADR-062's D14 implementation decisions). Tests:
   `tests/unit/storage/test_extension_preservation.py` (the former strict
   `xfail` probes), `tests/test_section_readers_contract.py`,
   `tests/test_cli_compare_must_understand.py` (CLI, JSON and Markdown
   report, exit codes), and the updated section-version gate tests.
+  2026-10-31: packages carry the carriers (`ArtifactRef.carriers`, written
+  at `ref_schema_version` 2 only when set; the left-out sections are the
+  carriers' undecoded ones; `carriers_for_reader` re-decides blocking on
+  read), a package section object's unknown must-understand name blocks only
+  that section, unknown keys are kept at any record nesting depth and on the
+  binary metadata objects, and a `not_collected` section re-saves absent.
+  `function_presence` reports removals while `functions` is blocked. Tests:
+  `tests/unit/storage/test_package_carriers_roundtrip.py` (Hypothesis over
+  per-section state x unknown sections x nested keys x document names:
+  single-file -> package -> load -> save exact, blocked set equal to the
+  generated one, digests), `tests/test_blocked_section_compare_matrix.py`
+  (every section x cause x side x file/package through `abicheck compare`),
+  `tests/test_pe_pdb_section_failure.py`.
   Residuals: see known gaps.
 - **D15, wire contract: implemented.** `tests/_wire_inventory.py`
   generates the per-section inventory (header keys including the D14
@@ -1141,7 +1178,7 @@ satisfies for the one domain type it actually sections today
 
 | Module | Contract |
 |---|---|
-| `abicheck/storage/package.py` | `MANIFEST_RELPATH`, `SECTION_KINDS`, `ObjectRef`, `VariantRef`, `ArtifactRef`, `PackageManifest`, `ObjectStore`, `InMemoryObjectStore`, `object_relpath`, `variant_ref_relpath`, `artifact_ref_relpath` (A1.1) |
+| `abicheck/storage/package.py` | `MANIFEST_RELPATH`, `SECTION_KINDS`, `ObjectRef`, `VariantRef`, `ArtifactRef`, `PackageManifest`, `ObjectStore`, `InMemoryObjectStore`, `object_relpath`, `variant_ref_relpath`, `artifact_ref_relpath`, `artifact_object_refs` (A1.1; `artifact_object_refs` lists an artifact's section and carriers objects) |
 | `abicheck/storage/env_limits.py` | `env_byte_limit` — the one parser behind the snapshot envelope's decompression-bomb ceilings (`snapshot_io.py`'s decoded/stored caps and the public ABICHECK_SNAPSHOT_MAX_DECODED_BYTES / ABICHECK_SNAPSHOT_MAX_STORED_BYTES environment knobs, plus their legacy underscore spellings). A leaf reading only `os.environ`, so the rule that a malformed or non-positive value is *ignored* — rather than honoured as a ceiling that would reject every read — has one implementation rather than one per limit; internal, not re-exported by the package |
 | `abicheck/storage/ast_size_observer.py` | `observe_ast_sizes`, `report_ast_size`, `set_ast_intake_hook`, `mark_ast_intake` — the last two let `workflows/memory_trace.py` bracket AST intake (`ast.intake:start`/`:done`) from parse sites that may not import the workflows layer. Also carries the byte size of each header AST a dump acquires (cold clang parse or AST-cache load) to an observer in the same context, which is how the release fan-out's memory admission (`workflows/release_admission.py`) costs a member by measured AST size. A context-variable leaf with no other state; internal, not re-exported by the package |
 | `abicheck/storage/ast_parse_exclusions.py` | `HEADER_PARSE_EXCLUDED_KEY`, `attach_parse_exclusions`, `record_parse_exclusions` — the top-level headers a clang header-AST parse dropped (the `#error` retry), carried on the tree and in a sidecar beside the AST-cache entry so a warm run records the same partial header coverage (evidence-entity-model gap A3). Internal, not re-exported by the package |
@@ -1159,9 +1196,10 @@ satisfies for the one domain type it actually sections today
 | `abicheck/storage/atomic_file.py` | `atomic_write` — write a cache file through a same-directory temp file and `os.replace`, so a concurrent reader sees either no file or a complete one, never a torn one. Moved unchanged from `dumper_cache.py`; its stream-copy sibling was removed in dead-code-and-single-owner Stage G. Internal, not re-exported by the package |
 | `abicheck/storage/project_package_archive.py` | `pack_project_package`, `unpack_project_package`, `is_project_package_archive`, `MIMETYPE` — A1.1's one-file zip transport of a package directory; unpacking refuses any non-layout, symlinked, compressed, duplicate or over-budget member before writing. Internal, reached through `workflows.storage` |
 | `abicheck/storage/evidence_digest.py` | `EVIDENCE_FORM_VERSION`, `UNORDERED_LISTS`, `VOLATILE_CAPTURE_FIELDS`, `evidence_digest_of_document` — ADR-062 D16's evidence digest over a snapshot document: volatile capture metadata dropped, identity-matched record lists stably sorted by identity, semantically ordered lists untouched, the form version hashed in. Internal, not re-exported by the package |
-| `abicheck/storage/wire_extensions.py` | `AVAILABILITY_KEY`, `DOCUMENT_MUST_UNDERSTAND_KEY`, `EXTENSIONS_KEY`, `IDENTITY_SECTION_KIND`, `MUST_UNDERSTAND_KEY`, `UNDERSTOOD_EXTENSIONS`, `WIRE_EXTENSIONS_KEY`, `WireExtensions`, `attach`, `check_must_understand`, `extensions_of`, `merge_wire_extensions`, `record_section_failure`, `refuse_package_flattening`, `refuse_unwritable_extensions`, `split_wire_extensions` — ADR-062 D14/D15 carriers of the sectioned document: unknown sections, header must-understand names and extension maps, the section availability table, and the sections a load must block, split off on read and merged back on write. Internal, not re-exported by the package |
-| `abicheck/storage/wire_record_extensions.py` | `RECORD_EXTENSIONS_KEY`, `RECORD_LISTS`, `RecordExtras`, `collect_record_extras`, `restore_record_extras` — ADR-062 D14 at record level: unknown fields of identity-matched records, kept by identity and ordinal and written back on re-save. Internal, not re-exported by the package |
+| `abicheck/storage/wire_extensions.py` | `AVAILABILITY_KEY`, `DOCUMENT_MUST_UNDERSTAND_KEY`, `EXTENSIONS_KEY`, `IDENTITY_SECTION_KIND`, `MUST_UNDERSTAND_KEY`, `UNDERSTOOD_EXTENSIONS`, `WIRE_EXTENSIONS_KEY`, `WireExtensions`, `attach`, `carriers_for_reader`, `check_must_understand`, `extensions_of`, `merge_wire_extensions`, `record_section_failure`, `refuse_package_flattening`, `refuse_unwritable_extensions`, `split_wire_extensions`, `unknown_must_understand` — ADR-062 D14/D15 carriers of the sectioned document: unknown sections, header must-understand names and extension maps, the section availability table, and the sections a load must block, split off on read and merged back on write; `WireExtensions.to_wire` is the form a directory package stores and `carriers_for_reader` re-decides what blocks on read. Internal, not re-exported by the package |
+| `abicheck/storage/wire_record_extensions.py` | `RECORD_EXTENSIONS_KEY`, `RECORD_LISTS`, `RECORD_OBJECTS`, `RecordExtras`, `collect_record_extras`, `nested_record_classes`, `restore_record_extras` — ADR-062 D14 at record level: unknown fields of identity-matched records and of the binary section's metadata objects, at any nesting depth (parameters, record fields, enum members, ELF symbols/imports, PE/Mach-O exports), kept by identity, ordinal and nested position and written back on re-save. Internal, not re-exported by the package |
 | `abicheck/storage/snapshot_lazy_decode.py` | `LEGACY_BACKFILL_FLOOR`, `decode_lazily`, `eager_section_decode`, `lazy_ir_eligible` — ADR-062 D18 step 2: a document on which every join touching the declarations, types and debug-layout sections is a no-op loads with them pending in the snapshot's semantic IR (model/lazy_declarations.py); any other document decodes eagerly. Internal, not re-exported by the package |
+| `abicheck/storage/transport_digest.py` | `TRANSPORT_EXTRA_ID`, `stored_transport_digest`, `transport_digest`, `transport_extra` — ADR-062 D16's transport digest: the SHA-256 of a package-archive member's stored bytes, carried in its zip extra field and verified on unpack. Internal, not re-exported by the package |
 | `abicheck/storage/wire_field_names.py` | `wire_field_names` — the keys the snapshot encoder writes for a dataclass record, shared by the encoder and the ADR-062 D14 record reader. Internal, not re-exported by the package |
 | `abicheck/storage/package_publish.py` | `REF_DIRS`, `REF_ENTRY_FIELDS`, `REF_SCHEMA_VERSION`, `REF_SCHEMA_VERSION_KEY`, `publish_lock_name`, `ref_digest_entries`, `ref_digest_of`, `ref_document`, `ref_record`, `versioned_ref_relpath` — ADR-062 D17's ref layout (amends D6): the immutable refs/&lt;kind&gt;/&lt;id&gt;/&lt;ref-digest&gt;.json path, the ref document with its own layout version, its ref digest (the semantic digest of the whole document), the package-format-v2 manifest entries naming each ref by id and ref digest, and the cross-process lock name serializing writers. Internal, not re-exported by the package |
 | `abicheck/storage/zip_member.py` | `deterministic_zipinfo` — the pinned zip member header shared by G40's bundle archive and the package transport. Internal, not re-exported by the package |
@@ -1171,7 +1209,7 @@ satisfies for the one domain type it actually sections today
 | `abicheck/storage/ref_ids.py` | `REF_SUFFIX`, `safe_ref_id`, `reject_filesystem_collisions` — cross-platform ref-id path safety, split out of `package.py`'s own 800-line production cap (ADR-063 Track C 8B); `resolve_ref_ids` — name-to-safe-artifact-id resolver the two bundle/baseline-set import adapters use for a library name they don't control -- internal, not re-exported by the package |
 | `abicheck/storage/dto.py` | `BASELINE_SET_SECTION_KIND`, `BINARY_SECTION_KIND`, `BUILD_SECTION_KIND`, `BUNDLE_COMPOSITION_SECTION_KIND`, `DEBUG_SECTION_KIND`, `DECLARATIONS_SECTION_KIND`, `GRAPH_SECTION_KIND`, `LAYOUT_SECTION_KIND`, `PROVENANCE_SECTION_KIND`, `SECTION_SCHEMA_VERSIONS`, `SEMANTIC_IR_SECTION_KIND`, `TYPES_SECTION_KIND`, `SectionDTO`, `baseline_set_metadata_from_dto`, `baseline_set_metadata_to_dto`, `binary_from_dto`, `binary_to_dto`, `build_from_dto`, `build_to_dto`, `bundle_composition_from_dto`, `bundle_composition_to_dto`, `debug_from_dto`, `debug_to_dto`, `declarations_from_dto`, `declarations_to_dto`, `graph_from_dto`, `graph_to_dto`, `layout_from_dto`, `layout_to_dto`, `legacy_section_from_dto`, `legacy_section_to_dto`, `migrate_section_dto`, `provenance_from_dto`, `provenance_to_dto`, `semantic_ir_from_dto`, `semantic_ir_to_dto`, `types_from_dto`, `types_to_dto` (A1.1's per-section DTO envelope, jointly ADR-063 Phase 8's D8 constraint; `TYPES_SECTION_KIND`/`types_from_dto`/`types_to_dto` are ADR-063 Track 4 (8B)'s first typed-DTO promotion beyond semantic_ir, see types_section_codec.py; `GRAPH_SECTION_KIND`/`graph_from_dto`/`graph_to_dto` are its second, see graph_section_codec.py; the remaining six `*_SECTION_KIND`/`*_from_dto`/`*_to_dto` triples are its third slice, see sparse_section_codec.py -- every D8 legacy section kind now has a dedicated DTO; `BUNDLE_COMPOSITION_SECTION_KIND`/`BASELINE_SET_SECTION_KIND` and their `*_from_dto`/`*_to_dto` pairs are A1.4's own two variant-level section kinds, ADR-063 Track C 8B, see `import_bundle_facts.py`/`import_baseline_set.py` below) |
 | `abicheck/storage/legacy_sections.py` | `LEGACY_SECTION_KINDS`, `SCHEMA_VERSION_KEY`, `join_legacy_document`, `missing_required_section_fields`, `split_legacy_document` (D8's full legacy-document section partition) |
-| `abicheck/storage/import_v1.py` | `export_legacy_snapshot`, `import_legacy_snapshot` (A1.2) |
+| `abicheck/storage/import_v1.py` | `CARRIERS_OBJECT_KIND`, `export_legacy_snapshot`, `import_legacy_snapshot` (A1.2; `CARRIERS_OBJECT_KIND` is the `ObjectRef.kind` of `ArtifactRef.carriers`) |
 | `abicheck/storage/import_bundle_facts.py` | `BUNDLE_FACTS_ARTIFACT_TYPE`, `export_bundle_facts`, `import_bundle_facts` (A1.4: a persisted G38 BundleFacts document, folded into a one-variant, multi-artifact PackageManifest by calling import_v1 once per library and attaching the container's own composition facts to VariantRef.sections) |
 | `abicheck/storage/import_baseline_set.py` | `export_baseline_set`, `import_baseline_set` (A1.4's other half: an actions/baseline-produced baseline set's manifest.json plus its already-resolved per-library snapshot documents, folded the same way) |
 | `abicheck/storage/variant_composition.py` | `read_variant_composition_degraded_members`, `read_variant_composition_inventory_complete`, `read_variant_composition_library_filenames`, `read_variant_composition_manifest_payload` (ADR-065 D2 added the inventory-complete reader, the capture's own assertion that lets a comparison against a stored package prove a removal or an addition -- the package type alone never does; D8 added the degraded-members reader, the marker a stored package preserves so the release fan-out records such a member as failed; A1.7: single-variant reads of import_bundle_facts.py's own composition layout, split into its own module purely to keep that module under the 800-line production cap. The manifest reader reads just one variant's own composition-embedded manifest back, for a single-artifact materialized sub-package that never has the full multi-artifact PackageManifest export_bundle_facts itself needs; the filenames reader recovers the same variant's real, possibly-versioned on-disk filenames, since import_bundle_facts itself stamps only the bundle key onto each artifact's own native_identity) |

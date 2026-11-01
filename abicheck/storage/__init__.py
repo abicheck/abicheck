@@ -105,7 +105,11 @@ from .import_bundle_facts import (
     export_bundle_facts,
     import_bundle_facts,
 )
-from .import_v1 import export_legacy_snapshot, import_legacy_snapshot
+from .import_v1 import (
+    CARRIERS_OBJECT_KIND,
+    export_legacy_snapshot,
+    import_legacy_snapshot,
+)
 from .legacy_sections import (
     LEGACY_SECTION_KINDS,
     SCHEMA_VERSION_KEY,
@@ -131,6 +135,7 @@ from .package import (
     ObjectStore,
     PackageManifest,
     VariantRef,
+    artifact_object_refs,
     artifact_ref_relpath,
     object_relpath,
     variant_ref_relpath,
@@ -172,6 +177,7 @@ __all__ = [
     "BUNDLE_COMPOSITION_SECTION_KIND",
     "BUNDLE_FACTS_ARTIFACT_TYPE",
     "CAPTURE_METADATA_KEY",
+    "CARRIERS_OBJECT_KIND",
     "COMPARISON_CONTRACT_VERSION",
     "Confidence",
     "DEBUG_SECTION_KIND",
@@ -211,6 +217,7 @@ __all__ = [
     "TYPES_SECTION_KIND",
     "UNSTATED_VERSION",
     "VariantRef",
+    "artifact_object_refs",
     "artifact_ref_relpath",
     "baseline_set_metadata_from_dto",
     "baseline_set_metadata_to_dto",

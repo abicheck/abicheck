@@ -109,6 +109,7 @@ DETECTOR_MODULE_ORDER: tuple[str, ...] = (
     "abicheck.compare.undeclared_exports",
     "abicheck.compare.overload_ambiguity",
     "abicheck.compare.target_isa",
+    "abicheck.compare.function_presence",
 )
 
 _MODULE_RANK = {name: rank for rank, name in enumerate(DETECTOR_MODULE_ORDER)}
@@ -211,6 +212,7 @@ class DetectorRegistry:
         # registration through the real registry for exactly that reason).
         "abicheck.compare.undeclared_exports",
         "abicheck.compare.overload_ambiguity",
+        "abicheck.compare.function_presence",
         "abicheck.compare.target_isa",
     )
 

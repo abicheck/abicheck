@@ -54,8 +54,14 @@ __all__ = [
 ]
 
 #: Layout version of one ref document, stored inside it (and so hashed).
-REF_SCHEMA_VERSION = 1
+#: The newest this build reads. 2 adds `ArtifactRef.carriers` (ADR-062
+#: D14/D15 in packages): written only for a ref that sets it, so every other
+#: ref keeps version 1 and its exact bytes and `ref_digest`, while a v1-only
+#: reader refuses a ref whose left-out sections it would read as empty.
+REF_SCHEMA_VERSION = 2
 REF_SCHEMA_VERSION_KEY = "ref_schema_version"
+#: Record keys that need `REF_SCHEMA_VERSION` 2.
+_V2_RECORD_KEYS = frozenset({"carriers"})
 
 #: `manifest.json` field listing `{id, ref_digest}` per ref, by ref kind.
 REF_ENTRY_FIELDS = {"variant": "variant_refs", "artifact": "artifact_refs"}
@@ -69,7 +75,8 @@ def ref_document(record: Mapping[str, Any]) -> dict[str, Any]:
     *record*: the record plus its own layout version."""
     if REF_SCHEMA_VERSION_KEY in record:
         raise ValueError(f"a ref record may not carry {REF_SCHEMA_VERSION_KEY!r}")
-    return {**record, REF_SCHEMA_VERSION_KEY: REF_SCHEMA_VERSION}
+    version = 2 if _V2_RECORD_KEYS & set(record) else 1
+    return {**record, REF_SCHEMA_VERSION_KEY: version}
 
 
 def ref_digest_of(document: Mapping[str, Any]) -> str:
@@ -83,10 +90,16 @@ def ref_record(document: Any, where: str) -> dict[str, Any]:
     if not isinstance(document, dict):
         raise ValueError(f"{where} is not a JSON object")
     version = document.get(REF_SCHEMA_VERSION_KEY)
-    if version != REF_SCHEMA_VERSION or isinstance(version, bool):
+    if version not in (1, REF_SCHEMA_VERSION) or isinstance(version, bool):
         raise ValueError(
             f"{where} states {REF_SCHEMA_VERSION_KEY} {version!r}; this build "
-            f"reads only {REF_SCHEMA_VERSION}"
+            f"reads 1 to {REF_SCHEMA_VERSION}"
+        )
+    if version == 1 and _V2_RECORD_KEYS & set(document):
+        raise ValueError(
+            f"{where} states {REF_SCHEMA_VERSION_KEY} 1 but carries "
+            f"{sorted(_V2_RECORD_KEYS & set(document))}, which need 2 -- the "
+            "ref is corrupted or was hand-edited"
         )
     return {k: v for k, v in document.items() if k != REF_SCHEMA_VERSION_KEY}
 

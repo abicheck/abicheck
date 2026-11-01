@@ -72,6 +72,18 @@ digest of the artifact's snapshot document (capture metadata such as
 `created_at` excluded, identity-matched record lists in a stable order). It
 is optional; a reader that does not know it ignores it, and it is covered
 by `ref_digest` like every other field.
+An artifact ref may also carry `carriers`: an object reference
+(`kind: "wire_carriers"`) to what the artifact's snapshot holds beyond its
+decoded sections -- a `failed` or `not_collected` section and its
+diagnostics, a section kept verbatim (an unknown kind, an unknown
+must-understand name, a newer section version), section-header `extensions`
+and `must_understand` names, unknown record fields at any depth, and a
+document-level `must_understand` list (see
+[snapshot format](snapshot-format.md#extensions-and-must-understand-sections)).
+The sections it holds undecoded are absent from the ref's `sections` and from
+the manifest's `section_schema_versions`, and the `evidence_digest` covers
+it. A ref with `carriers` is written at `ref_schema_version` 2, which a reader
+of version 1 refuses; every other ref is written at version 1.
 A package format v1 package kept each ref at a mutable
 `refs/variants/<id>.json`/`refs/artifacts/<id>.json` path and listed bare
 ids; it is still read.
@@ -82,10 +94,18 @@ each ref document once to its digest-named path, and only then replaces
 document is never overwritten, so a publish that fails or is interrupted,
 including a republish of changed content under the same ids, leaves the
 previous package fully readable. Writers to one package are serialized by a
-cross-process lock.
+cross-process lock (`flock`, or `msvcrt.locking` on Windows).
 
-A deterministic `.tar.zst` transport form is part of the design but **not
-yet implemented** — only the plain directory form exists today.
+**Superseded files stay until collected.** A republish leaves the previous
+refs and objects behind, unnamed.
+`abicheck.workflows.package_gc.collect_package_garbage(root)` removes them
+under the same lock, only once older than a grace period (one hour by
+default), so a reader still using the previous manifest is not cut off; a
+reader older than that fails closed, never reads wrong data. There is no CLI
+for it.
+
+The one-file transport form is a zip archive (see
+[One-file transport](#one-file-transport-zip)).
 
 ## Content addressing
 
@@ -123,10 +143,12 @@ unstated or unrecognized value refuses to load rather than being treated as
 
 `manifest.json` may also carry an optional `must_understand` list, written
 only when non-empty: an unknown name refuses the package. A
-section object's own header may carry `must_understand` and `extensions`; in
-a directory package an unknown must-understand name on a section is refused
-(fail closed). The single-file `.abi.json` reader blocks only that section's
-analyses instead (see [snapshot format](snapshot-format.md#extensions-and-must-understand-sections)).
+section object's own header may carry `must_understand` and `extensions`; an
+unknown must-understand name on a section blocks only that section's
+analyses (they are reported not comparable), in a directory package as in a
+single-file `.abi.json` (see [snapshot format](snapshot-format.md#extensions-and-must-understand-sections)).
+On the `provenance` section, which holds the snapshot's identity, it refuses
+the package.
 
 ## Sections
 
@@ -276,7 +298,11 @@ storage-format-v2 A1.1).
   - any member that is not exactly a package path (no `..`, absolute path,
     backslash, directory entry or stray file);
   - a symlink, a compressed member or a duplicate name;
-  - an archive over the member-count or size budgets.
+  - an archive over the member-count or size budgets;
+  - a member whose stored bytes do not match the `transport` digest (SHA-256)
+    the packer wrote into its zip extra field, or an archive in which only
+    some members carry one. An archive packed before this field existed
+    carries none and is still read.
 
   Object digests are verified when each object is read, as for a directory.
 - **Accepted as a `compare` operand** anywhere a package directory is.
