@@ -393,6 +393,9 @@ _F2 = (
     # side only; H2's asymmetric-header cell pins the route parity.
     "evidence.per_side_operand_divergence",
     "evidence.stored_live_route_member_divergence",
+    # A one-sided member no reader can open read as unmatched on the release
+    # routes while the same file paired read as failed.
+    "evidence.unreadable_one_sided_member",
 )
 _F3 = (
     "storage.digest_answers_the_wrong_question",

@@ -43,6 +43,8 @@ from ..model.bundle_facts import DEFAULT_VARIANT_FINGERPRINT, BundleFacts
 from ..model.release_surface import ReleasePublicSurface
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from ..bundle_models import BundleSnapshot
 
 log = logging.getLogger(__name__)
@@ -222,8 +224,6 @@ def facts_keyed_by_match_key(facts: BundleFacts) -> BundleFacts:
     versions of one library keeps the names it was written with rather
     than silently losing one of them.
     """
-    from dataclasses import replace
-
     from ..binary_utils import _canonical_library_key
 
     rekey = {
@@ -232,6 +232,15 @@ def facts_keyed_by_match_key(facts: BundleFacts) -> BundleFacts:
     }
     if all(k == v for k, v in rekey.items()) or len(set(rekey.values())) != len(rekey):
         return facts
+    return rekey_facts(facts, rekey)
+
+
+def rekey_facts(facts: BundleFacts, rekey: Mapping[str, str]) -> BundleFacts:
+    """*facts* with each member key ``k`` in *rekey* renamed to ``rekey[k]``
+    across every per-member mapping, keeping each renamed member's original
+    key as its ``library_filenames`` spelling when it recorded none. The
+    caller guarantees the renamed keys stay distinct."""
+    from dataclasses import replace
 
     def _moved(mapping: dict[str, _V]) -> dict[str, _V]:
         return {rekey.get(k, k): v for k, v in mapping.items()}
@@ -246,7 +255,7 @@ def facts_keyed_by_match_key(facts: BundleFacts) -> BundleFacts:
         | {
             rekey[k]: k
             for k in facts.per_library_snapshots
-            if rekey[k] != k and k not in facts.library_filenames
+            if rekey.get(k, k) != k and k not in facts.library_filenames
         },
         degraded_members=_moved(facts.degraded_members),
     )

@@ -429,4 +429,76 @@ INTEGRATION_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="evidence.unreadable_one_sided_member",
+        invariant=(
+            "A release member no reader can open is `failed` -- an `ERROR` "
+            "library entry and an extraction-error outcome -- whether or not "
+            "it has a counterpart, on either side and on every route; "
+            "only a member a reader can open may read as a plain one-sided "
+            "(`not_supplied`) member."
+        ),
+        fixed_by=(1878,),
+        seed_tests=("tests/test_cli_compare_stored_versioned_member_pairing.py",),
+        public_surfaces=("cli",),
+        axes={
+            "content": (
+                "text",
+                "empty",
+                "binary junk",
+                "non-snapshot JSON",
+                "dangling linker script",
+            ),
+            "side": ("old-only", "new-only", "paired"),
+            "route": ("live/live", "stored OLD/live NEW"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Only the format is probed: a one-sided file with valid "
+                    "ELF/PE/Mach-O magic but a damaged body is never "
+                    "extracted, so it still reads as a one-sided member."
+                ),
+                reference=(
+                    "docs/contribute/known-gaps/"
+                    "a-one-sided-member-with-a-damaged-native-body-reads-as-unmatched.md"
+                ),
+            ),
+        ),
+    ),
+    BugClass(
+        id="evidence.stored_live_route_member_divergence",
+        invariant=(
+            "A release compare pairs exactly the members the live/live "
+            "compare of the same libraries pairs, whatever form either side "
+            "is stored in (live files, stored dumps under any file name, a "
+            "`ProjectSnapshot` package, a `BundleFacts` document) -- one "
+            "discovery rule and one match key, the library a member is, "
+            "never the file name its stored document happens to have."
+        ),
+        fixed_by=(1878,),
+        seed_tests=(
+            "tests/test_cli_compare_stored_versioned_member_pairing.py",
+            "tests/test_stored_live_member_discovery_formats.py",
+            "tests/test_release_member_identity.py",
+            "tests/test_release_member_identity_integration.py",
+            "tests/test_family_f2_live_route_matrix.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "member_name": ("versioned", "unversioned", "mixed", "one-sided"),
+            "capture": ("cli --bundle-facts-out", "typed api file-name keys"),
+            "old_form": (
+                "live directory",
+                "stored dumps (stem, unrelated, gzip names)",
+                "ProjectSnapshot package",
+                "BundleFacts document",
+            ),
+            "new_form": (
+                "live directory",
+                "stored dumps (stem, unrelated, gzip names)",
+                "ProjectSnapshot package",
+            ),
+        },
+    ),
 )

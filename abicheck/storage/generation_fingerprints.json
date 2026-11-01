@@ -148,6 +148,7 @@
       "abicheck/extract/macho_build_signals.py": "c277bfdd55f26aae61af66c8fa6c5cdc5fa45acc49a3ae513af5899417db88bb",
       "abicheck/extract/mangled_foreign_template_args.py": "58892490cdf5173d3e562a8f63abe3b55371beb30aaacbf79d9aecfcd08ca8bc",
       "abicheck/extract/manifest_semantic_ir.py": "9d8a6ddaa619a7d4b214bbeab5c2c0dfef681a6fd9dffd004760b19a62da3b15",
+      "abicheck/extract/member_identity.py": "9045a480f6715aa8e3242b147c88eed503566487a49b7ecc6c57209aabbab102",
       "abicheck/extract/metadata_attach.py": "a4d2cba939ecf96036f0c974e723c15e68699d9f5ce847c8e9f8b04f0440fa6d",
       "abicheck/extract/occurrence_dependency_scope.py": "d28ca573fecaecec3c67b784c9d44d516d039824e744179f852f5a89dc135d8e",
       "abicheck/extract/ownership.py": "9285bfc00b5dc3948749004cbe9881b5eb034696b59d405bd0e579f9664fb036",
@@ -187,9 +188,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "c9c38748894ae181c0930752d9638c6bd1e9a5bae81d1edd0d78d203edb5b331",
+    "fingerprint": "db9856f0d2df293190cd33a7729bfe38e0433c21cb86a080426c8d754f7984ec",
     "generation": 34,
-    "reason": "generation 34 is still unreleased (same PR #1876): this amends its own semantic change -- any truncated supported TPI record or field-list sub-record, a dangling LF_INDEX, an enum whose list falls short of its count, or a TPI stream that ends before its declared type range now fails the PDB (PdbParseError) -- rather than introducing a new generation"
+    "reason": "member_identity: a library key whose value is not a string or null makes the scan ambiguous; no dumped field changes"
   },
   "resolver": {
     "files": {

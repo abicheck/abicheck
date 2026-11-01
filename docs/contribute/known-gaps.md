@@ -523,10 +523,10 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 **Status (2026-10-25): CLOSED for the document shape.** A stored `BundleFacts` comparison renders the live release document: its JSON is the live release document (release schema 2.5), and JSON, Markdown, JUnit, `oneline` and HTML all come from one live-shaped evaluation of the stored facts (`tests/unit/report/test_release_document.py`, `tests/test_cli_compare_stored_release_parity.py`). Fields a stored comparison cannot compute are explicit `unavailable` markers with a reason, and its receipt is marked `reconstructed_from_stored_facts`. Remaining limits, named rather than hidden: the stored JUnit omits the passing testcase for each unchanged symbol (no old-side inventory); `output.view` `show=`, `sarif` and `review` stay refused for a stored OLD_INPUT.  
 `hygiene` — Closed: the stored document now carries the live release shape (schema 2.5, breaking for the stored document). [Full write-up](known-gaps/release-report-live-and-stored-operands-render-different-documents.md) [Full write-up](known-gaps/release-report-live-and-stored-operands-render-different-documents.md)
 
-#### An unreadable NEW-only release member is reported unmatched, not unreadable (2026-10-31)
+#### A one-sided release member with a damaged native body reads as unmatched (2026-11-01)
 
-**Status (recorded 2026-10-31): OPEN.** A release compare only extracts paired members, so a NEW-only file named like a library that no extractor can read (`notes.so`, text) is reported as `not_supplied` in `unmatched_new`, not `failed`. Both routes behave the same way (live/live and stored/live), and neither reads it as a clean comparison. Found while aligning stored→live member discovery with live/live (PR #1878).
-`hygiene` — An unreadable NEW-only member reads as a one-sided member rather than as an unreadable one. [Full write-up](known-gaps/an-unreadable-new-only-release-member-is-not-reported-unreadable.md)
+**Status (recorded 2026-11-01): OPEN.** A one-sided member that no reader recognizes by content is now `failed` (archive: "An unreadable NEW-only release member..."). The probe reads the format only, so a file with valid ELF, PE or Mach-O magic and a truncated or corrupt body is never extracted when it has no counterpart, and still reads as `not_supplied`. Paired, it fails at extraction as before.
+`hygiene` — A one-sided member whose native image is damaged is reported as one-sided rather than unreadable; closing it needs a bounded structural parse of unmatched native members. [Full write-up](known-gaps/a-one-sided-member-with-a-damaged-native-body-reads-as-unmatched.md)
 
 #### Public-surface graph: surface_graph vs L5 header_graph node-id namespaces not unified; type_reachability stdlib query unmigrated
 
@@ -612,11 +612,6 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 #### An `ownership_fact` is persisted only as a PRESENT decision (2026-10-27)
 
 **Status (2026-10-29): FIXED (schema v67).** Non-`PRESENT` statuses and the decisions of a snapshot with no recorded scope are now persisted (`entity_ownership.statuses`, `ownership_without_scope`). The round-trip is pinned in `tests/unit/storage/test_snapshot_field_roundtrip.py`. [Write-up](known-gaps/ownership-fact-persists-only-a-present-decision.md)
-
-#### Release fan-out cannot pair a stored snapshot directory with a live one
-
-**Status (recorded 2026-10-28): OPEN.** A directory compare pairs members by library key, the file name, so a stored `libfoo.json` directory against a live `libfoo.so` directory completes zero comparisons and exits 1 (`no_comparison_completed`). The same bytes compared as scalar operands compare normally. Pinned by the strict-xfail cells `release@mixed_old` and `release@mixed_new` in `tests/test_family_f2_live_route_matrix.py`.
-`hygiene` — Closing it needs a member-identity rule for a stored snapshot and the live binary it came from, which changes which members pair in existing directory compares. [Full write-up](known-gaps/release-fan-out-cannot-pair-a-stored-snapshot-directory-with-a-live-one.md)
 
 ## Do not re-attempt
 

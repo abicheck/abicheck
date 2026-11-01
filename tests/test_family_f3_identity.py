@@ -551,6 +551,10 @@ _EXTRA_REGISTERED = {
 _U = "UNCOVERED: "
 COVERAGE: dict[str, str] = {
     # -- exercised --------------------------------------------------------
+    "abicheck.workflows.release_member_pairing:path_identity": "stored spelling x direction against a hand-written key table (tests/test_release_member_identity.py)",
+    "abicheck.workflows.release_member_pairing:snapshot_identity": "BundleFacts documents keyed by file name vs live name (tests/test_release_member_identity.py)",
+    "abicheck.workflows.release_member_pairing:pair_path_maps_by_identity": "every OLD x NEW storage form against the live/live run (tests/test_release_member_identity_integration.py)",
+    "abicheck.workflows.release_member_pairing:facts_paired_by_identity": "stored/stored pairing and the never-moves rule (tests/test_release_member_identity.py)",
     "abicheck.extract.binary_identity:stamp_binary_identity": "symlink x rename transforms (test_snapshot_hit_binary_identity)",
     "abicheck.name_classification:strip_anonymous_type_location": "string probe x path transforms",
     "abicheck.model.owner_recovery:is_mangled_identity": "moved verbatim from contract_evaluation; exercised by tests/test_contract_replay.py (mangled type-level symbols)",
@@ -661,6 +665,12 @@ def test_covered_rows_are_really_registered_in_the_catalogue() -> None:
             # Decodes abicheck's own decl:// node id; its round trip against
             # _decl_node_id is in tests/test_template_export_loss_declaration_presence_unit.py.
             "abicheck.model.graph_identity:decl_node_identity",
+            # Release member pairing by recorded library: exercised by
+            # tests/test_release_member_identity.py and its integration twin.
+            "abicheck.workflows.release_member_pairing:path_identity",
+            "abicheck.workflows.release_member_pairing:snapshot_identity",
+            "abicheck.workflows.release_member_pairing:pair_path_maps_by_identity",
+            "abicheck.workflows.release_member_pairing:facts_paired_by_identity",
         }
         | {
             f"abicheck.model.identity:entity_id_for_{k}"

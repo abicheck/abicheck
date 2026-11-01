@@ -9,9 +9,9 @@ generated: false
 
 # An unreadable NEW-only release member is reported unmatched, not unreadable
 
-Index: [Known gaps](../known-gaps.md)
+Index: [Known gaps — closed and moot](../archive/known-gaps-closed.md)
 
-**Status (recorded 2026-10-31): OPEN.** Hygiene.
+**Status (2026-11-01): CLOSED.** Unmatched members are probed by content after pairing (`workflows/release_member_readability`) and an unreadable one is `failed`, on both routes and both sides. Residual: a damaged native body with valid magic, recorded separately.
 
 ## Evidence
 

@@ -641,17 +641,7 @@ ROUTE_MATRIX: dict[str, Route] = {
 #: ``route name -> explanation``. Each is left out of the live matrix and
 #: pinned by its own ``xfail(strict=True)`` cell in the test module, so a fix
 #: turns that cell XPASS -> failure and forces the entry's removal.
-KNOWN_ROUTE_DIVERGENCES: dict[str, str] = {
-    "release@mixed_old": "the release fan-out pairs directory members by file "
-    "name, so a stored libfoo.json in OLD never pairs with a live libfoo.so in "
-    "NEW: the run completes zero comparisons and exits 1 "
-    "(no_comparison_completed), where the scalar route compares the same bytes "
-    "(known-gaps: release-fan-out-cannot-pair-a-stored-snapshot-directory-with-a-live-one)",
-    "release@mixed_new": "the mirror of release@mixed_old: a live libfoo.so "
-    "directory in OLD against a stored libfoo.json directory in NEW pairs no "
-    "member, exits 1 (no_comparison_completed), and the scalar route compares "
-    "the same bytes (known-gaps: release-fan-out-cannot-pair-a-stored-snapshot-directory-with-a-live-one)",
-}
+KNOWN_ROUTE_DIVERGENCES: dict[str, str] = {}
 
 
 #: The stored-form routes, as ``name -> runner`` (the historical view).
