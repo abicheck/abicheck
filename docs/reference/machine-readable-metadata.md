@@ -26,6 +26,8 @@ documentation at stable, versioned URLs:
 
 - [Build evidence](schemas/v1/build_evidence.schema.json)
 - [BuildSourcePack manifest](schemas/v1/build_source_pack.schema.json)
+- [BundleFacts document](schemas/v1/bundle_facts.schema.json) (`dump RELEASE --bundle-facts-out FILE.json`, a stored release baseline)
+- [BundleFacts archive manifest](schemas/v1/bundle_facts_archive_manifest.schema.json) (`manifest.json` inside the G40 zip form of the same facts)
 - [Compare JSON report](schemas/v1/compare_report.schema.json)
 - [Single-build audit report](schemas/v1/audit_report.schema.json) (`compare --no-baseline FILE`)
 - [N-library audit report](schemas/v1/audit_set_report.schema.json) (`compare --no-baseline DIR`)
