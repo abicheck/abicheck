@@ -73,7 +73,7 @@ from ..model.symbol_inventory import SymbolInventory, build_symbol_inventory
 __all__ = [
     "SnapshotRetention",
     "release_junit_pairs",
-    "release_old_snapshot_pairs",
+    "release_old_member_snapshots",
     "resolve_snapshot_retention",
 ]
 
@@ -187,30 +187,34 @@ def stash_member_evidence(
     )
 
 
-def release_old_snapshot_pairs(
+def release_old_member_snapshots(
     library_results: list[dict[str, object]],
-) -> list[tuple[DiffResult, AbiSnapshot]]:
-    """The ``(DiffResult, old AbiSnapshot)`` pairs ``--bundle-facts-out`` needs.
+) -> list[tuple[str, AbiSnapshot]]:
+    """``(member file name, OLD snapshot)`` for every member entry that kept
+    one -- what ``--bundle-facts-out`` persists.
 
-    The fan-out's own ``diff_pairs`` return value carries the compact
-    ``SymbolInventory`` -- enough to render JUnit, and deliberately not
-    enough to write a baseline document. A run that asked for
-    ``--bundle-facts-out`` gets ``old_full`` retention, so the full snapshot
-    is still stashed on each member entry; this recovers it, as a plain read
-    over the entries the primary pass already produced.
+    Keyed by the entry's own ``library`` (the OLD member's file name), not by
+    the ``DiffResult``'s: a JSON-snapshot member's diff carries the snapshot's
+    ``library`` field, which need not name the member at all, so keying by it
+    either invented a second key or, once that was refused, re-extracted a
+    snapshot the run already held.
 
-    Must be called before ``project_release_library_results`` clears
-    those entries. Returns only the members that actually have both halves;
-    ``write_bundle_facts_out`` back-fills every other key from ``old_map``,
-    which is what already covers a member whose compare failed.
+    Must be called before ``project_release_library_results`` clears those
+    entries. Only a member that was compared (it has its ``DiffResult``) and
+    kept its snapshot contributes; ``write_bundle_facts_out`` captures every
+    other member from ``old_map`` itself.
     """
-    pairs: list[tuple[DiffResult, AbiSnapshot]] = []
+    snapshots: list[tuple[str, AbiSnapshot]] = []
     for entry in library_results:
-        diff = entry.get("_diff_result")
         old_snap = entry.get("_old_snapshot")
-        if isinstance(diff, DiffResult) and isinstance(old_snap, AbiSnapshot):
-            pairs.append((diff, old_snap))
-    return pairs
+        name = entry.get("library")
+        if (
+            isinstance(entry.get("_diff_result"), DiffResult)
+            and isinstance(old_snap, AbiSnapshot)
+            and isinstance(name, str)
+        ):
+            snapshots.append((name, old_snap))
+    return snapshots
 
 
 def release_junit_pairs(

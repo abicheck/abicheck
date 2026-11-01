@@ -139,6 +139,7 @@ concepts:
     renames: []
     cli:
       - compare --variant
+      - dump --variant
       - project capture-variants --variant
   - concept: pack
     tier: config
@@ -723,6 +724,7 @@ concepts:
       - compare --instantiation-manifest
       - compare --bundle-facts-out
       - compare --bundle-facts-library-manifest
+      - dump --bundle-facts-out
     config:
       - bundle.system_providers
       - bundle.cohorts
@@ -733,6 +735,8 @@ concepts:
       - {id: compare --instantiation-manifest, rule: name, accepted: true, rename: R21, note: cli spelling breaks D1; the leaf is
           `bundle`}
       - {id: compare --bundle-facts-out, rule: name, accepted: true, rename: R21, note: cli spelling breaks D1; the leaf is `bundle`}
+      - {id: dump --bundle-facts-out, rule: name, accepted: true, rename: R21, note: cli spelling breaks D1; the leaf is `bundle`; the
+          spelling compare uses for the same document}
       - {id: compare --bundle-facts-library-manifest, rule: name, accepted: true, rename: R21, note: cli spelling breaks D1; the
           leaf is `bundle`}
       - {id: 'actions/check-target:bundle-members', rule: name, accepted: true, rename: R20, note: action spelling breaks D1; the

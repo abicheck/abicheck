@@ -1,0 +1,382 @@
+"""``abicheck dump RELEASE --bundle-facts-out PATH``: a release's BundleFacts
+document captured without a comparison.
+
+Known gap "``compare --bundle-facts-out`` stays a ``compare`` flag because
+``dump`` has no release fan-out" (closed 2026-10-31). The capture composes
+the comparison's own owners (the one-sided release resolver, the member-dump
+resolver, ``write_bundle_facts_out``), so the oracle is the comparison:
+
+* **Parity.** For every release shape below, ``dump OLD --bundle-facts-out``
+  writes the document ``compare OLD NEW --bundle-facts-out`` writes for its
+  OLD side, whatever NEW is -- byte-for-byte as JSON.
+* **Round trip** (``tests/test_dump_bundle_facts_integration.py``, real
+  libraries): ``compare DUMPED NEW`` reaches the verdict ``compare OLD NEW``
+  reaches live.
+* **Every key is a member.** The capture's library keys are exactly the
+  release's member keys. Writing the parity test found ``compare
+  --bundle-facts-out`` persisting a JSON-snapshot member twice, once under
+  its file name and once under the snapshot's ``library`` name.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+from click.testing import CliRunner
+
+from abicheck.cli import main
+from abicheck.model import AbiSnapshot, Function, Variable, Visibility
+from abicheck.serialization import snapshot_to_json
+
+
+def _fn(name: str, ret: str = "int") -> Function:
+    return Function(
+        name=name, mangled=name, return_type=ret, visibility=Visibility.PUBLIC
+    )
+
+
+def _var(name: str) -> Variable:
+    return Variable(name=name, mangled=name, type="int", visibility=Visibility.PUBLIC)
+
+
+def _write(root: Path, members: dict[str, AbiSnapshot]) -> Path:
+    root.mkdir(parents=True, exist_ok=True)
+    for name, snap in members.items():
+        (root / f"{name}.json").write_text(snapshot_to_json(snap), encoding="utf-8")
+    return root
+
+
+def _snap(lib: str, version: str, *, functions=(), variables=()) -> AbiSnapshot:
+    return AbiSnapshot(
+        library=f"{lib}.so",
+        version=version,
+        functions=list(functions),
+        variables=list(variables),
+        from_headers=True,
+    )
+
+
+#: (old members, new members) -- one library, several, a member only OLD
+#: has, a member only NEW has, and an unchanged release.
+_RELEASES = {
+    "one-member": (
+        {"liba": _snap("liba", "1", functions=[_fn("a"), _fn("b")])},
+        {"liba": _snap("liba", "2", functions=[_fn("a")])},
+    ),
+    "three-members": (
+        {
+            "liba": _snap("liba", "1", functions=[_fn("a")]),
+            "libb": _snap("libb", "1", variables=[_var("v")]),
+            "libc": _snap("libc", "1", functions=[_fn("c", "long")]),
+        },
+        {
+            "liba": _snap("liba", "2", functions=[_fn("a"), _fn("a2")]),
+            "libb": _snap("libb", "2", variables=[_var("v"), _var("w")]),
+            "libc": _snap("libc", "2", functions=[_fn("c")]),
+        },
+    ),
+    "old-only-member": (
+        {
+            "liba": _snap("liba", "1", functions=[_fn("a")]),
+            "libgone": _snap("libgone", "1", functions=[_fn("g")]),
+        },
+        {"liba": _snap("liba", "2", functions=[_fn("a")])},
+    ),
+    "new-only-member": (
+        {"liba": _snap("liba", "1", functions=[_fn("a")])},
+        {
+            "liba": _snap("liba", "2", functions=[_fn("a")]),
+            "libnew": _snap("libnew", "2", functions=[_fn("n")]),
+        },
+    ),
+    "unchanged": (
+        {"liba": _snap("liba", "1", functions=[_fn("a")])},
+        {"liba": _snap("liba", "1", functions=[_fn("a")])},
+    ),
+}
+
+
+def _invoke(*args: str):
+    return CliRunner().invoke(main, list(args))
+
+
+def _release(tmp_path: Path, shape: str) -> tuple[Path, Path]:
+    old, new = _RELEASES[shape]
+    return _write(tmp_path / "old", old), _write(tmp_path / "new", new)
+
+
+@pytest.mark.parametrize("shape", sorted(_RELEASES))
+def test_dump_writes_the_document_compare_writes(tmp_path: Path, shape: str) -> None:
+    old, new = _release(tmp_path, shape)
+    dumped, compared = tmp_path / "dumped.json", tmp_path / "compared.json"
+    result = _invoke("dump", str(old), "--bundle-facts-out", str(dumped))
+    assert result.exit_code == 0, result.output
+    assert f"BundleFacts written to {dumped}" in result.stderr
+    compare = _invoke(
+        "compare",
+        str(old),
+        str(new),
+        "--bundle-facts-out",
+        str(compared),
+        "-o",
+        f"json={tmp_path / 'report.json'}",
+    )
+    assert compare.exit_code in (0, 1, 2, 4), compare.output
+    dumped_doc = json.loads(dumped.read_text(encoding="utf-8"))
+    assert dumped_doc == json.loads(compared.read_text(encoding="utf-8"))
+    members = sorted(f"{name}.json" for name in _RELEASES[shape][0])
+    assert sorted(dumped_doc["per_library_snapshots"]) == members
+    assert sorted(dumped_doc["library_filenames"]) == members
+
+
+@pytest.mark.parametrize(
+    ("extra", "named"),
+    [
+        (["-o", "x.json"], "-o/--output"),
+        (["--dry-run"], "--dry-run"),
+        (["--follow-deps"], "--follow-deps"),
+        (["--provenance", "git-tag=v1"], "--provenance"),
+        (["--dump-manifest", "{manifest}"], "--dump-manifest"),
+        (["--sources", "{sources}"], "--sources"),
+        (["--build-info", "{build_info}"], "--build-info"),
+        (["--debug-info", "{debug}"], "--debug-info"),
+    ],
+)
+def test_an_input_the_capture_does_not_apply_is_refused(
+    tmp_path: Path, extra: list[str], named: str
+) -> None:
+    old, _new = _release(tmp_path, "one-member")
+    (tmp_path / "foo.h").write_text("int foo(void);\n", encoding="utf-8")
+    manifest = tmp_path / "tus.yaml"
+    manifest.write_text(
+        f"roots: [{tmp_path / 'foo.h'}]\ntranslation_units:\n"
+        f"  - name: main\n    forced_includes: [{tmp_path / 'foo.h'}]\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "src").mkdir()
+    (tmp_path / "debug").mkdir()
+    build_info = tmp_path / "compile_commands.json"
+    build_info.write_text("[]", encoding="utf-8")
+    paths = {
+        "manifest": manifest,
+        "sources": tmp_path / "src",
+        "build_info": build_info,
+        "debug": tmp_path / "debug",
+    }
+    args = [a.format(**paths) for a in extra]
+    out = tmp_path / "dumped.json"
+    result = _invoke("dump", str(old), "--bundle-facts-out", str(out), *args)
+    assert result.exit_code == 64, result.output
+    # The capture's own refusal, naming the input -- not some earlier parse
+    # error that merely mentions the flag.
+    assert "does not apply" in result.output
+    assert named in result.output.split("does not apply", 1)[1]
+    assert not out.exists()
+
+
+def test_variant_is_refused_without_a_capture(tmp_path: Path) -> None:
+    old, _new = _release(tmp_path, "one-member")
+    result = _invoke("dump", str(old / "liba.json"), "--variant", "gcc13")
+    assert result.exit_code == 64, result.output
+    assert "--variant" in result.output and "--bundle-facts-out" in result.output
+
+
+def _multi_variant_package(root: Path) -> None:
+    from test_cli_compare_release_project_snapshot_package import (
+        TestVariantSelection,
+    )
+
+    TestVariantSelection()._multi_variant_package(root)
+
+
+def test_a_multi_variant_package_names_dumps_own_variant_spelling(
+    tmp_path: Path,
+) -> None:
+    pkg = tmp_path / "pkg"
+    _multi_variant_package(pkg)
+    out = tmp_path / "dumped.json"
+    result = _invoke("dump", str(pkg), "--bundle-facts-out", str(out))
+    assert result.exit_code == 64, result.output
+    # dump's own unsided spelling, never compare's `--variant old=ID`.
+    assert "--variant gcc" in result.output
+    assert "old=" not in result.output
+    assert not out.exists()
+
+
+def _variant_libraries(variant: str) -> list[str]:
+    """What the fixture wrote into each variant: `gcc12` holds one unchanged
+    library, `gcc13` the OLD side of `_old_new_libraries`."""
+    from test_cli_compare_release_project_snapshot_package import (
+        _old_new_libraries,
+    )
+
+    if variant == "gcc12":
+        return ["libunchanged.so"]
+    return sorted(snap.library for snap in _old_new_libraries()[0].values())
+
+
+@pytest.mark.parametrize("variant", ["gcc12", "gcc13"])
+def test_variant_selects_the_captured_variant(tmp_path: Path, variant: str) -> None:
+    """Oracle: the libraries the fixture wrote into that variant."""
+    members = _variant_libraries(variant)
+    pkg = tmp_path / "pkg"
+    _multi_variant_package(pkg)
+    out = tmp_path / "dumped.json"
+    result = _invoke(
+        "dump", str(pkg), "--variant", variant, "--bundle-facts-out", str(out)
+    )
+    assert result.exit_code == 0, result.output
+    doc = json.loads(out.read_text(encoding="utf-8"))
+    libraries = sorted(s["library"] for s in doc["per_library_snapshots"].values())
+    assert libraries == members
+
+
+def test_compare_keeps_the_snapshot_it_already_holds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A paired member's OLD snapshot is persisted as the run holds it, under
+    its member key, and never extracted a second time -- even when, as for a
+    JSON-snapshot member, its file name and its snapshot's `library` differ.
+    Only an unpaired member reaches the member-dump resolver."""
+    from abicheck.workflows import release_member_dump
+
+    dumped: list[str] = []
+    real = release_member_dump.dump_release_member
+
+    def _spy(path, ctx, *, notice):
+        dumped.append(path.name)
+        return real(path, ctx, notice=notice)
+
+    monkeypatch.setattr(release_member_dump, "dump_release_member", _spy)
+    old, new = _release(tmp_path, "old-only-member")
+    out = tmp_path / "compared.json"
+    result = _invoke(
+        "compare",
+        str(old),
+        str(new),
+        "--bundle-facts-out",
+        str(out),
+        "-o",
+        f"json={tmp_path / 'report.json'}",
+    )
+    assert result.exit_code in (0, 1, 2, 4), result.output
+    assert dumped == ["libgone.json"]
+    doc = json.loads(out.read_text(encoding="utf-8"))
+    assert sorted(doc["per_library_snapshots"]) == ["liba.json", "libgone.json"]
+
+
+def test_a_single_library_is_not_a_release(tmp_path: Path) -> None:
+    old, _new = _release(tmp_path, "one-member")
+    out = tmp_path / "dumped.json"
+    result = _invoke("dump", str(old / "liba.json"), "--bundle-facts-out", str(out))
+    assert result.exit_code == 64, result.output
+    assert "directory or package release" in result.output
+    assert not out.exists()
+
+
+def test_an_empty_release_is_an_error_not_an_empty_baseline(tmp_path: Path) -> None:
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    out = tmp_path / "dumped.json"
+    result = _invoke("dump", str(empty), "--bundle-facts-out", str(out))
+    assert result.exit_code != 0, result.output
+    assert not out.exists()
+
+
+def test_compare_keys_json_snapshot_members_once(tmp_path: Path) -> None:
+    """The producer bug the parity test found: every key is a member key."""
+    old, new = _release(tmp_path, "three-members")
+    out = tmp_path / "compared.json"
+    result = _invoke(
+        "compare",
+        str(old),
+        str(new),
+        "--bundle-facts-out",
+        str(out),
+        "-o",
+        f"json={tmp_path / 'report.json'}",
+    )
+    assert result.exit_code in (0, 1, 2, 4), result.output
+    doc = json.loads(out.read_text(encoding="utf-8"))
+    assert sorted(doc["per_library_snapshots"]) == [
+        "liba.json",
+        "libb.json",
+        "libc.json",
+    ]
+
+
+def test_a_member_that_fails_to_dump_is_kept_degraded_like_compare_keeps_it(
+    tmp_path: Path,
+) -> None:
+    """ADR-065 D8: a member whose dump fails is persisted as an ELF-only
+    stand-in carrying its failure, never dropped. Oracle: `compare
+    --bundle-facts-out`, which captures the same unpaired member through the
+    same resolver."""
+    old, new = _release(tmp_path, "one-member")
+    (old / "libbad.so").write_bytes(b"\x7fELF not really an ELF file")
+    dumped, compared = tmp_path / "dumped.json", tmp_path / "compared.json"
+    result = _invoke("dump", str(old), "--bundle-facts-out", str(dumped))
+    assert result.exit_code == 0, result.output
+    assert "1 degraded" in result.stderr
+    assert "degraded: libbad.so:" in result.stderr
+    compare = _invoke(
+        "compare",
+        str(old),
+        str(new),
+        "--bundle-facts-out",
+        str(compared),
+        "-o",
+        f"json={tmp_path / 'report.json'}",
+    )
+    assert compare.exit_code in (0, 1, 2, 4), compare.output
+    dumped_doc = json.loads(dumped.read_text(encoding="utf-8"))
+    assert dumped_doc == json.loads(compared.read_text(encoding="utf-8"))
+    assert sorted(dumped_doc["degraded_members"]) == ["libbad.so"]
+    assert "ELF-only degraded capture" in dumped_doc["degraded_members"]["libbad.so"]
+    assert dumped_doc["per_library_snapshots"]["libbad.so"]["elf_only_mode"] is True
+
+
+def test_the_config_public_header_dirs_reach_the_capture_as_they_reach_compare(
+    tmp_path: Path,
+) -> None:
+    """`scope.public_header_dirs` from `--config` is handed to every member
+    dump, as a directory `compare` hands it. Oracle: compare's document."""
+    old, new = _release(tmp_path, "three-members")
+    include = tmp_path / "include"
+    include.mkdir()
+    cfg = tmp_path / "abicheck.yml"
+    cfg.write_text(f"scope:\n  public_header_dirs: [{include}]\n", encoding="utf-8")
+    dumped, compared = tmp_path / "dumped.json", tmp_path / "compared.json"
+    result = _invoke(
+        "dump", str(old), "--config", str(cfg), "--bundle-facts-out", str(dumped)
+    )
+    assert result.exit_code == 0, result.output
+    compare = _invoke(
+        "compare",
+        str(old),
+        str(new),
+        "--config",
+        str(cfg),
+        "--bundle-facts-out",
+        str(compared),
+        "-o",
+        f"json={tmp_path / 'r.json'}",
+    )
+    assert compare.exit_code in (0, 1, 2, 4), compare.output
+    assert json.loads(dumped.read_text(encoding="utf-8")) == json.loads(
+        compared.read_text(encoding="utf-8")
+    )
+
+
+def test_an_unknown_variant_is_a_usage_error_naming_it(tmp_path: Path) -> None:
+    pkg = tmp_path / "pkg"
+    _multi_variant_package(pkg)
+    out = tmp_path / "dumped.json"
+    result = _invoke(
+        "dump", str(pkg), "--variant", "no-such-variant", "--bundle-facts-out", str(out)
+    )
+    assert result.exit_code == 64, result.output
+    assert "no-such-variant" in result.output
+    assert not out.exists()

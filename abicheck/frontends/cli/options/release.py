@@ -136,25 +136,11 @@ def release_options(func: F) -> F:
         "for a later stored-baseline bundle comparison. "
         "Additive output alongside the ordinary live-vs-live comparison. "
         "(directory/package inputs only)\n\n"
-        "Phase 7d (one-comparison-product.md §4.1) originally classed this "
-        'REMOVE ("evidence capture belongs to dump (D2)"). Ruled '
-        "explicitly, not left pending: `dump` has no directory/package "
-        "fan-out at all today -- its operand is a single binary/header "
-        "input, with no equivalent that walks a release tree and writes a "
-        "multi-library BundleFacts document -- so this is not a duplicate "
-        "spelling of a `dump` capability to collapse, it is the only way "
-        "to produce a stored-baseline bundle-facts document for a later "
-        "`compare OLD_FACTS NEW_INPUT` bundle comparison. Under D5's own "
-        "test it is a per-run operand exactly like `-o/--output`: PATH "
-        "names where *this invocation's* evidence capture lands, which is "
-        "not a stable project property (it varies by run/CI job, e.g. by "
-        "date or build id) and has no config vocabulary to merge into "
-        "(guard 1) without inventing one purely to move a path string "
-        '(guard 2\'s "no escape hatch" cuts the other way here -- a fixed '
-        "config path would make the flag's own PATH argument the escape "
-        "hatch). Stays a `compare` CLI flag; revisit only if `dump` grows "
-        "a real release fan-out, at which point this becomes a duplicate "
-        "spelling of that capability rather than the only one.",
+        "The same document `dump RELEASE --bundle-facts-out PATH` writes, "
+        "by the same producer: this captures the OLD side as a by-product "
+        "of a comparison that already extracted it; `dump` captures a "
+        "release with no comparison. Both are kept (ruled 2026-10-31): "
+        "neither is a second implementation of the other.",
     )(func)
     # one-comparison-product.md Phase 7n: ``--devel-pkg`` and this group's
     # own ``--debug-info`` are gone from *here*. Neither capability is: a

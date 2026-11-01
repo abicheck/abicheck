@@ -147,6 +147,9 @@ def resolve_no_baseline_set_plan(
     dso_only: bool = False,
     selection: ReleaseSelection | None = None,
     variant: str | None = None,
+    side_label: str = "new",
+    headers: tuple[Path, ...] = (),
+    includes: tuple[Path, ...] = (),
 ) -> NoBaselineSetPlan:
     """Resolve *operand* (a directory, package archive, or multi-artifact
     stored package) into a :class:`NoBaselineSetPlan`.
@@ -158,6 +161,12 @@ def resolve_no_baseline_set_plan(
     :class:`~abicheck.errors.AmbiguousLibraryMatchError`), so a front end
     translates them exactly as the two-sided release boundary does.
     Temporary directories are removed again if resolution fails partway.
+
+    *side_label* labels the operand for :func:`~abicheck.workflows.release_inputs.
+    resolve_release_side` (``"old"`` for ``dump --bundle-facts-out``, which
+    captures a baseline); *headers*/*includes* are the side's ``-H``/
+    ``--include`` inputs, composed with the operand's own header tree into
+    ``side.headers``/``side.includes`` exactly as a two-sided release does.
     """
     from .extraction import (
         _is_elf_shared_object,
@@ -194,14 +203,14 @@ def resolve_no_baseline_set_plan(
     try:
         side = resolve_release_side(
             operand,
-            side="new",
+            side=side_label,
             debug_pkg=None,
             devel_pkg=None,
             include_private_dso=include_private_dso,
             dso_only=dso_only,
-            headers=(),
+            headers=headers,
             side_headers_only=(),
-            includes=(),
+            includes=includes,
             side_includes_only=(),
             config_includes=(),
             extract_if_package=_do_extract,
