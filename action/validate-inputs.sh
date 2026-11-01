@@ -363,10 +363,18 @@ case "$MODE" in
         _stored_old=""
         [[ -f "$INPUT_ABI_BASELINE" ]] && _stored_old="$INPUT_ABI_BASELINE"
       fi
-      if _is_stored_bundle_facts_operand "$_stored_old" \
-         && ! _cli_choice_allows stored-bundle-facts -o "$FORMAT"; then
-        _fail "mode: compare does not support format: $FORMAT with a stored BundleFacts old side ('$_stored_old', from a prior --bundle-facts-out) — only $(_cli_choice_list stored-bundle-facts -o) are available for a stored-bundle-facts comparison."
-      fi
+      _is_stored_bundle_facts_operand "$_stored_old"
+      case $? in
+        0)
+          if ! _cli_choice_allows stored-bundle-facts -o "$FORMAT"; then
+            _fail "mode: compare does not support format: $FORMAT with a stored BundleFacts old side ('$_stored_old', from a prior --bundle-facts-out) — only $(_cli_choice_list stored-bundle-facts -o) are available for a stored-bundle-facts comparison."
+          fi
+          ;;
+        2)
+          # Said once, not silently skipped: the run still enforces it, later.
+          printf '%s\n' "::notice::$(_sanitize_annotation "Preflight could not tell whether old side '$_stored_old' is a stored BundleFacts document (no Python 3.11+ before setup-python, or the Action's source tree is not importable), so format: $FORMAT is not pre-checked against the stored set; the CLI checks it after install.")"
+          ;;
+      esac
     fi
     if [[ -n "$FORMAT" ]]; then
       if { [[ -n "$NEW_LIBRARY" ]] && _is_compare_release_operand "$NEW_LIBRARY"; } \

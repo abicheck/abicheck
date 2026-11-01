@@ -26,7 +26,7 @@ because that comparison renders a narrower format set
 -- the predicate ``compare``'s routing calls -- imported from the Action's
 own source tree (``$1``, the same tree ``install-abicheck.sh`` installs from
 and ``cli-surface.txt`` was generated from). Its import closure is the
-standard library only (``tests/test_action_stored_operand_probe.py`` runs it
+standard library only (``tests/test_action_stored_bundle_facts_preflight.py`` runs it
 under ``python -S``, with no site-packages), so it runs before the install.
 A shell or Python re-implementation would be the second transcription
 ADR-070 forbids; a path-extension heuristic was rejected because a stored

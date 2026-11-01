@@ -217,6 +217,57 @@ def test_the_side_run_sh_compares_is_the_side_probed(
     assert ("stored BundleFacts old side" in result.stdout) == refused
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="the python3 shim needs shebang dispatch"
+)
+@pytest.mark.parametrize("probe_exit", [2, 3, 127])
+def test_an_undecided_probe_says_the_check_was_skipped(
+    shapes: tuple[dict[str, Path], Path], tmp_path: Path, probe_exit: int
+) -> None:
+    """A runner whose interpreter cannot answer (too old, no tree, crashed)
+    lets the run through -- the CLI enforces after install -- and says so
+    once as a notice, rather than skipping in silence."""
+    operands, new = shapes
+    shim_dir = tmp_path / "bin"
+    shim_dir.mkdir()
+    shim = shim_dir / "python3"
+    shim.write_text(f"#!/bin/sh\nexit {probe_exit}\n", encoding="utf-8")
+    shim.chmod(0o755)
+    result = _validate(
+        {
+            "INPUT_MODE": "compare",
+            "INPUT_FORMAT": "sarif",
+            "INPUT_OLD_LIBRARY": str(operands["stored-json"]),
+            "INPUT_NEW_LIBRARY": str(new),
+            "PATH": f"{shim_dir}{os.pathsep}{os.environ['PATH']}",
+        },
+        cwd=tmp_path,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    notices = [
+        line for line in result.stdout.splitlines() if line.startswith("::notice::")
+    ]
+    assert len(notices) == 1, result.stdout
+    assert "not pre-checked" in notices[0] and "after install" in notices[0]
+
+
+def test_a_decided_probe_emits_no_skip_notice(
+    shapes: tuple[dict[str, Path], Path], tmp_path: Path
+) -> None:
+    operands, new = shapes
+    result = _validate(
+        {
+            "INPUT_MODE": "compare",
+            "INPUT_FORMAT": "json",
+            "INPUT_OLD_LIBRARY": str(operands["stored-json"]),
+            "INPUT_NEW_LIBRARY": str(new),
+        },
+        cwd=tmp_path,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "::notice::" not in result.stdout
+
+
 def test_the_untrusted_checkout_cannot_shadow_the_classifier(
     shapes: tuple[dict[str, Path], Path], tmp_path: Path
 ) -> None:

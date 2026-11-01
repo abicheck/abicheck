@@ -670,8 +670,8 @@ inputs:
       the dependency install by the CLI's own classifier, run from this
       Action's source tree (action/stored_bundle_facts_probe.py, bounded
       reads only); on a runner whose pre-installed Python is older than
-      3.11 that check is skipped and the CLI rejects the format after
-      install. compare, audit-only shape (old-library/abi-baseline both
+      3.11 that check is skipped with a notice and the CLI rejects the
+      format after install. compare, audit-only shape (old-library/abi-baseline both
       omitted): json, markdown, sarif, junit, or oneline — html and review
       are two-sided-report renderers with no audit-only equivalent and are
       rejected with an error. html is also supported by deps-tree/deps-compare
