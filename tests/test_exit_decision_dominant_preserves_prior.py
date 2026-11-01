@@ -19,7 +19,7 @@ import dataclasses
 import pytest
 
 from abicheck.policy.exit_decision import ExitDecision, ExitReason
-from abicheck.policy.exit_decision_precedence import (
+from abicheck.policy.exit_rank import (
     _DOMINANT_FIELD,
     _dominant_decision,
 )

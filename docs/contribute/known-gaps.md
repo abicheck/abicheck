@@ -50,8 +50,8 @@ Next, unranked (the `--no-baseline` one-sided-detector gap, the target-platform 
 
 ### Scalar and release `compare` still fold the exit code in two places (2026-10-07)
 
-**Status (2026-10-12): PARTIAL, narrowed further.** The evidence-contract precedence (exit 7) is decided by one owner, `policy/exit_decision_precedence.py::resolve_evidence_over_ordinary`, for both paths; `tests/test_exit_precedence_matrix.py` pins both resolvers' exit codes over their per-axis matrices. Two resolvers remain: `policy/exit_decision.py::resolve_compare_exit_decision` (scalar) and `policy/exit_decision_precedence.py::resolve_release_exit_decision` (release), which keeps the release-only axes (`not_comparable`, the mode-dependent removed-library rank, the operational floor, the release-global fold) separate.  
-`hygiene` — Scalar and release `compare` still use two precedence resolvers (`resolve_compare_exit_decision` and `resolve_release_exit_decision`), so the exit-code rules can drift between the two paths. [Full write-up](known-gaps/scalar-and-release-compare-still-fold-the-exit-code-in-two.md)
+**Status (2026-11-01): PARTIAL, one cell family awaiting a ruling.** Both ladders (`resolve_compare_exit_decision_with_abort_axes`, scalar; `resolve_release_exit_decision`, release) now delegate dominant-axis precedence to one rank table, `policy/exit_rank.py::COMPARE_EXIT_RANK`, tested on its own (`tests/test_exit_rank_table.py`). All 512 N=1 cells were enumerated; the ladders agree field for field except the 128 cells where a budget overflow (5) decides the scalar exit and the evidence contract does not fire: the release ladder has no budget input. That family is pinned by `tests/test_exit_precedence_matrix.py::TestOneMemberCellDiff` and awaits a maintainer ruling under ADR-064 before the scalar path can call the release ladder directly.  
+`hygiene` — Scalar and release `compare` still have two ladder entry points; they share one rank table, and at N=1 differ only on the budget-overflow axis the release ladder cannot express. [Full write-up](known-gaps/scalar-and-release-compare-still-fold-the-exit-code-in-two.md)
 
 ## Open and partially open gaps
 
@@ -255,7 +255,7 @@ current emitter, which is unchanged.
 
 #### The root Action's baseline provenance is not recorded in the JSON report (2026-10-16)
 
-**Status (2026-10-16): OPEN.** The root Action now says which baseline it compared against, in its `baseline-source`, `baseline-asset-name`, `baseline-project-ref`, `baseline-generation` and `baseline-profile` outputs and in a "Baseline source" step-summary block. The JSON report, which a downstream consumer reads on its own, does not carry that provenance, so it cannot tell a legacy asset from a baseline-set, or which `project_ref` was checked. The nearest existing owner is ADR-065's acquisition record (`abicheck/model/scope_acquisition.py`). It records a per-member *state* (`available`, `failed`, `expected_not_produced`, and so on), not the artifact or revision a member was read from, so it does not already carry this. Adding the fields there is a report-schema change with its own decision and golden updates, so it is not made here.
+**Status (2026-11-01): CLOSED.** The compare report (schema 6.8) and the release report (release schema 2.8) carry an optional top-level `baseline_provenance` block (`source`, `asset_name`, `project_ref`, `generation`, `profile`), labelled `asserted_by: action` and `applies_to: baseline_operand`. The root Action writes its resolved values to a JSON file and passes `--set report.baseline_provenance=@FILE`; the CLI checks the file's shape (exit 64 if unusable) but not its values. Owners: `abicheck/model/baseline_provenance.py`, `abicheck/frontends/cli/baseline_provenance.py`, `action/run.sh`'s `add_baseline_provenance_flag`. The schema reserves `members` for per-member records that ADR-065's acquisition record can fill later; nothing emits it yet. A not-comparable or `--budget`-aborted single-pair report does not carry the block. Tests: `tests/test_report_baseline_provenance.py`, `tests/test_action_run_sh_baseline_source.py`.
 
 #### ADR-062 D14-D18 data-evolution rules are partly implemented (2026-10-30)
 
@@ -444,14 +444,12 @@ implemented; D18 is partial. Owner: `storage/`; per-item status in the
 
 #### Bundle and multi-library memory
 
-`perf` — Three retention costs on the multi-library path: `read_bundle_facts_package` holds raw JSON and decoded snapshots together, every member snapshot stores its own copy of the shared header evidence, and `--bundle-facts-out` pins OLD snapshots per member.
+`perf` — Two retention costs on the multi-library path: `read_bundle_facts_package` holds raw JSON and decoded snapshots together, and every member snapshot stores its own copy of the shared header evidence. (`--bundle-facts-out` pinning OLD snapshots per member is closed, see the [archive](archive/known-gaps-closed.md).)
 
 - [`bundle_facts_store.read_bundle_facts_package` holds a bundle's raw JSON and its decoded `AbiSnapshot`s concurrently at peak](known-gaps/bundle-facts-storeread-bundle-facts-package-holds-a-bundles-raw.md)  
   **Status (re-verified 2026-10-09 at `456989f`): OPEN.** abicheck/storage/import_bundle_facts.py:597 export_bundle_facts still returns one whole dict[str, Any] document (no streaming form). It is bounded by DEFAULT_MAX_BUNDLE_DECODED_BYTES, as the entry notes.
 - [The release public surface is acquired once, but each member snapshot still stores its own copy of the header evidence](known-gaps/the-release-public-surface-is-acquired-once-but-each-member.md)  
   **Status (re-verified 2026-10-09 at `456989f`): OPEN.** The per-member header evidence is still stored once per member. abicheck/storage/import_bundle_facts.py:107 still has _BUNDLE_FACTS_SCHEMA_VERSION = 3, so it still refuses schema 4.
-- [Multi-library compare memory: --bundle-facts-out still pins OLD snapshots per member](known-gaps/multi-library-compare-memory-bundle-facts-out-still-pins-old.md)  
-  **Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** Closed: JUnit uses SymbolInventory, compressed baseline streaming, and the attrs aliasing. Still open: OLD-side retention for --bundle-facts-out (no spooling handle). Graph sharing and Fact pooling were rejected as negative results, and the surface_graph ordering question is unverified.
 
 #### Interpreter startup dominates a small-input CLI run
 
@@ -512,6 +510,11 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 `perf` — The clang JSON tree is walked at least eight times in Python, snapshots are pickled across the side boundary, and populating the snapshot cache costs ~30 % wall on a 28-member release. [Full write-up](known-gaps/python-level-ast-walks-side-boundary-and-cache-costs.md)
 
 ### Hygiene
+
+#### A live release capture is not byte-reproducible run to run: member dict key order varies (2026-11-01)
+
+**Status (2026-11-01): OPEN.** Found while measuring the `--bundle-facts-out` spool. Two `compare --bundle-facts-out` runs of one unchanged revision (`8eb4d128a`) over one compiled six-member fixture (`scripts/bench_release_memory.py --members 6 --apis 1800 --records 40`) wrote JSON documents that are equal as JSON values but not as bytes: 72 objects listed their keys in a different order, six per member, among them `elf.versions_required`, `dwarf.structs`, `dwarf.base_types`, `dwarf_advanced.calling_conventions`, `ast_toolchain` and `contract.profile_fields`. The cause is in extraction, upstream of every writer, and not established: some of those maps are built in an order that varies between runs. The writer is deterministic over fixed snapshots (`tests/test_bundle_facts_out_spool.py`, `tests/test_bundle_facts_streaming_write.py`). This settles the question the closed `--bundle-facts-out` retention entry left unverified (it suspected `surface_graph` ordering): the nondeterminism predates that work and is not confined to `surface_graph`. The two archive-form documents from the same runs happened to be byte-identical, so one pair of equal archives proves nothing either way.
+`hygiene` — A stored baseline's `stored_sha256` can differ between two captures of the same release, so a digest comparison reads a no-op re-capture as a change.
 
 #### Release report: live and stored operands render different documents
 

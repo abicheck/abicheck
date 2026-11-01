@@ -337,29 +337,28 @@ class _Sampler(threading.Thread):
 # Variants
 # ---------------------------------------------------------------------------
 
+
+def _variant_args(
+    out: Path, *, junit: bool = False, baseline: str | None = None
+) -> list[str]:
+    args = ["-o", f"json={out / 'report.json'}"]
+    if junit:
+        args += ["-o", f"junit={out / 'report.xml'}"]
+    if baseline is not None:
+        args += ["--bundle-facts-out", str(out / baseline)]
+    return args
+
+
 #: name -> extra CLI arguments, as a function of the output directory.
 VARIANTS: dict[str, object] = {
-    "json": lambda out: ["-o", f"json={out / 'report.json'}"],
-    "junit": lambda out: [
-        "-o",
-        f"json={out / 'report.json'}",
-        "-o",
-        f"junit={out / 'report.xml'}",
-    ],
-    "bundle-facts": lambda out: [
-        "-o",
-        f"json={out / 'report.json'}",
-        "--bundle-facts-out",
-        str(out / "baseline.json"),
-    ],
-    "junit+bundle-facts": lambda out: [
-        "-o",
-        f"json={out / 'report.json'}",
-        "-o",
-        f"junit={out / 'report.xml'}",
-        "--bundle-facts-out",
-        str(out / "baseline.json"),
-    ],
+    "json": lambda out: _variant_args(out),
+    "junit": lambda out: _variant_args(out, junit=True),
+    "bundle-facts": lambda out: _variant_args(out, baseline="baseline.json"),
+    # The G40 archive form, selected by the `.zip` suffix.
+    "bundle-facts-archive": lambda out: _variant_args(out, baseline="baseline.zip"),
+    "junit+bundle-facts": lambda out: _variant_args(
+        out, junit=True, baseline="baseline.json"
+    ),
 }
 
 

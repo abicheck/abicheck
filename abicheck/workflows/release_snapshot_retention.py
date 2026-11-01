@@ -40,7 +40,13 @@ once per member into a
 its comparison finishes, and the snapshot is released there instead of
 being pinned until the release-level JUnit fold at the end of the run.
 ``--bundle-facts-out`` genuinely needs the whole document and is the only
-remaining reason ``old_full`` is ever true.
+remaining reason ``old_full`` is ever true -- and it keeps that document on
+disk, not resident: the release passes a
+:class:`~abicheck.storage.bundle_facts_spool.BlobSpool` as ``old_spool``, so
+each member's OLD snapshot is encoded into it when the member's comparison
+finishes and the entry keeps a :class:`~abicheck.storage.bundle_facts_spool.
+SpooledBlob` handle beside the compact evidence. The writer reads the blobs
+back one at a time (``workflows.release_bundle.write_bundle_facts_out``).
 
 Nothing anywhere reads a stashed ``_new_snapshot``: the one reader that
 looks for it (``collect_bundle_result``) falls back to the compact
@@ -67,8 +73,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..checker_types import DiffResult
+from ..errors import SnapshotError
 from ..model import AbiSnapshot
 from ..model.symbol_inventory import SymbolInventory, build_symbol_inventory
+from ..storage.bundle_facts_spool import BlobSpool, SpooledBlob
 
 __all__ = [
     "SnapshotRetention",
@@ -99,12 +107,18 @@ class SnapshotRetention:
     #: ``counts`` record. Empty when it is not.
     old_consumers: tuple[str, ...] = ()
     new_consumers: tuple[str, ...] = ()
+    #: Where a full OLD snapshot is kept when *old_full*: on disk, encoded,
+    #: in this spool (the member entry keeps a ``SpooledBlob`` handle and
+    #: the compact evidence), instead of resident. ``None`` keeps it
+    #: resident. ``--bundle-facts-out`` always passes one.
+    old_spool: BlobSpool | None = None
 
     def as_counts(self) -> dict[str, object]:
         """A memory-trace-friendly record of this decision."""
         return {
             "junit_inventory": self.junit_inventory,
             "old_full": self.old_full,
+            "old_spooled": self.old_full and self.old_spool is not None,
             "new_full": self.new_full,
             "old_consumers": list(self.old_consumers),
             "new_consumers": list(self.new_consumers),
@@ -115,6 +129,7 @@ def resolve_snapshot_retention(
     *,
     junit: bool = False,
     bundle_facts_out: bool = False,
+    old_spool: BlobSpool | None = None,
 ) -> SnapshotRetention:
     """Resolve retention from the run's *actual* output requirements.
 
@@ -130,6 +145,10 @@ def resolve_snapshot_retention(
 
     Neither consumer reads the NEW side, so ``new_full`` stays ``False``;
     see this module's docstring for the call sites that establish that.
+
+    *old_spool* moves a retained OLD snapshot out of memory: each member's
+    is encoded into it when that member's comparison finishes, and read
+    back only when ``--bundle-facts-out`` writes the document.
     """
     old_consumers: list[str] = []
     if bundle_facts_out:
@@ -140,6 +159,7 @@ def resolve_snapshot_retention(
         new_full=False,
         old_consumers=tuple(old_consumers),
         new_consumers=(),
+        old_spool=old_spool if old_consumers else None,
     )
 
 
@@ -173,7 +193,18 @@ def stash_member_evidence(
         # keeps four tuples of ``str`` per member instead of a whole
         # declaration graph, for the whole rest of the run.
         entry["_old_junit_inventory"] = build_symbol_inventory(old_snapshot)
-    if keep.old_full:
+    spooled = (
+        _spool_snapshot(keep.old_spool, old_snapshot)
+        if keep.old_full and keep.old_spool is not None
+        else None
+    )
+    if spooled is not None:
+        # Kept in full, on disk: the entry holds the handle, and the compact
+        # evidence serves the bundle layer exactly as on a run without
+        # --bundle-facts-out.
+        entry["_old_snapshot_spooled"] = spooled
+        entry["_old_bundle_evidence"] = build_bundle_signature_evidence(old_snapshot)
+    elif keep.old_full:
         entry["_old_snapshot"] = old_snapshot
     else:
         entry["_old_bundle_evidence"] = build_bundle_signature_evidence(old_snapshot)
@@ -187,11 +218,26 @@ def stash_member_evidence(
     )
 
 
+def _spool_snapshot(spool: BlobSpool, snapshot: AbiSnapshot) -> SpooledBlob | None:
+    """*snapshot*'s spooled handle, or ``None`` when it cannot be spooled.
+
+    ``None`` keeps the snapshot resident instead, so a member's comparison
+    never fails on the baseline's account: ``write_bundle_facts_out``
+    spools it again and reports a persistent failure (a full disk, a
+    snapshot no flat document can carry) as the ``--bundle-facts-out``
+    error it always was."""
+    try:
+        return spool.put_snapshot(snapshot)
+    except (OSError, SnapshotError, ValueError):
+        return None
+
+
 def release_old_member_snapshots(
     library_results: list[dict[str, object]],
-) -> list[tuple[str, AbiSnapshot]]:
+) -> list[tuple[str, AbiSnapshot | SpooledBlob]]:
     """``(member file name, OLD snapshot)`` for every member entry that kept
-    one -- what ``--bundle-facts-out`` persists.
+    one -- what ``--bundle-facts-out`` persists. A snapshot kept in the
+    retention's spool is its :class:`SpooledBlob` handle.
 
     Keyed by the entry's own ``library`` (the OLD member's file name), not by
     the ``DiffResult``'s: a JSON-snapshot member's diff carries the snapshot's
@@ -204,13 +250,13 @@ def release_old_member_snapshots(
     kept its snapshot contributes; ``write_bundle_facts_out`` captures every
     other member from ``old_map`` itself.
     """
-    snapshots: list[tuple[str, AbiSnapshot]] = []
+    snapshots: list[tuple[str, AbiSnapshot | SpooledBlob]] = []
     for entry in library_results:
-        old_snap = entry.get("_old_snapshot")
+        old_snap = entry.get("_old_snapshot") or entry.get("_old_snapshot_spooled")
         name = entry.get("library")
         if (
             isinstance(entry.get("_diff_result"), DiffResult)
-            and isinstance(old_snap, AbiSnapshot)
+            and isinstance(old_snap, (AbiSnapshot, SpooledBlob))
             and isinstance(name, str)
         ):
             snapshots.append((name, old_snap))

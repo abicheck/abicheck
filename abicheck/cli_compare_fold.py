@@ -719,8 +719,8 @@ def report_not_comparable_and_exit(
     output: Path | None,
     secondary_writes: tuple[tuple[str, Path], ...] = (),
 ) -> NoReturn:
-    """Render the refusal to every requested output and exit
-    ``_EXIT_NOT_COMPARABLE``.
+    """Render the refusal to every requested output and exit with the
+    shared rank table's ``not_comparable`` code (16).
 
     The whole comparability-refusal step, owned here beside the renderer it
     drives (Codex review, PR #1274) rather than spelled out in
@@ -729,12 +729,12 @@ def report_not_comparable_and_exit(
     this refusal, then exit with its code" is one decision, not a caller's
     two.
     """
-    from .frontends.cli.runtime import _EXIT_NOT_COMPARABLE
+    from .workflows.gate import resolve_compare_not_comparable_exit_decision
 
     _report_not_comparable(
         exc, old, new, fmt=fmt, output=output, secondary_writes=secondary_writes
     )
-    sys.exit(_EXIT_NOT_COMPARABLE)
+    sys.exit(resolve_compare_not_comparable_exit_decision().code)
 
 
 def _report_run_aborted(

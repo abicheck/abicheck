@@ -1242,6 +1242,11 @@ concepts:
     renames: []
     config:
       - output.view
+  - concept: report.baseline_provenance
+    tier: config
+    renames: []
+    config:
+      - report.baseline_provenance
   - concept: compression
     tier: config
     renames: []

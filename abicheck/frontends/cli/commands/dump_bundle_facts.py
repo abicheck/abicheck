@@ -59,7 +59,10 @@ def dump_bundle_facts_out_option(func: F) -> F:
         "release's public surface from -H, and its instantiation manifest, "
         "if any. The document a later `compare BUNDLE_FACTS NEW_RELEASE` "
         "reads as its stored OLD side, and the same one `compare "
-        "--bundle-facts-out` writes for its OLD side. Replaces -o/--output.",
+        "--bundle-facts-out` writes for its OLD side. A PATH ending in .zip "
+        "writes the content-addressed zip archive form; any other name "
+        "writes the JSON document (gzip- or zstd-compressed for a name ending in .json.gz or .json.zst). "
+        "Replaces -o/--output.",
     )(func)
 
 

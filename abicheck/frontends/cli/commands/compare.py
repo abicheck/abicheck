@@ -533,10 +533,12 @@ def _compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
             bundle_cfg.used_by_manifests
             or bundle_cfg.required_symbols
             or bundle_cfg.output_view
+            or bundle_cfg.report_baseline_provenance
         ):
             raise click.UsageError(
-                "consumers.* and output.view are not supported on a comparison of "
-                "a stored BundleFacts document yet; remove them for this run"
+                "consumers.*, output.view and report.baseline_provenance are not "
+                "supported on a comparison of a stored BundleFacts document yet; "
+                "remove them for this run"
             )
     if _bundle_operands.old_is_stored:
         from .compare_bundle_facts import (
@@ -578,4 +580,13 @@ def _compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     from ..compare_config_run_inputs import fold_config_run_inputs
 
     fold_config_run_inputs(kwargs, cfg_path, project_cfg)
+    # report.baseline_provenance: read before any analysis (exit 64 if unusable).
+    from ..baseline_provenance import enter_baseline_provenance
+
+    enter_baseline_provenance(
+        ctx,
+        cfg_path=cfg_path,
+        project_cfg=project_cfg,
+        config_overrides=kwargs.get("config_overrides"),
+    )
     run_compare(ctx, **kwargs)

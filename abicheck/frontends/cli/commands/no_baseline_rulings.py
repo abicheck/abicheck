@@ -407,6 +407,11 @@ def _reject_config_scoping_for_no_baseline(
             "rendering selectors apply to a comparison's report, which an audit "
             "does not produce",
         ),
+        (
+            "report.baseline_provenance",
+            project_cfg.report_baseline_provenance,
+            "an audit has no baseline operand whose provenance it could record",
+        ),
     ):
         if value:
             raise click.UsageError(

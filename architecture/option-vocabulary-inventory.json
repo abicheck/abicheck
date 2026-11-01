@@ -1482,6 +1482,11 @@
    "default": "[]"
   },
   {
+   "id": "report.baseline_provenance",
+   "kind": "str",
+   "default": "None"
+  },
+  {
    "id": "consumers.manifests",
    "kind": "list",
    "default": "[]"

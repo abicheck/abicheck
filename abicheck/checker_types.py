@@ -79,6 +79,9 @@ class DiffResult(ReportSideFacts):
     # coverage line (guard macro -> count/examples, named cause -> count);
     # None when no export was attributed (`confidence.undeclared_export_census_block`).
     undeclared_export_census: dict[str, dict[str, object]] | None = None
+    # Report schema 6.8: the caller-asserted `baseline_provenance` block
+    # (`model/baseline_provenance.py`); None when the run was given none.
+    baseline_provenance: dict[str, object] | None = None
     # ADR-024: findings excluded because they are not on the public-header
     # ABI surface (only populated when scope_to_public_surface is enabled).
     # Recorded for audit — surfaced under --show-filtered — never dropped.

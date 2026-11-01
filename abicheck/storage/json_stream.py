@@ -55,7 +55,7 @@ from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-__all__ = ["LazyItems", "iter_json_compact", "iter_json_indented"]
+__all__ = ["LazyItems", "PreEncoded", "iter_json_compact", "iter_json_indented"]
 
 
 @dataclass(frozen=True)
@@ -76,6 +76,22 @@ class LazyItems:
 
     keys: Sequence[str]
     produce: Callable[[str], Any]
+
+
+@dataclass(frozen=True)
+class PreEncoded:
+    """A value already encoded as ``json.dumps(value, indent=n)`` text.
+
+    *chunks* yields that text in pieces when called; it is called once, at
+    the moment the value is encoded, so a caller can stream it from disk
+    (``storage.bundle_facts_spool``) instead of holding the value. Spliced
+    into the document re-padded to its depth, which is exact for the same
+    reason :func:`_repad` is: ``json``'s indented output puts a newline
+    only before padding, and escapes every newline inside a string. The
+    *indent* the text was encoded with must equal the document's.
+    """
+
+    chunks: Callable[[], Iterator[str]]
 
 
 def _dumps(value: Any, indent: int) -> str:
@@ -140,7 +156,7 @@ def _shallow(obj: dict[str, Any] | list[Any], depth: int) -> bool:
                 return False
             if not _shallow(value, depth - 1):
                 return False
-        elif isinstance(value, LazyItems):
+        elif isinstance(value, (LazyItems, PreEncoded)):
             return False
     return True
 
@@ -150,7 +166,7 @@ def _descend_first(value: Any) -> bool:
     joining a batch: a :class:`LazyItems` (which ``json.dumps`` cannot
     encode, and must not materialise) or a container wide enough to be
     batched itself."""
-    return isinstance(value, LazyItems) or (
+    return isinstance(value, (LazyItems, PreEncoded)) or (
         type(value) in (dict, list) and len(value) > _DESCEND_LEN
     )
 
@@ -244,6 +260,11 @@ def iter_json_indented(obj: Any, *, indent: int = 2, _level: int = 0) -> Iterato
     step = " " * indent
     pad = step * _level
     inner_pad = step * (_level + 1)
+
+    if isinstance(obj, PreEncoded):
+        for chunk in obj.chunks():
+            yield _repad(chunk, pad)
+        return
 
     if isinstance(obj, LazyItems):
         keys = list(obj.keys)

@@ -1299,7 +1299,9 @@ outputs:
       single *.abicheck.json[.gz|.zst] release asset), baseline-set (a
       release-contract baseline-set archive selected by baseline-profile
       and baseline-target), or direct-path (abi-baseline given as a file
-      path). Empty when no release baseline was resolved.
+      path). Empty when no release baseline was resolved. The JSON report's
+      baseline_provenance block carries this and the other baseline-*
+      values, marked asserted_by: action.
     value: ${{ steps.run-abicheck.outputs.baseline-source }}
   baseline-asset-name:
     description: >

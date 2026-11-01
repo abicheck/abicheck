@@ -268,8 +268,11 @@ def execute_release_compare(
     2-hour default) raises :class:`~abicheck.deadline.DeadlineExceeded`:
     the whole run is incomplete, not one member.
     """
+    from contextlib import nullcontext
+
     from ..pack_application import resolve_bundle_policy_file
     from ..policy.release_outcome import apply_removed_member_floor
+    from ..storage.bundle_facts_spool import BlobSpool
     from .compare.budget import budget_deadline
     from .comparison_input_receipt import env_matrix_content_digest
     from .extraction import ast_acquisition_scope, resolve_package_debug_info
@@ -336,7 +339,13 @@ def execute_release_compare(
     # The caller's deadline (the CLI's --budget scope), else the 2-hour
     # default, bounds the whole run: members, waits on them, and the
     # surface/bundle/matrix stages; expiry raises DeadlineExceeded.
-    with budget_deadline(None), ast_acquisition_scope() as ast_scope:
+    with (
+        budget_deadline(None),
+        ast_acquisition_scope() as ast_scope,
+        # `--bundle-facts-out`'s OLD snapshots wait here, encoded, not
+        # resident, until the document is written.
+        BlobSpool() if o.bundle_facts_out is not None else nullcontext() as old_spool,
+    ):
         member_ctx = ReleaseMemberContext(
             request=release_parent_request(
                 pack_application,
@@ -384,6 +393,7 @@ def execute_release_compare(
             retention=resolve_snapshot_retention(
                 junit=o.junit_inventory,
                 bundle_facts_out=o.bundle_facts_out is not None,
+                old_spool=old_spool,
             ),
         )
         library_results, worst_verdict, junit_pairs = compare_release_members(
@@ -540,6 +550,7 @@ def execute_release_compare(
                 # unless --dso-only left one unclassified.
                 inventory_complete=not old_unclassified,
                 public_surface=surface_stage.old_surface,
+                spool=old_spool,
                 # ADR-062 A1.7: OLD's own manifest only -- this baseline
                 # describes OLD alone.
                 resolved_manifest=resolve_bundle_manifest(

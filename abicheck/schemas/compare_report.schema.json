@@ -1768,6 +1768,79 @@
         }
       }
     },
+    "baseline_provenance": {
+      "type": "object",
+      "description": "Schema 6.8: where the baseline (OLD) operand came from, as the caller asserted it -- the root GitHub Action's `baseline-source`/`baseline-asset-name`/`baseline-project-ref`/`baseline-generation`/`baseline-profile` outputs, so a consumer reading this report alone can tell a legacy asset from a baseline-set and which `project_ref` was checked. Present only when the run was given `report.baseline_provenance`. `asserted_by: action` marks the values unverified by the CLI. `members` is reserved for per-member records (ADR-065's acquisition record), keyed by member name, each a record with `applies_to: member`; nothing emits it yet. Informational: never affects `verdict`, `severity` or any exit code.",
+      "additionalProperties": false,
+      "required": [
+        "asserted_by",
+        "applies_to",
+        "source",
+        "asset_name",
+        "project_ref",
+        "generation",
+        "profile"
+      ],
+      "properties": {
+        "asserted_by": {
+          "type": "string",
+          "enum": [
+            "action"
+          ],
+          "description": "Who stated these values. `action`: the root GitHub Action wrote them (`--set report.baseline_provenance=@FILE`); the CLI did not fetch the asset or read the archive manifest, so it did not verify them."
+        },
+        "applies_to": {
+          "type": "string",
+          "const": "baseline_operand",
+          "description": "The whole OLD operand."
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "legacy-asset",
+            "baseline-set",
+            "direct-path"
+          ],
+          "description": "How the baseline was resolved: a single `*.abicheck.json[.gz|.zst]` release asset, a release-contract baseline-set archive, or a file path given directly. The same value as the Action's `baseline-source` output."
+        },
+        "asset_name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The release asset (or, for `direct-path`, the path) the baseline was read from. The Action's `baseline-asset-name` output."
+        },
+        "project_ref": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "`baseline-set` only: the archive manifest's `project_ref`. `null` otherwise."
+        },
+        "generation": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "`baseline-set` only: the archive's baseline generation, `null` when it has none or for another source."
+        },
+        "profile": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "`baseline-set` only: the profile the target's snapshot was resolved at. `null` otherwise."
+        },
+        "members": {
+          "type": "object",
+          "description": "Reserved: per-member records keyed by member name (ADR-065's acquisition record). Not emitted yet.",
+          "additionalProperties": {
+            "$ref": "#/$defs/baselineProvenanceRecord"
+          }
+        }
+      }
+    },
     "policy_overrides": {
       "type": "object",
       "additionalProperties": {
@@ -3986,6 +4059,72 @@
           "macro",
           "header"
         ]
+      }
+    },
+    "baselineProvenanceRecord": {
+      "type": "object",
+      "description": "One member's baseline provenance inside `baseline_provenance.members` (reserved; not emitted yet).",
+      "additionalProperties": false,
+      "required": [
+        "asserted_by",
+        "applies_to",
+        "source",
+        "asset_name",
+        "project_ref",
+        "generation",
+        "profile"
+      ],
+      "properties": {
+        "asserted_by": {
+          "type": "string",
+          "enum": [
+            "action"
+          ],
+          "description": "Who stated these values. `action`: the root GitHub Action wrote them (`--set report.baseline_provenance=@FILE`); the CLI did not fetch the asset or read the archive manifest, so it did not verify them."
+        },
+        "applies_to": {
+          "type": "string",
+          "const": "member",
+          "description": "A per-member record inside `members`."
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "legacy-asset",
+            "baseline-set",
+            "direct-path"
+          ],
+          "description": "How the baseline was resolved: a single `*.abicheck.json[.gz|.zst]` release asset, a release-contract baseline-set archive, or a file path given directly. The same value as the Action's `baseline-source` output."
+        },
+        "asset_name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The release asset (or, for `direct-path`, the path) the baseline was read from. The Action's `baseline-asset-name` output."
+        },
+        "project_ref": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "`baseline-set` only: the archive manifest's `project_ref`. `null` otherwise."
+        },
+        "generation": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "`baseline-set` only: the archive's baseline generation, `null` when it has none or for another source."
+        },
+        "profile": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "`baseline-set` only: the profile the target's snapshot was resolved at. `null` otherwise."
+        }
       }
     }
   }

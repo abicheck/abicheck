@@ -691,6 +691,28 @@ def test_release_reports_the_probe_matrix_at_release_level(tmp_path: Path) -> No
     assert r.exit_code == cli.exit_code
 
 
+def test_comparability_refusal_exits_alike_on_both_routes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A refused pair exits 16 as a scalar compare and as a one-member release,
+    both from the shared rank table (``gate.dominant_axis_precedence_drift``)."""
+    from abicheck.errors import ScopeMismatchError
+
+    def refuse(*_a: Any, **_kw: Any) -> Any:
+        raise ScopeMismatchError("scope_fingerprint mismatch: injected")
+
+    monkeypatch.setattr("abicheck.workflows.compare_policy.compare_snapshots", refuse)
+    ops = write_operands(tmp_path, "identical")
+    scalar = _invoke(["compare", str(ops.old), str(ops.new)])
+    out = tmp_path / "release.json"
+    release = _invoke(
+        ["compare", str(ops.old_dir), str(ops.new_dir), "-o", f"json={out}"]
+    )
+    exit_block = json.loads(out.read_text(encoding="utf-8"))["exit"]
+    assert scalar.exit_code == release.exit_code == exit_block["code"] == 16
+    assert exit_block["reasons"] == ["not_comparable"]
+
+
 # ── known divergences: pinned, not normalized away ───────────────────────
 
 

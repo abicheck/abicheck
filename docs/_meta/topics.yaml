@@ -205,6 +205,8 @@ topics:
       - .github/workflows/update-main-baseline.yml
       - .github/workflows/protect-committed-baseline.yml
       - action.yml
+      - abicheck/model/baseline_provenance.py
+      - abicheck/frontends/cli/baseline_provenance.py
     reference_page: reference/resolve-baseline.md
     task_pages:
       - reference/publish-baseline.md

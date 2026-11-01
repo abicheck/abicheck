@@ -42,7 +42,7 @@ edge -- ``serialization.py``'s side is what stays dynamic.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -51,6 +51,7 @@ from ..errors import IncompatibleSnapshotSchemaError
 if TYPE_CHECKING:
     from ..model.bundle_facts import BundleFacts
     from ..snapshot_io import SnapshotWriteResult
+    from .bundle_facts_spool import BlobSpool, SpooledBlob
 
 
 def bundle_facts_to_dict(
@@ -444,4 +445,40 @@ def save_bundle_facts(
         iter_json_indented(bundle_facts_document_stream(facts)),
         path,
         compression=SnapshotCompression(compression),
+    )
+
+
+def save_spooled_bundle_facts(
+    facts: BundleFacts,
+    members: Mapping[str, SpooledBlob],
+    spool: BlobSpool,
+    path: str | Path,
+    *,
+    format: str = "json",
+) -> SnapshotWriteResult:
+    """Write *facts* whose member snapshots are already encoded in *spool*.
+
+    *members* maps each library name to its spooled blob, in document order;
+    ``facts.per_library_snapshots`` is not read. The bytes are those
+    :func:`save_bundle_facts` writes for the same facts holding the members
+    as live snapshots: the JSON form splices each blob re-padded to its
+    depth, and the archive form stores each blob under its own hash. No blob
+    is decoded back into a snapshot, and only one is read at a time.
+    """
+    from ..snapshot_io import SnapshotCompression
+    from .bundle_facts_archive import assemble_bundle_facts_archive
+    from .json_stream import LazyItems, PreEncoded, iter_json_indented
+    from .snapshot_stream_write import write_snapshot_text_stream
+
+    if format == "archive":
+        return assemble_bundle_facts_archive(path, facts, members, spool)
+    if format != "json":
+        raise ValueError(f"save_bundle_facts: unknown format {format!r}")
+    document = bundle_facts_to_dict(cast("BundleFacts", _FactsWithoutMembers(facts)))
+    document["per_library_snapshots"] = LazyItems(
+        keys=list(members),
+        produce=lambda name: PreEncoded(lambda: spool.iter_text(members[name])),
+    )
+    return write_snapshot_text_stream(
+        iter_json_indented(document), path, compression=SnapshotCompression.AUTO
     )

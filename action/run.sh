@@ -2348,6 +2348,49 @@ _emit_baseline_source_outputs() {
   echo "baseline-archive-verified=$(_baseline_source_field "${BASELINE_ARCHIVE_VERIFIED:-}")"
 }
 
+# report.baseline_provenance (compare report schema 6.8, release 2.8): the
+# same values as the outputs above, handed to the CLI as a JSON file so the
+# JSON report carries them too and a consumer reading only the report can
+# tell which baseline was checked. The CLI copies them as
+# `asserted_by: action`: it did not fetch the asset or read the manifest.
+# Written by Python so every publisher-controlled value is JSON-escaped.
+# Added before `set:`'s own `--set` lines, so an explicit `set:` entry for
+# the same key still wins (the CLI keeps the last one).
+add_baseline_provenance_flag() {
+  [[ -n "${BASELINE_SOURCE:-}" && "${_NO_BASELINE:-}" != "true" ]] || return 0
+  if [[ -z "${_PY_BIN:-}" ]]; then
+    _error_annotation "Recording the baseline source in the JSON report needs a working Python interpreter on PATH (resolved interpreter: '<none found on PATH>')."
+    exit 1
+  fi
+  local prov_file
+  prov_file=$(_mktemp_canonical "$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-baseline-provenance.XXXXXX")")
+  if ! (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -I -c '
+import json, sys
+source, asset, ref, generation, profile, out = sys.argv[1:7]
+doc = {
+    "source": source,
+    "asset_name": asset or None,
+    "project_ref": ref or None,
+    # Only ASCII digits are converted (str.isdigit() also accepts "²", which
+    # int() rejects). Anything else is passed through as written, so the CLI
+    # refuses it (exit 64) rather than this writer crashing or dropping it.
+    "generation": (
+        int(generation)
+        if generation.isascii() and generation.isdigit()
+        else (generation or None)
+    ),
+    "profile": profile or None,
+}
+with open(out, "w", encoding="utf-8") as fh:
+    json.dump(doc, fh)
+' "$BASELINE_SOURCE" "${BASELINE_SOURCE_ASSET:-}" "${BASELINE_SET_PROJECT_REF:-}" \
+    "${BASELINE_SET_GENERATION:-}" "${BASELINE_SET_PROFILE:-}" "$prov_file"); then
+    _error_annotation "Could not write the baseline provenance file for the JSON report ($prov_file)."
+    exit 1
+  fi
+  CMD+=(--set "report.baseline_provenance=@${prov_file}")
+}
+
 # "### Baseline source" step-summary block. Prints nothing when this run
 # compared against no release baseline (a no-baseline audit, or an
 # old-library given directly), so it never claims a source it did not use.
@@ -3409,6 +3452,7 @@ elif [[ "$MODE" == "compare" ]]; then
 
   # severity-preset is a core flag (--severity-preset, ADR-068): forwarded as-is.
   add_single_flag "--severity-preset" "${INPUT_SEVERITY_PRESET:-}"
+  add_baseline_provenance_flag
   add_set_flags
   # --budget: time guard (e.g. 15m, 900s, 1h); the step FAILS on overflow
   # (exit 5) -- a budget never silently shrinks scope. Baseline shape only --
