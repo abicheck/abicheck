@@ -512,7 +512,7 @@ class TestCompareKeepsWhatItDoesNotScore:
         # A documented nonzero exit is a `SystemExit`, not a failure --
         # anything else is a real traceback the parse below would hide.
         assert isinstance(result.exception, SystemExit | None), result.output
-        payload = json.loads(result.output)
+        payload = json.loads(result.stdout)
         return payload.get("report", payload)
 
     def test_an_excluded_finding_is_still_itemized(self, tmp_path: Path) -> None:
@@ -607,7 +607,7 @@ class TestReleaseFanoutKeepsWhatItDoesNotScore:
             ],
         )
         assert isinstance(result.exception, SystemExit | None), result.output
-        payload = json.loads(result.output)
+        payload = json.loads(result.stdout)
         lib = payload["libraries"][0]
         entries = [f for f in lib["findings"] if f["bucket"] == "not_evaluated"]
         by_kind = {f["kind"]: f for f in entries}
@@ -1376,7 +1376,7 @@ class TestNothingIsLost:
         # A documented nonzero exit is a `SystemExit`, not a failure --
         # anything else is a real traceback the parse below would hide.
         assert isinstance(result.exception, SystemExit | None), result.output
-        report = json.loads(result.output)
+        report = json.loads(result.stdout)
         removal = next(c for c in report["changes"] if c["kind"] == "func_removed")
         assert removal["contract_relevance"] == "UNKNOWN_UNRESOLVED"
         assert removal["compatibility_evaluation_status"] == "NOT_EVALUATED"

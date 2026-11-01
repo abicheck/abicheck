@@ -165,8 +165,8 @@ def _compare_removal(tmp_path: Path, rule_binding: str) -> list[dict]:
         ],
     )
     assert result.exit_code in (0, 2, 4), result.output
-    start = result.output.index("{")
-    return json.loads(result.output[start:])["changes"]
+    start = result.stdout.index("{")
+    return json.loads(result.stdout[start:])["changes"]
 
 
 def test_binding_weak_rule_applies_to_a_removed_weak_macho_export(

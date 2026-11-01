@@ -154,7 +154,7 @@ class TestEndToEndJsonReport:
             ],
         )
         assert result.exit_code == 4, result.output
-        payload = json.loads(result.output)
+        payload = json.loads(result.stdout)
         stamped = [c for c in payload["changes"] if "contract_relevance" in c]
         assert stamped, "fixture must produce at least one shadow-evaluated finding"
         for c in stamped:
@@ -193,7 +193,7 @@ class TestEndToEndJsonReport:
             ],
         )
         assert result.exit_code == 4, result.output
-        payload = json.loads(result.output)
+        payload = json.loads(result.stdout)
         schema = load_compare_report_schema()
         validate_instance(payload, schema)
         assert "contract_context" in schema["properties"]
@@ -295,7 +295,7 @@ class TestEndToEndJsonReport:
             ["compare", str(old_p), str(new_p), "-o", "json=-"],
         )
         assert result.exit_code == 4, result.output
-        payload = json.loads(result.output)
+        payload = json.loads(result.stdout)
         evaluation = payload["contract_context"]["evaluation_context"]
         assert evaluation["resolved_config"]["contract"]["mode"] == "all"
         provenance = evaluation["field_provenance"]["contract.mode"]
@@ -329,7 +329,7 @@ class TestEndToEndJsonReport:
             ],
         )
         assert legacy.exit_code == 4, legacy.output
-        ctx = json.loads(legacy.output)["contract_context"]["evaluation_context"]
+        ctx = json.loads(legacy.stdout)["contract_context"]["evaluation_context"]
         gate = ctx["resolved_config"]["gate"]
         # No severity setting anywhere: resolved to `legacy`.
         # gate.exit_code_scheme is purely derived (PR G2) -- no provenance.
@@ -361,7 +361,7 @@ class TestEndToEndJsonReport:
                 str(cfg),
             ],
         )
-        ctx = json.loads(scored.output)["contract_context"]["evaluation_context"]
+        ctx = json.loads(scored.stdout)["contract_context"]["evaluation_context"]
         gate = ctx["resolved_config"]["gate"]
         # A severity setting flips `auto` to the severity-aware scheme, and the
         # config is what selected the level.
@@ -395,7 +395,7 @@ class TestEndToEndJsonReport:
                 "strict",
             ],
         )
-        ctx = json.loads(result.output)["contract_context"]["evaluation_context"]
+        ctx = json.loads(result.stdout)["contract_context"]["evaluation_context"]
         assert ctx["resolved_config"]["gate"]["exit_code_scheme"] == "severity"
         assert ctx["field_provenance"]["gate.preset"]["layer"] == "explicit_cli"
 
@@ -420,7 +420,7 @@ class TestEndToEndJsonReport:
                 "json=-",
             ],
         )
-        ctx = json.loads(typed.output)["contract_context"]["evaluation_context"]
+        ctx = json.loads(typed.stdout)["contract_context"]["evaluation_context"]
         assert ctx["resolved_config"]["contract"]["mode"] == "exports"
         provenance = ctx["field_provenance"]["contract.mode"]
         assert provenance["layer"] == "explicit_cli"
@@ -449,7 +449,7 @@ class TestEndToEndJsonReport:
                 "json=-",
             ],
         )
-        ctx = json.loads(legacy.output)["contract_context"]["evaluation_context"]
+        ctx = json.loads(legacy.stdout)["contract_context"]["evaluation_context"]
         provenance = ctx["field_provenance"]["contract.mode"]
         assert provenance["layer"] == "project_config"
         assert provenance["selected_by"][0]["option"] == "scope.public"
@@ -713,7 +713,7 @@ class TestReleaseFanOutContractParity:
         )
         assert result.exit_code == 4, result.output
         assert (
-            json.loads(result.output)["severity"]["config"]["abi_breaking"] == "error"
+            json.loads(result.stdout)["severity"]["config"]["abi_breaking"] == "error"
         )
 
     def test_pack_field_this_kind_may_not_assign_still_rejected(self, tmp_path):

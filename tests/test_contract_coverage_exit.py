@@ -178,7 +178,7 @@ class TestTheCoverageExitIsApplied:
             "exports",
         )
         assert result.exit_code == 1, result.output
-        report = json.loads(result.output)
+        report = json.loads(result.stdout)
         removals = [c for c in report["changes"] if c["kind"] == "func_removed"]
         assert removals, report["changes"]
         for c in removals:
@@ -263,7 +263,7 @@ class TestTheGatingConditionIsVisible:
         assert result.exit_code == 1, result.output
         assert "Contract coverage incomplete" not in result.output
         # The report is still valid JSON and still carries the ledger.
-        report = json.loads(result.output)
+        report = json.loads(result.stdout)
         assert report["contract_coverage_exit_contribution"] == 1
         assert report["contract_coverage_failures"]
 

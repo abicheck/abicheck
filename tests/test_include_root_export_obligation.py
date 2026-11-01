@@ -139,7 +139,7 @@ def _public_not_exported(tmp_path: Path, lib: Path, header: Path) -> dict[str, s
             "json=-",
         ],
     )
-    doc = json.loads(result.output[result.output.index("{") :])
+    doc = json.loads(result.stdout[result.stdout.index("{") :])
     return {
         c["symbol"]: c["description"]
         for c in doc["changes"]

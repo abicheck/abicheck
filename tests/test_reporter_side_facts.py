@@ -128,7 +128,7 @@ class TestEvidenceDepthOutOfBandPack:
             ],
         )
         assert result.exit_code in (0, 1, 2, 4), result.output
-        payload = json.loads(result.output[result.output.index("{") :])
+        payload = json.loads(result.stdout[result.stdout.index("{") :])
         assert payload["old_evidence_depth"] == "build"
         assert payload["new_evidence_depth"] == "build"
 
@@ -151,7 +151,7 @@ class TestEvidenceDepthOutOfBandPack:
             ["compare", str(old_p), str(new_p), "-o", "json=-"],
         )
         assert result.exit_code in (0, 1, 2, 4), result.output
-        payload = json.loads(result.output)
+        payload = json.loads(result.stdout)
         assert payload["old_evidence_depth"] == "binary"
         assert payload["new_evidence_depth"] == "headers"
 
@@ -175,7 +175,7 @@ class TestEvidenceDepthOutOfBandPack:
                 ],
             )
             assert result.exit_code in (0, 1, 2, 4), result.output
-            payload = json.loads(result.output)
+            payload = json.loads(result.stdout)
             assert payload["old_evidence_depth"] == "binary", mode
             assert payload["new_evidence_depth"] == "binary", mode
 

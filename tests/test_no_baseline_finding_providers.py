@@ -39,7 +39,7 @@ def test_findings_name_their_providers(case: str, assertions: dict) -> None:
     result = CliRunner().invoke(
         main, ["compare", "--no-baseline", str(snapshot), "-o", "json=-"]
     )
-    payload = json.loads(result.output[result.output.index("{") :])
+    payload = json.loads(result.stdout[result.stdout.index("{") :])
     findings = payload.get("findings") or []
     for check, providers in assertions.items():
         seen = [

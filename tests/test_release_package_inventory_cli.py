@@ -94,8 +94,14 @@ def _run(*args: str) -> tuple[int, str]:
     return result.exit_code, result.output
 
 
+def _run_stdout(*args: str) -> tuple[int, str]:
+    """``_run`` reading stdout only, for a caller that parses it as JSON."""
+    result = CliRunner().invoke(main, list(args))
+    return result.exit_code, result.stdout
+
+
 def _report(*args: str) -> tuple[int, dict]:
-    code, out = _run(*args, "-o", "json=-")
+    code, out = _run_stdout(*args, "-o", "json=-")
     return code, json.loads(out)
 
 

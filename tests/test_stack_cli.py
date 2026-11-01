@@ -76,7 +76,7 @@ class TestDepsCommand:
         binary = _pick_elf()
         result = CliRunner().invoke(main, ["deps", "tree", str(binary), "-o", "json=-"])
         assert result.exit_code == 0
-        return json.loads(result.output)
+        return json.loads(result.stdout)
 
     def test_deps_markdown(self, runner, real_binary):
         result = runner.invoke(main, ["deps", "tree", str(real_binary)])
@@ -163,7 +163,7 @@ class TestDumpFollowDeps:
         # `TestCompareFollowDeps` already uses for this exact reason.
         from abicheck.storage.sectioned_document import from_sectioned_document
 
-        data = from_sectioned_document(_extract_json(result.output))
+        data = from_sectioned_document(_extract_json(result.stdout))
         assert "dependency_info" in data
         di = data["dependency_info"]
         assert len(di["nodes"]) >= 1
@@ -175,7 +175,7 @@ class TestDumpFollowDeps:
 
         result = runner.invoke(main, ["dump", str(real_lib), "--follow-deps"])
         assert result.exit_code == 0
-        data = from_sectioned_document(_extract_json(result.output))
+        data = from_sectioned_document(_extract_json(result.stdout))
         sonames = [n["soname"] for n in data["dependency_info"]["nodes"]]
         assert "libc.so.6" in sonames
 
@@ -184,7 +184,7 @@ class TestDumpFollowDeps:
 
         result = runner.invoke(main, ["dump", str(real_lib)])
         assert result.exit_code == 0
-        data = from_sectioned_document(_extract_json(result.output))
+        data = from_sectioned_document(_extract_json(result.stdout))
         assert data.get("dependency_info") is None
 
     def test_dump_follow_deps_to_file(self, runner, real_lib, tmp_path):
@@ -251,7 +251,7 @@ class TestCompareFollowDeps:
             ],
         )
         assert result.exit_code == 0
-        data = _extract_json(result.output)
+        data = _extract_json(result.stdout)
         assert "old_dependency_info" in data
         assert "new_dependency_info" in data
         assert data["old_dependency_info"]["bindings_summary"]["resolved_ok"] > 0

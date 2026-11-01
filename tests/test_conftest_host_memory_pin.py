@@ -73,7 +73,7 @@ def test_pinned_release_output_is_pure_json(tmp_path: Path) -> None:
     result = _run(*_release_dirs(tmp_path))
     assert result.exit_code == 0, result.output
     assert _NOTE not in result.output
-    assert json.loads(result.output)["libraries"]
+    assert json.loads(result.stdout)["libraries"]
 
 
 @pytest.mark.parametrize("avail_gib", [0.05, 0.5, 1.5, 2.5, 3.9, 64.0])
@@ -93,13 +93,17 @@ def test_stdout_document_survives_any_probed_memory(
 def test_low_memory_really_engages_the_clamp_note(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Non-vacuity: the hazard the pin removes is real, so without the pin a
-    host under pressure would put the note into ``result.output``."""
+    """Non-vacuity: the hazard is real. Under pressure the note is printed,
+    and on the combined ``result.output`` stream it lands ahead of the
+    document, so a test parsing ``result.output`` would fail. ``stdout``
+    alone stays one JSON document (the reason the release CLI tests parse
+    ``result.stdout``, enforced by ``tests/test_cli_json_reads_stdout.py``)."""
     monkeypatch.setattr(process_resources, "python_parallelism", lambda **_: 4)
     monkeypatch.setattr(process_resources, "available_mem_gib", lambda: 0.05)
     monkeypatch.delenv("ABICHECK_RELEASE_JOB_MEM_GIB", raising=False)
     result = _run(*_release_dirs(tmp_path))
     assert result.exit_code == 0, result.output
     assert _NOTE in result.stderr
-    with pytest.raises(json.JSONDecodeError):
-        json.loads(result.output)
+    assert not result.output.lstrip().startswith("{")
+    assert _NOTE in result.output.split("{", 1)[0]
+    assert len(json.loads(result.stdout)["libraries"]) == 4

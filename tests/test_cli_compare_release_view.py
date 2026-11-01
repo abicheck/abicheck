@@ -279,7 +279,7 @@ class TestReleaseViewShowOnly:
             _view_config(tmp_path, '["show=variables"]'),
         )
         assert result.exit_code == 4, result.output
-        doc = json.loads(result.output)
+        doc = json.loads(result.stdout)
         lib_entries = doc["libraries"]
         assert len(lib_entries) == 1
         # The function-kind finding is filtered out of the projected list,
@@ -332,7 +332,7 @@ class TestReleaseViewShowOnly:
             _view_config(tmp_path, '["show=variables"]'),
         )
         assert result.exit_code == 4, result.output
-        doc = json.loads(result.output)
+        doc = json.loads(result.stdout)
         assert doc["libraries"][0].get("findings", []) == []
         assert doc["show_only_filter"] == "variables"
         # Two real findings (the removed function plus the resulting
@@ -361,7 +361,7 @@ class TestReleaseViewShowOnly:
             "json=-",
         )
         assert result.exit_code == 4, result.output
-        doc = json.loads(result.output)
+        doc = json.loads(result.stdout)
         assert "show_only_filter" not in doc
         assert "release_filtered_summary" not in doc
 
@@ -392,7 +392,7 @@ class TestReleaseViewShowOnly:
             _view_config(tmp_path, '["show=breaking"]'),
         )
         assert result.exit_code == 4, result.output
-        doc = json.loads(result.output)
+        doc = json.loads(result.stdout)
         assert doc["show_only_filter"] == "breaking"
         assert doc["matrix_findings"] == []
         assert doc["libraries"][0]["findings"] != []
@@ -420,7 +420,7 @@ class TestReleaseViewShowOnly:
             _view_config(tmp_path, '["show=functions"]'),
         )
         assert result.exit_code == 4, result.output
-        doc = json.loads(result.output)
+        doc = json.loads(result.stdout)
         lib = doc["libraries"][0]
         # Complete machine data, never truncated, and no truncation claimed.
         assert len(lib["findings"]) == 25
@@ -456,7 +456,7 @@ class TestReleaseViewShowOnly:
             _view_config(tmp_path, '["show=functions"]'),
         )
         assert result.exit_code == 4, result.output
-        lib = json.loads(result.output)["libraries"][0]
+        lib = json.loads(result.stdout)["libraries"][0]
         assert "findings_truncated" not in lib
         assert "findings_truncated_kinds" not in lib
         assert "findings_view_truncated_kinds" not in lib
