@@ -249,6 +249,20 @@ See "Landed in Phase 1" below.
   `indexes/index.sqlite` layout slot stays reserved.
 - **A2.5** **Measured**: peak RSS for a project comparison no longer scales
   with the total decoded size of the package.
+  **Partial (2026-11-01).** Measured with `tracemalloc` over a sequential
+  release fan-out (synthetic members, 2000 declarations each): the parsed
+  documents, symbol tables and execution-cache entries of a compared pair
+  are already released; what each finished member left resident was its
+  `DiffResult`, and ~75% of that was the contract evidence's
+  `TypeGraphSnapshot` (one per side, whole-surface, as a tuple of string
+  pairs). It is now held packed and decoded per read
+  (`contract_evidence.TypeGraphSnapshot`). Peak traced memory for 2/8/16
+  members: 52.8/57.4/72.1 MiB before, 51.6/47.4/53.6 MiB after; retained per
+  member at 1200 declarations 0.92 -> 0.24 MiB
+  (`tests/test_release_member_memory_bound.py`). Still per member, by
+  design: the compact bundle evidence the cross-library pass reads and the
+  public-declaration roots. Still open: the per-pair peak is set by the
+  whole-document `json.loads` (see A1.9/D18).
 
 ---
 

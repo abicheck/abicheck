@@ -324,6 +324,11 @@ per-item status in the
   decoded). Closing (3) needs a streamed or per-section parse so a raw
   section is not held as parsed JSON, and a release fan-out that loads
   members one pair at a time. Measurements: the plan's A1.9 D18 entry.
+  **Update 2026-11-01:** the release fan-out already loads and drops one
+  pair at a time; the member-count-scaling residue was each held
+  `DiffResult`'s contract type graph, now packed (peak for 16 members 72.1 ->
+  53.6 MiB, flat across 2/8/16; plan A2.5). (3)'s per-pair `json.loads` peak
+  is unchanged.
 
 ### False-positive risk
 
