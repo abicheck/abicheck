@@ -40,7 +40,7 @@ import os as dm_os
 import shutil
 import subprocess
 import sys
-import time
+import threading
 from dataclasses import replace
 from pathlib import Path
 
@@ -624,13 +624,15 @@ def test_run_tu_fragments_preserves_declared_order_despite_completion_order(
     monkeypatch.setenv("ABICHECK_TU_JOBS", "2")
     monkeypatch.setattr(dm_process_resources, "mem_cap", lambda budget: None)
     order: list = []
+    b_done = threading.Event()
 
     def _stub(headers, extra_includes, **kwargs):
         name = Path(headers[0]).stem
-        if name == "a":
-            # Let "b" (submitted second) finish first.
-            time.sleep(0.05)
+        if name == "a":  # finish after "b": an event, since a sleep raced on CI
+            b_done.wait(timeout=30)  # a serial pool times out and fails below
         order.append(name)
+        if name == "b":
+            b_done.set()
         return _StubParser(functions=(_fn(name),))
 
     tus = (_tu("a", "a.h"), _tu("b", "b.h"))
@@ -652,11 +654,9 @@ def test_run_tu_fragments_preserves_declared_order_despite_completion_order(
         public_dir_paths=[],
         extra_hash_dirs=(),
     )
-    # "b" really did finish executing before "a" (proves genuine concurrency,
-    # not an accidentally-serial pool)...
+    # "b" finished before "a" (a concurrent pool, not a serial one)...
     assert order == ["b", "a"]
-    # ...yet the returned fragment order still matches the manifest's own
-    # declared TU order, not completion order.
+    # ...yet fragments come back in declared TU order, not completion order.
     assert [f.tu_name for f in fragments] == ["a", "b"]
 
 

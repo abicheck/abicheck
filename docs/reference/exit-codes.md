@@ -105,6 +105,18 @@ Both appear in the report's `exit` block (`incomplete_scope_contribution`,
 `no_comparison_completed_contribution`) and, when they decide the code, in
 `exit.reasons`. A scalar `compare` never sets either.
 
+A `failed` member is also an **operational error**, independent of
+`scope.on_incomplete`: a member whose extraction failed, that `--dso-only`
+could not classify, or that no reader can open (text, an empty file, JSON
+that is no snapshot -- paired or one-sided alike) is listed as an `ERROR`
+library with its reason, sets `run_outcome.operational: extraction_error`,
+and contributes `4` through `exit.operational_error_contribution`. The two
+axes fold with `max`: such a run exits `4` under `warn` and under `block`,
+while a member that is merely `not_supplied` or `unsupported` contributes
+the completeness axis alone. This is the same `4` the
+[`--no-baseline` set audit](#compare-no-baseline-dir-n-library-audit) folds for a
+failed member.
+
 **Migration note (exit `8`).** Before the completeness axis landed, the (now-removed)
 `--fail-on-removed-library` flag (today `.abicheck.yml`'s
 `gate.fail_on_removed_library: true`) exited `8` on the raw old-minus-new filename set difference, so a partial

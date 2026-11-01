@@ -453,11 +453,14 @@ def execute_release_compare(
             reason = old_unclassified.get(key) or new_unclassified[key]
             if scope_states.get(key) is AcquisitionState.OUT_OF_SCOPE:
                 continue
+            # By file, as a paired member's entry is, when the member is
+            # still mapped (an unreadable one); by key otherwise.
+            name = (old_map.get(key) or new_map.get(key) or Path(key)).name
             library_results.append(
-                {"library": key, "verdict": "ERROR", "error": reason}
+                {"library": name, "verdict": "ERROR", "error": reason}
             )
             worst_verdict = worse_release_verdict(worst_verdict, "ERROR")
-            reporter.notice(f"Failed: {key}: {reason}")
+            reporter.notice(f"Failed: {name}: {reason}")
         # Decided by policy once; every consumer reads this one decision.
         scope_decision = resolve_scope_decision(
             scope_result.record, request.on_incomplete_scope
