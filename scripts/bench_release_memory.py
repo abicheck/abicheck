@@ -352,6 +352,13 @@ VARIANTS: dict[str, object] = {
         "--bundle-facts-out",
         str(out / "baseline.json"),
     ],
+    # The G40 archive form, selected by the `.zip` suffix.
+    "bundle-facts-archive": lambda out: [
+        "-o",
+        f"json={out / 'report.json'}",
+        "--bundle-facts-out",
+        str(out / "baseline.zip"),
+    ],
     "junit+bundle-facts": lambda out: [
         "-o",
         f"json={out / 'report.json'}",

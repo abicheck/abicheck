@@ -110,10 +110,30 @@ class TestResolution:
         assert counts == {
             "junit_inventory": True,
             "old_full": True,
+            # Resident: no spool was given. `--bundle-facts-out` always
+            # passes one (`test_a_spooling_retention_is_recorded_as_such`).
+            "old_spooled": False,
             "new_full": False,
             "old_consumers": ["bundle_facts_out"],
             "new_consumers": [],
         }
+
+    @pytest.mark.parametrize("baseline", [False, True])
+    def test_a_spooling_retention_is_recorded_as_such(
+        self, baseline: bool, tmp_path: Path
+    ) -> None:
+        """A spool moves the OLD side to disk only when a consumer retains
+        it: without ``--bundle-facts-out`` there is nothing to spool, and
+        the decision says so rather than carrying an unused spool."""
+        from abicheck.storage.bundle_facts_spool import BlobSpool
+
+        with BlobSpool(tmp_path) as spool:
+            got = resolve_snapshot_retention(
+                junit=True, bundle_facts_out=baseline, old_spool=spool
+            )
+            assert got.old_full is baseline
+            assert (got.old_spool is spool) is baseline
+            assert got.as_counts()["old_spooled"] is baseline
 
 
 def _read(name: str) -> ast.Module:

@@ -43,7 +43,7 @@ from ..model.bundle_facts import DEFAULT_VARIANT_FINGERPRINT, BundleFacts
 from ..model.release_surface import ReleasePublicSurface
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Collection, Mapping
 
     from ..bundle_models import BundleSnapshot
 
@@ -60,11 +60,48 @@ def capture_bundle_facts(
     inventory_complete: bool = False,
     public_surface: ReleasePublicSurface | None = None,
 ) -> BundleFacts:
-    """Build a :class:`~abicheck.model.bundle_facts.BundleFacts` from
-    already-dumped per-library snapshots.
+    """Build a :class:`~abicheck.model.bundle_facts.BundleFacts` holding
+    *per_library_snapshots*: :func:`capture_bundle_facts_metadata` over
+    their names, with the snapshots themselves attached."""
+    from dataclasses import replace
 
-    No new *ABI* extraction happens here -- *per_library_snapshots* is what
-    a real ``dump``/``compare`` run already produced (each with its ``.elf``).
+    facts = capture_bundle_facts_metadata(
+        per_library_snapshots,
+        manifest=manifest,
+        variant_fingerprint=variant_fingerprint,
+        library_paths=library_paths,
+        degraded_members=degraded_members,
+        inventory_complete=inventory_complete,
+        public_surface=public_surface,
+    )
+    return replace(facts, per_library_snapshots=dict(per_library_snapshots))
+
+
+def capture_bundle_facts_metadata(
+    member_names: Collection[str],
+    *,
+    manifest: InstantiationManifest | None = None,
+    variant_fingerprint: str = DEFAULT_VARIANT_FINGERPRINT,
+    library_paths: dict[str, Path] | None = None,
+    degraded_members: dict[str, str] | None = None,
+    inventory_complete: bool = False,
+    public_surface: ReleasePublicSurface | None = None,
+) -> BundleFacts:
+    """Everything of a captured
+    :class:`~abicheck.model.bundle_facts.BundleFacts` except its member
+    snapshots, for the members named *member_names*: a **header** for
+    ``storage.bundle_facts_codec.save_spooled_bundle_facts``, never a
+    comparison operand.
+
+    ``--bundle-facts-out`` captures this way: its members are already
+    encoded in a spool (``storage.bundle_facts_spool``), and nothing below
+    reads a snapshot -- only which members exist. No new *ABI* extraction
+    happens here either. ``per_library_snapshots`` is empty, so the
+    ``degraded_members`` rule the value type checks at construction (every
+    marker names a stored member) is checked here against *member_names*
+    instead, and the markers are attached after construction;
+    :func:`capture_bundle_facts` attaches the snapshots through
+    ``dataclasses.replace``, which runs the constructor's own check again.
 
     *public_surface*, when given, is the release's **one** acquired public
     contract (``model.release_surface.ReleasePublicSurface``): a
@@ -87,14 +124,17 @@ def capture_bundle_facts(
         BUNDLE_FACTS_BASE_SCHEMA_VERSION,
         DEGRADED_MEMBERS_SCHEMA_VERSION,
         PUBLIC_SURFACE_SCHEMA_VERSION,
+        require_degraded_members_known,
     )
+
+    require_degraded_members_known(degraded_members or {}, member_names)
 
     filesystem_aliases: dict[str, tuple[str, ...]] = {}
     library_filenames: dict[str, str] = {}
     alias_nodes_so_far = 0
     if library_paths:
         for name, path in library_paths.items():
-            if name not in per_library_snapshots:
+            if name not in member_names:
                 continue
             if path.is_dir():
                 stored = stored_capture_identity(path, alias_nodes_so_far)
@@ -106,7 +146,7 @@ def capture_bundle_facts(
                 library_filenames[name] = stored_name
             if stored_aliases:
                 filesystem_aliases[name] = stored_aliases
-    return BundleFacts(
+    header = BundleFacts(
         # Each block names the version it needs, rather than one "current"
         # constant: `BUNDLE_FACTS_SCHEMA_VERSION` became 4 when
         # `public_surface` landed, which stamped 4 on a degraded-only
@@ -124,14 +164,16 @@ def capture_bundle_facts(
             else BUNDLE_FACTS_BASE_SCHEMA_VERSION
         ),
         variant_fingerprint=variant_fingerprint,
-        per_library_snapshots=dict(per_library_snapshots),
+        per_library_snapshots={},
         manifest=manifest,
         filesystem_aliases=filesystem_aliases,
         library_filenames=library_filenames,
-        degraded_members=dict(degraded_members or {}),
         inventory_complete=inventory_complete,
         public_surface=public_surface,
     )
+    # Checked against *member_names* above.
+    header.degraded_members = dict(degraded_members or {})
+    return header
 
 
 def bundle_snapshot_from_facts(facts: BundleFacts) -> BundleSnapshot:

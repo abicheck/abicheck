@@ -34,11 +34,13 @@ if TYPE_CHECKING:
     from ..bundle_manifest import InstantiationManifest
     from ..model.release_surface import ReleasePublicSurface
     from ..model.scope_acquisition import ScopeAcquisitionRecord
+    from ..storage.bundle_facts_spool import BlobSpool, SpooledBlob
     from .policy_file import PolicyFile
 
 __all__ = [
     "collect_bundle_result",
     "resolve_bundle_manifest",
+    "bundle_facts_out_format",
     "run_bundle_analysis",
     "write_bundle_facts_out",
 ]
@@ -266,7 +268,7 @@ def collect_bundle_result(
 
 def write_bundle_facts_out(
     bundle_facts_out: Path,
-    diff_pairs: Sequence[tuple[DiffResult | str, AbiSnapshot]],
+    diff_pairs: Sequence[tuple[DiffResult | str, AbiSnapshot | SpooledBlob]],
     manifest_path: Path | None,
     old_map: dict[str, Path],
     *,
@@ -275,18 +277,24 @@ def write_bundle_facts_out(
     resolved_manifest: InstantiationManifest | None = None,
     inventory_complete: bool = False,
     public_surface: ReleasePublicSurface | None = None,
+    spool: BlobSpool | None = None,
 ) -> None:
     """Persist the OLD side's per-library snapshots (plus manifest) to
     *bundle_facts_out* as a :class:`~abicheck.model.bundle_facts.BundleFacts`
-    file (G38 Phase 2's ``--bundle-facts-out`` producer).
+    file (G38 Phase 2's ``--bundle-facts-out`` producer): the G40 archive
+    when its name ends in ``.zip``, else the JSON document (compressed by a
+    ``.gz``/``.zst`` suffix).
 
     *diff_pairs* holds the OLD snapshots the run already has, each with the
     member it belongs to: a member file name (``release_old_member_snapshots``,
     what the comparison passes -- exact) or a ``DiffResult`` (matched by its
-    canonical library name). The whole OLD snapshot, never JUnit's compact
-    inventory; a snapshot the run holds is never extracted again. Each persisted entry
-    is keyed by *old_map*'s **canonical** release-matching key (e.g.
-    ``libfoo.so`` for ``libfoo.so.1.2``), the same identity a live
+    canonical library name). Each is the whole OLD snapshot, never JUnit's
+    compact inventory -- live, or already encoded in *spool* (a
+    :class:`~abicheck.storage.bundle_facts_spool.SpooledBlob`, which the
+    comparison leaves when its retention spools). A snapshot the run holds
+    is never extracted again. Each persisted entry is keyed by *old_map*'s
+    **canonical** release-matching key (e.g. ``libfoo.so`` for
+    ``libfoo.so.1.2``), the same identity a live
     ``build_bundle_snapshot(dict(old_map))`` uses -- keying by basename would
     read as a false ``bundle_library_removed``/``_added`` pair later.
 
@@ -298,6 +306,15 @@ def write_bundle_facts_out(
     handed to the capture as ``library_paths`` so filesystem aliases are
     recorded while the files exist.
 
+    **At most one member snapshot is resident here.** A live snapshot --
+    a pair's or a stranded library's, as it is resolved -- is encoded into
+    *spool* (a private one when ``None``) and dropped, and the document is
+    written from the spool, one blob at a time. Member order is fixed
+    before the write -- pairs in *diff_pairs* order, then the stranded in
+    *old_map* order -- so the order members were spooled in never reaches
+    the bytes, which equal ``save_bundle_facts(capture_bundle_facts(...))``
+    over the same snapshots held live.
+
     *resolved_manifest*, when given, is used as-is (it covers the embedded
     fallback ``--manifest`` alone does not). *inherited_degraded* (ADR-065
     D8) is a stored OLD package's persisted marker; *inventory_complete*
@@ -307,66 +324,95 @@ def write_bundle_facts_out(
     :class:`~abicheck.errors.ReleaseOperandUsageError`, unlike bundle
     analysis, which degrades to a warning.
     """
+    from contextlib import ExitStack
+
     from ..bundle_manifest import load_manifest
-    from ..serialization import save_bundle_facts
-    from .bundle_facts_capture import capture_bundle_facts
+    from ..storage.bundle_facts_codec import save_spooled_bundle_facts
+    from ..storage.bundle_facts_spool import BlobSpool, SpooledBlob
+    from .bundle_facts_capture import capture_bundle_facts_metadata
     from .extraction import _canonical_library_key
 
     try:
-        manifest: InstantiationManifest | None
-        if resolved_manifest is not None:
-            manifest = resolved_manifest
-        else:
-            manifest = (
-                load_manifest(manifest_path) if manifest_path is not None else None
-            )
+        with ExitStack() as stack:
+            if spool is None:
+                spool = stack.enter_context(BlobSpool())
+            manifest: InstantiationManifest | None
+            if resolved_manifest is not None:
+                manifest = resolved_manifest
+            else:
+                manifest = (
+                    load_manifest(manifest_path) if manifest_path is not None else None
+                )
 
-        # Canonicalize DiffResult.library the way old_map's keys were derived;
-        # a stored operand's value is a materialized sub-package dirname a
-        # basename match would miss (capturing that pair twice).
-        # Every persisted key is an *old_map* member key: a pair whose
-        # library name matches none (a JSON-snapshot member, keyed by its
-        # file name while its DiffResult carries the snapshot's own
-        # `library`) is captured by the member resolver below under its real
-        # key, never under an invented second one beside it.
-        per_library_snapshots: dict[str, AbiSnapshot] = {}
-        key_of_name = {path.name: key for key, path in old_map.items()}
-        for member, old_snapshot in diff_pairs:
-            if isinstance(member, str):
-                # The member's own file name: exact, whatever the snapshot
-                # inside says its library is.
-                found = key_of_name.get(member)
-            else:
-                found = _canonical_library_key(Path(member.library))
-                if found not in old_map:
-                    found = key_of_name.get(Path(member.library).name)
-            if found is not None and found in old_map:
-                per_library_snapshots[found] = old_snapshot
-        # ADR-065 D8: a failed stranded dump is persisted *with* its failure.
-        degraded_members: dict[str, str] = {
-            k: v for k, v in (inherited_degraded or {}).items() if k in old_map
-        }
-        for key, old_path in old_map.items():
-            if key in per_library_snapshots:
-                continue
-            resolved = resolve_stranded_library(old_path)
-            if isinstance(resolved, StrandedLibraryResolution):
-                per_library_snapshots[key] = resolved.snapshot
-                if resolved.failure is not None:
-                    degraded_members.setdefault(key, resolved.failure)
-            else:
-                per_library_snapshots[key] = resolved
-        facts = capture_bundle_facts(
-            per_library_snapshots,
-            manifest=manifest,
-            library_paths=dict(old_map),
-            degraded_members=degraded_members,
-            inventory_complete=inventory_complete,
-            # The OLD side's own acquired public contract (schema_version 4).
-            public_surface=public_surface,
-        )
-        save_bundle_facts(facts, bundle_facts_out)
+            # Canonicalize DiffResult.library the way old_map's keys were
+            # derived; a stored operand's value is a materialized
+            # sub-package dirname a basename match would miss (capturing
+            # that pair twice). Every persisted key is an *old_map* member
+            # key: a pair whose library name matches none (a JSON-snapshot
+            # member, keyed by its file name while its DiffResult carries
+            # the snapshot's own `library`) is captured by the member
+            # resolver below under its real key, never under an invented
+            # second one beside it.
+            members: dict[str, SpooledBlob] = {}
+            key_of_name = {path.name: key for key, path in old_map.items()}
+            for member, old_snapshot in diff_pairs:
+                if isinstance(member, str):
+                    # The member's own file name: exact, whatever the
+                    # snapshot inside says its library is.
+                    found = key_of_name.get(member)
+                else:
+                    found = _canonical_library_key(Path(member.library))
+                    if found not in old_map:
+                        found = key_of_name.get(Path(member.library).name)
+                if found is not None and found in old_map:
+                    members[found] = (
+                        old_snapshot
+                        if isinstance(old_snapshot, SpooledBlob)
+                        else spool.put_snapshot(old_snapshot)
+                    )
+            # ADR-065 D8: a failed stranded dump is persisted *with* its
+            # failure.
+            degraded_members: dict[str, str] = {
+                k: v for k, v in (inherited_degraded or {}).items() if k in old_map
+            }
+            for key, old_path in old_map.items():
+                if key in members:
+                    continue
+                resolved = resolve_stranded_library(old_path)
+                if isinstance(resolved, StrandedLibraryResolution):
+                    members[key] = spool.put_snapshot(resolved.snapshot)
+                    if resolved.failure is not None:
+                        degraded_members.setdefault(key, resolved.failure)
+                else:
+                    members[key] = spool.put_snapshot(resolved)
+                # Spooled: this member's graph is released before the next
+                # stranded library is resolved.
+                del resolved
+            facts = capture_bundle_facts_metadata(
+                members,
+                manifest=manifest,
+                library_paths=dict(old_map),
+                degraded_members=degraded_members,
+                inventory_complete=inventory_complete,
+                # The OLD side's own acquired public contract
+                # (schema_version 4).
+                public_surface=public_surface,
+            )
+            save_spooled_bundle_facts(
+                facts,
+                members,
+                spool,
+                bundle_facts_out,
+                format=bundle_facts_out_format(bundle_facts_out),
+            )
     except (OSError, ValueError, SnapshotError) as exc:
         raise ReleaseOperandUsageError(
             f"--bundle-facts-out {bundle_facts_out}: {exc}"
         ) from exc
+
+
+def bundle_facts_out_format(path: Path) -> str:
+    """The ``BundleFacts`` form a ``--bundle-facts-out`` *path* asks for: the
+    G40 archive for a ``.zip`` name (what the archive manifest's published
+    schema documents), the JSON document otherwise."""
+    return "archive" if path.suffix.lower() == ".zip" else "json"

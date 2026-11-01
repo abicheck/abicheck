@@ -18,7 +18,8 @@ The writer used to accumulate every distinct encoded payload in an in-memory
 ``unique_payloads`` dict and only start writing archive members once the whole
 bundle had been encoded, so resident memory grew with the bundle's member
 count before a single byte had been written. It now spools payloads to a
-temporary file as they are produced and keeps only ``{hash: (offset, length)}``.
+temporary blob store as they are produced and keeps only ``{hash: (hash, length)}``
+handles (``storage.bundle_facts_spool.SpooledBlob``).
 
 The invariants below are what that change must not break. They are written
 against the mechanism (what is resident, what order members land in, what
@@ -179,13 +180,18 @@ def test_writer_retains_blob_metadata_not_blob_bytes(tmp_path) -> None:
         "inspects; update the probe rather than deleting the invariant"
     )
     assert len(retained) == 5
+    from abicheck.storage.bundle_facts_spool import SpooledBlob
+
     for key, value in retained.items():
         assert isinstance(key, str)
-        assert isinstance(value, tuple) and len(value) == 2, (
+        # The blob store's (hash, length) handle: metadata about a payload
+        # held on disk, with no field that could carry the payload itself.
+        assert type(value) is SpooledBlob, (
             f"blob {key} is retained as {type(value).__name__}, not "
-            "(offset, length) metadata"
+            "(hash, length) metadata"
         )
-        assert all(isinstance(part, int) for part in value)
+        assert value.sha256 == key
+        assert isinstance(value.length, int) and value.length > 0
     for name, value in frame.items():
         assert not isinstance(value, bytes) or len(value) < 256, (
             f"the writer frame still holds a large payload under {name!r}"

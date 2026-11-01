@@ -444,14 +444,12 @@ implemented; D18 is partial. Owner: `storage/`; per-item status in the
 
 #### Bundle and multi-library memory
 
-`perf` — Three retention costs on the multi-library path: `read_bundle_facts_package` holds raw JSON and decoded snapshots together, every member snapshot stores its own copy of the shared header evidence, and `--bundle-facts-out` pins OLD snapshots per member.
+`perf` — Two retention costs on the multi-library path: `read_bundle_facts_package` holds raw JSON and decoded snapshots together, and every member snapshot stores its own copy of the shared header evidence. (`--bundle-facts-out` pinning OLD snapshots per member is closed, see the [archive](archive/known-gaps-closed.md).)
 
 - [`bundle_facts_store.read_bundle_facts_package` holds a bundle's raw JSON and its decoded `AbiSnapshot`s concurrently at peak](known-gaps/bundle-facts-storeread-bundle-facts-package-holds-a-bundles-raw.md)  
   **Status (re-verified 2026-10-09 at `456989f`): OPEN.** abicheck/storage/import_bundle_facts.py:597 export_bundle_facts still returns one whole dict[str, Any] document (no streaming form). It is bounded by DEFAULT_MAX_BUNDLE_DECODED_BYTES, as the entry notes.
 - [The release public surface is acquired once, but each member snapshot still stores its own copy of the header evidence](known-gaps/the-release-public-surface-is-acquired-once-but-each-member.md)  
   **Status (re-verified 2026-10-09 at `456989f`): OPEN.** The per-member header evidence is still stored once per member. abicheck/storage/import_bundle_facts.py:107 still has _BUNDLE_FACTS_SCHEMA_VERSION = 3, so it still refuses schema 4.
-- [Multi-library compare memory: --bundle-facts-out still pins OLD snapshots per member](known-gaps/multi-library-compare-memory-bundle-facts-out-still-pins-old.md)  
-  **Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** Closed: JUnit uses SymbolInventory, compressed baseline streaming, and the attrs aliasing. Still open: OLD-side retention for --bundle-facts-out (no spooling handle). Graph sharing and Fact pooling were rejected as negative results, and the surface_graph ordering question is unverified.
 
 #### Interpreter startup dominates a small-input CLI run
 
@@ -512,6 +510,11 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 `perf` — The clang JSON tree is walked at least eight times in Python, snapshots are pickled across the side boundary, and populating the snapshot cache costs ~30 % wall on a 28-member release. [Full write-up](known-gaps/python-level-ast-walks-side-boundary-and-cache-costs.md)
 
 ### Hygiene
+
+#### A live release capture is not byte-reproducible run to run: member dict key order varies (2026-11-01)
+
+**Status (2026-11-01): OPEN.** Found while measuring the `--bundle-facts-out` spool. Two `compare --bundle-facts-out` runs of one unchanged revision (`8eb4d128a`) over one compiled six-member fixture (`scripts/bench_release_memory.py --members 6 --apis 1800 --records 40`) wrote JSON documents that are equal as JSON values but not as bytes: 72 objects listed their keys in a different order, six per member, among them `elf.versions_required`, `dwarf.structs`, `dwarf.base_types`, `dwarf_advanced.calling_conventions`, `ast_toolchain` and `contract.profile_fields`. The cause is in extraction, upstream of every writer, and not established: some of those maps are built in an order that varies between runs. The writer is deterministic over fixed snapshots (`tests/test_bundle_facts_out_spool.py`, `tests/test_bundle_facts_streaming_write.py`). This settles the question the closed `--bundle-facts-out` retention entry left unverified (it suspected `surface_graph` ordering): the nondeterminism predates that work and is not confined to `surface_graph`. The two archive-form documents from the same runs happened to be byte-identical, so one pair of equal archives proves nothing either way.
+`hygiene` — A stored baseline's `stored_sha256` can differ between two captures of the same release, so a digest comparison reads a no-op re-capture as a change.
 
 #### Release report: live and stored operands render different documents
 

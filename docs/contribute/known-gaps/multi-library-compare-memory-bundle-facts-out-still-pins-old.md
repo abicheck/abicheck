@@ -9,9 +9,11 @@ generated: false
 
 # Multi-library compare memory: --bundle-facts-out still pins OLD snapshots per member
 
-Index: [Known gaps](../known-gaps.md)
+Index: [Known gaps](../known-gaps.md) — closed; see the [archive](../archive/known-gaps-closed.md).
 
-**Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** Closed: JUnit uses SymbolInventory, compressed baseline streaming, and the attrs aliasing. Still open: OLD-side retention for --bundle-facts-out (no spooling handle). Graph sharing and Fact pooling were rejected as negative results, and the surface_graph ordering question is unverified.
+**Status (2026-11-01): CLOSED.** `--bundle-facts-out` keeps each OLD member on disk, not resident. The release owns a temp-dir, content-addressed blob store (`storage/bundle_facts_spool.BlobSpool`); `release_snapshot_retention.stash_member_evidence` encodes a member's OLD snapshot into it as that member's comparison finishes, and the entry keeps a `SpooledBlob` handle beside the compact bundle evidence. `release_bundle.write_bundle_facts_out` spools each stranded library as it resolves it, then writes the document from the store one blob at a time: the archive form copies the blobs (they *are* the G40 blobs, `storage/bundle_facts_archive.assemble_bundle_facts_archive`, which the API's `write_bundle_facts_archive` now also goes through), and the JSON form splices each blob re-padded to its depth (`storage/json_stream.PreEncoded`), never decoding it. Member order is fixed before the write, so completion order never reaches the bytes, which equal the eager writer's. A `.zip` PATH now selects the archive form, as its published schema already said. Measured on a six-member release (`docs/contribute/memory.md`, round 3): parent peak RSS 913.7 → 369.7 MiB for the JSON form (the no-baseline control run is 370.1 MiB) and 2305.0 → 516.8 MiB for the archive, with the written bytes unchanged. Tests: `tests/test_bundle_facts_out_spool.py`. The `surface_graph` ordering question below is settled: the base revision's own captures differ run to run in dict key order, outside `surface_graph` too, recorded as its own open gap. The text below is the history.
+
+Earlier status (re-verified 2026-10-09 at `456989f`): PARTIAL. Closed: JUnit uses SymbolInventory, compressed baseline streaming, and the attrs aliasing. Still open: OLD-side retention for --bundle-facts-out (no spooling handle). Graph sharing and Fact pooling were rejected as negative results, and the surface_graph ordering question is unverified.
 
 
 Three retention defects were measured and closed — per-side/per-consumer

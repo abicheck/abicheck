@@ -798,27 +798,20 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
             # what it read, which was four attributes. See
             # `perf.a_whole_document_retained_for_a_narrow_projection`.
             "tests/test_junit_symbol_inventory.py",
+            # The last consumer: `--bundle-facts-out` still reads the whole
+            # OLD document, so it is kept whole -- on disk, in a spool,
+            # from the moment the member finishes (weakref reachability,
+            # write peak, byte identity against the eager writer).
+            "tests/test_bundle_facts_out_spool.py",
         ),
         public_surfaces=(),
         axes={
             "output": ("json", "junit", "bundle-facts-out", "junit+baseline"),
+            "retained_where": ("resident", "spooled"),
             "side": ("old", "new"),
             "member_count": ("one", "several"),
         },
         known_gaps=(
-            KnownGap(
-                description=(
-                    "The OLD side is still retained in full, per member, "
-                    "for `--bundle-facts-out` -- which genuinely reads the "
-                    "whole document. JUnit no longer does (it takes the "
-                    "compact `SymbolInventory`), so that half of this "
-                    "gap is closed. Bounding the remaining one means "
-                    "spooling completed members through the storage codec "
-                    "rather than deciding retention, which is a separate "
-                    "change."
-                ),
-                reference="docs/contribute/known-gaps.md",
-            ),
             KnownGap(
                 description=(
                     "The consumer inventory is asserted against the call "
@@ -1005,6 +998,10 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=(
             "tests/test_bundle_facts_streaming_write.py",
             "tests/test_json_stream_encoder.py",
+            # The members themselves, not only the encode transient: a
+            # spooled member is spliced from disk (`PreEncoded`), one blob
+            # resident at a time.
+            "tests/test_bundle_facts_out_spool.py",
         ),
         public_surfaces=(),
         axes={
@@ -1025,16 +1022,6 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
                     "with its own determinism story."
                 ),
                 reference="abicheck/snapshot_io.py",
-            ),
-            KnownGap(
-                description=(
-                    "Only the *serialisation* transient is bounded. The "
-                    "member snapshots themselves are still all resident, "
-                    "because the release fan-out holds them until its folds "
-                    "run -- bounding that is the completed-member spooling "
-                    "this work did not attempt."
-                ),
-                reference="docs/contribute/known-gaps.md",
             ),
         ),
     ),
