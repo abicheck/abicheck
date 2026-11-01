@@ -114,6 +114,10 @@ NON_ADR062_MODULES = frozenset(
         "bundle_facts_codec",
         "bundle_facts_archive",
         "bundle_facts_package",
+        # The `--bundle-facts-out` member spool: the G40 archive's own
+        # blobs, held on disk until the BundleFacts writer runs -- part of
+        # that codec group, not a Phase 0 primitive.
+        "bundle_facts_spool",
         "native_identity_aliases",
         "json_budget",
         "zstd_frame_guard",

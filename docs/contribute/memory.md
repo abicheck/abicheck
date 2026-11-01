@@ -106,6 +106,7 @@ for byte), and all three are registered as bug classes in
 | 4 | Graph facts (`model.graph_facts`) | Every `GraphNode`/`GraphEdge` materialised **three** attrs dictionaries with identical contents -- `facts[0].attrs`, `resolved` and `attrs` -- in the single-producer shape a real graph is almost entirely made of (measured: 10,277 producer facts across 2,771 nodes and 7,506 edges, exactly one each). Two of the three were pure duplication. | `resolve_entity_attrs`'s single-producer fast path returns the fact's own dict and `attrs` aliases it, falling back to the full merge the moment a second fact arrives. Sound only because `attrs`/`resolved` were already *derived* views that `ensure_facts_and_resolve` overwrites on every call. |
 | 5 | JUnit OLD-side retention (`junit_report`) | A release JUnit render pinned every member's full `AbiSnapshot` until the release-level fold, to read **four** attributes off it. The module docstring recording that retention named a *fifth* consumer (declaration locations) that did not exist. | `model.symbol_inventory.SymbolInventory`, projected when the member's comparison finishes. `--bundle-facts-out` is now the only full-document consumer. Rendered JUnit is byte-identical. |
 | 6 | Compressed writes (`storage.snapshot_stream_write`) | `write_snapshot_text_stream` streamed an *uncompressed* write and did `"".join(chunks)` for a compressed one, so a compressed baseline still peaked at the whole document plus its whole encoded copy. | `storage.incremental_encode` compresses fragment by fragment. gzip output is byte-identical to the previous one-shot path for any chunking down to one byte; zstd is byte-identical whenever the decoded size is known. |
+| 7 | `--bundle-facts-out` OLD-side retention (`workflows.release_snapshot_retention`, `workflows.release_bundle`) | The one consumer that reads the whole OLD document kept every member's `AbiSnapshot` resident until the end of the run, and the `dump`/stranded path resolved every member before writing any. The archive form also built every blob as one in-memory `bytes` before spooling it. | `storage.bundle_facts_spool.BlobSpool`: each member is encoded to a temp-dir, content-addressed blob as it finishes and the entry keeps a handle; the document is written from the blobs one at a time (archive: copied; JSON: spliced by `json_stream.PreEncoded`). Byte-identical output. |
 
 Two design notes worth not relearning:
 
@@ -172,9 +173,59 @@ that, and checks which execution path actually ran.
 
 ## Results
 
-Two rounds are recorded here. The **first** (PR #1332) closed three
+Three rounds are recorded here. The **first** (PR #1332) closed three
 retention defects; the **second** (PR #1334) closed the structural costs
-that remained, and its table is below.
+that remained; the **third** moved `--bundle-facts-out`'s OLD members to
+disk.
+
+### Round 3 -- `--bundle-facts-out` spools completed members
+
+* **Before:** `8eb4d128a` (`main`), in a separate worktree
+* **After:** this change
+* **Fixture:** one real compiled six-member C++ release, **1800 public APIs
+  and 40 records per member** (`--members 6 --apis 1800 --records 40`), one
+  tree shared by both revisions; the JSON document it captures is 590 MB.
+* **Host:** CPython 3.13.18, Linux, 4 cores, 15 GB; warm cache; two runs
+  per variant, medians reported. The admitted worker count varied between
+  one and two from run to run (the admission reads available memory), which
+  moves the process-tree figures but not the parent's.
+* `bundle-facts-archive` is the bench's new `.zip` variant. The base
+  revision cannot write the archive form from the CLI, so its row was
+  measured with a `sitecustomize` shim that only switched the existing
+  `save_bundle_facts` call to `format="archive"` for a `.zip` path.
+
+| Variant | Parent peak RSS before | after | delta |
+|---|---:|---:|---:|
+| `json` (control) | 369.5 MiB | 370.1 MiB | +0.6 MiB (noise) |
+| `bundle-facts` (JSON document) | 913.7 MiB | 369.7 MiB | **-544.0 MiB (-59.5%)** |
+| `bundle-facts-archive` | 2305.0 MiB | 516.8 MiB | **-1788.2 MiB (-77.6%)** |
+
+Spread between the two runs: at most 1.2 MiB, except `bundle-facts`
+before, at 28.4 MiB.
+
+**Read the `json` row first.** It is the control: it never captures a
+baseline. `bundle-facts` now peaks where the control does, so capturing the
+JSON document no longer costs any parent memory on this fixture. The
+archive still peaks 147 MiB above it: assembly reads one whole member blob
+(about 100 MB here) and compresses it, which is one member, not six.
+
+**The bytes did not change.** Both forms were compared with the base
+revision's own output on the same fixture: the archive is byte-identical,
+and each JSON document is byte-identical to a base run. The two base runs
+are not byte-identical to *each other* (dict key order in the extracted
+snapshots varies run to run; equal as JSON values). That is a pre-existing
+gap, recorded in [Known gaps](known-gaps.md). Every run exits 4 with the
+injected break detected, and the release report is equal to the base's
+apart from timing fields.
+
+Wall time is not compared: some base runs overlapped a concurrent test run
+on the same host. The archive form takes about 5.5 minutes on this fixture
+before and after, almost all of it zstd-compressing 590 MB of blobs.
+
+**The cost moved to disk.** The spool holds each member's encoded
+snapshot, so it needs about the uncompressed JSON document's size in
+temporary space (590 MB here). The spool directory is removed when the run
+ends.
 
 ### Round 2 (PR #1334) -- structural costs
 
