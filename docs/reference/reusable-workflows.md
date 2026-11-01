@@ -315,13 +315,12 @@ own and redirects through its `library:` target's, the same way its
 `binary_pattern` already does. A target that declares none falls back to
 the workflow-global `header` input unchanged, so a project that only ever
 set the global value sees no behavior change. **`kind: bundle` cells are
-excluded from this override**, for the same reason `frontend` is: a
-bundle cell's candidate is the staged directory of every member's own
-binary, and there is no per-bundle-member header staging mechanism to give
-each member's binary its own header tree in that one directory comparison
-— see `BUNDLE_CHECK_DEPTHS`'s own docstring in `project_targets.py`. A
-bundle cell keeps resolving the workflow-global `header` input exactly as
-it did before this override existed.
+excluded from this override**: a bundle cell forwards each member's own
+headers as `member-headers` instead, and at `depth: headers`
+`check-target` dumps every candidate member against its own entry. A bundle
+cell still receives the workflow-global `header` input, which a
+binary-depth bundle uses as before and a header-depth one does not pass to
+its snapshot comparison.
 
 **Each cell is scheduled on its profile's own runner** (G34 Phase C), rather
 than the `ubuntu-latest` every cell used to hardcode: the `plan` job derives

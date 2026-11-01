@@ -133,25 +133,15 @@ BASELINE_SOURCES = frozenset({"github-release", "actions-cache", "git"})
 #: in the report schema (ADR-047 §7).
 CHECK_DEPTHS = frozenset(d.value for d in USER_DEPTHS)
 
-#: A ``bundle`` check's ``depth`` is further restricted to this single rung --
-#: ``kind: bundle`` always compares directories (the resolved binaries-dir vs.
-#: the candidate bundle directory) in ``actions/check-target``, which routes
-#: through the CLI's per-library release fan-out and never collects inline
-#: build/source evidence for that path (``actions/check-target/
-#: validate-inputs.sh`` rejects ``build``/``source`` for ``kind: bundle``).
-#: ``headers`` is *also* rejected here (not just build/source): a bundle
-#: baseline's old-library operand is always a directory of raw binaries
-#: (``actions/baseline``'s bundle staging, unlike its single-target mode,
-#: never produces pre-dumped ``.abi.json`` snapshots with historical header
-#: data already baked in), so at ``depth: headers`` both the old and new
-#: sides would be freshly header-parsed at compare time using the SAME
-#: current checkout's headers (``check-project.yml`` has only one
-#: project-wide ``header:`` input) -- a header-only change between baseline
-#: and candidate (e.g. an inline function or template removed) would be
-#: silently invisible, since only one version of the headers is ever parsed
-#: (Codex review). The baseline half now exists (``bundle_member_snapshots``
-#: stages it); the candidate half does not -- see that module's docstring.
-BUNDLE_CHECK_DEPTHS = frozenset({EvidenceDepth.BINARY.value})
+#: A ``bundle`` check's ``depth`` rungs. ``build``/``source`` are excluded:
+#: the release fan-out a bundle runs through never collects inline
+#: build/source evidence. ``headers`` compares each member's staged baseline
+#: snapshot against a candidate snapshot dumped with that member's own
+#: ``public_headers:`` (``actions/check-target``), so every member must
+#: declare them (``project_targets_validation``).
+BUNDLE_CHECK_DEPTHS = frozenset(
+    {EvidenceDepth.BINARY.value, EvidenceDepth.HEADERS.value}
+)
 
 
 def _require_mapping(data: object, block: str) -> dict[str, Any]:

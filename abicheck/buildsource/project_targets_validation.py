@@ -28,6 +28,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..model.evidence_depth_levels import EvidenceDepth
 from .analysis_assurance_gate import analysis_assurance_issues
 from .project_bundles import BundleSpec
 from .project_check_spec import NO_BASELINE_CHANNEL, CheckSpec
@@ -363,6 +364,16 @@ def _bundle_issues(config: ProjectTargetsConfig, bundle: BundleSpec) -> list[str
                 "validate-inputs.sh rejects build/source for kind: bundle, "
                 "which always compares directories)."
             )
+        if check.depth == EvidenceDepth.HEADERS.value:
+            bare = [m for m in bundle.targets if not _member_headers(config, m)]
+            if bare:
+                issues.append(
+                    f"bundle {bundle.id!r}.checks[{i}]: depth 'headers' needs "
+                    f"public_headers: on every member; {bare} declare none -- "
+                    "each member's candidate side is dumped against its own "
+                    "headers, and a member with none would compare header "
+                    "evidence against none."
+                )
         if check.channel == NO_BASELINE_CHANNEL:
             # channel: none routes check-target to the root Action's scan
             # mode (no baseline to compare against) -- but a bundle check's
@@ -386,6 +397,11 @@ def _bundle_issues(config: ProjectTargetsConfig, bundle: BundleSpec) -> list[str
             )
         )
     return issues
+
+
+def _member_headers(config: ProjectTargetsConfig, member: str) -> list[str]:
+    target = config.targets.get(member)
+    return list(target.public_headers) if target is not None else []
 
 
 def _profile_issues(profile: ProfileSpec) -> list[str]:

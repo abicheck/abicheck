@@ -167,3 +167,19 @@ def bundle_on_incomplete_field(d: Mapping[str, Any]) -> str:
             f"'bundle_on_incomplete' must be 'fail' or 'warn', got {raw!r}"
         )
     return str(raw)
+
+
+def member_headers_field(d: Mapping[str, Any]) -> dict[str, str]:
+    """A bundle cell's ``member_headers``: absent -> ``{}``; anything other
+    than a mapping of member id -> header string is refused, not filtered --
+    a dropped entry would dump that member against no headers."""
+    raw = d.get("member_headers")
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict) or any(
+        not isinstance(k, str) or not isinstance(v, str) for k, v in raw.items()
+    ):
+        raise _bundle_scope_error(
+            f"'member_headers' must map member ids to header strings, got {raw!r}"
+        )
+    return dict(raw)

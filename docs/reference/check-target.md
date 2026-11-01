@@ -141,14 +141,25 @@ path that does not exist — not a documentation choice:
 
 | Rejected | Why |
 |---|---|
-| `depth: headers\|build\|source` | A bundle's baseline is staged raw binaries with no historical per-member header/build/source evidence. Only `binary` is supported. Use `kind: target` to compare one library at a deeper rung. |
+| `depth: build\|source` | A bundle compares directories through the release fan-out, which collects no inline build/source evidence. Use `kind: target` to compare one library at those rungs. |
+| `depth: headers` without `member-headers` | Each member's candidate side is dumped against its own headers; one project-wide header set would parse every member against the union of all members'. |
 | `baseline-channel: none` | There is no no-baseline bundle audit path: a bundle always compares directories, which `compare`'s audit-only shape cannot do. |
 | `allow-new-target: true` | A bundle comparison needs one coherent release where every member already coexisted. Scope a new member with its own `kind: target` check. |
 
 `require-complete` is **not** in that list — see its row in
 [Inputs](#inputs). Supporting a release-level assurance gate is a different
-capability from supporting historical header-aware bundle capture; the first
-landed, the second has not.
+capability from supporting historical header-aware bundle capture.
+
+**`depth: headers` for a bundle.** `resolve-baseline` stages each member's
+own baseline snapshot (`stage-member-snapshots: true`, `member-snapshots-dir`)
+and the check refuses a baseline whose snapshots do not all carry header
+evidence (`member-header-evidence` other than `complete`). Each candidate
+member found in `new-library` is then dumped on its own with its
+`member-headers` entry (plus `include`/`build-config`), named after its
+baseline snapshot, and `compare` runs over the two snapshot directories.
+`header`/`include` are not passed to that `compare`: both sides' headers are
+already in the snapshots. A failure in either step is an operational error,
+and the analysis does not run.
 
 ## Inputs
 
@@ -160,6 +171,7 @@ landed, the second has not.
 | `baseline-target` | no | (= `name`) | Which target's baseline actually resolves — set to the referenced library for `app-consumer`/`plugin-contract`. Ignored for `kind: bundle`. |
 | `bundle-members` | when `kind: bundle` | `[]` | JSON array of the bundle's member target ids. For `kind: bundle`, `new-library` is a directory holding each member's candidate binary **named by its target id** (what `check-project.yml` stages, matching the baseline's `binaries/<target id>`); `compare` pairs members by file name. |
 | `bundle-required` | no | `''` | (`kind: bundle` only) JSON array of the member target ids that must be present — run-plan `bundle_required`. After `resolve-baseline`, each member is named by the release key of the file its baseline staged it under (`binary-paths`), and the required ones are passed to `compare` as `--select-required`, the rest as `--select`. A translation failure (a member with no baseline binary, two members sharing a key) is an operational error and the analysis does not run. `''`/`[]` means no policy. |
+| `member-headers` | when `kind: bundle` and `depth: headers` | `''` | JSON object: member target id → that member's own public headers, newline-joined (run-plan `member_headers`). |
 | `bundle-on-incomplete` | no | `''` | (`kind: bundle` only) `fail` \| `warn` — run-plan `bundle_on_incomplete`, passed as `set: scope.on_incomplete=block\|warn`. `''` leaves `.abicheck.yml`'s `scope.on_incomplete` in charge. |
 | `profile` | yes | — | The build `profile.id` this check runs under. |
 | `baseline-channel` | yes | — | A channel name, or the literal `none` for a no-baseline audit (S5) — `none` is rejected for `kind: bundle` (a bundle has no no-baseline audit path; it always compares directories, which `compare`'s audit-only shape cannot do). |
@@ -167,7 +179,7 @@ landed, the second has not.
 | `baseline-required` | no | `true` | Forwarded to `resolve-baseline`'s `required`. |
 | `candidate-build-output` | no | `''` | Forwarded to `resolve-baseline`'s `incompatible_evidence` check. |
 | `allow-new-target` | no | `false` | Forwarded to `resolve-baseline`'s `allow-new-target` — `false` means a target absent from an otherwise-resolved baseline-set always fails `ambiguous`; `true` opts this check into the `new_target` outcome instead, an advisory, non-fatal lifecycle state for a target checked before it has ever been published in a baseline-set (e.g. a new library's first release). Only meaningful for `kind: target`; rejected outright for `kind: bundle` (a bundle comparison needs one coherent release where every member already coexisted). Pair with `baseline-required: false`, or a required-coverage gate would still block on the target's first appearance. |
-| `depth` | yes | — | `binary` \| `headers` \| `build` \| `source` — for `kind: bundle`, only `binary` is supported (`headers`/`build`/`source` are all rejected: a bundle's baseline is always raw binaries with no historical header/build/source evidence staged per member). |
+| `depth` | yes | — | `binary` \| `headers` \| `build` \| `source` — for `kind: bundle`, `binary` or `headers` (`headers` needs `member-headers`; see above). |
 | `explicit-id` | no | `''` | (G42 "Explicit check identifiers") This check's `checks[].id`, if the project declared one — folded into `check-id`'s `~<explicit_id>` tail so two checks sharing (`name`, `profile`, `baseline-channel`, `requested-depth`) but declaring different analysis method/policy/assurance each produce a distinct, non-colliding `check-id`/report. Omit (default) for the pre-G42, unqualified `check-id` shape. |
 | `build-system` / `build-generator` | no | `''` | (WS-A) This cell's `build-output.json` `profile.build_system` name and generator. When `build-system` is set the report envelope carries `profile_build_system: {name, generator}` (report schema 5.11) in every mode, so the cell's findings name the build lane that produced them. `check-project.yml` forwards them from the run-plan cell. |
 | `gate-mode` | no | `local` | `local` \| `deferred` \| `advisory`. |

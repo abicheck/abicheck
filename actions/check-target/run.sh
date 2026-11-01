@@ -57,6 +57,7 @@ COLLECT_REPLAY_OUTCOME="${COLLECT_REPLAY_OUTCOME:-}"
 CONSUMER_CONTEXT_OUTCOME="${CONSUMER_CONTEXT_OUTCOME:-}"
 ASSURANCE_OVERLAY_OUTCOME="${ASSURANCE_OVERLAY_OUTCOME:-}"
 BUNDLE_SELECTION_OUTCOME="${BUNDLE_SELECTION_OUTCOME:-}"
+BUNDLE_CANDIDATE_OUTCOME="${BUNDLE_CANDIDATE_OUTCOME:-}"
 
 ACTION_PATH="${ACTION_PATH:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 
@@ -148,6 +149,12 @@ elif [[ "$BUNDLE_SELECTION_OUTCOME" == "failure" ]]; then
   # without it.
   MODE="operational-error"
   RESOLVE_ARGS+=(--resolve-outcome "ambiguous" --resolve-message "the bundle's declared scope policy could not be translated into compare's member selection -- see the 'Resolve bundle scope selection' step's own log.")
+elif [[ "$BUNDLE_CANDIDATE_OUTCOME" == "failure" ]]; then
+  # depth: headers bundle: the per-member candidate dumps (or the baseline's
+  # per-member header evidence they need) failed -- never fall back to
+  # parsing every member against one header set.
+  MODE="operational-error"
+  RESOLVE_ARGS+=(--resolve-outcome "ambiguous" --resolve-message "the depth: headers bundle could not dump each candidate member against its own headers -- see the 'Dump candidate bundle members' step's own log.")
 elif [[ "$ANALYSIS_RAN" != "true" || -z "$ANALYSIS_REPORT_PATH" || ! -f "$ANALYSIS_REPORT_PATH" ]]; then
   # Baseline resolution succeeded (or was skipped for baseline-channel:
   # none), but the analysis step never produced a report -- a genuine

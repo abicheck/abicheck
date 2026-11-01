@@ -1158,6 +1158,11 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=(
             "tests/test_release_member_headers_integration.py",
             "tests/test_family_f2_release_member_parity.py",
+            # A header-depth bundle check: each member's OLD side is its own
+            # baseline snapshot and its NEW side one dump against its own
+            # headers, never one shared header set (the old routing, shown
+            # to miss a header-only edit on the same fixture).
+            "tests/test_bundle_header_depth_routing.py",
         ),
         public_surfaces=("cli",),
         axes={

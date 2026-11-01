@@ -1035,6 +1035,9 @@ jobs:
           # run-plan v4); '[]'/'' when none was declared.
           bundle-required: ${{ toJSON(matrix.bundle_required || fromJSON('[]')) }}
           bundle-on-incomplete: ${{ matrix.bundle_on_incomplete || '' }}
+          # Each member's own public_headers (run-plan member_headers); a
+          # depth: headers bundle dumps each candidate member against them.
+          member-headers: ${{ toJSON(matrix.member_headers || fromJSON('{}')) }}
           profile: ${{ matrix.profile_id }}
           baseline-channel: ${{ matrix.baseline_channel }}
           baseline-path: 'baseline-sets/${{ matrix.profile_id }}-${{ matrix.baseline_channel }}'
