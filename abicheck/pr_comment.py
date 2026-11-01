@@ -116,7 +116,12 @@ from .pr_comment_render import (
     _header as _header,
     render_comment as render_comment,
 )
-from .report.change_summary import ChangeSummary, summarize_changes
+from .report.change_summary import (
+    BACKGROUND_EVOLUTIONS as _BACKGROUND_EVOLUTIONS,
+    is_this_changes_own,
+    release_change_summary,
+    summarize_changes,
+)
 from .report.comparison_scope import comparison_scope_notice
 from .report.evidence_summary import evidence_summary
 
@@ -257,59 +262,15 @@ def _changes_list(changes: object) -> list[dict[str, object]]:
 
 def _introduced_changes(changes: object) -> list[dict[str, object]]:
     """:func:`_changes_list` minus every finding this comparison did not
-    establish as its own (:data:`_NOT_THIS_CHANGES_EVOLUTIONS`).
-
-    The "What changed" rollup answers *what this comparison's operands
-    did*. Counting standing hygiene debt in it reports 336 modifications
-    for a byte-identical rebuild -- the same misattribution the background
-    bucket exists to stop, one table over.
-
-    ``not_evaluated`` is excluded too, for a different reason and with the
-    same necessity: there the comparison layer declined to say whether the
-    finding is new at all, so ``_bucket_changes`` routes it to the
-    analysis-*incomplete* bucket rather than a compatibility one. Counting
-    it here would assert as a modification the very thing the comparison
-    refused to assert, and would put one finding in two mutually exclusive
-    places at once. Filtering on the union keeps this rollup over exactly
-    the set ``_bucket_changes`` admits to the compatibility buckets, so the
-    summary and its own detail sections cannot disagree.
-    """
+    establish as its own -- the one predicate the release report's
+    ``change_counts`` applies too (:func:`abicheck.report.change_summary.
+    is_this_changes_own`, which records why ``not_evaluated`` is excluded
+    beside the two background states)."""
     return [
         c
         for c in _changes_list(changes)
-        if str(c.get("cross_source_evolution", "") or "")
-        not in _NOT_THIS_CHANGES_EVOLUTIONS
+        if is_this_changes_own(c.get("cross_source_evolution"))
     ]
-
-
-#: ``Change.cross_source_evolution`` states that mean *this comparison did
-#: not introduce the finding* (ADR-068 D3, stamped by
-#: ``workflows/cross_source_hygiene.py``). A one-sided hygiene check is
-#: re-run against the baseline and its findings paired, so the comparison
-#: layer already knows which of them are new; this renderer reads that
-#: answer and never re-derives it (ADR-072 D1).
-#:
-#: - ``persistent`` -- flagged identically on both sides. Standing library
-#:   debt (a C++ template-instantiation guard variable, a function-local
-#:   static), not something a pull request did.
-#: - ``resolved`` -- flagged on the baseline only. Good news, and still not
-#:   a change to review in the candidate.
-#:
-#: ``not_evaluated`` is deliberately absent: it means one side's evidence
-#: could not confirm or deny the finding, which is an analysis limitation
-#: and belongs in the analysis-incomplete bucket, not in background.
-#: ``introduced`` is absent because an introduced finding *is* this
-#: comparison's own, and is bucketed by severity like any other.
-_BACKGROUND_EVOLUTIONS = frozenset({"persistent", "resolved"})
-
-#: Everything :func:`_introduced_changes` keeps out of the "What changed"
-#: rollup: the two background states above, plus ``not_evaluated``. The
-#: three are not one concept -- two mean "present before this change", the
-#: third means "we could not tell" -- but a rollup of asserted
-#: modifications may claim none of them, and ``_bucket_changes`` keeps all
-#: three out of the compatibility buckets. Deriving the union here rather
-#: than spelling a second literal is what stops the two from drifting.
-_NOT_THIS_CHANGES_EVOLUTIONS = _BACKGROUND_EVOLUTIONS | {"not_evaluated"}
 
 
 def _bucket_changes(
@@ -1173,43 +1134,6 @@ def _release_contract_coverage_findings(
     ], blocking
 
 
-def _release_change_summary(report: dict[str, object]) -> ChangeSummary | None:
-    """Entity-by-operation rollup over a release report's *sampled* findings.
-
-    Always ``exact=False``: the only itemized, kind-level view a release
-    report carries is each library's ``findings`` list, which
-    ``cli_compare_release.py`` caps (at most 10 per library, and the
-    bundle/matrix sections have their own). The authoritative per-library
-    integer counts next to it are compatibility-bucket counts, not
-    entity/operation ones, so they cannot reconstruct this table -- and
-    reconstructing one from the capped list while calling it a total is the
-    exact failure AGENTS.md names ("never reconstruct exact totals from an
-    already-truncated finding list"). Closing this needs an authoritative
-    per-entity/operation count in the release JSON schema itself, a
-    `cli_compare_release.py` change rather than a rendering-only one -- the
-    same shape of gap `_from_release`'s own docstring already records for
-    the evidence-kind bucket.
-    """
-    sampled: list[dict[str, object]] = []
-    libraries = report.get("libraries")
-    if isinstance(libraries, list):
-        for lib in libraries:
-            if isinstance(lib, dict):
-                sampled.extend(_changes_list(lib.get("findings")))
-    for key in ("bundle_findings", "matrix_findings"):
-        sampled.extend(_changes_list(report.get(key)))
-    if not sampled:
-        return None
-    return summarize_changes(
-        sampled,
-        exact=False,
-        inexact_reason=(
-            "counted from each library's capped findings sample, so these "
-            "are lower bounds"
-        ),
-    )
-
-
 def _from_release(
     report: dict[str, object], gate_api_break: bool = False
 ) -> CommentModel:
@@ -1353,13 +1277,9 @@ def _from_release(
         review_groups=review_groups,
         result_counts=result_counts or None,
         evidence=evidence_summary(report),
-        # ADR-065/AGENTS.md: a release report's per-library `findings` list
-        # is a cap of at most 10 per library (`cli_compare_release.py`), so
-        # a total reconstructed from it is a floor, never the truth. It is
-        # summarized anyway -- a floor with its limitation stated is more
-        # useful to a reviewer than no breakdown at all -- but `exact=False`
-        # makes it impossible for a renderer to present it as complete.
-        change_summary=_release_change_summary(report),
+        # Exact from the document's own `change_counts` (release schema
+        # 2.7); an older document is summarized as a disclosed floor.
+        change_summary=release_change_summary(report),
     )
 
 

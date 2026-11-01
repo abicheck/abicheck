@@ -300,4 +300,16 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       or ``deps.follow``) and that side's snapshot carries a graph; absent
 #:       otherwise, never an empty graph. Before 2.6 a directory/package
 #:       compare did not run the walk at all. Additive.
-RELEASE_SCHEMA_VERSION = "2.6"
+#: - ``2.7`` adds ``change_counts``, the authoritative entity-by-operation
+#:       finding count, on every compared ``libraries[]`` entry and at the
+#:       top level: ``{"unit": "findings", "counted": N, "rows": [{"entity",
+#:       "removed", "modified", "added"}, ...]}``, ``entity`` a canonical
+#:       ``ChangeEntity`` value (or ``Unclassified``). A member's block counts
+#:       the findings of its complete pool before any ``output.view``
+#:       ``show=`` filter that the comparison established as its own (not
+#:       ``persistent``/``resolved``/``not_evaluated``) -- what the same pair's
+#:       scalar PR comment counts; the top-level block adds every member's block and the
+#:       complete ``bundle_findings``/``matrix_findings`` sets. The PR comment
+#:       reads it as an exact rollup; before 2.7 it summarized the finding
+#:       lists as a disclosed floor. Additive.
+RELEASE_SCHEMA_VERSION = "2.7"
