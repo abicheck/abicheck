@@ -740,7 +740,7 @@
     },
     {
       "path": "abicheck/pr_comment.py",
-      "baseline_lines": 1476,
+      "baseline_lines": 1437,
       "target": "report",
       "rule": "no_growth",
       "disposition": "migrate",

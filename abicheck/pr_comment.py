@@ -116,7 +116,12 @@ from .pr_comment_render import (
     _header as _header,
     render_comment as render_comment,
 )
-from .report.change_summary import release_change_summary, summarize_changes
+from .report.change_summary import (
+    BACKGROUND_EVOLUTIONS as _BACKGROUND_EVOLUTIONS,
+    is_this_changes_own,
+    release_change_summary,
+    summarize_changes,
+)
 from .report.comparison_scope import comparison_scope_notice
 from .report.evidence_summary import evidence_summary
 
@@ -257,59 +262,15 @@ def _changes_list(changes: object) -> list[dict[str, object]]:
 
 def _introduced_changes(changes: object) -> list[dict[str, object]]:
     """:func:`_changes_list` minus every finding this comparison did not
-    establish as its own (:data:`_NOT_THIS_CHANGES_EVOLUTIONS`).
-
-    The "What changed" rollup answers *what this comparison's operands
-    did*. Counting standing hygiene debt in it reports 336 modifications
-    for a byte-identical rebuild -- the same misattribution the background
-    bucket exists to stop, one table over.
-
-    ``not_evaluated`` is excluded too, for a different reason and with the
-    same necessity: there the comparison layer declined to say whether the
-    finding is new at all, so ``_bucket_changes`` routes it to the
-    analysis-*incomplete* bucket rather than a compatibility one. Counting
-    it here would assert as a modification the very thing the comparison
-    refused to assert, and would put one finding in two mutually exclusive
-    places at once. Filtering on the union keeps this rollup over exactly
-    the set ``_bucket_changes`` admits to the compatibility buckets, so the
-    summary and its own detail sections cannot disagree.
-    """
+    establish as its own -- the one predicate the release report's
+    ``change_counts`` applies too (:func:`abicheck.report.change_summary.
+    is_this_changes_own`, which records why ``not_evaluated`` is excluded
+    beside the two background states)."""
     return [
         c
         for c in _changes_list(changes)
-        if str(c.get("cross_source_evolution", "") or "")
-        not in _NOT_THIS_CHANGES_EVOLUTIONS
+        if is_this_changes_own(c.get("cross_source_evolution"))
     ]
-
-
-#: ``Change.cross_source_evolution`` states that mean *this comparison did
-#: not introduce the finding* (ADR-068 D3, stamped by
-#: ``workflows/cross_source_hygiene.py``). A one-sided hygiene check is
-#: re-run against the baseline and its findings paired, so the comparison
-#: layer already knows which of them are new; this renderer reads that
-#: answer and never re-derives it (ADR-072 D1).
-#:
-#: - ``persistent`` -- flagged identically on both sides. Standing library
-#:   debt (a C++ template-instantiation guard variable, a function-local
-#:   static), not something a pull request did.
-#: - ``resolved`` -- flagged on the baseline only. Good news, and still not
-#:   a change to review in the candidate.
-#:
-#: ``not_evaluated`` is deliberately absent: it means one side's evidence
-#: could not confirm or deny the finding, which is an analysis limitation
-#: and belongs in the analysis-incomplete bucket, not in background.
-#: ``introduced`` is absent because an introduced finding *is* this
-#: comparison's own, and is bucketed by severity like any other.
-_BACKGROUND_EVOLUTIONS = frozenset({"persistent", "resolved"})
-
-#: Everything :func:`_introduced_changes` keeps out of the "What changed"
-#: rollup: the two background states above, plus ``not_evaluated``. The
-#: three are not one concept -- two mean "present before this change", the
-#: third means "we could not tell" -- but a rollup of asserted
-#: modifications may claim none of them, and ``_bucket_changes`` keeps all
-#: three out of the compatibility buckets. Deriving the union here rather
-#: than spelling a second literal is what stops the two from drifting.
-_NOT_THIS_CHANGES_EVOLUTIONS = _BACKGROUND_EVOLUTIONS | {"not_evaluated"}
 
 
 def _bucket_changes(

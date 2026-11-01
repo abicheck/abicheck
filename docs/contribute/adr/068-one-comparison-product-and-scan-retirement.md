@@ -1072,8 +1072,8 @@ both operands; a stored operand records no walk, so it carries neither key.
 **Follow-up (2026-10-31): release schema `2.7`.** Additive: every compared
 `libraries[]` entry, and the document itself, carries `change_counts`, the
 complete entity-by-operation finding count (`report/change_summary.py`).
-A member's block is counted before any `show=` view and equals its own
-scalar report's rollup; the top-level block adds the bundle and matrix
+A member's block is counted before any `show=` view, over the findings the
+comparison introduced, and equals its own scalar PR comment's rollup; the top-level block adds the bundle and matrix
 findings. Both operands carry it, since the stored operand renders the same
 document. The PR comment's release rollup reads it as exact.
 

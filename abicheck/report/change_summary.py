@@ -78,6 +78,46 @@ _OPERATIONS = (
 )
 
 
+#: ``Change.cross_source_evolution`` states that mean *this comparison did
+#: not introduce the finding* (ADR-068 D3, stamped by
+#: ``workflows/cross_source_hygiene.py``). A one-sided hygiene check is re-run
+#: against the baseline and its findings paired, so the comparison layer
+#: already knows which are new; a renderer reads that answer and never
+#: re-derives it (ADR-072 D1).
+#:
+#: - ``persistent`` -- flagged identically on both sides: standing library
+#:   debt (a template-instantiation guard variable, a function-local static),
+#:   not something the change did.
+#: - ``resolved`` -- flagged on the baseline only: good news, and still not a
+#:   change to review in the candidate.
+#:
+#: ``not_evaluated`` is not background: one side's evidence could not confirm
+#: or deny the finding, an analysis limitation. ``introduced`` is the
+#: comparison's own finding.
+BACKGROUND_EVOLUTIONS = frozenset({"persistent", "resolved"})
+
+#: Every state an entity-by-operation rollup leaves out: the two background
+#: states, plus ``not_evaluated`` -- there the comparison declined to say
+#: whether the finding is new at all, so counting it would assert as a
+#: modification what the comparison refused to assert. Two of the three mean
+#: "present before this change", the third "we could not tell"; a rollup of
+#: asserted modifications may claim none of them.
+NOT_THIS_CHANGES_EVOLUTIONS = BACKGROUND_EVOLUTIONS | {"not_evaluated"}
+
+
+def is_this_changes_own(evolution: object) -> bool:
+    """Whether a finding stamped *evolution* (a ``cross_source_evolution``
+    value, its enum, or absent) belongs in a "What changed" rollup.
+
+    The one predicate every rollup applies -- the scalar PR comment's, and
+    the release report's ``change_counts`` -- so a release member counts
+    exactly what the same pair's scalar comment counts. Unstamped and
+    unrecognised values are the comparison's own.
+    """
+    value = getattr(evolution, "value", evolution)
+    return str(value or "") not in NOT_THIS_CHANGES_EVOLUTIONS
+
+
 @dataclass(frozen=True)
 class EntityRow:
     """One entity's finding counts, split by canonical operation."""
@@ -263,7 +303,8 @@ def fold_change_summaries(
 
 
 def summarize_change_objects(changes: Sequence[object]) -> ChangeSummary:
-    """:func:`summarize_changes` over live ``Change`` objects, exact.
+    """:func:`summarize_changes` over live ``Change`` objects this comparison
+    established as its own (:func:`is_this_changes_own`), exact.
 
     Each finding is classified the way ``change_json`` writes a scalar
     report's per-finding ``entity``/``operation`` (:func:`entity_for_change`,
@@ -272,6 +313,8 @@ def summarize_change_objects(changes: Sequence[object]) -> ChangeSummary:
     """
     rows: list[dict[str, object]] = []
     for change in changes:
+        if not is_this_changes_own(getattr(change, "cross_source_evolution", None)):
+            continue
         kind = getattr(change, "kind", "")
         kind_val = str(getattr(kind, "value", kind) or "")
         rows.append(
@@ -391,6 +434,9 @@ def release_change_summary(report: Mapping[str, object]) -> ChangeSummary | None
         sampled.extend(_finding_dicts(lib.get("findings")))
     for key in ("bundle_findings", "matrix_findings"):
         sampled.extend(_finding_dicts(report.get(key)))
+    sampled = [
+        f for f in sampled if is_this_changes_own(f.get("cross_source_evolution"))
+    ]
     if not sampled:
         return None
     return summarize_changes(

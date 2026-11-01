@@ -305,8 +305,10 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       top level: ``{"unit": "findings", "counted": N, "rows": [{"entity",
 #:       "removed", "modified", "added"}, ...]}``, ``entity`` a canonical
 #:       ``ChangeEntity`` value (or ``Unclassified``). A member's block counts
-#:       its complete finding pool before any ``output.view`` ``show=``
-#:       filter; the top-level block adds every member's block and the
+#:       the findings of its complete pool before any ``output.view``
+#:       ``show=`` filter that the comparison established as its own (not
+#:       ``persistent``/``resolved``/``not_evaluated``) -- what the same pair's
+#:       scalar PR comment counts; the top-level block adds every member's block and the
 #:       complete ``bundle_findings``/``matrix_findings`` sets. The PR comment
 #:       reads it as an exact rollup; before 2.7 it summarized the finding
 #:       lists as a disclosed floor. Additive.

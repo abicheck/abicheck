@@ -1140,8 +1140,10 @@ Every compared member also carries `change_counts` (release schema 2.7), and
 the document carries a top-level `change_counts` too: the number of findings
 per entity (`function`, `variable`, `type`, …) and operation (`removed`,
 `modified`, `added`), as `{"unit": "findings", "counted": N, "rows": [...]}`.
-A member's block counts all of its findings before any `output.view` `show=`
-filter, the same set its own single-pair `compare` report counts. The
+A member's block counts its findings before any `output.view` `show=` filter,
+leaving out findings the comparison did not introduce (`persistent`,
+`resolved` and `not_evaluated` hygiene findings); that is the same set the
+member's own single-pair PR comment counts. The
 top-level block adds the members' blocks and every `bundle_findings` and
 `matrix_findings` entry. The PR comment's "What changed" table reads it.
 

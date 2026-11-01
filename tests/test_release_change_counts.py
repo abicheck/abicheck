@@ -193,19 +193,148 @@ def test_pr_comment_rollup_is_exact_and_equals_the_document(
     assert "Not exact totals" not in render_comment(model, sha="a")
 
 
+def _scalar_rollup(scalar: dict) -> Counter[tuple[str, str]]:
+    """The oracle: what the same pair's scalar PR comment counts in its "What
+    changed" table (its own rollup over the findings it admits)."""
+    summary = build_model(scalar).change_summary
+    return _summary_counts(summary) if summary is not None else Counter()
+
+
 @pytest.mark.parametrize("member", ["liba", "libb"])
-def test_a_member_counts_what_its_scalar_compare_counts(
+def test_a_member_counts_what_its_scalar_comment_counts(
     tmp_path: Path, member: str
 ) -> None:
     old = _write_side(tmp_path / "old", 0, [member])
     new = _write_side(tmp_path / "new", 1, [member])
     release = _compare_json(old, new)
     scalar = _compare_json(old / f"{member}.json", new / f"{member}.json")
-    scalar_counts: Counter[tuple[str, str]] = Counter(
-        (c["entity"], c["operation"]) for c in scalar["changes"]
-    )
     (lib,) = release["libraries"]
-    assert _block_counts(lib["change_counts"]) == scalar_counts
+    assert _block_counts(lib["change_counts"]) == _scalar_rollup(scalar)
+
+
+# -- Findings a comparison did not introduce, and dispositions ---------------
+#
+# Real one-sided hygiene findings (`unversioned_exported_symbol`), stamped by
+# the comparison: `persistent` (both sides flag it), `not_evaluated` (the OLD
+# side has no ELF evidence) and `introduced`. A rollup counts only the last;
+# the scalar comment's own rollup is the oracle for every member.
+
+
+def _elf(unversioned: tuple[str, ...]):
+    from abicheck.model.elf_facts import ElfMetadata, ElfSymbol, ElfVersionBinding
+
+    symbols = [ElfSymbol(name="_Z3okv", version="FOO_1.0", visibility="default")]
+    symbols += [
+        ElfSymbol(
+            n, visibility="default", version_binding=ElfVersionBinding.UNVERSIONED
+        )
+        for n in unversioned
+    ]
+    return ElfMetadata(symbols=symbols, versions_defined=["FOO_1.0"])
+
+
+def _hygiene_snap(lib: str, version: str, elf, functions) -> AbiSnapshot:
+    return AbiSnapshot(
+        library=f"{lib}.so",
+        version=version,
+        from_headers=True,
+        elf=elf,
+        functions=list(functions),
+    )
+
+
+_HYGIENE = {
+    # persistent hygiene finding beside a real addition
+    "libp": (
+        lambda: _hygiene_snap("libp", "1", _elf(("_Z4leakv",)), [_fn("a")]),
+        lambda: _hygiene_snap("libp", "2", _elf(("_Z4leakv",)), [_fn("a"), _fn("b")]),
+    ),
+    # not_evaluated (OLD has no ELF) beside a real change
+    "libn": (
+        lambda: _hygiene_snap("libn", "1", None, [_fn("c")]),
+        lambda: _hygiene_snap("libn", "2", _elf(("_Z4leakv",)), [_fn("c", "long")]),
+    ),
+    # introduced: this change's own
+    "libi": (
+        lambda: _hygiene_snap("libi", "1", _elf(()), [_fn("d")]),
+        lambda: _hygiene_snap("libi", "2", _elf(("_Z5freshv",)), [_fn("d")]),
+    ),
+}
+
+
+def _write_hygiene(root: Path) -> tuple[Path, Path]:
+    for side, index in (("old", 0), ("new", 1)):
+        (root / side).mkdir(parents=True, exist_ok=True)
+        for name, builders in _HYGIENE.items():
+            snap = builders[index]()
+            (root / side / f"{name}.json").write_text(
+                snapshot_to_json(snap), encoding="utf-8"
+            )
+    return root / "old", root / "new"
+
+
+def test_the_fixture_stamps_every_evolution(tmp_path: Path) -> None:
+    """Vacuity guard: the scalar reports really carry each stamp."""
+    old, new = _write_hygiene(tmp_path)
+    seen = set()
+    for name in _HYGIENE:
+        scalar = _compare_json(old / f"{name}.json", new / f"{name}.json")
+        seen |= {c.get("cross_source_evolution") for c in scalar["changes"]}
+    assert {"persistent", "not_evaluated", "introduced"} <= seen
+
+
+@pytest.mark.parametrize(
+    "disposition",
+    ["none", "suppression", "acknowledgment"],
+)
+def test_members_count_what_their_scalar_comment_counts(
+    tmp_path: Path, disposition: str
+) -> None:
+    old, new = _write_hygiene(tmp_path)
+    extra: list[str] = []
+    if disposition == "suppression":
+        rules = tmp_path / "suppress.yml"
+        rules.write_text(
+            "version: 1\nsuppressions:\n  - symbol: c\n    reason: planned\n",
+            encoding="utf-8",
+        )
+        extra = ["--suppress", str(rules)]
+    elif disposition == "acknowledgment":
+        acks = tmp_path / "acks.yml"
+        acks.write_text(
+            'version: 1\nacknowledgments:\n  - symbol: "c"\n'
+            '    change_kind: func_removed\n    reason: "Planned"\n',
+            encoding="utf-8",
+        )
+        extra = ["--acknowledgments", str(acks)]
+    release = _compare_json(old, new, *extra)
+    total: Counter[tuple[str, str]] = Counter()
+    for lib in release["libraries"]:
+        name = lib["library"].removesuffix(".json")
+        scalar = _compare_json(old / f"{name}.json", new / f"{name}.json", *extra)
+        expected = _scalar_rollup(scalar)
+        assert _block_counts(lib["change_counts"]) == expected, name
+        total += expected
+    removed = Counter({("function", "removed"): 1})
+    members_total = total.copy()
+    # Release-level findings have no scalar counterpart; the top level adds
+    # them as the document lists them.
+    total += _registry_counts(release.get("bundle_findings", []))
+    total += _registry_counts(release.get("matrix_findings", []))
+    assert _block_counts(release["change_counts"]) == total
+    model = build_model(release)
+    assert model.change_summary is not None and model.change_summary.exact
+    assert _summary_counts(model.change_summary) == total
+    total = members_total
+    if disposition == "suppression":
+        # Out of the counts, never out of the record (ADR-067).
+        assert not (total & removed)
+        audit = release["disposition_audit"]
+        assert audit["counts"]["suppressed"] == 1
+        assert "planned" in json.dumps(audit["rules"])
+    else:
+        # An acknowledged break is still this change's own finding.
+        assert total & removed == removed
 
 
 def test_a_show_view_narrows_findings_but_not_the_counts(tmp_path: Path) -> None:
@@ -294,3 +423,34 @@ def test_the_well_formed_block_is_trusted() -> None:
     assert _summary_counts(summary) == Counter(
         {("function", "removed"): 1, ("function", "added"): 2}
     )
+
+
+_STAMPS = ["introduced", "persistent", "resolved", "not_evaluated", None]
+
+
+@pytest.mark.parametrize("stamp", _STAMPS)
+def test_every_rollup_admits_exactly_what_the_scalar_comment_admits(stamp) -> None:
+    """One predicate for all three rollups: the scalar comment's (the oracle,
+    over a report carrying one stamped finding), the release counts' (over a
+    live `Change`), and the pre-2.7 fallback's (over a finding dict)."""
+    from abicheck.checker_policy import ChangeKind
+    from abicheck.model.change import Change
+    from abicheck.report.change_json import change_to_dict
+    from abicheck.report.change_summary import summarize_change_objects
+
+    change = Change(kind=ChangeKind.FUNC_REMOVED, symbol="f", description="f removed")
+    if stamp is not None:
+        from abicheck.checker_policy import CrossSourceEvolution
+
+        evolution = CrossSourceEvolution(stamp)
+        object.__setattr__(change, "cross_source_evolution", evolution)
+    # The scalar report's own serialization of the same finding.
+    finding = change_to_dict(change)
+    scalar = build_model({"changes": [finding], "verdict": "BREAKING"}).change_summary
+    expected = _summary_counts(scalar) if scalar is not None else Counter()
+    assert _summary_counts(summarize_change_objects([change])) == expected
+
+    fallback = release_change_summary({"libraries": [{"findings": [finding]}]})
+    assert (_summary_counts(fallback) if fallback else Counter()) == expected
+    own = stamp not in ("persistent", "resolved", "not_evaluated")
+    assert bool(expected) == own
