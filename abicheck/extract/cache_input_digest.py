@@ -161,7 +161,7 @@ def tree_digest(root: Path | str) -> str:
 
     A regular file digests as itself; a directory as the ordered
     ``(relative path, content digest)`` sequence of
-    :func:`~.cache_header_scan.iter_cache_input_files`; anything else as a
+    :func:`~.cache_header_scan.iter_cache_input_rel_parts`; anything else as a
     fixed marker. Paths inside a directory are hashed relative to it, so the
     digest is a property of the tree's content, and the caller decides
     whether the root's own spelling is part of its key.

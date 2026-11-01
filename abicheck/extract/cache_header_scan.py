@@ -38,9 +38,9 @@ from pathlib import Path
 from ..header_utils import CACHE_HEADER_SUFFIXES
 
 __all__ = [
+    "iter_cache_input_rel_parts",
     "header_scan_statistics",
     "iter_cache_header_files",
-    "iter_cache_input_files",
     "reset_header_scan_statistics",
 ]
 
@@ -170,7 +170,7 @@ def _path_suffix(name: str) -> str:
     return name[i:] if 0 < i < len(name) - 1 else ""
 
 
-#: Directory names :func:`iter_cache_input_files` never descends into: version
+#: Directory names :func:`iter_cache_input_rel_parts` never descends into: version
 #: control metadata, which no ``#include`` names and which churns on every
 #: commit (hashing it would make every warm entry under a checkout root miss).
 _SKIPPED_INPUT_DIRS = frozenset({".git", ".hg", ".svn", ".bzr", "__pycache__"})
@@ -315,31 +315,19 @@ def iter_cache_header_files(directory: Path) -> list[Path]:
 
 
 def iter_cache_input_rel_parts(directory: Path) -> list[tuple[str, ...]]:
-    """:func:`iter_cache_input_files` as relative path parts, same order.
+    """Every non-directory entry under *directory* a parse could ``#include``,
+    as relative path parts in component-wise order.
 
-    For a caller that needs the relative spelling (the content digest folds
-    ``os.sep.join(parts)``) without building and re-relativizing one ``Path``
-    per file, which dominated a warm system-include digest.
+    Unlike :func:`iter_cache_header_files` there is no suffix filter: the
+    preprocessor opens ``x.def``, ``config.in`` and suffix-less ``<vector>``
+    exactly like ``x.h``, so the cache keys' content walk (ADR-062 D11) must
+    see them. Version-control directories and abicheck's own cache root are
+    skipped. Parts, not ``Path`` objects: the content digest folds
+    ``os.sep.join(parts)``, and building one ``Path`` per file dominated a
+    warm system-include digest.
     """
     rels = _cache_header_rel_parts(directory, all_files=True)
     if os.path.normcase("A") == "A":
         return sorted(rels)  # normcase is the identity here (POSIX)
     normcase = os.path.normcase
     return sorted(rels, key=lambda rel: tuple(normcase(part) for part in rel))
-
-
-def iter_cache_input_files(directory: Path) -> list[Path]:
-    """Every non-directory entry under *directory* a parse could ``#include``.
-
-    Unlike :func:`iter_cache_header_files` there is no suffix filter: the
-    preprocessor opens ``x.def``, ``config.in`` and suffix-less ``<vector>``
-    exactly like ``x.h``, so the cache keys' content walk (ADR-062 D11) must
-    see them. Version-control directories are skipped. Same traversal and
-    component-wise order as :func:`iter_cache_header_files`.
-    """
-    normcase = os.path.normcase
-    ordered = sorted(
-        _cache_header_rel_parts(directory, all_files=True),
-        key=lambda rel: tuple(normcase(part) for part in rel),
-    )
-    return [directory.joinpath(*rel) for rel in ordered]

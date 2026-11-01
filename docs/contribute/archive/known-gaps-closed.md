@@ -59,7 +59,7 @@ gap on the main page instead.
 - *The whole-snapshot key mixed mtime into identity; the clang AST key was mtime-only.* Both are content-only now; a touch keeps the warm entry.
 - *System include directories were not hashed.* The compiler's own `#include <...>` search list (`-E -v`, memoized per driver content digest) is content-hashed into the whole-snapshot key and the castxml AST key; the clang AST key hashes the content of its injected `system_includes`; both keys hash the content of the `CPATH`/`C_INCLUDE_PATH`/`CPLUS_INCLUDE_PATH` directories.
 - *A file passed as an include was not content-hashed.* A file-valued include entry digests as itself.
-- *The walk covered only `CACHE_HEADER_SUFFIXES`.* `iter_cache_input_files` covers every file under an include root (suffix-less `<vector>`, `.def`, `.in`), skipping only version-control directories.
+- *The walk covered only `CACHE_HEADER_SUFFIXES`.* `iter_cache_input_rel_parts` covers every file under an include root (suffix-less `<vector>`, `.def`, `.in`), skipping only version-control directories.
 
 Pinned by `tests/test_cache_identity_mutations.py` (mutation x key matrix against an `os.walk` oracle; nine of its cases fail on the previous derivation). Behaviour change: every header-bearing cache entry re-keys once; a sysfs-like tree passed as a sysroot is now walked in full.
 

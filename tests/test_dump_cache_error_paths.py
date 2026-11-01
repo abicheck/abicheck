@@ -66,14 +66,14 @@ def test_an_unreadable_header_directory_is_marked_not_skipped(
         path=binary, headers=[tmp_path / "inc"], includes=[tmp_path / "inc"]
     )
     base_key = api._cache_key_for(request)
-    real_walk = cache_input_digest.iter_cache_input_files
+    real_walk = cache_input_digest.iter_cache_input_rel_parts
 
     def failing_walk(path: Path):  # type: ignore[no-untyped-def]
         raise OSError("permission denied")
 
-    monkeypatch.setattr(cache_input_digest, "iter_cache_input_files", failing_walk)
+    monkeypatch.setattr(cache_input_digest, "iter_cache_input_rel_parts", failing_walk)
     unreadable = api._cache_key_for(request)
-    monkeypatch.setattr(cache_input_digest, "iter_cache_input_files", real_walk)
+    monkeypatch.setattr(cache_input_digest, "iter_cache_input_rel_parts", real_walk)
     assert unreadable
     assert unreadable != base_key
 
@@ -84,14 +84,14 @@ def test_an_unreadable_include_directory_is_marked_not_skipped(
     binary = _base(tmp_path)
     request = dump_request(path=binary, headers=None, includes=[tmp_path / "inc"])
     base_key = api._cache_key_for(request)
-    real_walk = cache_input_digest.iter_cache_input_files
+    real_walk = cache_input_digest.iter_cache_input_rel_parts
 
     def failing_walk(path: Path):  # type: ignore[no-untyped-def]
         raise OSError("permission denied")
 
-    monkeypatch.setattr(cache_input_digest, "iter_cache_input_files", failing_walk)
+    monkeypatch.setattr(cache_input_digest, "iter_cache_input_rel_parts", failing_walk)
     unreadable = api._cache_key_for(request)
-    monkeypatch.setattr(cache_input_digest, "iter_cache_input_files", real_walk)
+    monkeypatch.setattr(cache_input_digest, "iter_cache_input_rel_parts", real_walk)
     assert unreadable != base_key
 
 

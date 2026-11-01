@@ -23,8 +23,8 @@
       "abicheck/extract/build_mode_capture.py": "7a46c5babcc5bf770a1a38d5a5d3abb49a2b7d9575bda2b210d2e2861ebfb51f",
       "abicheck/extract/builtin_abi.py": "aad1229f3a899920a43a88aff31b91904f37ef938480754382c34584d4e3315e",
       "abicheck/extract/cache_digest_store.py": "c333f2bf9170d5c87c011f434d3638c944edf07e9670fd4cb84e2f73ac0775f1",
-      "abicheck/extract/cache_header_scan.py": "bdbb0daa7b0316f940affd96fb85e8ff21d45328c84494944632b0577055b376",
-      "abicheck/extract/cache_input_digest.py": "6c7e877e5480559298b275a51a98d0ff443e15dbb1db64cc4a72d11dbbee2bd4",
+      "abicheck/extract/cache_header_scan.py": "04fc927afed680495c7f8112c230cf4f5d93966dd398a7472533648657eff994",
+      "abicheck/extract/cache_input_digest.py": "2497c406f24ba2dbd83b43ac3db39308e726d88c839bfdd9150ae19c22507433",
       "abicheck/extract/castxml_compiler_emulation.py": "da713be283b31c31ab8c4c5486f0c70d4adf403365f630f88b718589ed03f763",
       "abicheck/extract/castxml_header_compat.py": "d0e78b90ad113be1cb89f05465f77fa9d9fc9546608275707cd7d15f18e2f518",
       "abicheck/extract/compile_header_inputs.py": "38655d35c5309694ebf12be60e5e4fcd3fa5c8ea7eb8a73a9b4ab2fcf46338b9",
@@ -189,7 +189,7 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "69d03c41e49e1941ac20a7cd42f4a2d90988a53c19680280618cce896706eedb",
+    "fingerprint": "41772ffe014c9b0ba1f4c71ea63ae50622283cb2ea6987eee5d7e29acd8d9624",
     "generation": 34,
     "reason": "persistent file-digest memo and faster content walk; digests and extracted facts unchanged"
   },
