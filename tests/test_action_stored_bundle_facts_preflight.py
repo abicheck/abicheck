@@ -285,8 +285,21 @@ def test_the_classifier_import_closure_is_the_standard_library() -> None:
         f"sys.path.insert(0, {str(REPO)!r})\n"
         "before = set(sys.modules)\n"
         "import abicheck.workflows.bundle_compare_operand\n"
-        "loaded = {m.split('.')[0] for m in set(sys.modules) - before}\n"
-        "extra = sorted(loaded - set(sys.stdlib_module_names) - {'abicheck'})\n"
+        # Judged by where each new module was loaded from, not by name:
+        # an interpreter-internal helper (3.15's `_missing_stdlib_info`)
+        # is in no name list but lives in the standard library's own tree.
+        "import sysconfig\n"
+        "from pathlib import Path\n"
+        "roots = [Path(sysconfig.get_paths()[k]).resolve() for k in ('stdlib', 'platstdlib')]\n"
+        f"roots.append(Path({str(REPO / 'abicheck')!r}).resolve())\n"
+        "extra = []\n"
+        "for name in sorted(set(sys.modules) - before):\n"
+        "    origin = getattr(sys.modules[name], '__file__', None)\n"
+        "    if origin is None:\n"
+        "        continue  # built-in or frozen\n"
+        "    path = Path(origin).resolve()\n"
+        "    if not any(root in path.parents for root in roots):\n"
+        "        extra.append(f'{name} ({path})')\n"
         "print(','.join(extra))\n"
     )
     proc = subprocess.run(
