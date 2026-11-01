@@ -9,9 +9,9 @@ generated: false
 
 # Release fan-out cannot pair a stored snapshot directory with a live one
 
-Index: [Known gaps](../known-gaps.md)
+Index: [Known gaps — closed and moot](../archive/known-gaps-closed.md)
 
-**Status (recorded 2026-10-28): OPEN.**
+**Status (2026-11-01): CLOSED.** Members the file name cannot pair are paired by the library they record (`workflows/release_member_pairing`), without moving any pair the file name makes. See the archive entry for the rule, the rejected alternative, the tests and the stored-package NEW route fixed alongside it.
 
 A directory (release) compare pairs members by their library key, which is the
 file name: `workflows/release_inputs.py` intersects the two sides' key sets. A

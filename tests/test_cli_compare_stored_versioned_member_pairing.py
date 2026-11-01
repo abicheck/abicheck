@@ -323,24 +323,228 @@ def test_a_new_operand_with_no_supported_input_is_a_zero_comparison_run(
     assert report["libraries"] == []
 
 
-def test_an_unreadable_new_only_member_is_unmatched_on_both_routes(
+#: One-sided member files no reader can open: text, empty, binary junk,
+#: JSON with no snapshot fingerprint, and a linker script naming nothing.
+#: Each is discovered on its ``.so`` name alone (``classify``).
+_UNREADABLE: dict[str, bytes] = {
+    "notes.so": b"plain text\n",
+    "libempty.so": b"",
+    "libjunk.so.1": b"\x00\x01binary junk\xff" * 8,
+    "libconfig.so": b'{"not": "a snapshot"}\n',
+    "libdangling.so": b"INPUT(libnowhere.so.9)\n",
+}
+
+#: One-sided member files a reader *can* open: they stay ``not_supplied``.
+#: The linker script names a real member, which extraction follows.
+_READABLE_ONE_SIDED = {
+    "libextra.so.5": snapshot_to_json(_snap("libextra.so.5", ["extra"])).encode(),
+    "libalias.so": b"INPUT(libcore.so.1)\n",
+}
+
+
+def _scope_states(report: dict, name: str) -> list[str]:
+    return [
+        m["state"] for m in report["comparison_scope"]["members"] if m["name"] == name
+    ]
+
+
+def _member_outcome(code: int, report: dict, name: str) -> dict:
+    """What a route decided about one member, independent of route wording."""
+    return {
+        "exit": code,
+        "states": _scope_states(report, name),
+        "library_verdicts": sorted(
+            e.get("verdict") for e in report["libraries"] if e["library"] == name
+        ),
+        "operational": report["run_outcome"]["operational"],
+        "scope": report["run_outcome"]["scope"],
+        "unmatched_old": report["unmatched_old"],
+        "unmatched_new": report["unmatched_new"],
+    }
+
+
+def _routes(tmp_path: Path, old_dir: Path, new_dir: Path, side: str) -> dict[str, dict]:
+    """Every route that holds the member's side live. A stored OLD side
+    (bundle facts) holds no file to probe, so OLD-only is live/live only."""
+    routes = {"live": _compare_json(tmp_path, old_dir, new_dir, "live")}
+    if side == "new":
+        facts = _cli_captured_facts(tmp_path, old_dir)
+        routes["stored"] = _compare_json(tmp_path, facts, new_dir, "stored")
+    return routes
+
+
+@pytest.mark.parametrize("side", ["new", "old"])
+@pytest.mark.parametrize("name", list(_UNREADABLE))
+def test_an_unreadable_one_sided_member_is_failed_on_every_route(
+    tmp_path: Path, name: str, side: str
+) -> None:
+    """A one-sided member no reader can open is ``failed`` with an ``ERROR``
+    library entry and an extraction-error operational outcome -- what the
+    same file reads as once it pairs -- on both routes, never a plain
+    ``not_supplied`` member. Oracle: the file content, chosen unreadable by
+    construction."""
+    old_dir, new_dir = _write_release(tmp_path, _SPECS["versioned"])
+    ((new_dir if side == "new" else old_dir) / name).write_bytes(_UNREADABLE[name])
+
+    outcomes = {
+        route: _member_outcome(code, report, name)
+        for route, (code, report) in _routes(tmp_path, old_dir, new_dir, side).items()
+    }
+
+    for outcome in outcomes.values():
+        assert outcome["states"] == ["failed"]
+        assert outcome["library_verdicts"] == ["ERROR"]
+        assert outcome["operational"] == "extraction_error"
+        assert outcome["scope"] == "incomplete"
+        assert outcome[f"unmatched_{side}"] == [name]
+    assert len({repr(o) for o in outcomes.values()}) == 1, outcomes
+
+
+@pytest.mark.parametrize("name", list(_READABLE_ONE_SIDED))
+def test_a_readable_one_sided_member_stays_not_supplied(
+    tmp_path: Path, name: str
+) -> None:
+    """Negative control: a one-sided member a reader can open (a stored
+    snapshot, a linker script naming a real member) is still a plain
+    unmatched member, read the same on both routes."""
+    old_dir, new_dir = _write_release(tmp_path, _SPECS["versioned"])
+    (new_dir / name).write_bytes(_READABLE_ONE_SIDED[name])
+
+    outcomes = {
+        route: _member_outcome(code, report, name)
+        for route, (code, report) in _routes(tmp_path, old_dir, new_dir, "new").items()
+    }
+
+    for outcome in outcomes.values():
+        assert outcome["states"] == ["not_supplied"]
+        assert outcome["library_verdicts"] == []
+        assert outcome["unmatched_new"] == [name]
+    assert outcomes["live"]["exit"] == outcomes["stored"]["exit"]
+    assert outcomes["live"]["operational"] == outcomes["stored"]["operational"]
+
+
+def test_an_unreadable_member_reads_the_same_paired_or_one_sided(
     tmp_path: Path,
 ) -> None:
-    """Pins current behaviour (a recorded known gap): a NEW-only member is
-    never extracted on either route, so an unreadable ``notes.so`` with no
-    OLD counterpart is an unmatched ``not_supplied`` member, not ``failed``.
-    The two routes agree; neither reads it as a clean comparison."""
+    """The paired case (its extraction fails) and the one-sided case (its
+    format probe fails) agree on the member's state, its library verdict and
+    the run's operational outcome."""
+    (tmp_path / "paired").mkdir()
+    (tmp_path / "one").mkdir()
+    paired_old, paired_new = _write_release(tmp_path / "paired", _SPECS["versioned"])
+    (paired_old / "notes.so").write_text(
+        snapshot_to_json(_snap("notes.so", ["n"])), encoding="utf-8"
+    )
+    (paired_new / "notes.so").write_bytes(_UNREADABLE["notes.so"])
+    one_old, one_new = _write_release(tmp_path / "one", _SPECS["versioned"])
+    (one_new / "notes.so").write_bytes(_UNREADABLE["notes.so"])
+
+    paired = _member_outcome(
+        *_compare_json(tmp_path / "paired", paired_old, paired_new, "p"), "notes.so"
+    )
+    one_sided = _member_outcome(
+        *_compare_json(tmp_path / "one", one_old, one_new, "o"), "notes.so"
+    )
+
+    for key in ("exit", "states", "library_verdicts", "operational", "scope"):
+        assert paired[key] == one_sided[key], key
+
+
+#: The dry-run marker each real-run scope state corresponds to.
+_DRY_RUN_MARKER = {
+    "failed": "FAILED",
+    "not_supplied": "MISSING",
+    "available": "compare",
+}
+
+
+def _dry_run_markers(old_dir: Path, new_dir: Path) -> dict[str, str]:
+    """``{member name: marker}`` from the dry-run's comparison plan."""
+    result = CliRunner().invoke(
+        main, ["compare", str(old_dir), str(new_dir), "--dry-run"]
+    )
+    assert result.exit_code == 0, result.output
+    markers: dict[str, str] = {}
+    for line in result.output.splitlines():
+        marker, sep, rest = line.strip().partition(": ")
+        if sep and marker in _DRY_RUN_MARKER.values() and " -- " in rest:
+            markers[rest.split(" -- ", 1)[0]] = marker
+    return markers
+
+
+@pytest.mark.parametrize(
+    ("name", "content", "side"),
+    [
+        *((n, c, s) for n, c in _UNREADABLE.items() for s in ("old", "new")),
+        *((n, c, "new") for n, c in _READABLE_ONE_SIDED.items()),
+    ],
+)
+def test_the_dry_run_previews_what_the_real_run_records(
+    tmp_path: Path, name: str, content: bytes, side: str
+) -> None:
+    """Every member's dry-run marker matches the state the real run records
+    for it: compared, one-sided, or failed because no reader can open it."""
     old_dir, new_dir = _write_release(tmp_path, _SPECS["versioned"])
-    (new_dir / "notes.so").write_text("plain text\n", encoding="utf-8")
-    _live_code, live = _compare_json(tmp_path, old_dir, new_dir, "live")
-    facts = _cli_captured_facts(tmp_path, old_dir)
-    _stored_code, stored = _compare_json(tmp_path, facts, new_dir, "stored")
-    for report in (live, stored):
-        states = [
-            m["state"]
-            for m in report["comparison_scope"]["members"]
-            if m["name"] == "notes.so"
-        ]
-        assert states == ["not_supplied"]
-        assert report["unmatched_new"] == ["notes.so"]
-        assert "notes.so" not in {e["library"] for e in report["libraries"]}
+    ((new_dir if side == "new" else old_dir) / name).write_bytes(content)
+
+    markers = _dry_run_markers(old_dir, new_dir)
+    _code, report = _compare_json(tmp_path, old_dir, new_dir, "real")
+    states = {m["name"]: m["state"] for m in report["comparison_scope"]["members"]}
+
+    assert markers == {
+        member: _DRY_RUN_MARKER[state] for member, state in states.items()
+    }
+
+
+#: One unchanged member: nothing but the member under test moves the exit.
+_UNCHANGED: Spec = {"libtop.so.1.2.3": _member(["top"], ["top"])}
+
+
+@pytest.mark.parametrize("on_incomplete", ["warn", "block"])
+@pytest.mark.parametrize(
+    "shape", ["one_sided_unreadable", "paired_unreadable", "one_sided_readable"]
+)
+def test_the_exit_code_folds_the_operational_and_scope_axes(
+    tmp_path: Path, shape: str, on_incomplete: str
+) -> None:
+    """docs/reference/exit-codes.md: a member whose acquisition failed is an
+    operational error (4) on every `scope.on_incomplete` setting, and also
+    an incomplete-scope member (0 under warn, 1 under block). A one-sided
+    unreadable member reads exactly as the same file does paired; a readable
+    one-sided member contributes the scope axis alone."""
+    old_dir, new_dir = _write_release(tmp_path, _UNCHANGED)
+    if shape == "paired_unreadable":
+        (old_dir / "notes.so").write_text(
+            snapshot_to_json(_snap("notes.so", ["n"])), encoding="utf-8"
+        )
+    content = (
+        _READABLE_ONE_SIDED["libextra.so.5"]
+        if shape == "one_sided_readable"
+        else _UNREADABLE["notes.so"]
+    )
+    (
+        new_dir / ("libextra.so.5" if shape == "one_sided_readable" else "notes.so")
+    ).write_bytes(content)
+    cfg = tmp_path / ".abicheck.yml"
+    cfg.write_text(f"scope:\n  on_incomplete: {on_incomplete}\n", encoding="utf-8")
+    out = tmp_path / "r.json"
+
+    result = CliRunner().invoke(
+        main,
+        [
+            "compare",
+            str(old_dir),
+            str(new_dir),
+            "--config",
+            str(cfg),
+            "-o",
+            f"json={out}",
+        ],
+    )
+    exit_block = json.loads(out.read_text(encoding="utf-8"))["exit"]
+
+    scope = 1 if on_incomplete == "block" else 0
+    operational = 0 if shape == "one_sided_readable" else 4
+    assert exit_block["incomplete_scope_contribution"] == scope
+    assert exit_block["operational_error_contribution"] == operational
+    assert result.exit_code == exit_block["code"] == max(scope, operational)
