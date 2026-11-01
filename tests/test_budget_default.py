@@ -318,27 +318,39 @@ class _Proc:
 
 
 class _SilentPipe:
-    """A child that is alive and never answers: ``poll`` always times out."""
+    """A child's pipe that never answers; its reads go through ``recv_bounded``."""
 
     def __init__(self) -> None:
-        self.poll_timeouts: list[float | None] = []
         self.closed = False
-
-    def poll(self, timeout: float | None = None) -> bool:
-        self.poll_timeouts.append(timeout)
-        return False
-
-    def recv(self) -> Any:  # pragma: no cover - reaching it is the bug
-        raise AssertionError("read a pipe poll() said was empty")
 
     def close(self) -> None:
         self.closed = True
+
+
+@pytest.fixture
+def silent_reads(monkeypatch: pytest.MonkeyPatch) -> list[tuple[Any, float]]:
+    """Every bounded read times out at once, recording ``(conn, bound)``.
+
+    Uses the real :func:`run_deadline.wait_bound`/``wait_expired``, so the
+    recorded bound is what the read would have waited. ``recv_bounded`` itself
+    is tested against a real forked child below.
+    """
+    reads: list[tuple[Any, float]] = []
+
+    def expire(conn: Any, waiting_for: str) -> Any:
+        reads.append((conn, run_deadline.wait_bound(waiting_for)))
+        raise run_deadline.wait_expired(waiting_for)
+
+    monkeypatch.setattr(run_deadline, "recv_bounded", expire)
+    monkeypatch.setattr(keyed_process_pool, "recv_bounded", expire)
+    return reads
 
 
 @pytest.mark.parametrize(("scope", "expected_bound"), [(None, TWO_HOURS), (90.0, 90.0)])
 def test_side_isolation_read_is_bounded(
     monkeypatch: pytest.MonkeyPatch,
     frozen: None,
+    silent_reads: list[tuple[Any, float]],
     scope: float | None,
     expected_bound: float,
 ) -> None:
@@ -353,7 +365,7 @@ def test_side_isolation_read_is_bounded(
         pytest.raises(deadline.DeadlineExceeded) as info,
     ):
         side_isolation._run_children(object(), [lambda: None])
-    assert pipe.poll_timeouts == [expected_bound]
+    assert silent_reads == [(pipe, expected_bound)]
     assert info.value.waiting_for == "a side-resolution child process"
     # The silent child is stopped, its pipe closed and it is reaped escalated.
     assert proc.terminated and pipe.closed and reaped == [(proc, True)]
@@ -394,14 +406,15 @@ def test_release_member_pool_wait_is_bounded(
 
 
 def test_release_member_pool_read_after_ready_is_bounded(
-    monkeypatch: pytest.MonkeyPatch, frozen: None
+    frozen: None, silent_reads: list[tuple[Any, float]]
 ) -> None:
     """A pipe reported ready can hold a partial frame from a child that hung
-    mid-send; the read is bounded too."""
+    mid-send; the read is bounded too, and its expiry is the run's, not a
+    member transfer failure."""
     pipe = _SilentPipe()
     with deadline.deadline_scope(30.0), pytest.raises(deadline.DeadlineExceeded):
         keyed_process_pool._receive(pipe, _Proc())
-    assert pipe.poll_timeouts == [30.0]
+    assert silent_reads == [(pipe, 30.0)]
 
 
 class _ExpiringCondition(threading.Condition):
@@ -444,15 +457,21 @@ def test_release_admission_wait_is_bounded(
 def test_an_already_expired_deadline_waits_on_nothing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """recv_bounded starts no read once the deadline has passed."""
     monkeypatch.setattr(deadline, "_clock", FakeClock(later=11.0))
-    pipe = _SilentPipe()
+
+    class _NeverRead:
+        def recv(self) -> Any:  # pragma: no cover - reaching it is the bug
+            raise AssertionError("read started after the deadline passed")
+
     with deadline.deadline_scope(10.0), pytest.raises(deadline.DeadlineExceeded):
-        keyed_process_pool._receive(pipe, _Proc())
-    assert pipe.poll_timeouts == []
+        run_deadline.recv_bounded(_NeverRead(), "a child")
 
 
 def test_release_member_pool_stops_a_member_whose_read_expires(
-    monkeypatch: pytest.MonkeyPatch, frozen: None
+    monkeypatch: pytest.MonkeyPatch,
+    frozen: None,
+    silent_reads: list[tuple[Any, float]],
 ) -> None:
     """A member already taken off the running set (its pipe was ready) is
     still stopped when its read expires."""
@@ -471,6 +490,7 @@ def test_release_member_pool_stops_a_member_whose_read_expires(
         keyed_process_pool.run_keyed_in_processes(
             ["a"], lambda k: k, max_workers=1, on_error=lambda e, k: k
         )
+    assert silent_reads == [(pipe, 20.0)]
     assert proc.terminated and pipe.closed and reaped == [True]
 
 
@@ -603,3 +623,102 @@ def test_stored_bundle_facts_compare_is_bounded(
     assert result.exit_code == 5, result.output
     assert expected_message in result.output
     assert "No verdict was produced" in result.output
+
+
+# -- a real child that stops mid-frame -------------------------------------------
+
+_READER = "abicheck-child-recv"
+
+
+def _start_partial_frame_child() -> tuple[Any, Any]:
+    """Fork a child that writes a length header and part of its frame, then
+    stalls: poll() then reports the pipe ready, but the frame never completes."""
+    ctx = multiprocessing.get_context("fork")
+    recv, send = ctx.Pipe(duplex=False)
+    proc = ctx.Process(target=_write_partial_frame, args=(send.fileno(),), daemon=True)
+    proc.start()
+    send.close()
+    return proc, recv
+
+
+def _write_partial_frame(fd: int) -> None:
+    import os
+    import struct
+    import time
+
+    os.write(fd, struct.pack("!i", 1 << 20) + b"x" * 16)
+    time.sleep(120)  # alive, holding its write end open, never finishing
+
+
+def _join_readers() -> list[threading.Thread]:
+    readers = [t for t in threading.enumerate() if t.name == _READER]
+    for t in readers:
+        t.join(10)
+    return [t for t in readers if t.is_alive()]
+
+
+@pytest.mark.skipif(
+    "fork" not in multiprocessing.get_all_start_methods(), reason="needs fork"
+)
+def test_recv_bounded_stops_on_a_real_partial_frame() -> None:
+    proc, recv = _start_partial_frame_child()
+    try:
+        assert recv.poll(10), "the header never arrived"  # poll alone says ready
+        with (
+            deadline.deadline_scope(0.5),
+            pytest.raises(deadline.DeadlineExceeded) as info,
+        ):
+            run_deadline.recv_bounded(recv, "a stalled test child")
+        assert info.value.waiting_for == "a stalled test child"
+    finally:
+        proc.terminate()
+        proc.join(10)
+    # The child's death closes its write end: the abandoned reader ends on EOF.
+    assert not proc.is_alive()
+    assert _join_readers() == []
+    recv.close()
+
+
+@pytest.mark.skipif(
+    "fork" not in multiprocessing.get_all_start_methods(), reason="needs fork"
+)
+def test_side_isolation_reaps_a_real_child_stalled_mid_frame(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started: list[Any] = []
+
+    def fork(_ctx: Any, _fn: Any) -> tuple[Any, Any]:
+        proc, recv = _start_partial_frame_child()
+        started.append(proc)
+        return proc, recv
+
+    monkeypatch.setattr(side_isolation, "fork_child", fork)
+    with (
+        deadline.deadline_scope(0.5),
+        pytest.raises(deadline.DeadlineExceeded) as info,
+    ):
+        side_isolation._run_children(object(), [lambda: None])
+    assert info.value.waiting_for == "a side-resolution child process"
+    (proc,) = started
+    assert not proc.is_alive() and proc.exitcode is not None  # terminated and reaped
+    assert _join_readers() == []
+
+
+@pytest.mark.parametrize(
+    ("outcome", "expected"),
+    [("value", ("ok", 42)), ("eof", EOFError)],
+)
+def test_recv_bounded_passes_answers_and_errors_through(
+    outcome: str, expected: Any
+) -> None:
+    recv, send = multiprocessing.Pipe(duplex=False)
+    if outcome == "value":
+        send.send(("ok", 42))
+    send.close()
+    with deadline.deadline_scope(30.0):
+        if expected is EOFError:
+            with pytest.raises(EOFError):
+                run_deadline.recv_bounded(recv, "a child")
+        else:
+            assert run_deadline.recv_bounded(recv, "a child") == expected
+    recv.close()

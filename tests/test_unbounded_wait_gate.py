@@ -42,10 +42,12 @@ import pytest
 REPO = Path(__file__).resolve().parent.parent
 SCAN_ROOT = REPO / "abicheck"
 
-_POLLED_FIRST = (
-    "read only after recv.poll(deadline.wait_bound(...)) reports data: bounded by "
-    "the run's deadline, or the 2-hour DEFAULT_BUDGET_S with none active "
-    "(ADR-068's 2026-11 amendment); tests/test_budget_default.py pins the expiry"
+_BOUNDED_READER = (
+    "runs on a reader thread the caller joins with deadline.wait_bound(): the "
+    "run's deadline, or the 2-hour DEFAULT_BUDGET_S with none active (ADR-068's "
+    "2026-11 amendment). poll() alone is not a bound -- it reports a pipe ready "
+    "on the length header, and recv() then blocks on a frame a stalled child "
+    "never finishes; tests/test_budget_default.py drives a real child that does"
 )
 
 #: ``(relative path, call text) -> (exact site count, reason)``.
@@ -135,8 +137,7 @@ ALLOWED_UNBOUNDED: dict[tuple[str, str], tuple[int, str]] = {
         1,
         "as_completed yields only finished futures",
     ),
-    ("abicheck/workflows/keyed_process_pool.py", "recv.recv()"): (1, _POLLED_FIRST),
-    ("abicheck/workflows/side_isolation.py", "recv.recv()"): (1, _POLLED_FIRST),
+    ("abicheck/workflows/run_deadline.py", "conn.recv()"): (1, _BOUNDED_READER),
 }
 
 _WAIT_METHODS = frozenset(

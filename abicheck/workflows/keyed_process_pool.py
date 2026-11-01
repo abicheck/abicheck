@@ -46,7 +46,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 from ..deadline import DeadlineExceeded
 from ..errors import SnapshotError
 from . import memory_trace
-from .run_deadline import wait_bound, wait_expired
+from .run_deadline import recv_bounded, wait_bound, wait_expired
 from .side_isolation import _TERMINATE_GRACE_SECONDS, fork_child, reap_child
 
 if TYPE_CHECKING:
@@ -81,17 +81,14 @@ def _receive(recv: Any, proc: Any) -> tuple[str, Any]:
     Raises :class:`~abicheck.deadline.DeadlineExceeded` when the run's
     deadline passes first.
     """
-    from ..storage.acyclic_json import gc_paused
 
-    # A ready pipe can still hold a partial frame from a child that hung
-    # mid-send; the read is bounded like the wait that found it ready. Outside
-    # the try: an expired run is not this member's transfer failure.
-    if not recv.poll(wait_bound(_MEMBER_WAIT)):
-        raise wait_expired(_MEMBER_WAIT)
+    # The whole frame is read under the run's deadline: a pipe reported
+    # ready can still hold only part of a frame from a child that stopped
+    # mid-send, and a plain recv() would block on the rest for ever.
     try:
-        # Unpickling builds a whole result graph at once; see side_isolation.
-        with gc_paused():
-            status, value = recv.recv()
+        status, value = recv_bounded(recv, _MEMBER_WAIT)
+    except DeadlineExceeded:
+        raise  # the run's budget, not this member's transfer failure
     except EOFError:
         # Bounded: a child that closed its pipe may still be alive; reap_child
         # in _settle (or the caller's finally) escalates to SIGKILL.
