@@ -29,6 +29,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from _action_run_sh_harness import REQUIRES_POSIX_SHELL, _run_action, _stub_abicheck
 from test_action_run_sh_baseline_set_fallback import (
     FIXTURE_TAG,
@@ -305,3 +306,43 @@ class TestBaselineProvenanceReachesTheReport:
         assert outputs["_exit"] == 0, outputs["_stdout"]
         assert outputs["baseline-source"] == ""
         assert _captured(tmp_path) == []
+
+
+class TestNonAsciiGenerationIsHandedThrough:
+    """A manifest `baseline_generation` the writer must not turn into an int:
+    `str.isdigit()` accepts Unicode digits that `int()` rejects, which used to
+    crash the step (exit 1). Each value must reach the CLI unchanged, as data,
+    and the CLI's own reader must refuse it (exit 64 in a real run)."""
+
+    @pytest.mark.parametrize("generation", ["²", "٣", "3.0", "-1"])
+    def test_value_is_passed_through_and_refused_by_the_reader(
+        self, tmp_path: Path, generation: str
+    ) -> None:
+        from abicheck.model.baseline_provenance import (
+            BaselineProvenance,
+            BaselineProvenanceError,
+        )
+
+        archive_dir = tmp_path / "archive"
+        archive_dir.mkdir()
+        archive = _build_baseline_set_archive(
+            archive_dir,
+            baseline_generation=generation,
+        )
+        bindir = _capturing_stub(tmp_path)
+        _gh_on_path(bindir)
+        _write_new_library(tmp_path)
+        env = _selected_env(tmp_path, legacy=False)
+        env["FIXTURE_ARCHIVE"] = str(archive)
+        outputs = _run_action(tmp_path, env, bindir)
+        docs = _captured(tmp_path)
+        if outputs["baseline-source"] != "baseline-set":
+            # The resolver itself refused the manifest: no file was handed on.
+            assert docs == []
+            return
+        assert outputs["_exit"] == 0, outputs["_stdout"]
+        assert docs, "the writer handed no file to the CLI"
+        for doc in docs:
+            assert doc["generation"] == generation
+            with pytest.raises(BaselineProvenanceError, match="generation"):
+                BaselineProvenance.from_mapping(doc)

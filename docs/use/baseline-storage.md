@@ -184,6 +184,8 @@ The job summary's "Baseline source" block, and the `baseline-source`,
 JSON report carries the same values in its `baseline_provenance` block,
 marked `asserted_by: action` because the CLI does not verify them (see
 [Output formats](output-formats.md#baseline-provenance-baseline_provenance)).
+The Action's value replaces a `report.baseline_provenance` set in
+`.abicheck.yml`; only the Action's `set:` input can override it.
 
 ## Recipe A2: Multi-Library Releases — the `baseline` Action (a generator, not a registry)
 

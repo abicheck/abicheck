@@ -2371,9 +2371,14 @@ doc = {
     "source": source,
     "asset_name": asset or None,
     "project_ref": ref or None,
-    # A non-numeric generation is passed through as written, so the CLI
-    # refuses it (exit 64) rather than this writer dropping it.
-    "generation": int(generation) if generation.isdigit() else (generation or None),
+    # Only ASCII digits are converted (str.isdigit() also accepts "²", which
+    # int() rejects). Anything else is passed through as written, so the CLI
+    # refuses it (exit 64) rather than this writer crashing or dropping it.
+    "generation": (
+        int(generation)
+        if generation.isascii() and generation.isdigit()
+        else (generation or None)
+    ),
     "profile": profile or None,
 }
 with open(out, "w", encoding="utf-8") as fh:
