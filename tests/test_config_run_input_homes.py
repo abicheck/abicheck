@@ -449,7 +449,7 @@ def test_typed_argument_beats_the_override(tmp_path: Path) -> None:
             "deps.search_paths": [str(tmp_path)],
         },
     )
-    out = _with_config_overrides(request)
+    out = _with_config_overrides(request)[0]
     assert out.ld_library_path == "/typed"
     assert out.dependency_search_paths == (tmp_path,)
 
@@ -468,7 +468,7 @@ def test_typed_api_refuses_the_core_keys_naming_their_flag(
         config_overrides={key: value},
     )
     with pytest.raises(Exception, match=re.escape(CORE_CONFIG_FLAGS[key])):
-        _with_config_overrides(compare)
+        _with_config_overrides(compare)[0]
     dump = DumpRequest(
         input=InputSpec(path=tmp_path / "a.so"), config_overrides={key: value}
     )

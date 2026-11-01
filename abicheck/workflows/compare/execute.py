@@ -145,7 +145,7 @@ def run_compare_request(request: CompareRequest) -> CompareResult:
     """
     import abicheck.deadline as deadline
 
-    request, contract = _resolve_config_overrides(request)
+    request, contract = _with_config_overrides(request)
     request = with_required_symbol_policy(request, contract)
     with deadline.deadline_scope(request.budget_s):
         # deadline_scope never raises on entry -- check() before the work
@@ -157,16 +157,7 @@ def run_compare_request(request: CompareRequest) -> CompareResult:
     return result
 
 
-def _with_config_overrides(request: CompareRequest) -> CompareRequest:
-    """*request* with its ``config_overrides`` resolved into the fields they set.
-
-    See :func:`_resolve_config_overrides`, which also returns the
-    ``consumers.required_symbols`` contract the overrides state.
-    """
-    return _resolve_config_overrides(request)[0]
-
-
-def _resolve_config_overrides(
+def _with_config_overrides(
     request: CompareRequest,
 ) -> tuple[CompareRequest, RequiredSymbolContract | None]:
     """*request* with its ``config_overrides`` resolved into the fields they set,
