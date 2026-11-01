@@ -90,7 +90,7 @@ def _parse_on_incomplete(d: dict[str, Any], *, where: str) -> str:
     if "on_incomplete" not in d:
         return ""
     raw = d["on_incomplete"]
-    if raw not in BUNDLE_ON_INCOMPLETE_TO_SCOPE:
+    if not isinstance(raw, str) or raw not in BUNDLE_ON_INCOMPLETE_TO_SCOPE:
         raise ValueError(
             f"{where}.on_incomplete must be one of "
             f"{sorted(BUNDLE_ON_INCOMPLETE_TO_SCOPE)}, got {raw!r}"

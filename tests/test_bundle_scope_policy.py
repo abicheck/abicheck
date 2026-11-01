@@ -126,6 +126,8 @@ class TestBundleSpecParsing:
             ({"on_incomplete": "block"}, "must be one of"),
             ({"on_incomplete": True}, "must be one of"),
             ({"on_incomplete": ""}, "must be one of"),
+            ({"on_incomplete": ["fail"]}, "must be one of"),
+            ({"on_incomplete": {"fail": 1}}, "must be one of"),
         ],
     )
     def test_malformed_policy_is_refused(self, patch, message):
@@ -170,6 +172,57 @@ class TestRunPlanCarriesThePolicy:
             "checks": [{"kind": "bundle", "name": "rel", key: value}],
         }
         with pytest.raises(AggregateError, match="run-plan/v4"):
+            RunPlan.from_dict(doc)
+
+    @pytest.mark.parametrize(
+        ("required", "on_incomplete"),
+        [(["liba"], ""), ([], "fail"), (["liba"], "warn")],
+    )
+    def test_hand_built_plan_round_trips_through_its_own_reader(
+        self, required, on_incomplete
+    ):
+        """Whatever subset of the two fields a bundle cell carries, the
+        writer stamps the schema its own reader accepts."""
+        from abicheck.buildsource.run_plan import RunPlanCheck
+
+        cell = RunPlanCheck(
+            kind="bundle",
+            name="rel",
+            bundle_members=["liba", "libb"],
+            bundle_required=required,
+            bundle_on_incomplete=on_incomplete,
+        )
+        doc = RunPlan(checks=[cell]).to_dict()
+        assert doc["schema"] == "abicheck.run-plan/v4"
+        back = RunPlan.from_dict(json.loads(json.dumps(doc))).checks[0]
+        assert (back.bundle_required, back.bundle_on_incomplete) == (
+            required,
+            on_incomplete,
+        )
+
+    def test_target_cell_never_selects_v4(self):
+        from abicheck.buildsource.run_plan import RunPlanCheck
+
+        cell = RunPlanCheck(kind="target", name="liba", bundle_on_incomplete="fail")
+        assert RunPlan(checks=[cell]).to_dict()["schema"] == "abicheck.run-plan/v1"
+
+    @pytest.mark.parametrize(
+        "fields",
+        [
+            {"bundle_required": ["liba", 1]},
+            {"bundle_required": [1]},
+            {"bundle_required": "liba"},
+            {"bundle_required": [""]},
+            {"bundle_on_incomplete": "block"},
+            {"bundle_on_incomplete": ["fail"]},
+        ],
+    )
+    def test_malformed_policy_fields_are_refused_not_filtered(self, fields):
+        doc = {
+            "schema": "abicheck.run-plan/v4",
+            "checks": [{"kind": "bundle", "name": "rel", **fields}],
+        }
+        with pytest.raises(AggregateError, match="bundle scope policy"):
             RunPlan.from_dict(doc)
 
     def test_v5_plan_is_refused_as_newer_than_supported(self):

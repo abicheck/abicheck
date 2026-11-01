@@ -30,6 +30,9 @@ A leaf: it imports nothing of this package, so both `run_plan.py` and
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import Any
+
 #: Schema discriminator stamped into every ``run-plan.json`` (mirrors
 #: ``BUILD_OUTPUT_SCHEMA``'s naming convention).
 RUN_PLAN_SCHEMA = "abicheck.run-plan/v1"
@@ -117,3 +120,50 @@ def reject_unversioned_bundle_scope(
             f"{schema!r}); an older reader would drop it and run the bundle "
             "with no selection"
         )
+
+
+def carries_bundle_scope(checks: object) -> bool:
+    """Whether any ``kind: bundle`` cell carries a scope policy field: the
+    write-side twin of :func:`reject_unversioned_bundle_scope`, so the stamp
+    and the reader's refusal test the same fields."""
+    return any(
+        getattr(c, "kind", "") == "bundle"
+        and (
+            getattr(c, "bundle_required", None)
+            or getattr(c, "bundle_on_incomplete", "")
+        )
+        for c in (checks if isinstance(checks, list) else [])
+    )
+
+
+def _bundle_scope_error(message: str) -> Exception:
+    from ..workflows.aggregate import AggregateError
+
+    return AggregateError(f"run-plan bundle scope policy: {message}")
+
+
+def bundle_required_field(d: Mapping[str, Any]) -> list[str]:
+    """A cell's ``bundle_required``: absent -> ``[]``; anything other than a
+    list of non-empty strings is refused, never filtered -- a filtered list
+    would be a different policy from the one the plan states."""
+    raw = d.get("bundle_required")
+    if raw is None:
+        return []
+    if not isinstance(raw, list) or any(not isinstance(x, str) or not x for x in raw):
+        raise _bundle_scope_error(
+            f"'bundle_required' must be a list of member ids, got {raw!r}"
+        )
+    return list(raw)
+
+
+def bundle_on_incomplete_field(d: Mapping[str, Any]) -> str:
+    """A cell's ``bundle_on_incomplete``: absent -> ``""``; else ``fail`` or
+    ``warn``."""
+    raw = d.get("bundle_on_incomplete")
+    if raw is None:
+        return ""
+    if raw not in ("fail", "warn"):
+        raise _bundle_scope_error(
+            f"'bundle_on_incomplete' must be 'fail' or 'warn', got {raw!r}"
+        )
+    return str(raw)

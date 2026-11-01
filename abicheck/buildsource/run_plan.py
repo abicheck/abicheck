@@ -169,6 +169,9 @@ from .run_plan_schema import (  # noqa: F401
     RUN_PLAN_SCHEMA_GATE,
     RUN_PLAN_SCHEMA_SKIPPED,
     _run_plan_schema_version,
+    bundle_on_incomplete_field,
+    bundle_required_field,
+    carries_bundle_scope,
     reject_unversioned_bundle_scope,
 )
 from .run_plan_skip import (  # noqa: F401
@@ -265,11 +268,10 @@ class RunPlanCheck:
     #: ``binary_pattern``, so a caller can stage a member-binaries directory
     #: without re-reading ``.abicheck.yml``.
     member_binary_patterns: dict[str, str] = field(default_factory=dict)
-    #: ``kind: bundle`` only -- the bundle's scope policy
-    #: (``project_bundles.BundleSpec``): the members forwarded as
-    #: ``--select-required`` (every other member as ``--select``), and
-    #: ``fail``/``warn`` for ``scope.on_incomplete``. ``[]``/``""`` = none
-    #: declared; a declared policy stamps ``RUN_PLAN_SCHEMA_BUNDLE_SCOPE``.
+    #: ``kind: bundle`` only -- the scope policy (``project_bundles``): members
+    #: forwarded as ``--select-required`` (the rest as ``--select``) and
+    #: ``fail``/``warn`` for ``scope.on_incomplete``; ``[]``/``""`` = none
+    #: declared. A declared policy stamps ``RUN_PLAN_SCHEMA_BUNDLE_SCOPE``.
     bundle_required: list[str] = field(default_factory=list)
     bundle_on_incomplete: str = ""
     #: This cell's profile's ``compile.binding``, resolved to an exact
@@ -447,10 +449,8 @@ class RunPlanCheck:
                 str(x) for x in (d.get("bundle_members") or []) if isinstance(x, str)
             ],
             member_binary_patterns=member_patterns,
-            bundle_required=[
-                x for x in (d.get("bundle_required") or []) if isinstance(x, str)
-            ],
-            bundle_on_incomplete=_opt_str(d.get("bundle_on_incomplete")),
+            bundle_required=bundle_required_field(d),
+            bundle_on_incomplete=bundle_on_incomplete_field(d),
             compile_gcc_path=_opt_str(d.get("compile_gcc_path")),
             compile_gcc_options=_opt_str(d.get("compile_gcc_options")),
             consumer_compile_gcc_path=_opt_str(d.get("consumer_compile_gcc_path")),
@@ -549,7 +549,7 @@ class RunPlan:
             has_gate=has_gate,
             skipped=self.skipped is not None,
             check_count=len(self.checks),
-            bundle_scope=any(c.bundle_required for c in self.checks),
+            bundle_scope=carries_bundle_scope(self.checks),
         )
         d: dict[str, Any] = {"schema": schema}
         if self.project:
