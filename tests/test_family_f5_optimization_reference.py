@@ -146,6 +146,8 @@ COVERAGE: dict[str, str] = {
     "abicheck.schemas.documents::memoized::load_aggregate_report_schema": "UNCOVERED: schema loader for `aggregate` only; returns packaged JSON",
     "abicheck.schemas.documents::memoized::load_audit_report_schema": "UNCOVERED: schema loader for audit reports only; returns packaged JSON",
     "abicheck.schemas.documents::memoized::load_audit_set_report_schema": "UNCOVERED: schema loader for directory audit-set reports only; returns packaged JSON",
+    "abicheck.schemas.documents::memoized::load_bundle_facts_schema": "UNCOVERED: schema loader for the stored BundleFacts JSON document; returns packaged JSON",
+    "abicheck.schemas.documents::memoized::load_bundle_facts_archive_manifest_schema": "UNCOVERED: schema loader for the BundleFacts archive manifest; returns packaged JSON",
     "abicheck.schemas.documents::memoized::load_compare_report_schema": "UNCOVERED: schema loader used by validation tooling, not by compare itself",
     "abicheck.storage.closure_identity::memoized::_anon_type_ordinal_matches_cached": "UNCOVERED: stored-closure identity for anonymous types; needs a ProjectSnapshot fixture",
     # ---- memoized properties ----

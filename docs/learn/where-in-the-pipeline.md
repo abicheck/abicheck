@@ -116,8 +116,9 @@ The nightly is where the expensive evidence goes: the *unseeded* deep scan
 (`--depth source` with no `--since`, which replays the whole target), and
 the one-build audit (`--no-baseline`) that lints a single build for
 accidental exports, private-header leaks and unversioned symbols. This is
-also where `--budget` belongs — it fails loudly on overflow rather than
-shrinking scope — and where `--dry-run` tells you what a depth would cost
+also where `--budget` belongs: it fails loudly on overflow rather than
+shrinking scope, and a run that states none gets a 2h default, so a deep
+scan that needs longer must say so. It is also where `--dry-run` tells you what a depth would cost
 before you spend it.
 
 The one-build audit (verified live against `catalog/cases/
@@ -129,7 +130,7 @@ abicheck compare --no-baseline build/libfoo.so -H include/
 ```
 
 `--budget` is not wired to `--no-baseline`'s one-sided audit path yet (it
-exits 64 there today) — a nightly deep scan compares against a real
+exits 64 there today; the audit still stops at the 2h default) — a nightly deep scan compares against a real
 baseline anyway, so this is a two-sided `compare`:
 
 ```bash

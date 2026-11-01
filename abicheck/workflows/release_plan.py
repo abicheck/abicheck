@@ -194,6 +194,9 @@ class ReleasePlanEntry:
     #: ReleaseSelection` -- always ``True`` when no selection was given.
     declared: bool
     note: str
+    #: A one-sided member no reader can open: the real run records it
+    #: ``failed`` (``release_member_readability``), not merely unmatched.
+    unreadable: bool = False
 
 
 @dataclass(frozen=True)
@@ -232,6 +235,7 @@ def build_release_plan(
     new_map: Mapping[str, Path],
     *,
     selection: ReleaseSelection | None = None,
+    unreadable: Mapping[str, str] | None = None,
 ) -> ReleasePlan:
     """The ``--dry-run`` preview of what :func:`~abicheck.workflows.
     release_scope.build_release_scope_record` would later decide, computed
@@ -246,7 +250,9 @@ def build_release_plan(
     fan-out behavior exactly (this is a preview, so it must never claim a
     plan the real run would not also produce). With one, every declared key
     plus every discovered key not declared (reported as an explicit
-    out-of-scope note) is listed.
+    out-of-scope note) is listed. *unreadable* names the one-sided members
+    no reader can open (``release_member_readability``), which the real run
+    records ``failed``.
     """
     if selection is not None:
         keys = sorted(set(selection.members) | set(old_map) | set(new_map))
@@ -282,6 +288,11 @@ def build_release_plan(
                 if selection is not None
                 else "not discovered on either side"
             )
+        elif unreadable and key in unreadable:
+            side = "OLD" if old_present else "NEW"
+            note = (
+                f"present only on {side}; would be recorded failed: {unreadable[key]}"
+            )
         elif old_present:
             note = "present only on OLD; no NEW counterpart"
         else:
@@ -296,6 +307,7 @@ def build_release_plan(
                 required=required,
                 declared=True,
                 note=note,
+                unreadable=key in (unreadable or {}),
             )
         )
     kind = "declared" if selection is not None else "discovered"
@@ -325,4 +337,17 @@ def build_release_plan_from_directories(
     new_files = collect_release_inputs(new_dir)
     old_map, _old_warnings = build_match_map(old_files)
     new_map, _new_warnings = build_match_map(new_files)
-    return build_release_plan(old_map, new_map, selection=selection)
+    from .release_member_pairing import pair_path_maps_by_identity
+    from .release_member_readability import unreadable_unmatched_members
+
+    new_map = pair_path_maps_by_identity(old_map, new_map)
+    matched = set(old_map) & set(new_map)
+    return build_release_plan(
+        old_map,
+        new_map,
+        selection=selection,
+        unreadable={
+            **unreadable_unmatched_members(old_map, matched),
+            **unreadable_unmatched_members(new_map, matched),
+        },
+    )

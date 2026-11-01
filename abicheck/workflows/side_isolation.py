@@ -53,7 +53,6 @@ from typing import Any, TypeVar
 
 from ..errors import SnapshotError
 from ..model.performance import ExecutionTuning
-from ..storage.acyclic_json import gc_paused
 
 __all__ = [
     "concurrent_children_apply",
@@ -258,8 +257,12 @@ def _with_ast_sizes(fn: Callable[[], _T]) -> Callable[[], tuple[_T, int]]:
     return run
 
 
+_SIDE_WAIT = "a side-resolution child process"
+
+
 def _run_children(ctx: Any, fns: list[Callable[[], _T]]) -> list[_T]:
     from ..storage.ast_size_observer import report_ast_size
+    from .run_deadline import recv_bounded
 
     started: list[tuple[Any, Any]] = [
         fork_child(ctx, _with_ast_sizes(fn)) for fn in fns
@@ -274,8 +277,11 @@ def _run_children(ctx: Any, fns: list[Callable[[], _T]]) -> list[_T]:
                 # Unpickling builds the whole snapshot graph at once; a gen-0
                 # collection every few hundred allocations would rescan it
                 # repeatedly for garbage it cannot contain yet.
-                with gc_paused():
-                    status, value = recv.recv()
+                # Bounded by the run's deadline (2 h by default), the whole
+                # frame included: a child that is alive but never answers, or
+                # stops mid-frame, fails the run instead of hanging it; the
+                # finally below terminates it.
+                status, value = recv_bounded(recv, _SIDE_WAIT)
             except EOFError:
                 # The child closed its end without answering. Bounded: it may
                 # still be alive (SIGTERM-proof, deadlocked); the finally

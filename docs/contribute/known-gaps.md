@@ -228,10 +228,10 @@ current emitter, which is unchanged.
 **Status (re-verified 2026-10-25): OPEN.** `abicheck/dumper.py:1051` `_dump_pe` has no debug_roots parameter, and `dwp_path`/`dsym_path` are set only by `debug_resolver.py` and read only by `extract/debug_artifact.py`'s description (no dump consumer). The directory form still resolves PDB/DWP/dSYM artifacts that are then dropped.  
 `false-clean` — The directory form resolves PDB/DWP/dSYM artifacts, but no dump path consumes them, so the debug evidence is dropped. [Full write-up](known-gaps/a-resolved-pdbdwpdsym-artifact-reaches-no-dump-path.md)
 
-#### A labelled side-scoped `--include` appeared to suppress unlabelled global include roots
+#### A failed header parse on PE or Mach-O falls back to export-table mode and can exit 0 (2026-11-01)
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** unverified: the entry itself has no minimal reproduction. The labelled/unlabelled --include merge in frontends/cli/options/params.py:187+ was not exercised with castxml here.  
-`false-clean` — Unverified, no minimal reproduction: a labelled side-scoped `--include` appeared to drop unlabelled global include roots. [Full write-up](known-gaps/a-labelled-side-scoped-include-appeared-to-suppress-unlabelled.md)
+**Status (recorded 2026-11-01): OPEN.** `workflows/dump/header_scoped.py` catches any header-parse failure of a PE or Mach-O binary, warns `Falling back to export-table mode -- --header/--include were ignored`, and returns an export-table snapshot. The run then reads `requested_depth: binary` (implicit) and `header_context_status: not_evaluated`, and can exit 0, where the same failure on ELF fails the run. Found by the macOS lane of `tests/test_sided_include_labelled_composition.py`, whose negative control pins the current behaviour on darwin.
+`false-clean` — An explicitly supplied header that does not parse on PE/Mach-O is reported as a warning and a binary-depth run instead of a failed acquisition. [Full write-up](known-gaps/a-failed-header-parse-on-pe-or-mach-o-falls-back-to-export-table-mode.md)
 
 #### A stored snapshot keeps no record of a partial export-table read
 
@@ -498,35 +498,20 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 
 ### Hygiene
 
-#### A forked child that is alive but never answers blocks the parent's pipe read
-
-**Status (recorded 2026-10-28): OPEN.** The side-isolation receive (`side_isolation._run_children`, `recv.recv()`), the release member pool's receive (`keyed_process_pool`, `recv.recv()` and `wait_ready()`) and the release admission budget wait (`release_admission`, `self._cond.wait()`) return only when the child answers or its pipe reaches EOF. A child that is alive, deadlocked (for example on a lock its fork copied held) and never exits or closes its pipe therefore hangs the run when no `--budget` is set. The EOF and completed-child reap paths are bounded (R6, 2026-10-28), and `tests/test_unbounded_wait_gate.py` pins these three sites as the only unbounded waits left under `abicheck/`. Bounding them needs a time policy for an unbudgeted side (a maintainer decision). Under `--budget` the active deadline could bound them, but `workflows` may not import the unclassified `deadline` module yet (`architecture/dispositions.yaml`).  
-`hygiene` — A hang here is silent: the run neither fails nor finishes. Decide the unbudgeted time limit, then route these reads through the deadline.
-
-#### `consumers.required_symbols` `@FILE` read errors are checked on the CLI route only
-
-**Status (recorded 2026-10-22): OPEN.** An unreadable `@FILE` is refused as a typed `CompareSettingsError` (exit 64, path named) by `workflows/compare_configuration.load_required_symbols`, pinned on the CLI and the typed function in `tests/test_compare_settings_cli_translation.py`. No bug-class harness covers it: the typed `CompareRequest` API does not accept `@FILE` required symbols, so there is no second route to compare against, and family F2's route-parity matrix has nothing to attach to.
-`hygiene` — A harness cell becomes meaningful only if `@FILE` resolution is exposed on a second route; until then the CLI test is the guard. [Full write-up](known-gaps/required-symbol-file-read-errors-are-checked-on-the-cli-route-only.md)
-
 #### Release report: live and stored operands render different documents
 
 **Status (2026-10-25): CLOSED for the document shape.** A stored `BundleFacts` comparison renders the live release document: its JSON is the live release document (release schema 2.5), and JSON, Markdown, JUnit, `oneline` and HTML all come from one live-shaped evaluation of the stored facts (`tests/unit/report/test_release_document.py`, `tests/test_cli_compare_stored_release_parity.py`). Fields a stored comparison cannot compute are explicit `unavailable` markers with a reason, and its receipt is marked `reconstructed_from_stored_facts`. Remaining limits, named rather than hidden: the stored JUnit omits the passing testcase for each unchanged symbol (no old-side inventory); `output.view` `show=`, `sarif` and `review` stay refused for a stored OLD_INPUT.  
 `hygiene` — Closed: the stored document now carries the live release shape (schema 2.5, breaking for the stored document). [Full write-up](known-gaps/release-report-live-and-stored-operands-render-different-documents.md) [Full write-up](known-gaps/release-report-live-and-stored-operands-render-different-documents.md)
 
-#### An unreadable NEW-only release member is reported unmatched, not unreadable (2026-10-31)
+#### A one-sided release member with a damaged native body reads as unmatched (2026-11-01)
 
-**Status (recorded 2026-10-31): OPEN.** A release compare only extracts paired members, so a NEW-only file named like a library that no extractor can read (`notes.so`, text) is reported as `not_supplied` in `unmatched_new`, not `failed`. Both routes behave the same way (live/live and stored/live), and neither reads it as a clean comparison. Found while aligning stored→live member discovery with live/live (PR #1878).
-`hygiene` — An unreadable NEW-only member reads as a one-sided member rather than as an unreadable one. [Full write-up](known-gaps/an-unreadable-new-only-release-member-is-not-reported-unreadable.md)
+**Status (recorded 2026-11-01): OPEN.** A one-sided member that no reader recognizes by content is now `failed` (archive: "An unreadable NEW-only release member..."). The probe reads the format only, so a file with valid ELF, PE or Mach-O magic and a truncated or corrupt body is never extracted when it has no counterpart, and still reads as `not_supplied`. Paired, it fails at extraction as before.
+`hygiene` — A one-sided member whose native image is damaged is reported as one-sided rather than unreadable; closing it needs a bounded structural parse of unmatched native members. [Full write-up](known-gaps/a-one-sided-member-with-a-damaged-native-body-reads-as-unmatched.md)
 
 #### Public-surface graph: surface_graph vs L5 header_graph node-id namespaces not unified; type_reachability stdlib query unmigrated
 
 **Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** The traversal half is superseded: the closure walk moved to policy/public_surface_closure.py. Still true: abicheck/type_reachability.py is unmigrated, and the compare/surface_graph.py and header_graph node-id namespaces are not unified.  
 `hygiene` — The closure walk moved to `policy/public_surface_closure.py`, but `type_reachability.py` is unmigrated and the surface-graph and header-graph node-id namespaces are still separate. [Full write-up](known-gaps/public-surface-graph-surface-graph-vs-l5-header-graph-node-id.md)
-
-#### `BundleFacts` (and its G40 archive container) has no published JSON Schema, in either `abicheck/schemas/` or `docs/reference/schemas/`
-
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** abicheck/model/bundle_facts.py:53 BUNDLE_FACTS_SCHEMA_VERSION = 4, but abicheck/schemas/ and docs/reference/schemas/v1/ hold no bundle_facts schema (only aggregate/audit/audit_set/build_evidence/build_source_pack/compare). The module path in the entry is stale (bundle_facts.py is now model/bundle_facts.py).  
-`hygiene` — `BundleFacts` (schema version 4) and its archive container have no published JSON Schema in `abicheck/schemas/` or `docs/reference/schemas/`. [Full write-up](known-gaps/bundlefacts-and-its-g40-archive-container-has-no-published-json.md)
 
 #### The weekly `Mutation testing` scheduled lane (`.github/workflows/mutation.yml`, job `mutmut (detector core)`) can outgrow its own job timeout before producing a receipt — investigated, partially mitigated, not fully fixed
 
@@ -558,11 +543,6 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 **Status (2026-10-22): PARTIAL.** The physical move and split landed: the detectors are in `compare/internal_leak.py`, the layout walk in `compare/internal_leak_paths.py`, the call-graph walk in `compare/internal_leak_graph.py`, and the subject classification in `compare/internal_leak_names.py`. Each is under the 800-line cap, and nothing re-exports from the old root path. Still open: `tests/test_internal_leak.py` (1933 lines) remains above the 1200-line test cap on its `no_growth` record.  
 `hygiene` — the leak rule is owned by `compare/` as four modules, but its main test module is still a `no_growth` grandfather and has not yet been split by behavior axis. [Full write-up](known-gaps/internal-leak-is-now-four-compare-modules-but-its-test.md)
 
-#### `compare --bundle-facts-out` stays a `compare` flag because `dump` has no release fan-out
-
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** --bundle-facts-out is still a compare option (frontends/cli/options/bundle_facts_library_manifest.py, commands/compare.py), and no dump command offers a bundle-facts format/fan-out. The blocker is removed, but the dump fan-out is unwritten.  
-`hygiene` — `--bundle-facts-out` remains a `compare` flag because `dump` has no release fan-out; the blocker is gone but the fan-out is unwritten. [Full write-up](known-gaps/compare-bundle-facts-out-stays-a-compare-flag-because-dump-has.md)
-
 #### A directory/package `compare` cannot render sarif/review; `bundles:` cannot state scope policy
 
 **Status (2026-10-23): PARTIAL.** Closed: a directory/package `compare` now renders `sarif` (one run per library, each result stamped with `properties.releaseMember`) and `review` (a release digest rendered from the release JSON), so `RELEASE_FORMATS` is the full compare set minus `terminal`. Still open: BundleSpec has no scope-policy keys (`bundles:` cannot state scope policy at bundle level).  
@@ -572,11 +552,6 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 
 **Status (re-verified 2026-10-09 at `456989f`): OPEN.** Both deliberate residuals are still open: scripts/check_ai_readiness.py has no source-read licence gate (grep 'licen' finds only license-header checks), and there are no per-input content digests. The third residual is recorded as closed.  
 `hygiene` — The source-read licence is enforced at its one consumer; there is no repo-wide gate and no per-input content digest. [Full write-up](known-gaps/source-read-licence-enforced-at-the-one-consumer-not-repo-wide.md)
-
-#### A release/bundle report carries no authoritative entity-by-operation counts
-
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** report/pr_comment_aggregate.py:575-588 still marks the release rollup exact=False when targets cannot be itemized. The release JSON has an `uncapped` findings path (cli_compare_release_matrix.py:634), but no authoritative entity-by-operation count field was found; pr_comment._release_change_summary named in the entry no longer exists under that name.  
-`hygiene` — The release rollup is marked `exact=False` when targets cannot be itemized, and the release JSON has no authoritative entity-by-operation count field. [Full write-up](known-gaps/a-releasebundle-report-carries-no-authoritative-entity-by.md)
 
 #### Five SVS-scan report findings not addressed by the change-vs-inventory/depth/exclusion fixes (2026-09-17)
 
@@ -612,11 +587,6 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 #### An `ownership_fact` is persisted only as a PRESENT decision (2026-10-27)
 
 **Status (2026-10-29): FIXED (schema v67).** Non-`PRESENT` statuses and the decisions of a snapshot with no recorded scope are now persisted (`entity_ownership.statuses`, `ownership_without_scope`). The round-trip is pinned in `tests/unit/storage/test_snapshot_field_roundtrip.py`. [Write-up](known-gaps/ownership-fact-persists-only-a-present-decision.md)
-
-#### Release fan-out cannot pair a stored snapshot directory with a live one
-
-**Status (recorded 2026-10-28): OPEN.** A directory compare pairs members by library key, the file name, so a stored `libfoo.json` directory against a live `libfoo.so` directory completes zero comparisons and exits 1 (`no_comparison_completed`). The same bytes compared as scalar operands compare normally. Pinned by the strict-xfail cells `release@mixed_old` and `release@mixed_new` in `tests/test_family_f2_live_route_matrix.py`.
-`hygiene` — Closing it needs a member-identity rule for a stored snapshot and the live binary it came from, which changes which members pair in existing directory compares. [Full write-up](known-gaps/release-fan-out-cannot-pair-a-stored-snapshot-directory-with-a-live-one.md)
 
 ## Do not re-attempt
 

@@ -900,12 +900,9 @@ def _exit_on_budget_overflow(
     fmt/path pairs, forwarded so an abort renders to every configured target,
     not just the primary one.
     """
-    click.echo(
-        f"Error: --budget {budget!r} exceeded while comparing {label}: {exc}. "
-        "Pin a shallower --depth or raise the budget; a budget never "
-        "silently narrows evidence.",
-        err=True,
-    )
+    from .workflows.compare.budget import budget_overflow_message
+
+    click.echo(budget_overflow_message(budget, label, exc), err=True)
     from .report.not_comparable import OperationalStatus
 
     _report_run_aborted(

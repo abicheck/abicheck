@@ -77,7 +77,6 @@ if TYPE_CHECKING:
     from ..checker_types import DiffResult
     from ..compile_context import CompileContext
     from ..environment_matrix import EnvironmentMatrix
-    from ..model import AbiSnapshot
     from ..pack_application import PackApplication
     from ..policy.release_assurance import ReleaseAssuranceDecision
     from .gate import ScopeDecision, SeverityConfig
@@ -265,10 +264,13 @@ def execute_release_compare(
     :class:`~abicheck.errors.ReleaseOperandError` family for an unusable
     ``--manifest``/embedded manifest, ``--bundle-facts-out`` or one-sided
     probe matrix; a member's own failure never raises -- it becomes that
-    member's entry.
+    member's entry. An expired budget (the caller's deadline, else the
+    2-hour default) raises :class:`~abicheck.deadline.DeadlineExceeded`:
+    the whole run is incomplete, not one member.
     """
     from ..pack_application import resolve_bundle_policy_file
     from ..policy.release_outcome import apply_removed_member_floor
+    from .compare.budget import budget_deadline
     from .comparison_input_receipt import env_matrix_content_digest
     from .extraction import ast_acquisition_scope, resolve_package_debug_info
     from .header_exclusion_audit import observed_member_exclusion_identities
@@ -295,7 +297,7 @@ def execute_release_compare(
     )
     from .release_scope_notices import release_scope_warnings
     from .release_snapshot_retention import (
-        release_old_snapshot_pairs,
+        release_old_member_snapshots,
         resolve_snapshot_retention,
     )
     from .release_stored_inventory import stored_side_degraded_members
@@ -331,7 +333,10 @@ def execute_release_compare(
         else _resolve_typed_release_configuration(plan, o)
     )
 
-    with ast_acquisition_scope() as ast_scope:
+    # The caller's deadline (the CLI's --budget scope), else the 2-hour
+    # default, bounds the whole run: members, waits on them, and the
+    # surface/bundle/matrix stages; expiry raises DeadlineExceeded.
+    with budget_deadline(None), ast_acquisition_scope() as ast_scope:
         member_ctx = ReleaseMemberContext(
             request=release_parent_request(
                 pack_application,
@@ -448,11 +453,14 @@ def execute_release_compare(
             reason = old_unclassified.get(key) or new_unclassified[key]
             if scope_states.get(key) is AcquisitionState.OUT_OF_SCOPE:
                 continue
+            # By file, as a paired member's entry is, when the member is
+            # still mapped (an unreadable one); by key otherwise.
+            name = (old_map.get(key) or new_map.get(key) or Path(key)).name
             library_results.append(
-                {"library": key, "verdict": "ERROR", "error": reason}
+                {"library": name, "verdict": "ERROR", "error": reason}
             )
             worst_verdict = worse_release_verdict(worst_verdict, "ERROR")
-            reporter.notice(f"Failed: {key}: {reason}")
+            reporter.notice(f"Failed: {name}: {reason}")
         # Decided by policy once; every consumer reads this one decision.
         scope_decision = resolve_scope_decision(
             scope_result.record, request.on_incomplete_scope
@@ -518,7 +526,7 @@ def execute_release_compare(
                 o.bundle_facts_out,
                 # The whole OLD snapshot `old_full` retention kept, not
                 # JUnit's compact inventory.
-                release_old_snapshot_pairs(library_results),
+                release_old_member_snapshots(library_results),
                 o.manifest_path,
                 old_map,
                 resolve_stranded_library=lambda old_path: _resolve_stranded_library(
@@ -734,67 +742,25 @@ def _resolve_stranded_library(
     reporter: ReleaseCompareReporter,
 ) -> StrandedLibraryResolution:
     """Dump one OLD library no successful member pair captured, for the
-    ``--bundle-facts-out`` baseline.
+    ``--bundle-facts-out`` baseline, under the extraction context every
+    member was compared under (:mod:`.release_member_dump`, the one owner
+    ``dump --bundle-facts-out`` dumps its members through too)."""
+    from .release_member_dump import ReleaseMemberDumpContext, dump_release_member
 
-    The same ``DumpRequest -> resolve_dump_request -> execute_dump_request``
-    pipeline ``dump`` uses (ADR-063 D1), with the extraction context every
-    member was compared under -- including the canonical
-    ``--exclude-header`` rules, so it never re-parses a header tree the run
-    was told how to narrow. A failure degrades to an ELF-only snapshot that
-    *carries* its failure (ADR-065 D8: persisted as a degraded member), with
-    a notice -- never an abort and never a silently impoverished OLD side.
-    """
-    from . import extraction
-    from .dump.request import execute_dump_request, resolve_dump_request
-    from .request_inputs import InputSpec
-    from .service_requests import DumpRequest
-    from .snapshot_factory import new_snapshot
-
-    old_dbg = (
-        extraction.resolve_package_debug_info(old_path, plan.old_debug_dir)
-        if plan.old_debug_dir
-        else None
-    )
-    try:
-        dump_request = DumpRequest(
-            input=InputSpec.of(
-                old_path,
-                headers=list(plan.old_headers),
-                includes=list(plan.old_includes),
-                version=options.old_version,
-                pdb=old_dbg,
-                compile=options.compile_context,
-                include_system_declarations=options.include_dependencies,
-                public_header_dirs=options.public_header_dirs,
-                exclude_headers=options.exclude_headers,
-            ),
+    return dump_release_member(
+        old_path,
+        ReleaseMemberDumpContext(
+            headers=plan.old_headers,
+            includes=plan.old_includes,
+            version=options.old_version,
             lang=options.lang,
             lang_explicit=options.lang_explicit,
             depth=options.depth,
-        )
-        resolved = resolve_dump_request(dump_request)
-        return StrandedLibraryResolution(execute_dump_request(resolved).snapshot)
-    except Exception as exc:
-        from ..elf_metadata import ElfMetadata
-        from ..extract.parse_failures import recording_export_read_failures
-
-        reporter.notice(f"{old_path.name}: ELF-only ({exc})")
-        with recording_export_read_failures() as export_failures:
-            elf = extraction.parse_elf_metadata(old_path)
-        failure = f"ELF-only degraded capture: {exc}"
-        if export_failures:
-            # The same rule the dump applies: a table that was not read is
-            # not persisted as a partial one. The member keeps an unread
-            # export table, which every reader already treats as FAILED.
-            elf = ElfMetadata()
-            reasons = "; ".join(dict.fromkeys(export_failures))
-            failure += f"; export table not read: {reasons}"
-        snapshot: AbiSnapshot = new_snapshot(
-            library=old_path.name,
-            version="",
-            elf=elf,
-            # ADR-065 D8: no header/DWARF evidence at all -- every detector
-            # that special-cases elf_only_mode must see the reduced tier.
-            elf_only_mode=True,
-        )
-        return StrandedLibraryResolution(snapshot, failure=failure)
+            compile_context=options.compile_context,
+            include_dependencies=options.include_dependencies,
+            public_header_dirs=options.public_header_dirs,
+            exclude_headers=options.exclude_headers,
+            debug_dir=plan.old_debug_dir,
+        ),
+        notice=reporter.notice,
+    )

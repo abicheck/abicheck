@@ -365,6 +365,9 @@ _F2 = (
     "serialization.persisted_field_not_decoded",
     "cardinality.member_request_drops_scalar_field",
     "config.front_end_default_divergence",
+    # `consumers.required_symbols` was resolved and refused on the CLI only;
+    # the typed `config_overrides` spelling now goes through the same owners.
+    "config.key_resolved_on_one_route_only",
     "config.propagation_completeness",
     "config.option_dropped_at_a_dispatch_branch",
     "config.sided_shared_input_dropped",
@@ -390,6 +393,9 @@ _F2 = (
     # side only; H2's asymmetric-header cell pins the route parity.
     "evidence.per_side_operand_divergence",
     "evidence.stored_live_route_member_divergence",
+    # A one-sided member no reader can open read as unmatched on the release
+    # routes while the same file paired read as failed.
+    "evidence.unreadable_one_sided_member",
 )
 _F3 = (
     "storage.digest_answers_the_wrong_question",

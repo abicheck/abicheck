@@ -254,7 +254,7 @@ def test_a_typed_value_beats_the_compile_override() -> None:
             "compile.options": ["-O2"],
         },
     )
-    out = _with_config_overrides(request)
+    out = _with_config_overrides(request)[0]
     assert out.frontend == "castxml"
     assert out.lang == "c" and out.lang_explicit
     assert out.old.compile is not None
@@ -277,6 +277,6 @@ def test_no_compile_override_leaves_the_request_unchanged() -> None:
         new=InputSpec(path=Path("b.so")),
         config_overrides={"scope.public": False},
     )
-    out = _with_config_overrides(request)
+    out = _with_config_overrides(request)[0]
     assert out.old.compile is None and out.new.compile is None
     assert out.frontend == "auto"

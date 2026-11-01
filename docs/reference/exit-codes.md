@@ -105,6 +105,18 @@ Both appear in the report's `exit` block (`incomplete_scope_contribution`,
 `no_comparison_completed_contribution`) and, when they decide the code, in
 `exit.reasons`. A scalar `compare` never sets either.
 
+A `failed` member is also an **operational error**, independent of
+`scope.on_incomplete`: a member whose extraction failed, that `--dso-only`
+could not classify, or that no reader can open (text, an empty file, JSON
+that is no snapshot -- paired or one-sided alike) is listed as an `ERROR`
+library with its reason, sets `run_outcome.operational: extraction_error`,
+and contributes `4` through `exit.operational_error_contribution`. The two
+axes fold with `max`: such a run exits `4` under `warn` and under `block`,
+while a member that is merely `not_supplied` or `unsupported` contributes
+the completeness axis alone. This is the same `4` the
+[`--no-baseline` set audit](#compare-no-baseline-dir-n-library-audit) folds for a
+failed member.
+
 **Migration note (exit `8`).** Before the completeness axis landed, the (now-removed)
 `--fail-on-removed-library` flag (today `.abicheck.yml`'s
 `gate.fail_on_removed_library: true`) exited `8` on the raw old-minus-new filename set difference, so a partial
@@ -495,7 +507,7 @@ below.
 | `0` | `NO_CHANGE`, `COMPATIBLE`, or `COMPATIBLE_WITH_RISK` — no binary ABI break |
 | `2` | `API_BREAK` — source-level API break — recompilation required |
 | `4` | `BREAKING` — binary ABI break |
-| `5` | Budget overflow — the run's wall-clock `--budget` guard was exceeded. `compare` has its own `--budget` flag now (`frontends/cli/commands/compare.py`); exit `5` applies to both `compare` and `scan` on overflow. |
+| `5` | Budget overflow — the run's wall-clock budget was exceeded and no verdict was produced. The budget is `--budget` when given, else the **2h default**: no `compare` run is unbounded. On a two-sided `compare` (single pair, directory/package release, or a stored-`BundleFacts` baseline) the error names which budget ran out and how to set a longer one: `--budget 4h`, the Action's `budget` input, or `CompareRequest.budget_s`. `compare --no-baseline` also stops at the 2h default but does not accept `--budget`; split the candidate into smaller audits or pin a shallower `--depth`. |
 | `7` | Evidence-contract error — the analysis a pinned input asked for could not be performed at all, so it was not silently downgraded. Reachable through **`--abi3-floor VERSION` against a candidate that is not a recognisable CPython extension module**, and through **a pinned `--depth build`/`--depth source` whose evidence doesn't reach it** (`compare` shares this floor with `scan`/`dump` now, verified live). The depth trigger applies only when **at least one operand is a live extraction**; comparing two already-serialized snapshots is exempted from it even when neither embeds L3/L4 evidence (verified live — see [Evidence Depth](../use/evidence-depth.md)'s "pinned depth is a contract" warning), so a clean both-snapshot `compare` is not proof the pinned depth was reached. **On `compare`, the top-level `verdict` field is *not* `"EVIDENCE_CONTRACT_ERROR"`** for either trigger — verified live: it stays whatever the (otherwise-unaffected) compatibility comparison produced (e.g. `"NO_CHANGE"`). The error is carried in the `exit` block instead: `exit.code: 7` and `exit.reasons: ["evidence_contract_error"]`. A JSON consumer must check `exit`, not `verdict`, to detect this. (`scan`'s own dedicated exit path does set `verdict: "EVIDENCE_CONTRACT_ERROR"` — see its row below — so the two commands differ here despite sharing the same exit code.) `compare` folds this through the same `ExitDecision` precedence rule `scan` uses (`exit_decision_precedence.resolve_scan_exit_decision`), so the two commands can never disagree on which axis wins, only on how the JSON surfaces it. `dump`'s own, separately implemented floor for the depth trigger raises `DumpDepthNotSatisfiedError` and exits `1` instead — no snapshot is written — since `dump` has no verdict to fall back to. |
 | `16` | `not_comparable` — OLD and NEW were not extracted under a comparable profile/scope contract, so no verdict was produced (`verdict: null` in `-o json=-`, with a `reason` object). Pass `--diagnostic-comparison` to force a tentative diff instead. |
 | `64` | Invalid invocation — bad arguments/options or an unreadable/unrecognised input, deliberately outside the `0/2/4` verdict space |
@@ -521,7 +533,7 @@ is computed from the severity configuration rather than the verdict:
 | `1` | Error-level findings in `addition` or `quality_issues` only |
 | `2` | Error-level findings in `potential_breaking` (but not `abi_breaking`) |
 | `4` | Error-level findings in `abi_breaking` |
-| `5` | Budget overflow — as in the legacy table above; the run's wall-clock `--budget` guard was exceeded before any severity classification could run, so it is scheme-independent. |
+| `5` | Budget overflow — as in the legacy table above; the run's wall-clock budget (`--budget`, else the 2h default) was exceeded before any severity classification could run, so it is scheme-independent. |
 | `7` | Evidence-contract error — as in the legacy table above; raised before severity classification runs, so it is scheme-independent. |
 | `16` | `not_comparable` — the comparability gate hard-fails before severity classification ever runs, identical to the legacy scheme's `16`. |
 
@@ -608,6 +620,7 @@ below, plus a dedicated code for removed libraries:
 | `2` | Worst verdict is `API_BREAK` |
 | `4` | Worst verdict is `BREAKING`, **or** an operational `ERROR` (a library failed to dump/extract/compare) |
 | `1` | No compatibility break, but the completeness axis contributed: `.abicheck.yml`'s `scope.on_incomplete: block` with an incompletely checked scope, or a run that completed no comparison at all (under either setting). Also the contract-coverage axis's own floor, as for single-pair `compare`. |
+| `5` | Budget overflow — the release's wall-clock budget (`--budget`, else the 2h default) ran out. The whole release is aborted with the `budget_overflow` document; it is not recorded as one `ERROR` member while the rest reads as finished. |
 | `8` | A library was **proven** removed between releases (NEW's inventory is proven complete — a stored `ProjectSnapshot` package or bundle-facts document whose capture asserted `inventory_complete`) and `.abicheck.yml`'s `gate.fail_on_removed_library: true` is set. In the legacy scheme this is emitted only when no API/ABI verdict exit 2/4 **and no operational `ERROR` exit 4** already applies; in the severity-aware scheme it takes precedence over 0/1/2/4. An unmatched library under an unproven inventory never exits `8`; see the completeness axis above. |
 | `16` | `not_comparable` — at least one library's OLD/NEW DSOs were not extracted under a comparable profile/scope contract. Takes precedence over **every** other outcome in the release, including `8` (removed-library) and a genuine `ERROR`: a not_comparable result means the comparison couldn't establish what changed at all, so it dominates in both the legacy and severity-aware schemes. Identical code to native `compare`'s own `16`. |
 
@@ -1018,7 +1031,7 @@ one of those.
 | `WARN` (ABI risk) | — | — | — | — | `1` |
 | `API_BREAK` | `2` | `0`–`2`* | `2` / `0`–`2`*‡ | — | — |
 | `BREAKING` / `FAIL` | `4` | `0`–`4`* | `4` / `0`–`4`*‡ | — | `4` |
-| `--budget` overflow | — | — | `5` | — | — |
+| Budget overflow (`--budget`; on `compare`, else the 2h default) | `5` | `5` | `5` (explicit `--budget` only) | — | — |
 | Configured rule unused (`unused_rules: block`) | `1` floor | `1` floor | — | — | — |
 | Missing dependencies/symbols | — | — | — | `1` | — |
 | Load failure | — | — | — | — | `4` |

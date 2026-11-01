@@ -213,7 +213,11 @@ stays a flag).
   dlopen/dlsym. An entry `@FILE` reads one symbol per line from that file (`#`
   comments allowed). Mutually exclusive with `--used-by` and with
   `consumers.manifests` — see [Application Compatibility](../use/appcompat.md)
-  and [Plugin & Host Systems](../use/plugin-systems.md).
+  and [Plugin & Host Systems](../use/plugin-systems.md). The typed Python API
+  takes the same key in `CompareRequest.config_overrides`
+  (`{"consumers.required_symbols": ["plugin_init", "@host.syms"]}`), resolved and
+  refused by the same loader as `compare --set`; a relative `@FILE` there is
+  relative to the current directory.
 
 `--no-baseline` and the stored-BundleFacts route reject both `consumers.*` and
 `output.view` with a usage error: an audit cannot honour them, and a silent

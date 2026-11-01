@@ -86,12 +86,32 @@ class DeadlineExceeded(Exception):
     castxml invocation it has no chance of finishing within the deadline.
     """
 
-    def __init__(self, remaining_s: float) -> None:
+    def __init__(self, remaining_s: float, *, waiting_for: str | None = None) -> None:
         self.remaining_s = remaining_s
-        super().__init__(
-            f"scan deadline already exceeded ({-remaining_s:.1f}s over budget); "
-            "refusing to start a new subprocess"
-        )
+        self.waiting_for = waiting_for
+        if waiting_for is None:
+            message = (
+                f"scan deadline already exceeded ({-remaining_s:.1f}s over budget); "
+                "refusing to start a new subprocess"
+            )
+        else:
+            message = (
+                f"deadline reached while waiting for {waiting_for}; "
+                "the waited-on work was stopped"
+            )
+        super().__init__(message)
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        # A release member's failure crosses a forked child's result pipe
+        # pickled; the default reduce would re-call __init__ with the message
+        # string as remaining_s.
+        return (_rebuild_deadline_exceeded, (self.remaining_s, self.waiting_for))
+
+
+def _rebuild_deadline_exceeded(
+    remaining_s: float, waiting_for: str | None
+) -> DeadlineExceeded:
+    return DeadlineExceeded(remaining_s, waiting_for=waiting_for)
 
 
 class ProcessCancelled(BaseException):
@@ -157,6 +177,16 @@ def carry_cancel_token(fn: Callable[..., Any]) -> Callable[..., Any]:
     return _under_token
 
 
+def _clock() -> float:
+    """The clock :func:`deadline_scope` and :func:`remaining` read.
+
+    A test injects a fake one here to expire a deadline without sleeping.
+    Looks ``time.monotonic`` up per call, so a test patching that instead
+    still reaches the deadline.
+    """
+    return time.monotonic()
+
+
 _deadline: contextvars.ContextVar[float | None] = contextvars.ContextVar(
     "abicheck_scan_deadline", default=None
 )
@@ -185,7 +215,7 @@ def deadline_scope(seconds: float | None) -> Iterator[None]:
     via :func:`with_deadline_ts` (see ``buildsource/source_replay.py``'s
     ``_deadline_bound_worker`` for the pattern).
     """
-    deadline_ts = time.monotonic() + seconds if seconds is not None else None
+    deadline_ts = _clock() + seconds if seconds is not None else None
     with with_deadline_ts(deadline_ts):
         yield
 
@@ -222,7 +252,7 @@ def remaining() -> float | None:
     deadline_ts = _deadline.get()
     if deadline_ts is None:
         return None
-    return deadline_ts - time.monotonic()
+    return deadline_ts - _clock()
 
 
 def check() -> None:

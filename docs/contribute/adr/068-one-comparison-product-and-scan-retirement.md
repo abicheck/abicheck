@@ -1069,6 +1069,64 @@ member's `--follow-deps` walk under the single-pair report's keys and shape,
 present only when the walk was requested. The same release document serves
 both operands; a stored operand records no walk, so it carries neither key.
 
+**Follow-up (2026-10-31): release schema `2.7`.** Additive: every compared
+`libraries[]` entry, and the document itself, carries `change_counts`, the
+complete entity-by-operation finding count (`report/change_summary.py`).
+A member's block is counted before any `show=` view, over the findings the
+comparison introduced, and equals its own scalar PR comment's rollup; the top-level block adds the bundle and matrix
+findings. Both operands carry it, since the stored operand renders the same
+document. The PR comment's release rollup reads it as exact.
+
+## Amendment (2026-11-01): a 2-hour default budget; no compare run is unbounded
+
+**Context.** §3 #19 made `--budget` optional, and an omitted budget meant no
+deadline at all. Three waits on a child returned only when the child answered
+or closed its pipe: the side-isolation pipe read (`side_isolation`), the
+release member pool's wait and read (`keyed_process_pool`), and the release
+memory-admission wait (`release_admission`). A child that stayed alive but
+deadlocked, for example on a lock its fork copied held, hung the run with no
+error and no exit (known gap "A forked child that is alive but never answers
+blocks the parent's pipe read"). The maintainer chose option (a): one default
+time limit for an unbudgeted run.
+
+**Decision.**
+- A run with no stated budget runs under one default, **2 hours**
+  (`workflows/run_deadline.DEFAULT_BUDGET_S`). This covers `--budget` omitted
+  on the CLI, `CompareRequest.budget_s=None` in the typed API, and an empty
+  `budget` input on the Action. The surfaces keep the option unset, and the
+  code resolves an unset budget to this value. The ADR-091 registry records it
+  as the `budget` concept's `default: 2h`, and `tests/test_budget_default.py`
+  checks that the registry and the code agree.
+- An explicit budget replaces the default, whether it is shorter or longer.
+  An unstated budget inside an active deadline inherits that deadline instead
+  of starting a new 2 hours, so a release member runs under its release's
+  budget (`workflows/compare/budget.budget_deadline`).
+- The three waits ask `run_deadline.wait_bound()` how long they may block:
+  the time left on the active deadline, or the default when no deadline is
+  active. A wait that times out raises `DeadlineExceeded` naming what it waited
+  for and stops the waited-on children. No wait under `abicheck/` is unbounded
+  (`tests/test_unbounded_wait_gate.py`).
+- Expiry is the existing budget-overflow outcome: exit `5` with the
+  `budget_overflow` aborted-run document on the CLI and the Action's
+  `BUDGET_OVERFLOW` verdict, or `DeadlineExceeded` from the typed API with a
+  note. It never reads as a clean pass (ADR-065). The message says whether a
+  stated budget or the default ran out, and how to set a longer one on each
+  surface.
+- A directory/package (release) `compare` now accepts `--budget`. It used to
+  refuse the flag because the deadline did not reach the members, but member
+  threads copy the caller's context and forked members inherit it. An expired
+  budget aborts the whole release with exit `5`. It is not recorded as one
+  `ERROR` member while the rest of the run reads as finished.
+- `compare --no-baseline` runs under the default and exits `5` when it
+  expires. It still rejects an explicit `--budget`, a pre-existing capability
+  gap, so the default cannot be raised on that route yet.
+
+**Consequences.** A comparison that legitimately needs more than 2 hours must
+state a budget. Before this change such a run passed with no flag; now it
+fails at 2 hours with exit `5` and a message that names the flag. This is a
+change of default, taken pre-1.0. A deadlocked child now fails the run at the
+deadline instead of hanging the CI job until the runner kills it.
+
 ## Relationship to existing ADRs
 
 | ADR | Effect |

@@ -42,7 +42,12 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 
 from ..model.change_catalog.registry import ChangeEntity, ChangeOperation
-from .change_operation import entity_for_kind, operation_for_kind
+from .change_operation import (
+    entity_for_change,
+    entity_for_kind,
+    operation_for_change,
+    operation_for_kind,
+)
 
 #: Display label per canonical :class:`ChangeEntity`. Plural, because a row
 #: counts findings across many entities of that kind.
@@ -71,6 +76,46 @@ _OPERATIONS = (
     ChangeOperation.MODIFIED.value,
     ChangeOperation.ADDED.value,
 )
+
+
+#: ``Change.cross_source_evolution`` states that mean *this comparison did
+#: not introduce the finding* (ADR-068 D3, stamped by
+#: ``workflows/cross_source_hygiene.py``). A one-sided hygiene check is re-run
+#: against the baseline and its findings paired, so the comparison layer
+#: already knows which are new; a renderer reads that answer and never
+#: re-derives it (ADR-072 D1).
+#:
+#: - ``persistent`` -- flagged identically on both sides: standing library
+#:   debt (a template-instantiation guard variable, a function-local static),
+#:   not something the change did.
+#: - ``resolved`` -- flagged on the baseline only: good news, and still not a
+#:   change to review in the candidate.
+#:
+#: ``not_evaluated`` is not background: one side's evidence could not confirm
+#: or deny the finding, an analysis limitation. ``introduced`` is the
+#: comparison's own finding.
+BACKGROUND_EVOLUTIONS = frozenset({"persistent", "resolved"})
+
+#: Every state an entity-by-operation rollup leaves out: the two background
+#: states, plus ``not_evaluated`` -- there the comparison declined to say
+#: whether the finding is new at all, so counting it would assert as a
+#: modification what the comparison refused to assert. Two of the three mean
+#: "present before this change", the third "we could not tell"; a rollup of
+#: asserted modifications may claim none of them.
+NOT_THIS_CHANGES_EVOLUTIONS = BACKGROUND_EVOLUTIONS | {"not_evaluated"}
+
+
+def is_this_changes_own(evolution: object) -> bool:
+    """Whether a finding stamped *evolution* (a ``cross_source_evolution``
+    value, its enum, or absent) belongs in a "What changed" rollup.
+
+    The one predicate every rollup applies -- the scalar PR comment's, and
+    the release report's ``change_counts`` -- so a release member counts
+    exactly what the same pair's scalar comment counts. Unstamped and
+    unrecognised values are the comparison's own.
+    """
+    value = getattr(evolution, "value", evolution)
+    return str(value or "") not in NOT_THIS_CHANGES_EVOLUTIONS
 
 
 @dataclass(frozen=True)
@@ -254,4 +299,151 @@ def fold_change_summaries(
         inexact_reason="" if exact else (inexact_reason or carried_reason),
         counted=counted,
         fell_back_to_registry=fallbacks,
+    )
+
+
+def summarize_change_objects(changes: Sequence[object]) -> ChangeSummary:
+    """:func:`summarize_changes` over live ``Change`` objects this comparison
+    established as its own (:func:`is_this_changes_own`), exact.
+
+    Each finding is classified the way ``change_json`` writes a scalar
+    report's per-finding ``entity``/``operation`` (:func:`entity_for_change`,
+    :func:`operation_for_change`), so a release member's count equals the
+    rollup of the same pair's scalar ``compare`` report.
+    """
+    rows: list[dict[str, object]] = []
+    for change in changes:
+        if not is_this_changes_own(getattr(change, "cross_source_evolution", None)):
+            continue
+        kind = getattr(change, "kind", "")
+        kind_val = str(getattr(kind, "value", kind) or "")
+        rows.append(
+            {
+                "kind": kind_val,
+                "entity": entity_for_change(change, kind_val),
+                "operation": operation_for_change(change, kind_val),
+            }
+        )
+    return summarize_changes(rows)
+
+
+#: The JSON key a release document carries its authoritative rollup under:
+#: ``libraries[].change_counts`` per member and the top-level fold (release
+#: schema 2.7).
+CHANGE_COUNTS_KEY = "change_counts"
+
+
+def change_counts_to_dict(summary: ChangeSummary) -> dict[str, object]:
+    """The serialized ``change_counts`` block of an exact *summary*.
+
+    ``{"unit", "counted", "rows": [{"entity", "removed", "modified",
+    "added"}, ...]}`` -- the entity is the canonical :class:`ChangeEntity`
+    value (or :data:`UNCLASSIFIED_LABEL`), never the display label, so a
+    reader re-labels it the one way :data:`ENTITY_LABELS` does. Only an
+    exact summary is serialized: a floor written as a count would be read
+    back as a total.
+    """
+    if not summary.exact:
+        raise ValueError("change_counts records complete counts only")
+    return {
+        "unit": summary.unit,
+        "counted": summary.counted,
+        "rows": [
+            {
+                "entity": row.entity,
+                "removed": row.removed,
+                "modified": row.modified,
+                "added": row.added,
+            }
+            for row in summary.rows
+        ],
+    }
+
+
+def _count(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
+def change_summary_from_counts(block: object) -> ChangeSummary | None:
+    """Read a ``change_counts`` block back into an exact :class:`ChangeSummary`.
+
+    ``None`` for anything that is not a well-formed block -- an absent key
+    (a document older than release schema 2.7), a foreign unit, a negative
+    or non-integer count, or rows that do not sum to ``counted``. A caller
+    falls back to its own inexact path then; it never trusts half a block.
+    """
+    if not isinstance(block, Mapping) or block.get("unit") != "findings":
+        return None
+    counted = _count(block.get("counted"))
+    raw_rows = block.get("rows")
+    if counted is None or not isinstance(raw_rows, list):
+        return None
+    by_entity: dict[str, EntityRow] = {}
+    for raw in raw_rows:
+        if not isinstance(raw, Mapping):
+            return None
+        entity = raw.get("entity")
+        removed, modified, added = (_count(raw.get(op)) for op in _OPERATIONS)
+        if removed is None or modified is None or added is None:
+            return None
+        if not isinstance(entity, str) or entity in by_entity:
+            return None
+        if entity not in ENTITY_LABELS and entity != UNCLASSIFIED_LABEL:
+            return None
+        by_entity[entity] = EntityRow(
+            entity=entity,
+            label=ENTITY_LABELS.get(entity, UNCLASSIFIED_LABEL),
+            removed=removed,
+            modified=modified,
+            added=added,
+        )
+    rows = tuple(
+        by_entity[key]
+        for key in [*_ENTITY_ORDER, UNCLASSIFIED_LABEL]
+        if key in by_entity and by_entity[key].total
+    )
+    if sum(row.total for row in rows) != counted:
+        return None
+    return ChangeSummary(rows=rows, counted=counted)
+
+
+def _finding_dicts(value: object) -> list[Mapping[str, object]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, Mapping)]
+
+
+def release_change_summary(report: Mapping[str, object]) -> ChangeSummary | None:
+    """The entity-by-operation rollup of a release (directory/package) report.
+
+    Exact when the document carries the top-level ``change_counts`` block
+    (release schema 2.7): the producer's own fold over every member's
+    complete, pre-view finding pool plus the bundle and matrix findings.
+    A document without it (older than 2.7) is summarized from its finding
+    lists and marked ``exact=False``: those lists may be view-filtered, and
+    an older producer's per-library list may have been capped, so the
+    counts are only a floor.
+    """
+    authoritative = change_summary_from_counts(report.get(CHANGE_COUNTS_KEY))
+    if authoritative is not None:
+        return authoritative if authoritative.rows else None
+    sampled: list[Mapping[str, object]] = []
+    for lib in _finding_dicts(report.get("libraries")):
+        sampled.extend(_finding_dicts(lib.get("findings")))
+    for key in ("bundle_findings", "matrix_findings"):
+        sampled.extend(_finding_dicts(report.get(key)))
+    sampled = [
+        f for f in sampled if is_this_changes_own(f.get("cross_source_evolution"))
+    ]
+    if not sampled:
+        return None
+    return summarize_changes(
+        sampled,
+        exact=False,
+        inexact_reason=(
+            "this report predates release schema 2.7's change_counts, so "
+            "these are counted from its finding lists and are lower bounds"
+        ),
     )

@@ -259,6 +259,9 @@ class Axis:
     #: -- for a setting whose flag was retired into config (e.g.
     #: ``scope.public``, one-comparison-product Phase 9b).
     config_keys: tuple[str, ...] = ()
+    #: route -> the text its refusal must contain, when it is not the flag
+    #: capability guard's "not supported" (a refused ``--set`` key names itself).
+    refusal_text: Mapping[str, str] = field(default_factory=dict)
 
 
 def _suppress_file(tmp: Path) -> Path:
@@ -325,6 +328,19 @@ def _policy_file(tmp: Path) -> Path:
         encoding="utf-8",
     )
     return p
+
+
+def _required_symbols_file(tmp: Path) -> Path:
+    """A ``consumers.required_symbols`` ``@FILE``: one symbol every corpus pair
+    keeps (``foo``), one it may lose (``gv``), and a comment line."""
+    p = tmp / "required.syms"
+    p.write_text("# host contract\nfoo\ngv\n", encoding="utf-8")
+    return p
+
+
+def _required_symbols_args(tmp: Path) -> list[str]:
+    entries = json.dumps([f"@{_required_symbols_file(tmp)}"])
+    return ["--set", f"consumers.required_symbols={entries}"]
 
 
 AXES: tuple[Axis, ...] = (
@@ -400,6 +416,25 @@ AXES: tuple[Axis, ...] = (
         unsupported={
             "release": "the per-library fan-out rejects --diagnostic-comparison "
             "with a usage error (capability guard, #1233 family)"
+        },
+    ),
+    Axis(
+        "required_symbols_file",
+        # The `--set` spelling of the config key, and its typed twin.
+        _required_symbols_args,
+        lambda t: {
+            "config_overrides": {
+                "consumers.required_symbols": [f"@{_required_symbols_file(t)}"]
+            }
+        },
+        ("config_overrides",),
+        ("config_overrides",),
+        unsupported={
+            "release": "a directory/package compare refuses --set "
+            "consumers.required_symbols (a contract scopes one library)"
+        },
+        refusal_text={
+            "release": "does not apply consumers.required_symbols yet",
         },
     ),
     Axis(
@@ -606,17 +641,7 @@ ROUTE_MATRIX: dict[str, Route] = {
 #: ``route name -> explanation``. Each is left out of the live matrix and
 #: pinned by its own ``xfail(strict=True)`` cell in the test module, so a fix
 #: turns that cell XPASS -> failure and forces the entry's removal.
-KNOWN_ROUTE_DIVERGENCES: dict[str, str] = {
-    "release@mixed_old": "the release fan-out pairs directory members by file "
-    "name, so a stored libfoo.json in OLD never pairs with a live libfoo.so in "
-    "NEW: the run completes zero comparisons and exits 1 "
-    "(no_comparison_completed), where the scalar route compares the same bytes "
-    "(known-gaps: release-fan-out-cannot-pair-a-stored-snapshot-directory-with-a-live-one)",
-    "release@mixed_new": "the mirror of release@mixed_old: a live libfoo.so "
-    "directory in OLD against a stored libfoo.json directory in NEW pairs no "
-    "member, exits 1 (no_comparison_completed), and the scalar route compares "
-    "the same bytes (known-gaps: release-fan-out-cannot-pair-a-stored-snapshot-directory-with-a-live-one)",
-}
+KNOWN_ROUTE_DIVERGENCES: dict[str, str] = {}
 
 
 #: The stored-form routes, as ``name -> runner`` (the historical view).

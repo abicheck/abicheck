@@ -205,7 +205,7 @@ degrades gracefully and L0–L2 stay authoritative.
 | `depth` | compare (both shapes), dump | Evidence-depth dial: `binary`, `headers`, `build`, or `source`. Maps to `--depth`. Omitting it means `headers` — pin `build`/`source` explicitly (there is no risk-driven `auto` escalation any more). |
 | `since` | compare, two-sided shape only | Focus the run's source-evidence scope on files changed vs a git ref (e.g. `origin/main`). Rejected outright for the audit-only shape (`compare --no-baseline` does not implement revision-range evidence scoping) and for a directory/package operand. |
 | `changed-path` | compare, two-sided shape only | Changed path(s) to focus the run's source-evidence scope on (space-separated; alternative to `since`). Same audit-only/directory-package rejection as `since` above. |
-| `budget` | compare, two-sided shape only | Time guard (e.g. `15m`). The step **fails** on overflow (`verdict: BUDGET_OVERFLOW`) — a budget never silently shrinks scope. Rejected outright for the audit-only shape (`compare --no-baseline`'s wall-clock guard isn't wired to that path yet). |
+| `budget` | compare, two-sided shape only | Time guard (e.g. `15m`); empty means the 2h default, so no run is unbounded. The step **fails** on overflow (`verdict: BUDGET_OVERFLOW`) — a budget never silently shrinks scope. Set a longer one for a comparison that needs more than 2h. Rejected outright for the audit-only shape (`compare --no-baseline`'s wall-clock guard isn't wired to that path yet). |
 | `against` | — | **Retired** (0.6, hard removal): this applied only to the now-removed `mode: scan`. Set `old-library` (or `abi-baseline`) under `mode: compare` instead — setting `against` is now a hard error naming that replacement. |
 | `crosscheck` | — | **Retired** (0.6, hard removal): `scan --crosscheck`'s `KEY=LEVEL` promotion syntax is gone along with `mode: scan` itself. Every cross-source check it used to gate already reaches `compare` as an ordinary finding — use `policy`/`.abicheck.yml`'s `policy.overrides.<CHANGE_KIND>: error` to control one check's severity instead. Setting `crosscheck` is now a hard error naming that replacement. |
 | `risk-rules` | — | **Retired** (0.6): `scan --risk-rules` and the risk-driven `auto` depth escalation it fed are gone. Pin `depth:` explicitly instead; setting this input is an error. |
@@ -320,7 +320,11 @@ Beside the verdict headline and the breaking/needs-review/safe counts:
 * **What changed** — an entity-by-operation table (functions / variables /
   types / enums / …, removed / changed / added). It counts **findings**, not
   declarations and not unique symbols, and says so in its own header. The
-  counts come from the complete finding list, before any display cap.
+  counts come from the complete finding list, before any display cap. For a
+  directory/package comparison they are the release report's own
+  `change_counts` (release schema 2.7), so the table is exact; a report
+  older than 2.7 is summarized from its finding lists and labelled
+  "Not exact totals".
 * **Findings** — per-symbol rows with the change kind, description, old and
   new values (including one-sided, zero, `false` and empty-string values),
   source location and the kind's impact text. Standard detail groups related

@@ -32,6 +32,9 @@ import click
 import yaml
 
 from ....workflows.compare.override_channels import TYPED_OVERRIDE_CHANNELS
+from ....workflows.compare.required_symbol_contract import (
+    REQUIRED_SYMBOLS_OVERRIDE_PATH,
+)
 from ....workflows.compare_configuration import CLI_ONLY_OVERRIDE_PATHS
 from ....workflows.compile_config import COMPILE_CONTEXT_OVERRIDE_PATHS
 from ....workflows.config_run_inputs import CONFIG_RUN_INPUT_SET_PATHS
@@ -51,7 +54,8 @@ RELEASE_TOPOLOGY_OVERRIDE_PATHS: frozenset[str] = frozenset(
 )
 
 #: The keys `compare --set` applies: the typed channels, the CLI-only ones, the
-#: compile-context keys and the non-core deps.* homes (ADR-091 D4). Every other key (build.*, sources.*,
+#: compile-context keys, the non-core deps.* homes (ADR-091 D4) and the
+#: required-symbol contract. Every other key (build.*, sources.*,
 #: ...) is refused with a usage error, because its loader does not yet take the
 #: override.
 _COMPARE_APPLIED_PATHS: frozenset[str] = (
@@ -60,6 +64,7 @@ _COMPARE_APPLIED_PATHS: frozenset[str] = (
     | COMPILE_CONTEXT_OVERRIDE_PATHS
     | RELEASE_TOPOLOGY_OVERRIDE_PATHS
     | CONFIG_RUN_INPUT_SET_PATHS
+    | {REQUIRED_SYMBOLS_OVERRIDE_PATH}
 )
 
 #: The keys a directory/package (release) compare forwards to its members. The

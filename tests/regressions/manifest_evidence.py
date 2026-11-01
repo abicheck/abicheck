@@ -1178,23 +1178,4 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
-    BugClass(
-        id="evidence.stored_live_route_member_divergence",
-        invariant=(
-            "A release compare with a stored (`BundleFacts`) OLD side pairs "
-            "exactly the members, keys and names the live/live compare of "
-            "the same trees pairs -- one discovery rule and one match key, "
-            "whatever the member file names or the capture route."
-        ),
-        fixed_by=(1878,),
-        seed_tests=(
-            "tests/test_cli_compare_stored_versioned_member_pairing.py",
-            "tests/test_stored_live_member_discovery_formats.py",
-        ),
-        public_surfaces=("cli",),
-        axes={
-            "member_name": ("versioned", "unversioned", "mixed", "one-sided"),
-            "capture": ("cli --bundle-facts-out", "typed api file-name keys"),
-        },
-    ),
 )

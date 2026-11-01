@@ -122,6 +122,8 @@ def release_dry_run_plan_lines(
     for entry in plan.entries:
         if entry.would_compare:
             marker = "compare"
+        elif entry.unreadable:
+            marker = "FAILED"
         elif entry.required:
             marker = "MISSING"
         else:

@@ -101,6 +101,7 @@ def compare_release_against_bundle_facts(
     include_dependencies: bool = False,
     max_json_object_nodes: int | None = None,
     env_matrix: EnvironmentMatrix | None = None,
+    new_members: dict[str, Path] | None = None,
 ) -> BundleDiffResult:
     """End-to-end driver: a stored OLD-side ``BundleFacts`` file compared
     against a live NEW-side directory/package extraction root (G38 Phase 13).
@@ -274,6 +275,12 @@ def compare_release_against_bundle_facts(
     from .workflows.extraction import ast_acquisition_scope, build_match_map
     from .workflows.input_resolution import resolve_input
     from .workflows.release_inputs import discover_live_member_libraries
+    from .workflows.release_member_pairing import (
+        identity_renames,
+        path_identity,
+        snapshot_identity,
+    )
+    from .workflows.release_member_readability import unreadable_unmatched_members
     from .workflows.release_public_surface import member_pass_scope
 
     # Keyed by the same match key `build_match_map` gives the live NEW side
@@ -283,9 +290,14 @@ def compare_release_against_bundle_facts(
     )
 
     # ELF, PE and Mach-O alike (issue #1715 on Windows): the ELF-only walk
-    # found no member in a directory of `.dll`s.
-    new_files = discover_live_member_libraries(
-        new_dir, include_private=include_private_dso, packaged=new_packaged
+    # found no member in a directory of `.dll`s. *new_members* is a stored
+    # NEW package's own member map, already keyed by its owner.
+    new_files = (
+        []
+        if new_members is not None
+        else discover_live_member_libraries(
+            new_dir, include_private=include_private_dso, packaged=new_packaged
+        )
     )
     # Version-aware duplicate resolution (the same rule the live release
     # fan-out uses -- `binary_utils.build_match_map`, the primitive the CLI
@@ -298,7 +310,11 @@ def compare_release_against_bundle_facts(
     # a CLI helper module) -- an `AmbiguousLibraryMatchError` here
     # propagates as a plain Python exception, appropriate for a module with
     # callers outside any Click command.
-    new_map, _match_warnings = build_match_map(new_files)
+    new_map, _match_warnings = (
+        (dict(new_members), [])
+        if new_members is not None
+        else build_match_map(new_files)
+    )
 
     # Codex review, fresh evidence: the actual validation logic lives in
     # workflows/bundle_facts_library_overrides.py (a `workflows`-classified
@@ -307,7 +323,19 @@ def compare_release_against_bundle_facts(
     # and cannot get any other way, since it's derived from this
     # function's own already-loaded `old_facts`/`new_map`, with no second
     # OLD_FACTS load) and delegates the actual check.
+    # A member the file name could not pair is paired by the library it
+    # records (workflows.release_member_pairing), as on the live fan-out.
+    renames = identity_renames(
+        old_facts.per_library_snapshots,
+        new_map,
+        old_identity=lambda k: snapshot_identity(k, old_facts.per_library_snapshots[k]),
+        new_identity=lambda k: path_identity(k, new_map[k]),
+    )
+    new_map = {renames.get(k, k): path for k, path in new_map.items()}
     matched_keys = set(old_facts.per_library_snapshots) & set(new_map)
+    # The live fan-out's rule: an unmatched NEW member no reader can open is
+    # `failed`, not one-sided (workflows.release_member_readability).
+    new_unreadable = unreadable_unmatched_members(new_map, matched_keys)
     validate_matched_library_overrides(
         per_library_headers=per_library_headers,
         per_library_includes=per_library_includes,
@@ -493,7 +521,11 @@ def compare_release_against_bundle_facts(
         # Named as the live fan-out names them: by file, not by match key.
         old_paths={k: Path(v) for k, v in old_facts.library_filenames.items()},
         new_paths=new_map,
+        new_failed=new_unreadable,
     )
+    # Reported like the live fan-out's: an `ERROR` member named by its file,
+    # and an extraction failure, beside its `failed` state on the record.
+    failed.update({new_map[k].name: reason for k, reason in new_unreadable.items()})
     # ADR-065 D2: the bundle graph sees matched members and proven
     # removals/additions only (Codex review) -- see bundle_analysis_members.
     bundle_members = bundle_analysis_members(scope_record)
