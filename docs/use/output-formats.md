@@ -1109,6 +1109,11 @@ file's shape. A missing or malformed file, or an unknown key, is a usage error
 (exit 64) before any analysis. `compare --no-baseline` and a comparison of a
 stored BundleFacts document refuse the key.
 
+When the Action resolves a baseline, its own `--set` replaces any
+`report.baseline_provenance` written in `.abicheck.yml`, because `--set` beats
+the file. To pass a different file in an Action run, use the Action's `set:`
+input: its lines come after the Action's own `--set`, so they win.
+
 ### `aggregate`'s own report shape
 
 `abicheck aggregate -o json=-` is a **separate document**, not a
