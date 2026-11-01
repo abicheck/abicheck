@@ -27,7 +27,11 @@ import pytest
 
 from abicheck.dwarf_advanced import AdvancedDwarfMetadata, ToolchainInfo
 from abicheck.dwarf_metadata import DwarfMetadata, EnumInfo, FieldInfo, StructLayout
-from abicheck.pdb_metadata import _is_user_visible, parse_pdb_debug_info
+from abicheck.pdb_metadata import (
+    PdbParseError,
+    _is_user_visible,
+    parse_pdb_debug_info,
+)
 
 # Import test helpers from test_pdb_parser
 from tests.test_pdb_parser import (
@@ -249,16 +253,14 @@ class TestPdbToDwarfMetadata:
         assert f1.bit_offset == 3
 
     def test_missing_pdb(self, tmp_path: Path) -> None:
-        meta, adv = parse_pdb_debug_info(tmp_path / "nonexistent.pdb")
-        assert meta.has_dwarf is False
-        assert adv.has_dwarf is False
+        with pytest.raises(PdbParseError, match="nonexistent.pdb"):
+            parse_pdb_debug_info(tmp_path / "nonexistent.pdb")
 
     def test_invalid_pdb(self, tmp_path: Path) -> None:
         bad_file = tmp_path / "bad.pdb"
         bad_file.write_bytes(b"not a pdb file" + b"\x00" * 100)
-        meta, adv = parse_pdb_debug_info(bad_file)
-        assert meta.has_dwarf is False
-        assert adv.has_dwarf is False
+        with pytest.raises(PdbParseError, match="bad magic"):
+            parse_pdb_debug_info(bad_file)
 
 
 # ---------------------------------------------------------------------------
@@ -759,3 +761,50 @@ class TestPdbInAbiSnapshot:
         assert loaded.declarations.debug_advanced is not None
         assert loaded.declarations.debug_advanced.has_dwarf
         assert loaded.declarations.debug_advanced.toolchain.compiler == "MSVC"
+
+
+# ---------------------------------------------------------------------------
+# A truncated supported TPI record fails the PDB (never silently skipped)
+# ---------------------------------------------------------------------------
+
+
+def _truncated(leaf: int) -> bytes:
+    """The first bytes of a well-formed record of *leaf*, cut short of its
+    fixed header."""
+    full = {
+        LF_ENUM: _make_lf_enum(1, 0, 0x74, 0, "Color"),
+        LF_STRUCTURE: _make_lf_structure(0, 0, 0, 4, "S"),
+        LF_UNION: _make_lf_union(0, 0, 0, 4, "U"),
+        LF_PROCEDURE: _make_lf_procedure(0x74, 0, 0, 0),
+    }[leaf]
+    return full[:4]
+
+
+@pytest.mark.parametrize("leaf", [LF_ENUM, LF_STRUCTURE, LF_UNION, LF_PROCEDURE])
+def test_truncated_supported_record_fails_the_pdb(tmp_path: Path, leaf: int) -> None:
+    """Real PDB bytes, the real parser: a well-formed struct next to one
+    truncated supported record. The database is non-empty, but the
+    truncated record's facts are missing, so the PDB is failed rather than
+    returned as present metadata without them."""
+    fl = _make_lf_fieldlist([_make_lf_member(0, 0x74, 0, "x")])
+    records = [
+        (LF_FIELDLIST, fl),
+        (LF_STRUCTURE, _make_lf_structure(1, 0, 0x1000, 4, "Good")),
+        (leaf, _truncated(leaf)),
+    ]
+    pdb_file = tmp_path / "trunc_record.pdb"
+    pdb_file.write_bytes(_build_minimal_pdb(tpi_records=records))
+    with pytest.raises(PdbParseError, match=r"1 TPI record\(s\) failed to parse"):
+        parse_pdb_debug_info(pdb_file)
+
+
+def test_the_same_pdb_without_the_truncated_record_parses(tmp_path: Path) -> None:
+    fl = _make_lf_fieldlist([_make_lf_member(0, 0x74, 0, "x")])
+    records = [
+        (LF_FIELDLIST, fl),
+        (LF_STRUCTURE, _make_lf_structure(1, 0, 0x1000, 4, "Good")),
+    ]
+    pdb_file = tmp_path / "ok.pdb"
+    pdb_file.write_bytes(_build_minimal_pdb(tpi_records=records))
+    meta, _adv = parse_pdb_debug_info(pdb_file)
+    assert set(meta.structs) == {"Good"}

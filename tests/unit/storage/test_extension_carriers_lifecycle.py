@@ -9,9 +9,10 @@ carrier object itself:
   an unknown section or record/header extensions keeps that state through
   every in-process copy (``dataclasses.replace``, ``copy``, ``deepcopy``,
   pickle) -- a re-save still writes it, never ``present`` and empty;
-* a writer that cannot represent that state (a ProjectSnapshot package, a
-  bundle document/archive/package, all built from the flat
-  ``snapshot_to_dict`` document) refuses instead of storing a false clean.
+* a ProjectSnapshot directory package stores it (``ArtifactRef.carriers``);
+  a writer that cannot represent it (a bundle document/archive/package,
+  built from the flat ``snapshot_to_dict`` document) refuses instead of
+  storing a false clean.
 """
 
 from __future__ import annotations
@@ -159,18 +160,23 @@ def test_unreadable_without_carriers_refuses_to_write(section: str) -> None:
 
 
 @pytest.mark.parametrize("carrier", sorted(_CARRIERS))
-def test_package_write_refuses_instead_of_a_false_clean(
-    carrier: str, tmp_path: Path
-) -> None:
+def test_a_package_carries_the_carriers(carrier: str, tmp_path: Path) -> None:
+    """A directory package stores the carriers (`ArtifactRef.carriers`), so
+    the snapshot reads back with the same blocked sections and re-saves to
+    the same single-file document -- never a false clean."""
+    loaded = _loaded(carrier)
     root = tmp_path / "pkg"
-    with pytest.raises(SnapshotError, match="single-file snapshot"):
-        write_legacy_snapshot_package(
-            _loaded(carrier),
-            root,
-            artifact_id="a",
-            max_known_schema_version=SCHEMA_VERSION,
-        )
-    assert not root.exists() or not any(root.iterdir())
+    write_legacy_snapshot_package(
+        loaded, root, artifact_id="a", max_known_schema_version=SCHEMA_VERSION
+    )
+    document, ref = read_stored_snapshot_document(root)
+    back = snapshot_from_dict(document)
+    assert back.unreadable_sections == loaded.unreadable_sections
+    written = json.loads(snapshot_to_json(back))
+    assert _CARRIERS[carrier][1](written)
+    assert written == json.loads(snapshot_to_json(loaded))
+    assert ref.carriers is not None
+    assert ref.evidence_digest == snapshot_evidence_digest(loaded)
 
 
 @pytest.mark.parametrize("carrier", sorted(_CARRIERS))
@@ -196,6 +202,5 @@ def test_a_clean_loaded_snapshot_still_packages_with_its_evidence_digest(
     back = snapshot_from_dict(document)
     assert back.unreadable_sections == ()
     assert [t.name for t in back.declarations.types] == ["T"]
-    # The stored digest is the snapshot's own, extensions included (none here:
-    # a snapshot carrying any is refused above, so the two cannot diverge).
+    # The stored digest is the snapshot's own (no carriers here).
     assert ref.evidence_digest == snapshot_evidence_digest(snap)

@@ -14,8 +14,9 @@ it once (measured on a 28-member release: ``dump.binary`` 2.4x per dump, and
 :func:`single_flight` restores the sharing through the disk cache: the first
 process to take the lock runs the producer and writes the entry, and a
 process that waited on it then finds the entry and reads it. The lock is
-an advisory ``flock``, which the OS releases if the holder dies, so a crash
-never leaves a stale lock. Where the lock cannot be taken (no ``fcntl``, an
+an advisory ``flock`` (``msvcrt.locking`` on Windows), which the OS
+releases if the holder dies, so a crash never leaves a stale lock. Where
+the lock cannot be taken (no lock primitive, an
 unwritable lock directory, reference mode) it is a no-op: the only cost is
 the duplicate work this module exists to remove, never a wrong result.
 """
@@ -53,19 +54,73 @@ def _lock_path(name: str) -> str | None:
     return str(lock_dir / f"{digest}.lock")
 
 
+class _LockBackend:
+    """The OS primitive behind :func:`single_flight`: POSIX ``flock`` or, on
+    Windows, ``msvcrt.locking`` over the file's first byte. Both are
+    released by the OS when the holder's process dies, so a crash never
+    leaves a stale lock. ``try_lock`` returns ``True`` once held, ``False``
+    while another holder has it, and raises ``OSError`` where the
+    filesystem cannot lock at all."""
+
+    def __init__(self, module: Any, kind: str) -> None:
+        self.module = module
+        self.kind = kind
+
+    def try_lock(self, fd: int) -> bool:
+        if self.kind == "fcntl":
+            try:
+                self.module.flock(fd, self.module.LOCK_EX | self.module.LOCK_NB)
+            except BlockingIOError:
+                return False
+            return True
+        os.lseek(fd, 0, os.SEEK_SET)
+        try:
+            self.module.locking(fd, self.module.LK_NBLCK, 1)
+        except PermissionError:
+            return False  # EACCES: another process holds the byte
+        except OSError as exc:
+            if getattr(exc, "errno", None) in _MSVCRT_BUSY_ERRNOS:
+                return False
+            raise
+        return True
+
+    def unlock(self, fd: int) -> None:
+        if self.kind == "fcntl":
+            self.module.flock(fd, self.module.LOCK_UN)
+            return
+        os.lseek(fd, 0, os.SEEK_SET)
+        self.module.locking(fd, self.module.LK_UNLCK, 1)
+
+
+#: ``msvcrt.locking`` reports a held byte as EACCES or EDEADLOCK.
+_MSVCRT_BUSY_ERRNOS = frozenset({13, 36})
+
+
+def _lock_backend() -> _LockBackend | None:
+    """``fcntl`` where it exists, else ``msvcrt`` (Windows), else none."""
+    try:
+        import fcntl
+    except ImportError:
+        try:
+            import msvcrt
+        except ImportError:  # pragma: no cover - neither primitive
+            return None
+        return _LockBackend(msvcrt, "msvcrt")
+    return _LockBackend(fcntl, "fcntl")
+
+
 @contextmanager
 def single_flight(name: str) -> Iterator[None]:
     """Hold the exclusive lock named *name* for the duration of the block.
 
-    Waits for a holder in any process (or any thread: ``flock`` locks an
-    open file description, and each call opens its own), polling so the
-    active request deadline still bounds the wait. The ``.lock`` file stays
-    behind, tiny and reused; unlinking it would race a waiter that already
-    has it open.
+    Waits for a holder in any process (or any thread: both primitives lock
+    per open file description or handle, and each call opens its own),
+    polling so the active request deadline still bounds the wait. The
+    ``.lock`` file stays behind, tiny and reused; unlinking it would race a
+    waiter that already has it open.
     """
-    try:
-        import fcntl
-    except ImportError:  # pragma: no cover - Windows
+    backend = _lock_backend()
+    if backend is None:  # pragma: no cover - no lock primitive
         yield
         return
     path = None if reference_mode() else _lock_path(name)
@@ -78,16 +133,17 @@ def single_flight(name: str) -> Iterator[None]:
     if fd < 0:
         yield
         return
+    held = False
     try:
         while True:
             try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except BlockingIOError:
+                if backend.try_lock(fd):
+                    held = True
+                    break
                 deadline.check()
                 time.sleep(_POLL_S)  # perf-ok: bounded lock poll
             except OSError:
-                # A filesystem without flock support: run unlocked.
+                # A filesystem without lock support: run unlocked.
                 os.close(fd)
                 fd = -1
                 break
@@ -95,7 +151,8 @@ def single_flight(name: str) -> Iterator[None]:
     finally:
         if fd >= 0:
             try:
-                fcntl.flock(fd, fcntl.LOCK_UN)
+                if held:
+                    backend.unlock(fd)
             finally:
                 os.close(fd)
 

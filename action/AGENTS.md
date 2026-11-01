@@ -18,7 +18,14 @@ sequence that invokes these scripts in order:
    local copy of `_is_release_style_operand()` deliberately — not sourced
    from `run.sh` — so this step has zero dependency on `run.sh`'s internal
    layout. `tests/test_action_validate_inputs.py` runs both copies against
-   the same fixtures to catch drift between them.
+   the same fixtures to catch drift between them. The one content
+   classification it needs -- whether `old-library` is a stored BundleFacts
+   document, which narrows `format` -- is not re-implemented:
+   `action/stored_bundle_facts_probe.py` imports the CLI's own
+   `looks_like_stored_bundle_facts` from the Action's source tree (stdlib-only
+   import closure, `python -I`) and answers "unknown" when it cannot, leaving
+   the check to the CLI. `tests/test_action_stored_bundle_facts_preflight.py`
+   checks the preflight refuses exactly what the CLI refuses.
 2. System dependencies, dispatched by the resolved `dependency-source`
    (`conda-forge` — the **default**, backward-compat-resolved from the
    deprecated `install-deps` boolean when `dependency-source` is unset (its

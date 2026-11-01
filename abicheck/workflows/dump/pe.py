@@ -48,19 +48,39 @@ def extract_pdb_debug(
     Returns ``(dwarf_meta, dwarf_adv)`` or ``(None, None)`` when no PDB is found
     or parsing fails.  PDB extraction is best-effort and never fatal.
     """
+    meta, adv, _failure = extract_pdb_debug_outcome(path, pdb_path)
+    return meta, adv
+
+
+def extract_pdb_debug_outcome(
+    path: Path, pdb_path: Path | None
+) -> tuple[DwarfMetadata | None, AdvancedDwarfMetadata | None, str | None]:
+    """:func:`extract_pdb_debug`, plus why a *located* PDB failed to parse.
+
+    The third element is ``None`` when the PDB parsed or none was found (an
+    absent optional input is not collected, never failed), and the parse
+    error otherwise -- ADR-062 D15's whole-extractor failure of the
+    ``debug`` section, which :func:`extract_pe` records instead of writing
+    an empty present section.
+    """
     try:
         from ...pdb_metadata import parse_pdb_debug_info
         from ...pdb_utils import locate_pdb
 
         pdb_file = locate_pdb(path, pdb_path_override=pdb_path, allow_network=False)
-        if pdb_file is not None:
-            meta, adv = parse_pdb_debug_info(pdb_file)
-            _logger.info("PDB debug info loaded from %s", pdb_file)
-            return meta, adv
+    except Exception as exc:  # noqa: BLE001
+        _logger.warning("PDB lookup failed for %s: %s", path, exc)
+        return None, None, None
+    if pdb_file is None:
         _logger.debug("No PDB file found for %s", path)
+        return None, None, None
+    try:
+        meta, adv = parse_pdb_debug_info(pdb_file)
     except Exception as exc:  # noqa: BLE001
         _logger.warning("PDB parsing failed for %s: %s", path, exc)
-    return None, None
+        return None, None, f"pdb: {pdb_file.name}: {exc}"
+    _logger.info("PDB debug info loaded from %s", pdb_file)
+    return meta, adv, None
 
 
 def extract_pe(
@@ -106,7 +126,7 @@ def extract_pe(
             "Verify the file is a valid DLL."
         )
 
-    dwarf_meta, dwarf_adv = extract_pdb_debug(path, pdb_path)
+    dwarf_meta, dwarf_adv, pdb_failure = extract_pdb_debug_outcome(path, pdb_path)
 
     scope_fallback: str | None = None
     if headers:
@@ -160,7 +180,7 @@ def extract_pe(
         if pdb_types or pdb_enums:
             pdb_ir = pdb_semantic_ir(pdb_types, pdb_enums)
 
-    return new_snapshot(
+    snap = new_snapshot(
         library=path.name,
         version=version,
         functions=funcs,
@@ -173,3 +193,13 @@ def extract_pe(
         scope_fallback=scope_fallback,
         semantic_ir=pdb_ir,
     )
+    if pdb_failure is not None:
+        # ADR-062 D15: the PDB was there and its extractor failed, so the
+        # `debug` section (on this export-table path, nothing but the PDB's
+        # facts) is `failed` with the diagnostic, not present and empty.
+        # A header-scoped dump's `debug` section also holds the header
+        # parse's provenance, so it is not failed wholesale (known gap).
+        from ...storage.wire_extensions import record_section_failure
+
+        record_section_failure(snap, "debug", [pdb_failure])
+    return snap

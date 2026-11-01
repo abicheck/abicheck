@@ -35,7 +35,7 @@ from .canonical import (
 )
 from .dto import SECTION_SCHEMA_VERSIONS, SectionDTO
 from .guards import mapping as _mapping, required_field as _required_field
-from .wire_extensions import check_must_understand
+from .wire_extensions import unknown_must_understand
 
 __all__ = ["current_section_payload", "section_dto_dict"]
 
@@ -109,10 +109,12 @@ def current_section_payload(
     _mapping(payload, "payload")
     # ADR-062 D14: the single-file reader splits header carriers off first;
     # a directory package's section reaching here with an unknown
-    # must-understand name is refused (fail closed) rather than ignored.
-    check_must_understand(
+    # must-understand name is not current: the caller's DTO branch blocks
+    # that section (`import_v1.export_legacy_sections`).
+    if unknown_must_understand(
         raw.get("must_understand"), f"section {header.section_kind!r}"
-    )
+    ):
+        return None
     if header.section_schema_version != SECTION_SCHEMA_VERSIONS.get(
         header.section_kind
     ):
