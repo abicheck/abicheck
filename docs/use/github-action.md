@@ -207,7 +207,6 @@ degrades gracefully and L0–L2 stay authoritative.
 | `changed-path` | compare, two-sided shape only | Changed path(s) to focus the run's source-evidence scope on (space-separated; alternative to `since`). Same audit-only/directory-package rejection as `since` above. |
 | `budget` | compare, two-sided shape only | Time guard (e.g. `15m`); empty means the 2h default, so no run is unbounded. The step **fails** on overflow (`verdict: BUDGET_OVERFLOW`) — a budget never silently shrinks scope. Set a longer one for a comparison that needs more than 2h. Rejected outright for the audit-only shape (`compare --no-baseline`'s wall-clock guard isn't wired to that path yet). |
 | `against` | — | **Retired** (0.6, hard removal): this applied only to the now-removed `mode: scan`. Set `old-library` (or `abi-baseline`) under `mode: compare` instead — setting `against` is now a hard error naming that replacement. |
-| `crosscheck` | — | **Retired** (0.6, hard removal): `scan --crosscheck`'s `KEY=LEVEL` promotion syntax is gone along with `mode: scan` itself. Every cross-source check it used to gate already reaches `compare` as an ordinary finding — use `policy`/`.abicheck.yml`'s `policy.overrides.<CHANGE_KIND>: error` to control one check's severity instead. Setting `crosscheck` is now a hard error naming that replacement. |
 | `risk-rules` | — | **Retired** (0.6): `scan --risk-rules` and the risk-driven `auto` depth escalation it fed are gone. Pin `depth:` explicitly instead; setting this input is an error. |
 
 !!! tip "Consuming build-emitted source facts (wrapper / Clang plugin)"
@@ -537,14 +536,14 @@ must change it to `format: markdown` (or drop the input entirely --
 that never set `format` (so relied on scan's own `text` default) needs no
 change, since both defaults render the identical markdown output.
 
-Three inputs have no `mode: compare` equivalent and are retired outright,
+Two inputs have no `mode: compare` equivalent and are retired outright,
 with no replacement: `new-library-set` (multi-library audit — compare each
-library individually until package component inventories land),
+library individually until package component inventories land) and
 `risk-rules` (the risk-driven `auto` depth escalation — pin `depth`
-explicitly), and legacy `crosscheck`'s `KEY=error` promotion syntax (every
-cross-source check already reaches `compare` as an ordinary finding; use
-`.abicheck.yml`'s `policy.overrides.<CHANGE_KIND>: error` via `build-config`
-instead).
+explicitly). The former `crosscheck` input was removed from the Action
+entirely: every cross-source check already reaches `compare` as an ordinary
+finding, so use `.abicheck.yml`'s `policy.overrides.<CHANGE_KIND>: error` via
+`build-config`.
 
 ## More usage recipes
 

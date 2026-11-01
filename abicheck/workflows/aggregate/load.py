@@ -264,7 +264,6 @@ def _scan_abort_prior_exit(data: Mapping[str, Any]) -> int:
             "compatibility_contribution",
             "contract_coverage_contribution",
             "analysis_assurance_contribution",
-            "crosscheck_promotion_contribution",
         ):
             raw = exit_block.get(key)
             if (

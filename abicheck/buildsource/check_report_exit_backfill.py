@@ -32,12 +32,8 @@ don't actually satisfy it. Two distinct gaps, both fixed here:
   `*_contribution` key with its documented default (``0``). The field set
   is read from :class:`~abicheck.policy.exit_decision.ExitDecision` itself
   rather than hand-copied here (Codex review, fresh evidence: an earlier
-  revision's own hand-copied five-field list already missed
-  `crosscheck_promotion_contribution`, added one schema version *before*
-  those five -- report_schema_version 2.41 introduced the block itself
-  with only the first three PR G1 fields, so a genuine 2.41 report is
-  missing six keys total, not five) -- deriving it from the dataclass
-  means a sixth future field can never be missed here again the same way.
+  revision's own hand-copied field list missed a key) -- deriving it from
+  the dataclass means a future field can never be missed here again.
 - A pre-1.22 `NOT_COMPARABLE` scan report's `diff` has *no* `exit` key at
   all (`{"reason": ...}` was the whole shape before ADR-064 stage 1b wired
   that outcome) -- synthesize the same decision the retired `scan_engine.py` (ADR-068 Phase 6)

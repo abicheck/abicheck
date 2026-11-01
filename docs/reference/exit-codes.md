@@ -411,9 +411,8 @@ rules that are unused.
 
 Every real-verdict `compare -o json=...` report (`full`/`leaf`/`root-cause`
 modes) carries a top-level `exit` object (introduced at report schema 2.41;
-schema 2.42 added its `crosscheck_promotion_contribution` field — see
-the [report schema version history](../contribute/report-schema-history.md) for that
-and later additive fields, e.g. `annotations` at 2.43) stating the
+see the [report schema version history](../contribute/report-schema-history.md) for
+later fields, e.g. `annotations` at 2.43) stating the
 already-resolved decision behind the axes above as one explainable
 value, rather than requiring a reader to separately combine
 `severity.exit_code`/`verdict`, `contract_coverage_exit_contribution`, and
@@ -428,25 +427,19 @@ its own constituent contribution fields lived:
   "reasons": ["analysis_assurance"],
   "compatibility_contribution": 0,
   "contract_coverage_contribution": 0,
-  "analysis_assurance_contribution": 1,
-  "crosscheck_promotion_contribution": 0
+  "analysis_assurance_contribution": 1
 }
 ```
 
-`code` is exactly `max()` over the four contributions — the identical
+`code` is exactly `max()` over the contributions — the identical
 number the real process exits with for a single-pair `compare`. `reasons`
 names every axis whose own contribution equals `code` (a lower,
 non-winning contribution is excluded, since it did not determine the
 result); `["clean"]` when `code` is `0`.
 
-`crosscheck_promotion_contribution` (schema 2.42) is always `0` on a
-`compare` report — it never had meaning outside the retired
-`scan --against`'s own maintainer-promoted `--crosscheck KEY=error` finding
-(`scan_engine._promote_published_gate`), which reconstructs the whole
-`diff.exit` block through the same resolver whenever the crosscheck
-contributes anything positive, so `reasons` can carry `promoted_crosscheck`
-even when the crosscheck only *ties* — rather than exceeds — the baseline
-comparison's own exit code.
+Report schema 7.0 removed the former `crosscheck_promotion_contribution`
+key and the `promoted_crosscheck` reason, which belonged to the retired
+`--crosscheck KEY=error` promotion.
 
 `--used-by`/`consumers.required_symbols` scoping does not change
 `compatibility_contribution`/`reasons` at all (workstream D-S1,
@@ -735,13 +728,6 @@ Verdict: COMPATIBLE
 
 Both are absent under the default legacy scheme, which runs no severity
 gate.
-
-The block is the scan's **compatibility gate**, not the baseline diff's
-alone: a cross-check the maintainer promoted with `--crosscheck KEY=error`
-raises it too, adding a `promoted_crosscheck` entry to `blocking_categories`
-(deliberately outside the four severity categories, since no severity level
-produced it). The promotion is a floor — it can add a blocking reason but
-never clear one a severity category already raised.
 
 `aggregate` reads that `diff.severity` block as the target's compatibility
 gate when it is present, exactly as it reads a `compare` report's own

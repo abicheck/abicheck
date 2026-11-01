@@ -141,7 +141,7 @@ schema. Each command applies only the keys it reads and refuses the others; see
 `compile:`, `debug:`, `deps:`, `bundle:`, `python:`, `gate:`, `release:`,
 `assurance:`, `deployment:`, `resource_limits:`, `performance:`, `policy:`, `version:`,
 `output:`, `consumers:`,
-`risk_rules:`, `crosschecks:`, `targets:`, `bundles:`, `profiles:`,
+`risk_rules:`, `targets:`, `bundles:`, `profiles:`,
 `baseline:`, `bundle_variants:`, and `contract:` are the recognized top-level keys.
 See the
 [Config Keys Reference](config-keys-reference.md) for the exhaustive,
@@ -907,10 +907,10 @@ forward compatibility.
 
 ---
 
-### `risk_rules:` and `crosschecks:`
+### `risk_rules:`
 
-Both are recognized top-level keys (so they do not trigger the unknown-key
-error), but they are handled outside the `compare` config merge:
+A recognized top-level key (so it does not trigger the unknown-key
+error), handled outside the `compare` config merge:
 
 - **`risk_rules:`** — formerly a mapping of rule-name → `{ paths: [...],
   weight: <int> }` path-glob risk profile, parsed by `RiskRules.from_dict` in
@@ -924,18 +924,13 @@ error), but they are handled outside the `compare` config merge:
   The key stays recognized (so an existing file does not trigger the
   unknown-key error), but is inert. See
   [Evidence depth](../use/evidence-depth.md).
-- **`crosschecks:`** — reserved. It has never actually been read: cross-checks
-  (`buildsource/cross_source_checks.py`) run unconditionally as part of every
-  `compare` invocation, with no per-check tuning surface — the `scan`
-  command's repeatable `--crosscheck KEY=LEVEL` flag that once tuned them was
-  deleted along with `scan` itself.
 
 ---
 
 ### `targets:`, `bundles:`, `profiles:`, and `baseline:`
 
 Recognized top-level keys (so they do not trigger the unknown-key error),
-but — like `risk_rules:`/`crosschecks:` above — not parsed by `BuildConfig`
+but — like `risk_rules:` above — not parsed by `BuildConfig`
 itself. `dump`/`compare` never read this block; it exists solely for
 G30's GitHub Actions CI-integration primitives: `abicheck project validate`
 validates it, and `abicheck project plan` consumes it to generate

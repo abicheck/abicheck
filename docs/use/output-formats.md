@@ -828,7 +828,7 @@ Every JSON report carries a top-level `report_schema_version` field
 
 ```json
 {
-  "report_schema_version": "6.8",
+  "report_schema_version": "7.0",
   "library": "libfoo.so.1",
   "verdict": "BREAKING"
 }
@@ -1071,48 +1071,6 @@ from abicheck.schemas import load_compare_report_schema
 report = json.loads(open("report.json").read())
 jsonschema.validate(report, load_compare_report_schema())
 ```
-
-### Baseline provenance (`baseline_provenance`)
-
-When the root GitHub Action resolved the baseline itself (`abi-baseline`), the
-compare report (schema 6.8) and the directory/package release report (release
-schema 2.8) carry a top-level `baseline_provenance` object with the same values
-as the Action's `baseline-*` outputs, so a reader of the JSON report alone can
-tell a legacy asset from a baseline-set and see which `project_ref` was checked:
-
-```json
-"baseline_provenance": {
-  "asserted_by": "action",
-  "applies_to": "baseline_operand",
-  "source": "baseline-set",
-  "asset_name": "abicheck-baseline-release.tar.zst",
-  "project_ref": "v1.2.0",
-  "generation": 3,
-  "profile": "release"
-}
-```
-
-`source` is `legacy-asset`, `baseline-set` or `direct-path`; `project_ref`,
-`generation` and `profile` are `null` unless the source is `baseline-set`.
-`asserted_by: "action"` means the CLI copied these values and did not verify
-them: it did not fetch the asset or read the archive manifest. The schema
-reserves a `members` object (per-member records keyed by member name) for a
-later per-member provenance; nothing emits it yet. The block is absent when
-the run was not given one, and it never affects `verdict`, `severity` or any
-exit code.
-
-The Action passes it as `--set report.baseline_provenance=@FILE`, where `FILE`
-is a JSON object with the keys `source`, `asset_name`, `project_ref`,
-`generation` and `profile`. Any other caller may pass one the same way; the
-block still reads `asserted_by: "action"`, because the CLI checks only the
-file's shape. A missing or malformed file, or an unknown key, is a usage error
-(exit 64) before any analysis. `compare --no-baseline` and a comparison of a
-stored BundleFacts document refuse the key.
-
-When the Action resolves a baseline, its own `--set` replaces any
-`report.baseline_provenance` written in `.abicheck.yml`, because `--set` beats
-the file. To pass a different file in an Action run, use the Action's `set:`
-input: its lines come after the Action's own `--set`, so they win.
 
 ### `aggregate`'s own report shape
 

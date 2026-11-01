@@ -14,8 +14,7 @@
 # limitations under the License.
 
 """ADR-068 §3 #23: ``.abicheck.yml``'s ``policy.overrides`` block -- the
-documented project-config policy-override mechanism, distinct from the
-still-live ``scan --crosscheck KEY=LEVEL`` flag.
+documented project-config policy-override mechanism.
 
 ADR-061 task routing ("decide relevance, suppression, classification,
 severity, or gating" -> ``policy/``): this module implements exactly that

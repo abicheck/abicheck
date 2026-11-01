@@ -31,19 +31,12 @@ are capturing a reusable snapshot instead of comparing.
     passages below still explain `scan`'s own historical behavior for
     context, clearly marked as such.
 
-**One capability on this page is still `scan`-only** (verified live against
-the current build, not read off `--help`), and it is an open migration item
-in
-[`plans/one-comparison-product.md`](../contribute/plans/one-comparison-product.md)
-§3 rather than something `compare` silently covers:
+**No capability on this page is still `scan`-only.** Opting a specific
+cross-source check into gating is `.abicheck.yml`'s
+`policy.overrides.<CHANGE_KIND>: error`; the former `--crosscheck KEY=error`
+promotion was removed outright.
 
-- **`--crosscheck KEY=error` promotion.** Opting a specific cross-source
-  check into gating has no `compare` spelling yet. The audit reports the
-  same checks (see [Single-build
-  audit](#single-build-audit-no-baseline) below), but cannot be told to
-  gate on one.
-
-The two entries that used to sit here are both gone, for opposite reasons.
+Two earlier gaps are both gone, for opposite reasons.
 **The single-build audit** closed on 2026-09-09/10: `compare --no-baseline`
 reproduces the audit's findings, and the paragraph below says what it now
 takes. **Risk-driven `auto` depth** was *retired* rather than mirrored --
@@ -64,8 +57,7 @@ to both commands now. Neither does risk-driven `auto` depth, which was
 `scan --build-target` was retired the same way, and `dump --build-target`
 was later retired outright too (a hard usage error, exit 64) — put root
 target(s) in `.abicheck.yml`'s `build.targets` instead, the only route left
-for either command. `--crosscheck KEY=error` promotion syntax is the one
-item left with no `compare` equivalent.
+for either command.
 
 The retired `scan ARTIFACT [OPTIONS]` command used to take the scanned
 binary/snapshot as a **positional** argument (not a flag), with `--against

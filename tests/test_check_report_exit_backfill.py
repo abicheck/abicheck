@@ -97,15 +97,9 @@ def test_older_nested_scan_exit_block_is_backfilled() -> None:
     assert "not_comparable_contribution" not in old_exit
 
 
-def test_a_pre_2_42_exit_block_also_backfills_crosscheck_promotion() -> None:
-    """Codex review, fresh evidence, second round: report_schema_version
-    2.41 introduced the `exit` block itself with only three fields
-    (`compatibility_contribution`/`contract_coverage_contribution`/
-    `analysis_assurance_contribution`) -- `crosscheck_promotion_
-    contribution` was schema 2.42's own addition, one version *before*
-    the five ADR-064 fields. A genuine 2.41 report is missing six keys
-    total, not five; backfilling only the five ADR-064 ones left this
-    sixth one silently absent from a document now claiming schema 2.47."""
+def test_a_2_41_exit_block_backfills_every_later_field() -> None:
+    """report_schema_version 2.41 introduced the `exit` block with only the
+    three PR G1 fields; every later contribution key must be backfilled."""
     old_exit = {
         "code": 0,
         "reasons": ["clean"],
@@ -115,10 +109,10 @@ def test_a_pre_2_42_exit_block_also_backfills_crosscheck_promotion() -> None:
     }
     report = {"report_schema_version": "2.41", "verdict": "NO_CHANGE", "exit": old_exit}
     out = _augment(report)
-    assert out["exit"]["crosscheck_promotion_contribution"] == 0
     for field in _ADR_064_EXIT_FIELDS:
         assert out["exit"][field] == 0
-    assert "crosscheck_promotion_contribution" not in old_exit
+    assert "crosscheck_promotion_contribution" not in out["exit"]
+    assert "operational_error_contribution" not in old_exit
 
 
 def test_a_report_already_on_the_current_schema_is_left_alone() -> None:
@@ -128,7 +122,6 @@ def test_a_report_already_on_the_current_schema_is_left_alone() -> None:
         "compatibility_contribution": 0,
         "contract_coverage_contribution": 0,
         "analysis_assurance_contribution": 0,
-        "crosscheck_promotion_contribution": 0,
         "unused_rules_contribution": 0,
         **dict.fromkeys(_ADR_064_EXIT_FIELDS, 0),
     }
@@ -184,8 +177,7 @@ def test_advisory_preserves_operational_error_contribution_in_the_exit_block() -
             "compatibility_contribution": 0,
             "contract_coverage_contribution": 0,
             "analysis_assurance_contribution": 0,
-            "crosscheck_promotion_contribution": 0,
-            "operational_error_contribution": 4,
+                "operational_error_contribution": 4,
             "evidence_contract_error_contribution": 0,
             "budget_overflow_contribution": 0,
             "not_comparable_contribution": 0,
@@ -227,8 +219,7 @@ def test_advisory_preserves_not_comparable_contribution_in_a_scan_diff_exit_bloc
             "compatibility_contribution": 0,
             "contract_coverage_contribution": 0,
             "analysis_assurance_contribution": 0,
-            "crosscheck_promotion_contribution": 0,
-            "operational_error_contribution": 0,
+                "operational_error_contribution": 0,
             "evidence_contract_error_contribution": 0,
             "budget_overflow_contribution": 0,
             "not_comparable_contribution": 6,

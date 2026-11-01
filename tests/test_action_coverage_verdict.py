@@ -843,8 +843,7 @@ class TestAPromotedExitDoesNotUnderstateTheReport:
     """Exit 0 was not the only exit a severity policy can understate.
 
     A policy demoting ``abi_breaking`` below ``error`` while something else
-    still gates -- an error-level ``--crosscheck KEY=error``, or
-    ``potential_breaking: error`` -- exits **2** with a report that still says
+    still gates -- ``potential_breaking: error``, for example -- exits **2** with a report that still says
     ``BREAKING``. Mapping exit 2 unconditionally to ``API_BREAK`` published a
     source-level break for a binary ABI break, so a workflow branching on
     ``verdict`` acted on the wrong tier (Codex review).
@@ -856,7 +855,7 @@ class TestAPromotedExitDoesNotUnderstateTheReport:
     """
 
     @staticmethod
-    def _report(compat_verdict: str, category: str = "promoted_crosscheck") -> dict:
+    def _report(compat_verdict: str, category: str = "potential_breaking") -> dict:
         """Exit 2 from a gate that is *not* the demoted compatibility tier.
 
         The category matters: a *configured* severity category (`addition`,
@@ -1330,13 +1329,9 @@ class TestTheReleaseTableVerdictIsNotReconstructed:
         assert outputs["verdict"] == "API_BREAK", outputs
 
 
-class TestThePromotedCrosscheckNoteNamesItsOwnMechanism:
-    """A promoted `--crosscheck KEY=error` raises the gate but is not a
-    severity category: it stays subject to `fail-on-api-break`, and
-    `_severity_gate_categories` filters the pseudo-category out. Attributing
-    the exit to the severity policy pointed at a knob that would not change
-    the outcome (Codex review).
-    """
+class TestTheEscalationNoteNamesTheSeverityPolicy:
+    """An escalated exit gated by a configured severity category names the
+    severity policy as the mechanism."""
 
     def _summary(self, tmp_path: Path, category: str) -> str:
         report = {
@@ -1361,11 +1356,6 @@ class TestThePromotedCrosscheckNoteNamesItsOwnMechanism:
             },
             bindir,
         )["_summary"]
-
-    def test_a_promoted_crosscheck_is_named_as_itself(self, tmp_path: Path) -> None:
-        summary = self._summary(tmp_path, "promoted_crosscheck")
-        assert "promoted `--crosscheck` gated this run" in summary, summary
-        assert "the severity policy gated this run" not in summary, summary
 
     def test_a_real_category_still_names_the_severity_policy(
         self, tmp_path: Path

@@ -78,6 +78,11 @@ class TestBuildConfigFromDictRejects:
         with pytest.raises(ValueError, match="unknown .abicheck.yml key 'bogus_top'"):
             BuildConfig.from_dict({"bogus_top": 1})
 
+    def test_removed_crosschecks_key_is_unknown(self) -> None:
+        """The reserved `crosschecks:` key was removed with `--crosscheck`."""
+        with pytest.raises(ValueError, match="unknown .abicheck.yml key 'crosschecks'"):
+            BuildConfig.from_dict({"crosschecks": {}})
+
     def test_unknown_block_subkey(self) -> None:
         with pytest.raises(ValueError, match=r"severity\.'bogus'"):
             BuildConfig.from_dict({"severity": {"preset": "strict", "bogus": 1}})
@@ -190,7 +195,6 @@ class TestBuildConfigFromDictRejects:
                 },
                 # Keys parsed by sibling modules, not from_dict itself.
                 "risk_rules": {},
-                "crosschecks": {},
             }
         )
         assert cfg.version == 1

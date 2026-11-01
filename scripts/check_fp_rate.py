@@ -1231,7 +1231,7 @@ CORPUS: list[Case] = [
 #   * stay silent on a clean snapshot (``should_fire=False``; a stray finding is
 #     a FP).
 # Both baselines are 0 — the corpus is chosen so the current engine is clean. A
-# check may be promoted to gating (``--crosscheck KEY=error``) only once it is
+# check may be promoted to gating (``policy.overrides.<kind>: error``) only once it is
 # represented here with both polarities.
 # --------------------------------------------------------------------------- #
 

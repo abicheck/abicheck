@@ -143,14 +143,6 @@ class ExitReason(StrEnum):
     CONTRACT_COVERAGE = "contract_coverage"
     ANALYSIS_ASSURANCE = "analysis_assurance"
     CLEAN = "clean"
-    #: **Read-only, retired producer.** The retired `scan --against`'s
-    #: maintainer-promoted `--crosscheck KEY=error` finding raised the exit
-    #: code through this axis. `scan` and `--crosscheck` were deleted by
-    #: ADR-068 Phase 6, so no current run can produce it and
-    #: :func:`resolve_exit_decision` no longer takes a contribution for it.
-    #: The member stays so :meth:`ExitDecision.from_dict` can still read a
-    #: stored pre-0.6 `scan` report whose `exit.reasons` names it.
-    PROMOTED_CROSSCHECK = "promoted_crosscheck"
 
     #: `compare` (`one-comparison-product.md` P3, ADR-037 D5; this axis
     #: originated in the retired `scan`). A pinned, non-`auto` `--depth`
@@ -247,15 +239,11 @@ class ExitDecision:
     """One comparison's fully explainable exit code.
 
     ``code`` is exactly ``max()`` over every contribution field below --
-    the first four (``compatibility_contribution`` through
-    ``crosscheck_promotion_contribution``) are the axes PR G1 modeled: the
-    first three are the identical value today's ad hoc fold chain in
+    the first three (``compatibility_contribution`` through
+    ``analysis_assurance_contribution``) are the axes PR G1 modeled: the
+    identical value today's ad hoc fold chain in
     ``cli._exit_with_severity_or_verdict`` already produces, computed once
-    here instead of via three separately-called functions; the fourth
-    belonged to the retired `scan --against`'s `--crosscheck KEY=error`
-    promotion and is always `0` for every current producer -- it is kept
-    only so stored reports round-trip (see
-    :class:`ExitReason.PROMOTED_CROSSCHECK`).
+    here instead of via three separately-called functions.
     ``reasons`` names every axis tied for that maximum; see
     :class:`ExitReason` for why a lower, non-winning contribution is
     excluded.
@@ -315,14 +303,6 @@ class ExitDecision:
     compatibility_contribution: int
     contract_coverage_contribution: int
     analysis_assurance_contribution: int
-    #: Retired producer: what the deleted `scan --against`'s
-    #: maintainer-promoted `--crosscheck KEY=error` finding contributed.
-    #: Always `0` for every current producer -- :func:`resolve_exit_decision`
-    #: no longer accepts it. Kept as a field, not deleted, because it is part
-    #: of the persisted report `exit` block (schema 2.42+): a stored pre-0.6
-    #: `scan` report still carries it, :meth:`from_dict` still reads it, and
-    #: `exit_decision_precedence` still preserves a prior decision's value.
-    crosscheck_promotion_contribution: int = 0
     #: A directory/package release comparison only (ADR-064). What one
     #: library's operational `ERROR` sentinel (a dump/extract/compare
     #: failure, not a `Verdict`) contributes -- a genuine fold participant
@@ -437,7 +417,6 @@ class ExitDecision:
             "compatibility_contribution": self.compatibility_contribution,
             "contract_coverage_contribution": self.contract_coverage_contribution,
             "analysis_assurance_contribution": self.analysis_assurance_contribution,
-            "crosscheck_promotion_contribution": self.crosscheck_promotion_contribution,
             "operational_error_contribution": self.operational_error_contribution,
             "evidence_contract_error_contribution": (
                 self.evidence_contract_error_contribution
@@ -479,9 +458,6 @@ class ExitDecision:
             compatibility_contribution=d["compatibility_contribution"],
             contract_coverage_contribution=d["contract_coverage_contribution"],
             analysis_assurance_contribution=d["analysis_assurance_contribution"],
-            crosscheck_promotion_contribution=d.get(
-                "crosscheck_promotion_contribution", 0
-            ),
             operational_error_contribution=d.get("operational_error_contribution", 0),
             evidence_contract_error_contribution=d.get(
                 "evidence_contract_error_contribution", 0
@@ -539,10 +515,6 @@ def resolve_exit_decision(
     default, or `SCOPED_GATE` when the caller's compatibility contribution
     is the scoped application/plugin-host gate rather than the full-library
     one; every other axis's reason is unaffected either way.
-    There is no crosscheck-promotion parameter: its only producer, the
-    retired `scan --crosscheck KEY=error`, is gone (ADR-068 Phase 6), so
-    the resolved decision's ``crosscheck_promotion_contribution`` is always
-    ``0``. See :class:`ExitReason.PROMOTED_CROSSCHECK`.
     *operational_error_contribution* defaults to ``0`` (every caller but
     `resolve_release_exit_decision`, ADR-064's release resolver) --
     :class:`ExitReason.OPERATIONAL_ERROR`'s own fixed reason, unlike
@@ -637,9 +609,7 @@ def resolve_compare_exit_decision(
     (CLI cleanup phase two, PR E), which nested its result at
     ``diff.exit``. `scan` was deleted by ADR-068 Phase 6; its budget-
     overflow and evidence-contract axes are now `compare`'s own
-    (`DiffResult.budget_overflow`/`evidence_contract_error`), and its
-    `--crosscheck` promotion axis has no producer left (see
-    :class:`ExitReason.PROMOTED_CROSSCHECK`).
+    (`DiffResult.budget_overflow`/`evidence_contract_error`),.
 
     **Consumer scoping (`--used-by`/`consumers.required_symbols`) no longer overrides
     the compatibility axis (workstream D-S1, vision-api-abi-evolution.md

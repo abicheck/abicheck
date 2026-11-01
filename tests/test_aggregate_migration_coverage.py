@@ -618,7 +618,6 @@ def test_early_budget_overflow_with_no_prior_contribution_stays_at_the_coverage_
                         "compatibility_contribution": 0,
                         "contract_coverage_contribution": 0,
                         "analysis_assurance_contribution": 0,
-                        "crosscheck_promotion_contribution": 0,
                     }
                 },
             }

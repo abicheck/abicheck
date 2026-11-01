@@ -151,7 +151,6 @@ class TestResolveExitDecision:
             "compatibility_contribution": 0,
             "contract_coverage_contribution": 1,
             "analysis_assurance_contribution": 0,
-            "crosscheck_promotion_contribution": 0,
             "operational_error_contribution": 0,
             "evidence_contract_error_contribution": 0,
             "budget_overflow_contribution": 0,
@@ -164,37 +163,13 @@ class TestResolveExitDecision:
             "unused_rules_contribution": 0,
         }
 
-    def test_crosscheck_promotion_has_no_live_producer(self) -> None:
-        """The retired `scan --crosscheck KEY=error` was this axis's only
-        producer (ADR-068 Phase 6). The resolver no longer accepts it, and
-        every decision it builds reports it as `0`, never as a reason.
-        """
-        import inspect
-
-        assert "crosscheck_promotion_contribution" not in (
-            inspect.signature(resolve_exit_decision).parameters
-        )
-        for code in (0, 1, 2, 4):
-            decision = resolve_exit_decision(compatibility_contribution=code)
-            assert decision.crosscheck_promotion_contribution == 0
-            assert ExitReason.PROMOTED_CROSSCHECK not in decision.reasons
-
-    def test_stored_crosscheck_promotion_still_round_trips(self) -> None:
-        """A stored pre-0.6 `scan` report may still name the axis. Reading
-        it back must keep the value and the reason, not drop them.
-        """
-        stored = {
-            "code": 2,
-            "reasons": ["promoted_crosscheck"],
-            "compatibility_contribution": 0,
-            "contract_coverage_contribution": 0,
-            "analysis_assurance_contribution": 0,
-            "crosscheck_promotion_contribution": 2,
-        }
-        decision = ExitDecision.from_dict(stored)
-        assert decision.crosscheck_promotion_contribution == 2
-        assert decision.reasons == (ExitReason.PROMOTED_CROSSCHECK,)
-        assert decision.to_dict()["crosscheck_promotion_contribution"] == 2
+    def test_retired_crosscheck_promotion_axis_is_gone(self) -> None:
+        """Report schema 7.0 removed the retired `--crosscheck` promotion
+        axis outright: no field, no reason, nothing serialized."""
+        decision = resolve_exit_decision(compatibility_contribution=2)
+        assert not hasattr(decision, "crosscheck_promotion_contribution")
+        assert "crosscheck_promotion_contribution" not in decision.to_dict()
+        assert "promoted_crosscheck" not in {r.value for r in ExitReason}
 
     def test_default_contributions_are_zero(self) -> None:
         """A caller with neither `--contract` nor
@@ -370,7 +345,6 @@ class TestResolveScanExitDecision:
             decision.compatibility_contribution,
             decision.contract_coverage_contribution,
             decision.analysis_assurance_contribution,
-            decision.crosscheck_promotion_contribution,
             decision.evidence_contract_error_contribution,
             decision.budget_overflow_contribution,
             decision.not_comparable_contribution,
@@ -523,7 +497,6 @@ class TestResolveReleaseExitDecision:
             decision.compatibility_contribution,
             decision.contract_coverage_contribution,
             decision.analysis_assurance_contribution,
-            decision.crosscheck_promotion_contribution,
             decision.evidence_contract_error_contribution,
             decision.budget_overflow_contribution,
             decision.not_comparable_contribution,
@@ -754,7 +727,6 @@ class TestResolveReleaseExitDecision:
             decision.compatibility_contribution,
             decision.contract_coverage_contribution,
             decision.analysis_assurance_contribution,
-            decision.crosscheck_promotion_contribution,
             decision.operational_error_contribution,
             decision.evidence_contract_error_contribution,
             decision.budget_overflow_contribution,
@@ -855,7 +827,6 @@ class TestCompareExitDecisionIntegration:
             "compatibility_contribution": 0,
             "contract_coverage_contribution": 0,
             "analysis_assurance_contribution": 0,
-            "crosscheck_promotion_contribution": 0,
             "operational_error_contribution": 0,
             "evidence_contract_error_contribution": 0,
             "budget_overflow_contribution": 0,

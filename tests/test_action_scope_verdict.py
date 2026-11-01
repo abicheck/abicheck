@@ -58,7 +58,6 @@ def _release_report(
             "compatibility_contribution": 0,
             "contract_coverage_contribution": 0,
             "analysis_assurance_contribution": 0,
-            "crosscheck_promotion_contribution": 0,
             "operational_error_contribution": 0,
             "evidence_contract_error_contribution": 0,
             "budget_overflow_contribution": 0,
