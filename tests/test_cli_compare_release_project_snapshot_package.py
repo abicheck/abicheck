@@ -253,14 +253,14 @@ class TestStoredVersusLiveReleaseParity:
 
     def test_stored_stored_matches_live_live(self, tmp_path: Path) -> None:
         paths = self._fixture(tmp_path)
-        _, live_out = _invoke(
+        _, live_out = _invoke_stdout(
             "compare",
             str(paths["old_dir"]),
             str(paths["new_dir"]),
             "-o",
             "json=-",
         )
-        ec, stored_out = _invoke(
+        ec, stored_out = _invoke_stdout(
             "compare",
             str(paths["old_pkg"]),
             str(paths["new_pkg"]),
@@ -272,14 +272,14 @@ class TestStoredVersusLiveReleaseParity:
 
     def test_stored_live_matches_live_live(self, tmp_path: Path) -> None:
         paths = self._fixture(tmp_path)
-        _, live_out = _invoke(
+        _, live_out = _invoke_stdout(
             "compare",
             str(paths["old_dir"]),
             str(paths["new_dir"]),
             "-o",
             "json=-",
         )
-        ec, mixed_out = _invoke(
+        ec, mixed_out = _invoke_stdout(
             "compare",
             str(paths["old_pkg"]),
             str(paths["new_dir"]),
@@ -291,14 +291,14 @@ class TestStoredVersusLiveReleaseParity:
 
     def test_live_stored_matches_live_live(self, tmp_path: Path) -> None:
         paths = self._fixture(tmp_path)
-        _, live_out = _invoke(
+        _, live_out = _invoke_stdout(
             "compare",
             str(paths["old_dir"]),
             str(paths["new_dir"]),
             "-o",
             "json=-",
         )
-        ec, mixed_out = _invoke(
+        ec, mixed_out = _invoke_stdout(
             "compare",
             str(paths["old_dir"]),
             str(paths["new_pkg"]),
@@ -591,7 +591,7 @@ class TestVariantSelection:
         _write_package(old_pkg, old_libs, variant_id="gcc13")
         _write_package(new_pkg, new_libs, variant_id="gcc13")
 
-        ec, out = _invoke("compare", str(old_pkg), str(new_pkg), "-o", "json=-")
+        ec, out = _invoke_stdout("compare", str(old_pkg), str(new_pkg), "-o", "json=-")
         assert ec == 4
         outcomes = _sorted_outcomes(out)
         assert any(o[0] == "BREAKING" and o[1] == 1 for o in outcomes)
@@ -658,7 +658,7 @@ class TestVariantSelection:
         self._multi_variant_package(old_pkg)
         _write_package(new_pkg, new_libs)
 
-        ec, out = _invoke(
+        ec, out = _invoke_stdout(
             "compare",
             str(old_pkg),
             str(new_pkg),
