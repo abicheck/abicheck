@@ -298,6 +298,12 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
             # the tombstones the same PR added. Fixed once in the shared
             # `_warn`/`_fail` helpers.
             "tests/test_action_validate_inputs.py",
+            # `extra-args` was split unquoted with globbing on, so `*` in
+            # a checkout holding a file named `--format=json` injected that
+            # name as a flag. Executes run.sh and the check-target overlay
+            # step against a matching workspace, plus a repo_scan guard over
+            # every Action shell for an unquoted user-input expansion.
+            "tests/test_action_extra_args_noglob.py",
             # PR #1240: the same class one layer out -- the *workflow*
             # rather than a script it calls. Attacker-controlled free text
             # (a PR title/body/head ref, an issue or comment body) is

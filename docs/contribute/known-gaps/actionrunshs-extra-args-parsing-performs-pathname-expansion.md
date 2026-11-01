@@ -11,7 +11,7 @@ generated: false
 
 Index: [Known gaps](../known-gaps.md)
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** action/run.sh:2235 `set -- ${INPUT_EXTRA_ARGS:-}` and :3893 `CMD+=($INPUT_EXTRA_ARGS)` are unquoted, with no set -f around them. set -f appears only at :189 in _split_legacy_value.
+**Status (2026-10-31): CLOSED.** Fixed by hardening all four sites together, as this entry asked: `run.sh`'s `CMD` append, `_extra_args_options` (behind `_effective_format`, `_extra_args_has_write_flag` and `_extra_args_write_json_path`) and `_extra_args_names_label` all tokenize through one noglob splitter, `_extra_args_split`, so detection and invocation still agree token for token. `actions/check-target`'s overlay tokenizer was a fifth site and is fixed too. Pinned by `tests/test_action_extra_args_noglob.py`, which includes a `repo_scan` guard against any new unquoted user-input expansion. The history below is kept as written.
 
 `_effective_format()` (added by that PR),
 `_extra_args_has_write_flag()`, `_extra_args_write_json_path()`, and the

@@ -616,18 +616,16 @@ class TestBundleFactsLiveRouteReuse:
         # diff would also satisfy (CodeRabbit review).
         assert compared == {f"lib{name}.so" for name in MEMBERS[:-1]}
 
-        # The damaged artifact is filtered out by `discover_shared_libraries`
-        # before matching, so on *this* route it is NOT_SUPPLIED on the scope
-        # record -- deliberately not `extraction_failures`, which only
-        # receives a member that was discovered and then failed extraction
-        # (the sibling case the next test covers). Asserted as the exact
-        # state rather than "absent somewhere", since absence alone cannot
-        # distinguish a recorded gap from a silently dropped member.
+        # The damaged artifact is discovered by the live fan-out's rule (a
+        # `lib*.so` name is a member, as on `compare OLD_DIR NEW_DIR`), so it
+        # reaches extraction, fails there, and is an explicit FAILED member
+        # with its reason -- never an empty success, and no longer silently
+        # filtered out as NOT_SUPPLIED by a stored-route-only native walk.
         states = {m.member: m for m in result.scope_record.members}
-        assert states[damaged].state.value == "not_supplied"
-        assert states[damaged].old_present and not states[damaged].new_present
-        # Never a proven removal: NEW's inventory is unproven (ADR-065 D2).
-        assert "unmatched, not removed" in states[damaged].reason
+        assert states[damaged].state.value == "failed"
+        assert states[damaged].old_present and states[damaged].new_present
+        assert damaged in result.extraction_failures
+        assert any(damaged in err for err in result.analysis_errors)
         for name in MEMBERS[:-1]:
             assert states[f"lib{name}.so"].state.value == "available"
 

@@ -1,6 +1,6 @@
 # A stored `BundleFacts` operand pairs versioned member names on one side only
 
-**Status (recorded 2026-10-23): OPEN.** Hygiene.
+**Status (2026-10-31): CLOSED.** The NEW side of a stored comparison is discovered by the live fan-out's own rule, and stored facts are re-keyed on load by `build_match_map`'s canonical key (`facts_keyed_by_match_key`). Stored/live now pairs exactly what live/live pairs, for versioned, unversioned and mixed names (`tests/test_cli_compare_stored_versioned_member_pairing.py`). That CLI test replaces the in-process one named under "Test that pins it". Root cause, corrected: on real binaries the CLI capture already keyed canonically; the stored route found no member because it ran its own native-only discovery of NEW.
 
 ## Evidence
 

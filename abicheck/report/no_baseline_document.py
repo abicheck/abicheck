@@ -287,7 +287,7 @@ def suppression_rule_label(
 
     Every projection that shows a label separately from a reason routes
     through here (the Markdown table's "Suppressed by" column, and
-    ``no_baseline_render._suppression_justification`` for SARIF and JUnit),
+    ``report.suppression_justification`` for SARIF and JUnit),
     so a fourth call site cannot quietly form its own opinion. The failure
     this prevents is a reason printed twice, once under a heading claiming
     it is a rule label (Codex review, P2, twice).
