@@ -386,8 +386,6 @@ def is_content_recognized_compare_input(path: Path) -> bool:
     """
     if not path.is_file():
         return False
-    for classifier in _CONTENT_PIPELINE:
-        result = classifier.accepts(path)
-        if result is not None:
-            return result
-    return False
+    # The first classifier with an opinion decides (the last one always has).
+    verdicts = (classifier.accepts(path) for classifier in _CONTENT_PIPELINE)
+    return next((v for v in verdicts if v is not None), False)

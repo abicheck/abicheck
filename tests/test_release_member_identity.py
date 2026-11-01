@@ -420,3 +420,26 @@ def test_a_member_that_cannot_be_stat_ed_is_unreadable(
 
     assert set(unreadable) == {"liblocked.so"}
     assert "liblocked.so" in unreadable["liblocked.so"]
+
+
+@pytest.mark.parametrize(
+    ("make", "expected"),
+    [
+        (lambda d: d / "missing.so", False),
+        (lambda d: (d / "dir.so").mkdir() or d / "dir.so", False),
+        (
+            lambda d: (
+                (d / "libn.so").write_bytes(b"\x7fELF" + b"\0" * 60) and d / "libn.so"
+            ),
+            True,
+        ),
+        (lambda d: (d / "text.so").write_text("plain\n") and d / "text.so", False),
+    ],
+    ids=["missing", "directory", "elf_magic", "text"],
+)
+def test_content_recognition_needs_a_file_with_recognized_content(
+    tmp_path: Path, make: Callable[[Path], Path], expected: bool
+) -> None:
+    from abicheck.classify import is_content_recognized_compare_input
+
+    assert is_content_recognized_compare_input(make(tmp_path)) is expected
