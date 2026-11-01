@@ -124,10 +124,15 @@ _STARRED_CALL_ALLOWLIST: dict[tuple[str, str], str] = {
     ("abicheck/workflows/release_member_request.py", "member_request"): (
         "ReleaseMemberCompareRequest: a typed request, no Fact-bridged fields."
     ),
-    ("abicheck/policy/exit_decision_precedence.py", "_dominant_decision"): (
+    ("abicheck/policy/exit_rank.py", "_dominant_decision"): (
         "ExitDecision: plain int contributions and a reason tuple, no "
         "Fact[T]-bridged field; the mapping is every contribution the prior "
         "decision carries, read off its own dataclass fields."
+    ),
+    ("abicheck/policy/exit_rank.py", "resolve_ranked"): (
+        "ExitDecision: plain int contributions, no Fact[T]-bridged field; the "
+        "mapping is outranked dominant axes' contribution fields, named by "
+        "_DOMINANT_FIELD."
     ),
     (
         "abicheck/model/semantic_ir_function_signature.py",

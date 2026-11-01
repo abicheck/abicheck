@@ -1,13 +1,15 @@
 """Pins today's exit code for a per-axis matrix on each precedence path.
 
 Known gap ``scalar-and-release-compare-still-fold-the-exit-code-in-two``: the
-scalar ``compare`` exit and the directory/package release exit are decided by
-two resolvers that share some axes and differ on others. Before either is
-moved onto a shared owner, these tests record what each path returns for every
-combination of its inputs. The expected values are written out literally from
-the precedence documented in ``policy/exit_decision_precedence.py`` (not
-computed by the helpers under test), so a change in either path's precedence
-fails here instead of silently moving an exit code.
+scalar ``compare`` exit and the directory/package release exit are two ladders
+that both delegate their dominant axes to one rank table
+(``policy/exit_rank.py``, tested on its own in ``test_exit_rank_table.py``).
+These tests record what each ladder returns for every combination of its
+inputs, and ``TestOneMemberCellDiff`` pins the cells where the two disagree at
+N=1. The expected values are written out literally from the precedence
+documented in ``policy/exit_decision_precedence.py`` (not computed by the
+helpers under test), so a change in either path's precedence fails here
+instead of silently moving an exit code.
 """
 
 from __future__ import annotations
@@ -233,3 +235,163 @@ class TestEvidenceOwnerKeepsOrdinaryContributions:
         assert decision.code == 7
         assert decision.reasons == (ExitReason.EVIDENCE_CONTRACT_ERROR,)
         assert decision.compatibility_contribution == 4
+
+
+def _scalar_with_contributions(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    severity: bool,
+    compat: int,
+    coverage: int,
+    assurance: int,
+    additions: int,
+    unused: int,
+    evidence: bool,
+    budget: bool,
+):
+    """The scalar ladder with each fold axis's derived contribution pinned."""
+    import dataclasses
+
+    from abicheck.policy import (
+        acknowledgment_gate,
+        analysis_assurance,
+        contract_coverage_exit,
+        severity as severity_mod,
+        unused_rules_gate,
+    )
+
+    monkeypatch.setattr(
+        contract_coverage_exit, "coverage_exit_floor", lambda r: coverage
+    )
+    monkeypatch.setattr(
+        analysis_assurance,
+        "analysis_assurance_exit_contribution",
+        lambda r, require_complete=False: assurance,
+    )
+    monkeypatch.setattr(
+        acknowledgment_gate, "additions_review_exit_contribution", lambda r: additions
+    )
+    monkeypatch.setattr(
+        unused_rules_gate,
+        "unused_rules_exit_contribution",
+        lambda r, today=None: unused,
+    )
+    gate = EffectiveGate.from_severity(None)
+    verdict = {0: Verdict.NO_CHANGE, 2: Verdict.API_BREAK, 4: Verdict.BREAKING}.get(
+        compat, Verdict.NO_CHANGE
+    )
+    if severity:
+        gate = dataclasses.replace(gate, severity=object())
+        monkeypatch.setattr(severity_mod, "compute_exit_code", lambda *a, **k: compat)
+    result = DiffResult(
+        old_version="1.0",
+        new_version="2.0",
+        library="libtest.so",
+        changes=[],
+        verdict=verdict,
+        evidence_contract_error=evidence,
+        budget_overflow=budget,
+    )
+    return resolve_compare_exit_decision_with_abort_axes(result, gate)
+
+
+_N1_CELLS = [
+    (severity, compat, coverage, assurance, additions, unused, evidence, budget)
+    for severity in (False, True)
+    for compat in ((0, 1, 2, 3, 4) if severity else (0, 2, 4))
+    for coverage, assurance, additions, unused, evidence, budget in itertools.product(
+        (0, 1), (0, 1), (0, 1), (0, 1), (False, True), (False, True)
+    )
+]
+
+
+class TestOneMemberCellDiff:
+    """Every N=1 cell of the two ladders, compared field for field.
+
+    The release ladder is given the same contributions with its release-only
+    axes empty (not comparable, removed library, operational error, scope).
+    The two ladders agree on every cell except one family: a budget overflow
+    the evidence contract does not outrank. The release ladder has no budget
+    input, so it cannot express the scalar's exit 5. That family awaits a
+    maintainer ruling under ADR-064 (known gap
+    ``scalar-and-release-compare-still-fold-the-exit-code-in-two``); this
+    test pins it so the diff can neither grow nor silently close.
+    """
+
+    @pytest.mark.parametrize(
+        (
+            "severity",
+            "compat",
+            "coverage",
+            "assurance",
+            "additions",
+            "unused",
+            "evidence",
+            "budget",
+        ),
+        _N1_CELLS,
+    )
+    def test_cell(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        severity: bool,
+        compat: int,
+        coverage: int,
+        assurance: int,
+        additions: int,
+        unused: int,
+        evidence: bool,
+        budget: bool,
+    ) -> None:
+        scalar = _scalar_with_contributions(
+            monkeypatch,
+            severity=severity,
+            compat=compat,
+            coverage=coverage,
+            assurance=assurance,
+            additions=additions,
+            unused=unused,
+            evidence=evidence,
+            budget=budget,
+        )
+        release = resolve_release_exit_decision(
+            not_comparable=False,
+            severity_scheme_active=severity,
+            verdict_or_severity_contribution=compat,
+            contract_coverage_contribution=coverage,
+            analysis_assurance_contribution=assurance,
+            additions_review_contribution=additions,
+            unused_rules_contribution=unused,
+            evidence_contract_error_contribution=7 if evidence else 0,
+        )
+        if budget and not evidence:
+            # The pinned disagreement: scalar exits 5, release has no axis.
+            assert (scalar.code, scalar.reasons) == (5, (ExitReason.BUDGET_OVERFLOW,))
+            assert release.code == max(compat, coverage, assurance, additions, unused)
+            assert release.budget_overflow_contribution == 0
+        else:
+            assert scalar == release
+
+    def test_cell_count(self) -> None:
+        # 2 schemes' verdict codes (3 legacy + 5 severity) x 2^6 binary axes.
+        assert len(_N1_CELLS) == 512
+        assert sum(1 for c in _N1_CELLS if c[7] and not c[6]) == 128
+
+
+class TestNotComparableAtOneMember:
+    """The scalar comparability refusal and a one-member release refusal are
+    the same rank-table axis: exit 16, reason ``not_comparable`` only."""
+
+    def test_scalar_refusal_equals_release_refusal(self) -> None:
+        from abicheck.policy.exit_decision_precedence import (
+            resolve_compare_not_comparable_exit_decision,
+        )
+
+        scalar = resolve_compare_not_comparable_exit_decision()
+        release = resolve_release_exit_decision(
+            not_comparable=True,
+            severity_scheme_active=False,
+            verdict_or_severity_contribution=0,
+        )
+        assert (scalar.code, scalar.reasons) == (16, (ExitReason.NOT_COMPARABLE,))
+        assert scalar == release

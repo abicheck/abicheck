@@ -141,17 +141,6 @@ def _safe_write_output(output: Path, text: str) -> None:
 # collides with ``compare``'s documented "2 = source break"; this remaps it.
 _EXIT_USAGE_ERROR = 64
 
-# Exit code for a single-library ``compare`` whose OLD/NEW snapshots failed
-# ADR-050 D2's comparability gate (a ProfileMismatchError/ScopeMismatchError
-# — the two snapshots were not extracted under a comparable contract, so no
-# verdict was ever produced). Identical across the legacy (0/2/4) and
-# severity-aware (0/1/2/4) single-library schemes, since the gate runs before
-# either classification, and deliberately not ``8`` — that already means
-# ``gate.fail_on_removed_library`` in the release/multi-library table. ``16``
-# continues that table's own doubling pattern one step further and sits
-# outside every existing compare exit code in all three tables.
-_EXIT_NOT_COMPARABLE = 16
-
 # Exit code for an invalid invocation (bad arguments, unknown option, invalid
 # option value, unreadable/unrecognised input path). Chosen as sysexits.h
 # ``EX_USAGE`` so it sits *outside* the compare/compat result space
@@ -159,17 +148,6 @@ _EXIT_NOT_COMPARABLE = 16
 # from a real ABI verdict. Click defaults ``UsageError`` to exit 2, which
 # collides with ``compare``'s documented "2 = source break"; this remaps it.
 _EXIT_USAGE_ERROR = 64
-
-# Exit code for a single-library ``compare`` whose OLD/NEW snapshots failed
-# ADR-050 D2's comparability gate (a ProfileMismatchError/ScopeMismatchError
-# — the two snapshots were not extracted under a comparable contract, so no
-# verdict was ever produced). Identical across the legacy (0/2/4) and
-# severity-aware (0/1/2/4) single-library schemes, since the gate runs before
-# either classification, and deliberately not ``8`` — that already means
-# ``gate.fail_on_removed_library`` in the release/multi-library table. ``16``
-# continues that table's own doubling pattern one step further and sits
-# outside every existing compare exit code in all three tables.
-_EXIT_NOT_COMPARABLE = 16
 
 
 #: Retired root commands whose replacement the error message names.

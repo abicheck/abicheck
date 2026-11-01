@@ -142,6 +142,48 @@ GUARD_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="gate.dominant_axis_precedence_drift",
+        invariant=(
+            "Every `compare` exit ladder (scalar pair, directory/package "
+            "release) ranks its dominant axes -- not_comparable 16, proven "
+            "removed library 8, evidence contract 7, budget overflow 5 -- "
+            "through the one rank table `policy/exit_rank.COMPARE_EXIT_RANK`: "
+            "the highest-ranked active axis decides the code and is the only "
+            "reason, the ordinary fold is kept, and code == max(contributions). "
+            "A ladder only decides which axes are active. At N=1 the two "
+            "ladders return the identical ExitDecision on every cell both can "
+            "express."
+        ),
+        # #1571 gave the evidence-contract precedence one owner; the rest of
+        # the dominant order was still written out twice, as two if-ladders.
+        fixed_by=(1571,),
+        seed_tests=(
+            "tests/test_exit_rank_table.py",
+            "tests/test_exit_precedence_matrix.py",
+        ),
+        # `()`: the seed tests call the policy resolvers directly.
+        public_surfaces=(),
+        axes={
+            "cardinality": ("scalar", "one_member_release"),
+            "scheme": ("legacy", "severity"),
+            "dominant_axes": ("none", "every_subset_of_four"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "At N=1 the ladders still differ on one cell family: a "
+                    "budget overflow (5) without an evidence-contract error "
+                    "decides the scalar exit, and the release ladder has no "
+                    "budget input. Awaiting a maintainer ruling under ADR-064; "
+                    "until then the scalar path cannot call the release "
+                    "ladder directly."
+                ),
+                reference="docs/contribute/known-gaps/scalar-and-release-compare-still-fold-the-exit-code-in-two.md",
+                canary_test="tests/test_exit_precedence_matrix.py",  # TestOneMemberCellDiff
+            ),
+        ),
+    ),
+    BugClass(
         id="guard.differential_test_shares_state_with_itself",
         invariant=(
             "A test whose claim is that two configurations AGREE must "

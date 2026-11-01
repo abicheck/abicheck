@@ -478,7 +478,7 @@ class TestNoContributionPassedToADominantDecisionIsSilentlyDropped:
     def _contribution_keywords() -> list[str]:
         import inspect
 
-        from abicheck.policy.exit_decision_precedence import _dominant_decision
+        from abicheck.policy.exit_rank import _dominant_decision
 
         return [
             name
@@ -496,7 +496,7 @@ class TestNoContributionPassedToADominantDecisionIsSilentlyDropped:
         self, dominant_code: int
     ) -> None:
         from abicheck.policy.exit_decision import ExitReason
-        from abicheck.policy.exit_decision_precedence import _dominant_decision
+        from abicheck.policy.exit_rank import _dominant_decision
 
         for keyword in self._contribution_keywords():
             # `NOT_COMPARABLE`'s own field is not among the keywords, so it
@@ -522,7 +522,7 @@ class TestNoContributionPassedToADominantDecisionIsSilentlyDropped:
         refused.
         """
         from abicheck.policy.exit_decision import ExitReason
-        from abicheck.policy.exit_decision_precedence import _dominant_decision
+        from abicheck.policy.exit_rank import _dominant_decision
 
         for keyword in self._contribution_keywords():
             with pytest.raises(ValueError, match="must strictly exceed"):

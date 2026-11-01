@@ -213,7 +213,7 @@ plus the exit-64 dispatch already surfaces it.
 | `5` | `BUDGET_OVERFLOW` | `abicheck/cli_compare_fold.py:833` `sys.exit(5)` | **AGREES** |
 | `7` | `EVIDENCE_CONTRACT_ERROR` | `policy/exit_decision_precedence.py:220` `EXIT_EVIDENCE_CONTRACT_ERROR = 7` | **AGREES** |
 | `8` | removed library | checked ahead of the coverage fallback | **AGREES** |
-| `16` | `NOT_COMPARABLE` | `frontends/cli/runtime.py:206` `_EXIT_NOT_COMPARABLE = 16` | **AGREES** |
+| `16` | `NOT_COMPARABLE` | `policy/exit_rank.py` `COMPARE_EXIT_RANK` (`NOT_COMPARABLE`, 16), via `resolve_compare_not_comparable_exit_decision` | **AGREES** |
 | `64` | usage error | `frontends/cli/runtime.py:195` | **AGREES** |
 
 Values all agree. **Four justification comments cite deleted modules**:

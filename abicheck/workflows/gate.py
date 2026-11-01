@@ -102,6 +102,7 @@ from ..policy.exit_decision_precedence import (
     EXIT_EVIDENCE_CONTRACT_ERROR,
     compare_assurance_notice_base_exit,
     resolve_compare_exit_decision_with_abort_axes,
+    resolve_compare_not_comparable_exit_decision,
     resolve_release_exit_decision,
 )
 from ..policy.gate_decision import gate_decision_for_result
@@ -225,6 +226,7 @@ __all__ = [
     "release_evidence_contract_contribution",
     "resolve_compare_exit_decision",
     "resolve_compare_exit_decision_with_abort_axes",
+    "resolve_compare_not_comparable_exit_decision",
     "compare_assurance_notice_base_exit",
     "resolve_exit_decision",
     "release_assurance_diagnostic",
