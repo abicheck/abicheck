@@ -331,13 +331,17 @@ def test_a_run_without_a_ledger_reports_no_provenance_rather_than_faking_one() -
         assert "properties" not in suppression, (
             "no ledger entry means no structured record to publish"
         )
-        assert suppression["justification"] == "audit-waiver-17"
+        assert suppression["justification"] == (
+            "suppressed by an abicheck --suppress rule: audit-waiver-17"
+        )
 
     junit = _junit_suite(render_no_baseline(result, "junit")[0])
     skipped = list(junit.iter("skipped"))
     assert skipped, "a suppressed finding must still be a skipped JUnit case"
     for element in skipped:
-        assert element.attrib["message"] == "suppressed: audit-waiver-17"
+        assert element.attrib["message"] == (
+            "suppressed: suppressed by an abicheck --suppress rule: audit-waiver-17"
+        )
         assert "suppression rule:" not in (element.text or ""), (
             "the structured block belongs only to a run that recorded one"
         )
@@ -364,10 +368,19 @@ def test_a_rule_stating_neither_label_nor_reason_still_reads_as_suppressed() -> 
         for r in sarif["runs"][0]["results"]
         if r.get("suppressions")
     ]
-    assert justifications == ["suppressed by an abicheck --suppress rule"] * len(
-        justifications
-    )
     assert justifications
+    # The rule states nothing, so its derived id (the JSON record's join key)
+    # and its source are what name it.
+    rule_ids = {
+        r["suppressions"][0]["properties"]["rule_id"]
+        for r in sarif["runs"][0]["results"]
+        if r.get("suppressions")
+    }
+    assert len(rule_ids) == 1
+    assert justifications == [
+        f"suppressed by an abicheck --suppress rule (rule {rule_ids.pop()}; "
+        "inline suppression rule)"
+    ] * len(justifications)
 
     markdown = render_no_baseline(result, "markdown")[0]
     assert "(rule gave no label)" in markdown
@@ -380,16 +393,21 @@ def test_a_rule_stating_neither_label_nor_reason_still_reads_as_suppressed() -> 
         pytest.param(
             "audit-waiver-17",
             "temporary vendor debug hook",
-            "audit-waiver-17: temporary vendor debug hook",
+            "audit-waiver-17: temporary vendor debug hook (from waivers.yaml)",
             id="both",
         ),
         pytest.param(
             None,
             "temporary vendor debug hook",
-            "temporary vendor debug hook",
+            "temporary vendor debug hook (from waivers.yaml)",
             id="reason-only",
         ),
-        pytest.param("audit-waiver-17", None, "audit-waiver-17", id="label-only"),
+        pytest.param(
+            "audit-waiver-17",
+            None,
+            "audit-waiver-17 (from waivers.yaml)",
+            id="label-only",
+        ),
     ],
 )
 def test_a_suppression_justification_never_repeats_one_field_as_two(

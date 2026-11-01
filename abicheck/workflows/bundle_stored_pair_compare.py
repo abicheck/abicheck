@@ -234,15 +234,24 @@ def compare_stored_bundle_facts_pair(
     from ..serialization import load_bundle_facts
     from ..storage.snapshot_encode import same_persisted_content
     from .artifact.execute import enforce_requested_depth
-    from .bundle_facts_capture import bundle_snapshot_from_facts
+    from .bundle_facts_capture import (
+        bundle_snapshot_from_facts,
+        facts_keyed_by_match_key,
+    )
     from .bundle_facts_compare import compare_bundle_from_facts
     from .compare_policy import compare_snapshots
 
-    old_facts = load_bundle_facts(
-        old_facts_path, max_json_object_nodes=old_max_json_object_nodes
+    # Both sides keyed by the live match key, so two documents pair the
+    # same members however each was captured.
+    old_facts = facts_keyed_by_match_key(
+        load_bundle_facts(
+            old_facts_path, max_json_object_nodes=old_max_json_object_nodes
+        )
     )
-    new_facts = load_bundle_facts(
-        new_facts_path, max_json_object_nodes=new_max_json_object_nodes
+    new_facts = facts_keyed_by_match_key(
+        load_bundle_facts(
+            new_facts_path, max_json_object_nodes=new_max_json_object_nodes
+        )
     )
 
     # Codex review, PR #1060, fresh evidence after the mismatch check just

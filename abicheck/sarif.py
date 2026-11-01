@@ -43,6 +43,7 @@ from abicheck.policy.classification import (
     impact_for,
     policy_for,
 )
+from abicheck.policy.disposition_close import ledger_for
 from abicheck.policy.severity import missing_contract_exit_code
 from abicheck.report.disposition_audit import disposition_audit_dict_reusing_document
 from abicheck.report.envelope import ReportEnvelope, resolved_document, resolved_gate
@@ -53,6 +54,7 @@ from abicheck.report.sarif_properties import (
     _contract_properties,
     _reachability_and_impact_properties,
 )
+from abicheck.report.suppression_justification import sarif_suppression
 from abicheck.report.use_case_impact_render import use_cases_by_finding_for
 from abicheck.report.view import (
     apply_show_only,
@@ -849,6 +851,7 @@ def to_sarif(
     # are new. Not run through `show_only`/root-cause grouping: those are
     # display filters for the *active* result set, and a suppressed finding
     # is definitionally outside it.
+    ledger = ledger_for(result)
     for change in result.suppressed_changes:
         rule_id = change.kind.value
         if rule_id not in rules_seen:
@@ -860,15 +863,10 @@ def to_sarif(
             finding=finding_by_id.get(id(change)),
             today=_resolved_today,
         )
+        # The run's own D3 record (the JSON `suppressed_changes[].rule`).
+        rule = ledger.rule_for(change)
         suppressed_result["suppressions"] = [
-            {
-                "kind": "external",
-                "justification": (
-                    f"suppressed by --suppress rule: {change.suppression_rule}"
-                    if change.suppression_rule
-                    else "suppressed by --suppress rule"
-                ),
-            }
+            sarif_suppression(change, None if rule is None else rule.to_dict())
         ]
         sarif_results.append(suppressed_result)
 

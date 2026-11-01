@@ -274,6 +274,10 @@ def _compare_stored_against_live(
                     detect_extractor,
                 )
             )
+            # The live fan-out walks an extracted package's shared libraries
+            # but collects every compare input from a plain directory; the
+            # NEW side here discovers by the same rule.
+            new_packaged = is_package(request.new_input)
             if header_dir is not None and request.depth != "binary":
                 if not headers:
                     headers = [header_dir]
@@ -284,7 +288,9 @@ def _compare_stored_against_live(
             per_library_compile: dict[str, Any] | None = None
             if request.bundle_facts_library_manifest is not None:
                 new_library_paths = known_libraries_for_new_side(
-                    lib_dir, include_private_dso=include_private_dso
+                    lib_dir,
+                    include_private_dso=include_private_dso,
+                    packaged=new_packaged,
                 )
                 overrides = load_bundle_facts_library_overrides(
                     Path(request.bundle_facts_library_manifest),
@@ -315,6 +321,7 @@ def _compare_stored_against_live(
                 lang=request.lang,
                 lang_explicit=bool(request.lang_explicit),
                 include_private_dso=include_private_dso,
+                new_packaged=new_packaged,
                 manifest_path=request.manifest_path,
                 system_providers=system_providers or None,
                 cohorts=cohorts or None,
