@@ -544,7 +544,7 @@ class TestIncompleteScopePolicyIsInTheDigest:
 
 class TestExtractionErrorSurvivesAggregation:
     def test_a_stored_live_extraction_failure_aggregates_to_four(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, tmp_path: Path
     ) -> None:
         """Codex review, twenty-third round: a stored/live run whose NEW
         member failed extraction beside a clean sibling exits 4 through the
@@ -554,14 +554,8 @@ class TestExtractionErrorSurvivesAggregation:
         from test_release_scope_bundle import _lib
         from test_release_scope_completeness import _facts_file, _write
 
-        import abicheck.extract.packages as package
         from abicheck.cli import main
 
-        monkeypatch.setattr(
-            package,
-            "discover_shared_libraries",
-            lambda d, include_private=False: sorted(Path(d).glob("*.json")),
-        )
         libs = {
             "libok.so": _lib("libok.so", exports=("ok_fn",)),
             "libbad.so": _lib("libbad.so", exports=("bad_fn",)),
@@ -569,7 +563,9 @@ class TestExtractionErrorSurvivesAggregation:
         old = _facts_file(tmp_path, "old.bundlefacts.json", libs)
         new_dir = tmp_path / "new"
         _write(new_dir, "libok.so.json", libs["libok.so"])
-        (new_dir / "libbad.so.json").write_bytes(b"{not json")
+        # Named like a library, so NEW's live discovery rule takes it as a
+        # member whose extraction then fails (the damaged-artifact shape).
+        (new_dir / "libbad.so").write_bytes(b"{not json")
         reports = tmp_path / "reports"
         reports.mkdir()
         result = CliRunner().invoke(

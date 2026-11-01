@@ -77,6 +77,9 @@ FAMILIES: dict[str, Family] = {
                 "tests/test_metamorphic_snapshot_relations.py",
                 "tests/test_metamorphic_source_relations.py",
                 "tests/test_live_stored_census_parity.py",
+                # Stored-vs-live release member pairing against the live/live
+                # CLI run, over member naming x capture route.
+                "tests/test_cli_compare_stored_versioned_member_pairing.py",
             ),
         ),
         Family(
@@ -385,6 +388,7 @@ _F2 = (
     # A release member and its scalar pair disagreed when a header existed on one
     # side only; H2's asymmetric-header cell pins the route parity.
     "evidence.per_side_operand_divergence",
+    "evidence.stored_live_route_member_divergence",
 )
 _F3 = (
     "storage.digest_answers_the_wrong_question",

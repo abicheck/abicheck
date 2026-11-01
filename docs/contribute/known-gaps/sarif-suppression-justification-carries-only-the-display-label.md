@@ -11,7 +11,7 @@ generated: false
 
 Index: [Known gaps](../known-gaps.md)
 
-**Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** The cli_scan_baseline.py half is moot because the file was deleted. The sarif.py half is still open: abicheck/sarif.py:963 still interpolates only change.suppression_rule ('suppressed by --suppress rule: ...') and never reads DispositionLedger.rule_for.
+**Status (2026-10-31): CLOSED.** `sarif.py` reads `DispositionLedger.rule_for` through `report/suppression_justification.py`, shared with the audit's SARIF and JUnit. The justification names the rule, reason, source (file, inline rule or abicheck policy) and expiry, and `properties` carry the JSON report's own rule record (`tests/test_sarif_suppression_disposition_sources.py`). The `cli_scan_baseline.py` half was moot.
 
 
 ADR-067 D3 says a disposition keeps the rule that made it — rule id, source
