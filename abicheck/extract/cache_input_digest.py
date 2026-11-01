@@ -47,12 +47,14 @@ from pathlib import Path
 
 import abicheck.deadline as deadline
 
-from .cache_header_scan import iter_cache_input_files
+from . import cache_digest_store
+from .cache_header_scan import iter_cache_input_rel_parts
 
 __all__ = [
     "compiler_search_dirs",
     "env_include_material",
     "file_digest",
+    "flush_digest_store",
     "parse_include_search_dirs",
     "search_dirs_material",
     "tree_digest",
@@ -63,6 +65,11 @@ _LOCK = threading.Lock()
 #: ``path -> (stat signature, digest)``. Process-wide: the signature check makes
 #: a stale entry unreachable, so the memo never needs a run scope to be correct.
 _FILE_MEMO: dict[str, tuple[tuple[int, ...], str]] = {}
+
+#: Entries added since the on-disk store was last written.
+_DIRTY: dict[str, tuple[tuple[int, ...], str]] = {}
+#: Whether the on-disk store has been merged into :data:`_FILE_MEMO`.
+_STORE_STATE = {"loaded": False}
 
 #: ``(tool identity, cpp) -> search dirs``.
 _SEARCH_DIR_MEMO: dict[tuple[str, bool], tuple[str, ...]] = {}
@@ -85,12 +92,24 @@ def file_digest(path: Path | str) -> str:
     fold their own marker for that case.
     """
     key = os.fspath(path)
+    # Fast path: a stat-validated memo hit needs no open/read.
+    try:
+        pre = os.stat(key)
+    except OSError:
+        pre = None
+    if pre is not None and stat.S_ISREG(pre.st_mode):
+        _load_store_once()
+        with _LOCK:
+            hit = _FILE_MEMO.get(key)
+        if hit is not None and hit[0] == _signature(pre):
+            return hit[1]
     fd = os.open(key, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0))
     try:
         st = os.fstat(fd)
         if not stat.S_ISREG(st.st_mode):
             return "nonregular"
         sig = _signature(st)
+        _load_store_once()
         with _LOCK:
             hit = _FILE_MEMO.get(key)
         if hit is not None and hit[0] == sig:
@@ -105,10 +124,32 @@ def file_digest(path: Path | str) -> str:
     if time.time_ns() - st.st_mtime_ns > _RACY_WINDOW_NS:
         with _LOCK:
             _FILE_MEMO[key] = (sig, digest)
+            _DIRTY[key] = (sig, digest)
     return digest
 
 
-def _marked_digest(path: Path) -> str:
+def _load_store_once() -> None:
+    """Merge the on-disk digest store into the memo, once per process."""
+    if _STORE_STATE["loaded"]:
+        return
+    entries = cache_digest_store.load_entries()
+    with _LOCK:
+        if _STORE_STATE["loaded"]:
+            return
+        for k, v in entries.items():
+            _FILE_MEMO.setdefault(k, v)
+        _STORE_STATE["loaded"] = True
+
+
+def flush_digest_store() -> None:
+    """Persist entries memoized since the last flush (best-effort)."""
+    with _LOCK:
+        pending = dict(_DIRTY)
+        _DIRTY.clear()
+    cache_digest_store.save_entries(pending)
+
+
+def _marked_digest(path: Path | str) -> str:
     try:
         return file_digest(path)
     except OSError:
@@ -135,15 +176,18 @@ def tree_digest(root: Path | str) -> str:
         return "unreadable"
     h = hashlib.sha256()
     try:
-        children = iter_cache_input_files(p)
+        children = iter_cache_input_rel_parts(p)
     except OSError:
         return "unreadable"
-    for child in children:
-        rel = os.path.relpath(child, p)
-        h.update(rel.encode("utf-8", "surrogateescape"))
+    base = os.fspath(p)
+    sep = os.sep
+    join = os.path.join
+    for parts in children:
+        h.update(sep.join(parts).encode("utf-8", "surrogateescape"))
         h.update(b"\x00")
-        h.update(_marked_digest(child).encode())
+        h.update(_marked_digest(join(base, *parts)).encode())
         h.update(b"\x00")
+    flush_digest_store()
     return "dir:" + h.hexdigest()
 
 

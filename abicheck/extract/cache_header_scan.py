@@ -314,6 +314,20 @@ def iter_cache_header_files(directory: Path) -> list[Path]:
     return [directory.joinpath(*rel) for rel in ordered]
 
 
+def iter_cache_input_rel_parts(directory: Path) -> list[tuple[str, ...]]:
+    """:func:`iter_cache_input_files` as relative path parts, same order.
+
+    For a caller that needs the relative spelling (the content digest folds
+    ``os.sep.join(parts)``) without building and re-relativizing one ``Path``
+    per file, which dominated a warm system-include digest.
+    """
+    rels = _cache_header_rel_parts(directory, all_files=True)
+    if os.path.normcase("A") == "A":
+        return sorted(rels)  # normcase is the identity here (POSIX)
+    normcase = os.path.normcase
+    return sorted(rels, key=lambda rel: tuple(normcase(part) for part in rel))
+
+
 def iter_cache_input_files(directory: Path) -> list[Path]:
     """Every non-directory entry under *directory* a parse could ``#include``.
 
