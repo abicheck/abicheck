@@ -93,7 +93,7 @@ CONFIG_BUG_CLASSES: tuple[BugClass, ...] = (
             "accepted value yields the same rendered result fields as the CLI "
             "run."
         ),
-        fixed_by=(1889,),
+        fixed_by=(1890,),
         seed_tests=(
             "tests/test_typed_required_symbols_route_parity.py",
             # H2 cell: axis `required_symbols_file` (CLI vs typed API, whole
