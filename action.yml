@@ -665,14 +665,13 @@ inputs:
       carries one run per library, each stamped with its release member;
       review is a release digest rendered from the release JSON). compare
       against a stored BundleFacts baseline (old-library naming such a
-      document, new-library a directory/package): json or markdown only --
-      that driver renders no other format. This one narrowing
-      is NOT pre-checked before the dependency install, unlike every other
-      row here: deciding it needs the document's own content (see the
-      `old-library` input), and neither re-implementing that classifier in
-      shell nor reading an untrusted document at preflight is acceptable, so
-      `-o junit=...` on this shape fails in the CLI instead. Tracked in
-      docs/contribute/known-gaps.md. compare, audit-only shape (old-library/abi-baseline both
+      document, or a local abi-baseline file): json, markdown, junit, oneline
+      or html -- that driver renders no sarif or review. Pre-checked before
+      the dependency install by the CLI's own classifier, run from this
+      Action's source tree (action/stored_bundle_facts_probe.py, bounded
+      reads only); on a runner whose pre-installed Python is older than
+      3.11 that check is skipped with a notice and the CLI rejects the
+      format after install. compare, audit-only shape (old-library/abi-baseline both
       omitted): json, markdown, sarif, junit, or oneline — html and review
       are two-sided-report renderers with no audit-only equivalent and are
       rejected with an error. html is also supported by deps-tree/deps-compare

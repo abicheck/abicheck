@@ -573,11 +573,6 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 **Status (2026-10-22): PARTIAL.** The physical move and split landed: the detectors are in `compare/internal_leak.py`, the layout walk in `compare/internal_leak_paths.py`, the call-graph walk in `compare/internal_leak_graph.py`, and the subject classification in `compare/internal_leak_names.py`. Each is under the 800-line cap, and nothing re-exports from the old root path. Still open: `tests/test_internal_leak.py` (1933 lines) remains above the 1200-line test cap on its `no_growth` record.  
 `hygiene` — the leak rule is owned by `compare/` as four modules, but its main test module is still a `no_growth` grandfather and has not yet been split by behavior axis. [Full write-up](known-gaps/internal-leak-is-now-four-compare-modules-but-its-test.md)
 
-#### A stored-`BundleFacts` baseline's narrower format set is not pre-checked by the Action
-
-**Status (2026-10-23): PARTIAL.** `action/validate-inputs.sh` now takes the release set from the generated `action/cli-surface.txt` (`release-compare`), and the generator also emits the stored set (`stored-bundle-facts`, from `STORED_RELEASE_FORMATS`), so both sets have one source. Still open: the stored narrowing itself is not applied before install, because deciding that an operand *is* a stored BundleFacts document needs `workflows/bundle_compare_operand.looks_like_stored_bundle_facts` (a multi-probe, FIFO-safe reader), and a shell copy of it would be the second transcription ADR-070 forbids. The narrowing is enforced by the CLI after install.  
-`hygiene` — For a stored-`BundleFacts` baseline the Action checks the release allowlist before install but not the stored subset, so a format the stored driver cannot render fails late, not at input validation. [Full write-up](known-gaps/a-stored-bundlefacts-baselines-narrower-format-set-is-not-pre.md)
-
 #### `compare --bundle-facts-out` stays a `compare` flag because `dump` has no release fan-out
 
 **Status (re-verified 2026-10-09 at `456989f`): OPEN.** --bundle-facts-out is still a compare option (frontends/cli/options/bundle_facts_library_manifest.py, commands/compare.py), and no dump command offers a bundle-facts format/fan-out. The blocker is removed, but the dump fan-out is unwritten.  
