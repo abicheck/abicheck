@@ -1020,8 +1020,7 @@ class TestMsfParserExtended:
 
 class TestTpiParserExtended:
     def test_record_with_small_rec_len(self) -> None:
-        """A record with rec_len < 2 is truncated: the TPI stream is refused
-        (ADR-062 D15: a malformed PDB fails `debug`, never reads as empty)."""
+        """A record with rec_len < 2 is truncated: the TPI stream is refused."""
         # Build TPI header for 1 record
         ti_begin = 0x1000
         ti_end = 0x1001
@@ -1205,8 +1204,7 @@ class TestTypeDatabaseExtended:
         assert db.type_name(0x1000) == "<ti:0x1000>"
 
     def test_arglist_truncated_entries(self) -> None:
-        """An arglist whose count exceeds its data is a parse failure, not a
-        shorter argument list (ADR-062 D15)."""
+        """An arglist whose count exceeds its data is a parse failure."""
         # count=5 but only room for 2
         payload = struct.pack("<III", 5, 0x74, 0x74)
         db = self._make_db([(LF_ARGLIST, payload)])
