@@ -7,5 +7,4 @@
   directory, a package archive or a stored `ProjectSnapshot` package (`--variant ID`
   selects one of several variants). It
   writes the same document `compare OLD NEW --bundle-facts-out` writes for its
-  OLD side, through the same producer; that `compare` flag stays. A malformed project
-  config, named or discovered, is a usage error, as it is for `compare`.
+  OLD side, through the same producer; that `compare` flag stays.
