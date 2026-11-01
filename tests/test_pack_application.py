@@ -170,7 +170,7 @@ class TestAPackActuallyConfiguresTheRun:
             runner, pair, "-o", "json=-", "--pack", str(ignore_removals)
         )
         assert with_pack.exit_code == 0, with_pack.output
-        assert json.loads(with_pack.output)["verdict"] == "COMPATIBLE"
+        assert json.loads(with_pack.stdout)["verdict"] == "COMPATIBLE"
 
     # `test_a_policy_pack_changes_a_scan_against_the_same_way` used to live
     # here: it proved a policy pack changed `scan --against`'s verdict the
@@ -199,7 +199,7 @@ class TestAPackActuallyConfiguresTheRun:
         result = _compare(CliRunner(), pair, "-o", "json=-", "--pack", str(gate))
         assert result.exit_code == 0, result.output
         # The finding is still reported -- only the gate moved.
-        assert json.loads(result.output)["verdict"] == "BREAKING"
+        assert json.loads(result.stdout)["verdict"] == "BREAKING"
 
     def test_a_gate_pack_category_applies_alongside_a_configured_category(
         self, pair: tuple[Path, Path], tmp_path: Path
@@ -230,7 +230,7 @@ class TestAPackActuallyConfiguresTheRun:
             str(gate),
         )
         assert result.exit_code == 1, result.output
-        assert json.loads(result.output)["severity"]["config"]["addition"] == "error"
+        assert json.loads(result.stdout)["severity"]["config"]["addition"] == "error"
 
     def test_a_contract_pack_internal_namespace_reaches_the_comparison(
         self, tmp_path: Path
@@ -945,7 +945,7 @@ class TestOnlyAppliedFieldsAreAccepted:
             ],
         )
         assert with_pack.exit_code == 1, with_pack.output
-        summary = json.loads(with_pack.output)
+        summary = json.loads(with_pack.stdout)
         assert summary["severity"]["config"]["addition"] == "error"
         assert summary["severity"]["exit_code"] == 1
 
@@ -1004,7 +1004,7 @@ class TestOnlyAppliedFieldsAreAccepted:
         assert with_pack.exit_code == 0, with_pack.output
         # The finding is still reported -- only the gate moved (same
         # assertion the single-pair sibling test makes).
-        summary = json.loads(with_pack.output)
+        summary = json.loads(with_pack.stdout)
         assert summary["libraries"][0]["verdict"] == "BREAKING"
 
     # `contract.unresolved` on a release comparison (with and without

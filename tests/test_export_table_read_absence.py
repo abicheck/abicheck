@@ -244,7 +244,7 @@ def test_cli_failed_read_never_reports_a_removal(tmp_path: Path) -> None:
             main, ["compare", str(old_p), str(new), "-o", "json=-"]
         )
         assert res.exit_code in (0, 1, 2, 4), res.output
-        doc = json.loads(res.output)
+        doc = json.loads(res.stdout)
         return {
             c["kind"] for c in doc["changes"] if "f" in (c.get("symbol"), c.get("name"))
         }

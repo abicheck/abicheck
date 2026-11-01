@@ -188,7 +188,7 @@ class TestRequestedDepthPropagation:
             ],
         )
         assert res.exit_code in (0, 1, 2, 4), res.output
-        payload = json.loads(res.output[res.output.index("{") :])
+        payload = json.loads(res.stdout[res.stdout.index("{") :])
         aa = payload["analysis_assurance"]
         assert aa["requested_depth"] == "source", aa
         assert aa["effective_depth"] == "headers", aa
@@ -235,7 +235,7 @@ class TestRequestedDepthPropagation:
             ["compare", str(old_p), str(new_p), "-o", "json=-"],
         )
         assert res.exit_code in (0, 1, 2, 4), res.output
-        payload = json.loads(res.output[res.output.index("{") :])
+        payload = json.loads(res.stdout[res.stdout.index("{") :])
         aa = payload["analysis_assurance"]
         assert aa["requested_depth_source"] == "implicit", aa
         assert aa["requested_depth"] == aa["effective_depth"], aa

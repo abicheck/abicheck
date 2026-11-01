@@ -113,9 +113,10 @@ def _cli(
     result = CliRunner().invoke(
         main, ["compare", str(old), str(new), "-o", "json=-", *extra]
     )
-    out = result.output
-    doc = json.loads(out[out.find("{") :]) if "{" in out else None
-    return result.exit_code, out, doc
+    # The document is parsed from stdout alone; ``out`` stays the combined
+    # stream so a caller can assert on a stderr usage message.
+    doc = json.loads(result.stdout) if result.stdout.strip() else None
+    return result.exit_code, result.output, doc
 
 
 def _api(old: Path, new: Path, **fields: object):

@@ -220,6 +220,12 @@ def _invoke(*args: str) -> tuple[int, str, str]:
     return result.exit_code, result.output, (result.stderr or "")
 
 
+def _invoke_stdout(*args: str) -> tuple[int, str, str]:
+    """``_invoke`` reading stdout only, for a caller that parses it as JSON."""
+    result = CliRunner().invoke(main, list(args))
+    return result.exit_code, result.stdout, (result.stderr or "")
+
+
 # ── classifier ────────────────────────────────────────────────────────────────
 
 
@@ -388,7 +394,7 @@ class TestCompareDispatch:
         _write_snap(old_dir / "libfoo.json", old_foo)
         _write_snap(new_dir / "libfoo.json", new_foo)
 
-        code, out, _ = _invoke(
+        code, out, _ = _invoke_stdout(
             "compare", str(old_dir), str(new_dir), "--config", str(cfg), "-o", "json=-"
         )
 
@@ -670,7 +676,7 @@ class TestReleaseFanoutParity:
             main, ["compare", str(old_dir), str(new_dir), "-o", "json=-"]
         )
         assert rel.exit_code == cmp.exit_code == 4
-        assert json.loads(rel.output) == json.loads(cmp.output)
+        assert json.loads(rel.stdout) == json.loads(cmp.stdout)
 
     def test_output_dir_fanout_preserved(self, tmp_path: Path) -> None:
         old_dir = tmp_path / "old"

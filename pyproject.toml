@@ -29,7 +29,7 @@ classifiers = [
     "Topic :: Software Development :: Quality Assurance",
 ]
 dependencies = [
-    "click>=8.0",
+    "click>=8.2",  # 8.2: CliRunner keeps stdout and stderr apart (result.stderr); the suite relies on it
     "rich-click>=1.7",    # progressive-disclosure --help option grouping (G21.8/M1)
     "pyyaml>=6.0",
     "defusedxml>=0.7.1",
