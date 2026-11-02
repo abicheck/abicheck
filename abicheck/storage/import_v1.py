@@ -176,6 +176,7 @@ from .surface_graph_codec import DeferredGraphPayload
 from .types_section_codec import TypesSection
 from .versioning import FactGenerations, StorageVersions
 from .wire_extensions import (
+    CARRIERS_OBJECT_KIND,
     WIRE_EXTENSIONS_KEY,
     WireExtensions,
     refuse_blocked_identity,
@@ -256,10 +257,6 @@ __all__ = [
 #: .split_legacy_document`/`.join_legacy_document` already enforce this
 #: exclusion internally (its own `_PROMOTED_KEYS`); this module never
 #: re-derives the exclusion itself, it only relies on the same three names.
-
-
-#: `ObjectRef.kind` of the object `ArtifactRef.carriers` names.
-CARRIERS_OBJECT_KIND = "wire_carriers"
 
 
 def import_legacy_snapshot(

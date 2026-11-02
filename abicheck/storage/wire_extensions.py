@@ -337,10 +337,23 @@ def carriers_for_reader(raw: Any, where: str) -> WireExtensions:
     return ext
 
 
-def attach_package_carriers(document: dict[str, Any], raw: Any, where: str) -> None:
-    """Put a package artifact's stored carriers (*raw*,
-    `ArtifactRef.carriers`), decided for this build, on its exported
-    *document*, merged with any section the export itself blocked."""
+#: `ObjectRef.kind` of the object `ArtifactRef.carriers` names.
+CARRIERS_OBJECT_KIND = "wire_carriers"
+
+
+def attach_package_carriers(
+    document: dict[str, Any], store: Any, ref: Any, where: str
+) -> Any:
+    """Put a package artifact's stored carriers (*ref*,
+    `ArtifactRef.carriers`, read from *store*), decided for this build, on
+    its exported *document*, merged with any section the export itself
+    blocked. Returns the raw carriers; *ref* must name a carriers object."""
+    if ref.kind != CARRIERS_OBJECT_KIND:
+        raise SnapshotError(
+            f"{where}: carrier reference of kind {ref.kind!r}, "
+            f"not {CARRIERS_OBJECT_KIND!r}"
+        )
+    raw = store.get(ref.digest)
     stored = carriers_for_reader(raw, where)
     blocked = document.get(WIRE_EXTENSIONS_KEY)
     if isinstance(blocked, WireExtensions):
@@ -348,6 +361,7 @@ def attach_package_carriers(document: dict[str, Any], raw: Any, where: str) -> N
         stored.passthrough_versions.update(blocked.passthrough_versions)
         stored.unreadable.extend(blocked.unreadable)
     document[WIRE_EXTENSIONS_KEY] = stored
+    return raw
 
 
 def attach(snap: Any, extensions: WireExtensions) -> None:

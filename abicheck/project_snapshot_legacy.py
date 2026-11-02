@@ -329,9 +329,7 @@ def read_stored_snapshot_document(
         # ADR-062 D14/D15: what the sections alone cannot say, decided for
         # this build; merged with any section the export itself blocked.
         attach_package_carriers(
-            document,
-            store.get(artifact.carriers.digest),
-            f"{root} artifact {artifact_id!r}",
+            document, store, artifact.carriers, f"{root} artifact {artifact_id!r}"
         )
     return document, artifact
 

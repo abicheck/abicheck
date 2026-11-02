@@ -84,12 +84,14 @@ import path already does. A `partial` export read also lowers scope
 completeness (ADR-065), so a comparison that relied on it reports incomplete
 coverage. No new exit code is added.
 
-**D5. Old-reader safety.** A pre-v59 reader drops the key without error, so
-it would read a partial snapshot as complete. The bump relies on the existing
-version gate, the same mechanism v42 used for the envelope change. It does not
-raise `_MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION`, so an old reader is not
-refused outright; hard rejection was the stricter option and would be a
-visible behaviour change for anyone on an old build.
+**D5. Old-reader safety.** A reader older than the schema version this
+change allocates refuses the snapshot before decoding `export_read` when that
+version is at or above `_MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION`
+(currently 14), which the allocated version is. Only a reader that predates
+the hard-rejection gate itself warns and continues, and so could read a
+partial snapshot as complete. The bump relies on this existing version gate,
+the same mechanism v42 used for the envelope change, and does not raise
+`_MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION`.
 
 ## Migration and compatibility
 

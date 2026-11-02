@@ -9,11 +9,16 @@ code under test."""
 
 from __future__ import annotations
 
+import pytest
+
+from abicheck.errors import SnapshotError
 from abicheck.model.graph_facts import GraphEdge, GraphFact, GraphNode
 from abicheck.model.source_graph import SourceGraphSummary
 from abicheck.storage.closure_graph_renumber import renumber_graph
 from abicheck.storage.closure_identity import graph_rewrite_factory
+from abicheck.storage.package import ObjectRef
 from abicheck.storage.wire_extensions import (
+    CARRIERS_OBJECT_KIND,
     WIRE_EXTENSIONS_KEY,
     WireExtensions,
     attach_package_carriers,
@@ -37,11 +42,19 @@ def test_marker_only_in_an_edge_fact_is_still_renumbered() -> None:
     a = GraphNode(id="decl://a", kind="source_decl", label="a")
     b = GraphNode(id="decl://b", kind="source_decl", label="b")
     edge = GraphEdge(src=a.id, dst=b.id, kind="decl_uses_type")
-    edge.facts = [GraphFact(producer="p", attrs={"t": f"f<{_STRIPPED}>"})]
-    out = renumber_graph(_graph(a, b, edges=(edge,)), graph_rewrite_factory({}))
-    assert out is not None
+    # The winning fact hides the marker from the resolved attrs; only the
+    # losing fact retains it.
+    edge.facts = [
+        GraphFact(producer="a", attrs={"t": "plain"}, confidence="high"),
+        GraphFact(producer="b", attrs={"t": f"f<{_STRIPPED}>"}, confidence="low"),
+    ]
+    graph = _graph(a, b, edges=(edge,))
+    assert "lambda" not in str(graph.edges[0].attrs)
+    out = renumber_graph(graph, graph_rewrite_factory({}))
+    assert out is not graph
     (renumbered,) = out.edges
-    assert renumbered.facts[0].attrs["t"] == "f<(lambda:a.h#1)>"
+    losing = next(f for f in renumbered.facts if f.producer == "b")
+    assert losing.attrs["t"] == "f<(lambda:a.h#1)>"
 
 
 def test_hint_without_a_closure_marker_needs_no_rewrite() -> None:
@@ -57,6 +70,14 @@ def test_raw_spelling_is_stripped_and_numbered() -> None:
     assert [n.id for n in out.nodes] == ["decl://f<(lambda:a.h#1)>"]
 
 
+class _Store:
+    def __init__(self, raw: object) -> None:
+        self.raw = raw
+
+    def get(self, digest: str) -> object:
+        return self.raw
+
+
 def test_package_carriers_merge_with_the_exports_blocked_sections() -> None:
     blocked = WireExtensions(
         passthrough_sections={"layout": {"x": 1}},
@@ -64,7 +85,21 @@ def test_package_carriers_merge_with_the_exports_blocked_sections() -> None:
     )
     document = {WIRE_EXTENSIONS_KEY: blocked}
     stored = WireExtensions(passthrough_sections={"vendor": {"y": 2}})
-    attach_package_carriers(document, stored.to_wire(), "lib")
+    ref = ObjectRef(kind=CARRIERS_OBJECT_KIND, digest="sha256:" + "0" * 64)
+    attach_package_carriers(document, _Store(stored.to_wire()), ref, "lib")
     merged = document[WIRE_EXTENSIONS_KEY]
     assert merged.passthrough_sections == {"vendor": {"y": 2}, "layout": {"x": 1}}
     assert merged.passthrough_versions["layout"] == 9
+
+
+def test_a_carrier_reference_of_another_kind_is_refused() -> None:
+    raw = WireExtensions(passthrough_sections={"vendor": {"y": 2}}).to_wire()
+    document: dict = {}
+    with pytest.raises(SnapshotError, match="carrier reference of kind 'section'"):
+        attach_package_carriers(
+            document,
+            _Store(raw),
+            ObjectRef(kind="section", digest="sha256:" + "0" * 64),
+            "lib",
+        )
+    assert WIRE_EXTENSIONS_KEY not in document

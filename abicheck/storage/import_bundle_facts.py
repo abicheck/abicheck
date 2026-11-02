@@ -731,10 +731,10 @@ def export_bundle_facts(
                 f"artifact {artifact_id!r} (library {library_name!r})",
             )
         if artifact.carriers is not None:  # ADR-062 D14/D15
-            raw_carriers = store.get(artifact.carriers.digest)
+            ref = artifact.carriers
+            raw = attach_package_carriers(snapshot_document, store, ref, artifact_id)
             if on_document is not None:  # carriers count toward the byte budget
-                on_document({"carriers": raw_carriers}, f"{artifact_id!r} carriers")
-            attach_package_carriers(snapshot_document, raw_carriers, artifact_id)
+                on_document({"carriers": raw}, f"{artifact_id!r} carriers")
         per_library_snapshots[library_name] = snapshot_document
 
     raw_manifest = composition.get("manifest")
