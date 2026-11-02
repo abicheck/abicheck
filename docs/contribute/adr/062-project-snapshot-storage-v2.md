@@ -721,6 +721,12 @@ informational at the package level.
   section's readers and is kept verbatim for a re-save, exactly as in a
   single-file document; only the `provenance` section refuses. (It was
   refused outright before.)
+- *Newer section versions in directory packages (2026-11-02).* A section
+  object stored at a `section_schema_version` newer than the reader's, and
+  stated so in the manifest's `section_schema_versions`, blocks only that
+  section's readers with the same cause text as a single-file document and
+  is kept verbatim for a re-save; the manifest-level version check no
+  longer refuses the package for it. A newer `provenance` still refuses.
 - *Directory packages carry the carriers (2026-10-31, revised).*
   `write_legacy_snapshot_package`, given the `AbiSnapshot`, stores its
   carriers (`WireExtensions.to_wire`: kept sections and their versions,

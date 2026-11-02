@@ -107,8 +107,10 @@ __all__ = [
     "extensions_of",
     "merge_wire_extensions",
     "record_section_failure",
+    "refuse_blocked_identity",
     "refuse_package_flattening",
     "refuse_unwritable_extensions",
+    "section_blocking_reason",
     "split_wire_extensions",
     "unknown_must_understand",
 ]
@@ -511,6 +513,24 @@ def _blocking_reason(kind: str, section: Any, stated: Any) -> str | None:
     return None
 
 
+def section_blocking_reason(kind: str, section: Any, stated: Any) -> str | None:
+    """Why this build cannot decode a stored section of the known *kind*
+    (written at *stated*, header *section*), or ``None``: a newer
+    ``section_schema_version`` or an unknown must-understand name. The one
+    cause text the single-file reader and the package reader report; the
+    identity section refuses instead (:func:`refuse_blocked_identity`)."""
+    return _blocking_reason(kind, section, stated)
+
+
+def refuse_blocked_identity(reason: str) -> IncompatibleSnapshotSchemaError:
+    """The refusal for a blocked ``provenance`` section, which every
+    analysis reads (both storage forms raise this one error)."""
+    return IncompatibleSnapshotSchemaError(
+        f"Snapshot {reason}; it holds the snapshot's identity, so "
+        "nothing can be compared. Upgrade abicheck to read this snapshot."
+    )
+
+
 def split_wire_extensions(document: Mapping[str, Any]) -> dict[str, Any]:
     """*document* with every D14/D15 carrier removed and collected under
     `WIRE_EXTENSIONS_KEY`, ready for the existing validation and decode.
@@ -584,10 +604,7 @@ def split_wire_extensions(document: Mapping[str, Any]) -> dict[str, Any]:
         reason = _blocking_reason(kind, section, version)
         if reason is not None:
             if kind == IDENTITY_SECTION_KIND:
-                raise IncompatibleSnapshotSchemaError(
-                    f"Snapshot {reason}; it holds the snapshot's identity, so "
-                    "nothing can be compared. Upgrade abicheck to read this snapshot."
-                )
+                raise refuse_blocked_identity(reason)
             ext.passthrough_sections[kind] = section
             ext.passthrough_versions[kind] = version
             ext.unreadable.append((kind, reason))

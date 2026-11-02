@@ -178,8 +178,8 @@ from .versioning import FactGenerations, StorageVersions
 from .wire_extensions import (
     WIRE_EXTENSIONS_KEY,
     WireExtensions,
-    check_must_understand,
-    unknown_must_understand,
+    refuse_blocked_identity,
+    section_blocking_reason,
 )
 
 #: ADR-063 Track 4 (8B), third slice: one entry per `LEGACY_SECTION_KINDS`
@@ -736,25 +736,19 @@ def export_legacy_sections(
             continue
         dto = SectionDTO.from_dict(raw)
         _check_section_kind(dto, section_kind, artifact_id, locator)
-        unknown = unknown_must_understand(list(dto.must_understand), locator)
-        if unknown:
-            # ADR-062 D14: a section-level name this build does not
-            # understand blocks that section's readers, as in a single-file
-            # document; it is kept verbatim for a re-save. The identity
-            # section, which every analysis reads, refuses.
+        reason = section_blocking_reason(section_kind, raw, dto.section_schema_version)
+        if reason is not None:
+            # ADR-062 D14: a section written at a newer section_schema_version,
+            # or naming a must-understand extension this build does not
+            # understand, blocks only that section's readers, as in a
+            # single-file document; it is kept verbatim for a re-save. The
+            # identity section, which every analysis reads, refuses.
             if section_kind == PROVENANCE_SECTION_KIND:
-                check_must_understand(list(dto.must_understand), locator)
+                raise refuse_blocked_identity(reason)
             blocked = document.setdefault(WIRE_EXTENSIONS_KEY, WireExtensions())
             blocked.passthrough_sections[section_kind] = raw
             blocked.passthrough_versions[section_kind] = dto.section_schema_version
-            blocked.unreadable.append(
-                (
-                    section_kind,
-                    f"section {section_kind!r} requires must-understand "
-                    f"extension(s) {', '.join(repr(n) for n in unknown)} this "
-                    "build does not understand",
-                )
-            )
+            blocked.unreadable.append((section_kind, reason))
             continue
         if section_kind == SEMANTIC_IR_SECTION_KIND:
             ir, conflicts = semantic_ir_from_dto(dto)

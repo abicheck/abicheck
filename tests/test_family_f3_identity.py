@@ -551,6 +551,7 @@ _EXTRA_REGISTERED = {
 _U = "UNCOVERED: "
 COVERAGE: dict[str, str] = {
     # -- exercised --------------------------------------------------------
+    "abicheck.storage.wire_extensions:refuse_blocked_identity": "a blocked provenance section in a single file and in a directory package, both causes (tests/test_package_section_version_blocks_section.py)",
     "abicheck.workflows.release_member_pairing:path_identity": "stored spelling x direction against a hand-written key table (tests/test_release_member_identity.py)",
     "abicheck.workflows.release_member_pairing:snapshot_identity": "BundleFacts documents keyed by file name vs live name (tests/test_release_member_identity.py)",
     "abicheck.workflows.release_member_pairing:pair_path_maps_by_identity": "every OLD x NEW storage form against the live/live run (tests/test_release_member_identity_integration.py)",
@@ -671,6 +672,7 @@ def test_covered_rows_are_really_registered_in_the_catalogue() -> None:
             "abicheck.workflows.release_member_pairing:snapshot_identity",
             "abicheck.workflows.release_member_pairing:pair_path_maps_by_identity",
             "abicheck.workflows.release_member_pairing:facts_paired_by_identity",
+            "abicheck.storage.wire_extensions:refuse_blocked_identity",
         }
         | {
             f"abicheck.model.identity:entity_id_for_{k}"

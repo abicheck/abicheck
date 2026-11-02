@@ -58,6 +58,7 @@ from .storage.sectioned_document import check_stated_section_version
 from .storage.snapshot_encode import snapshot_to_dict
 from .storage.versioning import FactGenerations
 from .storage.wire_extensions import (
+    IDENTITY_SECTION_KIND,
     WIRE_EXTENSIONS_KEY,
     WireExtensions,
     carriers_for_reader,
@@ -296,8 +297,13 @@ def read_stored_snapshot_document(
     # the single-file reader, where `{"binary": 99}` was decoded silently).
     # Unregistered kinds are variant-level evidence another owner versions
     # (e.g. `bundle_variant_spec`), so they are not this reader's to refuse.
+    # A newer version of a non-identity section is not refused here (ADR-062
+    # D14): the export blocks only that section, as the single-file reader
+    # does; the export itself refuses a newer `provenance`.
     for kind, stated in summary.versions.section_schema_versions.items():
-        if kind in SECTION_SCHEMA_VERSIONS:
+        if kind in SECTION_SCHEMA_VERSIONS and not _blocked_by_newer_version(
+            kind, stated
+        ):
             check_stated_section_version(kind, stated)
     store = DirectoryObjectStore(root)
     document = export_legacy_snapshot(
@@ -305,6 +311,20 @@ def read_stored_snapshot_document(
         store=store,
         source_schema_version=summary.versions.source_schema_version,
     )
+    # A manifest claiming a newer version its section object does not carry
+    # is contradictory: refuse it as before rather than read it as current.
+    exported = document.get(WIRE_EXTENSIONS_KEY)
+    for kind, stated in summary.versions.section_schema_versions.items():
+        if (
+            kind in SECTION_SCHEMA_VERSIONS
+            and _blocked_by_newer_version(kind, stated)
+            and kind in artifact.sections
+            and not (
+                isinstance(exported, WireExtensions)
+                and exported.passthrough_versions.get(kind) == stated
+            )
+        ):
+            check_stated_section_version(kind, stated)
     if artifact.carriers is not None:
         # ADR-062 D14/D15: what the sections alone cannot say, decided for
         # this build; merged with any section the export itself blocked.
@@ -318,6 +338,17 @@ def read_stored_snapshot_document(
             stored.unreadable.extend(blocked.unreadable)
         document[WIRE_EXTENSIONS_KEY] = stored
     return document, artifact
+
+
+def _blocked_by_newer_version(kind: str, stated: object) -> bool:
+    """*stated* is a newer version of a non-identity *kind*: its section
+    blocks rather than refuses the package (ADR-062 D14)."""
+    return (
+        kind != IDENTITY_SECTION_KIND
+        and isinstance(stated, int)
+        and not isinstance(stated, bool)
+        and stated > SECTION_SCHEMA_VERSIONS[kind]
+    )
 
 
 def _materialize_referenced_objects(
