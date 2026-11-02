@@ -61,7 +61,7 @@ from .bundle_facts_validation import (
     validated_inventory_complete,
     validated_variant_fingerprint,
 )
-from .wire_extensions import refuse_package_flattening
+from .bundle_member_carriers import require_sectioned_member_version
 
 if TYPE_CHECKING:
     from ..snapshot_io import SnapshotWriteResult
@@ -169,6 +169,7 @@ def write_bundle_facts_archive(
     from ..errors import SnapshotError
     from .bundle_archive_json_guard import bounded_encode_utf8
     from .bundle_facts_spool import BlobSpool
+    from .bundle_member_carriers import encode_bundle_member
 
     p = Path(path)
     # (a) Library-name-count cap, checked first, else many names sharing
@@ -188,16 +189,21 @@ def write_bundle_facts_archive(
         for name, snap in sorted(facts.per_library_snapshots.items()):
             blob = serialized_by_identity.get(id(snap))
             if blob is None:
-                refuse_package_flattening(snap)  # ADR-062 D14/D15
+                # ADR-062 D14/D15: the sectioned document when the flat one
+                # would lose the member's carriers (`bundle_member_carriers`).
+                member, sectioned = encode_bundle_member(
+                    snap, flat_encode=snapshot_to_dict
+                )
                 # Streamed against the *remaining* allowance -- json.dumps()+
                 # .encode() would fully materialize an oversized copy first.
                 remaining = max(
                     DEFAULT_MAX_BUNDLE_DECODED_BYTES - decoded_size_bytes, 0
                 )
-                encoded = bounded_encode_utf8(snapshot_to_dict(snap), remaining)
+                encoded = bounded_encode_utf8(member, remaining)
+                del member
                 if encoded is None:
                     raise SnapshotError(_oversized_bundle_message(p))
-                blob = spool.put_bytes(encoded)
+                blob = spool.put_bytes(encoded, sectioned=sectioned)
                 serialized_by_identity[id(snap)] = blob
                 del encoded
             # Charged here too: distinct AbiSnapshot objects serializing
@@ -343,7 +349,11 @@ def assemble_bundle_facts_archive(
         "schema_version": BUNDLE_ARCHIVE_SCHEMA_VERSION,
         # Not facts.schema_version -- the same writer rule as
         # bundle_facts_to_dict()'s own schema_version field (Codex).
-        "bundle_facts_schema_version": document_schema_version(facts),
+        # 5 when any member blob is a sectioned document (ADR-062 D14/D15).
+        "bundle_facts_schema_version": document_schema_version(
+            facts,
+            sectioned_members=any(blob.sectioned for blob in unique_blobs.values()),
+        ),
         "variant_fingerprint": facts.variant_fingerprint,
         # Sorted by name so two logically-equal BundleFacts don't produce
         # different archive bytes.
@@ -605,6 +615,9 @@ def read_bundle_facts_archive(
                     f"bundle archive: blob for library {name!r} must decode "
                     f"to a JSON object, got {type(blob).__name__}"
                 )
+            require_sectioned_member_version(
+                {name: blob}, bundle_facts_schema_version, what=f"{path}"
+            )
             snap = _load_snapshot_dict(blob, f"blob for library {name!r}")
             snapshot_cache[h] = snap
             snapshot_blob_len[h] = len(raw)

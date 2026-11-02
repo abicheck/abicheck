@@ -1,0 +1,3 @@
+### Changed
+
+- **Writing a snapshot encodes one section at a time** (storage plan A2.2) — `write_snapshot`, the compact cache write and `snapshot_to_json` no longer build the whole encoded document tree before serializing it: each section is encoded, written and dropped before the next, so the encode peak follows the largest section (550 -> 286 MiB on a two-section 80k-entity synthetic). Output bytes are unchanged. `snapshot_encode.sectioned_document_for_write` is removed; its replacement is `storage.snapshot_encode.streamed_sectioned_document` (per-section mechanics in `storage.snapshot_section_stream`).

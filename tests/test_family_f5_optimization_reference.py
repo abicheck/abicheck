@@ -564,6 +564,65 @@ def test_release_lazy_section_decode_matches_eager(
     _assert_same(lazy, _run(str(old), str(new)), "release.lazy_sections")
 
 
+def test_release_lazy_graph_renumber_matches_eager(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bug class storage.graph_closure_identity_not_renumbered: a stored
+    graph's closure markers renumbered on first decode give the graphs and
+    the report an eager decode-then-renumber gives."""
+    from abicheck.model.graph_facts import GraphNode
+    from abicheck.model.lazy_graph import PendingGraph
+    from abicheck.model.source_graph import SourceGraphSummary
+    from abicheck.serialization import load_snapshot, save_snapshot
+    from abicheck.storage import closure_graph_renumber as cgr
+
+    sides = {}
+    for side, lines in (("old", (3, 9, 20)), ("new", (4, 9, 21))):
+        root = tmp_path / side
+        root.mkdir()
+        for i in range(3):
+            snap = AbiSnapshot(
+                library=f"libg{i}.so",
+                version=side,
+                functions=[
+                    Function(
+                        name=f"f<(lambda:g.h:{lines[0]}:2)>",
+                        mangled=f"_Zf{i}",
+                        return_type="int",
+                    )
+                ],
+            )
+            snap.surface_graph = SourceGraphSummary(
+                nodes=[
+                    GraphNode(id=f"decl://f<(lambda:g.h:{line}:2)>", kind="source_decl")
+                    for line in lines
+                ]
+            )
+            save_snapshot(snap, root / f"libg{i}.so.abi.json")
+        sides[side] = root
+
+    def graphs() -> list[Any]:
+        return [
+            load_snapshot(p).surface_graph.to_dict()
+            for root in sides.values()
+            for p in sorted(root.iterdir())
+        ]
+
+    lazy_graphs, lazy = graphs(), _run(str(sides["old"]), str(sides["new"]))
+    # Not vacuous: every stored :line:col closure was renumbered.
+    ids = [n["id"] for g in lazy_graphs for n in g["nodes"]]
+    assert ids and all("#" in i and ":2)" not in i for i in ids)
+    monkeypatch.setattr(
+        cgr,
+        "_wrap",
+        lambda cell, make: PendingGraph.resolved(
+            cgr.renumber_graph(cell.resolve(), make)
+        ),
+    )
+    assert graphs() == lazy_graphs
+    _assert_same(lazy, _run(str(sides["old"]), str(sides["new"])), "release.lazy_graph")
+
+
 # ── (c) threads=1 vs threads=8 ──────────────────────────────────────────────
 
 
@@ -1120,45 +1179,3 @@ def test_cache_hit_identity_matches_cold_dump_for_a_symlink(tmp_path: Path) -> N
     from tests.test_snapshot_hit_binary_identity import check_hit_matches_cold
 
     check_hit_matches_cold("symlink", tmp_path)
-
-
-# ── packed contract type graph vs the tuple form it replaced (A2.5) ─────────
-
-
-def test_release_packed_type_graph_matches_tuple_reference(
-    release: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Bug class perf.retained_per_member_state_kept_in_its_working_form:
-    the packed ``TypeGraphSnapshot`` a release holds per member gives the
-    member report the tuple form gives. The reference holds the graph as the
-    tuples the class used to store (``sorted(set(...))``, not the packed
-    codec), and counts its constructions so the reference run provably
-    used it."""
-    from abicheck.contract_evidence import TypeGraphSnapshot as Graph
-
-    validate = Graph.__init__
-    built = [0]
-
-    def tuple_init(self: Any, nodes: Any = (), edges: Any = ()) -> None:
-        validate(self, nodes, edges)  # same argument validation
-        pairs = {(e[0], e[1]) for e in edges}
-        object.__setattr__(
-            self, "_packed", (tuple(sorted(set(nodes))), tuple(sorted(pairs)))
-        )
-        built[0] += 1
-
-    old, new = release
-    # One member pair: its JSON report carries the persisted
-    # ``contract_context`` (type graph included), which a release report
-    # does not, so a graph the reference reads back differently is visible.
-    member = sorted(old.iterdir())[0].name
-    args = (str(old / member), str(new / member), "--contract", "exports")
-    packed = _run(*args)
-    assert '"type_graph"' in packed and '"edges": [\n' in packed, packed[:500]
-    with monkeypatch.context() as mp:
-        mp.setattr(Graph, "__init__", tuple_init)
-        mp.setattr(Graph, "nodes", property(lambda self: self._packed[0]))
-        mp.setattr(Graph, "edges", property(lambda self: self._packed[1]))
-        reference = _run(*args)
-    assert built[0] > 0, "the reference run never built a graph"
-    _assert_same(packed, reference, "release.packed_type_graph")

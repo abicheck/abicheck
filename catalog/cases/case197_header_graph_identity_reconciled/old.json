@@ -96,31 +96,31 @@
   "nodes": [
     {
       "attrs": {
-        "build_system": "generic",
-        "kind": "shared_library",
-        "visibility": "unknown"
+        "consumer_compiled_body": true,
+        "decl_kind": "function",
+        "visibility": "private_header"
       },
       "confidence": "unknown",
       "conflicts": [],
       "facts": [
         {
           "attrs": {
-            "build_system": "generic",
-            "kind": "shared_library",
-            "visibility": "unknown"
+            "consumer_compiled_body": true,
+            "decl_kind": "function",
+            "visibility": "private_header"
           },
           "confidence": "unknown",
-          "producer": "build_evidence"
+          "producer": "source_abi"
         }
       ],
-      "id": "libdemo",
-      "kind": "target",
-      "label": "demo",
-      "provenance": "build_evidence",
+      "id": "decl://_ZN4demo6detail6helperEi",
+      "kind": "source_decl",
+      "label": "demo::detail::helper",
+      "provenance": "source_abi",
       "resolved": {
-        "build_system": "generic",
-        "kind": "shared_library",
-        "visibility": "unknown"
+        "consumer_compiled_body": true,
+        "decl_kind": "function",
+        "visibility": "private_header"
       }
     },
     {
@@ -177,35 +177,6 @@
     },
     {
       "attrs": {
-        "consumer_compiled_body": true,
-        "decl_kind": "function",
-        "visibility": "private_header"
-      },
-      "confidence": "unknown",
-      "conflicts": [],
-      "facts": [
-        {
-          "attrs": {
-            "consumer_compiled_body": true,
-            "decl_kind": "function",
-            "visibility": "private_header"
-          },
-          "confidence": "unknown",
-          "producer": "source_abi"
-        }
-      ],
-      "id": "decl://_ZN4demo6detail6helperEi",
-      "kind": "source_decl",
-      "label": "demo::detail::helper",
-      "provenance": "source_abi",
-      "resolved": {
-        "consumer_compiled_body": true,
-        "decl_kind": "function",
-        "visibility": "private_header"
-      }
-    },
-    {
-      "attrs": {
         "origin": "UNKNOWN"
       },
       "confidence": "unknown",
@@ -225,6 +196,35 @@
       "provenance": "source_abi",
       "resolved": {
         "origin": "UNKNOWN"
+      }
+    },
+    {
+      "attrs": {
+        "build_system": "generic",
+        "kind": "shared_library",
+        "visibility": "unknown"
+      },
+      "confidence": "unknown",
+      "conflicts": [],
+      "facts": [
+        {
+          "attrs": {
+            "build_system": "generic",
+            "kind": "shared_library",
+            "visibility": "unknown"
+          },
+          "confidence": "unknown",
+          "producer": "build_evidence"
+        }
+      ],
+      "id": "libdemo",
+      "kind": "target",
+      "label": "demo",
+      "provenance": "build_evidence",
+      "resolved": {
+        "build_system": "generic",
+        "kind": "shared_library",
+        "visibility": "unknown"
       }
     }
   ],

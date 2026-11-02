@@ -1189,7 +1189,7 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
         fixed_by=(1904,),  # A2.5: ~4.5 MiB kept per 6000-decl member -> ~1.1
         seed_tests=(
             "tests/test_release_member_memory_bound.py",
-            "tests/test_family_f5_optimization_reference.py",
+            "tests/test_family_f5_packed_type_graph.py",
         ),
         public_surfaces=(),
         axes={"members": ("N", "2N"), "graph": ("generated", "empty", "duplicates")},

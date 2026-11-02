@@ -48,13 +48,15 @@ from abicheck.storage import fact_backfill, snapshot_lazy_decode
 from abicheck.storage.evidence_digest import evidence_digest_of_document
 from abicheck.storage.snapshot_codec import write_snapshot
 from abicheck.storage.snapshot_encode import (
-    sectioned_document_for_write,
     snapshot_content_digest,
     snapshot_to_dict,
 )
 from abicheck.storage.snapshot_lazy_decode import (
     LEGACY_BACKFILL_FLOOR,
     eager_section_decode,
+)
+from tests._whole_document_encoder import (
+    whole_sectioned_document as sectioned_document_for_write,
 )
 
 

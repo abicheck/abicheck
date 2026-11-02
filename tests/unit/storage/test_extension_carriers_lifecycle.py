@@ -38,6 +38,7 @@ from abicheck.project_snapshot_legacy import (
 )
 from abicheck.serialization import (
     SCHEMA_VERSION,
+    load_bundle_facts,
     save_bundle_facts,
     snapshot_from_dict,
     snapshot_to_json,
@@ -180,14 +181,21 @@ def test_a_package_carries_the_carriers(carrier: str, tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("carrier", sorted(_CARRIERS))
-@pytest.mark.parametrize("fmt", ["json", "archive", "dict"])
-def test_bundle_writers_refuse(carrier: str, fmt: str, tmp_path: Path) -> None:
-    facts = BundleFacts(per_library_snapshots={"libext.so.1": _loaded(carrier)})
-    with pytest.raises(SnapshotError, match="single-file snapshot"):
-        if fmt == "dict":
-            bundle_facts_to_dict(facts)
-        else:
-            save_bundle_facts(facts, tmp_path / f"b.{fmt}", format=fmt)
+@pytest.mark.parametrize("fmt", ["json", "archive"])
+def test_bundle_writers_carry(carrier: str, fmt: str, tmp_path: Path) -> None:
+    """A G38 document or G40 archive stores a carrier-bearing member as its
+    sectioned document (bundle schema 5): same blocked sections, same
+    re-saved single-file document -- never refused, never a false clean."""
+    loaded = _loaded(carrier)
+    facts = BundleFacts(per_library_snapshots={"libext.so.1": loaded})
+    assert bundle_facts_to_dict(facts)["schema_version"] == 5
+    path = tmp_path / f"b.{fmt}"
+    save_bundle_facts(facts, path, format=fmt)
+    back = load_bundle_facts(path).per_library_snapshots["libext.so.1"]
+    assert back.unreadable_sections == loaded.unreadable_sections
+    written = json.loads(snapshot_to_json(back))
+    assert _CARRIERS[carrier][1](written)
+    assert written == json.loads(snapshot_to_json(loaded))
 
 
 def test_a_clean_loaded_snapshot_still_packages_with_its_evidence_digest(

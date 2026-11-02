@@ -114,6 +114,7 @@ FAMILIES: dict[str, Family] = {
             harness_tests=(
                 "tests/test_family_f5_optimization_reference.py",
                 "tests/test_family_f5_derived_ast_sharing.py",
+                "tests/test_family_f5_packed_type_graph.py",
             ),
         ),
         Family(
@@ -169,6 +170,7 @@ FAMILIES: dict[str, Family] = {
             harness_tests=(
                 "tests/test_str_enum_serialized_token.py",
                 "tests/test_ast_memo_slot_thread_context.py",
+                "tests/test_snapshot_byte_reproducibility.py",
             ),
         ),
         Family(
@@ -476,6 +478,7 @@ _F5 = tuple(
         "cache.key_identity_must_equal_parse_input_content",
         "cache.roundtrip_must_preserve_what_downstream_scoping_reads",
         "storage.lazy_decode_diverges_from_eager",
+        "storage.graph_closure_identity_not_renumbered",
     ]
 )
 _F8 = (
@@ -514,6 +517,8 @@ _F7 = (
 )
 _F9 = (
     "serialization.interpreter_dependent_str_subclass_token",
+    # Stored bytes followed hash-seed-dependent producer insertion order.
+    "serialization.stored_bytes_depend_on_producer_iteration_order",
     "concurrency.per_thread_state_in_inherited_context",
 )
 _F10 = ("concurrency.abandoned_child_outlives_failed_owner",)

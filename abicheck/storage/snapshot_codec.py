@@ -380,12 +380,12 @@ def write_snapshot_compact(
     from ..snapshot_io import SnapshotCompression
     from .acyclic_json import gc_paused
     from .json_stream import iter_json_compact
-    from .snapshot_encode import sectioned_document_for_write
+    from .snapshot_encode import streamed_sectioned_document
     from .snapshot_stream_write import write_snapshot_text_stream
 
     with gc_paused():
         return write_snapshot_text_stream(
-            iter_json_compact(sectioned_document_for_write(snap)),
+            iter_json_compact(streamed_sectioned_document(snap)),
             path,
             compression=SnapshotCompression(compression),
             zstd_level=zstd_level,
@@ -425,7 +425,7 @@ def write_snapshot(
     )
     from .acyclic_json import gc_paused
     from .json_stream import iter_json_indented, join_json_indented
-    from .snapshot_encode import sectioned_document_for_write
+    from .snapshot_encode import streamed_sectioned_document
     from .snapshot_stream_write import write_snapshot_text_stream
 
     resolved = resolve_write_compression(Path(path), SnapshotCompression(compression))
@@ -433,13 +433,13 @@ def write_snapshot(
         # One shot, so the frame can declare its size -- but formatted by the
         # same encoder as every streamed write, not a second ``json.dumps``.
         with gc_paused():
-            text = join_json_indented(sectioned_document_for_write(snap), indent=2)
+            text = join_json_indented(streamed_sectioned_document(snap), indent=2)
         return write_snapshot_text(
             text, path, compression=resolved, zstd_level=zstd_level
         )
     with gc_paused():
         return write_snapshot_text_stream(
-            iter_json_indented(sectioned_document_for_write(snap), indent=2),
+            iter_json_indented(streamed_sectioned_document(snap), indent=2),
             path,
             compression=resolved,
             zstd_level=zstd_level,

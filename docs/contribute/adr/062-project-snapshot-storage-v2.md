@@ -748,12 +748,24 @@ informational at the package level.
   read the left-out sections as empty. No `package_format_version` bump:
   the layout is unchanged, and the per-ref axis already fails closed (D2: the
   narrowest axis that makes an older reader refuse). A ref stating version 1
-  while carrying `carriers` is refused as corrupt. G38 bundle documents and
-  G40 bundle archives are still built from the flat `snapshot_to_dict`
-  document, so `wire_extensions.refuse_package_flattening` still refuses a
-  snapshot with carriers there (`bundle_facts_to_dict`, the archive writer);
-  a flat mapping handed to `write_legacy_snapshot_package` cannot say what it
-  lost and is written as what it says (known gap).
+  while carrying `carriers` is refused as corrupt. A flat mapping handed to
+  `write_legacy_snapshot_package` cannot say what it lost and is written as
+  what it says (known gap).
+- *Bundles carry the carriers (2026-10-31).* A bundle package stores each
+  member's carriers on its `ArtifactRef.carriers`, exactly as a directory
+  package. A G38 bundle document or G40 bundle archive has no ref to hang
+  them on, so a member whose flat document would lose state
+  (`wire_extensions.flattening_loses`) is stored as its single-file
+  sectioned document, which carries every carrier and which
+  `snapshot_from_dict` already reads (`storage/bundle_member_carriers.py`);
+  every other member keeps its flat bytes. *Versioning (D2):* the narrowest
+  axis an older reader fails closed on is the bundle's own
+  `schema_version`, so such a document or archive declares 5
+  (`SECTIONED_MEMBERS_SCHEMA_VERSION`); one without a sectioned member keeps
+  declaring what it did (2-4) and its bytes. A reader at 4 refuses a 5,
+  instead of decoding a sectioned member as a flat snapshot with every field
+  defaulted; a sectioned member under a declared version below 5 is refused
+  as corrupted. No D13 adapter: no stored document changes meaning.
 - *Nested record fields (2026-10-31).* Unknown keys are kept at any depth
   inside an identity-matched record (parameters, record fields, enum members)
   and on the `binary` section's ELF/PE/Mach-O metadata objects (including ELF
@@ -824,7 +836,13 @@ PDB's facts. A missing PDB is `not_collected` (optional inputs stay
 optional). Other sections aggregate several extractors whose failures are
 fact-family `FactAvailability` inside the payload, so no other extractor
 fails a whole section; a header-scoped PE dump's `debug` section also holds
-the header parse's provenance and is not failed wholesale (known gap). A
+the header parse's provenance and is not failed wholesale (known gap).
+Re-checked 2026-10-31 for castxml and DWARF: a castxml failure aborts the
+dump (requested headers are not optional), and a DWARF open/parse failure
+covers neither `debug` (which also holds the header AST's provenance and
+reliability facts) nor `layout` (scope and contract facts); DWARF is also an
+optional input on the binary path, so failing a section for it would let an
+unrequested input lower a passing run's assurance. Neither gets a producer. A
 `not_collected` entry is written back absent on re-save (it was re-saved as
 present, which made the document unreadable). A `not_collected` section adds no
 assurance note when a detector reads it, by decision: every pre-D15 document
@@ -995,6 +1013,13 @@ deferred together, with the `semantic_ir` section and the per-entity half of
   whole-document `json.loads`, which lazy decoding does not remove. No real
   consumer path would read the cache, so per D11 it is not built.
   Measurements are in the plan's A1.9 D18 entry.
+- 2026-11-02: a per-section parse (each section's JSON parsed from its own
+  text span) was measured and not adopted. D14's record-extras split and the
+  generation migration still parse every section at load, and the best
+  case is 20% below today's peak. The element-level `declarations` decode
+  that would bound the per-member peak is deferred as a separate future
+  item (maintainer decision); release fan-out peak does not grow with
+  member count. Figures are in the plan's A2.5 entry.
 
 ### Exit criteria and non-goals
 

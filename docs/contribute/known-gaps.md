@@ -273,25 +273,28 @@ document (closed 2026-11-02; `provenance` still refuses). Owner: `storage/`;
 per-item status in the
 [storage format v2 plan](plans/storage-format-v2.md).
 
-- **D14 residual: bundle documents and archives refuse the carriers.** A
-  directory ProjectSnapshot package now carries every D14/D15 carrier
-  (`ArtifactRef.carriers`, closed 2026-10-31). A G38 bundle document, a G40
-  bundle archive and a bundle package are still built from the flat
-  `snapshot_to_dict` document per member, so a member snapshot with a
-  failed/blocked/unknown section or extensions is refused there
-  (`wire_extensions.refuse_package_flattening`); save it as a single-file
-  snapshot or a directory package. A flat mapping a caller made with
-  `snapshot_to_dict` and handed to `write_legacy_snapshot_package` cannot say
-  what it lost and is written as what it says; pass the `AbiSnapshot`.
+- **D14 residual: a flat mapping cannot say what it lost.** Every
+  container now carries the D14/D15 carriers (directory and bundle
+  packages on `ArtifactRef.carriers`; G38 bundle documents and G40 bundle
+  archives by storing such a member as its sectioned document, closed
+  2026-10-31). A flat mapping a caller made with `snapshot_to_dict` and
+  handed to `write_legacy_snapshot_package` is still written as what it
+  says; pass the `AbiSnapshot`.
 - **D15 residual: one producer records a whole-section failure.** The PE
   dump records `debug` as `failed` when a located PDB fails to parse, on the
-  export-table path only. A header-scoped PE dump's `debug` section also
-  holds the header parse's provenance, so it is not failed wholesale (the
-  PDB failure is logged). No other extractor fails a whole section: each
-  section aggregates several extractors whose failures are fact-family
-  `FactAvailability`. The inventory expands only what the fixed corpus
-  populates. A `not_collected` section gives no assurance note when a
-  detector reads it (decided in ADR-062 D15's implementation decisions).
+  export-table path only. Checked 2026-10-31 for every other extractor, and
+  none fails a whole section: a castxml failure aborts the dump (requested
+  headers that cannot be parsed are a dump error, not a section state); a
+  DWARF open/parse failure (`AdvancedExtractionStatus.FAILED`) does not
+  cover `debug` (which also holds the header AST's provenance, toolchain and
+  reliability facts) or `layout` (scope, contract and coherence facts), and
+  DWARF is an optional input on the binary path, so failing either section
+  would make an unrequested input lower a passing run's assurance; a
+  header-scoped PE dump's `debug` also holds the header parse's provenance.
+  Each stays a fact-family `FactAvailability`. The inventory expands only
+  what the fixed corpus populates. A `not_collected` section gives no
+  assurance note when a detector reads it (decided in ADR-062 D15's
+  implementation decisions).
 - **D16 residual: `comparison_input`** has no consumer (no comparison-result
   cache exists) and is not implemented. A persisted evidence digest is used
   only against another persisted one: a snapshot decoded from the stored
@@ -324,19 +327,52 @@ per-item status in the
   decoded). Closing (3) needs a streamed or per-section parse so a raw
   section is not held as parsed JSON, and a release fan-out that loads
   members one pair at a time. Measurements: the plan's A1.9 D18 entry.
-  **Update 2026-11-02 (A2.5 per-member retention):** the release fan-out
-  already loads and drops one pair at a time; what grew with member count
-  was each held `DiffResult`'s contract type graph, now held packed
-  (`contract_evidence.TypeGraphSnapshot`). Synthetic members, 6000
-  declarations each, N=1/4/8: retained 4.5/18.1/36.1 -> 1.1/4.5/8.9 MiB,
-  peak traced 101.8/115.6/133.8 -> 101.8/105.4/109.8 MiB, max RSS
-  347/485/485 -> 348/430/432 MiB. Still open: (a) a residual ~0.19 MiB per
-  1000 declarations stays per finished member by design (packed graph,
-  public-declaration roots, compact bundle evidence the cross-library pass
-  reads), so peak is *dominated by* the largest pair but not strictly
-  independent of member count; (b) (3)'s per-pair whole-document
-  `json.loads` peak is unchanged -- the streaming `declarations` decode
-  stays deferred. Plan entry: A2.5.
+  2026-10-31 re-measurement: the release fan-out already loads one pair at
+  a time and keeps only compact per-member evidence
+  (`release_snapshot_retention`), yet peak RSS still grows with the member
+  count (53 MiB members, 6k functions: N=1 304 MiB, N=4 498 MiB, N=8
+  611 MiB). tracemalloc (1.5k-function members) shows about 5 MiB of live
+  memory kept per finished member, spread over parsed-JSON objects, decoded
+  ELF symbols, both sides' public-header type graphs
+  (`contract_evidence_collect.build_type_graph`) and execution-cache
+  entries (`elf_facts` alias index, `elf_symbol_filter`,
+  `diff_namespaces`); the rest of the growth is allocator high-water. Each
+  site needs its own owner decision (result data versus a cache that
+  outlives its pair) before A2.5 can be met.
+  **Decision 2026-11-02 (maintainer): the target for (3) is that release
+  fan-out peak memory does not grow with member count, bounded by the
+  largest member (about 8x its decoded size); the streaming decode is
+  deferred.** Status after the packed contract type graph (2026-11-02): the
+  dominant per-member term above -- both sides' public-header type graphs,
+  ~75% of what a finished member kept -- is now held packed
+  (`contract_evidence.TypeGraphSnapshot`). `compare old/ new/` over 6000-
+  function members, N=1/4/8: default fan-out (member processes) flat on both
+  revisions (262/248/262 MiB); in-process, one thread, 248/276/308 ->
+  245/264/272 MiB. Still open: (a) ~0.19 MiB per 1000 declarations stays per
+  finished member by design (packed graph, public-declaration roots, compact
+  bundle evidence), so an in-process fan-out still grows slowly with N;
+  (b) concurrent in-process members raise the peak by the worker count
+  (311 -> ~465 MiB from N=1 to N=4 with default threads), bounded by
+  workers, not N. Measurements: plan A2.5.
+  Per-section parse measurements: on a 140 MiB synthetic sectioned snapshot the parsed tree is 226 MiB and
+  `declarations` holds 85% of the text; the decoded snapshot is 43 MiB.
+  Ceilings (tracemalloc): today's text plus whole tree 359 MiB; whole text
+  plus only `declarations` parsed 323 MiB; a streamed per-section read that
+  never holds the whole text 287 MiB. Two load-time contracts force every
+  section to be parsed at load anyway: D14's record-extras split
+  (`wire_record_extensions.collect_record_extras` walks every record) and
+  the generation spelling migration, both whole-document. So a per-section
+  parse cannot leave an unread section unparsed without moving those errors
+  to first use. Its best case (-20%) also needs a streaming read that
+  reimplements `snapshot_io`'s decompression-bomb and size guards. The
+  deferred item is an element-level decode: the `declarations` arrays parsed,
+  checked for record extras, migrated and decoded one entity at a time, so
+  that neither the whole text nor the section's tree is ever resident.
+  Estimated bound: text plus decoded snapshot, about 180 MiB on the same
+  input. That rewrites `split_wire_extensions`, the DTO migration,
+  `export_legacy_sections`, `view_for` and `decode_declaration_store` as
+  streaming passes. The decoded-section cache still has no reader.
+  Measurements: plan A2.5.
 
 ### False-positive risk
 
@@ -400,8 +436,8 @@ per-item status in the
 
 #### The L5 source graph's own node identities are never renumbered alongside the flat snapshot's closure markers (Codex review on PR #868, fresh evidence)
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** abicheck/storage/snapshot_load_normalization.py:123-138 docstring still says surface_graph node/edge identities are not renumbered. renumber_anonymous_closure_identities (storage/closure_identity.py) has no graph handling.  
-`false-positive` — Closure markers in the flat snapshot are renumbered on load, but the L5 `surface_graph` node and edge identities are not, so the two disagree. [Full write-up](known-gaps/the-l5-source-graphs-own-node-identities-are-never-renumbered.md)
+**Status (2026-10-31): FIXED for every snapshot written from now on; residual for older baselines.** `storage/closure_graph_renumber.py` renumbers the graph's node ids, labels, edge endpoints and attributes with the flat fields' ordinals, on the dump path and on load (a stored graph on its first decode, so ADR-062 D18 laziness is kept). A graph-only closure is numbered after its group's flat ordinals, so the graph never moves a flat ordinal. Residual: a baseline written before this fix whose flat fields are already in `#N` form but whose graph still spells `:line:col` cannot be reconciled (the flat coordinates are gone), so its graph closures are numbered as graph-only.
+`false-positive` — a pre-fix baseline's graph closures can still be numbered differently from its flat ones. [Full write-up](known-gaps/the-l5-source-graphs-own-node-identities-are-never-renumbered.md)
 
 #### Declared-header order is still load-bearing because the driver TU is sequential
 
@@ -453,12 +489,12 @@ per-item status in the
 
 ### Performance
 
-#### Snapshot write memory
+#### Snapshot write peak
 
-`perf` — Writing a snapshot still builds the whole encoded document tree (A2.2's remaining half).
+`perf` — Writing a snapshot builds the largest section's encoded tree whole (A2.2's record-level remainder).
 
-- [Snapshot write still builds the whole document tree](known-gaps/snapshot-write-still-builds-the-whole-document-tree.md)  
-  **Status (2026-10-31): OPEN.** The text stage streams. The tree build is the whole remaining write peak (39.8 of 39.9 MiB on a 23.9 MB libstdc++ dump).
+- [Snapshot write still builds the largest section's tree whole](known-gaps/snapshot-write-still-builds-the-whole-document-tree.md)  
+  **Status (2026-10-31): NARROWED.** Sections are encoded and written one at a time (550 -> 286 MiB on a two-section synthetic); a binary-only dump is one section, so its peak barely moves (39.8 -> 37.1 MiB).
 
 #### Bundle and multi-library memory
 
@@ -571,8 +607,8 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 
 #### A snapshot is not byte-reproducible across processes
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** unverified: no cross-process determinism check was run. The entry says the producer of the surface_graph.nodes ordering drift was never identified.  
-`hygiene` — Unverified: a snapshot is not byte-reproducible across processes; the producer of the `surface_graph.nodes` ordering drift was never identified. [Full write-up](known-gaps/a-snapshot-is-not-byte-reproducible-across-processes.md)
+**Status (2026-10-31): NARROWED.** The graph section's node/edge rows are now written in canonical id order (`storage/graph_table_codec.encode_graph_table`), so the observed `surface_graph.nodes` drift cannot reach the bytes whatever its producer; `tests/test_snapshot_byte_reproducibility.py` checks permutation invariance and a cross-process dump under three `PYTHONHASHSEED` values. Residual: no oneDAL-scale corpus is in CI, so another section's ordering is proven only on the generated corpus.  
+`hygiene` — Graph rows are canonicalized; byte reproducibility of the other sections is proven only on a generated corpus, not on oneDAL scale. [Full write-up](known-gaps/a-snapshot-is-not-byte-reproducible-across-processes.md)
 
 #### Destructive test-helper resets are guarded one helper at a time (2026-09-30)
 

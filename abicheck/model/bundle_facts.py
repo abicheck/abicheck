@@ -47,10 +47,11 @@ from .snapshot import AbiSnapshot
 #: `BUNDLE_FACTS_ARTIFACT_TYPE` marker below; to 3 (ADR-065 D8) for the
 #: decision-bearing `degraded_members` marker; to 4 for the equally
 #: decision-bearing `public_surface` block (the release's one public
-#: contract and the acquisition identity it was acquired under). This is the
-#: *reader's* max; `document_schema_version` below chooses what a writer
-#: declares.
-BUNDLE_FACTS_SCHEMA_VERSION = 4
+#: contract and the acquisition identity it was acquired under); to 5 for a
+#: member stored as its single-file sectioned document because the flat one
+#: would lose its ADR-062 D14/D15 carriers. This is the *reader's* max;
+#: `document_schema_version` below chooses what a writer declares.
+BUNDLE_FACTS_SCHEMA_VERSION = 5
 #: What a document with no degraded member declares (a pre-S2 reader still
 #: opens it); one *with* degraded members declares 3, so a reader that cannot
 #: honor the marker rejects it instead of misreading an ELF-only stand-in.
@@ -67,9 +68,15 @@ PUBLIC_SURFACE_SCHEMA_VERSION = 4
 #: The version a decision-bearing ``degraded_members`` marker declares
 #: (ADR-065 D8), kept as its own name now that it is no longer the maximum.
 DEGRADED_MEMBERS_SCHEMA_VERSION = 3
+#: The version a document holding any sectioned member declares (ADR-062
+#: D14/D15 carriers), so an older reader refuses it instead of reading the
+#: sectioned member as an empty flat snapshot.
+SECTIONED_MEMBERS_SCHEMA_VERSION = 5
 
 
-def document_schema_version(facts: BundleFacts) -> int:
+def document_schema_version(
+    facts: BundleFacts, *, sectioned_members: bool = False
+) -> int:
     """The ``schema_version`` a writer declares for *facts* (see above).
 
     The highest version any block *actually present* requires -- never the
@@ -77,6 +84,8 @@ def document_schema_version(facts: BundleFacts) -> int:
     still opens in every older reader, which is what keeps the bump
     additive for every existing baseline.
     """
+    if sectioned_members:
+        return SECTIONED_MEMBERS_SCHEMA_VERSION
     if facts.public_surface is not None:
         return PUBLIC_SURFACE_SCHEMA_VERSION
     if facts.degraded_members:

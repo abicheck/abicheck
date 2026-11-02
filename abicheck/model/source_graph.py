@@ -497,6 +497,11 @@ class SourceGraphSummary:
             old = self.coverage.get(key)
             return {**(old if isinstance(old, dict) else {}), **new}
 
+        # Canonical row order (known gap "a snapshot is not byte-reproducible
+        # across processes"): insertion order follows producer iteration,
+        # which may vary between processes; ids/relation keys are unique.
+        self.nodes.sort(key=lambda n: n.id)
+        self.edges.sort(key=lambda e: e.relation_key())
         self.graph_id = self.compute_graph_id()
         kinds: dict[str, int] = {}
         for n in self.nodes:

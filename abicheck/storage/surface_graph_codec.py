@@ -65,7 +65,12 @@ from .graph_table_codec import decode_graph_table, encode_graph_table, is_graph_
 if TYPE_CHECKING:
     from ..model.snapshot import AbiSnapshot
 
-__all__ = ["DeferredGraphPayload", "decode_surface_graph", "encode_surface_graph"]
+__all__ = [
+    "DeferredGraphPayload",
+    "decode_surface_graph",
+    "drop_shared_source_graph",
+    "encode_surface_graph",
+]
 
 
 class DeferredGraphPayload:
@@ -105,9 +110,22 @@ def encode_surface_graph(d: dict[str, Any], snap: AbiSnapshot) -> None:
     # Schema v49: the compact graph table, not ``to_dict()``'s per-entity
     # objects (storage/graph_table_codec.py).
     d["surface_graph"] = encode_graph_table(graph)  # type: ignore[arg-type]
+    drop_shared_source_graph(d, snap)
+
+
+def drop_shared_source_graph(d: dict[str, Any], snap: AbiSnapshot) -> None:
+    """The ``build_source`` half of :func:`encode_surface_graph` alone: pop
+    the nested ``source_graph`` the top-level graph already carries. Lets a
+    per-section encode of the ``build`` section skip encoding the graph."""
+    graph = snap.surface_graph
     bs_dict = d.get("build_source")
     bs = snap.build_source
-    if isinstance(bs_dict, dict) and bs is not None and bs.source_graph is graph:
+    if (
+        graph is not None
+        and isinstance(bs_dict, dict)
+        and bs is not None
+        and bs.source_graph is graph
+    ):
         bs_dict.pop("source_graph", None)
 
 
