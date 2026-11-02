@@ -112,6 +112,25 @@ class TestPackedGraphReadsBackTheTupleForm:
         g = TypeGraphSnapshot(nodes=["a"])
         with pytest.raises(AttributeError):
             g.nodes = ("b",)  # type: ignore[misc]
+        with pytest.raises(AttributeError, match="immutable"):
+            g._packed = b""  # type: ignore[misc]
+        assert g.nodes == ("a",)
+
+    def test_not_equal_to_a_non_graph(self) -> None:
+        g = TypeGraphSnapshot(nodes=["a"])
+        assert g.__eq__(("a",)) is NotImplemented
+        assert g != ("a",)
+
+    def test_repr_shows_the_decoded_graph(self) -> None:
+        g = TypeGraphSnapshot(nodes=["b", "a"], edges=[("b", "a")])
+        assert repr(g) == "TypeGraphSnapshot(nodes=('a', 'b'), edges=(('b', 'a'),))"
+
+    @pytest.mark.parametrize(
+        "edges", ["ab", b"ab", [("a",)], [("a", "b", "c")], ["ab"], [(1, "b")]]
+    )
+    def test_malformed_edges_are_rejected(self, edges) -> None:
+        with pytest.raises(TypeError):
+            TypeGraphSnapshot(nodes=["a"], edges=edges)
 
 
 # ---------------------------------------------------------------------------
