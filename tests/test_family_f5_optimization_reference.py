@@ -1120,3 +1120,45 @@ def test_cache_hit_identity_matches_cold_dump_for_a_symlink(tmp_path: Path) -> N
     from tests.test_snapshot_hit_binary_identity import check_hit_matches_cold
 
     check_hit_matches_cold("symlink", tmp_path)
+
+
+# ── packed contract type graph vs the tuple form it replaced (A2.5) ─────────
+
+
+def test_release_packed_type_graph_matches_tuple_reference(
+    release: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bug class perf.retained_per_member_state_kept_in_its_working_form:
+    the packed ``TypeGraphSnapshot`` a release holds per member gives the
+    member report the tuple form gives. The reference holds the graph as the
+    tuples the class used to store (``sorted(set(...))``, not the packed
+    codec), and counts its constructions so the reference run provably
+    used it."""
+    from abicheck.contract_evidence import TypeGraphSnapshot as Graph
+
+    validate = Graph.__init__
+    built = [0]
+
+    def tuple_init(self: Any, nodes: Any = (), edges: Any = ()) -> None:
+        validate(self, nodes, edges)  # same argument validation
+        pairs = {(e[0], e[1]) for e in edges}
+        object.__setattr__(
+            self, "_packed", (tuple(sorted(set(nodes))), tuple(sorted(pairs)))
+        )
+        built[0] += 1
+
+    old, new = release
+    # One member pair: its JSON report carries the persisted
+    # ``contract_context`` (type graph included), which a release report
+    # does not, so a graph the reference reads back differently is visible.
+    member = sorted(old.iterdir())[0].name
+    args = (str(old / member), str(new / member), "--contract", "exports")
+    packed = _run(*args)
+    assert '"type_graph"' in packed and '"edges": [\n' in packed, packed[:500]
+    with monkeypatch.context() as mp:
+        mp.setattr(Graph, "__init__", tuple_init)
+        mp.setattr(Graph, "nodes", property(lambda self: self._packed[0]))
+        mp.setattr(Graph, "edges", property(lambda self: self._packed[1]))
+        reference = _run(*args)
+    assert built[0] > 0, "the reference run never built a graph"
+    _assert_same(packed, reference, "release.packed_type_graph")

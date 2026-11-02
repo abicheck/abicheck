@@ -459,6 +459,7 @@ _F5 = tuple(
         "perf.pattern_compiled_before_the_filter_that_discards_it",
         "perf.pure_content_digest_recomputed_per_consumer",
         "perf.retention_decided_by_one_switch_not_by_consumers",
+        "perf.retained_per_member_state_kept_in_its_working_form",
         "perf.reuse_key_normalizes_an_ordered_input",
         "perf.shared_projection_read_as_an_owned_copy",
         "perf.shared_resource_gate_keyed_on_a_per_caller_value",
