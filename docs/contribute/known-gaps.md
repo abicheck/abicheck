@@ -441,13 +441,6 @@ implemented; D18 is partial. Owner: `storage/`; per-item status in the
 
 ### Performance
 
-#### Snapshot write memory
-
-`perf` — Writing a snapshot still builds the whole encoded document tree (A2.2's remaining half).
-
-- [Snapshot write still builds the whole document tree](known-gaps/snapshot-write-still-builds-the-whole-document-tree.md)  
-  **Status (2026-10-31): OPEN.** The text stage streams. The tree build is the whole remaining write peak (39.8 of 39.9 MiB on a 23.9 MB libstdc++ dump).
-
 #### Snapshot write peak
 
 `perf` — Writing a snapshot builds the largest section's encoded tree whole (A2.2's record-level remainder).
