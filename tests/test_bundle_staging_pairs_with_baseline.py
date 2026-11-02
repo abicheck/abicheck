@@ -26,6 +26,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from _abicheck_subprocess import abicheck_command
 from _workflow_exec import bash_executable, require_bash
 
 from tests.test_reusable_workflows import CHECK_PROJECT, _load, _steps
@@ -105,10 +106,7 @@ def test_staged_bundle_pairs_every_member_with_the_baseline(
 
     report = tmp_path / "report.json"
     result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "abicheck",
+        abicheck_command(
             "compare",
             str(baseline),
             str(tmp_path / "bundle-staging"),
@@ -116,7 +114,7 @@ def test_staged_bundle_pairs_every_member_with_the_baseline(
             "binary",
             "-o",
             f"json={report}",
-        ],
+        ),
         capture_output=True,
         text=True,
     )
