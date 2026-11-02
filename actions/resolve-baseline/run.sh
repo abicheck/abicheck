@@ -32,6 +32,7 @@ _fail_ambiguous() {
     echo "binary-paths={}"
     echo "member-snapshots-dir="
     echo "member-header-evidence=none"
+    echo "member-snapshot-paths={}"
     echo "archive-digest="
     echo "archive-digest-verified=false"
     echo "archive-attestation-verified=false"

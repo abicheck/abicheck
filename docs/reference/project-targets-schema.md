@@ -91,7 +91,7 @@ Common optional fields for `kind: library`:
 
 | Field | Type | Meaning |
 |-------|------|---------|
-| `public_headers` | list of string | Public header roots for this target, forwarded as `check-target`'s own `header` input for this target's generated cells (newline-joined, so a header root containing whitespace survives `action/run.sh`'s `add_flag()` intact) — see [`run-plan-schema.md`](run-plan-schema.md#runplancheck-fields)'s `header` field and [`reusable-workflows.md`](reusable-workflows.md#shared-analysis-options)'s per-cell-override exception. Not yet honored for a `kind: bundle` member (no per-bundle-member header staging exists). |
+| `public_headers` | list of string | Public header roots for this target, forwarded as `check-target`'s own `header` input for this target's generated cells (newline-joined, so a header root containing whitespace survives `action/run.sh`'s `add_flag()` intact) — see [`run-plan-schema.md`](run-plan-schema.md#runplancheck-fields)'s `header` field and [`reusable-workflows.md`](reusable-workflows.md#shared-analysis-options)'s per-cell-override exception. For a `kind: bundle` member it is the member's own header set at `depth: headers`: the run plan's `member_headers` carries it, and `check-target` dumps that member's candidate side against it alone. A `depth: headers` bundle check needs it on every member. |
 | `bundle` | string | The `bundles:` entry this target belongs to. Must be declared under `bundles:`, and that bundle's own `targets:` list must include this target back (the two must agree). |
 | `bundle_only` | boolean, default `false` | When `true`, this target is checked only as a bundle member, never standalone. Requires `bundle` to be set, and must **not** declare its own `checks:` — a `bundle_only` target's own checks would never run standalone, so declare the policy under `bundles:<id>.checks` instead. |
 | `checks` | list of check tuple | See [`checks:`](#checks) below. |
@@ -143,7 +143,8 @@ This schema resolves it with two complementary mechanisms:
 
 ## `bundles:`
 
-A mapping of bundle id → `{targets: [...], checks: [...]}`. Every listed
+A mapping of bundle id → `{targets: [...], checks: [...], required: [...],
+on_incomplete: ...}`. Every listed
 target must be a declared `kind: library` target, and if that target itself
 sets a `bundle:` field, it must name this same bundle back — the validator
 flags a mismatch (e.g. a target claims `bundle: bundle-a` but only
@@ -156,16 +157,57 @@ per-target ones (S14 bundle-scoped analysis, e.g. soname/provider-set
 checks across the whole release), and that cell needs its own
 baseline-channel/depth/gate policy independent of its member targets'.
 **Two restrictions that don't apply to a target check:** `depth` must be
-`binary` (never `headers`/`build`/`source` — a bundle check always
+`binary` or `headers` (never `build`/`source` — a bundle check always
 compares directories, which the CLI's per-library release fan-out never
-collects inline build/source evidence for; `headers` is additionally
-unsafe because a bundle's baseline is always raw binaries with no
-historical header snapshot, so both sides would be parsed against the
-same current checkout's headers, silently missing a header-only change),
-and `channel` may not be `"none"` (a bundle's candidate is always a staged
+collects inline build/source evidence for). At `depth: headers` every
+member must declare `public_headers:`: the OLD side is each member's own
+baseline snapshot (dumped at baseline time with that member's headers,
+staged by `resolve-baseline`), and `check-target` dumps each candidate
+member against its own headers, so no member is parsed against another
+member's headers or against the current checkout's headers on both sides.
+`channel` may not be `"none"` (a bundle's candidate is always a staged
 directory of member binaries, which `compare`'s audit-only shape — the
 no-baseline routing — rejects outright). Both are rejected at validation
 time.
+
+### Bundle scope policy: `required:` and `on_incomplete:`
+
+Two optional keys state which members a bundle check needs, so a project
+says it once in `.abicheck.yml` rather than on every invocation:
+
+| Key | Type | Default | Meaning |
+|---|---|---|---|
+| `required` | non-empty list of member target ids | every member | The members that must be present. A subset of this bundle's `targets:`; a duplicate, an id outside `targets:`, or an explicit `[]` is refused when the config is parsed. |
+| `on_incomplete` | `fail` \| `warn` | the project's `scope.on_incomplete` (itself `warn` by default) | What a missing required member does to the check: `fail` floors its exit code at 1, `warn` reports it and leaves the exit code alone. |
+
+```yaml
+bundles:
+  release:
+    targets: [libcore, libio, libnet, libgpu, libcuda, librocm]
+    required: [libcore, libio, libnet, libgpu]  # libcuda/librocm may be missing
+    on_incomplete: fail
+    checks:
+      - {channel: release, depth: binary}
+```
+
+Declaring either key turns the policy on. The run plan's bundle cell then
+carries `bundle_required`/`bundle_on_incomplete` (run-plan schema
+[`v4`](run-plan-schema.md)), and [`check-target`](check-target.md) forwards
+the required members as `compare --select-required`, every other member as
+`--select`, and `on_incomplete` as `--set scope.on_incomplete=block|warn`.
+The selection keys are the release keys `compare` pairs members by: each
+member's key is taken from the file the resolved baseline staged it under
+(`resolve-baseline`'s `binary-paths`), so `check-target` never guesses it.
+`check-project.yml` stages each candidate member under its target id, the
+same name `actions/baseline` gives it in `binaries/`, so the two sides pair
+member for member. It also stops refusing a bundle whose candidate is
+missing a member: it stages the members it finds and leaves the decision to
+the scope gate, which reports every missing member either way. A bundle with neither
+key behaves as before: every member must be staged on the candidate side.
+
+The baseline side is unchanged: a resolved bundle baseline still has every
+member (`resolve-baseline` reports `ambiguous` otherwise), so `required:`
+governs which candidate members may be absent, not which baseline members.
 
 **A bundle spanning multiple mandatory build-toolchain variants (e.g. a
 CPU build and a DPC++ build of the same release) must give its check an
@@ -449,13 +491,11 @@ cross-library findings — removed dependencies, provider changes — are
 bundle analysis skipped). Before adopting the
 declarative topology, confirm none of these apply to you:
 
-- **`bundles:` checks run at one depth only** — see the [`bundles:`
-  section](#bundles) above for the allowed depth and what `project
-  validate` rejects. If a bundle-level check needs header-scope evidence,
-  it can't run through a `bundles:` entry today.
-- **Per-target `public_headers:` is not honored for a `kind: bundle`
-  member** — see the `public_headers` row of the `targets:` field table
-  above for the one authoritative statement of that gap.
+- **`bundles:` checks run at `binary` or `headers` depth only** — see the
+  [`bundles:` section](#bundles) above for what `project validate` rejects.
+  A `headers` bundle check needs a baseline whose member snapshots all carry
+  header evidence (each member published with its own `header:`);
+  `check-target` refuses one that does not.
 - **Stored-facts bundle comparison (`BundleFacts`) has no run-plan /
   composite-Action / `check-project.yml` wiring** — it is reachable from
   the Python API and from `compare` (OLD_INPUT auto-detected as a stored

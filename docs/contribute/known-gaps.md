@@ -156,10 +156,10 @@ current emitter, which is unchanged.
 
 **Status (2026-10-25): FIXED.** `_attach_header_graph` calls `header_graph_ast_projection.degrade_header_type_pass` whenever `ast_failure` is set (a refused, malformed or partially bisected clang AST, #1674): the `header_type_graph` flag and its role-coverage keys are withdrawn and the pass is marked degraded, so `type_edges` reads not collected alongside the degraded call and semantic passes. A run with no AST failure (clang not selected) keeps the flat pass collected. Consequence: a failed header AST reports fewer confirmed type-edge findings, which is the intended narrowing. Tests: `tests/test_header_graph_ast_failure_coverage.py` (stubbed acquisition) and `tests/test_header_graph_ast_failure_integration.py` (a real clang refusal through `abicheck dump`: only header refused, one of two refused, control). Owner: `service_header_graph_attach._attach_header_graph`.
 
-#### A `kind: bundle` check still cannot run at `depth: headers`: only the *baseline* half of per-member header staging is wired (2026-09-12)
+#### A header-depth `kind: bundle` check has no runner-scale memory receipt, and no Action emits bundle facts (2026-09-12)
 
-**Status (re-verified 2026-10-25): OPEN, partly narrowed.** actions/check-target/action.yml:1832 still routes bundle old-library to `steps.resolve.outputs.binaries-dir`, not `member-snapshots-dir`. BUNDLE_CHECK_DEPTHS is unchanged (binary only, abicheck/buildsource/project_targets.py:144). The fail-early requirement for `depth: headers` on a bundle is met at input validation, with a corrected reason. So (a) routing and (b) candidate-side per-member headers are still open.  
-`false-clean` — Bundle checks can stage per-member *baseline* header snapshots, but the Action still routes the old side to binaries and the candidate side has no per-member headers, so a bundle check cannot run at `depth: headers`. [Full write-up](known-gaps/a-kind-bundle-check-still-cannot-run-at-depth-headers-only-the.md)
+**Status (2026-11-01): PARTIAL, narrowed.** Fixed 2026-11-01: a bundle check runs at `depth: headers`. `check-target` takes the OLD side from `resolve-baseline`'s `member-snapshots-dir` (not `binaries-dir`), refuses a baseline whose member snapshots do not all carry header evidence, dumps each candidate member against its own `public_headers:` (run-plan `member_headers`, `workflows/bundle_candidate_snapshots`), and compares the two snapshot directories with `--depth headers`, so the fan-out is budgeted at the headers rung. `BUNDLE_CHECK_DEPTHS` is `{binary, headers}`; a header-depth bundle needs `public_headers:` on every member. Still open: (c) no measured peak-memory/wall-clock receipt for a large header-depth bundle on the 16 GB runner (a run that overruns fails loudly, it does not pass), and (d) no first-party Action declares a bundle-facts output. `tests/test_bundle_header_depth_routing.py`.
+`hygiene` — A large header-depth bundle check is not proven to fit the 16 GB runner, and no Action emits a bundle-facts document. [Full write-up](known-gaps/a-kind-bundle-check-still-cannot-run-at-depth-headers-only-the.md)
 
 #### Header-pass body coverage is one blanket unit, not per body (2026-10-11)
 
@@ -560,11 +560,6 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 
 **Status (2026-10-22): PARTIAL.** The physical move and split landed: the detectors are in `compare/internal_leak.py`, the layout walk in `compare/internal_leak_paths.py`, the call-graph walk in `compare/internal_leak_graph.py`, and the subject classification in `compare/internal_leak_names.py`. Each is under the 800-line cap, and nothing re-exports from the old root path. Still open: `tests/test_internal_leak.py` (1933 lines) remains above the 1200-line test cap on its `no_growth` record.  
 `hygiene` — the leak rule is owned by `compare/` as four modules, but its main test module is still a `no_growth` grandfather and has not yet been split by behavior axis. [Full write-up](known-gaps/internal-leak-is-now-four-compare-modules-but-its-test.md)
-
-#### A directory/package `compare` cannot render sarif/review; `bundles:` cannot state scope policy
-
-**Status (2026-10-23): PARTIAL.** Closed: a directory/package `compare` now renders `sarif` (one run per library, each result stamped with `properties.releaseMember`) and `review` (a release digest rendered from the release JSON), so `RELEASE_FORMATS` is the full compare set minus `terminal`. Still open: BundleSpec has no scope-policy keys (`bundles:` cannot state scope policy at bundle level).  
-`hygiene` — `bundles:` has no scope-policy keys. [Full write-up](known-gaps/a-directorypackage-compare-cannot-render-sarifreview-bundles.md)
 
 #### Source-read licence: enforced at the one consumer, not repo-wide (2026-09-12)
 

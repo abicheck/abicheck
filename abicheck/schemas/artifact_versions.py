@@ -94,7 +94,7 @@ def current_artifact_version(
     # parse, not a lower, conditionally-emitted one (Codex review; raised to
     # v3 with plan slice 7r's `skipped` block, since a registry still saying
     # v2 tells a consumer it need only support v2 against a build that can
-    # emit v3).
-    from ..buildsource.run_plan_schema import RUN_PLAN_SCHEMA_SKIPPED
+    # emit v3; raised again to v4 with the bundle scope policy).
+    from ..buildsource.run_plan_schema import RUN_PLAN_SCHEMA_BUNDLE_SCOPE
 
-    return RUN_PLAN_SCHEMA_SKIPPED
+    return RUN_PLAN_SCHEMA_BUNDLE_SCOPE

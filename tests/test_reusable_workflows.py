@@ -1811,50 +1811,6 @@ class TestCandidateResolverConfinesMatchesToTheArtifactRoot:
             "isn't a bug in the workflow script itself."
         ),
     )
-    def test_bundle_members_with_colliding_basenames_are_rejected(
-        self, tmp_path: Path
-    ) -> None:
-        # Two distinct members resolving to files with the same basename
-        # (e.g. build/linux/libfoo.so vs. build/plugins/libfoo.so) would
-        # otherwise silently overwrite one another in the shared flat
-        # bundle-staging/ directory (Codex review).
-        candidate = tmp_path / "candidate"
-        (candidate / "linux").mkdir(parents=True)
-        (candidate / "plugins").mkdir(parents=True)
-        (candidate / "linux" / "libfoo.so").write_bytes(b"core")
-        (candidate / "plugins" / "libfoo.so").write_bytes(b"plugin")
-
-        result = self._run_bash(
-            tmp_path,
-            {
-                "kind": "bundle",
-                "name": "mybundle",
-                "member_binary_patterns": {
-                    "core": "linux/libfoo.so",
-                    "plugin": "plugins/libfoo.so",
-                },
-            },
-        )
-        assert result.returncode != 0
-        assert "libfoo.so" in result.stderr
-        assert "'core'" in result.stderr and "'plugin'" in result.stderr
-
-    @pytest.mark.skipif(
-        sys.platform == "win32",
-        reason=(
-            "These steps run under the Actions runner's own `shell: bash`, "
-            "which is a real POSIX bash on every platform -- this test "
-            "exercises that behavior. (The check job's runs-on now comes "
-            "from the cell's profile and can be windows-latest, so the "
-            "older wording here, that the workflow only ever runs on "
-            "ubuntu-latest, no longer holds -- G34 Phase C.) What this "
-            "*test* cannot get is a POSIX bash on a Windows test runner: "
-            "plain 'bash' on PATH "
-            "resolves to the System32 WSL launcher (not Git Bash) and fails "
-            "before running anything if no WSL distro is installed, which "
-            "isn't a bug in the workflow script itself."
-        ),
-    )
     def test_bundle_members_with_distinct_basenames_still_resolve(
         self, tmp_path: Path
     ) -> None:
@@ -1919,7 +1875,7 @@ class TestCandidateResolverConfinesMatchesToTheArtifactRoot:
         )
         assert result.returncode == 0, result.stderr
         assert not (stale / "leftover.so").exists()
-        assert (stale / "libpvxs.so").exists()
+        assert (stale / "libpvxs").exists()
 
 
 class TestCheckTargetIdentityPassthrough:

@@ -71,7 +71,8 @@ def _print_outputs(
     trusting each value's construction to stay newline-free forever
     (CodeRabbit review).
 
-    ``member-snapshots-dir``/``member-header-evidence`` are always printed,
+    ``member-snapshots-dir``/``member-header-evidence``/
+    ``member-snapshot-paths`` (member -> staged snapshot) are always printed,
     empty/``none`` when no per-member baseline header staging ran (every
     ``kind: target`` resolution, and any bundle resolution the caller did
     not pass ``--stage-member-snapshots`` for) -- a composite Action output
@@ -88,6 +89,9 @@ def _print_outputs(
         "binary-paths": json.dumps(result.binary_paths),
         "member-snapshots-dir": str(staged.snapshots_dir) if staged else "",
         "member-header-evidence": (staged.header_evidence_state if staged else "none"),
+        "member-snapshot-paths": json.dumps(
+            {e.member: str(e.path) for e in staged.staged} if staged else {}
+        ),
         # kind: members only. Always printed (``{}``/``[]`` otherwise) for the
         # same reason ``binaries-dir`` is printed for a target: one key set for
         # every branch, so a caller's expression never reads a key that some
