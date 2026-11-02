@@ -7,10 +7,14 @@ Oracles are hand-computed: ``float x8`` is 8 * 4 = 32 bytes, ``char x32`` is
 
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
 from xml.etree.ElementTree import Element
 
 import pytest
 
+from abicheck.extract import cache_dep_manifest
+from abicheck.extract.cache_dep_manifest import DepManifest
 from abicheck.extract.headers.castxml.vector_join import (
     VECTOR_SIDECAR_BACKEND,
     _valid_sidecar,
@@ -218,9 +222,18 @@ def test_well_formed_sidecar_is_a_hit() -> None:
 
 
 class _FakeStore:
+    """A one-entry store. A seeded payload gets an empty dependency manifest
+    beside its entry, as a real publish of a dependency-free parse would."""
+
     def __init__(self, payload: object = None) -> None:
         self.payload = payload
         self.published: list[object] = []
+        self.root = Path(tempfile.mkdtemp(prefix="vj-store-"))
+        if payload is not None:
+            cache_dep_manifest.write_sidecar(self.path("k"), DepManifest())
+
+    def path(self, key: str) -> Path:
+        return self.root / "entry.json"
 
     def lookup(self, key: str, memo: object = None) -> object:
         return self.payload
@@ -354,12 +367,17 @@ def test_castxml_overloads_key_by_mangled_name() -> None:
 
 
 def test_clang_launch_failure_leaves_vectors_unresolved(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     import abicheck.extract.headers.castxml.vector_join as vj
 
+    tmp_root = tmp_path
+
     class _Store:
         published: list[object] = []
+
+        def path(self, key: str) -> Path:
+            return tmp_root / "entry.json"
 
         def lookup(self, key: str, memo: object = None) -> object:
             return None

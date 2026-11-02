@@ -27,6 +27,7 @@ from xml.etree.ElementTree import Element, SubElement
 
 from ....errors import SnapshotError
 from ....storage.ast_cache_location import ast_cache_store
+from ... import cache_dep_manifest
 from ...arithmetic_type_spellings import is_arithmetic_spelling
 from ..clang.ast_inner import ast_inner
 from ..clang.backend import clang_header_dump
@@ -327,24 +328,33 @@ def join_variable_templates(
     if not has_variable_template_text(headers):
         return root
     store = ast_cache_store(key, VARIABLE_TEMPLATE_SIDECAR_BACKEND)
-    cached = valid_sidecar(store.lookup(key))
+    # The sidecar is derived from a clang parse: valid only while the system
+    # headers that parse read are unchanged (ADR-062 D11).
+    entry = store.path(key)
+    cached = (
+        valid_sidecar(store.lookup(key))
+        if cache_dep_manifest.entry_valid(entry)
+        else None
+    )
     if cached is not None:
+        cache_dep_manifest.note(cache_dep_manifest.recall(str(entry), entry))
         return with_variable_templates(root, cached)
     try:
-        clang_root, _kind, _force_cpp = clang_header_dump(
-            headers,
-            extra_includes,
-            compiler,
-            gcc_path=gcc_path,
-            gcc_prefix=gcc_prefix,
-            gcc_options=gcc_options,
-            gcc_option_tokens=gcc_option_tokens,
-            sysroot=sysroot,
-            nostdinc=nostdinc,
-            lang=lang,
-            extra_hash_dirs=extra_hash_dirs,
-            exported_symbols=exported_symbols,
-        )
+        with cache_dep_manifest.recording() as clang_parse:
+            clang_root, _kind, _force_cpp = clang_header_dump(
+                headers,
+                extra_includes,
+                compiler,
+                gcc_path=gcc_path,
+                gcc_prefix=gcc_prefix,
+                gcc_options=gcc_options,
+                gcc_option_tokens=gcc_option_tokens,
+                sysroot=sysroot,
+                nostdinc=nostdinc,
+                lang=lang,
+                extra_hash_dirs=extra_hash_dirs,
+                exported_symbols=exported_symbols,
+            )
     except (SnapshotError, OSError) as exc:
         log.warning(
             "clang could not parse the header(s) for variable templates (%s); "
@@ -353,5 +363,7 @@ def join_variable_templates(
         )
         return root
     entries = clang_const_variable_templates(clang_root, headers)
-    store.publish(key, {"templates": entries}, ())
+    deps = clang_parse.manifest()
+    if deps is not None and cache_dep_manifest.write_sidecar(entry, deps):
+        store.publish(key, {"templates": entries}, ())
     return with_variable_templates(root, entries)

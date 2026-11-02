@@ -92,6 +92,21 @@ gap on the main page instead.
 
 **Status (2026-10-31): CLOSED (by design, maintainer decision).** `--sources` gets no `.abicheck.yml` home. The source tree is a per-side, per-run operand (ADR-091 D4 amendment (a)/(b); `frontends/cli/options/rulings.py`), and the one stable case, `dump` run in its own checkout, is already served by config discovery (`config_paths.resolve_project_config` finds the config at the `--sources` tree root or above the current directory). ADR-091 records it in a dated D4 amendment. [Full write-up](../known-gaps/sources-needs-config-discovery-rule.md)
 
+### Cache identity: mtime, system include directories, file includes and non-header suffixes (closed 2026-10-31)
+
+**Status (2026-10-31): CLOSED.** Four entries, one root cause: the header-parse cache keys approximated "the bytes the parse can read" with mtimes and a suffix-filtered walk. Both the whole-snapshot key (`workflows/dump/cache/key.py`) and the header-AST keys (`extract/headers/ast_config.py`) now fold content digests only, from one owner, `extract/cache_input_digest.py` (ADR-062 D11: stat fields only let `file_digest` skip re-reading an unchanged file, never reach a key):
+
+- *The whole-snapshot key mixed mtime into identity; the clang AST key was mtime-only.* Both are content-only now; a touch keeps the warm entry.
+- *System include directories were not hashed.* The compiler's own `#include <...>` search list (`-E -v`, memoized per driver content digest) is content-hashed into the whole-snapshot key and the castxml AST key; the clang AST key hashes the content of its injected `system_includes`; both keys hash the content of the `CPATH`/`C_INCLUDE_PATH`/`CPLUS_INCLUDE_PATH` directories.
+- *A file passed as an include was not content-hashed.* A file-valued include entry digests as itself.
+- *The walk covered only `CACHE_HEADER_SUFFIXES`.* `iter_cache_input_rel_parts` covers every file under an include root (suffix-less `<vector>`, `.def`, `.in`), skipping only version-control directories.
+
+Pinned by `tests/test_cache_identity_mutations.py` (mutation x key matrix against an `os.walk` oracle; nine of its cases fail on the previous derivation). Behaviour change: every header-bearing cache entry re-keys once; a sysfs-like tree passed as a sysroot is now walked in full.
+
+### Re-scoping a cache-reloaded snapshot kept typedefs that scoping the fresh extraction drops (closed 2026-10-31)
+
+**Status (2026-10-31): CLOSED.** Root cause: the flat maps' declaring-header attribution (`HeaderAttributedMap`) is runtime-only and the snapshot codec drops it by design, so scoping a reloaded snapshot could not prove a typedef dependency-only (libssl + `openssl/ssl.h`: 821 typedefs kept vs 652). The dump cache now writes the attribution to a cache-private `<key>.declhdr` sidecar and re-attaches it on read; a header-derived entry without its sidecar is a miss. Public snapshot schema unchanged. Pinned by `tests/test_dump_cache_rescope_roundtrip.py` (generated attribution shapes, plus a gcc fixture and libssl under `integration`). [Full write-up](../known-gaps/rescoping-a-cache-reloaded-snapshot-keeps-typedefs-a-fresh-scope-drops.md)
+
 ### A large export shrink with no declared surface emitted no finding in header mode (closed 2026-10-24)
 
 **Status (re-verified 2026-10-25): CLOSED (no longer reproduces; pinned).** The premise was wrong: header-aware dumps already report each lost undeclared export as `func_removed_elf_only`/`var_removed_elf_only` (`compare.undeclared_exports._export_only_removals`, #1308), BREAKING by default per ADR-063. Now pinned by `tests/test_undeclared_export_shrink.py` and its `_integration` sibling. [Full write-up](../known-gaps/a-large-export-shrink-with-no-declared-surface-emits-nothing.md)

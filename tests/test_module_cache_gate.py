@@ -48,6 +48,13 @@ _INTERNING = (
 
 #: ``<path>::<name>`` -> why this process-global state is safe to share.
 ALLOWLIST: dict[str, str] = {
+    "abicheck/extract/cache_input_digest.py::_FILE_MEMO": "content-digest memo for cache keys (ADR-062 D11): an entry is reachable only while the file's stat signature is unchanged and files inside the racy-mtime window are never memoized, so it can only skip re-reading identical bytes, never change a key",
+    "abicheck/extract/cache_input_digest.py::_DIRTY": "the not-yet-persisted half of _FILE_MEMO for the on-disk digest store; holds the same stat-validated entries and is cleared on each flush, so it can only skip a re-read in a later process, never change a key",
+    "abicheck/extract/cache_input_digest.py::_STORE_STATE": "one flag recording that the on-disk digest store was merged into _FILE_MEMO this process; not a cache of any result",
+    "abicheck/extract/cache_input_digest.py::_SEARCH_DIR_MEMO": "per-process memo of the compiler's include search dirs keyed by tool identity (path plus content digest) and language; the same tool binary answers the same list, so it can only skip a subprocess, never change a key",
+    "abicheck/extract/cache_dep_manifest.py::_KNOWN": "bounded map of an entry path to the dependency manifest that validated or produced it, so a result served from the shared acquisition table can name its dependencies; a miss falls back to the sidecar on disk and an unknown one makes the dump cache store nothing, so it can only cause a miss, never a hit",
+    "abicheck/extract/cache_dep_manifest.py::_JOURNAL": "the manifests noted while a recording is open, read back only as a union that can add dependencies (extra misses), never drop one; cleared when the last recording closes",
+    "abicheck/extract/cache_dep_manifest.py::_ACTIVE": "count of open recordings; bookkeeping, not a cache",
     "abicheck/model/execution_cache.py::_REGISTRY": "the cache wrapper's own registry: one record per cache definition, written at import, never per request",
     "abicheck/model/name_heuristics.py::_REGISTRY": "the name-heuristic registry: one record per heuristic, written by register_name_heuristic at import, never per request or per comparison",
     "abicheck/storage/ast_cache_location.py::_REFERENCE_SCRATCH": "reference mode's scratch-directory list, kept only to delete them at exit; never read as a cache",

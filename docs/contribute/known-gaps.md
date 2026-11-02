@@ -130,6 +130,12 @@ current emitter, which is unchanged.
 
 ### False-clean risk
 
+#### A cached header parse does not see a newly reachable system header that its depfile never named (2026-11-01)
+
+**Status (2026-11-01): OPEN, narrow.** The header-AST and whole-snapshot caches fold the compiler's system include directories by spelling and validate an entry by the files the parse read (`extract/cache_dep_manifest.py`, ADR-062 D11 implementation note). Three changes are not seen. (a) A file created where a `__has_include` probe or a failed `#include_next` search would now find it: the depfile lists only files that were opened, so a probe that answered "absent" records nothing. (b) Shadowing is checked lexically: a recorded header's relative name is checked absent in every *earlier* search directory by path spelling, so a directory reached through a symlink under a different spelling is not covered. (c) A frontend run that writes no depfile (a DPC++ multi-pass `-fsycl` run, or an injected test runner) records an empty manifest: its system headers are keyed by directory spelling only, as before ADR-062 D11, so an in-place system-header edit is not seen for that run. Hashing every file under the system directories instead walked whole SDK trees on each lookup (the Windows SDK and MSVC include dirs), which timed out Windows dumps. ccache's direct mode has the same (a) and (b). Each case is a stale hit only after a system-header installation that adds files without changing any file the parse read.
+
+`false-clean` — after such an installation a warm dump can serve the snapshot of the previous system-header set.
+
 #### A readable but corrupted `.dynsym` entry can still read as a clean compare (2026-10-27)
 
 **Status (2026-10-28): PARTIAL.** A shared object whose section header table is zeroed, absent or stripped (`sstrip`, `e_shoff`/`e_shnum` cleared) is no longer refused: the loader's view of the dynamic table (`PT_DYNAMIC`, `DT_SYMTAB`/`DT_STRTAB`/`DT_STRSZ`/`DT_SYMENT`, the `DT_GNU_HASH` or `DT_HASH` count, `DT_VERSYM`/`DT_VERDEF`/`DT_VERNEED`) yields the same exports, bindings, visibility and versions as the intact build (`abicheck/extract/elf_loader_view.py`, `tests/test_dynamic_table_loader_view.py`). An export table that is itself unreadable (no `PT_DYNAMIC`, a `.dynsym` filled with `0xff`, truncated, or exported entries with no resolvable name) is still refused at dump with exit 1 (`tests/test_export_table_unreadable_matrix.py`, OLD/NEW/both). Residual: corruption that leaves every entry structurally valid is read as the table it now says. Random byte flips inside `.dynsym` (`st_info`, `st_shndx`, `st_value`, or a `st_name` that still lands on a non-empty string) and garbage bytes in `.dynstr` that still yield non-empty names parse without a failure. On one side the result is a fabricated `BREAKING`; on the corrupted side of a pair it can be `COMPATIBLE` (exit 0, removals hidden) or, with both sides identically corrupted, `NO_CHANGE`. No reader can tell these from a legitimate table without a checksum.
@@ -435,12 +441,12 @@ implemented; D18 is partial. Owner: `storage/`; per-item status in the
 
 ### Performance
 
-#### Dependency scoping after a cache round-trip
+#### Snapshot write memory
 
-`perf` — Scoping a snapshot reloaded from the dump cache keeps typedefs that scoping the fresh extraction drops.
+`perf` — Writing a snapshot still builds the whole encoded document tree (A2.2's remaining half).
 
-- [Re-scoping a cache-reloaded snapshot keeps typedefs that scoping the fresh extraction drops](known-gaps/rescoping-a-cache-reloaded-snapshot-keeps-typedefs-a-fresh-scope-drops.md)  
-  **Status (2026-10-22): OPEN.** Warm `resolve_input` runs now reproduce cold output (finished-tier misses re-extract); the round-trip asymmetry itself is unfixed.
+- [Snapshot write still builds the whole document tree](known-gaps/snapshot-write-still-builds-the-whole-document-tree.md)  
+  **Status (2026-10-31): OPEN.** The text stage streams. The tree build is the whole remaining write peak (39.8 of 39.9 MiB on a 23.9 MB libstdc++ dump).
 
 #### Bundle and multi-library memory
 
@@ -488,21 +494,6 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 
 **Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** The 'currently ungated' clause is closed: scripts/check_header_graph_perf.py:267 defines MEMORY_METRICS attach_peak_rss_mib/attach_end_rss_mib. The peak from materialising the clang JSON AST is still open, and the empty-list reduction is a recorded negative result.  
 `perf` — A member's attach peak is the clang JSON document plus its parsed tree, not the header graph; the memory metrics are now gated, the peak itself is not reduced. [Full write-up](known-gaps/a-members-peak-memory-is-the-clang-json-ast-not-the-header.md)
-
-#### The cache keys do not hash system include directories, and a file passed as an include is not content-hashed (2026-10-12)
-
-**Status (2026-10-12): OPEN.** Found by reading `workflows/dump/cache/key.py`'s `_cache_key` and `extract/headers/ast_config._cache_key`, not by a toolchain-change probe. The whole-snapshot key hashes the caller's `headers`/`includes`, inferred roots and compile-context inputs. It does not hash auto-probed system include directories that are absent from those inputs. The header-AST key folds those resolved `system_includes` as path strings only, not their contents. A header update inside one of those unchanged directories can therefore reuse both caches. Compiler-option `-isystem` roots are outside this gap: their paths are content-hashed through `compile_context_header_inputs` and `extra_hash_dirs`. Separately, the snapshot key's include walk has no file branch: a file passed as an `includes` entry contributes its path but not its contents, because the directory scan returns no entries for a file. Reachable only through a direct `includes=[file]` call; `-include`/`-imacros` files use the content-hashed `files` channel.
-`false-clean` — A warm snapshot or AST entry can survive an edit to a system header, or to a file passed as an include, under an unchanged path.
-
-#### The cache keys walk include trees only over `CACHE_HEADER_SUFFIXES`, so transitive headers with other suffixes never bust them
-
-**Status (2026-10-12): OPEN, by decision.** `header_utils.py` documents the suffix filter as a deliberate choice (#454). Explicit inputs are hashed whatever their suffix; transitive includes under an `-I` directory with an unlisted suffix (`.def`, `.in`, `.cfg`) are not. Widening the walk re-keys every existing entry and adds walk cost on large include trees, so it needs a measured change rather than a one-line edit.
-`false-clean` — An edit to a transitively included `.def`/`.in` under an include root leaves both cache keys unchanged.
-
-#### The whole-snapshot key mixes mtime into identity, which ADR-062 D11 (Proposed) rules out
-
-**Status (2026-10-12): OPEN, blocked on D11.** `workflows/dump/cache/key.py`'s `_cache_key` hashes each header's `st_mtime_ns` alongside its content, so a touched but unchanged header discards the entry. ADR-062 D11 says caches key on content and use size and mtime only to avoid recomputing a digest. D11 is Proposed, so the key is unchanged until D11 is accepted or amended. The header-AST key is the other way round: mtime only, no content. The two caches therefore disagree on the same filesystem facts.
-`perf` — Unchanged headers with fresh mtimes miss the whole-snapshot cache. Keeping content but dropping mtime is safe for correctness because content is hashed.
 
 #### Python-level AST walks, the side boundary and the snapshot cache dominate large runs (2026-10-11)
 

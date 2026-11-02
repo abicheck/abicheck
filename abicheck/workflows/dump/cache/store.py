@@ -24,16 +24,21 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ....extract import progress
+from ....extract import cache_dep_manifest, progress
+from ....extract.cache_dep_manifest import DepManifest
 from ....model.execution_cache_scoped import DiskCache
+from ....storage.cache_integrity import DEPS_SUFFIX
+from . import declaring_headers
 
 if TYPE_CHECKING:
     from ....model import AbiSnapshot
 
 _logger = logging.getLogger("abicheck.cache")
 
-#: Maximum number of cached snapshots (LRU eviction by mtime).
-MAX_ENTRIES: int = 100
+#: Byte quota per cache tier (ADR-062 D11: byte-quota LRU, not an entry
+#: count). Recency is the entry's mtime, refreshed on every hit. Internal
+#: policy like D12's compression levels, not a user knob.
+MAX_BYTES: int = 4 * 1024**3
 
 
 def _get_cache_dir() -> Path:
@@ -56,6 +61,9 @@ _CACHE_DIR: Path = _get_cache_dir()
 #: plan, Phase 4): ``ABICHECK_REFERENCE_MODE=1`` makes every lookup a miss
 #: and every store a no-op, so a reference run always dumps afresh.
 SNAPSHOT_DISK_CACHE = DiskCache("abicheck.snapshot_cache.disk")
+
+#: The manifest of a snapshot no header parse fed: nothing to re-check.
+_NO_DEPS = DepManifest()
 
 
 def _write_enabled() -> bool:
@@ -109,28 +117,49 @@ def _read_entry(key: str, binary_path: Path, subdir: str = "") -> AbiSnapshot | 
     from ....serialization import load_snapshot
 
     base = _entry_dir(subdir)
+    # ADR-062 D11: the key folds system include dirs by spelling only; the
+    # system headers the entry's parses read are checked here, against the
+    # manifest stored beside it. No manifest, or a changed file, is a miss.
+    manifest_entry = base / key
+    if not cache_dep_manifest.entry_valid(manifest_entry):
+        return None
     for cache_file in (base / f"{key}.json.zst", base / f"{key}.json"):
         if not cache_file.exists():
             continue
         try:
-            snap = load_snapshot(cache_file)
+            snap = declaring_headers.attach(load_snapshot(cache_file), base, key)
         except Exception:
             _logger.debug(
                 "Cache read error for %s, treating as miss", key[:12], exc_info=True
             )
             continue
-        # Touch mtime for LRU
-        try:
-            cache_file.touch()
-        except OSError:
-            pass
+        if snap is None:  # header-derived entry without its attribution
+            continue
+        cache_dep_manifest.note(
+            cache_dep_manifest.recall(str(manifest_entry), manifest_entry)
+        )
+        # Touch mtime for LRU (the sidecars too, so they age with their entry)
+        for touched in (
+            cache_file,
+            declaring_headers.sidecar_path(base, key),
+            cache_dep_manifest.sidecar_path(manifest_entry),
+        ):
+            try:
+                os.utime(touched)  # never creates a missing sidecar
+            except OSError:
+                pass
         _logger.debug("Cache hit: %s → %s", binary_path.name, key[:12])
         return snap
     return None
 
 
 def _store_key(
-    snap: AbiSnapshot, key: str, binary_path: Path, subdir: str = ""
+    snap: AbiSnapshot,
+    key: str,
+    binary_path: Path,
+    subdir: str = "",
+    *,
+    deps: DepManifest | None = _NO_DEPS,
 ) -> None:
     """Store under a previously computed, post-execution-validated key.
 
@@ -140,22 +169,39 @@ def _store_key(
     from before this cache was compression-aware is never written again,
     only read as a fallback by :func:`lookup_key`. If a stale legacy
     ``<key>.json`` for the same key exists, it's removed so a lookup doesn't
-    keep preferring an old snapshot over a freshly stored one."""
-    if not key:
+    keep preferring an old snapshot over a freshly stored one.
+
+    *deps* is the dependency manifest of the parses that produced *snap*
+    (:mod:`abicheck.extract.cache_dep_manifest`), written beside the entry;
+    ``None`` -- dependencies unknown or changed mid-dump -- stores nothing.
+    The default, no dependencies, fits a snapshot no header parse fed."""
+    if not key or deps is None:
         return
     from ... import memory_trace
 
     with memory_trace.phase("dump.cache.store"):
-        SNAPSHOT_DISK_CACHE.store(lambda: _write_entry(snap, key, binary_path, subdir))
+        SNAPSHOT_DISK_CACHE.store(
+            lambda: _write_entry(snap, key, binary_path, subdir, deps=deps)
+        )
 
 
 def _write_entry(
-    snap: AbiSnapshot, key: str, binary_path: Path, subdir: str = ""
+    snap: AbiSnapshot,
+    key: str,
+    binary_path: Path,
+    subdir: str = "",
+    *,
+    deps: DepManifest = _NO_DEPS,
 ) -> None:
     try:
         base = _entry_dir(subdir)
         base.mkdir(parents=True, exist_ok=True)
         cache_file = base / f"{key}.json.zst"
+        declaring_headers.write_sidecar(snap, base, key)
+        # Before the entry is published: an entry never exists without the
+        # manifest it was written with.
+        if not cache_dep_manifest.write_sidecar(base / key, deps):
+            return
         from ....snapshot_io import ZSTD_LEVEL_CACHE, SnapshotCompression
         from ....storage.snapshot_codec import write_snapshot_compact
 
@@ -176,7 +222,7 @@ def _write_entry(
             except OSError:
                 pass
         _logger.debug("Cache store: %s → %s", binary_path.name, key[:12])
-        _evict_if_needed(base)
+        _evict_if_needed(base, protect=cache_file.name)
     except Exception as exc:
         # Caching is a pure optimization layered on top of a real dump that
         # already succeeded — any failure here (disk full, an unserializable
@@ -187,34 +233,24 @@ def _write_entry(
         _logger.debug("Cache write failed: %s", exc, exc_info=True)
 
 
-def _safe_mtime(p: Path) -> float:
-    """Return file mtime, or 0.0 if stat fails (e.g. concurrent deletion)."""
-    try:
-        return p.stat().st_mtime
-    except OSError:
-        return 0.0
+def _evict_if_needed(base: Path | None = None, *, protect: str = "") -> None:
+    """Evict least-recently-used entries until the tier fits :data:`MAX_BYTES`
+    (``storage.byte_quota_lru``), never the entry just written (*protect*),
+    and sweep temp files a crashed write left behind.
 
+    Counts both the current ``*.json.zst`` suffix and the legacy plain
+    ``*.json`` suffix (ADR-059) so a directory with pre-upgrade entries is
+    bounded too."""
+    from ....storage.byte_quota_lru import evict_directory_to_quota
 
-def _evict_if_needed(base: Path | None = None) -> None:
-    """Remove oldest entries if cache exceeds MAX_ENTRIES.
-
-    Globs both the current ``*.json.zst`` suffix and the legacy plain
-    ``*.json`` suffix (ADR-059) so LRU eviction accounts for a cache
-    directory that still has pre-upgrade entries mixed in with new ones."""
-    base = _CACHE_DIR if base is None else base
-    try:
-        entries = sorted(
-            (*base.glob("*.json.zst"), *base.glob("*.json")),
-            key=_safe_mtime,
-        )
-    except OSError:
-        return
-    excess = len(entries) - MAX_ENTRIES
-    if excess <= 0:
-        return
-    for p in entries[:excess]:
-        try:
-            p.unlink()
-            _logger.debug("Cache evict: %s", p.name[:12])
-        except OSError:
-            pass
+    evict_directory_to_quota(
+        _CACHE_DIR if base is None else base,
+        suffixes=(
+            ".json.zst",
+            ".json",
+            declaring_headers.SIDECAR_SUFFIX,
+            DEPS_SUFFIX,
+        ),
+        quota_bytes=MAX_BYTES,
+        protected=(protect,) if protect else (),
+    )

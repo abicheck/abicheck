@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ....buildsource.source_inputs import extraction_read_source_inputs
+from ....extract import cache_dep_manifest
 from ....extract.binary_identity import stamp_binary_identity
 from ...cache_probe import refuse_dump_while_probing, take_probed_miss
 from .finished import FINISHED_SUBDIR, take_pending
@@ -36,7 +37,7 @@ from .key import (
     _manifest_roots,
     compile_context_header_inputs,
 )
-from .store import _lookup_key, _store_key, _write_enabled
+from .store import _entry_dir, _lookup_key, _store_key, _write_enabled
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -432,17 +433,25 @@ def cached_run_dump(
     cached = _lookup_key(initial_key, path) if use_raw else None
     if cached is not None:
         _stamp_cache_hit(cached, path)
-        return _finish_and_store(cached, finisher, finished_key, req)
+        deps = cache_dep_manifest.recall(str(_entry_dir("") / initial_key))
+        return _finish_and_store(cached, finisher, finished_key, req, deps)
     refuse_dump_while_probing(initial_key)
-    snap = _dump_uncached()
+    # The union of the dependency manifests of every header parse the dump
+    # ran or was served (ADR-062 D11): the entry's validity beyond its key.
+    with cache_dep_manifest.recording() as parses:
+        snap = _dump_uncached()
+    deps = parses.manifest() if initial_key else None
     # Re-derive after the dump: a tool that appeared or changed mid-run must
-    # miss, not store under the key it was looked up with.
+    # miss, not store under the key it was looked up with. Likewise a system
+    # header that changed after its parse recorded it.
     final_key = _cache_key_for(req) if initial_key else ""
+    if not cache_dep_manifest.verify(deps):
+        deps = None
     if initial_key and initial_key == final_key and _write_enabled():
-        _store_key(snap, initial_key, path)
+        _store_key(snap, initial_key, path, deps=deps)
     elif finisher is not None:
         finished_key = ""  # unstable key: finish, but never store
-    return _finish_and_store(snap, finisher, finished_key, req)
+    return _finish_and_store(snap, finisher, finished_key, req, deps)
 
 
 def _stamp_cache_hit(cached: AbiSnapshot, path: Path) -> None:
@@ -463,6 +472,7 @@ def _finish_and_store(
     finisher: Finisher | None,
     finished_key: str,
     req: DumpCacheRequest,
+    deps: cache_dep_manifest.DepManifest | None,
 ) -> AbiSnapshot:
     """*snap* finished by *finisher* (when one was claimed), stored in the
     finished tier under *finished_key* when that is non-empty."""
@@ -471,5 +481,5 @@ def _finish_and_store(
     done = finisher.finish(snap)
     finisher.applied = True
     if finished_key and _write_enabled():
-        _store_key(done, finished_key, req.path, FINISHED_SUBDIR)
+        _store_key(done, finished_key, req.path, FINISHED_SUBDIR, deps=deps)
     return done

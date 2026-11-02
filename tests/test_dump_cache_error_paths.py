@@ -16,8 +16,9 @@ import pytest
 from abicheck.compare import manifest_tu_scope
 from abicheck.compile_context import CompileContext
 from abicheck.dump_manifest import parse_manifest
+from abicheck.extract import cache_input_digest
 from abicheck.model import AbiSnapshot, Function, Visibility
-from abicheck.workflows.dump.cache import api, key, store
+from abicheck.workflows.dump.cache import api, store
 from tests._dump_cache_request import dump_request
 
 
@@ -65,14 +66,14 @@ def test_an_unreadable_header_directory_is_marked_not_skipped(
         path=binary, headers=[tmp_path / "inc"], includes=[tmp_path / "inc"]
     )
     base_key = api._cache_key_for(request)
-    real_walk = key.iter_cache_header_files
+    real_walk = cache_input_digest.iter_cache_input_rel_parts
 
     def failing_walk(path: Path):  # type: ignore[no-untyped-def]
         raise OSError("permission denied")
 
-    monkeypatch.setattr(key, "iter_cache_header_files", failing_walk)
+    monkeypatch.setattr(cache_input_digest, "iter_cache_input_rel_parts", failing_walk)
     unreadable = api._cache_key_for(request)
-    monkeypatch.setattr(key, "iter_cache_header_files", real_walk)
+    monkeypatch.setattr(cache_input_digest, "iter_cache_input_rel_parts", real_walk)
     assert unreadable
     assert unreadable != base_key
 
@@ -83,14 +84,14 @@ def test_an_unreadable_include_directory_is_marked_not_skipped(
     binary = _base(tmp_path)
     request = dump_request(path=binary, headers=None, includes=[tmp_path / "inc"])
     base_key = api._cache_key_for(request)
-    real_walk = key.iter_cache_header_files
+    real_walk = cache_input_digest.iter_cache_input_rel_parts
 
     def failing_walk(path: Path):  # type: ignore[no-untyped-def]
         raise OSError("permission denied")
 
-    monkeypatch.setattr(key, "iter_cache_header_files", failing_walk)
+    monkeypatch.setattr(cache_input_digest, "iter_cache_input_rel_parts", failing_walk)
     unreadable = api._cache_key_for(request)
-    monkeypatch.setattr(key, "iter_cache_header_files", real_walk)
+    monkeypatch.setattr(cache_input_digest, "iter_cache_input_rel_parts", real_walk)
     assert unreadable != base_key
 
 
@@ -204,7 +205,7 @@ def test_a_failed_legacy_removal_does_not_fail_the_store(
 def test_a_failed_eviction_removal_is_skipped(
     cache_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(store, "MAX_ENTRIES", 1)
+    monkeypatch.setattr(store, "MAX_BYTES", 1)
     cache_dir.mkdir(parents=True)
     for index, name in enumerate(["a", "b"]):
         entry = cache_dir / f"{name}.json.zst"
@@ -225,15 +226,15 @@ def test_eviction_on_an_unreadable_directory_is_a_no_op(
     cache_dir = tmp_path / "snapshots"
     cache_dir.mkdir()
     monkeypatch.setattr(store, "_CACHE_DIR", cache_dir)
-    monkeypatch.setattr(store, "MAX_ENTRIES", 1)
+    monkeypatch.setattr(store, "MAX_BYTES", 1)
     entries = [cache_dir / f"{name}.json.zst" for name in ("a", "b", "c")]
     for entry in entries:
         entry.write_bytes(b"x")
 
-    def no_glob(self: Path, pattern: str):  # type: ignore[no-untyped-def]
+    def no_scandir(path: object):  # type: ignore[no-untyped-def]
         raise OSError("unreadable")
 
-    monkeypatch.setattr(Path, "glob", no_glob)
+    monkeypatch.setattr(os, "scandir", no_scandir)
     store._evict_if_needed()  # over the cap, yet nothing can be listed
     # Nothing was listed, so nothing was removed.
     assert all(entry.exists() for entry in entries)

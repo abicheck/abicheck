@@ -20,6 +20,7 @@ from xml.etree.ElementTree import Element
 
 from ....errors import SnapshotError
 from ....storage.ast_cache_location import ast_cache_store
+from ... import cache_dep_manifest
 from ..clang.backend import clang_header_dump
 from .function_type_cc import (
     files_mention_calling_convention,
@@ -95,27 +96,36 @@ def join_vector_spellings(
     ):
         return root
     store = ast_cache_store(key, VECTOR_SIDECAR_BACKEND)
-    cached = _valid_sidecar(store.lookup(key))
+    # The sidecar is derived from a clang parse: valid only while the system
+    # headers that parse read are unchanged (ADR-062 D11).
+    entry = store.path(key)
+    cached = (
+        _valid_sidecar(store.lookup(key))
+        if cache_dep_manifest.entry_valid(entry)
+        else None
+    )
     if cached is not None:
+        cache_dep_manifest.note(cache_dep_manifest.recall(str(entry), entry))
         spellings, conventions = cached
         return with_function_type_cc(
             with_vector_spellings(root, spellings), conventions
         )
     try:
-        clang_root, _kind, _force_cpp = clang_header_dump(
-            headers,
-            extra_includes,
-            compiler,
-            gcc_path=gcc_path,
-            gcc_prefix=gcc_prefix,
-            gcc_options=gcc_options,
-            gcc_option_tokens=gcc_option_tokens,
-            sysroot=sysroot,
-            nostdinc=nostdinc,
-            lang=lang,
-            extra_hash_dirs=extra_hash_dirs,
-            exported_symbols=exported_symbols,
-        )
+        with cache_dep_manifest.recording() as clang_parse:
+            clang_root, _kind, _force_cpp = clang_header_dump(
+                headers,
+                extra_includes,
+                compiler,
+                gcc_path=gcc_path,
+                gcc_prefix=gcc_prefix,
+                gcc_options=gcc_options,
+                gcc_option_tokens=gcc_option_tokens,
+                sysroot=sysroot,
+                nostdinc=nostdinc,
+                lang=lang,
+                extra_hash_dirs=extra_hash_dirs,
+                exported_symbols=exported_symbols,
+            )
     except (SnapshotError, OSError) as exc:
         log.warning(
             "clang could not parse the header(s) for vector spellings and "
@@ -126,5 +136,7 @@ def join_vector_spellings(
         return root
     resolved = resolve_vector_spellings(root, clang_root)
     conventions = resolve_function_type_cc(root, clang_root)
-    store.publish(key, {"spellings": resolved, "function_cc": conventions}, ())
+    deps = clang_parse.manifest()
+    if deps is not None and cache_dep_manifest.write_sidecar(entry, deps):
+        store.publish(key, {"spellings": resolved, "function_cc": conventions}, ())
     return with_function_type_cc(with_vector_spellings(root, resolved), conventions)

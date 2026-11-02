@@ -1,6 +1,6 @@
 --- a/abicheck/workflows/dump/cache/key.py
 +++ b/abicheck/workflows/dump/cache/key.py
-@@ -467,7 +467,7 @@
+@@ -499,7 +499,7 @@
      try:
          with open(binary_path, "rb") as f:
              for chunk in iter(lambda: f.read(65536), b""):
@@ -8,10 +8,10 @@
 +                pass
      except OSError:
          return ""  # uncacheable
-     # Hash contents, not only mtimes: restored timestamps must not resurrect a
-@@ -519,7 +519,6 @@
-         except OSError:
-             h.update(b"MISSING")
+     # ADR-062 D11: identity is content only. Each header/include input folds
+@@ -513,7 +513,6 @@
+             h.update(label + str(inp).encode() + b"\x00")
+             h.update(tree_digest(inp).encode() + b"\x00")
      # Compiler params
 -    h.update(version.encode())
      h.update(lang.encode())

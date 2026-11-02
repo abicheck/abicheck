@@ -703,8 +703,11 @@ def load_cached_ast(
     *,
     memoize: bool = True,
     on_disk_load: Callable[[Any], Any] | None = None,
+    entry_valid: Callable[[Path], bool] | None = None,
 ) -> Any | None:
     """Return a previously-parsed AST for (*backend*, *key*), or ``None``.
+
+    *entry_valid* -- the entry's gate beyond its key; ``False`` is a miss.
 
     *cache_path* is the caller's own already-resolved :func:`_cache_path`
     result, not recomputed here -- callers that patch ``_cache_path`` in
@@ -762,11 +765,9 @@ def load_cached_ast(
             return superseded
         return slot[2]
     # A derived-artifact consumer gets the entry's path before anything is
-    # read, which is the whole point: the parse this function would otherwise
-    # do is the cost being avoided. Checked ahead of `cache_path.exists()`
-    # because a derived entry is self-sufficient -- it stays valid for this
-    # key even if the AST itself was evicted, and re-parsing then would be a
-    # pure loss.
+    # read (the parse avoided is the point); a stale entry's forms are gone.
+    if entry_valid is not None and not entry_valid(cache_path):
+        cache_integrity.evict_with_derived(cache_path)  # stale, with its forms
     superseded = offer_derived_ast_source(cache_path, is_cache_entry=True)
     if superseded is not None:
         deadline.check()

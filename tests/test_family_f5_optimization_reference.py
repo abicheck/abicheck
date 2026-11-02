@@ -898,6 +898,43 @@ def test_catalog_with_headers_memo_bypass_matches_default(
     _assert_same(optimized, reference, f"headers.memo[{case}]")
 
 
+@pytest.mark.integration
+def test_header_disk_cache_warm_after_touch_matches_cold(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Header-bearing cold vs warm runs through the CLI, with every header
+    mtime-touched in between: the warm run must hit (ADR-062 D11, content is
+    identity) and report what the cold run reported -- which also requires
+    the reloaded snapshots to re-scope like fresh ones (declaring-header
+    sidecar)."""
+    if shutil.which("castxml") is None:
+        pytest.skip("castxml not available")
+    _cc()
+    out = tmp_path / "bin"
+    out.mkdir()
+    case = _HEADER_CASES[0]
+    v1, v2 = _build_case(case, out)
+    case_dir = example_catalog.case_dir(case)
+    hdrs = out / "h"
+    hdrs.mkdir()
+    for v in ("v1", "v2"):
+        shutil.copy(case_dir / f"{v}.h", hdrs / f"{v}.h")
+    args = (str(v1), str(v2), "--header", f"old={hdrs / 'v1.h'}")
+    args += ("--header", f"new={hdrs / 'v2.h'}")
+    outs, spies = [], []
+    for step in ("cold", "warm"):
+        if step == "warm":
+            for h in hdrs.iterdir():
+                os.utime(h, ns=(2_000_000_000_000_000_000,) * 2)
+        spy = DiskCacheSpy()
+        with monkeypatch.context() as mp:
+            spy.install(mp, tmp_path / "cacheT")
+            outs.append(_run(*args))
+        spies.append(spy)
+    assert spies[1].hits >= 2 and spies[1].stores == 0, spies[1]
+    _assert_same(outs[1], outs[0], "disk.header_touch")
+
+
 @pytest.mark.slow
 @pytest.mark.parametrize(
     "case",

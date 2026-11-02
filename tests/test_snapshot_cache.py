@@ -10,7 +10,7 @@ import pytest
 
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.workflows.dump.cache.key import _cache_key
-from abicheck.workflows.dump.cache.store import _get_cache_dir, _safe_mtime
+from abicheck.workflows.dump.cache.store import _get_cache_dir
 
 
 def lookup(
@@ -173,7 +173,6 @@ class TestCacheKey:
         on PR #612: before G31 Phase A this was moot because a header-graph
         dump was always uncacheable; it is not moot now that it's cacheable
         by default)."""
-        import time
 
         binary = tmp_path / "lib.so"
         binary.write_bytes(b"ELF content")
@@ -184,7 +183,7 @@ class TestCacheKey:
 
         key1 = _cache_key(binary, [], [inc], "1.0", "c++")
 
-        os.utime(transitive_hdr, (time.time() + 10, time.time() + 10))
+        transitive_hdr.write_text(transitive_hdr.read_text() + "// edited\n")
         key2 = _cache_key(binary, [], [inc], "1.0", "c++")
 
         assert key1 != key2
@@ -219,9 +218,7 @@ class TestCacheKey:
 
         key1 = _cache_key(binary, [], [inc], "1.0", "c++")
 
-        import time
-
-        os.utime(impl, (time.time() + 10, time.time() + 10))
+        impl.write_text(impl.read_text() + "// edited\n")
         key2 = _cache_key(binary, [], [inc], "1.0", "c++")
 
         assert key1 != key2
@@ -242,9 +239,7 @@ class TestCacheKey:
 
         key1 = _cache_key(binary, [hdr_dir], [], "1.0", "c++")
 
-        import time
-
-        os.utime(nested, (time.time() + 10, time.time() + 10))
+        nested.write_text(nested.read_text() + "// edited\n")
         key2 = _cache_key(binary, [hdr_dir], [], "1.0", "c++")
 
         assert key1 != key2
@@ -259,7 +254,7 @@ class TestCacheKey:
         key2 = _cache_key(binary, [hdr], [], "1.0", "c++")
         assert key1 != key2
 
-    def test_header_mtime_change_different_key(self, tmp_path):
+    def test_header_mtime_only_touch_keeps_key(self, tmp_path):
         import time
 
         binary = tmp_path / "lib.so"
@@ -267,10 +262,10 @@ class TestCacheKey:
         hdr = tmp_path / "foo.h"
         hdr.write_text("#pragma once\n")
         key1 = _cache_key(binary, [hdr], [], "1.0", "c++")
-        # Change header mtime
+        # ADR-062 D11: a touch alone is not a change -- content is identity.
         os.utime(hdr, (time.time() + 10, time.time() + 10))
         key2 = _cache_key(binary, [hdr], [], "1.0", "c++")
-        assert key1 != key2
+        assert key1 == key2
 
     @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFO requires POSIX")
     def test_special_header_file_does_not_block(self, tmp_path):
@@ -371,7 +366,7 @@ class TestEviction:
         from abicheck.workflows.dump.cache import store as sc
 
         monkeypatch.setattr(sc, "_CACHE_DIR", cache_dir)
-        monkeypatch.setattr(sc, "MAX_ENTRIES", 3)
+        monkeypatch.setattr(sc, "MAX_BYTES", 0)
 
         snap = _sample_snap()
         # Create 5 cache entries
@@ -380,11 +375,10 @@ class TestEviction:
             binary.write_bytes(f"content {i}".encode())
             store(snap, binary, [], [], "1.0", "c++")
 
-        # Should have at most MAX_ENTRIES files (ADR-059: new entries are
-        # *.json.zst, not plain *.json).
+        # A zero byte quota keeps only the protected, just-written entry
+        # (ADR-062 D11 byte-quota LRU; ADR-059: entries are *.json.zst).
         entries = list(cache_dir.glob("*.json.zst"))
-        assert entries, "eviction test produced zero entries -- glob is stale"
-        assert len(entries) <= 3
+        assert len(entries) == 1, entries
 
 
 class TestGetCacheDir:
@@ -402,18 +396,6 @@ class TestGetCacheDir:
         monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
         result = _get_cache_dir()
         assert str(result).startswith(str(tmp_path / "xdg"))
-
-
-class TestSafeMtime:
-    def test_returns_mtime_for_existing_file(self, tmp_path):
-        f = tmp_path / "test.json"
-        f.write_text("{}")
-        mtime = _safe_mtime(f)
-        assert mtime > 0
-
-    def test_returns_zero_for_missing_file(self, tmp_path):
-        mtime = _safe_mtime(tmp_path / "nonexistent.json")
-        assert mtime == 0.0
 
 
 class TestStoreErrorPaths:

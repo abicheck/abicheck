@@ -198,7 +198,7 @@ def test_a_hit_refreshes_the_entry_for_lru(cache_dir: Path, tmp_path: Path) -> N
 def test_eviction_removes_the_oldest_entries_beyond_the_cap(
     cache_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(store, "MAX_ENTRIES", 2)
+    monkeypatch.setattr(store, "MAX_BYTES", 2)
     cache_dir.mkdir(parents=True)
     for index, name in enumerate(["old", "mid", "new"]):
         entry = cache_dir / f"{name}.json.zst"
@@ -212,7 +212,7 @@ def test_eviction_removes_the_oldest_entries_beyond_the_cap(
 def test_eviction_is_a_no_op_under_the_cap(
     cache_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(store, "MAX_ENTRIES", 5)
+    monkeypatch.setattr(store, "MAX_BYTES", 5)
     cache_dir.mkdir(parents=True)
     (cache_dir / "only.json.zst").write_bytes(b"x")
     store._evict_if_needed()
@@ -222,7 +222,3 @@ def test_eviction_is_a_no_op_under_the_cap(
 def test_eviction_tolerates_a_missing_cache_directory(cache_dir: Path) -> None:
     assert not cache_dir.exists()
     store._evict_if_needed()  # glob on a missing directory: nothing to evict
-
-
-def test_safe_mtime_reads_zero_for_a_vanished_file(tmp_path: Path) -> None:
-    assert store._safe_mtime(tmp_path / "gone.json.zst") == 0.0
