@@ -191,10 +191,62 @@ See "Landed in Phase 1" below.
   analyses read, one matched library pair at a time, through a digest-keyed
   (`evidence`) decoded-section cache.
 - **A2.2** Streaming object encoding replaces whole-document `asdict()` +
-  one JSON string.
+  one JSON string. **Half implemented (status 2026-10-31).** The *string*
+  half is done: `write_snapshot`/`write_snapshot_compact`/bundle writes
+  stream `json_stream.iter_json_*` fragments through
+  `snapshot_stream_write.write_snapshot_text_stream`, so no whole JSON string
+  or its bytes is held (zstd one-shot only when the frame must declare its
+  size). The `asdict()` half has been replaced by `snapshot_encode`'s fused
+  per-class encoder, but it still builds the **whole document tree** before
+  serializing. Measured 2026-10-31 on a `libstdc++.so.6` dump (23.9 MB JSON,
+  `tracemalloc` peak): building the sectioned tree peaks at 39.8 MiB in
+  1.62 s, and the full uncompressed write peaks at 39.9 MiB in 3.53 s. The
+  streamed text stage adds about 0.1 MiB, and its output is byte-identical
+  to the stored file. All of the remaining write peak is the tree. Emitting
+  it per field would mean reordering about 12 whole-document post-passes
+  (`encode_entity_ids`, `encode_fact_fields`, `_compact_elf_symbols`,
+  `encode_surface_graph`, `to_sectioned_document`, ...), which read and
+  rewrite sibling keys, while keeping the output byte-identical. That is not
+  attempted here; see `known-gaps.md` "Snapshot write still builds the whole
+  document tree".
 - **A2.3** The snapshot cache moves onto the content-addressed store, keyed
-  per ADR-062 D11, with a byte-quota LRU.
+  per ADR-062 D11, with a byte-quota LRU. **Eviction implemented
+  (2026-10-31).** `storage/byte_quota_lru.py` replaces the dump cache's
+  100-entry count with a per-tier byte quota (`store.MAX_BYTES`, 4 GiB,
+  internal policy like D12). It evicts LRU-by-mtime, breaks ties by name, and
+  never evicts the entry just written. It also sweeps `.<name>.*.tmp` residue
+  that a crashed write leaves behind once that residue is over an hour old.
+  The key was already content-based per D11 (`workflows/dump/cache/key.py`:
+  binary/input digests, contract, generations, profile).
+  **Key made content-only (2026-10-31).** The mtime fold is gone from the
+  whole-snapshot and clang AST keys; both keys, and the castxml one, now hash
+  every file under an include root (any suffix), file-valued includes, the
+  compiler's built-in search directories and `CPATH`-style directories, via
+  `extract/cache_input_digest.py`. Raw entries carry a declaring-header
+  sidecar so a reloaded entry scopes like a fresh one.
+  **Still open:** moving the entries from whole-snapshot files onto the
+  package `ObjectStore`. That move gives per-section reuse. It depends on
+  A2.1's lazy section loading, which another workstream owns, because a
+  per-section cache entry is only cheaper if a hit can load fewer sections.
+  Re-checked 2026-10-31 on top of D18 step 2: still not built. A dump-cache
+  hit's consumers (compare, scoping, the finished tier) read declarations,
+  types and debug layout, which are the sections D18 defers, so a
+  per-section entry would decode the same bytes; and extraction is
+  monolithic, so no section can be reused across a binary change. Per D11
+  ("caching is per section so an unchanged binary ... can be reused") the
+  move pays only once an extractor can reuse a section, which no producer
+  does yet.
+  Tests: `tests/test_byte_quota_lru.py` runs random access sequences against
+  an independent `OrderedDict` LRU model. It also enumerates an unlink
+  failure at each victim and checks stale and live temp residue.
 - **A2.4** Optional, rebuildable SQLite indexes; never canonical truth.
+  **Deferred (2026-10-31): no query consumer.** Every current reader opens a
+  package by manifest and digest (`read_project_manifest`,
+  `ObjectStore.get`), and no code path searches across snapshots or
+  packages by entity. An index without a reader would be a second, unused
+  copy to keep consistent. Revisit when a cross-package query appears, such
+  as "which stored baselines export symbol X". `package.py`'s
+  `indexes/index.sqlite` layout slot stays reserved.
 - **A2.5** **Measured**: peak RSS for a project comparison no longer scales
   with the total decoded size of the package.
 
@@ -1182,7 +1234,8 @@ satisfies for the one domain type it actually sections today
 | `abicheck/storage/env_limits.py` | `env_byte_limit` — the one parser behind the snapshot envelope's decompression-bomb ceilings (`snapshot_io.py`'s decoded/stored caps and the public ABICHECK_SNAPSHOT_MAX_DECODED_BYTES / ABICHECK_SNAPSHOT_MAX_STORED_BYTES environment knobs, plus their legacy underscore spellings). A leaf reading only `os.environ`, so the rule that a malformed or non-positive value is *ignored* — rather than honoured as a ceiling that would reject every read — has one implementation rather than one per limit; internal, not re-exported by the package |
 | `abicheck/storage/ast_size_observer.py` | `observe_ast_sizes`, `report_ast_size`, `set_ast_intake_hook`, `mark_ast_intake` — the last two let `workflows/memory_trace.py` bracket AST intake (`ast.intake:start`/`:done`) from parse sites that may not import the workflows layer. Also carries the byte size of each header AST a dump acquires (cold clang parse or AST-cache load) to an observer in the same context, which is how the release fan-out's memory admission (`workflows/release_admission.py`) costs a member by measured AST size. A context-variable leaf with no other state; internal, not re-exported by the package |
 | `abicheck/storage/ast_parse_exclusions.py` | `HEADER_PARSE_EXCLUDED_KEY`, `attach_parse_exclusions`, `record_parse_exclusions` — the top-level headers a clang header-AST parse dropped (the `#error` retry), carried on the tree and in a sidecar beside the AST-cache entry so a warm run records the same partial header coverage (evidence-entity-model gap A3). Internal, not re-exported by the package |
-| `abicheck/storage/cache_integrity.py` | `digest_file`, `entry_intact`, `evict`, `record_digest`, `sidecar_path`, `verify_entry` — a `<entry>.sha256` content digest per L2 header-AST cache entry; a reader evicts and re-parses an entry that no longer matches it, and records one for a legacy entry on first use. Detects corruption, not tampering by a writer of the cache directory. Internal, not re-exported by the package |
+| `abicheck/storage/cache_integrity.py` | `DEPS_SUFFIX`, `digest_file`, `entry_intact`, `evict`, `evict_with_derived`, `record_digest`, `sidecar_path`, `verify_entry` — a `<entry>.sha256` content digest per L2 header-AST cache entry, and the `<entry>.deps` dependency-manifest suffix that eviction also removes; a reader evicts and re-parses an entry that no longer matches it, and records one for a legacy entry on first use. Detects corruption, not tampering by a writer of the cache directory. Internal, not re-exported by the package |
+| `abicheck/storage/byte_quota_lru.py` | `CacheEntry`, `evict_directory_to_quota`, `select_victims` — byte-quota LRU eviction for a cache directory (ADR-062 D11): oldest mtime first, ties by name, never the protected entry; sweeps stale `.tmp` residue. Internal, not re-exported by the package |
 | `abicheck/storage/ast_cache_budget.py` | `DEFAULT_MAX_BYTES`, `MIN_AGE_SECONDS`, `RECHECK_INTERVAL_SECONDS`, `configured_max_bytes`, `enforce_ast_cache_budget`, `note_use` — a least-recently-used byte budget (env ABICHECK_AST_CACHE_MAX_BYTES, default 16 GiB, 0 disables) for each L2 header-AST cache backend directory, re-checked at most every five minutes; each use stamps the entry mtime, and entries used in the last hour are never evicted. Internal, not re-exported by the package |
 | `abicheck/storage/ast_cache_location.py` | `AST_DISK_CACHE`, `ast_cache_entry_path`, `backend_cache_dir`, `reference_scratch_scoped` — where an L2 header-AST cache entry lives (one sub-directory and extension per backend, under LOCALAPPDATA or XDG_CACHE_HOME, falling back to the temp directory) and the disk cache's policy on the central cache wrapper: with ABICHECK_REFERENCE_MODE=1 every call hands out a fresh scratch path, so no entry is read back, removed when the enclosing `reference_scratch_scoped` call (`dumper.dump`) returns. Internal, not re-exported by the package |
 | `abicheck/storage/code_identity.py` | `PACKAGE_ROOT`, `SOURCE_SUFFIXES`, `compute_code_fingerprint`, `abicheck_code_fingerprint`, `compute_modules_fingerprint`, `abicheck_modules_fingerprint`, `module_source_path` — the identity of the abicheck code that produced a cached artifact: a content hash of every `.py`/`.pyi` file in the installed package (path and content, no mtimes or bytecode), or of a named set of modules, memoized per process. The whole-package fingerprint keys every disk cache whose entries abicheck itself computed (snapshot, L3 build evidence, L4 per-TU source ABI, the header-graph projection sidecar); the named-module fingerprint keys the clang header-AST cache with the modules that shape a stored entry (`extract.header_ast_cache_producers`). Internal, not re-exported by the package |

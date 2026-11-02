@@ -77,7 +77,14 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-__all__ = ["ReleaseSelection"]
+__all__ = ["BUNDLE_ON_INCOMPLETE_TO_SCOPE", "ReleaseSelection"]
+
+#: A project ``bundles.<id>.on_incomplete`` value -> the ``scope.on_incomplete``
+#: value (``warn``/``block``) the bundle's ``compare`` runs under. ``fail`` is
+#: the project-config spelling of ``block``. Read by the bundle parser
+#: (``buildsource/project_bundles.py``) and by the Action-side translation
+#: (``workflows/bundle_scope_selection.py``).
+BUNDLE_ON_INCOMPLETE_TO_SCOPE: Mapping[str, str] = {"fail": "block", "warn": "warn"}
 
 
 @dataclass(frozen=True)

@@ -22,6 +22,7 @@ import pytest
 from abicheck import dumper_clang_errors
 from abicheck.deadline import DeadlineExceeded, deadline_scope
 from abicheck.errors import SnapshotError
+from abicheck.extract import cache_dep_manifest
 from abicheck.extract.header_ast_fields import parse_header_ast_fields
 from abicheck.extract.headers.castxml import backend as castxml_backend
 from abicheck.extract.headers.clang import backend as clang_backend
@@ -374,6 +375,9 @@ def _stub_clang_resolution(monkeypatch: pytest.MonkeyPatch, cache: Path) -> None
     )
     monkeypatch.setattr(clang_backend, "_tool_identity", lambda *a, **k: "stable")
     monkeypatch.setattr(clang_backend, "_cache_path", lambda *a, **k: cache)
+    monkeypatch.setattr(
+        cache_dep_manifest, "entry_valid", lambda entry: True
+    )  # seeded by hand
 
 
 def _count_json_decodes(monkeypatch: pytest.MonkeyPatch) -> Callable[[], int]:
@@ -545,6 +549,9 @@ def test_warm_castxml_disk_hit_shares_producer_metadata(
     header.write_text("int api();\n", encoding="utf-8")
     store = TuParseStore(tmp_path / "store")
     store.publish("same", "<GCC_XML/>", ())
+    monkeypatch.setattr(
+        cache_dep_manifest, "entry_valid", lambda entry: True
+    )  # seeded by hand
     monkeypatch.setattr(
         castxml_backend, "_resolve_gated_castxml_bin", lambda value: "castxml"
     )

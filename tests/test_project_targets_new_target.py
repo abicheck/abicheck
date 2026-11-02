@@ -32,7 +32,8 @@ from __future__ import annotations
 
 import pytest
 
-from abicheck.buildsource.project_targets import CheckSpec, ProjectTargetsConfig
+from abicheck.buildsource.project_check_spec import CheckSpec
+from abicheck.buildsource.project_targets import ProjectTargetsConfig
 from abicheck.buildsource.project_targets_validation import validate_project_targets
 
 

@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 from collections.abc import Sequence
 from pathlib import Path
@@ -28,8 +27,8 @@ from ..._compiler_options import (
 )
 from ...dumper_ast_config_cpp20 import _preprocessed_header_content
 from ...header_utils import drop_include_tokens_duplicating_paths
-from ...storage.tu_parse_store import content_key, digest_file
-from ..cache_header_scan import iter_cache_header_files
+from ...storage.tu_parse_store import content_key
+from ..cache_input_digest import env_include_material, tree_digest
 from ..castxml_compiler_emulation import (
     castxml_parser_arguments,
     emulated_compiler_command,
@@ -56,7 +55,10 @@ from .clang_header_argv import HeaderCompileContext, render_clang_header_argv
 #: Bumped to 4 when every clang AST pass started receiving
 #: `CLANG_GCC_HEADER_COMPAT_DEFINES`: an entry written before could hold an
 #: AST clang only partially recovered from GCC's `omp.h`.
-_CLANG_CACHE_SCHEMA_VERSION = 4
+#: Bumped to 5 when system include dirs entered the key by spelling only and
+#: an entry became valid only beside its dependency manifest
+#: (`extract.cache_dep_manifest`): an older entry has no manifest.
+_CLANG_CACHE_SCHEMA_VERSION = 5
 
 #: Salts every castxml header-parse cache key. Bumped to 2 when castxml's
 #: emulated compiler started receiving the run's standard/sysroot/target
@@ -79,7 +81,9 @@ _CLANG_CACHE_SCHEMA_VERSION = 4
 #: excluded declaration scan (`extract.headers.preprocessor_branches`).
 #: Bumped to 9 for complex/bit-int types, and to 10 for their pointer, array and
 #: typedef-chain forms: entries before them left those as ``Unimplemented``.
-_CASTXML_CACHE_SCHEMA_VERSION = 10
+#: Bumped to 11 when the entry's ``deps`` started carrying the parse's
+#: depfile manifest and system dirs left the key's content material.
+_CASTXML_CACHE_SCHEMA_VERSION = 11
 
 #: Which module constant salts each backend's header-parse cache key. Named,
 #: not copied, so the key always reads the constant's current value.
@@ -158,46 +162,13 @@ def _cache_key(
     h.update(f"frontend_context={frontend_context}".encode())
     h.update(f"frontend_identity={frontend_identity}".encode())
     h.update(f"compiler_identity={compiler_identity}".encode())
+    # ADR-062 D11: content, never mtime. An include entry naming a file (a
+    # forced ``-include``/``-imacros``, any suffix) digests as itself; a
+    # directory as every file under it, whatever its suffix.
     for p in sorted(str(x.resolve()) for x in headers):
-        h.update(p.encode())
-        try:
-            h.update(str(os.path.getmtime(p)).encode())
-        except OSError:
-            pass
-    # Also hash mtimes of files in the include dirs (catches most transitive
-    # changes). extra_hash_dirs are dirs searched via *deferred* -isystem tokens
-    # (the inferred -H roots when a build context is present) rather than -I, so
-    # their contents must be folded in here too — otherwise an edit to a header
-    # transitively included from such a root would reuse a stale AST (Codex).
-    #
-    # An entry naming a *file* rather than a directory is hashed directly, the
-    # same way ``headers`` are above (Codex review, PR D). The directory walk
-    # below is deliberately suffix-filtered (#454), which is right for "catch
-    # transitive includes under a search root" but wrong for a file the caller
-    # named explicitly because it is *itself* part of the parse: a forced
-    # pre-include (``-include generated/config``, ``-imacros settings.def``)
-    # routinely carries a suffix ``CACHE_HEADER_SUFFIXES`` does not list, so
-    # hashing only its parent directory would let an edit to it reuse a stale
-    # AST while the unchanged option token kept the key identical. Before this
-    # branch a non-directory entry contributed only its path string, so this is
-    # a strict widening — no previously-hashed input stops being hashed.
+        h.update(f"header:{p}:{tree_digest(p)}".encode())
     for inc_dir in sorted(str(x) for x in (*extra_includes, *extra_hash_dirs)):
-        inc_path = Path(inc_dir)
-        h.update(inc_dir.encode())
-        if inc_path.is_dir():
-            # Hash every header-like file (incl. .inl/.tcc template bodies, not
-            # just .h/.hpp) so any transitive include edit busts the key (#454).
-            for f in iter_cache_header_files(inc_path):
-                try:
-                    h.update(str(f).encode())
-                    h.update(str(f.stat().st_mtime).encode())
-                except OSError:
-                    pass
-        else:
-            try:
-                h.update(str(inc_path.stat().st_mtime).encode())
-            except OSError:
-                pass
+        h.update(f"root:{inc_dir}:{tree_digest(inc_dir)}".encode())
     h.update(compiler.encode())
     # Include toolchain parameters so different cross-compilation configs
     # produce distinct cache entries
@@ -210,7 +181,8 @@ def _cache_key(
     h.update(f"lang={lang or ''}".encode())
     # Auto-probed system include dirs (castxml↔clang parity): a host-toolchain
     # change must invalidate a cached clang dump (the resolved libstdc++ moved).
-    h.update(f"system_includes={chr(0).join(system_includes)}".encode())
+    h.update(f"system_includes={_system_includes_material(system_includes)}".encode())
+    h.update(env_include_material().encode())
     # The *resolved* C++20 dialect decision (-std=gnu++20 or not), not just the
     # explicit --lang the caller passed (Codex review): _detect_cpp20_headers is
     # a heuristic that can itself change across an abicheck upgrade (a bug fix
@@ -249,31 +221,13 @@ def _cache_key(
     return h.hexdigest()
 
 
-def _content_digest(path: Path) -> str:
-    """Content digest of a file, or of every header-like file under a directory.
-
-    A missing path digests to a fixed marker, so an absent root and an empty
-    directory cannot share a key with a present one that happens to hash alike.
-    A file that cannot be read (a permission error, a dangling symlink, a
-    directory named like a header) digests to its own marker: the key still
-    computes, and it changes when the file becomes readable.
-    """
-
-    def _digest(file: Path) -> str:
-        try:
-            return digest_file(file)
-        except OSError:
-            return "unreadable"
-
-    if path.is_file():
-        return _digest(path)
-    if path.is_dir():
-        h = hashlib.sha256()
-        for child in iter_cache_header_files(path):
-            h.update(str(child).encode())
-            h.update(_digest(child).encode())
-        return h.hexdigest()
-    return "missing"
+def _system_includes_material(system_includes: tuple[str, ...]) -> str:
+    """The injected system dirs' spellings, in search order. Their *content*
+    is not key material: the headers a parse actually read under them are
+    validated at lookup by the entry's dependency manifest
+    (`extract.cache_dep_manifest`), so an edited system header still misses
+    without the key digesting every file under ``/usr/include``."""
+    return json.dumps(list(system_includes))
 
 
 def _castxml_store_key(
@@ -323,14 +277,15 @@ def _castxml_store_key(
         f"sysroot={sysroot or ''}",
         f"nostdinc={nostdinc}",
         f"lang={lang or ''}",
-        f"system_includes={json.dumps(list(system_includes))}",
+        f"system_includes={_system_includes_material(system_includes)}",
+        env_include_material(),
         f"force_cpp={force_cpp}",
         f"force_cpp20={force_cpp20}",
     ]
     for header in sorted(str(p.resolve()) for p in headers):
-        parts.append(f"header:{header}:{_content_digest(Path(header))}")
+        parts.append(f"header:{header}:{tree_digest(header)}")
     for root in sorted(str(p) for p in (*extra_includes, *extra_hash_dirs)):
-        parts.append(f"root:{root}:{_content_digest(Path(root))}")
+        parts.append(f"root:{root}:{tree_digest(root)}")
     if invocation_tool:
         parts.append(
             "invocation="

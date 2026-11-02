@@ -32,7 +32,9 @@ def _variants() -> dict[str, CompileContext]:
         "tokens": CompileContext(gcc_option_tokens=("-DX",)),
         "tokens_yx": CompileContext(gcc_option_tokens=("-DY", "-DX")),
         "tokens_xy": CompileContext(gcc_option_tokens=("-DX", "-DY")),
-        "sysroot": CompileContext(sysroot=Path("/sys")),
+        # Not "/sys": the key content-hashes every file under a sysroot (ADR-062
+        # D11), and sysfs pseudo-files change between reads.
+        "sysroot": CompileContext(sysroot=Path("/nonexistent-abicheck-sysroot")),
         "nostdinc": CompileContext(nostdinc=True),
         "device": CompileContext(frontend_context="device"),
     }

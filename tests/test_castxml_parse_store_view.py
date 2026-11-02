@@ -17,6 +17,8 @@ from xml.etree.ElementTree import Element, tostring
 
 import pytest
 
+from abicheck.extract import cache_dep_manifest
+from abicheck.extract.cache_dep_manifest import DepManifest
 from abicheck.extract.headers.ast_config import _cache_key
 from abicheck.extract.headers.castxml import backend as _cx
 from abicheck.extract.headers.castxml.backend import castxml_dump as _castxml_dump
@@ -79,8 +81,11 @@ class TestWarmHitEqualsColdRun:
 
         _cx.castxml_dump([header], [], lang="c", run=_fake_castxml([]))
 
-        entries = sorted(p.name for p in (tmp_path / "store").iterdir())
-        assert len(entries) == 1 and entries[0].endswith(".json")
+        entries = sorted(
+            p.name for p in (tmp_path / "store").iterdir() if p.suffix == ".json"
+        )
+        assert len(entries) == 1
+        assert (tmp_path / "store" / (entries[0] + ".deps")).is_file()
         key = entries[0][: -len(".json")]
         assert store.lookup(key) == _CASTXML_DOC
 
@@ -183,6 +188,8 @@ def _seeded_store(xml_file: Path) -> TuParseStore:
     """A parse store whose ``testkey`` entry holds the castxml XML in *xml_file*."""
     store = TuParseStore(xml_file.parent / "store")
     store.publish("testkey", xml_file.read_text(encoding="utf-8"), ())
+    # A real publish writes the entry's dependency manifest first.
+    cache_dep_manifest.write_sidecar(store.path("testkey"), DepManifest())
     return store
 
 
@@ -315,6 +322,7 @@ class TestCastxmlCacheBehaviour:
         # An unparseable (empty) payload under the entry's key
         store = TuParseStore(tmp_path / "store")
         store.publish("testkey", "", ())
+        cache_dep_manifest.write_sidecar(store.path("testkey"), DepManifest())
 
         monkeypatch.setattr(_cx, "_cache_key", lambda *a, **kw: "testkey")
         monkeypatch.setattr(_cx, "ast_cache_store", lambda k, backend="castxml": store)

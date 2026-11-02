@@ -935,6 +935,21 @@ concepts:
     renames: []
     config:
       - scope.on_incomplete
+  - concept: bundle_required
+    tier: config
+    renames: []
+    action:
+      - actions/check-target:bundle-required
+  - concept: bundle_on_incomplete
+    tier: config
+    renames: []
+    action:
+      - actions/check-target:bundle-on-incomplete
+  - concept: member_headers
+    tier: config
+    renames: []
+    action:
+      - actions/check-target:member-headers
   - concept: scope.dependencies
     tier: config
     renames: []

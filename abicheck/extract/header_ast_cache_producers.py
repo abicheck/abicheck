@@ -99,6 +99,10 @@ CLANG_AST_OUTPUT_MODULES: tuple[str, ...] = (
 NON_SHAPING_MODULES: dict[str, str] = {
     "abicheck.deadline": "budget checks only",
     "abicheck.storage.header_ast_cache": "coordination and memo bookkeeping",
+    "abicheck.extract.cache_dep_manifest": (
+        "writes the dependency manifest beside the entry; it "
+        "decides whether an entry is stored or served, never the entry's bytes"
+    ),
     "abicheck.extract.headers.clang.streaming": "prunes the in-memory tree after the entry is written",
     "abicheck.extract.env_flags": "reads the prune switch, which acts on the in-memory tree only",
     "abicheck.extract.headers.clang.locations": "materializes locations after the cache write",

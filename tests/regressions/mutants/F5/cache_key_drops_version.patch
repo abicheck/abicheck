@@ -1,8 +1,8 @@
 --- a/abicheck/workflows/dump/cache/key.py
 +++ b/abicheck/workflows/dump/cache/key.py
-@@ -519,7 +519,6 @@
-         except OSError:
-             h.update(b"MISSING")
+@@ -513,7 +513,6 @@
+             h.update(label + str(inp).encode() + b"\x00")
+             h.update(tree_digest(inp).encode() + b"\x00")
      # Compiler params
 -    h.update(version.encode())
      h.update(lang.encode())

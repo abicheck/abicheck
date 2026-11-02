@@ -744,24 +744,37 @@ jobs:
               shutil.rmtree(staging, ignore_errors=True)
               os.makedirs(staging)
               missing = []
-              # Each member is staged under its MEMBER NAME, never the
-              # artifact's basename: the accepted-main baseline set stores
-              # every bundle binary as binaries/<member name>
-              # (actions/baseline/run.sh), and `compare DIR DIR` pairs
-              # members by file name. Staging libcore.so against a baseline
-              # `core` paired nothing, so every member read not_supplied and
-              # the cell failed SCOPE_INCOMPLETE (exit 1). Member names are
-              # unique keys, so two members can no longer collide here.
+              # Each member is staged under its own target id, the name
+              # actions/baseline gives it in the baseline-set's binaries/
+              # directory. compare pairs native members by file name, so a
+              # member staged under its build basename (libfoo.so.1) never
+              # paired with its baseline (binaries/libfoo): every member read
+              # one-sided and nothing was compared. Ids are unique and
+              # path-safe (project validate's identifier rule), so two
+              # members can no longer overwrite each other; two members
+              # resolving to the same file is still refused.
+              staged_by_source = {}
               for member, pattern in cell.get('member_binary_patterns', {}).items():
+                  if not member or member.startswith('.') or os.path.basename(member) != member or len(member.splitlines()) != 1:
+                      print(f'::error::bundle {cell[\"name\"]!r}: member id {member!r} cannot be a staged file name', file=sys.stderr)
+                      sys.exit(1)
                   match = resolve(pattern, label=f'bundle {cell[\"name\"]!r} member {member!r}')
                   if match is None:
                       missing.append(member)
                       continue
-                  if os.sep in member or member in ('', '.', '..') or (os.altsep and os.altsep in member):
-                      print(f'::error::bundle {cell[\"name\"]!r}: member name {member!r} is not a single path segment', file=sys.stderr)
+                  source = os.path.realpath(match)
+                  if source in staged_by_source:
+                      print(f'::error::bundle {cell[\"name\"]!r}: members {staged_by_source[source]!r} and {member!r} both resolve to the candidate {match!r}', file=sys.stderr)
                       sys.exit(1)
+                  staged_by_source[source] = member
                   shutil.copy2(match, os.path.join(staging, member))
-              if missing:
+              # A bundle that declares a scope policy (bundle_required,
+              # from bundles.<id>.required/on_incomplete) hands a missing
+              # member to compare's scope axis, which gates it per the
+              # declared policy; without one, every member must be staged.
+              if missing and cell.get('bundle_required') and staged_by_source:
+                  print(f'::warning::bundle {cell[\"name\"]!r}: no candidate binary matched for member(s) {missing}; the declared scope policy decides whether that fails the check', file=sys.stderr)
+              elif missing:
                   print(f'::error::bundle {cell[\"name\"]!r}: no candidate binary matched for member(s) {missing}', file=sys.stderr)
                   sys.exit(1)
               print(f'new-library={staging}')
@@ -1018,6 +1031,13 @@ jobs:
           name: ${{ matrix.name }}
           baseline-target: ${{ matrix.baseline_target || '' }}
           bundle-members: ${{ toJSON(matrix.bundle_members || fromJSON('[]')) }}
+          # The bundle's scope policy (bundles.<id>.required/on_incomplete,
+          # run-plan v4); '[]'/'' when none was declared.
+          bundle-required: ${{ toJSON(matrix.bundle_required || fromJSON('[]')) }}
+          bundle-on-incomplete: ${{ matrix.bundle_on_incomplete || '' }}
+          # Each member's own public_headers (run-plan member_headers); a
+          # depth: headers bundle dumps each candidate member against them.
+          member-headers: ${{ toJSON(matrix.member_headers || fromJSON('{}')) }}
           profile: ${{ matrix.profile_id }}
           baseline-channel: ${{ matrix.baseline_channel }}
           baseline-path: 'baseline-sets/${{ matrix.profile_id }}-${{ matrix.baseline_channel }}'

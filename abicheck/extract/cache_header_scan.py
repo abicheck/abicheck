@@ -31,12 +31,14 @@ while ``header_utils`` is the stdlib-only path/flag leaf every layer shares.
 from __future__ import annotations
 
 import os
+import tempfile
 import threading
 from pathlib import Path
 
 from ..header_utils import CACHE_HEADER_SUFFIXES
 
 __all__ = [
+    "iter_cache_input_rel_parts",
     "header_scan_statistics",
     "iter_cache_header_files",
     "reset_header_scan_statistics",
@@ -168,7 +170,47 @@ def _path_suffix(name: str) -> str:
     return name[i:] if 0 < i < len(name) - 1 else ""
 
 
-def _cache_header_rel_parts(directory: Path) -> list[tuple[str, ...]]:
+#: Directory names :func:`iter_cache_input_rel_parts` never descends into: version
+#: control metadata, which no ``#include`` names and which churns on every
+#: commit (hashing it would make every warm entry under a checkout root miss).
+_SKIPPED_INPUT_DIRS = frozenset({".git", ".hg", ".svn", ".bzr", "__pycache__"})
+
+#: Name of abicheck's own cache root under every cache base.
+_OWN_CACHE_DIR_NAME = "abi_check"
+
+
+def _own_cache_roots() -> frozenset[str]:
+    """abicheck's own cache roots, normcased real paths, read at call time.
+
+    The content walk must never fold abicheck's own outputs: a cache root
+    under an include root (``XDG_CACHE_HOME`` inside a project tree) would
+    otherwise change the key while the parse writes its lock and AST files,
+    and the clang backend's stability check discards the parse. Mirrors the
+    bases ``storage.ast_cache_location.backend_cache_dir`` and the dump
+    cache's ``store._get_cache_dir`` resolve (including the temp fallback).
+    """
+    bases: list[str] = [tempfile.gettempdir()]
+    xdg = os.environ.get("XDG_CACHE_HOME")
+    if xdg:
+        bases.append(xdg)
+    local = os.environ.get("LOCALAPPDATA")
+    if local:
+        bases.append(local)
+    try:
+        home = os.path.expanduser("~")
+        bases.append(os.path.join(home, ".cache"))
+        bases.append(os.path.join(home, "AppData", "Local"))
+    except (OSError, RuntimeError):
+        pass
+    return frozenset(
+        os.path.normcase(os.path.realpath(os.path.join(b, _OWN_CACHE_DIR_NAME)))
+        for b in bases
+    )
+
+
+def _cache_header_rel_parts(
+    directory: Path, *, all_files: bool = False
+) -> list[tuple[str, ...]]:
     """Every matching entry under *directory*, as a tuple of relative path parts.
 
     The scan half of :func:`iter_cache_header_files`, kept separate so the
@@ -201,6 +243,7 @@ def _cache_header_rel_parts(directory: Path) -> list[tuple[str, ...]]:
     """
     root = str(directory)
     stack: list[tuple[str, tuple[str, ...]]] = [(root, ())]
+    own_cache = _own_cache_roots() if all_files else frozenset()
     found: list[tuple[str, ...]] = []
     traversed = 0
     suffix_of = _path_suffix
@@ -226,6 +269,18 @@ def _cache_header_rel_parts(directory: Path) -> list[tuple[str, ...]]:
                 is_dir = entry.is_dir(follow_symlinks=False)
             except OSError:
                 is_dir = False
+            if all_files:
+                if is_dir:
+                    child = join(base, name)
+                    if name in _SKIPPED_INPUT_DIRS or (
+                        name == _OWN_CACHE_DIR_NAME
+                        and os.path.normcase(os.path.realpath(child)) in own_cache
+                    ):
+                        continue
+                    stack.append((child, child_rel))
+                else:
+                    found.append(child_rel)
+                continue
             if is_dir:
                 stack.append((join(base, name), child_rel))
             if suffix_of(name).lower() in CACHE_HEADER_SUFFIXES:
@@ -257,3 +312,22 @@ def iter_cache_header_files(directory: Path) -> list[Path]:
         key=lambda rel: tuple(normcase(part) for part in rel),
     )
     return [directory.joinpath(*rel) for rel in ordered]
+
+
+def iter_cache_input_rel_parts(directory: Path) -> list[tuple[str, ...]]:
+    """Every non-directory entry under *directory* a parse could ``#include``,
+    as relative path parts in component-wise order.
+
+    Unlike :func:`iter_cache_header_files` there is no suffix filter: the
+    preprocessor opens ``x.def``, ``config.in`` and suffix-less ``<vector>``
+    exactly like ``x.h``, so the cache keys' content walk (ADR-062 D11) must
+    see them. Version-control directories and abicheck's own cache root are
+    skipped. Parts, not ``Path`` objects: the content digest folds
+    ``os.sep.join(parts)``, and building one ``Path`` per file dominated a
+    warm system-include digest.
+    """
+    rels = _cache_header_rel_parts(directory, all_files=True)
+    if os.path.normcase("A") == "A":
+        return sorted(rels)  # normcase is the identity here (POSIX)
+    normcase = os.path.normcase
+    return sorted(rels, key=lambda rel: tuple(normcase(part) for part in rel))

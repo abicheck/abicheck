@@ -239,6 +239,9 @@ outputs:
   member-snapshots-dir:
     description: '(kind: bundle with stage-member-snapshots: true only) Path to the staged, one-snapshot-per-member directory holding each member''s historical baseline snapshot -- usable as a directory-compare old-side operand. Empty otherwise.'
     value: ${{ steps.resolve.outputs.member-snapshots-dir }}
+  member-snapshot-paths:
+    description: '(kind: bundle with stage-member-snapshots: true only) JSON object mapping each staged member target id to its snapshot file inside member-snapshots-dir. `{}` otherwise.'
+    value: ${{ steps.resolve.outputs.member-snapshot-paths }}
   member-header-evidence:
     description: '''complete'' when every staged member''s baseline snapshot carries header-derived evidence, ''partial'' when only some do, ''none'' when none do or no staging ran. Only ''complete'' means an old side genuinely distinct from the current checkout for every member.'
     value: ${{ steps.resolve.outputs.member-header-evidence }}

@@ -505,6 +505,38 @@ header does not discard an expensive extraction. Eviction uses a byte quota
 with LRU rather than an entry count, and caching is per section so an
 unchanged binary, a shared graph, or an unchanged variant can be reused.
 
+*Implementation note (2026-10-31).* The identity half is implemented for the
+whole-snapshot and header-AST caches: content digests only
+(`extract/cache_input_digest.py`), over every file under an include root,
+file-valued includes, the compiler's built-in search directories and
+`CPATH`-style directories; a stat signature only lets a process skip
+re-reading an unchanged file. Byte-quota LRU is implemented
+(`storage/byte_quota_lru.py`). Per-section caching is not (storage plan
+A2.3). D11 itself is still Proposed: accepting it is a maintainer decision.
+
+*Implementation note (2026-11-01): dependency manifests.* Hashing the
+content of every file under the compiler's built-in search directories
+(~4,400 files) cost 30-60 ms per key derivation, about three derivations
+per dump and header-graph attach, and failed the header-graph perf gate.
+System include directories now enter every key by spelling and order only
+(plus the compiler's content identity, already folded). The system headers
+a parse *actually read* are recorded at store time in a dependency manifest
+beside the entry -- ccache's "direct mode" -- owned by
+`extract/cache_dep_manifest.py`: the file list comes from the frontend's own
+depfile (`-MD -MF`; both clang and castxml honour it), each file with its
+content digest. A key hit is served only while every recorded file still
+digests the same and no file has appeared that would shadow one from an
+earlier search directory; a missing or corrupt manifest, or a dependency
+modified after the parse started, is a miss / no store. The clang AST entry
+(`<key>.json.deps`), the castxml parse-store entry and its clang-derived
+vector/variable-template sidecars, and the whole-snapshot entry
+(`<key>.deps`, the union of the manifests of every parse the dump ran or
+was served, gathered by `cache_dep_manifest.recording()`) all use it. A
+frontend run that writes no depfile (a DPC++ multi-pass driver run) records
+the old full-content digest of each system directory instead. Project
+inputs (headers, include roots, file-valued includes, `CPATH`-style
+directories) stay content-hashed in the key.
+
 ### D12 — Compression level is internal policy, not a new user knob
 
 Local/extraction cache uses zstd level 3, ordinary CI baselines 10-15,

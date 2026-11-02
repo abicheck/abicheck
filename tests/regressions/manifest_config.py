@@ -357,6 +357,12 @@ CONFIG_BUG_CLASSES: tuple[BugClass, ...] = (
             # `compare --dry-run` priced a compile DB and a source scope the
             # run does not use. Oracle: the run's own L3 collector.
             "tests/test_compare_dry_run_compile_db.py",
+            # `bundles.<id>.required`/`on_incomplete` had no expression at
+            # all, and its CLI channel (`--set scope.on_incomplete`) was
+            # refused. The chain crosses a key space (target id -> release
+            # key). Oracle: the policy as documented, over every
+            # declarable policy x missing member through a real compare.
+            "tests/test_bundle_scope_policy.py",
         ),
         known_gaps=(
             KnownGap(

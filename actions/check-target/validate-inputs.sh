@@ -39,6 +39,9 @@ TARGET_KIND="${INPUT_TARGET_KIND:-library}"
 NAME="${INPUT_NAME:-}"
 PROFILE="${INPUT_PROFILE:-}"
 BUNDLE_MEMBERS="${INPUT_BUNDLE_MEMBERS:-[]}"
+BUNDLE_REQUIRED="${INPUT_BUNDLE_REQUIRED:-}"
+BUNDLE_ON_INCOMPLETE="${INPUT_BUNDLE_ON_INCOMPLETE:-}"
+MEMBER_HEADERS="${INPUT_MEMBER_HEADERS:-}"
 BASELINE_CHANNEL="${INPUT_BASELINE_CHANNEL:-}"
 BASELINE_PATH="${INPUT_BASELINE_PATH:-}"
 GATE_MODE="${INPUT_GATE_MODE:-local}"
@@ -162,21 +165,13 @@ if [[ "$KIND" == "bundle" ]]; then
     # than letting the nested analysis step fail later.
     _fail "depth '$REQUESTED_DEPTH' is not supported when kind is 'bundle' -- a bundle compares directories, which the CLI's per-library release fan-out never collects inline build/source evidence for. Use depth: binary for a bundle check, or kind: target to compare one library at build/source/headers depth."
   fi
-  if [[ "$REQUESTED_DEPTH" == "headers" ]]; then
-    # A bundle's old-library operand is always a directory of raw binaries
-    # (actions/baseline's bundle staging never produces pre-dumped .abi.json
-    # snapshots with historical header data already baked in, unlike its
-    # single-target mode) -- at depth: headers both the old and new sides
-    # would be freshly header-parsed at compare time using the SAME current
-    # checkout's headers (this Action has only one project-wide `header:`
-    # input, no per-baseline-version header staging), so a header-only
-    # change between baseline and candidate (e.g. an inline function or
-    # template removed) would be silently invisible: only one version of
-    # the headers is ever parsed (Codex review). Reject until the candidate
-    # side has per-member header selection. The baseline half exists
-    # (resolve-baseline's stage-member-snapshots), but check-target does not
-    # route it yet, so a bundle's old side is still binaries-dir.
-    _fail "depth 'headers' is not supported when kind is 'bundle' -- the candidate side has no per-member header selection yet (one project-wide header input would parse every member's new side against the union of all members' headers, which can invent or hide header-level changes), and the bundle's old side is not yet routed to the per-member baseline snapshots. Use depth: binary for a bundle check, or kind: target to compare one library at headers depth."
+  if [[ "$REQUESTED_DEPTH" == "headers" ]] && [[ -z "$MEMBER_HEADERS" || "$MEMBER_HEADERS" == "{}" ]]; then
+    # depth: headers compares per-member snapshots: the baseline's own, and
+    # one candidate dump per member against that member's own headers. With
+    # no per-member headers the only header input is one project-wide set,
+    # which would parse every member against the union of all members'
+    # headers and can invent or hide header-level changes.
+    _fail "depth 'headers' for kind: bundle needs member-headers -- a JSON object mapping each member to its own public headers (run-plan member_headers, from each member target's public_headers:). One project-wide header input would parse every member against the union of all members' headers. Declare public_headers: on every member, or use depth: binary."
   fi
   if [[ "$ALLOW_NEW_TARGET" == "true" ]]; then
     # abicheck.buildsource.baseline_set.resolve_bundle never returns
@@ -203,6 +198,19 @@ if [[ "$KIND" == "bundle" ]]; then
   # abicheck/buildsource/project_targets.py's _check_issues is gone for the
   # same reason; there is nothing left for this guard to reject. The value
   # is still validated as a strict 'true'/'false' just below.
+fi
+# The bundle scope policy (bundles.<id>.required/on_incomplete). Its member
+# ids are checked against bundle-members by the 'Resolve bundle scope
+# selection' step, which has the baseline's binary-paths to translate them.
+case "$BUNDLE_ON_INCOMPLETE" in
+  '' | fail | warn) ;;
+  *) _fail "bundle-on-incomplete '$BUNDLE_ON_INCOMPLETE' is not recognized. Use 'fail' or 'warn', or leave it unset to inherit .abicheck.yml's scope.on_incomplete." ;;
+esac
+if [[ "$KIND" != "bundle" ]] && [[ ( -n "$BUNDLE_REQUIRED" && "$BUNDLE_REQUIRED" != "[]" ) || -n "$BUNDLE_ON_INCOMPLETE" ]]; then
+  _fail "bundle-required/bundle-on-incomplete apply only when kind is 'bundle' -- a target check has one member and no selection to state."
+fi
+if [[ "$KIND" != "bundle" && -n "$MEMBER_HEADERS" && "$MEMBER_HEADERS" != "{}" ]]; then
+  _fail "member-headers applies only when kind is 'bundle' -- a target check takes header/new-header."
 fi
 case "$ALLOW_NEW_TARGET" in
   true | false) ;;

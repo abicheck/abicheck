@@ -7,11 +7,11 @@ lifecycle: active
 generated: false
 ---
 
-# A `kind: bundle` check still cannot run at `depth: headers`: only the *baseline* half of per-member header staging is wired (2026-09-12)
+# A header-depth `kind: bundle` check has no runner-scale memory receipt, and no Action emits bundle facts (2026-09-12)
 
 Index: [Known gaps](../known-gaps.md)
 
-**Status (re-verified 2026-10-25): OPEN, partly narrowed.** actions/check-target/action.yml:1832 still routes bundle old-library to `steps.resolve.outputs.binaries-dir`, not `member-snapshots-dir`. BUNDLE_CHECK_DEPTHS is unchanged (binary only, abicheck/buildsource/project_targets.py:144). (b)'s fail-early requirement is met: `actions/check-target/validate-inputs.sh` rejects `requested-depth: headers` for `kind: bundle` at input validation, before any tool runs, and the message now names the real remaining blockers instead of the retired "no historical header snapshot" reason (pinned by `tests/test_action_check_target.py::TestValidateInputs::test_bundle_kind_rejects_headers_depth`). (a) routing and the candidate-side per-member header selection are still open; see "Why (a) was not routed in this pass" below.
+**Status (2026-11-01): PARTIAL, narrowed.** (a) routing and (b) candidate-side per-member headers are **fixed**, and a bundle check now runs at `depth: headers`; see "How (a) and (b) were closed" at the end. (c)'s receipt and (d) are still open. The text between here and that section is the history of the entry as it stood before the fix.
 
 
 `abicheck/buildsource/bundle_member_snapshots.py` now resolves and stages
@@ -208,3 +208,41 @@ independent of every abicheck detector -- that a header-derived change
 *is* detected per member once the old side comes from the staged
 baseline, and *is not* when both sides come from the candidate (today's
 behavior).
+
+## How (a) and (b) were closed (2026-11-01)
+
+- **(a) routing.** For `kind: bundle` at `depth: headers`, `check-target`
+  passes `stage-member-snapshots: true` to `resolve-baseline` and uses
+  `member-snapshots-dir` as `old-library`. It refuses the run when
+  `member-header-evidence` is not `complete`: a member whose baseline
+  snapshot has no header evidence would have no header facts on one side.
+  `resolve-baseline` gained a `member-snapshot-paths` output (member → staged
+  snapshot), so nothing downstream guesses file names. A binary-depth bundle
+  still compares `binaries-dir`, unchanged.
+- **(b) candidate headers.** The run plan's bundle cell carries
+  `member_headers` (each member's own `public_headers:`). `check-target`
+  plans one dump per member (`workflows/bundle_candidate_snapshots`: the
+  candidate file is found by the canonical release key of the member's
+  baseline binary, the output is named after its baseline snapshot) and runs
+  `abicheck dump <member> -H <its headers> --depth headers` for each, one
+  process at a time. `compare` then runs over the two snapshot directories,
+  without `-H`. No member is parsed against another member's headers.
+- **Depth gate.** `BUNDLE_CHECK_DEPTHS` is `{binary, headers}`;
+  `project validate` requires `public_headers:` on every member of a
+  header-depth bundle, and `validate-inputs.sh` requires `member-headers`.
+- **The stored-snapshot budget hole** in (c) is closed for this route:
+  `check-target` passes `--depth headers`, so the fan-out sizes workers at
+  the headers rung instead of reading untyped snapshots as binary depth.
+
+Evidence: `tests/test_bundle_header_depth_routing.py` builds two members
+with gcc, publishes per-member snapshots with v1 headers, runs the real
+`bundle_candidate` step against v2 headers and a real `compare`: the member
+whose header lost an inline function reports a break, the other reads
+`NO_CHANGE`, and the previous routing (binaries plus one header set) reads
+exit 0 on the same edit.
+
+Still open: (c) a measured receipt that a large header-depth bundle fits the
+16 GB runner and its timeout (an overrun is an OOM or timeout, an
+operational failure, never a pass), and (d) an Action output for the
+bundle-facts document.
+

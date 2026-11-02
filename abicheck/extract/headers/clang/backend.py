@@ -61,7 +61,9 @@ from ....storage.header_ast_cache import (
     run_ast_acquisition_offering_entry,
     store_cached_ast,
 )
+from ... import cache_dep_manifest
 from ...builtin_abi import probe_builtin_abi
+from ...cache_input_digest import compiler_search_dirs
 from ...compiler_driver import (
     clang_bin_is_explicitly_configured as _clang_bin_is_explicitly_configured,
     is_cl_style_driver_name,
@@ -283,7 +285,7 @@ def clang_header_dump(
         # A warm disk hit is an acquisition too, so it is read on the
         # `_coordinated=True` re-entry below, never ahead of this call --
         # `run_ast_acquisition`'s own docstring has the rule.
-        return run_ast_acquisition_offering_entry(
+        acquired = run_ast_acquisition_offering_entry(
             "clang",
             key,
             _entry_path,
@@ -309,12 +311,23 @@ def clang_header_dump(
                 run_ast=run_ast,
             ),
         )
+        # Served from the request's table, a result names its dependencies
+        # only through the entry it was stored as.
+        served = _entry_path(acquired)
+        cache_dep_manifest.note(cache_dep_manifest.recall(str(served), served))
+        return acquired
 
     _memoize = resolve_request_memoization(memoize)
     _cached_result = load_cached_ast(
-        key, "clang", cached, memoize=_memoize, on_disk_load=materialize_locations
+        key,
+        "clang",
+        cached,
+        memoize=_memoize,
+        on_disk_load=materialize_locations,
+        entry_valid=cache_dep_manifest.entry_valid,
     )
     if _cached_result is not None:
+        cache_dep_manifest.note(cache_dep_manifest.recall(str(cached), cached))
         return cast("dict[str, Any]", _cached_result), resolved_kind, force_cpp
 
     agg_ext = ".hpp" if force_cpp else ".h"
@@ -328,6 +341,12 @@ def clang_header_dump(
     _write_agg(active_headers)
 
     _ast_paths: list[Path] = []  # each attempt's AST, cleaned up in `finally` below
+    # The files the parse reads, from clang's own depfile (ADR-062 D11). A
+    # DPC++ multi-pass driver run is left without one: the full-content
+    # fallback stands in.
+    parse_deps = cache_dep_manifest.ParseDeps(
+        enabled=not (dpcpp_multi_context or dpcpp_host_context)
+    )
 
     def _run_clang(
         fcpp: bool, fcpp20: bool, sysinc: tuple[str, ...]
@@ -347,6 +366,7 @@ def clang_header_dump(
             dpcpp_multi_context=dpcpp_multi_context,
             dpcpp_host_context=dpcpp_host_context,
         )
+        cmd[-1:-1] = parse_deps.args()  # the aggregate header stays last
         try:
             return run_ast(cmd, timeout=120, on_created=_ast_paths.append)
         except subprocess.TimeoutExpired as exc:
@@ -405,6 +425,30 @@ def clang_header_dump(
                 "header inputs changed while clang was acquiring L2 evidence; "
                 "discarding the unstable result"
             )
+        agg_name = str(agg_path)
+        manifest = (
+            parse_deps.manifest(
+                search_dirs=(
+                    *cur_sysinc,
+                    *compiler_search_dirs(clang_bin, cpp=cur_fcpp),
+                ),
+                exclude=lambda dep: dep == agg_name,
+            )
+            if result.returncode == 0
+            else None
+        )
+        cache_dep_manifest.note(manifest)
+        if manifest is not None:
+            # Under the lookup path too: the memo handoff is keyed there.
+            cache_dep_manifest.remember(str(cached), manifest)
+            cache_dep_manifest.remember(str(write_cached), manifest)
+        # A dependency modified mid-parse leaves no manifest: nothing is
+        # stored, since no digest taken now describes what clang read.
+        identities_stable = (
+            identities_stable
+            and manifest is not None
+            and cache_dep_manifest.write_sidecar(write_cached, manifest)
+        )
         root = _parse_clang_ast_result(
             result,
             write_cached,
@@ -427,6 +471,7 @@ def clang_header_dump(
             store_cached_ast(key, "clang", root)
         return root, resolved_kind, cur_fcpp
     finally:
+        parse_deps.close()
         agg_path.unlink(missing_ok=True)
         for _p in _ast_paths:
             _p.unlink(missing_ok=True)
