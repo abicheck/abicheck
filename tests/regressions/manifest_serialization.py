@@ -162,8 +162,8 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
         # Escape history: #1335's cross-process A/B measurement saw
         # `surface_graph.nodes` reorder between two dumps of one library;
-        # #1542 recorded it as a known gap. Add the fixing PR when opened.
-        fixed_by=(1335, 1542),
+        # #1542 recorded it as a known gap; #1905 fixed it.
+        fixed_by=(1335, 1542, 1905),
         seed_tests=("tests/test_snapshot_byte_reproducibility.py",),
         axes={
             "producer_order": ("sorted", "permuted"),
