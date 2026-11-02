@@ -672,6 +672,7 @@ def test_covered_rows_are_really_registered_in_the_catalogue() -> None:
             "abicheck.workflows.release_member_pairing:snapshot_identity",
             "abicheck.workflows.release_member_pairing:pair_path_maps_by_identity",
             "abicheck.workflows.release_member_pairing:facts_paired_by_identity",
+            "abicheck.storage.wire_extensions:refuse_blocked_identity",
         }
         | {
             f"abicheck.model.identity:entity_id_for_{k}"

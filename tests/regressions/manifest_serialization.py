@@ -330,9 +330,7 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
             KnownGap(
                 description=(
                     "G38 bundle documents and G40 bundle archives still refuse "
-                    "a member snapshot carrying D14/D15 carriers, and a newer "
-                    "section_schema_version inside a directory package refuses "
-                    "the package instead of blocking the section."
+                    "a member snapshot carrying D14/D15 carriers."
                 ),
                 reference="docs/contribute/known-gaps.md",
             ),
