@@ -1,11 +1,14 @@
 # ADR-079: Recording a Partial Export-Table Read in the Stored Snapshot
 
 **Date:** 2026-10-12
-**Status:** Proposed — not implemented. Drafted for the known gap
+**Status:** Accepted — not implemented (accepted 2026-11-02). Written for the known gap
 [`a-stored-snapshot-keeps-no-record-of-a-partial-export-table-read`](../known-gaps/a-stored-snapshot-keeps-no-record-of-a-partial-export-table-read.md).
-Proposes one snapshot field, a schema bump from v58 to v59, and two decisions
-the maintainer must confirm (D4, D5). No code, schema or default changes with
-this draft; the schema stays at v58 until the decisions are accepted.
+Accepts one snapshot field and a schema bump, with D4 and D5 as proposed
+(a `partial` read lowers scope completeness, no new exit code; old readers
+are handled by the existing version gate, without raising the hard-rejection
+floor). The v58/v59 numbers below are the draft's: the implementing change
+takes the next free schema version and carries the bump. No code, schema or
+default has changed yet.
 
 ## Context
 
@@ -55,7 +58,7 @@ evidence narrows conclusions" rule requires it to be closed.
    schema bump.** Proposed. It is the only option that lets a stored snapshot
    carry the fact, and it reuses the existing `FAILED`/`PARTIAL` vocabulary.
 
-## Decision (proposed)
+## Decision
 
 **D1. One field, per platform.** Each stored platform block (`elf`, `pe`,
 `macho`) gains `export_read`, one of `complete`, `partial`, `failed`. The
