@@ -94,7 +94,7 @@ class TestPackedGraphReadsBackTheTupleForm:
             edges=[list(e) for e in data.draw(st.permutations(edges))],
         )
         assert g == shuffled and hash(g) == hash(shuffled)
-        assert pickle.loads(pickle.dumps(g)) == g
+        assert pickle.loads(pickle.dumps(g)) == g  # nosec B301 - round-trips bytes this test just produced
 
     @pytest.mark.parametrize(
         ("a", "b"),
