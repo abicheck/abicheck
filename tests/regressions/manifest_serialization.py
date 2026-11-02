@@ -309,6 +309,8 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_blocked_section_compare_matrix.py",
             "tests/test_pe_pdb_section_failure.py",
             "tests/test_package_section_version_blocks_section.py",
+            "tests/unit/storage/test_bundle_carriers_roundtrip.py",
+            "tests/test_bundle_blocked_section_compare.py",
         ),
         public_surfaces=("cli",),
         axes={
@@ -322,15 +324,21 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
                 "not-collected-section",
             ),
             "level": ("record", "nested-record", "section", "document", "manifest"),
-            "container": ("single-file", "directory-package"),
+            "container": (
+                "single-file",
+                "directory-package",
+                "bundle-document",
+                "bundle-archive",
+                "bundle-package",
+            ),
             "producer": ("imported-document", "pe-pdb-parse-failure"),
             "side": ("old", "new"),
         },
         known_gaps=(
             KnownGap(
                 description=(
-                    "G38 bundle documents and G40 bundle archives still refuse "
-                    "a member snapshot carrying D14/D15 carriers."
+                    "A flat snapshot_to_dict mapping handed to a package "
+                    "writer cannot say what carriers it lost."
                 ),
                 reference="docs/contribute/known-gaps.md",
             ),

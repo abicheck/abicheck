@@ -41,10 +41,10 @@ then written at ``ref_schema_version`` 2, so a reader that predates it
 refuses rather than reads the dropped sections as empty), the blocked and
 failed sections are left out of ``ArtifactRef.sections``, and
 :func:`carriers_for_reader` re-decides on read what blocks *this* build. A
-G38 bundle document or G40 bundle archive is still built from the flat
-`snapshot_to_dict` document, so :func:`refuse_package_flattening` refuses
-such a snapshot there (a recorded gap) rather than storing a blocked
-section as present and empty.
+bundle package does the same per member. A G38 bundle document or G40
+bundle archive stores a member the flat document would lose state of
+(:func:`flattening_loses`) as its single-file sectioned document instead,
+under bundle ``schema_version`` 5 so an older reader refuses it.
 
 **What blocks.** A section of a known kind whose header names a
 ``must_understand`` entry this build does not understand, or which is
@@ -102,13 +102,14 @@ __all__ = [
     "WIRE_EXTENSIONS_KEY",
     "WireExtensions",
     "attach",
+    "attach_package_carriers",
     "carriers_for_reader",
     "check_must_understand",
     "extensions_of",
+    "flattening_loses",
     "merge_wire_extensions",
     "record_section_failure",
     "refuse_blocked_identity",
-    "refuse_package_flattening",
     "refuse_unwritable_extensions",
     "section_blocking_reason",
     "split_wire_extensions",
@@ -336,6 +337,19 @@ def carriers_for_reader(raw: Any, where: str) -> WireExtensions:
     return ext
 
 
+def attach_package_carriers(document: dict[str, Any], raw: Any, where: str) -> None:
+    """Put a package artifact's stored carriers (*raw*,
+    `ArtifactRef.carriers`), decided for this build, on its exported
+    *document*, merged with any section the export itself blocked."""
+    stored = carriers_for_reader(raw, where)
+    blocked = document.get(WIRE_EXTENSIONS_KEY)
+    if isinstance(blocked, WireExtensions):
+        stored.passthrough_sections.update(blocked.passthrough_sections)
+        stored.passthrough_versions.update(blocked.passthrough_versions)
+        stored.unreadable.extend(blocked.unreadable)
+    document[WIRE_EXTENSIONS_KEY] = stored
+
+
 def attach(snap: Any, extensions: WireExtensions) -> None:
     """Associate *extensions* with the decoded snapshot *snap*: stored on its
     runtime-only ``wire_extensions`` field, so `dataclasses.replace`, `copy`
@@ -363,39 +377,22 @@ def refuse_unwritable_extensions(snap: Any) -> None:
         )
 
 
-def refuse_package_flattening(snap: Any) -> None:
-    """Refuse to flatten *snap* into a `snapshot_to_dict` document bound for
-    a ProjectSnapshot package or a G40 bundle archive.
-
-    Those paths are built from the flat document, which cannot express a
-    ``failed``/blocked section, an unknown section, a header ``extensions``
-    or ``must_understand`` entry, or an unknown record field. Writing it
-    anyway would store a blocked section as present-and-empty -- a false
-    clean -- and drop the extensions from the stored evidence digest. Until
-    the package path carries them (`docs/contribute/known-gaps.md`), it
-    fails closed. Save such a snapshot as a single-file snapshot instead."""
-    refuse_unwritable_extensions(snap)
+def flattening_loses(snap: Any) -> bool:
+    """Whether the flat `snapshot_to_dict` document of *snap* would lose
+    stored state: a failed or blocked section, an unknown section, header
+    or record extensions, or a document-level must-understand list. A
+    ``not_collected`` section is simply absent from a flat document too."""
     carried = extensions_of(snap)
     if carried is None:
-        return
-    # A ``not_collected`` section is simply absent from a package too.
-    lost = sorted(
-        {kind for kind, _ in carried.unreadable}
-        | set(carried.passthrough_sections)
-        | set(carried.passthrough_versions)
-        | set(carried.header_extras)
-        | {kind for kind, _ in carried.record_extras}
-        | {k for k, v in carried.availability.items() if v["status"] == "failed"}
-    )
-    if not lost and not carried.document_must_understand:
-        return
-    detail = f" (section(s) {', '.join(repr(k) for k in lost)})" if lost else ""
-    raise SnapshotError(
-        "Snapshot carries stored state a ProjectSnapshot package or bundle "
-        "archive cannot represent yet -- a failed or blocked section, an "
-        "unknown section, section/record extensions or a must-understand "
-        f"list{detail}. Writing it would lose that state; save it as a "
-        "single-file snapshot instead."
+        return False
+    return bool(
+        carried.unreadable
+        or carried.passthrough_sections
+        or carried.passthrough_versions
+        or carried.header_extras
+        or carried.record_extras
+        or carried.document_must_understand
+        or any(v["status"] == "failed" for v in carried.availability.values())
     )
 
 

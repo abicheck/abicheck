@@ -23,7 +23,8 @@ count. This module holds the *encoded* member on disk instead:
 finishes, and the caller keeps only the small :class:`SpooledBlob` handle.
 
 **The blob is the G40 archive blob.** A blob's bytes are
-``json.dumps(snapshot_to_dict(snap), indent=2)`` in UTF-8, the payload
+``json.dumps(member, indent=2)`` in UTF-8 (*member* is the flat or, for a
+member with ADR-062 D14/D15 carriers, the sectioned document), the payload
 ``storage.bundle_facts_archive`` stores, and its name is that payload's
 content hash. So the same spool serves both output forms with no second
 encode:
@@ -72,6 +73,9 @@ class SpooledBlob:
 
     sha256: str
     length: int
+    #: The blob is a member's single-file sectioned document (ADR-062
+    #: D14/D15 carriers), so its bundle declares schema_version 5.
+    sectioned: bool = False
 
 
 class BlobSpool:
@@ -101,7 +105,9 @@ class BlobSpool:
     def _path(self, blob: SpooledBlob) -> Path:
         return self._dir / blob.sha256
 
-    def _write(self, chunks: Iterator[bytes]) -> SpooledBlob:
+    def _write(
+        self, chunks: Iterator[bytes], *, sectioned: bool = False
+    ) -> SpooledBlob:
         hasher = hashlib.sha256()
         length = 0
         fd, tmp_name = tempfile.mkstemp(dir=self._dir, prefix=".put-")
@@ -111,32 +117,33 @@ class BlobSpool:
                     hasher.update(chunk)
                     length += len(chunk)
                     out.write(chunk)
-            blob = SpooledBlob(hasher.hexdigest(), length)
+            blob = SpooledBlob(hasher.hexdigest(), length, sectioned)
             os.replace(tmp_name, self._path(blob))
         except BaseException:
             Path(tmp_name).unlink(missing_ok=True)
             raise
         return blob
 
-    def put_bytes(self, payload: bytes) -> SpooledBlob:
-        """Store *payload* under its content hash."""
-        return self._write(iter((payload,)))
+    def put_bytes(self, payload: bytes, *, sectioned: bool = False) -> SpooledBlob:
+        """Store *payload* under its content hash; *sectioned* marks a
+        member's sectioned document (`SpooledBlob.sectioned`)."""
+        return self._write(iter((payload,)), sectioned=sectioned)
 
     def put_snapshot(self, snap: AbiSnapshot) -> SpooledBlob:
-        """Store *snap*'s G40 blob: ``json.dumps(snapshot_to_dict(snap),
-        indent=2)`` as UTF-8, encoded fragment by fragment straight to disk.
-
-        Refuses, exactly as every ``BundleFacts`` writer does, a snapshot
-        whose stored state a flat document cannot carry
-        (``wire_extensions.refuse_package_flattening``)."""
-        from ..serialization import snapshot_to_dict
+        """Store *snap*'s G40 blob: ``json.dumps(member, indent=2)`` as
+        UTF-8, encoded fragment by fragment straight to disk, where *member*
+        is the document every ``BundleFacts`` writer stores
+        (``bundle_member_carriers.encode_bundle_member``): the flat
+        ``snapshot_to_dict`` one, or the sectioned one when the flat one
+        would lose ADR-062 D14/D15 carriers."""
+        from .bundle_member_carriers import encode_bundle_member
         from .json_stream import iter_json_indented
-        from .wire_extensions import refuse_package_flattening
 
-        refuse_package_flattening(snap)
-        document: Any = snapshot_to_dict(snap)
+        document: Any
+        document, sectioned = encode_bundle_member(snap)
         return self._write(
-            fragment.encode("utf-8") for fragment in iter_json_indented(document)
+            (fragment.encode("utf-8") for fragment in iter_json_indented(document)),
+            sectioned=sectioned,
         )
 
     def read_bytes(self, blob: SpooledBlob) -> bytes:

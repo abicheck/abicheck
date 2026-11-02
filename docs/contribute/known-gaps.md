@@ -273,16 +273,13 @@ document (closed 2026-11-02; `provenance` still refuses). Owner: `storage/`;
 per-item status in the
 [storage format v2 plan](plans/storage-format-v2.md).
 
-- **D14 residual: bundle documents and archives refuse the carriers.** A
-  directory ProjectSnapshot package now carries every D14/D15 carrier
-  (`ArtifactRef.carriers`, closed 2026-10-31). A G38 bundle document, a G40
-  bundle archive and a bundle package are still built from the flat
-  `snapshot_to_dict` document per member, so a member snapshot with a
-  failed/blocked/unknown section or extensions is refused there
-  (`wire_extensions.refuse_package_flattening`); save it as a single-file
-  snapshot or a directory package. A flat mapping a caller made with
-  `snapshot_to_dict` and handed to `write_legacy_snapshot_package` cannot say
-  what it lost and is written as what it says; pass the `AbiSnapshot`.
+- **D14 residual: a flat mapping cannot say what it lost.** Every
+  container now carries the D14/D15 carriers (directory and bundle
+  packages on `ArtifactRef.carriers`; G38 bundle documents and G40 bundle
+  archives by storing such a member as its sectioned document, closed
+  2026-10-31). A flat mapping a caller made with `snapshot_to_dict` and
+  handed to `write_legacy_snapshot_package` is still written as what it
+  says; pass the `AbiSnapshot`.
 - **D15 residual: one producer records a whole-section failure.** The PE
   dump records `debug` as `failed` when a located PDB fails to parse, on the
   export-table path only. A header-scoped PE dump's `debug` section also

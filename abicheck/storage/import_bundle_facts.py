@@ -80,6 +80,7 @@ from .import_v1 import export_legacy_snapshot, import_legacy_snapshot
 from .package import ObjectRef, ObjectStore, PackageManifest, VariantRef
 from .ref_ids import resolve_ref_ids
 from .versioning import FactGenerations, StorageVersions
+from .wire_extensions import WireExtensions, attach_package_carriers
 
 #: `native_identity` key `import_bundle_facts` stamps onto each per-library
 #: `ArtifactRef`, recording the library's own real name -- needed because
@@ -377,6 +378,7 @@ def import_bundle_facts(
     max_known_schema_version: int,
     variant_id: str = "default",
     generations: FactGenerations | None = None,
+    carriers: Mapping[str, WireExtensions] | None = None,
 ) -> PackageManifest:
     """Import *bundle_facts_document* (a `bundle_facts_serialization
     .bundle_facts_to_dict()`-shaped mapping) as a one-variant,
@@ -513,6 +515,7 @@ def import_bundle_facts(
             artifact_id=artifact_ids_by_library[library_name],
             variant_id=variant_id,
             max_known_schema_version=max_known_schema_version,
+            carriers=(carriers or {}).get(library_name),  # ADR-062 D14/D15
         )
         (artifact,) = member_manifest.artifact_refs
         artifact = replace(artifact, native_identity={_LIBRARY_NAME_KEY: library_name})
@@ -691,22 +694,11 @@ def export_bundle_facts(
                 "that this package's section_schema_versions does not "
                 "advertise -- the package is corrupted or was hand-edited"
             )
-        # `artifact_id` itself may be an opaque `resolve_ref_ids`-generated
-        # id, not the real library name -- `native_identity` is where
-        # `import_bundle_facts` stashed the real one. Falling back to
-        # `artifact_id` here (as an earlier version did) would export an
-        # opaque hash as a library name whenever the id happens to be one
-        # -- `import_bundle_facts` itself always sets this key, so its
-        # absence means this manifest wasn't built by it (or was
-        # hand-edited), and there is no real library name to recover
-        # (CodeRabbit review). Checked by *presence*, not truthiness: the
-        # empty string is itself a valid `per_library_snapshots` key the
-        # canonical `bundle_facts_from_dict` reader neither rejects nor
-        # special-cases (no key-shape validation exists for it at all),
-        # so `import_bundle_facts` itself can produce a real, legitimate
-        # `native_identity[_LIBRARY_NAME_KEY] == ""` -- rejecting it by
-        # truthiness would make an import-produced package unexportable
-        # (Codex review, fresh evidence).
+        # `artifact_id` may be an opaque `resolve_ref_ids` id; the real
+        # library name is on `native_identity`, which `import_bundle_facts`
+        # always sets, so its absence means a foreign or hand-edited
+        # manifest (CodeRabbit review). Checked by *presence*: the empty
+        # string is a legitimate library name (Codex review).
         if _LIBRARY_NAME_KEY not in artifact.native_identity:
             raise ValueError(
                 f"artifact {artifact_id!r} has no {_LIBRARY_NAME_KEY!r} "
@@ -738,6 +730,9 @@ def export_bundle_facts(
                 {"library_name": library_name, "snapshot": snapshot_document},
                 f"artifact {artifact_id!r} (library {library_name!r})",
             )
+        if artifact.carriers is not None:  # ADR-062 D14/D15
+            raw_carriers = store.get(artifact.carriers.digest)
+            attach_package_carriers(snapshot_document, raw_carriers, artifact_id)
         per_library_snapshots[library_name] = snapshot_document
 
     raw_manifest = composition.get("manifest")

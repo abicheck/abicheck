@@ -748,12 +748,24 @@ informational at the package level.
   read the left-out sections as empty. No `package_format_version` bump:
   the layout is unchanged, and the per-ref axis already fails closed (D2: the
   narrowest axis that makes an older reader refuse). A ref stating version 1
-  while carrying `carriers` is refused as corrupt. G38 bundle documents and
-  G40 bundle archives are still built from the flat `snapshot_to_dict`
-  document, so `wire_extensions.refuse_package_flattening` still refuses a
-  snapshot with carriers there (`bundle_facts_to_dict`, the archive writer);
-  a flat mapping handed to `write_legacy_snapshot_package` cannot say what it
-  lost and is written as what it says (known gap).
+  while carrying `carriers` is refused as corrupt. A flat mapping handed to
+  `write_legacy_snapshot_package` cannot say what it lost and is written as
+  what it says (known gap).
+- *Bundles carry the carriers (2026-10-31).* A bundle package stores each
+  member's carriers on its `ArtifactRef.carriers`, exactly as a directory
+  package. A G38 bundle document or G40 bundle archive has no ref to hang
+  them on, so a member whose flat document would lose state
+  (`wire_extensions.flattening_loses`) is stored as its single-file
+  sectioned document, which carries every carrier and which
+  `snapshot_from_dict` already reads (`storage/bundle_member_carriers.py`);
+  every other member keeps its flat bytes. *Versioning (D2):* the narrowest
+  axis an older reader fails closed on is the bundle's own
+  `schema_version`, so such a document or archive declares 5
+  (`SECTIONED_MEMBERS_SCHEMA_VERSION`); one without a sectioned member keeps
+  declaring what it did (2-4) and its bytes. A reader at 4 refuses a 5,
+  instead of decoding a sectioned member as a flat snapshot with every field
+  defaulted; a sectioned member under a declared version below 5 is refused
+  as corrupted. No D13 adapter: no stored document changes meaning.
 - *Nested record fields (2026-10-31).* Unknown keys are kept at any depth
   inside an identity-matched record (parameters, record fields, enum members)
   and on the `binary` section's ELF/PE/Mach-O metadata objects (including ELF
