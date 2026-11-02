@@ -339,6 +339,31 @@ per-item status in the
   `diff_namespaces`); the rest of the growth is allocator high-water. Each
   site needs its own owner decision (result data versus a cache that
   outlives its pair) before A2.5 can be met.
+  **Decision 2026-11-02 (maintainer): (3) is recorded as met for member
+  count; the streaming decode is deferred.** Release fan-out peak memory
+  does not grow with member count (members load one pair at a time); the
+  peak is bounded by the largest member, about 8x its decoded size. The
+  element-level streaming decode of `declarations` (est. ~360 -> ~180 MiB
+  on a 140 MiB snapshot) is deferred as a separate future item.
+  Per-section parse measurements: on a 140 MiB synthetic sectioned snapshot the parsed tree is 226 MiB and
+  `declarations` holds 85% of the text; the decoded snapshot is 43 MiB.
+  Ceilings (tracemalloc): today's text plus whole tree 359 MiB; whole text
+  plus only `declarations` parsed 323 MiB; a streamed per-section read that
+  never holds the whole text 287 MiB. Two load-time contracts force every
+  section to be parsed at load anyway: D14's record-extras split
+  (`wire_record_extensions.collect_record_extras` walks every record) and
+  the generation spelling migration, both whole-document. So a per-section
+  parse cannot leave an unread section unparsed without moving those errors
+  to first use. Its best case (-20%) also needs a streaming read that
+  reimplements `snapshot_io`'s decompression-bomb and size guards. The
+  deferred item is an element-level decode: the `declarations` arrays parsed,
+  checked for record extras, migrated and decoded one entity at a time, so
+  that neither the whole text nor the section's tree is ever resident.
+  Estimated bound: text plus decoded snapshot, about 180 MiB on the same
+  input. That rewrites `split_wire_extensions`, the DTO migration,
+  `export_legacy_sections`, `view_for` and `decode_declaration_store` as
+  streaming passes. The decoded-section cache still has no reader.
+  Measurements: plan A2.5.
 
 ### False-positive risk
 

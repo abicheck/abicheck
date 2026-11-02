@@ -249,6 +249,39 @@ See "Landed in Phase 1" below.
   `indexes/index.sqlite` layout slot stays reserved.
 - **A2.5** **Measured**: peak RSS for a project comparison no longer scales
   with the total decoded size of the package.
+  **Decision (2026-11-02, maintainer): A2.5 is recorded as met for
+  member count, and the streaming parse is deferred.** Release fan-out
+  peak memory does not grow with the number of members: members load one
+  pair at a time. The peak is bounded by the largest member, at about 8x
+  that member's decoded size. The element-level streaming decode of
+  `declarations` (estimated ~360 -> ~180 MiB peak on a 140 MiB snapshot,
+  table below) is deferred as a separate future item, not part of A2.5.
+  Per-section parse measurements (2026-11-02): synthetic
+  sectioned snapshot, 140 MiB pretty-printed (18k functions with 4 params,
+  1.8k records with 8 fields, 1.8k variables), Python 3.13, 4 cores:
+
+  | Measure (`load_snapshot`) | Value |
+  |---|---|
+  | wall time, load / load + first IR access | 2.4-2.5 s / 4.7 s |
+  | peak RSS (no tracemalloc) | 401 MiB |
+  | peak traced, load and load + access | 359.6 MiB |
+  | parsed JSON tree of the whole document | 226 MiB |
+  | decoded snapshot after load + access | 43 MiB |
+  | `declarations` share of the text | 97 of 116 MiB of section text |
+
+  | Parse strategy (traced peak, parse only) | Peak |
+  |---|---|
+  | whole text + whole tree (today) | 359 MiB |
+  | whole text + `declarations` only (best case of deferring every other section) | 323 MiB |
+  | streamed per section, whole text never held, all trees kept | 287 MiB |
+  | element-level decode (estimate: text + decoded snapshot) | ~180 MiB |
+
+  A per-section parse would gain 10-20% at most: D14's record-extras split
+  and the generation migration are whole-document checks whose errors are
+  load-time contracts, so every section is still parsed at load, and the
+  20% case needs a streaming reader that duplicates `snapshot_io`'s bomb
+  guards. The deferred item is element-level streaming of `declarations`;
+  see known-gaps "ADR-062 D14-D18", D18 (3).
 
 ---
 

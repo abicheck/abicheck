@@ -1013,6 +1013,13 @@ deferred together, with the `semantic_ir` section and the per-entity half of
   whole-document `json.loads`, which lazy decoding does not remove. No real
   consumer path would read the cache, so per D11 it is not built.
   Measurements are in the plan's A1.9 D18 entry.
+- 2026-11-02: a per-section parse (each section's JSON parsed from its own
+  text span) was measured and not adopted. D14's record-extras split and the
+  generation migration still parse every section at load, and the best
+  case is 20% below today's peak. The element-level `declarations` decode
+  that would bound the per-member peak is deferred as a separate future
+  item (maintainer decision); release fan-out peak does not grow with
+  member count. Figures are in the plan's A2.5 entry.
 
 ### Exit criteria and non-goals
 
