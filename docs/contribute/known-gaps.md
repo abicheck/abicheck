@@ -324,11 +324,19 @@ per-item status in the
   decoded). Closing (3) needs a streamed or per-section parse so a raw
   section is not held as parsed JSON, and a release fan-out that loads
   members one pair at a time. Measurements: the plan's A1.9 D18 entry.
-  **Update 2026-11-01:** the release fan-out already loads and drops one
-  pair at a time; the member-count-scaling residue was each held
-  `DiffResult`'s contract type graph, now packed (peak for 16 members 72.1 ->
-  53.6 MiB, flat across 2/8/16; plan A2.5). (3)'s per-pair `json.loads` peak
-  is unchanged.
+  **Update 2026-11-02 (A2.5 per-member retention):** the release fan-out
+  already loads and drops one pair at a time; what grew with member count
+  was each held `DiffResult`'s contract type graph, now held packed
+  (`contract_evidence.TypeGraphSnapshot`). Synthetic members, 6000
+  declarations each, N=1/4/8: retained 4.5/18.1/36.1 -> 1.1/4.5/8.9 MiB,
+  peak traced 101.8/115.6/133.8 -> 101.8/105.4/109.8 MiB, max RSS
+  347/485/485 -> 348/430/432 MiB. Still open: (a) a residual ~0.19 MiB per
+  1000 declarations stays per finished member by design (packed graph,
+  public-declaration roots, compact bundle evidence the cross-library pass
+  reads), so peak is *dominated by* the largest pair but not strictly
+  independent of member count; (b) (3)'s per-pair whole-document
+  `json.loads` peak is unchanged -- the streaming `declarations` decode
+  stays deferred. Plan entry: A2.5.
 
 ### False-positive risk
 

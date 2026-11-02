@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ADR-062 A2.5: a release fan-out's memory must not grow with member count.
+"""ADR-062 A2.5: a finished release member must not keep its whole surface resident.
 
 The fan-out keeps every member's ``DiffResult`` until the release-level folds
 have run, so whatever one result retains is multiplied by the member count.

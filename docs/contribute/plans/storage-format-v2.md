@@ -249,20 +249,25 @@ See "Landed in Phase 1" below.
   `indexes/index.sqlite` layout slot stays reserved.
 - **A2.5** **Measured**: peak RSS for a project comparison no longer scales
   with the total decoded size of the package.
-  **Partial (2026-11-01).** Measured with `tracemalloc` over a sequential
-  release fan-out (synthetic members, 2000 declarations each): the parsed
-  documents, symbol tables and execution-cache entries of a compared pair
-  are already released; what each finished member left resident was its
-  `DiffResult`, and ~75% of that was the contract evidence's
-  `TypeGraphSnapshot` (one per side, whole-surface, as a tuple of string
-  pairs). It is now held packed and decoded per read
-  (`contract_evidence.TypeGraphSnapshot`). Peak traced memory for 2/8/16
-  members: 52.8/57.4/72.1 MiB before, 51.6/47.4/53.6 MiB after; retained per
-  member at 1200 declarations 0.92 -> 0.24 MiB
-  (`tests/test_release_member_memory_bound.py`). Still per member, by
-  design: the compact bundle evidence the cross-library pass reads and the
-  public-declaration roots. Still open: the per-pair peak is set by the
-  whole-document `json.loads` (see A1.9/D18).
+  **Partial (2026-11-02).** Measured with `tracemalloc` over a sequential
+  release fan-out (synthetic members): the parsed documents, symbol tables
+  and execution-cache entries of a compared pair are already released; what
+  each finished member left resident was its `DiffResult`, and ~75% of that
+  was the contract evidence's `TypeGraphSnapshot` (one per side,
+  whole-surface, as a tuple of string pairs). It is now held packed and
+  decoded per read (`contract_evidence.TypeGraphSnapshot`). At 1200
+  declarations per member, N=2/4/8/16: peak traced 27.2/28.6/30.7/38.3 ->
+  27.2/28.1/28.9/31.6 MiB, retained 2.0/3.9/7.7/15.3 -> 0.6/1.2/2.2/4.4 MiB
+  (0.95 -> 0.26 MiB per member). At 6000 declarations, N=1/4/8: retained
+  4.5/18.1/36.1 -> 1.1/4.5/8.9 MiB, max RSS 347/485/485 -> 348/430/432 MiB.
+  `tests/test_release_member_memory_bound.py` (slow) asserts < 0.35 MiB
+  retained per member at 1200 declarations and a 2N peak under 1.3x the N
+  peak; it fails on the tuple-backed graph. Still per member, by design: the
+  packed graph, the compact bundle evidence the cross-library pass reads and
+  the public-declaration roots (~0.19 MiB per 1000 declarations), so peak is
+  dominated by the largest pair rather than strictly independent of member
+  count. Still open: the per-pair peak is set by the whole-document
+  `json.loads` (streaming `declarations` decode deferred; see A1.9/D18).
 
 ---
 
