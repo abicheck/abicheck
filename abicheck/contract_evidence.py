@@ -263,13 +263,17 @@ class TypeGraphSnapshot:
     @property
     def nodes(self) -> tuple[str, ...]:
         names, node_ix, _ = self._unpack()
-        return tuple(names[i] for i in node_ix)
+        return tuple(map(names.__getitem__, node_ix))
 
     @property
     def edges(self) -> tuple[tuple[str, str], ...]:
+        # Decoded with C-level ``map``/``zip``, not a per-edge Python
+        # generator: the graph can be far larger than the declaration count
+        # (``short_name_collisions`` grows edges ~n^2), and a Python frame
+        # per edge is what ``test_compare_call_complexity`` would count.
         names, _, edge_ix = self._unpack()
-        it = iter(edge_ix)
-        return tuple((names[a], names[b]) for a, b in zip(it, it))
+        lookup = names.__getitem__
+        return tuple(zip(map(lookup, edge_ix[0::2]), map(lookup, edge_ix[1::2])))
 
     def __setattr__(self, name: str, _value: object) -> None:
         raise AttributeError(f"TypeGraphSnapshot is immutable; cannot set {name!r}.")
