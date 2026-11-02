@@ -2192,7 +2192,7 @@ if [[ "$MODE" == "scan" ]]; then
   fi
   exit 1
 fi
-# new-library-set/risk-rules/crosscheck applied only to the now fully-
+# new-library-set/risk-rules applied only to the now fully-
 # removed mode: scan (ADR-068 D8, hard removal) -- with that mode gone,
 # none of the three can ever do anything on any mode any more. Rejected
 # here, before any mode dispatch, the identical checks
@@ -2204,10 +2204,6 @@ if [[ -n "${INPUT_NEW_LIBRARY_SET:-}" ]]; then
 fi
 if [[ -n "${INPUT_RISK_RULES:-}" ]]; then
   echo "::error::risk-rules is no longer supported (scan --risk-rules and mode: scan itself are both retired). An omitted depth now resolves to the fixed 'headers' rung, the same default compare always used; set depth: source (or build) explicitly to pin the evidence level a risk profile used to escalate to. Remove risk-rules."
-  exit 1
-fi
-if [[ -n "${INPUT_CROSSCHECK:-}" ]]; then
-  echo "::error::crosscheck is no longer supported (scan --crosscheck's KEY=error promotion syntax and mode: scan itself are both retired -- superseded, not dropped outright: every cross-source check already reaches compare as an ordinary ChangeKind, so --policy/.abicheck.yml's policy.overrides.<CHANGE_KIND>: error already lets you control any one check's severity). Remove crosscheck and use policy.overrides instead."
   exit 1
 fi
 
@@ -4886,7 +4882,7 @@ _scope_accepted_note() {
 _blocking_gate_note() {
   local _cats
   _cats=$(_severity_gate_categories | tr ',' '\n' \
-    | sed 's/^ *//;s/ *$//' | grep -v '^promoted_crosscheck$' | grep -v '^$' | paste -sd, -)
+    | sed 's/^ *//;s/ *$//' | grep -v '^$' | paste -sd, -)
   if [[ -n "$_cats" ]]; then
     echo ">"
     if [[ "${GATE_TIER:-$VERDICT}" == "SEVERITY_ERROR" ]]; then
@@ -4952,15 +4948,6 @@ _blocking_gate_note() {
   elif [[ "$GATE_TIER" == "ADDITIONS_UNACKNOWLEDGED" ]]; then
     # ADR-067 D6's additions-review axis, the same shape and reason.
     echo "> ℹ️ Verdict escalated from the report: the compatibility finding above was demoted by the severity policy, and what actually produced this run's exit ${ABICHECK_EXIT} is the orthogonal additions-review axis (public additions no acknowledgment record covers, under \`acknowledgments.unacknowledged_additions: block\`). That is **not** an ABI/API break and **not** a severity-policy failure -- see \`disposition_audit.unacknowledged_additions_review\` in the JSON report."
-  elif [[ -z "$_cats" ]] && _severity_gate_categories | grep -q 'promoted_crosscheck'; then
-    # A promoted `--crosscheck KEY=error` raises the published gate the same
-    # way a severity category does, but it is not one: `_severity_gate_
-    # categories` filters the pseudo-category out of `$_cats` above, and the
-    # final gate deliberately leaves it subject to `fail-on-api-break` rather
-    # than blocking unconditionally. Naming the severity policy here pointed
-    # the reader at a mechanism that did not fire, and at a knob that would
-    # not change the outcome (Codex review).
-    echo "> ℹ️ Verdict escalated from the report: a promoted \`--crosscheck\` gated this run at \`$GATE_TIER\` (exit ${ABICHECK_EXIT}), so that tier -- not the verdict above -- is what \`fail-on-*\` applies to. This is a cross-check promotion, not a severity category: it follows \`fail-on-api-break\`."
   else
     echo "> ℹ️ Verdict escalated from the report: the severity policy gated this run at \`$GATE_TIER\` (exit ${ABICHECK_EXIT}), so that tier -- not the verdict above -- is what \`fail-on-*\` applies to."
   fi
@@ -4979,7 +4966,7 @@ _coverage_where_suffix() {
 # Exit 0 is not the only exit a severity policy can understate, which is what
 # `_resolve_clean_exit_verdict` above fixed for exit 0 alone. A policy that
 # demotes `abi_breaking` below `error` while something else still gates --
-# an error-level `--crosscheck KEY=error`, or `potential_breaking: error` --
+# `potential_breaking: error`, for example --
 # exits 2 with a report that still says BREAKING. Mapping exit 2 straight to
 # API_BREAK then published a source-level break for a binary ABI break
 # (Codex review).

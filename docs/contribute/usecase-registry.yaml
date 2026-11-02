@@ -1165,9 +1165,10 @@ use_cases:
       2a/2b moved the engine into `compare()` itself, so the single-release
       audit runs it through `compare --no-baseline` rather than the Phase-3
       `scan`/`audit` orchestrator this line used to name (retired with `scan`,
-      ADR-068 Phase 6; see UC-WORKFLOW-single-release-audit). REMAINS: the
-      `crosschecks:` severity config, and FP-rate-gate corpus cases before any
-      check is promoted to gate.
+      ADR-068 Phase 6; see UC-WORKFLOW-single-release-audit). Per-check
+      severity is `policy.overrides.<CHANGE_KIND>` (the reserved `crosschecks:`
+      config key and `--crosscheck` were removed). REMAINS: FP-rate-gate corpus
+      cases before any check is promoted to gate.
 
   - id: UC-WORKFLOW-single-release-audit
     axis: workflow

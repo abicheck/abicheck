@@ -117,7 +117,6 @@ _TOMBSTONES_THAT_MUST_STAY_DECLARED = frozenset(
         "audit",
         "build-target",
         "bundle-system-providers",
-        "crosscheck",
         "estimate",
         "new-library-set",
         "require-complete-analysis",

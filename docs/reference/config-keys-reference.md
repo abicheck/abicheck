@@ -190,7 +190,6 @@ Recognized (so they don't trigger the unknown-key warning) but parsed by a sibli
 - `bundle_variants`
 - `bundles`
 - `contract`
-- `crosschecks`
 - `profiles`
 - `risk_rules`
 - `targets`

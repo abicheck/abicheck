@@ -33,8 +33,8 @@ skipped.
 Omitting both `old-library` and `abi-baseline` runs a single-release audit
 with no baseline at all instead (see [Single-release
 audit](#single-release-audit-no-baseline) below); `.abicheck.yml`'s
-`policy.overrides.<CHANGE_KIND>: error` (passed via `build-config`) is the
-replacement for legacy `crosscheck`'s promotion syntax (see [Gate CI on a
+`policy.overrides.<CHANGE_KIND>: warn` (passed via `build-config`) gates
+one cross-source check (see [Gate CI on a
 specific cross-source check](#gate-ci-on-a-specific-cross-source-check)
 below). `new-library-set` (the multi-library audit mode) and `risk-rules`
 (the risk-driven `auto` depth escalation) are retired outright with no
@@ -258,11 +258,9 @@ large repo:
 
 Cross-source findings are advisory by default. Promoting one to `error` makes
 a finding for it exit `2` (the API_BREAK tier); add `fail-on-api-break: true`
-so that exit turns the step red. Legacy `scan --crosscheck`'s `KEY=error`
-promotion syntax is retired along with `mode: scan` itself — every
-cross-source check already reaches `compare` as an ordinary finding, so its
-replacement is `.abicheck.yml`'s `policy.overrides.<CHANGE_KIND>: error`,
-passed as `build-config`:
+so that exit turns the step red. Every cross-source check reaches `compare`
+as an ordinary finding, so promote one with `.abicheck.yml`'s
+`policy.overrides.<CHANGE_KIND>: warn`, passed as `build-config`:
 
 ```yaml
       - uses: abicheck/abicheck@v0.7.0

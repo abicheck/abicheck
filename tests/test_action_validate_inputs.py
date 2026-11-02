@@ -69,7 +69,6 @@ _VALIDATOR_INPUT_VARS = (
     "INPUT_AGAINST",
     "INPUT_ESTIMATE",
     "INPUT_AUDIT",
-    "INPUT_CROSSCHECK",
     "INPUT_RISK_RULES",
     "INPUT_SINCE",
     "INPUT_CHANGED_PATH",
@@ -276,7 +275,7 @@ class TestAuditOnlyCompareRejectsDirectoryOrPackage:
     not VALIDATE_SH.is_file(), reason="action/validate-inputs.sh not found"
 )
 class TestGloballyRetiredInputsFailPreflight:
-    """`new-library-set`/`risk-rules`/`crosscheck` applied only to the now
+    """`new-library-set`/`risk-rules` applied only to the now
     fully-removed `mode: scan` (ADR-068's Action-input-lifecycle amendment,
     D8 hard removal) -- with that mode gone, none of the three can ever do
     anything on any mode, so preflight rejects them outright (not just a
@@ -295,7 +294,6 @@ class TestGloballyRetiredInputsFailPreflight:
             ({"INPUT_NEW_LIBRARY_SET": "a.so,b.so"}, "new-library-set"),
             ({"INPUT_NEW_LIBRARY_SET": "release/lib"}, "new-library-set"),
             ({"INPUT_RISK_RULES": "rules.yaml"}, "risk-rules"),
-            ({"INPUT_CROSSCHECK": "odr_type_variant=error"}, "crosscheck"),
         ],
     )
     def test_rejected_with_a_message_naming_the_input(
@@ -317,10 +315,6 @@ class TestGloballyRetiredInputsFailPreflight:
                 "compare each library individually",
             ),
             ({"INPUT_RISK_RULES": "rules.yaml"}, "depth: source"),
-            (
-                {"INPUT_CROSSCHECK": "odr_type_variant=error"},
-                "policy.overrides",
-            ),
         ):
             result = _run_validate(
                 {"INPUT_MODE": "compare", "INPUT_NEW_LIBRARY": "new.so", **env}
@@ -339,7 +333,7 @@ class TestGloballyRetiredInputsFailPreflight:
             {
                 "INPUT_MODE": mode,
                 "INPUT_NEW_LIBRARY": "new.so",
-                "INPUT_CROSSCHECK": "odr_type_variant=error",
+                "INPUT_RISK_RULES": "rules.yaml",
             }
         )
         assert result.returncode == 1, result.stdout + result.stderr

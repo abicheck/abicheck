@@ -338,7 +338,7 @@ class TestGloballyRetiredInputsAreRejectedBeforeAnyModeDispatch:
     """A retired input is rejected unconditionally, before the mode
     if/elif chain even starts, not buried inside one mode's own branch.
 
-    `new-library-set`/`risk-rules`/`crosscheck` applied only to the now
+    `new-library-set`/`risk-rules` applied only to the now
     fully-removed `mode: scan` (ADR-068's Action-input-lifecycle amendment,
     D8 hard removal) -- with that mode gone, none of the three can ever do
     anything on any mode any more, so `run.sh` rejects all three outright,
@@ -355,7 +355,6 @@ class TestGloballyRetiredInputsAreRejectedBeforeAnyModeDispatch:
     _RETIRED = (
         "INPUT_NEW_LIBRARY_SET",
         "INPUT_RISK_RULES",
-        "INPUT_CROSSCHECK",
     )
 
     def test_each_rejection_precedes_the_mode_dispatch(self) -> None:

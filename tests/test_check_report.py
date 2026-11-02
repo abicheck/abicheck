@@ -755,7 +755,6 @@ class TestAugmentReport:
                     "compatibility_contribution": 4,
                     "contract_coverage_contribution": 0,
                     "analysis_assurance_contribution": 0,
-                    "crosscheck_promotion_contribution": 0,
                 },
             },
             name="libfoo",
@@ -768,9 +767,8 @@ class TestAugmentReport:
 
     def test_advisory_neutralizes_a_scan_reports_nested_exit_block(self):
         """A ``scan --against`` report carries this block under ``diff``,
-        same as ``severity``/the two contributions -- and includes a
-        maintainer-promoted crosscheck's own nonzero contribution, which an
-        advisory report must also zero, not just the code/reasons."""
+        same as ``severity``/the two contributions -- which an advisory
+        report must also zero, not just the code/reasons."""
         out = augment_report(
             {
                 "scan_schema_version": "1.18",
@@ -780,11 +778,10 @@ class TestAugmentReport:
                     "verdict": "API_BREAK",
                     "exit": {
                         "code": 2,
-                        "reasons": ["compatibility_gate", "promoted_crosscheck"],
+                        "reasons": ["compatibility_gate"],
                         "compatibility_contribution": 2,
                         "contract_coverage_contribution": 0,
                         "analysis_assurance_contribution": 0,
-                        "crosscheck_promotion_contribution": 2,
                     },
                 },
             },

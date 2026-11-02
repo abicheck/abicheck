@@ -90,7 +90,6 @@ _NON_OPERATIONAL_CONTRIBUTIONS: frozenset[str] = frozenset(
         # failure (accepting incomplete assurance is not a broken run).
         "contract_coverage_contribution",
         "analysis_assurance_contribution",
-        "crosscheck_promotion_contribution",
         # ADR-065 D6: read from the caller's typed acquisition record via
         # *scope*, never from this block (it is `0` under `warn` while the
         # axis still reads `incomplete`).

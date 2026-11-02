@@ -515,19 +515,6 @@ inputs:
       replacement instead of a silently-ignored input.
     required: false
     default: 'false'
-  crosscheck:
-    description: >
-      RETIRED (superseded, not a hard
-      removal with nothing to replace it). `scan --crosscheck`'s KEY=LEVEL
-      promotion syntax, which this input mapped to, no longer exists (along
-      with mode: scan itself): every cross-source check it used to gate
-      already reaches `compare` as an ordinary `ChangeKind`, so `policy` /
-      `.abicheck.yml`'s `policy.overrides.<CHANGE_KIND>: error` already lets
-      you control any one check's severity — only the KEY=LEVEL syntax
-      itself doesn't survive. Still declared so a workflow that sets it gets
-      an explicit `::error::` naming that replacement instead of a
-      silently-ignored input.
-    required: false
   risk-rules:
     description: >
       RETIRED (hard removal). `scan --risk-rules` is gone,
@@ -1368,7 +1355,6 @@ runs:
         # rejected in preflight so a workflow that still sets one fails
         # before Python setup and the toolchain install.
         INPUT_RISK_RULES: ${{ inputs.risk-rules }}
-        INPUT_CROSSCHECK: ${{ inputs.crosscheck }}
         INPUT_AGAINST: ${{ inputs.against }}
         INPUT_DRY_RUN: ${{ inputs.dry-run }}
         INPUT_OLD_HEADER: ${{ inputs.old-header }}
@@ -1635,7 +1621,6 @@ runs:
         INPUT_DRY_RUN: ${{ inputs.dry-run }}
         INPUT_ESTIMATE: ${{ inputs.estimate }}
         INPUT_AUDIT: ${{ inputs.audit }}
-        INPUT_CROSSCHECK: ${{ inputs.crosscheck }}
         INPUT_RISK_RULES: ${{ inputs.risk-rules }}
         GH_TOKEN: ${{ inputs.github-token }}
         INPUT_LANG: ${{ inputs.lang }}

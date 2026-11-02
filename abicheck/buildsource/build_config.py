@@ -80,11 +80,10 @@ _SEVERITY_PRESETS = ("default", "strict", "info-only")
 #: Recognized top-level keys parsed by sibling modules (project_targets.py,
 #: ADR-047) or reserved without a parser, so they must not trip the
 #: unknown-key error. ``risk_rules`` was consumed by the deleted ``risk.py``
-#: (ADR-068 Phase 6) and ``crosschecks`` was never parsed by anything.
+#: (ADR-068 Phase 6).
 _OPAQUE_TOP_KEYS = frozenset(
     {
         "risk_rules",
-        "crosschecks",
         "targets",
         "bundles",
         "profiles",
@@ -635,7 +634,7 @@ class BuildConfig:
     #: ``version:`` — config schema version (forward-compat; Phase 7 wires the
     #: unknown-key warning). ``0`` = unset.
     version: int = 0
-    #: ``policy.overrides`` (ADR-068 §3 #23's `--crosscheck` replacement) --
+    #: ``policy.overrides`` --
     #: raw ``ChangeKind`` slug -> severity strings; see
     #: `docs/reference/config-file.md`'s own `policy:` section.
     policy_overrides: dict[str, str] = field(default_factory=dict)

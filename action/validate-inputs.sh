@@ -232,7 +232,7 @@ _warn() {
 # against, estimate, audit: retired outright -- each existed only for the
 # now-removed mode: scan, so none of them can ever do anything on any mode
 # any more. Failing rather than warning names the replacement, matching the
-# "hard removal, no deprecation window" treatment new-library-set/crosscheck/
+# "hard removal, no deprecation window" treatment new-library-set/
 # risk-rules get below (ADR-068 D8). Checked here, before the mode-specific
 # case block below, so a workflow that still sets a retired input alongside
 # an audit-only-shape-specific input (since/budget/...) is told about the
@@ -645,15 +645,6 @@ fi
 # there is no longer a mode it could ever have affected.
 if [[ -n "$NEW_LIBRARY_SET" ]]; then
   _fail "new-library-set is no longer supported (scan --artifact-set and mode: scan itself are both retired). Remove new-library-set and compare each library individually."
-fi
-
-# crosscheck: same shape as new-library-set directly above -- retired
-# outright (ADR-068 (b): scan --crosscheck's KEY=error promotion syntax, and
-# mode: scan itself, are both gone), and it applied only to the now-removed
-# mode: scan (crosscheck has never been a `compare`/`dump`/`deps-tree`/
-# `deps-compare` input) -- fails on every mode now.
-if [[ -n "${INPUT_CROSSCHECK:-}" ]]; then
-  _fail "crosscheck is no longer supported (scan --crosscheck's KEY=error promotion syntax and mode: scan itself are both retired -- superseded, not dropped outright: every cross-source check already reaches compare as an ordinary ChangeKind, so --policy/.abicheck.yml's policy.overrides.<CHANGE_KIND>: error already lets you control any one check's severity). Remove crosscheck and use policy.overrides instead."
 fi
 
 # risk-rules: same shape -- retired outright (ADR-068 (b): scan

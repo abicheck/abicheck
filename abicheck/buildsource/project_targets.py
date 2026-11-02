@@ -38,8 +38,8 @@ the compile-option denylist applied to ``compile:`` atoms lives in
 ``targets``/``bundles``/``profiles``/``baseline`` as known top-level
 ``.abicheck.yml`` keys (so their presence doesn't trip its own strict
 unknown-key error) but does not parse them itself — the same
-recognized-but-not-parsed treatment it already gives ``risk_rules``/
-``crosschecks``, which are likewise owned by a sibling module. This module's
+recognized-but-not-parsed treatment it already gives ``risk_rules``,
+which is likewise owned by a sibling module. This module's
 own loader (:func:`load_project_targets_config`) re-reads the same YAML file
 and is the sole owner of this block's schema.
 

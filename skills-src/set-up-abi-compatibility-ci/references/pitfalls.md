@@ -76,7 +76,10 @@ When the repository already has an ABI check, report what it actually does
 before changing it: which baseline, which headers, whether it can fail. Then
 fix it in place rather than adding a parallel workflow. Common findings:
 
-- `mode: scan`, `against:`, `audit:`, `estimate:`, `crosscheck:` — retired in
+- `crosscheck:` — removed from the Action; GitHub warns about an unexpected
+  input and ignores it. Gate one cross-source check with `.abicheck.yml`'s
+  `policy.overrides.<CHANGE_KIND>: warn` instead.
+- `mode: scan`, `against:`, `audit:`, `estimate:` — retired in
   0.6 and now hard errors; migrate to `mode: compare` per
   [the Action migration notes](../../../docs/use/github-action.md#migrating-from-mode-scan).
   An audit-only step that relied on scan's default gating needs

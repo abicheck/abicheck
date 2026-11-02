@@ -283,20 +283,15 @@ class TestReportValidatesAgainstSchema:
         with pytest.raises(jsonschema.ValidationError):
             self._validate(payload)
 
-    def test_nonzero_crosscheck_promotion_contribution_is_rejected(self):
-        """CodeRabbit review: crosscheck_promotion_contribution has no
-        meaning outside scan --against's own maintainer-promoted
-        --crosscheck KEY=error finding, and this schema validates only
-        native compare reports (scan's own report shape is never validated
-        against this file). A malformed compare report claiming a nonzero
-        contribution must fail schema validation, not silently pass under
-        a mere non-negativity floor."""
+    def test_retired_crosscheck_promotion_key_is_not_emitted(self):
+        """Schema 7.0 removed `exit.crosscheck_promotion_contribution` and
+        the `promoted_crosscheck` reason (retired `--crosscheck`)."""
         f = _fn("api", "_Z3apiv")
         snap = AbiSnapshot(library="libfoo.so.1", version="1.0", functions=[f])
         payload = json.loads(reporter.to_json(compare(snap, snap)))
-        assert payload["exit"]["crosscheck_promotion_contribution"] == 0
+        assert "crosscheck_promotion_contribution" not in payload["exit"]
         self._validate(payload)
-        payload["exit"]["crosscheck_promotion_contribution"] = 1
+        payload["exit"]["reasons"] = ["promoted_crosscheck"]
         with pytest.raises(jsonschema.ValidationError):
             self._validate(payload)
 

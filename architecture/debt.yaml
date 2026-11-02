@@ -850,7 +850,7 @@
     },
     {
       "path": "tests/test_action_coverage_verdict.py",
-      "baseline_lines": 1560,
+      "baseline_lines": 1550,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -872,7 +872,7 @@
     },
     {
       "path": "tests/test_action_validate_inputs.py",
-      "baseline_lines": 1287,
+      "baseline_lines": 1282,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1048,7 +1048,7 @@
     },
     {
       "path": "tests/test_check_report.py",
-      "baseline_lines": 1205,
+      "baseline_lines": 1202,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",

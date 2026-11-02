@@ -165,9 +165,8 @@ breaks depends on the *target interpreter*, not on the module's own consumers.
     policy configuration (e.g. a policy profile that escalates the kind, or
     `severity.preset`). `python_stable_abi_violation` from the single-module
     `--abi3-floor` audit gates the same way — see [Gating](#1-audit-a-single-module-compare-abi3-floor)
-    above. The retired `scan`'s separate `--crosscheck KEY=LEVEL` switch had no
-    replacement flag; both the audit finding and these four compare-time kinds
-    are gated through the same `--policy`/severity mechanism now.
+    above. Both the audit finding and these four compare-time kinds are gated
+    through the same `--policy`/severity mechanism.
 
 !!! note "Free-threaded (no-GIL) builds are never `abi3`"
     A free-threaded build (PEP 703, `cpython-313t` / `cp314t`) uses a different

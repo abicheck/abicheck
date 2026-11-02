@@ -2144,14 +2144,6 @@
    "default": "false"
   },
   {
-   "id": "action:crosscheck",
-   "action": "action",
-   "input": "crosscheck",
-   "status": "retired",
-   "required": false,
-   "default": null
-  },
-  {
    "id": "action:risk-rules",
    "action": "action",
    "input": "risk-rules",

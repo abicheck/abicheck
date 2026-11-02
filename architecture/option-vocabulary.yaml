@@ -1487,7 +1487,6 @@ concepts:
       - actions/check-target:requested-depth
       - action:new-library-set
       - action:against
-      - action:crosscheck
       - action:risk-rules
       - action:audit
       - action:estimate
@@ -1545,7 +1544,6 @@ replacements:
   - {id: action:allow-build-query, status: retired, replaced_by: null, reason: "abicheck always runs its own inferred compile-database query when a build context is needed"}
   - {id: action:estimate, status: retired, replaced_by: action:dry-run}
   - {id: action:audit, status: retired, replaced_by: null, reason: "under mode: compare, omit old-library and abi-baseline to get an audit-only run"}
-  - {id: action:crosscheck, status: retired, replaced_by: null, reason: "the KEY=LEVEL promotion syntax is gone; cross-source policy is set in .abicheck.yml policy.overrides"}
   - {id: action:risk-rules, status: retired, replaced_by: null, reason: "mode: scan and the risk-driven depth escalation are gone; an omitted depth resolves to headers"}
   - {id: action:install-deps, status: deprecated, replaced_by: action:dependency-source}
   - {id: action:require-complete-analysis, status: retired, replaced_by: assurance.require_complete}
