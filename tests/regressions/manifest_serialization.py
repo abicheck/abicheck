@@ -308,6 +308,7 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/unit/storage/test_extension_carriers_lifecycle.py",
             "tests/test_blocked_section_compare_matrix.py",
             "tests/test_pe_pdb_section_failure.py",
+            "tests/test_package_section_version_blocks_section.py",
         ),
         public_surfaces=("cli",),
         axes={
@@ -389,6 +390,7 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_blocked_section_compare_matrix.py",
             "tests/test_cli_compare_must_understand.py",
             "tests/test_pe_pdb_section_failure.py",
+            "tests/test_package_section_version_blocks_section.py",
             "tests/test_section_readers_contract.py",
         ),
         public_surfaces=("cli",),

@@ -267,7 +267,10 @@ current emitter, which is unchanged.
 
 **Status (2026-10-31): PARTIAL.** D14, D15 and D17 are implemented with
 the residuals below; D16's `evidence` and `transport` digests are
-implemented; D18 is partial. Owner: `storage/`; per-item status in the
+implemented; D18 is partial. A newer `section_schema_version` in a
+directory package now blocks only that section, as in a single-file
+document (closed 2026-11-02; `provenance` still refuses). Owner: `storage/`;
+per-item status in the
 [storage format v2 plan](plans/storage-format-v2.md).
 
 - **D14 residual: bundle documents and archives refuse the carriers.** A
@@ -280,10 +283,6 @@ implemented; D18 is partial. Owner: `storage/`; per-item status in the
   snapshot or a directory package. A flat mapping a caller made with
   `snapshot_to_dict` and handed to `write_legacy_snapshot_package` cannot say
   what it lost and is written as what it says; pass the `AbiSnapshot`.
-- **D14 residual: a newer `section_schema_version` in a package refuses.**
-  A single-file document blocks only that section; a directory package's
-  manifest-level version check refuses the package. An unknown section-level
-  must-understand name now blocks only its section in both.
 - **D15 residual: one producer records a whole-section failure.** The PE
   dump records `debug` as `failed` when a located PDB fails to parse, on the
   export-table path only. A header-scoped PE dump's `debug` section also
