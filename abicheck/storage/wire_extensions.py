@@ -79,7 +79,7 @@ writer that adds one must also bump that section's ``section_schema_version``
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -342,18 +342,25 @@ CARRIERS_OBJECT_KIND = "wire_carriers"
 
 
 def attach_package_carriers(
-    document: dict[str, Any], store: Any, ref: Any, where: str
-) -> Any:
+    document: dict[str, Any],
+    store: Any,
+    ref: Any,
+    where: str,
+    charge: Callable[[Any], None] | None = None,
+) -> None:
     """Put a package artifact's stored carriers (*ref*,
     `ArtifactRef.carriers`, read from *store*), decided for this build, on
     its exported *document*, merged with any section the export itself
-    blocked. Returns the raw carriers; *ref* must name a carriers object."""
+    blocked. *ref* must name a carriers object; *charge* sees the raw
+    carriers before they are decoded (a caller's decoded-byte budget)."""
     if ref.kind != CARRIERS_OBJECT_KIND:
         raise SnapshotError(
             f"{where}: carrier reference of kind {ref.kind!r}, "
             f"not {CARRIERS_OBJECT_KIND!r}"
         )
     raw = store.get(ref.digest)
+    if charge is not None:
+        charge(raw)
     stored = carriers_for_reader(raw, where)
     blocked = document.get(WIRE_EXTENSIONS_KEY)
     if isinstance(blocked, WireExtensions):
@@ -361,7 +368,6 @@ def attach_package_carriers(
         stored.passthrough_versions.update(blocked.passthrough_versions)
         stored.unreadable.extend(blocked.unreadable)
     document[WIRE_EXTENSIONS_KEY] = stored
-    return raw
 
 
 def attach(snap: Any, extensions: WireExtensions) -> None:

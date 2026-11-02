@@ -12,11 +12,15 @@ from __future__ import annotations
 import pytest
 
 from abicheck.errors import SnapshotError
+from abicheck.model import AbiSnapshot, Function
+from abicheck.model.bundle_facts import BundleFacts
 from abicheck.model.graph_facts import GraphEdge, GraphFact, GraphNode
 from abicheck.model.source_graph import SourceGraphSummary
+from abicheck.serialization import SCHEMA_VERSION, bundle_facts_to_dict
 from abicheck.storage.closure_graph_renumber import renumber_graph
 from abicheck.storage.closure_identity import graph_rewrite_factory
-from abicheck.storage.package import ObjectRef
+from abicheck.storage.import_bundle_facts import import_bundle_facts
+from abicheck.storage.package import InMemoryObjectStore, ObjectRef
 from abicheck.storage.wire_extensions import (
     CARRIERS_OBJECT_KIND,
     WIRE_EXTENSIONS_KEY,
@@ -103,3 +107,40 @@ def test_a_carrier_reference_of_another_kind_is_refused() -> None:
             "lib",
         )
     assert WIRE_EXTENSIONS_KEY not in document
+
+
+def test_carriers_are_charged_before_they_are_decoded() -> None:
+    raw = WireExtensions(passthrough_sections={"vendor": {"y": 2}}).to_wire()
+    document: dict = {}
+    seen: list[object] = []
+
+    def refuse(carriers: object) -> None:
+        seen.append(carriers)
+        raise ValueError("over budget")
+
+    ref = ObjectRef(kind=CARRIERS_OBJECT_KIND, digest="sha256:" + "0" * 64)
+    with pytest.raises(ValueError, match="over budget"):
+        attach_package_carriers(document, _Store(raw), ref, "lib", refuse)
+    assert seen == [raw]
+    assert WIRE_EXTENSIONS_KEY not in document
+
+
+def test_carriers_for_a_name_that_is_no_member_are_refused() -> None:
+    snap = AbiSnapshot(
+        library="liba.so.1",
+        version="1",
+        functions=[Function(name="f", mangled="f", return_type="int")],
+    )
+    doc = bundle_facts_to_dict(BundleFacts(per_library_snapshots={"liba.so.1": snap}))
+    store = InMemoryObjectStore()
+    with pytest.raises(
+        ValueError, match=r"carriers name no bundle member: \['libb.so.1'\]"
+    ):
+        import_bundle_facts(
+            doc,
+            store=store,
+            max_known_schema_version=SCHEMA_VERSION,
+            carriers={"libb.so.1": WireExtensions()},
+        )
+    # Refused before any member was written.
+    assert store._objects == {}

@@ -482,12 +482,10 @@ def import_bundle_facts(
     # A present-but-empty mapping is a valid (vacuous) BundleFacts, as the
     # canonical reader accepts; only the key's *absence* is malformed (Codex).
 
-    # `resolve_ref_ids`, not the raw library name: unlike
-    # `import_legacy_snapshot`'s own caller-supplied `artifact_id`, nothing
-    # upstream of this adapter has ensured a `per_library_snapshots` key is
-    # itself ref-id-safe or collision-free (Codex review). The real name is
-    # preserved on the artifact's own `native_identity` for
-    # `export_bundle_facts` to recover.
+    # `resolve_ref_ids`: no upstream check makes a library name ref-id-safe
+    # or collision-free; `native_identity` keeps the real name.
+    if stray := sorted(set(carriers or ()) - set(raw_snapshots)):
+        raise ValueError(f"carriers name no bundle member: {stray}")
     artifact_ids_by_library = resolve_ref_ids(list(raw_snapshots), opaque_prefix="lib")
     # Before any per-library write: `ObjectStore` has no rollback (CodeRabbit).
     degraded_members = _validated_library_filenames(  # ADR-065 D8, same shape
@@ -731,10 +729,11 @@ def export_bundle_facts(
                 f"artifact {artifact_id!r} (library {library_name!r})",
             )
         if artifact.carriers is not None:  # ADR-062 D14/D15
+            charge = None  # carriers count toward the byte budget, undecoded
+            if (cb := on_document) is not None:
+                charge = lambda raw: cb({"carriers": raw}, f"{artifact_id!r} carriers")  # noqa: E731
             ref = artifact.carriers
-            raw = attach_package_carriers(snapshot_document, store, ref, artifact_id)
-            if on_document is not None:  # carriers count toward the byte budget
-                on_document({"carriers": raw}, f"{artifact_id!r} carriers")
+            attach_package_carriers(snapshot_document, store, ref, artifact_id, charge)
         per_library_snapshots[library_name] = snapshot_document
 
     raw_manifest = composition.get("manifest")
