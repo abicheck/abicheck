@@ -744,26 +744,23 @@ jobs:
               shutil.rmtree(staging, ignore_errors=True)
               os.makedirs(staging)
               missing = []
-              # Two distinct members can resolve to files that share a
-              # basename (e.g. build/linux/libfoo.so vs. build/plugins/
-              # libfoo.so) -- copy2 into one shared flat staging directory
-              # would then silently overwrite the first with the second,
-              # dropping a member from the bundle comparison without any
-              # signal (Codex review). Track which member claimed each
-              # destination basename and fail loud on a second claim,
-              # instead of guessing.
-              staged_by_basename = {}
+              # Each member is staged under its MEMBER NAME, never the
+              # artifact's basename: the accepted-main baseline set stores
+              # every bundle binary as binaries/<member name>
+              # (actions/baseline/run.sh), and `compare DIR DIR` pairs
+              # members by file name. Staging libcore.so against a baseline
+              # `core` paired nothing, so every member read not_supplied and
+              # the cell failed SCOPE_INCOMPLETE (exit 1). Member names are
+              # unique keys, so two members can no longer collide here.
               for member, pattern in cell.get('member_binary_patterns', {}).items():
                   match = resolve(pattern, label=f'bundle {cell[\"name\"]!r} member {member!r}')
                   if match is None:
                       missing.append(member)
                       continue
-                  basename = os.path.basename(match)
-                  if basename in staged_by_basename:
-                      print(f'::error::bundle {cell[\"name\"]!r}: members {staged_by_basename[basename]!r} and {member!r} both resolve to a candidate named {basename!r} -- staging would silently drop one', file=sys.stderr)
+                  if os.sep in member or member in ('', '.', '..') or (os.altsep and os.altsep in member):
+                      print(f'::error::bundle {cell[\"name\"]!r}: member name {member!r} is not a single path segment', file=sys.stderr)
                       sys.exit(1)
-                  staged_by_basename[basename] = member
-                  shutil.copy2(match, os.path.join(staging, basename))
+                  shutil.copy2(match, os.path.join(staging, member))
               if missing:
                   print(f'::error::bundle {cell[\"name\"]!r}: no candidate binary matched for member(s) {missing}', file=sys.stderr)
                   sys.exit(1)

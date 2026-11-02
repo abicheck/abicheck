@@ -1811,13 +1811,12 @@ class TestCandidateResolverConfinesMatchesToTheArtifactRoot:
             "isn't a bug in the workflow script itself."
         ),
     )
-    def test_bundle_members_with_colliding_basenames_are_rejected(
+    def test_bundle_members_with_colliding_basenames_are_both_staged(
         self, tmp_path: Path
     ) -> None:
-        # Two distinct members resolving to files with the same basename
-        # (e.g. build/linux/libfoo.so vs. build/plugins/libfoo.so) would
-        # otherwise silently overwrite one another in the shared flat
-        # bundle-staging/ directory (Codex review).
+        # Same-basename members (linux/libfoo.so, plugins/libfoo.so) must not
+        # overwrite each other in the flat bundle-staging/ (Codex review);
+        # staging by unique member name makes that impossible.
         candidate = tmp_path / "candidate"
         (candidate / "linux").mkdir(parents=True)
         (candidate / "plugins").mkdir(parents=True)
@@ -1835,9 +1834,9 @@ class TestCandidateResolverConfinesMatchesToTheArtifactRoot:
                 },
             },
         )
-        assert result.returncode != 0
-        assert "libfoo.so" in result.stderr
-        assert "'core'" in result.stderr and "'plugin'" in result.stderr
+        assert result.returncode == 0, result.stderr
+        assert (tmp_path / "bundle-staging" / "core").read_bytes() == b"core"
+        assert (tmp_path / "bundle-staging" / "plugin").read_bytes() == b"plugin"
 
     @pytest.mark.skipif(
         sys.platform == "win32",
@@ -1919,7 +1918,7 @@ class TestCandidateResolverConfinesMatchesToTheArtifactRoot:
         )
         assert result.returncode == 0, result.stderr
         assert not (stale / "leftover.so").exists()
-        assert (stale / "libpvxs.so").exists()
+        assert (stale / "libpvxs").exists()
 
 
 class TestCheckTargetIdentityPassthrough:
