@@ -16,7 +16,7 @@ sorted by node id and edge rows sorted by `relation_key()` (both unique), so
 the interner indices and rows no longer follow in-memory insertion order. The
 producer of the insertion-order drift is still unidentified, but it can no
 longer reach the stored bytes. `tests/test_snapshot_byte_reproducibility.py`
-(bug class `serialization.stored_bytes_depend_on_producer_iteration_order`, to be registered in `tests/regressions` once a PR number exists)
+(bug class `serialization.stored_bytes_depend_on_producer_iteration_order`, family F9)
 checks every insertion permutation in-process and dumps a compiled corpus in
 three processes (`PYTHONHASHSEED` 1/4242/random, different cwd,
 `SOURCE_DATE_EPOCH` pinned) expecting identical bytes. **Residual:** the
