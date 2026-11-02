@@ -1183,4 +1183,12 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
         public_surfaces=(),
         axes={"detection": ("compile-bound", "oracle"), "size": ("16", "2048")},
     ),
+    BugClass(
+        id="perf.retained_per_member_state_kept_in_its_working_form",
+        invariant="State a fan-out keeps per finished member (here the contract type graph, whole-surface) is held in a compact form, so per-member retained memory stays under a bound the working form exceeds; the compact form reads back exactly the working form against an independent sorted-set oracle.",
+        fixed_by=(1904,),  # A2.5: ~4.5 MiB kept per 6000-decl member -> ~1.1
+        seed_tests=("tests/test_release_member_memory_bound.py",),
+        public_surfaces=(),
+        axes={"members": ("N", "2N"), "graph": ("generated", "empty", "duplicates")},
+    ),
 )
