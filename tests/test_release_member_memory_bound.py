@@ -58,7 +58,10 @@ from abicheck.workflows import release_members
 # Differential: the packed form is the old tuple form, read back.
 # ---------------------------------------------------------------------------
 
-_names = st.text(min_size=0, max_size=12)
+# Every code point, lone surrogates included (``st.text``'s default leaves
+# category Cs out): a name decoded from JSON can carry a ``\ud800`` escape,
+# and the tuple form held it fine.
+_names = st.text(st.characters(exclude_categories=()), min_size=0, max_size=12)
 _edges = st.lists(st.tuples(_names, _names), max_size=40)
 
 
@@ -97,12 +100,32 @@ class TestPackedGraphReadsBackTheTupleForm:
         assert pickle.loads(pickle.dumps(g)) == g  # nosec B301 - round-trips bytes this test just produced
 
     @pytest.mark.parametrize(
+        "name",
+        [
+            "a\ud800",  # lone high surrogate
+            "\udfff",  # lone low surrogate
+            "\ud83d\ude00",  # a surrogate pair kept as two code points
+            "\U0001f600",  # the same character as one code point
+            "\x00",
+            "\u00e9",
+        ],
+    )
+    def test_every_code_point_round_trips(self, name: str) -> None:
+        g = TypeGraphSnapshot(nodes=[name, "b"], edges=[(name, "b")])
+        assert g.nodes == tuple(sorted({name, "b"}))
+        assert g.edges == ((name, "b"),)
+        assert pickle.loads(pickle.dumps(g)) == g  # nosec B301 - round-trips bytes this test just produced
+
+    @pytest.mark.parametrize(
         ("a", "b"),
         [
             ({"nodes": ["a"]}, {"nodes": ["b"]}),
             ({"edges": [("a", "b")]}, {"edges": [("b", "a")]}),
             # An endpoint that is not a node is not a node.
             ({"edges": [("a", "b")]}, {"nodes": ["a", "b"], "edges": [("a", "b")]}),
+            # Two surrogate code points are not the astral character they
+            # would spell as a JSON escape pair.
+            ({"nodes": ["\ud83d\ude00"]}, {"nodes": ["\U0001f600"]}),
         ],
     )
     def test_different_graphs_stay_different(self, a, b) -> None:
