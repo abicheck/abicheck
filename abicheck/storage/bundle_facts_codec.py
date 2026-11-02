@@ -58,9 +58,15 @@ def bundle_facts_to_dict(
     facts: BundleFacts,
     *,
     on_snapshot: Callable[[str, dict[str, Any]], None] | None = None,
+    flat_members: bool = False,
 ) -> dict[str, Any]:
     """Serialize a :class:`~abicheck.model.bundle_facts.BundleFacts` to a
     JSON-able dict (G38 Phase 2).
+
+    A member whose flat document would lose its ADR-062 D14/D15 carriers is
+    written as its sectioned document (`bundle_member_carriers`).
+    *flat_members* writes every member flat instead, for a caller that
+    stores the carriers itself (a bundle package's `ArtifactRef.carriers`).
 
     ``artifact_type`` is always :data:`~abicheck.model.bundle_facts.
     BUNDLE_FACTS_ARTIFACT_TYPE` -- the constant, not ``facts.artifact_type``.
@@ -91,13 +97,14 @@ def bundle_facts_to_dict(
     from the callback to abort before the next snapshot is converted."""
     from ..bundle_manifest import manifest_to_dict
     from ..model.bundle_facts import BUNDLE_FACTS_ARTIFACT_TYPE, document_schema_version
-    from ..serialization import snapshot_to_dict
-    from .wire_extensions import refuse_package_flattening
+    from .bundle_member_carriers import encode_bundle_member
 
     per_library_snapshots: dict[str, Any] = {}
+    sectioned_members = False
     for name, snap in facts.per_library_snapshots.items():
-        refuse_package_flattening(snap)
-        document = snapshot_to_dict(snap)
+        # ADR-062 D14/D15: sectioned when the flat document would lose state.
+        document, sectioned = encode_bundle_member(snap, flat=flat_members)
+        sectioned_members = sectioned_members or sectioned
         if on_snapshot is not None:
             on_snapshot(name, document)
         per_library_snapshots[name] = document
@@ -106,7 +113,9 @@ def bundle_facts_to_dict(
         "artifact_type": BUNDLE_FACTS_ARTIFACT_TYPE,
         # 2 for a clean document, 3 once `degraded_members` carries a
         # decision-bearing marker (ADR-065 D8) -- see `document_schema_version`.
-        "schema_version": document_schema_version(facts),
+        "schema_version": document_schema_version(
+            facts, sectioned_members=sectioned_members
+        ),
         "variant_fingerprint": facts.variant_fingerprint,
         "per_library_snapshots": per_library_snapshots,
         "filesystem_aliases": {
@@ -152,17 +161,24 @@ def bundle_facts_document_stream(facts: BundleFacts) -> dict[str, Any]:
     ``bundle_facts_to_dict`` stays the eager spelling every other caller
     keeps using.
     """
-    from ..serialization import snapshot_to_dict
+    from ..model.bundle_facts import document_schema_version
+    from .bundle_member_carriers import encode_bundle_member
     from .json_stream import LazyItems
-    from .wire_extensions import refuse_package_flattening
+    from .wire_extensions import flattening_loses, refuse_unwritable_extensions
 
     for snap in facts.per_library_snapshots.values():
-        refuse_package_flattening(snap)
-
+        refuse_unwritable_extensions(snap)
     document = bundle_facts_to_dict(cast("BundleFacts", _FactsWithoutMembers(facts)))
+    # Decided up front: the version is written before any member is encoded.
+    document["schema_version"] = document_schema_version(
+        facts,
+        sectioned_members=any(
+            flattening_loses(snap) for snap in facts.per_library_snapshots.values()
+        ),
+    )
     document["per_library_snapshots"] = LazyItems(
         keys=list(facts.per_library_snapshots),
-        produce=lambda name: snapshot_to_dict(facts.per_library_snapshots[name]),
+        produce=lambda name: encode_bundle_member(facts.per_library_snapshots[name])[0],
     )
     return document
 
@@ -329,6 +345,13 @@ def bundle_facts_from_dict(d: dict[str, Any]) -> BundleFacts:
     require_degraded_marker_version(
         degraded_members, schema_version if "schema_version" in d else 1
     )
+    from .bundle_member_carriers import require_sectioned_member_version
+
+    require_sectioned_member_version(
+        raw_snapshots,
+        schema_version if "schema_version" in d else 1,
+        what="bundle facts",
+    )
     raw_public_surface = d.get("public_surface")
     if raw_public_surface is not None and not isinstance(raw_public_surface, dict):
         raise ValueError(
@@ -474,7 +497,13 @@ def save_spooled_bundle_facts(
         return assemble_bundle_facts_archive(path, facts, members, spool)
     if format != "json":
         raise ValueError(f"save_bundle_facts: unknown format {format!r}")
+    from ..model.bundle_facts import document_schema_version
+
     document = bundle_facts_to_dict(cast("BundleFacts", _FactsWithoutMembers(facts)))
+    # 5 when any spooled member is a sectioned document (ADR-062 D14/D15).
+    document["schema_version"] = document_schema_version(
+        facts, sectioned_members=any(blob.sectioned for blob in members.values())
+    )
     document["per_library_snapshots"] = LazyItems(
         keys=list(members),
         produce=lambda name: PreEncoded(lambda: spool.iter_text(members[name])),

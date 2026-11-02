@@ -249,6 +249,40 @@ See "Landed in Phase 1" below.
   `indexes/index.sqlite` layout slot stays reserved.
 - **A2.5** **Measured**: peak RSS for a project comparison no longer scales
   with the total decoded size of the package.
+  **Decision (2026-11-02, maintainer): the target is that release fan-out
+  peak memory does not grow with the number of members, bounded by the
+  largest member (about 8x its decoded size); the streaming parse is
+  deferred.** Not yet met on main: the re-measurement below still shows
+  304/498/611 MiB at N=1/4/8, from per-member retention. Holding the
+  contract type graph packed (in review) is the change meant to meet it. The element-level streaming decode of
+  `declarations` (estimated ~360 -> ~180 MiB peak on a 140 MiB snapshot,
+  table below) is deferred as a separate future item, not part of A2.5.
+  Per-section parse measurements (2026-11-02): synthetic
+  sectioned snapshot, 140 MiB pretty-printed (18k functions with 4 params,
+  1.8k records with 8 fields, 1.8k variables), Python 3.13, 4 cores:
+
+  | Measure (`load_snapshot`) | Value |
+  |---|---|
+  | wall time, load / load + first IR access | 2.4-2.5 s / 4.7 s |
+  | peak RSS (no tracemalloc) | 401 MiB |
+  | peak traced, load and load + access | 359.6 MiB |
+  | parsed JSON tree of the whole document | 226 MiB |
+  | decoded snapshot after load + access | 43 MiB |
+  | `declarations` share of the text | 97 of 116 MiB of section text |
+
+  | Parse strategy (traced peak, parse only) | Peak |
+  |---|---|
+  | whole text + whole tree (today) | 359 MiB |
+  | whole text + `declarations` only (best case of deferring every other section) | 323 MiB |
+  | streamed per section, whole text never held, all trees kept | 287 MiB |
+  | element-level decode (estimate: text + decoded snapshot) | ~180 MiB |
+
+  A per-section parse would gain 10-20% at most: D14's record-extras split
+  and the generation migration are whole-document checks whose errors are
+  load-time contracts, so every section is still parsed at load, and the
+  20% case needs a streaming reader that duplicates `snapshot_io`'s bomb
+  guards. The deferred item is element-level streaming of `declarations`;
+  see known-gaps "ADR-062 D14-D18", D18 (3).
 
 ---
 
@@ -868,6 +902,10 @@ listing/report, even where no resolution graph can place it.
     keys are kept, the PE dump records a failed `debug` section, a
     `function_presence` detector reports removals while `functions` is
     blocked, package GC and a Windows publish lock; detail below.
+    Bundles carry the carriers: bundle packages on `ArtifactRef.carriers`,
+    G38 documents and G40 archives as a sectioned member under bundle
+    `schema_version` 5 (`storage/bundle_member_carriers.py`;
+    `tests/unit/storage/test_bundle_carriers_roundtrip.py`).
   - D18, step 1 implemented (per-section decode split, no new laziness);
     lazy loading beyond the `graph` section is not.
   - Exit: one regression test per amendment probe (D14's and D17's exist), the oneDAL/MKL corpus, Windows and macOS, and
@@ -1146,6 +1184,16 @@ A1.9), item by item. Open items are also listed in
   decoded-section cache were therefore not built: no consumer path reads a
   section it could share or release early. What remains is in known-gaps.
 
+  *A2.5 re-measurement (2026-10-31, synthetic directory release, 53 MiB
+  members with 6k functions, `compare old/ new/`).* Peak RSS N=1 304 MiB,
+  N=4 498 MiB, N=8 611 MiB: still growing with N although the fan-out loads
+  one pair at a time. tracemalloc attributes about 5 MiB of live memory per
+  finished member (1.5k-function members) to parsed-JSON objects, decoded
+  ELF symbols, public-header type graphs and execution-cache entries; site
+  list in known-gaps. **A2.5 still not met**; the per-section streamed
+  parse, `BundleFacts` lazy members and the evidence-keyed decoded-section
+  cache were not started, because the measured growth is not in the parse.
+
 ---
 
 ## Validation corpus
@@ -1256,7 +1304,9 @@ satisfies for the one domain type it actually sections today
 | `abicheck/storage/atomic_file.py` | `atomic_write` — write a cache file through a same-directory temp file and `os.replace`, so a concurrent reader sees either no file or a complete one, never a torn one. Moved unchanged from `dumper_cache.py`; its stream-copy sibling was removed in dead-code-and-single-owner Stage G. Internal, not re-exported by the package |
 | `abicheck/storage/project_package_archive.py` | `pack_project_package`, `unpack_project_package`, `is_project_package_archive`, `MIMETYPE` — A1.1's one-file zip transport of a package directory; unpacking refuses any non-layout, symlinked, compressed, duplicate or over-budget member before writing. Internal, reached through `workflows.storage` |
 | `abicheck/storage/evidence_digest.py` | `EVIDENCE_FORM_VERSION`, `UNORDERED_LISTS`, `VOLATILE_CAPTURE_FIELDS`, `evidence_digest_of_document` — ADR-062 D16's evidence digest over a snapshot document: volatile capture metadata dropped, identity-matched record lists stably sorted by identity, semantically ordered lists untouched, the form version hashed in. Internal, not re-exported by the package |
-| `abicheck/storage/wire_extensions.py` | `AVAILABILITY_KEY`, `DOCUMENT_MUST_UNDERSTAND_KEY`, `EXTENSIONS_KEY`, `IDENTITY_SECTION_KIND`, `MUST_UNDERSTAND_KEY`, `UNDERSTOOD_EXTENSIONS`, `WIRE_EXTENSIONS_KEY`, `WireExtensions`, `attach`, `carriers_for_reader`, `check_must_understand`, `extensions_of`, `merge_wire_extensions`, `record_section_failure`, `refuse_blocked_identity`, `refuse_package_flattening`, `refuse_unwritable_extensions`, `section_blocking_reason`, `split_wire_extensions`, `unknown_must_understand` — ADR-062 D14/D15 carriers of the sectioned document: unknown sections, header must-understand names and extension maps, the section availability table, and the sections a load must block, split off on read and merged back on write; `WireExtensions.to_wire` is the form a directory package stores and `carriers_for_reader` re-decides what blocks on read. Internal, not re-exported by the package |
+| `abicheck/storage/wire_extensions.py` | `AVAILABILITY_KEY`, `DOCUMENT_MUST_UNDERSTAND_KEY`, `EXTENSIONS_KEY`, `IDENTITY_SECTION_KIND`, `MUST_UNDERSTAND_KEY`, `UNDERSTOOD_EXTENSIONS`, `WIRE_EXTENSIONS_KEY`, `WireExtensions`, `attach`, `attach_package_carriers`, `carriers_for_reader`, `check_must_understand`, `extensions_of`, `flattening_loses`, `merge_wire_extensions`, `record_section_failure`, `refuse_blocked_identity`, `refuse_unwritable_extensions`, `section_blocking_reason`, `split_wire_extensions`, `unknown_must_understand` — ADR-062 D14/D15 carriers of the sectioned document: unknown sections, header must-understand names and extension maps, the section availability table, and the sections a load must block, split off on read and merged back on write; `WireExtensions.to_wire` is the form a directory package stores and `carriers_for_reader` re-decides what blocks on read. Internal, not re-exported by the package |
+| `abicheck/storage/bundle_member_carriers.py` | `carriers_by_member`, `encode_bundle_member`, `require_sectioned_member_version` — ADR-062 D14/D15 carriers of a bundle member: a member whose flat document would lose them is stored as its sectioned document under bundle schema version 5 (G38 document, G40 archive), a bundle package stores them on `ArtifactRef.carriers`, and a sectioned member under a lower declared version is refused. Internal, not re-exported by the package |
+| `abicheck/storage/closure_graph_renumber.py` | `renumber_graph`, `renumber_snapshot_graphs` — the closure-marker strip-and-renumber pass applied to a snapshot's surface/source graph with the flat fields' ordinals (graph-only closures numbered after them); a stored graph is renumbered on its first decode. Internal, called by the closure-identity pass |
 | `abicheck/storage/wire_record_extensions.py` | `RECORD_EXTENSIONS_KEY`, `RECORD_LISTS`, `RECORD_OBJECTS`, `RecordExtras`, `collect_record_extras`, `nested_record_classes`, `restore_record_extras` — ADR-062 D14 at record level: unknown fields of identity-matched records and of the binary section's metadata objects, at any nesting depth (parameters, record fields, enum members, ELF symbols/imports, PE/Mach-O exports), kept by identity, ordinal and nested position and written back on re-save. Internal, not re-exported by the package |
 | `abicheck/storage/snapshot_lazy_decode.py` | `LEGACY_BACKFILL_FLOOR`, `decode_lazily`, `eager_section_decode`, `lazy_ir_eligible` — ADR-062 D18 step 2: a document on which every join touching the declarations, types and debug-layout sections is a no-op loads with them pending in the snapshot's semantic IR (model/lazy_declarations.py); any other document decodes eagerly. Internal, not re-exported by the package |
 | `abicheck/storage/transport_digest.py` | `TRANSPORT_EXTRA_ID`, `stored_transport_digest`, `transport_digest`, `transport_extra` — ADR-062 D16's transport digest: the SHA-256 of a package-archive member's stored bytes, carried in its zip extra field and verified on unpack. Internal, not re-exported by the package |

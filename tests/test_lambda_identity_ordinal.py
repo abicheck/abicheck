@@ -858,7 +858,7 @@ class TestFactProvenanceKeysAreRenumberedToo:
         assert fact_producer(snap, key) == "castxml"
 
 
-class TestL5SourceGraphIdentitiesAreNotRenumbered:
+class TestL5SourceGraphIdentitiesAreRenumbered:
     """Phase 4 of ``docs/contribute/plans/bug-class-regression-testing.md``
     (the ``identity.environment_taint`` bug class): a dedicated canary for
     the residual AGENTS.md already documents under "A named follow-on" --
@@ -872,15 +872,13 @@ class TestL5SourceGraphIdentitiesAreNotRenumbered:
     carries L5's own ``source_graph``) is absent from that list, so a
     closure-parameterized node label there is invisible to the rewrite
     walk entirely, regardless of content. This asserts the residual's OWN
-    bound per ``KnownGap``'s docstring rule (not the eventually-correct
-    behavior): the SAME marker renumbers on the flat side and is left
-    completely untouched on the L5 side, in one snapshot, so a future fix
-    that starts renumbering ``source_graph`` node labels too breaks this
-    test loudly (and a regression that also stops renumbering the flat
-    side breaks it the same way) -- either direction of drift is caught.
+    bound per ``KnownGap``'s docstring rule. Closed 2026-10-31
+    (``storage.closure_graph_renumber``): the SAME marker now renumbers to
+    the SAME ordinal on the flat side and in the L5 graph's node id, label
+    and edge endpoint -- a regression on either side breaks this test.
     """
 
-    def test_flat_side_renumbers_while_l5_node_label_does_not(self) -> None:
+    def test_flat_side_and_l5_graph_renumber_to_the_same_ordinal(self) -> None:
         """Uses production-shaped identity-bearing node/edge ids (the real
         ``decl://``/``type://`` scheme :func:`~abicheck.buildsource.
         graph_facts._decl_node_id`/``_type_node_id`` mint, embedding the
@@ -932,28 +930,20 @@ class TestL5SourceGraphIdentitiesAreNotRenumbered:
         assert renamed is not None
         assert "522" not in renamed and "26" not in renamed
 
-        # The L5 side is untouched by THIS pass -- still exactly the
-        # pre-renumber spelling, in the node's identity-bearing id, its
-        # label, AND the edge endpoint referencing it. This is the
-        # documented gap's own bound, not a desired outcome. Re-fetches
-        # ``source_graph`` from ``snap`` AFTER the call rather than reusing
-        # the ``graph`` reference captured before it (Codex review, PR
-        # #898): a future fix that closes this gap by constructing a
-        # rewritten ``SourceGraphSummary``/``BuildSourcePack`` and
-        # reassigning it onto ``snap.build_source`` -- rather than mutating
-        # the existing objects in place -- would leave the stale ``graph``
-        # reference showing the old, unrenumbered values forever, making
-        # this canary pass for the wrong reason even after the gap closed.
+        # The L5 side carries the same ordinal, in the node's identity-
+        # bearing id, its label AND the edge endpoint referencing it.
+        # Re-fetched from ``snap`` after the call: the fix rebinds a rebuilt
+        # graph rather than mutating the captured one.
         assert snap.build_source is not None
         post_renumber_graph = snap.build_source.source_graph
         assert post_renumber_graph is not None
-        assert post_renumber_graph.nodes[0].id == pre_renumber_id
-        assert post_renumber_graph.nodes[0].label == pre_renumber_label
-        assert (
-            "522" in post_renumber_graph.nodes[0].label
-            and "26" in post_renumber_graph.nodes[0].label
-        )
-        assert post_renumber_graph.edges[0].src == pre_renumber_edge_src
+        ordinal = renamed[renamed.index("(lambda") : renamed.index(")") + 1]
+        assert "#" in ordinal
+        node = post_renumber_graph.nodes[0]
+        assert node.id != pre_renumber_id
+        assert ordinal in node.id and ordinal in node.label
+        assert "522" not in node.label
+        assert post_renumber_graph.edges[0].src == node.id != pre_renumber_edge_src
 
 
 class TestFrozenDataclassesReachableFromTheWalkAreRebuilt:

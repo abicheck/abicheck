@@ -564,6 +564,65 @@ def test_release_lazy_section_decode_matches_eager(
     _assert_same(lazy, _run(str(old), str(new)), "release.lazy_sections")
 
 
+def test_release_lazy_graph_renumber_matches_eager(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Bug class storage.graph_closure_identity_not_renumbered: a stored
+    graph's closure markers renumbered on first decode give the graphs and
+    the report an eager decode-then-renumber gives."""
+    from abicheck.model.graph_facts import GraphNode
+    from abicheck.model.lazy_graph import PendingGraph
+    from abicheck.model.source_graph import SourceGraphSummary
+    from abicheck.serialization import load_snapshot, save_snapshot
+    from abicheck.storage import closure_graph_renumber as cgr
+
+    sides = {}
+    for side, lines in (("old", (3, 9, 20)), ("new", (4, 9, 21))):
+        root = tmp_path / side
+        root.mkdir()
+        for i in range(3):
+            snap = AbiSnapshot(
+                library=f"libg{i}.so",
+                version=side,
+                functions=[
+                    Function(
+                        name=f"f<(lambda:g.h:{lines[0]}:2)>",
+                        mangled=f"_Zf{i}",
+                        return_type="int",
+                    )
+                ],
+            )
+            snap.surface_graph = SourceGraphSummary(
+                nodes=[
+                    GraphNode(id=f"decl://f<(lambda:g.h:{line}:2)>", kind="source_decl")
+                    for line in lines
+                ]
+            )
+            save_snapshot(snap, root / f"libg{i}.so.abi.json")
+        sides[side] = root
+
+    def graphs() -> list[Any]:
+        return [
+            load_snapshot(p).surface_graph.to_dict()
+            for root in sides.values()
+            for p in sorted(root.iterdir())
+        ]
+
+    lazy_graphs, lazy = graphs(), _run(str(sides["old"]), str(sides["new"]))
+    # Not vacuous: every stored :line:col closure was renumbered.
+    ids = [n["id"] for g in lazy_graphs for n in g["nodes"]]
+    assert ids and all("#" in i and ":2)" not in i for i in ids)
+    monkeypatch.setattr(
+        cgr,
+        "_wrap",
+        lambda cell, make: PendingGraph.resolved(
+            cgr.renumber_graph(cell.resolve(), make)
+        ),
+    )
+    assert graphs() == lazy_graphs
+    _assert_same(lazy, _run(str(sides["old"]), str(sides["new"])), "release.lazy_graph")
+
+
 # ── (c) threads=1 vs threads=8 ──────────────────────────────────────────────
 
 

@@ -309,6 +309,8 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_blocked_section_compare_matrix.py",
             "tests/test_pe_pdb_section_failure.py",
             "tests/test_package_section_version_blocks_section.py",
+            "tests/unit/storage/test_bundle_carriers_roundtrip.py",
+            "tests/test_bundle_blocked_section_compare.py",
         ),
         public_surfaces=("cli",),
         axes={
@@ -322,15 +324,21 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
                 "not-collected-section",
             ),
             "level": ("record", "nested-record", "section", "document", "manifest"),
-            "container": ("single-file", "directory-package"),
+            "container": (
+                "single-file",
+                "directory-package",
+                "bundle-document",
+                "bundle-archive",
+                "bundle-package",
+            ),
             "producer": ("imported-document", "pe-pdb-parse-failure"),
             "side": ("old", "new"),
         },
         known_gaps=(
             KnownGap(
                 description=(
-                    "G38 bundle documents and G40 bundle archives still refuse "
-                    "a member snapshot carrying D14/D15 carriers."
+                    "A flat snapshot_to_dict mapping handed to a package "
+                    "writer cannot say what carriers it lost."
                 ),
                 reference="docs/contribute/known-gaps.md",
             ),
@@ -368,6 +376,41 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
                     "Only declarations/types/debug layout/semantic_ir and the "
                     "graph are deferred; a full compare decodes them anyway, "
                     "and peak RSS is still set by the whole-document parse."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
+    BugClass(
+        id="storage.graph_closure_identity_not_renumbered",
+        invariant=(
+            "A closure marker names one closure in every place a snapshot "
+            "spells it: the surface/source graph's node ids, labels, edge "
+            "endpoints and attributes carry the same #N ordinal as the flat "
+            "fields, on the dump path and on a stored graph's first decode "
+            "(identical to an eager decode then renumber); a closure only "
+            "the graph names is numbered after its group's flat ordinals, so "
+            "the graph never moves a flat ordinal."
+        ),
+        # Traces to the Codex review on PR #868 that recorded the gap.
+        fixed_by=(868,),
+        seed_tests=(
+            "tests/unit/storage/test_graph_closure_renumbering.py",
+            "tests/test_lambda_identity_ordinal.py",
+            "tests/test_family_f5_optimization_reference.py",
+        ),
+        public_surfaces=("python-api",),
+        axes={
+            "closure": ("flat-visible", "graph-only"),
+            "spelling": ("raw-path", "stripped"),
+            "path": ("dump-live-graph", "load-lazy-graph"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "A baseline written before the fix with flat #N spellings "
+                    "and a :line:col graph cannot be reconciled; its graph "
+                    "closures are numbered as graph-only."
                 ),
                 reference="docs/contribute/known-gaps.md",
             ),

@@ -95,6 +95,8 @@ _INTERNAL_MODULES = (
     "abicheck.storage.cross_process_lock",
     "abicheck.storage.tu_parse_store",
     "abicheck.storage.wire_extensions",
+    "abicheck.storage.closure_graph_renumber",
+    "abicheck.storage.bundle_member_carriers",
     "abicheck.storage.wire_field_names",
     "abicheck.storage.wire_record_extensions",
     "abicheck.storage.snapshot_lazy_decode",

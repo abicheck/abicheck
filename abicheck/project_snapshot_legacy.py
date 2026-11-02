@@ -61,7 +61,7 @@ from .storage.wire_extensions import (
     IDENTITY_SECTION_KIND,
     WIRE_EXTENSIONS_KEY,
     WireExtensions,
-    carriers_for_reader,
+    attach_package_carriers,
     extensions_of,
     refuse_unwritable_extensions,
 )
@@ -328,15 +328,9 @@ def read_stored_snapshot_document(
     if artifact.carriers is not None:
         # ADR-062 D14/D15: what the sections alone cannot say, decided for
         # this build; merged with any section the export itself blocked.
-        stored = carriers_for_reader(
-            store.get(artifact.carriers.digest), f"{root} artifact {artifact_id!r}"
+        attach_package_carriers(
+            document, store, artifact.carriers, f"{root} artifact {artifact_id!r}"
         )
-        blocked = document.get(WIRE_EXTENSIONS_KEY)
-        if isinstance(blocked, WireExtensions):
-            stored.passthrough_sections.update(blocked.passthrough_sections)
-            stored.passthrough_versions.update(blocked.passthrough_versions)
-            stored.unreadable.extend(blocked.unreadable)
-        document[WIRE_EXTENSIONS_KEY] = stored
     return document, artifact
 
 

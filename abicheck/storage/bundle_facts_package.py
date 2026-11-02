@@ -94,6 +94,7 @@ from .bundle_facts_archive import (
     DEFAULT_MAX_LIBRARY_COUNT,
 )
 from .bundle_facts_codec import bundle_facts_from_dict, bundle_facts_to_dict
+from .bundle_member_carriers import carriers_by_member
 from .generation_migrations import without_snapshot_generation_notices
 from .import_bundle_facts import export_bundle_facts, import_bundle_facts
 from .json_budget import DEFAULT_MAX_JSON_CONTAINER_NODES
@@ -230,7 +231,11 @@ def write_bundle_facts_package(
             ),
         )
 
-    document = bundle_facts_to_dict(facts, on_snapshot=_charge_snapshot)
+    # Flat members: the package stores each member's ADR-062 D14/D15
+    # carriers on its `ArtifactRef.carriers`, as a directory package does.
+    document = bundle_facts_to_dict(
+        facts, on_snapshot=_charge_snapshot, flat_members=True
+    )
     # The remaining, composition-only content (`per_library_snapshots`
     # already charged above) -- variant_fingerprint/manifest/
     # filesystem_aliases/library_filenames are typically small relative to
@@ -248,6 +253,7 @@ def write_bundle_facts_package(
         max_known_schema_version=SCHEMA_VERSION,
         variant_id=variant_id,
         generations=generations,
+        carriers=carriers_by_member(facts.per_library_snapshots),
     )
 
 
