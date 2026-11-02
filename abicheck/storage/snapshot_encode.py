@@ -41,7 +41,7 @@ from .enum_codec import encode_platform_enums
 from .extraction_scope_codec import encode_extraction_scope
 from .fact_codec import encode_fact_fields
 from .generation_migrations import FACT_GENERATIONS_KEY, encode_fact_generations
-from .json_stream import LazyItems
+from .json_stream import OMIT, LazyItems
 from .semantic_ir_codec import encode_semantic_ir
 from .snapshot_record_compaction import compact_records
 from .snapshot_runtime_only import RUNTIME_ONLY_SNAPSHOT_FIELDS
@@ -592,6 +592,26 @@ def streamed_sectioned_document(snap: AbiSnapshot) -> LazyItems:
         lambda keys: _snapshot_to_dict(snap, _encode_value_sorted, keys),
         _SNAPSHOT_SKIP_FIELDS,
     )
+
+
+def sectioned_document_for_write(snap: AbiSnapshot) -> dict[str, Any]:
+    """`streamed_sectioned_document` materialized as a plain ``dict``: the
+    same members, for a writer that embeds the document in another one (a
+    bundle member, `storage.bundle_member_carriers`) rather than streaming
+    it to a file. It holds every section at once."""
+    document: dict[str, Any] = _materialize(streamed_sectioned_document(snap))
+    return document
+
+
+def _materialize(value: Any) -> Any:
+    if isinstance(value, LazyItems):
+        out: dict[str, Any] = {}
+        for key in value.keys:
+            produced = value.produce(key)
+            if produced is not OMIT:
+                out[key] = _materialize(produced)
+        return out
+    return value
 
 
 def snapshot_content_digest(snap: AbiSnapshot) -> str:

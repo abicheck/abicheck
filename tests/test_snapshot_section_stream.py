@@ -41,7 +41,10 @@ from abicheck.storage.json_stream import (
     iter_json_indented,
     join_json_indented,
 )
-from abicheck.storage.snapshot_encode import streamed_sectioned_document
+from abicheck.storage.snapshot_encode import (
+    sectioned_document_for_write,
+    streamed_sectioned_document,
+)
 from abicheck.storage.wire_extensions import record_section_failure
 from tests._whole_document_encoder import whole_sectioned_document
 
@@ -57,6 +60,9 @@ def _assert_identical(snap: AbiSnapshot) -> None:
         json.dumps(oracle, separators=(",", ":"))
     )
     assert snapshot_to_json(snap) == json.dumps(oracle, indent=2)
+    # The eager form bundle members embed: same members, same order.
+    eager = sectioned_document_for_write(snap)
+    assert json.dumps(eager, indent=2) == json.dumps(oracle, indent=2)
 
 
 # -- generated snapshots -------------------------------------------------------
