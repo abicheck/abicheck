@@ -246,9 +246,34 @@ See "Landed in Phase 1" below.
   **Decision (2026-11-02, maintainer): the target is that release fan-out
   peak memory does not grow with the number of members, bounded by the
   largest member (about 8x its decoded size); the streaming parse is
-  deferred.** Not yet met on main: the re-measurement below still shows
-  304/498/611 MiB at N=1/4/8, from per-member retention. Holding the
-  contract type graph packed (in review) is the change meant to meet it. The element-level streaming decode of
+  deferred.** Status (2026-11-02, after the packed contract type graph):
+  met for the default fan-out, *reduced but not eliminated* for in-process
+  members. The 2026-10-31 growth (304/498/611 MiB at N=1/4/8) was per-member
+  retention, ~75% of it the contract evidence's `TypeGraphSnapshot` (one per
+  side, whole-surface, held as tuples of string pairs by every finished
+  member's `DiffResult` until the release folds run); it is now held packed
+  and decoded per read (`contract_evidence.TypeGraphSnapshot`).
+  `compare old/ new/` peak RSS, synthetic members of 6000 functions (23 MiB
+  documents), N=1/4/8, `origin/main` -> this change:
+
+  | Fan-out | main | packed graph |
+  |---|---|---|
+  | default (member processes) | 270/248/275 MiB | 262/248/262 MiB |
+  | in-process, 1 thread (`ABICHECK_MEMBER_PROCESSES=0 ABICHECK_MAX_THREADS=1`) | 248/276/308 MiB | 245/264/272 MiB |
+  | in-process, default threads | 311/464/453 MiB | 309/464/470 MiB |
+
+  The threaded row's step at N=4 is concurrency (several pairs resident at
+  once), bounded by the worker count, not by N. In-process
+  `tracemalloc` over `compare_release_members` (1200 declarations per member,
+  N=2/4/8/16): retained 2.0/3.9/7.7/15.3 -> 0.6/1.2/2.2/4.4 MiB (0.95 ->
+  0.26 MiB per member); at 6000 declarations, N=1/4/8: 4.5/18.1/36.1 ->
+  1.1/4.5/8.9 MiB. `tests/test_release_member_memory_bound.py` (slow)
+  asserts < 0.35 MiB retained per member at 1200 declarations and a 2N peak
+  under 1.3x the N peak; it fails on the tuple-backed graph. Still per
+  member, by design (~0.19 MiB per 1000 declarations): the packed graph, the
+  compact bundle evidence the cross-library pass reads and the
+  public-declaration roots -- so an in-process fan-out still grows slowly
+  with N. The element-level streaming decode of
   `declarations` (estimated ~360 -> ~180 MiB peak on a 140 MiB snapshot,
   table below) is deferred as a separate future item, not part of A2.5.
   Per-section parse measurements (2026-11-02): synthetic

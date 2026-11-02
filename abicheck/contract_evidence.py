@@ -78,6 +78,8 @@ already-constructed, supposedly-immutable block.
 
 from __future__ import annotations
 
+import json
+import zlib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
@@ -177,7 +179,6 @@ class InputIdentity:
             )
 
 
-@dataclass(frozen=True)
 class TypeGraphSnapshot:
     """Raw, policy-independent type nodes/edges observed by one provider
     (plan Section 5.1: ``type_graph: {nodes: [], edges: []}``).
@@ -190,20 +191,37 @@ class TypeGraphSnapshot:
     referencing entries in ``nodes`` by convention only (not enforced here,
     since this leaf module has no access to a real type-graph algorithm to
     validate referential integrity against).
+
+    **Held packed, read on demand (ADR-062 A2.5).** The graph is the size of
+    the provider's whole declaration surface, and every comparison's
+    :class:`PersistedContractContext` carries one per side for as long as its
+    ``DiffResult`` lives -- a release fan-out keeps every member's result
+    until its release-level folds have run. As a tuple of string pairs it was
+    most of what a compared member left resident (measured: ~0.7 MiB per side
+    per 1000 declarations, ~75% of the per-member growth). Its readers are
+    whole-graph scans (serialization, the replay index and closure walk), so
+    the canonical form -- a sorted string table plus index pairs -- is kept
+    compressed and ``nodes``/``edges`` decode it per read. Equality and
+    hashing are over that canonical form, so they keep the old
+    set-semantics: discovery order and multiplicity never matter.
     """
 
-    nodes: tuple[str, ...] = ()
-    edges: tuple[tuple[str, str], ...] = ()
+    __slots__ = ("_packed",)
+    _packed: bytes
 
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "nodes", _frozen_sorted_tuple(self.nodes))
-        if isinstance(self.edges, (str, bytes)):
+    def __init__(
+        self,
+        nodes: Sequence[str] = (),
+        edges: Sequence[Sequence[str]] = (),
+    ) -> None:
+        frozen_nodes = _frozen_sorted_tuple(nodes)
+        if isinstance(edges, (str, bytes)):
             raise TypeError(
                 f"TypeGraphSnapshot.edges must be a sequence of (str, str) "
-                f"pairs, not a bare {type(self.edges).__name__} {self.edges!r}."
+                f"pairs, not a bare {type(edges).__name__} {edges!r}."
             )
-        edges: list[tuple[str, str]] = []
-        for edge in self.edges:
+        pairs: set[tuple[str, str]] = set()
+        for edge in edges:
             if (
                 isinstance(edge, (str, bytes))
                 or not isinstance(edge, Sequence)
@@ -222,13 +240,57 @@ class TypeGraphSnapshot:
             # a tuple here, rather than rejecting the decoder's native shape
             # and pushing a bespoke inner-list conversion onto every future
             # reader (Codex review, fresh evidence).
-            edges.append((edge[0], edge[1]))
+            pairs.add((edge[0], edge[1]))
         # Edges are an unordered, deduplicated set of graph relationships
-        # (same reasoning as ``nodes`` above) -- sort by (from, to) tuple
-        # comparison and drop duplicates so neither discovery order nor
-        # repeated-observation multiplicity affects equality/serialization
-        # (Codex review, fresh evidence).
-        object.__setattr__(self, "edges", tuple(sorted(set(edges))))
+        # (same reasoning as ``nodes``) -- sorted by (from, to) and
+        # deduplicated so neither discovery order nor repeated-observation
+        # multiplicity affects equality/serialization (Codex review, fresh
+        # evidence). The string table is sorted too, so index order is
+        # string order and the packed form is canonical.
+        names = sorted(set(frozen_nodes).union(*pairs))
+        position = {name: i for i, name in enumerate(names)}
+        node_ix = [position[n] for n in frozen_nodes]
+        edge_ix = [ix for a, b in sorted(pairs) for ix in (position[a], position[b])]
+        payload = json.dumps(
+            [names, node_ix, edge_ix], ensure_ascii=False, separators=(",", ":")
+        )
+        object.__setattr__(self, "_packed", zlib.compress(payload.encode(), 1))
+
+    def _unpack(self) -> tuple[list[str], list[int], list[int]]:
+        names, node_ix, edge_ix = json.loads(zlib.decompress(self._packed))
+        return names, node_ix, edge_ix
+
+    @property
+    def nodes(self) -> tuple[str, ...]:
+        names, node_ix, _ = self._unpack()
+        return tuple(map(names.__getitem__, node_ix))
+
+    @property
+    def edges(self) -> tuple[tuple[str, str], ...]:
+        # Decoded with C-level ``map``/``zip``, not a per-edge Python
+        # generator: the graph can be far larger than the declaration count
+        # (``short_name_collisions`` grows edges ~n^2), and a Python frame
+        # per edge is what ``test_compare_call_complexity`` would count.
+        names, _, edge_ix = self._unpack()
+        lookup = names.__getitem__
+        return tuple(zip(map(lookup, edge_ix[0::2]), map(lookup, edge_ix[1::2])))
+
+    def __setattr__(self, name: str, _value: object) -> None:
+        raise AttributeError(f"TypeGraphSnapshot is immutable; cannot set {name!r}.")
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, TypeGraphSnapshot):
+            return NotImplemented
+        return self._packed == other._packed
+
+    def __hash__(self) -> int:
+        return hash(self._packed)
+
+    def __reduce__(self) -> tuple[object, ...]:
+        return (TypeGraphSnapshot, (self.nodes, self.edges))
+
+    def __repr__(self) -> str:
+        return f"TypeGraphSnapshot(nodes={self.nodes!r}, edges={self.edges!r})"
 
 
 # --------------------------------------------------------------------------

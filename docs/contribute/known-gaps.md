@@ -339,12 +339,21 @@ per-item status in the
   `diff_namespaces`); the rest of the growth is allocator high-water. Each
   site needs its own owner decision (result data versus a cache that
   outlives its pair) before A2.5 can be met.
-  **Decision 2026-11-02 (maintainer): (3) is recorded as met for member
-  count; the streaming decode is deferred.** Release fan-out peak memory
-  does not grow with member count (members load one pair at a time); the
-  peak is bounded by the largest member, about 8x its decoded size. The
-  element-level streaming decode of `declarations` (est. ~360 -> ~180 MiB
-  on a 140 MiB snapshot) is deferred as a separate future item.
+  **Decision 2026-11-02 (maintainer): the target for (3) is that release
+  fan-out peak memory does not grow with member count, bounded by the
+  largest member (about 8x its decoded size); the streaming decode is
+  deferred.** Status after the packed contract type graph (2026-11-02): the
+  dominant per-member term above -- both sides' public-header type graphs,
+  ~75% of what a finished member kept -- is now held packed
+  (`contract_evidence.TypeGraphSnapshot`). `compare old/ new/` over 6000-
+  function members, N=1/4/8: default fan-out (member processes) flat on both
+  revisions (262/248/262 MiB); in-process, one thread, 248/276/308 ->
+  245/264/272 MiB. Still open: (a) ~0.19 MiB per 1000 declarations stays per
+  finished member by design (packed graph, public-declaration roots, compact
+  bundle evidence), so an in-process fan-out still grows slowly with N;
+  (b) concurrent in-process members raise the peak by the worker count
+  (311 -> ~465 MiB from N=1 to N=4 with default threads), bounded by
+  workers, not N. Measurements: plan A2.5.
   Per-section parse measurements: on a 140 MiB synthetic sectioned snapshot the parsed tree is 226 MiB and
   `declarations` holds 85% of the text; the decoded snapshot is 43 MiB.
   Ceilings (tracemalloc): today's text plus whole tree 359 MiB; whole text
