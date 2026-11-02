@@ -244,34 +244,31 @@ class TestValidateInputs:
         )
         assert result.returncode == 64
 
-    def test_bundle_kind_rejects_headers_depth(self, tmp_path: Path) -> None:
-        # A bundle's old-library operand is always raw binaries, never a
-        # pre-dumped .abi.json snapshot with historical header data baked
-        # in -- at depth: headers, both sides would be freshly parsed
-        # against the SAME current checkout's headers (this Action has no
-        # per-baseline-version header staging), silently missing any
-        # header-only change between baseline and candidate (Codex review).
-        result = _run(
-            VALIDATE_SH,
-            {
-                **_BASE_IDENTITY,
-                "INPUT_KIND": "bundle",
-                "INPUT_DEPTH": "headers",
-                "INPUT_BASELINE_PATH": "./b",
-                "INPUT_BUNDLE_MEMBERS": '["libpvxs", "libpvxsIoc"]',
-            },
-            tmp_path,
-        )
-        assert result.returncode == 64
-        # The message is the user-facing reason. The baseline half of
-        # per-member header staging now exists (resolve-baseline's
-        # stage-member-snapshots), so the reason must name what is actually
-        # missing -- the candidate side's per-member header selection -- and
-        # must not repeat the retired claim that no historical header
-        # snapshot exists for a bundle's baseline.
-        assert "::error::" in result.stdout
-        assert "per-member header selection" in result.stdout
-        assert "no historical header snapshot" not in result.stdout
+    def test_bundle_kind_rejects_headers_depth_without_member_headers(
+        self, tmp_path: Path
+    ) -> None:
+        # depth: headers compares per-member snapshots, each candidate member
+        # dumped against its own headers. Without member-headers the only
+        # header input is one project-wide set, which would parse every
+        # member against the union of all members' headers.
+        for member_headers in ("", "{}"):
+            result = _run(
+                VALIDATE_SH,
+                {
+                    **_BASE_IDENTITY,
+                    "INPUT_KIND": "bundle",
+                    "INPUT_DEPTH": "headers",
+                    "INPUT_BASELINE_PATH": "./b",
+                    "INPUT_BUNDLE_MEMBERS": '["libpvxs", "libpvxsIoc"]',
+                    "INPUT_MEMBER_HEADERS": member_headers,
+                },
+                tmp_path,
+            )
+            assert result.returncode == 64
+            assert "::error::" in result.stdout
+            assert "member-headers" in result.stdout
+            assert "union" in result.stdout
+            assert "no historical header snapshot" not in result.stdout
 
     def test_bundle_kind_allows_binary_depth(self, tmp_path: Path) -> None:
         result = _run(

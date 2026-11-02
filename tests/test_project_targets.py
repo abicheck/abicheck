@@ -536,12 +536,10 @@ def test_bundle_check_depth_binary_is_accepted() -> None:
     assert report.ok, report.errors
 
 
-def test_bundle_check_depth_headers_is_rejected() -> None:
-    """A bundle's old-library operand is always raw binaries (never a
-    pre-dumped .abi.json snapshot with historical header data baked in),
-    so a headers-depth bundle compare would parse both sides against the
-    SAME current checkout's headers -- silently missing any header-only
-    change between baseline and candidate (Codex review)."""
+def test_bundle_check_depth_headers_without_member_headers_is_rejected() -> None:
+    """A headers-depth bundle dumps each candidate member against its own
+    public_headers:; a member that declares none would compare header
+    evidence against none, so the config is refused."""
     config = ProjectTargetsConfig.from_dict(
         {
             "targets": {
@@ -565,7 +563,7 @@ def test_bundle_check_depth_headers_is_rejected() -> None:
     report = validate_project_targets(config)
     assert not report.ok
     assert any(
-        "depth 'headers' is not supported for a bundle check" in e
+        "depth 'headers' needs public_headers: on every member" in e and "libfoo" in e
         for e in report.errors
     )
 

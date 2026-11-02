@@ -13,12 +13,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Per-bundle-member *baseline header staging* — the missing old-side
-evidence path behind :data:`~abicheck.buildsource.project_targets.
-BUNDLE_CHECK_DEPTHS`.
+"""Per-bundle-member *baseline header staging* — the old-side evidence
+path a ``depth: headers`` bundle check compares
+(:data:`~abicheck.buildsource.project_targets.BUNDLE_CHECK_DEPTHS`).
 
-**The problem this closes.** A ``kind: bundle`` check compares two
-directories: the resolved baseline ``binaries/`` directory against the
+**The problem this closes.** A binary-depth ``kind: bundle`` check compares
+two directories: the resolved baseline ``binaries/`` directory against the
 candidate bundle directory (``actions/check-target/action.yml``'s
 ``old-library``). That old-side operand is a directory of *raw ELF
 binaries* — it carries no historical header evidence at all — while
@@ -27,8 +27,7 @@ at the *current* checkout. So at ``depth: headers`` both sides would be
 header-parsed from the same current sources, and a header-only change (an
 inline function or a template removed, a default argument changed) would be
 silently invisible: only one version of the headers is ever parsed. That is
-why ``headers`` is rejected for a bundle check today, and why the rejection
-is a false-clean guard rather than mere lost evidence.
+why a header-depth bundle check compares the staged snapshots instead.
 
 **What is genuinely already available.** ``actions/baseline/run.sh`` dumps
 *one snapshot per library* at baseline time, from the baseline checkout,
@@ -60,16 +59,12 @@ This module is that missing link, in two steps that stay separable:
   honest fact that decides whether a header-depth bundle compare would
   have two genuinely different header sources or one.
 
-**Deliberately does not lift the restriction.** Staging the old side is
-necessary but not sufficient: ``actions/check-target`` still has to route
-the bundle compare's old operand at this directory (and keep real ELF
-binaries reachable for the cross-library bundle graph, which
-``abicheck/bundle.py``'s ``build_bundle_snapshot()`` cannot build from
-snapshots), and the new side still has no per-member header selection.
-:data:`~abicheck.buildsource.project_targets.BUNDLE_CHECK_DEPTHS` stays as
-it is until those land — see ``docs/contribute/known-gaps.md``. Lifting a
-false-clean guard before its backing evidence path is fully wired would
-re-create exactly the failure the guard exists for.
+**Who uses it.** ``actions/check-target`` stages through it for a
+``depth: headers`` bundle check (``resolve-baseline``'s
+``stage-member-snapshots``), refuses a staging whose
+:attr:`StagedBundleBaseline.header_evidence_state` is not ``complete``,
+and compares the staged directory against one candidate dump per member
+(:mod:`abicheck.workflows.bundle_candidate_snapshots`).
 
 Lives here, next to :mod:`~abicheck.buildsource.baseline_set` whose
 manifest model and path guards it builds on, rather than inside it:

@@ -87,14 +87,14 @@ records `binary`/`binary_sha256` in `manifest.json`, closing the gap
 [`resolve-baseline`'s bundle-scoped resolution](resolve-baseline.md#bundle-scoped-resolution-s14)
 depends on.
 
-**Depth scope, unchanged by this item.** A bundle-scoped check is still
-restricted to `requested-depth: binary` (`abicheck/buildsource/
-project_targets.py`'s `BUNDLE_CHECK_DEPTHS`) — this predates P1.6 and closes the "binaries only is not the full answer for every requested depth" open gap by construction: since a bundle check never requests header/build/
-source depth in the first place, the archive never needs a per-member
-`headers/` directory or a `compare-release` snapshot-consuming input path
-either. If a future item lifts that restriction, staging old-side headers
-per bundle member becomes this workflow's job to add, not a pre-existing gap
-to rediscover.
+**Depth scope.** A bundle-scoped check runs at `binary` or `headers` depth
+(`abicheck/buildsource/project_targets.py`'s `BUNDLE_CHECK_DEPTHS`). At
+`headers` it reads each member's own snapshot from this archive (staged by
+`resolve-baseline`'s `stage-member-snapshots`), so every member must have
+been published with its header roots; `check-target` refuses an archive
+whose member snapshots do not all carry header evidence. `build`/`source`
+are never requested for a bundle, so no per-member build/source evidence is
+archived.
 
 ## `publish-baseline.yml`
 

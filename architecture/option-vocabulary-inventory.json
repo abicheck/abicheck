@@ -2864,6 +2864,14 @@
    "default": ""
   },
   {
+   "id": "actions/check-target:member-headers",
+   "action": "actions/check-target",
+   "input": "member-headers",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
    "id": "actions/check-target:profile",
    "action": "actions/check-target",
    "input": "profile",

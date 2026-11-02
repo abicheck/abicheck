@@ -72,6 +72,16 @@ inputs:
       default) leaves `.abicheck.yml`'s own `scope.on_incomplete` in charge.
     required: false
     default: ''
+  member-headers:
+    description: >
+      (kind: bundle only) JSON object mapping each member target id to its
+      own `public_headers:`, newline-joined (run-plan `member_headers`).
+      Required for `depth: headers`: the baseline side is each member's staged
+      baseline snapshot (resolve-baseline `stage-member-snapshots`), and each
+      candidate member is dumped against its own headers, never the union of
+      every member's. Empty or '{}' (the default) for a binary-depth bundle.
+    required: false
+    default: ''
   profile:
     description: 'The build profile.id this check runs under.'
     required: true
@@ -544,6 +554,7 @@ runs:
         INPUT_BUNDLE_MEMBERS: ${{ inputs.bundle-members }}
         INPUT_BUNDLE_REQUIRED: ${{ inputs.bundle-required }}
         INPUT_BUNDLE_ON_INCOMPLETE: ${{ inputs.bundle-on-incomplete }}
+        INPUT_MEMBER_HEADERS: ${{ inputs.member-headers }}
         INPUT_BASELINE_CHANNEL: ${{ inputs.baseline-channel }}
         INPUT_BASELINE_PATH: ${{ inputs.baseline-path }}
         INPUT_GATE_MODE: ${{ inputs.gate-mode }}
@@ -659,6 +670,9 @@ runs:
         expected-project-ref: ${{ inputs.expected-project-ref }}
         expected-baseline-generation: ${{ inputs.expected-baseline-generation }}
         allow-new-target: ${{ inputs.allow-new-target }}
+        # A header-depth bundle compares per-member snapshots; stage the
+        # baseline's own (dumped with each member's own headers).
+        stage-member-snapshots: ${{ inputs.kind == 'bundle' && inputs.depth == 'headers' && 'true' || 'false' }}
         python-version: ${{ inputs.python-version }}
 
     # ── Evidence collection (ADR-047 §4's collect-facts composition note: ──
@@ -1950,6 +1964,68 @@ runs:
           echo "$_extra_args_output_delim"
         } >> "$GITHUB_OUTPUT"
 
+    # ── Header-depth bundle: dump each candidate member on its own ────────
+    # The old side is resolve-baseline's member-snapshots-dir: one baseline
+    # snapshot per member, dumped at baseline time with that member's own
+    # headers. The candidate side is made the same way, one dump per member
+    # against its own `member-headers` entry, named after its baseline
+    # snapshot so the two directories pair file for file
+    # (abicheck.workflows.bundle_candidate_snapshots). Refuses a baseline
+    # whose member snapshots do not all carry header evidence: one side would
+    # then have no header facts for that member, and every header-level
+    # finding for it would be invented or lost.
+    - name: Dump candidate bundle members (depth headers)
+      id: bundle_candidate
+      if: |
+        inputs.kind == 'bundle' && inputs.depth == 'headers' &&
+        steps.resolve.outputs.outcome == 'resolved'
+      continue-on-error: true
+      shell: bash
+      env:
+        BUNDLE_MEMBERS: ${{ inputs.bundle-members }}
+        MEMBER_HEADERS: ${{ inputs.member-headers }}
+        BINARY_PATHS: ${{ steps.resolve.outputs.binary-paths }}
+        SNAPSHOT_PATHS: ${{ steps.resolve.outputs.member-snapshot-paths }}
+        HEADER_EVIDENCE: ${{ steps.resolve.outputs.member-header-evidence }}
+        CANDIDATE_DIR: ${{ inputs.new-library }}
+        INCLUDE_DIRS: ${{ inputs.new-include != '' && inputs.new-include || inputs.include }}
+        BUILD_CONFIG: ${{ inputs.build-config }}
+      run: |
+        set -euo pipefail
+        if [[ "$HEADER_EVIDENCE" != "complete" ]]; then
+          echo "::error::depth: headers needs every member's baseline snapshot to carry header evidence; resolve-baseline reports '$HEADER_EVIDENCE'. Re-publish the baseline with each member's header: input set, or use depth: binary." >&2
+          exit 1
+        fi
+        PY="$(command -v python3 || command -v python)"
+        OUT_DIR="$(mktemp -d "${RUNNER_TEMP:-/tmp}/bundle-candidate.XXXXXX")"
+        PLAN="$(mktemp "${RUNNER_TEMP:-/tmp}/bundle-candidate-plan.XXXXXX")"
+        "$PY" -I -m abicheck.frontends.action.cli bundle-candidate-plan \
+          --members "$BUNDLE_MEMBERS" \
+          --member-headers "${MEMBER_HEADERS:-{\}}" \
+          --binary-paths "$BINARY_PATHS" \
+          --snapshot-paths "$SNAPSHOT_PATHS" \
+          --candidate-dir "$CANDIDATE_DIR" \
+          --plan-file "$PLAN" >> "$GITHUB_OUTPUT"
+        # Include roots: one per line when multi-line, else whitespace-split
+        # (the root Action's own multi-value convention).
+        INCS=()
+        if [[ "$INCLUDE_DIRS" == *$'\n'* ]]; then
+          while IFS= read -r inc; do [[ -n "$inc" ]] && INCS+=("$inc"); done <<< "$INCLUDE_DIRS"
+        else
+          read -r -a INCS <<< "$INCLUDE_DIRS"
+        fi
+        while IFS=$'\x1f' read -r member candidate output headers; do
+          [[ -z "$member" ]] && continue
+          echo "-- $member ($candidate)"
+          CMD=(abicheck dump "$candidate" --depth headers -o "$OUT_DIR/$output")
+          IFS=$'\x1e' read -r -a HDRS <<< "$headers"
+          for h in "${HDRS[@]}"; do CMD+=(-H "$h"); done
+          for i in ${INCS[@]+"${INCS[@]}"}; do CMD+=(-I "$i"); done
+          [[ -n "$BUILD_CONFIG" ]] && CMD+=(--config "$BUILD_CONFIG")
+          "${CMD[@]}"
+        done < "$PLAN"
+        echo "snapshots-dir=$OUT_DIR" >> "$GITHUB_OUTPUT"
+
     # ── Bundle scope policy (bundles.<id>.required/on_incomplete) ─────────
     # Translates the declared required member ids into compare's selection
     # arguments, keyed by each member's canonical release key -- the key
@@ -1969,7 +2045,9 @@ runs:
         BUNDLE_MEMBERS: ${{ inputs.bundle-members }}
         BUNDLE_REQUIRED: ${{ inputs.bundle-required }}
         BUNDLE_ON_INCOMPLETE: ${{ inputs.bundle-on-incomplete }}
-        BUNDLE_BINARY_PATHS: ${{ steps.resolve.outputs.binary-paths }}
+        # Keys come from the operands compare actually pairs: per-member
+        # snapshots at depth headers, binaries otherwise.
+        BUNDLE_BINARY_PATHS: ${{ inputs.depth == 'headers' && steps.resolve.outputs.member-snapshot-paths || steps.resolve.outputs.binary-paths }}
       run: |
         set -euo pipefail
         PY="$(command -v python3 || command -v python)"
@@ -2028,7 +2106,8 @@ runs:
         steps.collect_replay.outcome != 'failure' &&
         steps.consumer_context.outcome != 'failure' &&
         steps.assurance_overlay.outcome != 'failure' &&
-        steps.bundle_selection.outcome != 'failure'
+        steps.bundle_selection.outcome != 'failure' &&
+        steps.bundle_candidate.outcome != 'failure'
       continue-on-error: true
       uses: ./.abicheck-check-target-src
       with:
@@ -2040,14 +2119,18 @@ runs:
         # selects mode: compare's audit-only shape (old-library/abi-baseline
         # both omitted, ADR-068 D2). No separate mode selector is needed.
         mode: compare
-        old-library: ${{ inputs.kind == 'bundle' && steps.resolve.outputs.binaries-dir || steps.resolve.outputs.snapshot-path }}
-        new-library: ${{ steps.consumer_context.outcome == 'success' && 'check-target-consumer.abi.json' || inputs.new-library }}
-        header: ${{ steps.consumer_context.outcome == 'success' && '' || inputs.header }}
-        old-header: ${{ inputs.old-header }}
-        new-header: ${{ steps.consumer_context.outcome == 'success' && '' || inputs.new-header }}
-        include: ${{ inputs.include }}
-        old-include: ${{ inputs.old-include }}
-        new-include: ${{ steps.consumer_context.outcome == 'success' && '' || inputs.new-include }}
+        # A header-depth bundle compares per-member snapshot directories
+        # (step bundle_candidate above); a binary-depth one, binaries.
+        old-library: ${{ inputs.kind == 'bundle' && (inputs.depth == 'headers' && steps.resolve.outputs.member-snapshots-dir || steps.resolve.outputs.binaries-dir) || steps.resolve.outputs.snapshot-path }}
+        new-library: ${{ steps.bundle_candidate.outcome == 'success' && steps.bundle_candidate.outputs.snapshots-dir || (steps.consumer_context.outcome == 'success' && 'check-target-consumer.abi.json' || inputs.new-library) }}
+        # Blank for snapshot operands: each side's headers are already in
+        # its snapshots.
+        header: ${{ steps.bundle_candidate.outcome != 'success' && (steps.consumer_context.outcome == 'success' && '' || inputs.header) || '' }}
+        old-header: ${{ steps.bundle_candidate.outcome != 'success' && inputs.old-header || '' }}
+        new-header: ${{ steps.bundle_candidate.outcome != 'success' && (steps.consumer_context.outcome == 'success' && '' || inputs.new-header) || '' }}
+        include: ${{ steps.bundle_candidate.outcome != 'success' && inputs.include || '' }}
+        old-include: ${{ steps.bundle_candidate.outcome != 'success' && inputs.old-include || '' }}
+        new-include: ${{ steps.bundle_candidate.outcome != 'success' && (steps.consumer_context.outcome == 'success' && '' || inputs.new-include) || '' }}
         # collect-facts' own replay phase defaults an empty `sources` to '.'
         # internally (run.sh: `SOURCES="${INPUT_SOURCES:-.}"`) but never
         # surfaces that resolved value as an output -- it only prints a
@@ -2138,5 +2221,6 @@ runs:
         CONSUMER_CONTEXT_OUTCOME: ${{ steps.consumer_context.outcome }}
         ASSURANCE_OVERLAY_OUTCOME: ${{ steps.assurance_overlay.outcome }}
         BUNDLE_SELECTION_OUTCOME: ${{ steps.bundle_selection.outcome }}
+        BUNDLE_CANDIDATE_OUTCOME: ${{ steps.bundle_candidate.outcome }}
         ACTION_PATH: ${{ github.action_path }}
       run: bash "${{ github.action_path }}/run.sh"

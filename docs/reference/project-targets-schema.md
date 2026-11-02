@@ -91,7 +91,7 @@ Common optional fields for `kind: library`:
 
 | Field | Type | Meaning |
 |-------|------|---------|
-| `public_headers` | list of string | Public header roots for this target, forwarded as `check-target`'s own `header` input for this target's generated cells (newline-joined, so a header root containing whitespace survives `action/run.sh`'s `add_flag()` intact) — see [`run-plan-schema.md`](run-plan-schema.md#runplancheck-fields)'s `header` field and [`reusable-workflows.md`](reusable-workflows.md#shared-analysis-options)'s per-cell-override exception. Not yet honored for a `kind: bundle` member (no per-bundle-member header staging exists). |
+| `public_headers` | list of string | Public header roots for this target, forwarded as `check-target`'s own `header` input for this target's generated cells (newline-joined, so a header root containing whitespace survives `action/run.sh`'s `add_flag()` intact) — see [`run-plan-schema.md`](run-plan-schema.md#runplancheck-fields)'s `header` field and [`reusable-workflows.md`](reusable-workflows.md#shared-analysis-options)'s per-cell-override exception. For a `kind: bundle` member it is the member's own header set at `depth: headers`: the run plan's `member_headers` carries it, and `check-target` dumps that member's candidate side against it alone. A `depth: headers` bundle check needs it on every member. |
 | `bundle` | string | The `bundles:` entry this target belongs to. Must be declared under `bundles:`, and that bundle's own `targets:` list must include this target back (the two must agree). |
 | `bundle_only` | boolean, default `false` | When `true`, this target is checked only as a bundle member, never standalone. Requires `bundle` to be set, and must **not** declare its own `checks:` — a `bundle_only` target's own checks would never run standalone, so declare the policy under `bundles:<id>.checks` instead. |
 | `checks` | list of check tuple | See [`checks:`](#checks) below. |
@@ -157,13 +157,15 @@ per-target ones (S14 bundle-scoped analysis, e.g. soname/provider-set
 checks across the whole release), and that cell needs its own
 baseline-channel/depth/gate policy independent of its member targets'.
 **Two restrictions that don't apply to a target check:** `depth` must be
-`binary` (never `headers`/`build`/`source` — a bundle check always
+`binary` or `headers` (never `build`/`source` — a bundle check always
 compares directories, which the CLI's per-library release fan-out never
-collects inline build/source evidence for; `headers` is additionally
-unsafe because a bundle's baseline is always raw binaries with no
-historical header snapshot, so both sides would be parsed against the
-same current checkout's headers, silently missing a header-only change),
-and `channel` may not be `"none"` (a bundle's candidate is always a staged
+collects inline build/source evidence for). At `depth: headers` every
+member must declare `public_headers:`: the OLD side is each member's own
+baseline snapshot (dumped at baseline time with that member's headers,
+staged by `resolve-baseline`), and `check-target` dumps each candidate
+member against its own headers, so no member is parsed against another
+member's headers or against the current checkout's headers on both sides.
+`channel` may not be `"none"` (a bundle's candidate is always a staged
 directory of member binaries, which `compare`'s audit-only shape — the
 no-baseline routing — rejects outright). Both are rejected at validation
 time.
@@ -489,13 +491,11 @@ cross-library findings — removed dependencies, provider changes — are
 bundle analysis skipped). Before adopting the
 declarative topology, confirm none of these apply to you:
 
-- **`bundles:` checks run at one depth only** — see the [`bundles:`
-  section](#bundles) above for the allowed depth and what `project
-  validate` rejects. If a bundle-level check needs header-scope evidence,
-  it can't run through a `bundles:` entry today.
-- **Per-target `public_headers:` is not honored for a `kind: bundle`
-  member** — see the `public_headers` row of the `targets:` field table
-  above for the one authoritative statement of that gap.
+- **`bundles:` checks run at `binary` or `headers` depth only** — see the
+  [`bundles:` section](#bundles) above for what `project validate` rejects.
+  A `headers` bundle check needs a baseline whose member snapshots all carry
+  header evidence (each member published with its own `header:`);
+  `check-target` refuses one that does not.
 - **Stored-facts bundle comparison (`BundleFacts`) has no run-plan /
   composite-Action / `check-project.yml` wiring** — it is reachable from
   the Python API and from `compare` (OLD_INPUT auto-detected as a stored

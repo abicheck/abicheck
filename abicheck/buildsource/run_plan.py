@@ -143,7 +143,6 @@ from .build_output import BuildOutput
 from .build_output_profile import build_system_cell_fields
 from .check_report import build_check_id
 from .project_bundles import BundleSpec
-from .project_check_spec import CheckSpec
 from .project_profile_routing import DEFAULT_PROFILE_RUNNER_LABEL
 from .project_targets import TARGET_KIND_LIBRARY, ProjectTargetsConfig, TargetSpec
 from .run_plan_gate import parse_run_plan_gate
@@ -157,6 +156,7 @@ from .run_plan_profile_fields import (  # noqa: F401
     _newline_join_headers,
     _scheduling_fields_for_profile,
 )
+from .run_plan_report import RunPlanGenerationReport, _resolve_profile_ids
 
 # _compose_gcc_options/_scheduling_fields_for_profile are re-exported into
 # this module's own namespace (not just used internally) -- see
@@ -172,6 +172,7 @@ from .run_plan_schema import (  # noqa: F401
     bundle_on_incomplete_field,
     bundle_required_field,
     carries_bundle_scope,
+    member_headers_field,
     reject_unversioned_bundle_scope,
 )
 from .run_plan_skip import (  # noqa: F401
@@ -274,6 +275,11 @@ class RunPlanCheck:
     #: declared. A declared policy stamps ``RUN_PLAN_SCHEMA_BUNDLE_SCOPE``.
     bundle_required: list[str] = field(default_factory=list)
     bundle_on_incomplete: str = ""
+    #: ``kind: bundle`` only -- member target id -> that member's own
+    #: ``public_headers:``, newline-joined like :attr:`header`. A
+    #: ``depth: headers`` bundle check dumps each candidate member against
+    #: its own headers, never the union of every member's.
+    member_headers: dict[str, str] = field(default_factory=dict)
     #: This cell's profile's ``compile.binding``, resolved to an exact
     #: executable path (P1 toolchain-profile audit) -- forwarded as
     #: ``check-target``'s ``gcc-path`` input. Empty unless the profile
@@ -368,6 +374,8 @@ class RunPlanCheck:
                 d["bundle_required"] = list(self.bundle_required)
             if self.bundle_on_incomplete:
                 d["bundle_on_incomplete"] = self.bundle_on_incomplete
+            if self.member_headers:
+                d["member_headers"] = dict(self.member_headers)
         else:
             d["target_kind"] = self.target_kind
             if self.baseline_target:
@@ -451,6 +459,7 @@ class RunPlanCheck:
             member_binary_patterns=member_patterns,
             bundle_required=bundle_required_field(d),
             bundle_on_incomplete=bundle_on_incomplete_field(d),
+            member_headers=member_headers_field(d),
             compile_gcc_path=_opt_str(d.get("compile_gcc_path")),
             compile_gcc_options=_opt_str(d.get("compile_gcc_options")),
             consumer_compile_gcc_path=_opt_str(d.get("consumer_compile_gcc_path")),
@@ -607,43 +616,6 @@ class RunPlan:
             gate_unexpected_target=gate_unexpected_target,
             skipped=skipped,
         )
-
-
-@dataclass
-class RunPlanGenerationReport:
-    """Result of :func:`generate_run_plan` (mirrors
-    :class:`~.build_output.BuildOutputValidationReport`'s shape)."""
-
-    errors: list[str] = field(default_factory=list)
-    warnings: list[str] = field(default_factory=list)
-
-    @property
-    def ok(self) -> bool:
-        return not self.errors
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "ok": self.ok,
-            "errors": list(self.errors),
-            "warnings": list(self.warnings),
-        }
-
-
-def _resolve_profile_ids(
-    check: CheckSpec, config: ProjectTargetsConfig
-) -> tuple[list[str], bool]:
-    """Returns ``(profile_ids, explicit)``.
-
-    ``explicit`` is ``True`` when *check* named its own ``profiles:``
-    selector -- a profile named there that turns out not to build the
-    referenced target is a hard error, unlike the implicit "every contract
-    profile" sweep, where a non-matching profile is silently skipped
-    (that's the whole reason the implicit sweep is safe -- see module
-    docstring).
-    """
-    if check.profiles:
-        return list(check.profiles), True
-    return [p.id for p in config.profiles.values() if p.contract], False
 
 
 def _library_lookup_and_pattern(
@@ -894,6 +866,11 @@ def _generate_bundle_checks(
                         bundle.required_members if bundle.declares_scope_policy else []
                     ),
                     bundle_on_incomplete=bundle.on_incomplete,
+                    member_headers={
+                        m: _newline_join_headers(config.targets[m].public_headers)
+                        for m in bundle.targets
+                        if m in config.targets and config.targets[m].public_headers
+                    },
                     compile_gcc_path=compile_gcc_path,
                     compile_gcc_options=compile_gcc_options,
                     consumer_compile_gcc_path=consumer_compile_gcc_path,
