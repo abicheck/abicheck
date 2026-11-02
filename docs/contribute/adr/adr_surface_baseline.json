@@ -338,7 +338,6 @@
     "ADR-035": {
       "disposition": "surfaced",
       "surfaces": [
-        "action: crosscheck",
         "cli: compare --depth",
         "report: compare_report.cross_source_evolution"
       ],
@@ -859,7 +858,6 @@
     "ADR-033 action: budget",
     "ADR-033 cli: compare --performance-profile --budget",
     "ADR-034 api: abicheck.python_api",
-    "ADR-035 action: crosscheck",
     "ADR-035 cli: compare --depth",
     "ADR-035 report: compare_report.cross_source_evolution",
     "ADR-037 cli: compare --help-all --config",

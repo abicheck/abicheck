@@ -321,7 +321,6 @@ adrs:
     use_cases: [UC-WORKFLOW-pr-source-tier, UC-CHANGE-crosscheck-hygiene]
     surfaces:
       - cli: compare --depth
-      - action: crosscheck
       - report: compare_report.cross_source_evolution
 
   - id: ADR-036

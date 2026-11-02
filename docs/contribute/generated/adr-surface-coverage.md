@@ -51,7 +51,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 | [ADR-032](../adr/032-evidence-extractor-plugin-interface.md) | internal | — | — | In-repo extractor plugin interface and security model; no user-registered plugin surface. |
 | [ADR-033](../adr/033-ci-rollout-performance-and-validation.md) | surfaced | UC-REPORTING-dry-run-cost-preview | `cli: compare --performance-profile --budget`<br>`action: budget` | — |
 | [ADR-034](../adr/034-managed-runtime-and-non-c-abi-frontends.md) | partial | UC-ARCH-python-api | `api: abicheck.python_api` | Proposed; managed-runtime frontends beyond the Python-level API diff are not implemented. |
-| [ADR-035](../adr/035-pr-tier-source-intelligence-and-crosscheck.md) | surfaced | UC-WORKFLOW-pr-source-tier, UC-CHANGE-crosscheck-hygiene | `cli: compare --depth`<br>`action: crosscheck`<br>`report: compare_report.cross_source_evolution` | — |
+| [ADR-035](../adr/035-pr-tier-source-intelligence-and-crosscheck.md) | surfaced | UC-WORKFLOW-pr-source-tier, UC-CHANGE-crosscheck-hygiene | `cli: compare --depth`<br>`report: compare_report.cross_source_evolution` | — |
 | [ADR-036](../adr/036-report-view-model.md) | internal | — | — | Report view-model inside report/; users see its effect through the rendered formats owned by ADR-014. |
 | [ADR-037](../adr/037-cli-interface-contract.md) | surfaced | UC-WF-cli-contract | `cli: compare --help-all --config` | — |
 | [ADR-038](../adr/038-build-integrated-fact-collection-variants.md) | surfaced | UC-TC-build-emitted-facts | `cli: project capture-variants`<br>`action: actions/collect-facts` | — |
@@ -180,7 +180,6 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 - ADR-033 action: budget
 - ADR-033 cli: compare --performance-profile --budget
 - ADR-034 api: abicheck.python_api
-- ADR-035 action: crosscheck
 - ADR-035 cli: compare --depth
 - ADR-035 report: compare_report.cross_source_evolution
 - ADR-037 cli: compare --help-all --config
