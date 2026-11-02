@@ -77,29 +77,26 @@ For such a document the reader keeps today's rule (a header-parsed block is
 usable, an empty unparsed one is FAILED). Nothing about an old snapshot
 changes.
 
-**D4. Consumers (maintainer decision).** `read_library_export_facts` maps a
+**D4. Consumers.** `read_library_export_facts` maps a
 stored `partial` to a `PARTIAL` fact: usable, with reduced confidence and the
 unread part named as unknown, not absent. A `failed` maps to `FAILED`, as the
-import path already does. The open question is whether a `partial` export
-read should also lower scope completeness (ADR-065), so that a comparison
-which relied on it reports incomplete coverage. This draft proposes yes, as
-incomplete coverage, and no new exit code.
+import path already does. A `partial` export read also lowers scope
+completeness (ADR-065), so a comparison that relied on it reports incomplete
+coverage. No new exit code is added.
 
-**D5. Old-reader safety (maintainer decision).** A pre-v59 reader drops the
-key without error, so it would read a partial snapshot as complete. The
-proposal is to rely on the existing version gate, the same mechanism v42 used
-for the envelope change. The maintainer must decide whether v59 should also
-raise `_MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION`, which would make an old
-reader refuse a v59 document outright. Hard rejection is the safer choice, and
-it is a visible behaviour change for anyone on an old build.
+**D5. Old-reader safety.** A pre-v59 reader drops the key without error, so
+it would read a partial snapshot as complete. The bump relies on the existing
+version gate, the same mechanism v42 used for the envelope change. It does not
+raise `_MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION`, so an old reader is not
+refused outright; hard rejection was the stricter option and would be a
+visible behaviour change for anyone on an old build.
 
 ## Migration and compatibility
 
 - Schema v58 to v59. The bump is shared with ADR-080 (the advanced-DWARF
   status) so that one reader-compatibility decision covers both fields.
 - No default, exit code, CLI flag or report field changes with this ADR.
-  D4 changes a coverage row and is listed for review because it touches
-  scope completeness.
+  D4 changes a coverage row because it touches scope completeness.
 - A stored snapshot written before v59 is read as `unrecorded`. It is not
   re-classified. Re-dumping it with the current build gives the same
   `complete`/`failed` the dump already produces.
@@ -112,7 +109,7 @@ it is a visible behaviour change for anyone on an old build.
 - Whether `dump` should keep accepting a binary with a partial read rather
   than rejecting it. That is a behaviour choice and is out of scope here.
 
-## Verification plan (once accepted)
+## Verification plan
 
 - A regression test per platform: a stored block with `export_read` set to
   each of the three values reads as the matching fact, and a v58 block reads

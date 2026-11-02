@@ -249,11 +249,12 @@ See "Landed in Phase 1" below.
   `indexes/index.sqlite` layout slot stays reserved.
 - **A2.5** **Measured**: peak RSS for a project comparison no longer scales
   with the total decoded size of the package.
-  **Decision (2026-11-02, maintainer): A2.5 is recorded as met for
-  member count, and the streaming parse is deferred.** Release fan-out
-  peak memory does not grow with the number of members: members load one
-  pair at a time. The peak is bounded by the largest member, at about 8x
-  that member's decoded size. The element-level streaming decode of
+  **Decision (2026-11-02, maintainer): the target is that release fan-out
+  peak memory does not grow with the number of members, bounded by the
+  largest member (about 8x its decoded size); the streaming parse is
+  deferred.** Not yet met on main: the re-measurement below still shows
+  304/498/611 MiB at N=1/4/8, from per-member retention. Holding the
+  contract type graph packed (in review) is the change meant to meet it. The element-level streaming decode of
   `declarations` (estimated ~360 -> ~180 MiB peak on a 140 MiB snapshot,
   table below) is deferred as a separate future item, not part of A2.5.
   Per-section parse measurements (2026-11-02): synthetic

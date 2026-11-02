@@ -74,13 +74,24 @@ def _hinted(text: str) -> bool:
 
 def _may_hold(graph: Any) -> bool:
     """Whether any node or edge of *graph* can spell a marker -- a cheap
-    pre-check, so the common marker-free graph is never re-encoded. An
-    entity's ``attrs`` mirror its merged facts', so facts need no scan."""
+    pre-check, so the common marker-free graph is never re-encoded. Retained
+    ``facts`` are scanned too: a fact can keep a spelling its entity's
+    resolved ``attrs`` no longer show."""
     for node in getattr(graph, "nodes", ()):
-        if _hinted(node.id) or _hinted(node.label) or _hinted(str(node.attrs)):
+        if (
+            _hinted(node.id)
+            or _hinted(node.label)
+            or _hinted(str(node.attrs))
+            or _hinted(str(getattr(node, "facts", "")))
+        ):
             return True
     for edge in getattr(graph, "edges", ()):
-        if _hinted(edge.src) or _hinted(edge.dst) or _hinted(str(edge.attrs)):
+        if (
+            _hinted(edge.src)
+            or _hinted(edge.dst)
+            or _hinted(str(edge.attrs))
+            or _hinted(str(getattr(edge, "facts", "")))
+        ):
             return True
     return _hinted(str(getattr(graph, "identity_aliases", "")))
 
