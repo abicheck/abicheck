@@ -37,6 +37,24 @@
       "attrs": {},
       "confidence": "unknown",
       "conflicts": [],
+      "dst": "decl://_ZN4demo6detail6helperEl",
+      "edge": "DECL_CALLS_DECL",
+      "facts": [
+        {
+          "attrs": {},
+          "confidence": "unknown",
+          "producer": "source_edges"
+        }
+      ],
+      "occurrences": [],
+      "provenance": "source_edges",
+      "resolved": {},
+      "src": "decl://_ZN4demo7processEv"
+    },
+    {
+      "attrs": {},
+      "confidence": "unknown",
+      "conflicts": [],
       "dst": "decl://_ZN4demo7processEv",
       "edge": "SOURCE_DECLARES",
       "facts": [
@@ -68,24 +86,6 @@
       "provenance": "source_abi",
       "resolved": {},
       "src": "header://include/demo/detail.h"
-    },
-    {
-      "attrs": {},
-      "confidence": "unknown",
-      "conflicts": [],
-      "dst": "decl://_ZN4demo6detail6helperEl",
-      "edge": "DECL_CALLS_DECL",
-      "facts": [
-        {
-          "attrs": {},
-          "confidence": "unknown",
-          "producer": "source_edges"
-        }
-      ],
-      "occurrences": [],
-      "provenance": "source_edges",
-      "resolved": {},
-      "src": "decl://_ZN4demo7processEv"
     }
   ],
   "external_graph_refs": [],
@@ -116,31 +116,31 @@
   "nodes": [
     {
       "attrs": {
-        "build_system": "generic",
-        "kind": "shared_library",
-        "visibility": "unknown"
+        "consumer_compiled_body": true,
+        "decl_kind": "function",
+        "visibility": "private_header"
       },
       "confidence": "unknown",
       "conflicts": [],
       "facts": [
         {
           "attrs": {
-            "build_system": "generic",
-            "kind": "shared_library",
-            "visibility": "unknown"
+            "consumer_compiled_body": true,
+            "decl_kind": "function",
+            "visibility": "private_header"
           },
           "confidence": "unknown",
-          "producer": "build_evidence"
+          "producer": "source_abi"
         }
       ],
-      "id": "libdemo",
-      "kind": "target",
-      "label": "demo",
-      "provenance": "build_evidence",
+      "id": "decl://_ZN4demo6detail6helperEl",
+      "kind": "source_decl",
+      "label": "demo::detail::helper",
+      "provenance": "source_abi",
       "resolved": {
-        "build_system": "generic",
-        "kind": "shared_library",
-        "visibility": "unknown"
+        "consumer_compiled_body": true,
+        "decl_kind": "function",
+        "visibility": "private_header"
       }
     },
     {
@@ -197,35 +197,6 @@
     },
     {
       "attrs": {
-        "consumer_compiled_body": true,
-        "decl_kind": "function",
-        "visibility": "private_header"
-      },
-      "confidence": "unknown",
-      "conflicts": [],
-      "facts": [
-        {
-          "attrs": {
-            "consumer_compiled_body": true,
-            "decl_kind": "function",
-            "visibility": "private_header"
-          },
-          "confidence": "unknown",
-          "producer": "source_abi"
-        }
-      ],
-      "id": "decl://_ZN4demo6detail6helperEl",
-      "kind": "source_decl",
-      "label": "demo::detail::helper",
-      "provenance": "source_abi",
-      "resolved": {
-        "consumer_compiled_body": true,
-        "decl_kind": "function",
-        "visibility": "private_header"
-      }
-    },
-    {
-      "attrs": {
         "origin": "UNKNOWN"
       },
       "confidence": "unknown",
@@ -245,6 +216,35 @@
       "provenance": "source_abi",
       "resolved": {
         "origin": "UNKNOWN"
+      }
+    },
+    {
+      "attrs": {
+        "build_system": "generic",
+        "kind": "shared_library",
+        "visibility": "unknown"
+      },
+      "confidence": "unknown",
+      "conflicts": [],
+      "facts": [
+        {
+          "attrs": {
+            "build_system": "generic",
+            "kind": "shared_library",
+            "visibility": "unknown"
+          },
+          "confidence": "unknown",
+          "producer": "build_evidence"
+        }
+      ],
+      "id": "libdemo",
+      "kind": "target",
+      "label": "demo",
+      "provenance": "build_evidence",
+      "resolved": {
+        "build_system": "generic",
+        "kind": "shared_library",
+        "visibility": "unknown"
       }
     }
   ],

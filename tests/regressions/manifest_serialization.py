@@ -146,6 +146,32 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
         },
     ),
     BugClass(
+        id="serialization.stored_bytes_depend_on_producer_iteration_order",
+        invariant=(
+            "A snapshot's stored bytes are a function of its content only, "
+            "never of the order the producer happened to insert records in: "
+            "every row list an encoder writes (graph nodes and edges, and "
+            "the interner indices derived from them) is emitted in a "
+            "canonical order keyed by a unique identity, so dumping the same "
+            "input in separate interpreters (different PYTHONHASHSEED, cwd) "
+            "with SOURCE_DATE_EPOCH pinned yields identical bytes. The "
+            "oracle is the encoding of the same multiset inserted in sorted "
+            "order, over every insertion permutation, plus a cross-process "
+            "dump of a compiled corpus -- not a same-process round trip, "
+            "which cannot see hash-seed-dependent order."
+        ),
+        # Escape history: #1335's cross-process A/B measurement saw
+        # `surface_graph.nodes` reorder between two dumps of one library;
+        # #1542 recorded it as a known gap; #1905 fixed it.
+        fixed_by=(1335, 1542, 1905),
+        seed_tests=("tests/test_snapshot_byte_reproducibility.py",),
+        axes={
+            "producer_order": ("sorted", "permuted"),
+            "process": ("same", "separate_hash_seed"),
+            "rows": ("graph_nodes", "graph_edges"),
+        },
+    ),
+    BugClass(
         id="storage.short_decode_mistaken_for_complete_decode",
         invariant=(
             "A bounded read over a compressed/streamed source must never "

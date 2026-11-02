@@ -203,4 +203,15 @@ def test_decode_encode_equals_the_graph_without_its_projections(
     expected = SourceGraphSummary.from_dict(
         json.loads(json.dumps(stored.to_document()["surface_graph"]))
     )
-    assert decode_graph_table(payload).to_dict() == expected.to_dict()
+    # Row order is canonical on the wire (sorted by node id / edge relation
+    # key, test_snapshot_byte_reproducibility.py), not insertion order.
+    assert _row_order_free(decode_graph_table(payload).to_dict()) == _row_order_free(
+        expected.to_dict()
+    )
+
+
+def _row_order_free(doc: dict[str, Any]) -> dict[str, Any]:
+    out = dict(doc)
+    out["nodes"] = sorted(doc["nodes"], key=lambda n: n["id"])
+    out["edges"] = sorted(doc["edges"], key=lambda e: json.dumps(e, sort_keys=True))
+    return out

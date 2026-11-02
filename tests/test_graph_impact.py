@@ -59,13 +59,20 @@ def _graph() -> SourceGraphSummary:
     return g.finalize()
 
 
+def _chain(g: SourceGraphSummary) -> list[GraphEdge]:
+    # The pub -> helper -> Internal chain, in path order (finalize() stores
+    # edges in canonical relation-key order, not insertion order).
+    by_src = {e.src: e for e in g.edges}
+    return [by_src["decl://pub"], by_src["decl://helper"]]
+
+
 def test_structured_proof_path_empty_for_empty_path() -> None:
     assert structured_proof_path(_graph(), []) == []
 
 
 def test_structured_proof_path_alternates_node_edge_node() -> None:
     g = _graph()
-    path = [e for e in g.edges]
+    path = _chain(g)
     out = structured_proof_path(g, path)
     types = [entry["type"] for entry in out]
     assert types == ["node", "edge", "node", "edge", "node"]
@@ -79,7 +86,7 @@ def test_is_direct_path() -> None:
     g = _graph()
     assert is_direct_path([]) is True
     assert is_direct_path([g.edges[0]]) is True
-    assert is_direct_path(list(g.edges)) is False
+    assert is_direct_path(_chain(g)) is False
 
 
 def test_attach_impact_metadata_sets_fields_in_place() -> None:
@@ -90,7 +97,7 @@ def test_attach_impact_metadata_sets_fields_in_place() -> None:
         description="x",
     )
     attach_impact_metadata(
-        change, affected_public_roots=["pub"], path=list(g.edges), graph=g
+        change, affected_public_roots=["pub"], path=_chain(g), graph=g
     )
     assert change.affected_public_roots == ["pub"]
     assert change.impact_proof_path is not None
@@ -455,7 +462,7 @@ class TestPathOccurrenceId:
             description="x",
         )
         attach_impact_metadata(
-            change, affected_public_roots=["pub"], path=list(g.edges), graph=g
+            change, affected_public_roots=["pub"], path=_chain(g), graph=g
         )
         assert change.impact_occurrence_id is None
 

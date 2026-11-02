@@ -11,7 +11,19 @@ generated: false
 
 Index: [Known gaps](../known-gaps.md)
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** unverified: no cross-process determinism check was run. The entry says the producer of the surface_graph.nodes ordering drift was never identified.
+**Status (2026-10-31): NARROWED.** `SourceGraphSummary.finalize()` (live and decoded graphs alike) and `encode_graph_table` now order node rows
+sorted by node id and edge rows sorted by `relation_key()` (both unique), so
+the interner indices and rows no longer follow in-memory insertion order. The
+producer of the insertion-order drift is still unidentified, but it can no
+longer reach the stored bytes. `tests/test_snapshot_byte_reproducibility.py`
+(bug class `serialization.stored_bytes_depend_on_producer_iteration_order`, family F9)
+checks every insertion permutation in-process and dumps a compiled corpus in
+three processes (`PYTHONHASHSEED` 1/4242/random, different cwd,
+`SOURCE_DATE_EPOCH` pinned) expecting identical bytes. **Residual:** the
+cross-process check runs on a generated ~300-entity corpus, not a
+100k-node library like oneDAL; a different section with the same defect
+would only be caught at that scale. `created_at` differs by design unless
+`SOURCE_DATE_EPOCH` is set.
 
 
 **What was observed.** Dumping the *same* library twice, with the *same*
