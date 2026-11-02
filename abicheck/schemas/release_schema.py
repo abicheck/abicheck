@@ -320,4 +320,8 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       because the CLI did not verify it. Same shape as the compare
 #:       report's schema 6.8 block (``model/baseline_provenance.py``); absent
 #:       when the run was given none. Additive.
-RELEASE_SCHEMA_VERSION = "2.8"
+#: - ``3.0`` (BREAKING) drops the always-``0``
+#:       ``exit.crosscheck_promotion_contribution`` key and the
+#:       ``promoted_crosscheck`` exit reason with the retired ``--crosscheck``
+#:       promotion; same change as the compare report's schema 7.0.
+RELEASE_SCHEMA_VERSION = "3.0"

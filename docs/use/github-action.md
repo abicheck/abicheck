@@ -542,7 +542,7 @@ library individually until package component inventories land) and
 `risk-rules` (the risk-driven `auto` depth escalation — pin `depth`
 explicitly). The former `crosscheck` input was removed from the Action
 entirely: every cross-source check already reaches `compare` as an ordinary
-finding, so use `.abicheck.yml`'s `policy.overrides.<CHANGE_KIND>: error` via
+finding, so use `.abicheck.yml`'s `policy.overrides.<CHANGE_KIND>: warn` via
 `build-config`.
 
 ## More usage recipes

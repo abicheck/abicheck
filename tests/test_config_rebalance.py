@@ -1175,7 +1175,6 @@ class TestConfigStrictness:
                 "suppression": {"strict": True},
                 # Keys parsed by sibling modules must not trip the check.
                 "risk_rules": {},
-                "crosschecks": {},
             }
         )
         assert [w for w in recwarn.list if issubclass(w.category, UserWarning)] == []

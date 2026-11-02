@@ -31,9 +31,10 @@ are capturing a reusable snapshot instead of comparing.
     passages below still explain `scan`'s own historical behavior for
     context, clearly marked as such.
 
-**No capability on this page is still `scan`-only.** Opting a specific
-cross-source check into gating is `.abicheck.yml`'s
-`policy.overrides.<CHANGE_KIND>: error`; the former `--crosscheck KEY=error`
+**No capability on this page is still `scan`-only.** Gating a specific
+cross-source check is `.abicheck.yml`'s `policy.overrides.<CHANGE_KIND>:`
+`break` or `warn`; for `compare --no-baseline` the audit gate also needs a
+`--severity-preset` other than `info-only`. The former `--crosscheck KEY=error`
 promotion was removed outright.
 
 Two earlier gaps are both gone, for opposite reasons.

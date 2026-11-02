@@ -8,4 +8,4 @@
   `promoted_crosscheck` reason (report schema **7.0**, a major bump). Every
   cross-source check already reaches `compare` as an ordinary finding:
   control one check's severity with `.abicheck.yml`'s
-  `policy.overrides.<CHANGE_KIND>: error`.
+  `policy.overrides.<CHANGE_KIND>: warn`.

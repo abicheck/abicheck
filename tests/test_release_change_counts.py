@@ -160,7 +160,7 @@ def test_counts_equal_the_complete_finding_lists(tmp_path: Path, members) -> Non
         _write_side(tmp_path / "old", 0, members),
         _write_side(tmp_path / "new", 1, members),
     )
-    assert doc["release_schema_version"] == RELEASE_SCHEMA_VERSION == "2.8"
+    assert doc["release_schema_version"] == RELEASE_SCHEMA_VERSION == "3.0"
     total: Counter[tuple[str, str]] = Counter()
     for lib in doc["libraries"]:
         own = _registry_counts(lib.get("findings", []))

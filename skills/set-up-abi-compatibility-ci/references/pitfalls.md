@@ -80,7 +80,7 @@ fix it in place rather than adding a parallel workflow. Common findings:
 
 - `crosscheck:` — removed from the Action; GitHub warns about an unexpected
   input and ignores it. Gate one cross-source check with `.abicheck.yml`'s
-  `policy.overrides.<CHANGE_KIND>: error` instead.
+  `policy.overrides.<CHANGE_KIND>: warn` instead.
 - `mode: scan`, `against:`, `audit:`, `estimate:` — retired in
   0.6 and now hard errors; migrate to `mode: compare` per
   [the Action migration notes](https://abicheck.github.io/abicheck/use/github-action/#migrating-from-mode-scan).
