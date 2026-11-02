@@ -30,7 +30,6 @@ from abicheck.storage.sectioned_document import (
     is_sectioned_document,
 )
 from abicheck.storage.snapshot_encode import (
-    sectioned_document_for_write,
     snapshot_content_digest,
     snapshot_to_dict,
 )
@@ -182,7 +181,7 @@ def test_split_decode_equals_unrestricted_decode(
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         split = load_snapshot(path)
-        resaved = sectioned_document_for_write(split)
+        resaved = json.loads(snapshot_to_json(split))
         split_sectioned = snapshot_from_dict(json.loads(json.dumps(resaved)))
         monkeypatch.setattr(snapshot_codec, "view_for", lambda d, _step: dict(d))
         whole = load_snapshot(path)

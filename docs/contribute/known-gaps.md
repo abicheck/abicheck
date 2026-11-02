@@ -480,12 +480,12 @@ per-item status in the
 
 ### Performance
 
-#### Snapshot write memory
+#### Snapshot write peak
 
-`perf` — Writing a snapshot still builds the whole encoded document tree (A2.2's remaining half).
+`perf` — Writing a snapshot builds the largest section's encoded tree whole (A2.2's record-level remainder).
 
-- [Snapshot write still builds the whole document tree](known-gaps/snapshot-write-still-builds-the-whole-document-tree.md)  
-  **Status (2026-10-31): OPEN.** The text stage streams. The tree build is the whole remaining write peak (39.8 of 39.9 MiB on a 23.9 MB libstdc++ dump).
+- [Snapshot write still builds the largest section's tree whole](known-gaps/snapshot-write-still-builds-the-whole-document-tree.md)  
+  **Status (2026-10-31): NARROWED.** Sections are encoded and written one at a time (550 -> 286 MiB on a two-section synthetic); a binary-only dump is one section, so its peak barely moves (39.8 -> 37.1 MiB).
 
 #### Bundle and multi-library memory
 

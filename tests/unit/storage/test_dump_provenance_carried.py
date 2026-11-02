@@ -9,15 +9,14 @@ to the document, and a non-object one is refused rather than dropped.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from abicheck.errors import SnapshotError
 from abicheck.model import AbiSnapshot
 from abicheck.serialization import snapshot_from_dict
-from abicheck.storage.snapshot_encode import (
-    sectioned_document_for_write,
-    snapshot_to_dict,
-)
+from abicheck.storage.snapshot_encode import snapshot_to_dict, snapshot_to_json
 
 _PROVENANCE = {
     "requested_depth": "headers",
@@ -43,7 +42,7 @@ def test_present_provenance_round_trips_through_the_document(encode: str) -> Non
     doc = (
         snapshot_to_dict(snap)
         if encode == "flat"
-        else sectioned_document_for_write(snap)
+        else json.loads(snapshot_to_json(snap))
     )
     loaded = snapshot_from_dict(doc)
     assert loaded.dump_provenance == _PROVENANCE

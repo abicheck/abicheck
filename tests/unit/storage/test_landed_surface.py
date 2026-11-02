@@ -101,6 +101,8 @@ _INTERNAL_MODULES = (
     "abicheck.storage.wire_record_extensions",
     "abicheck.storage.snapshot_lazy_decode",
     "abicheck.storage.transport_digest",
+    "abicheck.storage.snapshot_section_stream",
+    "abicheck.storage.snapshot_record_compaction",
 )
 
 

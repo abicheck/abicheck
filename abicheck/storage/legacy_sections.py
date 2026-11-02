@@ -244,6 +244,12 @@ _PROMOTED_KEY_SECTIONS: Mapping[str, str] = {
 }
 
 
+def section_fields(section_kind: str) -> tuple[str, ...]:
+    """The flat-document keys legacy *section_kind* owns -- what a
+    per-section encode (`snapshot_section_stream`) asks the encoder for."""
+    return _SECTION_FIELDS[section_kind]
+
+
 def section_of_field(key: str) -> str | None:
     """The section kind owning flat-document *key*, or ``None`` for a key no
     section owns (``schema_version``, an unknown future field). The one

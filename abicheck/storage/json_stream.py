@@ -55,7 +55,21 @@ from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-__all__ = ["LazyItems", "PreEncoded", "iter_json_compact", "iter_json_indented"]
+__all__ = ["OMIT", "LazyItems", "PreEncoded", "iter_json_compact", "iter_json_indented"]
+
+
+class _Omit:
+    """The type of :data:`OMIT`."""
+
+    def __repr__(self) -> str:
+        return "OMIT"
+
+
+#: Returned by a :class:`LazyItems` ``produce`` for a key that turns out to
+#: have no member: the key is skipped as if it had never been listed. Lets a
+#: producer decide presence while encoding (a section whose encode came out
+#: empty) instead of encoding everything up front to learn it.
+OMIT: Any = _Omit()
 
 
 @dataclass(frozen=True)
@@ -65,7 +79,7 @@ class LazyItems:
     *keys* fixes the member order (so the document stays deterministic and
     matches what an eager ``dict`` would have produced), and *produce* is
     called exactly once per key, in that order, at the moment that member is
-    encoded. The value is dropped before the next one is produced, which is
+    encoded; a key it answers :data:`OMIT` for is left out. The value is dropped before the next one is produced, which is
     the entire point: the peak holds one member, not all of them.
 
     A frozen dataclass rather than a ``Mapping`` subclass on purpose --
@@ -161,16 +175,6 @@ def _shallow(obj: dict[str, Any] | list[Any], depth: int) -> bool:
     return True
 
 
-def _descend_first(value: Any) -> bool:
-    """Whether a wide container's element is streamed on its own rather than
-    joining a batch: a :class:`LazyItems` (which ``json.dumps`` cannot
-    encode, and must not materialise) or a container wide enough to be
-    batched itself."""
-    return isinstance(value, (LazyItems, PreEncoded)) or (
-        type(value) in (dict, list) and len(value) > _DESCEND_LEN
-    )
-
-
 def _batch_body(fragment: str, pad: str) -> str:
     """The elements of a whole-container ``json.dumps`` fragment, without
     its brackets, re-indented one level below *pad*.
@@ -201,7 +205,12 @@ def _iter_container(
     while i < n:
         item = items[i]
         value = item[1] if is_dict else item
-        if _descend_first(value):
+        # Streamed on its own rather than batched: a LazyItems/PreEncoded
+        # (json.dumps cannot encode it) or a container wide enough to batch itself.
+        # Inline, since it runs once per element of every wide container.
+        if isinstance(value, (LazyItems, PreEncoded)) or (
+            type(value) in (dict, list) and len(value) > _DESCEND_LEN
+        ):
             head = ("" if first else ",") + "\n" + pad + step
             if is_dict:
                 head += json.dumps(item[0]) + ": "
@@ -213,7 +222,10 @@ def _iter_container(
         stop = i + 1
         while stop < n and stop - i < batch:
             nxt = items[stop]
-            if _descend_first(nxt[1] if is_dict else nxt):
+            nv = nxt[1] if is_dict else nxt
+            if isinstance(nv, (LazyItems, PreEncoded)) or (
+                type(nv) in (dict, list) and len(nv) > _DESCEND_LEN
+            ):
                 break
             stop += 1
         chunk = items[i:stop]
@@ -267,20 +279,20 @@ def iter_json_indented(obj: Any, *, indent: int = 2, _level: int = 0) -> Iterato
         return
 
     if isinstance(obj, LazyItems):
-        keys = list(obj.keys)
-        if not keys:
-            yield "{}"
-            return
-        yield "{"
-        for i, key in enumerate(keys):
-            yield ("," if i else "") + "\n" + inner_pad + json.dumps(key) + ": "
+        emitted = 0
+        for key in list(obj.keys):
             value = obj.produce(key)
+            if value is OMIT:
+                continue
+            head = "{" if not emitted else ","
+            yield head + "\n" + inner_pad + json.dumps(key) + ": "
             yield from iter_json_indented(value, indent=indent, _level=_level + 1)
             # Drop the member before the next one is produced. Without this
             # the generator's frame keeps the last member alive across the
             # production of the next, i.e. two resident instead of one.
             del value
-        yield "\n" + pad + "}"
+            emitted += 1
+        yield "\n" + pad + "}" if emitted else "{}"
         return
 
     if type(obj) is dict or type(obj) is list:
@@ -333,6 +345,18 @@ def iter_json_compact(obj: Any, *, depth: int = 2) -> Iterator[str]:
     whole document's. Compact output has no indentation to re-pad, which is
     what keeps this much simpler than :func:`iter_json_indented`.
     """
+    if isinstance(obj, LazyItems):
+        emitted = 0
+        for key in list(obj.keys):
+            value = obj.produce(key)
+            if value is OMIT:
+                continue
+            yield ("{" if not emitted else ",") + json.dumps(key) + ":"
+            yield from iter_json_compact(value, depth=max(depth - 1, 1))
+            del value
+            emitted += 1
+        yield "}" if emitted else "{}"
+        return
     kind = type(obj)
     if depth <= 0 or kind not in (dict, list) or not obj:
         yield json.dumps(obj, separators=_COMPACT_SEPARATORS)

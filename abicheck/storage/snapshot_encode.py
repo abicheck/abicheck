@@ -27,30 +27,28 @@ import copy
 import datetime
 import enum
 import hashlib
-import json
 import operator
 import pathlib
 from dataclasses import fields as dataclass_fields, is_dataclass
 from typing import Any
 
-from ..model import AbiSnapshot, FactStatus
+from ..model import AbiSnapshot
 from ..model.declaration_store import STORE_ATTRIBUTE
-from ..model.dwarf_facts import AdvancedExtractionStatus
 from ..model.snapshot_reliability import FACT_FAMILIES, flag_name
 from .acyclic_json import gc_paused
-from .dwarf_layout_facts import drop_uncaptured_dwarf_layout_facts
 from .entity_id_codec import encode_entity_ids, encode_sidecar_entity_ids
 from .enum_codec import encode_platform_enums
 from .extraction_scope_codec import encode_extraction_scope
 from .fact_codec import encode_fact_fields
 from .generation_migrations import FACT_GENERATIONS_KEY, encode_fact_generations
-from .sectioned_document import to_sectioned_document
+from .json_stream import LazyItems
 from .semantic_ir_codec import encode_semantic_ir
+from .snapshot_record_compaction import compact_records
 from .snapshot_runtime_only import RUNTIME_ONLY_SNAPSHOT_FIELDS
 from .snapshot_schema_versions import SCHEMA_VERSION
-from .surface_graph_codec import encode_surface_graph
+from .snapshot_section_stream import sectioned_document_stream
+from .surface_graph_codec import drop_shared_source_graph, encode_surface_graph
 from .versioning import this_build_generations
-from .wire_extensions import extensions_of, refuse_unwritable_extensions
 from .wire_field_names import wire_field_names
 
 # Leaf types that are immutable, so the "detached container" contract
@@ -288,7 +286,10 @@ def _sorted_encoder(cls: type) -> Any:
 
 
 def _encode_dataclass_skipping(
-    obj: Any, skip: frozenset[str], encode: Any = _encode_value
+    obj: Any,
+    skip: frozenset[str],
+    encode: Any = _encode_value,
+    only: frozenset[str] | None = None,
 ) -> dict[str, Any]:
     """:func:`_encode_value` over *obj*'s fields, omitting the names in *skip*.
 
@@ -304,7 +305,7 @@ def _encode_dataclass_skipping(
     return {
         f.name: encode(getattr(obj, f.name))
         for f in dataclass_fields(obj)
-        if f.name not in skip
+        if f.name not in skip and (only is None or f.name in only)
     }
 
 
@@ -336,46 +337,6 @@ _SNAPSHOT_SKIP_FIELDS = frozenset(
 )
 
 
-#: ``DwarfMetadata``'s ODR-conflict fields (schema v51). Written only when
-#: the producer looked for conflicts (or found one), so a snapshot whose
-#: debug info was never walked for them -- BTF/CTF/PDB, a symbols-only dump
-#: -- encodes byte-identically to v50.
-_DWARF_ODR_KEYS = ("struct_odr_conflicts", "enum_odr_conflicts")
-
-
-def _compact_elf_symbols(d: dict[str, Any]) -> None:
-    """Drop the per-symbol keys a decoder restores on its own.
-
-    v56: ``ElfSymbol.code_hash`` is written only when computed, so a
-    snapshot without hashes encodes exactly as v55. v58:
-    ``version_binding`` is written only where ``version`` cannot say it --
-    ``unknown`` is the decoder's default and ``named`` is implied by a
-    non-empty ``version`` (``snapshot_platform_blocks.elf_symbol_binding``).
-    """
-    elf = d.get("elf")
-    if not isinstance(elf, dict):
-        return
-    for sym in elf.get("symbols") or ():
-        if not isinstance(sym, dict):
-            continue
-        if not sym.get("code_hash"):
-            sym.pop("code_hash", None)
-        binding = sym.get("version_binding")
-        if binding == "unknown" or (binding == "named" and sym.get("version")):
-            sym.pop("version_binding", None)
-
-
-def _drop_unobserved_odr_conflicts(d: dict[str, Any]) -> None:
-    dwarf = d.get("dwarf")
-    if not isinstance(dwarf, dict):
-        return
-    for key in _DWARF_ODR_KEYS:
-        if not dwarf.get(key):
-            dwarf.pop(key, None)
-    if not dwarf.get("odr_conflicts_observed"):
-        dwarf.pop("odr_conflicts_observed", None)
-
-
 #: Where each declaration kind sat among ``AbiSnapshot``'s fields before the
 #: kinds moved into ``semantic_ir.declarations`` (ADR-063 Phase 10): each is
 #: written right after the named key, so the encoded document -- and every
@@ -391,83 +352,21 @@ _DECLARATION_KEY_ANCHORS: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 
-#: Schema v54's per-slot resolved type identities, written only when a
-#: producer captured them: ``None`` ("not captured") is the default for every
-#: producer but castxml, so omitting it keeps a snapshot from any other
-#: producer -- and every digest over one -- byte-identical to v53. The decoder
-#: reads the missing key as ``NOT_COLLECTED`` (``fact_codec.
-#: validated_identities``).
-_TYPE_IDENTITY_KEY = "type_identities_fact"
-_RETURN_TYPE_IDENTITY_KEY = "return_type_identities_fact"
-_SPECIALIZATION_KEY = "specialization_declared_fact"
-_TEMPLATE_PARAM_DEFAULTS_KEY = "template_param_defaults_fact"
-_EXPLICIT_INSTANTIATION_KEY = "explicit_instantiation_fact"
-#: Schema v69: a fundamental-typed slot's ABI fact, written only where a producer
-#: determined it (model/abi_fundamental.py).
-_TYPE_ABI_KEY = "type_abi_fact"
-_RETURN_TYPE_ABI_KEY = "return_type_abi_fact"
-
-
-def _encode_advanced_extraction_status(d: dict[str, Any]) -> None:
-    """``dwarf_advanced.extraction`` (schema v68, ADR-080) is written only when
-    the extraction recorded an outcome. ``unrecorded`` -- a hand-built object,
-    or a BTF/CTF/PDB producer -- writes no key, so those documents encode
-    exactly as v67 did and a missing key decodes back to ``unrecorded``.
-    """
-    dwarf_advanced = d.get("dwarf_advanced")
-    if not isinstance(dwarf_advanced, dict):
-        return
-    if dwarf_advanced.get("extraction") in (None, AdvancedExtractionStatus.UNRECORDED):
-        dwarf_advanced.pop("extraction", None)
-
-
-def _drop_uncaptured(entry: dict[str, Any], key: str) -> None:
-    """Omit an uncaptured slot fact: ``None``, or a bare ``NOT_COLLECTED``
-    (no value, diagnostics or producer) -- which is exactly what the decoder
-    reads an absent key back as, so omitting it keeps a load/save round trip
-    byte-stable instead of materialising the decoder's answer on re-save."""
-    if key not in entry:
-        return
-    fact = entry[key]
-    if fact is None or (
-        fact.get("status") in (FactStatus.NOT_COLLECTED, FactStatus.NOT_COLLECTED.value)
-        and fact.get("value") is None
-        and not fact.get("diagnostics")
-        and fact.get("producer") is None
-    ):
-        del entry[key]
-
-
-def _drop_uncaptured_type_identities(d: dict[str, Any]) -> None:
-    for fn in d.get("functions", ()):
-        _drop_uncaptured(fn, _RETURN_TYPE_IDENTITY_KEY)
-        # Schema v64: written only when a producer recorded the defaults.
-        _drop_uncaptured(fn, _TEMPLATE_PARAM_DEFAULTS_KEY)
-        # Schema v65: written only when the clang text pass recorded the kind.
-        _drop_uncaptured(fn, _EXPLICIT_INSTANTIATION_KEY)
-        _drop_uncaptured(fn, _RETURN_TYPE_ABI_KEY)
-        for param in fn.get("params", ()):
-            _drop_uncaptured(param, _TYPE_IDENTITY_KEY)
-            _drop_uncaptured(param, _TYPE_ABI_KEY)
-    for var in d.get("variables", ()):
-        _drop_uncaptured(var, _TYPE_IDENTITY_KEY)
-        _drop_uncaptured(var, _EXPLICIT_INSTANTIATION_KEY)
-        _drop_uncaptured(var, _TYPE_ABI_KEY)
-    for rec in d.get("types", ()):
-        for fld in rec.get("fields", ()):
-            _drop_uncaptured(fld, _TYPE_IDENTITY_KEY)
-            _drop_uncaptured(fld, _TYPE_ABI_KEY)
-        # Schema v61: written only when captured, so a record from any other
-        # producer (or no specialization) encodes exactly as v60.
-        _drop_uncaptured(rec, _SPECIALIZATION_KEY)
-        # Schema v62: written only when a producer recorded the defaults.
-        _drop_uncaptured(rec, _TEMPLATE_PARAM_DEFAULTS_KEY)
-
-
 def _with_declarations(
-    d: dict[str, Any], snap: AbiSnapshot, encode: Any = _encode_value
+    d: dict[str, Any],
+    snap: AbiSnapshot,
+    encode: Any = _encode_value,
+    only: frozenset[str] | None = None,
 ) -> dict[str, Any]:
     decls = snap.declarations
+    if only is not None:
+        # A per-section encode: key order is canonicalized by the section
+        # packaging, so the kinds asked for need no anchor.
+        for _anchor, kinds in _DECLARATION_KEY_ANCHORS:
+            for kind in kinds:
+                if kind in only:
+                    d[kind] = encode(getattr(decls, STORE_ATTRIBUTE[kind]))
+        return d
     after = {anchor: kinds for anchor, kinds in _DECLARATION_KEY_ANCHORS}
     out: dict[str, Any] = {}
     for key, value in d.items():
@@ -501,12 +400,33 @@ def snapshot_to_dict(snap: AbiSnapshot) -> dict[str, Any]:
     return _snapshot_to_dict(snap, _encode_value)
 
 
-def _snapshot_to_dict(snap: AbiSnapshot, encode: Any) -> dict[str, Any]:
+def _snapshot_to_dict(
+    snap: AbiSnapshot, encode: Any, keys: frozenset[str] | None = None
+) -> dict[str, Any]:
     """`snapshot_to_dict`, walking the model with *encode* --
     :func:`_encode_value`, or :func:`_encode_value_sorted` for a document
-    the write path canonicalizes next."""
+    the write path canonicalizes next.
+
+    *keys* (ADR-062 D12, plan A2.2): encode only these flat-document keys --
+    one section's (`snapshot_section_stream`). Each post-pass below touches
+    only the keys it reads and writes, so a restricted encode yields exactly
+    the whole encode's values for *keys*; a pass none of whose outputs is
+    wanted is skipped. ``tests/test_snapshot_section_stream.py`` proves the
+    streamed bytes equal the whole-document encoder's."""
+
+    def wanted(*names: str) -> bool:
+        return keys is None or any(n in keys for n in names)
+
+    only = None
+    if keys is not None:
+        only = keys | (
+            {"stale_fact_families"} if keys & _STALE_FLAG_NAMES else frozenset()
+        )
     d = _with_declarations(
-        _encode_dataclass_skipping(snap, _SNAPSHOT_SKIP_FIELDS, encode), snap, encode
+        _encode_dataclass_skipping(snap, _SNAPSHOT_SKIP_FIELDS, encode, only),
+        snap,
+        encode,
+        keys,
     )
     # Runtime-only provenance qualifier — never persisted.
     d.pop("from_headers_inferred", None)
@@ -560,11 +480,7 @@ def _snapshot_to_dict(snap: AbiSnapshot, encode: Any) -> dict[str, Any]:
 
     # ElfMetadata/PeMetadata/MachoMetadata enums -> strings (storage/enum_codec.py).
     encode_platform_enums(d)
-    _drop_unobserved_odr_conflicts(d)
-    _encode_advanced_extraction_status(d)
-    _compact_elf_symbols(d)
-    _drop_uncaptured_type_identities(d)
-    drop_uncaptured_dwarf_layout_facts(d)
+    compact_records(d)
 
     # ADR-063 Phase 0 (schema v26): see storage/fact_codec.py.
     encode_fact_fields(d)
@@ -573,9 +489,9 @@ def _snapshot_to_dict(snap: AbiSnapshot, encode: Any) -> dict[str, Any]:
     # (storage/entity_id_codec.py). Sets were already converted to sorted
     # lists by the single walk above -- the former second full-tree
     # `_sets_to_lists(...)` pass over this result is gone.
-    converted: dict[str, Any] = encode_sidecar_entity_ids(
-        encode_entity_ids(d, snap), snap
-    )
+    converted: dict[str, Any] = encode_entity_ids(d, snap)
+    if wanted(*_SIDECAR_KEYS):
+        encode_sidecar_entity_ids(converted, snap)
 
     # BuildMode enums are (str, Enum), so dataclasses.asdict() carries
     # them through as Enum instances rather than plain strings; normalize
@@ -590,7 +506,7 @@ def _snapshot_to_dict(snap: AbiSnapshot, encode: Any) -> dict[str, Any]:
     # The inline embedded BuildSourcePack carries Path/enum/set-bearing nested
     # models asdict() cannot faithfully serialize; replace the raw asdict output
     # with the pack's canonical inline form, or drop the key when nothing was embedded.
-    if snap.build_source is not None:
+    if snap.build_source is not None and wanted("build_source"):
         # The shared header graph is written once, at the top level, by
         # encode_surface_graph(); encoding it here too only to pop it again
         # doubled the graph's encode cost on every save.
@@ -600,9 +516,14 @@ def _snapshot_to_dict(snap: AbiSnapshot, encode: Any) -> dict[str, Any]:
         converted["build_source"] = snap.build_source.to_embedded_dict(
             include_source_graph=not shared
         )
-    encode_surface_graph(converted, snap)  # storage/surface_graph_codec.py
-    encode_semantic_ir(converted, snap)  # storage/semantic_ir_codec.py (v38)
-    encode_extraction_scope(converted, snap)  # storage/extraction_scope_codec.py (v52)
+    if wanted("surface_graph"):
+        encode_surface_graph(converted, snap)  # storage/surface_graph_codec.py
+    else:
+        drop_shared_source_graph(converted, snap)
+    if wanted("semantic_ir", "semantic_ir_conflicts"):
+        encode_semantic_ir(converted, snap)  # storage/semantic_ir_codec.py (v38)
+    if wanted(*_EXTRACTION_SCOPE_KEYS):
+        encode_extraction_scope(converted, snap)  # extraction_scope_codec.py (v52)
     # v54: only the Fact is persisted (its value carries the identifiers; the
     # legacy field is rebuilt from it on load), and an evidence-free
     # not_collected one is omitted, so a snapshot without the index encodes
@@ -616,7 +537,23 @@ def _snapshot_to_dict(snap: AbiSnapshot, encode: Any) -> dict[str, Any]:
     # Placed at top level so loaders can inspect it without parsing the full snapshot.
     converted["schema_version"] = SCHEMA_VERSION
 
+    if keys is not None:
+        return {k: v for k, v in converted.items() if k in keys}
     return converted
+
+
+#: The ``*_facts_reliable`` keys ``stale_fact_families`` is written as.
+_STALE_FLAG_NAMES = frozenset(flag_name(family) for family in FACT_FAMILIES)
+_SIDECAR_KEYS = ("typedef_entity_ids", "constant_entity_ids")
+#: Every key `encode_extraction_scope` reads or writes.
+_EXTRACTION_SCOPE_KEYS = (
+    "functions",
+    "variables",
+    "types",
+    "enums",
+    "extraction_scope",
+    "ownership_without_scope",
+)
 
 
 def snapshot_to_json(snap: AbiSnapshot, indent: int = 2) -> str:
@@ -638,24 +575,22 @@ def snapshot_to_json(snap: AbiSnapshot, indent: int = 2) -> str:
 
 
 def _sectioned_json(snap: AbiSnapshot, indent: int) -> str:
-    return json.dumps(sectioned_document_for_write(snap), indent=indent)
+    # Section by section (storage plan A2.2): the encoded tree of one
+    # section is alive at a time, never the whole document's.
+    from .json_stream import join_json_indented
+
+    return join_json_indented(streamed_sectioned_document(snap), indent=indent)
 
 
-def sectioned_document_for_write(snap: AbiSnapshot) -> dict[str, Any]:
-    """The single-file sectioned document a snapshot write serializes --
-    `snapshot_to_json`'s document before ``json.dumps``, for a writer that
-    streams it instead (`snapshot_codec.write_snapshot`).
-
-    Built from the canonical-shape encoder and packaged sharing its
-    structure, so the result must be serialized and dropped, never mutated
-    or kept; run it under `acyclic_json.gc_paused` for the same reason
-    `snapshot_to_json` does."""
-    refuse_unwritable_extensions(snap)
-    return to_sectioned_document(
-        _snapshot_to_dict(snap, _encode_value_sorted),
-        max_known_schema_version=SCHEMA_VERSION,
-        document_encoded_here=True,
-        extensions=extensions_of(snap),  # ADR-062 D14
+def streamed_sectioned_document(snap: AbiSnapshot) -> LazyItems:
+    """The single-file sectioned document a snapshot write serializes, as a
+    `json_stream.LazyItems` that encodes one section at a time (storage plan
+    A2.2, `snapshot_section_stream`). Serialize it once, under
+    `acyclic_json.gc_paused`."""
+    return sectioned_document_stream(
+        snap,
+        lambda keys: _snapshot_to_dict(snap, _encode_value_sorted, keys),
+        _SNAPSHOT_SKIP_FIELDS,
     )
 
 

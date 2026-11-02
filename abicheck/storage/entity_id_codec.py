@@ -115,8 +115,12 @@ def encode_entity_ids(d: dict[str, Any], snap: AbiSnapshot) -> dict[str, Any]:
     ``getattr(snap, attr_name)``.
     """
     for list_key, attr_name in _DECLARATION_LIST_KEYS:
+        if list_key not in d:
+            # A per-section encode (`snapshot_section_stream`) that did not
+            # ask for this list; a whole-document encode always carries it.
+            continue
         decls = getattr(snap.declarations, attr_name)
-        decl_dicts = d.get(list_key, []) or []
+        decl_dicts = d[list_key] or []
         # Both sides are derived from the same list in the same call
         # (`snapshot_to_dict` builds `d` via `asdict(snap)` before this
         # runs), so a length mismatch means a caller passed a `d`/`snap`

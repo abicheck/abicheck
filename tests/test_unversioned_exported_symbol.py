@@ -551,7 +551,7 @@ def test_no_version_table_means_unversioned_and_no_dynsym_means_unknown():
 
 
 def test_compaction_ignores_a_symbol_that_is_not_an_object():
-    from abicheck.storage.snapshot_encode import _compact_elf_symbols
+    from abicheck.storage.snapshot_record_compaction import _compact_elf_symbols
 
     doc = {"elf": {"symbols": ["junk", {"name": "f", "version_binding": "unknown"}]}}
     _compact_elf_symbols(doc)
