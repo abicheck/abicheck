@@ -143,6 +143,12 @@ class _SectionWriter:
                 return OMIT
             self._written.append(kind)
             return ext.passthrough_sections[kind]
+        if (
+            ext is not None
+            and ext.availability.get(kind, {}).get("status") == "not_collected"
+        ):
+            # Never collected: written absent, as it was read (ADR-062 D15).
+            return OMIT
         section = self._encoded(kind)
         if section is None:
             return OMIT

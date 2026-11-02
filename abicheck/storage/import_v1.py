@@ -521,14 +521,10 @@ def legacy_section_dtos(
             ir_section = semantic_ir_to_dto(ir, conflicts).to_dict()
     section_dtos: list[tuple[str, dict[str, Any]]] = []
     for section_kind, payload in split_legacy_document(legacy_document).items():
-        section_dtos.append(
-            (
-                section_kind,
-                legacy_section_dto_dict(
-                    section_kind, payload, shared=document_encoded_here
-                ),
-            )
+        dto = legacy_section_dto_dict(
+            section_kind, payload, shared=document_encoded_here
         )
+        section_dtos.append((section_kind, dto))
     if ir_section is not None:
         section_dtos.append((SEMANTIC_IR_SECTION_KIND, ir_section))
     return source_schema_version, section_dtos
@@ -543,18 +539,14 @@ def legacy_section_dto_dict(
 
     *shared*: as `legacy_section_dtos`' *document_encoded_here*.
     """
-    # ADR-063 Track 4 (8B): every `LEGACY_SECTION_KINDS` member now has
-    # its own dedicated DTO -- `_LEGACY_SECTION_CODECS` above -- instead
-    # of the generic pass-through; the fallback is what a future,
-    # not-yet-specialized section kind would use.
+    # ADR-063 Track 4 (8B): every `LEGACY_SECTION_KINDS` member has its own
+    # DTO (`_LEGACY_SECTION_CODECS`); the fallback is for a future kind.
     document_codec = _LEGACY_SECTION_DOCUMENT_CODECS.get(section_kind)
     if document_codec is None:
         return legacy_section_to_dto(section_kind, payload).to_dict()
-    # `to_dto_fn(payload).to_dict()` (`_LEGACY_SECTION_CODECS`), minus
-    # the DTO's freeze/thaw copies: `section_dto_dict` returns the
-    # same dict. A codec that can validate without copying
-    # (`GraphSection.validated_document`) skips its own round trip
-    # too, since `section_dto_dict` canonicalizes the result anyway.
+    # `to_dto_fn(payload).to_dict()` minus the DTO's freeze/thaw copies; a
+    # codec that validates without copying (`GraphSection.validated_document`)
+    # skips its round trip, as `section_dto_dict` canonicalizes the result.
     validated = getattr(document_codec, "validated_document", None)
     document = (
         validated(payload)
