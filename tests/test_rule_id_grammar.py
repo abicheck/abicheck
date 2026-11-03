@@ -370,7 +370,8 @@ def test_the_loaded_list_records_its_source_path_and_digest(
 ) -> None:
     import hashlib
 
-    path = _write(tmp_path, "s.yml", text)
+    path = tmp_path / "s.yml"
+    path.write_bytes(text.encode())  # the digest is over these exact bytes
     loaded = SuppressionList.load(path)
     assert loaded.source_path == str(path)
     assert loaded.source_sha256 == hashlib.sha256(text.encode()).hexdigest()

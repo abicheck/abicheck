@@ -45,6 +45,7 @@ from pathlib import Path
 from typing import Any
 
 from .errors import SnapshotError
+from .storage.atomic_file import replace_file
 from .storage.env_limits import env_byte_limit
 from .storage.zstd_compress import compress_zstd
 from .storage.zstd_frame_guard import (
@@ -964,15 +965,14 @@ def _atomic_write_bytes(data: bytes | Iterable[bytes], path: Path) -> None:
                 # *existing* destination is untouched either way (this
                 # runs before os.replace()).
                 raise
-        os.replace(tmp_path, target)
+        replace_file(tmp_path, target)  # retries Windows' transient refusal
         # CodeRabbit review: os.replace()'s directory-entry update is not
         # itself durable across a crash until the *parent* directory is
         # fsync'd too -- the file-content fsync above only guarantees the
         # new data reaches storage, not that the rename pointing at it
         # survives a power loss. Best-effort in the same narrow sense as
         # the file fsync above: some platforms/filesystems don't support
-        # *fsync* on a directory fd at all (Windows has no directory fd
-        # concept here), which is not a storage failure to propagate --
+        # *fsync* on a directory fd at all (Windows has none), which is not a storage failure to propagate --
         # but a real one (EIO/ENOSPC/EROFS) means the rename may not
         # actually be durable, which this function should surface rather
         # than silently claim success for. Never blocks on a missing

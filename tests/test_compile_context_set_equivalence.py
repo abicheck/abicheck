@@ -246,7 +246,7 @@ def test_an_overrides_only_run_without_a_file_resolves_the_block(
     ctx, _ = merge_compile_config(
         CompileContext(), (), None, config_overrides={"compile.sysroot": "/s"}
     )
-    assert str(ctx.sysroot) == "/s"
+    assert ctx.sysroot == Path("/s")  # a Path, spelled "\\s" on Windows
 
 
 def test_a_malformed_explicit_file_still_fails_loud_with_overrides(

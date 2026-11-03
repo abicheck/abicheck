@@ -35,6 +35,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -297,16 +298,21 @@ CMD=("$TEST_BASH" "$TEST_STUB" compare old.json new.json --set "output.view=[sho
         require_bash()
         pr_json = tmp_path / "pr.json"
         pr_json.write_text("", encoding="utf-8")
-        # The argv lands beside the rerun's own `-o json=` destination, the
-        # one path every sibling stub already writes through on all three
-        # platforms; a path handed down in its own environment variable never
-        # arrived on the Windows lane (no args file was written there).
+        # The rerun's real target is the `abicheck` console script, a native
+        # program on Windows, so the stub is a Python script run by this
+        # interpreter: it receives the argv exactly as the CLI would. A bash
+        # stub run through Git's native `bin\\bash.exe` shim never ran on
+        # windows-latest (no sentinel, no argv file). It records its argv
+        # beside the rerun's `-o json=` destination.
         args_file = tmp_path / "pr.json.args"
-        stub = tmp_path / "stub.sh"
+        stub = tmp_path / "stub.py"
         stub.write_text(
-            '_last="${@: -1}"\n_dest="${_last#json=}"\n'
-            'printf "%s\\n" "$@" > "$_dest.args"\n'
-            'echo rerun-sentinel > "$_dest"\n',
+            "import sys\n"
+            "dest = sys.argv[-1].split('json=', 1)[1]\n"
+            "with open(dest + '.args', 'w', encoding='utf-8') as fh:\n"
+            "    fh.write(chr(10).join(sys.argv[1:]) + chr(10))\n"
+            "with open(dest, 'w', encoding='utf-8') as fh:\n"
+            "    fh.write('rerun-sentinel' + chr(10))\n",
             encoding="utf-8",
         )
         quoted = " ".join(f"'{t}'" for t in view_tokens)
@@ -315,14 +321,14 @@ MODE=compare
 PR_JSON="$TEST_PR_JSON"
 FORMAT=markdown
 OUTPUT_FILE=
-CMD=("$TEST_BASH" "$TEST_STUB" compare old.json new.json {quoted} --set severity.preset=strict -o markdown=-)
+CMD=("$TEST_PY" "$TEST_STUB" compare old.json new.json {quoted} --set severity.preset=strict -o markdown=-)
 """
         _run(
             harness,
             {
                 "TEST_PR_JSON": str(pr_json),
                 "TEST_STUB": str(stub),
-                "TEST_BASH": bash_executable(),
+                "TEST_PY": sys.executable,
             },
         )
         assert pr_json.read_text(encoding="utf-8").strip() == "rerun-sentinel"

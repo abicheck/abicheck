@@ -244,8 +244,9 @@ def test_argv_and_cwd_are_the_replay_context_of_each_unit(monkeypatch) -> None:
     cmd, cwd = captured[0]
     # One argv, shared with L4: the AST-dump tail, then the un-redacted source.
     assert "-ast-dump=json" in cmd
-    assert cmd[-1] == f"{home}/AppData/Local/Temp/t.cpp"
-    assert cwd == f"{home}/AppData/Local/Temp"
+    tmp = os.path.normpath(f"{home}/AppData/Local/Temp")  # host separators
+    assert os.path.normpath(cmd[-1]) == os.path.join(tmp, "t.cpp")
+    assert cwd is not None and os.path.normpath(cwd) == tmp
     assert all(not tok.startswith("~/") for tok in cmd)
 
 
