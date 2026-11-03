@@ -87,6 +87,7 @@ from adr_status_sync import (  # noqa: E402
     _adr_status_text,
     check_adr_status_sync,
 )
+from container_corpus_gate import check_container_corpus  # noqa: E402
 from engine_cli_boundary import check_engine_cli_boundary  # noqa: E402
 from fact_detector_misuse import check_fact_detector_misuse  # noqa: E402
 from fact_field_readers import check_fact_field_readers  # noqa: E402
@@ -94,7 +95,6 @@ from fact_registry_completeness import (  # noqa: E402
     check_fact_registry_completeness,
 )
 from findings_report import Findings as _SharedFindings  # noqa: E402
-from generation_corpus_gate import check_generation_corpus  # noqa: E402
 from schema_bump_gate import check_schema_bump_reasons  # noqa: E402
 
 # The generated-skill publication trees' own generator (ADR-058 / G36 P0.3).
@@ -107,6 +107,7 @@ from gen_agent_skills import (  # noqa: E402
     GENERATED_MARKER_SUBSTRING as _SKILL_MARKER,
     discover_skills as _discover_generated_skills,
 )
+from generation_corpus_gate import check_generation_corpus  # noqa: E402
 from learning_nav_order import check_learning_nav_order  # noqa: E402
 from mypy_override_targets import (  # noqa: E402
     check_mypy_override_targets,
@@ -3604,6 +3605,7 @@ CHECKS: dict[str, Callable[[Findings], None]] = {
     "adr-status-sync": check_adr_status_sync,
     "generation-corpus": check_generation_corpus,
     "schema-bump-reason": check_schema_bump_reasons,
+    "container-corpus": check_container_corpus,
     "banned-imports": check_banned_imports,
     "perf-antipatterns": check_perf_antipatterns,
     "project-snapshot-dto-no-asdict": check_project_snapshot_dto_no_asdict,

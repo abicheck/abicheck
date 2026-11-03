@@ -32,8 +32,7 @@ from .evidence_digest import (
     evidence_digest_of_document,
 )
 from .snapshot_digest_cache import EVIDENCE, memoized_digest, peek_digest
-from .snapshot_encode import _VERBATIM_STR_FIELDS, snapshot_to_dict
-from .wire_extensions import extensions_of
+from .snapshot_encode import _VERBATIM_STR_FIELDS, flat_document_and_carriers
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..model.snapshot import AbiSnapshot
@@ -68,9 +67,9 @@ def stored_evidence_digest(snap: AbiSnapshot) -> str | None:
 
 
 def _uncached_snapshot_evidence_digest(snap: AbiSnapshot) -> str:
-    carried = extensions_of(snap)
+    flat, carried = flat_document_and_carriers(snap)
     return evidence_digest_of_document(
-        snapshot_to_dict(snap),
+        flat,
         extensions=None if carried is None else carried.evidence_form(),
     )
 

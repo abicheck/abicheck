@@ -322,6 +322,34 @@ def _variant_artifact_ids(
     return {aid: resolved[name] for aid, name in namespaced.items()}
 
 
+def _package_generations(
+    snapshots: Sequence[AbiSnapshot],
+    this_build: Callable[..., tuple[int, int, int]],
+) -> tuple[int, int, int] | None:
+    """The one ``(extractor, resolver, source)`` triple the package states
+    (ADR-062 D2), or ``None`` (unstated) when its facts disagree.
+
+    A snapshot this build just dumped carries ``fact_generations is None``
+    and contributes this build's triple; a stored snapshot contributes the
+    triple its own document states (unstated axes stay 0). Stamping a stored
+    gen-N snapshot unstated instead dropped its generation-drift notice the
+    moment it was wrapped in a package, while the same file loaded directly
+    still reported it. The source axis of a fresh dump is stated only when
+    some dumped snapshot carries source-tier (L4/L5) facts, so an L2-only
+    package never drifts on an L4/L5 change."""
+    fresh = [s for s in snapshots if s.fact_generations is None]
+    candidates = {
+        s.fact_generations for s in snapshots if s.fact_generations is not None
+    }
+    if fresh:
+        candidates.add(
+            this_build(
+                carries_source_facts=any(s.build_source is not None for s in fresh)
+            )
+        )
+    return candidates.pop() if len(candidates) == 1 else None
+
+
 def _write_package(
     staging: Path,
     captures: Sequence[
@@ -335,25 +363,9 @@ def _write_package(
     from .bundle_facts_capture import capture_bundle_facts
 
     store = DirectoryObjectStore(staging)
-    # Facts this build dumped carry its generations; a variant assembled
-    # from stored snapshot files carries facts some earlier build extracted,
-    # so the package's generations are unstated (one package states one).
-    fresh = not any(
-        _is_snapshot_file(p)
-        for _spec, _snaps, paths in captures
-        for p in paths.values()
-    )
-    # The source axis is stated only when a dumped snapshot carries source-tier
-    # (L4/L5) facts, so an L2-only package never drifts on an L4/L5 change.
-    carries_source_facts = any(
-        snap.build_source is not None
-        for _spec, snapshots, _paths in captures
-        for snap in snapshots.values()
-    )
-    generations = (
-        this_build_generations(carries_source_facts=carries_source_facts)
-        if fresh
-        else None
+    generations = _package_generations(
+        [snap for _spec, snapshots, _paths in captures for snap in snapshots.values()],
+        this_build_generations,
     )
     variant_refs: list[VariantRef] = []
     artifact_refs: list[ArtifactRef] = []

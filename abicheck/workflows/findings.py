@@ -48,7 +48,8 @@ from ..compare.finding_identity import (
 )
 from ..diff_build_config import diff_matrix
 from ..model.probe_matrix import MatrixSnapshot, ProbeResult
-from ..serialization import snapshot_from_dict, snapshot_to_dict
+from ..serialization import snapshot_from_dict
+from ..storage.bundle_member_carriers import encode_bundle_member
 
 
 def probe_result_to_dict(result: ProbeResult) -> dict[str, Any]:
@@ -60,7 +61,10 @@ def probe_result_to_dict(result: ProbeResult) -> dict[str, Any]:
         "error": result.error,
     }
     if result.snapshot is not None:
-        out["snapshot"] = snapshot_to_dict(result.snapshot)
+        # The flat document, or the sectioned one when the flat one would
+        # lose the snapshot's ADR-062 D14/D15 carriers (a failed or blocked
+        # section); `snapshot_from_dict` reads either.
+        out["snapshot"] = encode_bundle_member(result.snapshot)[0]
     return out
 
 

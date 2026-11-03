@@ -925,8 +925,24 @@ listing/report, even where no resolution graph can place it.
     G38 documents and G40 archives as a sectioned member under bundle
     `schema_version` 5 (`storage/bundle_member_carriers.py`;
     `tests/unit/storage/test_bundle_carriers_roundtrip.py`).
+    2026-11-03: no writer accepts a flat mapping that lost carriers
+    (`snapshot_to_dict` refuses to make one); detail below.
   - D18, step 1 implemented (per-section decode split, no new laziness);
     lazy loading beyond the `graph` section is not.
+  - Frozen container corpus (2026-11-03): `tests/fixtures/containers/`
+    freezes one sample of each container and platform/frontend the
+    generation corpus does not cover: the G38 document, the G40 archive,
+    the directory `ProjectSnapshot` package, and clang-frontend, Mach-O and
+    PE snapshots. `tests/test_container_corpus.py` holds each one to the
+    generation corpus's invariants (loads with no unexpected notice,
+    compares clean against a fresh production, byte and respelling drift
+    only as a declared migration; re-encoding is byte-identical unless a
+    version moved with its D13 migration). The `container-corpus` gate
+    (`scripts/container_corpus_gate.py`) fails a bumped encoder version
+    until `scripts/freeze_container_corpus.py` adds an entry under it. The
+    corpus found that `project capture-variants` stamped a package
+    assembled from stored snapshots *unstated*, dropping the
+    generation-drift notice its members carried (fixed).
   - Exit: one regression test per amendment probe (D14's and D17's exist), the oneDAL/MKL corpus, Windows and macOS, and
     concurrent-publisher serialization (tested on Linux).
 
@@ -1110,6 +1126,21 @@ A1.9), item by item. Open items are also listed in
   generated one, digests), `tests/test_blocked_section_compare_matrix.py`
   (every section x cause x side x file/package through `abicheck compare`),
   `tests/test_pe_pdb_section_failure.py`.
+  2026-11-03, flat-mapping writers: `snapshot_to_dict` refuses a snapshot
+  whose flat document would lose stored state
+  (`wire_extensions.refuse_lossy_flattening`; `flattening_loses` counts a
+  `not_collected` section, which the flat split re-saved as present), so
+  every flat mapping a
+  writer (`to_sectioned_document`, `import_legacy_snapshot`,
+  `import_bundle_facts`, `import_baseline_set`) can be handed is complete;
+  `snapshot_encode.flat_document_and_carriers` is the one split that yields
+  the flat document of such a snapshot, and only beside its carriers.
+  `write_legacy_snapshot_package` takes only an `AbiSnapshot`; the `dump`
+  write and the probe-matrix file write the snapshot (the `dump` write used
+  to section a flat payload, storing a PE dump's failed `debug` section as
+  present). Test: `tests/unit/storage/test_flat_mapping_writers.py`
+  (Hypothesis over the same carrier combinations, every writer entry point:
+  write then read re-saves the generated document or fails loudly).
   Residuals: see known gaps.
 - **D15, wire contract: implemented.** `tests/_wire_inventory.py`
   generates the per-section inventory (header keys including the D14
@@ -1133,12 +1164,11 @@ A1.9), item by item. Open items are also listed in
   distinctly. Open: the inventory is recorded from the encoder's output,
   not generated from the `SectionDTO` encoders, and section-level
   `FactAvailability` header entries do not exist yet.
-- **D14, must-understand versus optional extensions: not implemented.** An
-  unknown field inside a record is dropped on re-save, and an unknown
-  section rejects the whole document. Both are pinned as strict `xfail`
-  probes in `tests/unit/storage/test_extension_preservation_gap.py`. The
-  carriers (`must_understand` list, `extensions` map) are specified by the
-  amendment but not built.
+- **D14, must-understand versus optional extensions:** implemented; see the
+  "D14, optional and must-understand extensions: implemented" entry above.
+  (This entry once read "not implemented", with strict `xfail` probes in
+  `tests/unit/storage/test_extension_preservation_gap.py`; those probes now
+  pass as `tests/unit/storage/test_extension_preservation.py`.)
 - **D18, selective load: steps 1 (decode split) and 2 (lazy declaration
   store) implemented 2026-10-31;** per-pair release and the shared
   decoded-section cache not built (step 2 and measurements below).
@@ -1340,7 +1370,7 @@ satisfies for the one domain type it actually sections today
 | `abicheck/storage/atomic_file.py` | `atomic_write` — write a cache file through a same-directory temp file and `os.replace`, so a concurrent reader sees either no file or a complete one, never a torn one. `replace_file` — that `os.replace`, retried with a bounded back-off when Windows transiently refuses it (another handle or writer on the destination); the snapshot writer uses it too. Moved unchanged from `dumper_cache.py`; its stream-copy sibling was removed in dead-code-and-single-owner Stage G. Internal, not re-exported by the package |
 | `abicheck/storage/project_package_archive.py` | `pack_project_package`, `unpack_project_package`, `is_project_package_archive`, `MIMETYPE` — A1.1's one-file zip transport of a package directory; unpacking refuses any non-layout, symlinked, compressed, duplicate or over-budget member before writing. Internal, reached through `workflows.storage` |
 | `abicheck/storage/evidence_digest.py` | `EVIDENCE_FORM_VERSION`, `UNORDERED_LISTS`, `VOLATILE_CAPTURE_FIELDS`, `evidence_digest_of_document` — ADR-062 D16's evidence digest over a snapshot document: volatile capture metadata dropped, identity-matched record lists stably sorted by identity, semantically ordered lists untouched, the form version hashed in. Internal, not re-exported by the package |
-| `abicheck/storage/wire_extensions.py` | `AVAILABILITY_KEY`, `DOCUMENT_MUST_UNDERSTAND_KEY`, `EXTENSIONS_KEY`, `IDENTITY_SECTION_KIND`, `MUST_UNDERSTAND_KEY`, `UNDERSTOOD_EXTENSIONS`, `WIRE_EXTENSIONS_KEY`, `WireExtensions`, `attach`, `attach_package_carriers`, `carriers_for_reader`, `check_must_understand`, `extensions_of`, `flattening_loses`, `merge_wire_extensions`, `record_section_failure`, `refuse_blocked_identity`, `refuse_orphaned_header_extras`, `refuse_unwritable_extensions`, `section_blocking_reason`, `split_wire_extensions`, `unknown_must_understand` — ADR-062 D14/D15 carriers of the sectioned document: unknown sections, header must-understand names and extension maps, the section availability table, and the sections a load must block, split off on read and merged back on write; `WireExtensions.to_wire` is the form a directory package stores and `carriers_for_reader` re-decides what blocks on read. Internal, not re-exported by the package |
+| `abicheck/storage/wire_extensions.py` | `AVAILABILITY_KEY`, `DOCUMENT_MUST_UNDERSTAND_KEY`, `EXTENSIONS_KEY`, `IDENTITY_SECTION_KIND`, `MUST_UNDERSTAND_KEY`, `UNDERSTOOD_EXTENSIONS`, `WIRE_EXTENSIONS_KEY`, `WireExtensions`, `attach`, `attach_package_carriers`, `carriers_for_reader`, `check_must_understand`, `extensions_of`, `flattening_loses`, `merge_wire_extensions`, `record_section_failure`, `refuse_blocked_identity`, `refuse_lossy_flattening`, `refuse_orphaned_header_extras`, `refuse_unwritable_extensions`, `section_blocking_reason`, `split_wire_extensions`, `unknown_must_understand` — ADR-062 D14/D15 carriers of the sectioned document: unknown sections, header must-understand names and extension maps, the section availability table, and the sections a load must block, split off on read and merged back on write; `WireExtensions.to_wire` is the form a directory package stores and `carriers_for_reader` re-decides what blocks on read. Internal, not re-exported by the package |
 | `abicheck/storage/extension_fact_catalog.py` | `EXTENSION_FACTS`, `ExtensionFact`, `ExtensionFactRegistry`, `ReaderSemantics` — ADR-062 D19's declared catalog of optional extension facts: name, section, reader semantics (optional, section- or document-level must-understand), what absence reads as, owning ADR, encode/decode. `wire_extensions.UNDERSTOOD_EXTENSIONS` is its names. Internal, not re-exported by the package |
 | `abicheck/storage/extension_facts.py` | `read_extension_fact`, `write_extension_fact` — record a declared fact on a snapshot's D14 carriers (its section header's extensions map and, when its semantics require it, its must-understand list) and read it back as a typed fact (present, not collected, or failed). Internal, not re-exported by the package |
 | `abicheck/storage/bundle_member_carriers.py` | `carriers_by_member`, `encode_bundle_member`, `require_sectioned_member_version` — ADR-062 D14/D15 carriers of a bundle member: a member whose flat document would lose them is stored as its sectioned document under bundle schema version 5 (G38 document, G40 archive), a bundle package stores them on `ArtifactRef.carriers`, and a sectioned member under a lower declared version is refused. Internal, not re-exported by the package |

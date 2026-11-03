@@ -68,7 +68,7 @@ def test_reader_reports_drift_per_axis_and_state(
 def _write_package(root: Path, *, ret: str) -> Path:
     from abicheck.model import AbiSnapshot, Function, Visibility
     from abicheck.project_snapshot_legacy import write_legacy_snapshot_package
-    from abicheck.serialization import SCHEMA_VERSION, snapshot_to_dict
+    from abicheck.serialization import SCHEMA_VERSION
 
     snap = AbiSnapshot(
         library="libone.so",
@@ -80,7 +80,7 @@ def _write_package(root: Path, *, ret: str) -> Path:
         ],
     )
     write_legacy_snapshot_package(
-        snapshot_to_dict(snap),
+        snap,
         root,
         artifact_id="libone.so",
         max_known_schema_version=SCHEMA_VERSION,

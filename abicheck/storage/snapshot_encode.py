@@ -49,6 +49,11 @@ from .snapshot_schema_versions import SCHEMA_VERSION
 from .snapshot_section_stream import sectioned_document_stream
 from .surface_graph_codec import drop_shared_source_graph, encode_surface_graph
 from .versioning import this_build_generations
+from .wire_extensions import (
+    WireExtensions,
+    extensions_of,
+    refuse_lossy_flattening,
+)
 from .wire_field_names import wire_field_names
 
 # Leaf types that are immutable, so the "detached container" contract
@@ -396,8 +401,29 @@ def snapshot_to_dict(snap: AbiSnapshot) -> dict[str, Any]:
     Pure with respect to *snap*: nothing here reads, writes, or temporarily
     clears a field on the caller's object, so serializing a snapshot another
     thread is concurrently reading is safe.
+
+    Raises `SnapshotError` when *snap* holds ADR-062 D14/D15 state the flat
+    document cannot carry (`wire_extensions.refuse_lossy_flattening`): every
+    flat document is then a complete statement of its snapshot, so a writer
+    handed one never stores lost state as if it were whole. A writer of such
+    a snapshot takes the `AbiSnapshot`; :func:`flat_document_and_carriers`
+    is the storage layer's own split for one that stores the carriers beside
+    the flat document.
     """
+    refuse_lossy_flattening(snap)
     return _snapshot_to_dict(snap, _encode_value)
+
+
+def flat_document_and_carriers(
+    snap: AbiSnapshot,
+) -> tuple[dict[str, Any], WireExtensions | None]:
+    """*snap*'s flat document together with the D14/D15 carriers it cannot
+    hold (``None`` when there are none), for a storage writer that keeps them
+    beside it (a directory or bundle package's `ArtifactRef.carriers`) or
+    hashes them with it (the `evidence` digest). The two are produced
+    together so a caller never holds one without the other. A writer still
+    calls `wire_extensions.refuse_unwritable_extensions` first."""
+    return _snapshot_to_dict(snap, _encode_value), extensions_of(snap)
 
 
 def _snapshot_to_dict(

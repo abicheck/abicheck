@@ -201,7 +201,7 @@ _SECTION_FIELDS: Mapping[str, tuple[str, ...]] = {
         "git_tag",
         "created_at",
         # `AbiSnapshot.dump_provenance` (model/snapshot.py): written by
-        # `cli_dump_helpers.fold_dump_provenance_into_dict` into a real
+        # `cli_dump_helpers.fold_dump_provenance` into a real
         # `dump`'s document, and carried on the model so a load -> save keeps
         # it. It records the same category of fact ("what/how this was
         # produced") every other key in this section does, so it belongs
