@@ -201,6 +201,7 @@ L2_ONLY_KINDS: frozenset[str] = frozenset(
         "VAR_EXPORT_ADDED",
         "VAR_LOST_CONST",
         "VAR_REMOVED",
+        "VAR_REMOVED_ELF_ONLY",
         "VAR_TYPE_CHANGED",
         "VAR_VALUE_CHANGED",
         "VAR_VISIBILITY_CHANGED",
