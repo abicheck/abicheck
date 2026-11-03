@@ -225,9 +225,12 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
         invariant=(
             "A snapshot extracted by an older extractor generation, compared "
             "against a fresh dump of identical source, reports no change and "
-            "carries a visible generation notice: the generation is stamped "
-            "on every single-file snapshot (absent reads as unstated, never "
-            "current), drift is decided by the one reader-compatibility "
+            "carries a visible generation notice in every container it is "
+            "stored in (single-file snapshot, G38 document, G40 archive, "
+            "ProjectSnapshot package -- a package assembled from stored "
+            "snapshots states the triple they agree on): the generation is "
+            "stamped on every single-file snapshot (absent reads as unstated, "
+            "never current), drift is decided by the one reader-compatibility "
             "owner, and every extractor generation records the stored type "
             "spellings it changed (or that it changed none), which the load "
             "path migrates at every position a type spelling is stored."
@@ -241,6 +244,9 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_generation_corpus.py",
             "tests/test_generation_drift_demotion.py",
             "tests/test_generation_corpus_gate.py",
+            "tests/test_container_corpus.py",
+            "tests/test_container_corpus_gate.py",
+            "tests/test_bundle_variants_capture.py",
         ),
     ),
     BugClass(

@@ -623,17 +623,8 @@ def test_unrelated_baseline_variant_does_not_change_the_selected_comparison(
 # ── Generation stamping: only facts this build extracted get its generations ─
 
 
-@pytest.mark.parametrize("fresh", [True, False])
-def test_package_generations_name_the_build_that_extracted_the_facts(
-    tmp_path: Path, fresh: bool
-) -> None:
-    from abicheck.storage import versioning
-
-    inputs = _write_inputs(tmp_path / "x", ["f"])
-    if fresh:
-        # Binaries this build dumps (the stub reads the fixture's content).
-        for p in list(inputs.iterdir()):
-            p.rename(p.with_suffix(""))
+def _capture_stub(tmp_path: Path, inputs: Path) -> Path:
+    """Capture *inputs* as variant ``x``, each file loaded as its snapshot."""
     config = parse_bundle_variants(
         {"x": {"target_triple": "t", "compiler_family": "g"}}
     )
@@ -646,10 +637,80 @@ def test_package_generations_name_the_build_that_extracted_the_facts(
         return snapshot_from_dict(json.loads(path.read_text()))
 
     capture_variants(plan, out, dump=_dump)
+    return out
+
+
+def test_freshly_dumped_facts_carry_this_builds_generations(tmp_path: Path) -> None:
+    from abicheck.storage import versioning
+
+    inputs = _write_inputs(tmp_path / "x", ["f"])
+    # Binaries this build dumps (the stub reads the fixture's content).
+    for p in list(inputs.iterdir()):
+        p.rename(p.with_suffix(""))
+    out = _capture_stub(tmp_path, inputs)
     stored = json.loads((out / "manifest.json").read_text())["versions"]
-    if fresh:
-        assert stored["extractor_generation"] == versioning.EXTRACTOR_GENERATION
-        assert stored["resolver_generation"] == versioning.RESOLVER_GENERATION
+    assert stored["extractor_generation"] == versioning.EXTRACTOR_GENERATION
+    assert stored["resolver_generation"] == versioning.RESOLVER_GENERATION
+
+
+def _restamp(path: Path, extractor: int | None) -> None:
+    """Rewrite *path*'s ``fact_generations`` extractor axis, or drop the
+    stamp (``None``), the way an older or a pre-stamp writer left it."""
+    document = json.loads(path.read_text())
+    holder = (
+        document["sections"]["provenance"]["payload"]
+        if "sections" in document
+        else document
+    )
+    if extractor is None:
+        holder.pop("fact_generations")
     else:
-        assert stored.get("extractor_generation", 0) == 0
-        assert stored.get("resolver_generation", 0) == 0
+        holder["fact_generations"]["extractor"] = extractor
+    path.write_text(json.dumps(document))
+
+
+@pytest.mark.parametrize(
+    "stamps",
+    [
+        pytest.param((None, None), id="both-unstamped"),
+        pytest.param((0, 0), id="both-current"),
+        pytest.param((-1, -1), id="both-one-older"),
+        pytest.param((-3, -3), id="both-three-older"),
+        pytest.param((-1, 0), id="older-and-current"),
+        pytest.param((None, 0), id="unstamped-and-current"),
+    ],
+)
+def test_stored_snapshot_package_reports_the_drift_its_members_state(
+    tmp_path: Path, stamps: tuple[int | None, int | None]
+) -> None:
+    """A variant assembled from stored snapshot files states the generations
+    those files state. Oracle: loading the package says the same thing about
+    generation drift as loading the members directly -- a drift notice when
+    every member states one older extractor generation, and none when the
+    members are unstamped or disagree (one package states one triple)."""
+    from abicheck.project_snapshot_store import read_manifest_summary
+    from abicheck.serialization import snapshot_from_dict
+    from abicheck.storage import versioning
+
+    inputs = _write_inputs(tmp_path / "x", ["f"])
+    members = sorted(inputs.iterdir())
+    for member, offset in zip(members, stamps, strict=True):
+        _restamp(
+            member,
+            None if offset is None else versioning.EXTRACTOR_GENERATION + offset,
+        )
+    direct = [
+        any(
+            versioning.GENERATION_DRIFT_NOTICE_MARKER in n
+            for n in snapshot_from_dict(json.loads(m.read_text())).load_notices
+        )
+        for m in members
+    ]
+    out = _capture_stub(tmp_path, inputs)
+    stored = json.loads((out / "manifest.json").read_text())["versions"]
+    agreed = len(set(stamps)) == 1 and stamps[0] is not None
+    expected = versioning.EXTRACTOR_GENERATION + stamps[0] if agreed else 0
+    assert stored.get("extractor_generation", 0) == expected
+    notice = read_manifest_summary(out).semantics_notice or ""
+    packaged = versioning.GENERATION_DRIFT_NOTICE_MARKER in notice
+    assert packaged == (agreed and all(direct))
