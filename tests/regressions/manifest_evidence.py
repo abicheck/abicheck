@@ -849,6 +849,8 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_family_f1_evidence_ablation.py",
             # a never-serialized AST key read as a confirmed False/value
             "tests/test_extract_absent_key_as_value.py",
+            "tests/test_clang_explicit_specifier.py",
+            "tests/test_concept_constraint_direction.py",
         ),
         known_gaps=(
             KnownGap(

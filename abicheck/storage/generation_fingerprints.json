@@ -118,7 +118,7 @@
       "abicheck/extract/headers/clang/enums.py": "87ee0817b89dd1483a48e5912602d8d02b84e1c0aa1671d0f32c1fd306b686b9",
       "abicheck/extract/headers/clang/error_header_retry.py": "3153f727c9d1934783a51d6917727a48aeba31e68b3c2462aef6e6b2f489f690",
       "abicheck/extract/headers/clang/explicit_instantiation.py": "359b71f36e304c2c1226ca35a65c1969989195dabc070a8035354caaef501663",
-      "abicheck/extract/headers/clang/explicit_specifier.py": "87fd20095043a7fb812831e0ecae47d86c0afe8378303d7b7d41739123e45afc",
+      "abicheck/extract/headers/clang/explicit_specifier.py": "fca63201aaf3d920e2bbb796114c93bd6edc89974083f9900ed26e98de7fc699",
       "abicheck/extract/headers/clang/expr.py": "456957f0f4ba36eaa8f4fed5d99c8c6ad5b13d48a2983220306cffeceb6a8f3b",
       "abicheck/extract/headers/clang/function_template_defaults.py": "af4a42ea00a91238ef8f111fe05c4b6aa625b84fd2fd4e39230b48953ebaf566",
       "abicheck/extract/headers/clang/functions.py": "12a37b2d33be83ab29d8242fd6fde193af1e377520871195fb86e6d9ce664fdc",
@@ -192,9 +192,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "73a533c82767400606d903c142afd0bd1dbc11c526aff037f531a9a4312ec6eb",
+    "fingerprint": "418d18b537d4216c5e399b37a0602c06ae999b0ecd18352f296d8696f6878a96",
     "generation": 35,
-    "reason": "semantic change folded into generation 35, which this branch introduces and has not shipped: a C -std= from build data now selects C mode for a header whose only C++ signal is a guarded extern \"C\" (see generation_migrations[35]); generation 34 failed that parse outright"
+    "reason": "explicit_specifier: read a key already proven present by subscript instead of .get(); behaviour identical"
   },
   "resolver": {
     "files": {

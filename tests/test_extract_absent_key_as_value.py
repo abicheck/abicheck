@@ -30,7 +30,6 @@ _BASELINE = frozenset(
     {
         "abicheck/extract/headers/castxml/variable_template_join.py:_maybe_record:constexpr",
         "abicheck/extract/headers/clang/expr.py:is_const_variable:constexpr",
-        "abicheck/extract/headers/clang/functions.py:parse_functions:explicit",
         "abicheck/extract/headers/clang/functions.py:parse_functions:explicitlyDeleted",
         "abicheck/extract/headers/clang/functions.py:parse_functions:pure",
         "abicheck/extract/headers/clang/functions.py:parse_functions:variadic",

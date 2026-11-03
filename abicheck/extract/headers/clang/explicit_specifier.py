@@ -195,7 +195,7 @@ def explicit_specifier_fact(
     """
     if "explicit" in node:
         # A Clang that does serialize the specifier is authoritative.
-        return Fact.present(bool(node.get("explicit")), producer="clang-json")
+        return Fact.present(bool(node["explicit"]), producer="clang-json")
     cache = file_cache if file_cache is not None else {}
     rng = node.get("range")
     loc = node.get("loc")
