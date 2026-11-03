@@ -16,7 +16,7 @@ Two invariants:
 Plus the generated field inventory (D15 (1)):
 `tests/fixtures/wire_contract/field_inventory.json` is generated from the
 `SectionDTO` encoders' declarations
-(`abicheck.storage.wire_inventory.declared_field_inventory`) and diffed; a
+(`tests/_wire_inventory.declared_field_inventory`) and diffed; a
 moved section needs a version bump and a D13 migration. Every key a written
 document carries must be declared there (`tests/_wire_inventory.py` walks
 the written corpus), so the declarations cannot fall behind the encoder.
@@ -59,8 +59,7 @@ from abicheck.storage.dto import SECTION_SCHEMA_VERSIONS, migration_source_versi
 from abicheck.storage.section_states import record_section_availability
 from abicheck.storage.sectioned_document import SECTIONS_KEY
 from abicheck.storage.sparse_section_codec import DeclarationsSection
-from abicheck.storage.wire_inventory import declared_field_inventory
-from tests._wire_inventory import observed_field_inventory
+from tests._wire_inventory import declared_field_inventory, observed_field_inventory
 
 _PIN = (
     Path(__file__).resolve().parents[2] / "fixtures" / "wire_contract" / "sections.json"

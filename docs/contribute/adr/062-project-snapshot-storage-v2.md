@@ -873,7 +873,7 @@ compare report lists them in `analysis_assurance.section_availability`
 `storage.section_states.record_section_availability` (`failed` or
 `not_collected`); `record_section_failure` moved there. The inventory is
 now generated from the encoders' declarations
-(`storage.wire_inventory.declared_field_inventory`), and a written corpus
+(`tests/_wire_inventory.declared_field_inventory`), and a written corpus
 must use only declared keys. No snapshot or section version bump: a pre-D15
 reader ignores the table, and the reader already accepted `not_collected`
 entries; only its reading of them changed.

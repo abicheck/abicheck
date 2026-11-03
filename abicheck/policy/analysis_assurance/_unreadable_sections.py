@@ -41,19 +41,15 @@ if TYPE_CHECKING:
 __all__ = ["section_availability_entries", "unreadable_section_gap"]
 
 
-def _sides(
-    old: AbiSnapshot | None, new: AbiSnapshot
-) -> tuple[tuple[str, AbiSnapshot], ...]:
-    return tuple((side, snap) for side, snap in (("old", old), ("new", new)) if snap)
-
-
 def unreadable_section_gap(
     old: AbiSnapshot | None, new: AbiSnapshot
 ) -> tuple[bool, list[str]]:
     """``(gap, notes)``: whether either side holds a section it could not use."""
     found: dict[str, str] = {}
     unrecorded: list[str] = []
-    for side, snap in _sides(old, new):
+    for side, snap in (("old", old), ("new", new)):
+        if snap is None:
+            continue
         for section, diagnostic in getattr(snap, "unreadable_sections", ()):
             found.setdefault(f"{side}:{section}", diagnostic)
         unrecorded.extend(
@@ -77,6 +73,7 @@ def section_availability_entries(
     ``analysis_assurance.section_availability`` entries."""
     return tuple(
         {"side": side, **entry.to_dict()}
-        for side, snap in _sides(old, new)
+        for side, snap in (("old", old), ("new", new))
+        if snap is not None
         for entry in getattr(snap, "section_availability", ())
     )

@@ -96,7 +96,6 @@ _INTERNAL_MODULES = (
     "abicheck.storage.tu_parse_store",
     "abicheck.storage.wire_extensions",
     "abicheck.storage.section_states",
-    "abicheck.storage.wire_inventory",
     "abicheck.storage.closure_graph_renumber",
     "abicheck.storage.bundle_member_carriers",
     "abicheck.storage.wire_field_names",

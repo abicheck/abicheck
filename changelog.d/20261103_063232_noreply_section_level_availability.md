@@ -16,5 +16,5 @@
   `storage.section_states`, beside the general
   `record_section_availability`. The wire-contract field inventory is now
   generated from the section encoders' declared fields
-  (`storage.wire_inventory`), and every key a written document carries must
+  (`tests/_wire_inventory.py`), and every key a written document carries must
   be declared there.

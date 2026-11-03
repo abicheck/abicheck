@@ -233,7 +233,7 @@ _LEGACY_SECTION_CODECS: Mapping[
 
 #: The codec class behind each `_LEGACY_SECTION_CODECS` entry, for
 #: `export_legacy_sections`' current-version fast path and the generated
-#: wire-contract inventory (`storage/wire_inventory.py`).
+#: wire-contract inventory (`tests/_wire_inventory.py`).
 LEGACY_SECTION_DOCUMENT_CODECS: Mapping[str, Any] = {
     TYPES_SECTION_KIND: TypesSection,
     GRAPH_SECTION_KIND: GraphSection,
