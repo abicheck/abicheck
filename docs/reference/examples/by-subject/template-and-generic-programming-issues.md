@@ -15,7 +15,7 @@ _14 case(s)._ [← back to all subjects](index.md)
 | [case87_default_template_arg_changed](../case87_default_template_arg_changed.md) | Default Template Argument Changed | 🔴 BREAKING | Breaking |
 | [case105_concept_tightening](../case105_concept_tightening.md) | Concept Tightening (C++20) | 🟠 API_BREAK | API Break |
 | [case111_enumerable_thread_specific_lambda_ambiguity](../case111_enumerable_thread_specific_lambda_ambiguity.md) | enumerable_thread_specific Lambda-Init Ambiguity | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case122_template_signature_uninstantiated](../case122_template_signature_uninstantiated.md) | Uninstantiated Template Signature Change | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case122_template_signature_uninstantiated](../case122_template_signature_uninstantiated.md) | Uninstantiated Template Signature Change | 🟠 API_BREAK | API Break |
 | [case223_header_only_template_default_changed](../case223_header_only_template_default_changed.md) | Header-Only Template Default Changed | ✅ NO_CHANGE | No Change |
 | [case224_header_only_template_default_added](../case224_header_only_template_default_added.md) | Header-Only Template Default Added | ✅ NO_CHANGE | No Change |
 | [case225_header_only_template_default_removed](../case225_header_only_template_default_removed.md) | Header-Only Template Default Removed | ✅ NO_CHANGE | No Change |

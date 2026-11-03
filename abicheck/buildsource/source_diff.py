@@ -391,7 +391,7 @@ def diff_source_abi(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change
     changes.extend(_diff_generated(old, new, compat))
     changes.extend(_diff_typedefs(old, new, compat))
     changes.extend(_diff_macros(old, new, compat))
-    changes.extend(_diff_concepts(old, new))
+    changes.extend(_diff_concepts(old, new, _loc))
     changes.extend(_diff_declarations(old, new))
     changes.extend(_diff_inline_bodies(old, new, compat))
     changes.extend(_diff_templates(old, new, compat))

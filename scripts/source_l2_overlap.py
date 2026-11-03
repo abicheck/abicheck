@@ -214,6 +214,15 @@ _JUDGED: dict[str, Row] = {
     "CONCEPT_TIGHTENED": Row(
         L4_ONLY, note="concept constraint; L2 has no concept facts"
     ),
+    "CONCEPT_CONSTRAINT_CHANGED": Row(
+        L4_ONLY, note="concept constraint, direction unproven; L2 has no concept facts"
+    ),
+    "HEADER_ONLY_FUNCTION_PARAMS_CHANGED": Row(
+        DUPLICATE,
+        note="never-exported template/inline parameter list: L4 template_signature "
+        "and L2 export_transition.regrade_unexported_params (clang header tier) both "
+        "emit it; source_replay_twins dedups them",
+    ),
     "CONSTEXPR_VALUE_CHANGED": Row(
         NEAR_DUPLICATE,
         "CONSTANT_CHANGED",

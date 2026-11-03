@@ -15,8 +15,8 @@ from abicheck.compare.auto_derived_standard import auto_derived_standard_reason
 
 def _snap(explicit: str | None, std: str, implied: str = "") -> SimpleNamespace:
     tc = {} if explicit is None else {"language_standard_explicit": explicit}
-    if implied:
-        tc["implied_options"] = implied
+    if "-std=" in implied:
+        tc["language_standard_implied"] = "1"
     return SimpleNamespace(
         ast_toolchain=tc,
         contract=SimpleNamespace(profile_fields={"language_standard": std}),

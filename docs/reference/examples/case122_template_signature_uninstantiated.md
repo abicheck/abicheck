@@ -3,12 +3,12 @@
 
 | Field | Value |
 |-------|-------|
-| **Verdict** | 🟡 **COMPATIBLE_WITH_RISK** |
-| **Category** | Risk |
+| **Verdict** | 🟠 **API_BREAK** |
+| **Category** | API Break |
 | **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
-| **Flags** | — |
-| **Detected `ChangeKind`s** | `template_body_changed` |
+| **Flags** | API break |
+| **Detected `ChangeKind`s** | `header_only_function_params_changed` |
 | **Source files** | `catalog/cases/case122_template_signature_uninstantiated/` |
 | **Rule family** | [`template-signature-uninstantiated`](by-rule/template-signature-uninstantiated.md) |
 | **Subject** | [Template and generic-programming issues](by-subject/template-and-generic-programming-issues.md) |
@@ -195,15 +195,28 @@ header ASTs, the same L0-L2 evidence this case's default lane already shows
 cannot see the change — so neither would be expected to report anything
 here without a source-AST-replay capability equivalent to abicheck's own L4.
 
+## Reference label (updated 2026-11)
+
+This case was labelled COMPATIBLE_WITH_RISK (`template_body_changed`). A
+consumer witness contradicts that: `consumer_address.cpp` binds
+`&clamp<int>` to `int (*)(int, int, int)`, which compiles against `v1.h` and
+is rejected against `v2.h` (a plain call `clamp<int>(5, 0, 10)` compiles
+against both). The library binary is unchanged, so this is a source/API
+break, not an ABI break. abicheck now reports
+`header_only_function_params_changed` (API_BREAK) on the direct-Clang header
+path and in the L4 clang replay; the default castxml L2 lane still cannot see
+uninstantiated templates (known gap).
+
 ---
 
 ## Source files
 
 - `CMakeLists.txt`
 - `app.cpp`
+- `consumer_address.cpp`
 - `v1.cpp`
 - `v1.h`
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All COMPATIBLE_WITH_RISK cases](by-verdict/compatible-risk.md) · [Category: Risk](by-category/risk.md) · [Rule: Uninstantiated template body changed](by-rule/template-signature-uninstantiated.md) · [Subject: Template and generic-programming issues](by-subject/template-and-generic-programming-issues.md)._
+_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Uninstantiated template body changed](by-rule/template-signature-uninstantiated.md) · [Subject: Template and generic-programming issues](by-subject/template-and-generic-programming-issues.md)._

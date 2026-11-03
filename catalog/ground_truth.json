@@ -674,7 +674,7 @@
     "header_only_function_params_changed"
    ],
    "known_gap": "CastXML omits uninstantiated function templates, so the default castxml L2 lane observes NO_CHANGE: a missed API_BREAK from insufficient evidence. The direct-Clang L2 header path and the L4 clang replay both detect it.",
-   "min_evidence": "L4",
+   "min_evidence": "L2",
    "platforms": [
     "linux",
     "macos",

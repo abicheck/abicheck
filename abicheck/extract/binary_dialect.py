@@ -338,5 +338,8 @@ def record_implied_options(snap: AbiSnapshot, implied: tuple[str, ...]) -> AbiSn
     if implied:
         if any(token.startswith("-std=") for token in implied):
             snap.ast_toolchain["language_standard_explicit"] = "0"
+            # The standard came from the binary's own build (ADR-050
+            # amendment 2026-11-03: compare/auto_derived_standard.py).
+            snap.ast_toolchain["language_standard_implied"] = "1"
         snap.ast_toolchain["implied_options"] = " ".join(implied)
     return snap

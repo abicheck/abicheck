@@ -2555,7 +2555,7 @@ profile mismatch since 44473ffcb").
 difference, **both** sides recorded it as auto-derived
 (`ast_toolchain["language_standard_explicit"] == "0"`), and **at least one**
 side's standard was implied by its binary's own build
-(`-std=` in `ast_toolchain["implied_options"]`), the D2 gate returns a
+(`ast_toolchain["language_standard_implied"] == "1"`, stamped by `extract/binary_dialect.py`), the D2 gate returns a
 non-fatal `ComparabilityMismatch`: the comparison yields a verdict, and the
 `declaration`/`layout` dimensions the standard can affect are reported
 unverified in `comparability_assurance`, with a `coverage_warnings` reason

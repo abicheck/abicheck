@@ -129,7 +129,7 @@ _219 case(s)._ [← back to all examples](../index.md)
 | [case119_internal_struct_field_removed_scoped](../case119_internal_struct_field_removed_scoped.md) | Internal Struct Loses a Field (Non-Public, Scoped) | ✅ NO_CHANGE | No Change |
 | [case120_internal_struct_reordered_scoped](../case120_internal_struct_reordered_scoped.md) | Internal Struct Fields Reordered (Non-Public, Scoped) | ✅ NO_CHANGE | No Change |
 | [case121_kernel_btf_struct_field_added](../case121_kernel_btf_struct_field_added.md) | Kernel BTF Struct Field Growth | 🔴 BREAKING | Breaking |
-| [case122_template_signature_uninstantiated](../case122_template_signature_uninstantiated.md) | Uninstantiated Template Signature Change | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case122_template_signature_uninstantiated](../case122_template_signature_uninstantiated.md) | Uninstantiated Template Signature Change | 🟠 API_BREAK | API Break |
 | [case123_default_argument_removed](../case123_default_argument_removed.md) | Default Argument Removed | 🟠 API_BREAK | API Break |
 | [case124_header_constant_value_changed](../case124_header_constant_value_changed.md) | Header Constant Value Changed | 🟠 API_BREAK | API Break |
 | [case125_class_became_final](../case125_class_became_final.md) | Class Became `final` | 🟠 API_BREAK | API Break |

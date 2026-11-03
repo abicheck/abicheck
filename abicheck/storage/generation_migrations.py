@@ -368,6 +368,18 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "did; a generation-33 snapshot of a malformed PDB carries an empty debug "
         "section no rewrite can mark failed, so it is re-dumped"
     ),
+    35: GenerationSpellingChange(
+        "no stored spelling changes: the direct-Clang header backend now reads "
+        "a constructor's or conversion function's `explicit` specifier from its "
+        "decl-specifier tokens (extract/headers/clang/explicit_specifier.py). "
+        "Generation 34 recorded is_explicit=False with a PRESENT fact for every "
+        "such declaration, because Clang's JSON never serializes the key; "
+        "generation 35 records True, False, or an unknown (NOT_COLLECTED/"
+        "UNSUPPORTED) fact. A generation-34 clang snapshot's False cannot be "
+        "told apart from a real one, so it is re-dumped. A binary-implied "
+        "-std= is also stamped as ast_toolchain language_standard_implied=1 "
+        "(ADR-050 amendment 2026-11-03); without it a pair keeps the refusal"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

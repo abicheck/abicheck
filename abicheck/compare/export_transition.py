@@ -32,13 +32,13 @@ reads and the ``Visibility.PUBLIC`` entry in
 from __future__ import annotations
 
 from collections.abc import Container
-from dataclasses import replace
 
 from ..diff_helpers import make_change
 from ..model import Function, Variable
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.edge_coverage import EdgeAnswer
+from ..model.fact import replace_with_fact_sync
 from ..model.surface_facts import (
     has_observed_contract_evidence,
     in_public_contract,
@@ -431,10 +431,12 @@ def regrade_unexported_params(
     ``FUNC_PARAMS_CHANGED``: an exported instantiation's ABI grading is not
     touched.
     """
-    if not (is_export_confirmed_absent(f_old) and is_export_confirmed_absent(f_new)):
+    if not any(c.kind is ChangeKind.FUNC_PARAMS_CHANGED for c in changes) or not (
+        is_export_confirmed_absent(f_old) and is_export_confirmed_absent(f_new)
+    ):
         return changes
     return [
-        replace(
+        replace_with_fact_sync(
             c,
             kind=ChangeKind.HEADER_ONLY_FUNCTION_PARAMS_CHANGED,
             description="Parameters changed (no exported symbol on either "

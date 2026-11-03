@@ -42,8 +42,8 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 | Verdict | Count | `checker_policy.py` set | Icon |
 |---------|-------|-------------------------|------|
 | BREAKING | 114 | `BREAKING_KINDS` | 🔴 |
-| API_BREAK | 21 | `API_BREAK_KINDS` | 🟠 |
-| COMPATIBLE_WITH_RISK | 38 | `RISK_KINDS` | 🟡 |
+| API_BREAK | 22 | `API_BREAK_KINDS` | 🟠 |
+| COMPATIBLE_WITH_RISK | 37 | `RISK_KINDS` | 🟡 |
 | COMPATIBLE (addition) | 12 | `ADDITION_KINDS` | 🟢 |
 | COMPATIBLE (quality) | 21 | `QUALITY_KINDS` | 🟡 |
 | NO_CHANGE | 18 | — | ✅ |
@@ -393,7 +393,7 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [119](cases/case119_internal_struct_field_removed_scoped/README.md) | Internal Struct Loses a Field (Non-Public, Scoped) | No Change | ✅ NO_CHANGE |
 | [120](cases/case120_internal_struct_reordered_scoped/README.md) | Internal Struct Fields Reordered (Non-Public, Scoped) | No Change | ✅ NO_CHANGE |
 | [121](cases/case121_kernel_btf_struct_field_added/README.md) | Kernel BTF Struct Field Growth | Breaking | 🔴 BREAKING |
-| [122](cases/case122_template_signature_uninstantiated/README.md) | Uninstantiated Template Signature Change | Risk | 🟡 COMPATIBLE_WITH_RISK |
+| [122](cases/case122_template_signature_uninstantiated/README.md) | Uninstantiated Template Signature Change | API Break | 🟠 API_BREAK |
 | [123](cases/case123_default_argument_removed/README.md) | Default Argument Removed | API Break | 🟠 API_BREAK |
 | [124](cases/case124_header_constant_value_changed/README.md) | Header Constant Value Changed | API Break | 🟠 API_BREAK |
 | [125](cases/case125_class_became_final/README.md) | Class Became `final` | API Break | 🟠 API_BREAK |

@@ -16,16 +16,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from .source_abi import SourceAbiSurface, SourceEntity
 from .source_extractors.concept_constraints import conjunctive_atoms
-
-
-def _loc(entity: SourceEntity) -> str:
-    from .source_diff import _loc as loc
-
-    return loc(entity)
 
 
 def _concept_constraint(entity: SourceEntity) -> str:
@@ -41,7 +37,11 @@ def _concepts_by_name(entities: list[SourceEntity]) -> dict[str, SourceEntity]:
     }
 
 
-def diff_concepts(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change]:
+def diff_concepts(
+    old: SourceAbiSurface,
+    new: SourceAbiSurface,
+    loc: Callable[[SourceEntity], str] = lambda entity: "",
+) -> list[Change]:
     """Detect changed C++20 concept constraints in the public surface.
 
     CastXML does not expose concepts; the L4 clang extractor emits
@@ -108,7 +108,7 @@ def diff_concepts(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change]:
                 description=description,
                 old_value=old_constraint,
                 new_value=new_constraint,
-                source_location=_loc(new_entity),
+                source_location=loc(new_entity),
             )
         )
     return changes

@@ -776,7 +776,7 @@ def classify_change_surface(
     # A confident private/system-header origin demotes even an exported symbol (leaked private header).
     if not type_level_finding:
         verdict = _classify_symbol_level(
-            local_entity_owner(sym, all_symbols),
+            local_entity_owner(sym, all_symbols) if sym[:3] in ("_ZZ", "_ZG") else sym,
             all_symbols,
             public_symbols,
             surf_old,

@@ -28,7 +28,7 @@ alone. The bounded middle: when ``language_standard`` is the only
 unexplained profile difference and **both** sides recorded it as
 auto-derived (``ast_toolchain["language_standard_explicit"] == "0"``), the
 comparison proceeds -- provided at least one side's standard was implied by
-its binary's build (``ast_toolchain["implied_options"]``), so the split has
+its binary's build (``ast_toolchain["language_standard_implied"]``), so the split has
 a build cause rather than the header-content heuristic -- and the ``declaration``/``layout`` dimensions the
 standard can affect are reported unverified, with the reason naming the
 input that completes the check. An explicit pin on either side, a legacy
@@ -53,10 +53,9 @@ def _auto_derived(snap: AbiSnapshot) -> bool:
 
 def _binary_implied_standard(snap: AbiSnapshot) -> bool:
     """Whether this side's ``-std=`` was implied by its own binary's build
-    (``extract/binary_dialect.record_implied_options``)."""
+    (stamped by ``extract/binary_dialect.record_implied_options``)."""
     toolchain = getattr(snap, "ast_toolchain", None) or {}
-    implied = str(toolchain.get("implied_options") or "").split()
-    return any(token.startswith("-std=") for token in implied)
+    return toolchain.get("language_standard_implied") == "1"
 
 
 def _standard(snap: AbiSnapshot) -> str:
