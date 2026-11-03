@@ -43,6 +43,10 @@ ALLOWLISTED_FILES: dict[str, str] = {
     # The same table for aggregate/project/deps, split out of rulings.py for
     # file size; registered through rulings.RULINGS_BY_COMMAND, never rendered.
     "frontends/cli/options/rulings_integration.py": "internal option-ruling rationale, test-only",
+    # ADR-062 D19's extension-fact catalog: each declaration's ``owner`` must
+    # name its deciding ADR (``ExtensionFact`` refuses one that does not). It
+    # is review metadata, never written to a document or rendered to a user.
+    "storage/extension_fact_catalog.py": "extension-fact owner ADRs, review metadata only",
 }
 
 

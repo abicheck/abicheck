@@ -242,7 +242,7 @@ EXPORT_READ: ExtensionFact[dict[str, str]] = ExtensionFact(
     section="binary",
     semantics=ReaderSemantics.SECTION_MUST_UNDERSTAND,
     absent_reads_as=(
-        "unrecorded: no record of the export-table read; the pre-ADR-079 rule "
+        "unrecorded: no record of the export-table read; the older rule "
         "(a block is read when it holds an export or its header was parsed) "
         "decides, never complete"
     ),
