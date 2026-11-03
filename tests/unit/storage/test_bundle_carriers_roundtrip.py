@@ -27,6 +27,7 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
+from abicheck.errors import SnapshotError
 from abicheck.model import AbiSnapshot, Function
 from abicheck.model.bundle_facts import BundleFacts
 from abicheck.serialization import (
@@ -138,11 +139,17 @@ def test_schema_version_5_exactly_when_a_member_is_sectioned(
     document, _blocked = case
     facts = _facts(snapshot_from_dict(copy.deepcopy(document)))
     stored = bundle_facts_to_dict(facts)
-    # Oracle: the flat document alone does not re-save as what was loaded.
-    flat = snapshot_from_dict(
-        snapshot_to_dict(snapshot_from_dict(copy.deepcopy(document)))
-    )
-    carries = _resaved(flat) != document
+    # Oracle: the flat document alone does not re-save as what was loaded --
+    # and since D14's residual closure the flat encoder refuses exactly then.
+    try:
+        flat = snapshot_from_dict(
+            snapshot_to_dict(snapshot_from_dict(copy.deepcopy(document)))
+        )
+    except SnapshotError:
+        carries = True
+    else:
+        carries = _resaved(flat) != document
+        assert not carries, "snapshot_to_dict flattened away stored state"
     assert stored["schema_version"] == (5 if carries else 2)
     assert ("sections" in stored["per_library_snapshots"]["libcarrier.so.1"]) == (
         carries

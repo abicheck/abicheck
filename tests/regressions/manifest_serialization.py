@@ -225,9 +225,12 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
         invariant=(
             "A snapshot extracted by an older extractor generation, compared "
             "against a fresh dump of identical source, reports no change and "
-            "carries a visible generation notice: the generation is stamped "
-            "on every single-file snapshot (absent reads as unstated, never "
-            "current), drift is decided by the one reader-compatibility "
+            "carries a visible generation notice in every container it is "
+            "stored in (single-file snapshot, G38 document, G40 archive, "
+            "ProjectSnapshot package -- a package assembled from stored "
+            "snapshots states the triple they agree on): the generation is "
+            "stamped on every single-file snapshot (absent reads as unstated, "
+            "never current), drift is decided by the one reader-compatibility "
             "owner, and every extractor generation records the stored type "
             "spellings it changed (or that it changed none), which the load "
             "path migrates at every position a type spelling is stored."
@@ -241,6 +244,9 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_generation_corpus.py",
             "tests/test_generation_drift_demotion.py",
             "tests/test_generation_corpus_gate.py",
+            "tests/test_container_corpus.py",
+            "tests/test_container_corpus_gate.py",
+            "tests/test_bundle_variants_capture.py",
         ),
     ),
     BugClass(
@@ -342,6 +348,7 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_bundle_blocked_section_compare.py",
             # state x section x side x file/package/live (2026-11-03)
             "tests/test_section_availability_matrix.py",
+            "tests/unit/storage/test_flat_mapping_writers.py",
         ),
         public_surfaces=("cli",),
         axes={
@@ -361,10 +368,14 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
                 "bundle-document",
                 "bundle-archive",
                 "bundle-package",
+                "flat-mapping-writer",
+                "baseline-set-package",
+                "probe-matrix-file",
             ),
             "producer": (
                 "imported-document",
                 "pe-pdb-parse-failure",
+                "dump-cli-write",
                 "record_section_availability",
             ),
             "side": ("old", "new"),
@@ -381,8 +392,11 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
         known_gaps=(
             KnownGap(
                 description=(
-                    "A flat snapshot_to_dict mapping handed to a package "
-                    "writer cannot say what carriers it lost."
+                    "Reader side: from_sectioned_document without "
+                    "carry_extensions returns a flat mapping without the "
+                    "carriers; its callers only peek, but the baseline-set "
+                    "content hash therefore ignores a blocked or failed "
+                    "section."
                 ),
                 reference="docs/contribute/known-gaps.md",
             ),

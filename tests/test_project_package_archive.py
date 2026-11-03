@@ -216,7 +216,7 @@ def test_resolve_input_reads_a_single_artifact_archive_like_its_directory(
 
     from abicheck.model import AbiSnapshot, Function, Visibility
     from abicheck.project_snapshot_legacy import write_legacy_snapshot_package
-    from abicheck.serialization import SCHEMA_VERSION, snapshot_to_dict
+    from abicheck.serialization import SCHEMA_VERSION
     from abicheck.workflows.input_resolution import (
         is_stored_snapshot_operand,
         resolve_input,
@@ -236,7 +236,7 @@ def test_resolve_input_reads_a_single_artifact_archive_like_its_directory(
     )
     pkg = tmp_path / "one"
     write_legacy_snapshot_package(
-        snapshot_to_dict(snap),
+        snap,
         pkg,
         artifact_id="libone.so",
         max_known_schema_version=SCHEMA_VERSION,
@@ -298,13 +298,13 @@ def test_generation_notice_names_the_operand_the_user_gave(
 
     from abicheck.model import AbiSnapshot
     from abicheck.project_snapshot_legacy import write_legacy_snapshot_package
-    from abicheck.serialization import SCHEMA_VERSION, snapshot_to_dict
+    from abicheck.serialization import SCHEMA_VERSION
     from abicheck.storage import versioning
     from abicheck.workflows.input_resolution import resolve_input
 
     pkg = tmp_path / "one"
     write_legacy_snapshot_package(
-        snapshot_to_dict(AbiSnapshot(library="libone.so", version="1")),
+        AbiSnapshot(library="libone.so", version="1"),
         pkg,
         artifact_id="libone.so",
         max_known_schema_version=SCHEMA_VERSION,

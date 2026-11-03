@@ -708,7 +708,7 @@ class ProvenanceSection(_SparseSectionMixin):
     #: `.language_profile`/`.git_commit`/`.git_tag`/`.created_at` are
     #: `str | None`; `.dependency_info` is `DependencyInfo | None`.
     #: `.dump_provenance` is a `dict` (or absent): `cli_dump_helpers
-    #: .fold_dump_provenance_into_dict` assigns it a `dict` literal, and the
+    #: .fold_dump_provenance` assigns it a `dict` literal, and the
     #: model carries it through a load -> save (`AbiSnapshot.dump_provenance`).
     #: Never `None` in a document: the encoder omits the key instead.
     OPTIONAL_FIELD_SHAPES: ClassVar[Mapping[str, str]] = {

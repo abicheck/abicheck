@@ -119,6 +119,7 @@ __all__ = [
     "merge_wire_extensions",
     "not_collected_reason",
     "refuse_blocked_identity",
+    "refuse_lossy_flattening",
     "refuse_unwritable_extensions",
     "section_blocking_reason",
     "split_wire_extensions",
@@ -413,10 +414,11 @@ def refuse_unwritable_extensions(snap: Any) -> None:
 
 def flattening_loses(snap: Any) -> bool:
     """Whether the flat `snapshot_to_dict` document of *snap* would lose
-    stored state: a failed or blocked section, an unknown section, header
-    or record extensions, a document-level must-understand list, or a
-    ``not_collected`` default-filled section (a flat document would write its
-    defaults, which read back as a collected-empty section)."""
+    stored state: a failed, not collected or blocked section, an unknown
+    section, header or record extensions, or a document-level
+    must-understand list. A flat document has no section absence: its D8
+    split emits every section, so a ``not_collected`` section would be
+    re-stored as ``present`` and empty."""
     carried = extensions_of(snap)
     if carried is None:
         return False
@@ -427,12 +429,61 @@ def flattening_loses(snap: Any) -> bool:
         or carried.header_extras
         or carried.record_extras
         or carried.document_must_understand
-        or any(
-            v["status"] == "failed"
-            or (v["status"] == "not_collected" and k in DEFAULT_FILLED_SECTION_KINDS)
-            for k, v in carried.availability.items()
-        )
+        or any(v["status"] != "present" for v in carried.availability.values())
     )
+
+
+def refuse_lossy_flattening(snap: Any) -> None:
+    """Refuse to flatten *snap* into a `snapshot_to_dict` document when that
+    document would lose stored state (:func:`flattening_loses`, or an
+    unreadable section with no carriers left to write it back from).
+
+    The flat document has no place for a failed or blocked section, an
+    unknown section, header or record extensions, or a document-level
+    must-understand list, and nothing downstream can tell that it lost them:
+    every writer that accepts a flat mapping (a directory package, a bundle
+    package, a baseline set, the sectioned document) would store it as
+    complete. Refusing here, where the flat document is made, keeps every
+    flat mapping lossless by construction. A writer of such a snapshot takes
+    the `AbiSnapshot` itself."""
+    refuse_unwritable_extensions(snap)
+    if flattening_loses(snap):
+        carried = extensions_of(snap)
+        assert carried is not None  # flattening_loses implies carriers
+        raise SnapshotError(
+            "Snapshot carries stored state a flat snapshot_to_dict "
+            f"document cannot hold ({_carried_summary(carried)}); refusing to "
+            "flatten it, which would store that state as lost without saying "
+            "so. Write the AbiSnapshot itself (save_snapshot/write_snapshot, "
+            "write_legacy_snapshot_package, a BundleFacts writer) instead."
+        )
+
+
+def _carried_summary(carried: WireExtensions) -> str:
+    parts: list[str] = []
+    failed = sorted(
+        k for k, v in carried.availability.items() if v["status"] == "failed"
+    )
+    if failed:
+        parts.append(f"failed section(s) {failed}")
+    not_collected = sorted(
+        k for k, v in carried.availability.items() if v["status"] == "not_collected"
+    )
+    if not_collected:
+        parts.append(f"not collected section(s) {not_collected}")
+    blocked = sorted({k for k, _ in carried.unreadable} - set(failed))
+    if blocked:
+        parts.append(f"blocked section(s) {blocked}")
+    unknown = sorted(set(carried.passthrough_sections) - set(failed))
+    if unknown:
+        parts.append(f"section(s) kept verbatim {unknown}")
+    if carried.header_extras:
+        parts.append(f"header extensions on {sorted(carried.header_extras)}")
+    if carried.record_extras:
+        parts.append("record extensions")
+    if carried.document_must_understand:
+        parts.append("a document-level must_understand list")
+    return "; ".join(parts) or "carriers"
 
 
 def not_collected_reason(kind: str, diagnostics: list[str]) -> str:

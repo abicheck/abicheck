@@ -559,7 +559,7 @@ class AbiSnapshot:
         default=None, repr=False, compare=False, kw_only=True
     )
     # The ``dump_provenance`` block the ``dump`` write path folds into the
-    # document (``cli_dump_helpers.fold_dump_provenance_into_dict``): how this
+    # document (``cli_dump_helpers.fold_dump_provenance``): how this
     # snapshot was produced -- requested/effective depth, frontend, toolchain.
     # Carried on the model so ``load_snapshot`` -> ``save_snapshot`` keeps it
     # verbatim (ADR-066: the snapshot carries this block; a re-save never
