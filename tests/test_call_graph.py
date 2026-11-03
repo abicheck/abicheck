@@ -1184,9 +1184,9 @@ def test_run_ast_passes_unredacts_home_placeholder_in_source_and_cwd(
 
     _run_call_pass(build)
 
-    cmd = captured["cmd"]
-    assert cmd[-1] == f"{home}/AppData/Local/Temp/t.cpp"
-    assert captured["cwd"] == f"{home}/AppData/Local/Temp"
+    tmp = os.path.normpath(f"{home}/AppData/Local/Temp")  # host separators
+    assert os.path.normpath(captured["cmd"][-1]) == os.path.join(tmp, "t.cpp")
+    assert os.path.normpath(captured["cwd"]) == tmp
 
 
 def test_run_ast_passes_empty_stdout(monkeypatch) -> None:

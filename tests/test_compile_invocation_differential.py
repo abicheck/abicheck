@@ -23,7 +23,8 @@ To regenerate after a deliberate, reviewed change: run
 from __future__ import annotations
 
 import json
-from pathlib import Path
+import sys
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 import pytest
@@ -54,6 +55,27 @@ _GOLDEN = _DATA / "clang_argv_golden.json"
 #: the host-only append). All reach ``clang_command`` with the same
 #: ``compiler_binary=None``, so only the driver token differs.
 _CLANG_BINS = ("clang", "clang++", "icpx")
+
+
+#: The argv goldens were recorded on a POSIX host from a corpus of POSIX-rooted
+#: paths, and pin every rendered byte. Windows resolves each entry's ``file``
+#: onto the current drive (``/work/x.c`` -> ``D:\\work\\x.c``) and renders paths
+#: with its own separator, so no row can match there; the operand and routing
+#: rules they guard are platform-independent and their oracle tests below run
+#: on every lane through :func:`corpus_spelling`. Same rule as
+#: ``test_compile_db_operand_routing.py``.
+POSIX_HOST_GOLDEN = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="argv golden recorded on a POSIX host pins POSIX absolute paths",
+)
+
+
+def corpus_spelling(path: str) -> str:
+    """*path* as the POSIX corpus spells it: the drive Windows resolved a
+    POSIX-rooted path onto is dropped and either separator is read as ``/``.
+    The identity for a POSIX path, on every host."""
+    win = PureWindowsPath(path)
+    return win.as_posix().removeprefix(win.drive)
 
 
 def _render_unit(cu: Any) -> dict[str, Any]:
@@ -99,6 +121,7 @@ def test_corpus_covers_every_unit_the_plan_names() -> None:
     assert all("ast[clang]" in row or "error[clang]" in row for row in rows.values())
 
 
+@POSIX_HOST_GOLDEN
 def test_rendered_clang_argv_matches_pre_change_golden() -> None:
     golden = json.loads(_GOLDEN.read_text(encoding="utf-8"))
     assert render_corpus() == golden

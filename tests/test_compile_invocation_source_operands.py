@@ -38,7 +38,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from test_compile_invocation_differential import _render_unit
+from test_compile_invocation_differential import (
+    POSIX_HOST_GOLDEN,
+    _render_unit,
+    corpus_spelling,
+)
 
 from abicheck.buildsource.adapters.compile_db import CompileDbAdapter
 from abicheck.buildsource.source_extractors.compile_action import (
@@ -80,6 +84,7 @@ def _render_corpus() -> dict[str, dict[str, Any]]:
     }
 
 
+@POSIX_HOST_GOLDEN
 def test_consumer_argv_matches_pre_change_golden() -> None:
     golden = json.loads(_GOLDEN.read_text(encoding="utf-8"))
     assert _render_corpus() == golden
@@ -152,7 +157,11 @@ def test_source_operands_match_hand_written_oracle(
     link_inputs: list[str],
 ) -> None:
     evidence = CompileDbAdapter(_CORPUS).collect()
-    cu = next(unit for unit in evidence.compile_units if unit.source == source)
+    cu = next(
+        unit
+        for unit in evidence.compile_units
+        if corpus_spelling(unit.source) == source
+    )
     inv = parse_compile_invocation(cu)
     assert inv.action is action
     assert [

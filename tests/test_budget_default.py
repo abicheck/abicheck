@@ -77,6 +77,22 @@ def frozen(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(deadline, "_clock", lambda: 0.0)
 
 
+@pytest.fixture
+def no_fork_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The pool's ``multiprocessing.get_context("fork")`` returns a stand-in.
+
+    These tests replace ``fork_child``, so the context is never used; but
+    ``fork`` does not exist on Windows (or is not the macOS default), where
+    the real lookup raises ``ValueError`` before the fake fork is reached.
+    The pool itself only runs where ``fork_is_safe()`` holds (Linux).
+    """
+    monkeypatch.setattr(
+        keyed_process_pool,
+        "multiprocessing",
+        SimpleNamespace(get_context=lambda method: SimpleNamespace(method=method)),
+    )
+
+
 # -- the default, as a value ---------------------------------------------------
 
 
@@ -375,6 +391,7 @@ def test_side_isolation_read_is_bounded(
 def test_release_member_pool_wait_is_bounded(
     monkeypatch: pytest.MonkeyPatch,
     frozen: None,
+    no_fork_context: None,
     scope: float | None,
     expected_bound: float,
 ) -> None:
@@ -471,6 +488,7 @@ def test_an_already_expired_deadline_waits_on_nothing(
 def test_release_member_pool_stops_a_member_whose_read_expires(
     monkeypatch: pytest.MonkeyPatch,
     frozen: None,
+    no_fork_context: None,
     silent_reads: list[tuple[Any, float]],
 ) -> None:
     """A member already taken off the running set (its pipe was ready) is

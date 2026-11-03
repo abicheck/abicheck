@@ -196,12 +196,12 @@ def test_cli_markdown_and_digest_gating_follow_the_preset(
         ],
     )
     assert res.exit_code == exit_code, res.output
-    document = json.loads(js.read_text())
+    document = json.loads(js.read_text(encoding="utf-8"))
     assert sum(g["gating_findings"] for g in document["review_groups"]) == gating
     assert document["result_counts"]["gating"] == gating
     groups = len(document["review_groups"])
-    assert f"; {gating} gating finding(s)." in md.read_text()
+    assert f"; {gating} gating finding(s)." in md.read_text(encoding="utf-8")
     assert (
         f"**Review:** {gating} gating finding(s) in {gating} gating group(s); "
-        f"{groups} retained group(s) total" in review.read_text()
+        f"{groups} retained group(s) total" in review.read_text(encoding="utf-8")
     )

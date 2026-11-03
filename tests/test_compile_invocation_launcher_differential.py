@@ -28,7 +28,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from test_compile_invocation_differential import _render_unit
+from test_compile_invocation_differential import (
+    POSIX_HOST_GOLDEN,
+    _render_unit,
+    corpus_spelling,
+)
 
 from abicheck.buildsource.adapters.compile_db import CompileDbAdapter
 
@@ -43,6 +47,7 @@ def render_launcher_corpus() -> dict[str, dict[str, object]]:
     return {cu.source: _render_unit(cu) for cu in evidence.compile_units}
 
 
+@POSIX_HOST_GOLDEN
 def test_launcher_corpus_matches_pre_change_golden() -> None:
     golden = json.loads(_GOLDEN.read_text(encoding="utf-8"))
     assert render_launcher_corpus() == golden
@@ -61,5 +66,6 @@ def test_launcher_rows_drop_every_launcher_token() -> None:
 
 
 def test_nested_env_chdir_composes_onto_the_recorded_directory() -> None:
-    row = render_launcher_corpus()["/work/src/env_nested.cpp"]
-    assert row["run_directory"] == "/work/rel/build/sub"
+    rows = {corpus_spelling(k): v for k, v in render_launcher_corpus().items()}
+    row = rows["/work/src/env_nested.cpp"]
+    assert corpus_spelling(row["run_directory"]) == "/work/rel/build/sub"
