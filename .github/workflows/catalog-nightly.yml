@@ -1,0 +1,102 @@
+name: Catalog Nightly
+
+# The whole catalog under every artifact variant in tests/validate_examples.py's
+# ARTIFACT_VARIANTS. examples-validation.yml runs the full catalog only for the
+# header variants and a fixed build-source case set, so a build-source
+# regression elsewhere in the catalog went unseen; this lane closes that and
+# gates on scripts/check_catalog_ratchet.py against catalog/nightly_baseline.json.
+# A separate report-only step measures the default public contract
+# (--contract-scope public) against the legacy per-case scope.
+on:
+  schedule:
+    # 04:37 UTC (~20:37/21:37 PT): outside the 06:00-09:00 PT busy window.
+    - cron: "37 4 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.run_id }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  catalog:
+    name: Full catalog (all artifact variants)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    env:
+      # Repository-owned fixtures only; without it source_smoke cases SKIP.
+      ABICHECK_TRUSTED_SOURCE_SMOKE_RUN: "1"
+      CC: gcc
+      CXX: g++
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Install system deps
+        uses: ./.github/actions/install-system-deps
+        with:
+          packages: gcc g++ cmake binutils curl ca-certificates
+
+      - uses: ./.github/actions/setup-castxml
+
+      - uses: ./.github/actions/cache-ast-dumps
+        with:
+          key-suffix: nightly
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+        with:
+          python-version: "3.14"
+          cache: "pip"
+
+      - name: Install test deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      # Every lane runs even when an earlier one fails; the ratchet decides.
+      - name: Validate full catalog, every artifact variant
+        run: |
+          mkdir -p results
+          variants=$(PYTHONPATH=. python -c "import sys; sys.path.insert(0, 'tests'); import validate_examples as v; print(' '.join(v.ARTIFACT_VARIANTS))")
+          for v in $variants; do
+            set +e
+            PYTHONPATH=. python tests/validate_examples.py --artifact-variant "$v" --jobs 0 --json \
+              > "results/validate_examples-$v.json"
+            echo "$v run rc=$?"
+            set -e
+          done
+
+      - name: Public-contract lane (report-only)
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        run: |
+          set +e
+          PYTHONPATH=. python tests/validate_examples.py --contract-scope public --jobs 0 --json \
+            > results/validate_examples-public.json
+          echo "public run rc=$?"
+          python scripts/catalog_scope_diff.py results/validate_examples-debug-headers.json \
+            results/validate_examples-public.json > results/scope-diff.md
+          cat results/scope-diff.md >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: catalog-nightly
+          path: results/
+          retention-days: 30
+
+      - name: Ratchet against catalog/nightly_baseline.json
+        if: ${{ !cancelled() }}
+        run: |
+          python scripts/check_catalog_ratchet.py \
+            results/validate_examples-debug-headers.json \
+            results/validate_examples-release-headers.json \
+            results/validate_examples-stripped-headers.json \
+            results/validate_examples-build-source.json
