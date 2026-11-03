@@ -1,7 +1,7 @@
 # ADR-079: Recording a Partial Export-Table Read in the Stored Snapshot
 
 **Date:** 2026-10-12
-**Status:** Accepted — not implemented (accepted 2026-11-02). Written for the known gap
+**Status:** Accepted — not implemented (accepted 2026-11-02; amended 2026-11-03: stored as an ADR-062 D19 extension fact on the `binary` section, superseding D5's global bump). Written for the known gap
 [`a-stored-snapshot-keeps-no-record-of-a-partial-export-table-read`](../known-gaps/a-stored-snapshot-keeps-no-record-of-a-partial-export-table-read.md).
 Accepts one snapshot field and a schema bump, with D4 and D5 as proposed
 (a `partial` read lowers scope completeness, no new exit code; old readers
@@ -121,3 +121,17 @@ the same mechanism v42 used for the envelope change, and does not raise
   from the version number.
 - A mutation test on the reader's mapping, so that flipping `partial` to
   `complete` fails a test.
+
+## Amendment (2026-11-03): stored as an extension fact (ADR-062 D19)
+
+[ADR-062 D19](062-project-snapshot-storage-v2.md#d19-an-optional-new-fact-is-a-declared-extension-fact)
+reserves the global `SCHEMA_VERSION` for envelope and wire changes. Under it,
+`export_read` is declared in `storage/extension_fact_catalog.py` as an
+extension fact on the `binary` section, keyed by platform, with
+`SECTION_MUST_UNDERSTAND` semantics and `must_understand_when` true for any
+non-`complete` value. This replaces D5's global bump: a dump whose reads were
+complete is readable by every older reader, and one with a `partial` or
+`failed` read blocks only the analyses that read `binary` in an older reader
+instead of refusing the document. D2 still holds (a `complete` read is not
+written), D3's `unrecorded` is the fact's `NOT_COLLECTED`, and D1 and D4 are
+unchanged.

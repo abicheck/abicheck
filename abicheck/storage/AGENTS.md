@@ -69,6 +69,7 @@ Seven primitives (four Phase 0, three Phase 1), plus the internal `guards.py`; e
 | `import_v1.py` | `import_legacy_snapshot`/`export_legacy_snapshot` — the v1-v25 import adapter (A1.2/A1.3): one already-serialized legacy document, reshaped into a one-artifact `PackageManifest`, and its exact inverse |
 | `import_bundle_facts.py`, `import_baseline_set.py` | A1.4 (ADR-063 Track C 8B): fold a G38 `BundleFacts` document (resp. a baseline set's `manifest.json` + snapshots) onto `VariantRef.sections`, calling `import_v1` once per library |
 | `guards.py` | the value guards all seven apply at their doors — internal, not re-exported (invariant 6) |
+| `extension_fact_catalog.py`, `extension_facts.py` | ADR-062 D19: `ExtensionFact`/`ReaderSemantics`/`EXTENSION_FACTS`, the declared catalog of optional facts stored in a section header's D14 `extensions` map, and `write_extension_fact`/`read_extension_fact`. **A new optional persisted fact goes here, not behind a `SCHEMA_VERSION` bump**; a bump needs a `SCHEMA_BUMP_REASONS` row (`snapshot_schema_versions.py`, gated by `scripts/schema_bump_gate.py`) |
 
 ## Invariants this package must not break
 
@@ -132,10 +133,9 @@ Seven primitives (four Phase 0, three Phase 1), plus the internal `guards.py`; e
 
 ## Tests
 
-`tests/test_bundle_archive.py` and
-`tests/test_bundle_archive_writer_hardening.py` (`BundleArchiveWriter`'s
-temp-file/security/metadata hardening — split out to keep both under the
-ADR-061 1200-line test cap); `tests/unit/storage/` for the ADR-062
+`tests/test_bundle_archive.py` and `tests/test_bundle_archive_writer_hardening.py`
+(`BundleArchiveWriter`'s temp-file/security/metadata hardening — split out to
+keep both under the ADR-061 1200-line test cap); `tests/unit/storage/` for the ADR-062
 primitives. A reusable primitive here gets a property-style test class
 stating its contract as invariants — see the root `AGENTS.md`
 "Primitive-level property tests" for why example-only tests are not
