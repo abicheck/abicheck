@@ -1208,8 +1208,10 @@ A1.9), item by item. Open items are also listed in
   N=4 498 MiB, N=8 611 MiB: still growing with N although the fan-out loads
   one pair at a time. tracemalloc attributes about 5 MiB of live memory per
   finished member (1.5k-function members) to parsed-JSON objects, decoded
-  ELF symbols, public-header type graphs and execution-cache entries; site
-  list in known-gaps. **A2.5 still not met**; the per-section streamed
+  ELF symbols, public-header type graphs
+  (`contract_evidence_collect.build_type_graph`) and execution-cache entries
+  (`elf_facts` alias index, `elf_symbol_filter`, `diff_namespaces`); the rest
+  is allocator high-water. **A2.5 still not met**; the per-section streamed
   parse, `BundleFacts` lazy members and the evidence-keyed decoded-section
   cache were not started, because the measured growth is not in the parse.
 

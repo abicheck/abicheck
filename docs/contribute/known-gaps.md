@@ -321,39 +321,22 @@ per-item status in the
   full compare decodes the cell anyway, and peak RSS is set by the
   whole-document `json.loads` (140 MiB synthetic snapshot: 419 MiB peak
   before and after; 8-library project compare 393 vs 391-406 MiB); (4)
-  per-pair release of decoded sections and the shared `evidence`-keyed
-  decoded-section cache are not built: no consumer path yet reads a section
-  it could share or release early (`BundleFacts` holds every member
-  decoded). Closing (3) needs a streamed or per-section parse so a raw
-  section is not held as parsed JSON, and a release fan-out that loads
-  members one pair at a time. Measurements: the plan's A1.9 D18 entry.
-  2026-10-31 re-measurement: the release fan-out already loads one pair at
-  a time and keeps only compact per-member evidence
-  (`release_snapshot_retention`), yet peak RSS still grows with the member
-  count (53 MiB members, 6k functions: N=1 304 MiB, N=4 498 MiB, N=8
-  611 MiB). tracemalloc (1.5k-function members) shows about 5 MiB of live
-  memory kept per finished member, spread over parsed-JSON objects, decoded
-  ELF symbols, both sides' public-header type graphs
-  (`contract_evidence_collect.build_type_graph`) and execution-cache
-  entries (`elf_facts` alias index, `elf_symbol_filter`,
-  `diff_namespaces`); the rest of the growth is allocator high-water. Each
-  site needs its own owner decision (result data versus a cache that
-  outlives its pair) before A2.5 can be met.
+  the shared `evidence`-keyed decoded-section cache is not built (no
+  consumer reads a section it could share), and a stored `BundleFacts`
+  comparison still holds every `per_library_snapshots` member decoded.
+  Closing (3) needs a streamed or per-section parse so a raw section is not
+  held as parsed JSON. Measurements: the plan's A1.9 D18 entry.
   **Decision 2026-11-02 (maintainer): the target for (3) is that release
   fan-out peak memory does not grow with member count, bounded by the
   largest member (about 8x its decoded size); the streaming decode is
-  deferred.** Status after the packed contract type graph (2026-11-02): the
-  dominant per-member term above -- both sides' public-header type graphs,
-  ~75% of what a finished member kept -- is now held packed
-  (`contract_evidence.TypeGraphSnapshot`). `compare old/ new/` over 6000-
-  function members, N=1/4/8: default fan-out (member processes) flat on both
-  revisions (262/248/262 MiB); in-process, one thread, 248/276/308 ->
-  245/264/272 MiB. Still open: (a) ~0.19 MiB per 1000 declarations stays per
-  finished member by design (packed graph, public-declaration roots, compact
-  bundle evidence), so an in-process fan-out still grows slowly with N;
-  (b) concurrent in-process members raise the peak by the worker count
-  (311 -> ~465 MiB from N=1 to N=4 with default threads), bounded by
-  workers, not N. Measurements: plan A2.5.
+  deferred.** The release fan-out already loads and drops one pair at a
+  time; what grew with N was per-member retention, ~75% of it both sides'
+  contract type graphs, now held packed (`contract_evidence.TypeGraphSnapshot`).
+  Still open: ~0.19 MiB per 1000 declarations stays per finished member by
+  design (packed graph, public-declaration roots, compact bundle evidence),
+  so an in-process fan-out still grows slowly with N, and concurrent
+  in-process members raise the peak by the worker count, not by N.
+  Before/after figures: plan A2.5.
   Per-section parse measurements: on a 140 MiB synthetic sectioned snapshot the parsed tree is 226 MiB and
   `declarations` holds 85% of the text; the decoded snapshot is 43 MiB.
   Ceilings (tracemalloc): today's text plus whole tree 359 MiB; whole text

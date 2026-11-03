@@ -179,6 +179,14 @@ class InputIdentity:
             )
 
 
+#: ``TypeGraphSnapshot``'s payload codec error handler. A name may hold a
+#: lone surrogate (decoded from a JSON ``\ud800`` escape), which strict UTF-8
+#: cannot encode. ``surrogatepass`` keeps every code point as itself; escaping
+#: to ASCII instead would let ``json.loads`` join two separate surrogate code
+#: points into one astral character, merging two distinct names.
+_SURROGATES = "surrogatepass"
+
+
 class TypeGraphSnapshot:
     """Raw, policy-independent type nodes/edges observed by one provider
     (plan Section 5.1: ``type_graph: {nodes: [], edges: []}``).
@@ -254,10 +262,12 @@ class TypeGraphSnapshot:
         payload = json.dumps(
             [names, node_ix, edge_ix], ensure_ascii=False, separators=(",", ":")
         )
-        object.__setattr__(self, "_packed", zlib.compress(payload.encode(), 1))
+        packed = zlib.compress(payload.encode("utf-8", _SURROGATES), 1)
+        object.__setattr__(self, "_packed", packed)
 
     def _unpack(self) -> tuple[list[str], list[int], list[int]]:
-        names, node_ix, edge_ix = json.loads(zlib.decompress(self._packed))
+        text = zlib.decompress(self._packed).decode("utf-8", _SURROGATES)
+        names, node_ix, edge_ix = json.loads(text)
         return names, node_ix, edge_ix
 
     @property
