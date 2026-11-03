@@ -33,6 +33,12 @@ EXPECTED_CASE_IDS = frozenset(
     {
         "case01_symbol_removal",
         "case04_no_change",
+        # C library whose compile DB carries a C -std= and whose header has a
+        # guarded extern "C"; and a build that force-includes the compared
+        # header. Both failed only in this lane and went unseen while it ran
+        # ten other cases.
+        "case28_typedef_opaque",
+        "case40_field_layout",
         "case98_cxx_standard_floor_raised",
         "case105_concept_tightening",
         "case122_template_signature_uninstantiated",

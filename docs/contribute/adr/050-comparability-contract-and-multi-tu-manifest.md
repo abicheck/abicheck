@@ -2542,6 +2542,36 @@ discipline forbids.
 states the same identity at the producer boundary; its validator checks it
 agrees with the target's attribution evidence.
 
+## Amendment (2026-11-03): a binary-implied dialect difference bounds, not refuses
+
+**Trigger.** Since the header parse takes its `-std=` from each binary's DWARF
+producer (#1778), two builds of one library under C++17 and C++20 were parsed
+under different dialects and refused as `profile_mismatch` (exit 16, no
+verdict), although no user chose different analysis modes
+(catalog case98; the open known gap "case98 release-headers is refused as a
+profile mismatch since 44473ffcb").
+
+**Decision.** When `language_standard` is the *only* unexplained profile
+difference, **both** sides recorded it as auto-derived
+(`ast_toolchain["language_standard_explicit"] == "0"`), and **at least one**
+side's standard was implied by its binary's own build
+(`ast_toolchain["language_standard_implied"] == "1"`, stamped by `extract/binary_dialect.py`), the D2 gate returns a
+non-fatal `ComparabilityMismatch`: the comparison yields a verdict, and the
+`declaration`/`layout` dimensions the standard can affect are reported
+unverified in `comparability_assurance`, with a `coverage_warnings` reason
+that names both standards and the inputs that complete the check
+(`--set compile.std=<std>` on both dumps; `--build-info` for the build-floor
+question). Owner: `compare/auto_derived_standard.py`.
+
+**Unchanged.** An explicit pin on either side, a legacy snapshot without the
+provenance stamp, a split caused only by the header-content heuristic or the
+default probe (no binary-implied standard), and any other differing field keep
+the refusal. No build fact is read or invented: whether the product's standard
+floor changed is still decided only by L3 build evidence
+(`abi_relevant_build_flag_changed`). Exit codes are unchanged for every pair
+the gate refused for another reason; a bounded pair exits by its verdict, as
+every other non-fatal axis already does.
+
 ## References
 
 - `abicheck/model.py` — `AbiSnapshot`, `ScopeOrigin` (`:131-147`)

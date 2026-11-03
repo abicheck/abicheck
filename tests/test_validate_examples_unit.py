@@ -1052,10 +1052,39 @@ class TestParallelRunAllCases:
 
         monkeypatch.setattr(runner, "ProcessPoolExecutor", _recording)
         monkeypatch.setattr(ve, "PREFERRED_FAMILY", "clang")
+        monkeypatch.setattr(ve, "CONTRACT_SCOPE", "public")
         verdicts = self._verdicts(3)
         ve._run_all_cases(list(verdicts), verdicts, json_out=True, jobs=2)
         assert seen["initializer"] is ve._init_worker
-        assert seen["initargs"] == ("clang",)
+        assert seen["initargs"] == ("clang", "public")
+
+
+@pytest.mark.parametrize(
+    ("contract_scope", "scoped_case", "has_config"),
+    [
+        ("legacy", False, True),
+        ("legacy", True, False),
+        ("public", False, False),
+        ("public", True, False),
+    ],
+)
+def test_contract_scope_controls_no_scope_config(
+    monkeypatch: pytest.MonkeyPatch,
+    contract_scope: str,
+    scoped_case: bool,
+    has_config: bool,
+) -> None:
+    """``--contract-scope public`` drops the unscoped config for every case;
+    ``legacy`` keeps each case's authored scope."""
+    monkeypatch.setattr(ve, "CONTRACT_SCOPE", contract_scope)
+    for cmd in (
+        ve._build_compare_direct_cmd(
+            Path("a.so"), Path("b.so"), None, None, scoped_case
+        ),
+        ve._build_compare_cmd(Path("a"), Path("b"), scoped_case, None, None),
+    ):
+        assert ("--config" in cmd) is has_config
+        assert (str(NO_SCOPE_CONFIG) in cmd) is has_config
 
 
 # ---------------------------------------------------------------------------

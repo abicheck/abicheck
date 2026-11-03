@@ -1,5 +1,17 @@
 # case98 release-headers is refused as a profile mismatch since 44473ffcb
 
+**Status (2026-11-03): CLOSED** by the ADR-050 amendment of 2026-11-03.
+A pair whose dialects were both auto-derived, with at least one implied by its
+binary's build, now gets a verdict with `declaration`/`layout` reported
+unverified and the remedy named (`--set compile.std=<std>`, `--build-info`).
+Explicit pins and content-heuristic splits still refuse. Measured on the
+debug build of case98: before, exit 16 `profile_mismatch`; after, exit 0
+`NO_CHANGE` with the two dimensions unverified. The same-standard re-dump
+gives `NO_CHANGE` at full assurance, and L3 build data gives
+`abi_relevant_build_flag_changed` (COMPATIBLE_WITH_RISK).
+
+Original report follows.
+
 **Status (2026-10-25): OPEN.** Behavior change, not yet ruled on.
 
 Since commit `44473ffcb` (#1778, "infer C++ dialect and target flags from

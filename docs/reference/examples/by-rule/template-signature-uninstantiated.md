@@ -7,5 +7,5 @@ _Canonical rule slug:_ `template-signature-uninstantiated`. [← back to all rul
 
 ## Canonical demonstration
 
-- [case122_template_signature_uninstantiated](../case122_template_signature_uninstantiated.md) — Uninstantiated Template Signature Change (🟡 COMPATIBLE_WITH_RISK)
+- [case122_template_signature_uninstantiated](../case122_template_signature_uninstantiated.md) — Uninstantiated Template Signature Change (🟠 API_BREAK)
 

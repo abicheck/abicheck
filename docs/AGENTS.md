@@ -405,6 +405,7 @@ python scripts/gen_backend_capability_matrix.py  # docs/reference/header-backend
 python scripts/gen_fact_capability_matrix.py      # docs/reference/fact-registry.md
 python scripts/gen_catalog_coverage_report.py     # docs/contribute/catalog-coverage.md (rule/variant/scenario/ecosystem/workflow coverage)
 python scripts/gen_abi_taxonomy_coverage.py       # docs/contribute/abi-taxonomy-coverage.md (per-taxonomy-leaf learn/case/detector mapping + coverage status)
+python scripts/changekind_real_coverage.py        # docs/contribute/changekind-real-coverage.md (per-ChangeKind real end-to-end evidence sources)
 python scripts/gen_agent_skills.py        # .agents/skills/, .claude/skills/, .gemini/skills/ (from skills-src/)
 ```
 

@@ -245,7 +245,7 @@
     "abicheck/model/stdlib_surface.py(stdlib_namespaces_excluded)": 256,
     "abicheck/model/surface_facts.py(_legacy_header_evidence)": 560,
     "abicheck/model/surface_facts.py(_tri)": 328,
-    "abicheck/model/surface_facts.py(binary_exported)": 6428,
+    "abicheck/model/surface_facts.py(binary_exported)": 6526,
     "abicheck/model/surface_facts.py(declaration_confirmed_absent)": 2682,
     "abicheck/model/surface_facts.py(declared_in_headers)": 6096,
     "abicheck/model/surface_facts.py(in_public_contract)": 7810,
@@ -253,9 +253,9 @@
     "abicheck/model/surface_facts.py(in_source_declaration_index)": 2682,
     "abicheck/model/surface_facts.py(is_abi_visible)": 1932,
     "abicheck/model/surface_facts.py(is_binary_exported)": 5216,
-    "abicheck/model/surface_facts.py(is_confirmed_false)": 7499,
+    "abicheck/model/surface_facts.py(is_confirmed_false)": 7597,
     "abicheck/model/surface_facts.py(is_confirmed_true)": 14635,
-    "abicheck/model/surface_facts.py(is_export_confirmed_absent)": 204,
+    "abicheck/model/surface_facts.py(is_export_confirmed_absent)": 302,
     "abicheck/model/surface_facts.py(is_export_table_only_record)": 4290,
     "abicheck/model/surface_facts.py(is_header_declared)": 2682,
     "abicheck/model/surface_facts.py(is_public_export)": 612,
@@ -306,5 +306,5 @@
   },
   "mode": "default",
   "n": 40,
-  "total": 239939
+  "total": 240233
 }

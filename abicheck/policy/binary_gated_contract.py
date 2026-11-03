@@ -128,6 +128,9 @@ BINARY_GATED: frozenset[ChangeKind] = frozenset(
 #: binary-only input does not carry. The reason names that input.
 NON_BINARY_REASONS: Mapping[ChangeKind, str] = {
     ChangeKind.CONCEPT_TIGHTENED: "L4 source replay (buildsource/source_diff)",
+    ChangeKind.HEADER_ONLY_FUNCTION_PARAMS_CHANGED: (
+        "a header-AST declaration with a confirmed-absent export, or L4 replay"
+    ),
     ChangeKind.CONSTEXPR_VALUE_CHANGED: "L4 source replay (buildsource/source_diff)",
     ChangeKind.DEFAULT_ARGUMENT_CHANGED: "L4 source replay (buildsource/source_diff)",
     ChangeKind.PUBLIC_MACRO_REMOVED: "preprocessor macros: L4 source replay",

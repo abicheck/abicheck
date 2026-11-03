@@ -84,7 +84,7 @@ COMPARISON_CONTRACT_VERSION = 1
 #: every package this build writes and passed by every reader, so a package
 #: produced under different extraction semantics is reported, never refused.
 #: Bump it when what an extractor records for the same input changes.
-EXTRACTOR_GENERATION = 34
+EXTRACTOR_GENERATION = 35
 
 #: This build's resolution semantics generation (ADR-062 D2): provider
 #: selection, alias normalization, symbol-version handling, reachability.
@@ -97,7 +97,7 @@ RESOLVER_GENERATION = 3
 #: not drift an L2 (binary plus headers) package. Stamped only on a package
 #: that carries source-tier facts. Bump it when what those extractors or passes
 #: record for the same input changes.
-SOURCE_GENERATION = 12
+SOURCE_GENERATION = 13
 
 #: Substring every generation-drift notice carries, so a consumer can filter
 #: ``coverage_warnings`` for it.

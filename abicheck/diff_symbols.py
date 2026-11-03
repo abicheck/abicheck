@@ -322,7 +322,7 @@ def _check_function_signature(
         is_llp64=is_llp64,
     )
     changes.extend(_export_transition.check_function(mangled, f_old, f_new))
-    return changes
+    return _export_transition.regrade_unexported_params(changes, f_old, f_new)
 
 
 def _check_inline_transitions(
@@ -787,7 +787,7 @@ def _diff_variables(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     return diff_by_key(
         SymbolIdentityIndex.for_variables(old_vars),
         new_vars_index,
-        on_removed=removed_variable(TemplateInstanceAbsence(new, old)),
+        on_removed=removed_variable(TemplateInstanceAbsence(new, old), old),
         on_added=_var_added,
         on_common=lambda m, o, n: _check_variable(
             m,

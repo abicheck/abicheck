@@ -72,6 +72,7 @@ from ..source_abi import (
     coverage_state_for_family,
     default_fact_set,
 )
+from ..template_signature import template_relations
 from ._argv import resolve_read_files, unredact_home
 from ._deadline_bound import run_bounded_for_extraction
 from .base import SourceExtractionError
@@ -137,6 +138,7 @@ from .clang_public_roots import (  # noqa: F401
     clang_cache_identity_extra,
 )
 from .clang_source_edges import build_source_edges
+from .concept_constraints import emit_concept as _emit_concept
 from .launcher_env import effective_directory
 
 #: clang extractor schema/behaviour version, recorded in the dump provenance and
@@ -477,37 +479,6 @@ def _walk(
     )
 
 
-def _emit_concept(
-    node: dict[str, Any],
-    ctx: _ClassifyContext,
-    tu: SourceAbiTu,
-    scope: list[str],
-    file: str,
-) -> None:
-    visibility, origin, public = ctx.classify(file)
-    if not public:
-        return
-    name = _qualified(scope, str(node.get("name", "")))
-    constraint_hash = _subtree_hash(node)
-    loc = _location(file, _node_line(node), origin)
-    tu.functions.append(
-        SourceEntity(
-            id=_hash("concept", name, constraint_hash),
-            kind="concept",
-            qualified_name=name,
-            signature_hash=_hash("concept-signature", name),
-            body_hash=constraint_hash,
-            value=constraint_hash,
-            names=_entity_names(name),
-            ownership=_entity_ownership(visibility, origin),
-            source_location=loc,
-            visibility=visibility,
-            api_relevant=True,
-            confidence=LayerConfidence.HIGH,
-        )
-    )
-
-
 def _emit_function(
     node: dict[str, Any],
     ctx: _ClassifyContext,
@@ -599,10 +570,7 @@ def _emit_template(
             qualified_name=name,
             body_hash=_subtree_hash(node),
             names=_entity_names(name),
-            relations={
-                "template_kind": str(node.get("kind", "")),
-                "template_parameters": ",".join(params),
-            },
+            relations=template_relations(node, params),
             ownership=_entity_ownership(visibility, origin),
             source_location=_location(file, _node_line(node), origin),
             visibility=visibility,

@@ -142,7 +142,9 @@ class TestVarRemovedElfOnly:
         )
         new = AbiSnapshot(library="libx.so", version="1.0", variables=[])
         result = compare(old, new)
-        removed = [c for c in result.changes if c.kind == ChangeKind.VAR_REMOVED]
+        removed = [
+            c for c in result.changes if c.kind == ChangeKind.VAR_REMOVED_ELF_ONLY
+        ]
         assert len(removed) == 1
         assert removed[0].demangled_symbol == "Foo::counter"
 

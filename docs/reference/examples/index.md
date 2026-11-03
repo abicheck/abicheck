@@ -19,8 +19,8 @@ Use this catalog to:
 | Verdict | Count | What it means |
 |---------|-------|---------------|
 | 🔴 [BREAKING](by-verdict/breaking.md) | 118 | ABI breaks: existing consumers will fail at runtime. |
-| 🟠 [API_BREAK](by-verdict/api-break.md) | 21 | Source-level / API-only breaks; recompilation fails or behavior shifts. |
-| 🟡 [COMPATIBLE_WITH_RISK](by-verdict/compatible-risk.md) | 39 | Backward-compatible at the symbol level but with behavioral risk. |
+| 🟠 [API_BREAK](by-verdict/api-break.md) | 22 | Source-level / API-only breaks; recompilation fails or behavior shifts. |
+| 🟡 [COMPATIBLE_WITH_RISK](by-verdict/compatible-risk.md) | 38 | Backward-compatible at the symbol level but with behavioral risk. |
 | 🟢 [COMPATIBLE](by-verdict/compatible.md) | 33 | Backward-compatible changes (additions or quality-only). |
 | ✅ [NO_CHANGE](by-verdict/no-change.md) | 18 | Identical ABI/API — baseline control cases. |
 
@@ -42,8 +42,8 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 | Category | Cases | What it covers |
 |----------|-------|----------------|
 | [Breaking](by-category/breaking.md) | 114 | Listed in `BREAKING_KINDS` — runtime ABI break. |
-| [API Break](by-category/api_break.md) | 21 | Listed in `API_BREAK_KINDS` — source/API-level break. |
-| [Risk](by-category/risk.md) | 38 | Listed in `RISK_KINDS` — symbol-compatible but behaviorally risky. |
+| [API Break](by-category/api_break.md) | 22 | Listed in `API_BREAK_KINDS` — source/API-level break. |
+| [Risk](by-category/risk.md) | 37 | Listed in `RISK_KINDS` — symbol-compatible but behaviorally risky. |
 | [Addition (Compatible)](by-category/addition.md) | 12 | Listed in `ADDITION_KINDS` — backward-compatible additions. |
 | [Quality (Compatible)](by-category/quality.md) | 21 | Listed in `QUALITY_KINDS` — metadata/quality issues, not ABI breaks. |
 | [No Change](by-category/no_change.md) | 18 | Identical ABI/API — sanity-check baselines. |
@@ -94,9 +94,9 @@ The weakest evidence source that reaches this case's verdict — see [Evidence a
 |----------|-------|---------------|
 | [L0 — binary only](by-evidence/l0.md) | 70 | Detectable from the shipped binary's symbol table alone. |
 | [L1 — + debug info](by-evidence/l1.md) | 77 | Needs debug information on top of the binary. |
-| [L2 — + headers](by-evidence/l2.md) | 48 | Needs the public headers parsed alongside the binary. |
+| [L2 — + headers](by-evidence/l2.md) | 49 | Needs the public headers parsed alongside the binary. |
 | [L3 — + build evidence](by-evidence/l3.md) | 11 | Needs the build's own configuration and flags. |
-| [L4 — + source replay](by-evidence/l4.md) | 6 | Needs the sources replayed through a source-level ABI extraction. |
+| [L4 — + source replay](by-evidence/l4.md) | 5 | Needs the sources replayed through a source-level ABI extraction. |
 | [L5 — + source graph](by-evidence/l5.md) | 17 | Needs the derived semantic source graph. |
 | [Not currently detectable](by-evidence/none.md) | 0 | No evidence tier currently reaches this case's canonical verdict — a known detector gap, kept in the catalog as calibration. |
 
@@ -237,7 +237,7 @@ The weakest evidence source that reaches this case's verdict — see [Evidence a
 | [case119_internal_struct_field_removed_scoped](case119_internal_struct_field_removed_scoped.md) | Internal Struct Loses a Field (Non-Public, Scoped) | ✅ NO_CHANGE | No Change |
 | [case120_internal_struct_reordered_scoped](case120_internal_struct_reordered_scoped.md) | Internal Struct Fields Reordered (Non-Public, Scoped) | ✅ NO_CHANGE | No Change |
 | [case121_kernel_btf_struct_field_added](case121_kernel_btf_struct_field_added.md) | Kernel BTF Struct Field Growth | 🔴 BREAKING | Breaking |
-| [case122_template_signature_uninstantiated](case122_template_signature_uninstantiated.md) | Uninstantiated Template Signature Change | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case122_template_signature_uninstantiated](case122_template_signature_uninstantiated.md) | Uninstantiated Template Signature Change | 🟠 API_BREAK | API Break |
 | [case123_default_argument_removed](case123_default_argument_removed.md) | Default Argument Removed | 🟠 API_BREAK | API Break |
 | [case124_header_constant_value_changed](case124_header_constant_value_changed.md) | Header Constant Value Changed | 🟠 API_BREAK | API Break |
 | [case125_class_became_final](case125_class_became_final.md) | Class Became `final` | 🟠 API_BREAK | API Break |

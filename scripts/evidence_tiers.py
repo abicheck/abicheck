@@ -319,6 +319,9 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "func_cv_changed": "L1",
     "func_static_changed": "L1",
     "func_params_changed": "L1",
+    # Needs the never-exported pattern from a header AST (direct Clang) or
+    # the L4 replay; castxml does not emit uninstantiated templates.
+    "header_only_function_params_changed": "L2",
     "func_return_changed": "L1",
     "param_pointer_level_changed": "L1",
     "abi_equivalent_type_changed": "L1",
@@ -443,6 +446,7 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "inline_function_removed": "L4",
     "public_typedef_removed": "L4",
     "concept_tightened": "L4",
+    "concept_constraint_changed": "L4",
     # Fact-set/coverage compatibility of the L4 evidence itself (ADR-038 C.8):
     # only meaningful once L4 source-fact records carry fact_set/coverage.
     "source_fact_coverage_incomplete": "L4",

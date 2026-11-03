@@ -39,6 +39,18 @@ def test_accepts_the_complete_fixed_pass_set():
     assert proof_gate.validate(_passing_artifact()) == []
 
 
+def test_full_matrix_and_release_gate_require_the_same_build_source_cases(monkeypatch):
+    scripts = _GATE_PATH.parent.parent / "skills-src/evaluation/validation/scripts"
+    monkeypatch.syspath_prepend(str(scripts))
+    import collect_full_example_matrix as matrix
+    import run_full_catalog as runner
+
+    assert matrix.BUILD_SOURCE_PROOF_CASES == set(proof_gate.EXPECTED_CASE_IDS)
+    assert set(runner.BUILD_SOURCE_CASES) == {
+        case.split("_", 1)[0] for case in proof_gate.EXPECTED_CASE_IDS
+    }
+
+
 def test_rejects_skip_even_when_nine_other_cases_pass():
     artifact = _passing_artifact()
     artifact["results"][-1]["status"] = "SKIP"
@@ -49,20 +61,25 @@ def test_rejects_skip_even_when_nine_other_cases_pass():
 
 
 def test_rejects_an_empty_result_set():
-    errors = proof_gate.validate({"selected_cases": 10, "results": []})
+    n = proof_gate.EXPECTED_RESULT_COUNT
+    errors = proof_gate.validate({"selected_cases": n, "results": []})
 
-    assert errors == ["expected exactly 10 result rows, found 0"]
+    assert errors == [f"expected exactly {n} result rows, found 0"]
 
 
 def test_rejects_missing_or_wrong_selected_case_count():
-    errors = proof_gate.validate({"selected_cases": 9, "results": []})
+    n = proof_gate.EXPECTED_RESULT_COUNT
+    errors = proof_gate.validate({"selected_cases": n - 1, "results": []})
 
-    assert errors == ["expected selected_cases=10, found 9"]
+    assert errors == [f"expected selected_cases={n}, found {n - 1}"]
 
 
 def test_status_sync_recognizes_build_source_proof_row(tmp_path: Path):
     artifact = tmp_path / "build-source.json"
-    artifact.write_text(json.dumps({"summary": {"PASS": 10}}), encoding="utf-8")
+    artifact.write_text(
+        json.dumps({"summary": {"PASS": proof_gate.EXPECTED_RESULT_COUNT}}),
+        encoding="utf-8",
+    )
 
     proc = subprocess.run(
         [

@@ -299,12 +299,12 @@
    "api_break": true,
    "bad_practice": false,
    "category": "api_break",
-   "description": "A converting conversion operator on a public handle type (mirrors `operator int()` on a oneTBB handle) gains the `explicit` specifier. The mangled name is unchanged so previously-compiled binaries still link, but any source code that wrote `int n = ta;` or relied on implicit conversion at a call site fails to compile against v2. Detected by the new CTOR_EXPLICIT_ADDED ChangeKind, derived from DW_AT_explicit on DW_TAG_subprogram (and `explicit=\"1\"` on castxml Method/Constructor \u2014 but not Converter, see known_gap).",
+   "description": "A converting conversion operator on a public handle type (mirrors `operator int()` on a oneTBB handle) gains the `explicit` specifier. The mangled name is unchanged so previously-compiled binaries still link, but any source code that wrote `int n = ta;` or relied on implicit conversion at a call site fails to compile against v2. Detected by the new CTOR_EXPLICIT_ADDED ChangeKind, derived from DW_AT_explicit on DW_TAG_subprogram (castxml: explicit=\"1\" or the declaring source line; direct Clang: the declaration's decl-specifier tokens).",
    "expected": "API_BREAK",
    "expected_kinds": [
     "ctor_explicit_added"
    ],
-   "known_gap": "castxml does not emit the `explicit` attribute on <Converter> elements (user-defined conversion operators), and does not emit a mangled name for user-declared constructors. The CTOR_EXPLICIT_ADDED detector is therefore not exercised end-to-end by the default castxml-based dump path on Linux/macOS \u2014 only via DWARF-only mode. The detector itself is validated by tests/test_explicit_ctor.py with synthetic snapshots. Windows also observes NO_CHANGE for the same case in the source_smoke lane (confirmed by CI), for a currently unconfirmed reason distinct from the castxml mechanism above (Windows uses MSVC PDB metadata, not castxml) \u2014 tracked as a separate, undiagnosed Windows gap.",
+   "known_gap": "Measured on Linux (GCC + headers, L2): both header frontends now report ctor_explicit_added. castxml omits explicit=\"1\" on <Converter> elements, but its extractor recovers the specifier from the declaring source line (castxml/location.py::source_line_has_explicit), so the castxml path is NOT broken. Clang's -ast-dump=json (18.1.3) never serializes `explicit` on CXXConstructorDecl/CXXConversionDecl; the direct-Clang path previously read that absence as a confirmed False (NO_CHANGE), and now decides it tri-state from the declaration's own decl-specifier tokens (extract/headers/clang/explicit_specifier.py), leaving it unknown -- never False -- for an unrecognized macro, dependent explicit(expr), or unreadable source. Windows observes NO_CHANGE for this case in the source_smoke lane for a currently undiagnosed reason (MSVC PDB metadata, not a header frontend) -- tracked separately.",
    "known_gap_platforms": [
     "linux",
     "macos",
@@ -659,21 +659,22 @@
   },
   "case122_template_signature_uninstantiated": {
    "abi_break": false,
-   "api_break": false,
+   "api_break": true,
    "bad_practice": false,
-   "category": "risk",
-   "description": "An uninstantiated function template's parameter types change (int -> long). No shipped binary instantiates the template, so nothing that currently links is broken; a consumer only picks up the new signature on its next recompile. The canonical truth is COMPATIBLE_WITH_RISK, not API_BREAK: a source-visible risk for future consumers, not a proven break for any consumer that exists yet. It is missed by default object/DWARF and header/castxml comparison (nothing is emitted to compare), but visible at L4: source-ABI replay parses the real clang AST, hashes each template's parameter list, and reports the mismatch as template_body_changed (RISK) \u2014 demonstrating that this class of C++-only change needs source evidence, not that it is undetectable outright. Seeing it takes explicit L3 compile-unit + public-header evidence (a bare --sources tree with no build metadata is not enough) plus --contract all on compare, since the L2 header backend does not model templates and would otherwise scope the finding out as internal.",
-   "expected": "COMPATIBLE_WITH_RISK",
+   "category": "api_break",
+   "description": "An uninstantiated function template's parameter types change (int -> long). The library instantiates nothing, so its binary is unchanged and no compiled consumer binds to a library symbol: there is no ABI break of the library. It is a source/API break: consumer source that names the exact instantiation type -- `int (*)(int,int,int) p = &clamp<int>;` (consumer_address.cpp, the source_smoke witness) -- compiles against v1 and is rejected against v2, while a plain call `clamp<int>(5, 0, 10)` compiles against both. The parameter list is compared structurally (template parameters positionally normalized), never from a body hash: the direct-Clang header path reports it on the never-exported pattern and the L4 clang replay on the template, both as header_only_function_params_changed (API_BREAK). A body-only edit stays template_body_changed (RISK), and an exported explicit instantiation keeps its artifact-tier ABI grading. Previously labelled COMPATIBLE_WITH_RISK/template_body_changed; the consumer witness contradicts that label.",
+   "expected": "API_BREAK",
    "expected_absent_kinds": [
     "func_params_changed",
     "func_added",
-    "func_removed"
-   ],
-   "expected_kinds": [
+    "func_removed",
     "template_body_changed"
    ],
-   "known_gap": "L0-L2 artifact/header scans cannot observe the uninstantiated function template because it emits no symbol and CastXML omits the declaration. Their NO_CHANGE verdict is a missed COMPATIBLE_WITH_RISK detection caused by insufficient evidence, not a lane-specific expectation. L4 source-ABI replay parses the real Clang AST and detects template_body_changed.",
-   "min_evidence": "L4",
+   "expected_kinds": [
+    "header_only_function_params_changed"
+   ],
+   "known_gap": "CastXML omits uninstantiated function templates, so the default castxml L2 lane observes NO_CHANGE: a missed API_BREAK from insufficient evidence. The direct-Clang L2 header path and the L4 clang replay both detect it.",
+   "min_evidence": "L2",
    "platforms": [
     "linux",
     "macos",
@@ -685,7 +686,29 @@
     "stripped-headers"
    ],
    "source_abi_extractor": "clang",
-   "source_abi_scope": "headers-only"
+   "source_abi_scope": "headers-only",
+   "source_smoke": {
+    "mode": "syntax",
+    "proof": "consumer address-of witness: &clamp<int> as int(*)(int,int,int) compiles against v1, rejected against v2",
+    "source": "consumer_address.cpp",
+    "standard": "c++17",
+    "v1": {
+     "expect": "success"
+    },
+    "v2": {
+     "expect": "failure",
+     "replace": [
+      [
+       "\"v1.h\"",
+       "\"v2.h\""
+      ],
+      [
+       "<v1.h>",
+       "<v2.h>"
+      ]
+     ]
+    }
+   }
   },
   "case123_default_argument_removed": {
    "abi_break": false,

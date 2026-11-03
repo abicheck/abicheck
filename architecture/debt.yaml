@@ -113,7 +113,7 @@
     },
     {
       "path": "abicheck/buildsource/header_compile_context.py",
-      "baseline_lines": 1758,
+      "baseline_lines": 1757,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -179,7 +179,7 @@
     },
     {
       "path": "abicheck/buildsource/source_diff.py",
-      "baseline_lines": 1066,
+      "baseline_lines": 1011,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -190,7 +190,7 @@
     },
     {
       "path": "abicheck/buildsource/source_extractors/clang.py",
-      "baseline_lines": 1114,
+      "baseline_lines": 1082,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1873,7 +1873,7 @@
     },
     {
       "path": "tests/validate_examples.py",
-      "baseline_lines": 1868,
+      "baseline_lines": 1835,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",

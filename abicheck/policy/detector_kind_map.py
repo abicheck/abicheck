@@ -227,6 +227,7 @@ DETECTOR_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
                 "func_virtual_added",
                 "func_virtual_removed",
                 "func_visibility_changed",
+                "header_only_function_params_changed",
                 "hidden_friend_added",
                 "hidden_friend_removed",
                 "inline_function_removed",
@@ -432,6 +433,7 @@ DETECTOR_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
                 "var_export_added",
                 "var_lost_const",
                 "var_removed",
+                "var_removed_elf_only",
                 "var_type_changed",
                 "var_visibility_changed",
             }
@@ -471,6 +473,7 @@ NON_DETECTOR_KINDS: frozenset[str] = frozenset(
         "call_graph_public_entry_reachability_changed",
         "char_signedness_changed",
         "compile_context_conflict",
+        "concept_constraint_changed",
         "concept_tightened",
         "constexpr_value_changed",
         "consumer_required_symbol_removed",

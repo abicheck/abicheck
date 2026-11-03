@@ -192,7 +192,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           mkdir -p results
-          CASES="case01 case04 case98 case105 case122 case129 case130 case131 case132 case133"
+          CASES="case01 case04 case28 case40 case98 case105 case122 case129 case130 case131 case132 case133"
           PYTHONPATH=. python tests/validate_examples.py $CASES --artifact-variant build-source --jobs 0 --json \
             > results/validate_examples-build-source.json
           cp results/validate_examples-build-source.json results/validate_examples.json

@@ -405,7 +405,7 @@ class TestVarElfOnlyTracking:
     """Tests for variable detection in ELF-only mode."""
 
     def test_var_removed_elf_only(self):
-        """Variable removed in ELF-only mode should emit VAR_REMOVED."""
+        """Variable removed without declaration evidence uses the export-only kind."""
         old = AbiSnapshot(
             library="libfoo.so",
             version="1.0",
@@ -424,7 +424,7 @@ class TestVarElfOnlyTracking:
         )
         result = compare(old, new)
         kinds = {c.kind for c in result.changes}
-        assert ChangeKind.VAR_REMOVED in kinds
+        assert ChangeKind.VAR_REMOVED_ELF_ONLY in kinds
         assert result.verdict == Verdict.BREAKING
 
     def test_var_added_elf_only(self):

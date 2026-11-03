@@ -47,4 +47,7 @@ def test_clang_walk_emits_public_concept_decl() -> None:
     assert len(concepts) == 1
     assert concepts[0].qualified_name == "lib::Accepts"
     assert concepts[0].value
-    assert concepts[0].body_hash == concepts[0].value
+    # value is the structured conjunctive form (concept_constraints.py);
+    # body_hash stays the whole-subtree fingerprint.
+    assert concepts[0].value.startswith("conj:sha256:")
+    assert concepts[0].body_hash.startswith("sha256:")

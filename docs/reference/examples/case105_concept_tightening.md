@@ -49,42 +49,25 @@ abicheck compare libtpl_v1.so libtpl_v2.so --header old=v1.h --header new=v2.h
 #   clang-frontend header AST would report NO_CHANGE, since neither AST
 #   backend's *header-level* pass models concept declarations by name)
 
-# L4 source-ABI replay actually catches it. Needs L3 build-context evidence
-# (a compile_commands.json) explicitly paired with a public-header root, so
-# abicheck knows the template is public and reachable, plus
-# --contract all on compare (the default L2 header-AST public-
-# surface scoping can't recognize `sum`/`Addable` as public because it
-# doesn't model concepts either):
+# L4 source-ABI replay actually catches it. It needs build-context
+# evidence (a compile_commands.json) and the sources, and --contract all
+# (the default public-surface scoping does not model concepts):
 cat > v1.compile_commands.json <<EOF
 [{"directory": "$PWD", "command": "c++ -std=c++20 -c v1.cpp -o v1.o", "file": "$PWD/v1.cpp"}]
 EOF
 cat > v2.compile_commands.json <<EOF
 [{"directory": "$PWD", "command": "c++ -std=c++20 -c v2.cpp -o v2.o", "file": "$PWD/v2.cpp"}]
 EOF
-python3 <<'PYEOF'
-import dataclasses
-from pathlib import Path
-from abicheck.buildsource import pack_io
-from abicheck.buildsource.inline import collect_inline_pack
-
-for v in ("v1", "v2"):
-    pack = collect_inline_pack(
-        sources=Path("."),
-        build_info=Path(f"{v}.compile_commands.json"),
-        public_header_roots=(f"{v}.h",),
-        extractor="clang",
-    )
-    pack_io.write(dataclasses.replace(pack, root=Path(f"{v}.evidence")))
-PYEOF
-
-cat > .abicheck.yml <<'EOF'
-compile:
-  frontend: clang
-EOF
-abicheck dump libtpl_v1.so -H v1.h -p v1.compile_commands.json --build-info v1.evidence -o v1.abi.json --config .abicheck.yml
-abicheck dump libtpl_v2.so -H v2.h -p v2.compile_commands.json --build-info v2.evidence -o v2.abi.json --config .abicheck.yml
-
-abicheck compare v1.abi.json v2.abi.json --contract all
+printf 'compile:\n  frontend: clang\n' > .abicheck.yml
+abicheck compare libtpl_v1.so libtpl_v2.so -H old=v1.h -H new=v2.h \
+  --build-info old=v1.compile_commands.json --build-info new=v2.compile_commands.json \
+  --sources old=. --sources new=. --depth source --config .abicheck.yml --contract all
+# The constraint is compared as a set of conjunctive requirements
+# (requires-expression requirements, `&&` operands): concept_tightened
+# (API_BREAK) is reported only when v2's set strictly contains v1's. The
+# reverse comparison (v2 -> v1) is concept_constraint_changed (RISK): a
+# relaxed concept is not proven to break a consumer, but can change
+# overload resolution through subsumption.
 ```
 
 ## Expected abicheck finding
