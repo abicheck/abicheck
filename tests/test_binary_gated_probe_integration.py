@@ -242,11 +242,17 @@ PROBES: dict[str, Probe] = {
     ),
     # -- HEADER_OR_SOURCE_GATED reached only with L3/L4 or a build matrix --
     "concept_tightened": _inline(
-        "template <class T> concept Small = sizeof(T) <= 8;\n"
+        "template <class T> concept Small = requires(T t) { t + t; };\n"
         "template <Small T> T id(T x) { return x; }\nint f(int);",
-        "template <class T> concept Small = sizeof(T) <= 4;\n"
+        "template <class T> concept Small = requires(T t) { t + t; t - t; };\n"
         "template <Small T> T id(T x) { return x; }\nint f(int);",
         "int f(int x) { return id(x); }",
+        rich="sources",
+    ),
+    "header_only_function_params_changed": _inline(
+        "template <class T> T twice(T x) { return x + x; }\nint f(int);",
+        "template <class T> T twice(T x, T y) { return x + y; }\nint f(int);",
+        "int f(int x) { return x; }",
         rich="sources",
     ),
     "constexpr_value_changed": _inline(

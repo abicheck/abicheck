@@ -8,13 +8,17 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 from tests._abicheck_subprocess import abicheck_command
 
-pytestmark = pytest.mark.integration
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(sys.platform != "linux", reason="STB_GNU_UNIQUE requires ELF"),
+]
 
 HEADER = (
     "#pragma once\n"

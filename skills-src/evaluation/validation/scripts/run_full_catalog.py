@@ -62,17 +62,8 @@ GROUND_TRUTH = example_catalog.GROUND_TRUTH_PATH
 sys.path.insert(0, str(REPO_DIR / "tests"))
 import validate_examples as _ve  # noqa: E402
 
-BUILD_SOURCE_CASES = (
-    "case01",
-    "case04",
-    "case98",
-    "case105",
-    "case122",
-    "case129",
-    "case130",
-    "case131",
-    "case132",
-    "case133",
+BUILD_SOURCE_CASES = tuple(
+    case.split("_", 1)[0] for case in sorted(_matrix.BUILD_SOURCE_PROOF_CASES)
 )
 # Derived from the shared registry, not hand-duplicated: a hardcoded tuple
 # here silently drifted behind collect_full_example_matrix.SPECIAL_PROOFS

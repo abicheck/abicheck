@@ -218,11 +218,11 @@ ROWS: tuple[Row, ...] = (
         "concept_tightened",
         "CT_c",
         _KEEP + "#include <type_traits>\n"
-        "template<class T> concept CT_c = true;\n"
+        "template<class T> concept CT_c = requires(T t) { t + t; };\n"
         "template<class T> requires CT_c<T> int ct_fn(T) { return 1; }\n",
         _KEEP_IMPL,
         _KEEP + "#include <type_traits>\n"
-        "template<class T> concept CT_c = std::is_integral_v<T>;\n"
+        "template<class T> concept CT_c = requires(T t) { t + t; t - t; };\n"
         "template<class T> requires CT_c<T> int ct_fn(T) { return 1; }\n",
         _KEEP_IMPL,
         std="c++20",

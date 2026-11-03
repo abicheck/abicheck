@@ -39,6 +39,18 @@ def test_accepts_the_complete_fixed_pass_set():
     assert proof_gate.validate(_passing_artifact()) == []
 
 
+def test_full_matrix_and_release_gate_require_the_same_build_source_cases(monkeypatch):
+    scripts = _GATE_PATH.parent.parent / "skills-src/evaluation/validation/scripts"
+    monkeypatch.syspath_prepend(str(scripts))
+    import collect_full_example_matrix as matrix
+    import run_full_catalog as runner
+
+    assert matrix.BUILD_SOURCE_PROOF_CASES == set(proof_gate.EXPECTED_CASE_IDS)
+    assert set(runner.BUILD_SOURCE_CASES) == {
+        case.split("_", 1)[0] for case in proof_gate.EXPECTED_CASE_IDS
+    }
+
+
 def test_rejects_skip_even_when_nine_other_cases_pass():
     artifact = _passing_artifact()
     artifact["results"][-1]["status"] = "SKIP"
