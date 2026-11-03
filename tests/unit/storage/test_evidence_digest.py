@@ -288,7 +288,7 @@ def test_stored_package_carries_and_reloads_the_evidence_digest(tmp_path: Path) 
         snap = dataclasses.replace(snap, created_at=f"2026-0{i + 1}-01T00:00:00Z")
         root = tmp_path / f"pkg{i}"
         write_legacy_snapshot_package(
-            snapshot_to_dict(snap),
+            snap,
             root,
             artifact_id="libx",
             max_known_schema_version=SCHEMA_VERSION,
