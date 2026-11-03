@@ -1,7 +1,7 @@
 # ADR-062: Project Snapshot Storage v2 — Content-Addressed Sections, Explicit Fact Availability, and Occurrence-Preserving Identity
 
 **Date:** 2026-08-26
-**Status:** Proposed — partially implemented; amended 2026-10-30 (D14-D18, rules accepted; D14, D15 and D17 implemented, D16 partially (`evidence` and `transport`), D18 steps 1-2 (per-section decode split; lazy `declarations`/`types`/debug layout via a deferred `semantic_ir` cell) implemented 2026-10-31, per-pair release and the shared decoded-section cache pending -- see known-gaps). Phase 0 primitives implemented (`abicheck/storage/`:
+**Status:** Proposed — partially implemented; amended 2026-11-03 (D19 accepted and implemented: an optional new fact is a declared extension fact, not a global `SCHEMA_VERSION` bump); amended 2026-10-30 (D14-D18, rules accepted; D14, D15 and D17 implemented, D16 partially (`evidence` and `transport`), D18 steps 1-2 (per-section decode split; lazy `declarations`/`types`/debug layout via a deferred `semantic_ir` cell) implemented 2026-10-31, per-pair release and the shared decoded-section cache pending -- see known-gaps). Phase 0 primitives implemented (`abicheck/storage/`:
 fact availability, entity/occurrence identity with conflict preservation,
 canonical encoding and semantic digest, and the separated version axes).
 Phase 1's A1.1-A1.3 are implemented: `abicheck/storage/package.py` carries
@@ -1057,3 +1057,103 @@ A1.9 is complete when these hold:
 
 This amendment introduces no binary codec and no user-facing compression knob
 (D1, D12).
+
+## Amendment (2026-11-03): an optional fact is an extension, not a global bump
+
+**Status of this amendment:** Accepted — implemented (D19). Plan item A1.10
+in the [storage format v2 plan](../plans/storage-format-v2.md).
+
+**Context.** Almost every new persisted fact so far raised the global
+`SCHEMA_VERSION` (`storage/snapshot_schema_versions.py`, 69 at this
+amendment). A reader hard-rejects a document newer than its own version
+(`_MIN_SCHEMA_VERSION_REQUIRING_HARD_REJECTION`), so one optional new fact
+made every new dump unreadable for every older build, including the
+analyses that never read the fact. D14 already gives each section header an
+`extensions` map that an older reader keeps verbatim, and a
+`must_understand` list that blocks only that section (or, at document
+level, the document). D2 says to use the narrowest axis that makes an older
+reader fail closed. The global integer was the widest one, used by default.
+
+### D19 — An optional new fact is a declared extension fact
+
+**Rule.**
+
+1. A new fact whose absence an older reader already reads correctly as
+   "not collected" is an **extension fact**. Its value is stored in its
+   section header's `extensions` map. It does not bump `SCHEMA_VERSION`,
+   any `section_schema_version`, or any package axis.
+2. `must_understand` is set only when ignoring the fact would make an older
+   reader's result **wrong**, not merely less informed. A
+   `SECTION_MUST_UNDERSTAND` fact blocks exactly the analyses that read its
+   section (D14). A `DOCUMENT_MUST_UNDERSTAND` fact refuses the document.
+   `must_understand_when` narrows the requirement to the values that need
+   it, so a common value costs an older reader nothing.
+3. The global `SCHEMA_VERSION` is reserved for **envelope** changes (the
+   document's own shape: top-level keys, section set or layout, framing)
+   and **wire** changes (an existing field's encoding or meaning, so an
+   older reader would misread a value it believes it understands). Each
+   bump after v69 records its kind and why it cannot be an extension fact.
+
+**Mechanism.**
+
+- `storage/extension_fact_catalog.py`: `ExtensionFact` declares a fact's
+  dotted name, its section, its `ReaderSemantics`
+  (`OPTIONAL`/`SECTION_MUST_UNDERSTAND`/`DOCUMENT_MUST_UNDERSTAND`), what its
+  absence reads as, its owning ADR, its encode/decode pair and an optional
+  `must_understand_when`. `EXTENSION_FACTS` is this build's catalog, a
+  static tuple in that module, never filled by registration calls from
+  elsewhere, so what a build understands cannot depend on import order.
+  `wire_extensions.UNDERSTOOD_EXTENSIONS` is derived from it. A fact name is
+  `<namespace>.<name>` with at least one dot, so it can never be read as a
+  section kind (the two share `must_understand`).
+- `storage/extension_facts.py`: `write_extension_fact` records a declared
+  fact on a snapshot's D14 carriers and maintains its `must_understand`
+  entry; `read_extension_fact` returns a `Fact`: `PRESENT`, `NOT_COLLECTED`
+  when absent, or `FAILED` when the section is blocked for this reader or the
+  stored value does not decode. The value is never a domain-model field
+  (ADR-063 D8). It is in the `evidence` digest, survives every re-save and
+  in-process copy, and travels into packages and bundles with the other
+  carriers.
+- A write refuses header extensions recorded for a section the document
+  does not write (for example a `graph` fact on a snapshot with no graph):
+  D14 makes dropping them a defect (`wire_extensions.refuse_orphaned_header_extras`,
+  on both the materialized and the streamed write path).
+- `snapshot_schema_versions.SCHEMA_BUMP_REASONS` maps each version after
+  `SCHEMA_BUMP_RULE_BASELINE` (69) to `SchemaBump(kind, why_not_extension)`,
+  kind `envelope` or `wire`. The `schema-bump-reason` ai-readiness check
+  (`scripts/schema_bump_gate.py`) fails a bump without a row, a placeholder
+  reason, an unknown kind, a row for a version not allocated, and a moved
+  baseline (the baseline is pinned in the gate as well).
+
+**Scope.** Section-header facts. A per-record extension fact (one value per
+function or type) is not implemented; record-level unknown fields are
+already preserved (D14), but a typed per-record API is future work. The
+flat `snapshot_to_dict` document has no header to carry a fact, so a member
+or package written from it follows `wire_extensions.flattening_loses`
+(stored sectioned), as for every other carrier. Existing v1-v69 fields are
+not migrated: the rule applies going forward.
+
+**Older readers.** Every build that accepts a v69 document reads the
+sectioned `extensions` map, except main commit `9bc29954f` (2026-10-29),
+which allocated v69 one day before D14 landed and was never released; the
+newest tag, `v0.7.0` (2026-10-13), reads up to v60 and refuses v69 outright. D14 said a
+writer adding a `must_understand` name to a known section also bumps that
+section's `section_schema_version`, to protect a pre-D14 reader. For an
+extension fact that protection is not required: no released reader can
+accept the document and ignore the name. A D14 reader blocks the section
+either way, so the bump would change only the diagnostic text.
+
+**Applied to ADR-079.** ADR-079's `export_read` (`complete`/`partial`/
+`failed` per platform) is the first candidate. An older reader that ignores
+a `partial` value reads a cut-short export table as complete, which is
+wrong, so the fact is `SECTION_MUST_UNDERSTAND` on the `binary` section with
+`must_understand_when` true for any non-`complete` value. A dump with a
+complete read is readable by every older reader at no cost, and one with a
+partial read blocks only the analyses that read `binary` there, instead of
+refusing the whole document. ADR-079's D5 global bump is superseded by this
+mapping; its D1-D4 stand.
+
+**Consequences.** A dump that adds an optional fact stays readable by the
+previous release. A must-understand fact narrows an older reader's result
+instead of refusing it. A reviewer sees every global bump's justification
+in the diff that makes it.
