@@ -199,7 +199,7 @@ def extract_pe(
         # facts) is `failed` with the diagnostic, not present and empty.
         # A header-scoped dump's `debug` section also holds the header
         # parse's provenance, so it is not failed wholesale (known gap).
-        from ...storage.wire_extensions import record_section_failure
+        from ...storage.section_states import record_section_failure
 
         record_section_failure(snap, "debug", [pdb_failure])
     return snap

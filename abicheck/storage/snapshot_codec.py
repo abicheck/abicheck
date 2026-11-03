@@ -82,6 +82,7 @@ from .fact_codec import (
     evidenced_producers,
 )
 from .generation_migrations import migrate_and_describe
+from .section_states import apply_section_states
 from .sectioned_document import from_sectioned_document, is_sectioned_document
 from .semantic_ir_codec import decode_semantic_ir
 from .snapshot_encode import (
@@ -208,8 +209,8 @@ def decode_snapshot(
     snap.load_notices = (*snap.load_notices, *_generation_notices)
     if carried is not None:
         attach_wire_extensions(snap, carried)
-        snap.unreadable_sections = tuple(carried.unreadable)
-        # ADR-079: the platform blocks' export-table read, from its fact.
+        apply_section_states(snap, carried)
+        # ADR-079: restore the platform blocks from their declared fact.
         apply_export_read_fact(snap)
     return snap, _schema_version
 

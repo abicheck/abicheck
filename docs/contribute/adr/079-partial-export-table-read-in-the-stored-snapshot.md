@@ -156,7 +156,7 @@ the same mechanism v42 used for the envelope change, and does not raise
   `analysis_assurance.export_read` reports each side's recorded states and a
   gap makes the status `partial` (so `assurance.require_complete` exits 1);
   `run_outcome.scope` reads `incomplete`; the Markdown report lists the gap
-  as a coverage row. Report schema 7.1.
+  as a coverage row. Report schema 7.2.
 - **Tests.** `tests/unit/storage/test_export_read_persisted.py` (property
   over the read outcomes × live/stored × ELF/PE/Mach-O, a document without
   the fact, re-save, an older reader, the D1 table) and `tests/test_cli_compare_partial_export_read.py`

@@ -37,10 +37,12 @@ from typing import Any, Literal
 #: (``evidence_depth.reported_depth_label``). No verdict, assurance
 #: ``status``, or exit code moves: every gate still reads the explicit
 #: request.
-#: ``1.3`` (ADR-079): the additive ``export_read`` object -- each side's
+#: ``1.4`` (ADR-079, after D15's 1.3): the additive ``export_read`` object -- each side's
 #: recorded export-table read per platform block; a ``partial``/``failed``
 #: one makes ``status`` read ``partial``.
-ANALYSIS_ASSURANCE_SCHEMA_VERSION = "1.3"
+#: 1.2 -> 1.3: added ``section_availability`` (ADR-062 D15), present only
+#: when a compared snapshot has a section that is not ``present``. Additive.
+ANALYSIS_ASSURANCE_SCHEMA_VERSION = "1.4"
 
 #: The required top-level status vocabulary.
 AssuranceStatus = Literal[
@@ -285,9 +287,16 @@ class AnalysisAssurance:
     #: :attr:`status` ``partial`` (``_export_read.py``). Appended at the END
     #: for the positional-constructor reason recorded above.
     export_read: dict[str, dict[str, str]] = field(default_factory=dict)
+    #: ADR-062 D15: every stored section that is not ``present`` on either
+    #: side -- ``{"side", "section", "status", "diagnostics"}``, status one of
+    #: ``not_collected``/``failed``/``blocked``/``unrecorded``. The first three
+    #: block that section's readers and lower ``status`` to ``partial``;
+    #: ``unrecorded`` is listed only. Appended at the end for the reason
+    #: ``schema_staleness_status`` records. Emitted only when non-empty.
+    section_availability: tuple[dict[str, Any], ...] = field(default_factory=tuple)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "schema_version": self.schema_version,
             "status": self.status,
             "requested_depth": self.requested_depth,
@@ -308,3 +317,6 @@ class AnalysisAssurance:
             "notes": list(self.notes),
             "export_read": {side: dict(v) for side, v in self.export_read.items()},
         }
+        if self.section_availability:
+            out["section_availability"] = [dict(e) for e in self.section_availability]
+        return out

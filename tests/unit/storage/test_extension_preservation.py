@@ -292,7 +292,7 @@ def test_contradictory_availability_is_refused(mutate) -> None:
 
 
 def test_the_producer_records_a_failed_section() -> None:
-    from abicheck.storage.wire_extensions import record_section_failure
+    from abicheck.storage.section_states import record_section_failure
 
     snap = _snapshot()
     record_section_failure(snap, "debug", ["dwarf: unreadable"])
@@ -308,7 +308,7 @@ def test_the_producer_records_a_failed_section() -> None:
 
 @pytest.mark.parametrize("section", ["provenance", "x_unknown"])
 def test_the_producer_refuses_an_unfailable_section(section: str) -> None:
-    from abicheck.storage.wire_extensions import record_section_failure
+    from abicheck.storage.section_states import record_section_failure
 
     with pytest.raises(ValueError):
         record_section_failure(_snapshot(), section, ["x"])

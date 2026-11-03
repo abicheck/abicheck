@@ -324,9 +324,12 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "is written back unchanged on re-save and is inside the evidence "
             "and publication digests; a section carrying an unknown "
             "must-understand name, a newer section_schema_version, or a "
-            "failed availability entry resolves exactly the analyses that "
-            "read it to not comparable (never to an empty section, a removal "
-            "or a clean pass) while every other analysis still runs."
+            "failed or not_collected availability entry resolves exactly the "
+            "analyses that read it to not comparable (never to an empty "
+            "section, a removal or a clean pass) while every other analysis "
+            "still runs; a collected-empty section stays an observation, and "
+            "a section with no recorded availability reads as before the "
+            "table existed."
         ),
         # ADR-062's 2026-10-30 amendment (#1858) records the probes (D14/D15).
         fixed_by=(1858,),
@@ -343,6 +346,8 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_package_section_version_blocks_section.py",
             "tests/unit/storage/test_bundle_carriers_roundtrip.py",
             "tests/test_bundle_blocked_section_compare.py",
+            # state x section x side x file/package/live (2026-11-03)
+            "tests/test_section_availability_matrix.py",
             "tests/unit/storage/test_flat_mapping_writers.py",
         ),
         public_surfaces=("cli",),
@@ -371,8 +376,18 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
                 "imported-document",
                 "pe-pdb-parse-failure",
                 "dump-cli-write",
+                "record_section_availability",
             ),
             "side": ("old", "new"),
+            "operand": ("stored", "live"),
+            "section_state": (
+                "present",
+                "collected-empty",
+                "not-collected",
+                "failed",
+                "blocked",
+                "unrecorded",
+            ),
         },
         known_gaps=(
             KnownGap(

@@ -852,6 +852,32 @@ missing evidence is already reported where the detector reads it, through
 the fact-family `FactAvailability` defaults the decoder fills. Only `failed`
 and blocked sections take the `unreadable_section_gap` path.
 
+**Amendment (2026-11-03): a `not_collected` section is read per section.**
+The decision above is superseded. Its premise was that `not_collected` would
+cover every unrequested section; in practice the writer stamps every
+section it writes `present` (an unrequested `build` is written, empty), a
+pre-D15 document has no table, and no producer writes a `not_collected`
+entry. So an explicit entry is rare, and where one appears the decoder did
+not report the gap: it filled the section's fields with defaults, and the
+comparison reported every entity the other side held as removed or added
+(a `not_collected` `types` section read as `type_removed` with assurance
+`complete`). Now, for the kinds whose decoded fields cannot say "absent"
+(`binary`, `build`, `debug`, `declarations`, `layout`, `types`), a
+`not_collected` entry blocks its readers exactly as `failed` does; the
+identity section cannot be not collected; `graph` and `semantic_ir` decode
+absence as `None` and are unaffected. A section absent from a document with
+no entry is `unrecorded` and reads as before. The decoded snapshot carries
+every non-`present` section in `AbiSnapshot.section_availability`, and the
+compare report lists them in `analysis_assurance.section_availability`
+(report schema 7.1). The producer API is
+`storage.section_states.record_section_availability` (`failed` or
+`not_collected`); `record_section_failure` moved there. The inventory is
+now generated from the encoders' declarations
+(`tests/_wire_inventory.declared_field_inventory`), and a written corpus
+must use only declared keys. No snapshot or section version bump: a pre-D15
+reader ignores the table, and the reader already accepted `not_collected`
+entries; only its reading of them changed.
+
 ### D16 — One digest per question, none silently redefined
 
 | Role | Covers | Today |

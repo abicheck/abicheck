@@ -64,8 +64,15 @@ to its D3 `FactAvailability` status: ``present``, ``failed`` (with
 diagnostics and no payload), or ``not_collected``. A ``failed`` section is
 still listed in ``section_schema_versions``, so a reader that predates this
 table refuses the document (its missing-section check) instead of reading the
-lost evidence as empty; this build reads it as ``unreadable``. A section
-missing from both tables is ``not_collected``, never ``present``.
+lost evidence as empty; this build reads it as ``unreadable``. A
+``not_collected`` section of a kind whose decoded fields cannot say "absent"
+(:data:`DEFAULT_FILLED_SECTION_KINDS`) is ``unreadable`` too: its fields
+would otherwise hold defaults that read as a collected-empty section.
+``graph`` and ``semantic_ir`` decode an absent section as ``None``, which
+already means not collected. A section absent from a sectioned document with
+no entry is ``unrecorded`` (:attr:`WireExtensions.unrecorded`) and reads as
+before the table existed. The per-section status a reader sees is
+`model.section_availability`, filled by `storage/section_states.py`.
 
 **Schema decision.** None of these carriers bumps a version: each is written
 only when non-empty except ``section_availability``, a document-level key a
@@ -113,12 +120,14 @@ __all__ = [
     "WireExtensions",
     "attach",
     "attach_package_carriers",
+    "DEFAULT_FILLED_SECTION_KINDS",
     "carriers_for_reader",
     "check_must_understand",
     "extensions_of",
+    "failed_reason",
     "flattening_loses",
     "merge_wire_extensions",
-    "record_section_failure",
+    "not_collected_reason",
     "refuse_blocked_identity",
     "refuse_orphaned_header_extras",
     "refuse_lossy_flattening",
@@ -145,6 +154,14 @@ UNDERSTOOD_EXTENSIONS: frozenset[str] = EXTENSION_FACTS.names()
 _SECTIONS_KEY = "sections"
 _VERSIONS_KEY = "section_schema_versions"
 _STATUSES = frozenset({"present", "failed", "not_collected"})
+#: The section kinds every sectioned document writes and whose decoded
+#: snapshot fields have no "absent" value: when one is not collected, its
+#: fields hold defaults, so its readers are blocked rather than shown an
+#: empty section. ``graph`` and ``semantic_ir`` decode absence as ``None``;
+#: the variant-level kinds never sit in a single-artifact document.
+DEFAULT_FILLED_SECTION_KINDS: frozenset[str] = frozenset(
+    {"binary", "build", "debug", "declarations", "layout", "provenance", "types"}
+)
 
 
 @dataclass
@@ -165,6 +182,10 @@ class WireExtensions:
     document_must_understand: list[str] = field(default_factory=list)
     #: ``(section kind, diagnostic)`` for each section that blocks its readers.
     unreadable: list[tuple[str, str]] = field(default_factory=list)
+    #: Default-filled section kinds a sectioned document neither holds nor
+    #: records availability for (read as their defaults, as before D15).
+    #: Decided on read like ``unreadable``; never stored.
+    unrecorded: list[str] = field(default_factory=list)
 
     def is_empty(self) -> bool:
         return not (
@@ -296,16 +317,9 @@ def carriers_for_reader(raw: Any, where: str) -> WireExtensions:
     ext = WireExtensions.from_wire(raw)
     check_must_understand(ext.document_must_understand, where)
     for kind, entry in sorted(ext.availability.items()):
-        if entry["status"] == "failed":
-            if kind == IDENTITY_SECTION_KIND:
-                raise ValueError("the provenance section cannot be failed")
-            ext.unreadable.append(
-                (
-                    kind,
-                    f"section {kind!r} failed at extraction: "
-                    + "; ".join(entry.get("diagnostics", [])),
-                )
-            )
+        reason = _unavailable_reason(kind, entry)
+        if reason is not None:
+            ext.unreadable.append((kind, reason))
     for kind in sorted(ext.passthrough_versions):
         if kind not in SECTION_SCHEMA_VERSIONS or kind in ext.availability:
             continue
@@ -483,37 +497,35 @@ def _carried_summary(carried: WireExtensions) -> str:
     return "; ".join(parts) or "carriers"
 
 
-def record_section_failure(
-    snap: Any, section_kind: str, diagnostics: list[str]
-) -> None:
-    """Producer side of D15: *section_kind* was attempted and its extractor
-    failed. The writer stores a ``failed`` header entry with no payload."""
-    if (
-        section_kind not in SECTION_SCHEMA_VERSIONS
-        or section_kind == IDENTITY_SECTION_KIND
-    ):
-        raise ValueError(f"section {section_kind!r} cannot be recorded as failed")
-    if not diagnostics or not all(isinstance(d, str) and d for d in diagnostics):
-        raise ValueError("a failed section needs at least one diagnostic")
-    ext = extensions_of(snap)
-    if ext is None:
-        ext = WireExtensions()
-        attach(snap, ext)
-    ext.availability[section_kind] = {
-        "diagnostics": list(diagnostics),
-        "status": "failed",
-    }
-    ext.passthrough_versions[section_kind] = SECTION_SCHEMA_VERSIONS[section_kind]
-    ext.passthrough_sections.pop(section_kind, None)
-    # The live snapshot blocks the same readers a reloaded one would, so a
-    # dump compared in-process and the stored dump agree.
-    reason = f"section {section_kind!r} failed at extraction: " + "; ".join(diagnostics)
-    ext.unreadable = [u for u in ext.unreadable if u[0] != section_kind]
-    ext.unreadable.append((section_kind, reason))
-    snap.unreadable_sections = (
-        *(u for u in getattr(snap, "unreadable_sections", ()) if u[0] != section_kind),
-        (section_kind, reason),
+def not_collected_reason(kind: str, diagnostics: list[str]) -> str:
+    """The one spelling of a not-collected section's blocking diagnostic."""
+    detail = "; ".join(diagnostics)
+    return (
+        f"section {kind!r} was not collected by the producer; its fields hold "
+        "defaults, not evidence" + (f" ({detail})" if detail else "")
     )
+
+
+def failed_reason(kind: str, diagnostics: list[str]) -> str:
+    """The one spelling of a failed section's blocking diagnostic."""
+    return f"section {kind!r} failed at extraction: " + "; ".join(diagnostics)
+
+
+def _unavailable_reason(kind: str, entry: Mapping[str, Any]) -> str | None:
+    """Why a section whose availability entry is *entry* blocks its readers,
+    or ``None`` (``present``, or a not-collected kind that decodes as
+    ``None``). The identity section can be neither failed nor uncollected."""
+    status = entry["status"]
+    diagnostics = list(entry.get("diagnostics", []))
+    if status == "present" or (
+        status == "not_collected" and kind not in DEFAULT_FILLED_SECTION_KINDS
+    ):
+        return None
+    if kind == IDENTITY_SECTION_KIND:
+        raise ValueError(f"the provenance section cannot be {status}")
+    if status == "failed":
+        return failed_reason(kind, diagnostics)
+    return not_collected_reason(kind, diagnostics)
 
 
 def _names(raw: Any, where: str) -> list[str]:
@@ -649,19 +661,12 @@ def split_wire_extensions(document: Mapping[str, Any]) -> dict[str, Any]:
                     f"{_VERSIONS_KEY!r}"
                 )
             assert entry is not None
-            diagnostics = list(entry.get("diagnostics", []))
             ext.availability[kind] = dict(entry)
             if status == "failed":
-                if kind == IDENTITY_SECTION_KIND:
-                    raise ValueError("the provenance section cannot be failed")
                 ext.passthrough_versions[kind] = version
-                ext.unreadable.append(
-                    (
-                        kind,
-                        f"section {kind!r} failed at extraction: "
-                        + "; ".join(diagnostics),
-                    )
-                )
+            reason = _unavailable_reason(kind, entry)
+            if reason is not None:
+                ext.unreadable.append((kind, reason))
             continue
         if section is None or version is None:
             # Let `from_sectioned_document`'s missing/extra checks refuse it.
@@ -695,6 +700,13 @@ def split_wire_extensions(document: Mapping[str, Any]) -> dict[str, Any]:
             continue
         kept[kind] = _split_header(kind, section, ext)
         kept_versions[kind] = version
+    ext.unrecorded = sorted(
+        DEFAULT_FILLED_SECTION_KINDS
+        - {IDENTITY_SECTION_KIND}
+        - set(sections)
+        - set(stated)
+        - set(availability)
+    )
     out = {
         key: value
         for key, value in document.items()
@@ -702,7 +714,7 @@ def split_wire_extensions(document: Mapping[str, Any]) -> dict[str, Any]:
     }
     out[_SECTIONS_KEY] = kept
     out[_VERSIONS_KEY] = kept_versions
-    if not ext.is_empty() or ext.unreadable:
+    if not ext.is_empty() or ext.unreadable or ext.unrecorded:
         out[WIRE_EXTENSIONS_KEY] = ext
     return out
 

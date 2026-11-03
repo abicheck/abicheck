@@ -13,33 +13,138 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ADR-062 D15: the per-section field inventory, generated from the encoders.
+"""ADR-062 D15 (1): the wire-contract field inventory, and what a written
+document actually carries.
 
-:func:`field_inventory` reads a sectioned document the `SectionDTO`
-encoders just wrote (`snapshot_encode.snapshot_to_json`) and lists, per
-section, its header keys and every object key path inside its payload --
-``functions[].params[]`` style, the union over every element of a list.
-Header keys include the D14 carriers a writer emits only when non-empty
-(:data:`OPTIONAL_HEADER_KEYS`), and the document level lists its own keys and
-the `section_availability` entry keys, so the inventory covers the header
-entry D15 asks for.
+:func:`declared_field_inventory` is generated from the `SectionDTO`
+encoders' own declarations; nothing here encodes a snapshot:
 
-The checked-in copy (`tests/fixtures/wire_contract/field_inventory.json`) is
-regenerated from a fixed corpus and diffed in CI
-(`tests/unit/storage/test_wire_contract.py`): a section whose inventory moved
-must also have moved its `section_schema_version`, with a registered D13
-migration from the pinned version.
+* the section header -- `storage.dto.SectionDTO`'s fields, exactly the keys
+  `SectionDTO.to_dict` emits (``must_understand``/``extensions`` only when
+  non-empty);
+* the payload keys -- the codec class behind each section
+  (`storage.import_v1.LEGACY_SECTION_DOCUMENT_CODECS`): a sparse section's
+  ``REQUIRED_FIELDS`` and ``OPTIONAL_FIELDS``, or a one-field codec's
+  dataclass field;
+* the record shapes inside a payload -- the model classes the record encoder
+  walks (`storage.wire_record_extensions.RECORD_LISTS`/``RECORD_OBJECTS`` and,
+  recursively, their list-of-record fields), each listed with
+  `storage.wire_field_names.wire_field_names`, the key set the encoder
+  writes and the D14 record reader compares against;
+* the document keys and the ``section_availability`` entry, with its stored
+  status vocabulary.
+
+So an optional key the fixed corpus never sets is still listed. The checked-in
+copy is `tests/fixtures/wire_contract/field_inventory.json`; a section whose
+entry moves must bump its `section_schema_version` with a D13 migration.
+``semantic_ir`` is not listed: its payload is the IR codec's own document,
+versioned and tested there.
+
+:func:`observed_field_inventory` is the conformance half: it reads a document
+the encoders just wrote and lists, per section, its header keys and every
+object key path inside its payload (``functions[].params[]`` style, the union
+over every element of a list), so `tests/unit/storage/test_wire_contract.py`
+can require every observed key to be declared.
 """
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Mapping
 from typing import Any
 
-__all__ = ["OPTIONAL_HEADER_KEYS", "field_inventory"]
+from abicheck.model.section_availability import SectionStatus
+from abicheck.storage.dto import SECTION_SCHEMA_VERSIONS, SectionDTO
+from abicheck.storage.import_v1 import LEGACY_SECTION_DOCUMENT_CODECS
+from abicheck.storage.sectioned_document import (
+    SECTION_SCHEMA_VERSIONS_KEY,
+    SECTIONS_KEY,
+)
+from abicheck.storage.wire_extensions import (
+    AVAILABILITY_KEY,
+    DOCUMENT_MUST_UNDERSTAND_KEY,
+)
+from abicheck.storage.wire_field_names import wire_field_names
+from abicheck.storage.wire_record_extensions import (
+    RECORD_LISTS,
+    RECORD_OBJECTS,
+    nested_record_classes,
+)
 
-#: Header keys written only when non-empty (ADR-062 D14).
-OPTIONAL_HEADER_KEYS = ("extensions", "must_understand")
+__all__ = [
+    "AVAILABILITY_ENTRY_KEYS",
+    "declared_field_inventory",
+    "observed_field_inventory",
+]
+
+#: The keys of one ``section_availability`` entry
+#: (`wire_extensions.merge_wire_extensions` writes both on every entry).
+AVAILABILITY_ENTRY_KEYS: tuple[str, ...] = ("diagnostics", "status")
+
+#: The statuses a stored entry may carry; ``blocked`` and ``unrecorded`` are
+#: decided by the reader and never stored.
+_STORED_STATUSES = (
+    SectionStatus.PRESENT,
+    SectionStatus.NOT_COLLECTED,
+    SectionStatus.FAILED,
+)
+
+
+def _payload_keys(codec: Any) -> list[str]:
+    required = getattr(codec, "REQUIRED_FIELDS", None)
+    if required is not None:
+        return sorted({*required, *codec.OPTIONAL_FIELDS})
+    return sorted(f.name for f in dataclasses.fields(codec))
+
+
+def _records(
+    path: str, cls: type, out: dict[str, list[str]], seen: frozenset[type]
+) -> None:
+    # ADR-079: encode_platform_enums strips this runtime view; the state
+    # is stored in the binary header extension, never in a metadata payload.
+    omitted = {"export_read"} if path in {"elf", "pe", "macho"} else set()
+    out[path] = sorted(set(wire_field_names(cls)) - omitted)
+    if cls in seen:
+        return
+    for name, element in sorted(nested_record_classes(cls).items()):
+        _records(f"{path}.{name}[]", element, out, seen | {cls})
+
+
+def _section_fields(kind: str, codec: Any) -> dict[str, list[str]]:
+    fields: dict[str, list[str]] = {"": _payload_keys(codec)}
+    for (section, key), (cls, _identity) in RECORD_LISTS.items():
+        if section == kind:
+            _records(f"{key}[]", cls, fields, frozenset())
+    for (section, key), cls in RECORD_OBJECTS.items():
+        if section == kind:
+            _records(key, cls, fields, frozenset())
+    return {path: fields[path] for path in sorted(fields)}
+
+
+def declared_field_inventory() -> dict[str, Any]:
+    """The inventory, as plain sorted JSON."""
+    header = sorted(f.name for f in dataclasses.fields(SectionDTO))
+    return {
+        "document": sorted(
+            {
+                "schema_version",
+                SECTIONS_KEY,
+                SECTION_SCHEMA_VERSIONS_KEY,
+                AVAILABILITY_KEY,
+                DOCUMENT_MUST_UNDERSTAND_KEY,
+            }
+        ),
+        "availability_entry": list(AVAILABILITY_ENTRY_KEYS),
+        "availability_statuses": sorted(str(s) for s in _STORED_STATUSES),
+        "sections": {
+            kind: {
+                "header": header,
+                "section_schema_version": SECTION_SCHEMA_VERSIONS[kind],
+                "fields": _section_fields(kind, codec),
+            }
+            for kind, codec in sorted(LEGACY_SECTION_DOCUMENT_CODECS.items())
+        },
+    }
 
 
 def _walk(value: Any, path: str, out: dict[str, set[str]]) -> None:
@@ -52,22 +157,25 @@ def _walk(value: Any, path: str, out: dict[str, set[str]]) -> None:
             _walk(item, f"{path}[]", out)
 
 
-def field_inventory(document: Mapping[str, Any]) -> dict[str, Any]:
-    """The field inventory of the sectioned *document*: plain, sorted JSON."""
+def observed_field_inventory(document: Mapping[str, Any]) -> dict[str, Any]:
+    """The keys the sectioned *document* carries: plain, sorted JSON."""
     sections: dict[str, Any] = {}
     for kind, section in sorted(document.get("sections", {}).items()):
         paths: dict[str, set[str]] = {}
         _walk(section.get("payload", {}), "", paths)
         sections[kind] = {
-            "header": sorted(set(section) | set(OPTIONAL_HEADER_KEYS)),
+            "header": sorted(section),
             "section_schema_version": section.get("section_schema_version"),
             "fields": {path: sorted(keys) for path, keys in sorted(paths.items())},
         }
     entries: set[str] = set()
+    statuses: set[str] = set()
     for entry in document.get("section_availability", {}).values():
         entries.update(entry)
+        statuses.add(entry.get("status"))
     return {
-        "document": sorted(set(document) | {"must_understand"}),
+        "document": sorted(document),
         "availability_entry": sorted(entries),
+        "availability_statuses": sorted(statuses),
         "sections": sections,
     }
