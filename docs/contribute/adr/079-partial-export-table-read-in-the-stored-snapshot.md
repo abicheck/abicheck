@@ -1,14 +1,15 @@
 # ADR-079: Recording a Partial Export-Table Read in the Stored Snapshot
 
 **Date:** 2026-10-12
-**Status:** Accepted — not implemented (accepted 2026-11-02). Written for the known gap
+**Status:** Accepted — implemented (accepted 2026-11-02). Written for the known gap
 [`a-stored-snapshot-keeps-no-record-of-a-partial-export-table-read`](../known-gaps/a-stored-snapshot-keeps-no-record-of-a-partial-export-table-read.md).
 Accepts one snapshot field and a schema bump, with D4 and D5 as proposed
 (a `partial` read lowers scope completeness, no new exit code; old readers
 are handled by the existing version gate, without raising the hard-rejection
-floor). The v58/v59 numbers below are the draft's: the implementing change
-takes the next free schema version and carries the bump. No code, schema or
-default has changed yet.
+floor). The v58/v59 numbers below are the draft's: the implementation took
+schema **v70** (from v69; ADR-080 had already taken its own bump, v68), so
+read "v58" as v69 and "v59" as v70 below. See
+[Implementation](#implementation).
 
 ## Context
 
@@ -121,3 +122,40 @@ the same mechanism v42 used for the envelope change, and does not raise
   from the version number.
 - A mutation test on the reader's mapping, so that flipping `partial` to
   `complete` fails a test.
+
+## Implementation
+
+- **Model.** `model/export_read.ExportReadState` (`complete`/`partial`/
+  `failed`/`unrecorded`) is the `export_read` field of `ElfMetadata`,
+  `PeMetadata` and `MachoMetadata` (`compare=False`: provenance, not table
+  content). `export_read_state` is the D1 writer rule.
+- **Writer.** `extract/export_table_read.read_exports_or_fail` stamps
+  `complete` on the block it returns; a read that noted a failure still
+  raises there (`dump` keeps rejecting it). `read_library_export_facts`
+  applies the same D1 rule to a raw binary's recorded failures, so a library
+  read live and its stored copy carry the same fact.
+- **Encoding (D2/D3).** `storage/enum_codec.encode_export_read` writes the
+  key for every state but `complete`, *including* `unrecorded`: at v70 an
+  absent key means `complete`, so dropping it would upgrade a re-saved
+  pre-v70 block. `snapshot_platform_blocks.export_read_from_dict` reads an
+  absent key as `complete` from v70 and `unrecorded` below, and refuses an
+  unknown value.
+- **Readers (D4).** `model/export_index.platform_export_read` is the one
+  effective-state rule: a recorded `partial`/`failed` is taken as recorded,
+  anything else keeps the pre-v70 rule. `ExportTableState.PARTIAL` withdraws
+  every stored "not exported" answer (at dump and at load), the `exports`
+  coverage record reads `failed` (`export_table_partially_read`),
+  `read_default_export_names` answers unknown, and consumer scoping refuses
+  a `PARTIAL` library (it reads absence).
+- **Comparison, assurance, report.** `policy/partial_export_read.py` keeps
+  each removal a recorded `partial`/`failed` NEW table cannot establish and
+  annotates it `COMPATIBLE_WITH_RISK` under the `partial_export_table_read`
+  rule (a removal the NEW side's parsed headers establish stands).
+  `analysis_assurance.export_read` reports each side's recorded states and a
+  gap makes the status `partial` (so `assurance.require_complete` exits 1);
+  `run_outcome.scope` reads `incomplete`; the Markdown report lists the gap
+  as a coverage row. Report schema 7.1.
+- **Tests.** `tests/unit/storage/test_export_read_persisted.py` (property
+  over the read outcomes × live/stored × ELF/PE/Mach-O, the pre-v70 and
+  re-save rules, the D1 table) and `tests/test_cli_compare_partial_export_read.py`
+  (the public `compare` path, with a complete-table control).

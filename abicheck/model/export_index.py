@@ -65,6 +65,7 @@ from typing import TYPE_CHECKING, Literal
 
 from .execution_cache import request_key
 from .execution_cache_scoped import InstanceMemo
+from .export_read import ExportReadState
 
 if TYPE_CHECKING:
     from .elf_facts import ElfMetadata, ElfSymbol
@@ -88,6 +89,7 @@ __all__ = [
     "default_versioned_names",
     "export_names_or_modeled_fallback",
     "platform_block_parsed",
+    "platform_export_read",
     "read_default_export_names",
     "read_export_platforms",
     "snapshot_export_table_state",
@@ -557,21 +559,36 @@ def platform_block_parsed(meta: object) -> bool:
     return any(getattr(meta, attr, "") for attr in ("machine", "filetype", "cpu_type"))
 
 
-def read_export_platforms(snap: AbiSnapshot) -> dict[str, bool]:
-    """Every export table *snap* carries -> whether it was read: it holds an
-    entry, or its header fields show the binary was parsed
-    (:func:`platform_block_parsed`). A carried block with neither is a
-    default or parse-failed one (``parse_pe_metadata``/
-    ``parse_macho_metadata`` return empty metadata on error), which reading
-    as "exports nothing" would prove every declaration unexported. The one
-    rule the export fact (:func:`snapshot_export_table_state`) and the
-    ``exports`` coverage record (``compare.edge_query``) both read."""
+def platform_export_read(meta: object, index: RawExportIndex) -> ExportReadState:
+    """How *meta*'s export table (read into *index*) may be relied on:
+    ``COMPLETE``, ``PARTIAL`` or ``FAILED`` -- never ``UNRECORDED``.
+
+    A recorded ``partial``/``failed`` read (ADR-079, ``meta.export_read``) is
+    taken as recorded. Otherwise -- a recorded ``complete`` or an
+    ``unrecorded`` block (a pre-v70 document, a hand-built object) -- the
+    pre-ADR-079 rule decides: the table was read when it holds an entry or
+    its header fields show the binary was parsed (:func:`platform_block_parsed`);
+    a carried block with neither is a default or parse-failed one, which
+    reading as "exports nothing" would prove every declaration unexported.
+    """
+    recorded = getattr(meta, "export_read", ExportReadState.UNRECORDED)
+    if recorded in (ExportReadState.PARTIAL, ExportReadState.FAILED):
+        return ExportReadState(recorded)
+    if index.entries or platform_block_parsed(meta):
+        return ExportReadState.COMPLETE
+    return ExportReadState.FAILED
+
+
+def read_export_platforms(snap: AbiSnapshot) -> dict[str, ExportReadState]:
+    """Every export table *snap* carries -> how it was read
+    (:func:`platform_export_read`). The one rule the export fact
+    (:func:`snapshot_export_table_state`) and the ``exports`` coverage
+    record (``compare.edge_query``) both read."""
     metas = {"elf": snap.elf, "pe": snap.pe, "macho": snap.macho}
-    read: dict[str, bool] = {}
-    for index in build_raw_export_indexes(snap):
-        ok = bool(index.entries) or platform_block_parsed(metas[index.platform])
-        read[index.platform] = read.get(index.platform, False) or ok
-    return read
+    return {
+        index.platform: platform_export_read(metas[index.platform], index)
+        for index in build_raw_export_indexes(snap)
+    }
 
 
 class ExportTableState(StrEnum):
@@ -596,15 +613,20 @@ class ExportTableState(StrEnum):
     #: The table was read -- it holds an entry, or the binary's header was
     #: parsed and it genuinely exports nothing: ``ABSENT`` is an observation.
     READ = "read"
+    #: The block records a partial read (ADR-079): every entry it holds is
+    #: real, but ``ABSENT`` is not an observation -- the unread part may hold
+    #: the symbol.
+    PARTIAL = "partial"
 
 
 def read_default_export_names(snap: AbiSnapshot) -> frozenset[str] | None:
     """*snap*'s default-versioned export names from the table it carries, or
-    ``None`` when there is no table *or the table was not read*
-    (:func:`platform_block_parsed`: a default or parse-failed block with no
-    entries). ``None`` is "unknown", never "exports nothing" -- the reading a
-    release reconciliation needs to record an obligation as unresolved rather
-    than as a missing export (evidence-entity-model gap A4)."""
+    ``None`` when there is no table *or the table was not completely read*
+    (:func:`platform_export_read`: a default or parse-failed block with no
+    entries, or a recorded partial/failed read). ``None`` is "unknown", never
+    "exports nothing" -- the reading a release reconciliation needs to record
+    an obligation as unresolved rather than as a missing export
+    (evidence-entity-model gap A4, ADR-079 D4)."""
     for platform, build in (
         ("elf", build_raw_export_index_from_elf),
         ("pe", build_raw_export_index_from_pe),
@@ -614,22 +636,34 @@ def read_default_export_names(snap: AbiSnapshot) -> frozenset[str] | None:
         if meta is None:
             continue
         index = build(meta)
-        if not index.entries and not platform_block_parsed(meta):
+        if platform_export_read(meta, index) is not ExportReadState.COMPLETE:
             return None
         return default_versioned_names(index)
     return None
 
 
+_TABLE_STATE = {
+    ExportReadState.COMPLETE: ExportTableState.READ,
+    ExportReadState.PARTIAL: ExportTableState.PARTIAL,
+    ExportReadState.FAILED: ExportTableState.FAILED,
+}
+
+
 def snapshot_export_table_state(snap: AbiSnapshot) -> ExportTableState:
     """Whether the table *snap*'s producers looked declarations up in was
     read (:func:`read_export_platforms`): the table its own ``platform``
-    names, or, when that is not one it carries, any table it carries."""
+    names, or, when that is not one it carries, the best-read table it
+    carries."""
     read = read_export_platforms(snap)
     if not read:
         return ExportTableState.NO_BINARY
     platform = getattr(snap, "platform", None)
-    ok = read[platform] if platform in read else any(read.values())
-    return ExportTableState.READ if ok else ExportTableState.FAILED
+    if platform in read:
+        return _TABLE_STATE[read[platform]]
+    for state in (ExportReadState.COMPLETE, ExportReadState.PARTIAL):
+        if state in read.values():
+            return _TABLE_STATE[state]
+    return ExportTableState.FAILED
 
 
 def pe_decoration_aliases(

@@ -39,6 +39,7 @@ from ..policy.outcome import (
     TargetLifecycle,
     policy_gate_decision_for_exit_code,
 )
+from ..policy.partial_export_read import export_read_scope_completeness
 
 if TYPE_CHECKING:
     from ..checker_types import DiffResult
@@ -77,11 +78,15 @@ def run_outcome_dict_for_diff_result(
     from ..policy.severity import legacy_exit_code
 
     exit_code = gate.exit_code if gate is not None else legacy_exit_code(result.verdict)
+    assurance = getattr(result, "analysis_assurance", None)
     outcome = RunOutcome(
         compatibility=result.verdict,
-        assurance=getattr(result, "analysis_assurance", None),
+        assurance=assurance,
         gate=policy_gate_decision_for_exit_code(exit_code),
         operational=OperationalStatus.NONE,
         lifecycle=TargetLifecycle.EXISTING,
+        # ADR-079 D4: a partially read export table is an incompletely
+        # checked scope, decided by policy from the assurance's own states.
+        scope=export_read_scope_completeness(assurance),
     )
     return outcome.to_dict()

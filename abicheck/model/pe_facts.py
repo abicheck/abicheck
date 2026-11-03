@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 
 from .execution_cache import memoized_property
+from .export_read import ExportReadState
 from .fact import Fact, bridge_legacy_and_fact
 from .name_decoration import pe_x86
 
@@ -88,6 +89,14 @@ class PeMetadata:
     # own three case-(b) fields.
     delay_imports_fact: Fact[dict[str, list[str]] | None] | None = field(
         default=None, kw_only=True
+    )
+
+    # ADR-079 (schema v70): how completely this block's export table was
+    # read -- model/export_read.py. ``UNRECORDED`` for a block no recording
+    # read produced (and every pre-v70 document); never read as complete.
+    # compare=False: a read outcome is provenance, not table content.
+    export_read: ExportReadState = field(
+        default=ExportReadState.UNRECORDED, compare=False, kw_only=True
     )
 
     def __post_init__(self) -> None:

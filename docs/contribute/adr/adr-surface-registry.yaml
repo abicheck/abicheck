@@ -692,10 +692,10 @@ adrs:
 
   - id: ADR-079
     file: 079-partial-export-table-read-in-the-stored-snapshot.md
-    disposition: gap
-    use_cases: []
-    surfaces: []
-    missing: Proposed, not yet implemented; no per-platform export_read snapshot field exists.
+    disposition: surfaced
+    use_cases: [UC-WF-compare]
+    surfaces:
+      - report: compare_report.analysis_assurance
 
   - id: ADR-080
     file: 080-persisting-the-advanced-dwarf-extraction-status.md

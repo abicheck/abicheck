@@ -28,11 +28,16 @@ from __future__ import annotations
 
 from typing import Any
 
-__all__ = ["encode_platform_enums"]
+__all__ = ["encode_export_read", "encode_platform_enums"]
 
 
 def encode_platform_enums(d: dict[str, Any]) -> None:
-    """In-place: ElfMetadata/PeMetadata/MachoMetadata enum members -> strings."""
+    """In-place: ElfMetadata/PeMetadata/MachoMetadata enum members -> strings,
+    and each block's ``export_read`` encoded (:func:`encode_export_read`)."""
+    for platform in ("elf", "pe", "macho"):
+        block = d.get(platform)
+        if isinstance(block, dict):
+            encode_export_read(block)
     if d.get("elf"):
         elf = d["elf"]
         for sym in elf.get("symbols", []):
@@ -77,3 +82,20 @@ def encode_platform_enums(d: dict[str, Any]) -> None:
                 if isinstance(exp["sym_type"], str)
                 else exp["sym_type"].value
             )
+
+
+def encode_export_read(block: dict[str, Any]) -> None:
+    """In-place: a platform block's ``export_read`` (schema v70, ADR-079 D2).
+
+    ``complete`` writes no key, so a snapshot with no read fault encodes as it
+    did before v70 apart from the version number. Every other state is written
+    as its string -- ``unrecorded`` included: an absent key reads as
+    ``complete`` from v70, so dropping it would upgrade a block with no record
+    of its read (a re-saved pre-v70 baseline) to a complete table.
+    """
+    state = block.get("export_read")
+    value = getattr(state, "value", state)
+    if value is None or value == "complete":
+        block.pop("export_read", None)
+    else:
+        block["export_read"] = value

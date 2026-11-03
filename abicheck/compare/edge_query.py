@@ -70,6 +70,7 @@ from ..model.edge_coverage import (
 )
 from ..model.execution_cache import memoized_property
 from ..model.export_index import read_export_platforms, snapshot_export_names
+from ..model.export_read import ExportReadState
 from ..model.graph_join import (
     BINARY_SYMBOL_PREFIX,
     DEBUG_TYPE_PREFIX,
@@ -199,8 +200,10 @@ def export_coverage_records(snap: AbiSnapshot) -> tuple[CoverageRecord, ...]:
     that exports nothing is a real, covered empty table. A carried block
     with neither is ``failed``: a default or parse-failed platform block,
     which reading as "exports nothing" would prove every declaration
-    unexported. A table owed but not carried is ``not_run``; no table owed
-    at all is one ``not_run`` record."""
+    unexported. A block recording a partial read (ADR-079) is ``failed`` too,
+    with reason ``export_table_partially_read``: what it holds is real, what
+    it lacks proves nothing. A table owed but not carried is ``not_run``; no
+    table owed at all is one ``not_run`` record."""
     carried = read_export_platforms(snap)
     owed = set(carried)
     if snap.platform in _PLATFORMS:
@@ -217,7 +220,10 @@ def export_coverage_records(snap: AbiSnapshot) -> tuple[CoverageRecord, ...]:
     for platform in sorted(owed):
         if platform not in carried:
             run, reason = ProducerRun.NOT_RUN, "no_export_table"
-        elif not carried[platform]:
+        elif carried[platform] is ExportReadState.PARTIAL:
+            # ADR-079 D4: the entries are real, the unread part proves nothing.
+            run, reason = ProducerRun.FAILED, "export_table_partially_read"
+        elif carried[platform] is not ExportReadState.COMPLETE:
             run, reason = ProducerRun.FAILED, "export_table_not_read"
         else:
             run, reason = ProducerRun.RAN, ""

@@ -41,6 +41,7 @@ from ._comparability import (
 from ._context import _dwarf_context_status, _header_context_status, _l3_context_status
 from ._depth_projection import depth_projection_gap
 from ._export_accounting import _export_accounting
+from ._export_read import export_read_gap
 from ._fact_set import _fact_set_comparability
 from ._graph_completeness import _graph_completeness
 from ._layout import layout_unverified_detectors as _layout_unverified_detectors
@@ -206,6 +207,8 @@ def compute_analysis_assurance(
     notes.extend(projection_notes)
     unreadable_gap, unreadable_notes = unreadable_section_gap(old, new)
     notes.extend(unreadable_notes)
+    export_read_unreliable, export_read_notes, export_read = export_read_gap(old, new)
+    notes.extend(export_read_notes)
 
     # -- manifest-level layer incompleteness ----------------------------------
     # The one check below that reads the pack MANIFEST directly (D7/D8's own
@@ -268,6 +271,7 @@ def compute_analysis_assurance(
         or template_defaults_gap
         or projection_gap
         or unreadable_gap
+        or export_read_unreliable
     ):
         status = "partial"
     elif nothing_requested:
@@ -293,4 +297,5 @@ def compute_analysis_assurance(
         graph_completeness=graph_completeness,
         layout_unverified_detectors=layout_unverified_detectors,
         notes=tuple(notes),
+        export_read=export_read,
     )

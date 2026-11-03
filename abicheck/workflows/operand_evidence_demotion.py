@@ -1,0 +1,43 @@
+# Copyright 2026 Nikolay Petrov
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""The operand-evidence demotions one comparison applies before its verdict.
+
+Each annotates, never removes (ADR-067 record before disposing), a finding
+the operands' own evidence cannot establish:
+
+* an undeclared respelling between operands of different extractor
+  generations (``workflows.generation_drift``, ADR-062 D2);
+* a removal resting on a partially read NEW export table
+  (``policy.partial_export_read``, ADR-079 D4).
+"""
+
+from __future__ import annotations
+
+from ..model.change import Change
+from ..model.snapshot import AbiSnapshot
+from ..policy.partial_export_read import demote_unestablished_export_removals
+from .generation_drift import demote_cross_generation_drift
+
+__all__ = ["demote_operand_evidence_gaps"]
+
+
+def demote_operand_evidence_gaps(
+    changes: list[Change], old: AbiSnapshot, new: AbiSnapshot
+) -> list[Change]:
+    """Apply every operand-evidence demotion to *changes*; mutates and
+    returns it."""
+    demote_cross_generation_drift(changes, old, new)
+    return demote_unestablished_export_removals(changes, new)

@@ -115,6 +115,7 @@ Nothing here shells out, re-parses a binary, or re-runs an extractor.
 from __future__ import annotations
 
 from ._compute import compute_analysis_assurance
+from ._export_read import export_read_notes
 from ._outputs import (
     INCOMPLETE_ANALYSIS_EXIT_CONTRIBUTION,
     analysis_assurance_exit_contribution,
@@ -142,4 +143,5 @@ __all__ = [
     "analysis_assurance_report_dict",
     "assurance_floor_diagnostic",
     "compute_analysis_assurance",
+    "export_read_notes",
 ]

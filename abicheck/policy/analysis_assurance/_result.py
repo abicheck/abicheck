@@ -276,6 +276,12 @@ class AnalysisAssurance:
     #: that, so ``tests/test_analysis_assurance_implicit_depth.py`` now
     #: states the rule executably rather than in a third comment.
     requested_depth_source: str = "implicit"
+    #: ADR-079: each side's recorded export-table read per platform
+    #: (``{"old": {"elf": "complete"}, "new": {"elf": "partial"}}``; an empty
+    #: side carries no binary). ``partial``/``failed`` on either side makes
+    #: :attr:`status` ``partial`` (``_export_read.py``). Appended at the END
+    #: for the positional-constructor reason recorded above.
+    export_read: dict[str, dict[str, str]] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -297,4 +303,5 @@ class AnalysisAssurance:
             "graph_completeness": self.graph_completeness,
             "layout_unverified_detectors": list(self.layout_unverified_detectors),
             "notes": list(self.notes),
+            "export_read": {side: dict(v) for side, v in self.export_read.items()},
         }

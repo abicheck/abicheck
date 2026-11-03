@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 
 from .execution_cache import memoized_property
+from .export_read import ExportReadState
 from .fact import Fact, bridge_legacy_and_fact
 
 
@@ -246,6 +247,14 @@ class ElfMetadata:
     )
     has_init_fact: Fact[bool | None] | None = field(default=None, kw_only=True)
     has_fini_fact: Fact[bool | None] | None = field(default=None, kw_only=True)
+
+    # ADR-079 (schema v70): how completely this block's export table was
+    # read -- model/export_read.py. ``UNRECORDED`` for a block no recording
+    # read produced (and every pre-v70 document); never read as complete.
+    # compare=False: a read outcome is provenance, not table content.
+    export_read: ExportReadState = field(
+        default=ExportReadState.UNRECORDED, compare=False, kw_only=True
+    )
 
     def __post_init__(self) -> None:
         self.dynamic_flags, self.dynamic_flags_fact = bridge_legacy_and_fact(
