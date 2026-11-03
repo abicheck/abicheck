@@ -173,7 +173,7 @@
       "abicheck/extract/semantic_normalizer_dwarf.py": "d092c309a8e349f9b699e5931456188485670ef05a8048783496d915fe7a7a83",
       "abicheck/extract/semantic_normalizer_template_args.py": "9e07ae6b02395411ad22cbd02e2acbe3f9d70b5a33283b606a9296ba9d55b1b2",
       "abicheck/extract/stdlib_local_origin.py": "5ba2ab65b5d264138e07adfa3506ade7706239bcc07cc04e3fb75596ec7b4358",
-      "abicheck/extract/surface_fact_producers.py": "f9e35bcf58e12ea169a5349a2d988e10a5f2d77f9c5e3f59a56a3fe3dd01d76f",
+      "abicheck/extract/surface_fact_producers.py": "3a6c9b3a355342de1f4658a2154f9769dde9c1165dd7b90aba7d449f5f6b7cda",
       "abicheck/extract/system_header_layout.py": "3784ee2f9386949eb3db9e4d77f9b92a5211106d72e4de1d004c9ea7f7d1a0cd",
       "abicheck/extract/target_platform.py": "d2f2774c26bd12eb623a64883c2611782cac8f3d84da51248a969bd1f288e739",
       "abicheck/extract/target_platform_probe.py": "8aa0a1b5d3352033f66ead8a609afac8076d6a6957ba1f8f8ea1e78f28b842e9",
@@ -191,7 +191,7 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "34450d61853034f2700264d644e43c6fe048653d57db7201b69aeca759c77df6",
+    "fingerprint": "26adde3b1cdd6c3d5a188b3469409131f88e76c241f21a618653f5a6aaacba27",
     "generation": 34,
     "reason": "ADR-079: a dump's export read now records export_read on its platform block, but a complete read (the only one dump accepts) writes no key, so what an extractor records for the same input is unchanged; pre-v70 snapshots are separated by the schema version gate, not the generation"
   },

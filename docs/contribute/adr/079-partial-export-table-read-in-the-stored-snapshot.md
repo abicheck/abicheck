@@ -139,7 +139,9 @@ the same mechanism v42 used for the envelope change, and does not raise
   absent key means `complete`, so dropping it would upgrade a re-saved
   pre-v70 block. `snapshot_platform_blocks.export_read_from_dict` reads an
   absent key as `complete` from v70 and `unrecorded` below, and refuses an
-  unknown value.
+  unknown value. The `binary` section moves to `section_schema_version` 2;
+  its D13 step (`enum_codec.binary_v1_to_v2`) stamps every block of a v1
+  section `unrecorded`, so a package section is gated by its own axis too.
 - **Readers (D4).** `model/export_index.platform_export_read` is the one
   effective-state rule: a recorded `partial`/`failed` is taken as recorded,
   anything else keeps the pre-v70 rule. `ExportTableState.PARTIAL` withdraws

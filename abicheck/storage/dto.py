@@ -47,6 +47,7 @@ from typing import Any, Protocol, TypeVar
 
 from ..model.semantic_ir import SemanticIR
 from .canonical import canonical_form, canonical_input_trusted
+from .enum_codec import binary_v1_to_v2
 from .graph_section_codec import GraphSection
 from .guards import (
     identity_text as _identity_text,
@@ -198,6 +199,7 @@ SECTION_SCHEMA_VERSIONS: Mapping[str, int] = {
     # its own independent axis from version 1 on, so a future `"binary"`
     # schema change never forces a bump on `"declarations"`.
     **{kind: 1 for kind in LEGACY_SECTION_KINDS},
+    BINARY_SECTION_KIND: 2,  # v2: platform blocks' export_read (ADR-079)
     # ADR-063 Track C 8B: the two variant-level kinds, independent likewise.
     # Composition v2 (ADR-065 D8) adds the decision-bearing `degraded_members`
     # map; a composition with none is still *written* at v1 (see
@@ -252,6 +254,7 @@ _MIGRATIONS: Mapping[
     **{kind: {} for kind in SECTION_SCHEMA_VERSIONS},
     BUNDLE_COMPOSITION_SECTION_KIND: {1: _bundle_composition_v1_to_v2},
     SEMANTIC_IR_SECTION_KIND: {1: _semantic_ir_v1_to_v2},
+    BINARY_SECTION_KIND: {1: binary_v1_to_v2},
 }
 
 

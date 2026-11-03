@@ -26,9 +26,10 @@ directly. Takes no dependency beyond stdlib, fitting ADR-061's
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
-__all__ = ["encode_export_read", "encode_platform_enums"]
+__all__ = ["binary_v1_to_v2", "encode_export_read", "encode_platform_enums"]
 
 
 def encode_platform_enums(d: dict[str, Any]) -> None:
@@ -99,3 +100,30 @@ def encode_export_read(block: dict[str, Any]) -> None:
         block.pop("export_read", None)
     else:
         block["export_read"] = value
+
+
+#: The ``binary`` section's D13 step v1 -> v2 (``storage/dto.py``, snapshot
+#: schema v70, ADR-079). v2 platform blocks may carry ``export_read``, and an
+#: absent key there means ``complete``. A v1 section predates the record, so
+#: each block it carries is stamped ``unrecorded`` -- never ``complete``; a v1
+#: block already carrying the key was not written by a v1 writer and is
+#: refused. Bumping the section version is what makes a reader that predates
+#: it refuse a v2 ``binary`` section in a package rather than read a partial
+#: table as complete.
+_PLATFORMS = ("elf", "pe", "macho")
+
+
+def binary_v1_to_v2(payload: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Stamp every platform block of a v1 ``binary`` payload ``unrecorded``."""
+    out = dict(payload)
+    for platform in _PLATFORMS:
+        block = payload.get(platform)
+        if not isinstance(block, Mapping):
+            continue
+        if "export_read" in block:
+            raise ValueError(
+                f"'binary' section v1 {platform!r} block carries export_read, "
+                "which only a v2 writer emits"
+            )
+        out[platform] = {**block, "export_read": "unrecorded"}
+    return out

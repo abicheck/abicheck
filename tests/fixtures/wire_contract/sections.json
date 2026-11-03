@@ -1,5 +1,5 @@
 {
-  "schema_version": 69,
+  "schema_version": 70,
   "sections": {
     "binary": {
       "fields": [
@@ -16,8 +16,8 @@
         "source_path",
         "source_size"
       ],
-      "section_schema_version": 1,
-      "sha256": "42f6702a1baea99ac08218e51e59815fc352928df80ff6dc80fc26201d6129eb"
+      "section_schema_version": 2,
+      "sha256": "77a346d1b5a10869601ec621b80ea29601d96486ee1dec90c8c51edc6e28dfdf"
     },
     "build": {
       "fields": [

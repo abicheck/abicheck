@@ -401,17 +401,11 @@ def compute_confidence_section(result: DiffResult) -> _rmd.ConfidenceSection | N
     comparability_dimensions = (
         tuple(sorted(comparability.items())) if comparability else ()
     )
-    # ADR-079: an export table recorded as not completely read is a coverage
-    # gap on that side; the assurance carries the states the policy decided.
-    from ..policy.analysis_assurance import export_read_notes
-
-    assurance = getattr(result, "analysis_assurance", None)
-    export_read = getattr(assurance, "export_read", None) or {}
     return _rmd.ConfidenceSection(
         confidence_upper=conf_val.upper(),
         evidence_tier=etier_val,
         evidence_tiers_str=tier_str,
-        coverage_warnings=(*(cov_warns or ()), *export_read_notes(export_read)),
+        coverage_warnings=tuple(cov_warns) if cov_warns else (),
         comparability_dimensions=comparability_dimensions,
     )
 

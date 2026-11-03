@@ -160,7 +160,10 @@ __all__ = [
 #:   report's ``analysis_assurance`` shape (with the ``not_evaluated``
 #:   ``schema_staleness_status`` every audit has always emitted, since an
 #:   audit has no OLD side -- compare report ``5.7``). No emitted value changes.
-AUDIT_REPORT_SCHEMA_VERSION = "1.6"
+#: ``1.7``: the shared assurance shape gains the additive ``export_read``
+#:   object (compare report ``7.1``, ADR-079): the candidate's recorded
+#:   export-table read per platform block.
+AUDIT_REPORT_SCHEMA_VERSION = "1.7"
 
 #: The ``audit_set`` envelope's own schema version (``compare --no-baseline
 #: DIR``, ``abicheck/schemas/audit_set_report.schema.json``), in its own

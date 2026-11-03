@@ -409,6 +409,36 @@
           "items": {
             "type": "string"
           }
+        },
+        "export_read": {
+          "type": "object",
+          "description": "Schema 7.1 (ADR-079): each side's recorded export-table read, per platform block: {\"old\": {platform: state}, \"new\": {platform: state}}. A state is complete, partial, failed or unrecorded (a snapshot written before snapshot schema v70, read by the pre-v70 rule). A side with no binary maps to {}. partial or failed on either side makes status partial.",
+          "properties": {
+            "old": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "enum": [
+                  "complete",
+                  "partial",
+                  "failed",
+                  "unrecorded"
+                ]
+              }
+            },
+            "new": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "enum": [
+                  "complete",
+                  "partial",
+                  "failed",
+                  "unrecorded"
+                ]
+              }
+            }
+          }
         }
       }
     }

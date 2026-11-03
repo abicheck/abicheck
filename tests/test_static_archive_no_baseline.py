@@ -51,6 +51,7 @@ from abicheck.extract.ar_archive import (
 )
 from abicheck.model import AbiSnapshot
 from abicheck.model.export_index import build_raw_export_index, read_export_platforms
+from abicheck.model.export_read import ExportReadState
 from abicheck.workflows.input_resolution import resolve_input
 
 
@@ -127,7 +128,7 @@ def test_empty_index_is_a_read_empty_table(tmp_path: Path) -> None:
     )
     assert read.status == ARCHIVE_EXPORTS_READ and read.names == frozenset()
     snap = AbiSnapshot(library="libx.a", version="1", elf=archive_elf_metadata(read))
-    assert read_export_platforms(snap) == {"elf": True}
+    assert read_export_platforms(snap) == {"elf": ExportReadState.COMPLETE}
     index = build_raw_export_index(snap)
     assert index is not None and index.entries == ()
 

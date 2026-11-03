@@ -39,6 +39,7 @@ mappings -- never the reader under test:
 from __future__ import annotations
 
 import copy
+import json
 from typing import Any
 
 import pytest
@@ -61,7 +62,11 @@ from abicheck.model.export_index import (
 from abicheck.model.export_read import ExportReadState, export_read_state
 from abicheck.model.macho_facts import MachoExport, MachoMetadata
 from abicheck.model.pe_facts import PeExport, PeMetadata
-from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
+from abicheck.serialization import (
+    snapshot_from_dict,
+    snapshot_to_dict,
+    snapshot_to_json,
+)
 from abicheck.workflows.consumer_scope import require_read_library
 
 PLATFORMS = ("elf", "pe", "macho")
@@ -351,3 +356,30 @@ def test_a_removal_the_new_headers_establish_still_stands(
     # annotated; PE/Mach-O do not report it at all).
     c_fn = removed.get("c_fn")
     assert c_fn is None or c_fn.modulation_rule == "partial_export_table_read"
+
+
+@pytest.mark.parametrize("platform", PLATFORMS)
+@pytest.mark.parametrize("schema_version", [69, 70])
+def test_a_v1_binary_section_reads_as_unrecorded(
+    platform: str, schema_version: int
+) -> None:
+    """The ``binary`` section's own v1 -> v2 migration: a v1 section predates
+    the record, so its block reads ``unrecorded`` whatever the document-level
+    version says -- the per-section axis a package reader goes by."""
+    document = json.loads(snapshot_to_json(_snapshot(platform, NAMES)))
+    document["schema_version"] = schema_version
+    document["section_schema_versions"]["binary"] = 1
+    document["sections"]["binary"]["section_schema_version"] = 1
+    snap = snapshot_from_dict(copy.deepcopy(document))
+    assert getattr(snap, platform).export_read is ExportReadState.UNRECORDED
+
+
+@pytest.mark.parametrize("platform", PLATFORMS)
+def test_a_v1_binary_section_carrying_the_key_is_refused(platform: str) -> None:
+    document = json.loads(
+        snapshot_to_json(_snapshot(platform, NAMES, state=ExportReadState.PARTIAL))
+    )
+    document["section_schema_versions"]["binary"] = 1
+    document["sections"]["binary"]["section_schema_version"] = 1
+    with pytest.raises((ValueError, SnapshotError), match="only a v2 writer"):
+        snapshot_from_dict(document)

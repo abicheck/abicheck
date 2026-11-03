@@ -207,8 +207,8 @@ def compute_analysis_assurance(
     notes.extend(projection_notes)
     unreadable_gap, unreadable_notes = unreadable_section_gap(old, new)
     notes.extend(unreadable_notes)
-    export_read_unreliable, export_read_notes, export_read = export_read_gap(old, new)
-    notes.extend(export_read_notes)
+    export_read_unreliable, read_notes, export_read = export_read_gap(old, new)
+    notes.extend(read_notes)
 
     # -- manifest-level layer incompleteness ----------------------------------
     # The one check below that reads the pack MANIFEST directly (D7/D8's own
