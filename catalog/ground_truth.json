@@ -659,20 +659,21 @@
   },
   "case122_template_signature_uninstantiated": {
    "abi_break": false,
-   "api_break": false,
+   "api_break": true,
    "bad_practice": false,
-   "category": "risk",
-   "description": "An uninstantiated function template's parameter types change (int -> long). No shipped binary instantiates the template, so nothing that currently links is broken; a consumer only picks up the new signature on its next recompile. The canonical truth is COMPATIBLE_WITH_RISK, not API_BREAK: a source-visible risk for future consumers, not a proven break for any consumer that exists yet. It is missed by default object/DWARF and header/castxml comparison (nothing is emitted to compare), but visible at L4: source-ABI replay parses the real clang AST, hashes each template's parameter list, and reports the mismatch as template_body_changed (RISK) \u2014 demonstrating that this class of C++-only change needs source evidence, not that it is undetectable outright. Seeing it takes explicit L3 compile-unit + public-header evidence (a bare --sources tree with no build metadata is not enough) plus --contract all on compare, since the L2 header backend does not model templates and would otherwise scope the finding out as internal.",
-   "expected": "COMPATIBLE_WITH_RISK",
+   "category": "api_break",
+   "description": "An uninstantiated function template's parameter types change (int -> long). The library instantiates nothing, so its binary is unchanged and no compiled consumer binds to a library symbol: there is no ABI break of the library. It is a source/API break: consumer source that names the exact instantiation type -- `int (*)(int,int,int) p = &clamp<int>;` (consumer_address.cpp, the source_smoke witness) -- compiles against v1 and is rejected against v2, while a plain call `clamp<int>(5, 0, 10)` compiles against both. The parameter list is compared structurally (template parameters positionally normalized), never from a body hash: the direct-Clang header path reports it on the never-exported pattern and the L4 clang replay on the template, both as header_only_function_params_changed (API_BREAK). A body-only edit stays template_body_changed (RISK), and an exported explicit instantiation keeps its artifact-tier ABI grading. Previously labelled COMPATIBLE_WITH_RISK/template_body_changed; the consumer witness contradicts that label.",
+   "expected": "API_BREAK",
    "expected_absent_kinds": [
     "func_params_changed",
     "func_added",
-    "func_removed"
-   ],
-   "expected_kinds": [
+    "func_removed",
     "template_body_changed"
    ],
-   "known_gap": "L0-L2 artifact/header scans cannot observe the uninstantiated function template because it emits no symbol and CastXML omits the declaration. Their NO_CHANGE verdict is a missed COMPATIBLE_WITH_RISK detection caused by insufficient evidence, not a lane-specific expectation. L4 source-ABI replay parses the real Clang AST and detects template_body_changed.",
+   "expected_kinds": [
+    "header_only_function_params_changed"
+   ],
+   "known_gap": "CastXML omits uninstantiated function templates, so the default castxml L2 lane observes NO_CHANGE: a missed API_BREAK from insufficient evidence. The direct-Clang L2 header path and the L4 clang replay both detect it.",
    "min_evidence": "L4",
    "platforms": [
     "linux",
@@ -685,7 +686,29 @@
     "stripped-headers"
    ],
    "source_abi_extractor": "clang",
-   "source_abi_scope": "headers-only"
+   "source_abi_scope": "headers-only",
+   "source_smoke": {
+    "mode": "syntax",
+    "proof": "consumer address-of witness: &clamp<int> as int(*)(int,int,int) compiles against v1, rejected against v2",
+    "source": "consumer_address.cpp",
+    "standard": "c++17",
+    "v1": {
+     "expect": "success"
+    },
+    "v2": {
+     "expect": "failure",
+     "replace": [
+      [
+       "\"v1.h\"",
+       "\"v2.h\""
+      ],
+      [
+       "<v1.h>",
+       "<v2.h>"
+      ]
+     ]
+    }
+   }
   },
   "case123_default_argument_removed": {
    "abi_break": false,

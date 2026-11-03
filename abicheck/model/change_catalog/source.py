@@ -405,6 +405,24 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         operation=_OP.MODIFIED,
     ),
     _E(
+        "header_only_function_params_changed",
+        _A,
+        impact="The parameter list of a public header declaration changed, and "
+        "both library builds confirm it has no exported symbol (an "
+        "uninstantiated function template or a header-only inline): the "
+        "library binary cannot break, but consumer source that calls it with "
+        "an exact-type expectation (taking its address as a specific function "
+        "pointer type, explicit template arguments, overload selection) may no "
+        "longer compile, and consumer code compiled against the old header "
+        "instantiates a different signature. A source/API break; it becomes a "
+        "binary break only for an instantiation the library exports, which is "
+        "reported as func_params_changed.",
+        description_template="Parameters changed (no exported symbol on either side): {name}",
+        entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
         "inline_function_removed",
         _A,
         impact="A public header-only inline function was removed. Because it was "

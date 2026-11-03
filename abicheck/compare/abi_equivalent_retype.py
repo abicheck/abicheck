@@ -58,6 +58,7 @@ __all__ = ["refine_abi_equivalent_retypes"]
 _RETYPE_KINDS = frozenset(
     {
         ChangeKind.FUNC_PARAMS_CHANGED,
+        ChangeKind.HEADER_ONLY_FUNCTION_PARAMS_CHANGED,
         ChangeKind.FUNC_RETURN_CHANGED,
         ChangeKind.TYPE_FIELD_TYPE_CHANGED,
         # The DWARF layout tier's spelling of a field retype (type_layout_diff):
@@ -217,7 +218,11 @@ def _typedef_retype(
 def _retyped(change: Change, old: AbiSnapshot, new: AbiSnapshot, index: _Index) -> bool:
     if change.kind is ChangeKind.TYPEDEF_BASE_CHANGED:
         return _typedef_retype(change, old, new, index)
-    if change.kind in (ChangeKind.FUNC_PARAMS_CHANGED, ChangeKind.FUNC_RETURN_CHANGED):
+    if change.kind in (
+        ChangeKind.FUNC_PARAMS_CHANGED,
+        ChangeKind.HEADER_ONLY_FUNCTION_PARAMS_CHANGED,
+        ChangeKind.FUNC_RETURN_CHANGED,
+    ):
         return _function_retype(change, old, new)
     if change.kind in (
         ChangeKind.TYPE_FIELD_TYPE_CHANGED,

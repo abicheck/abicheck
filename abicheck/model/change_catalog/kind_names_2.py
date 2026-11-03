@@ -511,6 +511,11 @@ KIND_NAMES_2: tuple[tuple[str, str, str | None], ...] = (
         "public header-only inline function removed (no exported symbol) → API_BREAK",
     ),
     (
+        "HEADER_ONLY_FUNCTION_PARAMS_CHANGED",
+        "header_only_function_params_changed",
+        "parameter list of a public declaration that neither side exports changed (header-only template/inline) → API_BREAK",
+    ),
+    (
         "PUBLIC_TYPEDEF_REMOVED",
         "public_typedef_removed",
         "public typedef/alias removed (no exported symbol) → API_BREAK",

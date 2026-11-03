@@ -72,6 +72,7 @@ SOURCE_REPLAY_EVIDENCE = "source_only"
 REPLAY_EMITTER_MODULES: tuple[str, ...] = (
     "abicheck/buildsource/source_diff.py",
     "abicheck/buildsource/concept_diff.py",
+    "abicheck/buildsource/template_signature.py",
     "abicheck/buildsource/source_graph_findings.py",
 )
 
@@ -188,6 +189,15 @@ REPLAY_TWINS: tuple[ReplayTwin, ...] = (
         _inline_removal_name,
         _inline_removal_name,
         owner="replay",
+    ),
+    # An uninstantiated function template's parameter list: the header tier
+    # (clang) reports it on the never-exported pattern, the replay on the
+    # template; both reduce to the bare name.
+    ReplayTwin(
+        ChangeKind.HEADER_ONLY_FUNCTION_PARAMS_CHANGED,
+        frozenset({ChangeKind.HEADER_ONLY_FUNCTION_PARAMS_CHANGED}),
+        _inline_removal_name,
+        _inline_removal_name,
     ),
     # A default-argument edit: the header tier reports it per parameter
     # (PARAM_DEFAULT_VALUE_CHANGED, mangled symbol); the replay per function

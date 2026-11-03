@@ -32,6 +32,7 @@ reads and the ``Visibility.PUBLIC`` entry in
 from __future__ import annotations
 
 from collections.abc import Container
+from dataclasses import replace
 
 from ..diff_helpers import make_change
 from ..model import Function, Variable
@@ -413,3 +414,33 @@ def surface_exit_is_evidence_gap(
         new_contract
     ) and not is_legacy_derived(new_contract)
     return not has_observed_contract_evidence(new_decl) and not observed_out_of_contract
+
+
+def regrade_unexported_params(
+    changes: list[Change], f_old: Function, f_new: Function
+) -> list[Change]:
+    """Grade a parameter-list change of a never-exported declaration as API.
+
+    When *both* sides confirm the declaration has no exported symbol (an
+    export table was read and lacks it -- an uninstantiated function
+    template, a header-only inline), no compiled consumer binds to it in
+    the library, so ``FUNC_PARAMS_CHANGED``'s binary-break impact cannot
+    hold; the change is a source/API break, the same split
+    ``INLINE_FUNCTION_REMOVED`` makes for a removal (case122). An unknown
+    export status on either side, or an export on either side, keeps
+    ``FUNC_PARAMS_CHANGED``: an exported instantiation's ABI grading is not
+    touched.
+    """
+    if not (is_export_confirmed_absent(f_old) and is_export_confirmed_absent(f_new)):
+        return changes
+    return [
+        replace(
+            c,
+            kind=ChangeKind.HEADER_ONLY_FUNCTION_PARAMS_CHANGED,
+            description="Parameters changed (no exported symbol on either "
+            f"side): {f_old.name}",
+        )
+        if c.kind is ChangeKind.FUNC_PARAMS_CHANGED
+        else c
+        for c in changes
+    ]

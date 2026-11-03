@@ -78,6 +78,7 @@ _SPELLING_KINDS = frozenset(
     {
         ChangeKind.FUNC_RETURN_CHANGED,
         ChangeKind.FUNC_PARAMS_CHANGED,
+        ChangeKind.HEADER_ONLY_FUNCTION_PARAMS_CHANGED,
         ChangeKind.TEMPLATE_RETURN_TYPE_CHANGED,
         ChangeKind.TEMPLATE_PARAM_TYPE_CHANGED,
         ChangeKind.TYPE_FIELD_TYPE_CHANGED,

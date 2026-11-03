@@ -224,6 +224,7 @@ DETECTOR_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
                 "func_return_changed",
                 "func_variadic_added",
                 "func_variadic_removed",
+                "header_only_function_params_changed",
                 "func_virtual_added",
                 "func_virtual_removed",
                 "func_visibility_changed",

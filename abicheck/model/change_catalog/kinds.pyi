@@ -304,6 +304,7 @@ class ChangeKind(StrEnum):
     PUBLIC_TYPEDEF_TARGET_CHANGED = 'public_typedef_target_changed'
     PUBLIC_MACRO_REMOVED = 'public_macro_removed'
     INLINE_FUNCTION_REMOVED = 'inline_function_removed'
+    HEADER_ONLY_FUNCTION_PARAMS_CHANGED = 'header_only_function_params_changed'
     PUBLIC_TYPEDEF_REMOVED = 'public_typedef_removed'
     SOURCE_FACT_COVERAGE_INCOMPLETE = 'source_fact_coverage_incomplete'
     PUBLIC_REACHABILITY_CHANGED = 'public_reachability_changed'

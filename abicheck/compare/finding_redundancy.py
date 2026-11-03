@@ -122,6 +122,7 @@ ALWAYS_INDEPENDENT_KINDS: frozenset[ChangeKind] = frozenset(
 _DERIVED_CHANGE_KINDS: frozenset[ChangeKind] = frozenset(
     {
         ChangeKind.FUNC_PARAMS_CHANGED,
+        ChangeKind.HEADER_ONLY_FUNCTION_PARAMS_CHANGED,
         ChangeKind.FUNC_RETURN_CHANGED,
         ChangeKind.VAR_TYPE_CHANGED,
         ChangeKind.TYPE_FIELD_TYPE_CHANGED,

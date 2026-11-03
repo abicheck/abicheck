@@ -46,6 +46,7 @@ from .source_abi import (
     SourceEntity,
 )
 from .source_provenance_diff import _diff_provenance
+from .template_signature import template_change
 
 
 def _header_basename(path: str) -> str:
@@ -872,21 +873,7 @@ def _diff_templates(
         ov, nv = old_t[key], new_t[key]
         name = nv.qualified_name
         if ov.body_hash != nv.body_hash:
-            changes.append(
-                Change(
-                    kind=ChangeKind.TEMPLATE_BODY_CHANGED,
-                    symbol=name,
-                    entity_discriminator=_template_entity(nv),
-                    description=(
-                        f"Uninstantiated public template {name!r} implementation "
-                        "changed. Invisible to artifact comparison; consumers pick "
-                        "up the new body on recompile."
-                    ),
-                    old_value=ov.body_hash,
-                    new_value=nv.body_hash,
-                    source_location=_loc(nv),
-                )
-            )
+            changes.append(template_change(ov, nv, _template_entity(nv), _loc(nv)))
     return changes
 
 

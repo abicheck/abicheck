@@ -72,6 +72,7 @@ from ..source_abi import (
     coverage_state_for_family,
     default_fact_set,
 )
+from ..template_signature import template_relations
 from ._argv import resolve_read_files, unredact_home
 from ._deadline_bound import run_bounded_for_extraction
 from .base import SourceExtractionError
@@ -569,10 +570,7 @@ def _emit_template(
             qualified_name=name,
             body_hash=_subtree_hash(node),
             names=_entity_names(name),
-            relations={
-                "template_kind": str(node.get("kind", "")),
-                "template_parameters": ",".join(params),
-            },
+            relations=template_relations(node, params),
             ownership=_entity_ownership(visibility, origin),
             source_location=_location(file, _node_line(node), origin),
             visibility=visibility,

@@ -322,7 +322,7 @@ def _check_function_signature(
         is_llp64=is_llp64,
     )
     changes.extend(_export_transition.check_function(mangled, f_old, f_new))
-    return changes
+    return _export_transition.regrade_unexported_params(changes, f_old, f_new)
 
 
 def _check_inline_transitions(

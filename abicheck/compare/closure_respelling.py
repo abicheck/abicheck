@@ -58,6 +58,7 @@ from ..model.surface_facts import binary_exported
 RESPELLING_KINDS: frozenset[ChangeKind] = frozenset(
     {
         ChangeKind.FUNC_PARAMS_CHANGED,
+        ChangeKind.HEADER_ONLY_FUNCTION_PARAMS_CHANGED,
         ChangeKind.FUNC_RETURN_CHANGED,
         ChangeKind.TEMPLATE_PARAM_TYPE_CHANGED,
         ChangeKind.TEMPLATE_RETURN_TYPE_CHANGED,
