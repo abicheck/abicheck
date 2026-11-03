@@ -70,6 +70,7 @@ from .model import ScopeOrigin
 from .model.owner_recovery import (
     itanium_special_name_owner_identifiers,
     itanium_special_name_owner_scope_components,
+    local_entity_owner,
 )
 from .model.type_identifiers import type_identifiers as _type_identifiers
 from .policy.public_surface_index import PublicSurface as PublicSurface
@@ -771,12 +772,11 @@ def classify_change_surface(
             change.caused_by_type
         )
 
-    # Symbol-level finding (function/variable): public iff a public symbol.
-    # A confident private/system-header origin demotes even an exported
-    # symbol — that is exactly the leaked-private-header case scoping targets.
+    # Symbol-level finding: public iff a public symbol (a function-local static by its enclosing function's).
+    # A confident private/system-header origin demotes even an exported symbol (leaked private header).
     if not type_level_finding:
         verdict = _classify_symbol_level(
-            sym,
+            local_entity_owner(sym, all_symbols),
             all_symbols,
             public_symbols,
             surf_old,

@@ -388,3 +388,36 @@ def itanium_special_member_owner(mangled: str) -> SpecialMemberOwner | None:
         owner_carries_template_arguments=templated,
         inherited=inherited,
     )
+
+
+#: Itanium special-name prefixes whose payload is a ``<local-name>``
+#: (``Z <function encoding> E <entity> [<discriminator>]``): the local entity
+#: itself (``_ZZ``) and the guard variable of a function-local static
+#: (``_ZGVZ``, which also carries ``STB_GNU_UNIQUE`` under GCC).
+_LOCAL_ENTITY_PREFIXES = ("_ZZ", "_ZGVZ")
+
+
+def local_entity_owner(sym: str, known_symbols: frozenset[str] | set[str]) -> str:
+    """The enclosing function of an Itanium function-local entity, else *sym*.
+
+    A function-local static of an inline/template function
+    (``_ZZN8RegistryI6WidgetE8instanceEvE5value``) is exported by every DSO
+    that instantiates the function, but it is not a declaration, so it never
+    appears in a header-derived public symbol set. Its contract membership is
+    its enclosing function's: the consumer reaches the static only by calling
+    that function (case180).
+
+    The ``<encoding>`` ends at one of the ``E`` characters after the prefix;
+    rather than parse the full grammar, each candidate ``_Z<encoding>`` is
+    tried longest-first and accepted only if it is a symbol the snapshots
+    actually know, so a candidate can never be invented. No match returns
+    *sym* unchanged.
+    """
+    for prefix in _LOCAL_ENTITY_PREFIXES:
+        if not sym.startswith(prefix):
+            continue
+        body = sym[len(prefix) :]
+        for end in range(len(body) - 1, 0, -1):
+            if body[end] == "E" and (owner := "_Z" + body[:end]) in known_symbols:
+                return owner
+    return sym
