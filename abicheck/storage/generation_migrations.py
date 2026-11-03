@@ -378,7 +378,7 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "UNSUPPORTED) fact. A generation-34 clang snapshot's False cannot be "
         "told apart from a real one, so it is re-dumped. A binary-implied "
         "-std= is also stamped as ast_toolchain language_standard_implied=1 "
-        "(ADR-050 amendment 2026-11-03); without it a pair keeps the refusal"
+        "so a binary-implied dialect difference can bound a comparison instead of refusing it; without the stamp the pair keeps the refusal"
     ),
 }
 

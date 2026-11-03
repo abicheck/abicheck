@@ -200,6 +200,7 @@ def test_record_implied_options_marks_an_inferred_standard_as_not_pinned() -> No
     assert out is snap
     assert snap.ast_toolchain == {
         "language_standard_explicit": "0",
+        "language_standard_implied": "1",
         "producer": "gcc",
         "implied_options": "-x c++ -std=gnu++20 -mavx2",
     }
