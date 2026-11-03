@@ -291,9 +291,9 @@ def write_snapshot_payload(
     import json
 
     from .serialization import SCHEMA_VERSION
-    from .workflows.storage import to_sectioned_document, write_snapshot_text
+    from .workflows.storage import sectioned_payload, write_snapshot_text
 
-    payload = to_sectioned_document(payload, max_known_schema_version=SCHEMA_VERSION)
+    payload = sectioned_payload(payload, SCHEMA_VERSION)
     text = json.dumps(payload, indent=2)
     return write_snapshot_text(text, path, compression=compression)
 

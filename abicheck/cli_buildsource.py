@@ -450,7 +450,11 @@ def _write_snapshot_output(
     # attach one key. For a 100+ MB snapshot that's a second full parse and
     # a second full encode for no reason; fold_dump_provenance_into_dict()
     # does the same augmentation on the already-decoded payload dict.
-    payload = snapshot_to_dict(snap)
+    from .workflows.storage import attach_write_carriers, sectioned_payload
+
+    # ADR-062 D14: the snapshot's carriers (ADR-079's export_read fact among
+    # them) travel with the flat payload to the sectioning writer.
+    payload = attach_write_carriers(snapshot_to_dict(snap), snap)
     payload, resolved_depth_label = fold_dump_provenance_into_dict(payload, depth, snap)
     if output:
         write_snapshot_and_report(
@@ -460,12 +464,8 @@ def _write_snapshot_output(
         import json
 
         from .serialization import SCHEMA_VERSION
-        from .workflows.storage import to_sectioned_document
 
-        sectioned = to_sectioned_document(
-            payload, max_known_schema_version=SCHEMA_VERSION
-        )
-        click.echo(json.dumps(sectioned, indent=2))
+        click.echo(json.dumps(sectioned_payload(payload, SCHEMA_VERSION), indent=2))
 
 
 def resolve_dump_request_for_cli(request: DumpRequest) -> ResolvedDumpRequest:

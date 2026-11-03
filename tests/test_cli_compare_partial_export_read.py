@@ -30,6 +30,9 @@ state it records. The same pair with a complete NEW table is the control.
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -39,7 +42,7 @@ from abicheck.cli import main
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.model.elf_facts import ElfMetadata, ElfSymbol, SymbolType
 from abicheck.model.export_read import ExportReadState
-from abicheck.serialization import snapshot_to_json
+from abicheck.serialization import load_snapshot, snapshot_to_json
 
 ALL = ("lib_init", "lib_read", "lib_write")
 KEPT = ("lib_init",)
@@ -144,3 +147,32 @@ def test_control_a_complete_new_table_still_scores_the_removals(tmp_path: Path) 
     assert report["analysis_assurance"]["export_read"]["new"] == {"elf": "complete"}
     assert report["run_outcome"]["scope"] == "complete"
     assert set(_removals(report)) == {"lib_read", "lib_write"}
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(
+    not (shutil.which("gcc") and sys.platform.startswith("linux")),
+    reason="needs gcc and an ELF target",
+)
+@pytest.mark.parametrize("to_stdout", [False, True])
+def test_a_cli_dump_records_its_complete_read(tmp_path: Path, to_stdout: bool) -> None:
+    """The public ``dump`` writer carries the fact: it sections a flat
+    payload itself, which used to drop every section-header carrier, so a
+    stored dump read ``unrecorded`` while the live binary read ``complete``
+    (the stored-vs-live split ``tests/test_family_f2_route_parity.py``
+    caught). Oracle: the live binary's own block state."""
+    source = tmp_path / "foo.c"
+    source.write_text("int foo(void) { return 1; }\n", encoding="utf-8")
+    lib = tmp_path / "libfoo.so"
+    subprocess.run(["gcc", "-shared", "-fPIC", "-o", str(lib), str(source)], check=True)
+    out = tmp_path / "foo.abi.json"
+    args = ["dump", str(lib)] + ([] if to_stdout else ["-o", str(out)])
+    result = CliRunner().invoke(main, args, catch_exceptions=False)
+    assert result.exit_code == 0, result.output
+    if to_stdout:
+        out.write_text(result.stdout, encoding="utf-8")
+    document = json.loads(out.read_text(encoding="utf-8"))
+    assert document["sections"]["binary"]["extensions"]["abicheck.export_read"] == {}
+    stored = load_snapshot(out)
+    assert stored.elf is not None
+    assert stored.elf.export_read is ExportReadState.COMPLETE
