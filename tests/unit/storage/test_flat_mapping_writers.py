@@ -243,7 +243,7 @@ def test_snapshot_to_dict_refuses_exactly_when_the_flat_document_loses_state(
     flat_alone.unreadable_sections = []
     lossy = _resaved(flat_alone) != document
     if lossy:
-        with pytest.raises(SnapshotError, match="D14/D15"):
+        with pytest.raises(SnapshotError, match="flat snapshot_to_dict"):
             snapshot_to_dict(loaded)
     else:
         assert _resaved(snapshot_from_dict(snapshot_to_dict(loaded))) == document

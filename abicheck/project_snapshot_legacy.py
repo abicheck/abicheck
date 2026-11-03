@@ -162,7 +162,7 @@ def write_legacy_snapshot_package(
         raise TypeError(
             "write_legacy_snapshot_package takes an AbiSnapshot, not "
             f"{type(snapshot).__name__}: a flat snapshot_to_dict mapping cannot "
-            "carry the ADR-062 D14/D15 state (failed or blocked sections, "
+            "carry the stored state (failed or blocked sections, "
             "extensions) the package stores. Pass the snapshot itself, or "
             "decode a stored document with serialization.snapshot_from_dict."
         )

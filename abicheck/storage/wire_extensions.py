@@ -435,7 +435,7 @@ def refuse_lossy_flattening(snap: Any) -> None:
         carried = extensions_of(snap)
         assert carried is not None  # flattening_loses implies carriers
         raise SnapshotError(
-            "Snapshot carries ADR-062 D14/D15 state a flat snapshot_to_dict "
+            "Snapshot carries stored state a flat snapshot_to_dict "
             f"document cannot hold ({_carried_summary(carried)}); refusing to "
             "flatten it, which would store that state as lost without saying "
             "so. Write the AbiSnapshot itself (save_snapshot/write_snapshot, "
