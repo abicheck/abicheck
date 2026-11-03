@@ -74,6 +74,10 @@ dependency walk and debug roots to every member. No open gap remains.
 
 **Status (2026-10-28): OPEN.** A finding the compatibility policy left `NOT_EVALUATED` is in `summary.total_changes` and in no bucket, and the JSON names it nowhere except as that surplus; its per-change status is emitted only under a stamped contract relevance. The one-line summary states it as `N not evaluated`. The release line's total is the sum of member buckets, so unscored release findings are absent from it. Owner: `report/release_oneline.py`, `report/json_sections.py`.
 
+#### build-source lane: build flags leak into the header-parse profile (2026-11-03)
+
+**Status (2026-11-03): OPEN.** 19 catalog cases fail only in the `build-source` lane, identically on base: 12 C libraries whose header is parsed as C++ under the compile database's C `-std=` (castxml rejects it), and 7 pairs refused as `profile_mismatch` on per-side `pass_through_flags`. Needs an ADR-050 ruling on which build flags may parameterize the header parse. [Full write-up](known-gaps/build-source-lane-build-flags-leak-into-the-header-parse-profile.md)
+
 #### An exported instantiation of a public class template is not in the public contract (2026-11-03)
 
 **Status (2026-11-03): OPEN.** case180's `symbol_binding_lost_unique` is excluded under the default public contract: its owner `Registry<Widget>::instance()` is an instantiation of a public-header class template that no header frontend emits, so it reads `exported_not_public`. The local-static-to-owner link is fixed; the instantiation membership needs an ADR-049 ruling. [Full write-up](known-gaps/an-exported-instantiation-of-a-public-class-template-is-not-in-the-public-contract.md)
