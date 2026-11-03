@@ -281,7 +281,8 @@ per-item status in the
 
 - **D14 residual: a flat mapping cannot say what it lost. Closed
   2026-11-03.** `snapshot_to_dict` now refuses a snapshot whose flat
-  document would lose stored state, so no writer that accepts a flat
+  document would lose stored state (a `not_collected` section included:
+  the flat split emits every section, so it re-saved as present), so no writer that accepts a flat
   mapping (`to_sectioned_document`, `import_legacy_snapshot`,
   `import_bundle_facts`, `import_baseline_set`) can be handed one that
   silently lost carriers; `write_legacy_snapshot_package` takes only an

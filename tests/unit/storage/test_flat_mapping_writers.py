@@ -24,6 +24,7 @@ loudly -- never a successful round trip that re-saves as something else.
 from __future__ import annotations
 
 import copy
+import itertools
 import json
 import tempfile
 from collections.abc import Callable
@@ -31,7 +32,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, example, given, settings
 
 from abicheck.cli_dump_helpers import write_snapshot_and_report
 from abicheck.errors import SnapshotError
@@ -66,11 +67,35 @@ from abicheck.workflows.findings import (
 )
 from tests.unit.storage.test_package_carriers_roundtrip import (
     _BASE,
+    _SECTIONS,
     _carriers,
     _resaved,
 )
 
 _LIBRARY = _BASE["sections"]["provenance"]["payload"]["library"]
+
+
+def _not_collected(kinds: tuple[str, ...]) -> dict[str, Any]:
+    """`_BASE` with *kinds* recorded as ``not_collected`` and nothing else
+    the flat document could lose -- the one carrier a random draw almost
+    never isolates (every other state it mixes in already refuses)."""
+    doc = copy.deepcopy(_BASE)
+    for kind in kinds:
+        del doc["sections"][kind]
+        del doc["section_schema_versions"][kind]
+        doc["section_availability"][kind] = {
+            "diagnostics": [],
+            "status": "not_collected",
+        }
+    return doc
+
+
+#: Every non-empty subset of the non-identity sections, not collected.
+_NOT_COLLECTED_SUBSETS = [
+    subset
+    for size in range(1, len(_SECTIONS) + 1)
+    for subset in itertools.combinations(sorted(_SECTIONS), size)
+]
 
 
 # --- writers that accept a flat mapping: handed `snapshot_to_dict(loaded)` --
@@ -202,6 +227,8 @@ def _loaded(document: dict[str, Any], blocked: frozenset[str]) -> AbiSnapshot:
 @pytest.mark.parametrize("writer", sorted(_FLAT_WRITERS))
 @settings(max_examples=40, deadline=None, suppress_health_check=[HealthCheck.too_slow])
 @given(case=_carriers())
+@example(case=(_not_collected(("types",)), frozenset()))
+@example(case=(_not_collected(tuple(sorted(_SECTIONS))), frozenset()))
 def test_a_flat_mapping_write_keeps_every_carrier_or_fails_loudly(
     writer: str, case: tuple[dict[str, Any], frozenset[str]]
 ) -> None:
@@ -229,6 +256,7 @@ def test_a_snapshot_writer_keeps_every_carrier(
 
 @settings(max_examples=40, deadline=None, suppress_health_check=[HealthCheck.too_slow])
 @given(case=_carriers())
+@example(case=(_not_collected(("types",)), frozenset()))
 def test_snapshot_to_dict_refuses_exactly_when_the_flat_document_loses_state(
     case: tuple[dict[str, Any], frozenset[str]],
 ) -> None:
@@ -281,3 +309,25 @@ def test_a_producer_recorded_failure_survives_the_dump_write(
     }
     assert section not in stored["sections"]
     assert [kind for kind, _ in load_snapshot(path).unreadable_sections] == [section]
+
+
+@pytest.mark.parametrize("writer", sorted(_FLAT_WRITERS))
+@pytest.mark.parametrize("kinds", _NOT_COLLECTED_SUBSETS, ids="+".join)
+def test_a_not_collected_section_is_never_rewritten_as_present(
+    writer: str, kinds: tuple[str, ...]
+) -> None:
+    # Exhaustive over the small domain the generator under-samples: the flat
+    # D8 split emits every section, so a flat route either refuses or would
+    # re-store each not-collected section as present and empty.
+    document = _not_collected(kinds)
+    loaded = snapshot_from_dict(copy.deepcopy(document))
+    assert _resaved(loaded) == document
+    try:
+        back = _FLAT_WRITERS[writer](snapshot_to_dict(loaded))
+    except (SnapshotError, TypeError):
+        return
+    stored = _resaved(back)
+    assert {k: stored["section_availability"][k]["status"] for k in kinds} == {
+        k: "not_collected" for k in kinds
+    }
+    assert stored == document

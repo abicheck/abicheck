@@ -400,9 +400,11 @@ def refuse_unwritable_extensions(snap: Any) -> None:
 
 def flattening_loses(snap: Any) -> bool:
     """Whether the flat `snapshot_to_dict` document of *snap* would lose
-    stored state: a failed or blocked section, an unknown section, header
-    or record extensions, or a document-level must-understand list. A
-    ``not_collected`` section is simply absent from a flat document too."""
+    stored state: a failed, not collected or blocked section, an unknown
+    section, header or record extensions, or a document-level
+    must-understand list. A flat document has no section absence: its D8
+    split emits every section, so a ``not_collected`` section would be
+    re-stored as ``present`` and empty."""
     carried = extensions_of(snap)
     if carried is None:
         return False
@@ -413,7 +415,7 @@ def flattening_loses(snap: Any) -> bool:
         or carried.header_extras
         or carried.record_extras
         or carried.document_must_understand
-        or any(v["status"] == "failed" for v in carried.availability.values())
+        or any(v["status"] != "present" for v in carried.availability.values())
     )
 
 
@@ -450,6 +452,11 @@ def _carried_summary(carried: WireExtensions) -> str:
     )
     if failed:
         parts.append(f"failed section(s) {failed}")
+    not_collected = sorted(
+        k for k, v in carried.availability.items() if v["status"] == "not_collected"
+    )
+    if not_collected:
+        parts.append(f"not collected section(s) {not_collected}")
     blocked = sorted({k for k, _ in carried.unreadable} - set(failed))
     if blocked:
         parts.append(f"blocked section(s) {blocked}")
