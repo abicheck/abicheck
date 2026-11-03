@@ -40,6 +40,7 @@ from .extraction_contract import DependencyInfo, ExtractionContract
 from .fact import Fact, bridge_legacy_and_fact
 from .graph_facts import SurfaceGraphLike
 from .lazy_graph import install_lazy_graph_field
+from .section_availability import SectionAvailability
 from .snapshot_index import build_snapshot_indexes
 
 if TYPE_CHECKING:
@@ -603,10 +604,18 @@ class AbiSnapshot:
     )
     # Runtime-only: ``(section kind, diagnostic)`` for each stored section
     # this build could not use (ADR-062 D14/D15: an unknown must-understand
-    # extension, a newer section version, a ``failed`` extraction). Its
-    # fields hold defaults, not evidence; `compare/section_readers.py`
-    # resolves every analysis reading it to not comparable. Never serialized.
+    # extension, a newer section version, a ``failed`` or ``not_collected``
+    # section). Its fields hold defaults, not evidence;
+    # `compare/section_readers.py` resolves every analysis reading it to not
+    # comparable. Never serialized.
     unreadable_sections: tuple[tuple[str, str], ...] = field(
+        default=(), repr=False, compare=False, kw_only=True
+    )
+    # Runtime-only: every section that is not ``present`` on this snapshot,
+    # with its status (`model/section_availability.py`, ADR-062 D15). Set
+    # together with `unreadable_sections`; read by the assurance layer and
+    # the report. Never serialized as itself.
+    section_availability: tuple[SectionAvailability, ...] = field(
         default=(), repr=False, compare=False, kw_only=True
     )
     # Runtime-only companion of `unreadable_sections`: the stored document's

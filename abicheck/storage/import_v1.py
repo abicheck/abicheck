@@ -232,8 +232,9 @@ _LEGACY_SECTION_CODECS: Mapping[
 }
 
 #: The codec class behind each `_LEGACY_SECTION_CODECS` entry, for
-#: `export_legacy_sections`' current-version fast path.
-_LEGACY_SECTION_DOCUMENT_CODECS: Mapping[str, Any] = {
+#: `export_legacy_sections`' current-version fast path and the generated
+#: wire-contract inventory (`storage/wire_inventory.py`).
+LEGACY_SECTION_DOCUMENT_CODECS: Mapping[str, Any] = {
     TYPES_SECTION_KIND: TypesSection,
     GRAPH_SECTION_KIND: GraphSection,
     BINARY_SECTION_KIND: BinarySection,
@@ -538,7 +539,7 @@ def legacy_section_dto_dict(
     """
     # ADR-063 Track 4 (8B): every `LEGACY_SECTION_KINDS` member has its own
     # DTO (`_LEGACY_SECTION_CODECS`); the fallback is for a future kind.
-    document_codec = _LEGACY_SECTION_DOCUMENT_CODECS.get(section_kind)
+    document_codec = LEGACY_SECTION_DOCUMENT_CODECS.get(section_kind)
     if document_codec is None:
         return legacy_section_to_dto(section_kind, payload).to_dict()
     # `to_dto_fn(payload).to_dict()` minus the DTO's freeze/thaw copies; a
@@ -704,7 +705,7 @@ def export_legacy_sections(
                 _graph_section_loader(raw, artifact_id, locator)
             )
             continue
-        document_codec = _LEGACY_SECTION_DOCUMENT_CODECS.get(section_kind)
+        document_codec = LEGACY_SECTION_DOCUMENT_CODECS.get(section_kind)
         if section_kind == SEMANTIC_IR_SECTION_KIND:
             # The current-version payload decodes directly: the frozen DTO
             # `semantic_ir_from_dto` would build is a copy it only reads.

@@ -2638,6 +2638,47 @@
           "items": {
             "type": "string"
           }
+        },
+        "section_availability": {
+          "type": "array",
+          "description": "Schema 7.1 (analysis_assurance 1.3, ADR-062 D15): every stored snapshot section that is not present on either side, one entry per side and section. not_collected (the producer never collected it), failed (its extractor failed) and blocked (this build cannot use it: an unknown must-understand name or a newer section_schema_version) resolve every analysis reading that section to not evaluated and lower status to partial; unrecorded (absent from a stored document that predates the section availability table) is read as its defaults, as before, and only listed. A not_collected section is never read as an empty one. Present only when non-empty.",
+          "items": {
+            "type": "object",
+            "required": [
+              "side",
+              "section",
+              "status",
+              "diagnostics"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "side": {
+                "type": "string",
+                "enum": [
+                  "old",
+                  "new"
+                ]
+              },
+              "section": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "not_collected",
+                  "failed",
+                  "blocked",
+                  "unrecorded"
+                ]
+              },
+              "diagnostics": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
         }
       }
     },

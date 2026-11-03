@@ -49,7 +49,10 @@ from ._result import AnalysisAssurance, AssuranceStatus
 from ._target_accounting import _target_accounting
 from ._template_defaults import template_default_gap
 from ._translation_units import _translation_units
-from ._unreadable_sections import unreadable_section_gap
+from ._unreadable_sections import (
+    section_availability_entries,
+    unreadable_section_gap,
+)
 
 if TYPE_CHECKING:
     from ...buildsource.pack import BuildSourcePack
@@ -293,4 +296,5 @@ def compute_analysis_assurance(
         graph_completeness=graph_completeness,
         layout_unverified_detectors=layout_unverified_detectors,
         notes=tuple(notes),
+        section_availability=section_availability_entries(old, new),
     )

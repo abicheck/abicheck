@@ -13,10 +13,13 @@ Two invariants:
 2. **Runtime-only refactors.** Re-declaring a model record with its fields
    in another order, under another class name, produces the same bytes.
 
-Plus the generated field inventory (D15 (1), `tests/_wire_inventory.py`):
-`tests/fixtures/wire_contract/field_inventory.json` is regenerated from the
-encoders and diffed; a moved section needs a version bump and a D13
-migration.
+Plus the generated field inventory (D15 (1)):
+`tests/fixtures/wire_contract/field_inventory.json` is generated from the
+`SectionDTO` encoders' declarations
+(`abicheck.storage.wire_inventory.declared_field_inventory`) and diffed; a
+moved section needs a version bump and a D13 migration. Every key a written
+document carries must be declared there (`tests/_wire_inventory.py` walks
+the written corpus), so the declarations cannot fall behind the encoder.
 
 Plus D3 at section level: *absent*, *present and empty*, and *failed* are
 stored distinctly and read back distinctly -- an absent section never
@@ -48,12 +51,16 @@ from abicheck.model import (
 )
 from abicheck.model.availability import FactStatus
 from abicheck.model.fact import Fact
+from abicheck.model.section_availability import SectionStatus
 from abicheck.model.snapshot import AbiSnapshot
 from abicheck.serialization import snapshot_from_dict, snapshot_to_json
 from abicheck.storage.canonical import canonical_json
 from abicheck.storage.dto import SECTION_SCHEMA_VERSIONS, migration_source_versions
+from abicheck.storage.section_states import record_section_availability
 from abicheck.storage.sectioned_document import SECTIONS_KEY
-from tests._wire_inventory import field_inventory
+from abicheck.storage.sparse_section_codec import DeclarationsSection
+from abicheck.storage.wire_inventory import declared_field_inventory
+from tests._wire_inventory import observed_field_inventory
 
 _PIN = (
     Path(__file__).resolve().parents[2] / "fixtures" / "wire_contract" / "sections.json"
@@ -139,10 +146,7 @@ def _record() -> None:
 
 
 def _inventory_text() -> str:
-    return (
-        json.dumps(field_inventory(_document(_corpus())), indent=2, sort_keys=True)
-        + "\n"
-    )
+    return json.dumps(declared_field_inventory(), indent=2, sort_keys=True) + "\n"
 
 
 def _migrates(kind: str, pinned: int, current: int) -> bool:
@@ -152,14 +156,14 @@ def _migrates(kind: str, pinned: int, current: int) -> bool:
 
 
 def test_generated_field_inventory_matches_the_checked_in_one() -> None:
-    """D15 (1): the inventory is generated from the encoders over the fixed
-    corpus and diffed against the checked-in copy. A section whose
+    """D15 (1): the inventory is generated from the encoders' declarations
+    and diffed against the checked-in copy. A section whose
     inventory moved must have bumped its `section_schema_version` with a
     D13 migration from the pinned version; only then may the copy be
     re-recorded (`python -m tests.unit.storage.test_wire_contract --record`)."""
     pinned = json.loads(_INVENTORY.read_text(encoding="utf-8"))
     current = json.loads(_inventory_text())
-    for key in ("document", "availability_entry"):
+    for key in ("document", "availability_entry", "availability_statuses"):
         assert current[key] == pinned[key], (
             f"the document-level {key} moved without a schema change"
         )
@@ -186,14 +190,86 @@ def test_inventory_covers_the_header_carriers() -> None:
         assert {"extensions", "must_understand", "payload"} <= set(section["header"])
 
 
-def test_the_inventory_detects_a_renamed_record_field() -> None:
-    """The generator is not vacuous: a key renamed inside a record moves
-    the inventory of exactly that section."""
+def _corpus_documents() -> list[dict[str, Any]]:
+    """The written corpus: the fixed snapshot, plus one copy per recorded
+    section state, so every availability entry shape is written."""
+    documents = [_document(_corpus())]
+    for status in (SectionStatus.FAILED, SectionStatus.NOT_COLLECTED):
+        snap = _corpus()
+        record_section_availability(snap, "debug", status, ["no debug info"])
+        documents.append(_document(snap))
+    return documents
+
+
+def _undeclared(
+    declared: dict[str, Any], observed: dict[str, Any]
+) -> list[tuple[str, str, list[str]]]:
+    """``(where, path, keys)`` for every observed key the inventory does not
+    declare. A path the inventory does not enumerate (inside an opaque
+    value, e.g. a fact object) is pinned by bytes instead."""
+    out = []
+    for key in ("document", "availability_entry", "availability_statuses"):
+        extra = sorted(set(observed[key]) - set(declared[key]))
+        if extra:
+            out.append(("document", key, extra))
+    for kind, section in observed["sections"].items():
+        own = declared["sections"].get(kind)
+        if own is None:
+            out.append((kind, "<section>", []))
+            continue
+        extra = sorted(set(section["header"]) - set(own["header"]))
+        if extra:
+            out.append((kind, "<header>", extra))
+        for path, keys in section["fields"].items():
+            if path in own["fields"]:
+                extra = sorted(set(keys) - set(own["fields"][path]))
+                if extra:
+                    out.append((kind, path, extra))
+    return out
+
+
+def test_every_written_key_is_declared() -> None:
+    """The conformance half: a key the encoder writes without declaring it
+    fails here, so the declared inventory cannot fall behind the wire."""
+    declared = declared_field_inventory()
+    for document in _corpus_documents():
+        assert _undeclared(declared, observed_field_inventory(document)) == []
+
+
+def test_the_conformance_check_sees_an_undeclared_record_key() -> None:
     document = _document(_corpus())
     record = document[SECTIONS_KEY]["declarations"]["payload"]["functions"][0]
     record["return_type_renamed"] = record.pop("return_type")
-    before = field_inventory(_document(_corpus()))["sections"]
-    after = field_inventory(document)["sections"]
+    assert _undeclared(
+        declared_field_inventory(), observed_field_inventory(document)
+    ) == [("declarations", "functions[]", ["return_type_renamed"])]
+
+
+def test_the_inventory_is_generated_from_declarations_not_output() -> None:
+    """Optional keys the fixed corpus never writes are still listed, and
+    every observed record path is enumerated."""
+    sections = declared_field_inventory()["sections"]
+    assert "typedef_abi_facts" in sections["declarations"]["fields"][""]
+    assert "evidence_pack" in sections["build"]["fields"][""]
+    assert sections["graph"]["fields"][""] == ["surface_graph"]
+    observed = observed_field_inventory(_document(_corpus()))["sections"]
+    for kind in ("binary", "declarations", "types"):
+        record_paths = {
+            p for p in observed[kind]["fields"] if p.endswith("[]") or p == "elf"
+        }
+        assert record_paths <= set(sections[kind]["fields"]), kind
+
+
+def test_a_declared_field_moves_exactly_its_sections_inventory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    before = declared_field_inventory()["sections"]
+    monkeypatch.setattr(
+        DeclarationsSection,
+        "OPTIONAL_FIELDS",
+        DeclarationsSection.OPTIONAL_FIELDS | {"wire_probe"},
+    )
+    after = declared_field_inventory()["sections"]
     assert {k for k in before if before[k] != after[k]} == {"declarations"}
     assert not _migrates("declarations", 1, SECTION_SCHEMA_VERSIONS["declarations"])
 
