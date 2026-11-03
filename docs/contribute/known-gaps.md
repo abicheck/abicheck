@@ -80,7 +80,7 @@ dependency walk and debug roots to every member. No open gap remains.
 
 #### case98 release-headers is refused as a profile mismatch since 44473ffcb (2026-10-25)
 
-**Status (2026-10-25): OPEN.** Since #1778 the release-headers compare of case98 returns no verdict (`profile_mismatch`) instead of the documented `NO_CHANGE`; the guard accepts a declared-gap no-verdict row, so the job is green but the change is unruled. [Full write-up](known-gaps/case98-release-headers-is-refused-as-profile-mismatch-since-44473ffcb.md)
+**Status (2026-11-03): CLOSED** (ADR-050 amendment: a binary-implied, auto-derived dialect difference now bounds the comparison instead of refusing it). Previously: since #1778 the release-headers compare of case98 returns no verdict (`profile_mismatch`) instead of the documented `NO_CHANGE`; the guard accepts a declared-gap no-verdict row, so the job is green but the change is unruled. [Full write-up](known-gaps/case98-release-headers-is-refused-as-profile-mismatch-since-44473ffcb.md)
 
 #### The `#ifdef` guard census is runtime-only, so stored snapshots fall back to the `sycl::` name rule (2026-10-25)
 
