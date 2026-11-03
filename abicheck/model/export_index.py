@@ -565,7 +565,7 @@ def platform_export_read(meta: object, index: RawExportIndex) -> ExportReadState
 
     A recorded ``partial``/``failed`` read (ADR-079, ``meta.export_read``) is
     taken as recorded. Otherwise -- a recorded ``complete`` or an
-    ``unrecorded`` block (a pre-v70 document, a hand-built object) -- the
+    ``unrecorded`` block (a document without the fact, a hand-built object) -- the
     pre-ADR-079 rule decides: the table was read when it holds an entry or
     its header fields show the binary was parsed (:func:`platform_block_parsed`);
     a carried block with neither is a default or parse-failed one, which

@@ -36,7 +36,7 @@ named sections.
 
 ```json
 {
-  "schema_version": 70,
+  "schema_version": 69,
   "sections": {
     "binary":       {"section_kind": "binary",       "section_schema_version": 1, "payload": {"...": "..."}},
     "declarations": {"section_kind": "declarations", "section_schema_version": 1, "payload": {"...": "..."}},
@@ -94,6 +94,21 @@ A writer that adds a `must_understand` name to a known section also bumps
 that section's `section_schema_version`, because a reader predating D14
 ignores the key. Exit codes are unchanged; see
 [analysis assurance](exit-codes.md#analysis-assurance-contribution-p04).
+
+**Export-table read (`abicheck.export_read`).** The `binary` section header's
+`extensions` map records how completely each platform block's export table
+was read, as `{platform: state}` for every block that was *not* read
+completely: `partial` (some exports read and a read failure recorded: the
+entries are real, the unread part is unknown, never absent), `failed`
+(nothing read) or `unrecorded`. `{}` means every block was read completely.
+A dump always writes it; a document without it (written before the fact
+existed, or from a hand-built object) reads `unrecorded`, which keeps the
+older rule: a block is read when it holds an export or its header fields show
+a parse. It is never read as complete. A `partial` or `failed` value also
+names `abicheck.export_read` in the section's `must_understand`, so a reader
+that does not know the fact reports the `binary` analyses *not comparable*
+rather than reading a cut-short table as complete. A `complete` dump blocks no
+reader. Neither `schema_version` nor `section_schema_version` changes for it.
 
 Every `dump` invocation produces this, with no flag. Compression
 (`--compression`, see [Storage encoding](#storage-encoding)) wraps it
@@ -153,7 +168,7 @@ abicheck, rather than round-tripped.
 ## Schema version history
 
 `schema_version` is a single integer, not `MAJOR.MINOR`.
-The current value is **`70`**. See
+The current value is **`69`**. See
 `abicheck/storage/snapshot_schema_versions.py`'s `SCHEMA_VERSION` for the
 authoritative, up-to-date value and the full per-version comment.
 
@@ -372,8 +387,6 @@ reports a conflicted name as ambiguous rather than trusting the first
 definition.
 
 (v68) `dwarf_advanced.extraction` -- how the advanced-DWARF extraction that produced the `dwarf_advanced` block ended: `not_run` (a presence-only lookup, no payload parsed), `completed` (the parse ran to the end; an empty payload is a real result) or `failed` (the extraction errored; the payload is not usable). Written only when the status is recorded, so a BTF/CTF/PDB object or a hand-built one (`unrecorded`) writes no key and encodes exactly as v67. A DWARF dump always records `completed` or `failed`. A pre-v68 document, or a v68 one without the key, decodes to `unrecorded`: the reader keeps the payload inference, never reads the block as `completed`. A pre-v68 reader drops the key silently and reads that same inference, so the key adds no reader-side hard rejection. Because the content digest covers the encoded document, DWARF-derived snapshot digests change once at this bump.
-
-(v70) `elf`/`pe`/`macho`.`export_read` -- how completely the block's export table was read: `complete`, `partial` (some exports read and a read failure recorded: the entries are real, the unread part is unknown, never absent), `failed` (a failure recorded and nothing read) or `unrecorded` (no record of the read). Only a non-complete state is written, so a snapshot with no read fault encodes exactly as v69 apart from the version number; an absent key reads as `complete` from v70 and as `unrecorded` below it, and `unrecorded` keeps the pre-v70 rule (a block is read when it holds an export or its header fields show a parse) -- it is never read as `complete`. A re-saved pre-v70 block therefore writes `export_read: unrecorded`. The `binary` section moves to `section_schema_version` 2; a v1 `binary` section migrates with every platform block read as `unrecorded`. A `partial` or `failed` block reads as a `PARTIAL`/`FAILED` export fact, makes the `exports` coverage record `failed`, lowers the comparison's `analysis_assurance.status` to `partial` and `run_outcome.scope` to `incomplete`, and a removal it cannot establish is kept as `COMPATIBLE_WITH_RISK` under the `partial_export_table_read` rule. A reader older than v70 refuses the document through the existing hard-rejection gate.
 
 (v69) `Param`/`TypeField`/`Variable.type_abi_fact` and `Function.return_type_abi_fact` -- the ABI fact of a slot whose type is a fundamental, an enum, an `_Atomic` or a vector of one: The same fact is written per member of the `dwarf` layout (`structs[*].fields[*].type_abi_fact`, and the `struct_odr_conflicts` variants), where DWARF states one: the depth projection rebuilds its fields from that layout, so without it a projected retype read as a break. its encoding class (signed, unsigned, boolean or float), byte size, alignment and vector lane count (`abicheck/model/abi_fundamental.py`). DWARF and castxml record it; the clang frontend does not, so its slots carry no fact. Written only where a producer determined it, so every other slot encodes exactly as v68. A pre-v69 document, or a v69 one without the key, decodes to an unset fact, which never proves two slots equal: an old baseline keeps its name-based verdict. A pre-v69 reader drops the facts silently and reads a retype between ABI-identical types as an ABI break, so the bump is not additive for that reader's verdicts.
 
@@ -667,7 +680,7 @@ unknown.
 
 | Key | Type | Meaning |
 |-----|------|---------|
-| `elf` | object \| null | ELF metadata: SONAME, `DT_NEEDED`, version defs/reqs, symbols, imports, hardening flags. `export_read` (schema v70, optional, also on `pe`/`macho`): `partial` / `failed` / `unrecorded`; absent reads as `complete`. |
+| `elf` | object \| null | ELF metadata: SONAME, `DT_NEEDED`, version defs/reqs, symbols, imports, hardening flags. |
 | `pe` | object \| null | PE/COFF metadata (Windows DLL exports, machine, characteristics). |
 | `macho` | object \| null | Mach-O metadata (dylib exports, CPU slices, install name). |
 | `dwarf` | object \| null | Debug struct/enum layout (v51: plus ODR conflicts, see above) — from DWARF, or BTF/CTF/PDB reduced to the same shape. In memory this is the IR store's `declarations.debug_layout`; the key keeps its historical name. |

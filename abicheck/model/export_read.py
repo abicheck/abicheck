@@ -19,8 +19,8 @@
 return what they read. :class:`ExportReadState` records the outcome of that
 read on the platform block itself (``ElfMetadata``/``PeMetadata``/
 ``MachoMetadata.export_read``), so a stored snapshot can say its table was
-cut short. The document key is ``export_read`` on each platform block
-(snapshot schema v70); see ``storage/snapshot_schema_versions.py``.
+cut short. It is stored as the ``binary`` section's ``abicheck.export_read``
+extension fact (ADR-062 D19); see ``storage/extension_fact_catalog.py``.
 
 A leaf: no imports from the rest of ``model``, so each platform-facts module
 can carry the field without an import cycle.
@@ -44,9 +44,9 @@ class ExportReadState(StrEnum):
     PARTIAL = "partial"
     #: A read failure was recorded and no export was read.
     FAILED = "failed"
-    #: No record of the read: a document written before schema v70, or a
+    #: No record of the read: a document carrying no export_read fact, or a
     #: block no recording read produced (a hand-built object). The readers
-    #: keep the pre-v70 rule for it (``model.export_index.
+    #: keep the pre-ADR-079 rule for it (``model.export_index.
     #: platform_block_parsed``) -- never read as ``complete``.
     UNRECORDED = "unrecorded"
 

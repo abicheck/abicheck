@@ -75,6 +75,7 @@ from ..model import AbiSnapshot
 from ..model.lazy_declarations import defer_declaration_step
 from ..model.semantic_ir_legacy_adapter import finalize_snapshot_semantic_ir
 from ..model.snapshot_reliability import FACT_FAMILIES, flag_name
+from .extension_facts import apply_export_read_fact
 from .extraction_scope_codec import decode_extraction_scope
 from .fact_codec import (
     apply_legacy_fact_backfill,
@@ -208,6 +209,8 @@ def decode_snapshot(
     if carried is not None:
         attach_wire_extensions(snap, carried)
         snap.unreadable_sections = tuple(carried.unreadable)
+        # ADR-079: the platform blocks' export-table read, from its fact.
+        apply_export_read_fact(snap)
     return snap, _schema_version
 
 

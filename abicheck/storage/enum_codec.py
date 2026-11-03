@@ -26,19 +26,22 @@ directly. Takes no dependency beyond stdlib, fitting ADR-061's
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Any
 
-__all__ = ["binary_v1_to_v2", "encode_export_read", "encode_platform_enums"]
+__all__ = ["encode_platform_enums"]
 
 
 def encode_platform_enums(d: dict[str, Any]) -> None:
-    """In-place: ElfMetadata/PeMetadata/MachoMetadata enum members -> strings,
-    and each block's ``export_read`` encoded (:func:`encode_export_read`)."""
+    """In-place: ElfMetadata/PeMetadata/MachoMetadata enum members -> strings.
+
+    Each block's ``export_read`` (ADR-079) is dropped here: it is persisted
+    as the ``binary`` section's ``abicheck.export_read`` extension fact
+    (``storage/extension_facts.sync_export_read_fact``), never as a block key.
+    """
     for platform in ("elf", "pe", "macho"):
         block = d.get(platform)
         if isinstance(block, dict):
-            encode_export_read(block)
+            block.pop("export_read", None)
     if d.get("elf"):
         elf = d["elf"]
         for sym in elf.get("symbols", []):
@@ -83,47 +86,3 @@ def encode_platform_enums(d: dict[str, Any]) -> None:
                 if isinstance(exp["sym_type"], str)
                 else exp["sym_type"].value
             )
-
-
-def encode_export_read(block: dict[str, Any]) -> None:
-    """In-place: a platform block's ``export_read`` (schema v70, ADR-079 D2).
-
-    ``complete`` writes no key, so a snapshot with no read fault encodes as it
-    did before v70 apart from the version number. Every other state is written
-    as its string -- ``unrecorded`` included: an absent key reads as
-    ``complete`` from v70, so dropping it would upgrade a block with no record
-    of its read (a re-saved pre-v70 baseline) to a complete table.
-    """
-    state = block.get("export_read")
-    value = getattr(state, "value", state)
-    if value is None or value == "complete":
-        block.pop("export_read", None)
-    else:
-        block["export_read"] = value
-
-
-#: The ``binary`` section's D13 step v1 -> v2 (``storage/dto.py``, snapshot
-#: schema v70, ADR-079). v2 platform blocks may carry ``export_read``, and an
-#: absent key there means ``complete``. A v1 section predates the record, so
-#: each block it carries is stamped ``unrecorded`` -- never ``complete``; a v1
-#: block already carrying the key was not written by a v1 writer and is
-#: refused. Bumping the section version is what makes a reader that predates
-#: it refuse a v2 ``binary`` section in a package rather than read a partial
-#: table as complete.
-_PLATFORMS = ("elf", "pe", "macho")
-
-
-def binary_v1_to_v2(payload: Mapping[str, Any]) -> Mapping[str, Any]:
-    """Stamp every platform block of a v1 ``binary`` payload ``unrecorded``."""
-    out = dict(payload)
-    for platform in _PLATFORMS:
-        block = payload.get(platform)
-        if not isinstance(block, Mapping):
-            continue
-        if "export_read" in block:
-            raise ValueError(
-                f"'binary' section v1 {platform!r} block carries export_read, "
-                "which only a v2 writer emits"
-            )
-        out[platform] = {**block, "export_read": "unrecorded"}
-    return out

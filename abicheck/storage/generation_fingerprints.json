@@ -193,7 +193,7 @@
     },
     "fingerprint": "26adde3b1cdd6c3d5a188b3469409131f88e76c241f21a618653f5a6aaacba27",
     "generation": 34,
-    "reason": "ADR-079: a dump's export read now records export_read on its platform block, but a complete read (the only one dump accepts) writes no key, so what an extractor records for the same input is unchanged; pre-v70 snapshots are separated by the schema version gate, not the generation"
+    "reason": "ADR-079: a dump's export read now records export_read on its platform block (persisted as the binary section's extension fact), but what an extractor records for the same input -- the symbols and header fields -- is unchanged"
   },
   "resolver": {
     "files": {

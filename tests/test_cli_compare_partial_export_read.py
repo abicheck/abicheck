@@ -18,7 +18,8 @@ short (ADR-079): the report, the assurance and the exit all say so.
 
 Bug class ``evidence.silent_degradation_to_clean_verdict``. The NEW snapshot
 is the externally produced case the ADR names -- a document recording
-``export_read: partial`` -- written to disk and compared through the CLI.
+``export_read: partial`` (the ``binary`` section's ``abicheck.export_read``
+extension fact) -- written to disk and compared through the CLI.
 Before the fix the document had no way to say it, so the missing exports
 read as removed: ``BREAKING``, exit 4, ``assurance: complete``.
 
@@ -38,7 +39,7 @@ from abicheck.cli import main
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.model.elf_facts import ElfMetadata, ElfSymbol, SymbolType
 from abicheck.model.export_read import ExportReadState
-from abicheck.serialization import snapshot_to_dict
+from abicheck.serialization import snapshot_to_json
 
 ALL = ("lib_init", "lib_read", "lib_write")
 KEPT = ("lib_init",)
@@ -62,7 +63,7 @@ def _write(
             export_read=state,
         ),
     )
-    path.write_text(json.dumps(snapshot_to_dict(snap)), encoding="utf-8")
+    path.write_text(snapshot_to_json(snap), encoding="utf-8")
     return path
 
 

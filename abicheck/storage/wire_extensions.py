@@ -75,6 +75,15 @@ absent) and a newer section version on its own. The one state it would
 ignore is a ``must_understand`` name on a *known* section's header, so a
 writer that adds one must also bump that section's ``section_schema_version``
 -- this build only ever re-emits names it read.
+
+**Extension facts (D19).** A new optional fact is declared in
+`extension_fact_catalog.py` and stored as one entry of its section header's
+``extensions`` map (`extension_facts.py`), never behind a global
+``SCHEMA_VERSION`` bump. :data:`UNDERSTOOD_EXTENSIONS` is that catalog's
+names. For a declared fact the section-version bump above is not required:
+no released reader accepts a v69+ document without reading these carriers
+(ADR-062 D19, "Older readers"). A write refuses header extras for a
+section the document does not write (:func:`refuse_orphaned_header_extras`).
 """
 
 from __future__ import annotations
@@ -86,6 +95,7 @@ from typing import Any
 from ..errors import IncompatibleSnapshotSchemaError, SnapshotError
 from .canonical import canonical_form
 from .dto import SECTION_SCHEMA_VERSIONS
+from .extension_fact_catalog import EXTENSION_FACTS
 from .wire_record_extensions import (
     RecordExtras,
     collect_record_extras,
@@ -110,6 +120,7 @@ __all__ = [
     "merge_wire_extensions",
     "record_section_failure",
     "refuse_blocked_identity",
+    "refuse_orphaned_header_extras",
     "refuse_unwritable_extensions",
     "section_blocking_reason",
     "split_wire_extensions",
@@ -125,10 +136,10 @@ AVAILABILITY_KEY = "section_availability"
 WIRE_EXTENSIONS_KEY = "\x00wire_extensions"
 #: The section holding the snapshot's identity (`library`, `version`).
 IDENTITY_SECTION_KIND = "provenance"
-#: Extension names this build understands. Empty: no must-understand
-#: extension has been defined yet. A section kind this build decodes is
-#: understood too.
-UNDERSTOOD_EXTENSIONS: frozenset[str] = frozenset()
+#: Extension names this build understands: the declared extension facts
+#: (`extension_fact_catalog.EXTENSION_FACTS`, ADR-062 D19). A section kind
+#: this build decodes is understood too.
+UNDERSTOOD_EXTENSIONS: frozenset[str] = EXTENSION_FACTS.names()
 
 _SECTIONS_KEY = "sections"
 _VERSIONS_KEY = "section_schema_versions"
@@ -662,6 +673,25 @@ def _split_header(kind: str, section: Any, ext: WireExtensions) -> Any:
     return section
 
 
+def refuse_orphaned_header_extras(ext: WireExtensions, written: Any) -> None:
+    """Refuse a write whose header extras (``extensions``/``must_understand``)
+    name a section the document does not write: D14 makes dropping them a
+    defect, and an extension fact recorded on a section the snapshot lacks
+    (ADR-062 D19, e.g. a ``graph`` fact on a snapshot with no graph) would
+    otherwise vanish silently. *written* holds the section kinds written."""
+    orphaned = sorted(
+        kind
+        for kind in ext.header_extras
+        if kind not in written and kind not in ext.passthrough_versions
+    )
+    if orphaned:
+        raise SnapshotError(
+            "header extensions/must_understand recorded for section(s) "
+            f"{orphaned} that this document does not write; refusing to drop "
+            "them"
+        )
+
+
 def merge_wire_extensions(
     document: dict[str, Any], ext: WireExtensions | None
 ) -> dict[str, Any]:
@@ -692,6 +722,7 @@ def merge_wire_extensions(
                 versions.pop(kind, None)
         if ext.document_must_understand:
             document[DOCUMENT_MUST_UNDERSTAND_KEY] = list(ext.document_must_understand)
+        refuse_orphaned_header_extras(ext, sections)
     for kind in sections:
         availability.setdefault(kind, {"diagnostics": [], "status": "present"})
     document[_SECTIONS_KEY] = {k: sections[k] for k in sorted(sections)}

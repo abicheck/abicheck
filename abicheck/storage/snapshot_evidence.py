@@ -31,6 +31,7 @@ from .evidence_digest import (
     VOLATILE_CAPTURE_FIELDS,
     evidence_digest_of_document,
 )
+from .extension_facts import sync_export_read_fact
 from .snapshot_digest_cache import EVIDENCE, memoized_digest, peek_digest
 from .snapshot_encode import _VERBATIM_STR_FIELDS, snapshot_to_dict
 from .wire_extensions import extensions_of
@@ -68,6 +69,7 @@ def stored_evidence_digest(snap: AbiSnapshot) -> str | None:
 
 
 def _uncached_snapshot_evidence_digest(snap: AbiSnapshot) -> str:
+    sync_export_read_fact(snap)  # ADR-079: digest what a write would carry
     carried = extensions_of(snap)
     return evidence_digest_of_document(
         snapshot_to_dict(snap),

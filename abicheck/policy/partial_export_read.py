@@ -70,7 +70,7 @@ _REMOVAL_KINDS = frozenset(
 def partially_read_platforms(snap: AbiSnapshot) -> tuple[str, ...]:
     """The platforms whose export table *snap* records (ADR-079) as not
     completely read: ``partial`` or ``failed``. A block with no record
-    (``unrecorded``, a pre-v70 document) is not listed -- the pre-v70 rule
+    (``unrecorded``, a document without the fact) is not listed -- the pre-ADR-079 rule
     (``compare.edge_query.export_table_covered``) still governs it."""
     gap = (ExportReadState.PARTIAL, ExportReadState.FAILED)
     return tuple(

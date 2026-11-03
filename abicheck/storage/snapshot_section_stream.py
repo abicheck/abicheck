@@ -46,6 +46,7 @@ from typing import Any
 from ..model import AbiSnapshot
 from .canonical import CAPTURE_METADATA_KEY
 from .dto import SECTION_SCHEMA_VERSIONS, SEMANTIC_IR_SECTION_KIND
+from .extension_facts import sync_export_read_fact
 from .import_v1 import legacy_section_dto_dict
 from .json_stream import OMIT, LazyItems
 from .legacy_sections import LEGACY_SECTION_KINDS, section_fields, section_of_field
@@ -56,6 +57,7 @@ from .wire_extensions import (
     DOCUMENT_MUST_UNDERSTAND_KEY,
     WireExtensions,
     extensions_of,
+    refuse_orphaned_header_extras,
     refuse_unwritable_extensions,
 )
 from .wire_record_extensions import restore_record_extras
@@ -165,6 +167,9 @@ class _SectionWriter:
         return section
 
     def versions(self) -> dict[str, Any]:
+        # Serialized right after `sections`, so every section is written.
+        if self._ext is not None:
+            refuse_orphaned_header_extras(self._ext, self._written)
         versions: dict[str, Any] = {
             kind: SECTION_SCHEMA_VERSIONS[kind]
             for kind in self._written
@@ -196,6 +201,7 @@ def sectioned_document_stream(
     the snapshot fields it never walks. Callers use
     `snapshot_encode.streamed_sectioned_document`, which supplies both.
     """
+    sync_export_read_fact(snap)  # ADR-079: the model field -> its fact
     refuse_unwritable_extensions(snap)
     _refuse_unsectioned_fields(snap, skip_fields)
     ext = extensions_of(snap)  # ADR-062 D14

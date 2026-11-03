@@ -35,7 +35,6 @@
           "e_flags",
           "ei_data",
           "elf_class",
-          "export_read",
           "gnu_properties",
           "has_dt_relr",
           "has_executable_stack",
@@ -110,7 +109,7 @@
         "section_kind",
         "section_schema_version"
       ],
-      "section_schema_version": 2
+      "section_schema_version": 1
     },
     "build": {
       "fields": {

@@ -20,7 +20,7 @@ side whose block records ``partial`` or ``failed`` was compared against a
 table that does not hold every export: a removal it cannot establish is
 demoted (``policy/partial_export_read.py``) and its absences are not
 observations. The run reads ``partial`` and names the side and platform,
-never ``complete``. ``unrecorded`` (a pre-v70 document) is reported as-is and
+never ``complete``. ``unrecorded`` (a document without the fact) is reported as-is and
 is not a gap by itself: the pre-ADR-079 rule still reads it.
 """
 

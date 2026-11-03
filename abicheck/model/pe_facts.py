@@ -91,9 +91,10 @@ class PeMetadata:
         default=None, kw_only=True
     )
 
-    # ADR-079 (schema v70): how completely this block's export table was
-    # read -- model/export_read.py. ``UNRECORDED`` for a block no recording
-    # read produced (and every pre-v70 document); never read as complete.
+    # ADR-079: how completely this block's export table was read --
+    # model/export_read.py, persisted as the binary section's export_read
+    # extension fact. ``UNRECORDED`` for a block no recording read produced
+    # (and every document without the fact); never read as complete.
     # compare=False: a read outcome is provenance, not table content.
     export_read: ExportReadState = field(
         default=ExportReadState.UNRECORDED, compare=False, kw_only=True

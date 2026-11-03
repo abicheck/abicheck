@@ -14,7 +14,8 @@
 # limitations under the License.
 
 """A partial export-table read survives storage and every reader honors it
-(ADR-079, schema v70).
+(ADR-079, stored as the ``binary`` section's ``abicheck.export_read``
+extension fact, ADR-062 D19).
 
 Bug class ``evidence.silent_degradation_to_clean_verdict``: a stored snapshot
 could not say its export table was cut short, so it read as a complete table
@@ -28,10 +29,11 @@ The oracle is the ADR's own decision table, written out below as literal
 mappings -- never the reader under test:
 
 * D1/D3: ``partial``/``failed`` are taken as recorded; ``complete`` and
-  ``unrecorded`` fall back to the pre-v70 rule (read when the table holds an
+  ``unrecorded`` fall back to the pre-ADR-079 rule (read when the table holds an
   entry or its header was parsed, else failed);
-* D2: a v70 document writes ``export_read`` exactly when the state is not
-  ``complete``; a pre-v70 document reads as ``unrecorded``;
+* D2: the stored fact lists exactly the platforms that are not ``complete``,
+  and is must-understand exactly for a ``partial``/``failed`` one; a
+  document without the fact reads as ``unrecorded``;
 * D4: the export fact, the ``exports`` coverage record, the release export
   names and the comparison all follow that effective state.
 """
@@ -67,9 +69,12 @@ from abicheck.serialization import (
     snapshot_to_dict,
     snapshot_to_json,
 )
+from abicheck.storage import wire_extensions
+from abicheck.storage.extension_fact_catalog import EXPORT_READ
 from abicheck.workflows.consumer_scope import require_read_library
 
 PLATFORMS = ("elf", "pe", "macho")
+FACT = EXPORT_READ.name
 STATES = tuple(ExportReadState)
 OPERANDS = ("live", "stored")
 NAMES = ("a_fn", "b_fn", "c_fn", "d_fn")
@@ -147,15 +152,28 @@ def _snapshot(
     )
 
 
+def _stored(snap: AbiSnapshot) -> dict[str, Any]:
+    """*snap* as written to disk: the single-file sectioned document."""
+    document: dict[str, Any] = json.loads(snapshot_to_json(snap))
+    return document
+
+
 def _operand(snap: AbiSnapshot, operand: str) -> AbiSnapshot:
-    return snap if operand == "live" else snapshot_from_dict(snapshot_to_dict(snap))
+    return snap if operand == "live" else snapshot_from_dict(_stored(snap))
 
 
-def _platform_block(document: dict[str, Any], platform: str) -> dict[str, Any] | None:
-    """The stored platform block, in the flat or the sectioned shape."""
-    if platform in document:
-        return document[platform]
-    return document["sections"]["binary"]["payload"][platform]
+def _binary_header(document: dict[str, Any]) -> dict[str, Any]:
+    section: dict[str, Any] = document["sections"]["binary"]
+    return section
+
+
+#: Oracle for D2 under ADR-062 D19: the stored fact lists exactly the
+#: platforms that are not complete; it is must-understand exactly when one
+#: of them is partial or failed.
+def _expected_fact(platform: str, state: ExportReadState) -> dict[str, str] | None:
+    if state is ExportReadState.UNRECORDED:
+        return None
+    return {} if state is ExportReadState.COMPLETE else {platform: state.value}
 
 
 # --- the property --------------------------------------------------------------
@@ -180,11 +198,14 @@ def test_every_reader_follows_the_recorded_read(
     snap = _operand(built, operand)
     meta = getattr(snap, platform)
 
-    # D2: the stored copy carries exactly the recorded state.
+    # D2: the stored copy carries exactly the recorded state, as the fact.
     assert meta.export_read is state
-    stored_block = _platform_block(snapshot_to_dict(built), platform)
-    assert stored_block is not None
-    assert ("export_read" in stored_block) == (state.value != "complete")
+    header = _binary_header(_stored(built))
+    assert "export_read" not in header["payload"][platform]
+    assert header.get("extensions", {}).get(FACT) == _expected_fact(platform, state)
+    assert (FACT in header.get("must_understand", ())) == (
+        state.value in ("partial", "failed")
+    )
 
     effective = _effective(state.value, len(names), parsed)
     assert snapshot_export_table_state(snap) is _TABLE_STATE[effective]
@@ -253,54 +274,93 @@ def test_a_removal_resting_on_an_unread_table_is_never_a_break(
 
 @pytest.mark.parametrize("platform", PLATFORMS)
 @pytest.mark.parametrize("recorded", ["complete", "partial", "failed"])
-def test_a_pre_v70_document_reads_as_unrecorded(platform: str, recorded: str) -> None:
-    """D3: a document older than v70 has no record of the read, whatever key
-    a later writer would have put there; its block reads ``unrecorded`` and
-    keeps the pre-v70 rule (a parsed block holding entries reads complete)."""
-    document = snapshot_to_dict(
-        _snapshot(platform, NAMES, state=ExportReadState(recorded))
-    )
-    _platform_block(document, platform).pop("export_read", None)
-    document["schema_version"] = 69
+def test_a_document_without_the_fact_reads_as_unrecorded(
+    platform: str, recorded: str
+) -> None:
+    """D3: a document carrying no fact (written before it existed) has no
+    record of the read, whatever a later writer would have recorded; its
+    block reads ``unrecorded`` and keeps the pre-ADR-079 rule (a parsed
+    block holding entries reads complete)."""
+    document = _stored(_snapshot(platform, NAMES, state=ExportReadState(recorded)))
+    header = _binary_header(document)
+    header.pop("extensions", None)
+    header.pop("must_understand", None)
     snap = snapshot_from_dict(copy.deepcopy(document))
     assert getattr(snap, platform).export_read is ExportReadState.UNRECORDED
     assert snapshot_export_table_state(snap) is ExportTableState.READ
 
 
 @pytest.mark.parametrize("platform", PLATFORMS)
-def test_an_unrecorded_block_is_never_upgraded_to_complete_on_resave(
-    platform: str,
-) -> None:
-    """A re-saved pre-v70 block writes ``unrecorded``: at v70 an absent key
-    means ``complete``, which the block never established."""
+def test_an_unrecorded_block_is_never_written_as_complete(platform: str) -> None:
+    """A block with no record writes no fact, so it re-reads ``unrecorded``,
+    and a flat document (which carries no section header) never claims a
+    read either."""
     snap = _snapshot(platform, (), parsed=False, state=ExportReadState.UNRECORDED)
-    block = _platform_block(snapshot_to_dict(snap), platform)
-    assert block["export_read"] == "unrecorded"
-    again = snapshot_from_dict(snapshot_to_dict(snap))
-    assert getattr(again, platform).export_read is ExportReadState.UNRECORDED
-    assert snapshot_export_table_state(again) is ExportTableState.FAILED
+    assert FACT not in _binary_header(_stored(snap)).get("extensions", {})
+    for again in (
+        snapshot_from_dict(_stored(snap)),
+        snapshot_from_dict(snapshot_to_dict(snap)),
+        snapshot_from_dict(
+            snapshot_to_dict(_snapshot(platform, NAMES, state=ExportReadState.PARTIAL))
+        ),
+    ):
+        assert getattr(again, platform).export_read is ExportReadState.UNRECORDED
+    assert snapshot_export_table_state(again) is ExportTableState.READ
 
 
 @pytest.mark.parametrize("platform", PLATFORMS)
-def test_a_complete_read_encodes_as_the_prior_version_apart_from_the_number(
+def test_a_fact_already_stored_survives_a_resave(platform: str) -> None:
+    """Load -> save keeps the fact byte-for-byte (ADR-062 D14)."""
+    first = _stored(_snapshot(platform, NAMES, state=ExportReadState.PARTIAL))
+    again = _stored(snapshot_from_dict(copy.deepcopy(first)))
+    assert _binary_header(again) == _binary_header(first)
+
+
+@pytest.mark.parametrize("platform", PLATFORMS)
+def test_a_complete_read_changes_no_block_and_blocks_no_reader(platform: str) -> None:
+    """D2: ``complete`` adds no block key and no must-understand name, so a
+    reader that predates the fact reads the section; a partial read differs
+    from it only by the fact's value and its must-understand entry."""
+    complete = _stored(_snapshot(platform, NAMES))
+    partial = _stored(_snapshot(platform, NAMES, state=ExportReadState.PARTIAL))
+    assert _binary_header(partial)["payload"] == _binary_header(complete)["payload"]
+    assert "must_understand" not in _binary_header(complete)
+    assert _binary_header(partial)["must_understand"] == [FACT]
+
+
+@pytest.mark.parametrize("platform", PLATFORMS)
+@pytest.mark.parametrize(
+    ("state", "blocked"),
+    [
+        (ExportReadState.COMPLETE, False),
+        (ExportReadState.PARTIAL, True),
+        (ExportReadState.FAILED, True),
+    ],
+)
+def test_a_reader_that_predates_the_fact(
     platform: str,
+    state: ExportReadState,
+    blocked: bool,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """D2: ``complete`` adds no key, so the document differs from the one an
-    unstamped block would have written only by ``export_read`` itself."""
-    complete = snapshot_to_dict(_snapshot(platform, NAMES))
-    partial = snapshot_to_dict(
-        _snapshot(platform, NAMES, state=ExportReadState.PARTIAL)
-    )
-    partial_block = _platform_block(partial, platform)
-    assert partial_block.pop("export_read") == "partial"
-    assert partial == complete
-    assert "export_read" not in _platform_block(complete, platform)
+    """ADR-079 D5 as amended (ADR-062 D19): an older reader (one that does not
+    understand the fact) reads a complete document normally and blocks only
+    the ``binary`` section of a partial or failed one -- it never reads the
+    cut-short table as complete."""
+    document = _stored(_snapshot(platform, NAMES, state=state))
+    monkeypatch.setattr(wire_extensions, "UNDERSTOOD_EXTENSIONS", frozenset())
+    snap = snapshot_from_dict(copy.deepcopy(document))
+    assert ({k for k, _ in snap.unreadable_sections} == {"binary"}) is blocked
+    # Blocked: no platform block is decoded at all, so nothing reads the
+    # cut-short table as complete; otherwise the block is read as stored.
+    assert (getattr(snap, platform) is None) is blocked
 
 
 @pytest.mark.parametrize("platform", PLATFORMS)
-def test_a_garbled_state_is_refused(platform: str) -> None:
-    document = snapshot_to_dict(_snapshot(platform, NAMES))
-    _platform_block(document, platform)["export_read"] = "mostly"
+@pytest.mark.parametrize("garbled", ["mostly", {"elf": "complete"}, {"dos": "partial"}])
+def test_a_garbled_fact_is_refused(platform: str, garbled: object) -> None:
+    document = _stored(_snapshot(platform, NAMES, state=ExportReadState.PARTIAL))
+    _binary_header(document)["extensions"][FACT] = garbled
     with pytest.raises(SnapshotError, match="export_read"):
         snapshot_from_dict(document)
 
@@ -356,30 +416,3 @@ def test_a_removal_the_new_headers_establish_still_stands(
     # annotated; PE/Mach-O do not report it at all).
     c_fn = removed.get("c_fn")
     assert c_fn is None or c_fn.modulation_rule == "partial_export_table_read"
-
-
-@pytest.mark.parametrize("platform", PLATFORMS)
-@pytest.mark.parametrize("schema_version", [69, 70])
-def test_a_v1_binary_section_reads_as_unrecorded(
-    platform: str, schema_version: int
-) -> None:
-    """The ``binary`` section's own v1 -> v2 migration: a v1 section predates
-    the record, so its block reads ``unrecorded`` whatever the document-level
-    version says -- the per-section axis a package reader goes by."""
-    document = json.loads(snapshot_to_json(_snapshot(platform, NAMES)))
-    document["schema_version"] = schema_version
-    document["section_schema_versions"]["binary"] = 1
-    document["sections"]["binary"]["section_schema_version"] = 1
-    snap = snapshot_from_dict(copy.deepcopy(document))
-    assert getattr(snap, platform).export_read is ExportReadState.UNRECORDED
-
-
-@pytest.mark.parametrize("platform", PLATFORMS)
-def test_a_v1_binary_section_carrying_the_key_is_refused(platform: str) -> None:
-    document = json.loads(
-        snapshot_to_json(_snapshot(platform, NAMES, state=ExportReadState.PARTIAL))
-    )
-    document["section_schema_versions"]["binary"] = 1
-    document["sections"]["binary"]["section_schema_version"] = 1
-    with pytest.raises((ValueError, SnapshotError), match="only a v2 writer"):
-        snapshot_from_dict(document)

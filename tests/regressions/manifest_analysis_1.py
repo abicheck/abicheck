@@ -668,7 +668,7 @@ ANALYSIS_1_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/unit/extract/test_library_export_read_failures.py",
             # ADR-079: a stored snapshot whose export table was cut short read
             # as complete forever -- the unread part's symbols read as
-            # unexported and their removal as a break. Persisted (schema v70)
+            # unexported and their removal as a break. Persisted (an ADR-062 D19 extension fact)
             # and honored live and stored, on ELF, PE and Mach-O.
             "tests/unit/storage/test_export_read_persisted.py",
             "tests/test_cli_compare_partial_export_read.py",

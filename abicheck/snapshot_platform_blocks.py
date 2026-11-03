@@ -62,38 +62,6 @@ def elf_symbol_binding(sym: dict[str, Any]) -> Any:
         return ElfVersionBinding.UNKNOWN
 
 
-#: Schema v70 (ADR-079): the first version whose platform blocks record their
-#: export-table read, so an absent ``export_read`` key there means ``complete``.
-MIN_SCHEMA_VERSION_FOR_EXPORT_READ = 70
-
-
-def export_read_from_dict(block: dict[str, Any], schema_version: int) -> Any:
-    """A platform block's ``export_read`` (ADR-079 D2/D3).
-
-    From v70 an absent key means ``complete`` (only a non-complete state is
-    written). Before v70 the document has no record of the read, so it
-    decodes to ``unrecorded`` -- never ``complete``. A present value must name
-    a state: a garbled one is refused rather than read as a complete table.
-    """
-    from .errors import SnapshotError
-    from .model.export_read import ExportReadState
-
-    value = block.get("export_read")
-    if value is None:
-        return (
-            ExportReadState.COMPLETE
-            if schema_version >= MIN_SCHEMA_VERSION_FOR_EXPORT_READ
-            else ExportReadState.UNRECORDED
-        )
-    try:
-        return ExportReadState(value)
-    except ValueError as exc:
-        raise SnapshotError(
-            f"snapshot platform block's export_read {value!r} is not an "
-            "export-table read state"
-        ) from exc
-
-
 def elf_from_dict(elf: dict[str, Any], schema_version: int) -> Any:
     from dataclasses import replace
 
@@ -200,7 +168,6 @@ def elf_from_dict(elf: dict[str, Any], schema_version: int) -> Any:
         has_fini_fact=decode_fact(
             elf.get("has_fini_fact"), schema_version, min_schema_version=_min_schema
         ),
-        export_read=export_read_from_dict(elf, schema_version),
     )
 
 
@@ -237,7 +204,6 @@ def pe_from_dict(pe: dict[str, Any], schema_version: int) -> Any:
         delay_imports_fact=decode_fact(
             pe.get("delay_imports_fact"), schema_version, min_schema_version=37
         ),
-        export_read=export_read_from_dict(pe, schema_version),
     )
 
 
@@ -280,7 +246,6 @@ def macho_from_dict(macho: dict[str, Any], schema_version: int) -> Any:
         rpaths_fact=decode_fact(
             macho.get("rpaths_fact"), schema_version, min_schema_version=37
         ),
-        export_read=export_read_from_dict(macho, schema_version),
     )
 
 
