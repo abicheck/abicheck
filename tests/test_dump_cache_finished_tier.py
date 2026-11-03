@@ -26,7 +26,7 @@ import pytest
 
 from abicheck.model.execution_cache import REFERENCE_MODE_ENV_VAR
 from abicheck.model.ownership_rules import OwnershipRequest
-from abicheck.serialization import snapshot_to_dict
+from abicheck.serialization import snapshot_to_json
 from abicheck.workflows import input_resolution
 from abicheck.workflows.dump import dependency_scope
 from abicheck.workflows.dump.cache import api as cache_api, store as cache_store
@@ -110,7 +110,8 @@ def _resolve(so: Path, cfg: dict[str, Any]) -> Any:
 
 
 def _canon(snap: Any) -> str:
-    return json.dumps(snapshot_to_dict(snap), sort_keys=True, default=str)
+    # Keep header extension facts as well as section payloads in the oracle.
+    return json.dumps(json.loads(snapshot_to_json(snap)), sort_keys=True, default=str)
 
 
 def _runtime(snap: Any) -> tuple[Any, ...]:

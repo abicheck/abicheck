@@ -308,7 +308,8 @@ def _contract_profile_fields_via_typed_api(
     compared under the same dependency scope rather than at two different
     ones.
     """
-    from abicheck.serialization import snapshot_to_dict
+    from abicheck.serialization import snapshot_to_json
+    from abicheck.storage.sectioned_document import from_sectioned_document
 
     request = DumpRequest(
         input=InputSpec(
@@ -323,7 +324,10 @@ def _contract_profile_fields_via_typed_api(
         depth="source",
     )
     snap = run_dump_request(request)
-    contract = snapshot_to_dict(snap).get("contract") or {}
+    # Project the contract only after serializing the complete stored state;
+    # flat snapshot_to_dict must refuse the export-read header extension.
+    document = from_sectioned_document(json.loads(snapshot_to_json(snap)))
+    contract = document.get("contract") or {}
     fields: dict = dict(contract.get("profile_fields") or {})
     fields["__scope_fingerprint__"] = contract.get("scope_fingerprint")
     return fields
