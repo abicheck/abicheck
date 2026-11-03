@@ -380,7 +380,9 @@ def test_the_classifier_import_closure_is_the_standard_library() -> None:
         "roots = [Path(sysconfig.get_paths()[k]).resolve() for k in ('stdlib', 'platstdlib')]\n"
         # A Windows CPython keeps its stdlib extension modules (`_hashlib`,
         # `_bz2`, ...) in `<base_prefix>\\DLLs`, beside `Lib`, not under it.
-        "roots.append((Path(sys.base_prefix) / 'DLLs').resolve())\n"
+        # Only stdlib names count there, so a third-party module dropped into
+        # that directory is still reported.
+        "dlls = (Path(sys.base_prefix) / 'DLLs').resolve()\n"
         f"roots.append(Path({str(REPO / 'abicheck')!r}).resolve())\n"
         "extra = []\n"
         "for name in sorted(set(sys.modules) - before):\n"
@@ -388,8 +390,11 @@ def test_the_classifier_import_closure_is_the_standard_library() -> None:
         "    if origin is None:\n"
         "        continue  # built-in or frozen\n"
         "    path = Path(origin).resolve()\n"
-        "    if not any(root in path.parents for root in roots):\n"
-        "        extra.append(f'{name} ({path})')\n"
+        "    if any(root in path.parents for root in roots):\n"
+        "        continue\n"
+        "    if path.parent == dlls and name.split('.')[0] in sys.stdlib_module_names:\n"
+        "        continue\n"
+        "    extra.append(f'{name} ({path})')\n"
         "print(','.join(extra))\n"
     )
     proc = subprocess.run(

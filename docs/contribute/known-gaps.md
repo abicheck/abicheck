@@ -138,7 +138,7 @@ current emitter, which is unchanged.
 
 #### On Windows an in-process file digest can miss a rewrite that kept size and mtime (2026-11-03)
 
-**Status (2026-11-03): OPEN, narrow.** `extract/cache_input_digest.py` reuses a memoized file digest while the stat signature (device, inode, size, mtime, ctime) is unchanged. On Windows `st_ctime` is the creation time, so a rewrite that restores both size and mtime leaves the signature unchanged. The cross-process store is therefore off on Windows (`_STORE_SIGNATURES_TRUSTED`). The memo inside one process still applies there: it is protected only by the racy-mtime window, which does not cover a file whose old mtime is restored on purpose. Closing it needs a change time that Windows `os.stat` does not expose (CPython plans to make `st_ctime` the change time on Windows in a later release).
+**Status (2026-11-03): OPEN, narrow.** `extract/cache_input_digest.py` reuses a memoized file digest while the stat signature (device, inode, size, mtime, ctime) is unchanged. On Windows `st_ctime` is the creation time, so a rewrite that restores both size and mtime leaves the signature unchanged. The cross-process store is therefore off on Windows (`_STORE_SIGNATURES_TRUSTED`). The memo inside one process still applies there: it is protected only by the racy-mtime window, which does not cover a file whose old mtime is restored on purpose. Closing it needs a change time that Windows `os.stat` does not expose (CPython plans to make `st_ctime` the change time on Windows in a later release). [Full write-up](known-gaps/windows-in-process-file-digest-misses-size-and-mtime-preserving-rewrite.md)
 
 `false-clean` — within one Windows process, a cache key can fold the digest of the file's earlier bytes.
 

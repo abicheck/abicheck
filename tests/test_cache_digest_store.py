@@ -148,6 +148,13 @@ def test_without_a_change_time_the_store_is_neither_read_nor_written(
     cid.flush_digest_store()
     store = fresh / "xdg" / "abi_check" / "digests" / "file_digests.json"
     assert store.exists() is trusted
+    if not trusted:
+        # A store an earlier (trusting) run left behind must still be ignored.
+        stale = (
+            _windows_like_signature(f.stat()),
+            hashlib.sha256(b"int a;").hexdigest(),
+        )
+        cache_digest_store.save_entries({str(f): stale})
     _new_process(monkeypatch)
     _write(f, b"int b;")  # same size, same mtime
     served = cid.file_digest(f)
