@@ -173,7 +173,8 @@ def _is_probe_compile(argv: tuple[str, ...]) -> bool:
 
 
 def _is_probe_run(argv: tuple[str, ...]) -> bool:
-    return len(argv) == 1 and argv[0].endswith("/probe")
+    # The probe lives in a temp dir: "\\" separates it on Windows.
+    return len(argv) == 1 and argv[0].replace("\\", "/").endswith("/probe")
 
 
 def _plain_char_step(

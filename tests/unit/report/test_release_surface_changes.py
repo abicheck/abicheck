@@ -104,9 +104,9 @@ def _run_release(tmp_path: Path, spec, *, extra: tuple[str, ...] = ()) -> dict:
         f"markdown={out_md}",
         *extra,
     )
-    doc = json.loads(out_json.read_text())
-    doc["_html"] = out_html.read_text()
-    doc["_md"] = out_md.read_text()
+    doc = json.loads(out_json.read_text(encoding="utf-8"))
+    doc["_html"] = out_html.read_text(encoding="utf-8")
+    doc["_md"] = out_md.read_text(encoding="utf-8")
     return doc
 
 
@@ -228,7 +228,7 @@ def test_one_member_package_reports_the_scalar_compare_entries(tmp_path: Path) -
         "-o",
         f"json={scalar_json}",
     )
-    scalar = json.loads(scalar_json.read_text())["surface_changes"]
+    scalar = json.loads(scalar_json.read_text(encoding="utf-8"))["surface_changes"]
 
     (tmp_path / "rel").mkdir()
     release = _run_release(tmp_path / "rel", spec)["surface_changes"]

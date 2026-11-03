@@ -232,7 +232,11 @@ class TestCanonicalResolverIsWhatRuns:
         merged into this `@FILE` spelling)."""
         listed = tmp_path / "required.txt"
         listed.write_text("# contract\napi_b\n", encoding="utf-8")
-        ctx = _context(tmp_path, "--set", f'consumers.required_symbols=["@{listed}"]')
+        # A YAML flow list built with json.dumps: a raw Windows path inside a
+        # hand-written double-quoted scalar is not valid YAML ("\\p" is an
+        # unknown escape), on the command line as in this test.
+        value = json.dumps([f"@{listed}"])
+        ctx = _context(tmp_path, "--set", f"consumers.required_symbols={value}")
 
         assert ctx["resolved_config"]["policy"]["base"]["id"] == "plugin_abi"
         prov = ctx["field_provenance"]["policy.base"]
@@ -259,9 +263,8 @@ class TestCanonicalResolverIsWhatRuns:
         """
         empty = tmp_path / "required.txt"
         empty.write_text("# nothing but a comment\n", encoding="utf-8")
-        ctx = _context(
-            tmp_path, "--set", f'consumers.required_symbols=["api_b", "@{empty}"]'
-        )
+        value = json.dumps(["api_b", f"@{empty}"])
+        ctx = _context(tmp_path, "--set", f"consumers.required_symbols={value}")
 
         assert ctx["resolved_config"]["policy"]["base"]["id"] == "plugin_abi"
         prov = ctx["field_provenance"]["policy.base"]

@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -20,7 +21,10 @@ _OLD = 1_000_000_000  # ns since epoch: far outside the racy window
 
 @pytest.fixture
 def fresh(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    # backend_cache_dir reads LOCALAPPDATA on Windows and XDG_CACHE_HOME
+    # elsewhere: point both at the same place, never the real user cache.
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "xdg"))
     monkeypatch.setattr(cid, "_FILE_MEMO", {})
     monkeypatch.setattr(cid, "_DIRTY", {})
     monkeypatch.setattr(cid, "_STORE_STATE", {"loaded": False})
@@ -38,6 +42,11 @@ def _write(path: Path, data: bytes) -> None:
     os.utime(path, ns=(_OLD, _OLD))
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Windows st_ctime is the creation time, so the store is off there "
+    "(test_without_a_change_time_the_store_is_neither_read_nor_written)",
+)
 def test_a_new_process_reuses_stored_digests_without_reading(
     fresh: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -116,3 +125,33 @@ def test_the_store_is_bounded(fresh: Path, monkeypatch: pytest.MonkeyPatch) -> N
         (fresh / "xdg" / "abi_check" / "digests" / "file_digests.json").read_bytes()
     )
     assert set(doc["entries"]) == {"/new"}
+
+
+def _windows_like_signature(st: os.stat_result) -> tuple[int, ...]:
+    """A signature without a change time, as Windows' stat gives one."""
+    return (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns)
+
+
+@pytest.mark.parametrize("trusted", [True, False])
+def test_without_a_change_time_the_store_is_neither_read_nor_written(
+    fresh: Path, monkeypatch: pytest.MonkeyPatch, trusted: bool
+) -> None:
+    """A rewrite that restores size and mtime is invisible to a signature with
+    no change time. Persisting such signatures serves the old digest to the
+    next process (the ``trusted`` row shows the hazard); with the store off
+    the next process re-reads the bytes."""
+    monkeypatch.setattr(cid, "_signature", _windows_like_signature)
+    monkeypatch.setattr(cid, "_STORE_SIGNATURES_TRUSTED", trusted)
+    f = fresh / "a.h"
+    _write(f, b"int a;")
+    cid.file_digest(f)
+    cid.flush_digest_store()
+    store = fresh / "xdg" / "abi_check" / "digests" / "file_digests.json"
+    assert store.exists() is trusted
+    _new_process(monkeypatch)
+    _write(f, b"int b;")  # same size, same mtime
+    served = cid.file_digest(f)
+    if trusted:
+        assert served == hashlib.sha256(b"int a;").hexdigest()  # the hazard
+    else:
+        assert served == hashlib.sha256(b"int b;").hexdigest()

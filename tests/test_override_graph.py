@@ -947,8 +947,12 @@ def test_run_ast_passes_unredacts_home_placeholder_in_cwd(monkeypatch) -> None:
         passes=_override_pass(),
     )
 
-    assert captured["argv"][-1] == f"{home}/AppData/Local/Temp/t.cpp"
-    assert captured["cwd"] == f"{home}/AppData/Local/Temp"
+    assert os.path.normpath(captured["argv"][-1]) == os.path.normpath(
+        f"{home}/AppData/Local/Temp/t.cpp"
+    )
+    assert os.path.normpath(captured["cwd"]) == os.path.normpath(
+        f"{home}/AppData/Local/Temp"
+    )
 
 
 def test_merge_override_facts_dedupes_across_compile_units() -> None:

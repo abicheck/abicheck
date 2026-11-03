@@ -315,6 +315,14 @@ class TestLoadOrder:
 # ---------------------------------------------------------------------------
 
 
+def _is_elf(path: Path) -> bool:
+    try:
+        with path.open("rb") as fh:
+            return fh.read(4) == b"\x7fELF"
+    except OSError:
+        return False
+
+
 class TestRealBinary:
     # Resolving + binding a real binary's full dependency graph is ~0.6s; both
     # tests need the same bindings, so compute them once per class instead of
@@ -326,7 +334,9 @@ class TestRealBinary:
 
         candidates = [Path("/usr/bin/python3"), Path("/usr/bin/ls"), Path("/bin/ls")]
         for p in candidates:
-            if p.exists():
+            # The binder reads ELF dynamic sections: macOS ships Mach-O at
+            # these paths, which the resolver rightly refuses to read as ELF.
+            if p.exists() and _is_elf(p):
                 return compute_bindings(resolve_dependencies(p))
         pytest.skip("No suitable ELF binary found")
 

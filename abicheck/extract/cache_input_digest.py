@@ -42,6 +42,7 @@ import os
 import shutil
 import stat
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -80,6 +81,16 @@ _SEARCH_DIR_MEMO: dict[tuple[str, bool], tuple[str, ...]] = {}
 #: otherwise leave the signature unchanged ("racy git"). Two seconds covers
 #: the coarsest common filesystem granularity (FAT, some network mounts).
 _RACY_WINDOW_NS = 2_000_000_000
+
+
+#: Whether a stat signature sees an in-place rewrite that restored size and
+#: mtime. It does where ``st_ctime_ns`` is the inode change time (POSIX). On
+#: Windows it is the file's *creation* time (Python 3.12+ deprecates it as
+#: such), so nothing in the signature moves on that rewrite: an entry persisted
+#: by an earlier process could then be served for different bytes. There the
+#: on-disk store is neither read nor written; the in-process memo remains,
+#: still guarded by the racy-mtime window below.
+_STORE_SIGNATURES_TRUSTED = sys.platform != "win32"
 
 
 def _signature(st: os.stat_result) -> tuple[int, ...]:
@@ -133,7 +144,7 @@ def _load_store_once() -> None:
     """Merge the on-disk digest store into the memo, once per process."""
     if _STORE_STATE["loaded"]:
         return
-    entries = cache_digest_store.load_entries()
+    entries = cache_digest_store.load_entries() if _STORE_SIGNATURES_TRUSTED else {}
     with _LOCK:
         if _STORE_STATE["loaded"]:
             return
@@ -147,7 +158,8 @@ def flush_digest_store() -> None:
     with _LOCK:
         pending = dict(_DIRTY)
         _DIRTY.clear()
-    cache_digest_store.save_entries(pending)
+    if _STORE_SIGNATURES_TRUSTED:
+        cache_digest_store.save_entries(pending)
 
 
 def _marked_digest(path: Path | str) -> str:

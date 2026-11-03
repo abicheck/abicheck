@@ -297,11 +297,16 @@ CMD=("$TEST_BASH" "$TEST_STUB" compare old.json new.json --set "output.view=[sho
         require_bash()
         pr_json = tmp_path / "pr.json"
         pr_json.write_text("", encoding="utf-8")
-        args_file = tmp_path / "args.txt"
+        # The argv lands beside the rerun's own `-o json=` destination, the
+        # one path every sibling stub already writes through on all three
+        # platforms; a path handed down in its own environment variable never
+        # arrived on the Windows lane (no args file was written there).
+        args_file = tmp_path / "pr.json.args"
         stub = tmp_path / "stub.sh"
         stub.write_text(
-            'printf "%s\\n" "$@" > "$TEST_ARGS"\n'
-            '_last="${@: -1}"\necho rerun-sentinel > "${_last#json=}"\n',
+            '_last="${@: -1}"\n_dest="${_last#json=}"\n'
+            'printf "%s\\n" "$@" > "$_dest.args"\n'
+            'echo rerun-sentinel > "$_dest"\n',
             encoding="utf-8",
         )
         quoted = " ".join(f"'{t}'" for t in view_tokens)
@@ -318,9 +323,9 @@ CMD=("$TEST_BASH" "$TEST_STUB" compare old.json new.json {quoted} --set severity
                 "TEST_PR_JSON": str(pr_json),
                 "TEST_STUB": str(stub),
                 "TEST_BASH": bash_executable(),
-                "TEST_ARGS": str(args_file),
             },
         )
+        assert pr_json.read_text(encoding="utf-8").strip() == "rerun-sentinel"
         args = args_file.read_text(encoding="utf-8").splitlines()
         assert args == [
             "compare",
