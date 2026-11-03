@@ -34,6 +34,7 @@ from abicheck.project_snapshot_legacy import (
 from abicheck.serialization import (
     SCHEMA_VERSION,
     snapshot_from_dict,
+    snapshot_to_dict,
     snapshot_to_json,
 )
 from abicheck.storage import wire_extensions
@@ -137,6 +138,9 @@ def test_an_older_reader_loses_only_an_optional_fact(section: str, value: Any) -
     assert "must_understand" not in document["sections"][section]
     old = _older_load(document)
     assert old.unreadable_sections == ()
+    # Flat mappings cannot retain the extension's header carrier (ADR-062 D14).
+    with pytest.raises(SnapshotError, match="refusing to flatten"):
+        snapshot_to_dict(old)
     # The older reader keeps the fact verbatim and re-saves it unchanged;
     # the rest of its re-save is the fact-less snapshot's.
     resaved = json.loads(snapshot_to_json(old))
@@ -226,6 +230,8 @@ def test_must_understand_when_narrows_to_the_values_that_need_it(
         assert _resaved_without(old, "binary", "extensions") == json.loads(
             snapshot_to_json(_plain())
         )
+        with pytest.raises(SnapshotError, match="refusing to flatten"):
+            snapshot_to_dict(old)
     elif semantics is ReaderSemantics.SECTION_MUST_UNDERSTAND:
         assert [k for k, _ in _older_load(document).unreadable_sections] == ["binary"]
     else:
