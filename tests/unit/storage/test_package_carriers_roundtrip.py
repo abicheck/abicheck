@@ -52,7 +52,8 @@ _STATES = {
     "must_understand_unknown": True,
     "newer_version": True,
     "failed": True,
-    "not_collected": False,
+    # Its fields would hold defaults: never read as a collected-empty section.
+    "not_collected": True,
 }
 #: Where an unknown key can sit, as a path from a section payload.
 _NESTED = {

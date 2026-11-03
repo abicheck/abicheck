@@ -60,7 +60,7 @@ from abicheck.storage.import_bundle_facts import (
 )
 from abicheck.storage.import_v1 import export_legacy_snapshot, import_legacy_snapshot
 from abicheck.storage.package import InMemoryObjectStore
-from abicheck.storage.wire_extensions import record_section_failure
+from abicheck.storage.section_states import record_section_failure
 from abicheck.workflows.findings import (
     matrix_snapshot_from_dict,
     matrix_snapshot_to_json,
@@ -227,8 +227,8 @@ def _loaded(document: dict[str, Any], blocked: frozenset[str]) -> AbiSnapshot:
 @pytest.mark.parametrize("writer", sorted(_FLAT_WRITERS))
 @settings(max_examples=40, deadline=None, suppress_health_check=[HealthCheck.too_slow])
 @given(case=_carriers())
-@example(case=(_not_collected(("types",)), frozenset()))
-@example(case=(_not_collected(tuple(sorted(_SECTIONS))), frozenset()))
+@example(case=(_not_collected(("types",)), frozenset({"types"})))
+@example(case=(_not_collected(tuple(sorted(_SECTIONS))), frozenset(_SECTIONS)))
 def test_a_flat_mapping_write_keeps_every_carrier_or_fails_loudly(
     writer: str, case: tuple[dict[str, Any], frozenset[str]]
 ) -> None:
@@ -256,7 +256,7 @@ def test_a_snapshot_writer_keeps_every_carrier(
 
 @settings(max_examples=40, deadline=None, suppress_health_check=[HealthCheck.too_slow])
 @given(case=_carriers())
-@example(case=(_not_collected(("types",)), frozenset()))
+@example(case=(_not_collected(("types",)), frozenset({"types"})))
 def test_snapshot_to_dict_refuses_exactly_when_the_flat_document_loses_state(
     case: tuple[dict[str, Any], frozenset[str]],
 ) -> None:

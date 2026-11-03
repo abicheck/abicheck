@@ -313,10 +313,18 @@ per-item status in the
   DWARF is an optional input on the binary path, so failing either section
   would make an unrequested input lower a passing run's assurance; a
   header-scoped PE dump's `debug` also holds the header parse's provenance.
-  Each stays a fact-family `FactAvailability`. The inventory expands only
-  what the fixed corpus populates. A `not_collected` section gives no
-  assurance note when a detector reads it (decided in ADR-062 D15's
-  implementation decisions).
+  Each stays a fact-family `FactAvailability`. No producer records a
+  whole section as `not_collected` yet: the reader honors one (its readers
+  are blocked, never shown an empty section; closed 2026-11-03, it used to
+  read as empty), but every in-tree writer stamps the sections it writes
+  `present`, including an empty `types` on a binary-only dump. Recording
+  that as `not_collected` would block every type detector on the standard
+  binary-only path, which the evidence tiers already report; it needs its
+  own decision. The inventory is generated from the encoders' declarations
+  (closed 2026-11-03), but stops at record-class fields: a key path inside
+  an opaque value (a fact object, `elf.versions_required`) is pinned by the
+  section sha256, not enumerated. A directory package names its sections in
+  its ref, so a section missing from one is never reported `unrecorded`.
 - **D16 residual: `comparison_input`** has no consumer (no comparison-result
   cache exists) and is not implemented. A persisted evidence digest is used
   only against another persisted one: a snapshot decoded from the stored

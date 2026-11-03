@@ -81,6 +81,7 @@ from .fact_codec import (
     evidenced_producers,
 )
 from .generation_migrations import migrate_and_describe
+from .section_states import apply_section_states
 from .sectioned_document import from_sectioned_document, is_sectioned_document
 from .semantic_ir_codec import decode_semantic_ir
 from .snapshot_encode import (
@@ -207,7 +208,7 @@ def decode_snapshot(
     snap.load_notices = (*snap.load_notices, *_generation_notices)
     if carried is not None:
         attach_wire_extensions(snap, carried)
-        snap.unreadable_sections = tuple(carried.unreadable)
+        apply_section_states(snap, carried)
     return snap, _schema_version
 
 

@@ -41,11 +41,11 @@ from abicheck.storage.json_stream import (
     iter_json_indented,
     join_json_indented,
 )
+from abicheck.storage.section_states import record_section_failure
 from abicheck.storage.snapshot_encode import (
     sectioned_document_for_write,
     streamed_sectioned_document,
 )
-from abicheck.storage.wire_extensions import record_section_failure
 from tests._whole_document_encoder import whole_sectioned_document
 
 _FIXTURES = Path(__file__).parent / "fixtures"

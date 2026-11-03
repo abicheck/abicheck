@@ -3,6 +3,11 @@
     "diagnostics",
     "status"
   ],
+  "availability_statuses": [
+    "failed",
+    "not_collected",
+    "present"
+  ],
   "document": [
     "must_understand",
     "schema_version",
@@ -66,21 +71,6 @@
           "versions_defined",
           "versions_required"
         ],
-        "elf.dynamic_flags_fact": [
-          "diagnostics",
-          "status",
-          "value"
-        ],
-        "elf.has_fini_fact": [
-          "diagnostics",
-          "status",
-          "value"
-        ],
-        "elf.has_init_fact": [
-          "diagnostics",
-          "status",
-          "value"
-        ],
         "elf.imports[]": [
           "binding",
           "is_default",
@@ -91,6 +81,7 @@
         ],
         "elf.symbols[]": [
           "binding",
+          "code_hash",
           "is_default",
           "name",
           "origin_lib",
@@ -98,9 +89,52 @@
           "sym_type",
           "value_alignment",
           "version",
+          "version_binding",
           "visibility"
         ],
-        "elf.versions_required": []
+        "macho": [
+          "compat_version",
+          "cpu_type",
+          "cpu_types",
+          "current_version",
+          "dependent_libs",
+          "exports",
+          "filetype",
+          "flags",
+          "imported_symbols",
+          "install_name",
+          "min_os_version",
+          "reexported_libs",
+          "rpaths",
+          "rpaths_fact",
+          "weak_dependent_libs",
+          "weak_dependent_libs_fact"
+        ],
+        "macho.exports[]": [
+          "is_data",
+          "is_weak",
+          "name",
+          "sym_type"
+        ],
+        "pe": [
+          "characteristics",
+          "delay_imports",
+          "delay_imports_fact",
+          "dll_characteristics",
+          "exports",
+          "file_version",
+          "imports",
+          "machine",
+          "product_version",
+          "subsystem_version"
+        ],
+        "pe.exports[]": [
+          "decoded_name",
+          "forwarder",
+          "name",
+          "ordinal",
+          "sym_type"
+        ]
       },
       "header": [
         "extensions",
@@ -114,7 +148,9 @@
     "build": {
       "fields": {
         "": [
-          "build_source_pack"
+          "build_source",
+          "build_source_pack",
+          "evidence_pack"
         ]
       },
       "header": [
@@ -156,14 +192,7 @@
           "param_kind_facts_reliable",
           "parsed_with_build_context",
           "template_default_header_scan"
-        ],
-        "ast_resolved_standard_fact": [
-          "diagnostics",
-          "status",
-          "value"
-        ],
-        "ast_toolchain": [],
-        "fact_provenance": []
+        ]
       },
       "header": [
         "extensions",
@@ -185,21 +214,22 @@
           "python_api",
           "python_ext",
           "sycl",
+          "typedef_abi_facts",
           "typedef_entity_ids",
           "typedefs",
           "typedefs_qualified",
           "variables"
         ],
-        "constant_entity_ids": [],
-        "constants": [],
         "enums[]": [
           "deprecated",
           "deprecated_fact",
+          "entity_id",
           "is_scoped",
           "is_scoped_fact",
           "members",
           "name",
           "origin",
+          "ownership_fact",
           "qualified_name",
           "qualified_name_fact",
           "source_header",
@@ -207,28 +237,8 @@
           "source_location",
           "underlying_type"
         ],
-        "enums[].deprecated_fact": [
-          "diagnostics",
-          "status",
-          "value"
-        ],
-        "enums[].is_scoped_fact": [
-          "diagnostics",
-          "status",
-          "value"
-        ],
         "enums[].members[]": [
           "name",
-          "value"
-        ],
-        "enums[].qualified_name_fact": [
-          "diagnostics",
-          "status",
-          "value"
-        ],
-        "enums[].source_header_fact": [
-          "diagnostics",
-          "status",
           "value"
         ],
         "functions[]": [
@@ -243,8 +253,10 @@
           "elf_binding",
           "elf_binding_fact",
           "elf_visibility",
+          "entity_id",
           "exception_spec",
           "exception_spec_fact",
+          "explicit_instantiation_fact",
           "hidden_friend_owner",
           "hidden_friend_owner_fact",
           "in_public_contract_fact",
@@ -271,70 +283,19 @@
           "mangled",
           "name",
           "origin",
+          "ownership_fact",
           "params",
           "ref_qualifier",
           "return_pointer_depth",
           "return_type",
+          "return_type_abi_fact",
+          "return_type_identities_fact",
           "source_header",
           "source_header_fact",
           "source_location",
+          "template_param_defaults_fact",
           "visibility",
           "vtable_index"
-        ],
-        "functions[].contract_attributes_fact": [
-          "diagnostics",
-          "status",
-          "value"
-        ],
-        "functions[].deprecated_fact": [
-          "diagnostics",
-          "status",
-          "value"
-        ],
-        "functions[].elf_binding_fact": [
-          "diagnostics",
-          "status",
-          "value"
-        ],
-        "functions[].exception_spec_fact": [
-          "diagnostics",
-          "status",
-          "value"
-        ],
-        "functions[].hidden_friend_owner_fact": [
-          "diagnostics",
-          "status",
-          "value"
-        ],
-        "functions[].is_compiler_generated_fact": [
-          "diagnostics",
-          "status",
-          "value"
-        ],
-        "functions[].is_explicit_fact": [
-          "diagnostics",
-          "status",
-          "value"
-        ],
-        "functions[].is_hidden_friend_fact": [
-          "diagnostics",
-          "status",
-          "value"
-        ],
-        "functions[].is_inline_fact": [
-          "diagnostics",
-          "status",
-          "value"
-        ],
-        "functions[].is_override_fact": [
-          "diagnostics",
-          "status",
-          "value"
-        ],
-        "functions[].is_variadic_fact": [
-          "diagnostics",
-          "status",
-          "value"
         ],
         "functions[].params[]": [
           "default",
@@ -346,31 +307,10 @@
           "kind_fact",
           "name",
           "pointer_depth",
-          "type"
+          "type",
+          "type_abi_fact",
+          "type_identities_fact"
         ],
-        "functions[].params[].is_restrict_fact": [
-          "diagnostics",
-          "status",
-          "value"
-        ],
-        "functions[].params[].is_va_list_fact": [
-          "diagnostics",
-          "status",
-          "value"
-        ],
-        "functions[].params[].kind_fact": [
-          "diagnostics",
-          "status",
-          "value"
-        ],
-        "functions[].source_header_fact": [
-          "diagnostics",
-          "status",
-          "value"
-        ],
-        "typedef_entity_ids": [],
-        "typedefs": [],
-        "typedefs_qualified": [],
         "variables[]": [
           "access",
           "access_fact",
@@ -383,43 +323,38 @@
           "elf_binding",
           "elf_binding_fact",
           "elf_visibility",
+          "entity_id",
+          "explicit_instantiation_fact",
           "in_public_contract_fact",
           "is_const",
           "is_static",
           "mangled",
           "name",
           "origin",
+          "ownership_fact",
           "source_header",
           "source_header_fact",
           "source_location",
           "type",
+          "type_abi_fact",
+          "type_identities_fact",
           "value",
           "visibility"
-        ],
-        "variables[].access_fact": [
-          "diagnostics",
-          "status",
-          "value"
-        ],
-        "variables[].alignment_bits_fact": [
-          "diagnostics",
-          "status",
-          "value"
-        ],
-        "variables[].deprecated_fact": [
-          "diagnostics",
-          "status",
-          "value"
-        ],
-        "variables[].elf_binding_fact": [
-          "diagnostics",
-          "status",
-          "value"
-        ],
-        "variables[].source_header_fact": [
-          "diagnostics",
-          "status",
-          "value"
+        ]
+      },
+      "header": [
+        "extensions",
+        "must_understand",
+        "payload",
+        "section_kind",
+        "section_schema_version"
+      ],
+      "section_schema_version": 1
+    },
+    "graph": {
+      "fields": {
+        "": [
+          "surface_graph"
         ]
       },
       "header": [
@@ -441,10 +376,14 @@
           "dwarf_layout_coherence_mismatches",
           "excluded_header_matching",
           "excluded_header_patterns",
+          "extraction_scope",
           "header_only",
+          "live_preprocessor_hidden",
+          "ownership_without_scope",
+          "public_header_identifiers",
+          "public_header_identifiers_fact",
           "scope_fallback"
-        ],
-        "conditional_fields": []
+        ]
       },
       "header": [
         "extensions",
@@ -460,17 +399,13 @@
         "": [
           "created_at",
           "dependency_info",
+          "dump_provenance",
           "fact_generations",
           "git_commit",
           "git_tag",
           "language_profile",
           "library",
           "version"
-        ],
-        "fact_generations": [
-          "extractor",
-          "resolver",
-          "source"
         ]
       },
       "header": [
@@ -496,6 +431,7 @@
           "data_size_bits_fact",
           "deprecated",
           "deprecated_fact",
+          "entity_id",
           "fields",
           "has_anonymous_aggregate_fields",
           "is_abstract",
@@ -512,34 +448,21 @@
           "kind",
           "name",
           "origin",
+          "ownership_fact",
           "qualified_name",
           "qualified_name_fact",
           "size_bits",
           "source_header",
           "source_header_fact",
           "source_location",
+          "specialization_declared_fact",
+          "template_param_defaults_fact",
           "virtual_bases",
           "virtual_bases_fact",
           "vptr_offset_bits",
           "vptr_offset_bits_fact",
           "vtable",
           "vtable_fact"
-        ],
-        "types[].base_offsets": [],
-        "types[].bases_fact": [
-          "diagnostics",
-          "status",
-          "value"
-        ],
-        "types[].data_size_bits_fact": [
-          "diagnostics",
-          "status",
-          "value"
-        ],
-        "types[].deprecated_fact": [
-          "diagnostics",
-          "status",
-          "value"
         ],
         "types[].fields[]": [
           "access",
@@ -557,77 +480,9 @@
           "is_volatile_fact",
           "name",
           "offset_bits",
-          "type"
-        ],
-        "types[].fields[].default_fact": [
-          "diagnostics",
-          "status",
-          "value"
-        ],
-        "types[].fields[].deprecated_fact": [
-          "diagnostics",
-          "status",
-          "value"
-        ],
-        "types[].fields[].is_const_fact": [
-          "diagnostics",
-          "status",
-          "value"
-        ],
-        "types[].fields[].is_mutable_fact": [
-          "diagnostics",
-          "status",
-          "value"
-        ],
-        "types[].fields[].is_volatile_fact": [
-          "diagnostics",
-          "status",
-          "value"
-        ],
-        "types[].is_abstract_fact": [
-          "diagnostics",
-          "status",
-          "value"
-        ],
-        "types[].is_final_fact": [
-          "diagnostics",
-          "status",
-          "value"
-        ],
-        "types[].is_standard_layout_fact": [
-          "diagnostics",
-          "status",
-          "value"
-        ],
-        "types[].is_trivially_copyable_fact": [
-          "diagnostics",
-          "status",
-          "value"
-        ],
-        "types[].qualified_name_fact": [
-          "diagnostics",
-          "status",
-          "value"
-        ],
-        "types[].source_header_fact": [
-          "diagnostics",
-          "status",
-          "value"
-        ],
-        "types[].virtual_bases_fact": [
-          "diagnostics",
-          "status",
-          "value"
-        ],
-        "types[].vptr_offset_bits_fact": [
-          "diagnostics",
-          "status",
-          "value"
-        ],
-        "types[].vtable_fact": [
-          "diagnostics",
-          "status",
-          "value"
+          "type",
+          "type_abi_fact",
+          "type_identities_fact"
         ]
       },
       "header": [
