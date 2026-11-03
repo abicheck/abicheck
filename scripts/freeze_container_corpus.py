@@ -134,7 +134,17 @@ def main(argv: list[str] | None = None) -> int:
         for name in names:
             key = freeze(SAMPLES[name], manifest, Path(tmp))
             print(f"froze {key}: {manifest['entries'][key]['path']}")
-    manifest["sources_sha256"] = sources_sha256()
+    # The digest says every entry was produced from these sources, so only a
+    # run that refroze every sample may restamp it: after a shared-source
+    # edit, a --sample run leaves it stale and the test keeps failing.
+    if set(names) == set(SAMPLES):
+        manifest["sources_sha256"] = sources_sha256()
+    elif manifest.get("sources_sha256") != sources_sha256():
+        print(
+            "sources changed: refreeze every sample (no --sample) to restamp "
+            "sources_sha256",
+            file=sys.stderr,
+        )
     manifest["entries"] = dict(sorted(manifest["entries"].items()))
     MANIFEST_PATH.write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"

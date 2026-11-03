@@ -43,6 +43,7 @@ import pytest
 from abicheck.serialization import snapshot_from_dict, snapshot_to_json
 from abicheck.storage.bundle_facts_codec import load_bundle_facts, save_bundle_facts
 from abicheck.storage.dto import migration_source_versions
+from abicheck.storage.generation_migrations import SPELLING_MIGRATIONS
 from abicheck.storage.versioning import (
     EXTRACTOR_GENERATION,
     GENERATION_DRIFT_NOTICE_MARKER,
@@ -215,20 +216,49 @@ def test_frozen_container_loads_with_no_unexpected_notice(
 # ── byte drift is a declared migration (fast) ───────────────────────────────
 
 
-def _reencode(sample: str, path: Path, work: Path) -> bytes:
-    """*path* decoded and encoded again by this build, as the bytes the
-    frozen file is compared with (the JSON text, not its gzip envelope)."""
+def _spelling_migration_declared(key: str) -> bool:
+    """Whether loading *key* under this build may rewrite stored spellings:
+    a generation after the frozen one declares a rewrite or an extent shift
+    (or the frozen one predates castxml's array-count fix, generation 15)."""
+    frozen = _entry(key)["generations"]["extractor"]
+    return frozen < 15 or any(
+        change.rewrites or change.extent_shift
+        for introduced, change in SPELLING_MIGRATIONS.items()
+        if frozen < introduced <= EXTRACTOR_GENERATION
+    )
+
+
+def _as_stored(snapshot: Any, key: str) -> Any:
+    """*snapshot* as its frozen document stated it. A load under a newer
+    extractor generation marks the spellings migrated (the stamp's
+    ``spellings`` key) even when no generation in between declared a
+    rewrite; with none declared that mark is the only legitimate difference,
+    so it is undone and every other byte must survive the re-encode."""
+    if not _spelling_migration_declared(key):
+        snapshot.spellings_generation = None
+    return snapshot
+
+
+def _reencode(key: str, work: Path) -> bytes:
+    """*key*'s frozen container decoded and encoded again by this build, as
+    the bytes the frozen file is compared with (the JSON text, not its gzip
+    envelope)."""
+    sample, path = _entry(key)["sample"], _frozen_path(key)
     out = work / "reencoded"
     out.mkdir(parents=True, exist_ok=True)
-    if sample == "g38_document":
-        save_bundle_facts(load_bundle_facts(path), out / "x.json")
-        return (out / "x.json").read_bytes()
-    if sample == "g40_archive":
-        save_bundle_facts(load_bundle_facts(path), out / "x.zip", format="archive")
+    if sample in ("g38_document", "g40_archive"):
+        facts = load_bundle_facts(path)
+        for snap in facts.per_library_snapshots.values():
+            _as_stored(snap, key)
+        if sample == "g38_document":
+            save_bundle_facts(facts, out / "x.json")
+            return (out / "x.json").read_bytes()
+        save_bundle_facts(facts, out / "x.zip", format="archive")
         return (out / "x.zip").read_bytes()
     if sample == "package":
-        return _tree_bytes(_repackage(path, work))
-    return snapshot_to_json(snapshot_from_dict(read_json_document(path))).encode()
+        return _tree_bytes(_repackage(key, work))
+    snapshot = _as_stored(snapshot_from_dict(read_json_document(path)), key)
+    return snapshot_to_json(snapshot).encode()
 
 
 def _frozen_bytes(sample: str, path: Path) -> bytes:
@@ -246,7 +276,7 @@ def _tree_bytes(root: Path) -> bytes:
     )
 
 
-def _repackage(path: Path, work: Path) -> Path:
+def _repackage(key: str, work: Path) -> Path:
     """The package's members captured again by this build's
     ``capture_variants``, each library dumped as its stored snapshot."""
     from abicheck.model.bundle_variants import parse_bundle_variants
@@ -258,7 +288,10 @@ def _repackage(path: Path, work: Path) -> Path:
     from tests._container_corpus import VARIANT_CONFIG
     from tests._yaml_fast import safe_load
 
-    snapshots = {lib: snap for lib, snap, _doc in _package_members(path, work)}
+    snapshots = {
+        lib: _as_stored(snap, key)
+        for lib, snap, _doc in _package_members(_frozen_path(key), work)
+    }
     inputs = work / "inputs"
     inputs.mkdir()
     for library in snapshots:
@@ -302,12 +335,16 @@ def test_reencoding_a_frozen_container_is_identity_or_a_declared_migration(
     sample = _entry(key)["sample"]
     path = _frozen_path(key)
     moved = _moved_versions(key)
-    if _reencode(sample, path, tmp_path) == _frozen_bytes(sample, path):
+    if _reencode(key, tmp_path) == _frozen_bytes(sample, path):
         return
-    assert moved or _drift_expected(key), (
+    # Only a moved encoder version, or a declared spelling migration (its
+    # respellings are held to the fresh-dump oracle below), may move bytes.
+    # Generation drift alone may not: _as_stored undid its only mark.
+    assert moved or _spelling_migration_declared(key), (
         f"{key}: this build encodes the frozen container to different bytes "
-        "with every encoder version and generation unchanged -- bump the "
-        "version that moved (with its migration) and refreeze"
+        "with no encoder version moved and no spelling migration declared "
+        "since it was frozen -- bump the version that moved (with its "
+        "migration) and refreeze"
     )
 
 
