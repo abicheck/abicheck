@@ -1099,7 +1099,9 @@ A1.9), item by item. Open items are also listed in
   `tests/test_pe_pdb_section_failure.py`.
   2026-11-03, flat-mapping writers: `snapshot_to_dict` refuses a snapshot
   whose flat document would lose stored state
-  (`wire_extensions.refuse_lossy_flattening`), so every flat mapping a
+  (`wire_extensions.refuse_lossy_flattening`; `flattening_loses` counts a
+  `not_collected` section, which the flat split re-saved as present), so
+  every flat mapping a
   writer (`to_sectioned_document`, `import_legacy_snapshot`,
   `import_bundle_facts`, `import_baseline_set`) can be handed is complete;
   `snapshot_encode.flat_document_and_carriers` is the one split that yields
