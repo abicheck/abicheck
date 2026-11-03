@@ -15,17 +15,17 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 
 ## Headline
 
-- Total kinds: **424**
-- Kinds with at least one real source: **178**
-- Kinds per source: catalog 158, field_shapes 9, integration 54
+- Total kinds: **426**
+- Kinds with at least one real source: **180**
+- Kinds per source: catalog 158, field_shapes 9, integration 59
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
 | L0 | 129 | 73 |
 | L1 | 62 | 7 |
-| L2 | 72 | 42 |
+| L2 | 73 | 42 |
 | L3 | 15 | 5 |
-| L4 | 9 | 2 |
+| L4 | 10 | 2 |
 | L5 | 15 | 5 |
 | unmapped | 122 | 112 |
 
@@ -157,7 +157,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `sycl_overload_set_removed` | BREAKING | 1 | 0 | 0 |
 | `symbol_binding_became_unique` | RISK | 0 | 0 | 0 |
 | `symbol_binding_changed` | COMPATIBLE | 1 | 0 | 0 |
-| `symbol_binding_lost_unique` | RISK | 1 | 0 | 0 |
+| `symbol_binding_lost_unique` | RISK | 1 | 0 | 2 |
 | `symbol_binding_strengthened` | COMPATIBLE | 1 | 0 | 0 |
 | `symbol_elf_visibility_changed` | COMPATIBLE | 1 | 0 | 0 |
 | `symbol_size_changed` | BREAKING | 1 | 0 | 0 |
@@ -288,6 +288,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `func_variadic_removed` | BREAKING | 0 | 0 | 0 |
 | `func_virtual_removed` | BREAKING | 1 | 0 | 0 |
 | `header_binary_context_mismatch` | RISK | 0 | 0 | 0 |
+| `header_only_function_params_changed` | API_BREAK | 1 | 0 | 1 |
 | `hidden_friend_removed` | API_BREAK | 1 | 1 | 1 |
 | `inline_body_references_renamed_member` | BREAKING | 1 | 0 | 0 |
 | `instantiation_missing_from_binary` | BREAKING | 1 | 0 | 0 |
@@ -356,7 +357,8 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 
 | Kind | Verdict | Catalog | Field shapes | Integration |
 |---|---|---:|---:|---:|
-| `concept_tightened` | API_BREAK | 1 | 0 | 0 |
+| `concept_constraint_changed` | RISK | 0 | 0 | 1 |
+| `concept_tightened` | API_BREAK | 1 | 0 | 1 |
 | `identity_collision_detected` | RISK | 0 | 0 | 0 |
 | `inline_function_removed` | API_BREAK | 1 | 0 | 0 |
 | `odr_type_variant` | API_BREAK | 1 | 0 | 0 |
@@ -364,7 +366,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `public_typedef_removed` | API_BREAK | 1 | 0 | 0 |
 | `source_fact_coverage_incomplete` | RISK | 0 | 0 | 1 |
 | `source_surface_dso_mismatch` | RISK | 0 | 0 | 0 |
-| `template_body_changed` | RISK | 1 | 0 | 0 |
+| `template_body_changed` | RISK | 0 | 0 | 1 |
 
 ## Tier L5
 
