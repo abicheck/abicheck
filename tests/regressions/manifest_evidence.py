@@ -847,6 +847,8 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             # header-origin seeding of the public surface
             "tests/test_surface_header_origin_unknown.py",
             "tests/test_family_f1_evidence_ablation.py",
+            # a never-serialized AST key read as a confirmed False/value
+            "tests/test_extract_absent_key_as_value.py",
         ),
         known_gaps=(
             KnownGap(
