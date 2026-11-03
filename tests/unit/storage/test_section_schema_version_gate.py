@@ -210,7 +210,10 @@ def _write_directory_package(root: Path) -> None:
 
     flat = _snapshot_flat_document()
     write_legacy_snapshot_package(
-        flat, root, artifact_id=flat["library"], max_known_schema_version=SCHEMA_VERSION
+        snapshot_from_dict(flat),
+        root,
+        artifact_id=flat["library"],
+        max_known_schema_version=SCHEMA_VERSION,
     )
 
 

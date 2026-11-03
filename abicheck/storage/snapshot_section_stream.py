@@ -56,6 +56,7 @@ from .wire_extensions import (
     DOCUMENT_MUST_UNDERSTAND_KEY,
     WireExtensions,
     extensions_of,
+    refuse_orphaned_header_extras,
     refuse_unwritable_extensions,
 )
 from .wire_record_extensions import restore_record_extras
@@ -165,6 +166,9 @@ class _SectionWriter:
         return section
 
     def versions(self) -> dict[str, Any]:
+        # Serialized right after `sections`, so every section is written.
+        if self._ext is not None:
+            refuse_orphaned_header_extras(self._ext, self._written)
         versions: dict[str, Any] = {
             kind: SECTION_SCHEMA_VERSIONS[kind]
             for kind in self._written

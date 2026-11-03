@@ -287,13 +287,21 @@ document (closed 2026-11-02; `provenance` still refuses). Owner: `storage/`;
 per-item status in the
 [storage format v2 plan](plans/storage-format-v2.md).
 
-- **D14 residual: a flat mapping cannot say what it lost.** Every
-  container now carries the D14/D15 carriers (directory and bundle
-  packages on `ArtifactRef.carriers`; G38 bundle documents and G40 bundle
-  archives by storing such a member as its sectioned document, closed
-  2026-10-31). A flat mapping a caller made with `snapshot_to_dict` and
-  handed to `write_legacy_snapshot_package` is still written as what it
-  says; pass the `AbiSnapshot`.
+- **D14 residual: a flat mapping cannot say what it lost. Closed
+  2026-11-03.** `snapshot_to_dict` now refuses a snapshot whose flat
+  document would lose stored state (a `not_collected` section included:
+  the flat split emits every section, so it re-saved as present), so no writer that accepts a flat
+  mapping (`to_sectioned_document`, `import_legacy_snapshot`,
+  `import_bundle_facts`, `import_baseline_set`) can be handed one that
+  silently lost carriers; `write_legacy_snapshot_package` takes only an
+  `AbiSnapshot`, and the `dump` write (which stored a PE dump's failed
+  `debug` section as present) writes the snapshot. Remaining, reader side:
+  `from_sectioned_document` without `carry_extensions` returns a flat
+  mapping without the carriers. Its four callers only peek (`library`, the
+  `elf` section, the baseline-set content hash), and none hands the result
+  to a writer, but `buildsource.baseline_set.compute_snapshot_content_hash`
+  therefore hashes two documents that differ only in a blocked or failed
+  section as equal.
 - **D15 residual: one producer records a whole-section failure.** The PE
   dump records `debug` as `failed` when a located PDB fails to parse, on the
   export-table path only. Checked 2026-10-31 for every other extractor, and

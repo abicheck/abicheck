@@ -84,6 +84,7 @@ from abicheck.serialization import snapshot_from_dict, snapshot_to_json
 from abicheck.storage.snapshot_encode import (
     _SNAPSHOT_SKIP_FIELDS,
     RUNTIME_ONLY_SNAPSHOT_FIELDS,
+    flat_document_and_carriers,
     snapshot_to_dict,
 )
 from abicheck.storage.versioning import EXTRACTOR_GENERATION, this_build_generations
@@ -758,7 +759,10 @@ def test_runtime_only_field_never_reaches_the_document(name: str) -> None:
         "runtime-only field needs a reason"
     )
     snap = _construct(AbiSnapshot, {name: _nondefault_value(AbiSnapshot, name)})
-    doc = snapshot_to_dict(snap)
+    # The unguarded flat encode: `snapshot_to_dict` itself refuses a snapshot
+    # naming an unreadable section with no carriers (ADR-062 D14), which is
+    # what a non-default `unreadable_sections` alone is.
+    doc, _carriers = flat_document_and_carriers(snap)
     assert name not in doc
 
 
