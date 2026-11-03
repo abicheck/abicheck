@@ -714,3 +714,39 @@ def test_stored_snapshot_package_reports_the_drift_its_members_state(
     notice = read_manifest_summary(out).semantics_notice or ""
     packaged = versioning.GENERATION_DRIFT_NOTICE_MARKER in notice
     assert packaged == (agreed and all(direct))
+
+
+@pytest.mark.parametrize("offset", [0, -1])
+def test_cli_compare_of_a_package_from_stored_snapshots_reports_their_drift(
+    tmp_path: Path, offset: int
+) -> None:
+    """Public surface: ``project capture-variants`` over stored snapshot
+    files, then ``compare`` of the package against itself. The report names
+    the generation drift exactly when the stored members state an older
+    extractor generation (oracle: the stamp the inputs were given)."""
+    from abicheck.storage import versioning
+
+    inputs = _write_inputs(tmp_path / "x", ["f"])
+    for member in inputs.iterdir():
+        _restamp(member, versioning.EXTRACTOR_GENERATION + offset)
+    cfg = tmp_path / "c.yml"
+    cfg.write_text(
+        "bundle_variants:\n  x86: {target_triple: x86_64-linux-gnu, compiler_family: gcc}\n"
+    )
+    pkg = tmp_path / "pkg"
+    code, out = _run(
+        "project",
+        "capture-variants",
+        "--config",
+        str(cfg),
+        "--variant",
+        f"x86={inputs}",
+        "--package",
+        str(pkg),
+    )
+    assert code == 0, out
+    report = tmp_path / "r.json"
+    code, out = _run("compare", str(pkg), str(pkg), "-o", f"json={report}")
+    assert code == 0, out
+    text = report.read_text(encoding="utf-8")
+    assert (versioning.GENERATION_DRIFT_NOTICE_MARKER in text) == (offset != 0)
