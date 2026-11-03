@@ -21,10 +21,38 @@ what is being cached, which is ``storage``'s job, not the AST cache's.
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
+import time
 from pathlib import Path
 
-__all__ = ["atomic_write"]
+__all__ = ["atomic_write", "replace_file"]
+
+#: Back-off before each retry of a rename Windows refused (seconds, ~1.9 s total).
+_WINDOWS_REPLACE_BACKOFF_S = (0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0)
+
+
+def replace_file(src: str | os.PathLike[str], dst: str | os.PathLike[str]) -> None:
+    """``os.replace(src, dst)``, retried briefly on Windows' transient refusal.
+
+    POSIX ``rename`` onto a path other writers are replacing or readers hold
+    open always succeeds. Windows' ``MoveFileEx`` instead fails with
+    ``ERROR_ACCESS_DENIED``/``ERROR_SHARING_VIOLATION`` (``PermissionError``)
+    while another handle has *dst* open or another writer's replace of it is
+    in flight, so two publishers of one ``manifest.json`` racing without the
+    cross-process lock failed one of them outright. The refusal clears as soon
+    as that handle closes; a refusal that outlasts the back-off is raised.
+    Elsewhere a ``PermissionError`` is a real one and is raised at once.
+    """
+    for delay in _WINDOWS_REPLACE_BACKOFF_S:
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if sys.platform != "win32":
+                raise
+            time.sleep(delay)  # perf-ok: bounded Windows replace retry
+    os.replace(src, dst)
 
 
 def atomic_write(path: Path, data: bytes) -> None:
@@ -44,7 +72,7 @@ def atomic_write(path: Path, data: bytes) -> None:
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(data)
-        os.replace(tmp_name, path)
+        replace_file(tmp_name, path)
     except OSError:
         try:
             os.unlink(tmp_name)

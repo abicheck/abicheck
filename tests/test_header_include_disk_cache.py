@@ -259,6 +259,7 @@ def test_the_default_cache_dir_is_the_include_backend_under_xdg_cache(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "xdg"))  # Windows' root
     assert _ORIGINAL_INCLUDE_CACHE_DIR() == tmp_path / "xdg" / "abi_check" / "include"
 
 

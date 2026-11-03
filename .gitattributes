@@ -32,3 +32,8 @@ skills-src/evaluation/agents/skills/fixtures/**/*.so binary
 # the regenerated tree differ from the committed LF one on Windows.
 # text=auto: binaries (prebuilt .so fixtures) are left alone.
 catalog/cases/** text=auto eol=lf
+
+# tests/test_generation_corpus.py pins the sha256 of these sources' bytes
+# (manifest `sources_sha256`), so a CRLF checkout on windows-latest must not
+# rewrite them.
+tests/fixtures/generations/corpus/** text=auto eol=lf

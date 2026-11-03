@@ -108,7 +108,11 @@ def _compare(tmp_path: Path, mutate, *extra: str):
             *extra,
         ],
     )
-    return result, json.loads(report.read_text()), md.read_text()
+    return (
+        result,
+        json.loads(report.read_text(encoding="utf-8")),
+        md.read_text(encoding="utf-8"),
+    )
 
 
 @pytest.mark.parametrize(

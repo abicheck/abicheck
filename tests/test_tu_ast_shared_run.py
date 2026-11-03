@@ -460,7 +460,7 @@ def test_union_argv_is_the_l4_context_plus_the_dump_tail() -> None:
     cmd = build_clang_command(cu, Path("/p/q.cpp"), clang_bin="clang++")
     assert cmd[0] == "clang++"
     assert "-ast-dump=json" in cmd
-    assert cmd[-1] == "/p/q.cpp"
+    assert cmd[-1] == str(Path("/p/q.cpp"))  # the host spelling of the source
     assert set(CLANG_GCC_HEADER_COMPAT_DEFINES) <= set(cmd)
 
 
