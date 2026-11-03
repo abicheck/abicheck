@@ -37,7 +37,10 @@ from typing import Any, Literal
 #: (``evidence_depth.reported_depth_label``). No verdict, assurance
 #: ``status``, or exit code moves: every gate still reads the explicit
 #: request.
-ANALYSIS_ASSURANCE_SCHEMA_VERSION = "1.2"
+#: ``1.3`` (ADR-079): the additive ``export_read`` object -- each side's
+#: recorded export-table read per platform block; a ``partial``/``failed``
+#: one makes ``status`` read ``partial``.
+ANALYSIS_ASSURANCE_SCHEMA_VERSION = "1.3"
 
 #: The required top-level status vocabulary.
 AssuranceStatus = Literal[
