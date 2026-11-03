@@ -27,7 +27,6 @@ Exit codes:
 
 from __future__ import annotations
 
-import argparse
 import hashlib
 import json
 import os
@@ -49,6 +48,7 @@ sys.path.insert(0, str(Path(__file__).parent))  # source_smoke lives beside this
 import example_applicability  # noqa: E402
 import example_catalog  # noqa: E402
 from _legacy_scope import scope_args  # noqa: E402
+from _validate_examples_cli import build_parser  # noqa: E402
 from example_case_runner import (  # noqa: E402
     print_console_summary,
     print_progress,
@@ -126,6 +126,9 @@ SHARED_LIB_SUFFIX = _shared_lib_suffix()
 # validator (see examples-validation.yml) flips producer-sensitive cases such
 # as case64 (GCC does not emit DW_AT_calling_convention for ms_abi).
 PREFERRED_FAMILY: str | None = None
+#: ``--contract-scope``: ``legacy`` honours each case's ``scope_public_headers``
+#: (unscoped unless it opts in); ``public`` forces the default scoped compare.
+CONTRACT_SCOPE = "legacy"
 
 
 def _find_compiler(
@@ -727,7 +730,7 @@ def _build_compare_cmd(
         ]
     # Scoping is on by default since ADR-024 Phase 5; ground_truth.json verdicts
     # are authored unscoped unless the case opts in.
-    cmd += scope_args(scope_public_headers)
+    cmd += _scope_args(scope_public_headers)
     # ADR-068 D4/Phase 5: pattern verdicts are unconditional now, not a CLI
     # flag; *pattern_verdicts* is kept only for call-site documentation of
     # which ground_truth.json cases need the idiom evidence -- inert here.
@@ -785,7 +788,7 @@ def _build_compare_direct_cmd(
         cmd += ["-H", "new=" + str(v2_hdr)]
     # Scoping is on by default since ADR-024 Phase 5; ground_truth.json verdicts
     # are authored unscoped unless the case opts in.
-    cmd += scope_args(scope_public_headers)
+    cmd += _scope_args(scope_public_headers)
     # ADR-068 D4/Phase 5: see _build_compare_cmd's identical note.
     del pattern_verdicts
     return cmd
@@ -1639,10 +1642,16 @@ def _check_prerequisites() -> str | None:
     return None
 
 
-def _init_worker(preferred_family: str | None) -> None:
-    """Pool initializer carrying ``--toolchain`` into a worker process."""
-    global PREFERRED_FAMILY
+def _scope_args(scope_public_headers: bool) -> list[str]:
+    """The case's scope args; none at all under ``--contract-scope public``."""
+    return [] if CONTRACT_SCOPE == "public" else scope_args(scope_public_headers)
+
+
+def _init_worker(preferred_family: str | None, contract_scope: str = "legacy") -> None:
+    """Pool initializer carrying ``--toolchain``/``--contract-scope`` into a worker."""
+    global PREFERRED_FAMILY, CONTRACT_SCOPE
     PREFERRED_FAMILY = preferred_family
+    CONTRACT_SCOPE = contract_scope
 
 
 def _timed_run_case(name: str, entry: dict, tmp_base: Path, variant: str) -> CaseResult:
@@ -1669,7 +1678,7 @@ def _run_all_cases(
             calls,
             jobs=1 if fail_fast else jobs,
             initializer=_init_worker,
-            initargs=(PREFERRED_FAMILY,),
+            initargs=(PREFERRED_FAMILY, CONTRACT_SCOPE),
         ):
             results.append(res)
             if not json_out:
@@ -1726,6 +1735,7 @@ def _json_payload(
         "selected_cases": len(names),
         "artifact_variants": list(variants),
         "toolchain": PREFERRED_FAMILY or "auto",
+        "contract_scope": CONTRACT_SCOPE,
         "compiler_c": _find_compiler(is_cpp=False) or "none",
         "compiler_cxx": _find_compiler(is_cpp=True) or "none",
         "summary": _summary_counts(results),
@@ -1766,54 +1776,11 @@ def _selected_variants(raw: str) -> tuple[str, ...]:
 
 def main(argv: list[str] | None = None) -> int:
     """CLI entrypoint for validating example cases."""
-    ap = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
-    )
-    ap.add_argument(
-        "filters", nargs="*", help="Name substrings to filter cases (default: all)"
-    )
-    ap.add_argument("--fail-fast", action="store_true", help="Stop after first FAIL")
-    ap.add_argument(
-        "-j",
-        "--jobs",
-        type=int,
-        default=1,
-        metavar="N",
-        help="Parallel cases (0 = one per CPU; result order unchanged; ignored with --fail-fast)",
-    )
-    ap.add_argument(
-        "--json",
-        action="store_true",
-        dest="json_out",
-        help="Machine-readable JSON output",
-    )
-    ap.add_argument(
-        "--category",
-        metavar="CAT",
-        help="Filter by category: breaking, compatible, bad_practice, api_break",
-    )
-    ap.add_argument(
-        "--artifact-variant",
-        choices=(*ARTIFACT_VARIANTS, "all"),
-        default=DEFAULT_ARTIFACT_VARIANT,
-        help=(
-            "Example artifact profile to validate: debug-headers (current default), "
-            "release-headers, stripped-headers, build-source, or all."
-        ),
-    )
-    ap.add_argument(
-        "--toolchain",
-        choices=("auto", "gcc", "clang", "msvc"),
-        default="auto",
-        help=(
-            "Compiler family to prefer for every compile/build (default: auto = "
-            "platform-native order). Use 'clang' to exercise producer-sensitive "
-            "cases such as case64 (DW_AT_calling_convention for ms_abi)."
-        ),
-    )
+    ap = build_parser(__doc__, ARTIFACT_VARIANTS, DEFAULT_ARTIFACT_VARIANT)
     args = ap.parse_args(argv)
 
-    global PREFERRED_FAMILY
+    global PREFERRED_FAMILY, CONTRACT_SCOPE
+    CONTRACT_SCOPE = args.contract_scope
     PREFERRED_FAMILY = None if args.toolchain == "auto" else args.toolchain
     # CMake-built cases honour CC/CXX; export them so the chosen family also
     # drives the cmake configure step, not just direct compilation. An explicit
