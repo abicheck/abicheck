@@ -71,6 +71,7 @@ SOURCE_REPLAY_EVIDENCE = "source_only"
 #: two producers ``evidence_report`` tags ``source_only``.
 REPLAY_EMITTER_MODULES: tuple[str, ...] = (
     "abicheck/buildsource/source_diff.py",
+    "abicheck/buildsource/concept_diff.py",
     "abicheck/buildsource/source_graph_findings.py",
 )
 
@@ -241,6 +242,7 @@ DISTINCT_FACETS: tuple[DistinctFacet, ...] = (
 #: Each reason is one line; a kind moves out of here once a counterpart exists.
 REPLAY_ONLY: dict[ChangeKind, str] = {
     ChangeKind.CONCEPT_TIGHTENED: "the header tier has no concept-constraint detector",
+    ChangeKind.CONCEPT_CONSTRAINT_CHANGED: "the header tier has no concept-constraint detector",
     ChangeKind.GENERATED_HEADER_CHANGED: "generated-header content is diffed only by the replay",
     ChangeKind.INLINE_BODY_CHANGED: "inline body fingerprints exist only in the replay",
     ChangeKind.ODR_SOURCE_CONFLICT: "cross-TU source ODR disagreement has no header-tier kind",

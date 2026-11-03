@@ -313,6 +313,11 @@ KIND_NAMES_2: tuple[tuple[str, str, str | None], ...] = (
         "── Build-configuration / probe-harness patterns (PR-C) ────────────── -- See examples/case97_api_depends_on_consumer_env/README.md",
     ),
     ("CONCEPT_TIGHTENED", "concept_tightened", None),
+    (
+        "CONCEPT_CONSTRAINT_CHANGED",
+        "concept_constraint_changed",
+        "a concept constraint changed without a proven tightening (relaxed, rewritten, or undecomposable) -> RISK",
+    ),
     ("CXX_STANDARD_FLOOR_RAISED", "cxx_standard_floor_raised", None),
     ("BEHAVIOURAL_DEFAULT_CHANGED", "behavioural_default_changed", None),
     (

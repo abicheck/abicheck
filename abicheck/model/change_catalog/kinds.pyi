@@ -255,6 +255,7 @@ class ChangeKind(StrEnum):
     UNSPECIFIED_RETURN_NOW_NAMED = 'unspecified_return_now_named'
     API_DEPENDS_ON_CONSUMER_ENV = 'api_depends_on_consumer_env'
     CONCEPT_TIGHTENED = 'concept_tightened'
+    CONCEPT_CONSTRAINT_CHANGED = 'concept_constraint_changed'
     CXX_STANDARD_FLOOR_RAISED = 'cxx_standard_floor_raised'
     BEHAVIOURAL_DEFAULT_CHANGED = 'behavioural_default_changed'
     HIDDEN_FRIEND_REMOVED = 'hidden_friend_removed'

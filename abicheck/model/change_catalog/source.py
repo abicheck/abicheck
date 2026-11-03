@@ -113,6 +113,15 @@ SOURCE_ENTRIES: list[ChangeKindMeta] = [
         operation=_OP.MODIFIED,
     ),
     _E(
+        "concept_constraint_changed",
+        _R,
+        impact="A public C++20 concept's constraint changed, but the comparison could not prove it became stricter: it was relaxed, rewritten into a form that is not a superset of the old conjunctive requirements, or is not decomposable. A relaxed concept can still change overload resolution (subsumption), so consumers may select a different overload; no compile failure is proven.",
+        description_template="Concept constraint changed: {name}",
+        entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
         "constexpr_value_changed",
         _A,
         impact="The value of a public constexpr constant changed. Like a macro "

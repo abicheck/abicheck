@@ -471,6 +471,7 @@ NON_DETECTOR_KINDS: frozenset[str] = frozenset(
         "call_graph_public_entry_reachability_changed",
         "char_signedness_changed",
         "compile_context_conflict",
+        "concept_constraint_changed",
         "concept_tightened",
         "constexpr_value_changed",
         "consumer_required_symbol_removed",
