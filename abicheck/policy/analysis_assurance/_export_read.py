@@ -34,9 +34,18 @@ from ...model.export_read import ExportReadState
 if TYPE_CHECKING:
     from ...model import AbiSnapshot
 
-__all__ = ["export_read_gap", "export_read_notes", "recorded_export_reads"]
+__all__ = [
+    "EXPORT_READ_NOTE_PREFIX",
+    "export_read_gap",
+    "export_read_notes",
+    "recorded_export_reads",
+]
 
 _GAP_STATES = frozenset({ExportReadState.PARTIAL, ExportReadState.FAILED})
+#: How every export-read gap note starts, so a consumer can pick the notes the
+#: rollup already built out of ``AnalysisAssurance.notes`` instead of
+#: rebuilding them.
+EXPORT_READ_NOTE_PREFIX = "export table not completely read ("
 
 
 def recorded_export_reads(snap: AbiSnapshot | None) -> dict[str, str]:
@@ -56,7 +65,7 @@ def export_read_notes(states: Mapping[str, Mapping[str, str]]) -> list[str]:
     """One note per side/platform whose recorded read is ``partial`` or
     ``failed`` -- the assurance note, and the Markdown coverage-gap row."""
     return [
-        f"export table not completely read ({side} snapshot, {platform}: {state}); "
+        f"{EXPORT_READ_NOTE_PREFIX}{side} snapshot, {platform}: {state}); "
         "a symbol absent from it is not established as absent, and a removal "
         "resting on that absence is not scored as a break"
         for side, by_platform in states.items()
