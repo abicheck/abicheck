@@ -68,7 +68,12 @@ def test_l4_closure_equals_direct_source_diff_references():
     # lives in ``source_provenance_diff``), so the oracle scans every L4 emitter.
     buildsource = ROOT / "abicheck" / "buildsource"
     direct = _direct_refs(
-        [buildsource / "source_diff.py", buildsource / "source_provenance_diff.py"]
+        [
+            buildsource / "source_diff.py",
+            buildsource / "source_provenance_diff.py",
+            buildsource / "concept_diff.py",
+            buildsource / "template_signature.py",
+        ]
     )
     assert set(l4) == direct
 
@@ -110,6 +115,11 @@ def test_label_must_match_the_derivation():
 
 
 def test_inline_removal_is_the_only_shared_kind_by_name():
+    # Plus the never-exported parameter-list change (case122), which both
+    # tiers emit by design and source_replay_twins collapses.
     l4, l2 = overlap.derive_sides()
-    assert (l4 & l2) == {"INLINE_FUNCTION_REMOVED"}
+    assert (l4 & l2) == {
+        "INLINE_FUNCTION_REMOVED",
+        "HEADER_ONLY_FUNCTION_PARAMS_CHANGED",
+    }
     assert _kind_values({"INLINE_FUNCTION_REMOVED"}) == {"inline_function_removed"}

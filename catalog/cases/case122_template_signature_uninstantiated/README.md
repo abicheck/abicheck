@@ -181,3 +181,15 @@ environment. Both tools work from compiled binaries and/or castxml-derived
 header ASTs, the same L0-L2 evidence this case's default lane already shows
 cannot see the change — so neither would be expected to report anything
 here without a source-AST-replay capability equivalent to abicheck's own L4.
+
+## Reference label (updated 2026-11)
+
+This case was labelled COMPATIBLE_WITH_RISK (`template_body_changed`). A
+consumer witness contradicts that: `consumer_address.cpp` binds
+`&clamp<int>` to `int (*)(int, int, int)`, which compiles against `v1.h` and
+is rejected against `v2.h` (a plain call `clamp<int>(5, 0, 10)` compiles
+against both). The library binary is unchanged, so this is a source/API
+break, not an ABI break. abicheck now reports
+`header_only_function_params_changed` (API_BREAK) on the direct-Clang header
+path and in the L4 clang replay; the default castxml L2 lane still cannot see
+uninstantiated templates (known gap).

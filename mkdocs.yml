@@ -323,6 +323,7 @@ nav:
     - Parity & Reports:
       - Catalog Coverage: contribute/catalog-coverage.md
       - ABI/API Taxonomy Coverage: contribute/abi-taxonomy-coverage.md
+      - ChangeKind Real-Extraction Coverage: contribute/changekind-real-coverage.md
       - ABICC Parity Status: contribute/abicc-parity-status.md
       - ABICC Test Coverage Comparison: contribute/abicc-test-coverage-comparison.md
       - libabigail Parity Matrix: contribute/libabigail-parity.md

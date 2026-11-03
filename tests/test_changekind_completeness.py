@@ -30,6 +30,10 @@ from abicheck.model import (
 # corresponding scenario) must be updated – the meta-test below will fail
 # until that happens.
 ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
+    # tests/test_concept_constraint_direction.py
+    ChangeKind.CONCEPT_CONSTRAINT_CHANGED,
+    # tests/test_header_only_params_regrade.py
+    ChangeKind.HEADER_ONLY_FUNCTION_PARAMS_CHANGED,
     ChangeKind.ABI_EQUIVALENT_TYPE_CHANGED,
     ChangeKind.ABI_RELEVANT_BUILD_FLAG_CHANGED,
     ChangeKind.ANON_FIELD_CHANGED,

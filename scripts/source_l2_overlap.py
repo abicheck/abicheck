@@ -201,6 +201,7 @@ L2_ONLY_KINDS: frozenset[str] = frozenset(
         "VAR_EXPORT_ADDED",
         "VAR_LOST_CONST",
         "VAR_REMOVED",
+        "VAR_REMOVED_ELF_ONLY",
         "VAR_TYPE_CHANGED",
         "VAR_VALUE_CHANGED",
         "VAR_VISIBILITY_CHANGED",
@@ -213,6 +214,15 @@ L2_ONLY_KINDS: frozenset[str] = frozenset(
 _JUDGED: dict[str, Row] = {
     "CONCEPT_TIGHTENED": Row(
         L4_ONLY, note="concept constraint; L2 has no concept facts"
+    ),
+    "CONCEPT_CONSTRAINT_CHANGED": Row(
+        L4_ONLY, note="concept constraint, direction unproven; L2 has no concept facts"
+    ),
+    "HEADER_ONLY_FUNCTION_PARAMS_CHANGED": Row(
+        DUPLICATE,
+        note="never-exported template/inline parameter list: L4 template_signature "
+        "and L2 export_transition.regrade_unexported_params (clang header tier) both "
+        "emit it; source_replay_twins dedups them",
     ),
     "CONSTEXPR_VALUE_CHANGED": Row(
         NEAR_DUPLICATE,

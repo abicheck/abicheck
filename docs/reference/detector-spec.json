@@ -1,6 +1,6 @@
 {
   "description": "Formal detector specification matrix (generated).",
-  "count": 424,
+  "count": 426,
   "detectors": [
     {
       "kind": "abi_equivalent_type_changed",
@@ -378,6 +378,15 @@
       "severity": "warning",
       "min_evidence": "L3",
       "doc_slug": "compile_context_conflict",
+      "examples": ""
+    },
+    {
+      "kind": "concept_constraint_changed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L4",
+      "doc_slug": "concept_constraint_changed",
       "examples": ""
     },
     {
@@ -1387,6 +1396,15 @@
       "min_evidence": "L3",
       "doc_slug": "header_build_context_mismatch",
       "examples": "case148_xcheck_header_build_mismatch"
+    },
+    {
+      "kind": "header_only_function_params_changed",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "header_only_function_params_changed",
+      "examples": "case122_template_signature_uninstantiated"
     },
     {
       "kind": "header_parse_context_drift",
@@ -3105,7 +3123,7 @@
       "severity": "warning",
       "min_evidence": "L4",
       "doc_slug": "template_body_changed",
-      "examples": "case122_template_signature_uninstantiated"
+      "examples": ""
     },
     {
       "kind": "template_param_default_changed",

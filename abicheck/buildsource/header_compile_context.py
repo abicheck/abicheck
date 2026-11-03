@@ -85,6 +85,7 @@ from .adapters.adapter_shared import (
     split_operand_survivor,
 )
 from .build_query import PRUNED_HEADER_DIR_SEGMENTS
+from .forced_include_keys import path_keys
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -966,11 +967,7 @@ def explicit_forced_include_keys(explicit: CompileContext | None) -> frozenset[s
         *forced_include_operands(tokens, msvc=False),
         *forced_include_operands(tokens, msvc=True),
     }:
-        keys.add(operand)
-        try:
-            keys.add(str(Path(operand).expanduser().resolve()))
-        except OSError:  # pragma: no cover - defensive, resolve() is strict=False
-            pass
+        keys |= path_keys([operand])
     return frozenset(keys)
 
 
@@ -1445,7 +1442,9 @@ def resolve_header_compile_context(
     flags = _context_flags(
         sample,
         forced_language=forced_language,
-        explicit_forced_includes=explicit_forced_include_keys(explicit),
+        # The declared headers too: forcing one in is redundant (forced_include_keys).
+        explicit_forced_includes=explicit_forced_include_keys(explicit)
+        | path_keys(resolved_headers),
     )
     context = CompileContext(
         gcc_option_tokens=tuple(flags),

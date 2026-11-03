@@ -431,6 +431,7 @@ _TYPE_BEARING_DISCRIMINATOR_KINDS = frozenset(
         # discriminators for the identical function-wide event across
         # producers (Codex review, fresh evidence).
         "func_params_changed",
+        "header_only_function_params_changed",
     }
 )
 

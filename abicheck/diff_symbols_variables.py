@@ -43,6 +43,7 @@ from .model.change_catalog.kinds import ChangeKind
 from .model.semantic_ir_variable_payload import variable_canonical_entity
 from .model.surface_facts import (
     is_export_confirmed_absent,
+    is_export_table_only_record,
     surface_fact_summary,
 )
 
@@ -65,7 +66,9 @@ def _is_access_narrowing(old_access: Any, new_access: Any) -> bool:
     return _RANK.get(new_access, 0) > _RANK.get(old_access, 0)
 
 
-def _var_removed(mangled: str, v_old: Variable) -> list[Change]:
+def _var_removed(
+    mangled: str, v_old: Variable, *, elf_only_mode: bool = False
+) -> list[Change]:
     """A public variable with no peer in the NEW side's public surface.
 
     Both surfaces are evidence-gap-reconciled before any detector runs
@@ -75,7 +78,11 @@ def _var_removed(mangled: str, v_old: Variable) -> list[Change]:
     """
     return [
         make_change(
-            ChangeKind.VAR_REMOVED,
+            # Match function removals: an export-only observation cannot
+            # claim the declaration-aware kind after header projection.
+            ChangeKind.VAR_REMOVED_ELF_ONLY
+            if elf_only_mode and is_export_table_only_record(v_old)
+            else ChangeKind.VAR_REMOVED,
             symbol=mangled,
             name=qualified_variable_name(v_old.entity_id, v_old.name, mangled=mangled),
             # See Change.symbol_binding's docstring - None when not captured.
@@ -90,6 +97,7 @@ def _var_removed(mangled: str, v_old: Variable) -> list[Change]:
 
 def removed_variable(
     absence: TemplateInstanceAbsence,
+    old: AbiSnapshot,
 ) -> Callable[[str, Variable], list[Change]]:
     """The ``on_removed`` callback of the variable join: a static data member
     of a class-template specialization the new header only stopped
@@ -98,7 +106,11 @@ def removed_variable(
 
     def removed(mangled: str, v_old: Variable) -> list[Change]:
         decided = absence.variable_changes_for(mangled, v_old)
-        return _var_removed(mangled, v_old) if decided is None else decided
+        return (
+            _var_removed(mangled, v_old, elf_only_mode=old.elf_only_mode)
+            if decided is None
+            else decided
+        )
 
     return removed
 

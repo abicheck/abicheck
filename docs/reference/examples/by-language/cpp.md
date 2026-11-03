@@ -66,7 +66,7 @@ _100 case(s)._ [← back to all examples](../index.md)
 | [case113_abi_tag_changed](../case113_abi_tag_changed.md) | ABI-tag set change ([abi:cxx11] lost on a single symbol) | 🔴 BREAKING | Breaking |
 | [case114_char8t_migration](../case114_char8t_migration.md) | char8_t Migration (C++20 char-family → char8_t) | 🔴 BREAKING | Breaking |
 | [case117_no_unique_address](../case117_no_unique_address.md) | [[no_unique_address]] Layout Overlay (no dedicated ChangeKind) | 🔴 BREAKING | Breaking |
-| [case122_template_signature_uninstantiated](../case122_template_signature_uninstantiated.md) | Uninstantiated Template Signature Change | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case122_template_signature_uninstantiated](../case122_template_signature_uninstantiated.md) | Uninstantiated Template Signature Change | 🟠 API_BREAK | API Break |
 | [case123_default_argument_removed](../case123_default_argument_removed.md) | Default Argument Removed | 🟠 API_BREAK | API Break |
 | [case124_header_constant_value_changed](../case124_header_constant_value_changed.md) | Header Constant Value Changed | 🟠 API_BREAK | API Break |
 | [case125_class_became_final](../case125_class_became_final.md) | Class Became `final` | 🟠 API_BREAK | API Break |

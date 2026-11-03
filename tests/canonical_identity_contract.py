@@ -166,6 +166,7 @@ UNVERIFIED = frozenset(
         "common_symbol_risk",
         "compat_version_changed",
         "compile_context_conflict",
+        "concept_constraint_changed",
         "concept_tightened",
         "constant_added",
         "constant_changed",

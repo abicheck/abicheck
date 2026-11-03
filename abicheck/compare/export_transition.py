@@ -38,6 +38,7 @@ from ..model import Function, Variable
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.edge_coverage import EdgeAnswer
+from ..model.fact import replace_with_fact_sync
 from ..model.surface_facts import (
     has_observed_contract_evidence,
     in_public_contract,
@@ -413,3 +414,35 @@ def surface_exit_is_evidence_gap(
         new_contract
     ) and not is_legacy_derived(new_contract)
     return not has_observed_contract_evidence(new_decl) and not observed_out_of_contract
+
+
+def regrade_unexported_params(
+    changes: list[Change], f_old: Function, f_new: Function
+) -> list[Change]:
+    """Grade a parameter-list change of a never-exported declaration as API.
+
+    When *both* sides confirm the declaration has no exported symbol (an
+    export table was read and lacks it -- an uninstantiated function
+    template, a header-only inline), no compiled consumer binds to it in
+    the library, so ``FUNC_PARAMS_CHANGED``'s binary-break impact cannot
+    hold; the change is a source/API break, the same split
+    ``INLINE_FUNCTION_REMOVED`` makes for a removal (case122). An unknown
+    export status on either side, or an export on either side, keeps
+    ``FUNC_PARAMS_CHANGED``: an exported instantiation's ABI grading is not
+    touched.
+    """
+    if not any(c.kind is ChangeKind.FUNC_PARAMS_CHANGED for c in changes) or not (
+        is_export_confirmed_absent(f_old) and is_export_confirmed_absent(f_new)
+    ):
+        return changes
+    return [
+        replace_with_fact_sync(
+            c,
+            kind=ChangeKind.HEADER_ONLY_FUNCTION_PARAMS_CHANGED,
+            description="Parameters changed (no exported symbol on either "
+            f"side): {f_old.name}",
+        )
+        if c.kind is ChangeKind.FUNC_PARAMS_CHANGED
+        else c
+        for c in changes
+    ]

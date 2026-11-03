@@ -50,7 +50,8 @@ def test_l4_cases_use_canonical_expected_kinds_for_doc_examples():
     examples = gen._examples_by_kind()
     assert "case105_concept_tightening" in examples["concept_tightened"]
     assert (
-        "case122_template_signature_uninstantiated" in examples["template_body_changed"]
+        "case122_template_signature_uninstantiated"
+        in examples["header_only_function_params_changed"]
     )
 
 

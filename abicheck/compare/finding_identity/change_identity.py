@@ -290,7 +290,7 @@ def _change_discriminator(
     old_str = raw_old_str
     new_str = raw_new_str
     if canonicalize_this_kind:
-        if kind_value == "func_params_changed":
+        if kind_value in ("func_params_changed", "header_only_function_params_changed"):
             # See _TYPE_BEARING_DISCRIMINATOR_KINDS's own comment: a
             # comma-joined parameter list needs per-parameter
             # canonicalization, not one whole-string call.

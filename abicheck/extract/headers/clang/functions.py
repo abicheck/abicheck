@@ -86,6 +86,7 @@ from .context import (
     source_location as _source_location,
     visibility_and_surface_facts as _visibility_and_surface_facts,
 )
+from .explicit_specifier import explicit_specifier_fact
 from .function_template_defaults import function_template_defaults_fact
 from .inline_semantics import fold_inline_across_redeclarations, is_effectively_inline
 from .macro_qualifier import node_qualtype_without_macro_qualifiers
@@ -415,6 +416,7 @@ def parse_functions(
     builtin_abi: BuiltinAbi | None = None,
 ) -> list[Function]:
     funcs: list[Function] = []
+    source_cache: dict[str, bytes | None] = {}
     redeclared = RedeclarationIdentity()  # out-of-line def -> in-class identity
     for entry in functions:
         node = entry.node
@@ -559,10 +561,15 @@ def parse_functions(
         ]
         kind = node.get("kind")
         is_explicit: bool | None
+        explicit_fact: Fact[bool | None]
         if kind in ("CXXConstructorDecl", "CXXConversionDecl"):
-            is_explicit = bool(node.get("explicit"))
+            # Clang's JSON never serializes `explicit`: read the
+            # decl-specifier tokens instead, tri-state (case106).
+            explicit_fact = explicit_specifier_fact(node, file_cache=source_cache)
+            is_explicit = explicit_fact.value if explicit_fact.is_present else None
         else:
             is_explicit = None
+            explicit_fact = Fact.not_applicable()
         if "&&" in quals:
             ref_qualifier = "&&"
         elif re.search(r"(?<!&)&(?!&)", quals):
@@ -653,11 +660,7 @@ def parse_functions(
                 # own explicit Fact rather than falling through the
                 # generic bridge into NOT_COLLECTED (Codex review, PR
                 # #982).
-                is_explicit_fact=(
-                    Fact.present(is_explicit)
-                    if kind in ("CXXConstructorDecl", "CXXConversionDecl")
-                    else Fact.not_applicable()
-                ),
+                is_explicit_fact=explicit_fact,
                 is_hidden_friend=entry.in_friend,
                 # ``entry.scope`` is the enclosing-class scope path at the
                 # point ``in_friend`` first became True (the FriendDecl's

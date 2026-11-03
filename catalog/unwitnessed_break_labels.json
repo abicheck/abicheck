@@ -1,0 +1,32 @@
+{
+  "description": "Shrink-only: BREAKING/API_BREAK ground-truth cases with no independent witness (source_smoke v1-pass/v2-fail, or an executed runtime smoke for BREAKING). Enforced by tests/test_ground_truth_label_witness.py; remove a case once it gains a witness, never add one.",
+  "unwitnessed": {
+    "case109_flow_graph_policy_renames": "API_BREAK",
+    "case115_bit_int_width_changed": "BREAKING",
+    "case121_kernel_btf_struct_field_added": "BREAKING",
+    "case123_default_argument_removed": "API_BREAK",
+    "case124_header_constant_value_changed": "API_BREAK",
+    "case148_xcheck_header_build_mismatch": "API_BREAK",
+    "case149_xcheck_odr_variant": "API_BREAK",
+    "case156_public_macro_removed": "API_BREAK",
+    "case157_inline_function_removed": "API_BREAK",
+    "case158_public_typedef_removed": "API_BREAK",
+    "case163_python_kwarg_renamed": "API_BREAK",
+    "case175_kabi_crc_changed": "BREAKING",
+    "case176_kabi_symbol_namespace_changed": "BREAKING",
+    "case192_call_graph_break_survives_suppression": "BREAKING",
+    "case193_ordinary_exported_fn_call_not_reachable": "BREAKING",
+    "case217_export_loss_weak_binding_demoted": "BREAKING",
+    "case218_export_loss_strong_binding_stays_breaking": "BREAKING",
+    "case30_field_qualifiers": "API_BREAK",
+    "case31_enum_rename": "API_BREAK",
+    "case32_param_defaults": "API_BREAK",
+    "case34_access_level": "API_BREAK",
+    "case35_field_rename": "API_BREAK",
+    "case84_bundle_soname_skew": "BREAKING",
+    "case90_bundle_intra_dep_removed": "BREAKING",
+    "case91_bundle_intra_signature_drift": "BREAKING",
+    "case93_bundle_manifest_drift": "BREAKING",
+    "case95_allocator_nested_typedef_removed": "API_BREAK"
+  }
+}

@@ -130,6 +130,7 @@ _SURFACE_SCOPE = (
 #: the same symbol, spelled differently from the evidence each side keeps.
 SPELLING_PAIRS: dict[tuple[str, str], str] = {
     ("func_removed", "func_removed_elf_only"): _DEBUG_DECLARATIONS,
+    ("var_removed", "var_removed_elf_only"): _DEBUG_DECLARATIONS,
     ("func_added_elf_only", "func_added"): _ELF_ONLY_MODE,
     ("var_removed_elf_only", "var_removed"): _ELF_ONLY_MODE,
     ("var_added_elf_only", "var_added"): _ELF_ONLY_MODE,

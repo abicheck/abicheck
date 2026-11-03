@@ -62,6 +62,7 @@ from .comparability_sequences import (
     header_sequence_is_scope_confirmed_evolution,
     include_sequence_is_scope_confirmed_evolution,
 )
+from .compare.auto_derived_standard import auto_derived_standard_reason
 from .model import AbiSnapshot, ExtractionContract, FactStatus
 
 
@@ -441,6 +442,15 @@ def _check_profile_fingerprint_comparable(
     reason = _profile_mismatch_reason(unknown_differing, differing, unexplained)
     if reason is None:
         return None
+    if bounded := auto_derived_standard_reason(
+        old, new, unknown_differing, unexplained
+    ):
+        return ComparabilityMismatch(
+            "profile",
+            bounded,
+            _PROFILE_FIELD_DIMENSIONS["language_standard"],
+            fatal=False,
+        )
     # Mirrors _profile_mismatch_reason's own three cases (Codex-review-style
     # fail-closed default first): an unrecognized differing field, or an
     # entirely empty `differing` (profile_fields absent/malformed), can never

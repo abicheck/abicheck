@@ -42,8 +42,8 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 | Verdict | Count | `checker_policy.py` set | Icon |
 |---------|-------|-------------------------|------|
 | BREAKING | 114 | `BREAKING_KINDS` | 🔴 |
-| API_BREAK | 21 | `API_BREAK_KINDS` | 🟠 |
-| COMPATIBLE_WITH_RISK | 38 | `RISK_KINDS` | 🟡 |
+| API_BREAK | 22 | `API_BREAK_KINDS` | 🟠 |
+| COMPATIBLE_WITH_RISK | 37 | `RISK_KINDS` | 🟡 |
 | COMPATIBLE (addition) | 12 | `ADDITION_KINDS` | 🟢 |
 | COMPATIBLE (quality) | 21 | `QUALITY_KINDS` | 🟡 |
 | NO_CHANGE | 18 | — | ✅ |
@@ -102,7 +102,7 @@ Commands below use `PYTHONPATH=.`.
 | Runtime smoke | `PYTHONPATH=. python skills-src/evaluation/validation/scripts/run_example_runtime_smoke.py --json` | Linux proof run | 229 catalog cases | 99 DEMONSTRATED / 85 NO_RUNTIME_SIGNAL / 45 SKIP | Passing; no BUILD_ERROR. The runner now compares each app's baseline exit code against a per-case `runtime_baseline_exit` in `ground_truth.json` (default 0) instead of hardcoding zero, so apps that deliberately return a computed value (e.g. case111's `ets(42).local()` returning `42`) are no longer misread as a broken baseline. No case shows a signal against its own baseline library (`BASELINE_SIGNAL`), so every DEMONSTRATED is a v2-only effect — see "Known validation gaps" below for case06's rewrite |
 | Release headers | `ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1 python tests/validate_examples.py --artifact-variant release-headers --json` | CI Linux artifact | 229 catalog cases | 183 PASS / 3 XFAIL / 43 SKIP | Informational; the false-risk regression on `case61_var_added` (`exported_object_alignment_reduced`) is fixed — CastXML now resolves a variable's natural type alignment as declared-alignment corroboration even without an explicit `alignas` override. Without the env var, the same 7 cases SKIP instead |
 | Stripped headers | `ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1 python tests/validate_examples.py --artifact-variant stripped-headers --json` | CI Linux artifact | 229 catalog cases | 179 PASS / 4 FAIL / 3 XFAIL / 43 SKIP | Informational; reduced-evidence signal-loss backlog (below). Without the env var, the same 7 cases SKIP instead |
-| Build/source proof | `ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1 python tests/validate_examples.py case01 case04 case98 case105 case122 case129 case130 case131 case132 case133 --artifact-variant build-source --json` | CI Linux artifact | 10 representative cases | 10 PASS | Required release proof; includes L3 C++ floor and L4 concept/template regressions. Not full L3-L5 catalog coverage — see "Known validation gaps" |
+| Build/source proof | `ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1 python tests/validate_examples.py case01 case04 case28 case40 case98 case105 case122 case129 case130 case131 case132 case133 --artifact-variant build-source --json` | CI Linux artifact | 12 representative cases | 12 PASS | Required release proof; includes L3 C++ floor and L4 concept/template regressions. Not full L3-L5 catalog coverage — see "Known validation gaps" |
 
 Counts above are from the most recent full catalog run this table was refreshed against; re-run
 the `Examples Validation` workflow and update this table whenever the catalog size or a lane's
@@ -393,7 +393,7 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [119](cases/case119_internal_struct_field_removed_scoped/README.md) | Internal Struct Loses a Field (Non-Public, Scoped) | No Change | ✅ NO_CHANGE |
 | [120](cases/case120_internal_struct_reordered_scoped/README.md) | Internal Struct Fields Reordered (Non-Public, Scoped) | No Change | ✅ NO_CHANGE |
 | [121](cases/case121_kernel_btf_struct_field_added/README.md) | Kernel BTF Struct Field Growth | Breaking | 🔴 BREAKING |
-| [122](cases/case122_template_signature_uninstantiated/README.md) | Uninstantiated Template Signature Change | Risk | 🟡 COMPATIBLE_WITH_RISK |
+| [122](cases/case122_template_signature_uninstantiated/README.md) | Uninstantiated Template Signature Change | API Break | 🟠 API_BREAK |
 | [123](cases/case123_default_argument_removed/README.md) | Default Argument Removed | API Break | 🟠 API_BREAK |
 | [124](cases/case124_header_constant_value_changed/README.md) | Header Constant Value Changed | API Break | 🟠 API_BREAK |
 | [125](cases/case125_class_became_final/README.md) | Class Became `final` | API Break | 🟠 API_BREAK |

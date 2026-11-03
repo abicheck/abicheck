@@ -2,7 +2,7 @@
 
 # Detector specification matrix
 
-One row per `ChangeKind` (424 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`catalog/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
+One row per `ChangeKind` (426 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`catalog/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
 
 | ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug | Examples |
 |---|---|---|---|---|---|---|
@@ -48,6 +48,7 @@ One row per `ChangeKind` (424 total). Columns fuse the verdict partition (`check
 | `common_symbol_risk` | quality | `COMPATIBLE` | `warning` | unspecified | `common_symbol_risk` | — |
 | `compat_version_changed` | breaking | `BREAKING` | `error` | unspecified | `compat_version_changed` | — |
 | `compile_context_conflict` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `compile_context_conflict` | — |
+| `concept_constraint_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L4 | `concept_constraint_changed` | — |
 | `concept_tightened` | api_break | `API_BREAK` | `warning` | L4 | `concept_tightened` | [case105](examples/case105_concept_tightening.md) |
 | `constant_added` | addition | `COMPATIBLE` | `warning` | unspecified | `constant_added` | — |
 | `constant_changed` | api_break | `API_BREAK` | `warning` | L2 | `constant_changed` | [case124](examples/case124_header_constant_value_changed.md) |
@@ -160,6 +161,7 @@ One row per `ChangeKind` (424 total). Columns fuse the verdict partition (`check
 | `hash_style_removed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `hash_style_removed` | — |
 | `header_binary_context_mismatch` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `header_binary_context_mismatch` | — |
 | `header_build_context_mismatch` | api_break | `API_BREAK` | `warning` | L3 | `header_build_context_mismatch` | [case148](examples/case148_xcheck_header_build_mismatch.md) |
+| `header_only_function_params_changed` | api_break | `API_BREAK` | `warning` | L2 | `header_only_function_params_changed` | [case122](examples/case122_template_signature_uninstantiated.md) |
 | `header_parse_context_drift` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `header_parse_context_drift` | — |
 | `hidden_friend_added` | addition | `COMPATIBLE` | `warning` | unspecified | `hidden_friend_added` | — |
 | `hidden_friend_removed` | api_break | `API_BREAK` | `warning` | L2 | `hidden_friend_removed` | [case96](examples/case96_hidden_friend_removed.md) |
@@ -350,7 +352,7 @@ One row per `ChangeKind` (424 total). Columns fuse the verdict partition (`check
 | `tail_padding_reuse_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `tail_padding_reuse_changed` | — |
 | `target_dependency_added` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `target_dependency_added` | [case161](examples/case161_target_dependency_added.md) |
 | `target_isa_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `target_isa_changed` | — |
-| `template_body_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L4 | `template_body_changed` | [case122](examples/case122_template_signature_uninstantiated.md) |
+| `template_body_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L4 | `template_body_changed` | — |
 | `template_param_default_changed` | api_break | `API_BREAK` | `warning` | L2 | `template_param_default_changed` | — |
 | `template_param_type_changed` | breaking | `BREAKING` | `error` | unspecified | `template_param_type_changed` | — |
 | `template_return_type_changed` | breaking | `BREAKING` | `error` | unspecified | `template_return_type_changed` | — |

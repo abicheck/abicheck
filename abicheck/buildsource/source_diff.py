@@ -33,6 +33,7 @@ import re
 
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
+from .concept_diff import diff_concepts as _diff_concepts
 from .fact_set import FactCompatibility, check_fact_compatibility, incomplete_families
 from .revision_comparability import (
     REVISION_COMPARABLE_FIELDS,
@@ -45,6 +46,7 @@ from .source_abi import (
     SourceEntity,
 )
 from .source_provenance_diff import _diff_provenance
+from .template_signature import template_change
 
 
 def _header_basename(path: str) -> str:
@@ -389,7 +391,7 @@ def diff_source_abi(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change
     changes.extend(_diff_generated(old, new, compat))
     changes.extend(_diff_typedefs(old, new, compat))
     changes.extend(_diff_macros(old, new, compat))
-    changes.extend(_diff_concepts(old, new))
+    changes.extend(_diff_concepts(old, new, _loc))
     changes.extend(_diff_declarations(old, new))
     changes.extend(_diff_inline_bodies(old, new, compat))
     changes.extend(_diff_templates(old, new, compat))
@@ -635,49 +637,6 @@ def _diff_macros(
 # -- declarations: default args, constexpr, generated headers ----------------
 
 
-def _concept_constraint(entity: SourceEntity) -> str:
-    """Comparable normalized constraint fingerprint/value for a concept entity."""
-    return entity.value or entity.body_hash or entity.signature_hash or entity.type_hash
-
-
-def _concepts_by_name(entities: list[SourceEntity]) -> dict[str, SourceEntity]:
-    return {
-        e.qualified_name: e
-        for e in entities
-        if e.kind == "concept" and e.qualified_name
-    }
-
-
-def _diff_concepts(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change]:
-    """Detect tightened/changed C++20 concept constraints in the public surface.
-
-    CastXML does not expose concepts, but L4 clang/source extractors can emit
-    ``SourceEntity(kind="concept")`` with a normalized constraint value or hash.
-    A changed public constraint is source-API relevant: consumers satisfying the
-    old concept may fail to compile against the new header.
-    """
-    old_concepts = _concepts_by_name(old.reachable_declarations + old.reachable_types)
-    new_concepts = _concepts_by_name(new.reachable_declarations + new.reachable_types)
-    changes: list[Change] = []
-    for name in sorted(set(old_concepts) & set(new_concepts)):
-        old_entity = old_concepts[name]
-        new_entity = new_concepts[name]
-        old_constraint = _concept_constraint(old_entity)
-        new_constraint = _concept_constraint(new_entity)
-        if old_constraint and new_constraint and old_constraint != new_constraint:
-            changes.append(
-                Change(
-                    kind=ChangeKind.CONCEPT_TIGHTENED,
-                    symbol=name,
-                    description=f"Concept constraint tightened: {name}",
-                    old_value=old_constraint,
-                    new_value=new_constraint,
-                    source_location=_loc(new_entity),
-                )
-            )
-    return changes
-
-
 def _diff_declarations(old: SourceAbiSurface, new: SourceAbiSurface) -> list[Change]:
     old_d = _by_identity(old.reachable_declarations)
     new_d = _by_identity(new.reachable_declarations)
@@ -914,21 +873,7 @@ def _diff_templates(
         ov, nv = old_t[key], new_t[key]
         name = nv.qualified_name
         if ov.body_hash != nv.body_hash:
-            changes.append(
-                Change(
-                    kind=ChangeKind.TEMPLATE_BODY_CHANGED,
-                    symbol=name,
-                    entity_discriminator=_template_entity(nv),
-                    description=(
-                        f"Uninstantiated public template {name!r} implementation "
-                        "changed. Invisible to artifact comparison; consumers pick "
-                        "up the new body on recompile."
-                    ),
-                    old_value=ov.body_hash,
-                    new_value=nv.body_hash,
-                    source_location=_loc(nv),
-                )
-            )
+            changes.append(template_change(ov, nv, _template_entity(nv), _loc(nv)))
     return changes
 
 
