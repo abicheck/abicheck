@@ -929,6 +929,20 @@ listing/report, even where no resolution graph can place it.
     (`snapshot_to_dict` refuses to make one); detail below.
   - D18, step 1 implemented (per-section decode split, no new laziness);
     lazy loading beyond the `graph` section is not.
+  - Frozen container corpus (2026-11-03): `tests/fixtures/containers/`
+    freezes one sample of each container and platform/frontend the
+    generation corpus does not cover: the G38 document, the G40 archive,
+    the directory `ProjectSnapshot` package, and clang-frontend, Mach-O and
+    PE snapshots. `tests/test_container_corpus.py` holds each one to the
+    generation corpus's invariants (loads with no unexpected notice,
+    compares clean against a fresh production, byte and respelling drift
+    only as a declared migration; re-encoding is byte-identical unless a
+    version moved with its D13 migration). The `container-corpus` gate
+    (`scripts/container_corpus_gate.py`) fails a bumped encoder version
+    until `scripts/freeze_container_corpus.py` adds an entry under it. The
+    corpus found that `project capture-variants` stamped a package
+    assembled from stored snapshots *unstated*, dropping the
+    generation-drift notice its members carried (fixed).
   - Exit: one regression test per amendment probe (D14's and D17's exist), the oneDAL/MKL corpus, Windows and macOS, and
     concurrent-publisher serialization (tested on Linux).
 
