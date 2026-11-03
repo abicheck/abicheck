@@ -337,6 +337,7 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_package_section_version_blocks_section.py",
             "tests/unit/storage/test_bundle_carriers_roundtrip.py",
             "tests/test_bundle_blocked_section_compare.py",
+            "tests/unit/storage/test_flat_mapping_writers.py",
         ),
         public_surfaces=("cli",),
         axes={
@@ -356,15 +357,25 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
                 "bundle-document",
                 "bundle-archive",
                 "bundle-package",
+                "flat-mapping-writer",
+                "baseline-set-package",
+                "probe-matrix-file",
             ),
-            "producer": ("imported-document", "pe-pdb-parse-failure"),
+            "producer": (
+                "imported-document",
+                "pe-pdb-parse-failure",
+                "dump-cli-write",
+            ),
             "side": ("old", "new"),
         },
         known_gaps=(
             KnownGap(
                 description=(
-                    "A flat snapshot_to_dict mapping handed to a package "
-                    "writer cannot say what carriers it lost."
+                    "Reader side: from_sectioned_document without "
+                    "carry_extensions returns a flat mapping without the "
+                    "carriers; its callers only peek, but the baseline-set "
+                    "content hash therefore ignores a blocked or failed "
+                    "section."
                 ),
                 reference="docs/contribute/known-gaps.md",
             ),
