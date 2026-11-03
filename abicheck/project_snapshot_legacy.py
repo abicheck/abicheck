@@ -29,7 +29,7 @@ out, don't trim the file to fit.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -55,14 +55,13 @@ from .storage.package import (
     artifact_object_refs,
 )
 from .storage.sectioned_document import check_stated_section_version
-from .storage.snapshot_encode import snapshot_to_dict
+from .storage.snapshot_encode import flat_document_and_carriers
 from .storage.versioning import FactGenerations
 from .storage.wire_extensions import (
     IDENTITY_SECTION_KIND,
     WIRE_EXTENSIONS_KEY,
     WireExtensions,
     attach_package_carriers,
-    extensions_of,
     refuse_unwritable_extensions,
 )
 
@@ -105,7 +104,7 @@ def is_project_snapshot_package_dir(path: str | Path) -> bool:
 
 
 def write_legacy_snapshot_package(
-    document: Mapping[str, Any] | AbiSnapshot,
+    snapshot: AbiSnapshot,
     root: str | Path,
     *,
     artifact_id: str,
@@ -114,18 +113,17 @@ def write_legacy_snapshot_package(
     artifact_kind: str | None = None,
     generations: FactGenerations | None = None,
 ) -> PackageManifest:
-    """*document* (a `serialization.snapshot_to_dict()`-shaped mapping — the
-    same document a real `dump` invocation already produces) written as a
-    real, directory-backed `ProjectSnapshot` package at *root*, alongside
-    whatever legacy `.abi.json` output the caller also writes.
+    """*snapshot* written as a real, directory-backed `ProjectSnapshot`
+    package at *root*, alongside whatever legacy `.abi.json` output the
+    caller also writes.
 
-    Pass the `AbiSnapshot` itself rather than flattening it: its ADR-062
-    D14/D15 carriers (a failed or blocked section, an unknown section,
-    header and record extensions) are then stored beside the sections
-    (`ArtifactRef.carriers`) and read back by
-    `read_stored_snapshot_document`. A document the caller flattened itself
-    has already lost that state, so a flat mapping is written as exactly what
-    it says (known gap: it cannot say what it lost).
+    Takes the `AbiSnapshot`, never a flat `snapshot_to_dict` mapping: its
+    ADR-062 D14/D15 carriers (a failed or blocked section, an unknown
+    section, header and record extensions) are stored beside the sections
+    (`ArtifactRef.carriers`) and read back by `read_stored_snapshot_document`.
+    A flat mapping has no place for them, so a mapping is refused
+    (`TypeError`); a stored flat document is decoded first
+    (`serialization.snapshot_from_dict`), which states exactly what it held.
 
     A thin composition of three already-independently-tested primitives —
     `storage.import_v1.import_legacy_snapshot` (build the manifest, populate
@@ -160,11 +158,16 @@ def write_legacy_snapshot_package(
             "drop. "
             "Pass a different, empty, or nonexistent directory."
         )
-    carriers: WireExtensions | None = None
-    if isinstance(document, AbiSnapshot):
-        refuse_unwritable_extensions(document)
-        carriers = extensions_of(document)
-        document = snapshot_to_dict(document)
+    if not isinstance(snapshot, AbiSnapshot):
+        raise TypeError(
+            "write_legacy_snapshot_package takes an AbiSnapshot, not "
+            f"{type(snapshot).__name__}: a flat snapshot_to_dict mapping cannot "
+            "carry the stored state (failed or blocked sections, "
+            "extensions) the package stores. Pass the snapshot itself, or "
+            "decode a stored document with serialization.snapshot_from_dict."
+        )
+    refuse_unwritable_extensions(snapshot)
+    document, carriers = flat_document_and_carriers(snapshot)
     staging = InMemoryObjectStore()
     manifest = import_legacy_snapshot(
         document,

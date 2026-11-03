@@ -35,7 +35,7 @@ from typing import Any
 from ..model.bundle_facts import SECTIONED_MEMBERS_SCHEMA_VERSION
 from ..model.snapshot import AbiSnapshot
 from .sectioned_document import is_sectioned_document
-from .snapshot_encode import sectioned_document_for_write
+from .snapshot_encode import flat_document_and_carriers, sectioned_document_for_write
 from .wire_extensions import (
     WireExtensions,
     extensions_of,
@@ -63,8 +63,13 @@ def encode_bundle_member(
     *flat_encode* is the flat encoder (default `serialization.snapshot_to_dict`),
     for a writer that is handed its own."""
     refuse_unwritable_extensions(snap)
-    if not flat and flattening_loses(snap):
-        return sectioned_document_for_write(snap), True
+    if flattening_loses(snap):
+        if not flat:
+            return sectioned_document_for_write(snap), True
+        # The caller stores this member's carriers on its
+        # `ArtifactRef.carriers` (`carriers_by_member`); the plain flat
+        # encoder refuses a snapshot whose flat document loses them.
+        return flat_document_and_carriers(snap)[0], False
     if flat_encode is not None:
         return flat_encode(snap), False
     # Resolved through `serialization`, as the bundle codec always has, so

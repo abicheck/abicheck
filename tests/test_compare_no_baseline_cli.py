@@ -671,17 +671,15 @@ def _project_snapshot_package(tmp_path: Path, case: str) -> Path:
     """A real directory-backed storage-v2 ``ProjectSnapshot`` package holding
     the same single artifact *case*'s committed ``.abi.json`` file holds."""
     from abicheck.project_snapshot_legacy import write_legacy_snapshot_package
-    from abicheck.serialization import load_snapshot, snapshot_to_dict
+    from abicheck.serialization import SCHEMA_VERSION, load_snapshot
 
-    document = snapshot_to_dict(
-        load_snapshot(example_catalog.case_dir(case) / "snapshot.abi.json")
-    )
+    snapshot = load_snapshot(example_catalog.case_dir(case) / "snapshot.abi.json")
     package = tmp_path / "package"
     write_legacy_snapshot_package(
-        document,
+        snapshot,
         package,
         artifact_id="libdemo.so",
-        max_known_schema_version=document.get("schema_version", 1),
+        max_known_schema_version=SCHEMA_VERSION,
     )
     return package
 

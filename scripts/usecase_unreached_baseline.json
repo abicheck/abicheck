@@ -4,7 +4,7 @@
   "scenarios"
  ],
  "revision": "375a1acf4bfa928476befd10191ad68dd15b359b",
- "count": 7094,
+ "count": 7093,
  "unreached": [
   "abicheck/_compiler_options.py::_forwarded_driver_mode_override",
   "abicheck/_compiler_options.py::_opaque_option_source_tokens",
@@ -1821,11 +1821,10 @@
   "abicheck/cli_dump_helpers.py::_l4_source_abi_frontend",
   "abicheck/cli_dump_helpers.py::check_dump_debug_format_error",
   "abicheck/cli_dump_helpers.py::check_requested_depth_satisfied",
-  "abicheck/cli_dump_helpers.py::fold_dump_provenance_into_dict",
+  "abicheck/cli_dump_helpers.py::fold_dump_provenance",
   "abicheck/cli_dump_helpers.py::reject_snapshot_compression_conflict",
   "abicheck/cli_dump_helpers.py::render_dump_dry_run",
   "abicheck/cli_dump_helpers.py::write_snapshot_and_report",
-  "abicheck/cli_dump_helpers.py::write_snapshot_payload",
   "abicheck/cli_dump_request.py::build_dump_request",
   "abicheck/cli_graph.py::_embedded_source_graph",
   "abicheck/cli_graph.py::_load_source_graph",
