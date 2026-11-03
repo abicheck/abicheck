@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from ..._compiler_options import (
+    explicit_c_standard,
     has_explicit_cpp_std,
     has_explicit_std,
     split_gcc_options,
@@ -50,6 +51,7 @@ from ..toolchain_identity import (
     _compiler_family_from_toolchain as _compiler_family_from_toolchain,
 )
 from .ast_config import (
+    _CPP_ONLY_PATTERNS,
     _detect_cpp_headers,
     _exported_symbols_indicate_cpp,
     _header_declared_identifiers,
@@ -542,10 +544,19 @@ def _resolve_force_cpp(
     if lang:
         return bool(lang.upper() in ("C++", "CPP"))
     if (
-        _detect_cpp_headers(headers)
+        _detect_cpp_headers(headers, _CPP_ONLY_PATTERNS)
         or _detect_cpp20_headers(headers, for_language_mode_decision=True)
         or has_explicit_cpp_std(gcc_options, gcc_option_tokens)
     ):
+        return True
+    # A C `-std=` (typically the build's own, from a compile database) says
+    # the header is compiled as C. It outranks the weak signals below -- a
+    # `#ifdef __cplusplus`-guarded `extern "C"`, which every dual-language C
+    # header carries -- but never the C++-only syntax above. Parsing such a
+    # header in C++ mode under that C `-std=` is rejected by the frontend.
+    if explicit_c_standard(gcc_options, gcc_option_tokens):
+        return False
+    if _detect_cpp_headers(headers):
         return True
     return bool(exported_symbols) and _exported_symbols_indicate_cpp(
         exported_symbols, _header_declared_identifiers(headers)

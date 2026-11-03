@@ -76,7 +76,7 @@ command, exit code, and bounded output in a machine-readable artifact.
 python tests/validate_examples.py --toolchain gcc --json > results/validate-examples-gcc.json
 python tests/validate_examples.py --toolchain clang --json > results/validate-examples-clang.json
 python tests/validate_examples.py \
-  case01 case04 case98 case105 case122 case129 case130 case131 case132 case133 \
+  case01 case04 case28 case40 case98 case105 case122 case129 case130 case131 case132 case133 \
   --artifact-variant build-source --json > results/validate-examples-build-source.json
 python skills-src/evaluation/validation/scripts/run_example_runtime_smoke.py --json > results/example-runtime-smoke.json
 python skills-src/evaluation/validation/scripts/run_bundle_examples.py --json > results/bundle-examples.json

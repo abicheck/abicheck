@@ -6,7 +6,11 @@ from __future__ import annotations
 import os
 import shlex
 
-from .model.language_standard import last_language_standard
+from .model.language_standard import (
+    language_standard_is_cxx,
+    language_standard_year,
+    last_language_standard,
+)
 
 #: Matches ``shlex.shlex``'s own POSIX-mode default (space/tab/CR/LF) --
 #: kept as an explicit constant so :func:`_split_gcc_options_windows`'s
@@ -407,6 +411,19 @@ def has_explicit_cpp_std(
         if normalized.startswith("/std:c++"):
             return True
     return False
+
+
+def explicit_c_standard(
+    gcc_options: str | None, gcc_option_tokens: tuple[str, ...] = ()
+) -> bool:
+    """Whether the last explicitly forwarded standard is a recognised C
+    edition (``c11``, ``gnu17``, ``iso9899:1999``, ...), not a C++ one."""
+    spelling = explicit_language_standard(gcc_options, gcc_option_tokens)
+    return (
+        spelling is not None
+        and not language_standard_is_cxx(spelling)
+        and language_standard_year(spelling) is not None
+    )
 
 
 def explicit_language_standard(

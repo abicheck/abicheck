@@ -49,20 +49,25 @@ def test_rejects_skip_even_when_nine_other_cases_pass():
 
 
 def test_rejects_an_empty_result_set():
-    errors = proof_gate.validate({"selected_cases": 10, "results": []})
+    n = proof_gate.EXPECTED_RESULT_COUNT
+    errors = proof_gate.validate({"selected_cases": n, "results": []})
 
-    assert errors == ["expected exactly 10 result rows, found 0"]
+    assert errors == [f"expected exactly {n} result rows, found 0"]
 
 
 def test_rejects_missing_or_wrong_selected_case_count():
-    errors = proof_gate.validate({"selected_cases": 9, "results": []})
+    n = proof_gate.EXPECTED_RESULT_COUNT
+    errors = proof_gate.validate({"selected_cases": n - 1, "results": []})
 
-    assert errors == ["expected selected_cases=10, found 9"]
+    assert errors == [f"expected selected_cases={n}, found {n - 1}"]
 
 
 def test_status_sync_recognizes_build_source_proof_row(tmp_path: Path):
     artifact = tmp_path / "build-source.json"
-    artifact.write_text(json.dumps({"summary": {"PASS": 10}}), encoding="utf-8")
+    artifact.write_text(
+        json.dumps({"summary": {"PASS": proof_gate.EXPECTED_RESULT_COUNT}}),
+        encoding="utf-8",
+    )
 
     proc = subprocess.run(
         [

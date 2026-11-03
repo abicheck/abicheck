@@ -1,5 +1,20 @@
 # build-source lane: build flags leak into the header-parse profile
 
+**Status (2026-11-03): CLOSED** for both shapes; root causes below were
+narrower than first recorded:
+
+1. The 12 dump failures came from `_resolve_force_cpp` choosing C++ for a C
+   header because of its `#ifdef __cplusplus extern "C"` guard, while the
+   compile database supplied a C `-std=`. A C `-std=` now selects C mode
+   (`extract/headers/toolchain.py`).
+2. The `pass_through_flags` refusals were not per-side build flags in
+   general: every one was `-include <the compared header>` (catalog
+   `V1_FORCE_INCLUDE v1.h`), fingerprinted by content. Declared public headers
+   are no longer re-emitted as forced includes
+   (`buildsource/forced_include_keys.py`). No ADR change was needed.
+
+Original report follows.
+
 **Status (2026-11-03): OPEN.** Measured on Linux/GCC, base `1694525ee` and
 this branch alike (identical rows): `python tests/validate_examples.py
 --artifact-variant build-source` reports 12 ERROR and 7 refused rows that the

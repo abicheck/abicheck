@@ -378,7 +378,7 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "UNSUPPORTED) fact. A generation-34 clang snapshot's False cannot be "
         "told apart from a real one, so it is re-dumped. A binary-implied "
         "-std= is also stamped as ast_toolchain language_standard_implied=1 "
-        "so a binary-implied dialect difference can bound a comparison instead of refusing it; without the stamp the pair keeps the refusal"
+        "so a binary-implied dialect difference can bound a comparison instead of refusing it; without the stamp the pair keeps the refusal. A C header whose only C++ signal is a guarded extern 'C' is now parsed in C mode when the build supplies a C -std= (generation 34 failed that parse outright, so it has no stored snapshot to drift)"
     ),
 }
 

@@ -76,7 +76,7 @@ dependency walk and debug roots to every member. No open gap remains.
 
 #### build-source lane: build flags leak into the header-parse profile (2026-11-03)
 
-**Status (2026-11-03): OPEN.** 19 catalog cases fail only in the `build-source` lane, identically on base: 12 C libraries whose header is parsed as C++ under the compile database's C `-std=` (castxml rejects it), and 7 pairs refused as `profile_mismatch` on per-side `pass_through_flags`. Needs an ADR-050 ruling on which build flags may parameterize the header parse. [Full write-up](known-gaps/build-source-lane-build-flags-leak-into-the-header-parse-profile.md)
+**Status (2026-11-03): CLOSED** (C `-std=` now selects C mode; a forced include of a declared header is no longer re-emitted). Previously: 19 catalog cases failed only in the `build-source` lane, identically on base: 12 C libraries whose header is parsed as C++ under the compile database's C `-std=` (castxml rejects it), and 7 pairs refused as `profile_mismatch` on per-side `pass_through_flags`. Needs an ADR-050 ruling on which build flags may parameterize the header parse. [Full write-up](known-gaps/build-source-lane-build-flags-leak-into-the-header-parse-profile.md)
 
 #### An exported instantiation of a public class template is not in the public contract (2026-11-03)
 

@@ -113,7 +113,7 @@
     },
     {
       "path": "abicheck/buildsource/header_compile_context.py",
-      "baseline_lines": 1758,
+      "baseline_lines": 1757,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",
