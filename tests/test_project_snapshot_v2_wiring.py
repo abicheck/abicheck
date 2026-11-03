@@ -24,10 +24,9 @@ from tests._project_manifest_reader import ref_document, rewrite_ref
 def _write_package(tmp_path: Path, snap: AbiSnapshot, name: str = "pkg") -> Path:
     from abicheck.project_snapshot_legacy import write_legacy_snapshot_package
 
-    doc = snapshot_to_dict(snap)
     root = tmp_path / name
     write_legacy_snapshot_package(
-        doc, root, artifact_id=snap.library, max_known_schema_version=SCHEMA_VERSION
+        snap, root, artifact_id=snap.library, max_known_schema_version=SCHEMA_VERSION
     )
     return root
 
@@ -257,7 +256,7 @@ class TestWriteLegacySnapshotPackageRefusesNonemptyRoot:
         root.mkdir()
         snap = AbiSnapshot(library="libfoo.so.1", version="1.0.0")
         write_legacy_snapshot_package(
-            snapshot_to_dict(snap),
+            snap,
             root,
             artifact_id=snap.library,
             max_known_schema_version=SCHEMA_VERSION,
@@ -274,7 +273,7 @@ class TestWriteLegacySnapshotPackageRefusesNonemptyRoot:
         other = AbiSnapshot(library="libbar.so.1", version="2.0.0")
         with pytest.raises(ValueError, match="already exists and is not empty"):
             write_legacy_snapshot_package(
-                snapshot_to_dict(other),
+                other,
                 root,
                 artifact_id=other.library,
                 max_known_schema_version=SCHEMA_VERSION,
@@ -291,7 +290,7 @@ class TestWriteLegacySnapshotPackageRefusesNonemptyRoot:
         snap = AbiSnapshot(library="libfoo.so.1", version="1.0.0")
         with pytest.raises(ValueError, match="already exists and is not empty"):
             write_legacy_snapshot_package(
-                snapshot_to_dict(snap),
+                snap,
                 root,
                 artifact_id=snap.library,
                 max_known_schema_version=SCHEMA_VERSION,

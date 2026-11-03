@@ -316,8 +316,8 @@ def _write_snapshot_output(
 
     ADR-062/ADR-063 Phase 8 (redesign): every snapshot this function writes
     -- to `-o`/`--output` or stdout -- is the single-file, D8-sectioned
-    shape (`storage.sectioned_document`, wired in at `write_snapshot_payload`
-    below and at the stdout `json.dumps` call), not a separate opt-in
+    shape (`storage.sectioned_document`, written from the snapshot itself by
+    `serialization.write_snapshot`/`snapshot_to_json`), not a separate opt-in
     package. `snapshot_from_dict` transparently reads either the new
     sectioned shape or an older flat `.abi.json` a prior build wrote.
 
@@ -366,10 +366,9 @@ def _write_snapshot_output(
     """
     from .cli_dump_helpers import (
         check_requested_depth_satisfied,
-        fold_dump_provenance_into_dict,
+        fold_dump_provenance,
         write_snapshot_and_report,
     )
-    from .serialization import snapshot_to_dict
 
     if (build_info is not None or sources is not None) and not (
         # PR 3A blocker 5, sub-issue 3: check before embedding. See
@@ -444,28 +443,20 @@ def _write_snapshot_output(
     from .workflows.snapshot_factory import finish_dependency_scope
 
     snap = finish_dependency_scope(snap, include_dependencies, header_roots)
-    # ADR-059: one payload dict, one JSON encode -- previously this built a
-    # full JSON *string* via snapshot_to_json(), then fold_dump_provenance_
-    # into_json() re-parsed and re-serialized that entire string just to
-    # attach one key. For a 100+ MB snapshot that's a second full parse and
-    # a second full encode for no reason; fold_dump_provenance_into_dict()
-    # does the same augmentation on the already-decoded payload dict.
-    from .workflows.storage import attach_write_carriers, sectioned_payload
-
-    # ADR-062 D14: the snapshot's carriers (ADR-079's export_read fact among
-    # them) travel with the flat payload to the sectioning writer.
-    payload = attach_write_carriers(snapshot_to_dict(snap), snap)
-    payload, resolved_depth_label = fold_dump_provenance_into_dict(payload, depth, snap)
+    # The snapshot itself is written, never a flat `snapshot_to_dict`
+    # payload: the snapshot writer streams the sectioned document one
+    # section at a time (ADR-059's single encode) and keeps the ADR-062
+    # D14/D15 carriers -- a section the extractor recorded as `failed`
+    # (`workflows/dump/pe.py`) -- that a flat payload has no place for.
+    resolved_depth_label = fold_dump_provenance(snap, depth)
     if output:
         write_snapshot_and_report(
-            payload, output, snapshot_compression, resolved_depth_label
+            snap, output, snapshot_compression, resolved_depth_label
         )
     else:
-        import json
+        from .serialization import snapshot_to_json
 
-        from .serialization import SCHEMA_VERSION
-
-        click.echo(json.dumps(sectioned_payload(payload, SCHEMA_VERSION), indent=2))
+        click.echo(snapshot_to_json(snap, indent=2))
 
 
 def resolve_dump_request_for_cli(request: DumpRequest) -> ResolvedDumpRequest:

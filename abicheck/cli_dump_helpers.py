@@ -234,20 +234,18 @@ def check_requested_depth_satisfied(
         )
 
 
-def fold_dump_provenance_into_dict(
-    payload: dict[str, Any],
-    depth: str | None,
+def fold_dump_provenance(
     snap: AbiSnapshot,
-) -> tuple[dict[str, Any], str]:
-    """Fold the dump's depth provenance into a snapshot payload.
+    depth: str | None,
+) -> str:
+    """Record the dump's depth provenance on *snap* (``dump_provenance``,
+    persisted with the snapshot and kept verbatim on a re-save) and return
+    the effective depth label.
 
-    Same computation, but operating on an already-decoded payload dict
-    in-place instead of a serialized JSON string — used by the normal
-    `dump` write path (ADR-059) so a 100+ MB snapshot is never
-    ``json.loads()``-ed and ``json.dumps()``-ed a second time just to
-    attach this one key.
-
-    Returns ``(payload, effective_depth)``.
+    Stamped on the snapshot, not on a flat ``snapshot_to_dict`` payload: the
+    write then goes through the snapshot writer, which keeps the ADR-062
+    D14/D15 carriers (a section the extractor recorded as ``failed``) that a
+    flat payload has no place for.
     """
     effective = _gated_source_label(snap.build_source, snap)
     frontend = (
@@ -259,7 +257,7 @@ def fold_dump_provenance_into_dict(
     source_scope = (
         source_abi.coverage.get("replay_scope") if source_abi is not None else None
     )
-    payload["dump_provenance"] = {
+    snap.dump_provenance = {
         "requested_depth": depth,
         "effective_depth": effective,
         "degraded": (
@@ -271,31 +269,7 @@ def fold_dump_provenance_into_dict(
         "ast_fallback_reason": snap.ast_fallback_reason,
         "source_scope": source_scope,
     }
-    return payload, effective
-
-
-def write_snapshot_payload(
-    payload: dict[str, Any],
-    path: Path,
-    *,
-    compression: Any,
-) -> Any:
-    """One JSON encode + one canonical, atomic, possibly-compressed write
-    (ADR-059) for the already-decoded ``dump`` payload dict — the write
-    chokepoint the real (non-dry) `dump` write path routes through so a
-    100+ MB snapshot is serialized exactly once. Writes the single-file
-    sectioned shape (``storage.sectioned_document``). *compression* is a
-    :class:`~abicheck.snapshot_io.SnapshotCompression`; returns a
-    :class:`~abicheck.snapshot_io.SnapshotWriteResult`.
-    """
-    import json
-
-    from .serialization import SCHEMA_VERSION
-    from .workflows.storage import sectioned_payload, write_snapshot_text
-
-    payload = sectioned_payload(payload, SCHEMA_VERSION)
-    text = json.dumps(payload, indent=2)
-    return write_snapshot_text(text, path, compression=compression)
+    return effective
 
 
 #: Size at which a plain (uncompressed) snapshot is worth a one-line note
@@ -331,24 +305,23 @@ def reject_snapshot_compression_conflict(
 
 
 def write_snapshot_and_report(
-    payload: dict[str, Any],
+    snap: AbiSnapshot,
     output: Path,
     snapshot_compression: str,
     resolved_depth_label: str,
 ) -> None:
-    """Write *payload* to *output* under *snapshot_compression* (ADR-059) and
+    """Write *snap* to *output* under *snapshot_compression* (ADR-059) and
     echo the "written to"/storage-summary/evidence-depth stderr lines the
     real (non-dry) ``dump`` write path always emits — split out of
     ``cli.dump_cmd`` to keep that function's line count under the AI-
     readiness file-size gate.
     """
     from .errors import SnapshotError
+    from .serialization import write_snapshot
     from .workflows.storage import SnapshotCompression
 
     try:
-        write_result = write_snapshot_payload(
-            payload, output, compression=SnapshotCompression(snapshot_compression)
-        )
+        write_result = write_snapshot(snap, output, compression=snapshot_compression)
     except SnapshotError as exc:
         raise click.ClickException(str(exc)) from exc
     except OSError as exc:
@@ -389,7 +362,7 @@ def write_snapshot_and_report(
     # snapshot actually reached -- computed from what it carries, not the
     # requested --depth, so an explicit --depth source that collected
     # nothing usable is never silently reported as if it had succeeded.
-    # Reuses fold_dump_provenance_into_dict's own returned label (the strict
+    # Reuses fold_dump_provenance's own returned label (the strict
     # _gated_source_label, not the plain reported_depth_label) so this line
     # can never disagree with the JSON's effective_depth for the same dump
     # -- they previously could, on the documented zero-match-source-only

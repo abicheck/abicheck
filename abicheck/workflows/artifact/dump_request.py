@@ -73,7 +73,7 @@ class ResolvedDumpRequest:
     ``depth`` (an input, known up front) and the effective *collect mode*
     (the build/source evidence level ``depth`` resolves to). Deliberately
     does **not** carry an *achieved* depth — that can only be read off the
-    completed snapshot (``cli_dump_helpers.fold_dump_provenance_into_dict``
+    completed snapshot (``cli_dump_helpers.fold_dump_provenance``
     derives it via ``_gated_source_label(snap.build_source, snap)``), so a
     resolve-only object reporting it would have to guess, and a guess that
     disagrees with the real run defeats the point of rendering ``--dry-run``

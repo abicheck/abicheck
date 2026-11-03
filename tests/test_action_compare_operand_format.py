@@ -14,7 +14,7 @@ from test_action_validate_inputs import _run_validate
 
 from abicheck.model.snapshot import AbiSnapshot
 from abicheck.project_snapshot_legacy import write_legacy_snapshot_package
-from abicheck.serialization import SCHEMA_VERSION, snapshot_to_dict
+from abicheck.serialization import SCHEMA_VERSION
 
 
 def test_single_artifact_project_snapshot_allows_terminal(tmp_path: Path) -> None:
@@ -62,7 +62,7 @@ def test_implicit_format_is_terminal_for_single_snapshot_directory(
     snapshot = AbiSnapshot(library="libfoo.so", version="1")
     package = tmp_path / "snapshot"
     write_legacy_snapshot_package(
-        snapshot_to_dict(snapshot),
+        snapshot,
         package,
         artifact_id=snapshot.library,
         max_known_schema_version=SCHEMA_VERSION,
