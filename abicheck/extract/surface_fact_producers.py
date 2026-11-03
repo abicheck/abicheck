@@ -218,7 +218,7 @@ def unread_export_fact(
         return Fact.not_collected("no binary in this dump", producer=producer)
     if state is ExportTableState.PARTIAL:
         return Fact.failed(
-            "export table only partially read (ADR-079); absence not established",
+            "export table only partially read; absence not established",
             producer=producer,
         )
     return Fact.failed(

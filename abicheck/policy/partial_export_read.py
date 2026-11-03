@@ -50,7 +50,7 @@ __all__ = [
 
 PARTIAL_EXPORT_READ_RULE = "partial_export_table_read"
 PARTIAL_EXPORT_READ_REASON = (
-    "the new side's export table was not completely read (ADR-079); the "
+    "the new side's export table was not completely read; the "
     "symbol may be in the unread part, so its removal is not established"
 )
 
