@@ -317,3 +317,37 @@ def test_the_writer_rule(
         export_read_state(failure_noted=failure_noted, exports_read=exports_read)
         is expected
     )
+
+
+@pytest.mark.parametrize("platform", PLATFORMS)
+@pytest.mark.parametrize("operand", OPERANDS)
+def test_a_removal_the_new_headers_establish_still_stands(
+    platform: str, operand: str
+) -> None:
+    """A real break is preserved: when NEW parsed headers and no longer
+    declares ``d_fn``, its removal is a header fact, not an export-table
+    absence, and stays a break even against a partial table. ``c_fn`` is still
+    declared by NEW's headers but missing from the partial table: only that
+    one is annotated."""
+    old = _operand(_snapshot(platform, NAMES), operand)
+    kept = ("a_fn", "b_fn")
+    built = AbiSnapshot(
+        library="libx",
+        version="2",
+        platform=platform,
+        ast_producer="castxml",
+        functions=[
+            Function(name=n, mangled=n, return_type="int", visibility=Visibility.PUBLIC)
+            for n in (*kept, "c_fn")
+        ],
+        **{platform: _block(platform, kept, True, ExportReadState.PARTIAL)},
+    )
+    new = _operand(built, operand)
+    result = compare(old, new)
+    removed = {c.symbol: c for c in result.changes if c.kind.value == "func_removed"}
+    assert removed["d_fn"].modulation_rule is None
+    assert result.verdict.value == "BREAKING"
+    # ``c_fn`` is still declared: never scored as a removal (ELF reports it,
+    # annotated; PE/Mach-O do not report it at all).
+    c_fn = removed.get("c_fn")
+    assert c_fn is None or c_fn.modulation_rule == "partial_export_table_read"
