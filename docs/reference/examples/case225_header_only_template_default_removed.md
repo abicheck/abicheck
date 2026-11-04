@@ -3,12 +3,12 @@
 
 | Field | Value |
 |-------|-------|
-| **Verdict** | ✅ **NO_CHANGE** |
-| **Category** | No Change |
+| **Verdict** | 🟠 **API_BREAK** |
+| **Category** | API Break |
 | **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
-| **Flags** | — |
-| **Detected `ChangeKind`s** | — |
+| **Flags** | API break |
+| **Detected `ChangeKind`s** | `template_param_default_changed` |
 | **Source files** | `catalog/cases/case225_header_only_template_default_removed/` |
 | **Rule family** | [`header-only-template-default-removed`](by-rule/header-only-template-default-removed.md) |
 | **Subject** | [Template and generic-programming issues](by-subject/template-and-generic-programming-issues.md) |
@@ -81,9 +81,10 @@ alias.
 
 - `CMakeLists.txt`
 - `app.cpp`
+- `consumer_smoke.cpp`
 - `v1.cpp`
 - `v1.h`
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md) · [Rule: Header-only template default removed](by-rule/header-only-template-default-removed.md) · [Subject: Template and generic-programming issues](by-subject/template-and-generic-programming-issues.md)._
+_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Header-only template default removed](by-rule/header-only-template-default-removed.md) · [Subject: Template and generic-programming issues](by-subject/template-and-generic-programming-issues.md)._

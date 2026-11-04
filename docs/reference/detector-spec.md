@@ -353,7 +353,7 @@ One row per `ChangeKind` (426 total). Columns fuse the verdict partition (`check
 | `target_dependency_added` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `target_dependency_added` | [case161](examples/case161_target_dependency_added.md) |
 | `target_isa_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `target_isa_changed` | — |
 | `template_body_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L4 | `template_body_changed` | — |
-| `template_param_default_changed` | api_break | `API_BREAK` | `warning` | L2 | `template_param_default_changed` | — |
+| `template_param_default_changed` | api_break | `API_BREAK` | `warning` | L2 | `template_param_default_changed` | [case223](examples/case223_header_only_template_default_changed.md), [case225](examples/case225_header_only_template_default_removed.md), [case227](examples/case227_nested_namespace_template_default_changed.md), [case228](examples/case228_nontype_template_param_default_changed.md) |
 | `template_param_type_changed` | breaking | `BREAKING` | `error` | unspecified | `template_param_type_changed` | — |
 | `template_return_type_changed` | breaking | `BREAKING` | `error` | unspecified | `template_return_type_changed` | — |
 | `text_relocation_introduced` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `text_relocation_introduced` | — |

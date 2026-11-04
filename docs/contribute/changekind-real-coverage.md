@@ -17,7 +17,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 
 - Total kinds: **426**
 - Kinds with at least one real source: **180**
-- Kinds per source: catalog 158, field_shapes 9, integration 59
+- Kinds per source: catalog 159, field_shapes 9, integration 59
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
@@ -323,7 +323,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `python_api_stub_invalid` | API_BREAK | 0 | 0 | 0 |
 | `rtti_for_internal_type` | RISK | 1 | 0 | 0 |
 | `serialization_tag_changed` | BREAKING | 1 | 0 | 0 |
-| `template_param_default_changed` | API_BREAK | 0 | 0 | 2 |
+| `template_param_default_changed` | API_BREAK | 4 | 0 | 2 |
 | `type_became_abstract` | API_BREAK | 0 | 0 | 0 |
 | `type_became_final` | API_BREAK | 1 | 0 | 0 |
 | `type_deprecated_added` | COMPATIBLE | 0 | 0 | 0 |

@@ -3,12 +3,12 @@
 
 | Field | Value |
 |-------|-------|
-| **Verdict** | ✅ **NO_CHANGE** |
-| **Category** | No Change |
+| **Verdict** | 🟠 **API_BREAK** |
+| **Category** | API Break |
 | **Classification** | Rule |
 | **Platforms** | Linux, macOS, Windows |
-| **Flags** | — |
-| **Detected `ChangeKind`s** | — |
+| **Flags** | API break |
+| **Detected `ChangeKind`s** | `template_param_default_changed` |
 | **Source files** | `catalog/cases/case227_nested_namespace_template_default_changed/` |
 | **Rule family** | [`nested-namespace-template-default-changed`](by-rule/nested-namespace-template-default-changed.md) |
 | **Subject** | [Template and generic-programming issues](by-subject/template-and-generic-programming-issues.md) |
@@ -66,9 +66,10 @@ As in case223: add an alias rather than change the default in place.
 
 - `CMakeLists.txt`
 - `app.cpp`
+- `consumer_smoke.cpp`
 - `v1.cpp`
 - `v1.h`
 - `v2.cpp`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md) · [Rule: Nested-namespace template default changed](by-rule/nested-namespace-template-default-changed.md) · [Subject: Template and generic-programming issues](by-subject/template-and-generic-programming-issues.md)._
+_See also: [Compatibility Catalog](index.md) · [All API_BREAK cases](by-verdict/api-break.md) · [Category: API Break](by-category/api_break.md) · [Rule: Nested-namespace template default changed](by-rule/nested-namespace-template-default-changed.md) · [Subject: Template and generic-programming issues](by-subject/template-and-generic-programming-issues.md)._

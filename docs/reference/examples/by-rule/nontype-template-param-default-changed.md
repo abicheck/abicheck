@@ -7,5 +7,5 @@ _Canonical rule slug:_ `nontype-template-param-default-changed`. [← back to al
 
 ## Canonical demonstration
 
-- [case228_nontype_template_param_default_changed](../case228_nontype_template_param_default_changed.md) — Non-Type Template Parameter Default Changed (✅ NO_CHANGE)
+- [case228_nontype_template_param_default_changed](../case228_nontype_template_param_default_changed.md) — Non-Type Template Parameter Default Changed (🟠 API_BREAK)
 

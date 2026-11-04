@@ -140,7 +140,7 @@
       "abicheck/extract/headers/clang/templates.py": "ee85de87a4180b5bed93d501237f153d1132fd325504c1fdf52fab87c7c95efe",
       "abicheck/extract/headers/clang/typedefs.py": "0345022b18ed0a011c4a1420e7b85e77dc3437f1339d5572ff28af29aebc0f3b",
       "abicheck/extract/headers/clang/vtable.py": "894fa40c7d59c4c874becd3a6b9547007fa2f08db075d095c2b5272ba9c60b2d",
-      "abicheck/extract/headers/clang_header_argv.py": "c198bd32d8fc6c5e59d6fd30f809544291a4a5381614f2fcbb281765da6626b7",
+      "abicheck/extract/headers/clang_header_argv.py": "e434ceaab1103e07b26761dade984d35459c9485d017be2b8545dc887c042118",
       "abicheck/extract/headers/compile_provenance.py": "5c800725da59c2c3aeac4e85118dcd54edd6ec5c75875e483978b78a750ec0af",
       "abicheck/extract/headers/manifest.py": "4f0e740bfeb88aa4363176f2defe422826a9e2cd91b03cd317f6f86f4eec5066",
       "abicheck/extract/headers/preprocessor_branches.py": "d3a409d126b0dd1b19a634d4aad25660d372dad931b310cfbaaefc9d769b244d",
@@ -192,9 +192,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "393e6aca4df5c4f00ed884c46e9f965e1b9272fe9f2257cd88a9d1f3c1515017",
-    "generation": 35,
-    "reason": "Integrate main generation 35 with ADR-079 export-read provenance: retain main extraction semantics and the additive recorded export-read state"
+    "fingerprint": "479889b0f6fb41970794c224ae690506897210468f8577ce359c9518607a4f77",
+    "generation": 36,
+    "reason": "bumped to 36 for a semantic change"
   },
   "resolver": {
     "files": {

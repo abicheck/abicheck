@@ -4453,7 +4453,29 @@
     "linux",
     "macos",
     "windows"
-   ]
+   ],
+   "source_smoke": {
+    "mode": "syntax",
+    "proof": "consumer default-meaning smoke: static_assert that Box<char>::u is int compiles against v1 and is rejected against v2 (U = long)",
+    "source": "consumer_smoke.cpp",
+    "standard": "c++17",
+    "v1": {
+     "expect": "success"
+    },
+    "v2": {
+     "expect": "failure",
+     "replace": [
+      [
+       "\"v1.h\"",
+       "\"v2.h\""
+      ],
+      [
+       "<v1.h>",
+       "<v2.h>"
+      ]
+     ]
+    }
+   }
   },
   "case224_header_only_template_default_added": {
    "abi_break": false,
@@ -4499,7 +4521,29 @@
     "linux",
     "macos",
     "windows"
-   ]
+   ],
+   "source_smoke": {
+    "mode": "syntax",
+    "proof": "consumer default-reliance smoke: Box<char> compiles against v1 and is ill-formed against v2 (no default for U)",
+    "source": "consumer_smoke.cpp",
+    "standard": "c++17",
+    "v1": {
+     "expect": "success"
+    },
+    "v2": {
+     "expect": "failure",
+     "replace": [
+      [
+       "\"v1.h\"",
+       "\"v2.h\""
+      ],
+      [
+       "<v1.h>",
+       "<v2.h>"
+      ]
+     ]
+    }
+   }
   },
   "case226_header_only_template_default_unchanged": {
    "abi_break": false,
@@ -4546,7 +4590,29 @@
     "linux",
     "macos",
     "windows"
-   ]
+   ],
+   "source_smoke": {
+    "mode": "syntax",
+    "proof": "consumer default-meaning smoke: static_assert that detail::Box<char>::u is int compiles against v1 and is rejected against v2",
+    "source": "consumer_smoke.cpp",
+    "standard": "c++17",
+    "v1": {
+     "expect": "success"
+    },
+    "v2": {
+     "expect": "failure",
+     "replace": [
+      [
+       "\"v1.h\"",
+       "\"v2.h\""
+      ],
+      [
+       "<v1.h>",
+       "<v2.h>"
+      ]
+     ]
+    }
+   }
   },
   "case228_nontype_template_param_default_changed": {
    "abi_break": false,
@@ -4573,7 +4639,29 @@
     "linux",
     "macos",
     "windows"
-   ]
+   ],
+   "source_smoke": {
+    "mode": "syntax",
+    "proof": "consumer layout smoke: static_assert(sizeof(Buf<char>) == 4) compiles against v1 and is rejected against v2 (N = 8)",
+    "source": "consumer_smoke.cpp",
+    "standard": "c++17",
+    "v1": {
+     "expect": "success"
+    },
+    "v2": {
+     "expect": "failure",
+     "replace": [
+      [
+       "\"v1.h\"",
+       "\"v2.h\""
+      ],
+      [
+       "<v1.h>",
+       "<v2.h>"
+      ]
+     ]
+    }
+   }
   },
   "case229_exported_template_default_changed": {
    "abi_break": true,
