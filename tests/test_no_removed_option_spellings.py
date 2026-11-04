@@ -64,6 +64,18 @@ ALLOWED: dict[tuple[str, str], str] = {
         "docs/reference/compatibility-evaluation-config.md",
         "run_compare(contract_mode)",
     ): "ExplicitCompatibilityInputs.contract_mode is an internal input, not the typed-request keyword",
+    (
+        "abicheck/frontends/cli/runtime.py",
+        "compare --abi3",
+    ): "RETIRED_OPTIONS keys the unknown-option hint on the retired spelling it rejects",
+    (
+        "abicheck/frontends/cli/runtime.py",
+        "deps compare --old-root",
+    ): "RETIRED_OPTIONS keys the unknown-option hint on the retired spelling it rejects",
+    (
+        "abicheck/frontends/cli/runtime.py",
+        "deps compare --new-root",
+    ): "RETIRED_OPTIONS keys the unknown-option hint on the retired spelling it rejects",
 }
 
 

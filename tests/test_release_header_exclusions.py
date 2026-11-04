@@ -375,7 +375,16 @@ class TestAnUnmatchedRuleWarnsOnceForTheWholeRun:
         # excluded") is a different, legitimate per-library statement about
         # that library's own narrowed surface, and its presence for all
         # three libraries is what proves the rules reached each of them.
-        assert result.output.count("were excluded from the parsed surface") == 3
+        # Identical per-library notes are grouped into one line naming every
+        # library that carries it, so "reached each" is that line naming all three.
+        (note,) = [
+            ln
+            for ln in result.output.splitlines()
+            if "were excluded from the parsed surface" in ln
+        ]
+        assert "(3 libraries:" in note
+        for lib in ("libfoo.so", "libbar.so", "libbaz.so"):
+            assert lib in note
 
     def test_a_matched_rule_produces_no_warning(self, tmp_path: Path) -> None:
         """The negative control: warning about every rule would satisfy the
