@@ -163,3 +163,11 @@ def parse_record_layout_dump(text: str) -> list[dict[str, Any]]:
 def normalized_record_name(name: str) -> str:
     """Spelling-insensitive key: whitespace dropped, ``class``/``struct`` tags removed."""
     return re.sub(r"\s+", "", re.sub(r"\b(?:class|struct|union|enum)\s+", "", name))
+
+
+def unscoped_record_name(name: str) -> str:
+    """Last-resort key with every scope qualifier dropped, inside template
+    arguments too: newer clang prints an explicit instantiation's arguments
+    as written (``B<task::tag>``) where the AST spelling is canonical
+    (``B<lib::task::tag>``). Used only for a match unique on both sides."""
+    return re.sub(r"\b\w+::", "", normalized_record_name(name))

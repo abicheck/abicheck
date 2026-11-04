@@ -261,6 +261,36 @@ def test_exact_layout_key_is_never_shadowed_by_a_normalized_one() -> None:
     assert sizes["A<int,long>"] is None
 
 
+def test_unscoped_layout_key_is_a_unique_last_resort() -> None:
+    """Newer clang prints an explicit instantiation's template arguments as
+    written; the canonical AST spelling still finds its layout when the
+    scope-free key is unique on both sides, and never when it is not."""
+    from abicheck.extract.headers.clang.layout_tool import apply_layout_facts
+    from abicheck.model import AbiSnapshot, RecordType
+
+    def snap(*names: str) -> AbiSnapshot:
+        return AbiSnapshot(
+            library="l",
+            version="1",
+            types=[RecordType(name=n, kind="class", qualified_name=n) for n in names],
+        )
+
+    canonical = "lib::detail::B<lib::task::tag>"
+    as_written = [
+        {"qualified_name": "lib::detail::B<task::tag>", "size_bits": 64, "fields": []}
+    ]
+    sized = apply_layout_facts(snap(canonical), as_written)
+    assert sized.declarations.types[0].size_bits == 64
+    # two snapshot records collapse to one scope-free key: no guess
+    both = apply_layout_facts(snap(canonical, "lib::detail::B<other::tag>"), as_written)
+    assert [t.size_bits for t in both.declarations.types] == [None, None]
+    # two dumped records collapse to one scope-free key: no guess
+    two = [*as_written, {**as_written[0], "qualified_name": "x::B<y::tag>"}]
+    assert (
+        apply_layout_facts(snap(canonical), two).declarations.types[0].size_bits is None
+    )
+
+
 _ORACLE_HEADER = """
 #include <cstddef>
 namespace ns {
@@ -409,9 +439,8 @@ def test_clang_backend_reports_catalog_kinds(
             t.qualified_name: t.size_bits
             for t in load_snapshot(snaps[1]).declarations.types
         }
-        assert (
-            base["mylib::detail::descriptor_base<mylib::task::classification>"] == 64
-        )  # two ints
+        key = "mylib::detail::descriptor_base<mylib::task::classification>"
+        assert base[key] == 64, sorted(base.items(), key=str)  # two ints
     assert data["verdict"] == "BREAKING"
     assert _CATALOG_CASES[case] <= kinds, sorted(kinds)
 

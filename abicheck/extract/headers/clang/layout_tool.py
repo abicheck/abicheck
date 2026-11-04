@@ -53,6 +53,7 @@ clang`` snapshot, where every one of these fields starts out empty).
 
 from __future__ import annotations
 
+import collections
 import json
 import logging
 import os
@@ -84,6 +85,7 @@ from .record_layout_dump import (
     parse_record_layout_dump,
     probe_source,
     probeable_record_name,
+    unscoped_record_name,
 )
 
 log = logging.getLogger(__name__)
@@ -509,14 +511,23 @@ def apply_layout_facts(
         return snapshot
     exact: dict[str, dict[str, Any]] = {}
     normalized: dict[str, list[dict[str, Any]]] = {}
+    unscoped: dict[str, list[dict[str, Any]]] = {}
     for r in records:
         if isinstance(r, dict) and isinstance(r.get("qualified_name"), str):
             exact.setdefault(r["qualified_name"], r)
             normalized.setdefault(
                 normalized_record_name(r["qualified_name"]), []
             ).append(r)
+            unscoped.setdefault(unscoped_record_name(r["qualified_name"]), []).append(r)
     if not exact:
         return snapshot
+    # How many snapshot records share each unscoped key: the last-resort
+    # match needs uniqueness on the snapshot side too.
+    snapshot_unscoped = collections.Counter(
+        unscoped_record_name(t.qualified_name or t.name)
+        for t in snapshot.declarations.types
+        if not t.is_template_pattern
+    )
 
     def _facts_for(key: str) -> dict[str, Any] | None:
         # An exact spelling always wins; the whitespace/tag-insensitive key is
@@ -525,7 +536,13 @@ def apply_layout_facts(
         if key in exact:
             return exact[key]
         candidates = normalized.get(normalized_record_name(key), [])
-        return candidates[0] if len(candidates) == 1 else None
+        if candidates:
+            return candidates[0] if len(candidates) == 1 else None
+        loose = unscoped_record_name(key)
+        candidates = unscoped.get(loose, [])
+        if len(candidates) == 1 and snapshot_unscoped[loose] == 1:
+            return candidates[0]
+        return None
 
     new_types = []
     changed = False
