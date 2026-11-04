@@ -399,3 +399,43 @@ def test_clang_backend_reports_catalog_kinds(
         )  # two ints
     assert data["verdict"] == "BREAKING"
     assert _CATALOG_CASES[case] <= kinds, sorted(kinds)
+
+
+@pytest.mark.parametrize(
+    "target",
+    ["--target=x86_64-w64-windows-gnu", "--target=x86_64-pc-windows-msvc", None],
+)
+def test_layout_pass_uses_the_binarys_abi_target(
+    target: str | None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The layout probe lays records out for the ABI the main header dump
+    chose from the binary's exports (MinGW Itanium vs MSVC), never clang's
+    host default: a different ABI moves the vptr and the base subobjects."""
+    from abicheck.extract.headers.clang import layout_tool
+    from abicheck.model import AbiSnapshot, RecordType
+
+    header = tmp_path / "a.hpp"
+    header.write_text("struct S { int a; };\n", encoding="utf-8")
+    snap = AbiSnapshot(
+        library="l",
+        version="1",
+        types=[RecordType(name="S", kind="struct", qualified_name="S")],
+    )
+    object.__setattr__(snap, "ast_producer", "clang")
+    seen: dict[str, tuple[str, ...]] = {}
+
+    def fake_run(binary, headers, includes, **kw):
+        seen["tokens"] = tuple(kw["gcc_option_tokens"])
+        return [{"qualified_name": "S", "size_bits": 32, "fields": []}]
+
+    monkeypatch.delenv(layout_tool.LAYOUT_TOOL_ENV_VAR, raising=False)
+    monkeypatch.setattr(layout_tool, "find_layout_tool_bin", lambda: None)
+    monkeypatch.setattr(layout_tool, "_binary_abi_target", lambda *a: target)
+    monkeypatch.setattr(layout_tool, "run_layout_tool", fake_run)
+    out = layout_tool.attach_clang_layout(snap, [header], [], lang="c++", compile=None)
+    assert (
+        (target in seen["tokens"])
+        if target
+        else not any(t.startswith("--target") for t in seen["tokens"])
+    )
+    assert out.declarations.types[0].size_bits == 32

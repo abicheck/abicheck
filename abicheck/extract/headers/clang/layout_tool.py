@@ -74,6 +74,7 @@ from ....name_classification import strip_anonymous_type_location
 from ...compiler_driver import resolve_clang_bin
 from ..ast_config import _build_clang_header_command
 from ..sysinc import _resolve_clang_system_includes
+from .abi_target import binary_abi_target_token
 from .backend import resolve_clang_langmode
 from .error_header_retry import retry_excluding_error_headers
 from .record_layout_dump import (
@@ -583,6 +584,42 @@ def _expand_header_inputs(inputs: list[Path]) -> list[Path]:
     return deduped
 
 
+def _binary_abi_target(
+    snap: AbiSnapshot, compiler: str, compile: Any, tokens: tuple[str, ...]
+) -> str | None:
+    """The ``--target`` the main clang header dump used for *snap*'s binary.
+
+    clang defaults to the MSVC C++ ABI on Windows; a MinGW-built library is
+    Itanium, and its record layout differs (vptr placement, base packing).
+    The header dump already picks the target from the binary's exports
+    (``abi_target``); the layout pass must lay records out for that same ABI
+    or it would attach the other ABI's sizes and offsets.
+    """
+    from ...._compiler_options import effective_driver_mode_is_cl
+    from ....compiler_driver import is_cl_style_driver_name
+    from ....model.export_index import export_names_or_modeled_fallback
+    from ..sysinc import _resolve_probe_compiler
+
+    gcc_path = compile.gcc_path if compile is not None else None
+    gcc_prefix = compile.gcc_prefix if compile is not None else None
+    gcc_options = compile.gcc_options if compile is not None else None
+    try:
+        clang_bin = resolve_clang_bin(compiler, gcc_path, gcc_prefix)
+        if effective_driver_mode_is_cl(
+            is_cl_style_driver_name(clang_bin), gcc_options, tokens
+        ):
+            return None
+        return binary_abi_target_token(
+            clang_bin=clang_bin,
+            exported=export_names_or_modeled_fallback(snap),
+            gcc_options=gcc_options,
+            gcc_option_tokens=tokens,
+            probe_cc=_resolve_probe_compiler(compiler, gcc_path, gcc_prefix),
+        )
+    except Exception:  # noqa: BLE001 -- best-effort enrichment, never raises
+        return None
+
+
 def attach_clang_layout(
     snap: AbiSnapshot,
     headers: list[Path],
@@ -674,6 +711,9 @@ def attach_clang_layout(
         )
     except (SnapshotError, ValidationError):
         return snap
+    compiler = "cc" if lang == "c" else "c++"
+    if (target := _binary_abi_target(snap, compiler, compile, eff_tokens)) is not None:
+        eff_tokens = (*eff_tokens, target)
     records = run_layout_tool(
         binary,
         resolved_headers,
