@@ -168,7 +168,7 @@ def iter_directory_headers(
             f = base / name
             if f.suffix.lower() in HEADER_SUFFIXES and f.is_file():
                 found.append(f)
-    return sorted(found, key=lambda h: str(h.resolve()))  # canonical_header_key
+    return sorted(found, key=lambda h: (str(h.resolve()), str(h)))
 
 
 def split_public_header_inputs(

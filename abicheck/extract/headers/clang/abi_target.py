@@ -46,7 +46,8 @@ __all__ = [
     "binary_abi_target_token",
     "exported_cxx_abi",
     "with_binary_abi_target",
-    "binary_abi_compile",
+    "binary_exported_names",
+    "binary_abi_tokens",
 ]
 
 ITANIUM = "itanium"
@@ -165,31 +166,43 @@ def with_binary_abi_target(
     return gcc_option_tokens if token is None else (*gcc_option_tokens, token)
 
 
-def binary_abi_compile(cc: Any, compiler: str, snap: Any) -> Any:
-    """*cc* (a ``CompileContext``) with the target :func:`with_binary_abi_target`
-    picks for *snap*'s binary-exported declarations.
+def binary_exported_names(snap: Any) -> frozenset[str]:
+    """*snap*'s binary-exported mangled names, the input
+    :func:`with_binary_abi_target` reads the binary's ABI from.
 
     Only binary-exported names count: a header-only declaration's mangled
     name is clang's own default ABI, and mixing it in would read as "both
     ABIs" and drop the token the primary pass applied.
     """
-    import dataclasses
-
     from ....model.surface_facts import is_binary_exported
 
-    exported = [
-        d.mangled
-        for d in (*snap.declarations.functions, *snap.declarations.variables)
-        if d.mangled and is_binary_exported(d)
-    ]
-    tokens = with_binary_abi_target(
-        compiler=compiler,
-        gcc_path=cc.gcc_path,
-        gcc_prefix=cc.gcc_prefix,
-        gcc_options=cc.gcc_options,
-        gcc_option_tokens=cc.gcc_option_tokens,
-        exported=exported,
-    )
-    if tokens == cc.gcc_option_tokens:
-        return cc
-    return dataclasses.replace(cc, gcc_option_tokens=tokens)
+    decls = (*snap.declarations.functions, *snap.declarations.variables)
+    return frozenset(d.mangled for d in decls if d.mangled and is_binary_exported(d))
+
+
+def binary_abi_tokens(
+    cc: Any, is_c: bool, tokens: tuple[str, ...], exported: frozenset[str]
+) -> tuple[str, ...]:
+    """*tokens* (already final, deferred include roots included) plus the
+    target :func:`with_binary_abi_target` picks for *exported*.
+
+    Appended last, the position the primary pass appends it in, so both
+    parses key one AST. Without exports, or without a resolvable clang (a
+    castxml-only host), the tokens are returned as they are and the parse
+    that follows reports its own failure.
+    """
+    from ....errors import SnapshotError
+
+    if not exported:
+        return tokens
+    try:
+        return with_binary_abi_target(
+            compiler="cc" if is_c else "c++",
+            gcc_path=cc.gcc_path,
+            gcc_prefix=cc.gcc_prefix,
+            gcc_options=cc.gcc_options,
+            gcc_option_tokens=tokens,
+            exported=exported,
+        )
+    except (SnapshotError, OSError):
+        return tokens

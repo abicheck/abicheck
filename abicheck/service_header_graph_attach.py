@@ -148,7 +148,7 @@ def _attach_header_graph(
     from .buildsource.include_graph import augment_graph_with_includes
     from .buildsource.semantic_fact_folds import HEADER_SEMANTIC_PASSES
     from .extract.compiler_driver import resolve_clang_bin
-    from .extract.headers.clang.abi_target import binary_abi_compile
+    from .extract.headers.clang.abi_target import binary_exported_names
     from .model.header_lang_mode import recorded_lang_mode
     from .model.source_graph_coverage import HEADER_CALL_GRAPH_PASS
 
@@ -165,8 +165,9 @@ def _attach_header_graph(
             headers,
             includes,
             lang,
-            binary_abi_compile(cc, "cc" if _is_c else "c++", snap),
+            compile,
             resolved_lang_mode=primary_mode,
+            abi_exported=binary_exported_names(snap),
         )
     projection = acquired.projection
     ast_failure = acquired.ast_failure
@@ -318,6 +319,7 @@ def acquire_header_graph_ast(
     lang: str | None,
     compile: CompileContext | None,
     resolved_lang_mode: str | None = None,
+    abi_exported: frozenset[str] = frozenset(),
 ) -> HeaderGraphAst:
     """The header graph's own clang parse, projected; independent of the snapshot.
 
@@ -329,9 +331,9 @@ def acquire_header_graph_ast(
     from its first lookup until it is stored, so a forked sibling over the
     same AST waits and reads the sidecar instead of re-streaming the AST.
     """
-    with ExitStack() as projection_lock:
+    with ExitStack() as lock:
         return _acquire_header_graph_ast(
-            headers, includes, lang, compile, resolved_lang_mode, projection_lock
+            headers, includes, lang, compile, resolved_lang_mode, lock, abi_exported
         )
 
 
@@ -342,6 +344,7 @@ def _acquire_header_graph_ast(
     compile: CompileContext | None,
     resolved_lang_mode: str | None,
     projection_lock: ExitStack,
+    abi_exported: frozenset[str] = frozenset(),
 ) -> HeaderGraphAst:
     from .buildsource.header_graph_ast_projection import (
         HeaderGraphAstProjection,
@@ -361,6 +364,7 @@ def _acquire_header_graph_ast(
         projection_sidecar_path,
         store_cached_projection,
     )
+    from .extract.headers.clang.abi_target import binary_abi_tokens
     from .extract.headers.clang.backend import clang_header_dump
     from .extract.headers.clang.streaming import suppress_streaming_prune
     from .extract.headers.toolchain import _resolve_force_cpp
@@ -527,7 +531,9 @@ def _acquire_header_graph_ast(
                 gcc_option_tokens=cc.gcc_option_tokens,
             )
             eff_includes = list(includes) + inc_extra
-            eff_tokens = cc.gcc_option_tokens + tuple(deferred)
+            eff_tokens = binary_abi_tokens(
+                cc, _is_c, (*cc.gcc_option_tokens, *deferred), abi_exported
+            )
             # The deferred roots ride in gcc_option_tokens (-isystem), not
             # extra_includes, so their contents must also be hashed into the
             # AST cache key explicitly — clang_header_dump's disk cache

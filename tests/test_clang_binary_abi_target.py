@@ -268,3 +268,51 @@ def test_header_graph_attach_parses_for_the_same_target(
         if not p.name.endswith(".projection.json")
     ]
     assert len(entries) == 2, sorted(p.name for p in entries)
+
+
+def test_attach_appends_the_target_after_the_deferred_roots(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The primary pass orders its tokens (caller, deferred roots, target);
+    the attach must produce the same sequence, or the two parses key apart."""
+    from abicheck.compile_context import CompileContext
+
+    monkeypatch.setattr(
+        abi_target,
+        "binary_abi_target_token",
+        lambda **_: "--target=x86_64-w64-windows-gnu",
+    )
+    cc = CompileContext(gcc_option_tokens=("-DFOO",))
+    deferred = ("-isystem", "/inc/root")
+    tokens = abi_target.binary_abi_tokens(
+        cc, False, (*cc.gcc_option_tokens, *deferred), frozenset({"_Z4keepi"})
+    )
+    assert tokens == (
+        "-DFOO",
+        "-isystem",
+        "/inc/root",
+        "--target=x86_64-w64-windows-gnu",
+    )
+    # No exports: nothing to read an ABI from, tokens untouched.
+    assert abi_target.binary_abi_tokens(cc, False, ("-DFOO",), frozenset()) == (
+        "-DFOO",
+    )
+
+
+def test_attach_without_a_clang_keeps_its_tokens(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A castxml-only host has no clang to resolve; the attach's parse then
+    fails inside its own degradation path instead of the dump failing here."""
+    from abicheck.compile_context import CompileContext
+    from abicheck.errors import SnapshotError
+    from abicheck.extract import compiler_driver
+
+    def no_clang(*_a: object, **_k: object) -> str:
+        raise SnapshotError("clang not found")
+
+    monkeypatch.setattr(compiler_driver, "resolve_clang_bin", no_clang)
+    cc = CompileContext()
+    assert abi_target.binary_abi_tokens(cc, False, ("-DX",), frozenset({"_Z1fv"})) == (
+        "-DX",
+    )

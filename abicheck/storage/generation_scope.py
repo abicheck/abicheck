@@ -75,8 +75,12 @@ EXTRACTOR_ROOT_GLOBS: tuple[str, ...] = (
 
 #: Modules outside ``extract/`` whose rules decide what an extractor records
 #: (package-relative): the arithmetic-spelling predicate decides which header
-#: initializers the castxml and clang backends store.
-EXTRACTOR_EXTRA_FILES: tuple[str, ...] = ("model/arithmetic_type_spellings.py",)
+#: initializers the castxml and clang backends store; ``header_utils``'s
+#: ``-H`` directory expansion decides which headers are parsed and in what order.
+EXTRACTOR_EXTRA_FILES: tuple[str, ...] = (
+    "model/arithmetic_type_spellings.py",
+    "header_utils.py",
+)
 
 #: A module whose file stem contains one of these words is resolver-named and
 #: must be classified below (semantic or non-semantic with a reason).

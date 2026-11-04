@@ -46,17 +46,15 @@ _F = TypeVar("_F", bound=Callable[..., Any])
 _PROVING: ContextVar[bool] = ContextVar("header_order_proving", default=False)
 
 
-def canonical_header_key(header: Path) -> str:
+def canonical_header_key(header: Path) -> tuple[str, str]:
     """The one sort key for a canonical header order: the resolved path as a
-    string, so ``foo.h`` sorts before ``foo/bar.h`` (``.`` < ``/``).
+    string, so ``foo.h`` sorts before ``foo/bar.h`` (``.`` sorts before ``/``),
+    then the spelled path, so two aliases of one file sort deterministically.
 
     ``header_utils.iter_directory_headers`` sorts a ``-H`` directory by this
-    same key. It used :class:`~pathlib.Path` ordering, which compares
-    components and puts ``foo/bar.h`` first, so any tree with a ``foo.h``
-    beside a ``foo/`` directory was never canonical and this witness re-ran
-    the whole dump in sorted order: a second clang parse per side.
+    same key.
     """
-    return str(header.resolve())
+    return (str(header.resolve()), str(header))
 
 
 def canonical_header_order(headers: Sequence[Path]) -> list[Path]:

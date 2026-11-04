@@ -9,6 +9,7 @@ a `foo.h` beside a `foo/` directory pay a full second dump per side.
 from __future__ import annotations
 
 import json
+import os
 import random
 import shutil
 import subprocess
@@ -237,3 +238,27 @@ def test_skipped_witness_dump_matches_the_witnessed_reference(tmp_path: Path) ->
     assert "added" in optimized
     assert optimized == reference, first_difference(optimized, reference)
     assert opt_entries < ref_entries, (opt_entries, ref_entries)
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="symlinks need privileges on Windows"
+)
+@pytest.mark.parametrize("walk_reversed", [False, True])
+def test_aliases_of_one_header_expand_in_a_fixed_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, walk_reversed: bool
+) -> None:
+    """Two spellings of one file share the resolved-path key; the spelled path
+    breaks the tie, so the walk's enumeration order cannot pick the survivor."""
+    inc = tmp_path / "inc"
+    inc.mkdir()
+    (tmp_path / "real.h").write_text("#pragma once\n")
+    for name in ("b_alias.h", "a_alias.h"):
+        (inc / name).symlink_to(tmp_path / "real.h")
+    real_walk = os.walk
+
+    def walk(top: Path):  # type: ignore[no-untyped-def]
+        for dirpath, dirnames, filenames in real_walk(top):
+            yield dirpath, dirnames, sorted(filenames, reverse=walk_reversed)
+
+    monkeypatch.setattr(os, "walk", walk)
+    assert [p.name for p in iter_directory_headers(inc)] == ["a_alias.h", "b_alias.h"]
