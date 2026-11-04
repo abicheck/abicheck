@@ -8,9 +8,11 @@ a `foo.h` beside a `foo/` directory pay a full second dump per side.
 
 from __future__ import annotations
 
+import json
 import random
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -133,3 +135,105 @@ def test_dir_compare_parses_each_side_once(tmp_path: Path) -> None:
         if not p.name.endswith(".projection.json")
     ]
     assert len(entries) == 2, sorted(p.name for p in entries)
+
+
+@pytest.mark.integration
+def test_skipped_witness_dump_matches_the_witnessed_reference(tmp_path: Path) -> None:
+    """Harness H5 cell (family F5): the witness's "already canonical" skip
+    equals running the witness.
+
+    Optimized: ``-H <dir>``, now canonical by construction, so the witness
+    records its proof without a second dump. Reference: the same headers
+    declared one by one in the old directory-walk order (``x/inner.h`` before
+    ``x.h``), which is not canonical, so the witness re-dumps in sorted order.
+    The canonical JSON reports must be equal, and the optimized run must
+    write fewer clang AST cache entries than the reference.
+    """
+    from _family_f5_support import canonical_report, first_difference
+
+    if sys.platform != "linux" or not (shutil.which("g++") and shutil.which("clang++")):
+        pytest.skip("needs g++ emitting ELF and clang++")
+    walk_order: dict[str, list[Path]] = {}
+    for side, extra in (("old", ""), ("new", " int added;")):
+        lib = tmp_path / side / "include" / "svs" / "lib"
+        (lib / "saveload").mkdir(parents=True)
+        (lib / "saveload.h").write_text(
+            "#pragma once\nnamespace svs{struct Save{int a;"
+            + extra
+            + "}; int save(Save*);}\n"
+        )
+        (lib / "saveload" / "inner.h").write_text(
+            '#pragma once\n#include "svs/lib/saveload.h"\n'
+            "namespace svs{struct Boot{Save s;}; int boot(Boot*);}\n"
+        )
+        walk_order[side] = [lib / "saveload" / "inner.h", lib / "saveload.h"]
+        src = tmp_path / side / "a.cpp"
+        src.write_text(
+            '#include "svs/lib/saveload/inner.h"\n'
+            "int svs::save(Save*s){return s->a;}\nint svs::boot(Boot*b){return b->s.a;}\n"
+        )
+        subprocess.run(
+            [
+                "g++",
+                "-shared",
+                "-fPIC",
+                f"-I{tmp_path / side / 'include'}",
+                "-o",
+                str(tmp_path / side / "libsvs.so"),
+                str(src),
+            ],
+            check=True,
+        )
+
+    def run(name: str, header_args: list[str]) -> tuple[int, str, int]:
+        cache = tmp_path / f"cache-{name}"
+        report = tmp_path / f"{name}.json"
+        env = abicheck_env(
+            {
+                "XDG_CACHE_HOME": str(cache),
+                "ABICHECK_AST_FRONTEND": "clang",
+            }
+        )
+        args = [str(tmp_path / "old/libsvs.so"), str(tmp_path / "new/libsvs.so")]
+        for side in ("old", "new"):
+            args += ["-I", f"{side}={tmp_path / side / 'include'}"]
+        proc = subprocess.run(
+            abicheck_command(
+                "compare",
+                *args,
+                *header_args,
+                "--depth",
+                "headers",
+                "-o",
+                f"json={report}",
+            ),
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        assert report.exists(), proc.stderr
+        entries = [
+            p
+            for p in cache.rglob("clang/*.json")
+            if not p.name.endswith(".projection.json")
+        ]
+        # What was observed, not how the inputs were spelled: the report also
+        # records each input's provenance (a directory vs. listed files).
+        doc = json.loads(canonical_report(report.read_text()))
+        observed = json.dumps(
+            {k: doc.get(k) for k in ("verdict", "changes")}, sort_keys=True, indent=1
+        )
+        return proc.returncode, observed, len(entries)
+
+    dir_args: list[str] = []
+    listed_args: list[str] = []
+    for side in ("old", "new"):
+        dir_args += ["-H", f"{side}={tmp_path / side / 'include/svs/lib'}"]
+        for h in walk_order[side]:
+            listed_args += ["-H", f"{side}={h}"]
+    exit_opt, optimized, opt_entries = run("optimized", dir_args)
+    exit_ref, reference, ref_entries = run("reference", listed_args)
+    assert exit_opt == exit_ref
+    assert "added" in optimized
+    assert optimized == reference, first_difference(optimized, reference)
+    assert opt_entries < ref_entries, (opt_entries, ref_entries)
