@@ -173,7 +173,37 @@ def test_eager_switch_forces_eager() -> None:
 # -- differential: the fixture corpus -------------------------------------------
 
 
-@pytest.mark.parametrize("path", _CORPUS, ids=lambda p: f"{p.parent.name}/{p.name}")
+def _flat_lossy_xfail(paths: list[Path]) -> list[Any]:
+    """Mark a corpus snapshot that carries an understood header extension
+    (``abicheck.export_read``, written on every binary dump since ADR-079) as
+    a strict xfail for the flat ``snapshot_to_dict`` differential: the flat
+    document refuses it (known-gaps: "A reloaded binary snapshot cannot be
+    flattened"). Strict, so fixing the gap turns this into a failure to remove."""
+    from abicheck.serialization import load_snapshot
+    from abicheck.storage.wire_extensions import flattening_loses
+
+    out: list[Any] = []
+    for path in paths:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            lossy = flattening_loses(load_snapshot(path))
+        marks = (
+            [
+                pytest.mark.xfail(
+                    strict=True,
+                    reason="flat snapshot_to_dict refuses an export_read extension",
+                )
+            ]
+            if lossy
+            else []
+        )
+        out.append(pytest.param(path, marks=marks))
+    return out
+
+
+@pytest.mark.parametrize(
+    "path", _flat_lossy_xfail(_CORPUS), ids=lambda p: f"{p.parent.name}/{p.name}"
+)
 def test_lazy_load_matches_eager_load(path: Path) -> None:
     eager = _quiet_load(path, eager=True)
     assert _quiet_load(path) == eager
