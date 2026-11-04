@@ -318,7 +318,7 @@ CACHING_BUG_CLASSES: tuple[BugClass, ...] = (
         # 1.9x RSS) because `header_utils.iter_directory_headers` sorted by
         # `Path` while ADR-082's `header_order_witness.canonical_header_order`
         # sorts by `str(resolve())`; the witness then re-ran `dumper.dump`.
-        fixed_by=(),
+        fixed_by=(1920,),
         seed_tests=("tests/test_header_dir_expansion_canonical_order.py",),
         public_surfaces=("cli:compare",),
         axes={
