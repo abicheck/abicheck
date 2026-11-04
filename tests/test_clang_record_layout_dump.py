@@ -160,6 +160,10 @@ def test_alias_template_target(written: str, desugared: str, expected: str) -> N
 _BASE_PATH = ["type:P", "P", "base:detail::Impl", "detail::Impl"]
 
 
+def _ctx(records: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    return [(n, q) for n, q in records]
+
+
 @pytest.mark.parametrize(
     ("records", "aliased"),
     [
@@ -185,7 +189,7 @@ def test_alias_scoped_path_keys_by_name_lookup(
     records: list[tuple[str, str]], aliased: bool
 ) -> None:
     paths = {"detail::Impl": [list(_BASE_PATH)]}
-    out = _alias_scoped_path_keys(paths, records, ["Impl"])
+    out = _alias_scoped_path_keys(paths, records, ["Impl"], _ctx(records))
     assert ("Impl" in out) is aliased
     assert out["detail::Impl"] == paths["detail::Impl"]
 
@@ -199,16 +203,27 @@ def test_alias_scoped_path_keys_signature_path_and_only_resolved_paths() -> None
     stray = ["type:Q", "Q", "field:x", "detail::Impl"]
     records = [("Q", "other::Q"), ("Impl", "lib::detail::Impl")]
     paths = {"detail::Impl": [fn_path, stray]}
-    out = _alias_scoped_path_keys(
-        paths, records, ["Impl"], [("fn:lib::make", "lib::make")]
-    )
+    fn_ctx = [*_ctx(records), ("fn:lib::make", "lib::make")]
+    out = _alias_scoped_path_keys(paths, records, ["Impl"], fn_ctx)
     assert out["Impl"] == [fn_path]
     # Without the function's scope the signature path resolves nowhere.
-    assert "Impl" not in _alias_scoped_path_keys(paths, records, ["Impl"])
-    # A record no change names is never aliased.
     assert "Impl" not in _alias_scoped_path_keys(
-        paths, records, ["Other"], [("fn:lib::make", "lib::make")]
+        paths, records, ["Impl"], _ctx(records)
     )
+    # A record no change names is never aliased.
+    assert "Impl" not in _alias_scoped_path_keys(paths, records, ["Other"], fn_ctx)
+
+
+def test_alias_scoped_path_keys_uses_each_sides_own_context() -> None:
+    # P moved from lib to lib2 between releases: pooled over both sides it has
+    # two scopes, but each side's own declarations name exactly one.
+    pooled = [("P", "lib::P"), ("P", "lib2::P"), ("Impl", "lib::detail::Impl")]
+    paths = {"detail::Impl": [list(_BASE_PATH)]}
+    old_side = [("P", "lib::P"), ("Impl", "lib::detail::Impl")]
+    assert "Impl" in _alias_scoped_path_keys(paths, pooled, ["Impl"], old_side)
+    # From lib2::P, detail::Impl is not visible: no alias.
+    new_side = [("P", "lib2::P"), ("Impl", "lib::detail::Impl")]
+    assert "Impl" not in _alias_scoped_path_keys(paths, pooled, ["Impl"], new_side)
 
 
 def test_exact_layout_key_is_never_shadowed_by_a_normalized_one() -> None:
@@ -439,3 +454,17 @@ def test_layout_pass_uses_the_binarys_abi_target(
         else not any(t.startswith("--target") for t in seen["tokens"])
     )
     assert out.declarations.types[0].size_bits == 32
+
+
+def test_binary_abi_target_is_none_for_a_linux_elf_snapshot() -> None:
+    """Unmocked: on an ELF/Itanium host the layout pass adds no --target (the
+    host default already matches), and resolving it never raises."""
+    from abicheck.extract.headers.clang.layout_tool import _binary_abi_target
+    from abicheck.model import AbiSnapshot, Function
+
+    snap = AbiSnapshot(
+        library="l",
+        version="1",
+        functions=[Function(name="f", mangled="_Z1fv", return_type="void")],
+    )
+    assert _binary_abi_target(snap, "c++", None, ()) is None

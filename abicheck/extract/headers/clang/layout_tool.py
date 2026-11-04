@@ -63,6 +63,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from ...._compiler_options import effective_driver_mode_is_cl
 from ....buildsource.build_query import PRUNED_HEADER_DIR_SEGMENTS
 from ....deadline import run_bounded
 from ....dumper_ast_config_cpp20 import _detect_cpp20_headers
@@ -70,10 +71,11 @@ from ....dumper_clang_errors import _is_missing_cpp_stdlib_header_error
 from ....errors import SnapshotError, ValidationError
 from ....header_utils import iter_directory_headers, resolve_inferred_header_roots
 from ....model import AbiSnapshot, RecordType, replace_with_fact_sync
+from ....model.export_index import export_names_or_modeled_fallback
 from ....name_classification import strip_anonymous_type_location
-from ...compiler_driver import resolve_clang_bin
+from ...compiler_driver import is_cl_style_driver_name, resolve_clang_bin
 from ..ast_config import _build_clang_header_command
-from ..sysinc import _resolve_clang_system_includes
+from ..sysinc import _resolve_clang_system_includes, _resolve_probe_compiler
 from .abi_target import binary_abi_target_token
 from .backend import resolve_clang_langmode
 from .error_header_retry import retry_excluding_error_headers
@@ -595,11 +597,6 @@ def _binary_abi_target(
     (``abi_target``); the layout pass must lay records out for that same ABI
     or it would attach the other ABI's sizes and offsets.
     """
-    from ...._compiler_options import effective_driver_mode_is_cl
-    from ....compiler_driver import is_cl_style_driver_name
-    from ....model.export_index import export_names_or_modeled_fallback
-    from ..sysinc import _resolve_probe_compiler
-
     gcc_path = compile.gcc_path if compile is not None else None
     gcc_prefix = compile.gcc_prefix if compile is not None else None
     gcc_options = compile.gcc_options if compile is not None else None

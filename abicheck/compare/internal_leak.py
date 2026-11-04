@@ -155,23 +155,22 @@ def _path_context(path: list[str], record_names: Mapping[str, object]) -> str | 
     return None
 
 
-def _lookup_tables(
-    old: AbiSnapshot, new: AbiSnapshot, wanted: Iterable[str]
-) -> tuple[list[tuple[str, str | None]], list[str], list[tuple[str, str]]]:
-    """Name-lookup inputs for :func:`_alias_scoped_path_keys` over both sides."""
-    snaps = (old, new)
-    records = [(t.name, t.qualified_name) for s in snaps for t in s.declarations.types]
-    entry_points = [
-        (f"fn:{f.name}", f.name) for s in snaps for f in s.declarations.functions
-    ] + [(f"var:{v.name}", v.name) for s in snaps for v in s.declarations.variables]
-    return records, list(wanted), entry_points
+def _side_contexts(snap: AbiSnapshot) -> list[tuple[str, str]]:
+    """``(path label, qualified scope)`` for one side's own declarations:
+    its records by bare name and its public functions/variables."""
+    decls = snap.declarations
+    return (
+        [(t.name, t.qualified_name or t.name) for t in decls.types]
+        + [(f"fn:{f.name}", f.name) for f in decls.functions]
+        + [(f"var:{v.name}", v.name) for v in decls.variables]
+    )
 
 
 def _alias_scoped_path_keys(
     paths: dict[str, list[list[str]]],
     records: Iterable[tuple[str, str | None]],
     wanted: Iterable[str],
-    entry_points: Iterable[tuple[str, str]] = (),
+    contexts_of_side: Iterable[tuple[str, str]],
 ) -> dict[str, list[list[str]]]:
     """Also key each scope-spelled path target by its record's bare name.
 
@@ -183,9 +182,11 @@ def _alias_scoped_path_keys(
     function/variable for a signature path. The bare alias is added only for
     a name in *wanted* (the changed records), only when that bare name
     belongs to exactly one record, and it carries only the paths that
-    resolved to it. *records* is ``(name, qualified_name)`` pairs;
-    *entry_points* is ``(path label, qualified name)`` pairs such as
-    ``("fn:make", "lib::make")``.
+    resolved to it. *records* is ``(name, qualified_name)`` pairs over both
+    sides (lookup targets); *contexts_of_side* is ``(path label, qualified
+    name)`` pairs from the side the paths were walked on (``("Public",
+    "lib::Public")``, ``("fn:make", "lib::make")``), so a referencing record
+    whose scope moved between releases still has one context per side.
     """
     wanted_names = set(wanted)
     by_qualified: dict[str, str] = {}
@@ -194,9 +195,8 @@ def _alias_scoped_path_keys(
     for name, qualified in records:
         qual = qualified or name
         by_qualified[qual] = name
-        contexts[name].add(qual)
         bare_owners[name].add(qual)
-    for label, qualified in entry_points:
+    for label, qualified in contexts_of_side:
         contexts[label].add(qualified)
     qualified_names = set(by_qualified)
     out = dict(paths)
@@ -339,9 +339,23 @@ def detect_internal_leaks(
     # Compute reachability on *both* snapshots (a type may be reachable
     # only in one direction, e.g. just-added internal type leaked by a
     # new public template).
-    tables = _lookup_tables(old, new, internal_changes)
-    old_paths = _alias_scoped_path_keys(compute_leak_paths(old, internal_set), *tables)
-    new_paths = _alias_scoped_path_keys(compute_leak_paths(new, internal_set), *tables)
+    pooled = [
+        (t.name, t.qualified_name)
+        for snap in (old, new)
+        for t in snap.declarations.types
+    ]
+    old_paths = _alias_scoped_path_keys(
+        compute_leak_paths(old, internal_set),
+        pooled,
+        internal_changes,
+        _side_contexts(old),
+    )
+    new_paths = _alias_scoped_path_keys(
+        compute_leak_paths(new, internal_set),
+        pooled,
+        internal_changes,
+        _side_contexts(new),
+    )
 
     out: list[Change] = []
     for tname, triggers in internal_changes.items():
