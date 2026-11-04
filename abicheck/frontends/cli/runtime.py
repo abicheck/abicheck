@@ -161,6 +161,32 @@ RETIRED_ROOT_COMMANDS: dict[str, str] = {
 }
 
 
+#: Retired subcommand options (ADR-091 D7, removed with no transition window)
+#: whose replacement the unknown-option error names, keyed by
+#: ``(command name, option)``. Click's own "Did you mean" fuzzy match points
+#: ``compare --version`` at ``--verbose``/``--variant``, never at ``--label``.
+RETIRED_OPTIONS: dict[tuple[str, str], str] = {
+    **{
+        (
+            cmd,
+            "--version",
+        ): "`--version` was renamed to `--label` (e.g. `--label old=1.0 --label new=1.1`)."
+        for cmd in ("compare", "dump", "history")
+    },
+    ("compare", "--abi3"): "`--abi3` was renamed to `--abi3-floor`.",
+    ("compare", "--old-root"): "use `--root old=PATH`.",
+    ("compare", "--new-root"): "use `--root new=PATH`.",
+    ("tree", "--sysroot"): "use `--root PATH`.",
+}
+
+
+def _retired_option_hint(exc: click.exceptions.ClickException) -> str | None:
+    """Name the replacement for a retired subcommand option, else ``None``."""
+    if not isinstance(exc, click.exceptions.NoSuchOption) or exc.ctx is None:
+        return None
+    return RETIRED_OPTIONS.get((exc.ctx.command.name or "", exc.option_name))
+
+
 class _AbicheckGroup(_RootGroupBase):
     """Root group that maps Click *usage* errors to a dedicated exit code.
 
@@ -209,6 +235,12 @@ class _AbicheckGroup(_RootGroupBase):
             click.echo("Aborted!", err=True)
             sys.exit(1)
         except click.exceptions.ClickException as exc:
+            hint = _retired_option_hint(exc)
+            if hint is not None:
+                # Replace Click's fuzzy "Did you mean" suggestion; keep the
+                # literal "No such option" phrase and the exit-64 remap.
+                exc.message = f"No such option: {exc.option_name}. {hint}"  # type: ignore[attr-defined]
+                exc.possibilities = None  # type: ignore[attr-defined]
             exc.show()
             # Only Click's usage-error code (2) collides with a compare verdict.
             sys.exit(_EXIT_USAGE_ERROR if exc.exit_code == 2 else exc.exit_code)
