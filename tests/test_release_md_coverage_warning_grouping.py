@@ -51,3 +51,12 @@ def test_each_warning_once_and_every_carrier_named(
         assert sum(f"`{lib['library']}`" in line for lib in libs) == len(carriers)
         if len(carriers) > 1:
             assert f"({len(carriers)} libraries:" in line
+
+
+def test_a_library_repeating_a_warning_is_named_once() -> None:
+    libs = [
+        {"library": "a.so", "coverage_warnings": ["w", "w"]},
+        {"library": "b.so", "coverage_warnings": ["w"]},
+    ]
+    entries = [ln for ln in _release_md_coverage_warnings(libs) if ln.startswith("- ")]
+    assert entries == ["- w (2 libraries: `a.so`, `b.so`)"]
