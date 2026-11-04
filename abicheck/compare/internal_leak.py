@@ -38,7 +38,7 @@ surface.
 from __future__ import annotations
 
 import collections
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING
 
 from ..model.change import Change
@@ -131,31 +131,71 @@ def _collect_internal_changes(
     return internal_changes
 
 
+def _scoped_lookup(spelling: str, context: str, qualified: set[str]) -> str | None:
+    """C++ qualified-name lookup of *spelling* written inside record *context*.
+
+    Tries the context record's own scope, then each enclosing scope out to
+    the global one (``a::b::C`` -> ``a::b::C::S``, ``a::b::S``, ``a::S``,
+    ``S``), and returns the first that names a record exactly.
+    """
+    parts = context.split("::")
+    for depth in range(len(parts), -1, -1):
+        candidate = "::".join([*parts[:depth], spelling])
+        if candidate in qualified:
+            return candidate
+    return None
+
+
+def _path_context(path: list[str], record_names: Mapping[str, object]) -> str | None:
+    """The record that wrote the path's final hop: the nearest record name
+    before the target (hop markers and entry labels are never record names)."""
+    for item in reversed(path[:-1]):
+        if item in record_names:
+            return item
+    return None
+
+
 def _alias_scoped_path_keys(
     paths: dict[str, list[list[str]]],
-    qualified_index: dict[str, set[str | None]],
+    records: Iterable[tuple[str, str | None]],
 ) -> dict[str, list[list[str]]]:
-    """Also key each scope-spelled path target by its bare record name.
+    """Also key each scope-spelled path target by its record's bare name.
 
     A leak path is keyed by the type spelling the public declaration wrote
     (clang keeps ``detail::Impl`` as written in ``: public detail::Impl``),
-    while a type change carries the record's bare ``name``. The bare alias
-    is added only when exactly one record has that bare name and its
-    qualified name ends with the written spelling, so two distinct records
-    sharing a bare name are never merged.
+    while a type change carries the record's bare ``name``. The spelling is
+    resolved by C++ name lookup from the referencing record's scope
+    (:func:`_scoped_lookup`), and the bare alias is added only when that
+    bare name belongs to exactly one record, so two records sharing a bare
+    name are never merged. *records* is ``(name, qualified_name)`` pairs.
     """
+    by_qualified: dict[str, str] = {}
+    context_qualified: dict[str, set[str]] = collections.defaultdict(set)
+    bare_owners: dict[str, set[str]] = collections.defaultdict(set)
+    for name, qualified in records:
+        qual = qualified or name
+        by_qualified[qual] = name
+        context_qualified[name].add(qual)
+        bare_owners[name].add(qual)
     out = dict(paths)
     for key, plist in paths.items():
         if "::" not in key:
             continue
-        bare = key.rsplit("::", 1)[1]
-        if bare in out:
+        resolved: set[str] = set()
+        for p in plist:
+            ctx = _path_context(p, context_qualified)
+            contexts = context_qualified.get(ctx, set()) if ctx else set()
+            if len(contexts) != 1:
+                continue
+            (ctx_qual,) = tuple(contexts)
+            hit = _scoped_lookup(key, ctx_qual, set(by_qualified))
+            if hit is not None:
+                resolved.add(hit)
+        if len(resolved) != 1:
             continue
-        quals = qualified_index.get(bare, set())
-        if len(quals) != 1:
-            continue
-        (qual,) = tuple(quals)
-        if qual is not None and (qual == key or qual.endswith("::" + key)):
+        (qual,) = tuple(resolved)
+        bare = by_qualified[qual]
+        if bare not in out and bare_owners[bare] == {qual}:
             out[bare] = plist
     return out
 
@@ -277,12 +317,12 @@ def detect_internal_leaks(
     # Compute reachability on *both* snapshots (a type may be reachable
     # only in one direction, e.g. just-added internal type leaked by a
     # new public template).
-    old_paths = _alias_scoped_path_keys(
-        compute_leak_paths(old, internal_set), merged_qualified_index
-    )
-    new_paths = _alias_scoped_path_keys(
-        compute_leak_paths(new, internal_set), merged_qualified_index
-    )
+    records = [
+        (t.name, t.qualified_name)
+        for t in (*old.declarations.types, *new.declarations.types)
+    ]
+    old_paths = _alias_scoped_path_keys(compute_leak_paths(old, internal_set), records)
+    new_paths = _alias_scoped_path_keys(compute_leak_paths(new, internal_set), records)
 
     out: list[Change] = []
     for tname, triggers in internal_changes.items():

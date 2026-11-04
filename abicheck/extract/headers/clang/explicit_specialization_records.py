@@ -42,7 +42,9 @@ def is_explicit_specialization(node: dict[str, Any], *, in_template: bool) -> bo
     """Whether *node* is a complete specialization declared outside its template."""
     return (
         not in_template
-        and bool(node.get("completeDefinition"))
+        # clang writes the key only on a definition; absent means "not one",
+        # which only withholds the record (never asserts a fact).
+        and node.get("completeDefinition") is True
         and not node.get("isImplicit")
     )
 

@@ -21,6 +21,7 @@ from abicheck.extract.headers.clang.record_layout_dump import (
     probeable_record_name,
 )
 from abicheck.extract.headers.clang.records import alias_template_target
+from tests._abicheck_subprocess import abicheck_command, abicheck_env
 
 _DERIVED_DUMP = """
 *** Dumping AST Record Layout
@@ -151,19 +152,37 @@ def test_alias_template_target(written: str, desugared: str, expected: str) -> N
     assert alias_template_target(written, desugared) == expected
 
 
-def test_alias_scoped_path_keys_only_unambiguous() -> None:
-    paths = {"detail::Impl": [["type:P", "base:detail::Impl"]], "other::Dup": [["x"]]}
-    index = {
-        "Impl": {"lib::detail::Impl"},
-        "Dup": {"a::Dup", "b::other::Dup"},  # two records share the bare name
-    }
-    out = _alias_scoped_path_keys(paths, index)
-    assert out["Impl"] == paths["detail::Impl"]
-    assert "Dup" not in out
-    # A spelling that is not a suffix of the record's qualified name is not aliased.
-    assert "Impl" not in _alias_scoped_path_keys(
-        {"other::Impl": [["x"]]}, {"Impl": {"lib::detail::Impl"}}
-    )
+_BASE_PATH = ["type:P", "P", "base:detail::Impl", "detail::Impl"]
+
+
+@pytest.mark.parametrize(
+    ("records", "aliased"),
+    [
+        # found from P's enclosing namespace lib -> lib::detail::Impl
+        ([("P", "lib::P"), ("Impl", "lib::detail::Impl")], True),
+        # found in P's own scope (nested class lookup comes first)
+        ([("P", "lib::P"), ("Impl", "lib::P::detail::Impl")], True),
+        # name lookup finds nothing: other::detail::Impl is not visible from lib::P
+        ([("P", "lib::P"), ("Impl", "other::detail::Impl")], False),
+        # two records share the bare name Impl: never merged
+        (
+            [("P", "lib::P"), ("Impl", "lib::detail::Impl"), ("Impl", "x::Impl")],
+            False,
+        ),
+        # the referencing record is ambiguous, so the lookup scope is unknown
+        (
+            [("P", "lib::P"), ("P", "y::P"), ("Impl", "lib::detail::Impl")],
+            False,
+        ),
+    ],
+)
+def test_alias_scoped_path_keys_by_name_lookup(
+    records: list[tuple[str, str]], aliased: bool
+) -> None:
+    paths = {"detail::Impl": [list(_BASE_PATH)]}
+    out = _alias_scoped_path_keys(paths, records)
+    assert ("Impl" in out) is aliased
+    assert out["detail::Impl"] == paths["detail::Impl"]
 
 
 _ORACLE_HEADER = """
@@ -266,7 +285,6 @@ def test_clang_backend_reports_catalog_kinds(
     case: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import json
-    import sys
 
     if shutil.which("clang++") is None or shutil.which("g++") is None:
         pytest.skip("needs clang++ and g++")
@@ -293,33 +311,17 @@ def test_clang_backend_reports_catalog_kinds(
         )
         snap = tmp_path / f"{v}.json"
         subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "abicheck",
-                "dump",
-                str(lib),
-                "-H",
-                str(header),
-                "-o",
-                str(snap),
-            ],
+            abicheck_command("dump", lib, "-H", header, "-o", snap),
             check=True,
             capture_output=True,
+            env=abicheck_env(),
         )
         snaps.append(snap)
     report = tmp_path / "r.json"
     subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "abicheck",
-            "compare",
-            *map(str, snaps),
-            "-o",
-            f"json={report}",
-        ],
+        abicheck_command("compare", *snaps, "-o", f"json={report}"),
         capture_output=True,
+        env=abicheck_env(),
     )
     data = json.loads(report.read_text(encoding="utf-8"))
     kinds = {c["kind"] for c in data["changes"]}
