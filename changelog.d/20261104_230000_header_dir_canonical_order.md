@@ -1,0 +1,3 @@
+### Fixed
+
+- **A `-H <dir>` compare no longer parses each side's headers twice.** A directory expansion sorted headers by path components (`foo/bar.h` before `foo.h`), while the ADR-082 header-order witness sorts by the whole path string (`foo.h` first). Any header tree with a `foo.h` beside a `foo/` directory — a common C++ layout — was therefore never "already canonical", and the witness re-ran the whole dump in sorted order: a second clang parse, projection and cache entry per side (SVS: 2.2x CPU, 1.9x peak RSS). Directory expansion now emits the witness's canonical order, so the second dump no longer runs. A header order you declare yourself is still witnessed as before, and stored `header_canonical` sequences are unchanged.

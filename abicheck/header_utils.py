@@ -159,8 +159,7 @@ def iter_directory_headers(
     *pruned_segments* directory names are dropped from the walk **in place**, so
     the walk never descends into them (VCS metadata, abicheck's own in-tree cmake
     build dir) rather than stat-ing every entry only to discard it afterwards.
-    Sorted for a deterministic surface.
-    """
+    Sorted in the ADR-082 canonical order, so the order witness never re-dumps."""
     found: list[Path] = []
     for dirpath, dirnames, filenames in os.walk(directory):
         dirnames[:] = [d for d in dirnames if d not in pruned_segments]
@@ -169,7 +168,7 @@ def iter_directory_headers(
             f = base / name
             if f.suffix.lower() in HEADER_SUFFIXES and f.is_file():
                 found.append(f)
-    return sorted(found)
+    return sorted(found, key=lambda h: str(h.resolve()))  # canonical_header_key
 
 
 def split_public_header_inputs(
