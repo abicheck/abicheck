@@ -46,6 +46,7 @@ from typing import Any
 from ..model import AbiSnapshot
 from .canonical import CAPTURE_METADATA_KEY
 from .dto import SECTION_SCHEMA_VERSIONS, SEMANTIC_IR_SECTION_KIND
+from .extension_facts import sync_export_read_fact
 from .import_v1 import legacy_section_dto_dict
 from .json_stream import OMIT, LazyItems
 from .legacy_sections import LEGACY_SECTION_KINDS, section_fields, section_of_field
@@ -200,6 +201,7 @@ def sectioned_document_stream(
     the snapshot fields it never walks. Callers use
     `snapshot_encode.streamed_sectioned_document`, which supplies both.
     """
+    sync_export_read_fact(snap)  # ADR-079: the model field -> its fact
     refuse_unwritable_extensions(snap)
     _refuse_unsectioned_fields(snap, skip_fields)
     ext = extensions_of(snap)  # ADR-062 D14

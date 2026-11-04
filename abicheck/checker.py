@@ -520,7 +520,7 @@ def _apply_soname_policy(
     from .diff_versioning import demote_internal_version_node_findings
     from .elf_metadata import ElfMetadata as _ElfMetadata
     from .policy.closure_identity_postprocess import apply_closure_identity_postprocess
-    from .workflows.generation_drift import demote_cross_generation_drift
+    from .workflows.operand_evidence_demotion import demote_operand_evidence_gaps
 
     _old_elf = getattr(old, "elf", None) or _ElfMetadata()
     _new_elf = getattr(new, "elf", None) or _ElfMetadata()
@@ -529,9 +529,9 @@ def _apply_soname_policy(
     # or spurious bump recommendation (validation parity class A, nettle 3.7).
     demote_internal_version_node_findings(kept + verdict_redundant, _old_elf, _new_elf)
 
-    # Closure respellings, then undeclared cross-generation respellings (H1).
+    # Closure respellings, then operand-evidence gaps (H1 drift, ADR-079 partial).
     apply_closure_identity_postprocess(kept, verdict_redundant, old, new)
-    demote_cross_generation_drift(kept + verdict_redundant, old, new)
+    demote_operand_evidence_gaps(kept + verdict_redundant, old, new)
 
     # Classify before deriving, not after: everything appended to `kept` up to
     # this point (the declared-floor, wheel and numpy checks above included) is

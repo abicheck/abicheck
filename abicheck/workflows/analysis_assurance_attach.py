@@ -53,6 +53,7 @@ def attach_analysis_assurance(
     """
     from ..evidence_depth import embedded_evidence_pack
     from ..policy.analysis_assurance import compute_analysis_assurance
+    from ..policy.analysis_assurance._export_read import EXPORT_READ_NOTE_PREFIX
     from ..policy.analysis_assurance._template_defaults import template_default_gap
     from ..storage.snapshot_encode import same_persisted_content
 
@@ -70,6 +71,13 @@ def attach_analysis_assurance(
     # ADR-085 D3: the same template-default gap the rollup reports is a coverage
     # gap, so the coverage-gap rows of every report show it.
     result.coverage_warnings.extend(template_default_gap(old, new)[1])
+    # ADR-079: likewise an export table recorded as not completely read -- the
+    # notes the rollup just built, not a second computation of them.
+    result.coverage_warnings.extend(
+        note
+        for note in result.analysis_assurance.notes
+        if note.startswith(EXPORT_READ_NOTE_PREFIX)
+    )
 
 
 def attach_evidence_depths(

@@ -19,6 +19,7 @@ from click.testing import CliRunner
 
 from abicheck.cli import main
 from abicheck.storage.evidence_digest import VOLATILE_CAPTURE_FIELDS
+from abicheck.storage.snapshot_encode import sectioned_document_for_write
 
 #: What a member snapshot records about its *capture* rather than the
 #: binary: the evidence digest's volatile set, plus the file size the
@@ -27,9 +28,29 @@ from abicheck.storage.evidence_digest import VOLATILE_CAPTURE_FIELDS
 _CAPTURE_FIELDS = VOLATILE_CAPTURE_FIELDS | {"source_size"}
 
 
+def _without_capture(doc: dict, fields: frozenset[str] | set[str]) -> dict:
+    """Strip only capture fields, preserving section headers and extension facts."""
+    if "sections" not in doc:
+        return {k: v for k, v in doc.items() if k not in fields}
+    return {
+        **doc,
+        "sections": {
+            name: {
+                **section,
+                "payload": {
+                    k: v for k, v in section["payload"].items() if k not in fields
+                },
+            }
+            if isinstance(section.get("payload"), dict)
+            else section
+            for name, section in doc["sections"].items()
+        },
+    }
+
+
 def _evidence(doc: dict) -> dict:
     members = {
-        key: {k: v for k, v in snap.items() if k not in _CAPTURE_FIELDS}
+        key: _without_capture(snap, _CAPTURE_FIELDS)
         for key, snap in doc["per_library_snapshots"].items()
     }
     return {**doc, "per_library_snapshots": members}
@@ -165,8 +186,10 @@ def test_the_label_names_every_member(tmp_path: Path) -> None:
         "dump", str(old_libs), "--label", "9.9", "--bundle-facts-out", str(dumped)
     )
     assert result.exit_code == 0, result.output
-    doc = json.loads(dumped.read_text(encoding="utf-8"))
-    assert {s["version"] for s in doc["per_library_snapshots"].values()} == {"9.9"}
+    from abicheck.serialization import load_bundle_facts
+
+    facts = load_bundle_facts(dumped)
+    assert {s.version for s in facts.per_library_snapshots.values()} == {"9.9"}
 
 
 @pytest.mark.parametrize("with_headers", [False, True], ids=["binary", "headers"])
@@ -180,7 +203,6 @@ def test_each_member_is_the_libraries_own_dump(
     from abicheck.serialization import (
         load_bundle_facts,
         load_snapshot,
-        snapshot_to_dict,
     )
 
     if with_headers and shutil.which("castxml") is None:
@@ -206,7 +228,7 @@ def test_each_member_is_the_libraries_own_dump(
     stamped = _CAPTURE_FIELDS | {"git_commit", "git_tag", "dump_provenance"}
 
     def _strip(snapshot) -> dict:
-        return {k: v for k, v in snapshot_to_dict(snapshot).items() if k not in stamped}
+        return _without_capture(sectioned_document_for_write(snapshot), stamped)
 
     assert sorted(facts.per_library_snapshots) == [f"{name}.so" for name, *_ in _LIBS]
     for key, member in facts.per_library_snapshots.items():

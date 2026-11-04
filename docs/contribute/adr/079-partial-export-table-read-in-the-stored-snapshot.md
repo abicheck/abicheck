@@ -1,14 +1,12 @@
 # ADR-079: Recording a Partial Export-Table Read in the Stored Snapshot
 
 **Date:** 2026-10-12
-**Status:** Accepted — not implemented (accepted 2026-11-02; amended 2026-11-03: stored as an ADR-062 D19 extension fact on the `binary` section, superseding D5's global bump). Written for the known gap
+**Status:** Accepted — implemented (accepted 2026-11-02; amended 2026-11-03: stored as an ADR-062 D19 extension fact on the `binary` section, superseding D5's global bump). Written for the known gap
 [`a-stored-snapshot-keeps-no-record-of-a-partial-export-table-read`](../known-gaps/a-stored-snapshot-keeps-no-record-of-a-partial-export-table-read.md).
-Accepts one snapshot field and a schema bump, with D4 and D5 as proposed
-(a `partial` read lowers scope completeness, no new exit code; old readers
-are handled by the existing version gate, without raising the hard-rejection
-floor). The v58/v59 numbers below are the draft's: the implementing change
-takes the next free schema version and carries the bump. No code, schema or
-default has changed yet.
+Accepts one snapshot field with D4 as proposed (a `partial` read lowers
+scope completeness, no new exit code). D2, D3 and D5 are read through the
+[amendment](#amendment-2026-11-03-stored-as-an-extension-fact-adr-062-d19):
+no `SCHEMA_VERSION` bump. See [Implementation](#implementation).
 
 ## Context
 
@@ -121,6 +119,48 @@ the same mechanism v42 used for the envelope change, and does not raise
   from the version number.
 - A mutation test on the reader's mapping, so that flipping `partial` to
   `complete` fails a test.
+
+## Implementation
+
+- **Model.** `model/export_read.ExportReadState` (`complete`/`partial`/
+  `failed`/`unrecorded`) is the `export_read` field of `ElfMetadata`,
+  `PeMetadata` and `MachoMetadata` (`compare=False`: provenance, not table
+  content). `export_read_state` is the D1 writer rule.
+- **Writer.** `extract/export_table_read.read_exports_or_fail` stamps
+  `complete` on the block it returns; a read that noted a failure still
+  raises there (`dump` keeps rejecting it). `read_library_export_facts`
+  applies the same D1 rule to a raw binary's recorded failures, so a library
+  read live and its stored copy carry the same fact.
+- **Encoding (D2/D3, as amended).** `storage/extension_fact_catalog.EXPORT_READ`
+  (`abicheck.export_read`, `binary`, `SECTION_MUST_UNDERSTAND`,
+  `must_understand_when` a value is `partial`/`failed`). Its value lists
+  every platform block that is not `complete` (`{}`: all complete), so D2's
+  "a complete read is not written" holds per block, and an absent fact is
+  D3's `unrecorded`. `storage/extension_facts.sync_export_read_fact` writes
+  it from the model field before every write path and the evidence digest
+  (a no-op while every block is `unrecorded`, so a loaded fact is kept);
+  `apply_export_read_fact` sets the blocks from it on load and refuses a
+  value that does not decode. The block itself never carries the key
+  (`storage/enum_codec.py` drops it), so a flat document reads `unrecorded`.
+- **Readers (D4).** `model/export_index.platform_export_read` is the one
+  effective-state rule: a recorded `partial`/`failed` is taken as recorded,
+  anything else keeps the pre-ADR-079 rule. `ExportTableState.PARTIAL` withdraws
+  every stored "not exported" answer (at dump and at load), the `exports`
+  coverage record reads `failed` (`export_table_partially_read`),
+  `read_default_export_names` answers unknown, and consumer scoping refuses
+  a `PARTIAL` library (it reads absence).
+- **Comparison, assurance, report.** `policy/partial_export_read.py` keeps
+  each removal a recorded `partial`/`failed` NEW table cannot establish and
+  annotates it `COMPATIBLE_WITH_RISK` under the `partial_export_table_read`
+  rule (a removal the NEW side's parsed headers establish stands).
+  `analysis_assurance.export_read` reports each side's recorded states and a
+  gap makes the status `partial` (so `assurance.require_complete` exits 1);
+  `run_outcome.scope` reads `incomplete`; the Markdown report lists the gap
+  as a coverage row. Report schema 7.2.
+- **Tests.** `tests/unit/storage/test_export_read_persisted.py` (property
+  over the read outcomes × live/stored × ELF/PE/Mach-O, a document without
+  the fact, re-save, an older reader, the D1 table) and `tests/test_cli_compare_partial_export_read.py`
+  (the public `compare` path, with a complete-table control).
 
 ## Amendment (2026-11-03): stored as an extension fact (ADR-062 D19)
 

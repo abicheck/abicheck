@@ -177,8 +177,13 @@ def require_read_library(facts: LibraryExportFacts) -> LibraryExportFacts:
     narrow every OLD requirement away (a clean verdict nobody checked) or
     prove every NEW one missing (a break nobody observed). Called after the
     consumer is read, so an unreadable consumer is still reported first.
+
+    A ``PARTIAL`` fact (ADR-079: the table was cut short) is refused too.
+    Its entries are real, but scoping reads *absence*: a requirement the
+    unread part satisfies would read as missing on NEW (a break nobody
+    observed), and an OLD requirement it held would be narrowed away.
     """
-    if facts.status is FactStatus.FAILED:
+    if facts.status in (FactStatus.FAILED, FactStatus.PARTIAL):
         raise LibraryExportsUnreadableError(facts.failure_reason or facts.label)
     return facts
 

@@ -138,8 +138,7 @@ def test_an_older_reader_loses_only_an_optional_fact(section: str, value: Any) -
     assert "must_understand" not in document["sections"][section]
     old = _older_load(document)
     assert old.unreadable_sections == ()
-    # A flat mapping cannot retain the fact's header carrier (ADR-062 D14).
-    # The sectioned re-save below checks equivalence without discarding it.
+    # Flat mappings cannot retain the extension's header carrier (ADR-062 D14).
     with pytest.raises(SnapshotError, match="refusing to flatten"):
         snapshot_to_dict(old)
     # The older reader keeps the fact verbatim and re-saves it unchanged;

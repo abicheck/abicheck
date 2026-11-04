@@ -410,6 +410,36 @@
             "type": "string"
           }
         },
+        "export_read": {
+          "type": "object",
+          "description": "Schema 7.2 (ADR-079): each side's recorded export-table read, per platform block: {\"old\": {platform: state}, \"new\": {platform: state}}. A state is complete, partial, failed or unrecorded (a snapshot without the export-read extension fact, read by the legacy rule). A side with no binary maps to {}. partial or failed on either side makes status partial.",
+          "properties": {
+            "old": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "enum": [
+                  "complete",
+                  "partial",
+                  "failed",
+                  "unrecorded"
+                ]
+              }
+            },
+            "new": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "enum": [
+                  "complete",
+                  "partial",
+                  "failed",
+                  "unrecorded"
+                ]
+              }
+            }
+          }
+        },
         "section_availability": {
           "type": "array",
           "description": "Schema 7.1 (analysis_assurance 1.3, ADR-062 D15): every stored snapshot section that is not present on either side, one entry per side and section. not_collected (the producer never collected it), failed (its extractor failed) and blocked (this build cannot use it: an unknown must-understand name or a newer section_schema_version) resolve every analysis reading that section to not evaluated and lower status to partial; unrecorded (absent from a stored document that predates the section availability table) is read as its defaults, as before, and only listed. A not_collected section is never read as an empty one. Present only when non-empty.",
@@ -457,7 +487,7 @@
   "properties": {
     "audit_report_schema_version": {
       "type": "string",
-      "description": "SemVer-style version of THIS schema (currently \"1.7\"). Consumers should accept any version with the same MAJOR component. Deliberately not named `report_schema_version`: that field identifies a compare report, and an audit is a different document.",
+      "description": "SemVer-style version of THIS schema (currently \"1.8\"). Consumers should accept any version with the same MAJOR component. Deliberately not named `report_schema_version`: that field identifies a compare report, and an audit is a different document.",
       "pattern": "^[0-9]+\\.[0-9]+$"
     },
     "no_baseline": {

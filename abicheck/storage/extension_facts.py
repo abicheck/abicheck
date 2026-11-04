@@ -34,9 +34,13 @@ from __future__ import annotations
 
 from typing import Any, TypeVar
 
+from ..errors import SnapshotError
+from ..model.availability import FactStatus
+from ..model.export_read import ExportReadState
 from ..model.fact import Fact
 from .canonical import canonical_form
 from .extension_fact_catalog import (
+    EXPORT_READ,
     EXTENSION_FACTS,
     ExtensionFact,
     ExtensionFactRegistry,
@@ -50,7 +54,12 @@ from .wire_extensions import (
     extensions_of,
 )
 
-__all__ = ["read_extension_fact", "write_extension_fact"]
+__all__ = [
+    "apply_export_read_fact",
+    "read_extension_fact",
+    "sync_export_read_fact",
+    "write_extension_fact",
+]
 
 T = TypeVar("T")
 
@@ -136,3 +145,53 @@ def read_extension_fact(snap: Any, fact: ExtensionFact[T]) -> Fact[T]:
             f"extension fact {fact.name!r} does not decode: {exc}", producer=None
         )
     return Fact.present(value)
+
+
+_PLATFORMS = ("elf", "pe", "macho")
+
+
+def _platform_blocks(snap: Any) -> dict[str, Any]:
+    return {p: m for p in _PLATFORMS if (m := getattr(snap, p, None)) is not None}
+
+
+def sync_export_read_fact(snap: Any) -> None:
+    """Record *snap*'s platform blocks' ``export_read`` as the
+    :data:`~.extension_fact_catalog.EXPORT_READ` fact (ADR-079), so every
+    write and the evidence digest carry it.
+
+    A no-op when no block records its read (all ``unrecorded``): there is
+    nothing to say, and a fact a loaded document already carries is kept.
+    Otherwise the value lists every block that is not ``complete``. Each
+    write path and the digest call this first; it is idempotent.
+    """
+    blocks = _platform_blocks(snap)
+    states = {
+        p: ExportReadState(getattr(m, "export_read", ExportReadState.UNRECORDED))
+        for p, m in blocks.items()
+    }
+    if all(s is ExportReadState.UNRECORDED for s in states.values()):
+        return
+    if _blocked_reason(snap, EXPORT_READ.section) is not None:
+        return
+    value = {p: s.value for p, s in states.items() if s is not ExportReadState.COMPLETE}
+    write_extension_fact(snap, EXPORT_READ, value)
+
+
+def apply_export_read_fact(snap: Any) -> None:
+    """Set each loaded platform block's ``export_read`` from the stored fact:
+    a listed platform reads its state, an unlisted one ``complete``. With no
+    fact (or a ``binary`` section this build cannot read) the blocks keep
+    ``unrecorded``. A value that does not decode is refused: reading it as
+    complete is the false-clean path the fact exists to close."""
+    fact = read_extension_fact(snap, EXPORT_READ)
+    if fact.status is FactStatus.NOT_COLLECTED:
+        return
+    if fact.status is not FactStatus.PRESENT or fact.value is None:
+        if _blocked_reason(snap, EXPORT_READ.section) is not None:
+            return
+        raise SnapshotError(
+            "snapshot's export_read extension fact is unreadable: "
+            + "; ".join(str(d) for d in fact.diagnostics)
+        )
+    for platform, meta in _platform_blocks(snap).items():
+        meta.export_read = ExportReadState(fact.value.get(platform, "complete"))

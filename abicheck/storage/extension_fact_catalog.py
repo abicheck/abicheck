@@ -58,6 +58,7 @@ from typing import Any, Generic, TypeVar
 from .dto import SECTION_SCHEMA_VERSIONS
 
 __all__ = [
+    "EXPORT_READ",
     "EXTENSION_FACTS",
     "ExtensionFact",
     "ExtensionFactRegistry",
@@ -202,7 +203,57 @@ class ExtensionFactRegistry:
         return ExtensionFactRegistry((*self._facts.values(), *facts))
 
 
-#: This build's optional extension facts. Empty: the rule (ADR-062 D19)
-#: applies going forward. Add a fact by declaring it as a module constant
-#: above and listing it here.
-EXTENSION_FACTS = ExtensionFactRegistry(())
+#: The platform blocks ``export_read`` covers, and the states it may record
+#: for one (``complete`` is never written: an unlisted platform is complete).
+_EXPORT_READ_PLATFORMS = frozenset({"elf", "pe", "macho"})
+_EXPORT_READ_LISTED_STATES = frozenset({"partial", "failed", "unrecorded"})
+_EXPORT_READ_GAP_STATES = frozenset({"partial", "failed"})
+
+
+def _export_read_map(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict):
+        raise TypeError(
+            f"export_read must map a platform to its read state, got "
+            f"{type(value).__name__}"
+        )
+    out: dict[str, str] = {}
+    for platform, state in value.items():
+        if platform not in _EXPORT_READ_PLATFORMS:
+            raise ValueError(f"export_read names unknown platform {platform!r}")
+        if state not in _EXPORT_READ_LISTED_STATES:
+            raise ValueError(
+                f"export_read {platform!r} state {state!r} is not "
+                f"one of {sorted(_EXPORT_READ_LISTED_STATES)}"
+            )
+        out[platform] = state
+    return {k: out[k] for k in sorted(out)}
+
+
+#: ADR-079 (amended by ADR-062 D19): how completely each platform block's
+#: export table was read (``model/export_read.ExportReadState``). Written on
+#: the ``binary`` section whenever a block records its read, as
+#: ``{platform: state}`` for every block that is *not* complete (``{}``: all
+#: complete). Absent, nothing was recorded (a writer that predates the fact,
+#: or a hand-built block): the blocks read ``unrecorded``, never complete. A
+#: ``partial``/``failed`` value is must-understand for ``binary``: a reader
+#: that ignored it would read a cut-short table as complete.
+EXPORT_READ: ExtensionFact[dict[str, str]] = ExtensionFact(
+    name="abicheck.export_read",
+    section="binary",
+    semantics=ReaderSemantics.SECTION_MUST_UNDERSTAND,
+    absent_reads_as=(
+        "unrecorded: no record of the export-table read; the older rule "
+        "(a block is read when it holds an export or its header was parsed) "
+        "decides, never complete"
+    ),
+    owner="ADR-079",
+    encode=_export_read_map,
+    decode=_export_read_map,
+    must_understand_when=lambda value: any(
+        state in _EXPORT_READ_GAP_STATES for state in value.values()
+    ),
+)
+
+#: This build's optional extension facts (ADR-062 D19). Add a fact by
+#: declaring it as a module constant above and listing it here.
+EXTENSION_FACTS = ExtensionFactRegistry((EXPORT_READ,))

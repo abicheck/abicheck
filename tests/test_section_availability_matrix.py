@@ -280,6 +280,32 @@ def test_live_and_stored_operands_agree(section: str, state: str, side: str) -> 
         assert listed == []
 
 
+@pytest.mark.parametrize("state", ["partial", "failed"])
+def test_section_availability_and_export_read_survive_together(state: str) -> None:
+    """D15 and ADR-079 must both survive the shared decoder and assurance fold."""
+    from abicheck.model.export_read import ExportReadState
+
+    old, live = _snap("1"), _live("types", "not_collected", "2")
+    assert live.elf is not None
+    live.elf.export_read = ExportReadState(state)
+    stored = _reloaded(live)
+    assert stored.elf is not None
+    assert stored.elf.export_read == ExportReadState(state)
+    assert stored.section_availability == live.section_availability
+    for candidate in (live, stored):
+        result = compare(old, candidate)
+        assert result.analysis_assurance is not None
+        assurance = result.analysis_assurance.to_dict()
+        assert assurance["schema_version"] == "1.4"
+        assert assurance["status"] == "partial"
+        assert assurance["export_read"]["new"] == {"elf": state}
+        assert [
+            (e["side"], e["section"], e["status"])
+            for e in assurance["section_availability"]
+        ] == [("new", "types", "not_collected")]
+    assert _outcome(old, live) == _outcome(old, stored)
+
+
 def test_a_not_collected_section_is_never_the_empty_one() -> None:
     """The bug class: swapping unavailable evidence for empty evidence must
     change the result. Per section, the not-collected and the

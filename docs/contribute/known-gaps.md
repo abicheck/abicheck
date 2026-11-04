@@ -255,8 +255,8 @@ current emitter, which is unchanged.
 
 #### A stored snapshot keeps no record of a partial export-table read
 
-**Status (2026-10-12): PARTIAL.** Fixed: FAILED import reads; tests/unit/workflows/test_failed_consumer_read.py exists. Open: a stored snapshot cannot record a partial export-table read. [ADR-081](adr/079-partial-export-table-read-in-the-stored-snapshot.md) is drafted and Proposed; the schema field waits on its decision, so the schema stays at v58.  
-`false-clean` — FAILED import reads are fixed. A stored snapshot still cannot record that its export-table read was partial; ADR-081 is drafted (Proposed) and needs a schema decision. [Full write-up](known-gaps/a-stored-snapshot-keeps-no-record-of-a-partial-export-table-read.md)
+**Status (2026-11-03): FIXED for persistence and consumers ([ADR-079](adr/079-partial-export-table-read-in-the-stored-snapshot.md), stored as the `binary` section's `abicheck.export_read` extension fact, ADR-062 D19); narrowed.** Each platform block's export read is recorded (`complete`/`partial`/`failed`; a document without the fact reads `unrecorded`, never `complete`). The export fact, `exports` coverage, consumer scoping, the comparison (a removal a partial NEW table cannot establish is kept as `COMPATIBLE_WITH_RISK`, rule `partial_export_table_read`), analysis assurance and `run_outcome.scope` honor it, live and stored alike. Tests: `tests/unit/storage/test_export_read_persisted.py`, `tests/test_cli_compare_partial_export_read.py`. Still open: an older baseline cut short has no fact and stays unrecorded (re-dump it); a release/package member's partial read lowers that member's assurance but not the release `comparison_scope` record.  
+`false-clean` — A stored snapshot now records a partial export-table read and every reader honors it; only an older baseline with no record can still hide one. [Full write-up](known-gaps/a-stored-snapshot-keeps-no-record-of-a-partial-export-table-read.md)
 
 #### `debug = 1` DWARF has no function types, so a return-type break reads `NO_CHANGE` with `assurance: complete` (2026-10-15)
 

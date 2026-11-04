@@ -32,6 +32,7 @@ from typing import TypeVar
 
 from ..model import AbiSnapshot, Function, Variable, Visibility
 from ..model.export_index import ExportTableState, snapshot_export_table_state
+from ..model.export_read import ExportReadState
 from ..storage import closure_identity
 from ..storage.snapshot_load_normalization import stamp_macho_elf_binding
 from .parse_failures import export_table_read_required
@@ -56,9 +57,16 @@ def read_exports_or_fail(
     unreadable table is an error (the exit-1 failure a truncated binary gets)
     rather than an empty export surface. See
     :func:`~abicheck.extract.parse_failures.export_table_read_required`.
+    The returned block records ``export_read = complete`` (ADR-079 D1), the
+    state a stored snapshot then carries.
     """
     with export_table_read_required(binary):
-        return reader(binary)
+        meta = reader(binary)
+    # ADR-079 D1: a read that noted no failure is complete; one that noted a
+    # failure raised above (``dump`` rejects it), so it never reaches a block.
+    if hasattr(meta, "export_read"):
+        meta.export_read = ExportReadState.COMPLETE
+    return meta
 
 
 def reconcile_snapshot_export_absence(snapshot: AbiSnapshot) -> int:

@@ -27,12 +27,19 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from ..model import AbiSnapshot
 from ..model.availability import FactStatus
 from ..model.consumer_requirements import LibraryExportFacts
-from ..model.export_index import platform_block_parsed
+from ..model.export_index import (
+    RawExportIndex,
+    build_raw_export_index_from_elf,
+    build_raw_export_index_from_macho,
+    build_raw_export_index_from_pe,
+    platform_export_read,
+)
+from ..model.export_read import ExportReadState, export_read_state
 from ..model.name_decoration import elf_version
 from ..model.surface_facts import is_binary_exported
 from .consumer_imports import detect_binary_file_format
@@ -130,7 +137,7 @@ def read_library_export_facts(lib: Path | AbiSnapshot) -> LibraryExportFacts:
     with recording_export_read_failures() as failures:
         elf_meta, pe_meta, macho_meta = _platform_metadata(lib, fmt)
     export_names = _export_names(fmt, elf_meta, pe_meta, macho_meta)
-    reason = _export_read_failure(
+    status, reason = _export_read_outcome(
         failures,
         {"elf": elf_meta, "pe": pe_meta, "macho": macho_meta}[fmt],
         export_names,
@@ -158,27 +165,59 @@ def read_library_export_facts(lib: Path | AbiSnapshot) -> LibraryExportFacts:
         exports_by_ordinal=(
             None if pe_meta is None else {e.ordinal: e.name for e in pe_meta.exports}
         ),
-        status=FactStatus.PRESENT if reason is None else FactStatus.FAILED,
+        status=status,
         failure_reason=None if reason is None else f"{label}: {reason}",
     )
 
 
-def _export_read_failure(
-    failures: list[str], meta: object | None, export_names: frozenset[str]
-) -> str | None:
-    """Why *meta*'s export table cannot be trusted, or ``None`` when it was read.
+_FACT_STATUS = {
+    ExportReadState.COMPLETE: FactStatus.PRESENT,
+    ExportReadState.PARTIAL: FactStatus.PARTIAL,
+    ExportReadState.FAILED: FactStatus.FAILED,
+}
 
-    A failure the platform parser recorded while reading a raw binary wins;
-    otherwise the table counts as read when it holds an entry or its header
-    fields show a real parse (:func:`platform_block_parsed`, the rule the
-    dump's own export fact uses), which also covers a stored snapshot whose
-    platform block is a parse-failed default.
+
+def _export_read_outcome(
+    failures: list[str], meta: object | None, export_names: frozenset[str]
+) -> tuple[FactStatus, str | None]:
+    """``(status, reason)`` for *meta*'s export table (ADR-079 D4).
+
+    A raw binary's read is judged from the failures its parser recorded
+    (:func:`~abicheck.model.export_read.export_read_state`): ``partial``
+    when exports were read and a failure was noted, ``failed`` when none
+    was. A stored block is judged by :func:`platform_export_read`: its
+    recorded ``partial``/``failed`` state, else the header-parse rule. The
+    two paths share one state vocabulary, so a library read live and its
+    stored copy carry the same fact.
     """
+    if meta is None:
+        return FactStatus.FAILED, "export table was not read"
     if failures:
-        return "; ".join(dict.fromkeys(failures))
-    if meta is None or not (export_names or platform_block_parsed(meta)):
-        return "export table was not read"
-    return None
+        state = export_read_state(failure_noted=True, exports_read=bool(export_names))
+        detail = "; ".join(dict.fromkeys(failures))
+    else:
+        state = platform_export_read(meta, _raw_index(meta))
+        detail = (
+            "export table recorded as partially read"
+            if state is ExportReadState.PARTIAL
+            else "export table was not read"
+        )
+    if state is ExportReadState.COMPLETE:
+        return FactStatus.PRESENT, None
+    if state is ExportReadState.PARTIAL:
+        detail = f"{detail} (partial: the unread part is unknown, not absent)"
+    return _FACT_STATUS[state], detail
+
+
+def _raw_index(meta: object) -> RawExportIndex:
+    from ..model.elf_facts import ElfMetadata
+    from ..model.pe_facts import PeMetadata
+
+    if isinstance(meta, ElfMetadata):
+        return build_raw_export_index_from_elf(meta)
+    if isinstance(meta, PeMetadata):
+        return build_raw_export_index_from_pe(meta)
+    return build_raw_export_index_from_macho(cast("MachoMetadata", meta))
 
 
 def _resolvable_symbol_names(name: str, mangled: str | None) -> set[str]:

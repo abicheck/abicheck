@@ -666,6 +666,12 @@ ANALYSIS_1_BUG_CLASSES: tuple[BugClass, ...] = (
             # (parse failure, skipped .dynsym, parse-failed stored block)
             # read as "exports nothing" -> every required symbol "missing".
             "tests/unit/extract/test_library_export_read_failures.py",
+            # ADR-079: a stored snapshot whose export table was cut short read
+            # as complete forever -- the unread part's symbols read as
+            # unexported and their removal as a break. Persisted (an ADR-062 D19 extension fact)
+            # and honored live and stored, on ELF, PE and Mach-O.
+            "tests/unit/storage/test_export_read_persisted.py",
+            "tests/test_cli_compare_partial_export_read.py",
             # An ELF/PE/Mach-O whose export table could not be read (corrupt
             # .dynsym, unnamed exports, no PT_DYNAMIC) dumped to an empty
             # surface: a compare against it read every export as added, or

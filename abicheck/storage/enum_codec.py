@@ -32,7 +32,16 @@ __all__ = ["encode_platform_enums"]
 
 
 def encode_platform_enums(d: dict[str, Any]) -> None:
-    """In-place: ElfMetadata/PeMetadata/MachoMetadata enum members -> strings."""
+    """In-place: ElfMetadata/PeMetadata/MachoMetadata enum members -> strings.
+
+    Each block's ``export_read`` (ADR-079) is dropped here: it is persisted
+    as the ``binary`` section's ``abicheck.export_read`` extension fact
+    (``storage/extension_facts.sync_export_read_fact``), never as a block key.
+    """
+    for platform in ("elf", "pe", "macho"):
+        block = d.get(platform)
+        if isinstance(block, dict):
+            block.pop("export_read", None)
     if d.get("elf"):
         elf = d["elf"]
         for sym in elf.get("symbols", []):

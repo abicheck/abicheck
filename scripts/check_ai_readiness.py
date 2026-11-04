@@ -116,6 +116,7 @@ from no_inline_gate_computation import (  # noqa: E402
     check_no_inline_gate_computation,
 )
 from perf_antipatterns import check_perf_antipatterns  # noqa: E402
+from schema_bump_gate import check_schema_bump_reasons  # noqa: E402
 from semantic_ir_cutover import check_semantic_ir_cutover  # noqa: E402
 
 # ---------------------------------------------------------------------------

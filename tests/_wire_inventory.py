@@ -100,7 +100,10 @@ def _payload_keys(codec: Any) -> list[str]:
 def _records(
     path: str, cls: type, out: dict[str, list[str]], seen: frozenset[type]
 ) -> None:
-    out[path] = sorted(wire_field_names(cls))
+    # ADR-079: encode_platform_enums strips this runtime view; the state
+    # is stored in the binary header extension, never in a metadata payload.
+    omitted = {"export_read"} if path in {"elf", "pe", "macho"} else set()
+    out[path] = sorted(set(wire_field_names(cls)) - omitted)
     if cls in seen:
         return
     for name, element in sorted(nested_record_classes(cls).items()):

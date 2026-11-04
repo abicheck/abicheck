@@ -67,7 +67,7 @@
       "abicheck/extract/elf_symbol_versions.py": "b2aa29df27ed51b9cbe3f6b94e9c99e391036216621fa35cb72dc922ecf39786",
       "abicheck/extract/env_flags.py": "6a1343268cdfcd4b2ccaf91008d96b611973bf5cab04467c2585f012e1f5466c",
       "abicheck/extract/export_symbol_identity.py": "2146bd67207411943258124a24271542c8b9767344c1b404aaa9133c0358ff00",
-      "abicheck/extract/export_table_read.py": "17bb4dd37c45886a9cf7c3e74355b9fe8b7c3f7d6bed338165e71397dfedd654",
+      "abicheck/extract/export_table_read.py": "58fdf78460a49cf1f906e3321c76aff912c27a70a3198050d9e532cdbbf39958",
       "abicheck/extract/flat_map_dependency_scope.py": "5fa66ab2f8ebdbc37d735e3dbad3b6fe1ae3907d7a98eab5c6e6257842e2ea07",
       "abicheck/extract/header_ast_backend.py": "1f5b15c126b139c49b702b69a4f626ed7d30f8294e15ad116d61387e96d31f16",
       "abicheck/extract/header_ast_cache_producers.py": "aa85ae5d148526267f600b0972ca89afc27b6b8cb3f51b4c781a1526773600b4",
@@ -148,7 +148,7 @@
       "abicheck/extract/headers/sysinc.py": "f82bd29033ed9d21f2b2af9a29352eb2b52b9c01ba7a09f47509af89017a359a",
       "abicheck/extract/headers/template_default_scan.py": "3b56f9307028934aa2126de14fa9847333bdc990f0943445604b255e494060e8",
       "abicheck/extract/headers/toolchain.py": "36d9f6dfda706653d6d41875f00bb9ada3975a1f5efb512f8c0a6b0db0cc54c6",
-      "abicheck/extract/library_export_facts.py": "071b2a58f284753b57fa2e374680a57e9ce6897877b65a84fb92f420e7cf2ab7",
+      "abicheck/extract/library_export_facts.py": "02f4f9bdc8ed4ec7215c3f40e4d4183e695d304c44f0ccaa44ec4cd18b72a927",
       "abicheck/extract/macho_build_signals.py": "c277bfdd55f26aae61af66c8fa6c5cdc5fa45acc49a3ae513af5899417db88bb",
       "abicheck/extract/mangled_foreign_template_args.py": "58892490cdf5173d3e562a8f63abe3b55371beb30aaacbf79d9aecfcd08ca8bc",
       "abicheck/extract/manifest_semantic_ir.py": "9d8a6ddaa619a7d4b214bbeab5c2c0dfef681a6fd9dffd004760b19a62da3b15",
@@ -174,7 +174,7 @@
       "abicheck/extract/semantic_normalizer_dwarf.py": "d092c309a8e349f9b699e5931456188485670ef05a8048783496d915fe7a7a83",
       "abicheck/extract/semantic_normalizer_template_args.py": "9e07ae6b02395411ad22cbd02e2acbe3f9d70b5a33283b606a9296ba9d55b1b2",
       "abicheck/extract/stdlib_local_origin.py": "5ba2ab65b5d264138e07adfa3506ade7706239bcc07cc04e3fb75596ec7b4358",
-      "abicheck/extract/surface_fact_producers.py": "04bf7fb7a1cef30ffbc942101d82f23f2f25fcd1e59a49aa6de2d3acdcf59cc9",
+      "abicheck/extract/surface_fact_producers.py": "3a6c9b3a355342de1f4658a2154f9769dde9c1165dd7b90aba7d449f5f6b7cda",
       "abicheck/extract/system_header_layout.py": "3784ee2f9386949eb3db9e4d77f9b92a5211106d72e4de1d004c9ea7f7d1a0cd",
       "abicheck/extract/target_platform.py": "d2f2774c26bd12eb623a64883c2611782cac8f3d84da51248a969bd1f288e739",
       "abicheck/extract/target_platform_probe.py": "8aa0a1b5d3352033f66ead8a609afac8076d6a6957ba1f8f8ea1e78f28b842e9",
@@ -192,9 +192,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "dff1d4e37d611c41729ca722ea4da1c1dd248a4fdb29cf3ce317d89a735fa073",
+    "fingerprint": "393e6aca4df5c4f00ed884c46e9f965e1b9272fe9f2257cd88a9d1f3c1515017",
     "generation": 35,
-    "reason": "merge of main: cache_input_digest's cross-process file-digest store is off on Windows (main #1908, no semantic change); this branch's generation-35 semantics (see generation_migrations[35]) are unchanged by the merge"
+    "reason": "Integrate main generation 35 with ADR-079 export-read provenance: retain main extraction semantics and the additive recorded export-read state"
   },
   "resolver": {
     "files": {

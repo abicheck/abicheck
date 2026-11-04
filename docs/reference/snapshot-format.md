@@ -95,6 +95,21 @@ that section's `section_schema_version`, because a reader predating D14
 ignores the key. Exit codes are unchanged; see
 [analysis assurance](exit-codes.md#analysis-assurance-contribution-p04).
 
+**Export-table read (`abicheck.export_read`).** The `binary` section header's
+`extensions` map records how completely each platform block's export table
+was read, as `{platform: state}` for every block that was *not* read
+completely: `partial` (some exports read and a read failure recorded: the
+entries are real, the unread part is unknown, never absent), `failed`
+(nothing read) or `unrecorded`. `{}` means every block was read completely.
+A dump always writes it; a document without it (written before the fact
+existed, or from a hand-built object) reads `unrecorded`, which keeps the
+older rule: a block is read when it holds an export or its header fields show
+a parse. It is never read as complete. A `partial` or `failed` value also
+names `abicheck.export_read` in the section's `must_understand`, so a reader
+that does not know the fact reports the `binary` analyses *not comparable*
+rather than reading a cut-short table as complete. A `complete` dump blocks no
+reader. Neither `schema_version` nor `section_schema_version` changes for it.
+
 Every `dump` invocation produces this, with no flag. Compression
 (`--compression`, see [Storage encoding](#storage-encoding)) wraps it
 but never changes it.

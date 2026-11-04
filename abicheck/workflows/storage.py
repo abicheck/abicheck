@@ -37,6 +37,8 @@ resolves.
 
 from __future__ import annotations
 
+from typing import Any
+
 from ..project_snapshot_legacy import (
     is_project_snapshot_package_dir,
     read_legacy_snapshot_document,
@@ -60,10 +62,39 @@ from ..storage.sectioned_document import (
     is_sectioned_document,
     to_sectioned_document,
 )
+from ..storage.wire_extensions import WIRE_EXTENSIONS_KEY
+
+
+def attach_write_carriers(payload: dict[str, Any], snap: Any) -> dict[str, Any]:
+    """Carry *snap*'s ADR-062 D14 carriers on its flat ``snapshot_to_dict``
+    *payload* (under the private, never-written ``WIRE_EXTENSIONS_KEY``), so
+    a writer that sections the payload itself (``dump``) writes them back.
+    ADR-079's ``export_read`` fact is synced from the platform blocks first.
+    Returns *payload*."""
+    from ..storage.extension_facts import sync_export_read_fact
+    from ..storage.wire_extensions import extensions_of
+
+    sync_export_read_fact(snap)
+    carried = extensions_of(snap)
+    if carried is not None:
+        payload[WIRE_EXTENSIONS_KEY] = carried
+    return payload
+
+
+def sectioned_payload(payload: dict[str, Any], max_known_schema_version: int) -> Any:
+    """:func:`to_sectioned_document` of a payload :func:`attach_write_carriers`
+    may have carried carriers on."""
+    return to_sectioned_document(
+        payload,
+        max_known_schema_version=max_known_schema_version,
+        extensions=payload.pop(WIRE_EXTENSIONS_KEY, None),
+    )
+
 
 __all__ = [
     "_COMPRESSED_SUFFIXES",
     "SnapshotCompression",
+    "attach_write_carriers",
     "bounded_decoded_prefix",
     "detect_snapshot_compression",
     "from_sectioned_document",
@@ -73,6 +104,7 @@ __all__ = [
     "pack_project_package",
     "read_legacy_snapshot_document",
     "resolve_write_compression",
+    "sectioned_payload",
     "to_sectioned_document",
     "unpack_project_package",
     "write_legacy_snapshot_package",
