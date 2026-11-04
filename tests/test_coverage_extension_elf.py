@@ -735,7 +735,13 @@ class TestObjectAlignmentReduced:
             fact = Fact.present(
                 AbiFundamental(FundamentalEncoding.SIGNED, size=align, align=align)
             )
-            return Variable(name="g", mangled="g", type="int", type_abi_fact=fact)
+            return Variable(
+                name="g",
+                mangled="g",
+                type="int",
+                type_abi_fact=fact,
+                declared_in_headers_fact=Fact.present(True),
+            )
 
         old = _elf(symbols=[_obj("g", alignment=64)])
         new = _elf(symbols=[_obj("g", alignment=2)])
@@ -753,7 +759,13 @@ class TestObjectAlignmentReduced:
         fact = Fact.present(AbiFundamental(FundamentalEncoding.SIGNED, size=4, align=4))
 
         def v(type_name: str) -> Variable:
-            return Variable(name="g", mangled="g", type=type_name, type_abi_fact=fact)
+            return Variable(
+                name="g",
+                mangled="g",
+                type=type_name,
+                type_abi_fact=fact,
+                declared_in_headers_fact=Fact.present(True),
+            )
 
         old = _elf(symbols=[_obj("g", alignment=16)])
         new = _elf(symbols=[_obj("g", alignment=4)])
@@ -761,6 +773,20 @@ class TestObjectAlignmentReduced:
         assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED in _kinds(typedef)
         plain = compare(_snap(old, [v("int")]), _snap(new, [v("int")]))
         assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED not in _kinds(plain)
+
+    def test_dwarf_only_variable_does_not_use_the_natural_alignment(self):
+        # A DWARF-derived variable carries type_abi_fact but records no
+        # DW_AT_alignment, so an ``alignas(16) int`` reduced to a plain int is
+        # unknowable from it; the address-derived drop must still fire.
+        from abicheck.model import Fact
+        from abicheck.model.abi_fundamental import AbiFundamental, FundamentalEncoding
+
+        fact = Fact.present(AbiFundamental(FundamentalEncoding.SIGNED, size=4, align=4))
+        dwarf_var = Variable(name="g", mangled="g", type="int", type_abi_fact=fact)
+        old = _elf(symbols=[_obj("g", alignment=16)])
+        new = _elf(symbols=[_obj("g", alignment=4)])
+        r = compare(_snap(old, [dwarf_var]), _snap(new, [dwarf_var]))
+        assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED in _kinds(r)
 
 
 # ── Undefined-symbol (import) surface ────────────────────────────────────────

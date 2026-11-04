@@ -182,6 +182,7 @@
       "abicheck/extract/unparseable_header_fallback.py": "a9aae1490ad88bb1f1bd9ddfe96681d4a3b9558436446305c66fb44f0003c2f6",
       "abicheck/extract/wheel_tags.py": "0a6eff34860223c9efb0fc2d62469804d50d59ae1825c726abafaf7c898789db",
       "abicheck/macho_metadata.py": "9b3fa13cbbc127fcf981289c4b15ff2aaabc6dfd10d7747a7262fd3cfda3e69e",
+      "abicheck/model/arithmetic_type_spellings.py": "790e6049cf5607e20d987d2151bacc4ba331f76e24c486b0305102f79f4ae726",
       "abicheck/pdb_metadata.py": "374231d67b2f90ab9f9f98ce7f839b413aa4e17def57472cb1306fa9587cd103",
       "abicheck/pdb_model.py": "d79ccfac86f4889d8d9b2c745ee2dacd6132c1789c0ca77988aaf53bd50aea8a",
       "abicheck/pdb_parser.py": "498bf0baa243b293d090f7910c467c9ce0988ea95edd6125de9692f07194a425",
@@ -191,9 +192,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "d22e65379e3c0c0440f8b328af88ac8dd3fd91c1821b9bd57015b3aa25a16f9d",
+    "fingerprint": "cb9b152595b6989cf4bcfaf8e62dd54543b94ef5031cc8e571ae5db7114e2376",
     "generation": 36,
-    "reason": "moved the arithmetic-spelling predicate unchanged from extract/ to model/ (compare/ needs it); same set and same rule, so nothing an extractor records changes"
+    "reason": "added model/arithmetic_type_spellings.py to the extractor scope (EXTRACTOR_EXTRA_FILES): it moved there unchanged from extract/ in this PR, and its rule decides which header initializers the backends record, so it must stay under the extractor generation"
   },
   "resolver": {
     "files": {

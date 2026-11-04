@@ -29,6 +29,7 @@ import re
 import shutil
 import subprocess
 import sys
+import warnings
 from pathlib import Path
 
 import pytest
@@ -984,7 +985,17 @@ def test_example_source_smoke(case_name: str, tmp_path: Path) -> None:
         result = ve.run_case(case_name, entry, work)
     finally:
         if work != tmp_path:
-            shutil.rmtree(work, ignore_errors=True)
+            # Never raise here (it would mask the test's own failure), but do
+            # not leave a locked directory behind silently either.
+            def _warn(*args: object) -> None:
+                warnings.warn(
+                    f"could not remove source-smoke work dir {args[1]}", stacklevel=1
+                )
+
+            if sys.version_info >= (3, 12):
+                shutil.rmtree(work, onexc=_warn)
+            else:
+                shutil.rmtree(work, onerror=_warn)
 
     if result.status == "SKIP":
         pytest.skip(f"{case_name}: {result.message}")

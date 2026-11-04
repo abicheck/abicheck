@@ -87,3 +87,21 @@ def test_a_policy_verdict_is_not_overridden():
     )
     assert changes[0].effective_verdict is Verdict.API_BREAK
     assert changes[0].modulation_reason is None
+
+
+@pytest.mark.parametrize(
+    ("dwarf_enums", "demoted"), [({}, True), ({"E": object()}, False)]
+)
+def test_a_dwarf_enum_vetoes_the_demotion(dwarf_enums, demoted):
+    # An enum the headers do not show (in an internal struct) but DWARF does
+    # still changes size under -fshort-enums.
+    from abicheck.model.dwarf_facts import DwarfMetadata
+
+    changes = _flip()
+    old, new = _snap(headers=True, enums=0), _snap(headers=True, enums=0)
+    for snap in (old, new):
+        snap.declarations.debug_layout = DwarfMetadata(
+            has_dwarf=True, enums=dict(dwarf_enums)
+        )
+    demote_unexposed_enum_size_flag(changes, old, new)
+    assert (changes[0].effective_verdict is Verdict.COMPATIBLE) is demoted

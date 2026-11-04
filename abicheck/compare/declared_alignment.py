@@ -42,6 +42,18 @@ def declared_alignment_bits(snap: AbiSnapshot, sym_name: str) -> int | None:
     # plain int's alignment and hide a real reduction.
     if not is_arithmetic_spelling(var.type):
         return None
+    # Only for a declaration a header AST parsed: there an explicit
+    # ``AlignedAttr`` would have been recorded as ``alignment_bits``, so its
+    # absence means none was declared. A DWARF-derived variable records no
+    # ``DW_AT_alignment`` at all, so for it an ``alignas(16)`` is unknown, and
+    # the natural alignment must not stand in for it.
+    declared = var.declared_in_headers_fact
+    if (
+        declared is None
+        or declared.status is not FactStatus.PRESENT
+        or not declared.value
+    ):
+        return None
     fact = var.type_abi_fact
     if (
         fact is not None

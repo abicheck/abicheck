@@ -342,6 +342,7 @@ def test_changed_default_is_never_a_silent_clean(
         # observed answer, not a silent one (case224). A function template's
         # added default is still reported (it can rebind an overload's call).
         assert not reported, (case, report["verdict"])
+        assert report["verdict"] == "NO_CHANGE", (case, report["verdict"])
         return
     assert reported or (
         report["analysis_assurance"]["status"] == "partial" and _gap_notes(report)
