@@ -110,6 +110,11 @@ def detect_template_param_default_changed(
         changed = [
             i for i, (a, b) in enumerate(zip(before, after, strict=True)) if a != b
         ]
+        # A default only *added* (no default -> one) leaves every previously
+        # valid spelling valid with the same meaning: before, the argument had
+        # to be written explicitly. It is not an API break (case224).
+        if all(before[i] is None for i in changed):
+            continue
         change = make_change(
             ChangeKind.TEMPLATE_PARAM_DEFAULT_CHANGED,
             symbol=key,
@@ -227,6 +232,9 @@ def detect_function_template_param_default_changed(
         changed = [
             i for i, (a, b) in enumerate(zip(before, after, strict=True)) if a != b
         ]
+        # Unlike a class template, an added default is still reported here:
+        # it makes the template viable for a call that omits the argument, so
+        # a call an existing overload served can silently rebind to it.
         new_fn = new_decls[0]
         symbol = f"{qname}({', '.join(param.type for param in new_fn.params)})"
         change = make_change(
@@ -318,6 +326,27 @@ def _extract_template_args(demangled: str) -> str | None:
     return head[last_open + 1 : end]
 
 
+def _substituted_template_args(fn: Function, qname: str) -> str | None:
+    """The template arguments *fn*'s symbol actually carries.
+
+    The clang header backend names an instance by its source spelling, which
+    elides a defaulted argument (``mylib::Box<int>::size`` for both
+    ``Box<int, int>`` and ``Box<int, long>``), so the two sides of a changed
+    default read identical arguments and never paired (case229 under clang).
+    The Itanium mangling records the substituted arguments, so its demangled
+    form is preferred whenever it carries them; otherwise *qname*'s.
+    """
+    from ..demangle import demangle_one_batched
+    from ..model.mangled_name import itanium_name_carries_template_arguments
+
+    if itanium_name_carries_template_arguments(fn.mangled):
+        demangled = demangle_one_batched(fn.mangled)
+        args = _extract_template_args(demangled) if demangled else None
+        if args is not None:
+            return args
+    return _extract_template_args(qname)
+
+
 def detect_default_template_arg_changed(
     old: AbiSnapshot,
     new: AbiSnapshot,
@@ -368,13 +397,17 @@ def detect_default_template_arg_changed(
     seen_pairs: set[tuple[str, str]] = set()
     for fn in removed:
         old_qname = old_name_of(fn)
-        old_args = _extract_template_args(old_qname)
+        if _extract_template_args(old_qname) is None:
+            continue
+        old_args = _substituted_template_args(fn, old_qname)
         if old_args is None:
             continue
         entity = _callable_stem(old_qname)
         for cand in added_by_entity.get(entity, []):
             new_qname = new_name_of(cand)
-            new_args = _extract_template_args(new_qname)
+            if _extract_template_args(new_qname) is None:
+                continue
+            new_args = _substituted_template_args(cand, new_qname)
             if new_args is None or new_args == old_args:
                 continue
             # Require that the two argument lists differ only in trailing

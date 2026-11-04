@@ -65,6 +65,10 @@ dependency walk and debug roots to every member. No open gap remains.
 
 ### Report and detector coverage
 
+#### The clang header backend reports a layout break without `type_size_changed`/`type_field_offset_changed` when DWARF has no full definition (2026-11-04)
+
+**Status (2026-11-04): OPEN.** clang's `-ast-dump=json` carries no computed layout, so a record's size and offsets come only from the same binary's DWARF (`extract/dwarf_layout_backfill.py`). GCC emits a dynamic class with no key function in the TU, and a class template reached only through `extern template`, as a `DW_AT_declaration` stub, so `Derived` in case43, `Buffer<int>` in case17 and the derived record in case77 stay unfilled. The verdict is still BREAKING through `type_field_added`, and a consumer smoke proves the break, but the size and offset kinds that castxml reports are missing. The same frontend split shows in case74–76 (`internal_type_leaks_via_public_api` absent under clang) and case80 (`type_field_type_changed` absent under clang), and case85 under castxml reports `func_visibility_changed` plus `internal_template_leaks_via_public_api` where the catalog lists `func_removed`. A lane PASS on these cases means the verdict matched, not every expected kind. Fix direction: read the layout clang itself computes (`-Xclang -fdump-record-layouts`) instead of depending on DWARF. Owner: `dumper_clang.py`, `extract/dwarf_layout_backfill.py`.
+
 
 #### The standing-inventory headline folds observed compatible findings into one clause (2026-10-28)
 
@@ -137,6 +141,10 @@ current emitter, which is unchanged.
 **Status (2026-10-22): OPEN.** `signature_hash` differs on 1374 of 1531 paired functions, record `type_hash` on 290 of 290, and typedef `type_hash` on 22 of 22. The inputs differ (L4 hashes its own `_signature(node)` string, `base.py` hashes `return(params)`), so the hashes cannot show the underlying types are equal. The default-argument `value` differs on 18 pairs: L4 spells `p0=sha256:…` and the projection spells `max_threads=expr:…`. A pinned set cannot include these fields until both producers use one canonical spelling.
 
 ### False-clean risk
+
+#### A reloaded binary snapshot written since ADR-079 cannot be flattened with `snapshot_to_dict` (2026-11-04)
+
+**Status (2026-11-04): OPEN.** Since ADR-079 (#1914) every binary dump writes the `binary` section's `abicheck.export_read` extension fact (`{}` when every export table was read completely). Absent means `unrecorded`, so the writer cannot leave it out. A snapshot loaded from disk keeps the fact in `WireExtensions.header_extras`, and `storage/wire_extensions.flattening_loses` counts any header extra as lossy, so `snapshot_to_dict` refuses every reloaded binary snapshot written since ADR-079 (an older one without another carrier still flattens). The frozen gen35 extractor corpus is the first fixture to carry the fact. Its flat-document differentials (`test_snapshot_section_decode.py`, `test_snapshot_lazy_decode.py`) assert that refusal and compare every other observed value, until the flat document can carry an understood extension fact, or `flattening_loses` exempts one the flat path can round-trip. Owner: `storage/wire_extensions.py`, `storage/extension_facts.py`.
 
 #### A cached header parse does not see a newly reachable system header that its depfile never named (2026-11-01)
 

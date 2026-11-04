@@ -78,6 +78,7 @@ from ....model import (
     Visibility,
 )
 from ....model.abi_fundamental import AbiFundamental
+from ....model.arithmetic_type_spellings import is_arithmetic_spelling
 from ....model.declaration_headers import attributed
 from ....model.export_index import ExportMatch
 from ....model.identity import (
@@ -87,7 +88,6 @@ from ....model.identity import (
     entity_id_for_typedef,
     entity_id_for_variable,
 )
-from ...arithmetic_type_spellings import is_arithmetic_spelling
 from ...declaration_provenance import header_from_location
 from ...surface_fact_producers import header_ast_surface_facts
 from ..scope_segments import (
@@ -231,7 +231,7 @@ class _CastxmlParser:
         eligible only when it is declared ``inline`` (``inline int x = 1;``, a
         C++17 definition every TU shares, read by ``castxml/inline_variables``)
         and its type is arithmetic: a pointer, class, or other spelling is not
-        a number a consumer observes (``extract/arithmetic_type_spellings.py``).
+        a number a consumer observes (``model/arithmetic_type_spellings.py``).
         A non-inline non-const global carries no value, as before.
         """
         if el.get("access") in ("private", "protected"):

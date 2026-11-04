@@ -4429,30 +4429,60 @@
   },
   "case223_header_only_template_default_changed": {
    "abi_break": false,
-   "api_break": false,
+   "api_break": true,
    "bad_practice": false,
-   "category": "no_change",
-   "description": "Header-only class template mylib::Box<T, U = int> with its default changed to U = long. Nothing exports or names Box, and the old default does not reference another template parameter. On the default castxml lane the header-only default change reads NO_CHANGE, with run status partial and the 'template-parameter defaults (castxml cannot record them)' assurance gap. The clang backend records the defaults and reports template_param_default_changed as API_BREAK (pinned in tests/test_default_template_arg_l2_matrix.py). No symbol or public signature depends on the default, so no BREAKING finding is produced.",
-   "expected": "NO_CHANGE",
+   "category": "api_break",
+   "description": "Header-only class template mylib::Box<T, U = int> with its default changed to U = long. Nothing exports or names Box, so no symbol changes and nothing is BREAKING; but consumer source spelling Box<int> now names Box<int, long> (an independent consumer that relies on the field type compiles against v1 and is rejected against v2), so the contract verdict is API_BREAK via template_param_default_changed. castxml cannot observe the change (known_gap_frontends).",
+   "expected": "API_BREAK",
    "expected_absent_kinds": [
-    "template_param_default_changed",
     "default_template_arg_changed",
     "public_dependency_role_changed"
    ],
-   "expected_kinds": [],
+   "expected_kinds": [
+    "template_param_default_changed"
+   ],
+   "known_gap": "castxml cannot record template-parameter defaults (ADR-085 D1/D3): on the castxml lane the change reads NO_CHANGE with run status partial and the 'template-parameter defaults (castxml cannot record them)' assurance gap -- a coverage limitation, not a compatibility claim. The clang backend records the defaults and reports the expected kind.",
+   "known_gap_frontends": [
+    "castxml"
+   ],
+   "known_gap_observed": [
+    "NO_CHANGE"
+   ],
    "min_evidence": "L2",
    "platforms": [
     "linux",
     "macos",
     "windows"
-   ]
+   ],
+   "source_smoke": {
+    "mode": "syntax",
+    "proof": "consumer default-meaning smoke: static_assert that Box<char>::u is int compiles against v1 and is rejected against v2 (U = long)",
+    "source": "consumer_smoke.cpp",
+    "standard": "c++17",
+    "v1": {
+     "expect": "success"
+    },
+    "v2": {
+     "expect": "failure",
+     "replace": [
+      [
+       "\"v1.h\"",
+       "\"v2.h\""
+      ],
+      [
+       "<v1.h>",
+       "<v2.h>"
+      ]
+     ]
+    }
+   }
   },
   "case224_header_only_template_default_added": {
    "abi_break": false,
    "api_break": false,
    "bad_practice": false,
    "category": "no_change",
-   "description": "Header-only Box<T, U>: a default U = int is added to a parameter that had none. Same header-only shape as case223, in the opposite direction. On the default castxml lane the header-only default change reads NO_CHANGE, with run status partial and the 'template-parameter defaults (castxml cannot record them)' assurance gap (ADR-085 D3). The clang backend records the defaults and reports template_param_default_changed as API_BREAK, which is pinned in tests/test_default_template_arg_l2_matrix.py, not here. No symbol or public signature depends on the default, so no BREAKING finding is produced.",
+   "description": "Header-only Box<T, U> gains a default (U = int). Before, every use had to spell U explicitly, and every such spelling stays valid with the same meaning, so adding a default is not an API break: both frontends report NO_CHANGE (clang records the defaults; the template_param_default_changed detector skips a parameter whose default was only added). castxml additionally reports its template-parameter-defaults assurance gap.",
    "expected": "NO_CHANGE",
    "expected_absent_kinds": [
     "template_param_default_changed",
@@ -4468,22 +4498,52 @@
   },
   "case225_header_only_template_default_removed": {
    "abi_break": false,
-   "api_break": false,
+   "api_break": true,
    "bad_practice": false,
-   "category": "no_change",
-   "description": "Header-only Box<T, U = int>: the default is removed from U. Same header-only shape as case223, in the removal direction. On the default castxml lane the header-only default change reads NO_CHANGE, with run status partial and the 'template-parameter defaults (castxml cannot record them)' assurance gap (ADR-085 D3). The clang backend records the defaults and reports template_param_default_changed as API_BREAK, which is pinned in tests/test_default_template_arg_l2_matrix.py, not here. No symbol or public signature depends on the default, so no BREAKING finding is produced.",
-   "expected": "NO_CHANGE",
+   "category": "api_break",
+   "description": "Header-only Box<T, U = int>: the default is removed from U. Same header-only shape as case223, in the removal direction: consumer source spelling Box<int> compiles against v1 and is ill-formed against v2, so the contract verdict is API_BREAK via template_param_default_changed. castxml cannot observe the change (known_gap_frontends).",
+   "expected": "API_BREAK",
    "expected_absent_kinds": [
-    "template_param_default_changed",
     "default_template_arg_changed"
    ],
-   "expected_kinds": [],
+   "expected_kinds": [
+    "template_param_default_changed"
+   ],
+   "known_gap": "castxml cannot record template-parameter defaults (ADR-085 D1/D3): on the castxml lane the change reads NO_CHANGE with run status partial and the 'template-parameter defaults (castxml cannot record them)' assurance gap -- a coverage limitation, not a compatibility claim. The clang backend records the defaults and reports the expected kind.",
+   "known_gap_frontends": [
+    "castxml"
+   ],
+   "known_gap_observed": [
+    "NO_CHANGE"
+   ],
    "min_evidence": "L2",
    "platforms": [
     "linux",
     "macos",
     "windows"
-   ]
+   ],
+   "source_smoke": {
+    "mode": "syntax",
+    "proof": "consumer default-reliance smoke: Box<char> compiles against v1 and is ill-formed against v2 (no default for U)",
+    "source": "consumer_smoke.cpp",
+    "standard": "c++17",
+    "v1": {
+     "expect": "success"
+    },
+    "v2": {
+     "expect": "failure",
+     "replace": [
+      [
+       "\"v1.h\"",
+       "\"v2.h\""
+      ],
+      [
+       "<v1.h>",
+       "<v2.h>"
+      ]
+     ]
+    }
+   }
   },
   "case226_header_only_template_default_unchanged": {
    "abi_break": false,
@@ -4506,42 +4566,102 @@
   },
   "case227_nested_namespace_template_default_changed": {
    "abi_break": false,
-   "api_break": false,
+   "api_break": true,
    "bad_practice": false,
-   "category": "no_change",
-   "description": "The header-only default change of case223 (U = int becomes U = long), with the template in the nested namespace mylib::detail. The qualified-name pairing must match the pattern under its nested scope. On the default castxml lane the header-only default change reads NO_CHANGE, with run status partial and the 'template-parameter defaults (castxml cannot record them)' assurance gap. The clang backend records the defaults and reports template_param_default_changed as API_BREAK (pinned in tests/test_default_template_arg_l2_matrix.py). No symbol or public signature depends on the default, so no BREAKING finding is produced.",
-   "expected": "NO_CHANGE",
+   "category": "api_break",
+   "description": "The header-only default change of case223 (U = int becomes U = long), with the template in the nested namespace mylib::detail. The qualified-name pairing must match the pattern under its nested scope. Contract verdict API_BREAK via template_param_default_changed; castxml cannot observe the change (known_gap_frontends).",
+   "expected": "API_BREAK",
    "expected_absent_kinds": [
-    "template_param_default_changed",
     "default_template_arg_changed",
     "public_dependency_role_changed"
    ],
-   "expected_kinds": [],
+   "expected_kinds": [
+    "template_param_default_changed"
+   ],
+   "known_gap": "castxml cannot record template-parameter defaults (ADR-085 D1/D3): on the castxml lane the change reads NO_CHANGE with run status partial and the 'template-parameter defaults (castxml cannot record them)' assurance gap -- a coverage limitation, not a compatibility claim. The clang backend records the defaults and reports the expected kind.",
+   "known_gap_frontends": [
+    "castxml"
+   ],
+   "known_gap_observed": [
+    "NO_CHANGE"
+   ],
    "min_evidence": "L2",
    "platforms": [
     "linux",
     "macos",
     "windows"
-   ]
+   ],
+   "source_smoke": {
+    "mode": "syntax",
+    "proof": "consumer default-meaning smoke: static_assert that detail::Box<char>::u is int compiles against v1 and is rejected against v2",
+    "source": "consumer_smoke.cpp",
+    "standard": "c++17",
+    "v1": {
+     "expect": "success"
+    },
+    "v2": {
+     "expect": "failure",
+     "replace": [
+      [
+       "\"v1.h\"",
+       "\"v2.h\""
+      ],
+      [
+       "<v1.h>",
+       "<v2.h>"
+      ]
+     ]
+    }
+   }
   },
   "case228_nontype_template_param_default_changed": {
    "abi_break": false,
-   "api_break": false,
+   "api_break": true,
    "bad_practice": false,
-   "category": "no_change",
-   "description": "Header-only Buf<T, int N = 4> with its non-type default changed to N = 8. The clang recorder spells non-type defaults (ADR-085 Remaining 3), so it reports template_param_default_changed as API_BREAK. The castxml side records nothing and reports its own gap, so its verdict stays NO_CHANGE. The validator lane is castxml, so the expected result is NO_CHANGE with a gap.",
-   "expected": "NO_CHANGE",
+   "category": "api_break",
+   "description": "Header-only Buf<T, int N = 4> with its non-type default changed to N = 8. A consumer's Buf<int> changes size (a static_assert on sizeof compiles against v1 and fails against v2), so the contract verdict is API_BREAK via template_param_default_changed; the clang recorder spells non-type defaults (ADR-085 Remaining 3). castxml records nothing (known_gap_frontends).",
+   "expected": "API_BREAK",
    "expected_absent_kinds": [
-    "template_param_default_changed",
     "default_template_arg_changed"
    ],
-   "expected_kinds": [],
+   "expected_kinds": [
+    "template_param_default_changed"
+   ],
+   "known_gap": "castxml cannot record template-parameter defaults (ADR-085 D1/D3): on the castxml lane the change reads NO_CHANGE with run status partial and the 'template-parameter defaults (castxml cannot record them)' assurance gap -- a coverage limitation, not a compatibility claim. The clang backend records the defaults and reports the expected kind.",
+   "known_gap_frontends": [
+    "castxml"
+   ],
+   "known_gap_observed": [
+    "NO_CHANGE"
+   ],
    "min_evidence": "L2",
    "platforms": [
     "linux",
     "macos",
     "windows"
-   ]
+   ],
+   "source_smoke": {
+    "mode": "syntax",
+    "proof": "consumer layout smoke: static_assert(sizeof(Buf<char>) == 4) compiles against v1 and is rejected against v2 (N = 8)",
+    "source": "consumer_smoke.cpp",
+    "standard": "c++17",
+    "v1": {
+     "expect": "success"
+    },
+    "v2": {
+     "expect": "failure",
+     "replace": [
+      [
+       "\"v1.h\"",
+       "\"v2.h\""
+      ],
+      [
+       "<v1.h>",
+       "<v2.h>"
+      ]
+     ]
+    }
+   }
   },
   "case229_exported_template_default_changed": {
    "abi_break": true,

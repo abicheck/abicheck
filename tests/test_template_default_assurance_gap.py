@@ -336,6 +336,14 @@ def test_changed_default_is_never_a_silent_clean(
     report = _compare(tmp_path, backend, old, new)
     kinds = {c["kind"] for c in report["changes"]}
     reported = "template_param_default_changed" in kinds
+    if backend == "clang" and case.startswith("class_") and case.endswith("_added"):
+        # clang recorded both sides, and an added class-template default
+        # invalidates no previously valid spelling: a clean result here is the
+        # observed answer, not a silent one (case224). A function template's
+        # added default is still reported (it can rebind an overload's call).
+        assert not reported, (case, report["verdict"])
+        assert report["verdict"] == "NO_CHANGE", (case, report["verdict"])
+        return
     assert reported or (
         report["analysis_assurance"]["status"] == "partial" and _gap_notes(report)
     ), (case, report["verdict"], report["analysis_assurance"])

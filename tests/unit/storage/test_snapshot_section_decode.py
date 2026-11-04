@@ -17,6 +17,7 @@ from typing import Any
 
 import pytest
 
+from abicheck.errors import SnapshotError
 from abicheck.serialization import load_snapshot, snapshot_from_dict, snapshot_to_json
 from abicheck.storage import snapshot_codec
 from abicheck.storage.evidence_digest import evidence_digest_of_document
@@ -45,6 +46,7 @@ from abicheck.storage.snapshot_section_decode import (
     decode_provenance_section,
     decode_types_section,
 )
+from abicheck.storage.wire_extensions import flattening_loses
 
 _FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
 _CORPUS = sorted(
@@ -168,8 +170,24 @@ def _observed(snap: Any) -> tuple[str, str, str]:
     return (
         snapshot_to_json(snap),
         snapshot_content_digest(snap),
-        evidence_digest_of_document(snapshot_to_dict(snap)),
+        _flat_evidence_digest(snap),
     )
+
+
+def _flat_evidence_digest(snap: Any) -> str:
+    """The flat document's evidence digest, or a pinned refusal.
+
+    A snapshot carrying an understood header extension (ADR-079's
+    ``abicheck.export_read``, on every binary dump since then; the gen35
+    corpus) is refused by ``snapshot_to_dict`` (known-gaps: "A reloaded binary
+    snapshot written since ADR-079 cannot be flattened"). The refusal itself is
+    asserted, so fixing the gap fails here and the pin is removed; every other
+    observed value is still compared."""
+    if flattening_loses(snap):
+        with pytest.raises(SnapshotError, match="cannot hold"):
+            snapshot_to_dict(snap)
+        return "flat-refused"
+    return evidence_digest_of_document(snapshot_to_dict(snap))
 
 
 @pytest.mark.parametrize("path", _CORPUS, ids=lambda p: p.parent.name + "/" + p.name)

@@ -3,7 +3,7 @@
 
 Listed in `API_BREAK_KINDS` — source/API-level break.
 
-_22 case(s)._ [← back to all examples](../index.md)
+_26 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -29,3 +29,7 @@ _22 case(s)._ [← back to all examples](../index.md)
 | [case163_python_kwarg_renamed](../case163_python_kwarg_renamed.md) | Python Keyword Argument Renamed (Stub-Only API Break) | 🟠 API_BREAK | API Break |
 | [case211_return_pointee_gained_const](../case211_return_pointee_gained_const.md) | Return Pointee Gained `const` | 🟠 API_BREAK | API Break |
 | [case215_return_double_pointer_lost_const](../case215_return_double_pointer_lost_const.md) | Returned Double Pointer Lost `const` | 🟠 API_BREAK | API Break |
+| [case223_header_only_template_default_changed](../case223_header_only_template_default_changed.md) | Header-Only Template Default Changed | 🟠 API_BREAK | API Break |
+| [case225_header_only_template_default_removed](../case225_header_only_template_default_removed.md) | Header-Only Template Default Removed | 🟠 API_BREAK | API Break |
+| [case227_nested_namespace_template_default_changed](../case227_nested_namespace_template_default_changed.md) | Nested-Namespace Template Default Changed | 🟠 API_BREAK | API Break |
+| [case228_nontype_template_param_default_changed](../case228_nontype_template_param_default_changed.md) | Non-Type Template Parameter Default Changed | 🟠 API_BREAK | API Break |

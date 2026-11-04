@@ -7,5 +7,5 @@ _Canonical rule slug:_ `header-only-template-default-removed`. [← back to all 
 
 ## Canonical demonstration
 
-- [case225_header_only_template_default_removed](../case225_header_only_template_default_removed.md) — Header-Only Template Default Removed (✅ NO_CHANGE)
+- [case225_header_only_template_default_removed](../case225_header_only_template_default_removed.md) — Header-Only Template Default Removed (🟠 API_BREAK)
 

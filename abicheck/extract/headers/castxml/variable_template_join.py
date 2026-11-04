@@ -26,9 +26,9 @@ from typing import Any
 from xml.etree.ElementTree import Element, SubElement
 
 from ....errors import SnapshotError
+from ....model.arithmetic_type_spellings import is_arithmetic_spelling
 from ....storage.ast_cache_location import ast_cache_store
 from ... import cache_dep_manifest
-from ...arithmetic_type_spellings import is_arithmetic_spelling
 from ..clang.ast_inner import ast_inner
 from ..clang.backend import clang_header_dump
 from ..clang.expr import _initializer_value

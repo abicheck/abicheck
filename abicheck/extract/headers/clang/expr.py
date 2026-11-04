@@ -45,8 +45,8 @@ import re
 from collections.abc import Callable
 from typing import Any
 
+from ....model.arithmetic_type_spellings import is_arithmetic_spelling
 from ....model.mangled_name import itanium_scope_components
-from ...arithmetic_type_spellings import is_arithmetic_spelling
 from .ast_inner import ast_inner
 
 # Canonical definition moved to ``extract.headers.clang.templates`` (ADR-061

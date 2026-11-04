@@ -7,5 +7,5 @@ _Canonical rule slug:_ `nested-namespace-template-default-changed`. [← back to
 
 ## Canonical demonstration
 
-- [case227_nested_namespace_template_default_changed](../case227_nested_namespace_template_default_changed.md) — Nested-Namespace Template Default Changed (✅ NO_CHANGE)
+- [case227_nested_namespace_template_default_changed](../case227_nested_namespace_template_default_changed.md) — Nested-Namespace Template Default Changed (🟠 API_BREAK)
 

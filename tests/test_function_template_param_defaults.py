@@ -129,6 +129,8 @@ def _pair(tmp: Path, old_text: str, new_text: str, frontend: str) -> dict[str, A
             "('char',)",
             id="changed",
         ),
+        # Still reported: an added default makes the template viable for a
+        # call that omits the argument, which can rebind an overload's call.
         pytest.param(
             _UNDEFAULTED,
             _DEFAULTED,

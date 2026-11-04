@@ -3132,7 +3132,7 @@
       "severity": "warning",
       "min_evidence": "L2",
       "doc_slug": "template_param_default_changed",
-      "examples": ""
+      "examples": "case223_header_only_template_default_changed,case225_header_only_template_default_removed,case227_nested_namespace_template_default_changed,case228_nontype_template_param_default_changed"
     },
     {
       "kind": "template_param_type_changed",

@@ -717,6 +717,77 @@ class TestObjectAlignmentReduced:
         )
         assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED in _kinds(r)
 
+    @pytest.mark.parametrize(
+        ("old_abi_align", "new_abi_align", "fires"),
+        [(4, 4, False), (8, 8, False), (16, 16, False), (8, 4, True), (4, 8, False)],
+    )
+    def test_natural_alignment_fact_corroborates(
+        self, old_abi_align, new_abi_align, fires
+    ):
+        # The clang header backend records no explicit alignment_bits for a
+        # plain variable, only the compiler-derived type_abi_fact. That natural
+        # alignment must corroborate exactly like an explicit one: unchanged or
+        # increased -> placement noise; reduced -> real (oracle: byte compare).
+        from abicheck.model import Fact
+        from abicheck.model.abi_fundamental import AbiFundamental, FundamentalEncoding
+
+        def v(align: int) -> Variable:
+            fact = Fact.present(
+                AbiFundamental(FundamentalEncoding.SIGNED, size=align, align=align)
+            )
+            return Variable(
+                name="g",
+                mangled="g",
+                type="int",
+                type_abi_fact=fact,
+                declared_in_headers_fact=Fact.present(True),
+            )
+
+        old = _elf(symbols=[_obj("g", alignment=64)])
+        new = _elf(symbols=[_obj("g", alignment=2)])
+        r = compare(_snap(old, [v(old_abi_align)]), _snap(new, [v(new_abi_align)]))
+        assert (ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED in _kinds(r)) is fires
+        assert fires is (new_abi_align < old_abi_align)
+
+    def test_typedef_spelled_variable_does_not_use_the_desugared_alignment(self):
+        # ``typedef int al16 __attribute__((aligned(16)))``: the fact describes
+        # the desugared int (align 4) and says nothing about the typedef's own
+        # alignment, so it must not suppress an address-derived reduction.
+        from abicheck.model import Fact
+        from abicheck.model.abi_fundamental import AbiFundamental, FundamentalEncoding
+
+        fact = Fact.present(AbiFundamental(FundamentalEncoding.SIGNED, size=4, align=4))
+
+        def v(type_name: str) -> Variable:
+            return Variable(
+                name="g",
+                mangled="g",
+                type=type_name,
+                type_abi_fact=fact,
+                declared_in_headers_fact=Fact.present(True),
+            )
+
+        old = _elf(symbols=[_obj("g", alignment=16)])
+        new = _elf(symbols=[_obj("g", alignment=4)])
+        typedef = compare(_snap(old, [v("al16")]), _snap(new, [v("al16")]))
+        assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED in _kinds(typedef)
+        plain = compare(_snap(old, [v("int")]), _snap(new, [v("int")]))
+        assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED not in _kinds(plain)
+
+    def test_dwarf_only_variable_does_not_use_the_natural_alignment(self):
+        # A DWARF-derived variable carries type_abi_fact but records no
+        # DW_AT_alignment, so an ``alignas(16) int`` reduced to a plain int is
+        # unknowable from it; the address-derived drop must still fire.
+        from abicheck.model import Fact
+        from abicheck.model.abi_fundamental import AbiFundamental, FundamentalEncoding
+
+        fact = Fact.present(AbiFundamental(FundamentalEncoding.SIGNED, size=4, align=4))
+        dwarf_var = Variable(name="g", mangled="g", type="int", type_abi_fact=fact)
+        old = _elf(symbols=[_obj("g", alignment=16)])
+        new = _elf(symbols=[_obj("g", alignment=4)])
+        r = compare(_snap(old, [dwarf_var]), _snap(new, [dwarf_var]))
+        assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED in _kinds(r)
+
 
 # ── Undefined-symbol (import) surface ────────────────────────────────────────
 

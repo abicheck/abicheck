@@ -380,6 +380,16 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "-std= is also stamped as ast_toolchain language_standard_implied=1 "
         "so a binary-implied dialect difference can bound a comparison instead of refusing it; without the stamp the pair keeps the refusal. A C header whose only C++ signal is a guarded extern 'C' is now parsed in C mode when the build supplies a C -std= (generation 34 failed that parse outright, so it has no stored snapshot to drift)"
     ),
+    36: GenerationSpellingChange(
+        "no stored spelling changes: the direct-Clang header backend always "
+        "selects the language (-x c / -x c++), also when the build supplies its "
+        "own -std= (extract/headers/clang_header_argv.py). Generation 35 dropped "
+        "-x whenever a -std= came from the build, so under the default clang++ "
+        "driver a C build's header was read as C++ and failed ('-std=gnu11 not "
+        "allowed with C++'): that parse has no stored snapshot to drift. A "
+        "generation-35 clang snapshot of a C header without a build -std= was "
+        "already parsed as C, so it records what generation 36 does"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

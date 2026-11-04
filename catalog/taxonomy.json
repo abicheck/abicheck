@@ -5138,7 +5138,7 @@
   "operation": "compare",
   "ecosystem": "generic",
   "topics": [
-   "controls"
+   "types"
   ],
   "languages": [
    "cpp"
@@ -5184,7 +5184,7 @@
   "operation": "compare",
   "ecosystem": "generic",
   "topics": [
-   "controls"
+   "types"
   ],
   "languages": [
    "cpp"
@@ -5230,7 +5230,7 @@
   "operation": "compare",
   "ecosystem": "generic",
   "topics": [
-   "controls"
+   "types"
   ],
   "languages": [
    "cpp"
@@ -5253,7 +5253,7 @@
   "operation": "compare",
   "ecosystem": "generic",
   "topics": [
-   "controls"
+   "types"
   ],
   "languages": [
    "cpp"

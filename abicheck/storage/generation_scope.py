@@ -44,6 +44,7 @@ from pathlib import Path
 from .code_identity import PACKAGE_ROOT
 
 __all__ = [
+    "EXTRACTOR_EXTRA_FILES",
     "EXTRACTOR_ROOT_GLOBS",
     "RECORD_PATH",
     "REPO_ROOT",
@@ -71,6 +72,11 @@ EXTRACTOR_ROOT_GLOBS: tuple[str, ...] = (
     "pdb_*.py",
     "dumper.py",
 )
+
+#: Modules outside ``extract/`` whose rules decide what an extractor records
+#: (package-relative): the arithmetic-spelling predicate decides which header
+#: initializers the castxml and clang backends store.
+EXTRACTOR_EXTRA_FILES: tuple[str, ...] = ("model/arithmetic_type_spellings.py",)
 
 #: A module whose file stem contains one of these words is resolver-named and
 #: must be classified below (semantic or non-semantic with a reason).
@@ -188,6 +194,7 @@ def _extractor_files() -> tuple[str, ...]:
     found: set[Path] = set((PACKAGE_ROOT / "extract").rglob("*.py"))
     for pattern in EXTRACTOR_ROOT_GLOBS:
         found.update(PACKAGE_ROOT.glob(pattern))
+    found.update(PACKAGE_ROOT / rel for rel in EXTRACTOR_EXTRA_FILES)
     return tuple(
         sorted(_rel(p) for p in found if p.is_file() and "__pycache__" not in p.parts)
     )

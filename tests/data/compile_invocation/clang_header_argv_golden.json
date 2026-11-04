@@ -16,6 +16,8 @@
   "cxx-explicit-std": [
     "clang++",
     "-std=c++17",
+    "-x",
+    "c++",
     "-D__malloc__(...)=__malloc__",
     "-fsyntax-only",
     "-ferror-limit=0",

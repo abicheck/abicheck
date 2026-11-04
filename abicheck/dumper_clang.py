@@ -39,21 +39,16 @@ typedef targets, public constant values — is produced. This is the documented
 "partial L2" trade-off: clang where castxml is absent or chokes, castxml for
 full layout.
 
-The same gap applies to a plain ``Variable``'s *natural* type alignment:
-:func:`_clang_var_alignment_bits` only reads an explicit ``AlignedAttr``
-override, never a computed one (contrast
-:meth:`abicheck.extract.headers.castxml.dumper._CastxmlParser._type_alignment_bits`, which
-castxml's real compiler-computed ``align`` attribute makes possible). Under
-``--artifact-variant release-headers`` on a clang-only host this leaves
-``diff_platform_elf_symbols._check_object_alignment_reduced`` without
-declared-alignment corroboration for the overwhelming majority of exported
-globals, so it can still false-positive ``exported_object_alignment_reduced``
-on a purely additive change (the case61_var_added scenario) — a real, known,
-tracked gap (see
-``tests/test_clang_header_backend_integration.py::test_clang_backend_still_false_positives_case61_alignment_risk``),
-not something a small patch can close: it would need clang to compute
-``alignof`` from scratch (target ABI rules for builtins, pointers, typedefs,
-arrays) rather than reading a value the AST dump already carries.
+A plain ``Variable``'s *natural* type alignment is not an AST attribute either:
+:func:`_clang_var_alignment_bits` only reads an explicit ``AlignedAttr``.
+For a fundamental-typed variable the backend instead records the
+compiler-derived ``type_abi_fact`` (size/alignment probed from the real
+compiler, :mod:`abicheck.extract.builtin_abi`), and
+``compare.declared_alignment.declared_alignment_bits`` falls back to it, so
+the case61_var_added placement noise is suppressed under clang too
+(``tests/test_clang_header_backend_integration.py::test_clang_backend_case61_alignment_noise_suppressed``).
+A record- or array-typed global still has no declared alignment under clang
+and keeps the address-derived signal.
 
 The parser is pure (no subprocess): it consumes an already-parsed JSON dict, so
 every emit path is unit-testable without clang installed. Shelling out to clang

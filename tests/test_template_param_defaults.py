@@ -800,3 +800,54 @@ def test_non_dict_child_of_a_template_is_skipped_not_taken_as_the_end() -> None:
 
     tpl = _tpl_node("junk", {"kind": "TemplateTypeParmDecl", "name": "T"})
     assert _template_param_default_spellings(tpl, lambda *_: None) == [None]
+
+
+# A default only *added* invalidates no previously valid spelling (case224);
+# a changed or removed default does. Exhaustive over a 2-parameter domain of
+# spellings, oracle: "some parameter had a default before and it differs".
+_SPELLINGS = (None, "int", "long")
+
+
+@pytest.mark.parametrize("before", [(a, b) for a in _SPELLINGS for b in _SPELLINGS])
+@pytest.mark.parametrize("after", [(a, b) for a in _SPELLINGS for b in _SPELLINGS])
+def test_only_changed_or_removed_defaults_fire(before, after) -> None:
+    findings, _ = detect_template_param_default_changed(
+        _snap(_box(Fact.present(before))), _snap(_box(Fact.present(after)))
+    )
+    expected = any(b is not None and b != a for b, a in zip(before, after))
+    assert bool(findings) is expected
+
+
+# Shape A under clang (case229): the backend names an instance by its source
+# spelling, which elides the defaulted argument, so only the Itanium mangling
+# says Box<int, int> became Box<int, long>. The pairing must read it.
+@pytest.mark.parametrize(
+    ("old_mangled", "new_mangled", "fires"),
+    [
+        ("_ZNK5mylib3BoxIiiE4sizeEv", "_ZNK5mylib3BoxIilE4sizeEv", True),
+        ("_ZNK5mylib3BoxIiiE4sizeEv", "_ZNK5mylib3BoxIicE4sizeEv", True),
+        # every position changed: an explicit re-instantiation, not a default
+        ("_ZNK5mylib3BoxIiiE4sizeEv", "_ZNK5mylib3BoxIllE4sizeEv", False),
+    ],
+)
+def test_default_arg_change_pairs_on_mangling_not_elided_spelling(
+    old_mangled, new_mangled, fires
+) -> None:
+    from abicheck.compare.template_param_defaults import (
+        detect_default_template_arg_changed,
+    )
+    from abicheck.model import Function, Visibility
+
+    def side(mangled: str) -> AbiSnapshot:
+        fn = Function(
+            name="mylib::Box<int>::size",  # clang: default argument elided
+            mangled=mangled,
+            return_type="int",
+            visibility=Visibility.PUBLIC,
+        )
+        return AbiSnapshot(library="lib.so", version="1", functions=[fn])
+
+    findings = detect_default_template_arg_changed(side(old_mangled), side(new_mangled))
+    assert bool(findings) is fires
+    if fires:
+        assert findings[0].kind is ChangeKind.DEFAULT_TEMPLATE_ARG_CHANGED
