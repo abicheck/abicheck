@@ -16,7 +16,7 @@
       "abicheck/extract/ar_archive.py": "6fdab7ed7390a20f087f9407eaa3988c0f8c658400bc0ea8c7e193271923956d",
       "abicheck/extract/ar_archive_format.py": "38a51cae7762eb269af3788d5dca9cfe50de38d9b315f34fa31427f791cb7e62",
       "abicheck/extract/archive_integrity.py": "8d2b9fb73980bf646972da75431adf6437335bd83aa7b14678d531b1084995cb",
-      "abicheck/extract/binary_dialect.py": "64bd6a5e3c68356bc5f2045882dfb0b64a59dd7dbd312742b2e51583f02f0c41",
+      "abicheck/extract/binary_dialect.py": "be8a71c557287ee47f63a49ea98306ac2d44877987cbadd9a554bd3f50119bc2",
       "abicheck/extract/binary_format.py": "4b9f591077fa5c90d2e3a767343d92b098061870403d431694470bc05e5468b3",
       "abicheck/extract/binary_identity.py": "4645eaf3dddd0a2230a5c694882548476406c57514275fa4c8c1bc152607ca88",
       "abicheck/extract/build_mode_capture.py": "7a46c5babcc5bf770a1a38d5a5d3abb49a2b7d9575bda2b210d2e2861ebfb51f",
@@ -192,9 +192,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "cb9b152595b6989cf4bcfaf8e62dd54543b94ef5031cc8e571ae5db7114e2376",
+    "fingerprint": "aea75ff6b42293fca13a9894910a6ad5a1e82dd818504c967063478456033b1d",
     "generation": 36,
-    "reason": "added model/arithmetic_type_spellings.py to the extractor scope (EXTRACTOR_EXTRA_FILES): it moved there unchanged from extract/ in this PR, and its rule decides which header initializers the backends record, so it must stay under the extractor generation"
+    "reason": "binary_dialect: rename the ELF machine/byte-order reader to read_elf_target"
   },
   "resolver": {
     "files": {
