@@ -504,20 +504,31 @@ def apply_layout_facts(
     """
     if not records:
         return snapshot
-    by_name: dict[str, dict[str, Any]] = {}
+    exact: dict[str, dict[str, Any]] = {}
+    normalized: dict[str, list[dict[str, Any]]] = {}
     for r in records:
         if isinstance(r, dict) and isinstance(r.get("qualified_name"), str):
-            by_name.setdefault(r["qualified_name"], r)
-            by_name.setdefault(normalized_record_name(r["qualified_name"]), r)
-    if not by_name:
+            exact.setdefault(r["qualified_name"], r)
+            normalized.setdefault(
+                normalized_record_name(r["qualified_name"]), []
+            ).append(r)
+    if not exact:
         return snapshot
+
+    def _facts_for(key: str) -> dict[str, Any] | None:
+        # An exact spelling always wins; the whitespace/tag-insensitive key is
+        # a fallback only when it names exactly one dumped record, so one
+        # record's normalized spelling never shadows another's exact one.
+        if key in exact:
+            return exact[key]
+        candidates = normalized.get(normalized_record_name(key), [])
+        return candidates[0] if len(candidates) == 1 else None
 
     new_types = []
     changed = False
     for t in snapshot.declarations.types:
-        key = t.qualified_name or t.name
         facts = (
-            by_name.get(key) or by_name.get(normalized_record_name(key))
+            _facts_for(t.qualified_name or t.name)
             if not t.is_template_pattern
             else None
         )
@@ -638,7 +649,9 @@ def attach_clang_layout(
             {
                 t.qualified_name or t.name
                 for t in snap.declarations.types
-                if t.size_bits is None
+                # DWARF backfill fills size but never dsize, which the
+                # tail-padding check needs, so those records are probed too.
+                if (t.size_bits is None or t.data_size_bits is None)
                 and not t.is_template_pattern
                 and probeable_record_name(t.qualified_name or t.name)
             }

@@ -21,6 +21,7 @@ from abicheck.extract.headers.clang.record_layout_dump import (
     probeable_record_name,
 )
 from abicheck.extract.headers.clang.records import alias_template_target
+from abicheck.serialization import load_snapshot
 from tests._abicheck_subprocess import abicheck_command, abicheck_env
 
 _DERIVED_DUMP = """
@@ -146,6 +147,10 @@ def test_normalized_record_name_equates_spellings(a: str, b: str) -> None:
         ),
         ("Foo<int>::type", "int", "Foo<int>::type"),
         ("pimpl<X>", "", "pimpl<X>"),
+        # same last segment, different template: a::Box aliases b::Box
+        ("a::Box<int>", "b::Box<int>", "b::Box<int>"),
+        # same template written without its leading scope
+        ("vector<int>", "std::vector<int, std::allocator<int>>", "vector<int>"),
     ],
 )
 def test_alias_template_target(written: str, desugared: str, expected: str) -> None:
@@ -180,9 +185,65 @@ def test_alias_scoped_path_keys_by_name_lookup(
     records: list[tuple[str, str]], aliased: bool
 ) -> None:
     paths = {"detail::Impl": [list(_BASE_PATH)]}
-    out = _alias_scoped_path_keys(paths, records)
+    out = _alias_scoped_path_keys(paths, records, ["Impl"])
     assert ("Impl" in out) is aliased
     assert out["detail::Impl"] == paths["detail::Impl"]
+
+
+def test_alias_scoped_path_keys_signature_path_and_only_resolved_paths() -> None:
+    # A public function returning detail::Impl by value: the lookup scope is
+    # the function's own (lib::make), so the spelling resolves to lib::detail::Impl.
+    fn_path = ["fn:lib::make", "detail::Impl"]
+    # A path written from other::Q, where detail::Impl names nothing: it must
+    # not ride along on the alias.
+    stray = ["type:Q", "Q", "field:x", "detail::Impl"]
+    records = [("Q", "other::Q"), ("Impl", "lib::detail::Impl")]
+    paths = {"detail::Impl": [fn_path, stray]}
+    out = _alias_scoped_path_keys(
+        paths, records, ["Impl"], [("fn:lib::make", "lib::make")]
+    )
+    assert out["Impl"] == [fn_path]
+    # Without the function's scope the signature path resolves nowhere.
+    assert "Impl" not in _alias_scoped_path_keys(paths, records, ["Impl"])
+    # A record no change names is never aliased.
+    assert "Impl" not in _alias_scoped_path_keys(
+        paths, records, ["Other"], [("fn:lib::make", "lib::make")]
+    )
+
+
+def test_exact_layout_key_is_never_shadowed_by_a_normalized_one() -> None:
+    from abicheck.extract.headers.clang.layout_tool import apply_layout_facts
+    from abicheck.model import AbiSnapshot, RecordType
+
+    snap = AbiSnapshot(
+        library="l",
+        version="1",
+        types=[
+            RecordType(name='Box<"ab">', kind="struct", qualified_name='Box<"ab">'),
+            RecordType(name="A<int,long>", kind="struct", qualified_name="A<int,long>"),
+        ],
+    )
+    records = [
+        {"qualified_name": 'Box<"a b">', "size_bits": 8, "fields": []},
+        {"qualified_name": 'Box<"ab">', "size_bits": 16, "fields": []},
+        {"qualified_name": "A<int, long>", "size_bits": 32, "fields": []},
+    ]
+    sizes = {
+        t.name: t.size_bits
+        for t in apply_layout_facts(snap, records).declarations.types
+    }
+    # exact key wins; a unique normalized key still matches
+    assert sizes == {'Box<"ab">': 16, "A<int,long>": 32}
+    # two dumped records sharing a normalized key: no guess
+    ambiguous = [
+        {"qualified_name": "A<int, long>", "size_bits": 32, "fields": []},
+        {"qualified_name": "A< int,long >", "size_bits": 64, "fields": []},
+    ]
+    sizes = {
+        t.name: t.size_bits
+        for t in apply_layout_facts(snap, ambiguous).declarations.types
+    }
+    assert sizes["A<int,long>"] is None
 
 
 _ORACLE_HEADER = """
@@ -325,5 +386,16 @@ def test_clang_backend_reports_catalog_kinds(
     )
     data = json.loads(report.read_text(encoding="utf-8"))
     kinds = {c["kind"] for c in data["changes"]}
+    if case == "case77_detail_templated_base_changed":
+        # `extern template class detail::descriptor_base<...>;` is written in
+        # namespace mylib but names mylib::detail's template: the record takes
+        # its semantic scope and is sized.
+        base = {
+            t.qualified_name: t.size_bits
+            for t in load_snapshot(snaps[1]).declarations.types
+        }
+        assert (
+            base["mylib::detail::descriptor_base<mylib::task::classification>"] == 64
+        )  # two ints
     assert data["verdict"] == "BREAKING"
     assert _CATALOG_CASES[case] <= kinds, sorted(kinds)

@@ -449,11 +449,12 @@ def _collect_fields(
     return fields
 
 
-def _template_head(spelling: str) -> str:
-    """``ns::pimpl`` of ``const ns::pimpl<T> *`` -- the outermost template name."""
+def _template_head(spelling: str) -> tuple[str, ...]:
+    """``("ns", "pimpl")`` of ``const ns::pimpl<T> *`` -- the outermost
+    template's name, as scope segments (a leading ``::`` dropped)."""
     head = spelling.split("<", 1)[0]
     head = re.sub(r"\b(?:const|volatile|struct|class|union|enum|typename)\b", "", head)
-    return head.strip().split("::")[-1]
+    return tuple(seg for seg in head.strip().split("::") if seg)
 
 
 def alias_template_target(written: str, desugared: str) -> str:
@@ -475,7 +476,12 @@ def alias_template_target(written: str, desugared: str) -> str:
         or not written.rstrip(" *&").endswith(">")
     ):
         return written
-    if _template_head(written) == _template_head(desugared):
+    # The same template when the written name is the desugared one with
+    # leading scopes omitted (`vector<int>` -> `std::vector<int, ...>`); a
+    # different one otherwise, even with an equal last segment
+    # (`a::Box<T>` aliasing `b::Box<T>`).
+    w_head, d_head = _template_head(written), _template_head(desugared)
+    if w_head and d_head[len(d_head) - len(w_head) :] == w_head:
         return written
     return desugared
 

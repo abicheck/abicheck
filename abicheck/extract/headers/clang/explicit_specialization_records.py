@@ -35,7 +35,48 @@ from collections.abc import Callable
 from typing import Any
 
 from ....model import RecordType
+from ....model.identity import ScopePath
+from .ast_inner import ast_inner
 from .context import _Decl, is_builtin_file
+from .scope import scope_segment_for
+
+#: The last AST root indexed and its namespace index (one TU at a time).
+_NAMESPACE_INDEX: list[
+    tuple[dict[str, Any], dict[str, tuple[tuple[str, ...], ScopePath]]]
+] = []
+
+
+def _namespace_scopes(
+    root: dict[str, Any],
+) -> dict[str, tuple[tuple[str, ...], ScopePath]]:
+    """``NamespaceDecl`` id -> the (names, typed path) of the scope it opens.
+
+    An anonymous namespace is left out: its typed segment needs the walk's
+    per-parent ordinal, so a specialization declared into one keeps its
+    lexical scope instead of a guessed one.
+    """
+    if _NAMESPACE_INDEX and _NAMESPACE_INDEX[0][0] is root:
+        return _NAMESPACE_INDEX[0][1]
+    index: dict[str, tuple[tuple[str, ...], ScopePath]] = {}
+    stack: list[tuple[Any, tuple[str, ...], ScopePath]] = [(root, (), ())]
+    while stack:
+        node, names, path = stack.pop()
+        if not isinstance(node, dict):
+            continue
+        child_names, child_path = names, path
+        if node.get("kind") == "NamespaceDecl":
+            name = node.get("name") or ""
+            segment = scope_segment_for(node, access="public") if name else None
+            if segment is None:
+                continue  # anonymous: neither it nor anything in it is indexed
+            child_names, child_path = (*names, name), (*path, segment)
+            if isinstance(node.get("id"), str):
+                index[node["id"]] = (child_names, child_path)
+        elif node.get("kind") not in ("TranslationUnitDecl", "LinkageSpecDecl"):
+            continue  # a namespace is only ever nested in these
+        stack.extend((c, child_names, child_path) for c in ast_inner(node))
+    _NAMESPACE_INDEX[:] = [(root, index)]
+    return index
 
 
 def is_explicit_specialization(node: dict[str, Any], *, in_template: bool) -> bool:
@@ -55,12 +96,24 @@ def collect_explicit_specialization(
     spelling: str,
     in_template: bool,
     decl_args: tuple[Any, ...],
+    root: dict[str, Any],
 ) -> None:
     """Append *node* (with its walk context *decl_args*: scope, file, access,
-    extern_c, in_friend, scope_path) when it is an explicit specialization."""
+    extern_c, in_friend, scope_path) when it is an explicit specialization.
+
+    ``extern template class detail::B<int>;`` written in ``namespace lib``
+    sits lexically in ``lib`` but belongs to ``lib::detail``; clang names the
+    semantic parent in ``parentDeclContextId``, and that scope is used.
+    """
     if not is_explicit_specialization(node, in_template=in_template):
         return
     scope, file, access, extern_c, in_friend, scope_path = decl_args
+    parent = node.get("parentDeclContextId")
+    if isinstance(parent, str):
+        semantic = _namespace_scopes(root).get(parent)
+        if semantic is None:
+            return  # a semantic scope that cannot be named exactly: no record
+        scope, scope_path = semantic
     entry = _Decl(
         node,
         scope,

@@ -4,6 +4,7 @@
       "abicheck/btf_metadata.py": "614321e6140b32e7518deb3991dc9b9421107688c952542808ec4da88a17dc73",
       "abicheck/ctf_metadata.py": "42d3f588c6c4567c2a9d43a3ef5b886a753c37dd5357a4199d81d7ffc60d2109",
       "abicheck/dumper.py": "5b861344a920e378b9fa5eb2973478a6e72e5a245eceae9b3400df7e8b98fb6e",
+      "abicheck/dumper_clang.py": "c3c91b7f1519879430e766437d96b76e96fca8f446e538920a13976721c728d1",
       "abicheck/dwarf_advanced.py": "91cfc7f410a37e7d7ba3ec922ff2944b81253fde3dcfdb806be032087822b339",
       "abicheck/dwarf_metadata.py": "a0621cde6559a0395b00d08aa25cc4cbff74b1121e2083e424e472c44b985512",
       "abicheck/dwarf_presence.py": "7e73580ec7a02fdf24e3815cb89e42aa6fe00e46e8cda6b7fe9d547f06ac3f06",
@@ -117,19 +118,19 @@
       "abicheck/extract/headers/clang/enums.py": "87ee0817b89dd1483a48e5912602d8d02b84e1c0aa1671d0f32c1fd306b686b9",
       "abicheck/extract/headers/clang/error_header_retry.py": "3153f727c9d1934783a51d6917727a48aeba31e68b3c2462aef6e6b2f489f690",
       "abicheck/extract/headers/clang/explicit_instantiation.py": "359b71f36e304c2c1226ca35a65c1969989195dabc070a8035354caaef501663",
-      "abicheck/extract/headers/clang/explicit_specialization_records.py": "b9ebb42e4a32af72db54d9d16678bbf2d82493638fc4a43c301bf9cc25c5ea36",
+      "abicheck/extract/headers/clang/explicit_specialization_records.py": "895d6be0cde085aa4be5ffb6064d66d4cb3532ad61bd613ad06ead2f56422ffa",
       "abicheck/extract/headers/clang/explicit_specifier.py": "fca63201aaf3d920e2bbb796114c93bd6edc89974083f9900ed26e98de7fc699",
       "abicheck/extract/headers/clang/expr.py": "da2554d914f005f8525e0a411b36e93e3dd3dc80957cc7597245c9257b875994",
       "abicheck/extract/headers/clang/function_template_defaults.py": "af4a42ea00a91238ef8f111fe05c4b6aa625b84fd2fd4e39230b48953ebaf566",
       "abicheck/extract/headers/clang/functions.py": "12a37b2d33be83ab29d8242fd6fde193af1e377520871195fb86e6d9ce664fdc",
       "abicheck/extract/headers/clang/inline_semantics.py": "8284b543b4fa45da23c50fee0f16fd11dab8c43cf43f1cf07334572a822ad04d",
-      "abicheck/extract/headers/clang/layout_tool.py": "2b9887d80fe6defbeee729129d1d4ae4d4c43d62d4ba18cfe331f03d041cb8ae",
+      "abicheck/extract/headers/clang/layout_tool.py": "6ed0fd19e5b3dbbf6a9e6062dc6717fc1ed6b2b5e6328b8f6d6303ca703eba2d",
       "abicheck/extract/headers/clang/locations.py": "d4292c937fb928268132c6a3f21a35a5d7576b8164416648ef73815cd07fcddf",
       "abicheck/extract/headers/clang/macro_qualifier.py": "f6b4d8d39639759ec555345358771937b77b7b490dae2a25ab99e077cd5d5728",
       "abicheck/extract/headers/clang/param_kind.py": "5f23882fce9965286398d2cf89d02e845051179dd5774a448c700d0498373fca",
       "abicheck/extract/headers/clang/qualifiers.py": "578b33e005de04a66073d7081267b78e777168fa34bd9bc4c689e5d4c0fe5fa7",
       "abicheck/extract/headers/clang/record_layout_dump.py": "93de22123033cab41286c466c36b6d06469a9dd249303f353cd6de587401cfaf",
-      "abicheck/extract/headers/clang/records.py": "e4e7d4ee471f0ea6badb3ba03078b3fac395baffe00eeeb8731ebdb669550f63",
+      "abicheck/extract/headers/clang/records.py": "f59d1b52eb3a599bbdce450f5a8759dd66ba8218afba86dbb0e459ef912ce0f3",
       "abicheck/extract/headers/clang/redeclarations.py": "a721440b183b81c24d1faad4c75dbb2241d28bc29c64792d79f99863b56029c8",
       "abicheck/extract/headers/clang/restrict_spelling.py": "309efe53d934303354ef102e0b223363a099c164b2000727e4f591998afa2ec7",
       "abicheck/extract/headers/clang/return_type.py": "3b758adeb133ea1544b4de420bb7d6cc19a6ac5f6f16b27f3c81e963b22940bc",
@@ -194,9 +195,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "05fab1d4e8eb6fe536bb84d0fc81ab599cafbb31d27e2155b7204d732234ddce",
+    "fingerprint": "8c002c252c7534f31625a5cf27695af841617ba62ecf7c5ac276553ea5d81430",
     "generation": 37,
-    "reason": "bumped to 37 for a semantic change"
+    "reason": "generation 37 (this change) already covers the clang backend semantics; dumper_clang.py joins the extractor scope and the layout/specialization fixes land within the same generation"
   },
   "resolver": {
     "files": {

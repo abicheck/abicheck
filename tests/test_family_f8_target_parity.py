@@ -541,6 +541,8 @@ def backend_layout_violations(oracle, candidate) -> list[str]:
         if rec.size_bits != ref.size_bits:
             out.append(f"{name}: size {rec.size_bits} != {ref.size_bits}")
         ref_off = {f.name: f.offset_bits for f in ref.fields}
+        for missing in sorted(set(ref_off) - {f.name for f in rec.fields}):
+            out.append(f"{name}::{missing}: missing from the candidate")
         for f in rec.fields:
             if f.offset_bits != ref_off.get(f.name):
                 out.append(

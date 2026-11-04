@@ -155,48 +155,70 @@ def _path_context(path: list[str], record_names: Mapping[str, object]) -> str | 
     return None
 
 
+def _lookup_tables(
+    old: AbiSnapshot, new: AbiSnapshot, wanted: Iterable[str]
+) -> tuple[list[tuple[str, str | None]], list[str], list[tuple[str, str]]]:
+    """Name-lookup inputs for :func:`_alias_scoped_path_keys` over both sides."""
+    snaps = (old, new)
+    records = [(t.name, t.qualified_name) for s in snaps for t in s.declarations.types]
+    entry_points = [
+        (f"fn:{f.name}", f.name) for s in snaps for f in s.declarations.functions
+    ] + [(f"var:{v.name}", v.name) for s in snaps for v in s.declarations.variables]
+    return records, list(wanted), entry_points
+
+
 def _alias_scoped_path_keys(
     paths: dict[str, list[list[str]]],
     records: Iterable[tuple[str, str | None]],
+    wanted: Iterable[str],
+    entry_points: Iterable[tuple[str, str]] = (),
 ) -> dict[str, list[list[str]]]:
     """Also key each scope-spelled path target by its record's bare name.
 
     A leak path is keyed by the type spelling the public declaration wrote
     (clang keeps ``detail::Impl`` as written in ``: public detail::Impl``),
     while a type change carries the record's bare ``name``. The spelling is
-    resolved by C++ name lookup from the referencing record's scope
-    (:func:`_scoped_lookup`), and the bare alias is added only when that
-    bare name belongs to exactly one record, so two records sharing a bare
-    name are never merged. *records* is ``(name, qualified_name)`` pairs.
+    resolved by C++ name lookup (:func:`_scoped_lookup`) from the scope of
+    whatever wrote the final hop: the referencing record, or the public
+    function/variable for a signature path. The bare alias is added only for
+    a name in *wanted* (the changed records), only when that bare name
+    belongs to exactly one record, and it carries only the paths that
+    resolved to it. *records* is ``(name, qualified_name)`` pairs;
+    *entry_points* is ``(path label, qualified name)`` pairs such as
+    ``("fn:make", "lib::make")``.
     """
+    wanted_names = set(wanted)
     by_qualified: dict[str, str] = {}
-    context_qualified: dict[str, set[str]] = collections.defaultdict(set)
+    contexts: dict[str, set[str]] = collections.defaultdict(set)
     bare_owners: dict[str, set[str]] = collections.defaultdict(set)
     for name, qualified in records:
         qual = qualified or name
         by_qualified[qual] = name
-        context_qualified[name].add(qual)
+        contexts[name].add(qual)
         bare_owners[name].add(qual)
+    for label, qualified in entry_points:
+        contexts[label].add(qualified)
+    qualified_names = set(by_qualified)
     out = dict(paths)
     for key, plist in paths.items():
-        if "::" not in key:
+        if "::" not in key or key.rsplit("::", 1)[1] not in wanted_names:
             continue
-        resolved: set[str] = set()
+        hits: dict[str, list[list[str]]] = collections.defaultdict(list)
         for p in plist:
-            ctx = _path_context(p, context_qualified)
-            contexts = context_qualified.get(ctx, set()) if ctx else set()
-            if len(contexts) != 1:
+            ctx = _path_context(p, contexts)
+            ctx_quals = contexts.get(ctx, set()) if ctx else set()
+            if len(ctx_quals) != 1:
                 continue
-            (ctx_qual,) = tuple(contexts)
-            hit = _scoped_lookup(key, ctx_qual, set(by_qualified))
+            (ctx_qual,) = tuple(ctx_quals)
+            hit = _scoped_lookup(key, ctx_qual, qualified_names)
             if hit is not None:
-                resolved.add(hit)
-        if len(resolved) != 1:
+                hits[hit].append(p)
+        if len(hits) != 1:
             continue
-        (qual,) = tuple(resolved)
+        ((qual, resolved),) = hits.items()
         bare = by_qualified[qual]
         if bare not in out and bare_owners[bare] == {qual}:
-            out[bare] = plist
+            out[bare] = resolved
     return out
 
 
@@ -317,12 +339,9 @@ def detect_internal_leaks(
     # Compute reachability on *both* snapshots (a type may be reachable
     # only in one direction, e.g. just-added internal type leaked by a
     # new public template).
-    records = [
-        (t.name, t.qualified_name)
-        for t in (*old.declarations.types, *new.declarations.types)
-    ]
-    old_paths = _alias_scoped_path_keys(compute_leak_paths(old, internal_set), records)
-    new_paths = _alias_scoped_path_keys(compute_leak_paths(new, internal_set), records)
+    tables = _lookup_tables(old, new, internal_changes)
+    old_paths = _alias_scoped_path_keys(compute_leak_paths(old, internal_set), *tables)
+    new_paths = _alias_scoped_path_keys(compute_leak_paths(new, internal_set), *tables)
 
     out: list[Change] = []
     for tname, triggers in internal_changes.items():

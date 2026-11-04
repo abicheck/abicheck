@@ -578,7 +578,7 @@ class _ClangAstParser:
                 if not self._skips_dependency_decl("CXXRecordDecl", name, file):
                     _collect_explicit_spec(
                         self._explicit_specializations, node, spelling, in_template,
-                        (scope, file, access, extern_c, in_friend, scope_path),
+                        (scope, file, access, extern_c, in_friend, scope_path), self._root,
                     )  # fmt: skip
         else:
             child_scope = scope
