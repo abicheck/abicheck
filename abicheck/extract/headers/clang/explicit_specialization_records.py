@@ -40,11 +40,6 @@ from .ast_inner import ast_inner
 from .context import _Decl, is_builtin_file
 from .scope import scope_segment_for
 
-#: The last AST root indexed and its namespace index (one TU at a time).
-_NAMESPACE_INDEX: list[
-    tuple[dict[str, Any], dict[str, tuple[tuple[str, ...], ScopePath]]]
-] = []
-
 
 def _namespace_scopes(
     root: dict[str, Any],
@@ -53,10 +48,10 @@ def _namespace_scopes(
 
     An anonymous namespace is left out: its typed segment needs the walk's
     per-parent ordinal, so a specialization declared into one keeps its
-    lexical scope instead of a guessed one.
+    lexical scope instead of a guessed one. Only namespace-level nodes are
+    visited, and only for an explicit specialization declared outside its
+    namespace, so it is not cached.
     """
-    if _NAMESPACE_INDEX and _NAMESPACE_INDEX[0][0] is root:
-        return _NAMESPACE_INDEX[0][1]
     index: dict[str, tuple[tuple[str, ...], ScopePath]] = {}
     stack: list[tuple[Any, tuple[str, ...], ScopePath]] = [(root, (), ())]
     while stack:
@@ -75,7 +70,6 @@ def _namespace_scopes(
         elif node.get("kind") not in ("TranslationUnitDecl", "LinkageSpecDecl"):
             continue  # a namespace is only ever nested in these
         stack.extend((c, child_names, child_path) for c in ast_inner(node))
-    _NAMESPACE_INDEX[:] = [(root, index)]
     return index
 
 
