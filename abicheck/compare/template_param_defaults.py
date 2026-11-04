@@ -232,11 +232,9 @@ def detect_function_template_param_default_changed(
         changed = [
             i for i, (a, b) in enumerate(zip(before, after, strict=True)) if a != b
         ]
-        # A default only *added* (no default -> one) leaves every previously
-        # valid spelling valid with the same meaning: before, the argument had
-        # to be written explicitly. It is not an API break (case224).
-        if all(before[i] is None for i in changed):
-            continue
+        # Unlike a class template, an added default is still reported here:
+        # it makes the template viable for a call that omits the argument, so
+        # a call an existing overload served can silently rebind to it.
         new_fn = new_decls[0]
         symbol = f"{qname}({', '.join(param.type for param in new_fn.params)})"
         change = make_change(

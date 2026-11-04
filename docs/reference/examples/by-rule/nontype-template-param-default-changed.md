@@ -3,7 +3,7 @@
 
 _Canonical rule slug:_ `nontype-template-param-default-changed`. [← back to all rules](index.md)
 
-> A non-type template parameter's default changes. The recorder covers type parameters only, so the change is an explicit assurance gap on both backends rather than a verdict.
+> A non-type template parameter's default changes. The clang recorder spells non-type defaults and reports API_BREAK; castxml cannot record defaults and reports an assurance gap.
 
 ## Canonical demonstration
 

@@ -66,3 +66,24 @@ def test_missing_side_keeps_risk():
     changes = _flip()
     demote_unexposed_enum_size_flag(changes, None, _snap(headers=True, enums=0))
     assert changes[0].effective_verdict is None
+
+
+def test_inferred_headers_are_not_established_evidence():
+    # A legacy document whose from_headers was inferred proves no header AST
+    # ran, so its empty enum list is not evidence of no enums.
+    changes = _flip()
+    old = _snap(headers=True, enums=0)
+    new = _snap(headers=True, enums=0)
+    new.from_headers_inferred = True
+    demote_unexposed_enum_size_flag(changes, old, new)
+    assert changes[0].effective_verdict is None
+
+
+def test_a_policy_verdict_is_not_overridden():
+    changes = _flip()
+    changes[0].effective_verdict = Verdict.API_BREAK
+    demote_unexposed_enum_size_flag(
+        changes, _snap(headers=True, enums=0), _snap(headers=True, enums=0)
+    )
+    assert changes[0].effective_verdict is Verdict.API_BREAK
+    assert changes[0].modulation_reason is None

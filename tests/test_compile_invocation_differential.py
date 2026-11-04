@@ -295,6 +295,38 @@ _HEADER_TAIL = [
             ["clang", "-std=c++17", "-x", "c++", *_HEADER_TAIL],
             id="c-driver-cxx-build-std-still-selects-cxx",
         ),
+        # A language the build forwards itself, with its own -std, is kept:
+        # an appended -x would override it.
+        pytest.param(
+            {
+                "clang_bin": "clang++",
+                "cc_id": "gnu",
+                "force_cpp": True,
+                "gcc_options": "-std=c++17 -x objective-c++",
+            },
+            ["clang++", "-std=c++17", "-x", "objective-c++", *_HEADER_TAIL],
+            id="forwarded-language-kept-with-explicit-std",
+        ),
+        pytest.param(
+            {
+                "clang_bin": "clang++",
+                "cc_id": "gnu",
+                "force_cpp": True,
+                "gcc_options": "-std=c++17 -x objective-c++ -x none",
+            },
+            [
+                "clang++",
+                "-std=c++17",
+                "-x",
+                "objective-c++",
+                "-x",
+                "none",
+                "-x",
+                "c++",
+                *_HEADER_TAIL,
+            ],
+            id="forwarded-x-none-resets-the-selection",
+        ),
         pytest.param(
             {"clang_bin": "clang++", "cc_id": "gnu", "force_cpp": True},
             ["clang++", "-x", "c++", *_HEADER_TAIL],

@@ -344,6 +344,13 @@ def test_clang_backend_case61_alignment_noise_suppressed(
     new_snap = dump(v2_so, [new_header], header_backend="clang")
     result = compare(old_snap, new_snap)
 
+    # The premise: the additive global really moved lib_version to a less
+    # aligned address, so the suppression path is the one exercised.
+    def _addr_align(snap):
+        (sym,) = [s for s in snap.elf.symbols if s.name == "lib_version"]
+        return sym.value_alignment
+
+    assert 0 < _addr_align(new_snap) < _addr_align(old_snap)
     assert result.verdict == Verdict.COMPATIBLE
     assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED not in {
         c.kind for c in result.changes

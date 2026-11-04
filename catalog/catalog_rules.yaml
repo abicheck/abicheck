@@ -177,7 +177,7 @@ rules:
     definition: A header-only default argument change for a class template in a nested namespace. The qualified-name pairing must match the pattern under its nested scope.
   nontype-template-param-default-changed:
     title: Non-type template parameter default changed
-    definition: A non-type template parameter's default changes. The recorder covers type parameters only, so the change is an explicit assurance gap on both backends rather than a verdict.
+    definition: A non-type template parameter's default changes. The clang recorder spells non-type defaults and reports API_BREAK; castxml cannot record defaults and reports an assurance gap.
   exported-template-default-changed:
     title: Exported template default changed
     definition: A default template argument changes for a template whose instantiation the library exports. The default-substituted symbol changes (BREAKING, default_template_arg_changed), and the header-level kind is recorded as DEDUPLICATED rather than reported twice.

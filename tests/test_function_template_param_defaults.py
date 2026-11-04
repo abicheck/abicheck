@@ -129,6 +129,15 @@ def _pair(tmp: Path, old_text: str, new_text: str, frontend: str) -> dict[str, A
             "('char',)",
             id="changed",
         ),
+        # Still reported: an added default makes the template viable for a
+        # call that omits the argument, which can rebind an overload's call.
+        pytest.param(
+            _UNDEFAULTED,
+            _DEFAULTED,
+            "(None,)",
+            "('int',)",
+            id="added",
+        ),
         pytest.param(
             _DEFAULTED,
             _REMOVED_DEFAULT,
@@ -148,15 +157,6 @@ def test_function_default_change_is_api_break_on_clang(
     assert change["old_value"] == old_value
     assert change["new_value"] == new_value
     assert change["symbol"] == "mylib::f()"
-
-
-def test_added_function_default_is_not_an_api_break_on_clang(tmp_path: Path) -> None:
-    """An added default leaves every previously valid call (which had to spell
-    the argument) valid with the same meaning, so nothing is reported."""
-    _require_clang()
-    report = _pair(tmp_path, _UNDEFAULTED, _DEFAULTED, "clang")
-    assert report["verdict"] == "NO_CHANGE"
-    assert _changes(report) == []
 
 
 def test_unchanged_function_default_reads_no_change_on_clang(tmp_path: Path) -> None:

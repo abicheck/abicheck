@@ -32,6 +32,7 @@ from abicheck.checker import compare
 from abicheck.compare.detection_memo import detection_memo_scope
 from abicheck.compare.section_readers import DETECTOR_SECTIONS
 from abicheck.detector_registry import registry
+from abicheck.errors import SnapshotError
 from abicheck.model import (
     AbiSnapshot,
     Function,
@@ -55,6 +56,7 @@ from abicheck.storage.snapshot_lazy_decode import (
     LEGACY_BACKFILL_FLOOR,
     eager_section_decode,
 )
+from abicheck.storage.wire_extensions import flattening_loses
 from tests._whole_document_encoder import (
     whole_sectioned_document as sectioned_document_for_write,
 )
@@ -110,8 +112,24 @@ def _observed(snap: AbiSnapshot) -> tuple[str, str, str]:
     return (
         snapshot_to_json(snap),
         snapshot_content_digest(snap),
-        evidence_digest_of_document(snapshot_to_dict(snap)),
+        _flat_evidence_digest(snap),
     )
+
+
+def _flat_evidence_digest(snap: Any) -> str:
+    """The flat document's evidence digest, or a pinned refusal.
+
+    A snapshot carrying an understood header extension (ADR-079's
+    ``abicheck.export_read``, on every binary dump since then; the gen35
+    corpus) is refused by ``snapshot_to_dict`` (known-gaps: "A reloaded binary
+    snapshot written since ADR-079 cannot be flattened"). The refusal itself is
+    asserted, so fixing the gap fails here and the pin is removed; every other
+    observed value is still compared."""
+    if flattening_loses(snap):
+        with pytest.raises(SnapshotError, match="cannot hold"):
+            snapshot_to_dict(snap)
+        return "flat-refused"
+    return evidence_digest_of_document(snapshot_to_dict(snap))
 
 
 def _diff_signature(old: AbiSnapshot, new: AbiSnapshot) -> tuple[Any, ...]:
@@ -173,37 +191,7 @@ def test_eager_switch_forces_eager() -> None:
 # -- differential: the fixture corpus -------------------------------------------
 
 
-def _flat_lossy_xfail(paths: list[Path]) -> list[Any]:
-    """Mark a corpus snapshot that carries an understood header extension
-    (``abicheck.export_read``, written on every binary dump since ADR-079) as
-    a strict xfail for the flat ``snapshot_to_dict`` differential: the flat
-    document refuses it (known-gaps: "A reloaded binary snapshot cannot be
-    flattened"). Strict, so fixing the gap turns this into a failure to remove."""
-    from abicheck.serialization import load_snapshot
-    from abicheck.storage.wire_extensions import flattening_loses
-
-    out: list[Any] = []
-    for path in paths:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            lossy = flattening_loses(load_snapshot(path))
-        marks = (
-            [
-                pytest.mark.xfail(
-                    strict=True,
-                    reason="flat snapshot_to_dict refuses an export_read extension",
-                )
-            ]
-            if lossy
-            else []
-        )
-        out.append(pytest.param(path, marks=marks))
-    return out
-
-
-@pytest.mark.parametrize(
-    "path", _flat_lossy_xfail(_CORPUS), ids=lambda p: f"{p.parent.name}/{p.name}"
-)
+@pytest.mark.parametrize("path", _CORPUS, ids=lambda p: f"{p.parent.name}/{p.name}")
 def test_lazy_load_matches_eager_load(path: Path) -> None:
     eager = _quiet_load(path, eager=True)
     assert _quiet_load(path) == eager

@@ -142,9 +142,9 @@ current emitter, which is unchanged.
 
 ### False-clean risk
 
-#### A reloaded binary snapshot cannot be flattened with `snapshot_to_dict` (2026-11-04)
+#### A reloaded binary snapshot written since ADR-079 cannot be flattened with `snapshot_to_dict` (2026-11-04)
 
-**Status (2026-11-04): OPEN.** Since ADR-079 (#1914) every binary dump writes the `binary` section's `abicheck.export_read` extension fact (`{}` when every export table was read completely). Absent means `unrecorded`, so the writer cannot leave it out. A snapshot loaded from disk keeps the fact in `WireExtensions.header_extras`, and `storage/wire_extensions.flattening_loses` counts any header extra as lossy, so `snapshot_to_dict` refuses every reloaded binary snapshot. The frozen gen35 extractor corpus is the first fixture to carry the fact. Its flat-document differentials (`test_snapshot_section_decode.py`, `test_snapshot_lazy_decode.py`) are strict xfails until the flat document can carry an understood extension fact, or `flattening_loses` exempts one the flat path can round-trip. Owner: `storage/wire_extensions.py`, `storage/extension_facts.py`.
+**Status (2026-11-04): OPEN.** Since ADR-079 (#1914) every binary dump writes the `binary` section's `abicheck.export_read` extension fact (`{}` when every export table was read completely). Absent means `unrecorded`, so the writer cannot leave it out. A snapshot loaded from disk keeps the fact in `WireExtensions.header_extras`, and `storage/wire_extensions.flattening_loses` counts any header extra as lossy, so `snapshot_to_dict` refuses every reloaded binary snapshot written since ADR-079 (an older one without another carrier still flattens). The frozen gen35 extractor corpus is the first fixture to carry the fact. Its flat-document differentials (`test_snapshot_section_decode.py`, `test_snapshot_lazy_decode.py`) assert that refusal and compare every other observed value, until the flat document can carry an understood extension fact, or `flattening_loses` exempts one the flat path can round-trip. Owner: `storage/wire_extensions.py`, `storage/extension_facts.py`.
 
 #### A cached header parse does not see a newly reachable system header that its depfile never named (2026-11-01)
 

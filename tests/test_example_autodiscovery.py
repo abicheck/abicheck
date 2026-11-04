@@ -952,6 +952,22 @@ def _load_validate_examples():
     return mod
 
 
+def _short_work_root(tmp_path: Path) -> Path:
+    """A work root short enough for MSVC on Windows.
+
+    The case build nests ``cmake_build/<case>/CMakeFiles/<case>_v1.dir/`` and
+    MSVC writes its program database there; with pytest's per-worker
+    ``tmp_path`` (~115 characters) a 44-49 character case name repeated twice
+    passes MAX_PATH, and ``cl`` fails with C1041 (case223/225/227/228). Elsewhere
+    the pytest path is fine and is used as is.
+    """
+    if sys.platform != "win32":
+        return tmp_path
+    import tempfile
+
+    return Path(tempfile.mkdtemp(prefix="ss"))
+
+
 @pytest.mark.integration
 @pytest.mark.parametrize("case_name", sorted(SOURCE_SMOKE_CASES))
 def test_example_source_smoke(case_name: str, tmp_path: Path) -> None:
@@ -963,7 +979,12 @@ def test_example_source_smoke(case_name: str, tmp_path: Path) -> None:
         pytest.skip(f"{case_name} not supported on {CURRENT_PLATFORM}")
 
     ve = _load_validate_examples()
-    result = ve.run_case(case_name, entry, tmp_path)
+    work = _short_work_root(tmp_path)
+    try:
+        result = ve.run_case(case_name, entry, work)
+    finally:
+        if work != tmp_path:
+            shutil.rmtree(work, ignore_errors=True)
 
     if result.status == "SKIP":
         pytest.skip(f"{case_name}: {result.message}")

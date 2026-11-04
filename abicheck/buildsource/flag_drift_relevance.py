@@ -40,14 +40,22 @@ MODULATION_REASON = "no-enum-in-compared-surface"
 
 
 def _enum_free(snapshot: AbiSnapshot | None) -> bool:
-    """True only when *snapshot*'s enum set is established and empty."""
+    """True only when *snapshot*'s enum set is established and empty.
+
+    Established means a confirmed public-header AST (``from_headers`` and not
+    inferred from a legacy document). DWARF alone is not enough: the CU walk
+    leaves no marker for a unit it skipped, so an empty DWARF enum table does
+    not prove the binary has none. When DWARF is present its enums must also
+    be empty, so an enum in a struct the headers do not show still counts.
+    """
     if snapshot is None:
         return False
-    dwarf = snapshot.declarations.debug_layout
-    dwarf_enums = dwarf.enums if dwarf is not None and dwarf.has_dwarf else None
-    if not (snapshot.from_headers or dwarf_enums is not None):
+    if not snapshot.from_headers or snapshot.from_headers_inferred:
         return False
-    return not snapshot.declarations.enums and not dwarf_enums
+    if snapshot.declarations.enums:
+        return False
+    dwarf = snapshot.declarations.debug_layout
+    return not (dwarf is not None and dwarf.has_dwarf and dwarf.enums)
 
 
 def demote_unexposed_enum_size_flag(

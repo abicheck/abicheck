@@ -47,6 +47,23 @@ class HeaderCompileContext:
     dpcpp_host_context: bool = False
 
 
+def _forwarded_language_selected(tokens: list[str]) -> bool:
+    """Whether the last forwarded ``-x`` (separate or joined) selects a
+    language; a later ``-x none`` resets the selection."""
+    language: str | None = None
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token == "-x" and index + 1 < len(tokens):
+            language = tokens[index + 1]
+            index += 2
+            continue
+        if token.startswith("-x") and len(token) > 2:
+            language = token[2:]
+        index += 1
+    return language not in (None, "none")
+
+
 def render_clang_header_argv(
     context: HeaderCompileContext, agg_path: Path
 ) -> list[str]:
@@ -111,12 +128,17 @@ def render_clang_header_argv(
     # only emitted alongside the default standard. Likewise the C→C++ retry
     # reuses a ``.h`` aggregate a C driver would read as C. Only the default
     # standard is conditional; gnu++20 only when C++20 syntax was detected.
+    # A language the build itself forwards (``-x objective-c++``) is kept when
+    # it also set the standard: appending ours after it would override it.
+    keep_forwarded = explicit_std and _forwarded_language_selected(cmd)
     if not context.force_cpp:
-        cmd += ["-x", "c"]
+        if not keep_forwarded:
+            cmd += ["-x", "c"]
         if not explicit_std:
             cmd += ["-std=gnu11"]
     else:
-        cmd += ["-x", "c++"]
+        if not keep_forwarded:
+            cmd += ["-x", "c++"]
         if not explicit_std and context.force_cpp20:
             cmd += ["-std=gnu++20"]
     if context.dpcpp_multi_context:

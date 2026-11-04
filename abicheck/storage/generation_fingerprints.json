@@ -16,7 +16,6 @@
       "abicheck/extract/ar_archive.py": "6fdab7ed7390a20f087f9407eaa3988c0f8c658400bc0ea8c7e193271923956d",
       "abicheck/extract/ar_archive_format.py": "38a51cae7762eb269af3788d5dca9cfe50de38d9b315f34fa31427f791cb7e62",
       "abicheck/extract/archive_integrity.py": "8d2b9fb73980bf646972da75431adf6437335bd83aa7b14678d531b1084995cb",
-      "abicheck/extract/arithmetic_type_spellings.py": "790e6049cf5607e20d987d2151bacc4ba331f76e24c486b0305102f79f4ae726",
       "abicheck/extract/binary_dialect.py": "64bd6a5e3c68356bc5f2045882dfb0b64a59dd7dbd312742b2e51583f02f0c41",
       "abicheck/extract/binary_format.py": "4b9f591077fa5c90d2e3a767343d92b098061870403d431694470bc05e5468b3",
       "abicheck/extract/binary_identity.py": "4645eaf3dddd0a2230a5c694882548476406c57514275fa4c8c1bc152607ca88",
@@ -86,7 +85,7 @@
       "abicheck/extract/headers/castxml/backend.py": "188684d40afc777fcc7c560747342be413e762f05326d2fd3911b04fe3356fef",
       "abicheck/extract/headers/castxml/calling_convention.py": "147c4be1a5b417eb4a67156e92e8f03f09eef3b7b34703ac22a98ad86d5dde1d",
       "abicheck/extract/headers/castxml/context.py": "a2a9fc7c8b2f5f06fc122d1628b4681d2a22cd6fffd16f173a48f157ccc1b889",
-      "abicheck/extract/headers/castxml/dumper.py": "e5082c2d5da488b9a1e07600408e9092420e97af6066652bcdcc81264c0e0ef6",
+      "abicheck/extract/headers/castxml/dumper.py": "518d94f63c1d4ebea6e1c30d21b9c45166c58a2f33c3c8f5778308a325b3187c",
       "abicheck/extract/headers/castxml/duplicate_declarations.py": "977b85a15408fa9877b9b686f0bd913af9442e4da5b1d9292975bda7eff424f7",
       "abicheck/extract/headers/castxml/enums.py": "e616c768543061d71812378dd92cbcb7b8d00afbb734bcb7b4b5334ee34042aa",
       "abicheck/extract/headers/castxml/function_type_cc.py": "54b78f155f3500d45cc578501e42ae2af256445bfa9819510e805e60df8c9967",
@@ -105,7 +104,7 @@
       "abicheck/extract/headers/castxml/specialization.py": "3f9f021672df1b84de42bc8de5f3c915508b3f3850e0a8acbaa80a3dee04c6f3",
       "abicheck/extract/headers/castxml/type_resolution.py": "3527318ed7d36b2b557c447c9fa0807deec9c594a7f481cf36c860859062552f",
       "abicheck/extract/headers/castxml/typedef_parsing.py": "332587638d5d4b7caebbc20fa44b69c314771fffa5839a15dec59eaba3caaf93",
-      "abicheck/extract/headers/castxml/variable_template_join.py": "54c2b883c9990f104bcabf631ffa00f7e8b1b4f5823d3aeef3cfcb7c6d5a718b",
+      "abicheck/extract/headers/castxml/variable_template_join.py": "d9a70038dd72b330cd677fcfcbbb6b2fa9bedfc4e1b269413384769360a733a0",
       "abicheck/extract/headers/castxml/vector_join.py": "a24eb21612af159ef05904fec5f32bf56d37c79abc459832e23929a6a193dbcb",
       "abicheck/extract/headers/castxml/vector_spellings.py": "1048c21245235f6857beacf4668fc888bea7117c88c18300aae666a90aac763d",
       "abicheck/extract/headers/clang/__init__.py": "538add12f3ff39e1c1b39e6f5def93b50a584b78b30c4e7e59058207222757d0",
@@ -119,7 +118,7 @@
       "abicheck/extract/headers/clang/error_header_retry.py": "3153f727c9d1934783a51d6917727a48aeba31e68b3c2462aef6e6b2f489f690",
       "abicheck/extract/headers/clang/explicit_instantiation.py": "359b71f36e304c2c1226ca35a65c1969989195dabc070a8035354caaef501663",
       "abicheck/extract/headers/clang/explicit_specifier.py": "fca63201aaf3d920e2bbb796114c93bd6edc89974083f9900ed26e98de7fc699",
-      "abicheck/extract/headers/clang/expr.py": "456957f0f4ba36eaa8f4fed5d99c8c6ad5b13d48a2983220306cffeceb6a8f3b",
+      "abicheck/extract/headers/clang/expr.py": "da2554d914f005f8525e0a411b36e93e3dd3dc80957cc7597245c9257b875994",
       "abicheck/extract/headers/clang/function_template_defaults.py": "af4a42ea00a91238ef8f111fe05c4b6aa625b84fd2fd4e39230b48953ebaf566",
       "abicheck/extract/headers/clang/functions.py": "12a37b2d33be83ab29d8242fd6fde193af1e377520871195fb86e6d9ce664fdc",
       "abicheck/extract/headers/clang/inline_semantics.py": "8284b543b4fa45da23c50fee0f16fd11dab8c43cf43f1cf07334572a822ad04d",
@@ -140,7 +139,7 @@
       "abicheck/extract/headers/clang/templates.py": "ee85de87a4180b5bed93d501237f153d1132fd325504c1fdf52fab87c7c95efe",
       "abicheck/extract/headers/clang/typedefs.py": "0345022b18ed0a011c4a1420e7b85e77dc3437f1339d5572ff28af29aebc0f3b",
       "abicheck/extract/headers/clang/vtable.py": "894fa40c7d59c4c874becd3a6b9547007fa2f08db075d095c2b5272ba9c60b2d",
-      "abicheck/extract/headers/clang_header_argv.py": "e434ceaab1103e07b26761dade984d35459c9485d017be2b8545dc887c042118",
+      "abicheck/extract/headers/clang_header_argv.py": "644a6454c6a3da3ab5f184cc2d9778d51f141f1e528f86162cccb815f9b17ddb",
       "abicheck/extract/headers/compile_provenance.py": "5c800725da59c2c3aeac4e85118dcd54edd6ec5c75875e483978b78a750ec0af",
       "abicheck/extract/headers/manifest.py": "4f0e740bfeb88aa4363176f2defe422826a9e2cd91b03cd317f6f86f4eec5066",
       "abicheck/extract/headers/preprocessor_branches.py": "d3a409d126b0dd1b19a634d4aad25660d372dad931b310cfbaaefc9d769b244d",
@@ -192,9 +191,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "479889b0f6fb41970794c224ae690506897210468f8577ce359c9518607a4f77",
+    "fingerprint": "d22e65379e3c0c0440f8b328af88ac8dd3fd91c1821b9bd57015b3aa25a16f9d",
     "generation": 36,
-    "reason": "bumped to 36 for a semantic change"
+    "reason": "moved the arithmetic-spelling predicate unchanged from extract/ to model/ (compare/ needs it); same set and same rule, so nothing an extractor records changes"
   },
   "resolver": {
     "files": {

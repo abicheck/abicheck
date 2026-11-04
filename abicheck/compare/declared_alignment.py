@@ -18,6 +18,7 @@ address-derived alignment change (``diff_platform_elf_symbols``)."""
 from __future__ import annotations
 
 from ..model import AbiSnapshot
+from ..model.arithmetic_type_spellings import is_arithmetic_spelling
 from ..model.availability import FactStatus
 
 
@@ -25,7 +26,7 @@ def declared_alignment_bits(snap: AbiSnapshot, sym_name: str) -> int | None:
     """Return the DWARF/header-declared alignment (bits) for a variable, if known.
 
     An explicit ``alignment_bits`` wins; otherwise the compiler-derived natural
-    alignment of a fundamental-typed variable (``type_abi_fact``, PRESENT only)
+    alignment of an arithmetic-typed variable (``type_abi_fact``, PRESENT only)
     corroborates -- the clang header backend records no computed alignment for
     a plain variable but does record this fact, so address-placement noise on
     an unchanged ``extern int`` is not reported as a reduction (case61).
@@ -35,6 +36,12 @@ def declared_alignment_bits(snap: AbiSnapshot, sym_name: str) -> int | None:
         return None
     if var.alignment_bits is not None:
         return var.alignment_bits
+    # Only a variable spelled with an arithmetic type: the fact describes the
+    # *desugared* type, so a typedef carrying its own alignment attribute
+    # (``typedef int al16 __attribute__((aligned(16)))``) would read as the
+    # plain int's alignment and hide a real reduction.
+    if not is_arithmetic_spelling(var.type):
+        return None
     fact = var.type_abi_fact
     if (
         fact is not None
