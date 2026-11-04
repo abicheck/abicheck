@@ -38,10 +38,16 @@ def test_each_warning_once_and_every_carrier_named(
         return
     entries = [ln for ln in lines if ln.startswith("- ")]
     assert len(entries) == len(expected)  # one line per distinct warning
+    first_seen = list(
+        dict.fromkeys(w for lib in libs for w in lib["coverage_warnings"])
+    )
+    assert [w for e in entries for w in _WARNINGS if w in e] == first_seen
     for w, carriers in expected.items():
         (line,) = [e for e in entries if w in e]
         for name in carriers:
             assert f"`{name}`" in line
+        positions = [line.index(f"`{name}`") for name in carriers]
+        assert positions == sorted(positions)  # first-seen library order
         assert sum(f"`{lib['library']}`" in line for lib in libs) == len(carriers)
         if len(carriers) > 1:
             assert f"({len(carriers)} libraries:" in line

@@ -166,13 +166,13 @@ RETIRED_ROOT_COMMANDS: dict[str, str] = {
 #: ``(command name, option)``. Click's own "Did you mean" fuzzy match points
 #: ``compare --version`` at ``--verbose``/``--variant``, never at ``--label``.
 RETIRED_OPTIONS: dict[tuple[str, str], str] = {
-    **{
-        (
-            cmd,
-            "--version",
-        ): "`--version` was renamed to `--label` (e.g. `--label old=1.0 --label new=1.1`)."
-        for cmd in ("compare", "dump", "history")
-    },
+    ("compare", "--version"): (
+        "`--version` was renamed to `--label` (e.g. `--label old=1.0 --label new=1.1`)."
+    ),
+    ("dump", "--version"): "`--version` was renamed to `--label` (e.g. `--label 1.1`).",
+    ("history", "--version"): (
+        "`--version` was renamed to `--label` (one `--label` per SNAPSHOT, in order)."
+    ),
     ("compare", "--abi3"): "`--abi3` was renamed to `--abi3-floor`.",
     ("compare", "--old-root"): "use `--root old=PATH`.",
     ("compare", "--new-root"): "use `--root new=PATH`.",
