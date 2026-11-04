@@ -131,6 +131,35 @@ def _collect_internal_changes(
     return internal_changes
 
 
+def _alias_scoped_path_keys(
+    paths: dict[str, list[list[str]]],
+    qualified_index: dict[str, set[str | None]],
+) -> dict[str, list[list[str]]]:
+    """Also key each scope-spelled path target by its bare record name.
+
+    A leak path is keyed by the type spelling the public declaration wrote
+    (clang keeps ``detail::Impl`` as written in ``: public detail::Impl``),
+    while a type change carries the record's bare ``name``. The bare alias
+    is added only when exactly one record has that bare name and its
+    qualified name ends with the written spelling, so two distinct records
+    sharing a bare name are never merged.
+    """
+    out = dict(paths)
+    for key, plist in paths.items():
+        if "::" not in key:
+            continue
+        bare = key.rsplit("::", 1)[1]
+        if bare in out:
+            continue
+        quals = qualified_index.get(bare, set())
+        if len(quals) != 1:
+            continue
+        (qual,) = tuple(quals)
+        if qual is not None and (qual == key or qual.endswith("::" + key)):
+            out[bare] = plist
+    return out
+
+
 def _merge_leak_paths(
     tname: str,
     old_paths: dict[str, list[list[str]]],
@@ -248,8 +277,12 @@ def detect_internal_leaks(
     # Compute reachability on *both* snapshots (a type may be reachable
     # only in one direction, e.g. just-added internal type leaked by a
     # new public template).
-    old_paths = compute_leak_paths(old, internal_set)
-    new_paths = compute_leak_paths(new, internal_set)
+    old_paths = _alias_scoped_path_keys(
+        compute_leak_paths(old, internal_set), merged_qualified_index
+    )
+    new_paths = _alias_scoped_path_keys(
+        compute_leak_paths(new, internal_set), merged_qualified_index
+    )
 
     out: list[Change] = []
     for tname, triggers in internal_changes.items():

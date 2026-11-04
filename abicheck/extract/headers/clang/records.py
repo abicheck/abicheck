@@ -449,6 +449,37 @@ def _collect_fields(
     return fields
 
 
+def _template_head(spelling: str) -> str:
+    """``ns::pimpl`` of ``const ns::pimpl<T> *`` -- the outermost template name."""
+    head = spelling.split("<", 1)[0]
+    head = re.sub(r"\b(?:const|volatile|struct|class|union|enum|typename)\b", "", head)
+    return head.strip().split("::")[-1]
+
+
+def alias_template_target(written: str, desugared: str) -> str:
+    """A field type spelled through an alias template, resolved to its target.
+
+    ``template <class T> using pimpl = std::shared_ptr<T>;`` makes a field
+    ``pimpl<Impl>`` read the same on both sides while its real type flips to
+    ``std::unique_ptr<Impl>``. castxml never models alias templates and records
+    the target, so the clang backend does too. Only a written template
+    specialization whose desugared spelling names a *different* template is
+    rewritten; a plain typedef (``size_t``) or an ordinary specialization
+    keeps the spelling the header wrote.
+    """
+    if (
+        not desugared
+        or desugared == written
+        or "<" not in written
+        or "<" not in desugared
+        or not written.rstrip(" *&").endswith(">")
+    ):
+        return written
+    if _template_head(written) == _template_head(desugared):
+        return written
+    return desugared
+
+
 def _make_field(
     child: dict[str, Any],
     access: str,
@@ -456,7 +487,7 @@ def _make_field(
     field_default_value: FieldDefaultValueEvaluator,
     builtin_abi: BuiltinAbi | None = None,
 ) -> TypeField:
-    ftype = qualtype(child)
+    ftype = alias_template_target(qualtype(child), desugared_qualtype(child))
     cv_type = field_own_cv_source(desugared_qualtype(child))
     bits, is_bitfield = _bitfield_width(child, evaluate_bitfield_int)
     return TypeField(

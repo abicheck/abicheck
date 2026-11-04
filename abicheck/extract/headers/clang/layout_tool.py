@@ -76,6 +76,12 @@ from ..ast_config import _build_clang_header_command
 from ..sysinc import _resolve_clang_system_includes
 from .backend import resolve_clang_langmode
 from .error_header_retry import retry_excluding_error_headers
+from .record_layout_dump import (
+    normalized_record_name,
+    parse_record_layout_dump,
+    probe_source,
+    probeable_record_name,
+)
 
 log = logging.getLogger(__name__)
 
@@ -131,7 +137,7 @@ def _compile_flags_from_ast_dump_command(cmd: list[str]) -> list[str]:
 
 
 def run_layout_tool(
-    binary: str,
+    binary: str | None,
     resolved_headers: list[Path],
     extra_includes: list[Path],
     *,
@@ -143,8 +149,14 @@ def run_layout_tool(
     sysroot: Path | None = None,
     nostdinc: bool = False,
     lang: str | None = None,
+    probe_names: list[str] | None = None,
 ) -> list[dict[str, Any]] | None:
     """Run the G28 Phase 4 layout tool over *resolved_headers*.
+
+    With ``binary=None`` the built-in path runs instead: the same clang
+    compile context over a probe TU taking ``sizeof`` of each of
+    *probe_names*, with ``-fdump-record-layouts``
+    (:mod:`.record_layout_dump`). C++ only; a C header set returns ``None``.
 
     *resolved_headers*/*extra_includes* must already be fully resolved (a
     directory entry expanded, inferred include roots folded in) — the same
@@ -194,6 +206,23 @@ def run_layout_tool(
     cpp_system_includes = (
         system_includes if force_cpp else _resolve_sysinc(force_cpp=True)
     )
+
+    if binary is None:
+        if not force_cpp or not probe_names:
+            return None
+        return _run_builtin_layout_dump(
+            clang_bin,
+            cc_id,
+            resolved_headers,
+            extra_includes,
+            probe_names,
+            sysroot=sysroot,
+            nostdinc=nostdinc,
+            gcc_options=gcc_options,
+            gcc_option_tokens=gcc_option_tokens,
+            force_cpp20=force_cpp20,
+            system_includes=system_includes,
+        )
 
     agg_ext = ".hpp" if force_cpp else ".h"
     with tempfile.NamedTemporaryFile(suffix=agg_ext, mode="w", delete=False) as agg:
@@ -316,6 +345,62 @@ def run_layout_tool(
         agg_path.unlink(missing_ok=True)
 
 
+def _run_builtin_layout_dump(
+    clang_bin: str,
+    cc_id: Any,
+    resolved_headers: list[Path],
+    extra_includes: list[Path],
+    probe_names: list[str],
+    *,
+    sysroot: Path | None,
+    nostdinc: bool,
+    gcc_options: str | None,
+    gcc_option_tokens: tuple[str, ...],
+    force_cpp20: bool,
+    system_includes: tuple[str, ...],
+) -> list[dict[str, Any]] | None:
+    """Run clang ``-fdump-record-layouts`` over a ``sizeof`` probe TU.
+
+    The exit status is not consulted: a probe clang rejects (an incomplete
+    or inaccessible record) costs only that record's layout, and every
+    layout clang did dump is the one it computed. Returns ``None`` when the
+    run itself fails or dumps nothing.
+    """
+    with tempfile.NamedTemporaryFile(suffix=".cpp", mode="w", delete=False) as probe:
+        probe_path = Path(probe.name)
+    try:
+        includes = "".join(f'#include "{h.resolve()}"\n' for h in resolved_headers)
+        probe_path.write_text(probe_source(includes, probe_names), encoding="utf-8")
+        full_cmd = _build_clang_header_command(
+            clang_bin,
+            cc_id,
+            extra_includes,
+            probe_path,
+            sysroot=sysroot,
+            nostdinc=nostdinc,
+            gcc_options=gcc_options,
+            gcc_option_tokens=gcc_option_tokens,
+            force_cpp=True,
+            force_cpp20=force_cpp20,
+            system_includes=system_includes,
+        )
+        cmd = [
+            "-fdump-record-layouts" if tok == "-ast-dump=json" else tok
+            for tok in full_cmd
+        ]
+        try:
+            result = run_bounded(
+                cmd, capture_output=True, text=True, timeout=_LAYOUT_TOOL_TIMEOUT_S
+            )
+        except (subprocess.SubprocessError, OSError) as exc:
+            log.debug("clang record-layout dump failed: %s", exc)
+            return None
+        records = parse_record_layout_dump(result.stdout or "")
+        return records or None
+    finally:
+        probe_path.unlink(missing_ok=True)
+
+
 def _bare_base_name(qualified: str) -> str:
     """Strip a leading namespace/enclosing-scope qualifier from a base class
     name -- e.g. ``"ns::Base"`` -> ``"Base"`` -- matching the BARE (never
@@ -419,19 +504,20 @@ def apply_layout_facts(
     """
     if not records:
         return snapshot
-    by_name: dict[str, dict[str, Any]] = {
-        r["qualified_name"]: r
-        for r in records
-        if isinstance(r, dict) and isinstance(r.get("qualified_name"), str)
-    }
+    by_name: dict[str, dict[str, Any]] = {}
+    for r in records:
+        if isinstance(r, dict) and isinstance(r.get("qualified_name"), str):
+            by_name.setdefault(r["qualified_name"], r)
+            by_name.setdefault(normalized_record_name(r["qualified_name"]), r)
     if not by_name:
         return snapshot
 
     new_types = []
     changed = False
     for t in snapshot.declarations.types:
+        key = t.qualified_name or t.name
         facts = (
-            by_name.get(t.qualified_name or t.name)
+            by_name.get(key) or by_name.get(normalized_record_name(key))
             if not t.is_template_pattern
             else None
         )
@@ -545,8 +631,20 @@ def attach_clang_layout(
         # layout data (Codex review).
         return snap
     binary = find_layout_tool_bin()
+    probe_names: list[str] | None = None
     if binary is None:
-        return snap
+        # Built-in fallback: only records still lacking a size are probed.
+        probe_names = sorted(
+            {
+                t.qualified_name or t.name
+                for t in snap.declarations.types
+                if t.size_bits is None
+                and not t.is_template_pattern
+                and probeable_record_name(t.qualified_name or t.name)
+            }
+        )
+        if not probe_names:
+            return snap
     try:
         resolved_headers = _expand_header_inputs(headers)
         if not resolved_headers:
@@ -582,5 +680,6 @@ def attach_clang_layout(
         sysroot=compile.sysroot if compile is not None else None,
         nostdinc=compile.nostdinc if compile is not None else False,
         lang=lang,
+        probe_names=probe_names,
     )
     return apply_layout_facts(snap, records)
