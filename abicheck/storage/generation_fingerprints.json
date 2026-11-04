@@ -72,7 +72,7 @@
       "abicheck/extract/header_ast_cache_producers.py": "aa85ae5d148526267f600b0972ca89afc27b6b8cb3f51b4c781a1526773600b4",
       "abicheck/extract/header_ast_fields.py": "29877eb38ce55c0d2dd459ceaca25f112850b3f2a0177abe61a53f3907bd3ee5",
       "abicheck/extract/header_exclusions.py": "254ca6e4ccf7366b9db516183d6814cb865c279845abe7d05051ac2f72bf0884",
-      "abicheck/extract/header_order_witness.py": "6a1cfce946826fa540a0601ebeefa02a8973ba6e8cd5d8287f6c1e7badc3d53a",
+      "abicheck/extract/header_order_witness.py": "7cd5b21b5bfedea0ab66b0e34174b69362facd302ebd449baf7a234f56fbcf6c",
       "abicheck/extract/header_scan_memo.py": "56f79b5316354b938b08a5f29779c3aaf40481892d947784ec2adb48ab5e83fb",
       "abicheck/extract/header_text.py": "b43a88d7bf1d2e601bb908c78f04cb07e552f9c59f03b678ecc85788b3d146e4",
       "abicheck/extract/headers/__init__.py": "70af0d3a16882783444077004b7a434a295505579fbbca219ce103f72074ad03",
@@ -192,9 +192,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "aea75ff6b42293fca13a9894910a6ad5a1e82dd818504c967063478456033b1d",
-    "generation": 36,
-    "reason": "binary_dialect: rename the ELF machine/byte-order reader to read_elf_target"
+    "fingerprint": "9691935fc898fc460cd30e06e73c4c25e344685b881665cdd5310738f88ae880",
+    "generation": 37,
+    "reason": "bumped to 37 for a semantic change"
   },
   "resolver": {
     "files": {

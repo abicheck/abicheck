@@ -390,6 +390,17 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "generation-35 clang snapshot of a C header without a build -std= was "
         "already parsed as C, so it records what generation 36 does"
     ),
+    37: GenerationSpellingChange(
+        "no stored spelling changes: a -H directory now expands its headers in "
+        "the ADR-082 canonical order (resolved path as a string, so foo.h "
+        "before foo/bar.h; header_utils.iter_directory_headers). Generation 36 "
+        "sorted by pathlib.Path components (foo/bar.h first), so for a tree "
+        "with a foo.h beside a foo/ directory the aggregate TU included the "
+        "headers in a different order, header_sequence recorded that order, and "
+        "the header-order witness re-dumped in canonical order. Types and "
+        "declarations keep their spellings; only the declared order of such "
+        "trees changes"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.
