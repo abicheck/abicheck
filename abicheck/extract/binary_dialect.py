@@ -79,10 +79,31 @@ _STD_YEAR: dict[str, int] = {
     "2b": 23,
     "23": 23,
 }
-#: ``-m`` flags that pin the target ABI or multilib rather than the ISA.
-#: Forwarding them would make castxml require 32-bit or x32 headers the host
-#: may not have, so they are never inferred.
-_TARGET_ABI_FLAGS = frozenset({"-m32", "-m64", "-mx32"})
+#: ``-m`` options that pin the target ABI, data model, byte order or multilib
+#: rather than the ISA, keyed by option name (``-mabi=lp64`` -> ``-mabi``).
+#: The parse already targets the host the binary is read on, so forwarding
+#: them adds no evidence, and their spellings are not portable between GCC
+#: and castxml's clang: AArch64 GCC records ``-mlittle-endian -mabi=lp64`` in
+#: every producer, and clang rejects ``-mabi=lp64`` ("unknown target ABI"),
+#: which failed every gcc-built AArch64 header parse. RISC-V
+#: (``-mabi=lp64d``), PowerPC (``-mabi=elfv2``) and MIPS (``-mabi=64``,
+#: ``-mel``) record the same kind of option. Forwarding ``-m32``/``-mx32``
+#: would also make castxml require multilib headers the host may not have.
+_TARGET_ABI_OPTION_KEYS = frozenset(
+    {
+        "-m16",
+        "-m32",
+        "-m64",
+        "-mx32",
+        "-mabi",
+        "-mlittle-endian",
+        "-mbig-endian",
+        "-mel",
+        "-meb",
+        "-mlittle",
+        "-mbig",
+    }
+)
 #: Dialect a binary of C++20 or later is parsed with. castxml has no C++23
 #: mode; ``gnu++20`` parses C++23 code that stays within C++20 and fails
 #: loudly on the rest, as it does today.
@@ -149,7 +170,7 @@ def parse_producer_dialect(
             for token in tokens
             if token.startswith("-m")
             and len(token) > 2
-            and token not in _TARGET_ABI_FLAGS
+            and _option_key(token) not in _TARGET_ABI_OPTION_KEYS
         )
     )
     std_flags = [m for t in tokens if (m := _STD_FLAG.match(t))]

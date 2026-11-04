@@ -110,6 +110,40 @@ DW_LANG_C_PLUS_PLUS_23 = 0x3A
             (True, 20, "producer", ("-mavx2",)),
             id="target-abi-flags-excluded",
         ),
+        # Target ABI / data-model / byte-order options other architectures'
+        # GCC records by default are excluded too; castxml's clang rejects
+        # GCC's -mabi= spellings ("unknown target ABI 'lp64'"). ISA flags on
+        # the same producer are still kept.
+        pytest.param(
+            "GNU C17 13.3.0 -mlittle-endian -mabi=lp64 -g -fPIC",
+            (False, None, "producer", ()),
+            id="aarch64-gcc-default-abi-flags",
+        ),
+        pytest.param(
+            "GNU C++17 13.3.0 -mlittle-endian -mabi=lp64 -march=armv8.2-a+crypto -g",
+            (True, 17, "producer", ("-march=armv8.2-a+crypto",)),
+            id="aarch64-gcc-keeps-march",
+        ),
+        pytest.param(
+            "GNU C++20 13.2.0 -march=rv64gc -mabi=lp64d -mcmodel=medany -g",
+            (True, 20, "producer", ("-march=rv64gc", "-mcmodel=medany")),
+            id="riscv64-gcc-mabi-lp64d",
+        ),
+        pytest.param(
+            "GNU C11 12.2.0 -mbig -mabi=elfv2 -mcpu=power8 -g",
+            (False, None, "producer", ("-mcpu=power8",)),
+            id="ppc64-gcc-mabi-elfv2",
+        ),
+        pytest.param(
+            "GNU C11 12.2.0 -mel -mabi=64 -march=mips64r2 -g",
+            (False, None, "producer", ("-march=mips64r2",)),
+            id="mips64el-gcc-mabi-64",
+        ),
+        pytest.param(
+            "GNU C++20 13.3.0 -mbig-endian -mabi=ilp32 -m16 -g",
+            (True, 20, "producer", ()),
+            id="every-abi-option-excluded",
+        ),
         pytest.param(
             "GNU C++20 13.3.0 -mavx2 -mavx2 -march=x86-64 -march=x86-64 -g",
             (True, 20, "producer", ("-mavx2", "-march=x86-64")),
