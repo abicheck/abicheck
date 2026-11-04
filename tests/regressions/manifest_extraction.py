@@ -668,7 +668,10 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "size and offset it reports equals sizeof/offsetof of a compiled program."
         ),
         fixed_by=(1918,),
-        seed_tests=("tests/test_clang_record_layout_dump.py",),
+        seed_tests=(
+            "tests/test_clang_record_layout_dump.py",
+            "tests/test_family_f8_target_parity.py",
+        ),
         public_surfaces=("cli",),
         axes={
             "frontend": ("clang",),

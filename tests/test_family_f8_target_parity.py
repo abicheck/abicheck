@@ -29,6 +29,9 @@ Two escapes motivated it, both invisible to every x86-64 lane:
 * ``extraction.linker_summary_flag_read_as_the_fact`` -- static-TLS use was
   read from ``DF_STATIC_TLS``, which GNU ld writes on x86-64 but not on
   AArch64, so the same initial-exec library had the fact on one target only.
+* ``extraction.backend_fact_family_parity`` -- the clang header backend left
+  record sizes and offsets empty where castxml reads them from its own Clang,
+  so the same headers carried layout through one frontend only.
 
 **Artifact-fact cells.** The same TLS source under every ``-ftls-model``, built
 for each target: ``has_static_tls`` must agree across targets wherever both
@@ -450,3 +453,133 @@ def test_seeded_mutant_aggregate_line_attribution_is_reported(tmp_path: Path) ->
     assert rejected_header_violations(
         alone, _dump_dir(tmp_path, None, mutant="aggregate_line_attribution")
     )
+
+
+# -- Header-backend parity: clang records the layout castxml records ----------
+#
+# ``extraction.backend_fact_family_parity``: the same headers through the clang
+# header backend must carry the record sizes and field offsets castxml reads
+# from its own Clang, with no DWARF to fall back on (the library is built
+# without -g). Oracle: the castxml dump of the same headers, read through
+# ``load_snapshot``. Seeded mutant: a failing companion layout tool disables the
+# built-in pass, and the oracle must report the missing layout.
+
+_BACKEND_HEADER = """#pragma once
+#include <memory>
+namespace ns {
+struct Impl;
+template <class T> using pimpl = std::shared_ptr<T>;
+class Base { public: virtual ~Base(); int id; char tag; };
+class Derived : public Base { public: short s; double d; void f(); };
+template <class T> struct Box { T a; char b; T c; long get() const; };
+extern template struct Box<long>;
+struct Holder { pimpl<Impl> impl; int n; };
+Holder* make();
+}
+"""
+_BACKEND_SRC = """#include "api.hpp"
+namespace ns {
+struct Impl {};
+Base::~Base() {}
+void Derived::f() {}
+template <class T> long Box<T>::get() const { return 0; }
+template struct Box<long>;
+Holder* make() { return new Holder; }
+}
+"""
+_BACKEND_RECORDS = ("ns::Base", "ns::Derived", "ns::Box<long>", "ns::Holder")
+
+
+def _backend_dump(tmp: Path, frontend: str, env_extra: dict[str, str] | None = None):
+    work = tmp / f"backend-{frontend}-{len(env_extra or {})}"
+    work.mkdir()
+    (work / "api.hpp").write_text(_BACKEND_HEADER, encoding="utf-8")
+    (work / "api.cpp").write_text(_BACKEND_SRC, encoding="utf-8")
+    lib = work / "libapi.so"
+    subprocess.run(
+        [
+            "g++",
+            "-std=c++17",
+            "-shared",
+            "-fPIC",
+            str(work / "api.cpp"),
+            "-o",
+            str(lib),
+        ],
+        check=True,
+    )
+    env = {**os.environ, "XDG_CACHE_HOME": str(work / "cache")}
+    env["ABICHECK_AST_FRONTEND"] = frontend
+    env.pop("ABICHECK_CLANG_LAYOUT_TOOL", None)
+    env.update(env_extra or {})
+    out = work / "snap.json"
+    subprocess.run(
+        abicheck_command("dump", lib, "-H", work / "api.hpp", "-o", out),
+        check=True,
+        capture_output=True,
+        env=env,
+    )
+    return load_snapshot(out)
+
+
+def backend_layout_violations(oracle, candidate) -> list[str]:
+    """Owned records whose size or field offsets differ from the oracle's."""
+
+    def table(snap):
+        return {(t.qualified_name or t.name): t for t in snap.declarations.types}
+
+    want, got = table(oracle), table(candidate)
+    out: list[str] = []
+    for name in _BACKEND_RECORDS:
+        ref, rec = want.get(name), got.get(name)
+        if ref is None:
+            out.append(f"{name}: absent from the oracle")
+            continue
+        if rec is None:
+            out.append(f"{name}: no record")
+            continue
+        if rec.size_bits != ref.size_bits:
+            out.append(f"{name}: size {rec.size_bits} != {ref.size_bits}")
+        ref_off = {f.name: f.offset_bits for f in ref.fields}
+        for f in rec.fields:
+            if f.offset_bits != ref_off.get(f.name):
+                out.append(
+                    f"{name}::{f.name}: offset {f.offset_bits} != {ref_off.get(f.name)}"
+                )
+    return out
+
+
+_needs_backends = pytest.mark.skipif(
+    _CASTXML is None or shutil.which("clang++") is None or shutil.which("g++") is None,
+    reason="needs castxml, clang++ and g++",
+)
+
+
+@pytest.mark.integration
+@_needs_backends
+def test_clang_backend_layout_matches_castxml(tmp_path: Path) -> None:
+    oracle = _backend_dump(tmp_path, "castxml")
+    assert all(
+        t.size_bits
+        for t in oracle.declarations.types
+        if (t.qualified_name or t.name) in _BACKEND_RECORDS
+    ), "vacuity guard: castxml sizes every owned record"
+    clang = _backend_dump(tmp_path, "clang")
+    assert backend_layout_violations(oracle, clang) == []
+    holder = next(t for t in clang.declarations.types if t.name == "Holder")
+    impl = next(f for f in holder.fields if f.name == "impl")
+    # The alias template is recorded by its target, as castxml records it.
+    assert "shared_ptr<" in impl.type and "pimpl" not in impl.type, impl.type
+
+
+@pytest.mark.integration
+@_needs_backends
+def test_seeded_mutant_disabled_clang_layout_pass_is_reported(tmp_path: Path) -> None:
+    oracle = _backend_dump(tmp_path, "castxml")
+    mutant = _backend_dump(
+        tmp_path,
+        "clang",
+        {"ABICHECK_CLANG_LAYOUT_TOOL": shutil.which("false") or "/bin/false"},
+    )
+    found = backend_layout_violations(oracle, mutant)
+    assert any("size None" in v for v in found), found
