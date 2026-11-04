@@ -119,12 +119,28 @@ def _release_md_libraries_table(
 def _release_md_coverage_warnings(
     library_results: list[dict[str, object]],
 ) -> list[str]:
-    """Per-library `coverage_warnings` (e.g. same-binary) -- absent when none carry any (Codex review: the release table alone omits this signal)."""
-    entries = [
-        f"- {md_text(lib['library'], code=True)}: {w}"
-        for lib in library_results
-        for w in cast(list[str], lib.get("coverage_warnings") or [])
-    ]
+    """Per-library `coverage_warnings` (e.g. same-binary) -- absent when none carry any (Codex review: the release table alone omits this signal).
+
+    A warning several members share (a disabled detector, an unmatched
+    ``--exclude-header`` rule) is one line naming every member that carries
+    it, in first-seen order, instead of one copy per member: a 28-library
+    directory scan otherwise repeated the same block 28 times. No member is
+    dropped -- each one carrying a warning is still named beside it.
+    """
+    grouped: dict[str, list[str]] = {}
+    for lib in library_results:
+        for w in cast(list[str], lib.get("coverage_warnings") or []):
+            names = grouped.setdefault(w, [])
+            name = str(lib["library"])
+            if name not in names:
+                names.append(name)
+    entries = []
+    for w, names in grouped.items():
+        if len(names) == 1:
+            entries.append(f"- {md_text(names[0], code=True)}: {w}")
+        else:
+            libs = ", ".join(md_text(n, code=True) for n in names)
+            entries.append(f"- {w} ({len(names)} libraries: {libs})")
     return ["", "## ⚠️ Coverage Warnings", "", *entries] if entries else []
 
 
