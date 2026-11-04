@@ -743,15 +743,15 @@ def _run_compare_and_parse(
 ) -> tuple[str | None, tuple[str, ...], str | None]:
     """Run the compare command and parse its JSON verdict and change kinds.
 
-    Returns ``(verdict, kinds, None)`` on success or ``(None, (), error_msg)``
-    on failure. *kinds* is every ``changes[].kind`` in the report, used to
+    Returns ``(verdict, kinds, None)``, else ``(None, (), error)``. *kinds* is every ``changes[].kind`` in the report, used to
     check ``expected_kinds``/``expected_absent_kinds`` from ground_truth.json.
     """
     rc = subprocess.run(compare_cmd, capture_output=True, text=True, timeout=60)
     try:
         data = json.loads(rc.stdout)
     except json.JSONDecodeError:
-        return None, (), f"invalid JSON from compare: {rc.stdout[:200]}"
+        detail = f"{rc.stdout[:200]} | stderr: {rc.stderr[-800:]}"
+        return None, (), f"invalid JSON from compare (exit {rc.returncode}): {detail}"
     kinds = tuple(
         c.get("kind", "") for c in data.get("changes", []) if isinstance(c, dict)
     )
