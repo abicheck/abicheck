@@ -108,10 +108,10 @@
       "abicheck/extract/headers/castxml/vector_join.py": "a24eb21612af159ef05904fec5f32bf56d37c79abc459832e23929a6a193dbcb",
       "abicheck/extract/headers/castxml/vector_spellings.py": "1048c21245235f6857beacf4668fc888bea7117c88c18300aae666a90aac763d",
       "abicheck/extract/headers/clang/__init__.py": "538add12f3ff39e1c1b39e6f5def93b50a584b78b30c4e7e59058207222757d0",
-      "abicheck/extract/headers/clang/abi_target.py": "bc6493b9a336e608dd0fef2d8ba3e7e20d295066922340aa7f53dd40ac596492",
+      "abicheck/extract/headers/clang/abi_target.py": "77715187459e2d8f578efbdce18d0d4ade91468ea329d43674322afbcbf4a410",
       "abicheck/extract/headers/clang/ast_inner.py": "f695f5bb01048fa924a1b67acbbcc29630c871607f1a3b4329ec781133f296f8",
       "abicheck/extract/headers/clang/attributes.py": "4f35afe72ef319265695d3e199e10c9ef0076db4a5238161b33a076fd3a599fe",
-      "abicheck/extract/headers/clang/backend.py": "a4fbef97222316038711ca4060947d5d5657fb820c27b3a109347ebbff8bfe67",
+      "abicheck/extract/headers/clang/backend.py": "d51b5909f5ba92f18f90160a95417859f7404e564db9b92dee5a1755d563f61f",
       "abicheck/extract/headers/clang/constraints.py": "e64400bbb73f904d5d390dc8e2530df0e69e3cf40d158901920077da4fe62b7e",
       "abicheck/extract/headers/clang/context.py": "f05bec9396a8cf29953268c0872bd0760a2f57896bd5185ed06be2b3d810730d",
       "abicheck/extract/headers/clang/enums.py": "87ee0817b89dd1483a48e5912602d8d02b84e1c0aa1671d0f32c1fd306b686b9",
@@ -193,9 +193,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "b050752c1ebef764349cbd6048c3aba4d0b7007f81a25fa863507b8c8fed8e24",
+    "fingerprint": "60f59e9b64b901b44c5e14518de0c5ba25016fd7204b9fa423b982078e55b81e",
     "generation": 37,
-    "reason": "Same PR as the generation-37 bump (#1920): enrolls header_utils.py in the extractor scope (its -H directory expansion decides which headers are parsed and in what order); the alias tie-break and the attach's target placement change only within unreleased generation 37"
+    "reason": "Same PR as the generation-37 bump (#1920): with_binary_abi_target takes the already-resolved clang_bin and probe compiler, so the primary parse no longer re-resolves the frontend; tokens are unchanged"
   },
   "resolver": {
     "files": {

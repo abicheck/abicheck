@@ -132,9 +132,8 @@ def binary_abi_target_token(
 
 def with_binary_abi_target(
     *,
-    compiler: str,
-    gcc_path: str | None,
-    gcc_prefix: str | None,
+    clang_bin: str,
+    probe_cc: str | None,
     gcc_options: str | None,
     gcc_option_tokens: tuple[str, ...],
     exported: Iterable[str],
@@ -143,15 +142,12 @@ def with_binary_abi_target(
 
     The one place every clang header parse of a binary gets its target: the
     primary snapshot pass and the header-graph attach both call it, so their
-    AST cache keys agree. Before, only the primary pass appended the token,
-    so on a Windows host a MinGW-built DLL's header graph re-parsed every
-    header under a second key.
+    AST cache keys agree. *clang_bin* is the already-resolved frontend and
+    *probe_cc* the GNU driver whose ``-dumpmachine`` a MinGW target may take.
     """
     from ...._compiler_options import effective_driver_mode_is_cl
-    from ...compiler_driver import is_cl_style_driver_name, resolve_clang_bin
-    from ..sysinc import _resolve_probe_compiler
+    from ...compiler_driver import is_cl_style_driver_name
 
-    clang_bin = resolve_clang_bin(compiler, gcc_path, gcc_prefix)
     if effective_driver_mode_is_cl(
         is_cl_style_driver_name(clang_bin), gcc_options, gcc_option_tokens
     ):
@@ -161,7 +157,7 @@ def with_binary_abi_target(
         exported=exported,
         gcc_options=gcc_options,
         gcc_option_tokens=gcc_option_tokens,
-        probe_cc=_resolve_probe_compiler(compiler, gcc_path, gcc_prefix),
+        probe_cc=probe_cc,
     )
     return gcc_option_tokens if token is None else (*gcc_option_tokens, token)
 
@@ -192,14 +188,16 @@ def binary_abi_tokens(
     that follows reports its own failure.
     """
     from ....errors import SnapshotError
+    from ...compiler_driver import resolve_clang_bin
+    from ..sysinc import _resolve_probe_compiler
 
     if not exported:
         return tokens
+    compiler = "cc" if is_c else "c++"
     try:
         return with_binary_abi_target(
-            compiler="cc" if is_c else "c++",
-            gcc_path=cc.gcc_path,
-            gcc_prefix=cc.gcc_prefix,
+            clang_bin=resolve_clang_bin(compiler, cc.gcc_path, cc.gcc_prefix),
+            probe_cc=_resolve_probe_compiler(compiler, cc.gcc_path, cc.gcc_prefix),
             gcc_options=cc.gcc_options,
             gcc_option_tokens=tokens,
             exported=exported,

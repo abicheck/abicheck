@@ -78,7 +78,7 @@ from ..ast_config import (
     clang_aggregate_text,
 )
 from ..backend_protocol import HeaderParseRequest
-from ..sysinc import _resolve_clang_system_includes
+from ..sysinc import _resolve_clang_system_includes, _resolve_probe_compiler
 from ..toolchain import (
     _configured_target_triple,
     _resolve_force_cpp,
@@ -586,9 +586,8 @@ class ClangBackend:
         r = dataclasses.replace(
             r,
             gcc_option_tokens=with_binary_abi_target(
-                compiler=r.compiler,
-                gcc_path=r.gcc_path,
-                gcc_prefix=r.gcc_prefix,
+                clang_bin=clang_bin,
+                probe_cc=_resolve_probe_compiler(r.compiler, r.gcc_path, r.gcc_prefix),
                 gcc_options=r.gcc_options,
                 gcc_option_tokens=r.gcc_option_tokens,
                 exported=r.exported_dynamic | r.exported_static,
