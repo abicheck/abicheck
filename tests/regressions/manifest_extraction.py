@@ -602,17 +602,23 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "gave always wins. Likewise a Windows image's C++ ABI: the clang "
             "frontend parses for the ABI the exports are mangled for (MinGW "
             "Itanium vs MSVC), not clang's own Windows default, unless the "
-            "caller named a target. Only ISA flags are inferred: an option "
-            "naming the target ABI, data model or byte order (-mabi=, "
-            "-mlittle-endian, -m32, ...) never reaches the frontend, whatever "
-            "its value or architecture -- AArch64 GCC records -mabi=lp64, "
-            "which castxml's clang refuses."
+            "caller named a target. Of the producer's -m options, multilib "
+            "options (-m16/-m32/-m64/-mx32) and byte-order options "
+            "(-mlittle-endian, -mbig-endian, -mel, -meb, -mlittle, -mbig) never "
+            "reach the frontend, and -mabi= is dropped only for an AArch64 "
+            "image (by ELF e_machine), whose GCC spelling castxml's clang "
+            "refuses; every other -m option, -mabi= elsewhere included, is "
+            "forwarded unless the caller set it. Instead of forwarding byte "
+            "order, a parse whose frontend byte order differs from the image's "
+            "EI_DATA is refused with a named reason unless the caller aimed it "
+            "at a target (cross prefix/path, -target, or a byte-order flag)."
         ),
         # #1842: a Windows-default clang parsed a MinGW DLL for MSVC; every
         # declaration mangled '?...' matched no export.
         fixed_by=(1778, 1842),
         seed_tests=(
             "tests/test_binary_dialect.py",
+            "tests/test_binary_dialect_target_abi.py",
             "tests/test_binary_dialect_integration.py",
             "tests/test_clang_binary_abi_target.py",
         ),
@@ -621,6 +627,7 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "dialect": ("c++17", "c++20", "c++23"),
             "windows_cxx_abi": ("itanium", "msvc", "c-only", "mixed"),
             "target_arch": ("x86_64", "aarch64", "riscv64", "ppc64", "mips64el"),
+            "byte_order": ("matching", "mismatched", "mismatched-aimed"),
         },
     ),
     BugClass(

@@ -42,6 +42,7 @@ existing defaults.
 from __future__ import annotations
 
 import re
+import sys
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -55,9 +56,11 @@ __all__ = [
     "BinaryDialect",
     "binary_dialect_compile",
     "binary_dialect_option_tokens",
+    "check_header_parse_byte_order",
     "header_parse_option_tokens",
     "parse_producer_dialect",
     "read_elf_binary_dialect",
+    "read_elf_target",
     "record_implied_options",
 ]
 
@@ -79,31 +82,25 @@ _STD_YEAR: dict[str, int] = {
     "2b": 23,
     "23": 23,
 }
-#: ``-m`` options that pin the target ABI, data model, byte order or multilib
-#: rather than the ISA, keyed by option name (``-mabi=lp64`` -> ``-mabi``).
-#: The parse already targets the host the binary is read on, so forwarding
-#: them adds no evidence, and their spellings are not portable between GCC
-#: and castxml's clang: AArch64 GCC records ``-mlittle-endian -mabi=lp64`` in
-#: every producer, and clang rejects ``-mabi=lp64`` ("unknown target ABI"),
-#: which failed every gcc-built AArch64 header parse. RISC-V
-#: (``-mabi=lp64d``), PowerPC (``-mabi=elfv2``) and MIPS (``-mabi=64``,
-#: ``-mel``) record the same kind of option. Forwarding ``-m32``/``-mx32``
-#: would also make castxml require multilib headers the host may not have.
-_TARGET_ABI_OPTION_KEYS = frozenset(
-    {
-        "-m16",
-        "-m32",
-        "-m64",
-        "-mx32",
-        "-mabi",
-        "-mlittle-endian",
-        "-mbig-endian",
-        "-mel",
-        "-meb",
-        "-mlittle",
-        "-mbig",
-    }
+#: Multilib options, keyed by option name. Forwarding ``-m32``/``-mx32``
+#: would make castxml require 32-bit or x32 headers the host may not have,
+#: so they are never inferred.
+_MULTILIB_OPTION_KEYS = frozenset({"-m16", "-m32", "-m64", "-mx32"})
+#: Byte-order options, keyed by option name. They are never forwarded: the
+#: header frontend's byte order is checked against the image's ELF
+#: ``EI_DATA`` instead (:func:`check_header_parse_byte_order`), because
+#: whether a host compiler accepts ``-mbig-endian`` depends on the host.
+_BYTE_ORDER_OPTION_KEYS = frozenset(
+    {"-mlittle-endian", "-mbig-endian", "-mel", "-meb", "-mlittle", "-mbig"}
 )
+#: ``e_machine`` values whose GCC ``-mabi=`` spelling castxml's clang does
+#: not accept. AArch64 GCC records ``-mabi=lp64`` (or ``ilp32``) in every
+#: producer and clang rejects it ("unknown target ABI 'lp64'"), which failed
+#: every gcc-built AArch64 header parse. Elsewhere ``-mabi=`` is forwarded:
+#: clang accepts the RISC-V (``lp64``/``lp64f``/``lp64d``), PowerPC
+#: (``elfv1``/``elfv2``) and MIPS spellings, and a non-default ABI changes
+#: the declarations an ABI-dependent header selects.
+_MABI_NOT_FORWARDED_MACHINES = frozenset({"EM_AARCH64"})
 #: Dialect a binary of C++20 or later is parsed with. castxml has no C++23
 #: mode; ``gnu++20`` parses C++23 code that stays within C++20 and fails
 #: loudly on the rest, as it does today.
@@ -151,8 +148,18 @@ def _dwarf_language_dialect(dwarf_language: int | None) -> BinaryDialect:
     return BinaryDialect(is_cxx=True, cxx_year=years.get(std), source="dwarf")
 
 
+def _not_forwarded_keys(e_machine: str | None) -> frozenset[str]:
+    keys = _MULTILIB_OPTION_KEYS | _BYTE_ORDER_OPTION_KEYS
+    if e_machine in _MABI_NOT_FORWARDED_MACHINES:
+        keys |= {"-mabi"}
+    return keys
+
+
 def parse_producer_dialect(
-    producer: str | None, dwarf_language: int | None = None
+    producer: str | None,
+    dwarf_language: int | None = None,
+    *,
+    e_machine: str | None = None,
 ) -> BinaryDialect:
     """The dialect a compile recorded, from its ``DW_AT_producer`` string and
     ``DW_AT_language`` code.
@@ -160,17 +167,22 @@ def parse_producer_dialect(
     Precedence: an explicit ``-std=`` the producer recorded, then the
     language token GCC always writes, then the DWARF language code. A
     producer that names no language falls through to the DWARF code.
+
+    *e_machine* is the image's ELF machine (``"EM_AARCH64"``); it decides
+    whether a recorded ``-mabi=`` is forwarded (see
+    ``_MABI_NOT_FORWARDED_MACHINES``).
     """
     if not producer:
         return _dwarf_language_dialect(dwarf_language)
     tokens = producer.split()
+    dropped = _not_forwarded_keys(e_machine)
     machine_flags = tuple(
         dict.fromkeys(
             token
             for token in tokens
             if token.startswith("-m")
             and len(token) > 2
-            and _option_key(token) not in _TARGET_ABI_OPTION_KEYS
+            and _option_key(token) not in dropped
         )
     )
     std_flags = [m for t in tokens if (m := _STD_FLAG.match(t))]
@@ -262,7 +274,58 @@ def read_elf_binary_dialect(
     signals = read_elf_build_signals(path, read_dwarf=True, debug_path=debug_path)
     if signals is None:
         return BinaryDialect()
-    return parse_producer_dialect(signals.producer, signals.dwarf_language)
+    e_machine, _ = read_elf_target(path)
+    return parse_producer_dialect(
+        signals.producer, signals.dwarf_language, e_machine=e_machine
+    )
+
+
+def read_elf_target(path: Path) -> tuple[str | None, str | None]:
+    """The ELF image's ``(e_machine, byte order)``: ``("EM_AARCH64",
+    "little")``. Either is ``None`` when the file cannot be read as ELF.
+    The byte order uses :data:`sys.byteorder`'s spelling.
+    """
+    from elftools.elf.elffile import ELFFile
+
+    try:
+        with path.open("rb") as fh:
+            elf = ELFFile(fh)  # type: ignore[no-untyped-call]
+            machine = elf.header["e_machine"]
+            order = "little" if elf.little_endian else "big"
+    except Exception:  # noqa: BLE001 - a non-ELF input has no identity
+        return None, None
+    return (machine if isinstance(machine, str) else None), order
+
+
+def check_header_parse_byte_order(
+    image_byte_order: str | None,
+    *,
+    frontend_byte_order: str,
+    frontend_target_selected: bool,
+) -> None:
+    """Refuse a header parse whose frontend byte order differs from the image's.
+
+    Byte-order options are never inferred from the producer, so a parse the
+    caller did not aim at a target (no cross compiler, no ``-target``, no
+    byte-order flag) runs in the host compiler's byte order. When that
+    differs from the image's ELF ``EI_DATA``, byte-order-conditioned
+    declarations and layouts would be read for the wrong target without any
+    signal, so the parse is refused with the reason and the remedy instead.
+    """
+    from ..errors import HeaderToolchainError
+
+    if frontend_target_selected or image_byte_order is None:
+        return
+    if image_byte_order == frontend_byte_order:
+        return
+    raise HeaderToolchainError(
+        f"the binary is {image_byte_order}-endian but the header parse would "
+        f"run {frontend_byte_order}-endian (the host compiler's byte order), "
+        "so byte-order-dependent declarations would be read for the wrong "
+        "target. Parse the headers with a toolchain for the binary's target "
+        "(set compile.compiler to a cross compiler, or add a -target triple "
+        "to compile.options), or compare without headers."
+    )
 
 
 def header_parse_option_tokens(
@@ -332,9 +395,21 @@ def binary_dialect_compile(
     keeps its identity. An image with no DWARF producer (stripped, no debug
     file) implies nothing, and the parse keeps its defaults.
     """
+    from .._compiler_options import explicit_target_triple, split_gcc_options
     from ..compile_context import CompileContext
 
     cc = compile if compile is not None else CompileContext()
+    explicit_tokens = [*split_gcc_options(cc.gcc_options or ""), *cc.gcc_option_tokens]
+    check_header_parse_byte_order(
+        read_elf_target(path)[1],
+        frontend_byte_order=sys.byteorder,
+        frontend_target_selected=bool(
+            cc.gcc_prefix
+            or cc.gcc_path
+            or explicit_target_triple(cc.gcc_options, tuple(cc.gcc_option_tokens))
+            or any(_option_key(t) in _BYTE_ORDER_OPTION_KEYS for t in explicit_tokens)
+        ),
+    )
     implied = header_parse_option_tokens(
         path,
         debug_path=None,
