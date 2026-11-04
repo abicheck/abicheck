@@ -8,7 +8,6 @@ a `foo.h` beside a `foo/` directory pay a full second dump per side.
 
 from __future__ import annotations
 
-import os
 import random
 import shutil
 import subprocess
@@ -18,6 +17,7 @@ import pytest
 
 from abicheck.extract.header_order_witness import canonical_header_order
 from abicheck.header_utils import iter_directory_headers
+from tests._abicheck_subprocess import abicheck_command, abicheck_env
 
 _STEMS = ("foo", "foo-x", "foo_x", "foo.x", "a", "a0", "z")
 
@@ -104,13 +104,15 @@ def test_dir_compare_parses_each_side_once(tmp_path: Path) -> None:
             check=True,
         )
     cache = tmp_path / "cache"
-    env = {**os.environ, "XDG_CACHE_HOME": str(cache), "ABICHECK_AST_FRONTEND": "clang"}
-    args = [
-        "abicheck",
-        "compare",
-        str(tmp_path / "old/libsvs.so"),
-        str(tmp_path / "new/libsvs.so"),
-    ]
+    # The AST cache root is LOCALAPPDATA on Windows, XDG_CACHE_HOME elsewhere.
+    env = abicheck_env(
+        {
+            "XDG_CACHE_HOME": str(cache),
+            "LOCALAPPDATA": str(cache),
+            "ABICHECK_AST_FRONTEND": "clang",
+        }
+    )
+    args: list[str] = [str(tmp_path / "old/libsvs.so"), str(tmp_path / "new/libsvs.so")]
     for side in ("old", "new"):
         args += [
             "-H",
@@ -119,7 +121,10 @@ def test_dir_compare_parses_each_side_once(tmp_path: Path) -> None:
             f"{side}={tmp_path / side / 'include'}",
         ]
     proc = subprocess.run(
-        [*args, "--depth", "headers"], env=env, capture_output=True, text=True
+        abicheck_command("compare", *args, "--depth", "headers"),
+        env=env,
+        capture_output=True,
+        text=True,
     )
     assert proc.returncode == 0, proc.stderr
     entries = [
