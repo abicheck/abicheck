@@ -274,8 +274,26 @@ _HEADER_TAIL = [
     [
         pytest.param(
             {"clang_bin": "clang", "cc_id": "gnu", "gcc_options": "-std=c11"},
-            ["clang", "-std=c11", *_HEADER_TAIL],
+            ["clang", "-std=c11", "-x", "c", *_HEADER_TAIL],
             id="c-mode-explicit-std-keeps-caller-standard",
+        ),
+        # A C build's own -std (compile database) under the default clang++
+        # driver: without an explicit -x c the .h aggregate read as c++-header
+        # and clang rejected "-std=gnu11 not allowed with 'C++'".
+        pytest.param(
+            {"clang_bin": "clang++", "cc_id": "gnu", "gcc_options": "-std=gnu11"},
+            ["clang++", "-std=gnu11", "-x", "c", *_HEADER_TAIL],
+            id="cxx-driver-c-build-std-still-selects-c",
+        ),
+        pytest.param(
+            {
+                "clang_bin": "clang",
+                "cc_id": "gnu",
+                "force_cpp": True,
+                "gcc_options": "-std=c++17",
+            },
+            ["clang", "-std=c++17", "-x", "c++", *_HEADER_TAIL],
+            id="c-driver-cxx-build-std-still-selects-cxx",
         ),
         pytest.param(
             {"clang_bin": "clang++", "cc_id": "gnu", "force_cpp": True},

@@ -498,7 +498,7 @@
     },
     {
       "path": "abicheck/diff_platform_elf_symbols.py",
-      "baseline_lines": 840,
+      "baseline_lines": 836,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -564,7 +564,7 @@
     },
     {
       "path": "abicheck/dumper_clang.py",
-      "baseline_lines": 1387,
+      "baseline_lines": 1382,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1070,7 +1070,7 @@
     },
     {
       "path": "tests/test_clang_header_backend_integration.py",
-      "baseline_lines": 1563,
+      "baseline_lines": 1551,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",

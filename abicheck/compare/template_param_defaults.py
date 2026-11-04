@@ -23,7 +23,7 @@ reads only PRESENT facts, so an UNKNOWN side never pairs with a recorded one.
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Collection
+from collections.abc import Callable, Collection
 
 from ..diff_helpers import make_change
 from ..model import (
@@ -110,6 +110,11 @@ def detect_template_param_default_changed(
         changed = [
             i for i, (a, b) in enumerate(zip(before, after, strict=True)) if a != b
         ]
+        # A default only *added* (no default -> one) leaves every previously
+        # valid spelling valid with the same meaning: before, the argument had
+        # to be written explicitly. It is not an API break (case224).
+        if all(before[i] is None for i in changed):
+            continue
         change = make_change(
             ChangeKind.TEMPLATE_PARAM_DEFAULT_CHANGED,
             symbol=key,
@@ -227,6 +232,11 @@ def detect_function_template_param_default_changed(
         changed = [
             i for i, (a, b) in enumerate(zip(before, after, strict=True)) if a != b
         ]
+        # A default only *added* (no default -> one) leaves every previously
+        # valid spelling valid with the same meaning: before, the argument had
+        # to be written explicitly. It is not an API break (case224).
+        if all(before[i] is None for i in changed):
+            continue
         new_fn = new_decls[0]
         symbol = f"{qname}({', '.join(param.type for param in new_fn.params)})"
         change = make_change(
@@ -318,6 +328,30 @@ def _extract_template_args(demangled: str) -> str | None:
     return head[last_open + 1 : end]
 
 
+def _substituted_name_lookup(snap: AbiSnapshot) -> Callable[[Function], str]:
+    """Qualified name with the template arguments the *symbol* carries.
+
+    The clang header backend names an instance by its source spelling, which
+    elides a defaulted argument (``mylib::Box<int>::size`` for both
+    ``Box<int, int>`` and ``Box<int, long>``), so the two sides of a changed
+    default read identical arguments and never paired (case229 under clang).
+    The Itanium mangling records the substituted arguments, so its demangled
+    form is preferred whenever there is one; otherwise the qualified name.
+    """
+    from ..demangle import demangle_one_batched
+
+    name_of = qualified_name_lookup(snap)
+
+    def lookup(fn: Function) -> str:
+        if fn.mangled.startswith("_Z"):
+            demangled = demangle_one_batched(fn.mangled)
+            if demangled:
+                return demangled
+        return name_of(fn)
+
+    return lookup
+
+
 def detect_default_template_arg_changed(
     old: AbiSnapshot,
     new: AbiSnapshot,
@@ -359,8 +393,8 @@ def detect_default_template_arg_changed(
     # positives — only different instantiations of the SAME callable get
     # paired.
     added_by_entity: dict[str, list[Function]] = defaultdict(list)
-    old_name_of = qualified_name_lookup(old)
-    new_name_of = qualified_name_lookup(new)
+    old_name_of = _substituted_name_lookup(old)
+    new_name_of = _substituted_name_lookup(new)
     for fn in new_funcs:
         qname = new_name_of(fn)
         added_by_entity[_callable_stem(qname)].append(fn)

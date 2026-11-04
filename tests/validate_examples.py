@@ -223,7 +223,7 @@ def _gap_applies(
     variants = entry.get("known_gap_variants")
     if variants and variant not in variants:
         return False
-    return True
+    return example_applicability.frontend_gap_applies(entry)
 
 
 def _build_info_applies(entry: dict, variant: str) -> bool:

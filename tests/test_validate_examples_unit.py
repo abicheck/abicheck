@@ -1145,3 +1145,38 @@ class TestWorkDirsDistinctPerCaseAndVariant:
             ve.run_case(name, gt[name], tmp_path, variant=variant)
         assert len(seen) == len(ARTIFACT_VARIANTS)
         assert len(set(seen)) == len(seen)
+
+
+class TestKnownGapFrontendScope:
+    """``known_gap_frontends`` excuses a mismatch only on the header frontend
+    that has the extraction gap (case223-228: castxml records no defaults)."""
+
+    @pytest.mark.parametrize(
+        ("pin", "frontends", "applies"),
+        [
+            ("castxml", ["castxml"], True),
+            ("clang", ["castxml"], False),
+            ("clang", ["clang"], True),
+            ("", ["castxml"], True),  # unpinned resolves to castxml
+            ("clang", None, True),  # unscoped gap applies everywhere
+        ],
+    )
+    def test_scope(self, monkeypatch, pin, frontends, applies):
+        monkeypatch.setenv("ABICHECK_AST_FRONTEND", pin)
+        entry = {"known_gap": "x"}
+        if frontends is not None:
+            entry["known_gap_frontends"] = frontends
+        assert _gap_applies(entry, True) is applies
+
+    def test_catalog_template_default_cases_state_the_contract_verdict(self):
+        gt = json.loads(Path("catalog/ground_truth.json").read_text())["verdicts"]
+        for name in (
+            "case223_header_only_template_default_changed",
+            "case225_header_only_template_default_removed",
+            "case227_nested_namespace_template_default_changed",
+            "case228_nontype_template_param_default_changed",
+        ):
+            e = gt[name]
+            assert e["expected"] == "API_BREAK"
+            assert e["known_gap_frontends"] == ["castxml"]
+            assert e["known_gap_observed"] == ["NO_CHANGE"]

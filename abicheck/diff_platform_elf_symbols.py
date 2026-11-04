@@ -26,6 +26,9 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from .compare.declared_alignment import (
+    declared_alignment_bits as _declared_alignment_bits,
+)
 from .compare.elf_alias_pairs import pair_elf_aliases
 from .compare.elf_capture_identity import both_captured_elf_identity
 from .diff_helpers import make_change
@@ -577,12 +580,6 @@ def _check_func_visibility_protected(
     ]
 
 
-def _declared_alignment_bits(snap: AbiSnapshot, sym_name: str) -> int | None:
-    """Return the DWARF/header-declared alignment (bits) for a variable, if known."""
-    var = snap.var_by_mangled(sym_name)
-    return var.alignment_bits if var is not None else None
-
-
 def _check_object_alignment_reduced(
     old: AbiSnapshot, new: AbiSnapshot, sym_name: str, s_old: Any, s_new: Any
 ) -> list[Change]:
@@ -646,10 +643,9 @@ def _check_object_alignment_reduced(
     declared-alignment change is instead owned by VAR_ALIGNMENT_CHANGED in
     diff_symbols.py). Falls back to the weak address-derived signal only when
     no declared-alignment evidence is available for corroboration (e.g.
-    symbols-only / stripped-without-headers snapshots, or -- a known,
-    documented gap, see dumper_clang.py's module docstring -- headers parsed
-    via the clang backend, which cannot compute a plain variable's natural
-    type alignment the way castxml's real compiler output can).
+    symbols-only / stripped-without-headers snapshots, or a record-typed
+    global under the clang backend, which records a natural alignment only
+    for fundamental types via ``type_abi_fact``).
     """
     if s_new.sym_type not in (SymbolType.OBJECT, SymbolType.COMMON, SymbolType.TLS):
         return []

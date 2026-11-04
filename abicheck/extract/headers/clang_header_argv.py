@@ -104,16 +104,20 @@ def render_clang_header_argv(
     for sysinc in context.system_includes:
         cmd += ["-isystem", sysinc]
     explicit_std = has_explicit_std(context.gcc_options, context.gcc_option_tokens)
+    # The language is always selected explicitly, whether or not the build
+    # supplied its own ``-std``: the default driver is ``clang++``, which reads a
+    # ``.h`` aggregate as ``c++-header``, so a C build's ``-std=gnu11`` from a
+    # compile database was rejected ("not allowed with 'C++'") when ``-x`` was
+    # only emitted alongside the default standard. Likewise the C→C++ retry
+    # reuses a ``.h`` aggregate a C driver would read as C. Only the default
+    # standard is conditional; gnu++20 only when C++20 syntax was detected.
     if not context.force_cpp:
+        cmd += ["-x", "c"]
         if not explicit_std:
-            cmd += ["-x", "c", "-std=gnu11"]
-    elif not explicit_std:
-        # Select the C++ language explicitly (``-x c++``) rather than relying on
-        # the aggregate file's extension: the C→C++ retry reuses a ``.h`` aggregate
-        # that clang would otherwise parse as C. Only bump the standard to gnu++20
-        # when C++20 syntax was detected; otherwise leave clang's default dialect.
+            cmd += ["-std=gnu11"]
+    else:
         cmd += ["-x", "c++"]
-        if context.force_cpp20:
+        if not explicit_std and context.force_cpp20:
             cmd += ["-std=gnu++20"]
     if context.dpcpp_multi_context:
         cmd += ["-fsycl", "-v"]

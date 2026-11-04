@@ -57,6 +57,7 @@ from .evidence_policy import (
     require_evidence_findings,
     tag_evidence_category,
 )
+from .flag_drift_relevance import demote_unexposed_enum_size_flag
 from .merge_support import _combine_packs
 from .model import CoverageStatus, DataLayer, LayerConfidence, LayerCoverage
 from .pack import BuildSourcePack
@@ -560,6 +561,7 @@ def diff_embedded_build_source(
     new_build = new_pack.build_evidence if new_pack else None
     if old_build is not None and new_build is not None:
         _build_changes = diff_build_evidence(old_build, new_build)
+        demote_unexposed_enum_size_flag(_build_changes, old_snapshot, new_snapshot)
         tag_evidence_category(_build_changes, "build_context")
         apply_evidence_policy(_build_changes, "build_context", policy_file)
         changes.extend(_build_changes)

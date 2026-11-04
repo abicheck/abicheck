@@ -40,3 +40,21 @@ def outcome(entry: dict, family: str, got: str) -> tuple[str, str] | None:
     else ``None`` (evaluate it normally)."""
     na = not_applicable_on(entry, family)
     return None if na is None else not_applicable_outcome(got, *na)
+
+
+def frontend_gap_applies(entry: dict) -> bool:
+    """Whether *entry*'s ``known_gap_frontends`` (if any) names this run's L2
+    header frontend, resolved by the product's own rule
+    (``ABICHECK_AST_FRONTEND``, else castxml).
+
+    Scopes an extraction gap to the frontend that has it (castxml records no
+    template-parameter defaults), so the case's ``expected`` can state the
+    contract verdict while that lane reports XFAIL -- not a PASS that a missed
+    break would also produce. Absent => applies everywhere.
+    """
+    frontends = entry.get("known_gap_frontends")
+    if not frontends:
+        return True
+    from abicheck.extract.header_ast_backend import _resolve_header_backend
+
+    return _resolve_header_backend(None) in frontends

@@ -717,6 +717,32 @@ class TestObjectAlignmentReduced:
         )
         assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED in _kinds(r)
 
+    @pytest.mark.parametrize(
+        ("old_abi_align", "new_abi_align", "fires"),
+        [(4, 4, False), (8, 8, False), (16, 16, False), (8, 4, True), (4, 8, False)],
+    )
+    def test_natural_alignment_fact_corroborates(
+        self, old_abi_align, new_abi_align, fires
+    ):
+        # The clang header backend records no explicit alignment_bits for a
+        # plain variable, only the compiler-derived type_abi_fact. That natural
+        # alignment must corroborate exactly like an explicit one: unchanged or
+        # increased -> placement noise; reduced -> real (oracle: byte compare).
+        from abicheck.model import Fact
+        from abicheck.model.abi_fundamental import AbiFundamental, FundamentalEncoding
+
+        def v(align: int) -> Variable:
+            fact = Fact.present(
+                AbiFundamental(FundamentalEncoding.SIGNED, size=align, align=align)
+            )
+            return Variable(name="g", mangled="g", type="t", type_abi_fact=fact)
+
+        old = _elf(symbols=[_obj("g", alignment=64)])
+        new = _elf(symbols=[_obj("g", alignment=2)])
+        r = compare(_snap(old, [v(old_abi_align)]), _snap(new, [v(new_abi_align)]))
+        assert (ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED in _kinds(r)) is fires
+        assert fires is (new_abi_align < old_abi_align)
+
 
 # ── Undefined-symbol (import) surface ────────────────────────────────────────
 

@@ -1,0 +1,53 @@
+"""Relevance of an enum-size build-flag flip to the compared surface.
+
+``-fshort-enums`` (``ENUM_SIZE_FLAG_CHANGED``, ``build_diff.py``) only changes
+the storage of an *enum* type. When both sides' established surfaces -- the
+parsed public headers and the DWARF type table -- declare no enum at all, the
+flip cannot change any size, offset or calling convention the library exposes,
+so the finding is a toolchain-hygiene note, not a compatibility risk
+(case103_toolchain_flag_drift).
+
+The finding is never dropped (record before disposing): it keeps its kind and
+is demoted to ``COMPATIBLE`` through ``Change.effective_verdict`` with a
+disclosed ``modulation_reason``/``modulation_rule``. A side whose enum set is
+not established (no header AST and no DWARF) keeps the RISK verdict -- absent
+evidence is not evidence of no enums.
+"""
+
+from __future__ import annotations
+
+from ..model import AbiSnapshot
+from ..model.change import Change
+from ..model.change_catalog.kinds import ChangeKind
+from ..model.change_catalog.registry import Verdict
+
+MODULATION_RULE = "build-flag-relevance/enum-size"
+MODULATION_REASON = "no-enum-in-compared-surface"
+
+
+def _enum_free(snapshot: AbiSnapshot | None) -> bool:
+    """True only when *snapshot*'s enum set is established and empty."""
+    if snapshot is None:
+        return False
+    dwarf = snapshot.declarations.debug_layout
+    dwarf_enums = dwarf.enums if dwarf is not None and dwarf.has_dwarf else None
+    if not (snapshot.from_headers or dwarf_enums is not None):
+        return False
+    return not snapshot.declarations.enums and not dwarf_enums
+
+
+def demote_unexposed_enum_size_flag(
+    changes: list[Change],
+    old_snapshot: AbiSnapshot | None,
+    new_snapshot: AbiSnapshot | None,
+) -> None:
+    """Demote ``ENUM_SIZE_FLAG_CHANGED`` when neither side declares an enum."""
+    if not (_enum_free(old_snapshot) and _enum_free(new_snapshot)):
+        return
+    for change in changes:
+        if change.kind is ChangeKind.ENUM_SIZE_FLAG_CHANGED and (
+            change.effective_verdict is None
+        ):
+            change.effective_verdict = Verdict.COMPATIBLE
+            change.modulation_reason = MODULATION_REASON
+            change.modulation_rule = MODULATION_RULE

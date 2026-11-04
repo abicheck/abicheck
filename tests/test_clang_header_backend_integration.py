@@ -285,23 +285,15 @@ def test_hybrid_headers_recover_case64_ms_abi_from_gcc_debug_build(
     ]
 
 
-def test_clang_backend_still_false_positives_case61_alignment_risk(
+def test_clang_backend_case61_alignment_noise_suppressed(
     tmp_path: Path,
 ) -> None:
-    """Known gap (Codex review): the case61_var_added false-positive fix in
-    dumper_castxml.py (_type_alignment_bits, a Variable's natural type
-    alignment as declared-alignment corroboration for
-    EXPORTED_OBJECT_ALIGNMENT_REDUCED) has no clang-frontend equivalent.
-
-    clang's ``-ast-dump=json`` does not compute type layout at all (see this
-    module's and dumper_clang.py's docstrings) -- there is no compiler-derived
-    alignment to fall back to the way castxml's XML always carries one, so
-    _clang_var_alignment_bits can only ever report an *explicit*
-    ``AlignedAttr`` override, never a natural one. This is a pre-existing
-    architectural boundary of the clang JSON-AST backend, not a regression
-    from the castxml fix. This test locks in the current (undesired but
-    honest) behavior so a future attempt to close it changes a real
-    assertion instead of silently going unnoticed.
+    """case61_var_added under the clang frontend: a purely additive global
+    shifts ``lib_version``'s link address (st_value alignment 8 -> 4), but its
+    declared natural alignment is unchanged. clang's AST carries no computed
+    alignment, yet the backend records the compiler-derived ``type_abi_fact``
+    for the variable, which compare.declared_alignment now uses as
+    corroboration -- so the placement noise is suppressed, as under castxml.
     """
     if not (_have("clang") and _have("gcc")):
         pytest.skip(
@@ -352,12 +344,8 @@ def test_clang_backend_still_false_positives_case61_alignment_risk(
     new_snap = dump(v2_so, [new_header], header_backend="clang")
     result = compare(old_snap, new_snap)
 
-    # Documents the gap: a purely additive change still trips the address-
-    # placement heuristic under clang, because no declared-alignment
-    # corroboration is available to suppress it -- castxml (dumper_castxml.py,
-    # TestCastxmlExtraction.test_variable_alignment) does not have this gap.
-    assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
-    assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED in {
+    assert result.verdict == Verdict.COMPATIBLE
+    assert ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED not in {
         c.kind for c in result.changes
     }
 
