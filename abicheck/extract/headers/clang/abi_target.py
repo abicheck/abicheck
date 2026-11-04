@@ -36,12 +36,18 @@ stays the default's.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from typing import Any
 
 from ...._compiler_options import explicit_target_triple, forwards_response_file
 from ....model.execution_cache import memoized
 from ..toolchain import _configured_target_triple, _resolved_tool, _tool_target_triple
 
-__all__ = ["binary_abi_target_token", "exported_cxx_abi"]
+__all__ = [
+    "binary_abi_target_token",
+    "exported_cxx_abi",
+    "with_binary_abi_target",
+    "binary_abi_compile",
+]
 
 ITANIUM = "itanium"
 MSVC = "msvc"
@@ -121,3 +127,69 @@ def binary_abi_target_token(
     if probed and probed.split("-", 1)[0] == arch and _windows_abi(probed) == ITANIUM:
         return f"--target={probed}"
     return f"--target={arch}-w64-windows-gnu"
+
+
+def with_binary_abi_target(
+    *,
+    compiler: str,
+    gcc_path: str | None,
+    gcc_prefix: str | None,
+    gcc_options: str | None,
+    gcc_option_tokens: tuple[str, ...],
+    exported: Iterable[str],
+) -> tuple[str, ...]:
+    """*gcc_option_tokens* plus the binary's ``--target`` when one applies.
+
+    The one place every clang header parse of a binary gets its target: the
+    primary snapshot pass and the header-graph attach both call it, so their
+    AST cache keys agree. Before, only the primary pass appended the token,
+    so on a Windows host a MinGW-built DLL's header graph re-parsed every
+    header under a second key.
+    """
+    from ...._compiler_options import effective_driver_mode_is_cl
+    from ...compiler_driver import is_cl_style_driver_name, resolve_clang_bin
+    from ..sysinc import _resolve_probe_compiler
+
+    clang_bin = resolve_clang_bin(compiler, gcc_path, gcc_prefix)
+    if effective_driver_mode_is_cl(
+        is_cl_style_driver_name(clang_bin), gcc_options, gcc_option_tokens
+    ):
+        return gcc_option_tokens
+    token = binary_abi_target_token(
+        clang_bin=clang_bin,
+        exported=exported,
+        gcc_options=gcc_options,
+        gcc_option_tokens=gcc_option_tokens,
+        probe_cc=_resolve_probe_compiler(compiler, gcc_path, gcc_prefix),
+    )
+    return gcc_option_tokens if token is None else (*gcc_option_tokens, token)
+
+
+def binary_abi_compile(cc: Any, compiler: str, snap: Any) -> Any:
+    """*cc* (a ``CompileContext``) with the target :func:`with_binary_abi_target`
+    picks for *snap*'s binary-exported declarations.
+
+    Only binary-exported names count: a header-only declaration's mangled
+    name is clang's own default ABI, and mixing it in would read as "both
+    ABIs" and drop the token the primary pass applied.
+    """
+    import dataclasses
+
+    from ....model.surface_facts import is_binary_exported
+
+    exported = [
+        d.mangled
+        for d in (*snap.declarations.functions, *snap.declarations.variables)
+        if d.mangled and is_binary_exported(d)
+    ]
+    tokens = with_binary_abi_target(
+        compiler=compiler,
+        gcc_path=cc.gcc_path,
+        gcc_prefix=cc.gcc_prefix,
+        gcc_options=cc.gcc_options,
+        gcc_option_tokens=cc.gcc_option_tokens,
+        exported=exported,
+    )
+    if tokens == cc.gcc_option_tokens:
+        return cc
+    return dataclasses.replace(cc, gcc_option_tokens=tokens)

@@ -78,14 +78,14 @@ from ..ast_config import (
     clang_aggregate_text,
 )
 from ..backend_protocol import HeaderParseRequest
-from ..sysinc import _resolve_clang_system_includes, _resolve_probe_compiler
+from ..sysinc import _resolve_clang_system_includes
 from ..toolchain import (
     _configured_target_triple,
     _resolve_force_cpp,
     _stamp_ast_parser,
     _tool_identity,
 )
-from .abi_target import binary_abi_target_token
+from .abi_target import with_binary_abi_target
 from .error_header_retry import retry_excluding_error_headers
 from .explicit_instantiation import (
     explicit_instantiation_facts,
@@ -581,22 +581,19 @@ class ClangBackend:
         """
         r = request
         clang_bin = resolve_clang_bin(r.compiler, r.gcc_path, r.gcc_prefix)
-        if not _effective_driver_mode_is_cl(
-            is_cl_style_driver_name(clang_bin), r.gcc_options, r.gcc_option_tokens
-        ):
-            # Parse for the C++ ABI the binary's exports are mangled for, not
-            # clang's own Windows default (abi_target's docstring).
-            abi_target = binary_abi_target_token(
-                clang_bin=clang_bin,
-                exported=r.exported_dynamic | r.exported_static,
+        # Parse for the C++ ABI the binary's exports are mangled for, not
+        # clang's own Windows default (abi_target's docstring).
+        r = dataclasses.replace(
+            r,
+            gcc_option_tokens=with_binary_abi_target(
+                compiler=r.compiler,
+                gcc_path=r.gcc_path,
+                gcc_prefix=r.gcc_prefix,
                 gcc_options=r.gcc_options,
                 gcc_option_tokens=r.gcc_option_tokens,
-                probe_cc=_resolve_probe_compiler(r.compiler, r.gcc_path, r.gcc_prefix),
-            )
-            if abi_target is not None:
-                r = dataclasses.replace(
-                    r, gcc_option_tokens=(*r.gcc_option_tokens, abi_target)
-                )
+                exported=r.exported_dynamic | r.exported_static,
+            ),
+        )
         ast_root, resolved_kind, resolved_force_cpp = clang_header_dump(
             r.headers,
             r.extra_includes,

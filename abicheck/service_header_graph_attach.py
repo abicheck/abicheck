@@ -148,6 +148,7 @@ def _attach_header_graph(
     from .buildsource.include_graph import augment_graph_with_includes
     from .buildsource.semantic_fact_folds import HEADER_SEMANTIC_PASSES
     from .extract.compiler_driver import resolve_clang_bin
+    from .extract.headers.clang.abi_target import binary_abi_compile
     from .model.header_lang_mode import recorded_lang_mode
     from .model.source_graph_coverage import HEADER_CALL_GRAPH_PASS
 
@@ -161,7 +162,11 @@ def _attach_header_graph(
         not lang and primary_mode == "c++" and acquired.resolved_force_cpp is not True
     ):
         acquired = acquire_header_graph_ast(
-            headers, includes, lang, compile, resolved_lang_mode=primary_mode
+            headers,
+            includes,
+            lang,
+            binary_abi_compile(cc, "cc" if _is_c else "c++", snap),
+            resolved_lang_mode=primary_mode,
         )
     projection = acquired.projection
     ast_failure = acquired.ast_failure

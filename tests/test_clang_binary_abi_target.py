@@ -229,3 +229,42 @@ def test_clang_frontend_reports_a_mingw_dlls_struct_change(
     assert report.exists(), result.output
     kinds = {c["kind"] for c in json.loads(report.read_text())["changes"]}
     assert "type_field_added_compatible" in kinds, (sorted(kinds), result.output)
+
+
+@pytest.mark.integration
+def test_header_graph_attach_parses_for_the_same_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The header-graph attach reuses the primary pass's AST: one clang
+    cache entry per side. Only the primary pass used to append the binary's
+    ``--target``, so on a Windows clang the attach parsed every header again
+    under a second key (4 entries for one compare)."""
+    if not (shutil.which("clang++") and shutil.which("ld.lld")):
+        pytest.skip("needs clang++ and ld.lld")
+    bindir = _windows_default_clang(tmp_path)
+    if bindir is None:
+        pytest.skip("emulates a Windows clang on a POSIX host")
+    keep = ("int keep(int x);\n", "int keep(int x) { return x + 1; }\n")
+    old, new = tmp_path / "v1", tmp_path / "v2"
+    for side in (old, new):
+        _build_mingw_dll(side, keep[0], keep[1])
+        (side / "extra.h").write_text("#pragma once\nstruct E { int a; };\n")
+    cache = tmp_path / "cache"
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("ABICHECK_AST_FRONTEND", "clang")
+    monkeypatch.setenv("XDG_CACHE_HOME", str(cache))
+    abi_target._default_triple.cache_clear()
+
+    from abicheck.cli import main
+
+    args = ["compare", str(old / "libwidget.dll"), str(new / "libwidget.dll")]
+    for label, side in (("old", old), ("new", new)):
+        args += ["-H", f"{label}={side}"]
+    result = CliRunner().invoke(main, args, catch_exceptions=False)
+    assert result.exit_code == 0, result.output
+    entries = [
+        p
+        for p in cache.rglob("clang/*.json")
+        if not p.name.endswith(".projection.json")
+    ]
+    assert len(entries) == 2, sorted(p.name for p in entries)
