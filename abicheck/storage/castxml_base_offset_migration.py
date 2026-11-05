@@ -12,11 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Generation-38 migration of castxml base-class offsets to bits.
+"""Generation-39 migration of castxml base-class offsets to bits.
 
 ``RecordType.base_offsets`` holds each direct base's offset in bits, which is
 what DWARF and the clang record-layout pass store. Before extractor
-generation 38 the castxml backend stored castxml's ``<Base offset>`` attribute
+generation 39 the castxml backend stored castxml's ``<Base offset>`` attribute
 verbatim, and castxml writes that offset in bytes, so a castxml snapshot said
 ``Base2: 16`` where the other producers said ``Base2: 128``. Without a
 migration, every class with a base at a nonzero offset reports
@@ -43,7 +43,7 @@ __all__ = [
 ]
 
 #: The extractor generation that started storing castxml base offsets in bits.
-CASTXML_BASE_OFFSET_BITS_GENERATION = 38
+CASTXML_BASE_OFFSET_BITS_GENERATION = 39
 
 
 def _record_in_bits(entry: Any, hits: list[int]) -> Any:
@@ -67,7 +67,7 @@ def migrate_castxml_base_offsets(
     document: dict[str, Any], extractor_generation: int
 ) -> tuple[dict[str, Any], list[str]]:
     """*document* with castxml base offsets read as bits, when it is a castxml
-    header snapshot extracted before generation 38; never mutated in place."""
+    header snapshot extracted before generation 39; never mutated in place."""
     if (
         extractor_generation >= CASTXML_BASE_OFFSET_BITS_GENERATION
         or document.get("ast_producer") != "castxml"

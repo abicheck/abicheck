@@ -88,7 +88,7 @@ def test_parse_bitfields_and_nested_by_value() -> None:
     ]
 
 
-#: Shapes the parser dropped before generation 38, as clang 18 prints them.
+#: Shapes the parser dropped before generation 39, as clang 18 prints them.
 _SHAPES_DUMP = """
 *** Dumping AST Record Layout
          0 | struct Tag (empty)

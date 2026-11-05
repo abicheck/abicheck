@@ -1,7 +1,7 @@
-"""Generation-38 castxml base-offset migration (bug class
+"""Generation-39 castxml base-offset migration (bug class
 ``storage.cross_generation_spelling_drift``).
 
-Before generation 38 the castxml backend stored castxml's ``<Base offset>``
+Before generation 39 the castxml backend stored castxml's ``<Base offset>``
 verbatim -- a byte offset -- in ``RecordType.base_offsets``, which every
 other producer (DWARF, the clang layout pass) fills in bits. A castxml
 baseline dumped earlier, compared against a fresh dump of the *same* source,
@@ -82,7 +82,7 @@ def _offsets(snap: AbiSnapshot) -> dict[str, int]:
     return next(t for t in snap.declarations.types if t.name == "D").base_offsets
 
 
-@pytest.mark.parametrize("extractor", [1, 36, 37])
+@pytest.mark.parametrize("extractor", [1, 36, 37, 38])
 @pytest.mark.parametrize(("old_bytes", "bits"), _CASES)
 def test_old_castxml_base_offsets_load_as_bits_and_compare_clean(
     old_bytes: dict[str, int], bits: dict[str, int], extractor: int
@@ -109,7 +109,7 @@ def test_real_base_move_still_reported() -> None:
 @pytest.mark.parametrize(
     ("producer", "extractor"),
     [
-        pytest.param("castxml", 38, id="castxml-current"),
+        pytest.param("castxml", 39, id="castxml-current"),
         pytest.param("clang", 37, id="clang-always-bits"),
         pytest.param("hybrid", 37, id="hybrid-mixed-units"),
         pytest.param(None, 37, id="dwarf-or-symbols"),

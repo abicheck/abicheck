@@ -264,3 +264,35 @@ def test_pr_perf_job_runs_the_scaling_gate():
     job = workflow.split("  l2-cli-perf:", 1)[1].split("\n  l2-cli-extended:", 1)[0]
     assert "scripts/check_l2_scaling_perf.py" in job
     assert "--require-toolchain" in job.split("check_l2_scaling_perf.py", 1)[1]
+
+
+@pytest.mark.parametrize(
+    "walls",
+    [
+        # Measured header sweeps (local, 2026-11): flat to ~8 headers, linear after.
+        {1: 1.910, 4: 2.003, 12: 2.759, 30: 4.110},
+        {1: 2.088, 8: 2.215, 16: 3.171, 30: 4.124},
+        {1: 1.205, 4: 1.261, 12: 1.706, 30: 2.626},  # the CI run that went red
+    ],
+)
+def test_a_flat_then_linear_header_sweep_fits_as_linear(
+    walls: dict[int, float],
+) -> None:
+    """A near-floor small-n margin is noise, not curvature: below the cutoff it
+    is left out, and the remaining points fit a linear axis under budget."""
+    pts = _points(tuple(walls), lambda n: walls[n])
+    exponent, reason = gate_mod.marginal_exponent(pts)
+    assert reason is None
+    assert (
+        exponent is not None
+        and 0.8 < exponent < gate_mod.DEFAULT_MAX_EXPONENT["headers"]
+    )
+
+
+def test_a_superlinear_header_sweep_still_fails_the_budget() -> None:
+    """The negative control: a real quadratic growth over the same sizes."""
+    walls = {n: 1.2 + 0.01 * (n - 1) ** 2 for n in (1, 4, 12, 30)}
+    pts = _points(tuple(walls), lambda n: walls[n])
+    exponent, reason = gate_mod.marginal_exponent(pts)
+    assert reason is None
+    assert exponent is not None and exponent > gate_mod.DEFAULT_MAX_EXPONENT["headers"]

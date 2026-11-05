@@ -404,6 +404,17 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "and fields as changes; it is re-dumped"
     ),
     38: GenerationSpellingChange(
+        "no stored spelling changes: a -H directory now expands its headers in "
+        "the header-order canonical order (resolved path as a string, so foo.h "
+        "before foo/bar.h; header_utils.iter_directory_headers). Generation 37 "
+        "sorted by pathlib.Path components (foo/bar.h first), so for a tree "
+        "with a foo.h beside a foo/ directory the aggregate TU included the "
+        "headers in a different order, header_sequence recorded that order, and "
+        "the header-order witness re-dumped in canonical order. Types and "
+        "declarations keep their spellings; only the declared order of such "
+        "trees changes"
+    ),
+    39: GenerationSpellingChange(
         "no type or name spelling changes. (1) The castxml backend stores a base "
         "class's offset in bits, as DWARF and the clang layout pass do; it stored "
         "castxml's byte offset, so a castxml snapshot and a clang one disagreed on "
@@ -414,7 +425,7 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "and records an empty base's offset, gives the members of an unnamed "
         "member struct/union their offsets, probes C headers, and keeps a virtual "
         "base out of base_offsets (castxml and DWARF record none). A "
-        "generation-37 clang snapshot lacks those facts or holds a virtual base's "
+        "generation-38 clang snapshot lacks those facts or holds a virtual base's "
         "offset, which no rewrite can settle, so it is re-dumped"
     ),
 }

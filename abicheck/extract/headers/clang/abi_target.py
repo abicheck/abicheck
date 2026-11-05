@@ -36,12 +36,21 @@ stays the default's.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from typing import Any
 
 from ...._compiler_options import explicit_target_triple, forwards_response_file
 from ....model.execution_cache import memoized
 from ..toolchain import _configured_target_triple, _resolved_tool, _tool_target_triple
 
-__all__ = ["binary_abi_target_token", "exported_cxx_abi"]
+__all__ = [
+    "binary_abi_target_token",
+    "exported_cxx_abi",
+    "with_binary_abi_target",
+    "binary_exported_names",
+    "binary_abi_tokens",
+    "lacks_binary_abi_target",
+    "binary_abi_target_may_apply",
+]
 
 ITANIUM = "itanium"
 MSVC = "msvc"
@@ -121,3 +130,114 @@ def binary_abi_target_token(
     if probed and probed.split("-", 1)[0] == arch and _windows_abi(probed) == ITANIUM:
         return f"--target={probed}"
     return f"--target={arch}-w64-windows-gnu"
+
+
+def with_binary_abi_target(
+    *,
+    clang_bin: str,
+    probe_cc: str | None,
+    gcc_options: str | None,
+    gcc_option_tokens: tuple[str, ...],
+    exported: Iterable[str],
+) -> tuple[str, ...]:
+    """*gcc_option_tokens* plus the binary's ``--target`` when one applies.
+
+    The one place every clang header parse of a binary gets its target: the
+    primary snapshot pass and the header-graph attach both call it, so their
+    AST cache keys agree. *clang_bin* is the already-resolved frontend and
+    *probe_cc* the GNU driver whose ``-dumpmachine`` a MinGW target may take.
+    """
+    from ...._compiler_options import effective_driver_mode_is_cl
+    from ...compiler_driver import is_cl_style_driver_name
+
+    if effective_driver_mode_is_cl(
+        is_cl_style_driver_name(clang_bin), gcc_options, gcc_option_tokens
+    ):
+        return gcc_option_tokens
+    token = binary_abi_target_token(
+        clang_bin=clang_bin,
+        exported=exported,
+        gcc_options=gcc_options,
+        gcc_option_tokens=gcc_option_tokens,
+        probe_cc=probe_cc,
+    )
+    return gcc_option_tokens if token is None else (*gcc_option_tokens, token)
+
+
+def binary_exported_names(snap: Any) -> frozenset[str]:
+    """*snap*'s binary-exported mangled names, the input
+    :func:`with_binary_abi_target` reads the binary's ABI from.
+
+    Only binary-exported names count: a header-only declaration's mangled
+    name is clang's own default ABI, and mixing it in would read as "both
+    ABIs" and drop the token the primary pass applied.
+    """
+    from ....model.surface_facts import is_binary_exported
+
+    decls = (*snap.declarations.functions, *snap.declarations.variables)
+    return frozenset(d.mangled for d in decls if d.mangled and is_binary_exported(d))
+
+
+def binary_abi_tokens(
+    cc: Any, is_c: bool, tokens: tuple[str, ...], exported: frozenset[str]
+) -> tuple[str, ...]:
+    """*tokens* (already final, deferred include roots included) plus the
+    target :func:`with_binary_abi_target` picks for *exported*.
+
+    Appended last, the position the primary pass appends it in, so both
+    parses key one AST. Without exports, or without a resolvable clang (a
+    castxml-only host), the tokens are returned as they are and the parse
+    that follows reports its own failure.
+    """
+    from ....errors import SnapshotError
+    from ...compiler_driver import resolve_clang_bin
+    from ..sysinc import _resolve_probe_compiler
+
+    if not exported:
+        return tokens
+    compiler = "cc" if is_c else "c++"
+    try:
+        return with_binary_abi_target(
+            clang_bin=resolve_clang_bin(compiler, cc.gcc_path, cc.gcc_prefix),
+            probe_cc=_resolve_probe_compiler(compiler, cc.gcc_path, cc.gcc_prefix),
+            gcc_options=cc.gcc_options,
+            gcc_option_tokens=tokens,
+            exported=exported,
+        )
+    except (SnapshotError, OSError):
+        return tokens
+
+
+def lacks_binary_abi_target(
+    tokens: tuple[str, ...], cc: Any, is_c: bool, exported: frozenset[str]
+) -> bool:
+    """Whether a parse made with *tokens* missed the target *exported* implies.
+
+    A header-graph prefetch runs before the snapshot exists, so it never has
+    the binary's exports; when they imply a ``--target``, its AST is for the
+    wrong ABI and the attach must acquire again with the target applied.
+    """
+    target = binary_abi_tokens(cc, is_c, (), exported)
+    return bool(target) and target[-1] not in tokens
+
+
+def binary_abi_target_may_apply(cc: Any, is_c: bool) -> bool:
+    """Whether some binary could make :func:`with_binary_abi_target` add a
+    ``--target`` for this compile context: only when clang's own default is a
+    Windows triple, whose ABI a binary's exports can contradict.
+
+    ``False`` when no clang resolves, since then there is no parse to target.
+    """
+    from ....errors import SnapshotError
+    from ...compiler_driver import resolve_clang_bin
+
+    compiler = "cc" if is_c else "c++"
+    try:
+        clang_bin = resolve_clang_bin(compiler, cc.gcc_path, cc.gcc_prefix)
+        selected, _real, _stat, digest = _resolved_tool(clang_bin)
+    except (SnapshotError, OSError):
+        return False
+    if explicit_target_triple(cc.gcc_options, cc.gcc_option_tokens):
+        return False
+    default = _default_triple(selected, digest)
+    return default is not None and _windows_abi(default) is not None
