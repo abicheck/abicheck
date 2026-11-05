@@ -56,6 +56,8 @@ def normalize_spelling(text: str) -> str:
 
 def split_components(name: str) -> list[str]:
     """``a::B<c::D>::E`` -> ``["a", "B<c::D>", "E"]`` (template-aware)."""
+    if "<" not in name:
+        return [p.strip() for p in name.split("::") if p.strip()]
     parts: list[str] = []
     depth = 0
     start = 0
@@ -96,16 +98,25 @@ class TypeResolver:
             self.records.setdefault(record_key(rec), rec)
         self._normalized = {normalize_spelling(k): k for k in self.records}
         self._by_leaf: dict[str, list[str]] = {}
-        for key in self.records:
-            self._by_leaf.setdefault(split_components(key)[-1], []).append(key)
         # Every scope-qualified name a reference may name: each record's
         # component stems (`lib`, `lib::Wrap`), plus enums and typedefs, so a
         # template argument naming a non-record still qualifies.
         self._known: set[str] = set()
-        for key in [*self.records, *extra_names]:
-            stems = [_stem(c) for c in split_components(key)]
-            for i in range(1, len(stems) + 1):
-                self._known.add("::".join(stems[:i]))
+        for key in self.records:
+            parts = split_components(key)
+            if parts:
+                self._by_leaf.setdefault(parts[-1], []).append(key)
+            self._add_known(parts)
+        for name in extra_names:
+            self._add_known(split_components(name))
+        # Per-resolver memo: the walk asks about the same spellings from the
+        # same scopes many times over one snapshot.
+        self._memo: dict[tuple[str, str | None, tuple[str, ...]], str] = {}
+
+    def _add_known(self, parts: list[str]) -> None:
+        stems = [_stem(c) for c in parts]
+        for i in range(1, len(stems) + 1):
+            self._known.add("::".join(stems[:i]))
 
     def leaf_owners(self, leaf: str) -> list[str]:
         return self._by_leaf.get(leaf, [])
@@ -142,10 +153,23 @@ class TypeResolver:
         referencing record, or a function's or variable's enclosing scope);
         *identities* is the slot's recorded ``type_identities_fact`` value.
         """
-        if not spelling:
+        if not spelling or spelling in self.records:
             return spelling
-        if spelling in self.records:
-            return spelling
+        key = (spelling, scope, identities)
+        found = self._memo.get(key)
+        if found is None:
+            found = self._memo[key] = self._resolve(spelling, scope, identities)
+        return found
+
+    def _resolve(
+        self, spelling: str, scope: str | None, identities: tuple[str, ...]
+    ) -> str:
+        if spelling.isidentifier():
+            # A bare name whose leaf one record owns: any lookup could only
+            # find that record, and the unique-leaf fallback returns it anyway.
+            owners = self._by_leaf.get(spelling, [])
+            if len(owners) == 1:
+                return owners[0]
         norm = normalize_spelling(spelling.removeprefix("::"))
         if norm in self._normalized:
             return self._normalized[norm]

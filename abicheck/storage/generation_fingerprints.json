@@ -209,7 +209,7 @@
       "abicheck/compare/export_owner_resolution.py": "e9108cbdf0459cb8171f63ca328138558cfd032bff9124e4b9bd0fd5bf8553c8",
       "abicheck/debug_resolver.py": "37746292726312ccf49dc91d7bb904d34633b0840f5eb298cf52063a5057d90a",
       "abicheck/model/fundamental_type.py": "c97bb2038bafedf3f21e5819df1d8e1be5bf97adbbb0fca5a16f49287b0aec0a",
-      "abicheck/model/type_spelling_resolve.py": "5206a0f0e944737006dd7791ea186f1e5de699ab01d9dd8329713fef4bbe78c0",
+      "abicheck/model/type_spelling_resolve.py": "2b79093abec6c4906b8b8d9b5ed4d92777729f20ab589af5801e8e120ebee26a",
       "abicheck/policy/use_case_reachability.py": "e21d1b32773ce42e458ec8dfe34d86c3a5c48732a829b4e985ec739cae594bc1",
       "abicheck/post_processing_reachability.py": "4417bfaf3c44e9963a54c862c3f3b9e355175755049c35b29f14a77d66e7e6b1",
       "abicheck/storage/native_identity_aliases.py": "061e634659b371f1688cfcd4845fdcbe6147b9c2cfddaa4285dd34c757ca80ef",
@@ -219,9 +219,9 @@
       "abicheck/workflows/compare/resolve.py": "1b33ff59c379c2fc7cc48a5b5908b701be4b878c68c46f28bba8c7bd5f0ff97d",
       "abicheck/workflows/elf_dependency_resolver.py": "69cdd9d8129410f824768fdc67ab14b2836761552fe300b63ebb0e290ee3a0b5"
     },
-    "fingerprint": "b81cff47bf4f9623e10ffba5547fb1d53da66d52da3d0b9c90f129cbb3f5f7f7",
+    "fingerprint": "51897d93c4ea2711998c38abe7275ad0092d340544b3f9dfd0f95ba2c7195c20",
     "generation": 4,
-    "reason": "bumped to 4 for a semantic change"
+    "reason": "TypeResolver: per-resolver memo, unique-bare-leaf fast path and a template-free split fast path; every spelling resolves to the same record as before (perf only, baseline-regression gate)"
   },
   "source": {
     "files": {
