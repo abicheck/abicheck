@@ -154,7 +154,14 @@ def _is_marker(node: ast.expr) -> bool:
     """Whether *node* spells `pytest.mark.known_gap_canary` (called or not)."""
     if isinstance(node, ast.Call):
         node = node.func
-    return isinstance(node, ast.Attribute) and node.attr == MARKER
+    return (
+        isinstance(node, ast.Attribute)
+        and node.attr == MARKER
+        and isinstance(node.value, ast.Attribute)
+        and node.value.attr == "mark"
+        and isinstance(node.value.value, ast.Name)
+        and node.value.value.id == "pytest"
+    )
 
 
 def _marker_call(decorators: list[ast.expr], name: str) -> list[ast.expr]:
@@ -166,24 +173,50 @@ def _marker_call(decorators: list[ast.expr], name: str) -> list[ast.expr]:
     return out
 
 
-def _module_marked(tree: ast.Module) -> bool:
+def _module_marks(tree: ast.Module) -> list[ast.expr]:
+    """The marks the module's `pytestmark` applies to every test in it."""
+    out: list[ast.expr] = []
     for stmt in tree.body:
         if isinstance(stmt, ast.Assign) and any(
             isinstance(t, ast.Name) and t.id == "pytestmark" for t in stmt.targets
         ):
-            values = (
+            out.extend(
                 stmt.value.elts
                 if isinstance(stmt.value, (ast.List, ast.Tuple))
                 else [stmt.value]
             )
-            if any(_is_marker(v) for v in values):
-                return True
-    return False
+    return out
 
 
-def _strictness_problem(decorators: list[ast.expr]) -> str | None:
+def _module_marked(tree: ast.Module) -> bool:
+    return any(_is_marker(v) for v in _module_marks(tree))
+
+
+def _calls_pytest_xfail(func: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    """Whether the body calls `pytest.xfail(...)`: once the guarding condition
+    stops holding, such a test falls through to an ordinary PASS."""
+    return any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "xfail"
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "pytest"
+        for node in ast.walk(func)
+    )
+
+
+def _strictness_problem(
+    decorators: list[ast.expr],
+    func: ast.FunctionDef | ast.AsyncFunctionDef | None = None,
+) -> str | None:
     if _marker_call(decorators, "skip"):
         return "is unconditionally skipped, so it cannot fail when the gap closes"
+    for dec in _marker_call(decorators, "skipif"):
+        condition = dec.args[0] if isinstance(dec, ast.Call) and dec.args else None
+        if isinstance(condition, ast.Constant) and bool(condition.value):
+            return "is skipped by a literally-true skipif, so it cannot fail when the gap closes"
+    if func is not None and _calls_pytest_xfail(func):
+        return "calls pytest.xfail(), which turns into a plain pass when the gap closes"
     for dec in _marker_call(decorators, "xfail"):
         strict = isinstance(dec, ast.Call) and any(
             kw.arg == "strict"
@@ -231,7 +264,8 @@ def resolve_canary(
     tree = _parse(path, cache)
     if tree is None:
         return None, f"names a file that does not parse ({rel})"
-    module_marked = _module_marked(tree)
+    module_marks = _module_marks(tree)
+    module_marked = any(_is_marker(v) for v in module_marks)
     scope: list[ast.stmt] = tree.body
     class_decorators: list[ast.expr] = []
     func_name = first
@@ -242,6 +276,11 @@ def resolve_canary(
         )
         if cls is None:
             return None, f"names class {first} that {rel} does not define"
+        if not first.startswith("Test"):
+            return (
+                None,
+                f"names class {first}, which pytest does not collect (no Test prefix)",
+            )
         scope, class_decorators, func_name = cls.body, cls.decorator_list, second
     func = next(
         (
@@ -254,9 +293,9 @@ def resolve_canary(
     )
     if func is None or not func_name.startswith("test"):
         return None, f"names test {func_name} that {rel} does not define"
-    decorators = [*class_decorators, *func.decorator_list]
+    decorators = [*module_marks, *class_decorators, *func.decorator_list]
     marked = module_marked or any(_is_marker(d) for d in decorators)
-    return MarkedTest(node_id, marked, _strictness_problem(decorators)), None
+    return MarkedTest(node_id, marked, _strictness_problem(decorators, func)), None
 
 
 def marked_tests(root: Path) -> set[str]:
@@ -336,6 +375,7 @@ def find_problems(text: str, root: Path) -> list[str]:
             if (
                 len(reason) < MIN_REASON_CHARS
                 or reason.strip().lower() in _PLACEHOLDER_REASONS
+                or re.match(r"(todo|tbd)\b", reason.strip(), re.IGNORECASE)
             ):
                 problems.append(
                     f"{where}: no-canary reason {reason!r} is a placeholder; say why "

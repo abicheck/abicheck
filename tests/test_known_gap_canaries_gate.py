@@ -370,3 +370,100 @@ def test_every_named_canary_is_collected_by_pytest() -> None:
         line.split("[")[0] for line in result.stdout.splitlines() if "::" in line
     }
     assert set(nodes) <= collected, sorted(set(nodes) - collected)
+
+
+# ---------------------------------------------------------------------------
+# A canary that cannot fail when its gap closes, in every spelling
+# ---------------------------------------------------------------------------
+
+_HEADER = "import pytest\n"
+
+
+@pytest.mark.parametrize(
+    ("source", "node", "fragment"),
+    [
+        (  # a module-level skip applies to the canary too
+            _HEADER
+            + "pytestmark = [pytest.mark.known_gap_canary, pytest.mark.skip(reason='x')]\n"
+            "def test_a():\n    assert True\n",
+            "test_a",
+            "unconditionally skipped",
+        ),
+        (  # a module-level non-strict xfail
+            _HEADER
+            + "pytestmark = [pytest.mark.known_gap_canary, pytest.mark.xfail(reason='x')]\n"
+            "def test_a():\n    assert True\n",
+            "test_a",
+            "non-strict xfail",
+        ),
+        (  # skipif with a literal true condition never runs
+            _HEADER
+            + "@pytest.mark.known_gap_canary\n@pytest.mark.skipif(True, reason='x')\n"
+            "def test_a():\n    assert True\n",
+            "test_a",
+            "literally-true skipif",
+        ),
+        (  # a runtime pytest.xfail() becomes a plain pass once its guard stops holding
+            _HEADER + "@pytest.mark.known_gap_canary\ndef test_a():\n"
+            "    if not fixed():\n        pytest.xfail('gap')\n    assert True\n",
+            "test_a",
+            "calls pytest.xfail()",
+        ),
+        (  # pytest never collects a class without the Test prefix
+            _HEADER + "class Helper:\n    @pytest.mark.known_gap_canary\n"
+            "    def test_a(self):\n        assert True\n",
+            "Helper::test_a",
+            "does not collect",
+        ),
+        (  # only pytest.mark spells the marker
+            _HEADER + "custom_mark = object()\n@custom_mark.known_gap_canary\n"
+            "def test_a():\n    assert True\n",
+            "test_a",
+            "lacks @pytest.mark.known_gap_canary",
+        ),
+    ],
+)
+def test_a_canary_that_cannot_fail_loudly_is_rejected(
+    tmp_path: Path, source: str, node: str, fragment: str
+) -> None:
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_m.py").write_text(source, encoding="utf-8")
+    page = "# Known gaps\n" + _entry(
+        "OPEN", f"<!-- canary: tests/test_m.py::{node} -->"
+    )
+    problems = [p for p in kgc.find_problems(page, tmp_path) if "known-gaps.md" in p]
+    assert len(problems) == 1 and fragment in problems[0], problems
+
+
+def test_a_conditional_skipif_is_accepted(tmp_path: Path) -> None:
+    """A platform-gated canary (`skipif(not linux)`) still runs where it applies."""
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_m.py").write_text(
+        _HEADER + "import sys\n@pytest.mark.known_gap_canary\n"
+        "@pytest.mark.skipif(sys.platform != 'linux', reason='x')\n"
+        "def test_a():\n    assert True\n",
+        encoding="utf-8",
+    )
+    page = "# Known gaps\n" + _entry("OPEN", "<!-- canary: tests/test_m.py::test_a -->")
+    assert kgc.find_problems(page, tmp_path) == []
+
+
+@pytest.mark.parametrize(
+    "reason",
+    ["TODO: write the canary test later", "tbd once the fixture exists upstream"],
+)
+def test_a_reason_that_starts_with_a_placeholder_word_fails(
+    reason: str, root: Path
+) -> None:
+    problems = _problems(_page(_entry("OPEN", f"<!-- no-canary: {reason} -->")), root)
+    assert len(problems) == 1 and "placeholder" in problems[0], problems
+
+
+def test_a_reason_that_merely_starts_with_none_is_accepted(root: Path) -> None:
+    page = _page(
+        _entry(
+            "OPEN",
+            "<!-- no-canary: None of the cheap fixtures reproduce this; needs MSVC -->",
+        )
+    )
+    assert _problems(page, root) == []

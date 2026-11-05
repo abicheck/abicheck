@@ -105,6 +105,11 @@ _KIND = {"func_removed": "FUNC_REMOVED"}
         ),
         (
             "import pytest\n@pytest.mark.integration\n@pytest.mark.known_gap_canary\n"
+            "def test_a():\n    assert 'func_removed' not in k\n",
+            False,
+        ),
+        (
+            "import pytest\n@pytest.mark.integration\n@pytest.mark.known_gap_canary\n"
             "def test_a():\n    assert 'func_removed' not in k\n"
             "@pytest.mark.integration\ndef test_b():\n    assert 'func_removed' in k\n",
             True,
