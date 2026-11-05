@@ -641,7 +641,7 @@
     },
     {
       "path": "abicheck/header_utils.py",
-      "baseline_lines": 1075,
+      "baseline_lines": 1074,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
