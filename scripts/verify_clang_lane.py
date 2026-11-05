@@ -66,6 +66,9 @@ CLANG_SENSITIVE_TESTS: tuple[str, ...] = (
     # A base spelled relative to its scope: clang 22+ drops the desugared
     # spelling clang 18 gave (live probe + both JSON shapes).
     "tests/test_clang_relative_base_vtable.py",
+    # The catalog-wide castxml/clang layout + vtable-presence parity
+    # harness: on LLVM 23.1.5 it caught case76's relative-base vtable.
+    "tests/test_family_f8_catalog_backend_parity.py",
 )
 
 #: A representative catalog subset for the clang toolchain lane: each case's

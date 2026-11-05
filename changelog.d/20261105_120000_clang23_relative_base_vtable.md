@@ -12,4 +12,4 @@
   `std::vector<int>`, now records its `vtable` fact as `partial`. Before,
   it recorded a confirmed, possibly empty, vtable. The vtable detectors
   decline on a `partial` fact and record why, instead of reading "no
-  vtable". The extractor generation is now 39.
+  vtable". The extractor generation is now 40.
