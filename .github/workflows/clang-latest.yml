@@ -193,7 +193,7 @@ jobs:
       - name: Clang-sensitive tests
         if: success() || failure()
         env:
-          # The non-slow tests in these files (958 on clang 18); a floor well
+          # The non-slow tests in these files (1112 on clang 18); a floor well
           # above any skip-only run catches a clang that failed to install.
           ABICHECK_MIN_EXECUTED: '800'
           PYTEST_ADDOPTS: -n auto --dist worksteal -rs
