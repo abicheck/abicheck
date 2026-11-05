@@ -203,3 +203,49 @@ def test_a_name_nested_in_a_template_instance_resolves_in_that_instance() -> Non
     )
     # Outside either instance the bare leaf stays ambiguous.
     assert r.resolve("Impl", "lib") == "Impl"
+
+
+def _r(*names: str) -> TypeResolver:
+    return TypeResolver([RecordType(name=n, kind="struct") for n in names])
+
+
+@pytest.mark.parametrize(
+    ("spelling", "scope", "want"),
+    [
+        # clang writes an explicit instantiation's argument as written.
+        (
+            "detail::descriptor_base<classification>",
+            "mylib::knn_descriptor<mylib::task::classification>",
+            "mylib::detail::descriptor_base<mylib::task::classification>",
+        ),
+        (
+            "detail::descriptor_base<task::regression>",
+            "mylib::knn_descriptor<mylib::task::regression>",
+            "mylib::detail::descriptor_base<mylib::task::regression>",
+        ),
+    ],
+)
+def test_as_written_specialization_arguments_resolve_uniquely(
+    spelling: str, scope: str, want: str
+) -> None:
+    r = _r(
+        "mylib::detail::descriptor_base<mylib::task::classification>",
+        "mylib::detail::descriptor_base<mylib::task::regression>",
+        "mylib::knn_descriptor<mylib::task::classification>",
+        "mylib::knn_descriptor<mylib::task::regression>",
+        "mylib::task::classification",
+        "mylib::task::regression",
+    )
+    assert r.resolve(spelling, scope) == want
+
+
+def test_as_written_specialization_arguments_refuse_an_ambiguous_match() -> None:
+    # Two specializations differ only in the argument's scope: no guess.
+    r = _r("lib::B<a::tag>", "lib::B<b::tag>", "lib::Pub", "a::tag", "b::tag")
+    assert r.resolve("B<tag>", "lib::Pub") == "B<tag>"
+
+
+def test_as_written_specialization_needs_a_resolved_template_head() -> None:
+    # The head `B` is not visible from `other::X`: no specialization fallback.
+    r = _r("lib::B<lib::tag>", "lib::tag", "other::X")
+    assert r.resolve("B<tag>", "other::X") == "B<tag>"

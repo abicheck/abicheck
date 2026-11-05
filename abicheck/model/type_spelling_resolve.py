@@ -107,11 +107,22 @@ class TypeResolver:
             if parts:
                 self._by_leaf.setdefault(parts[-1], []).append(key)
             self._add_known(parts)
+        # Every proper scope suffix of a record key (`B::C` of `a::B::C`): a
+        # spelling that is a record key and in none of these cannot be shadowed
+        # by lookup from any scope, so it names itself.
+        self._shadowable: set[str] = set()
+        for key in self.records:
+            parts = split_components(key)
+            for i in range(1, len(parts)):
+                self._shadowable.add("::".join(parts[i:]))
         for name in extra_names:
             self._add_known(split_components(name))
         # Per-resolver memo: the walk asks about the same spellings from the
         # same scopes many times over one snapshot.
         self._memo: dict[tuple[str, str | None, tuple[str, ...]], str] = {}
+        # Template head -> (argument-unscoped spelling, key), built on demand.
+        self._by_head: dict[str, list[tuple[str, str]]] | None = None
+        self._leaves: set[str] | None = None
 
     def _add_known(self, parts: list[str]) -> None:
         stems = [_stem(c) for c in parts]
@@ -150,7 +161,10 @@ class TypeResolver:
         referencing record, or a function's or variable's enclosing scope);
         *identities* is the slot's recorded ``type_identities_fact`` value.
         """
-        if not spelling or (spelling in self.records and not scope):
+        if not spelling or (
+            spelling in self.records
+            and (not scope or (not identities and spelling not in self._shadowable))
+        ):
             return spelling
         key = (spelling, scope, identities)
         found = self._memo.get(key)
@@ -198,7 +212,43 @@ class TypeResolver:
             owners = self._by_leaf.get(norm, [])
             if len(owners) == 1:
                 return owners[0]
+        if "<" in qualified:
+            found = self._unique_specialization(qualified)
+            if found is not None:
+                return found
         return spelling
+
+    def _unique_specialization(self, qualified: str) -> str | None:
+        """A specialization whose template head lookup resolved but whose
+        arguments are spelled as written: newer clang prints an explicit
+        instantiation's arguments scope-relative (``B<tag>``) where the record
+        is canonical (``B<lib::task::tag>``). Matched with argument scopes
+        dropped, and only when exactly one record of that template matches."""
+        head, args = qualified.split("<", 1)
+        if head not in self._known:
+            return None
+        # Every argument name must be one the snapshot declares (a leaf of a
+        # known name): an argument naming nothing known is not matched.
+        if self._leaves is None:
+            self._leaves = {k.rsplit("::", 1)[-1] for k in self._known}
+        leaves = self._leaves
+        for m in _CHAIN.finditer(args):
+            if re.sub(r"\s+", "", m.group(0)).rsplit("::", 1)[-1] not in leaves:
+                return None
+        if self._by_head is None:
+            self._by_head = {}
+            for norm_key, key in self._normalized.items():
+                if "<" in norm_key:
+                    self._by_head.setdefault(norm_key.split("<", 1)[0], []).append(
+                        (_unscoped(norm_key), key)
+                    )
+        want = _unscoped(qualified)
+        hits = [key for u, key in self._by_head.get(head, ()) if u == want]
+        return hits[0] if len(hits) == 1 else None
+
+
+def _unscoped(spelling: str) -> str:
+    return re.sub(r"\b\w+::", "", spelling)
 
 
 def scope_of(qualified: str) -> str:
