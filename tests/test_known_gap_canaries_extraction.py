@@ -32,6 +32,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -43,6 +44,13 @@ from abicheck.serialization import load_snapshot, snapshot_to_dict
 from tests._abicheck_subprocess import abicheck_command, abicheck_env
 
 pytestmark = pytest.mark.known_gap_canary
+
+#: Every compiled canary pins the answer measured with gcc/castxml/clang on a
+#: Linux ELF host; on Windows or macOS the toolchain, binary format and so the
+#: gapped answer differ, so the canary would assert the wrong bound there.
+_LINUX_ONLY = pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="pins the gap as measured on Linux/ELF"
+)
 
 _ROOT = Path(__file__).resolve().parents[1]
 
@@ -133,6 +141,7 @@ def _kinds(report: dict[str, Any]) -> set[str]:
 
 
 @pytest.mark.integration
+@_LINUX_ONLY
 def test_g1_dwarf_return_type_change_reads_complete_no_change(tmp_path: Path) -> None:
     """Line-tables-only DWARF has no `DW_AT_type`: the return change is missed, assurance complete."""
     _require("gcc")
@@ -154,6 +163,7 @@ def test_g1_dwarf_return_type_change_reads_complete_no_change(tmp_path: Path) ->
 
 
 @pytest.mark.integration
+@_LINUX_ONLY
 def test_headerless_additive_change_flags_alignment_on_an_untouched_static(
     tmp_path: Path,
 ) -> None:
@@ -177,6 +187,7 @@ _TD_SRC = '#include "api.h"\nvoid f(std::vector<T>) {}\n'
 
 
 @pytest.mark.integration
+@_LINUX_ONLY
 def test_typedef_retarget_inside_template_argument_reads_removed_plus_added(
     tmp_path: Path,
 ) -> None:
@@ -197,6 +208,7 @@ def test_typedef_retarget_inside_template_argument_reads_removed_plus_added(
 
 
 @pytest.mark.integration
+@_LINUX_ONLY
 def test_castxml_float128_function_is_unmangled_and_read_as_not_exported(
     tmp_path: Path,
 ) -> None:
@@ -221,6 +233,7 @@ def test_castxml_float128_function_is_unmangled_and_read_as_not_exported(
 
 
 @pytest.mark.integration
+@_LINUX_ONLY
 def test_castxml_dropped_explicit_function_instance_is_not_a_removal(
     tmp_path: Path,
 ) -> None:
@@ -244,6 +257,7 @@ def test_castxml_dropped_explicit_function_instance_is_not_a_removal(
 
 
 @pytest.mark.integration
+@_LINUX_ONLY
 def test_case180_binding_loss_is_filtered_as_exported_not_public(
     tmp_path: Path,
 ) -> None:
@@ -289,6 +303,7 @@ def test_case180_binding_loss_is_filtered_as_exported_not_public(
 
 
 @pytest.mark.integration
+@_LINUX_ONLY
 def test_reloaded_binary_snapshot_refuses_to_flatten(tmp_path: Path) -> None:
     _require("gcc")
     lib, _ = _build(
@@ -323,6 +338,7 @@ def test_mingw_triple_include_tree_is_not_a_toolchain_dir(
 
 
 @pytest.mark.integration
+@_LINUX_ONLY
 def test_binary_only_dump_drops_an_export_compiled_without_debug_info(
     tmp_path: Path,
 ) -> None:
@@ -377,6 +393,7 @@ def test_binary_only_dump_drops_an_export_compiled_without_debug_info(
 
 
 @pytest.mark.integration
+@_LINUX_ONLY
 def test_depth_binary_projection_of_header_snapshots_misses_a_return_change(
     tmp_path: Path,
 ) -> None:

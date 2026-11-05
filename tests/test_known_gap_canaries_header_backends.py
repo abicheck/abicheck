@@ -33,6 +33,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -41,7 +42,14 @@ import pytest
 from tests._abicheck_subprocess import abicheck_command, abicheck_env
 from tests.test_template_default_assurance_gap import _compare as _header_only_compare
 
-pytestmark = [pytest.mark.integration, pytest.mark.known_gap_canary]
+#: Every compiled canary pins the answer measured with gcc/castxml/clang on a
+#: Linux ELF host; on Windows or macOS the toolchain, binary format and so the
+#: gapped answer differ, so the canary would assert the wrong bound there.
+_LINUX_ONLY = pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="pins the gap as measured on Linux/ELF"
+)
+
+pytestmark = [pytest.mark.integration, pytest.mark.known_gap_canary, _LINUX_ONLY]
 
 _ROOT = Path(__file__).resolve().parents[1]
 _CASES = _ROOT / "catalog" / "cases"
