@@ -391,6 +391,15 @@ def _has_override_attr(node: dict[str, Any]) -> bool:
     )
 
 
+def _base_is_virtual(base: dict[str, Any]) -> bool:
+    """Whether a ``bases`` entry is a virtual base. ``JSONNodeDumper``
+    writes ``isVirtual`` only when true (``attributeOnlyIfTrue``), so an
+    omitted key is a confirmed non-virtual base -- checked on clang 18 and
+    LLVM 23.1.5: ``struct L : virtual X`` carries ``"isVirtual": true``,
+    ``struct R : X`` carries no key."""
+    return base.get("isVirtual") is True
+
+
 def _base_qualnames(
     node: dict[str, Any],
     qualname: str,
@@ -420,7 +429,7 @@ def _base_qualnames(
             continue
         found = resolver.resolve(b, qualname)
         if found is not None:
-            out.append((found, bool(b.get("isVirtual"))))
+            out.append((found, _base_is_virtual(b)))
             continue
         type_obj = b.get("type")
         spelled = (
