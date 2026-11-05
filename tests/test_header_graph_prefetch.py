@@ -107,7 +107,15 @@ def test_prefetched_and_sequential_dumps_are_identical(
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache-prefetch"))
     prefetched = _dump(lib, header)
     assert len(calls) == 1, "the prefetch path must acquire exactly once"
-    if max_threads == "":
+    from abicheck.compile_context import CompileContext
+    from abicheck.extract.headers.clang import abi_target
+
+    if abi_target.binary_abi_target_may_apply(CompileContext(), False):
+        # A Windows-default clang: the binary may call for a --target the
+        # prefetch cannot know yet, so it is skipped and the one acquisition
+        # runs sequentially instead of being discarded and repeated.
+        assert not calls[0].startswith("abicheck-hgraph"), calls
+    elif max_threads == "":
         # Observe the mechanism, not just the output: it ran on the prefetch
         # thread, i.e. alongside the primary dump.
         assert calls[0].startswith("abicheck-hgraph"), calls
