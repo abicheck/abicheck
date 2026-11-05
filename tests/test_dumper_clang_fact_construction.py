@@ -35,7 +35,17 @@ def _tu(*inner: dict) -> dict:
 
 
 def test_polymorphic_record_facts_present_and_match_legacy_fields() -> None:
+    # `Base` is defined, so the vtable is a complete answer; an undefined
+    # base makes it PARTIAL (test_clang_relative_base_vtable.py).
     root = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Base",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "completeDefinition": True,
+            "inner": [],
+        },
         {
             "kind": "CXXRecordDecl",
             "name": "Widget",
@@ -54,7 +64,7 @@ def test_polymorphic_record_facts_present_and_match_legacy_fields() -> None:
                     "virtual": True,
                 }
             ],
-        }
+        },
     )
     (rec,) = [
         t

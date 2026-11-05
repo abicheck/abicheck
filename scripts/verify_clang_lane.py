@@ -63,6 +63,9 @@ CLANG_SENSITIVE_TESTS: tuple[str, ...] = (
     "tests/test_dumper_clang_streaming.py",
     "tests/test_dumper_clang_vtable.py",
     "tests/test_dumper_clang_vtable_redecl.py",
+    # A base spelled relative to its scope: clang 22+ drops the desugared
+    # spelling clang 18 gave (live probe + both JSON shapes).
+    "tests/test_clang_relative_base_vtable.py",
 )
 
 #: A representative catalog subset for the clang toolchain lane: each case's

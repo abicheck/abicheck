@@ -56,6 +56,7 @@ from ....name_classification import strip_anonymous_type_location
 from ...declaration_provenance import classify_origin, header_from_location
 from ...surface_fact_producers import header_ast_surface_facts
 from .ast_inner import ast_inner
+from .base_resolution import BaseLookupIndex
 from .template_param_indexes import TemplateParamIndex
 from .templates import build_specialization_index
 from .vtable import build_vtable, is_record_definition
@@ -492,6 +493,7 @@ class RecordVtableIndex:
         self,
         root: dict[str, Any],
         records: list[_Decl],
+        typedefs: list[_Decl],
         # Widened from `dict[str, list[str | None]]` to the read-only
         # `Mapping`/`Sequence` pair (`templates.TemplateParamIndex`) so a shared,
         # immutable `TemplateParamIndexes` bundle is accepted alongside the plain
@@ -508,12 +510,15 @@ class RecordVtableIndex:
         # same timing the four caches below already relied on when this
         # state lived directly on `_ClangAstParser`.
         self._records = records
+        # The walk's typedef/alias decls, read lazily (same timing as
+        # `records`) for an alias base's declaring scope.
+        self._typedefs = typedefs
         self._template_param_kinds_by_qualname = template_param_kinds_by_qualname
         self._template_param_defaults_by_qualname = template_param_defaults_by_qualname
         self._template_param_names_by_qualname = template_param_names_by_qualname
         self._record_by_qualname: dict[str, dict[str, Any]] | None = None
         self._specialization_by_qualname: dict[str, dict[str, Any]] | None = None
-        self._base_lookup: dict[str, dict[str, Any]] | None = None
+        self._base_lookup: BaseLookupIndex | None = None
         self._virtual_mangled: frozenset[str] | None = None
 
     def record_index(self) -> dict[str, dict[str, Any]]:
@@ -586,8 +591,18 @@ class RecordVtableIndex:
         if self._base_lookup is None:
             merged = dict(self.specialization_record_index())
             merged.update(self.record_index())
-            self._base_lookup = merged
+            self._base_lookup = BaseLookupIndex(merged, self._alias_scopes)
         return self._base_lookup
+
+    def _alias_scopes(self) -> dict[str, tuple[str, ...]]:
+        """``{typedef/alias clang id: its declaring scope}`` -- where an alias
+        base's desugared spelling was written (clang 22+ prints it relative
+        to that scope; see ``base_resolution``)."""
+        return {
+            str(entry.node["id"]): entry.scope
+            for entry in self._typedefs
+            if isinstance(entry.node.get("id"), str)
+        }
 
     def virtual_mangled_names(self) -> frozenset[str]:
         """Every mangled name occupying a slot in ANY record's reconstructed
