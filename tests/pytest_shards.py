@@ -41,6 +41,15 @@ duplicate a test, since the partition is over the collected node ids.
 Refresh them from CI's ``test-durations-shard*`` artifacts with::
 
     python -m tests.pytest_shards update-weights test-durations-shard*.json
+
+The integration lane (``integration.yml``'s Linux leg) shards the same way
+but balances on its own file, ``shard_weights_integration.json``, passed as
+``--shard-weights``: many files carry both unit and integration tests, and
+their unit-lane seconds (``test_example_autodiscovery.py``: 0.03 s) say
+nothing about what their integration tests cost (minutes). Refresh it from
+that leg's ``integration-durations-shard*`` artifacts with::
+
+    python -m tests.pytest_shards update-weights --out tests/shard_weights_integration.json integration-durations-shard*.json
 """
 
 from __future__ import annotations
@@ -52,6 +61,7 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 
 WEIGHTS_FILE = Path(__file__).with_name("shard_weights.json")
+INTEGRATION_WEIGHTS_FILE = Path(__file__).with_name("shard_weights_integration.json")
 _MIN_SECONDS_PER_TEST = 1e-3
 
 
@@ -151,23 +161,31 @@ def weights_from_durations(records: Iterable[Mapping[str, object]]) -> dict[str,
 
 
 def _main(argv: list[str]) -> int:
-    if len(argv) < 2 or argv[0] != "update-weights":
-        print(
-            "usage: python -m tests.pytest_shards update-weights DURATIONS.json...",
-            file=sys.stderr,
-        )
+    usage = "usage: python -m tests.pytest_shards update-weights [--out WEIGHTS.json] DURATIONS.json..."
+    if not argv or argv[0] != "update-weights":
+        print(usage, file=sys.stderr)
+        return 64
+    args = argv[1:]
+    out = WEIGHTS_FILE
+    if args[:1] == ["--out"]:
+        if len(args) < 2:
+            print(usage, file=sys.stderr)
+            return 64
+        out, args = Path(args[1]), args[2:]
+    if not args:
+        print(usage, file=sys.stderr)
         return 64
     records: list[Mapping[str, object]] = []
-    for name in argv[1:]:
+    for name in args:
         records.extend(json.loads(Path(name).read_text(encoding="utf-8")))
     document = {
         "comment": "Per-file seconds steering `pytest --shard` balance only; regenerate with `python -m tests.pytest_shards update-weights`.",
         "files": weights_from_durations(records),
     }
-    WEIGHTS_FILE.write_text(
+    out.write_text(
         json.dumps(document, indent=1, sort_keys=True) + "\n", encoding="utf-8"
     )
-    print(f"wrote {len(document['files'])} file weights to {WEIGHTS_FILE}")
+    print(f"wrote {len(document['files'])} file weights to {out}")
     return 0
 
 
