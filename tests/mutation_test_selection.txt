@@ -84,6 +84,7 @@ tests/test_bundle_unresolved_imports.py
 tests/test_bundle_variants_capture.py
 tests/test_canonical_finding_id.py
 tests/test_castxml_array_migration.py
+tests/test_castxml_base_offset_migration.py
 tests/test_castxml_constructor_visibility.py
 tests/test_castxml_free_examples.py
 tests/test_castxml_function_pointer_spelling.py
