@@ -378,3 +378,31 @@ def test_a_target_may_apply_only_on_a_windows_default_clang(
     # An explicit target the caller gave always wins: nothing to infer.
     explicit = CompileContext(gcc_option_tokens=("--target=x86_64-pc-windows-msvc",))
     assert abi_target.binary_abi_target_may_apply(explicit, False) is False
+
+
+@pytest.mark.parametrize(
+    ("lang", "primary_mode", "prefetch_force_cpp", "expected"),
+    [
+        (None, "c++", False, True),  # the binary resolved C++; the prefetch ran as C
+        (None, "c++", True, False),  # the prefetch already parsed as C++
+        (None, "c", False, False),  # the primary pass agrees it is C
+        ("c", "c++", False, False),  # an explicit language is never second-guessed
+    ],
+)
+def test_a_prefetch_in_the_wrong_language_mode_is_reacquired(
+    monkeypatch: pytest.MonkeyPatch,
+    lang: str | None,
+    primary_mode: str,
+    prefetch_force_cpp: bool,
+    expected: bool,
+) -> None:
+    from abicheck.compile_context import CompileContext
+    from abicheck.service_header_graph_attach import HeaderGraphAst
+    from abicheck.workflows.dump.header_graph_staleness import prefetch_needs_reacquire
+
+    monkeypatch.setattr(abi_target, "binary_abi_target_token", lambda **_: None)
+    acquired = HeaderGraphAst(None, None, [], [], (), prefetch_force_cpp)
+    got = prefetch_needs_reacquire(
+        acquired, lang, primary_mode, CompileContext(), frozenset()
+    )
+    assert got is expected
