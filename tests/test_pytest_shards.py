@@ -22,6 +22,7 @@ green, so the partition itself is the thing to pin.
 
 from __future__ import annotations
 
+import json
 import random
 import subprocess
 import sys
@@ -31,6 +32,9 @@ import pytest
 from hypothesis import given, settings, strategies as st
 
 from tests.pytest_shards import (
+    INTEGRATION_WEIGHTS_FILE,
+    WEIGHTS_FILE,
+    _main,
     assign_files,
     file_of,
     file_weights,
@@ -248,3 +252,82 @@ def test_the_committed_weights_file_loads_and_is_nonnegative() -> None:
     assert len(weights) > 100, "tests/shard_weights.json is missing or nearly empty"
     assert all(v >= 0 for v in weights.values())
     assert all(k.startswith("tests/") and k.endswith(".py") for k in weights)
+
+
+_THREE_FILES = [
+    "tests/test_pytest_shards.py",
+    "tests/test_example_shards.py",
+    "tests/test_collect_partition.py",
+]
+
+
+def _collected_files(*extra: str) -> set[str]:
+    out = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            *_THREE_FILES,
+            "--collect-only",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            *extra,
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stdout
+    return {file_of(line) for line in out.splitlines() if "::" in line}
+
+
+@pytest.mark.parametrize("heavy", _THREE_FILES)
+def test_shard_weights_option_steers_the_split_through_pytest(
+    heavy: str, tmp_path: Path
+) -> None:
+    """``--shard-weights`` is what the integration lane balances on: the file
+    it names as heaviest gets a shard of its own, whichever file that is, and
+    the two shards still partition the collected files."""
+    weights = tmp_path / "w.json"
+    weights.write_text(
+        json.dumps(
+            {"files": {f: (1000.0 if f == heavy else 1.0) for f in _THREE_FILES}}
+        ),
+        encoding="utf-8",
+    )
+    opt = f"--shard-weights={weights}"
+    one, two = (_collected_files(f"--shard={k}/2", opt) for k in (1, 2))
+    assert one == {heavy}
+    assert two == set(_THREE_FILES) - {heavy}
+
+
+def test_update_weights_writes_only_the_named_file(tmp_path: Path) -> None:
+    durations = tmp_path / "d.json"
+    durations.write_text(
+        json.dumps(
+            [
+                {"nodeid": "tests/test_a.py::t", "when": "call", "duration": 2.5},
+                {"nodeid": "tests/test_a.py::u", "when": "setup", "duration": 0.5},
+            ]
+        ),
+        encoding="utf-8",
+    )
+    out = tmp_path / "integration.json"
+    before = WEIGHTS_FILE.read_bytes()
+    assert _main(["update-weights", "--out", str(out), str(durations)]) == 0
+    assert load_weights(out) == {"tests/test_a.py": 3.0}
+    assert WEIGHTS_FILE.read_bytes() == before
+    assert _main(["update-weights", "--out"]) == 64
+    assert _main(["update-weights", "--out", str(out)]) == 64
+
+
+def test_the_committed_integration_weights_measure_integration_cost() -> None:
+    """The integration lane's weights are integration seconds, not the unit
+    lane's: a catalog-wide integration file weighs minutes there and almost
+    nothing in the unit file."""
+    integration, unit = load_weights(INTEGRATION_WEIGHTS_FILE), load_weights()
+    assert len(integration) > 20
+    assert all(v >= 0 for v in integration.values())
+    heavy = "tests/test_family_f8_catalog_backend_parity.py"
+    assert integration[heavy] > 60 > unit.get(heavy, 0.0)
