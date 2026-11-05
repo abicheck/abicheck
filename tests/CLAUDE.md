@@ -79,6 +79,10 @@ CI's `pr` profile.
   error or the chosen branch instead. A deliberate shape takes
   `# test-quality: ok <reason>` on its `def` line. Rules and process:
   `docs/contribute/agent-guide/quality-gates.md` "Test-quality ratchet".
+- **Known-gap canaries** (`@pytest.mark.known_gap_canary`) assert the *current, gapped* answer of an open
+  `docs/contribute/known-gaps.md` entry, which names them with `<!-- canary: ... -->`. When one fails, the gap
+  moved: if it was fixed, archive the entry and turn the canary into a regression test (drop the marker); never
+  re-pin the new answer. The `known-gap-canaries` AI-readiness check keeps the two linked.
 - **Silent-skip guard** (`conftest.py`): export `ABICHECK_MIN_EXECUTED=<n>` and
   the session fails unless ≥ n tests actually ran — used by the marker lanes in
   CI so a missing tool can't pass with 0 tests. Every `test_*` should assert
@@ -99,6 +103,12 @@ CI's `pr` profile.
 
 - `check_validate_results.py`, `summarize_validate_results.py` — used by
   `test_abi_examples.py` to validate example case ground truth.
+- `expected_kinds_gate.py` — the catalog lanes' strict kinds gate: in the
+  native `validate_examples.py` lanes a missing `expected_kinds` entry FAILs
+  the cell unless `ground_truth.json`'s `expected_kinds_gaps` declares it for
+  that header frontend and mode; a declaration that no longer reproduces
+  FAILs as stale. Also validates that field. Tests:
+  `test_expected_kinds_gate.py`.
 - `conftest.py` — shared fixtures, including temp-dir helpers and
   binary-skip markers.
 - `_strict_process.py` — `StrictProcessRunner`, the scripted stand-in for
@@ -119,6 +129,10 @@ CI's `pr` profile.
   under clang. `test_frontend_spelling_integration.py` (`integration`) pins
   the rules to real dumps; `test_detector_frontend_spelling.py` is the
   scenario matrix.
+- `optional_tool_inventory.py` — every optional-tool lookup in `abicheck/`
+  and its default-install expectation. `test_optional_tool_inventory_gate.py`
+  fails on an unregistered lookup; `test_default_install_fact_invariants.py`
+  hides every registered optional tool and checks the promised facts.
 - `canonical_identity_contract.py` — the exhaustive per-`ChangeKind` identity
   classification enforced by `test_canonical_finding_id_completeness.py`; a new
   `ChangeKind` fails CI until it is placed in a bucket.

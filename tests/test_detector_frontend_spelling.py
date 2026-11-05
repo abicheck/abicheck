@@ -669,3 +669,32 @@ def test_frontend_spelling_does_not_change_the_answer(
         c.kind.value for c in base.out_of_surface_changes
     )
     assert spelled.verdict == base.verdict
+
+
+def _ambiguous_castxml_base(v: int) -> AbiSnapshot:
+    # Two records share the leaf `Base`; castxml writes the internal base as
+    # bare `Base` with no type identity, and lookup from `lib::Pub` finds
+    # neither, so the leak walk leaves it unresolved (known gap).
+    return _snap(
+        v,
+        [_make("lib::Pub*")],
+        [
+            _holder("lib::Pub", v, [("z", "int")], bases=["lib::detail::Base"]),
+            _grow("lib::detail::Base", v),
+            RecordType(name="other::Base", kind="struct", size_bits=32),
+        ],
+    )
+
+
+@pytest.mark.known_gap_canary
+def test_castxml_ambiguous_bare_base_leak_is_not_reported() -> None:
+    old = render(_ambiguous_castxml_base(1), Frontend.CASTXML)
+    new = render(_ambiguous_castxml_base(2), Frontend.CASTXML)
+    kinds = {c.kind for c in compare(old, new).changes}
+    assert LEAK not in kinds
+    # The as-written spelling resolves the base and reports the leak.
+    written = {
+        c.kind
+        for c in compare(_ambiguous_castxml_base(1), _ambiguous_castxml_base(2)).changes
+    }
+    assert LEAK in written

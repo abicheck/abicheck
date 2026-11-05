@@ -47,6 +47,7 @@ sys.path.insert(0, str(REPO_DIR / "scripts"))
 sys.path.insert(0, str(Path(__file__).parent))  # source_smoke lives beside this
 import example_applicability  # noqa: E402
 import example_catalog  # noqa: E402
+import expected_kinds_gate  # noqa: E402
 from _legacy_scope import scope_args  # noqa: E402
 from _validate_examples_cli import build_parser  # noqa: E402
 from example_case_runner import (  # noqa: E402
@@ -249,16 +250,9 @@ class CaseResult(NamedTuple):
     # Retained in the artifact schema for compatibility. Exact verdict matching
     # means a PASS is "ok"; category collapse is no longer possible.
     category_strict: str = "n/a"
-    # Strict-kinds signal: "ok" | "mismatch" | "gap-observed" | "n/a".
-    # "mismatch" means the verdict-level PASS/XFAIL/FAIL above hides a
-    # ground_truth.json expected_kinds/expected_absent_kinds violation — a
-    # case can get the right severity for the wrong detector reason.
-    # "gap-observed" means the case is a declared `detectability: none` known
-    # gap (e.g. case111): expected_kinds there records the tool's actual,
-    # insufficient current output for regression tracking, not a calibration
-    # target that proves the canonical verdict, so it must not read as "ok"
-    # (full calibration). Surfaced (not failed) by default;
-    # check_validate_results.py can gate "mismatch" via ABICHECK_STRICT_KINDS=1.
+    # Strict-kinds signal of expected_kinds_gate.judge_cell: "ok" |
+    # "gap-observed" | "declared-gap" | "stale-gap" | "mismatch" | "n/a".
+    # In the native lanes a "mismatch"/"stale-gap" FAILs the cell.
     kinds_strict: str = "n/a"
     kinds_strict_detail: str = ""
     # The full set of ChangeKind names the run actually emitted (not just the
@@ -1534,75 +1528,18 @@ def run_case(
             smoke_proof if not result.message else f"{smoke_proof} | {result.message}"
         )
         result = result._replace(message=combined)
-    kinds_strict, kinds_detail = _kinds_strict_signal(
-        entry, result, got_kinds, known_gap
+    category = _category_strict_signal(entry, result, source_layers)
+    status, message, kv = expected_kinds_gate.judge_cell(
+        entry, result.status, result.message, got_kinds, mode=variant
     )
     return result._replace(
-        category_strict=_category_strict_signal(entry, result, source_layers),
-        kinds_strict=kinds_strict,
-        kinds_strict_detail=kinds_detail,
+        status=status,
+        message=message,
+        category_strict=category,
+        kinds_strict=kv.signal,
+        kinds_strict_detail=kv.detail,
         actual_kinds=tuple(sorted(set(got_kinds))),
     )
-
-
-def _kinds_strict_signal(
-    entry: dict,
-    result: CaseResult,
-    got_kinds: tuple[str, ...],
-    known_gap: str | None = None,
-) -> tuple[str, str]:
-    """Check ``expected_kinds``/``expected_absent_kinds`` against the actual run.
-
-    ground_truth.json's ``expected_kinds`` (must appear) and
-    ``expected_absent_kinds`` (must not appear) are richer than the top-level
-    verdict string: a case can PASS/XFAIL on verdict alone while the specific
-    detector that fired is not the one the case is meant to calibrate. Only
-    meaningful for a case that actually ran compare (PASS/FAIL/XFAIL); SKIP/
-    ERROR results carry no *got_kinds* to check against.
-
-    A *known_gap* (already scoped to this toolchain/platform/variant by
-    ``_gap_applies`` at the call site, same as ``_evaluate_verdict`` above)
-    means the missing evidence is a documented, honest capability boundary,
-    not a mismatch to report — mirrors ``_evaluate_verdict``'s own known_gap
-    short-circuit so a documented gap doesn't ALSO surface as a bare,
-    undifferentiated "expected_kinds missing" strict-kinds mismatch.
-    """
-    if result.status not in ("PASS", "FAIL", "XFAIL"):
-        return "n/a", ""
-    if known_gap:
-        return "n/a", ""
-    expected_kinds = entry.get("expected_kinds")
-    expected_absent_kinds = entry.get("expected_absent_kinds")
-    if not expected_kinds and not expected_absent_kinds:
-        return "n/a", ""
-    got_set = set(got_kinds)
-    missing = [k for k in (expected_kinds or []) if k not in got_set]
-    unexpected = [k for k in (expected_absent_kinds or []) if k in got_set]
-    if not missing and not unexpected:
-        if entry.get("detectability") == "none":
-            return (
-                "gap-observed",
-                "expected_kinds here is the tool's current insufficient "
-                "observation under a declared detector gap, not calibration "
-                "proof of the canonical verdict",
-            )
-        return "ok", ""
-    parts = []
-    if missing:
-        parts.append(f"expected_kinds missing: {missing}")
-    if unexpected:
-        parts.append(f"expected_absent_kinds present: {unexpected}")
-    detail = "; ".join(parts)
-    # A case whose *entire* missing set is exactly the one kind ground_truth.json
-    # already root-caused as a known, triaged detector gap (known_kind_gap) is
-    # not a fresh, unexplained regression — it's the same documented gap firing
-    # again. Only the exact declared kind qualifies: a *different* or *additional*
-    # missing/unexpected kind on the same case is still a real "mismatch" so a
-    # new regression can't hide behind an old case's known_kind_gap note.
-    known_kind_gap = entry.get("known_kind_gap")
-    if known_kind_gap and missing == [known_kind_gap] and not unexpected:
-        return "documented-mismatch", detail
-    return "mismatch", detail
 
 
 def _category_strict_signal(
@@ -1804,6 +1741,10 @@ def main(argv: list[str] | None = None) -> int:
         gt = json.load(f)
 
     verdicts: dict[str, dict] = gt["verdicts"]
+    gap_errors = expected_kinds_gate.validate_ground_truth(verdicts)
+    if gap_errors:
+        print("ERROR: " + "\n  ".join(gap_errors), file=sys.stderr)
+        return 2
 
     # Filter cases
     names = sorted(verdicts.keys())

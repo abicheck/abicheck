@@ -17,6 +17,7 @@
 | `future-annotations` | WARN | `from __future__ import annotations` per this file's convention |
 | `changekind-partition` | ERROR | Every `ChangeKind` is in exactly one of `BREAKING_KINDS` / `API_BREAK_KINDS` / `COMPATIBLE_KINDS` / `RISK_KINDS` |
 | `abi-taxonomy-coverage` | ERROR | Every leaf mechanism in `docs/contribute/abi-api-failure-taxonomy.md` (88 today) carries exactly one Phase 3 coverage status in `docs/_meta/abi-taxonomy-coverage.json` — the taxonomy counterpart of `changekind-partition`, so a leaf added without being classified can't silently drop out of the coverage denominator. Also validates that every learn page/topic/catalog case/`ChangeKind` the mapping names exists, that a non-`COVERED` status states a reason, that a `KNOWN_UNDETECTABLE`/`NOT_IMPLEMENTED` leaf's cross-reference really appears in `docs/learn/limitations.md`/`docs/contribute/known-gaps.md`, and that the recorded status agrees with its own Phase 2 columns under the plan's first-match-wins order. Rules live in `scripts/abi_taxonomy_coverage.py`, which `scripts/gen_abi_taxonomy_coverage.py` imports too, so the gate and the generated report (`docs/contribute/abi-taxonomy-coverage.md`) can't disagree |
+| `known-gap-canaries` | ERROR | Every OPEN/PARTIAL/NARROWED entry of `docs/contribute/known-gaps.md` names a canary (`<!-- canary: tests/...::test_x -->`, a test marked `@pytest.mark.known_gap_canary` that asserts the gap's current answer, never skipped, xfail only `strict=True`) or carries one reasoned `<!-- no-canary: ... -->` note; no CLOSED/FIXED entry stays on that page; every marked test is named by an entry. A failing canary means the gap moved: archive the entry and turn the canary into a regression test. Rules in `scripts/known_gap_canaries.py`; `tests/test_known_gap_canaries_gate.py` also asks pytest to collect every named canary |
 | `changekind-detector` | WARN | Every `ChangeKind` is produced somewhere (not orphaned) |
 | `changekind-docs` | WARN | Every `ChangeKind` is mentioned in `docs/` |
 | `doc-count-sync` | ERROR on drift, WARN if anchor moved | Headline counts in docs (ChangeKind count, example-catalog size) match their source of truth (`len(ChangeKind)`, `ground_truth.json`) — this file (`AGENTS.md`) is included in the generic sweep, same as `README.md`/`CLAUDE.md` |
@@ -71,6 +72,23 @@ When it fails on your change: wire the function into its production
 consumer, delete it (and its test), or merge the clone into one owner --
 in that order of preference. `--json` prints every current finding.
 `scripts/usecase_paths.py` remains the dynamic, report-only counterpart.
+
+## Optional-tool inventory (default-install facts)
+
+Every lookup of something outside abicheck is registered in
+`tests/optional_tool_inventory.py` with its role and what a default install
+must still produce without it. `tests/test_optional_tool_inventory_gate.py`
+(`repo_scan`) fails on an unregistered or stale site. It scans for
+`shutil.which`, `find_*_bin` resolvers, `ABICHECK_*` environment names,
+optional third-party imports, and a literal program as `argv[0]` of a list or
+tuple display; a program bound to a variable first is not resolved. An
+`optional_enrichment` entry must name the fact families it leaves intact and
+a proof in `tests/test_default_install_fact_invariants.py` (`integration`),
+which hides every optional tool and environment variable and dumps real
+libraries through the CLI with both header frontends against a compiled
+`sizeof`/`offsetof` oracle. When the gate fails, add the site to the entry
+for the same tool, or add an entry: role, `without`, `preserved`/`marked`,
+and a proof.
 
 ## Test-quality ratchet (tautological tests)
 

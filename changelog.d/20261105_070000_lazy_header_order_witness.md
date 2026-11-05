@@ -1,0 +1,3 @@
+### Changed
+
+- **`compare` no longer parses headers a second time to prove an order it never checks.** When the header list given to `-H` is not in canonical order (for example `part1.h … part10.h`, where `part10.h` sorts before `part2.h`), the header-order witness used to re-parse every side in sorted order. A live `compare` now defers that second parse, and takes it only when the two sides' recorded header orders differ, which is the only case where the comparison reads the proof. A compare that declares the same order on both sides now parses each side once (about 11% less wall time on a 30-header compare). `abicheck dump` still records the proof, so stored baselines are unchanged.

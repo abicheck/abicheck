@@ -216,7 +216,7 @@ Follow the pointer whose trigger matches your task:
 | [`docs/contribute/agent-guide/performance.md`](docs/contribute/agent-guide/performance.md) | touching a hot path, a call-count/cost-budget/`perf-antipatterns` gate failed, or a user reports "slow" |
 | [`docs/contribute/agent-guide/cli-and-exit-codes.md`](docs/contribute/agent-guide/cli-and-exit-codes.md) | adding a CLI command or flag, changing an exit code, or editing a file over its size cap (`architecture/modules.yaml`) |
 | [`docs/contribute/agent-guide/decision-principles.md`](docs/contribute/agent-guide/decision-principles.md) | filling the PR template's "Bug class / General invariant" rows |
-| [`docs/contribute/known-gaps.md`](docs/contribute/known-gaps.md) | about to fix something in an area with a known gap or a reverted fix — read it **before** re-attempting |
+| [`docs/contribute/known-gaps.md`](docs/contribute/known-gaps.md) | about to fix something in an area with a known gap or a reverted fix — read it **before** re-attempting — or a `known_gap_canary` test failed |
 | [`tests/regressions/manifest.py`](tests/regressions/manifest.py) | writing a regression test — reuse a matching `BugClass` first |
 | [`docs/contribute/adr/index.md`](docs/contribute/adr/index.md) | a change touches a default, schema, exit code or public interface |
 | [`agent-guide/quality-gates.md` § ADR surface traceability](docs/contribute/agent-guide/quality-gates.md#adr-surface-traceability-adr-surfaces) | adding an ADR, or adding/renaming/removing a CLI flag, Action input, API symbol, report field, use case or scenario |

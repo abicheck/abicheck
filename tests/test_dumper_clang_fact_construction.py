@@ -35,7 +35,17 @@ def _tu(*inner: dict) -> dict:
 
 
 def test_polymorphic_record_facts_present_and_match_legacy_fields() -> None:
+    # `Base` is defined, so the vtable is a complete answer; an undefined
+    # base makes it PARTIAL (test_clang_relative_base_vtable.py).
     root = _tu(
+        {
+            "kind": "CXXRecordDecl",
+            "name": "Base",
+            "tagUsed": "struct",
+            "loc": {"file": "include/foo.h", "line": 1},
+            "completeDefinition": True,
+            "inner": [],
+        },
         {
             "kind": "CXXRecordDecl",
             "name": "Widget",
@@ -54,7 +64,7 @@ def test_polymorphic_record_facts_present_and_match_legacy_fields() -> None:
                     "virtual": True,
                 }
             ],
-        }
+        },
     )
     (rec,) = [
         t
@@ -68,6 +78,7 @@ def test_polymorphic_record_facts_present_and_match_legacy_fields() -> None:
     assert rec.virtual_bases_fact.value == rec.virtual_bases == []
     assert rec.vtable_fact.status is FactStatus.PRESENT
     assert rec.vtable_fact.value == rec.vtable
+    assert rec.vtable == ["_ZN6Widget3runEv"]
     assert rec.vptr_offset_bits_fact.status is FactStatus.PARTIAL
     assert rec.vptr_offset_bits_fact.value == rec.vptr_offset_bits
     # ADR-063 Phase 5: is_final_fact is constructed directly too, the same

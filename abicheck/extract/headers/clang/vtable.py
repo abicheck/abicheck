@@ -133,7 +133,11 @@ matching *identity*, not in the slot-vs-signature distinction above:
    ``records_by_qualname`` is keyed on the fully-qualified form
    (``dumper_clang._record_index``), reading only `qualType` silently
    failed to resolve either of these common shapes. Fixed by preferring
-   `desugaredQualType` when present, falling back to `qualType`.
+   `desugaredQualType` when present, falling back to `qualType`. clang 22+
+   no longer writes `desugaredQualType` for a relative base at all (and an
+   alias base's one is relative to the alias), so resolution now goes
+   through ``base_resolution.BaseResolver``'s C++ name lookup, and a base
+   it cannot resolve makes the vtable PARTIAL rather than confirmed.
 2. **CV/ref-qualifiers beyond `const` participate in override identity
    too.** `virtual void f() &;` / `virtual void g() volatile;` are real,
    confirmed-compiling declarations (ref-qualified and volatile-qualified
@@ -183,6 +187,10 @@ through the recursion, for BOTH backends together -- fixing only this one
 would trade one asymmetry (a total gap, closed) for a new one (clang more
 precise than castxml on this specific shape), which is its own scoped
 follow-up, not a drive-by extension of this pass.
+Since generation 40 the clang walk at least says so: a base reached a
+second time where either arrival is non-virtual (a repeated, separate
+subobject) is reported as unresolved, so the vtable fact is ``partial``
+rather than a confirmed list that is one slot group short.
 """
 
 from __future__ import annotations
@@ -190,8 +198,8 @@ from __future__ import annotations
 from typing import Any
 
 from ....model.signature_normalization import canonicalize_function_signature_param_type
-from ....name_classification import strip_anonymous_type_location
 from .ast_inner import ast_inner
+from .base_resolution import BaseResolver, resolver_for
 
 
 def is_record_definition(node: dict[str, Any]) -> bool:
@@ -383,43 +391,60 @@ def _has_override_attr(node: dict[str, Any]) -> bool:
     )
 
 
-def _base_qualnames(node: dict[str, Any]) -> list[str]:
-    """Direct + virtual base qualified names, in ``bases`` array order.
+def _base_is_virtual(base: dict[str, Any]) -> bool:
+    """Whether a ``bases`` entry is a virtual base. ``JSONNodeDumper``
+    writes ``isVirtual`` only when true (``attributeOnlyIfTrue``), so an
+    omitted key is a confirmed non-virtual base -- checked on clang 18 and
+    LLVM 23.1.5: ``struct L : virtual X`` carries ``"isVirtual": true``,
+    ``struct R : X`` carries no key."""
+    return base.get("isVirtual") is True
 
-    Prefers ``type.desugaredQualType`` over ``type.qualType`` when clang
-    supplies both: an ordinary unqualified base spelling inside the SAME
-    namespace as the derived class (`struct C : A {...}` where `A` is
-    `ns::A`), or a type-alias base (`struct D : AliasA {...}`), reports the
-    written, non-canonical spelling in `qualType` and only carries the
-    fully-qualified form in `desugaredQualType` -- confirmed with real
-    clang builds of both shapes. `desugaredQualType` is absent (not merely
-    identical) whenever a base is already written fully-qualified, so
-    preferring it never loses information.
 
-    Doesn't distinguish virtual from non-virtual bases -- castxml's own
-    inherited-slot walk (``_inherited_vtable_slots``) doesn't either, since
-    every base contributes to the derived class's *set of virtual methods
-    it must provide slots for*, regardless of how that base is placed at
-    runtime.
+def _base_qualnames(
+    node: dict[str, Any],
+    qualname: str,
+    resolver: BaseResolver,
+    unresolved: list[str],
+) -> list[tuple[str, bool]]:
+    """Direct + virtual base record keys with their ``isVirtual`` flag, in
+    ``bases`` array order.
+
+    Each base specifier is resolved by :class:`.base_resolution.BaseResolver`
+    -- an exact record key first (clang <= 21's ``desugaredQualType``, or a
+    base written fully qualified), then C++ name lookup of the written
+    spelling from *qualname*'s enclosing scopes (clang 22+ writes a relative
+    base like ``detail::I`` with no ``desugaredQualType`` at all; see that
+    module's docstring). A base that resolves to no record key is appended
+    to *unresolved* (its written spelling) and left out of the result, so
+    the caller can report the vtable as incomplete rather than confirmed.
+
+    Every base contributes to the derived class's *set of virtual methods it
+    must provide slots for*, however it is placed at runtime (castxml's own
+    ``_inherited_vtable_slots`` walk is the same); the flag only lets the
+    caller tell a shared virtual base from a repeated non-virtual one.
     """
-    out: list[str] = []
+    out: list[tuple[str, bool]] = []
     for b in node.get("bases", []) or []:
         if not isinstance(b, dict):
             continue
-        type_obj = b.get("type")
-        if not isinstance(type_obj, dict):
+        found = resolver.resolve(b, qualname)
+        if found is not None:
+            out.append((found, _base_is_virtual(b)))
             continue
-        # Same checkout-path stripping the specialization index key gets.
-        bname = str(type_obj.get("desugaredQualType") or type_obj.get("qualType") or "")
-        if bname:
-            out.append(strip_anonymous_type_location(bname))
+        type_obj = b.get("type")
+        spelled = (
+            str(type_obj.get("qualType") or "") if isinstance(type_obj, dict) else ""
+        )
+        unresolved.append(spelled or "<unspelled base>")
     return out
 
 
 def _collect_virtual_slots(
     qualname: str,
     records_by_qualname: dict[str, dict[str, Any]],
-    seen: set[str],
+    seen: dict[str, bool],
+    resolver: BaseResolver,
+    unresolved: list[str],
 ) -> tuple[dict[_SlotKey, str], dict[_Signature, list[_SlotKey]]]:
     """``(slots, sig_index)`` for *qualname*'s vtable.
 
@@ -437,19 +462,33 @@ def _collect_virtual_slots(
     insertion position, same as castxml), a genuinely new virtual creates
     one fresh physical key and appends.
     """
-    if qualname in seen:
-        return {}, {}
-    seen.add(qualname)
     node = records_by_qualname.get(qualname)
     if node is None:
         return {}, {}
 
     slots: dict[_SlotKey, str] = {}
     sig_index: dict[_Signature, list[_SlotKey]] = {}
-    base_qualnames = _base_qualnames(node)
-    for base_qualname in base_qualnames:
+    unresolved_before = len(unresolved)
+    base_qualnames = _base_qualnames(node, qualname, resolver, unresolved)
+    own_base_unresolved = len(unresolved) > unresolved_before
+    for base_qualname, is_virtual in base_qualnames:
+        if base_qualname in seen:
+            # Reached again. All virtual base-specifiers naming a class share
+            # one subobject; each non-virtual one is a subobject of its own
+            # with its own slots, which this walk (one slot per declaring
+            # node, see the module docstring) cannot represent -- so the
+            # vtable is a lower bound, not a confirmed list.
+            if not (is_virtual and seen[base_qualname]):
+                unresolved.append(f"{base_qualname} (repeated non-virtual base)")
+            continue
+        seen[base_qualname] = is_virtual
+        if not is_record_definition(records_by_qualname[base_qualname]):
+            # A key naming only a forward declaration: its virtuals are
+            # invisible here, which is not the same as having none.
+            unresolved.append(base_qualname)
+            own_base_unresolved = True
         base_slots, base_sig_index = _collect_virtual_slots(
-            base_qualname, records_by_qualname, seen
+            base_qualname, records_by_qualname, seen, resolver, unresolved
         )
         slots.update(base_slots)
         for sig, keys in base_sig_index.items():
@@ -482,9 +521,7 @@ def _collect_virtual_slots(
     # own claim that an unresolved-base override is "never a false
     # positive" was true only for an IMPLICIT override -- an explicit one
     # WAS reachable as a false positive before this fix).
-    any_base_unresolved = any(
-        records_by_qualname.get(bq) is None for bq in base_qualnames
-    )
+    any_base_unresolved = own_base_unresolved
 
     for child in ast_inner(node):
         if not isinstance(child, dict):
@@ -537,7 +574,29 @@ def build_vtable(
     -> node`` index over every parsed ``CXXRecordDecl``/``RecordDecl`` in
     this translation unit (``dumper_clang.py``'s ``_record_index()``,
     which itself prefers a complete definition over a forward-declaration
-    stub sharing the same qualname).
+    stub sharing the same qualname). See :func:`build_vtable_evidence` for
+    the variant that also says whether the list is complete.
     """
-    slots, _ = _collect_virtual_slots(qualname, records_by_qualname, set())
-    return list(slots.values())
+    return build_vtable_evidence(qualname, records_by_qualname)[0]
+
+
+def build_vtable_evidence(
+    qualname: str, records_by_qualname: dict[str, dict[str, Any]]
+) -> tuple[list[str], tuple[str, ...]]:
+    """``(vtable, unresolved_bases)`` for the record named *qualname*.
+
+    *unresolved_bases* lists every base, at any depth of the walk, whose
+    record could not be resolved (or is only forward-declared): its
+    virtuals are invisible, so a non-empty tuple means *vtable* is a lower
+    bound, never a confirmed answer (ADR-028/063) -- the caller records it as
+    ``PARTIAL``, not ``PRESENT``.
+    """
+    unresolved: list[str] = []
+    slots, _ = _collect_virtual_slots(
+        qualname,
+        records_by_qualname,
+        {qualname: False},
+        resolver_for(records_by_qualname),
+        unresolved,
+    )
+    return list(slots.values()), tuple(dict.fromkeys(unresolved))

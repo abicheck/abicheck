@@ -126,6 +126,7 @@ def test_golden_is_the_output_of_its_generator() -> None:
 
 @pytest.mark.integration
 @pytest.mark.slow
+@pytest.mark.known_gap_canary
 def test_pinned_set_matches_the_measured_projection_equivalence() -> None:
     from abicheck.buildsource.source_extractors.clang import ClangSourceExtractor
 

@@ -109,6 +109,34 @@ def test_adapter_load_reads_json_dump(tmp_path: Path) -> None:
     assert tu.source == "include/foo.h"
 
 
+def test_adapter_reads_a_captured_dump_without_the_dumper_on_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Default install without ``header-abi-dumper`` (tests/optional_tool_inventory.py):
+    the adapter reports itself unavailable, and still loads a dump captured
+    elsewhere into the same facts it reads with the tool present."""
+    path = tmp_path / "libfoo.lsdump"
+    path.write_text(json.dumps(_dump(record_size=16)))
+    with_tool = AndroidHeaderAbiAdapter().load(path, target_id="target://libfoo")
+    empty = tmp_path / "empty-bin"
+    empty.mkdir()
+    monkeypatch.setenv("PATH", str(empty))
+    adapter = AndroidHeaderAbiAdapter()
+    assert adapter.available() is False
+    without_tool = adapter.load(path, target_id="target://libfoo")
+    assert without_tool == with_tool
+    # The record's layout is read from the dump, not looked up: a different
+    # recorded size gives a different type identity.
+    other = tmp_path / "libfoo8.lsdump"
+    other.write_text(json.dumps(_dump(record_size=8)))
+    smaller = adapter.load(other, target_id="target://libfoo")
+
+    def foo(tu: SourceAbiTu) -> str:
+        return next(e.type_hash for e in tu.types if e.qualified_name == "Foo")
+
+    assert foo(without_tool) != foo(smaller)
+
+
 def test_adapter_load_rejects_non_json(tmp_path: Path) -> None:
     # A raw protobuf .sdump (not produced with -output-format Json) is rejected
     # with an actionable message rather than a confusing parse error.
