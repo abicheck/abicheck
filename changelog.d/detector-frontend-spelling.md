@@ -12,3 +12,9 @@
   next to `lib::Impl`) is no longer dropped from the walk, and a layout change
   to an internal type reached only through a pointer is demoted as unreachable
   churn instead of gating the verdict as `BREAKING`.
+- **An internal type whose layout only one side records no longer reads as a
+  leak** — when the sole finding on an internal type reachable from the public
+  API is `layout_unverifiable` (an older dump without layout against a newer
+  one with it), `internal_type_leaks_via_public_api` is no longer emitted:
+  that finding is an evidence gap, informational and non-escalating, not an
+  observed change, so it can no longer turn such a comparison `BREAKING`.

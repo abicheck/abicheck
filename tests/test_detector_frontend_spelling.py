@@ -270,6 +270,31 @@ def _same_leaf_internal_holder(v: int) -> AbiSnapshot:
     )
 
 
+def _evidence_gap_behind_pointer(v: int) -> AbiSnapshot:
+    # An older dump without layout (v1) against a newer one with it (v2): the
+    # only finding is LAYOUT_UNVERIFIABLE, an evidence gap, which must never
+    # become a BREAKING leak (the container corpus's clang/1 baseline shape).
+    laid = v == 2
+    node = RecordType(
+        name="lib::detail::Node",
+        kind="struct",
+        size_bits=128 if laid else None,
+        data_size_bits=128 if laid else None,
+        is_standard_layout=True,
+        fields=[
+            TypeField(
+                name="next", type="lib::detail::Node*", offset_bits=0 if laid else None
+            ),
+            TypeField(
+                name="label", type="const char*", offset_bits=64 if laid else None
+            ),
+        ],
+    )
+    first = _fn("lib::first_node", "_ZN3lib10first_nodeEv", ret="lib::detail::Node*")
+    first.return_pointer_depth = 1
+    return _snap(v, [first], [node])
+
+
 # --------------------------------------------------------------------------
 # Type diffs
 # --------------------------------------------------------------------------
@@ -454,6 +479,13 @@ SCENARIOS: tuple[Scenario, ...] = (
         "pointer_only_vtable_change_still_leaks",
         lambda v: _pointer_only(v, vtable=True),
         frozenset({LEAK, ChangeKind.TYPE_VTABLE_CHANGED}),
+    ),
+    Scenario(
+        "evidence_gap_is_not_a_leak",
+        _evidence_gap_behind_pointer,
+        frozenset(),
+        frozenset({LEAK, ChangeKind.LAYOUT_UNVERIFIABLE}),
+        frozenset({ChangeKind.LAYOUT_UNVERIFIABLE}),
     ),
     Scenario(
         "same_leaf_public_holder_is_not_a_leak",

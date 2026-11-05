@@ -256,6 +256,12 @@ def detect_internal_leaks(
 
     out: list[Change] = []
     for tname, triggers in internal_changes.items():
+        if all(c.kind is ChangeKind.LAYOUT_UNVERIFIABLE for c in triggers):
+            # Only a gap in the evidence (one side has no layout), never an
+            # observed change: LAYOUT_UNVERIFIABLE is informational and
+            # non-escalating, and missing evidence must not become a BREAKING
+            # leak (an older dump without layout against a newer one with it).
+            continue
         old_pl = old_paths.get(tname, [])
         new_pl = new_paths.get(tname, [])
         paths = _merge_leak_paths(tname, old_paths, new_paths)
