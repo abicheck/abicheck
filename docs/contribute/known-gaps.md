@@ -115,7 +115,6 @@ dependency walk and debug roots to every member. No open gap remains.
 #### A `--build-info` dump's L5 graph displaces the header graph, so a public-to-internal dependency goes unreported (2026-11-05)
 
 **Status (2026-11-05): OPEN.** A dump with `--build-info` embeds a build pack whose L5 graph has no `SOURCE_DECLARES` public closure, and `resolve_l5_source_graph` prefers it over the header graph that has one, so case187/188/189/191 lose `public_api_internal_dependency_added` in the `build-source` lane on both header frontends (declared under `expected_kinds_gaps`). [Full write-up](known-gaps/a-build-info-dump-graph-displaces-the-header-graph-public-closure.md)
-<!-- no-canary: needs a --build-info build-source dump; pinned instead by catalog/ground_truth.json expected_kinds_gaps on case187/188/189/191 (build-source), which the catalog kinds gate fails as stale when the gap closes -->
 
 #### The clang frontend's builtin-ABI probe links and runs a program, so a cross or linker-less dump records no builtin `type_abi_fact` (2026-11-05)
 
