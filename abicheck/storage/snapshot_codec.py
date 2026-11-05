@@ -75,7 +75,7 @@ from ..model import AbiSnapshot
 from ..model.lazy_declarations import defer_declaration_step
 from ..model.semantic_ir_legacy_adapter import finalize_snapshot_semantic_ir
 from ..model.snapshot_reliability import FACT_FAMILIES, flag_name
-from .extension_facts import apply_export_read_fact
+from .extension_facts import apply_model_extension_facts
 from .extraction_scope_codec import decode_extraction_scope
 from .fact_codec import (
     apply_legacy_fact_backfill,
@@ -211,7 +211,7 @@ def decode_snapshot(
         attach_wire_extensions(snap, carried)
         apply_section_states(snap, carried)
         # ADR-079: restore the platform blocks from their declared fact.
-        apply_export_read_fact(snap)
+        apply_model_extension_facts(snap)
     return snap, _schema_version
 
 

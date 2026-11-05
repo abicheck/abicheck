@@ -63,6 +63,10 @@ _NEVER_IN_A_DOCUMENT = (
     "projection_evidence_gaps",
     "unreadable_sections",
     "section_availability",
+    # Stored as the debug section's extension fact, never a document key.
+    "cxx_concept_header_scan",
+    # Stored as the debug section's extension fact, never a document key.
+    "cxx_concept_header_scan",
     "wire_extensions",
     "spellings_generation",
     "_func_by_mangled",

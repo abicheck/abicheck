@@ -42,8 +42,8 @@ than striking it through here.
 
 Every OPEN, PARTIAL or NARROWED entry is linked to a **canary**: a test
 marked `@pytest.mark.known_gap_canary` that asserts the gap's *current*
-answer (for example, case105 on clang reads `NO_CHANGE` with `complete`
-assurance). The entry names it on its own line inside the entry,
+answer (for example, case105 reads `NO_CHANGE` with `partial`
+assurance on both header backends). The entry names it on its own line inside the entry,
 `<!-- canary: tests/test_x.py::test_name -->` (one or more), or carries one
 reasoned exemption, `<!-- no-canary: needs MSVC cl.exe and a PDB -->`, when
 no canary is cheap. A canary fails when the gap closes *or* widens. When
@@ -107,10 +107,10 @@ dependency walk and debug roots to every member. No open gap remains.
 
 #### Catalog known-gap rows read `NO_CHANGE` at debug-headers depth: case105 (concept) and case98 (`-std` floor) (2026-11-05)
 
-**Status (2026-11-05): OPEN.** Both cases list `known_gap_variants: [debug-headers, ...]` in `catalog/ground_truth.json`: their truth (`API_BREAK` for case105's tightened C++20 concept, `COMPATIBLE_WITH_RISK` for case98's raised `-std=c++20` floor) needs L4 source replay or L3 build evidence. At debug-headers depth both read `NO_CHANGE`. case98 reads `partial` on both backends ("extraction contexts were not provably identical"). case105 reads `partial` on castxml only because the public surface did not resolve, and `complete` on clang, with no note that a concept was not modelled: neither backend records concepts, and nothing names that as an unobserved dimension.
+**Status (2026-11-05): OPEN.** Both cases list `known_gap_variants: [debug-headers, ...]` in `catalog/ground_truth.json`: their truth (`API_BREAK` for case105's tightened C++20 concept, `COMPATIBLE_WITH_RISK` for case98's raised `-std=c++20` floor) needs L4 source replay or L3 build evidence. At debug-headers depth both read `NO_CHANGE`. case98 reads `partial` on both backends ("extraction contexts were not provably identical"). case105 now reads `partial` on both castxml and clang with the unobserved dimension named: a castxml or clang dump scans its public headers for a `concept` definition or a `requires` clause (`extract/headers/concept_scan.py`, `AbiSnapshot.cxx_concept_header_scan`) and the rollup notes "C++20 concepts and requires-clauses (not modelled by header backends)". Detection is still missing: neither backend records concept definitions or constraints, so `concept_tightened` is not reported and the verdict stays `NO_CHANGE`.
 <!-- canary: tests/test_known_gap_canaries_header_backends.py::test_case105_concept_tightening_reads_no_change_at_debug_headers -->
 <!-- canary: tests/test_known_gap_canaries_header_backends.py::test_case98_standard_floor_reads_partial_no_change_at_debug_headers -->
-`false-clean` — A C++20 concept tightening compared from headers on clang reads `NO_CHANGE` with `complete` assurance. Owner: `extract/headers/` (concept facts) and `policy/analysis_assurance/` (naming the unobserved dimension).
+`false-clean` (narrowed) — A C++20 concept tightening compared from headers reads `NO_CHANGE`, now with `partial` assurance and the concept dimension named. Owner: `extract/headers/` (concept facts).
 
 #### The clang frontend's builtin-ABI probe links and runs a program, so a cross or linker-less dump records no builtin `type_abi_fact` (2026-11-05)
 

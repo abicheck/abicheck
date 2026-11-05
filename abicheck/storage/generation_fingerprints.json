@@ -145,12 +145,13 @@
       "abicheck/extract/headers/clang/typedefs.py": "0345022b18ed0a011c4a1420e7b85e77dc3437f1339d5572ff28af29aebc0f3b",
       "abicheck/extract/headers/clang/vtable.py": "ec35a377463d0191e013684713b5a049e78a766a16cf74e71354d2e57e3a2931",
       "abicheck/extract/headers/clang_header_argv.py": "644a6454c6a3da3ab5f184cc2d9778d51f141f1e528f86162cccb815f9b17ddb",
-      "abicheck/extract/headers/compile_provenance.py": "5c800725da59c2c3aeac4e85118dcd54edd6ec5c75875e483978b78a750ec0af",
+      "abicheck/extract/headers/compile_provenance.py": "856063faa1a3e915746e7f04d1254c113535da35b930bb841bfb58dd7bdc71ca",
+      "abicheck/extract/headers/concept_scan.py": "c22257b7d91028bd53bb2add2c2764d7c2055949c954712be54476f0c1cc72c0",
       "abicheck/extract/headers/manifest.py": "4f0e740bfeb88aa4363176f2defe422826a9e2cd91b03cd317f6f86f4eec5066",
       "abicheck/extract/headers/preprocessor_branches.py": "d3a409d126b0dd1b19a634d4aad25660d372dad931b310cfbaaefc9d769b244d",
       "abicheck/extract/headers/scope_segments.py": "d413edec257eb1334c829263770b66dc2eda3d263c765f699eac9f7e3ace9e65",
       "abicheck/extract/headers/sysinc.py": "f82bd29033ed9d21f2b2af9a29352eb2b52b9c01ba7a09f47509af89017a359a",
-      "abicheck/extract/headers/template_default_scan.py": "3b56f9307028934aa2126de14fa9847333bdc990f0943445604b255e494060e8",
+      "abicheck/extract/headers/template_default_scan.py": "ce339dc8dbb5ad58c29e0b09dbbaa2fb6aed40af50bd015b28849cbf7c02b7d2",
       "abicheck/extract/headers/toolchain.py": "36d9f6dfda706653d6d41875f00bb9ada3975a1f5efb512f8c0a6b0db0cc54c6",
       "abicheck/extract/library_export_facts.py": "02f4f9bdc8ed4ec7215c3f40e4d4183e695d304c44f0ccaa44ec4cd18b72a927",
       "abicheck/extract/macho_build_signals.py": "c277bfdd55f26aae61af66c8fa6c5cdc5fa45acc49a3ae513af5899417db88bb",
@@ -198,9 +199,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "2a2b032e15d4f045fb0ea68c039822e6fe6318ede028b94b4ee9fde6cf93dc5c",
-    "generation": 40,
-    "reason": "merge main into #1928: lazy header-order witness (deferred witness, order-proof retry with linker-script liveness); recorded output unchanged"
+    "fingerprint": "541ab587e0aef527ba716599bc82ec8bcb29d98b781e8ae834a5ce1f2d618fee",
+    "generation": 41,
+    "reason": "41: castxml and clang record cxx_concept_header_scan (C++20 concepts and requires-clauses are not modelled by either backend)"
   },
   "resolver": {
     "files": {

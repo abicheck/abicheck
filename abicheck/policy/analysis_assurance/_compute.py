@@ -38,6 +38,7 @@ from ._comparability import (
     bounded_comparability_notes,
     is_comparability_bounded,
 )
+from ._concepts import concept_constraint_gap
 from ._context import _dwarf_context_status, _header_context_status, _l3_context_status
 from ._depth_projection import depth_projection_gap
 from ._export_accounting import _export_accounting
@@ -206,6 +207,8 @@ def compute_analysis_assurance(
     notes.extend(graph_notes)
     template_defaults_gap, template_notes = template_default_gap(old, new)
     notes.extend(template_notes)
+    concept_gap, concept_notes = concept_constraint_gap(old, new)
+    notes.extend(concept_notes)
     projection_gap, projection_notes = depth_projection_gap(old, new)
     notes.extend(projection_notes)
     unreadable_gap, unreadable_notes = unreadable_section_gap(old, new)
@@ -272,6 +275,7 @@ def compute_analysis_assurance(
         or target_unresolved
         or is_comparability_bounded(result.comparability_assurance)
         or template_defaults_gap
+        or concept_gap
         or projection_gap
         or unreadable_gap
         or export_read_unreliable

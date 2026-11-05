@@ -40,6 +40,7 @@ from ..model.export_read import ExportReadState
 from ..model.fact import Fact
 from .canonical import canonical_form
 from .extension_fact_catalog import (
+    CXX_CONCEPT_HEADER_SCAN,
     EXPORT_READ,
     EXTENSION_FACTS,
     ExtensionFact,
@@ -56,8 +57,10 @@ from .wire_extensions import (
 
 __all__ = [
     "apply_export_read_fact",
+    "apply_model_extension_facts",
     "read_extension_fact",
     "sync_export_read_fact",
+    "sync_model_extension_facts",
     "write_extension_fact",
 ]
 
@@ -195,3 +198,23 @@ def apply_export_read_fact(snap: Any) -> None:
         )
     for platform, meta in _platform_blocks(snap).items():
         meta.export_read = ExportReadState(fact.value.get(platform, "complete"))
+
+
+def sync_model_extension_facts(snap: Any) -> None:
+    """Record every model field this build persists as an extension fact:
+    ADR-079's ``export_read`` and ``cxx_concept_header_scan``. Each write
+    path and the evidence digest call this first; it is idempotent."""
+    sync_export_read_fact(snap)
+    scan = getattr(snap, "cxx_concept_header_scan", None)
+    if isinstance(scan, bool) and _blocked_reason(snap, "debug") is None:
+        write_extension_fact(snap, CXX_CONCEPT_HEADER_SCAN, scan)
+
+
+def apply_model_extension_facts(snap: Any) -> None:
+    """The inverse of :func:`sync_model_extension_facts` on load. A missing,
+    blocked or undecodable concept scan leaves the field ``None`` (no scan),
+    which names no gap -- what every older snapshot reads as."""
+    apply_export_read_fact(snap)
+    scan = read_extension_fact(snap, CXX_CONCEPT_HEADER_SCAN)
+    if scan.status is FactStatus.PRESENT and isinstance(scan.value, bool):
+        snap.cxx_concept_header_scan = scan.value

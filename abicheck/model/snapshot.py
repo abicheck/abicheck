@@ -173,6 +173,14 @@ class AbiSnapshot:
     # generation 18). None: no scan ran (any other producer, a clang snapshot
     # before generation 18, and every snapshot predating schema v63).
     template_default_header_scan: bool | None = field(default=None, kw_only=True)
+    # Neither header backend models a C++20 concept or a requires-clause, so a
+    # castxml or clang run scans its public headers for one
+    # (extract/headers/concept_scan.py, extractor generation 41). True: one is
+    # declared and its constraints were not observed. False: the scan found
+    # none. None: no scan ran (another producer, or an older dump). Persisted
+    # as the ``abicheck.cxx_concept_header_scan`` extension fact of the debug
+    # section (storage/extension_fact_catalog.py), not as a section key.
+    cxx_concept_header_scan: bool | None = field(default=None, kw_only=True)
 
     # CastXML version-gate outcome (schema v13, ``castxml_policy.py``). None on
     # snapshots not produced by a version-gated CastXML L2 scan (older

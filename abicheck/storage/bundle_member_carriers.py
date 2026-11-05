@@ -34,7 +34,7 @@ from typing import Any
 
 from ..model.bundle_facts import SECTIONED_MEMBERS_SCHEMA_VERSION
 from ..model.snapshot import AbiSnapshot
-from .extension_facts import sync_export_read_fact
+from .extension_facts import sync_model_extension_facts
 from .sectioned_document import is_sectioned_document
 from .snapshot_encode import flat_document_and_carriers, sectioned_document_for_write
 from .wire_extensions import (
@@ -63,7 +63,7 @@ def encode_bundle_member(
     caller that stores the carriers beside it (`carriers_by_member`).
     *flat_encode* is the flat encoder (default `serialization.snapshot_to_dict`),
     for a writer that is handed its own."""
-    sync_export_read_fact(snap)  # ADR-079: the model field -> its fact
+    sync_model_extension_facts(snap)  # ADR-079: the model field -> its fact
     refuse_unwritable_extensions(snap)
     if flattening_loses(snap):
         if not flat:
@@ -88,7 +88,7 @@ def carriers_by_member(
     for a bundle package's `ArtifactRef.carriers`."""
     out: dict[str, WireExtensions] = {}
     for name, snap in members.items():
-        sync_export_read_fact(snap)
+        sync_model_extension_facts(snap)
         refuse_unwritable_extensions(snap)
         carried = extensions_of(snap)
         if carried is not None:

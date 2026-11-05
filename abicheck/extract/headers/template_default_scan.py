@@ -42,12 +42,18 @@ __all__ = [
     "alias_or_variable_template_default_scan",
     "header_declares_alias_or_variable_template_default",
     "header_declares_template_default",
+    "strip_comments_and_strings",
     "template_default_header_scan",
 ]
 
 _COMMENT = re.compile(r"//[^\n]*|/\*.*?\*/", re.DOTALL)
 _STRING = re.compile(r'"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'')
 _TEMPLATE_OPEN = re.compile(r"\btemplate\s*<")
+
+
+def strip_comments_and_strings(text: str) -> str:
+    """*text* with comments blanked and string/char literals emptied."""
+    return _STRING.sub('""', _COMMENT.sub(" ", text))
 
 
 def _list_has_default(text: str, start: int) -> bool:
@@ -93,7 +99,7 @@ def _scan_list(text: str, start: int) -> tuple[bool, int]:
 def header_declares_template_default(text: str) -> bool:
     """Whether the header *text* declares a class or function template whose
     parameter list carries a default argument."""
-    stripped = _STRING.sub('""', _COMMENT.sub(" ", text))
+    stripped = strip_comments_and_strings(text)
     return any(
         _list_has_default(stripped, match.end())
         for match in _TEMPLATE_OPEN.finditer(stripped)
@@ -230,7 +236,7 @@ def header_declares_alias_or_variable_template_default(text: str) -> bool:
     models neither alias nor variable templates, so only these two families
     leave a clang run unable to assess a default change (ADR-085 D3).
     """
-    stripped = _STRING.sub('""', _COMMENT.sub(" ", text))
+    stripped = strip_comments_and_strings(text)
     for match in _TEMPLATE_OPEN.finditer(stripped):
         has_default, end = _scan_list(stripped, match.end())
         if has_default and _declares_alias_or_variable(stripped, end):

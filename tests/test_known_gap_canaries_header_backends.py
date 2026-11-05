@@ -39,6 +39,7 @@ from typing import Any
 
 import pytest
 
+from abicheck.policy.analysis_assurance._concepts import CONCEPT_GAP_DIMENSION
 from tests._abicheck_subprocess import abicheck_command, abicheck_env
 from tests.test_template_default_assurance_gap import _compare as _header_only_compare
 
@@ -290,7 +291,8 @@ def test_legacy_dumper_dump_leaves_a_clang_record_unsized(
 def test_case105_concept_tightening_reads_no_change_at_debug_headers(
     tmp_path: Path,
 ) -> None:
-    """Neither backend sees a C++20 concept; clang even claims complete assurance."""
+    """Neither backend detects a C++20 concept tightening (NO_CHANGE); both now
+    read partial and name the concept dimension as unobserved."""
     _require("castxml", "clang", "g++")
     answers = {}
     for frontend in ("castxml", "clang"):
@@ -306,12 +308,19 @@ def test_case105_concept_tightening_reads_no_change_at_debug_headers(
             debug=True,
         )
         assert "concept_tightened" not in _kinds(report)
-        answers[frontend] = (report["verdict"], report["analysis_assurance"]["status"])
-    # castxml reads partial only because the public surface did not resolve,
-    # not because the concept is named as unobserved.
+        named = any(
+            n.startswith(CONCEPT_GAP_DIMENSION)
+            for n in report["analysis_assurance"]["notes"]
+        )
+        answers[frontend] = (
+            report["verdict"],
+            report["analysis_assurance"]["status"],
+            named,
+        )
+    # The detection gap remains; the false-clean `complete` is gone.
     assert answers == {
-        "castxml": ("NO_CHANGE", "partial"),
-        "clang": ("NO_CHANGE", "complete"),
+        "castxml": ("NO_CHANGE", "partial", True),
+        "clang": ("NO_CHANGE", "partial", True),
     }
 
 

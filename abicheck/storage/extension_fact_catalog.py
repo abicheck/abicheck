@@ -58,6 +58,7 @@ from typing import Any, Generic, TypeVar
 from .dto import SECTION_SCHEMA_VERSIONS
 
 __all__ = [
+    "CXX_CONCEPT_HEADER_SCAN",
     "EXPORT_READ",
     "EXTENSION_FACTS",
     "ExtensionFact",
@@ -254,6 +255,30 @@ EXPORT_READ: ExtensionFact[dict[str, str]] = ExtensionFact(
     ),
 )
 
+
+def _strict_bool(value: Any) -> bool:
+    if not isinstance(value, bool):
+        raise TypeError(f"expected a bool, got {type(value).__name__}")
+    return value
+
+
+#: Whether a castxml or clang run's public headers define a C++20 concept or
+#: spell a requires-clause, which neither header backend models
+#: (``AbiSnapshot.cxx_concept_header_scan``, extractor generation 41). Written
+#: on the ``debug`` section whenever a scan ran. Absent, no scan ran and no
+#: concept gap is named -- the answer every older snapshot already gives. An
+#: older reader that ignores it reads the run as it always did (the verdict is
+#: unaffected; only the coverage note is missing), so it is optional.
+CXX_CONCEPT_HEADER_SCAN: ExtensionFact[bool] = ExtensionFact(
+    name="abicheck.cxx_concept_header_scan",
+    section="debug",
+    semantics=ReaderSemantics.OPTIONAL,
+    absent_reads_as="no scan ran: no C++20 concept gap is named",
+    owner="ADR-062",
+    encode=_strict_bool,
+    decode=_strict_bool,
+)
+
 #: This build's optional extension facts (ADR-062 D19). Add a fact by
 #: declaring it as a module constant above and listing it here.
-EXTENSION_FACTS = ExtensionFactRegistry((EXPORT_READ,))
+EXTENSION_FACTS = ExtensionFactRegistry((CXX_CONCEPT_HEADER_SCAN, EXPORT_READ))

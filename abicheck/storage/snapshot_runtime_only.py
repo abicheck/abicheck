@@ -73,6 +73,11 @@ RUNTIME_ONLY_SNAPSHOT_FIELDS: Final[Mapping[str, str]] = MappingProxyType(
             "the section-level availability this run's load or extraction "
             "decided; the sectioned writer stores it as `section_availability`"
         ),
+        "cxx_concept_header_scan": (
+            "never a document key: the writer stores it as the debug section's "
+            "`abicheck.cxx_concept_header_scan` extension fact and the load "
+            "restores it from there (storage/extension_facts.py)"
+        ),
         "wire_extensions": (
             "the stored document's D14/D15 carriers this run's load kept; the "
             "sectioned writer merges them back into the document it writes"

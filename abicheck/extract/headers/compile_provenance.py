@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import TypedDict
 
 from ...buildsource.redaction import DEFAULT_REDACTION
+from .concept_scan import concept_header_scan
 from .template_default_scan import (
     alias_or_variable_template_default_scan,
     template_default_header_scan,
@@ -42,6 +43,7 @@ class _AstCompileProvenance(TypedDict):
     ast_compile_args: tuple[str, ...]
     ast_sysroot: str | None
     template_default_header_scan: bool | None
+    cxx_concept_header_scan: bool | None
 
 
 def _ast_compile_provenance(
@@ -98,6 +100,9 @@ def _ast_compile_provenance(
         "template_default_header_scan": _template_default_scan(
             headers, (ast_toolchain or {}).get("producer")
         ),
+        "cxx_concept_header_scan": _concept_scan(
+            headers, (ast_toolchain or {}).get("producer")
+        ),
     }
 
 
@@ -111,4 +116,13 @@ def _template_default_scan(headers: list[Path], producer: str | None) -> bool | 
         return template_default_header_scan(headers)
     if producer == "clang":
         return alias_or_variable_template_default_scan(headers)
+    return None
+
+
+def _concept_scan(headers: list[Path], producer: str | None) -> bool | None:
+    """Whether the parsed headers define a C++20 concept or spell a
+    ``requires`` clause. Neither castxml nor clang models them, so both scan;
+    other producers (hybrid, none) get no scan: ``None``."""
+    if producer in ("castxml", "clang"):
+        return concept_header_scan(headers)
     return None
