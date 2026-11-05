@@ -229,3 +229,180 @@ def test_clang_frontend_reports_a_mingw_dlls_struct_change(
     assert report.exists(), result.output
     kinds = {c["kind"] for c in json.loads(report.read_text())["changes"]}
     assert "type_field_added_compatible" in kinds, (sorted(kinds), result.output)
+
+
+@pytest.mark.integration
+def test_header_graph_attach_parses_for_the_same_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The header-graph attach reuses the primary pass's AST: one clang
+    cache entry per side. Only the primary pass used to append the binary's
+    ``--target``, so on a Windows clang the attach parsed every header again
+    under a second key (4 entries for one compare)."""
+    if not (shutil.which("clang++") and shutil.which("ld.lld")):
+        pytest.skip("needs clang++ and ld.lld")
+    bindir = _windows_default_clang(tmp_path)
+    if bindir is None:
+        pytest.skip("emulates a Windows clang on a POSIX host")
+    keep = ("int keep(int x);\n", "int keep(int x) { return x + 1; }\n")
+    old, new = tmp_path / "v1", tmp_path / "v2"
+    for side in (old, new):
+        _build_mingw_dll(side, keep[0], keep[1])
+        (side / "extra.h").write_text("#pragma once\nstruct E { int a; };\n")
+    cache = tmp_path / "cache"
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("ABICHECK_AST_FRONTEND", "clang")
+    monkeypatch.setenv("XDG_CACHE_HOME", str(cache))
+    abi_target._default_triple.cache_clear()
+
+    from abicheck.cli import main
+
+    args = ["compare", str(old / "libwidget.dll"), str(new / "libwidget.dll")]
+    for label, side in (("old", old), ("new", new)):
+        args += ["-H", f"{label}={side}"]
+    result = CliRunner().invoke(main, args, catch_exceptions=False)
+    assert result.exit_code == 0, result.output
+    entries = [
+        p
+        for p in cache.rglob("clang/*.json")
+        if not p.name.endswith(".projection.json")
+    ]
+    assert len(entries) == 2, sorted(p.name for p in entries)
+
+
+def test_attach_appends_the_target_after_the_deferred_roots(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The primary pass orders its tokens (caller, deferred roots, target);
+    the attach must produce the same sequence, or the two parses key apart."""
+    from abicheck.compile_context import CompileContext
+
+    monkeypatch.setattr(
+        abi_target,
+        "binary_abi_target_token",
+        lambda **_: "--target=x86_64-w64-windows-gnu",
+    )
+    cc = CompileContext(gcc_option_tokens=("-DFOO",))
+    deferred = ("-isystem", "/inc/root")
+    tokens = abi_target.binary_abi_tokens(
+        cc, False, (*cc.gcc_option_tokens, *deferred), frozenset({"_Z4keepi"})
+    )
+    assert tokens == (
+        "-DFOO",
+        "-isystem",
+        "/inc/root",
+        "--target=x86_64-w64-windows-gnu",
+    )
+    # No exports: nothing to read an ABI from, tokens untouched.
+    assert abi_target.binary_abi_tokens(cc, False, ("-DFOO",), frozenset()) == (
+        "-DFOO",
+    )
+
+
+def test_attach_without_a_clang_keeps_its_tokens(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A castxml-only host has no clang to resolve; the attach's parse then
+    fails inside its own degradation path instead of the dump failing here."""
+    from abicheck.compile_context import CompileContext
+    from abicheck.errors import SnapshotError
+    from abicheck.extract import compiler_driver
+
+    def no_clang(*_a: object, **_k: object) -> str:
+        raise SnapshotError("clang not found")
+
+    monkeypatch.setattr(compiler_driver, "resolve_clang_bin", no_clang)
+    cc = CompileContext()
+    assert abi_target.binary_abi_tokens(cc, False, ("-DX",), frozenset({"_Z1fv"})) == (
+        "-DX",
+    )
+
+
+@pytest.mark.parametrize(
+    ("prefetched_tokens", "implied", "expected"),
+    [
+        (None, "--target=x86_64-pc-windows-msvc", True),  # no prefetch: acquire
+        (("-DX",), "--target=x86_64-pc-windows-msvc", True),  # wrong ABI: re-acquire
+        (
+            ("-DX", "--target=x86_64-pc-windows-msvc"),
+            "--target=x86_64-pc-windows-msvc",
+            False,
+        ),
+        (("-DX",), None, False),  # the binary implies no target: the prefetch stands
+    ],
+)
+def test_a_prefetch_without_the_binarys_target_is_reacquired(
+    monkeypatch: pytest.MonkeyPatch,
+    prefetched_tokens: tuple[str, ...] | None,
+    implied: str | None,
+    expected: bool,
+) -> None:
+    """A prefetch runs before the snapshot, so it never saw the exports: when
+    they imply a target its graph would describe the wrong ABI (the prefetched
+    and sequential graphs differed on windows-latest)."""
+    from abicheck.compile_context import CompileContext
+    from abicheck.service_header_graph_attach import HeaderGraphAst
+    from abicheck.workflows.dump.header_graph_staleness import prefetch_needs_reacquire
+
+    monkeypatch.setattr(abi_target, "binary_abi_target_token", lambda **_: implied)
+    acquired = (
+        None
+        if prefetched_tokens is None
+        else HeaderGraphAst(None, None, [], [], prefetched_tokens, True)
+    )
+    got = prefetch_needs_reacquire(
+        acquired, "c++", "c++", CompileContext(), frozenset({"?f@@YAHH@Z"})
+    )
+    assert got is expected
+
+
+def test_a_target_may_apply_only_on_a_windows_default_clang(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The prefetch is skipped exactly where the binary can contradict clang's
+    default ABI: a Windows-default clang. The host's own clang (a non-Windows
+    default here) never needs a binary target."""
+    from abicheck.compile_context import CompileContext
+
+    if not shutil.which("clang++"):
+        pytest.skip("needs clang++")
+    abi_target._default_triple.cache_clear()
+    if sys.platform != "win32":
+        assert abi_target.binary_abi_target_may_apply(CompileContext(), False) is False
+    bindir = _windows_default_clang(tmp_path)
+    if bindir is None:
+        pytest.skip("emulates a Windows clang on a POSIX host")
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+    abi_target._default_triple.cache_clear()
+    assert abi_target.binary_abi_target_may_apply(CompileContext(), False) is True
+    # An explicit target the caller gave always wins: nothing to infer.
+    explicit = CompileContext(gcc_option_tokens=("--target=x86_64-pc-windows-msvc",))
+    assert abi_target.binary_abi_target_may_apply(explicit, False) is False
+
+
+@pytest.mark.parametrize(
+    ("lang", "primary_mode", "prefetch_force_cpp", "expected"),
+    [
+        (None, "c++", False, True),  # the binary resolved C++; the prefetch ran as C
+        (None, "c++", True, False),  # the prefetch already parsed as C++
+        (None, "c", False, False),  # the primary pass agrees it is C
+        ("c", "c++", False, False),  # an explicit language is never second-guessed
+    ],
+)
+def test_a_prefetch_in_the_wrong_language_mode_is_reacquired(
+    monkeypatch: pytest.MonkeyPatch,
+    lang: str | None,
+    primary_mode: str,
+    prefetch_force_cpp: bool,
+    expected: bool,
+) -> None:
+    from abicheck.compile_context import CompileContext
+    from abicheck.service_header_graph_attach import HeaderGraphAst
+    from abicheck.workflows.dump.header_graph_staleness import prefetch_needs_reacquire
+
+    monkeypatch.setattr(abi_target, "binary_abi_target_token", lambda **_: None)
+    acquired = HeaderGraphAst(None, None, [], [], (), prefetch_force_cpp)
+    got = prefetch_needs_reacquire(
+        acquired, lang, primary_mode, CompileContext(), frozenset()
+    )
+    assert got is expected

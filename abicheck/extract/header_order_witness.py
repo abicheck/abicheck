@@ -46,6 +46,17 @@ _F = TypeVar("_F", bound=Callable[..., Any])
 _PROVING: ContextVar[bool] = ContextVar("header_order_proving", default=False)
 
 
+def canonical_header_key(header: Path) -> tuple[str, str]:
+    """The one sort key for a canonical header order: the resolved path as a
+    string, so ``foo.h`` sorts before ``foo/bar.h`` (``.`` sorts before ``/``),
+    then the spelled path, so two aliases of one file sort deterministically.
+
+    ``header_utils.iter_directory_headers`` sorts a ``-H`` directory by this
+    same key.
+    """
+    return (str(header.resolve()), str(header))
+
+
 def canonical_header_order(headers: Sequence[Path]) -> list[Path]:
     """The header set sorted by resolved path: the order a proof is taken for.
 
@@ -53,7 +64,7 @@ def canonical_header_order(headers: Sequence[Path]) -> list[Path]:
     root-relative identity the contract records, since every header of one
     set shares its root.
     """
-    return sorted(headers, key=lambda h: str(h.resolve()))
+    return sorted(headers, key=canonical_header_key)
 
 
 def has_unique_resolved_paths(headers: Sequence[Path]) -> bool:
