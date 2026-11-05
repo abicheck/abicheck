@@ -74,6 +74,10 @@ class KnownGap:
     produces) rather than the eventually-correct behavior — asserting the
     bound fails loudly the moment the real behavior diverges from it, in
     either direction.
+
+    The page-level counterpart for `docs/contribute/known-gaps.md` entries is
+    the `known_gap_canary` pytest marker plus a `<!-- canary: ... -->` line in
+    the entry, checked both ways by `scripts/known_gap_canaries.py`.
     """
 
     #: What's not covered (one sentence — the full account lives in
