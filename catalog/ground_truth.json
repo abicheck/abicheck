@@ -1857,6 +1857,10 @@
    "expected_kinds": [
     "cet_protection_weakened"
    ],
+   "fixture_preconditions": [
+    {"side": "v1", "property": "elf_gnu_property", "includes": ["IBT", "SHSTK"]},
+    {"side": "v2", "property": "elf_gnu_property", "excludes": ["IBT", "SHSTK"]}
+   ],
    "min_evidence": "L0",
    "platforms": [
     "linux"

@@ -48,6 +48,7 @@ sys.path.insert(0, str(Path(__file__).parent))  # source_smoke lives beside this
 import example_applicability  # noqa: E402
 import example_catalog  # noqa: E402
 import expected_kinds_gate  # noqa: E402
+import fixture_preconditions  # noqa: E402
 from _legacy_scope import scope_args  # noqa: E402
 from _validate_examples_cli import build_parser  # noqa: E402
 from example_case_runner import (  # noqa: E402
@@ -1416,8 +1417,7 @@ def run_case(
     # unrelated detector gap (case20, case97) go unnoticed by this "ground
     # truth" gate for as long as the smoke kept passing. Smoke is now a
     # gate only on failure/skip; a PASS falls through so the verdict is
-    # still checked for real, and its proof text is folded into the final
-    # result below.
+    # still checked for real, its proof text folded into the result below.
     smoke_dir = _case_work_dir(tmp_base, f"{name}__source_smoke", variant)
     smoke_result = _run_source_smoke(name, entry, case_dir, smoke_dir, expected_raw)
     if smoke_result is not None and smoke_result.status != "PASS":
@@ -1425,8 +1425,7 @@ def run_case(
     smoke_proof = smoke_result.message if smoke_result is not None else None
 
     # A producer-scoped known_gap only excuses a mismatch under the producer that
-    # actually built the case (resolved per source language); on other producers
-    # the gap is dropped so a regression FAILs rather than being xfailed.
+    # built the case; elsewhere it is dropped so a regression FAILs, not xfails.
     gap_applies = _gap_applies(entry, v1_src.suffix == ".cpp", variant)
     known_gap = entry.get("known_gap") if gap_applies else None
     known_gap_observed = entry.get("known_gap_observed") if gap_applies else None
@@ -1438,6 +1437,7 @@ def run_case(
     v1_so, v2_so, build_err = _build_libs(
         name, case_dir, tmp, v1_src, v2_src, variant=variant
     )
+    build_err = build_err or fixture_preconditions.unmet(entry, v1_so, v2_so)
     if build_err is not None:
         res = _handle_build_error(name, expected_raw, build_err)
         return res._replace(variant=variant)
