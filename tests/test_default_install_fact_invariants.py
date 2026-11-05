@@ -517,6 +517,17 @@ def test_c_header_facts_survive_without_optional_tools(
     _assert_no_empty_as_value(snap)
 
 
+def _assert_builtin_slot_unknown(
+    kind: str, owner: str, fact: Fact[Any] | None, slots: dict[str, int]
+) -> None:
+    """A builtin slot's ABI fact is absent or a NOT_COLLECTED gap with no value."""
+    if fact is None:
+        return
+    slots[kind] += 1
+    assert fact.status is FactStatus.NOT_COLLECTED, (kind, owner, fact)
+    assert fact.value is None, (kind, owner, fact)
+
+
 @pytest.mark.known_gap_canary
 @_NEEDS_CLANG
 def test_clang_builtin_abi_facts_are_marked_without_a_linker(
@@ -542,15 +553,21 @@ def test_clang_builtin_abi_facts_are_marked_without_a_linker(
     snap = _dump(env, tmp_path / "s.json", fixture.lib, "-H", fixture.header)
     _assert_layout_matches(snap, fixture.oracle)
     _assert_enums_match(snap, fixture.oracle)
+    # Every builtin slot -- parameter, return and record field -- reads as a
+    # gap with no value. Count the slots that carry a fact so the sweep cannot
+    # pass vacuously on a snapshot that recorded none.
+    slots: dict[str, int] = {"param": 0, "return": 0, "field": 0}
     for fn in snap.declarations.functions:
-        for p in fn.params:
-            assert (
-                p.type_abi_fact is None
-                or p.type_abi_fact.status is FactStatus.NOT_COLLECTED
-            ), (
-                fn.mangled,
-                p.type_abi_fact,
+        facts = [("param", p.type_abi_fact) for p in fn.params]
+        facts.append(("return", fn.return_type_abi_fact))
+        for kind, fact in facts:
+            _assert_builtin_slot_unknown(kind, fn.mangled, fact, slots)
+    for name, rec in _records(snap).items():
+        for f in rec.fields:
+            _assert_builtin_slot_unknown(
+                "field", f"{name}::{f.name}", f.type_abi_fact, slots
             )
+    assert all(slots.values()), slots
     # Typedef ABI facts come from the same probe: the whole map is unknown.
     assert snap.typedef_abi_facts is None
     _assert_no_empty_as_value(snap)
