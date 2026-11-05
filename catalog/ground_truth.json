@@ -2077,8 +2077,32 @@
     "type_field_type_changed",
     "public_api_internal_dependency_added"
    ],
-   "known_kind_gap": "public_api_internal_dependency_added",
-   "known_kind_gap_note": "public_api_internal_dependency_added needs a public-header set (declarations must be classified as internal); tests/validate_examples.py's default gcc/clang debug-headers lane does not declare one in this fixture (see tests/validate_examples.py's _kinds_strict_signal call site). The BREAKING verdict is still correct via struct_field_type_changed alone; the L2 header-only graph is exercised for real, separately, by tests/test_header_graph_examples.py (wired into the full-matrix proof gate via the header_graph OWNER_PROOFS/SPECIAL_PROOFS entry in skills-src/evaluation/validation/scripts/run_example_owner_proofs.py and collect_full_example_matrix.py).",
+   "expected_kinds_gaps": {
+    "castxml": [
+     {
+      "kinds": [
+       "public_api_internal_dependency_added"
+      ],
+      "modes": [
+       "build-source"
+      ],
+      "reason": "dump --build-info embeds a build pack whose L5 graph has no SOURCE_DECLARES public closure, and resolve_l5_source_graph prefers it over the header graph that has one, so the public-to-internal reach is never evaluated at build-source depth; the debug-headers lane reports the kind.",
+      "known_gap": "A `--build-info` dump's L5 graph displaces the header graph"
+     }
+    ],
+    "clang": [
+     {
+      "kinds": [
+       "public_api_internal_dependency_added"
+      ],
+      "modes": [
+       "build-source"
+      ],
+      "reason": "dump --build-info embeds a build pack whose L5 graph has no SOURCE_DECLARES public closure, and resolve_l5_source_graph prefers it over the header graph that has one, so the public-to-internal reach is never evaluated at build-source depth; the debug-headers lane reports the kind.",
+      "known_gap": "A `--build-info` dump's L5 graph displaces the header graph"
+     }
+    ]
+   },
    "min_evidence": "L5",
    "platforms": [
     "linux"
@@ -2095,8 +2119,32 @@
     "type_base_changed",
     "public_api_internal_dependency_added"
    ],
-   "known_kind_gap": "public_api_internal_dependency_added",
-   "known_kind_gap_note": "public_api_internal_dependency_added needs a public-header set (declarations must be classified as internal); tests/validate_examples.py's default gcc/clang debug-headers lane does not declare one in this fixture (see tests/validate_examples.py's _kinds_strict_signal call site). The BREAKING verdict is still correct via type_base_changed alone; the L2 header-only graph is exercised for real, separately, by tests/test_header_graph_examples.py (wired into the full-matrix proof gate via the header_graph OWNER_PROOFS/SPECIAL_PROOFS entry in skills-src/evaluation/validation/scripts/run_example_owner_proofs.py and collect_full_example_matrix.py).",
+   "expected_kinds_gaps": {
+    "castxml": [
+     {
+      "kinds": [
+       "public_api_internal_dependency_added"
+      ],
+      "modes": [
+       "build-source"
+      ],
+      "reason": "dump --build-info embeds a build pack whose L5 graph has no SOURCE_DECLARES public closure, and resolve_l5_source_graph prefers it over the header graph that has one, so the public-to-internal reach is never evaluated at build-source depth; the debug-headers lane reports the kind.",
+      "known_gap": "A `--build-info` dump's L5 graph displaces the header graph"
+     }
+    ],
+    "clang": [
+     {
+      "kinds": [
+       "public_api_internal_dependency_added"
+      ],
+      "modes": [
+       "build-source"
+      ],
+      "reason": "dump --build-info embeds a build pack whose L5 graph has no SOURCE_DECLARES public closure, and resolve_l5_source_graph prefers it over the header graph that has one, so the public-to-internal reach is never evaluated at build-source depth; the debug-headers lane reports the kind.",
+      "known_gap": "A `--build-info` dump's L5 graph displaces the header graph"
+     }
+    ]
+   },
    "min_evidence": "L5",
    "platforms": [
     "linux"
@@ -2113,8 +2161,32 @@
     "func_removed",
     "public_api_internal_dependency_added"
    ],
-   "known_kind_gap": "public_api_internal_dependency_added",
-   "known_kind_gap_note": "public_api_internal_dependency_added needs a public-header set (declarations must be classified as internal); tests/validate_examples.py's default gcc/clang debug-headers lane does not declare one in this fixture (see tests/validate_examples.py's _kinds_strict_signal call site). The BREAKING verdict is still correct via func_removed alone; the L2 header-only graph is exercised for real, separately, by tests/test_header_graph_examples.py (wired into the full-matrix proof gate via the header_graph OWNER_PROOFS/SPECIAL_PROOFS entry in skills-src/evaluation/validation/scripts/run_example_owner_proofs.py and collect_full_example_matrix.py).",
+   "expected_kinds_gaps": {
+    "castxml": [
+     {
+      "kinds": [
+       "public_api_internal_dependency_added"
+      ],
+      "modes": [
+       "build-source"
+      ],
+      "reason": "dump --build-info embeds a build pack whose L5 graph has no SOURCE_DECLARES public closure, and resolve_l5_source_graph prefers it over the header graph that has one, so the public-to-internal reach is never evaluated at build-source depth; the debug-headers lane reports the kind.",
+      "known_gap": "A `--build-info` dump's L5 graph displaces the header graph"
+     }
+    ],
+    "clang": [
+     {
+      "kinds": [
+       "public_api_internal_dependency_added"
+      ],
+      "modes": [
+       "build-source"
+      ],
+      "reason": "dump --build-info embeds a build pack whose L5 graph has no SOURCE_DECLARES public closure, and resolve_l5_source_graph prefers it over the header graph that has one, so the public-to-internal reach is never evaluated at build-source depth; the debug-headers lane reports the kind.",
+      "known_gap": "A `--build-info` dump's L5 graph displaces the header graph"
+     }
+    ]
+   },
    "min_evidence": "L5",
    "platforms": [
     "linux"
@@ -2150,8 +2222,32 @@
     "type_size_changed",
     "public_api_internal_dependency_added"
    ],
-   "known_kind_gap": "public_api_internal_dependency_added",
-   "known_kind_gap_note": "public_api_internal_dependency_added needs a public-header set (declarations must be classified as internal); tests/validate_examples.py's default gcc/clang debug-headers lane does not declare one in this fixture (see tests/validate_examples.py's _kinds_strict_signal call site). The BREAKING verdict is still correct via struct_size_changed alone; the L2 header-only graph is exercised for real, separately, by tests/test_header_graph_examples.py (wired into the full-matrix proof gate via the header_graph OWNER_PROOFS/SPECIAL_PROOFS entry in skills-src/evaluation/validation/scripts/run_example_owner_proofs.py and collect_full_example_matrix.py).",
+   "expected_kinds_gaps": {
+    "castxml": [
+     {
+      "kinds": [
+       "public_api_internal_dependency_added"
+      ],
+      "modes": [
+       "build-source"
+      ],
+      "reason": "dump --build-info embeds a build pack whose L5 graph has no SOURCE_DECLARES public closure, and resolve_l5_source_graph prefers it over the header graph that has one, so the public-to-internal reach is never evaluated at build-source depth; the debug-headers lane reports the kind.",
+      "known_gap": "A `--build-info` dump's L5 graph displaces the header graph"
+     }
+    ],
+    "clang": [
+     {
+      "kinds": [
+       "public_api_internal_dependency_added"
+      ],
+      "modes": [
+       "build-source"
+      ],
+      "reason": "dump --build-info embeds a build pack whose L5 graph has no SOURCE_DECLARES public closure, and resolve_l5_source_graph prefers it over the header graph that has one, so the public-to-internal reach is never evaluated at build-source depth; the debug-headers lane reports the kind.",
+      "known_gap": "A `--build-info` dump's L5 graph displaces the header graph"
+     }
+    ]
+   },
    "min_evidence": "L5",
    "platforms": [
     "linux"
@@ -3064,8 +3160,6 @@
    "expected_kinds": [
     "func_language_linkage_changed"
    ],
-   "known_kind_gap": "func_language_linkage_changed",
-   "known_kind_gap_note": "The overall verdict (BREAKING) is correct via func_removed (v1's plain-name pair has no counterpart under v2's mangled name), but func_language_linkage_changed never fires \u2014 a real, root-caused gap, not a fixture problem, though narrower than first documented (superseding an earlier, incorrect theory about castxml never emitting extern=\"1\"). Root cause, confirmed by direct castxml invocation: v2.h has no extern \"C\" and no other C++-looking construct, so dumper.py's _detect_cpp_headers() content-sniff (correctly, from the header text alone) does not classify it as C++ and castxml parses it in C mode (`-x c -std=gnu11`). castxml still emits a pseudo-Itanium `mangled` attribute even in C mode, but *without* parameter-type encoding (e.g. 'parse_config' -> '_Z12parse_config', missing the 'PKc' suffix a real `const char*` parameter would add) \u2014 this incomplete guess matches neither v1's real plain export ('parse_config') nor v2's real, fully-mangled C++ export ('_Z12parse_configPKc', since v2.cpp is genuinely compiled as C++). The real fix needs TU-level context (this header is included from a .cpp, so it has C++ linkage) that no per-header content sniff can recover; a bare-name/real-export reconciliation (the fix applied for case141) does not help here because neither side of this pair matches by bare name.",
    "min_evidence": "L0",
    "platforms": [
     "linux",
@@ -3435,6 +3529,17 @@
     "internal_template_leaks_via_public_api",
     "func_removed"
    ],
+   "expected_kinds_gaps": {
+    "castxml": [
+     {
+      "kinds": [
+       "func_removed"
+      ],
+      "reason": "castxml records no declaration kind for an explicit instantiation, so the dropped `extern template` instance takes the export-loss path (func_visibility_changed) instead of func_removed; the clang header backend reports func_removed.",
+      "known_gap": "Explicit function and variable instances: removal is castxml-blind"
+     }
+    ]
+   },
    "known_gap": "macOS integration-tests observes NO_CHANGE for this case as of commit 71b4f624e2b10d53ee662b555907280baad0982a (PR #555); see case100_experimental_removed_without_replacement's known_gap for the shared investigation notes. Linux (gcc and clang) remains the blocking detector lane.",
    "known_gap_platforms": [
     "macos"

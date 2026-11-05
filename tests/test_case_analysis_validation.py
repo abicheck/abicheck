@@ -80,6 +80,10 @@ class TestGroundTruthStructure:
             "expected",
             "expected_kinds",
             "expected_absent_kinds",
+            # Not case truth: a per-frontend declaration that a lane misses
+            # some of the kinds above (tests/expected_kinds_gate.py checks its
+            # kinds are a subset of expected_kinds/expected_absent_kinds).
+            "expected_kinds_gaps",
         }
         for case_name, meta in verdicts.items():
             unexpected = {

@@ -96,6 +96,12 @@ CI's `pr` profile.
 
 - `check_validate_results.py`, `summarize_validate_results.py` — used by
   `test_abi_examples.py` to validate example case ground truth.
+- `expected_kinds_gate.py` — the catalog lanes' strict kinds gate: in the
+  native `validate_examples.py` lanes a missing `expected_kinds` entry FAILs
+  the cell unless `ground_truth.json`'s `expected_kinds_gaps` declares it for
+  that header frontend and mode; a declaration that no longer reproduces
+  FAILs as stale. Also validates that field. Tests:
+  `test_expected_kinds_gate.py`.
 - `conftest.py` — shared fixtures, including temp-dir helpers and
   binary-skip markers.
 - `_strict_process.py` — `StrictProcessRunner`, the scripted stand-in for

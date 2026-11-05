@@ -465,4 +465,51 @@ TEST_HARNESS_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="tests.verdict_only_gate_hides_missing_calibration_kind",
+        invariant=(
+            "A catalog lane cell passes only when the ChangeKinds its ground "
+            "truth calibrates are observed: a missing `expected_kinds` entry "
+            "or a present `expected_absent_kinds` entry fails the cell for "
+            "that header frontend and mode unless `expected_kinds_gaps` "
+            "declares exactly that set, and a declaration the lane no longer "
+            "reproduces fails as stale. `validate_examples.py` scored only the "
+            "verdict string, so the clang header lane passed "
+            "case17/43/74-77/80 without the layout kinds they exist for, and "
+            "the gap sat in known-gaps.md with no test failing."
+        ),
+        # 1918 closed the clang layout gap these cases exposed; 1927 made
+        # a missing calibration kind fail its lane cell.
+        fixed_by=(1918, 1927),
+        seed_tests=("tests/test_expected_kinds_gate.py",),
+        axes={
+            # The seed selects the frontend by name and scripts compare's
+            # output; the real castxml/clang runs are the PR's lane evidence,
+            # not a seed, so this is not a "frontend" axis (bug_class_schema).
+            "frontend_selection": ("castxml", "clang", "hybrid"),
+            "mode": ("debug-headers", "build-source", "release-headers"),
+            "target": ("linux/x86_64", "macos/aarch64", "windows", "linux/aarch64"),
+            "emitted": ("all subsets of expected + absent kinds",),
+            "declared": ("all subsets", "other frontend", "other mode"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "release-headers/stripped-headers keep the kinds signal "
+                    "reported-only (DWARF loss by design); only the native "
+                    "lanes fail on it."
+                ),
+                reference="catalog/README.md",
+            ),
+            KnownGap(
+                description=(
+                    "Only Linux x86_64 enforces: macOS, Windows and aarch64 "
+                    "lanes were never measured to declare their gaps (an "
+                    "ELF-only kind cannot fire on Mach-O), so a kind "
+                    "regression there is reported, not failed."
+                ),
+                reference="catalog/README.md",
+            ),
+        ),
+    ),
 )

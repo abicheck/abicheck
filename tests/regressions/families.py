@@ -519,6 +519,9 @@ _F7 = (
     "test_infra.caller_owned_directory_fabricated",
     "tests.constructed_environment_drops_ambient_mitigation",
     "tests.dead_harness_reads_as_a_passing_control",
+    # validate_examples.py scored a catalog cell on its verdict alone, so a
+    # lane missing every calibration kind still read PASS.
+    "tests.verdict_only_gate_hides_missing_calibration_kind",
     "tests.fixture_fabricates_a_state_the_types_forbid",
     "tests.locale_dependent_repo_text_read",
     "tests.host_dependent_expectation",
