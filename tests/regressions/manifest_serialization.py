@@ -158,17 +158,24 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "oracle is the encoding of the same multiset inserted in sorted "
             "order, over every insertion permutation, plus a cross-process "
             "dump of a compiled corpus -- not a same-process round trip, "
-            "which cannot see hash-seed-dependent order."
+            "which cannot see hash-seed-dependent order. Derived state "
+            "follows the same rule: an entity resolver built over the nodes "
+            "walks them in canonical (id) order, so which id represents a "
+            "shared canonical identity, and each conflict's id order, are "
+            "the same in memory, across processes and after a reload."
         ),
         # Escape history: #1335's cross-process A/B measurement saw
         # `surface_graph.nodes` reorder between two dumps of one library;
         # #1542 recorded it as a known gap; #1905 fixed it.
         fixed_by=(1335, 1542, 1905),
-        seed_tests=("tests/test_snapshot_byte_reproducibility.py",),
+        seed_tests=(
+            "tests/test_snapshot_byte_reproducibility.py",
+            "tests/test_entity_resolver.py",
+        ),
         axes={
             "producer_order": ("sorted", "permuted"),
             "process": ("same", "separate_hash_seed"),
-            "rows": ("graph_nodes", "graph_edges"),
+            "rows": ("graph_nodes", "graph_edges", "entity_resolver_conflicts"),
         },
     ),
     BugClass(

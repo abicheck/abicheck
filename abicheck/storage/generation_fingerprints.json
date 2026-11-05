@@ -198,7 +198,7 @@
     },
     "fingerprint": "e9da2a554268563c13c1171d71b1338190e6a1e1320ea15dffa4e4e5f0c2c703",
     "generation": 37,
-    "reason": "clang 22+ JSON AST shape (isTagOwned tag types) and the pruner's nested-method rule, found by the clang-latest lane; ships within the still-unreleased generation 37 that #1918 introduces"
+    "reason": "clang 22+ JSON AST shape (isTagOwned tag types) and the pruner's nested-method rule, found by the clang-latest lane; within generation 37 (#1918), which no release has shipped (v0.7.0 is generation 2)"
   },
   "resolver": {
     "files": {

@@ -484,9 +484,17 @@ class SourceGraphSummary:
         each node's *current* merged attrs; safe to call repeatedly (e.g.
         after further ``add_node`` calls) at the cost of re-resolving every
         node each time, not just the new ones.
+
+        Nodes are resolved in canonical order (by id, the row order
+        :meth:`finalize` writes), not insertion order. Which id becomes a
+        shared canonical identity's representative, and the order inside each
+        recorded conflict, then depend only on the node set. Insertion order
+        follows producer iteration and can differ between processes, and
+        :meth:`from_dict` rebuilds the resolver from the sorted rows, so an
+        insertion-order build did not survive a save and reload.
         """
         self.entity_resolver = EntityResolver()
-        for n in self.nodes:
+        for n in sorted(self.nodes, key=lambda n: n.id):
             self.entity_resolver.resolve(n)
         return self
 

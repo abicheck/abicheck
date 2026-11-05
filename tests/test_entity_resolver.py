@@ -214,3 +214,82 @@ class TestSourceGraphSummaryEntityResolution:
 
         restored = SourceGraphSummary.from_dict(d)
         assert restored.entity_resolver.aliases == {}
+
+
+# ── canonical order: the resolver does not depend on node insertion order ──
+#
+# Bug class serialization.persisted_field_not_decoded (round trip): a graph
+# whose nodes share one canonical identity recorded its conflicts in node
+# insertion order, but finalize() sorts the rows and from_dict() rebuilds the
+# resolver from them, so the reloaded resolver differed from the in-memory one
+# (Hypothesis: nodes '' and 'ns::T', both without kind or label, collide on
+# one synthetic id). Each case below is run over every insertion order.
+
+import itertools  # noqa: E402
+
+import pytest  # noqa: E402
+
+from abicheck.model.graph_facts import GraphFact  # noqa: E402
+
+
+def _bare(node_id: str) -> GraphNode:
+    """A node with no identity signal, so it falls back to the synthetic id."""
+    return GraphNode(
+        id=node_id,
+        kind="",
+        label="",
+        facts=[GraphFact(producer="", confidence="", attrs={})],
+    )
+
+
+_COLLIDING_SETS = {
+    # The Hypothesis counterexample: two bare nodes, one synthetic identity.
+    "bare-pair": [_bare("ns::T"), _bare("")],
+    # Three declarations a producer reported under one USR.
+    "shared-usr-triple": [
+        _node("decl://c", usr="c:@F@foo#"),
+        _node("decl://a", usr="c:@F@foo#"),
+        _node("decl://b", usr="c:@F@foo#"),
+    ],
+    # One collision next to an unrelated, distinct node.
+    "collision-plus-distinct": [
+        _node("decl://z", mangled_name="_Z3barv"),
+        _node("decl://y", mangled_name="_Z3barv"),
+        _node("decl://solo", usr="c:@F@solo#"),
+    ],
+}
+
+# Written out by hand: the lowest id is the representative, and each later
+# id, in id order, is recorded against it.
+_EXPECTED_CONFLICT_IDS = {
+    "bare-pair": [("", "ns::T")],
+    "shared-usr-triple": [("decl://a", "decl://b"), ("decl://a", "decl://c")],
+    "collision-plus-distinct": [("decl://y", "decl://z")],
+}
+
+
+def _resolved(nodes: list[GraphNode]) -> SourceGraphSummary:
+    graph = SourceGraphSummary(nodes=[GraphNode.from_dict(n.to_dict()) for n in nodes])
+    graph.resolve_entities()
+    return graph.finalize()
+
+
+@pytest.mark.parametrize("case", sorted(_COLLIDING_SETS))
+def test_resolver_is_independent_of_insertion_order(case: str) -> None:
+    nodes = _COLLIDING_SETS[case]
+    resolvers = [
+        _resolved(list(order)).entity_resolver.to_dict()
+        for order in itertools.permutations(nodes)
+    ]
+    assert all(r == resolvers[0] for r in resolvers)
+    conflict_ids = [tuple(c["node_ids"]) for c in resolvers[0]["conflicts"]]
+    assert conflict_ids == _EXPECTED_CONFLICT_IDS[case]
+
+
+@pytest.mark.parametrize("case", sorted(_COLLIDING_SETS))
+def test_resolver_survives_a_round_trip_from_any_insertion_order(case: str) -> None:
+    for order in itertools.permutations(_COLLIDING_SETS[case]):
+        graph = _resolved(list(order))
+        restored = SourceGraphSummary.from_dict(graph.to_dict())
+        assert restored.entity_resolver == graph.entity_resolver
+        assert restored.to_dict() == graph.to_dict()
