@@ -1005,13 +1005,11 @@ def _classify_type_level(
     # from unreferenced public-header types). Deferring to it guarantees a real
     # leak is never silently dropped here; a genuinely-unreachable internal type
     # is simply left for normal handling.
-    from .compare.internal_leak_names import INTERNAL_NAMESPACE
-    from .compare.internal_namespaces import DEFAULT_INTERNAL_NAMESPACES
+    # A bare candidate (a header frontend's type-change symbol) is read through
+    # the one qualified record identity with that leaf.
+    from .compare.internal_leak_names import is_internal_candidate
 
-    if any(
-        INTERNAL_NAMESPACE.matches(c, internal_namespaces=DEFAULT_INTERNAL_NAMESPACES)
-        for c in candidates
-    ):
+    if any(is_internal_candidate(c, qualified_key_union) for c in candidates):
         return True, None
 
     known = {c for c in candidates if c in all_types}

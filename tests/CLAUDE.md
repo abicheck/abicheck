@@ -36,6 +36,9 @@ CI's `pr` profile.
   Independent-random snapshot pairs almost never share symbols, so they only
   exercise add/remove; the controlled-mutation design is what reaches the
   *modification* detectors.
+  The oracle runs every mutation in three spellings: as written, and as the
+  castxml and clang header backends spell the same declarations
+  (`_frontend_spelling.render`, below).
 - `test_fp_rate_gate.py` — mirrors `scripts/check_fp_rate.py`; per-case FP/FN
   checks under public-surface scoping (baselines 0/0).
 - `test_mutation_score_gate.py` / `test_mutation_results.py` — the mutation
@@ -117,6 +120,15 @@ CI's `pr` profile.
   the calls with `.expect(...)`, then `.assert_exhausted()`; failures print the
   full transcript of what actually ran. See `test_strict_process.py` for the
   contract and `test_bazel_root_targets.py` for a migrated call site.
+- `_frontend_spelling.py` — `render(snapshot, Frontend.CASTXML|CLANG)`: a
+  hand-built, fully qualified snapshot re-spelled the way that header backend
+  writes it (castxml's bare leaf plus slot identities, clang's scope-relative
+  spelling, builtins, declarators, alias templates). **Run a detector test
+  that builds namespaced snapshots in every spelling**: a fixture spelled only
+  fully qualified is how `internal_type_leaks_via_public_api` stayed silent
+  under clang. `test_frontend_spelling_integration.py` (`integration`) pins
+  the rules to real dumps; `test_detector_frontend_spelling.py` is the
+  scenario matrix.
 - `optional_tool_inventory.py` — every optional-tool lookup in `abicheck/`
   and its default-install expectation. `test_optional_tool_inventory_gate.py`
   fails on an unregistered lookup; `test_default_install_fact_invariants.py`

@@ -587,6 +587,111 @@ def test_seeded_mutant_disabled_clang_layout_pass_is_reported(tmp_path: Path) ->
     assert any("size None" in v for v in found), found
 
 
+# -- Header-backend parity: a leak is decided alike from either spelling ------
+#
+# ``evidence.detector_answer_depends_on_frontend_spelling``: the same v1 -> v2
+# headers, compared through castxml and through clang, must report the same
+# internal-type leaks. castxml spells a reference as its bare leaf (with slot
+# identities), clang as the header wrote it (``detail::Impl``); the shapes are
+# the ones each backend once missed: an internal record sharing its leaf with a
+# public one (both), and an internal type returned by value (clang).
+# Oracle: the leak set the headers imply, by record leaf. Seeded mutant: a
+# leak walk that matches spellings instead of resolving them.
+
+_LEAK_HEADER = """#pragma once
+namespace lib {
+namespace detail { struct Impl { int x;%s }; struct Ret { int r;%s }; }
+struct Impl { int pub; };
+struct Holder { detail::Impl impl; Impl other; };
+Holder* get_holder();
+detail::Ret make();
+}
+"""
+_LEAK_SRC = """#include "api.hpp"
+namespace lib { Holder* get_holder() { return 0; } detail::Ret make() { return {}; } }
+"""
+_LEAK_EXPECTED = {"Impl", "Ret"}
+_MUTANTS["spelling_matched_leak_walk"] = (
+    "import abicheck.model.type_spelling_resolve as r\n"
+    "r.TypeResolver.resolve = lambda self, spelling, *a, **k: spelling\n"
+)
+
+
+def _leak_compare(tmp: Path, frontend: str, mutant: str | None = None) -> set[str]:
+    work = tmp / f"leak-{frontend}-{mutant or 'real'}"
+    libs = []
+    for version, extra in (("v1", ""), ("v2", " int added;")):
+        side = work / version
+        side.mkdir(parents=True)
+        (side / "api.hpp").write_text(_LEAK_HEADER % (extra, extra), encoding="utf-8")
+        (side / "api.cpp").write_text(_LEAK_SRC, encoding="utf-8")
+        lib = side / "libapi.so"
+        subprocess.run(
+            ["g++", "-shared", "-fPIC", str(side / "api.cpp"), "-o", str(lib)],
+            check=True,
+        )
+        libs.append(lib)
+    env = {**os.environ, "XDG_CACHE_HOME": str(work / "cache")}
+    env["ABICHECK_AST_FRONTEND"] = frontend
+    if mutant:
+        site = work / "site"
+        site.mkdir()
+        (site / "sitecustomize.py").write_text(
+            _MUTANTS[mutant]
+            + f"\nimport pathlib\npathlib.Path({str(work / 'mutant-ran')!r}).touch()\n"
+        )
+        env["PYTHONPATH"] = f"{site}{os.pathsep}{env.get('PYTHONPATH', '')}"
+    out = work / "report.json"
+    subprocess.run(
+        abicheck_command(
+            "compare",
+            libs[0],
+            libs[1],
+            "--header",
+            f"old={work / 'v1' / 'api.hpp'}",
+            "--header",
+            f"new={work / 'v2' / 'api.hpp'}",
+            "-o",
+            f"json={out}",
+        ),
+        capture_output=True,
+        env=env,
+    )
+    if mutant:
+        assert (work / "mutant-ran").exists(), "the seeded mutant never loaded"
+    import json
+
+    report = json.loads(out.read_text(encoding="utf-8"))
+    return {
+        c["symbol"].rsplit("::", 1)[-1]
+        for c in report.get("changes", [])
+        if c["kind"] == "internal_type_leaks_via_public_api"
+    }
+
+
+def leak_parity_violations(found: set[str]) -> list[str]:
+    """Expected leaks the run did not report."""
+    return [f"{name}: no leak reported" for name in sorted(_LEAK_EXPECTED - found)]
+
+
+@pytest.mark.integration
+@_needs_backends
+@pytest.mark.parametrize("frontend", ["castxml", "clang"])
+def test_internal_leaks_match_across_header_backends(
+    tmp_path: Path, frontend: str
+) -> None:
+    assert leak_parity_violations(_leak_compare(tmp_path, frontend)) == []
+
+
+@pytest.mark.integration
+@_needs_backends
+def test_seeded_mutant_spelling_matched_leak_walk_is_reported(tmp_path: Path) -> None:
+    found = leak_parity_violations(
+        _leak_compare(tmp_path, "clang", "spelling_matched_leak_walk")
+    )
+    assert "Ret: no leak reported" in found, found
+
+
 # --- clang AST-shape drift (extraction.clang_ast_shape_version_drift) -------
 #
 # A typedef'd anonymous struct/enum reaches the clang backend through a link

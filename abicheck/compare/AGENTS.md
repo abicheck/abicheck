@@ -51,7 +51,11 @@ severity, or a CLI flag is in the wrong layer.
   detectors (`detect_internal_leaks`, `detect_call_graph_leaks`,
   `detect_leak_findings`); `internal_leak_paths.py` the layout and type-graph
   walk; `internal_leak_graph.py` the call-graph walk; `internal_leak_names.py`
-  subject classification and the two name heuristics.
+  subject classification and the two name heuristics;
+  the walk resolves each type spelling to the record it names through
+  `model/type_spelling_resolve.py` (castxml slot identities, then C++ name
+  lookup from the writing scope, then a unique bare leaf), so it answers alike
+  for every header frontend's spelling.
 - `call_graph_walk.py` — `TraversalPolicy`/`CALL_GRAPH_TRAVERSAL_POLICY`,
   `consumer_compiled_reachability()` and `reconstruct_path()` (ADR-046 D5): the
   restricted BFS over a `SourceGraphSummary` that the call-graph leak overlay,

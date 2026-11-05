@@ -212,6 +212,7 @@
       "abicheck/compare/export_owner_resolution.py": "e9108cbdf0459cb8171f63ca328138558cfd032bff9124e4b9bd0fd5bf8553c8",
       "abicheck/debug_resolver.py": "37746292726312ccf49dc91d7bb904d34633b0840f5eb298cf52063a5057d90a",
       "abicheck/model/fundamental_type.py": "c97bb2038bafedf3f21e5819df1d8e1be5bf97adbbb0fca5a16f49287b0aec0a",
+      "abicheck/model/type_spelling_resolve.py": "88cdf4eb73070a87e1b806ac1629e58375caca113e9ef7e07331d6ac0e018974",
       "abicheck/policy/use_case_reachability.py": "e21d1b32773ce42e458ec8dfe34d86c3a5c48732a829b4e985ec739cae594bc1",
       "abicheck/post_processing_reachability.py": "4417bfaf3c44e9963a54c862c3f3b9e355175755049c35b29f14a77d66e7e6b1",
       "abicheck/storage/native_identity_aliases.py": "061e634659b371f1688cfcd4845fdcbe6147b9c2cfddaa4285dd34c757ca80ef",
@@ -221,9 +222,9 @@
       "abicheck/workflows/compare/resolve.py": "a60e4c0bbc7fada7d6dfb6f64f9ef504121315e763b90fb48863639d54f9ae79",
       "abicheck/workflows/elf_dependency_resolver.py": "69cdd9d8129410f824768fdc67ab14b2836761552fe300b63ebb0e290ee3a0b5"
     },
-    "fingerprint": "35b7c02f7f8764276d92c51b4348baba4d34eaafdf42d6e53a215e00c0cc82f9",
-    "generation": 3,
-    "reason": "merge main into #1928: lazy header-order witness (deferred witness, order-proof retry with linker-script liveness); recorded output unchanged"
+    "fingerprint": "2981f89e9a1a827c8f992093836e1398f8269858f2cb364e172f465fa6fa1995",
+    "generation": 4,
+    "reason": "as-written specialization arguments and a shadow-free fast path fold into resolver generation 4, introduced by this same unmerged PR"
   },
   "source": {
     "files": {

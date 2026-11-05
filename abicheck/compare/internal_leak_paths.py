@@ -23,18 +23,69 @@ by the leak detector and its finding builder.
 from __future__ import annotations
 
 import collections
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING
 
+from ..model.type_spelling_resolve import TypeResolver, record_key, scope_of
 from .internal_leak_names import (
     INTERNAL_NAMESPACE,
     _build_qualified_index,
     _candidate_type_names_indirect,
+    _strip_signature_params,
 )
 from .internal_namespaces import DEFAULT_INTERNAL_NAMESPACES
 
 if TYPE_CHECKING:
-    from ..model import AbiSnapshot, RecordType
+    from ..model import AbiSnapshot, Fact, RecordType
+
+# The scope a spelling was written in: a qualified name, or a deferred one (a
+# function's scope needs a demangle, paid only when a spelling needs it).
+_Scope = str | Callable[[], str] | None
+# (spelling, path, scope, recorded identities of the slot).
+_Item = tuple[str, list[str], _Scope, tuple[str, ...]]
+
+
+def _identities(fact: Fact[tuple[str, ...]] | None) -> tuple[str, ...]:
+    """A slot's recorded record identities (castxml), or none."""
+    if fact is None or not fact.is_present or not fact.value:
+        return ()
+    return tuple(fact.value)
+
+
+def _declaration_scope(name: str, mangled: str) -> Callable[[], str]:
+    """The scope a declaration's signature was written in, computed on first use.
+
+    Header backends write a function's or variable's name as the bare leaf, so
+    the scope comes from the Itanium mangling when the name is unqualified. An
+    operator's scope is the text before ``::operator`` (``operator new``,
+    ``operator<`` and conversion operators carry spaces and angle brackets).
+    """
+    cache: list[str] = []
+
+    def get() -> str:
+        if not cache:
+            from .template_surface import qualified_declaration_name
+
+            full = name
+            if "::" not in full:
+                full = qualified_declaration_name(full, mangled)
+            full = _strip_signature_params(full)
+            op = full.find("::operator")
+            if op >= 0:
+                full = full[:op] + "::operator"
+            # A template function's demangling leads with its return type.
+            depth, cut = 0, 0
+            for i, ch in enumerate(full):
+                if ch in "<(":
+                    depth += 1
+                elif ch in ">)":
+                    depth -= 1
+                elif ch == " " and depth == 0:
+                    cut = i + 1
+            cache.append(scope_of(full[cut:]))
+        return cache[0]
+
+    return get
 
 
 def _build_type_map(snap: AbiSnapshot) -> tuple[dict[str, RecordType], bool]:
@@ -59,7 +110,9 @@ def _build_type_map(snap: AbiSnapshot) -> tuple[dict[str, RecordType], bool]:
     from it would produce spurious ``INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API``
     findings with no real public entry point.
     """
-    out: dict[str, RecordType] = {t.name: t for t in snap.declarations.types}
+    out: dict[str, RecordType] = {}
+    for t in snap.declarations.types:
+        out.setdefault(record_key(t), t)
     if out:
         return out, False
     from .debug_layout_view import debug_layout_view
@@ -141,7 +194,7 @@ def _resolve_type_name(
 
 def _seed_queue_from_functions(
     snap: AbiSnapshot,
-    queue: collections.deque[tuple[str, list[str]]],
+    queue: collections.deque[_Item],
 ) -> None:
     """Enqueue type candidates derived from all public function signatures."""
     from .public_surface import public_functions
@@ -153,9 +206,19 @@ def _seed_queue_from_functions(
         # embed its layout — record the indirection so a layout-only change is
         # demoted, mirroring the pointer-field case (Codex review). The seed path
         # otherwise drops the ``*`` (``_candidate_type_names_indirect`` strips decorators).
-        seeds = [(func.return_type, (func.return_pointer_depth or 0) > 0)]
-        seeds += [(p.type, (p.pointer_depth or 0) > 0) for p in func.params]
-        for t, top_ptr in seeds:
+        scope = _declaration_scope(func.name or "", func.mangled or "")
+        seeds = [
+            (
+                func.return_type,
+                (func.return_pointer_depth or 0) > 0,
+                _identities(func.return_type_identities_fact),
+            )
+        ]
+        seeds += [
+            (p.type, (p.pointer_depth or 0) > 0, _identities(p.type_identities_fact))
+            for p in func.params
+        ]
+        for t, top_ptr, ids in seeds:
             if not t:
                 continue
             # Mark each candidate per template argument: a pointer buried in the
@@ -165,30 +228,32 @@ def _seed_queue_from_functions(
                 step = [f"fn:{func.name}"]
                 if top_ptr or arg_ptr:
                     step.append("indirect:signature")
-                queue.append((cand, step))
+                queue.append((cand, step, scope, ids))
 
 
 def _seed_queue_from_variables(
     snap: AbiSnapshot,
-    queue: collections.deque[tuple[str, list[str]]],
+    queue: collections.deque[_Item],
 ) -> None:
     """Enqueue type candidates derived from all public variable types."""
     from .public_surface import public_variables
 
     for var in public_variables(snap).values():
         if var.type:
+            ids = _identities(var.type_identities_fact)
+            scope = _declaration_scope(var.name or "", var.mangled or "")
             for cand, arg_ptr in _candidate_type_names_indirect(var.type):
                 step = [f"var:{var.name}"]
                 if arg_ptr:
                     step.append("indirect:signature")
-                queue.append((cand, step))
+                queue.append((cand, step, scope, ids))
 
 
 def _seed_queue_from_public_types(
     type_map: dict[str, RecordType],
     qualified_index: dict[str, set[str | None]],
     internal_set: set[str],
-    queue: collections.deque[tuple[str, list[str]]],
+    queue: collections.deque[_Item],
     *,
     is_dwarf_fallback: bool = False,
 ) -> None:
@@ -214,13 +279,13 @@ def _seed_queue_from_public_types(
         if seed_name and not INTERNAL_NAMESPACE.matches(
             seed_name, internal_namespaces=internal_set, qualified_index=qualified_index
         ):
-            queue.append((seed_name, [f"type:{seed_name}"]))
+            queue.append((seed_name, [f"type:{seed_name}"], None, ()))
 
 
 def _enqueue_record_children(
     rec: RecordType,
     new_path: list[str],
-    queue: collections.deque[tuple[str, list[str]]],
+    queue: collections.deque[_Item],
 ) -> None:
     """Enqueue bases (and virtual bases) and field types of *rec*.
 
@@ -232,32 +297,36 @@ def _enqueue_record_children(
     # argument* of the base (e.g. inheriting ``_Head_base<0, Proxy*, false>``,
     # libstdc++'s decomposed unique_ptr) reaches that argument through a pointer —
     # mark it per-hop, like fields.
+    # Every reference in the record is written in the record's own scope.
+    scope = record_key(rec)
     for base in rec.resolved_bases():
         for cand, via_ptr in _candidate_type_names_indirect(base):
             step = [f"base:{base}"]
             if via_ptr:
                 step.append("indirect:edge")
-            queue.append((cand, new_path + step))
+            queue.append((cand, new_path + step, scope, ()))
     for vb in rec.resolved_virtual_bases():
         for cand, via_ptr in _candidate_type_names_indirect(vb):
             step = [f"vbase:{vb}"]
             if via_ptr:
                 step.append("indirect:edge")
-            queue.append((cand, new_path + step))
+            queue.append((cand, new_path + step, scope, ()))
     # Fields: mark the edge indirect per template argument (accurate per-hop).
     for fld in rec.fields:
+        ids = _identities(fld.type_identities_fact)
         for cand, via_ptr in _candidate_type_names_indirect(fld.type):
             step = [f"field:{fld.name}"]
             if via_ptr:
                 step.append("indirect:edge")
-            queue.append((cand, new_path + step))
+            queue.append((cand, new_path + step, scope, ids))
 
 
 def _enqueue_typedef_targets(
     typename: str,
     typedefs: dict[str, str],
     path: list[str],
-    queue: collections.deque[tuple[str, list[str]]],
+    queue: collections.deque[_Item],
+    scope: _Scope = None,
 ) -> None:
     """Enqueue the underlying type candidates for a typedef alias."""
     target = typedefs.get(typename)
@@ -268,15 +337,16 @@ def _enqueue_typedef_targets(
             step = [f"typedef:{typename}"]
             if via_ptr:
                 step.append("indirect:edge")
-            queue.append((cand, path + step))
+            queue.append((cand, path + step, scope, ()))
 
 
 def _bfs_collect_paths(
-    queue: collections.deque[tuple[str, list[str]]],
+    queue: collections.deque[_Item],
     type_map: dict[str, RecordType],
     qualified_index: dict[str, set[str | None]],
     internal_set: set[str],
     typedefs: dict[str, str] | None = None,
+    resolver: TypeResolver | None = None,
 ) -> dict[str, list[list[str]]]:
     """Drive the BFS walk; return raw (un-deduped) internal-type paths."""
     paths: dict[str, list[list[str]]] = collections.defaultdict(list)
@@ -287,11 +357,15 @@ def _bfs_collect_paths(
     suffix_index = _build_suffix_index(type_map)
 
     while queue:
-        typename, path = queue.popleft()
+        typename, path, scope, ids = queue.popleft()
         if not typename:
             continue
-        # DWARF can record base-class names un-qualified; resolve against
-        # the type map before we record / enqueue children.
+        # Resolve the spelling to the record it names (frontend-independent:
+        # castxml's bare leaf + identities, clang's scope-relative spelling,
+        # DWARF's bare name) before we record / enqueue children.
+        if resolver is not None:
+            where = scope() if callable(scope) else scope
+            typename = resolver.resolve(typename, where, ids)
         typename = _resolve_type_name(typename, type_map, suffix_index)
         # Cycle protection: visit each (entry_point, typename, behind_pointer)
         # triple at most once. The entry-point scope lets two public roots each
@@ -314,7 +388,7 @@ def _bfs_collect_paths(
             continue
         visited.add(key)
 
-        _enqueue_typedef_targets(typename, typedefs or {}, path, queue)
+        _enqueue_typedef_targets(typename, typedefs or {}, path, queue, scope)
 
         if INTERNAL_NAMESPACE.matches(
             typename, internal_namespaces=internal_set, qualified_index=qualified_index
@@ -376,9 +450,17 @@ def compute_leak_paths(
     # ambiguous bare name is still detectable; naturally empty/inert in the
     # DWARF-fallback case (snap.types is empty there and DWARF carries no
     # qualified_name anyway).
-    qualified_index = _build_qualified_index(snap.declarations.types)
+    decls = snap.declarations
+    qualified_index = _build_qualified_index(decls.types)
+    resolver = TypeResolver(
+        type_map.values(),
+        extra_names=[
+            *(e.qualified_name or e.name for e in decls.enums),
+            *decls.typedefs_qualified,
+        ],
+    )
 
-    queue: collections.deque[tuple[str, list[str]]] = collections.deque()
+    queue: collections.deque[_Item] = collections.deque()
     _seed_queue_from_functions(snap, queue)
     _seed_queue_from_variables(snap, queue)
     _seed_queue_from_public_types(
@@ -389,10 +471,39 @@ def compute_leak_paths(
         is_dwarf_fallback=is_dwarf_fallback,
     )
 
-    paths = _bfs_collect_paths(
-        queue, type_map, qualified_index, internal_set, snap.declarations.typedefs
+    paths = _dedup_paths(
+        _bfs_collect_paths(
+            queue,
+            type_map,
+            qualified_index,
+            internal_set,
+            decls.typedefs,
+            resolver,
+        )
     )
-    return _dedup_paths(paths)
+    return _with_bare_aliases(paths, type_map, qualified_index)
+
+
+def _with_bare_aliases(
+    paths: dict[str, list[list[str]]],
+    type_map: dict[str, RecordType],
+    qualified_index: dict[str, set[str | None]],
+) -> dict[str, list[list[str]]]:
+    """Also key each record's paths by its bare ``name``.
+
+    Paths are keyed by the record's qualified identity; a type change carries
+    the record's bare ``name`` when that name is unambiguous (and the qualified
+    one otherwise), so the bare alias is added only when exactly one record
+    of this snapshot has that name.
+    """
+    out = dict(paths)
+    for key, plist in paths.items():
+        rec = type_map.get(key)
+        if rec is None or rec.name == key or rec.name in out:
+            continue
+        if len(qualified_index.get(rec.name, ())) == 1:
+            out[rec.name] = plist
+    return out
 
 
 def _format_path(path: list[str]) -> str:

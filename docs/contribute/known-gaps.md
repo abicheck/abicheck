@@ -200,6 +200,14 @@ current emitter, which is unchanged.
 
 ### False-clean risk
 
+#### A castxml base whose bare leaf two records share is not resolved by the leak walk (2026-11-05)
+
+**Status (2026-11-05): OPEN, narrow.** castxml writes a base class as its bare leaf (`Base`) and, unlike a field or signature slot, records no `type_identities_fact` for it. When two records share that leaf (`lib::detail::Base` and `other::Base`) and C++ name lookup from the derived class's scope does not find the one meant (the base lives in a sibling namespace), the leak walk (`model/type_spelling_resolve.py`) keeps the spelling unresolved rather than guess, so a layout change to that internal base reports no `internal_type_leaks_via_public_api`. The clang backend writes the base as the header did and is unaffected. Closing it needs castxml base identities in the snapshot. `tests/test_detector_frontend_spelling.py` pins the resolved shapes.
+<!-- canary: tests/test_detector_frontend_spelling.py::test_castxml_ambiguous_bare_base_leak_is_not_reported -->
+
+`false-clean` — a castxml dump can miss the leak finding (the raw size change still gates) for an internal base whose bare name is ambiguous.
+
+
 #### A reloaded binary snapshot written since ADR-079 cannot be flattened with `snapshot_to_dict` (2026-11-04)
 
 **Status (2026-11-04): OPEN.** Since ADR-079 (#1914) every binary dump writes the `binary` section's `abicheck.export_read` extension fact (`{}` when every export table was read completely). Absent means `unrecorded`, so the writer cannot leave it out. A snapshot loaded from disk keeps the fact in `WireExtensions.header_extras`, and `storage/wire_extensions.flattening_loses` counts any header extra as lossy, so `snapshot_to_dict` refuses every reloaded binary snapshot written since ADR-079 (an older one without another carrier still flattens). The frozen gen35 extractor corpus is the first fixture to carry the fact. Its flat-document differentials (`test_snapshot_section_decode.py`, `test_snapshot_lazy_decode.py`) assert that refusal and compare every other observed value, until the flat document can carry an understood extension fact, or `flattening_loses` exempts one the flat path can round-trip. Owner: `storage/wire_extensions.py`, `storage/extension_facts.py`.

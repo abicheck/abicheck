@@ -490,6 +490,9 @@ _F8 = (
     # from the same headers (harness cells: test_clang_backend_layout_matches_castxml,
     # and catalog-wide test_clang_record_layout_matches_castxml_across_the_catalog).
     "extraction.backend_fact_family_parity",
+    # A detector matched a type by the spelling one frontend writes (harness
+    # cell: test_internal_leaks_match_across_header_backends).
+    "evidence.detector_answer_depends_on_frontend_spelling",
     # A newer clang's JSON AST spelling read as absent (clang-latest lane).
     "extraction.clang_ast_shape_version_drift",
     "extraction.aggregate_layout_inverted_by_line",

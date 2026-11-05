@@ -23,11 +23,12 @@ from __future__ import annotations
 
 import collections
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING
 
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
+from ..model.execution_cache import memoized
 from ..model.name_heuristics import (
     NameHeuristicEffect,
     StructuralFact,
@@ -327,3 +328,67 @@ def _root_type_name_for_change(c: Change) -> str:
     if "::" in sym and c.kind in _FIELD_LEVEL_LEAK_KINDS:
         return sym.rsplit("::", 1)[0]
     return sym
+
+
+@memoized(maxsize=8)
+def _leaf_index(qualified_keys: frozenset[str]) -> dict[str, set[str | None]]:
+    """Bare leaf -> qualified names over *qualified_keys* (memoized per key set:
+    a frozenset caches its own hash, so a repeat call with the same set is O(1)).
+    The leaf is template-aware: ``lib::detail::Box<lib::X>`` -> ``Box<lib::X>``."""
+    from ..model.type_spelling_resolve import split_components
+
+    idx: dict[str, set[str | None]] = collections.defaultdict(set)
+    for key in qualified_keys:
+        parts = split_components(key)
+        idx[parts[-1] if parts else key].add(key)
+    return idx
+
+
+def is_internal_candidate(
+    name: str,
+    qualified_keys: frozenset[str],
+    internal_namespaces: tuple[str, ...] = DEFAULT_INTERNAL_NAMESPACES,
+) -> bool:
+    """Whether *name* is an internal-namespace type, reading a bare *name*
+    through the one qualified record identity in *qualified_keys* with that
+    leaf. Header frontends give a type change the record's bare name, so the
+    spelling alone (``Impl``) would never look internal even when the record is
+    ``lib::detail::Impl``; an ambiguous leaf falls back to the spelling.
+
+    Deliberately not memoized for the process: the answer runs through the
+    ``internal_namespace`` heuristic, which the F4 harness seeds with mutants,
+    and a process-lifetime memo would carry one test's mutant answer into the
+    next. :func:`internal_type_predicate` memoizes for one comparison."""
+    return INTERNAL_NAMESPACE.matches(
+        name,
+        internal_namespaces=internal_namespaces,
+        qualified_index=_leaf_index(qualified_keys),
+    )
+
+
+def change_type_identities(*snaps: AbiSnapshot | None) -> frozenset[str]:
+    """Every record's qualified identity across *snaps* (``None`` skipped)."""
+    return frozenset(
+        t.qualified_name or t.name
+        for snap in snaps
+        if snap is not None
+        for t in snap.declarations.types
+    )
+
+
+def internal_type_predicate(
+    old: AbiSnapshot | None,
+    new: AbiSnapshot | None,
+    internal_namespaces: Iterable[str] = DEFAULT_INTERNAL_NAMESPACES,
+) -> Callable[[str], bool]:
+    """:func:`is_internal_candidate` over the records of *old* and *new*."""
+    identities = change_type_identities(old, new)
+    namespaces = tuple(internal_namespaces)
+    answers: dict[str, bool] = {}
+
+    def is_internal(name: str) -> bool:
+        if name not in answers:
+            answers[name] = is_internal_candidate(name, identities, namespaces)
+        return answers[name]
+
+    return is_internal

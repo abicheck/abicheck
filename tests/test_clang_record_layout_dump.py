@@ -13,7 +13,6 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.compare.internal_leak import _alias_scoped_path_keys
 from abicheck.extract.headers.clang.record_layout_dump import (
     normalized_record_name,
     parse_record_layout_dump,
@@ -268,73 +267,110 @@ def test_alias_template_target(written: str, desugared: str, expected: str) -> N
     assert alias_template_target(written, desugared) == expected
 
 
-_BASE_PATH = ["type:P", "P", "base:detail::Impl", "detail::Impl"]
+def _leak_snap(records: list[tuple[str, str]], *, base: str = "detail::Impl", fns=()):
+    """Records ``(name, qualified_name)`` as clang writes them; every ``P``
+    derives from *base*, spelled as written inside its namespace."""
+    from abicheck.model import AbiSnapshot, RecordType
 
-
-def _ctx(records: list[tuple[str, str]]) -> list[tuple[str, str]]:
-    return [(n, q) for n, q in records]
+    types = [
+        RecordType(
+            name=n,
+            kind="struct",
+            qualified_name=q,
+            bases=[base] if n == "P" else [],
+        )
+        for n, q in records
+    ]
+    return AbiSnapshot(library="l", version="1", types=types, functions=list(fns))
 
 
 @pytest.mark.parametrize(
-    ("records", "aliased"),
+    ("records", "resolved", "aliased"),
     [
         # found from P's enclosing namespace lib -> lib::detail::Impl
-        ([("P", "lib::P"), ("Impl", "lib::detail::Impl")], True),
+        ([("P", "lib::P"), ("Impl", "lib::detail::Impl")], True, True),
         # found in P's own scope (nested class lookup comes first)
-        ([("P", "lib::P"), ("Impl", "lib::P::detail::Impl")], True),
+        ([("P", "lib::P"), ("Impl", "lib::P::detail::Impl")], True, True),
         # name lookup finds nothing: other::detail::Impl is not visible from lib::P
-        ([("P", "lib::P"), ("Impl", "other::detail::Impl")], False),
-        # two records share the bare name Impl: never merged
+        ([("P", "lib::P"), ("Impl", "other::detail::Impl")], False, False),
+        # two records share the bare name Impl: the lookup still finds the
+        # right one, but the ambiguous bare name is never an alias
         (
             [("P", "lib::P"), ("Impl", "lib::detail::Impl"), ("Impl", "x::Impl")],
+            True,
             False,
         ),
-        # the referencing record is ambiguous, so the lookup scope is unknown
+        # two records named P: each is walked under its own qualified scope,
+        # so lib::P resolves the base (y::P cannot see lib::detail)
         (
             [("P", "lib::P"), ("P", "y::P"), ("Impl", "lib::detail::Impl")],
-            False,
+            True,
+            True,
         ),
     ],
 )
-def test_alias_scoped_path_keys_by_name_lookup(
-    records: list[tuple[str, str]], aliased: bool
+def test_leak_paths_resolve_scope_spelled_base_by_name_lookup(
+    records: list[tuple[str, str]], resolved: bool, aliased: bool
 ) -> None:
-    paths = {"detail::Impl": [list(_BASE_PATH)]}
-    out = _alias_scoped_path_keys(paths, records, ["Impl"], _ctx(records))
-    assert ("Impl" in out) is aliased
-    assert out["detail::Impl"] == paths["detail::Impl"]
+    from abicheck.compare.internal_leak_paths import compute_leak_paths
+
+    target = next(q for n, q in records if n == "Impl" and "detail" in q)
+    paths = compute_leak_paths(_leak_snap(records))
+    assert (target in paths) is resolved
+    assert ("Impl" in paths) is aliased
+    if resolved:
+        # every path to the resolved record starts at the P that can see it
+        assert {p[0] for p in paths[target]} == {"type:lib::P"}
 
 
-def test_alias_scoped_path_keys_signature_path_and_only_resolved_paths() -> None:
-    # A public function returning detail::Impl by value: the lookup scope is
-    # the function's own (lib::make), so the spelling resolves to lib::detail::Impl.
-    fn_path = ["fn:lib::make", "detail::Impl"]
-    # A path written from other::Q, where detail::Impl names nothing: it must
-    # not ride along on the alias.
-    stray = ["type:Q", "Q", "field:x", "detail::Impl"]
-    records = [("Q", "other::Q"), ("Impl", "lib::detail::Impl")]
-    paths = {"detail::Impl": [fn_path, stray]}
-    fn_ctx = [*_ctx(records), ("fn:lib::make", "lib::make")]
-    out = _alias_scoped_path_keys(paths, records, ["Impl"], fn_ctx)
-    assert out["Impl"] == [fn_path]
-    # Without the function's scope the signature path resolves nowhere.
-    assert "Impl" not in _alias_scoped_path_keys(
-        paths, records, ["Impl"], _ctx(records)
+def test_leak_paths_resolve_a_signature_from_the_mangled_scope() -> None:
+    # A public function returning detail::Impl by value, its name written bare
+    # (as both header frontends write it): the lookup scope comes from the
+    # mangling (lib::make), so the spelling resolves to lib::detail::Impl.
+    # A field written from other::Q, where detail::Impl names nothing, must
+    # not be attributed to it.
+    from abicheck.compare.internal_leak_paths import compute_leak_paths
+    from abicheck.model import AbiSnapshot, Function, RecordType, TypeField, Visibility
+
+    make = Function(
+        name="make",
+        mangled="_ZN3lib4makeEv",
+        return_type="detail::Impl",
+        visibility=Visibility.PUBLIC,
     )
-    # A record no change names is never aliased.
-    assert "Impl" not in _alias_scoped_path_keys(paths, records, ["Other"], fn_ctx)
+    snap = AbiSnapshot(
+        library="l",
+        version="1",
+        functions=[make],
+        types=[
+            RecordType(
+                name="Q",
+                kind="struct",
+                qualified_name="other::Q",
+                fields=[TypeField(name="x", type="detail::Impl")],
+            ),
+            RecordType(name="Impl", kind="struct", qualified_name="lib::detail::Impl"),
+        ],
+    )
+    paths = compute_leak_paths(snap)
+    assert paths["lib::detail::Impl"] == [["fn:make", "lib::detail::Impl"]]
+    assert paths["Impl"] == paths["lib::detail::Impl"]
 
 
-def test_alias_scoped_path_keys_uses_each_sides_own_context() -> None:
-    # P moved from lib to lib2 between releases: pooled over both sides it has
-    # two scopes, but each side's own declarations name exactly one.
-    pooled = [("P", "lib::P"), ("P", "lib2::P"), ("Impl", "lib::detail::Impl")]
-    paths = {"detail::Impl": [list(_BASE_PATH)]}
-    old_side = [("P", "lib::P"), ("Impl", "lib::detail::Impl")]
-    assert "Impl" in _alias_scoped_path_keys(paths, pooled, ["Impl"], old_side)
-    # From lib2::P, detail::Impl is not visible: no alias.
-    new_side = [("P", "lib2::P"), ("Impl", "lib::detail::Impl")]
-    assert "Impl" not in _alias_scoped_path_keys(paths, pooled, ["Impl"], new_side)
+def test_leak_paths_use_each_sides_own_scopes() -> None:
+    # P moved from lib to lib2 between releases: each side resolves the base
+    # against its own declarations only.
+    from abicheck.compare.internal_leak_paths import compute_leak_paths
+
+    old = compute_leak_paths(
+        _leak_snap([("P", "lib::P"), ("Impl", "lib::detail::Impl")])
+    )
+    new = compute_leak_paths(
+        _leak_snap([("P", "lib2::P"), ("Impl", "lib::detail::Impl")])
+    )
+    assert "lib::detail::Impl" in old
+    # From lib2::P, detail::Impl is not visible.
+    assert "lib::detail::Impl" not in new
 
 
 def test_exact_layout_key_is_never_shadowed_by_a_normalized_one() -> None:
