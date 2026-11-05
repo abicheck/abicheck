@@ -85,6 +85,7 @@ import importlib
 import inspect
 import json
 import pkgutil
+import re
 import types
 import typing
 from collections.abc import Callable
@@ -200,7 +201,21 @@ _JSON_ANY: st.SearchStrategy[Any] = st.recursive(
 # keyed by ``(class, field)`` so the exception is named where it applies, and
 # each mirrors a validator the class enforces (the reason is beside it). A
 # field absent here is generated from its type hint as usual.
-_REF_ID: st.SearchStrategy[str] = st.from_regex(r"[a-z][a-z0-9_]{0,10}", fullmatch=True)
+def _is_safe_ref_id(value: str) -> bool:
+    """Whether `safe_ref_id` accepts *value* (it refuses reserved device names
+    such as ``con`` or ``com1``, which the regex below can produce)."""
+    from abicheck.storage.ref_ids import safe_ref_id
+
+    try:
+        safe_ref_id(value, "id")
+    except ValueError:
+        return False
+    return True
+
+
+_REF_ID: st.SearchStrategy[str] = st.from_regex(
+    r"[a-z][a-z0-9_]{0,10}", fullmatch=True
+).filter(_is_safe_ref_id)
 _SHA256_DIGEST: st.SearchStrategy[str] = st.from_regex(
     r"sha256:[0-9a-f]{64}", fullmatch=True
 )
@@ -425,6 +440,7 @@ def _package_manifest_strategy(draw: Callable[[st.SearchStrategy[Any]], Any]) ->
 
 
 def _register_package_manifest() -> None:
+    """Register the manifest recipe (a function so its import stays local)."""
     from abicheck.storage.package import PackageManifest
 
     _BUILDERS[PackageManifest] = _package_manifest_strategy
@@ -862,6 +878,8 @@ _MAX_DISCARD_RATIO = 0.6
 
 
 def _discard_ratio(cls: type) -> float:
+    """The share of *cls*'s generated draws its constructor rejected, counted
+    through the sweep's own `assume(False)` over 100 derandomized draws."""
     rejected = [0]
     accepted = [0]
     real_assume = assume
@@ -892,9 +910,34 @@ def _discard_ratio(cls: type) -> float:
 
 @pytest.mark.parametrize("qualname", sorted(_DISCOVERED))
 def test_class_strategy_does_not_discard_most_draws(qualname: str) -> None:
+    """No swept class's generator discards most of its draws."""
     ratio = _discard_ratio(_DISCOVERED[qualname])
     assert ratio <= _MAX_DISCARD_RATIO, (
         f"{qualname}: {ratio:.0%} of generated values are rejected by the "
         f"constructor (limit {_MAX_DISCARD_RATIO:.0%}); add a _FIELD_OVERRIDES "
         "entry or a _BUILDERS recipe for the validated field(s)"
     )
+
+
+@settings(max_examples=500, deadline=None, database=None)
+@given(_REF_ID)
+def test_ref_id_strategy_draws_only_ids_safe_ref_id_accepts(ref_id: str) -> None:
+    """A recipe that places drawn ids directly (the PackageManifest builder)
+    has no discard handler, so an id `safe_ref_id` refuses (``con``,
+    ``com1``) would fail the sweep instead of being discarded."""
+    from abicheck.storage.ref_ids import safe_ref_id
+
+    assert safe_ref_id(ref_id, "id") == ref_id
+
+
+@pytest.mark.parametrize("name", ["con", "prn", "aux", "nul", "com1", "com9", "lpt1"])
+def test_ref_id_strategy_excludes_reserved_device_names(name: str) -> None:
+    """Each reserved name, written out by hand, is one the `_REF_ID` regex can
+    produce, so only the filter keeps it out; the property test above rarely
+    draws one, which is why the builder failed only on some seeds."""
+    from abicheck.storage.ref_ids import safe_ref_id
+
+    assert re.fullmatch(r"[a-z][a-z0-9_]{0,10}", name)
+    with pytest.raises(ValueError):
+        safe_ref_id(name, "id")
+    assert not _is_safe_ref_id(name)
