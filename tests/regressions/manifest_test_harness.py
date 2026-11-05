@@ -478,8 +478,9 @@ TEST_HARNESS_BUG_CLASSES: tuple[BugClass, ...] = (
             "case17/43/74-77/80 without the layout kinds they exist for, and "
             "the gap sat in known-gaps.md with no test failing."
         ),
-        # 1918 closed the clang layout gap these cases exposed.
-        fixed_by=(1918,),
+        # 1918 closed the clang layout gap these cases exposed; 1927 made
+        # a missing calibration kind fail its lane cell.
+        fixed_by=(1918, 1927),
         seed_tests=("tests/test_expected_kinds_gate.py",),
         axes={
             "frontend": ("castxml", "clang"),
