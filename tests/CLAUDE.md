@@ -76,6 +76,10 @@ CI's `pr` profile.
   error or the chosen branch instead. A deliberate shape takes
   `# test-quality: ok <reason>` on its `def` line. Rules and process:
   `docs/contribute/agent-guide/quality-gates.md` "Test-quality ratchet".
+- **Known-gap canaries** (`@pytest.mark.known_gap_canary`) assert the *current, gapped* answer of an open
+  `docs/contribute/known-gaps.md` entry, which names them with `<!-- canary: ... -->`. When one fails, the gap
+  moved: if it was fixed, archive the entry and turn the canary into a regression test (drop the marker); never
+  re-pin the new answer. The `known-gap-canaries` AI-readiness check keeps the two linked.
 - **Silent-skip guard** (`conftest.py`): export `ABICHECK_MIN_EXECUTED=<n>` and
   the session fails unless ≥ n tests actually ran — used by the marker lanes in
   CI so a missing tool can't pass with 0 tests. Every `test_*` should assert
