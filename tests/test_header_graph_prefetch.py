@@ -107,7 +107,15 @@ def test_prefetched_and_sequential_dumps_are_identical(
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache-prefetch"))
     prefetched = _dump(lib, header)
     assert len(calls) == 1, "the prefetch path must acquire exactly once"
-    if max_threads == "":
+    from abicheck.compile_context import CompileContext
+    from abicheck.extract.headers.clang import abi_target
+
+    if abi_target.binary_abi_target_may_apply(CompileContext(), False):
+        # A Windows-default clang: the binary may call for a --target the
+        # prefetch cannot know yet, so it is skipped and the one acquisition
+        # runs sequentially instead of being discarded and repeated.
+        assert not calls[0].startswith("abicheck-hgraph"), calls
+    elif max_threads == "":
         # Observe the mechanism, not just the output: it ran on the prefetch
         # thread, i.e. alongside the primary dump.
         assert calls[0].startswith("abicheck-hgraph"), calls
@@ -124,13 +132,16 @@ def test_prefetched_and_sequential_dumps_are_identical(
 
 
 @pytest.mark.parametrize(
-    ("wanted", "backend", "headers", "engages"),
+    ("wanted", "backend", "headers", "windows_default_clang", "engages"),
     [
-        (True, "castxml", [Path("a.h")], True),
-        (True, "clang", [Path("a.h")], False),  # would parse the headers twice
-        (True, "hybrid", [Path("a.h")], False),
-        (False, "castxml", [Path("a.h")], False),
-        (True, "castxml", [], False),
+        (True, "castxml", [Path("a.h")], False, True),
+        (True, "clang", [Path("a.h")], False, False),  # would parse the headers twice
+        (True, "hybrid", [Path("a.h")], False, False),
+        (False, "castxml", [Path("a.h")], False, False),
+        (True, "castxml", [], False, False),
+        # The binary's exports may call for a --target the prefetch cannot
+        # know yet, so its parse would be discarded and repeated.
+        (True, "castxml", [Path("a.h")], True, False),
     ],
 )
 def test_prefetch_engages_only_where_it_cannot_parse_twice(
@@ -138,8 +149,14 @@ def test_prefetch_engages_only_where_it_cannot_parse_twice(
     wanted: bool,
     backend: str,
     headers: list[Path],
+    windows_default_clang: bool,
     engages: bool,
 ) -> None:
+    from abicheck.extract.headers.clang import abi_target
+
+    monkeypatch.setattr(
+        abi_target, "binary_abi_target_may_apply", lambda *_a: windows_default_clang
+    )
     started: list[object] = []
 
     def fake_prefetch(*args: object) -> prefetch.HeaderGraphPrefetch:
