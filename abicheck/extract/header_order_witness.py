@@ -67,24 +67,6 @@ def order_witness_deferred() -> bool:
     return _DEFERRED.get()
 
 
-def order_proof_needed(old: Any, new: Any) -> bool:
-    """Whether comparing *old* with *new* consults ``header_canonical``.
-
-    The comparison rule reads the proof only when the two recorded
-    ``header_sequence`` values differ (a permutation, or an insertion or
-    removal judged on the canonical sequences). Equal sequences, or both sides
-    already proven, need nothing more.
-    """
-    old_c, new_c = getattr(old, "contract", None), getattr(new, "contract", None)
-    if old_c is None or new_c is None:
-        return False
-    old_seq = old_c.profile_fields.get("header_sequence")
-    new_seq = new_c.profile_fields.get("header_sequence")
-    if old_seq == new_seq:
-        return False
-    return old_c.header_canonical is None or new_c.header_canonical is None
-
-
 def canonical_header_key(header: Path) -> tuple[str, str]:
     """The one sort key for a canonical header order: the resolved path as a
     string, so ``foo.h`` sorts before ``foo/bar.h`` (``.`` sorts before ``/``),
@@ -220,7 +202,7 @@ def _attach_proof(
         return
     if _DEFERRED.get():
         # The caller decides afterwards whether this comparison needs the proof
-        # (order_proof_needed) and re-resolves with the witness on if it does.
+        # (workflows.compare.order_proof) and re-resolves with the witness on if it does.
         return
 
     try:

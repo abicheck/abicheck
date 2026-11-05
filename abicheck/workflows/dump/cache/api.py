@@ -289,8 +289,13 @@ def _cache_key_for(req: DumpCacheRequest) -> str:
         extra += "\x00symbols-only"
     from ....extract.header_order_witness import order_witness_deferred
 
-    if order_witness_deferred():
+    witness_can_run = req.dump_manifest is None and (
+        len(req.headers or []) > 1 or any(h.is_dir() for h in req.headers or [])
+    )
+    if witness_can_run and order_witness_deferred():
         # A deferred dump may lack the header-order proof a full dump records.
+        # Headerless and single-header dumps never run the witness, so they
+        # keep the standalone dump's key and share its entry.
         extra += "\x00order-witness-deferred"
     return _cache_key(
         req.path, cache_headers, cache_includes, req.version, req.lang, extra=extra

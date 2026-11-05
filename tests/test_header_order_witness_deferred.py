@@ -18,6 +18,10 @@ import pytest
 
 from abicheck.extract import header_order_witness as witness
 from abicheck.workflows.compare import resolve as resolve_mod
+from abicheck.workflows.compare.order_proof import (
+    order_proof_needed,
+    should_resolve_with_order_witness,
+)
 
 
 def _contract(seq: list[str] | None, proof: list[str] | None) -> SimpleNamespace:
@@ -45,7 +49,7 @@ _AB, _BA = ["a.h", "b.h"], ["b.h", "a.h"]
     ],
 )
 def test_the_proof_is_needed_only_where_the_comparison_reads_it(old, new, needed):
-    assert witness.order_proof_needed(old, new) is needed
+    assert order_proof_needed(old, new) is needed
 
 
 def _dump_counting(calls: list[list[str]]):
@@ -113,7 +117,9 @@ def test_compare_resolves_again_with_the_witness_only_when_needed(
     monkeypatch: pytest.MonkeyPatch, pairs, expected_rounds
 ):
     rounds: list[bool] = []
-    results = iter(SimpleNamespace(old=o, new=n) for o, n in pairs)
+    results = iter(
+        SimpleNamespace(old=o, new=n, old_fmt="elf", new_fmt="elf") for o, n in pairs
+    )
 
     def once(request, *, notify=None, allow_parallel=True):
         rounds.append(witness.order_witness_deferred())
@@ -206,3 +212,35 @@ def test_a_compare_with_one_unsorted_order_parses_each_side_once(
         if not p.name.endswith(".projection.json")
     ]
     assert len(entries) == 2, sorted(p.name for p in entries)
+
+
+@pytest.mark.parametrize(
+    ("old_fmt", "new_fmt", "retry"),
+    [
+        ("elf", "elf", True),  # both live: re-dumping can prove the old side
+        (None, "elf", False),  # the old side is a stored snapshot without a proof
+        ("elf", None, True),  # the stored new side already carries its proof
+    ],
+)
+def test_no_retry_when_the_unproven_side_is_a_stored_snapshot(old_fmt, new_fmt, retry):
+    """A stored snapshot cannot gain a proof, and the reorder carve-out needs
+    both sides proven, so re-resolving the live side would buy nothing."""
+    pair = SimpleNamespace(
+        old=_snap(_BA), new=_snap(_AB, _AB), old_fmt=old_fmt, new_fmt=new_fmt
+    )
+    assert should_resolve_with_order_witness(pair) is retry
+
+
+@pytest.mark.parametrize("names", [(), ("a.h",)])
+def test_a_dump_that_cannot_run_the_witness_keeps_the_standalone_key(tmp_path, names):
+    from _dump_cache_request import dump_request
+
+    from abicheck.workflows.dump.cache import api
+
+    so = tmp_path / "lib.so"
+    so.write_bytes(b"\x7fELF" + b"\0" * 60)
+    req = dump_request(path=so, headers=_hdrs(tmp_path, *names) or None, includes=[])
+    full = api._cache_key_for(req)
+    with witness.deferred_order_witness():
+        deferred = api._cache_key_for(req)
+    assert full and full == deferred

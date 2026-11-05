@@ -122,15 +122,20 @@ about 11% of its wall time on the witness.
 - **Live `compare`:** `workflows/compare/resolve.resolve_compare_request` resolves
   both sides inside `deferred_order_witness()`. Step 1 above, where an already
   canonical order proves itself, still runs because it costs nothing. Step 2's
-  canonical-order dump is skipped. Afterwards `order_proof_needed(old, new)` checks
-  the two recorded sequences. Only when they differ without a proof on both sides
-  are both sides resolved again with the witness on, which is the cost every
-  unsorted dump used to pay.
+  canonical-order dump is skipped. Afterwards
+  `workflows/compare/order_proof.should_resolve_with_order_witness(pair)` checks the
+  two recorded sequences. Only when they differ without a proof on both sides, and
+  every unproven side is a live binary, are both sides resolved again with the
+  witness on, which is the cost every unsorted dump used to pay. A stored snapshot
+  without a proof cannot gain one, so a pair that includes one is not resolved again;
+  the comparison rule then refuses it exactly as before.
 - **Standalone `dump`:** unchanged. A stored snapshot may be compared later against
   any other snapshot, so it keeps taking the proof.
 - **Cache:** a deferred dump can lack `header_canonical`, so its whole-snapshot
   dump-cache key carries `order-witness-deferred`. A deferred snapshot is never
-  served to a non-deferred request, and the reverse.
+  served to a non-deferred request, and the reverse. A dump the witness can never
+  run on (no headers, or a single header file) keeps the standalone key and shares
+  its entry.
 - **Comparison rule:** unchanged. A pair whose sequences are equal never consulted
   `header_canonical`. A pair that needs it gets it from the second resolution.
 - **Process boundary:** the deferral is a context variable. It reaches a forked side

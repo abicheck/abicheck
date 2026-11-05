@@ -247,21 +247,20 @@ def resolve_compare_request(
 
     Both sides first resolve with the witness's second dump deferred. Only when
     their recorded header sequences differ without a proof on both sides
-    (:func:`~abicheck.extract.header_order_witness.order_proof_needed`) are they
+    (:func:`~abicheck.workflows.compare.order_proof.should_resolve_with_order_witness`) are they
     resolved again with the witness on, which is the cost every unsorted
     declared order used to pay.
     """
-    from ...extract.header_order_witness import (
-        deferred_order_witness,
-        order_proof_needed,
-    )
+    from ...extract.header_order_witness import deferred_order_witness
+    from .order_proof import should_resolve_with_order_witness
 
     with deferred_order_witness():
         pair = _resolve_compare_request_once(
             request, notify=notify, allow_parallel=allow_parallel
         )
-    if not order_proof_needed(pair.old, pair.new):
+    if not should_resolve_with_order_witness(pair):
         return pair
+    del pair  # release the first resolution before the second one runs
     return _resolve_compare_request_once(
         request, notify=notify, allow_parallel=allow_parallel
     )
