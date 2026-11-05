@@ -73,6 +73,23 @@ consumer, delete it (and its test), or merge the clone into one owner --
 in that order of preference. `--json` prints every current finding.
 `scripts/usecase_paths.py` remains the dynamic, report-only counterpart.
 
+## Optional-tool inventory (default-install facts)
+
+Every lookup of something outside abicheck is registered in
+`tests/optional_tool_inventory.py` with its role and what a default install
+must still produce without it. `tests/test_optional_tool_inventory_gate.py`
+(`repo_scan`) fails on an unregistered or stale site. It scans for
+`shutil.which`, `find_*_bin` resolvers, `ABICHECK_*` environment names,
+optional third-party imports, and a literal program as `argv[0]` of a list or
+tuple display; a program bound to a variable first is not resolved. An
+`optional_enrichment` entry must name the fact families it leaves intact and
+a proof in `tests/test_default_install_fact_invariants.py` (`integration`),
+which hides every optional tool and environment variable and dumps real
+libraries through the CLI with both header frontends against a compiled
+`sizeof`/`offsetof` oracle. When the gate fails, add the site to the entry
+for the same tool, or add an entry: role, `without`, `preserved`/`marked`,
+and a proof.
+
 ## Test-quality ratchet (tautological tests)
 
 Coverage counts a line as tested once a test runs it, whatever the test then
