@@ -739,13 +739,20 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "ElaboratedType.ownedTagDecl) is read in both spellings, never as "
             "absent, and the opt-in dependency pruner never elides a C++ "
             "method-shaped node, including one nested inside a prunable "
-            "function or variable. Oracle: an AST rewritten into the other "
-            "release's shape (from LLVM's JSONNodeDumper), and the "
-            "method-shaped node count with pruning off."
+            "function or variable. A base specifier resolves to its record "
+            "whether or not clang wrote a fully qualified desugaredQualType "
+            "(clang 22 writes a relative base only as written), and a base "
+            "that does not resolve makes the vtable PARTIAL, never a "
+            "confirmed list. Oracle: an AST rewritten into the other "
+            "release's shape (from LLVM's JSONNodeDumper), the "
+            "method-shaped node count with pruning off, and an independent "
+            "enumeration of C++ name lookup over a namespace tree."
         ),
         fixed_by=(1921,),
         seed_tests=(
             "tests/test_clang_ast_shape_version_drift.py",
+            "tests/test_clang_relative_base_vtable.py",
+            "tests/test_clang_vtable_base_migration.py",
             # F8 harness cell: castxml and the clang on PATH name the same
             # typedef'd anonymous tags from one C header.
             "tests/test_family_f8_target_parity.py",

@@ -248,6 +248,7 @@ def test_primary_template_pattern_proves_nothing(cls: Cls) -> None:
     )
 
 
+@pytest.mark.known_gap_canary
 @pytest.mark.parametrize("cls", SPECIALIZATIONS, ids=_IDS)
 def test_specialization_without_mangled_member_stays_unconfirmed(cls: Cls) -> None:
     """Only its header spelling is known: unproven, so not gating."""
@@ -272,6 +273,7 @@ def test_dtor_only_confirmed_by_implicit_assign(prefix: str, cls: Cls) -> None:
     )
 
 
+@pytest.mark.known_gap_canary
 @pytest.mark.parametrize("cls", DTOR_ONLY[:3], ids=lambda c: c.header_name)
 def test_dtor_only_without_assign_stays_unconfirmed(cls: Cls) -> None:
     _assert_unconfirmed(_metadata("_ZTV", cls), record=cls, vtable=(f"~{cls.leaf}",))

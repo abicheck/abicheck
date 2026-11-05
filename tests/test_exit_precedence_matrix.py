@@ -331,6 +331,7 @@ class TestOneMemberCellDiff:
         ),
         _N1_CELLS,
     )
+    @pytest.mark.known_gap_canary
     def test_cell(
         self,
         monkeypatch: pytest.MonkeyPatch,

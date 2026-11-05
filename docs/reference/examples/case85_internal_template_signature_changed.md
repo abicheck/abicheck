@@ -12,6 +12,7 @@
 | **Source files** | `catalog/cases/case85_internal_template_signature_changed/` |
 | **Rule family** | [`internal-template-signature-changed`](by-rule/internal-template-signature-changed.md) |
 | **Subject** | [Template and generic-programming issues](by-subject/template-and-generic-programming-issues.md) |
+| **Known kind gap (castxml; debug-headers, build-source)** | `func_removed` — see note below |
 
 **Category:** Template ABI | **Verdict:** 🔴 BREAKING
 
@@ -137,6 +138,10 @@ here) — see case02's parameter-type-change case for a documented `abidiff`
 exit-code comparison.
 
 ---
+
+## Ground-truth provenance
+
+**Known kind gap (castxml):** castxml records no declaration kind for an explicit instantiation, so the dropped `extern template` instance takes the export-loss path (func_visibility_changed) instead of func_removed; the clang header backend reports func_removed. (known gap: Explicit function and variable instances: removal is castxml-blind)
 
 ## Source files
 

@@ -91,6 +91,29 @@ _KIND = {"func_removed": "FUNC_REMOVED"}
             "import pytest\n@pytest.mark.integration\ndef helper():\n    assert 'func_removed' in k\n",
             False,
         ),
+        # A known-gap canary pins a miss (`not in`), so it is no detection evidence,
+        # whether marked on the module, the class or the test.
+        (
+            "import pytest\npytestmark = [pytest.mark.integration, pytest.mark.known_gap_canary]\n"
+            "def test_a():\n    assert 'func_removed' not in k\n",
+            False,
+        ),
+        (
+            "import pytest\npytestmark = pytest.mark.integration\n@pytest.mark.known_gap_canary\n"
+            "class TestX:\n    def test_a(self):\n        assert 'func_removed' not in k\n",
+            False,
+        ),
+        (
+            "import pytest\n@pytest.mark.integration\n@pytest.mark.known_gap_canary\n"
+            "def test_a():\n    assert 'func_removed' not in k\n",
+            False,
+        ),
+        (
+            "import pytest\n@pytest.mark.integration\n@pytest.mark.known_gap_canary\n"
+            "def test_a():\n    assert 'func_removed' not in k\n"
+            "@pytest.mark.integration\ndef test_b():\n    assert 'func_removed' in k\n",
+            True,
+        ),
     ],
 )
 def test_integration_scan_heuristic(

@@ -108,6 +108,7 @@ from gen_agent_skills import (  # noqa: E402
     discover_skills as _discover_generated_skills,
 )
 from generation_corpus_gate import check_generation_corpus  # noqa: E402
+from known_gap_canaries import check_known_gap_canaries  # noqa: E402
 from learning_nav_order import check_learning_nav_order  # noqa: E402
 from mypy_override_targets import (  # noqa: E402
     check_mypy_override_targets,
@@ -3605,6 +3606,7 @@ CHECKS: dict[str, Callable[[Findings], None]] = {
     "adr-index-nav-sync": check_adr_index_and_nav_sync,
     "adr-status-sync": check_adr_status_sync,
     "generation-corpus": check_generation_corpus,
+    "known-gap-canaries": check_known_gap_canaries,
     "schema-bump-reason": check_schema_bump_reasons,
     "container-corpus": check_container_corpus,
     "banned-imports": check_banned_imports,

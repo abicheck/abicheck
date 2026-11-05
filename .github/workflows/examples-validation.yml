@@ -196,7 +196,7 @@ jobs:
           PYTHONPATH=. python tests/validate_examples.py $CASES --artifact-variant build-source --jobs 0 --json \
             > results/validate_examples-build-source.json
           cp results/validate_examples-build-source.json results/validate_examples.json
-          ABICHECK_STRICT_KINDS=1 python tests/check_validate_results.py
+          python tests/check_validate_results.py
           python scripts/verify.py --profile full --only build-source-release-proof
 
       # These runners exit non-zero when any owned case fails, but write a
@@ -314,9 +314,13 @@ jobs:
           PYTHONPATH=. pytest -q --tb=short -m integration \
             'tests/test_example_autodiscovery.py::test_example_pipeline[case31_enum_rename]' \
             'tests/test_example_autodiscovery.py::test_example_pipeline[case62_type_field_added_compatible]'
+          # The whole catalog on the clang header frontend, not two cases: the
+          # strict expected_kinds gate (tests/expected_kinds_gate.py) is per
+          # frontend, so a clang-only kind miss -- and a stale
+          # expected_kinds_gaps.clang declaration -- fails here, where before
+          # the clang frontend passed case17/43/74-77/80 on verdict alone.
           PYTHONPATH=. python tests/validate_examples.py \
-            case31_enum_rename case62_type_field_added_compatible \
-            --toolchain gcc --json > results/validate_examples-clang-fallback.json
+            --toolchain gcc --jobs 0 --json > results/validate_examples-clang-fallback.json
           cp results/validate_examples-clang-fallback.json results/validate_examples.json
           python tests/check_validate_results.py
           # Leave the fixed path holding the leg's own whole-catalog result.

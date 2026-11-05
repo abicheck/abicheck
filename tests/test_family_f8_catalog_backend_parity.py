@@ -511,6 +511,7 @@ def _skip_unbuildable(case: str) -> None:
 
 @pytest.mark.integration
 @_needs_tools
+@pytest.mark.known_gap_canary
 @pytest.mark.parametrize("case", [c for c, _ in _ALL_CASES])
 def test_clang_record_layout_matches_castxml_across_the_catalog(
     case: str, catalog_dumps: CatalogDumps

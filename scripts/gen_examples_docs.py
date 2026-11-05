@@ -29,6 +29,7 @@ ROOT = Path(__file__).resolve().parent.parent
 # identical sibling-import guard for the identical reason.
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
+import catalog_kind_gaps  # noqa: E402
 import catalog_rule_registry  # noqa: E402
 import catalog_subjects  # noqa: E402
 import example_catalog  # noqa: E402
@@ -333,8 +334,7 @@ class Case:
     behavioral_note: str | None = None
     detectability: str | None = None
     known_detector_gap: str | None = None
-    known_kind_gap: str | None = None
-    known_kind_gap_note: str | None = None
+    expected_kinds_gaps: object = None  # catalog_kind_gaps renders it
     # Taxonomy (docs/contribute/plans/examples-catalog-split.md, Phase 1/2):
     # surfaced on the case page so a reader can see "is this an atomic rule
     # or a composed scenario" and "is this a duplicate/variant of another
@@ -393,8 +393,7 @@ def _read_case(name: str, meta: dict, taxonomy: dict) -> Case:
         ),
         detectability=meta.get("detectability"),
         known_detector_gap=meta.get("known_detector_gap"),
-        known_kind_gap=meta.get("known_kind_gap"),
-        known_kind_gap_note=meta.get("known_kind_gap_note"),
+        expected_kinds_gaps=meta.get("expected_kinds_gaps"),
         entity=taxonomy.get("entity", "rule"),
         scenario_kind=taxonomy.get("scenario_kind"),
         operation=taxonomy.get("operation", "compare"),
@@ -544,8 +543,7 @@ def _meta_table(case: Case) -> str:
         rows += f"| **Known detector gap** | `{case.known_detector_gap}` |\n"
     # Kind gap: the verdict/severity is correct, but the specific calibrated
     # ChangeKind above is not what the tool currently emits (case06-style).
-    if case.known_kind_gap:
-        rows += f"| **Known kind gap** | `{case.known_kind_gap}` — verdict is correct; see note below |\n"
+    rows += catalog_kind_gaps.meta_rows(case.expected_kinds_gaps)
     return rows
 
 
@@ -602,14 +600,13 @@ def _library_assertions(case: Case) -> str:
 
 
 def _provenance_notes(case: Case) -> str:
-    """Render policy_note/known_kind_gap_note prose when ground_truth.json sets
+    """Render policy_note/expected_kinds_gaps prose when ground_truth.json sets
     them, so the fact-vs-policy or kind-gap distinction is visible in the
     generated docs rather than only in the raw JSON."""
     parts = []
     if case.policy_note:
         parts.append(f"**Policy note:** {case.policy_note}\n")
-    if case.known_kind_gap_note:
-        parts.append(f"**Known kind gap:** {case.known_kind_gap_note}\n")
+    parts.extend(catalog_kind_gaps.provenance_notes(case.expected_kinds_gaps))
     if case.behavioral_note:
         parts.append(f"**Behavioral break:** {case.behavioral_note}\n")
     if not parts:

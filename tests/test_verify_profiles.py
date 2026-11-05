@@ -1095,6 +1095,35 @@ def test_integration_workflow_routes_every_lane_through_verify_py() -> None:
         assert verify.FULL in _step(name).profiles, name
 
 
+def test_integration_linux_leg_is_sharded_without_dropping_a_lane() -> None:
+    """The Linux leg outgrew its 40-min budget as one job, so it runs as N
+    shards of the integration step. The shards must cover 1..N exactly (a
+    missing index drops a slice of the tests, a duplicate runs one twice), the
+    step must pass the same N it is matrixed over and balance on the
+    integration lane's own weights, and each tool lane that shares the leg
+    (libabigail, ABICC, libz demo) must run on exactly one existing shard."""
+    workflow = _yaml_fast.safe_load(_read(".github/workflows/integration.yml"))
+    job = workflow["jobs"]["integration"]
+    entries = job["strategy"]["matrix"]["include"]
+    linux = sorted(e["shard"] for e in entries if e["os"].startswith("ubuntu"))
+    assert linux == list(range(1, len(linux) + 1)) and len(linux) >= 2, linux
+    assert all("shard" not in e for e in entries if not e["os"].startswith("ubuntu"))
+    steps = {st.get("name"): st for st in job["steps"]}
+    addopts = steps["Integration tests (Linux, with coverage)"]["env"]["PYTEST_ADDOPTS"]
+    assert f"--shard=${{{{ matrix.shard }}}}/{len(linux)}" in addopts, addopts
+    weights = re.search(r"--shard-weights=(\S+)", addopts)
+    assert weights and (ROOT / weights.group(1)).is_file(), addopts
+    for name, lane in (
+        ("libabigail parity", "libabigail-parity"),
+        ("ABICC parity", "abicc-parity"),
+        ("End-to-end demo (libz)", "demo-libz"),
+    ):
+        step = steps[name]
+        assert f"--only {lane}" in step["run"]
+        shards = [int(m) for m in re.findall(r"matrix\.shard == (\d+)", step["if"])]
+        assert len(shards) == 1 and shards[0] in linux, (name, step["if"])
+
+
 def test_integration_step_excludes_the_files_other_lanes_own() -> None:
     cmd = _step("integration").cmd
     assert "--ignore=tests/test_abi_examples.py" in cmd
