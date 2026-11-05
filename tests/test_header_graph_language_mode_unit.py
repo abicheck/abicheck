@@ -115,7 +115,14 @@ def _attach_with(
     """Run the attach over a prefetched result; the modes it re-acquired with."""
     calls: list[str | None] = []
 
-    def _acquire(headers, includes, lang_, compile_, resolved_lang_mode=None):  # noqa: ANN001
+    def _acquire(
+        headers,
+        includes,
+        lang_,
+        compile_,
+        resolved_lang_mode=None,
+        abi_exported=frozenset(),
+    ):  # noqa: ANN001
         calls.append(resolved_lang_mode)
         return _acquired(True, "re-acquired")
 
@@ -243,7 +250,14 @@ def test_no_prefetch_acquires_once_with_the_primary_decision(
 ) -> None:
     calls: list[str | None] = []
 
-    def _acquire(headers, includes, lang_, compile_, resolved_lang_mode=None):  # noqa: ANN001
+    def _acquire(
+        headers,
+        includes,
+        lang_,
+        compile_,
+        resolved_lang_mode=None,
+        abi_exported=frozenset(),
+    ):  # noqa: ANN001
         calls.append(resolved_lang_mode)
         return _acquired(True, "acquired")
 

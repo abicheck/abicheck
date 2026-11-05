@@ -516,11 +516,14 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
         # `dumper_elf_symbols._pyelftools_exported_symbols` -- which builds
         # its own `ELFFile` and walks BOTH `.dynsym` and `.symtab` -- kept
         # resolving every `Symbol.name` with one seek-and-read per name.
-        fixed_by=(1331, 1842),
+        fixed_by=(1331, 1842, 1920),
         seed_tests=(
             "tests/test_dumper_elf_symbols_buffering.py",
             "tests/test_symbols_only_reresolve_cached.py",
             "tests/test_pe_read_forces_no_collection.py",
+            # #1920: the binary-ABI --target reached the primary clang parse
+            # only, so the header-graph attach re-parsed under a second key.
+            "tests/test_clang_binary_abi_target.py",
         ),
         public_surfaces=("cli",),
         axes={

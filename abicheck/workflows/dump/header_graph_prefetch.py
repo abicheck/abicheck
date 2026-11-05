@@ -132,7 +132,17 @@ def prefetch_graph_if_useful(
     clang frontend the attach reuses the primary pass's AST instead, so a
     prefetch there would parse the same headers twice; ``None`` then, and
     whenever the graph is not wanted at all.
+
+    Also ``None`` on a clang whose default target is a Windows triple: there
+    the binary's exports can call for a ``--target`` the prefetch cannot know
+    before the snapshot exists, so its parse would be discarded and repeated.
     """
+    from ...compile_context import CompileContext as _Cc
+    from ...extract.headers.clang.abi_target import binary_abi_target_may_apply
+
     if not (wanted and headers and resolved_backend == "castxml"):
+        return None
+    is_c = (lang or "").lower() == "c"
+    if binary_abi_target_may_apply(compile or _Cc(), is_c):
         return None
     return prefetch_header_graph_ast(headers, includes, lang, compile)
