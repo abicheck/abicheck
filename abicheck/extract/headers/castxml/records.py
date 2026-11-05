@@ -161,14 +161,14 @@ def build_record_type(
     virtual_bases = [] if is_opaque else _base_names(virtual=True)
     # Polymorphic (non-empty vtable) → vtable pointer at offset 0; None when non-polymorphic so the diff can tell "gained a vptr" apart.
     vptr_offset_bits = 0 if vtable else None
-    # Best-effort layout descriptor (layout-closure work): direct (non-virtual) base subobject offsets from each ``<Base offset=...>``; the unit only has to be consistent across snapshots for change detection, and it is.
+    # Direct (non-virtual) base subobject offsets from each ``<Base offset=...>``. CastXML writes that offset in bytes; ``RecordType.base_offsets`` is bits, as DWARF and the clang layout pass record it, so a castxml snapshot compares against theirs (storage/castxml_base_offset_migration.py converts an older stored one).
     base_offsets: dict[str, int] = {}
     if not is_opaque:
         for b in el:
             if b.tag == "Base" and b.get("virtual") != "1":
                 off = optional_int_attr(b, "offset")
                 if off is not None:
-                    base_offsets[type_name(ctx, b.get("type", ""))] = off
+                    base_offsets[type_name(ctx, b.get("type", ""))] = off * 8
     # is_standard_layout / data_size_bits are left None: "not polymorphic and no virtual bases" is not a sound standard-layout signal (a mixed-access class is already non-standard-layout, so the heuristic would flip True→False on gaining a virtual and emit a spurious STANDARD_LAYOUT_LOST) (Codex review #345). is_trivially_copyable is derived from the special members CastXML emits, tri-state (record_traits.py).
     trivially = trivially_copyable(ctx, el)  # None for an incomplete record
     # castxml records the `final` class-key specifier as a `final` token

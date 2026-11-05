@@ -190,31 +190,10 @@ def test_clang_macro_spelled_alias_template_default_is_not_seen(tmp_path: Path) 
     assert _template_gap_notes(report) == []
 
 
-# -- "The clang record-layout pass leaves C headers, unnameable records and
-#    alias-template arrays to DWARF"
-
-_C_OLD = "struct S { int a; };\nint f(struct S s);\n"
-_C_NEW = "struct S { int a; int b; };\nint f(struct S s);\n"
-_C_SRC = '#include "api.h"\nint f(struct S s) { return s.a; }\n'
-
-
-def test_clang_c_header_record_growth_without_dwarf_misses_the_size_change(
-    tmp_path: Path,
-) -> None:
-    """The layout pass probes C++ only: a C struct that grows, built without -g, has no size."""
-    _require("clang", "gcc")
-    report = _compare_libraries(
-        tmp_path,
-        frontend="clang",
-        lang="c",
-        sides=_write_pair(tmp_path, "c", (_C_OLD, _C_NEW), _C_SRC),
-        debug=False,
-    )
-    kinds = _kinds(report)
-    assert "type_field_added_compatible" in kinds
-    assert "type_size_changed" not in kinds
-    assert report["verdict"] == "COMPATIBLE"
-
+# -- "The clang record-layout pass leaves unnameable records and
+#    alias-template arrays to DWARF" (the C-header residual closed with
+#    extractor generation 39; its canary is now a regression test in
+#    tests/test_clang_c_header_layout.py)
 
 _ALIAS = (
     "#include <memory>\nnamespace m {{\nstruct Impl;\n"
@@ -261,6 +240,48 @@ def test_castxml_case85_reports_visibility_change_not_removal(tmp_path: Path) ->
         "internal_template_leaks_via_public_api",
     } <= kinds
     assert "func_removed" not in kinds
+
+
+# -- "`dumper.dump()` never runs the clang record-layout pass"
+
+_DD_HEADER = "struct W { int a; long b; };\nint f(W* w);\n"
+_DD_SRC = '#include "api.h"\nint f(W* w) { return w->a; }\n'
+
+
+def test_legacy_dumper_dump_leaves_a_clang_record_unsized(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without DWARF, the in-process `dumper.dump()` has no record size on clang;
+    `run_dump()` on the same library lays the record out (the control)."""
+    _require("clang", "g++")
+    from abicheck.dumper import dump
+    from abicheck.service import run_dump
+
+    (tmp_path / "api.h").write_text(_DD_HEADER, encoding="utf-8")
+    (tmp_path / "api.cpp").write_text(_DD_SRC, encoding="utf-8")
+    lib = tmp_path / "lib.so"
+    subprocess.run(
+        [
+            "g++",
+            "-std=c++17",
+            "-shared",
+            "-fPIC",
+            f"-I{tmp_path}",
+            str(tmp_path / "api.cpp"),
+            "-o",
+            str(lib),
+        ],
+        check=True,
+    )
+    monkeypatch.setenv("ABICHECK_AST_FRONTEND", "clang")
+    headers = [tmp_path / "api.h"]
+
+    def sizes(snap: Any) -> list[tuple[str, int | None]]:
+        return [(t.name, t.size_bits) for t in snap.declarations.types]
+
+    controlled = run_dump(lib, "elf", headers=headers, version="v1", frontend="clang")
+    assert sizes(controlled) == [("W", 128)]
+    assert sizes(dump(lib, headers=headers, version="v1")) == [("W", None)]
 
 
 # -- "Catalog known-gap rows at debug-headers depth read NO_CHANGE (case105, case98)"
