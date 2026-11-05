@@ -47,11 +47,24 @@ _DSIZE_RE = re.compile(r"dsize=(\d+)")
 _ALIGN_RE = re.compile(r"\balign=(\d+)")
 #: ``  <offset> | <indent><text>`` where offset is ``N`` or ``N:a-b``.
 _LINE_RE = re.compile(r"^\s*(\d+)(?::(\d+)-\d+)?\s\|(\s+)(\S.*)$")
+_EMPTY_TAG_RE = re.compile(r"\s+\(empty\)$")
+#: A base subobject line (its ``(empty)`` tag already removed).
 _BASE_RE = re.compile(
-    r"^(?:class|struct|union)\s+(.+?)\s+\((primary base|base|virtual base)\)$"
+    r"^(?:class|struct|union)\s+(.+?)\s+"
+    r"\((primary base|base|primary virtual base|virtual base)\)$"
 )
 _VPTR_RE = re.compile(r"^\((.+) vtable pointer\)$")
-_RECORD_KW_RE = re.compile(r"^(?:class|struct|union)\s+(.+)$")
+#: The tag keyword that opens an entry's record line (``struct ns::X``); in C a
+#: typedef naming an unnamed struct prints as the bare typedef name, with none.
+_RECORD_KEYWORD_RE = re.compile(r"^(?:class|struct|union)\s+")
+#: An unnamed member aggregate (``union X::(anonymous at a.h:3:5)``) with no
+#: field name after it: its members are members of the enclosing record. Clang
+#: 23 qualifies a nested one by its unnamed parent
+#: (``struct X::(anonymous union)::(anonymous at a.h:3:9)``), so only the last
+#: parenthesized group is the member's own.
+_ANON_MEMBER_RE = re.compile(
+    r"^(?:class|struct|union)\s+.*\((?:anonymous|unnamed)\b[^()]*\)$"
+)
 
 
 def probeable_record_name(name: str) -> bool:
@@ -65,8 +78,22 @@ def probeable_record_name(name: str) -> bool:
     )
 
 
-def probe_source(include_lines: str, names: list[str]) -> str:
-    """The probe TU: the header includes plus one ``sizeof`` per record."""
+def probe_source(include_lines: str, names: list[str], *, c_mode: bool = False) -> str:
+    """The probe TU: the header includes plus one ``sizeof`` per record.
+
+    C has no scope operator, and a record name there is either a tag
+    (``struct P``) or a typedef (``typedef struct {...} P``), which the
+    snapshot does not tell apart -- so a C probe names each record all three
+    ways. The two that do not resolve are compile errors that cost nothing:
+    clang still lays out the one that does.
+    """
+    if c_mode:
+        body = "".join(
+            f"static const unsigned long __abicheck_layout_{i}_{j} = sizeof({spelled});\n"
+            for i, n in enumerate(names)
+            for j, spelled in enumerate((f"struct {n}", f"union {n}", n))
+        )
+        return f"{include_lines}{body}"
     body = "".join(
         f"constexpr unsigned long __abicheck_layout_{i} = sizeof(::{n});\n"
         for i, n in enumerate(names)
@@ -85,6 +112,13 @@ def _field_name(text: str) -> str | None:
 def _parse_entry(lines: list[str]) -> dict[str, Any] | None:
     record: dict[str, Any] | None = None
     member_indent: int | None = None
+    # Indents whose lines are the record's own members: its direct member
+    # indent, then -- while inside one -- the member indent of each unnamed
+    # member aggregate, whose fields castxml and the clang AST both flatten
+    # into the record. A stack, so a later by-value member's own members at
+    # the same depth are not read as the record's.
+    member_indents: list[int] = []
+    anon_parent: int | None = None
     fields: list[dict[str, Any]] = []
     bases: list[dict[str, Any]] = []
     vptr: int | None = None
@@ -106,24 +140,45 @@ def _parse_entry(lines: list[str]) -> dict[str, Any] | None:
         byte_off, bit_start, indent, text = m.groups()
         offset_bits = int(byte_off) * 8 + int(bit_start or 0)
         if record is None:
-            km = _RECORD_KW_RE.match(text.strip())
-            if km is None:
-                return None
-            record = {"qualified_name": km.group(1).strip()}
+            # ``struct Tag (empty)`` names ``Tag``; ``T`` (C typedef) names ``T``.
+            record_name = _EMPTY_TAG_RE.sub(
+                "", _RECORD_KEYWORD_RE.sub("", text.strip())
+            )
+            record = {"qualified_name": record_name.strip()}
             continue
         depth = len(indent)
         if member_indent is None:
             member_indent = depth
-        if depth != member_indent:
+            member_indents.append(depth)
+        if anon_parent is not None:
+            # First line after an unnamed member aggregate: its members'
+            # indent, when it is deeper (an empty one has no members).
+            if depth > anon_parent:
+                member_indents.append(depth)
+            anon_parent = None
+        while len(member_indents) > 1 and depth < member_indents[-1]:
+            member_indents.pop()
+        if depth != member_indents[-1]:
             continue  # a nested base's or by-value member's own members
-        text = text.strip()
-        vm = _VPTR_RE.match(text)
-        if vm is not None:
-            vptr = offset_bits if vptr is None else vptr
-            continue
-        bm = _BASE_RE.match(text)
-        if bm is not None:
-            bases.append({"name": bm.group(1).strip(), "offset_bits": offset_bits})
+        # clang tags an empty base or by-value member ``(empty)`` after it.
+        text = _EMPTY_TAG_RE.sub("", text.strip())
+        if depth == member_indent:
+            vm = _VPTR_RE.match(text)
+            if vm is not None:
+                vptr = offset_bits if vptr is None else vptr
+                continue
+            bm = _BASE_RE.match(text)
+            if bm is not None:
+                bases.append(
+                    {
+                        "name": bm.group(1).strip(),
+                        "offset_bits": offset_bits,
+                        "is_virtual": "virtual" in bm.group(2),
+                    }
+                )
+                continue
+        if _ANON_MEMBER_RE.match(text):
+            anon_parent = depth
             continue
         name = _field_name(text)
         if name is not None:

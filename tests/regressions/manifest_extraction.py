@@ -672,36 +672,59 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
         invariant=(
             "A header backend that cannot read a fact family the other backend "
             "records gets it from its own toolchain instead of leaving the field "
-            "empty: the clang backend sizes records from clang's own "
-            "-fdump-record-layouts when DWARF has only a declaration stub, records "
-            "an explicitly instantiated class template as its own X<Args> record, "
-            "records a field declared through an alias template by its target, and "
-            "a leak path written as a partial scope (detail::Impl) reaches the "
-            "changed record through C++ name lookup, never a spelling match. Every "
-            "size and offset it reports equals sizeof/offsetof of a compiled program."
+            "empty, and both backends store each layout fact in the model's unit: "
+            "the clang backend sizes records from clang's own "
+            "-fdump-record-layouts when DWARF has only a declaration stub -- C "
+            "records, empty records, empty bases and the members of an unnamed "
+            "member aggregate included, a virtual base never in base_offsets -- "
+            "records an explicitly instantiated class template as its own X<Args> "
+            "record, records a field declared through an alias template by its "
+            "target, and a leak path written as a partial scope (detail::Impl) "
+            "reaches the changed record through C++ name lookup, never a spelling "
+            "match; castxml stores base offsets in bits, as DWARF and clang do. "
+            "Every size and offset either backend reports equals sizeof/offsetof "
+            "of a compiled program, and for every library-owned record of every "
+            "catalog case the two backends agree, except for a declared, tracked "
+            "naming limitation."
         ),
         fixed_by=(1918,),
         seed_tests=(
             "tests/test_clang_record_layout_dump.py",
             "tests/test_family_f8_target_parity.py",
+            "tests/test_family_f8_catalog_backend_parity.py",
         ),
-        public_surfaces=("cli",),
+        public_surfaces=("cli", "python-api"),
         axes={
-            "frontend": ("clang",),
+            "frontend": ("castxml", "clang"),
+            "language": ("c", "c++"),
             "record_shape": (
                 "plain",
                 "polymorphic",
                 "derived",
                 "explicit_instantiation",
                 "bitfield",
+                "empty",
+                "empty_base",
+                "virtual_base",
+                "anonymous_member",
+                "c_typedef_struct",
             ),
             "leak_path": ("inheritance", "by_value_field", "vtable"),
         },
         known_gaps=(
             KnownGap(
                 description=(
-                    "C headers are not probed, and a record sizeof cannot name "
-                    "(private nested, unnamed) still depends on DWARF."
+                    "A record sizeof cannot name (private nested, unnamed) still "
+                    "depends on DWARF."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+            KnownGap(
+                description=(
+                    "castxml elides defaulted template arguments and inline "
+                    "namespaces from record names; the clang backend records only "
+                    "explicitly instantiated specializations (BACKEND_EXCEPTIONS "
+                    "in the catalog harness)."
                 ),
                 reference="docs/contribute/known-gaps.md",
             ),
