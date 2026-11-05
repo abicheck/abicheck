@@ -187,6 +187,10 @@ through the recursion, for BOTH backends together -- fixing only this one
 would trade one asymmetry (a total gap, closed) for a new one (clang more
 precise than castxml on this specific shape), which is its own scoped
 follow-up, not a drive-by extension of this pass.
+Since generation 40 the clang walk at least says so: a base reached a
+second time where either arrival is non-virtual (a repeated, separate
+subobject) is reported as unresolved, so the vtable fact is ``partial``
+rather than a confirmed list that is one slot group short.
 """
 
 from __future__ import annotations
@@ -392,8 +396,9 @@ def _base_qualnames(
     qualname: str,
     resolver: BaseResolver,
     unresolved: list[str],
-) -> list[str]:
-    """Direct + virtual base record keys, in ``bases`` array order.
+) -> list[tuple[str, bool]]:
+    """Direct + virtual base record keys with their ``isVirtual`` flag, in
+    ``bases`` array order.
 
     Each base specifier is resolved by :class:`.base_resolution.BaseResolver`
     -- an exact record key first (clang <= 21's ``desugaredQualType``, or a
@@ -404,19 +409,18 @@ def _base_qualnames(
     to *unresolved* (its written spelling) and left out of the result, so
     the caller can report the vtable as incomplete rather than confirmed.
 
-    Doesn't distinguish virtual from non-virtual bases -- castxml's own
-    inherited-slot walk (``_inherited_vtable_slots``) doesn't either, since
-    every base contributes to the derived class's *set of virtual methods
-    it must provide slots for*, regardless of how that base is placed at
-    runtime.
+    Every base contributes to the derived class's *set of virtual methods it
+    must provide slots for*, however it is placed at runtime (castxml's own
+    ``_inherited_vtable_slots`` walk is the same); the flag only lets the
+    caller tell a shared virtual base from a repeated non-virtual one.
     """
-    out: list[str] = []
+    out: list[tuple[str, bool]] = []
     for b in node.get("bases", []) or []:
         if not isinstance(b, dict):
             continue
         found = resolver.resolve(b, qualname)
         if found is not None:
-            out.append(found)
+            out.append((found, bool(b.get("isVirtual"))))
             continue
         type_obj = b.get("type")
         spelled = (
@@ -429,7 +433,7 @@ def _base_qualnames(
 def _collect_virtual_slots(
     qualname: str,
     records_by_qualname: dict[str, dict[str, Any]],
-    seen: set[str],
+    seen: dict[str, bool],
     resolver: BaseResolver,
     unresolved: list[str],
 ) -> tuple[dict[_SlotKey, str], dict[_Signature, list[_SlotKey]]]:
@@ -449,9 +453,6 @@ def _collect_virtual_slots(
     insertion position, same as castxml), a genuinely new virtual creates
     one fresh physical key and appends.
     """
-    if qualname in seen:
-        return {}, {}
-    seen.add(qualname)
     node = records_by_qualname.get(qualname)
     if node is None:
         return {}, {}
@@ -461,7 +462,17 @@ def _collect_virtual_slots(
     unresolved_before = len(unresolved)
     base_qualnames = _base_qualnames(node, qualname, resolver, unresolved)
     own_base_unresolved = len(unresolved) > unresolved_before
-    for base_qualname in base_qualnames:
+    for base_qualname, is_virtual in base_qualnames:
+        if base_qualname in seen:
+            # Reached again. All virtual base-specifiers naming a class share
+            # one subobject; each non-virtual one is a subobject of its own
+            # with its own slots, which this walk (one slot per declaring
+            # node, see the module docstring) cannot represent -- so the
+            # vtable is a lower bound, not a confirmed list.
+            if not (is_virtual and seen[base_qualname]):
+                unresolved.append(f"{base_qualname} (repeated non-virtual base)")
+            continue
+        seen[base_qualname] = is_virtual
         if not is_record_definition(records_by_qualname[base_qualname]):
             # A key naming only a forward declaration: its virtuals are
             # invisible here, which is not the same as having none.
@@ -575,7 +586,7 @@ def build_vtable_evidence(
     slots, _ = _collect_virtual_slots(
         qualname,
         records_by_qualname,
-        set(),
+        {qualname: False},
         resolver_for(records_by_qualname),
         unresolved,
     )

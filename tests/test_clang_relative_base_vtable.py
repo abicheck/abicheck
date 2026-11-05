@@ -396,6 +396,39 @@ def test_unresolved_base_never_reads_as_a_confirmed_vtable(build, shape: str) ->
     assert any("unresolved base" in d for d in rec.vtable_fact.diagnostics)
 
 
+def _diamond(left_virtual: bool, right_virtual: bool) -> dict:
+    """``struct X { virtual void q(); }; struct L : [virtual] X {};
+    struct R : [virtual] X {}; struct Z : L, R {};``"""
+
+    def base(name: str, virtual: bool) -> dict:
+        return {"type": {"qualType": name}, "access": "public", "isVirtual": virtual}
+
+    return _tu(
+        _cls("X", _vmethod("q", "_ZN1X1qEv")),
+        _cls("L", bases=[base("X", left_virtual)]),
+        _cls("R", bases=[base("X", right_virtual)]),
+        _cls("Z", bases=[base("L", False), base("R", False)]),
+    )
+
+
+@pytest.mark.parametrize("left_virtual", [False, True])
+@pytest.mark.parametrize("right_virtual", [False, True])
+def test_repeated_base_subobject_never_reads_as_confirmed(
+    left_virtual: bool, right_virtual: bool
+) -> None:
+    """Oracle: [class.mi] -- Z has one X subobject per non-virtual path plus
+    one shared by all virtual paths. With more than one, Z owns more vtable
+    slot groups than the walk can represent, so the fact must not be
+    confirmed; with exactly one, it is."""
+    x_subobjects = (
+        (not left_virtual) + (not right_virtual) + (left_virtual or right_virtual)
+    )
+    rec = _types(_diamond(left_virtual, right_virtual))["Z"]
+    assert rec.vtable == ["_ZN1X1qEv"]
+    expected = FactStatus.PRESENT if x_subobjects == 1 else FactStatus.PARTIAL
+    assert rec.vtable_fact.status is expected
+
+
 # ── C++ lookup property, against an independent enumeration ──────────────
 
 #: A small namespace tree: scope -> names it declares (records and

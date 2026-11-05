@@ -143,7 +143,7 @@
       "abicheck/extract/headers/clang/template_param_indexes.py": "1d54979cca271e1b112652f45f54ddd1356ca5f32e3367a3723aeaacd4e7c68d",
       "abicheck/extract/headers/clang/templates.py": "ee85de87a4180b5bed93d501237f153d1132fd325504c1fdf52fab87c7c95efe",
       "abicheck/extract/headers/clang/typedefs.py": "0345022b18ed0a011c4a1420e7b85e77dc3437f1339d5572ff28af29aebc0f3b",
-      "abicheck/extract/headers/clang/vtable.py": "99e68b24c02c310800a8f16a4efdfc666cb8b2e1d72fb90afe8eda3b929aed08",
+      "abicheck/extract/headers/clang/vtable.py": "10c1b5454a786558bb9103954a0f9331d13c09f9b43c62dd4d569549dfb8eee2",
       "abicheck/extract/headers/clang_header_argv.py": "644a6454c6a3da3ab5f184cc2d9778d51f141f1e528f86162cccb815f9b17ddb",
       "abicheck/extract/headers/compile_provenance.py": "5c800725da59c2c3aeac4e85118dcd54edd6ec5c75875e483978b78a750ec0af",
       "abicheck/extract/headers/manifest.py": "4f0e740bfeb88aa4363176f2defe422826a9e2cd91b03cd317f6f86f4eec5066",
@@ -198,9 +198,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "4ddeb73947d73daa91d6471884f393129e86fe4fbabf72e784655b458d1f84fb",
+    "fingerprint": "80b302d9c78046193a8e4e8243ede9732937bc42962bcfc52c23de29ab1ab608",
     "generation": 40,
-    "reason": "same unmerged generation-40 change (PR #1929): review fixes to base_resolution.py lookup order, template-parameter and alias-chain handling; generation 40 has not shipped, so no stored snapshot carries the earlier draft"
+    "reason": "same unmerged generation-40 change (PR #1929): a repeated non-virtual base now makes the clang vtable PARTIAL; generation 40 has not shipped"
   },
   "resolver": {
     "files": {
