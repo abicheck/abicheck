@@ -113,10 +113,13 @@ MIN_MARGINAL_SECONDS = 0.25
 #: A point whose margin over the floor is positive but below this is left out
 #: of the fit as unresolved. Its log is dominated by timing noise: margins of
 #: 0.01 s, 0.10 s and 2.0 s at 3/6/10 libraries fit an exponent of ~3.4 purely
-#: through the first point. A point at or *below* the floor is different: it
-#: stays in (clamped), because a small n becoming faster than n=1 is itself a
-#: signal the fit must not drop.
-NOISE_MARGIN_SECONDS = 0.05
+#: through the first point. The header axis is flat up to about 8 headers and
+#: linear after, so its small-n margin lands near 0.06-0.13 s; at a 0.05 s
+#: cutoff that point alone fitted 1.41-1.98 for a sweep that got faster at every
+#: size. A point at or *below* the floor is different: it stays in (clamped),
+#: because a small n becoming faster than n=1 is itself a signal the fit must
+#: not drop.
+NOISE_MARGIN_SECONDS = 0.15
 
 
 @dataclass
