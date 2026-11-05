@@ -115,6 +115,7 @@ dependency walk and debug roots to every member. No open gap remains.
 #### A `--build-info` dump's L5 graph displaces the header graph, so a public-to-internal dependency goes unreported (2026-11-05)
 
 **Status (2026-11-05): OPEN.** A dump with `--build-info` embeds a build pack whose L5 graph has no `SOURCE_DECLARES` public closure, and `resolve_l5_source_graph` prefers it over the header graph that has one, so case187/188/189/191 lose `public_api_internal_dependency_added` in the `build-source` lane on both header frontends (declared under `expected_kinds_gaps`). [Full write-up](known-gaps/a-build-info-dump-graph-displaces-the-header-graph-public-closure.md)
+<!-- no-canary: already pinned by catalog/ground_truth.json's expected_kinds_gaps rows for case187/188/189/191; tests/check_validate_results.py fails a row whose declared gap goes stale, so the build-source lane of tests/validate_examples.py fails when this gap closes -->
 
 #### The standing-inventory headline folds observed compatible findings into one clause (2026-10-28)
 
