@@ -11,11 +11,12 @@ Still open:
 - **castxml never records the declaration kind.** Its instance of an
   `extern template` sits on the primary template's line, so it cannot be told
   from an implicit instance. Its side stays `NOT_COLLECTED` and the export-loss
-  path keeps `func_visibility_changed`. On the gcc/castxml validator lane,
-  `case85` therefore stays `KINDS_MISMATCH`. This is reported, not masked: without
-  `ABICHECK_STRICT_KINDS` it is a report line, and `ground_truth.json` is unchanged.
-  Closing it needs castxml to expose the kind, or a per-frontend `known_gap` with
-  an observed value per key (a schema change left for a follow-up).
+  path keeps `func_visibility_changed`. On the castxml lanes (`debug-headers`
+  and `build-source`) `case85` therefore misses `func_removed`;
+  `ground_truth.json` declares exactly that under
+  `expected_kinds_gaps.castxml` (2026-11-05), so the cell passes only while
+  `func_removed` stays missing there, and FAILs as stale once castxml reports
+  it. The clang lanes report it. Closing it needs castxml to expose the kind.
 - **Two instances of one class template in one translation unit share a
   scope.** The text dump does not spell a specialization's arguments, so
   `Box<float>` and `Box<int>` both key as `Box`. A member declared by both reads

@@ -465,4 +465,37 @@ TEST_HARNESS_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="tests.verdict_only_gate_hides_missing_calibration_kind",
+        invariant=(
+            "A catalog lane cell passes only when the ChangeKinds its ground "
+            "truth calibrates are observed: a missing `expected_kinds` entry "
+            "or a present `expected_absent_kinds` entry fails the cell for "
+            "that header frontend and mode unless `expected_kinds_gaps` "
+            "declares exactly that set, and a declaration the lane no longer "
+            "reproduces fails as stale. `validate_examples.py` scored only the "
+            "verdict string, so the clang header lane passed "
+            "case17/43/74-77/80 without the layout kinds they exist for, and "
+            "the gap sat in known-gaps.md with no test failing."
+        ),
+        # 1918 closed the clang layout gap these cases exposed.
+        fixed_by=(1918,),
+        seed_tests=("tests/test_expected_kinds_gate.py",),
+        axes={
+            "frontend": ("castxml", "clang"),
+            "mode": ("debug-headers", "build-source", "release-headers"),
+            "emitted": ("all subsets of expected + absent kinds",),
+            "declared": ("all subsets", "other frontend", "other mode"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "release-headers/stripped-headers keep the kinds signal "
+                    "reported-only (DWARF loss by design); only the native "
+                    "lanes fail on it."
+                ),
+                reference="catalog/README.md",
+            ),
+        ),
+    ),
 )

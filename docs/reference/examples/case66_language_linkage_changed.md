@@ -12,7 +12,6 @@
 | **Source files** | `catalog/cases/case66_language_linkage_changed/` |
 | **Rule family** | [`language-linkage-changed`](by-rule/language-linkage-changed.md) |
 | **Subject** | [Calling convention and integer-model changes](by-subject/calling-convention-and-integer-model-changes.md) |
-| **Known kind gap** | `func_language_linkage_changed` — verdict is correct; see note below |
 
 **Category:** Function ABI | **Verdict:** 🔴 BREAKING
 
@@ -142,10 +141,6 @@ abidiff v1.xml v2.xml
 - [Itanium C++ ABI — Name Mangling](https://itanium-cxx-abi.github.io/cxx-abi/abi.html#mangling)
 
 ---
-
-## Ground-truth provenance
-
-**Known kind gap:** The overall verdict (BREAKING) is correct via func_removed (v1's plain-name pair has no counterpart under v2's mangled name), but func_language_linkage_changed never fires — a real, root-caused gap, not a fixture problem, though narrower than first documented (superseding an earlier, incorrect theory about castxml never emitting extern="1"). Root cause, confirmed by direct castxml invocation: v2.h has no extern "C" and no other C++-looking construct, so dumper.py's _detect_cpp_headers() content-sniff (correctly, from the header text alone) does not classify it as C++ and castxml parses it in C mode (`-x c -std=gnu11`). castxml still emits a pseudo-Itanium `mangled` attribute even in C mode, but *without* parameter-type encoding (e.g. 'parse_config' -> '_Z12parse_config', missing the 'PKc' suffix a real `const char*` parameter would add) — this incomplete guess matches neither v1's real plain export ('parse_config') nor v2's real, fully-mangled C++ export ('_Z12parse_configPKc', since v2.cpp is genuinely compiled as C++). The real fix needs TU-level context (this header is included from a .cpp, so it has C++ linkage) that no per-header content sniff can recover; a bare-name/real-export reconciliation (the fix applied for case141) does not help here because neither side of this pair matches by bare name.
 
 ## Source files
 

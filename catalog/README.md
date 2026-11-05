@@ -111,61 +111,28 @@ the way it previously did (stale at a 169-case catalog for several releases).
 
 ### Known validation gaps
 
-- **`expected_kinds`/`expected_absent_kinds` are checked but not yet blocking, and every
-  case that ever mismatched has now been individually triaged.** `tests/validate_examples.py`
-  parses the real compare output's change kinds and checks them against
-  `expected_kinds`/`expected_absent_kinds`, surfaced per-case as `kinds_strict` — previously only
-  the final verdict string was asserted, so a case could PASS with the right severity for the
-  wrong detector reason. A prior full-catalog run found 19 such cases; each was independently
-  re-derived (per-case: is the expected kind semantically correct, is the fixture actually
-  constructed to trigger it, is a generic detected kind sufficient, is this a detector bug, a
-  fixture bug, or a metadata bug) rather than blanket-implementing 19 detectors:
-  - **6 were metadata bugs** — `expected_kinds` named the wrong (or an overly specific) kind for
-    what the fixture actually demonstrates; corrected in `ground_truth.json`:
-    `case65_symbol_version_removed` (`symbol_version_defined_removed` → `symbol_version_node_removed`,
-    the two are deliberately deduplicated to the more specific kind), `case77_detail_templated_base_changed`
-    (→ `internal_template_leaks_via_public_api`, the templated sibling of the non-template kind),
-    `case80_pimpl_shared_to_unique` (→ `typedef_base_changed` + `struct_size_changed`; its README's
-    claim that `type_field_type_changed` fires on `impl_` was factually wrong), `case94_empty_tag_gained_state`
-    (→ `type_field_added_compatible`, the correct classification for a non-polymorphic field append),
-    `case126_sycl_device_impl_ptr` (→ `struct_size_changed`, the DWARF-side kind that actually proves
-    the break; the AST-side `type_size_changed` correctly declines given null layout evidence), and
-    `case23_pure_virtual_added` (→ `func_virtual_became_pure`, not `func_pure_virtual_added` — the
-    fixture's method was already virtual, not newly added).
-  - **1 was a fixture bug**, fixed in source: `case23_pure_virtual_added`'s v2 library defined no
-    out-of-line `Processor::process()` body at all, so v2's binary had no symbol to pair against
-    v1's for the pure-virtual-transition comparison; added a body (legal for a pure virtual function,
-    reachable only via an explicit qualified call, so it changes no runtime behavior) so the two
-    versions' `Processor::process()` can be compared.
-  - **Genuine, root-caused detector gaps** are documented in `ground_truth.json` via a
-    `known_kind_gap` (the specific missing/wrong kind) + `known_kind_gap_note` (the grounded root
-    cause, cited to file:line) on each case, and surfaced by `validate_examples.py`'s `kinds_strict`
-    as `documented-mismatch` (a triaged, tracked gap) rather than a bare `mismatch` (an unexplained
-    one). A prior pass triaged 13 such cases (`case06_visibility`, `case39_var_const`,
-    `case66_language_linkage_changed`, `case72_covariant_return_changed`,
-    `case74_detail_base_class_changed`, `case75_detail_embedded_by_value`,
-    `case76_detail_pimpl_vtable_changed`, `case79_missing_template_instantiation`,
-    `case82_sycl_overload_set_removed`, `case87_default_template_arg_changed`,
-    `case88_cpo_kind_changed`, `case116_atomic_qualifier_changed`,
-    `case141_versioned_symbol_scheme`); the CastXML schema-completeness/Clang-parity work in PR #582
-    subsequently closed all but one of those — `ground_truth.json` is the live count (grep it for
-    `known_kind_gap` rather than trusting a number here), and as of this writing
-    `case66_language_linkage_changed` is the only case still carrying one: castxml parses its v2
-    header in C mode (the header alone gives no C++ signal) and its pseudo-Itanium `mangled` guess
-    for a C-mode Variable/Function doesn't match either side's real export — see the case's
-    `known_kind_gap_note` for the full root cause. The verdict is still correct via a generic
-    `func_removed`; only the dedicated `func_language_linkage_changed` kind is missing.
-  - `case59_func_became_inline` and (clang-only) `case115_bit_int_width_changed` no longer/don't
-    reproduce as kind mismatches in this pass (the former is fixed upstream; the latter is a
-    local castxml/`_BitInt` parsing limitation in this environment, not evaluated) — case membership
-    here is toolchain-sensitive, so treat the 13 above as the latest triaged set, not a fixed list.
-  - Setting `ABICHECK_STRICT_KINDS=1` (see `tests/check_validate_results.py`) makes any *new*,
-    untriaged `mismatch` blocking while leaving the 13 documented `documented-mismatch` gaps
-    non-blocking — implementing fixes for those 13 remains future work, not something this pass
-    attempted (per the guidance above: triage first, then decide case by case whether a fix is
-    warranted). The full example matrix (`skills-src/evaluation/validation/scripts/collect_full_example_matrix.py`)
-    surfaces both `kind_mismatch_cases` (untriaged) and `documented_kind_gap_cases` (triaged)
-    separately at the matrix level.
+- **`expected_kinds`/`expected_absent_kinds` block the native lanes, per header frontend and
+  mode.** `tests/validate_examples.py` checks the real compare output's change kinds against
+  `expected_kinds`/`expected_absent_kinds` (surfaced per row as `kinds_strict`). In the
+  `debug-headers` and `build-source` lanes a missing expected kind, or a present absent kind,
+  FAILs the cell even when the verdict matches (`tests/expected_kinds_gate.py`) — before this,
+  only the verdict string decided the row, and the clang header lane passed
+  case17/43/74-77/80 without the layout kinds they calibrate. The one escape hatch is a
+  declared gap: `expected_kinds_gaps` names, per frontend (`castxml`/`clang`, the
+  `ABICHECK_AST_FRONTEND` header backend), the kinds that lane misses, the modes it misses
+  them in (default: both), a `reason`, and the `known_gap` heading of
+  `docs/contribute/known-gaps.md` that tracks it. A declared kind the lane reports again is
+  a **stale** declaration and FAILs the cell too, so a declaration cannot outlive its gap.
+  The loader (`expected_kinds_gate.validate_ground_truth`, run by `validate_examples.py` and
+  `tests/test_expected_kinds_gate.py`) rejects an unknown frontend or mode, a kind that is
+  in neither expected list, a missing reason, and a `known_gap` that starts no heading.
+  The older unscoped `known_kind_gap`/`known_kind_gap_note` fields are retired. The
+  release-headers/stripped-headers lanes keep `kinds_strict` reported-only: they lose
+  DWARF by design and are guarded by `check_stripped_fp.py`. The verdict-level
+  `known_gap`/XFAIL mechanism below is separate: an XFAIL row is not kinds-checked.
+  The full example matrix (`skills-src/evaluation/validation/scripts/collect_full_example_matrix.py`)
+  lists `kind_mismatch_cases` and the declared-gap cases (`documented_kind_gap_cases`)
+  separately.
 - **Verdicts are matched exactly — there is no `API_BREAK`/`COMPATIBLE` normalization.**
   `tests/validate_examples.py` compares the actual verdict to `expected` verbatim; an
   earlier `_normalize_verdict` helper that treated the two as equivalent has been removed.
