@@ -462,9 +462,13 @@ _VARIANTS: dict[str, str | None] = {
 }
 
 
+#: The harness dumps ELF libraries (``run_dump(..., "elf")``) stripped with
+#: ``objcopy --strip-debug``, so it is a Linux harness: a Windows or macOS
+#: runner can have all three tools on PATH and still no ELF case to build.
 _needs_tools = pytest.mark.skipif(
-    not all(shutil.which(t) for t in ("castxml", "clang++", "objcopy")),
-    reason="needs castxml, clang++ and objcopy",
+    CURRENT_PLATFORM != "linux"
+    or not all(shutil.which(t) for t in ("castxml", "clang++", "objcopy")),
+    reason="needs Linux (ELF cases) with castxml, clang++ and objcopy",
 )
 
 
@@ -540,6 +544,7 @@ _MUTANT_CASES = (
 def test_seeded_mutant_disabled_clang_layout_pass_is_reported(
     case: str, catalog_dumps: CatalogDumps
 ) -> None:
+    _skip_unbuildable(case)
     case_dir = catalog_dumps.case_dir(case)
     found: list[Divergence] = []
     for side in ("v1", "v2"):
