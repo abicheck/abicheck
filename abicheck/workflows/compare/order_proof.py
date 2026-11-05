@@ -33,7 +33,8 @@ def order_proof_needed(old: Any, new: Any) -> bool:
     Mirrors the ADR-082 comparison rule (``comparability_profile``): the proof is
     read only when the two recorded ``header_sequence`` values differ (a
     permutation, or an insertion or removal judged on the canonical sequences).
-    Equal sequences, or both sides already proven, need nothing more.
+    Equal sequences, both sides already proven, or a difference the gate's
+    scope-confirmed evolution carve-out already waives need nothing more.
     """
     old_c, new_c = getattr(old, "contract", None), getattr(new, "contract", None)
     if old_c is None or new_c is None:
@@ -42,7 +43,15 @@ def order_proof_needed(old: Any, new: Any) -> bool:
     new_seq = new_c.profile_fields.get("header_sequence")
     if old_seq == new_seq:
         return False
-    return old_c.header_canonical is None or new_c.header_canonical is None
+    if old_c.header_canonical is not None and new_c.header_canonical is not None:
+        return False
+    # The scope-confirmed evolution carve-out (an added or removed header,
+    # survivors in order) waives the difference without reading the proof.
+    from abicheck.comparability_profile import (
+        header_sequence_change_is_scope_confirmed,
+    )
+
+    return not header_sequence_change_is_scope_confirmed(old_c, new_c)
 
 
 def should_resolve_with_order_witness(pair: Any) -> bool:

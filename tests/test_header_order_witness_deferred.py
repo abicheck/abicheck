@@ -24,13 +24,21 @@ from abicheck.workflows.compare.order_proof import (
 )
 
 
-def _contract(seq: list[str] | None, proof: list[str] | None) -> SimpleNamespace:
+def _contract(
+    seq: list[str] | None, proof: list[str] | None, scope: list[str] | None = None
+) -> SimpleNamespace:
     fields = {} if seq is None else {"header_sequence": json.dumps(seq)}
-    return SimpleNamespace(profile_fields=fields, header_canonical=proof)
+    scope_fields = {} if scope is None else {"headers": json.dumps(sorted(scope))}
+    return SimpleNamespace(
+        profile_fields=fields,
+        header_canonical=proof,
+        scope_fields=scope_fields,
+        scope_fingerprint=None if scope is None else "fp",
+    )
 
 
-def _snap(seq, proof=None, *, contract=True) -> SimpleNamespace:
-    return SimpleNamespace(contract=_contract(seq, proof) if contract else None)
+def _snap(seq, proof=None, *, contract=True, scope=None) -> SimpleNamespace:
+    return SimpleNamespace(contract=_contract(seq, proof, scope) if contract else None)
 
 
 _AB, _BA = ["a.h", "b.h"], ["b.h", "a.h"]
@@ -46,6 +54,25 @@ _AB, _BA = ["a.h", "b.h"], ["b.h", "a.h"]
         (_snap(_AB), _snap(["a.h", "b.h", "c.h"]), True),  # an insertion
         (_snap(None), _snap(None), False),  # no headers on either side
         (_snap(_BA, contract=False), _snap(_AB), False),  # no contract: today's rules
+        # The gate's scope-confirmed evolution carve-out waives these without
+        # the proof: a declared header added or removed, survivors in order.
+        (
+            _snap(_BA, scope=_AB),
+            _snap(["b.h", "a.h", "c.h"], scope=["a.h", "b.h", "c.h"]),
+            False,
+        ),
+        (
+            _snap(["c.h", "b.h", "a.h"], scope=["a.h", "b.h", "c.h"]),
+            _snap(_BA, scope=_AB),
+            False,
+        ),
+        # ...but not a reordered survivor, nor a header the scope never added.
+        (
+            _snap(_AB, scope=_AB),
+            _snap(["b.h", "a.h", "c.h"], scope=["a.h", "b.h", "c.h"]),
+            True,
+        ),
+        (_snap(_AB, scope=_AB), _snap(["a.h", "b.h", "c.h"], scope=_AB), True),
     ],
 )
 def test_the_proof_is_needed_only_where_the_comparison_reads_it(old, new, needed):
