@@ -130,7 +130,7 @@
       "abicheck/extract/headers/clang/owned_tag.py": "61b5cd585abf22d1a2ad78e38d67c4dc32be54001001cb2a7bfe9adb5390a60c",
       "abicheck/extract/headers/clang/param_kind.py": "5f23882fce9965286398d2cf89d02e845051179dd5774a448c700d0498373fca",
       "abicheck/extract/headers/clang/qualifiers.py": "578b33e005de04a66073d7081267b78e777168fa34bd9bc4c689e5d4c0fe5fa7",
-      "abicheck/extract/headers/clang/record_layout_dump.py": "82c12ce95264772cd01bed1adc540d43b1ad25c840311f7a572a0ad3314357d1",
+      "abicheck/extract/headers/clang/record_layout_dump.py": "7f23ea96a2d5b2cb463c52ce74d0a1f30efebedc53e67b4e10ee5c9fa4821880",
       "abicheck/extract/headers/clang/records.py": "5df42eb9fcab35e9cbde80305960cd6004c08c20c2c9bf4f874302eaf577ed74",
       "abicheck/extract/headers/clang/redeclarations.py": "a721440b183b81c24d1faad4c75dbb2241d28bc29c64792d79f99863b56029c8",
       "abicheck/extract/headers/clang/restrict_spelling.py": "309efe53d934303354ef102e0b223363a099c164b2000727e4f591998afa2ec7",
@@ -197,9 +197,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "1746c5fcf08bd5a529580c0ef359d8b0c10016e89a711c5527feed2c3c3d9ce8",
+    "fingerprint": "91f50afc23b3041983eafa85cc23ad85fd1dbcee7dde902aca9ddc4b66f554c1",
     "generation": 39,
-    "reason": "generation 39: castxml base_offsets stored in bits (with a load migration); the clang record-layout pass sizes empty records, records empty-base offsets, flattens unnamed member aggregates, probes C headers and excludes virtual bases"
+    "reason": "generation 39: castxml base_offsets stored in bits (with a load migration); the clang record-layout pass sizes empty records, records empty-base offsets, flattens unnamed member aggregates (including clang 23's parent-qualified nested ones), probes C headers and excludes virtual bases"
   },
   "resolver": {
     "files": {

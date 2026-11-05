@@ -120,7 +120,7 @@ _SHAPES_DUMP = """
          0 |   int tag
          4 |   union A::(anonymous at ./t.hpp:6:21)\x20
          4 |     int i
-         4 |     struct A::(anonymous at ./t.hpp:6:40)\x20
+         4 |     struct A::(anonymous union)::(anonymous at ./t.hpp:6:40)\x20
          4 |       short lo
          6 |       short hi
          8 |   struct A::(unnamed at ./t.hpp:6:48) s

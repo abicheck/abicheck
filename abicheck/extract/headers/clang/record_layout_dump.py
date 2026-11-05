@@ -58,9 +58,12 @@ _VPTR_RE = re.compile(r"^\((.+) vtable pointer\)$")
 #: typedef naming an unnamed struct prints as the bare typedef name, with none.
 _RECORD_KEYWORD_RE = re.compile(r"^(?:class|struct|union)\s+")
 #: An unnamed member aggregate (``union X::(anonymous at a.h:3:5)``) with no
-#: field name after it: its members are members of the enclosing record.
+#: field name after it: its members are members of the enclosing record. Clang
+#: 23 qualifies a nested one by its unnamed parent
+#: (``struct X::(anonymous union)::(anonymous at a.h:3:9)``), so only the last
+#: parenthesized group is the member's own.
 _ANON_MEMBER_RE = re.compile(
-    r"^(?:class|struct|union)\s+\S*\((?:anonymous|unnamed)\b[^)]*\)$"
+    r"^(?:class|struct|union)\s+.*\((?:anonymous|unnamed)\b[^()]*\)$"
 )
 
 
