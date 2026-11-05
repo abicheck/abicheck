@@ -65,7 +65,7 @@ dependency walk and debug roots to every member. No open gap remains.
 
 ### Report and detector coverage
 
-#### The clang record-layout pass leaves C headers, unnameable records and alias-template arrays to DWARF (2026-11-04)
+#### The clang record-layout pass leaves unnameable records and alias-template arrays to DWARF (2026-11-04)
 
 **Status (2026-11-04): OPEN.** Residuals of the closed clang-layout gap ([archive](archive/known-gaps-closed.md)). The built-in pass (`extract/headers/clang/record_layout_dump.py`) probes only records `sizeof(::Name)` can name, so a private nested record or an unnamed record still depends on DWARF for its size and offsets. (A C header's named structs are sized without DWARF: re-checked 2026-11-05 by `tests/test_default_install_fact_invariants.py::test_c_header_facts_survive_without_optional_tools`, which fails when the pass is disabled.) A field declared as an array of an alias-template specialization (`pimpl<Impl> m[2]`) keeps its written spelling: clang's field spelling carries no desugared element type, so a retargeted alias is not reported as `type_field_type_changed` (`records.alias_template_target`). Under castxml, case85 reports `func_visibility_changed` plus `internal_template_leaks_via_public_api` where the catalog lists `func_removed`. Owner: `extract/headers/clang/`.
 
