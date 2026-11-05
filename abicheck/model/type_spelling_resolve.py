@@ -14,7 +14,7 @@
 
 """Resolve a type spelling to the record it names, whatever frontend wrote it.
 
-The leak walk (:mod:`.internal_leak_paths`) follows type *spellings* — a base,
+The leak walk (:mod:`abicheck.compare.internal_leak_paths`) follows type *spellings* — a base,
 a field type, a signature type — to records. Each header frontend spells the
 same reference differently:
 
@@ -39,8 +39,10 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
+from typing import TYPE_CHECKING
 
-from ..model import RecordType
+if TYPE_CHECKING:
+    from .entities import RecordType
 
 _CHAIN = re.compile(r"(?<![\w:])(?:::)?[A-Za-z_]\w*(?:\s*::\s*[A-Za-z_]\w*)*")
 _SPACE_AROUND = re.compile(r"\s*(::|<|>|,|\*|&)\s*")

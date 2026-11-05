@@ -182,8 +182,20 @@ class TestGenuineMutationsStillMatch:
             version="2",
             types=[_rec("graph", "tbb::detail::d1::graph", size_bits=128)],
         )
-        kinds = {c.kind for c in compare(old_snap, new_snap).changes}
-        assert ChangeKind.TYPE_SIZE_CHANGED in kinds
+        result = compare(old_snap, new_snap)
+        # Matched and recorded. No public API reaches this internal record, so
+        # the change is disposed as unreachable internal churn (ISSUE-15) into
+        # the out-of-surface ledger -- as the fully qualified spelling of the
+        # same record always was; the bare `graph` used to escape demotion only
+        # because the internal-namespace check read the spelling.
+        observed = {
+            (c.kind, c.surface_exclusion_reason)
+            for c in (*result.changes, *result.out_of_surface_changes)
+        }
+        assert (
+            ChangeKind.TYPE_SIZE_CHANGED,
+            "private-internal-unreachable",
+        ) in observed
 
 
 class TestLegacySchemaCompatibilityIsPreserved:

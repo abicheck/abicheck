@@ -22,13 +22,13 @@ and ``internal_type_leak`` name heuristics, whose owner module is this one.
 from __future__ import annotations
 
 import collections
-import functools
 import re
 from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING
 
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
+from ..model.execution_cache import memoized
 from ..model.name_heuristics import (
     NameHeuristicEffect,
     StructuralFact,
@@ -330,9 +330,9 @@ def _root_type_name_for_change(c: Change) -> str:
     return sym
 
 
-@functools.lru_cache(maxsize=8)
+@memoized(maxsize=8)
 def _leaf_index(qualified_keys: frozenset[str]) -> dict[str, set[str | None]]:
-    """Bare leaf -> qualified names over *qualified_keys* (cached per key set:
+    """Bare leaf -> qualified names over *qualified_keys* (memoized per key set:
     a frozenset caches its own hash, so a repeat call with the same set is O(1))."""
     idx: dict[str, set[str | None]] = collections.defaultdict(set)
     for key in qualified_keys:
@@ -343,13 +343,18 @@ def _leaf_index(qualified_keys: frozenset[str]) -> dict[str, set[str | None]]:
 def is_internal_candidate(
     name: str,
     qualified_keys: frozenset[str],
-    internal_namespaces: Iterable[str] = DEFAULT_INTERNAL_NAMESPACES,
+    internal_namespaces: tuple[str, ...] = DEFAULT_INTERNAL_NAMESPACES,
 ) -> bool:
     """Whether *name* is an internal-namespace type, reading a bare *name*
     through the one qualified record identity in *qualified_keys* with that
     leaf. Header frontends give a type change the record's bare name, so the
     spelling alone (``Impl``) would never look internal even when the record is
-    ``lib::detail::Impl``; an ambiguous leaf falls back to the spelling."""
+    ``lib::detail::Impl``; an ambiguous leaf falls back to the spelling.
+
+    Deliberately not memoized for the process: the answer runs through the
+    ``internal_namespace`` heuristic, which the F4 harness seeds with mutants,
+    and a process-lifetime memo would carry one test's mutant answer into the
+    next. :func:`internal_type_predicate` memoizes for one comparison."""
     return INTERNAL_NAMESPACE.matches(
         name,
         internal_namespaces=internal_namespaces,
@@ -375,4 +380,11 @@ def internal_type_predicate(
     """:func:`is_internal_candidate` over the records of *old* and *new*."""
     identities = change_type_identities(old, new)
     namespaces = tuple(internal_namespaces)
-    return lambda name: is_internal_candidate(name, identities, namespaces)
+    answers: dict[str, bool] = {}
+
+    def is_internal(name: str) -> bool:
+        if name not in answers:
+            answers[name] = is_internal_candidate(name, identities, namespaces)
+        return answers[name]
+
+    return is_internal

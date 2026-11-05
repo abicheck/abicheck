@@ -250,7 +250,7 @@ def detect_internal_leaks(
     # new public template). Paths are keyed by each record's qualified
     # identity and, when unambiguous, its bare name -- whichever form the
     # type change carries -- however the frontend spelled the references
-    # (compare.internal_leak_resolve).
+    # (model.type_spelling_resolve).
     old_paths = compute_leak_paths(old, internal_set)
     new_paths = compute_leak_paths(new, internal_set)
 

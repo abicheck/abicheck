@@ -612,7 +612,7 @@ namespace lib { Holder* get_holder() { return 0; } detail::Ret make() { return {
 """
 _LEAK_EXPECTED = {"Impl", "Ret"}
 _MUTANTS["spelling_matched_leak_walk"] = (
-    "import abicheck.compare.internal_leak_resolve as r\n"
+    "import abicheck.model.type_spelling_resolve as r\n"
     "r.TypeResolver.resolve = lambda self, spelling, *a, **k: spelling\n"
 )
 

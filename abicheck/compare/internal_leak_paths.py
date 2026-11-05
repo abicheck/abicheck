@@ -26,13 +26,13 @@ import collections
 from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING
 
+from ..model.type_spelling_resolve import TypeResolver, record_key, scope_of
 from .internal_leak_names import (
     INTERNAL_NAMESPACE,
     _build_qualified_index,
     _candidate_type_names_indirect,
     _strip_signature_params,
 )
-from .internal_leak_resolve import TypeResolver, record_key, scope_of
 from .internal_namespaces import DEFAULT_INTERNAL_NAMESPACES
 
 if TYPE_CHECKING:
@@ -62,11 +62,11 @@ def _function_scope(func: Function) -> Callable[[], str]:
 
     def get() -> str:
         if not cache:
-            name = func.name or ""
-            if "::" not in name and (func.mangled or "").startswith("_Z"):
-                from ..demangle import demangle_one_batched
+            from .template_surface import qualified_declaration_name
 
-                name = demangle_one_batched(func.mangled) or name
+            name = func.name or ""
+            if "::" not in name:
+                name = qualified_declaration_name(name, func.mangled or "")
             name = _strip_signature_params(name)
             # A template function's demangling leads with its return type.
             depth, cut = 0, 0
@@ -445,9 +445,8 @@ def compute_leak_paths(
     # ambiguous bare name is still detectable; naturally empty/inert in the
     # DWARF-fallback case (snap.types is empty there and DWARF carries no
     # qualified_name anyway).
-    qualified_index = _build_qualified_index(snap.declarations.types)
-
     decls = snap.declarations
+    qualified_index = _build_qualified_index(decls.types)
     resolver = TypeResolver(
         type_map.values(),
         extra_names=[

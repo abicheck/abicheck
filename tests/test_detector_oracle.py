@@ -105,10 +105,18 @@ def _spelled_identifiers(spelling: Frontend | None) -> set[str]:
 @pytest.mark.parametrize("mutation", MUTATIONS, ids=lambda m: m.__name__)
 def test_known_mutation_produces_expected_kind(mutation, spelling) -> None:
     old, new, expected_kind, _ = _pair(mutation, 1, spelling)
+    old_extra, new_extra, _, _ = mutation(tag=1)
+    also = set(old_extra.get("also_expects", ())) | set(
+        new_extra.get("also_expects", ())
+    )
 
     emitted = {c.kind for c in compare(old, new).changes}
     assert expected_kind in emitted, (
         f"{mutation.__name__}: expected {expected_kind.name}, "
+        f"got {sorted(k.name for k in emitted)}"
+    )
+    assert also <= emitted, (
+        f"{mutation.__name__}: expected {sorted(k.name for k in also - emitted)} too, "
         f"got {sorted(k.name for k in emitted)}"
     )
 

@@ -96,6 +96,8 @@ RESOLVER_SEMANTIC_FILES: tuple[str, ...] = (
     "abicheck/buildsource/source_extractors/resolver.py",
     "abicheck/buildsource/providers.py",
     "abicheck/compare/export_owner_resolution.py",
+    # Which record a type spelling names (the internal-leak walk).
+    "abicheck/model/type_spelling_resolve.py",
     "abicheck/storage/native_identity_aliases.py",
     "abicheck/workflows/compare/resolve.py",
     # Graph reconciliation: which removed/added pairs are one renamed

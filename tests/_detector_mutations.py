@@ -491,12 +491,25 @@ def _ns_fn(name: str, ret: str = "void", params: tuple[str, ...] = ()) -> Functi
 
 
 def _ns_grow(name: str, grown: bool) -> RecordType:
-    fields = [TypeField(name="a", type="int", offset_bits=0)]
-    if grown:
-        fields.append(TypeField(name="b", type="int", offset_bits=32))
+    """A record whose size alone changes (a pure layout edit: no member is
+    added or removed, so the reverse edit mirrors it exactly)."""
     return RecordType(
-        name=name, kind="struct", size_bits=64 if grown else 32, fields=fields
+        name=name,
+        kind="struct",
+        size_bits=64 if grown else 32,
+        fields=[TypeField(name="a", type="int", offset_bits=0)],
     )
+
+
+def _with_leak(fragment: dict) -> dict:
+    """Mark a fragment whose edit must also surface as a leak finding.
+
+    ``INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API`` is a post-processing overlay, not a
+    registered detector's output, so the catalogue's oracle kind stays the raw
+    layout change (``test_detector_kind_map`` credits it to a detector) and the
+    overlay is asserted from ``also_expects`` (``test_detector_oracle.py``).
+    """
+    return {**fragment, "also_expects": [ChangeKind.INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API]}
 
 
 def _ns_holder(tag: int, grown: bool, **kw: object) -> RecordType:
@@ -518,7 +531,12 @@ def _m_ns_internal_base_grows(tag: int):
             "types": [_ns_holder(tag, grown, bases=[base]), _ns_grow(base, grown)],
         }
 
-    return mk(False), mk(True), ChangeKind.INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API, True
+    return (
+        _with_leak(mk(False)),
+        _with_leak(mk(True)),
+        ChangeKind.TYPE_SIZE_CHANGED,
+        True,
+    )
 
 
 def _m_ns_internal_alias_field_grows(tag: int):
@@ -533,7 +551,12 @@ def _m_ns_internal_alias_field_grows(tag: int):
             "canonical_fields": [(f"lib::Pub{tag}", "p")],
         }
 
-    return mk(False), mk(True), ChangeKind.INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API, True
+    return (
+        _with_leak(mk(False)),
+        _with_leak(mk(True)),
+        ChangeKind.TYPE_SIZE_CHANGED,
+        True,
+    )
 
 
 def _m_ns_internal_return_grows(tag: int):
@@ -546,7 +569,12 @@ def _m_ns_internal_return_grows(tag: int):
             "types": [_ns_grow(impl, grown)],
         }
 
-    return mk(False), mk(True), ChangeKind.INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API, True
+    return (
+        _with_leak(mk(False)),
+        _with_leak(mk(True)),
+        ChangeKind.TYPE_SIZE_CHANGED,
+        True,
+    )
 
 
 def _m_ns_field_type_changed(tag: int):

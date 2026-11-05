@@ -911,9 +911,9 @@ class TestInternalLeakReachability:
 
         from abicheck.compare.internal_leak_paths import _bfs_collect_paths
 
-        queue: collections.deque[tuple[str, list[str]]] = collections.deque()
-        queue.append(("", []))
-        queue.append(("ns::detail::X", ["fn:foo"]))
+        queue: collections.deque = collections.deque()
+        queue.append(("", [], None, ()))
+        queue.append(("ns::detail::X", ["fn:foo"], None, ()))
         paths = _bfs_collect_paths(queue, {}, {}, {"detail"})
         assert "ns::detail::X" in paths
 
