@@ -50,7 +50,18 @@ pytestmark = [
     pytest.mark.skipif(os.name == "nt", reason="symlinked tool shims are POSIX-only"),
 ]
 
-FRONTENDS = ("castxml", "clang")
+_NEEDS_CASTXML = pytest.mark.skipif(
+    not shutil.which("castxml"), reason="castxml is not installed"
+)
+_NEEDS_CLANG = pytest.mark.skipif(
+    not (shutil.which("clang") and shutil.which("clang++")),
+    reason="clang and clang++ are not installed",
+)
+#: Each frontend arm skips on its own tool; the binary arm needs neither.
+FRONTENDS = (
+    pytest.param("castxml", marks=_NEEDS_CASTXML, id="castxml"),
+    pytest.param("clang", marks=_NEEDS_CLANG, id="clang"),
+)
 
 #: What a default install of a header frontend puts on PATH.
 _FRONTEND_TOOLS = ("castxml", "clang", "clang++", "gcc", "g++", "cc", "c++")
@@ -199,13 +210,9 @@ class Fixture:
 
 @pytest.fixture(scope="module")
 def fixture(tmp_path_factory: pytest.TempPathFactory) -> Fixture:
-    missing = [
-        t
-        for t in ("castxml", "clang", "clang++", "gcc", "g++", "ld")
-        if not shutil.which(t)
-    ]
+    missing = [t for t in ("gcc", "g++", "ld") if not shutil.which(t)]
     if missing:
-        pytest.skip(f"default-install frontends not available: {missing}")
+        pytest.skip(f"the fixture build needs gcc, g++ and ld: {missing}")
     root = tmp_path_factory.mktemp("default-install")
     (root / "api.h").write_text(CXX_HEADER, encoding="utf-8")
     (root / "api.cpp").write_text(CXX_SOURCE, encoding="utf-8")
@@ -502,6 +509,7 @@ def test_c_header_facts_survive_without_optional_tools(
     _assert_no_empty_as_value(snap)
 
 
+@_NEEDS_CLANG
 def test_clang_builtin_abi_facts_are_marked_without_a_linker(
     fixture: Fixture, tmp_path: Path
 ) -> None:
@@ -557,6 +565,7 @@ def _fact_projection(snap: Any) -> dict[str, Any]:
                 ),
                 fact(t.vtable_fact),
                 fact(t.data_size_bits_fact),
+                fact(t.vptr_offset_bits_fact),
                 tuple(t.bases),
             )
             for t in snap.declarations.types

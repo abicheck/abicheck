@@ -136,7 +136,9 @@ INVENTORY: tuple[ToolLookup, ...] = (
             "clang snapshot of a binary without DWARF carries sizes, alignment and "
             "offsets. A record clang cannot name with sizeof (private nested, "
             "unnamed) and a class-template pattern keep size_bits None (unknown), "
-            "never 0."
+            "never 0. The tool-present arm is not covered in CI: no lane installs "
+            "the companion, so the metamorphic proof compares two tool-absent dumps "
+            "there and only proves the built-in path."
         ),
         preserved=HEADER_FAMILIES + ("data_size",),
         proof=(
@@ -198,18 +200,24 @@ INVENTORY: tuple[ToolLookup, ...] = (
     ),
     ToolLookup(
         id="android-header-abi-dumper",
-        role=_O,
+        role=_I,
         sites=(
             "which:abicheck/buildsource/source_extractors/android.py:self.dumper_bin",
         ),
         binaries=("header-abi-dumper",),
         depths=("source",),
         without=(
-            "An alternative L4 source extractor. Unavailable means the clang/castxml "
-            "source extractors run instead; header and binary facts never consult it."
+            "abicheck never runs it: AndroidHeaderAbiAdapter.load reads a .sdump/"
+            ".lsdump captured elsewhere, and the which() lookup only feeds "
+            "available(). Without the binary the adapter reports unavailable and "
+            "still reads a captured dump into the same source facts. Header and "
+            "binary dumps never select this extractor."
         ),
-        preserved=("exported_symbols",) + HEADER_FAMILIES,
-        proof=(f"{_SUITE}::test_header_facts_survive_without_optional_tools",),
+        preserved=("source_abi_from_captured_dump",),
+        proof=(
+            "tests/test_source_extractors_android.py::"
+            "test_adapter_reads_a_captured_dump_without_the_dumper_on_path",
+        ),
     ),
     ToolLookup(
         id="cross-prefixed-compiler",

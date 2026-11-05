@@ -74,12 +74,13 @@ in that order of preference. `--json` prints every current finding.
 
 ## Optional-tool inventory (default-install facts)
 
-Every lookup of something outside abicheck (`shutil.which`, a `find_*_bin`
-resolver, an `ABICHECK_*` environment name, a literal argv program, an
-optional third-party import) is registered in
+Every lookup of something outside abicheck is registered in
 `tests/optional_tool_inventory.py` with its role and what a default install
 must still produce without it. `tests/test_optional_tool_inventory_gate.py`
-(`repo_scan`) fails on an unregistered or stale site. An
+(`repo_scan`) fails on an unregistered or stale site. It scans for
+`shutil.which`, `find_*_bin` resolvers, `ABICHECK_*` environment names,
+optional third-party imports, and a literal program as `argv[0]` of a list or
+tuple display; a program bound to a variable first is not resolved. An
 `optional_enrichment` entry must name the fact families it leaves intact and
 a proof in `tests/test_default_install_fact_invariants.py` (`integration`),
 which hides every optional tool and environment variable and dumps real

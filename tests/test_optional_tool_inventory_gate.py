@@ -13,8 +13,10 @@ Lookup shapes:
 
 * ``which:<path>:<argument>`` -- a ``shutil.which(...)``/``which(...)`` call;
 * ``find_bin:<path>:<name>`` -- a ``def find_*_bin`` resolver;
-* ``argv:<path>:<program>`` -- a literal program as ``argv[0]``, passed to a
-  subprocess call or returned as a command list;
+* ``argv:<path>:<program>`` -- a literal program as ``argv[0]`` of a list or
+  tuple display, passed to a subprocess call (positionally or as ``args=``) or
+  returned as a command list. A program bound to a variable first
+  (``cmd = ["tool"]; run(cmd)``) is not resolved;
 * ``import:<module>`` -- a third-party module imported under
   ``try/except ImportError`` that is neither stdlib nor a declared dependency;
 * ``env:<NAME>`` -- any ``ABICHECK_*`` string literal (an env-var name).
@@ -114,8 +116,18 @@ def scan_sites(source: str, rel: str) -> set[str]:
             name = _call_name(node.func)
             if name == "which" and node.args:
                 sites.add(f"which:{rel}:{ast.unparse(node.args[0])}")
-            elif name in _SUBPROCESS_CALLS and node.args:
-                program = _program(node.args[0])
+            elif name in _SUBPROCESS_CALLS:
+                # argv positionally, or as the `args=` keyword the stdlib
+                # receivers accept. A program bound to a name first is not
+                # resolved (see the docstring).
+                argv = (
+                    node.args[0]
+                    if node.args
+                    else next(
+                        (kw.value for kw in node.keywords if kw.arg == "args"), None
+                    )
+                )
+                program = _program(argv) if argv is not None else None
                 if program:
                     sites.add(f"argv:{rel}:{program}")
         elif isinstance(node, ast.Return) and node.value is not None:
@@ -247,6 +259,7 @@ def cmds():
     return (["sample-filt", "-n"], ["sample-filt"])
 def run():
     subprocess.run(["sample-run", "x"], check=False)
+    subprocess.run(args=["sample-kw", "x"], check=False)
     subprocess.run(["-not-a-program"], check=False)
     shutil.which(self_bin)
 NOT_AN_ENV = "abicheck_lower"
@@ -263,6 +276,7 @@ def test_scanner_finds_every_lookup_shape() -> None:
         "which:abicheck/sample.py:self_bin",
         "argv:abicheck/sample.py:sample-filt",
         "argv:abicheck/sample.py:sample-run",
+        "argv:abicheck/sample.py:sample-kw",
     }
 
 
