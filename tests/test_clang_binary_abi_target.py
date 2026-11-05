@@ -354,3 +354,27 @@ def test_a_prefetch_without_the_binarys_target_is_reacquired(
         acquired, "c++", "c++", CompileContext(), frozenset({"?f@@YAHH@Z"})
     )
     assert got is expected
+
+
+def test_a_target_may_apply_only_on_a_windows_default_clang(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The prefetch is skipped exactly where the binary can contradict clang's
+    default ABI: a Windows-default clang. The host's own clang (a non-Windows
+    default here) never needs a binary target."""
+    from abicheck.compile_context import CompileContext
+
+    if not shutil.which("clang++"):
+        pytest.skip("needs clang++")
+    abi_target._default_triple.cache_clear()
+    if sys.platform != "win32":
+        assert abi_target.binary_abi_target_may_apply(CompileContext(), False) is False
+    bindir = _windows_default_clang(tmp_path)
+    if bindir is None:
+        pytest.skip("emulates a Windows clang on a POSIX host")
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+    abi_target._default_triple.cache_clear()
+    assert abi_target.binary_abi_target_may_apply(CompileContext(), False) is True
+    # An explicit target the caller gave always wins: nothing to infer.
+    explicit = CompileContext(gcc_option_tokens=("--target=x86_64-pc-windows-msvc",))
+    assert abi_target.binary_abi_target_may_apply(explicit, False) is False

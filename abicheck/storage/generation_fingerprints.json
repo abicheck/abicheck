@@ -108,7 +108,7 @@
       "abicheck/extract/headers/castxml/vector_join.py": "a24eb21612af159ef05904fec5f32bf56d37c79abc459832e23929a6a193dbcb",
       "abicheck/extract/headers/castxml/vector_spellings.py": "1048c21245235f6857beacf4668fc888bea7117c88c18300aae666a90aac763d",
       "abicheck/extract/headers/clang/__init__.py": "538add12f3ff39e1c1b39e6f5def93b50a584b78b30c4e7e59058207222757d0",
-      "abicheck/extract/headers/clang/abi_target.py": "f9d586887e8bbb3eaa8930f866ac399120c66bcbe18a61e6bfe979b3a60a4009",
+      "abicheck/extract/headers/clang/abi_target.py": "d49762ce6a1f5593f04dec3e66f9f062cbfd91ccda8a0ddb3af064b48ed2190f",
       "abicheck/extract/headers/clang/ast_inner.py": "f695f5bb01048fa924a1b67acbbcc29630c871607f1a3b4329ec781133f296f8",
       "abicheck/extract/headers/clang/attributes.py": "4f35afe72ef319265695d3e199e10c9ef0076db4a5238161b33a076fd3a599fe",
       "abicheck/extract/headers/clang/backend.py": "d51b5909f5ba92f18f90160a95417859f7404e564db9b92dee5a1755d563f61f",
@@ -193,9 +193,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "45a5406bb149c080876b62c5870c211c4ea88fdc587945a5c99dc8d1af40fff1",
+    "fingerprint": "e117f8ca1925bd7bd3b65410a84e5fcfa1dd9994593756379198fcf91ea48c2d",
     "generation": 37,
-    "reason": "Same PR as the generation-37 bump (#1920): abi_target gains lacks_binary_abi_target, used by the header-graph prefetch staleness check; extraction output unchanged"
+    "reason": "Same PR as the generation-37 bump (#1920): abi_target gains binary_abi_target_may_apply, which gates the header-graph prefetch only; extraction output unchanged"
   },
   "resolver": {
     "files": {

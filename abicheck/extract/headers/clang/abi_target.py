@@ -49,6 +49,7 @@ __all__ = [
     "binary_exported_names",
     "binary_abi_tokens",
     "lacks_binary_abi_target",
+    "binary_abi_target_may_apply",
 ]
 
 ITANIUM = "itanium"
@@ -218,3 +219,25 @@ def lacks_binary_abi_target(
     """
     target = binary_abi_tokens(cc, is_c, (), exported)
     return bool(target) and target[-1] not in tokens
+
+
+def binary_abi_target_may_apply(cc: Any, is_c: bool) -> bool:
+    """Whether some binary could make :func:`with_binary_abi_target` add a
+    ``--target`` for this compile context: only when clang's own default is a
+    Windows triple, whose ABI a binary's exports can contradict.
+
+    ``False`` when no clang resolves, since then there is no parse to target.
+    """
+    from ....errors import SnapshotError
+    from ...compiler_driver import resolve_clang_bin
+
+    compiler = "cc" if is_c else "c++"
+    try:
+        clang_bin = resolve_clang_bin(compiler, cc.gcc_path, cc.gcc_prefix)
+        selected, _real, _stat, digest = _resolved_tool(clang_bin)
+    except (SnapshotError, OSError):
+        return False
+    if explicit_target_triple(cc.gcc_options, cc.gcc_option_tokens):
+        return False
+    default = _default_triple(selected, digest)
+    return default is not None and _windows_abi(default) is not None
