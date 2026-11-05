@@ -136,3 +136,29 @@ def prefetch_graph_if_useful(
     if not (wanted and headers and resolved_backend == "castxml"):
         return None
     return prefetch_header_graph_ast(headers, includes, lang, compile)
+
+
+def prefetch_needs_reacquire(
+    acquired: HeaderGraphAst | None,
+    lang: str | None,
+    primary_mode: str | None,
+    compile: CompileContext,
+    exported: frozenset[str],
+) -> bool:
+    """Whether the attach must parse again instead of using *acquired*.
+
+    A prefetch had the header text only. When the primary pass resolved C++
+    from the binary's mangled exports, a prefetch that ran as C is stale; when
+    those exports imply a binary-ABI ``--target``, a prefetch parsed without it
+    is for the wrong ABI. No prefetch at all (``None``) always acquires.
+    """
+    from ...extract.headers.clang.abi_target import lacks_binary_abi_target
+
+    if acquired is None:
+        return True
+    is_c = (lang or "").lower() == "c"
+    if lacks_binary_abi_target(acquired.eff_tokens, compile, is_c, exported):
+        return True
+    return (
+        not lang and primary_mode == "c++" and acquired.resolved_force_cpp is not True
+    )

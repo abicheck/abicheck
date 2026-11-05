@@ -151,23 +151,22 @@ def _attach_header_graph(
     from .extract.headers.clang.abi_target import binary_exported_names
     from .model.header_lang_mode import recorded_lang_mode
     from .model.source_graph_coverage import HEADER_CALL_GRAPH_PASS
+    from .workflows.dump.header_graph_prefetch import prefetch_needs_reacquire
 
     cc = compile if compile is not None else CompileContext()
     _is_c = (lang or "").lower() == "c"
-    # The primary pass decided C/C++ with the binary's mangled exports too (a
-    # hybrid snapshot: both legs); a prefetch had header text only, so ran as C.
+    # A prefetch had header text only: no binary language mode or ABI target.
     primary_mode = recorded_lang_mode(snap.ast_toolchain)
+    abi = binary_exported_names(snap)
     acquired = prefetched.result() if prefetched is not None else None
-    if acquired is None or (
-        not lang and primary_mode == "c++" and acquired.resolved_force_cpp is not True
-    ):
+    if prefetch_needs_reacquire(acquired, lang, primary_mode, cc, abi):
         acquired = acquire_header_graph_ast(
             headers,
             includes,
             lang,
             compile,
             resolved_lang_mode=primary_mode,
-            abi_exported=binary_exported_names(snap),
+            abi_exported=abi,
         )
     projection = acquired.projection
     ast_failure = acquired.ast_failure

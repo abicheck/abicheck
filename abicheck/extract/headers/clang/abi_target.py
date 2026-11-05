@@ -48,6 +48,7 @@ __all__ = [
     "with_binary_abi_target",
     "binary_exported_names",
     "binary_abi_tokens",
+    "lacks_binary_abi_target",
 ]
 
 ITANIUM = "itanium"
@@ -204,3 +205,16 @@ def binary_abi_tokens(
         )
     except (SnapshotError, OSError):
         return tokens
+
+
+def lacks_binary_abi_target(
+    tokens: tuple[str, ...], cc: Any, is_c: bool, exported: frozenset[str]
+) -> bool:
+    """Whether a parse made with *tokens* missed the target *exported* implies.
+
+    A header-graph prefetch runs before the snapshot exists, so it never has
+    the binary's exports; when they imply a ``--target``, its AST is for the
+    wrong ABI and the attach must acquire again with the target applied.
+    """
+    target = binary_abi_tokens(cc, is_c, (), exported)
+    return bool(target) and target[-1] not in tokens

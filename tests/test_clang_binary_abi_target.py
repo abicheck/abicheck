@@ -316,3 +316,41 @@ def test_attach_without_a_clang_keeps_its_tokens(
     assert abi_target.binary_abi_tokens(cc, False, ("-DX",), frozenset({"_Z1fv"})) == (
         "-DX",
     )
+
+
+@pytest.mark.parametrize(
+    ("prefetched_tokens", "implied", "expected"),
+    [
+        (None, "--target=x86_64-pc-windows-msvc", True),  # no prefetch: acquire
+        (("-DX",), "--target=x86_64-pc-windows-msvc", True),  # wrong ABI: re-acquire
+        (
+            ("-DX", "--target=x86_64-pc-windows-msvc"),
+            "--target=x86_64-pc-windows-msvc",
+            False,
+        ),
+        (("-DX",), None, False),  # the binary implies no target: the prefetch stands
+    ],
+)
+def test_a_prefetch_without_the_binarys_target_is_reacquired(
+    monkeypatch: pytest.MonkeyPatch,
+    prefetched_tokens: tuple[str, ...] | None,
+    implied: str | None,
+    expected: bool,
+) -> None:
+    """A prefetch runs before the snapshot, so it never saw the exports: when
+    they imply a target its graph would describe the wrong ABI (the prefetched
+    and sequential graphs differed on windows-latest)."""
+    from abicheck.compile_context import CompileContext
+    from abicheck.service_header_graph_attach import HeaderGraphAst
+    from abicheck.workflows.dump.header_graph_prefetch import prefetch_needs_reacquire
+
+    monkeypatch.setattr(abi_target, "binary_abi_target_token", lambda **_: implied)
+    acquired = (
+        None
+        if prefetched_tokens is None
+        else HeaderGraphAst(None, None, [], [], prefetched_tokens, True)
+    )
+    got = prefetch_needs_reacquire(
+        acquired, "c++", "c++", CompileContext(), frozenset({"?f@@YAHH@Z"})
+    )
+    assert got is expected
