@@ -393,16 +393,15 @@ class _ClangAstParser:
         self._template_param_default_facts_by_qualname = indexes.fact_defaults
         self._template_param_names_by_qualname = indexes.names
         # Lazily-built, memoized record/specialization/vtable indices shared
-        # between record-entity parsing (_build_record's base-lookup, still
-        # in this module) and function-entity parsing
-        # (extract.headers.clang.functions.parse_functions's is_virtual
-        # override recovery). Constructed here (referencing self._records,
-        # still empty) so its first real read -- after _walk below populates
-        # self._records -- sees the fully-categorized list; see
-        # RecordVtableIndex's own docstring for the full "why" of each cache.
+        # by record parsing (_build_record's base lookup) and function
+        # parsing (parse_functions' is_virtual override recovery). Built
+        # here over self._records/self._typedefs, still empty: its first
+        # read comes after _walk below fills both. See RecordVtableIndex's
+        # own docstring for the full "why" of each cache.
         self._record_vtable_index = _clang_context.RecordVtableIndex(
             root,
             self._records,
+            self._typedefs,
             self._template_param_kinds_by_qualname,
             self._template_param_defaults_by_qualname,
             self._template_param_names_by_qualname,

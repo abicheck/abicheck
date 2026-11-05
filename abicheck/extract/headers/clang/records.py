@@ -103,7 +103,7 @@ from .qualifiers import (
     record_kind,
     reduce_opaque_kind_set,
 )
-from .vtable import build_vtable, is_record_definition
+from .vtable import build_vtable_evidence, is_record_definition
 
 #: Evaluates a (possibly wrapped) clang constant-expression node to an int,
 #: or ``None`` when it isn't one. Matches
@@ -290,7 +290,18 @@ def _build_record(
     # a `bases` array, so using it here (rather than the node's own bare
     # "") is what lets it still resolve if ever referenced as a base.
     own_qualname = "::".join([*entry.scope, own_name]) if entry.scope else own_name
-    vtable = build_vtable(own_qualname, base_lookup_index)
+    vtable, unresolved_bases = build_vtable_evidence(own_qualname, base_lookup_index)
+    # A base whose record could not be resolved hides its virtuals: the
+    # list is a lower bound, never a confirmed "no (more) vtable" (ADR-028).
+    vtable_fact = (
+        Fact.partial(
+            vtable,
+            "vtable incomplete: unresolved base(s) " + ", ".join(unresolved_bases),
+            producer="clang",
+        )
+        if unresolved_bases
+        else Fact.present(vtable)
+    )
     return RecordType(
         name=own_name,
         kind=kind,
@@ -365,7 +376,7 @@ def _build_record(
         # Stated explicitly -- this parse genuinely resolved these. vptr_offset_bits_fact is `partial`, not `present`: 0-if-vtable-else-None is the Itanium primary-base heuristic, not a real offset read (matches vptr_offset_bits's own PARTIAL row).
         bases_fact=Fact.present(bases),
         virtual_bases_fact=Fact.present(virtual_bases),
-        vtable_fact=Fact.present(vtable),
+        vtable_fact=vtable_fact,
         vptr_offset_bits_fact=Fact.partial(0 if vtable else None),
         # ADR-063 Phase 2 -- see the opaque branch above.
         entity_id=entity_id_for_type(entry.scope_path, own_name),
