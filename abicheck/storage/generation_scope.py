@@ -71,6 +71,7 @@ EXTRACTOR_ROOT_GLOBS: tuple[str, ...] = (
     "dwarf_*.py",
     "pdb_*.py",
     "dumper.py",
+    "dumper_clang.py",  # the clang header backend's AST -> model parser
 )
 
 #: Modules outside ``extract/`` whose rules decide what an extractor records

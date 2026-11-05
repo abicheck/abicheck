@@ -484,6 +484,9 @@ _F5 = tuple(
     ]
 )
 _F8 = (
+    # The clang header backend left layout facts empty that castxml records
+    # from the same headers (harness cell: test_clang_backend_layout_matches_castxml).
+    "extraction.backend_fact_family_parity",
     "extraction.aggregate_layout_inverted_by_line",
     "extraction.emulated_compiler_builtin_absent_from_frontend",
     "extraction.linker_summary_flag_read_as_the_fact",

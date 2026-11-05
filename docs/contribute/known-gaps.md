@@ -65,10 +65,9 @@ dependency walk and debug roots to every member. No open gap remains.
 
 ### Report and detector coverage
 
-#### The clang header backend reports a layout break without `type_size_changed`/`type_field_offset_changed` when DWARF has no full definition (2026-11-04)
+#### The clang record-layout pass leaves C headers, unnameable records and alias-template arrays to DWARF (2026-11-04)
 
-**Status (2026-11-04): OPEN.** clang's `-ast-dump=json` carries no computed layout, so a record's size and offsets come only from the same binary's DWARF (`extract/dwarf_layout_backfill.py`). GCC emits a dynamic class with no key function in the TU, and a class template reached only through `extern template`, as a `DW_AT_declaration` stub, so `Derived` in case43, `Buffer<int>` in case17 and the derived record in case77 stay unfilled. The verdict is still BREAKING through `type_field_added`, and a consumer smoke proves the break, but the size and offset kinds that castxml reports are missing. The same frontend split shows in case74–76 (`internal_type_leaks_via_public_api` absent under clang) and case80 (`type_field_type_changed` absent under clang), and case85 under castxml reports `func_visibility_changed` plus `internal_template_leaks_via_public_api` where the catalog lists `func_removed`. A lane PASS on these cases means the verdict matched, not every expected kind. Fix direction: read the layout clang itself computes (`-Xclang -fdump-record-layouts`) instead of depending on DWARF. Owner: `dumper_clang.py`, `extract/dwarf_layout_backfill.py`.
-
+**Status (2026-11-04): OPEN.** Residuals of the closed clang-layout gap ([archive](archive/known-gaps-closed.md)). The built-in pass (`extract/headers/clang/record_layout_dump.py`) probes C++ headers only, and only records `sizeof(::Name)` can name, so a C header, a private nested record or an unnamed record still depends on DWARF for its size and offsets. A field declared as an array of an alias-template specialization (`pimpl<Impl> m[2]`) keeps its written spelling: clang's field spelling carries no desugared element type, so a retargeted alias is not reported as `type_field_type_changed` (`records.alias_template_target`). Under castxml, case85 reports `func_visibility_changed` plus `internal_template_leaks_via_public_api` where the catalog lists `func_removed`. Owner: `extract/headers/clang/`.
 
 #### The standing-inventory headline folds observed compatible findings into one clause (2026-10-28)
 

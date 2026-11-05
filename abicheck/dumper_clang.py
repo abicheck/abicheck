@@ -98,6 +98,10 @@ from .extract.headers.clang import (
 # ``extract.headers.clang.functions``.
 from .extract.headers.clang.attributes import _clang_contract_attributes  # noqa: F401
 from .extract.headers.clang.constraints import FunctionConstraintIndex
+from .extract.headers.clang.explicit_specialization_records import (
+    collect_explicit_specialization as _collect_explicit_spec,
+    explicit_specialization_records as _explicit_spec_records,
+)
 from .extract.headers.clang.expr import (  # noqa: F401  (some re-exported for tests)
     _SCOPE_NODE_KINDS,
     _WRAPPER_EXPR_KINDS,
@@ -359,6 +363,8 @@ class _ClangAstParser:
         self._functions: list[_Decl] = []
         self._variables: list[_Decl] = []
         self._records: list[_Decl] = []
+        # See extract.headers.clang.explicit_specialization_records.
+        self._explicit_specializations: list[tuple[_Decl, str]] = []
         self._enums: list[_Decl] = []
         self._typedefs: list[_Decl] = []
         # Built lazily (on first param-default/field-default extraction that
@@ -545,34 +551,12 @@ class _ClangAstParser:
             child_scope = (*scope, name)
             child_lookup_scope = (*lookup_scope, name)
         elif kind == "ClassTemplateSpecializationDecl" and name:
-            # A concrete template specialization's own members (e.g. `A<int>
-            # ::f`) are otherwise scoped as if declared at the SAME level as
-            # the specialization itself (`ClassTemplateSpecializationDecl`
-            # is deliberately not in `_SCOPE_NODE_KINDS` -- it isn't an
-            # ordinary namespace/class/linkage-spec scope) -- so a member's
-            # `entry.scope` silently dropped the owning specialization
-            # entirely (Codex review, fresh evidence: this is what let
-            # `_specialization_record_index`'s base-lookup fix resolve the
-            # base's vtable correctly while `owner_class_of`'s mangled-name
-            # fallback still couldn't match it against `RecordType.bases`
-            # -- see `parse_functions`'s own comment on this). Reuses
-            # `_specialization_spelling` (already built for that base-lookup
-            # index) so both consumers agree on the exact same spelling --
-            # INCLUDING the same `param_kinds`/`param_defaults` context, not
-            # just the bare function call: an earlier version of this branch
-            # passed `None` for both, which produced the UNTRIMMED
-            # `"A<double, int>"` form for a specialization using a defaulted
-            # template argument while `_base_lookup_index()`'s own call
-            # (through `D.bases`) correctly trimmed it to `"A<double>"` --
-            # the same qualname mismatch the specialization-owner fix
-            # itself was built to prevent, just for a different reason
-            # (Codex review, fresh evidence: confirmed end-to-end that this
-            # reintroduced a false `TYPE_VTABLE_CHANGED` for exactly the
-            # no-keyword-override-through-a-defaulted-specialization-base
-            # scenario the base-lookup fix was meant to make work). Falls
-            # back to the unscoped behavior (bare `name`, degrading the SAME
-            # way an unresolvable base already degrades elsewhere in this
-            # module) when the spelling can't be reconstructed.
+            # A specialization's members are scoped under its own spelled
+            # `A<int>` (it is not in `_SCOPE_NODE_KINDS`), built with the same
+            # param kinds/defaults/names the base-lookup index uses so both
+            # agree (e.g. a defaulted argument trims to `A<double>`); falls
+            # back to the unscoped name when the spelling cannot be rebuilt.
+            # Rationale: extract.headers.clang.templates.build_specialization_index.
             template_qualname = (
                 "::".join((*lookup_scope, name)) if lookup_scope else name
             )
@@ -591,6 +575,11 @@ class _ClangAstParser:
             # opinion about it.
             if spelling:
                 segment = _record_scope_segment(spelling, access=access)
+                if not self._skips_dependency_decl("CXXRecordDecl", name, file):
+                    _collect_explicit_spec(
+                        self._explicit_specializations, node, spelling, in_template,
+                        (scope, file, access, extern_c, in_friend, scope_path), self._root,
+                    )  # fmt: skip
         else:
             child_scope = scope
             child_lookup_scope = lookup_scope
@@ -1147,7 +1136,7 @@ class _ClangAstParser:
         and so cannot be imported from the ``extract``-classified
         ``records.py`` module directly.
         """
-        return _clang_records.parse_types(
+        records = _clang_records.parse_types(
             self._records,
             self._typedefs,
             builtin_abi=self.builtin_abi,
@@ -1158,6 +1147,11 @@ class _ClangAstParser:
             evaluate_bitfield_int=_evaluated_int_value,
             field_default_value=lambda p: _field_initializer_value(p, self._id_index),
             template_param_defaults=self._template_param_default_facts_by_qualname,
+        )
+        return records + _explicit_spec_records(
+            self._explicit_specializations,
+            {r.qualified_name or r.name for r in records},
+            self._build_record,
         )
 
     def _build_record(

@@ -243,8 +243,8 @@ def _k(*kinds: str) -> frozenset[str]:
 #:   the new one added (compatible): two symbols, two facts.
 #: * ``global_variable_retyped``: ``int`` -> ``long`` changes the symbol's size
 #:   and alignment as well as its type; each is a fact about the same variable.
-#: * ``struct_field_retyped`` (castxml): the field's offset moves in the castxml
-#:   layout; the clang frontend reports only the type.
+#: * ``struct_field_retyped``: the field's offset moves in the record layout,
+#:   which both frontends now record (clang through its own record-layout dump).
 #: * ``class_virtual_method_added``: adding a virtual changes the vtable layout
 #:   as well as adding the function.
 #: * ``template_default_argument_changed``: the template's declaration text
@@ -277,7 +277,10 @@ EXPECTED: dict[tuple[str, str], tuple[frozenset[str], frozenset[str]]] = {
         _k("type_field_type_changed"),
         _k("type_field_offset_changed"),
     ),
-    ("struct_field_retyped", "clang"): (_k("type_field_type_changed"), _k()),
+    ("struct_field_retyped", "clang"): (
+        _k("type_field_type_changed"),
+        _k("type_field_offset_changed"),
+    ),
     ("macro_value_changed", "castxml"): (_k("public_macro_value_changed"), _k()),
     ("macro_value_changed", "clang"): (_k("public_macro_value_changed"), _k()),
     ("class_virtual_method_added", "castxml"): (

@@ -170,7 +170,7 @@
     },
     "36": {
       "castxml": "castxml version 0.7.0",
-      "commit": "ae57bdb52eb0",
+      "commit": "87a00ef54485",
       "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
       "snapshot": "gen36/corpus.json.gz"
     },
