@@ -126,7 +126,9 @@ _SHAPES_DUMP = """
          8 |   struct A::(unnamed at ./t.hpp:6:48) s
          8 |     char c
         12 |   int after
-           | [sizeof=16, dsize=16, align=4,
+        16 |   struct A::(anonymous at ./t.hpp:6:70)\x20
+        16 |   int last
+           | [sizeof=20, dsize=20, align=4,
            |  nvsize=16, nvalign=4]
 
 *** Dumping AST Record Layout
@@ -165,6 +167,9 @@ def test_parse_shapes_empty_virtual_anonymous_and_c_typedef() -> None:
         {"name": "hi", "offset_bits": 48},
         {"name": "s", "offset_bits": 64},
         {"name": "after", "offset_bits": 96},
+        # An empty unnamed member has no members; the next line is the
+        # record's own member again, not one of its (absent) children.
+        {"name": "last", "offset_bits": 128},
     ]
     # C prints a typedef naming an unnamed struct with no tag keyword.
     assert recs["T"]["size_bits"] == 32 and "data_size_bits" not in recs["T"]

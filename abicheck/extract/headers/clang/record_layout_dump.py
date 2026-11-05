@@ -54,9 +54,9 @@ _BASE_RE = re.compile(
     r"\((primary base|base|primary virtual base|virtual base)\)$"
 )
 _VPTR_RE = re.compile(r"^\((.+) vtable pointer\)$")
-#: The entry's record line: ``struct ns::X``, ``struct Tag (empty)``, or -- in
-#: C, for a typedef naming an unnamed struct -- the bare typedef name.
-_RECORD_LINE_RE = re.compile(r"^(?:(?:class|struct|union)\s+)?(.+?)(?:\s+\(empty\))?$")
+#: The tag keyword that opens an entry's record line (``struct ns::X``); in C a
+#: typedef naming an unnamed struct prints as the bare typedef name, with none.
+_RECORD_KEYWORD_RE = re.compile(r"^(?:class|struct|union)\s+")
 #: An unnamed member aggregate (``union X::(anonymous at a.h:3:5)``) with no
 #: field name after it: its members are members of the enclosing record.
 _ANON_MEMBER_RE = re.compile(
@@ -137,10 +137,11 @@ def _parse_entry(lines: list[str]) -> dict[str, Any] | None:
         byte_off, bit_start, indent, text = m.groups()
         offset_bits = int(byte_off) * 8 + int(bit_start or 0)
         if record is None:
-            km = _RECORD_LINE_RE.match(text.strip())
-            if km is None:
-                return None
-            record = {"qualified_name": km.group(1).strip()}
+            # ``struct Tag (empty)`` names ``Tag``; ``T`` (C typedef) names ``T``.
+            record_name = _EMPTY_TAG_RE.sub(
+                "", _RECORD_KEYWORD_RE.sub("", text.strip())
+            )
+            record = {"qualified_name": record_name.strip()}
             continue
         depth = len(indent)
         if member_indent is None:

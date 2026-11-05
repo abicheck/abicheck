@@ -129,7 +129,7 @@
       "abicheck/extract/headers/clang/macro_qualifier.py": "f6b4d8d39639759ec555345358771937b77b7b490dae2a25ab99e077cd5d5728",
       "abicheck/extract/headers/clang/param_kind.py": "5f23882fce9965286398d2cf89d02e845051179dd5774a448c700d0498373fca",
       "abicheck/extract/headers/clang/qualifiers.py": "578b33e005de04a66073d7081267b78e777168fa34bd9bc4c689e5d4c0fe5fa7",
-      "abicheck/extract/headers/clang/record_layout_dump.py": "b9433f7f15ca40bc2622b9012241b3ce7b5d6d8987c8869dc09dca23d08ec9df",
+      "abicheck/extract/headers/clang/record_layout_dump.py": "82c12ce95264772cd01bed1adc540d43b1ad25c840311f7a572a0ad3314357d1",
       "abicheck/extract/headers/clang/records.py": "f59d1b52eb3a599bbdce450f5a8759dd66ba8218afba86dbb0e459ef912ce0f3",
       "abicheck/extract/headers/clang/redeclarations.py": "a721440b183b81c24d1faad4c75dbb2241d28bc29c64792d79f99863b56029c8",
       "abicheck/extract/headers/clang/restrict_spelling.py": "309efe53d934303354ef102e0b223363a099c164b2000727e4f591998afa2ec7",
@@ -195,7 +195,7 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "24cdde34648046e4d5e21f6c45fca96a2b532cc9af5552364e5427ec0959482a",
+    "fingerprint": "3d439cdcb2d5401a68368603781ee11aab14586606a8c7d1a612c78164be89ed",
     "generation": 38,
     "reason": "generation 38: castxml base_offsets stored in bits (with a load migration); the clang record-layout pass sizes empty records, records empty-base offsets, flattens unnamed member aggregates, probes C headers and excludes virtual bases"
   },
