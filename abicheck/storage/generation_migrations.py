@@ -413,6 +413,17 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "declarations keep their spellings; only the declared order of such "
         "trees changes"
     ),
+    39: GenerationSpellingChange(
+        "no stored spelling changes: the direct-Clang header backend resolves "
+        "a base specifier by C++ name lookup from the scope that wrote it "
+        "(extract/headers/clang/base_resolution.py), because clang 22+ writes "
+        "a relative base (detail::I inside namespace lib) with no fully "
+        "qualified desugaredQualType. A record whose base, at any depth, "
+        "still does not resolve now records its vtable fact PARTIAL instead "
+        "of PRESENT. bases keep their written spellings. A generation-38 "
+        "clang snapshot made with clang 22+ may hold an empty PRESENT vtable "
+        "for such a class, which no rewrite can recover, so it is re-dumped"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.
