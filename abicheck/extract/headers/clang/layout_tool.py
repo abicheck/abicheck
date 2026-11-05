@@ -161,7 +161,7 @@ def run_layout_tool(
     With ``binary=None`` the built-in path runs instead: the same clang
     compile context over a probe TU taking ``sizeof`` of each of
     *probe_names*, with ``-fdump-record-layouts``
-    (:mod:`.record_layout_dump`). C++ only; a C header set returns ``None``.
+    (:mod:`.record_layout_dump`), in the language the headers were parsed in.
 
     *resolved_headers*/*extra_includes* must already be fully resolved (a
     directory entry expanded, inferred include roots folded in) — the same
@@ -213,7 +213,7 @@ def run_layout_tool(
     )
 
     if binary is None:
-        if not force_cpp or not probe_names:
+        if not probe_names:
             return None
         return _run_builtin_layout_dump(
             clang_bin,
@@ -225,6 +225,7 @@ def run_layout_tool(
             nostdinc=nostdinc,
             gcc_options=gcc_options,
             gcc_option_tokens=gcc_option_tokens,
+            force_cpp=force_cpp,
             force_cpp20=force_cpp20,
             system_includes=system_includes,
         )
@@ -361,21 +362,27 @@ def _run_builtin_layout_dump(
     nostdinc: bool,
     gcc_options: str | None,
     gcc_option_tokens: tuple[str, ...],
+    force_cpp: bool,
     force_cpp20: bool,
     system_includes: tuple[str, ...],
 ) -> list[dict[str, Any]] | None:
     """Run clang ``-fdump-record-layouts`` over a ``sizeof`` probe TU.
 
     The exit status is not consulted: a probe clang rejects (an incomplete
-    or inaccessible record) costs only that record's layout, and every
-    layout clang did dump is the one it computed. Returns ``None`` when the
-    run itself fails or dumps nothing.
+    or inaccessible record, or a C spelling that names no record) costs only
+    that probe, and every layout clang did dump is the one it computed (the
+    shared tail sets ``-ferror-limit=0``, so rejected probes never stop it).
+    Returns ``None`` when the run itself fails or dumps nothing.
     """
-    with tempfile.NamedTemporaryFile(suffix=".cpp", mode="w", delete=False) as probe:
+    suffix = ".cpp" if force_cpp else ".c"
+    with tempfile.NamedTemporaryFile(suffix=suffix, mode="w", delete=False) as probe:
         probe_path = Path(probe.name)
     try:
         includes = "".join(f'#include "{h.resolve()}"\n' for h in resolved_headers)
-        probe_path.write_text(probe_source(includes, probe_names), encoding="utf-8")
+        probe_path.write_text(
+            probe_source(includes, probe_names, c_mode=not force_cpp),
+            encoding="utf-8",
+        )
         full_cmd = _build_clang_header_command(
             clang_bin,
             cc_id,
@@ -385,7 +392,7 @@ def _run_builtin_layout_dump(
             nostdinc=nostdinc,
             gcc_options=gcc_options,
             gcc_option_tokens=gcc_option_tokens,
-            force_cpp=True,
+            force_cpp=force_cpp,
             force_cpp20=force_cpp20,
             system_includes=system_includes,
         )
@@ -455,10 +462,15 @@ def _apply_record_facts(t: RecordType, facts: dict[str, Any]) -> RecordType:
     if not t.base_offsets:
         base_facts = facts.get("bases")
         if isinstance(base_facts, list):
+            # Direct non-virtual bases only: a virtual base's offset belongs
+            # to the most-derived object, and castxml and DWARF record none.
             offsets = {
                 _bare_base_name(b["name"]): b["offset_bits"]
                 for b in base_facts
-                if isinstance(b, dict) and "name" in b and "offset_bits" in b
+                if isinstance(b, dict)
+                and "name" in b
+                and "offset_bits" in b
+                and not b.get("is_virtual")
             }
             if offsets:
                 updates["base_offsets"] = offsets

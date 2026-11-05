@@ -100,7 +100,7 @@
       "abicheck/extract/headers/castxml/preprocessed_text.py": "a356fdba54f154d1b25b333a38242589a7fd4ec40130cbe02e58d9281fa9380d",
       "abicheck/extract/headers/castxml/probe.py": "ed1d074c4a25510e020e428b22277df84659c91951178aee3731d39f4385a200",
       "abicheck/extract/headers/castxml/record_traits.py": "6d836b2a2da27a0f12611f9c8dec681a8922ad2c5853f801ec9a94972654cdf1",
-      "abicheck/extract/headers/castxml/records.py": "d9d91833912bde39aa0e312c82d8fc9091045883f46665ffdf24a77dd7a845c2",
+      "abicheck/extract/headers/castxml/records.py": "8041534409b5880594f599090778a905993bb2237e2c769816a1e66b338c1a07",
       "abicheck/extract/headers/castxml/scope.py": "41cecc8dd996c10a58c022e5dca4003cce9d7775adf674b339cc199fb59297c7",
       "abicheck/extract/headers/castxml/specialization.py": "3f9f021672df1b84de42bc8de5f3c915508b3f3850e0a8acbaa80a3dee04c6f3",
       "abicheck/extract/headers/castxml/type_resolution.py": "3527318ed7d36b2b557c447c9fa0807deec9c594a7f481cf36c860859062552f",
@@ -124,13 +124,13 @@
       "abicheck/extract/headers/clang/function_template_defaults.py": "af4a42ea00a91238ef8f111fe05c4b6aa625b84fd2fd4e39230b48953ebaf566",
       "abicheck/extract/headers/clang/functions.py": "12a37b2d33be83ab29d8242fd6fde193af1e377520871195fb86e6d9ce664fdc",
       "abicheck/extract/headers/clang/inline_semantics.py": "8284b543b4fa45da23c50fee0f16fd11dab8c43cf43f1cf07334572a822ad04d",
-      "abicheck/extract/headers/clang/layout_tool.py": "d80bf47b6d366b6962f4e4fde4a2d863224dc9f3c5ce91d4db7195f979d86057",
+      "abicheck/extract/headers/clang/layout_tool.py": "bc641dea78bae1ef16030d69d746748ea431df39cb0e25540b29a7f18ea43774",
       "abicheck/extract/headers/clang/locations.py": "d4292c937fb928268132c6a3f21a35a5d7576b8164416648ef73815cd07fcddf",
       "abicheck/extract/headers/clang/macro_qualifier.py": "f6b4d8d39639759ec555345358771937b77b7b490dae2a25ab99e077cd5d5728",
       "abicheck/extract/headers/clang/owned_tag.py": "61b5cd585abf22d1a2ad78e38d67c4dc32be54001001cb2a7bfe9adb5390a60c",
       "abicheck/extract/headers/clang/param_kind.py": "5f23882fce9965286398d2cf89d02e845051179dd5774a448c700d0498373fca",
       "abicheck/extract/headers/clang/qualifiers.py": "578b33e005de04a66073d7081267b78e777168fa34bd9bc4c689e5d4c0fe5fa7",
-      "abicheck/extract/headers/clang/record_layout_dump.py": "3d7829c76a7330a9b7015f768efc59be2c710dda665747aaa8dbd286189e362a",
+      "abicheck/extract/headers/clang/record_layout_dump.py": "7f23ea96a2d5b2cb463c52ce74d0a1f30efebedc53e67b4e10ee5c9fa4821880",
       "abicheck/extract/headers/clang/records.py": "5df42eb9fcab35e9cbde80305960cd6004c08c20c2c9bf4f874302eaf577ed74",
       "abicheck/extract/headers/clang/redeclarations.py": "a721440b183b81c24d1faad4c75dbb2241d28bc29c64792d79f99863b56029c8",
       "abicheck/extract/headers/clang/restrict_spelling.py": "309efe53d934303354ef102e0b223363a099c164b2000727e4f591998afa2ec7",
@@ -197,9 +197,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "e313d39a996dc277eb425ba9a03c2cc1a2f7c4aa228c5e4348f83cfd43efee73",
-    "generation": 38,
-    "reason": "clang 22+ JSON AST shape (isTagOwned tag types) and the pruner's nested-method rule, found by the clang-latest lane; within generation 38 (#1920), which no release has shipped (v0.7.0 is generation 2)"
+    "fingerprint": "91f50afc23b3041983eafa85cc23ad85fd1dbcee7dde902aca9ddc4b66f554c1",
+    "generation": 39,
+    "reason": "generation 39: castxml base_offsets stored in bits (with a load migration); the clang record-layout pass sizes empty records, records empty-base offsets, flattens unnamed member aggregates (including clang 23's parent-qualified nested ones), probes C headers and excludes virtual bases"
   },
   "resolver": {
     "files": {
