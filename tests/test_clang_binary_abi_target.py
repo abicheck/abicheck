@@ -342,7 +342,7 @@ def test_a_prefetch_without_the_binarys_target_is_reacquired(
     and sequential graphs differed on windows-latest)."""
     from abicheck.compile_context import CompileContext
     from abicheck.service_header_graph_attach import HeaderGraphAst
-    from abicheck.workflows.dump.header_graph_prefetch import prefetch_needs_reacquire
+    from abicheck.workflows.dump.header_graph_staleness import prefetch_needs_reacquire
 
     monkeypatch.setattr(abi_target, "binary_abi_target_token", lambda **_: implied)
     acquired = (

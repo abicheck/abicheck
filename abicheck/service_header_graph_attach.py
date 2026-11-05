@@ -151,7 +151,7 @@ def _attach_header_graph(
     from .extract.headers.clang.abi_target import binary_exported_names
     from .model.header_lang_mode import recorded_lang_mode
     from .model.source_graph_coverage import HEADER_CALL_GRAPH_PASS
-    from .workflows.dump.header_graph_prefetch import prefetch_needs_reacquire
+    from .workflows.dump.header_graph_staleness import prefetch_needs_reacquire
 
     cc = compile if compile is not None else CompileContext()
     _is_c = (lang or "").lower() == "c"
@@ -168,6 +168,7 @@ def _attach_header_graph(
             resolved_lang_mode=primary_mode,
             abi_exported=abi,
         )
+    assert acquired is not None  # prefetch_needs_reacquire(None, ...) is True
     projection = acquired.projection
     ast_failure = acquired.ast_failure
     resolved_headers = acquired.resolved_headers
