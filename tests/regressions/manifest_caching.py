@@ -297,4 +297,33 @@ CACHING_BUG_CLASSES: tuple[BugClass, ...] = (
             "source": ("generated", "gcc-fixture", "libssl"),
         },
     ),
+    BugClass(
+        id="cache.canonical_form_check_uses_a_different_order_than_the_producer",
+        invariant=(
+            "When a stage skips expensive work for input already in a "
+            "canonical form, every producer of that input must emit the "
+            "same canonical form: one sort key, not two that agree on most "
+            "inputs. Two keys that differ only on a corner (here "
+            "`pathlib.Path` component order versus whole-string order, "
+            "which disagree exactly where `foo.h` sits beside `foo/`) make "
+            "the skip silently never fire on that corner, and the cost "
+            "doubles without any wrong answer to notice. The test must "
+            "generate the corner (sibling file/directory pairs, names "
+            "around `.`/`-`/`_`, which all sort before `/`) and assert the "
+            "producer's output is already canonical by the consumer's own "
+            "definition, plus one end-to-end count of the expensive work."
+        ),
+        # SVS field run 2026-11-03: a `-H <dir>` compare under the clang
+        # frontend parsed each side twice (4 clang cache entries, 2.2x CPU,
+        # 1.9x RSS) because `header_utils.iter_directory_headers` sorted by
+        # `Path` while ADR-082's `header_order_witness.canonical_header_order`
+        # sorts by `str(resolve())`; the witness then re-ran `dumper.dump`.
+        fixed_by=(1920,),
+        seed_tests=("tests/test_header_dir_expansion_canonical_order.py",),
+        public_surfaces=("cli:compare",),
+        axes={
+            "tree_shape": ("file beside same-stem dir", "nested pairs", "no pair"),
+            "name_chars": (".", "-", "_", "alnum"),
+        },
+    ),
 )
