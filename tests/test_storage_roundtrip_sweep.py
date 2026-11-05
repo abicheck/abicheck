@@ -267,6 +267,20 @@ _FIELD_OVERRIDES: dict[tuple[str, str], st.SearchStrategy[Any]] = {
         min_size=2,
         max_size=3,
     ).map(tuple),
+    # `side` is "old", "new" or None; `reason_code` is non-empty. Drawn from
+    # the type hint alone, `side` was almost never valid, so most drawn
+    # conflicts were discarded and Hypothesis could fail `filter_too_much`.
+    (f"{_CC}.ContractSourceConflict", "side"): st.sampled_from([None, "old", "new"]),
+    (f"{_CC}.ContractSourceConflict", "reason_code"): _NONEMPTY_TEXT,
+    # A section names a kind, a positive schema version and non-empty
+    # must-understand names (`SectionDTO.__post_init__`).
+    ("abicheck.storage.dto.SectionDTO", "section_kind"): _NONEMPTY_TEXT,
+    ("abicheck.storage.dto.SectionDTO", "section_schema_version"): st.integers(
+        min_value=1, max_value=1000
+    ),
+    ("abicheck.storage.dto.SectionDTO", "must_understand"): st.lists(
+        _NONEMPTY_TEXT, max_size=3
+    ).map(tuple),
     ("abicheck.model.extraction_scope.ExtractionScope", "ownership_rules"): (
         _scope_rules_strategy()
     ),
@@ -361,6 +375,62 @@ def _entity_resolver_strategy() -> st.SearchStrategy[Any]:
 
 
 _BUILDERS[EntityResolver] = _entity_resolver_strategy
+
+
+@st.composite
+def _package_manifest_strategy(draw: Callable[[st.SearchStrategy[Any]], Any]) -> Any:
+    """A manifest whose cross-references hold by construction.
+
+    `PackageManifest` requires unique variant and artifact ids, every
+    artifact's `variant_id` declared, and each variant's `artifact_ids` to be
+    exactly the artifacts that name it. Drawn field by field, almost no draw
+    satisfies all three (about 70% were discarded), which risks Hypothesis's
+    `filter_too_much` health check, so the references are assigned here.
+    """
+    from abicheck.storage.package import (
+        ArtifactRef,
+        ObjectRef,
+        PackageManifest,
+        VariantRef,
+    )
+    from abicheck.storage.versioning import StorageVersions
+
+    unique_ids = st.lists(_REF_ID, max_size=_MAX_CONTAINER, unique=True)
+    variant_ids = draw(unique_ids)
+    artifact_ids = draw(unique_ids) if variant_ids else []
+    owner = {aid: draw(st.sampled_from(variant_ids)) for aid in artifact_ids}
+    artifacts = [
+        dataclasses.replace(
+            draw(_dataclass_strategy(ArtifactRef)), artifact_id=aid, variant_id=vid
+        )
+        for aid, vid in owner.items()
+    ]
+    variants = [
+        dataclasses.replace(
+            draw(_dataclass_strategy(VariantRef)),
+            variant_id=vid,
+            artifact_ids=tuple(a for a, v in owner.items() if v == vid),
+        )
+        for vid in variant_ids
+    ]
+    return PackageManifest(
+        versions=draw(_class_strategy(StorageVersions)),
+        variant_refs=tuple(variants),
+        artifact_refs=tuple(artifacts),
+        project_sections=draw(
+            st.dictionaries(_REF_ID, _dataclass_strategy(ObjectRef), max_size=2)
+        ),
+        must_understand=draw(st.lists(_NONEMPTY_TEXT, max_size=3).map(tuple)),
+    )
+
+
+def _register_package_manifest() -> None:
+    from abicheck.storage.package import PackageManifest
+
+    _BUILDERS[PackageManifest] = _package_manifest_strategy
+
+
+_register_package_manifest()
 
 
 def _field_strategy(
@@ -774,3 +844,57 @@ def test_every_storage_and_model_class_satisfies_the_document_properties(
     the property it checks.
     """
     _sweep(_DISCOVERED[qualname], _all_properties)
+
+
+# ---------------------------------------------------------------------------
+# Generator health: a class's strategy must not discard most of its draws
+# ---------------------------------------------------------------------------
+#
+# A draw the constructor rejects is discarded (`assume(False)` in
+# `_dataclass_strategy`). When most draws are discarded, Hypothesis fails the
+# sweep with `FailedHealthCheck: filter_too_much` on some seeds and not others
+# (ContractSourceConflict: 74% discarded, failed on seed 111). This measures
+# every discovered class deterministically, so a validator the generator does
+# not know about fails here, by name, instead of on a random seed later. Fix a
+# breach with a `_FIELD_OVERRIDES` entry or a `_BUILDERS` recipe.
+
+_MAX_DISCARD_RATIO = 0.6
+
+
+def _discard_ratio(cls: type) -> float:
+    rejected = [0]
+    accepted = [0]
+    real_assume = assume
+
+    def counting_assume(condition: object) -> bool:
+        if not condition:
+            rejected[0] += 1
+        return real_assume(condition)
+
+    @settings(
+        max_examples=100,
+        deadline=None,
+        database=None,
+        derandomize=True,
+        suppress_health_check=list(HealthCheck),
+    )
+    @given(_class_strategy(cls))
+    def run(_x: Any) -> None:
+        accepted[0] += 1
+
+    globals()["assume"] = counting_assume
+    try:
+        run()
+    finally:
+        globals()["assume"] = real_assume
+    return rejected[0] / max(1, rejected[0] + accepted[0])
+
+
+@pytest.mark.parametrize("qualname", sorted(_DISCOVERED))
+def test_class_strategy_does_not_discard_most_draws(qualname: str) -> None:
+    ratio = _discard_ratio(_DISCOVERED[qualname])
+    assert ratio <= _MAX_DISCARD_RATIO, (
+        f"{qualname}: {ratio:.0%} of generated values are rejected by the "
+        f"constructor (limit {_MAX_DISCARD_RATIO:.0%}); add a _FIELD_OVERRIDES "
+        "entry or a _BUILDERS recipe for the validated field(s)"
+    )
