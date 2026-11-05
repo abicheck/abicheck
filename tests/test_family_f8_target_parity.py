@@ -646,6 +646,8 @@ def test_clang_backend_names_typedef_anonymous_tags_like_castxml(
     # Vacuity guard: the oracle itself names every typedef'd anonymous tag.
     assert {"point_t", "span_t"} <= set(want_records), want_records
     assert want_enums.get("level_t") == ["LVL_OFF", "LVL_ON", "LVL_AUTO"]
+    assert want_records["point_t"] == ["x", "y"], want_records
+    assert want_records["span_t"] == ["a", "lvl", "tag"], want_records
     got_records, got_enums = _c_anon_dump(tmp_path, "clang")
     for name in ("point_t", "span_t"):
         assert got_records.get(name) == want_records[name], (name, got_records)

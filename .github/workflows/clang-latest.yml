@@ -45,12 +45,14 @@ on:
       - 'abicheck/dumper*.py'
       - 'tests/*clang*'
       - 'tests/test_family_f8_target_parity.py'
+      - 'tests/test_header_backend_parity_probes_integration.py'
       - 'tests/conftest.py'
       - 'tests/validate_examples.py'
       - 'tests/_validate_examples_cli.py'
       - 'catalog/**'
       - '.github/workflows/clang-latest.yml'
-      # The lane's own infrastructure (tests/test_workflow_path_filter_closure.py).
+      # The lane's own infrastructure (tests/test_workflow_path_filter_closure.py);
+      # every CLANG_SENSITIVE_TESTS module is matched (tests/test_clang_latest_path_filter.py).
       - 'pyproject.toml'
       - 'scripts/verify.py'
       - 'scripts/verify_clang_lane.py'
@@ -63,12 +65,14 @@ on:
       - 'abicheck/dumper*.py'
       - 'tests/*clang*'
       - 'tests/test_family_f8_target_parity.py'
+      - 'tests/test_header_backend_parity_probes_integration.py'
       - 'tests/conftest.py'
       - 'tests/validate_examples.py'
       - 'tests/_validate_examples_cli.py'
       - 'catalog/**'
       - '.github/workflows/clang-latest.yml'
-      # The lane's own infrastructure (tests/test_workflow_path_filter_closure.py).
+      # The lane's own infrastructure (tests/test_workflow_path_filter_closure.py);
+      # every CLANG_SENSITIVE_TESTS module is matched (tests/test_clang_latest_path_filter.py).
       - 'pyproject.toml'
       - 'scripts/verify.py'
       - 'scripts/verify_clang_lane.py'
