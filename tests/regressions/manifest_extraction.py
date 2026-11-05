@@ -667,4 +667,44 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="extraction.backend_fact_family_parity",
+        invariant=(
+            "A header backend that cannot read a fact family the other backend "
+            "records gets it from its own toolchain instead of leaving the field "
+            "empty: the clang backend sizes records from clang's own "
+            "-fdump-record-layouts when DWARF has only a declaration stub, records "
+            "an explicitly instantiated class template as its own X<Args> record, "
+            "records a field declared through an alias template by its target, and "
+            "a leak path written as a partial scope (detail::Impl) reaches the "
+            "changed record through C++ name lookup, never a spelling match. Every "
+            "size and offset it reports equals sizeof/offsetof of a compiled program."
+        ),
+        fixed_by=(1918,),
+        seed_tests=(
+            "tests/test_clang_record_layout_dump.py",
+            "tests/test_family_f8_target_parity.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "frontend": ("clang",),
+            "record_shape": (
+                "plain",
+                "polymorphic",
+                "derived",
+                "explicit_instantiation",
+                "bitfield",
+            ),
+            "leak_path": ("inheritance", "by_value_field", "vtable"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "C headers are not probed, and a record sizeof cannot name "
+                    "(private nested, unnamed) still depends on DWARF."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
 )

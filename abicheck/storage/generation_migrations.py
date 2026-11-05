@@ -390,6 +390,18 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "generation-35 clang snapshot of a C header without a build -std= was "
         "already parsed as C, so it records what generation 36 does"
     ),
+    37: GenerationSpellingChange(
+        "the direct-Clang header backend now records what it previously left "
+        "empty or spelled as sugar: (1) a record's size, alignment, data size, "
+        "vptr, base and field offsets from clang's own -fdump-record-layouts "
+        "(extract/headers/clang/record_layout_dump.py) when DWARF did not fill "
+        "them; (2) one record per explicitly instantiated or specialized class "
+        "template, named by its spelled X<Args> (castxml's convention); (3) a "
+        "field declared through an alias template by the alias target's type "
+        "(castxml's spelling). A generation-36 clang snapshot lacks those facts, "
+        "so comparing it with a generation-37 one would report the new records "
+        "and fields as changes; it is re-dumped"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

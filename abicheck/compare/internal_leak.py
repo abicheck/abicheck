@@ -38,7 +38,7 @@ surface.
 from __future__ import annotations
 
 import collections
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import TYPE_CHECKING
 
 from ..model.change import Change
@@ -129,6 +129,97 @@ def _collect_internal_changes(
         ):
             internal_changes[type_name].append(c)
     return internal_changes
+
+
+def _scoped_lookup(spelling: str, context: str, qualified: set[str]) -> str | None:
+    """C++ qualified-name lookup of *spelling* written inside record *context*.
+
+    Tries the context record's own scope, then each enclosing scope out to
+    the global one (``a::b::C`` -> ``a::b::C::S``, ``a::b::S``, ``a::S``,
+    ``S``), and returns the first that names a record exactly.
+    """
+    parts = context.split("::")
+    for depth in range(len(parts), -1, -1):
+        candidate = "::".join([*parts[:depth], spelling])
+        if candidate in qualified:
+            return candidate
+    return None
+
+
+def _path_context(path: list[str], record_names: Mapping[str, object]) -> str | None:
+    """The record that wrote the path's final hop: the nearest record name
+    before the target (hop markers and entry labels are never record names)."""
+    for item in reversed(path[:-1]):
+        if item in record_names:
+            return item
+    return None
+
+
+def _side_contexts(snap: AbiSnapshot) -> list[tuple[str, str]]:
+    """``(path label, qualified scope)`` for one side's own declarations:
+    its records by bare name and its public functions/variables."""
+    decls = snap.declarations
+    return (
+        [(t.name, t.qualified_name or t.name) for t in decls.types]
+        + [(f"fn:{f.name}", f.name) for f in decls.functions]
+        + [(f"var:{v.name}", v.name) for v in decls.variables]
+    )
+
+
+def _alias_scoped_path_keys(
+    paths: dict[str, list[list[str]]],
+    records: Iterable[tuple[str, str | None]],
+    wanted: Iterable[str],
+    contexts_of_side: Iterable[tuple[str, str]],
+) -> dict[str, list[list[str]]]:
+    """Also key each scope-spelled path target by its record's bare name.
+
+    A leak path is keyed by the type spelling the public declaration wrote
+    (clang keeps ``detail::Impl`` as written in ``: public detail::Impl``),
+    while a type change carries the record's bare ``name``. The spelling is
+    resolved by C++ name lookup (:func:`_scoped_lookup`) from the scope of
+    whatever wrote the final hop: the referencing record, or the public
+    function/variable for a signature path. The bare alias is added only for
+    a name in *wanted* (the changed records), only when that bare name
+    belongs to exactly one record, and it carries only the paths that
+    resolved to it. *records* is ``(name, qualified_name)`` pairs over both
+    sides (lookup targets); *contexts_of_side* is ``(path label, qualified
+    name)`` pairs from the side the paths were walked on (``("Public",
+    "lib::Public")``, ``("fn:make", "lib::make")``), so a referencing record
+    whose scope moved between releases still has one context per side.
+    """
+    wanted_names = set(wanted)
+    by_qualified: dict[str, str] = {}
+    contexts: dict[str, set[str]] = collections.defaultdict(set)
+    bare_owners: dict[str, set[str]] = collections.defaultdict(set)
+    for name, qualified in records:
+        qual = qualified or name
+        by_qualified[qual] = name
+        bare_owners[name].add(qual)
+    for label, qualified in contexts_of_side:
+        contexts[label].add(qualified)
+    qualified_names = set(by_qualified)
+    out = dict(paths)
+    for key, plist in paths.items():
+        if "::" not in key or key.rsplit("::", 1)[1] not in wanted_names:
+            continue
+        hits: dict[str, list[list[str]]] = collections.defaultdict(list)
+        for p in plist:
+            ctx = _path_context(p, contexts)
+            ctx_quals = contexts.get(ctx, set()) if ctx else set()
+            if len(ctx_quals) != 1:
+                continue
+            (ctx_qual,) = tuple(ctx_quals)
+            hit = _scoped_lookup(key, ctx_qual, qualified_names)
+            if hit is not None:
+                hits[hit].append(p)
+        if len(hits) != 1:
+            continue
+        ((qual, resolved),) = hits.items()
+        bare = by_qualified[qual]
+        if bare not in out and bare_owners[bare] == {qual}:
+            out[bare] = resolved
+    return out
 
 
 def _merge_leak_paths(
@@ -248,8 +339,23 @@ def detect_internal_leaks(
     # Compute reachability on *both* snapshots (a type may be reachable
     # only in one direction, e.g. just-added internal type leaked by a
     # new public template).
-    old_paths = compute_leak_paths(old, internal_set)
-    new_paths = compute_leak_paths(new, internal_set)
+    pooled = [
+        (t.name, t.qualified_name)
+        for snap in (old, new)
+        for t in snap.declarations.types
+    ]
+    old_paths = _alias_scoped_path_keys(
+        compute_leak_paths(old, internal_set),
+        pooled,
+        internal_changes,
+        _side_contexts(old),
+    )
+    new_paths = _alias_scoped_path_keys(
+        compute_leak_paths(new, internal_set),
+        pooled,
+        internal_changes,
+        _side_contexts(new),
+    )
 
     out: list[Change] = []
     for tname, triggers in internal_changes.items():
