@@ -115,27 +115,37 @@ def scan_field_shapes(root: Path = FIELD_SHAPES) -> dict[str, set[str]]:
     return out
 
 
-def _is_integration_mark(node: ast.AST) -> bool:
-    """True for ``pytest.mark.integration`` / ``mark.integration`` (called or not)."""
+def _is_mark(node: ast.AST, name: str) -> bool:
+    """True for ``pytest.mark.<name>`` / ``mark.<name>`` (called or not)."""
     if isinstance(node, ast.Call):
         node = node.func
     return (
         isinstance(node, ast.Attribute)
-        and node.attr == "integration"
+        and node.attr == name
         and isinstance(node.value, ast.Attribute)
         and node.value.attr == "mark"
     )
 
 
-def _marks_in(expr: ast.AST | None) -> bool:
+def _is_integration_mark(node: ast.AST) -> bool:
+    return _is_mark(node, "integration")
+
+
+#: A known-gap canary asserts what abicheck currently gets *wrong* (often
+#: ``assert "<kind>" not in kinds``), so its kind references are not evidence
+#: that a kind is detected.
+_CANARY_MARK = "known_gap_canary"
+
+
+def _marks_in(expr: ast.AST | None, name: str = "integration") -> bool:
     if expr is None:
         return False
     if isinstance(expr, (ast.List, ast.Tuple)):
-        return any(_is_integration_mark(e) for e in expr.elts)
-    return _is_integration_mark(expr)
+        return any(_is_mark(e, name) for e in expr.elts)
+    return _is_mark(expr, name)
 
 
-def _module_is_integration(tree: ast.Module) -> bool:
+def _module_is_integration(tree: ast.Module, name: str = "integration") -> bool:
     for stmt in tree.body:
         targets: list[ast.expr] = []
         value: ast.AST | None = None
@@ -144,7 +154,7 @@ def _module_is_integration(tree: ast.Module) -> bool:
         elif isinstance(stmt, ast.AnnAssign):
             targets, value = [stmt.target], stmt.value
         if any(isinstance(t, ast.Name) and t.id == "pytestmark" for t in targets):
-            if _marks_in(value):
+            if _marks_in(value, name):
                 return True
     return False
 
@@ -173,26 +183,31 @@ def _kind_refs(
 
 
 def _test_functions(
-    tree: ast.Module, module_marked: bool
+    tree: ast.Module, module_marked: bool, module_canary: bool = False
 ) -> Iterator[tuple[str, ast.FunctionDef | ast.AsyncFunctionDef, bool]]:
+    """Yield ``(qualname, function, counts)``: integration-marked and not a canary."""
+
     def visit(
-        body: list[ast.stmt], prefix: str, marked: bool
+        body: list[ast.stmt], prefix: str, marked: bool, canary: bool
     ) -> Iterator[tuple[str, ast.FunctionDef | ast.AsyncFunctionDef, bool]]:
         for stmt in body:
             if isinstance(stmt, ast.ClassDef):
-                cls_marked = marked or any(
-                    _is_integration_mark(d) for d in stmt.decorator_list
+                decs = stmt.decorator_list
+                yield from visit(
+                    stmt.body,
+                    f"{prefix}{stmt.name}::",
+                    marked or any(_is_integration_mark(d) for d in decs),
+                    canary or any(_is_mark(d, _CANARY_MARK) for d in decs),
                 )
-                yield from visit(stmt.body, f"{prefix}{stmt.name}::", cls_marked)
             elif isinstance(
                 stmt, (ast.FunctionDef, ast.AsyncFunctionDef)
             ) and stmt.name.startswith("test"):
-                fn_marked = marked or any(
-                    _is_integration_mark(d) for d in stmt.decorator_list
-                )
-                yield f"{prefix}{stmt.name}", stmt, fn_marked
+                decs = stmt.decorator_list
+                fn_marked = marked or any(_is_integration_mark(d) for d in decs)
+                fn_canary = canary or any(_is_mark(d, _CANARY_MARK) for d in decs)
+                yield f"{prefix}{stmt.name}", stmt, fn_marked and not fn_canary
 
-    yield from visit(tree.body, "", module_marked)
+    yield from visit(tree.body, "", module_marked, module_canary)
 
 
 def scan_integration_tests(
@@ -212,7 +227,10 @@ def scan_integration_tests(
       ``ChangeKind.NAME`` or as the exact string value. A kind asserted only
       inside a helper the test calls is **not** seen (false negative), and a
       string literal that equals a kind value but means something else (or an
-      ``assert X not in kinds``) is counted (false positive).
+      ``assert X not in kinds``) is counted (false positive);
+    * a test marked ``known_gap_canary`` (itself, its class or its module)
+      is skipped: it pins what abicheck currently misses, so its kind
+      references are the opposite of detection evidence.
     """
     kinds = kinds if kinds is not None else all_kinds()
     values = set(kinds)
@@ -224,8 +242,9 @@ def scan_integration_tests(
         except (SyntaxError, UnicodeDecodeError):
             continue
         module_marked = _module_is_integration(tree)
+        module_canary = _module_is_integration(tree, _CANARY_MARK)
         rel = path.relative_to(ROOT).as_posix()
-        for qual, fn, marked in _test_functions(tree, module_marked):
+        for qual, fn, marked in _test_functions(tree, module_marked, module_canary):
             if not marked:
                 continue
             scope: list[ast.AST] = [

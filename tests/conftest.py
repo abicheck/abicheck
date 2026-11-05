@@ -569,6 +569,12 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         metavar="K/N",
         help="Run only shard K of N (whole test files, balanced by recorded duration; see tests/pytest_shards.py).",
     )
+    parser.addoption(
+        "--shard-weights",
+        default=None,
+        metavar="PATH",
+        help="Per-file seconds that balance --shard (default tests/shard_weights.json, the unit lane's; the integration lane passes its own).",
+    )
     from tests.pytest_collect_partition import add_option as add_partition_option
     from tests.pytest_marker_prefilter import add_option
 
@@ -834,7 +840,9 @@ def _apply_shard(config: pytest.Config, items: list) -> None:
         index, total = parse_shard(spec)
     except ValueError as exc:
         raise pytest.UsageError(str(exc)) from exc
-    keep = select((item.nodeid for item in items), index, total, load_weights())
+    weights_path = config.getoption("--shard-weights")
+    weights = load_weights(Path(weights_path)) if weights_path else load_weights()
+    keep = select((item.nodeid for item in items), index, total, weights)
     deselected = [item for item in items if item.nodeid not in keep]
     if deselected:
         config.hook.pytest_deselected(items=deselected)

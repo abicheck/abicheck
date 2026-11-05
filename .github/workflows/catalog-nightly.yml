@@ -39,7 +39,7 @@ jobs:
       - name: Install system deps
         uses: ./.github/actions/install-system-deps
         with:
-          packages: gcc g++ cmake binutils curl ca-certificates
+          packages: gcc g++ clang cmake binutils curl ca-certificates
 
       - uses: ./.github/actions/setup-castxml
 
@@ -70,6 +70,26 @@ jobs:
             echo "$v run rc=$?"
             set -e
           done
+
+      # The native lanes again on the clang header frontend. The strict
+      # expected_kinds gate is per frontend (expected_kinds_gaps.clang), so
+      # only a clang run can fail a clang-only kind miss or a stale clang
+      # declaration. Blocking via check_validate_results.py.
+      - name: Clang header frontend, native lanes (debug-headers, build-source)
+        if: ${{ !cancelled() }}
+        env:
+          ABICHECK_AST_FRONTEND: clang
+        run: |
+          rc=0
+          for v in debug-headers build-source; do
+            set +e
+            PYTHONPATH=. python tests/validate_examples.py --artifact-variant "$v" --jobs 0 --json \
+              > "results/clang-frontend-validate_examples-$v.json"
+            set -e
+            cp "results/clang-frontend-validate_examples-$v.json" results/validate_examples.json
+            python tests/check_validate_results.py || rc=1
+          done
+          exit $rc
 
       - name: Public-contract lane (report-only)
         if: ${{ !cancelled() }}

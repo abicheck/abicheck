@@ -57,7 +57,7 @@ permissions:
 
 jobs:
   integration:
-    name: integration (${{ matrix.os }})
+    name: integration (${{ matrix.os }}${{ matrix.shard && format(', shard {0}/2', matrix.shard) || '' }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     permissions:
@@ -65,8 +65,26 @@ jobs:
       id-token: write  # Codecov OIDC upload (Linux)
     strategy:
       fail-fast: false
+      # The Linux leg runs as two shards. Its integration step alone measured
+      # 35-38 min of this 40-min budget on main (the job ran 39:29 at #1918,
+      # 38:40 at #1920) before the catalog backend-parity harness added ~95 s
+      # and the leg started being cancelled mid-tail (42012488845, at #1925).
+      # `--shard=K/2` splits the integration tests by whole file, balanced on
+      # their own measured seconds (tests/shard_weights_integration.json; the
+      # unit lane's weights know nothing of integration cost), so each shard
+      # takes about half and the budget has room again. The shards partition
+      # the selection: nothing is dropped and nothing runs twice
+      # (tests/test_pytest_shards.py). The tool-lane tail (libabigail, ABICC,
+      # libz demo) runs on shard 2 only, and both shards upload coverage under
+      # the one Codecov `integration` flag, which merges them.
       matrix:
-        os: [ubuntu-24.04, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-24.04
+            shard: 1
+          - os: ubuntu-24.04
+            shard: 2
+          - os: macos-latest
+          - os: windows-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
         with:
@@ -173,10 +191,21 @@ jobs:
         if: (success() || failure()) && runner.os == 'Linux'
         env:
           # Linux's ELF integration count is known (~900), so it gets a real
-          # floor; the step's own default is the host-agnostic '1'.
+          # floor; the step's own default is the host-agnostic '1'. Each shard
+          # runs about half, still far above it.
           ABICHECK_MIN_EXECUTED: '20'
-          PYTEST_ADDOPTS: -n auto --dist worksteal --cov=abicheck --cov-report=xml:coverage-integration.xml
+          # Recorded per test so the shard weights can be refreshed from the
+          # artifact below (tests/pytest_shards.py's docstring).
+          ABICHECK_DURATIONS_JSON: integration-durations-shard${{ matrix.shard }}.json
+          PYTEST_ADDOPTS: -n auto --dist worksteal --shard=${{ matrix.shard }}/2 --shard-weights=tests/shard_weights_integration.json --cov=abicheck --cov-report=xml:coverage-integration.xml
         run: python scripts/verify.py --profile full --only integration --require-complete
+      - name: Upload integration-durations artifact
+        if: ${{ always() && runner.os == 'Linux' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: integration-durations-shard${{ matrix.shard }}
+          path: integration-durations-shard${{ matrix.shard }}.json
+          if-no-files-found: ignore
       - name: Integration tests (macOS/Windows)
         if: (success() || failure()) && runner.os != 'Linux'
         env:
@@ -204,18 +233,19 @@ jobs:
         run: python scripts/verify.py --profile full --only msvc --require-complete
       - name: libabigail parity
         # Marker-scoped, and the step sets its own ABICHECK_MIN_EXECUTED.
-        if: (success() || failure()) && runner.os == 'Linux'
+        # This tail (libabigail, ABICC, libz demo) runs on one Linux shard.
+        if: (success() || failure()) && runner.os == 'Linux' && matrix.shard == 2
         run: python scripts/verify.py --profile full --only libabigail-parity --require-complete
       - name: ABICC parity
         # Native `compare` verdicts against the real abi-compliance-checker;
         # the step sets its own ABICHECK_MIN_EXECUTED.
-        if: (success() || failure()) && runner.os == 'Linux'
+        if: (success() || failure()) && runner.os == 'Linux' && matrix.shard == 2
         run: python scripts/verify.py --profile full --only abicc-parity --require-complete
       - name: End-to-end demo (libz)
         # Formerly ci.yml's `e2e` job: the distro libz dumped with its real
         # zlib.h through CastXML, then mutated and classified. The demo takes
         # ~3 s; as its own job it paid a full runner's setup on every PR.
-        if: (success() || failure()) && runner.os == 'Linux'
+        if: (success() || failure()) && runner.os == 'Linux' && matrix.shard == 2
         run: python scripts/verify.py --profile full --only demo-libz --require-complete
       - name: Upload integration coverage to Codecov
         if: ${{ always() && runner.os == 'Linux' }}

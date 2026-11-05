@@ -65,6 +65,7 @@ _NEEDS_CLANG = pytest.mark.skipif(
     reason="clang and clang++ are not installed",
 )
 #: Each frontend arm skips on its own tool; the binary arm needs neither.
+FRONTENDS_ONLY = ("castxml", "clang")
 FRONTENDS = (
     pytest.param("castxml", marks=_NEEDS_CASTXML, id="castxml"),
     pytest.param("clang", marks=_NEEDS_CLANG, id="clang"),
@@ -516,6 +517,7 @@ def test_c_header_facts_survive_without_optional_tools(
     _assert_no_empty_as_value(snap)
 
 
+@pytest.mark.known_gap_canary
 @_NEEDS_CLANG
 def test_clang_builtin_abi_facts_are_marked_without_a_linker(
     fixture: Fixture, tmp_path: Path
@@ -552,6 +554,51 @@ def test_clang_builtin_abi_facts_are_marked_without_a_linker(
     # Typedef ABI facts come from the same probe: the whole map is unknown.
     assert snap.typedef_abi_facts is None
     _assert_no_empty_as_value(snap)
+
+
+@pytest.mark.known_gap_canary
+@_NEEDS_CASTXML
+@_NEEDS_CLANG
+def test_clang_leaves_enum_and_typedef_slots_without_an_abi_fact(
+    fixture: Fixture, tmp_path: Path
+) -> None:
+    """Known gap (docs/contribute/known-gaps.md): for ``make(Point, Color, Mode,
+    count_t) -> handle_t`` castxml records the ABI fact of the enum parameters
+    and the typedef'd return, and clang records NOT_COLLECTED for exactly those
+    three slots (it records ``count_t`` and plain builtins). Fails when clang
+    starts recording them, or when the gap widens."""
+    mangled = "_ZN3lib4makeENS_5PointENS_5ColorENS_4ModeEj"
+    slots = {}
+    for frontend in FRONTENDS_ONLY:
+        env = _default_install_env(tmp_path / frontend, frontend)
+        snap = _dump(
+            env, tmp_path / f"{frontend}.json", fixture.lib, "-H", fixture.header
+        )
+        make = next(f for f in snap.declarations.functions if f.mangled == mangled)
+        slots[frontend] = {
+            "Color": make.params[1].type_abi_fact,
+            "Mode": make.params[2].type_abi_fact,
+            "count_t": make.params[3].type_abi_fact,
+            "return": make.return_type_abi_fact,
+        }
+    expected = {  # (encoding, size) the oracle-backed castxml side records
+        "Color": (FundamentalEncoding.UNSIGNED, 4),
+        "Mode": (FundamentalEncoding.UNSIGNED, 2),
+        "count_t": (FundamentalEncoding.UNSIGNED, 4),
+        "return": (FundamentalEncoding.SIGNED, 8),
+    }
+    for slot, (encoding, size) in expected.items():
+        fact = slots["castxml"][slot]
+        assert fact.status is FactStatus.PRESENT, (slot, fact)
+        assert (fact.value.encoding, fact.value.size) == (encoding, size), slot
+    # The gap: clang marks the enum and typedef'd slots, never a wrong value.
+    for slot in ("Color", "Mode", "return"):
+        fact = slots["clang"][slot]
+        assert fact.status is FactStatus.NOT_COLLECTED, (slot, fact)
+        assert fact.value is None
+    count_t = slots["clang"]["count_t"]
+    assert count_t.status is FactStatus.PRESENT
+    assert (count_t.value.encoding, count_t.value.size) == expected["count_t"]
 
 
 def _fact_projection(snap: Any) -> dict[str, Any]:

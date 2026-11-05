@@ -670,13 +670,17 @@ def build_matrix(
         {row["case_id"] for row in rows if row.get("kinds_strict") == "mismatch"}
         | set(kind_mismatch_lanes)
     )
-    # Separate from kind_mismatch_cases: these have already been triaged (root
-    # cause identified and recorded in ground_truth.json's known_kind_gap/
-    # known_kind_gap_note) rather than being an unexplained backlog item.
+    # Separate from kind_mismatch_cases: these lanes miss a kind that
+    # ground_truth.json declares for that frontend and mode under
+    # expected_kinds_gaps (tests/expected_kinds_gate.py), with a reason and a
+    # known-gaps.md entry, rather than being an unexplained backlog item.
     documented_kind_gap_cases = sorted(
-        row["case_id"]
-        for row in rows
-        if row.get("kinds_strict") == "documented-mismatch"
+        {
+            row["case_id"]
+            for row in rows
+            for lane in [row, *(row.get("lanes") or [])]
+            if lane.get("kinds_strict") == "declared-gap"
+        }
     )
     return {
         "schema_version": SCHEMA_VERSION,

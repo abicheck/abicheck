@@ -76,6 +76,10 @@ CI's `pr` profile.
   error or the chosen branch instead. A deliberate shape takes
   `# test-quality: ok <reason>` on its `def` line. Rules and process:
   `docs/contribute/agent-guide/quality-gates.md` "Test-quality ratchet".
+- **Known-gap canaries** (`@pytest.mark.known_gap_canary`) assert the *current, gapped* answer of an open
+  `docs/contribute/known-gaps.md` entry, which names them with `<!-- canary: ... -->`. When one fails, the gap
+  moved: if it was fixed, archive the entry and turn the canary into a regression test (drop the marker); never
+  re-pin the new answer. The `known-gap-canaries` AI-readiness check keeps the two linked.
 - **Silent-skip guard** (`conftest.py`): export `ABICHECK_MIN_EXECUTED=<n>` and
   the session fails unless ≥ n tests actually ran — used by the marker lanes in
   CI so a missing tool can't pass with 0 tests. Every `test_*` should assert
@@ -96,6 +100,12 @@ CI's `pr` profile.
 
 - `check_validate_results.py`, `summarize_validate_results.py` — used by
   `test_abi_examples.py` to validate example case ground truth.
+- `expected_kinds_gate.py` — the catalog lanes' strict kinds gate: in the
+  native `validate_examples.py` lanes a missing `expected_kinds` entry FAILs
+  the cell unless `ground_truth.json`'s `expected_kinds_gaps` declares it for
+  that header frontend and mode; a declaration that no longer reproduces
+  FAILs as stale. Also validates that field. Tests:
+  `test_expected_kinds_gate.py`.
 - `conftest.py` — shared fixtures, including temp-dir helpers and
   binary-skip markers.
 - `_strict_process.py` — `StrictProcessRunner`, the scripted stand-in for
