@@ -487,6 +487,8 @@ _F8 = (
     # The clang header backend left layout facts empty that castxml records
     # from the same headers (harness cell: test_clang_backend_layout_matches_castxml).
     "extraction.backend_fact_family_parity",
+    # A newer clang's JSON AST spelling read as absent (clang-latest lane).
+    "extraction.clang_ast_shape_version_drift",
     "extraction.aggregate_layout_inverted_by_line",
     "extraction.emulated_compiler_builtin_absent_from_frontend",
     "extraction.linker_summary_flag_read_as_the_fact",
