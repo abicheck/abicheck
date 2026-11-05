@@ -118,9 +118,6 @@ class TypeResolver:
         for i in range(1, len(stems) + 1):
             self._known.add("::".join(stems[:i]))
 
-    def leaf_owners(self, leaf: str) -> list[str]:
-        return self._by_leaf.get(leaf, [])
-
     def _lookup_chain(self, chain: str, scope: list[str]) -> str | None:
         chain = re.sub(r"\s+", "", chain)
         if chain.startswith("::"):
@@ -177,11 +174,16 @@ class TypeResolver:
         for ident in identities:
             if ident in self.records and split_components(ident)[-1] == leaf:
                 return ident
+        # A leading `::` names the global scope: lookup must not start from
+        # the enclosing scopes, and no unique-leaf guess may override it.
+        rooted = spelling.lstrip().startswith("::")
         scope_parts = [_stem(c) for c in split_components(scope)] if scope else []
-        qualified = normalize_spelling(self._qualify(norm, scope_parts))
+        qualified = normalize_spelling(
+            self._qualify("::" + norm if rooted else norm, scope_parts)
+        )
         if qualified in self._normalized:
             return self._normalized[qualified]
-        if len(split_components(norm)) == 1 and "<" not in norm:
+        if not rooted and len(split_components(norm)) == 1 and "<" not in norm:
             owners = self._by_leaf.get(norm, [])
             if len(owners) == 1:
                 return owners[0]
