@@ -48,6 +48,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .castxml_array_migration import migrate_castxml_array_counts
+from .castxml_base_offset_migration import migrate_castxml_base_offsets
 from .versioning import (
     EXTRACTOR_GENERATION,
     GENERATION_DRIFT_NOTICE_MARKER,
@@ -413,6 +414,20 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "declarations keep their spellings; only the declared order of such "
         "trees changes"
     ),
+    39: GenerationSpellingChange(
+        "no type or name spelling changes. (1) The castxml backend stores a base "
+        "class's offset in bits, as DWARF and the clang layout pass do; it stored "
+        "castxml's byte offset, so a castxml snapshot and a clang one disagreed on "
+        "every nonzero base offset. castxml_base_offset_migration.py multiplies a "
+        "stored castxml snapshot's base offsets by 8; a hybrid snapshot mixed both "
+        "units and is re-dumped. (2) The clang record-layout pass "
+        "(extract/headers/clang/record_layout_dump.py) now sizes an empty record "
+        "and records an empty base's offset, gives the members of an unnamed "
+        "member struct/union their offsets, probes C headers, and keeps a virtual "
+        "base out of base_offsets (castxml and DWARF record none). A "
+        "generation-38 clang snapshot lacks those facts or holds a virtual base's "
+        "offset, which no rewrite can settle, so it is re-dumped"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.
@@ -617,10 +632,13 @@ def migrate_and_describe(
         # already rewritten, but the document still holds them, so say so
         # exactly as the first load did (a dry run that keeps only notices).
         notices.extend(migrate_castxml_array_counts(document, extractor)[1])
+        notices.extend(migrate_castxml_base_offsets(document, extractor)[1])
     if spellings >= EXTRACTOR_GENERATION:
         return document, generations, previous, tuple(notices)
     migrated, spelling_notices = _migrate_spellings(document, spellings)
     notices.extend(spelling_notices)
     migrated, array_notices = migrate_castxml_array_counts(migrated, spellings)
     notices.extend(array_notices)
+    migrated, offset_notices = migrate_castxml_base_offsets(migrated, spellings)
+    notices.extend(offset_notices)
     return migrated, generations, EXTRACTOR_GENERATION, tuple(notices)
