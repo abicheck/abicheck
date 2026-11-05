@@ -392,7 +392,7 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
     ),
     37: GenerationSpellingChange(
         "no stored spelling changes: a -H directory now expands its headers in "
-        "the ADR-082 canonical order (resolved path as a string, so foo.h "
+        "the header-order canonical order (resolved path as a string, so foo.h "
         "before foo/bar.h; header_utils.iter_directory_headers). Generation 36 "
         "sorted by pathlib.Path components (foo/bar.h first), so for a tree "
         "with a foo.h beside a foo/ directory the aggregate TU included the "
