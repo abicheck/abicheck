@@ -64,6 +64,7 @@ _REQUIRED_GAP_KEYS = frozenset({"kinds", "reason", "known_gap"})
 #: Retired by this gate: one unscoped kind per case could not say which lane
 #: has the gap, and could not go stale.
 RETIRED_FIELDS = ("known_kind_gap", "known_kind_gap_note")
+_CLOSED_STATUS = re.compile(r"\*\*Status[^:]*:\s*CLOSED")
 KNOWN_GAPS_PATH = Path(__file__).resolve().parent.parent / (
     "docs/contribute/known-gaps.md"
 )
@@ -91,11 +92,27 @@ NOT_CHECKED = KindsVerdict("n/a", "", False)
 
 
 def known_gap_headings(path: Path = KNOWN_GAPS_PATH) -> tuple[str, ...]:
-    """Every Markdown heading text of the known-gaps index."""
-    text = path.read_text(encoding="utf-8")
-    return tuple(
-        m.group(1).strip() for m in re.finditer(r"^#{2,6}\s+(.+)$", text, re.M)
-    )
+    """The headings of the known-gaps index's *open* entries.
+
+    An entry is a ``####`` heading (``##``/``###`` are section titles); it is
+    open unless the first ``**Status`` line under it says ``CLOSED``. A gap
+    declaration may cite only these, so it cannot point at a section or at a
+    gap the index already records as fixed.
+    """
+    lines = path.read_text(encoding="utf-8").splitlines()
+    open_entries: list[str] = []
+    for i, line in enumerate(lines):
+        if not line.startswith("#### "):
+            continue
+        body = []
+        for following in lines[i + 1 :]:
+            if following.startswith("#"):
+                break
+            body.append(following)
+        status = next((ln for ln in body if ln.startswith("**Status")), "")
+        if not _CLOSED_STATUS.match(status):
+            open_entries.append(line[5:].strip())
+    return tuple(open_entries)
 
 
 def _gap_objects(raw: object) -> list[object]:
@@ -177,8 +194,8 @@ def validate_entry(
                 and not any(h.startswith(known.strip()) for h in heading_list)
             ):
                 errors.append(
-                    f"{where}: known_gap {known!r} starts no heading of "
-                    "docs/contribute/known-gaps.md"
+                    f"{where}: known_gap {known!r} starts no open entry heading "
+                    "of docs/contribute/known-gaps.md"
                 )
             for mode in modes:
                 for kind in kinds:
@@ -247,7 +264,11 @@ def evaluate(
     undeclared_missing = [k for k in missing if k not in declared]
     undeclared_present = [k for k in present if k not in declared]
     stale = sorted(declared - violations)
-    enforced = mode in ENFORCED_MODES and target in ENFORCED_TARGETS
+    # A frontend outside FRONTENDS (``hybrid``) has no measured declarations
+    # and cannot have any, so it reports only, like an unmeasured target.
+    enforced = (
+        frontend in FRONTENDS and mode in ENFORCED_MODES and target in ENFORCED_TARGETS
+    )
     parts = []
     if undeclared_missing:
         parts.append(f"expected_kinds missing: {undeclared_missing}")

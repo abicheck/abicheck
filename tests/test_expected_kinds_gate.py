@@ -185,6 +185,20 @@ def test_unmeasured_targets_report_but_do_not_fail(target):
         assert (status, message, verdict.signal) == ("PASS", "m", signal)
 
 
+def test_an_unmeasured_frontend_reports_but_does_not_fail():
+    """hybrid is a valid ABICHECK_AST_FRONTEND with no measured declarations,
+    and a gap cannot be declared for it, so it never fails a cell."""
+    assert "hybrid" not in gate.FRONTENDS
+    status, _, verdict = gate.judge_cell(
+        _entry(), "PASS", "", set(), mode="debug-headers", frontend="hybrid"
+    )
+    assert (status, verdict.signal) == ("PASS", "mismatch")
+    status, _, _ = gate.judge_cell(
+        _entry(), "PASS", "", set(), mode="debug-headers", frontend="castxml"
+    )
+    assert status == "FAIL"
+
+
 def test_current_target_normalizes_like_validate_examples(monkeypatch):
     """The oracle is validate_examples' own platform/architecture tags."""
     for sys_platform, machine, want in (
@@ -234,6 +248,9 @@ def fake_lane(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(ve, "_build_info_applies", lambda *a: False)
     monkeypatch.setattr(
+        ve, "_collect_build_source_evidence", lambda *a, **k: (None, None, None)
+    )
+    monkeypatch.setattr(
         ve,
         "_dump_and_compare",
         lambda *a, **k: (emitted["verdict"], tuple(emitted["kinds"]), None),
@@ -260,6 +277,13 @@ def test_run_case_passes_a_gap_declared_for_its_frontend_only(fake_lane):
     entry = _entry(_gap(["a_kind"], frontend="clang"))
     assert fake_lane(entry, ["b_kind"], frontend="clang").status == "PASS"
     assert fake_lane(entry, ["b_kind"], frontend="castxml").status == "FAIL"
+
+
+def test_run_case_forwards_its_variant_as_the_gate_mode(fake_lane):
+    """A gap scoped to build-source excuses only the build-source cell."""
+    entry = _entry(_gap(["a_kind"], modes=["build-source"]))
+    assert fake_lane(entry, ["b_kind"], variant="build-source").status == "PASS"
+    assert fake_lane(entry, ["b_kind"], variant="debug-headers").status == "FAIL"
 
 
 def test_run_case_reports_a_stale_gap(fake_lane):
@@ -312,7 +336,7 @@ def test_main_refuses_an_invalid_declaration(monkeypatch, tmp_path):
         ),
         (
             {"clang": [{"kinds": ["a_kind"], "reason": "r", "known_gap": "No such"}]},
-            "starts no heading",
+            "starts no open entry heading",
         ),
         (
             {
@@ -378,6 +402,31 @@ def test_schema_accepts_a_single_object_and_rejects_the_retired_field():
         "caseX: known_kind_gap is retired; declare the gap per frontend under "
         "expected_kinds_gaps"
     ]
+
+
+def test_known_gap_headings_are_open_entries_only(tmp_path):
+    index = tmp_path / "known-gaps.md"
+    index.write_text(
+        "# Known gaps\n\n## Open and partially open gaps\n\n"
+        "### Report and detector coverage\n\n"
+        "#### Open gap (2026-11-01)\n\n**Status (2026-11-01): OPEN.** x\n\n"
+        "#### Narrowed gap\n\n**Status: NARROWED** (2026-10-25). x\n\n"
+        "#### Fixed gap (2026-11-03)\n\n**Status (2026-11-03): CLOSED** (x).\n\n"
+        "#### Untagged gap\n\nNo status line.\n",
+        encoding="utf-8",
+    )
+    headings = gate.known_gap_headings(index)
+    assert headings == ("Open gap (2026-11-01)", "Narrowed gap", "Untagged gap")
+    entry = _entry(
+        {"clang": [{"kinds": ["a_kind"], "reason": "r", "known_gap": "Fixed gap"}]}
+    )
+    assert any(
+        "starts no open entry" in e for e in gate.validate_entry("c", entry, headings)
+    )
+    entry["expected_kinds_gaps"]["clang"][0]["known_gap"] = "Report and detector"
+    assert any(
+        "starts no open entry" in e for e in gate.validate_entry("c", entry, headings)
+    )
 
 
 def test_known_gap_headings_reads_the_real_index():

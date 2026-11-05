@@ -1,4 +1,15 @@
+---
+doc_type: contributor
+audience:
+  - contributor
+level: advanced
+lifecycle: active
+generated: false
+---
+
 # A `--build-info` dump's L5 graph displaces the header graph, so a public-to-internal dependency goes unreported (2026-11-05)
+
+Index: [Known gaps](../known-gaps.md)
 
 **Status (2026-11-05): OPEN.** Measured on Linux/GCC with castxml 0.7 and
 clang 18 header frontends, `python tests/validate_examples.py

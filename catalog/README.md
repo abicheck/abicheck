@@ -131,7 +131,9 @@ the way it previously did (stale at a 169-case catalog for several releases).
   DWARF by design and are guarded by `check_stripped_fp.py`. So do targets other than
   Linux x86_64 (`ENFORCED_TARGETS`), where the declarations were measured: the
   catalog's kinds are calibrated on ELF (`func_removed_elf_only` cannot fire on
-  Mach-O), and no macOS, Windows or aarch64 lane has been measured to declare its gaps. The verdict-level
+  Mach-O), and no macOS, Windows or aarch64 lane has been measured to declare its gaps.
+  The `hybrid` header frontend reports only for the same reason. A `known_gap` must
+  name an open `####` entry of `known-gaps.md`, not a section or a CLOSED entry. The verdict-level
   `known_gap`/XFAIL mechanism below is separate: an XFAIL row is not kinds-checked.
   The full example matrix (`skills-src/evaluation/validation/scripts/collect_full_example_matrix.py`)
   lists `kind_mismatch_cases` and the declared-gap cases (`documented_kind_gap_cases`)

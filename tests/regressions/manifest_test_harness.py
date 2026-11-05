@@ -483,7 +483,10 @@ TEST_HARNESS_BUG_CLASSES: tuple[BugClass, ...] = (
         fixed_by=(1918, 1927),
         seed_tests=("tests/test_expected_kinds_gate.py",),
         axes={
-            "frontend": ("castxml", "clang"),
+            # The seed selects the frontend by name and scripts compare's
+            # output; the real castxml/clang runs are the PR's lane evidence,
+            # not a seed, so this is not a "frontend" axis (bug_class_schema).
+            "frontend_selection": ("castxml", "clang", "hybrid"),
             "mode": ("debug-headers", "build-source", "release-headers"),
             "target": ("linux/x86_64", "macos/aarch64", "windows", "linux/aarch64"),
             "emitted": ("all subsets of expected + absent kinds",),
