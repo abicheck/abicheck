@@ -175,7 +175,7 @@
   "excluded_header_patterns": [],
   "fact_generations": {
     "extractor": 37,
-    "resolver": 3,
+    "resolver": 4,
     "source": 13
   },
   "fact_provenance": {},
