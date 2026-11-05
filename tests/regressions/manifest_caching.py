@@ -341,7 +341,7 @@ CACHING_BUG_CLASSES: tuple[BugClass, ...] = (
         # header list was unsorted, although the proof is only read when the
         # two sides' header_sequence values differ (~11% of a 30-header
         # compare declaring part0.h..part29.h on both sides).
-        fixed_by=(),
+        fixed_by=(1928,),
         seed_tests=(
             "tests/test_header_order_witness_deferred.py",
             "tests/test_header_dir_expansion_canonical_order.py",
