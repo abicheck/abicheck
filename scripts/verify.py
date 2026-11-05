@@ -111,9 +111,9 @@ PR = "pr"
 FULL = "full"
 PROFILES = (FAST, PR, FULL)
 
-
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
+from verify_clang_lane import clang_lane_steps  # noqa: E402 -- sibling leaf
 from verify_preconditions import (  # noqa: E402 -- sibling leaf, see that module
     _need_bins,
     _need_castxml_and_system_zlib,
@@ -840,7 +840,7 @@ STEPS: tuple[Step, ...] = (
         precondition=_need_modules("build", "twine"),
         description="Build sdist/wheel, twine check, validate metadata",
     ),
-)
+) + clang_lane_steps(Step, _py, _pyscript, frozenset({FULL}))
 
 
 def steps_for(profile: str, only: set[str] | None, skip: set[str]) -> list[Step]:

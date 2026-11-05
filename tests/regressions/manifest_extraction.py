@@ -730,4 +730,43 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="extraction.clang_ast_shape_version_drift",
+        invariant=(
+            "The clang header backend yields the same surface from every clang "
+            "JSON AST shape it can receive: a link a newer clang spells "
+            "differently (clang 22's isTagOwned tag type for clang 21's "
+            "ElaboratedType.ownedTagDecl) is read in both spellings, never as "
+            "absent, and the opt-in dependency pruner never elides a C++ "
+            "method-shaped node, including one nested inside a prunable "
+            "function or variable. Oracle: an AST rewritten into the other "
+            "release's shape (from LLVM's JSONNodeDumper), and the "
+            "method-shaped node count with pruning off."
+        ),
+        fixed_by=(1921,),
+        seed_tests=(
+            "tests/test_clang_ast_shape_version_drift.py",
+            # F8 harness cell: castxml and the clang on PATH name the same
+            # typedef'd anonymous tags from one C header.
+            "tests/test_family_f8_target_parity.py",
+            # The live half: the clang-latest lane runs these against the
+            # newest released LLVM next to the distro clang.
+            "tests/test_clang_header_backend_integration.py",
+        ),
+        axes={
+            "ast_shape": ("clang<=21", "clang>=22"),
+            "tag": ("record", "enum"),
+            "pruned_holder": ("FunctionDecl", "VarDecl"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Only shapes a pinned clang release has shown are covered; a "
+                    "future release's change is caught by the clang-latest CI "
+                    "lane once its pin is bumped, not before."
+                ),
+                reference=".github/workflows/clang-latest.yml",
+            ),
+        ),
+    ),
 )
