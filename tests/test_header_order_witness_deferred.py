@@ -334,3 +334,8 @@ def test_a_linker_script_operand_counts_as_a_live_side(tmp_path, make, live):
         old=_snap(_BA), new=_snap(_AB, _AB), old_fmt=None, new_fmt="elf"
     )
     assert should_resolve_with_order_witness(pair, live=(live, True)) is live
+
+
+def test_an_operand_without_a_path_is_not_live():
+    """A source-only side (``InputSpec.path`` is ``None``) is never dumped live."""
+    assert operand_is_live_binary(None) is False
