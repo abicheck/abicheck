@@ -28,6 +28,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from collections.abc import Iterator
 from dataclasses import dataclass, fields, is_dataclass
 from pathlib import Path
@@ -45,9 +46,15 @@ from tests.optional_tool_inventory import hidden_binaries, hidden_modules
 
 pytestmark = [
     pytest.mark.integration,
-    # The default-install PATH is built from symlinked tool shims, which need
-    # a privilege Windows runners do not grant.
-    pytest.mark.skipif(os.name == "nt", reason="symlinked tool shims are POSIX-only"),
+    # Linux/ELF only. The default-install PATH is built from symlinked tool
+    # shims (a privilege Windows runners do not grant), and the oracles assume
+    # an ELF library and glibc spellings: on macOS the same build is Mach-O,
+    # `int64_t` is `long long`, and no typedef ABI facts are recorded. Mach-O
+    # and PE default-install facts are not covered by this module.
+    pytest.mark.skipif(
+        not sys.platform.startswith("linux"),
+        reason="default-install oracles are ELF/Linux-specific",
+    ),
 ]
 
 _NEEDS_CASTXML = pytest.mark.skipif(
