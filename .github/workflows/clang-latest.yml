@@ -1,0 +1,205 @@
+name: Clang latest
+
+# The clang-version-sensitive tests against the newest released LLVM, next to
+# the distro clang 18 that every other Linux lane uses.
+#
+# Why: PR #1918 was developed and tested against clang 18 only. Newer clang
+# printed `-fdump-record-layouts` explicit-instantiation template arguments as
+# written rather than canonically, and clang on Windows defaulted to the MSVC
+# ABI. Both surfaced only on the macOS/Windows integration legs, after
+# pushing. This lane makes "a newer clang changed its output" a Linux finding
+# on the PR that causes it.
+#
+# Which clang runs: abicheck resolves the clang driver by name on PATH
+# (abicheck/extract/compiler_driver.py `resolve_clang_bin`, `clang`/`clang++`
+# when no --compiler/--compiler-prefix is given), and the tests decide to run
+# on `shutil.which("clang++")`. So the lane selects the clang under test by
+# putting its bin/ first on PATH, then asserts that abicheck's own resolver
+# lands there (a silent fallback to the runner's preinstalled clang would make
+# the newest leg a second clang-18 run). The same two scripts/verify.py steps
+# (scripts/verify_clang_lane.py) run on both legs, so a red `latest` leg next
+# to a green `system` leg is attributable to the clang version alone.
+#
+# LLVM comes from the official release tarball, pinned by version and sha256
+# (the digest is the one in the release's signed attestation,
+# LLVM-<v>-Linux-X64.tar.xz.jsonl). Only clang, its symlinks and its resource
+# headers are extracted (~370 MB of a 1.2 GB download) and cached by
+# version+digest, so a warm run downloads nothing. To bump: change both
+# values in the matrix below, from the new release's attestation.
+#
+# Trigger: path-filtered on pull requests, not on every PR. Everything this
+# lane runs that can change with the clang version lives under
+# abicheck/extract/ (the clang header backend, the layout pass, compiler
+# driver and target resolution) plus the root dumper_* modules and the clang
+# tests themselves; a PR touching none of those cannot make the newest clang
+# disagree with clang 18 where it did not before, and integration.yml still
+# runs clang 18 on every PR. A cold cache costs a 1.2 GB download, which is
+# not worth paying on docs or policy-only PRs. Main pushes take the same
+# filter; the weekly schedule catches drift from the runner image (its GCC
+# headers, which this clang parses) that no commit would trigger.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'abicheck/extract/**'
+      - 'abicheck/dumper*.py'
+      - 'tests/*clang*'
+      - 'tests/test_family_f8_target_parity.py'
+      - 'tests/test_header_backend_parity_probes_integration.py'
+      - 'tests/conftest.py'
+      - 'tests/validate_examples.py'
+      - 'tests/_validate_examples_cli.py'
+      - 'catalog/**'
+      - '.github/workflows/clang-latest.yml'
+      # The lane's own infrastructure (tests/test_workflow_path_filter_closure.py);
+      # every CLANG_SENSITIVE_TESTS module is matched (tests/test_clang_latest_path_filter.py).
+      - 'pyproject.toml'
+      - 'scripts/verify.py'
+      - 'scripts/verify_clang_lane.py'
+      - 'scripts/verify_preconditions.py'
+      - '.github/actions/**'
+      - 'action/**'
+  pull_request:
+    paths:
+      - 'abicheck/extract/**'
+      - 'abicheck/dumper*.py'
+      - 'tests/*clang*'
+      - 'tests/test_family_f8_target_parity.py'
+      - 'tests/test_header_backend_parity_probes_integration.py'
+      - 'tests/conftest.py'
+      - 'tests/validate_examples.py'
+      - 'tests/_validate_examples_cli.py'
+      - 'catalog/**'
+      - '.github/workflows/clang-latest.yml'
+      # The lane's own infrastructure (tests/test_workflow_path_filter_closure.py);
+      # every CLANG_SENSITIVE_TESTS module is matched (tests/test_clang_latest_path_filter.py).
+      - 'pyproject.toml'
+      - 'scripts/verify.py'
+      - 'scripts/verify_clang_lane.py'
+      - 'scripts/verify_preconditions.py'
+      - '.github/actions/**'
+      - 'action/**'
+  schedule:
+    - cron: '37 4 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref) || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  clang:
+    name: clang-sensitive (${{ matrix.leg }} clang)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - leg: system
+            llvm_version: ''
+            llvm_sha256: ''
+          - leg: latest
+            llvm_version: '23.1.5'
+            # LLVM-23.1.5-Linux-X64.tar.zst, from the release attestation.
+            llvm_sha256: 'c3107384835f788768f614db610e87fba7077f125ca950eb02a78bab0a308065'
+    env:
+      LEG: ${{ matrix.leg }}
+      LLVM_VERSION: ${{ matrix.llvm_version }}
+      LLVM_SHA256: ${{ matrix.llvm_sha256 }}
+      LLVM_PREFIX: ${{ github.workspace }}/../llvm-${{ matrix.llvm_version }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+        with:
+          persist-credentials: false
+      - name: Install system deps
+        # The `system` leg's clang is the distro clang 18 the other Linux
+        # lanes use; the `latest` leg still needs g++ (the catalog tests build
+        # their reference binaries with it) and zstd for the tarball.
+        uses: ./.github/actions/install-system-deps
+        with:
+          packages: gcc g++ cmake clang binutils zstd curl ca-certificates
+      - name: Set up pinned CastXML
+        uses: ./.github/actions/setup-castxml
+      - name: Restore pinned LLVM
+        if: matrix.leg == 'latest'
+        id: llvm-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        with:
+          path: ${{ env.LLVM_PREFIX }}
+          key: llvm-${{ matrix.llvm_version }}-${{ matrix.llvm_sha256 }}-linux-x64-clang-only-v1
+      - name: Download and verify pinned LLVM
+        if: matrix.leg == 'latest' && steps.llvm-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          name="LLVM-${LLVM_VERSION}-Linux-X64"
+          major="${LLVM_VERSION%%.*}"
+          work="$(mktemp -d)"
+          curl --fail --location --silent --show-error --retry 3 --retry-all-errors \
+            --output "$work/$name.tar.zst" \
+            "https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_VERSION}/$name.tar.zst"
+          echo "${LLVM_SHA256}  $work/$name.tar.zst" | sha256sum -c -
+          mkdir -p "$LLVM_PREFIX"
+          # The release is zstd-compressed with a 1 GiB window (--long=31).
+          tar -I 'zstd -d --long=31' -xf "$work/$name.tar.zst" -C "$LLVM_PREFIX" \
+            --strip-components=1 \
+            "$name/bin/clang" "$name/bin/clang++" "$name/bin/clang-$major" \
+            "$name/lib/clang/$major"
+          rm -rf "$work"
+      - name: Put pinned LLVM first on PATH
+        if: matrix.leg == 'latest'
+        run: echo "$LLVM_PREFIX/bin" >> "$GITHUB_PATH"
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+      - name: Install package
+        run: pip install -e ".[dev]"
+      - name: Record and check which clang runs
+        # Asks abicheck's own resolver, not just `which`: that is the driver a
+        # clang header dump actually runs.
+        run: |
+          set -euo pipefail
+          resolved="$(python -I -c 'import shutil; from abicheck.extract.compiler_driver import resolve_clang_bin as r; print(shutil.which(r("c++", None, None)))')"
+          version="$("$resolved" --version | head -n 1)"
+          if [ "$LEG" = latest ]; then
+            expected="$(cd "$LLVM_PREFIX/bin" && pwd)/clang++"
+            [ "$(readlink -f "$resolved")" = "$(readlink -f "$expected")" ] || {
+              echo "::error::abicheck resolved $resolved, not the pinned $expected"; exit 1; }
+            case "$version" in
+              *"clang version ${LLVM_VERSION}"*) ;;
+              *) echo "::error::expected clang ${LLVM_VERSION}, got: $version"; exit 1 ;;
+            esac
+          fi
+          {
+            echo "### clang-sensitive lane: $LEG clang"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| abicheck-resolved driver | \`$resolved\` |"
+            echo "| \`--version\` | $version |"
+            echo "| target | \`$("$resolved" -print-target-triple)\` |"
+            echo "| castxml | $(castxml --version 2>&1 | head -n 1) |"
+            echo "| g++ | $(g++ --version | head -n 1) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "$version"
+      - name: Clang-sensitive tests
+        if: success() || failure()
+        env:
+          # The non-slow tests in these files (958 on clang 18); a floor well
+          # above any skip-only run catches a clang that failed to install.
+          ABICHECK_MIN_EXECUTED: '800'
+          PYTEST_ADDOPTS: -n auto --dist worksteal -rs
+        run: python scripts/verify.py --profile full --only clang-sensitive --require-complete
+      - name: Catalog subset (built and checked with this clang)
+        if: success() || failure()
+        env:
+          # case17's source smoke runs the built program, as in
+          # examples-validation.yml.
+          ABICHECK_TRUSTED_SOURCE_SMOKE_RUN: '1'
+        run: python scripts/verify.py --profile full --only clang-catalog --require-complete

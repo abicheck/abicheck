@@ -94,6 +94,7 @@ from .context import (
     qualtype,
     source_location,
 )
+from .owned_tag import owned_tag_decl
 from .qualifiers import (
     clang_record_is_abstract,
     clang_record_type_traits,
@@ -595,17 +596,17 @@ def _parse_bases(node: dict[str, Any]) -> tuple[list[str], list[str], dict[str, 
 def _owned_tag_id(typedef_node: dict[str, Any]) -> str:
     """The clang id of an anonymous tag a typedef *owns*, or ``""``.
 
-    For ``typedef struct {…} Foo;`` clang nests an ``ElaboratedType`` under the
-    ``TypedefDecl`` whose ``ownedTagDecl`` points at the unnamed ``RecordDecl``
-    that holds the fields. Returns that record's ``id`` so parse_types can emit
+    For ``typedef struct {…} Foo;`` the ``TypedefDecl``'s type node links to
+    the unnamed ``RecordDecl`` that holds the fields (in either clang shape,
+    :func:`owned_tag_decl`). Returns that record's ``id`` so parse_types can emit
     the otherwise-anonymous record under the typedef name.
     """
 
     def _scan(node: Any) -> str:
         if not isinstance(node, dict):
             return ""
-        owned = node.get("ownedTagDecl")
-        if isinstance(owned, dict) and isinstance(owned.get("id"), str):
+        owned = owned_tag_decl(node)
+        if owned is not None and isinstance(owned.get("id"), str):
             return str(owned["id"])
         for child in ast_inner(node):
             found = _scan(child)
