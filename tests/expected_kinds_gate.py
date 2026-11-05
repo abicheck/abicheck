@@ -9,9 +9,10 @@ as a side signal and still counted the cell as ``PASS``; the clang header lane
 passed case17/43/74-77/80 for weeks without the layout kinds those cases are
 about.
 
-In the *native* lanes (:data:`ENFORCED_MODES`) such a violation now FAILs the
-cell, unless ``ground_truth.json`` declares it for exactly that header frontend
-and mode under ``expected_kinds_gaps``::
+In the *native* lanes (:data:`ENFORCED_MODES`) on the measured target
+(:data:`ENFORCED_TARGETS`, Linux x86_64) such a violation now FAILs the cell,
+unless ``ground_truth.json`` declares it for exactly that header frontend and
+mode under ``expected_kinds_gaps``::
 
     "expected_kinds_gaps": {
       "castxml": [
@@ -37,7 +38,9 @@ schema half is usable before ``pip install -e .``.
 
 from __future__ import annotations
 
+import platform
 import re
+import sys
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -49,6 +52,12 @@ FRONTENDS = ("castxml", "clang")
 #: reported-only and guarded by ``check_stripped_fp.py``, so their kinds signal
 #: stays reported-only too.
 ENFORCED_MODES = ("debug-headers", "build-source")
+#: The (platform, architecture) targets whose cells the gate FAILs: the ones
+#: every declaration in ground_truth.json was measured on. The catalog's kinds
+#: are calibrated on Linux ELF; elsewhere a kind such as
+#: ``func_removed_elf_only`` cannot fire at all, and no lane there has been
+#: measured to declare its gaps, so the signal stays reported-only.
+ENFORCED_TARGETS = (("linux", "x86_64"),)
 GAPS_FIELD = "expected_kinds_gaps"
 _GAP_KEYS = frozenset({"kinds", "modes", "reason", "known_gap"})
 _REQUIRED_GAP_KEYS = frozenset({"kinds", "reason", "known_gap"})
@@ -223,6 +232,7 @@ def evaluate(
     *,
     frontend: str,
     mode: str,
+    target: tuple[str, str] = ENFORCED_TARGETS[0],
 ) -> KindsVerdict:
     """Judge one lane cell's emitted kinds against the case's ground truth."""
     expected = list(entry.get("expected_kinds") or [])
@@ -237,7 +247,7 @@ def evaluate(
     undeclared_missing = [k for k in missing if k not in declared]
     undeclared_present = [k for k in present if k not in declared]
     stale = sorted(declared - violations)
-    enforced = mode in ENFORCED_MODES
+    enforced = mode in ENFORCED_MODES and target in ENFORCED_TARGETS
     parts = []
     if undeclared_missing:
         parts.append(f"expected_kinds missing: {undeclared_missing}")
@@ -276,6 +286,16 @@ def current_frontend() -> str:
     return str(_resolve_header_backend(None))
 
 
+def current_target() -> tuple[str, str]:
+    """This run's ``(platform, architecture)``, normalized like
+    ``validate_examples.py``'s ``CURRENT_PLATFORM``/``CURRENT_ARCHITECTURE``."""
+    plat = {"darwin": "macos", "win32": "windows"}.get(sys.platform, sys.platform)
+    plat = "linux" if plat.startswith("linux") else plat
+    machine = platform.machine().lower()
+    arch = {"amd64": "x86_64", "arm64": "aarch64"}.get(machine, machine)
+    return plat, arch
+
+
 def judge_cell(
     entry: Mapping[str, Any],
     status: str,
@@ -284,6 +304,7 @@ def judge_cell(
     *,
     mode: str,
     frontend: str | None = None,
+    target: tuple[str, str] | None = None,
 ) -> tuple[str, str, KindsVerdict]:
     """``(status, message, verdict)`` of a lane cell after the kinds gate.
 
@@ -294,7 +315,11 @@ def judge_cell(
     if status not in ("PASS", "FAIL"):
         return status, message, NOT_CHECKED
     verdict = evaluate(
-        entry, got_kinds, frontend=frontend or current_frontend(), mode=mode
+        entry,
+        got_kinds,
+        frontend=frontend or current_frontend(),
+        mode=mode,
+        target=target or current_target(),
     )
     if not verdict.fails:
         return status, message, verdict

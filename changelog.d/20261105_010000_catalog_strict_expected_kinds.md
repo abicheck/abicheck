@@ -4,7 +4,8 @@
   only when the verdict differs.** In the native `validate_examples.py` lanes
   (`debug-headers`, `build-source`) a missing `expected_kinds` entry or a
   present `expected_absent_kinds` entry fails the row, per header frontend
-  (`ABICHECK_AST_FRONTEND`) and mode, unless `catalog/ground_truth.json`
+  (`ABICHECK_AST_FRONTEND`) and mode on Linux x86_64 (other targets keep it
+  reported-only), unless `catalog/ground_truth.json`
   declares that gap under the new `expected_kinds_gaps` field, which names
   the kinds, the modes, a reason, and the `docs/contribute/known-gaps.md`
   entry that tracks it. A declaration the lane no longer reproduces fails as

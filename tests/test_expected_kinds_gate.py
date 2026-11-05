@@ -22,6 +22,8 @@ import expected_kinds_gate as gate  # noqa: E402
 
 import tests.validate_examples as ve  # noqa: E402
 
+_REAL_CURRENT_TARGET = gate.current_target  # before the autouse fixture patches it
+
 _HEADING = "A header-only default template-argument change"
 _HEADINGS = (f"{_HEADING} reads `NO_CHANGE` at L2 on castxml (2026-10-21)",)
 _KINDS = ("a_kind", "b_kind", "c_kind")
@@ -54,6 +56,13 @@ def _subsets(items):
         for n in range(len(items) + 1)
         for c in itertools.combinations(items, n)
     ]
+
+
+@pytest.fixture(autouse=True)
+def _measured_target(monkeypatch):
+    """Run every case as the measured target, whatever host runs the suite;
+    the non-enforced targets have their own test below."""
+    monkeypatch.setattr(gate, "current_target", lambda: ("linux", "x86_64"))
 
 
 # ── the cell invariant, exhaustively over a small domain ──────────────────
@@ -151,6 +160,43 @@ def test_reduced_evidence_modes_report_but_do_not_fail(mode):
     )
     assert status == "PASS"
     assert verdict.signal == "mismatch"
+
+
+@pytest.mark.parametrize(
+    "target", [("macos", "aarch64"), ("windows", "x86_64"), ("linux", "aarch64")]
+)
+def test_unmeasured_targets_report_but_do_not_fail(target):
+    """case97 on macOS: an ELF-only expected kind cannot fire on Mach-O, and no
+    lane there was measured to declare gaps, so the cell keeps its verdict."""
+    stale = _entry(_gap(["a_kind"]))
+    for entry, got, signal in (
+        (_entry(), set(), "mismatch"),
+        (stale, {"a_kind", "b_kind"}, "stale-gap"),
+    ):
+        status, message, verdict = gate.judge_cell(
+            entry,
+            "PASS",
+            "m",
+            got,
+            mode="debug-headers",
+            frontend="clang",
+            target=target,
+        )
+        assert (status, message, verdict.signal) == ("PASS", "m", signal)
+
+
+def test_current_target_normalizes_like_validate_examples(monkeypatch):
+    """The oracle is validate_examples' own platform/architecture tags."""
+    for sys_platform, machine, want in (
+        ("linux", "AMD64", ("linux", "x86_64")),
+        ("darwin", "arm64", ("macos", "aarch64")),
+        ("win32", "AMD64", ("windows", "x86_64")),
+        ("linux", "aarch64", ("linux", "aarch64")),
+    ):
+        monkeypatch.setattr(gate.sys, "platform", sys_platform)
+        monkeypatch.setattr(gate.platform, "machine", lambda m=machine: m)
+        assert _REAL_CURRENT_TARGET() == want
+        assert (ve._current_platform(), ve._current_architecture()) == want
 
 
 def test_detectability_none_without_violation_is_gap_observed():

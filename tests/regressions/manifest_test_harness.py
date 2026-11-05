@@ -485,6 +485,7 @@ TEST_HARNESS_BUG_CLASSES: tuple[BugClass, ...] = (
         axes={
             "frontend": ("castxml", "clang"),
             "mode": ("debug-headers", "build-source", "release-headers"),
+            "target": ("linux/x86_64", "macos/aarch64", "windows", "linux/aarch64"),
             "emitted": ("all subsets of expected + absent kinds",),
             "declared": ("all subsets", "other frontend", "other mode"),
         },
@@ -494,6 +495,15 @@ TEST_HARNESS_BUG_CLASSES: tuple[BugClass, ...] = (
                     "release-headers/stripped-headers keep the kinds signal "
                     "reported-only (DWARF loss by design); only the native "
                     "lanes fail on it."
+                ),
+                reference="catalog/README.md",
+            ),
+            KnownGap(
+                description=(
+                    "Only Linux x86_64 enforces: macOS, Windows and aarch64 "
+                    "lanes were never measured to declare their gaps (an "
+                    "ELF-only kind cannot fire on Mach-O), so a kind "
+                    "regression there is reported, not failed."
                 ),
                 reference="catalog/README.md",
             ),
