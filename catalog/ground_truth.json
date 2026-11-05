@@ -2081,32 +2081,6 @@
     "type_field_type_changed",
     "public_api_internal_dependency_added"
    ],
-   "expected_kinds_gaps": {
-    "castxml": [
-     {
-      "kinds": [
-       "public_api_internal_dependency_added"
-      ],
-      "modes": [
-       "build-source"
-      ],
-      "reason": "dump --build-info embeds a build pack whose L5 graph has no SOURCE_DECLARES public closure, and resolve_l5_source_graph prefers it over the header graph that has one, so the public-to-internal reach is never evaluated at build-source depth; the debug-headers lane reports the kind.",
-      "known_gap": "A `--build-info` dump's L5 graph displaces the header graph"
-     }
-    ],
-    "clang": [
-     {
-      "kinds": [
-       "public_api_internal_dependency_added"
-      ],
-      "modes": [
-       "build-source"
-      ],
-      "reason": "dump --build-info embeds a build pack whose L5 graph has no SOURCE_DECLARES public closure, and resolve_l5_source_graph prefers it over the header graph that has one, so the public-to-internal reach is never evaluated at build-source depth; the debug-headers lane reports the kind.",
-      "known_gap": "A `--build-info` dump's L5 graph displaces the header graph"
-     }
-    ]
-   },
    "min_evidence": "L5",
    "platforms": [
     "linux"
@@ -2123,32 +2097,6 @@
     "type_base_changed",
     "public_api_internal_dependency_added"
    ],
-   "expected_kinds_gaps": {
-    "castxml": [
-     {
-      "kinds": [
-       "public_api_internal_dependency_added"
-      ],
-      "modes": [
-       "build-source"
-      ],
-      "reason": "dump --build-info embeds a build pack whose L5 graph has no SOURCE_DECLARES public closure, and resolve_l5_source_graph prefers it over the header graph that has one, so the public-to-internal reach is never evaluated at build-source depth; the debug-headers lane reports the kind.",
-      "known_gap": "A `--build-info` dump's L5 graph displaces the header graph"
-     }
-    ],
-    "clang": [
-     {
-      "kinds": [
-       "public_api_internal_dependency_added"
-      ],
-      "modes": [
-       "build-source"
-      ],
-      "reason": "dump --build-info embeds a build pack whose L5 graph has no SOURCE_DECLARES public closure, and resolve_l5_source_graph prefers it over the header graph that has one, so the public-to-internal reach is never evaluated at build-source depth; the debug-headers lane reports the kind.",
-      "known_gap": "A `--build-info` dump's L5 graph displaces the header graph"
-     }
-    ]
-   },
    "min_evidence": "L5",
    "platforms": [
     "linux"
@@ -2165,32 +2113,6 @@
     "func_removed",
     "public_api_internal_dependency_added"
    ],
-   "expected_kinds_gaps": {
-    "castxml": [
-     {
-      "kinds": [
-       "public_api_internal_dependency_added"
-      ],
-      "modes": [
-       "build-source"
-      ],
-      "reason": "dump --build-info embeds a build pack whose L5 graph has no SOURCE_DECLARES public closure, and resolve_l5_source_graph prefers it over the header graph that has one, so the public-to-internal reach is never evaluated at build-source depth; the debug-headers lane reports the kind.",
-      "known_gap": "A `--build-info` dump's L5 graph displaces the header graph"
-     }
-    ],
-    "clang": [
-     {
-      "kinds": [
-       "public_api_internal_dependency_added"
-      ],
-      "modes": [
-       "build-source"
-      ],
-      "reason": "dump --build-info embeds a build pack whose L5 graph has no SOURCE_DECLARES public closure, and resolve_l5_source_graph prefers it over the header graph that has one, so the public-to-internal reach is never evaluated at build-source depth; the debug-headers lane reports the kind.",
-      "known_gap": "A `--build-info` dump's L5 graph displaces the header graph"
-     }
-    ]
-   },
    "min_evidence": "L5",
    "platforms": [
     "linux"
@@ -2226,32 +2148,6 @@
     "type_size_changed",
     "public_api_internal_dependency_added"
    ],
-   "expected_kinds_gaps": {
-    "castxml": [
-     {
-      "kinds": [
-       "public_api_internal_dependency_added"
-      ],
-      "modes": [
-       "build-source"
-      ],
-      "reason": "dump --build-info embeds a build pack whose L5 graph has no SOURCE_DECLARES public closure, and resolve_l5_source_graph prefers it over the header graph that has one, so the public-to-internal reach is never evaluated at build-source depth; the debug-headers lane reports the kind.",
-      "known_gap": "A `--build-info` dump's L5 graph displaces the header graph"
-     }
-    ],
-    "clang": [
-     {
-      "kinds": [
-       "public_api_internal_dependency_added"
-      ],
-      "modes": [
-       "build-source"
-      ],
-      "reason": "dump --build-info embeds a build pack whose L5 graph has no SOURCE_DECLARES public closure, and resolve_l5_source_graph prefers it over the header graph that has one, so the public-to-internal reach is never evaluated at build-source depth; the debug-headers lane reports the kind.",
-      "known_gap": "A `--build-info` dump's L5 graph displaces the header graph"
-     }
-    ]
-   },
    "min_evidence": "L5",
    "platforms": [
     "linux"
@@ -4447,36 +4343,38 @@
    }
   },
   "case217_export_loss_weak_binding_demoted": {
-    "abi_break": true,
-    "api_break": false,
-    "bad_practice": false,
-    "category": "breaking",
-    "description": "Binding-scoped policy demotion. OLD exports three WEAK symbols that NEW loses: header-declared inline hdr_inline (hidden by NEW no longer calling it), an undeclared WEAK export weak_undeclared (not declared in any header), and the P<float> template constructor in the internal ns::detail namespace (NEW no longer instantiates it). Default verdict is BREAKING (exit 4). With policy.yaml, every WEAK finding under _ZN2ns.* is reclassified to risk, so the policy verdict is COMPATIBLE_WITH_RISK (exit 0). `expected` is the default-policy verdict; `policy_expected` is the verdict under policy.yaml. This is the binding: selector that did not reach these findings before PRs #1629 and #1630.",
-    "expected": "BREAKING",
-    "expected_kinds": [
-      "func_removed_elf_only"
-    ],
-    "min_evidence": "L0",
-    "platforms": [
-      "linux"
-    ],
-    "policy": "policy.yaml",
-    "policy_expected": "COMPATIBLE_WITH_RISK"
+   "abi_break": true,
+   "api_break": false,
+   "bad_practice": false,
+   "category": "breaking",
+   "description": "Binding-scoped policy demotion. OLD exports three WEAK symbols that NEW loses: header-declared inline hdr_inline (hidden by NEW no longer calling it), an undeclared WEAK export weak_undeclared (not declared in any header), and the P<float> template constructor in the internal ns::detail namespace (NEW no longer instantiates it). Default verdict is BREAKING (exit 4). With policy.yaml, every WEAK finding under _ZN2ns.* is reclassified to risk, so the policy verdict is COMPATIBLE_WITH_RISK (exit 0). `expected` is the default-policy verdict; `policy_expected` is the verdict under policy.yaml. This is the binding: selector that did not reach these findings before PRs #1629 and #1630.",
+   "expected": "BREAKING",
+   "expected_kinds": [
+    "func_removed_elf_only"
+   ],
+   "min_evidence": "L0",
+   "platforms": [
+    "linux"
+   ],
+   "policy": "policy.yaml",
+   "policy_expected": "COMPATIBLE_WITH_RISK"
   },
   "case218_export_loss_strong_binding_stays_breaking": {
-    "abi_break": true,
-    "api_break": false,
-    "bad_practice": false,
-    "category": "breaking",
-    "description": "Sibling of case217 with the same policy.yaml. NEW loses the same WEAK exports, and also the GLOBAL strong_fn (declared in v2.h, not defined in v2.cpp). The binding: weak rule matches only WEAK findings, so the strong removal keeps the run at BREAKING and exit 4. Shows the binding selector separates a WEAK loss from a GLOBAL one.",
-    "expected": "BREAKING",
-    "expected_kinds": ["func_removed_elf_only"],
-    "min_evidence": "L0",
-    "platforms": [
-      "linux"
-    ],
-    "policy": "policy.yaml",
-    "policy_expected": "BREAKING"
+   "abi_break": true,
+   "api_break": false,
+   "bad_practice": false,
+   "category": "breaking",
+   "description": "Sibling of case217 with the same policy.yaml. NEW loses the same WEAK exports, and also the GLOBAL strong_fn (declared in v2.h, not defined in v2.cpp). The binding: weak rule matches only WEAK findings, so the strong removal keeps the run at BREAKING and exit 4. Shows the binding selector separates a WEAK loss from a GLOBAL one.",
+   "expected": "BREAKING",
+   "expected_kinds": [
+    "func_removed_elf_only"
+   ],
+   "min_evidence": "L0",
+   "platforms": [
+    "linux"
+   ],
+   "policy": "policy.yaml",
+   "policy_expected": "BREAKING"
   },
   "case219_public_virtual_dispatch_set_changed": {
    "abi_break": false,

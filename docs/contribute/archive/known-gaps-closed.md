@@ -16,6 +16,10 @@ re-verification status line (2026-10-09, `456989f`). Do not re-open an
 entry from here without reproducing it on current `main`; record a new
 gap on the main page instead.
 
+### A `--build-info` dump's L5 graph displaced the header graph, so a public-to-internal dependency went unreported (closed 2026-11-05)
+
+**Status (2026-11-05): CLOSED.** `evidence_depth.resolve_l5_source_graph` now unions the snapshot's header-graph public closure (`SOURCE_DECLARES` edges and their endpoint nodes) into a build pack's graph (`with_header_public_closure`), for the dump-embedded pack and for an out-of-band `--build-info`/`--sources` pack of the same side. Only the closure is borrowed: dependency edges, pass flags, the graph's coverage block and the pack manifest's L5 row stay the pack's own, so no L5 collection is claimed that the pack did not make. case187/188/189/191 report `public_api_internal_dependency_added` in the `build-source` lane on both header frontends; their `expected_kinds_gaps` declarations are removed. Tests: `tests/test_build_pack_header_closure_merge.py` (header-only, build-only, both, transitive and conflicting-edge shapes against an independent reachability oracle; coverage/pass flags unchanged), `tests/test_build_source_lane_public_internal_dependency.py` (now a regression test). [Full write-up](../known-gaps/a-build-info-dump-graph-displaces-the-header-graph-public-closure.md)
+
 ### build-source lane: build flags leak into the header-parse profile (closed 2026-11-03)
 
 **Status (2026-11-03): CLOSED** (C `-std=` now selects C mode; a forced include of a declared header is no longer re-emitted). Previously: 19 catalog cases failed only in the `build-source` lane, identically on base: 12 C libraries whose header is parsed as C++ under the compile database's C `-std=` (castxml rejects it), and 7 pairs refused as `profile_mismatch` on per-side `pass_through_flags`. Needs an ADR-050 ruling on which build flags may parameterize the header parse. [Full write-up](../known-gaps/build-source-lane-build-flags-leak-into-the-header-parse-profile.md)

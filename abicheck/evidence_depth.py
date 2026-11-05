@@ -104,7 +104,9 @@ def resolve_l5_source_graph(
     fallback rule can't independently drift per call site the way it did
     across three earlier review rounds on this migration.
 
-    Prefers *pack*'s own ``source_graph``. With no pack at all (neither
+    Prefers *pack*'s own ``source_graph``, with *snap*'s header-graph public
+    closure folded in when that graph has none (:func:`with_header_public_closure`).
+    With no pack at all (neither
     *pack* nor ``snap.build_source`` -- a plain header-only dump, which no
     longer carries a synthesized pack), the header graph on
     ``AbiSnapshot.surface_graph`` *is* the snapshot's L5 evidence; depth
@@ -145,7 +147,16 @@ def resolve_l5_source_graph(
       downstream.
     """
     if pack is not None and pack.source_graph is not None:
-        return pack.source_graph
+        # A build pack's graph (embedded by `dump --build-info`, or an
+        # out-of-band `--build-info`/`--sources` pack for this same side)
+        # carries no public closure of its own; *snap*'s public headers
+        # define it, so the header graph's closure is folded in (formerly
+        # known gap "A `--build-info` dump's L5 graph displaces the header
+        # graph"). Only the closure is borrowed -- see
+        # :func:`with_header_public_closure`.
+        return with_header_public_closure(
+            pack.source_graph, embedded_header_graph(snap)
+        )
     if pack is None:
         # No pack at all: a plain header-only dump carries its header graph
         # on `surface_graph` alone (ADR-063 Phase 10 -- no synthesized pack).
@@ -158,6 +169,54 @@ def resolve_l5_source_graph(
     ):
         return embedded_header_graph(snap)
     return None
+
+
+_PUBLIC_CLOSURE_EDGE = "SOURCE_DECLARES"
+
+
+def with_header_public_closure(
+    graph: SourceGraphSummary, header: SourceGraphSummary | None
+) -> SourceGraphSummary:
+    """*graph* with *header*'s public closure -- its ``SOURCE_DECLARES``
+    edges and their endpoint nodes -- unioned in.
+
+    A build pack's graph has either no closure (a ``dump --build-info`` pack)
+    or one covering only the entities its replay saw (an ``--sources`` pack,
+    which records no declaring edge for a private header the header parse
+    did see), so public reachability is judged on the snapshot's own header
+    closure as well. Only the closure is borrowed: every dependency edge,
+    the pass flags (``extractor_passes``/``narrowed_passes``/
+    ``degraded_passes``) and the ``coverage`` block stay *graph*'s own, and
+    no pack manifest row is consulted or touched, so the result claims no
+    L5 collection the pack did not make. Returns *graph* itself when there
+    is nothing to add; otherwise a fresh object, neither input mutated.
+    """
+    if header is None or header is graph:
+        return graph
+    closure = [e for e in header.edges if e.kind == _PUBLIC_CLOSURE_EDGE]
+    if not closure:
+        return graph
+    from .model.graph_facts import GraphEdge, GraphNode
+    from .model.source_graph import SourceGraphSummary as _SourceGraphSummary
+
+    merged = _SourceGraphSummary.from_dict(graph.to_dict())
+    edges_before = len(merged.edges)
+    header_nodes = {n.id: n for n in header.nodes}
+    for e in closure:
+        for nid in (e.src, e.dst):
+            node = header_nodes.get(nid)
+            if node is not None:
+                merged.add_node(GraphNode.from_dict(node.to_dict()))
+        merged.add_edge(GraphEdge.from_dict(e.to_dict()))
+    if len(merged.edges) == edges_before:
+        return graph
+    merged.finalize()
+    # The borrowed header declarations are not source-tier decls the pack
+    # collected: keep the pack's own count on the coverage block.
+    merged.coverage["source_decls"] = graph.coverage.get(
+        "source_decls", merged.coverage.get("source_decls", 0)
+    )
+    return merged
 
 
 def embedded_header_graph(snap: AbiSnapshot) -> SourceGraphSummary | None:
