@@ -591,18 +591,40 @@ class RecordVtableIndex:
         if self._base_lookup is None:
             merged = dict(self.specialization_record_index())
             merged.update(self.record_index())
-            self._base_lookup = BaseLookupIndex(merged, self._alias_scopes)
+            self._base_lookup = BaseLookupIndex(
+                merged, self._alias_index, self._template_param_names
+            )
         return self._base_lookup
 
-    def _alias_scopes(self) -> dict[str, tuple[str, ...]]:
-        """``{typedef/alias clang id: its declaring scope}`` -- where an alias
-        base's desugared spelling was written (clang 22+ prints it relative
-        to that scope; see ``base_resolution``)."""
-        return {
-            str(entry.node["id"]): entry.scope
-            for entry in self._typedefs
-            if isinstance(entry.node.get("id"), str)
-        }
+    def _alias_index(self) -> dict[str, tuple[tuple[str, ...], str | None]]:
+        """``{typedef/alias clang id: (declaring scope, the alias id its own
+        target names, if any)}`` -- so an alias base's desugared spelling is
+        looked up where the innermost alias of its chain wrote it (clang 22+
+        prints it relative to that scope; see ``base_resolution``)."""
+        out: dict[str, tuple[tuple[str, ...], str | None]] = {}
+        for entry in self._typedefs:
+            alias_id = entry.node.get("id")
+            if not isinstance(alias_id, str):
+                continue
+            type_obj = entry.node.get("type")
+            nxt = (
+                type_obj.get("typeAliasDeclId") if isinstance(type_obj, dict) else None
+            )
+            out[alias_id] = (entry.scope, nxt if isinstance(nxt, str) else None)
+        return out
+
+    def _template_param_names(self) -> dict[str, frozenset[str]]:
+        """``{record key: template parameter names in scope}`` for every
+        record inside a template, so a base naming one is never resolved to
+        an unrelated record of the same name."""
+        out: dict[str, frozenset[str]] = {}
+        for entry in self._records:
+            names = entry.template_type_param_names
+            if not names or not entry.node.get("name"):
+                continue
+            key = qualified_name(entry)
+            out[key] = out.get(key, frozenset()) | frozenset(names)
+        return out
 
     def virtual_mangled_names(self) -> frozenset[str]:
         """Every mangled name occupying a slot in ANY record's reconstructed

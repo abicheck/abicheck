@@ -113,9 +113,9 @@
       "abicheck/extract/headers/clang/ast_inner.py": "f695f5bb01048fa924a1b67acbbcc29630c871607f1a3b4329ec781133f296f8",
       "abicheck/extract/headers/clang/attributes.py": "4f35afe72ef319265695d3e199e10c9ef0076db4a5238161b33a076fd3a599fe",
       "abicheck/extract/headers/clang/backend.py": "d51b5909f5ba92f18f90160a95417859f7404e564db9b92dee5a1755d563f61f",
-      "abicheck/extract/headers/clang/base_resolution.py": "c724b65c64c6d25f35dd76db3b89f58286158ac61cb62fc1f384b49862ffbc36",
+      "abicheck/extract/headers/clang/base_resolution.py": "d8841a88a3a57fdb478c16cd9e1fb69d119c35bb90766456b4750bb0fb12e4c8",
       "abicheck/extract/headers/clang/constraints.py": "e64400bbb73f904d5d390dc8e2530df0e69e3cf40d158901920077da4fe62b7e",
-      "abicheck/extract/headers/clang/context.py": "d73cd691a23654b784584a02bc5d30e6a6fdbb2e493337068d11066def54f456",
+      "abicheck/extract/headers/clang/context.py": "f4256aadc6bc2ed1cee1cb7b2ad23f2607bdff5eefda8eddabf27f2fe9dd058d",
       "abicheck/extract/headers/clang/enums.py": "7c91b6888bf450d160c29f6e2c624891dc9d5521cb465f43385d2ac09417f120",
       "abicheck/extract/headers/clang/error_header_retry.py": "3153f727c9d1934783a51d6917727a48aeba31e68b3c2462aef6e6b2f489f690",
       "abicheck/extract/headers/clang/explicit_instantiation.py": "359b71f36e304c2c1226ca35a65c1969989195dabc070a8035354caaef501663",
@@ -198,9 +198,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "3ad9b0b0245fc7af6011a38eae0ef84a97087711098764a65a4299a0da760e1d",
+    "fingerprint": "4ddeb73947d73daa91d6471884f393129e86fe4fbabf72e784655b458d1f84fb",
     "generation": 40,
-    "reason": "clang base specifiers resolved by C++ name lookup (clang 22+ drops desugaredQualType); a vtable with an unresolved base is recorded PARTIAL, not PRESENT"
+    "reason": "same unmerged generation-40 change (PR #1929): review fixes to base_resolution.py lookup order, template-parameter and alias-chain handling; generation 40 has not shipped, so no stored snapshot carries the earlier draft"
   },
   "resolver": {
     "files": {

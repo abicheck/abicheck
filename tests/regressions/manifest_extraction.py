@@ -752,6 +752,7 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=(
             "tests/test_clang_ast_shape_version_drift.py",
             "tests/test_clang_relative_base_vtable.py",
+            "tests/test_clang_vtable_base_migration.py",
             # F8 harness cell: castxml and the clang on PATH name the same
             # typedef'd anonymous tags from one C header.
             "tests/test_family_f8_target_parity.py",

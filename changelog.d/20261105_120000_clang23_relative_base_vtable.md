@@ -10,6 +10,11 @@
   record match. A class whose base (at any depth) still cannot be resolved,
   such as a dependent base of a class template or an uninstantiated
   `std::vector<int>`, now records its `vtable` fact as `partial`. Before,
-  it recorded a confirmed, possibly empty, vtable. The vtable detectors
-  decline on a `partial` fact and record why, instead of reading "no
-  vtable". The extractor generation is now 40.
+  it recorded a confirmed, possibly empty, vtable. The vtable diff
+  detectors (`type_vtable_changed`, `vptr_introduced`,
+  `virtual_method_added`) decline on a `partial` fact and record why,
+  instead of reading "no vtable". A clang or hybrid snapshot stored by an
+  older generation gets the same treatment on load: a confirmed vtable on a
+  record with base classes reads as `partial`. Comparing such a baseline
+  with a fresh dump therefore no longer reports a false `vptr_introduced`
+  break. The extractor generation is now 40.

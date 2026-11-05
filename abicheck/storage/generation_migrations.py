@@ -49,6 +49,7 @@ from typing import Any
 
 from .castxml_array_migration import migrate_castxml_array_counts
 from .castxml_base_offset_migration import migrate_castxml_base_offsets
+from .clang_vtable_base_migration import migrate_clang_vtable_bases
 from .versioning import (
     EXTRACTOR_GENERATION,
     GENERATION_DRIFT_NOTICE_MARKER,
@@ -436,8 +437,9 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "qualified desugaredQualType. A record whose base, at any depth, "
         "still does not resolve now records its vtable fact PARTIAL instead "
         "of PRESENT. bases keep their written spellings. A generation-39 "
-        "clang snapshot made with clang 22+ may hold an empty PRESENT vtable "
-        "for such a class, which no rewrite can recover, so it is re-dumped"
+        "clang snapshot may hold an empty or short PRESENT vtable for such a "
+        "class; clang_vtable_base_migration.py lowers a pre-40 clang/hybrid "
+        "vtable fact over bases to PARTIAL on load, and a re-dump restores it"
     ),
 }
 
@@ -644,6 +646,7 @@ def migrate_and_describe(
         # exactly as the first load did (a dry run that keeps only notices).
         notices.extend(migrate_castxml_array_counts(document, extractor)[1])
         notices.extend(migrate_castxml_base_offsets(document, extractor)[1])
+        notices.extend(migrate_clang_vtable_bases(document, extractor)[1])
     if spellings >= EXTRACTOR_GENERATION:
         return document, generations, previous, tuple(notices)
     migrated, spelling_notices = _migrate_spellings(document, spellings)
@@ -652,4 +655,6 @@ def migrate_and_describe(
     notices.extend(array_notices)
     migrated, offset_notices = migrate_castxml_base_offsets(migrated, spellings)
     notices.extend(offset_notices)
+    migrated, vtable_notices = migrate_clang_vtable_bases(migrated, spellings)
+    notices.extend(vtable_notices)
     return migrated, generations, EXTRACTOR_GENERATION, tuple(notices)

@@ -230,6 +230,53 @@ def _global_anchored(shape: str) -> dict:
     )
 
 
+def _shadows_global(shape: str) -> dict:
+    # A global `I` and `lib::I`: `struct D : I` inside `lib` is `lib::I`.
+    return _tu(
+        _cls("I", _vmethod("x", "_ZN1I1xEv")),
+        _ns(
+            "lib",
+            _cls("I", _vmethod("f", "_ZN3lib1I1fEv")),
+            _cls(
+                "D",
+                _vmethod("f", "_ZN3lib1D1fEv", override=True),
+                bases=[_bases_json(shape, "I", "lib::I")],
+            ),
+        ),
+    )
+
+
+def _alias_chain(shape: str) -> dict:
+    # `namespace a { using A = detail::I; }` -- `detail` there is
+    # `lib::a::detail` -- then `namespace b { using B = a::A; }` and
+    # `struct D : b::B`. Looking `detail::I` up from B's scope would find
+    # the unrelated `lib::detail::I`.
+    alias_a = _alias("0xa", "A", "detail::I")
+    alias_b = _alias("0xb", "B", "a::A")
+    alias_b["type"]["typeAliasDeclId"] = "0xa"
+    return _tu(
+        _ns(
+            "lib",
+            _ns("detail", _cls("I", _vmethod("x", "_ZN3lib6detail1I1xEv"))),
+            _ns(
+                "a",
+                _ns("detail", _cls("I", _vmethod("run", "_ZN3lib1a6detail1I3runEv"))),
+                alias_a,
+            ),
+            _ns("b", alias_b),
+            _cls(
+                "D",
+                _vmethod("run", "_ZN3lib1D3runEv", override=True),
+                bases=[
+                    _bases_json(
+                        shape, "b::B", "lib::a::detail::I", ("0xb", "detail::I")
+                    )
+                ],
+            ),
+        )
+    )
+
+
 _RESOLVABLE = {
     "relative_nested": (_relative_nested, "lib::D", ["_ZN3lib1D3runEv"]),
     "same_namespace": (_same_namespace, "lib::C", ["_ZN3lib1C1fEv"]),
@@ -241,6 +288,8 @@ _RESOLVABLE = {
         ["_ZN3lib5Outer1D1gEv"],
     ),
     "global_anchored": (_global_anchored, "app::G", ["_ZN3app1G1fEv"]),
+    "shadows_global": (_shadows_global, "lib::D", ["_ZN3lib1D1fEv"]),
+    "alias_chain": (_alias_chain, "lib::D", ["_ZN3lib1D3runEv"]),
 }
 
 
@@ -318,9 +367,27 @@ def _unresolvable_grandbase(shape: str) -> dict:
     )
 
 
+def _dependent_base(shape: str) -> dict:
+    # `template <class T> struct D : T` beside an unrelated record `lib::T`:
+    # the base is the template parameter, never the record.
+    pattern = {
+        "kind": "ClassTemplateDecl",
+        "name": "D",
+        "inner": [
+            {"kind": "TemplateTypeParmDecl", "name": "T", "tagUsed": "class"},
+            _cls(
+                "D",
+                _vmethod("g", "_ZN3lib1D1gEv"),
+                bases=[_bases_json(shape, "T", "T")],
+            ),
+        ],
+    }
+    return _tu(_ns("lib", _cls("T", _vmethod("t", "_ZN3lib1T1tEv")), pattern))
+
+
 @pytest.mark.parametrize("shape", _SHAPES)
 @pytest.mark.parametrize(
-    "build", [_unresolvable, _forward_only, _unresolvable_grandbase]
+    "build", [_unresolvable, _forward_only, _unresolvable_grandbase, _dependent_base]
 )
 def test_unresolved_base_never_reads_as_a_confirmed_vtable(build, shape: str) -> None:
     rec = _types(build(shape))["lib::D"]
@@ -346,8 +413,9 @@ _RECORDS = ["I", "lib::I", "lib::detail::I", "lib::a::K", "lib::a::detail::I"]
 
 def _cxx_lookup(spelling: str, scope: tuple[str, ...]) -> str | None:
     """[basic.lookup.unqual] + [basic.lookup.qual] over :data:`_MEMBERS`."""
-    parts = spelling.split("::")
-    for depth in range(len(scope), -1, -1):
+    rooted = spelling.startswith("::")
+    parts = spelling.removeprefix("::").split("::")
+    for depth in [0] if rooted else range(len(scope), -1, -1):
         here = scope[:depth]
         if parts[0] in _MEMBERS.get(here, set()):
             path = (*here, parts[0])
@@ -357,29 +425,69 @@ def _cxx_lookup(spelling: str, scope: tuple[str, ...]) -> str | None:
                 path = (*path, part)
             name = "::".join(path)
             return name if name in _RECORDS else None
+        if rooted:
+            return None
     return None
 
 
 def _all_spellings() -> list[str]:
     names = ["lib", "detail", "a", "I", "K"]
-    return ["::".join(p) for n in (1, 2, 3) for p in itertools.product(names, repeat=n)]
+    plain = [
+        "::".join(p) for n in (1, 2, 3) for p in itertools.product(names, repeat=n)
+    ]
+    return plain + ["::" + s for s in plain]
 
 
 @pytest.mark.parametrize("scope", sorted(_MEMBERS))
 def test_resolver_matches_cxx_lookup_exhaustively(scope: tuple[str, ...]) -> None:
+    """Every written spelling resolves exactly as C++ lookup does -- including
+    a bare ``I`` inside ``lib`` naming ``lib::I`` although a global ``I``
+    is also a record key."""
     resolver = BaseResolver(_RECORDS)
     derived = "::".join([*scope, "Derived"])
     for spelling in _all_spellings():
         base = {"type": {"qualType": spelling}}
-        expected = _cxx_lookup(spelling, scope)
-        # A spelling that is itself a record key is taken as written (the
-        # clang <= 21 fully qualified form); lookup decides everything else.
-        if spelling in _RECORDS:
-            expected = spelling if expected is None else expected
-            got = resolver.resolve(base, derived)
-            assert got in {spelling, expected}, (spelling, scope, got)
-            continue
-        assert resolver.resolve(base, derived) == expected, (spelling, scope)
+        assert resolver.resolve(base, derived) == _cxx_lookup(spelling, scope), (
+            spelling,
+            scope,
+        )
+
+
+@pytest.mark.parametrize("desugared", _RECORDS)
+def test_canonical_desugared_spelling_is_an_exact_key(desugared: str) -> None:
+    """clang <= 21's non-alias ``desugaredQualType`` is the canonical, fully
+    qualified name: it is taken as written, whatever lookup of the written
+    spelling from the derived scope would find."""
+    resolver = BaseResolver(_RECORDS)
+    base = {"type": {"qualType": "I", "desugaredQualType": desugared}}
+    assert resolver.resolve(base, "lib::a::Derived") == desugared
+
+
+@pytest.mark.parametrize(
+    ("keys", "spelling", "derived", "expected"),
+    [
+        pytest.param(
+            ["Inner", "lib::Outer", "lib::Outer<int>::Inner"],
+            "Outer<int>::Inner",
+            "lib::D",
+            "lib::Outer<int>::Inner",
+            id="member-of-specialization-not-global",
+        ),
+        pytest.param(["lib::Ω", "Ω"], "Ω", "lib::D", "lib::Ω", id="unicode-identifier"),
+        pytest.param(
+            ["lib::Box", "lib::detail::I", "lib::Box<lib::detail::I>"],
+            "Box<detail::I>",
+            "lib::D",
+            "lib::Box<lib::detail::I>",
+            id="template-argument-qualified",
+        ),
+    ],
+)
+def test_spelling_shapes_resolve(
+    keys: list[str], spelling: str, derived: str, expected: str
+) -> None:
+    resolver = BaseResolver(keys)
+    assert resolver.resolve({"type": {"qualType": spelling}}, derived) == expected
 
 
 # ── live probe: the clang on PATH (both clang-latest.yml legs) ────────────
@@ -410,6 +518,9 @@ def test_live_clang_resolves_relative_bases(tmp_path: Path) -> None:
             "-x",
             "c++",
             "-std=c++17",
+            # Itanium mangling on every host (Windows clang defaults to the
+            # MSVC ABI, Apple targets prefix symbols with `_`).
+            "--target=x86_64-unknown-linux-gnu",
             "-fsyntax-only",
             "-Xclang",
             "-ast-dump=json",

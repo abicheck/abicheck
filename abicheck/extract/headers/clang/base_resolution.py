@@ -28,27 +28,40 @@ on any release. What that spelling holds changed between releases:
   "detail::I"``, ``desugaredQualType: "lib::detail::I"``.
 * clang 22 removed ``ElaboratedType``; a ``RecordType`` now prints with the
   qualifier it was written with, so the same base gives only ``qualType:
-  "detail::I"`` -- no ``desugaredQualType`` at all -- and an alias base
-  (``using A = detail::I; class D : A``) gives ``desugaredQualType:
-  "detail::I"``, relative to the *alias's* scope. Confirmed against LLVM
-  23.1.5 (``.github/workflows/clang-latest.yml``'s pinned leg).
+  "detail::I"`` -- no ``desugaredQualType`` at all -- and an alias or
+  typedef base gives ``desugaredQualType`` as the target was written in the
+  *innermost* alias of its ``typeAliasDeclId`` chain (``using B = a::A;``
+  over ``using A = detail::I;`` desugars to ``detail::I``, relative to
+  ``A``'s scope). Confirmed against LLVM 23.1.5
+  (``.github/workflows/clang-latest.yml``'s pinned leg).
 
-Reading the spelling as a record key therefore stopped resolving relative
-bases on clang 22+, and the vtable walk then read "no inherited virtuals" as
-a confirmed fact. :class:`BaseResolver` resolves a spelling structurally:
-first as an exact record key (the clang <= 21 desugared form, or a base
-written fully qualified), then by C++ name lookup -- every name chain in the
-spelling (the head and each template argument) is looked up from the scope
-that wrote it, innermost enclosing scope first, the way
-[basic.lookup.qual] finds a nested-name-specifier's first component. The
+:class:`BaseResolver` therefore resolves structurally, in this order:
+
+1. a non-alias ``desugaredQualType`` is clang's canonical, fully qualified
+   spelling (clang 22 writes one only for that), so it is taken as an exact
+   record key;
+2. an alias base's ``desugaredQualType`` is looked up from the scope of the
+   innermost alias in its chain, then tried as an exact key (clang <= 21
+   wrote it fully qualified);
+3. the written ``qualType`` is resolved only by C++ name lookup from the
+   derived record's enclosing scopes, never as an exact key first: ``I``
+   written inside ``namespace lib`` names ``lib::I`` when that exists, even
+   if a global ``I`` does too.
+
+Lookup replaces every name chain in the spelling (the head and each
+template argument) by what [basic.lookup.unqual]/[basic.lookup.qual] find:
+the innermost enclosing scope declaring the chain's first component wins,
+and the rest of the chain must exist inside it. A chain whose first
+component is a template parameter of the derived record (or of a template
+enclosing it) is dependent and never resolves, so ``template <class T>
+struct D : T`` stays unresolved even when some record ``T`` exists. The
 result is accepted only when it is exactly one record key; anything else
-stays unresolved and the caller reports the vtable as incomplete rather than
-empty.
+stays unresolved and the caller reports the vtable as incomplete rather
+than empty.
 
 Not handled, by design (each leaves the base unresolved, never guessed):
-using-directives and inline-namespace members found through them, a base
-named through a member typedef of a base class, and a dependent base of a
-class template pattern.
+using-directives and inline-namespace members found through them, and a
+base named through a member typedef of a base class.
 """
 
 from __future__ import annotations
@@ -59,10 +72,19 @@ from typing import Any
 
 from ....name_classification import strip_anonymous_type_location
 
-#: One ``a::b::C`` name chain (optionally ``::``-anchored), not preceded by
-#: another identifier character or ``::`` so a match never starts mid-chain.
-_CHAIN = re.compile(r"(?<![\w:])(?:::\s*)?[A-Za-z_]\w*(?:\s*::\s*[A-Za-z_]\w*)*")
+#: One ``a::b::C`` name chain (optionally ``::``-anchored). Not preceded by
+#: an identifier character, ``:`` or ``>``, so a match never starts
+#: mid-chain -- ``Outer<int>::Inner`` yields ``Outer`` and ``int`` only, and
+#: ``::Inner`` there is not misread as a global-scope reference. The first
+#: character of each component is any Unicode letter or ``_`` (C++
+#: identifiers may be non-ASCII).
+_CHAIN = re.compile(r"(?<![\w:>])(?:::\s*)?[^\W\d]\w*(?:\s*::\s*[^\W\d]\w*)*")
 _SPACE_AROUND = re.compile(r"\s*(::|<|>|,|\*|&)\s*")
+
+#: ``alias id -> (declaring scope, the next alias id its target names)``.
+AliasIndex = Mapping[str, tuple[tuple[str, ...], str | None]]
+#: ``record key -> template parameter names in scope at its declaration``.
+TemplateParamIndex = Mapping[str, frozenset[str]]
 
 
 def normalize_spelling(text: str) -> str:
@@ -100,16 +122,16 @@ def scope_of_qualname(qualname: str) -> tuple[str, ...]:
 class BaseResolver:
     """Base-specifier spelling -> record key, over one TU's record index.
 
-    *alias_scopes* maps a ``TypedefDecl``/``TypeAliasDecl`` clang ``id`` to
-    the scope it was declared in, so an alias base's desugared spelling is
-    looked up where the alias wrote it. It is called lazily, at most once,
-    and only when an alias base needs it.
+    *aliases* and *template_params* are called lazily, at most once each,
+    and only when a base needs them (see :data:`AliasIndex`,
+    :data:`TemplateParamIndex`).
     """
 
     def __init__(
         self,
         record_keys: Iterable[str],
-        alias_scopes: Callable[[], Mapping[str, tuple[str, ...]]] | None = None,
+        aliases: Callable[[], AliasIndex] | None = None,
+        template_params: Callable[[], TemplateParamIndex] | None = None,
     ) -> None:
         keys = list(record_keys)
         self._keys = frozenset(keys)
@@ -124,8 +146,10 @@ class BaseResolver:
                 head = parts[i - 1].split("<", 1)[0].strip()
                 if head != parts[i - 1]:
                     self._scopes.add("::".join([*parts[: i - 1], head]))
-        self._alias_scopes_fn = alias_scopes
-        self._alias_scopes: Mapping[str, tuple[str, ...]] | None = None
+        self._aliases_fn = aliases
+        self._aliases: AliasIndex | None = None
+        self._tparams_fn = template_params
+        self._tparams: TemplateParamIndex | None = None
 
     def _exact(self, spelling: str) -> str | None:
         if spelling in self._keys:
@@ -147,33 +171,54 @@ class BaseResolver:
                 return candidate if candidate in self._scopes else None
         return None
 
-    def _qualify(self, spelling: str, scope: tuple[str, ...]) -> str | None:
-        """*spelling* with every name chain replaced by its lookup result, or
-        ``None`` when the head chain names nothing known."""
-        head_resolved = True
+    def _lookup(
+        self, spelling: str, scope: tuple[str, ...], dependent: frozenset[str]
+    ) -> str | None:
+        """The record key C++ lookup of every name chain in *spelling* from
+        *scope* yields, or ``None`` when the head names nothing known or any
+        chain starts with a template parameter in *dependent*."""
+        ok = True
 
         def sub(m: re.Match[str]) -> str:
-            nonlocal head_resolved
-            found = self._lookup_chain(m.group(0), scope)
+            nonlocal ok
+            chain = m.group(0)
+            if re.sub(r"\s+", "", chain).split("::", 1)[0] in dependent:
+                ok = False
+                return chain
+            found = self._lookup_chain(chain, scope)
             if found is None:
                 if m.start() == 0:
-                    head_resolved = False
-                return m.group(0)
+                    ok = False
+                return chain
             return found
 
-        out = _CHAIN.sub(sub, spelling.strip())
-        return out if head_resolved else None
+        qualified = _CHAIN.sub(sub, spelling.strip())
+        return self._exact(qualified) if ok else None
 
-    def _lookup(self, spelling: str, scope: tuple[str, ...]) -> str | None:
-        qualified = self._qualify(spelling, scope)
-        return self._exact(qualified) if qualified is not None else None
-
-    def _alias_scope(self, alias_id: object) -> tuple[str, ...] | None:
-        if not isinstance(alias_id, str) or self._alias_scopes_fn is None:
+    def _innermost_alias_scope(self, alias_id: object) -> tuple[str, ...] | None:
+        """The scope of the last alias in *alias_id*'s chain: where the
+        desugared spelling clang 22+ prints was written."""
+        if not isinstance(alias_id, str) or self._aliases_fn is None:
             return None
-        if self._alias_scopes is None:
-            self._alias_scopes = self._alias_scopes_fn()
-        return self._alias_scopes.get(alias_id)
+        if self._aliases is None:
+            self._aliases = self._aliases_fn()
+        scope: tuple[str, ...] | None = None
+        seen: set[str] = set()
+        current: str | None = alias_id
+        while current is not None and current not in seen:
+            seen.add(current)
+            entry = self._aliases.get(current)
+            if entry is None:
+                break
+            scope, current = entry
+        return scope
+
+    def _dependent_names(self, derived_qualname: str) -> frozenset[str]:
+        if self._tparams_fn is None:
+            return frozenset()
+        if self._tparams is None:
+            self._tparams = self._tparams_fn()
+        return self._tparams.get(derived_qualname, frozenset())
 
     def resolve(self, base: Mapping[str, Any], derived_qualname: str) -> str | None:
         """The record key *base* (one ``bases`` array entry of the record
@@ -185,19 +230,25 @@ class BaseResolver:
             str(type_obj.get("desugaredQualType") or "")
         )
         written = strip_anonymous_type_location(str(type_obj.get("qualType") or ""))
-        derived_scope = scope_of_qualname(derived_qualname)
-        for spelling in (desugared, written):
-            if spelling and (found := self._exact(spelling)) is not None:
-                return found
+        alias_id = type_obj.get("typeAliasDeclId")
+        dependent = self._dependent_names(derived_qualname)
         if desugared:
-            alias_scope = self._alias_scope(type_obj.get("typeAliasDeclId"))
-            if alias_scope is not None:
-                if (found := self._lookup(desugared, alias_scope)) is not None:
+            if alias_id is None:
+                # Only a canonical spelling gets a non-alias desugaredQualType.
+                if (found := self._exact(desugared)) is not None:
                     return found
-            elif (found := self._lookup(desugared, derived_scope)) is not None:
-                return found
+            else:
+                alias_scope = self._innermost_alias_scope(alias_id)
+                if (
+                    alias_scope is not None
+                    and (found := self._lookup(desugared, alias_scope, frozenset()))
+                    is not None
+                ):
+                    return found
+                if (found := self._exact(desugared)) is not None:
+                    return found
         if written:
-            return self._lookup(written, derived_scope)
+            return self._lookup(written, scope_of_qualname(derived_qualname), dependent)
         return None
 
 
@@ -209,15 +260,19 @@ class BaseLookupIndex(dict[str, dict[str, Any]]):
     def __init__(
         self,
         items: Mapping[str, dict[str, Any]],
-        alias_scopes: Callable[[], Mapping[str, tuple[str, ...]]] | None = None,
+        aliases: Callable[[], AliasIndex] | None = None,
+        template_params: Callable[[], TemplateParamIndex] | None = None,
     ) -> None:
         super().__init__(items)
-        self._alias_scopes = alias_scopes
+        self._aliases = aliases
+        self._template_params = template_params
         self._resolver: BaseResolver | None = None
 
     def resolver(self) -> BaseResolver:
         if self._resolver is None:
-            self._resolver = BaseResolver(self.keys(), self._alias_scopes)
+            self._resolver = BaseResolver(
+                self.keys(), self._aliases, self._template_params
+            )
         return self._resolver
 
 
