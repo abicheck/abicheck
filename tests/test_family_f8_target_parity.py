@@ -690,3 +690,70 @@ def test_seeded_mutant_spelling_matched_leak_walk_is_reported(tmp_path: Path) ->
         _leak_compare(tmp_path, "clang", "spelling_matched_leak_walk")
     )
     assert "Ret: no leak reported" in found, found
+
+
+# --- clang AST-shape drift (extraction.clang_ast_shape_version_drift) -------
+#
+# A typedef'd anonymous struct/enum reaches the clang backend through a link
+# clang <= 21 and clang >= 22 spell differently (ElaboratedType.ownedTagDecl
+# vs an isTagOwned tag type). Whatever clang is on PATH, the clang backend
+# must name and fill these exactly as castxml does from the same C header;
+# the clang-latest CI lane runs this cell against the newest released LLVM.
+
+_C_ANON_HEADER = """\
+typedef struct { int x; int y; } point_t;
+typedef enum { LVL_OFF, LVL_ON, LVL_AUTO } level_t;
+typedef struct { point_t a; level_t lvl; unsigned char tag; } span_t;
+extern point_t origin;
+level_t span_level(span_t s);
+"""
+_C_ANON_SRC = """\
+#include "api.h"
+point_t origin;
+level_t span_level(span_t s) { return s.lvl; }
+"""
+
+
+def _c_anon_dump(tmp_path: Path, frontend: str):
+    work = tmp_path / f"c-{frontend}"
+    work.mkdir()
+    (work / "api.h").write_text(_C_ANON_HEADER, encoding="utf-8")
+    (work / "api.c").write_text(_C_ANON_SRC, encoding="utf-8")
+    lib = work / "libapi.so"
+    subprocess.run(
+        ["gcc", "-shared", "-fPIC", f"-I{work}", str(work / "api.c"), "-o", str(lib)],
+        check=True,
+    )
+    env = {**os.environ, "XDG_CACHE_HOME": str(work / "cache")}
+    env["ABICHECK_AST_FRONTEND"] = frontend
+    out = work / "snap.json"
+    subprocess.run(
+        abicheck_command("dump", lib, "-H", work / "api.h", "-o", out),
+        check=True,
+        capture_output=True,
+        env=env,
+    )
+    snap = load_snapshot(out)
+    records = {t.name: [f.name for f in t.fields] for t in snap.declarations.types}
+    enums = {e.name: [m.name for m in e.members] for e in snap.declarations.enums}
+    return records, enums
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(
+    _CASTXML is None or shutil.which("clang") is None or shutil.which("gcc") is None,
+    reason="needs castxml, clang and gcc",
+)
+def test_clang_backend_names_typedef_anonymous_tags_like_castxml(
+    tmp_path: Path,
+) -> None:
+    want_records, want_enums = _c_anon_dump(tmp_path, "castxml")
+    # Vacuity guard: the oracle itself names every typedef'd anonymous tag.
+    assert {"point_t", "span_t"} <= set(want_records), want_records
+    assert want_enums.get("level_t") == ["LVL_OFF", "LVL_ON", "LVL_AUTO"]
+    assert want_records["point_t"] == ["x", "y"], want_records
+    assert want_records["span_t"] == ["a", "lvl", "tag"], want_records
+    got_records, got_enums = _c_anon_dump(tmp_path, "clang")
+    for name in ("point_t", "span_t"):
+        assert got_records.get(name) == want_records[name], (name, got_records)
+    assert got_enums.get("level_t") == want_enums["level_t"], got_enums

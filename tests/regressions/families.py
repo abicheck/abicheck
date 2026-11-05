@@ -490,6 +490,8 @@ _F8 = (
     # A detector matched a type by the spelling one frontend writes (harness
     # cell: test_internal_leaks_match_across_header_backends).
     "evidence.detector_answer_depends_on_frontend_spelling",
+    # A newer clang's JSON AST spelling read as absent (clang-latest lane).
+    "extraction.clang_ast_shape_version_drift",
     "extraction.aggregate_layout_inverted_by_line",
     "extraction.emulated_compiler_builtin_absent_from_frontend",
     "extraction.linker_summary_flag_read_as_the_fact",
