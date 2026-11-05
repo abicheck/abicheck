@@ -24,7 +24,11 @@ from __future__ import annotations
 
 from typing import Any
 
-__all__ = ["order_proof_needed", "should_resolve_with_order_witness"]
+__all__ = [
+    "operand_is_live_binary",
+    "order_proof_needed",
+    "should_resolve_with_order_witness",
+]
 
 
 def order_proof_needed(old: Any, new: Any) -> bool:
@@ -54,17 +58,38 @@ def order_proof_needed(old: Any, new: Any) -> bool:
     return not header_sequence_change_is_scope_confirmed(old_c, new_c)
 
 
-def should_resolve_with_order_witness(pair: Any) -> bool:
+def should_resolve_with_order_witness(
+    pair: Any, *, live: tuple[bool, bool] | None = None
+) -> bool:
     """Whether resolving *pair* again with the witness on can change the result.
 
     Only when the comparison reads the proof and every side still missing one is
-    a live binary (``*_fmt`` set): a stored snapshot without a proof cannot gain
-    one, and the reorder carve-out needs both sides proven, so re-dumping the live
-    side would cost a full resolution for nothing.
+    a live binary: a stored snapshot without a proof cannot gain one, and the
+    reorder carve-out needs both sides proven, so re-dumping the live side would
+    cost a full resolution for nothing. *live* gives each side's liveness as
+    ``(old, new)``; without it a side is live when its ``*_fmt`` is set.
     """
     if not order_proof_needed(pair.old, pair.new):
         return False
-    for snap, fmt in ((pair.old, pair.old_fmt), (pair.new, pair.new_fmt)):
-        if snap.contract.header_canonical is None and fmt is None:
+    if live is None:
+        live = (pair.old_fmt is not None, pair.new_fmt is not None)
+    for snap, is_live in ((pair.old, live[0]), (pair.new, live[1])):
+        if snap.contract.header_canonical is None and not is_live:
             return False
     return True
+
+
+def operand_is_live_binary(path: Any) -> bool:
+    """Whether a compare operand is dumped live rather than loaded as a snapshot.
+
+    A GNU ld linker script (``libfoo.so`` holding ``INPUT(libfoo.so.1)``) has no
+    binary format itself, but the resolver follows it to a live binary, so the
+    chain's end decides (review: a script operand must not read as stored).
+    """
+    from abicheck.binary_utils import resolve_linker_script_chain
+
+    from ..input_resolution import detect_binary_format
+
+    if path is None:
+        return False
+    return detect_binary_format(resolve_linker_script_chain(path)) is not None

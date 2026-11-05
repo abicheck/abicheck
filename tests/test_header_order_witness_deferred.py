@@ -19,6 +19,7 @@ import pytest
 from abicheck.extract import header_order_witness as witness
 from abicheck.workflows.compare import resolve as resolve_mod
 from abicheck.workflows.compare.order_proof import (
+    operand_is_live_binary,
     order_proof_needed,
     should_resolve_with_order_witness,
 )
@@ -141,7 +142,7 @@ def test_outside_the_scope_the_witness_runs_as_before(tmp_path):
     ],
 )
 def test_compare_resolves_again_with_the_witness_only_when_needed(
-    monkeypatch: pytest.MonkeyPatch, pairs, expected_rounds
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, pairs, expected_rounds
 ):
     rounds: list[bool] = []
     results = iter(
@@ -153,7 +154,11 @@ def test_compare_resolves_again_with_the_witness_only_when_needed(
         return next(results)
 
     monkeypatch.setattr(resolve_mod, "_resolve_compare_request_once", once)
-    pair = resolve_mod.resolve_compare_request(object())
+    so = _elf_stub(tmp_path / "lib.so")
+    request = SimpleNamespace(
+        old=SimpleNamespace(path=so), new=SimpleNamespace(path=so)
+    )
+    pair = resolve_mod.resolve_compare_request(request)
     assert rounds == expected_rounds
     assert pair.new is pairs[-1][1]
 
@@ -271,3 +276,61 @@ def test_a_dump_that_cannot_run_the_witness_keeps_the_standalone_key(tmp_path, n
     with witness.deferred_order_witness():
         deferred = api._cache_key_for(req)
     assert full and full == deferred
+
+
+def _elf_stub(path: Path) -> Path:
+    path.write_bytes(b"\x7fELF\x02\x01\x01" + b"\x00" * 57)
+    return path
+
+
+@pytest.mark.parametrize(
+    ("make", "live"),
+    [
+        (lambda d: _elf_stub(d / "libfoo.so.1"), True),  # a binary
+        # A dev-symlink linker script: no format itself, but the resolver
+        # follows it to a live binary (review).
+        (
+            lambda d: (
+                _elf_stub(d / "libfoo.so.1"),
+                (d / "libfoo.so").write_text("INPUT(libfoo.so.1)\n"),
+                d / "libfoo.so",
+            )[-1],
+            True,
+        ),
+        # Two hops: a script pointing at a script pointing at the binary.
+        (
+            lambda d: (
+                _elf_stub(d / "libfoo.so.1.2"),
+                (d / "libfoo.so.1").write_text("INPUT(libfoo.so.1.2)\n"),
+                (d / "libfoo.so").write_text("INPUT(libfoo.so.1)\n"),
+                d / "libfoo.so",
+            )[-1],
+            True,
+        ),
+        # A script whose target is missing resolves to nothing live.
+        (
+            lambda d: (
+                (d / "libfoo.so").write_text("INPUT(libgone.so.1)\n"),
+                d / "libfoo.so",
+            )[-1],
+            False,
+        ),
+        # A stored snapshot is loaded, never dumped.
+        (
+            lambda d: (
+                (d / "old.json").write_text('{"library": "libfoo"}'),
+                d / "old.json",
+            )[-1],
+            False,
+        ),
+    ],
+    ids=["binary", "linker-script", "script-chain", "dangling-script", "snapshot"],
+)
+def test_a_linker_script_operand_counts_as_a_live_side(tmp_path, make, live):
+    path = make(tmp_path)
+    assert operand_is_live_binary(path) is live
+    # The retry decision honours that liveness over the script's own (absent) format.
+    pair = SimpleNamespace(
+        old=_snap(_BA), new=_snap(_AB, _AB), old_fmt=None, new_fmt="elf"
+    )
+    assert should_resolve_with_order_witness(pair, live=(live, True)) is live

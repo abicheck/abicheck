@@ -217,12 +217,12 @@
       "abicheck/type_reachability.py": "1fe18d38eef5ebed444a3aac59247f72bbef677755652be333cb631dceaeb0c2",
       "abicheck/type_reachability_spelling.py": "1bd700f854cf9021fc30b577f4ddf3d22095c07b0c7a9bd90c497f8a8eb018a7",
       "abicheck/type_reachability_stdlib_spellings.py": "e20c1ffc6055602a97021b50fc496bd9892231bf6b437fb2a8e319cc3535f470",
-      "abicheck/workflows/compare/resolve.py": "26d3ab6dc8ad35c7cd2d798457b6b0c09307ecf5623a2961ffc27407bacefedf",
+      "abicheck/workflows/compare/resolve.py": "a60e4c0bbc7fada7d6dfb6f64f9ef504121315e763b90fb48863639d54f9ae79",
       "abicheck/workflows/elf_dependency_resolver.py": "69cdd9d8129410f824768fdc67ab14b2836761552fe300b63ebb0e290ee3a0b5"
     },
-    "fingerprint": "4c372e80306cd2d450a8736b3fb4c58182ec316e7bb5710752a3ffb35420a142",
+    "fingerprint": "35b7c02f7f8764276d92c51b4348baba4d34eaafdf42d6e53a215e00c0cc82f9",
     "generation": 3,
-    "reason": "merge main: resolve_compare_request runs once deferred and re-resolves with the witness only when the proof is read (#1928); the resolved request is unchanged"
+    "reason": "resolve_compare_request decides each side's liveness through its linker-script chain before the order-witness retry (#1928 review); the resolved request is unchanged"
   },
   "source": {
     "files": {

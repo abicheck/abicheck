@@ -252,13 +252,17 @@ def resolve_compare_request(
     declared order used to pay.
     """
     from ...extract.header_order_witness import deferred_order_witness
-    from .order_proof import should_resolve_with_order_witness
+    from .order_proof import operand_is_live_binary, should_resolve_with_order_witness
 
     with deferred_order_witness():
         pair = _resolve_compare_request_once(
             request, notify=notify, allow_parallel=allow_parallel
         )
-    if not should_resolve_with_order_witness(pair):
+    live = (
+        operand_is_live_binary(request.old.path),
+        operand_is_live_binary(request.new.path),
+    )
+    if not should_resolve_with_order_witness(pair, live=live):
         return pair
     del pair  # release the first resolution before the second one runs
     return _resolve_compare_request_once(
