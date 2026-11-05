@@ -356,11 +356,16 @@ INVENTORY: tuple[ToolLookup, ...] = (
             "env:ABICHECK_AUTO_SYSTEM_INCLUDES",
             "env:ABICHECK_CLANG_PRUNE_DEPENDENCY_DECLS",
             "env:ABICHECK_PREPROCESSOR_SCAN",
+            "env:ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES",
         ),
         depths=("headers", "build", "source"),
         without=(
             "Unset is the default install. The suite sets only ABICHECK_AST_FRONTEND "
-            "(the frontend under test) and unsets every other ABICHECK_* variable."
+            "(the frontend under test) and unsets every other ABICHECK_* variable. "
+            "ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES caps the macro and header-leak "
+            "probes per family (default 512): past the cap the dropped compile units "
+            "or headers record no macro-divergence or header-leak facts, and the "
+            "scan's coverage reads PARTIAL with a diagnostic naming the cap."
         ),
         proof=(f"{_SUITE}::test_header_facts_survive_without_optional_tools",),
     ),
@@ -398,7 +403,6 @@ INVENTORY: tuple[ToolLookup, ...] = (
                 "ABICHECK_CALL_GRAPH_JOBS",
                 "ABICHECK_PATTERN_SCAN_JOBS",
                 "ABICHECK_PREPROCESSOR_SCAN_JOBS",
-                "ABICHECK_PREPROCESSOR_SCAN_MAX_PROBES",
                 "ABICHECK_DWARF_LOW_MEMORY_MB",
                 "ABICHECK_TU_JOBS",
                 "ABICHECK_TU_JOB_MEM_GIB",

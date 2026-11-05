@@ -43,7 +43,12 @@ from abicheck.serialization import load_snapshot
 from tests._abicheck_subprocess import REPO_ROOT, abicheck_command
 from tests.optional_tool_inventory import hidden_binaries, hidden_modules
 
-pytestmark = pytest.mark.integration
+pytestmark = [
+    pytest.mark.integration,
+    # The default-install PATH is built from symlinked tool shims, which need
+    # a privilege Windows runners do not grant.
+    pytest.mark.skipif(os.name == "nt", reason="symlinked tool shims are POSIX-only"),
+]
 
 FRONTENDS = ("castxml", "clang")
 
@@ -352,14 +357,16 @@ def _assert_no_empty_as_value(snap: Any) -> None:
     for group in (decls.types, decls.functions, decls.enums, decls.variables):
         for entity in group:
             for path, fact in _iter_facts(entity, getattr(entity, "name", "?")):
+                # `.value`, not `value_or`: value_or returns the default for
+                # every gap status, so it would hide a stored value.
                 if fact.status in GAP_STATUSES:
-                    assert fact.value_or(None) is None, (path, fact)
+                    assert fact.value is None, (path, fact)
     # ``None`` is the model's "the producer captured none": an explicit unknown.
     for name, fact in (snap.typedef_abi_facts or {}).items():
         if fact.status in GAP_STATUSES:
-            assert fact.value_or(None) is None, (name, fact)
+            assert fact.value is None, (name, fact)
         if fact.status is FactStatus.PRESENT:
-            assert fact.value_or(None) is not None, (name, fact)
+            assert fact.value is not None, (name, fact)
 
 
 def _assert_layout_matches(
@@ -503,6 +510,18 @@ def test_clang_builtin_abi_facts_are_marked_without_a_linker(
     NOT_COLLECTED -- never a fabricated or empty fact -- and every other header
     family must stay present."""
     env = _default_install_env(tmp_path, "clang", with_linker=False)
+    # Clang also looks for `ld` in its GCC installation's target bin directory,
+    # so hiding it from PATH is not always enough. Ask clang itself.
+    probe = tmp_path / "probe.c"
+    probe.write_text("int main(void) { return 0; }\n", encoding="utf-8")
+    linked = subprocess.run(
+        ["clang", "-x", "c", str(probe), "-o", str(tmp_path / "probe")],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    if linked.returncode == 0:
+        pytest.skip("clang finds a linker outside PATH on this host")
     snap = _dump(env, tmp_path / "s.json", fixture.lib, "-H", fixture.header)
     _assert_layout_matches(snap, fixture.oracle)
     _assert_enums_match(snap, fixture.oracle)
