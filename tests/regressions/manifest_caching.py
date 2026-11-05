@@ -326,4 +326,30 @@ CACHING_BUG_CLASSES: tuple[BugClass, ...] = (
             "name_chars": (".", "-", "_", "alnum"),
         },
     ),
+    BugClass(
+        id="perf.proof_computed_on_every_input_but_read_on_few",
+        invariant=(
+            "A costly derived fact that only some comparisons read is computed "
+            "when one of them reads it, not on every input: the producer must "
+            "be able to defer it, the consumer must decide from what the "
+            "inputs recorded whether it needs it, and a deferred result must "
+            "never be served where the fact is expected (its cache key differs). "
+            "The test asserts both directions: no extra work when the fact is "
+            "not read, and the fact present when it is."
+        ),
+        # The ADR-082 order witness re-parsed every side whose declared
+        # header list was unsorted, although the proof is only read when the
+        # two sides' header_sequence values differ (~11% of a 30-header
+        # compare declaring part0.h..part29.h on both sides).
+        fixed_by=(1928,),
+        seed_tests=(
+            "tests/test_header_order_witness_deferred.py",
+            "tests/test_header_dir_expansion_canonical_order.py",
+        ),
+        public_surfaces=("cli:compare",),
+        axes={
+            "sequences": ("equal", "permuted", "inserted", "no headers"),
+            "proof": ("neither side", "one side", "both sides"),
+        },
+    ),
 )

@@ -387,7 +387,7 @@ Render comparison result in the requested output format.
 
 ## `resolve_compare_request`
 
-Resolve both sides of *request* into a classifiable pair.
+Resolve both sides of *request*, taking the header-order proof only when the comparison reads it.
 
 | Parameter | Type | Default |
 |---|---|---|

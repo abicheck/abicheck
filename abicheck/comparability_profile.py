@@ -59,6 +59,7 @@ from .comparability_language_mode import (
 from .comparability_sequences import (
     _HEADER_SEQUENCE_FIELDS,
     _INCLUDE_SEQUENCE_FIELDS,
+    HeaderSetDelta,
     header_sequence_is_scope_confirmed_evolution,
     include_sequence_is_scope_confirmed_evolution,
 )
@@ -262,12 +263,8 @@ def _unexplained_profile_fields(
     delta = _scope_evolution_delta(old_contract, new_contract)
 
     header_seq_candidate = unexplained & _HEADER_SEQUENCE_FIELDS
-    if header_seq_candidate and header_sequence_is_scope_confirmed_evolution(
-        old_fields.get("header_sequence"),
-        new_fields.get("header_sequence"),
-        delta,
-        old_scope=_contract_scope_headers(old_contract),
-        new_scope=_contract_scope_headers(new_contract),
+    if header_seq_candidate and header_sequence_change_is_scope_confirmed(
+        old_contract, new_contract, delta
     ):
         # Header-sequence-evolution carve-out -- see check_contracts_comparable's
         # own docstring: waived wherever an added header sorts and whichever
@@ -295,6 +292,30 @@ def _unexplained_profile_fields(
         unexplained -= include_seq_candidate
 
     return unexplained
+
+
+def header_sequence_change_is_scope_confirmed(
+    old_contract: ExtractionContract,
+    new_contract: ExtractionContract,
+    delta: HeaderSetDelta | None = None,
+) -> bool:
+    """Whether the header-sequence-evolution carve-out waives the two
+    contracts' ``header_sequence`` difference (added/removed headers the scope
+    confirms, survivors in order).
+
+    The comparability gate and the live compare's order-witness retry
+    (``workflows.compare.order_proof``) both ask this one question, so a waived
+    difference never costs a witnessed re-resolution the gate would not read.
+    """
+    if delta is None:
+        delta = _scope_evolution_delta(old_contract, new_contract)
+    return header_sequence_is_scope_confirmed_evolution(
+        old_contract.profile_fields.get("header_sequence"),
+        new_contract.profile_fields.get("header_sequence"),
+        delta,
+        old_scope=_contract_scope_headers(old_contract),
+        new_scope=_contract_scope_headers(new_contract),
+    )
 
 
 def _profile_mismatch_reason(
