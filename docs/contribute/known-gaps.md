@@ -117,6 +117,20 @@ dependency walk and debug roots to every member. No open gap remains.
 **Status (2026-11-05): OPEN.** A dump with `--build-info` embeds a build pack whose L5 graph has no `SOURCE_DECLARES` public closure, and `resolve_l5_source_graph` prefers it over the header graph that has one, so case187/188/189/191 lose `public_api_internal_dependency_added` in the `build-source` lane on both header frontends (declared under `expected_kinds_gaps`). [Full write-up](known-gaps/a-build-info-dump-graph-displaces-the-header-graph-public-closure.md)
 <!-- canary: tests/test_known_gap_canary_build_info_graph.py::test_build_info_dump_drops_public_internal_dependency_that_headers_report -->
 
+#### The clang frontend's builtin-ABI probe links and runs a program, so a cross or linker-less dump records no builtin `type_abi_fact` (2026-11-05)
+
+**Status (2026-11-05): OPEN.** `extract/builtin_abi.probe_builtin_abi` compiles, links and runs a `printf(sizeof, _Alignof)` program with the frontend's own driver. When the driver cannot link (no `ld` reachable: clang resolves it from `PATH`) or the host cannot run the target (a `--target=` cross dump, a Windows/Mach-O ABI target), the probe returns `None` and every builtin slot, and the whole `typedef_abi_facts` map, reads `NOT_COLLECTED`. Nothing is fabricated, so an ABI-equivalent retype simply stays a `type_field_type_changed`/`func_params_changed` instead of `abi_equivalent_type_changed`. Record layout, enums, typedefs and vtables are unaffected (the record-layout pass is compile-only). Pinned by `tests/test_default_install_fact_invariants.py::test_clang_builtin_abi_facts_are_marked_without_a_linker`. The fix is a compile-only probe (clang's `-fdump-record-layouts` over one wrapper record per builtin gives size and in-struct alignment for any target); not done here because it changes the measured alignment from `_Alignof` to member alignment on i386-like targets and needs its own oracle. Owner: `extract/builtin_abi.py`.
+
+`false-positive` — an ABI-equivalent builtin retype stays a type change instead of `abi_equivalent_type_changed`; nothing is fabricated. [Full write-up](known-gaps/clang-builtin-abi-probe-needs-a-linker-and-a-runnable-target.md)
+<!-- canary: tests/test_default_install_fact_invariants.py::test_clang_builtin_abi_facts_are_marked_without_a_linker -->
+
+#### Clang leaves enum- and typedef-typed slots without a `type_abi_fact` that castxml records (2026-11-05)
+
+**Status (2026-11-05): OPEN.** For `handle_t make(Point, Color, Mode, count_t)` castxml records `type_abi_fact` PRESENT for the `Color`/`Mode` parameters and the `handle_t` return; the clang frontend records `NOT_COLLECTED` for them (it does record `count_t`, a typedef of a builtin spelled without a namespace, and every plain builtin). The gap is marked, not empty, so it narrows the ABI-equivalence path rather than manufacturing a break. Found by the default-install invariant suite while comparing frontends; independent of optional tools (the same with every tool present). Cause not traced; `builtin_type_fact` is called on the desugared spelling, and has no enum underlying-type input. Owner: `extract/headers/clang/functions.py`.
+
+`false-positive` — a clang-side enum or typedef retype between ABI-identical types is not downgraded; castxml snapshots are unaffected. [Full write-up](known-gaps/clang-leaves-enum-and-typedef-slots-without-a-type-abi-fact.md)
+<!-- canary: tests/test_default_install_fact_invariants.py::test_clang_leaves_enum_and_typedef_slots_without_an_abi_fact -->
+
 #### The standing-inventory headline folds observed compatible findings into one clause (2026-10-28)
 
 **Status (2026-10-28): OPEN.** A one-line summary with standing cross-source inventory states the observed COMPATIBLE verdict as a single `compatible` clause, so an informational or quality finding is counted there, not named. The `summary.change_inventory` block has no additions/quality/informational split and its JSON shape is fixed, so the split needs an additive field and its schema ruling. The parts still add up to the total. Owner: `report/change_inventory.py`, `report/render_text.py`.

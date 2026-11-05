@@ -117,6 +117,10 @@ CI's `pr` profile.
   the calls with `.expect(...)`, then `.assert_exhausted()`; failures print the
   full transcript of what actually ran. See `test_strict_process.py` for the
   contract and `test_bazel_root_targets.py` for a migrated call site.
+- `optional_tool_inventory.py` — every optional-tool lookup in `abicheck/`
+  and its default-install expectation. `test_optional_tool_inventory_gate.py`
+  fails on an unregistered lookup; `test_default_install_fact_invariants.py`
+  hides every registered optional tool and checks the promised facts.
 - `canonical_identity_contract.py` — the exhaustive per-`ChangeKind` identity
   classification enforced by `test_canonical_finding_id_completeness.py`; a new
   `ChangeKind` fails CI until it is placed in a bucket.
