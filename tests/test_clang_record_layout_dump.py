@@ -71,7 +71,7 @@ def test_parse_top_level_members_only_and_bases() -> None:
     ]
     # The base's own members (deeper indent) never leak into Derived.
     assert derived["fields"] == [{"name": "value", "offset_bits": 128}]
-    assert derived["bases"] == [{"name": "Base", "offset_bits": 0}]
+    assert derived["bases"] == [{"name": "Base", "offset_bits": 0, "is_virtual": False}]
     assert derived["data_size_bits"] == 160
     assert "vptr_offset_bits" not in derived
 
@@ -85,6 +85,117 @@ def test_parse_bitfields_and_nested_by_value() -> None:
         {"name": "c", "offset_bits": 8},
         {"name": "inner", "offset_bits": 64},
     ]
+
+
+#: Shapes the parser dropped before generation 39, as clang 18 prints them.
+_SHAPES_DUMP = """
+*** Dumping AST Record Layout
+         0 | struct Tag (empty)
+           | [sizeof=1, dsize=1, align=1,
+           |  nvsize=1, nvalign=1]
+
+*** Dumping AST Record Layout
+         0 | struct W
+         0 |   struct Tag (base) (empty)
+         0 |   struct Payload (base)
+         0 |     int x
+         4 |   int y
+         8 |   struct Tag t (empty)
+           | [sizeof=12, dsize=12, align=4,
+           |  nvsize=12, nvalign=4]
+
+*** Dumping AST Record Layout
+         0 | struct V
+         8 |   int z
+         0 |   struct L (primary virtual base)
+         0 |     (L vtable pointer)
+        16 |   struct M (virtual base)
+        16 |     int m
+           | [sizeof=24, dsize=20, align=8,
+           |  nvsize=12, nvalign=8]
+
+*** Dumping AST Record Layout
+         0 | struct A
+         0 |   int tag
+         4 |   union A::(anonymous at ./t.hpp:6:21)\x20
+         4 |     int i
+         4 |     struct A::(anonymous union)::(anonymous at ./t.hpp:6:40)\x20
+         4 |       short lo
+         6 |       short hi
+         8 |   struct A::(unnamed at ./t.hpp:6:48) s
+         8 |     char c
+        12 |   int after
+        16 |   struct A::(anonymous at ./t.hpp:6:70)\x20
+        16 |   int last
+           | [sizeof=20, dsize=20, align=4,
+           |  nvsize=16, nvalign=4]
+
+*** Dumping AST Record Layout
+         0 | T
+         0 |   int a
+           | [sizeof=4, align=4]
+"""
+
+
+def test_parse_shapes_empty_virtual_anonymous_and_c_typedef() -> None:
+    recs = {r["qualified_name"]: r for r in parse_record_layout_dump(_SHAPES_DUMP)}
+    assert set(recs) == {"Tag", "W", "V", "A", "T"}
+    # An empty record is sized, under its own name (no "(empty)" tag).
+    assert recs["Tag"]["size_bits"] == 8
+    # An empty base keeps its offset; an empty by-value member keeps its name.
+    assert recs["W"]["bases"] == [
+        {"name": "Tag", "offset_bits": 0, "is_virtual": False},
+        {"name": "Payload", "offset_bits": 0, "is_virtual": False},
+    ]
+    assert recs["W"]["fields"] == [
+        {"name": "y", "offset_bits": 32},
+        {"name": "t", "offset_bits": 64},
+    ]
+    # Both virtual-base spellings are bases, marked virtual -- never fields.
+    assert recs["V"]["bases"] == [
+        {"name": "L", "offset_bits": 0, "is_virtual": True},
+        {"name": "M", "offset_bits": 128, "is_virtual": True},
+    ]
+    assert recs["V"]["fields"] == [{"name": "z", "offset_bits": 64}]
+    # Unnamed member aggregates flatten (nested ones too); a named member of
+    # unnamed type is one field, and the members after them stay top level.
+    assert recs["A"]["fields"] == [
+        {"name": "tag", "offset_bits": 0},
+        {"name": "i", "offset_bits": 32},
+        {"name": "lo", "offset_bits": 32},
+        {"name": "hi", "offset_bits": 48},
+        {"name": "s", "offset_bits": 64},
+        {"name": "after", "offset_bits": 96},
+        # An empty unnamed member has no members; the next line is the
+        # record's own member again, not one of its (absent) children.
+        {"name": "last", "offset_bits": 128},
+    ]
+    # C prints a typedef naming an unnamed struct with no tag keyword.
+    assert recs["T"]["size_bits"] == 32 and "data_size_bits" not in recs["T"]
+
+
+def test_virtual_base_offset_is_not_applied() -> None:
+    """``base_offsets`` holds direct non-virtual bases (castxml and DWARF record
+    no virtual-base offset): a virtual base the layout reports is dropped."""
+    from abicheck.extract.headers.clang.layout_tool import apply_layout_facts
+    from abicheck.model import AbiSnapshot, RecordType
+
+    snap = AbiSnapshot(
+        library="l",
+        version="1",
+        types=[RecordType(name="V", kind="struct", qualified_name="V")],
+    )
+    facts = {
+        "qualified_name": "V",
+        "size_bits": 192,
+        "fields": [],
+        "bases": [
+            {"name": "ns::N", "offset_bits": 64, "is_virtual": False},
+            {"name": "L", "offset_bits": 0, "is_virtual": True},
+        ],
+    }
+    (rec,) = apply_layout_facts(snap, [facts]).declarations.types
+    assert rec.base_offsets == {"N": 64}
 
 
 @pytest.mark.parametrize(
@@ -392,6 +503,155 @@ def test_probe_layout_matches_compiled_sizeof_offsetof(tmp_path: Path) -> None:
     ).stdout
 
     for line in measured.splitlines():
+        rec, what, value = line.rsplit(" ", 2)
+        facts = recs[rec]
+        if what == "size":
+            assert facts["size_bits"] == int(value) * 8, line
+        else:
+            offsets = {f["name"]: f["offset_bits"] for f in facts["fields"]}
+            assert offsets[what] == int(value) * 8, line
+
+
+_SHAPES_CXX = """
+struct Tag {};
+struct Payload { int x; };
+struct W : Tag, Payload { int y; Tag t; };
+struct L { virtual ~L(); long q; };
+struct M { int m; };
+struct V : virtual L, virtual M { int z; };
+struct N { char n; };
+struct D : N, Payload { short s; };
+struct A { int tag; union { int i; struct { short lo; short hi; }; }; struct { char c; } s; int after; };
+"""
+#: record -> (fields offsetof can name, non-virtual bases, virtual bases)
+_SHAPES_CXX_RECORDS = {
+    "Tag": ((), (), ()),
+    "W": (("y", "t"), ("Tag", "Payload"), ()),
+    "V": (("z",), (), ("L", "M")),
+    "D": (("s",), ("N", "Payload"), ()),
+    "A": (("tag", "i", "lo", "hi", "s", "after"), (), ()),
+}
+_SHAPES_C = """
+struct P { int x; char c; };
+typedef struct { int a; union { int i; float f; }; char tail; } T;
+union U { int i; double d; };
+"""
+_SHAPES_C_RECORDS = {"P": ("x", "c"), "T": ("a", "i", "f", "tail"), "U": ("i", "d")}
+
+
+def _clang_layouts(tmp_path: Path, lang: str, header: str, names: list[str]) -> dict:
+    ext = "hpp" if lang == "c++" else "h"
+    hdr = tmp_path / f"shapes.{ext}"
+    hdr.write_text(header, encoding="utf-8")
+    probe = tmp_path / ("probe.cpp" if lang == "c++" else "probe.c")
+    probe.write_text(
+        probe_source(f'#include "{hdr}"\n', names, c_mode=lang == "c"),
+        encoding="utf-8",
+    )
+    dump = subprocess.run(
+        [
+            "clang",
+            "-x",
+            lang,
+            "-fsyntax-only",
+            "-ferror-limit=0",
+            "-Xclang",
+            "-fdump-record-layouts",
+            str(probe),
+        ],
+        capture_output=True,
+        text=True,
+    ).stdout
+    return {r["qualified_name"]: r for r in parse_record_layout_dump(dump)}, hdr
+
+
+def _measure(tmp_path: Path, lang: str, src_lines: list[str]) -> list[str]:
+    src = tmp_path / ("m.cpp" if lang == "c++" else "m.c")
+    src.write_text("\n".join(src_lines), encoding="utf-8")
+    exe = tmp_path / "m"
+    subprocess.run(
+        [
+            "clang",
+            "-x",
+            lang,
+            str(src),
+            "-o",
+            str(exe),
+            *(["-lstdc++"] if lang == "c++" else []),
+        ],
+        check=True,
+    )
+    return subprocess.run(
+        [str(exe)], capture_output=True, text=True, check=True
+    ).stdout.splitlines()
+
+
+@pytest.mark.skipif(shutil.which("clang") is None, reason="needs clang")
+def test_new_shapes_match_compiled_sizeof_offsetof_and_base_casts(
+    tmp_path: Path,
+) -> None:
+    """Empty records, empty and virtual bases and flattened anonymous members:
+    each size, field offset and base offset the parser reports equals what a
+    compiled program measures (sizeof, offsetof, a derived-to-base pointer
+    cast) -- an oracle outside the parser."""
+    recs, hdr = _clang_layouts(tmp_path, "c++", _SHAPES_CXX, list(_SHAPES_CXX_RECORDS))
+    lines = [
+        "#include <cstdio>",
+        "#include <cstddef>",
+        f'#include "{hdr}"',
+        '#pragma clang diagnostic ignored "-Winvalid-offsetof"',
+        "L::~L() {}",
+        "int main() {",
+    ]
+    for rec, (fields, bases, vbases) in _SHAPES_CXX_RECORDS.items():
+        lines.append(f'std::printf("{rec} size %zu\\n", sizeof({rec}));')
+        lines += [
+            f'std::printf("{rec} f:{f} %zu\\n", offsetof({rec}, {f}));' for f in fields
+        ]
+        if bases or vbases:
+            lines.append(f"{{ static {rec} o;")
+            lines += [
+                f'std::printf("{rec} b:{b} %td\\n", (char*)static_cast<{b}*>(&o) - (char*)&o);'
+                for b in (*bases, *vbases)
+            ]
+            lines.append("}")
+    lines.append("}")
+    for line in _measure(tmp_path, "c++", lines):
+        rec, what, value = line.rsplit(" ", 2)
+        facts = recs[rec]
+        if what == "size":
+            assert facts["size_bits"] == int(value) * 8, line
+        elif what.startswith("f:"):
+            offsets = {f["name"]: f["offset_bits"] for f in facts["fields"]}
+            assert offsets[what[2:]] == int(value) * 8, line
+        else:
+            base = next(b for b in facts["bases"] if b["name"] == what[2:])
+            assert base["offset_bits"] == int(value) * 8, line
+            assert base["is_virtual"] is (what[2:] in _SHAPES_CXX_RECORDS[rec][2]), line
+
+
+@pytest.mark.skipif(shutil.which("clang") is None, reason="needs clang")
+def test_c_probe_lays_out_tags_typedefs_and_unions(tmp_path: Path) -> None:
+    """A C header: the probe names each record as struct, union and typedef,
+    and every record is laid out exactly as a compiled C program measures."""
+    recs, hdr = _clang_layouts(tmp_path, "c", _SHAPES_C, list(_SHAPES_C_RECORDS))
+    spelled = {"P": "struct P", "T": "T", "U": "union U"}
+    lines = [
+        "#include <stdio.h>",
+        "#include <stddef.h>",
+        f'#include "{hdr}"',
+        "int main(void) {",
+    ]
+    for rec, fields in _SHAPES_C_RECORDS.items():
+        lines.append(f'printf("{rec} size %zu\\n", sizeof({spelled[rec]}));')
+        lines += [
+            f'printf("{rec} {f} %zu\\n", offsetof({spelled[rec]}, {f}));'
+            for f in fields
+        ]
+    lines += ["return 0;", "}"]
+    measured = _measure(tmp_path, "c", lines)
+    assert len(measured) == sum(1 + len(f) for f in _SHAPES_C_RECORDS.values())
+    for line in measured:
         rec, what, value = line.rsplit(" ", 2)
         facts = recs[rec]
         if what == "size":
