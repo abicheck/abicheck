@@ -471,6 +471,127 @@ def _m_executable_stack_removed(tag: int):
     )
 
 
+# --- Namespaced edits: the same declarations a header frontend spells
+# differently (test_detector_oracle.py runs every mutation as written and in
+# the castxml and clang spellings, _frontend_spelling.render). A fragment may
+# carry ``canonical_fields``: (record, field) pairs the header wrote through an
+# alias template, which clang records fully qualified.
+
+
+def _ns_fn(name: str, ret: str = "void", params: tuple[str, ...] = ()) -> Function:
+    """A public ``lib::<name>`` function with its real Itanium mangling, so a
+    detector can recover the scope from it when the name is written bare."""
+    return Function(
+        name=f"lib::{name}",
+        mangled=f"_ZN3lib{len(name)}{name}Ev",
+        return_type=ret,
+        params=[Param(name=f"a{i}", type=t) for i, t in enumerate(params)],
+        visibility=Visibility.PUBLIC,
+    )
+
+
+def _ns_grow(name: str, grown: bool) -> RecordType:
+    fields = [TypeField(name="a", type="int", offset_bits=0)]
+    if grown:
+        fields.append(TypeField(name="b", type="int", offset_bits=32))
+    return RecordType(
+        name=name, kind="struct", size_bits=64 if grown else 32, fields=fields
+    )
+
+
+def _ns_holder(tag: int, grown: bool, **kw: object) -> RecordType:
+    return RecordType(
+        name=f"lib::Pub{tag}",
+        kind="struct",
+        size_bits=96 if grown else 64,
+        **kw,
+    )
+
+
+def _m_ns_internal_base_grows(tag: int):
+    """``struct Pub : detail::Base`` — the shape #1918 found clang never leaked."""
+    base = f"lib::detail::Base{tag}"
+
+    def mk(grown: bool) -> dict:
+        return {
+            "functions": [_ns_fn(f"get{tag}", ret=f"lib::Pub{tag}*")],
+            "types": [_ns_holder(tag, grown, bases=[base]), _ns_grow(base, grown)],
+        }
+
+    return mk(False), mk(True), ChangeKind.INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API, True
+
+
+def _m_ns_internal_alias_field_grows(tag: int):
+    """``pimpl<int> p;`` through ``template <class T> using pimpl = detail::Box<T>``."""
+    box = f"lib::detail::Box{tag}<int>"
+
+    def mk(grown: bool) -> dict:
+        holder = _ns_holder(tag, grown, fields=[TypeField(name="p", type=box)])
+        return {
+            "functions": [_ns_fn(f"get{tag}", ret=f"lib::Pub{tag}*")],
+            "types": [holder, _ns_grow(box, grown)],
+            "canonical_fields": [(f"lib::Pub{tag}", "p")],
+        }
+
+    return mk(False), mk(True), ChangeKind.INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API, True
+
+
+def _m_ns_internal_return_grows(tag: int):
+    """``detail::Impl make()`` — an internal type returned by value."""
+    impl = f"lib::detail::Impl{tag}"
+
+    def mk(grown: bool) -> dict:
+        return {
+            "functions": [_ns_fn(f"make{tag}", ret=impl)],
+            "types": [_ns_grow(impl, grown)],
+        }
+
+    return mk(False), mk(True), ChangeKind.INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API, True
+
+
+def _m_ns_field_type_changed(tag: int):
+    """A field retyped between two same-size records of an internal namespace."""
+
+    def mk(target: str) -> dict:
+        holder = RecordType(
+            name=f"lib::Pub{tag}",
+            kind="struct",
+            size_bits=32,
+            fields=[TypeField(name="x", type=target, offset_bits=0)],
+        )
+        return {
+            "functions": [_ns_fn(f"get{tag}", ret=f"lib::Pub{tag}*")],
+            "types": [
+                holder,
+                RecordType(name=f"lib::detail::A{tag}", kind="struct", size_bits=32),
+                RecordType(name=f"lib::detail::B{tag}", kind="struct", size_bits=32),
+            ],
+        }
+
+    return (
+        mk(f"lib::detail::A{tag}"),
+        mk(f"lib::detail::B{tag}"),
+        ChangeKind.TYPE_FIELD_TYPE_CHANGED,
+        True,
+    )
+
+
+def _m_ns_template_instance_grows(tag: int):
+    """A class-template instance with an internal argument, reached by pointer."""
+    inst = f"lib::Wrap{tag}<lib::detail::Impl{tag}>"
+
+    def mk(grown: bool) -> dict:
+        return {
+            "functions": [_ns_fn(f"wrap{tag}", ret=f"{inst}*")],
+            "types": [
+                _ns_grow(inst, grown),
+                _ns_grow(f"lib::detail::Impl{tag}", False),
+            ],
+        }
+
+    return mk(False), mk(True), ChangeKind.TYPE_SIZE_CHANGED, True
+
+
 def registry_twins() -> dict[str, str]:
     """Map each removed kind to its added twin, read from the ChangeKind registry.
 
@@ -552,6 +673,11 @@ MUTATIONS: list[Mutation] = [
     _m_writable_executable_segment,
     _m_executable_stack_introduced,
     _m_executable_stack_removed,
+    _m_ns_internal_base_grows,
+    _m_ns_internal_alias_field_grows,
+    _m_ns_internal_return_grows,
+    _m_ns_field_type_changed,
+    _m_ns_template_instance_grows,
 ]
 
 

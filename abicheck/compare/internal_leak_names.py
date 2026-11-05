@@ -22,8 +22,9 @@ and ``internal_type_leak`` name heuristics, whose owner module is this one.
 from __future__ import annotations
 
 import collections
+import functools
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING
 
 from ..model.change import Change
@@ -327,3 +328,51 @@ def _root_type_name_for_change(c: Change) -> str:
     if "::" in sym and c.kind in _FIELD_LEVEL_LEAK_KINDS:
         return sym.rsplit("::", 1)[0]
     return sym
+
+
+@functools.lru_cache(maxsize=8)
+def _leaf_index(qualified_keys: frozenset[str]) -> dict[str, set[str | None]]:
+    """Bare leaf -> qualified names over *qualified_keys* (cached per key set:
+    a frozenset caches its own hash, so a repeat call with the same set is O(1))."""
+    idx: dict[str, set[str | None]] = collections.defaultdict(set)
+    for key in qualified_keys:
+        idx[key.rsplit("::", 1)[-1]].add(key)
+    return idx
+
+
+def is_internal_candidate(
+    name: str,
+    qualified_keys: frozenset[str],
+    internal_namespaces: Iterable[str] = DEFAULT_INTERNAL_NAMESPACES,
+) -> bool:
+    """Whether *name* is an internal-namespace type, reading a bare *name*
+    through the one qualified record identity in *qualified_keys* with that
+    leaf. Header frontends give a type change the record's bare name, so the
+    spelling alone (``Impl``) would never look internal even when the record is
+    ``lib::detail::Impl``; an ambiguous leaf falls back to the spelling."""
+    return INTERNAL_NAMESPACE.matches(
+        name,
+        internal_namespaces=internal_namespaces,
+        qualified_index=_leaf_index(qualified_keys),
+    )
+
+
+def change_type_identities(*snaps: AbiSnapshot | None) -> frozenset[str]:
+    """Every record's qualified identity across *snaps* (``None`` skipped)."""
+    return frozenset(
+        t.qualified_name or t.name
+        for snap in snaps
+        if snap is not None
+        for t in snap.declarations.types
+    )
+
+
+def internal_type_predicate(
+    old: AbiSnapshot | None,
+    new: AbiSnapshot | None,
+    internal_namespaces: Iterable[str] = DEFAULT_INTERNAL_NAMESPACES,
+) -> Callable[[str], bool]:
+    """:func:`is_internal_candidate` over the records of *old* and *new*."""
+    identities = change_type_identities(old, new)
+    namespaces = tuple(internal_namespaces)
+    return lambda name: is_internal_candidate(name, identities, namespaces)

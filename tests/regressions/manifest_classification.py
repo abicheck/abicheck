@@ -780,6 +780,53 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
         },
     ),
     BugClass(
+        id="evidence.detector_answer_depends_on_frontend_spelling",
+        invariant=(
+            "The same declarations spelled by either header frontend -- castxml's "
+            "bare leaf with recorded slot identities, clang's scope-relative "
+            "spelling, or the fully qualified form hand-built fixtures use -- "
+            "produce the same kept and demoted ChangeKinds and the same verdict. "
+            "A detector resolves a type spelling to the record it names (C++ "
+            "name lookup from the writing scope, template arguments included), "
+            "never by matching the spelling; a bare type-change symbol is read "
+            "through its one qualified record. Detector unit fixtures run in "
+            "every frontend spelling, pinned to real dumps."
+        ),
+        fixed_by=(1918,),
+        seed_tests=(
+            "tests/test_detector_frontend_spelling.py",
+            "tests/test_detector_oracle.py",
+            "tests/test_frontend_spelling_integration.py",
+            "tests/test_clang_record_layout_dump.py",
+            "tests/test_family_f8_target_parity.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "frontend": ("castxml", "clang"),
+            "leak_path": (
+                "inheritance",
+                "virtual_base",
+                "by_value_field",
+                "alias_template_field",
+                "signature",
+                "template_argument",
+                "nested_template_instance",
+                "pointer_only",
+            ),
+            "same_leaf": ("public_holder", "internal_holder"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "castxml records no identity for a base, so a bare base "
+                    "leaf shared by two records that C++ lookup from the "
+                    "derived scope does not reach stays unresolved."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
+    BugClass(
         id="evidence.spelling_used_as_a_semantic_model",
         invariant=(
             "A property of a declaration that the ABI encodes -- linkage, "

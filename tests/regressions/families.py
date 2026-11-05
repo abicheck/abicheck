@@ -485,6 +485,9 @@ _F8 = (
     # The clang header backend left layout facts empty that castxml records
     # from the same headers (harness cell: test_clang_backend_layout_matches_castxml).
     "extraction.backend_fact_family_parity",
+    # A detector matched a type by the spelling one frontend writes (harness
+    # cell: test_internal_leaks_match_across_header_backends).
+    "evidence.detector_answer_depends_on_frontend_spelling",
     "extraction.aggregate_layout_inverted_by_line",
     "extraction.emulated_compiler_builtin_absent_from_frontend",
     "extraction.linker_summary_flag_read_as_the_fact",
