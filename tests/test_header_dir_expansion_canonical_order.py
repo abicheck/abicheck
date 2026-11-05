@@ -144,9 +144,11 @@ def test_skipped_witness_dump_matches_the_witnessed_reference(tmp_path: Path) ->
     equals running the witness.
 
     Optimized: ``-H <dir>``, now canonical by construction, so the witness
-    records its proof without a second dump. Reference: the same headers
-    declared one by one in the old directory-walk order (``x/inner.h`` before
-    ``x.h``), which is not canonical, so the witness re-dumps in sorted order.
+    records its proof without a second dump. Reference: each side dumped
+    standalone (``abicheck dump``, which always takes the proof) with the same
+    headers declared one by one in the old directory-walk order (``x/inner.h``
+    before ``x.h``, not canonical), so each witness re-dumps in sorted order;
+    the two stored snapshots are then compared.
     The canonical JSON reports must be equal, and the optimized run must
     write fewer clang AST cache entries than the reference.
     """
@@ -186,15 +188,26 @@ def test_skipped_witness_dump_matches_the_witnessed_reference(tmp_path: Path) ->
             check=True,
         )
 
-    def run(name: str, header_args: list[str]) -> tuple[int, str, int]:
-        cache = tmp_path / f"cache-{name}"
-        report = tmp_path / f"{name}.json"
-        env = abicheck_env(
-            {
-                "XDG_CACHE_HOME": str(cache),
-                "ABICHECK_AST_FRONTEND": "clang",
-            }
+    def _env(cache: Path) -> dict[str, str]:
+        return abicheck_env(
+            {"XDG_CACHE_HOME": str(cache), "ABICHECK_AST_FRONTEND": "clang"}
         )
+
+    def _entries(cache: Path) -> int:
+        return sum(
+            not p.name.endswith(".projection.json") for p in cache.rglob("clang/*.json")
+        )
+
+    def _observed(report: Path) -> str:
+        # What was observed, not how the inputs were spelled: the report also
+        # records each input's provenance (a directory, listed files, a snapshot).
+        doc = json.loads(canonical_report(report.read_text()))
+        return json.dumps(
+            {k: doc.get(k) for k in ("verdict", "changes")}, sort_keys=True, indent=1
+        )
+
+    def run_live(header_args: list[str]) -> tuple[int, str, int]:
+        cache, report = tmp_path / "cache-optimized", tmp_path / "optimized.json"
         args = [str(tmp_path / "old/libsvs.so"), str(tmp_path / "new/libsvs.so")]
         for side in ("old", "new"):
             args += ["-I", f"{side}={tmp_path / side / 'include'}"]
@@ -208,32 +221,49 @@ def test_skipped_witness_dump_matches_the_witnessed_reference(tmp_path: Path) ->
                 "-o",
                 f"json={report}",
             ),
-            env=env,
+            env=_env(cache),
             capture_output=True,
             text=True,
         )
         assert report.exists(), proc.stderr
-        entries = [
-            p
-            for p in cache.rglob("clang/*.json")
-            if not p.name.endswith(".projection.json")
-        ]
-        # What was observed, not how the inputs were spelled: the report also
-        # records each input's provenance (a directory vs. listed files).
-        doc = json.loads(canonical_report(report.read_text()))
-        observed = json.dumps(
-            {k: doc.get(k) for k in ("verdict", "changes")}, sort_keys=True, indent=1
+        return proc.returncode, _observed(report), _entries(cache)
+
+    def run_witnessed() -> tuple[int, str, int]:
+        cache, report = tmp_path / "cache-reference", tmp_path / "reference.json"
+        snaps = []
+        for side in ("old", "new"):
+            snap = tmp_path / f"{side}.abi.json"
+            headers = [a for h in walk_order[side] for a in ("-H", str(h))]
+            proc = subprocess.run(
+                abicheck_command(
+                    "dump",
+                    str(tmp_path / side / "libsvs.so"),
+                    *headers,
+                    "-I",
+                    str(tmp_path / side / "include"),
+                    "-o",
+                    str(snap),
+                ),
+                env=_env(cache),
+                capture_output=True,
+                text=True,
+            )
+            assert snap.exists(), proc.stderr
+            snaps.append(str(snap))
+        proc = subprocess.run(
+            abicheck_command("compare", *snaps, "-o", f"json={report}"),
+            env=_env(cache),
+            capture_output=True,
+            text=True,
         )
-        return proc.returncode, observed, len(entries)
+        assert report.exists(), proc.stderr
+        return proc.returncode, _observed(report), _entries(cache)
 
     dir_args: list[str] = []
-    listed_args: list[str] = []
     for side in ("old", "new"):
         dir_args += ["-H", f"{side}={tmp_path / side / 'include/svs/lib'}"]
-        for h in walk_order[side]:
-            listed_args += ["-H", f"{side}={h}"]
-    exit_opt, optimized, opt_entries = run("optimized", dir_args)
-    exit_ref, reference, ref_entries = run("reference", listed_args)
+    exit_opt, optimized, opt_entries = run_live(dir_args)
+    exit_ref, reference, ref_entries = run_witnessed()
     assert exit_opt == exit_ref
     assert "added" in optimized
     assert optimized == reference, first_difference(optimized, reference)

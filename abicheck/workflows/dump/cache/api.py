@@ -287,6 +287,11 @@ def _cache_key_for(req: DumpCacheRequest) -> str:
         # Appended only when set, so every key a full dump already had stays
         # valid; a symbols-only entry's extra is a strict extension of it.
         extra += "\x00symbols-only"
+    from ....extract.header_order_witness import order_witness_deferred
+
+    if order_witness_deferred():
+        # A deferred dump may lack the header-order proof a full dump records.
+        extra += "\x00order-witness-deferred"
     return _cache_key(
         req.path, cache_headers, cache_includes, req.version, req.lang, extra=extra
     )

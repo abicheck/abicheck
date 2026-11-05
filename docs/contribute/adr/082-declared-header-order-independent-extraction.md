@@ -107,3 +107,32 @@ residual, not claimed as proven.
   pair refusing, and a proven pair with a flipped order comparing equal.
 - **Known gap:** the known-gap entry stays OPEN until this ADR is Accepted and
   implemented.
+
+## Amendment (2026-11-05): the witness runs only when a comparison reads its proof
+
+**Decision maker:** Nikolay Petrov (repository maintainer), accepted in session 2026-11-05.
+
+The proof is read only when the two compared snapshots' `header_sequence` values
+differ: a permutation, or an insertion or removal judged on the canonical sequences.
+Taking it on every unsorted dump cost a second full parse even when both sides declared
+the same order, which is the common case. A 30-header compare listing `part0.h`
+through `part29.h` (not canonical, because `part10.h` sorts before `part2.h`) spent
+about 11% of its wall time on the witness.
+
+- **Live `compare`:** `workflows/compare/resolve.resolve_compare_request` resolves
+  both sides inside `deferred_order_witness()`. Step 1 above, where an already
+  canonical order proves itself, still runs because it costs nothing. Step 2's
+  canonical-order dump is skipped. Afterwards `order_proof_needed(old, new)` checks
+  the two recorded sequences. Only when they differ without a proof on both sides
+  are both sides resolved again with the witness on, which is the cost every
+  unsorted dump used to pay.
+- **Standalone `dump`:** unchanged. A stored snapshot may be compared later against
+  any other snapshot, so it keeps taking the proof.
+- **Cache:** a deferred dump can lack `header_canonical`, so its whole-snapshot
+  dump-cache key carries `order-witness-deferred`. A deferred snapshot is never
+  served to a non-deferred request, and the reverse.
+- **Comparison rule:** unchanged. A pair whose sequences are equal never consulted
+  `header_canonical`. A pair that needs it gets it from the second resolution.
+- **Process boundary:** the deferral is a context variable. It reaches a forked side
+  child; a spawned one does not, and that side simply takes the proof as before
+  (correct, only slower).

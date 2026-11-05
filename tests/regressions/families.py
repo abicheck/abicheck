@@ -465,6 +465,7 @@ _F5 = tuple(
         "perf.retained_per_member_state_kept_in_its_working_form",
         "perf.reuse_key_normalizes_an_ordered_input",
         "cache.canonical_form_check_uses_a_different_order_than_the_producer",
+        "perf.proof_computed_on_every_input_but_read_on_few",
         "perf.shared_projection_read_as_an_owned_copy",
         "perf.shared_resource_gate_keyed_on_a_per_caller_value",
         "caching.duck_typed_key_attribute_default",

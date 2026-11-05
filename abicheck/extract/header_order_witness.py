@@ -32,7 +32,8 @@ import dataclasses
 import functools
 import inspect
 import json
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, TypeVar, cast
@@ -44,6 +45,44 @@ _F = TypeVar("_F", bound=Callable[..., Any])
 #: True while the witness is running its own inner dumps, so those dumps are
 #: not themselves witnessed (no recursion, and no second proof per dump).
 _PROVING: ContextVar[bool] = ContextVar("header_order_proving", default=False)
+
+#: True while a caller that can tell afterwards whether it needs a proof (a
+#: live ``compare``) resolves its sides: the free proof for an already
+#: canonical order is still taken, the second, canonical-order dump is not.
+_DEFERRED: ContextVar[bool] = ContextVar("header_order_deferred", default=False)
+
+
+@contextmanager
+def deferred_order_witness() -> Iterator[None]:
+    """Skip the witness's second dump for dumps taken inside this scope."""
+    token = _DEFERRED.set(True)
+    try:
+        yield
+    finally:
+        _DEFERRED.reset(token)
+
+
+def order_witness_deferred() -> bool:
+    """Whether dumps taken now skip the witness's second dump."""
+    return _DEFERRED.get()
+
+
+def order_proof_needed(old: Any, new: Any) -> bool:
+    """Whether comparing *old* with *new* consults ``header_canonical``.
+
+    The comparison rule reads the proof only when the two recorded
+    ``header_sequence`` values differ (a permutation, or an insertion or
+    removal judged on the canonical sequences). Equal sequences, or both sides
+    already proven, need nothing more.
+    """
+    old_c, new_c = getattr(old, "contract", None), getattr(new, "contract", None)
+    if old_c is None or new_c is None:
+        return False
+    old_seq = old_c.profile_fields.get("header_sequence")
+    new_seq = new_c.profile_fields.get("header_sequence")
+    if old_seq == new_seq:
+        return False
+    return old_c.header_canonical is None or new_c.header_canonical is None
 
 
 def canonical_header_key(header: Path) -> tuple[str, str]:
@@ -178,6 +217,10 @@ def _attach_proof(
     if [h.resolve() for h in headers] == [h.resolve() for h in canonical_headers]:
         # Already canonical: the declared extraction is the canonical one.
         declared.contract.header_canonical = declared_sequence
+        return
+    if _DEFERRED.get():
+        # The caller decides afterwards whether this comparison needs the proof
+        # (order_proof_needed) and re-resolves with the witness on if it does.
         return
 
     try:

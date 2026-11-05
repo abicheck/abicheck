@@ -73,7 +73,7 @@
       "abicheck/extract/header_ast_cache_producers.py": "aa85ae5d148526267f600b0972ca89afc27b6b8cb3f51b4c781a1526773600b4",
       "abicheck/extract/header_ast_fields.py": "29877eb38ce55c0d2dd459ceaca25f112850b3f2a0177abe61a53f3907bd3ee5",
       "abicheck/extract/header_exclusions.py": "254ca6e4ccf7366b9db516183d6814cb865c279845abe7d05051ac2f72bf0884",
-      "abicheck/extract/header_order_witness.py": "1f2d157fe5d1c53bbef82063e1f27c5c9478acc04f89fd01eb805e150cbe920b",
+      "abicheck/extract/header_order_witness.py": "404f9a531171ff93ad113bbc881de041a2b8dd3f3f1501020f6503396bb84cf5",
       "abicheck/extract/header_scan_memo.py": "56f79b5316354b938b08a5f29779c3aaf40481892d947784ec2adb48ab5e83fb",
       "abicheck/extract/header_text.py": "b43a88d7bf1d2e601bb908c78f04cb07e552f9c59f03b678ecc85788b3d146e4",
       "abicheck/extract/headers/__init__.py": "70af0d3a16882783444077004b7a434a295505579fbbca219ce103f72074ad03",
@@ -196,9 +196,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "d764e0c2809c185dfa7e7623d378bc3ba0fbcbe4e87e4457d488a3e5c28b5b80",
+    "fingerprint": "a1a05e83b18a355f4dceb0e168b228d977f3b5386d7557f7296bb491e6f68509",
     "generation": 38,
-    "reason": "bumped to 38 for a semantic change"
+    "reason": "The header-order witness can defer its second, canonical-order dump inside a live compare (deferred_order_witness); a standalone dump records exactly what it did, and a deferred snapshot lacks only header_canonical, under its own dump-cache key"
   },
   "resolver": {
     "files": {
@@ -216,12 +216,12 @@
       "abicheck/type_reachability.py": "1fe18d38eef5ebed444a3aac59247f72bbef677755652be333cb631dceaeb0c2",
       "abicheck/type_reachability_spelling.py": "1bd700f854cf9021fc30b577f4ddf3d22095c07b0c7a9bd90c497f8a8eb018a7",
       "abicheck/type_reachability_stdlib_spellings.py": "e20c1ffc6055602a97021b50fc496bd9892231bf6b437fb2a8e319cc3535f470",
-      "abicheck/workflows/compare/resolve.py": "1b33ff59c379c2fc7cc48a5b5908b701be4b878c68c46f28bba8c7bd5f0ff97d",
+      "abicheck/workflows/compare/resolve.py": "111da250b0b0f32b787a6f55033c7aba19873e583030786cbeca3a46608c6854",
       "abicheck/workflows/elf_dependency_resolver.py": "69cdd9d8129410f824768fdc67ab14b2836761552fe300b63ebb0e290ee3a0b5"
     },
-    "fingerprint": "ebfb49186685e5bcb231c879ca631e8927a1c2eab63a6e71801c24bc5a83fb14",
+    "fingerprint": "73240b5cd3bb126c2000f756c19e487f2d5fb29bd5a8ee51ea8ffb903bd33a5e",
     "generation": 3,
-    "reason": "post_processing_reachability.py only registers the new CONCEPT_CONSTRAINT_CHANGED kind in the public-source-ABI kind set; no existing graph derivation changes"
+    "reason": "resolve_compare_request resolves both sides with the order witness deferred and resolves again with it on only when the two header sequences differ without a proof on both sides; the observed comparison is unchanged"
   },
   "source": {
     "files": {

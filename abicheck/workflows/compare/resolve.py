@@ -242,6 +242,37 @@ def resolve_compare_request(
     notify: Callable[[str], None] | None = None,
     allow_parallel: bool = True,
 ) -> ResolvedComparePair:
+    """Resolve both sides of *request*, taking the header-order proof only when
+    the comparison reads it.
+
+    Both sides first resolve with the witness's second dump deferred. Only when
+    their recorded header sequences differ without a proof on both sides
+    (:func:`~abicheck.extract.header_order_witness.order_proof_needed`) are they
+    resolved again with the witness on, which is the cost every unsorted
+    declared order used to pay.
+    """
+    from ...extract.header_order_witness import (
+        deferred_order_witness,
+        order_proof_needed,
+    )
+
+    with deferred_order_witness():
+        pair = _resolve_compare_request_once(
+            request, notify=notify, allow_parallel=allow_parallel
+        )
+    if not order_proof_needed(pair.old, pair.new):
+        return pair
+    return _resolve_compare_request_once(
+        request, notify=notify, allow_parallel=allow_parallel
+    )
+
+
+def _resolve_compare_request_once(
+    request: CompareRequest,
+    *,
+    notify: Callable[[str], None] | None = None,
+    allow_parallel: bool = True,
+) -> ResolvedComparePair:
     """Resolve both sides of *request* into a classifiable pair.
 
     The first half of :func:`abicheck.service.run_compare_request`, and the
