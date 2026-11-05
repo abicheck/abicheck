@@ -539,6 +539,12 @@ when PSS is unreadable) is gated at 512 MB per point (observed 255-315 MB at n=1
 so summed RSS reads roughly 3x the PSS footprint on the library axis.
 The whole gate takes about 75 s at `--repeat 3`.
 
+A point whose margin over `n = 1` is positive but under 0.15 s
+(`NOISE_MARGIN_SECONDS`) is left out of the fit as unresolved. The header axis
+is flat up to about 8 headers and linear after, so its smallest point lands
+0.06-0.13 s above the floor; at the earlier 0.05 s cutoff that one point fitted
+1.41-1.98 for a sweep that was faster than its base at every size (#1920).
+
 The gated number is the **marginal** exponent: the slope of
 `log(wall(n) - wall(1))` against `log(n - 1)`. Every CLI run pays a ~1 s fixed
 floor (startup, imports, config, report writing), so a raw log-log slope at

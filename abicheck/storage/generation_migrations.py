@@ -402,6 +402,17 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "so comparing it with a generation-37 one would report the new records "
         "and fields as changes; it is re-dumped"
     ),
+    38: GenerationSpellingChange(
+        "no stored spelling changes: a -H directory now expands its headers in "
+        "the header-order canonical order (resolved path as a string, so foo.h "
+        "before foo/bar.h; header_utils.iter_directory_headers). Generation 37 "
+        "sorted by pathlib.Path components (foo/bar.h first), so for a tree "
+        "with a foo.h beside a foo/ directory the aggregate TU included the "
+        "headers in a different order, header_sequence recorded that order, and "
+        "the header-order witness re-dumped in canonical order. Types and "
+        "declarations keep their spellings; only the declared order of such "
+        "trees changes"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

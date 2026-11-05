@@ -115,6 +115,7 @@ FAMILIES: dict[str, Family] = {
                 "tests/test_family_f5_optimization_reference.py",
                 "tests/test_family_f5_derived_ast_sharing.py",
                 "tests/test_family_f5_packed_type_graph.py",
+                "tests/test_header_dir_expansion_canonical_order.py",
             ),
         ),
         Family(
@@ -463,6 +464,7 @@ _F5 = tuple(
         "perf.retention_decided_by_one_switch_not_by_consumers",
         "perf.retained_per_member_state_kept_in_its_working_form",
         "perf.reuse_key_normalizes_an_ordered_input",
+        "cache.canonical_form_check_uses_a_different_order_than_the_producer",
         "perf.shared_projection_read_as_an_owned_copy",
         "perf.shared_resource_gate_keyed_on_a_per_caller_value",
         "caching.duck_typed_key_attribute_default",
