@@ -265,6 +265,15 @@ def test_owned_tag_decl_exhaustive_small_domain(
     assert owned_tag_decl(node) == expected
 
 
+@pytest.mark.parametrize(
+    "node", [None, "0xowned", 7, ["ownedTagDecl"], ("isTagOwned", True)]
+)
+def test_owned_tag_decl_of_a_non_object_node_is_none(node: Any) -> None:
+    """Readers pass ``inner`` children through unchecked; a malformed child
+    (not a JSON object) owns no tag rather than raising."""
+    assert owned_tag_decl(node) is None
+
+
 # --- streaming pruner: a class inside a prunable subtree --------------------
 
 _DEP = "/usr/include/c++/14/bits/ranges_util.h"
