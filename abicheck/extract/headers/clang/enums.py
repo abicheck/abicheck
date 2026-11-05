@@ -44,6 +44,7 @@ from .context import (
     is_builtin_file,
     source_location as _source_location,
 )
+from .owned_tag import owned_tag_decl
 
 #: Evaluates a (possibly wrapped) clang constant-expression node to an int,
 #: or ``None`` when it isn't one. Matches
@@ -66,7 +67,7 @@ def parse_enums(
         for child in ast_inner(node):
             if not isinstance(child, dict):
                 continue
-            owned = child.get("ownedTagDecl") or {}
+            owned = owned_tag_decl(child) or {}
             if owned.get("kind") == "EnumDecl" and owned.get("id"):
                 typedef_names_by_enum_id[str(owned["id"])] = typedef_name
 

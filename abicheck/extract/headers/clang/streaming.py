@@ -68,7 +68,8 @@ built, whenever that subtree:
    library analyzed via its own system-prefixed install path is never
    misclassified -- the identical rule ``dumper_scoping.py`` itself relies
    on); and
-3. a full re-scan of the already-built subtree finds *no* nested
+3. a full re-scan of the already-built subtree finds *no* nested C++
+   method-shaped node (see "Never pruned" below) and *no* nested
    ``loc``/``range`` location anywhere pointing at a file that is NOT a
    dependency header -- i.e. the declaration's whole textual extent is
    confined to dependency headers, with no macro-expansion or
@@ -332,20 +333,44 @@ def _loc_or_range_names_kept_file(node: dict[str, Any], is_dep: Any) -> bool:
     return False
 
 
-def _subtree_reaches_a_kept_file(value: Any, is_dep: Any) -> bool:
+#: The C++ method-shaped kinds this module never elides -- not as a pruned
+#: node, and not *inside* a pruned ``FunctionDecl``/``VarDecl`` subtree
+#: either (see the module docstring's "Never pruned" section).
+_METHOD_SHAPED_KINDS: frozenset[str] = frozenset(
+    {
+        "CXXMethodDecl",
+        "CXXConstructorDecl",
+        "CXXDestructorDecl",
+        "CXXConversionDecl",
+    }
+)
+
+
+def _subtree_must_be_kept(value: Any, is_dep: Any) -> bool:
     """Recursively scan an already-built (in-memory, not re-parsed) subtree
-    for any ``loc``/``range`` mention of a file that is not a dependency
-    header -- the safety net described in the module docstring. Cheap
-    relative to the JSON parse itself: a plain walk of Python objects
+    for a reason to keep it whole: any ``loc``/``range`` mention of a file
+    that is not a dependency header (the safety net described in the module
+    docstring), or any nested C++ method-shaped node.
+
+    The second condition: a free ``FunctionDecl``/``VarDecl`` can hold a
+    class inside it -- a lambda's closure type in a body or an initializer,
+    a local class -- and collapsing the outer node erased that class's
+    methods with it, breaking the "no method-shaped node is ever pruned"
+    contract from inside a prunable kind. libstdc++ as parsed by clang 23 has
+    such a subtree in a dependency header (found by the clang-latest CI
+    lane: 2 method-shaped nodes lost); nothing about it is clang-23-specific.
+    Cheap relative to the JSON parse itself: a plain walk of Python objects
     already resident in memory, no tokenization."""
     if isinstance(value, dict):
+        if value.get("kind") in _METHOD_SHAPED_KINDS:
+            return True
         for key in ("loc", "range"):
             sub = value.get(key)
             if isinstance(sub, dict) and _loc_or_range_names_kept_file(sub, is_dep):
                 return True
-        return any(_subtree_reaches_a_kept_file(v, is_dep) for v in value.values())
+        return any(_subtree_must_be_kept(v, is_dep) for v in value.values())
     if isinstance(value, list):
-        return any(_subtree_reaches_a_kept_file(v, is_dep) for v in value)
+        return any(_subtree_must_be_kept(v, is_dep) for v in value)
     return False
 
 
@@ -392,7 +417,7 @@ class DependencyDeclPruningHook:
         own_file = _own_explicit_file(loc)
         if own_file is None or not self._is_dep(own_file):
             return node
-        if _subtree_reaches_a_kept_file(node, self._is_dep):
+        if _subtree_must_be_kept(node, self._is_dep):
             return node
         self.pruned_count += 1
         # Keep just enough for a human/log to identify what was elided, PLUS
