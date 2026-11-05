@@ -718,7 +718,7 @@
     },
     {
       "path": "abicheck/post_processing.py",
-      "baseline_lines": 1354,
+      "baseline_lines": 1350,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",

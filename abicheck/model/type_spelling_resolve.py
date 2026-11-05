@@ -150,7 +150,7 @@ class TypeResolver:
         referencing record, or a function's or variable's enclosing scope);
         *identities* is the slot's recorded ``type_identities_fact`` value.
         """
-        if not spelling or spelling in self.records:
+        if not spelling or (spelling in self.records and not scope):
             return spelling
         key = (spelling, scope, identities)
         found = self._memo.get(key)
@@ -167,22 +167,33 @@ class TypeResolver:
             owners = self._by_leaf.get(spelling, [])
             if len(owners) == 1:
                 return owners[0]
+        # A leading `::` names the global scope: lookup must not start from
+        # the enclosing scopes, and no unique-leaf guess may override it.
+        rooted = spelling.lstrip().startswith("::")
         norm = normalize_spelling(spelling.removeprefix("::"))
-        if norm in self._normalized:
-            return self._normalized[norm]
         leaf = split_components(norm)[-1] if norm else norm
         for ident in identities:
             if ident in self.records and split_components(ident)[-1] == leaf:
                 return ident
-        # A leading `::` names the global scope: lookup must not start from
-        # the enclosing scopes, and no unique-leaf guess may override it.
-        rooted = spelling.lstrip().startswith("::")
+        if scope and not rooted:
+            # C++ lookup: the innermost enclosing scope that declares the name
+            # wins over an outer (or global) record of the same spelling. The
+            # scope keeps its template arguments first (`Box<int>::Impl`).
+            parts = split_components(scope)
+            for depth in range(len(parts), 0, -1):
+                found = self._normalized.get(
+                    normalize_spelling("::".join([*parts[:depth], norm]))
+                )
+                if found is not None:
+                    return found
         scope_parts = [_stem(c) for c in split_components(scope)] if scope else []
         qualified = normalize_spelling(
             self._qualify("::" + norm if rooted else norm, scope_parts)
         )
         if qualified in self._normalized:
             return self._normalized[qualified]
+        if norm in self._normalized:
+            return self._normalized[norm]
         if not rooted and len(split_components(norm)) == 1 and "<" not in norm:
             owners = self._by_leaf.get(norm, [])
             if len(owners) == 1:

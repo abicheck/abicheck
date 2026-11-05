@@ -172,3 +172,34 @@ def test_normalize_spelling_ignores_whitespace(a: str, b: str) -> None:
 )
 def test_split_components_is_template_aware(name: str, parts: list[str]) -> None:
     assert split_components(name) == parts
+
+
+def test_inner_scope_hides_a_global_record_of_the_same_spelling() -> None:
+    """`detail::Impl` written in `lib` names `lib::detail::Impl`: lookup finds
+    `lib::detail` before the global `detail`. Written at global scope, or with
+    a leading `::`, it names the global record."""
+    r = TypeResolver([_rec("lib::detail::Impl"), _rec("detail::Impl")])
+    assert r.resolve("detail::Impl", "lib") == "lib::detail::Impl"
+    assert r.resolve("detail::Impl", "lib::Pub") == "lib::detail::Impl"
+    assert r.resolve("detail::Impl", None) == "detail::Impl"
+    assert r.resolve("detail::Impl", "other") == "detail::Impl"
+    assert r.resolve("::detail::Impl", "lib") == "detail::Impl"
+
+
+def test_a_name_nested_in_a_template_instance_resolves_in_that_instance() -> None:
+    """A bare `Impl` written inside `Box<int>` names `Box<int>::Impl`, not
+    `Box<float>::Impl`: the scope keeps its template arguments."""
+    r = TypeResolver(
+        [
+            _rec("lib::detail::Box<int>::Impl"),
+            _rec("lib::detail::Box<float>::Impl"),
+            _rec("lib::detail::Box<int>"),
+            _rec("lib::detail::Box<float>"),
+        ]
+    )
+    assert r.resolve("Impl", "lib::detail::Box<int>") == "lib::detail::Box<int>::Impl"
+    assert (
+        r.resolve("Impl", "lib::detail::Box<float>") == "lib::detail::Box<float>::Impl"
+    )
+    # Outside either instance the bare leaf stays ambiguous.
+    assert r.resolve("Impl", "lib") == "Impl"

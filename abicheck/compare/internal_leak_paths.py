@@ -36,7 +36,7 @@ from .internal_leak_names import (
 from .internal_namespaces import DEFAULT_INTERNAL_NAMESPACES
 
 if TYPE_CHECKING:
-    from ..model import AbiSnapshot, Fact, Function, RecordType
+    from ..model import AbiSnapshot, Fact, RecordType
 
 # The scope a spelling was written in: a qualified name, or a deferred one (a
 # function's scope needs a demangle, paid only when a spelling needs it).
@@ -52,11 +52,13 @@ def _identities(fact: Fact[tuple[str, ...]] | None) -> tuple[str, ...]:
     return tuple(fact.value)
 
 
-def _function_scope(func: Function) -> Callable[[], str]:
-    """The scope *func*'s signature was written in, computed on first use.
+def _declaration_scope(name: str, mangled: str) -> Callable[[], str]:
+    """The scope a declaration's signature was written in, computed on first use.
 
-    Header backends write ``Function.name`` as the bare leaf, so the scope comes
-    from the Itanium mangling when the name itself is unqualified.
+    Header backends write a function's or variable's name as the bare leaf, so
+    the scope comes from the Itanium mangling when the name is unqualified. An
+    operator's scope is the text before ``::operator`` (``operator new``,
+    ``operator<`` and conversion operators carry spaces and angle brackets).
     """
     cache: list[str] = []
 
@@ -64,20 +66,23 @@ def _function_scope(func: Function) -> Callable[[], str]:
         if not cache:
             from .template_surface import qualified_declaration_name
 
-            name = func.name or ""
-            if "::" not in name:
-                name = qualified_declaration_name(name, func.mangled or "")
-            name = _strip_signature_params(name)
+            full = name
+            if "::" not in full:
+                full = qualified_declaration_name(full, mangled)
+            full = _strip_signature_params(full)
+            op = full.find("::operator")
+            if op >= 0:
+                full = full[:op] + "::operator"
             # A template function's demangling leads with its return type.
             depth, cut = 0, 0
-            for i, ch in enumerate(name):
+            for i, ch in enumerate(full):
                 if ch in "<(":
                     depth += 1
                 elif ch in ">)":
                     depth -= 1
                 elif ch == " " and depth == 0:
                     cut = i + 1
-            cache.append(scope_of(name[cut:]))
+            cache.append(scope_of(full[cut:]))
         return cache[0]
 
     return get
@@ -201,7 +206,7 @@ def _seed_queue_from_functions(
         # embed its layout — record the indirection so a layout-only change is
         # demoted, mirroring the pointer-field case (Codex review). The seed path
         # otherwise drops the ``*`` (``_candidate_type_names_indirect`` strips decorators).
-        scope = _function_scope(func)
+        scope = _declaration_scope(func.name or "", func.mangled or "")
         seeds = [
             (
                 func.return_type,
@@ -236,7 +241,7 @@ def _seed_queue_from_variables(
     for var in public_variables(snap).values():
         if var.type:
             ids = _identities(var.type_identities_fact)
-            scope = scope_of(var.name or "")
+            scope = _declaration_scope(var.name or "", var.mangled or "")
             for cand, arg_ptr in _candidate_type_names_indirect(var.type):
                 step = [f"var:{var.name}"]
                 if arg_ptr:

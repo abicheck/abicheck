@@ -3,7 +3,9 @@
 - **The internal-type leak check no longer depends on how a header frontend
   spells a type** — `internal_type_leaks_via_public_api` resolves every base,
   field and signature type to the record it names by C++ name lookup from the
-  scope that wrote it (template arguments included), using castxml's recorded
+  scope that wrote it (an inner scope hiding an outer record of the same
+  spelling, a name nested in a template instance, a variable's or operator's
+  scope recovered from its mangling, template arguments included), using castxml's recorded
   slot identities when present, instead of matching the written spelling.
   Under `ABICHECK_AST_FRONTEND=clang` a changed internal type returned or taken
   by value (`detail::Impl make()`) or nested in a template argument
@@ -17,4 +19,6 @@
   API is `layout_unverifiable` (an older dump without layout against a newer
   one with it), `internal_type_leaks_via_public_api` is no longer emitted:
   that finding is an evidence gap, informational and non-escalating, not an
-  observed change, so it can no longer turn such a comparison `BREAKING`.
+  observed change, so it can no longer turn such a comparison `BREAKING`. The
+  finding stays in the report when the type is reachable from the public API
+  (it is not filed as unreachable internal churn).

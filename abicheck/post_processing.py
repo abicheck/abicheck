@@ -1097,9 +1097,8 @@ class DemoteUnreachableInternalChurn:
             return changes
 
         from .compare import internal_leak_names as _names
-        from .compare.internal_leak import LEAK_TRIGGERING_KINDS
+        from .compare.internal_leak import LEAK_TRIGGERING_KINDS, leak_confirmed_types
         from .compare.internal_namespaces import DEFAULT_INTERNAL_NAMESPACES
-        from .model.change_catalog.kinds import ChangeKind
         from .surface import REASON_PRIVATE_INTERNAL_UNREACHABLE
 
         namespaces = (
@@ -1123,12 +1122,9 @@ class DemoteUnreachableInternalChurn:
                 is not None
             )
 
-        # Internal types the leak detector confirmed DO leak through public API.
-        leaked_types = {
-            c.symbol
-            for c in changes
-            if c.kind == ChangeKind.INTERNAL_TYPE_LEAKS_VIA_PUBLIC_API
-        }
+        # Internal types proven to leak through the public API (an evidence gap
+        # on a reachable type included: it is not unreachable churn).
+        leaked_types = leak_confirmed_types(changes, ctx.old, ctx.new, namespaces)
         kept: list[Change] = []
         # A bare root (a header frontend's type-change symbol) reads as its record.
         is_internal = _names.internal_type_predicate(ctx.old, ctx.new, namespaces)

@@ -44,6 +44,7 @@ from abicheck.model import (
     Param,
     RecordType,
     TypeField,
+    Variable,
     Visibility,
 )
 from abicheck.model.vocabulary import ScopeOrigin
@@ -185,6 +186,43 @@ def _leak_via_return(v: int) -> AbiSnapshot:
     return _snap(v, [_make("lib::detail::Impl")], [_grow("lib::detail::Impl", v)])
 
 
+def _leak_via_variable(v: int) -> AbiSnapshot:
+    # `namespace lib { extern detail::Impl g; }`: the only public reference is
+    # a variable, written `detail::Impl` relative to `lib` by clang and named by
+    # its leaf `g`; its scope comes from the mangling.
+    return AbiSnapshot(
+        library="libspell.so.1",
+        version=f"{v}.0",
+        types=[_grow("lib::detail::Impl", v)],
+        variables=[
+            Variable(
+                name="lib::g",
+                mangled="_ZN3lib1gE",
+                type="lib::detail::Impl",
+                visibility=Visibility.PUBLIC,
+            )
+        ],
+    )
+
+
+def _leak_via_operator_param(v: int) -> AbiSnapshot:
+    # `struct Pub { static void* operator new(unsigned long, detail::Impl); }`
+    # inside `lib`: the operator's scope is `lib::Pub` (the text before
+    # `::operator`), from which clang's relative `detail::Impl` resolves.
+    return _snap(
+        v,
+        [
+            _fn(
+                "lib::Pub::operator new",
+                "_ZN3lib3PubnwEmNS_6detail4ImplE",
+                ret="void*",
+                params=("unsigned long", "lib::detail::Impl"),
+            )
+        ],
+        [_holder("lib::Pub", v, [("z", "int")]), _grow("lib::detail::Impl", v)],
+    )
+
+
 def _leak_via_param(v: int) -> AbiSnapshot:
     return _snap(
         v,
@@ -273,7 +311,8 @@ def _same_leaf_internal_holder(v: int) -> AbiSnapshot:
 def _evidence_gap_behind_pointer(v: int) -> AbiSnapshot:
     # An older dump without layout (v1) against a newer one with it (v2): the
     # only finding is LAYOUT_UNVERIFIABLE, an evidence gap, which must never
-    # become a BREAKING leak (the container corpus's clang/1 baseline shape).
+    # become a BREAKING leak (the container corpus's clang/1 baseline shape)
+    # nor be filed as unreachable churn.
     laid = v == 2
     node = RecordType(
         name="lib::detail::Node",
@@ -293,6 +332,29 @@ def _evidence_gap_behind_pointer(v: int) -> AbiSnapshot:
     first = _fn("lib::first_node", "_ZN3lib10first_nodeEv", ret="lib::detail::Node*")
     first.return_pointer_depth = 1
     return _snap(v, [first], [node])
+
+
+def _evidence_gap_by_value(v: int) -> AbiSnapshot:
+    # The same evidence gap on an internal type embedded *by value* in a
+    # public holder whose own layout both sides record: reachable, so the gap
+    # is neither a leak nor "unreachable internal churn" -- it stays in the
+    # surface as the informational finding it is.
+    laid = v == 2
+    node = RecordType(
+        name="lib::detail::Node",
+        kind="struct",
+        size_bits=64 if laid else None,
+        data_size_bits=64 if laid else None,
+        is_standard_layout=True,
+        fields=[TypeField(name="n", type="long", offset_bits=0 if laid else None)],
+    )
+    holder = RecordType(
+        name="lib::Pub",
+        kind="struct",
+        size_bits=64,
+        fields=[TypeField(name="node", type="lib::detail::Node", offset_bits=0)],
+    )
+    return _snap(v, [_make("lib::Pub*")], [holder, node])
 
 
 # --------------------------------------------------------------------------
@@ -460,6 +522,8 @@ SCENARIOS: tuple[Scenario, ...] = (
     ),
     Scenario("leak_via_return", _leak_via_return, frozenset({LEAK})),
     Scenario("leak_via_param", _leak_via_param, frozenset({LEAK})),
+    Scenario("leak_via_variable", _leak_via_variable, frozenset({LEAK})),
+    Scenario("leak_via_operator_param", _leak_via_operator_param, frozenset({LEAK})),
     Scenario("leak_via_template_arg", _leak_via_template_arg, frozenset({LEAK})),
     Scenario(
         "leak_unreachable_is_not_a_leak",
@@ -483,9 +547,17 @@ SCENARIOS: tuple[Scenario, ...] = (
     Scenario(
         "evidence_gap_is_not_a_leak",
         _evidence_gap_behind_pointer,
-        frozenset(),
-        frozenset({LEAK, ChangeKind.LAYOUT_UNVERIFIABLE}),
+        # Reachable through first_node(): the gap stays in the surface. With
+        # no layout on one side, invisibility behind the pointer is unproven,
+        # so "private-internal-unreachable" would be a false disposition.
         frozenset({ChangeKind.LAYOUT_UNVERIFIABLE}),
+        frozenset({LEAK}),
+    ),
+    Scenario(
+        "evidence_gap_by_value_stays_in_surface",
+        _evidence_gap_by_value,
+        frozenset({ChangeKind.LAYOUT_UNVERIFIABLE}),
+        frozenset({LEAK}),
     ),
     Scenario(
         "same_leaf_public_holder_is_not_a_leak",

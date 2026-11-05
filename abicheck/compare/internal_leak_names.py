@@ -333,10 +333,14 @@ def _root_type_name_for_change(c: Change) -> str:
 @memoized(maxsize=8)
 def _leaf_index(qualified_keys: frozenset[str]) -> dict[str, set[str | None]]:
     """Bare leaf -> qualified names over *qualified_keys* (memoized per key set:
-    a frozenset caches its own hash, so a repeat call with the same set is O(1))."""
+    a frozenset caches its own hash, so a repeat call with the same set is O(1)).
+    The leaf is template-aware: ``lib::detail::Box<lib::X>`` -> ``Box<lib::X>``."""
+    from ..model.type_spelling_resolve import split_components
+
     idx: dict[str, set[str | None]] = collections.defaultdict(set)
     for key in qualified_keys:
-        idx[key.rsplit("::", 1)[-1]].add(key)
+        parts = split_components(key)
+        idx[parts[-1] if parts else key].add(key)
     return idx
 
 

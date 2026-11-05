@@ -303,7 +303,13 @@ def test_render_matches_real_frontend_spelling(
         alias_templates=ALIAS_TEMPLATES,
         leaf_decl_names=True,
     )
+    # The projection keys on render()'s own records, so a record it dropped
+    # would leave both sides unseen: every logical record must be rendered.
+    logical_keys = {t.qualified_name or t.name for t in LOGICAL.declarations.types}
+    rendered_keys = {t.qualified_name or t.name for t in rendered.declarations.types}
+    assert logical_keys <= rendered_keys, sorted(logical_keys - rendered_keys)
     got, want = _project(real, frontend), _project(rendered, frontend)
+    assert set(got["records"]) == set(want["records"]), "records"
     for section in want:
         assert got[section] == want[section], section
 
