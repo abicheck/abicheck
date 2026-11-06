@@ -35,6 +35,10 @@ if [ "${#packages[@]}" -eq 0 ]; then
 fi
 
 attempts="${APT_INSTALL_ATTEMPTS:-3}"
+apt_dir="${APT_INSTALL_APT_DIR:-/etc/apt}"
+# A stalled download must fail the attempt quickly rather than eat the whole
+# install timeout: apt's own per-connection timeout and retries.
+apt_net_opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30)
 retry_delay="${APT_INSTALL_RETRY_DELAY:-10}"
 update_timeout="${APT_INSTALL_UPDATE_TIMEOUT:-120}"
 install_timeout="${APT_INSTALL_INSTALL_TIMEOUT:-240}"
@@ -66,7 +70,25 @@ verify_installed() {
   [ "${#missing[@]}" -eq 0 ]
 }
 
+# GitHub's Ubuntu runners fetch from the Azure-hosted archive mirror. When
+# that mirror stalls on one package (observed: cmake, 11 MB, every attempt
+# timing out at the same file), retrying the same mirror cannot help. After
+# the first failed attempt, point apt at the primary Ubuntu archive instead.
+switch_to_primary_mirror() {
+  local files=() f
+  for f in "$apt_dir/sources.list" "$apt_dir/apt-mirrors.txt" \
+           "$apt_dir"/sources.list.d/*.list "$apt_dir"/sources.list.d/*.sources; do
+    [ -f "$f" ] && grep -q 'azure\.archive\.ubuntu\.com' "$f" && files+=("$f")
+  done
+  [ "${#files[@]}" -eq 0 ] && return 0
+  echo "::warning::switching apt from azure.archive.ubuntu.com to archive.ubuntu.com for the retry"
+  sudo sed -i -e 's#azure\.archive\.ubuntu\.com#archive.ubuntu.com#g' "${files[@]}" || true
+}
+
 for attempt in $(seq 1 "$attempts"); do
+  if [ "$attempt" -gt 1 ]; then
+    switch_to_primary_mirror
+  fi
   # `timeout`'s default signal is SIGTERM, which a caught/ignored signal in
   # apt-get, dpkg, or sudo's own child-signal handling can survive
   # indefinitely -- `timeout` then just waits forever for the process to
@@ -78,7 +100,7 @@ for attempt in $(seq 1 "$attempts"); do
   if ! timeout -k 10 "$update_timeout" sudo apt-get update -qq; then
     echo "::warning::apt-get update reported an error on attempt $attempt/$attempts (an unrelated third-party source is the usual cause); continuing with the existing package index"
   fi
-  if timeout -k 10 "$install_timeout" sudo apt-get install -y "${packages[@]}"; then
+  if timeout -k 10 "$install_timeout" sudo apt-get install "${apt_net_opts[@]}" -y "${packages[@]}"; then
     if verify_installed; then
       exit 0
     fi
