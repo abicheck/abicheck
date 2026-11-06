@@ -25,6 +25,7 @@ below, with the expected answer stated per row.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -207,6 +208,26 @@ def test_case105_concept_tightening_reads_partial_with_the_dimension_named(
         debug=True,
     )
     assurance = report["analysis_assurance"]
-    assert assurance["status"] == "partial"
     named = [n for n in assurance["notes"] if n.startswith(CONCEPT_GAP_DIMENSION)]
-    assert len(named) == 2
+    diagnostics = {
+        "platform": sys.platform,
+        "notes": assurance.get("notes"),
+        "old_scan": _snapshot_scan(tmp_path / "v1.json"),
+        "new_scan": _snapshot_scan(tmp_path / "v2.json"),
+    }
+    assert assurance["status"] == "partial", diagnostics
+    assert len(named) == 2, diagnostics
+
+
+def _snapshot_scan(path: Path) -> dict[str, object]:
+    """The dumped snapshot's concept-scan inputs, for a failure message."""
+    from abicheck.serialization import load_snapshot
+
+    if not path.exists():
+        return {"missing": str(path)}
+    snap = load_snapshot(path)
+    return {
+        "cxx_concept_header_scan": snap.cxx_concept_header_scan,
+        "ast_toolchain": dict(getattr(snap, "ast_toolchain", None) or {}),
+        "platform": getattr(snap, "platform", None),
+    }
