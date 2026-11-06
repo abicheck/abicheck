@@ -45,6 +45,14 @@ from .markdown_text import md_text
 from .release_change_inventory import release_inventory_counters
 from .render_text import format_hygiene_note
 
+#: Distinct coverage warnings rendered in a release summary's Coverage Warnings
+#: section. Per-member variants (a symbol list, a count, a path) are distinct
+#: strings, so a 28-member scan can carry dozens of them; the most widespread
+#: are shown and the rest are counted. ``-o json=...`` carries every warning.
+MAX_COVERAGE_WARNING_LINES = 10
+#: Member names listed beside one shared coverage warning before "and N more".
+MAX_COVERAGE_WARNING_CARRIERS = 5
+
 __all__ = [
     "_release_md_bundle_findings",
     "_release_md_changed_libraries",
@@ -122,26 +130,45 @@ def _release_md_coverage_warnings(
     """Per-library `coverage_warnings` (e.g. same-binary) -- absent when none carry any (Codex review: the release table alone omits this signal).
 
     A warning several members share (a disabled detector, an unmatched
-    ``--exclude-header`` rule) is one line naming every member that carries
-    it, in first-seen order, instead of one copy per member: a 28-library
-    directory scan otherwise repeated the same block 28 times. No member is
-    dropped -- each one carrying a warning is still named beside it.
+    ``--exclude-header`` rule) is one line, not one copy per member, and the
+    line names up to :data:`MAX_COVERAGE_WARNING_CARRIERS` of them with a
+    count for the rest. Distinct warnings are ranked by how many members
+    carry them and only the first :data:`MAX_COVERAGE_WARNING_LINES` are
+    rendered; the rest are counted in one closing line. The per-library list
+    in the JSON document is not touched by this view: it still carries every
+    warning on every member that has it.
     """
     grouped: dict[str, list[str]] = {}
     for lib in library_results:
+        name = str(lib["library"])
         for w in cast(list[str], lib.get("coverage_warnings") or []):
             names = grouped.setdefault(w, [])
-            name = str(lib["library"])
             if name not in names:
                 names.append(name)
+    if not grouped:
+        return []
+    # Stable sort: the most widespread warnings first, first-seen order on ties.
+    ranked = sorted(grouped.items(), key=lambda item: -len(item[1]))
+    shown = ranked[:MAX_COVERAGE_WARNING_LINES]
+    hidden = ranked[MAX_COVERAGE_WARNING_LINES:]
     entries = []
-    for w, names in grouped.items():
+    for w, names in shown:
         if len(names) == 1:
             entries.append(f"- {md_text(names[0], code=True)}: {w}")
         else:
-            libs = ", ".join(md_text(n, code=True) for n in names)
-            entries.append(f"- {w} ({len(names)} libraries: {libs})")
-    return ["", "## ⚠️ Coverage Warnings", "", *entries] if entries else []
+            listed = names[:MAX_COVERAGE_WARNING_CARRIERS]
+            libs = ", ".join(md_text(n, code=True) for n in listed)
+            more = len(names) - len(listed)
+            tail = f", and {more} more" if more else ""
+            entries.append(f"- {w} ({len(names)} libraries: {libs}{tail})")
+    if hidden:
+        hidden_libs = len({n for _, names in hidden for n in names})
+        entries.append(
+            f"- _...{len(hidden)} more distinct coverage warning(s) on "
+            f"{hidden_libs} librar{'y' if hidden_libs == 1 else 'ies'} omitted "
+            "from this summary; `-o json=...` carries every one, per library._"
+        )
+    return ["", "## ⚠️ Coverage Warnings", "", *entries]
 
 
 def _release_md_pattern_modulations(

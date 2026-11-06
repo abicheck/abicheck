@@ -825,6 +825,10 @@ REPORT_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/unit/report/test_renderer_size_budget.py",
             # The `--no-baseline` audit's findings and suppressed tables.
             "tests/unit/report/test_no_baseline_size_budget.py",
+            # The release Markdown's Coverage Warnings section: a 28-member scan
+            # with per-member variants renders the top distinct warnings and
+            # states how many it omits; the JSON document is not touched.
+            "tests/test_release_md_coverage_warning_grouping.py",
         ),
         axes={
             "section": (
