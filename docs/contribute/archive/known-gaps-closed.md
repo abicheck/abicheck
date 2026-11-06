@@ -16,6 +16,15 @@ re-verification status line (2026-10-09, `456989f`). Do not re-open an
 entry from here without reproducing it on current `main`; record a new
 gap on the main page instead.
 
+### Adding build/source evidence dropped some debug-headers change kinds (closed 2026-11-06)
+
+**Status (2026-11-06): CLOSED.** One product defect, fixed; the other groups were not evidence losses. Previously: the catalog's evidence-monotonicity gate (`tests/catalog_kind_parity.py`) found the build-source lane reporting a strict subset of the debug-headers kinds, declared `UNEXPLAINED:` in `ground_truth.json` `lane_kind_exceptions`.
+- **Fixed: clang `type_alignment_changed` (case26, 36, 40, 45, 48, 56, 57, 70).** The clang record layout probe (`attach_clang_layout`, the only alignment source under clang, since DWARF carries none) was given the raw CLI `lang` default `c++` while the main header parse auto-detected C. Under `--build-info`, the C build's `-std=gnu11` then made clang reject the C++ probe (`invalid argument '-std=gnu11' not allowed with 'C++'`), and every record lost `alignment_bits`. `workflows/dump/native.py` now passes the main pass's language (`header_graph_lang`). Regression: `tests/test_clang_layout_build_info_language.py`.
+- **Not a loss: `func_*_elf_only` and import/NEEDED/symbol-version/runtime-floor kinds (case80, 104, 114, 116).** `validate_examples.py` builds build-source as Release and debug-headers as Debug, so the two lanes compared different binaries. With identical binaries, build-source reports these kinds too.
+- **Refinement: castxml `inline_function_removed`/`public_surface_shrank` (case28, 30).** These were C++ implicit special members that castxml synthesizes when debug-headers parses a C header as C++. With the compile command's `-std=gnu11`, build-source parses the header as C.
+
+The declarations were deleted, or reworded with the precise reason.
+
 ### A `--build-info` dump's L5 graph displaced the header graph, so a public-to-internal dependency went unreported (closed 2026-11-05)
 
 **Status (2026-11-05): CLOSED.** `evidence_depth.resolve_l5_source_graph` now unions the snapshot's header-graph public closure (`SOURCE_DECLARES` edges and their endpoint nodes) into a build pack's graph (`with_header_public_closure`), for the dump-embedded pack and for an out-of-band `--build-info`/`--sources` pack of the same side. Only the closure is borrowed: dependency edges, pass flags, the graph's coverage block and the pack manifest's L5 row stay the pack's own, so no L5 collection is claimed that the pack did not make. case187/188/189/191 report `public_api_internal_dependency_added` in the `build-source` lane on both header frontends; their `expected_kinds_gaps` declarations are removed. Tests: `tests/test_build_pack_header_closure_merge.py` (header-only, build-only, both, transitive and conflicting-edge shapes against an independent reachability oracle; coverage/pass flags unchanged), `tests/test_build_source_lane_public_internal_dependency.py` (now a regression test). [Full write-up](../known-gaps/a-build-info-dump-graph-displaces-the-header-graph-public-closure.md)

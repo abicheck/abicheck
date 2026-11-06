@@ -467,11 +467,6 @@ per-item status in the
   streaming passes. The decoded-section cache still has no reader.
   Measurements: plan A2.5.
 
-#### Adding build/source evidence drops some debug-headers change kinds (2026-11-06)
-
-**Status (2026-11-06): OPEN.** The catalog's evidence-monotonicity gate (`tests/catalog_kind_parity.py`, catalog nightly) found the build-source lane (`--build-info`/`--sources` on top of DWARF+headers) reporting a strict subset of the debug-headers kinds, with no traced cause, for: `func_added_elf_only`/`func_removed_elf_only` (case80, case104, case114, both frontends); import/dependency facts of the unchanged binary (`imported_symbol_added`/`_removed`, `needed_added`, `runtime_floor_raised`, `symbol_leaked_from_dependency_changed`, `symbol_version_required_added[_compat]`: case114, case116); `type_alignment_changed` on clang only (case26, 36, 40, 45, 48, 56, 57, 70 — castxml keeps it); `inline_function_removed`/`public_surface_shrank` on castxml (case28, case30). Each is declared per case in `ground_truth.json` `lane_kind_exceptions` with an `UNEXPLAINED:` reason, so the gate stays green and a fix shows up as a stale declaration. `false-clean` — a richer run can silently omit a finding the poorer run reports (the case187/188/189/191 `public_api_internal_dependency_added` loss was this class). Owner: `workflows/` (build-source evidence merge).
-<!-- no-canary: the catalog-nightly kind-parity gate fails on each declaration once it goes stale -->
-
 #### castxml output carries no `noexcept` exception specification (2026-11-06)
 
 **Status (2026-11-06): OPEN.** castxml 0.7 (`--castxml-output=1`) writes no attribute for a function's or method's exception specification, so `extract/headers/castxml/functions.py` always records `is_noexcept=False` (its `noexcept` search of the `attributes` string only matches an annotate attribute) and the castxml header lane never reports `func_noexcept_removed`/`func_noexcept_added`. The clang header backend reads the qualifier from the type spelling and reports it. Seen on case15 (declared in `ground_truth.json` `expected_kinds_gaps`). A fix would need a clang-AST join like `function_type_cc.py` or a source re-read; not done here. `false-clean` on castxml for noexcept changes. Owner: `extract/headers/castxml/`.

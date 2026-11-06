@@ -239,8 +239,7 @@
       "func_added_elf_only",
       "func_removed_elf_only"
      ],
-     "reason": "UNEXPLAINED: build-source stops reporting the ELF-only symbol add/remove debug-headers reports",
-     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
+     "reason": "not an evidence loss: the build-source lane compiles the library as Release (CMake -O3, direct -O2) while debug-headers compiles Debug (-O0/-Og), so the two lanes compare different binaries; with identical binaries build-source reports these kinds too (verified 2026-11-06). At -O0 the out-of-line inline/template instances that read as ELF-only adds/removes are emitted; optimized, they are inlined away"
     }
    ],
    "abi_break": true,
@@ -581,15 +580,13 @@
       "symbol_leaked_from_dependency_changed",
       "symbol_version_required_added"
      ],
-     "reason": "UNEXPLAINED: build-source stops reporting a dependency/import/symbol-version fact of the unchanged binary",
-     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
+     "reason": "not an evidence loss: the build-source lane compiles the library as Release (CMake -O3, direct -O2) while debug-headers compiles Debug (-O0/-Og), so the two lanes compare different binaries; with identical binaries build-source reports these kinds too (verified 2026-11-06). The optimized build calls different libstdc++/libc entry points, so its imports, NEEDED entries and required symbol versions differ"
     },
     {
      "kinds": [
       "func_added_elf_only"
      ],
-     "reason": "UNEXPLAINED: build-source stops reporting the ELF-only symbol add/remove debug-headers reports",
-     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
+     "reason": "not an evidence loss: the build-source lane compiles the library as Release (CMake -O3, direct -O2) while debug-headers compiles Debug (-O0/-Og), so the two lanes compare different binaries; with identical binaries build-source reports these kinds too (verified 2026-11-06). At -O0 the out-of-line inline/template instances that read as ELF-only adds/removes are emitted; optimized, they are inlined away"
     }
    ],
    "abi_break": true,
@@ -640,8 +637,7 @@
       "needed_added",
       "symbol_version_required_added_compat"
      ],
-     "reason": "UNEXPLAINED: build-source stops reporting a dependency/import/symbol-version fact of the unchanged binary",
-     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
+     "reason": "not an evidence loss: the build-source lane compiles the library as Release (CMake -O3, direct -O2) while debug-headers compiles Debug (-O0/-Og), so the two lanes compare different binaries; with identical binaries build-source reports these kinds too (verified 2026-11-06). The optimized build calls different libstdc++/libc entry points, so its imports, NEEDED entries and required symbol versions differ"
     }
    ],
    "abi_break": true,
@@ -2532,18 +2528,6 @@
      "known_gap": "castxml and clang report different change-kind sets for the same case"
     }
    ],
-   "lane_kind_exceptions": [
-    {
-     "kinds": [
-      "type_alignment_changed"
-     ],
-     "reason": "UNEXPLAINED: on clang, build-source stops reporting the record alignment change debug-headers and castxml report",
-     "frontends": [
-      "clang"
-     ],
-     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
-    }
-   ],
    "abi_break": true,
    "api_break": false,
    "bad_practice": false,
@@ -2627,11 +2611,10 @@
       "inline_function_removed",
       "public_surface_shrank"
      ],
-     "reason": "UNEXPLAINED: build-source stops reporting an inline-member removal / surface shrink castxml reports at debug-headers",
+     "reason": "refinement, not a loss: these are C++ implicit special members (Context()/operator=/~Context, __builtin_memcpy) castxml synthesizes when debug-headers parses the C header as C++; build-source's --build-info compile command (-std=gnu11) parses it as C, where those members do not exist",
      "frontends": [
       "castxml"
-     ],
-     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
+     ]
     }
    ],
    "abi_break": true,
@@ -2684,11 +2667,10 @@
       "inline_function_removed",
       "public_surface_shrank"
      ],
-     "reason": "UNEXPLAINED: build-source stops reporting an inline-member removal / surface shrink castxml reports at debug-headers",
+     "reason": "refinement, not a loss: these are C++ implicit special members (Context()/operator=/~Context, __builtin_memcpy) castxml synthesizes when debug-headers parses the C header as C++; build-source's --build-info compile command (-std=gnu11) parses it as C, where those members do not exist",
      "frontends": [
       "castxml"
-     ],
-     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
+     ]
     }
    ],
    "abi_break": false,
@@ -2812,16 +2794,6 @@
     }
    ],
    "lane_kind_exceptions": [
-    {
-     "kinds": [
-      "type_alignment_changed"
-     ],
-     "reason": "UNEXPLAINED: on clang, build-source stops reporting the record alignment change debug-headers and castxml report",
-     "frontends": [
-      "clang"
-     ],
-     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
-    },
     {
      "kinds": [
       "declaration_moved"
@@ -2963,18 +2935,6 @@
      "known_gap": "castxml and clang report different change-kind sets for the same case"
     }
    ],
-   "lane_kind_exceptions": [
-    {
-     "kinds": [
-      "type_alignment_changed"
-     ],
-     "reason": "UNEXPLAINED: on clang, build-source stops reporting the record alignment change debug-headers and castxml report",
-     "frontends": [
-      "clang"
-     ],
-     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
-    }
-   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,
@@ -3101,18 +3061,6 @@
      "known_gap": "castxml and clang report different change-kind sets for the same case"
     }
    ],
-   "lane_kind_exceptions": [
-    {
-     "kinds": [
-      "type_alignment_changed"
-     ],
-     "reason": "UNEXPLAINED: on clang, build-source stops reporting the record alignment change debug-headers and castxml report",
-     "frontends": [
-      "clang"
-     ],
-     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
-    }
-   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,
@@ -3184,18 +3132,6 @@
      ],
      "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
      "known_gap": "castxml and clang report different change-kind sets for the same case"
-    }
-   ],
-   "lane_kind_exceptions": [
-    {
-     "kinds": [
-      "type_alignment_changed"
-     ],
-     "reason": "UNEXPLAINED: on clang, build-source stops reporting the record alignment change debug-headers and castxml report",
-     "frontends": [
-      "clang"
-     ],
-     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
     }
    ],
    "abi_break": true,
@@ -3355,18 +3291,6 @@
      "known_gap": "castxml and clang report different change-kind sets for the same case"
     }
    ],
-   "lane_kind_exceptions": [
-    {
-     "kinds": [
-      "type_alignment_changed"
-     ],
-     "reason": "UNEXPLAINED: on clang, build-source stops reporting the record alignment change debug-headers and castxml report",
-     "frontends": [
-      "clang"
-     ],
-     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
-    }
-   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,
@@ -3398,18 +3322,6 @@
      ],
      "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
      "known_gap": "castxml and clang report different change-kind sets for the same case"
-    }
-   ],
-   "lane_kind_exceptions": [
-    {
-     "kinds": [
-      "type_alignment_changed"
-     ],
-     "reason": "UNEXPLAINED: on clang, build-source stops reporting the record alignment change debug-headers and castxml report",
-     "frontends": [
-      "clang"
-     ],
-     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
     }
    ],
    "abi_break": true,
@@ -3691,18 +3603,6 @@
      ],
      "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
      "known_gap": "castxml and clang report different change-kind sets for the same case"
-    }
-   ],
-   "lane_kind_exceptions": [
-    {
-     "kinds": [
-      "type_alignment_changed"
-     ],
-     "reason": "UNEXPLAINED: on clang, build-source stops reporting the record alignment change debug-headers and castxml report",
-     "frontends": [
-      "clang"
-     ],
-     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
     }
    ],
    "abi_break": true,
@@ -3991,8 +3891,7 @@
      "kinds": [
       "func_removed_elf_only"
      ],
-     "reason": "UNEXPLAINED: build-source stops reporting the ELF-only symbol add/remove debug-headers reports",
-     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
+     "reason": "not an evidence loss: the build-source lane compiles the library as Release (CMake -O3, direct -O2) while debug-headers compiles Debug (-O0/-Og), so the two lanes compare different binaries; with identical binaries build-source reports these kinds too (verified 2026-11-06). At -O0 the out-of-line inline/template instances that read as ELF-only adds/removes are emitted; optimized, they are inlined away"
     }
    ],
    "abi_break": true,
