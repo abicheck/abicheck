@@ -40,7 +40,7 @@ typedef targets, public constant values — is produced. This is the documented
 full layout.
 
 A plain ``Variable``'s *natural* type alignment is not an AST attribute either:
-:func:`_clang_var_alignment_bits` only reads an explicit ``AlignedAttr``.
+:func:`_clang_var_alignment_bits` reads an explicit ``AlignedAttr`` else a builtin's probed one.
 For a fundamental-typed variable the backend instead records the
 compiler-derived ``type_abi_fact`` (size/alignment probed from the real
 compiler, :mod:`abicheck.extract.builtin_abi`), and
@@ -81,7 +81,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .extract.builtin_abi import BuiltinAbi, builtin_type_fact
+from .extract.builtin_abi import BuiltinAbi, builtin_type_fact, natural_alignment_bits
 from .extract.declaration_provenance import build_public_set
 from .extract.dependency_exclusion import active_dependency_predicate
 from .extract.headers.clang import (
@@ -202,20 +202,13 @@ def _return_type(qualtype: str) -> str:
 _clang_deprecated_message = _clang_context.clang_deprecated_message
 
 
-def _clang_var_alignment_bits(node: dict[str, Any]) -> int | None:
-    """Explicit alignment (bits) from an AlignedAttr, when evaluable.
-
-    No fallback to the variable's *natural* type alignment exists here —
-    unlike ``dumper_castxml._CastxmlParser._type_alignment_bits``, which
-    reads a real compiler-computed ``align`` attribute, clang's
-    ``-ast-dump=json`` never exposes computed alignment for a plain type at
-    all (see this module's docstring). Returning ``None`` for an
-    unattributed variable is correct given that constraint, not a bug: a
-    guessed alignment (from a hardcoded builtin/pointer/target-ABI table)
-    risks being silently wrong, which is worse than the honest "no
-    corroboration" this leaves for
-    ``diff_platform_elf_symbols._check_object_alignment_reduced``.
-    """
+def _clang_var_alignment_bits(
+    node: dict[str, Any], abi: BuiltinAbi | None = None
+) -> int | None:
+    """Explicit alignment (bits) from an AlignedAttr, else the natural one of a
+    builtin type probed from the real compiler (``builtin_abi.
+    natural_alignment_bits``, castxml's computed ``align`` for the same
+    variable). Any other type stays ``None``: the JSON AST has no layout."""
     for child in node.get("inner", []) or []:
         if not isinstance(child, dict) or child.get("kind") != "AlignedAttr":
             continue
@@ -230,7 +223,13 @@ def _clang_var_alignment_bits(node: dict[str, Any]) -> int | None:
             if isinstance(value, str) and value.isdigit():
                 return int(value) * 8
             stack.extend(sub.get("inner", []) or [])
-    return None
+    # Not through a typedef: an aligned typedef desugars to its plain builtin.
+    typ = node.get("type") or {}
+    return (
+        None
+        if "desugaredQualType" in typ
+        else natural_alignment_bits(_qualtype(node), abi)
+    )
 
 
 def _function_qualifiers(qualtype: str) -> str:
@@ -1040,7 +1039,7 @@ class _ClangAstParser:
                         node, type_name, entry.access, self._id_index
                     ),
                     source_location=self._source_location(entry),
-                    alignment_bits=_clang_var_alignment_bits(node),
+                    alignment_bits=_clang_var_alignment_bits(node, self.builtin_abi),
                     deprecated=_clang_deprecated_message(node),
                     # See Variable.is_static's own comment -- mirrors
                     # `parse_functions`'s identical `storageClass ==

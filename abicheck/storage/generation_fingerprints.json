@@ -4,7 +4,7 @@
       "abicheck/btf_metadata.py": "614321e6140b32e7518deb3991dc9b9421107688c952542808ec4da88a17dc73",
       "abicheck/ctf_metadata.py": "42d3f588c6c4567c2a9d43a3ef5b886a753c37dd5357a4199d81d7ffc60d2109",
       "abicheck/dumper.py": "fcd2874b1a06387a500f483c4fdc094ea47cf57cba897adfd8e9583fae6bb09b",
-      "abicheck/dumper_clang.py": "7ad44027fb5ba4716b5dca353848fd84fc46b712dfe868a2dc297d7373bfba32",
+      "abicheck/dumper_clang.py": "ab4fc9b015e7d1ecf31a34039b1c89b4302c309530b365f431b60fd6fc85e5e6",
       "abicheck/dwarf_advanced.py": "91cfc7f410a37e7d7ba3ec922ff2944b81253fde3dcfdb806be032087822b339",
       "abicheck/dwarf_metadata.py": "a0621cde6559a0395b00d08aa25cc4cbff74b1121e2083e424e472c44b985512",
       "abicheck/dwarf_presence.py": "7e73580ec7a02fdf24e3815cb89e42aa6fe00e46e8cda6b7fe9d547f06ac3f06",
@@ -21,7 +21,7 @@
       "abicheck/extract/binary_format.py": "4b9f591077fa5c90d2e3a767343d92b098061870403d431694470bc05e5468b3",
       "abicheck/extract/binary_identity.py": "4645eaf3dddd0a2230a5c694882548476406c57514275fa4c8c1bc152607ca88",
       "abicheck/extract/build_mode_capture.py": "7a46c5babcc5bf770a1a38d5a5d3abb49a2b7d9575bda2b210d2e2861ebfb51f",
-      "abicheck/extract/builtin_abi.py": "aad1229f3a899920a43a88aff31b91904f37ef938480754382c34584d4e3315e",
+      "abicheck/extract/builtin_abi.py": "e3f1d24f44d15016e686849a5481a80c271755ec573705226e65874a16fb4da9",
       "abicheck/extract/cache_dep_manifest.py": "b5eac3407ab1506a05647c8b61c33f60eda3789edfab9549c0b57ec20651e08b",
       "abicheck/extract/cache_digest_store.py": "c333f2bf9170d5c87c011f434d3638c944edf07e9670fd4cb84e2f73ac0775f1",
       "abicheck/extract/cache_header_scan.py": "04fc927afed680495c7f8112c230cf4f5d93966dd398a7472533648657eff994",
@@ -200,9 +200,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "7a1ddb5ef087cec5a496900783518843f92891aacefcc51cfc3e60f3e546d8ae",
-    "generation": 42,
-    "reason": "bumped to 42 for a semantic change"
+    "fingerprint": "ae76fe357d48e90015fcd9ab74c60c84bfe5139030ba65ab5c8ef32656a4576b",
+    "generation": 43,
+    "reason": "bumped to 43 for a semantic change"
   },
   "resolver": {
     "files": {
