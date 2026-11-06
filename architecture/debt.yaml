@@ -564,7 +564,7 @@
     },
     {
       "path": "abicheck/dumper_clang.py",
-      "baseline_lines": 1374,
+      "baseline_lines": 1371,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",

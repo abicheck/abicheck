@@ -89,6 +89,19 @@ def test_natural_alignment_is_not_invented(node: dict[str, Any]) -> None:
     assert _clang_var_alignment_bits(node, _ABI) is None
 
 
+@pytest.mark.parametrize("builtin", ["char", "int", "long", "double"])
+@pytest.mark.parametrize(
+    "attr", [{"kind": "AlignedAttr"}, {"kind": "AlignedAttr", "inner": []}]
+)
+def test_bare_aligned_attribute_is_unknown_not_natural(
+    builtin: str, attr: dict[str, Any]
+) -> None:
+    """``__attribute__((aligned))`` with no argument means the target's maximum
+    alignment (16 on x86-64), never the type's natural one."""
+    node = {"kind": "VarDecl", "type": {"qualType": builtin}, "inner": [attr]}
+    assert _clang_var_alignment_bits(node, _ABI) is None
+
+
 def test_no_probe_means_no_natural_alignment() -> None:
     assert _clang_var_alignment_bits(_var_node("int"), None) is None
 
@@ -145,7 +158,12 @@ _ALIASES = [
     ("handle_t", "void *", 1),
     ("cstr_t", "const char *", 1),
     ("argv_t", "char **", 2),
-    ("fnp_t", "int (*)(int)", 0),  # the `*` sits inside parentheses
+    # castxml: PointerType nodes over the FunctionType/ArrayType.
+    ("fnp_t", "int (*)(int)", 1),
+    ("fnpp_t", "void (**)(int)", 2),
+    ("rfnp_t", "char *(*)(int)", 1),  # the return type's `*` does not count
+    ("arrp_t", "int (*)[4]", 1),
+    ("memfn_t", "int (Foo::*)(int)", 0),  # member pointer, not PointerType
     ("count_t", "unsigned long", 0),
 ]
 

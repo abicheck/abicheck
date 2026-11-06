@@ -10,3 +10,9 @@
   from `int` to `long` no longer reports an extra `struct_field_type_changed`
   under clang only: DWARF's `long int` and clang's `long` are now read as the
   same type. Snapshots record extractor generation 43.
+- **clang counts a function-pointer parameter's pointer depth like castxml**
+  — `void (*)(int)` is depth 1 and `void (**)(int)` depth 2 (a member
+  pointer stays 0), so adding a level of indirection to a callback parameter
+  reads `param_pointer_level_changed` on both frontends. A bare
+  `__attribute__((aligned))` (no argument) now leaves a variable's alignment
+  unknown under clang instead of recording the type's natural alignment.

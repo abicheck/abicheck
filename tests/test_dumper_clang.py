@@ -4292,9 +4292,9 @@ def test_resolve_header_backend_neither_tool_defaults_castxml(
 @pytest.mark.parametrize(
     "type_str,expected",
     [
-        # A function-pointer's `*` sits inside parens, so the top-level heuristic
-        # reads it as depth 0 (a documented spelling-heuristic limit).
-        ("int (*)(int)", 0),
+        # A grouped function-pointer declarator counts like castxml's
+        # PointerType-over-FunctionType graph.
+        ("int (*)(int)", 1),
         ("char[10]", 0),
         ("int **)(", 2),
     ],

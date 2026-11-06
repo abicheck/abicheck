@@ -94,6 +94,7 @@ from .param_kind import (
     param_has_default as _param_has_default,
     param_kind as _param_kind,
 )
+from .pointer_depth import _pointer_depth
 from .qualifiers import (
     OVERRIDE_ELIGIBLE_KINDS as _OVERRIDE_ELIGIBLE_KINDS,
     clang_exception_spec as _clang_exception_spec,
@@ -111,26 +112,6 @@ from .return_type import return_type as _return_type
 #: ``dumper_clang._initializer_value``'s signature (bound to that parser's
 #: own ``_id_index`` memoized id-lookup) exactly.
 DefaultValueEvaluator = Callable[[dict[str, Any]], "str | None"]
-
-
-def _pointer_depth(type_str: str) -> int:
-    """Best-effort pointer nesting depth from a written type spelling.
-
-    castxml computes this from the type graph; on the clang path we count
-    top-level ``*`` tokens in the ``qualType`` spelling (``const char *`` → 1,
-    ``int **`` → 2), ignoring any inside template/array brackets. Stable for the
-    pointer-depth-change detector even though it is a spelling heuristic.
-    """
-    depth = 0
-    bracket = 0
-    for ch in type_str:
-        if ch in "<[(":
-            bracket += 1
-        elif ch in ">])":
-            bracket = max(0, bracket - 1)
-        elif ch == "*" and bracket == 0:
-            depth += 1
-    return depth
 
 
 def _function_qualifiers(qualtype: str) -> str:

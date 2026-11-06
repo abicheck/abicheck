@@ -33,7 +33,8 @@ at runtime, the exception escapes a `noexcept` frame and the process calls
 ```bash
 g++ -shared -fPIC -std=c++17 -g v1.cpp -o libv1.so
 g++ -shared -fPIC -std=c++17 -g v2.cpp -o libv2.so
-abicheck compare libv1.so libv2.so
+printf 'compile:\n  frontend: clang\n' > .abicheck.yml
+abicheck compare libv1.so libv2.so -H old=v1.h -H new=v2.h --config .abicheck.yml
 ```
 
 ## Expected abicheck finding
@@ -68,14 +69,13 @@ specification, so this kind is a declared castxml gap
 
 ## Minimum evidence
 
-`min_evidence: L0` — the ELF dynamic section's version-requirement table
-(`VERNEED`) alone is enough: v2's `.so` records a dependency on
-`GLIBCXX_3.4.21` that v1 doesn't have, because linking `__cxa_throw` /
-`std::runtime_error` pulls in symbols versioned against that release. No
-DWARF or headers are needed to see the new runtime floor — `noexcept`
-itself, notably, is *not* observable at this evidence level at all (it
-isn't in DWARF or the symbol table); this run reports the deployment-risk
-side of the change, not the `noexcept` removal itself.
+`min_evidence: L2` — the subject, the `noexcept` removal, is not in DWARF
+or the symbol table; only the headers carry it, and only the clang header
+backend reads it (`compile: frontend: clang`). Binary-only (L0), the ELF
+`VERNEED` table still shows the deployment-risk side: v2's `.so` records a
+dependency on `GLIBCXX_3.4.21` that v1 doesn't have, because linking
+`__cxa_throw` / `std::runtime_error` pulls in symbols versioned against that
+release — but not the `noexcept` removal itself.
 
 ## Why abicheck catches it
 

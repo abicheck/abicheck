@@ -125,6 +125,7 @@ from .extract.headers.clang.function_template_defaults import (
 # Split out to keep this module under the 2000-line hard cap; imported (not
 # just referenced) so the historical ``dumper_clang._name`` import paths that
 # tests and sibling modules already use keep resolving.
+from .extract.headers.clang.pointer_depth import _pointer_depth  # noqa: F401
 from .extract.headers.clang.qualifiers import (  # noqa: F401  (compatibility re-exports)
     _OVERRIDE_ELIGIBLE_KINDS,
     _clang_method_is_override,
@@ -185,12 +186,6 @@ from .storage import header_ast_cache as dumper_cache
 _BUILTIN_FILES = _clang_context.BUILTIN_FILES
 
 
-def _pointer_depth(type_str: str) -> int:
-    """See ``extract.headers.clang.functions._pointer_depth`` (the canonical
-    implementation this delegates to) for the full contract."""
-    return _clang_functions._pointer_depth(type_str)
-
-
 def _return_type(qualtype: str) -> str:
     """See ``extract.headers.clang.return_type.return_type`` (the canonical
     implementation this delegates to) for the full contract."""
@@ -223,6 +218,8 @@ def _clang_var_alignment_bits(
             if isinstance(value, str) and value.isdigit():
                 return int(value) * 8
             stack.extend(sub.get("inner", []) or [])
+        # Bare ``aligned`` (no argument) = target max alignment, not natural: unknown.
+        return None
     # Not through a typedef: an aligned typedef desugars to its plain builtin.
     typ = node.get("type") or {}
     return (
