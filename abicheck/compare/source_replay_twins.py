@@ -238,6 +238,17 @@ REPLAY_TWINS: tuple[ReplayTwin, ...] = (
     ),
 )
 
+# A concept constraint change: the clang header tier
+# (compare/concept_constraints.py) and the replay share one direction rule
+# (model/concept_constraint.py) and name the concept by its qualified name.
+_CONCEPT_KINDS = frozenset(
+    {ChangeKind.CONCEPT_TIGHTENED, ChangeKind.CONCEPT_CONSTRAINT_CHANGED}
+)
+REPLAY_TWINS += (
+    ReplayTwin(ChangeKind.CONCEPT_TIGHTENED, _CONCEPT_KINDS, _symbol, _symbol),
+    ReplayTwin(ChangeKind.CONCEPT_CONSTRAINT_CHANGED, _CONCEPT_KINDS, _symbol, _symbol),
+)
+
 DISTINCT_FACETS: tuple[DistinctFacet, ...] = (
     DistinctFacet(
         ChangeKind.TEMPLATE_BODY_CHANGED,
@@ -251,8 +262,6 @@ DISTINCT_FACETS: tuple[DistinctFacet, ...] = (
 #: Replay kinds with no header-tier or binary-tier counterpart in this tree.
 #: Each reason is one line; a kind moves out of here once a counterpart exists.
 REPLAY_ONLY: dict[ChangeKind, str] = {
-    ChangeKind.CONCEPT_TIGHTENED: "the header tier has no concept-constraint detector",
-    ChangeKind.CONCEPT_CONSTRAINT_CHANGED: "the header tier has no concept-constraint detector",
     ChangeKind.GENERATED_HEADER_CHANGED: "generated-header content is diffed only by the replay",
     ChangeKind.INLINE_BODY_CHANGED: "inline body fingerprints exist only in the replay",
     ChangeKind.ODR_SOURCE_CONFLICT: "cross-TU source ODR disagreement has no header-tier kind",

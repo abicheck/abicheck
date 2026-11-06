@@ -12,8 +12,6 @@
 | **Source files** | `catalog/cases/case187_public_struct_private_field_type/` |
 | **Rule family** | [`public-struct-private-field-type`](by-rule/public-struct-private-field-type.md) |
 | **Subject** | [Public API depends on an internal declaration](by-subject/internal-dependency-reachability.md) |
-| **Known kind gap (castxml; build-source)** | `public_api_internal_dependency_added` — see note below |
-| **Known kind gap (clang; build-source)** | `public_api_internal_dependency_added` — see note below |
 
 **Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
@@ -126,12 +124,6 @@ indirection instead of embedding the internal type directly.
 - `case191_header_only_graph_field_type` — the same `TYPE_HAS_FIELD_TYPE` mechanism, proven via a genuine confirmed-pass zero instead of case187's own `Meta` sibling field.
 
 ---
-
-## Ground-truth provenance
-
-**Known kind gap (castxml):** dump --build-info embeds a build pack whose L5 graph has no SOURCE_DECLARES public closure, and resolve_l5_source_graph prefers it over the header graph that has one, so the public-to-internal reach is never evaluated at build-source depth; the debug-headers lane reports the kind. (known gap: A `--build-info` dump's L5 graph displaces the header graph)
-
-**Known kind gap (clang):** dump --build-info embeds a build pack whose L5 graph has no SOURCE_DECLARES public closure, and resolve_l5_source_graph prefers it over the header graph that has one, so the public-to-internal reach is never evaluated at build-source depth; the debug-headers lane reports the kind. (known gap: A `--build-info` dump's L5 graph displaces the header graph)
 
 ## Source files
 

@@ -40,10 +40,8 @@ import pytest
 
 from abicheck.model import AbiSnapshot, Fact, Function
 from abicheck.model.identity import EntityId
-from abicheck.policy.analysis_assurance._template_defaults import (
-    template_default_gap,
-)
 from tests._abicheck_subprocess import abicheck_command
+from tests._assurance_gap_views import template_default_gap
 
 _GAP = "template-parameter defaults"
 

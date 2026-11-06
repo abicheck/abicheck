@@ -727,7 +727,7 @@
       ],
       "architectures": [],
       "category": "A",
-      "digest": "sha256:8acb0bec2efca927763548da9641c88d74346a66a66e43981ff5610d33107b77",
+      "digest": "sha256:7669f1840ceeebc2e98e34fb38097f155399eeb4c5f6cfb687c7918d48116e56",
       "expected": {
         "kinds": [
           "runtime_floor_raised"

@@ -49,6 +49,10 @@ if str(REPO_DIR / "scripts") not in sys.path:
     sys.path.insert(0, str(REPO_DIR / "scripts"))
 import example_catalog  # noqa: E402
 
+if str(Path(__file__).parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).parent))
+import fixture_preconditions  # noqa: E402
+
 
 # ---------------------------------------------------------------------------
 # Platform helpers
@@ -909,6 +913,14 @@ def test_example_pipeline(
         v1_src,
         v2_src,
     )
+    # Same fixture premise check as tests/validate_examples.py: a toolchain
+    # that cannot produce the property the case compares is a SKIP, not a
+    # verdict mismatch.
+    unmet = fixture_preconditions.unmet(
+        _gt_data["verdicts"].get(case_name, {}), v1_lib, v2_lib
+    )
+    if unmet:
+        pytest.skip(f"{case_name}: {unmet}")
 
     headers_v1 = _header_list(v1_hdr)
     headers_v2 = _header_list(v2_hdr)

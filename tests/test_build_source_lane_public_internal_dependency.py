@@ -13,20 +13,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Known-gap canary: a ``--build-info`` dump's L5 graph displaces the header graph.
+"""Regression: a build pack's L5 graph no longer displaces the header closure.
 
-Pins the current, gapped answer of the known-gaps.md entry "A `--build-info`
-dump's L5 graph displaces the header graph": on case187/188/189/191 the
-``debug-headers`` lane reports ``public_api_internal_dependency_added`` and
-the ``build-source`` lane (whose dumps embed a build pack) does not. The
-debug-headers half is the control: it proves the kind is detectable on the
-same sources, so the build-source miss is the graph displacement and not a
-broken fixture.
-
-When this fails because build-source now reports the kind, the gap closed:
-archive the entry, drop the four ``expected_kinds_gaps`` declarations in
-``catalog/ground_truth.json`` (the catalog lanes already fail them as
-stale), and turn this test into a regression test (drop the marker).
+Formerly the known-gap canary for "A `--build-info` dump's L5 graph displaces
+the header graph" (closed 2026-11-05, see the archive page). On
+case187/188/189/191 both the ``debug-headers`` lane and the ``build-source``
+lane (build packs embedded and passed out of band) report
+``public_api_internal_dependency_added``. The debug-headers half is the
+control proving the kind is detectable on the same sources.
 """
 
 from __future__ import annotations
@@ -42,7 +36,6 @@ import pytest
 
 pytestmark = [
     pytest.mark.integration,
-    pytest.mark.known_gap_canary,
     pytest.mark.skipif(
         not sys.platform.startswith("linux"),
         reason="pins the gap as measured on Linux/ELF",
@@ -102,8 +95,8 @@ def _lane_kinds(variant: str) -> dict[str, set[str]]:
     return kinds
 
 
-def test_build_info_dump_drops_public_internal_dependency_that_headers_report() -> None:
+def test_build_source_lane_reports_public_internal_dependency_like_headers() -> None:
     headers = _lane_kinds("debug-headers")
     build = _lane_kinds("build-source")
     assert {case for case, kinds in headers.items() if _KIND in kinds} == set(_CASES)
-    assert {case for case, kinds in build.items() if _KIND in kinds} == set()
+    assert {case for case, kinds in build.items() if _KIND in kinds} == set(_CASES)

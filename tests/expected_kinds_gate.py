@@ -29,6 +29,17 @@ kind) is a **stale** declaration and also FAILs the cell, so a declaration
 cannot outlive its gap. ``known_gap`` must start a heading of
 ``docs/contribute/known-gaps.md``: every declared gap is an open, indexed gap.
 
+``allowed_kinds`` separates what a case *tests* from incidental toolchain
+facts. ``expected_kinds`` is required (missing => fail); ``allowed_kinds``
+lists kinds a case's build may or may not produce depending on the toolchain
+(a GCC 13 -> 14 move flips ``needed_added``, ``symbol_version_required_*``,
+``runtime_floor_raised``, ``fortify_source_weakened``...). An allowed kind
+never fails a cell, present or absent, and is not reported as unexpected. It
+cannot rescue a kind in ``expected_absent_kinds``: listing a kind in both, or
+in both ``expected_kinds`` and ``allowed_kinds``, is an authoring error.
+:data:`TOOLCHAIN_INCIDENTAL_KINDS` is the documented shared vocabulary of
+such kinds; a case still declares the ones it observed explicitly.
+
 The verdict-level ``known_gap``/``XFAIL`` mechanism is separate and unchanged:
 an XFAIL cell (a declared wrong verdict) is not kinds-checked.
 
@@ -63,6 +74,25 @@ _GAP_KEYS = frozenset({"kinds", "modes", "reason", "known_gap"})
 _REQUIRED_GAP_KEYS = frozenset({"kinds", "reason", "known_gap"})
 #: Retired by this gate: one unscoped kind per case could not say which lane
 #: has the gap, and could not go stale.
+ALLOWED_FIELD = "allowed_kinds"
+#: Kinds whose presence in a catalog case is a fact of the build toolchain
+#: (dependency, symbol-version, runtime-floor and hardening families), not of
+#: the source edit the case makes. Not consulted by the pass/fail decision:
+#: it is the documented set ``allowed_kinds`` declarations draw from, and it
+#: is excluded from :func:`unexpected_kinds`'s reported-only list.
+TOOLCHAIN_INCIDENTAL_KINDS = frozenset(
+    {
+        "imported_symbol_added",
+        "imported_symbol_removed",
+        "needed_added",
+        "needed_removed",
+        "runtime_floor_raised",
+        "symbol_version_required_added",
+        "symbol_version_required_added_compat",
+        "symbol_version_required_removed",
+        "fortify_source_weakened",
+    }
+)
 RETIRED_FIELDS = ("known_kind_gap", "known_kind_gap_note")
 _CLOSED_STATUS = re.compile(r"\*\*Status[^:]*:\s*CLOSED")
 KNOWN_GAPS_PATH = Path(__file__).resolve().parent.parent / (
@@ -128,6 +158,7 @@ def validate_entry(
         for field in RETIRED_FIELDS
         if field in entry
     ]
+    errors.extend(_allowed_errors(case, entry))
     raw = entry.get(GAPS_FIELD)
     if raw is None:
         return errors
@@ -205,6 +236,48 @@ def validate_entry(
     return errors
 
 
+def _allowed_errors(case: str, entry: Mapping[str, Any]) -> list[str]:
+    raw = entry.get(ALLOWED_FIELD)
+    if raw is None:
+        return []
+    if (
+        not isinstance(raw, list)
+        or not raw
+        or not all(isinstance(k, str) and k for k in raw)
+        or len(set(raw)) != len(raw)
+    ):
+        return [f"{case}: {ALLOWED_FIELD} must be a non-empty list of unique names"]
+    errors = []
+    for other in ("expected_kinds", "expected_absent_kinds"):
+        both = sorted(set(raw) & set(entry.get(other) or []))
+        if both:
+            errors.append(
+                f"{case}: {both} in both {ALLOWED_FIELD} and {other}; a kind is "
+                "either required, forbidden, or toolchain-incidental"
+            )
+    return errors
+
+
+def allowed_kinds(entry: Mapping[str, Any]) -> frozenset[str]:
+    """The case's declared toolchain-incidental kinds."""
+    return frozenset(entry.get(ALLOWED_FIELD) or ())
+
+
+def unexpected_kinds(
+    entry: Mapping[str, Any], got_kinds: Iterable[str]
+) -> tuple[str, ...]:
+    """Emitted kinds the case neither requires nor allows (reported-only).
+
+    Excludes ``expected_kinds``, the case's ``allowed_kinds`` and the shared
+    :data:`TOOLCHAIN_INCIDENTAL_KINDS`; an ``expected_absent_kinds`` entry is
+    never excluded, so a forbidden kind always counts as unexpected.
+    """
+    absent = set(entry.get("expected_absent_kinds") or ())
+    known = set(entry.get("expected_kinds") or ()) | allowed_kinds(entry)
+    known |= TOOLCHAIN_INCIDENTAL_KINDS
+    return tuple(sorted(set(got_kinds) - (known - absent)))
+
+
 def validate_ground_truth(
     verdicts: Mapping[str, Mapping[str, Any]], headings: Iterable[str] | None = None
 ) -> list[str]:
@@ -251,7 +324,12 @@ def evaluate(
     mode: str,
     target: tuple[str, str] = ENFORCED_TARGETS[0],
 ) -> KindsVerdict:
-    """Judge one lane cell's emitted kinds against the case's ground truth."""
+    """Judge one lane cell's emitted kinds against the case's ground truth.
+
+    ``allowed_kinds`` takes no part: it is disjoint from both checked lists
+    (an overlap is a :func:`validate_entry` error), so an allowed kind can
+    neither soften a required kind nor rescue a forbidden one.
+    """
     expected = list(entry.get("expected_kinds") or [])
     absent = list(entry.get("expected_absent_kinds") or [])
     declared = declared_kinds(entry, frontend, mode)

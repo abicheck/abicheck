@@ -36,7 +36,14 @@ from ...model.availability import FactStatus
 if TYPE_CHECKING:
     from ...model import AbiSnapshot
 
-__all__ = ["template_default_gap"]
+from ._unobserved_finding import Side, UnobservedFinding
+
+__all__ = [
+    "TEMPLATE_DEFAULTS_DIMENSION",
+    "template_default_findings",
+]
+
+TEMPLATE_DEFAULTS_DIMENSION = "template parameter defaults"
 
 
 def _unrecorded_pattern_count(snap: AbiSnapshot) -> int:
@@ -130,10 +137,10 @@ def _function_side_note(label: str, count: int, reason: str) -> str:
     )
 
 
-def template_default_gap(
+def template_default_findings(
     old: AbiSnapshot | None, new: AbiSnapshot
-) -> tuple[bool, list[str]]:
-    """``(gap, notes)`` for the template-defaults axis of the rollup.
+) -> list[UnobservedFinding]:
+    """Findings for the template-defaults axis of the rollup.
 
     *gap* is True when either side has at least one class- or function-template
     pattern without recorded defaults, is a castxml run whose headers declare a
@@ -142,12 +149,15 @@ def template_default_gap(
     clang backend does not model (ADR-085 D3). *notes*
     names each such side. A snapshot with neither contributes nothing.
     """
-    notes: list[str] = []
-    for label, snap in (("old", old), ("new", new)):
+    findings: list[UnobservedFinding] = []
+    sides: tuple[tuple[Side, AbiSnapshot | None], ...] = (("old", old), ("new", new))
+    for label, snap in sides:
         if snap is None:
             continue
+        notes: list[str] = []
         if snap.ast_producer == "castxml" and snap.template_default_header_scan:
             notes.append(_castxml_header_note(label))
+            findings.extend(_as_findings(label, notes))
             continue
         if snap.ast_producer == "clang" and snap.template_default_header_scan:
             notes.append(_clang_alias_variable_note(label))
@@ -163,4 +173,9 @@ def template_default_gap(
             )
         if failed:
             notes.append(_function_side_note(label, failed, "their extraction failed"))
-    return bool(notes), notes
+        findings.extend(_as_findings(label, notes))
+    return findings
+
+
+def _as_findings(label: Side, notes: list[str]) -> list[UnobservedFinding]:
+    return [UnobservedFinding(TEMPLATE_DEFAULTS_DIMENSION, label, n) for n in notes]

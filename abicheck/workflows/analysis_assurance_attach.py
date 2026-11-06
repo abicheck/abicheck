@@ -53,14 +53,19 @@ def attach_analysis_assurance(
     """
     from ..evidence_depth import embedded_evidence_pack
     from ..policy.analysis_assurance import compute_analysis_assurance
-    from ..policy.analysis_assurance._export_read import EXPORT_READ_NOTE_PREFIX
-    from ..policy.analysis_assurance._template_defaults import template_default_gap
+    from ..policy.analysis_assurance._unobserved import (
+        COVERAGE_WARNING_DIMENSIONS,
+        collect_unobserved,
+    )
     from ..storage.snapshot_encode import same_persisted_content
 
+    # One registry pass feeds both the rollup and the coverage rows below.
+    unobserved = collect_unobserved(old, new)
     result.analysis_assurance = compute_analysis_assurance(
         result,
         old,
         new,
+        unobserved=unobserved,
         # A header-only side's graph stands in as its pack (ADR-063 Phase 10).
         old_pack=embedded_evidence_pack(old) if old is not None else None,
         new_pack=embedded_evidence_pack(new),
@@ -68,16 +73,18 @@ def attach_analysis_assurance(
             partial(same_persisted_content, old, new) if old is not None else None
         ),
     )
-    # ADR-085 D3: the same template-default gap the rollup reports is a coverage
-    # gap, so the coverage-gap rows of every report show it.
-    result.coverage_warnings.extend(template_default_gap(old, new)[1])
-    # ADR-079: likewise an export table recorded as not completely read -- the
-    # notes the rollup just built, not a second computation of them.
-    result.coverage_warnings.extend(
-        note
-        for note in result.analysis_assurance.notes
-        if note.startswith(EXPORT_READ_NOTE_PREFIX)
-    )
+    # ADR-085 D3 / ADR-079: the unobserved dimensions registered with
+    # ``coverage_warning=True`` (template defaults, concepts, export-table
+    # reads) are coverage gaps, so every report's coverage-gap rows show the
+    # same text the rollup noted -- one registry, not per-gap wiring. Scalar
+    # compare can attach twice to one result, so a warning already present is
+    # skipped.
+    for finding in unobserved:
+        if finding.dimension not in COVERAGE_WARNING_DIMENSIONS:
+            continue
+        warning = finding.reason
+        if warning not in result.coverage_warnings:
+            result.coverage_warnings.append(warning)
 
 
 def attach_evidence_depths(

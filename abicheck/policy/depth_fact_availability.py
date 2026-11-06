@@ -53,6 +53,7 @@ _BELOW_HEADERS = _BELOW_BUILD | {
     "canonical_ir",
     "python_api",
     "contract",
+    "cxx_concept_constraints",
     "from_headers",
     "declarations.types",
     "declarations.enums",

@@ -40,6 +40,8 @@ from ..model.export_read import ExportReadState
 from ..model.fact import Fact
 from .canonical import canonical_form
 from .extension_fact_catalog import (
+    CXX_CONCEPT_CONSTRAINTS,
+    CXX_CONCEPT_HEADER_SCAN,
     EXPORT_READ,
     EXTENSION_FACTS,
     ExtensionFact,
@@ -56,8 +58,10 @@ from .wire_extensions import (
 
 __all__ = [
     "apply_export_read_fact",
+    "apply_model_extension_facts",
     "read_extension_fact",
     "sync_export_read_fact",
+    "sync_model_extension_facts",
     "write_extension_fact",
 ]
 
@@ -195,3 +199,94 @@ def apply_export_read_fact(snap: Any) -> None:
         )
     for platform, meta in _platform_blocks(snap).items():
         meta.export_read = ExportReadState(fact.value.get(platform, "complete"))
+
+
+def sync_model_extension_facts(snap: Any) -> None:
+    """Record every model field this build persists as an extension fact:
+    ADR-079's ``export_read`` and ``cxx_concept_header_scan``. Each write
+    path and the evidence digest call this first; it is idempotent."""
+    sync_export_read_fact(snap)
+    scan = getattr(snap, "cxx_concept_header_scan", None)
+    if _blocked_reason(snap, CXX_CONCEPT_HEADER_SCAN.section) is not None:
+        return
+    if isinstance(scan, bool):
+        write_extension_fact(snap, CXX_CONCEPT_HEADER_SCAN, scan)
+    elif scan is None:
+        _drop_extension_fact(snap, CXX_CONCEPT_HEADER_SCAN)
+    table = getattr(snap, "cxx_concept_constraints", None)
+    if isinstance(table, dict):
+        write_extension_fact(snap, CXX_CONCEPT_CONSTRAINTS, table)
+    elif table is None:
+        _drop_extension_fact(snap, CXX_CONCEPT_CONSTRAINTS)
+
+
+def _drop_extension_fact(snap: Any, fact: ExtensionFact[Any]) -> None:
+    """Remove *fact* from *snap*'s carried extensions (a model field reset to
+    ``None`` claims no value, so a stale stored one must not be re-saved).
+    Other facts and their ``must_understand`` entries are left alone."""
+    ext = extensions_of(snap)
+    if ext is None:
+        return
+    extras = ext.header_extras.get(fact.section)
+    if not extras:
+        return
+    stored = dict(extras.get(EXTENSIONS_KEY, {}))
+    if stored.pop(fact.name, None) is None and fact.name not in extras.get(
+        MUST_UNDERSTAND_KEY, ()
+    ):
+        return
+    if stored:
+        extras[EXTENSIONS_KEY] = stored
+    else:
+        extras.pop(EXTENSIONS_KEY, None)
+    names = [n for n in extras.get(MUST_UNDERSTAND_KEY, ()) if n != fact.name]
+    if names:
+        extras[MUST_UNDERSTAND_KEY] = names
+    else:
+        extras.pop(MUST_UNDERSTAND_KEY, None)
+    ext.document_must_understand = [
+        n for n in ext.document_must_understand if n != fact.name
+    ]
+    if not extras:
+        ext.header_extras.pop(fact.section, None)
+
+
+def apply_model_extension_facts(snap: Any) -> None:
+    """The inverse of :func:`sync_model_extension_facts` on load. A missing
+    or blocked concept scan leaves the field ``None`` (no scan), which names
+    no gap -- what every older snapshot reads as. A stored value that does
+    not decode is refused rather than read as that no-gap answer."""
+    apply_export_read_fact(snap)
+    _apply_concept_constraints(snap)
+    scan = read_extension_fact(snap, CXX_CONCEPT_HEADER_SCAN)
+    if scan.status is FactStatus.PRESENT and isinstance(scan.value, bool):
+        snap.cxx_concept_header_scan = scan.value
+        return
+    if scan.status is FactStatus.NOT_COLLECTED:
+        return
+    if _blocked_reason(snap, CXX_CONCEPT_HEADER_SCAN.section) is not None:
+        return
+    # A stored value that does not decode would read as "no scan" -- the
+    # same no-gap answer as a clean run. Refuse it, as for export_read.
+    raise SnapshotError(
+        "snapshot's cxx_concept_header_scan extension fact is unreadable: "
+        + "; ".join(str(d) for d in scan.diagnostics)
+    )
+
+
+def _apply_concept_constraints(snap: Any) -> None:
+    """Restore ``cxx_concept_constraints``. Missing or blocked leaves it
+    ``None`` (not modelled: the gap stays named); a stored value that does not
+    decode is refused rather than read as "not modelled"."""
+    table = read_extension_fact(snap, CXX_CONCEPT_CONSTRAINTS)
+    if table.status is FactStatus.PRESENT and isinstance(table.value, dict):
+        snap.cxx_concept_constraints = table.value
+        return
+    if table.status is FactStatus.NOT_COLLECTED:
+        return
+    if _blocked_reason(snap, CXX_CONCEPT_CONSTRAINTS.section) is not None:
+        return
+    raise SnapshotError(
+        "snapshot's cxx_concept_constraints extension fact is unreadable: "
+        + "; ".join(str(d) for d in table.diagnostics)
+    )

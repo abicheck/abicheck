@@ -417,6 +417,10 @@ DETECTOR_INPUTS: dict[str, DetectorInputs] = {
     # build_mode leaves no target to compare, so the detector must report that
     # as disabled rather than read the absence as "same target".
     "target_isa": DetectorInputs(requires=frozenset({"build_mode"})),
+    # The clang header backend's concept table is the detector's subject.
+    "concept_constraints": DetectorInputs(
+        requires=frozenset({"cxx_concept_constraints"})
+    ),
     "function_presence": _NONE,
 }
 

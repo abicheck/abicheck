@@ -233,6 +233,16 @@
    ]
   },
   "case104_glibcxx_dual_abi_flip": {
+   "lane_kind_exceptions": [
+    {
+     "kinds": [
+      "func_added_elf_only",
+      "func_removed_elf_only"
+     ],
+     "reason": "UNEXPLAINED: build-source stops reporting the ELF-only symbol add/remove debug-headers reports",
+     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
+    }
+   ],
    "abi_break": true,
    "api_break": false,
    "bad_practice": true,
@@ -249,17 +259,41 @@
    ]
   },
   "case105_concept_tightening": {
+   "frontend_kind_differences": [
+    {
+     "kinds": [
+      "concept_tightened"
+     ],
+     "only_in": "clang",
+     "modes": [
+      "debug-headers"
+     ],
+     "reason": "castxml emits no element for a concept, so its header lane cannot model the constraint; build-source reports concept_tightened on both frontends through L4 replay",
+     "known_gap": "Catalog known-gap rows read `NO_CHANGE` at debug-headers depth: case105 on castxml (concept) and case98 (`-std` floor) (2026-11-05)"
+    },
+    {
+     "kinds": [
+      "exported_not_public"
+     ],
+     "only_in": "clang",
+     "reason": "UNEXPLAINED: only clang reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    }
+   ],
    "abi_break": false,
    "api_break": true,
    "bad_practice": false,
    "category": "api_break",
-   "description": "A C++20 `concept` (`Addable`) gains an additional requirement (default-constructibility). Already-shipped binary instantiations keep linking, but consumers instantiating `sum<T>` for types that fail the tightened constraint no longer compile. The canonical truth is API_BREAK. It is missed by default object/DWARF and header/castxml comparison (castxml emits concepts as `<Unimplemented kind=\"Concept\"/>`, no name, no body), but visible at L4: source-ABI replay reports `concept_tightened` (API_BREAK) when that opt-in evidence is supplied.",
+   "description": "A C++20 `concept` (`Addable`) gains an additional requirement (default-constructibility). Already-shipped binary instantiations keep linking, but consumers instantiating `sum<T>` for types that fail the tightened constraint no longer compile. The canonical truth is API_BREAK. It is missed by object/DWARF-only and header/castxml comparison (castxml emits concepts as `<Unimplemented kind=\"Concept\"/>`, no name, no body). The clang header backend models concepts and template constraints (AbiSnapshot.cxx_concept_constraints) and reports `concept_tightened` (API_BREAK) at header depth, as does L4 source-ABI replay when that opt-in evidence is supplied.",
    "expected": "API_BREAK",
    "expected_absent_kinds": [],
    "expected_kinds": [
     "concept_tightened"
    ],
-   "known_gap": "L0-L2 artifact/header scans cannot observe the C++20 concept constraint because CastXML emits concepts as unnamed <Unimplemented> nodes. Their NO_CHANGE verdict is a missed API_BREAK detection caused by insufficient evidence, not a lane-specific expectation. L4 source-ABI replay emits the named concept and constraint hash and detects concept_tightened.",
+   "known_gap": "castxml-backed header scans cannot observe the C++20 concept constraint because CastXML emits concepts as unnamed <Unimplemented> nodes; their NO_CHANGE verdict is a missed API_BREAK detection caused by insufficient evidence (assurance reads partial with the concept dimension named). The clang header backend models concepts and detects concept_tightened, as does L4 source-ABI replay.",
+   "known_gap_frontends": [
+    "castxml"
+   ],
    "min_evidence": "L4",
    "platforms": [
     "linux",
@@ -340,6 +374,16 @@
    }
   },
   "case107_task_scheduler_init_removed": {
+   "frontend_kind_differences": [
+    {
+     "kinds": [
+      "inline_function_removed"
+     ],
+     "only_in": "castxml",
+     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    }
+   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,
@@ -358,6 +402,16 @@
    ]
   },
   "case108_task_class_removed": {
+   "frontend_kind_differences": [
+    {
+     "kinds": [
+      "public_surface_shrank"
+     ],
+     "only_in": "clang",
+     "reason": "UNEXPLAINED: only clang reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    }
+   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,
@@ -376,6 +430,16 @@
    ]
   },
   "case109_flow_graph_policy_renames": {
+   "frontend_kind_differences": [
+    {
+     "kinds": [
+      "tag_type_renamed"
+     ],
+     "only_in": "castxml",
+     "reason": "clang records only explicitly instantiated specializations, so the tag rename is castxml-only",
+     "known_gap": "The clang header backend records only explicitly instantiated"
+    }
+   ],
    "abi_break": false,
    "api_break": true,
    "bad_practice": false,
@@ -508,7 +572,37 @@
    ]
   },
   "case114_char8t_migration": {
+   "lane_kind_exceptions": [
+    {
+     "kinds": [
+      "imported_symbol_added",
+      "imported_symbol_removed",
+      "runtime_floor_raised",
+      "symbol_leaked_from_dependency_changed",
+      "symbol_version_required_added"
+     ],
+     "reason": "UNEXPLAINED: build-source stops reporting a dependency/import/symbol-version fact of the unchanged binary",
+     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
+    },
+    {
+     "kinds": [
+      "func_added_elf_only"
+     ],
+     "reason": "UNEXPLAINED: build-source stops reporting the ELF-only symbol add/remove debug-headers reports",
+     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
+    }
+   ],
    "abi_break": true,
+   "allowed_kinds": [
+    "fortify_source_weakened",
+    "imported_symbol_added",
+    "needed_added",
+    "needed_removed",
+    "runtime_floor_raised",
+    "symbol_version_required_added",
+    "symbol_version_required_added_compat",
+    "symbol_version_required_removed"
+   ],
    "api_break": false,
    "bad_practice": false,
    "category": "breaking",
@@ -539,7 +633,28 @@
    "requires_feature": "_BitInt"
   },
   "case116_atomic_qualifier_changed": {
+   "lane_kind_exceptions": [
+    {
+     "kinds": [
+      "imported_symbol_added",
+      "needed_added",
+      "symbol_version_required_added_compat"
+     ],
+     "reason": "UNEXPLAINED: build-source stops reporting a dependency/import/symbol-version fact of the unchanged binary",
+     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
+    }
+   ],
    "abi_break": true,
+   "allowed_kinds": [
+    "fortify_source_weakened",
+    "imported_symbol_added",
+    "needed_added",
+    "needed_removed",
+    "runtime_floor_raised",
+    "symbol_version_required_added",
+    "symbol_version_required_added_compat",
+    "symbol_version_required_removed"
+   ],
    "api_break": false,
    "bad_practice": false,
    "category": "breaking",
@@ -608,6 +723,16 @@
    "scope_public_headers": true
   },
   "case11_global_var_type": {
+   "frontend_kind_differences": [
+    {
+     "kinds": [
+      "var_alignment_changed"
+     ],
+     "only_in": "castxml",
+     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    }
+   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,
@@ -658,6 +783,19 @@
    "skip": true
   },
   "case122_template_signature_uninstantiated": {
+   "frontend_kind_differences": [
+    {
+     "kinds": [
+      "header_only_function_params_changed"
+     ],
+     "only_in": "clang",
+     "modes": [
+      "debug-headers"
+     ],
+     "reason": "UNEXPLAINED: only clang reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    }
+   ],
    "abi_break": false,
    "api_break": true,
    "bad_practice": false,
@@ -791,6 +929,28 @@
    }
   },
   "case126_sycl_device_impl_ptr": {
+   "frontend_kind_differences": [
+    {
+     "kinds": [
+      "public_reachability_changed"
+     ],
+     "only_in": "clang",
+     "modes": [
+      "build-source"
+     ],
+     "reason": "UNEXPLAINED: only clang reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    },
+    {
+     "kinds": [
+      "public_surface_shrank",
+      "struct_field_type_changed"
+     ],
+     "only_in": "clang",
+     "reason": "UNEXPLAINED: only clang reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    }
+   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,
@@ -1461,6 +1621,16 @@
    ]
   },
   "case15_noexcept_change": {
+   "frontend_kind_differences": [
+    {
+     "kinds": [
+      "func_noexcept_removed"
+     ],
+     "only_in": "clang",
+     "reason": "UNEXPLAINED: only clang reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    }
+   ],
    "abi_break": false,
    "api_break": true,
    "bad_practice": false,
@@ -1757,6 +1927,28 @@
    ]
   },
   "case174_secondary_vtable_group_changed": {
+   "frontend_kind_differences": [
+    {
+     "kinds": [
+      "func_lost_inline",
+      "inline_function_removed",
+      "public_surface_shrank"
+     ],
+     "only_in": "castxml",
+     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    },
+    {
+     "kinds": [
+      "func_added",
+      "public_surface_grew",
+      "standard_layout_lost"
+     ],
+     "only_in": "clang",
+     "reason": "UNEXPLAINED: only clang reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    }
+   ],
    "abi_break": true,
    "api_break": false,
    "bad_practice": false,
@@ -1856,6 +2048,10 @@
    "expected": "COMPATIBLE_WITH_RISK",
    "expected_kinds": [
     "cet_protection_weakened"
+   ],
+   "fixture_preconditions": [
+    {"side": "v1", "property": "elf_gnu_property", "includes": ["IBT", "SHSTK"]},
+    {"side": "v2", "property": "elf_gnu_property", "excludes": ["IBT", "SHSTK"]}
    ],
    "min_evidence": "L0",
    "platforms": [
@@ -2067,6 +2263,16 @@
    ]
   },
   "case187_public_struct_private_field_type": {
+   "frontend_kind_differences": [
+    {
+     "kinds": [
+      "struct_field_type_changed"
+     ],
+     "only_in": "clang",
+     "reason": "UNEXPLAINED: only clang reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    }
+   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": true,
@@ -2077,32 +2283,6 @@
     "type_field_type_changed",
     "public_api_internal_dependency_added"
    ],
-   "expected_kinds_gaps": {
-    "castxml": [
-     {
-      "kinds": [
-       "public_api_internal_dependency_added"
-      ],
-      "modes": [
-       "build-source"
-      ],
-      "reason": "dump --build-info embeds a build pack whose L5 graph has no SOURCE_DECLARES public closure, and resolve_l5_source_graph prefers it over the header graph that has one, so the public-to-internal reach is never evaluated at build-source depth; the debug-headers lane reports the kind.",
-      "known_gap": "A `--build-info` dump's L5 graph displaces the header graph"
-     }
-    ],
-    "clang": [
-     {
-      "kinds": [
-       "public_api_internal_dependency_added"
-      ],
-      "modes": [
-       "build-source"
-      ],
-      "reason": "dump --build-info embeds a build pack whose L5 graph has no SOURCE_DECLARES public closure, and resolve_l5_source_graph prefers it over the header graph that has one, so the public-to-internal reach is never evaluated at build-source depth; the debug-headers lane reports the kind.",
-      "known_gap": "A `--build-info` dump's L5 graph displaces the header graph"
-     }
-    ]
-   },
    "min_evidence": "L5",
    "platforms": [
     "linux"
@@ -2119,32 +2299,6 @@
     "type_base_changed",
     "public_api_internal_dependency_added"
    ],
-   "expected_kinds_gaps": {
-    "castxml": [
-     {
-      "kinds": [
-       "public_api_internal_dependency_added"
-      ],
-      "modes": [
-       "build-source"
-      ],
-      "reason": "dump --build-info embeds a build pack whose L5 graph has no SOURCE_DECLARES public closure, and resolve_l5_source_graph prefers it over the header graph that has one, so the public-to-internal reach is never evaluated at build-source depth; the debug-headers lane reports the kind.",
-      "known_gap": "A `--build-info` dump's L5 graph displaces the header graph"
-     }
-    ],
-    "clang": [
-     {
-      "kinds": [
-       "public_api_internal_dependency_added"
-      ],
-      "modes": [
-       "build-source"
-      ],
-      "reason": "dump --build-info embeds a build pack whose L5 graph has no SOURCE_DECLARES public closure, and resolve_l5_source_graph prefers it over the header graph that has one, so the public-to-internal reach is never evaluated at build-source depth; the debug-headers lane reports the kind.",
-      "known_gap": "A `--build-info` dump's L5 graph displaces the header graph"
-     }
-    ]
-   },
    "min_evidence": "L5",
    "platforms": [
     "linux"
@@ -2161,32 +2315,6 @@
     "func_removed",
     "public_api_internal_dependency_added"
    ],
-   "expected_kinds_gaps": {
-    "castxml": [
-     {
-      "kinds": [
-       "public_api_internal_dependency_added"
-      ],
-      "modes": [
-       "build-source"
-      ],
-      "reason": "dump --build-info embeds a build pack whose L5 graph has no SOURCE_DECLARES public closure, and resolve_l5_source_graph prefers it over the header graph that has one, so the public-to-internal reach is never evaluated at build-source depth; the debug-headers lane reports the kind.",
-      "known_gap": "A `--build-info` dump's L5 graph displaces the header graph"
-     }
-    ],
-    "clang": [
-     {
-      "kinds": [
-       "public_api_internal_dependency_added"
-      ],
-      "modes": [
-       "build-source"
-      ],
-      "reason": "dump --build-info embeds a build pack whose L5 graph has no SOURCE_DECLARES public closure, and resolve_l5_source_graph prefers it over the header graph that has one, so the public-to-internal reach is never evaluated at build-source depth; the debug-headers lane reports the kind.",
-      "known_gap": "A `--build-info` dump's L5 graph displaces the header graph"
-     }
-    ]
-   },
    "min_evidence": "L5",
    "platforms": [
     "linux"
@@ -2222,32 +2350,6 @@
     "type_size_changed",
     "public_api_internal_dependency_added"
    ],
-   "expected_kinds_gaps": {
-    "castxml": [
-     {
-      "kinds": [
-       "public_api_internal_dependency_added"
-      ],
-      "modes": [
-       "build-source"
-      ],
-      "reason": "dump --build-info embeds a build pack whose L5 graph has no SOURCE_DECLARES public closure, and resolve_l5_source_graph prefers it over the header graph that has one, so the public-to-internal reach is never evaluated at build-source depth; the debug-headers lane reports the kind.",
-      "known_gap": "A `--build-info` dump's L5 graph displaces the header graph"
-     }
-    ],
-    "clang": [
-     {
-      "kinds": [
-       "public_api_internal_dependency_added"
-      ],
-      "modes": [
-       "build-source"
-      ],
-      "reason": "dump --build-info embeds a build pack whose L5 graph has no SOURCE_DECLARES public closure, and resolve_l5_source_graph prefers it over the header graph that has one, so the public-to-internal reach is never evaluated at build-source depth; the debug-headers lane reports the kind.",
-      "known_gap": "A `--build-info` dump's L5 graph displaces the header graph"
-     }
-    ]
-   },
    "min_evidence": "L5",
    "platforms": [
     "linux"
@@ -2316,6 +2418,16 @@
   },
   "case21_method_became_static": {
    "abi_break": true,
+   "allowed_kinds": [
+    "fortify_source_weakened",
+    "imported_symbol_added",
+    "needed_added",
+    "needed_removed",
+    "runtime_floor_raised",
+    "symbol_version_required_added",
+    "symbol_version_required_added_compat",
+    "symbol_version_required_removed"
+   ],
    "api_break": true,
    "bad_practice": false,
    "category": "breaking",
@@ -2401,6 +2513,31 @@
    ]
   },
   "case26_union_field_added": {
+   "frontend_kind_differences": [
+    {
+     "kinds": [
+      "type_alignment_changed"
+     ],
+     "only_in": "castxml",
+     "modes": [
+      "build-source"
+     ],
+     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    }
+   ],
+   "lane_kind_exceptions": [
+    {
+     "kinds": [
+      "type_alignment_changed"
+     ],
+     "reason": "UNEXPLAINED: on clang, build-source stops reporting the record alignment change debug-headers and castxml report",
+     "frontends": [
+      "clang"
+     ],
+     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
+    }
+   ],
    "abi_break": true,
    "api_break": false,
    "bad_practice": false,
@@ -2448,6 +2585,49 @@
    ]
   },
   "case28_typedef_opaque": {
+   "frontend_kind_differences": [
+    {
+     "kinds": [
+      "abi_equivalent_type_changed"
+     ],
+     "only_in": "castxml",
+     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    },
+    {
+     "kinds": [
+      "inline_function_removed",
+      "public_surface_shrank"
+     ],
+     "only_in": "castxml",
+     "modes": [
+      "debug-headers"
+     ],
+     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    },
+    {
+     "kinds": [
+      "func_return_changed"
+     ],
+     "only_in": "clang",
+     "reason": "UNEXPLAINED: only clang reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    }
+   ],
+   "lane_kind_exceptions": [
+    {
+     "kinds": [
+      "inline_function_removed",
+      "public_surface_shrank"
+     ],
+     "reason": "UNEXPLAINED: build-source stops reporting an inline-member removal / surface shrink castxml reports at debug-headers",
+     "frontends": [
+      "castxml"
+     ],
+     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
+    }
+   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,
@@ -2478,6 +2658,33 @@
    ]
   },
   "case30_field_qualifiers": {
+   "frontend_kind_differences": [
+    {
+     "kinds": [
+      "inline_function_removed",
+      "public_surface_shrank"
+     ],
+     "only_in": "castxml",
+     "modes": [
+      "debug-headers"
+     ],
+     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    }
+   ],
+   "lane_kind_exceptions": [
+    {
+     "kinds": [
+      "inline_function_removed",
+      "public_surface_shrank"
+     ],
+     "reason": "UNEXPLAINED: build-source stops reporting an inline-member removal / surface shrink castxml reports at debug-headers",
+     "frontends": [
+      "castxml"
+     ],
+     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
+    }
+   ],
    "abi_break": false,
    "api_break": true,
    "bad_practice": false,
@@ -2585,6 +2792,37 @@
    ]
   },
   "case36_anon_struct": {
+   "frontend_kind_differences": [
+    {
+     "kinds": [
+      "type_alignment_changed"
+     ],
+     "only_in": "castxml",
+     "modes": [
+      "build-source"
+     ],
+     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    }
+   ],
+   "lane_kind_exceptions": [
+    {
+     "kinds": [
+      "type_alignment_changed"
+     ],
+     "reason": "UNEXPLAINED: on clang, build-source stops reporting the record alignment change debug-headers and castxml report",
+     "frontends": [
+      "clang"
+     ],
+     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
+    },
+    {
+     "kinds": [
+      "declaration_moved"
+     ],
+     "reason": "build-source refines the anonymous-struct move into declaration_renamed (it reports declaration_renamed instead); a refinement, not a loss"
+    }
+   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,
@@ -2635,6 +2873,26 @@
    }
   },
   "case38_virtual_methods": {
+   "frontend_kind_differences": [
+    {
+     "kinds": [
+      "func_removed",
+      "public_reachability_changed",
+      "public_surface_shrank"
+     ],
+     "only_in": "castxml",
+     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    },
+    {
+     "kinds": [
+      "func_deleted"
+     ],
+     "only_in": "clang",
+     "reason": "UNEXPLAINED: only clang reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    }
+   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,
@@ -2651,6 +2909,16 @@
    ]
   },
   "case39_var_const": {
+   "frontend_kind_differences": [
+    {
+     "kinds": [
+      "exported_object_alignment_reduced"
+     ],
+     "only_in": "clang",
+     "reason": "UNEXPLAINED: only clang reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    }
+   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,
@@ -2668,6 +2936,39 @@
    ]
   },
   "case40_field_layout": {
+   "frontend_kind_differences": [
+    {
+     "kinds": [
+      "type_alignment_changed"
+     ],
+     "only_in": "castxml",
+     "modes": [
+      "build-source"
+     ],
+     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    },
+    {
+     "kinds": [
+      "struct_field_type_changed"
+     ],
+     "only_in": "clang",
+     "reason": "UNEXPLAINED: only clang reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    }
+   ],
+   "lane_kind_exceptions": [
+    {
+     "kinds": [
+      "type_alignment_changed"
+     ],
+     "reason": "UNEXPLAINED: on clang, build-source stops reporting the record alignment change debug-headers and castxml report",
+     "frontends": [
+      "clang"
+     ],
+     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
+    }
+   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,
@@ -2781,6 +3082,31 @@
    ]
   },
   "case45_multi_dim_array_change": {
+   "frontend_kind_differences": [
+    {
+     "kinds": [
+      "type_alignment_changed"
+     ],
+     "only_in": "castxml",
+     "modes": [
+      "build-source"
+     ],
+     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    }
+   ],
+   "lane_kind_exceptions": [
+    {
+     "kinds": [
+      "type_alignment_changed"
+     ],
+     "reason": "UNEXPLAINED: on clang, build-source stops reporting the record alignment change debug-headers and castxml report",
+     "frontends": [
+      "clang"
+     ],
+     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
+    }
+   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,
@@ -2841,6 +3167,31 @@
    ]
   },
   "case48_leaf_struct_through_pointer": {
+   "frontend_kind_differences": [
+    {
+     "kinds": [
+      "type_alignment_changed"
+     ],
+     "only_in": "castxml",
+     "modes": [
+      "build-source"
+     ],
+     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    }
+   ],
+   "lane_kind_exceptions": [
+    {
+     "kinds": [
+      "type_alignment_changed"
+     ],
+     "reason": "UNEXPLAINED: on clang, build-source stops reporting the record alignment change debug-headers and castxml report",
+     "frontends": [
+      "clang"
+     ],
+     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
+    }
+   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,
@@ -2955,6 +3306,16 @@
    ]
   },
   "case55_type_kind_changed": {
+   "frontend_kind_differences": [
+    {
+     "kinds": [
+      "typedef_base_changed"
+     ],
+     "only_in": "clang",
+     "reason": "UNEXPLAINED: only clang reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    }
+   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,
@@ -2975,6 +3336,31 @@
    ]
   },
   "case56_struct_packing_changed": {
+   "frontend_kind_differences": [
+    {
+     "kinds": [
+      "type_alignment_changed"
+     ],
+     "only_in": "castxml",
+     "modes": [
+      "build-source"
+     ],
+     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    }
+   ],
+   "lane_kind_exceptions": [
+    {
+     "kinds": [
+      "type_alignment_changed"
+     ],
+     "reason": "UNEXPLAINED: on clang, build-source stops reporting the record alignment change debug-headers and castxml report",
+     "frontends": [
+      "clang"
+     ],
+     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
+    }
+   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,
@@ -2995,6 +3381,31 @@
    ]
   },
   "case57_enum_underlying_size_changed": {
+   "frontend_kind_differences": [
+    {
+     "kinds": [
+      "type_alignment_changed"
+     ],
+     "only_in": "castxml",
+     "modes": [
+      "build-source"
+     ],
+     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    }
+   ],
+   "lane_kind_exceptions": [
+    {
+     "kinds": [
+      "type_alignment_changed"
+     ],
+     "reason": "UNEXPLAINED: on clang, build-source stops reporting the record alignment change debug-headers and castxml report",
+     "frontends": [
+      "clang"
+     ],
+     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
+    }
+   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,
@@ -3184,6 +3595,28 @@
    ]
   },
   "case68_virtual_method_added": {
+   "frontend_kind_differences": [
+    {
+     "kinds": [
+      "func_lost_inline",
+      "inline_function_removed",
+      "public_surface_shrank"
+     ],
+     "only_in": "castxml",
+     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    },
+    {
+     "kinds": [
+      "func_added",
+      "public_surface_grew",
+      "standard_layout_lost"
+     ],
+     "only_in": "clang",
+     "reason": "UNEXPLAINED: only clang reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    }
+   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,
@@ -3201,6 +3634,26 @@
    ]
   },
   "case69_trivial_to_nontrivial": {
+   "frontend_kind_differences": [
+    {
+     "kinds": [
+      "inline_function_removed",
+      "public_surface_shrank"
+     ],
+     "only_in": "castxml",
+     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    },
+    {
+     "kinds": [
+      "func_added",
+      "public_surface_grew"
+     ],
+     "only_in": "clang",
+     "reason": "UNEXPLAINED: only clang reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    }
+   ],
    "abi_break": true,
    "api_break": false,
    "bad_practice": false,
@@ -3221,6 +3674,31 @@
    ]
   },
   "case70_flexible_array_member_changed": {
+   "frontend_kind_differences": [
+    {
+     "kinds": [
+      "type_alignment_changed"
+     ],
+     "only_in": "castxml",
+     "modes": [
+      "build-source"
+     ],
+     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    }
+   ],
+   "lane_kind_exceptions": [
+    {
+     "kinds": [
+      "type_alignment_changed"
+     ],
+     "reason": "UNEXPLAINED: on clang, build-source stops reporting the record alignment change debug-headers and castxml report",
+     "frontends": [
+      "clang"
+     ],
+     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
+    }
+   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,
@@ -3239,6 +3717,16 @@
    ]
   },
   "case71_inline_namespace_moved": {
+   "frontend_kind_differences": [
+    {
+     "kinds": [
+      "inline_function_removed"
+     ],
+     "only_in": "castxml",
+     "reason": "castxml elides defaulted template arguments / inline namespaces from record names",
+     "known_gap": "castxml elides defaulted template arguments and inline namespaces"
+    }
+   ],
    "abi_break": true,
    "api_break": false,
    "bad_practice": false,
@@ -3263,6 +3751,27 @@
    ]
   },
   "case72_covariant_return_changed": {
+   "frontend_kind_differences": [
+    {
+     "kinds": [
+      "public_reachability_changed"
+     ],
+     "only_in": "castxml",
+     "modes": [
+      "build-source"
+     ],
+     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    },
+    {
+     "kinds": [
+      "tail_padding_reuse_changed"
+     ],
+     "only_in": "clang",
+     "reason": "UNEXPLAINED: only clang reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    }
+   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,
@@ -3286,6 +3795,17 @@
    ]
   },
   "case73_typedef_underlying_changed": {
+   "frontend_kind_differences": [
+    {
+     "kinds": [
+      "param_pointer_level_changed",
+      "return_pointer_level_changed"
+     ],
+     "only_in": "castxml",
+     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    }
+   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,
@@ -3381,6 +3901,17 @@
    ]
   },
   "case78_task_arena_attach_tag": {
+   "frontend_kind_differences": [
+    {
+     "kinds": [
+      "overload_set_rerouted",
+      "public_surface_grew"
+     ],
+     "only_in": "castxml",
+     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    }
+   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,
@@ -3416,6 +3947,48 @@
    ]
   },
   "case80_pimpl_shared_to_unique": {
+   "frontend_kind_differences": [
+    {
+     "kinds": [
+      "inline_function_removed",
+      "public_surface_shrank",
+      "struct_field_type_changed"
+     ],
+     "only_in": "castxml",
+     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    },
+    {
+     "kinds": [
+      "public_reachability_changed"
+     ],
+     "only_in": "castxml",
+     "modes": [
+      "debug-headers"
+     ],
+     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    },
+    {
+     "kinds": [
+      "standard_layout_lost",
+      "type_removed",
+      "typedef_base_changed"
+     ],
+     "only_in": "clang",
+     "reason": "UNEXPLAINED: only clang reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    }
+   ],
+   "lane_kind_exceptions": [
+    {
+     "kinds": [
+      "func_removed_elf_only"
+     ],
+     "reason": "UNEXPLAINED: build-source stops reporting the ELF-only symbol add/remove debug-headers reports",
+     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
+    }
+   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,
@@ -3519,6 +4092,16 @@
    ]
   },
   "case85_internal_template_signature_changed": {
+   "frontend_kind_differences": [
+    {
+     "kinds": [
+      "func_visibility_changed"
+     ],
+     "only_in": "castxml",
+     "reason": "castxml cannot prove the instance was `extern template`, so its export loss reads func_visibility_changed where clang reads func_removed",
+     "known_gap": "The clang record-layout pass leaves unnameable records"
+    }
+   ],
    "abi_break": true,
    "api_break": false,
    "bad_practice": false,
@@ -3554,6 +4137,16 @@
    ]
   },
   "case86_tag_struct_renamed": {
+   "frontend_kind_differences": [
+    {
+     "kinds": [
+      "overload_set_rerouted"
+     ],
+     "only_in": "castxml",
+     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    }
+   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,
@@ -3572,6 +4165,16 @@
    ]
   },
   "case87_default_template_arg_changed": {
+   "frontend_kind_differences": [
+    {
+     "kinds": [
+      "type_removed"
+     ],
+     "only_in": "clang",
+     "reason": "castxml elides defaulted template arguments / inline namespaces from record names",
+     "known_gap": "castxml elides defaulted template arguments and inline namespaces"
+    }
+   ],
    "abi_break": true,
    "api_break": false,
    "bad_practice": false,
@@ -4134,6 +4737,16 @@
    ]
   },
   "case203_class_gained_vtable_pointer": {
+   "frontend_kind_differences": [
+    {
+     "kinds": [
+      "standard_layout_lost"
+     ],
+     "only_in": "clang",
+     "reason": "UNEXPLAINED: only clang reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    }
+   ],
    "abi_break": true,
    "api_break": false,
    "bad_practice": false,
@@ -4443,36 +5056,38 @@
    }
   },
   "case217_export_loss_weak_binding_demoted": {
-    "abi_break": true,
-    "api_break": false,
-    "bad_practice": false,
-    "category": "breaking",
-    "description": "Binding-scoped policy demotion. OLD exports three WEAK symbols that NEW loses: header-declared inline hdr_inline (hidden by NEW no longer calling it), an undeclared WEAK export weak_undeclared (not declared in any header), and the P<float> template constructor in the internal ns::detail namespace (NEW no longer instantiates it). Default verdict is BREAKING (exit 4). With policy.yaml, every WEAK finding under _ZN2ns.* is reclassified to risk, so the policy verdict is COMPATIBLE_WITH_RISK (exit 0). `expected` is the default-policy verdict; `policy_expected` is the verdict under policy.yaml. This is the binding: selector that did not reach these findings before PRs #1629 and #1630.",
-    "expected": "BREAKING",
-    "expected_kinds": [
-      "func_removed_elf_only"
-    ],
-    "min_evidence": "L0",
-    "platforms": [
-      "linux"
-    ],
-    "policy": "policy.yaml",
-    "policy_expected": "COMPATIBLE_WITH_RISK"
+   "abi_break": true,
+   "api_break": false,
+   "bad_practice": false,
+   "category": "breaking",
+   "description": "Binding-scoped policy demotion. OLD exports three WEAK symbols that NEW loses: header-declared inline hdr_inline (hidden by NEW no longer calling it), an undeclared WEAK export weak_undeclared (not declared in any header), and the P<float> template constructor in the internal ns::detail namespace (NEW no longer instantiates it). Default verdict is BREAKING (exit 4). With policy.yaml, every WEAK finding under _ZN2ns.* is reclassified to risk, so the policy verdict is COMPATIBLE_WITH_RISK (exit 0). `expected` is the default-policy verdict; `policy_expected` is the verdict under policy.yaml. This is the binding: selector that did not reach these findings before PRs #1629 and #1630.",
+   "expected": "BREAKING",
+   "expected_kinds": [
+    "func_removed_elf_only"
+   ],
+   "min_evidence": "L0",
+   "platforms": [
+    "linux"
+   ],
+   "policy": "policy.yaml",
+   "policy_expected": "COMPATIBLE_WITH_RISK"
   },
   "case218_export_loss_strong_binding_stays_breaking": {
-    "abi_break": true,
-    "api_break": false,
-    "bad_practice": false,
-    "category": "breaking",
-    "description": "Sibling of case217 with the same policy.yaml. NEW loses the same WEAK exports, and also the GLOBAL strong_fn (declared in v2.h, not defined in v2.cpp). The binding: weak rule matches only WEAK findings, so the strong removal keeps the run at BREAKING and exit 4. Shows the binding selector separates a WEAK loss from a GLOBAL one.",
-    "expected": "BREAKING",
-    "expected_kinds": ["func_removed_elf_only"],
-    "min_evidence": "L0",
-    "platforms": [
-      "linux"
-    ],
-    "policy": "policy.yaml",
-    "policy_expected": "BREAKING"
+   "abi_break": true,
+   "api_break": false,
+   "bad_practice": false,
+   "category": "breaking",
+   "description": "Sibling of case217 with the same policy.yaml. NEW loses the same WEAK exports, and also the GLOBAL strong_fn (declared in v2.h, not defined in v2.cpp). The binding: weak rule matches only WEAK findings, so the strong removal keeps the run at BREAKING and exit 4. Shows the binding selector separates a WEAK loss from a GLOBAL one.",
+   "expected": "BREAKING",
+   "expected_kinds": [
+    "func_removed_elf_only"
+   ],
+   "min_evidence": "L0",
+   "platforms": [
+    "linux"
+   ],
+   "policy": "policy.yaml",
+   "policy_expected": "BREAKING"
   },
   "case219_public_virtual_dispatch_set_changed": {
    "abi_break": false,
@@ -4533,6 +5148,16 @@
    ]
   },
   "case223_header_only_template_default_changed": {
+   "frontend_kind_differences": [
+    {
+     "kinds": [
+      "template_param_default_changed"
+     ],
+     "only_in": "clang",
+     "reason": "castxml emits no uninstantiated template, so the default change is clang-only",
+     "known_gap": "A header-only default template-argument change reads `NO_CHANGE` at L2 on castxml"
+    }
+   ],
    "abi_break": false,
    "api_break": true,
    "bad_practice": false,
@@ -4602,6 +5227,16 @@
    ]
   },
   "case225_header_only_template_default_removed": {
+   "frontend_kind_differences": [
+    {
+     "kinds": [
+      "template_param_default_changed"
+     ],
+     "only_in": "clang",
+     "reason": "castxml emits no uninstantiated template, so the default change is clang-only",
+     "known_gap": "A header-only default template-argument change reads `NO_CHANGE` at L2 on castxml"
+    }
+   ],
    "abi_break": false,
    "api_break": true,
    "bad_practice": false,
@@ -4670,6 +5305,16 @@
    ]
   },
   "case227_nested_namespace_template_default_changed": {
+   "frontend_kind_differences": [
+    {
+     "kinds": [
+      "template_param_default_changed"
+     ],
+     "only_in": "clang",
+     "reason": "castxml emits no uninstantiated template, so the default change is clang-only",
+     "known_gap": "A header-only default template-argument change reads `NO_CHANGE` at L2 on castxml"
+    }
+   ],
    "abi_break": false,
    "api_break": true,
    "bad_practice": false,
@@ -4720,6 +5365,16 @@
    }
   },
   "case228_nontype_template_param_default_changed": {
+   "frontend_kind_differences": [
+    {
+     "kinds": [
+      "template_param_default_changed"
+     ],
+     "only_in": "clang",
+     "reason": "castxml emits no uninstantiated template, so the default change is clang-only",
+     "known_gap": "A header-only default template-argument change reads `NO_CHANGE` at L2 on castxml"
+    }
+   ],
    "abi_break": false,
    "api_break": true,
    "bad_practice": false,
@@ -4769,6 +5424,16 @@
    }
   },
   "case229_exported_template_default_changed": {
+   "frontend_kind_differences": [
+    {
+     "kinds": [
+      "declaration_moved"
+     ],
+     "only_in": "clang",
+     "reason": "UNEXPLAINED: only clang reports it; root cause not yet traced",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    }
+   ],
    "abi_break": true,
    "api_break": false,
    "bad_practice": false,

@@ -441,6 +441,19 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "class; clang_vtable_base_migration.py lowers a pre-40 clang/hybrid "
         "vtable fact over bases to PARTIAL on load, and a re-dump restores it"
     ),
+    41: GenerationSpellingChange(
+        "castxml and clang runs set cxx_concept_header_scan when a parsed public "
+        "header defines a C++20 concept or spells a requires-clause (was unset); "
+        "no type or name spelling changes, so no rewrite is needed -- an older "
+        "snapshot simply names no concept gap"
+    ),
+    42: GenerationSpellingChange(
+        "clang runs set cxx_concept_constraints (the public headers' C++20 "
+        "concepts and template constraints as conjunctive atom sets, "
+        "extract/headers/clang/concept_constraints.py) where it was unset; no "
+        "type or name spelling changes, so no rewrite is needed -- an older "
+        "snapshot reads as not modelled and keeps its concept gap note"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

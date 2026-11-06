@@ -10,6 +10,8 @@ Pure stdlib.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 _DEFAULT_MODES = ("debug-headers", "build-source")
 
 
@@ -43,3 +45,16 @@ def provenance_notes(raw: object) -> list[str]:
         f"(known gap: {gap['known_gap']})\n"
         for frontend, gap in gap_pairs(raw)
     ]
+
+
+def allowed_row(kinds: Iterable[str]) -> str:
+    """The meta-table row of a case's ``allowed_kinds``: toolchain-incidental
+    kinds (``tests/expected_kinds_gate.py``) that may or may not appear and are
+    not part of what the case tests; empty when the case declares none."""
+    names = ", ".join(f"`{k}`" for k in kinds)
+    if not names:
+        return ""
+    return (
+        f"| **Toolchain-dependent `ChangeKind`s** | {names} "
+        "(may or may not appear; not part of what the case tests) |\n"
+    )

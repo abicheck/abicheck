@@ -35,6 +35,11 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from ...model.concept_constraint import (
+    CONJUNCTIVE_PREFIX,
+    conjunctive_atoms,
+    encode_conjunctive,
+)
 from ..model import LayerConfidence
 from ..source_abi import SourceAbiTu, SourceEntity
 from .clang_node_predicates import _ClassifyContext, _location
@@ -47,7 +52,12 @@ from .clang_nodes import (
     _subtree_hash,
 )
 
-CONJUNCTIVE_PREFIX = "conj:"
+__all__ = [
+    "CONJUNCTIVE_PREFIX",
+    "concept_constraint_value",
+    "conjunctive_atoms",
+    "emit_concept",
+]
 
 
 def _param_ids_and_types(req_expr: Mapping[str, Any]) -> tuple[tuple[str, ...], str]:
@@ -92,15 +102,7 @@ def concept_constraint_value(concept_decl: Mapping[str, Any]) -> str | None:
     ]
     if len(exprs) != 1:
         return None
-    return CONJUNCTIVE_PREFIX + ",".join(sorted(set(_atoms(exprs[0]))))
-
-
-def conjunctive_atoms(value: str | None) -> frozenset[str] | None:
-    """The atom set a ``conj:`` value encodes; ``None`` for an opaque value."""
-    if not value or not value.startswith(CONJUNCTIVE_PREFIX):
-        return None
-    body = value[len(CONJUNCTIVE_PREFIX) :]
-    return frozenset(a for a in body.split(",") if a)
+    return encode_conjunctive(_atoms(exprs[0]))
 
 
 def emit_concept(

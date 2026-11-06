@@ -31,7 +31,7 @@ from .evidence_digest import (
     VOLATILE_CAPTURE_FIELDS,
     evidence_digest_of_document,
 )
-from .extension_facts import sync_export_read_fact
+from .extension_facts import sync_model_extension_facts
 from .snapshot_digest_cache import EVIDENCE, memoized_digest, peek_digest
 from .snapshot_encode import _VERBATIM_STR_FIELDS, flat_document_and_carriers
 
@@ -68,7 +68,7 @@ def stored_evidence_digest(snap: AbiSnapshot) -> str | None:
 
 
 def _uncached_snapshot_evidence_digest(snap: AbiSnapshot) -> str:
-    sync_export_read_fact(snap)  # ADR-079: digest what a write would carry
+    sync_model_extension_facts(snap)  # ADR-079: digest what a write would carry
     flat, carried = flat_document_and_carriers(snap)
     return evidence_digest_of_document(
         flat,

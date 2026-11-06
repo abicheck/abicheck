@@ -34,8 +34,12 @@ from ...model.export_read import ExportReadState
 if TYPE_CHECKING:
     from ...model import AbiSnapshot
 
+from ._unobserved_finding import Side, UnobservedFinding
+
 __all__ = [
+    "EXPORT_READ_DIMENSION",
     "EXPORT_READ_NOTE_PREFIX",
+    "export_read_findings",
     "export_read_gap",
     "export_read_notes",
     "recorded_export_reads",
@@ -46,6 +50,7 @@ _GAP_STATES = frozenset({ExportReadState.PARTIAL, ExportReadState.FAILED})
 #: rollup already built out of ``AnalysisAssurance.notes`` instead of
 #: rebuilding them.
 EXPORT_READ_NOTE_PREFIX = "export table not completely read ("
+EXPORT_READ_DIMENSION = "export table completeness"
 
 
 def recorded_export_reads(snap: AbiSnapshot | None) -> dict[str, str]:
@@ -71,6 +76,18 @@ def export_read_notes(states: Mapping[str, Mapping[str, str]]) -> list[str]:
         for side, by_platform in states.items()
         for platform, state in sorted(by_platform.items())
         if ExportReadState(state) in _GAP_STATES
+    ]
+
+
+def export_read_findings(
+    old: AbiSnapshot | None, new: AbiSnapshot
+) -> list[UnobservedFinding]:
+    """One finding per side/platform whose recorded read is a gap."""
+    sides: tuple[tuple[Side, AbiSnapshot | None], ...] = (("old", old), ("new", new))
+    return [
+        UnobservedFinding(EXPORT_READ_DIMENSION, side, note)
+        for side, snap in sides
+        for note in export_read_notes({side: recorded_export_reads(snap)})
     ]
 
 

@@ -163,12 +163,12 @@ def bundle_facts_document_stream(facts: BundleFacts) -> dict[str, Any]:
     """
     from ..model.bundle_facts import document_schema_version
     from .bundle_member_carriers import encode_bundle_member
-    from .extension_facts import sync_export_read_fact
+    from .extension_facts import sync_model_extension_facts
     from .json_stream import LazyItems
     from .wire_extensions import flattening_loses, refuse_unwritable_extensions
 
     for snap in facts.per_library_snapshots.values():
-        sync_export_read_fact(snap)  # before flattening_loses reads the carriers
+        sync_model_extension_facts(snap)  # before flattening_loses reads the carriers
         refuse_unwritable_extensions(snap)
     document = bundle_facts_to_dict(cast("BundleFacts", _FactsWithoutMembers(facts)))
     # Decided up front: the version is written before any member is encoded.

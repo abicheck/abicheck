@@ -3,7 +3,7 @@
     "files": {
       "abicheck/btf_metadata.py": "614321e6140b32e7518deb3991dc9b9421107688c952542808ec4da88a17dc73",
       "abicheck/ctf_metadata.py": "42d3f588c6c4567c2a9d43a3ef5b886a753c37dd5357a4199d81d7ffc60d2109",
-      "abicheck/dumper.py": "5b861344a920e378b9fa5eb2973478a6e72e5a245eceae9b3400df7e8b98fb6e",
+      "abicheck/dumper.py": "fcd2874b1a06387a500f483c4fdc094ea47cf57cba897adfd8e9583fae6bb09b",
       "abicheck/dumper_clang.py": "7ad44027fb5ba4716b5dca353848fd84fc46b712dfe868a2dc297d7373bfba32",
       "abicheck/dwarf_advanced.py": "91cfc7f410a37e7d7ba3ec922ff2944b81253fde3dcfdb806be032087822b339",
       "abicheck/dwarf_metadata.py": "a0621cde6559a0395b00d08aa25cc4cbff74b1121e2083e424e472c44b985512",
@@ -71,7 +71,7 @@
       "abicheck/extract/flat_map_dependency_scope.py": "5fa66ab2f8ebdbc37d735e3dbad3b6fe1ae3907d7a98eab5c6e6257842e2ea07",
       "abicheck/extract/header_ast_backend.py": "1f5b15c126b139c49b702b69a4f626ed7d30f8294e15ad116d61387e96d31f16",
       "abicheck/extract/header_ast_cache_producers.py": "aa85ae5d148526267f600b0972ca89afc27b6b8cb3f51b4c781a1526773600b4",
-      "abicheck/extract/header_ast_fields.py": "29877eb38ce55c0d2dd459ceaca25f112850b3f2a0177abe61a53f3907bd3ee5",
+      "abicheck/extract/header_ast_fields.py": "dfa466a2c4172dc4fe44b44c0d7d051238ac20019a4630dc94464ee46c8eab32",
       "abicheck/extract/header_exclusions.py": "254ca6e4ccf7366b9db516183d6814cb865c279845abe7d05051ac2f72bf0884",
       "abicheck/extract/header_order_witness.py": "40a29ffe7ed3751f9bb8e3bbce7f49011569b9d1d0d99947641d9ba178982966",
       "abicheck/extract/header_scan_memo.py": "56f79b5316354b938b08a5f29779c3aaf40481892d947784ec2adb48ab5e83fb",
@@ -114,7 +114,8 @@
       "abicheck/extract/headers/clang/attributes.py": "4f35afe72ef319265695d3e199e10c9ef0076db4a5238161b33a076fd3a599fe",
       "abicheck/extract/headers/clang/backend.py": "d51b5909f5ba92f18f90160a95417859f7404e564db9b92dee5a1755d563f61f",
       "abicheck/extract/headers/clang/base_resolution.py": "d8841a88a3a57fdb478c16cd9e1fb69d119c35bb90766456b4750bb0fb12e4c8",
-      "abicheck/extract/headers/clang/constraints.py": "e64400bbb73f904d5d390dc8e2530df0e69e3cf40d158901920077da4fe62b7e",
+      "abicheck/extract/headers/clang/concept_constraints.py": "84c3d090cd7bd33dcbd7749d171a355e7ad938b34bd5218036b45c1501787569",
+      "abicheck/extract/headers/clang/constraints.py": "a983103fce6534b18ec8694dd8152c95f1c0626908db92c6698c1082560ffa74",
       "abicheck/extract/headers/clang/context.py": "f4256aadc6bc2ed1cee1cb7b2ad23f2607bdff5eefda8eddabf27f2fe9dd058d",
       "abicheck/extract/headers/clang/enums.py": "7c91b6888bf450d160c29f6e2c624891dc9d5521cb465f43385d2ac09417f120",
       "abicheck/extract/headers/clang/error_header_retry.py": "3153f727c9d1934783a51d6917727a48aeba31e68b3c2462aef6e6b2f489f690",
@@ -145,12 +146,13 @@
       "abicheck/extract/headers/clang/typedefs.py": "0345022b18ed0a011c4a1420e7b85e77dc3437f1339d5572ff28af29aebc0f3b",
       "abicheck/extract/headers/clang/vtable.py": "ec35a377463d0191e013684713b5a049e78a766a16cf74e71354d2e57e3a2931",
       "abicheck/extract/headers/clang_header_argv.py": "644a6454c6a3da3ab5f184cc2d9778d51f141f1e528f86162cccb815f9b17ddb",
-      "abicheck/extract/headers/compile_provenance.py": "5c800725da59c2c3aeac4e85118dcd54edd6ec5c75875e483978b78a750ec0af",
-      "abicheck/extract/headers/manifest.py": "4f0e740bfeb88aa4363176f2defe422826a9e2cd91b03cd317f6f86f4eec5066",
+      "abicheck/extract/headers/compile_provenance.py": "e4a6bcf30627807081f38f909cd136e5203132c099ea225971ef1d4cf849d82a",
+      "abicheck/extract/headers/concept_scan.py": "547fbfd499fe75fb51bef714ebcd0f8a3f97f621e7bf631224ecead0a3fe0c35",
+      "abicheck/extract/headers/manifest.py": "e0a808fafd37745cd964f4a304820c65a25e2f9d99207abd88312f725ec4bd7e",
       "abicheck/extract/headers/preprocessor_branches.py": "d3a409d126b0dd1b19a634d4aad25660d372dad931b310cfbaaefc9d769b244d",
       "abicheck/extract/headers/scope_segments.py": "d413edec257eb1334c829263770b66dc2eda3d263c765f699eac9f7e3ace9e65",
       "abicheck/extract/headers/sysinc.py": "f82bd29033ed9d21f2b2af9a29352eb2b52b9c01ba7a09f47509af89017a359a",
-      "abicheck/extract/headers/template_default_scan.py": "3b56f9307028934aa2126de14fa9847333bdc990f0943445604b255e494060e8",
+      "abicheck/extract/headers/template_default_scan.py": "ce339dc8dbb5ad58c29e0b09dbbaa2fb6aed40af50bd015b28849cbf7c02b7d2",
       "abicheck/extract/headers/toolchain.py": "36d9f6dfda706653d6d41875f00bb9ada3975a1f5efb512f8c0a6b0db0cc54c6",
       "abicheck/extract/library_export_facts.py": "02f4f9bdc8ed4ec7215c3f40e4d4183e695d304c44f0ccaa44ec4cd18b72a927",
       "abicheck/extract/macho_build_signals.py": "c277bfdd55f26aae61af66c8fa6c5cdc5fa45acc49a3ae513af5899417db88bb",
@@ -198,9 +200,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "2a2b032e15d4f045fb0ea68c039822e6fe6318ede028b94b4ee9fde6cf93dc5c",
-    "generation": 40,
-    "reason": "merge main into #1928: lazy header-order witness (deferred witness, order-proof retry with linker-script liveness); recorded output unchanged"
+    "fingerprint": "7a1ddb5ef087cec5a496900783518843f92891aacefcc51cfc3e60f3e546d8ae",
+    "generation": 42,
+    "reason": "bumped to 42 for a semantic change"
   },
   "resolver": {
     "files": {
@@ -257,7 +259,7 @@
       "abicheck/buildsource/source_extractors/clang_source_edges.py": "c9b8c3daacd02c4913b486a6ac658b435744243ed4433f14792588f67ef800e9",
       "abicheck/buildsource/source_extractors/compile_action.py": "2712bfa332f110f9fbd623531d4ccab7bfec7749c3fc70ae91887b5988205c40",
       "abicheck/buildsource/source_extractors/compile_invocation.py": "5e83959c3a8a156837d4766fe41406bb09933779d430ca8b188ee4b0881acf0a",
-      "abicheck/buildsource/source_extractors/concept_constraints.py": "3256e94546bc48f4e3d83aab5a8601bbaeacf92fef25d1cb4c593eb11eb18e2e",
+      "abicheck/buildsource/source_extractors/concept_constraints.py": "0f88fccdde860b7f7c717468b3940b9b93f6e39711682cad4452fbe2a7ea0127",
       "abicheck/buildsource/source_extractors/launcher_env.py": "a84547b10b80a8d02c07c5f2a1949fdf661afc0abeaf7dae486e3a1d7762b470",
       "abicheck/buildsource/source_extractors/launcher_env_path.py": "9f746dd8170e1c6d2ff7289998e0e8738fe0bdc4c35edb06c39db2a5ebd5c16d",
       "abicheck/buildsource/source_graph.py": "28cb2b485ffcf276e9c751b99261cc2d3f4ab2ad440612ddb3111bc307372652",
@@ -273,8 +275,8 @@
       "abicheck/buildsource/type_graph.py": "a028a875057cd0cbf2930a431bfa1e579f7b770e0d124cbcfe715724e89d12e5",
       "abicheck/buildsource/type_graph_index.py": "7375f7baec7ceb3dd4a52a489b89e5a3571750dffca7490d1c5870301d55202d"
     },
-    "fingerprint": "f2b258e28623732d9b5ff2becbeff2ca9194ca4d0e9f5db5fd2b24d6c613a4d6",
+    "fingerprint": "cd673b0c33f993a427dd3703a3349eba32d27596949c39dcf3798ccba5a9c763",
     "generation": 13,
-    "reason": "bumped to 13 for a semantic change"
+    "reason": "conjunctive-atom helpers moved to model/concept_constraint.py and re-exported; the recorded concept value is byte-identical"
   }
 }

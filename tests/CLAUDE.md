@@ -107,8 +107,15 @@ CI's `pr` profile.
   native `validate_examples.py` lanes a missing `expected_kinds` entry FAILs
   the cell unless `ground_truth.json`'s `expected_kinds_gaps` declares it for
   that header frontend and mode; a declaration that no longer reproduces
-  FAILs as stale. Also validates that field. Tests:
+  FAILs as stale. `allowed_kinds` declares toolchain-incidental kinds that
+  never fail (`TOOLCHAIN_INCIDENTAL_KINDS` is the shared set). Also validates
+  both fields. Tests:
   `test_expected_kinds_gate.py`.
+- `catalog_kind_parity.py` — cross-cell kinds gates over the nightly's
+  `validate_examples.py --json` artifacts: build-source must not lose a
+  debug-headers kind (`lane_kind_exceptions`), and castxml/clang must report
+  the same kinds (`frontend_kind_differences`, or an `expected_kinds_gaps`
+  entry); stale declarations fail. Tests: `test_catalog_kind_parity.py`.
 - `conftest.py` — shared fixtures, including temp-dir helpers and
   binary-skip markers.
 - `_strict_process.py` — `StrictProcessRunner`, the scripted stand-in for

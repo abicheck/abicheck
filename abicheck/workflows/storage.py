@@ -71,10 +71,10 @@ def attach_write_carriers(payload: dict[str, Any], snap: Any) -> dict[str, Any]:
     a writer that sections the payload itself (``dump``) writes them back.
     ADR-079's ``export_read`` fact is synced from the platform blocks first.
     Returns *payload*."""
-    from ..storage.extension_facts import sync_export_read_fact
+    from ..storage.extension_facts import sync_model_extension_facts
     from ..storage.wire_extensions import extensions_of
 
-    sync_export_read_fact(snap)
+    sync_model_extension_facts(snap)
     carried = extensions_of(snap)
     if carried is not None:
         payload[WIRE_EXTENSIONS_KEY] = carried

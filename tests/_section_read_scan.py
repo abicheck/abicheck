@@ -32,6 +32,7 @@ DERIVED_ATTRS: dict[str, str | None] = {
     "variable_map": "declarations",
     "canonical_ir": "semantic_ir",
     "stale_fact_families": "debug",
+    "cxx_concept_constraints": "debug",
     "from_headers_inferred": "debug",
     "header_declaration_ids": None,
     "projection_unavailable": None,

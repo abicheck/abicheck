@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import TypedDict
 
 from ...buildsource.redaction import DEFAULT_REDACTION
+from .concept_scan import concept_header_scan
 from .template_default_scan import (
     alias_or_variable_template_default_scan,
     template_default_header_scan,
@@ -42,6 +43,7 @@ class _AstCompileProvenance(TypedDict):
     ast_compile_args: tuple[str, ...]
     ast_sysroot: str | None
     template_default_header_scan: bool | None
+    cxx_concept_header_scan: bool | None
 
 
 def _ast_compile_provenance(
@@ -90,13 +92,19 @@ def _ast_compile_provenance(
         abi_dialect=(ast_toolchain or {}).get("abi_dialect"),
     )
     args = _combined_option_tokens(gcc_options, gcc_option_tokens)
+    # A header parse with empty toolchain metadata (the Mach-O and PE dump
+    # paths, observed on macOS/Windows CI) is castxml's: the same default
+    # ``dumper`` and ``manifest`` already apply. Without it the
+    # producer-gated header scans below silently skipped those platforms.
+    producer = (ast_toolchain or {}).get("producer") or ("castxml" if headers else None)
     return {
         "ast_resolved_standard": resolved_standard,
         "ast_cplusplus_macro": _cplusplus_macro_for_standard(resolved_standard),
         "ast_compile_args": tuple(DEFAULT_REDACTION.argv(args)),
         "ast_sysroot": DEFAULT_REDACTION.path(str(sysroot)) if sysroot else None,
-        "template_default_header_scan": _template_default_scan(
-            headers, (ast_toolchain or {}).get("producer")
+        "template_default_header_scan": _template_default_scan(headers, producer),
+        "cxx_concept_header_scan": _concept_scan(
+            headers, producer, (ast_toolchain or {}).get("resolved_lang_mode")
         ),
     }
 
@@ -111,4 +119,20 @@ def _template_default_scan(headers: list[Path], producer: str | None) -> bool | 
         return template_default_header_scan(headers)
     if producer == "clang":
         return alias_or_variable_template_default_scan(headers)
+    return None
+
+
+def _concept_scan(
+    headers: list[Path], producer: str | None, lang_mode: str | None = None
+) -> bool | None:
+    """Whether the parsed headers define a C++20 concept or spell a
+    ``requires`` clause. Neither castxml nor clang models them, so both scan;
+    other producers (hybrid, none) get no scan: ``None``. A C-mode parse has
+    no concepts (``requires`` is an ordinary identifier there), so it is not
+    scanned either: ``None``. An unreadable header yields ``True`` (it
+    cannot rule a concept out)."""
+    if lang_mode == "c":
+        return None
+    if producer in ("castxml", "clang"):
+        return concept_header_scan(headers)
     return None

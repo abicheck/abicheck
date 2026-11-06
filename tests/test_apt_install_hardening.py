@@ -187,6 +187,8 @@ exit 1
     env = dict(os.environ)
     env["PATH"] = str(bindir) + os.pathsep + env["PATH"]
     env["APT_INSTALL_RETRY_DELAY"] = "0"
+    # Never let the mirror fallback touch the host's real /etc/apt.
+    env["APT_INSTALL_APT_DIR"] = str(tmp_path / "no-apt-dir")
     return env, log
 
 
@@ -1070,3 +1072,65 @@ class TestLogicalLines:
         assert from_helper == from_bash, (
             f"{script!r}: helper produced {from_helper}, bash ran {from_bash}"
         )
+
+
+@requires_apt_harness
+class TestStalledMirrorFallback:
+    """A stalled Azure archive mirror (cmake timing out on every attempt in
+    CI) is not retried against itself: from the second attempt apt is
+    pointed at the primary Ubuntu archive. Executed against a fake apt dir."""
+
+    _AZURE = "http://azure.archive.ubuntu.com/ubuntu"
+
+    def _apt_dir(self, tmp_path: Path) -> Path:
+        apt_dir = tmp_path / "etc-apt"
+        (apt_dir / "sources.list.d").mkdir(parents=True)
+        (apt_dir / "apt-mirrors.txt").write_text(
+            f"{self._AZURE}/\tpriority:1\n", encoding="utf-8"
+        )
+        (apt_dir / "sources.list.d" / "ubuntu.sources").write_text(
+            f"Types: deb\nURIs: {self._AZURE}/\nSuites: noble\n", encoding="utf-8"
+        )
+        (apt_dir / "sources.list.d" / "vendor.list").write_text(
+            "deb https://packages.microsoft.com/ubuntu/24.04/prod noble main\n",
+            encoding="utf-8",
+        )
+        return apt_dir
+
+    @pytest.mark.parametrize("failures", [1, 2])
+    def test_retry_switches_to_the_primary_archive(
+        self, tmp_path: Path, failures: int
+    ) -> None:
+        env, log = _fake_apt_env(tmp_path, install_fail_first=failures)
+        apt_dir = self._apt_dir(tmp_path)
+        env["APT_INSTALL_APT_DIR"] = str(apt_dir)
+        result = _run(env, "gcc cmake")
+        assert result.returncode == 0, result.stdout + result.stderr
+        for name in ("apt-mirrors.txt", "sources.list.d/ubuntu.sources"):
+            text = (apt_dir / name).read_text(encoding="utf-8")
+            assert "azure.archive" not in text
+            assert "http://archive.ubuntu.com/ubuntu" in text
+        vendor = (apt_dir / "sources.list.d" / "vendor.list").read_text(
+            encoding="utf-8"
+        )
+        assert "packages.microsoft.com" in vendor
+        assert "switching apt" in result.stdout
+
+    def test_first_attempt_success_leaves_the_mirror_alone(
+        self, tmp_path: Path
+    ) -> None:
+        env, _ = _fake_apt_env(tmp_path)
+        apt_dir = self._apt_dir(tmp_path)
+        env["APT_INSTALL_APT_DIR"] = str(apt_dir)
+        result = _run(env, "gcc")
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "azure.archive" in (apt_dir / "apt-mirrors.txt").read_text(
+            encoding="utf-8"
+        )
+
+    def test_install_bounds_each_download(self, tmp_path: Path) -> None:
+        env, log = _fake_apt_env(tmp_path)
+        env["APT_INSTALL_APT_DIR"] = str(tmp_path / "none")
+        assert _run(env, "gcc").returncode == 0
+        (install,) = _installs(log)
+        assert "Acquire::http::Timeout=" in install and "Acquire::Retries=" in install

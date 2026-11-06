@@ -38,32 +38,59 @@ from ...model.section_availability import SectionStatus
 if TYPE_CHECKING:
     from ...model import AbiSnapshot
 
-__all__ = ["section_availability_entries", "unreadable_section_gap"]
+from ._unobserved_finding import Side, UnobservedFinding, gap_and_notes
+
+__all__ = [
+    "UNREADABLE_SECTION_DIMENSION",
+    "section_availability_entries",
+    "unreadable_section_findings",
+    "unreadable_section_gap",
+]
+
+UNREADABLE_SECTION_DIMENSION = "stored sections a load could not use"
+
+
+def unreadable_section_findings(
+    old: AbiSnapshot | None, new: AbiSnapshot
+) -> list[UnobservedFinding]:
+    """Each section a side could not use (status-lowering), then each
+    ``unrecorded`` section (informational: never lowers status)."""
+    found: dict[tuple[Side, str], str] = {}
+    unrecorded: list[UnobservedFinding] = []
+    sides: tuple[tuple[Side, AbiSnapshot | None], ...] = (("old", old), ("new", new))
+    for side, snap in sides:
+        if snap is None:
+            continue
+        for section, diagnostic in getattr(snap, "unreadable_sections", ()):
+            found.setdefault((side, section), diagnostic)
+        unrecorded.extend(
+            UnobservedFinding(
+                UNREADABLE_SECTION_DIMENSION,
+                side,
+                f"section {entry.section!r} of the {side} snapshot has no recorded "
+                "availability and is absent from the stored document; read as its "
+                "defaults (a document from before the section availability table)",
+                lowers_status=False,
+            )
+            for entry in getattr(snap, "section_availability", ())
+            if entry.status is SectionStatus.UNRECORDED
+        )
+    return [
+        UnobservedFinding(
+            UNREADABLE_SECTION_DIMENSION,
+            side,
+            f"not comparable ({side} snapshot): {diagnostic}; every "
+            "analysis reading that section is not evaluated",
+        )
+        for (side, _section), diagnostic in found.items()
+    ] + unrecorded
 
 
 def unreadable_section_gap(
     old: AbiSnapshot | None, new: AbiSnapshot
 ) -> tuple[bool, list[str]]:
     """``(gap, notes)``: whether either side holds a section it could not use."""
-    found: dict[str, str] = {}
-    unrecorded: list[str] = []
-    for side, snap in (("old", old), ("new", new)):
-        if snap is None:
-            continue
-        for section, diagnostic in getattr(snap, "unreadable_sections", ()):
-            found.setdefault(f"{side}:{section}", diagnostic)
-        unrecorded.extend(
-            f"section {entry.section!r} of the {side} snapshot has no recorded "
-            "availability and is absent from the stored document; read as its "
-            "defaults (a document from before the section availability table)"
-            for entry in getattr(snap, "section_availability", ())
-            if entry.status is SectionStatus.UNRECORDED
-        )
-    return bool(found), [
-        f"not comparable ({key.split(':', 1)[0]} snapshot): {diagnostic}; every "
-        "analysis reading that section is not evaluated"
-        for key, diagnostic in found.items()
-    ] + unrecorded
+    return gap_and_notes(unreadable_section_findings(old, new))
 
 
 def section_availability_entries(

@@ -12,7 +12,7 @@
     "abicheck/comparability_profile.py(_toolchain_identity_status)": 14,
     "abicheck/compare/debug_layout_view.py(_layout_channel)": 140,
     "abicheck/compare/debug_layout_view.py(debug_layout_view)": 140,
-    "abicheck/compare/declined_comparisons.py(declined_scope)": 705,
+    "abicheck/compare/declined_comparisons.py(declined_scope)": 719,
     "abicheck/compare/dedup_key.py(hashable_value)": 1661,
     "abicheck/compare/detection_memo.py(detection_memo_scope)": 14,
     "abicheck/compare/detection_memo.py(memoized)": 777,
@@ -236,7 +236,7 @@
     "abicheck/model/signature_normalization.py(_strip_cv_tokens_outside_nesting)": 35,
     "abicheck/model/signature_normalization.py(canonicalize_function_signature_param_type)": 563,
     "abicheck/model/snapshot.py(AbiSnapshot.canonical_ir)": 488,
-    "abicheck/model/snapshot.py(AbiSnapshot.declarations)": 4703,
+    "abicheck/model/snapshot.py(AbiSnapshot.declarations)": 4647,
     "abicheck/model/snapshot.py(AbiSnapshot.function_map)": 570,
     "abicheck/model/snapshot.py(AbiSnapshot.index)": 196,
     "abicheck/model/snapshot.py(AbiSnapshot.type_by_name)": 312,
@@ -277,9 +277,7 @@
     "abicheck/name_classification.py(is_local_rtti_symbol)": 40,
     "abicheck/name_classification.py(is_non_abi_surface_type)": 1157,
     "abicheck/policy/analysis_assurance/_comparability.py(unverified_dimensions)": 14,
-    "abicheck/policy/analysis_assurance/_template_defaults.py(_unrecorded_function_pattern_count)": 28,
-    "abicheck/policy/analysis_assurance/_template_defaults.py(_unrecorded_pattern_count)": 28,
-    "abicheck/policy/analysis_assurance/_template_defaults.py(template_default_gap)": 14,
+    "abicheck/policy/analysis_assurance/_export_read.py(recorded_export_reads)": 28,
     "abicheck/policy/binary_gate_marker.py(is_binary_gate_demoted)": 3024,
     "abicheck/policy/captured_type_identities.py(present_identities)": 2388,
     "abicheck/policy/class_metadata_identity.py(_implicit_copy_assign_owner)": 204,
@@ -308,5 +306,5 @@
   },
   "mode": "default",
   "n": 40,
-  "total": 239777
+  "total": 239693
 }

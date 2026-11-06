@@ -214,6 +214,7 @@ def run_tu_fragment(
         frontend_context_kind=_parser_frontend_context_kind(parser),
         semantic_ir=fields.semantic_ir,
         preprocessor_hidden=parser_preprocessor_hidden(parser),
+        cxx_concept_constraints=fields.cxx_concept_constraints,
     )
 
 
@@ -571,6 +572,7 @@ class ElfHeaderAstResult:
     # `extract/semantic_normalizer.py`'s own docstring for each slice's scope.
     semantic_ir: SemanticIR | None = None
     preprocessor_hidden: dict[str, tuple[str, ...]] | None = None
+    cxx_concept_constraints: dict[str, str] | None = None
 
     def typedef_snapshot_fields(self) -> dict[str, Any]:
         """The typedef maps a snapshot carries, under their snapshot field names."""
@@ -715,6 +717,7 @@ def resolve_header_ast_result(
             frontend_context_kind=fragment.frontend_context_kind,
             semantic_ir=fragment.semantic_ir,
             preprocessor_hidden=fragment.preprocessor_hidden,
+            cxx_concept_constraints=fragment.cxx_concept_constraints,
         )
         provenance_headers = tuple(headers)
 
@@ -738,6 +741,7 @@ def resolve_header_ast_result(
         is_clang=merged.ast_producer == "clang",
         provenance_headers=provenance_headers,
         preprocessor_hidden=merged.preprocessor_hidden,
+        cxx_concept_constraints=merged.cxx_concept_constraints,
         # A real manifest carries its occurrence-preserving merged IR.
         semantic_ir=(
             merged.semantic_ir

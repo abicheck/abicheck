@@ -456,3 +456,94 @@ def test_known_gap_headings_are_open_entries_only(tmp_path: Path) -> None:
 def test_known_gap_headings_reads_the_real_index() -> None:
     headings = gate.known_gap_headings()
     assert any(h.startswith(_HEADING) for h in headings)
+
+
+# --- allowed_kinds: toolchain-incidental kinds (required vs. allowed split) ---
+
+_ALLOWED = ["needed_added", "symbol_version_required_added"]
+
+
+@pytest.mark.parametrize(
+    "emitted",
+    _subsets(["a_kind", "b_kind", "c_kind", *_ALLOWED, "x_kind"]),
+    ids=lambda s: "+".join(sorted(s)) or "none",
+)
+def test_allowed_kinds_never_decide_a_cell(emitted: frozenset[str]) -> None:
+    """Exhaustive over every emitted subset: the cell fails exactly when a
+    required kind is missing or a forbidden kind is present; the allowed kinds'
+    presence or absence never changes that (hand-written oracle)."""
+    entry = _entry(allowed_kinds=list(_ALLOWED))
+    should_fail = not {"a_kind", "b_kind"} <= emitted or "c_kind" in emitted
+    verdict = gate.evaluate(entry, emitted, frontend="clang", mode="debug-headers")
+    assert verdict.fails is should_fail
+    assert verdict.signal == ("mismatch" if should_fail else "ok")
+    assert gate.validate_entry("caseX", entry, _HEADINGS) == []
+
+
+def test_required_kind_missing_fails_even_with_allowed_kinds_present() -> None:
+    entry = _entry(allowed_kinds=list(_ALLOWED))
+    verdict = gate.evaluate(
+        entry, ["a_kind", *_ALLOWED], frontend="clang", mode="debug-headers"
+    )
+    assert verdict.fails is True
+    assert "expected_kinds missing: ['b_kind']" in verdict.detail
+
+
+@pytest.mark.parametrize("other", ["expected_kinds", "expected_absent_kinds"])
+def test_a_kind_both_allowed_and_checked_is_an_authoring_error(other: str) -> None:
+    kind = "a_kind" if other == "expected_kinds" else "c_kind"
+    errors = gate.validate_entry("caseX", _entry(allowed_kinds=[kind]), _HEADINGS)
+    assert errors == [
+        f"caseX: ['{kind}'] in both allowed_kinds and {other}; a kind is "
+        "either required, forbidden, or toolchain-incidental"
+    ]
+
+
+@pytest.mark.parametrize("bad", [[], "needed_added", [""], ["k", "k"], [1]])
+def test_malformed_allowed_kinds_is_rejected(bad: object) -> None:
+    errors = gate.validate_entry("caseX", _entry(allowed_kinds=bad), _HEADINGS)
+    assert errors == ["caseX: allowed_kinds must be a non-empty list of unique names"]
+
+
+def test_a_gap_cannot_declare_an_allowed_kind() -> None:
+    entry = _entry(_gap(["needed_added"]), allowed_kinds=["needed_added"])
+    errors = gate.validate_entry("caseX", entry, _HEADINGS)
+    assert any("'needed_added' is in neither expected_kinds" in e for e in errors)
+
+
+def test_unexpected_kinds_excludes_required_allowed_and_shared_not_forbidden() -> None:
+    entry = _entry(
+        allowed_kinds=["needed_added"],
+        expected_absent_kinds=["c_kind", "needed_removed"],
+    )
+    got = [
+        "a_kind",
+        "needed_added",
+        "fortify_source_weakened",
+        "needed_removed",
+        "c_kind",
+        "x_kind",
+    ]
+    assert gate.unexpected_kinds(entry, got) == ("c_kind", "needed_removed", "x_kind")
+
+
+def test_run_case_reports_unexpected_kinds_without_failing(fake_lane: _Lane) -> None:
+    entry = _entry(allowed_kinds=["needed_added"])
+    res = fake_lane(entry, ["a_kind", "b_kind", "needed_added", "x_kind"])
+    assert res.status == "PASS"
+    assert res.unexpected_kinds == ("x_kind",)
+
+
+def test_catalog_allowed_kinds_draw_from_the_shared_incidental_set() -> None:
+    """Every catalog allowed_kinds entry is a documented toolchain-incidental
+    kind, so the field cannot become a general escape hatch."""
+    root = Path(__file__).resolve().parent.parent
+    verdicts = json.loads((root / "catalog/ground_truth.json").read_text())["verdicts"]
+    stray = {
+        (case, kind)
+        for case, meta in verdicts.items()
+        for kind in meta.get("allowed_kinds", [])
+        if kind not in gate.TOOLCHAIN_INCIDENTAL_KINDS
+    }
+    assert stray == set()
+    assert "allowed_kinds" in verdicts["case21_method_became_static"]

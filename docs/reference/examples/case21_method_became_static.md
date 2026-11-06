@@ -10,6 +10,7 @@
 | **Flags** | ABI break, API break |
 | **Detected `ChangeKind`s** | `func_static_changed` |
 | **Source files** | `catalog/cases/case21_method_became_static/` |
+| **Toolchain-dependent `ChangeKind`s** | `fortify_source_weakened`, `imported_symbol_added`, `needed_added`, `needed_removed`, `runtime_floor_raised`, `symbol_version_required_added`, `symbol_version_required_added_compat`, `symbol_version_required_removed` (may or may not appear; not part of what the case tests) |
 | **Rule family** | [`method-became-static`](by-rule/method-became-static.md) |
 | **Subject** | [Function-signature and source-API changes](by-subject/function-signature-and-source-api-changes.md) |
 

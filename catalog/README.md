@@ -126,6 +126,14 @@ the way it previously did (stale at a 169-case catalog for several releases).
   The loader (`expected_kinds_gate.validate_ground_truth`, run by `validate_examples.py` and
   `tests/test_expected_kinds_gate.py`) rejects an unknown frontend or mode, a kind that is
   in neither expected list, a missing reason, and a `known_gap` that starts no heading.
+  `expected_kinds` lists only what a case *tests* (required). Kinds the build toolchain
+  may or may not produce (a GCC 13.3 -> 14.2 move flipped `needed_added`,
+  `symbol_version_required_*`, `runtime_floor_raised`, `imported_symbol_added` and
+  `fortify_source_weakened` on case21/114/116) go in `allowed_kinds`: present or absent,
+  they never fail a cell and are excluded from the reported-only `unexpected_kinds` row
+  field. A kind in both `allowed_kinds` and either expected list is a loader error, so an
+  allowed kind can never rescue a forbidden one. `TOOLCHAIN_INCIDENTAL_KINDS` in
+  `tests/expected_kinds_gate.py` documents the shared set these declarations draw from.
   The older unscoped `known_kind_gap`/`known_kind_gap_note` fields are retired. The
   release-headers/stripped-headers lanes keep `kinds_strict` reported-only: they lose
   DWARF by design and are guarded by `check_stripped_fp.py`. So do targets other than

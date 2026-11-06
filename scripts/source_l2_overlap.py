@@ -213,10 +213,12 @@ L2_ONLY_KINDS: frozenset[str] = frozenset(
 # that overlap it. Notes say *why* the row has its label, from the emitters.
 _JUDGED: dict[str, Row] = {
     "CONCEPT_TIGHTENED": Row(
-        L4_ONLY, note="concept constraint; L2 has no concept facts"
+        L4_ONLY,
+        note="concept constraint; the clang header detector (compare/concept_constraints.py) is outside the diff_types/diff_symbols L2 scope and deduplicated by source_replay_twins",
     ),
     "CONCEPT_CONSTRAINT_CHANGED": Row(
-        L4_ONLY, note="concept constraint, direction unproven; L2 has no concept facts"
+        L4_ONLY,
+        note="concept constraint, direction unproven; clang header twin deduplicated by source_replay_twins",
     ),
     "HEADER_ONLY_FUNCTION_PARAMS_CHANGED": Row(
         DUPLICATE,

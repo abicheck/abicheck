@@ -12,8 +12,6 @@
 | **Source files** | `catalog/cases/case191_header_only_graph_field_type/` |
 | **Related rules** | [`compatible-type-added`](by-rule/compatible-type-added.md), [`embedded-type-size-increased`](by-rule/embedded-type-size-increased.md), [`public-api-gains-internal-dependency`](by-rule/public-api-gains-internal-dependency.md), [`type-field-added-compatible`](by-rule/type-field-added-compatible.md) |
 | **Subject** | [Public API depends on an internal declaration](by-subject/internal-dependency-reachability.md) |
-| **Known kind gap (castxml; build-source)** | `public_api_internal_dependency_added` — see note below |
-| **Known kind gap (clang; build-source)** | `public_api_internal_dependency_added` — see note below |
 
 **Category:** Type Layout | **Verdict:** 🔴 BREAKING
 
@@ -140,12 +138,6 @@ instead of embedding the internal type directly.
 - `case189_public_function_private_parameter_type` — same finding family via `DECL_HAS_TYPE` (a private parameter type), real compiled example.
 
 ---
-
-## Ground-truth provenance
-
-**Known kind gap (castxml):** dump --build-info embeds a build pack whose L5 graph has no SOURCE_DECLARES public closure, and resolve_l5_source_graph prefers it over the header graph that has one, so the public-to-internal reach is never evaluated at build-source depth; the debug-headers lane reports the kind. (known gap: A `--build-info` dump's L5 graph displaces the header graph)
-
-**Known kind gap (clang):** dump --build-info embeds a build pack whose L5 graph has no SOURCE_DECLARES public closure, and resolve_l5_source_graph prefers it over the header graph that has one, so the public-to-internal reach is never evaluated at build-source depth; the debug-headers lane reports the kind. (known gap: A `--build-info` dump's L5 graph displaces the header graph)
 
 ## Source files
 

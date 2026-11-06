@@ -55,6 +55,7 @@ from ..storage.header_ast_cache import (
     retain_ast_context_object,
     run_ast_acquisition,
 )
+from .headers.clang.concept_constraints import collect_cxx_concept_constraints
 from .semantic_normalizer import normalize_header_ast
 
 __all__ = ["AST_SCOPE_ATTRIBUTES", "HeaderAstFields", "parse_header_ast_fields"]
@@ -103,6 +104,21 @@ class HeaderAstFields:
     #: Schema v69: each typedef's target ABI fact (see AbiSnapshot.typedef_abi_facts).
     typedef_abi_facts: dict[str, Fact[AbiFundamental]] = field(
         default_factory=dict, kw_only=True
+    )
+    #: The clang parse's C++20 concept/template-constraint table; ``None`` for
+    #: castxml, a C parse, or no declared public set (not modelled).
+    cxx_concept_constraints: dict[str, str] | None = field(default=None, kw_only=True)
+
+
+def _concept_constraints(parser: object) -> dict[str, str] | None:
+    """The concept table of a C++ clang parse (``None`` for any other)."""
+    if not getattr(parser, "_is_cxx", False):
+        return None
+    return collect_cxx_concept_constraints(
+        getattr(parser, AST_SCOPE_ATTRIBUTES[0], None),
+        getattr(parser, "_pub_header_segs", []),
+        getattr(parser, "_pub_dir_segs", []),
+        bool(getattr(parser, "_have_public_set", False)),
     )
 
 
@@ -183,6 +199,7 @@ def _parse_header_ast_legacy(parser: _HeaderAstParser) -> HeaderAstFields:
         constant_entity_ids=constant_entity_ids,
         # Replaced before this private intermediate leaves this module.
         semantic_ir=SemanticIR(),
+        cxx_concept_constraints=_concept_constraints(parser),
     )
 
 

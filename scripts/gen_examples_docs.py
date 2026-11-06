@@ -335,6 +335,7 @@ class Case:
     detectability: str | None = None
     known_detector_gap: str | None = None
     expected_kinds_gaps: object = None  # catalog_kind_gaps renders it
+    allowed_kinds: tuple[str, ...] = ()  # catalog_kind_gaps.allowed_row
     # Taxonomy (docs/contribute/plans/examples-catalog-split.md, Phase 1/2):
     # surfaced on the case page so a reader can see "is this an atomic rule
     # or a composed scenario" and "is this a duplicate/variant of another
@@ -394,6 +395,7 @@ def _read_case(name: str, meta: dict, taxonomy: dict) -> Case:
         detectability=meta.get("detectability"),
         known_detector_gap=meta.get("known_detector_gap"),
         expected_kinds_gaps=meta.get("expected_kinds_gaps"),
+        allowed_kinds=tuple(meta.get("allowed_kinds", ())),
         entity=taxonomy.get("entity", "rule"),
         scenario_kind=taxonomy.get("scenario_kind"),
         operation=taxonomy.get("operation", "compare"),
@@ -524,6 +526,7 @@ def _meta_table(case: Case) -> str:
         f"| **Detected `ChangeKind`s** | {kinds} |\n"
         f"| **Source files** | `catalog/cases/{case.name}/` |\n"
     )
+    rows += catalog_kind_gaps.allowed_row(case.allowed_kinds)
     if case.ecosystem != "generic":
         eco_link = f"[{ECOSYSTEM_LABEL.get(case.ecosystem, case.ecosystem)}](by-ecosystem/{case.ecosystem}.md)"
         rows += f"| **Ecosystem** | {eco_link} |\n"
