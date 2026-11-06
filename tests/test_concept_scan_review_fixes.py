@@ -318,3 +318,39 @@ def test_empty_toolchain_metadata_still_scans_like_castxml(
     assert hybrid["cxx_concept_header_scan"] is None
     none = _ast_compile_provenance([], None, (), None, ast_toolchain=toolchain)
     assert none["cxx_concept_header_scan"] is None
+
+
+@pytest.mark.parametrize(
+    ("old_fallback", "new_fallback", "sides"),
+    [
+        (None, None, []),
+        ("mangling-fallback", None, ["old"]),
+        (None, "header-backend-unavailable", ["new"]),
+        ("mangling-fallback", "mangling-fallback", ["old", "new"]),
+    ],
+)
+def test_export_table_fallback_lowers_assurance(
+    old_fallback: str | None, new_fallback: str | None, sides: list[str]
+) -> None:
+    """A dump given headers that fell back to the export table never reads
+    ``complete``: its header declarations were never assessed. Checked
+    through ``checker.compare``, not only the gap helper."""
+    from abicheck.checker import compare
+    from abicheck.policy.analysis_assurance._scope_fallback import (
+        SCOPE_FALLBACK_DIMENSION,
+    )
+
+    old = AbiSnapshot(library="l", version="1", scope_fallback=old_fallback)
+    new = AbiSnapshot(library="l", version="2", scope_fallback=new_fallback)
+    aa = compare(old, new).analysis_assurance
+    named = [
+        s
+        for s in ("old", "new")
+        if any(
+            n.startswith(SCOPE_FALLBACK_DIMENSION) and f" {s} snapshot" in n
+            for n in aa.notes
+        )
+    ]
+    assert named == sides
+    if sides:
+        assert aa.status == "partial"

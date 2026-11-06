@@ -48,6 +48,7 @@ from ._graph_completeness import _graph_completeness
 from ._layout import layout_unverified_detectors as _layout_unverified_detectors
 from ._manifest_layers import _manifest_layer_incompleteness
 from ._result import AnalysisAssurance, AssuranceStatus
+from ._scope_fallback import scope_fallback_gap
 from ._target_accounting import _target_accounting
 from ._template_defaults import template_default_gap
 from ._translation_units import _translation_units
@@ -209,6 +210,8 @@ def compute_analysis_assurance(
     notes.extend(template_notes)
     concept_gap, concept_notes = concept_constraint_gap(old, new)
     notes.extend(concept_notes)
+    fallback_gap, fallback_notes = scope_fallback_gap(old, new)
+    notes.extend(fallback_notes)
     projection_gap, projection_notes = depth_projection_gap(old, new)
     notes.extend(projection_notes)
     unreadable_gap, unreadable_notes = unreadable_section_gap(old, new)
@@ -276,6 +279,7 @@ def compute_analysis_assurance(
         or is_comparability_bounded(result.comparability_assurance)
         or template_defaults_gap
         or concept_gap
+        or fallback_gap
         or projection_gap
         or unreadable_gap
         or export_read_unreliable

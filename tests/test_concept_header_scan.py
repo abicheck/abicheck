@@ -40,6 +40,7 @@ from abicheck.policy.analysis_assurance._concepts import (
     CONCEPT_GAP_DIMENSION,
     concept_constraint_gap,
 )
+from abicheck.policy.analysis_assurance._scope_fallback import SCOPE_FALLBACK_DIMENSION
 
 # (id, header text, declares a concept or requires-clause)
 _HEADERS = [
@@ -216,7 +217,11 @@ def test_case105_concept_tightening_reads_partial_with_the_dimension_named(
         "new_scan": _snapshot_scan(tmp_path / "v2.json"),
     }
     assert assurance["status"] == "partial", diagnostics
-    assert len(named) == 2, diagnostics
+    # Each side names either the concept dimension (headers parsed: Linux/ELF)
+    # or the export-table fallback (the header-only template surface matches
+    # no Mach-O/PE export, so the headers were discarded) -- never neither.
+    fallback = [n for n in assurance["notes"] if n.startswith(SCOPE_FALLBACK_DIMENSION)]
+    assert len(named) + len(fallback) == 2, diagnostics
 
 
 def _snapshot_scan(path: Path) -> dict[str, object]:
