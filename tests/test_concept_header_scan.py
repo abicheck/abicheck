@@ -230,4 +230,9 @@ def _snapshot_scan(path: Path) -> dict[str, object]:
         "cxx_concept_header_scan": snap.cxx_concept_header_scan,
         "ast_toolchain": dict(getattr(snap, "ast_toolchain", None) or {}),
         "platform": getattr(snap, "platform", None),
+        "from_headers": getattr(snap, "from_headers", None),
+        "elf_only_mode": getattr(snap, "elf_only_mode", None),
+        "ast_producer": getattr(snap, "ast_producer", None),
+        "ast_fallback_reason": getattr(snap, "ast_fallback_reason", None),
+        "functions": len(getattr(snap, "functions", None) or ()),
     }
