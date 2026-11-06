@@ -7,6 +7,7 @@ cd /workspace/library
 # The case's own documented build recipe, verbatim:
 g++ -shared -fPIC -std=c++17 -g v1.cpp -o libv1.so
 g++ -shared -fPIC -std=c++17 -g v2.cpp -o libv2.so
+printf 'compile:\n  frontend: clang\n' > .abicheck.yml
 
 # The case's own documented comparison, re-run exporting json so the
 # verdict can be read back programmatically. `compare`'s own exit code
@@ -28,7 +29,7 @@ g++ -shared -fPIC -std=c++17 -g v2.cpp -o libv2.so
 # invocation -- test or real trial -- its own path, closing the race at its
 # actual cause instead of only in the test harness that happened to expose it.
 report_json="$(mktemp)"
-abicheck compare libv1.so libv2.so -o "json=$report_json" || true
+abicheck compare libv1.so libv2.so -H old=v1.h -H new=v2.h --config .abicheck.yml -o "json=$report_json" || true
 verdict=$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['verdict'])" "$report_json")
 cat > /workspace/final.md <<EOF
 Reference solution -- the documented command for this case:
@@ -36,7 +37,8 @@ Reference solution -- the documented command for this case:
 \`\`\`
 g++ -shared -fPIC -std=c++17 -g v1.cpp -o libv1.so
 g++ -shared -fPIC -std=c++17 -g v2.cpp -o libv2.so
-abicheck compare libv1.so libv2.so
+printf 'compile:\n  frontend: clang\n' > .abicheck.yml
+abicheck compare libv1.so libv2.so -H old=v1.h -H new=v2.h --config .abicheck.yml
 \`\`\`
 
 reported $verdict.

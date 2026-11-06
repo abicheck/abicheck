@@ -102,6 +102,37 @@ def test_bare_aligned_attribute_is_unknown_not_natural(
     assert _clang_var_alignment_bits(node, _ABI) is None
 
 
+@pytest.mark.parametrize("builtin", ["char", "int", "long", "double"])
+def test_bare_aligned_does_not_fall_back_to_natural_downstream(builtin: str) -> None:
+    """The address-derived alignment check must not read a bare-``aligned``
+    variable as naturally aligned: its type fact is withheld, so
+    ``declared_alignment_bits`` answers unknown, while an unattributed
+    variable of the same type still corroborates with its natural alignment."""
+    from abicheck.compare.declared_alignment import declared_alignment_bits
+    from abicheck.extract.headers.clang.var_alignment import clang_var_type_abi_fact
+    from abicheck.model.declarations import Variable
+    from abicheck.model.fact import Fact
+
+    class _Snap:
+        def __init__(self, var: Variable) -> None:
+            self._var = var
+
+        def var_by_mangled(self, name: str) -> Variable | None:
+            return self._var if name == "v" else None
+
+    natural = {"char": 8, "int": 32, "long": 64, "double": 64}[builtin]
+    bare = {"kind": "VarDecl", "type": {"qualType": builtin}, "inner": [{"kind": "AlignedAttr"}]}
+    for node, expected in ((bare, None), (_var_node(builtin), natural)):
+        var = Variable(
+            name="v",
+            mangled="v",
+            type=builtin,
+            type_abi_fact=clang_var_type_abi_fact(node, _ABI),
+            declared_in_headers_fact=Fact.present(True),
+        )
+        assert declared_alignment_bits(_Snap(var), "v") == expected  # type: ignore[arg-type]
+
+
 def test_no_probe_means_no_natural_alignment() -> None:
     assert _clang_var_alignment_bits(_var_node("int"), None) is None
 

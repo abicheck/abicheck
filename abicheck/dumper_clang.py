@@ -81,7 +81,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .extract.builtin_abi import BuiltinAbi, builtin_type_fact, natural_alignment_bits
+from .extract.builtin_abi import BuiltinAbi
 from .extract.declaration_provenance import build_public_set
 from .extract.dependency_exclusion import active_dependency_predicate
 from .extract.headers.clang import (
@@ -152,6 +152,10 @@ from .extract.headers.clang.typedefs import (
     typedef_abi_facts as _typedef_abi_facts,
     typedef_underlying as _typedef_underlying,
 )
+from .extract.headers.clang.var_alignment import (
+    clang_var_alignment_bits,
+    clang_var_type_abi_fact,
+)
 from .extract.headers.scope_segments import record_segment as _record_scope_segment
 from .extract.surface_fact_producers import header_ast_surface_facts
 from .model import (
@@ -197,36 +201,7 @@ def _return_type(qualtype: str) -> str:
 _clang_deprecated_message = _clang_context.clang_deprecated_message
 
 
-def _clang_var_alignment_bits(
-    node: dict[str, Any], abi: BuiltinAbi | None = None
-) -> int | None:
-    """Explicit alignment (bits) from an AlignedAttr, else the natural one of a
-    builtin type probed from the real compiler (``builtin_abi.
-    natural_alignment_bits``, castxml's computed ``align`` for the same
-    variable). Any other type stays ``None``: the JSON AST has no layout."""
-    for child in node.get("inner", []) or []:
-        if not isinstance(child, dict) or child.get("kind") != "AlignedAttr":
-            continue
-        stack: list[Any] = list(child.get("inner", []) or [])
-        while stack:
-            sub = stack.pop()
-            if not isinstance(sub, dict):
-                continue
-            value = sub.get("value")
-            if isinstance(value, int):
-                return value * 8
-            if isinstance(value, str) and value.isdigit():
-                return int(value) * 8
-            stack.extend(sub.get("inner", []) or [])
-        # Bare ``aligned`` (no argument) = target max alignment, not natural: unknown.
-        return None
-    # Not through a typedef: an aligned typedef desugars to its plain builtin.
-    typ = node.get("type") or {}
-    return (
-        None
-        if "desugaredQualType" in typ
-        else natural_alignment_bits(_qualtype(node), abi)
-    )
+_clang_var_alignment_bits = clang_var_alignment_bits
 
 
 def _function_qualifiers(qualtype: str) -> str:
@@ -1014,9 +989,7 @@ class _ClangAstParser:
                     name=name,
                     mangled=mangled,
                     type=type_name,
-                    type_abi_fact=builtin_type_fact(
-                        _clang_context.qualtype_desugared(node), self.builtin_abi
-                    ),
+                    type_abi_fact=clang_var_type_abi_fact(node, self.builtin_abi),
                     visibility=self._visibility(mangled, name),
                     # See model/surface_facts.py: the export lookup is one
                     # fact, the header declaration another. ``None`` for a
