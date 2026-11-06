@@ -229,3 +229,35 @@ def test_unreadable_header_lowers_comparison_assurance(tmp_path: Path) -> None:
     assert gap and len(notes) == 1 and "new snapshot" in notes[0]
     gap, notes = concept_constraint_gap(read_failed, read_failed)  # type: ignore[arg-type]
     assert gap and len(notes) == 2
+
+
+def test_unreadable_header_makes_comparison_assurance_partial(tmp_path: Path) -> None:
+    """The rolled-up assurance of ``checker.compare``, not only the gap
+    helper: with one side's header unreadable the result is ``partial`` and
+    names the concept dimension; with every header read it does not. (Bare
+    snapshots are already ``partial`` for unrelated layout reasons, so the
+    concept note is the discriminator.)"""
+    from abicheck.checker import compare
+    from abicheck.model import AbiSnapshot
+
+    clean = tmp_path / "clean.h"
+    clean.write_text("int f(void);\n", encoding="utf-8")
+    statuses = {}
+    for label, headers in (
+        ("read", [clean]),
+        ("unreadable", [clean, tmp_path / "gone.h"]),
+    ):
+        old = AbiSnapshot(library="l", version="1")
+        new = AbiSnapshot(library="l", version="2")
+        old.cxx_concept_header_scan = concept_header_scan([clean])
+        new.cxx_concept_header_scan = concept_header_scan(headers)
+        result = compare(old, new)
+        statuses[label] = result.analysis_assurance
+    assert statuses["unreadable"].status == "partial"
+    from abicheck.policy.analysis_assurance._concepts import CONCEPT_GAP_DIMENSION
+
+    def named(label: str) -> bool:
+        return any(n.startswith(CONCEPT_GAP_DIMENSION) for n in statuses[label].notes)
+
+    assert not named("read")
+    assert named("unreadable")

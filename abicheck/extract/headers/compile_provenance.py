@@ -128,7 +128,8 @@ def _concept_scan(
     ``requires`` clause. Neither castxml nor clang models them, so both scan;
     other producers (hybrid, none) get no scan: ``None``. A C-mode parse has
     no concepts (``requires`` is an ordinary identifier there), so it is not
-    scanned either: ``None``. An unreadable header also yields ``None``."""
+    scanned either: ``None``. An unreadable header yields ``True`` (it
+    cannot rule a concept out)."""
     if lang_mode == "c":
         return None
     if producer in ("castxml", "clang"):

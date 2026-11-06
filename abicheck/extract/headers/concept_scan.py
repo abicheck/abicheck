@@ -30,7 +30,7 @@ block (the one provably inactive branch a text scan can name) is skipped.
 A macro that expands to ``concept``/``requires`` is not seen, and a header
 included indirectly is not read; both make the scan say ``False`` (no gap
 reported), never a clean pass. A header that cannot be read makes the scan
-``None`` (not assessed) rather than ``False``. A ``#define`` line is
+``True``: it cannot rule a concept out, so the dimension is named. A ``#define`` line is
 skipped, so a macro *named* or *defined with* the keyword does not count on
 its own.
 """
