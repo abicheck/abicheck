@@ -89,6 +89,56 @@ comparison cannot see:
 cmake --build consumer-build && ctest --test-dir consumer-build --output-on-failure
 ```
 
+## Behavioral breaks: a separate kind of incompatibility
+
+A release can be incompatible for three different reasons, and each one needs
+different evidence:
+
+| Kind of break | What breaks | What shows it |
+|---|---|---|
+| **Source (API) break** | Old source no longer compiles against the new headers | Public headers (L2) |
+| **Binary (ABI) break** | An old binary no longer links, loads, or agrees on layout | Binary, debug info (L0/L1) |
+| **Behavioral break** | Old code compiles, links and runs, but gets a different result | Only running a consumer (tests) |
+
+A behavioral break is a real compatibility break: an unchanged consumer that
+was correct against the old release is wrong against the new one. It is not
+an API or ABI break, because nothing that consumer compiles or links against
+changed. The contract it violates (an error convention, a unit, an
+ownership rule, an aliasing rule) lives in documentation.
+
+**More evidence does not help.** abicheck's deterministic checks compare what
+the artifacts *declare*: symbols, layout, header declarations, build flags,
+source-graph dependencies. A behavioral break changes none of these. Giving
+abicheck the build data (`compile_commands.json`) and the full source trees
+(`--depth source`) still yields `NO_CHANGE`, because the change sits inside an
+out-of-line function body. No static rule can tell a bug fix from a contract
+break there, so abicheck reports nothing rather than guessing.
+
+### Worked examples in the catalog
+
+Each of these catalog cases is a `NO_CHANGE` result at every evidence depth,
+paired with a runtime witness: an unchanged old consumer (`app.cpp`/`app.c`)
+that passes against v1 and fails against v2. The catalog records each one as a
+behavioral break next to the `NO_CHANGE` verdict, so the clean verdict is
+never read as "safe to ship".
+
+| Case | What changed behind an identical declaration | Old consumer against v2 |
+|---|---|---|
+| [case230](../reference/examples/case230_error_reporting_return_code_to_exception.md) | Invalid input throws `std::invalid_argument` instead of returning the documented `-1` | Uncaught exception, `std::terminate` |
+| [case231](../reference/examples/case231_return_value_units_changed.md) | `session_timeout()` returns milliseconds instead of seconds | 30 s timeout becomes ~8 h |
+| [case232](../reference/examples/case232_factory_ownership_convention_changed.md) | `make_widget()` returns a library-owned cached object instead of a new caller-owned one | Shared state; `delete` frees library memory |
+| [case208](../reference/examples/case208_restrict_added_to_definition_only.md) | The definition (not the declaration) gains `restrict` | Overlapping call computes a wrong prefix sum at `-O3` |
+
+All four are grouped on the subject page
+[Behavioral breaks outside static evidence](../reference/examples/by-subject/behavioral-breaks-outside-static-evidence.md).
+
+Each case's "Safe redesign" shows the same fix: **move the contract into the
+type system**, where the compiler and abicheck can see it. `std::chrono::seconds`
+instead of `long`, `std::unique_ptr<Widget>` instead of `Widget*`, `noexcept`
+on a function that must not throw, `restrict` on the declaration rather than
+the definition. A later change to any of those is a declaration change, and
+abicheck reports it.
+
 ## How to reason about it in a release
 
 When evaluating whether a release preserves behavioral compatibility, ask:

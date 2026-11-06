@@ -4807,6 +4807,54 @@
    "platforms": [
     "linux"
    ]
+  },
+  "case230_error_reporting_return_code_to_exception": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": true,
+   "category": "no_change",
+   "description": "Behavior-only break, C++. cfg::parse_port(const char*) keeps its declaration, mangled symbol, exception specification (none, not noexcept) and imports; only its error reporting changes: invalid input returned the documented -1 sentinel in v1 and throws std::invalid_argument in v2. Detection control: NO_CHANGE is correct for the declared interface at every evidence depth. Not behavior-compatible: see behavioral_break / behavioral_note.",
+   "expected": "NO_CHANGE",
+   "expected_kinds": [],
+   "min_evidence": "L2",
+   "platforms": [
+    "linux"
+   ],
+   "truth_scope": "declared-interface",
+   "behavioral_break": true,
+   "behavioral_note": "Not a compatibility claim for the release. A static comparison at every evidence depth (binary, headers, build data, sources) sees the same declaration, the same symbol and the same layout, so NO_CHANGE is the truth only for the declared interface. The runtime witness breaks a valid old consumer: app.cpp relies on the -1 sentinel without a try/catch, exits 0 against v1, and against v2 the exception escapes main and std::terminate aborts the process (exit 134). Nothing in either artifact records the documented error contract, so no deterministic detector can see the change."
+  },
+  "case231_return_value_units_changed": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": true,
+   "category": "no_change",
+   "description": "Behavior-only break, C++. net::session_timeout() keeps its declaration, symbol and return type (long); only the unit of the returned value changes from seconds (30) to milliseconds (30000). Detection control: NO_CHANGE is correct for the declared interface at every evidence depth. Not behavior-compatible: see behavioral_break / behavioral_note.",
+   "expected": "NO_CHANGE",
+   "expected_kinds": [],
+   "min_evidence": "L2",
+   "platforms": [
+    "linux"
+   ],
+   "truth_scope": "declared-interface",
+   "behavioral_break": true,
+   "behavioral_note": "Not a compatibility claim for the release. A static comparison at every evidence depth (binary, headers, build data, sources) sees the same declaration, the same symbol and the same layout, so NO_CHANGE is the truth only for the declared interface. The runtime witness breaks a valid old consumer: app.cpp treats the value as seconds, as documented, exits 0 against v1 and reports a timeout of 30000 s and exits 1 against v2. A unit lives in documentation, not in the type `long`, so no deterministic detector can see the change."
+  },
+  "case232_factory_ownership_convention_changed": {
+   "abi_break": false,
+   "api_break": false,
+   "bad_practice": true,
+   "category": "no_change",
+   "description": "Behavior-only break, C++. ui::make_widget(int) keeps its declaration, symbol, the Widget layout and the imports; only the ownership convention of the returned raw pointer changes: v1 returns a new caller-owned object per call, v2 returns a library-owned object cached per id. Detection control: NO_CHANGE is correct for the declared interface at every evidence depth. Not behavior-compatible: see behavioral_break / behavioral_note.",
+   "expected": "NO_CHANGE",
+   "expected_kinds": [],
+   "min_evidence": "L2",
+   "platforms": [
+    "linux"
+   ],
+   "truth_scope": "declared-interface",
+   "behavioral_break": true,
+   "behavioral_note": "Not a compatibility claim for the release. A static comparison at every evidence depth (binary, headers, build data, sources) sees the same declaration, the same symbol and the same layout, so NO_CHANGE is the truth only for the declared interface. The runtime witness breaks a valid old consumer: app.cpp creates two widgets for one id and edits one; against v1 they are independent (exit 0), against v2 both pointers are the same shared object (exit 1), and the consumer's delete would free library-owned memory. A raw Widget* carries no ownership, so no deterministic detector can see the change."
   }
  },
  "version": "4",

@@ -11,7 +11,7 @@ the same cases by rule, scenario kind, ecosystem, operation, evidence level,
 language, and verdict.
 
 <!-- BEGIN GENERATED: catalog-headline (keep counts in sync with examples/ground_truth.json) -->
-This directory contains **229 cases** (224 single-library + 5 multi-library bundle cases) demonstrating real-world ABI/API break scenarios. Most cases are a minimal, compilable C/C++ example with:
+This directory contains **232 cases** (227 single-library + 5 multi-library bundle cases) demonstrating real-world ABI/API break scenarios. Most cases are a minimal, compilable C/C++ example with:
 <!-- END GENERATED: catalog-headline -->
 
 - Paired `v1/` and `v2/` source + headers.
@@ -46,7 +46,7 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 | COMPATIBLE_WITH_RISK | 37 | `RISK_KINDS` | 🟡 |
 | COMPATIBLE (addition) | 12 | `ADDITION_KINDS` | 🟢 |
 | COMPATIBLE (quality) | 21 | `QUALITY_KINDS` | 🟡 |
-| NO_CHANGE | 14 | — | ✅ |
+| NO_CHANGE | 17 | — | ✅ |
 | Bundle (multi-binary) | 5 | see [Multi-binary analysis](../docs/use/multi-binary.md) | 🔵 |
 <!-- END GENERATED: verdict-distribution -->
 
@@ -472,6 +472,9 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [227](cases/case227_nested_namespace_template_default_changed/README.md) | Nested-Namespace Template Default Changed | API Break | 🟠 API_BREAK |
 | [228](cases/case228_nontype_template_param_default_changed/README.md) | Non-Type Template Parameter Default Changed | API Break | 🟠 API_BREAK |
 | [229](cases/case229_exported_template_default_changed/README.md) | Exported Template Default Changed | Breaking | 🔴 BREAKING |
+| [230](cases/case230_error_reporting_return_code_to_exception/README.md) | Error Reporting Changed from Return Code to Exception | No Change | ✅ NO_CHANGE (bad practice) |
+| [231](cases/case231_return_value_units_changed/README.md) | Return Value Units Changed | No Change | ✅ NO_CHANGE (bad practice) |
+| [232](cases/case232_factory_ownership_convention_changed/README.md) | Factory Ownership Convention Changed | No Change | ✅ NO_CHANGE (bad practice) |
 <!-- END GENERATED: case-index -->
 
 ---

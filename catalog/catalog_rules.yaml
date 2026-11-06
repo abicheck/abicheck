@@ -439,6 +439,15 @@ rules:
   relro-weakened:
     title: RELRO hardening weakened
     definition: The library drops full or partial RELRO, leaving relocation data writable in processes that load it.
+  error-reporting-return-code-to-exception:
+    title: Error reporting changed from return code to exception
+    definition: A function's declaration and exception specification are unchanged, but its implementation now throws where it used to return a documented error value.
+  return-value-units-changed:
+    title: Return value units changed
+    definition: A function returns the same type through the same declaration, but the unit or scale of the value changes, so consumers that interpret it per the old contract compute wrong results.
+  factory-ownership-convention-changed:
+    title: Factory ownership convention changed
+    definition: A function returning a raw pointer keeps its declaration, but who owns the pointee changes (caller-owned new object versus library-owned shared object).
   restrict-added-to-definition-only:
     title: restrict added to the definition only
     definition: An implementation gains `restrict` on its parameters while the declaration in the public header is untouched, so the contract consumers compile against is unchanged.

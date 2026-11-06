@@ -174,6 +174,9 @@ rules:
   - case227_nested_namespace_template_default_changed
   - case228_nontype_template_param_default_changed
   - case229_exported_template_default_changed
+  - case230_error_reporting_return_code_to_exception
+  - case231_return_value_units_changed
+  - case232_factory_ownership_convention_changed
   - case19_enum_member_removed
   - case20_enum_member_value_changed
   - case21_method_became_static

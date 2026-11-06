@@ -66,6 +66,7 @@ Every atomic, ecosystem-neutral compatibility rule the catalog demonstrates or r
 | [`enum-size-flag-flip`](enum-size-flag-flip.md) | [case152_enum_size_flag_flip](../case152_enum_size_flag_flip.md) | — | — | — |
 | [`enum-underlying-size-changed`](enum-underlying-size-changed.md) | [case57_enum_underlying_size_changed](../case57_enum_underlying_size_changed.md) | — | — | — |
 | [`env-runtime-floor-raised`](env-runtime-floor-raised.md) | [case170_env_runtime_floor_raised](../case170_env_runtime_floor_raised.md) | — | — | — |
+| [`error-reporting-return-code-to-exception`](error-reporting-return-code-to-exception.md) | [case230_error_reporting_return_code_to_exception](../case230_error_reporting_return_code_to_exception.md) | — | — | — |
 | [`exceptions-mode-flip`](exceptions-mode-flip.md) | [case130_exceptions_mode_flip](../case130_exceptions_mode_flip.md) | — | — | — |
 | [`executable-stack-flag-changed`](executable-stack-flag-changed.md) | [case49_executable_stack](../case49_executable_stack.md) | [case136_executable_stack_removed](../case136_executable_stack_removed.md) | — | — |
 | [`experimental-graduated`](experimental-graduated.md) | [case99_experimental_graduated](../case99_experimental_graduated.md) | — | — | — |
@@ -75,6 +76,7 @@ Every atomic, ecosystem-neutral compatibility rule the catalog demonstrates or r
 | [`exported-function-removed`](exported-function-removed.md) | [case01_symbol_removal](../case01_symbol_removal.md) | [case12_function_removed](../case12_function_removed.md) | — | [case107_task_scheduler_init_removed](../case107_task_scheduler_init_removed.md), [case108_task_class_removed](../case108_task_class_removed.md), [case110_concurrent_unordered_map_api_drift](../case110_concurrent_unordered_map_api_drift.md), [case78_task_arena_attach_tag](../case78_task_arena_attach_tag.md), [case82_sycl_overload_set_removed](../case82_sycl_overload_set_removed.md), [case90_bundle_intra_dep_removed](../case90_bundle_intra_dep_removed.md), [case92_bundle_provider_changed](../case92_bundle_provider_changed.md), [case93_bundle_manifest_drift](../case93_bundle_manifest_drift.md), [case192_call_graph_break_survives_suppression](../case192_call_graph_break_survives_suppression.md), [case193_ordinary_exported_fn_call_not_reachable](../case193_ordinary_exported_fn_call_not_reachable.md) |
 | [`exported-template-default-changed`](exported-template-default-changed.md) | [case229_exported_template_default_changed](../case229_exported_template_default_changed.md) | — | — | — |
 | [`exported-type-removed`](exported-type-removed.md) | — | — | — | [case107_task_scheduler_init_removed](../case107_task_scheduler_init_removed.md), [case108_task_class_removed](../case108_task_class_removed.md), [case78_task_arena_attach_tag](../case78_task_arena_attach_tag.md), [case82_sycl_overload_set_removed](../case82_sycl_overload_set_removed.md) |
+| [`factory-ownership-convention-changed`](factory-ownership-convention-changed.md) | [case232_factory_ownership_convention_changed](../case232_factory_ownership_convention_changed.md) | — | — | — |
 | [`field-layout`](field-layout.md) | [case40_field_layout](../case40_field_layout.md) | — | — | — |
 | [`field-qualifiers`](field-qualifiers.md) | [case30_field_qualifiers](../case30_field_qualifiers.md) | — | — | — |
 | [`field-rename`](field-rename.md) | [case35_field_rename](../case35_field_rename.md) | — | — | — |
@@ -160,6 +162,7 @@ Every atomic, ecosystem-neutral compatibility rule the catalog demonstrates or r
 | [`return-double-pointer-lost-const`](return-double-pointer-lost-const.md) | [case215_return_double_pointer_lost_const](../case215_return_double_pointer_lost_const.md) | — | — | — |
 | [`return-pointee-gained-const`](return-pointee-gained-const.md) | [case211_return_pointee_gained_const](../case211_return_pointee_gained_const.md) | — | — | — |
 | [`return-type`](return-type.md) | [case10_return_type](../case10_return_type.md) | — | — | [case91_bundle_intra_signature_drift](../case91_bundle_intra_signature_drift.md) |
+| [`return-value-units-changed`](return-value-units-changed.md) | [case231_return_value_units_changed](../case231_return_value_units_changed.md) | — | — | — |
 | [`rpath-leak`](rpath-leak.md) | [case52_rpath_leak](../case52_rpath_leak.md) | — | — | — |
 | [`rtti-mode-flip`](rtti-mode-flip.md) | [case131_rtti_mode_flip](../case131_rtti_mode_flip.md) | — | — | — |
 | [`runpath-changed`](runpath-changed.md) | [case137_runpath_changed](../case137_runpath_changed.md) | — | — | — |
