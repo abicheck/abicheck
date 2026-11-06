@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -783,7 +784,9 @@ def test_layout_pass_uses_the_binarys_abi_target(
 
 def test_binary_abi_target_is_none_for_a_linux_elf_snapshot() -> None:
     """Unmocked: on an ELF/Itanium host the layout pass adds no --target (the
-    host default already matches), and resolving it never raises."""
+    host default already matches), and resolving it never raises. On Windows
+    clang defaults to the MSVC ABI, so Itanium-mangled exports select the
+    MinGW target instead."""
     from abicheck.extract.headers.clang.layout_tool import _binary_abi_target
     from abicheck.model import AbiSnapshot, Function
 
@@ -792,4 +795,8 @@ def test_binary_abi_target_is_none_for_a_linux_elf_snapshot() -> None:
         version="1",
         functions=[Function(name="f", mangled="_Z1fv", return_type="void")],
     )
-    assert _binary_abi_target(snap, "c++", None, ()) is None
+    target = _binary_abi_target(snap, "c++", None, ())
+    if sys.platform == "win32":
+        assert target is None or "mingw" in target
+    else:
+        assert target is None
