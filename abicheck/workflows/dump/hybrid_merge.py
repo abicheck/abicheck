@@ -663,6 +663,8 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
         # entity_ids`), not inlined here, so `_drop_unmatched_constant_
         # occurrences` filters `semantic_ir` against the identical set.
         constant_entity_ids=merged_constant_entity_ids,
+        # Only clang models concepts; its table (None when not modelled) wins.
+        cxx_concept_constraints=clang_snap.cxx_concept_constraints,
         ast_producer="hybrid",
         ast_toolchain={
             **{

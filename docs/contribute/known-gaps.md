@@ -42,8 +42,8 @@ than striking it through here.
 
 Every OPEN, PARTIAL or NARROWED entry is linked to a **canary**: a test
 marked `@pytest.mark.known_gap_canary` that asserts the gap's *current*
-answer (for example, case105 reads `NO_CHANGE` with `partial`
-assurance on both header backends). The entry names it on its own line inside the entry,
+answer (for example, case98 reads `NO_CHANGE` with `partial`
+assurance at debug-headers depth on both header backends). The entry names it on its own line inside the entry,
 `<!-- canary: tests/test_x.py::test_name -->` (one or more), or carries one
 reasoned exemption, `<!-- no-canary: needs MSVC cl.exe and a PDB -->`, when
 no canary is cheap. A canary fails when the gap closes *or* widens. When

@@ -194,3 +194,21 @@ def test_table_round_trips_through_a_saved_snapshot(
     path = tmp_path / "snap.json"
     save_snapshot(snap, path)
     assert load_snapshot(path).cxx_concept_constraints == value
+
+
+@pytest.mark.parametrize("table", [None, {}, {"concept:Small": "C:sizeof(T) <= 4"}])
+def test_hybrid_merge_keeps_the_clang_concept_table(
+    table: dict[str, str] | None,
+) -> None:
+    """Only clang models concepts: a hybrid castxml+clang merge must carry
+    clang's table verbatim (``None`` when clang did not model it), never the
+    castxml side's absent one -- or a hybrid compare misses concept_tightened."""
+    from abicheck.workflows.dump.hybrid_merge import merge_snapshots
+    from tests.test_dumper_hybrid import _snap
+
+    castxml = _snap(ast_producer="castxml")
+    clang = _snap(ast_producer="clang")
+    clang.cxx_concept_constraints = table
+    merged = merge_snapshots(castxml, clang)
+    assert merged.ast_producer == "hybrid"
+    assert merged.cxx_concept_constraints == table
