@@ -30,25 +30,47 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ...model import AbiSnapshot
 
-__all__ = ["CONCEPT_GAP_DIMENSION", "concept_constraint_gap"]
+from ._unobserved_finding import Side, UnobservedFinding, gap_and_notes
+
+__all__ = [
+    "CONCEPT_GAP_DIMENSION",
+    "concept_constraint_findings",
+    "concept_constraint_gap",
+]
 
 CONCEPT_GAP_DIMENSION = (
     "C++20 concepts and requires-clauses (not modelled by header backends)"
 )
 
 
+def _sides(
+    old: AbiSnapshot | None, new: AbiSnapshot
+) -> tuple[tuple[Side, AbiSnapshot | None], ...]:
+    return (("old", old), ("new", new))
+
+
+def concept_constraint_findings(
+    old: AbiSnapshot | None, new: AbiSnapshot
+) -> list[UnobservedFinding]:
+    """One finding per side whose public headers declare a concept or a
+    requires-clause the header backend does not model, or whose headers
+    could not be read to rule one out."""
+    return [
+        UnobservedFinding(
+            CONCEPT_GAP_DIMENSION,
+            label,
+            f"{CONCEPT_GAP_DIMENSION}: the public headers of the {label} snapshot "
+            "declare a concept or a requires-clause (or could not be read to rule "
+            "one out), so a change to a template "
+            "constraint is not assessed",
+        )
+        for label, snap in _sides(old, new)
+        if snap is not None and snap.cxx_concept_header_scan
+    ]
+
+
 def concept_constraint_gap(
     old: AbiSnapshot | None, new: AbiSnapshot
 ) -> tuple[bool, list[str]]:
-    """``(gap, notes)``: one note per side whose public headers declare a
-    concept or a requires-clause the header backend does not model, or whose
-    headers could not be read to rule one out."""
-    notes = [
-        f"{CONCEPT_GAP_DIMENSION}: the public headers of the {label} snapshot "
-        "declare a concept or a requires-clause (or could not be read to rule "
-        "one out), so a change to a template "
-        "constraint is not assessed"
-        for label, snap in (("old", old), ("new", new))
-        if snap is not None and snap.cxx_concept_header_scan
-    ]
-    return bool(notes), notes
+    """``(gap, notes)`` view of :func:`concept_constraint_findings`."""
+    return gap_and_notes(concept_constraint_findings(old, new))

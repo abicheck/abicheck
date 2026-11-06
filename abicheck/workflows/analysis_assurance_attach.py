@@ -53,9 +53,7 @@ def attach_analysis_assurance(
     """
     from ..evidence_depth import embedded_evidence_pack
     from ..policy.analysis_assurance import compute_analysis_assurance
-    from ..policy.analysis_assurance._concepts import CONCEPT_GAP_DIMENSION
-    from ..policy.analysis_assurance._export_read import EXPORT_READ_NOTE_PREFIX
-    from ..policy.analysis_assurance._template_defaults import template_default_gap
+    from ..policy.analysis_assurance._unobserved import collect_unobserved
     from ..storage.snapshot_encode import same_persisted_content
 
     result.analysis_assurance = compute_analysis_assurance(
@@ -69,17 +67,14 @@ def attach_analysis_assurance(
             partial(same_persisted_content, old, new) if old is not None else None
         ),
     )
-    notes = result.analysis_assurance.notes
-    # ADR-085 D3: the same template-default gap the rollup reports is a coverage
-    # gap, so the coverage-gap rows of every report show it. The concept gap
-    # and ADR-079's not-completely-read export tables are likewise the notes
-    # the rollup just built, not a second computation of them. Scalar compare
-    # can attach twice to one result, so a warning already present is skipped.
-    for warning in (
-        *template_default_gap(old, new)[1],
-        *(n for n in notes if n.startswith(CONCEPT_GAP_DIMENSION)),
-        *(n for n in notes if n.startswith(EXPORT_READ_NOTE_PREFIX)),
-    ):
+    # ADR-085 D3 / ADR-079: the unobserved dimensions registered with
+    # ``coverage_warning=True`` (template defaults, concepts, export-table
+    # reads) are coverage gaps, so every report's coverage-gap rows show the
+    # same text the rollup noted -- one registry, not per-gap wiring. Scalar
+    # compare can attach twice to one result, so a warning already present is
+    # skipped.
+    for finding in collect_unobserved(old, new, coverage_only=True):
+        warning = finding.reason
         if warning not in result.coverage_warnings:
             result.coverage_warnings.append(warning)
 

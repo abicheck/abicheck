@@ -38,24 +38,18 @@ from ._comparability import (
     bounded_comparability_notes,
     is_comparability_bounded,
 )
-from ._concepts import concept_constraint_gap
 from ._context import _dwarf_context_status, _header_context_status, _l3_context_status
-from ._depth_projection import depth_projection_gap
 from ._export_accounting import _export_accounting
-from ._export_read import export_read_gap
+from ._export_read import recorded_export_reads
 from ._fact_set import _fact_set_comparability
 from ._graph_completeness import _graph_completeness
 from ._layout import layout_unverified_detectors as _layout_unverified_detectors
 from ._manifest_layers import _manifest_layer_incompleteness
 from ._result import AnalysisAssurance, AssuranceStatus
-from ._scope_fallback import scope_fallback_gap
 from ._target_accounting import _target_accounting
-from ._template_defaults import template_default_gap
 from ._translation_units import _translation_units
-from ._unreadable_sections import (
-    section_availability_entries,
-    unreadable_section_gap,
-)
+from ._unobserved import collect_unobserved
+from ._unreadable_sections import section_availability_entries
 
 if TYPE_CHECKING:
     from ...buildsource.pack import BuildSourcePack
@@ -206,18 +200,11 @@ def compute_analysis_assurance(
     # -- graph completeness ---------------------------------------------------
     graph_completeness, graph_notes = _graph_completeness(old_pack, new_pack)
     notes.extend(graph_notes)
-    template_defaults_gap, template_notes = template_default_gap(old, new)
-    notes.extend(template_notes)
-    concept_gap, concept_notes = concept_constraint_gap(old, new)
-    notes.extend(concept_notes)
-    fallback_gap, fallback_notes = scope_fallback_gap(old, new)
-    notes.extend(fallback_notes)
-    projection_gap, projection_notes = depth_projection_gap(old, new)
-    notes.extend(projection_notes)
-    unreadable_gap, unreadable_notes = unreadable_section_gap(old, new)
-    notes.extend(unreadable_notes)
-    export_read_unreliable, read_notes, export_read = export_read_gap(old, new)
-    notes.extend(read_notes)
+    # -- unobserved dimensions: the one registry (``_unobserved.py``) ---------
+    unobserved = collect_unobserved(old, new)
+    notes.extend(f.reason for f in unobserved)
+    unobserved_gap = any(f.lowers_status for f in unobserved)
+    export_read = {"old": recorded_export_reads(old), "new": recorded_export_reads(new)}
 
     # -- manifest-level layer incompleteness ----------------------------------
     # The one check below that reads the pack MANIFEST directly (D7/D8's own
@@ -277,12 +264,7 @@ def compute_analysis_assurance(
         or (export_accounting.unaccounted or 0) > 0
         or target_unresolved
         or is_comparability_bounded(result.comparability_assurance)
-        or template_defaults_gap
-        or concept_gap
-        or fallback_gap
-        or projection_gap
-        or unreadable_gap
-        or export_read_unreliable
+        or unobserved_gap
     ):
         status = "partial"
     elif nothing_requested:

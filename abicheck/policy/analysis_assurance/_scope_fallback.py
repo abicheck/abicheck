@@ -31,22 +31,44 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ...model import AbiSnapshot
 
-__all__ = ["SCOPE_FALLBACK_DIMENSION", "scope_fallback_gap"]
+from ._unobserved_finding import Side, UnobservedFinding, gap_and_notes
+
+__all__ = [
+    "SCOPE_FALLBACK_DIMENSION",
+    "scope_fallback_findings",
+    "scope_fallback_gap",
+]
 
 SCOPE_FALLBACK_DIMENSION = (
     "header declarations (header scoping fell back to the export table)"
 )
 
 
+def _sides(
+    old: AbiSnapshot | None, new: AbiSnapshot
+) -> tuple[tuple[Side, AbiSnapshot | None], ...]:
+    return (("old", old), ("new", new))
+
+
+def scope_fallback_findings(
+    old: AbiSnapshot | None, new: AbiSnapshot
+) -> list[UnobservedFinding]:
+    """One finding per side whose dump discarded its headers."""
+    return [
+        UnobservedFinding(
+            SCOPE_FALLBACK_DIMENSION,
+            label,
+            f"{SCOPE_FALLBACK_DIMENSION}: the {label} snapshot was dumped with "
+            f"headers but fell back to export-table mode ({snap.scope_fallback}), "
+            "so header-level changes on that side are not assessed",
+        )
+        for label, snap in _sides(old, new)
+        if snap is not None and getattr(snap, "scope_fallback", None)
+    ]
+
+
 def scope_fallback_gap(
     old: AbiSnapshot | None, new: AbiSnapshot
 ) -> tuple[bool, list[str]]:
-    """``(gap, notes)``: one note per side whose dump discarded its headers."""
-    notes = [
-        f"{SCOPE_FALLBACK_DIMENSION}: the {label} snapshot was dumped with "
-        f"headers but fell back to export-table mode ({snap.scope_fallback}), "
-        "so header-level changes on that side are not assessed"
-        for label, snap in (("old", old), ("new", new))
-        if snap is not None and getattr(snap, "scope_fallback", None)
-    ]
-    return bool(notes), notes
+    """``(gap, notes)`` view of :func:`scope_fallback_findings`."""
+    return gap_and_notes(scope_fallback_findings(old, new))
