@@ -67,9 +67,9 @@ combines them, roughly from cheapest to most expensive:
 |---|---|---|
 | 1. Put the contract in the type system | Turns a future behavioral break into a declaration change | Prevents a whole class |
 | 2. Differential execution (old vs new) | A concrete failing input | Yes, for the inputs exercised |
-| 3. Runtime checking tools | Catches the consequences (memory errors, crashes) | Yes, for the paths exercised |
+| 3. Runtime checking tools | Detects specific runtime errors (memory, UB, races) on exercised paths | No: a clean run does not show the values are right |
 | 4. Static heuristics on function bodies | "This behavior probably changed, look here" | No, signals only |
-| 5. Formal methods | Equivalence or a counterexample | Yes, within the model |
+| 5. Formal methods | Equivalence, a counterexample, or an inconclusive result | Yes, within the verified model and bounds, when conclusive |
 | 6. Review against the documented contract | Human or AI judgement | No |
 
 ### 1. Put the contract where a compiler can see it
@@ -128,9 +128,11 @@ cmake --build consumer-build && ctest --test-dir consumer-build --output-on-fail
 
 Some behavioral breaks show up as memory or concurrency errors before
 anyone notices a wrong value. Run the tests from §2 under AddressSanitizer,
-UndefinedBehaviorSanitizer, ThreadSanitizer or Valgrind: an ownership change
-becomes a reported double free or use-after-free on the first test that
-deletes the object. After the release, canary or staged rollouts with error
+UndefinedBehaviorSanitizer, ThreadSanitizer or Valgrind. They report specific
+errors on the paths the tests exercise: an ownership change shows up as a
+use-after-free or double free once a test deletes the object *and* the
+library or a second delete touches it again. They cannot tell a right value
+from a wrong one, so a clean run says nothing about, say, a timeout's unit. After the release, canary or staged rollouts with error
 and crash monitoring are the last line of defence.
 
 ### 4. Look for suspicious changes in function bodies
@@ -152,12 +154,13 @@ the diff a reviewer has to read, not in a verdict.
 
 For small, critical functions such as parsers, numeric kernels and protocol
 state machines, formal methods can settle the question. **Regression
-verification** (equivalence checking, symbolic execution) either proves
-that two versions return the same outputs for all inputs or produces a
-concrete counterexample. **Formal specifications** (pre/postconditions
+verification** (equivalence checking, symbolic execution) tries to prove
+that two versions return the same outputs for all inputs, or to produce a
+concrete counterexample. It can also end inconclusive, and a bounded
+analysis can miss a difference beyond its loop or input bounds. **Formal specifications** (pre/postconditions
 checked by a verifier) make the contract machine-checkable in the first
-place. These are expensive to set up and rarely cover a whole library, but
-the answer they give is exact.
+place. These are expensive to set up and rarely cover a whole library; a
+proof they give holds exactly, but only for the verified model and bounds.
 
 ### 6. Review the change against the documented contract
 
@@ -166,8 +169,9 @@ documentation: "documented as returning `-1` on error, now throws" is
 obvious to a reviewer who has both side by side. Human review, assisted by
 AI review if you use one, is not deterministic, but it is cheap and catches
 contracts no test was written for. Pair it with the changelog: a behavior
-change that is part of the promised contract needs a major version, whether
-or not it was announced.
+change that is part of the promised contract needs a major version in a
+stable (1.0 and later) SemVer release, whether or not it was announced;
+during 0.y.z development SemVer allows it in a minor release.
 
 ### Where a static ABI/API checker fits
 
