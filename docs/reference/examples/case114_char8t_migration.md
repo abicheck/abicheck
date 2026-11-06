@@ -10,6 +10,7 @@
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `char8t_migration` |
 | **Source files** | `catalog/cases/case114_char8t_migration/` |
+| **Toolchain-dependent `ChangeKind`s** | `fortify_source_weakened`, `imported_symbol_added`, `needed_added`, `needed_removed`, `runtime_floor_raised`, `symbol_version_required_added`, `symbol_version_required_added_compat`, `symbol_version_required_removed` (may or may not appear; not part of what the case tests) |
 | **Rule family** | [`char8t-migration`](by-rule/char8t-migration.md) |
 | **Subject** | [Modern C/C++ standard-feature hazards](by-subject/modern-cpp-standard-feature-hazards.md) |
 

@@ -10,6 +10,7 @@
 | **Flags** | ABI break |
 | **Detected `ChangeKind`s** | `atomic_qualifier_changed` |
 | **Source files** | `catalog/cases/case116_atomic_qualifier_changed/` |
+| **Toolchain-dependent `ChangeKind`s** | `fortify_source_weakened`, `imported_symbol_added`, `needed_added`, `needed_removed`, `runtime_floor_raised`, `symbol_version_required_added`, `symbol_version_required_added_compat`, `symbol_version_required_removed` (may or may not appear; not part of what the case tests) |
 | **Rule family** | [`atomic-qualifier-changed`](by-rule/atomic-qualifier-changed.md) |
 | **Subject** | [Modern C/C++ standard-feature hazards](by-subject/modern-cpp-standard-feature-hazards.md) |
 

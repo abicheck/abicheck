@@ -261,6 +261,9 @@ class CaseResult(NamedTuple):
     # KINDS_MISMATCH row can be diagnosed from the artifact alone, without
     # re-running the case locally.
     actual_kinds: tuple[str, ...] = ()
+    # Reported-only: emitted kinds outside expected_kinds, allowed_kinds and
+    # expected_kinds_gate.TOOLCHAIN_INCIDENTAL_KINDS. Never fails a cell.
+    unexpected_kinds: tuple[str, ...] = ()
 
 
 # ---------------------------------------------------------------------------
@@ -1539,6 +1542,7 @@ def run_case(
         kinds_strict=kv.signal,
         kinds_strict_detail=kv.detail,
         actual_kinds=tuple(sorted(set(got_kinds))),
+        unexpected_kinds=expected_kinds_gate.unexpected_kinds(entry, got_kinds),
     )
 
 
@@ -1650,6 +1654,7 @@ def _result_to_json(r: CaseResult) -> dict[str, object]:
     d["manual_review_ok"] = r.status in {"XFAIL", "SKIP", "NOT_APPLICABLE"}
     d["category_strict"] = r.category_strict
     d["actual_kinds"] = list(r.actual_kinds)
+    d["unexpected_kinds"] = list(r.unexpected_kinds)
     return d
 
 

@@ -107,7 +107,9 @@ CI's `pr` profile.
   native `validate_examples.py` lanes a missing `expected_kinds` entry FAILs
   the cell unless `ground_truth.json`'s `expected_kinds_gaps` declares it for
   that header frontend and mode; a declaration that no longer reproduces
-  FAILs as stale. Also validates that field. Tests:
+  FAILs as stale. `allowed_kinds` declares toolchain-incidental kinds that
+  never fail (`TOOLCHAIN_INCIDENTAL_KINDS` is the shared set). Also validates
+  both fields. Tests:
   `test_expected_kinds_gate.py`.
 - `conftest.py` — shared fixtures, including temp-dir helpers and
   binary-skip markers.

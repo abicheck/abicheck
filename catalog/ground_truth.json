@@ -509,6 +509,16 @@
   },
   "case114_char8t_migration": {
    "abi_break": true,
+   "allowed_kinds": [
+    "fortify_source_weakened",
+    "imported_symbol_added",
+    "needed_added",
+    "needed_removed",
+    "runtime_floor_raised",
+    "symbol_version_required_added",
+    "symbol_version_required_added_compat",
+    "symbol_version_required_removed"
+   ],
    "api_break": false,
    "bad_practice": false,
    "category": "breaking",
@@ -540,6 +550,16 @@
   },
   "case116_atomic_qualifier_changed": {
    "abi_break": true,
+   "allowed_kinds": [
+    "fortify_source_weakened",
+    "imported_symbol_added",
+    "needed_added",
+    "needed_removed",
+    "runtime_floor_raised",
+    "symbol_version_required_added",
+    "symbol_version_required_added_compat",
+    "symbol_version_required_removed"
+   ],
    "api_break": false,
    "bad_practice": false,
    "category": "breaking",
@@ -2216,6 +2236,16 @@
   },
   "case21_method_became_static": {
    "abi_break": true,
+   "allowed_kinds": [
+    "fortify_source_weakened",
+    "imported_symbol_added",
+    "needed_added",
+    "needed_removed",
+    "runtime_floor_raised",
+    "symbol_version_required_added",
+    "symbol_version_required_added_compat",
+    "symbol_version_required_removed"
+   ],
    "api_break": true,
    "bad_practice": false,
    "category": "breaking",
