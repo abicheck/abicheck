@@ -63,6 +63,22 @@ __all__ = [
 ]
 
 
+def _release_md_folded_gating(library_results: Sequence[Mapping[str, object]]) -> int:
+    """Gating findings the members' verdicts score that no kind row itemises.
+
+    ``result_counts.gating`` is the disposition audit's effective total (every
+    gating finding, including those the redundancy filter folded into another
+    finding); ``gating_retained`` is the population the review groups hold.
+    The difference is the folded-but-scored remainder, summed over the members.
+    """
+    total = 0
+    for lib in library_results:
+        counts = cast(Mapping[str, int], lib.get("result_counts") or {})
+        gating = int(counts.get("gating", 0))
+        total += max(0, gating - int(counts.get("gating_retained", gating)))
+    return total
+
+
 def _release_md_libraries_table(
     library_results: list[dict[str, object]],
     emoji: dict[str, str],
@@ -105,6 +121,18 @@ def _release_md_libraries_table(
             f"| {lib.get('risk_changes', '—')} | {lib.get('compatible_additions', '—')} "
             f"| {lib.get('surface_removals', '—')} | {lib.get('surface_modifications', '—')} |"
         )
+    folded = _release_md_folded_gating(all_library_results or library_results)
+    if folded:
+        lines += [
+            "",
+            f"> The `Breaking` column includes {folded} gating finding"
+            f"{'' if folded == 1 else 's'} folded into another finding (the "
+            "redundancy filter; still scored by the verdict). The per-kind "
+            "sections itemise only the displayed findings, so those "
+            "findings appear in the totals but in no kind row. "
+            "`result_counts.gating_retained` vs `gating` in the JSON "
+            "report gives the same split per library.",
+        ]
     change_inventory = (
         release_inventory_counters(all_library_results)
         if all_library_results is not None
