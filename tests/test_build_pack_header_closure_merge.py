@@ -235,3 +235,24 @@ def test_merge_is_identity_when_nothing_to_add() -> None:
     )
     assert with_header_public_closure(pack_graph, header) is pack_graph
     assert with_header_public_closure(pack_graph, None) is pack_graph
+
+
+def test_merge_is_identity_when_header_has_no_closure() -> None:
+    pack_graph = _graph(list(_T), list(_OLD_FIELDS), closure=False, passes="type_graph")
+    header = _graph(
+        list(_T), list(_OLD_FIELDS), closure=False, passes="header_type_graph"
+    )
+    assert with_header_public_closure(pack_graph, header) is pack_graph
+    assert with_header_public_closure(pack_graph, pack_graph) is pack_graph
+
+
+def test_closure_edge_with_endpoint_missing_from_header_nodes_still_merges() -> None:
+    pack_graph = _graph(list(_T), list(_OLD_FIELDS), closure=False, passes="type_graph")
+    header = SourceGraphSummary()
+    header.add_edge(GraphEdge(src=_HDR, dst=f"type://{_T[0]}", kind="SOURCE_DECLARES"))
+    merged = with_header_public_closure(pack_graph, header)
+    assert merged is not pack_graph
+    assert any(
+        e.kind == "SOURCE_DECLARES" and e.dst == f"type://{_T[0]}" for e in merged.edges
+    )
+    assert not any(e.kind == "SOURCE_DECLARES" for e in pack_graph.edges)

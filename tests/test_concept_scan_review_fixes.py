@@ -261,3 +261,39 @@ def test_unreadable_header_makes_comparison_assurance_partial(tmp_path: Path) ->
 
     assert not named("read")
     assert named("unreadable")
+
+
+@pytest.mark.parametrize("other_must_understand", [True, False])
+def test_reset_drops_only_the_concept_fact(other_must_understand: bool) -> None:
+    """A reset removes the concept fact and its must_understand entry but
+    leaves a sibling fact (and its must_understand entry) in the section."""
+    from abicheck.storage.extension_fact_catalog import CXX_CONCEPT_HEADER_SCAN
+    from abicheck.storage.extension_facts import sync_model_extension_facts
+    from abicheck.storage.wire_extensions import (
+        EXTENSIONS_KEY,
+        MUST_UNDERSTAND_KEY,
+        WireExtensions,
+        attach,
+        extensions_of,
+    )
+
+    name = CXX_CONCEPT_HEADER_SCAN.name
+    snap = AbiSnapshot(library="l", version="1")
+    ext = WireExtensions()
+    must = [name, "acme.other"] if other_must_understand else [name]
+    ext.header_extras[CXX_CONCEPT_HEADER_SCAN.section] = {
+        EXTENSIONS_KEY: {name: True, "acme.other": 1},
+        MUST_UNDERSTAND_KEY: must,
+    }
+    ext.document_must_understand = [name]
+    attach(snap, ext)
+    snap.cxx_concept_header_scan = None
+    sync_model_extension_facts(snap)
+    carried = extensions_of(snap)
+    assert carried is not None
+    extras = carried.header_extras[CXX_CONCEPT_HEADER_SCAN.section]
+    assert extras[EXTENSIONS_KEY] == {"acme.other": 1}
+    assert extras.get(MUST_UNDERSTAND_KEY, []) == (
+        ["acme.other"] if other_must_understand else []
+    )
+    assert name not in carried.document_must_understand
