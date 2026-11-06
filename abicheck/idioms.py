@@ -426,10 +426,12 @@ class AntiPattern:
 
 
 #: ``std::`` names that alias a fundamental type (or are a scoped enum over
-#: one): passing them by value crosses no library type, so clang's
+#: one), plus ``std::max_align_t`` (``::max_align_t`` from ``<stddef.h>``: a
+#: struct on glibc, ``long double`` on libc++, laid out by the platform C ABI
+#: either way): passing them by value crosses no C++ library type, so clang's
 #: as-written ``std::size_t`` must read like castxml's ``unsigned long``.
 _STD_SCALAR_ALIAS_RE = re.compile(
-    r"^(?:const\s+|volatile\s+)*(?:::)?std::(?:size_t|ptrdiff_t|nullptr_t"
+    r"^(?:const\s+|volatile\s+)*(?:::)?std::(?:size_t|ptrdiff_t|nullptr_t|max_align_t"
     r"|byte|u?int(?:_least|_fast)?(?:8|16|32|64)_t|u?intmax_t|u?intptr_t)"
     r"(?:\s+const|\s+volatile)*$"
 )

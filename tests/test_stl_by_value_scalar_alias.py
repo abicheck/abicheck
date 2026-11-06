@@ -30,13 +30,16 @@ _SPELLINGS = [
     "std::shared_ptr<int>", "std::array<std::uint8_t, 4>",
 ]  # fmt: skip
 
-# std::max_align_t is a struct on glibc: a class type, like the containers.
 _CLASS_TYPES = {
-    "std::max_align_t",
     "std::string", "std::vector<int>", "std::vector<std::size_t>",
     "std::pair<std::size_t, int>", "std::optional<std::size_t>",
     "std::shared_ptr<int>", "std::array<std::uint8_t, 4>",
 }  # fmt: skip
+
+
+#: ``std::`` re-exports of C ``<stddef.h>`` types whose representation the
+#: C ABI fixes per platform (``std::is_class`` differs between glibc and libc++).
+_C_LIBRARY_TYPES = {"std::max_align_t"}
 
 
 @pytest.mark.parametrize("spelling", _SPELLINGS)
@@ -73,4 +76,9 @@ def test_detector_agrees_with_the_compilers_is_class(tmp_path: Path) -> None:
     is_class = [line == "1" for line in out.stdout.split()]
     assert len(is_class) == len(_SPELLINGS)
     for spelling, cls in zip(_SPELLINGS, is_class, strict=True):
+        if spelling in _C_LIBRARY_TYPES:
+            # A struct on glibc, ``long double`` on libc++: its layout is the
+            # platform C ABI's, not a C++ library's, so it never counts.
+            assert not _is_std_by_value(spelling, 0, ParamKind.VALUE), spelling
+            continue
         assert _is_std_by_value(spelling, 0, ParamKind.VALUE) is cls, spelling

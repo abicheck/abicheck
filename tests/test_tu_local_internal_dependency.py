@@ -120,9 +120,14 @@ def test_mangling_reader_agrees_with_the_linker(tmp_path: Path) -> None:
     checked = 0
     for line in out.splitlines():
         parts = line.split()
-        if len(parts) != 3 or not parts[2].startswith("_Z"):
+        if len(parts) != 3:
             continue
         letter, name = parts[1], parts[2]
+        # Mach-O prefixes every C symbol with one extra underscore (``__Z…``).
+        if name.startswith("__Z"):
+            name = name[1:]
+        if not name.startswith("_Z"):
+            continue
         if letter.upper() not in "TDB":
             continue
         assert itanium_has_internal_linkage(name) is letter.islower(), line
