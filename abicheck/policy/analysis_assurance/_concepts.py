@@ -41,10 +41,12 @@ def concept_constraint_gap(
     old: AbiSnapshot | None, new: AbiSnapshot
 ) -> tuple[bool, list[str]]:
     """``(gap, notes)``: one note per side whose public headers declare a
-    concept or a requires-clause the header backend does not model."""
+    concept or a requires-clause the header backend does not model, or whose
+    headers could not be read to rule one out."""
     notes = [
         f"{CONCEPT_GAP_DIMENSION}: the public headers of the {label} snapshot "
-        "declare a concept or a requires-clause, so a change to a template "
+        "declare a concept or a requires-clause (or could not be read to rule "
+        "one out), so a change to a template "
         "constraint is not assessed"
         for label, snap in (("old", old), ("new", new))
         if snap is not None and snap.cxx_concept_header_scan

@@ -1,6 +1,6 @@
 ### Fixed
 
-- **A build pack no longer hides a public-to-internal dependency the headers show** —
+- **A build pack now keeps the header graph's public declaration closure** —
   with `dump --build-info` (or an out-of-band `--build-info`/`--sources` pack at
   `compare`), the pack's L5 graph replaced the header graph and carried no (or
   only a partial) `SOURCE_DECLARES` public closure, so

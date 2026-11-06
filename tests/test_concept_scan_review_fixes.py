@@ -111,8 +111,10 @@ def test_unreadable_header_is_not_a_clean_negative(tmp_path: Path) -> None:
     directory = tmp_path / "a_dir.h"
     directory.mkdir()
     assert concept_header_scan([clean]) is False
-    assert concept_header_scan([clean, missing]) is None
-    assert concept_header_scan([directory, clean]) is None
+    # An unreadable header cannot rule a concept out, so it reads as a gap.
+    assert concept_header_scan([clean, missing]) is True
+    assert concept_header_scan([directory, clean]) is True
+    assert concept_header_scan([missing]) is True
     # A positive in a readable header is still reported.
     assert concept_header_scan([missing, positive]) is True
     assert concept_header_scan([positive, missing]) is True
@@ -206,3 +208,24 @@ def test_attaching_assurance_twice_does_not_duplicate_warnings(
     concept = [w for w in first if w.startswith(CONCEPT_GAP_DIMENSION)]
     assert len(concept) == [old_scan, new_scan].count(True)
     assert len(first) == len(set(first))
+
+
+def test_unreadable_header_lowers_comparison_assurance(tmp_path: Path) -> None:
+    """Comparison-level oracle: a side whose header could not be read names
+    the concept dimension as unobserved; a fully read clean side does not."""
+    from types import SimpleNamespace
+
+    from abicheck.policy.analysis_assurance._concepts import concept_constraint_gap
+
+    clean = tmp_path / "clean.h"
+    clean.write_text("int f(void);\n", encoding="utf-8")
+    missing = tmp_path / "gone.h"
+    read_ok = SimpleNamespace(cxx_concept_header_scan=concept_header_scan([clean]))
+    read_failed = SimpleNamespace(
+        cxx_concept_header_scan=concept_header_scan([clean, missing])
+    )
+    assert concept_constraint_gap(read_ok, read_ok) == (False, [])  # type: ignore[arg-type]
+    gap, notes = concept_constraint_gap(read_ok, read_failed)  # type: ignore[arg-type]
+    assert gap and len(notes) == 1 and "new snapshot" in notes[0]
+    gap, notes = concept_constraint_gap(read_failed, read_failed)  # type: ignore[arg-type]
+    assert gap and len(notes) == 2

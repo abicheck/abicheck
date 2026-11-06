@@ -108,11 +108,12 @@ def header_declares_concept_or_requires(text: str) -> bool:
     return bool(_CONCEPT_DEFINITION.search(code) or _REQUIRES.search(code))
 
 
-def concept_header_scan(paths: Iterable[str | Path]) -> bool | None:
+def concept_header_scan(paths: Iterable[str | Path]) -> bool:
     """Whether any header in *paths* defines a concept or spells a
-    ``requires`` clause. A positive in a readable header wins; otherwise an
-    unreadable header makes the answer ``None`` (not assessed), never a
-    clean ``False``."""
+    ``requires`` clause -- or could not be read to rule one out. An
+    unreadable header answers ``True``: the constraint dimension is then
+    named as unobserved, so a failed read lowers assurance instead of
+    reading as a clean ``False``."""
     unreadable = False
     for path in paths:
         try:
@@ -122,4 +123,4 @@ def concept_header_scan(paths: Iterable[str | Path]) -> bool | None:
             continue
         if header_declares_concept_or_requires(text):
             return True
-    return None if unreadable else False
+    return unreadable

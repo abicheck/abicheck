@@ -139,8 +139,8 @@ def test_only_the_given_public_headers_are_read(tmp_path: Path) -> None:
     public.write_text('#include "detail.h"\nint f();\n')
     (tmp_path / "detail.h").write_text(_HEADERS[0][1])
     assert concept_header_scan([public]) is False
-    # An unreadable header is "not assessed" (None), never a clean negative.
-    assert concept_header_scan([public, tmp_path / "missing.h"]) is None
+    # An unreadable header cannot rule a concept out, so it reads as a gap.
+    assert concept_header_scan([public, tmp_path / "missing.h"]) is True
 
 
 @pytest.mark.parametrize(
