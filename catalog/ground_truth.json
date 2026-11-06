@@ -1621,15 +1621,21 @@
    ]
   },
   "case15_noexcept_change": {
-   "frontend_kind_differences": [
-    {
-     "kinds": [
-      "func_noexcept_removed"
-     ],
-     "only_in": "clang",
-     "reason": "UNEXPLAINED: only clang reports it; root cause not yet traced",
-     "known_gap": "castxml and clang report different change-kind sets for the same case"
-    }
+   "expected_kinds_gaps": {
+    "castxml": [
+     {
+      "kinds": [
+       "func_noexcept_removed"
+      ],
+      "reason": "castxml 0.7's XML carries no exception specification for functions or methods (no noexcept attribute), so the castxml header lane cannot observe the noexcept removal; the clang header backend reports func_noexcept_removed.",
+      "known_gap": "castxml output carries no `noexcept` exception specification"
+     }
+    ]
+   },
+   "allowed_kinds": [
+    "imported_symbol_added",
+    "runtime_floor_raised",
+    "symbol_version_required_added"
    ],
    "abi_break": false,
    "api_break": true,
@@ -1637,12 +1643,12 @@
    "category": "risk",
    "expected": "COMPATIBLE_WITH_RISK",
    "min_evidence": "L0",
-   "note": "noexcept change itself is COMPATIBLE; GLIBCXX version requirement is deployment risk",
+   "note": "Subject is the noexcept removal on Buffer::reset() (func_noexcept_removed, a RISK kind). The GLIBCXX runtime-floor / symbol-version / import findings come from v2's throw path and depend on the toolchain, so they are allowed, not required.",
    "platforms": [
     "linux"
    ],
    "expected_kinds": [
-    "runtime_floor_raised"
+    "func_noexcept_removed"
    ]
   },
   "case160_public_api_internal_dep_added": {

@@ -51,6 +51,21 @@ Deployment Risk Changes:
   (__cxa_throw, __cxa_allocate_exception, std::runtime_error ctor/dtor, ...)
 ```
 
+These three deployment-risk kinds come from the toolchain (which
+`GLIBCXX_*` versions v2's throw path happens to need), so the ground truth
+lists them as `allowed_kinds`, not as the case's subject. The subject is
+the `noexcept` removal itself. With headers (`-H v1.h` / `-H v2.h`, L2),
+the clang header backend reports it:
+
+```text
+- func_noexcept_removed: Buffer::reset() lost noexcept
+```
+
+The default castxml backend does not: castxml's XML carries no exception
+specification, so this kind is a declared castxml gap
+(`expected_kinds_gaps` in `ground_truth.json`; see
+`docs/contribute/known-gaps.md`).
+
 ## Minimum evidence
 
 `min_evidence: L0` — the ELF dynamic section's version-requirement table
