@@ -354,3 +354,25 @@ def test_export_table_fallback_lowers_assurance(
     assert named == sides
     if sides:
         assert aa.status == "partial"
+
+
+@pytest.mark.parametrize(("depth", "kept"), [("binary", False), ("headers", True)])
+def test_projection_below_headers_clears_the_export_table_fallback(
+    depth: str, kept: bool
+) -> None:
+    """A stored Mach-O/PE header dump that fell back to the export table must
+    not lower a binary-depth comparison's assurance: below header depth the
+    fallback concerns headers the comparison excludes."""
+    from abicheck.checker import compare
+    from abicheck.policy.analysis_assurance._scope_fallback import (
+        SCOPE_FALLBACK_DIMENSION,
+    )
+    from abicheck.policy.depth_projection import project_snapshot_to_depth
+
+    snaps = []
+    for v in ("1", "2"):
+        snap = AbiSnapshot(library="l", version=v, scope_fallback="mangling-fallback")
+        snaps.append(project_snapshot_to_depth(snap, depth))
+    assert (snaps[0].scope_fallback is not None) is kept
+    notes = compare(snaps[0], snaps[1]).analysis_assurance.notes
+    assert any(n.startswith(SCOPE_FALLBACK_DIMENSION) for n in notes) is kept
