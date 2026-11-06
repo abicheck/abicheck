@@ -297,3 +297,24 @@ def test_reset_drops_only_the_concept_fact(other_must_understand: bool) -> None:
         ["acme.other"] if other_must_understand else []
     )
     assert name not in carried.document_must_understand
+
+
+@pytest.mark.parametrize("toolchain", [None, {}])
+def test_empty_toolchain_metadata_still_scans_like_castxml(
+    tmp_path: Path, toolchain: dict[str, str] | None
+) -> None:
+    """The Mach-O and PE dump paths hand over empty toolchain metadata (seen
+    on macOS/Windows CI); like ``dumper``/``manifest`` they are castxml's, so
+    the producer-gated scans must still run there. No headers, no scan."""
+    from abicheck.extract.headers.compile_provenance import _ast_compile_provenance
+
+    header = tmp_path / "api.h"
+    header.write_text(_CONCEPT + "\n", encoding="utf-8")
+    prov = _ast_compile_provenance([header], None, (), None, ast_toolchain=toolchain)
+    assert prov["cxx_concept_header_scan"] is True
+    hybrid = _ast_compile_provenance(
+        [header], None, (), None, ast_toolchain={"producer": "hybrid"}
+    )
+    assert hybrid["cxx_concept_header_scan"] is None
+    none = _ast_compile_provenance([], None, (), None, ast_toolchain=toolchain)
+    assert none["cxx_concept_header_scan"] is None

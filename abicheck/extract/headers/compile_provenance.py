@@ -92,18 +92,19 @@ def _ast_compile_provenance(
         abi_dialect=(ast_toolchain or {}).get("abi_dialect"),
     )
     args = _combined_option_tokens(gcc_options, gcc_option_tokens)
+    # A header parse with empty toolchain metadata (the Mach-O and PE dump
+    # paths, observed on macOS/Windows CI) is castxml's: the same default
+    # ``dumper`` and ``manifest`` already apply. Without it the
+    # producer-gated header scans below silently skipped those platforms.
+    producer = (ast_toolchain or {}).get("producer") or ("castxml" if headers else None)
     return {
         "ast_resolved_standard": resolved_standard,
         "ast_cplusplus_macro": _cplusplus_macro_for_standard(resolved_standard),
         "ast_compile_args": tuple(DEFAULT_REDACTION.argv(args)),
         "ast_sysroot": DEFAULT_REDACTION.path(str(sysroot)) if sysroot else None,
-        "template_default_header_scan": _template_default_scan(
-            headers, (ast_toolchain or {}).get("producer")
-        ),
+        "template_default_header_scan": _template_default_scan(headers, producer),
         "cxx_concept_header_scan": _concept_scan(
-            headers,
-            (ast_toolchain or {}).get("producer"),
-            (ast_toolchain or {}).get("resolved_lang_mode"),
+            headers, producer, (ast_toolchain or {}).get("resolved_lang_mode")
         ),
     }
 

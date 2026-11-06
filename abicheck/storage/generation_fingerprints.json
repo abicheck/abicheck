@@ -145,7 +145,7 @@
       "abicheck/extract/headers/clang/typedefs.py": "0345022b18ed0a011c4a1420e7b85e77dc3437f1339d5572ff28af29aebc0f3b",
       "abicheck/extract/headers/clang/vtable.py": "ec35a377463d0191e013684713b5a049e78a766a16cf74e71354d2e57e3a2931",
       "abicheck/extract/headers/clang_header_argv.py": "644a6454c6a3da3ab5f184cc2d9778d51f141f1e528f86162cccb815f9b17ddb",
-      "abicheck/extract/headers/compile_provenance.py": "631a87d3ba50bc0088ca942ec0d6dabb381cea4abd18efed7d358e1d5cb7d86a",
+      "abicheck/extract/headers/compile_provenance.py": "e4a6bcf30627807081f38f909cd136e5203132c099ea225971ef1d4cf849d82a",
       "abicheck/extract/headers/concept_scan.py": "547fbfd499fe75fb51bef714ebcd0f8a3f97f621e7bf631224ecead0a3fe0c35",
       "abicheck/extract/headers/manifest.py": "4f0e740bfeb88aa4363176f2defe422826a9e2cd91b03cd317f6f86f4eec5066",
       "abicheck/extract/headers/preprocessor_branches.py": "d3a409d126b0dd1b19a634d4aad25660d372dad931b310cfbaaefc9d769b244d",
@@ -199,9 +199,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "59666c8b3562884838f31296770f55c37cd5be38e609b566acae717745daa7e7",
+    "fingerprint": "be0ff56b9b8f34a399c6e7fc94afb08d7fd923d603c4ab1b0f4ccb93acd6a677",
     "generation": 41,
-    "reason": "Refines the concept scan introduced at generation 41 in this same unmerged PR (C-mode skip, #if 0, single-pass lexing, unreadable header -> True). Generation 41 has never been released and no committed snapshot carries the cxx_concept_header_scan fact, so no stored gen-41 value changes meaning."
+    "reason": "Gen 41 (unreleased, introduced by this PR) default for empty Mach-O/PE toolchain metadata: producer-gated header scans now run there as castxml. Every gen-40 snapshot is already invalidated by this PR's 40->41 bump, so no stored gen-41 value changes meaning."
   },
   "resolver": {
     "files": {
