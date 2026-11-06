@@ -65,12 +65,9 @@ def _release_md_folded_gating(library_results: Sequence[Mapping[str, object]]) -
     """
     total = 0
     for lib in library_results:
-        counts = lib.get("result_counts")
-        if not isinstance(counts, Mapping):
-            continue
-        gating = int(cast(int, counts.get("gating", 0)))
-        retained = int(cast(int, counts.get("gating_retained", gating)))
-        total += max(0, gating - retained)
+        counts = cast(Mapping[str, int], lib.get("result_counts") or {})
+        gating = int(counts.get("gating", 0))
+        total += max(0, gating - int(counts.get("gating_retained", gating)))
     return total
 
 
