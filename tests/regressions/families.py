@@ -437,6 +437,7 @@ _F4 = (
     "evidence.spelling_used_as_a_semantic_model",
     "evidence.spelling_matcher_same_offset_underreport",
     "policy.public_surface_reachability",
+    "policy.tu_local_entity_counted_as_internal_dependency",
     "extraction.function_local_declaration_leaks_into_surface",
     "extraction.implicit_declaration_leaks_into_surface",
     "extraction.implicit_language_rule_read_off_one_explicit_key",

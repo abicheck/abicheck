@@ -311,6 +311,74 @@ def is_consumer_compiled_node(node_id: str, node_by_id: dict[str, GraphNode]) ->
     return node.provenance not in _NO_CONSUMER_COMPILED_SIGNAL_PROVENANCES
 
 
+#: Source-file suffixes (not headers): an internal-linkage entity defined in
+#: one of these belongs to exactly one translation unit.
+_TU_SOURCE_SUFFIXES = frozenset(
+    {".c", ".cc", ".cpp", ".cxx", ".c++", ".cp", ".C", ".m", ".mm", ".cu"}
+)
+
+
+def is_tu_local_file(path: str) -> bool:
+    """Whether *path* is a translation-unit source file, not a header."""
+    dot = path.rfind(".")
+    if dot < 0 or "/" in path[dot:]:
+        return False
+    suffix = path[dot:]
+    return suffix in _TU_SOURCE_SUFFIXES or suffix.lower() in _TU_SOURCE_SUFFIXES
+
+
+def itanium_has_internal_linkage(mangled: str) -> bool:
+    """Whether an Itanium-mangled name encodes internal linkage.
+
+    Two spellings: an anonymous namespace component (``_GLOBAL__N_``), and the
+    ``L`` prefix the ABI puts before the unqualified name of a ``static``
+    namespace-scope entity (``_ZL10cache_head``, ``_ZN2uiL10cache_headE``).
+    Anything not starting ``_Z`` (C names, plain spellings) is ``False``:
+    no linkage evidence, not proof of external linkage.
+    """
+    if not mangled.startswith("_Z"):
+        return False
+    if "_GLOBAL__N_" in mangled:
+        return True
+    i = 2
+    nested = mangled.startswith("_ZN")
+    if nested:
+        i = 3
+        while i < len(mangled) and mangled[i] in "rVKRO":
+            i += 1
+    while i < len(mangled):
+        ch = mangled[i]
+        if ch == "L" and i + 1 < len(mangled) and mangled[i + 1].isdigit():
+            return True
+        if not ch.isdigit() or not nested and i > 2:
+            return False
+        j = i
+        while j < len(mangled) and mangled[j].isdigit():
+            j += 1
+        i = j + int(mangled[i:j])
+    return False
+
+
+def is_tu_local_node(node: GraphNode) -> bool:
+    """Whether *node* is TU-local: internal linkage, defined in a source file.
+
+    An entity in an anonymous namespace or declared ``static`` at file scope in
+    a ``.cpp`` is private to that one translation unit; no other TU (and no
+    consumer) can name it, so it is the defining function's own
+    implementation, not a separately changeable internal component. Linkage
+    evidence is the extractor's ``tu_local`` marker or an internal-linkage
+    mangled identity; the defining file must be a source file, since an
+    internal-linkage entity in a header is compiled into every includer.
+    """
+    def_file = str(node.attrs.get("def_file", ""))
+    if not def_file or not is_tu_local_file(def_file):
+        return False
+    if node.attrs.get("tu_local"):
+        return True
+    ident = node.id.split("://", 1)[-1]
+    return itanium_has_internal_linkage(ident)
+
+
 def is_internal_dependency_node(
     node_id: str,
     node_by_id: dict[str, GraphNode],
@@ -334,6 +402,8 @@ def is_internal_dependency_node(
     if node is None or node.kind not in DECL_NODE_KINDS:
         return False
     if node_id in exported_decls:
+        return False
+    if is_tu_local_node(node):
         return False
     vis = str(node.attrs.get("visibility", ""))
     if vis in INTERNAL_VISIBILITIES:

@@ -425,13 +425,26 @@ class AntiPattern:
     evidence: list[str] = field(default_factory=list)
 
 
+#: ``std::`` names that alias a fundamental type (or are a scoped enum over
+#: one), plus ``std::max_align_t`` (``::max_align_t`` from ``<stddef.h>``: a
+#: struct on glibc, ``long double`` on libc++, laid out by the platform C ABI
+#: either way): passing them by value crosses no C++ library type, so clang's
+#: as-written ``std::size_t`` must read like castxml's ``unsigned long``.
+_STD_SCALAR_ALIAS_RE = re.compile(
+    r"^(?:const\s+|volatile\s+)*(?:::)?std::(?:size_t|ptrdiff_t|nullptr_t|max_align_t|streamsize|streamoff"
+    r"|byte|u?int(?:_least|_fast)?(?:8|16|32|64)_t|u?intmax_t|u?intptr_t)"
+    r"(?:\s+const|\s+volatile)*$"
+)
+
+
 def _is_std_by_value(type_str: str, pointer_depth: int, kind: ParamKind) -> bool:
     """True when *type_str* names a ``std::`` type crossed **by value**.
 
     A pointer/reference to a ``std::`` type is fine (only the pointer crosses
     the boundary); it is passing/returning the container itself that is fragile.
+    A ``std::`` alias of a fundamental type is not a library type at all.
     """
-    if "std::" not in type_str:
+    if "std::" not in type_str or _STD_SCALAR_ALIAS_RE.match(type_str.strip()):
         return False
     if pointer_depth >= 1 or _is_pointer(type_str) or "&" in type_str:
         return False

@@ -496,3 +496,75 @@ def test_seeded_mutant_1231_substring_internal_namespace(
 def test_unmutated_pipeline_passes_the_mutant_cells() -> None:
     for prefix in ("sentinel.fn.", "tag.fp.", "experimental.fp.", "internal_ns.fn."):
         assert _violations(prefix) == [], prefix
+
+
+# --------------------------------------------------------------------------
+# L5 dependency-target cell: provenance heuristic vetoed by linkage
+# --------------------------------------------------------------------------
+#
+# ``is_internal_dependency_node`` classifies a reached node as internal from
+# provenance alone (``defined_in_project`` plus a non-system name), a spelling
+# heuristic. Linkage is the structural veto: an internal-linkage entity defined
+# in a translation-unit source is the function's own implementation (catalog
+# case232). FP cell: provenance says internal, linkage vetoes -> no finding.
+# FN cell: a near-miss spelling (anonymous-looking label, header-defined
+# internal linkage) keeps the finding. Control: external linkage -> finding.
+
+
+def _l5_dependency_findings(target_attrs: dict, target_id: str) -> list[str]:
+    from l5_graph_support import producers_ran_unless_flagged
+
+    from abicheck.buildsource.source_graph import (
+        GraphEdge,
+        GraphNode,
+        SourceGraphSummary,
+    )
+    from abicheck.buildsource.source_graph_findings import (
+        diff_source_graph_findings,
+    )
+
+    nodes = [
+        GraphNode(id="decl://pub", kind="source_decl", label="pub()"),
+        GraphNode(id="sym://pub", kind="binary_symbol", label="pub"),
+        GraphNode(id="hdr", kind="header", label="api.h"),
+        GraphNode(id=target_id, kind="source_decl", attrs=target_attrs),
+    ]
+    base = [
+        GraphEdge(src="decl://pub", dst="sym://pub", kind="SOURCE_DECL_MAPS_TO_SYMBOL"),
+        GraphEdge(src="hdr", dst="decl://pub", kind="SOURCE_DECLARES"),
+        GraphEdge(src="decl://pub", dst="decl://pub", kind="DECL_CALLS_DECL"),
+    ]
+    old = SourceGraphSummary(nodes=nodes, edges=base)
+    new = SourceGraphSummary(
+        nodes=nodes,
+        edges=[
+            *base,
+            GraphEdge(src="decl://pub", dst=target_id, kind="DECL_CALLS_DECL"),
+        ],
+    )
+    old, new = producers_ran_unless_flagged(old, new)
+    return [c.kind.value for c in diff_source_graph_findings(old, new)]
+
+
+_DEP = "public_api_internal_dependency_added"
+
+
+@pytest.mark.parametrize(
+    ("cell", "target_id", "attrs", "reported"),
+    [
+        ("fp_anon_namespace", "decl://_ZN2ui12_GLOBAL__N_14headE",
+         {"defined_in_project": True, "def_file": "/p/impl.cpp"}, False),
+        ("fp_file_static_marker", "decl://cache",
+         {"defined_in_project": True, "def_file": "/p/impl.cc", "tu_local": True}, False),
+        ("fn_anonymous_looking_label", "decl://_ZN6detail9anonymousEv",
+         {"defined_in_project": True, "def_file": "/p/impl.cpp"}, True),
+        ("fn_internal_linkage_in_header", "decl://_ZL6helperv",
+         {"defined_in_project": True, "def_file": "/p/detail.h"}, True),
+        ("control_external_linkage", "decl://_ZN6detail6helperEv",
+         {"defined_in_project": True, "def_file": "/p/impl.cpp"}, True),
+    ],
+)  # fmt: skip
+def test_l5_internal_dependency_provenance_vetoed_by_linkage(
+    cell: str, target_id: str, attrs: dict, reported: bool
+) -> None:
+    assert (_DEP in _l5_dependency_findings(attrs, target_id)) is reported, cell

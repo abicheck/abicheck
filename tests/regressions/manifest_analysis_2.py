@@ -473,4 +473,38 @@ ANALYSIS_2_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="policy.tu_local_entity_counted_as_internal_dependency",
+        invariant=(
+            "An entity with internal linkage defined in a translation-unit "
+            "source file (anonymous namespace, file-scope static, or a type "
+            "declared there) is never a target of "
+            "public_api_internal_dependency_added or "
+            "public_to_internal_dependency: no consumer or other TU can name "
+            "it. It still carries a dependency *through* it, and an "
+            "internal-linkage entity defined in a header (compiled into every "
+            "includer) and any external-linkage project entity still count. "
+            "Linkage is read from the encoding (Itanium _GLOBAL__N_/_ZL, clang "
+            "AST scope), checked against nm's local/global symbol letters and "
+            "a live clang AST."
+        ),
+        fixed_by=(1941,),
+        seed_tests=(
+            "tests/test_tu_local_internal_dependency.py",
+            "tests/test_family_f4_heuristics.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "linkage": (
+                "anonymous_namespace",
+                "file_static",
+                "namespace_static",
+                "external",
+            ),
+            "defined_in": ("source", "header", "private_header"),
+            "evidence": ("tu_local_marker", "mangled_name"),
+            "path": ("direct_target", "through_tu_local"),
+        },
+        known_gaps=(),
+    ),
 )

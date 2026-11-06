@@ -32,6 +32,7 @@ from typing import Any
 from ..model.execution_cache import request_key
 from ..model.execution_cache_scoped import ScopedCache
 from ..model.name_decoration import macho_underscore as macho_decoration
+from ..model.source_graph_query import is_tu_local_file, itanium_has_internal_linkage
 from .type_graph import _node_file
 
 _RECORD_DECL_KINDS = frozenset(
@@ -123,11 +124,47 @@ class _AstIndexes:
     ref_name_index: dict[str, list[str]]
     #: clang node id -> (identity, file), the unambiguous reference lookup.
     id_index: dict[str, tuple[str, str]]
+    #: identities/qualified names of TU-local entities: internal linkage
+    #: (anonymous namespace, file-scope ``static``) declared in a source file.
+    tu_local: set[str]
+    #: type qualified names also declared *outside* an anonymous namespace.
+    #: Type identity is the spelled qname, so ``ns::W`` and ``ns::{anon}::W``
+    #: collide; such a name is never treated as TU-local
+    #: (:func:`tu_local_identities`).
+    external_types: set[str]
 
 
 def _new_ast_indexes() -> _AstIndexes:
     """A fresh, empty :class:`_AstIndexes` for one AST walk."""
-    return _AstIndexes({}, {}, {}, {})
+    return _AstIndexes({}, {}, {}, {}, set(), set())
+
+
+def tu_local_identities(idx: _AstIndexes) -> set[str]:
+    """Identities proven TU-local: a type qname shared with an externally
+    visible declaration is ambiguous and stays external."""
+    return idx.tu_local - idx.external_types
+
+
+def _mark_tu_local(ident: str, cur_file: str, idx: _AstIndexes) -> None:
+    """Record *ident* as TU-local when it is declared in a source file."""
+    if ident and cur_file and is_tu_local_file(cur_file):
+        idx.tu_local.add(ident)
+
+
+def _has_internal_linkage(node: dict[str, Any], in_anon_ns: bool) -> bool:
+    """Whether a var/enum-constant declaration has internal linkage.
+
+    Inside an anonymous namespace, always. Otherwise the mangled name says so
+    for C++ (``_ZL…``); a C file-scope ``static`` has no mangled name, so its
+    ``storageClass`` decides — a C++ static *data member* is always mangled
+    and carries external linkage, so it never reaches that fallback.
+    """
+    if in_anon_ns:
+        return True
+    mangled = str(node.get("mangledName") or "")
+    if mangled.startswith("_Z"):
+        return itanium_has_internal_linkage(mangled)
+    return node.get("storageClass") == "static"
 
 
 def _index_type_target(
@@ -187,6 +224,7 @@ def _index_children(
     cur_file: str,
     idx: _AstIndexes,
     in_body: bool,
+    in_anon_ns: bool = False,
 ) -> str:
     """Index every child of *node* in order, threading the sticky file state.
 
@@ -196,7 +234,9 @@ def _index_children(
     value, which would lose the file for every sibling after the first.
     """
     for child in node.get("inner", []) or []:
-        cur_file = _index_declared_entities(child, scope, cur_file, idx, in_body)
+        cur_file = _index_declared_entities(
+            child, scope, cur_file, idx, in_body, in_anon_ns
+        )
     return cur_file
 
 
@@ -206,6 +246,7 @@ def _index_declared_entities(
     cur_file: str,
     idx: _AstIndexes,
     in_body: bool = False,
+    in_anon_ns: bool = False,
 ) -> str:
     """First pass: record every type declaration's qualified name (+declaring
     file) and every var/enum-constant's identity (+declaring file, +bare-name
@@ -232,26 +273,39 @@ def _index_declared_entities(
     name = str(node.get("name") or "")
 
     if kind in _RECORD_DECL_KINDS and name:
+        qname = "::".join([*scope, name])
         _index_type_target(
-            "::".join([*scope, name]),
+            qname,
             name,
             cur_file,
             idx,
             prefer_definition=_looks_like_record_definition(node),
         )
-        return _index_children(node, [*scope, name], cur_file, idx, in_body)
+        if in_anon_ns and not in_body:
+            _mark_tu_local(qname, cur_file, idx)
+        elif not in_anon_ns and not in_body:
+            idx.external_types.add(qname)
+        return _index_children(node, [*scope, name], cur_file, idx, in_body, in_anon_ns)
 
     if kind in _OTHER_TYPE_DECL_KINDS and name:
-        _index_type_target(
-            "::".join([*scope, name]), name, cur_file, idx, prefer_definition=False
-        )
+        qname = "::".join([*scope, name])
+        _index_type_target(qname, name, cur_file, idx, prefer_definition=False)
+        if in_anon_ns and not in_body:
+            _mark_tu_local(qname, cur_file, idx)
+        elif not in_anon_ns and not in_body:
+            idx.external_types.add(qname)
         # Enum constants (and any nested decls) still need indexing; no new
         # scope is opened — an unscoped/scoped enum's own name is not part of
         # its enumerators' spelling in clang's AST dump.
-        return _index_children(node, scope, cur_file, idx, in_body)
+        return _index_children(node, scope, cur_file, idx, in_body, in_anon_ns)
 
     if kind == "NamespaceDecl" and name:
-        return _index_children(node, [*scope, name], cur_file, idx, in_body)
+        return _index_children(node, [*scope, name], cur_file, idx, in_body, in_anon_ns)
+
+    if kind == "NamespaceDecl":
+        # An anonymous namespace adds no name component (clang spells its
+        # members without one) but gives everything in it internal linkage.
+        return _index_children(node, scope, cur_file, idx, in_body, True)
 
     if kind == "FieldDecl" and name and not in_body:
         # A field's own qualified identity (``Widget::x``), mirroring
@@ -267,7 +321,7 @@ def _index_declared_entities(
         # their own right, only entities with their own file to look up.
         if cur_file:
             idx.decl_file.setdefault("::".join([*scope, name]), cur_file)
-        return _index_children(node, scope, cur_file, idx, in_body)
+        return _index_children(node, scope, cur_file, idx, in_body, in_anon_ns)
 
     if kind in _FUNCTION_DECL_KINDS:
         # Everything declared inside a function/method body — including a
@@ -279,12 +333,14 @@ def _index_declared_entities(
         # local variables* get marked ``defined_in_project`` and reported by
         # ``public_to_internal_dependency`` as a hidden internal dependency
         # (Codex review).
-        return _index_children(node, scope, cur_file, idx, True)
+        return _index_children(node, scope, cur_file, idx, True, in_anon_ns)
 
     if kind in _REFERENCE_DECL_KINDS and not in_body:
         _index_reference_target(node, name, cur_file, idx)
+        if _has_internal_linkage(node, in_anon_ns):
+            _mark_tu_local(_decl_identity(node), cur_file, idx)
 
-    return _index_children(node, scope, cur_file, idx, in_body)
+    return _index_children(node, scope, cur_file, idx, in_body, in_anon_ns)
 
 
 #: :func:`_resolve_type_name` resolution labels (ADR-041 richer-confidence
