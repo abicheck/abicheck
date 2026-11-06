@@ -21,6 +21,7 @@ from typing import Any
 from ....model.abi_fundamental import AbiFundamental
 from ....model.fact import Fact
 from ...builtin_abi import BuiltinAbi, builtin_type_fact, natural_alignment_bits
+from .ast_inner import ast_inner
 from .context import qualtype, qualtype_desugared
 
 __all__ = ["clang_var_alignment_bits", "clang_var_type_abi_fact"]
@@ -29,13 +30,13 @@ __all__ = ["clang_var_alignment_bits", "clang_var_type_abi_fact"]
 def _aligned_attrs(node: dict[str, Any]) -> list[dict[str, Any]]:
     return [
         c
-        for c in node.get("inner", []) or []
+        for c in ast_inner(node)
         if isinstance(c, dict) and c.get("kind") == "AlignedAttr"
     ]
 
 
 def _attr_alignment_bits(attr: dict[str, Any]) -> int | None:
-    stack: list[Any] = list(attr.get("inner", []) or [])
+    stack: list[Any] = list(ast_inner(attr))
     while stack:
         sub = stack.pop()
         if not isinstance(sub, dict):
@@ -45,7 +46,7 @@ def _attr_alignment_bits(attr: dict[str, Any]) -> int | None:
             return value * 8
         if isinstance(value, str) and value.isdigit():
             return int(value) * 8
-        stack.extend(sub.get("inner", []) or [])
+        stack.extend(ast_inner(sub))
     return None
 
 

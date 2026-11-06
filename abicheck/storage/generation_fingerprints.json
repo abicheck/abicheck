@@ -145,7 +145,7 @@
       "abicheck/extract/headers/clang/template_param_indexes.py": "1d54979cca271e1b112652f45f54ddd1356ca5f32e3367a3723aeaacd4e7c68d",
       "abicheck/extract/headers/clang/templates.py": "ee85de87a4180b5bed93d501237f153d1132fd325504c1fdf52fab87c7c95efe",
       "abicheck/extract/headers/clang/typedefs.py": "0345022b18ed0a011c4a1420e7b85e77dc3437f1339d5572ff28af29aebc0f3b",
-      "abicheck/extract/headers/clang/var_alignment.py": "860bb379fa48bad1c140270853f3b8b6825cd4c6bf2b4d1e0524d0ce432743d1",
+      "abicheck/extract/headers/clang/var_alignment.py": "eebcf9beac1dfe14706b4b7d947791f9593cafb81f2be36643d16d80ab0a7d62",
       "abicheck/extract/headers/clang/vtable.py": "ec35a377463d0191e013684713b5a049e78a766a16cf74e71354d2e57e3a2931",
       "abicheck/extract/headers/clang_header_argv.py": "644a6454c6a3da3ab5f184cc2d9778d51f141f1e528f86162cccb815f9b17ddb",
       "abicheck/extract/headers/compile_provenance.py": "e4a6bcf30627807081f38f909cd136e5203132c099ea225971ef1d4cf849d82a",
@@ -202,9 +202,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "d23b6580848689c22b42260d71ca9f2e9cdb8b472079cf5cd63cc83a30b3a82d",
+    "fingerprint": "5639754281e15477eabdad446cf93734ea286c17b2889d47a246e3f48ad95f81",
     "generation": 43,
-    "reason": "part of the unreleased generation-43 bump in this PR: bare aligned attribute withholds the clang builtin type fact"
+    "reason": "ast_inner refactor of var_alignment; no output change"
   },
   "resolver": {
     "files": {
