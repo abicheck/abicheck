@@ -2922,6 +2922,16 @@
    ]
   },
   "case43_base_class_member_added": {
+   "frontend_kind_differences": [
+    {
+     "kinds": [
+      "tail_padding_reuse_changed"
+     ],
+     "only_in": "clang",
+     "reason": "TRACED: the detector compares a record's data size (dsize) at stable sizeof; castxml's XML records size and field offsets but no data size, so castxml snapshots leave data_size_bits unset and the check cannot run. Clang's verdict is correct: clang -fdump-record-layouts shows v1 Derived::value at byte 12, inside Base's tail padding (Base dsize 12, sizeof 16), and v2 at byte 16 (Base dsize 16)",
+     "known_gap": "castxml and clang report different change-kind sets for the same case"
+    }
+   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,

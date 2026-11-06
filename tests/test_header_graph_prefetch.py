@@ -392,8 +392,15 @@ def test_a_failed_dump_exits_without_waiting_for_its_parse(tmp_path: Path) -> No
 
     started = tmp_path / "started"
     script = tmp_path / "failing_dump.py"
+    import abicheck
+
+    # ``-I`` keeps the child free of cwd/PYTHONPATH/user-site leakage, which
+    # also hides a user-site or out-of-venv editable install; put the package
+    # root this test imported on the child's path explicitly.
+    package_root = str(Path(abicheck.__file__).resolve().parent.parent)
     script.write_text(
         "import sys, time\n"
+        f"sys.path.insert(0, {package_root!r})\n"
         "from pathlib import Path\n"
         "from abicheck import deadline\n"
         "from abicheck import service_header_graph_attach as attach\n"
@@ -411,11 +418,15 @@ def test_a_failed_dump_exits_without_waiting_for_its_parse(tmp_path: Path) -> No
         "    raise KeyboardInterrupt\n"
     )
     start = time.monotonic()
-    subprocess.run(
+    proc = subprocess.run(
         [sys.executable, "-I", str(script), str(started)],
         capture_output=True,
+        text=True,
         timeout=60,
     )
     elapsed = time.monotonic() - start
-    assert started.exists(), "the parse never started, so nothing was tested"
+    assert "ModuleNotFoundError" not in proc.stderr, proc.stderr
+    assert started.exists(), (
+        f"the parse never started, so nothing was tested; child stderr:\n{proc.stderr}"
+    )
     assert elapsed < 20, f"exit waited {elapsed:.1f}s for the cancelled parse"

@@ -123,6 +123,14 @@ class TypeEdge:
     #: for a field that adds detail without changing what they already
     #: verify.
     resolution: str = field(default="", compare=False)
+    #: Whether *dst* is TU-local: declared with internal linkage (inside an
+    #: anonymous namespace, or ``static`` at file scope) in a source file, not
+    #: a header (:func:`~.type_graph_index.is_tu_local_file`). Such an entity
+    #: is private to the one translation unit that defines it, so a public
+    #: entry reaching it is reaching its own implementation, not a separately
+    #: changeable internal component. Informational like ``resolution``
+    #: (``compare=False``).
+    dst_tu_local: bool = field(default=False, compare=False)
 
 
 def _node_file(node: dict[str, Any]) -> str:
@@ -217,11 +225,13 @@ def augment_graph_with_types(
         ):
             existing = node_by_id.get(node_id)
             if existing is None:
-                attrs = (
+                attrs: dict[str, Any] = (
                     {"defined_in_project": True, "def_file": e.dst_file}
                     if is_dst and dst_in_project
                     else {}
                 )
+                if attrs and e.dst_tu_local:
+                    attrs["tu_local"] = True
                 node = GraphNode(
                     id=node_id,
                     kind=node_kind,
@@ -243,12 +253,13 @@ def augment_graph_with_types(
                 # identical fix (fold_source_edges) for why a direct
                 # mutation is silently lost on the next to_dict()/from_dict()
                 # round-trip.
-                register_fact(
-                    existing,
-                    "type_graph",
-                    e.confidence,
-                    {"defined_in_project": True, "def_file": e.dst_file},
-                )
+                backfill: dict[str, Any] = {
+                    "defined_in_project": True,
+                    "def_file": e.dst_file,
+                }
+                if e.dst_tu_local:
+                    backfill["tu_local"] = True
+                register_fact(existing, "type_graph", e.confidence, backfill)
         before = len(graph.edges)
         edge_attrs: dict[str, Any] = {}
         if e.role:
@@ -284,12 +295,15 @@ def _merge_type_edges(existing: TypeEdge, new: TypeEdge) -> TypeEdge:
     (Codex review).
     """
     dst_file = existing.dst_file or new.dst_file
+    # TU-local only when every TU that saw the edge says so: one TU resolving
+    # the same spelling to an externally visible entity wins.
+    tu_local = existing.dst_tu_local and new.dst_tu_local
     if _CONFIDENCE_RANK.get(new.confidence, 0) > _CONFIDENCE_RANK.get(
         existing.confidence, 0
     ):
-        return replace(new, dst_file=dst_file)
-    if dst_file != existing.dst_file:
-        return replace(existing, dst_file=dst_file)
+        return replace(new, dst_file=dst_file, dst_tu_local=tu_local)
+    if dst_file != existing.dst_file or tu_local != existing.dst_tu_local:
+        return replace(existing, dst_file=dst_file, dst_tu_local=tu_local)
     return existing
 
 

@@ -25,6 +25,7 @@ and the cross-TU fold live in :mod:`~abicheck.buildsource.type_graph`.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 from ..model.execution_cache import request_key
@@ -782,4 +783,8 @@ def _parse_clang_ast_types(ast: dict[str, Any]) -> tuple[TypeEdge, ...]:
     idx = _ast_indexes(ast)
     edges: list[TypeEdge] = []
     _walk_types(ast, [], "", edges, idx)
+    if idx.tu_local:
+        edges = [
+            replace(e, dst_tu_local=True) if e.dst in idx.tu_local else e for e in edges
+        ]
     return tuple(_dedupe_edges(edges))

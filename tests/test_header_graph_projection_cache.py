@@ -71,6 +71,12 @@ PUBLIC_HEADER = "/proj/include/pub.h"
 PRIVATE_HEADER = "/proj/include/detail/impl.h"
 
 
+#: Edge fields a header projection holds constant by construction, so the
+#: real-AST vacuity guard cannot see them vary; each has its own codec test.
+#: ``dst_tu_local`` is True only for an entity defined in a source file.
+_HEADER_CONSTANT_FIELDS = frozenset({"dst_tu_local"})
+
+
 def _loc(file: str) -> dict[str, Any]:
     return {"file": file, "line": 1, "col": 1}
 
@@ -966,6 +972,8 @@ double total_area(const std::vector<std::unique_ptr<Shape>>& shapes);
         for edges in (projection.type_edges, projection.call_edges):
             assert edges, "the real AST projected no edges of one kind"
             for f in dataclasses.fields(edges[0]):
+                if f.name in _HEADER_CONSTANT_FIELDS:
+                    continue
                 distinct = {getattr(e, f.name) for e in edges}
                 assert len(distinct) > 1, (
                     f"every {type(edges[0]).__name__}.{f.name} in the real "
