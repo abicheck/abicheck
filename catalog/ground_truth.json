@@ -1628,7 +1628,7 @@
    "bad_practice": false,
    "category": "risk",
    "expected": "COMPATIBLE_WITH_RISK",
-   "min_evidence": "L0",
+   "min_evidence": "L2",
    "note": "Subject is the noexcept removal on Buffer::reset() (func_noexcept_removed, a RISK kind). The GLIBCXX runtime-floor / symbol-version / import findings come from v2's throw path and depend on the toolchain, so they are allowed, not required.",
    "platforms": [
     "linux"

@@ -21,6 +21,7 @@ and ``diff_symbols_scalar``.
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 
 # The words that make up a C integer built-in's declaration specifiers. A
 # spelling composed *only* of these can be reordered freely by the language
@@ -63,6 +64,7 @@ def canonical_int_spelling(t: str) -> str:
     return "unsigned int" if unsigned else "int"
 
 
+@lru_cache(maxsize=4096)
 def canonical_int_runs(text: str) -> str:
     """Apply :func:`canonical_int_spelling` to every maximal run of integer
     specifier words inside a larger spelling (``long unsigned int const *``,

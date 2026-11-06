@@ -26,6 +26,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from _abicheck_subprocess import abicheck_command
 
 from abicheck.serialization import load_snapshot
 
@@ -67,7 +68,7 @@ def _oracle_alignments(tmp: Path, header: Path) -> dict[str, int]:
 
 def _dump(tmp: Path, lib: Path, header: Path, build_info: Path | None) -> dict:
     out = tmp / ("bi.json" if build_info else "plain.json")
-    cmd = [sys.executable, "-m", "abicheck", "dump", str(lib), "-o", str(out)]
+    cmd = abicheck_command("dump", str(lib), "-o", str(out))
     cmd += ["-H", str(header)]
     if build_info is not None:
         cmd += ["--build-info", str(build_info)]

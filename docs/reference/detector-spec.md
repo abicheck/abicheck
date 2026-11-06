@@ -132,7 +132,7 @@ One row per `ChangeKind` (426 total). Columns fuse the verdict partition (`check
 | `func_likely_renamed` | breaking | `BREAKING` | `error` | unspecified | `func_likely_renamed` | — |
 | `func_lost_inline` | quality | `COMPATIBLE` | `warning` | unspecified | `func_lost_inline` | — |
 | `func_noexcept_added` | quality | `COMPATIBLE` | `warning` | unspecified | `func_noexcept_added` | — |
-| `func_noexcept_removed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `func_noexcept_removed` | — |
+| `func_noexcept_removed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `func_noexcept_removed` | [case15](examples/case15_noexcept_change.md) |
 | `func_override_specifier_added` | quality | `COMPATIBLE` | `warning` | L2 | `func_override_specifier_added` | — |
 | `func_override_specifier_removed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `func_override_specifier_removed` | — |
 | `func_params_changed` | breaking | `BREAKING` | `error` | L1 | `func_params_changed` | [case02](examples/case02_param_type_change.md), [case102](examples/case102_frozen_runtime_signature_changed.md), [case199](examples/case199_public_function_parameter_added.md), [case201](examples/case201_public_function_parameters_reordered.md), +1 |
@@ -283,7 +283,7 @@ One row per `ChangeKind` (426 total). Columns fuse the verdict partition (`check
 | `rtti_inheritance_changed` | breaking | `BREAKING` | `error` | L0 | `rtti_inheritance_changed` | — |
 | `rtti_mode_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `rtti_mode_changed` | [case131](examples/case131_rtti_mode_flip.md) |
 | `runpath_changed` | quality | `COMPATIBLE` | `warning` | L0 | `runpath_changed` | [case137](examples/case137_runpath_changed.md), [case52](examples/case52_rpath_leak.md) |
-| `runtime_floor_raised` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `runtime_floor_raised` | [case15](examples/case15_noexcept_change.md), [case170](examples/case170_env_runtime_floor_raised.md) |
+| `runtime_floor_raised` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `runtime_floor_raised` | [case170](examples/case170_env_runtime_floor_raised.md) |
 | `runtime_symbol_provider_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `runtime_symbol_provider_changed` | — |
 | `runtime_weak_resolution_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `runtime_weak_resolution_changed` | — |
 | `sanitizer_mode_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `sanitizer_mode_changed` | — |

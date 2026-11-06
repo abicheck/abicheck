@@ -1705,7 +1705,7 @@
   "operation": "compare",
   "ecosystem": "generic",
   "topics": [
-   "build"
+   "symbols"
   ],
   "languages": [
    "cpp"
