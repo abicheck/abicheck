@@ -107,6 +107,7 @@ from ..model.source_graph_coverage import (
     HEADER_DECLARATIONS_PASS,
     HEADER_TYPE_GRAPH_PASS as _HEADER_TYPE_GRAPH_PASS,
 )
+from ..storage.acyclic_json import gc_paused
 from .ast_special_members import collect_special_member_names
 from .call_graph import (
     augment_graph_with_calls,
@@ -230,31 +231,42 @@ def project_header_graph_ast(ast_root: dict[str, Any]) -> HeaderGraphAstProjecti
     Raises :class:`MalformedClangAstError` on a tree whose shape the readers
     cannot trust (see :func:`validate_ast_shape`).
     """
-    validate_ast_shape(ast_root)
-    # The type-file index, the type edges and the entity-file index all come
-    # from one whole-TU index walk (type_graph.ast_derived_scope).
-    with ast_derived_scope():
-        type_files = index_declared_type_files(ast_root)
-        type_edges = parse_clang_ast_types(ast_root)
-        needs_entity_files = any(e.kind == "DECL_REFERENCES_DECL" for e in type_edges)
-        entity_files = (
-            index_declared_entity_files(ast_root) if needs_entity_files else {}
+    # Seven-plus full walks over *ast_root*, each allocating many small
+    # objects while the whole tree stays alive. Cyclic GC would rescan that
+    # live tree on every generation-2 threshold crossing, which dominated the
+    # first walk at scale (measured on a 10x synthetic clang AST: 8.4 s with
+    # GC on vs 5.5 s paused; the result is identical). The projection creates
+    # only acyclic dicts, lists and frozen results, so pausing is safe, and
+    # ``gc_paused`` restores the caller's setting on exit.
+    with gc_paused():
+        validate_ast_shape(ast_root)
+        # The type-file index, the type edges and the entity-file index all
+        # come from one whole-TU index walk (type_graph.ast_derived_scope).
+        with ast_derived_scope():
+            type_files = index_declared_type_files(ast_root)
+            type_edges = parse_clang_ast_types(ast_root)
+            needs_entity_files = any(
+                e.kind == "DECL_REFERENCES_DECL" for e in type_edges
+            )
+            entity_files = (
+                index_declared_entity_files(ast_root) if needs_entity_files else {}
+            )
+            # Inside the same scope, and handed the type edges just parsed:
+            # the override facts read the inheritance edges, never a second
+            # walk.
+            semantic_facts = parse_semantic_facts(ast_root, type_edges)
+        call_edges = parse_clang_ast_calls(ast_root)
+        special: set[str] = set()
+        collect_special_member_names(ast_root, special)
+        return HeaderGraphAstProjection(
+            type_files=type_files,
+            type_edges=type_edges,
+            call_edges=call_edges,
+            entity_files=entity_files,
+            special_member_names=frozenset(special),
+            semantic_facts=semantic_facts,
+            function_bodies=frozenset(collect_function_bodies(ast_root)),
         )
-        # Inside the same scope, and handed the type edges just parsed: the
-        # override facts read the inheritance edges, never a second walk.
-        semantic_facts = parse_semantic_facts(ast_root, type_edges)
-    call_edges = parse_clang_ast_calls(ast_root)
-    special: set[str] = set()
-    collect_special_member_names(ast_root, special)
-    return HeaderGraphAstProjection(
-        type_files=type_files,
-        type_edges=type_edges,
-        call_edges=call_edges,
-        entity_files=entity_files,
-        special_member_names=frozenset(special),
-        semantic_facts=semantic_facts,
-        function_bodies=frozenset(collect_function_bodies(ast_root)),
-    )
 
 
 def merge_header_graph_ast_projections(
