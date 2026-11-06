@@ -121,7 +121,11 @@ def test_bare_aligned_does_not_fall_back_to_natural_downstream(builtin: str) -> 
             return self._var if name == "v" else None
 
     natural = {"char": 8, "int": 32, "long": 64, "double": 64}[builtin]
-    bare = {"kind": "VarDecl", "type": {"qualType": builtin}, "inner": [{"kind": "AlignedAttr"}]}
+    bare = {
+        "kind": "VarDecl",
+        "type": {"qualType": builtin},
+        "inner": [{"kind": "AlignedAttr"}],
+    }
     for node, expected in ((bare, None), (_var_node(builtin), natural)):
         var = Variable(
             name="v",
