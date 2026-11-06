@@ -84,8 +84,10 @@ Keep the old function's error contract. Add the throwing variant under a new
 name (`parse_port_or_throw`), or a new overload that takes an error-out
 parameter, and deprecate the old entry point. If the error contract must
 change, treat it as a major-version change and say so in the release notes.
-A `noexcept` on the old function would have made the contract visible to the
-compiler (and to abicheck: `func_noexcept_removed`).
+Marking the old function `noexcept` would have made the *non-throwing* part of
+the contract visible to the compiler and to abicheck (`func_noexcept_removed`
+when it is dropped). It would not encode the `-1` sentinel itself: changing
+which value signals an error is still only visible to a consumer test.
 
 ## Cross-tool comparison
 

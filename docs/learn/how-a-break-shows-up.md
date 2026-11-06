@@ -142,10 +142,11 @@ have no generated case pages).
 Nothing fails to link, load or compile, and no checker reports anything, yet
 an unchanged consumer now gets a different result: an error that used to be
 a return value is now an exception, a number changed its unit, a returned
-pointer changed owner. This is a **behavioral break**. Its contract lives in
+pointer changed owner. This is a **behavioral break**. In the worked cases below its contract lives in
 documentation, so no artifact carries it, and no amount of static evidence
-(binary, headers, build data, sources) shows it. Only running a consumer
-does. See
+(binary, headers, build data, sources) shows it. Static evidence can
+sometimes hint at a change in the implementation, but only running a
+consumer shows that the consumer actually broke. See
 [Behavioral & Semantic Compatibility](behavioral-compatibility.md#behavioral-breaks-a-separate-kind-of-incompatibility)
 and its worked catalog cases (case230, case231, case232).
 

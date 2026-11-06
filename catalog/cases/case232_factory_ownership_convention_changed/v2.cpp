@@ -6,8 +6,11 @@ namespace ui {
  * a caller that deletes it frees memory the library still references. */
 Widget *make_widget(int id) {
     static Widget *cache[64] = {};
-    Widget *&slot = cache[static_cast<unsigned>(id) % 64];
-    if (slot == nullptr) slot = new Widget{id, 1};
-    return slot;
+    static int used = 0;
+    for (int i = 0; i < used; ++i)
+        if (cache[i]->id == id) return cache[i];
+    Widget *w = new Widget{id, 1};
+    if (used < 64) cache[used++] = w;  // beyond 64 ids, fall back to a fresh object
+    return w;
 }
 }  // namespace ui

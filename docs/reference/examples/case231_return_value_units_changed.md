@@ -92,7 +92,13 @@ g++ -shared -fPIC -g v2.cpp -o libv1.so   # swap in v2, no recompile
 Put the unit in the type, so the compiler and abicheck can see it: return
 `std::chrono::seconds` instead of `long`. Changing that later to
 `std::chrono::milliseconds` changes the return type, which abicheck reports
-(`func_return_changed`), and the conversion stays correct at every call site.
+(`func_return_changed`). Old consumers that stored the result in
+`std::chrono::seconds` then fail to compile instead of silently computing a
+wrong deadline: `milliseconds` does not convert implicitly to `seconds`, and
+an explicit `duration_cast` makes the possible loss of precision visible. Both
+are far better than a wrong value at runtime. Changing the return type of an
+exported function in place is itself an ABI break, so do it through a new
+function or in an ABI-major release.
 With a plain number, add a new function (`session_timeout_ms()`) and keep the
 old one in seconds.
 

@@ -94,7 +94,9 @@ g++ -shared -fPIC -g v2.cpp -o libv1.so   # swap in v2, no recompile
 Put ownership in the type. Return `std::unique_ptr<Widget>` for a
 caller-owned object, or `std::shared_ptr<Widget>` / a reference for a
 library-owned one. Switching between them changes the return type, which
-abicheck reports. With a raw pointer, add a new function (`get_widget(id)`)
+abicheck reports. Replacing the exported factory's return type in place is
+itself an ABI break, so add a differently named typed factory or make the
+change in an ABI-major release. With a raw pointer, add a new function (`get_widget(id)`)
 for the cached object and keep `make_widget` allocating.
 
 ## Cross-tool comparison
