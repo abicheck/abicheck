@@ -781,12 +781,22 @@ def test_layout_pass_uses_the_binarys_abi_target(
     assert out.declarations.types[0].size_bits == 32
 
 
-def test_binary_abi_target_is_none_for_a_linux_elf_snapshot() -> None:
-    """Unmocked: on an ELF/Itanium host the layout pass adds no --target (the
-    host default already matches), and resolving it never raises."""
+def test_binary_abi_target_is_none_for_a_linux_elf_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With an ELF/Itanium clang default the layout pass adds no --target (the
+    default already matches), and resolving it never raises. clang's default
+    triple is pinned so the result does not depend on the host: a Windows
+    clang defaults to MSVC and correctly selects a GNU target instead (that
+    matrix is covered exhaustively in tests/test_clang_binary_abi_target.py).
+    """
+    import abicheck.extract.headers.clang.abi_target as abi_target
     from abicheck.extract.headers.clang.layout_tool import _binary_abi_target
     from abicheck.model import AbiSnapshot, Function
 
+    monkeypatch.setattr(
+        abi_target, "_default_triple", lambda _sel, _dig: "x86_64-pc-linux-gnu"
+    )
     snap = AbiSnapshot(
         library="l",
         version="1",
