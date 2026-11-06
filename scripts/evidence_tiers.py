@@ -572,6 +572,11 @@ KINDLESS_CASE_TIER: dict[str, str] = {
     # differs only in the public header AST, the binaries are identical.
     "case210_calling_convention_respelled_via_macro": "L2",
     "case214_calling_convention_macro_redefined_after_use": "L2",
+    # Behavior-only breaks (declared interface identical at every depth): the
+    # tier is where the identical declaration is established, the header AST.
+    "case230_error_reporting_return_code_to_exception": "L2",
+    "case231_return_value_units_changed": "L2",
+    "case232_factory_ownership_convention_changed": "L2",
 }
 
 

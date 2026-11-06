@@ -44,6 +44,16 @@ subjects:
       - case178_unnamed_type_in_public_abi
       - case205_public_function_marked_deprecated
 
+  behavioral-breaks-outside-static-evidence:
+    title: "Behavioral breaks outside static evidence"
+    blurb: "The declaration, the symbol, the layout and the imports are all unchanged, yet an unchanged old consumer breaks at runtime because the implementation's behavior changed. The correct static verdict is NO_CHANGE for the declared interface; the break is recorded separately as behavioral_break with a runtime witness."
+    pattern_summary: "Every case in this subject is a NO_CHANGE detection control with a failing runtime witness: binary exports, DWARF, the public header AST, build data and the source tree all show identical declarations, yet an unchanged consumer breaks because the behavior behind a declaration changed -- an error return became an exception (case230), a returned number changed its unit (case231), a raw pointer changed owner (case232), or an optimised definition now assumes its arguments never alias (case208). Each case records the break as behavioral_break with truth_scope declared-interface, so NO_CHANGE here never means safe to ship. Why static comparison cannot decide this, and how to defend against it, is explained in [Behavioral & Semantic Compatibility](../../../learn/behavioral-compatibility.md)."
+    cases:
+      - case208_restrict_added_to_definition_only
+      - case230_error_reporting_return_code_to_exception
+      - case231_return_value_units_changed
+      - case232_factory_ownership_convention_changed
+
   build-flag-and-toolchain-mode-drift:
     title: "Build-flag and toolchain-mode drift"
     blurb: "The same source compiles differently because a build flag, language-mode switch, or standard-library ABI mode flipped between releases -- nothing in the source changed, but the generated code's ABI contract did."

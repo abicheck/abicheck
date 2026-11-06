@@ -108,6 +108,9 @@
   "case88_cpo_kind_changed": {"date": "2026-10-11", "evidence": ["runtime_witness"], "note": "Old consumer exits 0 against v1 and 127 against v2 under GCC and Clang Debug."},
   "case89_inline_accessor_renamed_pimpl_member": {"date": "2026-10-11", "evidence": ["runtime_witness", "source_smoke"], "note": "Old consumer exits 0 against v1 and 1 against v2 under GCC and Clang Debug. Source smoke (c++17) matched v1=success, v2=failure under GCC and Clang."},
   "case96_hidden_friend_removed": {"date": "2026-10-11", "evidence": ["source_smoke"], "note": "Source smoke (c++17) matched v1=success, v2=failure under GCC and Clang."},
-  "case97_api_depends_on_consumer_env": {"date": "2026-10-11", "evidence": ["runtime_witness", "source_smoke"], "note": "Old consumer exits 0 against v1 and 127 against v2 under GCC and Clang Debug. Source smoke (c++17) matched v1=success, v2=failure under GCC and Clang."}
+  "case97_api_depends_on_consumer_env": {"date": "2026-10-11", "evidence": ["runtime_witness", "source_smoke"], "note": "Old consumer exits 0 against v1 and 127 against v2 under GCC and Clang Debug. Source smoke (c++17) matched v1=success, v2=failure under GCC and Clang."},
+  "case230_error_reporting_return_code_to_exception": {"date": "2026-11-06", "evidence": ["runtime_witness"], "note": "Old consumer without try/catch exits 0 against v1 and aborts (std::terminate) against v2; declared interface identical."},
+  "case231_return_value_units_changed": {"date": "2026-11-06", "evidence": ["runtime_witness"], "note": "Old consumer reads 30 s against v1 and 30000 s against v2 and exits 1; declared interface identical."},
+  "case232_factory_ownership_convention_changed": {"date": "2026-11-06", "evidence": ["runtime_witness"], "note": "Old consumer sees two independent widgets against v1 and one shared widget against v2 (exit 1); declared interface identical."}
  }
 }

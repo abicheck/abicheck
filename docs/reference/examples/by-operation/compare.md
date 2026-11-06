@@ -3,7 +3,7 @@
 
 Cases exercising an old-vs-new comparison — `abicheck compare`, the default operation.
 
-_219 case(s)._ [← back to all examples](../index.md)
+_222 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -226,3 +226,6 @@ _219 case(s)._ [← back to all examples](../index.md)
 | [case227_nested_namespace_template_default_changed](../case227_nested_namespace_template_default_changed.md) | Nested-Namespace Template Default Changed | 🟠 API_BREAK | API Break |
 | [case228_nontype_template_param_default_changed](../case228_nontype_template_param_default_changed.md) | Non-Type Template Parameter Default Changed | 🟠 API_BREAK | API Break |
 | [case229_exported_template_default_changed](../case229_exported_template_default_changed.md) | Exported Template Default Changed | 🔴 BREAKING | Breaking |
+| [case230_error_reporting_return_code_to_exception](../case230_error_reporting_return_code_to_exception.md) | Error Reporting Changed from Return Code to Exception | ✅ NO_CHANGE | No Change |
+| [case231_return_value_units_changed](../case231_return_value_units_changed.md) | Return Value Units Changed | ✅ NO_CHANGE | No Change |
+| [case232_factory_ownership_convention_changed](../case232_factory_ownership_convention_changed.md) | Factory Ownership Convention Changed | ✅ NO_CHANGE | No Change |

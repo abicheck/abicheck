@@ -110,7 +110,7 @@ def test_golden_header_pins_the_pre_change_producer() -> None:
     # 0.14 in plan b2; the golden stays 0.13 so the old side is still the old side.
     assert header["producer_version"] == "0.13"
     assert CLANG_EXTRACTOR_VERSION == "0.14"
-    assert header["tu_count"] == len(rows) == 279
+    assert header["tu_count"] == len(rows) == 288
 
 
 @pytest.mark.integration
@@ -148,7 +148,7 @@ def test_pinned_set_matches_the_measured_projection_equivalence() -> None:
         )
 
     assert failures == [], "golden TUs that failed to dump: " + ", ".join(failures)
-    assert len(comparisons) == 279
+    assert len(comparisons) == 288
 
     measured = {
         (r.kind, r.field)

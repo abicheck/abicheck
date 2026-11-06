@@ -58,7 +58,7 @@ _VALID_CATEGORIES = frozenset(
 _VALID_VERDICTS = frozenset(
     {"BREAKING", "COMPATIBLE", "COMPATIBLE_WITH_RISK", "NO_CHANGE", "API_BREAK"}
 )
-_EXPECTED_CASE_COUNT = 229
+_EXPECTED_CASE_COUNT = 232
 
 
 def test_source_smoke_run_mode_skips_without_trusted_env(

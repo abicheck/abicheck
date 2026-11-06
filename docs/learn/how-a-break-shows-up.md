@@ -28,7 +28,7 @@ checker needs before it can see it at all — the evidence levels that
 [Evidence & Detectability](evidence-and-detectability.md) defines and
 [What Each Level Sees](what-each-level-sees.md) walks one by one.
 
-## The eight symptoms
+## The nine symptoms
 
 ### 1. The link fails
 
@@ -137,6 +137,19 @@ case90, described with its three sibling bundle cases in
 [Multi-Binary Releases](../use/multi-binary.md#references) (the bundle fixtures
 have no generated case pages).
 
+### 9. Every check is clean, and the program still behaves differently
+
+Nothing fails to link, load or compile, and no checker reports anything, yet
+an unchanged consumer now gets a different result: an error that used to be
+a return value is now an exception, a number changed its unit, a returned
+pointer changed owner. This is a **behavioral break**. In the worked cases below its contract lives in
+documentation, so no artifact carries it, and no amount of static evidence
+(binary, headers, build data, sources) shows it. Static evidence can
+sometimes hint at a change in the implementation, but only running a
+consumer shows that the consumer actually broke. See
+[Behavioral & Semantic Compatibility](behavioral-compatibility.md#behavioral-breaks-a-separate-kind-of-incompatibility)
+and its worked catalog cases (case230, case231, case232).
+
 ## The table
 
 | Symptom | Mechanism family | First evidence that shows it |
@@ -149,6 +162,7 @@ have no generated case pages).
 | The source changed, no binary did | [Part 6](abi-series/06-transitive-breaks.md#source-only-api-breaks-binary-identical) | [L4](what-each-level-sees.md#level-4-sources-the-facts-that-never-reach-the-binary) |
 | Fails on the customer's distro | [Dependency floors](dependency-floors.md) | [L0](what-each-level-sees.md#level-0-the-shipped-binary-symbols-only) + a declared matrix |
 | Breaks the plugin or a sibling library | [Consumer models](consumer-models.md) | [bundle scan](what-each-level-sees.md#two-orthogonal-sources-app-swap-and-bundle-scan) |
+| Clean checks, different behavior | [Behavioral compatibility](behavioral-compatibility.md) | None: only consumer tests |
 
 ## What this means for you
 
@@ -160,6 +174,9 @@ have no generated case pages).
   ([Level 2](what-each-level-sees.md#level-2-public-headers-the-source-level-api)).
 - You cannot see the sixth row from any binary at all; only the sources
   carry it ([Level 4](what-each-level-sees.md#level-4-sources-the-facts-that-never-reach-the-binary)).
+- You cannot see the last row with any evidence level; a clean result there
+  means "no declared change", not "same behavior". Run consumer tests
+  ([Behavioral compatibility](behavioral-compatibility.md)).
 
 ---
 

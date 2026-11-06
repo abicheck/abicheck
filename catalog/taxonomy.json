@@ -4838,6 +4838,7 @@
   "relation_type": null,
   "relation_axis": null,
   "subjects": [
+   "behavioral-breaks-outside-static-evidence",
    "safe-changes-correctly-not-flagged"
   ]
  },
@@ -5315,6 +5316,75 @@
   "relation_axis": null,
   "subjects": [
    "internal-dependency-reachability"
+  ]
+ },
+ "case230_error_reporting_return_code_to_exception": {
+  "entity": "rule",
+  "scenario_kind": null,
+  "operation": "compare",
+  "ecosystem": "generic",
+  "topics": [
+   "controls"
+  ],
+  "languages": [
+   "cpp"
+  ],
+  "scope": "single-library",
+  "artifact_shape": "compiled-pair",
+  "validation_owner": "compiler-pair",
+  "related_rules": [],
+  "rule_slug": "error-reporting-return-code-to-exception",
+  "variant_of": null,
+  "relation_type": null,
+  "relation_axis": null,
+  "subjects": [
+   "behavioral-breaks-outside-static-evidence"
+  ]
+ },
+ "case231_return_value_units_changed": {
+  "entity": "rule",
+  "scenario_kind": null,
+  "operation": "compare",
+  "ecosystem": "generic",
+  "topics": [
+   "controls"
+  ],
+  "languages": [
+   "cpp"
+  ],
+  "scope": "single-library",
+  "artifact_shape": "compiled-pair",
+  "validation_owner": "compiler-pair",
+  "related_rules": [],
+  "rule_slug": "return-value-units-changed",
+  "variant_of": null,
+  "relation_type": null,
+  "relation_axis": null,
+  "subjects": [
+   "behavioral-breaks-outside-static-evidence"
+  ]
+ },
+ "case232_factory_ownership_convention_changed": {
+  "entity": "rule",
+  "scenario_kind": null,
+  "operation": "compare",
+  "ecosystem": "generic",
+  "topics": [
+   "controls"
+  ],
+  "languages": [
+   "cpp"
+  ],
+  "scope": "single-library",
+  "artifact_shape": "compiled-pair",
+  "validation_owner": "compiler-pair",
+  "related_rules": [],
+  "rule_slug": "factory-ownership-convention-changed",
+  "variant_of": null,
+  "relation_type": null,
+  "relation_axis": null,
+  "subjects": [
+   "behavioral-breaks-outside-static-evidence"
   ]
  }
 }

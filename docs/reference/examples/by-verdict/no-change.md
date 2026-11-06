@@ -3,7 +3,7 @@
 
 Identical ABI/API — baseline control cases.
 
-_14 case(s)._ [← back to all examples](../index.md)
+_17 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
@@ -21,3 +21,6 @@ _14 case(s)._ [← back to all examples](../index.md)
 | [case220_public_virtual_dispatch_set_reordered](../case220_public_virtual_dispatch_set_reordered.md) | Public Virtual Method's Override Set Reordered | ✅ NO_CHANGE | No Change |
 | [case224_header_only_template_default_added](../case224_header_only_template_default_added.md) | Header-Only Template Default Added | ✅ NO_CHANGE | No Change |
 | [case226_header_only_template_default_unchanged](../case226_header_only_template_default_unchanged.md) | Header-Only Template Default Unchanged | ✅ NO_CHANGE | No Change |
+| [case230_error_reporting_return_code_to_exception](../case230_error_reporting_return_code_to_exception.md) | Error Reporting Changed from Return Code to Exception | ✅ NO_CHANGE | No Change |
+| [case231_return_value_units_changed](../case231_return_value_units_changed.md) | Return Value Units Changed | ✅ NO_CHANGE | No Change |
+| [case232_factory_ownership_convention_changed](../case232_factory_ownership_convention_changed.md) | Factory Ownership Convention Changed | ✅ NO_CHANGE | No Change |

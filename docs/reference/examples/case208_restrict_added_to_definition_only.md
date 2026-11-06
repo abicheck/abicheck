@@ -11,7 +11,7 @@
 | **Detected `ChangeKind`s** | — |
 | **Source files** | `catalog/cases/case208_restrict_added_to_definition_only/` |
 | **Rule family** | [`restrict-added-to-definition-only`](by-rule/restrict-added-to-definition-only.md) |
-| **Subject** | [Safe changes correctly not flagged](by-subject/safe-changes-correctly-not-flagged.md) |
+| **Subject** | [Behavioral breaks outside static evidence](by-subject/behavioral-breaks-outside-static-evidence.md), [Safe changes correctly not flagged](by-subject/safe-changes-correctly-not-flagged.md) |
 
 **Category:** No Change (declared interface) | **Verdict:** ✅ NO_CHANGE — with a separate **behavioral break**
 
@@ -136,4 +136,4 @@ questions here rather than disagreeing about one.
 - `v2.c`
 - `v2.h`
 
-_See also: [Compatibility Catalog](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md) · [Rule: restrict added to the definition only](by-rule/restrict-added-to-definition-only.md) · [Subject: Safe changes correctly not flagged](by-subject/safe-changes-correctly-not-flagged.md)._
+_See also: [Compatibility Catalog](index.md) · [All NO_CHANGE cases](by-verdict/no-change.md) · [Category: No Change](by-category/no_change.md) · [Rule: restrict added to the definition only](by-rule/restrict-added-to-definition-only.md) · [Subject: Behavioral breaks outside static evidence](by-subject/behavioral-breaks-outside-static-evidence.md) · [Subject: Safe changes correctly not flagged](by-subject/safe-changes-correctly-not-flagged.md)._

@@ -148,6 +148,13 @@ explains *why* the gate exists and what its two possible gate outcomes
 (comparable, sitting in front of the ordinary verdict space; or
 not-comparable, a hard failure) mean.
 
+A **behavioral break** deserves its own name: the release is incompatible
+because an unchanged consumer now gets different results, not because its
+source or binary compatibility broke. The declaration, symbol and layout are
+identical, so no static check sees it at any evidence depth. See
+[Behavioral breaks: a separate kind of incompatibility](../behavioral-compatibility.md#behavioral-breaks-a-separate-kind-of-incompatibility)
+for worked examples.
+
 > **Rule of thumb:** name the dimension before you argue about whether a
 > change is "a break." A change that's a real source break and a total binary
 > non-event (e.g. a removed default argument) and a change that's the reverse

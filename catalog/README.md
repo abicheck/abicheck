@@ -11,7 +11,7 @@ the same cases by rule, scenario kind, ecosystem, operation, evidence level,
 language, and verdict.
 
 <!-- BEGIN GENERATED: catalog-headline (keep counts in sync with examples/ground_truth.json) -->
-This directory contains **229 cases** (224 single-library + 5 multi-library bundle cases) demonstrating real-world ABI/API break scenarios. Most cases are a minimal, compilable C/C++ example with:
+This directory contains **232 cases** (227 single-library + 5 multi-library bundle cases) demonstrating real-world ABI/API break scenarios. Most cases are a minimal, compilable C/C++ example with:
 <!-- END GENERATED: catalog-headline -->
 
 - Paired `v1/` and `v2/` source + headers.
@@ -46,7 +46,7 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 | COMPATIBLE_WITH_RISK | 37 | `RISK_KINDS` | 🟡 |
 | COMPATIBLE (addition) | 12 | `ADDITION_KINDS` | 🟢 |
 | COMPATIBLE (quality) | 21 | `QUALITY_KINDS` | 🟡 |
-| NO_CHANGE | 14 | — | ✅ |
+| NO_CHANGE | 17 | — | ✅ |
 | Bundle (multi-binary) | 5 | see [Multi-binary analysis](../docs/use/multi-binary.md) | 🔵 |
 <!-- END GENERATED: verdict-distribution -->
 
@@ -97,11 +97,11 @@ Commands below use `PYTHONPATH=.`.
 | Check | Command | Executed where | Scope | Result | Status |
 |---|---|---|---:|---|---|
 | Build/autodiscovery | `python -m pytest tests/test_example_autodiscovery.py -v --tb=short -m integration` | CI Linux, gcc/clang | 209 integration items | gcc: 149 passed / 55 skipped / 5 xfailed; clang: 149 passed / 54 skipped / 6 xfailed | Green default single-library build lane. `case115_bit_int_width_changed` needs a `_BitInt`-capable CastXML-bundled Clang; a sandbox with an older bundled Clang (unrelated to the fix in this catalog) sees it fail there instead of building — see `docs/contribute/examples-validation-runbook.md` |
-| Full example proof matrix | `skills-src/evaluation/validation/scripts/collect_full_example_matrix.py` over CI artifacts + dedicated bundle/G20/L3-L5/BTF proofs | CI aggregation | 229 catalog cases | 229/229 COVERED; 225 direct; 0 FAILED / 0 UNRESOLVED | Canonical full-catalog status; a lane-local `SKIP` is accepted only when a dedicated proof covers that case |
-| Default/debug verdicts | `ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1 PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | CI Linux, gcc/clang | 229 catalog cases | gcc: 179 PASS / 7 XFAIL / 43 SKIP; clang: 178 PASS / 8 XFAIL / 1 NOT_APPLICABLE / 42 SKIP | Green default/debug verdict lane. Without the env var, 7 `source_smoke: {mode: run}` cases SKIP instead of running. Under clang `case180_symbol_binding_lost_unique` is `NOT_APPLICABLE`: clang never emits `STB_GNU_UNIQUE`, so its v1/v2 are the same transition-free pair, and the lane checks the `NO_CHANGE` that pair warrants (`not_applicable_expected`) instead of excusing a miss as XFAIL |
-| Runtime smoke | `PYTHONPATH=. python skills-src/evaluation/validation/scripts/run_example_runtime_smoke.py --json` | Linux proof run | 229 catalog cases | 99 DEMONSTRATED / 85 NO_RUNTIME_SIGNAL / 45 SKIP | Passing; no BUILD_ERROR. The runner now compares each app's baseline exit code against a per-case `runtime_baseline_exit` in `ground_truth.json` (default 0) instead of hardcoding zero, so apps that deliberately return a computed value (e.g. case111's `ets(42).local()` returning `42`) are no longer misread as a broken baseline. No case shows a signal against its own baseline library (`BASELINE_SIGNAL`), so every DEMONSTRATED is a v2-only effect — see "Known validation gaps" below for case06's rewrite |
-| Release headers | `ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1 python tests/validate_examples.py --artifact-variant release-headers --json` | CI Linux artifact | 229 catalog cases | 179 PASS / 7 XFAIL / 43 SKIP | Informational; the false-risk regression on `case61_var_added` (`exported_object_alignment_reduced`) is fixed — CastXML now resolves a variable's natural type alignment as declared-alignment corroboration even without an explicit `alignas` override. Without the env var, the same 7 cases SKIP instead |
-| Stripped headers | `ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1 python tests/validate_examples.py --artifact-variant stripped-headers --json` | CI Linux artifact | 229 catalog cases | 175 PASS / 4 FAIL / 7 XFAIL / 43 SKIP | Informational; reduced-evidence signal-loss backlog (below). Without the env var, the same 7 cases SKIP instead |
+| Full example proof matrix | `skills-src/evaluation/validation/scripts/collect_full_example_matrix.py` over CI artifacts + dedicated bundle/G20/L3-L5/BTF proofs | CI aggregation | 232 catalog cases | 232/232 COVERED; 228 direct; 0 FAILED / 0 UNRESOLVED | Canonical full-catalog status; a lane-local `SKIP` is accepted only when a dedicated proof covers that case |
+| Default/debug verdicts | `ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1 PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | CI Linux, gcc/clang | 232 catalog cases | gcc: 182 PASS / 7 XFAIL / 43 SKIP; clang: 181 PASS / 8 XFAIL / 1 NOT_APPLICABLE / 42 SKIP | Green default/debug verdict lane. Without the env var, 7 `source_smoke: {mode: run}` cases SKIP instead of running. Under clang `case180_symbol_binding_lost_unique` is `NOT_APPLICABLE`: clang never emits `STB_GNU_UNIQUE`, so its v1/v2 are the same transition-free pair, and the lane checks the `NO_CHANGE` that pair warrants (`not_applicable_expected`) instead of excusing a miss as XFAIL |
+| Runtime smoke | `PYTHONPATH=. python skills-src/evaluation/validation/scripts/run_example_runtime_smoke.py --json` | Linux proof run | 232 catalog cases | 102 DEMONSTRATED / 85 NO_RUNTIME_SIGNAL / 45 SKIP | Passing; no BUILD_ERROR. The runner now compares each app's baseline exit code against a per-case `runtime_baseline_exit` in `ground_truth.json` (default 0) instead of hardcoding zero, so apps that deliberately return a computed value (e.g. case111's `ets(42).local()` returning `42`) are no longer misread as a broken baseline. No case shows a signal against its own baseline library (`BASELINE_SIGNAL`), so every DEMONSTRATED is a v2-only effect — see "Known validation gaps" below for case06's rewrite |
+| Release headers | `ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1 python tests/validate_examples.py --artifact-variant release-headers --json` | CI Linux artifact | 232 catalog cases | 182 PASS / 7 XFAIL / 43 SKIP | Informational; the false-risk regression on `case61_var_added` (`exported_object_alignment_reduced`) is fixed — CastXML now resolves a variable's natural type alignment as declared-alignment corroboration even without an explicit `alignas` override. Without the env var, the same 7 cases SKIP instead |
+| Stripped headers | `ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1 python tests/validate_examples.py --artifact-variant stripped-headers --json` | CI Linux artifact | 232 catalog cases | 178 PASS / 4 FAIL / 7 XFAIL / 43 SKIP | Informational; reduced-evidence signal-loss backlog (below). Without the env var, the same 7 cases SKIP instead |
 | Build/source proof | `ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1 python tests/validate_examples.py case01 case04 case28 case40 case98 case105 case122 case129 case130 case131 case132 case133 --artifact-variant build-source --json` | CI Linux artifact | 12 representative cases | 12 PASS | Required release proof; includes L3 C++ floor and L4 concept/template regressions. Not full L3-L5 catalog coverage — see "Known validation gaps" |
 
 Counts above are from the most recent full catalog run this table was refreshed against; re-run
@@ -472,6 +472,9 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [227](cases/case227_nested_namespace_template_default_changed/README.md) | Nested-Namespace Template Default Changed | API Break | 🟠 API_BREAK |
 | [228](cases/case228_nontype_template_param_default_changed/README.md) | Non-Type Template Parameter Default Changed | API Break | 🟠 API_BREAK |
 | [229](cases/case229_exported_template_default_changed/README.md) | Exported Template Default Changed | Breaking | 🔴 BREAKING |
+| [230](cases/case230_error_reporting_return_code_to_exception/README.md) | Error Reporting Changed from Return Code to Exception | No Change | ✅ NO_CHANGE (bad practice) |
+| [231](cases/case231_return_value_units_changed/README.md) | Return Value Units Changed | No Change | ✅ NO_CHANGE (bad practice) |
+| [232](cases/case232_factory_ownership_convention_changed/README.md) | Factory Ownership Convention Changed | No Change | ✅ NO_CHANGE (bad practice) |
 <!-- END GENERATED: case-index -->
 
 ---
