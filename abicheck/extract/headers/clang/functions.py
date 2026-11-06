@@ -543,7 +543,8 @@ def parse_functions(
                 # see `context.qualtype_desugared`'s own docstring (Codex review, PR #1200).
                 kind=_param_kind(_qualtype_desugared(p)),
                 type_abi_fact=builtin_type_fact(_qualtype_desugared(p), builtin_abi),
-                pointer_depth=_pointer_depth(_qualtype(p)),
+                # Desugared too: castxml counts through a typedef'd pointer (case73).
+                pointer_depth=_pointer_depth(_qualtype_desugared(p)),
                 # G31 Phase C: castxml was the ONLY producer of this fact (`_resolve_cv_restrict`), so a castxml-vs-clang comparison of unchanged headers reported PARAM_RESTRICT_CHANGED for every restrict-qualified parameter -- the detector compares the two bools directly, with no producer gate to decline on (unlike `deprecated`/`is_scoped` before this phase).
                 is_restrict=_clang_param_is_restrict(p),
                 # G31 Phase C continued: same shape as `is_restrict` above -- castxml never populated this fact either. See `dumper_clang_qualifiers._clang_param_is_va_list`. is_va_list_fact is `partial`, not `present`: the check only covers x86-64 System V, and conservatively answers `False` -- not "confirmed no" -- on any other target (Codex review; target-scoping residual unchanged, per that function's own docstring).

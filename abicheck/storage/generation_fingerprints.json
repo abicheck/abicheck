@@ -124,7 +124,7 @@
       "abicheck/extract/headers/clang/explicit_specifier.py": "fca63201aaf3d920e2bbb796114c93bd6edc89974083f9900ed26e98de7fc699",
       "abicheck/extract/headers/clang/expr.py": "da2554d914f005f8525e0a411b36e93e3dd3dc80957cc7597245c9257b875994",
       "abicheck/extract/headers/clang/function_template_defaults.py": "af4a42ea00a91238ef8f111fe05c4b6aa625b84fd2fd4e39230b48953ebaf566",
-      "abicheck/extract/headers/clang/functions.py": "12a37b2d33be83ab29d8242fd6fde193af1e377520871195fb86e6d9ce664fdc",
+      "abicheck/extract/headers/clang/functions.py": "498461fc5764672ca735fe5012ed5fadfb9211b5f177cbe877b8481e5b715de7",
       "abicheck/extract/headers/clang/inline_semantics.py": "8284b543b4fa45da23c50fee0f16fd11dab8c43cf43f1cf07334572a822ad04d",
       "abicheck/extract/headers/clang/layout_tool.py": "bc641dea78bae1ef16030d69d746748ea431df39cb0e25540b29a7f18ea43774",
       "abicheck/extract/headers/clang/locations.py": "d4292c937fb928268132c6a3f21a35a5d7576b8164416648ef73815cd07fcddf",
@@ -200,9 +200,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "ae76fe357d48e90015fcd9ab74c60c84bfe5139030ba65ab5c8ef32656a4576b",
+    "fingerprint": "8c7b597c08195cde075bc9267344dd5e7aa33141f16c864638c484fb58043def",
     "generation": 43,
-    "reason": "bumped to 43 for a semantic change"
+    "reason": "clang parameter pointer_depth now read through typedefs; folded into the unreleased generation-43 bump made earlier on this same branch"
   },
   "resolver": {
     "files": {

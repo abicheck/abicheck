@@ -379,7 +379,7 @@
       "inline_function_removed"
      ],
      "only_in": "castxml",
-     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
+     "reason": "TRACED backend limit: castxml emits every implicitly-declared special member (artificial=\"1\": implicit dtor, copy/move ctor and operator=), so a user-declared destructor or vptr reads as the implicit inline member lost/out-of-lined and the implicit move members removed; clang's JSON AST emits only the special members Sema declared (definitionData marks the rest needs_implicit), so it sees the user-declared member as func_added. definitionData cannot replace castxml's view: it does not say which implicit members are deleted (case30's const member keeps defaultCtor.exists)",
      "known_gap": "castxml and clang report different change-kind sets for the same case"
     }
    ],
@@ -719,16 +719,6 @@
    "scope_public_headers": true
   },
   "case11_global_var_type": {
-   "frontend_kind_differences": [
-    {
-     "kinds": [
-      "var_alignment_changed"
-     ],
-     "only_in": "castxml",
-     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
-     "known_gap": "castxml and clang report different change-kind sets for the same case"
-    }
-   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,
@@ -943,7 +933,7 @@
       "struct_field_type_changed"
      ],
      "only_in": "clang",
-     "reason": "UNEXPLAINED: only clang reports it; root cause not yet traced",
+     "reason": "TRACED spelling limit: clang spells the field type scope-relative (`std::shared_ptr<detail::device_impl>`) while DWARF writes `shared_ptr<sycl::detail::device_impl>`, so the DWARF struct_field_type_changed does not dedup against clang's header finding; castxml's spelling matches DWARF's",
      "known_gap": "castxml and clang report different change-kind sets for the same case"
     }
    ],
@@ -1937,7 +1927,7 @@
       "public_surface_shrank"
      ],
      "only_in": "castxml",
-     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
+     "reason": "TRACED backend limit: castxml emits every implicitly-declared special member (artificial=\"1\": implicit dtor, copy/move ctor and operator=), so a user-declared destructor or vptr reads as the implicit inline member lost/out-of-lined and the implicit move members removed; clang's JSON AST emits only the special members Sema declared (definitionData marks the rest needs_implicit), so it sees the user-declared member as func_added. definitionData cannot replace castxml's view: it does not say which implicit members are deleted (case30's const member keeps defaultCtor.exists)",
      "known_gap": "castxml and clang report different change-kind sets for the same case"
     },
     {
@@ -1947,7 +1937,7 @@
       "standard_layout_lost"
      ],
      "only_in": "clang",
-     "reason": "UNEXPLAINED: only clang reports it; root cause not yet traced",
+     "reason": "TRACED backend limit: castxml emits every implicitly-declared special member (artificial=\"1\": implicit dtor, copy/move ctor and operator=), so a user-declared destructor or vptr reads as the implicit inline member lost/out-of-lined and the implicit move members removed; clang's JSON AST emits only the special members Sema declared (definitionData marks the rest needs_implicit), so it sees the user-declared member as func_added. definitionData cannot replace castxml's view: it does not say which implicit members are deleted (case30's const member keeps defaultCtor.exists)",
      "known_gap": "castxml and clang report different change-kind sets for the same case"
     }
    ],
@@ -2515,19 +2505,6 @@
    ]
   },
   "case26_union_field_added": {
-   "frontend_kind_differences": [
-    {
-     "kinds": [
-      "type_alignment_changed"
-     ],
-     "only_in": "castxml",
-     "modes": [
-      "build-source"
-     ],
-     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
-     "known_gap": "castxml and clang report different change-kind sets for the same case"
-    }
-   ],
    "abi_break": true,
    "api_break": false,
    "bad_practice": false,
@@ -2593,7 +2570,7 @@
      "modes": [
       "debug-headers"
      ],
-     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
+     "reason": "TRACED backend limit: castxml emits every implicitly-declared special member (artificial=\"1\": implicit dtor, copy/move ctor and operator=), so a user-declared destructor or vptr reads as the implicit inline member lost/out-of-lined and the implicit move members removed; clang's JSON AST emits only the special members Sema declared (definitionData marks the rest needs_implicit), so it sees the user-declared member as func_added. definitionData cannot replace castxml's view: it does not say which implicit members are deleted (case30's const member keeps defaultCtor.exists)",
      "known_gap": "castxml and clang report different change-kind sets for the same case"
     },
     {
@@ -2657,7 +2634,7 @@
      "modes": [
       "debug-headers"
      ],
-     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
+     "reason": "TRACED backend limit: castxml emits every implicitly-declared special member (artificial=\"1\": implicit dtor, copy/move ctor and operator=), so a user-declared destructor or vptr reads as the implicit inline member lost/out-of-lined and the implicit move members removed; clang's JSON AST emits only the special members Sema declared (definitionData marks the rest needs_implicit), so it sees the user-declared member as func_added. definitionData cannot replace castxml's view: it does not say which implicit members are deleted (case30's const member keeps defaultCtor.exists)",
      "known_gap": "castxml and clang report different change-kind sets for the same case"
     }
    ],
@@ -2780,19 +2757,6 @@
    ]
   },
   "case36_anon_struct": {
-   "frontend_kind_differences": [
-    {
-     "kinds": [
-      "type_alignment_changed"
-     ],
-     "only_in": "castxml",
-     "modes": [
-      "build-source"
-     ],
-     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
-     "known_gap": "castxml and clang report different change-kind sets for the same case"
-    }
-   ],
    "lane_kind_exceptions": [
     {
      "kinds": [
@@ -2859,7 +2823,7 @@
       "public_surface_shrank"
      ],
      "only_in": "castxml",
-     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
+     "reason": "TRACED backend limit: castxml 0.7 drops a `= delete`d member from its XML entirely, so the copy constructor reads as removed; clang records it with explicitlyDeleted and reports func_deleted (what the case describes)",
      "known_gap": "castxml and clang report different change-kind sets for the same case"
     },
     {
@@ -2867,7 +2831,7 @@
       "func_deleted"
      ],
      "only_in": "clang",
-     "reason": "UNEXPLAINED: only clang reports it; root cause not yet traced",
+     "reason": "TRACED backend limit: castxml 0.7 drops a `= delete`d member from its XML entirely, so the copy constructor reads as removed; clang records it with explicitlyDeleted and reports func_deleted (what the case describes)",
      "known_gap": "castxml and clang report different change-kind sets for the same case"
     }
    ],
@@ -2887,16 +2851,6 @@
    ]
   },
   "case39_var_const": {
-   "frontend_kind_differences": [
-    {
-     "kinds": [
-      "exported_object_alignment_reduced"
-     ],
-     "only_in": "clang",
-     "reason": "UNEXPLAINED: only clang reports it; root cause not yet traced",
-     "known_gap": "castxml and clang report different change-kind sets for the same case"
-    }
-   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,
@@ -2914,27 +2868,6 @@
    ]
   },
   "case40_field_layout": {
-   "frontend_kind_differences": [
-    {
-     "kinds": [
-      "type_alignment_changed"
-     ],
-     "only_in": "castxml",
-     "modes": [
-      "build-source"
-     ],
-     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
-     "known_gap": "castxml and clang report different change-kind sets for the same case"
-    },
-    {
-     "kinds": [
-      "struct_field_type_changed"
-     ],
-     "only_in": "clang",
-     "reason": "UNEXPLAINED: only clang reports it; root cause not yet traced",
-     "known_gap": "castxml and clang report different change-kind sets for the same case"
-    }
-   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,
@@ -3048,19 +2981,6 @@
    ]
   },
   "case45_multi_dim_array_change": {
-   "frontend_kind_differences": [
-    {
-     "kinds": [
-      "type_alignment_changed"
-     ],
-     "only_in": "castxml",
-     "modes": [
-      "build-source"
-     ],
-     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
-     "known_gap": "castxml and clang report different change-kind sets for the same case"
-    }
-   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,
@@ -3121,19 +3041,6 @@
    ]
   },
   "case48_leaf_struct_through_pointer": {
-   "frontend_kind_differences": [
-    {
-     "kinds": [
-      "type_alignment_changed"
-     ],
-     "only_in": "castxml",
-     "modes": [
-      "build-source"
-     ],
-     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
-     "known_gap": "castxml and clang report different change-kind sets for the same case"
-    }
-   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,
@@ -3278,19 +3185,6 @@
    ]
   },
   "case56_struct_packing_changed": {
-   "frontend_kind_differences": [
-    {
-     "kinds": [
-      "type_alignment_changed"
-     ],
-     "only_in": "castxml",
-     "modes": [
-      "build-source"
-     ],
-     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
-     "known_gap": "castxml and clang report different change-kind sets for the same case"
-    }
-   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,
@@ -3311,19 +3205,6 @@
    ]
   },
   "case57_enum_underlying_size_changed": {
-   "frontend_kind_differences": [
-    {
-     "kinds": [
-      "type_alignment_changed"
-     ],
-     "only_in": "castxml",
-     "modes": [
-      "build-source"
-     ],
-     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
-     "known_gap": "castxml and clang report different change-kind sets for the same case"
-    }
-   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,
@@ -3521,7 +3402,7 @@
       "public_surface_shrank"
      ],
      "only_in": "castxml",
-     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
+     "reason": "TRACED backend limit: castxml emits every implicitly-declared special member (artificial=\"1\": implicit dtor, copy/move ctor and operator=), so a user-declared destructor or vptr reads as the implicit inline member lost/out-of-lined and the implicit move members removed; clang's JSON AST emits only the special members Sema declared (definitionData marks the rest needs_implicit), so it sees the user-declared member as func_added. definitionData cannot replace castxml's view: it does not say which implicit members are deleted (case30's const member keeps defaultCtor.exists)",
      "known_gap": "castxml and clang report different change-kind sets for the same case"
     },
     {
@@ -3531,7 +3412,7 @@
       "standard_layout_lost"
      ],
      "only_in": "clang",
-     "reason": "UNEXPLAINED: only clang reports it; root cause not yet traced",
+     "reason": "TRACED backend limit: castxml emits every implicitly-declared special member (artificial=\"1\": implicit dtor, copy/move ctor and operator=), so a user-declared destructor or vptr reads as the implicit inline member lost/out-of-lined and the implicit move members removed; clang's JSON AST emits only the special members Sema declared (definitionData marks the rest needs_implicit), so it sees the user-declared member as func_added. definitionData cannot replace castxml's view: it does not say which implicit members are deleted (case30's const member keeps defaultCtor.exists)",
      "known_gap": "castxml and clang report different change-kind sets for the same case"
     }
    ],
@@ -3559,7 +3440,7 @@
       "public_surface_shrank"
      ],
      "only_in": "castxml",
-     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
+     "reason": "TRACED backend limit: castxml emits every implicitly-declared special member (artificial=\"1\": implicit dtor, copy/move ctor and operator=), so a user-declared destructor or vptr reads as the implicit inline member lost/out-of-lined and the implicit move members removed; clang's JSON AST emits only the special members Sema declared (definitionData marks the rest needs_implicit), so it sees the user-declared member as func_added. definitionData cannot replace castxml's view: it does not say which implicit members are deleted (case30's const member keeps defaultCtor.exists)",
      "known_gap": "castxml and clang report different change-kind sets for the same case"
     },
     {
@@ -3568,7 +3449,7 @@
       "public_surface_grew"
      ],
      "only_in": "clang",
-     "reason": "UNEXPLAINED: only clang reports it; root cause not yet traced",
+     "reason": "TRACED backend limit: castxml emits every implicitly-declared special member (artificial=\"1\": implicit dtor, copy/move ctor and operator=), so a user-declared destructor or vptr reads as the implicit inline member lost/out-of-lined and the implicit move members removed; clang's JSON AST emits only the special members Sema declared (definitionData marks the rest needs_implicit), so it sees the user-declared member as func_added. definitionData cannot replace castxml's view: it does not say which implicit members are deleted (case30's const member keeps defaultCtor.exists)",
      "known_gap": "castxml and clang report different change-kind sets for the same case"
     }
    ],
@@ -3592,19 +3473,6 @@
    ]
   },
   "case70_flexible_array_member_changed": {
-   "frontend_kind_differences": [
-    {
-     "kinds": [
-      "type_alignment_changed"
-     ],
-     "only_in": "castxml",
-     "modes": [
-      "build-source"
-     ],
-     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
-     "known_gap": "castxml and clang report different change-kind sets for the same case"
-    }
-   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,
@@ -3704,11 +3572,10 @@
    "frontend_kind_differences": [
     {
      "kinds": [
-      "param_pointer_level_changed",
       "return_pointer_level_changed"
      ],
      "only_in": "castxml",
-     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
+     "reason": "TRACED backend limit: castxml counts a return type's pointer depth through the typedef (type graph); clang's FunctionDecl type carries no desugaredQualType for its return (`handle_t (const char *)`), so the clang backend cannot see the typedef'd pointer without a typedef table in function parsing. Parameters were fixed (generation 43)",
      "known_gap": "castxml and clang report different change-kind sets for the same case"
     }
    ],

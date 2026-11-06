@@ -25,7 +25,7 @@ import pytest
 
 from abicheck.checker_policy import ChangeKind
 from abicheck.diff_helpers import cross_tier_transition
-from abicheck.dumper_clang import _clang_var_alignment_bits
+from abicheck.dumper_clang import _clang_var_alignment_bits, _ClangAstParser
 from abicheck.extract.builtin_abi import BuiltinAbi, builtin_type_fact
 from abicheck.model.change import Change
 
@@ -138,3 +138,43 @@ def test_distinct_integer_types_still_disagree(a: str, b: str) -> None:
     dwarf = _field_change(ChangeKind.STRUCT_FIELD_TYPE_CHANGED, "int", a)
     clang = _field_change(ChangeKind.TYPE_FIELD_TYPE_CHANGED, "int", b)
     assert cross_tier_transition(dwarf) != cross_tier_transition(clang)
+
+
+#: (alias spelling, desugared spelling, pointer depth by hand)
+_ALIASES = [
+    ("handle_t", "void *", 1),
+    ("cstr_t", "const char *", 1),
+    ("argv_t", "char **", 2),
+    ("fnp_t", "int (*)(int)", 0),  # the `*` sits inside parentheses
+    ("count_t", "unsigned long", 0),
+]
+
+
+@pytest.mark.parametrize(("alias", "desugared", "depth"), _ALIASES)
+def test_clang_param_pointer_depth_counts_through_a_typedef(
+    alias: str, desugared: str, depth: int
+) -> None:
+    """castxml counts a typedef'd pointer parameter's depth through the
+    typedef; clang did not, so retyping ``typedef int handle_t`` to
+    ``void *`` read ``param_pointer_level_changed`` on castxml only (case73)."""
+    param = {
+        "kind": "ParmVarDecl",
+        "name": "h",
+        "type": {"qualType": alias, "desugaredQualType": desugared},
+    }
+    root = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "FunctionDecl",
+                "name": "api",
+                "loc": {"file": "include/api.h", "line": 3},
+                "mangledName": "api",
+                "type": {"qualType": f"void ({alias})"},
+                "inner": [param],
+            }
+        ],
+    }
+    (fn,) = _ClangAstParser(root, {"api"}, set()).parse_functions()
+    assert fn.params[0].type == alias
+    assert fn.params[0].pointer_depth == depth
