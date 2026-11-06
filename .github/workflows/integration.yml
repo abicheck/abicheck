@@ -160,8 +160,12 @@ jobs:
         #
         # No `choco install cmake` either: the image ships CMake
         # (C:\Program Files\CMake\bin is on PATH), so it only re-installed it.
+        #
+        # Pinned below 0.8: conda-forge's castxml moved to 0.8.0, which the
+        # castxml_policy gate rejects (supported >=0.6.11,<0.8.0), so an
+        # unpinned install fails every castxml test on this leg.
         run: |
-          & "$env:CONDA\condabin\conda.bat" install --yes -c conda-forge castxml
+          & "$env:CONDA\condabin\conda.bat" install --yes -c conda-forge "castxml>=0.7,<0.8"
           Add-Content -Path $env:GITHUB_PATH -Value "$env:CONDA\Library\bin"
           Add-Content -Path $env:GITHUB_PATH -Value "$env:CONDA\Scripts"
       - name: Set up MSVC developer environment (cl.exe on PATH)
