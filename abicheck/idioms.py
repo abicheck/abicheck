@@ -431,7 +431,7 @@ class AntiPattern:
 #: either way): passing them by value crosses no C++ library type, so clang's
 #: as-written ``std::size_t`` must read like castxml's ``unsigned long``.
 _STD_SCALAR_ALIAS_RE = re.compile(
-    r"^(?:const\s+|volatile\s+)*(?:::)?std::(?:size_t|ptrdiff_t|nullptr_t|max_align_t"
+    r"^(?:const\s+|volatile\s+)*(?:::)?std::(?:size_t|ptrdiff_t|nullptr_t|max_align_t|streamsize|streamoff"
     r"|byte|u?int(?:_least|_fast)?(?:8|16|32|64)_t|u?intmax_t|u?intptr_t)"
     r"(?:\s+const|\s+volatile)*$"
 )

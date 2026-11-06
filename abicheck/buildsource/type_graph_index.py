@@ -283,7 +283,7 @@ def _index_declared_entities(
         )
         if in_anon_ns and not in_body:
             _mark_tu_local(qname, cur_file, idx)
-        elif not in_anon_ns:
+        elif not in_anon_ns and not in_body:
             idx.external_types.add(qname)
         return _index_children(node, [*scope, name], cur_file, idx, in_body, in_anon_ns)
 
@@ -292,7 +292,7 @@ def _index_declared_entities(
         _index_type_target(qname, name, cur_file, idx, prefer_definition=False)
         if in_anon_ns and not in_body:
             _mark_tu_local(qname, cur_file, idx)
-        elif not in_anon_ns:
+        elif not in_anon_ns and not in_body:
             idx.external_types.add(qname)
         # Enum constants (and any nested decls) still need indexing; no new
         # scope is opened — an unscoped/scoped enum's own name is not part of

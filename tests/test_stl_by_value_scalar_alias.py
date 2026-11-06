@@ -25,6 +25,7 @@ _SPELLINGS = [
     "std::size_t", "std::ptrdiff_t", "std::nullptr_t", "std::max_align_t",
     "std::byte", "std::int8_t", "std::uint16_t", "std::int32_t", "std::uint64_t",
     "std::int_least8_t", "std::uint_fast64_t", "std::intmax_t", "std::uintptr_t",
+    "std::streamsize", "std::streamoff",
     "std::string", "std::vector<int>", "std::vector<std::size_t>",
     "std::pair<std::size_t, int>", "std::optional<std::size_t>",
     "std::shared_ptr<int>", "std::array<std::uint8_t, 4>",
@@ -64,7 +65,7 @@ def test_detector_agrees_with_the_compilers_is_class(tmp_path: Path) -> None:
         "#include <cstddef>", "#include <cstdint>", "#include <string>",
         "#include <vector>", "#include <utility>", "#include <optional>",
         "#include <memory>", "#include <array>", "#include <type_traits>",
-        "#include <cstdio>", "int main() {",
+        "#include <cstdio>", "#include <ios>", "int main() {",
     ]  # fmt: skip
     for s in _SPELLINGS:
         lines.append(f'  std::printf("%d\\n", (int)std::is_class_v<{s}>);')

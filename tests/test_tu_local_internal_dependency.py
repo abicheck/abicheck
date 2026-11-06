@@ -439,3 +439,59 @@ def test_a_type_name_shared_with_an_external_declaration_is_not_tu_local() -> No
         }
         dsts = _tu_local_dsts(parse_clang_ast_types(tree))
         assert dsts.get("ns::W") is False, dsts
+
+
+def test_a_function_local_type_does_not_unmark_a_same_named_anonymous_type() -> None:
+    """A type declared in a function body is indexed without the function's
+    name, so it can spell like ``ns::{anon}::Node``; it is not an externally
+    visible declaration and must not cancel the anonymous one's TU-local mark."""
+    anon = {
+        "kind": "NamespaceDecl",
+        "inner": [
+            {"kind": "CXXRecordDecl", "name": "Node", "completeDefinition": True}
+        ],
+    }
+    helper = {
+        "kind": "FunctionDecl",
+        "name": "helper",
+        "mangledName": "_ZN2ns6helperEv",
+        "type": {"qualType": "void ()"},
+        "inner": [
+            {
+                "kind": "CompoundStmt",
+                "inner": [
+                    {
+                        "kind": "DeclStmt",
+                        "inner": [
+                            {
+                                "kind": "CXXRecordDecl",
+                                "name": "Node",
+                                "completeDefinition": True,
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+    pub = {
+        "kind": "FunctionDecl",
+        "name": "pub",
+        "mangledName": "_ZN2ns3pubEPNS_12_GLOBAL__N_14NodeE",
+        "type": {"qualType": "void (Node *)"},
+        "inner": [{"kind": "ParmVarDecl", "name": "n", "type": {"qualType": "Node *"}}],
+    }
+    for order in ([anon, helper, pub], [helper, anon, pub]):
+        tree = {
+            "kind": "TranslationUnitDecl",
+            "inner": [
+                {
+                    "kind": "NamespaceDecl",
+                    "name": "ns",
+                    "loc": {"file": "/p/src/impl.cpp"},
+                    "inner": [dict(n) for n in order],
+                }
+            ],
+        }
+        dsts = _tu_local_dsts(parse_clang_ast_types(tree))
+        assert dsts.get("ns::Node") is True, dsts
