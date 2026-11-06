@@ -447,6 +447,9 @@ def _strip_header_and_above_evidence(
     # graph" -- an L2 fact like the others above, not the L4/L5
     # `build_source.source_graph` this function leaves untouched.
     snap.surface_graph = None
+    # The C++20 concept scan read the public headers this projection excludes;
+    # a gap it names would describe evidence the comparison no longer uses.
+    snap.cxx_concept_header_scan = None
     # ADR-050 `ExtractionContract`: both fingerprints are computed from
     # header-scope/compile-context inputs this function just discarded.
     # Left alone, `checker.compare()`'s `check_contracts_comparable()` can

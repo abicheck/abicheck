@@ -101,7 +101,9 @@ def _ast_compile_provenance(
             headers, (ast_toolchain or {}).get("producer")
         ),
         "cxx_concept_header_scan": _concept_scan(
-            headers, (ast_toolchain or {}).get("producer")
+            headers,
+            (ast_toolchain or {}).get("producer"),
+            (ast_toolchain or {}).get("resolved_lang_mode"),
         ),
     }
 
@@ -119,10 +121,16 @@ def _template_default_scan(headers: list[Path], producer: str | None) -> bool | 
     return None
 
 
-def _concept_scan(headers: list[Path], producer: str | None) -> bool | None:
+def _concept_scan(
+    headers: list[Path], producer: str | None, lang_mode: str | None = None
+) -> bool | None:
     """Whether the parsed headers define a C++20 concept or spell a
     ``requires`` clause. Neither castxml nor clang models them, so both scan;
-    other producers (hybrid, none) get no scan: ``None``."""
+    other producers (hybrid, none) get no scan: ``None``. A C-mode parse has
+    no concepts (``requires`` is an ordinary identifier there), so it is not
+    scanned either: ``None``. An unreadable header also yields ``None``."""
+    if lang_mode == "c":
+        return None
     if producer in ("castxml", "clang"):
         return concept_header_scan(headers)
     return None

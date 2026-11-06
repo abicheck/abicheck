@@ -206,15 +206,62 @@ def sync_model_extension_facts(snap: Any) -> None:
     path and the evidence digest call this first; it is idempotent."""
     sync_export_read_fact(snap)
     scan = getattr(snap, "cxx_concept_header_scan", None)
-    if isinstance(scan, bool) and _blocked_reason(snap, "debug") is None:
+    if _blocked_reason(snap, CXX_CONCEPT_HEADER_SCAN.section) is not None:
+        return
+    if isinstance(scan, bool):
         write_extension_fact(snap, CXX_CONCEPT_HEADER_SCAN, scan)
+    elif scan is None:
+        _drop_extension_fact(snap, CXX_CONCEPT_HEADER_SCAN)
+
+
+def _drop_extension_fact(snap: Any, fact: ExtensionFact[Any]) -> None:
+    """Remove *fact* from *snap*'s carried extensions (a model field reset to
+    ``None`` claims no value, so a stale stored one must not be re-saved).
+    Other facts and their ``must_understand`` entries are left alone."""
+    ext = extensions_of(snap)
+    if ext is None:
+        return
+    extras = ext.header_extras.get(fact.section)
+    if not extras:
+        return
+    stored = dict(extras.get(EXTENSIONS_KEY, {}))
+    if stored.pop(fact.name, None) is None and fact.name not in extras.get(
+        MUST_UNDERSTAND_KEY, ()
+    ):
+        return
+    if stored:
+        extras[EXTENSIONS_KEY] = stored
+    else:
+        extras.pop(EXTENSIONS_KEY, None)
+    names = [n for n in extras.get(MUST_UNDERSTAND_KEY, ()) if n != fact.name]
+    if names:
+        extras[MUST_UNDERSTAND_KEY] = names
+    else:
+        extras.pop(MUST_UNDERSTAND_KEY, None)
+    ext.document_must_understand = [
+        n for n in ext.document_must_understand if n != fact.name
+    ]
+    if not extras:
+        ext.header_extras.pop(fact.section, None)
 
 
 def apply_model_extension_facts(snap: Any) -> None:
-    """The inverse of :func:`sync_model_extension_facts` on load. A missing,
-    blocked or undecodable concept scan leaves the field ``None`` (no scan),
-    which names no gap -- what every older snapshot reads as."""
+    """The inverse of :func:`sync_model_extension_facts` on load. A missing
+    or blocked concept scan leaves the field ``None`` (no scan), which names
+    no gap -- what every older snapshot reads as. A stored value that does
+    not decode is refused rather than read as that no-gap answer."""
     apply_export_read_fact(snap)
     scan = read_extension_fact(snap, CXX_CONCEPT_HEADER_SCAN)
     if scan.status is FactStatus.PRESENT and isinstance(scan.value, bool):
         snap.cxx_concept_header_scan = scan.value
+        return
+    if scan.status is FactStatus.NOT_COLLECTED:
+        return
+    if _blocked_reason(snap, CXX_CONCEPT_HEADER_SCAN.section) is not None:
+        return
+    # A stored value that does not decode would read as "no scan" -- the
+    # same no-gap answer as a clean run. Refuse it, as for export_read.
+    raise SnapshotError(
+        "snapshot's cxx_concept_header_scan extension fact is unreadable: "
+        + "; ".join(str(d) for d in scan.diagnostics)
+    )

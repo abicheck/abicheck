@@ -69,22 +69,19 @@ def attach_analysis_assurance(
             partial(same_persisted_content, old, new) if old is not None else None
         ),
     )
+    notes = result.analysis_assurance.notes
     # ADR-085 D3: the same template-default gap the rollup reports is a coverage
-    # gap, so the coverage-gap rows of every report show it.
-    result.coverage_warnings.extend(template_default_gap(old, new)[1])
-    # The concept gap the rollup just noted, not a second computation of it.
-    result.coverage_warnings.extend(
-        n
-        for n in result.analysis_assurance.notes
-        if n.startswith(CONCEPT_GAP_DIMENSION)
-    )
-    # ADR-079: likewise an export table recorded as not completely read -- the
-    # notes the rollup just built, not a second computation of them.
-    result.coverage_warnings.extend(
-        note
-        for note in result.analysis_assurance.notes
-        if note.startswith(EXPORT_READ_NOTE_PREFIX)
-    )
+    # gap, so the coverage-gap rows of every report show it. The concept gap
+    # and ADR-079's not-completely-read export tables are likewise the notes
+    # the rollup just built, not a second computation of them. Scalar compare
+    # can attach twice to one result, so a warning already present is skipped.
+    for warning in (
+        *template_default_gap(old, new)[1],
+        *(n for n in notes if n.startswith(CONCEPT_GAP_DIMENSION)),
+        *(n for n in notes if n.startswith(EXPORT_READ_NOTE_PREFIX)),
+    ):
+        if warning not in result.coverage_warnings:
+            result.coverage_warnings.append(warning)
 
 
 def attach_evidence_depths(

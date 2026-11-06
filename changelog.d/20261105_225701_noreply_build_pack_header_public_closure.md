@@ -7,3 +7,6 @@
   `public_api_internal_dependency_added` went unreported at build-source depth.
   `resolve_l5_source_graph` now unions the snapshot's header closure into the
   pack graph; dependency edges, pass flags and L5 coverage stay the pack's own.
+  Only the declaration closure is borrowed: a dependency edge the header graph
+  has but the pack lacks is not added, so build-source analysis can still miss
+  a dependency the pack itself did not record.

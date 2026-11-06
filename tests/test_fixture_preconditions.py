@@ -113,3 +113,18 @@ def test_real_elf_gnu_property_reader(tmp_path) -> None:
     entry = {"fixture_preconditions": CASE179_SPECS}
     assert fp.unmet(entry, built["on"], built["off"]) is None
     assert fp.unmet(entry, built["off"], built["off"]) is not None
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [
+        {"side": "v1", "property": "elf_gnu_property", "include": CET},
+        {"side": "v1", "property": "elf_gnu_property", "exclude": CET},
+        {"side": "v1", "prop": "elf_gnu_property", "includes": CET},
+        {"side": "v1", "property": "elf_gnu_property", "includes": CET, "x": 1},
+    ],
+)
+def test_unknown_precondition_keys_are_rejected(spec: dict, fake_reader) -> None:
+    fake_reader.update(v1=frozenset(CET), v2=frozenset())
+    with pytest.raises(ValueError, match="unknown keys"):
+        fp.unmet({"fixture_preconditions": [spec]}, Path("v1"), Path("v2"))

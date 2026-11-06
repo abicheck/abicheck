@@ -23,12 +23,16 @@ definition or a ``requires`` clause/expression at all? When one does, the
 snapshot records that the constraints were not observed, and the assurance
 rollup reads ``partial`` instead of ``complete``.
 
-Like :mod:`.template_default_scan`, it is a text heuristic over the headers
-the parse was given, with comments and string literals stripped first. A
-macro that expands to ``concept``/``requires`` is not seen, and a header
+It is a text heuristic over the headers the parse was given. Comments and
+string/character literals are removed in one lexical pass, so a ``"/*"``
+inside a string does not open a comment, and a ``#if 0`` ... ``#endif``
+block (the one provably inactive branch a text scan can name) is skipped.
+A macro that expands to ``concept``/``requires`` is not seen, and a header
 included indirectly is not read; both make the scan say ``False`` (no gap
-reported), never a clean pass. A ``#define`` line is skipped, so a macro
-*named* or *defined with* the keyword does not count on its own.
+reported), never a clean pass. A header that cannot be read makes the scan
+``None`` (not assessed) rather than ``False``. A ``#define`` line is
+skipped, so a macro *named* or *defined with* the keyword does not count on
+its own.
 """
 
 from __future__ import annotations
@@ -36,8 +40,6 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 from pathlib import Path
-
-from .template_default_scan import strip_comments_and_strings
 
 __all__ = ["concept_header_scan", "header_declares_concept_or_requires"]
 
@@ -51,23 +53,73 @@ _REQUIRES = re.compile(r"\brequires\s*(?:[({!]|::|[A-Za-z_])")
 _DIRECTIVE = re.compile(r"^[ \t]*#(?:[^\n]*\\\n)*[^\n]*", re.MULTILINE)
 
 
+#: One lexical pass: whichever of a comment, a string literal or a character
+#: literal starts first wins, so delimiters inside the others are inert.
+_LEXEME = re.compile(
+    r"//[^\n]*|/\*.*?(?:\*/|\Z)|\"(?:\\.|[^\"\\\n])*\"|'(?:\\.|[^'\\\n])*'",
+    re.DOTALL,
+)
+_CONDITIONAL = re.compile(r"^[ \t]*#[ \t]*(if|ifdef|ifndef|elif|else|endif)\b([^\n]*)")
+
+
+def _strip_lexemes(text: str) -> str:
+    """*text* with comments blanked and string/character literals emptied,
+    in a single left-to-right pass."""
+
+    def repl(m: re.Match[str]) -> str:
+        tok = m.group(0)
+        if tok.startswith("/"):
+            # Keep line breaks so directive lines stay on their own lines.
+            return " " + "\n" * tok.count("\n")
+        return tok[0] * 2
+
+    return _LEXEME.sub(repl, text)
+
+
+def _drop_if0_blocks(code: str) -> str:
+    """*code* without the lines of ``#if 0`` groups (up to their matching
+    ``#else``/``#elif``/``#endif``); nested conditionals are tracked."""
+    out: list[str] = []
+    depth = 0  # nesting depth inside a skipped group, 0 when not skipping
+    for line in code.split("\n"):
+        m = _CONDITIONAL.match(line)
+        if depth:
+            if m:
+                kw = m.group(1)
+                if kw in ("if", "ifdef", "ifndef"):
+                    depth += 1
+                elif kw == "endif":
+                    depth -= 1
+                elif depth == 1:  # else/elif of the #if 0 group itself
+                    depth = 0
+            continue
+        if m and m.group(1) == "if" and m.group(2).strip() == "0":
+            depth = 1
+            continue
+        out.append(line)
+    return "\n".join(out)
+
+
 def header_declares_concept_or_requires(text: str) -> bool:
     """Whether the header *text* defines a concept or spells a ``requires``
-    clause or expression outside comments, string literals and preprocessor
-    directives."""
-    code = _DIRECTIVE.sub(" ", strip_comments_and_strings(text))
+    clause or expression outside comments, string literals, ``#if 0``
+    blocks and preprocessor directives."""
+    code = _DIRECTIVE.sub(" ", _drop_if0_blocks(_strip_lexemes(text)))
     return bool(_CONCEPT_DEFINITION.search(code) or _REQUIRES.search(code))
 
 
-def concept_header_scan(paths: Iterable[str | Path]) -> bool:
+def concept_header_scan(paths: Iterable[str | Path]) -> bool | None:
     """Whether any header in *paths* defines a concept or spells a
-    ``requires`` clause. Unreadable files are skipped, as in
-    :func:`.template_default_scan.template_default_header_scan`."""
+    ``requires`` clause. A positive in a readable header wins; otherwise an
+    unreadable header makes the answer ``None`` (not assessed), never a
+    clean ``False``."""
+    unreadable = False
     for path in paths:
         try:
             text = Path(path).read_text(encoding="utf-8", errors="replace")
         except OSError:
+            unreadable = True
             continue
         if header_declares_concept_or_requires(text):
             return True
-    return False
+    return None if unreadable else False

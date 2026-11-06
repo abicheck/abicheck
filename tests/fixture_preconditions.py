@@ -47,6 +47,9 @@ PROPERTY_READERS: dict[str, Callable[[Path], frozenset[str]]] = {
 }
 
 
+_KNOWN_KEYS = frozenset({"side", "property", "includes", "excludes"})
+
+
 def unmet(entry: dict, v1: Path | None, v2: Path | None) -> str | None:
     """Return a ``SKIP:`` reason for the first unmet precondition, else ``None``.
 
@@ -55,6 +58,14 @@ def unmet(entry: dict, v1: Path | None, v2: Path | None) -> str | None:
     """
     binaries = {"v1": v1, "v2": v2}
     for spec in entry.get("fixture_preconditions", ()):
+        unknown = set(spec) - _KNOWN_KEYS
+        if unknown:
+            # A misspelt key (``include`` for ``includes``) would silently
+            # drop the requirement: an authoring error, not an unmet premise.
+            raise ValueError(
+                f"fixture_preconditions entry has unknown keys {sorted(unknown)}; "
+                f"allowed: {sorted(_KNOWN_KEYS)}"
+            )
         side, prop = spec.get("side"), spec.get("property")
         path, reader = binaries.get(side), PROPERTY_READERS.get(prop)
         label = f"{side} {prop}"

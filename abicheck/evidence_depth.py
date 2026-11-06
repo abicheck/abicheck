@@ -105,7 +105,9 @@ def resolve_l5_source_graph(
     across three earlier review rounds on this migration.
 
     Prefers *pack*'s own ``source_graph``, with *snap*'s header-graph public
-    closure folded in when that graph has none (:func:`with_header_public_closure`).
+    closure (its ``SOURCE_DECLARES`` edges) unioned into every pack graph --
+    whether that graph has no closure, a partial one or a complete one
+    (:func:`with_header_public_closure`).
     With no pack at all (neither
     *pack* nor ``snap.build_source`` -- a plain header-only dump, which no
     longer carries a synthesized pack), the header graph on
