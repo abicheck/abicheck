@@ -274,11 +274,11 @@
       "abicheck/buildsource/template_graph.py": "57c5248820c2ade147850c9cb92a281087213b6d3b7420620ecbbdeef6a26756",
       "abicheck/buildsource/template_graph_fold.py": "630006aa35ad1a6dc2e3797b662e857aee790e94acee759331478993f5ffad03",
       "abicheck/buildsource/template_graph_value_decls.py": "d50b5cd979744d4ecb4ae2ad859faf99689d6af50d0e0d0a24d867f99a83931c",
-      "abicheck/buildsource/type_graph.py": "a028a875057cd0cbf2930a431bfa1e579f7b770e0d124cbcfe715724e89d12e5",
-      "abicheck/buildsource/type_graph_index.py": "7375f7baec7ceb3dd4a52a489b89e5a3571750dffca7490d1c5870301d55202d"
+      "abicheck/buildsource/type_graph.py": "e836e687fe95d52f6483a70893cff385b8d175284e6f5bebadaa2b805b7387c5",
+      "abicheck/buildsource/type_graph_index.py": "3fb021cfb493a24fceb2ae5622e0da42648a3b9692f1c645c6558a97fd5ec539"
     },
-    "fingerprint": "cd673b0c33f993a427dd3703a3349eba32d27596949c39dcf3798ccba5a9c763",
-    "generation": 13,
-    "reason": "conjunctive-atom helpers moved to model/concept_constraint.py and re-exported; the recorded concept value is byte-identical"
+    "fingerprint": "7aa2d469a577ce4620f87df87ec756a26e0f1414156d6b7baa53176d07715138",
+    "generation": 14,
+    "reason": "bumped to 14 for a semantic change"
   }
 }

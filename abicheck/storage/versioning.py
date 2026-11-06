@@ -97,7 +97,7 @@ RESOLVER_GENERATION = 4
 #: not drift an L2 (binary plus headers) package. Stamped only on a package
 #: that carries source-tier facts. Bump it when what those extractors or passes
 #: record for the same input changes.
-SOURCE_GENERATION = 13
+SOURCE_GENERATION = 14
 
 #: Substring every generation-drift notice carries, so a consumer can filter
 #: ``coverage_warnings`` for it.

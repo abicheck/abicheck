@@ -489,7 +489,10 @@ ANALYSIS_2_BUG_CLASSES: tuple[BugClass, ...] = (
             "a live clang AST."
         ),
         fixed_by=(1941,),
-        seed_tests=("tests/test_tu_local_internal_dependency.py",),
+        seed_tests=(
+            "tests/test_tu_local_internal_dependency.py",
+            "tests/test_family_f4_heuristics.py",
+        ),
         public_surfaces=("cli",),
         axes={
             "linkage": (
