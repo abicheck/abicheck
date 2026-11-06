@@ -261,8 +261,7 @@ class CaseResult(NamedTuple):
     # KINDS_MISMATCH row can be diagnosed from the artifact alone, without
     # re-running the case locally.
     actual_kinds: tuple[str, ...] = ()
-    # Reported-only: emitted kinds outside expected_kinds, allowed_kinds and
-    # expected_kinds_gate.TOOLCHAIN_INCIDENTAL_KINDS. Never fails a cell.
+    # Report-only: kinds outside expected/allowed/toolchain-incidental sets.
     unexpected_kinds: tuple[str, ...] = ()
 
 
@@ -1411,16 +1410,11 @@ def run_case(
         return resolved._replace(variant=variant)
     case_dir, (v1_src, v2_src, v1_hdr, v2_hdr) = resolved
 
-    # A declared source_smoke proves the *consumer-observable* claim (old
-    # binary genuinely misbehaves / fails to link against the new library) —
-    # a hard precondition for the case's premise. It does NOT prove abicheck
-    # itself detects the change: historically this returned straight to the
-    # caller on a smoke PASS, so a case with source_smoke never reached the
-    # build+dump+compare+verdict check below at all. That let a real,
-    # unrelated detector gap (case20, case97) go unnoticed by this "ground
-    # truth" gate for as long as the smoke kept passing. Smoke is now a
-    # gate only on failure/skip; a PASS falls through so the verdict is
-    # still checked for real, its proof text folded into the result below.
+    # A declared source_smoke proves the consumer-observable premise (the old
+    # binary misbehaves / fails to link against the new library), not that
+    # abicheck detects the change. Returning on a smoke PASS once hid real
+    # detector gaps (case20, case97), so smoke gates only on failure/skip; a
+    # PASS falls through to the verdict check, its proof folded in below.
     smoke_dir = _case_work_dir(tmp_base, f"{name}__source_smoke", variant)
     smoke_result = _run_source_smoke(name, entry, case_dir, smoke_dir, expected_raw)
     if smoke_result is not None and smoke_result.status != "PASS":
