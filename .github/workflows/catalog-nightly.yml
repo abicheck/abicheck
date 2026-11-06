@@ -91,6 +91,19 @@ jobs:
           done
           exit $rc
 
+      # Relations between cells the per-cell kinds gate cannot see: richer
+      # evidence (build-source) must not lose a debug-headers kind, and
+      # castxml/clang must report the same kinds, unless declared in
+      # ground_truth.json (tests/catalog_kind_parity.py). Blocking.
+      - name: Catalog kind parity (evidence monotonicity + frontend parity)
+        if: ${{ !cancelled() }}
+        run: |
+          python tests/catalog_kind_parity.py \
+            castxml:debug-headers=results/validate_examples-debug-headers.json \
+            castxml:build-source=results/validate_examples-build-source.json \
+            clang:debug-headers=results/clang-frontend-validate_examples-debug-headers.json \
+            clang:build-source=results/clang-frontend-validate_examples-build-source.json
+
       - name: Public-contract lane (report-only)
         if: ${{ !cancelled() }}
         continue-on-error: true
