@@ -56,6 +56,7 @@ from .type_graph_index import (
     _declares_anonymous_enum_type,
     _resolve_ref_identity,
     _resolve_type_name,
+    tu_local_identities,
 )
 from .type_graph_names import (
     _decl_return_type_name,
@@ -783,8 +784,9 @@ def _parse_clang_ast_types(ast: dict[str, Any]) -> tuple[TypeEdge, ...]:
     idx = _ast_indexes(ast)
     edges: list[TypeEdge] = []
     _walk_types(ast, [], "", edges, idx)
-    if idx.tu_local:
+    tu_local = tu_local_identities(idx)
+    if tu_local:
         edges = [
-            replace(e, dst_tu_local=True) if e.dst in idx.tu_local else e for e in edges
+            replace(e, dst_tu_local=True) if e.dst in tu_local else e for e in edges
         ]
     return tuple(_dedupe_edges(edges))

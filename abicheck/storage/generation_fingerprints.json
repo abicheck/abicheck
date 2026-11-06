@@ -275,10 +275,10 @@
       "abicheck/buildsource/template_graph_fold.py": "630006aa35ad1a6dc2e3797b662e857aee790e94acee759331478993f5ffad03",
       "abicheck/buildsource/template_graph_value_decls.py": "d50b5cd979744d4ecb4ae2ad859faf99689d6af50d0e0d0a24d867f99a83931c",
       "abicheck/buildsource/type_graph.py": "e836e687fe95d52f6483a70893cff385b8d175284e6f5bebadaa2b805b7387c5",
-      "abicheck/buildsource/type_graph_index.py": "3fb021cfb493a24fceb2ae5622e0da42648a3b9692f1c645c6558a97fd5ec539"
+      "abicheck/buildsource/type_graph_index.py": "cd4f3820f4384d4da2f1cc1bc7be8117dcaf60e2ca4feade9cef673507b2cb31"
     },
-    "fingerprint": "7aa2d469a577ce4620f87df87ec756a26e0f1414156d6b7baa53176d07715138",
+    "fingerprint": "e836b36a13a4afe0e6c6cf751584413db1d3c05241ff13edde7744383e8327da",
     "generation": 14,
-    "reason": "bumped to 14 for a semantic change"
+    "reason": "generation 14 is introduced by this unmerged PR (#1941) and never released; no stored pack carries tu_local yet, so narrowing which nodes get it changes no recorded value"
   }
 }

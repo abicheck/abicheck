@@ -406,3 +406,31 @@ def test_projection_cache_codec_keeps_the_tu_local_flag() -> None:
     assert [e.dst_tu_local for e in decoded.type_edges] == [True] * len(
         flagged.type_edges
     )
+
+
+def test_a_type_name_shared_with_an_external_declaration_is_not_tu_local() -> None:
+    """``ns::W`` and ``ns::{anon}::W`` spell the same qualified name; an edge to
+    it must not be hidden as TU-local, whichever declaration comes first."""
+    external = {"kind": "CXXRecordDecl", "name": "W", "completeDefinition": True}
+    anon = {"kind": "NamespaceDecl", "inner": [dict(external)]}
+    fn = {
+        "kind": "FunctionDecl",
+        "name": "pub",
+        "mangledName": "_ZN2ns3pubENS_1WE",
+        "type": {"qualType": "void (W)"},
+        "inner": [{"kind": "ParmVarDecl", "name": "w", "type": {"qualType": "W"}}],
+    }
+    for order in ([anon, external, fn], [external, anon, fn]):
+        tree = {
+            "kind": "TranslationUnitDecl",
+            "inner": [
+                {
+                    "kind": "NamespaceDecl",
+                    "name": "ns",
+                    "loc": {"file": "/p/src/impl.cpp"},
+                    "inner": [dict(n) for n in order],
+                }
+            ],
+        }
+        dsts = _tu_local_dsts(parse_clang_ast_types(tree))
+        assert dsts.get("ns::W") is False, dsts

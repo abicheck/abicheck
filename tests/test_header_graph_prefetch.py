@@ -395,12 +395,17 @@ def test_a_failed_dump_exits_without_waiting_for_its_parse(tmp_path: Path) -> No
     import abicheck
 
     # ``-I`` keeps the child free of cwd/PYTHONPATH/user-site leakage, which
-    # also hides a user-site or out-of-venv editable install; put the package
-    # root this test imported on the child's path explicitly.
+    # also hides a user-site or out-of-venv install of abicheck *and* of its
+    # dependencies; hand the child this process's resolved import path (the
+    # package root first, the current directory left out) explicitly.
     package_root = str(Path(abicheck.__file__).resolve().parent.parent)
+    cwd = str(Path.cwd().resolve())
+    child_path = [package_root] + [
+        p for p in sys.path if p and str(Path(p).resolve()) != cwd and p != package_root
+    ]
     script.write_text(
         "import sys, time\n"
-        f"sys.path.insert(0, {package_root!r})\n"
+        f"sys.path[:0] = {child_path!r}\n"
         "from pathlib import Path\n"
         "from abicheck import deadline\n"
         "from abicheck import service_header_graph_attach as attach\n"

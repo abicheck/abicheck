@@ -127,11 +127,22 @@ class _AstIndexes:
     #: identities/qualified names of TU-local entities: internal linkage
     #: (anonymous namespace, file-scope ``static``) declared in a source file.
     tu_local: set[str]
+    #: type qualified names also declared *outside* an anonymous namespace.
+    #: Type identity is the spelled qname, so ``ns::W`` and ``ns::{anon}::W``
+    #: collide; such a name is never treated as TU-local
+    #: (:func:`tu_local_identities`).
+    external_types: set[str]
 
 
 def _new_ast_indexes() -> _AstIndexes:
     """A fresh, empty :class:`_AstIndexes` for one AST walk."""
-    return _AstIndexes({}, {}, {}, {}, set())
+    return _AstIndexes({}, {}, {}, {}, set(), set())
+
+
+def tu_local_identities(idx: _AstIndexes) -> set[str]:
+    """Identities proven TU-local: a type qname shared with an externally
+    visible declaration is ambiguous and stays external."""
+    return idx.tu_local - idx.external_types
 
 
 def _mark_tu_local(ident: str, cur_file: str, idx: _AstIndexes) -> None:
@@ -272,6 +283,8 @@ def _index_declared_entities(
         )
         if in_anon_ns and not in_body:
             _mark_tu_local(qname, cur_file, idx)
+        elif not in_anon_ns:
+            idx.external_types.add(qname)
         return _index_children(node, [*scope, name], cur_file, idx, in_body, in_anon_ns)
 
     if kind in _OTHER_TYPE_DECL_KINDS and name:
@@ -279,6 +292,8 @@ def _index_declared_entities(
         _index_type_target(qname, name, cur_file, idx, prefer_definition=False)
         if in_anon_ns and not in_body:
             _mark_tu_local(qname, cur_file, idx)
+        elif not in_anon_ns:
+            idx.external_types.add(qname)
         # Enum constants (and any nested decls) still need indexing; no new
         # scope is opened — an unscoped/scoped enum's own name is not part of
         # its enumerators' spelling in clang's AST dump.
