@@ -53,13 +53,19 @@ def attach_analysis_assurance(
     """
     from ..evidence_depth import embedded_evidence_pack
     from ..policy.analysis_assurance import compute_analysis_assurance
-    from ..policy.analysis_assurance._unobserved import collect_unobserved
+    from ..policy.analysis_assurance._unobserved import (
+        collect_unobserved,
+        unobserved_dimensions,
+    )
     from ..storage.snapshot_encode import same_persisted_content
 
+    # One registry pass feeds both the rollup and the coverage rows below.
+    unobserved = collect_unobserved(old, new)
     result.analysis_assurance = compute_analysis_assurance(
         result,
         old,
         new,
+        unobserved=unobserved,
         # A header-only side's graph stands in as its pack (ADR-063 Phase 10).
         old_pack=embedded_evidence_pack(old) if old is not None else None,
         new_pack=embedded_evidence_pack(new),
@@ -73,7 +79,8 @@ def attach_analysis_assurance(
     # same text the rollup noted -- one registry, not per-gap wiring. Scalar
     # compare can attach twice to one result, so a warning already present is
     # skipped.
-    for finding in collect_unobserved(old, new, coverage_only=True):
+    coverage_dims = {d.dimension for d in unobserved_dimensions() if d.coverage_warning}
+    for finding in (f for f in unobserved if f.dimension in coverage_dims):
         warning = finding.reason
         if warning not in result.coverage_warnings:
             result.coverage_warnings.append(warning)

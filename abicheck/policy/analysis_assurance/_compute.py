@@ -49,6 +49,7 @@ from ._result import AnalysisAssurance, AssuranceStatus
 from ._target_accounting import _target_accounting
 from ._translation_units import _translation_units
 from ._unobserved import collect_unobserved
+from ._unobserved_finding import UnobservedFinding
 from ._unreadable_sections import section_availability_entries
 
 if TYPE_CHECKING:
@@ -63,6 +64,7 @@ def compute_analysis_assurance(
     old_pack: BuildSourcePack | None = None,
     new_pack: BuildSourcePack | None = None,
     same_content: Callable[[], bool] | None = None,
+    unobserved: list[UnobservedFinding] | None = None,
 ) -> AnalysisAssurance:
     """Roll up existing pipeline signals into an :class:`AnalysisAssurance`.
 
@@ -201,7 +203,8 @@ def compute_analysis_assurance(
     graph_completeness, graph_notes = _graph_completeness(old_pack, new_pack)
     notes.extend(graph_notes)
     # -- unobserved dimensions: the one registry (``_unobserved.py``) ---------
-    unobserved = collect_unobserved(old, new)
+    if unobserved is None:
+        unobserved = collect_unobserved(old, new)
     notes.extend(f.reason for f in unobserved)
     unobserved_gap = any(f.lowers_status for f in unobserved)
     export_read = {"old": recorded_export_reads(old), "new": recorded_export_reads(new)}
