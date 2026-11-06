@@ -488,7 +488,7 @@ ANALYSIS_2_BUG_CLASSES: tuple[BugClass, ...] = (
             "AST scope), checked against nm's local/global symbol letters and "
             "a live clang AST."
         ),
-        fixed_by=(),
+        fixed_by=(1941,),
         seed_tests=("tests/test_tu_local_internal_dependency.py",),
         public_surfaces=("cli",),
         axes={
