@@ -368,6 +368,9 @@ DETECTOR_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
         "symbol_renames": frozenset({"symbol_renamed_batch"}),
         "symbol_version_alias": frozenset({"symbol_version_alias_changed"}),
         "target_isa": frozenset({"target_isa_changed"}),
+        "concept_constraints": frozenset(
+            {"concept_constraint_changed", "concept_tightened"}
+        ),
         "template_inner_types": frozenset(
             {"template_param_type_changed", "template_return_type_changed"}
         ),
@@ -473,8 +476,6 @@ NON_DETECTOR_KINDS: frozenset[str] = frozenset(
         "call_graph_public_entry_reachability_changed",
         "char_signedness_changed",
         "compile_context_conflict",
-        "concept_constraint_changed",
-        "concept_tightened",
         "constexpr_value_changed",
         "consumer_required_symbol_removed",
         "cpo_kind_changed",

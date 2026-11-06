@@ -89,6 +89,7 @@ def _full_snapshot(version: str, *, pack: bool) -> AbiSnapshot:
         build_source=BuildSourcePack(root=Path("pack")) if pack else None,
     )
     snap.semantic_ir = SemanticIR()
+    snap.cxx_concept_constraints = {"concept C": "conj:a"}
     decls = snap.declarations
     decls.typedefs_qualified = {"t": "int"}
     decls.typedef_entity_ids = {"t": entity_id_for_typedef((), "t")}

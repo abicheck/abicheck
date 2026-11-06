@@ -87,6 +87,9 @@ class TuFragment:
     # {guard macro: function names} the parse's preprocessor configuration
     # excluded (extract/headers/preprocessor_branches.py); None = no scan.
     preprocessor_hidden: dict[str, tuple[str, ...]] | None = None
+    # The clang parse's concept/template-constraint table
+    # (extract/headers/clang/concept_constraints.py); None = not modelled.
+    cxx_concept_constraints: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -128,6 +131,9 @@ class MergedTuFragments:
     semantic_ir: SemanticIR | None = None
     #: Only the single-TU path carries it; a multi-TU merge leaves it None.
     preprocessor_hidden: dict[str, tuple[str, ...]] | None = None
+    #: Single-TU only, like ``preprocessor_hidden``: None (not modelled, the
+    #: concept gap stays named) after a multi-TU merge.
+    cxx_concept_constraints: dict[str, str] | None = None
 
 
 def entity_key(kind: str, name: str) -> tuple[str, str]:

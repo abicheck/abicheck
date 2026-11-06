@@ -145,6 +145,7 @@ def build_header_only_snapshot(
         typedef_entity_ids=ast_result.typedef_entity_ids,
         constant_entity_ids=ast_result.constant_entity_ids,
         semantic_ir=ast_result.semantic_ir,
+        cxx_concept_constraints=ast_result.cxx_concept_constraints,
         from_headers=True,
         header_only=True,
         ast_producer=ast_result.ast_producer,

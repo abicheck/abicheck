@@ -253,13 +253,16 @@
    "api_break": true,
    "bad_practice": false,
    "category": "api_break",
-   "description": "A C++20 `concept` (`Addable`) gains an additional requirement (default-constructibility). Already-shipped binary instantiations keep linking, but consumers instantiating `sum<T>` for types that fail the tightened constraint no longer compile. The canonical truth is API_BREAK. It is missed by default object/DWARF and header/castxml comparison (castxml emits concepts as `<Unimplemented kind=\"Concept\"/>`, no name, no body), but visible at L4: source-ABI replay reports `concept_tightened` (API_BREAK) when that opt-in evidence is supplied.",
+   "description": "A C++20 `concept` (`Addable`) gains an additional requirement (default-constructibility). Already-shipped binary instantiations keep linking, but consumers instantiating `sum<T>` for types that fail the tightened constraint no longer compile. The canonical truth is API_BREAK. It is missed by object/DWARF-only and header/castxml comparison (castxml emits concepts as `<Unimplemented kind=\"Concept\"/>`, no name, no body). The clang header backend models concepts and template constraints (AbiSnapshot.cxx_concept_constraints) and reports `concept_tightened` (API_BREAK) at header depth, as does L4 source-ABI replay when that opt-in evidence is supplied.",
    "expected": "API_BREAK",
    "expected_absent_kinds": [],
    "expected_kinds": [
     "concept_tightened"
    ],
-   "known_gap": "L0-L2 artifact/header scans cannot observe the C++20 concept constraint because CastXML emits concepts as unnamed <Unimplemented> nodes. Their NO_CHANGE verdict is a missed API_BREAK detection caused by insufficient evidence, not a lane-specific expectation. L4 source-ABI replay emits the named concept and constraint hash and detects concept_tightened.",
+   "known_gap": "castxml-backed header scans cannot observe the C++20 concept constraint because CastXML emits concepts as unnamed <Unimplemented> nodes; their NO_CHANGE verdict is a missed API_BREAK detection caused by insufficient evidence (assurance reads partial with the concept dimension named). The clang header backend models concepts and detects concept_tightened, as does L4 source-ABI replay.",
+   "known_gap_frontends": [
+    "castxml"
+   ],
    "min_evidence": "L4",
    "platforms": [
     "linux",

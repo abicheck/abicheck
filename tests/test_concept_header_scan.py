@@ -13,11 +13,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""C++20 concepts and requires-clauses are a named unobserved dimension.
+"""C++20 concepts and requires-clauses: scanned, and named when unmodelled.
 
-Invariant: neither header backend models a concept or a ``requires``
-constraint, so a castxml or clang run over public headers that declare one
-reads ``partial`` with the concept dimension named, never ``complete``; a
+Invariant: a castxml or clang run over public headers that declare a concept
+or a ``requires`` constraint records the scan; a side that did not model the
+constraints (castxml) reads ``partial`` with the concept dimension named,
+while a clang side that modelled them names no gap (the CLI test below); a
 header with no concept (or one only in a comment, string or macro
 definition) names no such gap. The oracle is the hand-written header table
 below, with the expected answer stated per row.
@@ -183,12 +184,12 @@ def test_scan_round_trips_through_a_saved_snapshot(
 
 @pytest.mark.integration
 @pytest.mark.parametrize("frontend", ["castxml", "clang"])
-def test_case105_concept_tightening_reads_partial_with_the_dimension_named(
+def test_case105_concept_tightening_through_the_cli_per_backend(
     tmp_path: Path, frontend: str
 ) -> None:
     """Catalog case105 (concept tightened) through the public dump/compare CLI:
-    whatever the verdict, assurance is never ``complete`` and the concept
-    dimension is named on both sides."""
+    castxml never reads ``complete`` and names the concept dimension on both
+    sides; clang detects ``concept_tightened`` and names no concept gap."""
     import shutil
 
     from tests.test_known_gap_canaries_header_backends import (
@@ -212,15 +213,23 @@ def test_case105_concept_tightening_reads_partial_with_the_dimension_named(
     named = [n for n in assurance["notes"] if n.startswith(CONCEPT_GAP_DIMENSION)]
     diagnostics = {
         "platform": sys.platform,
+        "status": assurance.get("status"),
         "notes": assurance.get("notes"),
         "old_scan": _snapshot_scan(tmp_path / "v1.json"),
         "new_scan": _snapshot_scan(tmp_path / "v2.json"),
     }
+    fallback = [n for n in assurance["notes"] if n.startswith(SCOPE_FALLBACK_DIMENSION)]
+    if frontend == "clang" and not fallback:
+        # clang models the concepts: the tightening is detected and no
+        # concept gap is named on either side.
+        kinds = {c["kind"] for c in report.get("changes", [])}
+        assert "concept_tightened" in kinds, diagnostics
+        assert named == [], diagnostics
+        return
     assert assurance["status"] == "partial", diagnostics
     # Each side names either the concept dimension (headers parsed: Linux/ELF)
     # or the export-table fallback (the header-only template surface matches
     # no Mach-O/PE export, so the headers were discarded) -- never neither.
-    fallback = [n for n in assurance["notes"] if n.startswith(SCOPE_FALLBACK_DIMENSION)]
     assert len(named) + len(fallback) == 2, diagnostics
 
 

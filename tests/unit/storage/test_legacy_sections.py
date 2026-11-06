@@ -67,6 +67,7 @@ _NEVER_IN_A_DOCUMENT = (
     "cxx_concept_header_scan",
     # Stored as the debug section's extension fact, never a document key.
     "cxx_concept_header_scan",
+    "cxx_concept_constraints",
     "wire_extensions",
     "spellings_generation",
     "_func_by_mangled",

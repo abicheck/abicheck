@@ -447,6 +447,13 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "no type or name spelling changes, so no rewrite is needed -- an older "
         "snapshot simply names no concept gap"
     ),
+    42: GenerationSpellingChange(
+        "clang runs set cxx_concept_constraints (the public headers' C++20 "
+        "concepts and template constraints as conjunctive atom sets, "
+        "extract/headers/clang/concept_constraints.py) where it was unset; no "
+        "type or name spelling changes, so no rewrite is needed -- an older "
+        "snapshot reads as not modelled and keeps its concept gap note"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

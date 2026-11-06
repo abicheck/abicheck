@@ -288,11 +288,11 @@ def test_legacy_dumper_dump_leaves_a_clang_record_unsized(
 # -- "Catalog known-gap rows at debug-headers depth read NO_CHANGE (case105, case98)"
 
 
-def test_case105_concept_tightening_reads_no_change_at_debug_headers(
+def test_case105_concept_tightening_debug_headers_per_backend(
     tmp_path: Path,
 ) -> None:
-    """Neither backend detects a C++20 concept tightening (NO_CHANGE); both now
-    read partial and name the concept dimension as unobserved."""
+    """castxml cannot see a C++20 concept (NO_CHANGE, partial, dimension
+    named); clang models concepts and detects the tightening, naming no gap."""
     _require("castxml", "clang", "g++")
     answers = {}
     for frontend in ("castxml", "clang"):
@@ -307,21 +307,19 @@ def test_case105_concept_tightening_reads_no_change_at_debug_headers(
             ),
             debug=True,
         )
-        assert "concept_tightened" not in _kinds(report)
         named = any(
             n.startswith(CONCEPT_GAP_DIMENSION)
             for n in report["analysis_assurance"]["notes"]
         )
         answers[frontend] = (
             report["verdict"],
-            report["analysis_assurance"]["status"],
+            "concept_tightened" in _kinds(report),
             named,
         )
-    # The detection gap remains; the false-clean `complete` is gone.
     assert answers == {
-        "castxml": ("NO_CHANGE", "partial", True),
-        "clang": ("NO_CHANGE", "partial", True),
-    }
+        "castxml": ("NO_CHANGE", False, True),
+        "clang": ("API_BREAK", True, False),
+    }, answers
 
 
 def test_case98_standard_floor_reads_partial_no_change_at_debug_headers(

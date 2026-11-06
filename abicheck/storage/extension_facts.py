@@ -40,6 +40,7 @@ from ..model.export_read import ExportReadState
 from ..model.fact import Fact
 from .canonical import canonical_form
 from .extension_fact_catalog import (
+    CXX_CONCEPT_CONSTRAINTS,
     CXX_CONCEPT_HEADER_SCAN,
     EXPORT_READ,
     EXTENSION_FACTS,
@@ -212,6 +213,11 @@ def sync_model_extension_facts(snap: Any) -> None:
         write_extension_fact(snap, CXX_CONCEPT_HEADER_SCAN, scan)
     elif scan is None:
         _drop_extension_fact(snap, CXX_CONCEPT_HEADER_SCAN)
+    table = getattr(snap, "cxx_concept_constraints", None)
+    if isinstance(table, dict):
+        write_extension_fact(snap, CXX_CONCEPT_CONSTRAINTS, table)
+    elif table is None:
+        _drop_extension_fact(snap, CXX_CONCEPT_CONSTRAINTS)
 
 
 def _drop_extension_fact(snap: Any, fact: ExtensionFact[Any]) -> None:
@@ -251,6 +257,7 @@ def apply_model_extension_facts(snap: Any) -> None:
     no gap -- what every older snapshot reads as. A stored value that does
     not decode is refused rather than read as that no-gap answer."""
     apply_export_read_fact(snap)
+    _apply_concept_constraints(snap)
     scan = read_extension_fact(snap, CXX_CONCEPT_HEADER_SCAN)
     if scan.status is FactStatus.PRESENT and isinstance(scan.value, bool):
         snap.cxx_concept_header_scan = scan.value
@@ -264,4 +271,22 @@ def apply_model_extension_facts(snap: Any) -> None:
     raise SnapshotError(
         "snapshot's cxx_concept_header_scan extension fact is unreadable: "
         + "; ".join(str(d) for d in scan.diagnostics)
+    )
+
+
+def _apply_concept_constraints(snap: Any) -> None:
+    """Restore ``cxx_concept_constraints``. Missing or blocked leaves it
+    ``None`` (not modelled: the gap stays named); a stored value that does not
+    decode is refused rather than read as "not modelled"."""
+    table = read_extension_fact(snap, CXX_CONCEPT_CONSTRAINTS)
+    if table.status is FactStatus.PRESENT and isinstance(table.value, dict):
+        snap.cxx_concept_constraints = table.value
+        return
+    if table.status is FactStatus.NOT_COLLECTED:
+        return
+    if _blocked_reason(snap, CXX_CONCEPT_CONSTRAINTS.section) is not None:
+        return
+    raise SnapshotError(
+        "snapshot's cxx_concept_constraints extension fact is unreadable: "
+        + "; ".join(str(d) for d in table.diagnostics)
     )

@@ -58,6 +58,7 @@ from typing import Any, Generic, TypeVar
 from .dto import SECTION_SCHEMA_VERSIONS
 
 __all__ = [
+    "CXX_CONCEPT_CONSTRAINTS",
     "CXX_CONCEPT_HEADER_SCAN",
     "EXPORT_READ",
     "EXTENSION_FACTS",
@@ -279,6 +280,35 @@ CXX_CONCEPT_HEADER_SCAN: ExtensionFact[bool] = ExtensionFact(
     decode=_strict_bool,
 )
 
+
+def _str_map(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict) or not all(
+        isinstance(k, str) and isinstance(v, str) for k, v in value.items()
+    ):
+        raise TypeError("expected a {str: str} map")
+    return dict(sorted(value.items()))
+
+
+#: The public headers' C++20 concepts and template constraints the clang
+#: header backend modelled (``AbiSnapshot.cxx_concept_constraints``, extractor
+#: generation 42; keys and encoding in ``model/concept_constraint.py``).
+#: Written on the ``debug`` section whenever a run modelled them, the empty
+#: map included. Absent, nothing was modelled: no constraint change can be
+#: assessed and the concept scan's coverage gap stays named. An older reader
+#: that ignores it keeps that gap and reports no concept change -- what it
+#: always did -- so it is optional.
+CXX_CONCEPT_CONSTRAINTS: ExtensionFact[dict[str, str]] = ExtensionFact(
+    name="abicheck.cxx_concept_constraints",
+    section="debug",
+    semantics=ReaderSemantics.OPTIONAL,
+    absent_reads_as="not modelled: no concept change is assessed, the gap is named",
+    owner="ADR-062",
+    encode=_str_map,
+    decode=_str_map,
+)
+
 #: This build's optional extension facts (ADR-062 D19). Add a fact by
 #: declaring it as a module constant above and listing it here.
-EXTENSION_FACTS = ExtensionFactRegistry((CXX_CONCEPT_HEADER_SCAN, EXPORT_READ))
+EXTENSION_FACTS = ExtensionFactRegistry(
+    (CXX_CONCEPT_HEADER_SCAN, CXX_CONCEPT_CONSTRAINTS, EXPORT_READ)
+)

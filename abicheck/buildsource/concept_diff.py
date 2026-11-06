@@ -20,8 +20,8 @@ from collections.abc import Callable
 
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
+from ..model.concept_constraint import classify_constraint_change, conjunctive_atoms
 from .source_abi import SourceAbiSurface, SourceEntity
-from .source_extractors.concept_constraints import conjunctive_atoms
 
 
 def _concept_constraint(entity: SourceEntity) -> str:
@@ -71,36 +71,21 @@ def diff_concepts(
         new_constraint = _concept_constraint(new_entity)
         if not (old_constraint and new_constraint) or old_constraint == new_constraint:
             continue
-        old_atoms = conjunctive_atoms(old_entity.value)
-        new_atoms = conjunctive_atoms(new_entity.value)
-        if old_atoms is not None and new_atoms is not None:
-            if old_atoms == new_atoms:
-                continue
-            if old_atoms < new_atoms:
-                kind = ChangeKind.CONCEPT_TIGHTENED
-                description = (
-                    f"Concept constraint tightened: {name} "
-                    f"(+{len(new_atoms - old_atoms)} requirement(s), none removed)"
-                )
-            elif new_atoms < old_atoms:
-                kind = ChangeKind.CONCEPT_CONSTRAINT_CHANGED
-                description = (
-                    f"Concept constraint relaxed: {name} "
-                    f"(-{len(old_atoms - new_atoms)} requirement(s)); may change "
-                    "overload resolution, no compile failure proven"
-                )
-            else:
-                kind = ChangeKind.CONCEPT_CONSTRAINT_CHANGED
-                description = (
-                    f"Concept constraint changed: {name} (requirements both "
-                    "added and removed; strictness not decidable)"
-                )
-        else:
-            kind = ChangeKind.CONCEPT_CONSTRAINT_CHANGED
-            description = (
-                f"Concept constraint changed: {name} (no structured constraint "
-                "on one side; direction not decidable)"
-            )
+        decided = classify_constraint_change(
+            name,
+            conjunctive_atoms(old_entity.value),
+            conjunctive_atoms(new_entity.value),
+        )
+        if decided is None:
+            continue
+        kind, description = decided
+        # The shared rule emits exactly these two kinds; naming them here keeps
+        # them visible to the replay-twin and L4/L2 overlap AST scans.
+        if kind not in (
+            ChangeKind.CONCEPT_TIGHTENED,
+            ChangeKind.CONCEPT_CONSTRAINT_CHANGED,
+        ):
+            continue
         changes.append(
             Change(
                 kind=kind,

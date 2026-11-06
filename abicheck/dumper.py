@@ -842,8 +842,7 @@ def _dump_elf(
         elf=elf_meta,
         dwarf=dwarf_meta,
         dwarf_advanced=dwarf_adv,
-        # Reached only when headers were supplied and castxml ran (the no-header
-        # and DWARF-only branches return earlier): this surface is header-parsed.
+        # Only reached with headers parsed (no-header/DWARF-only return earlier).
         from_headers=True,
         ast_producer=ast_result.ast_producer,
         ast_toolchain=ast_result.ast_toolchain,
@@ -858,6 +857,7 @@ def _dump_elf(
         dwarf_layout_coherence=_dwarf_layout_coherence,
         dwarf_layout_coherence_mismatches=_dwarf_layout_coherence_mismatches,
         live_preprocessor_hidden=ast_result.preprocessor_hidden,
+        cxx_concept_constraints=ast_result.cxx_concept_constraints,
         **_ast_compile_provenance(
             list(ast_result.provenance_headers),
             gcc_options,
@@ -1022,9 +1022,9 @@ def _dump_macho(
             typedef_entity_ids=_ast.typedef_entity_ids,
             constant_entity_ids=_ast.constant_entity_ids,
             semantic_ir=_ast.semantic_ir,
+            cxx_concept_constraints=_ast.cxx_concept_constraints,
             macho=macho_meta,
-            # Reached only when headers were supplied and castxml ran (the no-header
-            # branch returns earlier): this surface is header-parsed.
+            # Only reached with headers parsed (no-header returns earlier).
             from_headers=True,
             ast_producer=_ast_producer,
             ast_toolchain=_parser_ast_toolchain(parser),
@@ -1160,9 +1160,9 @@ def _dump_pe(
             typedef_entity_ids=_ast.typedef_entity_ids,
             constant_entity_ids=_ast.constant_entity_ids,
             semantic_ir=_ast.semantic_ir,
+            cxx_concept_constraints=_ast.cxx_concept_constraints,
             pe=pe_meta,
-            # Reached only when headers were supplied and castxml ran (the no-header
-            # branch returns earlier): this surface is header-parsed.
+            # Only reached with headers parsed (no-header returns earlier).
             from_headers=True,
             ast_producer=_ast_producer,
             ast_toolchain=_parser_ast_toolchain(parser),

@@ -173,6 +173,15 @@ class FunctionConstraintIndex:
             for tag, expr in self._by_function.get(id(node), ())
         )
 
+    def serialize(self, node: Any, type_param_names: tuple[str, ...] = ()) -> str:
+        """The structural, rename-stable serialization of constraint *node*."""
+        return self._serialize(node, type_param_names)
+
+    def concept_name(self, specialization: dict[str, Any]) -> str:
+        """The qualified name of the concept an
+        ``ImplicitConceptSpecializationDecl`` names, or ``"?"``."""
+        return self._concept_name(specialization)
+
     def _concept_name(self, specialization: dict[str, Any]) -> str:
         name = self._concepts.get(_loc_key(specialization.get("loc")) or ())
         return name if isinstance(name, str) else "?"

@@ -358,7 +358,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | Kind | Verdict | Catalog | Field shapes | Integration |
 |---|---|---:|---:|---:|
 | `concept_constraint_changed` | RISK | 0 | 0 | 1 |
-| `concept_tightened` | API_BREAK | 1 | 0 | 1 |
+| `concept_tightened` | API_BREAK | 1 | 0 | 2 |
 | `identity_collision_detected` | RISK | 0 | 0 | 0 |
 | `inline_function_removed` | API_BREAK | 1 | 0 | 0 |
 | `odr_type_variant` | API_BREAK | 1 | 0 | 0 |
