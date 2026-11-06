@@ -239,8 +239,7 @@
       "func_added_elf_only",
       "func_removed_elf_only"
      ],
-     "reason": "UNEXPLAINED: build-source stops reporting the ELF-only symbol add/remove debug-headers reports",
-     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
+     "reason": "not an evidence loss: the build-source lane compiles the library as Release (CMake -O3, direct -O2) while debug-headers compiles Debug (-O0/-Og), so the two lanes compare different binaries; with identical binaries build-source reports these kinds too (verified 2026-11-06). At -O0 the out-of-line inline/template instances that read as ELF-only adds/removes are emitted; optimized, they are inlined away"
     }
    ],
    "abi_break": true,
@@ -380,7 +379,7 @@
       "inline_function_removed"
      ],
      "only_in": "castxml",
-     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
+     "reason": "TRACED backend limit: castxml emits every implicitly-declared special member (artificial=\"1\": implicit dtor, copy/move ctor and operator=), so a user-declared destructor or vptr reads as the implicit inline member lost/out-of-lined and the implicit move members removed; clang's JSON AST emits only the special members Sema declared (definitionData marks the rest needs_implicit), so it sees the user-declared member as func_added. definitionData cannot replace castxml's view: it does not say which implicit members are deleted (case30's const member keeps defaultCtor.exists)",
      "known_gap": "castxml and clang report different change-kind sets for the same case"
     }
    ],
@@ -581,15 +580,13 @@
       "symbol_leaked_from_dependency_changed",
       "symbol_version_required_added"
      ],
-     "reason": "UNEXPLAINED: build-source stops reporting a dependency/import/symbol-version fact of the unchanged binary",
-     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
+     "reason": "not an evidence loss: the build-source lane compiles the library as Release (CMake -O3, direct -O2) while debug-headers compiles Debug (-O0/-Og), so the two lanes compare different binaries; with identical binaries build-source reports these kinds too (verified 2026-11-06). The optimized build calls different libstdc++/libc entry points, so its imports, NEEDED entries and required symbol versions differ"
     },
     {
      "kinds": [
       "func_added_elf_only"
      ],
-     "reason": "UNEXPLAINED: build-source stops reporting the ELF-only symbol add/remove debug-headers reports",
-     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
+     "reason": "not an evidence loss: the build-source lane compiles the library as Release (CMake -O3, direct -O2) while debug-headers compiles Debug (-O0/-Og), so the two lanes compare different binaries; with identical binaries build-source reports these kinds too (verified 2026-11-06). At -O0 the out-of-line inline/template instances that read as ELF-only adds/removes are emitted; optimized, they are inlined away"
     }
    ],
    "abi_break": true,
@@ -640,8 +637,7 @@
       "needed_added",
       "symbol_version_required_added_compat"
      ],
-     "reason": "UNEXPLAINED: build-source stops reporting a dependency/import/symbol-version fact of the unchanged binary",
-     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
+     "reason": "not an evidence loss: the build-source lane compiles the library as Release (CMake -O3, direct -O2) while debug-headers compiles Debug (-O0/-Og), so the two lanes compare different binaries; with identical binaries build-source reports these kinds too (verified 2026-11-06). The optimized build calls different libstdc++/libc entry points, so its imports, NEEDED entries and required symbol versions differ"
     }
    ],
    "abi_break": true,
@@ -723,16 +719,6 @@
    "scope_public_headers": true
   },
   "case11_global_var_type": {
-   "frontend_kind_differences": [
-    {
-     "kinds": [
-      "var_alignment_changed"
-     ],
-     "only_in": "castxml",
-     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
-     "known_gap": "castxml and clang report different change-kind sets for the same case"
-    }
-   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,
@@ -947,7 +933,7 @@
       "struct_field_type_changed"
      ],
      "only_in": "clang",
-     "reason": "UNEXPLAINED: only clang reports it; root cause not yet traced",
+     "reason": "TRACED spelling limit: clang spells the field type scope-relative (`std::shared_ptr<detail::device_impl>`) while DWARF writes `shared_ptr<sycl::detail::device_impl>`, so the DWARF struct_field_type_changed does not dedup against clang's header finding; castxml's spelling matches DWARF's",
      "known_gap": "castxml and clang report different change-kind sets for the same case"
     }
    ],
@@ -1621,28 +1607,34 @@
    ]
   },
   "case15_noexcept_change": {
-   "frontend_kind_differences": [
-    {
-     "kinds": [
-      "func_noexcept_removed"
-     ],
-     "only_in": "clang",
-     "reason": "UNEXPLAINED: only clang reports it; root cause not yet traced",
-     "known_gap": "castxml and clang report different change-kind sets for the same case"
-    }
+   "expected_kinds_gaps": {
+    "castxml": [
+     {
+      "kinds": [
+       "func_noexcept_removed"
+      ],
+      "reason": "castxml 0.7's XML carries no exception specification for functions or methods (no noexcept attribute), so the castxml header lane cannot observe the noexcept removal; the clang header backend reports func_noexcept_removed.",
+      "known_gap": "castxml output carries no `noexcept` exception specification"
+     }
+    ]
+   },
+   "allowed_kinds": [
+    "imported_symbol_added",
+    "runtime_floor_raised",
+    "symbol_version_required_added"
    ],
    "abi_break": false,
    "api_break": true,
    "bad_practice": false,
    "category": "risk",
    "expected": "COMPATIBLE_WITH_RISK",
-   "min_evidence": "L0",
-   "note": "noexcept change itself is COMPATIBLE; GLIBCXX version requirement is deployment risk",
+   "min_evidence": "L2",
+   "note": "Subject is the noexcept removal on Buffer::reset() (func_noexcept_removed, a RISK kind). The GLIBCXX runtime-floor / symbol-version / import findings come from v2's throw path and depend on the toolchain, so they are allowed, not required.",
    "platforms": [
     "linux"
    ],
    "expected_kinds": [
-    "runtime_floor_raised"
+    "func_noexcept_removed"
    ]
   },
   "case160_public_api_internal_dep_added": {
@@ -1935,7 +1927,7 @@
       "public_surface_shrank"
      ],
      "only_in": "castxml",
-     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
+     "reason": "TRACED backend limit: castxml emits every implicitly-declared special member (artificial=\"1\": implicit dtor, copy/move ctor and operator=), so a user-declared destructor or vptr reads as the implicit inline member lost/out-of-lined and the implicit move members removed; clang's JSON AST emits only the special members Sema declared (definitionData marks the rest needs_implicit), so it sees the user-declared member as func_added. definitionData cannot replace castxml's view: it does not say which implicit members are deleted (case30's const member keeps defaultCtor.exists)",
      "known_gap": "castxml and clang report different change-kind sets for the same case"
     },
     {
@@ -1945,7 +1937,7 @@
       "standard_layout_lost"
      ],
      "only_in": "clang",
-     "reason": "UNEXPLAINED: only clang reports it; root cause not yet traced",
+     "reason": "TRACED backend limit: castxml emits every implicitly-declared special member (artificial=\"1\": implicit dtor, copy/move ctor and operator=), so a user-declared destructor or vptr reads as the implicit inline member lost/out-of-lined and the implicit move members removed; clang's JSON AST emits only the special members Sema declared (definitionData marks the rest needs_implicit), so it sees the user-declared member as func_added. definitionData cannot replace castxml's view: it does not say which implicit members are deleted (case30's const member keeps defaultCtor.exists)",
      "known_gap": "castxml and clang report different change-kind sets for the same case"
     }
    ],
@@ -2513,31 +2505,6 @@
    ]
   },
   "case26_union_field_added": {
-   "frontend_kind_differences": [
-    {
-     "kinds": [
-      "type_alignment_changed"
-     ],
-     "only_in": "castxml",
-     "modes": [
-      "build-source"
-     ],
-     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
-     "known_gap": "castxml and clang report different change-kind sets for the same case"
-    }
-   ],
-   "lane_kind_exceptions": [
-    {
-     "kinds": [
-      "type_alignment_changed"
-     ],
-     "reason": "UNEXPLAINED: on clang, build-source stops reporting the record alignment change debug-headers and castxml report",
-     "frontends": [
-      "clang"
-     ],
-     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
-    }
-   ],
    "abi_break": true,
    "api_break": false,
    "bad_practice": false,
@@ -2603,7 +2570,7 @@
      "modes": [
       "debug-headers"
      ],
-     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
+     "reason": "TRACED backend limit: castxml emits every implicitly-declared special member (artificial=\"1\": implicit dtor, copy/move ctor and operator=), so a user-declared destructor or vptr reads as the implicit inline member lost/out-of-lined and the implicit move members removed; clang's JSON AST emits only the special members Sema declared (definitionData marks the rest needs_implicit), so it sees the user-declared member as func_added. definitionData cannot replace castxml's view: it does not say which implicit members are deleted (case30's const member keeps defaultCtor.exists)",
      "known_gap": "castxml and clang report different change-kind sets for the same case"
     },
     {
@@ -2621,11 +2588,10 @@
       "inline_function_removed",
       "public_surface_shrank"
      ],
-     "reason": "UNEXPLAINED: build-source stops reporting an inline-member removal / surface shrink castxml reports at debug-headers",
+     "reason": "refinement, not a loss: these are C++ implicit special members (Context()/operator=/~Context, __builtin_memcpy) castxml synthesizes when debug-headers parses the C header as C++; build-source's --build-info compile command (-std=gnu11) parses it as C, where those members do not exist",
      "frontends": [
       "castxml"
-     ],
-     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
+     ]
     }
    ],
    "abi_break": true,
@@ -2668,7 +2634,7 @@
      "modes": [
       "debug-headers"
      ],
-     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
+     "reason": "TRACED backend limit: castxml emits every implicitly-declared special member (artificial=\"1\": implicit dtor, copy/move ctor and operator=), so a user-declared destructor or vptr reads as the implicit inline member lost/out-of-lined and the implicit move members removed; clang's JSON AST emits only the special members Sema declared (definitionData marks the rest needs_implicit), so it sees the user-declared member as func_added. definitionData cannot replace castxml's view: it does not say which implicit members are deleted (case30's const member keeps defaultCtor.exists)",
      "known_gap": "castxml and clang report different change-kind sets for the same case"
     }
    ],
@@ -2678,11 +2644,10 @@
       "inline_function_removed",
       "public_surface_shrank"
      ],
-     "reason": "UNEXPLAINED: build-source stops reporting an inline-member removal / surface shrink castxml reports at debug-headers",
+     "reason": "refinement, not a loss: these are C++ implicit special members (Context()/operator=/~Context, __builtin_memcpy) castxml synthesizes when debug-headers parses the C header as C++; build-source's --build-info compile command (-std=gnu11) parses it as C, where those members do not exist",
      "frontends": [
       "castxml"
-     ],
-     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
+     ]
     }
    ],
    "abi_break": false,
@@ -2792,30 +2757,7 @@
    ]
   },
   "case36_anon_struct": {
-   "frontend_kind_differences": [
-    {
-     "kinds": [
-      "type_alignment_changed"
-     ],
-     "only_in": "castxml",
-     "modes": [
-      "build-source"
-     ],
-     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
-     "known_gap": "castxml and clang report different change-kind sets for the same case"
-    }
-   ],
    "lane_kind_exceptions": [
-    {
-     "kinds": [
-      "type_alignment_changed"
-     ],
-     "reason": "UNEXPLAINED: on clang, build-source stops reporting the record alignment change debug-headers and castxml report",
-     "frontends": [
-      "clang"
-     ],
-     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
-    },
     {
      "kinds": [
       "declaration_moved"
@@ -2881,7 +2823,7 @@
       "public_surface_shrank"
      ],
      "only_in": "castxml",
-     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
+     "reason": "TRACED backend limit: castxml 0.7 drops a `= delete`d member from its XML entirely, so the copy constructor reads as removed; clang records it with explicitlyDeleted and reports func_deleted (what the case describes)",
      "known_gap": "castxml and clang report different change-kind sets for the same case"
     },
     {
@@ -2889,7 +2831,7 @@
       "func_deleted"
      ],
      "only_in": "clang",
-     "reason": "UNEXPLAINED: only clang reports it; root cause not yet traced",
+     "reason": "TRACED backend limit: castxml 0.7 drops a `= delete`d member from its XML entirely, so the copy constructor reads as removed; clang records it with explicitlyDeleted and reports func_deleted (what the case describes)",
      "known_gap": "castxml and clang report different change-kind sets for the same case"
     }
    ],
@@ -2909,16 +2851,6 @@
    ]
   },
   "case39_var_const": {
-   "frontend_kind_differences": [
-    {
-     "kinds": [
-      "exported_object_alignment_reduced"
-     ],
-     "only_in": "clang",
-     "reason": "UNEXPLAINED: only clang reports it; root cause not yet traced",
-     "known_gap": "castxml and clang report different change-kind sets for the same case"
-    }
-   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,
@@ -2936,39 +2868,6 @@
    ]
   },
   "case40_field_layout": {
-   "frontend_kind_differences": [
-    {
-     "kinds": [
-      "type_alignment_changed"
-     ],
-     "only_in": "castxml",
-     "modes": [
-      "build-source"
-     ],
-     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
-     "known_gap": "castxml and clang report different change-kind sets for the same case"
-    },
-    {
-     "kinds": [
-      "struct_field_type_changed"
-     ],
-     "only_in": "clang",
-     "reason": "UNEXPLAINED: only clang reports it; root cause not yet traced",
-     "known_gap": "castxml and clang report different change-kind sets for the same case"
-    }
-   ],
-   "lane_kind_exceptions": [
-    {
-     "kinds": [
-      "type_alignment_changed"
-     ],
-     "reason": "UNEXPLAINED: on clang, build-source stops reporting the record alignment change debug-headers and castxml report",
-     "frontends": [
-      "clang"
-     ],
-     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
-    }
-   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,
@@ -3082,31 +2981,6 @@
    ]
   },
   "case45_multi_dim_array_change": {
-   "frontend_kind_differences": [
-    {
-     "kinds": [
-      "type_alignment_changed"
-     ],
-     "only_in": "castxml",
-     "modes": [
-      "build-source"
-     ],
-     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
-     "known_gap": "castxml and clang report different change-kind sets for the same case"
-    }
-   ],
-   "lane_kind_exceptions": [
-    {
-     "kinds": [
-      "type_alignment_changed"
-     ],
-     "reason": "UNEXPLAINED: on clang, build-source stops reporting the record alignment change debug-headers and castxml report",
-     "frontends": [
-      "clang"
-     ],
-     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
-    }
-   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,
@@ -3167,31 +3041,6 @@
    ]
   },
   "case48_leaf_struct_through_pointer": {
-   "frontend_kind_differences": [
-    {
-     "kinds": [
-      "type_alignment_changed"
-     ],
-     "only_in": "castxml",
-     "modes": [
-      "build-source"
-     ],
-     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
-     "known_gap": "castxml and clang report different change-kind sets for the same case"
-    }
-   ],
-   "lane_kind_exceptions": [
-    {
-     "kinds": [
-      "type_alignment_changed"
-     ],
-     "reason": "UNEXPLAINED: on clang, build-source stops reporting the record alignment change debug-headers and castxml report",
-     "frontends": [
-      "clang"
-     ],
-     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
-    }
-   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,
@@ -3336,31 +3185,6 @@
    ]
   },
   "case56_struct_packing_changed": {
-   "frontend_kind_differences": [
-    {
-     "kinds": [
-      "type_alignment_changed"
-     ],
-     "only_in": "castxml",
-     "modes": [
-      "build-source"
-     ],
-     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
-     "known_gap": "castxml and clang report different change-kind sets for the same case"
-    }
-   ],
-   "lane_kind_exceptions": [
-    {
-     "kinds": [
-      "type_alignment_changed"
-     ],
-     "reason": "UNEXPLAINED: on clang, build-source stops reporting the record alignment change debug-headers and castxml report",
-     "frontends": [
-      "clang"
-     ],
-     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
-    }
-   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,
@@ -3381,31 +3205,6 @@
    ]
   },
   "case57_enum_underlying_size_changed": {
-   "frontend_kind_differences": [
-    {
-     "kinds": [
-      "type_alignment_changed"
-     ],
-     "only_in": "castxml",
-     "modes": [
-      "build-source"
-     ],
-     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
-     "known_gap": "castxml and clang report different change-kind sets for the same case"
-    }
-   ],
-   "lane_kind_exceptions": [
-    {
-     "kinds": [
-      "type_alignment_changed"
-     ],
-     "reason": "UNEXPLAINED: on clang, build-source stops reporting the record alignment change debug-headers and castxml report",
-     "frontends": [
-      "clang"
-     ],
-     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
-    }
-   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,
@@ -3603,7 +3402,7 @@
       "public_surface_shrank"
      ],
      "only_in": "castxml",
-     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
+     "reason": "TRACED backend limit: castxml emits every implicitly-declared special member (artificial=\"1\": implicit dtor, copy/move ctor and operator=), so a user-declared destructor or vptr reads as the implicit inline member lost/out-of-lined and the implicit move members removed; clang's JSON AST emits only the special members Sema declared (definitionData marks the rest needs_implicit), so it sees the user-declared member as func_added. definitionData cannot replace castxml's view: it does not say which implicit members are deleted (case30's const member keeps defaultCtor.exists)",
      "known_gap": "castxml and clang report different change-kind sets for the same case"
     },
     {
@@ -3613,7 +3412,7 @@
       "standard_layout_lost"
      ],
      "only_in": "clang",
-     "reason": "UNEXPLAINED: only clang reports it; root cause not yet traced",
+     "reason": "TRACED backend limit: castxml emits every implicitly-declared special member (artificial=\"1\": implicit dtor, copy/move ctor and operator=), so a user-declared destructor or vptr reads as the implicit inline member lost/out-of-lined and the implicit move members removed; clang's JSON AST emits only the special members Sema declared (definitionData marks the rest needs_implicit), so it sees the user-declared member as func_added. definitionData cannot replace castxml's view: it does not say which implicit members are deleted (case30's const member keeps defaultCtor.exists)",
      "known_gap": "castxml and clang report different change-kind sets for the same case"
     }
    ],
@@ -3641,7 +3440,7 @@
       "public_surface_shrank"
      ],
      "only_in": "castxml",
-     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
+     "reason": "TRACED backend limit: castxml emits every implicitly-declared special member (artificial=\"1\": implicit dtor, copy/move ctor and operator=), so a user-declared destructor or vptr reads as the implicit inline member lost/out-of-lined and the implicit move members removed; clang's JSON AST emits only the special members Sema declared (definitionData marks the rest needs_implicit), so it sees the user-declared member as func_added. definitionData cannot replace castxml's view: it does not say which implicit members are deleted (case30's const member keeps defaultCtor.exists)",
      "known_gap": "castxml and clang report different change-kind sets for the same case"
     },
     {
@@ -3650,7 +3449,7 @@
       "public_surface_grew"
      ],
      "only_in": "clang",
-     "reason": "UNEXPLAINED: only clang reports it; root cause not yet traced",
+     "reason": "TRACED backend limit: castxml emits every implicitly-declared special member (artificial=\"1\": implicit dtor, copy/move ctor and operator=), so a user-declared destructor or vptr reads as the implicit inline member lost/out-of-lined and the implicit move members removed; clang's JSON AST emits only the special members Sema declared (definitionData marks the rest needs_implicit), so it sees the user-declared member as func_added. definitionData cannot replace castxml's view: it does not say which implicit members are deleted (case30's const member keeps defaultCtor.exists)",
      "known_gap": "castxml and clang report different change-kind sets for the same case"
     }
    ],
@@ -3674,31 +3473,6 @@
    ]
   },
   "case70_flexible_array_member_changed": {
-   "frontend_kind_differences": [
-    {
-     "kinds": [
-      "type_alignment_changed"
-     ],
-     "only_in": "castxml",
-     "modes": [
-      "build-source"
-     ],
-     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
-     "known_gap": "castxml and clang report different change-kind sets for the same case"
-    }
-   ],
-   "lane_kind_exceptions": [
-    {
-     "kinds": [
-      "type_alignment_changed"
-     ],
-     "reason": "UNEXPLAINED: on clang, build-source stops reporting the record alignment change debug-headers and castxml report",
-     "frontends": [
-      "clang"
-     ],
-     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
-    }
-   ],
    "abi_break": true,
    "api_break": true,
    "bad_practice": false,
@@ -3798,11 +3572,10 @@
    "frontend_kind_differences": [
     {
      "kinds": [
-      "param_pointer_level_changed",
       "return_pointer_level_changed"
      ],
      "only_in": "castxml",
-     "reason": "UNEXPLAINED: only castxml reports it; root cause not yet traced",
+     "reason": "TRACED backend limit: castxml counts a return type's pointer depth through the typedef (type graph); clang's FunctionDecl type carries no desugaredQualType for its return (`handle_t (const char *)`), so the clang backend cannot see the typedef'd pointer without a typedef table in function parsing. Parameters were fixed (generation 43)",
      "known_gap": "castxml and clang report different change-kind sets for the same case"
     }
    ],
@@ -3985,8 +3758,7 @@
      "kinds": [
       "func_removed_elf_only"
      ],
-     "reason": "UNEXPLAINED: build-source stops reporting the ELF-only symbol add/remove debug-headers reports",
-     "known_gap": "Adding build/source evidence drops some debug-headers change kinds"
+     "reason": "not an evidence loss: the build-source lane compiles the library as Release (CMake -O3, direct -O2) while debug-headers compiles Debug (-O0/-Og), so the two lanes compare different binaries; with identical binaries build-source reports these kinds too (verified 2026-11-06). At -O0 the out-of-line inline/template instances that read as ELF-only adds/removes are emitted; optimized, they are inlined away"
     }
    ],
    "abi_break": true,

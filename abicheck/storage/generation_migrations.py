@@ -454,6 +454,16 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "type or name spelling changes, so no rewrite is needed -- an older "
         "snapshot reads as not modelled and keeps its concept gap note"
     ),
+    43: GenerationSpellingChange(
+        "clang runs record Variable.alignment_bits for a builtin-typed variable "
+        "(cv-qualified or not) as the compiler-probed natural alignment, as "
+        "castxml's computed align already did (extract/builtin_abi."
+        "natural_alignment_bits), and a parameter's pointer_depth counted "
+        "through a typedef'd pointer as castxml does; no type or name spelling "
+        "changes, so no "
+        "rewrite is needed -- an older clang snapshot reads the alignment as "
+        "not captured"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

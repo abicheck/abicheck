@@ -318,3 +318,28 @@ def builtin_type_fact(
     else:
         fact = _scalar(text, abi)
     return None if fact is None else Fact.present(fact)
+
+
+#: A top-level ``const``/``volatile``: it changes neither size nor alignment.
+_TOP_LEVEL_CV = re.compile(r"\b(?:const|volatile)\b")
+
+
+def natural_alignment_bits(spelling: str, abi: BuiltinAbi | None) -> int | None:
+    """The compiler-probed natural alignment (bits) of an object whose
+    desugared type is *spelling*, looking through a top-level cv-qualifier.
+
+    What castxml's computed ``align`` records for a builtin-typed variable,
+    for the clang backend, whose JSON AST has no computed alignment: without
+    it ``extern int v`` -> ``extern long v`` (case11) and a ``const int``
+    global (case39) had a declared alignment under castxml only. The cv strip
+    is local to this read: :func:`builtin_type_fact` keeps refusing a
+    cv-qualified spelling, so a retype's fact comparison is unchanged.
+    A compound spelling (pointer, reference, array, template) reads ``None``.
+    """
+    text = spelling.strip()
+    if any(ch in text for ch in "*&[(<"):
+        return None
+    fact = builtin_type_fact(" ".join(_TOP_LEVEL_CV.sub(" ", text).split()), abi)
+    if fact is None or fact.value is None:
+        return None
+    return fact.value.align * 8

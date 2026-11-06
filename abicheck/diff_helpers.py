@@ -54,6 +54,7 @@ from .model.change_catalog.kinds import ChangeKind
 from .model.change_catalog.registry import TEMPLATE_VOCAB as TEMPLATE_VOCAB
 from .model.execution_cache import memoized
 from .model.identity import EntityId
+from .model.int_spelling import canonical_int_runs
 from .model.qualified_name_split import iter_top_level_chars
 
 K = TypeVar("K")
@@ -488,7 +489,12 @@ def _normalize_type_spelling(name: str, *, strip_indirection: bool) -> str:
     if anon is not None:
         kind = anon.group(1) or lead_kind
         return f"<anonymous {kind.lower()}>" if kind else "<anonymous>"
-    return s
+    # Fold integer specifier spellings (``long int`` -> ``long``): DWARF and
+    # castxml write GCC's ``long int``/``long unsigned int`` while the clang
+    # header backend writes ``long``/``unsigned long`` for the same type, so a
+    # DWARF field retype never matched clang's header finding and stayed as a
+    # duplicate ``struct_field_type_changed`` (catalog case40 frontend parity).
+    return canonical_int_runs(s)
 
 
 # DWARF-tier kinds whose old_value/new_value are byte-based (DW_AT_byte_size/

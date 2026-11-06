@@ -318,6 +318,7 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "var_type_changed": "L1",
     "func_cv_changed": "L1",
     "func_static_changed": "L1",
+    "func_noexcept_removed": "L2",
     "func_params_changed": "L1",
     # Needs the never-exported pattern from a header AST (direct Clang) or
     # the L4 replay; castxml does not emit uninstantiated templates.

@@ -16,18 +16,18 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 ## Headline
 
 - Total kinds: **426**
-- Kinds with at least one real source: **180**
-- Kinds per source: catalog 159, field_shapes 9, integration 59
+- Kinds with at least one real source: **181**
+- Kinds per source: catalog 160, field_shapes 9, integration 59
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
 | L0 | 129 | 73 |
 | L1 | 62 | 7 |
-| L2 | 73 | 42 |
+| L2 | 74 | 42 |
 | L3 | 15 | 5 |
 | L4 | 10 | 2 |
 | L5 | 15 | 5 |
-| unmapped | 122 | 112 |
+| unmapped | 121 | 111 |
 
 ## Most important zero-source kinds (top 20)
 
@@ -144,7 +144,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `rpath_type_changed` | RISK | 0 | 0 | 0 |
 | `rtti_inheritance_changed` | BREAKING | 0 | 0 | 1 |
 | `runpath_changed` | COMPATIBLE | 2 | 0 | 0 |
-| `runtime_floor_raised` | RISK | 2 | 0 | 0 |
+| `runtime_floor_raised` | RISK | 1 | 0 | 0 |
 | `runtime_symbol_provider_changed` | RISK | 0 | 0 | 0 |
 | `runtime_weak_resolution_changed` | RISK | 0 | 0 | 0 |
 | `soname_changed` | RISK | 1 | 0 | 1 |
@@ -278,6 +278,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `func_deprecated_added` | COMPATIBLE | 1 | 0 | 0 |
 | `func_deprecated_removed` | COMPATIBLE | 0 | 0 | 0 |
 | `func_exception_spec_changed` | RISK | 0 | 0 | 0 |
+| `func_noexcept_removed` | RISK | 1 | 0 | 0 |
 | `func_override_specifier_added` | COMPATIBLE | 0 | 0 | 0 |
 | `func_override_specifier_removed` | RISK | 0 | 0 | 0 |
 | `func_ref_qual_changed` | BREAKING | 1 | 0 | 0 |
@@ -428,7 +429,6 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `func_likely_renamed` | BREAKING | 0 | 0 | 0 |
 | `func_lost_inline` | COMPATIBLE | 0 | 0 | 0 |
 | `func_noexcept_added` | COMPATIBLE | 0 | 0 | 0 |
-| `func_noexcept_removed` | RISK | 0 | 0 | 0 |
 | `generated_file_dependency_unstable` | RISK | 0 | 0 | 0 |
 | `generated_header_changed` | RISK | 0 | 0 | 0 |
 | `generated_header_reaches_public_api` | RISK | 0 | 0 | 0 |

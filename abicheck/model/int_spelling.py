@@ -22,6 +22,8 @@ from __future__ import annotations
 
 import re
 
+from abicheck.model.execution_cache import memoized
+
 # The words that make up a C integer built-in's declaration specifiers. A
 # spelling composed *only* of these can be reordered freely by the language
 # (``unsigned long int`` == ``long unsigned int`` == ``unsigned long``), and
@@ -63,6 +65,7 @@ def canonical_int_spelling(t: str) -> str:
     return "unsigned int" if unsigned else "int"
 
 
+@memoized(maxsize=4096)
 def canonical_int_runs(text: str) -> str:
     """Apply :func:`canonical_int_spelling` to every maximal run of integer
     specifier words inside a larger spelling (``long unsigned int const *``,

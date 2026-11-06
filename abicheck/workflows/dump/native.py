@@ -339,7 +339,6 @@ def _extract_and_finish(
     path = request.path
     _headers = request.headers
     _includes = request.includes
-    lang = request.lang
     compile = request.compile
     public_headers = request.public_headers
     public_header_dirs = request.public_header_dirs
@@ -412,8 +411,11 @@ def _extract_and_finish(
                 _prefetched_graph.future if _prefetched_graph is not None else None
             ),
         )
+        # The probe parses in the main pass's language mode (auto-detected
+        # unless explicit), never the raw Click default: a forced C++ probe
+        # of a C header rejects a build-info C `-std=` and drops the layout.
         snap = attach_clang_layout(
-            snap, _headers, _includes, lang=lang, compile=compile
+            snap, _headers, _includes, lang=_header_graph_lang, compile=compile
         )
         return closure_identity.renumber_anonymous_closure_identities(snap)
     # PE and Mach-O: see the ELF branch's comment above -- the same
@@ -429,7 +431,6 @@ def _extract_and_finish(
         path=path,
         headers=_headers,
         includes=_includes,
-        lang=lang,
         header_graph_lang=_header_graph_lang,
         compile=compile,
         public_headers=public_headers,
@@ -445,7 +446,6 @@ def _finish_native_snapshot(
     path: Path,
     headers: list[Path],
     includes: list[Path],
-    lang: str,
     header_graph_lang: str | None,
     compile: CompileContext | None,
     public_headers: list[Path] | None,
@@ -503,7 +503,9 @@ def _finish_native_snapshot(
         public_header_dirs,
         include_search_dirs=_public_dirs,
     )
-    snap = attach_clang_layout(snap, headers, includes, lang=lang, compile=compile)
+    snap = attach_clang_layout(
+        snap, headers, includes, lang=header_graph_lang, compile=compile
+    )
     return closure_identity.renumber_anonymous_closure_identities(snap)
 
 

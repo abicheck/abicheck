@@ -108,6 +108,7 @@ COVERAGE: dict[str, str] = {
     "abicheck.policy.selectors::memoized::_ns_forms": "UNCOVERED: pure function of a symbol name (demangle + template-argument strip); no cell runs a namespace suppression rule. Its equivalence is pinned by tests/test_disposition_hot_path_equivalence.py",
     "abicheck.model.semantic_ir_function_signature::memoized::_shared_present": B,
     "abicheck.storage.code_identity::memoized::abicheck_modules_fingerprint": H,
+    "abicheck.model.int_spelling::memoized::canonical_int_runs": "UNCOVERED: pure string-to-string canonicalization of integer specifier runs; no reference-mode bypass cell applies. Its output is pinned by tests/test_frontend_kind_parity_normalization.py (same-type groups equal, distinct types unequal, against hand-written tables)",
     "abicheck.model.graph_identity::memoized::closure_discriminator_free_identity": "UNCOVERED: pure string memo over closure spellings; no reference-mode bypass cell applies. Its behaviour is pinned by tests/test_closure_respelling.py property tests instead",
     "abicheck.buildsource.header_compile_context::memoized::_include_pattern": _NEEDS_L5,
     "abicheck.buildsource.source_extractors.castxml::memoized::_castxml_tool_version": "UNCOVERED: L4 castxml source extractor tool probe; build-source path only",

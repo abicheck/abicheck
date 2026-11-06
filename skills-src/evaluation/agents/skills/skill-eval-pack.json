@@ -727,12 +727,12 @@
       ],
       "architectures": [],
       "category": "A",
-      "digest": "sha256:7669f1840ceeebc2e98e34fb38097f155399eeb4c5f6cfb687c7918d48116e56",
+      "digest": "sha256:88ab04111cef71f2ff9c2d897fea66502d54c4fcf65040f074e5c2eca38be55c",
       "expected": {
         "kinds": [
-          "runtime_floor_raised"
+          "func_noexcept_removed"
         ],
-        "min_evidence": "L0",
+        "min_evidence": "L2",
         "resolved_from": "catalog/ground_truth.json",
         "verdict": "COMPATIBLE_WITH_RISK"
       },
