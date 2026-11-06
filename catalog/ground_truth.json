@@ -262,6 +262,17 @@
    "frontend_kind_differences": [
     {
      "kinds": [
+      "concept_tightened"
+     ],
+     "only_in": "clang",
+     "modes": [
+      "debug-headers"
+     ],
+     "reason": "castxml emits no element for a concept, so its header lane cannot model the constraint; build-source reports concept_tightened on both frontends through L4 replay",
+     "known_gap": "Catalog known-gap rows read `NO_CHANGE` at debug-headers depth: case105 on castxml (concept) and case98 (`-std` floor) (2026-11-05)"
+    },
+    {
+     "kinds": [
       "exported_not_public"
      ],
      "only_in": "clang",
