@@ -33,12 +33,11 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ...model import AbiSnapshot
 
-from ._unobserved_finding import Side, UnobservedFinding, gap_and_notes
+from ._unobserved_finding import Side, UnobservedFinding
 
 __all__ = [
     "CONCEPT_GAP_DIMENSION",
     "concept_constraint_findings",
-    "concept_constraint_gap",
 ]
 
 CONCEPT_GAP_DIMENSION = (
@@ -72,10 +71,3 @@ def concept_constraint_findings(
         and snap.cxx_concept_header_scan
         and getattr(snap, "cxx_concept_constraints", None) is None
     ]
-
-
-def concept_constraint_gap(
-    old: AbiSnapshot | None, new: AbiSnapshot
-) -> tuple[bool, list[str]]:
-    """``(gap, notes)`` view of :func:`concept_constraint_findings`."""
-    return gap_and_notes(concept_constraint_findings(old, new))

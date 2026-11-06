@@ -29,8 +29,8 @@ from abicheck.model.elf_facts import ElfMetadata
 from abicheck.model.export_read import ExportReadState
 from abicheck.policy.analysis_assurance import compute_analysis_assurance
 from abicheck.policy.analysis_assurance._unobserved import (
+    UNOBSERVED_DIMENSIONS,
     collect_unobserved,
-    unobserved_dimensions,
 )
 from abicheck.workflows.analysis_assurance_attach import attach_analysis_assurance
 
@@ -57,10 +57,10 @@ NON_DIMENSION_MODULES = {
 
 def test_every_assurance_module_is_registered_or_classified() -> None:
     modules = {m.name for m in pkgutil.iter_modules(aa_pkg.__path__)}
-    registered = {p.module.rsplit(".", 1)[1] for p in unobserved_dimensions()}
+    registered = {p.module.rsplit(".", 1)[1] for p in UNOBSERVED_DIMENSIONS}
     unclassified = modules - registered - NON_DIMENSION_MODULES
     assert not unclassified, (
-        f"{sorted(unclassified)}: register it in _unobserved.unobserved_dimensions() "
+        f"{sorted(unclassified)}: register it in _unobserved.UNOBSERVED_DIMENSIONS "
         "or classify it in NON_DIMENSION_MODULES with a reason"
     )
     assert not registered & NON_DIMENSION_MODULES
@@ -69,7 +69,7 @@ def test_every_assurance_module_is_registered_or_classified() -> None:
 
 
 def test_dimension_ids_are_unique() -> None:
-    ids = [p.dimension for p in unobserved_dimensions()]
+    ids = [p.dimension for p in UNOBSERVED_DIMENSIONS]
     assert len(ids) == len(set(ids))
 
 
@@ -98,7 +98,7 @@ TRIGGERS: dict[str, Callable[[AbiSnapshot], AbiSnapshot]] = {
 
 
 def test_every_registered_provider_has_a_trigger() -> None:
-    registered = {p.module.rsplit(".", 1)[1] for p in unobserved_dimensions()}
+    registered = {p.module.rsplit(".", 1)[1] for p in UNOBSERVED_DIMENSIONS}
     assert registered == set(TRIGGERS)
 
 
@@ -129,7 +129,7 @@ def test_a_triggered_dimension_never_reads_complete(
     findings = collect_unobserved(old, new)
     triggered = {
         p.module.rsplit(".", 1)[1]
-        for p in unobserved_dimensions()
+        for p in UNOBSERVED_DIMENSIONS
         for f in findings
         if f.dimension == p.dimension and f.lowers_status
     }
@@ -164,7 +164,7 @@ def test_coverage_warnings_come_from_coverage_providers_only() -> None:
     result = compare(old, new)
     attach_analysis_assurance(result, old, new)
     attach_analysis_assurance(result, old, new)  # idempotent
-    coverage = {p.dimension for p in unobserved_dimensions() if p.coverage_warning}
+    coverage = {p.dimension for p in UNOBSERVED_DIMENSIONS if p.coverage_warning}
     expected = [
         f.reason for f in collect_unobserved(old, new) if f.dimension in coverage
     ]

@@ -36,15 +36,14 @@ from ...model.availability import FactStatus
 if TYPE_CHECKING:
     from ...model import AbiSnapshot
 
-from ._unobserved_finding import Side, UnobservedFinding, gap_and_notes
+from ._unobserved_finding import Side, UnobservedFinding
 
 __all__ = [
     "TEMPLATE_DEFAULTS_DIMENSION",
     "template_default_findings",
-    "template_default_gap",
 ]
 
-TEMPLATE_DEFAULTS_DIMENSION = "template parameter defaults (ADR-085 D3)"
+TEMPLATE_DEFAULTS_DIMENSION = "template parameter defaults"
 
 
 def _unrecorded_pattern_count(snap: AbiSnapshot) -> int:
@@ -180,10 +179,3 @@ def template_default_findings(
 
 def _as_findings(label: Side, notes: list[str]) -> list[UnobservedFinding]:
     return [UnobservedFinding(TEMPLATE_DEFAULTS_DIMENSION, label, n) for n in notes]
-
-
-def template_default_gap(
-    old: AbiSnapshot | None, new: AbiSnapshot
-) -> tuple[bool, list[str]]:
-    """``(gap, notes)`` view of :func:`template_default_findings`."""
-    return gap_and_notes(template_default_findings(old, new))

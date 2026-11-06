@@ -37,11 +37,9 @@ from abicheck.extract.headers.concept_scan import (
     header_declares_concept_or_requires,
 )
 from abicheck.model import AbiSnapshot
-from abicheck.policy.analysis_assurance._concepts import (
-    CONCEPT_GAP_DIMENSION,
-    concept_constraint_gap,
-)
+from abicheck.policy.analysis_assurance._concepts import CONCEPT_GAP_DIMENSION
 from abicheck.policy.analysis_assurance._scope_fallback import SCOPE_FALLBACK_DIMENSION
+from tests._assurance_gap_views import concept_constraint_gap
 
 # (id, header text, declares a concept or requires-clause)
 _HEADERS = [

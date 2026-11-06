@@ -28,7 +28,7 @@ from abicheck.extract.headers.clang.concept_constraints import (
     collect_cxx_concept_constraints,
 )
 from abicheck.model import AbiSnapshot
-from abicheck.policy.analysis_assurance._concepts import concept_constraint_gap
+from tests._assurance_gap_views import concept_constraint_gap
 
 _ADDABLE = "template <class T> concept Addable = requires(T a, T b) { a + b; };\n"
 _ADDABLE_DC = (

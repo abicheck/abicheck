@@ -50,7 +50,7 @@ _GAP_STATES = frozenset({ExportReadState.PARTIAL, ExportReadState.FAILED})
 #: rollup already built out of ``AnalysisAssurance.notes`` instead of
 #: rebuilding them.
 EXPORT_READ_NOTE_PREFIX = "export table not completely read ("
-EXPORT_READ_DIMENSION = "export table completeness (ADR-079)"
+EXPORT_READ_DIMENSION = "export table completeness"
 
 
 def recorded_export_reads(snap: AbiSnapshot | None) -> dict[str, str]:

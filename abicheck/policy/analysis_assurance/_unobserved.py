@@ -23,7 +23,7 @@ any status-lowering finding keeps the rollup from reading ``complete``.
 
 Each dimension lives in its own private module and exposes a
 ``*_findings(old, new)`` function returning :class:`UnobservedFinding`
-records. :func:`unobserved_dimensions` returns the declared registry
+records. ``UNOBSERVED_DIMENSIONS`` is the declared registry
 (gap modules build findings from the leaf ``_unobserved_finding``):
 ``_compute.compute_analysis_assurance`` iterates it for both the notes and the
 status rollup, and ``workflows/analysis_assurance_attach`` iterates its
@@ -43,7 +43,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from functools import cache
 from typing import TYPE_CHECKING
 
 from ._concepts import CONCEPT_GAP_DIMENSION, concept_constraint_findings
@@ -67,10 +66,11 @@ if TYPE_CHECKING:
     from ...model import AbiSnapshot
 
 __all__ = [
+    "UNOBSERVED_DIMENSIONS",
+    "COVERAGE_WARNING_DIMENSIONS",
     "UnobservedDimension",
     "UnobservedFinding",
     "collect_unobserved",
-    "unobserved_dimensions",
 ]
 
 FindingsFn = Callable[["AbiSnapshot | None", "AbiSnapshot"], list[UnobservedFinding]]
@@ -90,44 +90,47 @@ class UnobservedDimension:
     coverage_warning: bool = False
 
 
-@cache
-def unobserved_dimensions() -> tuple[UnobservedDimension, ...]:
-    """The registry, in note-emission order."""
+_PKG = __name__.rsplit(".", 1)[0]
+#: The registry, in note-emission order (a constant: nothing to memoize).
+UNOBSERVED_DIMENSIONS: tuple[UnobservedDimension, ...] = (
+    UnobservedDimension(
+        TEMPLATE_DEFAULTS_DIMENSION,
+        f"{_PKG}._template_defaults",
+        template_default_findings,
+        coverage_warning=True,
+    ),
+    UnobservedDimension(
+        CONCEPT_GAP_DIMENSION,
+        f"{_PKG}._concepts",
+        concept_constraint_findings,
+        coverage_warning=True,
+    ),
+    UnobservedDimension(
+        SCOPE_FALLBACK_DIMENSION, f"{_PKG}._scope_fallback", scope_fallback_findings
+    ),
+    UnobservedDimension(
+        DEPTH_PROJECTION_DIMENSION,
+        f"{_PKG}._depth_projection",
+        depth_projection_findings,
+    ),
+    UnobservedDimension(
+        UNREADABLE_SECTION_DIMENSION,
+        f"{_PKG}._unreadable_sections",
+        unreadable_section_findings,
+    ),
+    UnobservedDimension(
+        EXPORT_READ_DIMENSION,
+        f"{_PKG}._export_read",
+        export_read_findings,
+        coverage_warning=True,
+    ),
+)
 
-    pkg = __name__.rsplit(".", 1)[0]
-    return (
-        UnobservedDimension(
-            TEMPLATE_DEFAULTS_DIMENSION,
-            f"{pkg}._template_defaults",
-            template_default_findings,
-            coverage_warning=True,
-        ),
-        UnobservedDimension(
-            CONCEPT_GAP_DIMENSION,
-            f"{pkg}._concepts",
-            concept_constraint_findings,
-            coverage_warning=True,
-        ),
-        UnobservedDimension(
-            SCOPE_FALLBACK_DIMENSION, f"{pkg}._scope_fallback", scope_fallback_findings
-        ),
-        UnobservedDimension(
-            DEPTH_PROJECTION_DIMENSION,
-            f"{pkg}._depth_projection",
-            depth_projection_findings,
-        ),
-        UnobservedDimension(
-            UNREADABLE_SECTION_DIMENSION,
-            f"{pkg}._unreadable_sections",
-            unreadable_section_findings,
-        ),
-        UnobservedDimension(
-            EXPORT_READ_DIMENSION,
-            f"{pkg}._export_read",
-            export_read_findings,
-            coverage_warning=True,
-        ),
-    )
+
+#: Dimensions whose findings also become ``DiffResult.coverage_warnings``.
+COVERAGE_WARNING_DIMENSIONS: frozenset[str] = frozenset(
+    d.dimension for d in UNOBSERVED_DIMENSIONS if d.coverage_warning
+)
 
 
 def collect_unobserved(
@@ -139,7 +142,7 @@ def collect_unobserved(
     """Every registered dimension's findings, in registry order."""
     return [
         finding
-        for provider in unobserved_dimensions()
+        for provider in UNOBSERVED_DIMENSIONS
         if not coverage_only or provider.coverage_warning
         for finding in provider.findings(old, new)
     ]

@@ -30,8 +30,8 @@ from abicheck.compare.template_param_defaults import (
 from abicheck.model import AbiSnapshot, Fact, RecordType
 from abicheck.model.availability import FactStatus
 from abicheck.model.change_catalog.kinds import ChangeKind
-from abicheck.policy.analysis_assurance._template_defaults import template_default_gap
 from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
+from tests._assurance_gap_views import template_default_gap
 
 
 def _box(

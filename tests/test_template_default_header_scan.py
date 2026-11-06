@@ -29,13 +29,13 @@ from abicheck.extract.headers.template_default_scan import (
     template_default_header_scan,
 )
 from abicheck.model import AbiSnapshot
-from abicheck.policy.analysis_assurance._template_defaults import template_default_gap
 from abicheck.serialization import (
     snapshot_from_dict,
     snapshot_to_dict,
     snapshot_to_json,
 )
 from tests._abicheck_subprocess import abicheck_command
+from tests._assurance_gap_views import template_default_gap
 
 
 @pytest.mark.parametrize(

@@ -46,6 +46,8 @@ __all__ = [
     "constraint_digest",
     "conjunctive_atoms",
     "encode_conjunctive",
+    "ref_atom_body",
+    "split_table_key",
 ]
 
 CONJUNCTIVE_PREFIX = "conj:"
@@ -55,6 +57,22 @@ CONCEPT_KEY_PREFIX = "concept "
 TEMPLATE_KEY_PREFIX = "template "
 #: A concept-id atom of a template's constraint: ``ref:<concept>@<args digest>``.
 REF_ATOM_PREFIX = "ref:"
+
+
+def split_table_key(key: str) -> tuple[str | None, str]:
+    """Decode a ``cxx_concept_constraints`` key into ``(kind, name)``:
+    kind ``"concept"`` or ``"template"``, or ``None`` for any other key.
+    The one decoder of this module's own key encoding."""
+    kind, sep, name = key.partition(" ")
+    if sep and f"{kind} " in (CONCEPT_KEY_PREFIX, TEMPLATE_KEY_PREFIX):
+        return kind, name
+    return None, key
+
+
+def ref_atom_body(atom: str) -> str | None:
+    """The ``<concept>@<args digest>`` of a concept-id atom, else ``None``."""
+    head, sep, body = atom.partition(":")
+    return body if sep and f"{head}:" == REF_ATOM_PREFIX else None
 
 
 def constraint_digest(*parts: str) -> str:

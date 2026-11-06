@@ -54,8 +54,8 @@ def attach_analysis_assurance(
     from ..evidence_depth import embedded_evidence_pack
     from ..policy.analysis_assurance import compute_analysis_assurance
     from ..policy.analysis_assurance._unobserved import (
+        COVERAGE_WARNING_DIMENSIONS,
         collect_unobserved,
-        unobserved_dimensions,
     )
     from ..storage.snapshot_encode import same_persisted_content
 
@@ -79,8 +79,9 @@ def attach_analysis_assurance(
     # same text the rollup noted -- one registry, not per-gap wiring. Scalar
     # compare can attach twice to one result, so a warning already present is
     # skipped.
-    coverage_dims = {d.dimension for d in unobserved_dimensions() if d.coverage_warning}
-    for finding in (f for f in unobserved if f.dimension in coverage_dims):
+    for finding in unobserved:
+        if finding.dimension not in COVERAGE_WARNING_DIMENSIONS:
+            continue
         warning = finding.reason
         if warning not in result.coverage_warnings:
             result.coverage_warnings.append(warning)

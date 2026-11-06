@@ -215,7 +215,7 @@ def test_unreadable_header_lowers_comparison_assurance(tmp_path: Path) -> None:
     the concept dimension as unobserved; a fully read clean side does not."""
     from types import SimpleNamespace
 
-    from abicheck.policy.analysis_assurance._concepts import concept_constraint_gap
+    from tests._assurance_gap_views import concept_constraint_gap
 
     clean = tmp_path / "clean.h"
     clean.write_text("int f(void);\n", encoding="utf-8")

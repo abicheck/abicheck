@@ -45,12 +45,11 @@ from typing import TYPE_CHECKING
 from ..detector_registry import registry
 from ..model.change import Change
 from ..model.concept_constraint import (
-    CONCEPT_KEY_PREFIX,
-    REF_ATOM_PREFIX,
-    TEMPLATE_KEY_PREFIX,
     classify_constraint_change,
     conjunctive_atoms,
     constraint_digest,
+    ref_atom_body,
+    split_table_key,
 )
 
 if TYPE_CHECKING:
@@ -64,8 +63,9 @@ def _expand(
 ) -> frozenset[str]:
     out: set[str] = set()
     for atom in atoms:
-        if atom.startswith(REF_ATOM_PREFIX):
-            name, _, args = atom[len(REF_ATOM_PREFIX) :].rpartition("@")
+        ref = ref_atom_body(atom)
+        if ref is not None:
+            name, _, args = ref.rpartition("@")
             body = concepts.get(name)
             if body is not None:
                 out.update(constraint_digest(a, args) for a in body)
@@ -75,11 +75,12 @@ def _expand(
 
 
 def _concept_atoms(table: dict[str, str]) -> dict[str, frozenset[str] | None]:
-    return {
-        key[len(CONCEPT_KEY_PREFIX) :]: conjunctive_atoms(value)
-        for key, value in table.items()
-        if key.startswith(CONCEPT_KEY_PREFIX)
-    }
+    out: dict[str, frozenset[str] | None] = {}
+    for key, value in table.items():
+        kind, name = split_table_key(key)
+        if kind == "concept":
+            out[name] = conjunctive_atoms(value)
+    return out
 
 
 def diff_concept_constraint_tables(
@@ -97,16 +98,14 @@ def diff_concept_constraint_tables(
             # when a concept body changed: that concept's finding reports it.
             continue
         old_atoms, new_atoms = conjunctive_atoms(before), conjunctive_atoms(after)
-        if key.startswith(TEMPLATE_KEY_PREFIX):
-            subject = key[len(TEMPLATE_KEY_PREFIX) :]
+        kind_, subject = split_table_key(key)
+        if kind_ == "template":
             if old_atoms is not None and new_atoms is not None:
                 old_atoms = _expand(old_atoms, old_concepts)
                 new_atoms = _expand(new_atoms, new_concepts)
                 if old_atoms == new_atoms:
                     continue
-        elif key.startswith(CONCEPT_KEY_PREFIX):
-            subject = key[len(CONCEPT_KEY_PREFIX) :]
-        else:
+        elif kind_ != "concept":
             continue
         decided = classify_constraint_change(subject, old_atoms, new_atoms)
         if decided is None:
