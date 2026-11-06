@@ -26,7 +26,7 @@ every internal caller now imports from here directly.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import click
 
@@ -123,6 +123,18 @@ DEPTH_PARAM = DepthParam()
 _SIDES: tuple[str, ...] = ("old", "new", "both")
 
 
+def _converted_path(value: object) -> Path:
+    """The ``Path`` a ``click.Path(path_type=Path)`` conversion returns.
+
+    click < 8.5.1 types ``Path.convert`` as ``str | bytes | PathLike`` even
+    with ``path_type=Path``; 8.5.1 types it precisely. Narrowing at runtime
+    type-checks under both and fails loudly if the contract ever breaks.
+    """
+    if not isinstance(value, Path):
+        raise TypeError(f"click.Path(path_type=Path) returned {type(value).__name__}")
+    return value
+
+
 class SidedPathParam(click.ParamType):
     """Click type for a side-aware path option (ADR-040 Lever 1).
 
@@ -159,10 +171,8 @@ class SidedPathParam(click.ParamType):
             prefix = f"{side}="
             if s.startswith(prefix):
                 raw = s[len(prefix) :]
-                # ``click.Path.convert`` is typed ``str | bytes | PathLike`` even
-                # with ``path_type=Path``; it returns a real ``Path`` at runtime.
-                return (side, cast("Path", self._path.convert(raw, param, ctx)))
-        return ("both", cast("Path", self._path.convert(s, param, ctx)))
+                return (side, _converted_path(self._path.convert(raw, param, ctx)))
+        return ("both", _converted_path(self._path.convert(s, param, ctx)))
 
     def get_metavar(self, param: Any, ctx: Any = None) -> str:
         return "[old=|new=]PATH"
@@ -234,7 +244,7 @@ class SidedIncludePathParam(click.ParamType):
                         ctx=ctx,
                         param=param,
                     )
-                path = cast("Path", self._sided._path.convert(raw, param, ctx))
+                path = _converted_path(self._sided._path.convert(raw, param, ctx))
                 return (side, path, label)
         side, path = self._sided.convert(value, param, ctx)
         return (side, path, None)
