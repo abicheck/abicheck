@@ -1,4 +1,4 @@
-# Reusable Workflows Reference: `check-single.yml` / `check-project.yml`
+# Reusable Workflows Reference: `check-single.yml` / `check-project.yml` / `report-pr.yml`
 
 Two `workflow_call` reusable workflows (G30 P1.4)
 built on top of [`actions/check-target`](check-target.md):
@@ -358,9 +358,32 @@ twice).
 | `gate-exit-code` | `abicheck aggregate`'s own exit code (`0` pass / `1` coverage-or-policy gap / `2` API break / `4` ABI break). |
 | `run-plan-artifact-name` | Echoes `inputs.run-plan-artifact-name`, for a caller that wants to download it too. |
 
+## `report-pr.yml`
+
+The trusted publisher half of
+[fork-PR reporting](../use/fork-pr-reporting.md), packaged. Call it from a
+`workflow_run` workflow in your own repository (GitHub fires `workflow_run`
+only there) that grants `actions: read`, `contents: read` and
+`pull-requests: write`; the job requests exactly those three and the
+workflow declares no others. It runs
+[`verify-source-run`](verify-source-run.md) against the triggering run, then
+[`report`](report-action.md) on the verified document, taking both Actions
+from a self-checkout of its own revision (below) with every third-party
+Action SHA-pinned. It never checks out the contributor's code.
+
+It publishes what the main Action uploads under `pr-comment-via:
+artifact`/`auto`: an artifact named `abicheck-pr-report[-<key>]` whose
+`aggregate.json` carries the report and the recorded analysed commit.
+`report-from`/`provenance-from` point it at another canonical report in
+the artifact instead. A verified run that uploaded no artifact is skipped
+with `skipped-reason=no-artifact` (it posted directly, or commented
+nothing); every other refusal fails the job. The full input table and the
+no-double-comment rule are in the
+[guide](../use/fork-pr-reporting.md#publisher-inputs).
+
 ## Self-checkout: how the nested Actions actually resolve
 
-Both workflows' steps reference `check-target` (and, transitively,
+`check-single.yml`/`check-project.yml` reference `check-target` (and, transitively,
 `resolve-baseline`/`collect-facts`/the root Action) via a relative
 `uses: ./x` path. A relative path inside a *reusable workflow's own steps*
 resolves against the **caller's** checkout, never against the repository

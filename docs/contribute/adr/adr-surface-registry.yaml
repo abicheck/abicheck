@@ -624,6 +624,8 @@ adrs:
     surfaces:
       - action: actions/report
       - action: actions/verify-source-run
+      - action: pr-comment-via
+      - action: pr-comment-artifact-name
 
   - id: ADR-074
     file: 074-logical-macro-definitions-on-the-cli.md

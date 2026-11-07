@@ -2440,6 +2440,22 @@
    "default": "standard"
   },
   {
+   "id": "action:pr-comment-via",
+   "action": "action",
+   "input": "pr-comment-via",
+   "status": "live",
+   "required": false,
+   "default": "direct"
+  },
+  {
+   "id": "action:pr-comment-artifact-name",
+   "action": "action",
+   "input": "pr-comment-artifact-name",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
    "id": "action:github-token",
    "action": "action",
    "input": "github-token",

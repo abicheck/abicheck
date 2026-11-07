@@ -670,7 +670,9 @@
       "disposition": "surfaced",
       "surfaces": [
         "action: actions/report",
-        "action: actions/verify-source-run"
+        "action: actions/verify-source-run",
+        "action: pr-comment-artifact-name",
+        "action: pr-comment-via"
       ],
       "use_cases": []
     },
@@ -914,6 +916,8 @@
     "ADR-072 report: format:review",
     "ADR-073 action: actions/report",
     "ADR-073 action: actions/verify-source-run",
+    "ADR-073 action: pr-comment-artifact-name",
+    "ADR-073 action: pr-comment-via",
     "ADR-074 cli: compare --define",
     "ADR-074 cli: dump --define",
     "ADR-078 report: compare_report.severity",

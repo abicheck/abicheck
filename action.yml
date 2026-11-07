@@ -922,6 +922,36 @@ inputs:
       list) or 'full' (every change with locations, all sections expanded).
     required: false
     default: 'standard'
+  pr-comment-via:
+    description: >
+      How the PR comment reaches the pull request. 'direct' (default) posts
+      it from this job with github-token, exactly as before. 'artifact'
+      never posts: it uploads the canonical JSON report, wrapped in a
+      one-target aggregate document that records the analysed commit
+      (github.sha -- on a pull_request run, the ephemeral merge commit) as
+      its analysis_context, as an artifact for a trusted workflow_run
+      publisher -- the reusable .github/workflows/report-pr.yml -- to verify
+      and post. 'auto' uses 'artifact' on a pull_request run whose token
+      cannot write -- a fork's (head repository differs from this one) or
+      Dependabot's -- and 'direct' otherwise. Each run takes exactly one
+      path, so wiring both this Action and report-pr.yml never double-posts:
+      a run that posted directly uploads nothing, and report-pr.yml skips a
+      run with no artifact. Never give this job a write token to make the
+      fork case work; that is what 'artifact' replaces. The same pr-comment,
+      pr-comment-on, pr-comment-key gating applies to both paths; the
+      upload needs no permissions. See docs/use/fork-pr-reporting.md.
+    required: false
+    default: 'direct'
+  pr-comment-artifact-name:
+    description: >
+      Name of the artifact pr-comment-via 'artifact' (or 'auto' on a fork)
+      uploads. Empty (default) derives 'abicheck-pr-report', or
+      'abicheck-pr-report-<pr-comment-key>' when pr-comment-key is set, so
+      matrix jobs upload distinct artifacts -- the same derivation
+      report-pr.yml's artifact-name applies to its comment-key, so both
+      sides agree without configuration.
+    required: false
+    default: ''
   github-token:
     description: >
       Token used to post the PR comment and to auto-fetch release baselines.
@@ -1280,6 +1310,20 @@ outputs:
       value the upload-sarif step below gates on, so withholding it skips
       that upload rather than feeding mismatched content to CodeQL.
     value: ${{ steps.run-abicheck.outputs.report-path }}
+  pr-comment-delivery:
+    description: >
+      Which path pr-comment-via resolved to for this run: 'direct' (this job
+      handled the comment itself), 'artifact' (a report artifact was
+      uploaded for report-pr.yml to publish), or 'none' (pr-comment-via
+      'artifact'/'auto' on a run that comments nothing -- not a
+      pull_request event, not compare mode, pr-comment false or
+      pr-comment-on never).
+    value: ${{ steps.pr-delivery.outputs.delivery }}
+  pr-report-artifact-name:
+    description: >
+      Name of the uploaded PR report artifact, or empty when none was
+      uploaded (delivery not 'artifact', or the run produced no report).
+    value: ${{ steps.upload-pr-report.outputs.artifact-id && steps.pr-delivery.outputs.artifact-name || '' }}
   baseline-source:
     description: >
       Which release baseline this run compared against: legacy-asset (a
@@ -1433,6 +1477,25 @@ runs:
         INPUT_COMPILE_DB: ${{ inputs.compile-db }}
         INPUT_SET: ${{ inputs.set }}
       run: bash "${{ github.action_path }}/action/validate-inputs.sh"
+
+    # ── 0b. PR comment delivery ─────────────────────────────────────────────
+    # Pure bash, so a bad pr-comment-via fails here, before any install.
+    # Decide, before anything can post, whether this run's PR comment goes
+    # out directly or as an artifact for report-pr.yml. One answer per run:
+    # that is the whole double-posting guard (pr-comment-via's description).
+    - name: Resolve PR comment delivery
+      id: pr-delivery
+      shell: bash
+      env:
+        INPUT_MODE: ${{ inputs.mode }}
+        INPUT_PR_COMMENT: ${{ inputs.pr-comment }}
+        INPUT_PR_COMMENT_ON: ${{ inputs.pr-comment-on }}
+        INPUT_PR_COMMENT_KEY: ${{ inputs.pr-comment-key }}
+        INPUT_PR_COMMENT_VIA: ${{ inputs.pr-comment-via }}
+        INPUT_PR_COMMENT_ARTIFACT_NAME: ${{ inputs.pr-comment-artifact-name }}
+        PR_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+        GITHUB_ACTOR_LOGIN: ${{ github.actor }}
+      run: bash "${{ github.action_path }}/action/pr-report-delivery.sh" resolve
 
     # ── 1. Python ─────────────────────────────────────────────────────────────
     - name: Set up Python
@@ -1609,6 +1672,7 @@ runs:
         INPUT_PR_COMMENT_ON: ${{ inputs.pr-comment-on }}
         INPUT_PR_COMMENT_DETAIL: ${{ inputs.pr-comment-detail }}
         INPUT_PR_COMMENT_REPORT_ARTIFACT_URL: ${{ inputs.pr-comment-report-artifact-url }}
+        ABICHECK_PR_COMMENT_DELIVERY: ${{ steps.pr-delivery.outputs.delivery }}
         INPUT_SOURCES: ${{ inputs.sources }}
         INPUT_BUILD_INFO: ${{ inputs.build-info }}
         INPUT_COMPILE_DB: ${{ inputs.compile-db }}
@@ -1628,6 +1692,40 @@ runs:
         INPUT_SYSROOT: ${{ inputs.sysroot }}
         INPUT_SEVERITY_PRESET: ${{ inputs.severity-preset }}
       run: bash "${{ github.action_path }}/action/run.sh"
+
+    # ── 4b. PR report artifact (pr-comment-via: artifact / auto on a fork) ──
+    # `always()`: run.sh exits non-zero on a gated break, which is exactly
+    # the run a fork's reviewer most needs the comment for. Both steps are
+    # still keyed on run.sh having staged a report, so a run that produced
+    # none (an operational error, a dry run) uploads nothing rather than an
+    # empty artifact that would read as a clean result.
+    - name: Record analysis context for the PR report
+      id: stage-pr-report
+      if: always() && steps.run-abicheck.outputs.pr-report-dir != ''
+      shell: bash
+      env:
+        PR_REPORT_DIR: ${{ steps.run-abicheck.outputs.pr-report-dir }}
+        ABICHECK_CTX_TESTED_SHA: ${{ github.sha }}
+        ABICHECK_CTX_PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        ABICHECK_CTX_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        ABICHECK_CTX_PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+        ABICHECK_CTX_PR_NUMBER: ${{ github.event.pull_request.number }}
+        ABICHECK_CTX_REPOSITORY: ${{ github.repository }}
+        ABICHECK_CTX_RUN_ID: ${{ github.run_id }}
+        ABICHECK_CTX_RUN_ATTEMPT: ${{ github.run_attempt }}
+        ABICHECK_CTX_WORKFLOW_REF: ${{ github.workflow_ref }}
+        ABICHECK_CTX_EVENT: ${{ github.event_name }}
+        ABICHECK_CTX_ORCHESTRATION_REF: ${{ github.action_ref }}
+      run: bash "${{ github.action_path }}/action/pr-report-delivery.sh" stage
+
+    - name: Upload PR report artifact
+      id: upload-pr-report
+      if: always() && steps.stage-pr-report.outputs.dir != ''
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+      with:
+        name: ${{ steps.pr-delivery.outputs.artifact-name }}
+        path: ${{ steps.stage-pr-report.outputs.dir }}
+        if-no-files-found: error
 
     # ── 5. Upload SARIF ──────────────────────────────────────────────────────
     - name: Upload SARIF to Code Scanning

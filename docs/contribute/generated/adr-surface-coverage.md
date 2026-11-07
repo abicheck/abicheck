@@ -89,7 +89,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 | [ADR-070](../adr/070-action-layer-does-not-encode-cli-semantics.md) | partial | — | `action: extra-args` | Only D3 is implemented; D1, D2 and D4 remain. |
 | [ADR-071](../adr/071-release-analysis-assurance-fold.md) | surfaced | UC-WF-compare, UC-WF-scope-completeness | `action: analysis-assurance-complete`<br>`report: compare_report.analysis_assurance` | — |
 | [ADR-072](../adr/072-pr-comment-reporting-fidelity.md) | surfaced | UC-REP-markdown-html | `action: pr-comment-detail`<br>`report: format:review` | — |
-| [ADR-073](../adr/073-report-only-publication-and-the-trusted-reporter-boundary.md) | surfaced | — | `action: actions/report`<br>`action: actions/verify-source-run` | — |
+| [ADR-073](../adr/073-report-only-publication-and-the-trusted-reporter-boundary.md) | surfaced | — | `action: actions/report`<br>`action: actions/verify-source-run`<br>`action: pr-comment-via`<br>`action: pr-comment-artifact-name` | — |
 | [ADR-074](../adr/074-logical-macro-definitions-on-the-cli.md) | surfaced | UC-TC-header-scope-robustness | `cli: compare --define`<br>`cli: dump --define` | — |
 | [ADR-075](../adr/075-target-ownership-and-extraction-scope.md) | gap | — | — | Accepted, not yet implemented; no ownership/extraction-scope surface exists. |
 | [ADR-076](../adr/076-adr-use-case-surface-traceability.md) | internal | — | — | Repository traceability contract and gate; not a product surface. |
@@ -232,6 +232,8 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 - ADR-072 report: format:review
 - ADR-073 action: actions/report
 - ADR-073 action: actions/verify-source-run
+- ADR-073 action: pr-comment-artifact-name
+- ADR-073 action: pr-comment-via
 - ADR-074 cli: compare --define
 - ADR-074 cli: dump --define
 - ADR-078 report: compare_report.severity

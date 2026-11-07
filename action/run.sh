@@ -5750,6 +5750,11 @@ _build_json_cmd() {
 
 _maybe_post_pr_comment() {
   [[ "${INPUT_PR_COMMENT:-true}" == "true" ]] || return 0
+  # `pr-comment-via` (action.yml's "Resolve PR comment delivery" step): an
+  # artifact-capable setting on a run that comments nothing resolved to
+  # `none`; `artifact` stages the report below instead of posting it. Unset
+  # (run.sh invoked directly) keeps the historical direct path.
+  [[ "${ABICHECK_PR_COMMENT_DELIVERY:-direct}" == "none" ]] && return 0
   case "$MODE" in
     compare) ;;
     *) return 0 ;;
@@ -5847,6 +5852,18 @@ _maybe_post_pr_comment() {
     return 0
   fi
 
+  # Artifact delivery: hand the same report the direct path would render to
+  # action.yml's staging/upload steps and stop -- this job holds no write
+  # token on that path, and rendering is the trusted publisher's job.
+  # Staged BEFORE the `--on` filter on purpose: the publisher applies
+  # `post-on` itself, and under `changes` it must still see a clean report
+  # to clear a stale sticky comment.
+  if [[ "${ABICHECK_PR_COMMENT_DELIVERY:-direct}" == "artifact" ]]; then
+    _stage_pr_report_for_artifact
+    echo "::endgroup::"
+    return 0
+  fi
+
   # Mirror the step's gate: when fail-on-api-break is set, API/source breaks
   # turn the check red, so the comment must file them under Breaking too.
   PR_GATE_ARGS=()
@@ -5925,6 +5942,26 @@ runpy.run_module("abicheck.cli_pr_comment", run_name="__main__")
 
   _post_pr_comment "$pr_number" "$PR_BODY"
   echo "::endgroup::"
+}
+
+# Copy the PR report into a fresh directory, named the way `abicheck
+# aggregate` reads a target (`abi-report-<id>.json`), and announce it on
+# `pr-report-dir`. PR_JSON itself is removed by the EXIT trap, so the copy
+# is what survives into the next step. The target id is the sanitized
+# pr-comment-key (`default` when unset), so a matrix's per-key artifacts
+# render under distinguishable target names.
+_stage_pr_report_for_artifact() {
+  local dir key
+  if ! dir=$(mktemp -d "${RUNNER_TEMP:-/tmp}/abicheck-pr-report.XXXXXX"); then
+    _warning_annotation "abicheck: could not create a staging directory; no PR report artifact will be uploaded."
+    return 0
+  fi
+  key=$(_sanitize_pr_comment_key "${INPUT_PR_COMMENT_KEY:-}")
+  cp "$PR_JSON" "$dir/abi-report-${key:-default}.json"
+  if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+    printf 'pr-report-dir=%s\n' "$dir" >> "$GITHUB_OUTPUT"
+  fi
+  echo "abicheck: staged the PR report for artifact delivery ($dir)."
 }
 
 # Hidden marker the renderer embeds; used to find OUR sticky comment.

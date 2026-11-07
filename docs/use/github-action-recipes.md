@@ -540,6 +540,10 @@ Behavior knobs:
   result; `never` disables it.
 - `pr-comment-detail: full` lists every change with source locations and expands
   all sections; `summary` reduces the comment to the verdict and counts.
+- `pr-comment-via: auto` makes fork pull requests work: a fork's run (whose
+  token cannot post) uploads the report instead, and an eight-line
+  `workflow_run` file calling the reusable `report-pr.yml` posts it. See
+  [Reporting on fork pull requests](fork-pr-reporting.md#quick-start-two-files).
 
 The same four inputs work for `mode: compare`'s audit-only shape
 (`old-library`/`abi-baseline` both omitted — the replacement for
