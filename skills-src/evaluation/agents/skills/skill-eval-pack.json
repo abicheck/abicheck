@@ -863,7 +863,7 @@
       "roots": [
         ".agents/skills/check-abi-compatibility"
       ],
-      "tree": "sha256:f21490fcd064d26e61ed78236455d7aa247fe40f1c5ea1e628912a002a08d182"
+      "tree": "sha256:118c329140e7c99c7115ef39fb18bfe3c7f84e4851e86f2199ff5585b488b7fb"
     },
     "explain-abi-change": {
       "affects": [
@@ -872,7 +872,7 @@
       "roots": [
         ".agents/skills/explain-abi-change"
       ],
-      "tree": "sha256:a718ea4ee06f9178a1cd8c3a2b6ef039626fbe6d36a6f34a3485af228a835991"
+      "tree": "sha256:89e6b86ecb32decee8db403ca353a09338387858536fe8475a5b389fbaf980b6"
     },
     "set-up-abi-compatibility-ci": {
       "affects": [
@@ -881,7 +881,7 @@
       "roots": [
         ".agents/skills/set-up-abi-compatibility-ci"
       ],
-      "tree": "sha256:8b30596009b0d8683125d77a09e4fd7ef1aab4d1a6c6be0c1b303b6a3f794422"
+      "tree": "sha256:d2edc95390f85f8dd5609f01c0a74b0e5d339b72c19ff0ca22bdd556b6b357d9"
     }
   }
 }

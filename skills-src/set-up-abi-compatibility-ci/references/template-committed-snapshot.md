@@ -7,7 +7,7 @@ repository's own install + configure + build, with debug info and a shared
 build on both sides).
 
 ```yaml
-      - uses: abicheck/abicheck@v0.7.0
+      - uses: abicheck/abicheck@v0.8.0
         with:
           old-library: abi/<lib>.abicheck.json   # committed, reviewed
           new-library: <lib-path>

@@ -1,3 +1,0 @@
-### Fixed
-
-- **`compare OLD.bundle-facts.json NEW_DIR` pairs the members `compare OLD_DIR NEW_DIR` pairs.** The stored route discovered NEW's members with a native-library-only walk, so a NEW directory of per-library snapshots such as `libcore.so.1` compared nothing and exited 1. A facts document keyed by a member's file name never met the canonical `libcore.so` key either. NEW is now discovered by the live release rule, and stored members are re-keyed on load to the same canonical key. Because the rule is now shared, a file named like a shared library but holding no binary is a NEW member on the stored route too, and fails as one, as it already did on the live route. `--include-private-dso` no longer filters a plain NEW directory there, matching live.

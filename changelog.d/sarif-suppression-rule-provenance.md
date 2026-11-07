@@ -1,3 +1,0 @@
-### Fixed
-
-- **SARIF names the rule that suppressed each finding.** A two-sided `compare`'s SARIF `suppressions[].justification` said `suppressed by --suppress rule: <label>` for every suppression. That dropped the reason, the suppression file and the expiry, and attributed abicheck's own release policy decisions (the lockstep SONAME suppression) to a `--suppress` rule. It now reads the run's disposition record, names the label or id, reason, source and expiry, and carries the same record as the JSON report's `suppressed_changes[].rule` in `properties`. The `--no-baseline` audit's SARIF and JUnit use the same wording, so their justification now also names the rule's source.

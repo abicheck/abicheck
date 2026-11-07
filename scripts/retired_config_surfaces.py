@@ -11,7 +11,7 @@ RETIRED_CONFIG_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...]
         "ADR-091 R3/R13 config keys (acknowledgment: -> acknowledgments:, source.method -> sources.method)",
         ("source.method", "acknowledgment.file", "acknowledgment.breaks"),
         frozenset(
-            {"start/upgrading-to-0.7.md", "AGENTS.md", "contribute/known-gaps.md"}
+            {"start/upgrading-to-0.8.md", "AGENTS.md", "contribute/known-gaps.md"}
         ),
     ),
     (
@@ -19,7 +19,7 @@ RETIRED_CONFIG_SURFACES: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...]
         ("acknowledgment:",),
         frozenset(
             {
-                "start/upgrading-to-0.7.md",
+                "start/upgrading-to-0.8.md",
                 "AGENTS.md",
                 "contribute/known-gaps.md",
                 "contribute/adr/091-one-option-vocabulary.md",

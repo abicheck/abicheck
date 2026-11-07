@@ -1,3 +1,0 @@
-### Fixed
-
-- **Bundles store snapshots with blocked, failed or unknown sections instead of refusing them** — a bundle member snapshot carrying ADR-062 D14/D15 state (a failed or blocked section, an unknown section, section or record extensions, a must-understand list) is now stored by every bundle container rather than refused: a bundle package records it on the member's `ArtifactRef.carriers`, and a G38 bundle document or G40 bundle archive stores that member as its single-file sectioned document. Such a document or archive declares bundle `schema_version` 5, so an older abicheck refuses it instead of reading the member as empty; bundles without such a member keep their version and bytes.

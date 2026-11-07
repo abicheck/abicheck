@@ -109,7 +109,7 @@ their gates — never whether either comparison runs:**
 jobs:
   release-contract:
     steps:
-      - uses: abicheck/abicheck@v0.7.0
+      - uses: abicheck/abicheck@v0.8.0
         with:
           abi-baseline: latest-release       # fixed until the next release
           new-library: build/libfoo.so
@@ -118,7 +118,7 @@ jobs:
 
   accepted-main:
     steps:
-      - uses: abicheck/abicheck@v0.7.0
+      - uses: abicheck/abicheck@v0.8.0
         with:
           old-library: main-baseline.json     # refreshed on every merge to main
           new-library: build/libfoo.so
