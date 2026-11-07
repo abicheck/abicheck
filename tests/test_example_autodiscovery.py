@@ -495,7 +495,9 @@ def _build_with_cmake(
             ],
             capture_output=True,
             text=True,
-            timeout=600,
+            # Per-test fallback only (shared configure failed); bounded so a
+            # run where every case falls back cannot exhaust the job budget.
+            timeout=180,
         )
         if r.returncode != 0:
             pytest.fail(

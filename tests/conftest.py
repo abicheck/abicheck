@@ -937,7 +937,11 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
             print(msg)
 
 
-_CMAKE_CONFIGURE_TIMEOUT_S = 600
+# Must stay below pytest-timeout's per-test 600s (pyproject.toml), which
+# counts session-fixture setup in the first test that requests it; the
+# lock waiters below add their slack on top of this and must fit too.
+_CMAKE_CONFIGURE_TIMEOUT_S = 420
+_CMAKE_LOCK_WAIT_S = _CMAKE_CONFIGURE_TIMEOUT_S + 60
 
 
 def _cmake_configure_once(build_dir: Path) -> bool:
@@ -1003,9 +1007,7 @@ def shared_cmake_build_dir(tmp_path_factory: pytest.TempPathFactory) -> Path | N
         fail_flag = root_tmp / "cmake_shared_build.fail"
 
         try:
-            with filelock.FileLock(
-                str(lock_path), timeout=_CMAKE_CONFIGURE_TIMEOUT_S + 120
-            ):
+            with filelock.FileLock(str(lock_path), timeout=_CMAKE_LOCK_WAIT_S):
                 if fail_flag.exists():
                     return None
                 if not done_flag.exists():
