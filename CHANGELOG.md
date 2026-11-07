@@ -22,12 +22,97 @@ They are consolidated into a concise release summary when a version ships.
 
 <!-- scriv-insert-here -->
 
-## [0.7.0] — not yet released
+## [0.8.0] — 2026-11-07
 
-> **This release has not been published.** The latest release on PyPI,
-> conda-forge and GitHub Releases is **0.6.0**. The entries below describe
-> what `main` currently carries and will ship as `0.7.0`; the date will be
-> filled in when the tag is cut.
+### One option vocabulary (breaking)
+
+- Every concept now has one spelling across the CLI, `.abicheck.yml`, the
+  Action, the reusable workflows and the typed Python API (ADR-091), and the
+  old spellings are removed with no transition window — a retired flag fails
+  with exit `64`, a retired Action input fails before any analysis and names
+  its replacement. Highlights: `--version` → `--label`, `--abi3` →
+  `--abi3-floor`, `deps --old-root/--new-root/--sysroot` → `--root`,
+  `acknowledgment:` → `acknowledgments:`, `source.method` → `sources.method`,
+  and many Action inputs (`policy-file` → `policy`, `old-version` →
+  `old-label`, `debug-info1/2` → `old-/new-debug-info`, …).
+- New `--set PATH=VALUE` on `compare`, `dump` and `project capture-variants`
+  (and `config_overrides` on the typed requests, `set:` on the Action) sets
+  one `.abicheck.yml` key for one run. Options that now live only in the
+  config (`--used-by-manifest`, `--required-symbol`, `--view`, and Action
+  inputs such as `dso-only`, `frontend`, `compile-options`) moved behind it.
+- `--crosscheck` is gone; cross-source checks are ordinary findings
+  controlled with `policy.overrides`.
+
+### Acknowledgments, audit and gating
+
+- `compare --acknowledgments FILE` and the Action's `acknowledgments` input
+  apply acknowledgment records for one run; an acknowledged break can stop
+  gating, and accepted breaks stay visible on a passing run.
+- The disposition audit lists every configured suppression, `reclassify:`
+  and acknowledgment rule, including ones that matched nothing, as `used`,
+  `unused` or `not_evaluated` (with the missing evidence), and
+  `unused_rules: warn|block` can fail a run. Rules take an optional `id:`;
+  an id-less rule gets a portable `rule-<12 hex>` id.
+- A `compare` run is never unbounded: without `--budget` it now has a 2-hour
+  deadline (exit `5`), and directory/package `compare` accepts `--budget`.
+- `compare --require-same-generation` refuses a pair captured by different
+  extractor generations.
+
+### New analysis
+
+- New findings: `PUBLIC_VIRTUAL_DISPATCH_SET_CHANGED`,
+  `PUBLIC_CONSUMER_COMPILED_DEPENDENCY_CHANGED`, `TARGET_ISA_CHANGED`, and
+  `public_api_internal_type_renamed`.
+- Class- and function-template parameter defaults are recorded, and a
+  header-level default change is an `API_BREAK` (ADR-085); the clang header
+  backend models C++20 concepts and constraints.
+- `compare --no-baseline libfoo.a -H include/` audits a static archive
+  (ADR-086).
+- `dump` captures a whole release as a `BundleFacts` baseline, with
+  published JSON Schemas; stored `BundleFacts` comparisons render the full
+  release document, JUnit and `oneline`.
+
+### Reports and CI integration
+
+- Directory/package `compare` reports show what each library removed and
+  changed, list added/removed public API, count findings by entity and
+  operation, render `sarif` and `review`, and cover PE/COFF and Mach-O in the
+  dependency graph. Large scans cap the Coverage Warnings section.
+- `--use-cases` attribution appears per finding in HTML and SARIF.
+- The JSON report records which baseline the Action compared against;
+  baseline-set archives can be pinned with `expected-archive-digest` and
+  attested (`attest: true` on `actions/stage-baseline` and
+  `publish-baseline.yml`). New `pr-comment-key` input for parallel jobs.
+- Built-in `append_only_dispatch_tables` policy.
+
+### Correctness and performance
+
+- About 180 fixes, mostly false positives and hidden breaks: templates and
+  specializations, vtables/typeinfo, ELF binding, header-only dependencies,
+  binary-only runs no longer claiming source-level or reachability evidence,
+  and failed or malformed extractor output (clang AST, DWARF) reported as
+  `FAILED` instead of an empty surface.
+- Faster snapshot encode/decode with lazy loading of stored declarations, a
+  byte-bounded snapshot cache, less memory per release member, and fewer
+  repeated header/`clang -M` passes.
+
+### Upgrade notes
+
+- Pin `abicheck/abicheck@v0.8.0` and run your existing command lines,
+  `.abicheck.yml` and workflow inputs once: every retired spelling fails
+  loudly. The full rename table is
+  [Upgrading to 0.8](docs/start/upgrading-to-0.8.md).
+- Report schema is **7.0** (the `exit` block drops the crosscheck keys), and
+  `rule_id` for id-less rules changed format; update report consumers.
+- Python API (pre-1.0): typed names follow ADR-091 (`old_label`/`new_label`,
+  `policy` takes a name or path, `contract` is one field;
+  `contract_evaluation=False` is refused). More root modules moved to their
+  owning packages (`abicheck.suppression` → `abicheck.policy.suppression.rules`,
+  `abicheck.package` → `abicheck.extract.packages`, `abicheck.reporter*` →
+  `abicheck.report`).
+- abicheck now requires Click 8.2 or newer.
+
+## [0.7.0] — 2026-10-13
 
 ### Compatibility contract and gating
 

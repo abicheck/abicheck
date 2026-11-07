@@ -51,7 +51,7 @@ jobs:
       - run: <build-steps>      # one run step per build command, or a `run: |` block
 
       - name: Dump ABI snapshot
-        uses: abicheck/abicheck@<sha>  # v0.7.0
+        uses: abicheck/abicheck@<sha>  # v0.8.0
         with:
           mode: dump
           new-library: <lib-path>
@@ -113,7 +113,7 @@ jobs:
       - run: <build-steps>      # one run step per build command, or a `run: |` block
 
       - name: Compare against the last release
-        uses: abicheck/abicheck@v0.7.0
+        uses: abicheck/abicheck@v0.8.0
         with:
           abi-baseline: latest-release
           new-library: <lib-path>
@@ -154,7 +154,7 @@ In the PR workflow, replace `abi-baseline` with an explicit download plus
         run: gh release download --pattern '${{ matrix.lib }}.abicheck.json' --dir baseline
         env:
           GH_TOKEN: ${{ github.token }}
-      - uses: abicheck/abicheck@v0.7.0
+      - uses: abicheck/abicheck@v0.8.0
         with:
           old-library: baseline/${{ matrix.lib }}.abicheck.json
           new-library: ${{ matrix.path }}
@@ -183,7 +183,7 @@ nothing is clobbered. Its reference is
     needs: <build-job>          # each profile's build uploads an abicheck-build-<profile-id> artifact
     permissions:
       contents: write           # this job alone writes the release asset
-    uses: abicheck/abicheck/.github/workflows/publish-baseline.yml@<sha>  # v0.7.0
+    uses: abicheck/abicheck/.github/workflows/publish-baseline.yml@<sha>  # v0.8.0
     with:
       build-output-artifact-prefix: abicheck-build-
       build-config: .abicheck.yml   # needed even when the file sits at the repository root
@@ -194,7 +194,7 @@ root Action reads the target's snapshot out of the release archive:
 
 ```yaml
       - name: Compare against the latest release baseline set
-        uses: abicheck/abicheck@v0.7.0
+        uses: abicheck/abicheck@v0.8.0
         with:
           abi-baseline: latest-release
           baseline-profile: <profile-id>
@@ -225,7 +225,7 @@ as an empty or stale baseline), then compare against the snapshot it returns:
 
       - name: Resolve <lib>'s baseline
         id: baseline
-        uses: abicheck/abicheck/actions/resolve-baseline@v0.7.0
+        uses: abicheck/abicheck/actions/resolve-baseline@v0.8.0
         with:
           baseline-path: baseline/abicheck-baseline-<profile-id>.tar.zst
           channel: release-contract
@@ -234,7 +234,7 @@ as an empty or stale baseline), then compare against the snapshot it returns:
           expected-baseline-generation: <generation>   # omit to skip the generation check
 
       - name: ABI compatibility check
-        uses: abicheck/abicheck@v0.7.0
+        uses: abicheck/abicheck@v0.8.0
         with:
           old-library: ${{ steps.baseline.outputs.snapshot-path }}
           new-library: <lib-path>

@@ -66,7 +66,7 @@ jobs:
         run: make
 
       - name: Dump ABI baseline
-        uses: abicheck/abicheck@v0.7.0
+        uses: abicheck/abicheck@v0.8.0
         with:
           mode: dump
           new-library: build/libfoo.so
@@ -103,7 +103,7 @@ jobs:
         run: make
 
       - name: ABI compatibility check
-        uses: abicheck/abicheck@v0.7.0
+        uses: abicheck/abicheck@v0.8.0
         with:
           abi-baseline: latest-release
           new-library: build/libfoo.so
@@ -117,7 +117,7 @@ To pin to a specific release:
 
 ```yaml
       - name: ABI compatibility check
-        uses: abicheck/abicheck@v0.7.0
+        uses: abicheck/abicheck@v0.8.0
         with:
           abi-baseline: v2.0.0
           new-library: build/libfoo.so
@@ -146,7 +146,7 @@ out of the archive:
 
 ```yaml
       - name: ABI compatibility check
-        uses: abicheck/abicheck@v0.7.0
+        uses: abicheck/abicheck@v0.8.0
         with:
           abi-baseline: latest-release
           baseline-profile: linux-x86_64-gcc13-release
@@ -229,7 +229,7 @@ git push
 
 ```yaml
       - name: ABI compatibility check
-        uses: abicheck/abicheck@v0.7.0
+        uses: abicheck/abicheck@v0.8.0
         with:
           old-library: abi/libfoo.abicheck.json
           new-library: build/libfoo.so
@@ -259,7 +259,7 @@ Fix by reading the baseline from the base commit explicitly:
           git show "${{ github.event.pull_request.base.sha }}:abi/libfoo.abicheck.json" \
             > /tmp/baseline.abicheck.json
       - name: ABI compatibility check
-        uses: abicheck/abicheck@v0.7.0
+        uses: abicheck/abicheck@v0.8.0
         with:
           old-library: /tmp/baseline.abicheck.json
           new-library: build/libfoo.so
@@ -294,7 +294,7 @@ it with the current build):
             abi-baseline-${{ github.event.repository.default_branch }}-
 
       - name: Refresh baseline
-        uses: abicheck/abicheck@v0.7.0
+        uses: abicheck/abicheck@v0.8.0
         with:
           mode: dump
           new-library: build/libfoo.so
@@ -318,7 +318,7 @@ key, ready for the next PR's `restore-keys` fallback to pick up.
             abi-baseline-${{ github.event.repository.default_branch }}-
 
       - name: ABI compatibility check
-        uses: abicheck/abicheck@v0.7.0
+        uses: abicheck/abicheck@v0.8.0
         with:
           old-library: abi-baseline.json
           new-library: build/libfoo.so
@@ -348,7 +348,7 @@ Best for: large binaries, private repos, retention policies.
         run: aws s3 cp s3://my-bucket/abi-baselines/libfoo-2.0.0.abicheck.json baseline.json
 
       - name: ABI check
-        uses: abicheck/abicheck@v0.7.0
+        uses: abicheck/abicheck@v0.8.0
         with:
           old-library: baseline.json
           new-library: build/libfoo.so

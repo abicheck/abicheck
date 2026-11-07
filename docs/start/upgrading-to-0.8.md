@@ -8,20 +8,20 @@ lifecycle: migration
 generated: false
 ---
 
-# Upgrading from 0.6 to 0.7
+# Upgrading from 0.7 to 0.8
 
-This page is the migration for the 0.7 option-vocabulary renames. The same
-concept had two spellings on the command line; 0.7 keeps one, and the old
+This page is the migration for the 0.8 option-vocabulary renames. The same
+concept had two spellings on the command line; 0.8 keeps one, and the old
 spelling is removed. A script that still uses a retired spelling stops with
 exit 64 and a `No such option` error naming the flag, so it fails loudly
 rather than running with a different meaning.
 
-**Do this first:** run your existing command lines against 0.7. Each failure
+**Do this first:** run your existing command lines against 0.8. Each failure
 names the retired flag; the table below gives its replacement.
 
 ## CLI renames
 
-| 0.6 spelling | 0.7 spelling | Where |
+| 0.7 spelling | 0.8 spelling | Where |
 |---|---|---|
 | `--version LABEL` (per-side version label) | `--label LABEL` | `compare`, `dump`, `project history` |
 | `--abi3 VERSION` (stable-ABI floor) | `--abi3-floor VERSION` | `compare` |
@@ -51,7 +51,7 @@ Config keys have no transition period: the old key is removed in this
 release, so a `.abicheck.yml` that still uses it fails with the strict schema's
 unknown-key error, and the run stops instead of changing meaning.
 
-| 0.6 key | 0.7 key | Notes |
+| 0.7 key | 0.8 key | Notes |
 |---|---|---|
 | `acknowledgment:` (the `.abicheck.yml` block, and the top-level block of a `--policy` document) | `acknowledgments:` | Same keys inside: `.abicheck.yml` takes `file`, `unacknowledged_additions` and `breaks`; a `--policy` document's block takes `unacknowledged_additions` and `breaks`. A `--policy` document still carrying `acknowledgment:` fails with an error naming `acknowledgments:`; the old key is not accepted. |
 | `source: {method: ...}` | `sources: {method: ...}` | Joins the existing `sources:` block (`public_headers`, `exclude`, `graph`). |
@@ -62,7 +62,7 @@ The typed Python API (`run_compare`, `run_dump`, `CompareRequest`, `DumpRequest`
 `InputSpec`) renames these keyword arguments and fields. Each old spelling is
 removed outright, so passing it raises `TypeError` naming the unexpected keyword.
 
-| 0.6 spelling | 0.7 spelling | Where |
+| 0.7 spelling | 0.8 spelling | Where |
 |---|---|---|
 | `old_version` / `new_version` | `old_label` / `new_label` | `run_compare` |
 | `policy_file_path` | `policy` (a document path; `policy` takes a profile name or a document) | `run_compare`, `CompareRequest` |
@@ -90,14 +90,14 @@ and setting the old name fails the run before any analysis, with an
 `::error::` that names the new input. Change the workflow in the same edit
 that moves to this release.
 
-| 0.6 input | 0.7 input | Notes |
+| 0.7 input | 0.8 input | Notes |
 |---|---|---|
-| `ast-frontend` | `set: compile.frontend=<value>` | Renamed to `frontend`, which 0.7 also retires (see below). |
+| `ast-frontend` | `set: compile.frontend=<value>` | Renamed to `frontend`, which 0.8 also retires (see below). |
 | `gcc-path` | `compiler` | Takes a compiler path or a cross-toolchain prefix. |
 | `gcc-prefix` | `compiler` | Removed. `compiler` takes the same value. |
-| `gcc-options` | `set: compile.options=[<flag>, ...]` | Renamed to `compile-options`, which 0.7 also retires (see below). |
+| `gcc-options` | `set: compile.options=[<flag>, ...]` | Renamed to `compile-options`, which 0.8 also retires (see below). |
 | `analysis-assurance-complete` | `require-complete` | Same `true`/`false` override of `assurance.require_complete`. |
-| `public-header-dir` | `header: <dir> ...` | Renamed to `public-header-dirs`, which 0.7 also retires (see below). |
+| `public-header-dir` | `header: <dir> ...` | Renamed to `public-header-dirs`, which 0.8 also retires (see below). |
 | `debug-info1`, `debug-info2` | `old-debug-info`, `new-debug-info` | |
 | `devel-pkg1`, `devel-pkg2` | `old-header`, `new-header` | These now also accept a development package. |
 | `old-version`, `new-version` | `old-label`, `new-label` | Report labels; the defaults stay `old` and `new`. |
@@ -128,7 +128,7 @@ transition period. Each old `workflow_call` input is still declared as an empty
 tombstone, and a non-empty value fails the run before any analysis with an
 `::error::` that names the replacement.
 
-| 0.6 input | 0.7 input | Workflows |
+| 0.7 input | 0.8 input | Workflows |
 |---|---|---|
 | `requested-depth` | `depth` | `check-single.yml` |
 | `ast-frontend` | `frontend` | both |
@@ -147,7 +147,7 @@ Three project-stable `compare` options are removed from the command line. Each
 now fails as an unknown option (exit 64). Set the same value in `.abicheck.yml`,
 or pass it once with `--set PATH=VALUE`, whose value is YAML.
 
-| 0.6 spelling | 0.7 spelling | Notes |
+| 0.7 spelling | 0.8 spelling | Notes |
 |---|---|---|
 | `compare --view TOKEN` | `output.view` (`--set 'output.view=["show=breaking"]'`) | A YAML list of the same tokens. |
 | `compare --used-by-manifest FILE` | `consumers.manifests` (`--set 'consumers.manifests=[FILE]'`) | Relative paths resolve against the config file. |

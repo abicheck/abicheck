@@ -30,7 +30,7 @@ automatically, then runs ABI comparison and reports results.
 ## Quick start
 
 ```yaml
-- uses: abicheck/abicheck@v0.7.0
+- uses: abicheck/abicheck@v0.8.0
   with:
     old-library: abi-baseline.json
     new-library: build/libfoo.so
@@ -126,7 +126,7 @@ There is no separate `appcompat` mode. Scope a normal `compare` to what an
 application actually uses via `extra-args`:
 
 ```yaml
-- uses: abicheck/abicheck@v0.7.0
+- uses: abicheck/abicheck@v0.8.0
   with:
     old-library: libfoo-old.so
     new-library: libfoo-new.so
@@ -416,7 +416,7 @@ jobs:
         run: mkdir build && cd build && cmake .. && make
 
       - name: Check ABI compatibility
-        uses: abicheck/abicheck@v0.7.0
+        uses: abicheck/abicheck@v0.8.0
         with:
           old-library: abi-baseline.json  # committed to repo
           new-library: build/libfoo.so
@@ -445,7 +445,7 @@ jobs:
         run: mkdir build && cd build && cmake .. && make
 
       - name: Dump ABI baseline
-        uses: abicheck/abicheck@v0.7.0
+        uses: abicheck/abicheck@v0.8.0
         with:
           mode: dump
           new-library: build/libfoo.so
@@ -468,7 +468,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Check ABI
-        uses: abicheck/abicheck@v0.7.0
+        uses: abicheck/abicheck@v0.8.0
         with:
           old-library: abi-baseline.json
           new-library: build/libfoo.so
@@ -561,7 +561,7 @@ is pre-1.0, pin an exact release tag; a floating major tag is not published
 yet:
 
 ```yaml
-uses: abicheck/abicheck@v0.7.0     # exact release tag (recommended, reproducible)
+uses: abicheck/abicheck@v0.8.0     # exact release tag (recommended, reproducible)
 uses: abicheck/abicheck@abc123def  # exact commit SHA (most secure)
 ```
 

@@ -48,7 +48,7 @@ REMOVED_IN_0_7: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         # typed-request spelling.
         frozenset(
             {
-                "start/upgrading-to-0.7.md",
+                "start/upgrading-to-0.8.md",
                 "reference/compatibility-evaluation-config.md",
             }
         ),
@@ -60,7 +60,7 @@ REMOVED_IN_0_7: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         "typed Python API `policy_file_path=` (the keyword of the documented"
         " load_suppression_and_policy helper; the typed request's field is `policy`)",
         ("policy_file_path=",),
-        frozenset({"start/upgrading-to-0.7.md", "use/python-api.md#L147"}),
+        frozenset({"start/upgrading-to-0.8.md", "use/python-api.md#L147"}),
     ),
     (
         "compare/dump/project history --version (the per-side version label,"
@@ -72,13 +72,13 @@ REMOVED_IN_0_7: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
             "dump --version",
             "project history --version",
         ),
-        frozenset({"start/upgrading-to-0.7.md"}),
+        frozenset({"start/upgrading-to-0.8.md"}),
     ),
     (
         "compare --abi3 (the stable-ABI floor, renamed --abi3-floor by"
         " ADR-091 D5 R12 and removed outright by its D7 amendment)",
         ("compare --abi3 ",),
-        frozenset({"start/upgrading-to-0.7.md"}),
+        frozenset({"start/upgrading-to-0.8.md"}),
     ),
     (
         "deps compare --old-root/--new-root and deps tree --sysroot (renamed"
@@ -89,7 +89,7 @@ REMOVED_IN_0_7: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
             "deps compare --new-root",
             "deps tree --sysroot",
         ),
-        frozenset({"start/upgrading-to-0.7.md"}),
+        frozenset({"start/upgrading-to-0.8.md"}),
     ),
     (
         "root Action inputs retired by ADR-091 D7 to set: replacements or removed"
@@ -105,7 +105,7 @@ REMOVED_IN_0_7: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         ),
         frozenset(
             {
-                "start/upgrading-to-0.7.md",
+                "start/upgrading-to-0.8.md",
                 "reference/github-action-inputs.md",
             }
         ),
@@ -120,7 +120,7 @@ REMOVED_IN_0_7: tuple[tuple[str, tuple[str, ...], frozenset[str]], ...] = (
         ),
         frozenset(
             {
-                "start/upgrading-to-0.7.md",
+                "start/upgrading-to-0.8.md",
                 "contribute/known-gaps.md",
                 "AGENTS.md",
             }

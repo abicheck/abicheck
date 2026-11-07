@@ -3,7 +3,7 @@ name: set-up-abi-compatibility-ci
 description: Set up automated ABI compatibility checking for a C/C++ shared library in a GitHub repository's GitHub Actions CI. Use when asked to add, enable, integrate, or configure ABI checking or a breaking-change gate in GitHub Actions, to onboard a native library project onto continuous compatibility checking, to make pull requests fail when they break the library's ABI, or to repair an existing ABI-checking workflow that never catches anything, always fails, or compares against the wrong baseline. Inspects the repository's build, headers, libraries, and release process, chooses a baseline strategy, and writes a working, pinned, least-privilege workflow with a staged rollout.
 license: Apache-2.0
 metadata:
-  abicheck-version-range: ">=0.6.0,<0.8.0"
+  abicheck-version-range: ">=0.6.0,<0.9.0"
   layer: A
   source: skills-src/set-up-abi-compatibility-ci/SKILL.md
 ---
@@ -90,7 +90,7 @@ decides. Both sides must be built identically
 
 ## Step 4 — Write the workflow (every rule below is required)
 
-- `abicheck/abicheck@v0.7.0` — exact tag. In a job holding `contents: write`
+- `abicheck/abicheck@v0.8.0` — exact tag. In a job holding `contents: write`
   or `security-events: write`, pin **every** action to a commit SHA with the
   tag in a comment, resolved only with:
   `git ls-remote https://github.com/<owner>/<repo> 'refs/tags/<tag>' 'refs/tags/<tag>^{}' | sort -k2 | tail -1 | cut -f1`

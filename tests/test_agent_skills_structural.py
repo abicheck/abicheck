@@ -431,11 +431,11 @@ def test_every_pinned_abicheck_release_is_inside_the_skill_version_range(
 
 
 def test_pin_check_fires_on_the_range_defect_it_was_written_for():
-    """Negative control on the real tree: the set-up skill pins v0.7.0 in its
-    own workflows, so the pre-fix `<0.7.0` range must be reported."""
+    """Negative control on the real tree: the set-up skill pins v0.8.0 in its
+    own workflows, so the pre-fix `<0.8.0` range must be reported."""
     set_up = next(d for d in SKILL_DIRS if d.name == "set-up-abi-compatibility-ci")
-    offenders = _pins_outside_range(set_up, ">=0.6.0,<0.7.0")
-    assert offenders and all("v0.7.0" in line for line in offenders)
+    offenders = _pins_outside_range(set_up, ">=0.6.0,<0.8.0")
+    assert offenders and all("v0.8.0" in line for line in offenders)
 
 
 def test_pin_check_reads_both_tag_pins_and_sha_comment_pins(tmp_path: Path):
