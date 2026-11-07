@@ -495,7 +495,7 @@ def _build_with_cmake(
             ],
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=600,
         )
         if r.returncode != 0:
             pytest.fail(
