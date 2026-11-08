@@ -74,6 +74,27 @@ Next, unranked (the `--no-baseline` one-sided-detector gap, the target-platform 
 
 ## Open and partially open gaps
 
+### Parser inputs: corrupt input reads as empty or escapes as an untyped exception
+
+Found by the parser fuzz oracle in `tests/test_parser_fuzz_oracle.py`
+(`tests/_parser_fuzz_oracle.py` holds the oracle: a corrupted input must raise
+an allowed type, record an explicit failure, or read as non-empty, and must
+raise no other type). Each entry below is one way the oracle fails. The
+fast lane uses a fixed seed and stays green on the parsers listed here; the
+`slow` lane finds the failures and is `xfail(strict=True)` on them.
+
+#### A corrupt PE export directory parses with zero exports and records no failure (2026-11-08)
+**Status (2026-11-08): OPEN.** `parse_pe_metadata` (`abicheck/pe_metadata.py`) returns normally on a damaged export directory and reports `exports == []` with `export_read == "unrecorded"`. No `note_export_read_failure` is called on that path, so the read is neither `failed` nor `partial`. Reproduction: the committed `tests/fixtures/containers/sources/corpus_pe.dll` (3 exports) cut to 1405 bytes. The parse succeeds, the machine type is read, and zero exports come back. A fuzz run finds more cases from byte flips inside the export directory. Owner: `abicheck/pe_metadata.py`, with the export-read recording contract in `abicheck/extract/parse_failures.py`.
+<!-- canary: tests/test_parser_fuzz_oracle.py::test_pe_truncated_export_directory_reads_empty_unrecorded -->
+
+#### `parse_dwarf_metadata` reads corrupt DWARF as empty, and lets a `MemoryError` escape (2026-11-08)
+**Status (2026-11-08): OPEN.** `parse_dwarf_metadata` (`abicheck/dwarf_metadata.py`) catches only `ELFError`, `OSError` and `ValueError`, and it records no export-read failure. A single corrupted byte in a gcc `-g` shared-object seed (about 3 % of flips in one measured run) returns no structs, enums or base types with nothing recorded, so the corrupt debug info reads as "no DWARF". Another flip (about 0.3 %) makes pyelftools allocate a decompressed section of arbitrary size, and the `MemoryError` escapes a function whose docstring says "Never raises". Owner: `abicheck/dwarf_metadata.py`, `abicheck/extract/dwarf_subtree_index.py`.
+<!-- canary: tests/test_parser_fuzz_oracle.py::test_dwarf_single_byte_corruption_reads_empty_without_failure -->
+
+#### A malformed storage-v2 snapshot leaks `KeyError`/`TypeError`/`AttributeError` instead of a typed error (2026-11-08)
+**Status (2026-11-08): OPEN.** A storage-v2 snapshot document with one function's `mangled` key removed (`sections/declarations/payload/functions[0]`) is accepted by `load_snapshot`, and the `KeyError` surfaces only on the first `declarations` access (`abicheck/model/lazy_declarations.py` -> `abicheck/storage/snapshot_decode_declarations.py`). Structural mutations (dropped keys, wrong node types) leak the same classes: `KeyError` for `return_type`, `status` and `name`, and `TypeError` / `AttributeError` for wrong node types, raised from `load_snapshot` or from the lazy decode, which the harness does not distinguish. The documented contract is `SnapshotError` / `ValidationError`. Owner: `storage/snapshot_decode_declarations.py`, `storage/snapshot_codec.py`.
+<!-- canary: tests/test_parser_fuzz_oracle.py::test_snapshot_missing_function_mangled_key_leaks_keyerror -->
+
 ### Option vocabulary (ADR-091 follow-ups)
 
 The option-vocabulary migration is complete (ADR-091, Accepted and
