@@ -573,3 +573,132 @@ def test_main_snapshot_names_an_adopted_snapshot_for_its_commit(tmp_path: Path) 
     )
     assert result.returncode == 0, result.stderr
     assert f"artifact-name={_NAME}-x86" in out.read_text()
+
+
+# ── the CLI commands the Action shells call, in-process ────────────────────
+
+from click.testing import CliRunner  # noqa: E402
+
+from abicheck.frontends.action.cli import action_cli  # noqa: E402
+
+
+def _outputs(path: Path) -> dict[str, str]:
+    return dict(
+        line.split("=", 1) for line in path.read_text(encoding="utf-8").splitlines()
+    )
+
+
+def test_cli_snapshot_name() -> None:
+    runner = CliRunner()
+    ok = runner.invoke(action_cli, ["snapshot-name", _BASE, "--profile", "p"])
+    assert (ok.exit_code, ok.output.strip()) == (0, f"{_NAME}-p")
+    bad = runner.invoke(action_cli, ["snapshot-name", "abc"])
+    assert bad.exit_code == 2
+    assert "not a full commit SHA" in bad.output
+
+
+@pytest.mark.parametrize(
+    ("args", "code", "outcome", "base"),
+    [
+        (["--mode", "merge-commit", "--head-parents", "p1 p2"], 0, "resolved", "p1"),
+        (["--mode", "head", "--merge-bases", "m n"], 3, "base_ambiguous", ""),
+        (["--mode", "merge-group"], 3, "base_unknown", ""),
+    ],
+)
+def test_cli_select_base(
+    tmp_path: Path, args: list[str], code: int, outcome: str, base: str
+) -> None:
+    out = tmp_path / "o"
+    result = CliRunner().invoke(
+        action_cli, ["select-base", *args, "--github-output", str(out)]
+    )
+    fields = _outputs(out)
+    assert (result.exit_code, fields["outcome"], fields["base-sha"]) == (
+        code,
+        outcome,
+        base,
+    )
+    assert fields["message"]
+
+
+def _resolve(
+    tmp_path: Path, artifacts: object, runs: object, *extra: str
+) -> tuple[int, dict[str, str], str]:
+    a, r, out = tmp_path / "a.json", tmp_path / "r.json", tmp_path / "o"
+    a.write_text(json.dumps(artifacts))
+    r.write_text(json.dumps(runs))
+    result = CliRunner().invoke(
+        action_cli,
+        [
+            "resolve-snapshot",
+            str(a),
+            str(r),
+            "--repository",
+            "o/r",
+            "--workflow",
+            _WF,
+            "--branch",
+            "main",
+            "--base-sha",
+            _BASE,
+            "--artifact-name",
+            _NAME,
+            "--github-output",
+            str(out),
+            *extra,
+        ],
+    )
+    return result.exit_code, (_outputs(out) if out.exists() else {}), result.output
+
+
+def test_cli_resolve_snapshot_resolved(tmp_path: Path) -> None:
+    code, fields, _ = _resolve(
+        tmp_path, {"artifacts": [_art(4, 10)]}, {"workflow_runs": [_run(10)]}
+    )
+    assert (code, fields["outcome"], fields["artifact-id"], fields["run-id"]) == (
+        0,
+        "resolved",
+        "4",
+        "10",
+    )
+    assert "this PR" in fields["message"]
+
+
+def test_cli_resolve_snapshot_refusal_reports_rejections(tmp_path: Path) -> None:
+    code, fields, output = _resolve(
+        tmp_path,
+        [_art(4, 10)],
+        [_run(10, event="pull_request")],
+        "--merge-group",
+    )
+    assert (code, fields["outcome"], fields["artifact-id"]) == (
+        3,
+        "untrusted_source",
+        "",
+    )
+    assert "rejected artifact 4: wrong-event" in output
+
+
+def test_cli_resolve_snapshot_lookup_failed(tmp_path: Path) -> None:
+    code, fields, _ = _resolve(tmp_path, [], [], "--lookup-failed")
+    assert (code, fields["outcome"]) == (3, "lookup_failed")
+
+
+def test_cli_resolve_snapshot_rejects_a_non_array(tmp_path: Path) -> None:
+    code, _fields, output = _resolve(tmp_path, {"artifacts": {}}, [])
+    assert code == 1
+    assert "does not hold a 'artifacts' array" in output
+
+
+def test_select_base_rejects_an_unknown_mode() -> None:
+    with pytest.raises(ValueError, match="unknown base mode"):
+        select_base_commit("sideways")
+
+
+def test_unreadable_rows_are_ignored_not_trusted() -> None:
+    result = resolve_snapshot(
+        ["not a row", {"name": _NAME, "id": 1, "workflow_run": "x"}],
+        ["not a run", {"id": ""}],
+        _EXPECT,
+    )
+    assert result.outcome is DeltaOutcome.UNTRUSTED_SOURCE
