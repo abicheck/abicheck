@@ -197,13 +197,15 @@ current emitter, which is unchanged.
 
 #### A stripped library compared without headers reads `NO_CHANGE` with `partial` assurance and exit 0 (2026-11-08)
 
-**Status (2026-11-08): OPEN.** Found while building the invariant oracles (`tests/test_invariant_oracles_reduced_evidence.py`). A shared object with its symbols stripped (`strip`, no `.symtab`/DWARF) compared against a changed build with no `-H` headers reads `verdict: NO_CHANGE`, `analysis_assurance.status: partial`, exit 0 and `Gate: ACCEPTED`. The same pair unstripped reads `BREAKING` (`func_removed`, exit 4) with `complete` assurance, so the change is real and the reduced run loses it: a parameter-count change on an exported symbol is not visible from the stripped dynamic symbol table alone. The terminal headline also says `Gate: ACCEPTED` while its own warning says "Treat this result as unconfirmed". Invariant A (`tests/oracles/absence.py`) says a `partial` run must not state a compatibility claim, so this is a false-clean on missing evidence. Owner: `workflows/dump/` (the symbols-only fallback) and the verdict/gate mapping in `report/`.
+**Status (2026-11-08): OPEN.** Found while building the invariant oracles (`tests/test_invariant_oracles_reduced_evidence.py`).
+[Full write-up](known-gaps/a-stripped-library-compared-without-headers-reads-no-change-with-partial-assurance-and-exit-0.md)
 `false-clean` — a symbols-only compare of a stripped library reads `NO_CHANGE` with exit 0 and an accepted headline.
 <!-- canary: tests/test_invariant_oracles_reduced_evidence.py::test_stripped_pair_gap_is_still_the_current_answer -->
 
 #### The typed `compare()` route omits `exported_not_public` that the CLI reports for the same catalog case (2026-11-08)
 
-**Status (2026-11-08): OPEN.** Found by the typed-API route check in `tests/test_invariant_oracles_catalog.py`. On `case09_cpp_vtable` (castxml, with headers), the CLI reports `exported_not_public` (a binary export with no header declaration) and the typed `abicheck.checker.compare()` on the same dumped snapshots does not, even though `cross_source_checks` defaults to `True`. Verdict and every other kind agree; `surface_metrics=True` closes the `public_surface_*` gap on `case01`, so the remaining difference is the cross-source stage's input. The test is a strict xfail for `case09` until the typed route receives the same resolved inputs as the CLI. Owner: `checker.py` (the typed entry point's defaults) and `workflows/` (the request the CLI resolves).
+**Status (2026-11-08): OPEN.** Found by the typed-API route check in `tests/test_invariant_oracles_catalog.py`.
+[Full write-up](known-gaps/the-typed-compare-route-omits-exported-not-public-that-the-cli-reports-for-the-same-catalog-case.md)
 `false-clean` — the typed route can read a catalog case as having one fewer hygiene finding than the CLI.
 <!-- canary: tests/test_invariant_oracles_catalog.py::test_typed_api_omits_exported_not_public_on_case09 -->
 

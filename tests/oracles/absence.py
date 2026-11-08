@@ -41,7 +41,10 @@ def absence_violations(report: Mapping[str, Any]) -> list[str]:
 CLEAN_CLAIM_PHRASES: tuple[str, ...] = (
     "Gate: ACCEPTED",
     "Compatibility: NO_CHANGE",
-    "✅ `NO_CHANGE`",
+    "Compatibility: COMPATIBLE",
+    "`NO_CHANGE`",
+    "`COMPATIBLE`",
+    "`COMPATIBLE_WITH_RISK`",
 )
 
 

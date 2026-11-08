@@ -32,6 +32,10 @@ pytestmark = [
         not sys.platform.startswith("linux") or shutil.which("gcc") is None,
         reason="builds ELF libraries with gcc on Linux",
     ),
+    pytest.mark.skipif(
+        shutil.which("strip") is None,
+        reason="strip is required to build the stripped library",
+    ),
 ]
 
 _V1 = "int add(int a, int b) { return a + b; }\nint keep(void) { return 1; }\n"
@@ -69,8 +73,8 @@ def _build(tmp: Path) -> tuple[Path, Path, Path, Path]:
     )
 
 
-def _compare(tmp: Path, old: Path, new: Path, tag: str) -> tuple[int, dict, str]:
-    """Run the public CLI compare; return (exit code, JSON report, terminal text)."""
+def _compare(tmp: Path, old: Path, new: Path, tag: str) -> tuple[int, dict, str, str]:
+    """Run the public CLI compare; return (exit code, JSON report, terminal, Markdown)."""
     out_json = tmp / f"{tag}.json"
     out_md = tmp / f"{tag}.md"
     proc = subprocess.run(
@@ -91,11 +95,13 @@ def _compare(tmp: Path, old: Path, new: Path, tag: str) -> tuple[int, dict, str]
         env=abicheck_env(),
     )
     report = json.loads(out_json.read_text(encoding="utf-8"))
-    return proc.returncode, report, proc.stdout
+    return proc.returncode, report, proc.stdout, out_md.read_text(encoding="utf-8")
 
 
 @pytest.fixture(scope="module")
-def pairs(tmp_path_factory: pytest.TempPathFactory) -> dict[str, tuple[int, dict, str]]:
+def pairs(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> dict[str, tuple[int, dict, str, str]]:
     tmp = tmp_path_factory.mktemp("reduced_evidence")
     v1, v2, s1, s2 = _build(tmp)
     return {
@@ -105,10 +111,10 @@ def pairs(tmp_path_factory: pytest.TempPathFactory) -> dict[str, tuple[int, dict
 
 
 def test_unstripped_control_reaches_a_complete_breaking_result(
-    pairs: dict[str, tuple[int, dict, str]],
+    pairs: dict[str, tuple[int, dict, str, str]],
 ) -> None:
     """Control: the scenario is sensitive, so the reduced pair's answer means something."""
-    exit_code, report, _ = pairs["control"]
+    exit_code, report, _, _ = pairs["control"]
     assert report["verdict"] == "BREAKING"
     assert report["analysis_assurance"]["status"] == "complete"
     assert exit_code == 4
@@ -116,10 +122,10 @@ def test_unstripped_control_reaches_a_complete_breaking_result(
 
 @pytest.mark.known_gap_canary
 def test_stripped_pair_gap_is_still_the_current_answer(
-    pairs: dict[str, tuple[int, dict, str]],
+    pairs: dict[str, tuple[int, dict, str, str]],
 ) -> None:
     """Canary: the gapped answer (NO_CHANGE, partial, exit 0) while the gap is open."""
-    exit_code, report, _ = pairs["stripped"]
+    exit_code, report, _, _ = pairs["stripped"]
     assert report["verdict"] == "NO_CHANGE"
     assert report["analysis_assurance"]["status"] == "partial"
     assert exit_code == 0
@@ -127,18 +133,23 @@ def test_stripped_pair_gap_is_still_the_current_answer(
 
 @pytest.mark.xfail(strict=True, reason=f"known gap: {_GAP}")
 def test_stripped_pair_does_not_claim_compatibility_on_partial_evidence(
-    pairs: dict[str, tuple[int, dict, str]],
+    pairs: dict[str, tuple[int, dict, str, str]],
 ) -> None:
     """Invariant A on the JSON verdict."""
-    _, report, _ = pairs["stripped"]
+    _, report, _, _ = pairs["stripped"]
     assert absence_violations(report) == []
 
 
 @pytest.mark.xfail(strict=True, reason=f"known gap: {_GAP}")
 def test_stripped_pair_renderers_do_not_state_acceptance(
-    pairs: dict[str, tuple[int, dict, str]],
+    pairs: dict[str, tuple[int, dict, str, str]],
 ) -> None:
-    """Invariant A on the rendered wording: the terminal headline must not say ACCEPTED."""
-    _, report, terminal = pairs["stripped"]
+    """Invariant A on the rendered wording, in the terminal and the Markdown report."""
+    _, report, terminal, markdown = pairs["stripped"]
     status = report["analysis_assurance"]["status"]
-    assert rendered_absence_violations({"terminal": terminal}, status) == []
+    assert (
+        rendered_absence_violations(
+            {"terminal": terminal, "markdown": markdown}, status
+        )
+        == []
+    )

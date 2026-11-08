@@ -30,9 +30,14 @@ def conservation_violations(
         if total != population
     ]
 
-    audit = report.get("disposition_audit")
-    if isinstance(audit, Mapping):
-        problems.extend(_audit_violations(audit))
+    if "disposition_audit" in report and report["disposition_audit"] is not None:
+        audit = report["disposition_audit"]
+        if isinstance(audit, Mapping):
+            problems.extend(_audit_violations(audit))
+        else:
+            problems.append(
+                f"disposition_audit is not a mapping: {type(audit).__name__}"
+            )
 
     keys = Counter(_identity(change) for change in changes)
     problems.extend(
@@ -58,6 +63,12 @@ def _audit_violations(audit: Mapping[str, Any]) -> list[str]:
     )
     if bad:
         return [f"disposition_audit.counts has non-integer values for {bad}"]
+    negative = sorted(k for k, v in counts.items() if v < 0)
+    if negative or detected < 0:
+        return [
+            "disposition_audit has negative values "
+            f"(counts {negative}, detected_total {detected})"
+        ]
     summed = sum(counts.values())
     if summed != detected:
         return [

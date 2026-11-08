@@ -234,3 +234,31 @@ def test_symbol_pairs_catch_a_same_kind_on_a_different_symbol() -> None:
         "only castxml: func_removed on a",
         "only clang: func_removed on b",
     ]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Compatibility: COMPATIBLE_WITH_RISK | Gate: REJECTED",
+        "| **Verdict** | ✅ `COMPATIBLE` |",
+        "| **Verdict** | ✅ `COMPATIBLE_WITH_RISK` |",
+    ],
+)
+def test_rendered_compatibility_claim_is_flagged_without_an_accepted_gate(
+    text: str,
+) -> None:
+    assert rendered_absence_violations({"markdown": text}, "partial") != []
+
+
+def test_negative_audit_counts_cannot_cancel_a_positive_one() -> None:
+    audit = {"counts": {"gating": 2, "suppressed": -1}, "detected_total": 1}
+    assert conservation_violations({"changes": [], "disposition_audit": audit}, {}) == [
+        "disposition_audit has negative values (counts ['suppressed'], detected_total 1)"
+    ]
+
+
+def test_non_mapping_disposition_audit_is_a_violation_and_absent_is_allowed() -> None:
+    assert conservation_violations(
+        {"changes": [], "disposition_audit": "gating"}, {}
+    ) == ["disposition_audit is not a mapping: str"]
+    assert conservation_violations({"changes": []}, {}) == []

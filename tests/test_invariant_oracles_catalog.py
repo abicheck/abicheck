@@ -239,6 +239,8 @@ def test_producer_symbol_pairs_agree_between_castxml_and_clang(
     """B: beyond kinds, the (kind, symbol) pairs must agree, with no undeclared difference."""
     from tests.oracles.producer import symbol_violations
 
+    if shutil.which("clang++") is None:
+        pytest.skip("clang++ is required for the clang header backend")
     castxml = _backend_pairs(lab, case, "castxml")
     clang = _backend_pairs(lab, case, "clang")
     assert castxml and clang, f"{case}: a backend reported no changes"
@@ -246,20 +248,17 @@ def test_producer_symbol_pairs_agree_between_castxml_and_clang(
 
 
 def test_producer_allowlist_has_not_grown_past_its_baseline() -> None:
-    """B: the allowlist may only shrink. Every entry must be in the committed baseline."""
+    """B: the allowlist may only shrink. Compared per case, as (kind, side) pairs."""
     from tests.oracles.producer import allowlist_growth
 
-    current = {
-        (case, kind, side)
-        for case, entries in PRODUCER_ALLOWLIST.items()
-        for kind, side in entries
-    }
-    recorded = {
-        (case, kind, side)
-        for case, entries in _BASELINE.items()
-        for kind, side in entries
-    }
-    assert allowlist_growth(current, recorded) == []
+    growth: list[str] = []
+    for case in sorted(set(PRODUCER_ALLOWLIST) | set(_BASELINE)):
+        current = set(PRODUCER_ALLOWLIST.get(case, frozenset()))
+        recorded = {(kind, side) for kind, side in _BASELINE.get(case, [])}
+        growth.extend(
+            f"{case}: {message}" for message in allowlist_growth(current, recorded)
+        )
+    assert growth == []
 
 
 @pytest.mark.known_gap_canary
