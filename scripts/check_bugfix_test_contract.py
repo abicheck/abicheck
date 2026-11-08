@@ -386,11 +386,8 @@ REQUIREMENTS: tuple[Requirement, ...] = (
         "docs/contribute/plans/bug-class-regression-testing.md for the "
         "analysis this requirement is based on). Check "
         "tests/regressions/manifest.py (BUG_CLASSES/get()) first for a "
-        "matching class before restating the invariant from scratch — name "
-        "its BugClass id here if it already has a home. When a defect family "
-        "in tests/regressions/families.py (F1–F18) already covers the "
-        "mechanism, name the family id instead and extend that family's "
-        "harness, rather than adding a new class. "
+        "matching class: name its id here, or the family id from "
+        "tests/regressions/families.py (F1–F18) if a family covers it. "
         "'None — documented as a known gap' is an acceptable answer; "
         "silence is not.",
     ),
