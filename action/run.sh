@@ -2410,7 +2410,7 @@ with open(out, "w", encoding="utf-8") as fh:
       "$gate_verdict" "$out") 2>/dev/null; then
     printf '%s\n' "$out"
   else
-    echo "::warning::abicheck: could not record the delta-baseline $role block in the JSON report (outcome '$outcome'); the comparison itself is unaffected." >&2
+    _warning_annotation "abicheck: could not record the delta-baseline $role block in the JSON report (outcome '$outcome'); the comparison itself is unaffected." >&2
   fi
 }
 
