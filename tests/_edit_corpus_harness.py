@@ -1,13 +1,18 @@
-"""Build old/new libraries from a seed and an operator, then run abicheck on them.
+"""Build old/new libraries from a seed, an operator and a ``Config``; run abicheck.
 
 Only the public entry points are used: ``abicheck.dumper.dump`` for the
-snapshots and ``abicheck.checker.compare`` for the verdict. A compiler failure
-raises ``CompileError``; it is never converted into a skip, because a corpus
-case that did not build proved nothing.
+snapshots and ``abicheck.checker.compare`` for the verdict. The evidence axis
+decides what the dump is given: ``binary`` builds without ``-g`` and passes no
+header, ``dwarf`` builds with ``-g`` and passes no header, ``headers`` adds the
+public header (castxml, with the standard and the layout-changing flags the
+library was built with). A compiler failure raises ``CompileError``; it is
+never converted into a skip, because a corpus case that did not build proved
+nothing.
 """
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -15,14 +20,18 @@ from pathlib import Path
 
 from abicheck.checker import compare
 from abicheck.dumper import dump
-from tests._edit_corpus_operators import VERDICT_RANK, EditOp
-from tests._edit_corpus_seeds import Seed
+from tests._edit_corpus_config import Config, Flags, Toolchain, default_config
+from tests._edit_corpus_operators import EditOp
+from tests._edit_corpus_seeds import RoleText, Seed
+from tests._edit_corpus_toolchains import std_flag
 
-# compiler label -> (C driver, C++ driver)
+# compiler label -> (C driver, C++ driver): the base PR's two fixed lanes.
 COMPILERS: dict[str, tuple[str, str]] = {
     "gcc": ("gcc", "g++"),
     "clang": ("clang", "clang++"),
 }
+
+LIB_NAME = "libedit.so"
 
 
 class CompileError(RuntimeError):
@@ -31,6 +40,7 @@ class CompileError(RuntimeError):
 
 @dataclass(frozen=True)
 class Built:
+    dir: Path
     so: Path
     header: Path
     snapshot: object  # AbiSnapshot; typed loosely to keep this module import-light
@@ -43,40 +53,76 @@ class Outcome:
     failures: tuple[str, ...]
 
 
-def _compile(
-    seed: Seed, compiler: str, out_dir: Path, header_text: str, source_text: str
+def label_toolchain(label: str) -> Toolchain:
+    """The plain-``PATH`` driver pair of a base-PR compiler label as a Toolchain."""
+    from tests._edit_corpus_toolchains import _identify
+
+    cc, cxx = COMPILERS[label]
+    ident = _identify(cc) if shutil.which(cc) else None
+    family, version = ident if ident else (label, 0)
+    return Toolchain(family, version, cc, cxx)
+
+
+def compile_cmd(
+    tc: Toolchain, config: Config, flags: Flags, *, debug: bool
+) -> list[str]:
+    """Driver + standard + ABI flags shared by library, consumer and probe builds."""
+    std = std_flag(tc, config.std) or config.std.name
+    cmd = [tc.driver(config.lang), f"-std={std}", *flags.render(tc, config.lang)]
+    if debug:
+        cmd.append("-g")
+    return cmd
+
+
+def dump_std_spelling(config: Config) -> str:
+    """A ``-std=`` spelling the header frontend's compiler accepts.
+
+    castxml emulates the system ``cc``/``c++`` (gcc on Linux), not the
+    producer, so ``c23`` from clang must be spelled ``c2x`` for gcc 13.
+    """
+    from tests._edit_corpus_toolchains import std_flag_for_driver
+
+    driver = "c++" if config.lang == "c++" else "cc"
+    return (
+        std_flag_for_driver(driver, config.std)
+        or std_flag(config.producer, config.std)
+        or config.std.name
+    )
+
+
+def _check(cmd: list[str], proc: subprocess.CompletedProcess[str], what: str) -> None:
+    if proc.returncode != 0:
+        raise CompileError(
+            f"{' '.join(cmd)} failed (exit {proc.returncode}):\n"
+            f"--- {what} ---\n--- stderr ---\n{proc.stderr}"
+        )
+
+
+def _compile_library(
+    seed: Seed,
+    config: Config,
+    flags: Flags,
+    out_dir: Path,
+    header_text: str,
+    source_text: str,
 ) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / seed.header_name).write_text(header_text, encoding="utf-8")
     src = out_dir / seed.source_name
     src.write_text(source_text, encoding="utf-8")
-    cc, cxx = COMPILERS[compiler]
-    driver = cxx if seed.lang == "c++" else cc
-    so = out_dir / "libedit.so"
-    cmd = [
-        driver,
-        "-shared",
-        "-g",
-        "-O0",
-        "-I",
-        str(out_dir),
-        "-o",
-        str(so),
-        str(src),
-    ]
-    if seed.lang == "c++":
-        cmd.insert(1, "-std=c++17")
+    so = out_dir / LIB_NAME
+    cmd = compile_cmd(config.producer, config, flags, debug=config.evidence != "binary")
+    cmd += ["-shared", "-I", str(out_dir), "-o", str(so), str(src)]
+    # PIC is an ELF/Mach-O concept: clang rejects -fPIC for the Windows target.
+    if sys.platform != "win32":
+        cmd.append("-fPIC")
     # Give old and new the same install name / SONAME. Otherwise the default is
     # derived from the output path (macOS) and the two sides differ only by their
     # build directory, which reads as a spurious SONAME_CHANGED.
-    # PIC is an ELF/Mach-O concept: clang rejects -fPIC for the Windows target.
-    if sys.platform != "win32":
-        cmd.insert(1, "-fPIC")
-    # PE has no SONAME, so Windows takes no flag.
     if sys.platform == "darwin":
-        cmd.insert(1, "-Wl,-install_name,libedit.so")
+        cmd.append(f"-Wl,-install_name,{LIB_NAME}")
     elif sys.platform.startswith("linux"):
-        cmd.insert(1, "-Wl,-soname,libedit.so")
+        cmd.append(f"-Wl,-soname,{LIB_NAME}")
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if proc.returncode != 0:
         raise CompileError(
@@ -87,73 +133,107 @@ def _compile(
 
 
 def build(
-    seed: Seed, compiler: str, out_dir: Path, overrides: dict | None = None
+    seed: Seed,
+    config: Config,
+    out_dir: Path,
+    overrides: dict[str, RoleText] | None = None,
+    flags: Flags | None = None,
 ) -> Built:
-    """Render *seed* (with *overrides* applied), compile it and snapshot the library."""
+    """Render *seed* (with *overrides*), compile it under *config* and snapshot it.
+
+    *flags* replaces the config's producer flags (a rebuild edit's new side).
+    """
+    fl = flags or config.flags
     header_text, source_text = seed.render(overrides)
-    so = _compile(seed, compiler, out_dir, header_text, source_text)
+    so = _compile_library(seed, config, fl, out_dir, header_text, source_text)
     header = out_dir / seed.header_name
-    # Pin the header frontend and the language standard so the dump reads the
-    # header the way the library was built, whatever the environment selects.
     is_cxx = seed.lang == "c++"
+    headers = [header] if config.evidence == "headers" else []
+    std = dump_std_spelling(config)
+    # The header frontend reads the header the way the library was built:
+    # same standard, same layout-changing flags.
+    gcc_options = " ".join(
+        [f"-std={std}", *fl.layout_flags(config.producer, seed.lang)]
+    )
     snap = dump(
         so,
-        [header],
+        headers,
         version=out_dir.name,
         compiler="c++" if is_cxx else "cc",
         lang="c++" if is_cxx else "c",
         header_backend="castxml",
-        gcc_options="-std=c++17" if is_cxx else None,
+        gcc_options=gcc_options if headers else None,
     )
-    return Built(so=so, header=header, snapshot=snap)
+    return Built(dir=out_dir, so=so, header=header, snapshot=snap)
 
 
 class BaselineCache:
-    """Old-side builds are identical for every operator on a (seed, compiler); build once."""
+    """Old-side builds are identical for every operator on a (seed, config); build once."""
 
     def __init__(self, root: Path) -> None:
         self._root = root
         self._cache: dict[tuple[str, str], Built] = {}
 
-    def get(self, seed: Seed, compiler: str) -> Built:
-        key = (seed.name, compiler)
+    def get(self, seed: Seed, config: Config | str) -> Built:
+        cfg = _as_config(seed, config)
+        key = (seed.name, cfg.id)
         if key not in self._cache:
             self._cache[key] = build(
-                seed, compiler, self._root / f"{seed.name}-{compiler}-old"
+                seed, cfg, self._root / f"{seed.name}-{cfg.id}-old"
             )
         return self._cache[key]
 
 
-def run_operator(
-    op: EditOp, seed: Seed, compiler: str, cache: BaselineCache, root: Path
-) -> Outcome:
-    old = cache.get(seed, compiler)
-    new_roles = op.edit(seed.roles)
-    new = build(
-        seed, compiler, root / f"{seed.name}-{compiler}-{op.name}", overrides=new_roles
+def _as_config(seed: Seed, config: Config | str) -> Config:
+    if isinstance(config, Config):
+        return config
+    return default_config(seed.lang, label_toolchain(config))
+
+
+def build_new(op: EditOp, seed: Seed, config: Config, root: Path) -> Built:
+    return build(
+        seed,
+        config,
+        root / f"{seed.name}-{config.id}-{op.name}",
+        overrides=op.edit(seed.roles),
+        flags=op.new_flags(config.flags),
     )
-    result = compare(old.snapshot, new.snapshot)
-    verdict = result.verdict.name
-    kinds = frozenset(c.kind.name for c in result.changes)
+
+
+# abicheck's answer when it refuses to compare the two snapshots at all.
+REFUSED = "REFUSED"
+
+
+def abicheck_answer(old: Built, new: Built) -> tuple[str, frozenset[str]]:
+    """(verdict name, ChangeKind names); ``REFUSED`` plus the error type on refusal.
+
+    A refusal (``abicheck.errors.AbicheckError``, e.g. a profile mismatch) is
+    abicheck's answer, not a harness failure: it is neither clean nor a break.
+    """
+    from abicheck.errors import AbicheckError
+
+    try:
+        result = compare(old.snapshot, new.snapshot)
+    except AbicheckError as exc:
+        return REFUSED, frozenset({type(exc).__name__})
+    return result.verdict.name, frozenset(c.kind.name for c in result.changes)
+
+
+def run_operator(
+    op: EditOp, seed: Seed, config: Config | str, cache: BaselineCache, root: Path
+) -> Outcome:
+    """Build and compare one cell; check it against ``op.expect(config)``."""
+    cfg = _as_config(seed, config)
+    old = cache.get(seed, cfg)
+    new = build_new(op, seed, cfg, root)
+    verdict, kinds = abicheck_answer(old, new)
     return Outcome(
-        verdict=verdict, kinds=kinds, failures=tuple(check(op, verdict, kinds))
+        verdict=verdict,
+        kinds=kinds,
+        failures=tuple(op.expect(cfg).problems(verdict, kinds)),
     )
 
 
 def check(op: EditOp, verdict: str, kinds: frozenset[str]) -> list[str]:
-    """Return the ways the observed result departs from the operator's ground truth."""
-    problems: list[str] = []
-    missing = sorted(op.expected - kinds)
-    if missing:
-        problems.append(f"missing expected kinds {missing}")
-    for group in op.any_of:
-        if not (group & kinds):
-            problems.append(f"none of {sorted(group)} reported")
-    rank = VERDICT_RANK[verdict]
-    if rank < VERDICT_RANK[op.verdict_min]:
-        problems.append(f"verdict {verdict} weaker than required {op.verdict_min}")
-    if op.verdict_max is not None and rank > VERDICT_RANK[op.verdict_max]:
-        problems.append(
-            f"verdict {verdict} stronger than benign maximum {op.verdict_max}"
-        )
-    return problems
+    """How the observed result departs from the operator's base (default-config) truth."""
+    return op.base().problems(verdict, kinds)

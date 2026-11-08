@@ -21,9 +21,25 @@ from pathlib import Path
 import pytest
 
 from abicheck.model.change_catalog.kinds import ChangeKind
+from tests._edit_corpus_config import Toolchain, default_config
 from tests._edit_corpus_harness import COMPILERS, BaselineCache, run_operator
 from tests._edit_corpus_operators import OPERATORS, VERDICT_RANK, matrix
 from tests._edit_corpus_seeds import SEEDS
+
+
+def _applies_at_default(op, seed) -> bool:
+    """The operator is meaningful under the base PR's fixed config (C17/C++17, -O0, headers).
+
+    Feature-gated operators (C++20, C23) and rebuilds that need another config
+    run in the config matrix (``test_abi_edit_corpus_matrix.py``) instead.
+    """
+    placeholder = Toolchain("gcc", 0, "gcc", "g++")
+    return op.requires(default_config(seed.lang, placeholder)) is None
+
+
+def default_matrix():
+    return tuple((op, seed) for op, seed in matrix() if _applies_at_default(op, seed))
+
 
 # (operator, seed, compiler) -> (reason, kind the detector is missing).
 # A documented cell xfails only while its recorded mismatch still reproduces;
@@ -49,12 +65,31 @@ _VIRTUAL_REMOVED = (
     "FUNC_VIRTUAL_REMOVED",
 )
 
+_CXX11_ABI = (
+    "a -D_GLIBCXX_USE_CXX11_ABI=0 rebuild makes compare refuse the pair as a profile "
+    "mismatch (docs/contribute/known-gaps.md: _GLIBCXX_USE_CXX11_ABI rebuild refused)",
+    "refused",
+)
+
+_O2_STD = (
+    "an -O2 rebuild drops the weak std::string instantiations the -O0 build exported and "
+    "reads BREAKING (docs/contribute/known-gaps.md: -O2 rebuild of a std::string library)",
+    "stronger than benign",
+)
+
 KNOWN_MISMATCHES: dict[tuple[str, str, str], tuple[str, str]] = {
     **{
         (op, "cxx_classes", c): _CXX_PARAM
         for op in ("func_param_append", "func_param_type_change", "func_param_remove")
         for c in COMPILERS
     },
+    **{
+        (op, "cxx_stdlib", c): _CXX_PARAM
+        for op in ("func_param_append", "func_param_type_change", "func_param_remove")
+        for c in COMPILERS
+    },
+    **{("rebuild_cxx11_abi_off", "cxx_stdlib", c): _CXX11_ABI for c in COMPILERS},
+    **{("rebuild_optimized", "cxx_stdlib", c): _O2_STD for c in COMPILERS},
     **{("virtual_remove", "cxx_classes", c): _VIRTUAL_REMOVED for c in COMPILERS},
     **{("method_noexcept_add", "cxx_classes", c): _CASTXML_NOEXCEPT for c in COMPILERS},
     **{
@@ -65,7 +100,7 @@ KNOWN_MISMATCHES: dict[tuple[str, str, str], tuple[str, str]] = {
 
 CELLS = [
     pytest.param(op, seed, compiler, id=f"{op.name}-{seed.name}-{compiler}")
-    for op, seed in matrix()
+    for op, seed in default_matrix()
     for compiler in COMPILERS
 ]
 
@@ -88,7 +123,7 @@ def test_operator_names_are_unique_and_nonempty() -> None:
 
 def test_seed_names_are_unique() -> None:
     names = [s.name for s in SEEDS]
-    assert len(names) == len(set(names)) == 2
+    assert len(names) == len(set(names)) == 3
 
 
 def test_every_template_placeholder_is_a_known_role() -> None:
@@ -130,6 +165,8 @@ def test_every_operator_applies_to_at_least_one_seed() -> None:
 
 def test_every_operator_changes_the_rendered_text() -> None:
     for op, seed in matrix():
+        if op.rebuild is not None:
+            continue  # a rebuild keeps the source and changes a flag
         base = seed.render()
         edited = seed.render(op.edit(seed.roles))
         assert edited != base, f"{op.name} on {seed.name} is an identity edit"
@@ -138,7 +175,7 @@ def test_every_operator_changes_the_rendered_text() -> None:
 def test_edits_only_return_roles_they_declare() -> None:
     for op, seed in matrix():
         changed = set(op.edit(seed.roles))
-        assert changed <= set(op.touches) | set(op.requires), (op.name, changed)
+        assert changed <= set(op.touches) | set(op.roles), (op.name, changed)
 
 
 def test_declared_kinds_are_real_changekinds() -> None:
@@ -162,7 +199,9 @@ def test_every_operator_declares_some_ground_truth() -> None:
 
 
 def test_known_mismatches_name_real_cells() -> None:
-    cells = {(op.name, seed.name, c) for op, seed in matrix() for c in COMPILERS}
+    cells = {
+        (op.name, seed.name, c) for op, seed in default_matrix() for c in COMPILERS
+    }
     stale = set(KNOWN_MISMATCHES) - cells
     assert stale == set(), (
         f"known mismatches for cells that do not exist: {sorted(stale)}"
@@ -172,8 +211,8 @@ def test_known_mismatches_name_real_cells() -> None:
 def test_matrix_is_not_silently_shrinking() -> None:
     # Guard against an applicability bug emptying the matrix: a shrink is
     # visible here rather than as a green run that tested less.
-    assert len(matrix()) >= 50
-    assert len(CELLS) == len(matrix()) * len(COMPILERS)
+    assert len(default_matrix()) >= 60
+    assert len(CELLS) == len(default_matrix()) * len(COMPILERS)
 
 
 # --- integration: real compilers, real castxml dump, real compare ----------
@@ -237,7 +276,9 @@ def test_edit_produces_declared_ground_truth(
 def test_smoke_subset_is_exercised() -> None:
     # The fast smoke subset is the fixed set of cells that always run on a
     # toolchain lane; this asserts it still names real cells.
-    cells = {(op.name, seed.name, c) for op, seed in matrix() for c in COMPILERS}
+    cells = {
+        (op.name, seed.name, c) for op, seed in default_matrix() for c in COMPILERS
+    }
     assert SMOKE_CELLS <= cells
 
 
