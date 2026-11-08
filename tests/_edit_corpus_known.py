@@ -54,6 +54,38 @@ class Known:
     when: Callable[[Config], bool]
     reason: str
     gap: str
+    # The exact finding: ``_edit_corpus_expect.issue_keys`` of the problems,
+    # and the abicheck verdicts it was observed with. A cell xfails only when
+    # class, issues and verdict all match; anything else fails.
+    issues: frozenset[str]
+    verdicts: frozenset[str]
+
+    def expected_cls(self, execution_available: bool) -> str:
+        """The class this finding reconciles to on a host with or without execution.
+
+        ``false-clean`` needs the execution oracle to show the break; where it
+        is unavailable (a non-ELF host) the same issues read as the plain
+        verdict or kind mismatch ``reconcile`` gives them.
+        """
+        if execution_available or self.cls != "false-clean":
+            return self.cls
+        verdict_issue = any(
+            i.startswith(("weaker-than:", "stronger-than:")) for i in self.issues
+        )
+        return "wrong-verdict" if verdict_issue else "wrong-kind"
+
+    def matches(
+        self,
+        cls: str,
+        issues: frozenset[str],
+        verdict: str,
+        execution_available: bool = True,
+    ) -> bool:
+        return (
+            cls == self.expected_cls(execution_available)
+            and issues == self.issues
+            and verdict in self.verdicts
+        )
 
 
 KNOWN: tuple[Known, ...] = (
@@ -66,6 +98,8 @@ KNOWN: tuple[Known, ...] = (
             "the mangled name changes, so old and new are not paired: func_removed + func_added, "
             "never func_params_changed (binary-only and DWARF evidence pair them)",
             GAP_CXX_PARAM,
+            issues=frozenset({"missing:FUNC_PARAMS_CHANGED"}),
+            verdicts=frozenset({"BREAKING"}),
         )
         for op in ("func_param_append", "func_param_type_change", "func_param_remove")
     ),
@@ -76,6 +110,8 @@ KNOWN: tuple[Known, ...] = (
         _ev("dwarf", "headers"),
         "removal reads func_removed + vtable kinds; func_virtual_removed is never emitted",
         GAP_VIRTUAL_REMOVED,
+        issues=frozenset({"missing:FUNC_VIRTUAL_REMOVED"}),
+        verdicts=frozenset({"BREAKING"}),
     ),
     Known(
         "method_noexcept_add",
@@ -85,6 +121,8 @@ KNOWN: tuple[Known, ...] = (
         "castxml writes no exception specification: NO_CHANGE while an overrider without "
         "noexcept no longer compiles",
         GAP_NOEXCEPT,
+        issues=frozenset({"missing:FUNC_NOEXCEPT_ADDED", "weaker-than:API_BREAK"}),
+        verdicts=frozenset({"NO_CHANGE"}),
     ),
     Known(
         "template_default_arg_change",
@@ -93,6 +131,13 @@ KNOWN: tuple[Known, ...] = (
         _ev("headers"),
         "castxml reads a header-only template default change as NO_CHANGE",
         GAP_TEMPLATE_DEFAULT,
+        issues=frozenset(
+            {
+                "none-of:DEFAULT_TEMPLATE_ARG_CHANGED|TEMPLATE_PARAM_DEFAULT_CHANGED",
+                "weaker-than:API_BREAK",
+            }
+        ),
+        verdicts=frozenset({"NO_CHANGE"}),
     ),
     Known(
         "concept_constraint_added",
@@ -102,6 +147,13 @@ KNOWN: tuple[Known, ...] = (
         "a requires-clause added to a header-only function template reads NO_CHANGE while a "
         "consumer call stops compiling",
         GAP_CONCEPT,
+        issues=frozenset(
+            {
+                "none-of:CONCEPT_CONSTRAINT_CHANGED|CONCEPT_TIGHTENED",
+                "weaker-than:API_BREAK",
+            }
+        ),
+        verdicts=frozenset({"NO_CHANGE"}),
     ),
     Known(
         "struct_array_shrink_in_padding",
@@ -110,6 +162,13 @@ KNOWN: tuple[Known, ...] = (
         lambda c: c.evidence == "dwarf" and c.flags.pack is None,
         "char[8] -> char[6] reads NO_CHANGE from DWARF (headers report type_field_type_changed)",
         GAP_DWARF_ARRAY,
+        issues=frozenset(
+            {
+                "none-of:STRUCT_FIELD_TYPE_CHANGED|TYPE_FIELD_TYPE_CHANGED",
+                "weaker-than:API_BREAK",
+            }
+        ),
+        verdicts=frozenset({"NO_CHANGE"}),
     ),
     Known(
         "struct_array_shrink_in_padding",
@@ -118,6 +177,8 @@ KNOWN: tuple[Known, ...] = (
         lambda c: c.evidence == "dwarf" and c.flags.pack is not None,
         "packed, DWARF shows only type_size_changed; the member's type change is not reported",
         GAP_DWARF_ARRAY,
+        issues=frozenset({"none-of:STRUCT_FIELD_TYPE_CHANGED|TYPE_FIELD_TYPE_CHANGED"}),
+        verdicts=frozenset({"BREAKING"}),
     ),
     Known(
         "virtual_become_pure",
@@ -127,6 +188,8 @@ KNOWN: tuple[Known, ...] = (
         "from DWARF the now-pure virtual reads func_removed_elf_only; neither "
         "func_virtual_became_pure nor type_became_abstract",
         GAP_DWARF_PURE,
+        issues=frozenset({"none-of:FUNC_VIRTUAL_BECAME_PURE|TYPE_BECAME_ABSTRACT"}),
+        verdicts=frozenset({"BREAKING"}),
     ),
     Known(
         "method_const_drop",
@@ -136,6 +199,8 @@ KNOWN: tuple[Known, ...] = (
         "from DWARF the const drop reads func_removed_elf_only + func_added_elf_only; "
         "func_cv_changed is not emitted (headers emit it)",
         GAP_DWARF_CV,
+        issues=frozenset({"missing:FUNC_CV_CHANGED"}),
+        verdicts=frozenset({"BREAKING"}),
     ),
     Known(
         "rebuild_cxx11_abi_off",
@@ -145,16 +210,21 @@ KNOWN: tuple[Known, ...] = (
         "the new side's -D_GLIBCXX_USE_CXX11_ABI=0 makes compare raise ProfileMismatchError; "
         "consumers fail with undefined std::__cxx11 symbols",
         GAP_CXX11_ABI,
+        issues=frozenset({"refused:ProfileMismatchError"}),
+        verdicts=frozenset({"REFUSED"}),
     ),
     Known(
         "rebuild_optimized",
         frozenset({"cxx_stdlib"}),
         "false-positive",
-        _always,
+        # libstdc++ on ELF: on macOS (libc++, Mach-O) the rebuild reads NO_CHANGE.
+        lambda c: c.objfmt == "elf",
         "-O2 inlines the weak std::string instantiations the -O0 build exported (and drops "
         "stack canaries); their disappearance reads func_visibility_changed / "
         "func_removed_elf_only (BREAKING) or a hardening risk, while every consumer still runs",
         GAP_O2_STD,
+        issues=frozenset({"stronger-than:COMPATIBLE"}),
+        verdicts=frozenset({"BREAKING", "COMPATIBLE_WITH_RISK"}),
     ),
 )
 

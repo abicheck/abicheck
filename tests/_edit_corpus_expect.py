@@ -34,6 +34,7 @@ given evidence cannot show it, abicheck stayed clean).
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 
@@ -142,6 +143,16 @@ class ExecTruth:
     source_break: bool = False
     signals: tuple[str, ...] = ()
     reason: str = ""
+    # The binary break rests on the layout probe alone (sizeof/offsetof/enum
+    # values differ) with no consumer run diverging: a compiler-measured
+    # surrogate for a break, not an observed one.
+    layout_only: bool = False
+
+    def describe_break(self) -> str:
+        what = "; ".join(self.signals)
+        if self.layout_only:
+            return f"layout probe only (surrogate, no consumer run diverged): {what}"
+        return f"consumers broke: {what}"
 
 
 @dataclass(frozen=True)
@@ -159,7 +170,7 @@ def reconcile(
     exec_truth: ExecTruth, exp: Expectation, verdict: str, kinds: frozenset[str]
 ) -> Reconciled:
     if verdict == "REFUSED":
-        return Reconciled("refused", (f"abicheck refused to compare: {sorted(kinds)}",))
+        return Reconciled("refused", tuple(exp.problems(verdict, kinds)))
     problems = tuple(exp.problems(verdict, kinds))
     rank = VERDICT_RANK[verdict]
     broke = exec_truth.available and (
@@ -172,8 +183,8 @@ def reconcile(
         return Reconciled(
             "oracle-conflict",
             problems,
-            "the expectation declares this edit harmless but consumers broke: "
-            + "; ".join(exec_truth.signals),
+            "the expectation declares this edit harmless, yet "
+            + exec_truth.describe_break(),
         )
     if broke:
         clean = (
@@ -184,11 +195,7 @@ def reconcile(
         if clean:
             if not exp.observable:
                 return Reconciled("unobservable", problems, exp.note)
-            return Reconciled(
-                "false-clean",
-                problems,
-                "consumers broke: " + "; ".join(exec_truth.signals),
-            )
+            return Reconciled("false-clean", problems, exec_truth.describe_break())
     if any("stronger than benign" in p for p in problems):
         if not broke:
             return Reconciled("false-positive", problems)
@@ -208,3 +215,31 @@ def reconcile(
             "non-observable", problems, "no consumer shape observed the break here"
         )
     return Reconciled("agree", problems)
+
+
+def issue_keys(problems: tuple[str, ...] | list[str]) -> frozenset[str]:
+    """Normalize ``Expectation.problems`` into comparable keys.
+
+    ``missing:KIND`` per missing expected kind, ``none-of:A|B`` per unmet
+    any-of group, ``weaker-than:V`` / ``stronger-than:V`` for a verdict outside
+    its bound, ``refused:Error`` for a refusal. A recorded mismatch is the same
+    finding only if these keys match exactly.
+    """
+    keys: set[str] = set()
+    for p in problems:
+        if m := re.fullmatch(r"missing expected kinds \[(.*)\]", p):
+            keys |= {"missing:" + k.strip("' ") for k in m.group(1).split(",")}
+        elif m := re.fullmatch(r"none of \[(.*)\] reported", p):
+            keys.add(
+                "none-of:"
+                + "|".join(sorted(k.strip("' ") for k in m.group(1).split(",")))
+            )
+        elif m := re.fullmatch(r"verdict \w+ weaker than required (\w+)", p):
+            keys.add(f"weaker-than:{m.group(1)}")
+        elif m := re.fullmatch(r"verdict \w+ stronger than benign maximum (\w+)", p):
+            keys.add(f"stronger-than:{m.group(1)}")
+        elif m := re.fullmatch(r"abicheck refused to compare \((.*)\)", p):
+            keys |= {f"refused:{e.strip()}" for e in m.group(1).split(",")}
+        else:
+            raise ValueError(f"unrecognized problem text: {p!r}")
+    return frozenset(keys)

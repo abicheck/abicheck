@@ -271,8 +271,8 @@ markers = [
     "repo_scan: statically scans the whole repository tree; OS- and coverage-independent, run once by the repo-scan-tests CI job",
     "model_warning_hygiene: fails the test on an unexpected WARNING log record from abicheck.model.* (tests/_model_warning_hygiene.py allowlist)",
     "known_gap_canary: asserts the current gapped answer of an open docs/contribute/known-gaps.md entry; fails when the gap closes or widens (scripts/known_gap_canaries.py)",
-    "edit_corpus_nightly: generated ABI corpus nightly tier (seeded pairwise covering array; tests/test_abi_edit_corpus_matrix.py); excluded from the integration lane, run with -m edit_corpus_nightly",
-    "edit_corpus_weekly: generated ABI corpus weekly tier (newest toolchains, -m32, exotic flags); excluded from the integration lane, run with -m edit_corpus_weekly",
+    "edit_corpus_nightly: generated ABI corpus nightly tier (seeded pairwise covering array; tests/test_abi_edit_corpus_matrix.py); cells generated only with ABICHECK_EDIT_CORPUS_TIER=nightly; excluded from the integration lane; run by .github/workflows/edit-corpus-tiers.yml",
+    "edit_corpus_weekly: generated ABI corpus weekly tier (newest toolchains, -m32, exotic flags); cells generated only with ABICHECK_EDIT_CORPUS_TIER=weekly; excluded from the integration lane; run by .github/workflows/edit-corpus-tiers.yml",
     "host_memory_probe: opts out of tests/conftest.py's autouse pin of process_resources.available_mem_gib (tests of the real probe)",
 ]
 # Global per-test hang safety valve (pytest-timeout), not a perf regression

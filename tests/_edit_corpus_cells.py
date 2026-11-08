@@ -86,8 +86,8 @@ class CellResult:
 
 def seed_conflict(seed: Seed, config: Config) -> str | None:
     """A seed x config pair that is ill-formed on its own, whatever the edit."""
-    if seed.name == "cxx_stdlib" and (
-        config.flags.pack is not None or config.flags.short_enums
+    if seed.name == "cxx_stdlib" and any(
+        f.pack is not None or f.short_enums for f in (config.flags, config.consumer_fl)
     ):
         # gcc documents both flags as making code binary-incompatible with
         # code built without them, and the installed libstdc++ is built without.

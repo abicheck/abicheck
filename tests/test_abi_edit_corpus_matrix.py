@@ -58,6 +58,7 @@ from tests._edit_corpus_expect import (
     PASSING_CLASSES,
     ExecTruth,
     Expectation,
+    issue_keys,
     reconcile,
 )
 from tests._edit_corpus_known import KNOWN, known_mismatch
@@ -533,6 +534,108 @@ def test_known_mismatches_point_at_a_known_gaps_heading() -> None:
     assert missing == []
 
 
+def test_every_standard_of_both_languages_is_a_nightly_axis_value() -> None:
+    from tests._edit_corpus_tiers import _STD_SLOTS, std_for_slot
+
+    for lang in ("c", "c++"):
+        drawn = {std_for_slot(lang, slot) for slot in range(_STD_SLOTS)}
+        assert drawn == {s for s in STANDARDS if s.lang == lang}, lang
+
+
+@pytest.mark.parametrize("n", [1, 2, 3, 4, 7])
+def test_shards_partition_the_cells(n: int, monkeypatch: pytest.MonkeyPatch) -> None:
+    from tests._edit_corpus_tiers import shard
+
+    cells = list(range(23))
+    got = []
+    for k in range(1, n + 1):
+        monkeypatch.setenv("ABICHECK_EDIT_CORPUS_SHARD", f"{k}/{n}")
+        got.append(shard(cells))  # type: ignore[arg-type]
+    flat = [c for part in got for c in part]
+    assert sorted(flat) == cells and len(flat) == len(set(flat))
+
+
+def test_a_malformed_shard_spec_is_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tests._edit_corpus_tiers import shard_spec
+
+    monkeypatch.setenv("ABICHECK_EDIT_CORPUS_SHARD", "5/4")
+    with pytest.raises(ValueError, match="1 <= K <= N"):
+        shard_spec()
+
+
+@pytest.mark.parametrize(
+    ("raw", "want"),
+    [
+        ("", set()),
+        ("nightly", {"nightly"}),
+        (" nightly , weekly ", {"nightly", "weekly"}),
+    ],
+)
+def test_enabled_tiers_reads_the_env_var(
+    raw: str, want: set[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests._edit_corpus_tiers import enabled_tiers
+
+    monkeypatch.setenv("ABICHECK_EDIT_CORPUS_TIER", raw)
+    assert enabled_tiers() == want
+
+
+def test_issue_keys_normalize_every_problem_shape() -> None:
+    exp = Expectation(
+        expected=frozenset({"B_KIND", "A_KIND"}),
+        any_of=(frozenset({"Y", "X"}),),
+        verdict_min="API_BREAK",
+    )
+    assert issue_keys(exp.problems("COMPATIBLE", frozenset())) == {
+        "missing:A_KIND",
+        "missing:B_KIND",
+        "none-of:X|Y",
+        "weaker-than:API_BREAK",
+    }
+    assert issue_keys(_BENIGN.problems("BREAKING", frozenset())) == {
+        "stronger-than:NO_CHANGE"
+    }
+    assert issue_keys(
+        _BENIGN.problems("REFUSED", frozenset({"ProfileMismatchError"}))
+    ) == {"refused:ProfileMismatchError"}
+    with pytest.raises(ValueError):
+        issue_keys(["something new"])
+
+
+def test_a_layout_only_break_is_labelled_a_surrogate() -> None:
+    probe_only = replace(
+        _BROKE, signals=("layout sizeof(rec): 24 -> 32",), layout_only=True
+    )
+    got = reconcile(probe_only, _BREAK, "COMPATIBLE", frozenset())
+    assert got.cls == "false-clean" and "surrogate" in got.detail
+    assert (
+        "surrogate" not in reconcile(_BROKE, _BREAK, "COMPATIBLE", frozenset()).detail
+    )
+
+
+def test_known_entries_record_the_exact_finding() -> None:
+    for k in KNOWN:
+        assert k.issues and k.verdicts, k.op
+        assert k.matches(k.cls, k.issues, next(iter(k.verdicts)))
+        assert not k.matches(
+            k.cls, k.issues | {"missing:SOMETHING_ELSE"}, next(iter(k.verdicts))
+        )
+        assert not k.matches(k.cls, k.issues, "NOT_A_VERDICT")
+
+
+def test_a_false_clean_degrades_to_its_verdict_class_without_execution() -> None:
+    # Reconcile the recorded issues with no execution signal and check the
+    # class the registry predicts for that host (independent derivation).
+    for k in KNOWN:
+        if k.cls != "false-clean":
+            continue
+        exp = OP_BY_NAME[k.op].expect(_cfg("c++"))
+        verdict = next(iter(k.verdicts))
+        got = reconcile(_NONE, exp, verdict, frozenset())
+        assert got.cls == k.expected_cls(execution_available=False), k.op
+        assert got.cls != "false-clean"
+
+
 # --- integration -------------------------------------------------------------
 
 
@@ -551,9 +654,13 @@ def check_cell(cell: Cell, ctx: CellContext) -> None:
         pytest.skip(f"{result.status}: {result.reason}")
     known = known_mismatch(cell.op.name, cell.seed.name, cell.config)
     if known is not None:
-        assert result.cls == known.cls, (
-            f"recorded {known.cls} no longer reproduces as recorded; the detector may be "
-            f"fixed: remove the _edit_corpus_known entry and its known-gaps row.\n{result.describe()}"
+        issues = issue_keys(result.reconciled.problems if result.reconciled else ())
+        executed = bool(result.exec_truth and result.exec_truth.available)
+        assert known.matches(result.cls, issues, result.verdict, executed), (
+            f"recorded {known.cls} {sorted(known.issues)} (verdict in {sorted(known.verdicts)}) "
+            f"no longer reproduces as recorded: got {result.cls} {sorted(issues)} "
+            f"verdict={result.verdict}. If the detector was fixed, remove the "
+            f"_edit_corpus_known entry and its known-gaps row.\n{result.describe()}"
         )
         pytest.xfail(f"{known.cls}: {known.reason}")
     if result.cls in PASSING_CLASSES:
@@ -564,7 +671,17 @@ def check_cell(cell: Cell, ctx: CellContext) -> None:
         report += (
             "\n\nminimized:\n" + small.describe() + "\n\n" + regression_test(small)
         )
+    _write_report(cell, report)
     pytest.fail(report)
+
+
+def _write_report(cell: Cell, report: str) -> None:
+    """Keep a failing cell's report for the scheduled workflow's artifact."""
+    out = os.environ.get("ABICHECK_EDIT_CORPUS_REPORT_DIR")
+    if out:
+        safe = "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in cell.id)
+        Path(out).mkdir(parents=True, exist_ok=True)
+        (Path(out) / f"{safe}.txt").write_text(report + "\n", encoding="utf-8")
 
 
 @pytest.mark.integration
@@ -578,30 +695,47 @@ def test_pr_tier_cell(index: int, cell_ctx: CellContext) -> None:
     check_cell(cell, cell_ctx)
 
 
-def _tier_selected(config: pytest.Config, marker: str) -> bool:
-    expr = config.option.markexpr or ""
-    return marker in expr and f"not {marker}" not in expr
+_TIER_OFF = (
+    "set ABICHECK_EDIT_CORPUS_TIER={tier} to generate this tier's cells "
+    "(and select them with -m edit_corpus_{tier})"
+)
 
 
 def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
+    """Generate a tier's cells only when ``ABICHECK_EDIT_CORPUS_TIER`` names it.
+
+    Otherwise the test gets one placeholder that skips with the reason, so
+    collecting this module never probes a compiler and a forgotten env var is
+    visible as a skip, not as an empty parameter set.
+    """
     from tests import _edit_corpus_tiers as tiers
 
-    for name, marker, gen in (
-        ("nightly_cell", "edit_corpus_nightly", tiers.nightly_cells),
-        ("weekly_cell", "edit_corpus_weekly", tiers.weekly_cells),
+    for name, tier, gen in (
+        ("nightly_cell", "nightly", tiers.nightly_cells),
+        ("weekly_cell", "weekly", tiers.weekly_cells),
     ):
-        if name in metafunc.fixturenames:
-            cells = gen() if _tier_selected(metafunc.config, marker) else []
+        if name not in metafunc.fixturenames:
+            continue
+        if tier in tiers.enabled_tiers():
+            cells = gen()
             metafunc.parametrize(name, cells, ids=[c.id for c in cells])
+        else:
+            metafunc.parametrize(name, [None], ids=[f"{tier}-tier-disabled"])
+
+
+def _tier_cell(cell: Cell | None, tier: str, ctx: CellContext) -> None:
+    if cell is None:
+        pytest.skip(_TIER_OFF.format(tier=tier))
+    check_cell(cell, ctx)
 
 
 @pytest.mark.integration
 @pytest.mark.edit_corpus_nightly
-def test_nightly_tier_cell(nightly_cell: Cell, cell_ctx: CellContext) -> None:
-    check_cell(nightly_cell, cell_ctx)
+def test_nightly_tier_cell(nightly_cell: Cell | None, cell_ctx: CellContext) -> None:
+    _tier_cell(nightly_cell, "nightly", cell_ctx)
 
 
 @pytest.mark.integration
 @pytest.mark.edit_corpus_weekly
-def test_weekly_tier_cell(weekly_cell: Cell, cell_ctx: CellContext) -> None:
-    check_cell(weekly_cell, cell_ctx)
+def test_weekly_tier_cell(weekly_cell: Cell | None, cell_ctx: CellContext) -> None:
+    _tier_cell(weekly_cell, "weekly", cell_ctx)

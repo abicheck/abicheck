@@ -18,6 +18,12 @@ For a cell ``(op, seed, config)`` with old library ``old`` and new library
    (``-fsyntax-only``); a shape that no longer compiles is a source break.
 
 None of this reads abicheck's output. The result is an ``ExecTruth``.
+
+Only (1) and (3) observe a consumer. (2) is a surrogate: a changed ``sizeof``
+or offset is what an ABI break is made of, but no consumer run showed it, so
+``ExecTruth.layout_only`` marks a binary break that rests on it alone and
+every report says so. Execution needs an ELF loader (Linux); elsewhere the
+oracle reports itself unavailable instead of "no break".
 """
 
 from __future__ import annotations
@@ -286,11 +292,13 @@ class ExecutionOracle:
                     proc.stderr[:120],
                 )
                 signals.append(f"source {shape}: {err.split(': ', 1)[-1].strip()}")
+        observed = any(sig.startswith(("run ", "source ")) for sig in signals)
         return ExecTruth(
             available=True,
             binary_break=binary_break,
             source_break=source_break,
             signals=tuple(signals),
+            layout_only=binary_break and not observed,
         )
 
 

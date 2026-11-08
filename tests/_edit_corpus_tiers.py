@@ -126,25 +126,43 @@ def pr_cells() -> list[Cell | tuple[str, str]]:
 
 # --- pairwise covering array -----------------------------------------------
 
-_STD_SLOTS = 4  # low .. high, mapped onto each language's standards
+# Standard slots, mapped onto each language's list so that every standard of
+# both languages is some slot's value (C: 5 standards, C++: 6).
+_STD_SLOTS = max(sum(1 for s in STANDARDS if s.lang == lang) for lang in ("c", "c++"))
+
+
+def _m32_buildable(toolchains: Sequence[Toolchain]) -> bool:
+    from tests._edit_corpus_toolchains import _flags_build
+
+    return any(_flags_build(t, "c", Flags(bits=32)) is None for t in toolchains)
 
 
 def _factors(toolchains: Sequence[Toolchain]) -> dict[str, list[object]]:
+    """Every nightly axis. A value the host cannot build still appears and its
+    cells are reported unavailable; -m32 is drawn only where some installed
+    toolchain links it (otherwise every such row would be skipped)."""
     cells = [f"{op.name}@{seed.name}" for op, seed in matrix()]
     tc_ids = [t.id for t in toolchains] or ["none"]
     return {
         "cell": cells,
         "producer": tc_ids,
-        "consumer": ["same", "other"],
+        "consumer": ["same", *tc_ids],
         "std": list(range(_STD_SLOTS)),
         "opt": ["O0", "O2"],
         "visibility": ["default", "hidden"],
+        "bits": [64, 32] if _m32_buildable(toolchains) else [64],
         "short_enums": [False, True],
         "pack": [None, 1],
         "cxx11_abi": [None, 0],
         "abi_version": [None, 11],
+        "consumer_flags": ["same", "flip_short_enums"],
         "evidence": list(EVIDENCE),
     }
+
+
+def std_for_slot(lang: str, slot: int) -> Standard:
+    options = stds(lang)
+    return options[min(slot * len(options) // _STD_SLOTS, len(options) - 1)]
 
 
 def pairwise(
@@ -205,7 +223,7 @@ def _repair_std(op: EditOp, lang: str, slot: int, tc: Toolchain) -> Standard:
     """The row's standard, raised to the first one that has the op's features, and
     lowered to one the producer accepts."""
     options = stds(lang)
-    idx = min(slot * len(options) // _STD_SLOTS, len(options) - 1)
+    idx = options.index(std_for_slot(lang, slot))
     floor = 0
     for feat in op.features:
         floor = max(
@@ -224,22 +242,32 @@ def row_to_cell(row: dict[str, object], toolchains: Sequence[Toolchain]) -> Cell
     tc = by_id.get(str(row["producer"]))
     if tc is None:
         return None
-    others = [t for t in toolchains if t.family != tc.family]
-    consumer = others[-1] if row["consumer"] == "other" and others else None
+    consumer = by_id.get(str(row["consumer"]))
+    if consumer == tc:
+        consumer = None
     lang = seed.lang
     flags = Flags(
         opt=str(row["opt"]),
         visibility=str(row["visibility"]),
+        bits=int(row["bits"]),  # type: ignore[call-overload]
         short_enums=bool(row["short_enums"]),
         pack=row["pack"],  # type: ignore[arg-type]
         cxx11_abi=row["cxx11_abi"] if lang == "c++" else None,  # type: ignore[arg-type]
         abi_version=row["abi_version"] if tc.family == "gcc" else None,  # type: ignore[arg-type]
     )
+    consumer_flags = None
+    if row["consumer_flags"] == "flip_short_enums":
+        consumer_flags = replace(
+            flags,
+            short_enums=not flags.short_enums,
+            abi_version=flags.abi_version if (consumer or tc).family == "gcc" else None,
+        )
     cfg = Config(
-        std=_repair_std(op, lang, int(row["std"]), tc),  # type: ignore[arg-type]
+        std=_repair_std(op, lang, int(row["std"]), tc),  # type: ignore[call-overload]
         producer=tc,
         flags=flags,
         consumer=consumer,
+        consumer_flags=consumer_flags,
         evidence=str(row["evidence"]),
     )
     return Cell(op, seed, cfg)
@@ -253,7 +281,28 @@ def nightly_cells(seed: int | None = None) -> list[Cell]:
     toolchains = discover()
     rows = pairwise(_factors(toolchains), nightly_seed() if seed is None else seed)
     cells = [row_to_cell(r, toolchains) for r in rows]
-    return [c for c in cells if c is not None]
+    return shard([c for c in cells if c is not None])
+
+
+def shard_spec() -> tuple[int, int]:
+    """``ABICHECK_EDIT_CORPUS_SHARD=K/N`` (1-based); default 1/1."""
+    raw = os.environ.get("ABICHECK_EDIT_CORPUS_SHARD", "1/1")
+    k, n = (int(x) for x in raw.split("/"))
+    if not 1 <= k <= n:
+        raise ValueError(f"ABICHECK_EDIT_CORPUS_SHARD={raw!r}: need 1 <= K <= N")
+    return k, n
+
+
+def shard(cells: list[Cell]) -> list[Cell]:
+    """This shard's cells: every N-th cell from K-1, so shards partition the list."""
+    k, n = shard_spec()
+    return cells[k - 1 :: n]
+
+
+def enabled_tiers() -> frozenset[str]:
+    """Tiers ``ABICHECK_EDIT_CORPUS_TIER`` (comma-separated) asks to generate."""
+    raw = os.environ.get("ABICHECK_EDIT_CORPUS_TIER", "")
+    return frozenset(t.strip() for t in raw.split(",") if t.strip())
 
 
 # --- weekly -----------------------------------------------------------------
@@ -300,4 +349,4 @@ def weekly_cells() -> list[Cell]:
                 seed.lang, tc, [o for o in others if o is not None]
             ):
                 cells.append(Cell(op, seed, cfg))
-    return cells
+    return shard(cells)

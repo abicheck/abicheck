@@ -89,7 +89,12 @@ KNOWN_MISMATCHES: dict[tuple[str, str, str], tuple[str, str]] = {
         for c in COMPILERS
     },
     **{("rebuild_cxx11_abi_off", "cxx_stdlib", c): _CXX11_ABI for c in COMPILERS},
-    **{("rebuild_optimized", "cxx_stdlib", c): _O2_STD for c in COMPILERS},
+    # libstdc++ on ELF only: on macOS (libc++, Mach-O) the rebuild reads NO_CHANGE.
+    **(
+        {("rebuild_optimized", "cxx_stdlib", c): _O2_STD for c in COMPILERS}
+        if sys.platform.startswith("linux")
+        else {}
+    ),
     **{("virtual_remove", "cxx_classes", c): _VIRTUAL_REMOVED for c in COMPILERS},
     **{("method_noexcept_add", "cxx_classes", c): _CASTXML_NOEXCEPT for c in COMPILERS},
     **{

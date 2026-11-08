@@ -14,7 +14,7 @@ suite as a whole is not quick: budget ~12 minutes at 4-way parallelism.
 | `msvc` | MSVC `cl.exe` (Windows) | MSVC+PDB end-to-end (`msvc` step, `integration.yml` Windows leg) |
 | `slow` | varies | hypothesis / property-based / perf — covered in CI on Linux/3.13 |
 | `golden` | golden files in `tests/golden/` | output-format snapshots |
-| `edit_corpus_nightly` / `edit_corpus_weekly` | castxml + gcc/clang | generated ABI corpus tiers (`test_abi_edit_corpus_matrix.py`); opt-in with `-m`, excluded from the integration lane |
+| `edit_corpus_nightly` / `edit_corpus_weekly` | castxml + gcc/clang | generated ABI corpus tiers (`test_abi_edit_corpus_matrix.py`); cells exist only with `ABICHECK_EDIT_CORPUS_TIER=nightly\|weekly`; excluded from the integration lane, run by `edit-corpus-tiers.yml` |
 
 The default fast command excludes all external-tool markers. Use it — but note
 it also excludes `golden`, so an output-format regression it skips still fails
@@ -223,9 +223,10 @@ CI's `pr` profile.
   layout probes, new-header compiles) and `reconcile` (false-clean first).
   Record a mismatch in `_edit_corpus_known.py` with a `known-gaps.md` row;
   change an expectation only from the edit's ABI meaning (an `oracle-conflict`
-  means it is wrong), never to match abicheck's answer. Nightly: `pytest tests/test_abi_edit_corpus_matrix.py
-  -m edit_corpus_nightly` (`ABICHECK_EDIT_CORPUS_SEED`); a failing cell prints
-  a minimized, ready-to-paste regression test.
+  means it is wrong), never to match abicheck's answer. Nightly: `ABICHECK_EDIT_CORPUS_TIER=nightly pytest
+  tests/test_abi_edit_corpus_matrix.py -m edit_corpus_nightly`
+  (`ABICHECK_EDIT_CORPUS_SEED`, `ABICHECK_EDIT_CORPUS_SHARD=K/N`); a failing
+  cell prints a minimized, ready-to-paste regression test.
 
 ## Field-shapes corpus (`field_shapes/`)
 

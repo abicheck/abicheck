@@ -10,6 +10,12 @@ itself, and folds duplicates (``gcc`` and ``gcc-13`` resolving to one binary).
 spelling (``-std=c23`` vs ``-std=c2x``), and whether the flag set builds both
 a shared library and an executable (``-m32`` needs multilib). A cell whose
 config is unavailable is reported unavailable/skipped, never passed.
+
+MSVC and Apple clang are *modelled* (``Toolchain`` families, ``Flags`` renders
+``/O``, ``/Zp``, ``/vd``) but not built: an MSVC or clang-on-Windows DLL
+exports nothing without ``__declspec(dllexport)``, which the seeds do not
+declare, so those configs are always unavailable here; Apple clang is
+discovered, but the execution oracle is ELF-only.
 Probe results are cached per process.
 """
 
@@ -214,6 +220,10 @@ def unavailable(config: Config) -> str | None:
         reason = _flags_build(tc, config.lang, fl)
         if reason:
             return f"{role}: {reason}"
+    if config.evidence == "dwarf" and config.objfmt != "elf":
+        # Mach-O keeps -g debug info in the object files (no dSYM is produced
+        # here) and a PE DLL carries none, so the library has no DWARF to give.
+        return f"{config.objfmt} libraries built here carry no DWARF of their own"
     if config.evidence == "headers":
         # castxml emulates the system cc/c++, not the producer: the standard
         # must be spellable there too (gcc 13 has no -std=c++26).
