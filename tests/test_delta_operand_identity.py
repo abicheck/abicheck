@@ -12,6 +12,7 @@ from __future__ import annotations
 import itertools
 import json
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -441,6 +442,10 @@ def test_delta_notes_cli_refuses_an_unknown_match_rule() -> None:
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="needs an ELF toolchain: MinGW gcc builds PE (no SONAME), macOS ld has no -soname",
+)
 def test_real_elf_soname_bump_pairs_and_unrelated_library_does_not(
     tmp_path: Path,
 ) -> None:
