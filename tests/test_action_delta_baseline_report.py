@@ -26,6 +26,7 @@ are the gate's whatever the record says. Harness: ``test_action_delta_baseline``
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -188,3 +189,67 @@ def test_an_unwritable_delta_record_clears_any_configured_one(tmp_path: Path) ->
     sets = [a for p, a in zip(delta, delta[1:], strict=False) if p == "--set"]
     assert 'report.delta_baseline=""' in sets
     assert not any(a.startswith(_KEY) for a in sets)
+
+
+_QUALIFY_START = "_is_path_already_qualified() {"
+_CANONICAL_START = "_mktemp_canonical() {"
+
+
+def _helper(text: str, start: str) -> str:
+    i = text.index(start)
+    return text[i : text.index("\n}\n", i) + 3]
+
+
+#: (spelling, anchored on POSIX, anchored on Windows) -- the oracle, written
+#: out by hand: only a spelling neither platform qualifies gets ``$PWD/``.
+_SPELLINGS = [
+    ("facts.json", True, True),
+    ("sub/facts.json", True, True),
+    ("/abs/facts.json", False, False),
+    ("C:/facts.json", True, False),
+    ("C:\\facts.json", True, False),
+    ("\\\\server\\share\\facts.json", True, False),
+]
+
+
+@pytest.mark.parametrize("windows", [False, True])
+def test_the_old_operand_is_anchored_by_the_shared_qualification_rule(
+    tmp_path: Path, windows: bool
+) -> None:
+    """``add_delta_baseline_flag`` anchors the old operand with run.sh's own
+    ``_mktemp_canonical`` (``_is_path_already_qualified``), so a Windows
+    drive or UNC path is never prefixed with ``$PWD`` on Git Bash, while a
+    relative one always is."""
+    from _workflow_exec import bash_executable, require_bash
+
+    require_bash()
+    text = (Path(__file__).resolve().parents[1] / "action" / "run.sh").read_text(
+        encoding="utf-8"
+    )
+    fn = text[text.index("add_delta_baseline_flag() {") :]
+    fn = fn[: fn.index("\n}\n")]
+    assert '_mktemp_canonical "$old"' in fn
+    script = (
+        f"_RUNNING_ON_WINDOWS={'true' if windows else 'false'}\n"
+        + _helper(text, _QUALIFY_START)
+        + _helper(text, _CANONICAL_START)
+        + 'for p in "$@"; do _mktemp_canonical "$p"; done\n'
+    )
+    spellings = [s for s, _, _ in _SPELLINGS]
+    out = subprocess.run(
+        [bash_executable(), "-c", script, "bash", *spellings],
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+        check=True,
+    ).stdout.splitlines()
+    pwd = subprocess.run(
+        [bash_executable(), "-c", "pwd"],
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+        check=True,
+    ).stdout.strip()
+    for (spelling, posix, win), got in zip(_SPELLINGS, out, strict=True):
+        anchored = win if windows else posix
+        assert got == (f"{pwd}/{spelling}" if anchored else spelling), spelling
