@@ -219,10 +219,10 @@ def test_junit_detected_total_equals_the_json_audit(
     case: str, lab: _metamorphic._Lab
 ) -> None:
     """D: the JUnit renderer's detected total is the JSON audit's detected total."""
-    import xml.etree.ElementTree as ET
+    from defusedxml.ElementTree import parse as defused_parse
 
     run = lab.live(case)
-    junit = ET.parse(run.files["junit"]).getroot()
+    junit = defused_parse(run.files["junit"]).getroot()
     values = {
         p.get("name"): p.get("value")
         for p in junit.iter("property")
