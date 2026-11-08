@@ -60,6 +60,7 @@ FAMILIES: dict[str, Family] = {
             harness_tests=(
                 "tests/test_family_f1_evidence_ablation.py",
                 "tests/test_export_loss_binding_unit.py",
+                "tests/test_dwarf_unknown_triviality.py",
             ),
         ),
         Family(
@@ -125,7 +126,11 @@ FAMILIES: dict[str, Family] = {
                 "A known-compatible real release pair produces no BREAKING or "
                 "API_BREAK finding."
             ),
-            harness_tests=("tests/test_family_f6_corpus.py",),
+            harness_tests=(
+                "tests/test_family_f6_corpus.py",
+                "tests/test_rebuild_toolchain_drift_integration.py",
+                "tests/test_toolchain_rebuild_drift.py",
+            ),
             planned_reason="",
         ),
         Family(

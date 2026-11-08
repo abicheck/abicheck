@@ -5,7 +5,7 @@
       "abicheck/ctf_metadata.py": "42d3f588c6c4567c2a9d43a3ef5b886a753c37dd5357a4199d81d7ffc60d2109",
       "abicheck/dumper.py": "fcd2874b1a06387a500f483c4fdc094ea47cf57cba897adfd8e9583fae6bb09b",
       "abicheck/dumper_clang.py": "0ee5831454abd776a07706b7c9a69d6fa3136dad37890f70e4103f4c940f3d05",
-      "abicheck/dwarf_advanced.py": "91cfc7f410a37e7d7ba3ec922ff2944b81253fde3dcfdb806be032087822b339",
+      "abicheck/dwarf_advanced.py": "1e3f46ae917457ad2193b20d0ce5ebf7b6467b1cd12cc117a9ca1d1224440e40",
       "abicheck/dwarf_metadata.py": "a0621cde6559a0395b00d08aa25cc4cbff74b1121e2083e424e472c44b985512",
       "abicheck/dwarf_presence.py": "7e73580ec7a02fdf24e3815cb89e42aa6fe00e46e8cda6b7fe9d547f06ac3f06",
       "abicheck/dwarf_snapshot.py": "f0e8fce9495c762539ffa051662dc2bd5a375817f8b8c6f648a2135ceebf59eb",
@@ -181,7 +181,7 @@
       "abicheck/extract/semantic_normalizer.py": "ddbbba743b7630a47494ae298468357ff1187b9812d2affa4a3bcbdad4f91f60",
       "abicheck/extract/semantic_normalizer_dwarf.py": "d092c309a8e349f9b699e5931456188485670ef05a8048783496d915fe7a7a83",
       "abicheck/extract/semantic_normalizer_template_args.py": "9e07ae6b02395411ad22cbd02e2acbe3f9d70b5a33283b606a9296ba9d55b1b2",
-      "abicheck/extract/stdlib_local_origin.py": "5ba2ab65b5d264138e07adfa3506ade7706239bcc07cc04e3fb75596ec7b4358",
+      "abicheck/extract/stdlib_local_origin.py": "e44bb8a32af5c09aa91e396a368b15ab4cd3fb93b614bc1b502a5d9787a206dc",
       "abicheck/extract/surface_fact_producers.py": "3a6c9b3a355342de1f4658a2154f9769dde9c1165dd7b90aba7d449f5f6b7cda",
       "abicheck/extract/system_header_layout.py": "3784ee2f9386949eb3db9e4d77f9b92a5211106d72e4de1d004c9ea7f7d1a0cd",
       "abicheck/extract/target_platform.py": "d2f2774c26bd12eb623a64883c2611782cac8f3d84da51248a969bd1f288e739",
@@ -202,9 +202,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "5639754281e15477eabdad446cf93734ea286c17b2889d47a246e3f48ad95f81",
-    "generation": 43,
-    "reason": "ast_inner refactor of var_alignment; no output change"
+    "fingerprint": "ca2cd759097fceaf0852422320cdfc9d55314b5ba530238e4ee781fd2fae4515",
+    "generation": 44,
+    "reason": "bumped to 44 for a semantic change"
   },
   "resolver": {
     "files": {

@@ -66,10 +66,41 @@ def is_user_specializable_std_symbol(name: str) -> bool:
     Such a symbol nominally lives in namespace ``std``, but its body is
     user-authored, so it is the library's own ABI and never the runtime's.
     """
-    return bool(
-        _USER_SPECIALIZABLE_STD_TEMPLATE_RE.match(name)
-        or _USER_SPECIALIZABLE_STD_MEMBER_RE.match(name)
-    )
+    match = _USER_SPECIALIZABLE_STD_TEMPLATE_RE.match(
+        name
+    ) or _USER_SPECIALIZABLE_STD_MEMBER_RE.match(name)
+    return match is not None and not _builtin_arguments_only(name, match.end())
+
+
+#: ``<builtin-type>`` codes (Itanium ABI 5.1.5): one letter, or ``D`` plus one.
+_BUILTIN_TYPE_CODES = frozenset("abcdefghijlmnostvwxyz")
+_BUILTIN_D_CODES = frozenset("defhinsu")
+
+
+def _builtin_arguments_only(name: str, start: int) -> bool:
+    """Whether the template-argument list opening at *start* (just past its
+    ``I``) holds builtin types only, up to its closing ``E``.
+
+    A program may specialize a standard template only for a program-defined
+    type ([namespace.std]/2), so ``std::char_traits<char>`` or
+    ``std::hash<int>`` is the implementation's own specialization, never the
+    library's. Anything this does not read as a builtin (a name, a
+    substitution, a qualifier) answers ``False``, keeping the customization
+    point user-owned.
+    """
+    i, count = start, 0
+    while i < len(name):
+        ch = name[i]
+        if ch == "E":
+            return count > 0
+        if ch in _BUILTIN_TYPE_CODES:
+            i += 1
+        elif ch == "D" and i + 1 < len(name) and name[i + 1] in _BUILTIN_D_CODES:
+            i += 2
+        else:
+            return False
+        count += 1
+    return False
 
 
 def find_libcxx(needed_libs: list[str]) -> str | None:

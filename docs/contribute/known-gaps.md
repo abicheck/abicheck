@@ -493,6 +493,11 @@ per-item status in the
 
 ### False-positive risk
 
+#### An `-O2` rebuild of a gcc library that needed stack canaries at `-O0` reads `stack_canary_removed` (2026-11-08)
+
+**Status (2026-11-08): OPEN, narrowed.** Rebuilding an unchanged library at `-O2` can leave no frame that `-fstack-protector-strong` must guard, so the new binary no longer imports `__stack_chk_fail` and abicheck reports `stack_canary_removed` (RISK), though the protector flag is still on. The rest of that rebuild's noise is fixed (weak `std::`/`__gnu_cxx::` copies, version-covered imports, clang's declaration-only `std::string` DIE; ADR-089 A7). A binary without debug info cannot show the flag; with DWARF, `DW_AT_producer` records it, but the snapshot keeps only the first unit's producer string, and one unit is not evidence for the others. Closing it needs a per-unit stack-protector fact in the advanced-DWARF payload (a snapshot schema change). `false-positive` (RISK, exit 0). Owner: `extract/` (DWARF producer flags) and `diff_platform_elf_dynamic._diff_security_hardening`.
+<!-- no-canary: tests/test_rebuild_toolchain_drift_integration.py::test_optimization_rebuild_reads_compatible allows exactly this residue and fails on any other -->
+
 #### A typedef retargeted inside a template argument still reads as a removal plus an addition under headers (2026-10-25)
 
 **Status (2026-10-25): OPEN.** #1812 pairs a header-declared parameter retype into `func_params_changed` when the typedef it names changed target, but `compare/parameter_replacement.py`'s `typedef_target_changed` reads only a spelling that reduces to one name.

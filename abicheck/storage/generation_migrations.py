@@ -464,6 +464,15 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "rewrite is needed -- an older clang snapshot reads the alignment as "
         "not captured"
     ),
+    44: GenerationSpellingChange(
+        "advanced DWARF records a by-value aggregate's triviality as 'unknown' "
+        "when the unit carries only its declaration (clang's type homing of "
+        "std::string), and takes a type's own DW_AT_calling_convention as the "
+        "answer when present; the ELF origin of a std customization point "
+        "specialized over builtins only (std::char_traits<char>) is the C++ "
+        "runtime. No type or name spelling changes, so no rewrite is needed -- "
+        "an older snapshot's declaration-only 'trivial' reads as before"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.
