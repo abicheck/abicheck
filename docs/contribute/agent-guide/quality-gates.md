@@ -507,6 +507,87 @@ is complete out of the box. Prefer `pip install -e ".[dev]"` above when pixi
 isn't available in your environment (add `,docs,dist` for full parity).
 
 
+## Toolchain canaries (`toolchain-canary.yml`)
+
+The required lanes pin every external tool to a version CI installs today, so a
+new release of a tool abicheck parses output from is first noticed by a field
+report. The canary workflow runs the `integration` marker suite (the same
+`scripts/verify.py --profile full --only integration` step `integration.yml`
+runs) against the **newest** release of one tool at a time:
+
+| Leg | Newest tool under test | Runner | Baseline for the other tools |
+|---|---|---|---|
+| `castxml` | Newest CastXML Superbuild release, resolved from the GitHub API and verified by the asset's reported SHA-256 digest (fail-closed if the digest is absent) | `ubuntu-24.04`, 2 shards | runner's default GCC; no pinned castxml needed |
+| `gcc` | Newest GCC major ≥ 14 in the runner's Ubuntu archive | `ubuntu-24.04`, 2 shards | pinned castxml via `setup-castxml` |
+| `xcode` | Newest installed Xcode (`sort -V` over `/Applications/Xcode*.app`) and its Apple clang | `macos-latest` | the conda-forge castxml 0.7.0 build `integration.yml` pins |
+
+Each leg changes one tool, so a red leg points at that tool. The step summary
+records the versions each leg actually ran, and the leg fails if its own tool
+is not the one on `PATH`.
+
+**Non-blocking, by construction.** The workflow triggers only on
+`schedule` (Tuesday 05:23 UTC) and `workflow_dispatch`. It has no
+`pull_request` or `push` trigger, so it is never a PR check and cannot become a
+required one. Failing legs stay red so they show in the Actions tab; there is no
+`continue-on-error`. Each failing leg uploads its verify.py log
+(`canary-<tool>[-shardN].log`, 30-day retention). The workflow uses
+`contents: read` only and no secrets. It opens no issue. Nothing here changes an
+existing lane, a required check, or an exit code.
+
+**Known limits, so a red leg is read correctly:**
+
+- **GCC is not the latest release.** Ubuntu 24.04's archive carries GCC 14, not
+  15 or 16. A GCC trunk or latest-release leg needs a conda-forge or source build
+  and is a follow-up. The gcc leg's step summary states the version it ran.
+- **A newer CastXML can fail the version policy.** `abicheck/extract/headers/castxml/policy.py`
+  supports CastXML `>=0.6.11,<0.8.0`. A newest release at or above 0.8.0 makes the
+  castxml leg fail with `UnsupportedCastxmlVersionError`. That is the gate doing its
+  job, not drift. The canary does not set `ABICHECK_ALLOW_UNSUPPORTED_CASTXML`,
+  because the point is to see the real policy answer.
+- **The digest is the only check on a "newest" artifact.** Pinned lanes compare
+  a SHA-256 written into the repo. The canary can only check the digest GitHub
+  reports for the asset, so a compromised release would pass the digest check.
+  The leg is non-blocking and runs against released assets only.
+
+**Triage: who looks and what to do.** The owner is the maintainer on CI duty
+(name them here when the rota exists). Check the Actions run on the Tuesday it
+ran, or the failed run after a manual dispatch.
+
+1. **Classify the leg.** Read the step summary for the versions that ran, and the
+   `canary-*.log` artifact for the first failing test. Rerun the failed leg once.
+   A red rerun is a real failure. A green rerun is a flake: note it in the PR or
+   issue that follows, and stop.
+2. **Reproduce locally** with the tool version the leg ran, first on `PATH`.
+   Then run `python scripts/verify.py --profile full --only integration`. For
+   castxml, use the tarball named in the summary. For GCC, put the same
+   `gcc-N` / `g++-N` first on `PATH`. For Xcode, `xcode-select -s` the Xcode the
+   summary names. Confirm the same test fails with the same message.
+3. **Decide what the failure is**, and fix the cause, not the test:
+   - *abicheck reads the new output wrongly* (a changed AST shape, a changed
+     `--version` string, a layout that moved): fix it in the owning module with a
+     regression test that covers the bug class, not only the reported input
+     (AGENTS.md "Test the bug class"), and add a changelog fragment. Model it on
+     the clang 22 fixes (#1921, #1929).
+   - *a tool release changed a behaviour abicheck relies on, on purpose*: adapt
+     the code, and note the new supported range in the code and docs that name it.
+   - *the newest CastXML is outside the supported range*: this is a policy
+     decision, not a bug. Open it as a plan or ADR (`docs/contribute/adr/`) that
+     moves `MAX_CASTXML`, with a canary run as the evidence. Do not widen the range
+     in a drive-by PR.
+   - *the runner image or the leg's setup changed*: fix `toolchain-canary.yml`.
+4. **If it cannot be fixed in the same pass**, record it in
+   [`known-gaps.md`](../known-gaps.md) with a status line (OPEN/PARTIAL), and a
+   `known_gap_canary` test that asserts the current answer, which the
+   `known-gap-canaries` gate requires. The entry names the run that found it.
+   Do not reach for `xfail` to hide the leg.
+5. **Close it** when a fix merges and a later canary run is green on that leg.
+   Move the entry to the archive with a CLOSED status line, and turn the canary
+   into a regression test.
+
+The canary is never the only evidence for a fix. Reproduce it in the normal PR
+gate first, and do not add a `pull_request` trigger to this workflow to make
+triage easier: a PR-triggered run would make a weekly signal a merge gate.
+
 ## Reading CodeFactor findings on a PR
 
 CodeFactor's check run links to `https://www.codefactor.io/repository/github/abicheck/abicheck/pull/<N>`.
