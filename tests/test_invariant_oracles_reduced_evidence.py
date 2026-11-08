@@ -23,6 +23,7 @@ from pathlib import Path
 
 import pytest
 
+from tests._abicheck_subprocess import abicheck_command, abicheck_env
 from tests.oracles.absence import absence_violations, rendered_absence_violations
 
 pytestmark = [
@@ -73,10 +74,7 @@ def _compare(tmp: Path, old: Path, new: Path, tag: str) -> tuple[int, dict, str]
     out_json = tmp / f"{tag}.json"
     out_md = tmp / f"{tag}.md"
     proc = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "abicheck.cli",
+        abicheck_command(
             "compare",
             str(old),
             str(new),
@@ -86,10 +84,11 @@ def _compare(tmp: Path, old: Path, new: Path, tag: str) -> tuple[int, dict, str]
             f"markdown={out_md}",
             "-o",
             "terminal=-",
-        ],
+        ),
         capture_output=True,
         text=True,
         timeout=600,
+        env=abicheck_env(),
     )
     report = json.loads(out_json.read_text(encoding="utf-8"))
     return proc.returncode, report, proc.stdout
