@@ -5764,13 +5764,13 @@ _run_delta_json() {
       continue
     fi
     case "$tok" in
-      --header | --include | --label | --debug-info)
+      -H | -I | --header | --include | --label | --debug-info)
         if [[ "${CMD[$((i + 1))]:-}" == old=* ]]; then
           i=$((i + 1))
           continue
         fi
         ;;
-      --header=old=* | --include=old=* | --label=old=* | --debug-info=old=*)
+      --header=old=* | --include=old=* | --label=old=* | --debug-info=old=* | -Hold=* | -Iold=*)
         continue
         ;;
       --set)

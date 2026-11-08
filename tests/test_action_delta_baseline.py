@@ -368,3 +368,32 @@ def test_the_delta_report_never_reaches_the_gate_s_exit_axes(
         delta_gates=True,
     )
     assert outputs["_exit"] == 0, outputs["_stdout"]
+
+
+@pytest.mark.parametrize(
+    "extra_args",
+    [
+        "-H old=release.h -H new=pr.h",
+        "--header=old=release.h --header=new=pr.h",
+        "-I old=rel/inc -I new=pr/inc",
+        "-Hold=release.h -Hnew=pr.h",
+    ],
+)
+def test_every_old_side_spelling_is_dropped_and_new_side_kept(
+    tmp_path: Path, extra_args: str
+) -> None:
+    snap = str(tmp_path / "base-snapshot.json")
+    _outputs, calls = _run(
+        tmp_path,
+        "artifact",
+        "resolved",
+        snapshot=snap,
+        extra={"INPUT_EXTRA_ARGS": extra_args},
+    )
+    (gate,) = [c for c in calls if snap not in c]
+    (delta,) = [c for c in calls if snap in c]
+    old_tokens = [t for t in extra_args.split() if "old=" in t or t.endswith("old")]
+    new_tokens = [t for t in extra_args.split() if "new=" in t]
+    assert all(t in " ".join(gate) for t in old_tokens)
+    assert not any("old=" in a for a in delta)
+    assert all(any(t in a for a in delta) for t in new_tokens)
