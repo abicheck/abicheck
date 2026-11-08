@@ -3496,6 +3496,126 @@
    "default": "3.13"
   },
   {
+   "id": "actions/fetch-main-snapshot:workflow",
+   "action": "actions/fetch-main-snapshot",
+   "input": "workflow",
+   "status": "live",
+   "required": true,
+   "default": null
+  },
+  {
+   "id": "actions/fetch-main-snapshot:mode",
+   "action": "actions/fetch-main-snapshot",
+   "input": "mode",
+   "status": "live",
+   "required": false,
+   "default": "auto"
+  },
+  {
+   "id": "actions/fetch-main-snapshot:branch",
+   "action": "actions/fetch-main-snapshot",
+   "input": "branch",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "actions/fetch-main-snapshot:profile",
+   "action": "actions/fetch-main-snapshot",
+   "input": "profile",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "actions/fetch-main-snapshot:wait-timeout",
+   "action": "actions/fetch-main-snapshot",
+   "input": "wait-timeout",
+   "status": "live",
+   "required": false,
+   "default": "600"
+  },
+  {
+   "id": "actions/fetch-main-snapshot:destination",
+   "action": "actions/fetch-main-snapshot",
+   "input": "destination",
+   "status": "live",
+   "required": false,
+   "default": "${{ runner.temp }}/abicheck-base-snapshot"
+  },
+  {
+   "id": "actions/fetch-main-snapshot:github-token",
+   "action": "actions/fetch-main-snapshot",
+   "input": "github-token",
+   "status": "live",
+   "required": false,
+   "default": "${{ github.token }}"
+  },
+  {
+   "id": "actions/fetch-main-snapshot:python-version",
+   "action": "actions/fetch-main-snapshot",
+   "input": "python-version",
+   "status": "live",
+   "required": false,
+   "default": "3.13"
+  },
+  {
+   "id": "actions/main-snapshot:library",
+   "action": "actions/main-snapshot",
+   "input": "library",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "actions/main-snapshot:header",
+   "action": "actions/main-snapshot",
+   "input": "header",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "actions/main-snapshot:dump-args",
+   "action": "actions/main-snapshot",
+   "input": "dump-args",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "actions/main-snapshot:snapshot",
+   "action": "actions/main-snapshot",
+   "input": "snapshot",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "actions/main-snapshot:profile",
+   "action": "actions/main-snapshot",
+   "input": "profile",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "actions/main-snapshot:retention-days",
+   "action": "actions/main-snapshot",
+   "input": "retention-days",
+   "status": "live",
+   "required": false,
+   "default": "14"
+  },
+  {
+   "id": "actions/main-snapshot:python-version",
+   "action": "actions/main-snapshot",
+   "input": "python-version",
+   "status": "live",
+   "required": false,
+   "default": "3.13"
+  },
+  {
    "id": "actions/report:report",
    "action": "actions/report",
    "input": "report",

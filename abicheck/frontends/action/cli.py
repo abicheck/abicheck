@@ -573,6 +573,7 @@ def prepare_baseline_set_cmd(
 from . import (  # noqa: E402
     cli_bundle_scope as _cli_bundle_scope,  # noqa: F401
     cli_integration as _cli_integration,  # noqa: F401
+    cli_main_snapshot as _cli_main_snapshot,  # noqa: F401
     cli_provenance as _cli_provenance,  # noqa: F401
 )
 

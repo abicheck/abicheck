@@ -1,0 +1,98 @@
+name: 'abicheck fetch-main-snapshot'
+description: >-
+  Find the default-branch snapshot a pull request's delta is measured
+  against. The base commit is chosen by an exact rule (first parent of the PR
+  merge commit by default; the unique merge-base in head mode; base_sha for
+  merge_group), the snapshot is the `actions/main-snapshot` artifact for that
+  exact commit uploaded by the configured workflow on the default branch, and
+  every way it can be unavailable is a named `outcome` -- never a substitute
+  commit and never "no changes". Read-only. Requires the checkout to contain
+  the base: `fetch-depth: 2` for a merge commit, `0` in head mode.
+
+branding:
+  icon: 'git-pull-request'
+  color: 'blue'
+
+inputs:
+  workflow:
+    description: "The snapshot workflow's file name or path (e.g. `abi-main.yml`)."
+    required: true
+  mode:
+    description: >
+      `auto` (default: `merge-group` on merge_group events, otherwise
+      `merge-commit`), `merge-commit`, or `head`.
+    required: false
+    default: 'auto'
+  branch:
+    description: 'Default branch the snapshot must come from. Empty = the repository default branch.'
+    required: false
+    default: ''
+  profile:
+    description: 'Profile suffix used by main-snapshot, if any.'
+    required: false
+    default: ''
+  wait-timeout:
+    description: >
+      Seconds to wait while the snapshot run for the base is still in
+      progress (outcome `base_pending`). 0 disables waiting.
+    required: false
+    default: '600'
+  destination:
+    description: >
+      Directory under which the snapshot is extracted, into a new
+      subdirectory of its own; existing contents are left untouched.
+    required: false
+    default: '${{ runner.temp }}/abicheck-base-snapshot'
+  github-token:
+    description: 'Token with `actions: read`.'
+    required: false
+    default: ${{ github.token }}
+  python-version:
+    description: 'Python used to run abicheck.'
+    required: false
+    default: '3.13'
+
+outputs:
+  outcome:
+    description: >
+      `resolved` | `base_unknown` | `base_ambiguous` | `base_pending` |
+      `base_failed` | `base_not_snapshotted` | `base_expired` | `snapshot_missing` |
+      `untrusted_source` | `lookup_failed`.
+    value: ${{ steps.fetch.outputs.outcome }}
+  base-sha:
+    description: 'The base commit the delta is measured against (empty when it could not be chosen).'
+    value: ${{ steps.fetch.outputs.base-sha }}
+  snapshot-path:
+    description: 'Path of the extracted snapshot file when `outcome` is `resolved`.'
+    value: ${{ steps.fetch.outputs.snapshot-path }}
+  message:
+    description: 'One-line text for a PR comment or job summary describing the outcome.'
+    value: ${{ steps.fetch.outputs.message }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install abicheck
+      shell: bash
+      run: pip install "${{ github.action_path }}/../.."
+
+    - name: Fetch the base snapshot
+      id: fetch
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        REPO: ${{ github.repository }}
+        EVENT_NAME: ${{ github.event_name }}
+        MERGE_GROUP_BASE: ${{ github.event.merge_group.base_sha }}
+        INPUT_WORKFLOW: ${{ inputs.workflow }}
+        INPUT_MODE: ${{ inputs.mode }}
+        INPUT_BRANCH: ${{ inputs.branch || github.event.repository.default_branch }}
+        INPUT_PROFILE: ${{ inputs.profile }}
+        INPUT_WAIT_TIMEOUT: ${{ inputs.wait-timeout }}
+        INPUT_DESTINATION: ${{ inputs.destination }}
+      run: bash "${{ github.action_path }}/run.sh"
