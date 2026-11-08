@@ -72,6 +72,27 @@ deprecation-window note would need to reach.
   `baseline-generation`, `baseline-profile` outputs and a "Baseline source"
   step-summary block). The JSON report does not carry that provenance yet; see
   the gap recorded in [`known-gaps.md`](../known-gaps.md).
+- **2026-11-08 (accepted-main delta: the report records gate vs delta).**
+  The `accepted-main` channel is consumed per pull request as an exact-commit
+  snapshot (`actions/main-snapshot`, `actions/fetch-main-snapshot`, and the
+  root Action's `delta-baseline` input; base-selection rule, named outcomes
+  and artifact storage in
+  [`plans/pr-delta-vs-main-snapshot.md`](../plans/pr-delta-vs-main-snapshot.md)).
+  The release-contract comparison stays the **gate**: its verdict alone sets
+  the step's verdict and exit code, whatever the delta outcome
+  (`delta-on-missing-base: fail` is a separate failing step). Both reports
+  now say which comparison they are, in a versioned report field rather than
+  only in the PR comment: an optional top-level `delta_baseline` block
+  (compare report schema 7.3, release report schema 3.1) with
+  `comparison_role` (`gate` | `delta`), `decides_exit_code`, the lookup
+  `outcome` (or `unsupported_operand`), `base_sha`, `branch` and, on the
+  delta report, the gate's `gate_verdict`. The Action asserts it through the
+  config key `report.delta_baseline` (`--set report.delta_baseline=@FILE`),
+  so it is labelled `asserted_by: action`; the CLI validates its shape and
+  role rules (exit 64 if unusable) and never lets it change a verdict, a
+  severity or an exit code. The Action skips, with a warning, a record the
+  CLI would refuse, so the informational block cannot fail the gate. Owner:
+  `abicheck/report/delta_baseline.py` (ADR-061 `report/`).
 
 ---
 

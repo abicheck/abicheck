@@ -1841,6 +1841,81 @@
         }
       }
     },
+    "delta_baseline": {
+      "type": "object",
+      "description": "Schema 7.3: which comparison of a root GitHub Action `delta-baseline` pair this report is, as the caller asserted it. With `delta-baseline: main` the Action compares the same new side twice: the gate (against the configured release baseline; its verdict is the check's verdict and exit code) and the delta (against the default-branch snapshot of the exact commit the pull request was built on, so the PR comment lists only that PR's changes). Present only when the run was given `report.delta_baseline` (`--set report.delta_baseline=@FILE`). `asserted_by: action` marks the values unverified by the CLI. Informational: never affects `verdict`, `severity` or any exit code; a `delta` report's own verdict never gates.",
+      "additionalProperties": false,
+      "required": [
+        "asserted_by",
+        "comparison_role",
+        "decides_exit_code",
+        "outcome",
+        "base_sha",
+        "branch",
+        "gate_verdict"
+      ],
+      "properties": {
+        "asserted_by": {
+          "type": "string",
+          "enum": [
+            "action"
+          ],
+          "description": "Who stated these values. `action`: the root GitHub Action wrote them after its base-snapshot lookup; the CLI did not look the snapshot up itself."
+        },
+        "comparison_role": {
+          "type": "string",
+          "enum": [
+            "gate",
+            "delta"
+          ],
+          "description": "`gate`: this report is the comparison against the release baseline, and its verdict decides the check. `delta`: this report is the advisory comparison against the default-branch snapshot named by `base_sha`."
+        },
+        "decides_exit_code": {
+          "type": "boolean",
+          "description": "`true` exactly for `comparison_role: gate`. Stated so a consumer reading a `delta` report alone does not take its verdict for the check's."
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "resolved",
+            "base_unknown",
+            "base_ambiguous",
+            "base_pending",
+            "base_failed",
+            "base_not_snapshotted",
+            "base_expired",
+            "snapshot_missing",
+            "untrusted_source",
+            "lookup_failed",
+            "unsupported_operand"
+          ],
+          "description": "The base-snapshot outcome (the Action's `delta-outcome` output; meanings in docs/reference/main-snapshot.md), or `unsupported_operand` for a directory/package comparison, which a single-snapshot delta cannot describe. A `delta` report is always `resolved`. On a `gate` report this is the lookup's outcome when the gate ran; the PR comment may still fall back to the gate's report if the delta comparison then produced none."
+        },
+        "base_sha": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$",
+          "description": "The default-branch commit the delta is (or would have been) measured against: the first parent of the PR merge commit, the merge-base in head mode, or the merge-queue entry's base. `null` when no base commit was selected (`base_unknown`, `base_ambiguous`). Always set on a `delta` report."
+        },
+        "branch": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The default branch the snapshot must come from. `null` when not recorded."
+        },
+        "gate_verdict": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[A-Z][A-Z_]{0,39}$",
+          "description": "`delta` reports only: the gate comparison's verdict (the Action's `verdict` output), which is the check's result. `null` on a `gate` report, whose own `verdict` is the gate's."
+        }
+      }
+    },
     "policy_overrides": {
       "type": "object",
       "additionalProperties": {

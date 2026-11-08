@@ -1487,6 +1487,11 @@
    "default": "None"
   },
   {
+   "id": "report.delta_baseline",
+   "kind": "str",
+   "default": "None"
+  },
+  {
    "id": "consumers.manifests",
    "kind": "list",
    "default": "[]"

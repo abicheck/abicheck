@@ -324,4 +324,11 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       ``exit.crosscheck_promotion_contribution`` key and the
 #:       ``promoted_crosscheck`` exit reason with the retired ``--crosscheck``
 #:       promotion; same change as the compare report's schema 7.0.
-RELEASE_SCHEMA_VERSION = "3.0"
+#: - ``3.1`` adds the optional top-level ``delta_baseline`` block: whether
+#:       this report is the gate or the delta comparison of a root-Action
+#:       ``delta-baseline`` pair, the base-snapshot ``outcome``, ``base_sha``,
+#:       ``branch`` and (delta only) the gate's verdict, asserted through
+#:       ``report.delta_baseline``. Same shape as the compare report's schema
+#:       7.3 block (``report/delta_baseline.py``); absent when the run was
+#:       given none. Informational and additive.
+RELEASE_SCHEMA_VERSION = "3.1"

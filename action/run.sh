@@ -2387,6 +2387,49 @@ with open(out, "w", encoding="utf-8") as fh:
   CMD+=(--set "report.baseline_provenance=@${prov_file}")
 }
 
+# report.delta_baseline (compare report schema 7.3, release 3.1): which
+# comparison of a delta-baseline pair a report is. Writes the record for
+# role $1 (gate|delta) to a new file and prints its path; prints nothing
+# (with a warning) when the record would not validate, so a malformed delta
+# value can never turn the gate's run into a usage error. The values go
+# through Python and the report module's own validator, never shell text.
+_write_delta_record() {
+  local role="$1" outcome="$2" gate_verdict="${3:-}" out
+  [[ -n "${_PY_BIN:-}" ]] || return 0
+  out=$(_mktemp_canonical "$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-delta-baseline.XXXXXX")")
+  if (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
+import json, sys
+from abicheck.report.delta_baseline import DeltaBaseline
+role, outcome, sha, branch, verdict, out = sys.argv[1:7]
+doc = {"comparison_role": role, "outcome": outcome, "base_sha": sha or None,
+       "branch": branch or None, "gate_verdict": verdict or None}
+DeltaBaseline.from_mapping(doc)
+with open(out, "w", encoding="utf-8") as fh:
+    json.dump(doc, fh)
+' "$role" "$outcome" "${ABICHECK_DELTA_BASE_SHA:-}" "${ABICHECK_DELTA_BRANCH:-}" \
+      "$gate_verdict" "$out") 2>/dev/null; then
+    printf '%s\n' "$out"
+  else
+    echo "::warning::abicheck: could not record the delta-baseline $role block in the JSON report (outcome '$outcome'); the comparison itself is unaffected." >&2
+  fi
+}
+
+# The gate's record: added to the gate command whenever a delta base was
+# looked up, so the release comparison's own report says it is the gate and
+# what the lookup found. A directory/package comparison is recorded as
+# `unsupported_operand` (the same rule `_select_delta_report` applies).
+add_delta_baseline_flag() {
+  [[ -n "${ABICHECK_DELTA_OUTCOME:-}" && "${_NO_BASELINE:-}" != "true" ]] || return 0
+  local outcome="$ABICHECK_DELTA_OUTCOME" rec
+  if [[ "$outcome" == resolved ]] \
+     && { _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" || _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; }; then
+    outcome=unsupported_operand
+  fi
+  rec=$(_write_delta_record gate "$outcome")
+  [[ -n "$rec" ]] && CMD+=(--set "report.delta_baseline=@${rec}")
+  return 0
+}
+
 # "### Baseline source" step-summary block. Prints nothing when this run
 # compared against no release baseline (a no-baseline audit, or an
 # old-library given directly), so it never claims a source it did not use.
@@ -3450,6 +3493,7 @@ elif [[ "$MODE" == "compare" ]]; then
   # severity-preset is a core flag (--severity-preset, ADR-068): forwarded as-is.
   add_single_flag "--severity-preset" "${INPUT_SEVERITY_PRESET:-}"
   add_baseline_provenance_flag
+  add_delta_baseline_flag
   add_set_flags
   # --budget: time guard (e.g. 15m, 900s, 1h); the step FAILS on overflow
   # (exit 5) -- a budget never silently shrinks scope. Baseline shape only --
@@ -5776,7 +5820,9 @@ _run_delta_json() {
       --set)
         # The release baseline's provenance describes the gate's old side,
         # not the snapshot: a delta report must not claim it.
-        if [[ "${CMD[$((i + 1))]:-}" == report.baseline_provenance=* ]]; then
+        # The gate's own delta_baseline record is replaced by the delta's.
+        if [[ "${CMD[$((i + 1))]:-}" == report.baseline_provenance=* \
+              || "${CMD[$((i + 1))]:-}" == report.delta_baseline=* ]]; then
           i=$((i + 1))
           continue
         fi
@@ -5784,6 +5830,9 @@ _run_delta_json() {
     esac
     delta+=("$tok")
   done
+  local rec
+  rec=$(_write_delta_record delta resolved "${VERDICT:-}")
+  [[ -n "$rec" ]] && delta+=(--set "report.delta_baseline=@${rec}")
   CMD=("${delta[@]}")
   PR_JSON="$out"
   _build_json_cmd

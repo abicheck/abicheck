@@ -639,31 +639,74 @@ __all__ = [
 
 
 def context_notes(data: Mapping[str, Any]) -> list[str]:
-    """Delta notes for a report carrying a delta-baseline analysis context.
+    """Delta notes for a report from a delta-baseline run.
 
     The fork-path publisher never trusts producer-written text: it rebuilds
-    the notes from the shape-validated structured fields only. A missing or
-    invalid context yields no notes (the plain release comparison).
+    the notes from shape-validated structured fields only -- the analysis
+    context's ``delta_*`` fields first, else the report's own
+    ``delta_baseline`` block (report schema 7.3), so a stored report renders
+    the same notes without a context. A missing or invalid record yields no
+    notes (the plain release comparison).
     """
     from ...model.analysis_context import AnalysisContext, AnalysisContextError
     from .main_snapshot import delta_notes
 
     raw = data.get("analysis_context")
-    if raw is None:
+    ctx: AnalysisContext | None = None
+    if raw is not None:
+        try:
+            ctx = AnalysisContext.from_mapping(raw)
+        except AnalysisContextError:
+            return []
+    if ctx is not None and ctx.delta_outcome:
+        try:
+            return delta_notes(
+                ctx.delta_outcome,
+                base_sha=ctx.delta_base_sha,
+                branch=ctx.pr_base_ref or "main",
+                gate_verdict=ctx.gate_verdict,
+                merge_group=ctx.producer_event == "merge_group",
+            )
+        except ValueError:
+            return []
+    return _block_notes(
+        data, merge_group=ctx is not None and ctx.producer_event == "merge_group"
+    )
+
+
+def _block_notes(data: Mapping[str, Any], *, merge_group: bool) -> list[str]:
+    """Notes from the report's ``delta_baseline`` block, or ``[]``.
+
+    A ``delta`` report is labelled as the delta, with the gate's recorded
+    verdict. A ``gate`` report is labelled only when its lookup did not
+    resolve -- then it *is* what the comment shows. A resolved gate report
+    rendered on its own carries no note: whether a delta comparison followed
+    is not recorded in it, and guessing either way would mislabel it.
+    """
+    from ...report.delta_baseline import DeltaBaseline, DeltaBaselineError
+    from .main_snapshot import delta_notes
+
+    block = data.get("delta_baseline")
+    if block is None:
         return []
     try:
-        ctx = AnalysisContext.from_mapping(raw)
-    except AnalysisContextError:
+        record = DeltaBaseline.from_report_block(block)
+    except DeltaBaselineError:
         return []
-    if not ctx.delta_outcome:
-        return []
+    if record.comparison_role == "gate":
+        if record.outcome == "resolved":
+            return []
+        verdict = data.get("verdict")
+        gate_verdict = verdict.upper() if isinstance(verdict, str) else ""
+    else:
+        gate_verdict = record.gate_verdict or ""
     try:
         return delta_notes(
-            ctx.delta_outcome,
-            base_sha=ctx.delta_base_sha,
-            branch=ctx.pr_base_ref or "main",
-            gate_verdict=ctx.gate_verdict,
-            merge_group=ctx.producer_event == "merge_group",
+            record.outcome,
+            base_sha=record.base_sha or "",
+            branch=record.branch or "main",
+            gate_verdict=gate_verdict,
+            merge_group=merge_group,
         )
     except ValueError:
         return []
