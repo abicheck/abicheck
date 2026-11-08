@@ -58,7 +58,7 @@ status line's date and commit.
 
 ## Page layout
 
-Each open entry below has its status line, a risk tag and a short summary; the full write-up, with the history of what was tried, is one file per entry under `docs/contribute/known-gaps/`. Index rows are ranked: the Priority list, then `false-clean` (a run can read cleaner than its evidence), `false-positive` (a finding or failure that is not real), `perf`, and `hygiene` (tests, tooling, schema or code-ownership debt). When you fix, re-check or add an entry, edit its write-up and keep the index row's status line in sync.
+Each open entry below has its status line, a risk tag and a short summary; the full write-up, with the history of what was tried, is one file per entry under `docs/contribute/known-gaps/`. Index rows are ranked: the Priority list, then `false-clean` (a run can read cleaner than its evidence), `false-positive` (a finding or failure that is not real), `perf`, and `hygiene` (tests, tooling, schema or code-ownership debt). `route-divergence` marks two equivalent routes (CLI, typed API, package) that report different findings for one input without a cleaner verdict. When you fix, re-check or add an entry, edit its write-up and keep the index row's status line in sync.
 
 ## Priority
 
@@ -83,6 +83,13 @@ flag only, by design, and a directory/package `compare` now applies the
 dependency walk and debug roots to every member. No open gap remains.
 
 ### Report and detector coverage
+
+#### The typed `compare()` route omits `exported_not_public` that the CLI reports for the same catalog case (2026-11-08)
+
+**Status (2026-11-08): OPEN.** Found by the typed-API route check in `tests/test_invariant_oracles_catalog.py`.
+[Full write-up](known-gaps/the-typed-compare-route-omits-exported-not-public-that-the-cli-reports-for-the-same-catalog-case.md)
+`route-divergence` — the typed route reports a different kind set from the CLI for one catalog case (one hygiene finding missing). The verdict agrees, so no run reads cleaner than its evidence.
+<!-- canary: tests/test_invariant_oracles_catalog.py::test_typed_api_omits_exported_not_public_on_case09 -->
 
 #### The clang record-layout pass leaves unnameable records and alias-template arrays to DWARF (2026-11-04)
 
@@ -197,17 +204,10 @@ current emitter, which is unchanged.
 
 #### A stripped library compared without headers reads `NO_CHANGE` with `partial` assurance and exit 0 (2026-11-08)
 
-**Status (2026-11-08): OPEN.** Found while building the invariant oracles (`tests/test_invariant_oracles_reduced_evidence.py`).
+**Status (2026-11-08): OPEN.** Found while building the invariant oracles (`tests/test_invariant_oracles_reduced_evidence.py`). Three shapes reproduce it: both sides stripped (`NO_CHANGE`, `partial`), old side with DWARF and new side stripped (`COMPATIBLE`, `partial`), and both stripped with `--depth headers` and no headers (`NO_CHANGE`, `failed`). The fix is [ADR-090](adr/090-unresolved-surface-is-not-a-clean-verdict.md) (proposed).
 [Full write-up](known-gaps/a-stripped-library-compared-without-headers-reads-no-change-with-partial-assurance-and-exit-0.md)
-`false-clean` — a symbols-only compare of a stripped library reads `NO_CHANGE` with exit 0 and an accepted headline.
+`false-clean` — a compare without type-level evidence on a side reads a clean verdict with exit 0 and an accepted headline in the terminal, Markdown, review and HTML reports.
 <!-- canary: tests/test_invariant_oracles_reduced_evidence.py::test_stripped_pair_gap_is_still_the_current_answer -->
-
-#### The typed `compare()` route omits `exported_not_public` that the CLI reports for the same catalog case (2026-11-08)
-
-**Status (2026-11-08): OPEN.** Found by the typed-API route check in `tests/test_invariant_oracles_catalog.py`.
-[Full write-up](known-gaps/the-typed-compare-route-omits-exported-not-public-that-the-cli-reports-for-the-same-catalog-case.md)
-`false-clean` — the typed route can read a catalog case as having one fewer hygiene finding than the CLI.
-<!-- canary: tests/test_invariant_oracles_catalog.py::test_typed_api_omits_exported_not_public_on_case09 -->
 
 #### A castxml base whose bare leaf two records share is not resolved by the leak walk (2026-11-05)
 
