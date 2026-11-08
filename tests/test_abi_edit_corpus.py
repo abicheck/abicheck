@@ -15,6 +15,7 @@ observed answer, and listed in the PR and ``docs/contribute/known-gaps.md``.
 from __future__ import annotations
 
 import shutil
+import sys
 from pathlib import Path
 
 import pytest
@@ -189,11 +190,22 @@ def corpus_root(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 def _skip_without_driver(seed, compiler: str) -> None:
-    """Skip only when this cell's compiler driver is absent; a failing build still fails."""
+    """Skip a cell only when it cannot observe its ground truth on this platform.
+
+    Two reasons qualify: the driver is absent, or the clang driver targets Windows
+    MSVC, whose DLLs export no symbol without __declspec(dllexport). The seeds
+    declare none, so such a build reads as NO_CHANGE and proves nothing. A build
+    that runs and fails is still a failure.
+    """
     driver = COMPILERS[compiler][1 if seed.lang == "c++" else 0]
     if shutil.which(driver) is None:
         pytest.skip(
             f"{driver} is not installed; this compiler lane cannot build the cell"
+        )
+    if sys.platform == "win32" and compiler == "clang":
+        pytest.skip(
+            "clang targeting Windows MSVC exports no symbols without __declspec(dllexport); "
+            "the corpus seeds declare none, so this cell cannot observe its ground truth"
         )
 
 
