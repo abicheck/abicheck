@@ -70,9 +70,10 @@ def _compile(
     # Give old and new the same install name / SONAME. Otherwise the default is
     # derived from the output path (macOS) and the two sides differ only by their
     # build directory, which reads as a spurious SONAME_CHANGED.
+    # PE has no SONAME, so Windows takes no flag.
     if sys.platform == "darwin":
         cmd.insert(1, "-Wl,-install_name,libedit.so")
-    else:
+    elif sys.platform.startswith("linux"):
         cmd.insert(1, "-Wl,-soname,libedit.so")
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if proc.returncode != 0:

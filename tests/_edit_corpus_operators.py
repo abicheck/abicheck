@@ -85,7 +85,7 @@ def _struct_swap_fields(r: Roles) -> dict[str, RoleText]:
 
 
 def _struct_field_widen(r: Roles) -> dict[str, RoleText]:
-    return _set(r, "struct.point", "struct point { long x; int y; };")
+    return _set(r, "struct.point", "struct point { long long x; int y; };")
 
 
 def _struct_array_grow(r: Roles) -> dict[str, RoleText]:
@@ -123,7 +123,7 @@ def _enum_class_change_value(r: Roles) -> dict[str, RoleText]:
 
 
 def _typedef_retarget(r: Roles) -> dict[str, RoleText]:
-    return _set(r, "typedef.handle", "typedef long handle_t;")
+    return _set(r, "typedef.handle", "typedef long long handle_t;")
 
 
 # --- functions -------------------------------------------------------------
@@ -133,8 +133,8 @@ def _func_param_type_change(r: Roles) -> dict[str, RoleText]:
     return _set(
         r,
         "func.add",
-        "int add_ints(long a, int b);",
-        "int add_ints(long a, int b) { return a + b; }",
+        "int add_ints(long long a, int b);",
+        "int add_ints(long long a, int b) { return a + b; }",
     )
 
 
@@ -157,8 +157,8 @@ def _func_return_type_change(r: Roles) -> dict[str, RoleText]:
     return _set(
         r,
         "func.count",
-        "long get_count(void);",
-        "long get_count(void) { return g_counter; }",
+        "long long get_count(void);",
+        "long long get_count(void) { return g_counter; }",
     )
 
 
@@ -188,7 +188,9 @@ def _func_param_rename_header_only(r: Roles) -> dict[str, RoleText]:
 
 
 def _var_type_change(r: Roles) -> dict[str, RoleText]:
-    return _set(r, "var.counter", "extern long g_counter;", "long g_counter = 0;")
+    return _set(
+        r, "var.counter", "extern long long g_counter;", "long long g_counter = 0;"
+    )
 
 
 # --- benign edits (must not be reported as breaking) -----------------------
@@ -306,7 +308,7 @@ OPERATORS: tuple[EditOp, ...] = (
         "struct_field_widen",
         ("struct.point",),
         _struct_field_widen,
-        "int -> long changes the member type and layout",
+        "int -> long long changes the member type and layout",
         any_of=(frozenset({"STRUCT_FIELD_TYPE_CHANGED", "TYPE_FIELD_TYPE_CHANGED"}),),
         touches=("struct.point",),
     ),
