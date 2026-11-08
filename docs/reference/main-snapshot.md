@@ -40,6 +40,12 @@ other pull requests are measured against.
 
 Outputs: `artifact-name`, `snapshot-path`.
 
+The artifact holds `snapshot.json` and `operand.json`, which records the
+`library` path as given (and `profile`) so a pull request whose library moved
+can still be paired with it (§ Operand identity below). The file name and the
+SONAME / Mach-O install name are read from the snapshot itself, so an
+artifact without `operand.json` still pairs by name.
+
 ## `actions/fetch-main-snapshot` — in the pull-request job
 
 Chooses the base commit by an exact rule, then finds the snapshot uploaded
@@ -155,7 +161,41 @@ under two notes: what it was measured against, and the gate's verdict. When
 the snapshot is unavailable the comment shows the gate's report under a note
 naming the outcome. The step's exit code, `verdict` and every other output
 come from the gate in all cases; `delta-on-missing-base: fail` adds a separate
-failing step. Outputs: `delta-outcome`, `delta-base-sha`.
+failing step. Outputs: `delta-outcome`, `delta-base-sha`,
+`delta-operand-match`.
+
+### Operand identity: is the snapshot this PR's library?
+
+Before the delta comparison runs, the Action checks that the snapshot
+describes the same library as `new-library`. A snapshot of a different
+library is **never compared**: every one of its symbols would read as
+removed. The rule (`abicheck/workflows/delta_operand.py`):
+
+| Snapshot vs. PR | Result | `delta-operand-match` |
+|---|---|---|
+| Same SONAME / install name (any path or file name: a different build directory, a renamed output) | delta runs | `loader_name` |
+| SONAME / install name differs only by version (`libfoo.so.1` → `libfoo.so.2`, `libfoo.1.dylib` → `libfoo.2.dylib`) | delta runs; it reports the bump as a finding, and the comment says the two were paired by version | `loader_name_version` |
+| No loader name on a side (PE, or a snapshot without one): same path or file name | delta runs | `file_name` |
+| …file names differ only by version | delta runs, with a note | `file_name_version` |
+| Unrelated SONAMEs, same file name or path | `operand_ambiguous` — not compared | — |
+| Nothing links them | `operand_unmatched` — not compared | — |
+| Either side could not be read | `operand_unreadable` — not compared | — |
+
+When the automatic rule cannot see the pairing (a PE DLL renamed, a SONAME
+renamed outright), declare it with `delta-operand-map`, one
+`SNAPSHOT=PR` pair per line, each side a path, file name or SONAME:
+
+```yaml
+          delta-operand-map: |
+            foo.dll=foo-core.dll
+```
+
+A map, once given, is decisive: if no entry names the snapshot's library, or
+the entry names a different PR library, the outcome is `operand_unmatched`
+rather than an automatic match. Every refusal keeps the gate's report in the
+comment under a "Delta unavailable" note; with `delta-on-missing-base: fail`
+an `operand_*` refusal fails the separate "Require the delta base snapshot"
+step like a missing snapshot does.
 
 It runs on `pull_request` and `merge_group` only (a `pull_request_target`
 checkout is the base branch, not the PR), and for a single-library
@@ -165,7 +205,8 @@ note. A failed lookup reads as `lookup_failed` and never stops the gate.
 With `pr-comment-via: artifact` (fork pull requests) the delta report is the
 one staged for the publisher, and the same two notes appear on its comment.
 They travel as structured fields of the report's `analysis_context`
-(`delta_outcome`, `delta_base_sha`, `gate_verdict`), never as text: the
+(`delta_outcome`, `delta_base_sha`, `gate_verdict`, `delta_operand_match`),
+never as text: the
 trusted publisher validates their shape and writes the notes itself, with the
 wording the direct path uses. A field that fails validation drops the notes
 rather than showing fork-written text.

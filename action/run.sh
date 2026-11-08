@@ -5799,12 +5799,32 @@ _select_delta_report() {
   PR_RENDER_JSON="$PR_JSON"
   PR_NOTES=()
   [[ -n "${ABICHECK_DELTA_OUTCOME:-}" ]] || return 0
-  local code="$ABICHECK_DELTA_OUTCOME"
+  local code="$ABICHECK_DELTA_OUTCOME" operand_match="" delta_json identity key value new_operand
   if [[ "$code" == resolved ]] \
      && { _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" || _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; }; then
     code=unsupported_operand
   elif [[ "$code" == resolved && -n "${ABICHECK_DELTA_SNAPSHOT:-}" && -n "${OLD_OPERAND_INDEX:-}" ]]; then
-    local delta_json
+    # Operand identity first (abicheck.workflows.delta_operand): a snapshot
+    # that is not shown to be this PR's library is never compared -- an
+    # unrelated one would read as every symbol removed (ADR-065).
+    # The CLI runs from $_PY_SAFE_DIR, so the operand goes over absolute;
+    # --new-given-as keeps the spelling the user wrote (the recorded path).
+    new_operand="${CMD[$((OLD_OPERAND_INDEX + 1))]}"
+    [[ "$new_operand" == /* ]] || new_operand="$PWD/$new_operand"
+    identity=$(cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -m abicheck.frontends.action.cli delta-operand \
+        --snapshot "$ABICHECK_DELTA_SNAPSHOT" --new-library "$new_operand" \
+        --new-given-as "${CMD[$((OLD_OPERAND_INDEX + 1))]}" \
+        --map "${INPUT_DELTA_OPERAND_MAP:-}" 2>/dev/null) || true
+    code=operand_unreadable
+    while IFS='=' read -r key value; do
+      case "$key" in
+        outcome) code="$value" ;;
+        rule) operand_match="$value" ;;
+        message) [[ -n "$value" ]] && _notice_annotation "abicheck delta operand: $value" ;;
+      esac
+    done <<< "$identity"
+  fi
+  if [[ "$code" == resolved && -n "${ABICHECK_DELTA_SNAPSHOT:-}" && -n "${OLD_OPERAND_INDEX:-}" ]]; then
     delta_json=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-delta-json.XXXXXX")
     if _run_delta_json "$delta_json"; then
       PR_RENDER_JSON="$delta_json"
@@ -5815,13 +5835,15 @@ _select_delta_report() {
   # The code, not text, is what travels to a fork's trusted publisher
   # (action.yml records it in the analysis context); both render the notes
   # through the same `delta-notes` wording.
-  [[ -n "${GITHUB_OUTPUT:-}" ]] && printf 'delta-comment-outcome=%s\n' "$code" >> "$GITHUB_OUTPUT"
+  [[ "$code" == resolved ]] || operand_match=""
+  [[ -n "${GITHUB_OUTPUT:-}" ]] && printf 'delta-comment-outcome=%s\ndelta-operand-match=%s\n' "$code" "$operand_match" >> "$GITHUB_OUTPUT"
   local line
   while IFS= read -r line; do
     [[ -n "$line" ]] && PR_NOTES+=("$line")
   done < <(cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -m abicheck.frontends.action.cli delta-notes \
       --outcome "$code" --base-sha "${ABICHECK_DELTA_BASE_SHA:-}" \
       --branch "${ABICHECK_DELTA_BRANCH:-main}" --gate-verdict "${VERDICT:-}" \
+      --operand-match "$operand_match" \
       $([[ "${GITHUB_EVENT_NAME:-}" == merge_group ]] && echo --merge-group) 2>/dev/null)
 }
 

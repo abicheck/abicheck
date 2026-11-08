@@ -664,6 +664,7 @@ def context_notes(data: Mapping[str, Any]) -> list[str]:
             branch=ctx.pr_base_ref or "main",
             gate_verdict=ctx.gate_verdict,
             merge_group=ctx.producer_event == "merge_group",
+            operand_match=ctx.delta_operand_match,
         )
     except ValueError:
         return []

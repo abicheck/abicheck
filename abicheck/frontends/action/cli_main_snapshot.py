@@ -171,8 +171,16 @@ def resolve_snapshot_cmd(
 @click.option("--branch", default="main")
 @click.option("--gate-verdict", default="")
 @click.option("--merge-group", is_flag=True, default=False)
+@click.option(
+    "--operand-match", default="", help="delta-operand's matched rule, if any."
+)
 def delta_notes_cmd(
-    outcome: str, base_sha: str, branch: str, gate_verdict: str, merge_group: bool
+    outcome: str,
+    base_sha: str,
+    branch: str,
+    gate_verdict: str,
+    merge_group: bool,
+    operand_match: str,
 ) -> None:
     """Print the delta-baseline comment notes, one per line."""
     try:
@@ -182,8 +190,86 @@ def delta_notes_cmd(
             branch=branch,
             gate_verdict=gate_verdict,
             merge_group=merge_group,
+            operand_match=operand_match,
         )
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
     for line in lines:
         click.echo(line)
+
+
+@action_cli.command("operand-record")
+@click.argument("out", type=click.Path(path_type=Path))
+@click.option(
+    "--library", default="", help="The library path the snapshot was dumped from."
+)
+@click.option("--profile", default="")
+def operand_record_cmd(out: Path, library: str, profile: str) -> None:
+    """Write the ``operand.json`` main-snapshot uploads beside the snapshot."""
+    import json
+
+    from ...workflows.delta_operand import operand_record
+
+    out.write_text(
+        json.dumps(operand_record(library, profile), indent=2) + "\n", encoding="utf-8"
+    )
+
+
+@action_cli.command("delta-operand")
+@click.option(
+    "--snapshot",
+    "snapshot_path",
+    required=True,
+    type=click.Path(path_type=Path),
+    help="The fetched snapshot.json (its operand.json sibling is read if present).",
+)
+@click.option(
+    "--new-library",
+    required=True,
+    type=click.Path(path_type=Path),
+    help="This PR's new-side operand.",
+)
+@click.option(
+    "--new-given-as",
+    default="",
+    help="The new operand as the user spelled it (matched against a recorded path).",
+)
+@click.option("--map", "operand_map", default="", help="delta-operand-map text.")
+def delta_operand_cmd(
+    snapshot_path: Path, new_library: Path, new_given_as: str, operand_map: str
+) -> None:
+    """Is the snapshot the same library as this PR's?
+
+    Prints ``outcome=``, ``rule=`` and ``message=`` lines.
+
+    Exit 0 when matched, 3 (refused) for every named non-match; a malformed
+    ``--map`` is a usage error.
+    """
+    from ...workflows.delta_operand import (
+        OperandMatch,
+        OperandMatchOutcome,
+        identity_of_operand,
+        identity_of_snapshot_artifact,
+        match_delta_operand,
+        parse_operand_map,
+    )
+
+    try:
+        pairs = parse_operand_map(operand_map)
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
+    try:
+        result = match_delta_operand(
+            identity_of_snapshot_artifact(snapshot_path),
+            identity_of_operand(new_library, new_given_as or str(new_library)),
+            pairs,
+        )
+    except Exception as exc:  # noqa: BLE001 -- any unreadable side is one named outcome
+        result = OperandMatch(
+            OperandMatchOutcome.UNREADABLE, message=f"{type(exc).__name__}: {exc}"
+        )
+    click.echo(f"outcome={result.outcome.value}")
+    click.echo(f"rule={result.rule.value}")
+    click.echo(f"message={' '.join(result.message.splitlines())}")
+    if not result.ok:
+        sys.exit(EXIT_REFUSED)
