@@ -386,8 +386,8 @@ REQUIREMENTS: tuple[Requirement, ...] = (
         "docs/contribute/plans/bug-class-regression-testing.md for the "
         "analysis this requirement is based on). Check "
         "tests/regressions/manifest.py (BUG_CLASSES/get()) first for a "
-        "matching class before restating the invariant from scratch — name "
-        "its id here if it already has a home. "
+        "matching class: name its id here, or the family id from "
+        "tests/regressions/families.py (F1–F18) if a family covers it. "
         "'None — documented as a known gap' is an acceptable answer; "
         "silence is not.",
     ),
