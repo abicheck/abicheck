@@ -577,7 +577,14 @@ class TestTheAggregateActionRecordsIt:
         # silently never recorded, which is this whole module's bug class.
         from abicheck.frontends.action.cli_provenance import _CONTEXT_ENV
 
-        assert set(_CONTEXT_ENV.values()) == {
+        # delta-baseline is single-library only, so the aggregate Action never
+        # has a delta outcome; the main Action records those three itself.
+        main_only = {
+            "ABICHECK_CTX_DELTA_OUTCOME",
+            "ABICHECK_CTX_DELTA_BASE_SHA",
+            "ABICHECK_CTX_GATE_VERDICT",
+        }
+        assert set(_CONTEXT_ENV.values()) - main_only == {
             key for key in step["env"] if key.startswith("ABICHECK_CTX_")
         }
 

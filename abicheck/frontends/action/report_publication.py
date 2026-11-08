@@ -50,12 +50,13 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from ...pr_comment import build_model, render_comment, should_post
+from ...pr_comment_render import insert_notes
 from ...pr_comment_sections import _close_open_details
 
 #: GitHub's documented comment-body limit, in characters.
@@ -318,6 +319,7 @@ def render_report(
     gate_api_break: bool = False,
     gate_breaking: bool = True,
     max_comment_bytes: int = DEFAULT_MAX_COMMENT_BYTES,
+    notes: Sequence[str] = (),
 ) -> RenderedReport:
     """Render *report* to a bounded, identity-stamped comment body.
 
@@ -357,6 +359,8 @@ def render_report(
         report_url=report_url,
         report_artifact_url=report_artifact_url,
     )
+    if notes:
+        body = insert_notes(body, list(notes))
     body = f"{identity.marker()}\n{body}"
     full_body = body
     body, truncated = bound_to_bytes(
@@ -632,3 +636,34 @@ __all__ = [
     "render_summary",
     "request_payload",
 ]
+
+
+def context_notes(data: Mapping[str, Any]) -> list[str]:
+    """Delta notes for a report carrying a delta-baseline analysis context.
+
+    The fork-path publisher never trusts producer-written text: it rebuilds
+    the notes from the shape-validated structured fields only. A missing or
+    invalid context yields no notes (the plain release comparison).
+    """
+    from ...model.analysis_context import AnalysisContext, AnalysisContextError
+    from .main_snapshot import delta_notes
+
+    raw = data.get("analysis_context")
+    if raw is None:
+        return []
+    try:
+        ctx = AnalysisContext.from_mapping(raw)
+    except AnalysisContextError:
+        return []
+    if not ctx.delta_outcome:
+        return []
+    try:
+        return delta_notes(
+            ctx.delta_outcome,
+            base_sha=ctx.delta_base_sha,
+            branch=ctx.pr_base_ref or "main",
+            gate_verdict=ctx.gate_verdict,
+            merge_group=ctx.producer_event == "merge_group",
+        )
+    except ValueError:
+        return []

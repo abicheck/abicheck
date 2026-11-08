@@ -742,3 +742,21 @@ def render_comment(
 def _apply_marker(body: str, comment_key: str | None) -> str:
     marker = sticky_marker(comment_key)
     return body if marker == MARKER else body.replace(MARKER, marker, 1)
+
+
+def insert_notes(body: str, notes: tuple[str, ...] | list[str]) -> str:
+    """Insert *notes* as a quoted block right after the comment's first heading.
+
+    Each note is one line; embedded newlines are folded to spaces so a note
+    can never open a new Markdown block. With no heading, the notes go first.
+    """
+    block = "\n>\n".join(
+        "> " + " ".join(note.split()) for note in notes if note.strip()
+    )
+    if not block:
+        return body
+    lines = body.split("\n")
+    for index, line in enumerate(lines):
+        if line.startswith("#"):
+            return "\n".join([*lines[: index + 1], "", block, *lines[index + 1 :]])
+    return block + "\n\n" + body

@@ -5799,24 +5799,30 @@ _select_delta_report() {
   PR_RENDER_JSON="$PR_JSON"
   PR_NOTES=()
   [[ -n "${ABICHECK_DELTA_OUTCOME:-}" ]] || return 0
-  local gate="Release gate: ${VERDICT:-unknown} (the comparison against the configured baseline); this check's status comes from the gate."
-  if [[ "$ABICHECK_DELTA_OUTCOME" == resolved ]] \
+  local code="$ABICHECK_DELTA_OUTCOME"
+  if [[ "$code" == resolved ]] \
      && { _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" || _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; }; then
-    PR_NOTES=("Delta unavailable: delta-baseline compares one library; this is a directory/package comparison. Showing the release-baseline comparison." "$gate")
-    return 0
-  fi
-  if [[ "$ABICHECK_DELTA_OUTCOME" == resolved && -n "${ABICHECK_DELTA_SNAPSHOT:-}" && -n "${OLD_OPERAND_INDEX:-}" ]]; then
+    code=unsupported_operand
+  elif [[ "$code" == resolved && -n "${ABICHECK_DELTA_SNAPSHOT:-}" && -n "${OLD_OPERAND_INDEX:-}" ]]; then
     local delta_json
     delta_json=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-delta-json.XXXXXX")
     if _run_delta_json "$delta_json"; then
       PR_RENDER_JSON="$delta_json"
-      PR_NOTES=("${ABICHECK_DELTA_MESSAGE:-Changes in this PR.}" "$gate")
-      return 0
+    else
+      code=rerun_failed
     fi
-    PR_NOTES=("Delta unavailable: the comparison against the default-branch snapshot produced no report. Showing the release-baseline comparison." "$gate")
-    return 0
   fi
-  PR_NOTES=("${ABICHECK_DELTA_MESSAGE:-Delta unavailable.} Showing the release-baseline comparison." "$gate")
+  # The code, not text, is what travels to a fork's trusted publisher
+  # (action.yml records it in the analysis context); both render the notes
+  # through the same `delta-notes` wording.
+  [[ -n "${GITHUB_OUTPUT:-}" ]] && printf 'delta-comment-outcome=%s\n' "$code" >> "$GITHUB_OUTPUT"
+  local line
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && PR_NOTES+=("$line")
+  done < <(cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -m abicheck.frontends.action.cli delta-notes \
+      --outcome "$code" --base-sha "${ABICHECK_DELTA_BASE_SHA:-}" \
+      --branch "${ABICHECK_DELTA_BRANCH:-main}" --gate-verdict "${VERDICT:-}" \
+      $([[ "${GITHUB_EVENT_NAME:-}" == merge_group ]] && echo --merge-group) 2>/dev/null)
 }
 
 _maybe_post_pr_comment() {

@@ -458,6 +458,9 @@ INVENTORY: tuple[ToolLookup, ...] = (
                 "ABICHECK_CTX_EVENT",
                 "ABICHECK_CTX_ORCHESTRATION_REF",
                 "ABICHECK_CTX_PROFILE",
+                "ABICHECK_CTX_DELTA_OUTCOME",
+                "ABICHECK_CTX_DELTA_BASE_SHA",
+                "ABICHECK_CTX_GATE_VERDICT",
             )
         ),
         without="Progress output, memory tracing and Action run provenance; reports carry them, facts do not.",
