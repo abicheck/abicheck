@@ -476,6 +476,29 @@ if [[ -n "${INPUT_REQUIRE_COMPLETE:-}" && "$MODE" != "compare" ]]; then
   _warn "require-complete is set but has no effect: it only applies to mode: compare (mode is '$MODE')."
 fi
 
+# delta-baseline (docs/contribute/plans/pr-delta-vs-main-snapshot.md):
+# closed vocabularies, and the snapshot workflow is what the lookup trusts,
+# so it is required rather than guessed.
+case "${INPUT_DELTA_BASELINE:-}" in
+  '' | main) ;;
+  *) _fail "delta-baseline '${INPUT_DELTA_BASELINE}' is not recognized. Use 'main' or leave it unset." ;;
+esac
+case "${INPUT_DELTA_MODE:-auto}" in
+  auto | merge-commit | head) ;;
+  *) _fail "delta-mode '${INPUT_DELTA_MODE}' is not recognized. Use 'auto', 'merge-commit' or 'head'." ;;
+esac
+case "${INPUT_DELTA_ON_MISSING_BASE:-report}" in
+  report | fail) ;;
+  *) _fail "delta-on-missing-base '${INPUT_DELTA_ON_MISSING_BASE}' is not recognized. Use 'report' or 'fail'." ;;
+esac
+if [[ "${INPUT_DELTA_BASELINE:-}" == main ]]; then
+  [[ -n "${INPUT_DELTA_SNAPSHOT_WORKFLOW:-}" ]] \
+    || _fail "delta-baseline: main needs delta-snapshot-workflow (the workflow file that runs actions/main-snapshot on the default branch)."
+  if [[ "$MODE" != compare ]]; then
+    _warn "delta-baseline is set but has no effect: it only applies to mode: compare (mode is '$MODE')."
+  fi
+fi
+
 # used-by/required-symbol/required-symbols: compare mode only
 # (ADR-043 scoped-comparison contracts). --used-by and consumers.required_symbols
 # are mutually exclusive on the CLI itself, but that

@@ -18,9 +18,9 @@ Two composite Actions that give a pull request an exact default-branch
 snapshot to measure **its own** changes against, instead of everything that
 changed since the last release. Design and remaining work:
 [PR delta against a main snapshot](../contribute/plans/pr-delta-vs-main-snapshot.md).
-The comparison itself is still an ordinary compare — pass `snapshot-path` as
-`old-library`. Wiring this into the main Action as one input
-(`delta-baseline`) is planned, not shipped.
+The main Action wires both together through `delta-baseline` (below); the
+standalone Actions remain for custom workflows — pass `snapshot-path` as
+`old-library` to an ordinary compare.
 
 ## `actions/main-snapshot` — on every push to the default branch
 
@@ -129,3 +129,38 @@ jobs:
           MESSAGE: ${{ steps.base.outputs.message }}   # data, never shell text
         run: printf '%s\n' "$MESSAGE" >> "$GITHUB_STEP_SUMMARY"
 ```
+
+## `delta-baseline` in the main Action
+
+```yaml
+# pull-request workflow (permissions: contents: read, actions: read, pull-requests: write)
+      - uses: actions/checkout@v5
+        with: { fetch-depth: 2 }
+      - run: ./build.sh
+      - uses: abicheck/abicheck@v1
+        with:
+          abi-baseline: latest-release          # the gate: decides red/green
+          new-library: build/libfoo.so
+          new-header: include/
+          delta-baseline: main                  # the comment: this PR's changes only
+          delta-snapshot-workflow: abi-main.yml
+```
+
+The Action looks up the base snapshot as `fetch-main-snapshot` does, runs the
+normal comparison (the gate) unchanged, and, when the snapshot resolved,
+reruns the same comparison with the snapshot as the old side (old-side
+`old-header`/`old-include`/`old-label`/`old-debug-info` are dropped: the
+snapshot carries its own evidence). The comment renders that second report
+under two notes: what it was measured against, and the gate's verdict. When
+the snapshot is unavailable the comment shows the gate's report under a note
+naming the outcome. The step's exit code, `verdict` and every other output
+come from the gate in all cases; `delta-on-missing-base: fail` adds a separate
+failing step. Outputs: `delta-outcome`, `delta-base-sha`.
+
+It runs on `pull_request` and `merge_group` only (a `pull_request_target`
+checkout is the base branch, not the PR), and for a single-library
+comparison; a directory/package comparison keeps the gate's report with a
+note. A failed lookup reads as `lookup_failed` and never stops the gate.
+
+With `pr-comment-via: artifact` (fork pull requests) the delta report is the
+one staged for the publisher, but the two notes are not yet carried to it.

@@ -2432,6 +2432,54 @@
    "default": ""
   },
   {
+   "id": "action:delta-baseline",
+   "action": "action",
+   "input": "delta-baseline",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "action:delta-snapshot-workflow",
+   "action": "action",
+   "input": "delta-snapshot-workflow",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "action:delta-mode",
+   "action": "action",
+   "input": "delta-mode",
+   "status": "live",
+   "required": false,
+   "default": "auto"
+  },
+  {
+   "id": "action:delta-profile",
+   "action": "action",
+   "input": "delta-profile",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "action:delta-wait-timeout",
+   "action": "action",
+   "input": "delta-wait-timeout",
+   "status": "live",
+   "required": false,
+   "default": "600"
+  },
+  {
+   "id": "action:delta-on-missing-base",
+   "action": "action",
+   "input": "delta-on-missing-base",
+   "status": "live",
+   "required": false,
+   "default": "report"
+  },
+  {
    "id": "action:pr-comment-detail",
    "action": "action",
    "input": "pr-comment-detail",

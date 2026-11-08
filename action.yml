@@ -915,6 +915,49 @@ inputs:
       so it cannot derive this value.
     required: false
     default: ''
+  delta-baseline:
+    description: >
+      'main' makes the PR comment show only this pull request's changes:
+      the comment is rendered from a second comparison against the
+      default-branch snapshot of the PR's exact base commit (uploaded by
+      actions/main-snapshot, found by actions/fetch-main-snapshot), while
+      the step's pass/fail still comes from the normal comparison
+      (old-library/abi-baseline). When no snapshot is available the comment
+      says why and shows the normal comparison. Empty (default) changes
+      nothing. Compare mode on pull_request/merge_group only; needs
+      'actions: read' and a checkout with fetch-depth 2 (0 for
+      delta-mode head).
+    required: false
+    default: ''
+  delta-snapshot-workflow:
+    description: >
+      File name of the workflow that runs actions/main-snapshot on the
+      default branch (e.g. 'abi-main.yml'). Required with delta-baseline.
+    required: false
+    default: ''
+  delta-mode:
+    description: >
+      How the PR's base commit is found: 'auto' (merge-group base on
+      merge_group, otherwise the merge commit's first parent),
+      'merge-commit', or 'head' (unique merge-base; for a head checkout).
+    required: false
+    default: 'auto'
+  delta-profile:
+    description: 'Profile suffix the snapshot workflow passed to main-snapshot, if any.'
+    required: false
+    default: ''
+  delta-wait-timeout:
+    description: 'Seconds to wait while the base snapshot is still being built.'
+    required: false
+    default: '600'
+  delta-on-missing-base:
+    description: >
+      'report' (default): an unavailable snapshot is explained in the
+      comment and nothing fails. 'fail': additionally fail the job in a
+      separate step after the comparison, so the result reads as
+      "delta required but unavailable", never as a compatibility break.
+    required: false
+    default: 'report'
   pr-comment-detail:
     description: >
       Detail level of the comment body: 'summary' (verdict + counts only),
@@ -1310,6 +1353,15 @@ outputs:
       value the upload-sarif step below gates on, so withholding it skips
       that upload rather than feeding mismatched content to CodeQL.
     value: ${{ steps.run-abicheck.outputs.report-path }}
+  delta-outcome:
+    description: >
+      delta-baseline only: the base-snapshot outcome ('resolved',
+      'base_pending', 'snapshot_missing', ...; see
+      docs/reference/main-snapshot.md). Empty when delta-baseline is unset.
+    value: ${{ steps.delta-base.outputs.outcome }}
+  delta-base-sha:
+    description: 'delta-baseline only: the base commit the delta was measured against.'
+    value: ${{ steps.delta-base.outputs.base-sha }}
   pr-comment-delivery:
     description: >
       Which path pr-comment-via resolved to for this run: 'direct' (this job
@@ -1380,6 +1432,10 @@ runs:
       shell: bash
       env:
         INPUT_MODE: ${{ inputs.mode }}
+        INPUT_DELTA_BASELINE: ${{ inputs.delta-baseline }}
+        INPUT_DELTA_SNAPSHOT_WORKFLOW: ${{ inputs.delta-snapshot-workflow }}
+        INPUT_DELTA_MODE: ${{ inputs.delta-mode }}
+        INPUT_DELTA_ON_MISSING_BASE: ${{ inputs.delta-on-missing-base }}
         # Retired by the ADR-091 renames: tombstones, rejected here (see the
         # Retired inputs block above). Each one's replacement is validated below.
         INPUT_POLICY_FILE: ${{ inputs.policy-file }}
@@ -1610,6 +1666,36 @@ runs:
       # already installed identical source into the same interpreter.
       run: bash "${{ github.action_path }}/action/install-abicheck.sh" "${{ github.action_path }}"
 
+    # ── 3b. delta-baseline: the PR's exact-base default-branch snapshot ──────
+    # Runs the fetch-main-snapshot Action's own script (a composite cannot
+    # `uses:` a path relative to itself). Every outcome is a successful step;
+    # only `resolved` yields a snapshot.
+    - name: Fetch delta base snapshot
+      id: delta-base
+      if: >-
+        inputs.delta-baseline == 'main' && inputs.mode == 'compare' &&
+        (github.event_name == 'pull_request' || github.event_name == 'merge_group')
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        REPO: ${{ github.repository }}
+        EVENT_NAME: ${{ github.event_name }}
+        MERGE_GROUP_BASE: ${{ github.event.merge_group.base_sha }}
+        INPUT_WORKFLOW: ${{ inputs.delta-snapshot-workflow }}
+        INPUT_MODE: ${{ inputs.delta-mode }}
+        INPUT_BRANCH: ${{ github.event.repository.default_branch }}
+        INPUT_PROFILE: ${{ inputs.delta-profile }}
+        INPUT_WAIT_TIMEOUT: ${{ inputs.delta-wait-timeout }}
+        INPUT_DESTINATION: ${{ runner.temp }}/abicheck-delta-base
+      run: |
+        [[ -n "$INPUT_WORKFLOW" ]] || { echo "::error::delta-baseline: main needs delta-snapshot-workflow."; exit 1; }
+        # An unexpected failure of the lookup itself is an unavailable base,
+        # not a reason to skip the gate: report it and let the comparison run.
+        bash "${{ github.action_path }}/actions/fetch-main-snapshot/run.sh" || {
+          echo "::warning::abicheck: the delta base lookup failed; the comment shows the release-baseline comparison."
+          printf 'outcome=lookup_failed\nmessage=Delta unavailable: the snapshot lookup failed.\n' >> "$GITHUB_OUTPUT"
+        }
+
     # ── 4. Run abicheck ──────────────────────────────────────────────────────
     - name: Run abicheck
       id: run-abicheck
@@ -1673,6 +1759,9 @@ runs:
         INPUT_PR_COMMENT_DETAIL: ${{ inputs.pr-comment-detail }}
         INPUT_PR_COMMENT_REPORT_ARTIFACT_URL: ${{ inputs.pr-comment-report-artifact-url }}
         ABICHECK_PR_COMMENT_DELIVERY: ${{ steps.pr-delivery.outputs.delivery }}
+        ABICHECK_DELTA_OUTCOME: ${{ steps.delta-base.outputs.outcome }}
+        ABICHECK_DELTA_SNAPSHOT: ${{ steps.delta-base.outputs.snapshot-path }}
+        ABICHECK_DELTA_MESSAGE: ${{ steps.delta-base.outputs.message }}
         INPUT_SOURCES: ${{ inputs.sources }}
         INPUT_BUILD_INFO: ${{ inputs.build-info }}
         INPUT_COMPILE_DB: ${{ inputs.compile-db }}
@@ -1692,6 +1781,20 @@ runs:
         INPUT_SYSROOT: ${{ inputs.sysroot }}
         INPUT_SEVERITY_PRESET: ${{ inputs.severity-preset }}
       run: bash "${{ github.action_path }}/action/run.sh"
+
+    # delta-on-missing-base: fail -- its own step, so the run's compatibility
+    # verdict and exit code stay the gate's, and this failure names itself.
+    - name: Require the delta base snapshot
+      if: >-
+        always() && inputs.delta-on-missing-base == 'fail' &&
+        steps.delta-base.outcome == 'success' && steps.delta-base.outputs.outcome != 'resolved'
+      shell: bash
+      env:
+        DELTA_OUTCOME: ${{ steps.delta-base.outputs.outcome }}
+        DELTA_MESSAGE: ${{ steps.delta-base.outputs.message }}
+      run: |
+        printf '::error::delta-baseline required (delta-on-missing-base: fail) but unavailable: %s (%s)\n' "$DELTA_MESSAGE" "$DELTA_OUTCOME"
+        exit 1
 
     # ── 4b. PR report artifact (pr-comment-via: artifact / auto on a fork) ──
     # `always()`: run.sh exits non-zero on a gated break, which is exactly
