@@ -56,7 +56,6 @@ def _compile(
     cmd = [
         driver,
         "-shared",
-        "-fPIC",
         "-g",
         "-O0",
         "-I",
@@ -70,6 +69,9 @@ def _compile(
     # Give old and new the same install name / SONAME. Otherwise the default is
     # derived from the output path (macOS) and the two sides differ only by their
     # build directory, which reads as a spurious SONAME_CHANGED.
+    # PIC is an ELF/Mach-O concept: clang rejects -fPIC for the Windows target.
+    if sys.platform != "win32":
+        cmd.insert(1, "-fPIC")
     # PE has no SONAME, so Windows takes no flag.
     if sys.platform == "darwin":
         cmd.insert(1, "-Wl,-install_name,libedit.so")
