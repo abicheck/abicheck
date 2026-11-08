@@ -13,7 +13,12 @@ CLI=(python -m abicheck.frontends.action.cli)
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 BRANCH="${INPUT_BRANCH:-main}"
-WORKFLOW="$(basename "${INPUT_WORKFLOW:?workflow is required}")"
+STORAGE="${INPUT_STORAGE:-artifact}"
+case "$STORAGE" in
+  artifact) WORKFLOW="$(basename "${INPUT_WORKFLOW:?workflow is required with storage: artifact}")" ;;
+  cache) ;;
+  *) _fail "storage must be artifact or cache (got '$STORAGE')." ;;
+esac
 
 MODE="${INPUT_MODE:-auto}"
 if [[ "$MODE" == auto ]]; then
@@ -53,6 +58,22 @@ cat "$WORK/base.out" >> "$GITHUB_OUTPUT"
 [[ "$rc" == 0 || "$rc" == 3 ]] || _fail "select-base failed with exit $rc."
 [[ "$rc" == 0 ]] || _finish
 BASE=$(grep '^base-sha=' "$WORK/base.out" | cut -d= -f2)
+
+if [[ "$STORAGE" == cache ]]; then
+  # The cache is restored by the next (actions/cache/restore) step and
+  # checked by verify-cache.sh. Until then the outcome is a failed lookup,
+  # so a step that never ran cannot leave `resolved` behind with no file.
+  KEY=$("${CLI[@]}" snapshot-cache-key "$BASE" --profile "${INPUT_PROFILE:-}")
+  STAGE="${GITHUB_WORKSPACE:-$PWD}/.abicheck-main-snapshot-cache"
+  [[ ! -e "$STAGE" ]] || _fail "$STAGE already exists; it is reserved for the restored cache entry."
+  {
+    echo "outcome=lookup_failed"
+    echo "message=Delta unavailable: the cache lookup did not complete."
+    echo "cache-key=$KEY"
+  } >> "$GITHUB_OUTPUT"
+  echo "base $BASE: restoring cache key $KEY"
+  exit 0
+fi
 NAME=$("${CLI[@]}" snapshot-name "$BASE" --profile "${INPUT_PROFILE:-}")
 
 _lookup() {  # $1 = endpoint, $2 = jq path, $3 = output; paginated, flattened

@@ -23,6 +23,7 @@ files; every decision is in :mod:`~abicheck.frontends.action.main_snapshot`.
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -37,6 +38,14 @@ from .main_snapshot import (
     resolve_snapshot,
     select_base_commit,
     snapshot_artifact_name,
+)
+from .main_snapshot_cache import (
+    DEFAULT_MAX_ENTRY_BYTES,
+    DEFAULT_MAX_TOTAL_BYTES,
+    CacheExpectation,
+    provenance_record,
+    snapshot_cache_key,
+    verify_cached_snapshot,
 )
 
 
@@ -187,3 +196,108 @@ def delta_notes_cmd(
         raise click.UsageError(str(exc)) from exc
     for line in lines:
         click.echo(line)
+
+
+# ── storage: cache ──────────────────────────────────────────────────────────
+
+
+@action_cli.command("snapshot-cache-key")
+@click.argument("sha")
+@click.option("--profile", default="", help="Optional profile suffix.")
+def snapshot_cache_key_cmd(sha: str, profile: str) -> None:
+    """Print the Actions-cache key a snapshot of commit SHA is saved under."""
+    try:
+        click.echo(snapshot_cache_key(sha, profile))
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
+
+
+@action_cli.command("write-cache-provenance")
+@click.argument("out", type=click.Path(path_type=Path))
+@click.option("--sha", required=True)
+@click.option("--profile", default="")
+@click.option("--repository", required=True)
+@click.option("--ref", required=True)
+@click.option("--run-id", default="")
+@click.option("--run-attempt", default="")
+@click.option("--workflow-ref", default="")
+@click.option("--event", default="")
+def write_cache_provenance_cmd(
+    out: Path,
+    sha: str,
+    profile: str,
+    repository: str,
+    ref: str,
+    run_id: str,
+    run_attempt: str,
+    workflow_ref: str,
+    event: str,
+) -> None:
+    """Write the provenance.json main-snapshot stores beside a cached snapshot.
+
+    Prints the cache key it records, so the save step uses the same one.
+    """
+    try:
+        key = snapshot_cache_key(sha, profile)
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
+    record = provenance_record(
+        sha=sha.strip().lower(),
+        key=key,
+        repository=repository,
+        ref=ref,
+        run_id=run_id,
+        run_attempt=run_attempt,
+        workflow_ref=workflow_ref,
+        event=event,
+    )
+    out.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+    click.echo(key)
+
+
+@action_cli.command("verify-cached-snapshot")
+@click.argument("directory", type=click.Path(path_type=Path))
+@click.option("--repository", required=True)
+@click.option("--branch", required=True)
+@click.option("--base-sha", required=True)
+@click.option("--key", required=True)
+@click.option("--cache-hit", default="", help="actions/cache/restore's cache-hit.")
+@click.option("--matched-key", default="")
+@click.option("--destination", type=click.Path(path_type=Path), required=True)
+@click.option("--max-entry-bytes", type=int, default=DEFAULT_MAX_ENTRY_BYTES)
+@click.option("--max-total-bytes", type=int, default=DEFAULT_MAX_TOTAL_BYTES)
+@click.option("--github-output", type=click.Path(path_type=Path), default=None)
+def verify_cached_snapshot_cmd(
+    directory: Path,
+    repository: str,
+    branch: str,
+    base_sha: str,
+    key: str,
+    cache_hit: str,
+    matched_key: str,
+    destination: Path,
+    max_entry_bytes: int,
+    max_total_bytes: int,
+    github_output: Path | None,
+) -> None:
+    """Check a restored cache entry; exit 3 with an outcome when it is unusable."""
+    result = verify_cached_snapshot(
+        directory,
+        CacheExpectation(
+            repository=repository, branch=branch, base_sha=base_sha, key=key
+        ),
+        cache_hit=cache_hit.strip().lower() == "true",
+        matched_key=matched_key.strip(),
+        destination=destination,
+        max_entry_bytes=max_entry_bytes,
+        max_total_bytes=max_total_bytes,
+    )
+    _emit(
+        github_output,
+        outcome=result.outcome.value,
+        message=result.message,
+        snapshot_path=result.snapshot_path,
+    )
+    click.echo(f"{result.outcome.value}: {result.reason}")
+    if not result.ok:
+        sys.exit(EXIT_REFUSED)

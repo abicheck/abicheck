@@ -6,6 +6,19 @@
 set -euo pipefail
 
 _fail() { echo "::error::$*"; exit 1; }
+STORAGE="${INPUT_STORAGE:-artifact}"
+case "$STORAGE" in
+  artifact) ;;
+  cache)
+    # A cache entry carries no producing-run provenance; the only thing a
+    # consumer can rely on is the scope it was written in. So it is written
+    # from the default branch or not at all.
+    [[ -n "${DEFAULT_BRANCH:-}" ]] || _fail "storage: cache needs 'branch' (the default branch) on ${GITHUB_EVENT_NAME:-this event}."
+    [[ "${GITHUB_REF:-}" == "refs/heads/$DEFAULT_BRANCH" ]] \
+      || _fail "storage: cache saves only from refs/heads/$DEFAULT_BRANCH, not ${GITHUB_REF:-(no ref)}: a pull request reads that scope."
+    ;;
+  *) _fail "storage must be artifact or cache (got '$STORAGE')." ;;
+esac
 
 NAME=$(python -m abicheck.frontends.action.cli snapshot-name "${SNAPSHOT_SHA:?}" \
   --profile "${INPUT_PROFILE:-}") || _fail "cannot name a snapshot for ${SNAPSHOT_SHA}"
@@ -43,3 +56,18 @@ fi
   echo "artifact-name=$NAME"
   echo "snapshot-path=$OUT"
 } >> "$GITHUB_OUTPUT"
+
+if [[ "$STORAGE" == cache ]]; then
+  # The cache path is a fixed workspace-relative literal: the cache version
+  # hashes it, so fetch-main-snapshot must spell it the same way.
+  STAGE="${GITHUB_WORKSPACE:-$PWD}/.abicheck-main-snapshot-cache"
+  [[ ! -e "$STAGE" ]] || _fail "$STAGE already exists; it is reserved for the cached snapshot."
+  mkdir -p "$STAGE"
+  cp "$OUT" "$STAGE/snapshot.json"
+  KEY=$(python -m abicheck.frontends.action.cli write-cache-provenance "$STAGE/provenance.json" \
+    --sha "$SNAPSHOT_SHA" --profile "${INPUT_PROFILE:-}" --repository "${GITHUB_REPOSITORY:?}" \
+    --ref "$GITHUB_REF" --run-id "${GITHUB_RUN_ID:-}" --run-attempt "${GITHUB_RUN_ATTEMPT:-}" \
+    --workflow-ref "${GITHUB_WORKFLOW_REF:-}" --event "${GITHUB_EVENT_NAME:-}") \
+    || _fail "cannot record provenance for $SNAPSHOT_SHA"
+  echo "cache-key=$KEY" >> "$GITHUB_OUTPUT"
+fi
