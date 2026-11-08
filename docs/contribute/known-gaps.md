@@ -350,12 +350,6 @@ current emitter, which is unchanged.
 `false-clean` — (DWARF residual) A callback that gains a parameter is reported as no change on DWARF unless the type name happens to carry the signature. [Full write-up](known-gaps/function-pointer-signatures-are-not-compared-in-header-mode.md)
 <!-- no-canary: DWARF residual not reproduced on 2026-11-05: gcc -g on a C int(*)(int) -> int(*)(int,int) parameter reports func_params_changed; re-verify the residual's shape before writing a canary -->
 
-#### A default release-profile Rust run without headers reports `NO_CHANGE ... ACCEPTED` while its own warnings say the result is unconfirmed (2026-10-15)
-
-**Status (2026-10-15): OPEN.** The headline label, the gate and the `analysis_assurance: partial` field disagree with each other, and the label is the clean one.
-`false-clean` — A real return-type change in a header-less, no-debug run is labelled `NO_CHANGE` and accepted at exit 0. [Full write-up](known-gaps/header-less-rust-runs-report-no-change-and-alignment-noise.md)
-<!-- no-canary: needs a Rust toolchain (cargo) to build the cdylib pair -->
-
 #### ADR-062 D14-D18 data-evolution rules are partly implemented (2026-10-30)
 
 **Status (2026-10-31): PARTIAL.** D14, D15 and D17 are implemented with

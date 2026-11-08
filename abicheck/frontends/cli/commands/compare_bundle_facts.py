@@ -428,6 +428,9 @@ def dispatch(
         stored_reported_verdict(result),
         fail_on_removed=False,
         removed_keys=[],
+        # Every member axis (ADR-090's UNCONFIRMED floor among them) folds
+        # from the entries, as the live fan-out's exit does.
+        library_results=release.library_results,
         incomplete_scope_exit_contribution=outcome.scope_decision.incomplete_scope_exit_contribution,
         no_comparison_completed_exit_contribution=outcome.scope_decision.no_comparison_completed_exit_contribution,
         assurance_decision=outcome.assurance_decision,

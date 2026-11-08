@@ -308,6 +308,53 @@ readable member exits `1` with the same error a two-sided `compare` gives.
 Formats: `json`, `markdown` (the default) and `oneline`; the others are
 usage errors.
 
+## Unconfirmed compatibility (ADR-090)
+
+A `compare` whose change-derived verdict is a compatibility claim
+(`NO_CHANGE`, `COMPATIBLE` or `COMPATIBLE_WITH_RISK`) while **at least one
+compared side has no type-level evidence** reads **`UNCONFIRMED`** and
+contributes exit **`1`**. A side has type-level evidence when it carries debug
+info (DWARF, or BTF, CTF or PDB, which reduce to it) or a parsed header AST.
+A stripped or `-g`-less binary compared without headers has only its symbol
+table: a parameter, return-type, enumerator or layout change on an exported
+symbol keeps the same symbol and is invisible to it, so "no change" is not
+something that run can establish.
+
+- **Where it shows.** JSON `verdict` and `run_outcome.compatibility` read
+  `UNCONFIRMED` (report schema 7.3); the observed verdict stays in the
+  top-level `unconfirmed` block (`observed_verdict`,
+  `sides_without_type_evidence`, `mode`, `exit_contribution`, `remedy`);
+  `exit.unconfirmed_contribution` is the axis and `exit.reasons` names
+  `unconfirmed_compatibility`; `release_recommendation.version_bump` is
+  `undetermined`. The terminal, Markdown and HTML headlines say
+  `UNCONFIRMED`; SARIF folds the axis into `invocations[0].exitCode` and adds
+  a `warning` notification; JUnit adds a failing
+  `abicheck.unconfirmed_compatibility.<library>` suite.
+- **Folded with `max`.** It raises a clean `0` to `1` and never lowers an
+  observed `2`/`4`. An observed `API_BREAK`/`BREAKING` is never relabelled.
+- **Exempt: one identical input.** When neither side has type-level
+  evidence and the two binaries are byte-identical (or, for two stored
+  snapshots, have identical content), the comparison is `NO_CHANGE` by
+  construction. A one-sided gap is never exempt, even for identical bytes.
+- **Directory/package and `aggregate`.** Each member reads `UNCONFIRMED` on
+  its own; the release exit is `max` over every member's contribution, and
+  `abicheck aggregate` folds each target's `unconfirmed_exit` the same way.
+- **Opt-out: `assurance.unconfirmed: warn`** (`.abicheck.yml`, `--set
+  assurance.unconfirmed=warn`, or the typed `CompareRequest.unconfirmed`)
+  keeps the `UNCONFIRMED` label and contributes `0`. No setting restores the
+  clean label for such a run.
+- **To confirm instead:** supply headers for both sides
+  (`--header old=... --header new=...`), or compare unstripped debug builds.
+
+**Migration (behaviour change).** Before this change, the same runs read
+`NO_CHANGE`/`COMPATIBLE`/`COMPATIBLE_WITH_RISK` with exit `0` and
+`Gate: ACCEPTED`. A pipeline comparing stripped or debug-less binaries
+without headers now exits `1`; a consumer that matches
+`verdict == "NO_CHANGE"`, or that enumerates verdicts exhaustively, must
+handle `UNCONFIRMED`. To keep a passing exit while you add headers or debug
+builds, set `assurance.unconfirmed: warn`. The `UNCONFIRMED` label and exit
+ship together; there is no exit-`0`-only stage.
+
 ## Analysis-assurance contribution (P0.4)
 
 `compare` always computes and reports
@@ -498,6 +545,7 @@ below.
 | Exit code | Meaning |
 |-----------|---------|
 | `0` | `NO_CHANGE`, `COMPATIBLE`, or `COMPATIBLE_WITH_RISK` — no binary ABI break |
+| `1` | `UNCONFIRMED` — the verdict would be one of the three above, but a compared side has no type-level evidence ([ADR-090](#unconfirmed-compatibility-adr-090)); `assurance.unconfirmed: warn` turns it into `0`. Also the contract-coverage and other orthogonal `1` floors described above |
 | `2` | `API_BREAK` — source-level API break — recompilation required |
 | `4` | `BREAKING` — binary ABI break |
 | `5` | Budget overflow — the run's wall-clock budget was exceeded and no verdict was produced. The budget is `--budget` when given, else the **2h default**: no `compare` run is unbounded. On a two-sided `compare` (single pair, directory/package release, or a stored-`BundleFacts` baseline) the error names which budget ran out and how to set a longer one: `--budget 4h`, the Action's `budget` input, or `CompareRequest.budget_s`. `compare --no-baseline` also stops at the 2h default but does not accept `--budget`; split the candidate into smaller audits or pin a shallower `--depth`. |
@@ -513,7 +561,9 @@ below.
 
 > **⚠️ Exit `0` covers `NO_CHANGE`, `COMPATIBLE`, and `COMPATIBLE_WITH_RISK`.** If your pipeline needs
 > to distinguish them (e.g. warn on deployment risk), use `-o json=...` and
-> read the `verdict` field — exit code alone is not sufficient.
+> read the `verdict` field — exit code alone is not sufficient. A claim that
+> no type-level evidence backs is not among them: it reads `UNCONFIRMED` and
+> exits `1` (or `0` with `UNCONFIRMED` under `assurance.unconfirmed: warn`).
 
 ### Severity-aware exit codes (with any `severity.*` setting)
 
@@ -1019,6 +1069,7 @@ one of those.
 | `BREAKING` / `FAIL` | `4` | `0`–`4`* | `4` / `0`–`4`*‡ | — | `4` |
 | Budget overflow (`--budget`; on `compare`, else the 2h default) | `5` | `5` | `5` (explicit `--budget` only) | — | — |
 | Configured rule unused (`unused_rules: block`) | `1` floor | `1` floor | — | — | — |
+| `UNCONFIRMED` (no type-level evidence on a side; ADR-090) | `1` floor (`0` under `assurance.unconfirmed: warn`) | `1` floor (same) | — | — | — |
 | Missing dependencies/symbols | — | — | — | `1` | — |
 | Load failure | — | — | — | — | `4` |
 | Invalid invocation / tool error | `64`† | `64`† | `64`† | `64`† | `64`† |

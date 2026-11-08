@@ -70,6 +70,9 @@ class SemverBump(StrEnum):
     MINOR = "minor"
     PATCH = "patch"
     NONE = "none"
+    #: ADR-090: a compatibility claim with no type-level evidence on a side --
+    #: no bump, including ``none``, can be stated from a symbol table alone.
+    UNDETERMINED = "undetermined"
 
 
 class SonameAction(StrEnum):
@@ -218,6 +221,8 @@ class ReleaseRecommendation:
         """One-line summary suitable for ``--stat`` output or a CI log."""
         if self.state == ReleaseRecommendationState.UNAVAILABLE:
             return "Recommended release: UNAVAILABLE (insufficient binary evidence)"
+        if self.bump == SemverBump.UNDETERMINED:
+            return "Recommended release: UNDETERMINED (no type-level evidence)"
         if self.soname in (SonameAction.BUMP_REQUIRED, SonameAction.BUMP_MISSING):
             return f"Recommended release: {self.bump.value.upper()} + SONAME bump"
         return f"Recommended release: {self.bump.value.upper()}"
@@ -384,6 +389,16 @@ def _recommend_release_observed(result: DiffResult) -> ReleaseRecommendation:
     suppressed_major = _suppressed_major_class_recommendation(result)
     if suppressed_major is not None:
         return suppressed_major
+    from .policy.unconfirmed_compatibility import is_unconfirmed, unconfirmed_summary
+
+    if is_unconfirmed(result):
+        # ADR-090 D2: "none" would be the clean claim the label removes.
+        return ReleaseRecommendation(
+            SemverBump.UNDETERMINED,
+            SonameAction.NOT_DETERMINED,
+            "No version bump can be determined: " + unconfirmed_summary(result) + ".",
+            ReleaseRecommendationState.REVIEW,
+        )
     verdict = result.verdict
     kinds = {c.kind for c in result.changes}
     has_additions = bool(kinds & ADDITION_KINDS)

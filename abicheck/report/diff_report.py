@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
+from ..policy.unconfirmed_compatibility import report_compatibility
 from .change_json import (
     change_to_dict,
     prewarm_change_demangling,
@@ -165,7 +166,7 @@ def to_stat_json(
         "library": result.library,
         "old_version": result.old_version,
         "new_version": result.new_version,
-        "verdict": result.verdict.value,
+        "verdict": report_compatibility(result),  # ADR-090 D2
         "policy": effective_policy,
         "summary": {
             "breaking": summary.breaking,

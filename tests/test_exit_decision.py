@@ -161,6 +161,7 @@ class TestResolveExitDecision:
             "loadability_contribution": 0,
             "additions_review_contribution": 0,
             "unused_rules_contribution": 0,
+            "unconfirmed_contribution": 0,
         }
 
     def test_retired_crosscheck_promotion_axis_is_gone(self) -> None:
@@ -837,6 +838,7 @@ class TestCompareExitDecisionIntegration:
             "loadability_contribution": 0,
             "additions_review_contribution": 0,
             "unused_rules_contribution": 0,
+            "unconfirmed_contribution": 0,
         }
 
     def test_breaking_comparison_reports_the_compatibility_gate_reason(
@@ -999,7 +1001,12 @@ class TestCompareExitDecisionIntegration:
         report = json.loads(res.stdout[res.stdout.index("{") :])
         assert report["exit"]["code"] == 1
         assert report["exit"]["code"] == res.exit_code
-        assert report["exit"]["reasons"] == ["analysis_assurance"]
+        # This ELF-only pair is also ADR-090 UNCONFIRMED, so both 1-axes tie
+        # and both are named; the assurance reason is not masked either way.
+        assert report["exit"]["reasons"] == [
+            "analysis_assurance",
+            "unconfirmed_compatibility",
+        ]
         assert report["exit"]["compatibility_contribution"] == 0
         assert report["exit"]["analysis_assurance_contribution"] == 1
 

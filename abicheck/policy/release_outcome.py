@@ -67,10 +67,13 @@ RELEASE_VERDICT_ORDER: Mapping[str, int] = MappingProxyType(
         "NO_CHANGE": 0,
         "COMPATIBLE": 1,
         "COMPATIBLE_WITH_RISK": 2,
-        "API_BREAK": 3,
-        "BREAKING": 4,
-        "ERROR": 5,
-        "not_comparable": 6,
+        # ADR-090: a compatibility claim no type-level evidence backs. Above
+        # every claim (it is not one), below every observed break.
+        "UNCONFIRMED": 3,
+        "API_BREAK": 4,
+        "BREAKING": 5,
+        "ERROR": 6,
+        "not_comparable": 7,
     }
 )
 
@@ -80,6 +83,12 @@ RELEASE_VERDICT_ORDER: Mapping[str, int] = MappingProxyType(
 #: compatibility result on ``run_outcome.compatibility``.
 RELEASE_OPERATIONAL_SENTINELS = frozenset(
     {"ERROR", "not_comparable", "unsupported", "failed"}
+)
+
+#: The release order restricted to real ``Verdict`` values: a consumer's own
+#: verdict is never ``UNCONFIRMED`` or an operational state.
+_CONSUMER_ORDER: tuple[str, ...] = tuple(
+    v for v in RELEASE_VERDICT_ORDER if v in Verdict.__members__
 )
 
 #: A proven-removed member (ADR-065 D2) floors the reported verdict here.
@@ -120,9 +129,9 @@ def consumer_verdict_rank(verdict: object) -> int:
     under a severity scheme a BREAKING app can exit 0, so ranking by exit
     code would let a later COMPATIBLE app overwrite the reported verdict."""
     value = getattr(verdict, "value", verdict)
-    if not isinstance(value, str) or value in RELEASE_OPERATIONAL_SENTINELS:
+    if not isinstance(value, str) or value not in _CONSUMER_ORDER:
         return 0
-    return max(RELEASE_VERDICT_ORDER.get(value, 0) - 1, 0)
+    return max(_CONSUMER_ORDER.index(value) - 1, 0)
 
 
 def release_global_verdicts(

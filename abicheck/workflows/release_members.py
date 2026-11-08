@@ -38,6 +38,7 @@ from ..buildsource.header_graph_ast_projection import header_graph_bisection_sco
 from ..checker_types import DiffResult
 from ..deadline import DeadlineExceeded
 from ..model.symbol_inventory import SymbolInventory
+from ..policy.unconfirmed_compatibility import report_compatibility
 from . import cache_counters, memory_trace, release_snapshot_retention
 from .crosscheck_ownership import release_level_checks, release_owned_checks_scope
 from .gate import worse_release_verdict
@@ -190,7 +191,9 @@ def compare_release_member(key: str, ctx: ReleaseMemberContext) -> dict[str, obj
         result = compare_result.diff
         entry: dict[str, object] = {
             "library": old_path.name,
-            "verdict": result.verdict.value,
+            # ADR-090: the report's compatibility value, as a single-pair
+            # compare of this member states it.
+            "verdict": report_compatibility(result),
         }
         reporter.project(
             entry,
@@ -310,7 +313,7 @@ def dispose_release_unreached_types(
         if not moved:
             continue
         moved_total += len(moved)
-        entry["verdict"] = result.verdict.value
+        entry["verdict"] = report_compatibility(result)
         reporter.reproject(entry, result, scope_changed=True)
         stamp_member_exit_contributions(
             entry,

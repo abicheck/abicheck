@@ -42,7 +42,7 @@ from __future__ import annotations
 import dataclasses
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from ..errors import ValidationError
 from .request_inputs import InputSpec
@@ -106,6 +106,8 @@ class ReleaseMemberCompareRequest:
     acknowledgments_path: Path | None = None
     acknowledgment_unacknowledged_additions: str | None = None
     acknowledgment_breaks: str | None = None
+    #: ADR-090 D4 ``assurance.unconfirmed``, applied to every member.
+    unconfirmed_mode: Literal["fail", "warn"] = "fail"
     #: :class:`ReleaseMemberRunInputs`' fields: the dependency walk and the
     #: per-side debug roots, applied to every member as the scalar compare
     #: applies them to its one pair.
@@ -168,6 +170,7 @@ if not set(_DELTA_FIELDS) <= _REQUEST_FIELDS:  # pragma: no cover - import-time 
 #: refused loudly rather than dropped from the member's comparison.
 _MAPPED_FIELDS = frozenset(
     {
+        "unconfirmed_mode",
         "old_input",
         "new_input",
         "old_pdb_path",
@@ -311,6 +314,7 @@ def member_compare_request(request: ReleaseMemberCompareRequest) -> CompareReque
             request.acknowledgment_unacknowledged_additions
         ),
         acknowledgment_breaks=request.acknowledgment_breaks,
+        unconfirmed=request.unconfirmed_mode,
         follow_deps=request.follow_deps,
         dependency_search_paths=tuple(request.dependency_search_paths),
         ld_library_path=request.ld_library_path,

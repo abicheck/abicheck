@@ -1136,7 +1136,16 @@ outputs:
       verdict for the whole release, and the release JSON's
       `analysis_assurance` block names which members fell short. It used to
       be rejected outright for that operand, and this output declared itself
-      single-pair-only on the strength of that rejection), API_BREAK,
+      single-pair-only on the strength of that rejection), UNCONFIRMED
+      (ADR-090: no break was observed, but a compared side has no
+      type-level evidence -- no debug info, no header AST -- so the
+      compatibility claim cannot be confirmed; read from the report's
+      `exit.unconfirmed_contribution`. Exit 1 and fails the step under the
+      default `.abicheck.yml` `assurance.unconfirmed: fail`, since no
+      fail-on-* input governs it; published at exit 0 under
+      `assurance.unconfirmed: warn`. For a directory/package operand it is
+      `max` over every compared member. Supply headers for both sides or
+      compare unstripped debug builds to confirm), API_BREAK,
       BREAKING, REMOVED_LIBRARY (directory/package
       operands with fail-on-removed-library set), ERROR, or
       REPORT_UNREADABLE (abicheck itself exited 0, but the JSON report you

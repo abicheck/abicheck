@@ -232,6 +232,10 @@ class ExitReason(StrEnum):
     #: ``unused_rules: block`` (``policy/unused_rules_gate.py``). Same ``0``/``1``
     #: fold participant as ``ADDITIONS_REVIEW``; it never lowers a real ``2``/``4``.
     UNUSED_RULES = "unused_rules"
+    #: ADR-090: a compatibility claim on a side with no type-level evidence
+    #: (``policy/unconfirmed_compatibility.py``), under the default
+    #: ``assurance.unconfirmed: fail``. ``0``/``1``; never lowers a ``2``/``4``.
+    UNCONFIRMED_COMPATIBILITY = "unconfirmed_compatibility"
 
 
 @dataclass(frozen=True)
@@ -371,6 +375,8 @@ class ExitDecision:
     additions_review_contribution: int = 0
     #: ADR-067 P1 ``unused_rules`` floor -- see :class:`ExitReason.UNUSED_RULES`.
     unused_rules_contribution: int = 0
+    #: ADR-090 ``UNCONFIRMED`` floor -- see :class:`ExitReason.UNCONFIRMED_COMPATIBILITY`.
+    unconfirmed_contribution: int = 0
 
     def exit_without_analysis_assurance(self) -> int:
         """The code this decision would have had with no assurance axis.
@@ -433,6 +439,7 @@ class ExitDecision:
             "loadability_contribution": self.loadability_contribution,
             "additions_review_contribution": self.additions_review_contribution,
             "unused_rules_contribution": self.unused_rules_contribution,
+            "unconfirmed_contribution": self.unconfirmed_contribution,
         }
 
     @classmethod
@@ -474,6 +481,7 @@ class ExitDecision:
             loadability_contribution=d.get("loadability_contribution", 0),
             additions_review_contribution=d.get("additions_review_contribution", 0),
             unused_rules_contribution=d.get("unused_rules_contribution", 0),
+            unconfirmed_contribution=d.get("unconfirmed_contribution", 0),
         )
 
 
@@ -491,6 +499,7 @@ def resolve_exit_decision(
     loadability_contribution: int = 0,
     additions_review_contribution: int = 0,
     unused_rules_contribution: int = 0,
+    unconfirmed_contribution: int = 0,
     compatibility_reason: ExitReason = ExitReason.COMPATIBILITY_GATE,
 ) -> ExitDecision:
     """Fold the axis contributions below into one explainable decision.
@@ -561,6 +570,7 @@ def resolve_exit_decision(
         ExitReason.LOADABILITY: loadability_contribution,
         ExitReason.ADDITIONS_REVIEW: additions_review_contribution,
         ExitReason.UNUSED_RULES: unused_rules_contribution,
+        ExitReason.UNCONFIRMED_COMPATIBILITY: unconfirmed_contribution,
     }
     code = max(contributions.values())
     if code == 0:
@@ -586,6 +596,7 @@ def resolve_exit_decision(
         loadability_contribution=loadability_contribution,
         additions_review_contribution=additions_review_contribution,
         unused_rules_contribution=unused_rules_contribution,
+        unconfirmed_contribution=unconfirmed_contribution,
     )
 
 
@@ -648,6 +659,7 @@ def resolve_compare_exit_decision(
     from .analysis_assurance import analysis_assurance_exit_contribution
     from .contract_coverage_exit import coverage_exit_floor
     from .severity import compute_exit_code, legacy_exit_code
+    from .unconfirmed_compatibility import unconfirmed_exit_contribution
     from .unused_rules_gate import unused_rules_exit_contribution
 
     coverage_contribution = coverage_exit_floor(result)
@@ -702,6 +714,7 @@ def resolve_compare_exit_decision(
         analysis_assurance_contribution=assurance_contribution,
         additions_review_contribution=additions_review_exit_contribution(result),
         unused_rules_contribution=unused_rules_exit_contribution(result, today=today),
+        unconfirmed_contribution=unconfirmed_exit_contribution(result),
     )
 
 

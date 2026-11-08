@@ -205,6 +205,7 @@ the severity of the findings) becomes the process **exit code** your CI reads:
 | `COMPATIBLE_WITH_RISK` | Binary-compatible, but a deployment risk that needs manual review (e.g. a newer glibc requirement, `noexcept` removed). | `potential_breaking` | `0` | `0`–`2`* | Warn and review; do not fail automatically. |
 | `API_BREAK` | Source-level API break — headers changed incompatibly; already-compiled binaries still work, recompilation may fail. | `potential_breaking` | `2` | `0`–`2`* | Fail in source-strict / build-from-source pipelines; warn in ABI-only gates. |
 | `BREAKING` | Binary ABI break — existing compiled consumers can crash, fail to load, or misbehave. | `abi_breaking` | `4` | `4` | Always fail; do not ship. |
+| `UNCONFIRMED` | Not a sixth change verdict: the report's label when the verdict would be `NO_CHANGE`, `COMPATIBLE` or `COMPATIBLE_WITH_RISK` but a compared side has no type-level evidence (no debug info, no header AST), so signature, enum and layout changes cannot be seen. The observed verdict is kept in the report's `unconfirmed` block. | *(none)* | `1` | `1` | Supply headers for both sides or compare debug builds; or accept it with `assurance.unconfirmed: warn` (exit `0`, label kept). See [exit codes](../reference/exit-codes.md#unconfirmed-compatibility-adr-090). |
 
 \* Severity-aware codes depend on the active severity configuration. Under the
 **`default`** preset (`abi_breaking=error`, everything else `warning`/`info`),
@@ -216,7 +217,9 @@ additions-only `COMPATIBLE` exit `1`, and `--set severity.preset=strict` makes
 > **Exit `0` is not one verdict.** In legacy mode, `NO_CHANGE`, `COMPATIBLE`,
 > and `COMPATIBLE_WITH_RISK` all exit `0`. If your pipeline must distinguish
 > them — for example to warn on deployment risk — read the `verdict` field from
-> `-o json=...` rather than keying off the exit code alone.
+> `-o json=...` rather than keying off the exit code alone. None of the three
+> is reported when no type-level evidence backs it: that run reads
+> `UNCONFIRMED` and exits `1`.
 
 ### The two exit-code schemes
 

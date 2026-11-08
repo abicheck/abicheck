@@ -43,6 +43,7 @@ from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any
 
 from ..model.change_catalog.registry import Verdict
+from ..policy.unconfirmed_compatibility import UNCONFIRMED, is_unconfirmed
 from .envelope import resolved_gate, resolved_scoped_gate
 from .finding import build_report_findings
 from .policy_facts import kind_sets_for
@@ -60,12 +61,15 @@ if TYPE_CHECKING:
 
 __all__ = [
     "SEVERITY_EMOJI",
+    "UNCONFIRMED_EMOJI",
+    "UNCONFIRMED_MERGE_EFFECT",
     "VERDICT_EMOJI",
     "VERDICT_LABEL",
     "VERDICT_MERGE_EFFECT",
     "OutcomeSummary",
     "compute_severity_summary",
     "gate_merge_effect",
+    "headline_verdict",
     "project_outcome",
     "section_severity_label",
     "section_severity_level",
@@ -97,11 +101,25 @@ VERDICT_MERGE_EFFECT: Mapping[Verdict, str] = {
     Verdict.BREAKING: "binary (ABI) break — blocks merge under a strict gate",
 }
 
+#: ADR-090 D2: the headline glyph and phrase of an ``UNCONFIRMED`` result.
+UNCONFIRMED_EMOJI = "❓"
+UNCONFIRMED_MERGE_EFFECT = (
+    "compatibility unconfirmed — no type-level evidence on a compared side; "
+    "supply headers for both sides or compare unstripped debug builds"
+)
+
 SEVERITY_EMOJI: Mapping[str, str] = {
     "error": "❌",
     "warning": "⚠️",
     "info": "ℹ️",
 }
+
+
+def headline_verdict(result: DiffResult) -> tuple[str, str]:
+    """``(emoji, label)`` of *result*'s headline verdict (ADR-090 aware)."""
+    if is_unconfirmed(result):
+        return UNCONFIRMED_EMOJI, UNCONFIRMED
+    return VERDICT_EMOJI[result.verdict], VERDICT_LABEL[result.verdict]
 
 
 def gate_merge_effect(exit_code: int) -> str:
@@ -122,18 +140,27 @@ class OutcomeSummary:
     verdict: Verdict
     gate: GateDecision | None
     scoped_gate: ScopedGateFacts | None
+    #: ADR-090: the verdict is a compatibility claim no type-level evidence
+    #: backs on some side, so every headline states ``UNCONFIRMED``.
+    unconfirmed: bool = False
 
     @property
     def verdict_emoji(self) -> str:
+        if self.unconfirmed:
+            return UNCONFIRMED_EMOJI
         return VERDICT_EMOJI.get(self.verdict, "?")
 
     @property
     def verdict_label(self) -> str:
+        if self.unconfirmed:
+            return UNCONFIRMED
         return VERDICT_LABEL.get(self.verdict, self.verdict.value)
 
     @property
     def merge_effect(self) -> str:
         """The gate's phrase under a severity scheme, else the verdict's."""
+        if self.unconfirmed:
+            return UNCONFIRMED_MERGE_EFFECT
         if self.gate is not None:
             return gate_merge_effect(self.gate.exit_code)
         return VERDICT_MERGE_EFFECT.get(self.verdict, "")
@@ -162,6 +189,7 @@ def project_outcome(
         verdict=result.verdict,
         gate=resolved_gate(envelope, result, severity_config),
         scoped_gate=resolved_scoped_gate(envelope, result),
+        unconfirmed=is_unconfirmed(result),
     )
 
 

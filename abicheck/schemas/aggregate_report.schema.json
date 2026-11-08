@@ -243,6 +243,11 @@
             1
           ]
         },
+        "unconfirmed_exit": {
+          "type": "integer",
+          "description": "ADR-090 (aggregate schema 1.12): this target's own UNCONFIRMED contribution, read verbatim from its report's exit.unconfirmed_contribution -- a compatibility claim with no type-level evidence on a compared side, under the default assurance.unconfirmed: fail. Folded into gate.exit_code with max. 0 for a pre-7.3 report or an unavailable target.",
+          "enum": [0, 1]
+        },
         "analysis_assurance_exit": {
           "type": "integer",
           "description": "P0.4 (aggregate schema 1.5): this target's own analysis-assurance contribution, read verbatim from its report's analysis_assurance_exit_contribution -- the exact sibling of contract_coverage_exit above, for the other orthogonal exit-floor axis. 0 when the target never set `.abicheck.yml`'s `assurance.require_complete: true`, or its evidence was complete. Folded into the top-level analysis_assurance.exit_contribution and thence into gate.exit_code with max. Always present; 0 for an unavailable target.",

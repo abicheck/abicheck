@@ -623,8 +623,8 @@ def run_compare(
                 dso_only=resolved_cfg.release_dso_only,  # Phase 7d: config-only, no CLI kwarg
                 fail_on_removed=resolved_cfg.fail_on_removed_library,
                 on_incomplete_scope=resolved_cfg.on_incomplete_scope,
-                # ADR-071: folded over every compared member's assurance (max).
-                require_complete_analysis=require_complete_analysis,
+                require_complete_analysis=require_complete_analysis,  # ADR-071: max over members
+                unconfirmed_mode=resolved_cfg.unconfirmed_mode,  # ADR-090 D4
                 support_promise=resolved_cfg.release_support_promise,  # Phase 7: config-only, no CLI kwarg
                 select=select,
                 select_required=select_required,

@@ -39,7 +39,11 @@ if TYPE_CHECKING:
     from ..checker_types import DiffResult
     from ..model import AbiSnapshot
 
-__all__ = ["attach_analysis_assurance", "attach_evidence_depths"]
+__all__ = [
+    "attach_analysis_assurance",
+    "attach_evidence_depths",
+    "attach_type_evidence",
+]
 
 
 def attach_analysis_assurance(
@@ -59,6 +63,7 @@ def attach_analysis_assurance(
     )
     from ..storage.snapshot_encode import same_persisted_content
 
+    attach_type_evidence(result, old, new)
     # One registry pass feeds both the rollup and the coverage rows below.
     unobserved = collect_unobserved(old, new)
     result.analysis_assurance = compute_analysis_assurance(
@@ -106,3 +111,32 @@ def attach_evidence_depths(
 
     result.old_evidence_depth = reported_depth_label(old, old.build_source)
     result.new_evidence_depth = reported_depth_label(new, new.build_source)
+
+
+def attach_type_evidence(
+    result: DiffResult, old: AbiSnapshot | None, new: AbiSnapshot
+) -> None:
+    """Stamp ADR-090's per-side type-evidence fact onto *result*.
+
+    Runs on both pairwise entry points (this module's docstring), so a
+    typed-API, scalar-CLI and release-member result all carry it. The
+    identical-input exemption (D1(c)) matters only when *both* sides lack
+    type-level evidence: a one-sided gap means the two inputs differ by
+    construction. It is proven by byte-identical binaries
+    (``LibraryMetadata.sha256``, set by ``compare_classify`` before its own
+    call) or, with no binary hashes on both sides, by identical persisted
+    snapshot content -- the same identity ``note_if_same_binary_compared``
+    uses.
+    """
+    from ..model.type_evidence import type_evidence_facts
+    from ..storage.snapshot_encode import same_persisted_content
+
+    facts = type_evidence_facts(old, new)
+    if old is not None and facts.old is False and not facts.new:
+        old_meta, new_meta = result.old_metadata, result.new_metadata
+        if old_meta is not None and new_meta is not None:
+            identical = bool(old_meta.sha256) and old_meta.sha256 == new_meta.sha256
+        else:
+            identical = same_persisted_content(old, new)
+        facts = type_evidence_facts(old, new, identical_inputs=identical)
+    result.type_evidence = facts

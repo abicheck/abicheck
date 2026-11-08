@@ -127,6 +127,8 @@ class ReleaseCompareOptions:
     acknowledgments_path: Path | None = None
     acknowledgment_unacknowledged_additions: str | None = None
     acknowledgment_breaks: str | None = None
+    #: ADR-090 D4 ``assurance.unconfirmed`` (``fail``/``warn``).
+    unconfirmed_mode: str = "fail"
     #: The dependency walk and debug roots every member takes, as scalar does.
     run_inputs: ReleaseMemberRunInputs = ReleaseMemberRunInputs()
     #: ADR-065 D1/S3: the support-promise contract (``off`` emits nothing).
@@ -374,6 +376,7 @@ def execute_release_compare(
                 acknowledgments_path=o.acknowledgments_path,
                 acknowledgment_unacknowledged_additions=o.acknowledgment_unacknowledged_additions,
                 acknowledgment_breaks=o.acknowledgment_breaks,
+                unconfirmed_mode="warn" if o.unconfirmed_mode == "warn" else "fail",
                 **o.run_inputs.request_fields(),
             ),
             old_map=old_map,

@@ -104,6 +104,9 @@ _NON_OPERATIONAL_CONTRIBUTIONS: frozenset[str] = frozenset(
         # ADR-067 P1: a policy-acceptance floor (an unused configured rule under
         # `unused_rules: block`), never a broken run.
         "unused_rules_contribution",
+        # ADR-090: a compatibility claim without type-level evidence -- an
+        # evidence gap on a completed comparison, never a broken run.
+        "unconfirmed_contribution",
     }
 )
 
@@ -198,6 +201,7 @@ def run_outcome_dict_for_release(
         assurance=None,
         gate=gate,
         operational=operational,
+        unconfirmed=compatibility_verdict == "UNCONFIRMED",
         lifecycle=TargetLifecycle.EXISTING,
         scope=scope,
     ).to_dict()

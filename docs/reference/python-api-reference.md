@@ -58,6 +58,7 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `severity_quality_issues` | `str \| None` | `None` |
 | `severity_addition` | `str \| None` | `None` |
 | `require_complete_analysis` | `bool` | `False` |
+| `unconfirmed` | `Literal[fail, warn]` | `'fail'` |
 | `changed_paths` | `tuple[str, ...]` | `()` |
 | `abi3_floor` | `tuple[int, int] \| None` | `None` |
 | `collapse_versioned_symbols` | `bool` | `False` |

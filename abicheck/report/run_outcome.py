@@ -40,6 +40,7 @@ from ..policy.outcome import (
     policy_gate_decision_for_exit_code,
 )
 from ..policy.partial_export_read import export_read_scope_completeness
+from ..policy.unconfirmed_compatibility import is_unconfirmed
 
 if TYPE_CHECKING:
     from ..checker_types import DiffResult
@@ -88,5 +89,6 @@ def run_outcome_dict_for_diff_result(
         # ADR-079 D4: a partially read export table is an incompletely
         # checked scope, decided by policy from the assurance's own states.
         scope=export_read_scope_completeness(assurance),
+        unconfirmed=is_unconfirmed(result),
     )
     return outcome.to_dict()

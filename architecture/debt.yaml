@@ -652,7 +652,7 @@
     },
     {
       "path": "abicheck/junit_report.py",
-      "baseline_lines": 1167,
+      "baseline_lines": 1131,
       "target": "report",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -740,7 +740,7 @@
     },
     {
       "path": "abicheck/sarif.py",
-      "baseline_lines": 1247,
+      "baseline_lines": 1203,
       "target": "report",
       "rule": "no_growth",
       "disposition": "migrate",

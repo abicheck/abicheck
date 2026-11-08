@@ -13,6 +13,7 @@ The last column gives the same option on the other surfaces, read from `architec
 | Sub-key | Type | Same option on other surfaces |
 |---|---|---|
 | `require_complete` | bool | Action: `require-complete`; --set: `--set assurance.require_complete=VALUE` |
+| `unconfirmed` | str | --set: `--set assurance.unconfirmed=VALUE` |
 
 ### `build:`
 

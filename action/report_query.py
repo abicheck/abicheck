@@ -185,6 +185,9 @@ KNOWN_VERDICTS = frozenset(
         "COMPATIBLE_WITH_RISK",
         "API_BREAK",
         "BREAKING",
+        # ADR-090: a compatibility claim no type-level evidence backs (report
+        # schema 7.3). A compatibility result, not an operational state.
+        "UNCONFIRMED",
         "ERROR",
         "UNKNOWN",
         "not_comparable",
@@ -701,7 +704,11 @@ def answer(report: dict[str, Any], query: str, arg: str = "") -> str | None:
                 }
             )
         )
-    if query in ("additions_review_contribution", "unused_rules_contribution"):
+    if query in (
+        "additions_review_contribution",
+        "unused_rules_contribution",
+        "unconfirmed_contribution",  # ADR-090, report schema 7.3
+    ):
         # ADR-067 floors on the root `exit` block (additions: schema 5.13); the
         # audit shape folds unused rules into `exit_axes.unused_rules`. Only an
         # integer 0/1 answers; anything else, or no key, is "" (cannot tell).
