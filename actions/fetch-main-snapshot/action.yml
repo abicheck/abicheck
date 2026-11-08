@@ -105,6 +105,7 @@ runs:
         REPO: ${{ github.repository }}
         EVENT_NAME: ${{ github.event_name }}
         MERGE_GROUP_BASE: ${{ github.event.merge_group.base_sha }}
+        PR_BASE_REF: ${{ github.base_ref }}
         INPUT_WORKFLOW: ${{ inputs.workflow }}
         INPUT_STORAGE: ${{ inputs.storage }}
         INPUT_MODE: ${{ inputs.mode }}

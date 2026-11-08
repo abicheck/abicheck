@@ -160,18 +160,28 @@ inspect, so `resolved` means less than on the artifact path:
 | Check | Artifact | Cache |
 |---|---|---|
 | Bound to the exact base commit | name `abicheck-main-<sha>` + the run's `head_sha` | the exact key only — `restore-keys` is never used, so no other commit's entry can stand in |
-| Who wrote it | the uploading run is a `push`/`workflow_dispatch`/`schedule` run of `workflow`, in this repository, on `branch`, concluded `success` | **not verified.** GitHub's cache scoping limits it: a pull-request job reads its own ref's entries, its base branch's and the default branch's, and `main-snapshot` refuses to save from any ref but `refs/heads/<branch>` |
+| Who wrote it | the uploading run is a `push`/`workflow_dispatch`/`schedule` run of `workflow`, in this repository, on `branch`, concluded `success` | **not verified.** GitHub's cache scoping limits it: a job reads its own ref's entries, its base branch's and the default branch's. `main-snapshot` saves only from `refs/heads/<branch>`, and `fetch-main-snapshot` refuses (`untrusted_source`, before restoring anything) unless it runs on a pull request **into `branch`** or on `refs/heads/<branch>` itself — a PR into another branch or a `merge_group` run would also read a scope other workflows write. Any workflow on `branch` can still write `branch`'s scope |
 | Origin record | — (the run is the record) | `provenance.json`, written by `main-snapshot`, must name this repository, `refs/heads/<branch>`, the base SHA and the key. It is **self-reported**: anything able to write the scope can write it |
-| Contents | ≤ 1 GiB, safe zip extraction, `snapshot.json` present | exactly `snapshot.json` + `provenance.json`, regular files only, ≤ 1 GiB each and in total, both JSON objects. Extraction itself is done by `actions/cache` |
+| Contents | ≤ 1 GiB, safe zip extraction, `snapshot.json` present | exactly `snapshot.json` + `provenance.json`, regular files only, ≤ 1 GiB each and in total, both JSON objects — checked **after** `actions/cache` has extracted the entry. That extraction (`tar -P`, relative to the workspace) is not limited by abicheck: an entry can place files outside the staging directory before any check runs, as with any `actions/cache` use |
 | In progress / failed run | `base_pending` / `base_failed` | not observable — a miss is `base_not_snapshotted`; `wait-timeout` does not apply |
 | Lifetime | `retention-days` | 7 days unused, and the repository's cache size limit (LRU) |
+| Replacing a bad entry | a re-run uploads a newer one, which wins | impossible: a key is written once. Delete it (`gh cache delete <key>`) and re-run the snapshot job |
+| Runner | any | the same OS family on both sides: the cache version covers the compression method, so an entry saved on Linux is a miss on Windows. `provenance.json` records `runner_os` |
 
-The trust difference matters in one case: a workflow that runs **on the
-pull request's own ref** can save an entry under the same key, and that
-job's own lookup reads its own scope first. A pull request can therefore
-mislead its own delta comment — never another pull request's, and never the
-release gate, which this lookup does not feed. Prefer `artifact` whenever the
-pull-request token can have `actions: read`.
+What remains is two ways an entry can be forged. A workflow that runs **on
+the pull request's own ref** can save an entry under the same key, and that
+job's own lookup reads its own scope first, so a pull request can mislead
+its own delta comment. And any workflow running on `branch` — not only the
+snapshot workflow — can write `branch`'s scope, with a `provenance.json`
+that says whatever it likes; that is everyone with push access to `branch`.
+Neither reaches another pull request's comment through a third party's
+scope, and neither reaches the release gate, which this lookup does not
+feed. Prefer `artifact` whenever the pull-request token can have
+`actions: read`.
+
+A cache-service error and a version mismatch (another OS family, another
+compression) both read as `base_not_snapshotted`: `actions/cache/restore`
+reports them as a miss.
 
 The restored entry is checked in a workspace directory
 (`.abicheck-main-snapshot-cache`, which must not already exist) and removed

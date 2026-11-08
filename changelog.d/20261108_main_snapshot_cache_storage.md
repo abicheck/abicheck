@@ -8,7 +8,9 @@
   `actions: read`, can read it. The producer saves only from the default
   branch; the consumer restores the exact key (never `restore-keys`), applies
   the artifact path's size limits, and checks a self-reported
-  `provenance.json` (repository, ref, commit, key). Unlike the artifact path
+  `provenance.json` (repository, ref, commit, key). A lookup from a pull
+  request into another branch, or from a merge queue, is refused as
+  `untrusted_source` before anything is restored. Unlike the artifact path
   the producing workflow run is not verified — see
   `docs/reference/main-snapshot.md`. Outcomes reuse the existing vocabulary
   (a miss is `base_not_snapshotted`). New module

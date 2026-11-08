@@ -34,8 +34,10 @@ here, is narrower:
 - ``snapshot.json`` is a JSON object.
 
 Who could have written the entry is GitHub's cache-scope rule, not something
-checked here: a PR job reads its own ref's caches and the default branch's,
-and ``actions/main-snapshot`` refuses to save from any other ref. The
+checked here: a job reads its own ref's caches, its base branch's and the
+default branch's. ``actions/main-snapshot`` refuses to save from any other
+ref, and :func:`cache_scope_refusal` refuses a lookup from a job whose base
+branch or queue ref is a scope other workflows write. The
 producing workflow, its event and its conclusion are **not** verified.
 """
 
@@ -58,6 +60,7 @@ __all__ = [
     "CachedSnapshot",
     "CacheExpectation",
     "SNAPSHOT_CACHE_PREFIX",
+    "cache_scope_refusal",
     "provenance_record",
     "snapshot_cache_key",
     "verify_cached_snapshot",
@@ -104,11 +107,15 @@ def provenance_record(
     run_attempt: str = "",
     workflow_ref: str = "",
     event: str = "",
+    runner_os: str = "",
 ) -> dict[str, str]:
     """The ``provenance.json`` the producer stores beside the snapshot.
 
-    ``run_id``/``run_attempt``/``workflow_ref``/``event`` are recorded for an
-    auditor to follow up; the consumer cannot verify them and does not.
+    ``run_id``/``run_attempt``/``workflow_ref``/``event``/``runner_os`` are
+    recorded for an auditor to follow up; the consumer cannot verify them and
+    does not. ``runner_os`` explains a persistent miss: the cache version
+    covers the compression method, so an entry saved on another OS family is
+    not restorable.
     """
     return {
         "schema": CACHE_PROVENANCE_SCHEMA,
@@ -120,7 +127,46 @@ def provenance_record(
         "run_attempt": run_attempt,
         "workflow_ref": workflow_ref,
         "event": event,
+        "runner_os": runner_os,
     }
+
+
+#: Events whose cache scope a default-branch snapshot lookup may read. A job
+#: reads its own ref's scope, its base branch's, and the default branch's.
+_SCOPE_EVENTS = ("pull_request", "push", "workflow_dispatch", "schedule")
+
+
+def cache_scope_refusal(
+    *, event: str, ref: str, base_ref: str, branch: str
+) -> CachedSnapshot | None:
+    """Refuse a lookup whose readable cache scopes include one that ``branch``
+    pushes do not own, or ``None`` when the lookup may proceed.
+
+    A pull request into another branch (``release/x``) also reads that
+    branch's scope, where any workflow run on it can save the same key with a
+    forged ``provenance.json`` -- and every PR into that branch would then
+    resolve against it. A ``merge_group`` run reads the queue ref's scope,
+    written by the queued PRs' own workflow code. Neither is acceptable for a
+    snapshot other PRs are measured against, so both are ``untrusted_source``
+    before anything is restored. What remains readable is the job's own ref
+    (a PR can mislead only its own delta) and ``refs/heads/<branch>``.
+    """
+    if event == "pull_request":
+        if base_ref == branch:
+            return None
+        why = f"the pull request targets `{base_ref or '?'}`, not `{branch}`"
+    elif event == "merge_group":
+        why = "a merge-queue run reads the queue ref's cache, written by the queued pull requests"
+    elif event in _SCOPE_EVENTS and ref == f"refs/heads/{branch}":
+        return None
+    else:
+        why = f"a `{event or '?'}` run on `{ref or '?'}` reads caches other than `{branch}`'s"
+    return _refused(
+        DeltaOutcome.UNTRUSTED_SOURCE,
+        f"cache storage is used only from pull requests into `{branch}`; {why}. "
+        "Use `storage: artifact` here.",
+        why,
+    )
 
 
 @dataclass(frozen=True)
@@ -232,8 +278,9 @@ def verify_cached_snapshot(
         return CachedSnapshot(
             DeltaOutcome.BASE_NOT_SNAPSHOTTED,
             f"Delta unavailable: no cache entry for {where} (not saved yet, "
-            "evicted, or never saved; the cache cannot tell which). Re-run once "
-            "the default-branch snapshot job has saved it.",
+            "evicted, never saved, saved from another runner OS, or a cache-"
+            "service error; the cache cannot tell which). Re-run once the "
+            "default-branch snapshot job has saved it.",
             "cache miss",
         )
     if matched_key != expected.key:

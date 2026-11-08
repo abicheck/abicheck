@@ -155,7 +155,8 @@ that permission (private repositories), store the snapshot in the Actions
 cache instead: `storage: cache` on
 [`main-snapshot` / `fetch-main-snapshot`](../reference/main-snapshot.md#cache-storage)
 needs no API permission, at the cost of weaker provenance (the producing run
-is not verified). The main Action's `delta-baseline` reads artifacts only, so
+is not verified; pull requests into a branch other than the default one are
+refused). The main Action's `delta-baseline` reads artifacts only, so
 on that path wire `fetch-main-snapshot` and pass its `snapshot-path` as
 `old-library` to a second compare. Without either, the comment falls back to
 the release-baseline report under a `lookup_failed` note; the gate is

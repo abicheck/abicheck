@@ -45,6 +45,7 @@ from abicheck.frontends.action.main_snapshot import (
 from abicheck.frontends.action.main_snapshot_cache import (
     CACHE_STAGING_DIR,
     CacheExpectation,
+    cache_scope_refusal,
     provenance_record,
     snapshot_cache_key,
     verify_cached_snapshot,
@@ -416,6 +417,7 @@ def test_fetch_cache_mode_selects_the_base_without_any_api_call(tmp_path: Path) 
         INPUT_BRANCH="main",
         INPUT_DESTINATION=str(tmp_path / "dest"),
         EVENT_NAME="pull_request",
+        PR_BASE_REF="main",
     )
     env["PATH"] = os.pathsep.join([str(bin_dir), env["PATH"]])
     result = _sh(_FETCH_SH, env, repo)
@@ -434,6 +436,8 @@ def test_fetch_cache_mode_refuses_an_occupied_staging_directory(tmp_path: Path) 
         INPUT_STORAGE="cache",
         INPUT_MODE="merge-group",
         MERGE_GROUP_BASE=_BASE,
+        EVENT_NAME="pull_request",
+        PR_BASE_REF="main",
         INPUT_DESTINATION=str(tmp_path / "dest"),
     )
     (tmp_path / "ws" / CACHE_STAGING_DIR).mkdir()
@@ -473,3 +477,100 @@ def test_both_actions_use_the_one_cache_path_and_the_exact_key() -> None:
     assert save[0]["with"]["path"] == restore[0]["with"]["path"] == CACHE_STAGING_DIR
     assert set(restore[0]["with"]) == {"path", "key"}  # never restore-keys
     assert save[0]["uses"].split("@")[1] == restore[0]["uses"].split("@")[1]
+
+
+# ── which cache scopes a lookup may read ───────────────────────────────────
+
+# (event, GITHUB_REF, base_ref) -> allowed. Oracle: GitHub's cache-scope rule
+# -- a job reads its own ref, its base branch and the default branch -- and
+# the requirement that every scope other than the job's own is `main`'s.
+_SCOPES = [
+    ("pull_request", "refs/pull/1/merge", "main", True),
+    ("pull_request", "refs/pull/1/merge", "release/x", False),
+    ("pull_request", "refs/pull/1/merge", "", False),
+    ("pull_request_target", "refs/heads/main", "main", False),
+    ("merge_group", "refs/heads/gh-readonly-queue/main/pr-1-abc", "", False),
+    ("push", "refs/heads/main", "", True),
+    ("push", "refs/heads/dev", "", False),
+    ("push", "refs/tags/v1", "", False),
+    ("workflow_dispatch", "refs/heads/main", "", True),
+    ("workflow_dispatch", "refs/heads/feature", "", False),
+    ("schedule", "refs/heads/main", "", True),
+    ("workflow_run", "refs/heads/main", "", False),
+    ("", "", "", False),
+]
+
+
+@pytest.mark.parametrize(("event", "ref", "base_ref", "allowed"), _SCOPES)
+def test_cache_lookup_reads_only_scopes_the_branch_owns(
+    event: str, ref: str, base_ref: str, allowed: bool
+) -> None:
+    refusal = cache_scope_refusal(
+        event=event, ref=ref, base_ref=base_ref, branch="main"
+    )
+    assert (refusal is None) == allowed
+    if refusal is not None:
+        assert refusal.outcome is DeltaOutcome.UNTRUSTED_SOURCE
+        assert refusal.message.startswith("Delta unavailable")
+
+
+@pytest.mark.parametrize(
+    ("event", "base_ref", "mode"),
+    [("pull_request", "release/x", "merge-group"), ("merge_group", "", "merge-group")],
+)
+def test_fetch_refuses_a_foreign_scope_before_any_restore(
+    tmp_path: Path, event: str, base_ref: str, mode: str
+) -> None:
+    require_bash()
+    env = _env(
+        tmp_path,
+        INPUT_STORAGE="cache",
+        INPUT_MODE=mode,
+        INPUT_BRANCH="main",
+        MERGE_GROUP_BASE=_BASE,
+        EVENT_NAME=event,
+        PR_BASE_REF=base_ref,
+        INPUT_DESTINATION=str(tmp_path / "dest"),
+    )
+    result = _sh(_FETCH_SH, env, tmp_path / "ws")
+    assert result.returncode == 0, result.stdout + result.stderr
+    fields = _outputs(tmp_path / "o")
+    assert fields["outcome"] == "untrusted_source"
+    # No key -> the composite's restore and verify steps never run.
+    assert "cache-key" not in fields
+
+
+def test_verify_step_always_writes_an_outcome(tmp_path: Path) -> None:
+    """The composite reads `cache-verify.outputs.outcome || fetch.outputs.outcome`;
+    a crashed check must still overwrite the fetch step's value, never leave
+    a stale one, and never claim `resolved`."""
+    require_bash()
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "python").write_text("#!/bin/sh\necho boom >&2; exit 1\n")
+    (bin_dir / "python").chmod(0o755)
+    (tmp_path / "ws" / CACHE_STAGING_DIR).mkdir(parents=True)
+    env = _env(
+        tmp_path,
+        REPO=_REPO,
+        INPUT_BRANCH="main",
+        INPUT_DESTINATION=str(tmp_path / "dest"),
+        BASE_SHA=_BASE,
+        CACHE_KEY=_KEY,
+        CACHE_HIT="true",
+        CACHE_MATCHED_KEY=_KEY,
+    )
+    env["PATH"] = os.pathsep.join([str(bin_dir), env["PATH"]])
+    result = _sh(_VERIFY_SH, env, tmp_path / "ws")
+    assert result.returncode == 0, result.stdout + result.stderr
+    fields = _outputs(tmp_path / "o")
+    assert fields["outcome"] == "lookup_failed"
+    assert fields["message"].startswith("Delta unavailable")
+    assert not (tmp_path / "ws" / CACHE_STAGING_DIR).exists()
+
+
+def test_producer_records_the_runner_os(tmp_path: Path) -> None:
+    produced = _produce(tmp_path, RUNNER_OS="Linux")
+    assert produced.returncode == 0, produced.stdout + produced.stderr
+    stage = tmp_path / "ws" / CACHE_STAGING_DIR
+    assert json.loads((stage / "provenance.json").read_text())["runner_os"] == "Linux"

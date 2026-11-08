@@ -63,6 +63,17 @@ if [[ "$STORAGE" == cache ]]; then
   # The cache is restored by the next (actions/cache/restore) step and
   # checked by verify-cache.sh. Until then the outcome is a failed lookup,
   # so a step that never ran cannot leave `resolved` behind with no file.
+  # Refused before anything is restored: a job reading a cache scope that
+  # `$BRANCH` pushes do not own (another PR base, a merge queue) never
+  # resolves from the cache.
+  rc=0
+  "${CLI[@]}" cache-scope-check --event "${EVENT_NAME:-}" --ref "${GITHUB_REF:-}" \
+    --base-ref "${PR_BASE_REF:-}" --branch "$BRANCH" --github-output "$WORK/scope.out" || rc=$?
+  [[ "$rc" == 0 || "$rc" == 3 ]] || _fail "cache-scope-check failed with exit $rc."
+  if [[ "$rc" == 3 ]]; then
+    cat "$WORK/scope.out" >> "$GITHUB_OUTPUT"
+    _finish
+  fi
   KEY=$("${CLI[@]}" snapshot-cache-key "$BASE" --profile "${INPUT_PROFILE:-}")
   STAGE="${GITHUB_WORKSPACE:-$PWD}/.abicheck-main-snapshot-cache"
   [[ ! -e "$STAGE" ]] || _fail "$STAGE already exists; it is reserved for the restored cache entry."

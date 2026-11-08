@@ -67,7 +67,8 @@ if [[ "$STORAGE" == cache ]]; then
   KEY=$(python -m abicheck.frontends.action.cli write-cache-provenance "$STAGE/provenance.json" \
     --sha "$SNAPSHOT_SHA" --profile "${INPUT_PROFILE:-}" --repository "${GITHUB_REPOSITORY:?}" \
     --ref "$GITHUB_REF" --run-id "${GITHUB_RUN_ID:-}" --run-attempt "${GITHUB_RUN_ATTEMPT:-}" \
-    --workflow-ref "${GITHUB_WORKFLOW_REF:-}" --event "${GITHUB_EVENT_NAME:-}") \
+    --workflow-ref "${GITHUB_WORKFLOW_REF:-}" --event "${GITHUB_EVENT_NAME:-}" \
+    --runner-os "${RUNNER_OS:-}") \
     || _fail "cannot record provenance for $SNAPSHOT_SHA"
   echo "cache-key=$KEY" >> "$GITHUB_OUTPUT"
 fi

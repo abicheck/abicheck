@@ -43,6 +43,7 @@ from .main_snapshot_cache import (
     DEFAULT_MAX_ENTRY_BYTES,
     DEFAULT_MAX_TOTAL_BYTES,
     CacheExpectation,
+    cache_scope_refusal,
     provenance_record,
     snapshot_cache_key,
     verify_cached_snapshot,
@@ -222,6 +223,7 @@ def snapshot_cache_key_cmd(sha: str, profile: str) -> None:
 @click.option("--run-attempt", default="")
 @click.option("--workflow-ref", default="")
 @click.option("--event", default="")
+@click.option("--runner-os", default="")
 def write_cache_provenance_cmd(
     out: Path,
     sha: str,
@@ -232,6 +234,7 @@ def write_cache_provenance_cmd(
     run_attempt: str,
     workflow_ref: str,
     event: str,
+    runner_os: str,
 ) -> None:
     """Write the provenance.json main-snapshot stores beside a cached snapshot.
 
@@ -250,9 +253,31 @@ def write_cache_provenance_cmd(
         run_attempt=run_attempt,
         workflow_ref=workflow_ref,
         event=event,
+        runner_os=runner_os,
     )
     out.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
     click.echo(key)
+
+
+@action_cli.command("cache-scope-check")
+@click.option("--event", default="")
+@click.option("--ref", default="")
+@click.option("--base-ref", default="")
+@click.option("--branch", required=True)
+@click.option("--github-output", type=click.Path(path_type=Path), default=None)
+def cache_scope_check_cmd(
+    event: str, ref: str, base_ref: str, branch: str, github_output: Path | None
+) -> None:
+    """Exit 3 with `untrusted_source` when this job may read caches `branch` does not own."""
+    refusal = cache_scope_refusal(
+        event=event, ref=ref, base_ref=base_ref, branch=branch
+    )
+    if refusal is None:
+        click.echo(f"cache scope ok: {event} on {ref or base_ref}")
+        return
+    _emit(github_output, outcome=refusal.outcome.value, message=refusal.message)
+    click.echo(f"{refusal.outcome.value}: {refusal.reason}")
+    sys.exit(EXIT_REFUSED)
 
 
 @action_cli.command("verify-cached-snapshot")
