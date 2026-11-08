@@ -12,10 +12,10 @@ generated: false
 (absent is not removed) · **Status:** pieces 1–2 landed (`actions/main-snapshot`,
 `actions/fetch-main-snapshot`, `abicheck/frontends/action/main_snapshot.py`);
 piece 3 landed (main Action `delta-baseline`, `delta-on-missing-base:
-report|fail`, the comment's two notes via `pr_comment --note`, and on the
-artifact (fork) path via `analysis_context`); open: piece 4's
-report-schema field, `on-missing-base:
-build`, path equivalence, cache storage · **Effort:** L
+report|fail|build` with `delta-base-build-command`, the comment's two notes
+via `pr_comment --note`, and on the artifact (fork) path via
+`analysis_context`); open: piece 4's report-schema field, path
+equivalence, cache storage · **Effort:** L
 
 ## Problem
 
@@ -262,8 +262,13 @@ work, which publishes the delta report; nothing else changes.
    from `base-sha` only under path equivalence).
 3. **Main Action inputs** (*landed* as `delta-baseline: main`,
    `delta-snapshot-workflow`, `delta-mode`, `delta-profile`,
-   `delta-wait-timeout`, `delta-on-missing-base: report|fail`; `build` and a
-   `<path>` value are planned). When set, the Action runs the existing compare twice:
+   `delta-wait-timeout`, `delta-on-missing-base: report|fail|build`,
+   `delta-base-build-command`; a `<path>` value is planned). `build` checks
+   the base out into a worktree, runs the command in a token-less step, and
+   dumps it with the gate's new-side evidence moved into that worktree
+   (`abicheck/frontends/action/delta_base_dump.py`), so evidence parity holds
+   by construction; its results are the comment-only outcomes `base_built`,
+   `base_build_failed` and `base_dump_failed`. When set, the Action runs the existing compare twice:
    the gate as today, and the delta compare with `pr-comment` routed to the
    delta report and the gate's verdict as one header line ("Release gate:
    ✅ compatible / ❌ breaking — see summary"). The step's exit code comes

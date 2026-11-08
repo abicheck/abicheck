@@ -8,6 +8,8 @@ depends_on:
   - actions/main-snapshot/action.yml
   - actions/fetch-main-snapshot/action.yml
   - abicheck/frontends/action/main_snapshot.py
+  - abicheck/frontends/action/delta_base_dump.py
+  - action/build-delta-base.sh
 lifecycle: active
 generated: false
 ---
@@ -155,7 +157,9 @@ under two notes: what it was measured against, and the gate's verdict. When
 the snapshot is unavailable the comment shows the gate's report under a note
 naming the outcome. The step's exit code, `verdict` and every other output
 come from the gate in all cases; `delta-on-missing-base: fail` adds a separate
-failing step. Outputs: `delta-outcome`, `delta-base-sha`.
+failing step. Outputs: `delta-outcome` (the lookup's outcome),
+`delta-base-sha`, and `delta-comment-outcome` (what the comment shows: the
+lookup outcome, or one of the outcomes below).
 
 It runs on `pull_request` and `merge_group` only (a `pull_request_target`
 checkout is the base branch, not the PR), and for a single-library
@@ -169,3 +173,64 @@ They travel as structured fields of the report's `analysis_context`
 trusted publisher validates their shape and writes the notes itself, with the
 wording the direct path uses. A field that fails validation drops the notes
 rather than showing fork-written text.
+
+### `delta-on-missing-base: build`
+
+When the lookup selected an exact base commit but no stored snapshot is
+usable for it (`base_pending`, `base_failed`, `base_not_snapshotted`,
+`base_expired`, `snapshot_missing`, `untrusted_source`, `lookup_failed`), the
+Action can build that commit in the PR job instead of explaining the gap:
+
+```yaml
+      - uses: actions/checkout@v5
+        with: { fetch-depth: 2, persist-credentials: false }
+      - run: ./build.sh
+      - uses: abicheck/abicheck@v1
+        with:
+          abi-baseline: latest-release
+          new-library: build/libfoo.so
+          new-header: include/
+          delta-baseline: main
+          delta-snapshot-workflow: abi-main.yml
+          delta-on-missing-base: build
+          delta-base-build-command: ./build.sh
+```
+
+1. A step named *Build the delta base* checks the base commit out into a git
+   worktree under `runner.temp` (the PR checkout and its build outputs are
+   untouched; a commit missing from a shallow clone is fetched by SHA) and
+   runs `delta-base-build-command` with `bash -e -o pipefail` from that
+   worktree's root, with `ABICHECK_BASE_SHA` set. The step is given no token.
+2. The comparison step dumps the result with this run's **new-side**
+   evidence inputs (`new-library`, `header`/`new-header`,
+   `include`/`new-include`, `new-debug-info`, `sources`, `build-info`,
+   `depth`, `build-config`, the compile context and `compile.*`/`build.*`
+   `set:` lines), each path moved to the same place relative to the base
+   checkout's root, so both sides of the delta are captured at the same
+   evidence depth. Old-side inputs describe the release baseline and are not
+   used. A path outside the PR checkout (other than an include directory,
+   kept as a toolchain directory) cannot be provided by the base build and
+   is refused rather than reused.
+3. That snapshot is the delta's old side, exactly as a resolved stored
+   snapshot is.
+
+`delta-base-build-command` must therefore leave the library and those
+inputs at the same paths, relative to the checkout root, as the PR build
+does. Submodules, caches and dependencies are the command's job. The build
+runs code from the base commit — code already on the default branch — with
+the permissions of the PR job; `persist-credentials: false` keeps the
+checkout's token out of the worktree's git config.
+
+`base_unknown` and `base_ambiguous` selected no commit, so nothing is built:
+the comment explains them as with `report`. The comment and
+`delta-comment-outcome` name what happened, and the step's status is always
+the gate's:
+
+| `delta-comment-outcome` | Comment |
+|---|---|
+| `base_built` | The delta, headed "Changes in this PR (vs `main@<sha7>`, built in this job …)". |
+| `base_build_failed` | The checkout or `delta-base-build-command` failed; the release comparison is shown and the job log has the build output. |
+| `base_dump_failed` | The build succeeded but its dump failed, or an evidence path cannot be moved into the base checkout; the release comparison is shown. |
+| `rerun_failed` | The comparison against the built base produced no report. |
+
+None of them reads as "no changes", and none of them changes the exit code.

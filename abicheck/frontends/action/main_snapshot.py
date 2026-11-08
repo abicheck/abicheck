@@ -49,6 +49,7 @@ from .run_selection import (
 
 __all__ = [
     "BaseSelection",
+    "BUILDABLE_OUTCOMES",
     "COMMENT_ONLY_OUTCOMES",
     "delta_notes",
     "DeltaOutcome",
@@ -387,17 +388,46 @@ def resolve_snapshot(
 
 # ── the PR comment's notes ──────────────────────────────────────────────────
 
+#: Lookup outcomes that ``delta-on-missing-base: build`` may answer by
+#: building the base commit in the PR job: each one selected an exact base
+#: commit. ``base_unknown`` and ``base_ambiguous`` selected none, so there is
+#: nothing to build -- building "some" commit would fabricate a delta.
+BUILDABLE_OUTCOMES = frozenset(
+    {
+        DeltaOutcome.BASE_PENDING,
+        DeltaOutcome.BASE_FAILED,
+        DeltaOutcome.BASE_NOT_SNAPSHOTTED,
+        DeltaOutcome.BASE_EXPIRED,
+        DeltaOutcome.SNAPSHOT_MISSING,
+        DeltaOutcome.UNTRUSTED_SOURCE,
+        DeltaOutcome.LOOKUP_FAILED,
+    }
+)
+
 #: Decided by the main Action after the lookup, not by it: the snapshot
 #: resolved but the comparison is not one a single-library delta can describe,
-#: or the delta rerun produced no report.
+#: the delta rerun produced no report, or (``delta-on-missing-base: build``)
+#: the base commit was built in this job -- or could not be.
 COMMENT_ONLY_OUTCOMES = {
     "unsupported_operand": (
-        "Delta unavailable: delta-baseline compares one library; this is a "
-        "directory/package comparison."
+        "Delta unavailable: delta-baseline compares one library against one "
+        "old library; this is a directory/package or audit-only comparison."
     ),
     "rerun_failed": (
         "Delta unavailable: the comparison against the default-branch snapshot "
         "produced no report."
+    ),
+    "base_built": (
+        "Changes in this {subject} (vs `{branch}@{sha7}`, built in this job: "
+        "no stored snapshot was available)."
+    ),
+    "base_build_failed": (
+        "Delta unavailable: building `{branch}@{sha7}` in this job failed "
+        "(checkout or delta-base-build-command; see the job log)."
+    ),
+    "base_dump_failed": (
+        "Delta unavailable: `{branch}@{sha7}` was built in this job, but "
+        "dumping it failed (see the job log)."
     ),
 }
 
@@ -419,8 +449,11 @@ def delta_notes(
     from *structured* fields of an analysis context a fork wrote -- never
     from text the fork chose. An unknown outcome is refused, not rendered.
     """
+    subject = "merge-queue entry" if merge_group else "PR"
     if outcome in COMMENT_ONLY_OUTCOMES:
-        first = COMMENT_ONLY_OUTCOMES[outcome]
+        first = COMMENT_ONLY_OUTCOMES[outcome].format(
+            sha7=base_sha[:7] or "?", branch=branch or "main", subject=subject
+        )
     else:
         try:
             parsed = DeltaOutcome(outcome)
@@ -430,7 +463,7 @@ def delta_notes(
             parsed,
             sha=base_sha,
             branch=branch or "main",
-            subject="merge-queue entry" if merge_group else "PR",
+            subject=subject,
         )
     if first.startswith("Delta unavailable"):
         first += " Showing the release-baseline comparison."
