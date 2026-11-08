@@ -188,16 +188,21 @@ def corpus_root(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return tmp_path_factory.mktemp("edit_corpus_new")
 
 
-@pytest.mark.integration
-@pytest.mark.parametrize("op,seed,compiler", CELLS)
-def test_edit_produces_declared_ground_truth(
-    op, seed, compiler, baseline_cache: BaselineCache, corpus_root: Path
-) -> None:
+def _skip_without_driver(seed, compiler: str) -> None:
+    """Skip only when this cell's compiler driver is absent; a failing build still fails."""
     driver = COMPILERS[compiler][1 if seed.lang == "c++" else 0]
     if shutil.which(driver) is None:
         pytest.skip(
             f"{driver} is not installed; this compiler lane cannot build the cell"
         )
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("op,seed,compiler", CELLS)
+def test_edit_produces_declared_ground_truth(
+    op, seed, compiler, baseline_cache: BaselineCache, corpus_root: Path
+) -> None:
+    _skip_without_driver(seed, compiler)
     # A build or extraction exception propagates and fails the cell.
     outcome = run_operator(op, seed, compiler, baseline_cache, corpus_root)
     key = (op.name, seed.name, compiler)
@@ -236,5 +241,6 @@ def test_smoke_subset_is_exercised() -> None:
 def test_smoke_cells(
     op, seed, compiler, baseline_cache: BaselineCache, corpus_root: Path
 ) -> None:
+    _skip_without_driver(seed, compiler)
     outcome = run_operator(op, seed, compiler, baseline_cache, corpus_root)
     assert outcome.failures == (), list(outcome.failures)
