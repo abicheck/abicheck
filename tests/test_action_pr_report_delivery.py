@@ -42,6 +42,7 @@ from pathlib import Path
 
 import _yaml_fast
 import pytest
+from _abicheck_subprocess import abicheck_env, abicheck_module_command
 from _action_run_sh_harness import (
     REQUIRES_POSIX_SHELL,
     _compare_env,
@@ -338,7 +339,7 @@ def test_staged_document_round_trips_through_the_publisher_readers(
     aggregate = json.loads((staged / "aggregate.json").read_text())
     assert [t["target_id"] for t in aggregate["targets"]] == ["default"]
 
-    cli = [sys.executable, "-m", "abicheck.frontends.action.cli"]
+    cli = abicheck_module_command("abicheck.frontends.action.cli")
     ctx = tmp_path / "ctx.json"
     subprocess.run(
         [
@@ -350,6 +351,7 @@ def test_staged_document_round_trips_through_the_publisher_readers(
         ],
         check=True,
         capture_output=True,
+        env=abicheck_env(),
     )
     assert json.loads(ctx.read_text())["tested_sha"] == SHA
 
@@ -366,6 +368,7 @@ def test_staged_document_round_trips_through_the_publisher_readers(
         ],
         check=True,
         capture_output=True,
+        env=abicheck_env(),
     )  # fmt: skip
     assert json.loads(plan.read_text())["action"] == "create"
     assert "func_removed" in body.read_text() and "`gone`" in body.read_text()
