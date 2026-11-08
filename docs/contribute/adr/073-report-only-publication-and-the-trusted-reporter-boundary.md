@@ -275,3 +275,39 @@ comment with nothing to tell it it had been superseded.
 populated only for multi-profile targets, so the common case would silently
 render without detail — and "silently render less than the document supports"
 is the defect class this ADR is closing, not a mitigation for it.
+
+## Amendment (2026-11): the turnkey pair — `pr-comment-via` and `report-pr.yml`
+
+The two Actions above were building blocks: an integrator still hand-wrote
+the producer's upload and analysis-context recording and the publisher's
+`workflow_run` job. Both halves are now packaged, without moving either
+boundary:
+
+- **Producer.** The root Action's `pr-comment-via` input chooses how a run's
+  comment travels: `direct` (default, unchanged behaviour), `artifact`, or
+  `auto` (`artifact` on a `pull_request` run whose token is read-only — a
+  fork's or Dependabot's — `direct` otherwise). On the artifact path the
+  Action makes no GitHub API call: it stages the same canonical report the
+  direct path would render, wraps it in a one-target `aggregate`
+  (`--discovered-only`, since the job states no inventory) whose
+  `analysis_context` records `github.sha`, and uploads that through the
+  runner's own artifact credentials. The aggregate wrapper is what lets
+  `verify-source-run` keep D7's single-identity rule (`provenance-from` and
+  `report-from` name one document) without a new document format.
+- **Publisher.** `.github/workflows/report-pr.yml` is a `workflow_call`
+  workflow running `verify-source-run` then `report` with
+  `actions: read`, `contents: read`, `pull-requests: write`, its abicheck
+  Actions taken from a self-checkout of its own revision and every
+  third-party Action SHA-pinned. The `workflow_run` trigger stays in the
+  caller's repository because GitHub only fires it there.
+- **One path per run.** A run either posts or uploads, never both, so a
+  repository wiring both halves cannot double-post. The publisher treats
+  `artifact-not-found` from an otherwise verified run as "nothing to
+  publish" (a run that posted directly, commented nothing, or failed before
+  producing a report — the producer's own check carries that failure);
+  every other refusal still fails, and `require-artifact` restores failing
+  on a missing artifact too.
+
+The publisher still renders with `report-from`/`provenance-from` inputs, so
+another canonical report a producer uploads (e.g. a delta report) can reuse
+the same publisher unchanged. No verdict, gate, exit code or schema changes.

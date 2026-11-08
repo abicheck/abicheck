@@ -74,6 +74,13 @@ sequence that invokes these scripts in order:
    lives here rather than under `abicheck/` (it must version with the Action,
    not with whatever `abicheck-version:` a workflow pinned). **Add a report
    field's reader here, never as a second parser in `run.sh`.**
+6. `action/pr-report-delivery.sh` — the producer half of `pr-comment-via`.
+   `resolve` runs before Python setup and picks `direct`/`artifact`/`none`
+   (one path per run is the double-posting guard); `run.sh`'s
+   `_maybe_post_pr_comment` stages the report instead of posting on
+   `artifact`; `stage` wraps it in a one-target aggregate carrying
+   `analysis_context` for `.github/workflows/report-pr.yml`. Tests:
+   `tests/test_action_pr_report_delivery.py`.
 
 **Keep `validate-inputs.sh` and `run.sh` in sync.** `run.sh` independently
 re-checks the format/upload-sarif rules right before invoking `abicheck`

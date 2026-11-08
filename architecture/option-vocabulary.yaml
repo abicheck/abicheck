@@ -1290,6 +1290,8 @@ concepts:
       - action:pr-comment-on
       - action:pr-comment-report-artifact-url
       - action:pr-comment-detail
+      - action:pr-comment-via
+      - action:pr-comment-artifact-name
       - action:github-token
   - concept: aggregate
     tier: core

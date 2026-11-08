@@ -264,19 +264,21 @@ suppression:
 | `pr-comment-on` | `changes` | When to comment: `changes`, `always`, or `never` — see [What the default comments on](#what-the-default-comments-on) |
 | `pr-comment-detail` | `standard` | Comment detail: `summary`, `standard`, or `full` |
 | `pr-comment-report-artifact-url` | — | Direct URL of an uploaded full-report artifact, shown as **Download full report**; leave unset unless the upload succeeded |
+| `pr-comment-via` | `direct` | How the comment reaches the PR: `direct` posts from this job; `artifact` uploads the report for the trusted [`report-pr.yml`](fork-pr-reporting.md) publisher and never posts; `auto` uploads on a fork's (or Dependabot's) `pull_request` run and posts directly otherwise. One path per run, so wiring both never double-posts |
+| `pr-comment-artifact-name` | derived | Artifact name for the upload; empty derives `abicheck-pr-report[-<pr-comment-key>]`, which `report-pr.yml` expects by default |
 | `github-token` | `${{ github.token }}` | Token for the PR comment and baseline auto-fetch (needs `pull-requests: write`) |
 
 !!! note "Pull requests from forks"
 
     `pr-comment` is a no-op outside a `pull_request` or `pull_request_target`
     event (`action/run.sh` accepts both) and needs `pull-requests: write`,
-    which a fork's `pull_request` deliberately does not get. Publishing a fork PR's result needs a separate, trusted
-    `workflow_run` job — see
-    [Reporting on fork pull requests](fork-pr-reporting.md) for the supported
-    two-workflow split and the
+    which a fork's `pull_request` deliberately does not get. Set
+    `pr-comment-via: auto` here and add the eight-line publisher that calls
+    the reusable `report-pr.yml` — see
+    [Reporting on fork pull requests](fork-pr-reporting.md). The
     [`report`](../reference/report-action.md) /
-    [`verify-source-run`](../reference/verify-source-run.md) Actions that
-    implement it.
+    [`verify-source-run`](../reference/verify-source-run.md) Actions it is
+    built from remain available for a hand-wired publisher.
 
 #### What the default comments on
 

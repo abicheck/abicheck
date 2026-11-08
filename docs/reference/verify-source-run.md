@@ -19,6 +19,12 @@ its artifact as hostile input. It analyses nothing.
 Task owner for the whole pattern:
 [Reporting on fork pull requests](../use/fork-pr-reporting.md).
 
+Most projects do not call this Action directly: the reusable
+`.github/workflows/report-pr.yml` runs `verify-source-run` then `report` with
+the right permissions, and the main Action's `pr-comment-via: auto` produces
+the artifact it expects. Use this Action when you are hand-wiring a
+publisher (the guide's *Advanced* section).
+
 It exists as an Action because every project attempting the two-workflow
 split needs the same checks, and they are the ones that are easy to get
 subtly wrong and impossible to notice when wrong.

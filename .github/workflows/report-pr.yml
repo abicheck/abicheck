@@ -1,0 +1,316 @@
+name: 'abicheck report-pr'
+
+# ADR-073's trusted publisher, packaged: the whole `workflow_run` half of
+# docs/use/fork-pr-reporting.md as one reusable workflow, so a project's
+# publisher file is a trigger, three permissions and one `uses:` line:
+#
+#   on:
+#     workflow_run:
+#       workflows: ["ABI analysis"]
+#       types: [completed]
+#   permissions: { actions: read, contents: read, pull-requests: write }
+#   jobs:
+#     report:
+#       uses: abicheck/abicheck/.github/workflows/report-pr.yml@v1
+#
+# The `workflow_run` trigger has to live in the CALLER's repository (GitHub
+# only fires it for workflows on the default branch of the repository that
+# owns them), which is why this is a `workflow_call` workflow rather than
+# something a caller can reference from its analysis workflow.
+#
+# The producer side is the main Action's `pr-comment-via: auto` (or
+# `artifact`), which uploads an artifact named `abicheck-pr-report[-<key>]`
+# holding the compare report wrapped in a one-target `aggregate.json` that
+# records the analysed commit. The defaults below expect exactly that.
+#
+# What this workflow does NOT do, on purpose: check out the contributor's
+# code, build anything, or execute anything from the artifact. It verifies
+# the producer run and the artifact (actions/verify-source-run) and renders
+# the already-produced report (actions/report). See the fork-PR guide's
+# "A trusted reporter does not make the report trusted evidence" warning:
+# the comment carries the producer's own recorded evidence facts, nothing
+# this job adds.
+#
+# Every third-party Action below is pinned to a full commit SHA -- this job
+# holds `pull-requests: write`, the same bar publish-baseline.yml and
+# update-main-baseline.yml meet. The two abicheck Actions are referenced
+# from a self-checkout of THIS workflow's own revision (job.workflow_ref /
+# job.workflow_sha, as check-project.yml does), so the publisher runs the
+# abicheck code its caller pinned, never whatever a floating tag says now.
+
+on:
+  workflow_call:
+    inputs:
+      comment-key:
+        description: >-
+          Matches the producer's `pr-comment-key`: selects the artifact
+          `abicheck-pr-report-<key>` (unless artifact-name is set) and gives
+          this report its own sticky comment, identity `abicheck:<key>`.
+          Empty (default) is the unkeyed `abicheck-pr-report` artifact and
+          identity `abicheck:default`. For a matrix, call this workflow once
+          per key (a `strategy.matrix` on the calling job).
+        type: string
+        default: ''
+      artifact-name:
+        description: >-
+          Artifact to publish from. Empty derives it from comment-key, the
+          same rule the main Action's `pr-comment-artifact-name` uses.
+        type: string
+        default: ''
+      report-from:
+        description: >-
+          The report to publish, as a path inside the artifact. The default
+          is the one-target aggregate document the main Action uploads. Any
+          canonical abicheck JSON report actions/report accepts works, as
+          long as it carries the `analysis_context` block named by
+          provenance-from (or require-provenance is false).
+        type: string
+        default: 'aggregate.json'
+      provenance-from:
+        description: >-
+          Document inside the artifact the analysed commit is read from.
+          Empty means report-from, which is the only combination
+          actions/verify-source-run accepts when both are set: the commit
+          and the report are returned as one verified identity.
+        type: string
+        default: ''
+      require-provenance:
+        description: >-
+          true (default): refuse a report that records no analysed commit
+          rather than display the PR head for a tree nothing analysed.
+          false: fall back to the producer run's head commit.
+        type: boolean
+        default: true
+      expect-workflow:
+        description: >-
+          The producer workflow, as its file path
+          (`.github/workflows/abi.yml`) or name. Empty means the run that
+          triggered this one -- already restricted by the caller's own
+          `workflow_run.workflows` list. Set it when that list names more
+          than one workflow.
+        type: string
+        default: ''
+      allowed-conclusions:
+        description: >-
+          Producer run conclusions that are published. The default includes
+          'failure' because a gated ABI break fails the producer -- the run
+          a reviewer most needs the comment for.
+        type: string
+        default: 'success,failure'
+      require-artifact:
+        description: >-
+          false (default): a verified producer run that uploaded no artifact
+          is skipped with a notice -- that is a run which posted its comment
+          directly (`pr-comment-via: auto` on a same-repository PR), was
+          configured not to comment, or failed before producing a report
+          (its own red check says so). true: fail instead, for a setup where
+          every run is expected to upload.
+        type: boolean
+        default: false
+      detail:
+        description: 'Comment detail level: summary, standard or full.'
+        type: string
+        default: 'standard'
+      post-on:
+        description: >-
+          When to comment: changes (default), always or never -- the
+          main Action's `pr-comment-on`, applied here because this job is
+          the one that renders.
+        type: string
+        default: 'changes'
+      gate-api-break:
+        description: >-
+          Render API/source breaks under 'Breaking'. Set it to mirror a
+          producer that runs with `fail-on-api-break: true`. Presentation
+          only; this workflow never gates.
+        type: boolean
+        default: false
+      gate-breaking:
+        description: >-
+          Whether the producer gated on ABI breaks (its `fail-on-breaking`).
+          Affects only the analysis-incomplete section's blocking wording.
+        type: boolean
+        default: true
+      python-version:
+        description: 'Python version for setup-python.'
+        type: string
+        default: '3.13'
+    outputs:
+      posted:
+        description: "'true' when a comment was created, updated or cleared."
+        value: ${{ jobs.publish.outputs.posted }}
+      comment-url:
+        description: 'URL of the comment that was created or updated, when one was.'
+        value: ${{ jobs.publish.outputs.comment-url }}
+      skipped-reason:
+        description: >-
+          Why nothing was published: 'no-artifact' (the producer uploaded
+          none), or actions/report's own 'never', 'no-changes', 'stale'.
+          Empty when something was published.
+        value: ${{ jobs.publish.outputs.skipped-reason }}
+
+# Nothing at workflow level; the one job below names exactly what it uses.
+permissions: {}
+
+jobs:
+  publish:
+    name: Publish ABI report
+    # Only a pull_request producer run is about a pull request. A producer
+    # workflow that also runs on push still triggers its `workflow_run`
+    # publisher; those runs, and cancelled/skipped ones, are not failures of
+    # this job -- they are simply not its business. A caller on any OTHER
+    # trigger is a wiring mistake and runs the job, whose first step says so.
+    if: >-
+      github.event_name != 'workflow_run'
+      || (github.event.workflow_run.event == 'pull_request'
+          && github.event.workflow_run.conclusion != 'cancelled'
+          && github.event.workflow_run.conclusion != 'skipped')
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read          # read the producer run and download its artifact
+      contents: read         # read commit documents to verify the analysed SHA
+      pull-requests: write   # post or update the sticky comment
+    outputs:
+      posted: ${{ steps.report.outputs.posted || 'false' }}
+      comment-url: ${{ steps.report.outputs.comment-url }}
+      skipped-reason: ${{ steps.decide.outputs.skipped-reason || steps.report.outputs.skipped-reason }}
+    steps:
+      - name: Require a workflow_run trigger
+        if: github.event_name != 'workflow_run'
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          echo "::error::abicheck report-pr.yml must be called from a workflow triggered by 'workflow_run' (got '$EVENT_NAME'); it publishes the report a completed pull_request run uploaded. See docs/use/fork-pr-reporting.md."
+          exit 1
+
+      # `job.*`, not `github.workflow_*`: inside a reusable workflow the
+      # `github` context describes the CALLER (check-project.yml's identical
+      # step has the full write-up, including actionlint's false negative).
+      - name: Capture this reusable workflow's identity
+        id: identity
+        shell: bash
+        env:
+          WORKFLOW_REF: ${{ job.workflow_ref }}
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+          FALLBACK_REPOSITORY: ${{ github.repository }}
+          FALLBACK_REF: ${{ github.sha }}
+        run: |
+          repository="${WORKFLOW_REF%%/.github/workflows/*}"
+          echo "repository=${repository:-$FALLBACK_REPOSITORY}" >> "$GITHUB_OUTPUT"
+          echo "ref=${WORKFLOW_SHA:-$FALLBACK_REF}" >> "$GITHUB_OUTPUT"
+
+      # abicheck's own code at this workflow's revision -- not the caller's
+      # repository and never the contributor's head.
+      - name: Checkout abicheck
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6.1.0
+        with:
+          repository: ${{ steps.identity.outputs.repository }}
+          ref: ${{ steps.identity.outputs.ref }}
+          path: .report-pr-src
+          persist-credentials: false
+
+      - name: Resolve publication inputs
+        id: inputs
+        shell: bash
+        env:
+          INPUT_COMMENT_KEY: ${{ inputs.comment-key }}
+          INPUT_ARTIFACT_NAME: ${{ inputs.artifact-name }}
+          INPUT_REPORT_FROM: ${{ inputs.report-from }}
+          INPUT_PROVENANCE_FROM: ${{ inputs.provenance-from }}
+          INPUT_EXPECT_WORKFLOW: ${{ inputs.expect-workflow }}
+          TRIGGERING_WORKFLOW_PATH: ${{ github.event.workflow_run.path }}
+        run: |
+          set -euo pipefail
+          # Same sanitization and derivation as the main Action's
+          # action/pr-report-delivery.sh, so both sides agree by default.
+          key="$INPUT_COMMENT_KEY"
+          key="${key#"${key%%[![:space:]]*}"}"
+          key="${key%"${key##*[![:space:]]}"}"
+          key=$(printf '%s' "$key" | LC_ALL=C tr -c 'A-Za-z0-9._-' '-')
+          key="${key:0:64}"
+          name="$INPUT_ARTIFACT_NAME"
+          if [[ -z "$name" ]]; then
+            name="abicheck-pr-report${key:+-$key}"
+          fi
+          {
+            echo "artifact-name=$name"
+            echo "identity=abicheck:${key:-default}"
+            echo "report-from=$INPUT_REPORT_FROM"
+            echo "provenance-from=${INPUT_PROVENANCE_FROM:-$INPUT_REPORT_FROM}"
+            echo "expect-workflow=${INPUT_EXPECT_WORKFLOW:-$TRIGGERING_WORKFLOW_PATH}"
+          } >> "$GITHUB_OUTPUT"
+
+      # continue-on-error so the next step can tell "no artifact" (a run
+      # that posted directly) from every other refusal, which still fails.
+      - name: Verify the producer run and extract its artifact
+        id: verify
+        continue-on-error: true
+        uses: ./.report-pr-src/actions/verify-source-run
+        with:
+          source-run-id: ${{ github.event.workflow_run.id }}
+          expect-repository: ${{ github.repository }}
+          expect-workflow: ${{ steps.inputs.outputs.expect-workflow }}
+          expect-event: pull_request
+          expect-run-attempt: ${{ github.event.workflow_run.run_attempt }}
+          allowed-conclusions: ${{ inputs.allowed-conclusions }}
+          artifact-name: ${{ steps.inputs.outputs.artifact-name }}
+          provenance-from: ${{ steps.inputs.outputs.provenance-from }}
+          require-provenance: ${{ inputs.require-provenance }}
+          report-from: ${{ steps.inputs.outputs.report-from }}
+          destination: incoming
+          python-version: ${{ inputs.python-version }}
+          github-token: ${{ github.token }}
+
+      - name: Decide whether to publish
+        id: decide
+        shell: bash
+        env:
+          OUTCOME: ${{ steps.verify.outcome }}
+          REFUSAL_CODE: ${{ steps.verify.outputs.refusal-code }}
+          REPORT_AVAILABLE: ${{ steps.verify.outputs.report-available }}
+          REPORT_FROM: ${{ steps.inputs.outputs.report-from }}
+          ARTIFACT_NAME: ${{ steps.inputs.outputs.artifact-name }}
+          REQUIRE_ARTIFACT: ${{ inputs.require-artifact }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          set -euo pipefail
+          if [[ "$OUTCOME" != "success" ]]; then
+            if [[ "$REFUSAL_CODE" == "artifact-not-found" && "$REQUIRE_ARTIFACT" != "true" ]]; then
+              echo "::notice::abicheck: the producer run uploaded no '$ARTIFACT_NAME' artifact, so there is nothing to publish -- it posted its comment directly (pr-comment-via: auto on a same-repository PR), was configured not to comment, or failed before producing a report ($RUN_URL)."
+              echo "publish=false" >> "$GITHUB_OUTPUT"
+              echo "skipped-reason=no-artifact" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "::error::abicheck: refused to publish from the producer run (${REFUSAL_CODE:-verification failed}); see the step above."
+            exit 1
+          fi
+          if [[ "$REPORT_AVAILABLE" != "true" ]]; then
+            echo "::error::abicheck: the verified artifact '$ARTIFACT_NAME' holds no '$REPORT_FROM' -- an unavailable analysis, which is not a clean result."
+            exit 1
+          fi
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+
+      - name: Publish the report
+        id: report
+        if: steps.decide.outputs.publish == 'true'
+        uses: ./.report-pr-src/actions/report
+        with:
+          report: ${{ steps.verify.outputs.report-path }}
+          repository: ${{ github.repository }}
+          pr-number: ${{ steps.verify.outputs.pr-number }}
+          sha: ${{ steps.verify.outputs.tested-sha }}
+          # The run that PRODUCED the report, so the sticky comment's
+          # ordering guard compares producer runs, not publisher triggers.
+          source-run-id: ${{ github.event.workflow_run.id }}
+          source-run-attempt: ${{ github.event.workflow_run.run_attempt }}
+          comment-identity: ${{ steps.inputs.outputs.identity }}
+          detail: ${{ inputs.detail }}
+          post-on: ${{ inputs.post-on }}
+          gate-api-break: ${{ inputs.gate-api-break }}
+          gate-breaking: ${{ inputs.gate-breaking }}
+          # Quoted: an unquoted `#` starts a YAML comment.
+          run-label: "run #${{ github.event.workflow_run.run_number }}"
+          report-url: ${{ github.event.workflow_run.html_url }}
+          python-version: ${{ inputs.python-version }}
+          github-token: ${{ github.token }}

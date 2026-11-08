@@ -17,6 +17,12 @@ pull request, as a sticky comment and/or a job summary. It is the
 publication half of the two-workflow split described in
 [Reporting on fork pull requests](../use/fork-pr-reporting.md).
 
+Most projects do not call this Action directly: the reusable
+`.github/workflows/report-pr.yml` runs `verify-source-run` then `report` with
+the right permissions, and the main Action's `pr-comment-via: auto` produces
+the artifact it expects. Use this Action when you are hand-wiring a
+publisher (the guide's *Advanced* section).
+
 > **It analyses nothing.** No comparison, no dump, no build query, no
 > compiler, no project-dependency install. It installs abicheck and renders.
 > That is what makes it safe to run in a trusted `workflow_run` job holding a
