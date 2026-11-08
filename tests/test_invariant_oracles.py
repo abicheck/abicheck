@@ -198,3 +198,39 @@ def test_malformed_disposition_audit_is_a_violation_not_a_crash(
         conservation_violations({"changes": [], "disposition_audit": audit}, {})
         == expected
     )
+
+
+# -- A: rendered wording -------------------------------------------------------
+
+from tests.oracles.absence import rendered_absence_violations  # noqa: E402
+from tests.oracles.producer import symbol_violations  # noqa: E402
+
+
+def test_rendered_headline_claiming_acceptance_on_partial_evidence_is_a_violation() -> (
+    None
+):
+    text = "Compatibility: NO_CHANGE | Gate: ACCEPTED (exit 0)"
+    assert rendered_absence_violations({"terminal": text}, "partial") == [
+        "terminal states a clean claim ('Gate: ACCEPTED') while analysis_assurance.status is 'partial'",
+        "terminal states a clean claim ('Compatibility: NO_CHANGE') while analysis_assurance.status is 'partial'",
+    ]
+
+
+def test_rendered_headline_is_silent_on_complete_evidence() -> None:
+    assert rendered_absence_violations({"terminal": "Gate: ACCEPTED"}, "complete") == []
+
+
+# -- B: symbol-level pairs ------------------------------------------------------
+
+
+def test_symbol_pairs_agree_silently() -> None:
+    pairs = {("func_removed", "helper")}
+    assert symbol_violations(pairs, pairs) == []
+
+
+def test_symbol_pairs_catch_a_same_kind_on_a_different_symbol() -> None:
+    # Kinds agree (both report func_removed) but the symbols differ: a kind-only check misses it.
+    assert symbol_violations({("func_removed", "a")}, {("func_removed", "b")}) == [
+        "only castxml: func_removed on a",
+        "only clang: func_removed on b",
+    ]

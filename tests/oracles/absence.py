@@ -33,3 +33,33 @@ def absence_violations(report: Mapping[str, Any]) -> list[str]:
             f"analysis_assurance.status is {status!r}"
         ]
     return []
+
+
+#: Renderer phrases that state acceptance or a clean compatibility result.
+#: Checked on rendered output so a headline cannot claim acceptance while the
+#: JSON says the evidence was partial.
+CLEAN_CLAIM_PHRASES: tuple[str, ...] = (
+    "Gate: ACCEPTED",
+    "Compatibility: NO_CHANGE",
+    "✅ `NO_CHANGE`",
+)
+
+
+def rendered_absence_violations(
+    rendered: Mapping[str, str],
+    status: str | None,
+) -> list[str]:
+    """Renderers that state a clean claim while analysis assurance is absent.
+
+    *rendered* maps a renderer name (``"terminal"``, ``"markdown"``) to its
+    output text. Only runs whose assurance is ``partial``, ``failed`` or
+    ``not_comparable`` are judged.
+    """
+    if status not in ABSENT_EVIDENCE_STATUSES:
+        return []
+    return [
+        f"{name} states a clean claim ({phrase!r}) while analysis_assurance.status is {status!r}"
+        for name, text in sorted(rendered.items())
+        for phrase in CLEAN_CLAIM_PHRASES
+        if phrase in text
+    ]

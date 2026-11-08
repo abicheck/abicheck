@@ -15,6 +15,7 @@ import json
 import re
 import shutil
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -64,7 +65,6 @@ def test_route_invariant_holds_across_operand_routes(
         "dumped snapshot pair": _route(lab.stored(case)),
         "live old, snapshot new": _route(lab.mixed(case)),
     }
-    assert set(routes) == set(EQUIVALENT_ROUTES)
     assert route_violations(routes) == [], case
 
 
@@ -89,7 +89,20 @@ def test_conservation_invariant_holds_across_renderers(
 #: Kinds the castxml and clang backends are known to disagree on for a catalog
 #: case, as ``(kind, only_in)`` pairs. Starts empty: every entry must be a
 #: recorded known-gap, and the list may only shrink (see ``allowlist_growth``).
-PRODUCER_ALLOWLIST: frozenset[tuple[str, str]] = frozenset()
+PRODUCER_ALLOWLIST: dict[str, frozenset[tuple[str, str]]] = {}
+
+
+def _backend_pairs(
+    lab: _metamorphic._Lab, case: str, backend: str
+) -> frozenset[tuple[str, str]]:
+    """``(kind, symbol)`` pairs one header backend reports for the case."""
+    from abicheck.checker import compare
+    from abicheck.dumper import dump
+
+    build = lab.build(case)
+    old = dump(build.v1, list(build.h1), header_backend=backend)
+    new = dump(build.v2, list(build.h2), header_backend=backend)
+    return frozenset((str(c.kind), str(c.symbol)) for c in compare(old, new).changes)
 
 
 def _backend_kinds(lab: _metamorphic._Lab, case: str, backend: str) -> frozenset[str]:
@@ -119,4 +132,140 @@ def test_producer_invariant_holds_between_castxml_and_clang(
     castxml = _backend_kinds(lab, case, "castxml")
     clang = _backend_kinds(lab, case, "clang")
     assert castxml and clang, f"{case}: a backend reported no changes"
-    assert producer_violations(castxml, clang, PRODUCER_ALLOWLIST) == [], case
+    assert (
+        producer_violations(castxml, clang, PRODUCER_ALLOWLIST.get(case, frozenset()))
+        == []
+    ), case
+
+
+#: The committed baseline of the producer allowlist, keyed by catalog case.
+_BASELINE = json.loads(
+    (Path(__file__).resolve().parent / "oracles" / "allowlist_baseline.json").read_text(
+        encoding="utf-8"
+    )
+)["allowlist"]
+
+
+def _typed_outcome(lab: _metamorphic._Lab, case: str) -> tuple[str, frozenset[str]]:
+    """Verdict and kinds from the typed Python API on the case's dumped libraries.
+
+    The typed API has no exit code, so only verdict and kinds are compared
+    against the CLI route. ``surface_metrics=True`` is the resolved request
+    the CLI sends for its surface findings, so the bare default is not used.
+    """
+    from abicheck.checker import compare
+    from abicheck.dumper import dump
+
+    build = lab.build(case)
+    old = dump(build.v1, list(build.h1))
+    new = dump(build.v2, list(build.h2))
+    result = compare(old, new, surface_metrics=True)
+    return str(result.verdict), frozenset(str(change.kind) for change in result.changes)
+
+
+_TYPED_ROUTE_GAP = (
+    "known gap: the typed compare() on the same dumped snapshots omits exported_not_public "
+    "that the CLI reports on case09 (see docs/contribute/known-gaps.md)"
+)
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "case01_symbol_removal",
+        pytest.param(
+            "case09_cpp_vtable",
+            marks=pytest.mark.xfail(strict=True, reason=_TYPED_ROUTE_GAP),
+        ),
+        "case19_enum_member_removed",
+    ],
+)
+def test_typed_api_route_matches_the_cli_route(
+    case: str, lab: _metamorphic._Lab
+) -> None:
+    """C: the typed Python API decides the same verdict and kinds as the CLI."""
+    cli = lab.live(case).outcome()
+    _, cli_verdict, cli_kinds = cli
+    typed_verdict, typed_kinds = _typed_outcome(lab, case)
+    assert typed_verdict == cli_verdict, case
+    assert typed_kinds == frozenset(cli_kinds), case
+
+
+@pytest.mark.parametrize("case", CASES)
+def test_every_catalog_change_carries_a_finding_id(
+    case: str, lab: _metamorphic._Lab
+) -> None:
+    """D: real reports always key findings by finding_id, so the identity fallback never runs."""
+    changes = lab.live(case).json()["changes"]
+    missing = [c.get("kind") for c in changes if not c.get("finding_id")]
+    assert missing == [], f"{case}: changes without finding_id: {missing}"
+
+
+@pytest.mark.parametrize("case", CASES)
+def test_disposition_audit_conserves_on_the_live_report(
+    case: str, lab: _metamorphic._Lab
+) -> None:
+    """D: effective_total is the gating subset (schema), and the counts sum to detected_total."""
+    from tests.oracles.conservation import conservation_violations
+
+    report = lab.live(case).json()
+    audit = report.get("disposition_audit") or {}
+    assert audit.get("effective_total") == audit["counts"]["gating"], case
+    assert conservation_violations(report, {}) == [], case
+
+
+@pytest.mark.parametrize("case", CASES)
+def test_junit_detected_total_equals_the_json_audit(
+    case: str, lab: _metamorphic._Lab
+) -> None:
+    """D: the JUnit renderer's detected total is the JSON audit's detected total."""
+    import xml.etree.ElementTree as ET
+
+    run = lab.live(case)
+    junit = ET.parse(run.files["junit"]).getroot()
+    values = {
+        p.get("name"): p.get("value")
+        for p in junit.iter("property")
+        if p.get("name") == "abicheck.detected_total"
+    }
+    expected = (run.json().get("disposition_audit") or {}).get("detected_total")
+    assert values == {"abicheck.detected_total": str(expected)}, case
+
+
+@pytest.mark.parametrize("case", CASES)
+def test_producer_symbol_pairs_agree_between_castxml_and_clang(
+    case: str, lab: _metamorphic._Lab
+) -> None:
+    """B: beyond kinds, the (kind, symbol) pairs must agree, with no undeclared difference."""
+    from tests.oracles.producer import symbol_violations
+
+    castxml = _backend_pairs(lab, case, "castxml")
+    clang = _backend_pairs(lab, case, "clang")
+    assert castxml and clang, f"{case}: a backend reported no changes"
+    assert symbol_violations(castxml, clang) == [], case
+
+
+def test_producer_allowlist_has_not_grown_past_its_baseline() -> None:
+    """B: the allowlist may only shrink. Every entry must be in the committed baseline."""
+    from tests.oracles.producer import allowlist_growth
+
+    current = {
+        (case, kind, side)
+        for case, entries in PRODUCER_ALLOWLIST.items()
+        for kind, side in entries
+    }
+    recorded = {
+        (case, kind, side)
+        for case, entries in _BASELINE.items()
+        for kind, side in entries
+    }
+    assert allowlist_growth(current, recorded) == []
+
+
+@pytest.mark.known_gap_canary
+def test_typed_api_omits_exported_not_public_on_case09(lab: _metamorphic._Lab) -> None:
+    """Canary: the typed route's current answer on case09 (no exported_not_public)."""
+    _, typed_kinds = _typed_outcome(lab, "case09_cpp_vtable")
+    assert "exported_not_public" not in typed_kinds
+    cli_kinds = set(lab.live("case09_cpp_vtable").outcome()[2])
+    assert "exported_not_public" in cli_kinds

@@ -38,3 +38,20 @@ def allowlist_growth(
     """Allowlist entries that are not in the recorded baseline."""
     grown = set(allowlist) - set(baseline)
     return [f"allowlist grew: {kind} (only {side})" for kind, side in sorted(grown)]
+
+
+def symbol_violations(
+    castxml: Iterable[tuple[str, str]],
+    clang: Iterable[tuple[str, str]],
+) -> list[str]:
+    """``(kind, symbol)`` pairs that only one producer reports.
+
+    Kinds alone can agree while the symbols they attach to differ, so the
+    pairs are compared too. There is no allowlist here: a pair difference is
+    a finding until it is recorded as a known gap and its case is allowlisted.
+    """
+    cx, cl = set(castxml), set(clang)
+    return [
+        *(f"only castxml: {kind} on {symbol}" for kind, symbol in sorted(cx - cl)),
+        *(f"only clang: {kind} on {symbol}" for kind, symbol in sorted(cl - cx)),
+    ]
