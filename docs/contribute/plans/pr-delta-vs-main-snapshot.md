@@ -101,13 +101,13 @@ built rather than of the event payload, so the two cannot disagree.
 | Scenario | Merge-commit mode (default) | Head mode |
 |---|---|---|
 | Fresh PR off current main | base = main tip → snapshot normally present | merge-base = branch point → present while within retention |
-| **Old PR, branched months ago**, new push | base = *current* main tip (GitHub re-merges on every `synchronize`) → present. Age of the branch is irrelevant. | merge-base = old branch point → likely expired → `base_expired`: "rebase or merge main" |
+| **Old PR, branched months ago**, new push | base = *current* main tip (GitHub re-merges on every `synchronize`) → present. Age of the branch is irrelevant. | merge-base = old branch point → artifact past retention → `snapshot_missing` (an expired artifact is no longer listed; `base_expired` only if still listed as expired): "rebase or merge main" |
 | **Rebased** onto new main | base = current main tip → present | merge-base = the rebase target → present if that commit was snapshotted |
 | **Merged main into the branch** | base = current main tip → present | merge-base = the merged main commit → present if it was a snapshotted push tip |
 | Branched off a **non-tip** main commit (pushed together with others, or a commit skipped by CI) | unaffected | merge-base has no snapshot → `base_not_snapshotted` (see path-equivalence below) |
 | **Criss-cross** history (several merge-bases) | unaffected | `base_ambiguous` — refuse; ask for a rebase or merge of main |
-| Main moved after the PR's last push, **re-run** of the old job | re-run reuses the old merge commit → its base is an older tip; usually still present, else `base_expired`: "push or *Update branch* — a re-run reuses the old merge commit" | same as above |
-| PR opened seconds after a merge to main; main's snapshot job still running | `base_pending` → wait (bounded), then `base_pending_timeout` | same |
+| Main moved after the PR's last push, **re-run** of the old job | re-run reuses the old merge commit → its base is an older tip; usually still present, else `snapshot_missing`/`base_expired`: "push or *Update branch* — a re-run reuses the old merge commit" | same as above |
+| PR opened seconds after a merge to main; main's snapshot job still running | `base_pending` → wait up to `wait-timeout`, then still `base_pending` | same |
 | Main's snapshot job failed / cancelled for the base commit | `base_failed` | same |
 | Base commit skipped by the main workflow (`paths` filter, `[skip ci]`) | `base_not_snapshotted` | same |
 | Merge conflict | GitHub creates no merge commit and does not run `pull_request` workflows; nothing to do | head mode still runs; rules above apply |
