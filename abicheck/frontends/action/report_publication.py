@@ -638,15 +638,20 @@ __all__ = [
 ]
 
 
-def context_notes(data: Mapping[str, Any]) -> list[str]:
+def context_notes(
+    data: Mapping[str, Any], *, report_dir: Path | None = None
+) -> list[str]:
     """Delta notes for a report from a delta-baseline run.
 
     The fork-path publisher never trusts producer-written text: it rebuilds
     the notes from shape-validated structured fields only -- the analysis
     context's ``delta_*`` fields first, else the report's own
     ``delta_baseline`` block (report schema 7.3), so a stored report renders
-    the same notes without a context. A missing or invalid record yields no
-    notes (the plain release comparison).
+    the same notes without a context. The fork path stages a one-target
+    aggregate whose member report holds the block; with *report_dir* (the
+    aggregate's directory) that one member is read through the same
+    path-safe loader the comment's member rendering uses. A missing or
+    invalid record yields no notes (the plain release comparison).
     """
     from ...model.analysis_context import AnalysisContext, AnalysisContextError
     from .main_snapshot import delta_notes
@@ -669,9 +674,36 @@ def context_notes(data: Mapping[str, Any]) -> list[str]:
             )
         except ValueError:
             return []
-    return _block_notes(
-        data, merge_group=ctx is not None and ctx.producer_event == "merge_group"
-    )
+    merge_group = ctx is not None and ctx.producer_event == "merge_group"
+    if "delta_baseline" not in data:
+        member = _single_member_report(data, report_dir)
+        if member is not None:
+            return _block_notes(member, merge_group=merge_group)
+    return _block_notes(data, merge_group=merge_group)
+
+
+def _single_member_report(
+    data: Mapping[str, Any], report_dir: Path | None
+) -> Mapping[str, Any] | None:
+    """The one member report of a one-target aggregate, or ``None``.
+
+    Only a single target: one member's gate/delta record cannot describe a
+    multi-member document. Any refusal or read failure is ``None`` -- the
+    comment's own member rendering reports it as a limitation.
+    """
+    from ...report.pr_comment_members import MemberReportRefused, load_member_report
+
+    targets = data.get("targets")
+    if report_dir is None or not isinstance(targets, list) or len(targets) != 1:
+        return None
+    target = targets[0]
+    raw = target.get("report_path") if isinstance(target, Mapping) else None
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        return load_member_report(report_dir, raw)
+    except MemberReportRefused:
+        return None
 
 
 def _block_notes(data: Mapping[str, Any], *, merge_group: bool) -> list[str]:

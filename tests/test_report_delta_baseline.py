@@ -527,3 +527,60 @@ def test_an_empty_file_reference_is_a_usage_error(tmp_path: Path, _compare) -> N
     )
     assert code == 64, output
     assert "report.delta_baseline: no file named" in output
+
+
+def test_the_fork_path_one_target_aggregate_renders_its_member_s_notes(
+    tmp_path: Path, _compare, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The fork path stages a one-target aggregate (pr-report-delivery.sh):
+    the record lives in the member report the aggregate names, and the
+    publisher reads it through the path-safe member loader."""
+    old, new = _inputs(tmp_path / "in", "pair")
+    stage = tmp_path / "stage"
+    stage.mkdir()
+    rec = tmp_path / "rec.json"
+    rec.write_text(
+        json.dumps(
+            {
+                "comparison_role": "delta",
+                "outcome": "resolved",
+                "base_sha": _SHA,
+                "branch": "main",
+                "gate_verdict": "BREAKING",
+            }
+        ),
+        encoding="utf-8",
+    )
+    code, output = _compare(
+        [
+            str(old),
+            str(new),
+            "--set",
+            f"report.delta_baseline=@{rec}",
+            "-o",
+            f"json={stage / 'r.json'}",
+        ],
+        tmp_path,
+    )
+    assert code == 4, output
+    monkeypatch.chdir(stage)
+    result = CliRunner().invoke(
+        main, ["aggregate", ".", "--discovered-only", "-o", "json=aggregate.json"]
+    )
+    assert result.exit_code in (0, 1, 2, 4), result.output
+    aggregate = json.loads((stage / "aggregate.json").read_text(encoding="utf-8"))
+    assert "delta_baseline" not in aggregate
+    expected = delta_notes(
+        "resolved", base_sha=_SHA, branch="main", gate_verdict="BREAKING"
+    )
+    assert context_notes(aggregate, report_dir=stage) == expected
+    # Without the aggregate's directory no member is read: no notes, never a guess.
+    assert context_notes(aggregate) == []
+    # A second target makes one member's record unable to describe the document.
+    two = aggregate | {"targets": aggregate["targets"] * 2}
+    assert context_notes(two, report_dir=stage) == []
+    # A member path escaping the directory is refused by the loader, not followed.
+    escaped = aggregate | {
+        "targets": [aggregate["targets"][0] | {"report_path": "../rec.json"}]
+    }
+    assert context_notes(escaped, report_dir=stage) == []

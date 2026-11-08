@@ -191,7 +191,9 @@ into a usage error.
 
 A stored report renders its own notes: the fork publisher reads the
 analysis context's `delta_*` fields first and, without them, the report's
-`delta_baseline` block -- a `delta` report is labelled as the delta with the
+`delta_baseline` block (for the one-target aggregate the fork path stages, the
+block of the one member report it names, read through the same path-safe
+loader as the comment's member rendering) -- a `delta` report is labelled as the delta with the
 recorded gate verdict, an unresolved `gate` report with its outcome. A
 resolved `gate` report rendered on its own carries no note, since it does not
 record whether a delta comparison followed.
