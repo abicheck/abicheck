@@ -163,6 +163,9 @@ class AnalysisContext:
     delta_outcome: str = ""
     delta_base_sha: str = ""
     gate_verdict: str = ""
+    #: How the snapshot's library was paired with the PR's
+    #: (``abicheck.workflows.delta_operand.MatchRule``), when the delta resolved.
+    delta_operand_match: str = ""
 
     _PATTERNS = {
         "tested_sha": _FULL_SHA,
@@ -180,10 +183,16 @@ class AnalysisContext:
         "delta_outcome": _IDENTIFIER,
         "delta_base_sha": _FULL_SHA,
         "gate_verdict": _VERDICT,
+        "delta_operand_match": _IDENTIFIER,
     }
 
     #: Written only when non-empty (see the fields' comment).
-    _OPTIONAL_IN_DOCUMENT = ("delta_outcome", "delta_base_sha", "gate_verdict")
+    _OPTIONAL_IN_DOCUMENT = (
+        "delta_outcome",
+        "delta_base_sha",
+        "gate_verdict",
+        "delta_operand_match",
+    )
 
     @classmethod
     def field_names(cls) -> tuple[str, ...]:

@@ -578,11 +578,12 @@ class TestTheAggregateActionRecordsIt:
         from abicheck.frontends.action.cli_provenance import _CONTEXT_ENV
 
         # delta-baseline is single-library only, so the aggregate Action never
-        # has a delta outcome; the main Action records those three itself.
+        # has a delta outcome; the main Action records those itself.
         main_only = {
             "ABICHECK_CTX_DELTA_OUTCOME",
             "ABICHECK_CTX_DELTA_BASE_SHA",
             "ABICHECK_CTX_GATE_VERDICT",
+            "ABICHECK_CTX_DELTA_OPERAND_MATCH",
         }
         assert set(_CONTEXT_ENV.values()) - main_only == {
             key for key in step["env"] if key.startswith("ABICHECK_CTX_")

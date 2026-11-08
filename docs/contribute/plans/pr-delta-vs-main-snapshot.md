@@ -13,9 +13,11 @@ generated: false
 `actions/fetch-main-snapshot`, `abicheck/frontends/action/main_snapshot.py`);
 piece 3 landed (main Action `delta-baseline`, `delta-on-missing-base:
 report|fail`, the comment's two notes via `pr_comment --note`, and on the
-artifact (fork) path via `analysis_context`); open: piece 4's
-report-schema field, `on-missing-base:
-build`, path equivalence, cache storage · **Effort:** L
+artifact (fork) path via `analysis_context`); operand identity landed
+(§ Operand identity: `operand.json`, `delta-operand-map`, `operand_*`
+outcomes); open: piece 4's report-schema field, `on-missing-base: build`,
+the path-equivalent *ancestor* rule (`base-equivalent-paths`), cache storage
+· **Effort:** L
 
 ## Problem
 
@@ -131,6 +133,45 @@ report records the substitution (`base_commit`, `snapshot_commit`,
 claim, not something abicheck verifies; with the input unset there is no
 substitution at all. The provenance check (§ Storage) then applies to the
 ancestor's SHA.
+
+### Operand identity (landed)
+
+Base selection picks the right *commit*; the snapshot must also be the right
+*library*. The delta rerun substitutes the snapshot for the gate's old
+operand, so a snapshot of a different library would report its whole surface
+as removed — and a library whose path or name changed between the snapshot
+and the PR (renamed output, another build directory, a SONAME bump) must
+still get its delta. The decision lives in `abicheck/workflows/delta_operand.py`
+(pure over two identities, unit-tested over an exhaustive small domain);
+`action/run.sh` asks it (`delta-operand`) before the rerun.
+
+- **What the snapshot records.** `main-snapshot` uploads `operand.json`
+  (`schema`, `path` as given, `profile`) beside `snapshot.json`. File name
+  and loader name (ELF `DT_SONAME`, Mach-O install-name base name) come
+  from the snapshot itself, so artifacts written before the record existed
+  still pair by name; PE has no loader name beyond the file name.
+- **How the PR side matches.** Equal loader names; else loader names equal
+  up to version (`binary_utils._canonical_library_key`, the release
+  member-pairing key); else, with a loader name missing on a side, equal
+  path or file name, then file names equal up to version — unless the one
+  loader name present names another library than the other side's file.
+  Unrelated loader names never match automatically.
+- **Explicit mapping.** `delta-operand-map` (`SNAPSHOT=PR` lines, either side
+  a path, file name or loader name) is the project's claim and is decisive:
+  once given, an uncovered or contradicting pair is refused rather than
+  matched automatically, and differing targets declared for one snapshot
+  library are ambiguous rather than resolved by line order.
+- **Outcomes.** `operand_unmatched` (nothing links them), `operand_ambiguous`
+  (same file name/path but disagreeing loader evidence, or several map
+  targets), `operand_unreadable`, `operand_map_invalid` (the log names the
+  line). Each is
+  "Delta unavailable" with the gate's report shown — never a removal — and
+  counts as unavailable for `on-missing-base: fail`. A non-trivial match
+  (`declared`, `*_version`) adds a comment note; the rule travels to the fork
+  publisher as the structured `delta_operand_match` context field.
+- **Scope.** One library per snapshot, as the rest of piece 3. A
+  multi-library baseline-set will pair members by the same rule, with the
+  map covering renames; that waits on piece 1's `baseline` input.
 
 ### Evidence parity
 
@@ -305,6 +346,11 @@ discussion is the manual form of the same thing.
   (artifact list, run list with pending/failed/success, wrong workflow, wrong
   event, wrong branch) → exact outcome + exact rendered line; no outcome
   renders "no changes".
+- **Operand identity (landed, `tests/test_delta_operand_identity.py`):**
+  every rule row; symmetry and "unrelated loader names never match" over an
+  exhaustive small identity domain against a hand-written version-stem
+  oracle; the map's decisiveness; `run.sh` end to end — an unmatched snapshot
+  is never passed to `compare`.
 - **Path-equivalence:** substitution only when the diff is empty under the
   declared paths; refused otherwise; recorded in the report.
 - **Gate isolation:** with `on-missing-base: report`/`build`, for every delta
