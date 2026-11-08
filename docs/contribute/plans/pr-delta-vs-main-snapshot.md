@@ -9,7 +9,10 @@ generated: false
 
 **Owner ADRs:** [ADR-047](../adr/047-github-actions-integration-model.md) (the
 `accepted-main` channel), [ADR-065](../adr/065-comparison-scope-selection-and-completeness.md)
-(absent is not removed) · **Status:** proposed, no code yet · **Effort:** L
+(absent is not removed) · **Status:** pieces 1–2 landed (`actions/main-snapshot`,
+`actions/fetch-main-snapshot`, `abicheck/frontends/action/main_snapshot.py`);
+pieces 3–4 (main Action `delta-baseline`, report rendering), path equivalence
+and `on-missing-base` open · **Effort:** L
 
 ## Problem
 
@@ -23,8 +26,9 @@ with what we shipped?"). What is missing is a second, cheap comparison that
 answers "what did this PR change?" — the `accepted-main` question of
 [baseline-management.md](../../use/baseline-management.md#two-kinds-of-baseline-release-contract-vs-accepted-main).
 
-The producer half already exists: `update-main-baseline.yml` writes an
-`accepted-main` snapshot to the Actions cache on every default-branch push.
+A producer half already exists: `update-main-baseline.yml` (a reusable
+`workflow_call` workflow) writes an `accepted-main` snapshot to the Actions
+cache when a calling workflow runs it on a default-branch push.
 Nothing consumes it (the "Known gap" sections of
 [publish-baseline.md](../../reference/publish-baseline.md) and
 [resolve-baseline.md](../../reference/resolve-baseline.md)), and restoring by
@@ -40,16 +44,21 @@ to the repository.
 1. Default integration is ≤ ~15 lines of user YAML per workflow; everything
    else lives in Actions / reusable workflows owned by this repository.
 2. The comparison base is chosen by an exact, documented rule (§ Base
-   selection). abicheck never substitutes a different commit's snapshot and
-   never substitutes the release baseline for the delta.
-3. Every way the base snapshot can be unavailable is a **named outcome**,
+   selection). abicheck never substitutes a different commit's snapshot —
+   the one exception is the opt-in `base-equivalent-paths` rule, which is
+   recorded in the report — and never substitutes the release baseline for
+   the delta.
+3. Both sides of the delta are captured at the same evidence depth (§ Evidence
+   parity); a mismatch is reported, never a silently narrower delta.
+4. Every way the base snapshot can be unavailable is a **named outcome**,
    rendered in the comment/summary with the action the user should take.
    No outcome renders as "no changes".
-4. The gate (release comparison) is unaffected by any delta outcome; the
-   delta comparison never changes the step's exit code.
-5. Works for fork PRs through the turnkey `workflow_run` publisher
+5. The gate (release comparison) is unaffected by any delta outcome; the
+   delta comparison changes the step's exit code only under the explicit
+   `on-missing-base: fail` opt-in (§ Outcomes).
+6. Works for fork PRs through the turnkey `workflow_run` publisher
    (`report-pr.yml`, delivered separately — see § Dependencies).
-6. Storage: workflow artifacts by default, Actions cache as an option; both
+7. Storage: workflow artifacts by default, Actions cache as an option; both
    addressed by exact commit SHA.
 
 ## Design
@@ -75,8 +84,13 @@ What the PR job builds determines the base commit:
 |---|---|---|
 | **The PR merge commit** (`pull_request` default: `$GITHUB_SHA` = `refs/pull/N/merge`) — **default** | its **first parent** (`git rev-parse HEAD^1`) | The merge commit is *base-branch tip at event time* + the PR's changes. Its first parent is that tip, whatever the branch history looks like. |
 | **The PR head** (`ref: head.sha`) | `git merge-base <default-branch> HEAD` | The head contains exactly the PR's commits on top of its merge-base. |
-| `merge_group` (merge queue) | `github.event.merge_group.base_sha` | The queue entry is built on that base. |
+| `merge_group` (merge queue) | `github.event.merge_group.base_sha` | The queue entry is built on that base. Its delta can span several PRs, so it is headed "Changes in this merge-queue entry", not "this PR". |
 | `push` to the default branch | `HEAD^1` (optional; "what did this merge change") | Same rule as the merge commit. |
+
+The checkout must contain that base: `fetch-depth: 2` for the merge commit
+(its first parent), `fetch-depth: 0` in head mode (the merge-base). With a
+default depth-1 checkout the parent is not local, and the outcome is
+`base_unknown` with that instruction — never a guess.
 
 The first parent of the merge commit is preferred over
 `github.event.pull_request.base.sha`: it is a property of the commit actually
@@ -112,7 +126,18 @@ nearest snapshotted commit **only if** `git diff --quiet <ancestor> <base> --
 report records the substitution (`base_commit`, `snapshot_commit`,
 `equivalence: paths`) and the comment shows it. The path list is a project
 claim, not something abicheck verifies; with the input unset there is no
-substitution at all.
+substitution at all. The provenance check (§ Storage) then applies to the
+ancestor's SHA.
+
+### Evidence parity
+
+A snapshot-to-snapshot delta is only as deep as its shallower side: a header
+snapshot compared against a binary-only PR side reports evidence differences
+as changes, and the reverse misses type-level changes. `main-snapshot`
+therefore takes the same evidence inputs as the PR side (its `dump-args`
+document this), and piece 3 compares the snapshot's recorded evidence depth
+with the PR side's. A mismatch is reported in the comment header as a
+partial delta naming both depths; it never silently narrows the delta.
 
 ### Outcomes
 
@@ -121,14 +146,18 @@ substitution at all.
 
 | Outcome | Delta comparison runs? | Comment / summary says |
 |---|---|---|
-| `resolved` | yes | the delta, headed "Changes in this PR (vs `main@<sha7>`)" |
+| `resolved` | yes | the delta, headed "Changes in this PR (vs `main@<sha7>`)" ("this merge-queue entry" for `merge_group`) |
+| `base_unknown` | no | "the base commit could not be determined — check out with `fetch-depth: 2` (`0` in head mode)" |
 | `resolved_equivalent` | yes | the delta + "base `<sha7>` not snapshotted; used `<sha7'>`, identical under declared paths" |
-| `base_pending_timeout` | no | "main snapshot for `<sha7>` still being built — re-run when it finishes" |
+| `base_pending` (after `wait-timeout`) | no | "main snapshot for `<sha7>` still being built — re-run when it finishes" |
 | `base_failed` | no | "main snapshot job for `<sha7>` failed (link)" |
 | `base_not_snapshotted` | no | "main workflow did not snapshot `<sha7>` (skipped / filtered)" |
 | `base_expired` | no | "snapshot for `<sha7>` expired — rebase onto or merge `main`" (head mode) / "push or *Update branch*" (re-run) |
 | `base_ambiguous` | no | "several merge-bases — rebase onto or merge `main`" |
 | `untrusted_source` | no | "a snapshot exists but did not come from the configured main workflow" |
+| `snapshot_conflict` | no | "several eligible snapshots for `<sha7>` differ in content; none was picked" |
+| `lookup_failed` | no | "the snapshot lookup failed (API error)" — an operational error, never "absent" |
+| `cache_miss` (cache storage) | no | "no cache entry for `<sha7>` — retry, or use `on-missing-base: build`" (the cache cannot tell pending from evicted) |
 
 On any non-`resolved*` outcome the user picks the fallback with
 `on-missing-base`:
@@ -136,8 +165,13 @@ On any non-`resolved*` outcome the user picks the fallback with
 - `report` (default) — the line above; the release gate result still shows.
 - `build` — the PR job builds the base commit itself (checkout `<base>` →
   user's build command → `dump`). Exact, but costs a second build; needs a
-  `base-build-command` input, so it is opt-in.
-- `fail` — fail the delta step (for projects that require the delta).
+  `base-build-command` input, so it is opt-in. Applies only to outcomes that
+  selected a base commit — never to `base_unknown` or `base_ambiguous`, which
+  have no commit to build.
+- `fail` — the one explicit exception to gate isolation: the step fails with
+  the delta outcome as its reason, and the `delta-outcome` output says so,
+  so a required check can tell "gate failed" from "delta required but
+  unavailable". Without this opt-in no delta outcome changes the exit code.
 
 The release baseline is **never** used as a delta fallback.
 
@@ -147,7 +181,8 @@ The release baseline is **never** used as a delta fallback.
 |---|---|---|
 | Name / key | `abicheck-main-<full-sha>` (+ `-<profile>` for multi-profile) | `<prefix>-<profile>-<full-sha>` (existing `accepted_main_cache_key`) |
 | Lookup | `GET /repos/{o}/{r}/actions/artifacts?name=…` → exact name | `actions/cache/restore` with the **exact** key — never `restore-keys` |
-| Provenance check | the artifact's `workflow_run`: must be the configured workflow file, event `push` (or `workflow_dispatch`/`schedule`), branch = default, conclusion success — reuse `verify-baseline-source` rules | none available beyond "written from the default branch's scope"; documented as weaker |
+| Provenance check | the uploading run must be a run of the configured workflow in this repository, event `push`/`workflow_dispatch`/`schedule`, on the default branch, conclusion success, and its `head_sha` must equal the requested snapshot SHA (the ancestor's under path equivalence) | none available beyond "written from the default branch's scope"; documented as weaker |
+| Duplicates | re-runs can upload the same name twice: every eligible candidate must carry the same content `digest`, otherwise `snapshot_conflict` — never a silent pick | keys are immutable; no duplicates |
 | Lifetime | `retention-days` (default 14, max 90 per repo setting) | evicted after 7 days unused and by the 10 GiB LRU, which can evict unrelated caches |
 | Pending detection | list runs of the main workflow with `head_sha == base` and `status != completed` | not possible → only `not found` |
 | Fork PRs | needs `actions: read` on the read-only fork token (to verify on a public and a private repo during implementation) | default-branch caches are readable by PRs, forks included |
@@ -189,6 +224,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with: { fetch-depth: 2 }          # the merge commit's first parent is the base
       - run: ./build.sh
       - uses: abicheck/abicheck@v1
         with:
@@ -204,19 +240,22 @@ work, which publishes the delta report; nothing else changes.
 
 ### Pieces
 
-1. **`actions/main-snapshot`** (producer). `dump` (or `baseline` for a
+1. **`actions/main-snapshot`** (producer, **landed**). `dump` (or `baseline` for a
    multi-library set) → upload `abicheck-main-<sha>` with `retention-days`.
    Refuses to run on `pull_request`/`pull_request_target` (ADR-047 §12, same
    rule as `update-main-baseline.yml`). Optional `storage: cache` writes the
    existing `accepted-main` cache key instead; `update-main-baseline.yml`
    becomes a thin caller of this Action rather than a second implementation.
-2. **`actions/fetch-main-snapshot`** (consumer). Inputs: `mode`
+2. **`actions/fetch-main-snapshot`** (consumer, **landed**). Inputs: `mode`
    (`merge-commit`/`head`/`auto` from the event), `workflow`, `storage`,
    `wait-timeout`, `base-equivalent-paths`. Computes the base commit,
    resolves and verifies the snapshot, outputs `outcome`, `base-sha`,
    `snapshot-sha`, `snapshot-path`. Read-only API calls only. Logic in a
    `workflows/`-owned module (base selection + outcome typing are pure and
-   unit-testable without credentials); the Action is a thin shell.
+   unit-testable without credentials); the Action is a thin shell. The
+   decision module landed in `abicheck/frontends/action/main_snapshot.py`,
+   beside `baseline_source.py`, because it reuses that package's
+   `SourceRun`/`verify_source_run` provenance checks.
 3. **Main Action inputs** `delta-baseline: main|<path>|''` and
    `on-missing-base`. When set, the Action runs the existing compare twice:
    the gate as today, and the delta compare with `pr-comment` routed to the
@@ -262,8 +301,10 @@ discussion is the manual form of the same thing.
   renders "no changes".
 - **Path-equivalence:** substitution only when the diff is empty under the
   declared paths; refused otherwise; recorded in the report.
-- **Gate isolation:** for every delta outcome the step exit code equals the
-  gate-only exit code.
+- **Gate isolation:** with `on-missing-base: report`/`build`, for every delta
+  outcome the step exit code equals the gate-only exit code; with a failing
+  gate and a resolved snapshot the delta still runs and its findings appear
+  in the comment. `on-missing-base: fail` is tested as its own case.
 - **E2E** (`test-action.yml`-style): main push writes the artifact; a PR job
   in the same repo resolves it; a re-run after main moves reports
   `resolved` against the old tip.

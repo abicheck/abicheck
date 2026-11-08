@@ -1,0 +1,97 @@
+name: 'abicheck main-snapshot'
+description: >-
+  Capture one ABI snapshot of a default-branch commit and upload it as the
+  workflow artifact `abicheck-main-<full sha>[-<profile>]`, the exact name
+  `actions/fetch-main-snapshot` looks up when a pull request needs its base.
+  Snapshots are per-commit and immutable; the delta a PR shows is computed
+  from them, never stored. Refuses to run on pull_request/pull_request_target
+  (ADR-047 section 12): a pull request must never write what other pull
+  requests are measured against. Plan:
+  docs/contribute/plans/pr-delta-vs-main-snapshot.md.
+
+branding:
+  icon: 'camera'
+  color: 'blue'
+
+inputs:
+  library:
+    description: >
+      Built library to dump (as `abicheck dump LIBRARY`). Leave empty when
+      `snapshot` names an already-dumped file.
+    required: false
+    default: ''
+  header:
+    description: 'Public header file or directory; newline-separated for several.'
+    required: false
+    default: ''
+  dump-args:
+    description: >
+      Extra `abicheck dump` arguments, one per line (for example `-I include`).
+      Use the same evidence inputs the pull-request side uses: a delta between
+      snapshots captured at different depths reports evidence differences as
+      changes.
+    required: false
+    default: ''
+  snapshot:
+    description: 'Path of an already-produced snapshot to upload instead of dumping.'
+    required: false
+    default: ''
+  profile:
+    description: 'Optional profile suffix for multi-configuration projects ([A-Za-z0-9._-]).'
+    required: false
+    default: ''
+  retention-days:
+    description: 'Artifact retention. Pull requests older than this fall back to `base_expired`.'
+    required: false
+    default: '14'
+  python-version:
+    description: 'Python used to run abicheck.'
+    required: false
+    default: '3.13'
+
+outputs:
+  artifact-name:
+    description: 'The uploaded artifact name.'
+    value: ${{ steps.dump.outputs.artifact-name }}
+  snapshot-path:
+    description: 'The snapshot file that was uploaded.'
+    value: ${{ steps.dump.outputs.snapshot-path }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Refuse pull-request events
+      if: github.event_name == 'pull_request' || github.event_name == 'pull_request_target'
+      shell: bash
+      run: |
+        echo "::error::main-snapshot writes the baseline other pull requests are measured against; it must not run on ${{ github.event_name }}."
+        exit 1
+
+    - name: Set up Python
+      uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install abicheck
+      shell: bash
+      run: pip install "${{ github.action_path }}/../.."
+
+    - name: Dump snapshot
+      id: dump
+      shell: bash
+      env:
+        INPUT_LIBRARY: ${{ inputs.library }}
+        INPUT_HEADER: ${{ inputs.header }}
+        INPUT_DUMP_ARGS: ${{ inputs.dump-args }}
+        INPUT_SNAPSHOT: ${{ inputs.snapshot }}
+        INPUT_PROFILE: ${{ inputs.profile }}
+        SNAPSHOT_SHA: ${{ github.sha }}
+      run: bash "${{ github.action_path }}/run.sh"
+
+    - name: Upload snapshot
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+      with:
+        name: ${{ steps.dump.outputs.artifact-name }}
+        path: ${{ steps.dump.outputs.snapshot-path }}
+        retention-days: ${{ inputs.retention-days }}
+        if-no-files-found: error

@@ -65,6 +65,12 @@ out_of_scope:
   - pattern: actions/verify-baseline-source:*
     reason: Baseline provenance verification, no CLI counterpart.
     until: permanent
+  - pattern: actions/main-snapshot:*
+    reason: Default-branch snapshot upload for PR deltas, no CLI counterpart.
+    until: permanent
+  - pattern: actions/fetch-main-snapshot:*
+    reason: Base-commit snapshot lookup for PR deltas, no CLI counterpart.
+    until: permanent
   - pattern: actions/report:*
     reason: Report publication (ADR-073), no CLI counterpart.
     until: permanent
