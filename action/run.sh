@@ -2430,6 +2430,9 @@ add_delta_baseline_flag() {
   # gate into a usage error, so that gate report goes without the block.
   local old=""
   [[ -n "${OLD_OPERAND_INDEX:-}" ]] && old="${CMD[$OLD_OPERAND_INDEX]:-}"
+  # Anchored here: the probe runs from $_PY_SAFE_DIR, where a relative
+  # operand would name a different (usually missing) file.
+  [[ -n "$old" && "$old" != /* ]] && old="$PWD/$old"
   if [[ -n "$old" && -f "$old" ]] && (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
 import sys
 from pathlib import Path

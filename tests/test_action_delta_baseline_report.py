@@ -145,8 +145,13 @@ def test_a_user_set_record_for_the_gate_wins_but_never_reaches_the_delta(
     assert [r.comparison_role for r in _records(delta)] == ["delta"]
 
 
-def test_a_stored_bundle_facts_gate_gets_no_record(tmp_path: Path) -> None:
-    """That route refuses the key; recording it would fail the gate."""
+@pytest.mark.parametrize("spelling", ["absolute", "relative"])
+def test_a_stored_bundle_facts_gate_gets_no_record(
+    tmp_path: Path, spelling: str
+) -> None:
+    """That route refuses the key; recording it would fail the gate. A
+    relative operand resolves against the step's working directory, not the
+    interpreter's safe directory the probe runs from."""
     from abicheck.serialization import save_bundle_facts
     from abicheck.workflows.bundle_facts_capture import capture_bundle_facts
 
@@ -158,7 +163,9 @@ def test_a_stored_bundle_facts_gate_gets_no_record(tmp_path: Path) -> None:
         "artifact",
         "resolved",
         snapshot=snap,
-        extra={"INPUT_OLD_LIBRARY": str(facts)},
+        extra={
+            "INPUT_OLD_LIBRARY": facts.name if spelling == "relative" else str(facts)
+        },
     )
     gates = [c for c in calls if snap not in c]
     assert gates
