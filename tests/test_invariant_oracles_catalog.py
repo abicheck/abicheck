@@ -112,8 +112,10 @@ def test_producer_invariant_holds_between_castxml_and_clang(
     The comparison must be non-vacuous: each backend has to report at least
     one change, or two empty sets would agree trivially.
     """
-    if shutil.which("clang") is None:
-        pytest.skip("clang is required for the clang header backend")
+    if shutil.which("clang++") is None:
+        pytest.skip(
+            "clang++ is required: dump() defaults to the c++ compiler, which selects clang++"
+        )
     castxml = _backend_kinds(lab, case, "castxml")
     clang = _backend_kinds(lab, case, "clang")
     assert castxml and clang, f"{case}: a backend reported no changes"
