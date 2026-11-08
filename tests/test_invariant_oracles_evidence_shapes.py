@@ -123,10 +123,18 @@ def _gcc(tmp: Path, name: str, src: str, *, strip: bool) -> Path:
 
 
 def _compare(
-    tmp: Path, tag: str, *args: str, env: dict[str, str] | None = None
+    tmp: Path,
+    tag: str,
+    *args: str,
+    env: dict[str, str] | None = None,
+    frontend: str | None = None,
 ) -> _Run:
     out = tmp / tag
     out.mkdir()
+    if frontend is not None:
+        # The nearest config wins discovery, so this pins the header backend
+        # even when the scratch directory sits inside a checkout with its own.
+        (out / ".abicheck.yml").write_text(f"compile:\n  frontend: {frontend}\n")
     files = {fmt: out / f"{fmt}.{ext}" for fmt, ext in _FILE_FORMATS.items()}
     outputs = [x for fmt, path in files.items() for x in ("-o", f"{fmt}={path}")]
     proc = subprocess.run(
@@ -135,8 +143,8 @@ def _compare(
         text=True,
         timeout=600,
         env=env or abicheck_env(),
-        # A scratch directory, so no .abicheck.yml (e.g. compile.frontend:
-        # clang) from the invoking checkout changes which extractor runs.
+        # A scratch directory, so a checkout's .abicheck.yml is not the
+        # nearest config; ``frontend`` pins the backend where it matters.
         cwd=out,
     )
     return _Run(proc.returncode, proc.stdout, proc.stderr, files)
@@ -194,6 +202,7 @@ def runs(tmp_path_factory: pytest.TempPathFactory) -> dict[str, _Run]:
             "-H",
             f"new={tmp / 'v2.h'}",
             env=_without_castxml(),
+            frontend="castxml",
         ),
     }
 
