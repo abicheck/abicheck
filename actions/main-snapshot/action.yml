@@ -5,7 +5,7 @@ description: >-
   `actions/fetch-main-snapshot` looks up when a pull request needs its base.
   Snapshots are per-commit and immutable; the delta a PR shows is computed
   from them, never stored. Refuses to run on pull_request/pull_request_target
-  (ADR-047 section 12): a pull request must never write what other pull
+  : a pull request must never write what other pull
   requests are measured against. Plan:
   docs/contribute/plans/pr-delta-vs-main-snapshot.md.
 
