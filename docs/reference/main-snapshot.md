@@ -178,8 +178,10 @@ removed. The rule (`abicheck/workflows/delta_operand.py`):
 | No loader name on a side (PE, or a snapshot without one): same path or file name | delta runs | `file_name` |
 | …file names differ only by version | delta runs, with a note | `file_name_version` |
 | Unrelated SONAMEs, same file name or path | `operand_ambiguous` — not compared | — |
+| Only one side has a SONAME, and it names a different library than the other side's file | `operand_ambiguous` — not compared | — |
 | Nothing links them | `operand_unmatched` — not compared | — |
 | Either side could not be read | `operand_unreadable` — not compared | — |
+| `delta-operand-map` is malformed | `operand_map_invalid` — not compared; the job log names the line | — |
 
 When the automatic rule cannot see the pairing (a PE DLL renamed, a SONAME
 renamed outright), declare it with `delta-operand-map`, one
@@ -192,7 +194,9 @@ renamed outright), declare it with `delta-operand-map`, one
 
 A map, once given, is decisive: if no entry names the snapshot's library, or
 the entry names a different PR library, the outcome is `operand_unmatched`
-rather than an automatic match. Every refusal keeps the gate's report in the
+rather than an automatic match; entries declaring different targets for the
+same snapshot library are `operand_ambiguous` (line order never decides).
+Every refusal's reason is also written to the job log as a warning. Every refusal keeps the gate's report in the
 comment under a "Delta unavailable" note; with `delta-on-missing-base: fail`
 an `operand_*` refusal fails the separate "Require the delta base snapshot"
 step like a missing snapshot does.

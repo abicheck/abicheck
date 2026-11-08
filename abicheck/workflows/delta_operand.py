@@ -71,6 +71,8 @@ class OperandMatchOutcome(enum.StrEnum):
     UNMATCHED = "operand_unmatched"
     AMBIGUOUS = "operand_ambiguous"
     UNREADABLE = "operand_unreadable"
+    #: ``delta-operand-map`` itself is malformed.
+    MAP_INVALID = "operand_map_invalid"
 
 
 class MatchRule(enum.StrEnum):
@@ -175,7 +177,8 @@ def match_delta_operand(
     """Decide whether *snapshot* and *pr* describe the same library.
 
     An explicit *operand_map* is the project's own claim and is decisive:
-    when it is given it must name the snapshot's library, and the entry must
+    when it is given exactly one target must be declared for the snapshot's
+    library (several differing ones are ``operand_ambiguous``), and it must
     name the PR's library -- a map that does not cover this pair is reported,
     never overridden by the automatic rules. Without a map:
 
@@ -187,27 +190,37 @@ def match_delta_operand(
        is ``operand_ambiguous``;
     4. with a loader name missing on a side (PE, or a snapshot without one),
        the same path or file name matches, then a file name that differs
-       only by version;
+       only by version -- unless the one loader name present names a
+       different library than the other side's file (``operand_ambiguous``);
     5. anything else is ``operand_unmatched``.
     """
     pair = f"snapshot `{snapshot.label()}` vs this PR's `{pr.label()}`"
     if operand_map:
-        for old, new in operand_map:
-            if not _mentions(snapshot, old):
-                continue
-            if _mentions(pr, new):
-                return OperandMatch(
-                    OperandMatchOutcome.MATCHED,
-                    MatchRule.DECLARED,
-                    f"{pair}: paired by delta-operand-map ({old}={new})",
-                )
+        named = [(old, new) for old, new in operand_map if _mentions(snapshot, old)]
+        if not named:
             return OperandMatch(
                 OperandMatchOutcome.UNMATCHED,
-                message=f"{pair}: delta-operand-map pairs `{old}` with `{new}`, not with this PR's library",
+                message=f"{pair}: no delta-operand-map entry names the snapshot's library",
+            )
+        if len({_norm_path(new) for _old, new in named}) > 1:
+            # Several entries for one snapshot library: line order must not
+            # decide which one the project meant.
+            return OperandMatch(
+                OperandMatchOutcome.AMBIGUOUS,
+                message=f"{pair}: several delta-operand-map entries name the snapshot's library ("
+                + ", ".join(f"{o}={n}" for o, n in named)
+                + ")",
+            )
+        old, new = named[0]
+        if _mentions(pr, new):
+            return OperandMatch(
+                OperandMatchOutcome.MATCHED,
+                MatchRule.DECLARED,
+                f"{pair}: paired by delta-operand-map ({old}={new})",
             )
         return OperandMatch(
             OperandMatchOutcome.UNMATCHED,
-            message=f"{pair}: no delta-operand-map entry names the snapshot's library",
+            message=f"{pair}: delta-operand-map pairs `{old}` with `{new}`, not with this PR's library",
         )
 
     same_place = bool(
@@ -236,17 +249,32 @@ def match_delta_operand(
             OperandMatchOutcome.UNMATCHED, message=f"{pair}: unrelated libraries"
         )
 
+    # Exactly one side has a loader name: it must not point at a different
+    # library than the other side's file name, or a file-name match would
+    # pair two libraries the only loader evidence says are unrelated.
+    named_side, bare_side = (snapshot, pr) if snapshot.loader_name else (pr, snapshot)
+    contradicted = bool(
+        named_side.loader_name
+        and bare_side.file_name
+        and _version_key(named_side.loader_name) != _version_key(bare_side.file_name)
+    )
+    file_version_match = bool(
+        snapshot.file_name
+        and pr.file_name
+        and _version_key(snapshot.file_name) == _version_key(pr.file_name)
+    )
+    if contradicted and (same_place or file_version_match):
+        return OperandMatch(
+            OperandMatchOutcome.AMBIGUOUS,
+            message=f"{pair}: same file name, but the only loader name ({named_side.loader_name}) names another library",
+        )
     if same_place:
         return OperandMatch(
             OperandMatchOutcome.MATCHED,
             MatchRule.FILE_NAME,
             f"{pair}: same path or file name",
         )
-    if (
-        snapshot.file_name
-        and pr.file_name
-        and _version_key(snapshot.file_name) == _version_key(pr.file_name)
-    ):
+    if file_version_match:
         return OperandMatch(
             OperandMatchOutcome.MATCHED,
             MatchRule.FILE_NAME_VERSION,

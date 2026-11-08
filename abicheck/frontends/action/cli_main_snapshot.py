@@ -242,8 +242,8 @@ def delta_operand_cmd(
 
     Prints ``outcome=``, ``rule=`` and ``message=`` lines.
 
-    Exit 0 when matched, 3 (refused) for every named non-match; a malformed
-    ``--map`` is a usage error.
+    Exit 0 when matched, 3 (refused) for every named non-match, a malformed
+    ``--map`` (``operand_map_invalid``) included.
     """
     from ...workflows.delta_operand import (
         OperandMatch,
@@ -257,13 +257,17 @@ def delta_operand_cmd(
     try:
         pairs = parse_operand_map(operand_map)
     except ValueError as exc:
-        raise click.UsageError(str(exc)) from exc
+        # A named outcome, not a usage error: the shell discards stderr, and
+        # the message (naming the bad line) must reach the job log.
+        pairs = None
+        result = OperandMatch(OperandMatchOutcome.MAP_INVALID, message=str(exc))
     try:
-        result = match_delta_operand(
-            identity_of_snapshot_artifact(snapshot_path),
-            identity_of_operand(new_library, new_given_as or str(new_library)),
-            pairs,
-        )
+        if pairs is not None:
+            result = match_delta_operand(
+                identity_of_snapshot_artifact(snapshot_path),
+                identity_of_operand(new_library, new_given_as or str(new_library)),
+                pairs,
+            )
     except Exception as exc:  # noqa: BLE001 -- any unreadable side is one named outcome
         result = OperandMatch(
             OperandMatchOutcome.UNREADABLE, message=f"{type(exc).__name__}: {exc}"

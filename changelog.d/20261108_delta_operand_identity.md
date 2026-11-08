@@ -8,6 +8,7 @@
   A renamed or relocated library is paired with the new `delta-operand-map`
   input (`SNAPSHOT=PR` lines). A snapshot of a different library is never
   compared (it would read as every symbol removed); the comment says
-  `operand_unmatched`, `operand_ambiguous` or `operand_unreadable` and shows
+  `operand_unmatched`, `operand_ambiguous`, `operand_unreadable` or
+  `operand_map_invalid` and shows
   the release comparison. New output `delta-operand-match`. See
   `docs/reference/main-snapshot.md#operand-identity-is-the-snapshot-this-prs-library`.

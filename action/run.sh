@@ -5799,7 +5799,7 @@ _select_delta_report() {
   PR_RENDER_JSON="$PR_JSON"
   PR_NOTES=()
   [[ -n "${ABICHECK_DELTA_OUTCOME:-}" ]] || return 0
-  local code="$ABICHECK_DELTA_OUTCOME" operand_match="" delta_json identity key value new_operand
+  local code="$ABICHECK_DELTA_OUTCOME" operand_match="" operand_message="" delta_json identity key value new_operand
   if [[ "$code" == resolved ]] \
      && { _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" || _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; }; then
     code=unsupported_operand
@@ -5820,9 +5820,16 @@ _select_delta_report() {
       case "$key" in
         outcome) code="$value" ;;
         rule) operand_match="$value" ;;
-        message) [[ -n "$value" ]] && _notice_annotation "abicheck delta operand: $value" ;;
+        message) [[ -n "$value" ]] && operand_message="$value" ;;
       esac
     done <<< "$identity"
+    if [[ -n "${operand_message:-}" ]]; then
+      if [[ "$code" == resolved ]]; then
+        _notice_annotation "abicheck delta operand: $operand_message"
+      else
+        _warning_annotation "abicheck delta operand ($code): $operand_message"
+      fi
+    fi
   fi
   if [[ "$code" == resolved && -n "${ABICHECK_DELTA_SNAPSHOT:-}" && -n "${OLD_OPERAND_INDEX:-}" ]]; then
     delta_json=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-delta-json.XXXXXX")

@@ -153,14 +153,18 @@ still get its delta. The decision lives in `abicheck/workflows/delta_operand.py`
 - **How the PR side matches.** Equal loader names; else loader names equal
   up to version (`binary_utils._canonical_library_key`, the release
   member-pairing key); else, with a loader name missing on a side, equal
-  path or file name, then file names equal up to version. Unrelated loader
-  names never match automatically.
+  path or file name, then file names equal up to version — unless the one
+  loader name present names another library than the other side's file.
+  Unrelated loader names never match automatically.
 - **Explicit mapping.** `delta-operand-map` (`SNAPSHOT=PR` lines, either side
   a path, file name or loader name) is the project's claim and is decisive:
   once given, an uncovered or contradicting pair is refused rather than
-  matched automatically.
+  matched automatically, and differing targets declared for one snapshot
+  library are ambiguous rather than resolved by line order.
 - **Outcomes.** `operand_unmatched` (nothing links them), `operand_ambiguous`
-  (same file name/path, unrelated loader names), `operand_unreadable`. Each is
+  (same file name/path but disagreeing loader evidence, or several map
+  targets), `operand_unreadable`, `operand_map_invalid` (the log names the
+  line). Each is
   "Delta unavailable" with the gate's report shown — never a removal — and
   counts as unavailable for `on-missing-base: fail`. A non-trivial match
   (`declared`, `*_version`) adds a comment note; the rule travels to the fork

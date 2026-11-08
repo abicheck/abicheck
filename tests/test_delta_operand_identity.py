@@ -152,8 +152,19 @@ def test_invariants_over_a_small_exhaustive_domain(snap: OperandIdentity) -> Non
             assert not got.ok
         if both_named and snap.loader_name == pr.loader_name:
             assert got.rule is MatchRule.LOADER_NAME
-        if not both_named and (snap.file_name == pr.file_name):
-            assert got.ok
+        lone = snap.loader_name or pr.loader_name
+        bare = pr if snap.loader_name else snap
+        contradicted = bool(lone) and _stem(lone) != _stem(bare.file_name)
+        if not both_named and snap.file_name == pr.file_name:
+            # A shared file name pairs them unless the only loader name
+            # present names another library -- then it is ambiguous, never
+            # silently matched.
+            expected = (
+                OperandMatchOutcome.AMBIGUOUS
+                if contradicted
+                else OperandMatchOutcome.MATCHED
+            )
+            assert got.outcome is expected
 
 
 def test_declared_map_pairs_a_rename_and_is_decisive() -> None:
@@ -172,6 +183,53 @@ def test_declared_map_pairs_a_rename_and_is_decisive() -> None:
     none = match_delta_operand(snap, same, parse_operand_map("x.dll=foo.dll"))
     assert none.outcome is OperandMatchOutcome.UNMATCHED
     assert "no delta-operand-map entry" in none.message
+
+
+def test_several_map_targets_for_one_snapshot_are_ambiguous_not_order_dependent() -> (
+    None
+):
+    snap = OperandIdentity("Release/foo.dll", "foo.dll", "")
+    pr = OperandIdentity("Release/foo2.dll", "foo2.dll", "")
+    for text in (
+        "foo.dll=foo2.dll\nfoo.dll=foo3.dll",
+        "foo.dll=foo3.dll\nfoo.dll=foo2.dll",
+    ):
+        got = match_delta_operand(snap, pr, parse_operand_map(text))
+        assert got.outcome is OperandMatchOutcome.AMBIGUOUS
+    # The same target spelled twice is one declaration, not a conflict.
+    twice = parse_operand_map(
+        "foo.dll=Release/foo2.dll\nRelease/foo.dll=./Release/foo2.dll"
+    )
+    assert match_delta_operand(snap, pr, twice).rule is MatchRule.DECLARED
+
+
+@pytest.mark.parametrize(
+    ("snap", "pr", "outcome"),
+    [
+        # The snapshot's only loader name names another library.
+        (
+            OperandIdentity("b/libfoo.so", "libfoo.so", "libbar.so.1"),
+            OperandIdentity("b/libfoo.so", "libfoo.so", ""),
+            OperandMatchOutcome.AMBIGUOUS,
+        ),
+        (
+            OperandIdentity("", "libfoo.so.1", ""),
+            OperandIdentity("b/libfoo.so.2", "libfoo.so.2", "libbar.so.2"),
+            OperandMatchOutcome.AMBIGUOUS,
+        ),
+        # Consistent: the SONAME agrees with the other side's file name.
+        (
+            OperandIdentity("b/libfoo.so", "libfoo.so", "libfoo.so.1"),
+            OperandIdentity("b/libfoo.so", "libfoo.so", ""),
+            OperandMatchOutcome.MATCHED,
+        ),
+    ],
+)
+def test_a_lone_loader_name_must_agree_with_the_other_file_name(
+    snap: OperandIdentity, pr: OperandIdentity, outcome: OperandMatchOutcome
+) -> None:
+    assert match_delta_operand(snap, pr).outcome is outcome
+    assert match_delta_operand(pr, snap).outcome is outcome
 
 
 @pytest.mark.parametrize("text", ["foo.dll", "=x", "x=", "a=b\nbroken"])
@@ -267,13 +325,29 @@ def test_cli_outcomes(tmp_path: Path) -> None:
     assert (code, fields["outcome"]) == (3, "operand_unreadable")
     res = CliRunner().invoke(
         delta_operand_cmd,
-        ["--snapshot", str(snap), "--new-library", str(bump), "--map", "nonsense"],
+        [
+            "--snapshot",
+            str(snap),
+            "--new-library",
+            str(bump),
+            "--map",
+            "ok=fine\nnonsense",
+        ],
     )
-    assert res.exit_code == 2
+    # A named outcome naming the bad line, not a usage error the shell hides.
+    assert res.exit_code == 3
+    assert "outcome=operand_map_invalid" in res.output
+    assert "line 2" in res.output
 
 
 @pytest.mark.parametrize(
-    "outcome", ["operand_unmatched", "operand_ambiguous", "operand_unreadable"]
+    "outcome",
+    [
+        "operand_unmatched",
+        "operand_ambiguous",
+        "operand_unreadable",
+        "operand_map_invalid",
+    ],
 )
 def test_operand_outcomes_say_unavailable_never_removed(outcome: str) -> None:
     first, gate = delta_notes(outcome, base_sha=SHA, gate_verdict="BREAKING")
@@ -334,6 +408,7 @@ def test_unknown_match_rule_is_refused() -> None:
         ("libfoo.so.2", "", "resolved", True),
         ("libbar.so.1", "", "operand_unmatched", False),
         ("libbar.so.1", "libfoo.so.1=libbar.so.1", "resolved", True),
+        ("libfoo.so.2", "libfoo.so.1", "operand_map_invalid", False),
     ],
 )
 def test_run_sh_never_compares_an_unmatched_snapshot(
@@ -365,7 +440,14 @@ def test_run_sh_never_compares_an_unmatched_snapshot(
         # The release comparison stays, labelled; nothing reads as removed
         # because of the unrelated snapshot.
         assert "release_only" in body and "pr_only" not in body
-        assert COMMENT_ONLY_OUTCOMES["operand_unmatched"] in body
+        assert COMMENT_ONLY_OUTCOMES[comment_outcome] in body
+        # Why, as a warning in the job log (a bad map names its line).
+        assert (
+            f"::warning::abicheck delta operand ({comment_outcome}):"
+            in outputs["_stdout"]
+        )
+        if comment_outcome == "operand_map_invalid":
+            assert "line 1" in outputs["_stdout"]
 
 
 def test_fail_opt_in_covers_operand_refusals() -> None:

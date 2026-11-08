@@ -409,9 +409,14 @@ COMMENT_ONLY_OUTCOMES = {
         "name). If it was renamed, pair the two with `delta-operand-map`."
     ),
     "operand_ambiguous": (
-        "Delta unavailable: the default-branch snapshot has this PR's library "
-        "file name but an unrelated SONAME/install name. Declare the pairing "
-        "with `delta-operand-map` if they are the same library."
+        "Delta unavailable: the default-branch snapshot and this PR's library "
+        "share a file name but their SONAME/install-name evidence disagrees, "
+        "or `delta-operand-map` declares several targets for it. Declare one "
+        "pairing with `delta-operand-map` if they are the same library."
+    ),
+    "operand_map_invalid": (
+        "Delta unavailable: `delta-operand-map` is malformed (expected one "
+        "`SNAPSHOT=PR` pair per line; the job log names the line)."
     ),
     "operand_unreadable": (
         "Delta unavailable: the identity of the default-branch snapshot or of "
