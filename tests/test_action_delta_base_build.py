@@ -698,3 +698,84 @@ def test_no_build_when_the_outcome_selected_no_commit(tmp_path: Path) -> None:
     )
     assert [c[0] for c in calls] == ["compare"]
     assert "several merge-bases" in body
+
+
+# ── the delta-base-dump-args command (run.sh's interface to the rewrite) ────
+
+
+def test_dump_args_command_prints_the_argv_nul_separated(tmp_path: Path) -> None:
+    tail = tmp_path / "tail"
+    tail.write_bytes(b"--header\0new=include\0--policy\0p.yml\0\0")
+    res = CliRunner().invoke(
+        action_cli,
+        [
+            "delta-base-dump-args",
+            str(tail),
+            "--new-library",
+            "build/libx.so",
+            "--cwd",
+            _TOP,
+            "--checkout",
+            _TOP,
+            "--base-root",
+            _BASE,
+            "--output",
+            "/t/out.json",
+            "--value-options",
+            "|--policy|-o|",
+        ],
+    )
+    assert res.exit_code == 0, res.output
+    assert res.output.split("\0")[:-1] == [
+        "dump",
+        f"{_BASE}/build/libx.so",
+        "-H",
+        f"{_BASE}/include",
+        "-o",
+        "/t/out.json",
+    ]
+
+
+@pytest.mark.parametrize(
+    "tail", [b"-H\0/elsewhere/include\0", b"--dump-manifest\0new=m.yml\0", b"-H\0"]
+)
+def test_dump_args_command_refuses_with_exit_3(tmp_path: Path, tail: bytes) -> None:
+    path = tmp_path / "tail"
+    path.write_bytes(tail)
+    res = CliRunner().invoke(
+        action_cli,
+        [
+            "delta-base-dump-args",
+            str(path),
+            "--new-library",
+            "libx.so",
+            "--cwd",
+            _TOP,
+            "--checkout",
+            _TOP,
+            "--base-root",
+            _BASE,
+            "--output",
+            "/t/o.json",
+        ],
+    )
+    assert res.exit_code == 3
+    assert "\0" not in res.stdout
+
+
+@pytest.mark.parametrize(
+    ("tail", "expected"),
+    [
+        (["--depth"], ["--depth", ""]),  # a trailing value option without its value
+        (["--set"], []),
+        (["--depth=binary"], ["--depth", "binary"]),
+        (["--unknown-flag"], []),
+    ],
+)
+def test_rewrite_edges(tail: list[str], expected: list[str]) -> None:
+    assert _argv(tail)[2:-2] == expected
+
+
+def test_empty_path_is_refused() -> None:
+    with pytest.raises(BaseDumpRefused, match="empty"):
+        map_into_base("", cwd=_TOP, checkout=_TOP, base_root=_BASE)
