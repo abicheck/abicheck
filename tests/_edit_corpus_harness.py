@@ -82,12 +82,17 @@ def build(
     header_text, source_text = seed.render(overrides)
     so = _compile(seed, compiler, out_dir, header_text, source_text)
     header = out_dir / seed.header_name
+    # Pin the header frontend and the language standard so the dump reads the
+    # header the way the library was built, whatever the environment selects.
+    is_cxx = seed.lang == "c++"
     snap = dump(
         so,
         [header],
         version=out_dir.name,
-        compiler="c++" if seed.lang == "c++" else "cc",
-        lang="c++" if seed.lang == "c++" else "c",
+        compiler="c++" if is_cxx else "cc",
+        lang="c++" if is_cxx else "c",
+        header_backend="castxml",
+        gcc_options="-std=c++17" if is_cxx else None,
     )
     return Built(so=so, header=header, snapshot=snap)
 

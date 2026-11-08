@@ -444,7 +444,7 @@ OPERATORS: tuple[EditOp, ...] = (
                 {"FUNC_BECAME_INLINE", "FUNC_VISIBILITY_CHANGED", "FUNC_REMOVED"}
             ),
         ),
-        verdict_min="COMPATIBLE_WITH_RISK",
+        verdict_min="BREAKING",
         touches=("func.twice",),
     ),
     # PARAM_RENAMED is the taxonomy's source-level risk (COMPATIBLE_WITH_RISK),

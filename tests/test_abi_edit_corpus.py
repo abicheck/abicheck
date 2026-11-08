@@ -14,6 +14,7 @@ observed answer, and listed in the PR and ``docs/contribute/known-gaps.md``.
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import pytest
@@ -23,23 +24,31 @@ from tests._edit_corpus_harness import COMPILERS, BaselineCache, run_operator
 from tests._edit_corpus_operators import OPERATORS, VERDICT_RANK, matrix
 from tests._edit_corpus_seeds import SEEDS
 
-# (operator, seed, compiler) -> reason. Each entry is a strict xfail: when the
-# detector is fixed the cell XPASSes and the entry must be removed.
+# (operator, seed, compiler) -> (reason, kind the detector is missing).
+# A documented cell xfails only while its recorded mismatch still reproduces;
+# any other outcome (compile error, crash, different wrong answer) fails. When
+# the detector is fixed the mismatch stops reproducing and the entry must go.
 _CXX_PARAM = (
     "C++ parameter change reads as FUNC_REMOVED + FUNC_ADDED (the mangled symbol changes, "
-    "so the old and new functions are not paired), never FUNC_PARAMS_CHANGED; verdict is right"
+    "so the old and new functions are not paired), never FUNC_PARAMS_CHANGED; verdict is right",
+    "FUNC_PARAMS_CHANGED",
 )
 _CASTXML_NOEXCEPT = (
     "castxml writes no exception specification, so noexcept added reads NO_CHANGE "
-    "(docs/contribute/known-gaps.md: castxml output carries no noexcept)"
+    "(docs/contribute/known-gaps.md: castxml output carries no noexcept)",
+    "FUNC_NOEXCEPT_ADDED",
 )
 _CASTXML_TEMPLATE_DEFAULT = (
     "castxml reads a header-only template default change as NO_CHANGE "
-    "(docs/contribute/known-gaps.md: header-only default template argument, castxml side)"
+    "(docs/contribute/known-gaps.md: header-only default template argument, castxml side)",
+    "DEFAULT_TEMPLATE_ARG_CHANGED",
 )
-_VIRTUAL_REMOVED = "removing a virtual reads FUNC_REMOVED plus vtable kinds; FUNC_VIRTUAL_REMOVED is never emitted"
+_VIRTUAL_REMOVED = (
+    "removing a virtual reads FUNC_REMOVED plus vtable kinds; FUNC_VIRTUAL_REMOVED is never emitted",
+    "FUNC_VIRTUAL_REMOVED",
+)
 
-KNOWN_MISMATCHES: dict[tuple[str, str, str], str] = {
+KNOWN_MISMATCHES: dict[tuple[str, str, str], tuple[str, str]] = {
     **{
         (op, "cxx_classes", c): _CXX_PARAM
         for op in ("func_param_append", "func_param_type_change", "func_param_remove")
@@ -54,20 +63,7 @@ KNOWN_MISMATCHES: dict[tuple[str, str, str], str] = {
 }
 
 CELLS = [
-    pytest.param(
-        op,
-        seed,
-        compiler,
-        id=f"{op.name}-{seed.name}-{compiler}",
-        marks=(
-            pytest.mark.xfail(
-                strict=True,
-                reason=KNOWN_MISMATCHES[(op.name, seed.name, compiler)],
-            )
-            if (op.name, seed.name, compiler) in KNOWN_MISMATCHES
-            else ()
-        ),
-    )
+    pytest.param(op, seed, compiler, id=f"{op.name}-{seed.name}-{compiler}")
     for op, seed in matrix()
     for compiler in COMPILERS
 ]
@@ -197,7 +193,22 @@ def corpus_root(tmp_path_factory: pytest.TempPathFactory) -> Path:
 def test_edit_produces_declared_ground_truth(
     op, seed, compiler, baseline_cache: BaselineCache, corpus_root: Path
 ) -> None:
+    driver = COMPILERS[compiler][1 if seed.lang == "c++" else 0]
+    if shutil.which(driver) is None:
+        pytest.skip(
+            f"{driver} is not installed; this compiler lane cannot build the cell"
+        )
+    # A build or extraction exception propagates and fails the cell.
     outcome = run_operator(op, seed, compiler, baseline_cache, corpus_root)
+    key = (op.name, seed.name, compiler)
+    if key in KNOWN_MISMATCHES:
+        reason, missing = KNOWN_MISMATCHES[key]
+        assert any(missing in problem for problem in outcome.failures), (
+            f"documented mismatch no longer reproduces (outcome: verdict={outcome.verdict} "
+            f"kinds={sorted(outcome.kinds)} problems={list(outcome.failures)}); "
+            "the detector may be fixed: remove the KNOWN_MISMATCHES entry"
+        )
+        pytest.xfail(reason)
     assert outcome.failures == (), (
         f"{op.name} on {seed.name} with {compiler}: verdict={outcome.verdict} "
         f"kinds={sorted(outcome.kinds)} problems={list(outcome.failures)} "
