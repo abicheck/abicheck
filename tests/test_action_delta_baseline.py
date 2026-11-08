@@ -33,8 +33,10 @@ from _action_run_sh_harness import REQUIRES_POSIX_SHELL, _compare_env, _run_acti
 from click.testing import CliRunner
 
 from abicheck.cli import main
-from abicheck.cli_pr_comment import insert_notes, pr_comment_cmd
+from abicheck.cli_pr_comment import pr_comment_cmd
+from abicheck.frontends.action.main_snapshot import delta_notes
 from abicheck.model import AbiSnapshot, Function
+from abicheck.pr_comment_render import insert_notes
 from abicheck.serialization import save_snapshot
 
 pytestmark = REQUIRES_POSIX_SHELL
@@ -144,6 +146,8 @@ def _run(
                 "ABICHECK_DELTA_OUTCOME": outcome,
                 "ABICHECK_DELTA_SNAPSHOT": snap if outcome == "resolved" else "",
                 "ABICHECK_DELTA_MESSAGE": message,
+                "ABICHECK_DELTA_BASE_SHA": "a" * 40,
+                "ABICHECK_DELTA_BRANCH": "main",
             }
         )
     env.update(extra or {})
@@ -211,8 +215,12 @@ def test_unresolved_delta_keeps_the_release_report_and_says_so(tmp_path: Path) -
     assert not any(str(tmp_path / "base-snapshot.json") in c for c in calls)
     body = json.loads((tmp_path / "gh_bodies").read_text())["body"]
     assert "release_only" in body
-    assert "> Delta unavailable: gone. Showing the release-baseline comparison." in body
-    assert "> Release gate: BREAKING" in body
+    # The wording is delta_notes' -- the same function the fork publisher uses.
+    first, gate = delta_notes(
+        "snapshot_missing", base_sha="a" * 40, gate_verdict="BREAKING"
+    )
+    assert first.endswith("Showing the release-baseline comparison.")
+    assert f"> {first}" in body and f"> {gate}" in body
 
 
 def test_resolved_direct_comment_carries_both_notes(tmp_path: Path) -> None:
@@ -224,7 +232,7 @@ def test_resolved_direct_comment_carries_both_notes(tmp_path: Path) -> None:
     )
     body = json.loads((tmp_path / "gh_bodies").read_text())["body"]
     assert "pr_only" in body and "release_only" not in body
-    assert "> Changes in this PR (vs `main@aaaaaaa`)." in body
+    assert f"> {delta_notes('resolved', base_sha='a' * 40)[0]}" in body
     assert "this check's status comes from the gate" in body
 
 
