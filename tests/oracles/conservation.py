@@ -32,13 +32,7 @@ def conservation_violations(
 
     audit = report.get("disposition_audit")
     if isinstance(audit, Mapping):
-        counts = audit.get("counts") or {}
-        detected = audit.get("detected_total")
-        summed = sum(counts.values())
-        if detected is not None and summed != detected:
-            problems.append(
-                f"disposition_audit counts sum to {summed}, detected_total is {detected}"
-            )
+        problems.extend(_audit_violations(audit))
 
     keys = Counter(_identity(change) for change in changes)
     problems.extend(
@@ -49,8 +43,38 @@ def conservation_violations(
     return problems
 
 
+def _audit_violations(audit: Mapping[str, Any]) -> list[str]:
+    """Malformed audit fields are violations; the sum is compared only when they are well-formed."""
+    counts = audit.get("counts")
+    detected = audit.get("detected_total")
+    if not isinstance(counts, Mapping):
+        return ["disposition_audit.counts is missing or not a mapping"]
+    if not isinstance(detected, int) or isinstance(detected, bool):
+        return [
+            f"disposition_audit.detected_total is missing or not an integer: {detected!r}"
+        ]
+    bad = sorted(
+        k for k, v in counts.items() if not isinstance(v, int) or isinstance(v, bool)
+    )
+    if bad:
+        return [f"disposition_audit.counts has non-integer values for {bad}"]
+    summed = sum(counts.values())
+    if summed != detected:
+        return [
+            f"disposition_audit counts sum to {summed}, detected_total is {detected}"
+        ]
+    return []
+
+
 def _identity(change: Mapping[str, Any]) -> str:
-    """A finding's identity: its canonical id when present, else kind and symbol."""
-    if change.get("id"):
-        return str(change["id"])
+    """A finding's per-finding identity, as the JSON serializer emits it.
+
+    ``finding_id`` is the per-finding key (``change_json`` writes it on every
+    change). ``id`` and kind-and-symbol are fallbacks for synthetic reports
+    that carry neither. ``canonical_finding_id`` is deliberately not used: two
+    distinct findings on one symbol can share it.
+    """
+    for key in ("finding_id", "id"):
+        if change.get(key):
+            return str(change[key])
     return f"{change.get('kind')}:{change.get('symbol')}"

@@ -149,3 +149,52 @@ def test_conservation_fires_on_disposition_leak() -> None:
 def test_conservation_fires_on_double_counted_finding() -> None:
     report = {"changes": [{"id": "x1"}, {"id": "x1"}, {"id": "x2"}]}
     assert conservation_violations(report, {}) == ["finding counted more than once: x1"]
+
+
+def test_distinct_finding_ids_on_one_symbol_are_not_duplicates() -> None:
+    # Two parameter findings on the same function share kind and symbol but
+    # carry distinct per-finding ids; the serializer writes finding_id.
+    report = {
+        "changes": [
+            {"kind": "param_type_changed", "symbol": "f", "finding_id": "a1"},
+            {"kind": "param_type_changed", "symbol": "f", "finding_id": "a2"},
+        ]
+    }
+    assert conservation_violations(report, {}) == []
+
+
+def test_repeated_finding_id_is_a_duplicate() -> None:
+    report = {
+        "changes": [
+            {"kind": "param_type_changed", "symbol": "f", "finding_id": "a1"},
+            {"kind": "param_type_changed", "symbol": "f", "finding_id": "a1"},
+        ]
+    }
+    assert conservation_violations(report, {}) == ["finding counted more than once: a1"]
+
+
+@pytest.mark.parametrize(
+    ("audit", "expected"),
+    [
+        (
+            {"counts": {"gating": 1}},
+            ["disposition_audit.detected_total is missing or not an integer: None"],
+        ),
+        (
+            {"counts": {"gating": "1"}, "detected_total": 1},
+            ["disposition_audit.counts has non-integer values for ['gating']"],
+        ),
+        (
+            {"counts": None, "detected_total": 1},
+            ["disposition_audit.counts is missing or not a mapping"],
+        ),
+    ],
+)
+def test_malformed_disposition_audit_is_a_violation_not_a_crash(
+    audit: dict, expected: list[str]
+) -> None:
+    assert conservation_violations({"changes": []}, {}) == []
+    assert (
+        conservation_violations({"changes": [], "disposition_audit": audit}, {})
+        == expected
+    )
