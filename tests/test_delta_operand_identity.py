@@ -384,3 +384,98 @@ def test_fail_opt_in_covers_operand_refusals() -> None:
     )
     assert "delta-operand-map" in action["inputs"]
     assert "delta-operand-match" in action["outputs"]
+
+
+@pytest.mark.parametrize(
+    ("magic", "module", "attr", "meta", "expected"),
+    [
+        (
+            b"\x7fELF",
+            "abicheck.elf_metadata",
+            "parse_elf_metadata",
+            ElfMetadata(soname="libfoo.so.3"),
+            "libfoo.so.3",
+        ),
+        (
+            b"\xcf\xfa\xed\xfe",
+            "abicheck.macho_metadata",
+            "parse_macho_metadata",
+            MachoMetadata(install_name="@rpath/libfoo.4.dylib"),
+            "libfoo.4.dylib",
+        ),
+        (b"MZ\x90\x00", "", "", None, ""),
+    ],
+)
+def test_pr_side_reads_the_binary_s_loader_name(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    magic: bytes,
+    module: str,
+    attr: str,
+    meta: object,
+    expected: str,
+) -> None:
+    import importlib
+
+    lib = tmp_path / "out" / "libfoo.bin"
+    lib.parent.mkdir()
+    lib.write_bytes(magic + b"\0" * 60)
+    if module:
+        monkeypatch.setattr(importlib.import_module(module), attr, lambda _p: meta)
+    got = identity_of_operand(lib, "./out/libfoo.bin")
+    assert got == OperandIdentity("out/libfoo.bin", "libfoo.bin", expected)
+
+
+def test_operand_record_path_must_be_a_string(tmp_path: Path) -> None:
+    snap = _snap(tmp_path / "snapshot.json", "libfoo.so")
+    (tmp_path / "operand.json").write_text(json.dumps({"schema": 1, "path": 7}))
+    with pytest.raises(ValueError, match="'path' is not a string"):
+        identity_of_snapshot_artifact(snap)
+
+
+def test_delta_notes_cli_refuses_an_unknown_match_rule() -> None:
+    res = CliRunner().invoke(
+        delta_notes_cmd, ["--outcome", "resolved", "--operand-match", "bogus"]
+    )
+    assert res.exit_code == 2 and "operand match rule" in res.output
+
+
+@pytest.mark.integration
+def test_real_elf_soname_bump_pairs_and_unrelated_library_does_not(
+    tmp_path: Path,
+) -> None:
+    """Real gcc-built libraries: the SONAME is read from DT_SONAME."""
+    import shutil
+    import subprocess
+
+    gcc = shutil.which("gcc")
+    if gcc is None:
+        pytest.skip("gcc not available")
+    src = tmp_path / "a.c"
+    src.write_text("int foo(void) { return 1; }\n")
+
+    def build(name: str, soname: str) -> Path:
+        out = tmp_path / name
+        subprocess.run(
+            [
+                gcc,
+                "-shared",
+                "-fPIC",
+                f"-Wl,-soname,{soname}",
+                str(src),
+                "-o",
+                str(out),
+            ],
+            check=True,
+        )
+        return out
+
+    old = _snap(
+        tmp_path / "s.json", "libfoo.so.1", elf=ElfMetadata(soname="libfoo.so.1")
+    )
+    bumped = build("libfoo-renamed.so", "libfoo.so.2")
+    other = build("libfoo.so.1", "libbar.so.1")
+    assert identity_of_operand(bumped).loader_name == "libfoo.so.2"
+    assert _invoke(old, bumped)[1]["rule"] == "loader_name_version"
+    # Same file name as the snapshot, unrelated SONAME: refused as ambiguous.
+    assert _invoke(old, other)[1]["outcome"] == "operand_ambiguous"
