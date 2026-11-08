@@ -280,6 +280,7 @@ def _env(tmp_path: Path, **extra: str) -> dict[str, str]:
 
 
 def _sh(script: Path, env: dict[str, str], cwd: Path) -> subprocess.CompletedProcess:
+    require_bash()
     return subprocess.run(
         [bash_executable(), str(script)],
         env=env,
