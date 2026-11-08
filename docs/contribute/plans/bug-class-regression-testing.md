@@ -181,8 +181,9 @@ add an entry (Phase 0's contract wording makes this explicit).
 
 Before adding an entry, check whether the fix is an instance of an existing
 defect family (`tests/regressions/families.py`, F1–F18). If it is, extend that
-family's sweep or harness and attach the class there. A new `BugClass` must
-name an invariant no family states. See
+family's sweep or harness. A genuinely distinct bug class still gets its own
+`BugClass` entry, mapped to that family. A new family is added only for an
+invariant no family states. See
 [Defect-family harnesses](defect-family-harnesses.md#registry-change-classes-attach-to-a-family).
 
 ### Independent oracles, not the production formula restated
