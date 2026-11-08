@@ -11,8 +11,10 @@ generated: false
 `accepted-main` channel), [ADR-065](../adr/065-comparison-scope-selection-and-completeness.md)
 (absent is not removed) · **Status:** pieces 1–2 landed (`actions/main-snapshot`,
 `actions/fetch-main-snapshot`, `abicheck/frontends/action/main_snapshot.py`);
-pieces 3–4 (main Action `delta-baseline`, report rendering), path equivalence
-and `on-missing-base` open · **Effort:** L
+piece 3 landed (main Action `delta-baseline`, `delta-on-missing-base:
+report|fail`, the comment's two notes via `pr_comment --note`); open: piece 4's
+report-schema field, notes on the artifact (fork) path, `on-missing-base:
+build`, path equivalence, cache storage · **Effort:** L
 
 ## Problem
 
@@ -257,8 +259,10 @@ work, which publishes the delta report; nothing else changes.
    outcome typing are pure and unit-tested without credentials. *Planned:*
    `storage`, `base-equivalent-paths`, and a `snapshot-sha` output (it differs
    from `base-sha` only under path equivalence).
-3. **Main Action inputs** `delta-baseline: main|<path>|''` and
-   `on-missing-base`. When set, the Action runs the existing compare twice:
+3. **Main Action inputs** (*landed* as `delta-baseline: main`,
+   `delta-snapshot-workflow`, `delta-mode`, `delta-profile`,
+   `delta-wait-timeout`, `delta-on-missing-base: report|fail`; `build` and a
+   `<path>` value are planned). When set, the Action runs the existing compare twice:
    the gate as today, and the delta compare with `pr-comment` routed to the
    delta report and the gate's verdict as one header line ("Release gate:
    ✅ compatible / ❌ breaking — see summary"). The step's exit code comes

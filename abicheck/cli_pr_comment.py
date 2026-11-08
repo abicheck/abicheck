@@ -111,6 +111,14 @@ from .frontends.cli.runtime import _write_or_echo
     "compatibility judgement, not a gate one, and is unaffected.",
 )
 @click.option(
+    "--note",
+    "notes",
+    multiple=True,
+    help="A line shown as a quoted note directly under the comment heading "
+    "(repeatable). The Action uses it to say what a delta comment was "
+    "measured against and what the release gate decided.",
+)
+@click.option(
     "-o",
     "--output",
     type=click.Path(path_type=Path),
@@ -130,6 +138,7 @@ def pr_comment_cmd(
     path_prefix: str,
     gate_api_break: bool,
     gate_breaking: bool,
+    notes: tuple[str, ...],
     output: Path | None,
 ) -> None:
     """Render a sticky PR-comment body from a JSON REPORT.
@@ -213,7 +222,27 @@ def pr_comment_cmd(
         report_artifact_url=report_artifact_url,
         comment_key=comment_key,
     )
+    if notes:
+        body = insert_notes(body, notes)
     _write_or_echo(output, body)
+
+
+def insert_notes(body: str, notes: tuple[str, ...] | list[str]) -> str:
+    """Insert *notes* as a quoted block right after the comment's first heading.
+
+    Each note is one line; embedded newlines are folded to spaces so a note
+    can never open a new Markdown block. With no heading, the notes go first.
+    """
+    block = "\n>\n".join(
+        "> " + " ".join(note.split()) for note in notes if note.strip()
+    )
+    if not block:
+        return body
+    lines = body.split("\n")
+    for index, line in enumerate(lines):
+        if line.startswith("#"):
+            return "\n".join([*lines[: index + 1], "", block, *lines[index + 1 :]])
+    return block + "\n\n" + body
 
 
 if (

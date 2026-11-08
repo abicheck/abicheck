@@ -3165,6 +3165,7 @@ elif [[ "$MODE" == "compare" ]]; then
     fi
     CMD+=(--no-baseline "${INPUT_NEW_LIBRARY:?new-library is required for an audit-only compare (old-library/abi-baseline both omitted)}")
   else
+    OLD_OPERAND_INDEX=${#CMD[@]}
     CMD+=("${INPUT_OLD_LIBRARY}")
     CMD+=("${INPUT_NEW_LIBRARY:?new-library is required}")
   fi
@@ -5748,6 +5749,60 @@ _build_json_cmd() {
   PR_CMD_JSON+=(-o "json=$PR_JSON")
 }
 
+# delta-baseline (plan: docs/contribute/plans/pr-delta-vs-main-snapshot.md).
+# The gate command, with the old operand replaced by the default-branch
+# snapshot and every old-side evidence flag dropped (the stored snapshot
+# carries its own), rerun for JSON into $1. The step's exit code never comes
+# from here: this rerun only chooses what the PR comment shows.
+_run_delta_json() {
+  local out="$1" i tok saved_json="${PR_JSON:-}"
+  local -a saved=("${CMD[@]}") delta=()
+  for ((i = 0; i < ${#CMD[@]}; i++)); do
+    tok="${CMD[$i]}"
+    if [[ "$i" == "${OLD_OPERAND_INDEX:--1}" ]]; then
+      delta+=("$ABICHECK_DELTA_SNAPSHOT")
+      continue
+    fi
+    case "$tok" in
+      --header | --include | --label | --debug-info)
+        if [[ "${CMD[$((i + 1))]:-}" == old=* ]]; then
+          i=$((i + 1))
+          continue
+        fi
+        ;;
+    esac
+    delta+=("$tok")
+  done
+  CMD=("${delta[@]}")
+  PR_JSON="$out"
+  _build_json_cmd
+  CMD=("${saved[@]}")
+  PR_JSON="$saved_json"
+  ${PR_CMD_JSON[@]+"${PR_CMD_JSON[@]}"} >/dev/null 2>&1 || true
+  [[ -s "$out" ]]
+}
+
+# Chooses the report the PR comment renders when delta-baseline is set, and
+# the notes that say what it is. Sets PR_RENDER_JSON and PR_NOTES.
+_select_delta_report() {
+  PR_RENDER_JSON="$PR_JSON"
+  PR_NOTES=()
+  [[ -n "${ABICHECK_DELTA_OUTCOME:-}" ]] || return 0
+  local gate="Release gate: ${VERDICT:-unknown} (vs \`${INPUT_ABI_BASELINE:-${INPUT_OLD_LIBRARY:-baseline}}\`); this check's status comes from the gate."
+  if [[ "$ABICHECK_DELTA_OUTCOME" == resolved && -n "${ABICHECK_DELTA_SNAPSHOT:-}" && -n "${OLD_OPERAND_INDEX:-}" ]]; then
+    local delta_json
+    delta_json=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-delta-json.XXXXXX")
+    if _run_delta_json "$delta_json"; then
+      PR_RENDER_JSON="$delta_json"
+      PR_NOTES=("${ABICHECK_DELTA_MESSAGE:-Changes in this PR.}" "$gate")
+      return 0
+    fi
+    PR_NOTES=("Delta unavailable: the comparison against the default-branch snapshot produced no report. Showing the release-baseline comparison." "$gate")
+    return 0
+  fi
+  PR_NOTES=("${ABICHECK_DELTA_MESSAGE:-Delta unavailable.} Showing the release-baseline comparison." "$gate")
+}
+
 _maybe_post_pr_comment() {
   [[ "${INPUT_PR_COMMENT:-true}" == "true" ]] || return 0
   # `pr-comment-via` (action.yml's "Resolve PR comment delivery" step): an
@@ -5852,6 +5907,16 @@ _maybe_post_pr_comment() {
     return 0
   fi
 
+  _select_delta_report
+  if [[ "$PR_RENDER_JSON" != "$PR_JSON" ]]; then
+    cp "$PR_RENDER_JSON" "$PR_JSON"
+  fi
+  local -a note_args=()
+  local note
+  for note in ${PR_NOTES[@]+"${PR_NOTES[@]}"}; do
+    note_args+=(--note "$note")
+  done
+
   # Artifact delivery: hand the same report the direct path would render to
   # action.yml's staging/upload steps and stop -- this job holds no write
   # token on that path, and rendering is the trusted publisher's job.
@@ -5927,6 +5992,7 @@ runpy.run_module("abicheck.cli_pr_comment", run_name="__main__")
     ${INPUT_PR_COMMENT_KEY:+--comment-key "$INPUT_PR_COMMENT_KEY"} \
     ${PR_GATE_ARGS[@]+"${PR_GATE_ARGS[@]}"} \
     ${subject_args[@]+"${subject_args[@]}"} \
+    ${note_args[@]+"${note_args[@]}"} \
     -o "$PR_BODY") || true
 
   if [[ ! -s "$PR_BODY" ]]; then

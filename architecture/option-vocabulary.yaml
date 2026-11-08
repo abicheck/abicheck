@@ -1299,6 +1299,16 @@ concepts:
       - action:pr-comment-via
       - action:pr-comment-artifact-name
       - action:github-token
+  - concept: action.delta-baseline
+    tier: action
+    renames: []
+    action:
+      - action:delta-baseline
+      - action:delta-snapshot-workflow
+      - action:delta-mode
+      - action:delta-profile
+      - action:delta-wait-timeout
+      - action:delta-on-missing-base
   - concept: aggregate
     tier: core
     renames: []

@@ -266,6 +266,12 @@ suppression:
 | `pr-comment-report-artifact-url` | — | Direct URL of an uploaded full-report artifact, shown as **Download full report**; leave unset unless the upload succeeded |
 | `pr-comment-via` | `direct` | How the comment reaches the PR: `direct` posts from this job; `artifact` uploads the report for the trusted [`report-pr.yml`](fork-pr-reporting.md) publisher and never posts; `auto` uploads on a fork's (or Dependabot's) `pull_request` run and posts directly otherwise. One path per run, so wiring both never double-posts |
 | `pr-comment-artifact-name` | derived | Artifact name for the upload; empty derives `abicheck-pr-report[-<pr-comment-key>]`, which `report-pr.yml` expects by default |
+| `delta-baseline` | — | `main`: the PR comment shows only this PR's changes, measured against the default-branch snapshot of the PR's exact base commit; the step's status still comes from the normal comparison. See [`main-snapshot` / `fetch-main-snapshot`](../reference/main-snapshot.md#delta-baseline-in-the-main-action) |
+| `delta-snapshot-workflow` | — | Workflow file that runs `main-snapshot` on the default branch; required with `delta-baseline` |
+| `delta-mode` | `auto` | How the base commit is found: `auto`, `merge-commit` or `head` |
+| `delta-profile` | — | Profile suffix used by `main-snapshot`, if any |
+| `delta-wait-timeout` | `600` | Seconds to wait while the base snapshot is still being built |
+| `delta-on-missing-base` | `report` | `report` explains an unavailable snapshot in the comment; `fail` also fails the job in a separate step |
 | `github-token` | `${{ github.token }}` | Token for the PR comment and baseline auto-fetch (needs `pull-requests: write`) |
 
 !!! note "Pull requests from forks"
