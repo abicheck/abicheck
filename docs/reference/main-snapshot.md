@@ -157,5 +157,10 @@ naming the outcome. The step's exit code, `verdict` and every other output
 come from the gate in all cases; `delta-on-missing-base: fail` adds a separate
 failing step. Outputs: `delta-outcome`, `delta-base-sha`.
 
+It runs on `pull_request` and `merge_group` only (a `pull_request_target`
+checkout is the base branch, not the PR), and for a single-library
+comparison; a directory/package comparison keeps the gate's report with a
+note. A failed lookup reads as `lookup_failed` and never stops the gate.
+
 With `pr-comment-via: artifact` (fork pull requests) the delta report is the
 one staged for the publisher, but the two notes are not yet carried to it.
