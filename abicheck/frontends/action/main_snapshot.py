@@ -81,7 +81,6 @@ class DeltaOutcome(enum.StrEnum):
     BASE_NOT_SNAPSHOTTED = "base_not_snapshotted"
     BASE_EXPIRED = "base_expired"
     UNTRUSTED_SOURCE = "untrusted_source"
-    SNAPSHOT_CONFLICT = "snapshot_conflict"
     LOOKUP_FAILED = "lookup_failed"
 
 
@@ -115,10 +114,6 @@ _MESSAGES: dict[DeltaOutcome, str] = {
         "Delta unavailable: a snapshot for `{branch}@{sha7}` exists but was not "
         "produced by the configured snapshot workflow on `{branch}`."
     ),
-    DeltaOutcome.SNAPSHOT_CONFLICT: (
-        "Delta unavailable: several eligible snapshots for `{branch}@{sha7}` "
-        "differ in content; none was picked."
-    ),
     DeltaOutcome.LOOKUP_FAILED: (
         "Delta unavailable: the snapshot lookup failed (API error)."
     ),
@@ -140,7 +135,9 @@ def snapshot_artifact_name(sha: str, profile: str = "") -> str:
     if len(sha) != 40 or any(ch not in "0123456789abcdef" for ch in sha):
         raise ValueError(f"not a full commit SHA: {sha!r}")
     suffix = f"-{profile}" if profile else ""
-    if profile and not all(ch.isalnum() or ch in "._-" for ch in profile):
+    if profile and not all(
+        (ch.isascii() and ch.isalnum()) or ch in "._-" for ch in profile
+    ):
         raise ValueError(f"profile {profile!r} has characters outside [A-Za-z0-9._-]")
     return f"{SNAPSHOT_ARTIFACT_PREFIX}{sha}{suffix}"
 
@@ -295,8 +292,11 @@ def resolve_snapshot(
     An artifact is eligible only when its name matches exactly, it has not
     expired, and the run that uploaded it is one of *runs* and passes
     :func:`_producer_problem` with conclusion ``success``. Several eligible
-    artifacts must share one ``digest``; otherwise the result is
-    ``snapshot_conflict`` -- never a silent pick.
+    artifacts (a re-run of the snapshot workflow for the same commit) were all
+    built from the base by the trusted workflow; the newest is taken and every
+    other one is listed in ``rejected`` as superseded. Their archive digests
+    cannot be compared instead: an artifact zip records upload timestamps, so
+    two uploads of identical content never share one.
     """
     if lookup_failed:
         return SnapshotResolution(
@@ -336,14 +336,12 @@ def resolve_snapshot(
         eligible.append(row)
 
     if eligible:
-        digests = {str(row.get("digest") or "") for row in eligible}
-        if len(eligible) > 1 and (len(digests) > 1 or "" in digests):
-            return SnapshotResolution(
-                DeltaOutcome.SNAPSHOT_CONFLICT,
-                message=f"{len(eligible)} eligible artifacts with differing or unknown digests",
-                rejected=tuple(rejected),
-            )
         chosen = max(eligible, key=lambda row: int(row.get("id", 0) or 0))
+        rejected.extend(
+            f"artifact {row.get('id', '?')}: superseded by newer upload {chosen.get('id')}"
+            for row in eligible
+            if row is not chosen
+        )
         run_ref = chosen.get("workflow_run")
         return SnapshotResolution(
             DeltaOutcome.RESOLVED,
@@ -362,6 +360,11 @@ def resolve_snapshot(
         outcome = DeltaOutcome.BASE_EXPIRED
     elif trusted_runs and not any(run.conclusion == "success" for run in trusted_runs):
         outcome = DeltaOutcome.BASE_FAILED
+    elif trusted_runs and not saw_untrusted:
+        # A trusted run succeeded for this exact commit, yet no artifact is
+        # listed: the API stopped listing expired artifacts (2026-09), so
+        # an expired snapshot looks like this rather than like `expired: true`.
+        outcome = DeltaOutcome.BASE_EXPIRED
     elif saw_untrusted:
         outcome = DeltaOutcome.UNTRUSTED_SOURCE
     else:

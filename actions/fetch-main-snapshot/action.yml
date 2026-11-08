@@ -38,7 +38,9 @@ inputs:
     required: false
     default: '600'
   destination:
-    description: 'Directory the snapshot is extracted into.'
+    description: >
+      Directory under which the snapshot is extracted, into a new
+      subdirectory of its own; existing contents are left untouched.
     required: false
     default: '${{ runner.temp }}/abicheck-base-snapshot'
   github-token:
@@ -55,7 +57,7 @@ outputs:
     description: >
       `resolved` | `base_unknown` | `base_ambiguous` | `base_pending` |
       `base_failed` | `base_not_snapshotted` | `base_expired` |
-      `untrusted_source` | `snapshot_conflict` | `lookup_failed`.
+      `untrusted_source` | `lookup_failed`.
     value: ${{ steps.fetch.outputs.outcome }}
   base-sha:
     description: 'The base commit the delta is measured against (empty when it could not be chosen).'

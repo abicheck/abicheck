@@ -55,17 +55,22 @@ cat "$WORK/base.out" >> "$GITHUB_OUTPUT"
 BASE=$(grep '^base-sha=' "$WORK/base.out" | cut -d= -f2)
 NAME=$("${CLI[@]}" snapshot-name "$BASE" --profile "${INPUT_PROFILE:-}")
 
+_lookup() {  # $1 = endpoint, $2 = jq path, $3 = output; paginated, flattened
+  if gh api -X GET "$1" "${@:4}" -f per_page=100 --paginate --jq "$2" \
+       > "$WORK/pages.json" 2>"$WORK/err"; then
+    "${CLI[@]}" flatten-pages "$WORK/pages.json" "$3"
+  else
+    cat "$WORK/err" >&2; echo '[]' > "$3"; return 1
+  fi
+}
+
 deadline=$(( $(date +%s) + ${INPUT_WAIT_TIMEOUT:-0} ))
 while :; do
   LOOKUP=()
-  if ! gh api -X GET "repos/$REPO/actions/artifacts" -f "name=$NAME" -f per_page=100 \
-       > "$WORK/artifacts.json" 2>"$WORK/err"; then
-    cat "$WORK/err" >&2; echo '{"artifacts":[]}' > "$WORK/artifacts.json"; LOOKUP=(--lookup-failed)
-  fi
-  if ! gh api -X GET "repos/$REPO/actions/workflows/$WORKFLOW/runs" -f "head_sha=$BASE" \
-       -f per_page=100 > "$WORK/runs.json" 2>"$WORK/err"; then
-    cat "$WORK/err" >&2; echo '{"workflow_runs":[]}' > "$WORK/runs.json"; LOOKUP=(--lookup-failed)
-  fi
+  _lookup "repos/$REPO/actions/artifacts" '.artifacts' "$WORK/artifacts.json" \
+    -f "name=$NAME" || LOOKUP=(--lookup-failed)
+  _lookup "repos/$REPO/actions/workflows/$WORKFLOW/runs" '.workflow_runs' "$WORK/runs.json" \
+    -f "head_sha=$BASE" || LOOKUP=(--lookup-failed)
   : > "$WORK/resolve.out"
   rc=0
   "${CLI[@]}" resolve-snapshot "$WORK/artifacts.json" "$WORK/runs.json" \
@@ -80,16 +85,31 @@ while :; do
   fi
   break
 done
-grep -v '^base-sha=' "$WORK/resolve.out" >> "$GITHUB_OUTPUT"
-[[ "$OUTCOME" == resolved ]] || _finish
+if [[ "$OUTCOME" != resolved ]]; then
+  grep -v '^base-sha=' "$WORK/resolve.out" >> "$GITHUB_OUTPUT"
+  _finish
+fi
 
+# `resolved` is published only once the snapshot is on disk. The extraction
+# goes into a fresh directory of its own under `destination`, so nothing the
+# caller already keeps there is touched.
+_unavailable() {
+  {
+    echo "outcome=lookup_failed"
+    echo "message=Delta unavailable: $1"
+  } >> "$GITHUB_OUTPUT"
+  _finish
+}
 ARTIFACT_ID=$(grep '^artifact-id=' "$WORK/resolve.out" | cut -d= -f2)
-gh api "repos/$REPO/actions/artifacts/$ARTIFACT_ID/zip" > "$WORK/snapshot.zip" \
-  || _fail "downloading artifact $ARTIFACT_ID failed."
-DEST="${INPUT_DESTINATION:?}"
-rm -rf "$DEST"
-"${CLI[@]}" extract-artifact "$WORK/snapshot.zip" "$DEST"
-SNAP=$(find "$DEST" -type f -name '*.json' | head -n1)
-[[ -n "$SNAP" ]] || _fail "artifact $ARTIFACT_ID held no snapshot file."
+gh api "repos/$REPO/actions/artifacts/$ARTIFACT_ID/zip" > "$WORK/snapshot.zip" 2>"$WORK/err" \
+  || { cat "$WORK/err" >&2; _unavailable "downloading snapshot artifact $ARTIFACT_ID failed."; }
+mkdir -p "${INPUT_DESTINATION:?}"
+DEST=$(mktemp -d "$INPUT_DESTINATION/snapshot.XXXXXX")
+"${CLI[@]}" extract-artifact "$WORK/snapshot.zip" "$DEST" \
+  --max-total-bytes 1073741824 --max-entry-bytes 1073741824 \
+  || _unavailable "snapshot artifact $ARTIFACT_ID could not be extracted safely."
+SNAP="$DEST/snapshot.json"
+[[ -f "$SNAP" ]] || _unavailable "snapshot artifact $ARTIFACT_ID holds no snapshot.json."
+grep -v '^base-sha=' "$WORK/resolve.out" >> "$GITHUB_OUTPUT"
 echo "snapshot-path=$SNAP" >> "$GITHUB_OUTPUT"
 _finish

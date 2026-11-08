@@ -114,16 +114,16 @@ _CASES: list[tuple[str, list[Any], list[Any], DeltaOutcome]] = [
         DeltaOutcome.RESOLVED,
     ),
     (
-        "re-run, different digest",
+        "re-run, different zip digest",
         [_art(1, 10), _art(2, 11, digest="sha256:bb")],
         [_run(10), _run(11)],
-        DeltaOutcome.SNAPSHOT_CONFLICT,
+        DeltaOutcome.RESOLVED,
     ),
     (
-        "two artifacts, no digest",
+        "two artifacts, no digest field",
         [_art(1, 10, digest=""), _art(2, 11, digest="")],
         [_run(10), _run(11)],
-        DeltaOutcome.SNAPSHOT_CONFLICT,
+        DeltaOutcome.RESOLVED,
     ),
     (
         "producer still running",
@@ -192,7 +192,7 @@ _CASES: list[tuple[str, list[Any], list[Any], DeltaOutcome]] = [
         "name of another commit ignored",
         [_art(1, 10, name="abicheck-main-" + "c" * 40)],
         [_run(10)],
-        DeltaOutcome.BASE_NOT_SNAPSHOTTED,
+        DeltaOutcome.BASE_EXPIRED,
     ),
     (
         "dispatch is a valid producer",
@@ -371,8 +371,14 @@ def _gh_stub(bin_dir: Path, data: Path) -> None:
 
 
 def _fetch(
-    tmp_path: Path, repo: _Repo, mode: str, *, publish_for: str | None
+    tmp_path: Path,
+    repo: _Repo,
+    mode: str,
+    *,
+    publish_for: str | None,
+    zip_members: dict[str, str] | None = None,
 ) -> dict[str, str]:
+    """Run the Action's run.sh. *zip_members* None = the download fails."""
     require_bash()
     data = tmp_path / "data"
     data.mkdir()
@@ -389,10 +395,16 @@ def _fetch(
             }
         ]
         runs = [_run(70, sha=publish_for)]
-    (data / "artifacts.json").write_text(json.dumps({"artifacts": artifacts}))
-    (data / "runs.json").write_text(json.dumps({"workflow_runs": runs}))
-    with zipfile.ZipFile(data / "snapshot.zip", "w") as zf:
-        zf.writestr("snapshot.json", '{"library": "base"}')
+    # The stub answers as `gh api --paginate --jq .<key>` does: the bare array.
+    (data / "artifacts.json").write_text(json.dumps(artifacts))
+    (data / "runs.json").write_text(json.dumps(runs))
+    members = (
+        {"snapshot.json": '{"library": "base"}'} if zip_members is None else zip_members
+    )
+    if zip_members != {"__download_fails__": ""}:
+        with zipfile.ZipFile(data / "snapshot.zip", "w") as zf:
+            for member, text in members.items():
+                zf.writestr(member, text)
     _gh_stub(tmp_path / "bin", data)
     out = tmp_path / "gh_output"
     out.write_text("")
@@ -702,3 +714,169 @@ def test_unreadable_rows_are_ignored_not_trusted() -> None:
         _EXPECT,
     )
     assert result.outcome is DeltaOutcome.UNTRUSTED_SOURCE
+
+
+def test_a_rerun_takes_the_newest_upload_and_reports_the_other() -> None:
+    result = resolve_snapshot(
+        [_art(3, 10), _art(8, 11, digest="sha256:bb")], [_run(10), _run(11)], _EXPECT
+    )
+    assert (result.artifact_id, result.run_id) == ("8", "11")
+    assert result.rejected == ("artifact 3: superseded by newer upload 8",)
+
+
+@pytest.mark.parametrize("bad", ["\u03bb", "x\u0663", "a b", "a/b"])
+def test_artifact_name_profile_is_ascii_only(bad: str) -> None:
+    with pytest.raises(ValueError):
+        snapshot_artifact_name(_BASE, bad)
+
+
+_GIT = pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
+
+
+@_GIT
+def test_run_sh_keeps_what_destination_already_holds(tmp_path: Path) -> None:
+    repo, mode, base = _history(tmp_path, "old-branch-merge-commit")
+    keep = tmp_path / "dest" / "build" / "libfoo.so"
+    keep.parent.mkdir(parents=True)
+    keep.write_text("built")
+    fields = _fetch(tmp_path, repo, mode, publish_for=base)
+    assert keep.read_text() == "built"
+    snap = Path(fields["snapshot-path"])
+    assert snap.name == "snapshot.json"
+    assert snap.parent.parent == tmp_path / "dest"
+
+
+@_GIT
+@pytest.mark.parametrize(
+    "members",
+    [
+        {"__download_fails__": ""},
+        {"other.json": "{}"},
+        {"notes.json": "{}", "nested/snapshot.json": "{}"},
+    ],
+    ids=["download fails", "no snapshot.json", "snapshot.json not at the root"],
+)
+def test_run_sh_never_reports_resolved_without_the_snapshot(
+    tmp_path: Path, members: dict[str, str]
+) -> None:
+    repo, mode, base = _history(tmp_path, "old-branch-merge-commit")
+    fields = _fetch(tmp_path, repo, mode, publish_for=base, zip_members=members)
+    assert fields["outcome"] == "lookup_failed"
+    assert fields.get("snapshot-path", "") == ""
+    assert fields["message"].startswith("Delta unavailable")
+
+
+def _snap_env(tmp_path: Path, **inputs: str) -> dict[str, str]:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    stub = bin_dir / "abicheck"
+    stub.write_text(
+        "#!/usr/bin/env bash\n"
+        f'printf "%s\\n" "$@" > "{tmp_path}/argv"\n'
+        'while [[ $# -gt 0 ]]; do [[ "$1" == -o ]] && echo "{}" > "$2"; shift; done\n',
+        encoding="utf-8",
+    )
+    stub.chmod(0o755)
+    env = {k: v for k, v in os.environ.items() if not k.startswith("INPUT_")}
+    env.update(
+        {
+            "PATH": os.pathsep.join(
+                [str(bin_dir), str(Path(sys.executable).parent), env["PATH"]]
+            ),
+            "GITHUB_OUTPUT": str(tmp_path / "o"),
+            "RUNNER_TEMP": str(tmp_path),
+            "SNAPSHOT_SHA": _BASE,
+            **inputs,
+        }
+    )
+    (tmp_path / "o").write_text("")
+    return env
+
+
+def test_main_snapshot_forwards_every_evidence_input(tmp_path: Path) -> None:
+    require_bash()
+    env = _snap_env(
+        tmp_path,
+        INPUT_LIBRARY="build/libfoo.so",
+        INPUT_HEADER="include/a.h\ninclude/b\n",
+        INPUT_DUMP_ARGS="-I include\n\n--define\nFOO=1\n",
+    )
+    result = subprocess.run(
+        [bash_executable(), str(_SNAP_SH)],
+        env=env,
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    argv = (tmp_path / "argv").read_text().splitlines()
+    out = _outputs(tmp_path / "o")["snapshot-path"]
+    assert argv == [
+        "dump", "build/libfoo.so", "-H", "include/a.h", "-H", "include/b",
+        "-I", "include", "--define", "FOO=1", "--label", _BASE, "-o", out,
+    ]  # fmt: skip
+
+
+@_GIT
+def test_main_snapshot_refuses_a_checkout_of_another_commit(tmp_path: Path) -> None:
+    require_bash()
+    repo = _Repo(tmp_path / "repo")
+    repo.commit("a")
+    snap = tmp_path / "s.json"
+    snap.write_text("{}")
+    env = _snap_env(tmp_path, INPUT_SNAPSHOT=str(snap))
+    result = subprocess.run(
+        [bash_executable(), str(_SNAP_SH)],
+        env=env,
+        cwd=repo.path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "not " + _BASE in result.stdout + result.stderr
+
+
+def test_main_snapshot_uses_a_new_directory_per_invocation(tmp_path: Path) -> None:
+    require_bash()
+    snap = tmp_path / "s.json"
+    snap.write_text("{}")
+    paths = []
+    for _ in range(2):
+        env = _snap_env(tmp_path, INPUT_SNAPSHOT=str(snap))
+        result = subprocess.run(
+            [bash_executable(), str(_SNAP_SH)],
+            env=env,
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        paths.append(_outputs(tmp_path / "o")["snapshot-path"])
+    assert paths[0] != paths[1]
+
+
+def test_a_successful_run_with_no_listed_artifact_reads_as_expired() -> None:
+    assert (
+        resolve_snapshot([], [_run(10)], _EXPECT).outcome is DeltaOutcome.BASE_EXPIRED
+    )
+
+
+def test_main_snapshot_refuses_a_truncated_adopted_snapshot(tmp_path: Path) -> None:
+    require_bash()
+    snap = tmp_path / "s.json"
+    snap.write_text('{"library": ')
+    env = _snap_env(tmp_path, INPUT_SNAPSHOT=str(snap))
+    result = subprocess.run(
+        [bash_executable(), str(_SNAP_SH)],
+        env=env,
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "not a readable JSON document" in result.stdout + result.stderr
+    assert "artifact-name" not in (tmp_path / "o").read_text()

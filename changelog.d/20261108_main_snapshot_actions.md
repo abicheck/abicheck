@@ -6,5 +6,5 @@
   a pull request's exact base commit (first parent of the merge commit,
   the merge-base in head mode, or the merge-queue base), verifying the
   uploading run. Every missing-base case is a named `outcome`
-  (`base_pending`, `base_expired`, `snapshot_conflict`, ...), never a
+  (`base_pending`, `base_expired`, `base_failed`, ...), never a
   substitute commit. See `docs/reference/main-snapshot.md`.

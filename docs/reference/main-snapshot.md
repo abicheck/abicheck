@@ -33,7 +33,7 @@ other pull requests are measured against.
 |---|---|---|
 | `library` | — | Library to `abicheck dump`. |
 | `header` | — | Header file/directory; one per line. |
-| `dump-args` | — | Extra `dump` arguments, one per line. Use the same evidence inputs as the PR side. |
+| `dump-args` | — | Extra `dump` arguments, one per line; a line such as `-I include` is split on whitespace. Use the same evidence inputs as the PR side. |
 | `snapshot` | — | An already-produced snapshot to upload instead of dumping. |
 | `profile` | — | Name suffix for multi-configuration projects. |
 | `retention-days` | `14` | Artifact lifetime. |
@@ -58,7 +58,7 @@ Chooses the base commit by an exact rule, then finds the snapshot uploaded
 | `branch` | repository default | Branch the snapshot must come from. |
 | `profile` | — | As in `main-snapshot`. |
 | `wait-timeout` | `600` | Seconds to wait while the base's snapshot run is still in progress. |
-| `destination` | runner temp | Where the snapshot is extracted. |
+| `destination` | runner temp | Parent directory; the snapshot is extracted into a new subdirectory of it. |
 | `github-token` | `github.token` | Needs `actions: read`. |
 
 Outputs: `outcome`, `base-sha`, `snapshot-path` (when resolved), `message`
@@ -66,8 +66,12 @@ Outputs: `outcome`, `base-sha`, `snapshot-path` (when resolved), `message`
 
 A snapshot is accepted only if the run that uploaded it is a `push`,
 `workflow_dispatch` or `schedule` run of `workflow` in this repository, on
-`branch`, concluded `success`, and built exactly the base commit. Several
-eligible uploads (re-runs) must share one content digest.
+`branch`, concluded `success`, and built exactly the base commit. When a
+re-run uploaded it again, the newest upload is used and the older one is
+logged as superseded. `main-snapshot` itself refuses to upload when the
+working directory is a checkout of a different commit than the one it is
+naming; a snapshot adopted from outside a checkout is the producing
+workflow's responsibility.
 
 ### Outcomes
 
@@ -82,10 +86,9 @@ other outcome may be read as "no changes".
 | `base_pending` | The base's snapshot run was still running after `wait-timeout`. | Re-run when it finishes. |
 | `base_failed` | The base's snapshot run did not succeed. | Fix the default-branch run. |
 | `base_not_snapshotted` | No snapshot run for the base (path filter, `[skip ci]`). | Snapshot every push, or accept no delta. |
-| `base_expired` | The snapshot passed `retention-days`. | Push or *Update branch*; a re-run reuses the old merge commit. |
+| `base_expired` | The snapshot passed `retention-days` (or the run that produced it succeeded but its artifact is no longer listed). | Push or *Update branch*; a re-run reuses the old merge commit. |
 | `untrusted_source` | An artifact with the right name came from another workflow, event, branch or commit. | Investigate; it is never used. |
-| `snapshot_conflict` | Eligible uploads differ in content. | Investigate the snapshot workflow's determinism. |
-| `lookup_failed` | The GitHub API call failed. | Retry; this is not "absent". |
+| `lookup_failed` | A GitHub API call or the download failed, or the artifact held no `snapshot.json`. | Retry; this is not "absent". |
 
 ## Example
 
@@ -121,5 +124,7 @@ jobs:
           new-library: build/libfoo.so
           new-header: include/
       - if: steps.base.outputs.outcome != 'resolved'
-        run: echo "${{ steps.base.outputs.message }}" >> "$GITHUB_STEP_SUMMARY"
+        env:
+          MESSAGE: ${{ steps.base.outputs.message }}   # data, never shell text
+        run: printf '%s\n' "$MESSAGE" >> "$GITHUB_STEP_SUMMARY"
 ```

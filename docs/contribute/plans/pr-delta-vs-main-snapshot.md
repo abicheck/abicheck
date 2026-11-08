@@ -155,7 +155,6 @@ partial delta naming both depths; it never silently narrows the delta.
 | `base_expired` | no | "snapshot for `<sha7>` expired — rebase onto or merge `main`" (head mode) / "push or *Update branch*" (re-run) |
 | `base_ambiguous` | no | "several merge-bases — rebase onto or merge `main`" |
 | `untrusted_source` | no | "a snapshot exists but did not come from the configured main workflow" |
-| `snapshot_conflict` | no | "several eligible snapshots for `<sha7>` differ in content; none was picked" |
 | `lookup_failed` | no | "the snapshot lookup failed (API error)" — an operational error, never "absent" |
 | `cache_miss` (cache storage) | no | "no cache entry for `<sha7>` — retry, or use `on-missing-base: build`" (the cache cannot tell pending from evicted) |
 
@@ -182,7 +181,7 @@ The release baseline is **never** used as a delta fallback.
 | Name / key | `abicheck-main-<full-sha>` (+ `-<profile>` for multi-profile) | `<prefix>-<profile>-<full-sha>` (existing `accepted_main_cache_key`) |
 | Lookup | `GET /repos/{o}/{r}/actions/artifacts?name=…` → exact name | `actions/cache/restore` with the **exact** key — never `restore-keys` |
 | Provenance check | the uploading run must be a run of the configured workflow in this repository, event `push`/`workflow_dispatch`/`schedule`, on the default branch, conclusion success, and its `head_sha` must equal the requested snapshot SHA (the ancestor's under path equivalence) | none available beyond "written from the default branch's scope"; documented as weaker |
-| Duplicates | re-runs can upload the same name twice: every eligible candidate must carry the same content `digest`, otherwise `snapshot_conflict` — never a silent pick | keys are immutable; no duplicates |
+| Duplicates | a re-run uploads the same name again; every eligible candidate was built from the base by the trusted workflow, so the newest is used and the others are logged as superseded. (Comparing archive `digest`s does not work: an artifact zip records upload timestamps.) | keys are immutable; no duplicates |
 | Lifetime | `retention-days` (default 14, max 90 per repo setting) | evicted after 7 days unused and by the 10 GiB LRU, which can evict unrelated caches |
 | Pending detection | list runs of the main workflow with `head_sha == base` and `status != completed` | not possible → only `not found` |
 | Fork PRs | needs `actions: read` on the read-only fork token (to verify on a public and a private repo during implementation) | default-branch caches are readable by PRs, forks included |
@@ -240,22 +239,23 @@ work, which publishes the delta report; nothing else changes.
 
 ### Pieces
 
-1. **`actions/main-snapshot`** (producer, **landed**). `dump` (or `baseline` for a
-   multi-library set) → upload `abicheck-main-<sha>` with `retention-days`.
-   Refuses to run on `pull_request`/`pull_request_target` (ADR-047 §12, same
-   rule as `update-main-baseline.yml`). Optional `storage: cache` writes the
-   existing `accepted-main` cache key instead; `update-main-baseline.yml`
+1. **`actions/main-snapshot`** (producer). *Landed:* `dump` of one library
+   (or adoption of a prepared snapshot) → upload `abicheck-main-<sha>` with
+   `retention-days`; refuses `pull_request`/`pull_request_target` (ADR-047
+   §12) and a checkout that is not the commit being named. *Planned:*
+   `baseline` for a multi-library set, and `storage: cache` writing the
+   existing `accepted-main` cache key, after which `update-main-baseline.yml`
    becomes a thin caller of this Action rather than a second implementation.
-2. **`actions/fetch-main-snapshot`** (consumer, **landed**). Inputs: `mode`
-   (`merge-commit`/`head`/`auto` from the event), `workflow`, `storage`,
-   `wait-timeout`, `base-equivalent-paths`. Computes the base commit,
-   resolves and verifies the snapshot, outputs `outcome`, `base-sha`,
-   `snapshot-sha`, `snapshot-path`. Read-only API calls only. Logic in a
-   `workflows/`-owned module (base selection + outcome typing are pure and
-   unit-testable without credentials); the Action is a thin shell. The
-   decision module landed in `abicheck/frontends/action/main_snapshot.py`,
-   beside `baseline_source.py`, because it reuses that package's
-   `SourceRun`/`verify_source_run` provenance checks.
+2. **`actions/fetch-main-snapshot`** (consumer). *Landed:* inputs `mode`
+   (`merge-commit`/`head`/`auto`), `workflow`, `branch`, `profile`,
+   `wait-timeout`, `destination`; outputs `outcome`, `base-sha`,
+   `snapshot-path`, `message`. Read-only API calls only. The decision module
+   is `abicheck/frontends/action/main_snapshot.py`, beside
+   `baseline_source.py`, because it reuses that package's
+   `SourceRun`/`verify_source_run` provenance checks; base selection and
+   outcome typing are pure and unit-tested without credentials. *Planned:*
+   `storage`, `base-equivalent-paths`, and a `snapshot-sha` output (it differs
+   from `base-sha` only under path equivalence).
 3. **Main Action inputs** `delta-baseline: main|<path>|''` and
    `on-missing-base`. When set, the Action runs the existing compare twice:
    the gate as today, and the delta compare with `pr-comment` routed to the
