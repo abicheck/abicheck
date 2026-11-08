@@ -6353,6 +6353,14 @@ else
     FINAL_EXIT=1
   fi
 
+  # ADR-090's UNCONFIRMED axis, unconditional for the same reason: no
+  # fail-on-* input governs it -- `assurance.unconfirmed: warn` is the opt-out,
+  # and under it the report's contribution is 0, so this does not fire.
+  if _unconfirmed_gated; then
+    echo "::error::abicheck could not confirm compatibility: a compared side has no type-level evidence (no debug info, no header AST); see unconfirmed in the JSON report. Supply headers for both sides or compare unstripped debug builds, or accept it with assurance.unconfirmed: warn."
+    FINAL_EXIT=1
+  fi
+
   # A report that claims a schema version whose contract includes the
   # assurance contribution, and then omits it. Unconditional for the same
   # reason as the axis check above, but a distinct failure: the axis did not

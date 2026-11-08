@@ -1030,3 +1030,41 @@ class TestTheReleaseSchemaSequence:
             "audit_report_schema_version",
             "release_schema_version",
         }
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (1, "1"),
+        (0, "0"),
+        # Hostile or malformed values from a report the run cannot vouch for:
+        # none may read as "gated", and none may reach the shell unescaped.
+        ("1", ""),
+        ("1; touch /tmp/pwned", ""),
+        ("$(touch /tmp/pwned)", ""),
+        (True, ""),
+        (2, ""),
+        (1.0, ""),
+        (None, ""),
+    ],
+)
+def test_unconfirmed_contribution_answers_only_a_real_zero_or_one(
+    tmp_path: Path, value: object, expected: str
+) -> None:
+    """ADR-090: `run.sh`'s `_unconfirmed_gated` reads this answer. Run as the
+    Action runs it (a subprocess); a sentinel proves no payload executed."""
+    sentinel = tmp_path / "pwned"
+    document = {
+        "report_schema_version": "7.3",
+        "verdict": "UNCONFIRMED",
+        "exit": {
+            "code": 1,
+            "unconfirmed_contribution": value
+            if not isinstance(value, str)
+            else value.replace("/tmp/pwned", str(sentinel)),
+        },
+    }
+    code, out, err = _ask_full(tmp_path, document, "unconfirmed_contribution")
+    assert code == 0, err
+    assert out.strip() == expected
+    assert not sentinel.exists()
