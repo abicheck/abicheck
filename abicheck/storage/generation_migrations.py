@@ -49,6 +49,7 @@ from typing import Any
 
 from .castxml_array_migration import migrate_castxml_array_counts
 from .castxml_base_offset_migration import migrate_castxml_base_offsets
+from .castxml_noexcept_migration import migrate_castxml_noexcept
 from .clang_vtable_base_migration import migrate_clang_vtable_bases
 from .versioning import (
     EXTRACTOR_GENERATION,
@@ -464,6 +465,19 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "rewrite is needed -- an older clang snapshot reads the alignment as "
         "not captured"
     ),
+    44: GenerationSpellingChange(
+        "no type or name spelling changes. castxml runs read a function's "
+        "noexcept specification and the public headers' C++20 concept and "
+        "template constraints from the clang AST of the same header "
+        "(extract/headers/castxml/clang_semantics_join.py), where castxml "
+        "stored is_noexcept=False for every function and no constraint table; "
+        "a function whose header spells a specification the join could not "
+        "read stores is_noexcept=None (not observed). "
+        "castxml_noexcept_migration.py loads a pre-44 castxml snapshot's C++ "
+        "is_noexcept=False as None, so an older baseline reports no "
+        "func_noexcept_added for an unchanged noexcept function; its missing "
+        "constraint table already reads as not modelled"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.
@@ -670,6 +684,7 @@ def migrate_and_describe(
         notices.extend(migrate_castxml_array_counts(document, extractor)[1])
         notices.extend(migrate_castxml_base_offsets(document, extractor)[1])
         notices.extend(migrate_clang_vtable_bases(document, extractor)[1])
+        notices.extend(migrate_castxml_noexcept(document, extractor)[1])
     if spellings >= EXTRACTOR_GENERATION:
         return document, generations, previous, tuple(notices)
     migrated, spelling_notices = _migrate_spellings(document, spellings)
@@ -680,4 +695,6 @@ def migrate_and_describe(
     notices.extend(offset_notices)
     migrated, vtable_notices = migrate_clang_vtable_bases(migrated, spellings)
     notices.extend(vtable_notices)
+    migrated, noexcept_notices = migrate_castxml_noexcept(migrated, spellings)
+    notices.extend(noexcept_notices)
     return migrated, generations, EXTRACTOR_GENERATION, tuple(notices)

@@ -44,6 +44,7 @@ from ....model.identity import entity_id_for_function
 from ...surface_fact_producers import header_ast_surface_facts
 from .abi_fundamental import castxml_type_abi_fact
 from .calling_convention import source_calling_conventions
+from .clang_semantics_join import special_member_key
 from .context import CastxmlParserContext
 from .duplicate_declarations import collapse_benign_duplicates
 from .location import (
@@ -553,6 +554,12 @@ def parse_function_element(
     )
 
     source_loc, loc_el = function_source_location(ctx, el)
+    noexcept = ctx.clang_semantics.function_noexcept(
+        (raw_mangled, mangled, special_member_key(el.tag, qualified_scope, params)),
+        (source_loc or "").rsplit(":", 1)[0],
+        bool(noexcept_re),
+        artificial=el.get("artificial") == "1",
+    )
     access = access_level(el)
     is_deleted = el.get("deleted") == "1"
     visibility_ = (
@@ -623,7 +630,10 @@ def parse_function_element(
             exported=exported_, judged_public=judged_public_, producer="castxml"
         ),
         is_virtual=is_virtual,
-        is_noexcept=bool(noexcept_re),
+        is_noexcept=bool(noexcept),
+        is_noexcept_fact=(
+            Fact.not_collected() if noexcept is None else Fact.present(noexcept)
+        ),
         is_extern_c=is_extern_c,
         vtable_index=vtable_index,
         source_location=source_loc,

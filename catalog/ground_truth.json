@@ -261,17 +261,6 @@
    "frontend_kind_differences": [
     {
      "kinds": [
-      "concept_tightened"
-     ],
-     "only_in": "clang",
-     "modes": [
-      "debug-headers"
-     ],
-     "reason": "castxml emits no element for a concept, so its header lane cannot model the constraint; build-source reports concept_tightened on both frontends through L4 replay",
-     "known_gap": "Catalog known-gap rows read `NO_CHANGE` at debug-headers depth: case105 on castxml (concept) and case98 (`-std` floor) (2026-11-05)"
-    },
-    {
-     "kinds": [
       "exported_not_public"
      ],
      "only_in": "clang",
@@ -283,15 +272,11 @@
    "api_break": true,
    "bad_practice": false,
    "category": "api_break",
-   "description": "A C++20 `concept` (`Addable`) gains an additional requirement (default-constructibility). Already-shipped binary instantiations keep linking, but consumers instantiating `sum<T>` for types that fail the tightened constraint no longer compile. The canonical truth is API_BREAK. It is missed by object/DWARF-only and header/castxml comparison (castxml emits concepts as `<Unimplemented kind=\"Concept\"/>`, no name, no body). The clang header backend models concepts and template constraints (AbiSnapshot.cxx_concept_constraints) and reports `concept_tightened` (API_BREAK) at header depth, as does L4 source-ABI replay when that opt-in evidence is supplied.",
+   "description": "A C++20 `concept` (`Addable`) gains an additional requirement (default-constructibility). Already-shipped binary instantiations keep linking, but consumers instantiating `sum<T>` for types that fail the tightened constraint no longer compile. The canonical truth is API_BREAK. Object/DWARF-only comparison misses it. Both header backends report `concept_tightened` (API_BREAK) at header depth: the clang backend from its own AST (AbiSnapshot.cxx_concept_constraints), the castxml backend from the clang AST of the same header (castxml itself emits concepts as `<Unimplemented kind=\"Concept\"/>`, no name, no body); L4 source-ABI replay reports it too when that opt-in evidence is supplied.",
    "expected": "API_BREAK",
    "expected_absent_kinds": [],
    "expected_kinds": [
     "concept_tightened"
-   ],
-   "known_gap": "castxml-backed header scans cannot observe the C++20 concept constraint because CastXML emits concepts as unnamed <Unimplemented> nodes; their NO_CHANGE verdict is a missed API_BREAK detection caused by insufficient evidence (assurance reads partial with the concept dimension named). The clang header backend models concepts and detects concept_tightened, as does L4 source-ABI replay.",
-   "known_gap_frontends": [
-    "castxml"
    ],
    "min_evidence": "L4",
    "platforms": [
@@ -319,11 +304,6 @@
      ]
     }
    },
-   "known_gap_variants": [
-    "debug-headers",
-    "release-headers",
-    "stripped-headers"
-   ],
    "source_abi_extractor": "clang",
    "source_abi_scope": "headers-only"
   },
@@ -1607,17 +1587,6 @@
    ]
   },
   "case15_noexcept_change": {
-   "expected_kinds_gaps": {
-    "castxml": [
-     {
-      "kinds": [
-       "func_noexcept_removed"
-      ],
-      "reason": "castxml 0.7's XML carries no exception specification for functions or methods (no noexcept attribute), so the castxml header lane cannot observe the noexcept removal; the clang header backend reports func_noexcept_removed.",
-      "known_gap": "castxml output carries no `noexcept` exception specification"
-     }
-    ]
-   },
    "allowed_kinds": [
     "imported_symbol_added",
     "runtime_floor_raised",
@@ -2042,8 +2011,22 @@
     "cet_protection_weakened"
    ],
    "fixture_preconditions": [
-    {"side": "v1", "property": "elf_gnu_property", "includes": ["IBT", "SHSTK"]},
-    {"side": "v2", "property": "elf_gnu_property", "excludes": ["IBT", "SHSTK"]}
+    {
+     "side": "v1",
+     "property": "elf_gnu_property",
+     "includes": [
+      "IBT",
+      "SHSTK"
+     ]
+    },
+    {
+     "side": "v2",
+     "property": "elf_gnu_property",
+     "excludes": [
+      "IBT",
+      "SHSTK"
+     ]
+    }
    ],
    "min_evidence": "L0",
    "platforms": [

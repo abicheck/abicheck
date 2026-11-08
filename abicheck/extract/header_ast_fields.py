@@ -111,7 +111,12 @@ class HeaderAstFields:
 
 
 def _concept_constraints(parser: object) -> dict[str, str] | None:
-    """The concept table of a C++ clang parse (``None`` for any other)."""
+    """The concept table of a C++ parse: the castxml parser's from its clang
+    join, the clang parser's from its own AST (``None``: not modelled)."""
+    joined = getattr(parser, "parse_cxx_concept_constraints", None)
+    if callable(joined):
+        table = joined()
+        return table if isinstance(table, dict) else None
     if not getattr(parser, "_is_cxx", False):
         return None
     return collect_cxx_concept_constraints(

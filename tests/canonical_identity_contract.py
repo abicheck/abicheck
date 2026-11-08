@@ -243,6 +243,7 @@ UNVERIFIED = frozenset(
         "func_lost_inline",
         "func_noexcept_added",
         "func_noexcept_removed",
+        "func_virtual_noexcept_added",
         "func_override_specifier_added",
         "func_override_specifier_removed",
         "func_pure_virtual_added",

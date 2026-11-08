@@ -62,6 +62,7 @@ __all__ = [
     "CXX_CONCEPT_HEADER_SCAN",
     "EXPORT_READ",
     "EXTENSION_FACTS",
+    "NOEXCEPT_UNOBSERVED",
     "ExtensionFact",
     "ExtensionFactRegistry",
     "ReaderSemantics",
@@ -307,8 +308,32 @@ CXX_CONCEPT_CONSTRAINTS: ExtensionFact[dict[str, str]] = ExtensionFact(
     decode=_str_map,
 )
 
+
+def _str_list(value: Any) -> list[str]:
+    if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+        raise TypeError("expected a list of str")
+    return sorted(set(value))
+
+
+#: The functions whose ``noexcept`` exception specification the producer did
+#: not observe (``Function.is_noexcept_fact`` ``NOT_COLLECTED``, extractor
+#: generation 44): a castxml run whose clang join could not read a header that
+#: spells one. Their mangled names, written on the ``declarations`` section
+#: when there is at least one. Absent, every stored ``is_noexcept`` was
+#: observed. An older reader that ignores it reads those functions as not
+#: ``noexcept`` -- what a castxml snapshot always stored -- so it is optional.
+NOEXCEPT_UNOBSERVED: ExtensionFact[list[str]] = ExtensionFact(
+    name="abicheck.noexcept_unobserved",
+    section="declarations",
+    semantics=ReaderSemantics.OPTIONAL,
+    absent_reads_as="every stored noexcept specification was observed",
+    owner="ADR-062",
+    encode=_str_list,
+    decode=_str_list,
+)
+
 #: This build's optional extension facts (ADR-062 D19). Add a fact by
 #: declaring it as a module constant above and listing it here.
 EXTENSION_FACTS = ExtensionFactRegistry(
-    (CXX_CONCEPT_HEADER_SCAN, CXX_CONCEPT_CONSTRAINTS, EXPORT_READ)
+    (CXX_CONCEPT_HEADER_SCAN, CXX_CONCEPT_CONSTRAINTS, EXPORT_READ, NOEXCEPT_UNOBSERVED)
 )

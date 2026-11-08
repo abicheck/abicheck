@@ -54,7 +54,22 @@ LEADING_ROWS: tuple[FactRow, ...] = (
     FactRow("Function", "params", _FULL, _FULL),
     FactRow("Function", "visibility", _FULL, _FULL),
     FactRow("Function", "is_virtual", _FULL, _FULL),
-    FactRow("Function", "is_noexcept", _FULL, _FULL),
+    FactRow(
+        "Function",
+        "is_noexcept",
+        _PARTIAL,
+        _FULL,
+        note=(
+            "castxml writes no `noexcept`, so the castxml backend reads it from "
+            "the clang AST of the same header "
+            "(`extract/headers/castxml/clang_semantics_join.py`). Without clang, "
+            "or for a function the join does not cover, a function declared in "
+            "a header that spells `noexcept`/`throw`/`nothrow` is `None` (not "
+            "observed): the detector declines it and the assurance rollup names "
+            "the dimension. C++20 concept/constraint tables "
+            "(`AbiSnapshot.cxx_concept_constraints`) come from the same join."
+        ),
+    ),
     FactRow("Function", "is_extern_c", _FULL, _FULL),
     FactRow(
         "Function",
@@ -676,7 +691,9 @@ _ABI_SLOT_NOTE = (
 )
 _ABI_SLOT_ROWS = (
     FactRow("Param", "type_abi_fact", _PARTIAL, _PARTIAL, note=_ABI_SLOT_NOTE),
-    FactRow("Function", "return_type_abi_fact", _PARTIAL, _PARTIAL, note=_ABI_SLOT_NOTE),
+    FactRow(
+        "Function", "return_type_abi_fact", _PARTIAL, _PARTIAL, note=_ABI_SLOT_NOTE
+    ),
     FactRow("Variable", "type_abi_fact", _PARTIAL, _PARTIAL, note=_ABI_SLOT_NOTE),
     FactRow("TypeField", "type_abi_fact", _PARTIAL, _PARTIAL, note=_ABI_SLOT_NOTE),
 )

@@ -44,6 +44,7 @@ from .extension_fact_catalog import (
     CXX_CONCEPT_HEADER_SCAN,
     EXPORT_READ,
     EXTENSION_FACTS,
+    NOEXCEPT_UNOBSERVED,
     ExtensionFact,
     ExtensionFactRegistry,
     ReaderSemantics,
@@ -59,6 +60,8 @@ from .wire_extensions import (
 __all__ = [
     "apply_export_read_fact",
     "apply_model_extension_facts",
+    "decode_noexcept_unobserved",
+    "encode_noexcept_unobserved",
     "read_extension_fact",
     "sync_export_read_fact",
     "sync_model_extension_facts",
@@ -218,6 +221,56 @@ def sync_model_extension_facts(snap: Any) -> None:
         write_extension_fact(snap, CXX_CONCEPT_CONSTRAINTS, table)
     elif table is None:
         _drop_extension_fact(snap, CXX_CONCEPT_CONSTRAINTS)
+    encode_noexcept_unobserved(snap)
+
+
+def _unobserved_noexcept(snap: Any) -> list[str]:
+    decls = getattr(snap, "declarations", None)
+    return sorted(
+        {
+            f.mangled
+            for f in getattr(decls, "functions", ())
+            if f.is_noexcept_fact is not None
+            and f.is_noexcept_fact.status is FactStatus.NOT_COLLECTED
+        }
+    )
+
+
+def encode_noexcept_unobserved(snap: Any) -> None:
+    """The side table of ``Function.is_noexcept_fact``: the functions whose
+    specification was not observed, as :data:`NOEXCEPT_UNOBSERVED` (the
+    per-function key is not written; ``fact_codec.encode_fact_fields`` drops
+    it). Dropped when there is none."""
+    if _blocked_reason(snap, NOEXCEPT_UNOBSERVED.section) is not None:
+        return
+    names = _unobserved_noexcept(snap)
+    if names:
+        write_extension_fact(snap, NOEXCEPT_UNOBSERVED, names)
+    else:
+        _drop_extension_fact(snap, NOEXCEPT_UNOBSERVED)
+
+
+def decode_noexcept_unobserved(snap: Any) -> None:
+    """Restore ``Function.is_noexcept_fact`` ``NOT_COLLECTED`` for every
+    listed function; the others keep the ``PRESENT`` fact their stored
+    ``is_noexcept`` decodes to. A stored value that does not decode is
+    refused: reading it as "all observed" is the false clean it records."""
+    fact = read_extension_fact(snap, NOEXCEPT_UNOBSERVED)
+    if fact.status is FactStatus.NOT_COLLECTED:
+        return
+    if fact.status is not FactStatus.PRESENT or fact.value is None:
+        if _blocked_reason(snap, NOEXCEPT_UNOBSERVED.section) is not None:
+            return
+        raise SnapshotError(
+            "snapshot's noexcept_unobserved extension fact is unreadable: "
+            + "; ".join(str(d) for d in fact.diagnostics)
+        )
+    names = set(fact.value)
+    for func in snap.declarations.functions:
+        if func.mangled in names:
+            # Both halves set together, so the bridged pair stays consistent.
+            func.is_noexcept = False
+            func.is_noexcept_fact = Fact.not_collected()
 
 
 def _drop_extension_fact(snap: Any, fact: ExtensionFact[Any]) -> None:
@@ -258,6 +311,7 @@ def apply_model_extension_facts(snap: Any) -> None:
     not decode is refused rather than read as that no-gap answer."""
     apply_export_read_fact(snap)
     _apply_concept_constraints(snap)
+    decode_noexcept_unobserved(snap)
     scan = read_extension_fact(snap, CXX_CONCEPT_HEADER_SCAN)
     if scan.status is FactStatus.PRESENT and isinstance(scan.value, bool):
         snap.cxx_concept_header_scan = scan.value

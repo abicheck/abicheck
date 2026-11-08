@@ -39,7 +39,7 @@ import subprocess
 import tempfile
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 from xml.etree.ElementTree import Element, tostring
 
 from ....dumper_ast_config_cpp20 import _detect_cpp20_headers
@@ -72,6 +72,7 @@ from ..toolchain import (
 )
 from .abi_fundamental import probe_plain_char_unsigned
 from .calling_convention import calling_conventions_in
+from .clang_semantics_join import join_clang_semantics
 from .dumper import _CastxmlParser
 from .hidden_declarations import attach_hidden_declarations
 from .policy import evaluate_castxml_version
@@ -298,22 +299,24 @@ def castxml_dump(
         )
         # castxml has no element for a variable template; clang's const ones
         # are written in as Variable elements (see variable_template_join).
-        return join_variable_templates(
-            joined,
-            key,
-            headers=headers,
-            extra_includes=extra_includes,
-            compiler=compiler,
-            gcc_path=gcc_path,
-            gcc_prefix=gcc_prefix,
-            gcc_options=gcc_options,
-            gcc_option_tokens=gcc_option_tokens,
-            sysroot=sysroot,
-            nostdinc=nostdinc,
-            lang=lang,
-            extra_hash_dirs=extra_hash_dirs,
-            exported_symbols=exported_symbols,
-        )
+        clang_inputs: dict[str, Any] = {
+            "headers": headers,
+            "extra_includes": extra_includes,
+            "compiler": compiler,
+            "gcc_path": gcc_path,
+            "gcc_prefix": gcc_prefix,
+            "gcc_options": gcc_options,
+            "gcc_option_tokens": gcc_option_tokens,
+            "sysroot": sysroot,
+            "nostdinc": nostdinc,
+            "lang": lang,
+            "extra_hash_dirs": extra_hash_dirs,
+            "exported_symbols": exported_symbols,
+        }
+        joined = join_variable_templates(joined, key, **clang_inputs)
+        # noexcept and C++20 constraints: castxml writes neither (see
+        # clang_semantics_join).
+        return join_clang_semantics(joined, key, **clang_inputs)
 
     if _expected_acquisition_key is not None and key != _expected_acquisition_key:
         raise SnapshotError("header inputs changed before CastXML acquisition started")

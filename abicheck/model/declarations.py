@@ -143,6 +143,11 @@ class Function:
     params: list[Param] = field(default_factory=list)
     visibility: Visibility = Visibility.PUBLIC
     is_virtual: bool = False
+    # Availability lives in is_noexcept_fact (below): NOT_COLLECTED when the
+    # producer did not observe the exception specification -- a castxml run
+    # whose clang join could not read a header that spells one, or a
+    # pre-generation-44 castxml baseline (which stored a blanket False). A
+    # constructor given is_noexcept=None records exactly that.
     is_noexcept: bool = False
     is_extern_c: bool = False
     vtable_index: int | None = None
@@ -359,6 +364,13 @@ class Function:
     )
     # Fact[bool] sibling of is_inline -- case (a), see the field's comment.
     is_inline_fact: Fact[bool] | None = field(default=None, kw_only=True)
+    # Fact[bool] sibling of is_noexcept (schema v70): NOT_COLLECTED when the
+    # exception specification was not observed; the detector declines then.
+    # Not a record key: storage carries it as the abicheck.noexcept_unobserved
+    # extension fact (storage/extension_facts.py).
+    is_noexcept_fact: Fact[bool] | None = field(
+        default=None, kw_only=True, metadata={"wire": False}
+    )
     # The three facts ``Visibility`` conflated (see
     # ``model/surface_facts.py``, which owns every read of these): (a) a
     # header this run parsed declares this entity, (b) it belongs to the
@@ -419,6 +431,11 @@ class Function:
         )
         self.is_inline, self.is_inline_fact = bridge_legacy_and_fact(
             self.is_inline, self.is_inline_fact, _OMITTED_FUNC_IS_INLINE, False
+        )
+        # A legacy None (not observed) is this field's omission marker; the
+        # resting default False stays a real answer, as it always was.
+        self.is_noexcept, self.is_noexcept_fact = bridge_legacy_and_fact(
+            self.is_noexcept, self.is_noexcept_fact, cast(bool, None), False
         )
 
 

@@ -44,6 +44,7 @@ from __future__ import annotations
 from xml.etree.ElementTree import Element
 
 from ...declaration_provenance import build_public_set
+from .clang_semantics_join import CastxmlClangSemantics, load_clang_semantics
 from .hidden_declarations import read_hidden_declarations
 from .preprocessed_text import PreprocessedText, read_preprocessed_text
 
@@ -105,6 +106,9 @@ class CastxmlParserContext:
         #: the declaration reaching it (``ms_abi``); castxml drops it from the
         #: XML (``function_type_cc``). Empty when no convention was joined.
         self.function_type_cc: dict[str, str] = {}
+        #: ``noexcept`` and C++20 constraint facts read from the clang AST of
+        #: the same header (``clang_semantics_join``); empty when not joined.
+        self.clang_semantics: CastxmlClangSemantics = load_clang_semantics(root)
         self.virtual_methods_by_class: dict[str, list[Element]] = {}
         self.source_lines_cache: dict[str, list[str]] = {}
         #: Preprocessed declaration text and the target's default calling

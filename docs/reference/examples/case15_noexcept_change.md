@@ -13,7 +13,6 @@
 | **Toolchain-dependent `ChangeKind`s** | `imported_symbol_added`, `runtime_floor_raised`, `symbol_version_required_added` (may or may not appear; not part of what the case tests) |
 | **Rule family** | [`noexcept-change`](by-rule/noexcept-change.md) |
 | **Subject** | [Build-flag and toolchain-mode drift](by-subject/build-flag-and-toolchain-mode-drift.md) |
-| **Known kind gap (castxml; debug-headers, build-source)** | `func_noexcept_removed` — see note below |
 
 **Category:** Risk | **Verdict:** 🟡 COMPATIBLE_WITH_RISK
 
@@ -71,16 +70,16 @@ These three deployment-risk kinds come from the toolchain (which
 `GLIBCXX_*` versions v2's throw path happens to need), so the ground truth
 lists them as `allowed_kinds`, not as the case's subject. The subject is
 the `noexcept` removal itself. With headers (`-H v1.h` / `-H v2.h`, L2),
-the clang header backend reports it:
+both header backends report it:
 
 ```text
 - func_noexcept_removed: Buffer::reset() lost noexcept
 ```
 
-The default castxml backend does not: castxml's XML carries no exception
-specification, so this kind is a declared castxml gap
-(`expected_kinds_gaps` in `ground_truth.json`; see
-`docs/contribute/known-gaps.md`).
+castxml's own XML carries no exception specification; the castxml backend
+reads it from the clang AST of the same header. Without clang installed it
+cannot, and the report says so: the comparison is declined and
+`analysis_assurance` reads `partial`, naming the noexcept dimension.
 
 ## Minimum evidence
 
@@ -193,10 +192,6 @@ echo "exit: $?"   # → 0 — abidiff misses this change entirely
 - `checker_policy.py` — `RISK_KINDS`
 
 ---
-
-## Ground-truth provenance
-
-**Known kind gap (castxml):** castxml 0.7's XML carries no exception specification for functions or methods (no noexcept attribute), so the castxml header lane cannot observe the noexcept removal; the clang header backend reports func_noexcept_removed. (known gap: castxml output carries no `noexcept` exception specification)
 
 ## Source files
 

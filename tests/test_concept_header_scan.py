@@ -148,7 +148,10 @@ def test_only_the_given_public_headers_are_read(tmp_path: Path) -> None:
     ("old_scan", "new_scan", "sides"),
     [
         (True, True, ["old", "new"]),
-        (True, False, ["old"]),
+        # A constrained side makes an unmodelled baseline a gap too: a
+        # requires-clause added to a template leaves the old headers spelling
+        # none, and an unmodelled old side hides that tightening.
+        (True, False, ["old", "new"]),
         (None, True, ["new"]),
         (False, None, []),
     ],
@@ -186,8 +189,10 @@ def test_case105_concept_tightening_through_the_cli_per_backend(
     tmp_path: Path, frontend: str
 ) -> None:
     """Catalog case105 (concept tightened) through the public dump/compare CLI:
-    castxml never reads ``complete`` and names the concept dimension on both
-    sides; clang detects ``concept_tightened`` and names no concept gap."""
+    both backends detect ``concept_tightened`` and name no concept gap --
+    castxml through its clang join (extractor generation 44). Without a
+    clang for that join, castxml never reads ``complete`` and names the
+    concept dimension on both sides."""
     import shutil
 
     from tests.test_known_gap_canaries_header_backends import (
@@ -217,9 +222,9 @@ def test_case105_concept_tightening_through_the_cli_per_backend(
         "new_scan": _snapshot_scan(tmp_path / "v2.json"),
     }
     fallback = [n for n in assurance["notes"] if n.startswith(SCOPE_FALLBACK_DIMENSION)]
-    if frontend == "clang" and not fallback:
-        # clang models the concepts: the tightening is detected and no
-        # concept gap is named on either side.
+    if shutil.which("clang") is not None and not fallback:
+        # clang (or castxml's clang join) models the concepts: the
+        # tightening is detected and no concept gap is named on either side.
         kinds = {c["kind"] for c in report.get("changes", [])}
         assert "concept_tightened" in kinds, diagnostics
         assert named == [], diagnostics
@@ -248,3 +253,29 @@ def _snapshot_scan(path: Path) -> dict[str, object]:
         "ast_fallback_reason": getattr(snap, "ast_fallback_reason", None),
         "functions": len(getattr(snap, "functions", None) or ()),
     }
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        # Type-constraints: castxml without its clang join cannot see them.
+        ("template <std::integral T> struct C;", True),
+        ("template <std::convertible_to<int> T> void h(T);", True),
+        ("template <Sortable... Ts> void g();", True),
+        ("inline int t(std::integral auto v);", True),
+        ("inline int t(const std::integral auto& v);", True),
+        # Unconstrained spellings that look similar.
+        ("template <typename T> struct A;", False),
+        ("template <class T, int N = 8> struct B;", False),
+        ("template <std::size_t N> struct D;", False),
+        ("template <typename T, typename... Ts> void g();", False),
+        ("template <template <class> class TT> struct E;", False),
+        ("template <> struct A<int>;", False),
+        ("inline auto f() { return 1; }", False),
+        ("constexpr auto k = 1;", False),
+        ("void f(const auto& v);", False),
+        ("// template <std::integral T> struct C;\nint f();", False),
+    ],
+)
+def test_type_constraints_are_scanned(text: str, expected: bool) -> None:
+    assert header_declares_concept_or_requires(text) is expected

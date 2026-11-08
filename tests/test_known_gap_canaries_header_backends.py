@@ -39,7 +39,6 @@ from typing import Any
 
 import pytest
 
-from abicheck.policy.analysis_assurance._concepts import CONCEPT_GAP_DIMENSION
 from tests._abicheck_subprocess import abicheck_command, abicheck_env
 from tests.test_template_default_assurance_gap import _compare as _header_only_compare
 
@@ -285,41 +284,9 @@ def test_legacy_dumper_dump_leaves_a_clang_record_unsized(
     assert sizes(dump(lib, headers=headers, version="v1")) == [("W", None)]
 
 
-# -- "Catalog known-gap rows at debug-headers depth read NO_CHANGE (case105, case98)"
-
-
-def test_case105_concept_tightening_debug_headers_per_backend(
-    tmp_path: Path,
-) -> None:
-    """castxml cannot see a C++20 concept (NO_CHANGE, partial, dimension
-    named); clang models concepts and detects the tightening, naming no gap."""
-    _require("castxml", "clang", "g++")
-    answers = {}
-    for frontend in ("castxml", "clang"):
-        work = tmp_path / frontend
-        work.mkdir()
-        report = _compare_libraries(
-            work,
-            frontend=frontend,
-            lang="c++",
-            sides=_catalog_sides(
-                "case105_concept_tightening", (["-std=c++20"], ["-std=c++20"])
-            ),
-            debug=True,
-        )
-        named = any(
-            n.startswith(CONCEPT_GAP_DIMENSION)
-            for n in report["analysis_assurance"]["notes"]
-        )
-        answers[frontend] = (
-            report["verdict"],
-            "concept_tightened" in _kinds(report),
-            named,
-        )
-    assert answers == {
-        "castxml": ("NO_CHANGE", False, True),
-        "clang": ("API_BREAK", True, False),
-    }, answers
+# -- "Catalog known-gap rows at debug-headers depth read NO_CHANGE (case98)"
+# case105 (concept) is fixed on both backends; its regression test is
+# tests/test_concept_header_scan.py::test_case105_concept_tightening_through_the_cli_per_backend.
 
 
 def test_case98_standard_floor_reads_partial_no_change_at_debug_headers(
