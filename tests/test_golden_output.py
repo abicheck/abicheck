@@ -230,10 +230,14 @@ def test_golden_leaked_dependency_symbol(update_goldens: bool) -> None:
     """Leaked dependency symbol removed → COMPATIBLE_WITH_RISK output is stable."""
     from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolBinding, SymbolType
 
-    def _elf_sym(name: str, origin: str | None = None) -> ElfSymbol:
+    def _elf_sym(
+        name: str,
+        origin: str | None = None,
+        binding: SymbolBinding = SymbolBinding.WEAK,
+    ) -> ElfSymbol:
         return ElfSymbol(
             name=name,
-            binding=SymbolBinding.WEAK,
+            binding=binding,
             sym_type=SymbolType.FUNC,
             size=0,
             version="",
@@ -248,7 +252,13 @@ def test_golden_leaked_dependency_symbol(update_goldens: bool) -> None:
         needed=["libstdc++.so.6"],
         symbols=[
             _elf_sym("_Z7computei"),
-            _elf_sym("_ZNSt6thread8_M_startEv", "libstdc++.so.6"),
+            # A statically linked libstdc++ re-exports its own non-template
+            # definition GLOBAL. A WEAK copy would be a coalesced (COMDAT)
+            # instance every consumer emits too, which is compatible
+            # (ADR-089 A7, tests/test_toolchain_rebuild_drift.py).
+            _elf_sym(
+                "_ZNSt6thread8_M_startEv", "libstdc++.so.6", SymbolBinding.GLOBAL
+            ),
         ],
     )
 

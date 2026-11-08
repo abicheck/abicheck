@@ -5,7 +5,7 @@
       "abicheck/ctf_metadata.py": "42d3f588c6c4567c2a9d43a3ef5b886a753c37dd5357a4199d81d7ffc60d2109",
       "abicheck/dumper.py": "fcd2874b1a06387a500f483c4fdc094ea47cf57cba897adfd8e9583fae6bb09b",
       "abicheck/dumper_clang.py": "0ee5831454abd776a07706b7c9a69d6fa3136dad37890f70e4103f4c940f3d05",
-      "abicheck/dwarf_advanced.py": "1e3f46ae917457ad2193b20d0ce5ebf7b6467b1cd12cc117a9ca1d1224440e40",
+      "abicheck/dwarf_advanced.py": "3b75113e5d03388ed2740a361a0f618bccb323c9d50bffc7bf39981ac7d20dc1",
       "abicheck/dwarf_metadata.py": "a0621cde6559a0395b00d08aa25cc4cbff74b1121e2083e424e472c44b985512",
       "abicheck/dwarf_presence.py": "7e73580ec7a02fdf24e3815cb89e42aa6fe00e46e8cda6b7fe9d547f06ac3f06",
       "abicheck/dwarf_snapshot.py": "f0e8fce9495c762539ffa051662dc2bd5a375817f8b8c6f648a2135ceebf59eb",
@@ -51,6 +51,7 @@
       "abicheck/extract/dwarf_scope.py": "1800757661a850338d8cb96d715995ffa8f79354047f68b1ce5e248a72819b20",
       "abicheck/extract/dwarf_subtree_index.py": "45ffbba03c1eeb9f8a1d9ed54ab3f3e2492363d4b56e16944f326154c7654aa9",
       "abicheck/extract/dwarf_type_names.py": "dab8b4167a3c69e3e8d92b4e1cb08ba58df4e9c59fd5f8d064e83c84405c016a",
+      "abicheck/extract/dwarf_value_abi_trait.py": "74b5b1d1d03fc8547194527a9eefa07f2d2e866cf6fa3be0ae3e7a21403d210b",
       "abicheck/extract/dwarf_vptr_resolution.py": "756dfe22e692c77de3b06fa3d86959b4e1c1bdd0d3729fae66743e923bbc2a68",
       "abicheck/extract/dwarf_vtable_completeness.py": "8a03fbbb12c5dfd13598251e6dbf8b58ff015e538fb0635f4afbfdb754d054da",
       "abicheck/extract/elf_abi_flags.py": "426d6d97328e32071a84422c130bdefebe31cee85a91146efe8c01f7ce97d87f",
@@ -202,9 +203,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "ca2cd759097fceaf0852422320cdfc9d55314b5ba530238e4ee781fd2fae4515",
+    "fingerprint": "4a08867275a4a962a48a70f8090c04197de6a34c00f2650d2f4347fa5a5fcd6e",
     "generation": 44,
-    "reason": "bumped to 44 for a semantic change"
+    "reason": "generation 44's value-ABI triviality reading moved verbatim from dwarf_advanced.py into extract/dwarf_value_abi_trait.py in the same PR; recorded once the move settled"
   },
   "resolver": {
     "files": {

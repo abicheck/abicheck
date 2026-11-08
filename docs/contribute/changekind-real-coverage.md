@@ -17,7 +17,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 
 - Total kinds: **426**
 - Kinds with at least one real source: **181**
-- Kinds per source: catalog 160, field_shapes 9, integration 59
+- Kinds per source: catalog 160, field_shapes 9, integration 60
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
@@ -149,7 +149,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `runtime_weak_resolution_changed` | RISK | 0 | 0 | 0 |
 | `soname_changed` | RISK | 1 | 0 | 1 |
 | `soname_missing` | COMPATIBLE | 1 | 0 | 0 |
-| `stack_canary_removed` | RISK | 1 | 0 | 0 |
+| `stack_canary_removed` | RISK | 1 | 0 | 1 |
 | `static_tls_introduced` | RISK | 1 | 0 | 0 |
 | `static_tls_removed` | COMPATIBLE | 0 | 0 | 0 |
 | `support_promise_component_introduced` | COMPATIBLE | 0 | 0 | 0 |
