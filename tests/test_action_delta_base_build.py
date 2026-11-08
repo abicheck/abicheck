@@ -820,3 +820,17 @@ def test_a_built_base_of_another_library_is_never_compared(tmp_path: Path) -> No
     (dump,) = [c for c in calls if c[0] == "dump"]
     record = Path(dump[dump.index("-o") + 1]).parent / "operand.json"
     assert json.loads(record.read_text())["path"].endswith("libnew.so")
+
+
+@pytest.mark.parametrize("outcome", ["resolved", "base_built"])
+def test_a_measured_delta_states_a_non_trivial_operand_pairing(outcome: str) -> None:
+    lines = delta_notes(outcome, base_sha=_SHA, operand_match="declared")
+    assert "paired with this PR's by `delta-operand-map`" in lines[1]
+    assert len(lines) == 3
+
+
+def test_an_unavailable_delta_never_states_a_pairing() -> None:
+    assert (
+        len(delta_notes("base_build_failed", base_sha=_SHA, operand_match="declared"))
+        == 2
+    )
