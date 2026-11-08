@@ -37,23 +37,31 @@ COMPATIBLE_VERSION_BUMPS: frozenset[str] = frozenset({"none", "patch"})
 
 def absence_violations(report: Mapping[str, Any]) -> list[str]:
     """Violations of invariant A in one compare-report JSON document."""
+    return [*verdict_violations(report), *version_bump_violations(report)]
+
+
+def verdict_violations(report: Mapping[str, Any]) -> list[str]:
+    """A compatibility verdict on a run whose evidence was absent."""
     status = (report.get("analysis_assurance") or {}).get("status")
-    if status not in ABSENT_EVIDENCE_STATUSES:
-        return []
-    problems: list[str] = []
     verdict = report.get("verdict")
-    if verdict in COMPATIBILITY_CLAIMS:
-        problems.append(
+    if status in ABSENT_EVIDENCE_STATUSES and verdict in COMPATIBILITY_CLAIMS:
+        return [
             f"verdict {verdict} asserts compatibility while "
             f"analysis_assurance.status is {status!r}"
-        )
+        ]
+    return []
+
+
+def version_bump_violations(report: Mapping[str, Any]) -> list[str]:
+    """A release recommendation that presumes compatibility on absent evidence."""
+    status = (report.get("analysis_assurance") or {}).get("status")
     bump = (report.get("release_recommendation") or {}).get("version_bump")
-    if bump in COMPATIBLE_VERSION_BUMPS:
-        problems.append(
+    if status in ABSENT_EVIDENCE_STATUSES and bump in COMPATIBLE_VERSION_BUMPS:
+        return [
             f"release_recommendation.version_bump {bump!r} presumes compatibility "
             f"while analysis_assurance.status is {status!r}"
-        )
-    return problems
+        ]
+    return []
 
 
 def gate_violations(exit_code: int, status: str | None) -> list[str]:

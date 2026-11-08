@@ -204,10 +204,17 @@ current emitter, which is unchanged.
 
 #### A stripped library compared without headers reads `NO_CHANGE` with `partial` assurance and exit 0 (2026-11-08)
 
-**Status (2026-11-08): OPEN.** Found while building the invariant oracles (`tests/test_invariant_oracles_reduced_evidence.py`). Three shapes reproduce it: both sides stripped (`NO_CHANGE`, `partial`), old side with DWARF and new side stripped (`COMPATIBLE`, `partial`), and both stripped with `--depth headers` and no headers (`NO_CHANGE`, `failed`). The fix is [ADR-090](adr/090-unresolved-surface-is-not-a-clean-verdict.md) (proposed).
+**Status (2026-11-08): OPEN.** Found while building the invariant oracles (`tests/test_invariant_oracles_reduced_evidence.py`).
 [Full write-up](known-gaps/a-stripped-library-compared-without-headers-reads-no-change-with-partial-assurance-and-exit-0.md)
-`false-clean` — a compare without type-level evidence on a side reads a clean verdict with exit 0 and an accepted headline in the terminal, Markdown, review and HTML reports.
+`false-clean` — a symbols-only compare of a stripped library reads `NO_CHANGE` with exit 0 and an accepted headline.
 <!-- canary: tests/test_invariant_oracles_reduced_evidence.py::test_stripped_pair_gap_is_still_the_current_answer -->
+
+#### One-sided DWARF or an unmet `--depth headers` request reads a clean verdict with exit 0 (2026-11-08)
+
+**Status (2026-11-08): OPEN.** Found by the evidence-shape oracles (`tests/test_invariant_oracles_evidence_shapes.py`). Sibling shapes of the stripped-pair entry above: an old library with DWARF against a stripped new one reads `COMPATIBLE` (`partial`, `version_bump: patch`), and a stripped pair compared with `--depth headers` and no headers reads `NO_CHANGE` (`failed`). Both exit 0, and every renderer states the clean result. [ADR-090](adr/090-unresolved-surface-is-not-a-clean-verdict.md) (proposed) covers both.
+[Full write-up](known-gaps/one-sided-dwarf-or-an-unmet-depth-headers-request-reads-a-clean-verdict-with-exit-0.md)
+`false-clean` — a compare with type-level evidence on one side only, or with its requested depth unmet, reads clean with exit 0.
+<!-- canary: tests/test_invariant_oracles_evidence_shapes.py::test_one_sided_and_unmet_depth_gap_is_still_the_current_answer -->
 
 #### A castxml base whose bare leaf two records share is not resolved by the leak walk (2026-11-05)
 
