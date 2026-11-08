@@ -32,6 +32,7 @@ from .cli_base import EXIT_REFUSED, _read_json, action_cli
 from .main_snapshot import (
     DeltaOutcome,
     SnapshotExpectation,
+    delta_notes,
     outcome_message,
     resolve_snapshot,
     select_base_commit,
@@ -162,3 +163,27 @@ def resolve_snapshot_cmd(
     click.echo(resolution.message)
     if resolution.outcome is not DeltaOutcome.RESOLVED:
         sys.exit(EXIT_REFUSED)
+
+
+@action_cli.command("delta-notes")
+@click.option("--outcome", required=True)
+@click.option("--base-sha", default="")
+@click.option("--branch", default="main")
+@click.option("--gate-verdict", default="")
+@click.option("--merge-group", is_flag=True, default=False)
+def delta_notes_cmd(
+    outcome: str, base_sha: str, branch: str, gate_verdict: str, merge_group: bool
+) -> None:
+    """Print the delta-baseline comment notes, one per line."""
+    try:
+        lines = delta_notes(
+            outcome,
+            base_sha=base_sha,
+            branch=branch,
+            gate_verdict=gate_verdict,
+            merge_group=merge_group,
+        )
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
+    for line in lines:
+        click.echo(line)

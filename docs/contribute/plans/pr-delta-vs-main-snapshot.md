@@ -12,8 +12,9 @@ generated: false
 (absent is not removed) · **Status:** pieces 1–2 landed (`actions/main-snapshot`,
 `actions/fetch-main-snapshot`, `abicheck/frontends/action/main_snapshot.py`);
 piece 3 landed (main Action `delta-baseline`, `delta-on-missing-base:
-report|fail`, the comment's two notes via `pr_comment --note`); open: piece 4's
-report-schema field, notes on the artifact (fork) path, `on-missing-base:
+report|fail`, the comment's two notes via `pr_comment --note`, and on the
+artifact (fork) path via `analysis_context`); open: piece 4's
+report-schema field, `on-missing-base:
 build`, path equivalence, cache storage · **Effort:** L
 
 ## Problem

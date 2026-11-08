@@ -35,6 +35,7 @@ rule is testable with no credentials -- the same split as
 from __future__ import annotations
 
 import enum
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -48,6 +49,8 @@ from .run_selection import (
 
 __all__ = [
     "BaseSelection",
+    "COMMENT_ONLY_OUTCOMES",
+    "delta_notes",
     "DeltaOutcome",
     "SNAPSHOT_ARTIFACT_PREFIX",
     "SnapshotExpectation",
@@ -380,3 +383,60 @@ def resolve_snapshot(
     else:
         outcome = DeltaOutcome.BASE_NOT_SNAPSHOTTED
     return SnapshotResolution(outcome, message=outcome.value, rejected=tuple(rejected))
+
+
+# ── the PR comment's notes ──────────────────────────────────────────────────
+
+#: Decided by the main Action after the lookup, not by it: the snapshot
+#: resolved but the comparison is not one a single-library delta can describe,
+#: or the delta rerun produced no report.
+COMMENT_ONLY_OUTCOMES = {
+    "unsupported_operand": (
+        "Delta unavailable: delta-baseline compares one library; this is a "
+        "directory/package comparison."
+    ),
+    "rerun_failed": (
+        "Delta unavailable: the comparison against the default-branch snapshot "
+        "produced no report."
+    ),
+}
+
+_GATE_VERDICT = re.compile(r"^[A-Z][A-Z_]{0,39}$")
+
+
+def delta_notes(
+    outcome: str,
+    *,
+    base_sha: str = "",
+    branch: str = "main",
+    gate_verdict: str = "",
+    merge_group: bool = False,
+) -> list[str]:
+    """The two quoted lines a delta-baseline comment carries.
+
+    The one place their wording lives: the main Action's direct comment and
+    the trusted fork publisher both call this, and the publisher calls it
+    from *structured* fields of an analysis context a fork wrote -- never
+    from text the fork chose. An unknown outcome is refused, not rendered.
+    """
+    if outcome in COMMENT_ONLY_OUTCOMES:
+        first = COMMENT_ONLY_OUTCOMES[outcome]
+    else:
+        try:
+            parsed = DeltaOutcome(outcome)
+        except ValueError as exc:
+            raise ValueError(f"unknown delta outcome {outcome!r}") from exc
+        first = outcome_message(
+            parsed,
+            sha=base_sha,
+            branch=branch or "main",
+            subject="merge-queue entry" if merge_group else "PR",
+        )
+    if first.startswith("Delta unavailable"):
+        first += " Showing the release-baseline comparison."
+    verdict = gate_verdict if _GATE_VERDICT.match(gate_verdict or "") else "unknown"
+    gate = (
+        f"Release gate: {verdict} (the comparison against the configured "
+        "baseline); this check's status comes from the gate."
+    )
+    return [first, gate]

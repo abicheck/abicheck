@@ -99,6 +99,9 @@ _CONTEXT_ENV = {
     "producer_event": "ABICHECK_CTX_EVENT",
     "orchestration_ref": "ABICHECK_CTX_ORCHESTRATION_REF",
     "profile": "ABICHECK_CTX_PROFILE",
+    "delta_outcome": "ABICHECK_CTX_DELTA_OUTCOME",
+    "delta_base_sha": "ABICHECK_CTX_DELTA_BASE_SHA",
+    "gate_verdict": "ABICHECK_CTX_GATE_VERDICT",
 }
 
 

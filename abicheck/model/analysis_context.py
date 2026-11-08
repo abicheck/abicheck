@@ -77,6 +77,8 @@ _DIGITS = re.compile(r"^[0-9]{1,20}$")
 #: control character, and never at unbounded length.
 _SAFE_TEXT = re.compile(r"^[\x20-\x7e]{1,300}$")
 _REPOSITORY = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
+_IDENTIFIER = re.compile(r"^[a-z][a-z_]{0,39}$")
+_VERDICT = re.compile(r"^[A-Z][A-Z_]{0,39}$")
 
 
 class AnalysisContextError(ValueError):
@@ -152,6 +154,15 @@ class AnalysisContext:
     orchestration_ref: str = ""
     #: The contract profile this analysis was performed under.
     profile: str = ""
+    #: delta-baseline only (docs/reference/main-snapshot.md): the outcome the
+    #: PR comment is labelled with, the base commit, and the gate's verdict.
+    #: Structured on purpose -- a trusted publisher builds the comment's
+    #: wording from these, never from text the producer wrote. Omitted from
+    #: the document when empty, so a publisher that predates them still
+    #: reads every context that does not use them.
+    delta_outcome: str = ""
+    delta_base_sha: str = ""
+    gate_verdict: str = ""
 
     _PATTERNS = {
         "tested_sha": _FULL_SHA,
@@ -166,7 +177,13 @@ class AnalysisContext:
         "producer_event": _SAFE_TEXT,
         "orchestration_ref": _SAFE_TEXT,
         "profile": _SAFE_TEXT,
+        "delta_outcome": _IDENTIFIER,
+        "delta_base_sha": _FULL_SHA,
+        "gate_verdict": _VERDICT,
     }
+
+    #: Written only when non-empty (see the fields' comment).
+    _OPTIONAL_IN_DOCUMENT = ("delta_outcome", "delta_base_sha", "gate_verdict")
 
     @classmethod
     def field_names(cls) -> tuple[str, ...]:
@@ -225,7 +242,13 @@ class AnalysisContext:
                 "before a trusted publisher displays it."
             ),
         }
-        document.update({name: getattr(self, name) for name in self.field_names()})
+        document.update(
+            {
+                name: getattr(self, name)
+                for name in self.field_names()
+                if getattr(self, name) or name not in self._OPTIONAL_IN_DOCUMENT
+            }
+        )
         return document
 
     @property

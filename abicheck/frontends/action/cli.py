@@ -48,6 +48,7 @@ from .report_publication import (
     POST_MODES,
     PublicationError,
     PublicationIdentity,
+    context_notes,
     decide,
     read_comments,
     render_report,
@@ -171,6 +172,7 @@ def comment_cmd(
             gate_api_break=gate_api_break,
             gate_breaking=gate_breaking,
             max_comment_bytes=max_comment_bytes,
+            notes=context_notes(data),
         )
     except PublicationError as exc:
         raise click.ClickException(str(exc)) from exc

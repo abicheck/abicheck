@@ -1762,6 +1762,8 @@ runs:
         ABICHECK_DELTA_OUTCOME: ${{ steps.delta-base.outputs.outcome }}
         ABICHECK_DELTA_SNAPSHOT: ${{ steps.delta-base.outputs.snapshot-path }}
         ABICHECK_DELTA_MESSAGE: ${{ steps.delta-base.outputs.message }}
+        ABICHECK_DELTA_BASE_SHA: ${{ steps.delta-base.outputs.base-sha }}
+        ABICHECK_DELTA_BRANCH: ${{ github.event.repository.default_branch }}
         INPUT_SOURCES: ${{ inputs.sources }}
         INPUT_BUILD_INFO: ${{ inputs.build-info }}
         INPUT_COMPILE_DB: ${{ inputs.compile-db }}
@@ -1819,6 +1821,10 @@ runs:
         ABICHECK_CTX_WORKFLOW_REF: ${{ github.workflow_ref }}
         ABICHECK_CTX_EVENT: ${{ github.event_name }}
         ABICHECK_CTX_ORCHESTRATION_REF: ${{ github.action_ref }}
+        # delta-baseline: structured fields only; the publisher words the notes.
+        ABICHECK_CTX_DELTA_OUTCOME: ${{ steps.run-abicheck.outputs.delta-comment-outcome }}
+        ABICHECK_CTX_DELTA_BASE_SHA: ${{ steps.run-abicheck.outputs.delta-comment-outcome && steps.delta-base.outputs.base-sha || '' }}
+        ABICHECK_CTX_GATE_VERDICT: ${{ steps.run-abicheck.outputs.delta-comment-outcome && steps.run-abicheck.outputs.verdict || '' }}
       run: bash "${{ github.action_path }}/action/pr-report-delivery.sh" stage
 
     - name: Upload PR report artifact

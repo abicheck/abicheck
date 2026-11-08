@@ -163,4 +163,9 @@ comparison; a directory/package comparison keeps the gate's report with a
 note. A failed lookup reads as `lookup_failed` and never stops the gate.
 
 With `pr-comment-via: artifact` (fork pull requests) the delta report is the
-one staged for the publisher, but the two notes are not yet carried to it.
+one staged for the publisher, and the same two notes appear on its comment.
+They travel as structured fields of the report's `analysis_context`
+(`delta_outcome`, `delta_base_sha`, `gate_verdict`), never as text: the
+trusted publisher validates their shape and writes the notes itself, with the
+wording the direct path uses. A field that fails validation drops the notes
+rather than showing fork-written text.
