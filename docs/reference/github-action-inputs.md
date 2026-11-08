@@ -4,7 +4,7 @@
 
 Every `with:` input and `outputs.*` value for the [abicheck GitHub Action](../use/github-action.md), generated directly from `action.yml` — see that page for setup, mode/input compatibility, and usage recipes; this page is the exhaustive field list only.
 
-## Inputs (110)
+## Inputs (111)
 
 The last column gives the same option on the other surfaces, read from `architecture/option-vocabulary.yaml`. `--set PATH=VALUE` is the escape hatch for a `.abicheck.yml` key, not the primary spelling; a core option has no `--set` form. A `RETIRED` input is a fail-closed tombstone: it fails the run and names its replacement, or the reason it has none.
 
@@ -101,6 +101,7 @@ The last column gives the same option on the other surfaces, read from `architec
 | `delta-mode` | no | auto | How the PR's base commit is found: 'auto' (merge-group base on merge_group, otherwise the merge commit's first parent), 'merge-commit', or 'head' (unique merge-base; for a head checkout). | — |
 | `delta-profile` | no | — | Profile suffix the snapshot workflow passed to main-snapshot, if any. | — |
 | `delta-wait-timeout` | no | 600 | Seconds to wait while the base snapshot is still being built. | — |
+| `delta-operand-map` | no | — | delta-baseline only: declare that the default-branch snapshot's library and this PR's new-library are the same library when nothing else links them (a renamed file with no shared SONAME/install name, a PE DLL rename). One 'SNAPSHOT=PR' pair per line; each side may be the path, the file name, or the SONAME/install name. Without it the pairing is automatic (same SONAME/install name, a SONAME version bump, the same path or file name); a snapshot of a different library is reported as 'operand_unmatched' / 'operand_ambiguous' and never compared. | — |
 | `delta-on-missing-base` | no | report | 'report' (default): an unavailable snapshot is explained in the comment and nothing fails. 'fail': additionally fail the job in a separate step after the comparison, so the result reads as "delta required but unavailable", never as a compatibility break. 'build': after the normal comparison, check out the base commit beside this checkout, run delta-base-build-command there, dump it with this run's new-side evidence inputs and use it as the delta base; a failed build is reported in the comment and never changes the step's status. Only for an outcome that selected a base commit (not base_unknown or base_ambiguous), and only when a comment is rendered. | — |
 | `delta-base-build-command` | no | — | delta-on-missing-base: build only. Shell commands (bash -e) that build the base commit, run from the root of its checkout (a git worktree in runner.temp; ABICHECK_BASE_SHA names the commit). They must leave new-library and the new-side header/debug-info/build inputs at the same paths relative to the checkout root as the PR build does, and must not install over the PR build. They run without the token or the Action's inputs in their environment, and their GITHUB_ENV/GITHUB_PATH/ GITHUB_OUTPUT writes are discarded. | — |
 | `pr-comment-detail` | no | standard | Detail level of the comment body: 'summary' (verdict + counts only), 'standard' (default; per-symbol tables for breaking/review, grouped safe list) or 'full' (every change with locations, all sections expanded). | — |
@@ -121,7 +122,7 @@ The last column gives the same option on the other surfaces, read from `architec
 | `devel-pkg1` | no | — | RETIRED (no transition period): renamed to `old-header`. Setting this input fails the run before any analysis with an `::error::` naming `old-header`. Replace `devel-pkg1` with `old-header`, then remove `devel-pkg1`. | **RETIRED**, use the Action input `old-header` |
 | `devel-pkg2` | no | — | RETIRED (no transition period): renamed to `new-header`. Setting this input fails the run before any analysis with an `::error::` naming `new-header`. Replace `devel-pkg2` with `new-header`, then remove `devel-pkg2`. | **RETIRED**, use the Action input `new-header` |
 
-## Outputs (15)
+## Outputs (16)
 
 | Output | Description |
 |---|---|
@@ -130,7 +131,8 @@ The last column gives the same option on the other surfaces, read from `architec
 | `report-path` | Path to the generated report file. Set when output-file is provided, or auto-populated for SARIF format (defaults to abicheck-results.sarif). Withheld (empty) when format: sarif and upload-sarif: true were both requested but extra-args' own exports replaced it with a non-sarif format -- the real file exists but its content isn't SARIF, and this is the exact value the upload-sarif step below gates on, so withholding it skips that upload rather than feeding mismatched content to CodeQL. |
 | `delta-outcome` | delta-baseline only: the base-snapshot outcome ('resolved', 'base_pending', 'snapshot_missing', ...; see docs/reference/main-snapshot.md). Empty when delta-baseline is unset. |
 | `delta-base-sha` | delta-baseline only: the base commit the delta was measured against. |
-| `delta-comment-outcome` | delta-baseline only: what the PR comment shows -- the lookup outcome, or 'base_built' / 'base_build_failed' / 'base_dump_failed' after delta-on-missing-base: build, 'rerun_failed' or 'unsupported_operand'. Empty when no comment was rendered. |
+| `delta-comment-outcome` | delta-baseline only: what the PR comment shows -- the lookup outcome, or 'base_built' / 'base_build_failed' / 'base_dump_failed' after delta-on-missing-base: build, 'rerun_failed', 'unsupported_operand' or an operand_* identity refusal. Empty when no comment was rendered. |
+| `delta-operand-match` | delta-baseline only: how the snapshot's library was paired with new-library when the delta ran ('loader_name', 'loader_name_version', 'file_name', 'file_name_version', 'declared'); empty otherwise. |
 | `pr-comment-delivery` | Which path pr-comment-via resolved to for this run: 'direct' (this job handled the comment itself), 'artifact' (a report artifact was uploaded for report-pr.yml to publish), or 'none' (pr-comment-via 'artifact'/'auto' on a run that comments nothing -- not a pull_request event, not compare mode, pr-comment false or pr-comment-on never). |
 | `pr-report-artifact-name` | Name of the uploaded PR report artifact, or empty when none was uploaded (delivery not 'artifact', or the run produced no report). |
 | `baseline-source` | Which release baseline this run compared against: legacy-asset (a single *.abicheck.json[.gz\|.zst] release asset), baseline-set (a release-contract baseline-set archive selected by baseline-profile and baseline-target), or direct-path (abi-baseline given as a file path). Empty when no release baseline was resolved. The JSON report's baseline_provenance block carries this and the other baseline-* values, marked asserted_by: action. |

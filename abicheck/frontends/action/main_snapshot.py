@@ -52,6 +52,7 @@ __all__ = [
     "BUILDABLE_OUTCOMES",
     "COMMENT_ONLY_OUTCOMES",
     "delta_notes",
+    "OPERAND_MATCH_NOTES",
     "DeltaOutcome",
     "SNAPSHOT_ARTIFACT_PREFIX",
     "SnapshotExpectation",
@@ -429,7 +430,48 @@ COMMENT_ONLY_OUTCOMES = {
         "Delta unavailable: `{branch}@{sha7}` was built in this job, but "
         "dumping it failed (see the job log)."
     ),
+    # Operand identity (abicheck.workflows.delta_operand): the snapshot is not
+    # shown to be the same library as this PR's. Never compared -- an
+    # unrelated snapshot would read as every symbol removed (ADR-065).
+    "operand_unmatched": (
+        "Delta unavailable: the default-branch snapshot is of a different "
+        "library than this PR's (no shared SONAME/install name, path or file "
+        "name). If it was renamed, pair the two with `delta-operand-map`."
+    ),
+    "operand_ambiguous": (
+        "Delta unavailable: the default-branch snapshot and this PR's library "
+        "share a file name but their SONAME/install-name evidence disagrees, "
+        "or `delta-operand-map` declares several targets for it. Declare one "
+        "pairing with `delta-operand-map` if they are the same library."
+    ),
+    "operand_map_invalid": (
+        "Delta unavailable: `delta-operand-map` is malformed (expected one "
+        "`SNAPSHOT=PR` pair per line; the job log names the line)."
+    ),
+    "operand_unreadable": (
+        "Delta unavailable: the identity of the default-branch snapshot or of "
+        "this PR's library could not be read."
+    ),
 }
+
+#: A matched pairing worth stating in the comment (the trivial ones -- same
+#: loader name, same file name -- need no note). Keyed by
+#: :class:`abicheck.workflows.delta_operand.MatchRule` values.
+OPERAND_MATCH_NOTES = {
+    "declared": (
+        "The snapshot's library is paired with this PR's by `delta-operand-map`."
+    ),
+    "loader_name_version": (
+        "The snapshot's library and this PR's differ only by SONAME/install-name "
+        "version; the delta reports that version change."
+    ),
+    "file_name_version": (
+        "The snapshot's library and this PR's differ only by file-name version."
+    ),
+}
+#: The outcomes whose comment shows a delta (and so may carry a pairing note).
+_MEASURED_OUTCOMES = {DeltaOutcome.RESOLVED.value, "base_built"}
+_KNOWN_MATCH_RULES = {"", "loader_name", "file_name", *OPERAND_MATCH_NOTES}
 
 _GATE_VERDICT = re.compile(r"^[A-Z][A-Z_]{0,39}$")
 
@@ -441,8 +483,14 @@ def delta_notes(
     branch: str = "main",
     gate_verdict: str = "",
     merge_group: bool = False,
+    operand_match: str = "",
 ) -> list[str]:
-    """The two quoted lines a delta-baseline comment carries.
+    """The quoted lines a delta-baseline comment carries.
+
+    The outcome line, then -- for a measured delta (``resolved`` or
+    ``base_built``) whose operand pairing
+    is not trivial (*operand_match*, a ``MatchRule`` value) -- how the
+    snapshot's library was paired with this PR's, then the gate line.
 
     The one place their wording lives: the main Action's direct comment and
     the trusted fork publisher both call this, and the publisher calls it
@@ -465,11 +513,16 @@ def delta_notes(
             branch=branch or "main",
             subject=subject,
         )
+    if operand_match not in _KNOWN_MATCH_RULES:
+        raise ValueError(f"unknown operand match rule {operand_match!r}")
     if first.startswith("Delta unavailable"):
         first += " Showing the release-baseline comparison."
+    lines = [first]
+    if outcome in _MEASURED_OUTCOMES and operand_match in OPERAND_MATCH_NOTES:
+        lines.append(OPERAND_MATCH_NOTES[operand_match])
     verdict = gate_verdict if _GATE_VERDICT.match(gate_verdict or "") else "unknown"
     gate = (
         f"Release gate: {verdict} (the comparison against the configured "
         "baseline); this check's status comes from the gate."
     )
-    return [first, gate]
+    return [*lines, gate]

@@ -5881,7 +5881,41 @@ _dump_delta_base() {
     _warning_annotation "abicheck: dumping the delta base built in this job failed (exit $rc)."
     return 1
   fi
+  # The same operand record actions/main-snapshot uploads beside a stored
+  # snapshot, so the identity check reads both bases alike.
+  (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -m abicheck.frontends.action.cli operand-record \
+      "$work/operand.json" --library "${CMD[$((OLD_OPERAND_INDEX + 1))]}") || return 1
   ABICHECK_DELTA_SNAPSHOT="$work/base-snapshot.json"
+}
+
+# Is $ABICHECK_DELTA_SNAPSHOT this PR's library? Sets _DELTA_OPERAND_MATCH
+# (the matching rule) and, on a refusal, _DELTA_OPERAND_CODE (the named
+# outcome); returns 0 only on a match. The CLI runs from $_PY_SAFE_DIR, so
+# the operand goes over absolute; --new-given-as keeps the spelling the user
+# wrote (the recorded path).
+_check_delta_operand() {
+  local identity key value new_operand message=""
+  _DELTA_OPERAND_MATCH="" _DELTA_OPERAND_CODE=operand_unreadable
+  new_operand="${CMD[$((OLD_OPERAND_INDEX + 1))]}"
+  [[ "$new_operand" == /* ]] || new_operand="$PWD/$new_operand"
+  identity=$(cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -m abicheck.frontends.action.cli delta-operand \
+      --snapshot "$ABICHECK_DELTA_SNAPSHOT" --new-library "$new_operand" \
+      --new-given-as "${CMD[$((OLD_OPERAND_INDEX + 1))]}" \
+      --map "${INPUT_DELTA_OPERAND_MAP:-}" 2>/dev/null) || true
+  while IFS='=' read -r key value; do
+    case "$key" in
+      outcome) _DELTA_OPERAND_CODE="$value" ;;
+      rule) _DELTA_OPERAND_MATCH="$value" ;;
+      message) [[ -n "$value" ]] && message="$value" ;;
+    esac
+  done <<< "$identity"
+  if [[ "$_DELTA_OPERAND_CODE" == resolved ]]; then
+    [[ -n "$message" ]] && _notice_annotation "abicheck delta operand: $message"
+    return 0
+  fi
+  _DELTA_OPERAND_MATCH=""
+  [[ -n "$message" ]] && _warning_annotation "abicheck delta operand ($_DELTA_OPERAND_CODE): $message"
+  return 1
 }
 
 # Chooses the report the PR comment renders when delta-baseline is set, and
@@ -5890,7 +5924,7 @@ _select_delta_report() {
   PR_RENDER_JSON="$PR_JSON"
   PR_NOTES=()
   [[ -n "${ABICHECK_DELTA_OUTCOME:-}" ]] || return 0
-  local code="$ABICHECK_DELTA_OUTCOME" want_build=false
+  local code="$ABICHECK_DELTA_OUTCOME" want_build=false operand_match="" delta_json
   _delta_build_requested "$code" && want_build=true
   if [[ "$code" == resolved || "$want_build" == true ]] \
      && { [[ -z "${OLD_OPERAND_INDEX:-}" ]] \
@@ -5911,8 +5945,17 @@ _select_delta_report() {
       code=base_built
     fi
   fi
+  # Operand identity (abicheck.workflows.delta_operand), for a fetched and a
+  # built base alike: a snapshot that is not shown to be this PR's library
+  # is never compared -- an unrelated one would read as every symbol
+  # removed (ADR-065).
   if [[ "$code" == resolved && -n "${ABICHECK_DELTA_SNAPSHOT:-}" ]] || [[ "$code" == base_built ]]; then
-    local delta_json
+    if ! _check_delta_operand; then
+      code="$_DELTA_OPERAND_CODE"
+    fi
+    operand_match="$_DELTA_OPERAND_MATCH"
+  fi
+  if [[ "$code" == resolved && -n "${ABICHECK_DELTA_SNAPSHOT:-}" ]] || [[ "$code" == base_built ]]; then
     delta_json=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-delta-json.XXXXXX")
     if _run_delta_json "$delta_json"; then
       PR_RENDER_JSON="$delta_json"
@@ -5924,13 +5967,15 @@ _select_delta_report() {
   # The code, not text, is what travels to a fork's trusted publisher
   # (action.yml records it in the analysis context); both render the notes
   # through the same `delta-notes` wording.
-  [[ -n "${GITHUB_OUTPUT:-}" ]] && printf 'delta-comment-outcome=%s\n' "$code" >> "$GITHUB_OUTPUT"
+  [[ "$code" == resolved || "$code" == base_built ]] || operand_match=""
+  [[ -n "${GITHUB_OUTPUT:-}" ]] && printf 'delta-comment-outcome=%s\ndelta-operand-match=%s\n' "$code" "$operand_match" >> "$GITHUB_OUTPUT"
   local line
   while IFS= read -r line; do
     [[ -n "$line" ]] && PR_NOTES+=("$line")
   done < <(cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -m abicheck.frontends.action.cli delta-notes \
       --outcome "$code" --base-sha "${ABICHECK_DELTA_BASE_SHA:-}" \
       --branch "${ABICHECK_DELTA_BRANCH:-main}" --gate-verdict "${VERDICT:-}" \
+      --operand-match "$operand_match" \
       $([[ "${GITHUB_EVENT_NAME:-}" == merge_group ]] && echo --merge-group) 2>/dev/null)
 }
 

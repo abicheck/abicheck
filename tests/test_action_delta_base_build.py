@@ -42,6 +42,7 @@ from _workflow_exec import bash_executable, require_bash
 from click.testing import CliRunner
 
 from abicheck.cli import main
+from abicheck.elf_metadata import ElfMetadata
 from abicheck.frontends.action.cli import action_cli
 from abicheck.frontends.action.delta_base_dump import (
     BaseDumpRefused,
@@ -520,7 +521,9 @@ def _report(
     return res.exit_code, out.read_bytes()
 
 
-def _stub(tmp_path: Path, *, dump_ok: bool) -> tuple[Path, Path]:
+def _stub(
+    tmp_path: Path, *, dump_ok: bool, base_soname: str = "libnew.so.1"
+) -> tuple[Path, Path]:
     """abicheck: `dump` writes a snapshot (or fails); `compare` answers the
     gate with ``release_only`` removed, and a compare whose old operand is
     the dumped base with ``pr_only`` added."""
@@ -528,6 +531,15 @@ def _stub(tmp_path: Path, *, dump_ok: bool) -> tuple[Path, Path]:
     _, delta = _report(tmp_path, "delta", "pr_only", removed=False)
     (tmp_path / "gate.bin").write_bytes(gate)
     (tmp_path / "delta.bin").write_bytes(delta)
+    # What the base dump writes: a real snapshot, so operand identity (which
+    # reads both sides) sees the same library as new-library -- or not.
+    base_snap = tmp_path / "base-dump.json"
+    save_snapshot(
+        AbiSnapshot(
+            library="libnew.so", version="1", elf=ElfMetadata(soname=base_soname)
+        ),
+        base_snap,
+    )
     log = tmp_path / "argv.log"
     bindir = tmp_path / "bin"
     bindir.mkdir()
@@ -538,7 +550,7 @@ def _stub(tmp_path: Path, *, dump_ok: bool) -> tuple[Path, Path]:
         'prev=""\n'
         'if [[ "$1" == dump ]]; then\n'
         f"  {'' if dump_ok else 'exit 1'}\n"
-        '  for a in "$@"; do [[ "$prev" == -o ]] && echo "{}" > "$a"; prev="$a"; done\n'
+        f'  for a in "$@"; do [[ "$prev" == -o ]] && cp "{base_snap}" "$a"; prev="$a"; done\n'
         "  exit 0\n"
         "fi\n"
         f'src="{tmp_path}/gate.bin"; code={gate_code}\n'
@@ -570,6 +582,7 @@ def _run_sh(
     dump_ok: bool = True,
     on_missing: str = "build",
     extra: dict | None = None,
+    base_soname: str = "libnew.so.1",
 ) -> tuple[dict, list[list[str]], str]:
     """run.sh in a real repository whose first commit is the base."""
     tmp_path.mkdir(exist_ok=True)
@@ -579,13 +592,22 @@ def _run_sh(
     _git(tmp_path, "add", "include")
     _git(tmp_path, "commit", "-qm", "base")
     base = _git(tmp_path, "rev-parse", "HEAD")
-    bindir, log = _stub(tmp_path, dump_ok=dump_ok)
+    bindir, log = _stub(tmp_path, dump_ok=dump_ok, base_soname=base_soname)
     event = tmp_path / "event.json"
     event.write_text(
         json.dumps({"pull_request": {"number": 7, "head": {"sha": "a" * 40}}})
     )
+    base_env = _compare_env(tmp_path)
+    # The PR's new-library as a readable snapshot of libnew.so (operand
+    # identity reads it), the way test_action_delta_baseline does.
+    save_snapshot(
+        AbiSnapshot(
+            library="libnew.so", version="2", elf=ElfMetadata(soname="libnew.so.1")
+        ),
+        Path(base_env["INPUT_NEW_LIBRARY"]),
+    )
     env = {
-        **_compare_env(tmp_path),
+        **base_env,
         "INPUT_OLD_HEADER": "release/include",
         "INPUT_NEW_HEADER": "include",
         "INPUT_PR_COMMENT": "true",
@@ -779,3 +801,22 @@ def test_rewrite_edges(tail: list[str], expected: list[str]) -> None:
 def test_empty_path_is_refused() -> None:
     with pytest.raises(BaseDumpRefused, match="empty"):
         map_into_base("", cwd=_TOP, checkout=_TOP, base_root=_BASE)
+
+
+@REQUIRES_POSIX_SHELL
+def test_a_built_base_of_another_library_is_never_compared(tmp_path: Path) -> None:
+    """The built base goes through the same operand-identity check as a
+    fetched snapshot: a base whose SONAME names a different library (the
+    build produced something else at new-library's path) is refused, not
+    compared as if every symbol were removed (ADR-065)."""
+    outputs, calls, body = _run_sh(tmp_path, base_soname="libother.so.3")
+    assert outputs["delta-comment-outcome"].startswith("operand_")
+    assert "release_only" in body and "pr_only" not in body
+    assert not any(
+        c[0] == "compare" and any(a.endswith("base-snapshot.json") for a in c)
+        for c in calls
+    )
+    # The dump wrote the same operand record a stored snapshot carries.
+    (dump,) = [c for c in calls if c[0] == "dump"]
+    record = Path(dump[dump.index("-o") + 1]).parent / "operand.json"
+    assert json.loads(record.read_text())["path"].endswith("libnew.so")
