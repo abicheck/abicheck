@@ -196,11 +196,14 @@ Action can build that commit in the PR job instead of explaining the gap:
           delta-base-build-command: ./build.sh
 ```
 
-1. A step named *Build the delta base* checks the base commit out into a git
+1. **After** the normal comparison (the gate) has run, and only when a
+   comment is rendered, the Action checks the base commit out into a git
    worktree under `runner.temp` (the PR checkout and its build outputs are
-   untouched; a commit missing from a shallow clone is fetched by SHA) and
-   runs `delta-base-build-command` with `bash -e -o pipefail` from that
-   worktree's root, with `ABICHECK_BASE_SHA` set. The step is given no token.
+   untouched; a commit missing from a shallow clone is fetched by SHA; the
+   repository is found from `new-library`'s directory, so a checkout under
+   `path:` works) and runs `delta-base-build-command` with
+   `bash -e -o pipefail` from that worktree's root, with `ABICHECK_BASE_SHA`
+   set.
 2. The comparison step dumps the result with this run's **new-side**
    evidence inputs (`new-library`, `header`/`new-header`,
    `include`/`new-include`, `new-debug-info`, `sources`, `build-info`,
@@ -210,16 +213,27 @@ Action can build that commit in the PR job instead of explaining the gap:
    evidence depth. Old-side inputs describe the release baseline and are not
    used. A path outside the PR checkout (other than an include directory,
    kept as a toolchain directory) cannot be provided by the base build and
-   is refused rather than reused.
+   is refused rather than reused, as is a `--dump-manifest`.
 3. That snapshot is the delta's old side, exactly as a resolved stored
-   snapshot is.
+   snapshot is. The worktree is removed afterwards.
 
 `delta-base-build-command` must therefore leave the library and those
 inputs at the same paths, relative to the checkout root, as the PR build
-does. Submodules, caches and dependencies are the command's job. The build
-runs code from the base commit — code already on the default branch — with
-the permissions of the PR job; `persist-credentials: false` keeps the
-checkout's token out of the worktree's git config.
+does, and must not install over the PR build: when it changes
+`new-library`, the delta is not measured (`base_build_failed`), since it would
+compare the base with itself. Submodules, caches and dependencies are the
+command's job.
+
+The command is isolated from the rest of the job. The gate has already
+compared, so nothing it writes can change the gate's result. Its
+`GITHUB_ENV`, `GITHUB_PATH`, `GITHUB_OUTPUT` and `GITHUB_STEP_SUMMARY` point at
+throwaway files, so it cannot change a later step's environment or forge
+the build's result. No token and none of the Action's inputs are in its
+environment, and the git commands it runs see no `actions/checkout`
+credential. The persisted credential is still in `.git/config`, readable
+by any code the build runs, so check out with `persist-credentials: false`
+(as above). The code it runs is the base commit's, already on the default
+branch.
 
 `base_unknown` and `base_ambiguous` selected no commit, so nothing is built:
 the comment explains them as with `report`. The comment and

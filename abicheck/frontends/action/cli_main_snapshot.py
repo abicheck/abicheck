@@ -32,6 +32,7 @@ import click
 from .cli_base import EXIT_REFUSED, _read_json, action_cli
 from .delta_base_dump import BaseDumpRefused, base_dump_argv
 from .main_snapshot import (
+    BUILDABLE_OUTCOMES,
     DeltaOutcome,
     SnapshotExpectation,
     delta_notes,
@@ -189,6 +190,14 @@ def delta_notes_cmd(
         raise click.UsageError(str(exc)) from exc
     for line in lines:
         click.echo(line)
+
+
+@action_cli.command("delta-buildable")
+@click.argument("outcome")
+def delta_buildable_cmd(outcome: str) -> None:
+    """Exit 0 when delta-on-missing-base: build applies to OUTCOME, else 3."""
+    if outcome not in {o.value for o in BUILDABLE_OUTCOMES}:
+        sys.exit(EXIT_REFUSED)
 
 
 @action_cli.command("delta-base-dump-args")

@@ -263,8 +263,9 @@ work, which publishes the delta report; nothing else changes.
 3. **Main Action inputs** (*landed* as `delta-baseline: main`,
    `delta-snapshot-workflow`, `delta-mode`, `delta-profile`,
    `delta-wait-timeout`, `delta-on-missing-base: report|fail|build`,
-   `delta-base-build-command`; a `<path>` value is planned). `build` checks
-   the base out into a worktree, runs the command in a token-less step, and
+   `delta-base-build-command`; a `<path>` value is planned). `build` runs
+   after the gate comparison: it checks the base out into a worktree, runs
+   the command sandboxed (no token or inputs, throwaway runner files), and
    dumps it with the gate's new-side evidence moved into that worktree
    (`abicheck/frontends/action/delta_base_dump.py`), so evidence parity holds
    by construction; its results are the comment-only outcomes `base_built`,

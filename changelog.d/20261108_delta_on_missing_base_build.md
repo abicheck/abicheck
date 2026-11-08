@@ -2,10 +2,11 @@
 
 - **`delta-on-missing-base: build` on the main Action** — when no stored
   default-branch snapshot is usable for the PR's exact base commit, the
-  Action checks that commit out in a worktree, builds it with the new
-  `delta-base-build-command` input (in its own step, with no token), dumps it
-  with the run's new-side evidence inputs, and renders the PR comment against
-  it. A failed checkout, build or dump is named in the comment
+  Action, after the gate comparison has run, checks that commit out in a
+  worktree, builds it with the new `delta-base-build-command` input (with no
+  token or Action inputs in its environment and its `GITHUB_ENV`/
+  `GITHUB_PATH`/`GITHUB_OUTPUT` writes discarded), dumps it with the run's
+  new-side evidence inputs, and renders the PR comment against it. A failed checkout, build or dump is named in the comment
   (`base_build_failed` / `base_dump_failed`, also in the new
   `delta-comment-outcome` output) and never changes the step's status, which
   stays the release gate's. See `docs/reference/main-snapshot.md`.

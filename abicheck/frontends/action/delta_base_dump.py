@@ -72,7 +72,10 @@ _VALUE_FLAGS = {
     "--search-path",
     "--ld-library-path",
 }
-_BARE_FLAGS = {"--follow-deps", "--no-follow-deps"}
+_BARE_FLAGS = {"--follow-deps", "--no-follow-deps", "--include-system-declarations"}
+#: Per-side evidence whose own content names paths this module cannot move
+#: into the base checkout: refused, never silently dropped.
+_REFUSED_FLAGS = {"--dump-manifest"}
 #: ``--set`` keys that describe how a side is extracted. Report, gate,
 #: policy and consumer keys belong to the comparison, not to a dump.
 _SET_PREFIXES = ("compile.", "build.")
@@ -184,6 +187,11 @@ def base_dump_argv(
             ]
             continue
         name, eq, inline = tok.partition("=")
+        if name in _REFUSED_FLAGS:
+            raise BaseDumpRefused(
+                f"{name} names per-side inputs the base build cannot be "
+                "re-pointed at; delta-on-missing-base: build does not support it"
+            )
         if name == "--set":
             value = (
                 inline if eq else (gate_tail[i + 1] if i + 1 < len(gate_tail) else "")

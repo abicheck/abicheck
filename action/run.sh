@@ -5793,25 +5793,74 @@ _run_delta_json() {
   [[ -s "$out" ]]
 }
 
-# delta-on-missing-base: build. Dumps the base commit the "Build the delta
-# base" step built in $ABICHECK_DELTA_BUILD_ROOT with the gate's NEW-side
+# delta-on-missing-base: build applies to a lookup outcome that selected an
+# exact base commit (main_snapshot.BUILDABLE_OUTCOMES owns the list).
+_delta_build_requested() {
+  [[ "${ABICHECK_DELTA_ON_MISSING_BASE:-report}" == build && "$1" != resolved ]] || return 1
+  [[ "${ABICHECK_DELTA_BASE_SHA:-}" =~ ^[0-9a-f]{40}$ ]] || return 1
+  (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -m abicheck.frontends.action.cli delta-buildable "$1") >/dev/null 2>&1
+}
+
+# The PR checkout's top level, found from new-library's own directory (a
+# checkout under `path:` is not the working directory), in the shell's
+# physical spelling -- Git for Windows prints `D:/a/...`, `pwd -P` `/d/a/...`.
+_delta_repo_top() {
+  local lib="${CMD[$((OLD_OPERAND_INDEX + 1))]}" dir top
+  dir=$(dirname -- "$lib")
+  top=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null) || top=$(git rev-parse --show-toplevel 2>/dev/null) || return 1
+  [[ -n "$top" ]] && (cd "$top" 2>/dev/null && pwd -P)
+}
+
+_file_fingerprint() {
+  [[ -f "$1" ]] && cksum < "$1" 2>/dev/null || echo absent
+}
+
+# Runs action/build-delta-base.sh (worktree checkout + the sandboxed user
+# command) and sets ABICHECK_DELTA_BUILD_ROOT. Fails when the build failed,
+# or when it changed the gate's new-library: a base build that overwrote the
+# PR's library (an absolute install path) would make the delta compare the
+# base with itself and read as "no changes".
+_build_delta_base() {
+  local repo result lib before
+  repo=$(_delta_repo_top) || {
+    _warning_annotation "abicheck: delta-on-missing-base: build needs new-library inside a git checkout."
+    return 1
+  }
+  lib="${CMD[$((OLD_OPERAND_INDEX + 1))]}"
+  before=$(_file_fingerprint "$lib")
+  result=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-delta-build.XXXXXX") || return 1
+  BASE_SHA="$ABICHECK_DELTA_BASE_SHA" ABICHECK_BASE_BUILD_COMMAND="${ABICHECK_DELTA_BASE_BUILD_COMMAND:-}" \
+    DEST="${RUNNER_TEMP:-/tmp}/abicheck-delta-base-src" RESULT_FILE="$result" REPO_DIR="$repo" \
+    bash "$(dirname "${BASH_SOURCE[0]}")/build-delta-base.sh" >&2 || true
+  _DELTA_BUILD_REPO="$repo"
+  ABICHECK_DELTA_BUILD_ROOT=$(grep '^root=' "$result" | tail -n1 | cut -d= -f2-)
+  grep -qx 'outcome=built' "$result" || return 1
+  if [[ "$(_file_fingerprint "$lib")" != "$before" ]]; then
+    _warning_annotation "abicheck: delta-base-build-command changed new-library outside the base checkout; the delta is not measured. The gate already ran and is unaffected."
+    return 1
+  fi
+  [[ -n "$ABICHECK_DELTA_BUILD_ROOT" && -d "$ABICHECK_DELTA_BUILD_ROOT" ]]
+}
+
+_remove_delta_base_worktree() {
+  [[ -n "${ABICHECK_DELTA_BUILD_ROOT:-}" && -n "${_DELTA_BUILD_REPO:-}" ]] || return 0
+  git -C "$_DELTA_BUILD_REPO" worktree remove --force "$ABICHECK_DELTA_BUILD_ROOT" >/dev/null 2>&1 || true
+}
+
+# delta-on-missing-base: build. Dumps the base commit _build_delta_base
+# built in $ABICHECK_DELTA_BUILD_ROOT with the gate's NEW-side
 # evidence inputs, each path moved into that checkout
 # (abicheck.frontends.action.delta_base_dump owns the rewrite and refuses a
 # path the base build cannot provide), and points ABICHECK_DELTA_SNAPSHOT at
 # the result. Never sets the step's exit code; a failure is reported.
 _dump_delta_base() {
-  # Physical, as `git rev-parse --show-toplevel` is (a symlinked runner temp).
+  # Physical, as _delta_repo_top's checkout path is (a symlinked runner temp).
   local root="${ABICHECK_DELTA_BUILD_ROOT:-}" here work top tok rc=0
   here=$(pwd -P)
   local -a dump=()
   [[ -n "$root" && -d "$root" && -n "${OLD_OPERAND_INDEX:-}" ]] || return 1
-  # Through `cd`/`pwd -P`, so Git for Windows' `D:/a/...` reads as the
-  # shell's own `/d/a/...` spelling of $here.
-  top=$(git rev-parse --show-toplevel 2>/dev/null) && [[ -n "$top" ]] \
-    && top=$(cd "$top" 2>/dev/null && pwd -P) || {
-    _warning_annotation "abicheck: delta base dump: the working directory is not inside a git checkout."
-    return 1
-  }
+  top="${_DELTA_BUILD_REPO:-}"
+  [[ -n "$top" ]] || return 1
   work=$(mktemp -d "${RUNNER_TEMP:-/tmp}/abicheck-delta-dump.XXXXXX") || return 1
   printf '%s\0' "${CMD[@]:$((OLD_OPERAND_INDEX + 2))}" > "$work/tail"
   _cli_value_options_init
@@ -5841,24 +5890,26 @@ _select_delta_report() {
   PR_RENDER_JSON="$PR_JSON"
   PR_NOTES=()
   [[ -n "${ABICHECK_DELTA_OUTCOME:-}" ]] || return 0
-  local code="$ABICHECK_DELTA_OUTCOME" built="${ABICHECK_DELTA_BUILD_OUTCOME:-}"
-  # delta-on-missing-base: build answered an unavailable snapshot (the
-  # "Build the delta base" step): its result labels the comment instead.
-  if [[ "$code" != resolved && -n "$built" ]]; then
-    case "$built" in
-      built) code=base_built ;;
-      *) code=base_build_failed ;;
-    esac
-  fi
-  if [[ "$code" == resolved || "$code" == base_built ]] \
+  local code="$ABICHECK_DELTA_OUTCOME" want_build=false
+  _delta_build_requested "$code" && want_build=true
+  if [[ "$code" == resolved || "$want_build" == true ]] \
      && { [[ -z "${OLD_OPERAND_INDEX:-}" ]] \
           || _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
           || _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; }; then
     # No single old library to replace (a directory/package or audit-only
     # comparison): the gate report must not be labelled as this PR's delta.
     code=unsupported_operand
-  elif [[ "$code" == base_built ]] && ! _dump_delta_base; then
-    code=base_dump_failed
+  elif [[ "$want_build" == true ]]; then
+    # delta-on-missing-base: build. This runs from the comment path, after
+    # the gate comparison has already produced its report and exit code, so
+    # nothing the base build does can reach what the gate compared.
+    if ! _build_delta_base; then
+      code=base_build_failed
+    elif ! _dump_delta_base; then
+      code=base_dump_failed
+    else
+      code=base_built
+    fi
   fi
   if [[ "$code" == resolved && -n "${ABICHECK_DELTA_SNAPSHOT:-}" ]] || [[ "$code" == base_built ]]; then
     local delta_json
@@ -5869,6 +5920,7 @@ _select_delta_report() {
       code=rerun_failed
     fi
   fi
+  _remove_delta_base_worktree
   # The code, not text, is what travels to a fork's trusted publisher
   # (action.yml records it in the analysis context); both render the notes
   # through the same `delta-notes` wording.

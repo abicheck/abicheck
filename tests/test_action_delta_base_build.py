@@ -42,6 +42,7 @@ from _workflow_exec import bash_executable, require_bash
 from click.testing import CliRunner
 
 from abicheck.cli import main
+from abicheck.frontends.action.cli import action_cli
 from abicheck.frontends.action.delta_base_dump import (
     BaseDumpRefused,
     base_dump_argv,
@@ -193,6 +194,71 @@ def test_a_value_option_s_value_is_not_read_as_a_flag() -> None:
     ]
 
 
+#: Options both `compare` and `dump` accept that describe the comparison or
+#: the run, not how one side is extracted -- stated here, not read from the
+#: module under test.
+_COMPARISON_ONLY = {
+    "--label",  # names a side of the comparison
+    "--variant",  # selects a variant of a stored ProjectSnapshot package
+    "--bundle-facts-out",  # an output of the comparison
+    "--output",
+    "-o",
+    "--dry-run",
+    "--verbose",
+    "-v",
+    "--help",
+    "--help-all",
+}
+
+
+def _cli_options(command: str) -> set[str]:
+    import click
+
+    cmd = main.commands[command]
+    return {
+        o
+        for p in cmd.params
+        if isinstance(p, click.Option)
+        for o in (*p.opts, *p.secondary_opts)
+    }
+
+
+@pytest.mark.parametrize(
+    "option", sorted(_cli_options("compare") & _cli_options("dump") - _COMPARISON_ONLY)
+)
+def test_every_shared_extraction_option_is_carried_or_refused(option: str) -> None:
+    """An extraction option the rewrite silently dropped would capture the
+    base at a different depth than the new side (CodeRabbit/peer review).
+    Each shared option either reaches the dump or refuses it."""
+    value = (
+        []
+        if option
+        in {"--follow-deps", "--no-follow-deps", "--include-system-declarations"}
+        else [
+            "new=x"
+            if option
+            in {
+                "-H",
+                "--header",
+                "-I",
+                "--include",
+                "--debug-info",
+                "--sources",
+                "--build-info",
+            }
+            else "compile.lang=c"
+            if option == "--set"
+            else "v"
+        ]
+    )
+    try:
+        argv = _argv([option, *value])
+    except BaseDumpRefused:
+        return
+    carried = argv[2:-2]
+    assert carried, f"{option} was dropped from the base dump"
+
+
 # ── outcome vocabulary ──────────────────────────────────────────────────────
 
 
@@ -207,13 +273,10 @@ def test_only_outcomes_with_a_selected_commit_are_buildable() -> None:
     }
 
 
-def test_action_builds_on_exactly_the_buildable_outcomes() -> None:
-    steps = {s.get("id"): s for s in _action()["runs"]["steps"]}
-    cond = steps["delta-build"]["if"]
-    listed = set(json.loads(cond.split("fromJSON('")[1].split("')")[0]))
-    assert listed == {o.value for o in BUILDABLE_OUTCOMES}
-    assert "delta-on-missing-base == 'build'" in cond
-    assert "base-sha != ''" in cond
+@pytest.mark.parametrize("outcome", [o.value for o in DeltaOutcome] + ["", "x"])
+def test_the_shell_s_buildable_check_is_the_registry_s(outcome: str) -> None:
+    res = CliRunner().invoke(action_cli, ["delta-buildable", outcome])
+    assert (res.exit_code == 0) == (outcome in {o.value for o in BUILDABLE_OUTCOMES})
 
 
 @pytest.mark.parametrize("outcome", ["base_build_failed", "base_dump_failed"])
@@ -243,16 +306,21 @@ def _action() -> dict:
     return yaml.safe_load((_ROOT / "action.yml").read_text(encoding="utf-8"))
 
 
-def test_the_base_build_runs_without_a_token_between_lookup_and_comparison() -> None:
+def test_the_base_build_is_no_step_of_its_own_before_the_gate() -> None:
+    """The build runs inside run.sh after the gate comparison (see the
+    run.sh tests below); a step placed before it could rewrite what the
+    gate reads or the environment it runs in."""
     steps = _action()["runs"]["steps"]
-    ids = [s.get("id") for s in steps]
+    assert not any("build-delta-base" in str(s.get("run", "")) for s in steps)
+    (run,) = [s for s in steps if s.get("id") == "run-abicheck"]
     assert (
-        ids.index("delta-base") < ids.index("delta-build") < ids.index("run-abicheck")
+        run["env"]["ABICHECK_DELTA_ON_MISSING_BASE"]
+        == "${{ inputs.delta-on-missing-base }}"
     )
-    build = steps[ids.index("delta-build")]
-    assert not any("token" in str(v).lower() for v in build["env"].values())
-    assert "${{" not in build["run"].replace("${{ github.action_path }}", "")
-    assert "continue-on-error" not in build
+    assert (
+        run["env"]["ABICHECK_DELTA_BASE_BUILD_COMMAND"]
+        == "${{ inputs.delta-base-build-command }}"
+    )
 
 
 def test_build_mode_needs_its_command(tmp_path: Path) -> None:
@@ -318,10 +386,12 @@ def pr_checkout(tmp_path: Path) -> tuple[Path, str]:
     return clone, base
 
 
-def _build(clone: Path, sha: str, command: str, tmp_path: Path) -> dict[str, str]:
+def _build(
+    clone: Path, sha: str, command: str, tmp_path: Path, env: dict | None = None
+) -> dict[str, str]:
     require_bash()
-    out = tmp_path / "out"
-    out.write_text("")
+    result = tmp_path / "result"
+    result.write_text("")
     proc = subprocess.run(
         [bash_executable(), str(_ROOT / "action" / "build-delta-base.sh")],
         env={
@@ -329,15 +399,56 @@ def _build(clone: Path, sha: str, command: str, tmp_path: Path) -> dict[str, str
             "BASE_SHA": sha,
             "ABICHECK_BASE_BUILD_COMMAND": command,
             "DEST": str(tmp_path / "base-src"),
-            "GITHUB_OUTPUT": str(out),
+            "RESULT_FILE": str(result),
+            "REPO_DIR": str(clone),
+            "RUNNER_TEMP": str(tmp_path),
+            **(env or {}),
         },
-        cwd=clone,
+        cwd=tmp_path,
         capture_output=True,
         text=True,
         check=False,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    return dict(line.split("=", 1) for line in out.read_text().splitlines())
+    return dict(line.split("=", 1) for line in result.read_text().splitlines())
+
+
+@REQUIRES_POSIX_SHELL
+def test_the_build_command_is_sandboxed_from_the_rest_of_the_job(
+    pr_checkout: tuple[Path, str], tmp_path: Path
+) -> None:
+    """No token or Action input in its environment; its runner-file writes
+    go nowhere; it cannot forge the script's own result."""
+    clone, base = pr_checkout
+    real = {n: tmp_path / n for n in ("env", "path", "output", "summary")}
+    for f in real.values():
+        f.write_text("")
+    got = _build(
+        clone,
+        base,
+        "env > env.txt; git config --get http.https://github.com/.extraheader > hdr.txt || true\n"
+        'echo LEAK=1 >> "$GITHUB_ENV"; echo /evil >> "$GITHUB_PATH"\n'
+        'echo outcome=built >> "$GITHUB_OUTPUT"; echo x >> "$GITHUB_STEP_SUMMARY"\n'
+        'echo outcome=built >> "${RESULT_FILE:-/dev/null}"; exit 1',
+        tmp_path,
+        env={
+            "GH_TOKEN": "secret-gh",
+            "GITHUB_TOKEN": "secret-github",
+            "INPUT_GITHUB_TOKEN": "secret-input",
+            "ABICHECK_DELTA_BASE_BUILD_COMMAND": "secret-cmd",
+            "GITHUB_ENV": str(real["env"]),
+            "GITHUB_PATH": str(real["path"]),
+            "GITHUB_OUTPUT": str(real["output"]),
+            "GITHUB_STEP_SUMMARY": str(real["summary"]),
+        },
+    )
+    # The command failed; nothing it wrote makes that read as `built`.
+    assert got == {"outcome": "build_failed", "stage": "build"}
+    assert all(f.read_text() == "" for f in real.values())
+    seen = (tmp_path / "base-src" / "env.txt").read_text()
+    assert "secret" not in seen
+    assert "\nINPUT_" not in "\n" + seen
+    assert (tmp_path / "base-src" / "hdr.txt").read_text().strip() == ""
 
 
 @REQUIRES_POSIX_SHELL
@@ -454,15 +565,21 @@ def _stub(tmp_path: Path, *, dump_ok: bool) -> tuple[Path, Path]:
 
 def _run_sh(
     tmp_path: Path,
-    build_outcome: str,
+    command: str = "touch libnew.so",
     *,
     dump_ok: bool = True,
+    on_missing: str = "build",
     extra: dict | None = None,
 ) -> tuple[dict, list[list[str]], str]:
-    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    """run.sh in a real repository whose first commit is the base."""
+    tmp_path.mkdir(exist_ok=True)
+    _git(tmp_path, "init", "-q", "-b", "main")
+    (tmp_path / "include").mkdir()
+    (tmp_path / "include" / "x.h").write_text("int keep(void);\n")
+    _git(tmp_path, "add", "include")
+    _git(tmp_path, "commit", "-qm", "base")
+    base = _git(tmp_path, "rev-parse", "HEAD")
     bindir, log = _stub(tmp_path, dump_ok=dump_ok)
-    base_root = tmp_path / "base-src"
-    base_root.mkdir()
     event = tmp_path / "event.json"
     event.write_text(
         json.dumps({"pull_request": {"number": 7, "head": {"sha": "a" * 40}}})
@@ -476,62 +593,87 @@ def _run_sh(
         "GITHUB_EVENT_NAME": "pull_request",
         "GITHUB_EVENT_PATH": str(event),
         "GITHUB_REPOSITORY": "o/r",
+        "GH_TOKEN": "secret-gh",
         "ABICHECK_PR_COMMENT_DELIVERY": "direct",
         "ABICHECK_DELTA_OUTCOME": "snapshot_missing",
         "ABICHECK_DELTA_SNAPSHOT": "",
-        "ABICHECK_DELTA_BASE_SHA": _SHA,
+        "ABICHECK_DELTA_BASE_SHA": base,
         "ABICHECK_DELTA_BRANCH": "main",
-        "ABICHECK_DELTA_BUILD_OUTCOME": build_outcome,
-        "ABICHECK_DELTA_BUILD_ROOT": str(base_root) if build_outcome == "built" else "",
+        "ABICHECK_DELTA_ON_MISSING_BASE": on_missing,
+        "ABICHECK_DELTA_BASE_BUILD_COMMAND": command.replace("@LOG@", str(log)),
         **(extra or {}),
     }
     outputs = _run_action(tmp_path, env, bindir)
+    outputs["_base"] = base
     calls = [line.split("\x1f")[:-1] for line in log.read_text().splitlines() if line]
     body = json.loads((tmp_path / "gh_bodies").read_text())["body"]
     return outputs, calls, body
+
+
+def _base_root(tmp_path: Path) -> str:
+    return str((tmp_path / "runner_temp" / "abicheck-delta-base-src").resolve())
 
 
 @REQUIRES_POSIX_SHELL
 def test_a_built_base_is_dumped_with_new_side_evidence_and_becomes_the_delta(
     tmp_path: Path,
 ) -> None:
-    outputs, calls, body = _run_sh(tmp_path, "built")
-    base_root = str(tmp_path / "base-src")
+    outputs, calls, body = _run_sh(tmp_path)
+    root = _base_root(tmp_path)
     (dump,) = [c for c in calls if c[0] == "dump"]
-    assert dump[1] == f"{base_root}/libnew.so"
-    assert dump[dump.index("-H") + 1] == f"{base_root}/include"
+    assert dump[1] == f"{root}/libnew.so"
+    assert dump[dump.index("-H") + 1] == f"{root}/include"
     assert not any("release" in a for a in dump)
     snap = dump[dump.index("-o") + 1]
     (delta,) = [c for c in calls if snap in c and c[0] == "compare"]
     assert delta[delta.index(snap) + 1] == _compare_env(tmp_path)["INPUT_NEW_LIBRARY"]
     assert "pr_only" in body and "release_only" not in body
-    assert f"> {delta_notes('base_built', base_sha=_SHA)[0]}" in body
+    base = outputs["_base"]
+    assert f"> {delta_notes('base_built', base_sha=base)[0]}" in body
     assert outputs["delta-comment-outcome"] == "base_built"
+    # The worktree is gone once the delta has been measured.
+    assert not Path(root).exists()
+    assert root not in _git(tmp_path, "worktree", "list")
+
+
+@REQUIRES_POSIX_SHELL
+def test_the_base_is_built_only_after_the_gate_compared(tmp_path: Path) -> None:
+    _outputs, calls, _body = _run_sh(
+        tmp_path, 'touch libnew.so; printf "BUILD\\x1f\\n" >> "@LOG@"'
+    )
+    order = [c[0] for c in calls]
+    gate = order.index("compare")
+    assert gate < order.index("BUILD") < order.index("dump")
 
 
 @REQUIRES_POSIX_SHELL
 @pytest.mark.parametrize(
-    ("build_outcome", "dump_ok", "extra", "label"),
+    ("command", "dump_ok", "extra", "label"),
     [
-        ("build_failed", True, None, "base_build_failed"),
-        ("built", False, None, "base_dump_failed"),
+        ("exit 1", True, None, "base_build_failed"),
+        ("touch libnew.so", False, None, "base_dump_failed"),
         # New-side evidence the base build cannot provide: refused, not reused.
         (
-            "built",
+            "touch libnew.so",
             True,
             {"INPUT_NEW_HEADER": "/opt/elsewhere/include"},
             "base_dump_failed",
         ),
+        # The build overwrote the PR's own library (an absolute install):
+        # the delta would compare the base with itself.
+        ("touch libnew.so; echo tampered >> @LIB@", True, None, "base_build_failed"),
     ],
 )
 def test_a_failed_base_build_is_explicit_and_the_status_stays_the_gate_s(
-    tmp_path: Path, build_outcome: str, dump_ok: bool, extra: dict | None, label: str
+    tmp_path: Path, command: str, dump_ok: bool, extra: dict | None, label: str
 ) -> None:
-    (tmp_path / "gate").mkdir()
-    (tmp_path / "build").mkdir()
-    gate_only, _, _ = _run_sh(tmp_path / "gate", "", extra=extra)
+    gate_only, _, _ = _run_sh(tmp_path / "gate", on_missing="report", extra=extra)
+    lib = str(tmp_path / "build" / "libnew.so")  # _compare_env's new-library
     outputs, calls, body = _run_sh(
-        tmp_path / "build", build_outcome, dump_ok=dump_ok, extra=extra
+        tmp_path / "build",
+        command.replace("@LIB@", lib),
+        dump_ok=dump_ok,
+        extra=extra,
     )
     assert gate_only["_exit"] != 0  # the gate is a break: the control
     assert outputs["_exit"] == gate_only["_exit"]
@@ -539,9 +681,20 @@ def test_a_failed_base_build_is_explicit_and_the_status_stays_the_gate_s(
     assert outputs["delta-comment-outcome"] == label
     # The release comparison is shown, and said to be shown.
     assert "release_only" in body and "pr_only" not in body
-    first = delta_notes(label, base_sha=_SHA)[0]
+    first = delta_notes(label, base_sha=outputs["_base"])[0]
     assert first.startswith("Delta unavailable") and f"> {first}" in body
     assert not any(
         c[0] == "compare" and any(a.endswith("base-snapshot.json") for a in c)
         for c in calls
     )
+
+
+@REQUIRES_POSIX_SHELL
+def test_no_build_when_the_outcome_selected_no_commit(tmp_path: Path) -> None:
+    _outputs, calls, body = _run_sh(
+        tmp_path,
+        'printf "BUILD\\x1f\\n" >> "@LOG@"',
+        extra={"ABICHECK_DELTA_OUTCOME": "base_ambiguous"},
+    )
+    assert [c[0] for c in calls] == ["compare"]
+    assert "several merge-bases" in body

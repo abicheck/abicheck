@@ -956,12 +956,12 @@ inputs:
       comment and nothing fails. 'fail': additionally fail the job in a
       separate step after the comparison, so the result reads as
       "delta required but unavailable", never as a compatibility break.
-      'build': check out the base commit beside this checkout, run
-      delta-base-build-command there, dump it with this run's new-side
-      evidence inputs and use it as the delta base; a failed build is
-      reported in the comment and never changes the step's status. Only
-      for an outcome that selected a base commit (not base_unknown or
-      base_ambiguous).
+      'build': after the normal comparison, check out the base commit
+      beside this checkout, run delta-base-build-command there, dump it with
+      this run's new-side evidence inputs and use it as the delta base; a
+      failed build is reported in the comment and never changes the step's
+      status. Only for an outcome that selected a base commit (not
+      base_unknown or base_ambiguous), and only when a comment is rendered.
     required: false
     default: 'report'
   delta-base-build-command:
@@ -970,8 +970,10 @@ inputs:
       the base commit, run from the root of its checkout (a git worktree in
       runner.temp; ABICHECK_BASE_SHA names the commit). They must leave
       new-library and the new-side header/debug-info/build inputs at the
-      same paths relative to the checkout root as the PR build does. The
-      step gets no token.
+      same paths relative to the checkout root as the PR build does, and
+      must not install over the PR build. They run without the token or the
+      Action's inputs in their environment, and their GITHUB_ENV/GITHUB_PATH/
+      GITHUB_OUTPUT writes are discarded.
     required: false
     default: ''
   pr-comment-detail:
@@ -1720,22 +1722,6 @@ runs:
           printf 'outcome=lookup_failed\nmessage=Delta unavailable: the snapshot lookup failed.\n' >> "$GITHUB_OUTPUT"
         }
 
-    # delta-on-missing-base: build -- its own step, so the base commit's
-    # build runs with no token and its log and failure name themselves. It
-    # never fails: run.sh reads `outcome` and labels the comment.
-    - name: Build the delta base
-      id: delta-build
-      if: >-
-        inputs.delta-on-missing-base == 'build' && steps.delta-base.outcome == 'success' &&
-        steps.delta-base.outputs.base-sha != '' &&
-        contains(fromJSON('["base_pending","base_failed","base_not_snapshotted","base_expired","snapshot_missing","untrusted_source","lookup_failed"]'), steps.delta-base.outputs.outcome)
-      shell: bash
-      env:
-        BASE_SHA: ${{ steps.delta-base.outputs.base-sha }}
-        ABICHECK_BASE_BUILD_COMMAND: ${{ inputs.delta-base-build-command }}
-        DEST: ${{ runner.temp }}/abicheck-delta-base-src
-      run: bash "${{ github.action_path }}/action/build-delta-base.sh"
-
     # ── 4. Run abicheck ──────────────────────────────────────────────────────
     - name: Run abicheck
       id: run-abicheck
@@ -1804,8 +1790,10 @@ runs:
         ABICHECK_DELTA_MESSAGE: ${{ steps.delta-base.outputs.message }}
         ABICHECK_DELTA_BASE_SHA: ${{ steps.delta-base.outputs.base-sha }}
         ABICHECK_DELTA_BRANCH: ${{ github.event.repository.default_branch }}
-        ABICHECK_DELTA_BUILD_OUTCOME: ${{ steps.delta-build.outputs.outcome }}
-        ABICHECK_DELTA_BUILD_ROOT: ${{ steps.delta-build.outputs.root }}
+        # delta-on-missing-base: build runs inside run.sh, after the gate
+        # comparison and in a sandbox (action/build-delta-base.sh).
+        ABICHECK_DELTA_ON_MISSING_BASE: ${{ inputs.delta-on-missing-base }}
+        ABICHECK_DELTA_BASE_BUILD_COMMAND: ${{ inputs.delta-base-build-command }}
         INPUT_SOURCES: ${{ inputs.sources }}
         INPUT_BUILD_INFO: ${{ inputs.build-info }}
         INPUT_COMPILE_DB: ${{ inputs.compile-db }}
