@@ -70,3 +70,36 @@ def test_rendered_comment_carries_notes_before_size_bounding() -> None:
     assert body.index("> Changes in this PR") < body.index("> Release gate: BREAKING")
     plain = render_report(report, identity=ident, on="always").body
     assert "Release gate" not in plain
+
+
+@pytest.mark.parametrize("merge_group", [False, True])
+def test_delta_notes_cli_prints_the_shared_wording(merge_group: bool) -> None:
+    from click.testing import CliRunner
+
+    from abicheck.frontends.action.cli_main_snapshot import delta_notes_cmd
+
+    args = [
+        "--outcome",
+        "base_pending",
+        "--base-sha",
+        SHA,
+        "--gate-verdict",
+        "BREAKING",
+    ]
+    if merge_group:
+        args.append("--merge-group")
+    result = CliRunner().invoke(delta_notes_cmd, args)
+    assert result.exit_code == 0, result.output
+    expected = delta_notes(
+        "base_pending", base_sha=SHA, gate_verdict="BREAKING", merge_group=merge_group
+    )
+    assert result.output.splitlines() == expected
+
+
+def test_delta_notes_cli_refuses_an_unknown_outcome() -> None:
+    from click.testing import CliRunner
+
+    from abicheck.frontends.action.cli_main_snapshot import delta_notes_cmd
+
+    result = CliRunner().invoke(delta_notes_cmd, ["--outcome", "bogus"])
+    assert result.exit_code == 2 and not result.output.startswith("Delta")
