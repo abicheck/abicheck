@@ -122,9 +122,14 @@ def disposition_violations(report: Mapping[str, Any]) -> list[str]:
     ``effective_total`` is the gating subset (schema) and must equal
     ``counts.gating``. Each change in ``changes`` states its own
     ``gate_contribution``; the changes that contributed to the gate are the
-    gating ones, so their number is ``effective_total`` too. When
-    ``result_counts`` is present, its ``gating`` agrees, and its ``retained``
-    is the length of ``changes``.
+    retained gating ones. Their number is ``result_counts.gating_retained``,
+    and never more than ``effective_total``, which may exceed it by a
+    redundant finding folded out of ``changes`` but still scored
+    (``held_out_gating``). When ``result_counts`` is present, its ``gating``
+    is ``effective_total`` and its ``retained`` is the length of ``changes``.
+
+    Judge a full report: a ``--show-only`` view filters ``changes`` and is not
+    expected to satisfy this.
     """
     audit = report.get("disposition_audit")
     if not isinstance(audit, Mapping) or not isinstance(audit.get("counts"), Mapping):
@@ -139,13 +144,19 @@ def disposition_violations(report: Mapping[str, Any]) -> list[str]:
     missing = [c.get("kind") for c in changes if "gate_contribution" not in c]
     if missing:
         problems.append(f"changes without gate_contribution: {missing}")
-    else:
-        gating = sum(1 for c in changes if c["gate_contribution"] > 0)
-        if gating != effective:
-            problems.append(
-                f"{gating} changes contribute to the gate, effective_total is {effective}"
-            )
     counts = report.get("result_counts")
+    if not missing:
+        gating = sum(1 for c in changes if c["gate_contribution"] > 0)
+        if isinstance(effective, int) and gating > effective:
+            problems.append(
+                f"{gating} changes contribute to the gate, more than effective_total {effective}"
+            )
+        if isinstance(counts, Mapping) and "gating_retained" in counts:
+            if gating != counts["gating_retained"]:
+                problems.append(
+                    f"{gating} changes contribute to the gate, "
+                    f"result_counts.gating_retained is {counts['gating_retained']}"
+                )
     if isinstance(counts, Mapping):
         if counts.get("gating") != effective:
             problems.append(

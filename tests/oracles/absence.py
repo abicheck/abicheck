@@ -16,6 +16,7 @@ surface without type-level evidence: verdict ``UNCONFIRMED``, version bump
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -77,7 +78,6 @@ def gate_violations(exit_code: int, status: str | None) -> list[str]:
 CLEAN_CLAIM_PHRASES: tuple[str, ...] = (
     "Gate: ACCEPTED",
     "**Gate:** PASS",
-    "safe to merge",
     "Compatibility: NO_CHANGE",
     "Compatibility: COMPATIBLE",
     "`NO_CHANGE`",
@@ -102,6 +102,15 @@ def rendered_absence_violations(
     return [
         f"{name} states a clean claim ({phrase!r}) while analysis_assurance.status is {status!r}"
         for name, text in sorted(rendered.items())
-        for phrase in CLEAN_CLAIM_PHRASES
-        if phrase in text
+        for phrase in (
+            *(p for p in CLEAN_CLAIM_PHRASES if p in text),
+            *(m.group(0) for m in _AFFIRMED_SAFE_TO_MERGE.finditer(text)),
+        )
     ]
+
+
+#: "safe to merge" as a claim, not negated ("not safe to merge", "isn't safe
+#: to merge"), which an unconfirmed result may legitimately say.
+_AFFIRMED_SAFE_TO_MERGE = re.compile(
+    r"(?<!\bnot )(?<!n't )(?<!\bnever )\bsafe to merge\b", re.IGNORECASE
+)

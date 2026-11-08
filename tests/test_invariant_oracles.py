@@ -332,10 +332,34 @@ def test_review_and_html_clean_wording_is_flagged(text: str) -> None:
     assert rendered_absence_violations({"review": text}, "partial") != []
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "**Verdict:** `UNCONFIRMED` — not safe to merge",
+        "This result isn't safe to merge without headers.",
+        "Never safe to merge on partial evidence.",
+    ],
+)
+def test_negated_safe_to_merge_is_not_a_clean_claim(text: str) -> None:
+    assert rendered_absence_violations({"review": text}, "partial") == []
+
+
+def test_affirmed_safe_to_merge_is_a_clean_claim() -> None:
+    assert rendered_absence_violations({"review": "Safe to merge."}, "partial") == [
+        "review states a clean claim ('Safe to merge') while analysis_assurance.status is 'partial'"
+    ]
+
+
 # -- D: rendered audit totals and disposition agreement --------------------------
 
 
-def _audited(changes: list[dict], gating: int, non_gating: int) -> dict:
+def _audited(
+    changes: list[dict],
+    gating: int,
+    non_gating: int,
+    *,
+    gating_retained: int | None = None,
+) -> dict:
     return {
         "changes": changes,
         "disposition_audit": {
@@ -343,7 +367,11 @@ def _audited(changes: list[dict], gating: int, non_gating: int) -> dict:
             "effective_total": gating,
             "counts": {"gating": gating, "non_gating": non_gating},
         },
-        "result_counts": {"gating": gating, "retained": len(changes)},
+        "result_counts": {
+            "gating": gating,
+            "gating_retained": gating if gating_retained is None else gating_retained,
+            "retained": len(changes),
+        },
     }
 
 
@@ -381,17 +409,26 @@ def test_disposition_agrees_silently() -> None:
 def test_disposition_fires_when_gating_changes_outnumber_effective_total() -> None:
     changes = [{**c, "gate_contribution": 4} for c in _TWO]
     assert disposition_violations(_audited(changes, 1, 1)) == [
-        "2 changes contribute to the gate, effective_total is 1"
+        "2 changes contribute to the gate, more than effective_total 1",
+        "2 changes contribute to the gate, result_counts.gating_retained is 1",
     ]
+
+
+def test_a_scored_finding_folded_out_of_changes_is_not_a_violation() -> None:
+    # A redundant finding the verdict still scores stays in the audit's
+    # gating count but is folded out of ``changes`` (held_out_gating).
+    report = _audited(_TWO, 2, 1, gating_retained=1)
+    assert disposition_violations(report) == []
 
 
 def test_disposition_fires_on_effective_total_and_result_count_drift() -> None:
     report = _audited(_TWO, 1, 1)
     report["disposition_audit"]["effective_total"] = 2
     report["result_counts"]["retained"] = 5
+    report["result_counts"]["gating_retained"] = 2
     assert disposition_violations(report) == [
         "effective_total 2 != counts.gating 1",
-        "1 changes contribute to the gate, effective_total is 2",
+        "1 changes contribute to the gate, result_counts.gating_retained is 2",
         "result_counts.gating 1 != effective_total 2",
         "result_counts.retained 5 != 2 changes listed",
     ]

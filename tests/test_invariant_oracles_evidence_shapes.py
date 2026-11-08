@@ -135,6 +135,9 @@ def _compare(
         text=True,
         timeout=600,
         env=env or abicheck_env(),
+        # A scratch directory, so no .abicheck.yml (e.g. compile.frontend:
+        # clang) from the invoking checkout changes which extractor runs.
+        cwd=out,
     )
     return _Run(proc.returncode, proc.stdout, proc.stderr, files)
 

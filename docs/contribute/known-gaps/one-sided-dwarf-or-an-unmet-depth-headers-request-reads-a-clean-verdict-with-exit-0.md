@@ -1,3 +1,12 @@
+---
+doc_type: contributor
+audience:
+  - contributor
+level: advanced
+lifecycle: active
+generated: false
+---
+
 # One-sided DWARF or an unmet --depth headers request reads a clean verdict with exit 0
 
 Opened 2026-11-08. The index entry is in [known-gaps.md](../known-gaps.md).
