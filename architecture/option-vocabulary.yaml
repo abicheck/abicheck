@@ -1314,6 +1314,7 @@ concepts:
       - action:delta-profile
       - action:delta-wait-timeout
       - action:delta-on-missing-base
+      - action:delta-operand-map
   - concept: aggregate
     tier: core
     renames: []

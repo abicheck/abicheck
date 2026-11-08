@@ -86,7 +86,10 @@ deprecation-window note would need to reach.
   (compare report schema 7.3, release report schema 3.1) with
   `comparison_role` (`gate` | `delta`), `decides_exit_code`, the lookup
   `outcome` (or `unsupported_operand`), `base_sha`, `branch` and, on the
-  delta report, the gate's `gate_verdict`. The Action asserts it through the
+  delta report, the gate's `gate_verdict` and the operand-identity rule that
+  paired the snapshot's library with the PR's (`operand_match`). Outcomes
+  decided after the gate ran (`rerun_failed`, the `operand_*` refusals) run
+  no delta comparison and are not recorded in either report. The Action asserts it through the
   config key `report.delta_baseline` (`--set report.delta_baseline=@FILE`),
   so it is labelled `asserted_by: action`; the CLI validates its shape and
   role rules (exit 64 if unusable) and never lets it change a verdict, a

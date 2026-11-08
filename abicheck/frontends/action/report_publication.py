@@ -671,6 +671,7 @@ def context_notes(
                 branch=ctx.pr_base_ref or "main",
                 gate_verdict=ctx.gate_verdict,
                 merge_group=ctx.producer_event == "merge_group",
+                operand_match=ctx.delta_operand_match,
             )
         except ValueError:
             return []
@@ -740,4 +741,5 @@ def _block_notes(data: Mapping[str, Any], *, merge_group: bool) -> list[str]:
         branch=record.branch or "main",
         gate_verdict=gate_verdict,
         merge_group=merge_group,
+        operand_match=record.operand_match or "",
     )

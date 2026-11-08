@@ -25,6 +25,7 @@ can tell which one reached the comment.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -122,6 +123,7 @@ def _run(
     extra: dict[str, str] | None = None,
     clean_gate: bool = False,
     delta_gates: bool = False,
+    before: Callable[[], object] | None = None,
 ) -> tuple[dict, list[list[str]]]:
     snap = snapshot or str(tmp_path / "base-snapshot.json")
     bindir, log, _ = _stub(
@@ -129,8 +131,19 @@ def _run(
     )
     event = tmp_path / "event.json"
     event.write_text(json.dumps({"pull_request": {"number": 7, "head": {"sha": _SHA}}}))
+    base_env = _compare_env(tmp_path)
+    if outcome == "resolved" and not Path(snap).exists():
+        # Operand identity reads both sides: the snapshot and the PR's
+        # library are the same library (same file name), as in a real run.
+        save_snapshot(AbiSnapshot(library="libnew.so", version="1"), Path(snap))
+        save_snapshot(
+            AbiSnapshot(library="libnew.so", version="2"),
+            Path(base_env["INPUT_NEW_LIBRARY"]),
+        )
+    if before is not None:
+        before()
     env = {
-        **_compare_env(tmp_path),
+        **base_env,
         "INPUT_OLD_HEADER": "release/include",
         "INPUT_NEW_HEADER": "include",
         "INPUT_PR_COMMENT": "true",

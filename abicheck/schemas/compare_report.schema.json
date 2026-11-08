@@ -1843,7 +1843,7 @@
     },
     "delta_baseline": {
       "type": "object",
-      "description": "Schema 7.3: which comparison of a root GitHub Action `delta-baseline` pair this report is, as the caller asserted it. With `delta-baseline: main` the Action compares the same new side twice: the gate (against the configured release baseline; its verdict is the check's verdict and exit code) and the delta (against the default-branch snapshot of the exact commit the pull request was built on, so the PR comment lists only that PR's changes). Present only when the run was given `report.delta_baseline` (`--set report.delta_baseline=@FILE`). `asserted_by: action` marks the values unverified by the CLI. Informational: never affects `verdict`, `severity` or any exit code; a `delta` report's own verdict never gates.",
+      "description": "Schema 7.3: which comparison of a root GitHub Action `delta-baseline` pair this report is, as the caller asserted it. With `delta-baseline: main` the Action compares the same new side twice: the gate (against the configured release baseline; its verdict is the check's verdict and exit code) and the delta (against the default-branch snapshot of the exact commit the pull request was built on, so the PR comment lists only that PR's changes). Present only when the run was given `report.delta_baseline` (`--set report.delta_baseline=@FILE`). `asserted_by: action` marks the values unverified by the CLI. Informational: never affects `verdict`, `severity` or any exit code; a `delta` report's own verdict never gates. Outcomes decided only after the gate ran (`rerun_failed` and the operand-identity refusals `operand_unmatched`/`operand_ambiguous`/`operand_map_invalid`/`operand_unreadable`) are never recorded: no delta comparison runs then, and the gate's block keeps the lookup's outcome.",
       "additionalProperties": false,
       "required": [
         "asserted_by",
@@ -1852,7 +1852,8 @@
         "outcome",
         "base_sha",
         "branch",
-        "gate_verdict"
+        "gate_verdict",
+        "operand_match"
       ],
       "allOf": [
         {
@@ -1885,6 +1886,9 @@
                 "const": true
               },
               "gate_verdict": {
+                "type": "null"
+              },
+              "operand_match": {
                 "type": "null"
               }
             }
@@ -1950,6 +1954,21 @@
           ],
           "pattern": "^[A-Z][A-Z_]{0,39}$",
           "description": "`delta` reports only: the gate comparison's verdict (the Action's `verdict` output), which is the check's result. `null` on a `gate` report, whose own `verdict` is the gate's."
+        },
+        "operand_match": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "declared",
+            "loader_name",
+            "loader_name_version",
+            "file_name",
+            "file_name_version",
+            null
+          ],
+          "description": "`delta` reports only: how the default-branch snapshot's library was paired with this PR's library before the delta comparison ran (the operand-identity rule, the Action's `delta-operand-match` output): `declared` (`delta-operand-map`), `loader_name` (same SONAME/install name), `loader_name_version` (loader names differ only by version), `file_name` (same path or file name, no loader name on one side), `file_name_version` (file names differ only by version). `null` on a `gate` report: the gate runs before the operands are paired. An `operand_*` refusal is never recorded here, because no delta comparison runs then."
         }
       }
     },

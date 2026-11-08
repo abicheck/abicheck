@@ -43,10 +43,14 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from ..workflows.delta_operand import MatchRule
+
 __all__ = [
     "DELTA_BASELINE_PATH",
     "DELTA_COMPARISON_ROLES",
     "DELTA_LOOKUP_OUTCOMES",
+    "DELTA_OPERAND_MATCHES",
+    "DELTA_POST_GATE_OUTCOMES",
     "DELTA_REPORT_OUTCOMES",
     "DeltaBaseline",
     "DeltaBaselineError",
@@ -80,8 +84,35 @@ DELTA_LOOKUP_OUTCOMES: tuple[str, ...] = (
 #: single-snapshot delta can describe -- known before the gate runs).
 DELTA_REPORT_OUTCOMES: tuple[str, ...] = (*DELTA_LOOKUP_OUTCOMES, "unsupported_operand")
 
+#: Outcomes the comment can carry that no report records. Each is decided
+#: after the gate has run, and in each case no delta comparison runs:
+#: ``rerun_failed`` (the delta rerun produced no report) and the operand
+#: identity refusals of :mod:`abicheck.workflows.delta_operand` (the snapshot
+#: is not shown to be this PR's library, so it is never compared). The gate
+#: report's own block keeps the lookup's outcome; the analysis context's
+#: ``delta_outcome`` carries the comment's final one.
+DELTA_POST_GATE_OUTCOMES: tuple[str, ...] = (
+    "rerun_failed",
+    "operand_unmatched",
+    "operand_ambiguous",
+    "operand_map_invalid",
+    "operand_unreadable",
+)
+
+#: How a delta report's snapshot library was paired with the PR's library
+#: (:class:`~abicheck.workflows.delta_operand.MatchRule`, without its empty
+#: "no match" member: a delta report exists only for a matched pair).
+DELTA_OPERAND_MATCHES: tuple[str, ...] = tuple(r.value for r in MatchRule if r.value)
+
 _KNOWN_FIELDS: frozenset[str] = frozenset(
-    {"comparison_role", "outcome", "base_sha", "branch", "gate_verdict"}
+    {
+        "comparison_role",
+        "outcome",
+        "base_sha",
+        "branch",
+        "gate_verdict",
+        "operand_match",
+    }
 )
 _FULL_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 #: A git ref name with nothing a Markdown renderer or a shell would act on.
@@ -104,6 +135,17 @@ def _optional(
     return value
 
 
+def _operand_match(data: Mapping[str, object]) -> str | None:
+    value = data.get("operand_match")
+    if value is None or value == "":
+        return None
+    if value not in DELTA_OPERAND_MATCHES:
+        raise DeltaBaselineError(
+            f"operand_match must be one of {', '.join(DELTA_OPERAND_MATCHES)}, got {value!r}"
+        )
+    return str(value)
+
+
 @dataclass(frozen=True)
 class DeltaBaseline:
     """One report's asserted place in a gate + delta pair."""
@@ -113,6 +155,10 @@ class DeltaBaseline:
     base_sha: str | None = None
     branch: str | None = None
     gate_verdict: str | None = None
+    #: Delta reports only: the operand-identity rule that paired the
+    #: snapshot's library with the PR's (one of :data:`DELTA_OPERAND_MATCHES`);
+    #: ``None`` when not recorded.
+    operand_match: str | None = None
 
     @classmethod
     def from_mapping(cls, data: object) -> DeltaBaseline:
@@ -151,6 +197,7 @@ class DeltaBaseline:
             base_sha=_optional(data, "base_sha", _FULL_SHA),
             branch=_optional(data, "branch", _BRANCH),
             gate_verdict=_optional(data, "gate_verdict", _VERDICT),
+            operand_match=_operand_match(data),
         )
         if record.comparison_role == "delta":
             if record.outcome != "resolved":
@@ -167,6 +214,11 @@ class DeltaBaseline:
             raise DeltaBaselineError(
                 "gate_verdict is recorded on the delta report only; a gate "
                 "report's own verdict is the gate's"
+            )
+        elif record.operand_match is not None:
+            raise DeltaBaselineError(
+                "operand_match is recorded on the delta report only; the gate "
+                "runs before the operands are paired"
             )
         return record
 
@@ -206,4 +258,5 @@ class DeltaBaseline:
             "base_sha": self.base_sha,
             "branch": self.branch,
             "gate_verdict": self.gate_verdict,
+            "operand_match": self.operand_match,
         }

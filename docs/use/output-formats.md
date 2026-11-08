@@ -1132,7 +1132,8 @@ schema 3.1) saying which one they are:
   "outcome": "resolved",
   "base_sha": "4f2c...e1",
   "branch": "main",
-  "gate_verdict": "BREAKING"
+  "gate_verdict": "BREAKING",
+  "operand_match": "loader_name"
 }
 ```
 
@@ -1143,8 +1144,16 @@ directory/package comparison; a `delta` report is always `resolved`.
 `base_sha` is the default-branch commit the delta is measured against (`null`
 when none was selected), `branch` the branch the snapshot came from, and
 `gate_verdict` -- on the `delta` report only -- the gate's verdict, so a
-reader of the delta report alone sees what the check decided. The delta
-report's own `verdict` describes this PR's changes and never gates.
+reader of the delta report alone sees what the check decided. `operand_match`
+-- also on the `delta` report only -- says how the snapshot's library was
+paired with this PR's library (`declared`, `loader_name`,
+`loader_name_version`, `file_name`, `file_name_version`; the Action's
+`delta-operand-match` output). The delta report's own `verdict` describes this
+PR's changes and never gates. Outcomes decided only after the gate ran --
+`rerun_failed` and the operand-identity refusals (`operand_unmatched`,
+`operand_ambiguous`, `operand_map_invalid`, `operand_unreadable`) -- are never
+recorded: no delta comparison runs then, the gate's block keeps the lookup's
+outcome, and the PR comment states the final one.
 
 The block is informational: it never changes `verdict`, `severity` or any exit
 code, and it is absent when the run was given none. The Action passes it as

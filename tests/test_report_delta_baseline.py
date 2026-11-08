@@ -50,6 +50,8 @@ from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.report.delta_baseline import (
     DELTA_COMPARISON_ROLES,
     DELTA_LOOKUP_OUTCOMES,
+    DELTA_OPERAND_MATCHES,
+    DELTA_POST_GATE_OUTCOMES,
     DELTA_REPORT_OUTCOMES,
     DeltaBaseline,
     DeltaBaselineError,
@@ -60,6 +62,7 @@ from abicheck.schemas import (
     load_compare_report_schema,
 )
 from abicheck.serialization import snapshot_to_json
+from abicheck.workflows.delta_operand import MatchRule
 
 _SHA = "c" * 40
 
@@ -99,24 +102,32 @@ def _valid(doc: dict[str, object]) -> bool:
             doc["outcome"] == "resolved"
             and bool(doc.get("base_sha"))
             and bool(doc.get("gate_verdict"))
+            and doc.get("operand_match") in (None, "", *_MATCH_RULES)
         )
-    return not doc.get("gate_verdict")
+    return not doc.get("gate_verdict") and not doc.get("operand_match")
+
+
+#: The operand-identity rules, read from their owner (MatchRule), minus its
+#: empty "no match" member. ``_domain`` also tries a spelling none defines.
+_MATCH_RULES = tuple(r.value for r in MatchRule if r.value)
 
 
 def _domain() -> list[dict[str, object]]:
     docs = []
-    for role, outcome, sha, branch, verdict in itertools.product(
+    for role, outcome, sha, branch, verdict, match in itertools.product(
         DELTA_COMPARISON_ROLES,
         DELTA_REPORT_OUTCOMES,
         (None, "", _SHA, "d" * 64),
         (None, "main"),
         (None, "BREAKING"),
+        (None, "file_name", "declared", "not_a_rule"),
     ):
         doc: dict[str, object] = {"comparison_role": role, "outcome": outcome}
         for key, value in (
             ("base_sha", sha),
             ("branch", branch),
             ("gate_verdict", verdict),
+            ("operand_match", match),
         ):
             if value is not None:
                 doc[key] = value
@@ -129,11 +140,17 @@ def _domain() -> list[dict[str, object]]:
 
 def test_the_outcome_vocabulary_is_the_action_s() -> None:
     assert set(DELTA_LOOKUP_OUTCOMES) == {o.value for o in DeltaOutcome}
-    # Every report outcome is one the comment can word; `rerun_failed` is
-    # decided after the gate ran, so no report records it.
-    assert set(DELTA_REPORT_OUTCOMES) == (
-        set(DELTA_LOOKUP_OUTCOMES) | set(COMMENT_ONLY_OUTCOMES)
-    ) - {"rerun_failed"}
+    # Every outcome the comment can word is either one a report records or
+    # one decided only after the gate ran (rerun_failed, the operand-identity
+    # refusals), when no delta comparison runs -- never silently neither.
+    worded = set(DELTA_LOOKUP_OUTCOMES) | set(COMMENT_ONLY_OUTCOMES)
+    assert set(DELTA_POST_GATE_OUTCOMES) <= set(COMMENT_ONLY_OUTCOMES)
+    assert set(DELTA_REPORT_OUTCOMES) == worded - set(DELTA_POST_GATE_OUTCOMES)
+    assert {o for o in COMMENT_ONLY_OUTCOMES if o.startswith("operand_")} <= set(
+        DELTA_POST_GATE_OUTCOMES
+    )
+    # The recorded operand rules are exactly the matched MatchRule values.
+    assert set(DELTA_OPERAND_MATCHES) == set(_MATCH_RULES)
 
 
 def test_the_whole_domain_is_accepted_exactly_by_the_rules() -> None:
@@ -178,6 +195,7 @@ def test_the_schema_and_the_reader_agree_on_every_stored_block() -> None:
                 "base_sha": doc.get("base_sha") or None,
                 "branch": doc.get("branch"),
                 "gate_verdict": doc.get("gate_verdict") or None,
+                "operand_match": doc.get("operand_match") or None,
             }
             schema_ok = validator.is_valid(block)
             try:
@@ -584,3 +602,32 @@ def test_the_fork_path_one_target_aggregate_renders_its_member_s_notes(
         "targets": [aggregate["targets"][0] | {"report_path": "../rec.json"}]
     }
     assert context_notes(escaped, report_dir=stage) == []
+
+
+@pytest.mark.parametrize("rule", sorted(DELTA_OPERAND_MATCHES))
+def test_a_stored_delta_report_states_its_operand_pairing(rule: str) -> None:
+    """The block's operand_match reaches the notes exactly as the Action's
+    direct comment words it (delta_notes is the one owner of that wording)."""
+    block = _block(
+        comparison_role="delta",
+        outcome="resolved",
+        base_sha=_SHA,
+        branch="main",
+        gate_verdict="BREAKING",
+        operand_match=rule,
+    )
+    expected = delta_notes(
+        "resolved",
+        base_sha=_SHA,
+        branch="main",
+        gate_verdict="BREAKING",
+        operand_match=rule,
+    )
+    assert context_notes({"delta_baseline": block}) == expected
+    plain = delta_notes(
+        "resolved", base_sha=_SHA, branch="main", gate_verdict="BREAKING"
+    )
+    # A non-trivial pairing adds exactly one line; a trivial one adds none.
+    assert len(expected) - len(plain) == (
+        0 if rule in ("loader_name", "file_name") else 1
+    )

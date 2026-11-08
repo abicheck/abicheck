@@ -77,8 +77,11 @@ def test_every_gate_command_records_the_lookup_outcome(
             base_sha="a" * 40,
             branch="main",
             gate_verdict=outputs["verdict"],
+            # The pairing the Action reports as its delta-operand-match output.
+            operand_match=outputs["delta-operand-match"],
         )
     ]
+    assert outputs["delta-operand-match"]  # a delta report is always a matched pair
     # The staged (stored) delta report is the one the record describes.
     assert outputs["verdict"] == "BREAKING"
 
