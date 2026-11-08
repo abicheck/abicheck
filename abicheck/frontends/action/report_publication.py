@@ -700,13 +700,12 @@ def _block_notes(data: Mapping[str, Any], *, merge_group: bool) -> list[str]:
         gate_verdict = verdict.upper() if isinstance(verdict, str) else ""
     else:
         gate_verdict = record.gate_verdict or ""
-    try:
-        return delta_notes(
-            record.outcome,
-            base_sha=record.base_sha or "",
-            branch=record.branch or "main",
-            gate_verdict=gate_verdict,
-            merge_group=merge_group,
-        )
-    except ValueError:
-        return []
+    # Every outcome a validated record carries is one delta_notes words
+    # (tests/test_report_delta_baseline.py pins the two vocabularies equal).
+    return delta_notes(
+        record.outcome,
+        base_sha=record.base_sha or "",
+        branch=record.branch or "main",
+        gate_verdict=gate_verdict,
+        merge_group=merge_group,
+    )

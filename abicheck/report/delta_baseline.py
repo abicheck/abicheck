@@ -99,7 +99,7 @@ def _optional(
     value = data.get(name)
     if value is None or value == "":
         return None
-    if not isinstance(value, str) or not pattern.match(value):
+    if not isinstance(value, str) or not pattern.fullmatch(value):
         raise DeltaBaselineError(f"{name} {value!r} does not match {pattern.pattern}")
     return value
 

@@ -1854,6 +1854,43 @@
         "branch",
         "gate_verdict"
       ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "comparison_role": {
+                "const": "delta"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "decides_exit_code": {
+                "const": false
+              },
+              "outcome": {
+                "const": "resolved"
+              },
+              "base_sha": {
+                "type": "string"
+              },
+              "gate_verdict": {
+                "type": "string"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "decides_exit_code": {
+                "const": true
+              },
+              "gate_verdict": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ],
       "properties": {
         "asserted_by": {
           "type": "string",

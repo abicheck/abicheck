@@ -2425,6 +2425,20 @@ add_delta_baseline_flag() {
      && { _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" || _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; }; then
     outcome=unsupported_operand
   fi
+  # A stored BundleFacts old side is compared by a route that refuses the
+  # key (it renders no such block yet): recording it there would turn the
+  # gate into a usage error, so that gate report goes without the block.
+  local old=""
+  [[ -n "${OLD_OPERAND_INDEX:-}" ]] && old="${CMD[$OLD_OPERAND_INDEX]:-}"
+  if [[ -n "$old" && -f "$old" ]] && (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
+import sys
+from pathlib import Path
+from abicheck.workflows.bundle_compare_operand import looks_like_stored_bundle_facts
+sys.exit(0 if looks_like_stored_bundle_facts(Path(sys.argv[1])) else 1)
+' "$old") 2>/dev/null; then
+    _notice_annotation "abicheck: the gate compares a stored BundleFacts baseline, whose report does not carry the delta_baseline block yet; the gate itself is unaffected."
+    return 0
+  fi
   rec=$(_write_delta_record gate "$outcome")
   [[ -n "$rec" ]] && CMD+=(--set "report.delta_baseline=@${rec}")
   return 0
@@ -5832,7 +5846,14 @@ _run_delta_json() {
   done
   local rec
   rec=$(_write_delta_record delta resolved "${VERDICT:-}")
-  [[ -n "$rec" ]] && delta+=(--set "report.delta_baseline=@${rec}")
+  if [[ -n "$rec" ]]; then
+    delta+=(--set "report.delta_baseline=@${rec}")
+  else
+    # Clear any record a config file supplies, so the delta report can never
+    # carry a gate record it does not describe. `""` is YAML's empty string:
+    # the key reads as unset.
+    delta+=(--set 'report.delta_baseline=""')
+  fi
   CMD=("${delta[@]}")
   PR_JSON="$out"
   _build_json_cmd

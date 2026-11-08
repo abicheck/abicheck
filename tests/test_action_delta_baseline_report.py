@@ -143,3 +143,41 @@ def test_a_user_set_record_for_the_gate_wins_but_never_reaches_the_delta(
     assert sets[-1] == f"{_KEY}{user}"  # the CLI keeps the last one
     assert f"{_KEY}{user}" not in delta
     assert [r.comparison_role for r in _records(delta)] == ["delta"]
+
+
+def test_a_stored_bundle_facts_gate_gets_no_record(tmp_path: Path) -> None:
+    """That route refuses the key; recording it would fail the gate."""
+    from abicheck.serialization import save_bundle_facts
+    from abicheck.workflows.bundle_facts_capture import capture_bundle_facts
+
+    facts = tmp_path / "facts.json"
+    save_bundle_facts(capture_bundle_facts({}), facts)
+    snap = str(tmp_path / "base-snapshot.json")
+    _outputs, calls = _run(
+        tmp_path,
+        "artifact",
+        "resolved",
+        snapshot=snap,
+        extra={"INPUT_OLD_LIBRARY": str(facts)},
+    )
+    gates = [c for c in calls if snap not in c]
+    assert gates
+    assert all(_records(argv) == [] for argv in gates)
+    assert not any(a.startswith(_KEY) for argv in gates for a in argv)
+
+
+def test_an_unwritable_delta_record_clears_any_configured_one(tmp_path: Path) -> None:
+    """With no gate verdict to record, the delta command clears the key, so a
+    config file's record can never label the delta report as the gate."""
+    snap = str(tmp_path / "base-snapshot.json")
+    _outputs, calls = _run(
+        tmp_path,
+        "artifact",
+        "resolved",
+        snapshot=snap,
+        extra={"ABICHECK_DELTA_BASE_SHA": "not-a-sha"},
+    )
+    (delta,) = [c for c in calls if snap in c]
+    sets = [a for p, a in zip(delta, delta[1:], strict=False) if p == "--set"]
+    assert 'report.delta_baseline=""' in sets
+    assert not any(a.startswith(_KEY) for a in sets)

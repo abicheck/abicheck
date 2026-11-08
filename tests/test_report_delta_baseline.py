@@ -158,6 +158,70 @@ def test_the_whole_domain_is_accepted_exactly_by_the_rules() -> None:
     assert accepted > len(DELTA_REPORT_OUTCOMES)
 
 
+def test_the_schema_and_the_reader_agree_on_every_stored_block() -> None:
+    """Two independent statements of the role rules -- the published JSON
+    Schema and the Python reader -- accept exactly the same blocks, including
+    ones no writer produces (a delta block claiming to decide the exit code)."""
+    import jsonschema
+
+    schema = load_compare_report_schema()
+    sub = schema["properties"]["delta_baseline"] | {"$defs": schema["$defs"]}
+    validator = jsonschema.Draft202012Validator(sub)
+    seen = {True: 0, False: 0}
+    for doc in _domain():
+        for decides in (True, False):
+            block = {
+                "asserted_by": "action",
+                "comparison_role": doc["comparison_role"],
+                "decides_exit_code": decides,
+                "outcome": doc["outcome"],
+                "base_sha": doc.get("base_sha") or None,
+                "branch": doc.get("branch"),
+                "gate_verdict": doc.get("gate_verdict") or None,
+            }
+            schema_ok = validator.is_valid(block)
+            try:
+                DeltaBaseline.from_report_block(block)
+                reader_ok = True
+            except DeltaBaselineError:
+                reader_ok = False
+            assert schema_ok == reader_ok, block
+            seen[reader_ok] += 1
+    assert seen[True] and seen[False]
+
+
+@pytest.mark.parametrize("name", ["base_sha", "branch", "gate_verdict"])
+def test_a_trailing_newline_is_refused(name: str) -> None:
+    doc = {
+        "comparison_role": "delta",
+        "outcome": "resolved",
+        "base_sha": _SHA,
+        "branch": "main",
+        "gate_verdict": "BREAKING",
+    }
+    doc[name] = f"{doc[name]}\n"
+    with pytest.raises(DeltaBaselineError, match=name):
+        DeltaBaseline.from_mapping(doc)
+
+
+def test_a_positional_diff_result_keeps_its_older_tail() -> None:
+    """``delta_baseline`` is keyword-only, so it never takes a positional slot
+    an older caller fills (the ``baseline_provenance`` neighbour sits before
+    ``out_of_surface_changes`` in field order)."""
+    from dataclasses import fields
+
+    from abicheck.checker_types import DiffResult
+
+    by_name = {f.name: f for f in fields(DiffResult)}
+    assert by_name["delta_baseline"].kw_only is True
+    positional = [f.name for f in fields(DiffResult) if not f.kw_only]
+    assert "delta_baseline" not in positional
+    assert (
+        positional[positional.index("baseline_provenance") + 1]
+        == "out_of_surface_changes"
+    )
+
+
 @pytest.mark.parametrize(
     ("doc", "message"),
     [
@@ -435,3 +499,31 @@ def test_the_analysis_context_wins_and_a_bad_block_yields_no_notes() -> None:
     assert notes[0].startswith("Delta unavailable")
     assert context_notes({"delta_baseline": block | {"outcome": "base_pending"}}) == []
     assert context_notes({"delta_baseline": "resolved"}) == []
+
+
+def test_an_unusable_context_or_block_yields_no_notes() -> None:
+    from abicheck.model.analysis_context import ANALYSIS_CONTEXT_SCHEMA
+
+    block = _block(comparison_role="gate", outcome="base_failed", base_sha=_SHA)
+    # A malformed context drops the notes rather than falling back to the block.
+    assert (
+        context_notes({"analysis_context": {"bogus": 1}, "delta_baseline": block}) == []
+    )
+    # A well-formed context naming an outcome nothing words drops them too.
+    ctx = {"schema": ANALYSIS_CONTEXT_SCHEMA, "delta_outcome": "made_up"}
+    assert context_notes({"analysis_context": ctx}) == []
+    # No context, no block.
+    assert context_notes({"verdict": "BREAKING"}) == []
+    # Every unresolved gate outcome is worded from the block alone.
+    for outcome in sorted(set(DELTA_REPORT_OUTCOMES) - {"resolved"}):
+        rec = _block(comparison_role="gate", outcome=outcome)
+        assert context_notes({"delta_baseline": rec})[0].startswith("Delta unavailable")
+
+
+def test_an_empty_file_reference_is_a_usage_error(tmp_path: Path, _compare) -> None:
+    old, new = _inputs(tmp_path / "in", "pair")
+    code, output = _compare(
+        [str(old), str(new), "--set", "report.delta_baseline=@"], tmp_path
+    )
+    assert code == 64, output
+    assert "report.delta_baseline: no file named" in output
