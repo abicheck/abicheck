@@ -155,6 +155,7 @@ partial delta naming both depths; it never silently narrows the delta.
 | `base_expired` | no | "snapshot for `<sha7>` expired — rebase onto or merge `main`" (head mode) / "push or *Update branch*" (re-run) |
 | `base_ambiguous` | no | "several merge-bases — rebase onto or merge `main`" |
 | `untrusted_source` | no | "a snapshot exists but did not come from the configured main workflow" |
+| `snapshot_missing` | no | "the snapshot run succeeded but no artifact is listed (expired, deleted, or never uploaded)" — the API no longer lists expired artifacts, so expiry cannot be told apart |
 | `lookup_failed` | no | "the snapshot lookup failed (API error)" — an operational error, never "absent" |
 | `cache_miss` (cache storage) | no | "no cache entry for `<sha7>` — retry, or use `on-missing-base: build`" (the cache cannot tell pending from evicted) |
 

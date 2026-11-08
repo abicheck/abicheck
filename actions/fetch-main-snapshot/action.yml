@@ -56,7 +56,7 @@ outputs:
   outcome:
     description: >
       `resolved` | `base_unknown` | `base_ambiguous` | `base_pending` |
-      `base_failed` | `base_not_snapshotted` | `base_expired` |
+      `base_failed` | `base_not_snapshotted` | `base_expired` | `snapshot_missing` |
       `untrusted_source` | `lookup_failed`.
     value: ${{ steps.fetch.outputs.outcome }}
   base-sha:

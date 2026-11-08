@@ -192,7 +192,7 @@ _CASES: list[tuple[str, list[Any], list[Any], DeltaOutcome]] = [
         "name of another commit ignored",
         [_art(1, 10, name="abicheck-main-" + "c" * 40)],
         [_run(10)],
-        DeltaOutcome.BASE_EXPIRED,
+        DeltaOutcome.SNAPSHOT_MISSING,
     ),
     (
         "dispatch is a valid producer",
@@ -858,10 +858,9 @@ def test_main_snapshot_uses_a_new_directory_per_invocation(tmp_path: Path) -> No
     assert paths[0] != paths[1]
 
 
-def test_a_successful_run_with_no_listed_artifact_reads_as_expired() -> None:
-    assert (
-        resolve_snapshot([], [_run(10)], _EXPECT).outcome is DeltaOutcome.BASE_EXPIRED
-    )
+def test_a_successful_run_with_no_listed_artifact_is_not_claimed_expired() -> None:
+    result = resolve_snapshot([], [_run(10)], _EXPECT)
+    assert result.outcome is DeltaOutcome.SNAPSHOT_MISSING
 
 
 def test_main_snapshot_refuses_a_truncated_adopted_snapshot(tmp_path: Path) -> None:

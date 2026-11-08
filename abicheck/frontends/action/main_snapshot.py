@@ -80,6 +80,10 @@ class DeltaOutcome(enum.StrEnum):
     BASE_FAILED = "base_failed"
     BASE_NOT_SNAPSHOTTED = "base_not_snapshotted"
     BASE_EXPIRED = "base_expired"
+    #: A trusted run succeeded for the base, but no artifact is listed: it
+    #: expired (the API no longer lists expired artifacts), was deleted, or
+    #: was never uploaded. Which one is not knowable from the API.
+    SNAPSHOT_MISSING = "snapshot_missing"
     UNTRUSTED_SOURCE = "untrusted_source"
     LOOKUP_FAILED = "lookup_failed"
 
@@ -109,6 +113,11 @@ _MESSAGES: dict[DeltaOutcome, str] = {
     DeltaOutcome.BASE_EXPIRED: (
         "Delta unavailable: the `{branch}@{sha7}` snapshot expired. Push to this "
         "branch or use *Update branch* (a re-run reuses the old merge commit)."
+    ),
+    DeltaOutcome.SNAPSHOT_MISSING: (
+        "Delta unavailable: the snapshot run for `{branch}@{sha7}` succeeded but "
+        "no snapshot artifact is listed (expired, deleted, or never uploaded). "
+        "Push to this branch or use *Update branch* to measure against a newer base."
     ),
     DeltaOutcome.UNTRUSTED_SOURCE: (
         "Delta unavailable: a snapshot for `{branch}@{sha7}` exists but was not "
@@ -362,9 +371,10 @@ def resolve_snapshot(
         outcome = DeltaOutcome.BASE_FAILED
     elif trusted_runs and not saw_untrusted:
         # A trusted run succeeded for this exact commit, yet no artifact is
-        # listed: the API stopped listing expired artifacts (2026-09), so
-        # an expired snapshot looks like this rather than like `expired: true`.
-        outcome = DeltaOutcome.BASE_EXPIRED
+        # listed. Expired artifacts are no longer listed (2026-09), but a
+        # deleted or never-uploaded one looks the same, so this is not
+        # reported as `base_expired`.
+        outcome = DeltaOutcome.SNAPSHOT_MISSING
     elif saw_untrusted:
         outcome = DeltaOutcome.UNTRUSTED_SOURCE
     else:

@@ -86,7 +86,8 @@ other outcome may be read as "no changes".
 | `base_pending` | The base's snapshot run was still running after `wait-timeout`. | Re-run when it finishes. |
 | `base_failed` | The base's snapshot run did not succeed. | Fix the default-branch run. |
 | `base_not_snapshotted` | No snapshot run for the base (path filter, `[skip ci]`). | Snapshot every push, or accept no delta. |
-| `base_expired` | The snapshot passed `retention-days` (or the run that produced it succeeded but its artifact is no longer listed). | Push or *Update branch*; a re-run reuses the old merge commit. |
+| `base_expired` | The snapshot passed `retention-days`. | Push or *Update branch*; a re-run reuses the old merge commit. |
+| `snapshot_missing` | The base's snapshot run succeeded, but no artifact is listed: expired, deleted or never uploaded (the API cannot tell which). | Push or *Update branch*; check the snapshot workflow's upload step. |
 | `untrusted_source` | An artifact with the right name came from another workflow, event, branch or commit. | Investigate; it is never used. |
 | `lookup_failed` | A GitHub API call or the download failed, or the artifact held no `snapshot.json`. | Retry; this is not "absent". |
 
