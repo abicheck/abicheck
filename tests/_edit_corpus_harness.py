@@ -9,6 +9,7 @@ case that did not build proved nothing.
 from __future__ import annotations
 
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -66,6 +67,13 @@ def _compile(
     ]
     if seed.lang == "c++":
         cmd.insert(1, "-std=c++17")
+    # Give old and new the same install name / SONAME. Otherwise the default is
+    # derived from the output path (macOS) and the two sides differ only by their
+    # build directory, which reads as a spurious SONAME_CHANGED.
+    if sys.platform == "darwin":
+        cmd.insert(1, "-Wl,-install_name,libedit.so")
+    else:
+        cmd.insert(1, "-Wl,-soname,libedit.so")
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if proc.returncode != 0:
         raise CompileError(
