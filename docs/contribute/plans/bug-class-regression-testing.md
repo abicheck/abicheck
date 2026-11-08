@@ -179,6 +179,12 @@ should, where the class already exists in the registry, name the existing
 `id` rather than inventing new prose — and where it's genuinely new,
 add an entry (Phase 0's contract wording makes this explicit).
 
+Before adding an entry, check whether the fix is an instance of an existing
+defect family (`tests/regressions/families.py`, F1–F18). If it is, extend that
+family's sweep or harness and attach the class there. A new `BugClass` must
+name an invariant no family states. See
+[Defect-family harnesses](defect-family-harnesses.md#registry-change-classes-attach-to-a-family).
+
 ### Independent oracles, not the production formula restated
 
 Several of the audit's most damaging examples (#721's zstd window-size
