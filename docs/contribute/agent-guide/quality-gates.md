@@ -517,41 +517,63 @@ runs) against the **newest** release of one tool at a time:
 
 | Leg | Newest tool under test | Runner | Baseline for the other tools |
 |---|---|---|---|
-| `castxml` | Newest CastXML Superbuild release, resolved from the GitHub API and verified by the asset's reported SHA-256 digest (fail-closed if the digest is absent) | `ubuntu-24.04`, 2 shards | runner's default GCC; no pinned castxml needed |
-| `gcc` | Newest GCC major ≥ 14 in the runner's Ubuntu archive | `ubuntu-24.04`, 2 shards | pinned castxml via `setup-castxml` |
-| `xcode` | Newest installed Xcode (`sort -V` over `/Applications/Xcode*.app`) and its Apple clang | `macos-latest` | the conda-forge castxml 0.7.0 build `integration.yml` pins |
+| `castxml` | Newest CastXML Superbuild release, resolved from the GitHub API (authenticated with `github.token`) and verified by the asset's reported SHA-256 digest; an asset with no `digest`, or a non-`sha256` one, fails the leg with its own error | `ubuntu-24.04`, 2 shards | runner's default GCC; no pinned castxml needed |
+| `gcc` | Newest GCC release on conda-forge (`gcc`/`gxx`, checked against conda-forge's index), installed with the pinned micromamba `setup_dev_env.sh` uses | `ubuntu-24.04`, 2 shards | pinned castxml via `setup-castxml` |
+| `xcode` | Newest *released* Xcode installed on the runner (`sort -V` over `/Applications/Xcode_<ver>.app`; `_beta` and `_Release_Candidate` bundles excluded) and its Apple clang | `macos-26`, the newest GA label (named explicitly, not `macos-latest`) | the conda-forge castxml 0.7.0 build `integration.yml` pins |
 
 Each leg changes one tool, so a red leg points at that tool. The step summary
 records the versions each leg actually ran, and the leg fails if its own tool
-is not the one on `PATH`.
+is not the one actually used: the castxml leg checks `PATH`; the gcc leg checks
+that `CC`/`CXX` (exported via `$GITHUB_ENV`) and `gcc`, `cc`, `g++`, `c++` on
+`PATH` all resolve to the conda-forge GCC and report its exact version; the
+xcode leg checks `xcode-select -p`, `DEVELOPER_DIR`, and that `xcrun` resolves
+`clang`, `clang++`, `cc` and `c++` inside the selected Xcode. Every leg,
+including xcode, runs with `ABICHECK_MIN_EXECUTED=20`, so a leg that silently
+skips the suite fails.
+
+**Why betas and RCs are excluded from the xcode leg.** A beta Xcode is not
+what abicheck's users build releases with, its breakage is often fixed before
+GA, and a red leg from it would be noise to triage. The leg picks the newest
+released Xcode the image carries; when a newer macOS runner label goes GA, bump
+`os:` in the matrix.
 
 **Non-blocking, by construction.** The workflow triggers only on
 `schedule` (Tuesday 05:23 UTC) and `workflow_dispatch`. It has no
 `pull_request` or `push` trigger, so it is never a PR check and cannot become a
 required one. Failing legs stay red so they show in the Actions tab; there is no
 `continue-on-error`. Each failing leg uploads its verify.py log
-(`canary-<tool>[-shardN].log`, 30-day retention). The workflow uses
-`contents: read` only and no secrets. It opens no issue. Nothing here changes an
-existing lane, a required check, or an exit code.
+(`canary-<tool>[-shardN].log`, 30-day retention). The canary jobs use
+`contents: read` and `github.token` only, no secrets. A failing **scheduled** run
+opens one tracking issue titled `Toolchain canary failing`, or comments on it
+if it is already open; the `notify` job that does this is the only job with
+`issues: write`. A failing manual dispatch opens nothing: whoever started it is
+watching. Runs share one concurrency group per ref and queue rather than cancel
+each other. Nothing here changes an existing lane, a required check, or an exit
+code.
 
 **Known limits, so a red leg is read correctly:**
 
-- **GCC is not the latest release.** Ubuntu 24.04's archive carries GCC 14, not
-  15 or 16. A GCC trunk or latest-release leg needs a conda-forge or source build
-  and is a follow-up. The gcc leg's step summary states the version it ran.
-- **A newer CastXML can fail the version policy.** `abicheck/extract/headers/castxml/policy.py`
-  supports CastXML `>=0.6.11,<0.8.0`. A newest release at or above 0.8.0 makes the
-  castxml leg fail with `UnsupportedCastxmlVersionError`. That is the gate doing its
-  job, not drift. The canary does not set `ABICHECK_ALLOW_UNSUPPORTED_CASTXML`,
-  because the point is to see the real policy answer.
+- **GCC is the newest conda-forge release, not trunk.** conda-forge's GCC is a
+  packaged release built against its own sysroot, not Ubuntu's toolchain; a red
+  gcc leg that does not reproduce with the same GCC version built another way
+  may be a packaging difference. GCC trunk is out of scope.
+- **The castxml leg gives two separate answers.** The integration suite runs
+  with `ABICHECK_ALLOW_UNSUPPORTED_CASTXML=1`, so a release past `MAX_CASTXML`
+  (`abicheck/extract/headers/castxml/policy.py`, currently `>=0.6.11,<0.8.0`)
+  still shows output-format drift. A separate step runs **without** the override
+  and asserts the version gate's answer: refused with
+  `UnsupportedCastxmlVersionError` when the release is outside the range,
+  accepted when inside, with the expected answer computed from the bare version
+  numbers. A red integration step is drift; a red policy step is the gate
+  answering wrongly.
 - **The digest is the only check on a "newest" artifact.** Pinned lanes compare
   a SHA-256 written into the repo. The canary can only check the digest GitHub
   reports for the asset, so a compromised release would pass the digest check.
   The leg is non-blocking and runs against released assets only.
 
-**Triage: who looks and what to do.** The owner is the maintainer on CI duty
-(name them here when the rota exists). Check the Actions run on the Tuesday it
-ran, or the failed run after a manual dispatch.
+**Triage: who looks and what to do.** The owner is the **maintainers**: the
+tracking issue a failing scheduled run opens is theirs to triage, and a failed
+manual dispatch belongs to whoever ran it.
 
 1. **Classify the leg.** Read the step summary for the versions that ran, and the
    `canary-*.log` artifact for the first failing test. Rerun the failed leg once.
@@ -582,7 +604,9 @@ ran, or the failed run after a manual dispatch.
    Do not reach for `xfail` to hide the leg.
 5. **Close it** when a fix merges and a later canary run is green on that leg.
    Move the entry to the archive with a CLOSED status line, and turn the canary
-   into a regression test.
+   into a regression test. Close the `Toolchain canary failing` issue once a
+   scheduled run is green on every leg; the next red scheduled run opens a new
+   one.
 
 The canary is never the only evidence for a fix. Reproduce it in the normal PR
 gate first, and do not add a `pull_request` trigger to this workflow to make
