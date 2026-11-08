@@ -1674,7 +1674,7 @@ runs:
       id: delta-base
       if: >-
         inputs.delta-baseline == 'main' && inputs.mode == 'compare' &&
-        (github.event_name == 'pull_request' || github.event_name == 'pull_request_target' || github.event_name == 'merge_group')
+        (github.event_name == 'pull_request' || github.event_name == 'merge_group')
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
@@ -1689,7 +1689,12 @@ runs:
         INPUT_DESTINATION: ${{ runner.temp }}/abicheck-delta-base
       run: |
         [[ -n "$INPUT_WORKFLOW" ]] || { echo "::error::delta-baseline: main needs delta-snapshot-workflow."; exit 1; }
-        bash "${{ github.action_path }}/actions/fetch-main-snapshot/run.sh"
+        # An unexpected failure of the lookup itself is an unavailable base,
+        # not a reason to skip the gate: report it and let the comparison run.
+        bash "${{ github.action_path }}/actions/fetch-main-snapshot/run.sh" || {
+          echo "::warning::abicheck: the delta base lookup failed; the comment shows the release-baseline comparison."
+          printf 'outcome=lookup_failed\nmessage=Delta unavailable: the snapshot lookup failed.\n' >> "$GITHUB_OUTPUT"
+        }
 
     # ── 4. Run abicheck ──────────────────────────────────────────────────────
     - name: Run abicheck

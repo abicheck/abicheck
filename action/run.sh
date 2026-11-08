@@ -5770,6 +5770,17 @@ _run_delta_json() {
           continue
         fi
         ;;
+      --header=old=* | --include=old=* | --label=old=* | --debug-info=old=*)
+        continue
+        ;;
+      --set)
+        # The release baseline's provenance describes the gate's old side,
+        # not the snapshot: a delta report must not claim it.
+        if [[ "${CMD[$((i + 1))]:-}" == report.baseline_provenance=* ]]; then
+          i=$((i + 1))
+          continue
+        fi
+        ;;
     esac
     delta+=("$tok")
   done
@@ -5788,7 +5799,12 @@ _select_delta_report() {
   PR_RENDER_JSON="$PR_JSON"
   PR_NOTES=()
   [[ -n "${ABICHECK_DELTA_OUTCOME:-}" ]] || return 0
-  local gate="Release gate: ${VERDICT:-unknown} (vs \`${INPUT_ABI_BASELINE:-${INPUT_OLD_LIBRARY:-baseline}}\`); this check's status comes from the gate."
+  local gate="Release gate: ${VERDICT:-unknown} (the comparison against the configured baseline); this check's status comes from the gate."
+  if [[ "$ABICHECK_DELTA_OUTCOME" == resolved ]] \
+     && { _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" || _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; }; then
+    PR_NOTES=("Delta unavailable: delta-baseline compares one library; this is a directory/package comparison. Showing the release-baseline comparison." "$gate")
+    return 0
+  fi
   if [[ "$ABICHECK_DELTA_OUTCOME" == resolved && -n "${ABICHECK_DELTA_SNAPSHOT:-}" && -n "${OLD_OPERAND_INDEX:-}" ]]; then
     local delta_json
     delta_json=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-delta-json.XXXXXX")
@@ -5907,10 +5923,9 @@ _maybe_post_pr_comment() {
     return 0
   fi
 
+  # The gate's own report ($PR_JSON) is never overwritten: later exit and
+  # summary logic reads it. The comment renders $PR_RENDER_JSON instead.
   _select_delta_report
-  if [[ "$PR_RENDER_JSON" != "$PR_JSON" ]]; then
-    cp "$PR_RENDER_JSON" "$PR_JSON"
-  fi
   local -a note_args=()
   local note
   for note in ${PR_NOTES[@]+"${PR_NOTES[@]}"}; do
@@ -5981,7 +5996,7 @@ _maybe_post_pr_comment() {
 import runpy
 
 runpy.run_module("abicheck.cli_pr_comment", run_name="__main__")
-' "$PR_JSON" \
+' "${PR_RENDER_JSON:-$PR_JSON}" \
     --sha "${head_sha:-${GITHUB_SHA:-}}" \
     --detail "${INPUT_PR_COMMENT_DETAIL:-standard}" \
     --on "${INPUT_PR_COMMENT_ON:-changes}" \
@@ -6023,7 +6038,7 @@ _stage_pr_report_for_artifact() {
     return 0
   fi
   key=$(_sanitize_pr_comment_key "${INPUT_PR_COMMENT_KEY:-}")
-  cp "$PR_JSON" "$dir/abi-report-${key:-default}.json"
+  cp "${PR_RENDER_JSON:-$PR_JSON}" "$dir/abi-report-${key:-default}.json"
   if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     printf 'pr-report-dir=%s\n' "$dir" >> "$GITHUB_OUTPUT"
   fi
