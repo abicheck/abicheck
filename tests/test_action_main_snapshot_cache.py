@@ -574,3 +574,37 @@ def test_producer_records_the_runner_os(tmp_path: Path) -> None:
     assert produced.returncode == 0, produced.stdout + produced.stderr
     stage = tmp_path / "ws" / CACHE_STAGING_DIR
     assert json.loads((stage / "provenance.json").read_text())["runner_os"] == "Linux"
+
+
+def test_operand_record_travels_through_the_cache(tmp_path: Path) -> None:
+    """The producer stages the operand.json main-snapshot records, and the
+    consumer copies it beside the snapshot, where the operand pairing reads it."""
+    produced = _produce(tmp_path)
+    assert produced.returncode == 0, produced.stdout + produced.stderr
+    stage = tmp_path / "ws" / CACHE_STAGING_DIR
+    assert sorted(p.name for p in stage.iterdir()) == [
+        "operand.json", "provenance.json", "snapshot.json",
+    ]  # fmt: skip
+    staged = (stage / "operand.json").read_text()
+    result = verify_cached_snapshot(
+        stage, _EXPECT, cache_hit=True, matched_key=_KEY, destination=tmp_path / "dest"
+    )
+    assert result.ok, result.reason
+    assert (Path(result.snapshot_path).parent / "operand.json").read_text() == staged
+
+
+@pytest.mark.parametrize("with_operand", [True, False])
+def test_operand_record_is_optional_but_must_be_a_regular_file(
+    tmp_path: Path, with_operand: bool
+) -> None:
+    stage = _entry(tmp_path, extra={"operand.json": "{}"} if with_operand else None)
+    result = _verify(stage, tmp_path)
+    assert result.ok
+    copied = Path(result.snapshot_path).parent / "operand.json"
+    assert copied.exists() == with_operand
+    if with_operand:
+        (stage / "operand.json").unlink()
+        (stage / "operand.json").mkdir()
+        refused = _verify(stage, tmp_path)
+        assert refused.outcome is DeltaOutcome.LOOKUP_FAILED
+        assert "operand.json is not a regular file" in refused.reason

@@ -52,6 +52,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ...workflows.delta_operand import OPERAND_RECORD_NAME
 from .main_snapshot import DeltaOutcome, outcome_message, snapshot_artifact_name
 
 __all__ = [
@@ -80,6 +81,11 @@ CACHE_PROVENANCE_SCHEMA = "abicheck-main-snapshot-cache/1"
 
 _SNAPSHOT = "snapshot.json"
 _PROVENANCE = "provenance.json"
+#: Optional: the library path the snapshot was dumped from, which the delta's
+#: operand pairing reads beside ``snapshot.json`` (an entry saved before it
+#: existed has none). Its content is checked by that reader, not here.
+_OPERAND = OPERAND_RECORD_NAME
+_REQUIRED = (_SNAPSHOT, _PROVENANCE)
 _PROVENANCE_MAX_BYTES = 64 * 1024
 #: The artifact path's extraction limits (``fetch-main-snapshot/run.sh``).
 DEFAULT_MAX_ENTRY_BYTES = 1 << 30
@@ -204,13 +210,14 @@ def _entry_problem(directory: Path, max_entry_bytes: int, max_total_bytes: int) 
         names = set(os.listdir(directory))
     except OSError as exc:
         return f"cannot read the cache path: {exc.strerror or exc}"
-    unexpected = sorted(names - {_SNAPSHOT, _PROVENANCE})
+    unexpected = sorted(names - {_SNAPSHOT, _PROVENANCE, _OPERAND})
     if unexpected:
         return f"unexpected entries {unexpected[:5]!r}"
+    missing = [name for name in _REQUIRED if name not in names]
+    if missing:
+        return f"no {missing[0]}"
     total = 0
-    for name in (_SNAPSHOT, _PROVENANCE):
-        if name not in names:
-            return f"no {name}"
+    for name in sorted(names):
         info = os.lstat(directory / name)
         if not stat.S_ISREG(info.st_mode):
             return f"{name} is not a regular file"
@@ -315,6 +322,8 @@ def verify_cached_snapshot(
     destination.mkdir(parents=True, exist_ok=True)
     target = Path(tempfile.mkdtemp(prefix="snapshot.", dir=destination)) / _SNAPSHOT
     shutil.copyfile(directory / _SNAPSHOT, target)
+    if (directory / _OPERAND).is_file():
+        shutil.copyfile(directory / _OPERAND, target.parent / _OPERAND)
     return CachedSnapshot(
         DeltaOutcome.RESOLVED,
         outcome_message(

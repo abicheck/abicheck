@@ -950,6 +950,18 @@ inputs:
     description: 'Seconds to wait while the base snapshot is still being built.'
     required: false
     default: '600'
+  delta-operand-map:
+    description: >
+      delta-baseline only: declare that the default-branch snapshot's library
+      and this PR's new-library are the same library when nothing else links
+      them (a renamed file with no shared SONAME/install name, a PE DLL
+      rename). One 'SNAPSHOT=PR' pair per line; each side may be the path,
+      the file name, or the SONAME/install name. Without it the pairing is
+      automatic (same SONAME/install name, a SONAME version bump, the same
+      path or file name); a snapshot of a different library is reported as
+      'operand_unmatched' / 'operand_ambiguous' and never compared.
+    required: false
+    default: ''
   delta-on-missing-base:
     description: >
       'report' (default): an unavailable snapshot is explained in the
@@ -1362,6 +1374,12 @@ outputs:
   delta-base-sha:
     description: 'delta-baseline only: the base commit the delta was measured against.'
     value: ${{ steps.delta-base.outputs.base-sha }}
+  delta-operand-match:
+    description: >
+      delta-baseline only: how the snapshot's library was paired with
+      new-library when the delta ran ('loader_name', 'loader_name_version',
+      'file_name', 'file_name_version', 'declared'); empty otherwise.
+    value: ${{ steps.run-abicheck.outputs.delta-operand-match }}
   pr-comment-delivery:
     description: >
       Which path pr-comment-via resolved to for this run: 'direct' (this job
@@ -1764,6 +1782,7 @@ runs:
         ABICHECK_DELTA_MESSAGE: ${{ steps.delta-base.outputs.message }}
         ABICHECK_DELTA_BASE_SHA: ${{ steps.delta-base.outputs.base-sha }}
         ABICHECK_DELTA_BRANCH: ${{ github.event.repository.default_branch }}
+        INPUT_DELTA_OPERAND_MAP: ${{ inputs.delta-operand-map }}
         INPUT_SOURCES: ${{ inputs.sources }}
         INPUT_BUILD_INFO: ${{ inputs.build-info }}
         INPUT_COMPILE_DB: ${{ inputs.compile-db }}
@@ -1789,11 +1808,15 @@ runs:
     - name: Require the delta base snapshot
       if: >-
         always() && inputs.delta-on-missing-base == 'fail' &&
-        steps.delta-base.outcome == 'success' && steps.delta-base.outputs.outcome != 'resolved'
+        steps.delta-base.outcome == 'success' &&
+        (steps.delta-base.outputs.outcome != 'resolved' ||
+         startsWith(steps.run-abicheck.outputs.delta-comment-outcome, 'operand_'))
       shell: bash
       env:
-        DELTA_OUTCOME: ${{ steps.delta-base.outputs.outcome }}
-        DELTA_MESSAGE: ${{ steps.delta-base.outputs.message }}
+        # A resolved snapshot of a different library (operand identity) is
+        # as unavailable as a missing one.
+        DELTA_OUTCOME: ${{ startsWith(steps.run-abicheck.outputs.delta-comment-outcome, 'operand_') && steps.run-abicheck.outputs.delta-comment-outcome || steps.delta-base.outputs.outcome }}
+        DELTA_MESSAGE: ${{ startsWith(steps.run-abicheck.outputs.delta-comment-outcome, 'operand_') && 'the default-branch snapshot is not shown to be the same library as new-library (see delta-operand-map)' || steps.delta-base.outputs.message }}
       run: |
         printf '::error::delta-baseline required (delta-on-missing-base: fail) but unavailable: %s (%s)\n' "$DELTA_MESSAGE" "$DELTA_OUTCOME"
         exit 1
@@ -1825,6 +1848,7 @@ runs:
         ABICHECK_CTX_DELTA_OUTCOME: ${{ steps.run-abicheck.outputs.delta-comment-outcome }}
         ABICHECK_CTX_DELTA_BASE_SHA: ${{ steps.run-abicheck.outputs.delta-comment-outcome && steps.delta-base.outputs.base-sha || '' }}
         ABICHECK_CTX_GATE_VERDICT: ${{ steps.run-abicheck.outputs.delta-comment-outcome && steps.run-abicheck.outputs.verdict || '' }}
+        ABICHECK_CTX_DELTA_OPERAND_MATCH: ${{ steps.run-abicheck.outputs.delta-operand-match }}
       run: bash "${{ github.action_path }}/action/pr-report-delivery.sh" stage
 
     - name: Upload PR report artifact
