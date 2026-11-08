@@ -81,7 +81,7 @@ Found by the parser fuzz oracle in `tests/test_parser_fuzz_oracle.py`
 an allowed type, record an explicit failure, or read as non-empty, and must
 raise no other type). Each entry below is one way the oracle fails. The
 fast lane uses a fixed seed and stays green on the parsers listed here; the
-`slow` lane finds the failures and is `xfail(strict=True)` on them.
+`slow` lane finds the failures and is non-strict `xfail` on them (`raises=` filtered; the canaries carry the strict signal).
 
 #### A corrupt PE export directory parses with zero exports and records no failure (2026-11-08)
 **Status (2026-11-08): OPEN.** `parse_pe_metadata` (`abicheck/pe_metadata.py`) returns normally on a damaged export directory and reports `exports == []` with `export_read == "unrecorded"`. No `note_export_read_failure` is called on that path, so the read is neither `failed` nor `partial`. Reproduction: the committed `tests/fixtures/containers/sources/corpus_pe.dll` (3 exports) cut to 1405 bytes. The parse succeeds, the machine type is read, and zero exports come back. A fuzz run finds more cases from byte flips inside the export directory. Owner: `abicheck/pe_metadata.py`, with the export-read recording contract in `abicheck/extract/parse_failures.py`.
