@@ -483,7 +483,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `sycl_plugin_search_path_changed` | RISK | 0 | 0 | 0 |
 | `sycl_runtime_version_changed` | COMPATIBLE | 0 | 0 | 0 |
 | `symbol_leaked_from_dependency_changed` | RISK | 0 | 0 | 0 |
-| `symbol_moved_version_node` | RISK | 0 | 0 | 0 |
+| `symbol_moved_version_node` | BREAKING | 0 | 0 | 0 |
 | `symbol_renamed_batch` | BREAKING | 0 | 0 | 0 |
 | `symbol_size_changed_const_object` | BREAKING | 0 | 0 | 0 |
 | `symbol_size_changed_internal` | BREAKING | 0 | 0 | 0 |

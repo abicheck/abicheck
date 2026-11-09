@@ -2965,9 +2965,9 @@
     },
     {
       "kind": "symbol_moved_version_node",
-      "category": "risk",
-      "default_verdict": "COMPATIBLE_WITH_RISK",
-      "severity": "warning",
+      "category": "breaking",
+      "default_verdict": "BREAKING",
+      "severity": "error",
       "min_evidence": "unspecified",
       "doc_slug": "symbol_moved_version_node",
       "examples": ""

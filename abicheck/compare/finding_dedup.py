@@ -645,7 +645,7 @@ def deduplicate_cross_detector(
     the source-replay twin pass (:func:`abicheck.compare.source_replay_twins.replay_twin_pairs`),
     so the caller can record which kept finding each dropped copy folded into.
     """
-    # A symbol-version-node bump (e.g. LLVM_17 -> LLVM_18.1 on every symbol in a major release) makes BOTH version detectors fire per symbol with the same old->new transition: SYMBOL_MOVED_VERSION_NODE (node label moved) and SYMBOL_VERSION_ALIAS_CHANGED (default version changed, old not retained as an alias). Drop the alias-change duplicate where a node move already covers the same (symbol, old -> new) -- halves the version-bump noise on real libraries (libLLVM 17->18: ~46k instead of ~92k risk findings). Matches on (symbol, old_value, new_value); if that ever diverges the dedup simply no-ops (both findings kept).
+    # A symbol-version-node bump (e.g. LLVM_17 -> LLVM_18.1 on every symbol in a major release) makes BOTH version detectors fire per symbol with the same old->new transition: SYMBOL_MOVED_VERSION_NODE (node label moved) and SYMBOL_VERSION_ALIAS_CHANGED (default version changed, old not retained as an alias). Drop the alias-change duplicate where a node move already covers the same (symbol, old -> new) -- halves the version-bump noise on real libraries (libLLVM 17->18: ~46k instead of ~92k findings). Matches on (symbol, old_value, new_value); if that ever diverges the dedup simply no-ops (both findings kept).
     moved_transitions: set[tuple[str, str | None, str | None]] = {
         (c.symbol, c.old_value, c.new_value)
         for c in changes

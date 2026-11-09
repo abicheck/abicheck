@@ -652,7 +652,9 @@ def detect_version_node_changes(
     Builds a version_node → set[symbol_name] mapping for both old and new,
     then detects:
       - Removed version nodes (all symbols in that node gone)
-      - Symbols migrated between version nodes
+      - Symbols migrated between version nodes without keeping the old
+        version (old consumers cannot bind them; a migration that keeps it is
+        the alias detector's compatible ``SYMBOL_VERSION_ALIAS_CHANGED``)
       - New version nodes added (informational, no change emitted here —
         already covered by SYMBOL_VERSION_DEFINED_ADDED)
     """
@@ -676,14 +678,21 @@ def detect_version_node_changes(
             )
         )
 
-    # Detect symbols that moved between version nodes
-    old_sym_to_node = _build_sym_to_node_map(old_node_syms)
-    new_sym_to_node = _build_sym_to_node_map(new_node_syms)
+    # Detect symbols whose old version a consumer can no longer bind. A
+    # consumer linked against the old library recorded ``sym@old_node``; the
+    # dynamic loader resolves that reference only if the new library still
+    # defines ``sym`` at ``old_node`` (as its default or as a retained
+    # non-default alias). A move that keeps the old version is compatible and
+    # is reported by the alias detector (``SYMBOL_VERSION_ALIAS_CHANGED``); one
+    # that drops it fails to load ("undefined symbol: sym, version old_node").
+    old_sym_to_node = _default_node_by_symbol(old_elf)
+    new_sym_to_node = _default_node_by_symbol(new_elf)
+    new_versions = _defined_versions_by_symbol(new_elf)
 
     for sym_name in sorted(set(old_sym_to_node) & set(new_sym_to_node)):
         old_node = old_sym_to_node[sym_name]
         new_node = new_sym_to_node[sym_name]
-        if old_node != new_node:
+        if old_node != new_node and old_node not in new_versions[sym_name]:
             changes.append(
                 make_change(
                     ChangeKind.SYMBOL_MOVED_VERSION_NODE,
@@ -761,11 +770,26 @@ def _build_version_node_map(elf: ElfMetadata) -> dict[str, set[str]]:
     return node_map
 
 
-def _build_sym_to_node_map(node_map: dict[str, set[str]]) -> dict[str, str]:
-    """Invert node_map: symbol_name → version_node (first wins)."""
-    result: dict[str, str] = {}
-    for node, syms in node_map.items():
-        for sym in syms:
-            if sym not in result:
-                result[sym] = node
-    return result
+def _default_node_by_symbol(elf: ElfMetadata) -> dict[str, str]:
+    """symbol_name → the defined version node a new link binds it to.
+
+    The default (``@@``) version when the symbol has one, else its only
+    non-default version (first wins), matching what a consumer records.
+    """
+    default: dict[str, str] = {}
+    other: dict[str, str] = {}
+    for sym in elf.symbols:
+        if not sym.version or sym.version not in elf.versions_defined:
+            continue
+        target = default if sym.is_default else other
+        target.setdefault(sym.name, sym.version)
+    return {**other, **default}
+
+
+def _defined_versions_by_symbol(elf: ElfMetadata) -> dict[str, set[str]]:
+    """symbol_name → every defined version node the symbol is exported at."""
+    out: dict[str, set[str]] = {}
+    for sym in elf.symbols:
+        if sym.version and sym.version in elf.versions_defined:
+            out.setdefault(sym.name, set()).add(sym.version)
+    return out

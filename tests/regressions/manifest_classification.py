@@ -941,4 +941,25 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="classification.unresolvable_symbol_version_scored_as_risk",
+        invariant=(
+            "A symbol-version transition is a binary break exactly when a "
+            "(symbol, version) reference an old consumer recorded no longer "
+            "resolves in the new library -- the dynamic loader's binding rule, "
+            "independent of whether the change looks intentional. Moving a "
+            "symbol's default version while keeping the old one as an alias "
+            "is compatible; moving it without keeping the old one is breaking, "
+            "even when the old node still exists for other symbols."
+        ),
+        # Found by the generated edit corpus (#1958).
+        fixed_by=(1958,),
+        seed_tests=("tests/test_symbol_version_binding.py",),
+        axes={
+            "old version": ("LIBX_1.0", "LIBX_2.0"),
+            "new versions": ("one node", "both nodes"),
+            "new default": ("same as old", "other node"),
+            "evidence": ("synthetic ElfMetadata", "gcc-built .so + loader run"),
+        },
+    ),
 )

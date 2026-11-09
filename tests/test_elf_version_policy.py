@@ -547,10 +547,13 @@ class TestChangeKindClassification:
 
         assert ChangeKind.SYMBOL_VERSION_NODE_REMOVED in BREAKING_KINDS
 
-    def test_symbol_moved_version_node_is_risk(self):
-        from abicheck.checker_policy import RISK_KINDS
+    def test_symbol_moved_version_node_is_breaking(self):
+        # The kind is emitted only when the old version is no longer provided,
+        # so every old consumer bound to it fails to load: a binary break. The
+        # move that keeps the old version is SYMBOL_VERSION_ALIAS_CHANGED.
+        from abicheck.checker_policy import BREAKING_KINDS
 
-        assert ChangeKind.SYMBOL_MOVED_VERSION_NODE in RISK_KINDS
+        assert ChangeKind.SYMBOL_MOVED_VERSION_NODE in BREAKING_KINDS
 
     def test_soname_bump_recommended_is_compatible(self):
         from abicheck.checker_policy import COMPATIBLE_KINDS
