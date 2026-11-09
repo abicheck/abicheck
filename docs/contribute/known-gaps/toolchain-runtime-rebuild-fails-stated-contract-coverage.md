@@ -38,10 +38,13 @@ Three open shapes:
 2. **`unmatched_runtime_exports`: the export domain cannot close over
    runtime exports.** An exported symbol with no declaration makes the
    `export_table` record `unmatched_exports` (`PARTIAL`), so a stated
-   `exports` fails coverage on the whole domain. A static libstdc++, or
-   clang's default-visibility `std::` template instantiations at `-O0`, is
+   `exports` fails coverage on the whole domain. A static libstdc++ is
    enough. This fires even for a byte-identical pair with zero findings.
-   Toolchain-owned exports should not count as unmatched.
+   Toolchain-owned exports should not count as unmatched. The clang
+   dynamic-runtime cells (`-O0`, `opt_level`, `inline_imports`) are fixed:
+   their only unmatched exports were mangled `__gnu_cxx::` weak
+   instantiations (`_ZN9__gnu_cxx11char_traitsIcE2eqERKcS3_`), which the
+   transitive-runtime filter knew only in their demangled spelling.
 3. **Non-declaration kinds left unresolved by a stated `public`. FIXED by
    #1770.** The catalog corpus showed `toolchain_flag_drift`,
    `integer_model_changed`, `glibcxx_dual_abi_flip_detected`,

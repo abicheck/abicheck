@@ -315,3 +315,30 @@ def test_a_user_specializations_local_entity_stays_the_users(
     # std::[ns::]point<MyType>::operator()() const::salt -- user-authored code
     symbol = f"_ZZNK{_std(ns)}{_src(point)}I6MyTypeEclEvE4salt"
     assert not is_stdlib_local_name_symbol(symbol), symbol
+
+
+@pytest.mark.parametrize(
+    "symbol",
+    [
+        "_ZXinternal_helper",  # not a <name> production the walker models
+        "_Zliy",  # a literal operator with no suffix source-name
+        "_Z",  # nothing after the prefix
+    ],
+)
+def test_a_mangling_the_walker_cannot_read_makes_no_claim(symbol: str) -> None:
+    # Its raw text spells "internal"/"helper", but nothing says which part is
+    # the declared name: no whole-string guess, so no leak.
+    from abicheck.compare.naming_conventions import own_declared_name
+
+    assert own_declared_name(symbol) == ""
+    assert _leaks([symbol]) == []
+
+
+@pytest.mark.parametrize(
+    ("symbol", "leaks"), [("internal_helper", True), ("api_init", False)]
+)
+def test_a_c_symbol_is_its_own_declared_name(symbol: str, leaks: bool) -> None:
+    from abicheck.compare.naming_conventions import own_declared_name
+
+    assert own_declared_name(symbol) == symbol
+    assert _leaks([symbol]) == ([symbol] if leaks else [])
