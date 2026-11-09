@@ -90,7 +90,6 @@ from ....model.identity import (
 )
 from ...declaration_provenance import header_from_location
 from ...surface_fact_producers import header_ast_surface_facts
-from ..clang.concept_constraints import public_concept_constraints
 from ..scope_segments import (
     entity_is_record_member as entity_is_record_member,
 )
@@ -176,17 +175,6 @@ class _CastxmlParser:
     @property
     def _pub_dir_segs(self) -> Any:
         return self._ctx.pub_dir_segs
-
-    def parse_cxx_concept_constraints(self) -> dict[str, str] | None:
-        """The public headers' C++20 concept/constraint table read from the
-        clang join (castxml emits no element for either); ``None`` when no
-        join read them or no public set is declared (not modelled)."""
-        entries = self._ctx.clang_semantics.concepts
-        if entries is None or not self._ctx.have_public_set:
-            return None
-        return public_concept_constraints(
-            entries, self._ctx.pub_header_segs, self._ctx.pub_dir_segs
-        )
 
     @property
     def _preprocessor_hidden(self) -> dict[str, tuple[str, ...]] | None:

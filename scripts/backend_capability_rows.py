@@ -70,6 +70,19 @@ LEADING_ROWS: tuple[FactRow, ...] = (
             "(`AbiSnapshot.cxx_concept_constraints`) come from the same join."
         ),
     ),
+    FactRow(
+        "Function",
+        "is_noexcept_fact",
+        _FULL,
+        _NONE,
+        note=(
+            "Fact[bool] sibling of is_noexcept: the castxml backend passes it "
+            "explicitly (NOT_COLLECTED when its clang join did not read a "
+            "specification the header spells); the clang backend passes the bool "
+            "and the bridge derives Fact.present. Stored as the "
+            "abicheck.noexcept_unobserved extension fact, not a record key."
+        ),
+    ),
     FactRow("Function", "is_extern_c", _FULL, _FULL),
     FactRow(
         "Function",

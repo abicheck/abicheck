@@ -16,12 +16,14 @@ from xml.etree.ElementTree import Element, SubElement
 
 import pytest
 
-from abicheck.extract.headers.castxml.clang_semantics_join import (
+from abicheck.extract.headers.castxml.clang_semantics import (
     SEMANTICS_ATTR,
     CastxmlClangSemantics,
+    load_clang_semantics,
+)
+from abicheck.extract.headers.castxml.clang_semantics_join import (
     clang_noexcept_map,
     join_clang_semantics,
-    load_clang_semantics,
     special_member_key,
 )
 from abicheck.storage.castxml_noexcept_migration import migrate_castxml_noexcept
@@ -238,3 +240,54 @@ def test_an_unobserved_specification_survives_a_save_and_load(tmp_path: Path) ->
         ("_Z1hv", False, FactStatus.PRESENT),
     ]
     assert "is_noexcept_fact" not in path.read_text()
+
+
+def test_mention_gate_reads_only_local_headers(tmp_path: Path) -> None:
+    """The clang pass runs only for a header beside a given one that can spell
+    an exception specification: a system header that spells ``noexcept``
+    does not trigger it, a local one spelling it through a macro does."""
+    from abicheck.extract.headers.castxml.clang_semantics_join import _mention_files
+
+    inc = tmp_path / "include"
+    inc.mkdir()
+    api = inc / "api.h"
+    api.write_text('#include "detail/cfg.h"\nint f() API_NOTHROW;\n')
+    (inc / "detail").mkdir()
+    cfg = inc / "detail" / "cfg.h"
+    cfg.write_text("#define API_NOTHROW\n")
+    plain = inc / "plain.h"
+    plain.write_text("int g();\n")
+    system = tmp_path / "sys" / "string.h"
+    system.parent.mkdir()
+    system.write_text("void s() noexcept;\n")
+    root = Element("CastXML")
+    for i, path in enumerate((api, cfg, plain, system)):
+        SubElement(root, "File", id=f"f{i}", name=str(path))
+    assert _mention_files(root, [api]) == frozenset({str(api), str(cfg)})
+    assert _mention_files(root, [plain]) == frozenset({str(api), str(cfg)})
+    assert _mention_files(root, [system]) == frozenset({str(system)})
+
+
+def test_concept_entries_keep_only_public_unambiguous_declarations() -> None:
+    """The castxml path filters the clang join's entries by its own public
+    set: a private-header template is never recorded (so never reported), and
+    a key two public declarations constrain differently is left out."""
+    from abicheck.extract.declaration_provenance import build_public_set
+    from abicheck.extract.headers.clang.concept_constraints import (
+        public_concept_constraints,
+    )
+
+    segs, dirs, have = build_public_set(["/pkg/include/api.h"], [])
+    assert have
+    entries = [
+        ("template f(int)", "conj:a", "/pkg/include/api.h"),
+        ("template g(int)", "conj:b", "/pkg/src/private.h"),
+        ("template h(int)", "conj:c", "/pkg/include/api.h"),
+        ("template h(int)", "conj:d", "/pkg/include/api.h"),
+        ("template k(int)", "conj:e", "/pkg/include/api.h"),
+        ("template k(int)", "conj:e", "/pkg/include/api.h"),
+    ]
+    assert public_concept_constraints(entries, segs, dirs) == {
+        "template f(int)": "conj:a",
+        "template k(int)": "conj:e",
+    }

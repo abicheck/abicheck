@@ -117,6 +117,10 @@ class GenerationSpellingChange:
     reason: str
     rewrites: tuple[tuple[str, str], ...] = ()
     extent_shift: int = 0
+    #: This generation also declares a load-time rewrite of stored *facts*
+    #: (not spellings), such as ``castxml_noexcept_migration.py``: a document
+    #: from before it re-encodes to different bytes by design.
+    migrates_facts: bool = False
 
 
 #: Every row's reason cites the commit that introduced the generation and what
@@ -476,7 +480,8 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "castxml_noexcept_migration.py loads a pre-44 castxml snapshot's C++ "
         "is_noexcept=False as None, so an older baseline reports no "
         "func_noexcept_added for an unchanged noexcept function; its missing "
-        "constraint table already reads as not modelled"
+        "constraint table already reads as not modelled",
+        migrates_facts=True,
     ),
 }
 

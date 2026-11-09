@@ -727,7 +727,7 @@
       ],
       "architectures": [],
       "category": "A",
-      "digest": "sha256:88ab04111cef71f2ff9c2d897fea66502d54c4fcf65040f074e5c2eca38be55c",
+      "digest": "sha256:c4050868f3a2e5936039db85a5b9908ab7bd74fec3e0b14d5faeed3d34e244da",
       "expected": {
         "kinds": [
           "func_noexcept_removed"

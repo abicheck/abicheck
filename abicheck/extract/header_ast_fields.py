@@ -55,6 +55,7 @@ from ..storage.header_ast_cache import (
     retain_ast_context_object,
     run_ast_acquisition,
 )
+from .headers.castxml.clang_semantics import castxml_concept_constraints
 from .headers.clang.concept_constraints import collect_cxx_concept_constraints
 from .semantic_normalizer import normalize_header_ast
 
@@ -110,21 +111,19 @@ class HeaderAstFields:
     cxx_concept_constraints: dict[str, str] | None = field(default=None, kw_only=True)
 
 
-def _concept_constraints(parser: object) -> dict[str, str] | None:
-    """The concept table of a C++ parse: the castxml parser's from its clang
-    join, the clang parser's from its own AST (``None``: not modelled)."""
-    joined = getattr(parser, "parse_cxx_concept_constraints", None)
-    if callable(joined):
-        table = joined()
-        return table if isinstance(table, dict) else None
+def _concept_constraints(parser: object, producer: str) -> dict[str, str] | None:
+    """The concept table of a C++ parse (``None``: not modelled). The clang
+    parser reads it from its own AST; the castxml parser's XML root carries
+    the entries its clang join read (``castxml/clang_semantics_join.py``)."""
+    root = getattr(parser, AST_SCOPE_ATTRIBUTES[0], None)
+    segs = getattr(parser, "_pub_header_segs", [])
+    dirs = getattr(parser, "_pub_dir_segs", [])
+    have_public_set = bool(getattr(parser, "_have_public_set", False))
+    if producer == "castxml":
+        return castxml_concept_constraints(root, segs, dirs, have_public_set)
     if not getattr(parser, "_is_cxx", False):
         return None
-    return collect_cxx_concept_constraints(
-        getattr(parser, AST_SCOPE_ATTRIBUTES[0], None),
-        getattr(parser, "_pub_header_segs", []),
-        getattr(parser, "_pub_dir_segs", []),
-        bool(getattr(parser, "_have_public_set", False)),
-    )
+    return collect_cxx_concept_constraints(root, segs, dirs, have_public_set)
 
 
 def parse_header_ast_fields(
@@ -138,7 +137,7 @@ def parse_header_ast_fields(
     both slower and lossy.  Keep that established per-member binding path, and
     single-flight only the canonical ``SemanticIR`` derived from it.
     """
-    legacy = _parse_header_ast_legacy(parser)
+    legacy = _parse_header_ast_legacy(parser, producer)
     # The shared normalization is keyed on the parsed AST's identity. A
     # parser that does not expose its root cannot be keyed: every such
     # parse would share ``id(None)`` and receive the first one's IR, so it
@@ -165,7 +164,7 @@ def parse_header_ast_fields(
                 # its normalization member-local rather than publishing the
                 # first binary's view under a shared context key.
                 return _normalize_header_ast_fields(legacy, producer=producer)
-            neutral = _parse_header_ast_legacy(neutral_factory())
+            neutral = _parse_header_ast_legacy(neutral_factory(), producer)
             return _normalize_header_ast_fields(neutral, producer=producer)
 
         if neutral_factory is None:
@@ -182,7 +181,9 @@ def parse_header_ast_fields(
     return replace(legacy, semantic_ir=semantic_ir)
 
 
-def _parse_header_ast_legacy(parser: _HeaderAstParser) -> HeaderAstFields:
+def _parse_header_ast_legacy(
+    parser: _HeaderAstParser, producer: str
+) -> HeaderAstFields:
     functions = tuple(parser.parse_functions())
     variables = tuple(parser.parse_variables())
     types = tuple(parser.parse_types())
@@ -204,7 +205,7 @@ def _parse_header_ast_legacy(parser: _HeaderAstParser) -> HeaderAstFields:
         constant_entity_ids=constant_entity_ids,
         # Replaced before this private intermediate leaves this module.
         semantic_ir=SemanticIR(),
-        cxx_concept_constraints=_concept_constraints(parser),
+        cxx_concept_constraints=_concept_constraints(parser, producer),
     )
 
 

@@ -14,7 +14,6 @@ signatures, is left to the snapshot index, which still warns.
 
 from __future__ import annotations
 
-import dataclasses
 import itertools
 import logging
 import pprint
@@ -31,6 +30,7 @@ from abicheck.extract.headers.castxml.duplicate_declarations import (
     collapse_benign_duplicates,
 )
 from abicheck.model import AbiSnapshot, Function, Param
+from abicheck.model.fact import replace_with_fact_sync
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -139,7 +139,7 @@ def test_benign_group_keeps_first_declaration_in_any_order(
         (  # exception specifications are not mangled: same key, two entities
             [
                 _fn("k", "_Z1kv", "void"),
-                dataclasses.replace(_fn("k", "_Z1kv", "void"), is_noexcept=True),
+                replace_with_fact_sync(_fn("k", "_Z1kv", "void"), is_noexcept=True),
             ],
             [True, True],
         ),

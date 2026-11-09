@@ -24,6 +24,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from .versioning import GENERATION_DRIFT_NOTICE_MARKER
+
 __all__ = ["CASTXML_NOEXCEPT_GENERATION", "migrate_castxml_noexcept"]
 
 CASTXML_NOEXCEPT_GENERATION = 44
@@ -67,7 +69,8 @@ def migrate_castxml_noexcept(
     if not hits[0]:
         return document, []
     return {**document, "functions": lowered}, [
-        f"read {hits[0]} stored castxml noexcept value(s) from an older extractor "
-        "generation as not observed (castxml recorded no exception "
-        "specification); re-dump the baseline to drop this migration"
+        f"read {hits[0]} stored castxml noexcept value(s) as not observed: the "
+        f"snapshot was {GENERATION_DRIFT_NOTICE_MARKER} extractor semantics "
+        "(castxml recorded no exception specification before generation 44); "
+        "re-dump the baseline to drop this migration"
     ]

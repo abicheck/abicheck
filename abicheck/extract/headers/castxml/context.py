@@ -44,7 +44,7 @@ from __future__ import annotations
 from xml.etree.ElementTree import Element
 
 from ...declaration_provenance import build_public_set
-from .clang_semantics_join import CastxmlClangSemantics, load_clang_semantics
+from .clang_semantics import CastxmlClangSemantics, load_clang_semantics
 from .hidden_declarations import read_hidden_declarations
 from .preprocessed_text import PreprocessedText, read_preprocessed_text
 

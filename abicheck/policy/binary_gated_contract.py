@@ -127,7 +127,12 @@ BINARY_GATED: frozenset[ChangeKind] = frozenset(
 #: Each kind's producer needs header, source or build data, which a
 #: binary-only input does not carry. The reason names that input.
 NON_BINARY_REASONS: Mapping[ChangeKind, str] = {
-    ChangeKind.CONCEPT_TIGHTENED: "L4 source replay (buildsource/source_diff)",
+    ChangeKind.CONCEPT_TIGHTENED: (
+        "header constraint tables (compare/concept_constraints) or L4 source replay"
+    ),
+    ChangeKind.FUNC_VIRTUAL_NOEXCEPT_ADDED: (
+        "header exception specifications (compare/noexcept_change)"
+    ),
     ChangeKind.HEADER_ONLY_FUNCTION_PARAMS_CHANGED: (
         "a header-AST declaration with a confirmed-absent export, or L4 replay"
     ),

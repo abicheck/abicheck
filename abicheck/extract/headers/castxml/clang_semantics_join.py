@@ -22,7 +22,7 @@ what it read on the castxml root as one JSON attribute (:data:`SEMANTICS_ATTR`):
   given header's directory) whose text spells ``noexcept``/``throw``/
   ``nothrow`` in any letter case. A function declared in one of them that the
   ``noexcept`` map does not cover has an *unknown* specification
-  (``Function.is_noexcept = None``), never a guessed ``False``;
+  (``Function.is_noexcept_fact`` ``NOT_COLLECTED``), never a guessed ``False``;
 * ``concepts``: the clang concept collector's unfiltered entries
   (``clang/concept_constraints.concept_constraint_entries``) or ``null``. The
   castxml parser filters them by its own public set.
@@ -54,22 +54,17 @@ from ..clang.concept_constraints import concept_constraint_entries
 from ..clang.functions import _function_qualifiers
 from ..clang.qualifiers import is_noexcept_qualifier
 from ..concept_scan import concept_header_scan
+from .clang_semantics import SEMANTICS_ATTR
 
 log = logging.getLogger(__name__)
 
 __all__ = [
-    "SEMANTICS_ATTR",
     "SEMANTICS_SIDECAR_BACKEND",
-    "CastxmlClangSemantics",
     "clang_noexcept_map",
     "join_clang_semantics",
-    "load_clang_semantics",
     "mentions_exception_spec",
     "special_member_key",
 ]
-
-#: Root attribute carrying the joined facts. The parsed tree itself is never written.
-SEMANTICS_ATTR = "abicheck-clang-semantics"
 
 #: The AST-cache namespace of the sidecar, distinct from the castxml XML entry.
 SEMANTICS_SIDECAR_BACKEND = "castxml-clang-semantics"
@@ -88,49 +83,6 @@ _FUNCTION_KINDS = frozenset(
         "CXXConversionDecl",
     }
 )
-
-
-class CastxmlClangSemantics:
-    """The joined facts as the castxml parser reads them."""
-
-    __slots__ = ("concepts", "mention_files", "noexcept")
-
-    def __init__(
-        self,
-        noexcept: dict[str, bool] | None = None,
-        mention_files: frozenset[str] = frozenset(),
-        concepts: list[tuple[str, str, str]] | None = None,
-    ) -> None:
-        self.noexcept = noexcept
-        self.mention_files = mention_files
-        self.concepts = concepts
-
-    def function_noexcept(
-        self,
-        names: tuple[str, ...],
-        file_name: str,
-        castxml_value: bool,
-        *,
-        artificial: bool = False,
-    ) -> bool | None:
-        """``Function.is_noexcept`` for one castxml function, looked up by its
-        candidate *names* (castxml's guessed mangling, the final one, then a
-        constructor/destructor's :func:`special_member_key`): clang's reading
-        when the join has one, ``None`` (unknown) when the declaring file can
-        spell a specification the join did not read, else castxml's value.
-
-        A compiler-generated (``artificial``) member keeps castxml's value: its
-        specification is deduced from the members, not spelled in the header,
-        and the clang backend does not record one either."""
-        if artificial:
-            return castxml_value
-        if self.noexcept is not None:
-            for name in names:
-                if name and name in self.noexcept:
-                    return self.noexcept[name]
-        if file_name in self.mention_files:
-            return None
-        return castxml_value
 
 
 def _file_stamp(path: str) -> tuple[int, int] | None:
@@ -300,25 +252,6 @@ def _with_semantics(
     carried.text = root.text
     carried.tail = root.tail
     return carried
-
-
-def load_clang_semantics(root: Element) -> CastxmlClangSemantics:
-    """The facts :func:`join_clang_semantics` carried on *root* (none when absent)."""
-    raw = root.get(SEMANTICS_ATTR)
-    if not raw:
-        return CastxmlClangSemantics()
-    loaded = json.loads(raw)
-    noexcept = loaded.get("noexcept")
-    concepts = loaded.get("concepts")
-    return CastxmlClangSemantics(
-        noexcept=None
-        if noexcept is None
-        else {str(k): bool(v) for k, v in noexcept.items()},
-        mention_files=frozenset(str(f) for f in loaded.get("mention_files") or ()),
-        concepts=None
-        if concepts is None
-        else [(str(e[0]), str(e[1]), str(e[2])) for e in concepts],
-    )
 
 
 _TEMPLATE_TEXT = re.compile(rb"\b(?:template|auto)\b")
