@@ -100,7 +100,7 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "DWARF baseline's erased T[] against a fresh T[N] reads as "
             "extractor drift, never a break."
         ),
-        fixed_by=(1958,),
+        fixed_by=(1958, 1962),
         seed_tests=(
             "tests/test_dwarf_array_extents.py",
             "tests/test_dwarf_erased_extent_generation_drift.py",
@@ -147,7 +147,7 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "reports (func_cv_changed, func_static_changed, "
             "func_virtual_became_pure), not as an ELF removal plus addition."
         ),
-        fixed_by=(1958,),
+        fixed_by=(1958, 1962),
         seed_tests=(
             "tests/test_dwarf_member_functions.py",
             "tests/test_dwarf_semantic_ir.py",
