@@ -123,6 +123,21 @@ dependency walk and debug roots to every member. No open gap remains.
 
 ### Report and detector coverage
 
+#### A GCC-built DWARF snapshot cannot tell that a virtual became pure (2026-11-08)
+
+**Status (2026-11-08): OPEN.** Since extractor generation 45 a DWARF-only snapshot records C++ member functions, and a clang-built virtual that becomes `= 0` reads `func_virtual_became_pure` (clang marks the in-class declaration `DW_VIRTUALITY_pure_virtual`). GCC 13 writes `DW_VIRTUALITY_virtual` for a pure virtual, so the declaration looks like any other unexported virtual and the pair reads `func_removed` (BREAKING, so the verdict is right; the kind is not). The binary does carry the fact: the class's `_ZTV` object has an `R_X86_64_64` relocation against `__cxa_pure_virtual` in that slot. Closing it needs the ELF reader to map vtable relocations to slots; the DWARF walker already reads each virtual's slot from `DW_AT_vtable_elem_location` (`extract/dwarf_member_functions.vtable_slot`). Found by the config-matrix corpus (`virtual_become_pure`, `cxx_classes`, evidence `dwarf`, gcc). `wrong-kind`. Owner: `extract/` (ELF vtable relocations, `extract/dwarf_member_functions.py`).
+<!-- canary: tests/test_dwarf_member_functions.py::test_a_virtual_that_became_pure_is_reported_from_gcc_dwarf -->
+
+#### castxml spells a multi-dimensional array with its bounds reversed (2026-11-08)
+
+**Status (2026-11-08): OPEN.** castxml writes `int m[2][3]` as an `ArrayType` of `ArrayType`, and `extract/headers/castxml/type_resolution.py` appends the outer bound after the inner one, so the member reads `int[3][2]`. The clang header backend and DWARF (generation 45) spell it `int[2][3]`, as C does. Comparing two castxml dumps is self-consistent, but a castxml snapshot against a clang or DWARF one reports a `type_field_type_changed` that is not there, and a reshape `[2][3]` -> `[3][2]` reads as its mirror image. Closing it needs the spelling fixed and a stored-spelling migration for castxml snapshots (every multi-dimensional castxml spelling reverses soundly). `false-positive` across frontends. Owner: `extract/headers/castxml/`.
+<!-- no-canary: needs castxml and a multi-dimensional member; tests/test_dwarf_array_extents.py uses the clang frontend as its oracle for that reason -->
+
+#### castxml records no `volatile` qualifier on a member function (2026-11-08)
+
+**Status (2026-11-08): OPEN.** `int touch() volatile;` mangles as `_ZNV...` and DWARF (generation 45) records `is_volatile=True`, but the castxml header lane records `is_volatile=False`, so a dropped or added `volatile` on a method is seen only through the mangled-name change (`func_removed` + `func_added`), not `func_cv_changed`. Owner: `extract/headers/castxml/functions.py`.
+<!-- no-canary: needs castxml; tests/test_dwarf_member_functions.py compares the castxml lane on const/static/virtual only for this reason -->
+
 #### The clang header backend records no parameter identities, so a kept-spelling retype stays a removal (2026-11-09)
 
 **Status (2026-11-09): OPEN.** `compare/parameter_replacement.py` pairs a header-declared function whose written parameter spelling is unchanged but resolves to a different type (`V scale(V, float)` with `using V = basic_vec<float>` whose default width changed) by reading `Param.type_identities_fact` and the record layouts it names. The castxml backend collects those identities; the clang backend records them as `not_collected`, so under `ABICHECK_AST_FRONTEND=clang` that pair stays `func_removed` + `func_added` (verdict right, kind wrong). A *rewritten* signature (`add(int, int)` -> `add(int, int, int)`) pairs on both backends: without identities its spelling is read. Closing it needs the clang backend to record each parameter's resolved record/enum identities. `wrong-kind` on clang. Owner: `extract/headers/clang/`.
@@ -208,20 +223,6 @@ dependency walk and debug roots to every member. No open gap remains.
 **Status (2026-10-26): OPEN — gate-semantics decision needed.** A finding folded out as redundant but kept for the verdict is `gating` under the legacy scheme and `non_gating` under a severity config. `result_counts.gating_retained` now partitions the retained findings and the summary names the folded one, so the counts no longer contradict each other; the scheme disagreement remains. [Full write-up](known-gaps/legacy-gate-counts-a-redundant-finding-the-review-groups-omit.md)
 <!-- no-canary: awaits a gate-semantics decision between two schemes that are each internally consistent; no wrong value to pin until the ruling -->
 
-#### A member array-bound change is invisible in DWARF-only comparison (2026-11-08)
-
-**Status (2026-11-08): OPEN.** `struct rec { …; char tag[8]; }` becoming `char tag[6]` reads `NO_CHANGE` when the snapshots carry DWARF but no header; the header lane reports `type_field_type_changed` for the same pair. With `-fpack-struct=1` the DWARF lane reports only `type_size_changed` (the size really shrinks), still without the member's type change. Found by the config-matrix corpus (`tests/test_abi_edit_corpus_matrix.py`, `struct_array_shrink_in_padding` on `c_core`/`cxx_classes`, evidence `dwarf`, gcc and clang; strict xfails in `tests/_edit_corpus_known.py`). `wrong-verdict` unpacked (a public member's type changed, nothing reported), `wrong-kind` packed. Owner: `extract/` DWARF member-type spelling (array bound).
-<!-- no-canary: the corpus nightly strict xfails (tests/_edit_corpus_known.py) fail once DWARF reports the member type change -->
-
-#### DWARF-only comparison reports a virtual that became pure as a plain removal (2026-11-08)
-
-**Status (2026-11-08): OPEN.** `virtual int kind() const;` becoming `= 0` reads `func_removed_elf_only` (BREAKING) from DWARF-only snapshots; neither `func_virtual_became_pure` nor `type_became_abstract` is emitted (the header lane emits `type_became_abstract`). Verdict right, kind wrong. Found by the config-matrix corpus (`virtual_become_pure`, `cxx_classes`, evidence `dwarf`; strict xfail). `wrong-kind`. Owner: `extract/` DWARF virtuality (`DW_AT_virtuality` pure) and `compare/` virtual detectors.
-<!-- no-canary: the corpus nightly strict xfails (tests/_edit_corpus_known.py) fail once the kind is emitted -->
-
-#### DWARF-only comparison reports a method's dropped `const` as a removal plus an addition (2026-11-08)
-
-**Status (2026-11-08): OPEN.** `virtual int area() const;` becoming non-const changes the mangled name; from DWARF-only snapshots the pair reads `func_removed_elf_only` + `func_added_elf_only` + `type_vtable_changed`, never `func_cv_changed` (the header lane emits it). Verdict right, kind wrong. Found by the config-matrix corpus (`method_const_drop`, `cxx_classes`, evidence `dwarf`; strict xfail). `wrong-kind`. Owner: `compare/` function pairing on DWARF-sourced methods.
-<!-- no-canary: the corpus nightly strict xfails (tests/_edit_corpus_known.py) fail once the kind is emitted -->
 
 #### A `_GLIBCXX_USE_CXX11_ABI` rebuild is refused as a profile mismatch, not reported as a break (2026-11-08)
 
@@ -321,7 +322,7 @@ current emitter, which is unchanged.
 
 #### `--depth binary` on a header-built snapshot misses debug-only declaration findings (2026-10-25)
 
-**Status (2026-10-25): PARTIAL — no longer a false clean; the findings themselves are still missing.** A header snapshot does not persist debug-info subprogram/variable records or record relations, so its `--depth binary` projection cannot report the signature, typedef, vtable or base findings a binary-only dump reports. Fixed 2026-10-25: such a projection (header-built side with debug info) now reads `analysis_assurance` `partial` and names both missing evidence families (`policy/depth_projection_gaps.py`, `policy/analysis_assurance/_depth_projection.py`; `tests/test_depth_projection_declaration_gap.py`). Residual: the findings are not reported; each is named in `tests/test_depth_projection_matches_shallow_dump.py`.
+**Status (2026-10-25): PARTIAL — no longer a false clean; the findings themselves are still missing.** A header snapshot does not persist debug-info subprogram/variable records or record relations, so its `--depth binary` projection cannot report the signature, typedef, vtable or base findings a binary-only dump reports. Fixed 2026-10-25: such a projection (header-built side with debug info) now reads `analysis_assurance` `partial` and names both missing evidence families (`policy/depth_projection_gaps.py`, `policy/analysis_assurance/_depth_projection.py`; `tests/test_depth_projection_declaration_gap.py`). Residual: the findings are not reported; each is named in `tests/test_depth_projection_matches_shallow_dump.py`. Since extractor generation 45 (2026-11-09) a binary-only dump also reads C++ member and namespace-scope functions from debug info, so their qualifier, access, virtuality and template findings (`func_cv_changed`, `method_access_changed`, `default_template_arg_changed`, …) join that residual.
 `false-clean` — `compare old.json new.json --depth binary` on two header snapshots can read `NO_CHANGE` (with `partial` assurance naming the missing evidence) where a binary-only dump of the same libraries reads `BREAKING` (a return or parameter type change). [Full write-up](known-gaps/depth-binary-projection-cannot-reproduce-debug-declaration-findings.md)
 <!-- canary: tests/test_known_gap_canaries_extraction.py::test_depth_binary_projection_of_header_snapshots_misses_a_return_change -->
 
@@ -574,6 +575,11 @@ per-item status in the
 <!-- no-canary: the catalog-nightly kind-parity gate fails on each declaration once it goes stale -->
 
 ### False-positive risk
+
+#### A public alias retargeted to a same-layout type gates as `typedef_base_changed` (2026-11-09)
+
+**Status (2026-11-09): OPEN.** `using V = fakevec::vec<float>;` held by a public struct field, rebuilt so the alias names `basic_vec<float, avx512_tag>` instead of `basic_vec<float, avx2_tag>` (same size, alignment and members; no exported function takes `V`), reads `typedef_base_changed` (BREAKING) on `V` under both the header lane and, since extractor generation 45 records namespace-scope functions and the typedefs they reach, the DWARF-only lane. The struct's layout and every exported mangling are unchanged, so the release is compatible with risk. A retarget whose old and new targets are distinct record identities is gated whatever their layout; telling a layout-identical retarget from one a consumer's code would observe needs the record layouts the snapshot already holds. `false-positive`. Owner: `compare/` typedef detector and `policy/` classification.
+<!-- canary: tests/test_dwarf_dependency_scope_integration.py::test_a_field_only_alias_retarget_does_not_gate -->
 
 #### An `-O2` rebuild of a C++ library that uses `std::string` reads as a break or a risk (2026-11-08)
 

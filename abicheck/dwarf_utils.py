@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -135,31 +136,159 @@ def vector_byte_size(die: Any, element_size: int | None) -> int | None:
     return None
 
 
-def array_type_spelling(element: str | None, size: int, is_vector: bool) -> str:
+#: Constant attribute forms. A reference or expression form is not a
+#: constant (a variable-length bound), even when its value decodes as an
+#: integer.
+_CONSTANT_FORMS = frozenset(
+    {
+        "DW_FORM_data1",
+        "DW_FORM_data2",
+        "DW_FORM_data4",
+        "DW_FORM_data8",
+        "DW_FORM_sdata",
+        "DW_FORM_udata",
+        "DW_FORM_implicit_const",
+    }
+)
+#: Byte width of each fixed-width constant form. GCC writes the ``-1`` upper
+#: bound of a zero-length (``T[0]``) array unsigned, in the width of the
+#: target's ``sizetype`` (the CU's address size): ``0xffffffff`` in
+#: ``DW_FORM_data4`` on a 32-bit target. All-ones in a narrower form is a real
+#: bound (``char[256]`` is ``DW_FORM_data1`` 255).
+_FORM_WIDTH = {
+    "DW_FORM_data1": 1,
+    "DW_FORM_data2": 2,
+    "DW_FORM_data4": 4,
+    "DW_FORM_data8": 8,
+}
+
+
+def _is_unsigned_minus_one(subrange: Any, value: int, form: str) -> bool:
+    width = _FORM_WIDTH.get(form)
+    if width is None or value != (1 << (8 * width)) - 1:
+        return False
+    cu = getattr(subrange, "cu", None)
+    address_size = cu.header["address_size"] if cu is not None else 8
+    return width >= address_size
+
+
+def _constant(subrange: Any, name: str) -> int | None:
+    """*subrange*'s *name* attribute as a constant, ``None`` when absent or
+    not written in a constant form."""
+    attr = subrange.attributes.get(name)
+    if attr is None or attr.form not in _CONSTANT_FORMS:
+        return None
+    value = attr.value
+    return value if isinstance(value, int) else None
+
+
+def _subrange_count(subrange: Any) -> int | None:
+    """Element count of one ``DW_TAG_subrange_type``, or ``None`` when the
+    DIE states no constant bound (a flexible array member ``T[]``, or a
+    variable-length bound written as an expression or reference)."""
+    attrs = subrange.attributes
+    if "DW_AT_count" in attrs:
+        count = _constant(subrange, "DW_AT_count")
+        return count if count is not None and count >= 0 else None
+    upper = _constant(subrange, "DW_AT_upper_bound")
+    lower: int | None = 0
+    if "DW_AT_lower_bound" in attrs:
+        lower = _constant(subrange, "DW_AT_lower_bound")
+    if upper is None or lower is None:
+        return None
+    # GCC's unsigned all-ones is the bound -1; with the default lower bound 0
+    # that is the zero-length ``T[0]``, and with a negative lower bound (Ada,
+    # Fortran) an ordinary signed range: both are ``upper - lower + 1``.
+    if _is_unsigned_minus_one(subrange, upper, attrs["DW_AT_upper_bound"].form):
+        upper = -1
+    count = upper - lower + 1
+    return count if count >= 0 else None
+
+
+def array_extents(die: Any) -> tuple[int | None, ...]:
+    """Each dimension's element count of a ``DW_TAG_array_type``, outermost
+    first (``int[2][3]`` is ``(2, 3)``); ``None`` for an unbounded one."""
+    return tuple(
+        _subrange_count(child)
+        for child in die.iter_children()
+        if child.tag == "DW_TAG_subrange_type"
+    )
+
+
+def array_type_spelling(
+    element: str | None,
+    size: int,
+    is_vector: bool,
+    extents: tuple[int | None, ...] = (),
+) -> str:
     """Spell a DW_TAG_array_type, distinguishing GCC/Clang vector types.
 
     A ``DW_AT_GNU_vector`` array is a ``vector_size`` vector: its lane count
     and vector-ness are part of its identity, so it spells as the source
     spelling ``T __attribute__((vector_size(N)))`` (``N`` in bytes, the same
-    total size the ``DW_AT_byte_size`` carries). A plain array keeps the
-    ``T[]`` form, which never names its element count.
+    total size the ``DW_AT_byte_size`` carries). A plain array spells each
+    dimension's bound the way the header frontends and CTF do (``char[8]``,
+    ``int[2][3]``): the bound is part of the member's type, so ``char[8]`` ->
+    ``char[6]`` is a type change even when the record's size is not. An
+    unbounded dimension (a flexible array member) keeps ``[]``, and an array
+    DIE with no subrange at all spells ``T[]``.
     """
     if is_vector:
         return f"{element or '?'} __attribute__((vector_size({size or 0})))"
     if element is None:
         return "array"
-    return f"{element}[]"
+    if not extents:
+        return f"{element}[]"
+    return element + "".join("[]" if n is None else f"[{n}]" for n in extents)
 
 
 def array_type_info(die: Any, inner: tuple[str, int] | None) -> tuple[str, int]:
-    """Name and byte size of a DW_TAG_array_type from its element's (name, size)."""
+    """Name and byte size of a DW_TAG_array_type from its element's (name, size).
+
+    Arrays rarely carry ``DW_AT_byte_size``; the size is then the product of
+    the dimensions' counts times the element size (0 when a dimension is
+    unbounded, the element size is unknown, or a stride spaces the elements
+    apart: GCC and clang write none for C or C++).
+    """
     is_vector = "DW_AT_GNU_vector" in die.attributes
     element_name = inner[0] if inner is not None else None
     if is_vector:
         size = vector_byte_size(die, inner[1] if inner is not None else None) or 0
-    else:
-        size = attr_int(die, "DW_AT_byte_size")
-    return (array_type_spelling(element_name, size, is_vector), size)
+        return (array_type_spelling(element_name, size, is_vector), size)
+    extents = array_extents(die)
+    # An array DIE whose element is itself an array DIE (not a typedef of
+    # one): the element's bounds are the inner dimensions, so they follow
+    # this DIE's own (``int[2]`` of ``int[3]`` is ``int[2][3]``).
+    inner_bounds = ""
+    if element_name is not None:
+        nested = _TRAILING_BOUNDS.match(element_name)
+        if nested is not None:
+            element_name, inner_bounds = nested.group(1), nested.group(2)
+    size = attr_int(die, "DW_AT_byte_size")
+    if not size and extents and inner is not None and inner[1] and not _strided(die):
+        total = inner[1]
+        for count in extents:
+            if count is None:
+                total = 0
+                break
+            total *= count
+        size = total
+    spelling = array_type_spelling(element_name, size, is_vector, extents)
+    return (spelling + inner_bounds, size)
+
+
+_STRIDES = ("DW_AT_byte_stride", "DW_AT_bit_stride")
+
+
+def _strided(die: Any) -> bool:
+    """Whether the array DIE or one of its subranges states an element stride."""
+    dies = [die, *(c for c in die.iter_children() if c.tag == "DW_TAG_subrange_type")]
+    return any(a in d.attributes for d in dies for a in _STRIDES)
+
+
+#: The bounds an array spelling ends with (``int[3]``, ``char[][4]``); no
+#: other spelling ends with ``]``.
+_TRAILING_BOUNDS = re.compile(r"^(.*?)((?:\[\d*\])+)$")
 
 
 #: ``DW_AT_calling_convention`` values a compiler writes on a
