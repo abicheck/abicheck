@@ -53,7 +53,7 @@ size, a loop bound) now silently disagrees with what the new library was
 built expecting. `widget.c`'s own logic is identical in both versions — only
 the header changes.
 
-## Step 1: binaries only — misses the break entirely
+## Step 1: binaries only — cannot see the break, so it is not called clean
 
 ```bash
 cd examples/workflows/evidence-depth
@@ -65,17 +65,18 @@ abicheck compare v1/libwidget.so v2/libwidget.so
 ```
 
 ```text
-| **Verdict** | ✅ `NO_CHANGE` |
+Compatibility: UNCONFIRMED | Policy: strict_abi | Gate: REJECTED (exit 1)
 ```
 
 With no debug info and no headers, abicheck has only the exported symbol
 table to go on — `widget_get_b` and `widget_get_limit` are still exported,
-with the same names, so nothing looks different. The report says so plainly:
-`Coverage gap | Binary-only analysis without debug info; many ABI changes
-cannot be detected (struct layout, enum values, type changes)`. This is a
-real false negative, not a bug — L0 evidence is *structurally* blind to
-layout and macro changes, and abicheck's own coverage-gap line is what tells
-you not to trust this result as complete.
+with the same names, so nothing looks different. L0 evidence is
+*structurally* blind to layout and macro changes, so abicheck does not turn
+"nothing changed in what I could see" into a clean result: the verdict is
+`UNCONFIRMED` and the exit code is `1`. The JSON report keeps what it did
+observe (`unconfirmed.observed_verdict: NO_CHANGE`) and names both sides as
+lacking type-level evidence. The fix is more evidence, which is what the next
+steps add.
 
 ## Step 2: add public headers — catches the struct break
 
