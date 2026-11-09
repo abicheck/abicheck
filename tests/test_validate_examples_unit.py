@@ -1179,4 +1179,6 @@ class TestKnownGapFrontendScope:
             e = gt[name]
             assert e["expected"] == "API_BREAK"
             assert e["known_gap_frontends"] == ["castxml"]
-            assert e["known_gap_observed"] == ["NO_CHANGE"]
+            # UNCONFIRMED: the same gap on PE/Mach-O, where header scoping
+            # falls back to the export table (ADR-090).
+            assert e["known_gap_observed"] == ["NO_CHANGE", "UNCONFIRMED"]

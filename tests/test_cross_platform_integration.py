@@ -11,6 +11,7 @@ Platform requirements:
 
 from __future__ import annotations
 
+import filecmp
 import shutil
 import subprocess
 import sys
@@ -544,23 +545,44 @@ class TestPeIntegration:
         assert "api_fn" in (cmp.stdout or "")
 
     def test_native_identical_dll_is_compatible(self) -> None:
-        """Identical native DLLs compare COMPATIBLE (exit 0)."""
+        """An identical native DLL compares clean (exit 0); a rebuild of the
+        same source is a different input unless its bytes match.
+
+        ADR-090 D1(c) exempts one identical input. A PE link records a
+        timestamp, so a rebuilt header-less DLL is two inputs with no
+        type-level evidence: ``UNCONFIRMED``, exit 1, never a clean claim.
+        """
         env = {**subprocess.os.environ, "PYTHONUTF8": "1"}
         src = (
             "__declspec(dllexport) int api_fn(void){return 1;}\n"
             "__declspec(dllexport) int other_fn(void){return 2;}"
         )
-        with tempfile.TemporaryDirectory() as td:
-            td_path = Path(td)
-            a = _compile_dll(src, "a.dll", td_path)
-            b = _compile_dll(src, "b.dll", td_path)
-            cmp = subprocess.run(
-                abicheck_command("compare", str(a), str(b)),
+
+        def compare(old: Path, new: Path) -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                abicheck_command("compare", str(old), str(new)),
                 capture_output=True,
                 encoding="utf-8",
                 check=False,
                 env=env,
             )
-        assert cmp.returncode == 0, (
-            f"Expected COMPATIBLE (exit 0), got {cmp.returncode}\n{cmp.stderr}\n{cmp.stdout}"
+
+        with tempfile.TemporaryDirectory() as td:
+            td_path = Path(td)
+            a = _compile_dll(src, "a.dll", td_path)
+            copy = td_path / "copy.dll"
+            shutil.copyfile(a, copy)
+            same = compare(a, copy)
+            b = _compile_dll(src, "b.dll", td_path)
+            rebuilt_identical = filecmp.cmp(a, b, shallow=False)
+            rebuilt = compare(a, b)
+        assert same.returncode == 0, (
+            f"Expected clean (exit 0), got {same.returncode}\n{same.stderr}\n{same.stdout}"
         )
+        expected = 0 if rebuilt_identical else 1
+        assert rebuilt.returncode == expected, (
+            f"rebuilt (identical bytes: {rebuilt_identical}): expected exit {expected}, "
+            f"got {rebuilt.returncode}\n{rebuilt.stderr}\n{rebuilt.stdout}"
+        )
+        if not rebuilt_identical:
+            assert "UNCONFIRMED" in rebuilt.stdout, rebuilt.stdout

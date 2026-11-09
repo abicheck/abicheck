@@ -4953,12 +4953,13 @@
    "expected_kinds": [
     "template_param_default_changed"
    ],
-   "known_gap": "castxml cannot record template-parameter defaults (ADR-085 D1/D3): on the castxml lane the change reads NO_CHANGE with run status partial and the 'template-parameter defaults (castxml cannot record them)' assurance gap -- a coverage limitation, not a compatibility claim. The clang backend records the defaults and reports the expected kind.",
+   "known_gap": "castxml cannot record template-parameter defaults (ADR-085 D1/D3): on the castxml lane the change reads NO_CHANGE with run status partial and the 'template-parameter defaults (castxml cannot record them)' assurance gap -- a coverage limitation, not a compatibility claim. The clang backend records the defaults and reports the expected kind. On PE/Mach-O, when no header declaration matches an export, header scoping falls back to the export table (`mangling-fallback`): that side keeps no type-level evidence, so the same gap reads UNCONFIRMED (ADR-090) instead of NO_CHANGE.",
    "known_gap_frontends": [
     "castxml"
    ],
    "known_gap_observed": [
-    "NO_CHANGE"
+    "NO_CHANGE",
+    "UNCONFIRMED"
    ],
    "min_evidence": "L2",
    "platforms": [
@@ -5031,12 +5032,13 @@
    "expected_kinds": [
     "template_param_default_changed"
    ],
-   "known_gap": "castxml cannot record template-parameter defaults (ADR-085 D1/D3): on the castxml lane the change reads NO_CHANGE with run status partial and the 'template-parameter defaults (castxml cannot record them)' assurance gap -- a coverage limitation, not a compatibility claim. The clang backend records the defaults and reports the expected kind.",
+   "known_gap": "castxml cannot record template-parameter defaults (ADR-085 D1/D3): on the castxml lane the change reads NO_CHANGE with run status partial and the 'template-parameter defaults (castxml cannot record them)' assurance gap -- a coverage limitation, not a compatibility claim. The clang backend records the defaults and reports the expected kind. On PE/Mach-O, when no header declaration matches an export, header scoping falls back to the export table (`mangling-fallback`): that side keeps no type-level evidence, so the same gap reads UNCONFIRMED (ADR-090) instead of NO_CHANGE.",
    "known_gap_frontends": [
     "castxml"
    ],
    "known_gap_observed": [
-    "NO_CHANGE"
+    "NO_CHANGE",
+    "UNCONFIRMED"
    ],
    "min_evidence": "L2",
    "platforms": [
@@ -5110,12 +5112,13 @@
    "expected_kinds": [
     "template_param_default_changed"
    ],
-   "known_gap": "castxml cannot record template-parameter defaults (ADR-085 D1/D3): on the castxml lane the change reads NO_CHANGE with run status partial and the 'template-parameter defaults (castxml cannot record them)' assurance gap -- a coverage limitation, not a compatibility claim. The clang backend records the defaults and reports the expected kind.",
+   "known_gap": "castxml cannot record template-parameter defaults (ADR-085 D1/D3): on the castxml lane the change reads NO_CHANGE with run status partial and the 'template-parameter defaults (castxml cannot record them)' assurance gap -- a coverage limitation, not a compatibility claim. The clang backend records the defaults and reports the expected kind. On PE/Mach-O, when no header declaration matches an export, header scoping falls back to the export table (`mangling-fallback`): that side keeps no type-level evidence, so the same gap reads UNCONFIRMED (ADR-090) instead of NO_CHANGE.",
    "known_gap_frontends": [
     "castxml"
    ],
    "known_gap_observed": [
-    "NO_CHANGE"
+    "NO_CHANGE",
+    "UNCONFIRMED"
    ],
    "min_evidence": "L2",
    "platforms": [
@@ -5169,12 +5172,13 @@
    "expected_kinds": [
     "template_param_default_changed"
    ],
-   "known_gap": "castxml cannot record template-parameter defaults (ADR-085 D1/D3): on the castxml lane the change reads NO_CHANGE with run status partial and the 'template-parameter defaults (castxml cannot record them)' assurance gap -- a coverage limitation, not a compatibility claim. The clang backend records the defaults and reports the expected kind.",
+   "known_gap": "castxml cannot record template-parameter defaults (ADR-085 D1/D3): on the castxml lane the change reads NO_CHANGE with run status partial and the 'template-parameter defaults (castxml cannot record them)' assurance gap -- a coverage limitation, not a compatibility claim. The clang backend records the defaults and reports the expected kind. On PE/Mach-O, when no header declaration matches an export, header scoping falls back to the export table (`mangling-fallback`): that side keeps no type-level evidence, so the same gap reads UNCONFIRMED (ADR-090) instead of NO_CHANGE.",
    "known_gap_frontends": [
     "castxml"
    ],
    "known_gap_observed": [
-    "NO_CHANGE"
+    "NO_CHANGE",
+    "UNCONFIRMED"
    ],
    "min_evidence": "L2",
    "platforms": [
