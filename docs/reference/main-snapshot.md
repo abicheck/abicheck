@@ -263,8 +263,16 @@ same entry check — everything in the table above, including its limits.
   step. `operand.json` travels with the entry, so the
   [operand pairing](#operand-identity-is-the-snapshot-this-prs-library) is
   the same as from an artifact.
-- The gate is unaffected: a failed restore or check leaves `lookup_failed`
-  and the comparison runs. `delta-outcome` and the reports'
+- The gate is unaffected by every outcome: a failed restore or check leaves
+  `lookup_failed` and the comparison runs. One limit is the cache's own
+  (see *Contents* above): `actions/cache` extracts the entry into the
+  workspace **before** the comparison and before any check, and that
+  extraction is not confined to the staging directory, so an entry forged
+  by someone able to write a readable scope could overwrite the gate's own
+  inputs. Those writers — workflows on this pull request's ref, and anyone
+  able to push to `branch` — can already change this pull request's build
+  or workflow, so this grants them nothing new; with `artifact` the
+  snapshot is extracted under `runner.temp` and the limit does not apply. `delta-outcome` and the reports'
   `delta_baseline` block carry the cache lookup's outcome; the backend is
   not recorded in the report.
 

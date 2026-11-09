@@ -8,5 +8,6 @@
   the same entry checks and the same refusals (`untrusted_source` for a pull
   request into another branch and for `merge_group`). Every unavailable entry
   is a named outcome that `delta-on-missing-base: build` and `fail` act on;
-  the release gate still alone decides the step's status. `artifact` stays
-  the default. See `docs/reference/main-snapshot.md`.
+  the release gate still alone decides the verdict and the comparison's exit
+  code, and only `fail` (in its own step) can fail the job over an
+  unavailable delta base. `artifact` stays the default. See `docs/reference/main-snapshot.md`.

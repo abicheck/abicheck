@@ -1800,6 +1800,16 @@ runs:
         CACHE_MATCHED_KEY: ${{ steps.delta-cache-restore.outputs.cache-matched-key }}
       run: bash "${{ github.action_path }}/actions/fetch-main-snapshot/verify-cache.sh"
 
+    # A restore that failed (possibly after extracting part of the entry)
+    # skips the check above, which is what removes the staging directory;
+    # remove it here, so a later call of this Action in the same job is not
+    # refused by fetch-main-snapshot's "staging directory already exists".
+    # run.sh refused to start if it pre-existed, so it is this run's own.
+    - name: Clean up after a failed delta cache restore
+      if: steps.delta-cache-restore.outcome == 'failure'
+      shell: bash
+      run: rm -rf -- "${GITHUB_WORKSPACE:-$PWD}/.abicheck-main-snapshot-cache"
+
     # ── 4. Run abicheck ──────────────────────────────────────────────────────
     - name: Run abicheck
       id: run-abicheck

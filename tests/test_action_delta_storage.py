@@ -43,7 +43,12 @@ from pathlib import Path
 
 import pytest
 from _action_run_sh_harness import REQUIRES_POSIX_SHELL
-from _workflow_exec import bash_executable, require_bash
+from _workflow_exec import (
+    bash_executable,
+    make_workspace,
+    outside_is_intact,
+    require_bash,
+)
 from _yaml_fast import safe_load
 from click.testing import CliRunner
 from test_action_delta_base_build import _delta_record, _run_sh
@@ -98,19 +103,96 @@ def _expand(text: str, ctx: dict[str, str]) -> str:
     return _EXPR.sub(one, text)
 
 
-_CLAUSE = re.compile(r"^\s*(\S+)\s*(==|!=)\s*'([^']*)'\s*$")
+_TOKEN = re.compile(
+    r"\s*(?:(?P<str>'(?:[^']|'')*')|(?P<op>&&|\|\||==|!=|[()!,])"
+    r"|(?P<name>[A-Za-z_][A-Za-z0-9_.-]*))"
+)
 
 
-def _condition(text: str, ctx: dict[str, str]) -> bool:
-    """An ``if:`` made of ``X == 'v'`` / ``X != 'v'`` clauses joined by ``&&``."""
-    result = True
-    for clause in text.split("&&"):
-        match = _CLAUSE.match(clause)
-        assert match, f"unmodelled clause {clause!r}"
-        left, op, right = match.groups()
-        got = _value(left, ctx)
-        result = result and ((got == right) if op == "==" else (got != right))
-    return result
+def _tokens(text: str) -> list[str]:
+    out: list[str] = []
+    pos = 0
+    text = text.strip()
+    while pos < len(text):
+        match = _TOKEN.match(text, pos)
+        assert match and match.end() > pos, f"unmodelled syntax at {text[pos:]!r}"
+        out.append(match.group(0).strip())
+        pos = match.end()
+    return out
+
+
+def _evaluate(text: str, ctx: dict[str, str]) -> bool:
+    """A step's ``if:`` under GitHub's expression rules, for the subset the
+    delta steps use: ``&&``/``||`` (returning an operand, as GitHub does),
+    ``==``/``!=`` (case-insensitive), ``!``, parentheses, string literals,
+    context references, ``always()`` and ``startsWith()``. Anything else is
+    a test failure rather than a guess."""
+    toks = _tokens(text)
+    pos = 0
+
+    def peek() -> str:
+        return toks[pos] if pos < len(toks) else ""
+
+    def take(expected: str = "") -> str:
+        nonlocal pos
+        tok = toks[pos]
+        assert not expected or tok == expected, (expected, tok, text)
+        pos += 1
+        return tok
+
+    def primary() -> object:
+        tok = take()
+        if tok == "(":
+            value = either()
+            take(")")
+            return value
+        if tok == "!":
+            return not primary()
+        if tok.startswith("'"):
+            return tok[1:-1].replace("''", "'")
+        if peek() == "(":
+            take("(")
+            args: list[object] = []
+            while peek() != ")":
+                args.append(either())
+                if peek() == ",":
+                    take(",")
+            take(")")
+            if tok == "always":
+                return True
+            if tok == "startsWith":
+                return str(args[0]).lower().startswith(str(args[1]).lower())
+            raise AssertionError(f"unmodelled function {tok}")
+        return _value(tok, ctx)
+
+    def comparison() -> object:
+        left = primary()
+        if peek() in ("==", "!="):
+            op = take()
+            right = primary()
+            same = str(left).lower() == str(right).lower()
+            return same if op == "==" else not same
+        return left
+
+    def both() -> object:
+        value = comparison()
+        while peek() == "&&":
+            take()
+            rhs = comparison()
+            value = rhs if value else value
+        return value
+
+    def either() -> object:
+        value = both()
+        while peek() == "||":
+            take()
+            rhs = both()
+            value = value if value else rhs
+        return value
+
+    result = either()
+    assert pos == len(toks), f"trailing tokens in {text!r}"
+    return bool(result)
 
 
 def _outputs(path: Path) -> dict[str, str]:
@@ -264,17 +346,24 @@ def _lookup(
         }
     )
     fetch = _STEPS["delta-base"]
-    rc = _run_step(fetch, ctx, env, ws, tmp_path / "fetch.out")
-    ctx["steps.delta-base.outcome"] = "success" if rc == 0 else "failure"
-    for name, value in _outputs(tmp_path / "fetch.out").items():
-        ctx[f"steps.delta-base.outputs.{name}"] = value
-    log = (tmp_path / "delta-base.log").read_text()
+    log = ""
+    if _evaluate(fetch["if"], ctx):
+        rc = _run_step(fetch, ctx, env, ws, tmp_path / "fetch.out")
+        ctx["steps.delta-base.outcome"] = "success" if rc == 0 else "failure"
+        for name, value in _outputs(tmp_path / "fetch.out").items():
+            ctx[f"steps.delta-base.outputs.{name}"] = value
+        log = (tmp_path / "delta-base.log").read_text()
+    else:
+        ctx["steps.delta-base.outcome"] = "skipped"
 
     restore = _STEPS["delta-cache-restore"]
-    restored = _condition(restore["if"], ctx)
+    restored = _evaluate(restore["if"], ctx)
     if restored:
         key = _expand(restore["with"]["key"], ctx)
         if restore_fails:
+            # Failed after extracting part of the entry.
+            (ws / restore["with"]["path"]).mkdir()
+            (ws / restore["with"]["path"] / "snapshot.json").write_text("{")
             ctx["steps.delta-cache-restore.outcome"] = "failure"
         else:
             ctx["steps.delta-cache-restore.outcome"] = "success"
@@ -289,12 +378,21 @@ def _lookup(
             )
 
     verify = _STEPS["delta-cache-verify"]
-    verified = _condition(verify["if"], ctx)
+    verified = _evaluate(verify["if"], ctx)
     if verified:
         _run_step(verify, ctx, env, ws, tmp_path / "verify.out")
         for name, value in _outputs(tmp_path / "verify.out").items():
             ctx[f"steps.delta-cache-verify.outputs.{name}"] = value
         log += (tmp_path / "delta-cache-verify.log").read_text()
+
+    cleanup = next(
+        s
+        for s in _ACTION["runs"]["steps"]
+        if s.get("name") == "Clean up after a failed delta cache restore"
+    )
+    if _evaluate(cleanup["if"], ctx):
+        cleanup = {**cleanup, "id": "delta-cache-cleanup"}
+        assert _run_step(cleanup, ctx, env, ws, tmp_path / "cleanup.out") == 0
 
     run_env = {
         k: _expand(str(v), ctx)
@@ -333,9 +431,28 @@ def test_resolved_entry_reaches_the_comparison_with_its_operand_record(
     assert "gh api" not in got.log
 
 
+#: Files the runner itself writes beside the workspace (step scripts, logs,
+#: outputs) and the simulated cache service (`store/`); everything else
+#: outside `ws/` and `runner/` must stay as it was.
+_RUNNER_FILES = (".sh", ".log", ".out")
+
+
+def _outside_tree(tmp_path: Path) -> dict[str, bytes]:
+    tree: dict[str, bytes] = {}
+    for path in sorted(tmp_path.rglob("*")):
+        rel = path.relative_to(tmp_path)
+        if rel.parts[0] in ("ws", "runner", "store") or not path.is_file():
+            continue
+        if len(rel.parts) == 1 and path.suffix in _RUNNER_FILES:
+            continue
+        tree[str(rel)] = path.read_bytes()
+    return tree
+
+
 def _base_and_lookup(tmp_path: Path, **kw: object) -> tuple[str, Lookup]:
     store = tmp_path / "store"
-    base = _pr_checkout(tmp_path / "ws")
+    ws = tmp_path / "ws"
+    base = _git(ws, "rev-parse", "HEAD^1") if ws.exists() else _pr_checkout(ws)
     entry_kw = kw.pop("entry", {})
     if entry_kw is not None:
         _entry(store, base, **entry_kw)  # type: ignore[arg-type]
@@ -367,9 +484,18 @@ def test_every_unavailable_entry_is_a_named_outcome(
         # merge_group's base comes from the event; an entry for it exists.
         kw = {**kw, "merge_group_base": queue_base}
         _entry(tmp_path / "store", queue_base)
+    make_workspace(tmp_path)  # the sentinel tree outside the workspace
+    _pr_checkout(tmp_path / "ws")
+    before = _outside_tree(tmp_path)
     base, got = _base_and_lookup(tmp_path, **kw)
     if case == "merge-queue":
         base = queue_base
+    # Neither a refused nor a forged entry touches anything outside the
+    # workspace and runner.temp, and its staging directory never outlives
+    # the lookup -- a failed restore's included.
+    assert outside_is_intact(tmp_path)
+    assert _outside_tree(tmp_path) == before
+    assert not (tmp_path / "ws" / CACHE_STAGING_DIR).exists()
     env = got.run_env
     assert env["ABICHECK_DELTA_OUTCOME"] == env["delta-outcome"] == outcome, got.log
     assert got.restored is restore_ran
@@ -380,6 +506,71 @@ def test_every_unavailable_entry_is_a_named_outcome(
     assert DeltaOutcome(outcome) in BUILDABLE_OUTCOMES
     res = CliRunner().invoke(action_cli, ["delta-buildable", outcome])
     assert res.exit_code == 0
+
+
+# (inputs, event) under which no delta lookup runs at all: the fetch step's
+# own `if:`, evaluated, leaves every delta output empty.
+_NO_LOOKUP = [
+    ({"delta-baseline": ""}, "pull_request"),
+    ({"mode": "dump"}, "pull_request"),
+    ({}, "pull_request_target"),
+    ({}, "push"),
+]
+
+
+@pytest.mark.parametrize(("inputs", "event"), _NO_LOOKUP)
+def test_no_lookup_outside_its_scope_even_with_cache_storage(
+    tmp_path: Path, inputs: dict, event: str
+) -> None:
+    store = tmp_path / "store"
+    base = _pr_checkout(tmp_path / "ws")
+    _entry(store, base)
+    got = _lookup(tmp_path, store, event=event, inputs=inputs)
+    assert got.ctx["steps.delta-base.outcome"] == "skipped"
+    assert not got.restored and not got.verified
+    assert got.run_env["delta-outcome"] == ""
+    for name in ("OUTCOME", "SNAPSHOT", "MESSAGE", "BASE_SHA"):
+        assert got.run_env[f"ABICHECK_DELTA_{name}"] == "", name
+
+
+def _require_runs(ctx: dict[str, str], on_missing: str, comment_outcome: str) -> bool:
+    step = next(
+        s
+        for s in _ACTION["runs"]["steps"]
+        if s.get("name") == "Require the delta base snapshot"
+    )
+    ctx = {
+        **ctx,
+        "inputs.delta-on-missing-base": on_missing,
+        "steps.run-abicheck.outputs.delta-comment-outcome": comment_outcome,
+    }
+    return _evaluate(step["if"], ctx)
+
+
+# (case, lookup kwargs, run.sh's comment outcome). Oracle: with `fail`, the
+# job fails exactly when no usable snapshot reached the comparison -- the
+# lookup did not resolve, or it resolved a snapshot of another library.
+_REQUIRE = [
+    ("resolved", {}, "resolved", False),
+    ("resolved-other-library", {}, "operand_unmatched", True),
+    ("miss", {"entry": None}, "base_not_snapshotted", True),
+    ("foreign-scope", {"base_ref": "release/1"}, "untrusted_source", True),
+    ("forged", {"entry": {"sha": "f" * 40}}, "untrusted_source", True),
+    ("restore-failed", {"restore_fails": True}, "lookup_failed", True),
+]  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    ("case", "kw", "comment", "fails"), _REQUIRE, ids=[c[0] for c in _REQUIRE]
+)
+def test_delta_on_missing_base_fail_decides_on_the_verified_cache_outcome(
+    tmp_path: Path, case: str, kw: dict, comment: str, fails: bool
+) -> None:
+    got = _base_and_lookup(tmp_path, **kw)[1]
+    assert _require_runs(got.ctx, "fail", comment) is fails, case
+    # `report` and `build` never fail the job over the delta.
+    assert _require_runs(got.ctx, "report", comment) is False
+    assert _require_runs(got.ctx, "build", comment) is False
 
 
 def test_artifact_storage_never_touches_the_cache_steps(tmp_path: Path) -> None:
@@ -594,12 +785,14 @@ def test_delta_storage_is_validated_before_any_install(
 _MANIFESTS = sorted([_ROOT / "action.yml", *(_ROOT / "actions").glob("*/action.yml")])
 
 
-def _expression_problem(expr: str) -> str:
+def _expression_problem(expr: str | None) -> str:
     """Why *expr* cannot parse as a GitHub Actions expression, or ``""``.
 
     Single-quoted strings (``''`` escapes a quote) are skipped; outside them
     ``(``/``)`` and ``[``/``]`` must nest and close.
     """
+    if expr is None:
+        return "`${{` with no closing `}}`"
     stack: list[str] = []
     pairs = {")": "(", "]": "["}
     i = 0
@@ -636,8 +829,11 @@ def _expressions(node: object, where: str = ""):
         for index, value in enumerate(node):
             yield from _expressions(value, f"{where}[{index}]")
     elif isinstance(node, str):
-        for match in _EXPR.finditer(node):
+        matches = list(_EXPR.finditer(node))
+        for match in matches:
             yield where, match.group(1)
+        if node.count("${{") != len(matches):
+            yield where, None  # an opening `${{` with no closing `}}`
 
 
 @pytest.mark.parametrize(
@@ -670,3 +866,12 @@ def test_every_expression_in_an_action_manifest_is_well_formed(manifest: Path) -
 )
 def test_expression_checker_on_known_shapes(expr: str, ok: bool) -> None:
     assert (_expression_problem(expr) == "") is ok
+
+
+def test_expression_discovery_reports_an_unterminated_opening() -> None:
+    doc = {"runs": {"steps": [{"env": {"A": "${{ inputs.x }} and ${{ inputs.y"}}]}}
+    found = list(_expressions(doc))
+    assert [_expression_problem(e) for _, e in found] == [
+        "",
+        "`${{` with no closing `}}`",
+    ]
