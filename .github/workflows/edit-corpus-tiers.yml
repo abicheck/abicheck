@@ -20,7 +20,8 @@ name: Edit corpus tiers
 #
 # Build vs consumer toolchains: a library pair is built once by a BUILD
 # toolchain and checked against every CONSUMER toolchain's client programs.
-# Both default to every installed compiler; a dispatch can restrict either
+# Build toolchains default to every installed compiler, consumer toolchains
+# to the build selection; a dispatch can restrict either
 # (`toolchains`, `consumer_toolchains`: comma-separated gcc-14, clang-19, or a
 # bare family). A named compiler that is not installed fails the run; it is
 # never dropped. Versioned names are apt-installed first.
@@ -290,7 +291,8 @@ jobs:
     needs: [plan, corpus, report]
     if: >-
       always() && github.event_name == 'schedule' &&
-      (needs.plan.result == 'failure' || needs.corpus.result == 'failure')
+      (needs.plan.result == 'failure' || needs.corpus.result == 'failure' ||
+       needs.report.result == 'failure')
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:

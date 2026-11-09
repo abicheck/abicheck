@@ -155,6 +155,9 @@ def test_a_tier_with_an_uninstalled_selection_fails_instead_of_shrinking(
     monkeypatch: pytest.MonkeyPatch, var: str, gen: object
 ) -> None:
     monkeypatch.setattr(tcs, "discover", lambda: (GCC13, CLANG18))
+    # Start from no selection: an inherited one must not decide the case.
+    monkeypatch.delenv(tcs.TOOLCHAIN_ENV, raising=False)
+    monkeypatch.delenv(tcs.CONSUMER_TOOLCHAIN_ENV, raising=False)
     monkeypatch.setenv(var, "gcc-14")
     with pytest.raises(ToolchainSelectionError, match="gcc-14"):
         gen()  # type: ignore[operator]
@@ -578,6 +581,33 @@ def test_a_family_outside_the_selection_skips_with_the_selection_named(
     assert {u.toolchain for c in ran for u in c.config.consumer_set} == {GCC13}
 
 
+def test_a_consumer_family_outside_the_consumer_selection_names_that_variable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(tcs, "discover", lambda: (CLANG18, GCC13))
+    monkeypatch.setattr(tiers, "std_flag", lambda tc, std: std.name)
+    monkeypatch.delenv(tcs.TOOLCHAIN_ENV, raising=False)
+    monkeypatch.setenv(tcs.CONSUMER_TOOLCHAIN_ENV, "gcc-13")
+    skipped = dict(
+        c for c in tiers.pr_consumer_cells() if not isinstance(c, tiers.Cell)
+    )
+    # clang is installed: only the consumer selection excludes it.
+    assert skipped and all(
+        why == f"no selected consumer clang toolchain ({tcs.CONSUMER_TOOLCHAIN_ENV})"
+        for why in skipped.values()
+    ), skipped
+    # With only the build selection set, consumers inherit it and say so.
+    monkeypatch.delenv(tcs.CONSUMER_TOOLCHAIN_ENV)
+    monkeypatch.setenv(tcs.TOOLCHAIN_ENV, "gcc-13")
+    reasons = {
+        why
+        for c in tiers.pr_consumer_cells()
+        if not isinstance(c, tiers.Cell)
+        for why in [c[1]]
+    }
+    assert f"no selected consumer clang toolchain ({tcs.TOOLCHAIN_ENV})" in reasons
+
+
 def test_weekly_checks_each_build_against_the_full_consumer_cross(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -626,6 +656,54 @@ def test_a_nightly_row_checks_the_build_and_the_drawn_consumer() -> None:
 
 
 # --- reporting ----------------------------------------------------------------------
+
+
+def test_cells_sharing_an_id_keep_every_pair_file(tmp_path: Path) -> None:
+    def cell(op: str) -> CellResult:
+        return CellResult(op, "c_core", _cfg(), "unavailable", f"why {op}")
+
+    # The same id twice, and two ids that sanitize to one name.
+    paths = [
+        write_cell(tmp_path, "a-b", cell("one")),
+        write_cell(tmp_path, "a-b", cell("two")),
+        write_cell(tmp_path, "x/y", cell("three")),
+        write_cell(tmp_path, "x_y", cell("four")),
+    ]
+    assert [p.name for p in paths] == [
+        "a-b.json",
+        "a-b~2.json",
+        "x_y.json",
+        "x_y~2.json",
+    ]
+    assert sorted(r["op"] for r in load(tmp_path)) == ["four", "one", "three", "two"]
+
+
+def test_the_summary_keeps_a_hyphenated_toolchain_id() -> None:
+    rows = [
+        {
+            "op": "o",
+            "seed": "s",
+            "build": "b",
+            "producer": "apple-clang15",
+            "consumer": "apple-clang15-c17-O0+se",
+            "outcome": "no-break",
+            "cell": "agree",
+            "detail": "",
+        },
+        {
+            "op": "o",
+            "seed": "s",
+            "build": "b",
+            "producer": "apple-clang15",
+            "consumer": "apple-clang15-c17-O0",
+            "outcome": "binary-break",
+            "cell": "agree",
+            "detail": "",
+        },
+    ]
+    text = summarize(rows)
+    assert "| `apple-clang15-c17` | 1 | 1 |" in text
+    assert "| apple-clang15 | apple-clang15 | 1 | 1 |" in text
 
 
 def test_the_pair_report_counts_outcomes_and_lists_every_blocked_pair(
@@ -688,6 +766,10 @@ def test_the_workflow_schedules_both_tiers_with_minimal_permissions() -> None:
         "issues": "write"
     }
     assert "github.event_name == 'schedule'" in jobs["notify"]["if"]
+    # A failed plan, corpus or report job each reaches the tracking issue.
+    for job in ("plan", "corpus", "report"):
+        assert f"needs.{job}.result == 'failure'" in jobs["notify"]["if"]
+    assert set(jobs["notify"]["needs"]) == {"plan", "corpus", "report"}
     assert "refs/heads/main" in jobs["plan"]["if"]
     uploads = [
         s

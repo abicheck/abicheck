@@ -57,6 +57,7 @@ from tests._edit_corpus_config import (
 from tests._edit_corpus_operators import OP_BY_NAME, EditOp, matrix
 from tests._edit_corpus_seeds import SEED_BY_NAME, Seed
 from tests._edit_corpus_toolchains import (
+    CONSUMER_TOOLCHAIN_ENV,
     TOOLCHAIN_ENV,
     build_toolchains,
     consumer_toolchains,
@@ -117,8 +118,20 @@ def _toolchain(family: str) -> Toolchain | None:
 
 
 def _missing(family: str, role: str) -> str:
-    if os.environ.get(TOOLCHAIN_ENV, "").strip():
-        return f"no selected {role} {family} toolchain ({TOOLCHAIN_ENV})"
+    """Why no *role* toolchain of *family* is available: deselected or absent.
+
+    Consumers follow ``CONSUMER_TOOLCHAIN_ENV`` when it is set, else the build
+    selection (``consumer_toolchains``), so the reason names the variable
+    that actually excluded the family.
+    """
+    names = (
+        [CONSUMER_TOOLCHAIN_ENV, TOOLCHAIN_ENV]
+        if role == "consumer"
+        else [TOOLCHAIN_ENV]
+    )
+    for var in names:
+        if os.environ.get(var, "").strip():
+            return f"no selected {role} {family} toolchain ({var})"
     return f"no {role} {family} toolchain installed"
 
 

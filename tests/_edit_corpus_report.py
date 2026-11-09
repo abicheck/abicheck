@@ -14,6 +14,7 @@ with their reasons and are never counted as passes.
 
 from __future__ import annotations
 
+import itertools
 import json
 import sys
 from collections import Counter
@@ -40,9 +41,19 @@ def write_cell(out_dir: Path, cell_id: str, result: CellResult) -> Path:
         }
     ]
     safe = "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in cell_id)
-    path = out_dir / f"{safe}.json"
-    path.write_text(json.dumps(rows, indent=1, sort_keys=True) + "\n", encoding="utf-8")
-    return path
+    text = json.dumps(rows, indent=1, sort_keys=True) + "\n"
+    # Two cells can share an id (pairwise rows that collapse to one config) or
+    # sanitize to one name: never overwrite, take the next free ``~N`` name.
+    # Exclusive create, so concurrent xdist workers cannot claim the same file.
+    for n in itertools.count(1):
+        path = out_dir / (f"{safe}.json" if n == 1 else f"{safe}~{n}.json")
+        try:
+            with path.open("x", encoding="utf-8") as fh:
+                fh.write(text)
+        except FileExistsError:
+            continue
+        return path
+    raise AssertionError("unreachable")
 
 
 def load(pairs_dir: Path) -> list[dict[str, str]]:
@@ -57,11 +68,12 @@ def summarize(rows: list[dict[str, str]], limit: int = 40) -> str:
     if not rows:
         return "No (build, consumer) pairs were recorded.\n"
     outcomes = sorted({r["outcome"] for r in rows})
-    # Consumer ids are ``<toolchain>-<standard>-<flags>``: count by the first
-    # two, so the table stays one row per (compiler, standard) whatever the flags.
+    # Consumer ids are ``<toolchain>-<standard>-<flags>``; neither the standard
+    # nor the flags id has a ``-`` but a toolchain id can (``apple-clang15``):
+    # drop the flags from the right, one row per (compiler, standard).
     by_consumer: dict[str, Counter[str]] = {}
     for r in rows:
-        key = "-".join(r["consumer"].split("-", 2)[:2])
+        key = r["consumer"].rsplit("-", 1)[0]
         by_consumer.setdefault(key, Counter())[r["outcome"]] += 1
     lines = [
         f"{len(rows)} (build, consumer) pairs over "
@@ -77,7 +89,7 @@ def summarize(rows: list[dict[str, str]], limit: int = 40) -> str:
     pairs: dict[tuple[str, str], Counter[str]] = {}
     for r in rows:
         if r["consumer"] != "*":
-            key = (r.get("producer", "?"), r["consumer"].split("-", 1)[0])
+            key = (r.get("producer", "?"), r["consumer"].rsplit("-", 2)[0])
             pairs.setdefault(key, Counter())[r["outcome"]] += 1
     if pairs:
         lines += [
