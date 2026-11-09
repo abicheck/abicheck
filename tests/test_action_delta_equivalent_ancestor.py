@@ -939,3 +939,49 @@ def test_a_resolver_crash_reaches_the_log_as_an_annotation(tmp_path: Path) -> No
     assert "::error::resolve-snapshot failed with exit 1." in result.stderr
     # The step dies before any snapshot is published.
     assert "snapshot-path=" not in out.read_text()
+
+
+@needs_git
+def test_an_unnameable_artifact_fails_the_step_not_reads_as_absent(
+    tmp_path: Path,
+) -> None:
+    """``snapshot-name`` refuses a profile outside ``[A-Za-z0-9._-]``. Inside
+    ``_resolve_artifact`` errexit does not apply, so that refusal must fail
+    the step explicitly rather than look up an empty name and report
+    ``base_not_snapshotted``."""
+    require_bash()
+    repo, chain = _main_history(tmp_path, ("doc",))
+    data = tmp_path / "data"
+    data.mkdir()
+    _gh_stub(tmp_path / "bin", data)
+    out = tmp_path / "gh_output"
+    out.write_text("")
+    env = {k: v for k, v in os.environ.items() if not k.startswith("INPUT_")}
+    env.update(
+        {
+            "PATH": os.pathsep.join(
+                [str(tmp_path / "bin"), str(Path(sys.executable).parent), env["PATH"]]
+            ),
+            "GITHUB_OUTPUT": str(out),
+            "REPO": "o/r",
+            "EVENT_NAME": "merge_group",
+            "MERGE_GROUP_BASE": chain[-1],
+            "INPUT_WORKFLOW": _WF,
+            "INPUT_MODE": "merge-group",
+            "INPUT_BRANCH": "main",
+            "INPUT_PROFILE": "bad/profile",
+            "INPUT_WAIT_TIMEOUT": "0",
+            "INPUT_DESTINATION": str(tmp_path / "dest"),
+        }
+    )
+    result = subprocess.run(
+        [bash_executable(), str(_FETCH_SH)],
+        cwd=repo.path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "::error::no artifact name for" in result.stderr
+    assert "base_not_snapshotted" not in out.read_text()

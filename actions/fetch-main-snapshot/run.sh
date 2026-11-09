@@ -190,7 +190,10 @@ _lookup() {  # $1 = endpoint, $2 = jq path, $3 = output; paginated, flattened
 _resolve_artifact() {
   local sha="$1" equivalent="${2:-}" name rc=0
   local -a lookup=() extra=()
-  name=$("${CLI[@]}" snapshot-name "$sha" --profile "${INPUT_PROFILE:-}")
+  # errexit does not reach into this function's $(...) callers: fail
+  # explicitly, or an empty name would read as "no snapshot".
+  name=$("${CLI[@]}" snapshot-name "$sha" --profile "${INPUT_PROFILE:-}") \
+    || _fail "no artifact name for $sha (profile '${INPUT_PROFILE:-}')." >&2
   _lookup "repos/$REPO/actions/artifacts" '.artifacts' "$WORK/artifacts.json" \
     -f "name=$name" >&2 || lookup=(--lookup-failed)
   _lookup "repos/$REPO/actions/workflows/$WORKFLOW/runs" '.workflow_runs' "$WORK/runs.json" \
