@@ -96,6 +96,76 @@ coverage, so those lanes run without the fail-under gate.
   `tests/test_sprint7_full_parity.py`, `tests/test_sprint10_abicc_parity.py`.
 - Exercises realistic binaries, toolchain outputs, and compatibility expectations.
 
+#### Generated ABI edit corpus coverage
+
+The generated edit corpus (`tests/_edit_corpus_*.py`: semantic edit operators
+× seeds × configurations, run in PR, nightly and weekly tiers) reports two
+separate coverage measures. Both are computed by
+`tests/_edit_corpus_coverage.py`; every corpus cell writes a record when
+`ABICHECK_EDIT_CORPUS_COVERAGE_DIR` is set, and
+`python -m tests._edit_corpus_coverage report DIR...` aggregates records into
+a JSON report and a step summary (`integration.yml` for the PR tier,
+`edit-corpus-tiers.yml` per shard and for the merged tier).
+
+**ChangeKind coverage.** The denominator is the ChangeKinds one Linux ELF
+shared library with DWARF and public headers can show. `SCOPE_BUCKETS` is that
+partition as data: named buckets (by prefix or name) exclude PE/COFF, Apple,
+Python/NumPy/wheel packaging, SYCL, kernel-module ABI and multi-library bundle
+kinds, and include the `source`-taxonomy kinds a header alone shows (concepts,
+public typedef targets, header-only functions); module buckets take the rest of
+each taxonomy module (`symbols`/`types`/`platform` in, `build`/`source` and the
+source graph out — L3–L5 evidence). Macro, `constexpr` and default-argument
+values stay out: abicheck reads them only from L4 sources, and the corpus gives
+at most headers. Every kind is in exactly one bucket
+(`test_every_kind_is_in_exactly_one_scope_bucket`), and every report lists the
+buckets with their counts and reasons.
+
+- *Declared*: an operator names the kind in an expectation, under some rule.
+  Computed from the operators alone.
+- *Verified* (per tier): a cell expected the kind, abicheck produced it, and
+  the cell reconciled to a passing class. A strict-xfail (known) cell, a
+  skipped cell and an unobservable cell verify nothing. A kind abicheck
+  produced that the cell did not expect is listed separately, per tier with
+  its cell count, as *produced but not expected* — a possible false positive
+  or a missing expectation, never coverage.
+
+`tests/edit_corpus_coverage_ledger.json` is the ratchet:
+`tests/test_edit_corpus_coverage.py` fails when a declared kind stops being
+declared, when a new declared kind is not written down
+(`python -m tests._edit_corpus_coverage ledger --write`), or when a floor names
+a kind no cell can verify. `verified_floor[tier]` holds the kinds a tier
+verified when it was raised (`report DIR --raise-floor TIER`); a run that
+verifies less fails `--check-floor TIER`. A single shard is held only to the
+floor kinds its own cells expected; the merged run (`--complete`) to the whole
+floor.
+
+**Language-space coverage.** `tests/_edit_corpus_space.py` models the space
+the corpus samples: construct (from the operators' roles and language
+features) × language × standard × config feature (`baseline`, `-O2`, hidden
+visibility, `-m32`, `-fshort-enums`, `-fpack-struct`,
+`_GLIBCXX_USE_CXX11_ABI=0`, `-fabi-version`, different consumer flags) × build
+toolchain × consumer toolchain × evidence level. A (build, consumer) pair that
+cannot work is made infeasible by a `PAIR_RULES` entry. `infeasible()`
+names why a point cannot be a meaningful cell (concepts before C++20, a C++
+construct in C, `-fabi-version` on clang, `std::string` under
+`-fpack-struct`, a family that does not target Linux ELF); the generator
+refuses the same combinations through the same module. The report gives
+covered against feasible points overall and per axis value, and the top
+uncovered feasible points ranked by how thinly their axis values are covered.
+
+What these numbers do **not** mean:
+
+- A verified ChangeKind is not proof that abicheck reports that kind for every
+  edit that should produce it; one cell under one configuration verified it.
+- A covered space point means a cell *ran* there, not that abicheck was right
+  there (mismatches are the corpus test's own result) and not that every edit
+  of that construct ran: the space has no edit axis.
+- The space holds only the corpus's own axes. Architectures beyond `-m32`,
+  other operating systems, link order and real-world library shapes are not in
+  the denominator, so 100% would still not be "all of C/C++".
+- Declared coverage is a property of the operator table; only verified
+  coverage says abicheck did anything.
+
 ### 7) Architecture conformance
 - `tests/test_architecture_conformance.py`, `tests/test_changekind_completeness.py`,
   `tests/test_changekind_coverage.py`.

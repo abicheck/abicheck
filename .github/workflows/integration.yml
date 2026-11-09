@@ -205,8 +205,25 @@ jobs:
           # Recorded per test so the shard weights can be refreshed from the
           # artifact below (tests/pytest_shards.py's docstring).
           ABICHECK_DURATIONS_JSON: integration-durations-shard${{ matrix.shard }}.json
+          # The edit corpus's PR tier writes one coverage record per cell
+          # (tests/_edit_corpus_coverage.py); the next step reports them.
+          ABICHECK_EDIT_CORPUS_COVERAGE_DIR: edit-corpus-coverage
           PYTEST_ADDOPTS: -n auto --dist worksteal --shard=${{ matrix.shard }}/2 --shard-weights=tests/shard_weights_integration.json --cov=abicheck --cov-report=xml:coverage-integration.xml
         run: python scripts/verify.py --profile full --only integration --require-complete
+      - name: Edit corpus coverage (Linux)
+        # ChangeKinds the PR tier verified and the language space it ran, in the
+        # step summary; fails if a kind in the ledger's `pr` verified floor that
+        # this shard's cells expected was not verified. A shard without corpus
+        # cells has no records and reports nothing.
+        if: (success() || failure()) && runner.os == 'Linux'
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          if [ -d edit-corpus-coverage ]; then
+            python -m tests._edit_corpus_coverage report edit-corpus-coverage \
+              --title "Edit corpus PR-tier coverage (shard ${SHARD}/2)" \
+              --summary "$GITHUB_STEP_SUMMARY" --check-floor pr
+          fi
       - name: Upload integration-durations artifact
         if: ${{ always() && runner.os == 'Linux' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4

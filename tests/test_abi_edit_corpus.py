@@ -23,6 +23,7 @@ import pytest
 
 from abicheck.model.change_catalog.kinds import ChangeKind
 from tests._edit_corpus_config import Toolchain, default_config
+from tests._edit_corpus_coverage import make_record, write_record
 from tests._edit_corpus_expect import issue_keys
 from tests._edit_corpus_harness import (
     COMPILERS,
@@ -240,15 +241,34 @@ def _skip_wrong_width(seed, config) -> None:
 def test_edit_produces_declared_ground_truth(
     op, seed, compiler, baseline_cache: BaselineCache, corpus_root: Path
 ) -> None:
-    _skip_without_driver(seed, compiler)
-    # A build or extraction exception propagates and fails the cell.
     config = _as_config(seed, compiler)
-    _skip_wrong_width(seed, config)
-    gap = capability_gap(op, config)
-    if gap:
-        pytest.skip(gap)
+    try:
+        _skip_without_driver(seed, compiler)
+        # A build or extraction exception propagates and fails the cell.
+        _skip_wrong_width(seed, config)
+        gap = capability_gap(op, config)
+        if gap:
+            pytest.skip(gap)
+    except pytest.skip.Exception:
+        write_record(make_record("pr", op, seed.name, config, status="unavailable"))
+        raise
     outcome = run_operator(op, seed, config, baseline_cache, corpus_root)
     known = known_mismatch(op.name, seed.name, config)
+    write_record(
+        make_record(
+            "pr",
+            op,
+            seed.name,
+            config,
+            status="ran",
+            # No execution oracle here: a cell meeting its expectation agrees.
+            cls="known-xfail"
+            if known
+            else ("agree" if not outcome.failures else "mismatch"),
+            verdict=outcome.verdict,
+            produced=outcome.kinds,
+        )
+    )
     if known is not None:
         issues = issue_keys(outcome.failures)
         assert issues == known.issues and outcome.verdict in known.verdicts, (
