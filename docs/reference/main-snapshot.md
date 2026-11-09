@@ -355,3 +355,34 @@ the gate's:
 | `rerun_failed` | The comparison against the built base produced no report. |
 
 None of them reads as "no changes", and none of them changes the exit code.
+
+### The record in the JSON report
+
+Both reports say which comparison they are, in a top-level `delta_baseline`
+block (compare report schema 7.3, release report schema 3.1; field reference
+in [output formats](../use/output-formats.md#gate-or-delta-comparison-delta_baseline)):
+
+| Report | `comparison_role` | `outcome` | `gate_verdict` | `operand_match` |
+|---|---|---|---|---|
+| The gate's (the `output-file`, the summary, the SARIF/JUnit sources) | `gate` (`decides_exit_code: true`) | the lookup's outcome, or `unsupported_operand` for a directory/package comparison | `null` -- its own `verdict` is the gate's | `null` -- the gate runs before the operands are paired |
+| The delta's (the one the comment renders, and the one staged for a fork publisher) | `delta` (`decides_exit_code: false`) | `resolved`, or `base_built` when `delta-on-missing-base: build` built the base in this job | the gate's verdict | how the snapshot's library was paired with `new-library` (the `delta-operand-match` output) |
+
+`base_sha` and `branch` are the base commit and default branch on both. The
+gate's block records the lookup as it stood when the gate ran: if the delta
+comparison then produces no report, the comment falls back to the gate's
+report under `rerun_failed`, which the gate's block does not show; the same
+holds for the operand-identity refusals (`operand_*`) and for a failed base
+build (`base_build_failed`, `base_dump_failed`), which are decided after the
+gate and run no delta comparison. The block
+never changes a verdict or exit code. A record the CLI would refuse is not
+passed at all (the run warns), so the block can never turn the gate's run
+into a usage error.
+
+A stored report renders its own notes: the fork publisher reads the
+analysis context's `delta_*` fields first and, without them, the report's
+`delta_baseline` block (for the one-target aggregate the fork path stages, the
+block of the one member report it names, read through the same path-safe
+loader as the comment's member rendering) -- a `delta` report is labelled as the delta with the
+recorded gate verdict, an unresolved `gate` report with its outcome. A
+resolved `gate` report rendered on its own carries no note, since it does not
+record whether a delta comparison followed.

@@ -1388,6 +1388,8 @@ outputs:
       delta-baseline only: the base-snapshot outcome ('resolved',
       'base_pending', 'snapshot_missing', ...; see
       docs/reference/main-snapshot.md). Empty when delta-baseline is unset.
+      The JSON reports record it too, in their delta_baseline block
+      (comparison_role gate or delta).
     value: ${{ steps.delta-base.outputs.outcome }}
   delta-base-sha:
     description: 'delta-baseline only: the base commit the delta was measured against.'

@@ -632,6 +632,12 @@ def _run_sh(
     return outputs, calls, body
 
 
+def _delta_record(argv: list[str]) -> dict:
+    """The report.delta_baseline record a compare command was given."""
+    (value,) = [a for a in argv if a.startswith("report.delta_baseline=@")]
+    return json.loads(Path(value.split("=@", 1)[1]).read_text())
+
+
 def _base_root(tmp_path: Path) -> str:
     return str((tmp_path / "runner_temp" / "abicheck-delta-base-src").resolve())
 
@@ -653,6 +659,19 @@ def test_a_built_base_is_dumped_with_new_side_evidence_and_becomes_the_delta(
     base = outputs["_base"]
     assert f"> {delta_notes('base_built', base_sha=base)[0]}" in body
     assert outputs["delta-comment-outcome"] == "base_built"
+    # Each report's delta_baseline record (schema 7.3) says what it is: the
+    # delta records the built base, the gate keeps the lookup's outcome.
+    gate = next(c for c in calls if c[0] == "compare" and snap not in c)
+    assert _delta_record(delta) == {
+        "comparison_role": "delta",
+        "outcome": "base_built",
+        "base_sha": outputs["_base"],
+        "branch": "main",
+        "gate_verdict": outputs["verdict"],
+        "operand_match": "loader_name",
+    }
+    assert _delta_record(gate)["outcome"] == "snapshot_missing"
+    assert _delta_record(gate)["comparison_role"] == "gate"
     # The worktree is gone once the delta has been measured.
     assert not Path(root).exists()
     assert root not in _git(tmp_path, "worktree", "list")
@@ -898,3 +917,39 @@ def test_every_cache_refusal_selected_a_commit_and_is_buildable(tmp_path: Path) 
     for case, outcome in outcomes.items():
         res = CliRunner().invoke(action_cli, ["delta-buildable", outcome.value])
         assert res.exit_code == 0, f"{case}: {outcome} is not buildable"
+
+
+def test_a_stored_built_delta_report_renders_its_own_notes() -> None:
+    """The fork publisher reads a stored delta report's delta_baseline block
+    (no analysis context): a built base is labelled as built, with the
+    pairing and the gate's verdict -- the wording the direct comment uses."""
+    from abicheck.frontends.action.report_publication import context_notes
+    from abicheck.report.delta_baseline import DeltaBaseline
+
+    record = DeltaBaseline.from_mapping(
+        {
+            "comparison_role": "delta",
+            "outcome": "base_built",
+            "base_sha": _SHA,
+            "branch": "main",
+            "gate_verdict": "BREAKING",
+            "operand_match": "declared",
+        }
+    )
+    notes = context_notes(
+        {"verdict": "COMPATIBLE", "delta_baseline": record.to_report_dict()}
+    )
+    assert notes == delta_notes(
+        "base_built", base_sha=_SHA, gate_verdict="BREAKING", operand_match="declared"
+    )
+    assert "built in this job" in notes[0] and "Release gate: BREAKING" in notes[-1]
+
+
+@pytest.mark.parametrize("role", ["gate"])
+def test_a_gate_report_can_never_claim_a_built_base(role: str) -> None:
+    from abicheck.report.delta_baseline import DeltaBaseline, DeltaBaselineError
+
+    with pytest.raises(DeltaBaselineError, match="after the gate"):
+        DeltaBaseline.from_mapping(
+            {"comparison_role": role, "outcome": "base_built", "base_sha": _SHA}
+        )

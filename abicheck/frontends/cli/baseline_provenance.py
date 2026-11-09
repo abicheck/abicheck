@@ -50,6 +50,8 @@ __all__ = [
     "current_baseline_provenance_block",
     "enter_baseline_provenance",
     "load_baseline_provenance",
+    "read_record_file",
+    "record_base_dir",
 ]
 
 _CURRENT: ContextVar[BaselineProvenance | None] = ContextVar(
@@ -57,34 +59,47 @@ _CURRENT: ContextVar[BaselineProvenance | None] = ContextVar(
 )
 
 
-def load_baseline_provenance(
-    value: str, *, base_dir: Path | None
-) -> BaselineProvenance:
-    """The record in the file *value* names; :class:`click.UsageError` if unusable.
+def read_record_file(key: str, value: str, *, base_dir: Path | None) -> object:
+    """The JSON document the file *value* names; :class:`click.UsageError` if unusable.
 
-    *base_dir* is the directory a relative path resolves against (``None``:
-    the current directory).
+    Shared by every ``report.*`` key that names a caller-asserted record file
+    (``report.baseline_provenance``, ``report.delta_baseline``). *key* names
+    the config path in the error. *base_dir* is the directory a relative path
+    resolves against (``None``: the current directory).
     """
     name = value[1:] if value.startswith("@") else value
     if not name:
-        raise click.UsageError(f"{BASELINE_PROVENANCE_PATH}: no file named")
+        raise click.UsageError(f"{key}: no file named")
     path = Path(name)
     if base_dir is not None and not path.is_absolute():
         path = base_dir / path
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8"))
     except OSError as exc:
         raise click.UsageError(
-            f"{BASELINE_PROVENANCE_PATH}: cannot read {path}: {exc.strerror or exc}"
+            f"{key}: cannot read {path}: {exc.strerror or exc}"
         ) from None
     except ValueError as exc:
-        raise click.UsageError(
-            f"{BASELINE_PROVENANCE_PATH}: {path} is not valid JSON ({exc})"
-        ) from None
+        raise click.UsageError(f"{key}: {path} is not valid JSON ({exc})") from None
+
+
+def record_base_dir(
+    key: str, *, cfg_path: Path | None, config_overrides: Mapping[str, object] | None
+) -> Path | None:
+    """Where a relative record path resolves (the ADR-091 D4 amendment's rule)."""
+    from_set = key in (config_overrides or {})
+    return None if from_set or cfg_path is None else cfg_path.parent
+
+
+def load_baseline_provenance(
+    value: str, *, base_dir: Path | None
+) -> BaselineProvenance:
+    """The record in the file *value* names; :class:`click.UsageError` if unusable."""
+    data = read_record_file(BASELINE_PROVENANCE_PATH, value, base_dir=base_dir)
     try:
         return BaselineProvenance.from_mapping(data)
     except BaselineProvenanceError as exc:
-        raise click.UsageError(f"{BASELINE_PROVENANCE_PATH}: {path}: {exc}") from None
+        raise click.UsageError(f"{BASELINE_PROVENANCE_PATH}: {value}: {exc}") from None
 
 
 @contextmanager
@@ -107,8 +122,9 @@ def enter_baseline_provenance(
     value = getattr(project_cfg, "report_baseline_provenance", None)
     if not value:
         return
-    from_set = BASELINE_PROVENANCE_PATH in (config_overrides or {})
-    base_dir = None if from_set or cfg_path is None else cfg_path.parent
+    base_dir = record_base_dir(
+        BASELINE_PROVENANCE_PATH, cfg_path=cfg_path, config_overrides=config_overrides
+    )
     record = load_baseline_provenance(str(value), base_dir=base_dir)
     ctx.with_resource(_provenance_scope(record))
 
