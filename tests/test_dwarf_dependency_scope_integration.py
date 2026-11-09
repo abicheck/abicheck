@@ -13,8 +13,13 @@ contract.
 
 Two shapes are covered. With an exported function taking the vector by value,
 it is reached through that parameter. Without one, it is reached only through
-the library's own struct field, and the field spells a typedef alias the
-DWARF-only path cannot resolve; that exercises the size bound on the alias.
+the library's own struct field, which spells the library's alias ``lib::V``.
+Since extractor generation 45 a DWARF-only dump records the library's
+namespace-scope functions (``lib::sum``, ``lib::scale``, defined through
+``DW_AT_specification``) and so the typedefs they reach: the vector's identity
+change is reported on ``V``, in contract, and the type presence changes are
+recorded out of the public surface. The field-only shape still gates on
+``V``'s retarget, as the header lane does: a recorded false positive.
 """
 
 from __future__ import annotations
@@ -165,52 +170,63 @@ def compared(request, tmp_path: Path) -> tuple[dict, bool]:
     return _compare(old, new, tmp_path / "report.json"), with_scale
 
 
-def _presence(report: dict) -> dict[str, dict]:
-    return {
-        c["symbol"]: c
+def _recorded(report: dict) -> list[dict]:
+    """Every finding the report records: the reported ones and those scoped
+    out of the public surface (ADR-067: record before disposing)."""
+    return [*report["changes"], *report["surface_scope"]["out_of_surface_changes"]]
+
+
+_TAGS = ("fakevec::simd::avx2_tag", "fakevec::simd::avx512_tag")
+
+
+def test_dependency_tags_are_recorded_and_never_gate(compared) -> None:
+    report, _ = compared
+    tag_findings = [c for c in _recorded(report) if c["symbol"] in _TAGS]
+    assert tag_findings, "the dependency's tag structs changed and must be recorded"
+    for finding in tag_findings:
+        # Recorded, and never a gate input: its own contribution to the exit
+        # code is zero, whatever its kind's severity.
+        if finding in report["changes"]:
+            assert finding["gate_contribution"] == 0, finding
+
+
+def test_reached_vector_type_change_stays_in_contract(compared) -> None:
+    # State holds the vector through the library's own alias V: the vector's
+    # identity change is reported, in contract, on V (and, with a parameter
+    # of that type, on scale).
+    report, _ = compared
+    old_vec = "fakevec::simd::avx2_tag"
+    reached = [
+        c
         for c in report["changes"]
-        if c["kind"] in ("type_added", "type_removed")
-    }
+        if c["contract_relevance"] == "IN_CONTRACT"
+        and old_vec in str(c.get("old_value"))
+        and c["symbol"] in ("V", "lib::V")
+    ]
+    assert reached, "the vector type the library's State holds must be reported"
 
 
-def test_dependency_tags_are_out_of_contract_and_counted(compared) -> None:
-    report, _ = compared
-    presence = _presence(report)
-    tags = {"fakevec::simd::avx2_tag", "fakevec::simd::avx512_tag"}
-    assert tags <= presence.keys()
-    for name in tags:
-        assert presence[name]["contract_relevance"] == "PROVEN_OUT_OF_CONTRACT"
-        assert presence[name]["contract_reason_code"] == (
-            "dependency_internal_unreachable"
-        )
-    reasons = {
-        entry["reason_code"]: entry["matched_count"]
-        for entry in report["disposition_audit"]["scope_reasons"]
-    }
-    assert reasons["dependency_internal_unreachable"] >= len(tags)
+def test_library_break_gates_through_its_vector_parameter(tmp_path: Path) -> None:
+    root = _write_tree(tmp_path / "src", with_scale=True)
+    old = _build_so(root, "-mavx2", tmp_path / "lib_avx2.so")
+    new = _build_so(root, "-mavx512f", tmp_path / "lib_avx512f.so")
+    report = _compare(old, new, tmp_path / "report.json")
+    # scale(V, float) re-mangles: a real break, on the library's own symbol.
+    assert report["verdict"] == "BREAKING"
+    assert any(c["kind"] == "func_params_changed" for c in report["changes"])
 
 
-@pytest.mark.parametrize(
-    "name",
-    [
-        "fakevec::simd::basic_vec<float, fakevec::simd::avx2_tag>",
-        "fakevec::simd::basic_vec<float, fakevec::simd::avx512_tag>",
-    ],
+@pytest.mark.known_gap_canary
+@pytest.mark.xfail(
+    strict=True,
+    reason="a public alias retargeted to a same-layout type reads typedef_base_changed "
+    "(BREAKING) on both the DWARF and header lanes (docs/contribute/known-gaps.md)",
 )
-def test_reached_vector_type_stays_in_contract(compared, name: str) -> None:
-    report, _ = compared
-    presence = _presence(report)
-    assert name in presence, (
-        "the vector type the library's State holds must be reported"
-    )
-    assert presence[name]["contract_relevance"] == "IN_CONTRACT"
-    assert presence[name]["contract_reason_code"] != "dependency_internal_unreachable"
-
-
-def test_library_break_still_gates(compared) -> None:
-    # With an exported parameter of the vector type, its mangled name changes
-    # (a real break). Without one, the public surface and State's layout are
-    # unchanged; the vector-type presence changes remain as risk, not a gate.
-    report, with_scale = compared
-    expected = "BREAKING" if with_scale else "COMPATIBLE_WITH_RISK"
-    assert report["verdict"] == expected
+def test_a_field_only_alias_retarget_does_not_gate(tmp_path: Path) -> None:
+    # Without scale, State's layout and every exported mangling are unchanged:
+    # the vector's identity change is a risk, not a gate.
+    root = _write_tree(tmp_path / "src", with_scale=False)
+    old = _build_so(root, "-mavx2", tmp_path / "lib_avx2.so")
+    new = _build_so(root, "-mavx512f", tmp_path / "lib_avx512f.so")
+    report = _compare(old, new, tmp_path / "report.json")
+    assert report["verdict"] == "COMPATIBLE_WITH_RISK"

@@ -27,10 +27,12 @@ from __future__ import annotations
 from ..model.change import Change
 from ..model.snapshot import AbiSnapshot
 from ..policy.generation_drift_demotion import (
+    demote_erased_extent_drift,
     demote_generation_spelling_drift,
     demote_restrict_depth_drift,
 )
 from ..storage.generation_migrations import (
+    erased_extents_restored_between,
     extractor_generation_of,
     pending_extent_shift,
 )
@@ -81,6 +83,14 @@ def demote_cross_generation_drift(
             _extent_generation(old, old_generation),
             _extent_generation(new, new_generation),
         ),
+    )
+    changes = demote_erased_extent_drift(
+        changes,
+        old,
+        new,
+        old_generation,
+        new_generation,
+        restored=erased_extents_restored_between(old_generation, new_generation),
     )
     return demote_restrict_depth_drift(
         changes, old, new, old_generation, new_generation

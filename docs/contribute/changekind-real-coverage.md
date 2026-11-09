@@ -17,7 +17,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 
 - Total kinds: **426**
 - Kinds with at least one real source: **182**
-- Kinds per source: catalog 160, field_shapes 9, integration 61
+- Kinds per source: catalog 160, field_shapes 9, integration 62
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
@@ -94,7 +94,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `func_added_elf_only` | COMPATIBLE | 0 | 0 | 0 |
 | `func_export_added` | COMPATIBLE | 2 | 0 | 0 |
 | `func_language_linkage_changed` | BREAKING | 1 | 0 | 0 |
-| `func_removed` | BREAKING | 15 | 1 | 20 |
+| `func_removed` | BREAKING | 15 | 1 | 21 |
 | `func_removed_elf_only` | BREAKING | 5 | 0 | 6 |
 | `func_visibility_changed` | BREAKING | 2 | 0 | 2 |
 | `func_visibility_protected_changed` | RISK | 1 | 0 | 0 |
@@ -217,7 +217,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `func_return_changed` | BREAKING | 5 | 0 | 6 |
 | `func_static_changed` | BREAKING | 1 | 0 | 0 |
 | `func_virtual_added` | BREAKING | 1 | 0 | 0 |
-| `func_virtual_became_pure` | BREAKING | 1 | 0 | 0 |
+| `func_virtual_became_pure` | BREAKING | 1 | 0 | 1 |
 | `graph_coverage_insufficient_for_suppression` | COMPATIBLE | 0 | 0 | 0 |
 | `integer_model_changed` | BREAKING | 1 | 0 | 0 |
 | `param_pointer_level_changed` | BREAKING | 1 | 0 | 0 |
@@ -238,7 +238,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `type_field_added` | BREAKING | 2 | 0 | 0 |
 | `type_field_added_compatible` | COMPATIBLE | 1 | 0 | 1 |
 | `type_field_offset_changed` | BREAKING | 6 | 0 | 2 |
-| `type_field_type_changed` | BREAKING | 3 | 0 | 4 |
+| `type_field_type_changed` | BREAKING | 3 | 0 | 5 |
 | `type_kind_changed` | BREAKING | 1 | 0 | 0 |
 | `type_removed` | API_BREAK | 5 | 1 | 3 |
 | `type_size_changed` | BREAKING | 19 | 1 | 4 |
