@@ -227,6 +227,16 @@ CI's `pr` profile.
   tests/test_abi_edit_corpus_matrix.py -m edit_corpus_nightly`
   (`ABICHECK_EDIT_CORPUS_SEED`, `ABICHECK_EDIT_CORPUS_SHARD=K/N`); a failing
   cell prints a minimized, ready-to-paste regression test.
+  A `Config` is one library *build* (`build_id`: standard, producer, flags,
+  evidence — built and compared once) plus `consumers` (toolchain, standard,
+  flags each); the oracle reports every (build, consumer) pair, and a mix
+  that cannot work (libstdc++ vs libc++, the dual ABI, a standard the edited
+  header needs) is an explicit `infeasible` pair, never a pass. Restrict
+  either role with `ABICHECK_EDIT_CORPUS_TOOLCHAIN` /
+  `ABICHECK_EDIT_CORPUS_CONSUMER_TOOLCHAIN` (or `--edit-corpus-toolchain` /
+  `--edit-corpus-consumer-toolchain`; e.g. `gcc-13` and
+  `gcc-14,clang-18,clang-19`); an uninstalled name fails the run.
+  `python -m tests._edit_corpus_report RESULTS_DIR` summarizes the pairs.
 
 ## Field-shapes corpus (`field_shapes/`)
 

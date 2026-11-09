@@ -47,6 +47,7 @@ from tests._edit_corpus_config import (
     STANDARD_BY_NAME,
     STANDARDS,
     Config,
+    Consumer,
     Flags,
     Toolchain,
     default_config,
@@ -64,7 +65,15 @@ from tests._edit_corpus_expect import (
 from tests._edit_corpus_known import KNOWN, known_mismatch
 from tests._edit_corpus_operators import OP_BY_NAME, OPERATORS, matrix
 from tests._edit_corpus_seeds import C_SEED, SEED_BY_NAME
-from tests._edit_corpus_tiers import _PR, Cell, pairwise, pr_cells, uncovered_pairs
+from tests._edit_corpus_tiers import (
+    _PR,
+    Cell,
+    pairwise,
+    pr_cells,
+    pr_consumer_cells,
+    pr_consumer_ids,
+    uncovered_pairs,
+)
 
 GCC = Toolchain("gcc", 13, "gcc", "g++")
 CLANG = Toolchain("clang", 18, "clang", "clang++")
@@ -150,15 +159,21 @@ def test_config_ids_are_unique_across_axes() -> None:
         )
         for s in (STANDARD_BY_NAME["c89"], STANDARD_BY_NAME["c23"])
     ]
-    configs.append(_cfg(consumer=CLANG))
+    configs.append(_cfg(consumers=(Consumer(toolchain=CLANG),)))
+    configs.append(_cfg(consumers=(Consumer(), Consumer(toolchain=CLANG))))
+    configs.append(
+        _cfg(consumers=(Consumer(toolchain=CLANG, std=STANDARD_BY_NAME["c89"]),))
+    )
     ids = [c.id for c in configs]
     assert len(ids) == len(set(ids))
 
 
 def test_a_clang_consumer_drops_the_gcc_only_abi_version() -> None:
-    c = _cfg(flags=Flags(abi_version=11), consumer=CLANG)
-    assert c.consumer_fl.abi_version is None
-    assert _cfg(flags=Flags(abi_version=11)).consumer_fl.abi_version == 11
+    c = _cfg(flags=Flags(abi_version=11), consumers=(Consumer(toolchain=CLANG),))
+    assert [u.flags.abi_version for u in c.consumer_set] == [None]
+    assert [
+        u.flags.abi_version for u in _cfg(flags=Flags(abi_version=11)).consumer_set
+    ] == [11]
 
 
 # --- fast: operators' config-dependent expectations -------------------------
@@ -461,17 +476,21 @@ def test_shrink_steps_move_one_axis_towards_the_default() -> None:
         flags=Flags(opt="O2", short_enums=True, pack=1),
         evidence="binary",
         std=STANDARD_BY_NAME["c89"],
-        consumer=CLANG,
+        consumers=(Consumer(), Consumer(toolchain=CLANG)),
     )
     steps = dict(_shrink_steps(c))
     assert set(steps) == {
         "flags.opt",
         "flags.short_enums",
         "flags.pack",
-        "consumer",
+        "consumers",
+        "consumers[0]",
+        "consumers[1]",
         "std",
         "evidence",
     }
+    assert steps["consumers"].consumers == ()
+    assert steps["consumers[0]"].consumers == (Consumer(toolchain=CLANG),)
     assert steps["flags.pack"].flags == Flags(opt="O2", short_enums=True)
     assert steps["evidence"].evidence == "headers"
     assert _shrink_steps(_cfg()) == []
@@ -504,7 +523,14 @@ def test_regression_printer_emits_valid_python_naming_the_cell() -> None:
     cell = CellResult(
         "enum_append_wide_value",
         "c_core",
-        _cfg(flags=Flags(short_enums=True), evidence="dwarf"),
+        _cfg(
+            flags=Flags(short_enums=True),
+            evidence="dwarf",
+            consumers=(
+                Consumer(),
+                Consumer(toolchain=CLANG, std=STANDARD_BY_NAME["c89"]),
+            ),
+        ),
         "ran",
         verdict="COMPATIBLE",
         reconciled=Reconciled(
@@ -526,6 +552,10 @@ def test_regression_printer_emits_valid_python_naming_the_cell() -> None:
     assert used - imported <= {"tmp_path", "config", "cell"}
     assert 'OP_BY_NAME["enum_append_wide_value"]' in text
     assert "Flags(short_enums=True)" in text and 'evidence="dwarf"' in text
+    assert (
+        'Consumer(toolchain=toolchain("clang", 18), std=STANDARD_BY_NAME["c89"])'
+        in text
+    )
 
 
 # --- fast: probes, tiers, known mismatches -----------------------------------
@@ -754,6 +784,7 @@ def check_cell(cell: Cell, ctx: CellContext) -> None:
 
 def _check_cell(cell: Cell, ctx: CellContext) -> None:
     result = run_cell(cell.op, cell.seed, cell.config, ctx)
+    _write_pairs(cell, result)
     if result.status != "ran":
         pytest.skip(f"{result.status}: {result.reason}")
     known = known_mismatch(cell.op.name, cell.seed.name, cell.config)
@@ -784,6 +815,15 @@ def _check_cell(cell: Cell, ctx: CellContext) -> None:
     pytest.fail(report)
 
 
+def _write_pairs(cell: Cell, result: CellResult) -> None:
+    """Keep every cell's per-(build, consumer) rows for the workflow's summary."""
+    from tests._edit_corpus_report import write_cell
+
+    out = os.environ.get("ABICHECK_EDIT_CORPUS_REPORT_DIR")
+    if out:
+        write_cell(Path(out).parent / "pairs", cell.id, result)
+
+
 def _write_report(cell: Cell, report: str) -> None:
     """Keep a failing cell's report for the scheduled workflow's artifact."""
     out = os.environ.get("ABICHECK_EDIT_CORPUS_REPORT_DIR")
@@ -799,6 +839,15 @@ def _write_report(cell: Cell, report: str) -> None:
 )
 def test_pr_tier_cell(index: int, cell_ctx: CellContext) -> None:
     cell = pr_cells()[index]
+    if not isinstance(cell, Cell):
+        pytest.skip(cell[1])
+    check_cell(cell, cell_ctx)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("index", range(len(pr_consumer_ids())), ids=pr_consumer_ids())
+def test_pr_tier_consumer_cell(index: int, cell_ctx: CellContext) -> None:
+    cell = pr_consumer_cells()[index]
     if not isinstance(cell, Cell):
         pytest.skip(cell[1])
     check_cell(cell, cell_ctx)

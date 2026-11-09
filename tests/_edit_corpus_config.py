@@ -8,7 +8,12 @@ parameter that can decide an edit's ABI outcome, as explicit axes:
   (``Flags``: -O level, symbol visibility, -m32/-m64, -fshort-enums,
   -fpack-struct, ``_GLIBCXX_USE_CXX11_ABI``, -fabi-version; MSVC renders the
   /O, /Zp and /vd analogues);
-- consumer toolchain and consumer flags (default: the producer's);
+- the *consumers* (``Consumer``): the toolchain, standard and flags each
+  client program of the execution oracle is compiled with. The producer side
+  (standard, producer toolchain, flags, evidence: ``Config.build_id``) builds
+  one library pair; every consumer of the tuple is checked against that same
+  pair, so a build is compiled once whatever the number of consumers.
+  Default: one consumer built like the library;
 - platform / object format (``host_platform``);
 - the evidence abicheck is given (``EVIDENCE``: binary only, +DWARF, +headers).
 
@@ -203,12 +208,39 @@ def host_platform() -> tuple[str, str]:
 
 
 @dataclass(frozen=True)
+class Consumer:
+    """How one client program of the execution oracle is compiled.
+
+    ``None`` fields take the build's value: the producer toolchain, the
+    build's standard, the build's flags (minus a gcc-only ``-fabi-version``
+    another family has no spelling for). ``Config.consumer_set`` resolves them.
+    """
+
+    toolchain: Toolchain | None = None
+    std: Standard | None = None
+    flags: Flags | None = None
+
+
+@dataclass(frozen=True)
+class ResolvedConsumer:
+    """A consumer with every axis concrete, checked against one library build."""
+
+    toolchain: Toolchain
+    std: Standard
+    flags: Flags
+
+    @property
+    def id(self) -> str:
+        return f"{self.toolchain.id}-{self.std.id}-{self.flags.id}"
+
+
+@dataclass(frozen=True)
 class Config:
     std: Standard
     producer: Toolchain
     flags: Flags = Flags()
-    consumer: Toolchain | None = None  # None = same as producer
-    consumer_flags: Flags | None = None  # None = same as producer flags
+    # Consumers checked against the one library pair; () = one built like it.
+    consumers: tuple[Consumer, ...] = ()
     evidence: str = "headers"
     platform: tuple[str, str] = field(default_factory=host_platform)
 
@@ -216,18 +248,22 @@ class Config:
     def lang(self) -> str:
         return self.std.lang
 
-    @property
-    def consumer_tc(self) -> Toolchain:
-        return self.consumer or self.producer
+    def resolve(self, consumer: Consumer) -> ResolvedConsumer:
+        tc = consumer.toolchain or self.producer
+        if consumer.flags is not None:
+            fl = consumer.flags
+        elif tc.family != "gcc" and self.flags.abi_version is not None:
+            # -fabi-version has no other-family spelling: that consumer uses its default.
+            fl = replace(self.flags, abi_version=None)
+        else:
+            fl = self.flags
+        return ResolvedConsumer(tc, consumer.std or self.std, fl)
 
     @property
-    def consumer_fl(self) -> Flags:
-        if self.consumer_flags is not None:
-            return self.consumer_flags
-        if self.consumer_tc.family != "gcc" and self.flags.abi_version is not None:
-            # -fabi-version has no other-family spelling: that consumer uses its default.
-            return replace(self.flags, abi_version=None)
-        return self.flags
+    def consumer_set(self) -> tuple[ResolvedConsumer, ...]:
+        """Every consumer, resolved, in order, without duplicates."""
+        specs = self.consumers or (Consumer(),)
+        return tuple(dict.fromkeys(self.resolve(c) for c in specs))
 
     @property
     def objfmt(self) -> str:
@@ -237,12 +273,29 @@ class Config:
         return has_feature(self.std, feature)
 
     @property
+    def build_id(self) -> str:
+        """The library pair: everything that decides what is built and dumped.
+
+        abicheck's answer and the operator's expectation depend on this alone;
+        consumers only decide what the execution oracle runs.
+        """
+        return "-".join([self.std.id, self.producer.id, self.flags.id, self.evidence])
+
+    def consumer_label(self, c: ResolvedConsumer) -> str:
+        """*c* relative to the build: ``self``, or the axes that differ."""
+        parts = [c.toolchain.id if c.toolchain != self.producer else "self"]
+        if c.std != self.std:
+            parts.append(f"@{c.std.id}")
+        if c.flags != self.resolve(Consumer(toolchain=c.toolchain)).flags:
+            parts.append(f"~{c.flags.id}")
+        return "".join(parts)
+
+    @property
     def id(self) -> str:
         parts = [self.std.id, self.producer.id, self.flags.id]
-        if self.consumer is not None and self.consumer != self.producer:
-            parts.append(f"use-{self.consumer.id}")
-        if self.consumer_flags is not None and self.consumer_flags != self.flags:
-            parts.append(f"useflags-{self.consumer_flags.id}")
+        resolved = self.consumer_set
+        if resolved != (self.resolve(Consumer()),):
+            parts.append("use-" + ",".join(self.consumer_label(c) for c in resolved))
         parts.append(self.evidence)
         return "-".join(parts)
 
