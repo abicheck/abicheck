@@ -14,6 +14,7 @@ floor) is smoke-only: it must stay in the ``smoke`` matrix, not ``full-suite``.
 from __future__ import annotations
 
 import re
+import shlex
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -100,6 +101,17 @@ def _suite_step(job: dict[str, Any]) -> dict[str, Any]:
     return next(s for s in job["steps"] if "--shard" in str(s.get("run", "")))
 
 
+def _active_suite_command(run: str) -> list[str]:
+    """The shard's pytest invocation as the shell runs it: comment lines
+    dropped, ``\\``-continuations joined, split into argv by ``shlex``. An
+    option that only appears in a comment, or on a different command, is not
+    in it."""
+    lines = [ln for ln in run.splitlines() if not ln.lstrip().startswith("#")]
+    joined = re.sub(r"\\\n", " ", "\n".join(lines))
+    (command,) = [c for c in joined.splitlines() if "pytest tests/" in c]
+    return shlex.split(command)
+
+
 def _minutes(spec: str) -> float:
     m = re.fullmatch(r"(\d+)([smh]?)", spec)
     assert m, spec
@@ -122,10 +134,15 @@ def test_a_hang_is_diagnosed_inside_the_job_budget(name: str) -> None:
     per_test = tomllib.loads((_ROOT / "pyproject.toml").read_text())["tool"]["pytest"][
         "ini_options"
     ]["timeout"]
-    dump = re.search(r"-o faulthandler_timeout=(\d+)", run)
-    assert dump and 0 < int(dump.group(1)) < per_test, run
+    argv = _active_suite_command(run)
+    options = [argv[i + 1] for i, tok in enumerate(argv[:-1]) if tok == "-o"]
+    dump = [o for o in options if o.startswith("faulthandler_timeout=")]
+    assert len(dump) == 1, argv
+    assert 0 < int(dump[0].split("=", 1)[1]) < per_test, argv
     # The signal method cannot interrupt a main thread stuck in C code.
-    assert "-o timeout_method=thread" in run
+    assert "timeout_method=thread" in options, argv
+    # The watchdog wraps the pytest command itself, not a sibling command.
+    assert argv[:2] == ["timeout", "--signal=ABRT"], argv
     watchdog = re.search(
         r"timeout --signal=ABRT --kill-after=(\d+[smh]?) (\d+[smh]?) ", run
     )
