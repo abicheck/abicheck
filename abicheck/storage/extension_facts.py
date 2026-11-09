@@ -222,7 +222,8 @@ def sync_model_extension_facts(snap: Any) -> None:
     census = getattr(snap, "cu_stack_protector", None)
     if isinstance(census, dict) and census:
         write_extension_fact(snap, CU_STACK_PROTECTOR, census)
-    elif census is None:
+    elif not census:
+        # None or {}: no unit is claimed, so a stale stored census must go.
         _drop_extension_fact(snap, CU_STACK_PROTECTOR)
 
 

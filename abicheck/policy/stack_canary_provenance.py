@@ -25,14 +25,16 @@ The per-unit census (``AbiSnapshot.cu_stack_protector``, read from each
 CU's ``DW_AT_producer``) decides, through
 :func:`~abicheck.model.stack_protector.compare_stack_protector`:
 
-* ``unchanged`` -- every unit on both sides records its setting, every new
-  unit is protected, and the weakest setting did not drop: the finding is
+* ``unchanged`` -- every unit on both sides records its setting, and every
+  new unit is protected and at least as strong as the strongest old unit
+  (units are not matched across builds): the finding is
   demoted to ``COMPATIBLE`` with rule :data:`PROTECTOR_UNCHANGED_RULE`
   (ADR-067: annotated, never removed);
-* ``weakened`` / ``partial`` -- the RISK stands, and ``review_evidence``
-  names the recorded settings;
+* ``weakened`` / ``partial`` / ``mixed`` -- the RISK stands, and
+  ``review_evidence`` names the recorded settings;
 * ``unknown`` -- no census on a side (no DWARF read: binary-only, stripped,
-  an older snapshot) or a unit with no recorded setting: the RISK stands as
+  an older snapshot), a unit with no recorded setting, or exported code no
+  unit describes (an object linked without debug info): the RISK stands as
   before, with ``confidence`` lowered and ``review_evidence`` saying the flag
   could not be checked.
 """
@@ -54,8 +56,9 @@ __all__ = [
 
 PROTECTOR_UNCHANGED_RULE = "stack-protector-unchanged-in-every-unit"
 PROTECTOR_UNCHANGED_REASON = (
-    "every compilation unit on both sides records a stack protector that is "
-    "still on and no weaker; no frame needs a canary any more"
+    "every compilation unit on both sides records a stack protector, every "
+    "exported function lies in one of them, and no new unit is weaker than "
+    "any old one; no frame needs a canary any more"
 )
 
 _NOTES: dict[StackProtectorTransition, str] = {
@@ -64,6 +67,10 @@ _NOTES: dict[StackProtectorTransition, str] = {
     ),
     StackProtectorTransition.PARTIAL: (
         "a new compilation unit is built without a stack protector"
+    ),
+    StackProtectorTransition.MIXED: (
+        "the builds mix stack-protector settings across units, and units are "
+        "not matched across builds, so one unit's weakening cannot be ruled out"
     ),
     StackProtectorTransition.UNKNOWN: (
         "weaker evidence: no per-unit compile flags were recorded on both "

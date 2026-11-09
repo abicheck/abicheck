@@ -79,7 +79,9 @@ def test_a_producer_without_a_protector_switch_is_unrecorded(producer) -> None:
     assert level_from_producer(producer).value == "unrecorded"
 
 
-def test_census_counts_compiled_units_and_skips_assembler_units() -> None:
+def test_census_counts_compiled_and_unreadable_units_and_skips_assembler_units() -> (
+    None
+):
     units = [
         ("GNU C17 13.3.0 -O2 -fstack-protector-strong", 0x1D),
         ("GNU C17 13.3.0 -O2 -fstack-protector-strong", 0x1D),
@@ -87,11 +89,25 @@ def test_census_counts_compiled_units_and_skips_assembler_units() -> None:
         ("clang version 18.1.3", 0x8001),  # clang's integrated assembler unit
         ("clang version 18.1.3", 0x21),
         ("GNU C17 13.3.0 -fno-stack-protector", None),
-        (None, None),
+        (None, None),  # a unit whose top DIE could not be read
     ]
-    assert stack_protector_census(units) == {"none": 1, "strong": 2, "unrecorded": 1}
-    assert stack_protector_census([("GNU AS 2.42", 0x8001), (None, None)]) is None
+    assert stack_protector_census(units) == {"none": 1, "strong": 2, "unrecorded": 2}
+    assert stack_protector_census([("GNU AS 2.42", 0x8001), (None, None)]) == {
+        "unrecorded": 1
+    }
+    assert stack_protector_census([("GNU AS 2.42", 0x8001)]) is None
     assert stack_protector_census([]) is None
+
+
+@pytest.mark.parametrize("outside", [False, True])
+def test_code_no_unit_describes_is_an_unrecorded_unit(outside: bool) -> None:
+    units = [("GNU C17 13.3.0 -fstack-protector-strong", 0x1D)]
+    census = stack_protector_census(units, code_outside_units=outside)
+    expected = {"strong": 1, "unrecorded": 1} if outside else {"strong": 1}
+    assert census == expected
+    unchanged = compare_stack_protector({"strong": 1}, census)
+    assert unchanged.value == ("unknown" if outside else "unchanged")
+    assert stack_protector_census([], code_outside_units=True) is None
 
 
 def _worlds(levels: frozenset[str]):
@@ -113,11 +129,13 @@ def _oracle(old: frozenset[str] | None, new: frozenset[str] | None) -> str:
         return "weakened"
     if all(n - _PROTECTED for _o, n in pairs):
         return "partial"
-    if "unrecorded" not in old | new and all(
-        n <= _PROTECTED and min(map(rank, n)) >= min(map(rank, o)) for o, n in pairs
-    ):
+    if "unrecorded" in old | new:
+        return "unknown"
+    # Units are not matched across builds: any old unit may be any new one, so
+    # "no unit weakened" must hold for every (old unit, new unit) pairing.
+    if all(rank(nu) >= rank(ou) for ou in old for nu in new):
         return "unchanged"
-    return "unknown"
+    return "mixed"
 
 
 _LEVELS = [*_ORDER, "unrecorded"]
@@ -158,6 +176,9 @@ def _snap(census: dict[str, int] | None) -> AbiSnapshot:
     [
         ({"strong": 3}, {"strong": 3}, True, Confidence.HIGH),
         ({"basic": 1}, {"strong": 1, "all": 1}, True, Confidence.HIGH),
+        # One unit could have dropped strong -> basic while another stayed basic.
+        ({"strong": 1, "basic": 1}, {"basic": 2}, False, Confidence.HIGH),
+        ({"strong": 1, "basic": 1}, {"strong": 1, "basic": 1}, False, Confidence.HIGH),
         ({"all": 2}, {"strong": 2}, False, Confidence.HIGH),
         ({"all": 1}, {"none": 1}, False, Confidence.HIGH),
         ({"strong": 1}, {"strong": 1, "explicit": 1}, False, Confidence.HIGH),

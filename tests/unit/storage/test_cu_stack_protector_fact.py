@@ -48,12 +48,13 @@ def test_census_round_trips(tmp_path: Path, census: dict[str, int]) -> None:
     assert "cu_stack_protector" not in json.loads(path.read_text()).get("sections", {})
 
 
-def test_a_reset_census_is_not_resaved(tmp_path: Path) -> None:
+@pytest.mark.parametrize("reset", [None, {}])
+def test_a_reset_census_is_not_resaved(tmp_path: Path, reset: object) -> None:
     snap = AbiSnapshot(library="l", version="1", cu_stack_protector={"strong": 1})
     first = tmp_path / "a.json"
     save_snapshot(snap, first)
     loaded = load_snapshot(first)
-    loaded.cu_stack_protector = None
+    loaded.cu_stack_protector = reset  # type: ignore[assignment]
     second = tmp_path / "b.json"
     save_snapshot(loaded, second)
     assert load_snapshot(second).cu_stack_protector is None

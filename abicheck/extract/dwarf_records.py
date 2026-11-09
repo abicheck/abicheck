@@ -29,15 +29,18 @@ from typing import Any
 
 from ..dwarf_utils import (
     attr_bool as _attr_bool,
+    attr_int as _attr_int,
     attr_str as _attr_str,
     decode_member_location as _decode_member_location,
     resolve_die_ref as _resolve_die_ref,
     resolve_type_die as _resolve_type_die,
 )
 from ..model import AccessLevel, Visibility
+from ..model.fact import Fact
 
 __all__ = [
     "access_from_dwarf",
+    "backfill_variable_alignment",
     "default_member_access_for_tag",
     "format_qualified_type_name",
     "local_vptr_member_offset_bits",
@@ -228,3 +231,24 @@ def admit_subprogram(
     if is_deleted or is_exported:
         return Visibility.PUBLIC
     return Visibility.HIDDEN if is_external else None
+
+
+def backfill_variable_alignment(variables: list[Any], mangled: str, die: Any) -> None:
+    """Carry a later DIE's ``DW_AT_alignment`` onto the already-recorded
+    variable *mangled* when that one recorded none.
+
+    A unit that only references ``extern int g;`` is often walked before the
+    unit defining ``_Alignas(16) int g``; the first DIE wins the de-duplication,
+    so without this the declared alignment would be lost. Only a DIE that
+    carries the attribute triggers the lookup, so the common duplicate costs
+    nothing. A recorded alignment is never overwritten.
+    """
+    align = _attr_int(die, "DW_AT_alignment")
+    if align <= 0:
+        return
+    for var in variables:
+        if var.mangled == mangled:
+            if var.alignment_bits is None:
+                var.alignment_bits = align * 8
+                var.alignment_bits_fact = Fact.present(align * 8)
+            return

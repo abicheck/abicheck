@@ -38,6 +38,7 @@ The ``_GLIBCXX_USE_CXX11_ABI=0`` rebuild under headers is refused as
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -206,18 +207,26 @@ def test_dual_abi_rebuild_refusal_names_the_macro(tmp_path):
     assert compare(bin_old, bin_new).verdict is Verdict.BREAKING
 
 
+#: What a gcc without the 32-bit multilib runtime prints; any other failure of
+#: the probe is a real compiler failure, not a missing capability.
+_NO_MULTILIB = re.compile(
+    r"cannot find (crt\w*\.o|-lgcc|-lgcc_s|-lc)|skipping incompatible|gnu/stubs-32\.h"
+)
+
+
 def _require_m32() -> None:
+    cmd = ["gcc", "-m32", "-shared", "-fPIC", "-x", "c", "-", "-o", "/dev/null"]
+    source = "int x;\n"
     probe = subprocess.run(
-        ["gcc", "-m32", "-shared", "-fPIC", "-x", "c", "-", "-o", "/dev/null"],
-        input="int x;\n",
-        capture_output=True,
-        text=True,
-        check=False,
+        cmd, input=source, capture_output=True, text=True, check=False
     )
-    if probe.returncode != 0:
+    if probe.returncode == 0:
+        return
+    if _NO_MULTILIB.search(probe.stderr):
         pytest.skip(
             f"gcc -m32 cannot link (gcc-multilib missing): {probe.stderr[-200:]}"
         )
+    pytest.fail(f"gcc -m32 probe failed: {cmd}\nsource: {source!r}\n{probe.stderr}")
 
 
 @pytest.mark.parametrize("evidence", _EVIDENCE)
@@ -477,3 +486,84 @@ def test_headerless_additive_change_keeps_placement_alignment_compatible(tmp_pat
     )
     assert doc["verdict"] == "COMPATIBLE"
     assert run.returncode == 0, run.stdout
+
+
+@pytest.mark.parametrize("cc", ["gcc", "clang"])
+def test_an_object_linked_without_debug_info_keeps_the_canary_risk(tmp_path, cc):
+    """A unit built without ``-g`` has no producer to record: its exported
+    function lies in no unit's code range, so the census cannot claim every
+    unit kept the protector, and the lost canary keeps its RISK. With every
+    object built ``-g`` the same rebuild is demoted (control)."""
+    _driver(cc)
+    record = ["-grecord-command-line"] if cc == "clang" else []
+    extra = "int other(int x) { return x * 7; }\n"
+    results = {}
+    for debug_both in (True, False):
+        snaps = []
+        for name, opt in (("old", "-O0"), ("new", "-O2")):
+            d = tmp_path / f"{name}-{debug_both}"
+            d.mkdir()
+            (d / "a.c").write_text(_CANARY_SOURCE)
+            (d / "b.c").write_text(extra)
+            objs = []
+            for src, debug in (("a.c", True), ("b.c", debug_both)):
+                obj = d / (src + ".o")
+                flags = ["-g", *record] if debug else []
+                cmd = [cc, opt, "-fstack-protector-strong", "-fPIC", *flags]
+                cmd += ["-c", str(d / src), "-o", str(obj)]
+                proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+                assert proc.returncode == 0, f"{cmd}\n{proc.stderr}"
+                objs.append(str(obj))
+            so = d / "lib.so"
+            cmd = [cc, "-shared", "-o", str(so), *objs]
+            proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            assert proc.returncode == 0, f"{cmd}\n{proc.stderr}"
+            snaps.append(dump(so, [], compiler="cc", lang="c"))
+        found = [
+            c for c in compare(*snaps).changes if c.kind.value == "stack_canary_removed"
+        ]
+        assert [c.kind.value for c in found] == ["stack_canary_removed"]
+        results[debug_both] = (snaps[1].cu_stack_protector, found[0])
+    census, finding = results[False]
+    assert census == {"strong": 1, "unrecorded": 1}
+    assert finding.effective_verdict is None
+    assert finding.review_evidence["stack_protector"] == "unknown"
+    census, finding = results[True]
+    assert census == {"strong": 2}
+    assert finding.modulation_rule == "stack-protector-unchanged-in-every-unit"
+
+
+@pytest.mark.parametrize("cc", ["gcc", "clang"])
+def test_an_alignas_defined_in_a_later_unit_survives_deduplication(tmp_path, cc):
+    """``DW_AT_alignment`` sits only in the unit that defines the object. gcc
+    also writes a declaration DIE, without it, in a unit that merely references
+    ``extern int g_data``; that DIE wins the de-duplication, and the
+    definition's alignment must still be recorded, so a dropped
+    ``_Alignas(16)`` keeps its RISK under DWARF."""
+    _driver(cc)
+    snaps = []
+    for name, spec in (("old", "_Alignas(16) "), ("new", "")):
+        d = tmp_path / name
+        d.mkdir()
+        (d / "use.c").write_text(
+            "extern int g_data;\nint get(void) { return g_data; }\n"
+        )
+        (d / "def.c").write_text(f"int pad = 2;\n{spec}int g_data = 1;\n")
+        so = d / "lib.so"
+        cmd = [cc, "-O0", "-g", "-shared", "-fPIC", "-o", str(so)]
+        cmd += [str(d / "use.c"), str(d / "def.c")]
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        assert proc.returncode == 0, f"{cmd}\n{proc.stderr}"
+        snaps.append(dump(so, [], compiler="cc", lang="c"))
+    old_var = snaps[0].var_by_mangled("g_data")
+    assert old_var is not None and old_var.alignment_bits == 128
+    new_sym = next(s for s in snaps[1].elf.symbols if s.name == "g_data")
+    if new_sym.value_alignment >= 16:
+        pytest.skip("the linker kept g_data 16-aligned; nothing was lost")
+    found = [
+        c
+        for c in compare(*snaps).changes
+        if c.kind.value == "exported_object_alignment_reduced" and c.symbol == "g_data"
+    ]
+    assert [c.kind.value for c in found] == ["exported_object_alignment_reduced"]
+    assert found[0].effective_verdict is None

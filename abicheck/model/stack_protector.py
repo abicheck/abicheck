@@ -101,17 +101,26 @@ def level_from_producer(producer: str | None) -> StackProtectorLevel:
 
 def stack_protector_census(
     units: Iterable[tuple[str | None, int | None]],
+    *,
+    code_outside_units: bool = False,
 ) -> dict[str, int] | None:
     """``{level: units}`` over *units* (``(DW_AT_producer, DW_AT_language)``
-    per CU); ``None`` when no compiled unit is present (nothing to say)."""
+    per CU); ``None`` when no unit is present (nothing to say).
+
+    A unit with neither attribute (its top DIE was unreadable) counts as
+    ``unrecorded``. *code_outside_units* says the binary holds code no unit
+    describes -- an object linked without debug info, or coverage that could
+    not be established -- which adds one ``unrecorded`` unit: its setting is
+    unknown, so the census cannot claim every unit is protected."""
     census: dict[str, int] = {}
     for producer, language in units:
-        if producer is None and language is None:
-            continue
         if _is_assembler_unit(producer, language):
             continue
         level = level_from_producer(producer).value
         census[level] = census.get(level, 0) + 1
+    if census and code_outside_units:
+        unrecorded = StackProtectorLevel.UNRECORDED.value
+        census[unrecorded] = census.get(unrecorded, 0) + 1
     return dict(sorted(census.items())) or None
 
 
@@ -119,7 +128,8 @@ class StackProtectorTransition(StrEnum):
     """What two censuses establish about the protector between two builds."""
 
     #: Every unit on both sides records its setting, every new unit is
-    #: protected, and the weakest setting did not drop.
+    #: protected, and every new unit is at least as strong as the strongest
+    #: old one -- so no unit can have weakened, however units correspond.
     UNCHANGED = "unchanged"
     #: Every old unit records its setting and a recorded new unit is weaker
     #: than the weakest of them.
@@ -127,6 +137,10 @@ class StackProtectorTransition(StrEnum):
     #: Not weakened, but a recorded new unit is built without a protector
     #: (``none``/``explicit``), so the flag is not on in every unit.
     PARTIAL = "partial"
+    #: Every unit records a protected setting, but the builds mix settings
+    #: (old ``strong`` and ``basic`` units, say). Units are not matched across
+    #: builds, so one unit dropping ``strong`` -> ``basic`` cannot be ruled out.
+    MIXED = "mixed"
     #: A side has no census, or a unit whose setting is not recorded.
     UNKNOWN = "unknown"
 
@@ -157,4 +171,6 @@ def compare_stack_protector(
         return StackProtectorTransition.PARTIAL
     if StackProtectorLevel.UNRECORDED in old_levels | new_levels:
         return StackProtectorTransition.UNKNOWN
+    if _weakest(new_known) < max(_RANK[level] for level in old_known):
+        return StackProtectorTransition.MIXED
     return StackProtectorTransition.UNCHANGED

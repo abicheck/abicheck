@@ -62,6 +62,7 @@ from .extract.dwarf_decl_file import decl_header_location
 from .extract.dwarf_records import (
     access_from_dwarf as _access_from_dwarf,
     admit_subprogram as _admit_subprogram,
+    backfill_variable_alignment as _backfill_variable_alignment,
     default_member_access_for_tag as _default_member_access_for_tag,
     format_qualified_type_name as _format_qualified_type_name,
     local_vptr_member_offset_bits as _local_vptr_member_offset_bits,
@@ -742,7 +743,6 @@ class _DwarfSnapshotBuilder:
         self, die: Any, CU: Any, scope: str, scope_path: ScopePath = ()
     ) -> None:
         """Extract a variable from DW_TAG_variable."""
-        # Only externally visible variables
         if not _attr_bool(die, "DW_AT_external"):
             return
 
@@ -760,7 +760,7 @@ class _DwarfSnapshotBuilder:
             return
 
         if mangled in self._seen_var_mangles:
-            return
+            return _backfill_variable_alignment(self.variables, mangled, die)
         self._seen_var_mangles.add(mangled)
 
         type_name, is_const = "?", False
