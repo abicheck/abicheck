@@ -19,6 +19,7 @@ tests/test_acknowledgment_twin_identity.py
 tests/test_action_accepted_breaks_notice.py
 tests/test_action_additions_verdict.py
 tests/test_action_delta_baseline.py
+tests/test_action_delta_baseline_report.py
 tests/test_action_pr_report_delivery.py
 tests/test_action_step_summary_no_adr.py
 tests/test_action_stored_bundle_facts_preflight.py
@@ -514,6 +515,7 @@ tests/test_render_output_unit.py
 tests/test_replay_twin_acknowledgment.py
 tests/test_report_baseline_provenance.py
 tests/test_report_change_view_entity_id.py
+tests/test_report_delta_baseline.py
 tests/test_report_filtering.py
 tests/test_report_format_bucket_parity.py
 tests/test_report_integrity.py
