@@ -55,7 +55,6 @@ from abicheck.workflows.release_scope import (
     build_stored_baseline_scope_record,
     bundle_analysis_members,
 )
-from tests._unconfirmed import passes_but_for_unconfirmed
 
 # ---------------------------------------------------------------------------
 # The release manifest is enforced over the retained members only (D2)
@@ -795,7 +794,7 @@ class TestNarrowingOutranksAnUnrelatedOldFailure:
         reason="--dso-only classifies ELF shared objects; MinGW/clang gcc build PE/Mach-O",
     )
     @pytest.mark.parametrize("policy", ["warn", "block"])
-    def test_dso_only_current_artifact_compare_exits_0(
+    def test_dso_only_current_artifact_compare_reads_complete_scope(
         self, tmp_path: Path, policy: str
     ) -> None:
         """OLD stored package: the real DSO's own dump plus a member
@@ -846,9 +845,18 @@ class TestNarrowingOutranksAnUnrelatedOldFailure:
         assert scope["unchecked"] == []
         assert doc["run_outcome"]["scope"] == "complete"
         assert doc["exit"]["incomplete_scope_contribution"] == 0
-        # Built without -g and compared without headers: the scope axis adds
-        # nothing, and ADR-090's UNCONFIRMED axis alone may raise 0 -> 1.
-        assert passes_but_for_unconfirmed(code, doc), doc["exit"]
+        # Built without -g and compared without headers, so neither side has
+        # type-level evidence. The stored side is a snapshot, which records no
+        # binary SHA-256, so D1(c) cannot prove the pair identical: the member's
+        # observed NO_CHANGE reads UNCONFIRMED for both sides (ADR-090), and
+        # that axis alone raises the run to exit 1.
+        (member,) = doc["libraries"]
+        assert member["verdict"] == "UNCONFIRMED", member
+        assert member["unconfirmed"]["observed_verdict"] == "NO_CHANGE"
+        assert member["unconfirmed"]["sides_without_type_evidence"] == ["old", "new"]
+        assert doc["verdict"] == "UNCONFIRMED"
+        assert doc["exit"]["reasons"] == ["unconfirmed_compatibility"], doc["exit"]
+        assert code == 1
 
 
 class TestStoredLiveDriverSurvivesAMemberExtractionFailure:

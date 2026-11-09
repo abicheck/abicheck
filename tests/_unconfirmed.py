@@ -1,31 +1,51 @@
-"""Helpers for tests whose fixture has no type-level evidence (ADR-090).
+"""The exact ADR-090 answer of a comparison whose observed verdict is a claim.
 
-Such a run's clean compatibility claim is reported ``UNCONFIRMED`` and exits
-1 through the ``unconfirmed_compatibility`` axis alone. A test about another
-axis (suppression, roll-ups, export-table reads, scope) asserts its own
-answer through these, so the UNCONFIRMED axis is checked, not ignored: the
-exit is 0, or exactly 1 from that one axis.
+A test about another axis (suppression, roll-ups, export-table reads) still
+knows, per cell, which compared sides carry type-level evidence (debug info or
+a header AST). From that it states the one answer ADR-090 allows:
+
+* no side lacks it: the report reads the observed verdict, carries no
+  ``unconfirmed`` block, and the run exits 0;
+* some side lacks it: the report reads ``UNCONFIRMED``, its ``unconfirmed``
+  block keeps the observed verdict and names exactly those sides, the exit
+  reason is ``unconfirmed_compatibility`` alone, and the run exits 1.
+
+There is no "0 or 1" branch: each cell's evidence decides which answer it is.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
-__all__ = ["observed_verdict", "passes_but_for_unconfirmed"]
+__all__ = ["assert_claim_outcome"]
 
 
-def observed_verdict(report: Mapping[str, Any]) -> str:
-    """The change-derived verdict, whether or not the run is UNCONFIRMED."""
-    block = report.get("unconfirmed") or {}
-    return str(block.get("observed_verdict", report["verdict"]))
+def assert_claim_outcome(
+    code: int,
+    report: Mapping[str, Any],
+    *,
+    observed: str,
+    lacking: Sequence[str],
+) -> None:
+    """Assert the exact answer for a run whose observed verdict is *observed*.
 
-
-def passes_but_for_unconfirmed(code: int, report: Mapping[str, Any] | None) -> bool:
-    """Exit 0, or exit 1 decided by the UNCONFIRMED axis and nothing else."""
-    if code == 0:
-        return True
-    if code != 1 or not report:
-        return False
-    exit_block = report.get("exit") or {}
-    return list(exit_block.get("reasons", ())) == ["unconfirmed_compatibility"]
+    *lacking* is the ordered list of compared sides (``"old"``, ``"new"``)
+    that carry no type-level evidence in this cell; empty when both do.
+    """
+    context = {
+        "code": code,
+        "verdict": report.get("verdict"),
+        "exit": report.get("exit"),
+    }
+    if not lacking:
+        assert report["verdict"] == observed, context
+        assert "unconfirmed" not in report, report.get("unconfirmed")
+        assert code == 0, context
+        return
+    block = report["unconfirmed"]
+    assert report["verdict"] == "UNCONFIRMED", context
+    assert block["observed_verdict"] == observed, block
+    assert block["sides_without_type_evidence"] == list(lacking), block
+    assert report["exit"]["reasons"] == ["unconfirmed_compatibility"], context
+    assert code == 1, context
