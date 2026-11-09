@@ -7,7 +7,7 @@
   such as a stripped pair compared without headers, used to report a clean
   result with exit `0` and `Gate: ACCEPTED`. The same pair unstripped reported
   `BREAKING`. Such a run now reads `UNCONFIRMED` in the JSON `verdict` and
-  `run_outcome.compatibility` (report schema 7.3, with a new `unconfirmed`
+  `run_outcome.compatibility` (report schema 7.4, with a new `unconfirmed`
   block keeping the observed verdict), in the terminal, Markdown and HTML
   headlines, in SARIF (a `warning` notification, with the axis folded into
   `exitCode`) and in JUnit (a failing suite). It also gets

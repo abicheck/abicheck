@@ -83,6 +83,11 @@ class DiffResult(ReportSideFacts):
     # Report schema 6.8: the caller-asserted `baseline_provenance` block
     # (`model/baseline_provenance.py`); None when the run was given none.
     baseline_provenance: dict[str, object] | None = None
+    # Report schema 7.3: the caller-asserted `delta_baseline` block
+    # (`report/delta_baseline.py`); None when the run was given none.
+    # Keyword-only so a positional caller written before it existed keeps
+    # binding `out_of_surface_changes` and the rest of the older tail.
+    delta_baseline: dict[str, object] | None = field(default=None, kw_only=True)
     # ADR-024: findings excluded because they are not on the public-header
     # ABI surface (only populated when scope_to_public_surface is enabled).
     # Recorded for audit — surfaced under --show-filtered — never dropped.

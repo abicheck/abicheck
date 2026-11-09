@@ -828,7 +828,7 @@ Every JSON report carries a top-level `report_schema_version` field
 
 ```json
 {
-  "report_schema_version": "7.3",
+  "report_schema_version": "7.4",
   "library": "libfoo.so.1",
   "verdict": "BREAKING"
 }
@@ -1113,6 +1113,56 @@ When the Action resolves a baseline, its own `--set` replaces any
 `report.baseline_provenance` written in `.abicheck.yml`, because `--set` beats
 the file. To pass a different file in an Action run, use the Action's `set:`
 input: its lines come after the Action's own `--set`, so they win.
+
+### Gate or delta comparison (`delta_baseline`)
+
+With `delta-baseline: main` the root GitHub Action compares the same new side
+twice: the **gate**, against the release baseline, whose verdict is the
+check's verdict and exit code; and the **delta**, against the default-branch
+snapshot of the commit the pull request was built on, which the PR comment
+shows ([main-snapshot reference](../reference/main-snapshot.md)). Both reports
+carry a top-level `delta_baseline` object (compare schema 7.3, release
+schema 3.1) saying which one they are:
+
+```json
+"delta_baseline": {
+  "asserted_by": "action",
+  "comparison_role": "delta",
+  "decides_exit_code": false,
+  "outcome": "resolved",
+  "base_sha": "4f2c...e1",
+  "branch": "main",
+  "gate_verdict": "BREAKING",
+  "operand_match": "loader_name"
+}
+```
+
+`comparison_role` is `gate` or `delta`, and `decides_exit_code` is `true`
+exactly for `gate`. `outcome` is the base-snapshot lookup's outcome (the
+Action's `delta-outcome` output), or `unsupported_operand` for a
+directory/package comparison; a `delta` report is always `resolved`.
+`base_sha` is the default-branch commit the delta is measured against (`null`
+when none was selected), `branch` the branch the snapshot came from, and
+`gate_verdict` -- on the `delta` report only -- the gate's verdict, so a
+reader of the delta report alone sees what the check decided. `operand_match`
+-- also on the `delta` report only -- says how the snapshot's library was
+paired with this PR's library (`declared`, `loader_name`,
+`loader_name_version`, `file_name`, `file_name_version`; the Action's
+`delta-operand-match` output). The delta report's own `verdict` describes this
+PR's changes and never gates. Outcomes decided only after the gate ran --
+`rerun_failed` and the operand-identity refusals (`operand_unmatched`,
+`operand_ambiguous`, `operand_map_invalid`, `operand_unreadable`) -- are never
+recorded: no delta comparison runs then, the gate's block keeps the lookup's
+outcome, and the PR comment states the final one.
+
+The block is informational: it never changes `verdict`, `severity` or any exit
+code, and it is absent when the run was given none. The Action passes it as
+`--set report.delta_baseline=@FILE` (a JSON object with `comparison_role`,
+`outcome`, `base_sha`, `branch`, `gate_verdict`); as with
+`baseline_provenance`, the CLI checks the shape and the two roles' rules, not
+the values, and refuses an unusable file with exit 64 before any analysis.
+`compare --no-baseline` and a comparison of a stored BundleFacts document
+refuse the key.
 
 ### `aggregate`'s own report shape
 

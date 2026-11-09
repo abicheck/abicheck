@@ -2387,6 +2387,68 @@ with open(out, "w", encoding="utf-8") as fh:
   CMD+=(--set "report.baseline_provenance=@${prov_file}")
 }
 
+# report.delta_baseline (compare report schema 7.3, release 3.1): which
+# comparison of a delta-baseline pair a report is. Writes the record for
+# role $1 (gate|delta) to a new file and prints its path; prints nothing
+# (with a warning) when the record would not validate, so a malformed delta
+# value can never turn the gate's run into a usage error. The values go
+# through Python and the report module's own validator, never shell text.
+_write_delta_record() {
+  local role="$1" outcome="$2" gate_verdict="${3:-}" operand_match="${4:-}" out
+  [[ -n "${_PY_BIN:-}" ]] || return 0
+  out=$(_mktemp_canonical "$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-delta-baseline.XXXXXX")")
+  if (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
+import json, sys
+from abicheck.report.delta_baseline import DeltaBaseline
+role, outcome, sha, branch, verdict, match, out = sys.argv[1:8]
+doc = {"comparison_role": role, "outcome": outcome, "base_sha": sha or None,
+       "branch": branch or None, "gate_verdict": verdict or None,
+       "operand_match": match or None}
+DeltaBaseline.from_mapping(doc)
+with open(out, "w", encoding="utf-8") as fh:
+    json.dump(doc, fh)
+' "$role" "$outcome" "${ABICHECK_DELTA_BASE_SHA:-}" "${ABICHECK_DELTA_BRANCH:-}" \
+      "$gate_verdict" "$operand_match" "$out") 2>/dev/null; then
+    printf '%s\n' "$out"
+  else
+    _warning_annotation "abicheck: could not record the delta-baseline $role block in the JSON report (outcome '$outcome'); the comparison itself is unaffected." >&2
+  fi
+}
+
+# The gate's record: added to the gate command whenever a delta base was
+# looked up, so the release comparison's own report says it is the gate and
+# what the lookup found. A directory/package comparison is recorded as
+# `unsupported_operand` (the same rule `_select_delta_report` applies).
+add_delta_baseline_flag() {
+  [[ -n "${ABICHECK_DELTA_OUTCOME:-}" && "${_NO_BASELINE:-}" != "true" ]] || return 0
+  local outcome="$ABICHECK_DELTA_OUTCOME" rec
+  if [[ "$outcome" == resolved ]] \
+     && { _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" || _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; }; then
+    outcome=unsupported_operand
+  fi
+  # A stored BundleFacts old side is compared by a route that refuses the
+  # key (it renders no such block yet): recording it there would turn the
+  # gate into a usage error, so that gate report goes without the block.
+  local old=""
+  [[ -n "${OLD_OPERAND_INDEX:-}" ]] && old="${CMD[$OLD_OPERAND_INDEX]:-}"
+  # Anchored here: the probe runs from $_PY_SAFE_DIR, where a relative
+  # operand would name a different (usually missing) file. The shared
+  # qualification rule keeps POSIX-absolute and, on Windows, drive/UNC forms.
+  [[ -n "$old" ]] && old=$(_mktemp_canonical "$old")
+  if [[ -n "$old" && -f "$old" ]] && (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
+import sys
+from pathlib import Path
+from abicheck.workflows.bundle_compare_operand import looks_like_stored_bundle_facts
+sys.exit(0 if looks_like_stored_bundle_facts(Path(sys.argv[1])) else 1)
+' "$old") 2>/dev/null; then
+    _notice_annotation "abicheck: the gate compares a stored BundleFacts baseline, whose report does not carry the delta_baseline block yet; the gate itself is unaffected."
+    return 0
+  fi
+  rec=$(_write_delta_record gate "$outcome")
+  [[ -n "$rec" ]] && CMD+=(--set "report.delta_baseline=@${rec}")
+  return 0
+}
+
 # "### Baseline source" step-summary block. Prints nothing when this run
 # compared against no release baseline (a no-baseline audit, or an
 # old-library given directly), so it never claims a source it did not use.
@@ -3450,6 +3512,7 @@ elif [[ "$MODE" == "compare" ]]; then
   # severity-preset is a core flag (--severity-preset, ADR-068): forwarded as-is.
   add_single_flag "--severity-preset" "${INPUT_SEVERITY_PRESET:-}"
   add_baseline_provenance_flag
+  add_delta_baseline_flag
   add_set_flags
   # --budget: time guard (e.g. 15m, 900s, 1h); the step FAILS on overflow
   # (exit 5) -- a budget never silently shrinks scope. Baseline shape only --
@@ -4376,7 +4439,7 @@ _unused_rules_gated() {
 # ADR-090's UNCONFIRMED axis: the compatibility claim rests on a compared
 # side with no type-level evidence (no debug info, no header AST), under the
 # default `assurance.unconfirmed: fail`. Reported as `exit.unconfirmed_contribution`
-# (report schema 7.3); a report without the key cannot say, which is "not gated".
+# (report schema 7.4); a report without the key cannot say, which is "not gated".
 _unconfirmed_gated() {
   local _src _contribution
   _src=$(_json_report_src)
@@ -5787,7 +5850,9 @@ _build_json_cmd() {
 # carries its own), rerun for JSON into $1. The step's exit code never comes
 # from here: this rerun only chooses what the PR comment shows.
 _run_delta_json() {
-  local out="$1" i tok saved_json="${PR_JSON:-}"
+  # $2: the operand-identity rule that paired the snapshot with new-library
+  # (recorded in the delta report's delta_baseline block).
+  local out="$1" match="${2:-}" i tok saved_json="${PR_JSON:-}"
   local -a saved=("${CMD[@]}") delta=()
   for ((i = 0; i < ${#CMD[@]}; i++)); do
     tok="${CMD[$i]}"
@@ -5808,7 +5873,9 @@ _run_delta_json() {
       --set)
         # The release baseline's provenance describes the gate's old side,
         # not the snapshot: a delta report must not claim it.
-        if [[ "${CMD[$((i + 1))]:-}" == report.baseline_provenance=* ]]; then
+        # The gate's own delta_baseline record is replaced by the delta's.
+        if [[ "${CMD[$((i + 1))]:-}" == report.baseline_provenance=* \
+              || "${CMD[$((i + 1))]:-}" == report.delta_baseline=* ]]; then
           i=$((i + 1))
           continue
         fi
@@ -5816,6 +5883,16 @@ _run_delta_json() {
     esac
     delta+=("$tok")
   done
+  local rec
+  rec=$(_write_delta_record delta resolved "${VERDICT:-}" "$match")
+  if [[ -n "$rec" ]]; then
+    delta+=(--set "report.delta_baseline=@${rec}")
+  else
+    # Clear any record a config file supplies, so the delta report can never
+    # carry a gate record it does not describe. `""` is YAML's empty string:
+    # the key reads as unset.
+    delta+=(--set 'report.delta_baseline=""')
+  fi
   CMD=("${delta[@]}")
   PR_JSON="$out"
   _build_json_cmd
@@ -5865,7 +5942,7 @@ _select_delta_report() {
   fi
   if [[ "$code" == resolved && -n "${ABICHECK_DELTA_SNAPSHOT:-}" && -n "${OLD_OPERAND_INDEX:-}" ]]; then
     delta_json=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-delta-json.XXXXXX")
-    if _run_delta_json "$delta_json"; then
+    if _run_delta_json "$delta_json" "$operand_match"; then
       PR_RENDER_JSON="$delta_json"
     else
       code=rerun_failed

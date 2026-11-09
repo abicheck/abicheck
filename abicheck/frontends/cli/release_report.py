@@ -136,6 +136,7 @@ def render_release_summary(
             excluded_header_patterns=excluded_header_patterns,
         )
     from .baseline_provenance import current_baseline_provenance_block
+    from .delta_baseline import current_delta_baseline_block
 
     evaluation = ReleaseEvaluation(
         worst_verdict=worst_verdict,
@@ -162,6 +163,7 @@ def render_release_summary(
         public_surface=public_surface,
         effective_config=effective_config,
         baseline_provenance=current_baseline_provenance_block(),
+        delta_baseline=current_delta_baseline_block(),
     )
     report = build_release_report(evaluation, show_only=show_only)
     return render_release_text(fmt, report, demangle=demangle)

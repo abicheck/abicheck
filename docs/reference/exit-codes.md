@@ -321,7 +321,7 @@ symbol keeps the same symbol and is invisible to it, so "no change" is not
 something that run can establish.
 
 - **Where it shows.** JSON `verdict` and `run_outcome.compatibility` read
-  `UNCONFIRMED` (report schema 7.3); the observed verdict stays in the
+  `UNCONFIRMED` (report schema 7.4); the observed verdict stays in the
   top-level `unconfirmed` block (`observed_verdict`,
   `sides_without_type_evidence`, `mode`, `exit_contribution`, `remedy`);
   `exit.unconfirmed_contribution` is the axis and `exit.reasons` names

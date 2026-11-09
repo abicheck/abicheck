@@ -172,7 +172,7 @@ def comment_cmd(
             gate_api_break=gate_api_break,
             gate_breaking=gate_breaking,
             max_comment_bytes=max_comment_bytes,
-            notes=context_notes(data),
+            notes=context_notes(data, report_dir=report.resolve().parent),
         )
     except PublicationError as exc:
         raise click.ClickException(str(exc)) from exc

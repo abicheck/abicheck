@@ -32,6 +32,7 @@ import click
 import yaml
 
 from ....model.baseline_provenance import BASELINE_PROVENANCE_PATH
+from ....report.delta_baseline import DELTA_BASELINE_PATH
 from ....workflows.compare.override_channels import TYPED_OVERRIDE_CHANNELS
 from ....workflows.compare.required_symbol_contract import (
     REQUIRED_SYMBOLS_OVERRIDE_PATH,
@@ -68,7 +69,7 @@ _COMPARE_APPLIED_PATHS: frozenset[str] = (
     | COMPILE_CONTEXT_OVERRIDE_PATHS
     | RELEASE_TOPOLOGY_OVERRIDE_PATHS
     | CONFIG_RUN_INPUT_SET_PATHS
-    | {REQUIRED_SYMBOLS_OVERRIDE_PATH, BASELINE_PROVENANCE_PATH}
+    | {REQUIRED_SYMBOLS_OVERRIDE_PATH, BASELINE_PROVENANCE_PATH, DELTA_BASELINE_PATH}
 )
 
 #: The keys a directory/package (release) compare forwards to its members. The
@@ -88,6 +89,7 @@ _RELEASE_APPLIED_PATHS: frozenset[str] = frozenset(
         # ADR-090: every member's classification takes the resolved mode.
         "assurance.unconfirmed",
         BASELINE_PROVENANCE_PATH,
+        DELTA_BASELINE_PATH,
     }
     | COMPILE_CONTEXT_OVERRIDE_PATHS
     | RELEASE_TOPOLOGY_OVERRIDE_PATHS

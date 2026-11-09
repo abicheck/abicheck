@@ -127,6 +127,9 @@ class ReleaseEvaluation:
     #: Release schema 2.8: the caller-asserted ``baseline_provenance`` block
     #: (``model/baseline_provenance.py``); ``None`` when the run was given none.
     baseline_provenance: Mapping[str, object] | None = None
+    #: Release schema 3.1: the caller-asserted ``delta_baseline`` block
+    #: (``report/delta_baseline.py``); ``None`` when the run was given none.
+    delta_baseline: Mapping[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -504,6 +507,9 @@ def release_json_document(report: ReleaseReport) -> ReportDocument:
     if ev.baseline_provenance is not None:
         # Schema 2.8: asserted by the caller (the root Action), not verified.
         summary["baseline_provenance"] = dict(ev.baseline_provenance)
+    if ev.delta_baseline is not None:
+        # Schema 3.1: informational; never changes the verdict or exit code.
+        summary["delta_baseline"] = dict(ev.delta_baseline)
     if terms.section is not None:
         summary["comparison_scope"] = terms.section
     if (folded := _inventory.release_change_inventory(library_results)) is not None:

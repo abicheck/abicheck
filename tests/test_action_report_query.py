@@ -1055,7 +1055,7 @@ def test_unconfirmed_contribution_answers_only_a_real_zero_or_one(
     Action runs it (a subprocess); a sentinel proves no payload executed."""
     sentinel = tmp_path / "pwned"
     document = {
-        "report_schema_version": "7.3",
+        "report_schema_version": "7.4",
         "verdict": "UNCONFIRMED",
         "exit": {
             "code": 1,
