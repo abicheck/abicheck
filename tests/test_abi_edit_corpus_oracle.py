@@ -475,3 +475,40 @@ def test_the_pixi_integration_task_leaves_the_scheduled_tiers_out() -> None:
     cmd = tasks["test-integration"]
     for marker in ("edit_corpus_nightly", "edit_corpus_weekly"):
         assert f"not {marker}" in cmd, cmd
+
+
+@pytest.mark.parametrize(
+    ("evidence", "bits", "checked"),
+    [
+        ("headers", 64, [("g++", ("-O0",), 64), ("c++", (), 64)]),
+        ("headers", 32, [("g++", ("-O0", "-m32"), 32), ("c++", ("-m32",), 32)]),
+        ("binary", 64, [("g++", ("-O0",), 64)]),
+    ],
+)
+def test_fixed_matrix_checks_producer_and_header_driver_widths(
+    monkeypatch: pytest.MonkeyPatch,
+    evidence: str,
+    bits: int,
+    checked: list[tuple[str, tuple[str, ...], int]],
+) -> None:
+    import tests.test_abi_edit_corpus as v1
+
+    seen: list[tuple[str, tuple[str, ...], int]] = []
+
+    def width(driver: str, lang: str, flags: tuple[str, ...], want: int) -> str | None:
+        seen.append((driver, flags, want))
+        return None
+
+    monkeypatch.setattr(v1, "driver_width", width)
+    monkeypatch.setattr(v1.shutil, "which", lambda name: f"/usr/bin/{name}")
+    seed = SEED_BY_NAME["cxx_classes"]
+    v1._skip_wrong_width(seed, _cfg("c++", evidence=evidence, flags=Flags(bits=bits)))
+    assert seen == checked
+    # Either driver at the wrong width skips the cell.
+    monkeypatch.setattr(
+        v1, "driver_width", lambda d, *a: f"{d} does not target {bits}-bit"
+    )
+    with pytest.raises(pytest.skip.Exception, match="g\\+\\+ does not target"):
+        v1._skip_wrong_width(
+            seed, _cfg("c++", evidence=evidence, flags=Flags(bits=bits))
+        )

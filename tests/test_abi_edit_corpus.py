@@ -210,6 +210,31 @@ def _skip_without_driver(seed, compiler: str) -> None:
         )
 
 
+def _skip_wrong_width(seed, config) -> None:
+    """Skip when the producer, or the header frontend's system driver, targets another width.
+
+    The fixed matrix is declared at the default word size; building or
+    parsing headers at another one would test a different ABI than it claims.
+    A driver that fails for any other reason raises ``ToolchainBroken``.
+    """
+    drivers = [
+        (
+            config.producer.driver(seed.lang),
+            config.flags.render(config.producer, seed.lang),
+        )
+    ]
+    if config.evidence == "headers":
+        system = "c++" if seed.lang == "c++" else "cc"
+        if shutil.which(system) is not None:
+            drivers.append(
+                (system, config.flags.layout_flags(config.producer, seed.lang))
+            )
+    for driver, flags in drivers:
+        width = driver_width(driver, seed.lang, tuple(flags), config.flags.bits)
+        if width:
+            pytest.skip(width)
+
+
 @pytest.mark.integration
 @pytest.mark.parametrize("op,seed,compiler", CELLS)
 def test_edit_produces_declared_ground_truth(
@@ -218,16 +243,7 @@ def test_edit_produces_declared_ground_truth(
     _skip_without_driver(seed, compiler)
     # A build or extraction exception propagates and fails the cell.
     config = _as_config(seed, compiler)
-    width = driver_width(
-        config.producer.driver(seed.lang),
-        seed.lang,
-        tuple(config.flags.render(config.producer, seed.lang)),
-        config.flags.bits,
-    )
-    if width:
-        # The fixed matrix is declared at the default word size; a compiler
-        # that targets another one would test a different ABI than it claims.
-        pytest.skip(width)
+    _skip_wrong_width(seed, config)
     gap = capability_gap(op, config)
     if gap:
         pytest.skip(gap)
@@ -272,5 +288,7 @@ def test_smoke_cells(
     op, seed, compiler, baseline_cache: BaselineCache, corpus_root: Path
 ) -> None:
     _skip_without_driver(seed, compiler)
-    outcome = run_operator(op, seed, compiler, baseline_cache, corpus_root)
+    config = _as_config(seed, compiler)
+    _skip_wrong_width(seed, config)
+    outcome = run_operator(op, seed, config, baseline_cache, corpus_root)
     assert outcome.failures == (), list(outcome.failures)
