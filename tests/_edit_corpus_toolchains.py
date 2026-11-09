@@ -273,9 +273,36 @@ def _flags_build(
             if proc.returncode != 0:
                 if "edit_corpus_target_width" in proc.stderr:
                     return f"{tc.id} with {' '.join(rendered)} does not target {flags.bits}-bit"
+                if not _names_capability(proc.stderr, rendered):
+                    # Not a missing option or multilib: a compiler that ran and
+                    # failed for another reason is a failure, never a skip.
+                    raise ToolchainBroken(
+                        f"{' '.join(cmd)} failed (exit {proc.returncode}) without naming "
+                        f"a requested capability: {proc.stderr.strip()[-400:]}"
+                    )
                 tail = (proc.stderr.strip().splitlines() or ["(no stderr)"])[-1]
                 return f"{tc.id} cannot build with {' '.join(rendered)}: {tail}"
     return None
+
+
+# What a toolchain without 32-bit multilib says when asked for -m32.
+_MULTILIB_MISSING = re.compile(
+    r"skipping incompatible|cannot find -l|cannot find crt|stubs-32\.h|"
+    r"bits/libc-header-start\.h|gnu/stubs|unsupported architecture|-m32 is not supported"
+)
+
+
+def _names_capability(stderr: str, rendered: list[str]) -> bool:
+    """Whether a failed probe's *stderr* names one of the requested capabilities.
+
+    Either the driver rejects one of the non-default flags by name
+    (``unrecognized command-line option '-fabi-version=2'``), or ``-m32`` was
+    asked for and the 32-bit runtime is missing.
+    """
+    optional = [f for f in rendered if not f.startswith("-O")]
+    if any(f in stderr for f in optional):
+        return True
+    return "-m32" in rendered and _MULTILIB_MISSING.search(stderr) is not None
 
 
 def _flags_unavailable(tc: Toolchain, lang: str, flags: Flags) -> str | None:

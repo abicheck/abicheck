@@ -229,6 +229,23 @@ def _flag_runner(failure: object) -> object:
     ("failure", "broken"),
     [
         (_proc(1, stderr="/usr/bin/ld: cannot find -lgcc\n"), False),
+        (
+            _proc(
+                1,
+                stderr="/usr/include/features.h: fatal error: gnu/stubs-32.h: No such file\n",
+            ),
+            False,
+        ),
+        (
+            _proc(1, stderr="gcc: error: unrecognized command-line option '-m32'\n"),
+            False,
+        ),
+        # A non-zero exit that names no requested capability is a broken compiler.
+        (
+            _proc(1, stderr="gcc: fatal error: Killed signal terminated program cc1\n"),
+            True,
+        ),
+        (_proc(1, stderr="collect2: error: ld returned 1 exit status\n"), True),
         (subprocess.TimeoutExpired(["gcc"], 60), True),
         (OSError("exec format error"), True),
         (_proc(-11, stderr="gcc: internal compiler error: Segmentation fault\n"), True),
@@ -245,7 +262,8 @@ def test_flag_probe_skips_only_a_failure_that_names_a_capability(
             tcs._flags_unavailable(_PROBE_TC, "c", flags)
     else:
         reason = tcs._flags_unavailable(_PROBE_TC, "c", flags)
-        assert reason is not None and "cannot find -lgcc" in reason
+        assert isinstance(failure, subprocess.CompletedProcess)
+        assert reason is not None and failure.stderr.strip() in reason
 
 
 @pytest.mark.usefixtures("clean_probe_caches")
