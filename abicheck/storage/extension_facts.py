@@ -42,6 +42,7 @@ from .canonical import canonical_form
 from .extension_fact_catalog import (
     CXX_CONCEPT_CONSTRAINTS,
     CXX_CONCEPT_HEADER_SCAN,
+    CXX_TEMPLATE_DEFAULTS,
     EXPORT_READ,
     EXTENSION_FACTS,
     NOEXCEPT_UNOBSERVED,
@@ -221,6 +222,11 @@ def sync_model_extension_facts(snap: Any) -> None:
         write_extension_fact(snap, CXX_CONCEPT_CONSTRAINTS, table)
     elif table is None:
         _drop_extension_fact(snap, CXX_CONCEPT_CONSTRAINTS)
+    defaults = getattr(snap, "cxx_template_defaults", None)
+    if isinstance(defaults, dict):
+        write_extension_fact(snap, CXX_TEMPLATE_DEFAULTS, defaults)
+    elif defaults is None:
+        _drop_extension_fact(snap, CXX_TEMPLATE_DEFAULTS)
     encode_noexcept_unobserved(snap)
 
 
@@ -311,6 +317,7 @@ def apply_model_extension_facts(snap: Any) -> None:
     not decode is refused rather than read as that no-gap answer."""
     apply_export_read_fact(snap)
     _apply_concept_constraints(snap)
+    _apply_template_defaults(snap)
     decode_noexcept_unobserved(snap)
     scan = read_extension_fact(snap, CXX_CONCEPT_HEADER_SCAN)
     if scan.status is FactStatus.PRESENT and isinstance(scan.value, bool):
@@ -342,5 +349,25 @@ def _apply_concept_constraints(snap: Any) -> None:
         return
     raise SnapshotError(
         "snapshot's cxx_concept_constraints extension fact is unreadable: "
+        + "; ".join(str(d) for d in table.diagnostics)
+    )
+
+
+def _apply_template_defaults(snap: Any) -> None:
+    """Restore ``cxx_template_defaults``. Missing or blocked leaves it ``None``
+    (not modelled: the header-scan gap stays named); a stored value that does
+    not decode is refused rather than read as "not modelled"."""
+    table = read_extension_fact(snap, CXX_TEMPLATE_DEFAULTS)
+    if table.status is FactStatus.PRESENT and isinstance(table.value, dict):
+        snap.cxx_template_defaults = {
+            key: None if row is None else tuple(row) for key, row in table.value.items()
+        }
+        return
+    if table.status is FactStatus.NOT_COLLECTED:
+        return
+    if _blocked_reason(snap, CXX_TEMPLATE_DEFAULTS.section) is not None:
+        return
+    raise SnapshotError(
+        "snapshot's cxx_template_defaults extension fact is unreadable: "
         + "; ".join(str(d) for d in table.diagnostics)
     )

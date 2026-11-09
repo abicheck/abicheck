@@ -62,6 +62,7 @@ from ...model.abi_fundamental import AbiFundamental
 from ...model.fact import Fact
 from ...model.identity import EntityId
 from ...model.semantic_ir import SemanticIR
+from ...model.template_default_table import TemplateDefaults
 from ...process_resources import BudgetedExecutor
 from ...tu_fragment import (
     MergedTuFragments as MergedTuFragments,
@@ -215,6 +216,7 @@ def run_tu_fragment(
         semantic_ir=fields.semantic_ir,
         preprocessor_hidden=parser_preprocessor_hidden(parser),
         cxx_concept_constraints=fields.cxx_concept_constraints,
+        cxx_template_defaults=fields.cxx_template_defaults,
     )
 
 
@@ -573,6 +575,16 @@ class ElfHeaderAstResult:
     semantic_ir: SemanticIR | None = None
     preprocessor_hidden: dict[str, tuple[str, ...]] | None = None
     cxx_concept_constraints: dict[str, str] | None = None
+    cxx_template_defaults: dict[str, TemplateDefaults] | None = None
+
+    def clang_ast_tables(self) -> dict[str, Any]:
+        """The snapshot fields read from a clang AST of the headers (the
+        clang backend's own, or castxml's clang join): the concept and
+        template-default tables."""
+        return {
+            "cxx_concept_constraints": self.cxx_concept_constraints,
+            "cxx_template_defaults": self.cxx_template_defaults,
+        }
 
     def typedef_snapshot_fields(self) -> dict[str, Any]:
         """The typedef maps a snapshot carries, under their snapshot field names."""
@@ -718,6 +730,7 @@ def resolve_header_ast_result(
             semantic_ir=fragment.semantic_ir,
             preprocessor_hidden=fragment.preprocessor_hidden,
             cxx_concept_constraints=fragment.cxx_concept_constraints,
+            cxx_template_defaults=fragment.cxx_template_defaults,
         )
         provenance_headers = tuple(headers)
 
@@ -742,6 +755,7 @@ def resolve_header_ast_result(
         provenance_headers=provenance_headers,
         preprocessor_hidden=merged.preprocessor_hidden,
         cxx_concept_constraints=merged.cxx_concept_constraints,
+        cxx_template_defaults=merged.cxx_template_defaults,
         # A real manifest carries its occurrence-preserving merged IR.
         semantic_ir=(
             merged.semantic_ir

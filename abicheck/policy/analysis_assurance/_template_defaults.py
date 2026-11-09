@@ -32,6 +32,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ...model.availability import FactStatus
+from ...model.template_default_table import split_template_default_key
 
 if TYPE_CHECKING:
     from ...model import AbiSnapshot
@@ -95,12 +96,42 @@ def _is_nested_in(qualified: str, parent: str) -> bool:
     return len(parts) > len(owner) and parts[: len(owner)] == owner
 
 
+#: Families a table entry can name; the clang backend's own pattern facts
+#: carry class and function templates, so only these two are table-only there.
+_ALL_FAMILIES = frozenset({"class", "function", "alias", "variable"})
+_UNMODELLED_BY_CLANG = frozenset({"alias", "variable"})
+
+
+def _unknown_table_count(
+    table: dict[str, tuple[str | None, ...] | None], families: frozenset[str]
+) -> int:
+    """Templates of *families* in the template-default table whose defaults
+    are not known (a default the AST walk could not spell, or declarations
+    that disagree)."""
+    return sum(
+        1
+        for key, row in table.items()
+        if row is None and split_template_default_key(key)[0] in families
+    )
+
+
+def _table_note(label: str, count: int) -> str:
+    return (
+        "template-parameter defaults (a default could not be spelled): "
+        f"{count} template(s) in the public headers of the {label} snapshot "
+        "carry a default the clang AST walk could not spell or key (an "
+        "expression such as sizeof(T), declarations that disagree, or a member "
+        "template of an explicit or partial specialization), so a "
+        "default-argument change in them is not assessed"
+    )
+
+
 def _castxml_header_note(label: str) -> str:
     return (
-        f"template-parameter defaults (castxml cannot record them): the public "
-        f"headers of the {label} snapshot declare template-parameter "
-        "defaults that castxml does not record, so a default-argument change in "
-        "them is not assessed"
+        "template-parameter defaults (castxml cannot record them): its clang "
+        f"join did not run, and the public headers of the {label} snapshot "
+        "declare template-parameter defaults that castxml does not record, so a "
+        "default-argument change in them is not assessed"
     )
 
 
@@ -155,12 +186,27 @@ def template_default_findings(
         if snap is None:
             continue
         notes: list[str] = []
-        if snap.ast_producer == "castxml" and snap.template_default_header_scan:
-            notes.append(_castxml_header_note(label))
-            findings.extend(_as_findings(label, notes))
-            continue
-        if snap.ast_producer == "clang" and snap.template_default_header_scan:
-            notes.append(_clang_alias_variable_note(label))
+        table = snap.cxx_template_defaults
+        if snap.ast_producer == "castxml":
+            if table is not None:
+                # The clang join read every family: only a template whose
+                # defaults it could not spell is unassessed.
+                unknown = _unknown_table_count(table, _ALL_FAMILIES)
+                if unknown:
+                    notes.append(_table_note(label, unknown))
+                findings.extend(_as_findings(label, notes))
+                continue
+            if snap.template_default_header_scan:
+                notes.append(_castxml_header_note(label))
+                findings.extend(_as_findings(label, notes))
+                continue
+        if snap.ast_producer == "clang":
+            if table is not None:
+                unknown = _unknown_table_count(table, _UNMODELLED_BY_CLANG)
+                if unknown:
+                    notes.append(_table_note(label, unknown))
+            elif snap.template_default_header_scan:
+                notes.append(_clang_alias_variable_note(label))
         count = _unrecorded_pattern_count(snap)
         if count:
             notes.append(_side_note(label, snap, count))

@@ -149,7 +149,7 @@ NON_BINARY_REASONS: Mapping[ChangeKind, str] = {
     ChangeKind.CONSTANT_CHANGED: "header macro and constant data (compare/constants)",
     ChangeKind.CONSTANT_REMOVED: "header macro and constant data (compare/constants)",
     ChangeKind.PARAM_DEFAULT_VALUE_REMOVED: "header default-argument spellings (parameter_facts)",
-    ChangeKind.TEMPLATE_PARAM_DEFAULT_CHANGED: "header template-parameter defaults (compare/template_param_defaults, clang backend)",
+    ChangeKind.TEMPLATE_PARAM_DEFAULT_CHANGED: "header template-parameter defaults (compare/template_param_defaults, compare/template_default_table)",
 }
 
 #: Kinds governed by their own evidence axis, or a sentinel that is not a

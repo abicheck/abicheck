@@ -96,6 +96,41 @@ run reads `NO_CHANGE` with `partial` assurance and the named gap, pinned by
 `tests/test_default_template_arg_l2_matrix.py` (including on
 `catalog/cases/case224_header_only_template_default_added`).
 
+**Amendment (2026-11-09): castxml observes the defaults through the clang AST.**
+The 2026-10-23 amendment rested on castxml being unable to observe a default.
+That premise no longer holds. A castxml run already parses the same headers
+with clang to read `noexcept` and C++20 constraints
+(`extract/headers/castxml/clang_semantics_join.py`), and the same parse now
+records every template's defaults: class, function, alias and variable
+templates, and type, non-type and template-template parameters
+(`extract/headers/clang/template_default_entries.py`,
+`AbiSnapshot.cxx_template_defaults`, extractor generation 45). The clang
+backend records the same table, which is how it now covers alias and variable
+templates, which it had no model entity for. The decisions that follow keep
+the 2026-10-23 rationale: the verdict reports what was observed, and
+assurance reports what was not.
+
+- A castxml run whose join read the defaults reports a header-only change
+  exactly as clang does: `TEMPLATE_PARAM_DEFAULT_CHANGED`, `API_BREAK`. This
+  is same-evidence-same-verdict parity (D3). Both backends observed the same
+  defaults from the same AST, so the verdicts must agree.
+- A castxml run whose join could not run (no clang) has observed nothing.
+  Its verdict stays `NO_CHANGE` and the run reads `partial`, with
+  `template-parameter defaults (castxml cannot record them)` named whenever
+  the header text scan finds a default. This is the 2026-10-23 answer, now
+  limited to that path.
+- A template whose default the walk cannot spell (`sizeof(T)`), whose
+  declarations disagree, or that cannot be keyed (a member template of an
+  explicit or partial specialization) is recorded as known but unspelled. Its
+  side reads `partial`, naming `a default could not be spelled`.
+- The class-template rule for an *added* default (not a break, case224)
+  applies to alias and variable templates too. A function template's added
+  default is still reported.
+- A class or function template that both clang snapshots also carry as a
+  pattern with a defaults fact is compared by D2's pattern detectors. The
+  table compares only the rest, so one change is reported once. Shape A and
+  shape C deduplication apply to table findings too.
+
 ## Consequences
 
 - **Behaviour change (after acceptance).** A clang run on shape B changes from `NO_CHANGE` to `API_BREAK`. This is a new finding on a header-only default change. It needs a changelog fragment and is reviewed as a policy change, not a fix.
@@ -117,7 +152,7 @@ Each claim below is tested through the public workflow (`abicheck dump` then `ab
 
 - **Both backends, shapes A/B/C.** Run `case87_default_template_arg_changed` (A) and the two inline headers (B and C) with `compile.frontend: castxml` and `clang`. Pin:
   - A: `BREAKING`, `DEFAULT_TEMPLATE_ARG_CHANGED` on both backends (unchanged); the new kind is not emitted for it.
-  - B: clang `API_BREAK`, `TEMPLATE_PARAM_DEFAULT_CHANGED`; castxml `NO_CHANGE` with `partial` assurance and the named gap (amended 2026-10-23, see D3).
+  - B: `API_BREAK`, `TEMPLATE_PARAM_DEFAULT_CHANGED` on both backends (amended 2026-11-09, see D3); castxml without clang `NO_CHANGE` with `partial` assurance and the named gap (amended 2026-10-23).
   - C: `BREAKING` via `func_removed`/`func_added` on both backends (unchanged); the new kind is not emitted when the mangled change already reports the break.
 - **Parity.** For each shape where both backends observe the same defaults, the verdict and kind set are equal. A parametrised test asserts this, so a backend that drops the fact fails it.
 - **Old-snapshot comparison.** A v60 fixture snapshot (from before the bump) compared with a v61 clang dump of the same header yields a coverage gap for the template and no `NO_CHANGE` and no `API_BREAK`. A v61 snapshot round-trips the fact including the `None`-per-parameter entries.
@@ -210,14 +245,15 @@ are recorded here rather than edited into the decision.
 
 ## Remaining
 
-1. **Verdict decision (resolved 2026-10-23).** The castxml verdict stays
-   `NO_CHANGE`, and the run reads `partial` with the gap named. D3 is amended
-   above. Rationale: weaker evidence narrows the conclusion and is reported; it
-   does not fabricate a finding, and this keeps same-evidence-same-verdict
-   parity. Pinned by `tests/test_default_template_arg_l2_matrix.py`.
-2. **Parity test.** Landed for the header-only shape: clang reports
-   `template_param_default_changed`, castxml reports the gap and no kind
-   (`tests/test_default_template_arg_l2_matrix.py`).
+1. **Verdict decision (resolved 2026-10-23, superseded 2026-11-09).** castxml
+   now observes the defaults through its clang join and reports the change
+   as clang does; only a castxml run without clang keeps the 2026-10-23
+   answer (`NO_CHANGE`, `partial`, gap named). See D3's 2026-11-09 amendment.
+2. **Parity test.** Landed: both backends report
+   `template_param_default_changed` for every family and parameter kind
+   (`tests/test_template_default_assurance_gap.py`,
+   `tests/test_template_default_header_backends.py` against the compiler, and
+   `tests/test_default_template_arg_l2_matrix.py`).
 3. ~~**Non-type and template-template parameters.**~~ Done (see Implementation
    status). The spelling rule and the `sizeof`-style exclusion are recorded there
    and in `header-backend-capabilities.md`.

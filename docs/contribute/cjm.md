@@ -152,11 +152,13 @@ UC-TC-make-auto-query, UC-TC-build-emitted-facts, UC-WF-oneshot-deep,
 UC-WORKFLOW-real-world-corpus, UC-WORKFLOW-pr-source-tier,
 UC-TC-bazel-build-evidence, UC-CHANGE-crosscheck-example-corpus.
 **Friction (highest priority, L2 Linux first):**
-- Template-default coverage on L2: castxml cannot carry template defaults
-  at all, and clang does not model alias or variable templates; both name the
-  gap and read `partial` instead of clean, but report no finding for those
-  shapes ([known gap](known-gaps.md#a-header-only-default-template-argument-change-reads-no_change-at-l2-on-castxml-2026-10-21),
+- Template-default coverage on L2, residual: castxml without clang falls
+  back to a header text scan that misses a macro-spelled default
+  ([known gap](known-gaps/without-clang-castxml-misses-a-macro-spelled-template-default.md),
   ADR-085).
+- Closed 2026-11-09: both header backends read every template family's
+  defaults from the clang AST (castxml through its clang join) and report a
+  default change as `template_param_default_changed`.
 - Closed 2026-10-25: clang alias/variable template defaults no longer read
   `complete` `NO_CHANGE`.
 - Closed 2026-10-24: callback (function-pointer) signature changes on the

@@ -224,6 +224,13 @@ UNCOVERED: dict[str, str] = {
     "TypeField.type_abi_fact": _ABI_FACT_UNCOVERED,
     "Variable.type_abi_fact": _ABI_FACT_UNCOVERED,
     "Function.return_type_abi_fact": _ABI_FACT_UNCOVERED,
+    "AbiSnapshot.cxx_template_defaults": (
+        "header-level template-parameter default table (extractor generation 45); "
+        "the H1 corpus has no header-only template whose default differs across "
+        "its operands, so the ablation cannot reach it. Its unobserved state "
+        "(None) is covered by tests/test_template_default_header_backends.py "
+        "(castxml without its clang join reads partial, never clean)"
+    ),
     "AbiSnapshot.typedef_abi_facts": (
         "persisted typedef-target Fact[AbiFundamental] map (schema v69); the H1 "
         "corpus has no typedef whose target spelling differs while the ABI agrees, "

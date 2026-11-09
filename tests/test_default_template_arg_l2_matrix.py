@@ -28,12 +28,10 @@ through the public ``abicheck dump`` / ``abicheck compare`` workflow:
   added mangled function, but neither attributes it to the default, so the
   finding carries no ``default_template_arg_changed`` label.
 * **header-only** — the template is never named by the public surface and
-  nothing is exported. No ABI effect exists to report, so L2 is ``NO_CHANGE``
-  on both backends. CastXML emits no record for an uninstantiated class
-  template at all; the clang AST does carry the template pattern and the
-  default argument (``TemplateTypeParmDecl.defaultArg``), which abicheck's clang
-  dumper does not record. That asymmetry is why no clang-only detector was
-  added: it would return a BREAKING verdict castxml cannot reproduce.
+  nothing is exported. ADR-085 reports it as ``template_param_default_changed``
+  (``API_BREAK``) on both backends: clang records the defaults on the template
+  pattern, and castxml -- which emits no record for an uninstantiated template
+  -- reads them from the clang AST of the same header through its clang join.
 
 See ``docs/contribute/plans/g28-castxml-clang-l2-parity-hardening.md`` (Phase 5)
 and ``docs/contribute/known-gaps.md`` for the decision record.
@@ -190,35 +188,30 @@ def test_header_only_default_change_is_api_break_on_clang(
     assert DEFAULT_KIND not in _kinds(report)
 
 
-def test_header_only_default_change_is_a_castxml_assurance_gap(
+def test_header_only_default_change_is_reported_on_castxml(
     tmp_path: Path, header_pair: tuple[Path, Path]
 ) -> None:
-    """ADR-085 D3: castxml cannot record the default, so the run says so.
-
-    castxml's compare verdict stays NO_CHANGE (it cannot see the change), but
-    the header scan finds the template default on both sides, so the analysis
-    is partial with an explicit gap note, not a silent clean comparison.
-    """
+    """castxml writes no record for an uninstantiated template, but its clang
+    join reads the defaults from the same header's AST
+    (``castxml/clang_semantics_join.py``), so castxml reports the change as
+    clang does, with no gap named."""
     _require_tools("castxml")
     old_h, new_h = header_pair
     old = _dump_header(tmp_path, old_h, "castxml", "old")
     new = _dump_header(tmp_path, new_h, "castxml", "new")
     report = _compare_kinds(old, new, tmp_path, "castxml")
-    assert report["verdict"] == "NO_CHANGE"
-    assert HEADER_KIND not in _kinds(report)
+    assert report["verdict"] == "API_BREAK"
+    assert HEADER_KIND in _kinds(report)
     assurance = report["analysis_assurance"]
-    assert assurance["status"] == "partial"
-    gap = [n for n in assurance["notes"] if n.startswith(_CASTXML_GAP)]
-    assert len(gap) == 2  # one per side
+    assert not [n for n in assurance["notes"] if n.startswith(_CASTXML_GAP)]
 
 
 @pytest.mark.integration
 def test_clang_reports_and_castxml_names_the_same_header_change(
     tmp_path: Path, header_pair: tuple[Path, Path]
 ) -> None:
-    """Cross-backend parity (ADR-085 test plan): the same header pair is not
-    a silent clean on either backend. clang reports the kind; castxml reports
-    the explicit gap instead."""
+    """Cross-backend parity (ADR-085 test plan): the same header pair reads
+    the same on both backends -- the same kind and verdict."""
     _require_tools("castxml", "clang")
     old_h, new_h = header_pair
     clang = _compare_kinds(
@@ -234,11 +227,12 @@ def test_clang_reports_and_castxml_names_the_same_header_change(
         "castxml",
     )
     assert HEADER_KIND in _kinds(clang)
-    assert HEADER_KIND not in _kinds(castxml)
-    assert castxml["analysis_assurance"]["status"] == "partial"
-    assert not any(
-        n.startswith(_CASTXML_GAP) for n in clang["analysis_assurance"]["notes"]
-    )
+    assert _kinds(castxml) == _kinds(clang)
+    assert castxml["verdict"] == clang["verdict"] == "API_BREAK"
+    for report in (clang, castxml):
+        assert not any(
+            n.startswith(_CASTXML_GAP) for n in report["analysis_assurance"]["notes"]
+        )
 
 
 def test_castxml_cannot_expose_uninstantiated_template_defaults(
@@ -479,15 +473,13 @@ _CASE224 = (
 
 
 @pytest.mark.integration
-def test_catalog_case224_castxml_reads_no_change_with_partial_assurance(
+def test_catalog_case224_added_default_reads_no_change_on_castxml(
     tmp_path: Path,
 ) -> None:
-    """ADR-085 D3 on the catalog case: castxml's verdict stays NO_CHANGE, and the run reads partial.
-
-    case224 is the header-only default-added shape. Its castxml lane must not
-    report a finding it cannot observe, and must not read as a clean pass: the
-    assurance status is partial, and the gap is named on each side.
-    """
+    """case224, the header-only default-added shape, on castxml: the clang join
+    records both sides, and a default only added invalidates no previously
+    valid spelling, so the run reads NO_CHANGE with no template-defaults gap --
+    the same answer as clang."""
     _require_tools("castxml")
     old = _dump_header(tmp_path, _CASE224 / "v1.h", "castxml", "old")
     new = _dump_header(tmp_path, _CASE224 / "v2.h", "castxml", "new")
@@ -495,8 +487,4 @@ def test_catalog_case224_castxml_reads_no_change_with_partial_assurance(
     assert report["verdict"] == "NO_CHANGE"
     assert HEADER_KIND not in _kinds(report)
     assurance = report["analysis_assurance"]
-    assert assurance["status"] == "partial"
-    gap = [n for n in assurance["notes"] if n.startswith(_CASTXML_GAP)]
-    # v1.h declares no default, so only the new side's scan finds one.
-    assert len(gap) == 1
-    assert "the new snapshot" in gap[0]
+    assert not [n for n in assurance["notes"] if n.startswith(_CASTXML_GAP)]
