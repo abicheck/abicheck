@@ -51,6 +51,7 @@ from abicheck.checker import compare
 from abicheck.checker_policy import API_BREAK_KINDS, BREAKING_KINDS, RISK_KINDS
 from abicheck.cli import main
 from abicheck.dumper import dump
+from abicheck.model.availability import FactStatus
 from abicheck.model.change_catalog.registry import Verdict
 from abicheck.serialization import snapshot_to_json
 
@@ -344,15 +345,65 @@ def test_a_real_alignment_loss_still_reports(tmp_path, cc, bits, evidence):
         assert found[0].effective_verdict is None, found[0].modulation_rule
 
 
+@pytest.mark.parametrize("cc", ["gcc", "clang"])
+def test_castxml_headers_report_a_dropped_alignas(tmp_path, cc):
+    """castxml 0.7 emits no ``align`` on a ``Variable``. The header that spells
+    ``_Alignas`` makes the type's natural alignment a lower bound (PARTIAL),
+    so it no longer vetoes the reduction the binary shows: the finding is
+    reported, never dropped (it was, before extractor generation 51)."""
+    _driver(cc)
+    snaps, found = _alignas_drop(tmp_path, cc, 64, "headers", "castxml")
+    old_var = snaps[0].var_by_mangled("g_data")
+    assert old_var is not None
+    assert old_var.alignment_bits_fact.status is FactStatus.PARTIAL
+    assert [c.kind.value for c in found] == ["exported_object_alignment_reduced"]
+
+
 @pytest.mark.known_gap_canary
-def test_castxml_headers_hide_a_dropped_alignas(tmp_path):
-    """castxml 0.7 emits no ``align`` on a ``Variable``, so the header side
-    records an ``_Alignas(16)`` object at its type's natural alignment on both
-    sides, and the reduction the binary shows is read as placement and not
-    reported (``docs/contribute/known-gaps.md``)."""
+def test_castxml_headers_demote_a_dropped_alignas(tmp_path):
+    """Residual gap: castxml cannot say the old side declared 16, so the
+    reported reduction is demoted with the unknown-requirement rule, where
+    DWARF and the clang header backend keep its RISK
+    (``docs/contribute/known-gaps.md``)."""
     _driver("gcc")
     _snaps, found = _alignas_drop(tmp_path, "gcc", 64, "headers", "castxml")
-    assert found == []
+    assert [c.effective_verdict for c in found] == [Verdict.COMPATIBLE]
+    assert found[0].modulation_rule == (
+        "address-alignment-with-unknown-declared-requirement"
+    )
+
+
+@pytest.mark.known_gap_canary
+def test_gcc_dwarf_loses_a_definition_only_alignas(tmp_path):
+    """Residual gap: gcc writes a specifier spelled only on the definition
+    (``extern int g_data;`` in the header) on neither DIE, so the old side's
+    16 is unknown and the reduction is demoted, not kept at RISK
+    (``docs/contribute/known-gaps.md``)."""
+    _driver("gcc")
+    snaps = []
+    for name, spec in (("old", "_Alignas(16) "), ("new", "")):
+        source = (
+            f'#include "lib.h"\nint pad = 2;\n{spec}int g_data = 1;\n'
+            "int get(void) { return g_data; }\n"
+        )
+        header = "extern int g_data;\nint get(void);\n"
+        so = _build_c(tmp_path, name, "gcc", source, ["-O0", "-g"], header)
+        snaps.append(_dump_c(so, "dwarf"))
+    old_var = snaps[0].var_by_mangled("g_data")
+    assert old_var is not None
+    assert old_var.alignment_bits_fact.status is FactStatus.PARTIAL
+    assert old_var.alignment_bits == 32
+    new_sym = next(s for s in snaps[1].elf.symbols if s.name == "g_data")
+    if new_sym.value_alignment >= 16:
+        pytest.skip("the linker kept g_data 16-aligned; nothing was lost")
+    found = [
+        c
+        for c in compare(*snaps).changes
+        if c.kind.value == "exported_object_alignment_reduced"
+    ]
+    assert [c.modulation_rule for c in found] == [
+        "address-alignment-with-unknown-declared-requirement"
+    ]
 
 
 _CANARY_SOURCE = (
@@ -620,8 +671,10 @@ def test_a_class_static_member_keeps_its_dwarf_alignment(tmp_path, cxx):
     """An out-of-line ``alignas(16) int A::x`` definition: clang writes the
     alignment (and the linkage name) only on the definition DIE, which has no
     name of its own. Read with its ``DW_AT_specification`` declaration, the
-    variable is recorded as ``A::x`` with 128 bits declared; gcc emits no
-    ``DW_AT_alignment`` for it, so its declared alignment stays unknown."""
+    variable is recorded as ``A::x`` with 128 bits declared. gcc emits no
+    ``DW_AT_alignment`` for it on either DIE, so the definition completing the
+    in-class declaration records ``int``'s default only as a lower bound
+    (PARTIAL), which never vetoes the address reduction."""
     _driver(cxx)
     snaps = []
     for name, spec in (("old", "alignas(16) "), ("new", "")):
@@ -639,8 +692,12 @@ def test_a_class_static_member_keeps_its_dwarf_alignment(tmp_path, cxx):
         snaps.append(dump(so, [], compiler="c++", lang="c++"))
     old_var = snaps[0].var_by_mangled("_ZN1A1xE")
     assert old_var is not None and old_var.name == "A::x"
-    expected = 128 if cxx == "clang++" else None
-    assert old_var.alignment_bits == expected
+    if cxx == "clang++":
+        assert old_var.alignment_bits == 128
+        assert old_var.alignment_bits_fact.status is FactStatus.PRESENT
+    else:
+        assert old_var.alignment_bits == 32
+        assert old_var.alignment_bits_fact.status is FactStatus.PARTIAL
     new_sym = next(s for s in snaps[1].elf.symbols if s.name == "_ZN1A1xE")
     if new_sym.value_alignment >= 16:
         pytest.skip("the linker kept A::x 16-aligned; nothing was lost")
@@ -655,5 +712,5 @@ def test_a_class_static_member_keeps_its_dwarf_alignment(tmp_path, cxx):
         assert found[0].effective_verdict is None
     else:
         assert found[0].modulation_rule == (
-            "address-alignment-without-declared-requirement"
+            "address-alignment-with-unknown-declared-requirement"
         )

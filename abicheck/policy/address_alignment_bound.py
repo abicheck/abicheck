@@ -32,7 +32,12 @@ the new side proves a reduction only against a requirement the old side
   observed drop is placement (rule :data:`DECLARED_STILL_MET_RULE`);
 * the old side declares nothing: both numbers are placements, and the old
   one says nothing about what consumers rely on (rule
-  :data:`UNDECLARED_RULE`).
+  :data:`UNDECLARED_RULE`);
+* the old side's declaration is unknown -- castxml records only a lower
+  bound for a variable whose header spells an alignment specifier
+  (``extract/headers/castxml/variable_alignment``): the placements alone
+  still prove nothing (rule :data:`UNKNOWN_DECLARATION_RULE`), and the
+  reason says so instead of claiming nothing was declared.
 
 Both demotions set ``effective_verdict`` to ``COMPATIBLE`` and keep the
 finding with its rule (ADR-067: annotated, never removed). The section's
@@ -42,7 +47,10 @@ image must yield the same facts as the intact one.
 
 from __future__ import annotations
 
-from ..compare.declared_alignment import declared_alignment_bits
+from ..compare.declared_alignment import (
+    declared_alignment_bits,
+    declared_alignment_is_lower_bound,
+)
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.change_catalog.registry import Verdict
@@ -53,6 +61,8 @@ __all__ = [
     "DECLARED_STILL_MET_RULE",
     "UNDECLARED_REASON",
     "UNDECLARED_RULE",
+    "UNKNOWN_DECLARATION_REASON",
+    "UNKNOWN_DECLARATION_RULE",
     "bound_address_alignment_reductions",
 ]
 
@@ -61,6 +71,13 @@ UNDECLARED_REASON = (
     "both alignments come from symbol addresses, which only bound the "
     "declared alignment from above; the old side declares no requirement "
     "the new placement could fail"
+)
+UNKNOWN_DECLARATION_RULE = "address-alignment-with-unknown-declared-requirement"
+UNKNOWN_DECLARATION_REASON = (
+    "both alignments come from symbol addresses, and the old side's declared "
+    "alignment is unknown (its header spells an alignment specifier the header "
+    "backend records only as a lower bound); the placements alone prove no "
+    "reduction -- debug info (DW_AT_alignment) can"
 )
 DECLARED_STILL_MET_RULE = "address-alignment-meets-declared-requirement"
 DECLARED_STILL_MET_REASON = (
@@ -92,7 +109,9 @@ def bound_address_alignment_reductions(
         if new_bound is None:
             continue
         declared = declared_alignment_bits(old, change.symbol)
-        if declared is None:
+        if declared is None and declared_alignment_is_lower_bound(old, change.symbol):
+            rule, reason = UNKNOWN_DECLARATION_RULE, UNKNOWN_DECLARATION_REASON
+        elif declared is None:
             rule, reason = UNDECLARED_RULE, UNDECLARED_REASON
         elif new_bound * 8 >= declared:
             rule, reason = DECLARED_STILL_MET_RULE, DECLARED_STILL_MET_REASON

@@ -80,6 +80,7 @@ from .extract.dwarf_scope import (
 )
 from .extract.dwarf_subtree_index import open_indexed_dwarf_info
 from .extract.dwarf_type_names import strip_type_decorators as _strip_type_decorators
+from .extract.dwarf_variable_alignment import dwarf_variable_layout_facts
 from .extract.dwarf_variable_identity import variable_definition_view
 from .extract.dwarf_vptr_resolution import finalize_vptr_offsets
 from .extract.surface_fact_producers import debug_info_surface_facts
@@ -758,8 +759,7 @@ class _DwarfSnapshotBuilder:
                 visibility=Visibility.PUBLIC,
                 **debug_info_surface_facts(exported=var_export),
                 is_const=is_const,
-                type_abi_fact=_type_abi_fact(die, CU),
-                alignment_bits=_attr_int(die, "DW_AT_alignment") * 8 or None,
+                **dwarf_variable_layout_facts(die, CU),
                 entity_id=_dwarf_variable_entity_id(  # ADR-063 Phase 2: dwarf_scope
                     scope_path, name, mangled, bool(linkage_name)
                 ),

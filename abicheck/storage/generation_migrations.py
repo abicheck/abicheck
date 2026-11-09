@@ -553,6 +553,16 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "no rewrite is needed -- an older snapshot reads is_variadic as not "
         "recorded and simply lacks the added records and flags"
     ),
+    51: GenerationSpellingChange(
+        "no type or name spelling changes. A castxml variable's alignment is "
+        "recorded as a lower bound (Fact PARTIAL) when its file, or the file "
+        "of a typedef its type names, spells an alignment specifier in its "
+        "preprocessed code (castxml writes none for a variable); a DWARF 5 "
+        "variable without DW_AT_alignment records its type's default "
+        "alignment where DWARF states it; no rewrite is needed -- an older "
+        "snapshot reads the castxml value as declared and a DWARF default as "
+        "not recorded, as before"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

@@ -36,7 +36,7 @@ from ..dwarf_utils import attr_int, resolve_type_die, vector_byte_size
 from ..model.abi_fundamental import AbiFundamental, FundamentalEncoding
 from ..model.fact import Fact
 
-__all__ = ["dwarf_type_abi_fact"]
+__all__ = ["dwarf_fundamental", "dwarf_type_abi_fact"]
 
 #: DW_ATE encodings a calling convention can distinguish, mapped to the
 #: encoding class. ``DW_ATE_signed_char``/``unsigned_char`` carry the signedness
@@ -72,6 +72,12 @@ def dwarf_type_abi_fact(die: Any, cu: Any) -> Fact[AbiFundamental] | None:
     ``Fact`` a declaration stores: ``None`` when DWARF states no fundamental."""
     fact = _fact(resolve_type_die(die, cu), cu, 0)
     return None if fact is None else Fact.present(fact)
+
+
+def dwarf_fundamental(type_die: Any, cu: Any) -> AbiFundamental | None:
+    """The ABI fact of the type DIE *type_die* itself (not of a slot naming
+    it), or ``None`` when DWARF states no fundamental."""
+    return _fact(type_die, cu, 0)
 
 
 def _fact(die: Any, cu: Any, depth: int) -> AbiFundamental | None:

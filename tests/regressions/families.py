@@ -608,6 +608,7 @@ _F14 = (
     "extraction.dwarf_array_bound_erased",
     "extraction.dwarf_out_of_line_definition_dropped",
     "extraction.dwarf_lane_drops_a_recorded_fact",
+    "extraction.variable_alignment_misread_as_declared",
 )
 _F15 = (
     "extraction.castxml_vector_element_not_modelled",

@@ -245,8 +245,9 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             KnownGap(
                 description=(
                     "castxml 0.7 emits no align attribute on a Variable, so "
-                    "under castxml headers a dropped _Alignas reads as the "
-                    "type's unchanged natural alignment and is not reported."
+                    "under castxml headers a dropped _Alignas is reported but "
+                    "demoted: the old declared requirement is unknown "
+                    "(extraction.variable_alignment_misread_as_declared)."
                 ),
                 reference="docs/contribute/known-gaps.md",
             ),

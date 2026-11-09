@@ -54,7 +54,12 @@ from __future__ import annotations
 #: v41: a DWARF-only dump records export-table-only records for exports no
 #: DWARF declaration names, ``Function.is_variadic``, and plain-char
 #: signedness flags. A warm entry would carry none of them.
-SNAPSHOT_CACHE_VERSION: str = "41"
+#:
+#: v42: a castxml dump records which files spell an alignment specifier (in
+#: the cached AST) and a variable's alignment as a lower bound there; a DWARF
+#: 5 variable records its type's default alignment. A warm entry would carry
+#: neither.
+SNAPSHOT_CACHE_VERSION: str = "42"
 # v35: header-derived snapshots now carry public_header_identifiers (schema
 # v55, extract/public_header_identifiers.py). The key also folds in the
 # snapshot schema version from this version on, so the next schema bump
