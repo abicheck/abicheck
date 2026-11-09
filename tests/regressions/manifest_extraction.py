@@ -133,6 +133,15 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
                 ),
                 reference="docs/contribute/known-gaps.md",
             ),
+            KnownGap(
+                description=(
+                    "No seed test drives a DWARF array-bound change through "
+                    "`abicheck.service` (python-api); the CLI is reached only "
+                    "by `abicheck dump`, and the comparison by "
+                    "`checker.compare()`."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md#phase-5",
+            ),
         ),
     ),
     BugClass(
@@ -174,6 +183,14 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
                     "GCC-built DWARF snapshot cannot report func_virtual_became_pure."
                 ),
                 reference="docs/contribute/known-gaps.md",
+            ),
+            KnownGap(
+                description=(
+                    "No seed test reaches a public surface (CLI or "
+                    "`abicheck.service`): the member-function shapes are "
+                    "dumped and compared through `dump()`/`checker.compare()`."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md#phase-5",
             ),
         ),
     ),
