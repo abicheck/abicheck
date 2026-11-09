@@ -72,7 +72,7 @@ _COMPARE_APPLIED_PATHS: frozenset[str] = (
 )
 
 #: The keys a directory/package (release) compare forwards to its members. The
-#: release request carries no public-symbol, suppression, assurance or debug
+#: release request carries no public-symbol, suppression, require-complete or debug
 #: settings field, so every other ``--set`` key is refused on that route rather
 #: than accepted and not applied. The non-core ``deps.*`` keys are folded into
 #: the walk inputs every member takes (``ReleaseMemberRunInputs``).
@@ -85,6 +85,8 @@ _RELEASE_APPLIED_PATHS: frozenset[str] = frozenset(
         "severity.quality_issues",
         "severity.addition",
         "deployment",
+        # ADR-090: every member's classification takes the resolved mode.
+        "assurance.unconfirmed",
         BASELINE_PROVENANCE_PATH,
     }
     | COMPILE_CONTEXT_OVERRIDE_PATHS

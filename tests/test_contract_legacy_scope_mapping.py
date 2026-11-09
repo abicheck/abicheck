@@ -97,6 +97,11 @@ def exits(tmp_path_factory: pytest.TempPathFactory) -> dict[str, dict[str, int]]
                     str(old_p),
                     str(new_p),
                     *args,
+                    # Exit codes are this module's oracle for the scope
+                    # mapping; ADR-090's UNCONFIRMED axis (these snapshots
+                    # may carry no type-level evidence) is a separate one.
+                    "--set",
+                    "assurance.unconfirmed=warn",
                     "-o",
                     f"json={root / 'r.json'}",
                 ],

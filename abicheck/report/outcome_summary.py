@@ -43,7 +43,11 @@ from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any
 
 from ..model.change_catalog.registry import Verdict
-from ..policy.unconfirmed_compatibility import UNCONFIRMED, is_unconfirmed
+from ..policy.unconfirmed_compatibility import (
+    UNCONFIRMED,
+    is_unconfirmed,
+    report_compatibility,
+)
 from .envelope import resolved_gate, resolved_scoped_gate
 from .finding import build_report_findings
 from .policy_facts import kind_sets_for
@@ -70,6 +74,7 @@ __all__ = [
     "compute_severity_summary",
     "gate_merge_effect",
     "headline_verdict",
+    "report_verdict",
     "project_outcome",
     "section_severity_label",
     "section_severity_level",
@@ -113,6 +118,12 @@ SEVERITY_EMOJI: Mapping[str, str] = {
     "warning": "⚠️",
     "info": "ℹ️",
 }
+
+
+def report_verdict(result: DiffResult) -> str:
+    """The report's compatibility value for *result*: ``UNCONFIRMED`` (ADR-090)
+    or the verdict. The one place a renderer reads it from."""
+    return report_compatibility(result)
 
 
 def headline_verdict(result: DiffResult) -> tuple[str, str]:

@@ -4,7 +4,7 @@
 |---|---|
 | **Old version** | `1.0` |
 | **New version** | `2.0` |
-| **Verdict** | ⚠️ `COMPATIBLE_WITH_RISK` |
+| **Verdict** | ❓ `UNCONFIRMED` |
 | Breaking changes | 0 |
 | Source-level breaks | 0 |
 | Deployment risk changes | 2 |

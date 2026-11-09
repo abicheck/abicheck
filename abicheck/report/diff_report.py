@@ -19,7 +19,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
 
-from ..policy.unconfirmed_compatibility import report_compatibility
 from .change_json import (
     change_to_dict,
     prewarm_change_demangling,
@@ -44,6 +43,7 @@ from .json_sections import (
     displayed_with_scoped_only,
     scoped_only_extra_causes,
 )
+from .outcome_summary import report_verdict
 
 if TYPE_CHECKING:
     from ..policy.severity import SeverityConfig
@@ -166,7 +166,7 @@ def to_stat_json(
         "library": result.library,
         "old_version": result.old_version,
         "new_version": result.new_version,
-        "verdict": report_compatibility(result),  # ADR-090 D2
+        "verdict": report_verdict(result),  # ADR-090 D2
         "policy": effective_policy,
         "summary": {
             "breaking": summary.breaking,

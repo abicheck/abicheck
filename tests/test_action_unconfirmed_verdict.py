@@ -43,7 +43,9 @@ from abicheck.model import AbiSnapshot, Function
 from abicheck.serialization import save_snapshot
 
 
-def _real_report(tmp_path: Path, *, mode: str, funcs_new: list[str]) -> tuple[int, dict]:
+def _real_report(
+    tmp_path: Path, *, mode: str, funcs_new: list[str]
+) -> tuple[int, dict]:
     def snap(version: str, names: list[str]) -> AbiSnapshot:
         return AbiSnapshot(
             library="libx.so.1",

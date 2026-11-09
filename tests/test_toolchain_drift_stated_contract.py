@@ -120,8 +120,13 @@ def test_svs_drift_replay_never_fails_contract_coverage(
     # The library's own API did not change; only the toolchain around it did.
     assert report["contract_coverage_failures"] == []
     assert report["contract_coverage_exit_contribution"] == 0
-    assert rc == 0, report["exit"]
-    assert report["verdict"] == "COMPATIBLE_WITH_RISK"
+    # The replay carries no type-level evidence on either side, so the
+    # risk-only verdict is reported UNCONFIRMED (ADR-090): exit 1 through that
+    # axis alone, with the observed verdict kept.
+    assert rc == 1, report["exit"]
+    assert report["exit"]["reasons"] == ["unconfirmed_compatibility"]
+    assert report["verdict"] == "UNCONFIRMED"
+    assert report["unconfirmed"]["observed_verdict"] == "COMPATIBLE_WITH_RISK"
 
     # ...and the toolchain facts are still all there, none hidden by the mode.
     recorded = _every_recorded_finding(report)

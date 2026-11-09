@@ -154,7 +154,9 @@ def _removal_changes(
         main,
         ["compare", str(old), str(new), "--suppress", str(suppress), "-o", "json=-"],
     )
-    assert result.exit_code in (0, 2, 4), result.output
+    # 1: a fully suppressed removal over symbols-only evidence leaves a clean
+    # claim no type-level evidence backs (ADR-090 UNCONFIRMED).
+    assert result.exit_code in (0, 1, 2, 4), result.output
     return json.loads(result.stdout[result.stdout.index("{") :])["changes"]
 
 

@@ -1137,7 +1137,7 @@ outputs:
       `analysis_assurance` block names which members fell short. It used to
       be rejected outright for that operand, and this output declared itself
       single-pair-only on the strength of that rejection), UNCONFIRMED
-      (ADR-090: no break was observed, but a compared side has no
+      (no break was observed, but a compared side has no
       type-level evidence -- no debug info, no header AST -- so the
       compatibility claim cannot be confirmed; read from the report's
       `exit.unconfirmed_contribution`. Exit 1 and fails the step under the

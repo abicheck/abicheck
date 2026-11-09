@@ -85,7 +85,12 @@ _RECORDED_POLICY_IMPORTS: dict[str, frozenset[str]] = {
     # its rows. Per-category counts are tallied from each finding's resolved
     # category, never re-classified here; ``markdown_compute.py`` reads the
     # table from here and no longer reaches policy at all.
-    "outcome_summary.py": frozenset({"policy.severity"}),
+    # ``policy.unconfirmed_compatibility`` (ADR-090): the headline's
+    # ``UNCONFIRMED`` label is decided there once; every renderer reads it
+    # through ``report_verdict``/``headline_verdict`` here, never itself.
+    "outcome_summary.py": frozenset(
+        {"policy.severity", "policy.unconfirmed_compatibility"}
+    ),
 }
 _RECORDED_DISPOSITION_COMPUTE: dict[str, frozenset[str]] = {
     # The envelope-driven renders (every ``render_*`` module, the one-line

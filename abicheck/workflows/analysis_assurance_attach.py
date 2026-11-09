@@ -124,19 +124,32 @@ def attach_type_evidence(
     type-level evidence: a one-sided gap means the two inputs differ by
     construction. It is proven by byte-identical binaries
     (``LibraryMetadata.sha256``, set by ``compare_classify`` before its own
-    call) or, with no binary hashes on both sides, by identical persisted
-    snapshot content -- the same identity ``note_if_same_binary_compared``
+    call) or, with no binary hashes on both sides, by the snapshots' evidence
+    identity digest -- the same identity ``note_if_same_binary_compared``
     uses.
     """
-    from ..model.type_evidence import type_evidence_facts
-    from ..storage.snapshot_encode import same_persisted_content
+    from ..model.type_evidence import TypeEvidenceFacts, type_evidence_facts
+    from ..storage.snapshot_evidence import evidence_identity_digests
 
-    facts = type_evidence_facts(old, new)
+    # The second attach of one comparison (compare_classify, after
+    # checker.compare) sees the same snapshots: reuse the per-side answers
+    # and decide only the identical-input flag, which needs the hashes that
+    # exist only now.
+    prior = result.type_evidence
+    facts = (
+        prior
+        if prior is not None and prior.old == (None if old is None else prior.old)
+        else type_evidence_facts(old, new)
+    )
     if old is not None and facts.old is False and not facts.new:
         old_meta, new_meta = result.old_metadata, result.new_metadata
         if old_meta is not None and new_meta is not None:
             identical = bool(old_meta.sha256) and old_meta.sha256 == new_meta.sha256
         else:
-            identical = same_persisted_content(old, new)
-        facts = type_evidence_facts(old, new, identical_inputs=identical)
+            # ADR-062 D16's *evidence* identity: two dumps of one binary that
+            # differ only in `created_at`, dump path or producer order are one
+            # input -- the identity `note_if_same_binary_compared` uses too.
+            old_digest, new_digest = evidence_identity_digests(old, new)
+            identical = old_digest is not None and old_digest == new_digest
+        facts = TypeEvidenceFacts(old=False, new=False, identical_inputs=identical)
     result.type_evidence = facts

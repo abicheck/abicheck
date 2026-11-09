@@ -288,7 +288,10 @@ def test_compare_accepts_depth_over_snapshots(tmp_path, depth: str) -> None:  # 
     old = _snap(tmp_path, "libx", "1.0", [_fn("a"), _fn("b")])
     new = _snap(tmp_path, "libx", "2.0", [_fn("a"), _fn("b")])
     res = CliRunner().invoke(main, ["compare", str(old), str(new), "--depth", depth])
-    assert res.exit_code == 0, _all_output(res)
+    # `--depth binary` keeps no header evidence, so the clean claim is
+    # ADR-090 UNCONFIRMED (exit 1); every deeper depth keeps the model
+    # surface's declarations and exits clean.
+    assert res.exit_code == (1 if depth == "binary" else 0), _all_output(res)
 
 
 def test_compare_collect_mode_flag_removed(tmp_path) -> None:  # type: ignore[no-untyped-def]
@@ -309,7 +312,10 @@ def test_compare_depth_over_snapshots(tmp_path, depth: str) -> None:  # type: ig
     old = _snap(tmp_path, "libz", "1.0", [_fn("a")])
     new = _snap(tmp_path, "libz", "2.0", [_fn("a")])
     res = CliRunner().invoke(main, ["compare", str(old), str(new), "--depth", depth])
-    assert res.exit_code == 0, _all_output(res)
+    # `--depth binary` keeps no header evidence, so the clean claim is
+    # ADR-090 UNCONFIRMED (exit 1); every deeper depth keeps the model
+    # surface's declarations and exits clean.
+    assert res.exit_code == (1 if depth == "binary" else 0), _all_output(res)
 
 
 def test_dump_source_only_depth_build_without_facts_fails(tmp_path) -> None:  # type: ignore[no-untyped-def]

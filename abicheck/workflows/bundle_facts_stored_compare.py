@@ -159,6 +159,11 @@ def execute_bundle_facts_compare(
         request.warn("no library pair was compared -- no comparison completed.")
 
     require_complete = bool(cfg.assurance_require_complete) if cfg else False
+    # ADR-090 D4: `assurance.unconfirmed`, applied to every stored member as a
+    # live release applies it to each member's own classification.
+    unconfirmed_mode = (cfg.assurance_unconfirmed if cfg else None) or "fail"
+    for diff in getattr(result, "per_library", ()) or ():
+        diff.unconfirmed_mode = "warn" if unconfirmed_mode == "warn" else "fail"
     if request.output_dir is not None:
         _prepare_output_dir(request, Path(request.output_dir), result.per_library)
     # ADR-071 D8: resolved ahead of every render and per-library write, so the

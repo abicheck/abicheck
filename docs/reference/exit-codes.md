@@ -308,7 +308,7 @@ readable member exits `1` with the same error a two-sided `compare` gives.
 Formats: `json`, `markdown` (the default) and `oneline`; the others are
 usage errors.
 
-## Unconfirmed compatibility (ADR-090)
+## Unconfirmed compatibility
 
 A `compare` whose change-derived verdict is a compatibility claim
 (`NO_CHANGE`, `COMPATIBLE` or `COMPATIBLE_WITH_RISK`) while **at least one
@@ -545,7 +545,7 @@ below.
 | Exit code | Meaning |
 |-----------|---------|
 | `0` | `NO_CHANGE`, `COMPATIBLE`, or `COMPATIBLE_WITH_RISK` — no binary ABI break |
-| `1` | `UNCONFIRMED` — the verdict would be one of the three above, but a compared side has no type-level evidence ([ADR-090](#unconfirmed-compatibility-adr-090)); `assurance.unconfirmed: warn` turns it into `0`. Also the contract-coverage and other orthogonal `1` floors described above |
+| `1` | `UNCONFIRMED` — the verdict would be one of the three above, but a compared side has no type-level evidence ([unconfirmed compatibility](#unconfirmed-compatibility)); `assurance.unconfirmed: warn` turns it into `0`. Also the contract-coverage and other orthogonal `1` floors described above |
 | `2` | `API_BREAK` — source-level API break — recompilation required |
 | `4` | `BREAKING` — binary ABI break |
 | `5` | Budget overflow — the run's wall-clock budget was exceeded and no verdict was produced. The budget is `--budget` when given, else the **2h default**: no `compare` run is unbounded. On a two-sided `compare` (single pair, directory/package release, or a stored-`BundleFacts` baseline) the error names which budget ran out and how to set a longer one: `--budget 4h`, the Action's `budget` input, or `CompareRequest.budget_s`. `compare --no-baseline` also stops at the 2h default but does not accept `--budget`; split the candidate into smaller audits or pin a shallower `--depth`. |
@@ -1069,7 +1069,7 @@ one of those.
 | `BREAKING` / `FAIL` | `4` | `0`–`4`* | `4` / `0`–`4`*‡ | — | `4` |
 | Budget overflow (`--budget`; on `compare`, else the 2h default) | `5` | `5` | `5` (explicit `--budget` only) | — | — |
 | Configured rule unused (`unused_rules: block`) | `1` floor | `1` floor | — | — | — |
-| `UNCONFIRMED` (no type-level evidence on a side; ADR-090) | `1` floor (`0` under `assurance.unconfirmed: warn`) | `1` floor (same) | — | — | — |
+| `UNCONFIRMED` (no type-level evidence on a side) | `1` floor (`0` under `assurance.unconfirmed: warn`) | `1` floor (same) | — | — | — |
 | Missing dependencies/symbols | — | — | — | `1` | — |
 | Load failure | — | — | — | — | `4` |
 | Invalid invocation / tool error | `64`† | `64`† | `64`† | `64`† | `64`† |

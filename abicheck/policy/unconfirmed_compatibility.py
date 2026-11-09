@@ -79,7 +79,9 @@ UNCONFIRMED_REMEDY = (
 
 def is_unconfirmed(result: DiffResult) -> bool:
     """Whether *result* meets ADR-090 D1 (a), (b) and (c)."""
-    facts = result.type_evidence
+    # Read defensively: a duck-typed result (a report view, a test double)
+    # carrying no fact was never evaluated, so it asserts nothing new.
+    facts = getattr(result, "type_evidence", None)
     if facts is None or facts.old is None:
         # Never evaluated (a hand-built result), or a `--no-baseline` audit,
         # which compares nothing and so asserts no compatibility.
@@ -97,12 +99,15 @@ def is_unconfirmed(result: DiffResult) -> bool:
 
 def report_compatibility(result: DiffResult) -> str:
     """The report's compatibility value: ``UNCONFIRMED`` or the verdict."""
-    return UNCONFIRMED if is_unconfirmed(result) else result.verdict.value
+    if is_unconfirmed(result):
+        return UNCONFIRMED
+    verdict = result.verdict
+    return verdict.value if hasattr(verdict, "value") else str(verdict)
 
 
 def unconfirmed_exit_contribution(result: DiffResult) -> int:
     """The ``0``/``1`` exit axis: ``1`` for a triggered ``fail``-mode run."""
-    if result.unconfirmed_mode == "warn":
+    if getattr(result, "unconfirmed_mode", "fail") == "warn":
         return 0
     return 1 if is_unconfirmed(result) else 0
 

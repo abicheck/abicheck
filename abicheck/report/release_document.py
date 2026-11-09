@@ -415,9 +415,14 @@ def stored_reported_verdict(result: Any) -> str:
     when a matched pair's contracts disagreed, else ``"ERROR"`` when a NEW
     member failed extraction (ADR-065 D1), else the verdict. The ranking is
     ``policy.release_outcome``'s; the exit and the document both read this."""
+    from ..policy.unconfirmed_compatibility import report_compatibility
+
     sentinels = [
         *(["not_comparable"] if result.not_comparable_members else []),
         *(["ERROR"] if result.extraction_failures else []),
+        # ADR-090: each member's own report value, as the live fan-out folds
+        # its entries -- an UNCONFIRMED member outranks a clean claim.
+        *(report_compatibility(d) for d in getattr(result, "per_library", ()) or ()),
     ]
     return fold_release_outcome(sentinels, [result.verdict.value]).reported_verdict
 

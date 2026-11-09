@@ -43,6 +43,9 @@ _S2_EXIT_FIELDS = (
     # ADR-067 P1's unused_rules axis, appended after additions_review for the
     # identical reason.
     "unused_rules_contribution",
+    # ADR-090's UNCONFIRMED axis, appended after unused_rules for the
+    # identical reason.
+    "unconfirmed_contribution",
 )
 _S2_BUNDLE_FIELDS = (
     "scope_record",
@@ -76,6 +79,9 @@ _S2_TARGET_FIELDS = (
     # field existed keeps binding the older tail rather than silently
     # feeding it into this one.
     "completed_without_compatibility_verdict",
+    # ADR-090's per-target UNCONFIRMED contribution, appended last for the
+    # identical reason.
+    "unconfirmed_exit",
 )
 
 

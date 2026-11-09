@@ -392,9 +392,9 @@ def build_html_document(
         result, severity_config, resolved_document(envelope)
     )
 
-    from ..policy.unconfirmed_compatibility import report_compatibility
+    from .outcome_summary import report_verdict
 
-    verdict = report_compatibility(result)  # ADR-090: UNCONFIRMED aware
+    verdict = report_verdict(result)  # ADR-090: UNCONFIRMED aware
 
     all_changes: list[object] = list(getattr(result, "changes", None) or [])
 

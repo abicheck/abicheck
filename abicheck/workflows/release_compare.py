@@ -376,7 +376,7 @@ def execute_release_compare(
                 acknowledgments_path=o.acknowledgments_path,
                 acknowledgment_unacknowledged_additions=o.acknowledgment_unacknowledged_additions,
                 acknowledgment_breaks=o.acknowledgment_breaks,
-                unconfirmed_mode="warn" if o.unconfirmed_mode == "warn" else "fail",
+                unconfirmed="warn" if o.unconfirmed_mode == "warn" else "fail",
                 **o.run_inputs.request_fields(),
             ),
             old_map=old_map,

@@ -536,9 +536,6 @@ class TargetReport:
     #: orthogonal exit-floor axis. Declared last for the same
     #: positional-construction-safety reason as that field.
     analysis_assurance_exit: int = 0
-    #: ADR-090's ``UNCONFIRMED`` contribution (``0``/``1``), aggregate schema
-    #: 1.12; folded into the aggregate gate with ``max``.
-    unconfirmed_exit: int = 0
     #: Phase 0 item 6 of docs/contribute/plans/duplication-and-convergence-
     #: assessment.md: this target's own already-computed
     #: ``effective_config_digest``, read straight off its report by
@@ -575,6 +572,10 @@ class TargetReport:
     #: shape, so this widens :attr:`analyzed` only for the one shape that
     #: needs it and changes nothing else.
     completed_without_compatibility_verdict: bool = False
+    #: ADR-090's ``UNCONFIRMED`` contribution (``0``/``1``), aggregate schema
+    #: 1.12; folded into the aggregate gate with ``max``. Declared last for the
+    #: same positional-construction-safety reason as the fields above.
+    unconfirmed_exit: int = 0
 
     @property
     def analyzed(self) -> bool:

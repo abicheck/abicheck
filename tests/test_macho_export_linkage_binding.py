@@ -164,7 +164,9 @@ def _compare_removal(tmp_path: Path, rule_binding: str) -> list[dict]:
             "json=-",
         ],
     )
-    assert result.exit_code in (0, 2, 4), result.output
+    # 1: a fully suppressed removal over symbols-only evidence leaves a clean
+    # claim no type-level evidence backs (ADR-090 UNCONFIRMED).
+    assert result.exit_code in (0, 1, 2, 4), result.output
     start = result.stdout.index("{")
     return json.loads(result.stdout[start:])["changes"]
 

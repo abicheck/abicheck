@@ -383,8 +383,21 @@ def _assert_clean_against_fresh(key: str, fresh: Path, work: Path) -> None:
     sample = _entry(key)["sample"]
     frozen = _frozen_path(key)
     code, report = _compare_report(frozen, fresh, work)
-    assert report["verdict"] not in _GATING, report["verdict"]
-    assert code == 0, report.get("exit")
+    # A frozen and a fresh dump of a sample without debug info are two inputs
+    # with no type-level evidence: their clean claim reads UNCONFIRMED
+    # (ADR-090), exit 1 through that axis alone. The oracle is the observed
+    # verdict -- regeneration must still fabricate no gating finding.
+    observed = (report.get("unconfirmed") or {}).get(
+        "observed_verdict", report["verdict"]
+    )
+    assert observed not in _GATING, observed
+    if report["verdict"] == "UNCONFIRMED":
+        assert report["exit"]["reasons"] == ["unconfirmed_compatibility"], report[
+            "exit"
+        ]
+        assert code == 1
+    else:
+        assert code == 0, report.get("exit")
     old = _members(sample, frozen, work / "old")
     new = _members(sample, fresh, work / "new")
     assert sorted(old) == sorted(new)

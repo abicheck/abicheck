@@ -548,6 +548,9 @@ class TestStoredPairEndToEnd:
         assert code != 0
 
     def test_unchanged_pair_is_a_clean_exit(self, tmp_path: Path) -> None:
+        """No change is observed, but the stored members carry only binary
+        evidence and are two distinct releases: ADR-090 reports UNCONFIRMED
+        (exit 1) on the release and on its member alike; `warn` accepts it."""
         old_path = _write_facts(
             tmp_path, "old.bundlefacts.json", "old", Visibility.PUBLIC
         )
@@ -560,8 +563,17 @@ class TestStoredPairEndToEnd:
         )
 
         data = json.loads(out)
-        assert data["verdict"] == "NO_CHANGE"
-        assert code == 0
+        assert data["verdict"] == "UNCONFIRMED"
+        assert {e["verdict"] for e in data["libraries"]} == {"UNCONFIRMED"}
+        assert code == 1
+        cfg = tmp_path / ".abicheck.yml"
+        cfg.write_text("assurance:\n  unconfirmed: warn\n", encoding="utf-8")
+        accepted, out = _invoke_stdout(
+            "compare", str(old_path), str(new_path),
+            "--config", str(cfg), "-o", "json=-",
+        )  # fmt: skip
+        assert accepted == 0
+        assert json.loads(out)["verdict"] == "UNCONFIRMED"
 
     def test_scope_on_incomplete_config_is_read_through_this_dispatch(
         self, tmp_path: Path
@@ -583,7 +595,10 @@ class TestStoredPairEndToEnd:
             tmp_path, "new.bundlefacts.json", "new", Visibility.PUBLIC
         )
         cfg = tmp_path / ".abicheck.yml"
-        cfg.write_text("scope:\n  on_incomplete: block\n", encoding="utf-8")
+        cfg.write_text(
+            "scope:\n  on_incomplete: block\nassurance:\n  unconfirmed: warn\n",
+            encoding="utf-8",
+        )
 
         code, out = _invoke_stdout(
             "compare",
@@ -596,7 +611,8 @@ class TestStoredPairEndToEnd:
         )
 
         data = json.loads(out)
-        assert data["verdict"] == "NO_CHANGE"
+        # Binary-only members: UNCONFIRMED, accepted at exit 0 by `warn`.
+        assert data["verdict"] == "UNCONFIRMED"
         assert code == 0
 
     def test_markdown_output_labels_new_side_as_stored_facts(
@@ -665,8 +681,10 @@ class TestStoredPairEndToEnd:
             "json=-",
         )
 
-        assert code == 0
-        assert json.loads(out)["verdict"] == "NO_CHANGE"
+        # Not refused by the depth floor (that would be exit 7). The clean
+        # claim over binary-only evidence is ADR-090 UNCONFIRMED: exit 1.
+        assert code == 1
+        assert json.loads(out)["verdict"] == "UNCONFIRMED"
 
     def test_depth_headers_over_binary_only_evidence_is_refused(
         self, tmp_path: Path

@@ -211,6 +211,10 @@ EXCLUDED: dict[str, tuple[str, str]] = {
         "abicheck.workflows.compare_finalize",
         "exit-gate axis applied by effective_gate_for_compare at finalize",
     ),
+    "unconfirmed": (
+        "abicheck.workflows.compare_classify",
+        "ADR-090 exit-gate mode stamped on DiffResult.unconfirmed_mode at classification",
+    ),
     "changed_paths": (
         "abicheck.service_compare_evidence",
         "changed-path scoping seed for evidence collection",

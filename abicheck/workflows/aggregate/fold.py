@@ -311,7 +311,7 @@ class AggregateResult:
             code = max(code, COVERAGE_INCOMPLETE_EXIT)
         code = max(code, self.contract_coverage_exit)
         code = max(code, self.analysis_assurance_exit)
-        code = max(code, *(t.unconfirmed_exit for t in gated))  # ADR-090
+        code = max([code, *(t.unconfirmed_exit for t in gated)])  # ADR-090
         code = max(code, self.scope_completeness_exit)
         # ``fail`` fails the gate on *any* unexpected report — including one that is unreadable/verdictless (so has no gate to contribute above) — since
         # the policy is "no target outside the expected set is tolerated".
