@@ -323,7 +323,9 @@ something that run can establish.
 - **Where it shows.** JSON `verdict` and `run_outcome.compatibility` read
   `UNCONFIRMED` (report schema 7.4); the observed verdict stays in the
   top-level `unconfirmed` block (`observed_verdict`,
-  `sides_without_type_evidence`, `mode`, `exit_contribution`, `remedy`);
+  `sides_without_type_evidence`, `mode`, `exit_contribution`, `remedy`, and
+  `header_scope_fallback` when headers were supplied but header scoping fell
+  back to the export table, in which case the remedy names that mismatch);
   `exit.unconfirmed_contribution` is the axis and `exit.reasons` names
   `unconfirmed_compatibility`; `release_recommendation.version_bump` is
   `undetermined`. The terminal, Markdown and HTML headlines say

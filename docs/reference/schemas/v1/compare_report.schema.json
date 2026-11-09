@@ -151,6 +151,19 @@
         },
         "remedy": {
           "type": "string"
+        },
+        "header_scope_fallback": {
+          "type": "object",
+          "description": "Present only when headers were supplied for a lacking side but header scoping fell back to the export table (the snapshot's scope_fallback, e.g. 'mangling-fallback': no header declaration matched an exported symbol), so the header surface was not kept. Maps each such side to its fallback reason; 'remedy' then names the mismatch instead of asking for headers.",
+          "propertyNames": {
+            "enum": [
+              "old",
+              "new"
+            ]
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
         }
       }
     },

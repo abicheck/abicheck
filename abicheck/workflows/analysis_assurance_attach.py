@@ -32,6 +32,7 @@ remaining call site to the same wiring.
 
 from __future__ import annotations
 
+import dataclasses
 from functools import partial
 from typing import TYPE_CHECKING
 
@@ -128,7 +129,7 @@ def attach_type_evidence(
     identity digest -- the same identity ``note_if_same_binary_compared``
     uses.
     """
-    from ..model.type_evidence import TypeEvidenceFacts, type_evidence_facts
+    from ..model.type_evidence import type_evidence_facts
     from ..storage.snapshot_evidence import evidence_identity_digests
 
     # Recomputed on every attach, from the snapshots this call was given:
@@ -144,5 +145,5 @@ def attach_type_evidence(
             # input -- the identity `note_if_same_binary_compared` uses too.
             old_digest, new_digest = evidence_identity_digests(old, new)
             identical = old_digest is not None and old_digest == new_digest
-        facts = TypeEvidenceFacts(old=False, new=False, identical_inputs=identical)
+        facts = dataclasses.replace(facts, identical_inputs=identical)
     result.type_evidence = facts

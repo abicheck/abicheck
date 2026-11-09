@@ -210,3 +210,69 @@ def test_checker_compare_records_the_fact_and_reports_unconfirmed(
         assert doc["run_outcome"]["compatibility"] == "UNCONFIRMED"
         assert doc["exit"]["code"] >= 1
         assert doc["release_recommendation"]["version_bump"] == "undetermined"
+
+
+def _fallback_side(version: str, *, dwarf: bool = False) -> AbiSnapshot:
+    """A PE-style side whose supplied headers were dropped: header scoping
+    found no declaration matching an export and fell back to the table."""
+    snap = _snapshot("symbols_only")
+    snap.version = version
+    snap.scope_fallback = "mangling-fallback"
+    if dwarf:
+        snap.declarations.debug_layout = DwarfMetadata(has_dwarf=True)
+    return snap
+
+
+@pytest.mark.parametrize(
+    ("old_fb", "new_fb", "new_dwarf", "expected"),
+    [
+        (False, True, False, {"new": "mangling-fallback"}),
+        (True, True, False, {"old": "mangling-fallback", "new": "mangling-fallback"}),
+        # A side that kept type evidence (DWARF) is not a lacking side.
+        (True, True, True, {"old": "mangling-fallback"}),
+        (False, False, False, None),
+    ],
+)
+def test_header_scope_fallback_names_the_cause_instead_of_asking_for_headers(
+    tmp_path, old_fb: bool, new_fb: bool, new_dwarf: bool, expected
+) -> None:
+    """Headers supplied but dropped by header scoping: every surface says so,
+    and the remedy never asks for the headers the user already gave."""
+    from abicheck import checker
+    from abicheck.policy.unconfirmed_compatibility import (
+        HEADER_SCOPE_FALLBACK_REMEDY,
+        UNCONFIRMED_REMEDY,
+        unconfirmed_summary,
+    )
+    from abicheck.report.diff_report import to_json
+    from abicheck.report.outcome_summary import (
+        UNCONFIRMED_FALLBACK_MERGE_EFFECT,
+        UNCONFIRMED_MERGE_EFFECT,
+        project_outcome,
+    )
+    from abicheck.serialization import load_snapshot, save_snapshot
+
+    old = _fallback_side("1") if old_fb else _snapshot("symbols_only")
+    new = _fallback_side("2", dwarf=new_dwarf) if new_fb else _snapshot("symbols_only")
+    new.version = "2"
+    # Through storage: the fallback reason is a persisted snapshot fact.
+    paths = tmp_path / "o.json", tmp_path / "n.json"
+    save_snapshot(old, paths[0])
+    save_snapshot(new, paths[1])
+    result = checker.compare(*(load_snapshot(p) for p in paths))
+    doc = json.loads(to_json(result))
+    assert doc["verdict"] == "UNCONFIRMED"
+    block = doc["unconfirmed"]
+    summary = unconfirmed_summary(result)
+    effect = project_outcome(result).merge_effect
+    if expected is None:
+        assert "header_scope_fallback" not in block
+        assert block["remedy"] == UNCONFIRMED_REMEDY
+        assert "header scoping fell back" not in summary
+        assert effect == UNCONFIRMED_MERGE_EFFECT
+        return
+    assert block["header_scope_fallback"] == expected
+    assert block["remedy"] == HEADER_SCOPE_FALLBACK_REMEDY
+    assert "supply public headers" not in block["remedy"] + summary
+    assert "headers were supplied, but header scoping fell back" in summary
+    assert effect == UNCONFIRMED_FALLBACK_MERGE_EFFECT

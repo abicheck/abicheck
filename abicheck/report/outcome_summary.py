@@ -66,6 +66,7 @@ if TYPE_CHECKING:
 __all__ = [
     "SEVERITY_EMOJI",
     "UNCONFIRMED_EMOJI",
+    "UNCONFIRMED_FALLBACK_MERGE_EFFECT",
     "UNCONFIRMED_MERGE_EFFECT",
     "VERDICT_EMOJI",
     "VERDICT_LABEL",
@@ -112,6 +113,11 @@ UNCONFIRMED_MERGE_EFFECT = (
     "compatibility unconfirmed — no type-level evidence on a compared side; "
     "supply headers for both sides or compare unstripped debug builds"
 )
+#: The same, when headers were supplied but header scoping fell back.
+UNCONFIRMED_FALLBACK_MERGE_EFFECT = (
+    "compatibility unconfirmed — headers were supplied, but header scoping "
+    "fell back to the export table; check that they declare the exported symbols"
+)
 
 SEVERITY_EMOJI: Mapping[str, str] = {
     "error": "❌",
@@ -154,6 +160,8 @@ class OutcomeSummary:
     #: ADR-090: the verdict is a compatibility claim no type-level evidence
     #: backs on some side, so every headline states ``UNCONFIRMED``.
     unconfirmed: bool = False
+    #: A lacking side's headers were supplied but scoping fell back.
+    header_scope_fell_back: bool = False
 
     @property
     def verdict_emoji(self) -> str:
@@ -171,6 +179,8 @@ class OutcomeSummary:
     def merge_effect(self) -> str:
         """The gate's phrase under a severity scheme, else the verdict's."""
         if self.unconfirmed:
+            if self.header_scope_fell_back:
+                return UNCONFIRMED_FALLBACK_MERGE_EFFECT
             return UNCONFIRMED_MERGE_EFFECT
         if self.gate is not None:
             return gate_merge_effect(self.gate.exit_code)
@@ -201,6 +211,9 @@ def project_outcome(
         gate=resolved_gate(envelope, result, severity_config),
         scoped_gate=resolved_scoped_gate(envelope, result),
         unconfirmed=is_unconfirmed(result),
+        header_scope_fell_back=bool(
+            getattr(getattr(result, "type_evidence", None), "header_scope_fallback", ())
+        ),
     )
 
 

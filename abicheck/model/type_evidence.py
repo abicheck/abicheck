@@ -81,6 +81,11 @@ class TypeEvidenceFacts:
     old: bool | None
     new: bool
     identical_inputs: bool = False
+    #: ``(side, reason)`` for each side lacking evidence although headers were
+    #: supplied: header scoping fell back to the export table
+    #: (``AbiSnapshot.scope_fallback``, e.g. ``"mangling-fallback"``), so the
+    #: parsed header surface was not kept.
+    header_scope_fallback: tuple[tuple[str, str], ...] = ()
 
     def sides_without_type_evidence(self) -> tuple[str, ...]:
         """``"old"``/``"new"``, in that order, for each compared side lacking it."""
@@ -96,6 +101,7 @@ class TypeEvidenceFacts:
             "old": self.old,
             "new": self.new,
             "identical_inputs": self.identical_inputs,
+            "header_scope_fallback": dict(self.header_scope_fallback),
         }
 
 
@@ -106,8 +112,18 @@ def type_evidence_facts(
     identical_inputs: bool = False,
 ) -> TypeEvidenceFacts:
     """The :class:`TypeEvidenceFacts` of comparing *old* to *new*."""
+    old_has = side_has_type_evidence(old) if old is not None else None
+    new_has = side_has_type_evidence(new)
+    fallback = tuple(
+        (side, str(reason))
+        for side, snap, has in (("old", old, old_has), ("new", new, new_has))
+        if snap is not None
+        and has is False
+        and (reason := getattr(snap, "scope_fallback", None))
+    )
     return TypeEvidenceFacts(
-        old=side_has_type_evidence(old) if old is not None else None,
-        new=side_has_type_evidence(new),
+        old=old_has,
+        new=new_has,
         identical_inputs=identical_inputs,
+        header_scope_fallback=fallback,
     )

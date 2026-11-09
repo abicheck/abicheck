@@ -51,11 +51,14 @@ __all__ = [
     "COMPATIBILITY_CLAIMS",
     "UNCONFIRMED",
     "UNCONFIRMED_MODES",
+    "HEADER_SCOPE_FALLBACK_REMEDY",
     "UNCONFIRMED_REMEDY",
     "is_unconfirmed",
     "report_compatibility",
     "unconfirmed_block",
+    "unconfirmed_cause",
     "unconfirmed_exit_contribution",
+    "unconfirmed_remedy",
     "unconfirmed_summary",
 ]
 
@@ -75,6 +78,40 @@ UNCONFIRMED_REMEDY = (
     "supply public headers for both sides (--header old=... --header new=...), "
     "or compare unstripped debug builds (-g, without strip/strip --strip-debug)"
 )
+
+#: The remedy when headers were supplied but header scoping fell back to the
+#: export table on a side (``AbiSnapshot.scope_fallback``): asking for the
+#: headers again would tell the user to do what they already did.
+HEADER_SCOPE_FALLBACK_REMEDY = (
+    "check that the supplied headers declare the library's exported symbols "
+    "under the same names (for C++ on Windows, MSVC name mangling is the usual "
+    "mismatch), or compare unstripped debug builds"
+)
+
+
+def _scope_fallback(result: DiffResult) -> tuple[tuple[str, str], ...]:
+    facts = getattr(result, "type_evidence", None)
+    return tuple(getattr(facts, "header_scope_fallback", ()) or ())
+
+
+def unconfirmed_cause(result: DiffResult) -> str:
+    """Why the lacking side(s) have no type-level evidence, for every surface."""
+    fallback = _scope_fallback(result)
+    if not fallback:
+        return "no debug info, no header AST"
+    sides = " and ".join(f"{side}: {reason}" for side, reason in fallback)
+    return (
+        "headers were supplied, but header scoping fell back to the export "
+        f"table ({sides}) because no header declaration matched an exported "
+        "symbol, so the header surface was not kept"
+    )
+
+
+def unconfirmed_remedy(result: DiffResult) -> str:
+    """The remedy text: fallback-aware, else :data:`UNCONFIRMED_REMEDY`."""
+    return (
+        HEADER_SCOPE_FALLBACK_REMEDY if _scope_fallback(result) else UNCONFIRMED_REMEDY
+    )
 
 
 def is_unconfirmed(result: DiffResult) -> bool:
@@ -120,10 +157,10 @@ def unconfirmed_summary(result: DiffResult) -> str:
     noun = "sides have" if len(sides) > 1 else "side has"
     return (
         f"compatibility is UNCONFIRMED: the {which} {noun} no type-level "
-        f"evidence (no debug info, no header AST), so signature, enum and "
+        f"evidence ({unconfirmed_cause(result)}), so signature, enum and "
         f"layout changes on exported symbols cannot be seen; "
         f"{result.verdict.value} describes only the symbol table. "
-        f"To confirm, {UNCONFIRMED_REMEDY}"
+        f"To confirm, {unconfirmed_remedy(result)}"
     )
 
 
@@ -132,10 +169,13 @@ def unconfirmed_block(result: DiffResult) -> dict[str, object] | None:
     facts = result.type_evidence
     if facts is None or not is_unconfirmed(result):
         return None
-    return {
+    block: dict[str, object] = {
         "observed_verdict": result.verdict.value,
         "sides_without_type_evidence": list(facts.sides_without_type_evidence()),
         "mode": result.unconfirmed_mode,
         "exit_contribution": unconfirmed_exit_contribution(result),
-        "remedy": UNCONFIRMED_REMEDY,
+        "remedy": unconfirmed_remedy(result),
     }
+    if fallback := _scope_fallback(result):
+        block["header_scope_fallback"] = dict(fallback)
+    return block
