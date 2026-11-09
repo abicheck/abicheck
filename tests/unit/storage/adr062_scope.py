@@ -149,6 +149,8 @@ NON_ADR062_MODULES = frozenset(
         # digest side table, order of work): rides with `snapshot_digest_cache`.
         "snapshot_evidence",
         "json_stream",
+        # JSON decoder scheduling/ownership helper, not a v2 document primitive.
+        "json_strings",
         # A GC-paused `json.loads` for AST/projection documents: a parse
         # helper beside json_stream, not an ADR-062 Phase 0 primitive.
         "acyclic_json",

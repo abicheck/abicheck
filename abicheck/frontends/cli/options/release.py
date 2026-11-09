@@ -490,11 +490,9 @@ def variant_options(func: F) -> F:
     stored `ProjectSnapshot` package operand declares more than one --
     release-fanout-specific, same as this module's other option groups (a
     plain directory/package release comparison, ADR-054's own admission bar
-    for what belongs here). Not applied via ``@variant_options`` on
-    ``compare_cmd`` itself -- ``cli.py`` calls it directly on the already-
-    registered ``compare`` command instead, once `frontends/cli/commands/
-    compare.py` is fully loaded, so that already-at-cap module owes this
-    flag family neither an import nor a decorator line. See
+    for what belongs here). Applied outside ``@main.command`` on
+    ``compare_cmd``, so importing the command completes its parameters even
+    when the root CLI loads implementations lazily. See
     `variant_kwargs_from_context`/`frontends/cli/commands/compare.py`'s own
     use for the full read-back contract.
 

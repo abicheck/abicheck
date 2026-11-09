@@ -55,6 +55,7 @@ from ..options.operand_path import CompareOperandPath
 from ..options.params import (
     _load_suppression_and_policy as _load_suppression_and_policy,  # noqa: F401  — re-exported to keep cli import sites (test suite) stable
 )
+from ..options.release import variant_options
 
 if TYPE_CHECKING:
     pass
@@ -69,6 +70,7 @@ from ..options.config_set import config_set_option
 from .compare_routing import _RELEASE_FORMATS
 
 
+@variant_options
 @main.command("compare")
 @cli_help.compare_help_options  # curated --help + full --help-all (G21.8 collapse M2)
 @click.argument("old_input", type=CompareOperandPath())

@@ -14,7 +14,9 @@
 #   test_only_functions:
 #     - key: abicheck.module#Class.method
 #       reason: documented extension hook, called by third-party plugins
-test_only_functions: []
+test_only_functions:
+  - key: abicheck.frontends.cli.registry#LazyGroup.get_command
+    reason: "Click Group extension hook: Click dispatch and completion call this override through the third-party base-class interface; the static caller scan cannot resolve that dynamic dispatch"
 test_only_modules:
   - key: abicheck.workflows.consumer_scope_standalone
     reason: "public Python API: check_appcompat/check_plugin_host_contract (docs/use/appcompat.md, docs/use/plugin-systems.md) for library users; the CLI uses the pre-computed-diff path instead"
