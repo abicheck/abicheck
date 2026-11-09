@@ -36,8 +36,12 @@ is fixed.
 An explicitly supplied `--header` whose parse fails is a failed acquisition
 (AGENTS.md "Weaker evidence narrows conclusions": a failed extractor is an
 error or an explicit `FAILED` fact, never an empty surface), on every binary
-format. The narrower fallbacks that are deliberate (the MSVC mangling
-mismatch, `mangling-fallback`) need their own ruling, because a header set
-that parses but matches no export is a different state from one that does
-not parse. Flip the darwin branch of that test's negative control when this
+format. Flip the darwin branch of that test's negative control when this
 is fixed.
+
+The neighbouring state, a header set that parses but matches no export
+(formerly `mangling-fallback`), was ruled on and fixed on 2026-11-09: the
+parsed surface is kept, declarations are bound to exports across mangling
+schemes (`extract/header_export_binding.py`), and a snapshot with nothing
+bound records `export-binding-unresolved`. Only the failed parse described
+here still drops to export-table mode.

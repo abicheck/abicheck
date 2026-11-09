@@ -179,10 +179,14 @@ itself, distinct from the overall verdict confidence:
 
 - `confidence`: `"high"` (a clean header-scoped run) or `"reduced"`.
 - `notes`: structured codes explaining any reduction —
-  `mangling-fallback` / `header-backend-unavailable` (header scoping was requested on a
-  PE/Mach-O binary but fell back to the export table; recorded on the snapshot
-  as `scope_fallback`), or `no-provenance` (the surface resolved without any
-  declaration provenance).
+  `header-backend-unavailable` (header scoping was requested on a PE/Mach-O
+  binary but the header parse failed, so the dump fell back to the export
+  table), `export-binding-unresolved` (the headers parsed and were kept, but
+  no declaration could be bound to any export), both recorded on the snapshot
+  as `scope_fallback`; `mangling-fallback` (the pre-2026-11-09 spelling of the
+  latter, which discarded the headers; only older stored snapshots carry it);
+  or `no-provenance` (the surface resolved without any declaration
+  provenance).
 
 **Text**: an audit block on stderr (the reason is shown in parentheses):
 ```text

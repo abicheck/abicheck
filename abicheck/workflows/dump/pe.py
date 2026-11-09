@@ -101,9 +101,11 @@ def extract_pe(
     """Dump a PE binary (Windows DLL) to an ABI snapshot.
 
     When *headers* are supplied the ABI surface is scoped to declarations in
-    those public headers via castxml (mirroring ``abidw --headers-dir``).  If
-    castxml is unavailable or no header declaration matches an exported symbol,
-    scoping is skipped (with a warning) and the full export table is used.
+    those public headers (mirroring ``abidw --headers-dir``), binding each
+    declaration to its export across mangling schemes (an MSVC DLL against an
+    Itanium header parse). A header set that parses is always kept, bound or
+    not. Only a failed header parse skips scoping (with a warning) and uses
+    the full export table.
     """
     from ...extract.export_table_read import read_exports_or_fail
     from ...pe_metadata import parse_pe_metadata
@@ -166,8 +168,8 @@ def extract_pe(
     ]
 
     # ADR-024 Phase 1 (PDB provenance): when header scoping was requested but
-    # castxml could not resolve a surface (commonly the MSVC C++-mangling
-    # gap), recover declared types -- with their defining source header --
+    # the header parse failed (``header-backend-unavailable``), recover
+    # declared types -- with their defining source header --
     # from PDB debug info, so public-header scoping still has a provenance
     # signal to classify against. Bounded so default PE diffs are unaffected.
     pdb_types: list[RecordType] = []
