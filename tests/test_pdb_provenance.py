@@ -307,22 +307,25 @@ class TestHeaderScopeFallback:
         assert snap is None
         assert reason == "header-backend-unavailable"
 
-    def test_mangling_fallback(self, tmp_path, monkeypatch):
+    def test_unbound_headers_are_kept(self, tmp_path, monkeypatch):
         import warnings as _w
 
         import abicheck.dumper as dumper
         from abicheck.model import AbiSnapshot, Function, Visibility
+        from abicheck.model.pe_facts import PeExport, PeMetadata
         from abicheck.workflows.dump import header_scoped
 
         hdr = tmp_path / "api.h"
         hdr.write_text("int f(void);\n")
 
-        # A snapshot whose declared symbols never matched the export table:
-        # no PUBLIC-visibility symbols → _has_matched_public_surface is False.
+        # A parsed header whose only declaration matches no export under any
+        # mangling scheme: the parse is kept and the gap is recorded.
         def _unmatched(*a, **k):
             return AbiSnapshot(
                 library="lib.dll",
                 version="1",
+                from_headers=True,
+                pe=PeMetadata(machine="AMD64", exports=[PeExport(name="g")]),
                 functions=[
                     Function(
                         name="f",
@@ -339,8 +342,9 @@ class TestHeaderScopeFallback:
             snap, reason = header_scoped._try_header_scoped_dump(
                 "pe", tmp_path / "lib.dll", [hdr], [], "1", "c++"
             )
-        assert snap is None
-        assert reason == "mangling-fallback"
+        assert reason == "export-binding-unresolved"
+        assert snap is not None and snap.scope_fallback == reason
+        assert [f.name for f in snap.declarations.functions] == ["f"]
 
     def test_scoped_success_returns_no_fallback(self, tmp_path, monkeypatch):
         import abicheck.dumper as dumper
