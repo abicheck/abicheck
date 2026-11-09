@@ -232,6 +232,15 @@ def driver_width(
     )
 
 
+def _failure_report(cmd: list[str], src: Path, what: str, stderr: str) -> str:
+    """The command, the source it compiled and the whole stderr, for a failure."""
+    return (
+        f"{' '.join(cmd)} {what}\n"
+        f"--- {src.name} ---\n{src.read_text(encoding='utf-8')}"
+        f"--- stderr ---\n{stderr}"
+    )
+
+
 @functools.cache
 def _flags_build(
     tc: Toolchain, lang: str, flags: Flags, check_width: bool = True
@@ -268,16 +277,20 @@ def _flags_build(
         drv = tc.driver(lang)
         lib = [drv, *rendered, "-shared", "-fPIC", "-o", "libprobe.so", f"lib.{ext}"]
         exe = [drv, *rendered, "-o", "main", f"main.{ext}", "-L.", "-lprobe"]
-        for cmd in (lib, exe):
+        for cmd, src in ((lib, tmp / f"lib.{ext}"), (exe, tmp / f"main.{ext}")):
             try:
                 proc = _run(cmd, cwd=tmp)
             except (OSError, subprocess.TimeoutExpired) as exc:
                 # The driver was found: one that cannot start or hangs is broken,
                 # not missing a capability.
-                raise ToolchainBroken(f"{' '.join(cmd)}: {exc}") from exc
+                raise ToolchainBroken(
+                    _failure_report(cmd, src, f"did not run: {exc}", "")
+                ) from exc
             if _crashed(proc):
                 raise ToolchainBroken(
-                    f"{' '.join(cmd)} crashed (exit {proc.returncode}): {proc.stderr.strip()[-400:]}"
+                    _failure_report(
+                        cmd, src, f"crashed (exit {proc.returncode})", proc.stderr
+                    )
                 )
             if proc.returncode != 0:
                 if "edit_corpus_target_width" in proc.stderr:
@@ -286,8 +299,12 @@ def _flags_build(
                     # Not a missing option or multilib: a compiler that ran and
                     # failed for another reason is a failure, never a skip.
                     raise ToolchainBroken(
-                        f"{' '.join(cmd)} failed (exit {proc.returncode}) without naming "
-                        f"a requested capability: {proc.stderr.strip()[-400:]}"
+                        _failure_report(
+                            cmd,
+                            src,
+                            f"failed (exit {proc.returncode}) without naming a requested capability",
+                            proc.stderr,
+                        )
                     )
                 tail = (proc.stderr.strip().splitlines() or ["(no stderr)"])[-1]
                 return f"{tc.id} cannot build with {' '.join(rendered)}: {tail}"

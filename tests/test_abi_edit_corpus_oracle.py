@@ -303,8 +303,14 @@ def test_flag_probe_skips_only_a_failure_that_names_a_capability(
     runner.install(monkeypatch, tcs, "_run")
     flags = Flags(bits=32)
     if broken:
-        with pytest.raises(tcs.ToolchainBroken):
+        with pytest.raises(tcs.ToolchainBroken) as info:
             tcs._flags_unavailable(_PROBE_TC, "c", flags)
+        # The failure carries the command, the probe source and the whole stderr.
+        report = str(info.value)
+        assert "-m32 -shared -fPIC" in report
+        assert "--- lib.c ---\n" in report and "int probe_fn(int x)" in report
+        if isinstance(failure, subprocess.CompletedProcess):
+            assert report.endswith("--- stderr ---\n" + failure.stderr)
     else:
         reason = tcs._flags_unavailable(_PROBE_TC, "c", flags)
         assert isinstance(failure, subprocess.CompletedProcess)
