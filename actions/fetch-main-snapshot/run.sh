@@ -203,10 +203,12 @@ _resolve_artifact() {
     --base-sha "$sha" --artifact-name "$name" \
     ${extra[@]+"${extra[@]}"} ${lookup[@]+"${lookup[@]}"} \
     --github-output "$WORK/resolve.out" >&2 || rc=$?
-  [[ "$rc" == 0 || "$rc" == 3 ]] || _fail "resolve-snapshot failed with exit $rc."
+  # Called inside $(...): the annotation goes to stderr, or the caller's
+  # command substitution would swallow it.
+  [[ "$rc" == 0 || "$rc" == 3 ]] || _fail "resolve-snapshot failed with exit $rc." >&2
   local outcome
   outcome=$(_field outcome "$WORK/resolve.out")
-  [[ -n "$outcome" ]] || _fail "resolve-snapshot wrote no outcome."
+  [[ -n "$outcome" ]] || _fail "resolve-snapshot wrote no outcome." >&2
   printf '%s\n' "$outcome"
 }
 

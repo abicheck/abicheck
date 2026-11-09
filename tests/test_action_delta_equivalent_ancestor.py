@@ -34,6 +34,7 @@ from __future__ import annotations
 import itertools
 import json
 import os
+import shutil
 import subprocess
 import sys
 import zipfile
@@ -75,10 +76,7 @@ _WF = "abi-main.yml"
 _BASE = "a" * 40
 _ANCESTOR = "e" * 40
 
-needs_git = pytest.mark.skipif(
-    subprocess.run(["git", "--version"], capture_output=True).returncode != 0,
-    reason="git not installed",
-)
+needs_git = pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
 
 
 # ── the declaration ──────────────────────────────────────────────────────────
@@ -889,3 +887,55 @@ def test_every_walk_result_has_its_own_sentence(
         tried=4,
     )
     assert needle in text
+
+
+@needs_git
+def test_a_resolver_crash_reaches_the_log_as_an_annotation(tmp_path: Path) -> None:
+    """``_resolve_artifact`` runs inside a command substitution: its ``::error::``
+    line must go to stderr, where the runner still reads it, not into the
+    caller's captured outcome."""
+    require_bash()
+    repo, chain = _main_history(tmp_path, ("doc",))
+    data = tmp_path / "data"
+    data.mkdir()
+    _gh_stub(tmp_path / "bin", data)
+    # resolve-snapshot dies (exit 1): a crash of the step, not an outcome.
+    wrapper = tmp_path / "bin" / "python"
+    wrapper.write_text(
+        "#!/usr/bin/env bash\n"
+        'for a in "$@"; do [[ "$a" == resolve-snapshot ]] && exit 1; done\n'
+        f'exec "{sys.executable}" "$@"\n',
+        encoding="utf-8",
+    )
+    wrapper.chmod(0o755)
+    out = tmp_path / "gh_output"
+    out.write_text("")
+    env = {k: v for k, v in os.environ.items() if not k.startswith("INPUT_")}
+    env.update(
+        {
+            "PATH": os.pathsep.join(
+                [str(tmp_path / "bin"), str(Path(sys.executable).parent), env["PATH"]]
+            ),
+            "GITHUB_OUTPUT": str(out),
+            "REPO": "o/r",
+            "EVENT_NAME": "merge_group",
+            "MERGE_GROUP_BASE": chain[-1],
+            "INPUT_WORKFLOW": _WF,
+            "INPUT_MODE": "merge-group",
+            "INPUT_BRANCH": "main",
+            "INPUT_WAIT_TIMEOUT": "0",
+            "INPUT_DESTINATION": str(tmp_path / "dest"),
+        }
+    )
+    result = subprocess.run(
+        [bash_executable(), str(_FETCH_SH)],
+        cwd=repo.path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "::error::resolve-snapshot failed with exit 1." in result.stderr
+    # The step dies before any snapshot is published.
+    assert "snapshot-path=" not in out.read_text()
