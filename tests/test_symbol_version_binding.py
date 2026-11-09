@@ -18,6 +18,7 @@ from __future__ import annotations
 import itertools
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -161,6 +162,11 @@ def _lib(d: Path, src: str, vmap: str) -> Path:
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(shutil.which("gcc") is None, reason="gcc required")
+@pytest.mark.skipif(
+    sys.platform != "linux",
+    reason="links an ELF .so with a GNU version script and runs glibc's loader",
+)
 @pytest.mark.parametrize(
     "new_src,new_map,loads",
     [(_SRC, _NEW_MAP, False), (_RETAINED_SRC, _NEW_MAP_RETAINED, True)],
@@ -169,8 +175,7 @@ def _lib(d: Path, src: str, vmap: str) -> Path:
 def test_real_loader_and_compare_agree(
     tmp_path: Path, new_src: str, new_map: str, loads: bool
 ) -> None:
-    if shutil.which("gcc") is None:
-        pytest.skip("gcc is not installed")
+    # gcc and Linux are present (the skipifs above): a failing build is a failure.
     from abicheck.dumper import dump
 
     old_so = _lib(tmp_path / "old", _SRC, _OLD_MAP)
