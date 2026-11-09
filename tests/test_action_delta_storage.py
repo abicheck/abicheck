@@ -582,3 +582,91 @@ def test_delta_storage_is_validated_before_any_install(
     assert ("delta-snapshot-workflow is set but has no effect" in text) is warns
     if storage not in ("", "artifact", "cache"):
         assert f"delta-storage '{storage}' is not recognized" in text
+
+
+# ── every Action manifest's expressions are well-formed ─────────────────────
+# The runner rejects the whole action.yml on one malformed expression (this
+# PR's first push dropped a `(` from the `Require` step's `if:` and every job
+# using `./` failed to load the Action). Nothing above parses an `if:` the
+# runner evaluates, so this checks the grammar's bracket and string structure
+# over every expression in every manifest.
+
+_MANIFESTS = sorted([_ROOT / "action.yml", *(_ROOT / "actions").glob("*/action.yml")])
+
+
+def _expression_problem(expr: str) -> str:
+    """Why *expr* cannot parse as a GitHub Actions expression, or ``""``.
+
+    Single-quoted strings (``''`` escapes a quote) are skipped; outside them
+    ``(``/``)`` and ``[``/``]`` must nest and close.
+    """
+    stack: list[str] = []
+    pairs = {")": "(", "]": "["}
+    i = 0
+    while i < len(expr):
+        ch = expr[i]
+        if ch == "'":
+            i += 1
+            while True:
+                if i >= len(expr):
+                    return "unterminated string"
+                if expr[i] == "'":
+                    if expr[i + 1 : i + 2] == "'":
+                        i += 2
+                        continue
+                    break
+                i += 1
+        elif ch in "([":
+            stack.append(ch)
+        elif ch in pairs:
+            if not stack or stack.pop() != pairs[ch]:
+                return f"unexpected {ch!r} at {i}"
+        i += 1
+    return f"unclosed {stack[-1]!r}" if stack else ""
+
+
+def _expressions(node: object, where: str = ""):
+    if isinstance(node, dict):
+        for key, value in node.items():
+            here = f"{where}.{key}"
+            if key == "if" and isinstance(value, str) and "${{" not in value:
+                yield here, value
+            yield from _expressions(value, here)
+    elif isinstance(node, list):
+        for index, value in enumerate(node):
+            yield from _expressions(value, f"{where}[{index}]")
+    elif isinstance(node, str):
+        for match in _EXPR.finditer(node):
+            yield where, match.group(1)
+
+
+@pytest.mark.parametrize(
+    "manifest", _MANIFESTS, ids=lambda p: str(p.relative_to(_ROOT))
+)
+def test_every_expression_in_an_action_manifest_is_well_formed(manifest: Path) -> None:
+    doc = safe_load(manifest.read_text(encoding="utf-8"))
+    found = list(_expressions(doc))
+    assert found, manifest  # the walk reached the manifest's expressions
+    bad = [
+        (where, expr, why)
+        for where, expr in found
+        if (why := _expression_problem(expr))
+    ]
+    assert not bad, bad
+
+
+@pytest.mark.parametrize(
+    ("expr", "ok"),
+    [
+        ("a && (b || c)", True),
+        ("(a || b) != 'x' || f(c, 'y'))", False),  # this PR's first push
+        ("((a || b) != 'x' || f(c, 'y'))", True),
+        ("f('a)b')", True),
+        ("f('it''s')", True),
+        ("f('open)", False),
+        ("x[0] && (y", False),
+        ("x[0)]", False),
+    ],
+)
+def test_expression_checker_on_known_shapes(expr: str, ok: bool) -> None:
+    assert (_expression_problem(expr) == "") is ok

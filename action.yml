@@ -1899,7 +1899,7 @@ runs:
       if: >-
         always() && inputs.delta-on-missing-base == 'fail' &&
         steps.delta-base.outcome == 'success' &&
-        (steps.delta-cache-verify.outputs.outcome || steps.delta-base.outputs.outcome) != 'resolved' ||
+        ((steps.delta-cache-verify.outputs.outcome || steps.delta-base.outputs.outcome) != 'resolved' ||
          startsWith(steps.run-abicheck.outputs.delta-comment-outcome, 'operand_'))
       shell: bash
       env:
