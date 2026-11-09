@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Collection
 from typing import Any
 
@@ -110,6 +111,16 @@ _TRANSITIVE_RUNTIME_PREFIXES: tuple[str, ...] = tuple(_STDLIB_PREFIXES) + tuple(
     _STDLIB_RTTI_PREFIXES
 )
 
+# A mangled member of the C++ runtime's *other* namespaces, under any CV/ref
+# qualifier: ``_ZN9__gnu_cxx11char_traitsIcE2eqERKcS3_`` is the weak
+# ``__gnu_cxx::char_traits<char>::eq`` instantiation every libstdc++ user that
+# touches ``std::string`` at -O0 exports, exactly like the ``_ZNSt...`` members
+# above. ``_STDLIB_PREFIXES`` named these namespaces only in their demangled
+# spelling, so the export table's own (mangled) names slipped through.
+_MANGLED_RUNTIME_NAMESPACE = re.compile(
+    r"_ZN[rVK]*[RO]?(?:9__gnu_cxx|11__gnu_debug|10__cxxabiv1)"
+)
+
 
 #: Public read-only view of the linker-reserved names, for tests and callers
 #: that enumerate the class rather than probe one name.
@@ -168,8 +179,9 @@ def is_abi_relevant_elf_symbol(
     # One tuple-argument ``startswith`` per group: ``str.startswith`` scans a
     # tuple in C, where the earlier per-prefix Python loops cost ~48 calls per
     # symbol (169M calls on a 65k-export libmkl_rt scan).
-    if filter_transitive_runtime_symbols and name.startswith(
-        _TRANSITIVE_RUNTIME_PREFIXES
+    if filter_transitive_runtime_symbols and (
+        name.startswith(_TRANSITIVE_RUNTIME_PREFIXES)
+        or _MANGLED_RUNTIME_NAMESPACE.match(name) is not None
     ):
         return False
 
