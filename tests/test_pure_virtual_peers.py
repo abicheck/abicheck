@@ -14,6 +14,7 @@ from hypothesis import given, strategies as st
 from abicheck.compare.pure_virtual_peers import PureVirtualPeers
 from abicheck.extract.surface_fact_producers import debug_info_surface_facts
 from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.model.fact import Fact
 
 M = "_ZNK5Shape4kindEv"
 
@@ -80,6 +81,16 @@ def test_a_peer_is_an_in_contract_pure_declaration_of_an_old_virtual(
     assert (peer is not None) is paired
     if paired:
         assert peer is side.function_map[M]
+
+
+def test_a_pure_declaration_explicitly_out_of_contract_is_no_peer() -> None:
+    # A public visibility does not override an explicit contract fact.
+    out = _fn(pure=True)
+    out.in_public_contract_fact = Fact.present(False)
+    inside = _fn(pure=True)
+    inside.in_public_contract_fact = Fact.present(True)
+    assert PureVirtualPeers(_side(out)).of(_fn()) is None
+    assert PureVirtualPeers(_side(inside)).of(_fn()) is inside
 
 
 def test_a_lookup_answers_the_same_peer_every_time() -> None:

@@ -129,6 +129,37 @@ _UNIT_CASES = [
         "char[0]",
         0,
     ),
+    # Ada/Fortran signed ranges: the count is upper - lower + 1 in each.
+    (
+        "negative_range",
+        _array(
+            _sub(lower_bound=(-2, "DW_FORM_sdata"), upper_bound=(-1, "DW_FORM_sdata"))
+        ),
+        ("int", 4),
+        "int[2]",
+        8,
+    ),
+    (
+        "negative_range_all_ones_upper",
+        _array(
+            _sub(
+                lower_bound=(-3, "DW_FORM_sdata"),
+                upper_bound=(0xFFFFFFFFFFFFFFFF, "DW_FORM_data8"),
+            )
+        ),
+        ("int", 4),
+        "int[3]",
+        12,
+    ),
+    (
+        "range_across_zero",
+        _array(
+            _sub(lower_bound=(-1, "DW_FORM_sdata"), upper_bound=(1, "DW_FORM_sdata"))
+        ),
+        ("char", 1),
+        "char[3]",
+        3,
+    ),
     (
         "huge_bound_in_a_wider_form",
         _array(_sub(upper_bound=(0xFFFFFFFF, "DW_FORM_data8"))),

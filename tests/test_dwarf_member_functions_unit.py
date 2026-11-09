@@ -513,6 +513,12 @@ def test_a_named_die_linked_to_no_declaration_answers_for_itself() -> None:
         ([0x10, 0xC8, 0x01], "DW_FORM_exprloc", 200),
         (bytes([0x10, 5]), "DW_FORM_block1", 5),
         (7, "DW_FORM_data1", 7),
+        (7, "DW_FORM_udata", 7),
+        # A location-list offset, not a slot (DWARF 4/5, and data4/8 in 2/3).
+        (0x40, "DW_FORM_sec_offset", None),
+        (1, "DW_FORM_loclistx", None),
+        (0x40, "DW_FORM_data4", None),
+        (0x40, "DW_FORM_data8", None),
         ([0x11, 2], "DW_FORM_exprloc", None),  # DW_OP_consts: not decoded
         ([0x10, 2, 0x22], "DW_FORM_exprloc", None),  # a second operation
         ([0x10, 0x80], "DW_FORM_exprloc", None),  # truncated uleb128

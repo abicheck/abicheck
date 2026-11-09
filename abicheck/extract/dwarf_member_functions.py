@@ -154,6 +154,11 @@ def parameter_dies(die: Any, CU: Any) -> Iterator[Any]:
 #: ``DW_OP_constu``: the one operation GCC and clang write in
 #: ``DW_AT_vtable_elem_location`` (``[0x10, <uleb128 slot>]``).
 _DW_OP_CONSTU = 0x10
+#: Forms that make a location attribute a location-list offset: ``sec_offset``
+#: and ``loclistx`` from DWARF 4/5, and ``data4``/``data8`` in DWARF 2/3.
+_LOCATION_LIST_FORMS = frozenset(
+    {"DW_FORM_sec_offset", "DW_FORM_loclistx", "DW_FORM_data4", "DW_FORM_data8"}
+)
 
 
 def vtable_slot(die: Any) -> int | None:
@@ -164,7 +169,9 @@ def vtable_slot(die: Any) -> int | None:
     if attr is None:
         return None
     value = attr.value
-    if isinstance(value, int):  # a DWARF 2 constant form
+    if getattr(attr, "form", None) in _LOCATION_LIST_FORMS:  # a list, not a slot
+        return None
+    if isinstance(value, int):  # a constant form
         return value
     ops = list(value) if isinstance(value, (list, tuple, bytes)) else []
     if len(ops) < 2 or ops[0] != _DW_OP_CONSTU:

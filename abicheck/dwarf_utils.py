@@ -196,10 +196,11 @@ def _subrange_count(subrange: Any) -> int | None:
         lower = _constant(subrange, "DW_AT_lower_bound")
     if upper is None or lower is None:
         return None
-    if upper == -1 or _is_unsigned_minus_one(
-        subrange, upper, attrs["DW_AT_upper_bound"].form
-    ):
-        return 0
+    # GCC's unsigned all-ones is the bound -1; with the default lower bound 0
+    # that is the zero-length ``T[0]``, and with a negative lower bound (Ada,
+    # Fortran) an ordinary signed range: both are ``upper - lower + 1``.
+    if _is_unsigned_minus_one(subrange, upper, attrs["DW_AT_upper_bound"].form):
+        upper = -1
     count = upper - lower + 1
     return count if count >= 0 else None
 
