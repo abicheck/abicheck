@@ -39,6 +39,7 @@ _VERDICT_STYLE: dict[str, tuple[str, str]] = {
     "COMPATIBLE": ("#1b5e20", "#c8e6c9"),
     "NO_CHANGE": ("#0d47a1", "#bbdefb"),
     "API_BREAK": ("#e65100", "#ffe0b2"),
+    "UNCONFIRMED": ("#6a1b9a", "#f3e5f5"),  # ADR-090: no type-level evidence
 }
 
 # ---------------------------------------------------------------------------

@@ -166,6 +166,18 @@ def _expected_returncode(verdict: str) -> int:
     return 0
 
 
+def _unconfirmed_observed(
+    payload: dict[str, Any], expected_rc: int, errors: list[str]
+) -> tuple[Any, int]:
+    """The observed verdict and expected exit of an ``UNCONFIRMED`` run."""
+    block = payload.get("unconfirmed") or {}
+    reasons = (payload.get("exit") or {}).get("reasons") or []
+    if "unconfirmed_compatibility" not in reasons:
+        errors.append(f"UNCONFIRMED without its exit reason (reasons {reasons!r})")
+    rc = max(expected_rc, 1) if block.get("mode", "fail") == "fail" else expected_rc
+    return block.get("observed_verdict"), rc
+
+
 def _change_kinds(payload: dict[str, Any]) -> set[str]:
     return {
         str(item["kind"])
@@ -272,6 +284,11 @@ def _validate_compare(
     expected = str(entry.get("expected"))
     expected_rc = _expected_returncode(expected)
     got = payload.get("verdict")
+    if got == "UNCONFIRMED":
+        # A side without type-level evidence (these stored snapshots carry
+        # no DWARF or headers): the ground truth is the *observed* verdict,
+        # and the unconfirmed axis may raise only 0 -> 1, alone.
+        got, expected_rc = _unconfirmed_observed(payload, expected_rc, errors)
     expected_kinds = set(entry.get("expected_kinds") or [])
     expected_absent = set(entry.get("expected_absent_kinds") or [])
     got_kinds = _change_kinds(payload)

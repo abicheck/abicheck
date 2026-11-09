@@ -8,13 +8,25 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 
-from .document import ReportDocument
+from .document import FrozenObject, ReportDocument
+
+
+def _frozen_object_as_mapping(value: object) -> dict[str, object]:
+    """A shallow projection; the JSON encoder visits frozen children itself.
+
+    Tuples already serialize as arrays. Returning just this object's mapping
+    lets the encoder retain only the current branch rather than a complete
+    second, mutable report tree. The immutable document stays unchanged.
+    """
+    if isinstance(value, FrozenObject):
+        return dict(value.items)
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
 
 
 def render_json(document: ReportDocument, *, indent: int | None = 2) -> str:
     """Serialize *document* without deriving or changing report facts."""
 
-    return json.dumps(document.to_mapping(), indent=indent)
+    return json.dumps(document.root, default=_frozen_object_as_mapping, indent=indent)
 
 
 def render_mapping_as_json(value: Mapping[str, object]) -> str:

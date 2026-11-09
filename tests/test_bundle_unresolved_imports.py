@@ -579,9 +579,11 @@ class TestZeroDtNeededBundleEndToEnd:
             main, ["compare", str(old), str(new), "--depth", "binary"]
         )
         assert "bundle_intra_dep_removed" not in result.output, result.output
-        # 0 == compatible under the legacy verdict scheme; 4 was the reported
-        # false ABI break.
-        assert result.exit_code == 0, result.output
+        # 4 was the reported false ABI break. `--depth binary` with no DWARF
+        # has no type-level evidence, so ADR-090 reports the addition-only
+        # member UNCONFIRMED (exit 1) rather than a clean claim.
+        assert result.exit_code == 1, result.output
+        assert "**Verdict** | ? `UNCONFIRMED`" in result.output, result.output
 
 
 class TestAWeakOldImportIsNotEvidenceOfAnExternalProvider:

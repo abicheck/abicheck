@@ -21,6 +21,7 @@ import pytest
 from click.testing import CliRunner
 
 from abicheck.cli import main
+from tests._unconfirmed import passes_but_for_unconfirmed
 
 pytestmark = [
     pytest.mark.integration,
@@ -116,7 +117,7 @@ def test_a_stale_dwarf_only_rule_stays_not_evaluated_and_never_blocks(
     old, new = _build(tmp_path)
     policy = _policy(tmp_path, _DWARF_RULE, block=True)
     code, report = _run(tmp_path, old, new, policy)
-    assert code == 0
+    assert passes_but_for_unconfirmed(code, report)  # ADR-090: ELF-only fixture
     assert _rows_by_index(report)[0]["status"] == "not_evaluated"
     assert report["disposition_audit"]["unused_rules_review"]["unused"] == []
 
@@ -143,7 +144,7 @@ def test_without_the_policy_key_the_stale_rule_is_reported_but_never_blocks(
     old, new = _build(tmp_path)
     policy = _policy(tmp_path, _SYMBOL_RULE, block=False)
     code, report = _run(tmp_path, old, new, policy)
-    assert code == 0
+    assert passes_but_for_unconfirmed(code, report)  # ADR-090: ELF-only fixture
     assert _rows_by_index(report)[0]["status"] == "unused"
 
 
@@ -185,7 +186,7 @@ def test_a_not_evaluated_rule_is_a_warning_naming_the_missing_evidence(
     policy = _policy_mode(tmp_path, _DWARF_RULE, mode)
     md = tmp_path / "report.md"
     code, report = _run(tmp_path, old, new, policy, "-o", f"markdown={md}")
-    assert code == 0  # never gating, even under block
+    assert passes_but_for_unconfirmed(code, report)  # ADR-090: ELF-only fixture
     review = report["disposition_audit"]["unused_rules_review"]
     assert review["gate_contribution"] == 0
     (entry,) = review["not_evaluated"]
@@ -201,7 +202,7 @@ def test_under_allow_the_not_evaluated_rule_stays_quiet(tmp_path: Path) -> None:
     old, new = _build(tmp_path)
     policy = _policy_mode(tmp_path, _DWARF_RULE, "allow")
     code, report = _run(tmp_path, old, new, policy)
-    assert code == 0
+    assert passes_but_for_unconfirmed(code, report)  # ADR-090: ELF-only fixture
     assert "not_evaluated" not in report["disposition_audit"]["unused_rules_review"]
 
 

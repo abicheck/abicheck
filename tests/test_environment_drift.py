@@ -1125,15 +1125,14 @@ class TestEnvironmentMatrixRuntimeFloors:
         )
 
         cfg = tmp_path / ".abicheck.yml"
-        cfg.write_text(
-            'deployment:\n  runtime_floors:\n    GLIBC: "2.28"\n', encoding="utf-8"
-        )
-
-        # Baseline: no declared floor -- the default RISK verdict, exit 0.
-        result_default = CliRunner().invoke(
-            main, ["compare", str(old_dir), str(new_dir)]
-        )
+        cfg.write_text('deployment:\n  runtime_floors:\n    GLIBC: "2.28"\nassurance:\n  unconfirmed: warn\n', encoding="utf-8")  # fmt: skip
+        # Baseline: RISK, exit 0 under `warn` (ADR-090: this ELF-only fixture is UNCONFIRMED, exit 1, without it).
+        result_default = CliRunner().invoke(main, ["compare", str(old_dir), str(new_dir), "--set", "assurance.unconfirmed=warn"])  # fmt: skip
         assert result_default.exit_code == 0, result_default.output
+        assert (
+            CliRunner().invoke(main, ["compare", str(old_dir), str(new_dir)]).exit_code
+            == 1
+        )
 
         # With the project-wide `deployment:` floor declared, the same
         # library's new requirement exceeds it -- BREAKING, exit 4.

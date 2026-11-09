@@ -56,8 +56,6 @@ except ImportError:  # pragma: no cover - rich-click is a declared dependency
 # re-exports them, and reaching for them there was a `frontends -> compare`
 # import for two value types.
 from ...checker_types import DiffResult
-from ...cli_audit import echo_filtered_surface, echo_reconciled
-from ...workflows.compare_finalize import _merge_redundant_changes
 from . import help as cli_help
 from .options.export import ExportSet
 from .options.params import (
@@ -368,7 +366,9 @@ def _announce_exit_scheme(
             "Exit-code scheme: legacy verdict (0=compatible, 2=API break, 4=ABI break; "
             "1=the contract domain could not be closed on the evidence; with "
             ".abicheck.yml's assurance.require_complete: true, 1=incomplete analysis "
-            "assurance -- both orthogonal axes that never lower a 2/4). "
+            "assurance; 1=UNCONFIRMED, a compatibility claim with no type-level "
+            "evidence on a side (assurance.unconfirmed: warn accepts it) -- "
+            "orthogonal axes that never lower a 2/4). "
             "Set a severity setting (--severity-preset, a --pack, or "
             ".abicheck.yml's severity: block) for the severity-aware scheme -- "
             "there is no manual scheme selector any more.",
@@ -511,6 +511,9 @@ def _finalize_compare_result(
     classification (``workflows.compare_classify``), from the pre-embed
     operand paths the CLI hands it.
     """
+    from ...cli_audit import echo_filtered_surface, echo_reconciled
+    from ...workflows.compare_finalize import _merge_redundant_changes
+
     if show_redundant and result.redundant_changes:
         _merge_redundant_changes(result)
     # Plan slice 7o: both ledgers are unconditional. They used to be gated

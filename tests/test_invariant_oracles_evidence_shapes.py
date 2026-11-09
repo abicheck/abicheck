@@ -18,11 +18,10 @@ parameter), through the public CLI:
 * **stripped**: the stripped pair's exit code, version bump, and review and
   HTML wording, which the reduced-evidence module does not check.
 
-Known gap: the mixed, unmet-depth and stripped runs read ``NO_CHANGE`` or
-``COMPATIBLE`` with exit 0. The strict xfails state the ADR-090 contract
-(verdict ``UNCONFIRMED``, version bump ``undetermined``, exit 1) as separate
-checks, because ADR-090 ships the label before the exit change; each flips
-when its stage lands.
+Fixed by ADR-090: the mixed, unmet-depth and stripped runs used to read
+``NO_CHANGE`` or ``COMPATIBLE`` with exit 0. They now read ``UNCONFIRMED``,
+version bump ``undetermined``, exit 1, each checked separately below; the
+former canary is the regression test of the observed verdict each run keeps.
 """
 
 from __future__ import annotations
@@ -66,15 +65,11 @@ _V2 = (
 _V1_REBUILT = "int add(int a, int b) { return b + a; }\nint keep(void) { return 1; }\n"
 _BAD_HEADER = "int add(int a, int b\n"
 
-_GAP = (
-    "known gap: a compare without type-level evidence on a side reads NO_CHANGE or "
-    "COMPATIBLE with exit 0 and an accepted headline (ADR-090 proposes UNCONFIRMED, exit 1)"
-)
 
 #: Reduced-evidence runs whose JSON verdict this module checks. The stripped
 #: pair's verdict is the reduced-evidence module's.
 _NEW_SHAPES = ("mixed", "depth_unmet")
-#: Every reduced-evidence run that currently reads as clean.
+#: Every reduced-evidence run that used to read as clean (ADR-090).
 _GAPPED = ("stripped", *_NEW_SHAPES)
 
 _ALL_RENDERERS = frozenset({"terminal", "markdown", "review", "html"})
@@ -268,33 +263,35 @@ def test_failed_extractor_stops_the_run_instead_of_comparing_an_empty_surface(
     assert rendered_absence_violations(run.rendered(), "failed") == [], tag
 
 
-# -- the gap: reduced evidence reads as clean ----------------------------------
+# -- reduced evidence never reads as clean (ADR-090) ---------------------------
 
 
-@pytest.mark.known_gap_canary
 @pytest.mark.parametrize(
-    ("tag", "verdict", "status", "bump"),
+    ("tag", "observed", "status"),
     [
-        ("mixed", "COMPATIBLE", "partial", "patch"),
-        ("depth_unmet", "NO_CHANGE", "failed", "none"),
+        ("mixed", "COMPATIBLE", "partial"),
+        ("depth_unmet", "NO_CHANGE", "failed"),
     ],
 )
-def test_one_sided_and_unmet_depth_gap_is_still_the_current_answer(
-    tag: str, verdict: str, status: str, bump: str, runs: dict[str, _Run]
+def test_one_sided_and_unmet_depth_runs_read_unconfirmed_and_exit_one(
+    tag: str, observed: str, status: str, runs: dict[str, _Run]
 ) -> None:
-    """Canary: each run's gapped answer (a clean verdict, exit 0) while the gap is open."""
+    """ADR-090: each run reads UNCONFIRMED with exit 1, keeps its observed
+    verdict, and names the side(s) lacking type-level evidence."""
     run = runs[tag]
     report = run.report()
     assert report is not None
-    assert report["verdict"] == verdict
+    assert report["verdict"] == "UNCONFIRMED"
+    assert report["unconfirmed"]["observed_verdict"] == observed
+    lacking = ["new"] if tag == "mixed" else ["old", "new"]
+    assert report["unconfirmed"]["sides_without_type_evidence"] == lacking
     assert report["analysis_assurance"]["status"] == status
-    assert report["release_recommendation"]["version_bump"] == bump
+    assert report["release_recommendation"]["version_bump"] == "undetermined"
     assert "func_params_changed" not in {c["kind"] for c in report["changes"]}
-    assert run.exit_code == 0
+    assert run.exit_code == 1
 
 
 @pytest.mark.parametrize("tag", _NEW_SHAPES)
-@pytest.mark.xfail(strict=True, reason=_GAP)
 def test_reduced_evidence_verdict_does_not_claim_compatibility(
     tag: str, runs: dict[str, _Run]
 ) -> None:
@@ -305,7 +302,6 @@ def test_reduced_evidence_verdict_does_not_claim_compatibility(
 
 
 @pytest.mark.parametrize("tag", _GAPPED)
-@pytest.mark.xfail(strict=True, reason=_GAP)
 def test_reduced_evidence_version_bump_does_not_presume_compatibility(
     tag: str, runs: dict[str, _Run]
 ) -> None:
@@ -316,7 +312,6 @@ def test_reduced_evidence_version_bump_does_not_presume_compatibility(
 
 
 @pytest.mark.parametrize("tag", _GAPPED)
-@pytest.mark.xfail(strict=True, reason=_GAP)
 def test_reduced_evidence_run_does_not_pass_the_gate_with_exit_0(
     tag: str, runs: dict[str, _Run]
 ) -> None:
@@ -328,7 +323,6 @@ def test_reduced_evidence_run_does_not_pass_the_gate_with_exit_0(
 
 
 @pytest.mark.parametrize("tag", _GAPPED)
-@pytest.mark.xfail(strict=True, reason=_GAP)
 def test_reduced_evidence_renderers_do_not_state_acceptance(
     tag: str, runs: dict[str, _Run]
 ) -> None:

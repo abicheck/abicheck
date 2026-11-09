@@ -510,8 +510,13 @@ def test_headerless_additive_change_keeps_placement_alignment_compatible(tmp_pat
     assert flagged[0]["modulation_rule"] == (
         "address-alignment-without-declared-requirement"
     )
-    assert doc["verdict"] == "COMPATIBLE"
-    assert run.returncode == 0, run.stdout
+    # Dumped without headers or -g, and the two libraries differ: ADR-090
+    # labels the claim UNCONFIRMED (exit 1, that axis alone), and the
+    # demoted alignment drop leaves the observed verdict COMPATIBLE.
+    assert doc["verdict"] == "UNCONFIRMED"
+    assert doc["unconfirmed"]["observed_verdict"] == "COMPATIBLE"
+    assert doc["exit"]["reasons"] == ["unconfirmed_compatibility"]
+    assert run.returncode == 1, run.stdout
 
 
 @pytest.mark.parametrize("cc", ["gcc", "clang"])

@@ -159,6 +159,7 @@ def execute_bundle_facts_compare(
         request.warn("no library pair was compared -- no comparison completed.")
 
     require_complete = bool(cfg.assurance_require_complete) if cfg else False
+    _stamp_unconfirmed_mode(result, cfg)
     if request.output_dir is not None:
         _prepare_output_dir(request, Path(request.output_dir), result.per_library)
     # ADR-071 D8: resolved ahead of every render and per-library write, so the
@@ -172,6 +173,14 @@ def execute_bundle_facts_compare(
         assurance_decision=assurance_decision,
         require_complete_analysis=require_complete,
     )
+
+
+def _stamp_unconfirmed_mode(result: Any, cfg: Any) -> None:
+    """ADR-090 D4: `.abicheck.yml`'s `assurance.unconfirmed` on every stored
+    member, as a live release applies it to each member's classification."""
+    mode = "warn" if cfg is not None and cfg.assurance_unconfirmed == "warn" else "fail"
+    for diff in getattr(result, "per_library", ()) or ():
+        diff.unconfirmed_mode = mode
 
 
 def _merge_project_policy(

@@ -260,6 +260,12 @@ def stamp_member_exit_contributions(
     # ADR-067 P1: per-member rule keys, so the release fold can decide "unused
     # in every comparison" without re-reading each member's ledger.
     entry["unused_rules_exit_contribution"] = decision.unused_rules_contribution
+    # ADR-090: the member's UNCONFIRMED floor, and the block that explains it.
+    entry["unconfirmed_exit_contribution"] = decision.unconfirmed_contribution
+    from ..policy.unconfirmed_compatibility import unconfirmed_block
+
+    if (unconfirmed := unconfirmed_block(result)) is not None:
+        entry["unconfirmed"] = unconfirmed
     entry.update(unused_rule_keys_for_release(result))
     if contract_evaluation:
         entry["contract_coverage_exit_contribution"] = (

@@ -316,5 +316,8 @@ def _attach_pair_report_fields(
         result.requested_depth = context.requested_depth
     elif requested is not None:
         result.requested_depth = requested
+    # ADR-090 D4: the run's `assurance.unconfirmed`, read by every exit
+    # derivation of this result (scalar, typed, release member).
+    result.unconfirmed_mode = request.unconfirmed
     assurance_attach.attach_analysis_assurance(result, old, new)
     assurance_attach.attach_evidence_depths(result, old, new)

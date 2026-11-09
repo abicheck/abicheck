@@ -143,11 +143,9 @@ def enter_performance_profile(ctx: click.Context, explicit: str | None) -> None:
     is loaded again there, and exits 64 with its own message.
     """
     from ...config_paths import resolve_project_config
-    from ...model.performance import (
-        parse_performance_profile,
-        performance_profile_scope,
-    )
+    from ...model.performance import parse_performance_profile
     from ...workflows.extraction import load_build_config_with_digest
+    from ...workflows.performance import execution_profile_scope
 
     value = explicit
     if value is None:
@@ -163,4 +161,4 @@ def enter_performance_profile(ctx: click.Context, explicit: str | None) -> None:
             except (OSError, ValueError):
                 value = None
     profile = None if value is None else parse_performance_profile(value)
-    ctx.with_resource(performance_profile_scope(profile))
+    ctx.with_resource(execution_profile_scope(profile))

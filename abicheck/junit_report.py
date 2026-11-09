@@ -65,6 +65,7 @@ from .report.junit_properties import (
     add_scoped_properties,
     testcase_properties,
 )
+from .report.junit_run_suites import append_coverage_suite, append_unconfirmed_suite
 from .report.junit_scope import append_env_matrix_suite, append_scope_suite
 from .report.view import (
     display_changes,
@@ -991,55 +992,15 @@ def to_junit_xml(
     # means (an error is "the test could not run", a failure is "it ran and
     # the assertion failed"). Emitting it as a passing testcase, or omitting
     # it, would let a CI dashboard read "no evidence" as "compatible".
-    errors = _append_coverage_suite(root, result)
+    errors = append_coverage_suite(root, result)
     warnings = append_coverage_warnings_suite(root, result)
+    unconfirmed = append_unconfirmed_suite(root, result)  # ADR-090
     # Roll up counts
-    root.set("tests", str(int(ts.get("tests", "0")) + errors + warnings))
-    root.set("failures", ts.get("failures", "0"))
+    root.set("tests", str(int(ts.get("tests", "0")) + errors + warnings + unconfirmed))
+    root.set("failures", str(int(ts.get("failures", "0")) + unconfirmed))
     root.set("errors", str(errors))
 
     return _to_xml_string(root)
-
-
-def _append_coverage_suite(root: ET.Element, result: DiffResult) -> int:
-    """Append the contract-coverage suite, returning how many errors it holds.
-
-    Nothing at all when the run computed no contract context (the default),
-    so an ordinary report is unchanged. A run whose selected contract domain
-    *closed* gets an empty suite rather than no suite: "checked, nothing
-    missing" and "never checked" are different states, and a consumer must be
-    able to tell them apart.
-    """
-    from .policy.coverage_ledger import coverage_failures_for_context
-
-    ctx = getattr(result, "contract_context", None)
-    if ctx is None:
-        return 0
-    failures = coverage_failures_for_context(ctx)
-    # Qualified by library: a multi-library document appends one of these per
-    # result, and a coverage failure identifies only its provider and side.
-    # Two libraries failing the same provider on the same side produced two
-    # indistinguishable suites, so a consumer could not attribute either
-    # error to a library (CodeRabbit review).
-    library = getattr(result, "library", "") or "unknown"
-    suite = ET.SubElement(root, "testsuite")
-    suite.set("name", f"abicheck.contract_coverage.{library}")
-    suite.set("tests", str(len(failures)))
-    suite.set("failures", "0")
-    suite.set("errors", str(len(failures)))
-    for failure in failures:
-        case = ET.SubElement(suite, "testcase")
-        case.set("classname", f"abicheck.contract_coverage.{library}")
-        case.set("name", f"{failure.provider}:{failure.side}")
-        error = ET.SubElement(case, "error")
-        error.set("type", failure.reason)
-        error.set(
-            "message",
-            f"contract coverage: {failure.provider} ({failure.side}) could not "
-            f"close the {failure.mode} domain ({failure.reason}); this finding "
-            "cannot be suppressed",
-        )
-    return len(failures)
 
 
 def to_junit_xml_multi(
@@ -1090,9 +1051,12 @@ def to_junit_xml_multi(
         root.append(ts)
         total_tests += int(ts.get("tests", "0"))
         total_failures += int(ts.get("failures", "0"))
-        coverage_errors = _append_coverage_suite(root, result)
+        coverage_errors = append_coverage_suite(root, result)
         total_tests += coverage_errors
         total_errors += coverage_errors
+        unconfirmed = append_unconfirmed_suite(root, result)  # ADR-090
+        total_tests += unconfirmed
+        total_failures += unconfirmed
         # Per result, mirroring the coverage-error suite above: each library carries its own coverage_warnings, not a document-wide list.
         total_tests += append_coverage_warnings_suite(root, result)
 

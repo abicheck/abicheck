@@ -20,6 +20,7 @@ from pathlib import Path
 import pytest
 
 from tests._abicheck_subprocess import abicheck_command, abicheck_env
+from tests._unconfirmed import passes_but_for_unconfirmed
 
 pytestmark = [
     pytest.mark.integration,
@@ -117,7 +118,8 @@ def test_base_kind_rule_hides_the_removal_headerless(
         with_headers=False,
         suppress=_suppression(tmp_path, "func_removed"),
     )
-    assert code == 0
+    # Header-less: the clean claim left is ADR-090 UNCONFIRMED.
+    assert passes_but_for_unconfirmed(code, report)
     assert _removal_kinds(report) == ["func_removed_elf_only"]
     # The removal and its public_surface_shrank roll-up (ADR-067 derived).
     assert report["disposition_audit"]["counts"]["suppressed"] == 2
@@ -146,7 +148,8 @@ def test_elf_only_rule_hides_only_the_headerless_removal(
     suppress = _suppression(tmp_path, "func_removed_elf_only")
 
     code, report = _run(tmp_path, pair, with_headers=False, suppress=suppress)
-    assert code == 0
+    # Header-less: the clean claim left is ADR-090 UNCONFIRMED.
+    assert passes_but_for_unconfirmed(code, report)
     assert _removal_kinds(report) == ["func_removed_elf_only"]
 
     # The variant rule does not reach the header-backed kind: the removal stays.
@@ -196,7 +199,8 @@ def test_base_override_sets_the_verdict_of_the_headerless_removal(
     assert (code, verdict) == (4, "BREAKING")
     # The base entry pins the headerless removal too.
     code, verdict = _verdict_run(tmp_path, pair, with_headers=False, policy=ignore_base)
-    assert (code, verdict) == (0, "COMPATIBLE")
+    # Not a break any more; header-less, so the claim is ADR-090 UNCONFIRMED.
+    assert (code, verdict) == (1, "UNCONFIRMED")
     # And the header-backed removal, which the same entry always covered.
     code, verdict = _verdict_run(tmp_path, pair, with_headers=True, policy=ignore_base)
     assert (code, verdict) == (0, "COMPATIBLE")

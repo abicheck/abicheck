@@ -1513,7 +1513,7 @@ use_cases:
     status: partial
     user_task: [pr_review, release, audit]
     journey_stages: [trust]
-    adrs: [ADR-063]
+    adrs: [ADR-063, ADR-090]
     gap: G47
     plan: docs/contribute/plans/g47-analysis-assurance.md
     evidence:

@@ -58,6 +58,7 @@ A fully-specified comparison request — the single input to ``run_compare``.
 | `severity_quality_issues` | `str \| None` | `None` |
 | `severity_addition` | `str \| None` | `None` |
 | `require_complete_analysis` | `bool` | `False` |
+| `unconfirmed` | `Literal[fail, warn]` | `'fail'` |
 | `changed_paths` | `tuple[str, ...]` | `()` |
 | `abi3_floor` | `tuple[int, int] \| None` | `None` |
 | `collapse_versioned_symbols` | `bool` | `False` |
@@ -474,6 +475,7 @@ Compare two ABI inputs and return the classified diff result.
 | `follow_deps` | `bool` | `False` |
 | `dependency_search_paths` | `tuple[Path, ...]` | `()` |
 | `ld_library_path` | `str` | `''` |
+| `unconfirmed` | `Literal[fail, warn]` | `'fail'` |
 
 **Returns:** `CompareResult`
 

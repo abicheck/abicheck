@@ -284,6 +284,7 @@ def resolve_release_exit_decision(
     no_comparison_completed_contribution: int = 0,
     additions_review_contribution: int = 0,
     unused_rules_contribution: int = 0,
+    unconfirmed_contribution: int = 0,
 ) -> ExitDecision:
     """ADR-064's precedence for a directory/package release comparison
     -- the one both its process exit and its persisted ``exit`` block read,
@@ -447,6 +448,7 @@ def resolve_release_exit_decision(
             no_comparison_completed_contribution=no_comparison_completed_contribution,
             additions_review_contribution=additions_review_contribution,
             unused_rules_contribution=unused_rules_contribution,
+            unconfirmed_contribution=unconfirmed_contribution,
         ),
     )
 

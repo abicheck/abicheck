@@ -769,7 +769,7 @@ class TestRendering:
         that updates `aggregate_report.schema.json`, its published mirror,
         and the docs (CodeRabbit review).
         """
-        assert AGGREGATE_SCHEMA_VERSION == "1.11"
+        assert AGGREGATE_SCHEMA_VERSION == "1.12"
 
     def test_json_schema_shape(self, tmp_path: Path):
         _write_report(tmp_path, LINUX, "COMPATIBLE")

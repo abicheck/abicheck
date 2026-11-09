@@ -45,10 +45,14 @@ from abicheck.policy.classification import (
 )
 from abicheck.policy.disposition_close import ledger_for
 from abicheck.policy.severity import missing_contract_exit_code
+from abicheck.policy.unconfirmed_compatibility import report_compatibility
 from abicheck.report.disposition_audit import disposition_audit_dict_reusing_document
 from abicheck.report.envelope import ReportEnvelope, resolved_document, resolved_gate
 from abicheck.report.render_json import render_mapping_as_json
-from abicheck.report.sarif_invocation import compute_sarif_invocation_exit
+from abicheck.report.sarif_invocation import (
+    compute_sarif_invocation_exit,
+    run_notifications,
+)
 from abicheck.report.sarif_properties import (
     _change_detail_properties,
     _contract_properties,
@@ -578,54 +582,6 @@ def _scoped_gate_properties(result: DiffResult) -> dict[str, Any] | None:
     return block
 
 
-def _coverage_notifications(result: object) -> dict[str, object]:
-    """The ``toolExecutionNotifications`` entry for this run's coverage ledger.
-
-    Returns an empty mapping -- so the key is absent, not empty -- when the
-    run built no contract context, which is every run without
-    ``--contract``. A run whose domain *closed* yields an empty
-    list, because "checked, nothing missing" and "never checked" are
-    different states and a consumer must be able to tell them apart.
-
-    ``level: "error"`` regardless of what the ledger contributed: the
-    notification describes the evidence, not the gate. ``executionSuccessful``
-    stays untouched (the tool ran to completion either way), but the
-    invocation's ``exitCode`` *is* folded with the coverage floor now that
-    ADR-049 Phase 7 applies it -- see :func:`to_sarif`.
-    """
-    from .policy.coverage_ledger import coverage_failures_for_context
-
-    ctx = getattr(result, "contract_context", None)
-    if ctx is None:
-        return {}
-    failures = coverage_failures_for_context(ctx)
-    return {
-        "toolExecutionNotifications": [
-            {
-                "level": "error",
-                "message": {
-                    "text": (
-                        f"contract coverage: {f.provider} ({f.side}) could not "
-                        f"close the {f.mode} domain ({f.reason})"
-                    )
-                },
-                "descriptor": {"id": f"abicheck.coverage.{f.reason}"},
-                "properties": {
-                    "provider": f.provider,
-                    "side": f.side,
-                    "recordId": f.record_id,
-                    "contractMode": f.mode,
-                    # Stated per notification so a consumer reading one in
-                    # isolation knows it cannot be waived by a suppression
-                    # rule (plan Section 6.2).
-                    "suppressible": False,
-                },
-            }
-            for f in failures
-        ]
-    }
-
-
 def to_sarif(
     result: DiffResult,
     *,
@@ -975,7 +931,7 @@ def to_sarif(
                         # finding. Absent (not empty) when the run computed no
                         # contract context, so an ordinary document is
                         # unchanged.
-                        **_coverage_notifications(result),
+                        **run_notifications(result),
                         # Always true: this reports the SARIF tool run, which
                         # completed. It must not encode the ABI/severity gate
                         # outcome — see the docstring above.
@@ -1002,12 +958,12 @@ def to_sarif(
                         "text": (
                             f"ABI comparison: {result.library} "
                             f"{result.old_version} → {result.new_version} "
-                            f"verdict={result.verdict.value}"
+                            f"verdict={report_compatibility(result)}"
                         )
                     },
                 },
                 "properties": {
-                    "abiVerdict": result.verdict.value,
+                    "abiVerdict": report_compatibility(result),
                     "oldVersion": result.old_version,
                     "newVersion": result.new_version,
                     "library": result.library,

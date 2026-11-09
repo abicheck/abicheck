@@ -57,7 +57,7 @@ from .markdown_sections import (
     compute_severity_sections,
 )
 from .not_evaluated_section import compute_not_evaluated
-from .outcome_summary import VERDICT_EMOJI, VERDICT_LABEL, severity_summary_mapping
+from .outcome_summary import headline_verdict, severity_summary_mapping
 from .policy_facts import (
     accepted_break_ids,
     evidence_status_of,
@@ -230,9 +230,7 @@ def build_markdown_document(
     them.
     """
     shared_document = resolved_document(envelope)
-    verdict = result.verdict
-    emoji = VERDICT_EMOJI[verdict]
-    label = VERDICT_LABEL[verdict]
+    emoji, label = headline_verdict(result)  # ADR-090: UNCONFIRMED aware
 
     old_meta = getattr(result, "old_metadata", None)
     new_meta = getattr(result, "new_metadata", None)
@@ -439,8 +437,8 @@ def _view_preamble_mapping(
         "view_label": view_label,
         "old_version": result.old_version,
         "new_version": result.new_version,
-        "verdict_emoji": VERDICT_EMOJI[result.verdict],
-        "verdict_label": VERDICT_LABEL[result.verdict],
+        "verdict_emoji": headline_verdict(result)[0],
+        "verdict_label": headline_verdict(result)[1],
         "coverage_warnings": (
             list(result.coverage_warnings) if result.coverage_warnings else []
         ),

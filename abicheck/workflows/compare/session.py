@@ -432,6 +432,10 @@ def _evaluate_and_classify(
         probe_matrix_new=ev.probe_matrix_new,
         abi3_floor=abi3_floor,
     )
+    # ADR-090 D4: `.abicheck.yml`'s `assurance.unconfirmed`.
+    classify_request = dataclasses.replace(
+        classify_request, unconfirmed=resolved_cfg.unconfirmed_mode
+    )
     try:
         classified = classify_resolved_pair(
             classify_request,

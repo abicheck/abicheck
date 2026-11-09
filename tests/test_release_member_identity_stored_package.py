@@ -126,7 +126,9 @@ def test_a_bundle_facts_old_pairs_every_member_of_a_stored_package_new(
             tmp_path / "oracle.json",
         )[:2]
     )
-    assert oracle["verdicts"] == ["BREAKING", "COMPATIBLE", "NO_CHANGE"]
+    # The compatible member carries no type-level evidence, so it reads
+    # UNCONFIRMED (ADR-090); the unchanged one is one identical input.
+    assert oracle["verdicts"] == ["BREAKING", "NO_CHANGE", "UNCONFIRMED"]
 
     code, report, output = _compare(old_facts, package, tmp_path / "r.json")
 
@@ -173,7 +175,7 @@ def test_a_non_package_new_operand_is_not_read_as_a_package(
     assert report, output
     assert sorted(e["verdict"] for e in report["libraries"]) == [
         "BREAKING",
-        "COMPATIBLE",
         "NO_CHANGE",
+        "UNCONFIRMED",  # ADR-090: the compatible member has no type evidence
     ]
     assert code == 4

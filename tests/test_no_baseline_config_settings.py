@@ -84,6 +84,10 @@ NOT_APPLICABLE: dict[str, str] = {
         "bounds decoding a bundle-facts document, which --no-baseline does not "
         "accept as its operand"
     ),
+    "unconfirmed_mode": (
+        "ADR-090's UNCONFIRMED axis narrows a two-sided compatibility claim; "
+        "an audit compares no baseline and states no such claim"
+    ),
 }
 #: Shrink-only: a field the audit should read and does not yet.
 NOT_YET_WIRED: dict[str, str] = {

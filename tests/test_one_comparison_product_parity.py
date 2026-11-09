@@ -220,10 +220,12 @@ def _incomplete_analysis_pair(tmp_path: Path) -> tuple[Path, Path]:
 
 
 def _project_config(tmp_path: Path, *, require_complete: bool) -> None:
+    # `unconfirmed: warn` isolates the axis this module tests: its fixture
+    # carries no type-level evidence, which ADR-090's separate axis gates.
     (tmp_path / ".abicheck.yml").write_text(
         "assurance:\n  require_complete: "
         + ("true" if require_complete else "false")
-        + "\n",
+        + "\n  unconfirmed: warn\n",
         encoding="utf-8",
     )
 

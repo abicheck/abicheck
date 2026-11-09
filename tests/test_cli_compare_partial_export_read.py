@@ -109,7 +109,12 @@ def test_a_partially_read_new_table_is_reported_not_scored(
     tmp_path: Path, state: ExportReadState
 ) -> None:
     code, report, markdown = _compare(tmp_path, state)
-    assert code == 0, report["exit"]
+    # Not scored as removals, so no break gates. These export-table-only
+    # snapshots carry no type-level evidence, so the clean claim that remains
+    # is ADR-090 UNCONFIRMED: exit 1 through that axis alone.
+    assert code == 1, report["exit"]
+    assert report["exit"]["reasons"] == ["unconfirmed_compatibility"]
+    assert report["exit"]["compatibility_contribution"] == 0
     assurance = report["analysis_assurance"]
     assert assurance["status"] == "partial"
     assert assurance["export_read"] == {

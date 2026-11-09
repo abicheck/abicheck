@@ -161,8 +161,10 @@ class TestCompareUsesResolvedDebugArtifacts:
         self, tmp_path: Path
     ) -> None:
         """Baseline for the regression: two stripped builds with an identical
-        export table but a changed struct layout report NO_CHANGE when no
-        DWARF evidence is available — the false-green the report describes."""
+        export table but a changed struct layout. With no DWARF evidence the
+        change cannot be seen; this used to read NO_CHANGE at exit 0 (the
+        false-green the report describes) and now reads UNCONFIRMED, exit 1
+        (ADR-090), with the observed NO_CHANGE kept."""
         old_so, _ = _build_split_debug_lib(tmp_path, "old", _POINT_V1)
         new_so, _ = _build_split_debug_lib(tmp_path, "new", _POINT_V2)
         out = tmp_path / "result.json"
@@ -170,9 +172,10 @@ class TestCompareUsesResolvedDebugArtifacts:
             main,
             ["compare", str(old_so), str(new_so), "-o", f"json={out}"],
         )
-        assert result.exit_code == 0, result.output
+        assert result.exit_code == 1, result.output
         data = json.loads(out.read_text())
-        assert data["verdict"] == "NO_CHANGE"
+        assert data["verdict"] == "UNCONFIRMED"
+        assert data["unconfirmed"]["observed_verdict"] == "NO_CHANGE"
 
     def test_compare_stripped_binaries_with_debug_root_detects_real_break(
         self, tmp_path: Path
