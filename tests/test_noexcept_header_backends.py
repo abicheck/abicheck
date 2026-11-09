@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -154,6 +155,13 @@ _SHAPES = (
 )
 
 
+# Mach-O records the output path as the install name, so the old/ and new/
+# builds would differ in it (SONAME_CHANGED); give both the same one.
+_INSTALL_NAME = (
+    ["-Wl,-install_name,@rpath/libapi.so"] if sys.platform == "darwin" else []
+)
+
+
 def _write(d: Path, side: str, header: str, source: str) -> tuple[Path, Path]:
     d.mkdir(parents=True, exist_ok=True)
     h = d / "api.h"
@@ -165,7 +173,17 @@ def _write(d: Path, side: str, header: str, source: str) -> tuple[Path, Path]:
     src.write_text(f'#include "api.h"\n{source.replace("{q}", spec)}\n')
     so = d / "libapi.so"
     proc = subprocess.run(
-        ["g++", _STD, "-shared", "-fPIC", "-g", "-o", str(so), str(src)],
+        [
+            "g++",
+            _STD,
+            "-shared",
+            "-fPIC",
+            "-g",
+            *_INSTALL_NAME,
+            "-o",
+            str(so),
+            str(src),
+        ],
         capture_output=True,
         text=True,
     )
