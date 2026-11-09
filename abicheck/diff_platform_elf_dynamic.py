@@ -28,12 +28,12 @@ from typing import Any
 from .compare.elf_capture_identity import both_captured_elf_identity
 from .compare.naming_conventions import (  # noqa: F401 -- re-exported
     _INTERNAL_NAME_PATTERNS as _INTERNAL_NAME_PATTERNS,
-    ELF_INTERNAL_SYMBOL_NAME,
+    ELF_INTERNAL_SYMBOL_NAME as ELF_INTERNAL_SYMBOL_NAME,
     _looks_internal as _looks_internal,
+    internal_looking_export,
 )
 from .compare.public_surface import should_filter_transitive_runtime_symbols
 from .diff_helpers import make_change
-from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .model import AbiSnapshot
 from .model.binary_naming import strip_vendor_hash
 from .model.change import Change
@@ -53,11 +53,7 @@ def _diff_visibility_leak(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         for f in old.declarations.functions
         if (
             is_export_table_only_record(f)
-            and is_abi_relevant_elf_symbol(
-                f.name,
-                filter_transitive_runtime_symbols=filter_transitive_runtime_symbols,
-            )
-            and ELF_INTERNAL_SYMBOL_NAME.matches(f.name)
+            and internal_looking_export(f.name, filter_transitive_runtime_symbols)
         )
     ]
     if not leaked:

@@ -238,3 +238,80 @@ def test_the_real_export_table_leaks_exactly_its_internal_scopes() -> None:
         "_ZN5mylib6detail5parseERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE",
         "_ZN5mylib8internal6renderB5cxx11Ei",
     ]
+
+
+# Local entities and literal operators, from a real g++ 13 build (``c++filt``
+# in each comment): a local class or static of a function is scoped by that
+# function's own name; a literal operator is named by its suffix.
+@pytest.mark.parametrize(
+    ("symbol", "leaks"),
+    [
+        (
+            "_ZZN5mylib6detail3runEvEN4NodeC1Ev",
+            True,
+        ),  # mylib::detail::run()::Node::Node()
+        ("_ZZN5mylib6detail3runEvEN4NodeclEv", True),  # ...::Node::operator()()
+        ("_ZZN5mylib6detail3runEvE4hits", True),  # mylib::detail::run()::hits
+        ("_ZZN5mylib3apiEvEN7Visitor2goEv", False),  # mylib::api()::Visitor::go()
+        ("_ZZN5mylib3apiEvE5calls", False),  # mylib::api()::calls
+        ("_Zli5_imply", True),  # operator"" _impl(unsigned long long)
+        ("_ZN5mylibli5_implEy", True),  # mylib::operator"" _impl(unsigned long long)
+        ("_Zli3_kmy", False),  # operator"" _km(unsigned long long)
+    ],
+)
+def test_local_entities_and_literal_operators_keep_their_owning_name(
+    symbol: str, leaks: bool
+) -> None:
+    assert _leaks([symbol]) == ([symbol] if leaks else [])
+
+
+@pytest.mark.parametrize("prefix", ["_ZTI", "_ZTS", "_ZTV", "_ZTT"])
+def test_debug_mode_runtime_rtti_is_transitive(prefix: str) -> None:
+    # typeinfo/vtable of __gnu_debug::_Safe_iterator_base, like __gnu_cxx's
+    symbol = f"{prefix}N11__gnu_debug19_Safe_iterator_baseE"
+    assert not is_abi_relevant_elf_symbol(symbol)
+    assert is_abi_relevant_elf_symbol(symbol, filter_transitive_runtime_symbols=False)
+
+
+# --- who owns a local entity: the runtime, or a user specialization ---------
+
+INLINE_NAMESPACES = ("", "__1", "__cxx11", "__ndk1", "__debug")
+# Runtime templates whose *arguments* name a customization point.
+RUNTIME_TEMPLATES = (
+    (
+        "basic_string",
+        "cSt11char_traitsIcESaIcE",
+    ),  # basic_string<char, char_traits<char>, ...>
+    ("set", "iSt4lessIiESaIiE"),  # set<int, less<int>, ...>
+    ("unordered_map", "iiSt4hashIiESt8equal_toIiESaISt4pairIKiiEE"),
+)
+CUSTOMIZATION_POINTS = ("hash", "char_traits", "less", "numeric_limits")
+
+
+def _std(ns: str) -> str:
+    return "St" + (_src(ns) if ns else "")
+
+
+@pytest.mark.parametrize("ns", INLINE_NAMESPACES)
+@pytest.mark.parametrize(("template", "args"), RUNTIME_TEMPLATES)
+def test_a_runtime_templates_local_entity_is_the_runtimes(
+    ns: str, template: str, args: str
+) -> None:
+    from abicheck.name_classification import is_stdlib_local_name_symbol
+
+    # std::[ns::]template<args>::_M_construct()::_Guard::_Guard()
+    symbol = f"_ZZN{_std(ns)}{_src(template)}I{args}E12_M_constructEvEN6_GuardC1Ev"
+    assert is_stdlib_local_name_symbol(symbol), symbol
+    assert _leaks([symbol]) == []
+
+
+@pytest.mark.parametrize("ns", INLINE_NAMESPACES)
+@pytest.mark.parametrize("point", CUSTOMIZATION_POINTS)
+def test_a_user_specializations_local_entity_stays_the_users(
+    ns: str, point: str
+) -> None:
+    from abicheck.name_classification import is_stdlib_local_name_symbol
+
+    # std::[ns::]point<MyType>::operator()() const::salt -- user-authored code
+    symbol = f"_ZZNK{_std(ns)}{_src(point)}I6MyTypeEclEvE4salt"
+    assert not is_stdlib_local_name_symbol(symbol), symbol
