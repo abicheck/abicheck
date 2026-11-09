@@ -119,8 +119,10 @@ def _report_compare_result(
     """
     from ...cli_compare_receipt import record_resolved_config
     from .baseline_provenance import current_baseline_provenance_block
+    from .delta_baseline import current_delta_baseline_block
 
     result.baseline_provenance = current_baseline_provenance_block()
+    result.delta_baseline = current_delta_baseline_block()
     record_resolved_config(
         result,
         resolved_cfg,

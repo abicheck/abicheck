@@ -418,6 +418,10 @@ def build_json_base(result: DiffResult) -> dict[str, object]:
     # Schema 6.8: asserted by the caller (the root Action), not verified.
     if result.baseline_provenance is not None:
         d["baseline_provenance"] = dict(result.baseline_provenance)
+    # Schema 7.3: gate or delta comparison of a delta-baseline pair; asserted
+    # by the caller, informational (never changes verdict or exit code).
+    if result.delta_baseline is not None:
+        d["delta_baseline"] = dict(result.delta_baseline)
     d["summary"] = {
         "breaking": summary.breaking,
         "source_breaks": summary.source_breaks,
