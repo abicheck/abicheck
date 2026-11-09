@@ -7,12 +7,31 @@ results, not outputs of the detectors under test.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
-from tests.oracles.absence import absence_violations
-from tests.oracles.conservation import conservation_violations
-from tests.oracles.producer import allowlist_growth, producer_violations
+from tests.oracles.absence import (
+    absence_violations,
+    gate_violations,
+    rendered_absence_violations,
+)
+from tests.oracles.conservation import (
+    conservation_violations,
+    disposition_violations,
+    rendered_audit_violations,
+)
+from tests.oracles.producer import (
+    allowlist_growth,
+    producer_violations,
+    symbol_violations,
+)
 from tests.oracles.routes import RouteOutcome, route_violations
+
+_ALLOWLIST_FILE = (
+    Path(__file__).resolve().parent / "oracles" / "allowlist_baseline.json"
+)
 
 # -- A: absence typing ----------------------------------------------------------
 
@@ -202,9 +221,6 @@ def test_malformed_disposition_audit_is_a_violation_not_a_crash(
 
 # -- A: rendered wording -------------------------------------------------------
 
-from tests.oracles.absence import rendered_absence_violations  # noqa: E402
-from tests.oracles.producer import symbol_violations  # noqa: E402
-
 
 def test_rendered_headline_claiming_acceptance_on_partial_evidence_is_a_violation() -> (
     None
@@ -262,3 +278,181 @@ def test_non_mapping_disposition_audit_is_a_violation_and_absent_is_allowed() ->
         {"changes": [], "disposition_audit": "gating"}, {}
     ) == ["disposition_audit is not a mapping: str"]
     assert conservation_violations({"changes": []}, {}) == []
+
+
+# -- A: release recommendation and exit code -----------------------------------
+
+
+@pytest.mark.parametrize("bump", ["none", "patch"])
+def test_absence_fires_on_a_compatible_version_bump_without_evidence(bump: str) -> None:
+    report = {
+        "verdict": "UNCONFIRMED",
+        "analysis_assurance": {"status": "partial"},
+        "release_recommendation": {"version_bump": bump},
+    }
+    assert absence_violations(report) == [
+        f"release_recommendation.version_bump {bump!r} presumes compatibility "
+        "while analysis_assurance.status is 'partial'"
+    ]
+
+
+def test_absence_accepts_the_adr_090_unconfirmed_contract() -> None:
+    report = {
+        "verdict": "UNCONFIRMED",
+        "analysis_assurance": {"status": "partial"},
+        "release_recommendation": {"version_bump": "undetermined"},
+    }
+    assert absence_violations(report) == []
+    assert gate_violations(1, "partial") == []
+
+
+@pytest.mark.parametrize("status", ["partial", "failed", "not_comparable"])
+def test_gate_fires_on_exit_0_without_evidence(status: str) -> None:
+    assert gate_violations(0, status) == [
+        f"exit 0 (gate passed) while analysis_assurance.status is {status!r}"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("exit_code", "status"), [(0, "complete"), (0, "not_requested"), (4, "partial")]
+)
+def test_gate_silent_on_supported_exit(exit_code: int, status: str) -> None:
+    assert gate_violations(exit_code, status) == []
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "**Verdict:** ✅ `NO_CHANGE` — no ABI/API change — safe to merge",
+        "**Policy:** `strict_abi` · **Gate:** PASS (exit 0)",
+        "<h2>🔵 Compatibility: NO_CHANGE</h2>",
+    ],
+)
+def test_review_and_html_clean_wording_is_flagged(text: str) -> None:
+    assert rendered_absence_violations({"review": text}, "partial") != []
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "**Verdict:** `UNCONFIRMED` — not safe to merge",
+        "This result isn't safe to merge without headers.",
+        "Never safe to merge on partial evidence.",
+    ],
+)
+def test_negated_safe_to_merge_is_not_a_clean_claim(text: str) -> None:
+    assert rendered_absence_violations({"review": text}, "partial") == []
+
+
+def test_affirmed_safe_to_merge_is_a_clean_claim() -> None:
+    assert rendered_absence_violations({"review": "Safe to merge."}, "partial") == [
+        "review states a clean claim ('Safe to merge') while analysis_assurance.status is 'partial'"
+    ]
+
+
+# -- D: rendered audit totals and disposition agreement --------------------------
+
+
+def _audited(
+    changes: list[dict],
+    gating: int,
+    non_gating: int,
+    *,
+    gating_retained: int | None = None,
+) -> dict:
+    return {
+        "changes": changes,
+        "disposition_audit": {
+            "detected_total": gating + non_gating,
+            "effective_total": gating,
+            "counts": {"gating": gating, "non_gating": non_gating},
+        },
+        "result_counts": {
+            "gating": gating,
+            "gating_retained": gating if gating_retained is None else gating_retained,
+            "retained": len(changes),
+        },
+    }
+
+
+_TWO = [
+    {"kind": "func_removed", "finding_id": "a", "gate_contribution": 4},
+    {"kind": "func_added", "finding_id": "b", "gate_contribution": 0},
+]
+
+
+def test_rendered_audit_totals_agree_silently() -> None:
+    report = _audited(_TWO, 1, 1)
+    rendered = {"markdown": {"detected": 2, "gating": 1}, "html": {"detected": 2}}
+    assert rendered_audit_violations(report, rendered) == []
+
+
+def test_rendered_audit_total_drift_is_named_per_renderer() -> None:
+    report = _audited(_TWO, 1, 1)
+    rendered = {"review": {"detected": 3, "gating": 1}, "html": {"gating": 0}}
+    assert rendered_audit_violations(report, rendered) == [
+        "html prints gating 0, JSON audit says 1",
+        "review prints detected 3, JSON audit says 2",
+    ]
+
+
+def test_rendered_audit_without_a_json_audit_is_a_violation() -> None:
+    assert rendered_audit_violations(
+        {"changes": []}, {"markdown": {"detected": 0}}
+    ) == ["disposition_audit is missing, so rendered totals have no reference"]
+
+
+def test_disposition_agrees_silently() -> None:
+    assert disposition_violations(_audited(_TWO, 1, 1)) == []
+
+
+def test_disposition_fires_when_gating_changes_outnumber_effective_total() -> None:
+    changes = [{**c, "gate_contribution": 4} for c in _TWO]
+    assert disposition_violations(_audited(changes, 1, 1)) == [
+        "2 changes contribute to the gate, more than effective_total 1",
+        "2 changes contribute to the gate, result_counts.gating_retained is 1",
+    ]
+
+
+def test_a_scored_finding_folded_out_of_changes_is_not_a_violation() -> None:
+    # A redundant finding the verdict still scores stays in the audit's
+    # gating count but is folded out of ``changes`` (held_out_gating).
+    report = _audited(_TWO, 2, 1, gating_retained=1)
+    assert disposition_violations(report) == []
+
+
+def test_disposition_fires_on_effective_total_and_result_count_drift() -> None:
+    report = _audited(_TWO, 1, 1)
+    report["disposition_audit"]["effective_total"] = 2
+    report["result_counts"]["retained"] = 5
+    report["result_counts"]["gating_retained"] = 2
+    assert disposition_violations(report) == [
+        "effective_total 2 != counts.gating 1",
+        "1 changes contribute to the gate, result_counts.gating_retained is 2",
+        "result_counts.gating 1 != effective_total 2",
+        "result_counts.retained 5 != 2 changes listed",
+    ]
+
+
+def test_disposition_requires_a_per_change_gate_contribution() -> None:
+    changes = [{"kind": "func_removed", "finding_id": "a"}]
+    assert disposition_violations(_audited(changes, 1, 0)) == [
+        "changes without gate_contribution: ['func_removed']"
+    ]
+
+
+# -- B: the committed allowlist only shrinks ----------------------------------------
+
+
+def test_producer_allowlist_has_not_grown_past_its_baseline() -> None:
+    """B: the JSON allowlist may only shrink. Compared per case, as (kind, side) pairs."""
+    data = json.loads(_ALLOWLIST_FILE.read_text(encoding="utf-8"))
+    allowlist, baseline = data["allowlist"], data["baseline"]
+    growth: list[str] = []
+    for case in sorted(set(allowlist) | set(baseline)):
+        current = {(kind, side) for kind, side in allowlist.get(case, [])}
+        recorded = {(kind, side) for kind, side in baseline.get(case, [])}
+        growth.extend(
+            f"{case}: {message}" for message in allowlist_growth(current, recorded)
+        )
+    assert growth == []

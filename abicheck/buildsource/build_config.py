@@ -244,6 +244,7 @@ KEY_TABLE = KeyTable(
         KeySpec("scope.public_symbols", Kind.LIST, "public_symbols", []),
         KeySpec("output.view", Kind.LIST, "output_view", []),
         KeySpec("report.baseline_provenance", Kind.STR, "report_baseline_provenance"),
+        KeySpec("report.delta_baseline", Kind.STR, "report_delta_baseline"),
         KeySpec("consumers.manifests", Kind.LIST, "used_by_manifests", []),
         KeySpec("consumers.required_symbols", Kind.LIST, "required_symbols", []),
         KeySpec("scope.show_redundant", Kind.BOOL, "scope_show_redundant"),
@@ -466,6 +467,10 @@ class BuildConfig:
     #: ``report.baseline_provenance``: a JSON file the root Action writes with
     #: the baseline it resolved; copied into the report, not verified.
     report_baseline_provenance: str | None = None
+    #: ``report.delta_baseline``: a JSON file the root Action writes saying
+    #: whether this run is the gate or the delta comparison of a
+    #: ``delta-baseline`` pair (``report/delta_baseline.py``).
+    report_delta_baseline: str | None = None
     #: ``consumers.manifests``/``consumers.required_symbols``: the ADR-043
     #: scoped-gate inputs that ``consumers.manifests``/``consumers.required_symbols``
     #: used to carry on the command line. Paths resolve against the config.

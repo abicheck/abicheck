@@ -1,7 +1,9 @@
 name: 'abicheck main-snapshot'
 description: >-
   Capture one ABI snapshot of a default-branch commit and upload it as the
-  workflow artifact `abicheck-main-<full sha>[-<profile>]`, the exact name
+  workflow artifact `abicheck-main-<full sha>[-<profile>]` (or, with
+  `storage: cache`, save it under the Actions-cache key
+  `abicheck-main-snapshot-<full sha>[-<profile>]`), the exact name
   `actions/fetch-main-snapshot` looks up when a pull request needs its base.
   Snapshots are per-commit and immutable; the delta a PR shows is computed
   from them, never stored. Refuses to run on pull_request/pull_request_target
@@ -41,9 +43,25 @@ inputs:
     required: false
     default: ''
   retention-days:
-    description: 'Artifact retention. Pull requests older than this fall back to `base_expired`.'
+    description: 'Artifact retention (`storage: artifact`). Pull requests older than this fall back to `base_expired`.'
     required: false
     default: '14'
+  storage:
+    description: >
+      `artifact` (default): a workflow artifact, verified by the consumer
+      against the run that uploaded it. `cache`: an Actions-cache entry under
+      a key bound to the full commit SHA, readable from pull requests
+      (forks included) without `actions: read`, but carrying no
+      producing-run provenance -- see docs/reference/main-snapshot.md.
+      Saved only from the default branch.
+    required: false
+    default: 'artifact'
+  branch:
+    description: >
+      `storage: cache` only: the default branch the entry must be saved
+      from. Empty = the repository default branch from the event payload.
+    required: false
+    default: ''
   python-version:
     description: 'Python used to run abicheck.'
     required: false
@@ -56,6 +74,9 @@ outputs:
   snapshot-path:
     description: 'The snapshot file that was uploaded.'
     value: ${{ steps.dump.outputs.snapshot-path }}
+  cache-key:
+    description: '`storage: cache` only: the cache key the snapshot was saved under.'
+    value: ${{ steps.dump.outputs.cache-key }}
 
 runs:
   using: 'composite'
@@ -85,10 +106,13 @@ runs:
         INPUT_DUMP_ARGS: ${{ inputs.dump-args }}
         INPUT_SNAPSHOT: ${{ inputs.snapshot }}
         INPUT_PROFILE: ${{ inputs.profile }}
+        INPUT_STORAGE: ${{ inputs.storage }}
+        DEFAULT_BRANCH: ${{ inputs.branch || github.event.repository.default_branch }}
         SNAPSHOT_SHA: ${{ github.sha }}
       run: bash "${{ github.action_path }}/run.sh"
 
     - name: Upload snapshot
+      if: inputs.storage != 'cache'
       uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
       with:
         name: ${{ steps.dump.outputs.artifact-name }}
@@ -96,3 +120,12 @@ runs:
         path: ${{ steps.dump.outputs.snapshot-dir }}
         retention-days: ${{ inputs.retention-days }}
         if-no-files-found: error
+
+    # Exact key, saved once: a key is immutable, so a re-run for the same
+    # commit leaves the first entry in place (both were built from it).
+    - name: Save snapshot to the Actions cache
+      if: inputs.storage == 'cache'
+      uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830  # v4
+      with:
+        path: .abicheck-main-snapshot-cache
+        key: ${{ steps.dump.outputs.cache-key }}

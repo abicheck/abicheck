@@ -58,7 +58,7 @@ status line's date and commit.
 
 ## Page layout
 
-Each open entry below has its status line, a risk tag and a short summary; the full write-up, with the history of what was tried, is one file per entry under `docs/contribute/known-gaps/`. Index rows are ranked: the Priority list, then `false-clean` (a run can read cleaner than its evidence), `false-positive` (a finding or failure that is not real), `perf`, and `hygiene` (tests, tooling, schema or code-ownership debt). When you fix, re-check or add an entry, edit its write-up and keep the index row's status line in sync.
+Each open entry below has its status line, a risk tag and a short summary; the full write-up, with the history of what was tried, is one file per entry under `docs/contribute/known-gaps/`. Index rows are ranked: the Priority list, then `false-clean` (a run can read cleaner than its evidence), `false-positive` (a finding or failure that is not real), `perf`, and `hygiene` (tests, tooling, schema or code-ownership debt). `route-divergence` marks two equivalent routes (CLI, typed API, package) that report different findings for one input without a cleaner verdict. When you fix, re-check or add an entry, edit its write-up and keep the index row's status line in sync.
 
 ## Priority
 
@@ -74,6 +74,45 @@ Next, unranked (the `--no-baseline` one-sided-detector gap, the target-platform 
 
 ## Open and partially open gaps
 
+### Parser inputs: corrupt input reads as empty or escapes as an untyped exception
+
+Found by the parser fuzz oracle in `tests/test_parser_fuzz_oracle.py`
+(`tests/_parser_fuzz_oracle.py` holds the oracle: a corrupted input must raise
+an allowed type, record an explicit `partial`/`failed` export read, or read as
+non-empty; a truncated input must lose no fact without such a record; and no
+parse may raise another type or run past its time budget). Each entry below is
+one way the oracle fails. How strict the tests are: a fuzz test for a parser
+with an entry here is marked xfail only when *every* violation it finds matches
+that entry's message pattern (`KnownGap.pattern` in the test module); any other
+violation fails the test, and a run that finds none passes. The fast lane uses
+a fixed Hypothesis seed and may or may not reach a gap; the `slow` lane
+reaches each one. The canary named under each entry asserts the gapped answer
+deterministically and fails when the gap closes.
+
+#### A corrupt PE export directory reads as fewer or zero exports and records no failure (2026-11-08)
+**Status (2026-11-08): OPEN.** `parse_pe_metadata` (`abicheck/pe_metadata.py`) returns normally on a damaged export directory. No `note_export_read_failure` is called on that path, so the ADR-079 read state (`platform_export_read`) is `complete` although exports were lost. Reproduction: the committed `tests/fixtures/containers/sources/corpus_pe.dll` (3 exports) cut to 1405 bytes parses with zero exports; cuts between about 1405 and 1683 bytes keep one or two of the three. A fuzz run finds more cases from byte flips inside the export directory. Owner: `abicheck/pe_metadata.py`, with the export-read recording contract in `abicheck/extract/parse_failures.py`.
+<!-- canary: tests/test_parser_fuzz_oracle.py::test_pe_truncated_export_directory_reads_empty_unrecorded -->
+
+#### A Mach-O cut inside its string table or export trie reads as fewer or zero exports and records no failure (2026-11-08)
+**Status (2026-11-08): OPEN.** `parse_macho_metadata` (`abicheck/macho_metadata.py`) reads a dylib whose `LC_SYMTAB` string table or `LC_DYLD_EXPORTS_TRIE` data runs past the end of the file as having fewer exports (none, for most cuts) with nothing recorded, so the read state is `complete`. Reproduction: the three-export synthetic dylib from `tests/_macho_synthetic.py` (`build_macho_seed`, 236 bytes) cut anywhere from 192 to 232 bytes. Load-command truncations are recorded correctly. Owner: `abicheck/macho_metadata.py` (`_parse_macho_symbols`, `_parse_export_trie`).
+<!-- canary: tests/test_parser_fuzz_oracle.py::test_macho_truncated_string_table_reads_empty_unrecorded -->
+
+#### `parse_dwarf_metadata` reads corrupt DWARF as empty, and lets a `MemoryError` escape (2026-11-08)
+**Status (2026-11-08): OPEN.** Both `parse_dwarf_metadata` readers (`abicheck/dwarf_metadata.py` and the production `abicheck/dwarf_unified.py`) catch only `ELFError`, `OSError` and `ValueError`, swallow per-CU errors, and record nothing. A single corrupted byte in a gcc `-g` shared-object seed (about 3 % of flips in one measured run; any of the first bytes of `.debug_abbrev`) returns no structs, enums or base types with nothing recorded, so the corrupt debug info reads as "no DWARF". Another flip (about 0.3 %) makes pyelftools allocate a decompressed section of arbitrary size, and the `MemoryError` escapes a function whose docstring says "Never raises". The DWARF fuzz tests are `slow` only; the canary is the fast-lane signal. Owner: `abicheck/dwarf_metadata.py`, `abicheck/dwarf_unified.py`, `abicheck/extract/dwarf_subtree_index.py`.
+<!-- canary: tests/test_parser_fuzz_oracle.py::test_dwarf_corrupt_abbrev_table_reads_empty_without_failure -->
+
+#### A clang AST node of the wrong JSON type leaks `TypeError`/`AttributeError` instead of `MalformedClangAstError` (2026-11-08)
+**Status (2026-11-08): OPEN.** `_ClangAstParser` (`abicheck/dumper_clang.py`) refuses a wrong-typed `inner` with `MalformedClangAstError`, but a wrong-typed scalar field does not get the same treatment: an object- or list-valued `kind` raises `TypeError: unhashable type`, a non-string `mangledName` or record `name` raises `AttributeError` (`.startswith`/`.strip`), and a non-object `type` raises `TypeError`. A tree with no `inner`, or `inner: null`, is a valid empty translation unit (`ast_inner` documents `null` as absent) and is not part of this gap. Owner: `abicheck/dumper_clang.py`, `abicheck/extract/headers/clang/ast_inner.py` (the shape validation the readers share).
+<!-- canary: tests/test_parser_fuzz_oracle.py::test_clang_ast_object_valued_kind_leaks_typeerror -->
+
+#### A malformed storage-v2 snapshot leaks `KeyError`/`TypeError`/`AttributeError` instead of a typed error (2026-11-08)
+**Status (2026-11-08): OPEN.** A storage-v2 snapshot document with one function's `mangled` key removed (`sections/declarations/payload/functions[0]`) is accepted by `load_snapshot`, and the `KeyError` surfaces only on the first `declarations` access (`abicheck/model/lazy_declarations.py` -> `abicheck/storage/snapshot_decode_declarations.py`). Structural mutations (dropped keys, wrong node types) leak the same classes: `KeyError` for `return_type`, `status` and `name`, and `TypeError` / `AttributeError` for wrong node types, raised from `load_snapshot` or from the lazy decode, which the harness does not distinguish. The documented contract is `SnapshotError` / `ValidationError`. Owner: `storage/snapshot_decode_declarations.py`, `storage/snapshot_codec.py`.
+<!-- canary: tests/test_parser_fuzz_oracle.py::test_snapshot_missing_function_mangled_key_leaks_keyerror -->
+
+#### Parsers not yet fuzzed (2026-11-08)
+**Status (2026-11-08): OPEN.** `parse_btf_metadata`, `parse_ctf_metadata` and `parse_sycl_metadata` are discovered by `tests/test_parser_fuzz_enrollment.py` but listed in `NOT_ENROLLED` (`tests/_parser_fuzz_oracle.py`): each needs a seed the default lane cannot build (pahole/BPF, gcc `-gctf` with libctf, a SYCL plugin). Their corrupt-input behaviour is unmeasured. Owner: `tests/_parser_fuzz_oracle.py`.
+<!-- no-canary: the gap is an absence of tests, not a parser answer to pin; tests/test_parser_fuzz_enrollment.py keeps the NOT_ENROLLED list honest and fails on an unlisted new parser -->
+
 ### Option vocabulary (ADR-091 follow-ups)
 
 The option-vocabulary migration is complete (ADR-091, Accepted and
@@ -88,6 +127,13 @@ dependency walk and debug roots to every member. No open gap remains.
 
 **Status (2026-11-09): OPEN.** `compare/parameter_replacement.py` pairs a header-declared function whose written parameter spelling is unchanged but resolves to a different type (`V scale(V, float)` with `using V = basic_vec<float>` whose default width changed) by reading `Param.type_identities_fact` and the record layouts it names. The castxml backend collects those identities; the clang backend records them as `not_collected`, so under `ABICHECK_AST_FRONTEND=clang` that pair stays `func_removed` + `func_added` (verdict right, kind wrong). A *rewritten* signature (`add(int, int)` -> `add(int, int, int)`) pairs on both backends: without identities its spelling is read. Closing it needs the clang backend to record each parameter's resolved record/enum identities. `wrong-kind` on clang. Owner: `extract/headers/clang/`.
 <!-- canary: tests/test_header_param_change_pairing_integration.py::test_clang_kept_spelling_default_argument_change_stays_unpaired -->
+
+#### The typed `compare()` route omits `exported_not_public` that the CLI reports for the same catalog case (2026-11-08)
+
+**Status (2026-11-08): OPEN.** Found by the typed-API route check in `tests/test_invariant_oracles_catalog.py`.
+[Full write-up](known-gaps/the-typed-compare-route-omits-exported-not-public-that-the-cli-reports-for-the-same-catalog-case.md)
+`route-divergence` — the typed route reports a different kind set from the CLI for one catalog case (one hygiene finding missing). The verdict agrees, so no run reads cleaner than its evidence.
+<!-- canary: tests/test_invariant_oracles_catalog.py::test_typed_api_omits_exported_not_public_on_case09 -->
 
 #### The clang record-layout pass leaves unnameable records and alias-template arrays to DWARF (2026-11-04)
 
@@ -207,12 +253,12 @@ current emitter, which is unchanged.
 `false-clean` — a symbols-only compare of a stripped library reads `NO_CHANGE` with exit 0 and an accepted headline.
 <!-- canary: tests/test_invariant_oracles_reduced_evidence.py::test_stripped_pair_gap_is_still_the_current_answer -->
 
-#### The typed `compare()` route omits `exported_not_public` that the CLI reports for the same catalog case (2026-11-08)
+#### One-sided DWARF or an unmet `--depth headers` request reads a clean verdict with exit 0 (2026-11-08)
 
-**Status (2026-11-08): OPEN.** Found by the typed-API route check in `tests/test_invariant_oracles_catalog.py`.
-[Full write-up](known-gaps/the-typed-compare-route-omits-exported-not-public-that-the-cli-reports-for-the-same-catalog-case.md)
-`false-clean` — the typed route can read a catalog case as having one fewer hygiene finding than the CLI.
-<!-- canary: tests/test_invariant_oracles_catalog.py::test_typed_api_omits_exported_not_public_on_case09 -->
+**Status (2026-11-08): OPEN.** Found by the evidence-shape oracles (`tests/test_invariant_oracles_evidence_shapes.py`). Sibling shapes of the stripped-pair entry above: an old library with DWARF against a stripped new one reads `COMPATIBLE` (`partial`, `version_bump: patch`), and a stripped pair compared with `--depth headers` and no headers reads `NO_CHANGE` (`failed`). Both exit 0, and every renderer states the clean result. [ADR-090](adr/090-unresolved-surface-is-not-a-clean-verdict.md) (proposed) covers both.
+[Full write-up](known-gaps/one-sided-dwarf-or-an-unmet-depth-headers-request-reads-a-clean-verdict-with-exit-0.md)
+`false-clean` — a compare with type-level evidence on one side only, or with its requested depth unmet, reads clean with exit 0.
+<!-- canary: tests/test_invariant_oracles_evidence_shapes.py::test_one_sided_and_unmet_depth_gap_is_still_the_current_answer -->
 
 #### A castxml base whose bare leaf two records share is not resolved by the leak walk (2026-11-05)
 
