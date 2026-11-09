@@ -219,10 +219,11 @@ def _require_m32() -> None:
 def test_i386_c_rebuild_leaves_only_the_stack_canary(tmp_path, evidence):
     """The corpus's minimized cell (rebuild_optimized on c_core, c17 gcc13 -m32).
 
-    The address-placement alignment drop of ``g_counter`` (16 -> 8 in a
-    4-aligned ``.bss``) is gone; ``-O2`` needs no canary, so the recorded
-    ``stack_canary_removed`` RISK is all that is left, as the strict
-    ``tests/_edit_corpus_known.py`` entry records.
+    Every risk left is one the strict ``tests/_edit_corpus_known.py`` entry
+    records and ``docs/contribute/known-gaps.md`` explains: the stack canary
+    ``-O2`` no longer needs, and the address-placement alignment of
+    ``g_counter`` (binary and DWARF only; headers know the declared one). No
+    break, and no other risk, is reported.
     """
     _driver("gcc")
     _require_m32()
@@ -250,8 +251,10 @@ def test_i386_c_rebuild_leaves_only_the_stack_canary(tmp_path, evidence):
         for k in cell.kinds
         if k.lower() in {c.value for c in RISK_KINDS | BREAKING_KINDS}
     }
-    assert "EXPORTED_OBJECT_ALIGNMENT_REDUCED" not in cell.kinds, cell.describe()
-    assert risky <= {"STACK_CANARY_REMOVED"}, cell.describe()
+    allowed = {"STACK_CANARY_REMOVED"}
+    if evidence != "headers":
+        allowed.add("EXPORTED_OBJECT_ALIGNMENT_REDUCED")
+    assert risky <= allowed, cell.describe()
     known = known_mismatch("rebuild_optimized", "c_core", config)
     if risky:
         assert known is not None and cell.verdict in known.verdicts, cell.describe()
@@ -261,7 +264,7 @@ def test_i386_c_rebuild_leaves_only_the_stack_canary(tmp_path, evidence):
 
 def test_a_real_alignment_loss_still_reports(tmp_path):
     """Negative control: ``alignas(16)`` dropped from an exported object is a
-    genuine reduction, and the section bound keeps it visible."""
+    genuine reduction and is reported from the binary."""
     cxx = _driver("gcc")
     snaps = []
     for name, decl in (

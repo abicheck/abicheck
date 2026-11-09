@@ -240,12 +240,14 @@ KNOWN: tuple[Known, ...] = (
         frozenset({"c_core"}),
         "false-positive",
         # i386 -O0 guards fill_rec's frame and calls __stack_chk_fail; -O2 needs no
-        # canary. The address-alignment noise of the same cell is fixed (#1960).
+        # canary, and moves g_counter to a less-aligned address in a 4-aligned .bss.
         lambda c: (
             c.objfmt == "elf" and c.producer.family == "gcc" and c.flags.bits == 32
         ),
-        "-O2 leaves no frame that needs a stack canary, so stack_canary_removed (RISK) is "
-        "reported though -fstack-protector-strong is still on; every consumer still runs",
+        "-O2 leaves no frame that needs a stack canary (stack_canary_removed, though "
+        "-fstack-protector-strong is still on) and places g_counter at 0x4008 instead of "
+        "0x4010 (exported_object_alignment_reduced 16 -> 8 from the address alone, binary "
+        "and DWARF); both RISK, while every consumer still runs",
         GAP_O2_STD,
         issues=frozenset({"stronger-than:COMPATIBLE"}),
         verdicts=frozenset({"COMPATIBLE_WITH_RISK"}),

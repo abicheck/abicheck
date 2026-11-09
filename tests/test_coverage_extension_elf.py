@@ -40,9 +40,9 @@ from abicheck.elf_metadata import (
     SymbolType,
     _parse_abi_tag,
     _parse_dynamic,
+    _value_alignment,
 )
 from abicheck.extract.elf_notes import decode_abi_tag_desc, decode_gnu_property_desc
-from abicheck.extract.elf_value_alignment import value_alignment as _value_alignment
 from abicheck.model import AbiSnapshot, Variable
 
 

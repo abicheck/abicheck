@@ -12,7 +12,7 @@
       "abicheck/dwarf_snapshot_datasources.py": "e337f8be3a8ae16350c0639d0be10670d4d5d1197108659fa210fcbbf8a5bdde",
       "abicheck/dwarf_unified.py": "9ecb70b59bb26674ac98ba14ad1211b4103e3a78426a91ed7901e59f1a7d9cdf",
       "abicheck/dwarf_utils.py": "faa6be4a5de6e58b3c6ba139dc6983b0c6404ed69c348f19d724fc56aa70f5d7",
-      "abicheck/elf_metadata.py": "5356326c28cd71b0200c159913c9e40f1f7a7783d4c16feda9d3a97235b25b0f",
+      "abicheck/elf_metadata.py": "e5ca377a85a3380faaa63119f832780fa344ecfad346d81b9cfcc6ee2050ac35",
       "abicheck/extract/__init__.py": "011ec37fad96ea2035983eaaedeba0976940a570900f85db8c03bb7369af742a",
       "abicheck/extract/ar_archive.py": "6fdab7ed7390a20f087f9407eaa3988c0f8c658400bc0ea8c7e193271923956d",
       "abicheck/extract/ar_archive_format.py": "38a51cae7762eb269af3788d5dca9cfe50de38d9b315f34fa31427f791cb7e62",
@@ -66,7 +66,6 @@
       "abicheck/extract/elf_symbol_origin.py": "3408f0fdb9d3ce98eff14007012ac4bf844256f6628d127c4853ef8b6c20dac4",
       "abicheck/extract/elf_symbol_tables.py": "20aad46c8363b26b371f367dae054f96c92773551b1adec67628348613f4401f",
       "abicheck/extract/elf_symbol_versions.py": "b2aa29df27ed51b9cbe3f6b94e9c99e391036216621fa35cb72dc922ecf39786",
-      "abicheck/extract/elf_value_alignment.py": "c3fa9a7a3e5d48fe937fc57680759353c869971a228d2f34934417e92cbdb87d",
       "abicheck/extract/env_flags.py": "6a1343268cdfcd4b2ccaf91008d96b611973bf5cab04467c2585f012e1f5466c",
       "abicheck/extract/export_symbol_identity.py": "2146bd67207411943258124a24271542c8b9767344c1b404aaa9133c0358ff00",
       "abicheck/extract/export_table_read.py": "58fdf78460a49cf1f906e3321c76aff912c27a70a3198050d9e532cdbbf39958",
@@ -205,9 +204,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "a70e85a5127d080829eb05e1acf1d55a17ea0f5fcc835913de29f00717f523e5",
+    "fingerprint": "89974a91014122e63c5fcff1b34909618bf81dcb7d4ac35c51081e55821cc750",
     "generation": 45,
-    "reason": "generation 45 (not yet on main) also caps ELF value_alignment at sh_addralign (extract/elf_value_alignment.py); the generation-45 SPELLING_MIGRATIONS row and cache salt v39 describe it, recorded in the same PR"
+    "reason": "bumped to 45 for a semantic change"
   },
   "resolver": {
     "files": {

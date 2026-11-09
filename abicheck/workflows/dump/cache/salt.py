@@ -44,9 +44,8 @@ from __future__ import annotations
 #: v39: advanced DWARF reads a declaration-only by-value aggregate's
 #: triviality as ``unknown`` (not ``trivial``) and honours a type's own
 #: ``DW_AT_calling_convention``; ``origin_lib`` attributes a std customization
-#: point specialized over builtins only to the runtime; ``ElfSymbol.value_alignment``
-#: is capped at the containing section's ``sh_addralign``. A warm entry would keep
-#: the old ``trivial``/native/uncapped readings.
+#: point specialized over builtins only to the runtime. A warm entry would keep
+#: the old ``trivial``/native readings.
 SNAPSHOT_CACHE_VERSION: str = "39"
 # v35: header-derived snapshots now carry public_header_identifiers (schema
 # v55, extract/public_header_identifiers.py). The key also folds in the
