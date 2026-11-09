@@ -89,7 +89,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `executable_stack_removed` | COMPATIBLE | 2 | 0 | 0 |
 | `experimental_graduated` | COMPATIBLE | 1 | 0 | 0 |
 | `experimental_removed_without_replacement` | API_BREAK | 1 | 0 | 0 |
-| `exported_object_alignment_reduced` | RISK | 0 | 0 | 2 |
+| `exported_object_alignment_reduced` | RISK | 0 | 0 | 3 |
 | `func_added` | COMPATIBLE | 9 | 0 | 8 |
 | `func_added_elf_only` | COMPATIBLE | 0 | 0 | 0 |
 | `func_export_added` | COMPATIBLE | 2 | 0 | 0 |

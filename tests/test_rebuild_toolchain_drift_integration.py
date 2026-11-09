@@ -207,10 +207,12 @@ def test_dual_abi_rebuild_refusal_names_the_macro(tmp_path):
     assert compare(bin_old, bin_new).verdict is Verdict.BREAKING
 
 
-#: What a gcc without the 32-bit multilib runtime prints; any other failure of
+#: What a gcc without the 32-bit multilib runtime prints: a missing 32-bit
+#: startup object or runtime library, or header. ``skipping incompatible`` alone
+#: is not that (ld may go on to find a compatible one), so any other failure of
 #: the probe is a real compiler failure, not a missing capability.
 _NO_MULTILIB = re.compile(
-    r"cannot find (crt\w*\.o|-lgcc|-lgcc_s|-lc)|skipping incompatible|gnu/stubs-32\.h"
+    r"cannot find (crt\w*\.o|-lgcc|-lgcc_s|-lc)\b|gnu/stubs-32\.h"
 )
 
 
@@ -567,3 +569,86 @@ def test_an_alignas_defined_in_a_later_unit_survives_deduplication(tmp_path, cc)
     ]
     assert [c.kind.value for c in found] == ["exported_object_alignment_reduced"]
     assert found[0].effective_verdict is None
+
+
+@pytest.mark.parametrize("cc", ["gcc", "clang"])
+def test_an_ifunc_from_an_object_without_debug_info_keeps_the_canary_risk(tmp_path, cc):
+    """An IFUNC (``STT_GNU_IFUNC``, which pyelftools may spell ``STT_LOOS``)
+    whose resolver comes from an object built without ``-g`` is code no unit
+    describes, so the census records an unrecorded unit."""
+    from abicheck.extract.build_mode_capture import read_elf_build_signals
+
+    _driver(cc)
+    record = ["-grecord-command-line"] if cc == "clang" else []
+    d = tmp_path / "lib"
+    d.mkdir()
+    (d / "a.c").write_text(_CANARY_SOURCE)
+    (d / "b.c").write_text(
+        "static int impl(void) { return 1; }\n"
+        "static void *resolve(void) { return (void *)impl; }\n"
+        'int picked(void) __attribute__((ifunc("resolve")));\n'
+    )
+    objs = []
+    for src, debug in (("a.c", True), ("b.c", False)):
+        obj = d / (src + ".o")
+        flags = ["-g", *record] if debug else []
+        cmd = [cc, "-O0", "-fstack-protector-strong", "-fPIC", *flags]
+        cmd += ["-c", str(d / src), "-o", str(obj)]
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        assert proc.returncode == 0, f"{cmd}\n{proc.stderr}"
+        objs.append(str(obj))
+    so = d / "lib.so"
+    proc = subprocess.run(
+        [cc, "-shared", "-o", str(so), *objs],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    signals = read_elf_build_signals(so)
+    assert signals is not None
+    assert signals.stack_protector == {"strong": 1, "unrecorded": 1}
+
+
+@pytest.mark.parametrize("cxx", ["g++", "clang++"])
+def test_a_class_static_member_keeps_its_dwarf_alignment(tmp_path, cxx):
+    """An out-of-line ``alignas(16) int A::x`` definition: clang writes the
+    alignment (and the linkage name) only on the definition DIE, which has no
+    name of its own. Read with its ``DW_AT_specification`` declaration, the
+    variable is recorded as ``A::x`` with 128 bits declared; gcc emits no
+    ``DW_AT_alignment`` for it, so its declared alignment stays unknown."""
+    _driver(cxx)
+    snaps = []
+    for name, spec in (("old", "alignas(16) "), ("new", "")):
+        d = tmp_path / name
+        d.mkdir()
+        (d / "a.cpp").write_text(
+            "struct A { static int x; };\n"
+            f"int pad = 2;\n{spec}int A::x = 1;\n"
+            "int get() { return A::x; }\n"
+        )
+        so = d / "lib.so"
+        cmd = [cxx, "-O0", "-g", "-shared", "-fPIC", "-o", str(so), str(d / "a.cpp")]
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        assert proc.returncode == 0, f"{cmd}\n{proc.stderr}"
+        snaps.append(dump(so, [], compiler="c++", lang="c++"))
+    old_var = snaps[0].var_by_mangled("_ZN1A1xE")
+    assert old_var is not None and old_var.name == "A::x"
+    expected = 128 if cxx == "clang++" else None
+    assert old_var.alignment_bits == expected
+    new_sym = next(s for s in snaps[1].elf.symbols if s.name == "_ZN1A1xE")
+    if new_sym.value_alignment >= 16:
+        pytest.skip("the linker kept A::x 16-aligned; nothing was lost")
+    found = [
+        c
+        for c in compare(*snaps).changes
+        if c.kind.value == "exported_object_alignment_reduced"
+        and c.symbol == "_ZN1A1xE"
+    ]
+    assert [c.kind.value for c in found] == ["exported_object_alignment_reduced"]
+    if cxx == "clang++":
+        assert found[0].effective_verdict is None
+    else:
+        assert found[0].modulation_rule == (
+            "address-alignment-without-declared-requirement"
+        )

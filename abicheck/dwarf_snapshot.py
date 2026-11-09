@@ -77,6 +77,7 @@ from .extract.dwarf_scope import (
 )
 from .extract.dwarf_subtree_index import open_indexed_dwarf_info
 from .extract.dwarf_type_names import strip_type_decorators as _strip_type_decorators
+from .extract.dwarf_variable_identity import variable_definition_view
 from .extract.dwarf_vptr_resolution import finalize_vptr_offsets
 from .extract.surface_fact_producers import debug_info_surface_facts
 from .model import (
@@ -743,13 +744,12 @@ class _DwarfSnapshotBuilder:
         self, die: Any, CU: Any, scope: str, scope_path: ScopePath = ()
     ) -> None:
         """Extract a variable from DW_TAG_variable."""
+        die, scope, scope_path = variable_definition_view(die, CU, scope, scope_path)
         if not _attr_bool(die, "DW_AT_external"):
             return
-
         name = _attr_str(die, "DW_AT_name")
         if not name:
             return
-
         linkage_name = _attr_str(die, "DW_AT_linkage_name")
         if not linkage_name:
             linkage_name = _attr_str(die, "DW_AT_MIPS_linkage_name")

@@ -38,9 +38,8 @@ from enum import StrEnum
 
 __all__ = [
     "PROTECTED_LEVELS",
+    "STRENGTH",
     "StackProtectorLevel",
-    "StackProtectorTransition",
-    "compare_stack_protector",
     "level_from_producer",
     "stack_protector_census",
 ]
@@ -65,7 +64,8 @@ _SWITCHES: Mapping[str, StackProtectorLevel] = {
     "-fstack-protector-all": StackProtectorLevel.ALL,
 }
 
-_RANK: Mapping[StackProtectorLevel, int] = {
+#: Strength order of the recorded levels (``unrecorded`` has none).
+STRENGTH: Mapping[StackProtectorLevel, int] = {
     StackProtectorLevel.NONE: 0,
     StackProtectorLevel.EXPLICIT: 1,
     StackProtectorLevel.BASIC: 2,
@@ -122,55 +122,3 @@ def stack_protector_census(
         unrecorded = StackProtectorLevel.UNRECORDED.value
         census[unrecorded] = census.get(unrecorded, 0) + 1
     return dict(sorted(census.items())) or None
-
-
-class StackProtectorTransition(StrEnum):
-    """What two censuses establish about the protector between two builds."""
-
-    #: Every unit on both sides records its setting, every new unit is
-    #: protected, and every new unit is at least as strong as the strongest
-    #: old one -- so no unit can have weakened, however units correspond.
-    UNCHANGED = "unchanged"
-    #: Every old unit records its setting and a recorded new unit is weaker
-    #: than the weakest of them.
-    WEAKENED = "weakened"
-    #: Not weakened, but a recorded new unit is built without a protector
-    #: (``none``/``explicit``), so the flag is not on in every unit.
-    PARTIAL = "partial"
-    #: Every unit records a protected setting, but the builds mix settings
-    #: (old ``strong`` and ``basic`` units, say). Units are not matched across
-    #: builds, so one unit dropping ``strong`` -> ``basic`` cannot be ruled out.
-    MIXED = "mixed"
-    #: A side has no census, or a unit whose setting is not recorded.
-    UNKNOWN = "unknown"
-
-
-def _weakest(levels: set[StackProtectorLevel]) -> int:
-    return min(_RANK[level] for level in levels)
-
-
-def compare_stack_protector(
-    old: Mapping[str, int] | None, new: Mapping[str, int] | None
-) -> StackProtectorTransition:
-    """Classify the protector between *old* and *new* censuses."""
-    if not old or not new:
-        return StackProtectorTransition.UNKNOWN
-    old_levels = {StackProtectorLevel(k) for k, n in old.items() if n > 0}
-    new_levels = {StackProtectorLevel(k) for k, n in new.items() if n > 0}
-    old_known = old_levels - {StackProtectorLevel.UNRECORDED}
-    new_known = new_levels - {StackProtectorLevel.UNRECORDED}
-    # Proven only when no old unit is unrecorded (one could have been the
-    # weakest); an unrecorded new unit cannot lower the new side's weakest.
-    if (
-        StackProtectorLevel.UNRECORDED not in old_levels
-        and new_known
-        and _weakest(new_known) < _weakest(old_known)
-    ):
-        return StackProtectorTransition.WEAKENED
-    if new_known - PROTECTED_LEVELS:
-        return StackProtectorTransition.PARTIAL
-    if StackProtectorLevel.UNRECORDED in old_levels | new_levels:
-        return StackProtectorTransition.UNKNOWN
-    if _weakest(new_known) < max(_RANK[level] for level in old_known):
-        return StackProtectorTransition.MIXED
-    return StackProtectorTransition.UNCHANGED

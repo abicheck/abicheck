@@ -241,14 +241,16 @@ def backfill_variable_alignment(variables: list[Any], mangled: str, die: Any) ->
     unit defining ``_Alignas(16) int g``; the first DIE wins the de-duplication,
     so without this the declared alignment would be lost. Only a DIE that
     carries the attribute triggers the lookup, so the common duplicate costs
-    nothing. A recorded alignment is never overwritten.
+    nothing. The stronger of two declared alignments wins (an ``extern``
+    declaration's ``aligned(8)`` against the definition's ``aligned(16)``):
+    the object is placed at the definition's, which consumers may rely on.
     """
     align = _attr_int(die, "DW_AT_alignment")
     if align <= 0:
         return
     for var in variables:
         if var.mangled == mangled:
-            if var.alignment_bits is None:
+            if var.alignment_bits is None or var.alignment_bits < align * 8:
                 var.alignment_bits = align * 8
                 var.alignment_bits_fact = Fact.present(align * 8)
             return

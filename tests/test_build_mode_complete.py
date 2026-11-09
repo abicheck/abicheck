@@ -153,14 +153,20 @@ def test_detached_debug_consulted_only_when_image_has_no_producer(
     lib.write_bytes(b"\x7fELF")
     lang = ENUM_DW_LANG["DW_LANG_C_plus_plus_14"]
     seen: list[Path] = []
+    forwarded: list[object] = []
 
     def _fake_detached(
-        path: Path, _exported: object = None
+        path: Path, exported: object = None
     ) -> tuple[str | None, int | None, dict[str, int] | None]:
         seen.append(path)
+        forwarded.append(exported)
         return "GNU C++17 13.3.0 -g", lang, {"unrecorded": 1}
 
     monkeypatch.setattr(build_mode_capture, "_read_detached_producer", _fake_detached)
+    # The image's exported functions are what the detached DWARF must cover.
+    monkeypatch.setattr(
+        build_mode_capture, "_exported_code_addresses", lambda _e: [0x1040, 0x1100]
+    )
     debug = Path("/nonexistent/libx.debug")
 
     monkeypatch.setattr(
@@ -171,6 +177,7 @@ def test_detached_debug_consulted_only_when_image_has_no_producer(
     assert sig.producer == "GNU C++17 13.3.0 -g" and sig.dwarf_language == lang
     assert sig.stack_protector == {"unrecorded": 1}
     assert seen == [debug]
+    assert forwarded == [[0x1040, 0x1100]]
 
     # Shallow mode reads neither file's DWARF.
     seen.clear()

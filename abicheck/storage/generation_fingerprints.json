@@ -8,7 +8,7 @@
       "abicheck/dwarf_advanced.py": "3b75113e5d03388ed2740a361a0f618bccb323c9d50bffc7bf39981ac7d20dc1",
       "abicheck/dwarf_metadata.py": "a0621cde6559a0395b00d08aa25cc4cbff74b1121e2083e424e472c44b985512",
       "abicheck/dwarf_presence.py": "7e73580ec7a02fdf24e3815cb89e42aa6fe00e46e8cda6b7fe9d547f06ac3f06",
-      "abicheck/dwarf_snapshot.py": "f8f2134864888fea070feb1aa129a2d95400a4b55869964d704f8c92c82b85c8",
+      "abicheck/dwarf_snapshot.py": "d94cb9cda1319cb7034c5ed81064d76e64be1b617ef54bd2be9fb3b81ed4f994",
       "abicheck/dwarf_snapshot_datasources.py": "e337f8be3a8ae16350c0639d0be10670d4d5d1197108659fa210fcbbf8a5bdde",
       "abicheck/dwarf_unified.py": "9ecb70b59bb26674ac98ba14ad1211b4103e3a78426a91ed7901e59f1a7d9cdf",
       "abicheck/dwarf_utils.py": "faa6be4a5de6e58b3c6ba139dc6983b0c6404ed69c348f19d724fc56aa70f5d7",
@@ -20,7 +20,7 @@
       "abicheck/extract/binary_dialect.py": "be8a71c557287ee47f63a49ea98306ac2d44877987cbadd9a554bd3f50119bc2",
       "abicheck/extract/binary_format.py": "4b9f591077fa5c90d2e3a767343d92b098061870403d431694470bc05e5468b3",
       "abicheck/extract/binary_identity.py": "4645eaf3dddd0a2230a5c694882548476406c57514275fa4c8c1bc152607ca88",
-      "abicheck/extract/build_mode_capture.py": "8e5dfb44cfe2dd2600c27acbc28095470acd5f589a318a74a092781bcac63bf5",
+      "abicheck/extract/build_mode_capture.py": "8391e4e27b5bb68b7bdd7e3d4bbc7feee5244607507a57f35bd08a90c308ac48",
       "abicheck/extract/builtin_abi.py": "e3f1d24f44d15016e686849a5481a80c271755ec573705226e65874a16fb4da9",
       "abicheck/extract/cache_dep_manifest.py": "b5eac3407ab1506a05647c8b61c33f60eda3789edfab9549c0b57ec20651e08b",
       "abicheck/extract/cache_digest_store.py": "c333f2bf9170d5c87c011f434d3638c944edf07e9670fd4cb84e2f73ac0775f1",
@@ -47,11 +47,12 @@
       "abicheck/extract/dwarf_decl_file.py": "a585b6e38dc879b04db4b3d70a8b7131774a8b735df1068e6baafcaac934af42",
       "abicheck/extract/dwarf_layout_backfill.py": "3dcc9efb8907b6b3419b09b1c262f64403a5162148bc3be0a5d51e112ef69a4d",
       "abicheck/extract/dwarf_producer.py": "4b85d88dd77f7dca39669cceb2f494e58c81063ebd35bf59674bbee8504cac5f",
-      "abicheck/extract/dwarf_records.py": "55075ea4c4037eb043b959c175096b61720005d41092e09c21ed2d6964d3352e",
+      "abicheck/extract/dwarf_records.py": "e5f307a55318212f542e46212dc4e3c0f38608c6de6253780df54fb9a800fa6a",
       "abicheck/extract/dwarf_scope.py": "1800757661a850338d8cb96d715995ffa8f79354047f68b1ce5e248a72819b20",
       "abicheck/extract/dwarf_subtree_index.py": "45ffbba03c1eeb9f8a1d9ed54ab3f3e2492363d4b56e16944f326154c7654aa9",
       "abicheck/extract/dwarf_type_names.py": "dab8b4167a3c69e3e8d92b4e1cb08ba58df4e9c59fd5f8d064e83c84405c016a",
       "abicheck/extract/dwarf_value_abi_trait.py": "74b5b1d1d03fc8547194527a9eefa07f2d2e866cf6fa3be0ae3e7a21403d210b",
+      "abicheck/extract/dwarf_variable_identity.py": "ab35f80066f19d1b8d59d39d1eec43906abb061d31f24f755fabab01a4e9d4fc",
       "abicheck/extract/dwarf_vptr_resolution.py": "756dfe22e692c77de3b06fa3d86959b4e1c1bdd0d3729fae66743e923bbc2a68",
       "abicheck/extract/dwarf_vtable_completeness.py": "8a03fbbb12c5dfd13598251e6dbf8b58ff015e538fb0635f4afbfdb754d054da",
       "abicheck/extract/elf_abi_flags.py": "426d6d97328e32071a84422c130bdefebe31cee85a91146efe8c01f7ce97d87f",
@@ -204,9 +205,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "edbdba284a0a531c948e75dbf18233e70ac272e8a2f42ff2debc273e389f016b",
+    "fingerprint": "d73fe3547381e676b0806f86b4a0a6311c78aac697042afb1cdd97372b2ce0d6",
     "generation": 46,
-    "reason": "generation 46 not yet released: the census now counts unreadable units and exported code outside every unit, and a later DIE's DW_AT_alignment is kept"
+    "reason": "generation 46 not yet released: a nameless variable definition is read with its specification, the stronger DW_AT_alignment wins, and IFUNC exports count in coverage"
   },
   "resolver": {
     "files": {

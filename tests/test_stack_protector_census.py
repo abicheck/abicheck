@@ -33,14 +33,11 @@ from abicheck.model.change_catalog.kinds import ChangeKind
 from abicheck.model.change_catalog.registry import Verdict
 from abicheck.model.evidence_status import Confidence
 from abicheck.model.snapshot import AbiSnapshot
-from abicheck.model.stack_protector import (
-    StackProtectorTransition,
-    compare_stack_protector,
-    level_from_producer,
-    stack_protector_census,
-)
+from abicheck.model.stack_protector import level_from_producer, stack_protector_census
 from abicheck.policy.stack_canary_provenance import (
     PROTECTOR_UNCHANGED_RULE,
+    StackProtectorTransition,
+    compare_stack_protector,
     qualify_stack_canary_removal,
 )
 
@@ -220,3 +217,27 @@ def test_a_prior_modulation_is_left_alone() -> None:
     assert change.effective_verdict is Verdict.BREAKING
     assert change.modulation_rule == "security-policy"
     assert change.review_evidence is None
+
+
+class _Die:
+    def __init__(self, align: int) -> None:
+        self.attributes = (
+            {"DW_AT_alignment": type("_A", (), {"value": align})()} if align else {}
+        )
+
+
+@pytest.mark.parametrize(
+    ("recorded", "later", "expected"),
+    [(None, 16, 128), (None, 0, None), (64, 16, 128), (128, 8, 128), (128, 0, 128)],
+)
+def test_a_later_die_contributes_the_stronger_declared_alignment(
+    recorded, later, expected
+) -> None:
+    from abicheck.extract.dwarf_records import backfill_variable_alignment
+    from abicheck.model.declarations import Variable
+
+    var = Variable(name="g", mangled="g", type="int", alignment_bits=recorded)
+    other = Variable(name="h", mangled="h", type="int")
+    backfill_variable_alignment([other, var], "g", _Die(later))
+    assert var.alignment_bits == expected
+    assert other.alignment_bits is None

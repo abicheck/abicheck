@@ -487,7 +487,9 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "an ELF dump records every compilation unit's stack-protector setting "
         "from its DW_AT_producer (the abicheck.cu_stack_protector extension "
         "fact), and a DWARF-derived variable records its DW_AT_alignment as "
-        "alignment_bits. No type or name spelling changes, so no rewrite is "
+        "alignment_bits (a nameless out-of-line definition, such as clang's "
+        "for a C++ static data member, is read with the declaration it "
+        "completes, so that variable is now recorded). No type or name spelling changes, so no rewrite is "
         "needed -- an older snapshot reads as no unit recorded (a lost canary "
         "keeps its RISK) and as no declared DWARF alignment"
     ),

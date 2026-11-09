@@ -83,8 +83,9 @@ class ElfBuildSignals:
 
 _NO_DWARF: tuple[str | None, int | None, dict[str, int] | None] = (None, None, None)
 
-#: ELF symbol types that are code a compilation unit compiled.
-_CODE_SYMBOL_TYPES = frozenset({"STT_FUNC", "STT_GNU_IFUNC"})
+#: ELF symbol types that are code a compilation unit compiled. pyelftools
+#: names type 10 (``STT_GNU_IFUNC``) ``STT_LOOS`` in some releases.
+_CODE_SYMBOL_TYPES = frozenset({"STT_FUNC", "STT_GNU_IFUNC", "STT_LOOS"})
 
 
 def _exported_code_addresses(elf: object) -> list[int] | None:
