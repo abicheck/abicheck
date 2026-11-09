@@ -193,6 +193,25 @@ FAMILIES: dict[str, Family] = {
             ),
         ),
         Family(
+            key="F19",
+            title="An edit reads as its own kind on every evidence lane",
+            invariant=(
+                "One source edit is reported with the change kind the catalog "
+                "names for it whichever evidence lane observed it (binary "
+                "symbols, DWARF, castxml or clang headers): a parameter-list "
+                "change is func_params_changed, a removed virtual's lost slot is "
+                "func_virtual_removed, never only the removal and addition of "
+                "the mangled names the edit produced."
+            ),
+            harness_tests=(),
+            planned_reason=(
+                "The harness is the generated ABI edit corpus (PR #1958: each "
+                "edit operator run through every evidence lane and reconciled "
+                "against the edit's own expected kinds), which lands separately; "
+                "until then the seed tests of each class carry the lanes."
+            ),
+        ),
+        Family(
             key="F11",
             title="Measurement judges what it claims to measure",
             invariant=(
@@ -571,6 +590,7 @@ _F9 = (
 )
 _F10 = ("concurrency.abandoned_child_outlives_failed_owner",)
 _F11 = ("measurement.forked_tree_rss_overstates_memory",)
+_F19 = ("classification.removed_virtual_slot_read_as_plain_removal",)
 _F12 = (
     # The public-root probe read only `/I` from a CL-mode argv, so a `-I` or
     # `/external:I` include root was never probed while the replay read a
@@ -637,6 +657,7 @@ for _key, _ids in (
     ("F9", _F9),
     ("F10", _F10),
     ("F11", _F11),
+    ("F19", _F19),
     ("F12", _F12),
     ("F13", _F13),
     ("F14", _F14),

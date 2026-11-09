@@ -239,8 +239,6 @@ def _k(*kinds: str) -> frozenset[str]:
 #: than passing silently. Companions are the distinct consequences one edit
 #: legitimately implies, each with its reason:
 #:
-#: * ``free_function_param_retyped``: the old overload is removed (BREAKING) and
-#:   the new one added (compatible): two symbols, two facts.
 #: * ``global_variable_retyped``: ``int`` -> ``long`` changes the symbol's size
 #:   and alignment as well as its type; each is a fact about the same variable.
 #: * ``struct_field_retyped``: the field's offset moves in the record layout,
@@ -253,8 +251,8 @@ def _k(*kinds: str) -> frozenset[str]:
 EXPECTED: dict[tuple[str, str], tuple[frozenset[str], frozenset[str]]] = {
     ("free_function_removed", "castxml"): (_k("func_removed"), _k()),
     ("free_function_removed", "clang"): (_k("func_removed"), _k()),
-    ("free_function_param_retyped", "castxml"): (_k("func_removed"), _k("func_added")),
-    ("free_function_param_retyped", "clang"): (_k("func_removed"), _k("func_added")),
+    ("free_function_param_retyped", "castxml"): (_k("func_params_changed"), _k()),
+    ("free_function_param_retyped", "clang"): (_k("func_params_changed"), _k()),
     ("free_function_return_retyped", "castxml"): (_k("func_return_changed"), _k()),
     ("free_function_return_retyped", "clang"): (_k("func_return_changed"), _k()),
     ("global_variable_retyped", "castxml"): (

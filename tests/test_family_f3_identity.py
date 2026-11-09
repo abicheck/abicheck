@@ -868,19 +868,22 @@ def test_parameter_template_args_do_not_join_a_template_family() -> None:
         # Relocated checkout, same header: one declaration.
         ("/a/v1/include/api.h", "/b/build/v2/include/api.h", "V", True),
         ("C:\\src\\v1\\api.h", "/home/ci/v2/api.h", "V", True),
-        # Another header, or another written signature: another declaration.
+        # Another header: another declaration.
         ("/a/v1/include/api.h", "/a/v2/include/other.h", "V", False),
-        ("/a/v1/include/api.h", "/a/v2/include/api.h", "W", False),
+        # Another written signature of the one lib::scale in the same header,
+        # naming only types the old release declares: the function rewritten.
+        ("/a/v1/include/api.h", "/a/v2/include/api.h", "W", True),
     ],
 )
 def test_header_declaration_identity_survives_relocation_not_a_new_signature(
     old_header: str, new_header: str, new_spelling: str, same_declaration: bool
 ) -> None:
-    """A header declaration's identity is its declared name, written
-    signature and declaring header, invariant under where the tree was
-    checked out. Oracle: the scenario says whether the declaration is the
-    same; a same declaration whose typedef retargeted is one parameter
-    change, any other pair stays a removal and an addition."""
+    """A header declaration's identity is its declared name and declaring
+    header, invariant under where the tree was checked out; with one
+    function by that name, a rewritten written signature is the same
+    function too. Oracle: the scenario says whether the declaration is the
+    same; a same declaration is one parameter change, any other pair stays a
+    removal and an addition."""
     from abicheck.checker_policy import ChangeKind
     from abicheck.compare.parameter_replacement import pair_parameter_replacements
     from abicheck.demangle import demangle
