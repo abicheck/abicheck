@@ -89,3 +89,81 @@ def _identity(change: Mapping[str, Any]) -> str:
         if change.get(key):
             return str(change[key])
     return f"{change.get('kind')}:{change.get('symbol')}"
+
+
+def rendered_audit_violations(
+    report: Mapping[str, Any],
+    rendered: Mapping[str, Mapping[str, int]],
+) -> list[str]:
+    """Rendered detected and gating totals that differ from the JSON audit.
+
+    *rendered* maps a renderer name to the totals it printed, keyed
+    ``"detected"`` (the audit's ``detected_total``) and ``"gating"`` (its
+    ``effective_total``). A renderer may print only one of the two.
+    """
+    audit = report.get("disposition_audit")
+    if not isinstance(audit, Mapping):
+        return ["disposition_audit is missing, so rendered totals have no reference"]
+    expected = {
+        "detected": audit.get("detected_total"),
+        "gating": audit.get("effective_total"),
+    }
+    return [
+        f"{name} prints {field} {value}, JSON audit says {expected[field]}"
+        for name, totals in sorted(rendered.items())
+        for field, value in sorted(totals.items())
+        if value != expected.get(field)
+    ]
+
+
+def disposition_violations(report: Mapping[str, Any]) -> list[str]:
+    """The audit's gating total disagrees with the change list it summarizes.
+
+    ``effective_total`` is the gating subset (schema) and must equal
+    ``counts.gating``. Each change in ``changes`` states its own
+    ``gate_contribution``; the changes that contributed to the gate are the
+    retained gating ones. Their number is ``result_counts.gating_retained``,
+    and never more than ``effective_total``, which may exceed it by a
+    redundant finding folded out of ``changes`` but still scored
+    (``held_out_gating``). When ``result_counts`` is present, its ``gating``
+    is ``effective_total`` and its ``retained`` is the length of ``changes``.
+
+    Judge a full report: a ``--show-only`` view filters ``changes`` and is not
+    expected to satisfy this.
+    """
+    audit = report.get("disposition_audit")
+    if not isinstance(audit, Mapping) or not isinstance(audit.get("counts"), Mapping):
+        return ["disposition_audit or its counts is missing"]
+    effective = audit.get("effective_total")
+    problems: list[str] = []
+    if effective != audit["counts"].get("gating"):
+        problems.append(
+            f"effective_total {effective} != counts.gating {audit['counts'].get('gating')}"
+        )
+    changes = list(report.get("changes") or [])
+    missing = [c.get("kind") for c in changes if "gate_contribution" not in c]
+    if missing:
+        problems.append(f"changes without gate_contribution: {missing}")
+    counts = report.get("result_counts")
+    if not missing:
+        gating = sum(1 for c in changes if c["gate_contribution"] > 0)
+        if isinstance(effective, int) and gating > effective:
+            problems.append(
+                f"{gating} changes contribute to the gate, more than effective_total {effective}"
+            )
+        if isinstance(counts, Mapping) and "gating_retained" in counts:
+            if gating != counts["gating_retained"]:
+                problems.append(
+                    f"{gating} changes contribute to the gate, "
+                    f"result_counts.gating_retained is {counts['gating_retained']}"
+                )
+    if isinstance(counts, Mapping):
+        if counts.get("gating") != effective:
+            problems.append(
+                f"result_counts.gating {counts.get('gating')} != effective_total {effective}"
+            )
+        if counts.get("retained") != len(changes):
+            problems.append(
+                f"result_counts.retained {counts.get('retained')} != {len(changes)} changes listed"
+            )
+    return problems
