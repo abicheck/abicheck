@@ -62,6 +62,7 @@ __all__ = [
     "member_declaration",
     "member_qualifiers",
     "parameter_dies",
+    "vtable_slot",
 ]
 
 #: ``DW_AT_virtuality`` value of a pure virtual (DWARF ``DW_VIRTUALITY_pure_virtual``).
@@ -124,24 +125,54 @@ def chained_linkage_name(die: Any, CU: Any) -> str:
 def parameter_dies(die: Any, CU: Any) -> Iterator[Any]:
     """*die*'s declared parameters, artificial ones (``this``) left out.
 
-    A concrete instance's parameter carries only ``DW_AT_abstract_origin``:
-    its name, type and artificial flag are on the abstract instance's
-    parameter, which is yielded in its place.
+    A concrete instance's parameter usually carries only
+    ``DW_AT_abstract_origin``: its name, type and artificial flag are on the
+    abstract instance's parameter, which is yielded in its place. The
+    artificial flag is read from either DIE, since a concrete parameter may
+    repeat its type without repeating the flag.
     """
     for child in die.iter_children():
         if child.tag != "DW_TAG_formal_parameter":
             continue
-        param = child
-        if (
-            "DW_AT_type" not in child.attributes
-            and "DW_AT_abstract_origin" in child.attributes
-        ):
+        origin = None
+        if "DW_AT_abstract_origin" in child.attributes:
             try:
-                param = resolve_die_ref(child, "DW_AT_abstract_origin", CU)
+                origin = resolve_die_ref(child, "DW_AT_abstract_origin", CU)
             except Exception:  # noqa: BLE001 -- keep the bare DIE ("?" type)
-                param = child
-        if not attr_bool(param, "DW_AT_artificial"):
-            yield param
+                origin = None
+        if attr_bool(child, "DW_AT_artificial") or (
+            origin is not None and attr_bool(origin, "DW_AT_artificial")
+        ):
+            continue
+        local = "DW_AT_type" in child.attributes or origin is None
+        yield child if local else origin
+
+
+#: ``DW_OP_constu``: the one operation GCC and clang write in
+#: ``DW_AT_vtable_elem_location`` (``[0x10, <uleb128 slot>]``).
+_DW_OP_CONSTU = 0x10
+
+
+def vtable_slot(die: Any) -> int | None:
+    """The vtable slot *die*'s ``DW_AT_vtable_elem_location`` names, ``None``
+    when absent or written as any expression other than one ``DW_OP_constu``
+    (an unknown slot, never slot 0)."""
+    attr = die.attributes.get("DW_AT_vtable_elem_location")
+    if attr is None:
+        return None
+    value = attr.value
+    if isinstance(value, int):  # a DWARF 2 constant form
+        return value
+    ops = list(value) if isinstance(value, (list, tuple, bytes)) else []
+    if len(ops) < 2 or ops[0] != _DW_OP_CONSTU:
+        return None
+    slot, shift = 0, 0
+    for i, byte in enumerate(ops[1:], start=1):
+        slot |= (byte & 0x7F) << shift
+        shift += 7
+        if not byte & 0x80:
+            return slot if i == len(ops) - 1 else None
+    return None
 
 
 def is_pure_virtual_declaration(die: Any) -> bool:
@@ -318,7 +349,7 @@ class MemberScopes:
         way. A definition linked to a declaration takes that declaration's
         scope (and its name, when it has none of its own); one whose
         declaration the walk has not passed yet is deferred (unless this is
-        the *retry*), and a nameless one with no linkage name is not a
+        the *retry*), and a member one with no linkage name is not a
         concrete function. A named DIE with no declaration link answers for
         itself (its declaration DIE is ``None``).
         """
@@ -338,7 +369,11 @@ class MemberScopes:
             # answers for itself, from where it sits.
             return (name, None, scope, scope_path, default_access) if name else None
         name = name or attr_str(decl, "DW_AT_name")
-        if not name or not chained_linkage_name(die, CU):
+        # No linkage name anywhere on the chain: an ``extern "C"`` function
+        # (its symbol is its name), never a member, which is always mangled.
+        if not name or (
+            is_member_scope(found.scope_path) and not chained_linkage_name(die, CU)
+        ):
             return None
         return name, decl, found.scope, found.scope_path, found.default_access
 

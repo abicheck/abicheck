@@ -11,6 +11,10 @@
   declaration when the definition does not repeat it), so a dropped `const` reads
   `func_cv_changed` and a clang-built virtual that became pure reads
   `func_virtual_became_pure` instead of an ELF symbol removal plus addition.
+  A GCC-built `extern "C"` function declared in a namespace and defined
+  outside it keeps its signature, and each DWARF virtual records its vtable
+  slot (`DW_AT_vtable_elem_location`), so reordered virtuals read
+  `type_vtable_changed` from DWARF alone.
   Extractor generation 45: a stored pre-45 DWARF baseline's `T[]` against a
   fresh `T[N]` (DWARF-sourced, not PDB or headers) is demoted to
   `COMPATIBLE_WITH_RISK` as extractor drift (re-dump

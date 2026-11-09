@@ -236,6 +236,33 @@ def test_parameters_resolve_through_their_abstract_origin_and_skip_this() -> Non
     assert [p.offset for p in members.parameter_dies(fn, cu)] == [50, 72]
 
 
+def test_the_artificial_flag_is_read_from_either_parameter_die() -> None:
+    cu = _CU()
+    _die(cu, 50, "DW_TAG_formal_parameter", {"DW_AT_artificial": True})
+    _die(cu, 51, "DW_TAG_formal_parameter", {"DW_AT_name": "x"})
+    # Each concrete parameter repeats its own type.
+    this_by_origin = _die(
+        cu,
+        70,
+        "DW_TAG_formal_parameter",
+        {"DW_AT_abstract_origin": _Ref(50), "DW_AT_type": _Ref(60)},
+    )
+    x_local = _die(
+        cu,
+        71,
+        "DW_TAG_formal_parameter",
+        {"DW_AT_abstract_origin": _Ref(51), "DW_AT_type": _Ref(60)},
+    )
+    this_local = _die(
+        cu,
+        72,
+        "DW_TAG_formal_parameter",
+        {"DW_AT_artificial": True, "DW_AT_type": _Ref(60)},
+    )
+    fn = _die(cu, 80, "DW_TAG_subprogram", {}, (this_by_origin, x_local, this_local))
+    assert [p.offset for p in members.parameter_dies(fn, cu)] == [71]
+
+
 @pytest.mark.parametrize(
     ("mangled", "attr", "status", "value"),
     [
@@ -302,6 +329,24 @@ def test_a_declaration_without_name_or_linkage_records_nothing(missing: str) -> 
     definition = _die(cu, 30, "DW_TAG_subprogram", {"DW_AT_specification": _Ref(10)})
     scopes.remember(decl, "C", (Record("C", "public"),), "private")
     assert scopes.resolve(definition, cu, "", (), "public", retry=False) is None
+
+
+def test_a_namespace_declaration_without_linkage_is_an_extern_c_function() -> None:
+    # GCC: ``namespace lib { extern "C" int f(); }`` defined as ``lib::f``.
+    cu = _CU()
+    scopes = members.MemberScopes()
+    decl = _die(
+        cu, 10, "DW_TAG_subprogram", {"DW_AT_declaration": True, "DW_AT_name": "f"}
+    )
+    definition = _die(cu, 30, "DW_TAG_subprogram", {"DW_AT_specification": _Ref(10)})
+    ns_scope = ("lib", (Namespace("lib"),), "public")
+    scopes.remember(decl, *ns_scope)
+    assert members.chained_linkage_name(definition, cu) == ""
+    assert scopes.resolve(definition, cu, "", (), "public", retry=False) == (
+        "f",
+        decl,
+        *ns_scope,
+    )
 
 
 def test_a_pure_virtual_member_is_recognized_only_inside_a_record() -> None:
@@ -433,3 +478,31 @@ def test_a_named_die_linked_to_no_declaration_answers_for_itself() -> None:
         (),
         "public",
     )
+
+
+@pytest.mark.parametrize(
+    ("value", "form", "slot"),
+    [
+        ([0x10, 2], "DW_FORM_exprloc", 2),
+        ([0x10, 0], "DW_FORM_exprloc", 0),
+        # uleb128 200 = 0xC8 0x01
+        ([0x10, 0xC8, 0x01], "DW_FORM_exprloc", 200),
+        (bytes([0x10, 5]), "DW_FORM_block1", 5),
+        (7, "DW_FORM_data1", 7),
+        ([0x11, 2], "DW_FORM_exprloc", None),  # DW_OP_consts: not decoded
+        ([0x10, 2, 0x22], "DW_FORM_exprloc", None),  # a second operation
+        ([0x10, 0x80], "DW_FORM_exprloc", None),  # truncated uleb128
+        ([0x10], "DW_FORM_exprloc", None),
+        ([], "DW_FORM_exprloc", None),
+    ],
+)
+def test_a_vtable_slot_is_decoded_or_left_unknown(
+    value: Any, form: str, slot: int | None
+) -> None:
+    die = SimpleNamespace(
+        attributes={
+            "DW_AT_vtable_elem_location": SimpleNamespace(value=value, form=form)
+        }
+    )
+    assert members.vtable_slot(die) == slot
+    assert members.vtable_slot(SimpleNamespace(attributes={})) is None

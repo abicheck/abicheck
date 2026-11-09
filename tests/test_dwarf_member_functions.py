@@ -234,3 +234,83 @@ def test_a_virtual_that_became_pure_is_reported_from_gcc_dwarf(tmp_path: Path) -
     result, kinds = _became_pure(tmp_path, "gcc")
     assert ChangeKind.FUNC_VIRTUAL_BECAME_PURE in kinds, kinds
     assert result.verdict == Verdict.BREAKING
+
+
+# ``extern "C"`` declared in a namespace and defined outside it: GCC writes the
+# definition as a nameless DIE whose DW_AT_specification names a declaration
+# with no linkage name (the C symbol is the plain name); clang writes one
+# top-level DIE. The oracle is the edit itself.
+_EXTERN_C = 'namespace lib {{ extern "C" {ret} c_fill({params}); }}\n'
+_EXTERN_C_SOURCE = (
+    '#include "api.h"\nextern "C" {ret} lib::c_fill({params}) {{ return n; }}\n'
+)
+_BASE = ("int", "int n, long v")
+# (edit id, (return, parameters) after the edit, the kind the edit is)
+_EXTERN_C_EDITS = [
+    ("param_append", ("int", "int n, long v, int w"), ChangeKind.FUNC_PARAMS_CHANGED),
+    ("param_retype", ("int", "int n, double v"), ChangeKind.FUNC_PARAMS_CHANGED),
+    ("return_retype", ("long", "int n, long v"), ChangeKind.FUNC_RETURN_CHANGED),
+    ("unchanged", _BASE, None),
+]
+
+
+def _extern_c(ret: str, params: str) -> tuple[str, str]:
+    fmt = {"ret": ret, "params": params}
+    return _EXTERN_C.format(**fmt), _EXTERN_C_SOURCE.format(**fmt)
+
+
+@pytest.mark.parametrize("compiler", sorted(_CXX))
+@pytest.mark.parametrize(
+    ("after", "kind"),
+    [pytest.param(a, k, id=i) for i, a, k in _EXTERN_C_EDITS],
+)
+def test_an_extern_c_definition_out_of_its_namespace_keeps_its_signature(
+    tmp_path: Path, compiler: str, after: tuple[str, str], kind: ChangeKind | None
+) -> None:
+    snap = _dwarf(_build(tmp_path / "probe", compiler, *_extern_c(*_BASE)))
+    fn = next(f for f in snap.declarations.functions if f.mangled == "c_fill")
+    assert (fn.return_type, [p.type.split()[0] for p in fn.params]) == (
+        "int",
+        ["int", "long"],
+    )
+    result, kinds = _kinds(tmp_path, compiler, _extern_c(*_BASE), _extern_c(*after))
+    if kind is None:
+        assert result.verdict == Verdict.NO_CHANGE, kinds
+        return
+    assert kind in kinds, kinds
+    assert ChangeKind.FUNC_REMOVED not in kinds, kinds
+
+
+_SLOTS = "struct A {{ virtual ~A(); {decls} }};\n"
+_SLOTS_SOURCE = (
+    '#include "api.h"\nA::~A() {}\nint A::f() { return 1; }\nint A::g() { return 2; }\n'
+)
+
+
+def _slots(tmp_path: Path, compiler: str, decls: str) -> AbiSnapshot:
+    return _dwarf(_build(tmp_path, compiler, _SLOTS.format(decls=decls), _SLOTS_SOURCE))
+
+
+@pytest.mark.parametrize("compiler", sorted(_CXX))
+def test_dwarf_virtuals_carry_their_itanium_vtable_slot(
+    tmp_path: Path, compiler: str
+) -> None:
+    # Itanium: a virtual destructor takes two slots (complete, deleting), so
+    # the next virtuals sit at 2 and 3 in declaration order.
+    snap = _slots(tmp_path, compiler, "virtual int f(); virtual int g();")
+    slots = {f.mangled: f.vtable_index for f in snap.declarations.functions}
+    assert (slots["_ZN1A1fEv"], slots["_ZN1A1gEv"]) == (2, 3)
+
+
+@pytest.mark.parametrize("compiler", sorted(_CXX))
+def test_reordered_virtuals_read_as_a_vtable_change_from_dwarf(
+    tmp_path: Path, compiler: str
+) -> None:
+    old = _slots(tmp_path / "old", compiler, "virtual int f(); virtual int g();")
+    new = _slots(tmp_path / "new", compiler, "virtual int g(); virtual int f();")
+    result = compare(old, new)
+    moved = {
+        c.symbol for c in result.changes if c.kind == ChangeKind.TYPE_VTABLE_CHANGED
+    }
+    assert {"_ZN1A1fEv", "_ZN1A1gEv"} <= moved, result.changes
+    assert result.verdict == Verdict.BREAKING

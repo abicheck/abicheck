@@ -136,13 +136,9 @@ def vector_byte_size(die: Any, element_size: int | None) -> int | None:
     return None
 
 
-#: An unsigned ``DW_AT_upper_bound`` of all-ones is GCC's spelling of the
-#: ``-1`` bound of a zero-length (``T[0]``) array in a fixed-width form.
-#: Constant attribute forms, and the all-ones value of each fixed-width one:
-#: GCC writes a ``T[0]`` bound as ``upper = -1`` in the form's own width
-#: (``0xffffffff`` in ``DW_FORM_data4``), while the same value in a wider
-#: form is a real bound. A reference or expression form is not a constant
-#: (a variable-length bound), even when its value decodes as an integer.
+#: Constant attribute forms. A reference or expression form is not a
+#: constant (a variable-length bound), even when its value decodes as an
+#: integer.
 _CONSTANT_FORMS = frozenset(
     {
         "DW_FORM_data1",
@@ -154,12 +150,26 @@ _CONSTANT_FORMS = frozenset(
         "DW_FORM_implicit_const",
     }
 )
-_ALL_ONES_BY_FORM = {
-    "DW_FORM_data1": 0xFF,
-    "DW_FORM_data2": 0xFFFF,
-    "DW_FORM_data4": 0xFFFFFFFF,
-    "DW_FORM_data8": 0xFFFFFFFFFFFFFFFF,
+#: Byte width of each fixed-width constant form. GCC writes the ``-1`` upper
+#: bound of a zero-length (``T[0]``) array unsigned, in the width of the
+#: target's ``sizetype`` (the CU's address size): ``0xffffffff`` in
+#: ``DW_FORM_data4`` on a 32-bit target. All-ones in a narrower form is a real
+#: bound (``char[256]`` is ``DW_FORM_data1`` 255).
+_FORM_WIDTH = {
+    "DW_FORM_data1": 1,
+    "DW_FORM_data2": 2,
+    "DW_FORM_data4": 4,
+    "DW_FORM_data8": 8,
 }
+
+
+def _is_unsigned_minus_one(subrange: Any, value: int, form: str) -> bool:
+    width = _FORM_WIDTH.get(form)
+    if width is None or value != (1 << (8 * width)) - 1:
+        return False
+    cu = getattr(subrange, "cu", None)
+    address_size = cu.header["address_size"] if cu is not None else 8
+    return width >= address_size
 
 
 def _constant(subrange: Any, name: str) -> int | None:
@@ -186,7 +196,9 @@ def _subrange_count(subrange: Any) -> int | None:
         lower = _constant(subrange, "DW_AT_lower_bound")
     if upper is None or lower is None:
         return None
-    if upper == -1 or upper == _ALL_ONES_BY_FORM.get(attrs["DW_AT_upper_bound"].form):
+    if upper == -1 or _is_unsigned_minus_one(
+        subrange, upper, attrs["DW_AT_upper_bound"].form
+    ):
         return 0
     count = upper - lower + 1
     return count if count >= 0 else None
@@ -234,7 +246,8 @@ def array_type_info(die: Any, inner: tuple[str, int] | None) -> tuple[str, int]:
 
     Arrays rarely carry ``DW_AT_byte_size``; the size is then the product of
     the dimensions' counts times the element size (0 when a dimension is
-    unbounded or the element size is unknown).
+    unbounded, the element size is unknown, or a stride spaces the elements
+    apart: GCC and clang write none for C or C++).
     """
     is_vector = "DW_AT_GNU_vector" in die.attributes
     element_name = inner[0] if inner is not None else None
@@ -251,7 +264,7 @@ def array_type_info(die: Any, inner: tuple[str, int] | None) -> tuple[str, int]:
         if nested is not None:
             element_name, inner_bounds = nested.group(1), nested.group(2)
     size = attr_int(die, "DW_AT_byte_size")
-    if not size and extents and inner is not None and inner[1]:
+    if not size and extents and inner is not None and inner[1] and not _strided(die):
         total = inner[1]
         for count in extents:
             if count is None:
@@ -261,6 +274,15 @@ def array_type_info(die: Any, inner: tuple[str, int] | None) -> tuple[str, int]:
         size = total
     spelling = array_type_spelling(element_name, size, is_vector, extents)
     return (spelling + inner_bounds, size)
+
+
+_STRIDES = ("DW_AT_byte_stride", "DW_AT_bit_stride")
+
+
+def _strided(die: Any) -> bool:
+    """Whether the array DIE or one of its subranges states an element stride."""
+    dies = [die, *(c for c in die.iter_children() if c.tag == "DW_TAG_subrange_type")]
+    return any(a in d.attributes for d in dies for a in _STRIDES)
 
 
 #: The bounds an array spelling ends with (``int[3]``, ``char[][4]``); no

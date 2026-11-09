@@ -639,10 +639,7 @@ class _DwarfSnapshotBuilder:
         access_val = _attr_int(attrs, "DW_AT_accessibility")
         access = _access_from_dwarf(access_val, default_access)
 
-        # Vtable index
-        vtable_index: int | None = None
-        if "DW_AT_vtable_elem_location" in attrs.attributes:
-            vtable_index = _attr_int(attrs, "DW_AT_vtable_elem_location")
+        vtable_index = _members.vtable_slot(attrs)
 
         return Function(
             name=qualified_name if scope else name,

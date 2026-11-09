@@ -488,7 +488,9 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "count times element size (was 0); DWARF-only snapshots record C++ "
         "member and namespace-scope functions defined outside their declaration "
         "(DW_AT_specification, extract/dwarf_member_functions), with the "
-        "declaration's name, scope, return type and 'this' qualifiers. A stored 'T[]' cannot say what bound it "
+        "declaration's name, scope, return type and 'this' qualifiers (an "
+        'extern "C" one by its plain name), and each virtual\'s vtable slot '
+        "from DW_AT_vtable_elem_location (was 0 or unrecorded). A stored 'T[]' cannot say what bound it "
         "erased, so no rewrite is sound: comparison demotes a finding whose "
         "spellings differ only by that erasure (policy/generation_drift_demotion)",
         restores_erased_extents=True,

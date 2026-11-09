@@ -54,8 +54,10 @@ def _die(tag: str, attrs: dict[str, object], children: tuple = ()) -> SimpleName
     )
 
 
-def _sub(**attrs: object) -> SimpleNamespace:
-    return _die("DW_TAG_subrange_type", {f"DW_AT_{k}": v for k, v in attrs.items()})
+def _sub(address_size: int = 8, **attrs: object) -> SimpleNamespace:
+    die = _die("DW_TAG_subrange_type", {f"DW_AT_{k}": v for k, v in attrs.items()})
+    die.cu = SimpleNamespace(header={"address_size": address_size})
+    return die
 
 
 def _array(
@@ -85,28 +87,40 @@ _UNIT_CASES = [
     ),
     ("flexible_member", _array(_sub()), ("char", 1), "char[]", 0),
     ("zero_length_count", _array(_sub(count=0)), ("double", 8), "double[0]", 0),
-    # GCC writes ``T[0]`` as ``upper = -1`` in the form's own width; the same
-    # value in a wider form is a real bound.
+    # GCC writes ``T[0]`` as ``upper = -1`` unsigned in the width of the
+    # target's ``sizetype`` (its address size); all-ones in a narrower form
+    # is a real bound: GCC spells ``char[256]`` as ``DW_FORM_data1`` 255.
     (
-        "zero_length_all_ones_data4",
-        _array(_sub(upper_bound=(0xFFFFFFFF, "DW_FORM_data4"))),
+        "zero_length_all_ones_data4_on_32_bit",
+        _array(_sub(upper_bound=(0xFFFFFFFF, "DW_FORM_data4"), address_size=4)),
         ("double", 8),
         "double[0]",
         0,
     ),
     (
-        "zero_length_all_ones_data8",
+        "zero_length_all_ones_data8_on_64_bit",
         _array(_sub(upper_bound=(0xFFFFFFFFFFFFFFFF, "DW_FORM_data8"))),
         ("double", 8),
         "double[0]",
         0,
     ),
     (
-        "zero_length_all_ones_data1",
-        _array(_sub(upper_bound=(0xFF, "DW_FORM_data1"))),
+        "all_ones_data4_on_64_bit_is_a_bound",
+        _array(_sub(upper_bound=(0xFFFFFFFF, "DW_FORM_data4"))),
         ("char", 1),
-        "char[0]",
-        0,
+        "char[4294967296]",
+        4294967296,
+    ),
+    *(
+        (
+            f"all_ones_{form[8:]}_on_{bits}_bit_is_a_bound",
+            _array(_sub(upper_bound=(top, form), address_size=bits // 8)),
+            ("char", 1),
+            f"char[{top + 1}]",
+            top + 1,
+        )
+        for form, top in (("DW_FORM_data1", 0xFF), ("DW_FORM_data2", 0xFFFF))
+        for bits in (32, 64)
     ),
     (
         "zero_length_minus_one_sdata",
@@ -184,6 +198,32 @@ _UNIT_CASES = [
     ),
     ("nested_unbounded_outer", _array(_sub()), ("int[3]", 12), "int[][3]", 0),
     ("no_subrange", _array(), ("int", 4), "int[]", 0),
+    # A stride spaces the elements apart: the size is not count * element.
+    (
+        "subrange_byte_stride",
+        _array(_sub(count=3, byte_stride=8)),
+        ("int", 4),
+        "int[3]",
+        0,
+    ),
+    (
+        "array_bit_stride",
+        _die("DW_TAG_array_type", {"DW_AT_bit_stride": 64}, (_sub(count=3),)),
+        ("int", 4),
+        "int[3]",
+        0,
+    ),
+    (
+        "stride_with_declared_size",
+        _die(
+            "DW_TAG_array_type",
+            {"DW_AT_byte_stride": 8, "DW_AT_byte_size": 20},
+            (_sub(count=3),),
+        ),
+        ("int", 4),
+        "int[3]",
+        20,
+    ),
     ("unknown_element_size", _array(_sub(count=3)), ("T", 0), "T[3]", 0),
 ]
 
@@ -254,7 +294,7 @@ def _fields(snap: AbiSnapshot, record: str) -> dict[str, str]:
 _MEMBERS = (
     "struct P { int x; };\n"
     "struct S { int n; char a[8]; int m[2][3]; struct P ps[3]; double q[1][2][5];"
-    " char tail[]; };\n"
+    " unsigned char b1[256]; int b2[65536]; char tail[]; };\n"
 )
 
 
@@ -290,19 +330,22 @@ def test_dwarf_member_spelling_matches_the_clang_header_frontend(
     assert dwarf["m"] == "int[2][3]" and dwarf["tail"] == "char[]"
 
 
+_SIZED = ("a", "m", "ps", "q", "b1", "b2")
+
+
 def _sizeof_members(work: Path) -> dict[str, int]:
     probe = work / "probe.c"
     probe.write_text(
         '#include <stdio.h>\n#include "api.h"\nint main(void) { struct S s;'
-        ' printf("%zu %zu %zu %zu\\n", sizeof s.a, sizeof s.m, sizeof s.ps,'
-        " sizeof s.q); return 0; }\n"
+        ' printf("%zu %zu %zu %zu %zu %zu\\n", sizeof s.a, sizeof s.m,'
+        " sizeof s.ps, sizeof s.q, sizeof s.b1, sizeof s.b2); return 0; }\n"
     )
     exe = work / "probe"
     subprocess.run([_need("gcc"), str(probe), "-o", str(exe)], check=True, cwd=work)
     values = subprocess.run(
         [str(exe)], capture_output=True, text=True, check=True
     ).stdout.split()
-    return dict(zip(("a", "m", "ps", "q"), map(int, values), strict=True))
+    return dict(zip(_SIZED, map(int, values), strict=True))
 
 
 @pytest.mark.integration
@@ -312,9 +355,7 @@ def test_dwarf_member_byte_size_is_what_sizeof_reports(tmp_path: Path, cc: str) 
     _build(tmp_path, cc, _MEMBERS)
     meta, _ = parse_dwarf(tmp_path / "libapi.so")
     layout = meta.structs["S"]
-    sizes = {
-        f.name: f.byte_size for f in layout.fields if f.name in ("a", "m", "ps", "q")
-    }
+    sizes = {f.name: f.byte_size for f in layout.fields if f.name in _SIZED}
     assert sizes == _sizeof_members(tmp_path)
 
 
@@ -332,6 +373,9 @@ _SHAPES = [
         "int id; double w; char tag[8];",
         True,
     ),
+    # GCC writes these bounds (255, 65535) as all-ones DW_FORM_data1/data2.
+    ("byte_width_bounds", "int id; char t[256];", "int id; char t[65536];", True),
+    ("byte_width_unchanged", "int id; char t[256];", "int id; char t[256];", False),
     ("reshape_same_total", "int id; int m[2][3];", "int id; int m[3][2];", True),
     ("inner_bound", "int id; int m[2][3];", "int id; int m[2][4];", True),
     (
