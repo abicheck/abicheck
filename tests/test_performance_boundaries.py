@@ -276,3 +276,31 @@ def test_cli_gc_scope_includes_final_report(
     assert result.exit_code == 0, result.output
     assert observed == [expected]
     assert gc.get_threshold() == prior
+
+
+@pytest.mark.parametrize("deferred", [False, True])
+def test_reference_inventory_handles_deferred_factories(
+    monkeypatch: pytest.MonkeyPatch, deferred: bool
+) -> None:
+    import _family_f5_support as support
+
+    site = support.Site(
+        "abicheck.storage.json_strings",
+        "memoized",
+        "parse_document.shared" if deferred else "parse_document",
+    )
+    reference = support.ReferenceMode()
+    # Simulate the state before any factory was invoked, independently of
+    # test order. Actual counters are restored before testing engagement.
+    with monkeypatch.context() as probe:
+        probe.setattr(support, "_stats", lambda: {})
+        reference.install(monkeypatch, [site])
+    if not deferred:
+        assert site.key in reference.unpatchable
+        return
+    assert not reference.unpatchable
+    assert not reference.calls.get(site.key)
+    assert parse_document('{"value":"spelling"}', pool_strings=True) == {
+        "value": "spelling"
+    }
+    assert reference.calls.get(site.key, 0) > 0

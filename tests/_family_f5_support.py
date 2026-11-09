@@ -37,6 +37,7 @@ from __future__ import annotations
 import ast
 import copy
 import importlib
+import inspect
 import json
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -239,12 +240,24 @@ def _resolve(site: Site) -> tuple[Any, list[str]]:
     return owner, parts
 
 
+def _deferred_memo_name(site: Site) -> str | None:
+    if site.kind != "memoized":
+        return None
+    try:
+        owner, parts = _resolve(site)
+    except AttributeError:
+        return None
+    if inspect.isfunction(owner):
+        return f"{owner.__module__}.{owner.__qualname__}.<locals>.{parts[-1]}"
+    return None
+
+
 def registry_name(site: Site) -> str:
     """The name *site*'s cache is registered under in the wrapper's registry."""
     if site.kind == "header_scan":
         return f"{site.module}.{site.name}.header_scan"
     if site.kind in ("memoized", "memoized_property"):
-        return f"{site.module}.{site.name}"
+        return _deferred_memo_name(site) or f"{site.module}.{site.name}"
     owner, parts = _resolve(site)
     obj = getattr(owner, parts[-1])
     return str(getattr(obj, "name"))
@@ -285,7 +298,7 @@ class ReferenceMode:
             except Exception as exc:  # noqa: BLE001 - recorded, asserted on by the caller
                 self.unpatchable[site.key] = f"{type(exc).__name__}: {exc}"
                 continue
-            if name not in registered:
+            if name not in registered and _deferred_memo_name(site) is None:
                 self.unpatchable[site.key] = f"not registered: {name}"
                 continue
             self.names[site.key] = name
