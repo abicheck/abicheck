@@ -5,8 +5,16 @@
 clang, MSVC ``cl``), reads each one's family and major version from the driver
 itself, and folds duplicates (``gcc`` and ``gcc-13`` resolving to one binary).
 
-``unavailable(config)`` answers *why* a config cannot be built here, or
-``None``. Each answer comes from probing the real driver: the standard
+``build_toolchains()`` / ``consumer_toolchains()`` restrict a run to the
+compilers named by ``ABICHECK_EDIT_CORPUS_TOOLCHAIN`` and
+``ABICHECK_EDIT_CORPUS_CONSUMER_TOOLCHAIN`` (comma-separated, ``gcc-14``,
+``clang19``, or a bare family for every installed major). A malformed or
+uninstalled name raises ``ToolchainSelectionError``: a requested compiler
+that is missing fails the run, it never shrinks it to whatever is installed.
+
+``unavailable(config)`` answers *why* a config's library build cannot be
+built here, or ``None``; ``consumer_unavailable(config, consumer)`` answers
+the same for one consumer of that build. Each answer comes from probing the real driver: the standard
 spelling (``-std=c23`` vs ``-std=c2x``), and whether the flag set builds both
 a shared library and an executable (``-m32`` needs multilib). A cell whose
 config is unavailable is reported unavailable/skipped, never passed.
@@ -28,11 +36,14 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Sequence
 from pathlib import Path
 
 from tests._edit_corpus_config import (
+    FAMILIES,
     Config,
     Flags,
+    ResolvedConsumer,
     Standard,
     Toolchain,
     host_platform,
@@ -115,6 +126,114 @@ def discover() -> tuple[Toolchain, ...]:
     if sys.platform == "win32" and shutil.which("cl"):
         found.setdefault(("msvc", 0), Toolchain("msvc", 0, "cl", "cl"))
     return tuple(sorted(found.values()))
+
+
+class ToolchainSelectionError(ValueError):
+    """A toolchain selection names something malformed or not installed."""
+
+
+TOOLCHAIN_ENV = "ABICHECK_EDIT_CORPUS_TOOLCHAIN"
+CONSUMER_TOOLCHAIN_ENV = "ABICHECK_EDIT_CORPUS_CONSUMER_TOOLCHAIN"
+
+# ``apple-clang`` first: the alternation is tried in order.
+_SELECTOR = re.compile(r"(apple-clang|gcc|clang|msvc)(?:-?([0-9]+))?")
+
+
+def parse_selection(
+    raw: str, var: str = TOOLCHAIN_ENV
+) -> tuple[tuple[str, int | None], ...]:
+    """``"gcc-14, clang19,clang"`` -> ``(("gcc", 14), ("clang", 19), ("clang", None))``."""
+    out: list[tuple[str, int | None]] = []
+    for item in raw.split(","):
+        name = item.strip()
+        if not name:
+            continue
+        m = _SELECTOR.fullmatch(name)
+        if m is None:
+            raise ToolchainSelectionError(
+                f"{var}: {name!r} is not a toolchain name; use FAMILY or FAMILY-MAJOR "
+                f"with FAMILY in {', '.join(FAMILIES)} (e.g. gcc-14, clang-19, gcc)"
+            )
+        out.append((m.group(1), int(m.group(2)) if m.group(2) else None))
+    return tuple(dict.fromkeys(out))
+
+
+def select(
+    raw: str, installed: Sequence[Toolchain], var: str = TOOLCHAIN_ENV
+) -> tuple[Toolchain, ...]:
+    """The *installed* toolchains *raw* names; every installed one when it is empty.
+
+    A name that matches nothing installed raises: a selection that silently
+    dropped a compiler would report a narrower run as the requested one.
+    """
+    wanted = parse_selection(raw, var)
+    if not wanted:
+        return tuple(installed)
+    have = ", ".join(t.id for t in installed) or "none"
+    picked: list[Toolchain] = []
+    for family, version in wanted:
+        hits = [
+            t
+            for t in installed
+            if t.family == family and (version is None or t.version == version)
+        ]
+        if not hits:
+            label = family if version is None else f"{family}-{version}"
+            raise ToolchainSelectionError(
+                f"{var} asks for {label}, which is not installed on this host "
+                f"(installed: {have})"
+            )
+        picked.extend(hits)
+    return tuple(sorted(dict.fromkeys(picked)))
+
+
+_OPTIONS = {
+    "--edit-corpus-toolchain": TOOLCHAIN_ENV,
+    "--edit-corpus-consumer-toolchain": CONSUMER_TOOLCHAIN_ENV,
+}
+
+
+def add_pytest_options(parser: object) -> None:
+    """Register the CLI spellings of the two selection variables (conftest)."""
+    for opt, var in _OPTIONS.items():
+        parser.addoption(  # type: ignore[attr-defined]
+            opt,
+            default=None,
+            metavar="NAMES",
+            help=f"Edit corpus: comma-separated toolchains (gcc-14,clang-19,gcc); sets {var}.",
+        )
+
+
+def apply_pytest_options(config: object) -> None:
+    """Export the options as the env variables, validated, before collection.
+
+    Runs in every xdist worker too, so workers see the same selection. A
+    malformed name fails the session here, not at the first generated cell.
+    """
+    import pytest
+
+    for opt, var in _OPTIONS.items():
+        value = config.getoption(opt, default=None)  # type: ignore[attr-defined]
+        if value is not None:
+            try:
+                # Names *and* installation: a missing compiler fails the session.
+                select(value, discover(), var)
+            except ToolchainSelectionError as exc:
+                raise pytest.UsageError(f"{opt}: {exc}") from exc
+            os.environ[var] = value
+
+
+def build_toolchains() -> tuple[Toolchain, ...]:
+    """The toolchains that may build libraries in this run."""
+    return select(os.environ.get(TOOLCHAIN_ENV, ""), discover(), TOOLCHAIN_ENV)
+
+
+def consumer_toolchains() -> tuple[Toolchain, ...]:
+    """The toolchains that may build consumers; defaults to the build selection."""
+    raw = os.environ.get(CONSUMER_TOOLCHAIN_ENV, "")
+    if raw.strip():
+        return select(raw, discover(), CONSUMER_TOOLCHAIN_ENV)
+    return build_toolchains()
 
 
 def toolchain(family: str, version: int) -> Toolchain:
@@ -489,9 +608,8 @@ def capability_gap(op: object, config: Config) -> str | None:
     if getattr(op, "needs_libstdcxx", False) and not uses_libstdcxx(config.producer):
         return f"{config.producer.id}'s C++ standard library is not libstdc++"
     for feature in getattr(op, "features", ()):
-        for tc in dict.fromkeys((config.producer, config.consumer_tc)):
-            if lacks_feature(tc, config.std, feature):
-                return f"{tc.id} does not compile {feature} in -std={config.std.name}"
+        if lacks_feature(config.producer, config.std, feature):
+            return f"{config.producer.id} does not compile {feature} in -std={config.std.name}"
     rebuild = getattr(op, "rebuild", None)
     if rebuild is not None:
         new_abi = rebuild(Flags()).cxx11_abi
@@ -504,40 +622,48 @@ def capability_gap(op: object, config: Config) -> str | None:
     return None
 
 
+def _toolchain_unavailable(
+    role: str, tc: Toolchain, std: Standard, fl: Flags
+) -> str | None:
+    """Why *tc* cannot compile *std* code with *fl* here (shared by both roles)."""
+    if tc not in discover():
+        return f"{role} toolchain {tc.id} is not installed"
+    if tc.family == "msvc":
+        return (
+            "MSVC DLLs export nothing without __declspec(dllexport) and the corpus "
+            "seeds declare none; the MSVC lane is not built"
+        )
+    if sys.platform == "win32":
+        # clang targeting MSVC exports nothing without __declspec(dllexport)
+        # (the seeds declare none). MinGW gcc would auto-export, but the PE
+        # expectations (e.g. the MSVC-ABI no_unique_address rule) are not
+        # validated under MinGW, so the lane is not enabled there yet.
+        return (
+            f"{tc.family} on Windows: the corpus PE lane is not validated "
+            "(clang/MSVC export nothing without __declspec(dllexport); MinGW untested)"
+        )
+    reason = fl.unsupported_reason(tc, std.lang)
+    if reason:
+        return f"{role}: {reason}"
+    if std_flag(tc, std) is None:
+        return f"{role} {tc.id} does not accept -std={std.name}"
+    reason = _flags_unavailable(tc, std.lang, fl)
+    if reason:
+        return f"{role}: {reason}"
+    return None
+
+
 def unavailable(config: Config) -> str | None:
-    """Why *config* cannot be built and compared on this host, or None."""
+    """Why *config*'s library pair cannot be built and compared here, or None."""
     if config.platform != host_platform():
         # No cross toolchain: an ELF config on macOS would build Mach-O and
         # still enable the ELF execution oracle.
         return f"config targets {config.platform}, host is {host_platform()}"
-    for role, tc, fl in (
-        ("producer", config.producer, config.flags),
-        ("consumer", config.consumer_tc, config.consumer_fl),
-    ):
-        if tc not in discover():
-            return f"{role} toolchain {tc.id} is not installed"
-        if tc.family == "msvc":
-            return (
-                "MSVC DLLs export nothing without __declspec(dllexport) and the corpus "
-                "seeds declare none; the MSVC lane is not built"
-            )
-        if sys.platform == "win32":
-            # clang targeting MSVC exports nothing without __declspec(dllexport)
-            # (the seeds declare none). MinGW gcc would auto-export, but the PE
-            # expectations (e.g. the MSVC-ABI no_unique_address rule) are not
-            # validated under MinGW, so the lane is not enabled there yet.
-            return (
-                f"{tc.family} on Windows: the corpus PE lane is not validated "
-                "(clang/MSVC export nothing without __declspec(dllexport); MinGW untested)"
-            )
-        reason = fl.unsupported_reason(tc, config.lang)
-        if reason:
-            return f"{role}: {reason}"
-        if std_flag(tc, config.std) is None:
-            return f"{role} {tc.id} does not accept -std={config.std.name}"
-        reason = _flags_unavailable(tc, config.lang, fl)
-        if reason:
-            return f"{role}: {reason}"
+    reason = _toolchain_unavailable(
+        "producer", config.producer, config.std, config.flags
+    )
+    if reason:
+        return reason
     if config.evidence == "dwarf" and config.objfmt != "elf":
         # Mach-O keeps -g debug info in the object files (no dSYM is produced
         # here) and a PE DLL carries none, so the library has no DWARF to give.
@@ -562,8 +688,30 @@ def unavailable(config: Config) -> str | None:
             )
             if reason:
                 return f"header frontend: {reason}"
-    if config.consumer_fl.bits != config.flags.bits:
-        return "consumer and producer word sizes differ; nothing can link"
+    return None
+
+
+def consumer_unavailable(
+    config: Config, consumer: ResolvedConsumer, features: Sequence[str] = ()
+) -> str | None:
+    """Why this host cannot compile *consumer*'s programs, or None.
+
+    *features* are the language features the edited header needs; a consumer
+    toolchain that names the standard but lacks one cannot compile it.
+    """
+    if consumer.std.lang != config.lang:
+        return None  # an infeasible mix, not a host gap: see cells.pair_infeasible
+    reason = _toolchain_unavailable(
+        "consumer", consumer.toolchain, consumer.std, consumer.flags
+    )
+    if reason:
+        return reason
+    for feature in features:
+        if lacks_feature(consumer.toolchain, consumer.std, feature):
+            return (
+                f"consumer {consumer.toolchain.id} does not compile {feature} "
+                f"in -std={consumer.std.name}"
+            )
     return None
 
 

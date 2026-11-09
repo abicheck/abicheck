@@ -5,7 +5,12 @@
 - ``status="not-applicable"``: ``op.requires(config)`` gave a reason;
 - ``status="unavailable"``: the host cannot build ``config`` (toolchain
   registry); reported as a skip, never as a pass;
-- ``status="ran"``: built, compared, executed and reconciled.
+- ``status="infeasible"``: every consumer of the build is a mix that cannot
+  work whatever the edit (``pair_blocked``), so nothing could be executed;
+  reported as a skip with each pair's reason, never as a pass;
+- ``status="ran"``: built once, compared once, executed per consumer and
+  reconciled. ``pairs`` reports each (build, consumer) pair, blocked ones
+  included with their reasons.
 
 ``minimize`` shrinks a failing cell's config one axis at a time towards
 ``default_config`` (and the evidence towards ``headers``), keeping every step
@@ -18,19 +23,41 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from tests._edit_corpus_config import Config, Flags, Toolchain, default_config
-from tests._edit_corpus_exec import ExecutionOracle
-from tests._edit_corpus_expect import ExecTruth, Expectation, Reconciled, reconcile
-from tests._edit_corpus_harness import BaselineCache, abicheck_answer, build_new
+from tests._edit_corpus_config import (
+    Config,
+    Consumer,
+    Flags,
+    ResolvedConsumer,
+    Toolchain,
+    default_config,
+    has_feature,
+)
+from tests._edit_corpus_exec import Blocked, ExecutionOracle
+from tests._edit_corpus_expect import (
+    ExecTruth,
+    Expectation,
+    PairTruth,
+    Reconciled,
+    reconcile,
+)
+from tests._edit_corpus_harness import BaselineCache, NewBuildCache, abicheck_answer
 from tests._edit_corpus_operators import EditOp
 from tests._edit_corpus_seeds import Seed
-from tests._edit_corpus_toolchains import capability_gap, unavailable, uses_libstdcxx
+from tests._edit_corpus_toolchains import (
+    capability_gap,
+    consumer_unavailable,
+    default_cxx11_abi,
+    execution_unavailable,
+    unavailable,
+    uses_libstdcxx,
+)
 
 
 @dataclass
 class CellContext:
     root: Path
     cache: BaselineCache
+    new_cache: NewBuildCache
     oracle: ExecutionOracle
     execute: bool = True
 
@@ -39,6 +66,7 @@ class CellContext:
         return cls(
             root=root,
             cache=BaselineCache(root / "old"),
+            new_cache=NewBuildCache(root / "new"),
             oracle=ExecutionOracle(root / "exec"),
             execute=execute,
         )
@@ -61,6 +89,26 @@ class CellResult:
     def cls(self) -> str:
         return self.reconciled.cls if self.reconciled else self.status
 
+    @property
+    def pairs(self) -> tuple[PairTruth, ...]:
+        return self.exec_truth.pairs if self.exec_truth else ()
+
+    def pair_rows(self) -> list[dict[str, str]]:
+        """One row per (build, consumer) pair, for the per-pair report."""
+        return [
+            {
+                "op": self.op,
+                "seed": self.seed,
+                "build": self.config.build_id,
+                "producer": self.config.producer.id,
+                "consumer": p.consumer,
+                "outcome": p.outcome,
+                "cell": self.cls,
+                "detail": p.reason or "; ".join(p.signals),
+            }
+            for p in self.pairs
+        ]
+
     def signature(self) -> tuple[str, tuple[str, ...]]:
         """What must reproduce for a minimized cell to count as the same finding."""
         return (self.cls, self.reconciled.problems if self.reconciled else ())
@@ -80,34 +128,112 @@ class CellResult:
             f"  abicheck: verdict={self.verdict} kinds={sorted(self.kinds)}\n"
             f"  expect:   {self.expectation}\n"
             f"  execute:  {exec_txt}\n"
-            f"  problems: {list(self.reconciled.problems)} {self.reconciled.detail}"
+            + "".join(
+                f"    [{self.config.build_id} x {p.consumer}] {p.outcome}"
+                f"{': ' + (p.reason or '; '.join(p.signals)) if p.reason or p.signals else ''}\n"
+                for p in self.pairs
+            )
+            + f"  problems: {list(self.reconciled.problems)} {self.reconciled.detail}"
         )
 
 
 def seed_conflict(seed: Seed, config: Config) -> str | None:
-    """A seed x config pair that is ill-formed on its own, whatever the edit."""
-    if seed.name == "cxx_stdlib" and any(
-        f.pack is not None or f.short_enums for f in (config.flags, config.consumer_fl)
-    ):
+    """A seed x build pair that is ill-formed on its own, whatever the edit."""
+    return _std_flag_conflict(seed, config.flags)
+
+
+def _std_flag_conflict(seed: Seed, flags: Flags) -> str | None:
+    if seed.name == "cxx_stdlib" and (flags.pack is not None or flags.short_enums):
         # gcc documents both flags as making code binary-incompatible with
         # code built without them, and the installed libstdc++ is built without.
         return "-fpack-struct/-fshort-enums make std::string incompatible with the installed libstdc++"
     return None
 
 
-def stdlib_mismatch(seed: Seed, config: Config) -> str | None:
-    """A ``std::`` seed whose producer and consumer use different C++ libraries.
+def stdlib_mismatch(
+    seed: Seed, config: Config, consumer: ResolvedConsumer
+) -> str | None:
+    """A ``std::`` seed whose library and consumer use different C++ libraries.
 
     A consumer built against libc++ cannot link a libstdc++ ``std::string``
     API (or the reverse), whatever the edit; that pairing is not buildable.
     """
-    if seed.name != "cxx_stdlib" or config.consumer_tc == config.producer:
+    tc = consumer.toolchain
+    if seed.name != "cxx_stdlib" or tc == config.producer:
         return None
-    if uses_libstdcxx(config.producer) != uses_libstdcxx(config.consumer_tc):
+    if uses_libstdcxx(config.producer) != uses_libstdcxx(tc):
         return (
-            f"{config.producer.id} and {config.consumer_tc.id} use different C++ standard "
+            f"{config.producer.id} and {tc.id} use different C++ standard "
             "libraries; the std::string seed cannot link across them"
         )
+    return None
+
+
+def _effective_cxx11_abi(tc: Toolchain, flags: Flags) -> int | None:
+    return flags.cxx11_abi if flags.cxx11_abi is not None else default_cxx11_abi(tc)
+
+
+def dual_abi_mismatch(
+    seed: Seed, config: Config, consumer: ResolvedConsumer
+) -> str | None:
+    """A ``std::string`` consumer on the other side of libstdc++'s dual ABI.
+
+    ``_GLIBCXX_USE_CXX11_ABI=0`` and ``=1`` are two different ``std::string``
+    types with different mangled names: the consumer cannot link the old
+    library at all, so the pair says nothing about the edit.
+    """
+    if seed.name != "cxx_stdlib":
+        return None
+    if not (uses_libstdcxx(config.producer) and uses_libstdcxx(consumer.toolchain)):
+        return None
+    lib = _effective_cxx11_abi(config.producer, config.flags)
+    use = _effective_cxx11_abi(consumer.toolchain, consumer.flags)
+    if lib != use:
+        return (
+            f"the library's std::string is _GLIBCXX_USE_CXX11_ABI={lib}, the "
+            f"consumer's is {use}: the dual ABI cannot link across them"
+        )
+    return None
+
+
+def pair_blocked(
+    op: EditOp, seed: Seed, config: Config, consumer: ResolvedConsumer
+) -> tuple[str, str] | None:
+    """``("infeasible" | "unavailable", reason)`` for a pair that cannot run, else None.
+
+    *Infeasible* mixes cannot work whatever the edit, so their consumers would
+    break (or fail to build) against the old library already; *unavailable*
+    ones are host gaps. Neither is a pass: both are reported with the reason.
+    """
+    if consumer.std.lang != config.lang:
+        return (
+            "infeasible",
+            f"a {consumer.std.lang} consumer cannot use the {config.lang} seed "
+            '(the C header has no extern "C" guards)',
+        )
+    for feat in op.features:
+        if not has_feature(consumer.std, feat):
+            return (
+                "infeasible",
+                f"the edited header needs {feat}, which the consumer's "
+                f"{consumer.std.name} lacks",
+            )
+    if consumer.flags.bits != config.flags.bits:
+        return (
+            "infeasible",
+            "consumer and library word sizes differ; nothing can link",
+        )
+    reason = _std_flag_conflict(seed, consumer.flags)
+    if reason:
+        return ("infeasible", f"consumer: {reason}")
+    reason = consumer_unavailable(config, consumer, op.features)
+    if reason:
+        return ("unavailable", reason)
+    reason = stdlib_mismatch(seed, config, consumer) or dual_abi_mismatch(
+        seed, config, consumer
+    )
+    if reason:
+        return ("infeasible", reason)
     return None
 
 
@@ -121,17 +247,31 @@ def run_cell(op: EditOp, seed: Seed, config: Config, ctx: CellContext) -> CellRe
             "not-applicable",
             reason or "seed/language mismatch",
         )
-    reason = (
-        unavailable(config)
-        or capability_gap(op, config)
-        or stdlib_mismatch(seed, config)
-    )
+    reason = unavailable(config) or capability_gap(op, config)
     if reason is None and op.rebuild is not None:
         reason = unavailable(replace(config, flags=op.new_flags(config.flags)))
     if reason:
         return CellResult(op.name, seed.name, config, "unavailable", reason)
+    executes = ctx.execute and execution_unavailable(config) is None
+    blocked: list[Blocked] = []
+    if executes:
+        for consumer in config.consumer_set:
+            why = pair_blocked(op, seed, config, consumer)
+            if why is not None:
+                blocked.append((consumer, *why))
+        if len(blocked) == len(config.consumer_set):
+            # Nothing can execute: the oracle would add no signal, and running
+            # abicheck alone would pass a cell its consumers never checked.
+            status = (
+                "unavailable"
+                if all(b[1] == "unavailable" for b in blocked)
+                else "infeasible"
+            )
+            why_all = "; ".join(f"{c.id}: {r}" for c, _, r in blocked)
+            return CellResult(op.name, seed.name, config, status, why_all)
     old = ctx.cache.get(seed, config)
-    new = build_new(op, seed, config, ctx.root / "new")
+    new = ctx.new_cache.get(op, seed, config)
+    # The verdict depends on the library pair alone, never on the consumers.
     verdict, kinds = abicheck_answer(old, new)
     exp = op.expect(config)
     if ctx.execute:
@@ -143,6 +283,7 @@ def run_cell(op: EditOp, seed: Seed, config: Config, ctx: CellContext) -> CellRe
             op.edit(seed.roles),
             op.new_flags(config.flags),
             op.name,
+            blocked,
         )
     else:
         truth = ExecTruth(available=False, reason="execution disabled for this run")
@@ -184,10 +325,12 @@ def _shrink_steps(config: Config) -> list[tuple[str, Config]]:
                     replace(config, flags=replace(f, **{attr: getattr(d, attr)})),
                 )
             )
-    if config.consumer is not None:
-        steps.append(("consumer", replace(config, consumer=None)))
-    if config.consumer_flags is not None:
-        steps.append(("consumer_flags", replace(config, consumer_flags=None)))
+    if config.consumers:
+        steps.append(("consumers", replace(config, consumers=())))
+        if len(config.consumers) > 1:
+            for i in range(len(config.consumers)):
+                rest = config.consumers[:i] + config.consumers[i + 1 :]
+                steps.append((f"consumers[{i}]", replace(config, consumers=rest)))
     if config.std != base.std:
         steps.append(("std", replace(config, std=base.std)))
     if config.evidence != "headers":
@@ -234,6 +377,17 @@ def _flags_expr(f: Flags) -> str:
     return f"Flags({', '.join(args)})"
 
 
+def _consumer_expr(u: Consumer) -> str:
+    args = []
+    if u.toolchain is not None:
+        args.append(f"toolchain={_tc_expr(u.toolchain)}")
+    if u.std is not None:
+        args.append(f'std=STANDARD_BY_NAME["{u.std.name}"]')
+    if u.flags is not None:
+        args.append(f"flags={_flags_expr(u.flags)}")
+    return f"Consumer({', '.join(args)})"
+
+
 def config_expr(c: Config) -> str:
     parts = [
         f'std=STANDARD_BY_NAME["{c.std.name}"]',
@@ -241,10 +395,10 @@ def config_expr(c: Config) -> str:
     ]
     if c.flags != Flags():
         parts.append(f"flags={_flags_expr(c.flags)}")
-    if c.consumer is not None:
-        parts.append(f"consumer={_tc_expr(c.consumer)}")
-    if c.consumer_flags is not None:
-        parts.append(f"consumer_flags={_flags_expr(c.consumer_flags)}")
+    if c.consumers:
+        parts.append(
+            "consumers=(" + "".join(_consumer_expr(u) + ", " for u in c.consumers) + ")"
+        )
     if c.evidence != "headers":
         parts.append(f'evidence="{c.evidence}"')
     return "Config(" + ", ".join(parts) + ")"
@@ -255,7 +409,7 @@ REGRESSION_IMPORTS = """from pathlib import Path
 import pytest
 
 from tests._edit_corpus_cells import CellContext, run_cell
-from tests._edit_corpus_config import STANDARD_BY_NAME, Config, Flags
+from tests._edit_corpus_config import STANDARD_BY_NAME, Config, Consumer, Flags
 from tests._edit_corpus_expect import PASSING_CLASSES
 from tests._edit_corpus_operators import OP_BY_NAME
 from tests._edit_corpus_seeds import SEED_BY_NAME
@@ -277,7 +431,7 @@ def test_edit_corpus_regression_{safe}(tmp_path: Path) -> None:
     cell = run_cell(
         OP_BY_NAME["{cell.op}"], SEED_BY_NAME["{cell.seed}"], config, CellContext.at(tmp_path)
     )
-    if cell.status == "unavailable":
+    if cell.status in ("unavailable", "infeasible"):
         pytest.skip(cell.reason)
     assert cell.cls in PASSING_CLASSES, cell.describe()
 '''

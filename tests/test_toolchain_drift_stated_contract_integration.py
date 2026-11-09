@@ -80,10 +80,11 @@ IDENTICAL_BUILDS: dict[str, tuple[str, ...]] = {
 #: ``tm_clone``: libstdc++'s transactional-memory clones (``_ZGTt...``),
 #: re-exported by ``-static-libstdc++``, are not recognised as runtime-owned,
 #: so a stated ``public`` leaves them UNKNOWN_UNRESOLVED.
-#: ``unmatched_runtime_exports``: an exported libstdc++ symbol (a static
-#: runtime, or clang's default-visibility ``std::`` instantiations) has no
+#: ``unmatched_runtime_exports``: an exported static-libstdc++ symbol has no
 #: declaration, so the stated ``exports`` domain is ``unmatched_exports`` and
-#: cannot close -- even for a byte-identical pair.
+#: cannot close -- even for a byte-identical pair. (clang's dynamic builds left
+#: this list once their mangled ``__gnu_cxx::`` weak instantiations were
+#: filtered as transitive runtime symbols.)
 _TM = "tm_clone"
 _UNMATCHED = "unmatched_runtime_exports"
 
@@ -94,8 +95,6 @@ KNOWN_GAP_CELLS: dict[tuple[str, str, str], str] = {
     ("g++", "static_runtime", "exports"): _UNMATCHED,
     ("g++", "combined", "public"): _TM,
     ("g++", "combined", "exports"): _UNMATCHED,
-    ("clang++", "opt_level", "exports"): _UNMATCHED,
-    ("clang++", "inline_imports", "exports"): _UNMATCHED,
     ("clang++", "static_runtime", "public"): _TM,
     ("clang++", "static_runtime", "exports"): _UNMATCHED,
     ("clang++", "combined", "public"): _TM,
@@ -105,7 +104,6 @@ KNOWN_GAP_CELLS: dict[tuple[str, str, str], str] = {
 #: Shrink-only: (compiler, identical build, mode) -> gap id.
 KNOWN_GAP_IDENTICAL: dict[tuple[str, str, str], str] = {
     ("g++", "static_runtime", "exports"): _UNMATCHED,
-    ("clang++", "O0", "exports"): _UNMATCHED,
     ("clang++", "static_runtime", "exports"): _UNMATCHED,
 }
 

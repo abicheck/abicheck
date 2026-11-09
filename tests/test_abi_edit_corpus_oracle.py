@@ -23,6 +23,7 @@ from tests._edit_corpus_cells import CellResult
 from tests._edit_corpus_config import (
     STANDARD_BY_NAME,
     Config,
+    Consumer,
     Flags,
     Toolchain,
     default_config,
@@ -110,13 +111,14 @@ def test_a_failed_old_side_probe_is_retried_not_half_cached(
     monkeypatch.setattr(ex, "run_probe", probe)
     oracle = ExecutionOracle(tmp_path)
     old = Built(tmp_path, tmp_path / "libedit.so", tmp_path / "edit_seed.h", None)
+    (me,) = _cfg().consumer_set
     with pytest.raises(CompileError):
-        oracle._old(C_SEED, _cfg(), old)
-    _, got = oracle._old(C_SEED, _cfg(), old)
+        oracle._old(C_SEED, _cfg(), old, me)
+    _, got = oracle._old(C_SEED, _cfg(), old, me)
     assert got == {"sizeof(point)": "8"}
     assert calls == {"consumers": 2, "probe": 2}
     # Once both succeeded, the entry is served from the cache.
-    oracle._old(C_SEED, _cfg(), old)
+    oracle._old(C_SEED, _cfg(), old, me)
     assert calls == {"consumers": 2, "probe": 2}
 
 
@@ -752,7 +754,7 @@ def test_a_crashed_new_header_compile_is_a_harness_error_not_a_source_break(
     )
     truth = oracle.truth(C_SEED, _cfg(), built, built, {}, Flags(), "t")
     assert truth.source_break and truth.signals == (
-        "source call: error: too few arguments",
+        "source call [gcc13-c17-O0]: error: too few arguments",
     )
 
 
@@ -780,5 +782,7 @@ def test_a_std_seed_needs_one_cxx_library_on_both_sides(
         "uses_libstdcxx",
         lambda tc: producer_libstdcxx if tc == GCC else consumer_libstdcxx,
     )
-    reason = cells.stdlib_mismatch(SEED_BY_NAME[seed], _cfg("c++", consumer=consumer))
+    cfg = _cfg("c++", consumers=(Consumer(toolchain=consumer),))
+    (user,) = cfg.consumer_set
+    reason = cells.stdlib_mismatch(SEED_BY_NAME[seed], cfg, user)
     assert (reason is not None) is blocked
