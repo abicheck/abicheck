@@ -2,8 +2,10 @@
 removal and an addition are one ``FUNC_PARAMS_CHANGED`` exactly when they are
 the same header declaration (declared name, written parameter and return
 spellings, declaring header) and some parameter spelled the same resolves to
-a different type. A changed written signature (case189) or a changed mangling
-the header cannot explain (a renumbered lambda closure) stays a removal.
+a different type, or when the written signature of the one function by that
+name was rewritten in the same header. A retype to a record the old release
+never declared (case189), an overloaded name, or a changed mangling the
+header cannot explain (a renumbered lambda closure) stays a removal.
 
 Oracle: each scenario states by construction whether the written declaration
 is kept and whether a resolved type changed; the expected outcome is read off
@@ -378,9 +380,16 @@ def test_pairing_rule_over_the_whole_scenario_domain(
 ) -> None:
     old, new = _scenario(written, resolution, header, sibling)
     out = pair_parameter_replacements([_removed(OLD), _added(NEW)], old, new)
-    same_declaration = written == "kept" and header == "same"
-    expected = PAIRED if same_declaration and resolution != "unchanged" else UNPAIRED
-    assert _kinds(out) == expected
+    # Kept written signature: one declaration whose parameter resolves to a
+    # different type. Rewritten signature: the same function under a new
+    # signature, unless an overload makes the target ambiguous or the new
+    # parameter reaches a record the old release never declared (vec<16>).
+    kept_pairs = written == "kept" and resolution != "unchanged"
+    rewritten_pairs = (
+        written == "retyped" and not sibling and resolution != "record_identity"
+    )
+    paired = header == "same" and (kept_pairs or rewritten_pairs)
+    assert _kinds(out) == (PAIRED if paired else UNPAIRED)
 
 
 @pytest.mark.parametrize("header_side", ["old", "new"])
@@ -423,4 +432,95 @@ def test_record_layout_is_read_for_every_identity_of_every_slot() -> None:
     assert (
         _kinds(pair_parameter_replacements([_removed(OLD), _added(NEW)], old, new))
         == PAIRED
+    )
+
+
+# ── rewritten written signature (the binary-only rule, read from headers) ──
+
+ADD2 = "_ZN3lib3addEii"
+ADD3 = "_ZN3lib3addEiii"
+
+
+def _add(mangled: str, params: list[Param], **kw: object) -> Function:
+    fn = _fn(mangled, params, **kw)  # type: ignore[arg-type]
+    fn.name = "add"
+    return fn
+
+
+def _add_changes() -> list[Change]:
+    return [
+        make_change(ChangeKind.FUNC_REMOVED, symbol=ADD2, name="add", description="r"),
+        make_change(ChangeKind.FUNC_ADDED, symbol=ADD3, new="add", description="a"),
+    ]
+
+
+_INT = ("int", ())
+
+
+@pytest.mark.parametrize(
+    ("new_params", "extra", "paired"),
+    [
+        pytest.param([_INT, _INT, _INT], {}, True, id="parameter_appended"),
+        pytest.param([("long", ()), _INT, _INT], {}, True, id="appended_and_retyped"),
+        pytest.param(
+            [_INT, _INT, ("Opts*", ("lib::Opts",))],
+            {},
+            False,
+            id="new_record_parameter",
+        ),
+        # The clang backend collects no identities: the spelling is read.
+        pytest.param([_INT, _INT, ("int", None)], {}, True, id="uncollected_builtin"),
+        pytest.param(
+            [_INT, _INT, ("Opts*", None)], {}, False, id="uncollected_unknown_name"
+        ),
+        pytest.param(
+            [_INT, _INT, ("Box<int>", None)], {}, False, id="uncollected_template"
+        ),
+        pytest.param(
+            [_INT, _INT, _INT], {"return_type": "long"}, False, id="return_changed"
+        ),
+        pytest.param(
+            [_INT, _INT, _INT],
+            {"header": "/src/v/include/b.h"},
+            False,
+            id="moved_header",
+        ),
+    ],
+)
+def test_a_rewritten_signature_pairs_only_when_nothing_else_explains_it(
+    new_params: list[tuple[str, tuple[str, ...] | None]],
+    extra: dict[str, str],
+    paired: bool,
+) -> None:
+    old = _snap([_add(ADD2, [_param("int"), _param("int")])])
+    new = _snap([_add(ADD3, [_param(t, ids) for t, ids in new_params], **extra)])
+    out = _kinds(pair_parameter_replacements(_add_changes(), old, new))
+    expected = (
+        [(ChangeKind.FUNC_PARAMS_CHANGED, ADD2)]
+        if paired
+        else [(ChangeKind.FUNC_REMOVED, ADD2), (ChangeKind.FUNC_ADDED, ADD3)]
+    )
+    assert out == expected
+
+
+def test_a_parameter_retyped_to_a_record_the_old_release_declares_pairs() -> None:
+    record = _record("lib::Opts", 32)
+    old = _snap([_add(ADD2, [_param("int"), _param("int")])], types=[record])
+    new = _snap(
+        [_add(ADD3, [_param("int"), _param("int"), _param("Opts*", ("lib::Opts",))])],
+        types=[record],
+    )
+    out = _kinds(pair_parameter_replacements(_add_changes(), old, new))
+    assert out == [(ChangeKind.FUNC_PARAMS_CHANGED, ADD2)]
+
+
+@pytest.mark.parametrize("side", ["old", "new"])
+def test_an_overload_on_either_side_keeps_a_rewrite_unpaired(side: str) -> None:
+    other = _add("_ZN3lib3addEd", [_param("double")])
+    old_fns = [_add(ADD2, [_param("int"), _param("int")])]
+    new_fns = [_add(ADD3, [_param("int"), _param("int"), _param("int")])]
+    (old_fns if side == "old" else new_fns).append(other)
+    changes = _add_changes()
+    assert (
+        pair_parameter_replacements(changes, _snap(old_fns), _snap(new_fns)) == changes
     )

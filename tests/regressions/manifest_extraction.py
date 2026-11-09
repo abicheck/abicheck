@@ -519,14 +519,18 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "return spellings, declaring header -- are one parameter change when "
             "a parameter written the same resolves to a different type (its "
             "resolved record/enum, that record's layout, or a typedef's target "
-            "changed). A changed written signature, or a mangling change the "
-            "header evidence does not explain, stays a removal and an addition. "
+            "changed), and so are the removal and addition of the one function by "
+            "that name whose written signature was rewritten in the same header "
+            "with the same return type, as the binary-only rule pairs them. A "
+            "retype to a record the old release never declared (case189), an "
+            "overloaded name, or a mangling change the header evidence does not "
+            "explain stays a removal and an addition. "
             "A fundamental type (float _Complex, __int128, a vector or SIMD type, "
             "or a pointer, cv or array of one) is never paired as a rename or "
             "move: a builtin change is a true removal and addition, not 'the same "
             "declaration, renamed'."
         ),
-        fixed_by=(1779, 1812),
+        fixed_by=(1779, 1812, 1958),
         seed_tests=(
             "tests/test_header_parameter_replacement_pairing.py",
             "tests/test_header_param_change_pairing_integration.py",
@@ -535,6 +539,30 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_graph_reconcile_fundamental.py",
             "tests/test_graph_reconcile_fundamental_cli.py",
         ),
+    ),
+    BugClass(
+        id="classification.removed_virtual_slot_read_as_plain_removal",
+        invariant=(
+            "A virtual method removed together with its vtable slot -- an entry "
+            "of every old vtable that held it, gone from each of those records' "
+            "shorter new vtable, with no new declaration or export left -- "
+            "reports func_virtual_removed beside the function's removal, on the "
+            "header and DWARF lanes alike; removing an override (the slot "
+            "stays) or devirtualizing a method that stays exported does not."
+        ),
+        fixed_by=(1958,),
+        seed_tests=("tests/test_virtual_slot_removal.py",),
+        public_surfaces=("cli", "python-api"),
+        axes={
+            "lane": ("dwarf", "castxml", "clang"),
+            "shape": (
+                "last_virtual_removed",
+                "middle_virtual_removed",
+                "override_removed",
+                "devirtualized",
+                "inherited_by_derived",
+            ),
+        },
     ),
     BugClass(
         id="templates.explicit_instance_removal_read_as_visibility_change",

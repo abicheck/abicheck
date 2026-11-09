@@ -1,5 +1,7 @@
 """Header-parsed comparisons report a same-declaration parameter retype as one
-``FUNC_PARAMS_CHANGED`` and a changed written signature as a removal.
+``FUNC_PARAMS_CHANGED``, a rewritten signature of the one function by that
+name likewise, and a retype to a new internal type (case189) or an overloaded
+rewrite as a removal.
 
 Each shape is a real shared library built with g++ from a header, dumped
 through ``abicheck dump -H`` and compared through the loader users reach, so
@@ -9,12 +11,15 @@ function's mangled name changes in every one of them, and only the header
 declaration tells a parameter change from a removal.
 
 Oracle: the expected finding is fixed per shape from what its header edit is
-(same declaration with a retargeted type -> parameter change; old signature
-gone from the header -> removal), not read from the implementation.
+(same declaration with a retargeted type, or the one declaration of that
+name rewritten with only previously declared types -> parameter change; a
+retype to a type new to the release, or an overload set -> removal), not
+read from the implementation.
 """
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -90,6 +95,29 @@ _SHAPES: dict[str, tuple[str, str, str, str, ChangeKind]] = {
         "namespace lib { void put(long v, float f); }\n",
         "",
         "put",
+        ChangeKind.FUNC_PARAMS_CHANGED,
+    ),
+    # The edit corpus's func_param_append/remove/type_change on a free C++
+    # function: the one declaration of that name, rewritten in place.
+    "parameter_appended": (
+        "int add_ints(int a, int b);\n",
+        "int add_ints(int a, int b, int c);\n",
+        "",
+        "add_ints",
+        ChangeKind.FUNC_PARAMS_CHANGED,
+    ),
+    "parameter_removed": (
+        "int add_ints(int a, int b);\n",
+        "int add_ints(int a);\n",
+        "",
+        "add_ints",
+        ChangeKind.FUNC_PARAMS_CHANGED,
+    ),
+    "overloaded_rewrite_stays_a_removal": (
+        "int add_ints(int a, int b);\nint add_ints(double a);\n",
+        "int add_ints(int a, int b, int c);\nint add_ints(double a);\n",
+        "",
+        "add_ints",
         ChangeKind.FUNC_REMOVED,
     ),
     "internal_retype_case189": (
@@ -106,6 +134,18 @@ _IMPLS_PER_SIDE = {
     "direct_public_retype": (
         "namespace lib { void put(int, float) {} }",
         "namespace lib { void put(long, float) {} }",
+    ),
+    "parameter_appended": (
+        "int add_ints(int a, int b) { return a + b; }",
+        "int add_ints(int a, int b, int c) { return a + b + c; }",
+    ),
+    "parameter_removed": (
+        "int add_ints(int a, int b) { return a + b; }",
+        "int add_ints(int a) { return a; }",
+    ),
+    "overloaded_rewrite_stays_a_removal": (
+        "int add_ints(int a, int b) { return a + b; }\nint add_ints(double a) { return 0; }",
+        "int add_ints(int a, int b, int c) { return a; }\nint add_ints(double a) { return 0; }",
     ),
     "internal_retype_case189": (
         "namespace demo { void configure(void*, Meta) {} }",
@@ -157,16 +197,31 @@ def _build_and_dump(case: Path, header: str, impl: str) -> Path:
     return out
 
 
-@pytest.fixture(scope="module")
-def results(tmp_path_factory: pytest.TempPathFactory) -> dict[str, list]:
+@pytest.fixture(scope="module", params=["castxml", "clang"])
+def results(
+    request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory
+) -> dict[str, list]:
+    """Every shape dumped through one header frontend (castxml, or the
+    clang backend via ``ABICHECK_AST_FRONTEND``): the pairing reads the
+    spellings and identities each backend writes."""
     _need_toolchain()
-    root = tmp_path_factory.mktemp("header_param_change")
+    if request.param == "clang" and shutil.which("clang") is None:
+        pytest.skip("needs clang")
+    root = tmp_path_factory.mktemp(f"header_param_change_{request.param}")
     out: dict[str, list] = {}
-    for name, (v1, v2, impl, _fn, _kind) in _SHAPES.items():
-        impl_old, impl_new = _IMPLS_PER_SIDE.get(name, (impl, impl))
-        old = load_snapshot(_build_and_dump(root / name / "v1", v1, impl_old))
-        new = load_snapshot(_build_and_dump(root / name / "v2", v2, impl_new))
-        out[name] = [old, new, compare(old, new)]
+    saved = os.environ.get("ABICHECK_AST_FRONTEND")
+    os.environ["ABICHECK_AST_FRONTEND"] = request.param
+    try:
+        for name, (v1, v2, impl, _fn, _kind) in _SHAPES.items():
+            impl_old, impl_new = _IMPLS_PER_SIDE.get(name, (impl, impl))
+            old = load_snapshot(_build_and_dump(root / name / "v1", v1, impl_old))
+            new = load_snapshot(_build_and_dump(root / name / "v2", v2, impl_new))
+            out[name] = [old, new, compare(old, new)]
+    finally:
+        if saved is None:
+            os.environ.pop("ABICHECK_AST_FRONTEND", None)
+        else:
+            os.environ["ABICHECK_AST_FRONTEND"] = saved
     return out
 
 
@@ -183,10 +238,24 @@ def _function_findings(result, symbols: set[str]) -> list[tuple[ChangeKind, str]
     ]
 
 
+#: Shapes whose pairing evidence one header backend does not record.
+_BACKEND_GAPS = {
+    ("clang", "default_template_argument"): (
+        "the clang backend records no resolved parameter identities, so a "
+        "kept spelling whose default template argument changed has no "
+        "evidence (docs/contribute/known-gaps.md); pinned by "
+        "test_clang_kept_spelling_default_argument_change_stays_unpaired"
+    ),
+}
+
+
 @pytest.mark.parametrize("shape", sorted(_SHAPES))
 def test_shape_reports_its_expected_function_finding(
-    results: dict[str, list], shape: str
+    request: pytest.FixtureRequest, results: dict[str, list], shape: str
 ) -> None:
+    gap = _BACKEND_GAPS.get((request.node.callspec.params["results"], shape))
+    if gap is not None:
+        pytest.skip(gap)
     old, new, result = results[shape]
     fn_name, expected = _SHAPES[shape][3], _SHAPES[shape][4]
     old_symbols = {f.mangled for f in old.declarations.functions if f.name == fn_name}
@@ -201,3 +270,28 @@ def test_shape_reports_its_expected_function_finding(
             [(ChangeKind.FUNC_REMOVED, old_key), (ChangeKind.FUNC_ADDED, new_key)]
         ), findings
     assert result.verdict.value == "BREAKING"
+
+
+@pytest.mark.known_gap_canary
+def test_clang_kept_spelling_default_argument_change_stays_unpaired(
+    tmp_path: Path,
+) -> None:
+    """Canary: under the clang backend the xvec shape still reads as a removal
+    plus an addition, not ``func_params_changed``."""
+    _need_toolchain()
+    if shutil.which("clang") is None:
+        pytest.skip("needs clang")
+    v1, v2, impl, _fn, _kind = _SHAPES["default_template_argument"]
+    saved = os.environ.get("ABICHECK_AST_FRONTEND")
+    os.environ["ABICHECK_AST_FRONTEND"] = "clang"
+    try:
+        old = load_snapshot(_build_and_dump(tmp_path / "v1", v1, impl))
+        new = load_snapshot(_build_and_dump(tmp_path / "v2", v2, impl))
+    finally:
+        if saved is None:
+            os.environ.pop("ABICHECK_AST_FRONTEND", None)
+        else:
+            os.environ["ABICHECK_AST_FRONTEND"] = saved
+    kinds = {c.kind for c in compare(old, new).changes if "scale" in (c.symbol or "")}
+    assert ChangeKind.FUNC_PARAMS_CHANGED not in kinds
+    assert {ChangeKind.FUNC_REMOVED, ChangeKind.FUNC_ADDED} <= kinds
