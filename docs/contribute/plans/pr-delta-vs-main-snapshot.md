@@ -17,9 +17,12 @@ artifact (fork) path via `analysis_context`); operand identity landed
 (§ Operand identity: `operand.json`, `delta-operand-map`, `operand_*`
 outcomes); `storage: cache` landed on both Actions
 (`abicheck/frontends/action/main_snapshot_cache.py`; the cache entry carries
-`operand.json` too); open: piece 4's report-schema field, `on-missing-base:
-build`, the path-equivalent *ancestor* rule (`base-equivalent-paths`), a
-`delta-storage` input on the main Action · **Effort:** L
+`operand.json` too); piece 4's report field landed (`delta_baseline` block,
+compare report schema 7.3 / release 3.1, `report.delta_baseline`, with the
+operand pairing as `operand_match`); open: the comment header's equivalence
+note (needs path equivalence), `on-missing-base: build`, the path-equivalent
+*ancestor* rule (`base-equivalent-paths`), a `delta-storage` input on the main
+Action · **Effort:** L
 
 ## Problem
 
@@ -313,10 +316,16 @@ work, which publishes the delta report; nothing else changes.
    delta report and the gate's verdict as one header line ("Release gate:
    ✅ compatible / ❌ breaking — see summary"). The step's exit code comes
    from the gate only.
-4. **Report rendering**: a `delta` block in the comment header (base/snapshot
-   SHAs, outcome, equivalence note). Report schema gains an optional
-   `comparison_role: gate|delta` + `delta_base` object (minor schema bump,
-   ADR surface traceability).
+4. **Report rendering** (*landed*, except the equivalence note): the
+   comment's two notes (piece 3), and a versioned report field so the JSON
+   report says it too -- the optional top-level `delta_baseline` block
+   (compare report schema 7.3, release 3.1; owner `abicheck/report/delta_baseline.py`)
+   with `comparison_role: gate|delta`, `decides_exit_code`, `outcome`,
+   `base_sha`, `branch` and, on the delta report, `gate_verdict`. The Action
+   passes it with `--set report.delta_baseline=@FILE` to both commands; the
+   fork publisher falls back to it when a report has no delta analysis
+   context. ADR-047's 2026-11-08 amendment. *Planned:* `snapshot_sha` and
+   `equivalence` fields with `base-equivalent-paths`.
 
 Explicit `old-library` / `old-header` pointing at a snapshot the user staged
 themselves stays supported — the two-compare recipe from the previous

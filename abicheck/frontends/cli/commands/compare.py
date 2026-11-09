@@ -534,9 +534,11 @@ def _compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
             or bundle_cfg.required_symbols
             or bundle_cfg.output_view
             or bundle_cfg.report_baseline_provenance
+            or bundle_cfg.report_delta_baseline
         ):
             raise click.UsageError(
-                "consumers.*, output.view and report.baseline_provenance are not "
+                "consumers.*, output.view, report.baseline_provenance and "
+                "report.delta_baseline are not "
                 "supported on a comparison of a stored BundleFacts document yet; "
                 "remove them for this run"
             )
@@ -584,6 +586,14 @@ def _compare_cmd(ctx: click.Context, /, **kwargs: Any) -> None:
     from ..baseline_provenance import enter_baseline_provenance
 
     enter_baseline_provenance(
+        ctx,
+        cfg_path=cfg_path,
+        project_cfg=project_cfg,
+        config_overrides=kwargs.get("config_overrides"),
+    )
+    from ..delta_baseline import enter_delta_baseline
+
+    enter_delta_baseline(
         ctx,
         cfg_path=cfg_path,
         project_cfg=project_cfg,

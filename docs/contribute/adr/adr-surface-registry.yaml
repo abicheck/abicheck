@@ -416,6 +416,7 @@ adrs:
       - action: actions/resolve-baseline:verify-baseline-attestation
       - action: actions/stage-baseline:attest
       - report: compare_report.baseline_provenance
+      - report: compare_report.delta_baseline
     missing: P2 of the lifecycle model is only partially implemented (see the ADR).
 
   - id: ADR-048
