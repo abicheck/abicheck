@@ -272,6 +272,11 @@ current emitter, which is unchanged.
 
 ### False-clean risk
 
+#### A clang-built plain-`char` signedness flip reads `NO_CHANGE` at DWARF depth (2026-11-09)
+
+**Status (2026-11-09): OPEN.** The DWARF lane reads `-funsigned-char`/`-fsigned-char` from `DW_AT_producer` (`dwarf_advanced._diff_char_signedness`, extractor generation 50), which gcc records and clang does not unless built with `-grecord-command-line`. A clang rebuild with `-funsigned-char` therefore reports nothing. Closing it means reading the plain `char` base type's `DW_AT_encoding` (`DW_ATE_signed_char`/`DW_ATE_unsigned_char`), a new persisted advanced-DWARF fact. Owner: `dwarf_advanced.py`.
+`false-clean` — a clang-built library's char-signedness flip is invisible without build data.
+<!-- canary: tests/test_dwarf_lane_extractor_parity.py::test_clang_char_signedness_flip_is_still_unread -->
 
 #### A castxml base whose bare leaf two records share is not resolved by the leak walk (2026-11-05)
 

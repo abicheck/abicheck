@@ -945,4 +945,39 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="extraction.dwarf_lane_drops_a_recorded_fact",
+        invariant=(
+            "A DWARF-only snapshot records every fact the binary and its debug "
+            "info carry that the other lanes record: an ABI-relevant export no "
+            "DWARF declaration names still gets an export-table-only record (a "
+            ".symver implementation, an IFUNC), a variadic subprogram's "
+            "DW_TAG_unspecified_parameters sets is_variadic, and a plain-char "
+            "signedness flag in DW_AT_producer is read; and an export-table-only "
+            "record paired with a described declaration compares no signature."
+        ),
+        # Found by the generated edit corpus (#1958) while expanding its operators.
+        fixed_by=(1958,),
+        seed_tests=("tests/test_dwarf_lane_extractor_parity.py",),
+        axes={
+            "producer": ("gcc", "clang"),
+            "fact": (
+                "export without a same-named DIE",
+                "variadic arity",
+                "char signedness",
+            ),
+            "direction": ("added", "removed"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "clang does not record command-line switches in "
+                    "DW_AT_producer by default, so a clang-built char-signedness "
+                    "flip is read only through the plain-char base type's "
+                    "DW_ATE encoding, which is not extracted yet."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
 )

@@ -5,10 +5,10 @@
       "abicheck/ctf_metadata.py": "42d3f588c6c4567c2a9d43a3ef5b886a753c37dd5357a4199d81d7ffc60d2109",
       "abicheck/dumper.py": "b7c21a8d7cdad074634f37ff9d827cb2c0658cc08db5e19bf146e9748f10a566",
       "abicheck/dumper_clang.py": "0ee5831454abd776a07706b7c9a69d6fa3136dad37890f70e4103f4c940f3d05",
-      "abicheck/dwarf_advanced.py": "3b75113e5d03388ed2740a361a0f618bccb323c9d50bffc7bf39981ac7d20dc1",
+      "abicheck/dwarf_advanced.py": "e7dc4a394915381a0c67081f14b8301d63677c5c63d1feb4e95c6c3573c111e8",
       "abicheck/dwarf_metadata.py": "a0621cde6559a0395b00d08aa25cc4cbff74b1121e2083e424e472c44b985512",
       "abicheck/dwarf_presence.py": "7e73580ec7a02fdf24e3815cb89e42aa6fe00e46e8cda6b7fe9d547f06ac3f06",
-      "abicheck/dwarf_snapshot.py": "894c4cdf25aa5874f09a3bfbe35c5d41fa5cff421f3be51befc31273929e8e24",
+      "abicheck/dwarf_snapshot.py": "28affe61aa9e592958b4a6bc7c3f50b98d73779bc97be178e34f789ded9750b4",
       "abicheck/dwarf_snapshot_datasources.py": "e337f8be3a8ae16350c0639d0be10670d4d5d1197108659fa210fcbbf8a5bdde",
       "abicheck/dwarf_unified.py": "9ecb70b59bb26674ac98ba14ad1211b4103e3a78426a91ed7901e59f1a7d9cdf",
       "abicheck/dwarf_utils.py": "804ffe3cfa507b305ca7ff206fee70957e23e20f7eabd7c05eaa1e45a7f3bd8f",
@@ -45,8 +45,9 @@
       "abicheck/extract/dump_manifest_roots.py": "b616e45b7eafdd2dd4c69c1031f9a5c8b54973633aa3e9057edc60525ea0d15a",
       "abicheck/extract/dwarf_abi_fact.py": "3a16135cf85dd7e4f7bf6dc6dfe5d0a9445f8d2c84a19030ed3a3fefe666ecbf",
       "abicheck/extract/dwarf_decl_file.py": "a585b6e38dc879b04db4b3d70a8b7131774a8b735df1068e6baafcaac934af42",
+      "abicheck/extract/dwarf_export_gaps.py": "ed04bbe774a14bc4b1c695f05ceb6a1da8e376cce001d780d63ccb9a9a52b412",
       "abicheck/extract/dwarf_layout_backfill.py": "3dcc9efb8907b6b3419b09b1c262f64403a5162148bc3be0a5d51e112ef69a4d",
-      "abicheck/extract/dwarf_member_functions.py": "7ee2f77769f2fd5c53d92e38e5a8b0b048371f70771335f8254338a4d290b3b5",
+      "abicheck/extract/dwarf_member_functions.py": "e5d142641b3098a7e4181319c7474173028a22c924521ef2e79aa5df233691ff",
       "abicheck/extract/dwarf_producer.py": "4b85d88dd77f7dca39669cceb2f494e58c81063ebd35bf59674bbee8504cac5f",
       "abicheck/extract/dwarf_records.py": "60c9e9aacd78d4ec63a31062a502a7483e64cc106e678aac2bd62048f5e0be55",
       "abicheck/extract/dwarf_scope.py": "1800757661a850338d8cb96d715995ffa8f79354047f68b1ce5e248a72819b20",
@@ -209,9 +210,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "7233c474bbf29616dfc60029544288f0bdccb3e7d9134a82bffdc8e9fce2a205",
-    "generation": 49,
-    "reason": "comment moved from snapshot.py to model/stack_protector.py"
+    "fingerprint": "c5ad38bf9cad7959b0e0161733ba7a33507d4ae2d1afe4cda2f9efc32bd7d927",
+    "generation": 50,
+    "reason": "generation 50: DWARF-only snapshots record an export-table-only record for each ABI-relevant export no DWARF declaration names (extract/dwarf_export_gaps.py), Function.is_variadic from DW_TAG_unspecified_parameters, and -f[no-][un]signed-char in the advanced DWARF toolchain flags"
   },
   "resolver": {
     "files": {

@@ -107,6 +107,7 @@ _ABI_FLAGS_RE = re.compile(
     |(?P<mabi>-mabi=\S+)
     |(?P<fabi>-fabi-version=\d+)
     |(?P<cxx11abi>-D_GLIBCXX_USE_CXX11_ABI=\d)
+    |(?P<char_sign>-f(?:no-)?(?:un)?signed-char)
     """,
     re.VERBOSE,
 )
@@ -1008,103 +1009,6 @@ def _diff_struct_packing(
     return results
 
 
-def _diff_toolchain_flags(
-    old_meta: AdvancedDwarfMetadata,
-    new_meta: AdvancedDwarfMetadata,
-) -> list[tuple[str, str, str, str | None, str | None]]:
-    """Diff ABI-affecting compiler flags. Returns results list."""
-    results: list[tuple[str, str, str, str | None, str | None]] = []
-    old_flags = old_meta.toolchain.abi_flags
-    new_flags = new_meta.toolchain.abi_flags
-    removed_flags = old_flags - new_flags
-    added_flags = new_flags - old_flags
-    if removed_flags or added_flags:
-        parts = []
-        if added_flags:
-            parts.append(f"added: {', '.join(sorted(added_flags))}")
-        if removed_flags:
-            parts.append(f"removed: {', '.join(sorted(removed_flags))}")
-        results.append(
-            (
-                "toolchain_flag_drift",
-                "<toolchain>",
-                f"ABI-affecting compiler flags changed: {'; '.join(parts)}",
-                ",".join(sorted(old_flags)) or None,
-                ",".join(sorted(new_flags)) or None,
-            )
-        )
-    return results
-
-
-def _diff_vector_abi_flags(
-    old_meta: AdvancedDwarfMetadata,
-    new_meta: AdvancedDwarfMetadata,
-) -> list[tuple[str, str, str, str | None, str | None]]:
-    """Diff vector-function (SIMD clone) ABI flags. Returns results list.
-
-    A change in the vector-ABI flag set (-mveclibabi/-fveclib/-vecabi) means
-    the vectorized call variants of functions resolve to a different ABI, which
-    breaks callers that were compiled against the old vector entry points.
-    """
-    results: list[tuple[str, str, str, str | None, str | None]] = []
-    old_flags = old_meta.toolchain.vector_abi_flags
-    new_flags = new_meta.toolchain.vector_abi_flags
-    if old_flags != new_flags:
-        removed_flags = old_flags - new_flags
-        added_flags = new_flags - old_flags
-        parts = []
-        if added_flags:
-            parts.append(f"added: {', '.join(sorted(added_flags))}")
-        if removed_flags:
-            parts.append(f"removed: {', '.join(sorted(removed_flags))}")
-        results.append(
-            (
-                "vector_abi_changed",
-                "<vector-abi>",
-                f"Vector-function (SIMD clone) ABI flags changed: {'; '.join(parts)}",
-                ",".join(sorted(old_flags)) or None,
-                ",".join(sorted(new_flags)) or None,
-            )
-        )
-    return results
-
-
-def _diff_wchar_flags(
-    old_meta: AdvancedDwarfMetadata,
-    new_meta: AdvancedDwarfMetadata,
-) -> list[tuple[str, str, str, str | None, str | None]]:
-    """Diff the -fshort-wchar / default wchar_t data-model flag.
-
-    GCC/Clang document that objects built with and without -fshort-wchar are
-    not binary compatible: the flag switches wchar_t between the platform
-    default (commonly 4-byte signed on Linux/macOS) and a 2-byte unsigned
-    type. Any public function or struct field carrying wchar_t changes size
-    and signedness with no symbol-level signal, so this flags the compiler-
-    flag cause for review.
-    """
-    old_short = "-fshort-wchar" in old_meta.toolchain.wchar_flags
-    new_short = "-fshort-wchar" in new_meta.toolchain.wchar_flags
-    if old_short == new_short:
-        return []
-    old_label = (
-        "short (2-byte unsigned, -fshort-wchar)" if old_short else "default wchar_t"
-    )
-    new_label = (
-        "short (2-byte unsigned, -fshort-wchar)" if new_short else "default wchar_t"
-    )
-    return [
-        (
-            "wchar_model_changed",
-            "<wchar_t>",
-            f"wchar_t model changed: {old_label} → {new_label}. Objects built with "
-            "and without -fshort-wchar are not binary compatible for any public "
-            "wchar_t parameter, field, or return value.",
-            old_label,
-            new_label,
-        )
-    ]
-
-
 def diff_advanced_dwarf(
     old_meta: AdvancedDwarfMetadata,
     new_meta: AdvancedDwarfMetadata,
@@ -1119,18 +1023,8 @@ def diff_advanced_dwarf(
     cc_results, already_reported_cc = _diff_calling_conventions(old_meta, new_meta)
     trait_results = _diff_value_abi_traits(old_meta, new_meta, already_reported_cc)
     pack_results = _diff_struct_packing(old_meta, new_meta)
-    flag_results = _diff_toolchain_flags(old_meta, new_meta)
-    vec_results = _diff_vector_abi_flags(old_meta, new_meta)
-    wchar_results = _diff_wchar_flags(old_meta, new_meta)
-
-    return (
-        cc_results
-        + trait_results
-        + pack_results
-        + flag_results
-        + vec_results
-        + wchar_results
-    )
+    # The DW_AT_producer flag families are diffed by compare/toolchain_flags.py.
+    return cc_results + trait_results + pack_results
 
 
 # ---------------------------------------------------------------------------

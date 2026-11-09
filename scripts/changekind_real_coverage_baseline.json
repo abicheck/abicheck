@@ -76,8 +76,6 @@
     "func_override_specifier_added",
     "func_override_specifier_removed",
     "func_pure_virtual_added",
-    "func_variadic_added",
-    "func_variadic_removed",
     "generated_file_dependency_unstable",
     "generated_header_changed",
     "generated_header_reaches_public_api",

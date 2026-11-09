@@ -543,6 +543,16 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "needed -- an older snapshot reads as no unit recorded (a lost canary "
         "keeps its RISK) and as no declared DWARF alignment"
     ),
+    50: GenerationSpellingChange(
+        "no type or name spelling changes. DWARF-only snapshots record an "
+        "export-table-only record for each ABI-relevant export no DWARF "
+        "declaration names (a .symver alias, an IFUNC, a TU built without -g; "
+        "extract/dwarf_export_gaps.py), set Function.is_variadic from "
+        "DW_TAG_unspecified_parameters (was unset), and the advanced DWARF "
+        "toolchain flags include -f[no-][un]signed-char from DW_AT_producer; "
+        "no rewrite is needed -- an older snapshot reads is_variadic as not "
+        "recorded and simply lacks the added records and flags"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

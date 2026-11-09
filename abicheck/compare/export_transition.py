@@ -46,6 +46,7 @@ from ..model.surface_facts import (
     is_binary_exported,
     is_confirmed_false,
     is_export_confirmed_absent,
+    is_export_table_only_record,
     is_legacy_derived,
     surface_fact_summary,
     visibility_label,
@@ -64,6 +65,29 @@ __all__ = [
     "deleted_declaration_is_public",
     "surface_exit_is_evidence_gap",
 ]
+
+
+#: The return type an export-table stub carries (``itanium_export_function``).
+_STUB_RETURN_TYPE = "?"
+
+
+def carries_no_signature(f_old: Function, f_new: Function) -> bool:
+    """Whether either side of a matched pair is a signatureless export stub.
+
+    Such a record (no header, no DWARF declaration under its name) has no
+    return type, parameters or qualifiers: pairing it with a described
+    declaration proves the symbol still exists and nothing about the
+    signature either way, so no signature comparison runs.
+    """
+    # Content first: a record whose producer parsed a signature (a header-AST
+    # ``ELF_ONLY`` declaration, a legacy record with a real return type) is
+    # not a stub even where the legacy enum alone would call it one.
+    return any(
+        f.return_type == _STUB_RETURN_TYPE
+        and not f.params
+        and is_export_table_only_record(f)
+        for f in (f_old, f_new)
+    )
 
 
 def check_function(mangled: str, f_old: Function, f_new: Function) -> list[Change]:
