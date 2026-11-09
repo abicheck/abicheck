@@ -24,6 +24,7 @@ Oracles, none of which is the diff engine's own helper:
 
 from __future__ import annotations
 
+import copy
 import gzip
 import hashlib
 import json
@@ -38,13 +39,24 @@ import pytest
 
 from abicheck.checker import compare
 from abicheck.checker_policy import API_BREAK_KINDS, BREAKING_KINDS
+from abicheck.project_snapshot_legacy import (
+    read_stored_snapshot_document,
+    write_legacy_snapshot_package,
+)
 from abicheck.serialization import snapshot_from_dict
+from abicheck.storage.extension_fact_catalog import (
+    CXX_CONCEPT_HEADER_SCAN,
+    EXPORT_READ,
+)
+from abicheck.storage.extension_facts import write_extension_fact
 from abicheck.storage.generation_migrations import SPELLING_MIGRATIONS
+from abicheck.storage.snapshot_schema_versions import SCHEMA_VERSION
 from abicheck.storage.versioning import (
     EXTRACTOR_GENERATION,
     GENERATION_DRIFT_NOTICE_MARKER,
     RESOLVER_GENERATION,
 )
+from abicheck.storage.wire_extensions import WIRE_EXTENSIONS_KEY
 from tests._abicheck_subprocess import abicheck_command
 
 CORPUS_ROOT = Path(__file__).parent / "fixtures" / "generations"
@@ -72,8 +84,14 @@ def _frozen_document(generation: int) -> dict[str, Any]:
 
 def _stamped_current(document: dict[str, Any]) -> dict[str, Any]:
     """*document* stamped with this build's generations, so the loader applies
-    no migration and its stored spellings are read back verbatim."""
-    doc = json.loads(json.dumps(document))
+    no migration and its stored spellings are read back verbatim.
+
+    A deep copy, not a JSON round trip: a document read back from a stored
+    package (``read_stored_snapshot_document``) carries its ADR-062 D14/D15
+    carriers as a live ``WireExtensions`` under the private
+    ``WIRE_EXTENSIONS_KEY`` -- the in-memory form ``snapshot_from_dict``
+    consumes -- which JSON can neither encode nor must lose."""
+    doc = copy.deepcopy(document)
     stamp = {
         "extractor": EXTRACTOR_GENERATION,
         "resolver": RESOLVER_GENERATION,
@@ -213,6 +231,55 @@ def test_corpus_exercises_the_spelling_that_drifted() -> None:
     assert any("<" in s for s in old.values() if s)  # template spellings
     assert any(k[0] == "typedef" for k in old)
     assert any(k[0] == "enum" for k in old)
+
+
+_CARRIED_FACTS: list[tuple[str, list[tuple[Any, Any]]]] = [
+    ("none", []),
+    ("export_read complete", [(EXPORT_READ, {})]),
+    ("export_read partial", [(EXPORT_READ, {"elf": "partial"})]),
+    ("concept scan", [(CXX_CONCEPT_HEADER_SCAN, False)]),
+    (
+        "both, as a fresh dump writes them",
+        [(EXPORT_READ, {}), (CXX_CONCEPT_HEADER_SCAN, False)],
+    ),
+]
+
+
+#: The oldest, a middle and the newest frozen generation: the shapes that
+#: predate the carriers, and the ones that already record them.
+_CARRIER_GENERATIONS = sorted({FROZEN[0], FROZEN[len(FROZEN) // 2], FROZEN[-1]})
+
+
+@pytest.mark.parametrize("generation", _CARRIER_GENERATIONS)
+@pytest.mark.parametrize(
+    "facts", [f for _, f in _CARRIED_FACTS], ids=[i for i, _ in _CARRIED_FACTS]
+)
+def test_spellings_read_a_stored_package_document_with_its_carriers(
+    generation: int, facts: list[tuple[Any, Any]], tmp_path: Path
+) -> None:
+    """The respelling oracle reads a document as the stored-package path
+    returns it -- extension facts carried as a live ``WireExtensions`` under
+    ``WIRE_EXTENSIONS_KEY`` -- exactly as it reads the plain frozen document
+    (its oracle here), and leaves the carriers in place. A JSON round trip
+    raised on them, which reddened ``package/1``'s fresh-production test once
+    every dump began recording ``abicheck.export_read`` (#1914)."""
+    frozen = _frozen_document(generation)
+    snap = snapshot_from_dict(_stamped_current(frozen))
+    for fact, value in facts:
+        write_extension_fact(snap, fact, value)
+    root = tmp_path / "pkg"
+    write_legacy_snapshot_package(
+        snap, root, artifact_id="a", max_known_schema_version=SCHEMA_VERSION
+    )
+    stored, _ = read_stored_snapshot_document(root)
+    if facts:
+        assert WIRE_EXTENSIONS_KEY in stored
+    assert _spellings(stored) == _spellings(frozen)
+    stamped = _stamped_current(stored)
+    assert stamped.get(WIRE_EXTENSIONS_KEY) == stored.get(WIRE_EXTENSIONS_KEY)
+    if WIRE_EXTENSIONS_KEY in stored:
+        # A copy: stamping and decoding it never touches the caller's document.
+        assert stamped[WIRE_EXTENSIONS_KEY] is not stored[WIRE_EXTENSIONS_KEY]
 
 
 @pytest.mark.parametrize("generation", FROZEN)
