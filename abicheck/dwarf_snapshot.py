@@ -781,8 +781,8 @@ class _DwarfSnapshotBuilder:
                 **debug_info_surface_facts(exported=var_export),
                 is_const=is_const,
                 type_abi_fact=_type_abi_fact(die, CU),
-                # ADR-063 Phase 2 -- see dwarf_scope.variable_entity_id.
-                entity_id=_dwarf_variable_entity_id(
+                alignment_bits=_attr_int(die, "DW_AT_alignment") * 8 or None,
+                entity_id=_dwarf_variable_entity_id(  # ADR-063 Phase 2: dwarf_scope
                     scope_path, name, mangled, bool(linkage_name)
                 ),
             )

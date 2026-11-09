@@ -226,11 +226,15 @@ KNOWN: tuple[Known, ...] = (
         frozenset({"cxx_stdlib"}),
         "false-positive",
         # ELF: the weak std:: copies and covered imports are demoted (ADR-089
-        # A7, #1960); gcc still drops __stack_chk_fail, which no binary fact
-        # shows was not a hardening drop. clang on ELF reads COMPATIBLE.
-        lambda c: c.objfmt == "elf" and c.producer.family == "gcc",
-        "-O2 leaves no frame that needs a stack canary, so stack_canary_removed (RISK) is "
-        "reported though -fstack-protector is still on; every consumer still runs",
+        # A7, #1960); with DWARF every unit's DW_AT_producer shows
+        # -fstack-protector-strong still on, so the lost canary is demoted too.
+        # Binary only, nothing records the flag. clang on ELF reads COMPATIBLE.
+        lambda c: (
+            c.objfmt == "elf" and c.producer.family == "gcc" and c.evidence == "binary"
+        ),
+        "-O2 leaves no frame that needs a stack canary; without debug info no unit "
+        "records -fstack-protector, so stack_canary_removed keeps its RISK (marked as "
+        "weaker evidence); every consumer still runs",
         GAP_O2_STD,
         issues=frozenset({"stronger-than:COMPATIBLE"}),
         verdicts=frozenset({"COMPATIBLE_WITH_RISK"}),
@@ -240,14 +244,17 @@ KNOWN: tuple[Known, ...] = (
         frozenset({"c_core"}),
         "false-positive",
         # i386 -O0 guards fill_rec's frame and calls __stack_chk_fail; -O2 needs no
-        # canary, and moves g_counter to a less-aligned address in a 4-aligned .bss.
+        # canary. With DWARF the per-unit census shows the protector unchanged; the
+        # g_counter placement drop (0x4010 -> 0x4008) is demoted at every level.
         lambda c: (
-            c.objfmt == "elf" and c.producer.family == "gcc" and c.flags.bits == 32
+            c.objfmt == "elf"
+            and c.producer.family == "gcc"
+            and c.flags.bits == 32
+            and c.evidence == "binary"
         ),
-        "-O2 leaves no frame that needs a stack canary (stack_canary_removed, though "
-        "-fstack-protector-strong is still on) and places g_counter at 0x4008 instead of "
-        "0x4010 (exported_object_alignment_reduced 16 -> 8 from the address alone, binary "
-        "and DWARF); both RISK, while every consumer still runs",
+        "-O2 leaves no frame that needs a stack canary; without debug info no unit "
+        "records -fstack-protector-strong, so stack_canary_removed keeps its RISK "
+        "(marked as weaker evidence) while every consumer still runs",
         GAP_O2_STD,
         issues=frozenset({"stronger-than:COMPATIBLE"}),
         verdicts=frozenset({"COMPATIBLE_WITH_RISK"}),

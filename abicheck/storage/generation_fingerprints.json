@@ -8,7 +8,7 @@
       "abicheck/dwarf_advanced.py": "3b75113e5d03388ed2740a361a0f618bccb323c9d50bffc7bf39981ac7d20dc1",
       "abicheck/dwarf_metadata.py": "a0621cde6559a0395b00d08aa25cc4cbff74b1121e2083e424e472c44b985512",
       "abicheck/dwarf_presence.py": "7e73580ec7a02fdf24e3815cb89e42aa6fe00e46e8cda6b7fe9d547f06ac3f06",
-      "abicheck/dwarf_snapshot.py": "f0e8fce9495c762539ffa051662dc2bd5a375817f8b8c6f648a2135ceebf59eb",
+      "abicheck/dwarf_snapshot.py": "6eff1e84e3f3d5840cecd9aa3210d2d80317a3e78a15fcb9f6ea4316f73f4bc4",
       "abicheck/dwarf_snapshot_datasources.py": "e337f8be3a8ae16350c0639d0be10670d4d5d1197108659fa210fcbbf8a5bdde",
       "abicheck/dwarf_unified.py": "9ecb70b59bb26674ac98ba14ad1211b4103e3a78426a91ed7901e59f1a7d9cdf",
       "abicheck/dwarf_utils.py": "faa6be4a5de6e58b3c6ba139dc6983b0c6404ed69c348f19d724fc56aa70f5d7",
@@ -20,7 +20,7 @@
       "abicheck/extract/binary_dialect.py": "be8a71c557287ee47f63a49ea98306ac2d44877987cbadd9a554bd3f50119bc2",
       "abicheck/extract/binary_format.py": "4b9f591077fa5c90d2e3a767343d92b098061870403d431694470bc05e5468b3",
       "abicheck/extract/binary_identity.py": "4645eaf3dddd0a2230a5c694882548476406c57514275fa4c8c1bc152607ca88",
-      "abicheck/extract/build_mode_capture.py": "7a46c5babcc5bf770a1a38d5a5d3abb49a2b7d9575bda2b210d2e2861ebfb51f",
+      "abicheck/extract/build_mode_capture.py": "c9d4433cf42ffd788eea3317094dcc76cfdc17faefdfc1c247fb96790d66ed29",
       "abicheck/extract/builtin_abi.py": "e3f1d24f44d15016e686849a5481a80c271755ec573705226e65874a16fb4da9",
       "abicheck/extract/cache_dep_manifest.py": "b5eac3407ab1506a05647c8b61c33f60eda3789edfab9549c0b57ec20651e08b",
       "abicheck/extract/cache_digest_store.py": "c333f2bf9170d5c87c011f434d3638c944edf07e9670fd4cb84e2f73ac0775f1",
@@ -46,7 +46,7 @@
       "abicheck/extract/dwarf_abi_fact.py": "3a16135cf85dd7e4f7bf6dc6dfe5d0a9445f8d2c84a19030ed3a3fefe666ecbf",
       "abicheck/extract/dwarf_decl_file.py": "a585b6e38dc879b04db4b3d70a8b7131774a8b735df1068e6baafcaac934af42",
       "abicheck/extract/dwarf_layout_backfill.py": "3dcc9efb8907b6b3419b09b1c262f64403a5162148bc3be0a5d51e112ef69a4d",
-      "abicheck/extract/dwarf_producer.py": "86e449f5776fe7aead410ef979dc636837d28c8caae5599d3c22b8c3f442e1c6",
+      "abicheck/extract/dwarf_producer.py": "7b763a2732eb1ca0d97bca753441f89585c30880b91ff659d7f5bba5721bc131",
       "abicheck/extract/dwarf_records.py": "e77d5320c3a56b7ca6a46b20ab7197ed03817d0f838d0a7c0fe899439a71ec42",
       "abicheck/extract/dwarf_scope.py": "1800757661a850338d8cb96d715995ffa8f79354047f68b1ce5e248a72819b20",
       "abicheck/extract/dwarf_subtree_index.py": "45ffbba03c1eeb9f8a1d9ed54ab3f3e2492363d4b56e16944f326154c7654aa9",
@@ -204,9 +204,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "89974a91014122e63c5fcff1b34909618bf81dcb7d4ac35c51081e55821cc750",
-    "generation": 45,
-    "reason": "bumped to 45 for a semantic change"
+    "fingerprint": "21d9493ea1fe717342ed1b2f0b749d4e9a0ba49e16341ce1f9dee8b7daa92f9b",
+    "generation": 46,
+    "reason": "bumped to 46 for a semantic change"
   },
   "resolver": {
     "files": {

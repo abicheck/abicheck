@@ -483,6 +483,14 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "runtime. No type or name spelling changes, so no rewrite is needed -- "
         "an older snapshot's declaration-only 'trivial' reads as before"
     ),
+    46: GenerationSpellingChange(
+        "an ELF dump records every compilation unit's stack-protector setting "
+        "from its DW_AT_producer (the abicheck.cu_stack_protector extension "
+        "fact), and a DWARF-derived variable records its DW_AT_alignment as "
+        "alignment_bits. No type or name spelling changes, so no rewrite is "
+        "needed -- an older snapshot reads as no unit recorded (a lost canary "
+        "keeps its RISK) and as no declared DWARF alignment"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

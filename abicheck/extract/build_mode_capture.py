@@ -55,7 +55,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..model import AbiSnapshot
-from .dwarf_producer import best_cu_producer, decode_attr
+from ..model.stack_protector import stack_protector_census
+from .dwarf_producer import best_cu_from, cu_producers, decode_attr
 
 log = logging.getLogger(__name__)
 
@@ -74,14 +75,25 @@ class ElfBuildSignals:
     producer: str | None = None
     dwarf_language: int | None = None
     comment: str | None = None
+    #: Every compiled unit's stack-protector setting
+    #: (``model.stack_protector``); ``None`` when no unit was read.
+    stack_protector: dict[str, int] | None = None
 
 
-def _read_producer(elf: object) -> tuple[str | None, int | None]:
+_NO_DWARF: tuple[str | None, int | None, dict[str, int] | None] = (None, None, None)
+
+
+def _read_producer(
+    elf: object,
+) -> tuple[str | None, int | None, dict[str, int] | None]:
+    """The best CU's producer and language, and every unit's protector."""
     from ..dwarf_utils import has_real_dwarf_info
 
     if not has_real_dwarf_info(elf):
-        return None, None
-    return best_cu_producer(elf.get_dwarf_info())  # type: ignore[attr-defined]
+        return _NO_DWARF
+    units = cu_producers(elf.get_dwarf_info())  # type: ignore[attr-defined]
+    producer, lang = best_cu_from(units)
+    return producer, lang, stack_protector_census(units)
 
 
 def _read_comment(elf: object) -> str | None:
@@ -97,9 +109,11 @@ def _read_comment(elf: object) -> str | None:
     return "\n".join(parts) or None
 
 
-def _read_detached_producer(debug_path: Path) -> tuple[str | None, int | None]:
-    """The producer/language of a detached ELF debug file (``None`` pair when
-    it cannot be read or carries no CU attributes)."""
+def _read_detached_producer(
+    debug_path: Path,
+) -> tuple[str | None, int | None, dict[str, int] | None]:
+    """The producer/language/protector census of a detached ELF debug file
+    (all ``None`` when it cannot be read or carries no CU attributes)."""
     from elftools.elf.elffile import ELFFile
 
     try:
@@ -107,7 +121,7 @@ def _read_detached_producer(debug_path: Path) -> tuple[str | None, int | None]:
             return _read_producer(ELFFile(fh))  # type: ignore[no-untyped-call]
     except Exception as exc:  # noqa: BLE001 - detached debug is optional evidence
         log.debug("build_mode_capture: cannot read %s: %s", debug_path, exc)
-        return None, None
+        return _NO_DWARF
 
 
 def read_elf_build_signals(
@@ -131,20 +145,24 @@ def read_elf_build_signals(
         with path.open("rb") as fh:
             elf = ELFFile(fh)  # type: ignore[no-untyped-call]
             comment = _read_comment(elf)
-            producer: str | None = None
-            lang: int | None = None
+            producer, lang, census = _NO_DWARF
             try:
                 if read_dwarf:
-                    producer, lang = _read_producer(elf)
+                    producer, lang, census = _read_producer(elf)
             except Exception as exc:  # noqa: BLE001 - DWARF is optional evidence
                 log.debug("build_mode_capture: DWARF read failed: %s", exc)
-                producer, lang = None, None
+                producer, lang, census = _NO_DWARF
     except Exception as exc:  # noqa: BLE001
         log.debug("build_mode_capture: cannot read %s: %s", path, exc)
         return None
     if read_dwarf and producer is None and lang is None and debug_path is not None:
-        producer, lang = _read_detached_producer(debug_path)
-    return ElfBuildSignals(producer=producer, dwarf_language=lang, comment=comment)
+        producer, lang, census = _read_detached_producer(debug_path)
+    return ElfBuildSignals(
+        producer=producer,
+        dwarf_language=lang,
+        comment=comment,
+        stack_protector=census,
+    )
 
 
 def capture_build_mode(
@@ -175,6 +193,8 @@ def _mangled_names(snapshot: AbiSnapshot) -> list[str]:
 def _record(snapshot: AbiSnapshot, signals: ElfBuildSignals) -> AbiSnapshot:
     from ..build_mode import build_mode_from_signals
 
+    if signals.stack_protector is not None:
+        snapshot.cu_stack_protector = signals.stack_protector
     mangled = _mangled_names(snapshot)
     if (
         signals.producer is None

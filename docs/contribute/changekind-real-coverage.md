@@ -149,7 +149,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `runtime_weak_resolution_changed` | RISK | 0 | 0 | 0 |
 | `soname_changed` | RISK | 1 | 0 | 1 |
 | `soname_missing` | COMPATIBLE | 1 | 0 | 0 |
-| `stack_canary_removed` | RISK | 1 | 0 | 1 |
+| `stack_canary_removed` | RISK | 1 | 0 | 2 |
 | `static_tls_introduced` | RISK | 1 | 0 | 0 |
 | `static_tls_removed` | COMPATIBLE | 0 | 0 | 0 |
 | `support_promise_component_introduced` | COMPATIBLE | 0 | 0 | 0 |

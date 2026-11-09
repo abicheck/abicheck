@@ -154,17 +154,22 @@ def test_detached_debug_consulted_only_when_image_has_no_producer(
     lang = ENUM_DW_LANG["DW_LANG_C_plus_plus_14"]
     seen: list[Path] = []
 
-    def _fake_detached(path: Path) -> tuple[str | None, int | None]:
+    def _fake_detached(
+        path: Path,
+    ) -> tuple[str | None, int | None, dict[str, int] | None]:
         seen.append(path)
-        return "GNU C++17 13.3.0 -g", lang
+        return "GNU C++17 13.3.0 -g", lang, {"unrecorded": 1}
 
     monkeypatch.setattr(build_mode_capture, "_read_detached_producer", _fake_detached)
     debug = Path("/nonexistent/libx.debug")
 
-    monkeypatch.setattr(build_mode_capture, "_read_producer", lambda _e: (None, None))
+    monkeypatch.setattr(
+        build_mode_capture, "_read_producer", lambda _e: (None, None, None)
+    )
     sig = read_elf_build_signals(lib, debug_path=debug)
     assert sig is not None
     assert sig.producer == "GNU C++17 13.3.0 -g" and sig.dwarf_language == lang
+    assert sig.stack_protector == {"unrecorded": 1}
     assert seen == [debug]
 
     # Shallow mode reads neither file's DWARF.
@@ -174,7 +179,9 @@ def test_detached_debug_consulted_only_when_image_has_no_producer(
 
     # The image's own producer wins; the debug file is not opened.
     monkeypatch.setattr(
-        build_mode_capture, "_read_producer", lambda _e: ("clang version 18.1.3", 4)
+        build_mode_capture,
+        "_read_producer",
+        lambda _e: ("clang version 18.1.3", 4, {"unrecorded": 1}),
     )
     sig = read_elf_build_signals(lib, debug_path=debug)
     assert sig is not None and sig.producer == "clang version 18.1.3"
@@ -184,8 +191,9 @@ def test_detached_debug_consulted_only_when_image_has_no_producer(
 def test_unreadable_detached_debug_is_unknown(tmp_path: Path) -> None:
     junk = tmp_path / "x.debug"
     junk.write_bytes(b"not an elf")
-    assert build_mode_capture._read_detached_producer(junk) == (None, None)
+    assert build_mode_capture._read_detached_producer(junk) == (None, None, None)
     assert build_mode_capture._read_detached_producer(tmp_path / "missing") == (
+        None,
         None,
         None,
     )
@@ -562,14 +570,19 @@ def test_best_cu_producer_ranking(
 
 def test_read_producer_needs_real_dwarf(monkeypatch: pytest.MonkeyPatch) -> None:
     from abicheck import dwarf_utils
+    from abicheck.model.stack_protector import level_from_producer
 
     elf = type(
         "_E", (), {"get_dwarf_info": lambda self: _Dwarf({"DW_AT_producer": _GCC})}
     )()
     monkeypatch.setattr(dwarf_utils, "has_real_dwarf_info", lambda _e: False)
-    assert build_mode_capture._read_producer(elf) == (None, None)
+    assert build_mode_capture._read_producer(elf) == (None, None, None)
     monkeypatch.setattr(dwarf_utils, "has_real_dwarf_info", lambda _e: True)
-    assert build_mode_capture._read_producer(elf) == (_GCC, None)
+    assert build_mode_capture._read_producer(elf) == (
+        _GCC,
+        None,
+        {level_from_producer(_GCC).value: 1},
+    )
 
 
 def test_read_detached_producer_reads_the_debug_file(

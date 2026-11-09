@@ -58,6 +58,7 @@ from typing import Any, Generic, TypeVar
 from .dto import SECTION_SCHEMA_VERSIONS
 
 __all__ = [
+    "CU_STACK_PROTECTOR",
     "CXX_CONCEPT_CONSTRAINTS",
     "CXX_CONCEPT_HEADER_SCAN",
     "EXPORT_READ",
@@ -307,8 +308,41 @@ CXX_CONCEPT_CONSTRAINTS: ExtensionFact[dict[str, str]] = ExtensionFact(
     decode=_str_map,
 )
 
+_STACK_PROTECTOR_LEVELS = frozenset(
+    {"none", "explicit", "basic", "strong", "all", "unrecorded"}
+)
+
+
+def _stack_protector_census(value: Any) -> dict[str, int]:
+    if not isinstance(value, dict) or not value:
+        raise TypeError("expected a non-empty {level: units} map")
+    for level, units in value.items():
+        if level not in _STACK_PROTECTOR_LEVELS:
+            raise ValueError(f"unknown stack-protector level {level!r}")
+        if isinstance(units, bool) or not isinstance(units, int) or units < 1:
+            raise ValueError(f"stack-protector level {level!r}: bad count {units!r}")
+    return dict(sorted(value.items()))
+
+
+#: Every compiled unit's stack-protector setting from its ``DW_AT_producer``
+#: (``AbiSnapshot.cu_stack_protector``, ``model/stack_protector.py``,
+#: extractor generation 46). Written on the ``debug`` section whenever DWARF
+#: units were read. Absent, no unit was read: a lost ``__stack_chk_fail``
+#: keeps its RISK with the cause unestablished -- the answer every older
+#: snapshot gives. An older reader that ignores it reports that same RISK,
+#: so it is optional.
+CU_STACK_PROTECTOR: ExtensionFact[dict[str, int]] = ExtensionFact(
+    name="abicheck.cu_stack_protector",
+    section="debug",
+    semantics=ReaderSemantics.OPTIONAL,
+    absent_reads_as="no unit read: a lost stack canary's cause is unknown",
+    owner="ADR-062",
+    encode=_stack_protector_census,
+    decode=_stack_protector_census,
+)
+
 #: This build's optional extension facts (ADR-062 D19). Add a fact by
 #: declaring it as a module constant above and listing it here.
 EXTENSION_FACTS = ExtensionFactRegistry(
-    (CXX_CONCEPT_HEADER_SCAN, CXX_CONCEPT_CONSTRAINTS, EXPORT_READ)
+    (CU_STACK_PROTECTOR, CXX_CONCEPT_HEADER_SCAN, CXX_CONCEPT_CONSTRAINTS, EXPORT_READ)
 )

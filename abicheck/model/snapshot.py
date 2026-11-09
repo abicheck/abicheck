@@ -187,6 +187,13 @@ class AbiSnapshot:
     # a C parse, no declared public set, an older dump). Persisted as the
     # ``abicheck.cxx_concept_constraints`` extension fact of the debug section.
     cxx_concept_constraints: dict[str, str] | None = field(default=None, kw_only=True)
+    # Every compiled unit's stack-protector setting, read from its
+    # DW_AT_producer (``model/stack_protector.py``: ``{level: units}``,
+    # extractor generation 46). None: no DWARF unit was read (a binary-only
+    # dump, a stripped image without detached debug, PE, Mach-O, an older
+    # dump), so a lost canary's cause is unknown. Persisted as the
+    # ``abicheck.cu_stack_protector`` extension fact of the debug section.
+    cu_stack_protector: dict[str, int] | None = field(default=None, kw_only=True)
 
     # CastXML version-gate outcome (schema v13, ``castxml_policy.py``). None on
     # snapshots not produced by a version-gated CastXML L2 scan (older

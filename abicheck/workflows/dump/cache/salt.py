@@ -46,7 +46,11 @@ from __future__ import annotations
 #: ``DW_AT_calling_convention``; ``origin_lib`` attributes a std customization
 #: point specialized over builtins only to the runtime. A warm entry would keep
 #: the old ``trivial``/native readings.
-SNAPSHOT_CACHE_VERSION: str = "39"
+#:
+#: v40: an ELF dump records each compilation unit's stack-protector setting
+#: (``cu_stack_protector``) and a DWARF variable's ``DW_AT_alignment``. A warm
+#: entry would carry neither.
+SNAPSHOT_CACHE_VERSION: str = "40"
 # v35: header-derived snapshots now carry public_header_identifiers (schema
 # v55, extract/public_header_identifiers.py). The key also folds in the
 # snapshot schema version from this version on, so the next schema bump

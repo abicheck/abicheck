@@ -16,6 +16,10 @@ re-verification status line (2026-10-09, `456989f`). Do not re-open an
 entry from here without reproducing it on current `main`; record a new
 gap on the main page instead.
 
+### Header-less runs flagged `exported_object_alignment_reduced` on an unrelated exported static after an additive change (closed 2026-11-09)
+
+**Status (2026-11-09): CLOSED.** An object's alignment taken from its link-time address only bounds its declared alignment from above, so a neighbour's addition that moves it proves nothing. `policy/address_alignment_bound.py` keeps the finding and demotes it to `COMPATIBLE`, with rule `address-alignment-without-declared-requirement`, unless the old side declares an alignment (header `alignas`/`aligned`, DWARF `DW_AT_alignment`, now extracted at generation 46, or a header-declared arithmetic type) that the new placement fails. A dropped `_Alignas(16)` keeps its RISK under DWARF and clang headers. The former canary is the regression test `tests/test_rebuild_toolchain_drift_integration.py::test_headerless_additive_change_keeps_placement_alignment_compatible`.
+
 ### Adding build/source evidence dropped some debug-headers change kinds (closed 2026-11-06)
 
 **Status (2026-11-06): CLOSED.** One product defect, fixed; the other groups were not evidence losses. Previously: the catalog's evidence-monotonicity gate (`tests/catalog_kind_parity.py`) found the build-source lane reporting a strict subset of the debug-headers kinds, declared `UNEXPLAINED:` in `ground_truth.json` `lane_kind_exceptions`.

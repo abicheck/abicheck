@@ -158,27 +158,6 @@ def test_g1_dwarf_return_type_change_reads_complete_no_change(tmp_path: Path) ->
     )
 
 
-# -- "Header-less runs flag exported_object_alignment_reduced on an unrelated
-#    exported static after an additive change"
-
-
-@pytest.mark.integration
-@_LINUX_ONLY
-def test_headerless_additive_change_flags_alignment_on_an_untouched_static(
-    tmp_path: Path,
-) -> None:
-    """The alignment comes from the link-time address, so a neighbour's addition moves it."""
-    _require("gcc")
-    old = "int counter = 1;\nint f(void) { return counter; }\n"
-    new = old + "int g(void) { return 2; }\nchar extra[3] = {1, 2, 3};\n"
-    report = _pair(tmp_path, (old, new), lang="c", flags=["-O2"])
-    flagged = [
-        c for c in report["changes"] if c["kind"] == "exported_object_alignment_reduced"
-    ]
-    assert [c["symbol"] for c in flagged] == ["counter"]
-    assert report["verdict"] == "COMPATIBLE_WITH_RISK"
-
-
 # -- "A typedef retargeted inside a template argument still reads as a
 #    removal plus an addition under headers"
 

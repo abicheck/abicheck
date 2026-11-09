@@ -24,9 +24,12 @@ the old version requirements already covered, and a clang ``std::string``
 DIE that is declaration-only at ``-O0``. Every consumer built against the
 ``-O0`` library runs against the ``-O2`` one (the corpus's execution oracle).
 
-What stays: gcc drops ``__stack_chk_fail`` because ``-O2`` leaves no frame
-that needs a canary; the binary cannot show the protector is still on, so
-``stack_canary_removed`` keeps its RISK (``docs/contribute/known-gaps.md``).
+gcc also drops ``__stack_chk_fail`` because ``-O2`` leaves no frame that
+needs a canary. With DWARF every unit's ``DW_AT_producer`` records the
+protector, which proves it unchanged, and the loss is demoted with its rule;
+binary only, ``stack_canary_removed`` keeps its RISK, marked as weaker
+evidence. An address-derived alignment drop is demoted unless the old side
+declares an alignment the new placement fails.
 
 The ``_GLIBCXX_USE_CXX11_ABI=0`` rebuild under headers is refused as
 ``not_comparable`` (ADR-050, exit 16): the refusal must name the macro.
@@ -140,8 +143,10 @@ def test_optimization_rebuild_reads_compatible(tmp_path, cxx, evidence):
     new = _snap(_build(tmp_path, "new", cxx, ["-O2"], _SOURCE, debug), evidence, [])
     result = compare(old, new)
     residue = _not_compatible(result)
-    # Only the stack-canary observation may remain (see the module docstring).
-    assert [k for k, _ in residue if k != "stack_canary_removed"] == [], residue
+    # Only the stack-canary observation may remain, and only binary only, where
+    # no unit records the protector (see the module docstring).
+    allowed = {"stack_canary_removed"} if evidence == "binary" else set()
+    assert [k for k, _ in residue if k not in allowed] == [], residue
     expected = (
         {Verdict.COMPATIBLE_WITH_RISK}
         if residue
@@ -216,14 +221,16 @@ def _require_m32() -> None:
 
 
 @pytest.mark.parametrize("evidence", _EVIDENCE)
-def test_i386_c_rebuild_leaves_only_the_stack_canary(tmp_path, evidence):
+def test_i386_c_rebuild_reads_compatible_once_debug_info_is_read(tmp_path, evidence):
     """The corpus's minimized cell (rebuild_optimized on c_core, c17 gcc13 -m32).
 
-    Every risk left is one the strict ``tests/_edit_corpus_known.py`` entry
-    records and ``docs/contribute/known-gaps.md`` explains: the stack canary
-    ``-O2`` no longer needs, and the address-placement alignment of
-    ``g_counter`` (binary and DWARF only; headers know the declared one). No
-    break, and no other risk, is reported.
+    ``-O2`` needs no canary for ``fill_rec`` while ``-fstack-protector-strong``
+    stays on in every unit, and places ``g_counter`` at ``0x4008`` instead of
+    ``0x4010``. With DWARF the census proves the protector unchanged and the
+    canary loss is demoted; the address-derived alignment is demoted at every
+    evidence level, since nothing declares an alignment the new placement
+    fails. Binary only, the canary loss keeps its RISK (no unit records its
+    flags) -- the strict ``tests/_edit_corpus_known.py`` entry.
     """
     _driver("gcc")
     _require_m32()
@@ -246,40 +253,227 @@ def test_i386_c_rebuild_leaves_only_the_stack_canary(tmp_path, evidence):
         config,
         CellContext.at(tmp_path),
     )
-    risky = {
-        k
-        for k in cell.kinds
-        if k.lower() in {c.value for c in RISK_KINDS | BREAKING_KINDS}
-    }
-    allowed = {"STACK_CANARY_REMOVED"}
-    if evidence != "headers":
-        allowed.add("EXPORTED_OBJECT_ALIGNMENT_REDUCED")
-    assert risky <= allowed, cell.describe()
     known = known_mismatch("rebuild_optimized", "c_core", config)
-    if risky:
-        assert known is not None and cell.verdict in known.verdicts, cell.describe()
+    if evidence == "binary":
+        assert cell.verdict == "COMPATIBLE_WITH_RISK", cell.describe()
+        assert known is not None and cell.verdict in known.verdicts
     else:
         assert cell.verdict in ("NO_CHANGE", "COMPATIBLE"), cell.describe()
+        assert known is None
 
 
-def test_a_real_alignment_loss_still_reports(tmp_path):
-    """Negative control: ``alignas(16)`` dropped from an exported object is a
-    genuine reduction and is reported from the binary."""
-    cxx = _driver("gcc")
+def _build_c(
+    tmp: Path, name: str, cc: str, source: str, flags: list[str], header: str
+) -> Path:
+    d = tmp / name
+    d.mkdir()
+    (d / "lib.h").write_text(header)
+    (d / "lib.c").write_text(source)
+    so = d / "libal.so"
+    cmd = [cc, *flags, "-shared", "-fPIC", "-o", str(so), str(d / "lib.c")]
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    assert proc.returncode == 0, f"{cmd}\n{proc.stderr}"
+    return so
+
+
+def _dump_c(so: Path, evidence: str, backend: str = "clang"):
+    headers = [so.parent / "lib.h"] if evidence == "headers" else []
+    return dump(so, headers, compiler="cc", lang="c", header_backend=backend)
+
+
+def _alignas_drop(tmp_path: Path, cc: str, bits: int, evidence: str, backend: str):
+    """Dump an exported object that loses ``_Alignas(16)``; the ``g_data``
+    reduction findings, or a skip when the linker kept it 16-aligned."""
+    flags = ["-O0", f"-m{bits}", *(["-g"] if evidence != "binary" else [])]
     snaps = []
-    for name, decl in (
-        ("old", "_Alignas(16) int g_data = 1;"),
-        ("new", "int g_data = 1;"),
-    ):
-        d = tmp_path / name
-        d.mkdir()
-        (d / "lib.c").write_text(
-            f"int pad = 2;\n{decl}\nint get(void) {{ return g_data; }}\n"
+    for name, spec in (("old", "_Alignas(16) "), ("new", "")):
+        header = f"extern {spec}int g_data;\nint get(void);\n"
+        source = (
+            f'#include "lib.h"\nint pad = 2;\n{spec}int g_data = 1;\n'
+            "int get(void) { return g_data; }\n"
         )
-        so = d / "libal.so"
-        cmd = [cxx, "-O0", "-shared", "-fPIC", "-o", str(so), str(d / "lib.c")]
-        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
-        assert proc.returncode == 0, f"{cmd}\n{proc.stderr}"
-        snaps.append(dump(so, [], compiler="cc", lang="c"))
-    kinds = {c.kind.value for c in compare(*snaps).changes}
-    assert "exported_object_alignment_reduced" in kinds, kinds
+        so = _build_c(tmp_path, name, cc, source, flags, header)
+        snaps.append(_dump_c(so, evidence, backend))
+    new_sym = next(s for s in snaps[1].elf.symbols if s.name == "g_data")
+    if new_sym.value_alignment >= 16:
+        pytest.skip("the linker kept g_data 16-aligned; nothing was lost")
+    found = [
+        c
+        for c in compare(*snaps).changes
+        if c.kind.value == "exported_object_alignment_reduced" and c.symbol == "g_data"
+    ]
+    return snaps, found
+
+
+@pytest.mark.parametrize("evidence", _EVIDENCE)
+@pytest.mark.parametrize("bits", [64, 32])
+@pytest.mark.parametrize("cc", ["gcc", "clang"])
+def test_a_real_alignment_loss_still_reports(tmp_path, cc, bits, evidence):
+    """Negative control: ``_Alignas(16)`` dropped from an exported object.
+
+    With a declared old alignment (DWARF ``DW_AT_alignment``, or the clang
+    header backend's ``AlignedAttr``) the reduction keeps its RISK. Binary
+    only, both numbers are placements: the finding is kept and demoted with
+    its rule, never dropped.
+    """
+    _driver(cc)
+    if bits == 32:
+        _require_m32()
+    snaps, found = _alignas_drop(tmp_path, cc, bits, evidence, "clang")
+    if evidence == "dwarf":
+        old_var = snaps[0].var_by_mangled("g_data")
+        assert old_var is not None and old_var.alignment_bits == 128
+    assert [c.kind.value for c in found] == ["exported_object_alignment_reduced"]
+    if evidence == "binary":
+        assert found[0].effective_verdict is Verdict.COMPATIBLE
+        assert found[0].modulation_rule == (
+            "address-alignment-without-declared-requirement"
+        )
+    else:
+        assert found[0].effective_verdict is None, found[0].modulation_rule
+
+
+@pytest.mark.known_gap_canary
+def test_castxml_headers_hide_a_dropped_alignas(tmp_path):
+    """castxml 0.7 emits no ``align`` on a ``Variable``, so the header side
+    records an ``_Alignas(16)`` object at its type's natural alignment on both
+    sides, and the reduction the binary shows is read as placement and not
+    reported (``docs/contribute/known-gaps.md``)."""
+    _driver("gcc")
+    _snaps, found = _alignas_drop(tmp_path, "gcc", 64, "headers", "castxml")
+    assert found == []
+
+
+_CANARY_SOURCE = (
+    "int sum(int n) { char buf[16];\n"
+    "  for (int i = 0; i < 16; i++) buf[i] = (char)(n + i);\n"
+    "  int s = 0; for (int i = 0; i < 16; i++) s += buf[i]; return s; }\n"
+)
+
+
+def _canary_pair(tmp_path, cc, bits, evidence, old_flags, new_flags, record=()):
+    """Dump the same source built with *old_flags* and *new_flags*; the
+    ``stack_canary_removed`` findings and whether the binaries lost
+    ``__stack_chk_fail`` at all."""
+    _driver(cc)
+    if bits == 32:
+        _require_m32()
+    debug = ["-g", *record] if evidence != "binary" else []
+    snaps, canary = [], []
+    header = "int sum(int n);\n"
+    for name, flags in (("old", old_flags), ("new", new_flags)):
+        so = _build_c(
+            tmp_path, name, cc, _CANARY_SOURCE, [f"-m{bits}", *flags, *debug], header
+        )
+        snaps.append(_dump_c(so, evidence))
+        canary.append(snaps[-1].elf.has_stack_canary)
+    found = [
+        c for c in compare(*snaps).changes if c.kind.value == "stack_canary_removed"
+    ]
+    return snaps, found, canary == [True, False]
+
+
+@pytest.mark.parametrize("evidence", _EVIDENCE)
+@pytest.mark.parametrize("bits", [64, 32])
+@pytest.mark.parametrize(
+    ("cc", "record"),
+    [("gcc", ()), ("clang", ()), ("clang", ("-grecord-command-line",))],
+)
+def test_a_canary_no_frame_needs_is_demoted_only_when_every_unit_records_it(
+    tmp_path, cc, record, bits, evidence
+):
+    """``-O0`` -> ``-O2`` under ``-fstack-protector-strong``: ``-O2`` keeps
+    the buffer in registers and needs no canary. The loss is demoted when
+    every unit's ``DW_AT_producer`` records the flag (gcc by default, clang
+    with ``-grecord-command-line``), and keeps its RISK, marked as weaker
+    evidence, when no unit records it (binary only, or clang's default)."""
+    flags = "-fstack-protector-strong"
+    snaps, found, lost = _canary_pair(
+        tmp_path, cc, bits, evidence, ["-O0", flags], ["-O2", flags], record
+    )
+    if not lost:
+        assert found == []
+        pytest.skip(f"{cc} -m{bits} -O2 keeps the canary; nothing was lost")
+    assert [c.kind.value for c in found] == ["stack_canary_removed"]
+    recorded = evidence != "binary" and (cc == "gcc" or record)
+    if recorded:
+        assert snaps[0].cu_stack_protector == {"strong": 1}
+        assert snaps[1].cu_stack_protector == {"strong": 1}
+        assert found[0].effective_verdict is Verdict.COMPATIBLE
+        assert found[0].modulation_rule == "stack-protector-unchanged-in-every-unit"
+    else:
+        assert found[0].effective_verdict is None
+        assert found[0].review_evidence["stack_protector"] == "unknown"
+        assert "weaker evidence" in found[0].review_evidence["note"]
+
+
+@pytest.mark.parametrize("evidence", ["dwarf", "headers"])
+@pytest.mark.parametrize("bits", [64, 32])
+@pytest.mark.parametrize("cc", ["gcc", "clang"])
+def test_a_dropped_protector_flag_keeps_its_risk(tmp_path, cc, bits, evidence):
+    """Negative control (catalog case135's change): ``-fstack-protector-all``
+    -> ``-fno-stack-protector`` with debug info recording both is a real
+    hardening loss, and the census names it."""
+    record = ("-grecord-command-line",) if cc == "clang" else ()
+    snaps, found, lost = _canary_pair(
+        tmp_path,
+        cc,
+        bits,
+        evidence,
+        ["-O0", "-fstack-protector-all"],
+        ["-O0", "-fno-stack-protector"],
+        record,
+    )
+    assert lost
+    assert snaps[0].cu_stack_protector == {"all": 1}
+    assert snaps[1].cu_stack_protector == {"none": 1}
+    assert [c.kind.value for c in found] == ["stack_canary_removed"]
+    assert found[0].effective_verdict is None
+    assert found[0].review_evidence["stack_protector"] == "weakened"
+    assert compare(*snaps).verdict is Verdict.COMPATIBLE_WITH_RISK
+
+
+def test_headerless_additive_change_keeps_placement_alignment_compatible(tmp_path):
+    """Formerly a known-gap canary: adding a neighbour moves ``counter``'s
+    link-time address, and the address-derived alignment drop gated a
+    header-less run at COMPATIBLE_WITH_RISK. Through the CLI the finding is
+    kept, with its rule, and the run reads COMPATIBLE."""
+    from tests._abicheck_subprocess import abicheck_command, abicheck_env
+
+    _driver("gcc")
+    old = "int counter = 1;\nint f(void) { return counter; }\n"
+    sides = {
+        "old": old,
+        "new": old + "int g(void) { return 2; }\nchar extra[3] = {1, 2, 3};\n",
+    }
+    dumps = []
+    for name, source in sides.items():
+        so = _build_c(tmp_path, name, "gcc", source, ["-O2"], "int f(void);\n")
+        out = so.with_suffix(".json")
+        run = subprocess.run(
+            abicheck_command("dump", so, "-o", out),
+            capture_output=True,
+            text=True,
+            env=abicheck_env(),
+            check=False,
+        )
+        assert run.returncode == 0, run.stderr
+        dumps.append(out)
+    report = tmp_path / "report.json"
+    run = subprocess.run(
+        abicheck_command("compare", *dumps, "-o", f"json={report}"),
+        capture_output=True,
+        text=True,
+        env=abicheck_env(),
+        check=False,
+    )
+    doc = json.loads(report.read_text())
+    flagged = [
+        c for c in doc["changes"] if c["kind"] == "exported_object_alignment_reduced"
+    ]
+    assert [c["symbol"] for c in flagged] == ["counter"]
+    assert flagged[0]["modulation_rule"] == (
+        "address-alignment-without-declared-requirement"
+    )
+    assert doc["verdict"] == "COMPATIBLE"
+    assert run.returncode == 0, run.stdout

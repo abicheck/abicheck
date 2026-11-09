@@ -27,7 +27,7 @@ import logging
 
 log = logging.getLogger(__name__)
 
-__all__ = ["best_cu_producer", "decode_attr"]
+__all__ = ["best_cu_producer", "cu_producers", "decode_attr"]
 
 
 def decode_attr(raw: object) -> str | None:
@@ -57,10 +57,11 @@ def _cu_rank(producer: str | None, lang: int | None) -> int:
     return 4 if known else 5
 
 
-def best_cu_producer(dwarf: object) -> tuple[str | None, int | None]:
-    """``(DW_AT_producer, DW_AT_language)`` of the best-ranked CU in *dwarf*
-    (a pyelftools ``DWARFInfo``), reading CU top DIEs only."""
-    best: tuple[int, str | None, int | None] | None = None
+def cu_producers(dwarf: object) -> list[tuple[str | None, int | None]]:
+    """``(DW_AT_producer, DW_AT_language)`` of every CU in *dwarf* (a
+    pyelftools ``DWARFInfo``), in unit order, reading CU top DIEs only. A CU
+    whose top DIE cannot be read is skipped."""
+    units: list[tuple[str | None, int | None]] = []
     for cu in dwarf.iter_CUs():  # type: ignore[attr-defined]
         try:
             top = cu.get_top_DIE()
@@ -71,7 +72,17 @@ def best_cu_producer(dwarf: object) -> tuple[str | None, int | None]:
         lang_attr = top.attributes.get("DW_AT_language")
         producer = decode_attr(prod_attr.value) if prod_attr is not None else None
         lang = lang_attr.value if lang_attr is not None else None
-        lang = lang if isinstance(lang, int) else None
+        units.append((producer, lang if isinstance(lang, int) else None))
+    return units
+
+
+def best_cu_from(
+    units: list[tuple[str | None, int | None]],
+) -> tuple[str | None, int | None]:
+    """The best-ranked ``(producer, language)`` of *units* (see
+    :func:`_cu_rank`); ``(None, None)`` when none carries either."""
+    best: tuple[int, str | None, int | None] | None = None
+    for producer, lang in units:
         if producer is None and lang is None:
             continue
         rank = _cu_rank(producer, lang)
@@ -82,3 +93,9 @@ def best_cu_producer(dwarf: object) -> tuple[str | None, int | None]:
     if best is None:
         return None, None
     return best[1], best[2]
+
+
+def best_cu_producer(dwarf: object) -> tuple[str | None, int | None]:
+    """``(DW_AT_producer, DW_AT_language)`` of the best-ranked CU in *dwarf*
+    (a pyelftools ``DWARFInfo``), reading CU top DIEs only."""
+    return best_cu_from(cu_producers(dwarf))
