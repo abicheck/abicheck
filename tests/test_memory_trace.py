@@ -57,9 +57,47 @@ requires_sysconf = pytest.mark.skipif(
 
 @pytest.fixture(autouse=True)
 def _reset() -> object:
+    import tracemalloc
+
+    was_tracing = tracemalloc.is_tracing()
     memory_trace.reset_for_testing()
     yield
     memory_trace.reset_for_testing()
+    # memory_trace starts tracemalloc lazily and, by design, never stops it
+    # within a run. Left on, every later test in this xdist worker runs
+    # traced, and whatever it keeps alive becomes the next tracemalloc test's
+    # baseline -- which is how a 2.4 MB baseline pushed a 2 MB phase past its
+    # 4 MB bound on one shard's worker and not another's.
+    if not was_tracing and tracemalloc.is_tracing():
+        tracemalloc.stop()
+
+
+#: Traced memory already live before a test body runs: what an earlier test
+#: in the same process leaves behind when tracing outlives it. Larger than any
+#: bound's slack below, so an oracle that reads the peak as absolute (rather
+#: than relative to the live memory a window starts from) fails here.
+_INHERITED_LIVE_BYTES = 3_000_000
+
+
+@pytest.fixture(params=["fresh", "inherited"])
+def traced_baseline(request: pytest.FixtureRequest) -> object:
+    """The tracemalloc state a test starts in: off (``fresh``), or already
+    tracing with :data:`_INHERITED_LIVE_BYTES` live (``inherited``)."""
+    import tracemalloc
+
+    if request.param == "fresh":
+        if tracemalloc.is_tracing():
+            tracemalloc.stop()
+        yield None
+        return
+    started = not tracemalloc.is_tracing()
+    if started:
+        tracemalloc.start()
+    live = bytearray(_INHERITED_LIVE_BYTES)
+    yield live
+    del live
+    if started:
+        tracemalloc.stop()
 
 
 def _enable(monkeypatch: pytest.MonkeyPatch, path: Path, tracemalloc: bool = False):
@@ -490,6 +528,12 @@ class TestAPhasePeakIsThePhasesOwn:
             r for r in memory_trace.read_samples(out) if r["event"].endswith(":exit")
         ]
 
+    @staticmethod
+    def _enters(out: Path) -> list[dict]:
+        return [
+            r for r in memory_trace.read_samples(out) if r["event"].endswith(":enter")
+        ]
+
     @pytest.mark.parametrize(
         "sizes",
         [
@@ -501,21 +545,33 @@ class TestAPhasePeakIsThePhasesOwn:
         ],
     )
     def test_each_phase_peak_tracks_its_own_allocation_not_an_earlier_one(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, sizes: list[int]
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        sizes: list[int],
+        traced_baseline: object,
     ) -> None:
         out = tmp_path / "trace.jsonl"
         _enable(monkeypatch, out, tracemalloc=True)
         exits = self._run(out, sizes)
-        assert len(exits) == len(sizes)
-        for size, record in zip(sizes, exits, strict=True):
+        enters = self._enters(out)
+        assert len(exits) == len(enters) == len(sizes)
+        for size, enter, record in zip(sizes, enters, exits, strict=True):
             phase_peak = record["tracemalloc_phase_peak_bytes"]
+            # tracemalloc's peak is absolute: reset_peak() resets it to the
+            # memory traced *now*, so a window's peak is what was already
+            # live when it opened plus what it allocated. The growth is read
+            # against the live memory the enter sample saw, never against
+            # zero -- the baseline is whatever the process (or an earlier
+            # test in it) still holds.
+            grown = phase_peak - enter["tracemalloc_current_bytes"]
             # The oracle is the allocation this phase actually made, derived
             # from the input rather than from the implementation: the phase
             # must account for its own block, and must not be inflated to a
             # bigger sibling's size. The upper bound carries the real claim
             # -- it is what an omitted reset_peak() fails.
             assert phase_peak >= size
-            assert phase_peak < size + max(sizes)
+            assert grown < size + max(sizes)
 
     def test_the_cumulative_peak_is_the_max_over_phases(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -562,7 +618,10 @@ class TestMarkIsAPhaseBoundary:
         assert record["attrs"] == {"library": "a"}
 
     def test_consecutive_marks_partition_the_peak_between_them(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        traced_baseline: object,
     ) -> None:
         """A mark closes the window the previous mark opened.
 
@@ -572,6 +631,11 @@ class TestMarkIsAPhaseBoundary:
         """
         out = tmp_path / "trace.jsonl"
         _enable(monkeypatch, out, tracemalloc=True)
+        # Tracing starts when the gate is first resolved. Resolve it before
+        # the first stage allocates, as a run does at its first sample;
+        # otherwise the 9 MB block is traced only when an earlier test in
+        # this process happened to leave tracemalloc running.
+        assert memory_trace.memory_trace_enabled()
         # Freed *before* the boundary that closes its window: a peak counts
         # still-live blocks too, so holding the big block across the second
         # mark would make the second window legitimately 9 MB and the test
@@ -584,7 +648,15 @@ class TestMarkIsAPhaseBoundary:
         memory_trace.mark("second:done")
         first, second = memory_trace.read_samples(out)
         assert first["tracemalloc_phase_peak_bytes"] >= 9_000_000
-        assert second["tracemalloc_phase_peak_bytes"] < 9_000_000
+        # Relative to the memory live when the first mark opened the second
+        # window (see the phase test above for why the peak is absolute).
+        # The second stage allocated 1 MB; a window that still held the
+        # first stage's peak would have grown by ~9 MB. The midpoint
+        # separates the two with room for either side's bookkeeping.
+        grown = (
+            second["tracemalloc_phase_peak_bytes"] - first["tracemalloc_current_bytes"]
+        )
+        assert grown < 5_000_000
 
     def test_a_mark_is_a_no_op_when_tracing_is_off(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

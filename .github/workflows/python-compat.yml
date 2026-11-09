@@ -191,12 +191,28 @@ jobs:
       - name: Keep this job's temporary files off the shared /tmp
         run: echo "TMPDIR=$RUNNER_TEMP" >> "$GITHUB_ENV"
       - name: Full fast suite without the GIL (one shard)
+        # Hang diagnostics: see the full-suite job's step of the same shape.
         env:
           PYTHON_GIL: '0'
         run: |
+          set -o pipefail
+          timeout --signal=ABRT --kill-after=60 30m \
           "$PY" -m pytest tests/ -q --tb=short -r fE -n auto --dist worksteal \
             -m "not integration and not libabigail and not abicc and not slow and not repo_scan" \
-            --shard=${{ matrix.shard }}/3
+            --shard=${{ matrix.shard }}/3 \
+            -o timeout_method=thread -o faulthandler_timeout=540 \
+            --junitxml="$RUNNER_TEMP/pytest-junit.xml" \
+            2>&1 | tee "$RUNNER_TEMP/pytest.log"
+      - name: Upload test log and JUnit
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: pytest-py3.15t-shard-${{ matrix.shard }}
+          path: |
+            ${{ runner.temp }}/pytest.log
+            ${{ runner.temp }}/pytest-junit.xml
+          if-no-files-found: warn
+          retention-days: 14
 
   full-suite:
     # The full fast suite (same selection as ci.yml's canonical 3.14
@@ -229,7 +245,37 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
       - name: Full fast suite (one shard)
+        # Hang diagnostics. This lane intermittently hung until the 40-min
+        # job timeout with no log kept (docs/contribute/known-gaps.md), so
+        # every layer here fires before that budget and names the test:
+        #   * faulthandler_timeout (540s, below pytest-timeout's 600s) dumps
+        #     every thread's Python *and* C stack from a C watchdog thread,
+        #     which works even when the main thread is stuck in C code that
+        #     never returns to the eval loop -- the case in which the
+        #     pyproject default `timeout_method` (signal) cannot fire;
+        #   * timeout_method=thread then kills just that xdist worker, and
+        #     xdist reports "worker crashed while running <test id>";
+        #   * the shell `timeout` (30 min, well inside the 40-min job) sends
+        #     SIGABRT to the whole process group if the hang is outside any
+        #     test (xdist controller, session teardown): faulthandler dumps
+        #     every process's stacks, and the step fails with its log kept;
+        #   * the log and JUnit are uploaded on failure and cancellation.
         run: |
+          set -o pipefail
+          timeout --signal=ABRT --kill-after=60 30m \
           pytest tests/ -q --tb=short -r fE -n auto --dist worksteal \
             -m "not integration and not libabigail and not abicc and not slow and not repo_scan" \
-            --shard=${{ matrix.shard }}/3
+            --shard=${{ matrix.shard }}/3 \
+            -o timeout_method=thread -o faulthandler_timeout=540 \
+            --junitxml="$RUNNER_TEMP/pytest-junit.xml" \
+            2>&1 | tee "$RUNNER_TEMP/pytest.log"
+      - name: Upload test log and JUnit
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: pytest-py${{ matrix.python-version }}-shard-${{ matrix.shard }}
+          path: |
+            ${{ runner.temp }}/pytest.log
+            ${{ runner.temp }}/pytest-junit.xml
+          if-no-files-found: warn
+          retention-days: 14
