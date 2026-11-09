@@ -33,7 +33,12 @@ from ....model.template_default_table import (
 )
 from ...declaration_provenance import classify_origin, header_from_location
 from .ast_inner import ast_inner
-from .concept_constraints import _node_file, _node_line, _without_auto_constraints
+from .concept_constraints import (
+    _node_file,
+    _node_line,
+    _type_param_names,
+    _without_auto_constraints,
+)
 from .context import is_builtin_file
 from .template_default_spelling import _template_param_default_spellings
 from .template_param_indexes import _source_span_reader
@@ -123,14 +128,6 @@ def _positional(spelling: str, levels: tuple[tuple[str, ...], ...]) -> str:
     return pattern.sub(lambda m: tokens[m.group(0)], spelling)
 
 
-def _param_names(children: list[Any]) -> tuple[str, ...]:
-    return tuple(
-        str(c.get("name") or "")
-        for c in children
-        if isinstance(c, dict) and c.get("kind") in _TEMPLATE_PARAM_KINDS
-    )
-
-
 class _Collector:
     def __init__(self, root: dict[str, Any]) -> None:
         self._span: Callable[[str, int, int], str | None] = _source_span_reader()
@@ -156,7 +153,9 @@ class _Collector:
             self._template(node, str(kind), children, scope, outer, file, mode)
         child_scope = scope
         child_outer = (
-            (_param_names(children), *outer) if kind == "ClassTemplateDecl" else outer
+            (_type_param_names(children), *outer)
+            if kind == "ClassTemplateDecl"
+            else outer
         )
         if kind in _SCOPE_KINDS:
             name = str(node.get("name") or "")
@@ -230,7 +229,7 @@ class _Collector:
         )
         if not header:
             return
-        levels = (_param_names(children), *outer)
+        levels = (_type_param_names(children), *outer)
         if mode == _SPECIALIZATION:
             if not any(
                 isinstance(c, dict)

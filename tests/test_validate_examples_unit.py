@@ -1169,6 +1169,9 @@ class TestKnownGapFrontendScope:
         assert _gap_applies(entry, True) is applies
 
     def test_catalog_template_default_cases_state_the_contract_verdict(self):
+        """Both header backends read template defaults from the clang AST
+        (castxml through its clang join), so these cases declare no castxml
+        gap: every lane must reach the contract verdict."""
         gt = json.loads(Path("catalog/ground_truth.json").read_text())["verdicts"]
         for name in (
             "case223_header_only_template_default_changed",
@@ -1178,5 +1181,5 @@ class TestKnownGapFrontendScope:
         ):
             e = gt[name]
             assert e["expected"] == "API_BREAK"
-            assert e["known_gap_frontends"] == ["castxml"]
-            assert e["known_gap_observed"] == ["NO_CHANGE"]
+            assert "known_gap_frontends" not in e
+            assert "known_gap" not in e

@@ -143,7 +143,7 @@
       "abicheck/extract/headers/clang/scope.py": "5b7bf471b1e95184c97da44aed88c8f4b29b36f77699a44255c33a889ea3a4b3",
       "abicheck/extract/headers/clang/streaming.py": "21db95a9e99e3dd51bef00492f9b4eb046d0d3e9d32f3b511391dfdf704dbfff",
       "abicheck/extract/headers/clang/template_decl_walk.py": "ea3d022f01c86057a69229a5ecaba9d5a7b8a476445678c438dc6662bedfada0",
-      "abicheck/extract/headers/clang/template_default_entries.py": "1b9d95e72e7bdece2162a060fbaf078a1d23dc4784d03d363912843ee9a9a879",
+      "abicheck/extract/headers/clang/template_default_entries.py": "9743b0c4703c5b805820bbbbdd9333046a5a8f2f886a455491b516e282bcc9e8",
       "abicheck/extract/headers/clang/template_default_spelling.py": "dd2f4d32ff440849edc6547afeacd9945502860e4536d158bde3109306908434",
       "abicheck/extract/headers/clang/template_param_indexes.py": "1d54979cca271e1b112652f45f54ddd1356ca5f32e3367a3723aeaacd4e7c68d",
       "abicheck/extract/headers/clang/templates.py": "ee85de87a4180b5bed93d501237f153d1132fd325504c1fdf52fab87c7c95efe",
@@ -205,7 +205,7 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "ca9575ed0691baa95138cf01f91e47666385bd88953d22a96d5fd0c878446601",
+    "fingerprint": "53ecdcdf09a256f25a02ed4b7d6b2a08df38ffceb48bff23c18b1979f9ea5b8c",
     "generation": 45,
     "reason": "generation 45: castxml and clang record the public headers' template-parameter defaults of every class, function, alias and variable template from the clang AST (extract/headers/clang/template_default_entries.py; castxml through castxml/clang_semantics_join.py) as AbiSnapshot.cxx_template_defaults"
   },
