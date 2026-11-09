@@ -158,3 +158,83 @@ def test_the_reported_std_string_library_has_no_leak() -> None:
     # A real internal export beside them is still reported, and alone.
     real = "_ZN5mylib6detail6expandEv"
     assert _leaks([*exports, real]) == [real]
+
+
+# Public shapes g++ 13 emits for a std-heavy API (``nm -D`` of a real build,
+# checked with ``c++filt``): container and string parameters, the dual-ABI
+# ``[abi:cxx11]`` tag on a name returning ``std::string``, a constructor, a
+# const member, a function template instantiated over ``std::string`` and a
+# ``__gnu_cxx::__normal_iterator`` parameter. None declares an internal name.
+PUBLIC_STD_SHAPES = (
+    "_ZN5mylib3sumERKSt6vectorIiSaIiEE",  # sum(std::vector<int> const&)
+    "_ZN5mylib4keysERKSt3mapINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEiSt4lessIS6_ESaISt4pairIKS6_iEEE",
+    "_ZN5mylib5countERKNSt7__cxx114listINS0_12basic_stringIcSt11char_traitsIcESaIcEEESaIS6_EEE",
+    "_ZN5mylib5firstEN9__gnu_cxx17__normal_iteratorIPiSt6vectorIiSaIiEEEE",
+    "_ZN5mylib6Parser5parseERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE",
+    "_ZN5mylib6Parser7versionB5cxx11Ev",  # static std::string version() [abi:cxx11]
+    "_ZN5mylib6ParserC1ERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE",
+    "_ZN5mylib6ParserC2ERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE",
+    "_ZNK5mylib6Parser4nameB5cxx11Ev",  # std::string name() const [abi:cxx11]
+    "_ZN5mylib7convertINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEEET_PKc",
+    "_ZN5mylib8greetingB5cxx11Ev",
+)
+
+
+@pytest.mark.parametrize("symbol", PUBLIC_STD_SHAPES)
+def test_a_public_std_shape_is_not_a_leak(symbol: str) -> None:
+    assert _leaks([symbol]) == []
+
+
+@pytest.mark.parametrize(
+    "symbol",
+    [
+        # mylib::detail::parse(std::string const&)
+        "_ZN5mylib6detail5parseERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE",
+        # mylib::internal::render[abi:cxx11](int)
+        "_ZN5mylib8internal6renderB5cxx11Ei",
+    ],
+)
+def test_an_internal_scope_is_a_leak_whatever_it_takes_or_returns(symbol: str) -> None:
+    assert _leaks([symbol]) == [symbol]
+
+
+# The whole dynamic export table of that g++ 13 -O0 build: the API above, the
+# libstdc++ weak instantiations it pulls in (``std::``, ``__gnu_cxx::``, and
+# ``_ZZ…_Guard`` local classes) and the two internal-scope functions.
+REAL_EXPORT_TABLE = (
+    "_ZN5mylib3sumERKSt6vectorIiSaIiEE",
+    "_ZN5mylib4keysERKSt3mapINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEiSt4lessIS6_ESaISt4pairIKS6_iEEE",
+    "_ZN5mylib5countERKNSt7__cxx114listINS0_12basic_stringIcSt11char_traitsIcESaIcEEESaIS6_EEE",
+    "_ZN5mylib5firstEN9__gnu_cxx17__normal_iteratorIPiSt6vectorIiSaIiEEEE",
+    "_ZN5mylib6Parser5parseERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE",
+    "_ZN5mylib6Parser7versionB5cxx11Ev",
+    "_ZN5mylib6ParserC1ERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE",
+    "_ZN5mylib6ParserC2ERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE",
+    "_ZN5mylib6detail5parseERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE",
+    "_ZN5mylib7convertINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEEET_PKc",
+    "_ZN5mylib8greetingB5cxx11Ev",
+    "_ZN5mylib8internal6renderB5cxx11Ei",
+    "_ZN9__gnu_cxx11char_traitsIcE2eqERKcS3_",
+    "_ZN9__gnu_cxx11char_traitsIcE6lengthEPKc",
+    "_ZNK5mylib6Parser4nameB5cxx11Ev",
+    "_ZNSt11char_traitsIcE6lengthEPKc",
+    "_ZNSt15__new_allocatorIcED1Ev",
+    "_ZNSt15__new_allocatorIcED2Ev",
+    "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE12_Alloc_hiderD1Ev",
+    "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE12_Alloc_hiderD2Ev",
+    "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE12_M_constructIPKcEEvT_S8_St20forward_iterator_tag",
+    "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEC1IS3_EEPKcRKS3_",
+    "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEC2IS3_EEPKcRKS3_",
+    "_ZSt23__is_constant_evaluatedv",
+    "_ZZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE12_M_constructIPKcEEvT_S8_St20forward_iterator_tagEN6_GuardC1EPS4_",
+    "_ZZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE12_M_constructIPKcEEvT_S8_St20forward_iterator_tagEN6_GuardC2EPS4_",
+    "_ZZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE12_M_constructIPKcEEvT_S8_St20forward_iterator_tagEN6_GuardD1Ev",
+    "_ZZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE12_M_constructIPKcEEvT_S8_St20forward_iterator_tagEN6_GuardD2Ev",
+)
+
+
+def test_the_real_export_table_leaks_exactly_its_internal_scopes() -> None:
+    assert _leaks(list(REAL_EXPORT_TABLE)) == [
+        "_ZN5mylib6detail5parseERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE",
+        "_ZN5mylib8internal6renderB5cxx11Ei",
+    ]
