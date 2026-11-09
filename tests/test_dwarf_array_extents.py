@@ -145,6 +145,19 @@ _UNIT_CASES = [
         "int[]",
         0,
     ),
+    # The zero-length reading needs a constant lower bound too.
+    (
+        "reference_lower_bound_with_all_ones_upper",
+        _array(
+            _sub(
+                lower_bound=(0x2A, "DW_FORM_ref4"),
+                upper_bound=(-1, "DW_FORM_sdata"),
+            )
+        ),
+        ("int", 4),
+        "int[]",
+        0,
+    ),
     (
         "reference_lower_bound",
         _array(_sub(lower_bound=(0x2A, "DW_FORM_ref4"), upper_bound=4)),

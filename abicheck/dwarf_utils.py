@@ -181,15 +181,13 @@ def _subrange_count(subrange: Any) -> int | None:
         count = _constant(subrange, "DW_AT_count")
         return count if count is not None and count >= 0 else None
     upper = _constant(subrange, "DW_AT_upper_bound")
-    if upper is None:
-        return None
-    if upper == -1 or upper == _ALL_ONES_BY_FORM.get(attrs["DW_AT_upper_bound"].form):
-        return 0
     lower: int | None = 0
     if "DW_AT_lower_bound" in attrs:
         lower = _constant(subrange, "DW_AT_lower_bound")
-    if lower is None:
+    if upper is None or lower is None:
         return None
+    if upper == -1 or upper == _ALL_ONES_BY_FORM.get(attrs["DW_AT_upper_bound"].form):
+        return 0
     count = upper - lower + 1
     return count if count >= 0 else None
 
