@@ -163,6 +163,7 @@ from ..policy.severity import (
     missing_contract_exit_code,
     resolve_severity_config,
 )
+from ..policy.unconfirmed_compatibility import report_compatibility
 from ..storage.snapshot_encode import same_persisted_content
 from .analysis_assurance_attach import attach_analysis_assurance
 
@@ -222,6 +223,7 @@ __all__ = [
     "missing_contract_exit_code",
     "no_comparison_completed_exit_contribution",
     "note_if_same_binary_compared",
+    "report_compatibility",
     "EXIT_EVIDENCE_CONTRACT_ERROR",
     "release_evidence_contract_contribution",
     "resolve_compare_exit_decision",

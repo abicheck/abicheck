@@ -116,6 +116,23 @@ def release_additions_review_contribution(
     )
 
 
+def release_unconfirmed_contribution(
+    library_results: list[dict[str, object]],
+) -> int:
+    """ADR-090's ``UNCONFIRMED`` floor across a release's members: ``max()``
+    over each member's ``unconfirmed_exit_contribution`` (the ADR-071 pattern).
+    """
+    return max(
+        (
+            value
+            for entry in library_results
+            if isinstance(entry, dict)
+            and type(value := entry.get("unconfirmed_exit_contribution", 0)) is int
+        ),
+        default=0,
+    )
+
+
 def release_unused_rules_contribution(
     library_results: list[dict[str, object]],
 ) -> int:
@@ -367,6 +384,7 @@ def resolve_release_exit_decision_for_report(
             library_results
         ),
         unused_rules_contribution=release_unused_rules_contribution(library_results),
+        unconfirmed_contribution=release_unconfirmed_contribution(library_results),
     )
 
 

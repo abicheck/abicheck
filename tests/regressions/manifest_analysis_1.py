@@ -641,9 +641,19 @@ ANALYSIS_1_BUG_CLASSES: tuple[BugClass, ...] = (
             "result must agree, checked independently, not all derived "
             "from one production helper."
         ),
-        fixed_by=(834, 838, 860, 883, 932),
+        fixed_by=(834, 838, 860, 883, 932, 1963),
         seed_tests=(
             "tests/test_fact_conservation_properties.py",
+            # ADR-090 (#1963): a NO_CHANGE/COMPATIBLE/COMPATIBLE_WITH_RISK claim
+            # on a side with neither debug info nor a header AST (a stripped
+            # pair without headers) read clean at exit 0; it now reads
+            # UNCONFIRMED on every route and surface. Oracles: the ADR's D1 text
+            # over an exhaustive evidence-shape domain, and gcc-built pairs
+            # judged by build flags and filecmp.
+            "tests/test_unconfirmed_compatibility.py",
+            "tests/test_unconfirmed_compatibility_matrix.py",
+            "tests/test_invariant_oracles_reduced_evidence.py",
+            "tests/test_action_unconfirmed_verdict.py",
             # A changed value on a form the header tier skipped (inline or
             # extern const, variable template) must surface as a finding, not
             # read as a clean compare. Oracle: the compiler's probe.

@@ -366,7 +366,9 @@ def _announce_exit_scheme(
             "Exit-code scheme: legacy verdict (0=compatible, 2=API break, 4=ABI break; "
             "1=the contract domain could not be closed on the evidence; with "
             ".abicheck.yml's assurance.require_complete: true, 1=incomplete analysis "
-            "assurance -- both orthogonal axes that never lower a 2/4). "
+            "assurance; 1=UNCONFIRMED, a compatibility claim with no type-level "
+            "evidence on a side (assurance.unconfirmed: warn accepts it) -- "
+            "orthogonal axes that never lower a 2/4). "
             "Set a severity setting (--severity-preset, a --pack, or "
             ".abicheck.yml's severity: block) for the severity-aware scheme -- "
             "there is no manual scheme selector any more.",

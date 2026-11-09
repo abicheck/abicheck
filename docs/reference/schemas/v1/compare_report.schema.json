@@ -11,7 +11,7 @@
   "additionalProperties": true,
   "allOf": [
     {
-      "description": "A real compatibility comparison (the five Verdict enum values) carries the full compare-report shape.",
+      "description": "A real compatibility comparison (the five Verdict enum values, or ADR-090's UNCONFIRMED over one of them) carries the full compare-report shape.",
       "if": {
         "properties": {
           "verdict": {
@@ -20,7 +20,8 @@
               "COMPATIBLE",
               "COMPATIBLE_WITH_RISK",
               "API_BREAK",
-              "BREAKING"
+              "BREAKING",
+              "UNCONFIRMED"
             ]
           }
         },
@@ -88,18 +89,83 @@
         "string",
         "null"
       ],
-      "description": "The five real Verdict enum values for a computed compatibility comparison, plus three sentinel values for a report that never got that far: \"ERROR\" (an operational/infrastructure failure -- e.g. a library that failed to dump/extract/compare in the per-library release fan-out, or a resolve-baseline failure in actions/check-target; pre-dates check-target, see aggregate.py's _OPERATIONAL_ERROR_VERDICT), \"NO_BASELINE\" (actions/check-target's bootstrap \"no baseline published yet\" advisory pass, ADR-047 \u00a76 -- never a compatibility verdict), and \"NEW_TARGET\" (schema 2.35: actions/check-target's allow-new-target-opted-in advisory pass for a target genuinely absent from an otherwise-resolved baseline-set, e.g. a new library's first release -- also never a compatibility verdict). Only the five real values require the full compare-report shape below (see allOf); ERROR/NO_BASELINE/NEW_TARGET reports carry whatever operational_errors/check_evidence_coverage context is available instead. Schema 2.17 (ADR-050 D2): `null` is a fourth class -- the comparability precondition gate rejected the pair before any diff ran (old/new were not extracted under a comparable contract); see the sibling `reason` property, always present when `verdict` is `null`.",
+      "description": "The five real Verdict enum values for a computed compatibility comparison, plus three sentinel values for a report that never got that far: \"ERROR\" (an operational/infrastructure failure -- e.g. a library that failed to dump/extract/compare in the per-library release fan-out, or a resolve-baseline failure in actions/check-target; pre-dates check-target, see aggregate.py's _OPERATIONAL_ERROR_VERDICT), \"NO_BASELINE\" (actions/check-target's bootstrap \"no baseline published yet\" advisory pass, ADR-047 \u00a76 -- never a compatibility verdict), and \"NEW_TARGET\" (schema 2.35: actions/check-target's allow-new-target-opted-in advisory pass for a target genuinely absent from an otherwise-resolved baseline-set, e.g. a new library's first release -- also never a compatibility verdict). Only the five real values require the full compare-report shape below (see allOf); ERROR/NO_BASELINE/NEW_TARGET reports carry whatever operational_errors/check_evidence_coverage context is available instead. Schema 2.17 (ADR-050 D2): `null` is a fourth class -- the comparability precondition gate rejected the pair before any diff ran (old/new were not extracted under a comparable contract); see the sibling `reason` property, always present when `verdict` is `null`. Schema 7.4 (ADR-090): \"UNCONFIRMED\" -- the change-derived verdict was a compatibility claim (NO_CHANGE/COMPATIBLE/COMPATIBLE_WITH_RISK) but at least one compared side carried no type-level evidence (no debug info, no header AST), so the claim cannot be confirmed; the observed verdict is in the 'unconfirmed' block.",
       "enum": [
         "NO_CHANGE",
         "COMPATIBLE",
         "COMPATIBLE_WITH_RISK",
         "API_BREAK",
         "BREAKING",
+        "UNCONFIRMED",
         "ERROR",
         "NO_BASELINE",
         "NEW_TARGET",
         null
       ]
+    },
+    "unconfirmed": {
+      "type": "object",
+      "description": "Schema 7.4 (ADR-090): present only when 'verdict' is UNCONFIRMED. Records the observed change-derived verdict and which compared sides lacked type-level evidence.",
+      "required": [
+        "observed_verdict",
+        "sides_without_type_evidence",
+        "mode",
+        "exit_contribution",
+        "remedy"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "observed_verdict": {
+          "type": "string",
+          "enum": [
+            "NO_CHANGE",
+            "COMPATIBLE",
+            "COMPATIBLE_WITH_RISK"
+          ]
+        },
+        "sides_without_type_evidence": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "enum": [
+              "old",
+              "new"
+            ]
+          }
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "fail",
+            "warn"
+          ],
+          "description": "The run's assurance.unconfirmed setting."
+        },
+        "exit_contribution": {
+          "type": "integer",
+          "enum": [
+            0,
+            1
+          ]
+        },
+        "remedy": {
+          "type": "string"
+        },
+        "header_scope_fallback": {
+          "type": "object",
+          "description": "Present only when headers were supplied for a lacking side but header scoping fell back to the export table (the snapshot's scope_fallback, e.g. 'mangling-fallback': no header declaration matched an exported symbol), so the header surface was not kept. Maps each such side to its fallback reason; 'remedy' then names the mismatch instead of asking for headers.",
+          "propertyNames": {
+            "enum": [
+              "old",
+              "new"
+            ]
+          },
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
     },
     "reason": {
       "type": "object",
@@ -340,11 +406,19 @@
     "profile_build_system": {
       "type": "object",
       "description": "Schema 5.11 (WS-A). check-target envelope only: the build system (and generator/backend, empty when it has none) that produced the build-output.json profile this check cell ran under, from that document's profile.build_system. Absent when the profile declared none (unrecorded).",
-      "required": ["name", "generator"],
+      "required": [
+        "name",
+        "generator"
+      ],
       "additionalProperties": false,
       "properties": {
-        "name": {"type": "string", "minLength": 1},
-        "generator": {"type": "string"}
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "generator": {
+          "type": "string"
+        }
       }
     },
     "requested_depth": {
@@ -611,35 +685,95 @@
         "within_comparison_counterpart"
       ],
       "properties": {
-        "basis": {"const": "comparison_chain"},
-        "chain_evaluated": {"type": "boolean"},
-        "total": {"type": "integer", "minimum": 0},
-        "within_comparison_counterpart": {"const": "summary.change_inventory"},
+        "basis": {
+          "const": "comparison_chain"
+        },
+        "chain_evaluated": {
+          "type": "boolean"
+        },
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "within_comparison_counterpart": {
+          "const": "summary.change_inventory"
+        },
         "counts": {
           "type": "object",
-          "required": ["introduced", "persistent", "resolved", "not_evaluated"],
+          "required": [
+            "introduced",
+            "persistent",
+            "resolved",
+            "not_evaluated"
+          ],
           "properties": {
-            "introduced": {"type": "integer", "minimum": 0},
-            "persistent": {"type": "integer", "minimum": 0},
-            "resolved": {"type": "integer", "minimum": 0},
-            "not_evaluated": {"type": "integer", "minimum": 0}
+            "introduced": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "persistent": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "resolved": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "not_evaluated": {
+              "type": "integer",
+              "minimum": 0
+            }
           },
-          "additionalProperties": {"type": "integer", "minimum": 0}
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
         },
         "resolved": {
           "type": "array",
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["finding_id", "kind", "symbol", "description", "old_value", "new_value", "source_location"],
+            "required": [
+              "finding_id",
+              "kind",
+              "symbol",
+              "description",
+              "old_value",
+              "new_value",
+              "source_location"
+            ],
             "properties": {
-              "finding_id": {"type": "string"},
-              "kind": {"type": "string"},
-              "symbol": {"type": "string"},
-              "description": {"type": "string"},
-              "old_value": {"type": ["string", "null"]},
-              "new_value": {"type": ["string", "null"]},
-              "source_location": {"type": ["string", "null"]}
+              "finding_id": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string"
+              },
+              "symbol": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "old_value": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "new_value": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "source_location": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
             }
           }
         }
@@ -854,21 +988,80 @@
       "description": "Schema 5.1: presentation-only correlation of retained findings. Group membership never changes finding, disposition, compatibility, or gate counts.",
       "items": {
         "type": "object",
-        "required": ["group_id", "entity", "operation", "display_name", "transition", "member_finding_ids", "member_kinds", "exact_symbols", "evidence", "gating_findings", "consequence", "action"],
+        "required": [
+          "group_id",
+          "entity",
+          "operation",
+          "display_name",
+          "transition",
+          "member_finding_ids",
+          "member_kinds",
+          "exact_symbols",
+          "evidence",
+          "gating_findings",
+          "consequence",
+          "action"
+        ],
         "properties": {
-          "group_id": {"type": "string"},
-          "library": {"type": ["string", "null"]},
-          "entity": {"type": "string"},
-          "operation": {"enum": ["added", "removed", "modified"]},
-          "display_name": {"type": "string"},
-          "transition": {"type": "string"},
-          "member_finding_ids": {"type": "array", "items": {"type": "string"}},
-          "member_kinds": {"type": "array", "items": {"type": "string"}},
-          "exact_symbols": {"type": "array", "items": {"type": "string"}},
-          "evidence": {"type": "array", "items": {"type": "string"}},
-          "gating_findings": {"type": "integer", "minimum": 0},
-          "consequence": {"type": "string"},
-          "action": {"type": "string"}
+          "group_id": {
+            "type": "string"
+          },
+          "library": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "entity": {
+            "type": "string"
+          },
+          "operation": {
+            "enum": [
+              "added",
+              "removed",
+              "modified"
+            ]
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "transition": {
+            "type": "string"
+          },
+          "member_finding_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "member_kinds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "exact_symbols": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "gating_findings": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "consequence": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          }
         },
         "additionalProperties": true
       }
@@ -876,27 +1069,100 @@
     "result_counts": {
       "type": "object",
       "description": "Schema 5.1: explicitly named populations and stages used by concise human projections; group counts are not finding counts.",
-      "required": ["raw_detected", "retained", "gating", "non_gating", "review_groups", "gating_review_groups", "public_additions", "public_removals", "public_modifications", "detected_public_additions", "detected_public_removals", "detected_public_modifications", "runtime_dependency", "hygiene_introduced", "hygiene_resolved", "hygiene_persistent", "hygiene_not_evaluated"],
+      "required": [
+        "raw_detected",
+        "retained",
+        "gating",
+        "non_gating",
+        "review_groups",
+        "gating_review_groups",
+        "public_additions",
+        "public_removals",
+        "public_modifications",
+        "detected_public_additions",
+        "detected_public_removals",
+        "detected_public_modifications",
+        "runtime_dependency",
+        "hygiene_introduced",
+        "hygiene_resolved",
+        "hygiene_persistent",
+        "hygiene_not_evaluated"
+      ],
       "additionalProperties": false,
       "properties": {
-        "raw_detected": {"type": "integer", "minimum": 0},
-        "retained": {"type": "integer", "minimum": 0},
-        "gating": {"type": "integer", "minimum": 0},
-        "non_gating": {"type": "integer", "minimum": 0},
-        "gating_retained": {"type": "integer", "minimum": 0, "description": "Gating findings among the retained ones (the review groups' sum); gating minus this counts redundant findings folded out of the findings but still scored by the legacy verdict."},
-        "review_groups": {"type": "integer", "minimum": 0},
-        "gating_review_groups": {"type": "integer", "minimum": 0},
-        "public_additions": {"type": "integer", "minimum": 0},
-        "public_removals": {"type": "integer", "minimum": 0},
-        "public_modifications": {"type": "integer", "minimum": 0},
-        "detected_public_additions": {"type": "integer", "minimum": 0},
-        "detected_public_removals": {"type": "integer", "minimum": 0},
-        "detected_public_modifications": {"type": "integer", "minimum": 0},
-        "runtime_dependency": {"type": "integer", "minimum": 0},
-        "hygiene_introduced": {"type": "integer", "minimum": 0},
-        "hygiene_resolved": {"type": "integer", "minimum": 0},
-        "hygiene_persistent": {"type": "integer", "minimum": 0},
-        "hygiene_not_evaluated": {"type": "integer", "minimum": 0}
+        "raw_detected": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "retained": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "gating": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "non_gating": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "gating_retained": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Gating findings among the retained ones (the review groups' sum); gating minus this counts redundant findings folded out of the findings but still scored by the legacy verdict."
+        },
+        "review_groups": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "gating_review_groups": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "public_additions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "public_removals": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "public_modifications": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "detected_public_additions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "detected_public_removals": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "detected_public_modifications": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "runtime_dependency": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "hygiene_introduced": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "hygiene_resolved": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "hygiene_persistent": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "hygiene_not_evaluated": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
     "suppression": {
@@ -1205,9 +1471,10 @@
             "minor",
             "patch",
             "none",
+            "undetermined",
             null
           ],
-          "description": "'null' added in schema 2.20: when 'state' is 'unavailable', abicheck cannot confirm any bump with real evidence, so this is null instead of a plausible-looking literal automation could act on blindly \u2014 the still-likely bump, if any, is now readable from 'possible_impact' below (previously only in 'rationale' prose)."
+          "description": "'null' added in schema 2.20: when 'state' is 'unavailable', abicheck cannot confirm any bump with real evidence, so this is null instead of a plausible-looking literal automation could act on blindly \u2014 the still-likely bump, if any, is now readable from 'possible_impact' below (previously only in 'rationale' prose). 'undetermined' added in schema 7.4 (ADR-090): an UNCONFIRMED comparison, where no bump (including 'none') can be stated from a symbol table alone."
         },
         "possible_impact": {
           "type": "string",
@@ -1215,7 +1482,8 @@
             "major",
             "minor",
             "patch",
-            "none"
+            "none",
+            "undetermined"
           ],
           "description": "Added in schema 2.22: the bump abicheck would recommend if its evidence were sufficient to confirm one \u2014 always a non-null string, unlike 'version_bump'. Equals 'version_bump' whenever 'state' is 'actionable'; the two diverge only for 'review'/'unavailable', where 'version_bump' is deliberately withheld. Never gate an automated release action on this field alone \u2014 check 'state' first, the same rule as for 'version_bump'."
         },
@@ -1671,11 +1939,18 @@
             "description": "ADR-063 T9 (schema 5.12): comparisons this detector ran but declined to judge because the evidence it needed was incomplete or unsupported for that entity (e.g. a PDB or partial DWARF vtable). An empty list means nothing was declined; a declined entity is neither a finding nor a clean result.",
             "items": {
               "type": "object",
-              "required": ["entity", "reason"],
+              "required": [
+                "entity",
+                "reason"
+              ],
               "additionalProperties": false,
               "properties": {
-                "entity": {"type": "string"},
-                "reason": {"type": "string"}
+                "entity": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                }
               }
             }
           },
@@ -1684,7 +1959,10 @@
             "description": "ADR-067 D3 (schema 2.51): true when this detector did not run at all -- its requires_support gate refused it -- as opposed to running and producing no findings. `changes_count` is 0 in both cases, which is the ambiguity this flag removes; `coverage_gap` carries the gate's reason."
           },
           "excluded_by_depth": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "description": "Schema 6.6: the explicitly requested --depth whose projection cleared a fact this detector requires, when that is the only reason it did not run; null otherwise. Such detectors are summarized in one coverage_warnings line and are not an evidence gap."
           }
         }
@@ -1731,26 +2009,54 @@
     "dependency_types_read": {
       "type": "object",
       "description": "Per binary-only side (`old`/`new`; a header-derived side is not listed), whether that side's dependency-internal types were classified (`true`) or could not be read (`false`). An unread side excludes nothing, so a `false` means the dependency-internal classification is unknown, never that nothing is internal. The matching coverage note is in `coverage_warnings`. Omitted when no side is binary only. Informational: never affects `verdict`, `severity` or any exit code.",
-      "additionalProperties": {"type": "boolean"}
+      "additionalProperties": {
+        "type": "boolean"
+      }
     },
     "undeclared_export_census": {
       "type": "object",
       "description": "Schema 6.7: per side (`old`/`new`), the census behind the undeclared-export coverage_warnings lines -- exported symbols the parsed headers did not declare, attributed to the guard macro of a preprocessor branch the parse excluded (`by_guard`, decided by the castxml run's own `-E -dD` output; only for a side whose headers were parsed in this run, since the scan is never stored in a snapshot) or else to a named cause (`by_cause`, the `sycl` name rule). A guard macro is one whose definition would enable the branch; an export under `defined(A) && defined(B)` counts for both. Emitted only when at least one export on some side is attributed. Informational: never affects `verdict`, `severity` or any exit code.",
       "additionalProperties": {
         "type": "object",
-        "required": ["undeclared_total", "attributed", "by_guard", "by_cause"],
+        "required": [
+          "undeclared_total",
+          "attributed",
+          "by_guard",
+          "by_cause"
+        ],
         "properties": {
-          "undeclared_total": {"type": "integer", "minimum": 0},
-          "attributed": {"type": "integer", "minimum": 0},
+          "undeclared_total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "attributed": {
+            "type": "integer",
+            "minimum": 0
+          },
           "by_guard": {
             "type": "array",
             "items": {
               "type": "object",
-              "required": ["macro", "count", "examples"],
+              "required": [
+                "macro",
+                "count",
+                "examples"
+              ],
               "properties": {
-                "macro": {"type": "string"},
-                "count": {"type": "integer", "minimum": 1},
-                "examples": {"type": "array", "items": {"type": "string"}, "maxItems": 3}
+                "macro": {
+                  "type": "string"
+                },
+                "count": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "examples": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 3
+                }
               }
             }
           },
@@ -1758,10 +2064,18 @@
             "type": "array",
             "items": {
               "type": "object",
-              "required": ["cause", "count"],
+              "required": [
+                "cause",
+                "count"
+              ],
               "properties": {
-                "cause": {"type": "string"},
-                "count": {"type": "integer", "minimum": 1}
+                "cause": {
+                  "type": "string"
+                },
+                "count": {
+                  "type": "integer",
+                  "minimum": 1
+                }
               }
             }
           }
@@ -2395,7 +2709,8 @@
               "evidence_contract_error",
               "budget_overflow",
               "additions_review",
-              "unused_rules"
+              "unused_rules",
+              "unconfirmed_compatibility"
             ]
           },
           "description": "Every axis whose own contribution equals code -- \"clean\" alone when code is 0. \"incomplete_scope\"/\"no_comparison_completed\" (schema 2.50, ADR-065 S2) only ever appear on a directory/package release report. \"scoped_gate\" (schema < 3.0 only, kept in this enum for historical/persisted documents) used to replace \"compatibility_gate\" whenever --used-by/consumers.required_symbols scoping was in effect; as of schema 3.0 (workstream D-S1) this resolver never produces it -- \"compatibility_contribution\"/\"reasons\" always describe the full-library gate regardless of consumer scoping. \"evidence_contract_error\"/\"budget_overflow\" (schema 3.3, one-comparison-product.md P3) are shared by scan --against and native compare; neither is ever produced by a native compare report today (no CLI-reachable trigger yet), but the resolver's shared precedence rule can now name either when a caller's DiffResult sets evidence_contract_error/budget_overflow."
@@ -2463,13 +2778,27 @@
         },
         "additions_review_contribution": {
           "type": "integer",
-          "enum": [0, 1],
+          "enum": [
+            0,
+            1
+          ],
           "description": "schema 5.13 (ADR-067 D6): the additions-review floor -- 1 when public additions are not covered by the run's acknowledgment records and the resolved acknowledgments.unacknowledged_additions is block, else 0. A 0/1 fold participant like contract_coverage_contribution: it raises a clean exit to 1 and never lowers a 2/4."
         },
         "unused_rules_contribution": {
           "type": "integer",
-          "enum": [0, 1],
+          "enum": [
+            0,
+            1
+          ],
           "description": "schema 6.3 (ADR-067 P1): the unused-rules floor -- 1 when the resolved `unused_rules` policy is `block` and at least one configured suppression, reclassify or acknowledgment rule has status `unused`, else 0. A 0/1 fold participant: it raises a clean exit to 1 and never lowers a 2/4."
+        },
+        "unconfirmed_contribution": {
+          "type": "integer",
+          "enum": [
+            0,
+            1
+          ],
+          "description": "Schema 7.4 (ADR-090 D3): 1 when the run is UNCONFIRMED under the default assurance.unconfirmed: fail; 0 otherwise (including warn). Folded with max, so it never lowers a 2/4. Absent in a pre-7.4 report, read as 0."
         }
       },
       "$comment": "exit_decision.resolve_compare_exit_decision (and, on scan --against's promotion path, exit_decision.resolve_exit_decision) is what builds this object; cli._exit_with_severity_or_verdict resolves the identical ExitDecision for compare's own real process exit, so the two cannot disagree."
@@ -3020,6 +3349,7 @@
             "COMPATIBLE_WITH_RISK",
             "API_BREAK",
             "BREAKING",
+            "UNCONFIRMED",
             null
           ]
         },
@@ -3598,7 +3928,10 @@
           ]
         },
         "review_evidence": {
-          "type": ["object", "null"],
+          "type": [
+            "object",
+            "null"
+          ],
           "description": "Schema 5.1 structured transition evidence for human explanations; it does not affect finding identity, compatibility, or gating.",
           "additionalProperties": true
         },
@@ -3673,7 +4006,9 @@
         },
         "affected_use_cases": {
           "type": "array",
-          "items": {"type": "string"},
+          "items": {
+            "type": "string"
+          },
           "description": "Schema 5.10, present only under `compare --use-cases MANIFEST`: the sorted, duplicate-free names of the manifest's use cases whose declared entrypoints can be shown to reach this finding. The exact inverse of `use_case_impact.by_use_case` (joined on `finding_id`). An empty list means the attribution ran and no declared entrypoint was shown to reach the finding (absence of proof, not proof of absence); the key is absent when no manifest was given."
         },
         "canonical_finding_id": {
@@ -3720,7 +4055,11 @@
           "description": "Schema 6.2: present only on internal_template_leaks_via_public_api findings. The complete, uncapped list of removed template instantiations behind the finding -- one entry per old-side declaration whose instantiation is absent from the new library. `symbol` stays the template stem; this list is where each removed instantiation's mangled name and linkage are read. `binding` is the old-side ELF linkage (null when never captured). An empty array means the comparison ran and removed none.",
           "items": {
             "type": "object",
-            "required": ["mangled", "demangled", "binding"],
+            "required": [
+              "mangled",
+              "demangled",
+              "binding"
+            ],
             "additionalProperties": false,
             "properties": {
               "mangled": {
@@ -3732,9 +4071,19 @@
                 "description": "The identity name the detector matched on: the demangled name when a demangler resolved it, otherwise the declared qualified name."
               },
               "binding": {
-                "type": ["string", "null"],
+                "type": [
+                  "string",
+                  "null"
+                ],
                 "description": "The old-side ELF linkage, or null when it was not captured.",
-                "enum": ["global", "weak", "local", "unique", "other", null]
+                "enum": [
+                  "global",
+                  "weak",
+                  "local",
+                  "unique",
+                  "other",
+                  null
+                ]
               }
             }
           }
@@ -3749,18 +4098,34 @@
           "properties": {
             "declared_in_headers": {
               "type": "string",
-              "enum": ["true", "false", "unknown"]
+              "enum": [
+                "true",
+                "false",
+                "unknown"
+              ]
             },
             "in_public_contract": {
               "type": "string",
-              "enum": ["true", "false", "unknown"]
+              "enum": [
+                "true",
+                "false",
+                "unknown"
+              ]
             },
             "binary_exported": {
               "type": "string",
-              "enum": ["true", "false", "unknown"]
+              "enum": [
+                "true",
+                "false",
+                "unknown"
+              ]
             }
           },
-          "required": ["declared_in_headers", "in_public_contract", "binary_exported"],
+          "required": [
+            "declared_in_headers",
+            "in_public_contract",
+            "binary_exported"
+          ],
           "additionalProperties": false
         },
         "cross_source_evolution": {

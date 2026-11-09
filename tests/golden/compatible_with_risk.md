@@ -14,20 +14,19 @@
 
 | Field | Value |
 |---|---|
-| Confidence | LOW |
-| Evidence tier | `elf_only` |
-| Evidence tiers | `elf` |
+| Confidence | MEDIUM |
+| Evidence tier | `dwarf_aware` |
+| Evidence tiers | `elf`, `dwarf` |
 | Coverage gap | Detector 'fingerprint_renames' disabled: neither side was dumped in elf_only_mode (both carry headers or debug info); fingerprint rename matching runs only on stripped, symbol-only dumps |
 | Coverage gap | Detector 'kabi' disabled: missing Module.symvers (kABI) metadata |
 | Coverage gap | Detector 'pe' disabled: missing PE metadata |
 | Coverage gap | Detector 'macho' disabled: missing Mach-O metadata |
-| Coverage gap | Detector 'dwarf' disabled: no DWARF debug info on either side |
 | Coverage gap | Detector 'python_ext' disabled: missing CPython extension metadata |
 | Coverage gap | Detector 'python_api' disabled: missing Python API surface (no .pyi stub recovered) |
 | Coverage gap | Detector 'sycl' disabled: missing SYCL runtime (PI plugin) metadata; SYCL header APIs are covered by header parsing, not this detector |
 | Coverage gap | Detector 'vtable_layout' disabled: missing DWARF/header type metadata on one side (inheritance) |
 | Coverage gap | Detector 'advanced_dwarf' disabled: missing DWARF advanced metadata |
-| Coverage gap | Binary-only analysis without debug info; many ABI changes cannot be detected (struct layout, enum values, type changes) |
+| Coverage gap | No header/AST data; type-level changes may be missed |
 
 ## Relationship Coverage
 
@@ -35,16 +34,16 @@
 
 | Side | Relationship | Subjects | Present | Proven absent | Unknown | Producers |
 |---|---|---|---|---|---|---|
-| old | `debug_type_of` (resolved_join) | debug_types | 0 | 0 | 0 | debug_section[debug]: not_run (no_debug_info)<br>header_ast[dependency_headers,headers]: not_run (no_header_ast) |
-| old | `debug_type_of` (resolved_join) | header_types | 0 | 0 | 0 | debug_section[debug]: not_run (no_debug_info)<br>header_ast[dependency_headers,headers]: not_run (no_header_ast) |
+| old | `debug_type_of` (resolved_join) | debug_types | 0 | 0 | 0 | debug_section[debug]: ran<br>header_ast[dependency_headers,headers]: not_run (no_header_ast) |
+| old | `debug_type_of` (resolved_join) | header_types | 0 | 0 | 0 | debug_section[debug]: ran<br>header_ast[dependency_headers,headers]: not_run (no_header_ast) |
 | old | `declares` (observed) | — | — | — | — | header_ast[dependency_headers,headers]: not_run (no_header_ast) |
 | old | `exports` (resolved_join) | declarations | 0 | 0 | 0 | export_table[elf]: failed (export_table_not_read)<br>header_ast[dependency_headers,headers]: not_run (no_header_ast) |
 | old | `exports` (resolved_join) | exports | 0 | 0 | 0 | export_table[elf]: failed (export_table_not_read)<br>header_ast[dependency_headers,headers]: not_run (no_header_ast) |
 | old | `in_contract` (derived) | — | — | — | — | ownership_stamp[classified_declarations]: not_run (no_extraction_scope) |
 | old | `owned_by` (derived) | — | — | — | — | ownership_stamp[classified_declarations]: not_run (no_extraction_scope) |
 | old | `references` (resolved_join) | — | — | — | — | header_ast[dependency_headers,headers]: not_run (no_header_ast) |
-| new | `debug_type_of` (resolved_join) | debug_types | 0 | 0 | 0 | debug_section[debug]: not_run (no_debug_info)<br>header_ast[dependency_headers,headers]: not_run (no_header_ast) |
-| new | `debug_type_of` (resolved_join) | header_types | 0 | 0 | 0 | debug_section[debug]: not_run (no_debug_info)<br>header_ast[dependency_headers,headers]: not_run (no_header_ast) |
+| new | `debug_type_of` (resolved_join) | debug_types | 0 | 0 | 0 | debug_section[debug]: ran<br>header_ast[dependency_headers,headers]: not_run (no_header_ast) |
+| new | `debug_type_of` (resolved_join) | header_types | 0 | 0 | 0 | debug_section[debug]: ran<br>header_ast[dependency_headers,headers]: not_run (no_header_ast) |
 | new | `declares` (observed) | — | — | — | — | header_ast[dependency_headers,headers]: not_run (no_header_ast) |
 | new | `exports` (resolved_join) | declarations | 0 | 0 | 0 | export_table[elf]: failed (export_table_not_read)<br>header_ast[dependency_headers,headers]: not_run (no_header_ast) |
 | new | `exports` (resolved_join) | exports | 0 | 0 | 0 | export_table[elf]: failed (export_table_not_read)<br>header_ast[dependency_headers,headers]: not_run (no_header_ast) |
@@ -88,7 +87,7 @@
 | … unresolved relevance | 0 |
 | … deduplicated | 0 |
 
-**Not evaluated:** 10 detector(s) — `fingerprint_renames`, `kabi`, `pe`, `macho`, `dwarf`, `python_ext`, … and 4 more
+**Not evaluated:** 9 detector(s) — `fingerprint_renames`, `kabi`, `pe`, `macho`, `python_ext`, `python_api`, … and 3 more
 
 
 ## Related review groups

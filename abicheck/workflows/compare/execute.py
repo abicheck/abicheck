@@ -34,7 +34,7 @@ from __future__ import annotations
 import dataclasses
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from ...buildsource.build_config_overrides import ConfigOverrideError
 from ...compile_context import CompileContext
@@ -324,6 +324,8 @@ def run_compare(
     follow_deps: bool = _declared_default(CompareRequest, "follow_deps"),
     dependency_search_paths: tuple[Path, ...] = (),
     ld_library_path: str = _declared_default(CompareRequest, "ld_library_path"),
+    # ADR-090 D4 `assurance.unconfirmed`; appended last.
+    unconfirmed: Literal["fail", "warn"] = "fail",
 ) -> CompareResult:
     """Compare two ABI inputs and return the classified diff result.
 
@@ -493,5 +495,6 @@ def run_compare(
         follow_deps=follow_deps,
         dependency_search_paths=tuple(dependency_search_paths),
         ld_library_path=ld_library_path,
+        unconfirmed=unconfirmed,
     )
     return run_compare_request(request)

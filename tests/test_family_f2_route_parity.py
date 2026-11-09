@@ -210,6 +210,10 @@ REQUEST_ROUTING: dict[str, tuple[str, Any]] = {
         _UC,
         "the assurance.require_complete exit needs an incomplete-analysis fixture; gate-level parity is test_compare_exit_gate_unified.py",
     ),
+    "unconfirmed": (
+        _UC,
+        "ADR-090 assurance.unconfirmed; CLI warn/fail is test_unconfirmed_compatibility_matrix.py and test_scenarios.py, the typed field is the same classify stamp",
+    ),
     "diagnostic_comparison": ("covered", ("diagnostic_comparison",)),
     "contract": ("covered", ("contract_exports",)),
     "pattern_verdicts": (

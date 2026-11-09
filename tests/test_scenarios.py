@@ -1065,3 +1065,43 @@ def test_sc_analysis_assurance_gate(tmp_path: Path) -> None:
         str(cfg),
     )
     assert broken.exit_code == 4
+
+
+def test_sc_unconfirmed_compatibility(tmp_path: Path) -> None:
+    # ADR-090: export-table-only snapshots whose tables agree but which are
+    # not one input (different versions). No side has type-level evidence, so
+    # the NO_CHANGE claim is UNCONFIRMED, exit 1; `warn` keeps the label at 0.
+    def _elf_only(version: str, funcs: list[str]) -> AbiSnapshot:
+        return AbiSnapshot(
+            library="libfoo.so.1",
+            version=version,
+            elf_only_mode=True,
+            functions=[_fn(f) for f in funcs],
+        )
+
+    old, new = _elf_only("1", ["pub_a"]), _elf_only("2", ["pub_a"])
+    default_report = tmp_path / "default.json"
+    default = _compare(tmp_path, old, new, "-o", f"json={default_report}")
+    assert default.exit_code == 1
+    doc = json.loads(default_report.read_text(encoding="utf-8"))
+    assert doc["verdict"] == "UNCONFIRMED"
+    assert doc["run_outcome"]["compatibility"] == "UNCONFIRMED"
+    assert doc["unconfirmed"]["observed_verdict"] == "NO_CHANGE"
+    assert doc["unconfirmed"]["sides_without_type_evidence"] == ["old", "new"]
+    assert doc["exit"]["reasons"] == ["unconfirmed_compatibility"]
+
+    cfg = tmp_path / "abicheck.yml"
+    cfg.write_text("assurance:\n  unconfirmed: warn\n", encoding="utf-8")
+    warn_report = tmp_path / "warn.json"
+    warn = _compare(
+        tmp_path, old, new, "--config", str(cfg), "-o", f"json={warn_report}"
+    )
+    assert warn.exit_code == 0
+    assert (
+        json.loads(warn_report.read_text(encoding="utf-8"))["verdict"] == "UNCONFIRMED"
+    )
+
+    broken = _compare(tmp_path, _elf_only("1", ["pub_a", "pub_b"]), new)
+    assert broken.exit_code == 4
+    identical = _compare(tmp_path, old, _elf_only("1", ["pub_a"]))
+    assert identical.exit_code == 0

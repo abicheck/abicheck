@@ -64,6 +64,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -306,13 +307,18 @@ def live_release_dirs(tmp_path: Path) -> tuple[Path, Path]:
     src = tmp_path / "foo.c"
     src.write_text("int foo(void){return 1;}\n", encoding="utf-8")
     old_dir, new_dir = tmp_path / "live-old", tmp_path / "live-new"
-    for side in (old_dir, new_dir):
-        side.mkdir()
-        subprocess.run(
-            ["gcc", "-shared", "-fPIC", "-o", str(side / "libfoo.so"), str(src)],
-            check=True,
-            capture_output=True,
-        )
+    old_dir.mkdir()
+    new_dir.mkdir()
+    subprocess.run(
+        ["gcc", "-shared", "-fPIC", "-o", str(old_dir / "libfoo.so"), str(src)],
+        check=True,
+        capture_output=True,
+    )
+    # One build, copied: the same input on both sides on every platform. Two
+    # builds are byte-identical only on ELF; Mach-O records the output path
+    # (install name) and PE a link timestamp, so a rebuilt pair is two
+    # different header-less inputs, which ADR-090 reads UNCONFIRMED.
+    shutil.copy2(old_dir / "libfoo.so", new_dir / "libfoo.so")
     return old_dir, new_dir
 
 

@@ -45,7 +45,7 @@ from ....report.release_findings import project_release_library_results
 from ....report.release_member_entry import stamp_member_assurance, stamp_member_counts
 from ....report.release_member_summary import add_member_review_summary
 from ....report.release_surface_changes import attach_member_surface_changes
-from ....workflows.gate import resolve_release_assurance_decision
+from ....workflows.gate import report_compatibility, resolve_release_assurance_decision
 from ....workflows.member_compare import stamp_member_exit_contributions
 
 #: Per-member fields a stored comparison cannot compute, each an explicit
@@ -84,7 +84,7 @@ def stored_library_entries(
     for diff in result.per_library:
         entry: dict[str, object] = {
             "library": diff.library,
-            "verdict": diff.verdict.value,
+            "verdict": report_compatibility(diff),  # ADR-090, as a live member
             "_diff_result": diff,
         }
         stamp_member_counts(entry, diff)

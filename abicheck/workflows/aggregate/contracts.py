@@ -178,7 +178,12 @@ from .report_gate import GateInfo as GateInfo
 #: structurally absent. Additive and inert like ``1.10``: adds a predicate
 #: a consumer can check, never changes ``gate.exit_code`` or ``state``
 #: itself.
-AGGREGATE_SCHEMA_VERSION = "1.11"
+#:
+#: ``1.12`` (ADR-090) adds ``unconfirmed_exit`` (``0``/``1``) to every target
+#: entry: the target report's ``exit.unconfirmed_contribution``, folded into
+#: ``gate.exit_code`` with ``max`` so an ``UNCONFIRMED`` target never reads
+#: as a green aggregate.
+AGGREGATE_SCHEMA_VERSION = "1.12"
 
 #: Matches a ``check_id``-shaped ``target_id`` — ADR-047 §7's
 #: ``target@profile#baseline_channel@requested_depth``, built verbatim by
@@ -398,6 +403,8 @@ class _LoadedReport:
     #: report's own ``analysis_assurance_exit_contribution``; ``0`` for a run
     #: without ``--require-complete-analysis``.
     analysis_assurance_exit: int = 0
+    #: ADR-090: the report's own ``exit.unconfirmed_contribution``.
+    unconfirmed_exit: int = 0
     #: Phase 0 item 6: the report's own ``effective_config_digest``, never
     #: recomputed; ``None`` when it carries none (fail-open like the above).
     effective_config_digest: str | None = None
@@ -565,6 +572,10 @@ class TargetReport:
     #: shape, so this widens :attr:`analyzed` only for the one shape that
     #: needs it and changes nothing else.
     completed_without_compatibility_verdict: bool = False
+    #: ADR-090's ``UNCONFIRMED`` contribution (``0``/``1``), aggregate schema
+    #: 1.12; folded into the aggregate gate with ``max``. Declared last for the
+    #: same positional-construction-safety reason as the fields above.
+    unconfirmed_exit: int = 0
 
     @property
     def analyzed(self) -> bool:
@@ -606,6 +617,7 @@ class TargetReport:
             "contract_coverage_exit": self.contract_coverage_exit,
             "analysis_assurance_exit": self.analysis_assurance_exit,
             "scope_completeness_exit": self.scope_completeness_exit,
+            "unconfirmed_exit": self.unconfirmed_exit,
         }
         if self.unexpected:
             d["unexpected"] = True

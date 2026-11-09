@@ -112,6 +112,10 @@ def test_exit_0_compatible_with_risk(tmp_path: Path) -> None:
     old.elf = ElfMetadata(versions_required={"libc.so.6": ["GLIBC_2.5"]})
     new = _snap("2.0")
     new.elf = ElfMetadata(versions_required={"libc.so.6": ["GLIBC_2.5", "GLIBC_2.34"]})
+    # Header-derived on both sides: this pins the verdict -> exit mapping, so
+    # the claim must be one type-level evidence backs (else ADR-090 makes it
+    # UNCONFIRMED, exit 1 -- covered in test_unconfirmed_compatibility.py).
+    old.from_headers = new.from_headers = True
     _write_snap(old_path, old)
     _write_snap(new_path, new)
 

@@ -1,7 +1,7 @@
 # ADR-090: An Unresolved Surface Without Type-Level Evidence Is Not a Clean Verdict
 
 **Date:** 2026-10-28
-**Status:** Proposed — not implemented. This ADR proposes a change to the default verdict label and to the default exit code of a `compare` run with no type-level evidence. No code has changed.
+**Status:** Accepted (2026-11-08) — implemented. A `compare` whose compatibility claim rests on a side with no type-level evidence now reads `UNCONFIRMED` and exits 1 by default; `assurance.unconfirmed: warn` keeps the label at exit 0. The maintainer's answers to the open questions are under "Maintainer decisions"; what shipped is under "Implementation".
 
 Governed by: [ADR-009](009-verdict-system-and-exit-codes.md) (verdict and exit codes), [ADR-042](042-compatibility-and-gate-decision-separation.md) (compatibility decision separated from gate decision), [ADR-049](049-contract-relevance-and-compatibility-configuration.md) (contract domain default), [ADR-064](064-canonical-gate-algorithm-and-exit-decision.md) (exit-decision precedence), [ADR-065](065-comparison-scope-selection-and-completeness.md) (absent is not removed), [ADR-066](066-longitudinal-history-and-versioning-policy.md) (policy decides acceptance, not facts), [ADR-071](071-release-analysis-assurance-fold.md) (`assurance.require_complete` for a release), [ADR-084](084-binary-depth-source-contract-gate.md) (a header-less exit-code change, maintainer-approved precedent), [ADR-088](088-one-compare-exit-gate.md) (one compare exit gate).
 
@@ -109,7 +109,7 @@ The detection gap itself is legitimate. Without DWARF or headers, an enumerator 
 
 ## Decision
 
-Proposed. Nothing below is implemented.
+Accepted 2026-11-08, with the answers recorded under "Maintainer decisions" below, which override this section where the two differ (notably: no separate exit-0 stage).
 
 ### D1. The trigger
 
@@ -267,7 +267,55 @@ Negative controls: rows 1, 2, 5, 6, 16, 18 and 20 must not be `UNCONFIRMED` and 
 
 Per the repository's bug-class rule, the regression test exercises the invariant with more than the reported input: at least the rows above plus a generated set of stripped-versus-unstripped pairs, against the oracle, not against the trigger helper.
 
-## Open questions for maintainers
+## Maintainer decisions (2026-11-08)
+
+Accepted by the maintainer on 2026-11-08, with these answers to the seven open questions below. They override the Decision section where the two differ.
+
+1. **Trigger breadth.** `COMPATIBLE_WITH_RISK` is included, as D1(a) is written.
+2. **Verdict enum versus compatibility field.** `UNCONFIRMED` is part of the *report's* compatibility vocabulary only: the JSON `verdict`, `run_outcome.compatibility`, every headline. It is not a `Verdict` member, so the `*_KINDS` sets and `DiffResult.verdict` (the observed, change-derived verdict) are unchanged. The observed verdict is kept in the report's `unconfirmed.observed_verdict`.
+3. **Stored-snapshot decidability.** D1(b) is decided from the facts snapshots already carry: debug-info evidence (`model/debug_evidence.py`; BTF, CTF and PDB reduce to it) and `from_headers`. A stored snapshot that lacks the fact reads it at its absent default, so it can only read as *no* evidence (`UNCONFIRMED`), never as clean. Per-backend provenance is not recorded; it would only change message wording. The stored route is tested before the live one (`tests/test_unconfirmed_compatibility.py::test_stored_stripped_snapshot_lacks_type_evidence`, then end to end in `tests/test_unconfirmed_compatibility_matrix.py::test_stored_snapshots_read_the_same_as_live`).
+4. **Stage 1 label change.** Label and exit ship together in one release. There is no exit-0 stage. `assurance.unconfirmed: warn` is the opt-out. The changelog fragment marks the behaviour change, and `docs/reference/exit-codes.md` carries the migration note.
+5. **SARIF level.** `warning`. It is emitted as a `toolExecutionNotifications` entry (the channel ADR-049 uses for contract coverage), not as a `results[]` finding.
+6. **Blast radius.** Measured as part of the implementation; recorded under "Measured blast radius" below. Not blocking.
+7. **Vision wording.** Confirmed: "stripped binaries are first-class inputs" is about admission, not about the clean claim.
+
+## Implementation (2026-11-08)
+
+Shipped in one change, label and exit together (answer 4). What each part of the Decision became:
+
+- **The fact (D1(b)).** `abicheck/model/type_evidence.py` records, per side, whether it carried type-level evidence: debug info (`model/debug_evidence.py`, which BTF, CTF and PDB already reduce to) or `from_headers`. A snapshot with no binary metadata at all is a model surface, not a binary operand, and counts as carrying it, the reading `confidence._detect_evidence_tiers` already gives it. `workflows/analysis_assurance_attach.attach_type_evidence` stamps it on `DiffResult.type_evidence` on both pairwise entry points (`checker.compare` and `compare_classify`), so the typed API, the scalar CLI, release members and stored bundle members all carry it.
+- **The exemption (D1(c)).** Decided only when both sides lack the evidence: byte-identical binaries (`LibraryMetadata.sha256`), or, with no binary hashes, identical persisted snapshot content (`storage.snapshot_encode.same_persisted_content`). A one-sided gap is never exempt, whatever the bytes. A type-only C change built without `-g` compiles to byte-identical libraries; such a pair is exempt, correctly, because the artifacts carry no trace of the change.
+- **The trigger and outcome (D1, D2).** `abicheck/policy/unconfirmed_compatibility.py` owns `is_unconfirmed`, the report value (`report_compatibility`), the JSON `unconfirmed` block and the exit contribution. `DiffResult.verdict` and the `Verdict` enum are unchanged (answer 2). A `--no-baseline` audit compares nothing and is never triggered.
+- **The exit (D3).** `ExitDecision.unconfirmed_contribution` and `ExitReason.UNCONFIRMED_COMPATIBILITY` (`"unconfirmed_compatibility"`), folded with `max` in `resolve_compare_exit_decision`, the release resolver (`release_unconfirmed_contribution`, `max` over members, the ADR-071 shape) and `abicheck aggregate` (per-target `unconfirmed_exit`, aggregate schema 1.12).
+- **Opt-out (D4).** `.abicheck.yml` `assurance.unconfirmed: fail | warn`, `--set assurance.unconfirmed=warn`, and the typed `CompareRequest.unconfirmed`. The resolved mode is stored on `DiffResult.unconfirmed_mode` (like `policy`/`policy_file`), so every exit derivation of one result reads the same mode; a release hands it to every member through `ReleaseMemberCompareRequest`.
+- **Surfaces.** Report schema 7.4: `verdict` and `run_outcome.compatibility` gain `UNCONFIRMED`, the top-level `unconfirmed` block, `exit.unconfirmed_contribution`, and `release_recommendation.version_bump: "undetermined"` (state `review`). Terminal, Markdown and HTML headlines say `UNCONFIRMED` (the terminal gate word follows the exit: `REJECTED (exit 1)`). SARIF: `invocations[0].exitCode` folds the axis, `abiVerdict` is `UNCONFIRMED`, and a `warning`-level `toolExecutionNotifications` entry carries the block (answer 5). JUnit: an `abicheck.unconfirmed_compatibility.<library>` suite with one `<failure>` under `fail`. Release members report `UNCONFIRMED` as their `verdict`, ranked above every claim and below every observed break. The GitHub Action publishes `verdict: UNCONFIRMED` (exit 1 under `fail`; still published at exit 0 under `warn`).
+- **Remedy wording (D5).** `UNCONFIRMED_REMEDY`, used by the JSON block, SARIF, JUnit and the release recommendation. When headers were supplied for a lacking side but header scoping fell back to the export table (PE/Mach-O `scope_fallback`, e.g. `mangling-fallback`: no header declaration matched an export, so the parsed surface was not kept), the fact records `header_scope_fallback`, the block carries it, and every surface says the headers were supplied but scoping fell back, with `HEADER_SCOPE_FALLBACK_REMEDY` in place of asking for headers again. Since #1967 a live PE/Mach-O dump keeps the parsed header surface when no declaration binds to an export (`export-binding-unresolved`), so that side has type-level evidence; the wording applies to stored snapshots dumped before that fix (legacy `mangling-fallback`), whose header surface was dropped.
+
+- **An explicit `--depth binary` is not exempt.** The projection to binary depth drops the header evidence by request, so the claim that remains has no type-level evidence behind it and reads `UNCONFIRMED`; `assurance.unconfirmed: warn` accepts it. D1 states no depth carve-out, and a pinned depth that discards evidence is exactly the case D1 exists for.
+- **Stored `BundleFacts` route.** Its exit was resolved without the member entries, so every member axis was dropped there; it now folds them like the live fan-out, and its reported verdict folds each member's report value. `assurance.unconfirmed` reaches its member diffs from `.abicheck.yml`.
+- **Repeated-call budget.** Reading each side's evidence once per comparison adds two `debug_info_evidence` calls per compare beyond the confidence pass's own; the repeat baseline (`tests/perf_repeat_baseline.json`) was re-recorded for that, and the second attach of one comparison reuses the first's per-side answers.
+
+Not done here, recorded rather than claimed:
+
+- `compare --no-baseline` (audit mode) is out of scope: it states no compatibility claim to narrow.
+- Per-backend provenance (DWARF vs BTF vs CTF vs PDB) is not recorded; only message wording would use it (answer 3).
+- Matrix rows 13 (clang), 15 (Rust cdylib), 18-21 (PE/PDB, BTF, CTF) were not run here: no clang-built pair, cargo, MSVC or BTF/CTF toolchain was exercised. Their trigger reduces to the same `debug_info_evidence` fact the DWARF rows test.
+
+### Measured blast radius (answer 6)
+
+Measured on this implementation over `catalog/cases/` (232 cases). 149 cases build as a plain `v1`/`v2` single-source pair with `gcc`/`g++ -shared -fPIC -g -O0`. The other 83 need their own CMake setup or a multi-file build and were skipped. Each built case was compared through the CLI under four configurations: `-g` without headers, `-g` then `strip` without headers, stripped with per-side headers, and `-g` with per-side headers. That is 568 runs in total; the header configurations need both `v1.h` and `v2.h`, which 135 cases have. A run "newly exits 1" when every other exit contribution is `0`, so it exited `0` before.
+
+| Configuration | Runs | Newly exit 1 under D1 | Newly exit 1 under `require_complete: true` |
+|---|---:|---:|---:|
+| `-g`, no headers | 149 | 2 | 20 |
+| stripped, no headers | 149 | 107 | 107 |
+| stripped, per-side headers | 135 | 0 | 6 |
+| `-g`, per-side headers | 135 | 0 | 6 |
+| **Total** | **568** | **109** | **139** |
+
+Every one of the 109 D1 runs is also a `require_complete` run, so D1 is a strict subset: it newly fails 30 fewer runs, all of them partial for reasons unrelated to type-level evidence. The 107 stripped runs had observed verdicts `NO_CHANGE` (82), `COMPATIBLE` (18) and `COMPATIBLE_WITH_RISK` (7). The two `-g` runs are `case224`/`case226` (header-only templates): the `.so` carries debug sections, but debug-info collection records none, and the API lives entirely in the header that was not passed, so `UNCONFIRMED` is the correct reading there. No run with headers on both sides was triggered. The measuring script is not committed; the per-row numbers came from the report's own `exit` block and `analysis_assurance.status`.
+
+## Open questions for maintainers (answered above)
 
 1. **Trigger breadth.** D1 includes `COMPATIBLE_WITH_RISK`. Should risk-only results on a debug-less side be `UNCONFIRMED`, or should only `NO_CHANGE` and `COMPATIBLE` be triggered? Including it is the rule as written; excluding it is narrower and would still leave the case-19 defect fixed.
 2. **Verdict enum versus compatibility field.** D2 adds `UNCONFIRMED` to the report's verdict vocabulary. The change-kind `Verdict` enum stays unchanged. Confirm this split is acceptable to the `*_KINDS` derivation and to ADR-042.

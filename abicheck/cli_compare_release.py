@@ -418,6 +418,8 @@ def compare_release_cmd(
     acknowledgments_path: Path | None = None,
     acknowledgment_unacknowledged_additions: str | None = None,
     acknowledgment_breaks: str | None = None,
+    # ADR-090 D4: `.abicheck.yml`'s `assurance.unconfirmed`, config-only.
+    unconfirmed_mode: str = "fail",
     # The dependency walk and debug roots, resolved by `compare` exactly as for
     # one pair and applied to every member. `None` is the scalar default.
     run_inputs: ReleaseMemberRunInputs | None = None,
@@ -617,6 +619,7 @@ def compare_release_cmd(
                     acknowledgments_path=acknowledgments_path,
                     acknowledgment_unacknowledged_additions=acknowledgment_unacknowledged_additions,
                     acknowledgment_breaks=acknowledgment_breaks,
+                    unconfirmed_mode=unconfirmed_mode,
                     run_inputs=run_inputs or ReleaseMemberRunInputs(),
                     support_promise=support_promise,
                     manifest_path=manifest_path,

@@ -64,6 +64,7 @@ from .report_gate import (
     analysis_assurance_exit,
     contract_coverage_blocks,
     contract_coverage_declared,
+    unconfirmed_exit,
 )
 from .scope_axis import (
     declares_null_compatibility,
@@ -389,6 +390,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             contract_coverage_incomplete=_contract_coverage_incomplete(data),
             contract_coverage_declared=contract_coverage_declared(data),
             analysis_assurance_exit=analysis_assurance_exit(data),
+            unconfirmed_exit=unconfirmed_exit(data),
             scope_completeness_exit=scope_completeness_exit(data),
             scope_completeness_incomplete=scope_completeness_incomplete(data),
             disposition_audit=disposition_audit_block(data),
@@ -485,6 +487,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
                 contract_coverage_declared(data) or contract_declared
             ),
             analysis_assurance_exit=max(analysis_assurance_exit(data), assurance_axis),
+            unconfirmed_exit=unconfirmed_exit(data),
             scope_completeness_exit=scope_completeness_exit(data),
             scope_completeness_incomplete=scope_completeness_incomplete(data),
             disposition_audit=disposition_audit_block(data),
@@ -551,6 +554,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
             contract_coverage_incomplete=_contract_coverage_incomplete(data),
             contract_coverage_declared=contract_coverage_declared(data),
             analysis_assurance_exit=analysis_assurance_exit(data),
+            unconfirmed_exit=unconfirmed_exit(data),
             scope_completeness_exit=scope_completeness_exit(data),
             scope_completeness_incomplete=scope_completeness_incomplete(data),
             disposition_audit=disposition_audit_block(data),
@@ -677,6 +681,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
                 contract_coverage_incomplete=_contract_coverage_incomplete(data),
                 contract_coverage_declared=contract_coverage_declared(data),
                 analysis_assurance_exit=analysis_assurance_exit(data),
+                unconfirmed_exit=unconfirmed_exit(data),
                 scope_completeness_exit=scope_completeness_exit(data),
                 scope_completeness_incomplete=scope_completeness_incomplete(data),
                 disposition_audit=disposition_audit_block(data),
@@ -755,6 +760,7 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
         contract_coverage_incomplete=_contract_coverage_incomplete(data),
         contract_coverage_declared=contract_coverage_declared(data),
         analysis_assurance_exit=analysis_assurance_exit(data),
+        unconfirmed_exit=unconfirmed_exit(data),
         scope_completeness_exit=scope_completeness_exit(data),
         scope_completeness_incomplete=scope_completeness_incomplete(data),
         disposition_audit=disposition_audit_block(data),

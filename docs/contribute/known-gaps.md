@@ -272,19 +272,6 @@ current emitter, which is unchanged.
 
 ### False-clean risk
 
-#### A stripped library compared without headers reads `NO_CHANGE` with `partial` assurance and exit 0 (2026-11-08)
-
-**Status (2026-11-08): OPEN.** Found while building the invariant oracles (`tests/test_invariant_oracles_reduced_evidence.py`).
-[Full write-up](known-gaps/a-stripped-library-compared-without-headers-reads-no-change-with-partial-assurance-and-exit-0.md)
-`false-clean` — a symbols-only compare of a stripped library reads `NO_CHANGE` with exit 0 and an accepted headline.
-<!-- canary: tests/test_invariant_oracles_reduced_evidence.py::test_stripped_pair_gap_is_still_the_current_answer -->
-
-#### One-sided DWARF or an unmet `--depth headers` request reads a clean verdict with exit 0 (2026-11-08)
-
-**Status (2026-11-08): OPEN.** Found by the evidence-shape oracles (`tests/test_invariant_oracles_evidence_shapes.py`). Sibling shapes of the stripped-pair entry above: an old library with DWARF against a stripped new one reads `COMPATIBLE` (`partial`, `version_bump: patch`), and a stripped pair compared with `--depth headers` and no headers reads `NO_CHANGE` (`failed`). Both exit 0, and every renderer states the clean result. [ADR-090](adr/090-unresolved-surface-is-not-a-clean-verdict.md) (proposed) covers both.
-[Full write-up](known-gaps/one-sided-dwarf-or-an-unmet-depth-headers-request-reads-a-clean-verdict-with-exit-0.md)
-`false-clean` — a compare with type-level evidence on one side only, or with its requested depth unmet, reads clean with exit 0.
-<!-- canary: tests/test_invariant_oracles_evidence_shapes.py::test_one_sided_and_unmet_depth_gap_is_still_the_current_answer -->
 
 #### A castxml base whose bare leaf two records share is not resolved by the leak walk (2026-11-05)
 
@@ -445,12 +432,6 @@ current emitter, which is unchanged.
 **Status (2026-10-24): PARTIAL — fixed for the header (castxml) path; the DWARF residual below remains.** `extract/headers/castxml/type_resolution.py` spells a castxml `FunctionType` as its full declarator (`int (*)(int, int)`, with `...`, calling-convention attributes and the pointer/reference/cv/array declarator) instead of the opaque `FunctionType` tag, so an inline callback parameter, a pointer to one, a callback typedef, a struct field and a returned callback report `func_params_changed`/`typedef_base_changed`/`type_field_type_changed`. `EXTRACTOR_GENERATION` advanced to 16 for this fix; a pre-16 baseline's `FunctionType*` against a fresh declarator is demoted as generation drift (`policy/generation_drift_demotion.py`), and a callback typedef is no longer read as an opaque handle (`idioms.py`). Tests: `tests/test_castxml_function_pointer_spelling.py`, `tests/test_castxml_function_pointer_integration.py`. **Status (generation 29): the DWARF subroutine part is FIXED.** `DW_TAG_subroutine_type` spells its return, parameters and convention (`void (*)(int) __attribute__((ms_abi))`) in both DWARF readers (`dwarf_utils.subroutine_type_spelling`), so a DWARF-only callback signature change is reported. castxml drops `ms_abi`/`sysv_abi` from its XML; the clang AST join (`extract/headers/castxml/function_type_cc.py`) restores the convention on fields, typedefs and parameters, and the clang frontend already carried it. Still open: (1) a GCC `-g` build writes no `DW_AT_calling_convention` for `ms_abi` on a subroutine type, so the DWARF lane cannot see that convention in a GCC binary (header lanes only; `tests/test_dwarf_subroutine_calling_convention.py` pins it as an xfail); (2) a function-pointer **return** of a non-default convention is not joined from clang (DWARF covers it); (3) C++ `noexcept` on a function *type* (a `void (*)() noexcept` parameter) is not in castxml's output -- a function's own specification is read from the clang join since generation 46, a function-pointer type's is not; (4) the PDB reader still spells a subroutine type `fn(...)` (`pdb_parser.py`). Matrix: `tests/test_type_spelling_differential_matrix.py`.
 `false-clean` — (DWARF residual) A callback that gains a parameter is reported as no change on DWARF unless the type name happens to carry the signature. [Full write-up](known-gaps/function-pointer-signatures-are-not-compared-in-header-mode.md)
 <!-- no-canary: DWARF residual not reproduced on 2026-11-05: gcc -g on a C int(*)(int) -> int(*)(int,int) parameter reports func_params_changed; re-verify the residual's shape before writing a canary -->
-
-#### A default release-profile Rust run without headers reports `NO_CHANGE ... ACCEPTED` while its own warnings say the result is unconfirmed (2026-10-15)
-
-**Status (2026-10-15): OPEN.** The headline label, the gate and the `analysis_assurance: partial` field disagree with each other, and the label is the clean one.
-`false-clean` — A real return-type change in a header-less, no-debug run is labelled `NO_CHANGE` and accepted at exit 0. [Full write-up](known-gaps/header-less-rust-runs-report-no-change-and-alignment-noise.md)
-<!-- no-canary: needs a Rust toolchain (cargo) to build the cdylib pair -->
 
 #### ADR-062 D14-D18 data-evolution rules are partly implemented (2026-10-30)
 
