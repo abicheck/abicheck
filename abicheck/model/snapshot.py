@@ -331,9 +331,15 @@ class AbiSnapshot:
     # never requested. Recognised values:
     #   "header-backend-unavailable" — selected header backend missing / header
     #                                  parse failed
-    #   "mangling-fallback"          — headers parsed but no declared symbol
-    #                                  matched the export table (typically MSVC
-    #                                  C++ name mangling)
+    #   "export-binding-unresolved"  — headers parsed and KEPT (from_headers
+    #                                  stays True), but no declaration could be
+    #                                  bound to any export, exactly or across
+    #                                  mangling schemes (extract.
+    #                                  header_export_binding); the exports are
+    #                                  compared from the export table only
+    #   "mangling-fallback"          — legacy (stored snapshots only): headers
+    #                                  parsed, nothing matched, and the header
+    #                                  surface was discarded
     scope_fallback: str | None = None
 
     # Full-stack dependency info (populated by --follow-deps)

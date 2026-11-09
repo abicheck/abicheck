@@ -156,6 +156,9 @@ FAMILIES: dict[str, Family] = {
                 "tests/test_family_f8_target_parity.py",
                 "tests/test_family_f8_symbol_rule_parity.py",
                 "tests/test_family_f8_catalog_backend_parity.py",
+                # ELF vs PE (MSVC ABI) vs Mach-O cross-builds of one source,
+                # compared through the CLI with -H under both header backends.
+                "tests/test_pe_macho_header_binding_integration.py",
             ),
         ),
         Family(
@@ -301,6 +304,23 @@ FAMILIES: dict[str, Family] = {
                 "manifest names is ever rewritten in place."
             ),
             harness_tests=("tests/test_package_immutable_publication.py",),
+        ),
+        Family(
+            key="F19",
+            title="The Action's trust boundary is executed, not read",
+            invariant=(
+                "A hostile or careless value crossing into the Action -- an "
+                "input that reaches a shell or workflow command, a build "
+                "command run for the user -- cannot run as the Action's own "
+                "code, forge a workflow command or result, or reach what the "
+                "gate compares or a later step's environment; each property "
+                "is shown by executing the step against that value, never by "
+                "reading the step's text."
+            ),
+            harness_tests=(
+                "tests/test_action_run_sh_injection.py",
+                "tests/test_action_delta_base_build.py",
+            ),
         ),
         Family(
             key="OTHER",
@@ -501,6 +521,9 @@ _F8 = (
     "extraction.linker_summary_flag_read_as_the_fact",
     "scoping.system_header_layout_unrecognized",
     "symbol_rule.single_object_format",
+    # A PE/Mach-O header parse discarded when no declaration's spelling met an
+    # export (an MSVC DLL against an Itanium parse; a template-only header).
+    "extraction.header_surface_discarded_on_export_mismatch",
 )
 _F7 = (
     # Masked by suite-wide shared interpreter state: passed in a full run,
@@ -572,7 +595,6 @@ OTHER_REASONS: dict[str, str] = {
     "ci.shared_budget_over_heterogeneous_matrix": "GitHub workflow configuration",
     "ci.unrelated_apt_source_gates_the_job": "GitHub workflow configuration",
     "shell.empty_array_expansion_under_nounset": "shell-script semantics",
-    "trust_boundary.shell_workflow_injection": "trust-boundary execution tests",
     "tooling.platform_dependent_record_separator": "developer tooling text I/O",
     "config.env_flag_value_domain": "environment-variable parsing",
     "config.input_granted_unrelated_authority": "trust-boundary authority",
@@ -614,6 +636,13 @@ for _key, _ids in (
         (
             "storage.republish_overwrites_live_ref",
             "storage.package_gc_or_lock_breaks_a_live_package",
+        ),
+    ),
+    (
+        "F19",
+        (
+            "trust_boundary.shell_workflow_injection",
+            "action.supplied_code_runs_before_the_gate",
         ),
     ),
     ("OTHER", tuple(OTHER_REASONS)),

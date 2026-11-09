@@ -2498,6 +2498,14 @@
    "default": "report"
   },
   {
+   "id": "action:delta-base-build-command",
+   "action": "action",
+   "input": "delta-base-build-command",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
    "id": "action:pr-comment-detail",
    "action": "action",
    "input": "pr-comment-detail",

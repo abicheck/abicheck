@@ -83,8 +83,8 @@ class TypeEvidenceFacts:
     identical_inputs: bool = False
     #: ``(side, reason)`` for each side lacking evidence although headers were
     #: supplied: header scoping fell back to the export table
-    #: (``AbiSnapshot.scope_fallback``, e.g. ``"mangling-fallback"``), so the
-    #: parsed header surface was not kept.
+    #: (``AbiSnapshot.scope_fallback``; the legacy ``"mangling-fallback"`` of a
+    #: stored snapshot, whose parsed header surface was not kept).
     header_scope_fallback: tuple[tuple[str, str], ...] = ()
 
     def sides_without_type_evidence(self) -> tuple[str, ...]:

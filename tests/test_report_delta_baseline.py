@@ -49,6 +49,7 @@ from abicheck.frontends.action.report_publication import context_notes
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.report.delta_baseline import (
     DELTA_COMPARISON_ROLES,
+    DELTA_GATE_OUTCOMES,
     DELTA_LOOKUP_OUTCOMES,
     DELTA_OPERAND_MATCHES,
     DELTA_POST_GATE_OUTCOMES,
@@ -99,12 +100,18 @@ def _valid(doc: dict[str, object]) -> bool:
     """The roles' rules, written independently of the reader."""
     if doc["comparison_role"] == "delta":
         return (
-            doc["outcome"] == "resolved"
+            doc["outcome"] in ("resolved", "base_built")
             and bool(doc.get("base_sha"))
             and bool(doc.get("gate_verdict"))
             and doc.get("operand_match") in (None, "", *_MATCH_RULES)
         )
-    return not doc.get("gate_verdict") and not doc.get("operand_match")
+    # A gate report records the lookup as the gate saw it; a base is built
+    # only after the gate, so `base_built` is never a gate's outcome.
+    return (
+        doc["outcome"] != "base_built"
+        and not doc.get("gate_verdict")
+        and not doc.get("operand_match")
+    )
 
 
 #: The operand-identity rules, read from their owner (MatchRule), minus its
@@ -305,7 +312,7 @@ def _compare(monkeypatch: pytest.MonkeyPatch):
 
 _CASES = [
     {"comparison_role": "gate", "outcome": o, "base_sha": _SHA, "branch": "main"}
-    for o in DELTA_REPORT_OUTCOMES
+    for o in DELTA_GATE_OUTCOMES
 ] + [
     {"comparison_role": "gate", "outcome": "base_unknown"},
     {
@@ -320,6 +327,14 @@ _CASES = [
         "outcome": "resolved",
         "base_sha": _SHA,
         "gate_verdict": "COMPATIBLE",
+    },
+    {
+        "comparison_role": "delta",
+        "outcome": "base_built",
+        "base_sha": _SHA,
+        "branch": "main",
+        "gate_verdict": "BREAKING",
+        "operand_match": "loader_name",
     },
 ]
 
@@ -474,7 +489,7 @@ def test_a_stored_delta_report_renders_the_action_s_notes(verdict: str) -> None:
     assert f"Release gate: {verdict}" in context_notes(data)[1]
 
 
-@pytest.mark.parametrize("outcome", sorted(set(DELTA_REPORT_OUTCOMES) - {"resolved"}))
+@pytest.mark.parametrize("outcome", sorted(set(DELTA_GATE_OUTCOMES) - {"resolved"}))
 def test_a_stored_unresolved_gate_report_names_its_outcome(outcome: str) -> None:
     data = {
         "verdict": "breaking",
@@ -533,7 +548,7 @@ def test_an_unusable_context_or_block_yields_no_notes() -> None:
     # No context, no block.
     assert context_notes({"verdict": "BREAKING"}) == []
     # Every unresolved gate outcome is worded from the block alone.
-    for outcome in sorted(set(DELTA_REPORT_OUTCOMES) - {"resolved"}):
+    for outcome in sorted(set(DELTA_GATE_OUTCOMES) - {"resolved"}):
         rec = _block(comparison_role="gate", outcome=outcome)
         assert context_notes({"delta_baseline": rec})[0].startswith("Delta unavailable")
 

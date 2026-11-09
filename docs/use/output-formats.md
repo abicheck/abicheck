@@ -179,10 +179,14 @@ itself, distinct from the overall verdict confidence:
 
 - `confidence`: `"high"` (a clean header-scoped run) or `"reduced"`.
 - `notes`: structured codes explaining any reduction —
-  `mangling-fallback` / `header-backend-unavailable` (header scoping was requested on a
-  PE/Mach-O binary but fell back to the export table; recorded on the snapshot
-  as `scope_fallback`), or `no-provenance` (the surface resolved without any
-  declaration provenance).
+  `header-backend-unavailable` (header scoping was requested on a PE/Mach-O
+  binary but the header parse failed, so the dump fell back to the export
+  table), `export-binding-unresolved` (the headers parsed and were kept, but
+  no declaration could be bound to any export), both recorded on the snapshot
+  as `scope_fallback`; `mangling-fallback` (the pre-2026-11-09 spelling of the
+  latter, which discarded the headers; only older stored snapshots carry it);
+  or `no-provenance` (the surface resolved without any declaration
+  provenance).
 
 **Text**: an audit block on stderr (the reason is shown in parentheses):
 ```text
@@ -1140,7 +1144,9 @@ schema 3.1) saying which one they are:
 `comparison_role` is `gate` or `delta`, and `decides_exit_code` is `true`
 exactly for `gate`. `outcome` is the base-snapshot lookup's outcome (the
 Action's `delta-outcome` output), or `unsupported_operand` for a
-directory/package comparison; a `delta` report is always `resolved`.
+directory/package comparison; a `delta` report is `resolved`, or
+`base_built` when `delta-on-missing-base: build` built the base commit in the
+PR job after the gate (never on a `gate` report).
 `base_sha` is the default-branch commit the delta is measured against (`null`
 when none was selected), `branch` the branch the snapshot came from, and
 `gate_verdict` -- on the `delta` report only -- the gate's verdict, so a
@@ -1150,8 +1156,9 @@ paired with this PR's library (`declared`, `loader_name`,
 `loader_name_version`, `file_name`, `file_name_version`; the Action's
 `delta-operand-match` output). The delta report's own `verdict` describes this
 PR's changes and never gates. Outcomes decided only after the gate ran --
-`rerun_failed` and the operand-identity refusals (`operand_unmatched`,
-`operand_ambiguous`, `operand_map_invalid`, `operand_unreadable`) -- are never
+`rerun_failed`, a failed base build (`base_build_failed`, `base_dump_failed`)
+and the operand-identity refusals (`operand_unmatched`, `operand_ambiguous`,
+`operand_map_invalid`, `operand_unreadable`) -- are never
 recorded: no delta comparison runs then, the gate's block keeps the lookup's
 outcome, and the PR comment states the final one.
 

@@ -565,29 +565,35 @@ class TestPeHeaderScoping:
         ]
         assert removed == [], f"private export must not be reported: {removed}"
 
-    def test_fallback_when_no_header_match(self, tmp_path):
-        """MSVC-mangled C++ exports won't match Itanium names → warn + fallback."""
+    def test_unbound_header_surface_is_kept(self, tmp_path):
+        """A parsed header set that binds to no export is kept, not discarded.
+
+        ``someDecl`` names no export under any scheme, so nothing binds: the
+        header surface (its type, its declaration) stays, the export stays in
+        the PE table for the platform export delta, and the snapshot records
+        ``export-binding-unresolved``.
+        """
         from abicheck.workflows.dump.pe import extract_pe
 
         p = tmp_path / "lib.dll"
         p.write_bytes(b"MZ" + b"\x00" * 100)
         pe_meta = _pe_meta("?realFunc@@YAHXZ")
-        # castxml parsed headers but nothing matched the export table.
         scoped = _scoped_snapshot("pe", ("someDecl", Visibility.HIDDEN))
+        scoped.pe = pe_meta
 
         with (
             patch("abicheck.pe_metadata.parse_pe_metadata", return_value=pe_meta),
             patch("abicheck.pdb_utils.locate_pdb", return_value=None),
             patch("abicheck.dumper._dump_pe", return_value=scoped),
         ):
-            with pytest.warns(
-                UserWarning, match="None of the provided headers matched"
-            ):
+            with pytest.warns(UserWarning, match="could be bound to an exported"):
                 result = extract_pe(p, "1.0", headers=[_mk_header(tmp_path)])
 
-        # Fell back to the full export table.
-        names = [f.name for f in result.declarations.functions]
-        assert "?realFunc@@YAHXZ" in names
+        assert result is scoped
+        assert result.scope_fallback == "export-binding-unresolved"
+        assert [f.name for f in result.declarations.functions] == ["someDecl"]
+        assert [t.name for t in result.declarations.types] == ["PublicStruct"]
+        assert [e.name for e in result.pe.exports] == ["?realFunc@@YAHXZ"]
 
     def test_fallback_when_castxml_unavailable(self, tmp_path):
         from abicheck.workflows.dump.pe import extract_pe
@@ -721,7 +727,7 @@ class TestMachoHeaderScoping:
         assert mock_dump.called
         assert [f.name for f in result.declarations.functions] == ["publicFn"]
 
-    def test_fallback_when_no_header_match(self, tmp_path):
+    def test_unbound_header_surface_is_kept(self, tmp_path):
         from abicheck.workflows.dump.macho import extract_macho
 
         p = tmp_path / "lib.dylib"
@@ -733,6 +739,7 @@ class TestMachoHeaderScoping:
         macho_meta.install_name = "libtest.dylib"
         macho_meta.dependent_libs = []
         scoped = _scoped_snapshot("macho", ("other", Visibility.HIDDEN))
+        scoped.macho = macho_meta
 
         with (
             patch(
@@ -740,9 +747,9 @@ class TestMachoHeaderScoping:
             ),
             patch("abicheck.dumper._dump_macho", return_value=scoped),
         ):
-            with pytest.warns(
-                UserWarning, match="None of the provided headers matched"
-            ):
+            with pytest.warns(UserWarning, match="could be bound to an exported"):
                 result = extract_macho(p, "1.0", headers=[_mk_header(tmp_path)])
 
-        assert [f.name for f in result.declarations.functions] == ["_publicFn"]
+        assert result.scope_fallback == "export-binding-unresolved"
+        assert [f.name for f in result.declarations.functions] == ["other"]
+        assert [t.name for t in result.declarations.types] == ["PublicStruct"]

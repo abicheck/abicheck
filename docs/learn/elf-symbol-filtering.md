@@ -121,9 +121,10 @@ printed; opt out for one run with `--contract all`, or project-wide with
 the public-header-declared exported API are recorded as *filtered* rather than reported, while
 internal-type *leaks* are never hidden. Source-header provenance (distinguishing a
 privately-included header from a public one independently of reachability) is implemented
-across castxml, DWARF, and PDB; the one residual gap is MSVC C++ name
-mangling on PE, where castxml can't match a mangled export and the surface falls back to
-the export table with a `mangling-fallback` confidence note.
+across castxml, DWARF, and PDB. On PE, a header parse with Itanium names is bound to an
+MSVC DLL's exports by the qualified name both manglings encode; overloads whose parameters
+are not builtin types stay unbound and are compared from the export table only (see
+the known gap "PE: overloads with class-typed parameters stay unbound").
 
 See also: [Limitations & Known Boundaries](limitations.md) for the rest of
 abicheck's practical boundary list, and

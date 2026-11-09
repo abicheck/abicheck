@@ -17,7 +17,6 @@ from pathlib import Path
 import pytest
 
 from tests._abicheck_subprocess import abicheck_command
-from tests._unconfirmed import observed_verdict
 
 pytestmark = pytest.mark.integration
 
@@ -106,11 +105,7 @@ def _compare(root: Path, old: Path, new: Path) -> tuple[str, set[str]]:
         capture_output=True,
     )
     doc = json.loads(out.read_text())
-    # The observed verdict: on PE/Mach-O, header scoping falls back to the
-    # export table when no declaration matches an export (`mangling-fallback`),
-    # so the side has no type-level evidence and ADR-090 labels a claim
-    # UNCONFIRMED. The concept direction under test is the observed answer.
-    return observed_verdict(doc), {c["kind"] for c in doc["changes"]}
+    return doc["verdict"], {c["kind"] for c in doc["changes"]}
 
 
 def test_concept_direction_end_to_end(tmp_path):
