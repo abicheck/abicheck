@@ -287,8 +287,17 @@ def _flags_build(
 
 # What a toolchain without 32-bit multilib says when asked for -m32.
 _MULTILIB_MISSING = re.compile(
-    r"skipping incompatible|cannot find -l|cannot find crt|stubs-32\.h|"
+    r"cannot find -l|cannot find crt|stubs-32\.h|"
     r"bits/libc-header-start\.h|gnu/stubs|unsupported architecture|-m32 is not supported"
+)
+
+
+# A compiler or linker that was killed or crashed: never a missing capability,
+# whatever capability-looking warnings (e.g. ld's "skipping incompatible")
+# came before it.
+_CRASH = re.compile(
+    r"internal compiler error|Killed signal|terminated program|Segmentation fault|"
+    r"core dumped|signal \d+|killed"
 )
 
 
@@ -299,6 +308,8 @@ def _names_capability(stderr: str, rendered: list[str]) -> bool:
     (``unrecognized command-line option '-fabi-version=2'``), or ``-m32`` was
     asked for and the 32-bit runtime is missing.
     """
+    if _CRASH.search(stderr):
+        return False
     optional = [f for f in rendered if not f.startswith("-O")]
     if any(f in stderr for f in optional):
         return True

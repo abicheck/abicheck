@@ -246,6 +246,30 @@ def _flag_runner(failure: object) -> object:
             True,
         ),
         (_proc(1, stderr="collect2: error: ld returned 1 exit status\n"), True),
+        # A capability-looking warning before a crash: the crash decides.
+        (
+            _proc(
+                1,
+                stderr="/usr/bin/ld: skipping incompatible /usr/lib/libc.so when searching for -lc\n"
+                "collect2: fatal error: ld terminated with signal 9 [Killed]\n",
+            ),
+            True,
+        ),
+        (
+            _proc(
+                1,
+                stderr="/usr/bin/ld: skipping incompatible /usr/lib/libc.so when searching for -lc\n",
+            ),
+            True,
+        ),
+        (
+            _proc(
+                1,
+                stderr="/usr/bin/ld: skipping incompatible /usr/lib/gcc/x86_64/13/libgcc.a when searching for -lgcc\n"
+                "/usr/bin/ld: cannot find -lgcc: No such file or directory\n",
+            ),
+            False,
+        ),
         (subprocess.TimeoutExpired(["gcc"], 60), True),
         (OSError("exec format error"), True),
         (_proc(-11, stderr="gcc: internal compiler error: Segmentation fault\n"), True),
@@ -263,7 +287,7 @@ def test_flag_probe_skips_only_a_failure_that_names_a_capability(
     else:
         reason = tcs._flags_unavailable(_PROBE_TC, "c", flags)
         assert isinstance(failure, subprocess.CompletedProcess)
-        assert reason is not None and failure.stderr.strip() in reason
+        assert reason is not None and failure.stderr.strip().splitlines()[-1] in reason
 
 
 @pytest.mark.usefixtures("clean_probe_caches")
