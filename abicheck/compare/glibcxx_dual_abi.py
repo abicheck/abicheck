@@ -61,8 +61,11 @@ from ..model.glibcxx_dual_abi import (
     selection_from_producer_flags,
     spells_dual_abi_type,
 )
-from ..model.surface_facts import is_binary_exported
 from ..model.vocabulary import NON_PUBLIC_ORIGINS
+from .exported_functions import (
+    exported_functions_by_mangled,
+    exported_variables_by_mangled,
+)
 
 if TYPE_CHECKING:
     from ..model import AbiSnapshot, RecordType
@@ -100,14 +103,8 @@ def dual_abi_selection_of(snapshot: AbiSnapshot) -> DualAbiSelection | None:
 
 def _exports(snapshot: AbiSnapshot) -> dict[str, str]:
     """Exported function and variable mangled names -> declared name."""
-    out: dict[str, str] = {}
-    decls = snapshot.declarations
-    for f in decls.functions:
-        if f.mangled and is_binary_exported(f):
-            out[f.mangled] = f.name
-    for v in decls.variables:
-        if v.mangled and is_binary_exported(v):
-            out[v.mangled] = v.name
+    out = {m: f.name for m, f in exported_functions_by_mangled(snapshot).items() if m}
+    out.update((m, v.name) for m, v in exported_variables_by_mangled(snapshot).items())
     return out
 
 
@@ -178,16 +175,12 @@ def _affected_records(
 def _affected_variables(old: AbiSnapshot, new: AbiSnapshot) -> list[str]:
     """Exported variables on both sides whose type spells a dual-ABI type
     (a variable's mangled name does not encode its type, so it survives)."""
-    new_exported = {
-        v.mangled for v in new.declarations.variables if is_binary_exported(v)
-    }
+    new_exported = exported_variables_by_mangled(new)
     return sorted(
         {
             v.name
-            for v in old.declarations.variables
-            if v.mangled in new_exported
-            and is_binary_exported(v)
-            and spells_dual_abi_type(v.type)
+            for m, v in exported_variables_by_mangled(old).items()
+            if m in new_exported and spells_dual_abi_type(v.type)
         }
     )
 

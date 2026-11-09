@@ -476,7 +476,7 @@
     },
     {
       "path": "abicheck/diff_platform.py",
-      "baseline_lines": 1635,
+      "baseline_lines": 1616,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",
