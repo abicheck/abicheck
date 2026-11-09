@@ -242,23 +242,15 @@ _STDLIB_LOCAL_NAME_RE = re.compile(
 # keep clearing) -- closing it fully needs a real demangler or type-graph
 # analysis, per this comment block's own opening paragraph.
 #
-# `(?:\d+__[A-Za-z0-9_]+?)?` between the `St`/`3std` substitution and the
-# customization-point name accepts libc++'s versioned inline ABI namespace
-# (Codex review, PR #641 follow-up, fifth P2): libc++ wraps its entire
-# standard-library implementation in an inline namespace -- `__1` in
-# mainline libc++, `__ndk1` on Android NDK, etc. -- so a user specialization
-# of e.g. `std::hash<X>` mangles as `_ZZNKSt3__14hashI1XEclERKS1_E4salt`
-# (`3__1` = the length-prefixed `__1` namespace component) rather than the
-# bare `_ZZNKSt4hashI...` this alternation originally expected. Without
-# this, `_STDLIB_LOCAL_NAME_RE` still matches the `St` prefix (classifying
-# the symbol as stdlib-owned) while this exclusion regex misses it entirely
-# (nothing after `St3__1` matched a listed customization point), so a real
-# user-owned regression under libc++ was wrongly suppressed. The inner
-# `+?` is non-greedy, not `+`: greedily consuming word characters would eat
-# into the customization-point name itself (e.g. `3__1` followed directly
-# by `4hash` reads as one contiguous word-character run), so the engine
-# must backtrack to the shortest inline-namespace match that still lets one
-# of the listed alternatives match immediately after.
+# The optional inline-namespace component after `St`/`3std` accepts libc++'s
+# versioned inline ABI namespace (Codex review, PR #641 follow-up, fifth P2):
+# `__1`, `__ndk1`, ..., so a user `std::hash<X>` specialization mangles as
+# `_ZZNKSt3__14hashI1XEclERKS1_E4salt`. It matches exactly ONE length-prefixed
+# component (`<n>__` plus n-2 characters): a free `\d+__[A-Za-z0-9_]+?` run ran
+# on into the template arguments, so libstdc++'s own
+# `std::__cxx11::basic_string<..., char_traits<char>, ...>::_M_construct()::_Guard`
+# (`_ZZNSt7__cxx1112basic_stringIcSt11char_traitsI...`) read as a user
+# `char_traits` specialization and was never classified as stdlib-owned.
 # The optional ``(?:GV)?`` right after the leading ``_Z`` mirrors
 # `_STDLIB_LOCAL_NAME_RE`'s own guard-variable handling above (Codex review,
 # PR #641 follow-up, sixth P2): a user specialization's local static can
@@ -270,7 +262,7 @@ _STDLIB_LOCAL_NAME_RE = re.compile(
 # this regex exists to prevent for the plain local-static form.
 _USER_SPECIALIZABLE_STD_TEMPLATE_RE = re.compile(
     r"^_Z(?:GV)?ZZ*N?[rVK]{0,3}[RO]?(?:St|3std)"
-    r"(?:\d+__[A-Za-z0-9_]+?)?"
+    "(?:" + "|".join(f"{n}__[A-Za-z0-9_]{{{n - 2}}}" for n in range(3, 32)) + ")?"
     r"(?:4hash|4less|7greater|8equal_to|12not_equal_to|10less_equal|"
     r"13greater_equal|11char_traits|14numeric_limits|15iterator_traits|"
     r"14default_delete|9formatter|4swap|10tuple_size|11common_type)I"
@@ -322,6 +314,11 @@ STDLIB_RTTI_PREFIXES: tuple[str, ...] = (
     "_ZTSN10__cxxabiv",
     "_ZTVN10__cxxabiv",
     "_ZTTN10__cxxabiv",
+    # __gnu_debug:: (libstdc++ debug mode)
+    "_ZTIN11__gnu_debug",
+    "_ZTSN11__gnu_debug",
+    "_ZTVN11__gnu_debug",
+    "_ZTTN11__gnu_debug",
     # std::__cxx11::
     "_ZTIN7__cxx11",
     "_ZTSN7__cxx11",

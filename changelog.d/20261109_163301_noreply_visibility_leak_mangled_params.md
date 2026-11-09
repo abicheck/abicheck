@@ -12,3 +12,13 @@
   spelling too (`_ZN9__gnu_cxx…`), the way `std::` members already were. A
   library that only exports `std::string` APIs no longer reads `COMPATIBLE`
   instead of `NO_CHANGE` against itself.
+- **A local class or static of a libstdc++ function is the runtime's, not a
+  user specialization.** The `std::` customization-point check let its
+  inline-namespace match run on into template arguments, so
+  `std::__cxx11::basic_string<char, std::char_traits<char>>::_M_construct()::_Guard`
+  read as a user `char_traits` specialization. Such locals are now owned by
+  the runtime (the alignment-only exemption and `visibility_leak` both see
+  it), while a real `std::hash<MyType>` specialization stays the library's.
+  A local entity of `mylib::detail::run()` and an exported
+  `operator""_impl` are still reported by `visibility_leak`, and
+  `__gnu_debug::` RTTI is filtered like `__gnu_cxx::`'s.

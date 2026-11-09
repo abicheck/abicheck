@@ -158,3 +158,187 @@ def test_the_reported_std_string_library_has_no_leak() -> None:
     # A real internal export beside them is still reported, and alone.
     real = "_ZN5mylib6detail6expandEv"
     assert _leaks([*exports, real]) == [real]
+
+
+# Public shapes g++ 13 emits for a std-heavy API (``nm -D`` of a real build,
+# checked with ``c++filt``): container and string parameters, the dual-ABI
+# ``[abi:cxx11]`` tag on a name returning ``std::string``, a constructor, a
+# const member, a function template instantiated over ``std::string`` and a
+# ``__gnu_cxx::__normal_iterator`` parameter. None declares an internal name.
+PUBLIC_STD_SHAPES = (
+    "_ZN5mylib3sumERKSt6vectorIiSaIiEE",  # sum(std::vector<int> const&)
+    "_ZN5mylib4keysERKSt3mapINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEiSt4lessIS6_ESaISt4pairIKS6_iEEE",
+    "_ZN5mylib5countERKNSt7__cxx114listINS0_12basic_stringIcSt11char_traitsIcESaIcEEESaIS6_EEE",
+    "_ZN5mylib5firstEN9__gnu_cxx17__normal_iteratorIPiSt6vectorIiSaIiEEEE",
+    "_ZN5mylib6Parser5parseERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE",
+    "_ZN5mylib6Parser7versionB5cxx11Ev",  # static std::string version() [abi:cxx11]
+    "_ZN5mylib6ParserC1ERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE",
+    "_ZN5mylib6ParserC2ERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE",
+    "_ZNK5mylib6Parser4nameB5cxx11Ev",  # std::string name() const [abi:cxx11]
+    "_ZN5mylib7convertINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEEET_PKc",
+    "_ZN5mylib8greetingB5cxx11Ev",
+)
+
+
+@pytest.mark.parametrize("symbol", PUBLIC_STD_SHAPES)
+def test_a_public_std_shape_is_not_a_leak(symbol: str) -> None:
+    assert _leaks([symbol]) == []
+
+
+@pytest.mark.parametrize(
+    "symbol",
+    [
+        # mylib::detail::parse(std::string const&)
+        "_ZN5mylib6detail5parseERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE",
+        # mylib::internal::render[abi:cxx11](int)
+        "_ZN5mylib8internal6renderB5cxx11Ei",
+    ],
+)
+def test_an_internal_scope_is_a_leak_whatever_it_takes_or_returns(symbol: str) -> None:
+    assert _leaks([symbol]) == [symbol]
+
+
+# The whole dynamic export table of that g++ 13 -O0 build: the API above, the
+# libstdc++ weak instantiations it pulls in (``std::``, ``__gnu_cxx::``, and
+# ``_ZZ…_Guard`` local classes) and the two internal-scope functions.
+REAL_EXPORT_TABLE = (
+    "_ZN5mylib3sumERKSt6vectorIiSaIiEE",
+    "_ZN5mylib4keysERKSt3mapINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEiSt4lessIS6_ESaISt4pairIKS6_iEEE",
+    "_ZN5mylib5countERKNSt7__cxx114listINS0_12basic_stringIcSt11char_traitsIcESaIcEEESaIS6_EEE",
+    "_ZN5mylib5firstEN9__gnu_cxx17__normal_iteratorIPiSt6vectorIiSaIiEEEE",
+    "_ZN5mylib6Parser5parseERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE",
+    "_ZN5mylib6Parser7versionB5cxx11Ev",
+    "_ZN5mylib6ParserC1ERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE",
+    "_ZN5mylib6ParserC2ERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE",
+    "_ZN5mylib6detail5parseERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE",
+    "_ZN5mylib7convertINSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEEEET_PKc",
+    "_ZN5mylib8greetingB5cxx11Ev",
+    "_ZN5mylib8internal6renderB5cxx11Ei",
+    "_ZN9__gnu_cxx11char_traitsIcE2eqERKcS3_",
+    "_ZN9__gnu_cxx11char_traitsIcE6lengthEPKc",
+    "_ZNK5mylib6Parser4nameB5cxx11Ev",
+    "_ZNSt11char_traitsIcE6lengthEPKc",
+    "_ZNSt15__new_allocatorIcED1Ev",
+    "_ZNSt15__new_allocatorIcED2Ev",
+    "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE12_Alloc_hiderD1Ev",
+    "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE12_Alloc_hiderD2Ev",
+    "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE12_M_constructIPKcEEvT_S8_St20forward_iterator_tag",
+    "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEC1IS3_EEPKcRKS3_",
+    "_ZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEC2IS3_EEPKcRKS3_",
+    "_ZSt23__is_constant_evaluatedv",
+    "_ZZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE12_M_constructIPKcEEvT_S8_St20forward_iterator_tagEN6_GuardC1EPS4_",
+    "_ZZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE12_M_constructIPKcEEvT_S8_St20forward_iterator_tagEN6_GuardC2EPS4_",
+    "_ZZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE12_M_constructIPKcEEvT_S8_St20forward_iterator_tagEN6_GuardD1Ev",
+    "_ZZNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEE12_M_constructIPKcEEvT_S8_St20forward_iterator_tagEN6_GuardD2Ev",
+)
+
+
+def test_the_real_export_table_leaks_exactly_its_internal_scopes() -> None:
+    assert _leaks(list(REAL_EXPORT_TABLE)) == [
+        "_ZN5mylib6detail5parseERKNSt7__cxx1112basic_stringIcSt11char_traitsIcESaIcEEE",
+        "_ZN5mylib8internal6renderB5cxx11Ei",
+    ]
+
+
+# Local entities and literal operators, from a real g++ 13 build (``c++filt``
+# in each comment): a local class or static of a function is scoped by that
+# function's own name; a literal operator is named by its suffix.
+@pytest.mark.parametrize(
+    ("symbol", "leaks"),
+    [
+        (
+            "_ZZN5mylib6detail3runEvEN4NodeC1Ev",
+            True,
+        ),  # mylib::detail::run()::Node::Node()
+        ("_ZZN5mylib6detail3runEvEN4NodeclEv", True),  # ...::Node::operator()()
+        ("_ZZN5mylib6detail3runEvE4hits", True),  # mylib::detail::run()::hits
+        ("_ZZN5mylib3apiEvEN7Visitor2goEv", False),  # mylib::api()::Visitor::go()
+        ("_ZZN5mylib3apiEvE5calls", False),  # mylib::api()::calls
+        ("_Zli5_imply", True),  # operator"" _impl(unsigned long long)
+        ("_ZN5mylibli5_implEy", True),  # mylib::operator"" _impl(unsigned long long)
+        ("_Zli3_kmy", False),  # operator"" _km(unsigned long long)
+    ],
+)
+def test_local_entities_and_literal_operators_keep_their_owning_name(
+    symbol: str, leaks: bool
+) -> None:
+    assert _leaks([symbol]) == ([symbol] if leaks else [])
+
+
+@pytest.mark.parametrize("prefix", ["_ZTI", "_ZTS", "_ZTV", "_ZTT"])
+def test_debug_mode_runtime_rtti_is_transitive(prefix: str) -> None:
+    # typeinfo/vtable of __gnu_debug::_Safe_iterator_base, like __gnu_cxx's
+    symbol = f"{prefix}N11__gnu_debug19_Safe_iterator_baseE"
+    assert not is_abi_relevant_elf_symbol(symbol)
+    assert is_abi_relevant_elf_symbol(symbol, filter_transitive_runtime_symbols=False)
+
+
+# --- who owns a local entity: the runtime, or a user specialization ---------
+
+INLINE_NAMESPACES = ("", "__1", "__cxx11", "__ndk1", "__debug")
+# Runtime templates whose *arguments* name a customization point.
+RUNTIME_TEMPLATES = (
+    (
+        "basic_string",
+        "cSt11char_traitsIcESaIcE",
+    ),  # basic_string<char, char_traits<char>, ...>
+    ("set", "iSt4lessIiESaIiE"),  # set<int, less<int>, ...>
+    ("unordered_map", "iiSt4hashIiESt8equal_toIiESaISt4pairIKiiEE"),
+)
+CUSTOMIZATION_POINTS = ("hash", "char_traits", "less", "numeric_limits")
+
+
+def _std(ns: str) -> str:
+    return "St" + (_src(ns) if ns else "")
+
+
+@pytest.mark.parametrize("ns", INLINE_NAMESPACES)
+@pytest.mark.parametrize(("template", "args"), RUNTIME_TEMPLATES)
+def test_a_runtime_templates_local_entity_is_the_runtimes(
+    ns: str, template: str, args: str
+) -> None:
+    from abicheck.name_classification import is_stdlib_local_name_symbol
+
+    # std::[ns::]template<args>::_M_construct()::_Guard::_Guard()
+    symbol = f"_ZZN{_std(ns)}{_src(template)}I{args}E12_M_constructEvEN6_GuardC1Ev"
+    assert is_stdlib_local_name_symbol(symbol), symbol
+    assert _leaks([symbol]) == []
+
+
+@pytest.mark.parametrize("ns", INLINE_NAMESPACES)
+@pytest.mark.parametrize("point", CUSTOMIZATION_POINTS)
+def test_a_user_specializations_local_entity_stays_the_users(
+    ns: str, point: str
+) -> None:
+    from abicheck.name_classification import is_stdlib_local_name_symbol
+
+    # std::[ns::]point<MyType>::operator()() const::salt -- user-authored code
+    symbol = f"_ZZNK{_std(ns)}{_src(point)}I6MyTypeEclEvE4salt"
+    assert not is_stdlib_local_name_symbol(symbol), symbol
+
+
+@pytest.mark.parametrize(
+    "symbol",
+    [
+        "_ZXinternal_helper",  # not a <name> production the walker models
+        "_Zliy",  # a literal operator with no suffix source-name
+        "_Z",  # nothing after the prefix
+    ],
+)
+def test_a_mangling_the_walker_cannot_read_makes_no_claim(symbol: str) -> None:
+    # Its raw text spells "internal"/"helper", but nothing says which part is
+    # the declared name: no whole-string guess, so no leak.
+    from abicheck.compare.naming_conventions import own_declared_name
+
+    assert own_declared_name(symbol) == ""
+    assert _leaks([symbol]) == []
+
+
+@pytest.mark.parametrize(
+    ("symbol", "leaks"), [("internal_helper", True), ("api_init", False)]
+)
+def test_a_c_symbol_is_its_own_declared_name(symbol: str, leaks: bool) -> None:
+    from abicheck.compare.naming_conventions import own_declared_name
+
+    assert own_declared_name(symbol) == symbol
+    assert _leaks([symbol]) == ([symbol] if leaks else [])
