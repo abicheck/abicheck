@@ -234,6 +234,14 @@ PROBES: dict[str, Probe] = {
         "int f(int x) { return x; }",
         header_reaches=False,  # producer is L4 source replay, not castxml
     ),
+    # castxml reads the specification from its clang join (generation 44);
+    # DWARF records no exception specification at all.
+    "func_virtual_noexcept_added": _inline(
+        "struct S { virtual ~S(); virtual int area() const; int w; };",
+        "struct S { virtual ~S(); virtual int area() const noexcept; int w; };",
+        "S::~S() {}\nint S::area() const { return w; }",
+        "S::~S() {}\nint S::area() const noexcept { return w; }",
+    ),
     "public_macro_removed": _inline(
         "#define LIB_MAX 8\nint f(int);",
         "int f(int);",

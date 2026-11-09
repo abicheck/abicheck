@@ -44,7 +44,7 @@ from ....model.identity import entity_id_for_function
 from ...surface_fact_producers import header_ast_surface_facts
 from .abi_fundamental import castxml_type_abi_fact
 from .calling_convention import source_calling_conventions
-from .clang_semantics_join import special_member_key
+from .clang_semantics_join import function_decl_key, special_member_key
 from .context import CastxmlParserContext
 from .duplicate_declarations import collapse_benign_duplicates
 from .location import (
@@ -176,6 +176,15 @@ def ctor_or_dtor_visibility(
     if access == AccessLevel.PUBLIC and not is_deleted and not is_artificial:
         return Visibility.PUBLIC
     return Visibility.HIDDEN
+
+
+def _decl_scope(ctx: CastxmlParserContext, el: Element) -> str:
+    """The qualified name of *el*'s enclosing namespace or class ("" at
+    global scope), for the clang join's target-independent key."""
+    parent = ctx.id_map.get(el.get("context", ""))
+    if parent is None or parent.get("name") in (None, "", "::"):
+        return ""
+    return qualified_name(ctx, parent)
 
 
 def function_display_name(ctx: CastxmlParserContext, el: Element) -> str:
@@ -555,7 +564,14 @@ def parse_function_element(
 
     source_loc, loc_el = function_source_location(ctx, el)
     noexcept = ctx.clang_semantics.function_noexcept(
-        (raw_mangled, mangled, special_member_key(el.tag, qualified_scope, params)),
+        (
+            raw_mangled,
+            mangled,
+            special_member_key(el.tag, qualified_scope, params),
+            function_decl_key(
+                _decl_scope(ctx, el), name, len(params), el.get("const") == "1"
+            ),
+        ),
         (source_loc or "").rsplit(":", 1)[0],
         bool(noexcept_re),
         artificial=el.get("artificial") == "1",

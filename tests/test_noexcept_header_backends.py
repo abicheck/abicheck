@@ -289,3 +289,43 @@ def test_only_a_virtual_gaining_noexcept_reports_the_overrider_break(
         ChangeKind.FUNC_VIRTUAL_NOEXCEPT_ADDED
         not in reported["virtual_method_noexcept_removed"]
     )
+
+
+@pytest.mark.parametrize(
+    "shape",
+    [s for s in _SHAPES if "noexcept" in s.name],
+    ids=lambda s: s.name,
+)
+def test_castxml_join_does_not_depend_on_matching_mangling(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, shape: Shape
+) -> None:
+    """castxml and its clang join can mangle for different targets (clang's
+    Windows default is MSVC, castxml emulates g++): the join still reads
+    each specification, by qualified name and arity. Seen on the Windows
+    integration lane; simulated here by targeting the join at MSVC."""
+    import abicheck.extract.headers.castxml.clang_semantics_join as join
+
+    real = join.clang_header_dump
+
+    def msvc_join(
+        headers: object, extra: object, compiler: object, **kw: object
+    ) -> object:
+        tokens = (
+            *tuple(kw.pop("gcc_option_tokens", ()) or ()),
+            "--target=x86_64-pc-windows-msvc",
+        )  # type: ignore[arg-type]
+        return real(headers, extra, compiler, gcc_option_tokens=tokens, **kw)  # type: ignore[arg-type]
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setattr(join, "clang_header_dump", msvc_join)
+    result, old_h, new_h = _compare(tmp_path, shape, "castxml")
+    assert _consumer_compiles(old_h, shape.consumer, tmp_path / "old")
+    source_break = not _consumer_compiles(new_h, shape.consumer, tmp_path / "new")
+    kinds = {c.kind.name for c in result.changes}  # type: ignore[attr-defined]
+    verdict = result.verdict.name  # type: ignore[attr-defined]
+    assert shape.kinds <= kinds, (verdict, sorted(kinds))
+    assert (verdict in ("API_BREAK", "BREAKING")) is source_break, (
+        verdict,
+        sorted(kinds),
+    )
+    assert result.analysis_assurance.status == "complete"  # type: ignore[attr-defined]

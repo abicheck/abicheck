@@ -78,6 +78,9 @@ def test_clang_map_reads_each_specification_by_mangled_and_special_member_key() 
         "_Z1fv": True,
         "_Z1gv": False,
         "_Z1hi": False,
+        "fn:f#0": True,
+        "fn:g#0": False,
+        "fn:h#0": False,  # a FunctionDecl's arity is its ParmVarDecl children
         "_ZN2ns1SD1Ev": True,
         "dtor:ns::S": True,
         "ctor:ns::S#1": True,
@@ -291,3 +294,41 @@ def test_concept_entries_keep_only_public_unambiguous_declarations() -> None:
         "template f(int)": "conj:a",
         "template k(int)": "conj:e",
     }
+
+
+def test_function_key_does_not_need_a_mangled_name() -> None:
+    """Without (or with a foreign) mangled name, a function is still keyed by
+    its qualified name, arity and const-ness; overloads that disagree drop."""
+    from abicheck.extract.headers.castxml.clang_semantics_join import function_decl_key
+
+    parm = {"kind": "ParmVarDecl", "name": "x"}
+    root = {
+        "kind": "TranslationUnitDecl",
+        "inner": [
+            {
+                "kind": "NamespaceDecl",
+                "name": "ns",
+                "inner": [
+                    _record(
+                        "S",
+                        _fn(
+                            "CXXMethodDecl",
+                            "area",
+                            "int () const noexcept",
+                            "?area@S@ns@@QEBAHXZ",
+                        ),
+                        _fn("CXXMethodDecl", "area", "int ()"),
+                        _fn("CXXMethodDecl", "g", "void (int) noexcept", inner=[parm]),
+                        _fn("CXXMethodDecl", "g", "void (double)", inner=[parm]),
+                    ),
+                    _fn("FunctionDecl", "count", "int (int)", inner=[parm]),
+                ],
+            }
+        ],
+    }
+    got = clang_noexcept_map(root)
+    assert got[function_decl_key("ns::S", "area", 0, True)] is True
+    assert got[function_decl_key("ns::S", "area", 0, False)] is False
+    assert got[function_decl_key("ns", "count", 1, False)] is False
+    assert function_decl_key("ns::S", "g", 1, False) not in got  # overloads disagree
+    assert function_decl_key("ns::S", "~S", 0, False) == ""

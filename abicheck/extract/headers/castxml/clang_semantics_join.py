@@ -61,6 +61,7 @@ log = logging.getLogger(__name__)
 __all__ = [
     "SEMANTICS_SIDECAR_BACKEND",
     "clang_noexcept_map",
+    "function_decl_key",
     "join_clang_semantics",
     "mentions_exception_spec",
     "special_member_key",
@@ -147,6 +148,19 @@ def special_member_key(tag: str, class_name: str, params: Iterable[object]) -> s
     return ""
 
 
+def function_decl_key(scope: str, name: str, arity: int, is_const: bool) -> str:
+    """A function's join key that does not depend on name mangling:
+    ``fn:<scope>::<name>#<arity>`` plus ``c`` for a const member. castxml and
+    the clang join may mangle for different targets (Itanium against the
+    MSVC default of clang on Windows), so the mangled name alone can miss.
+    Same-arity overloads share a key; a key they read differently is left
+    out (unknown)."""
+    if not name or name.startswith("~"):
+        return ""
+    qualified = f"{scope}::{name}" if scope else name
+    return f"fn:{qualified}#{arity}{'c' if is_const else ''}"
+
+
 _SCOPES = frozenset({"NamespaceDecl", "CXXRecordDecl", "ClassTemplateDecl"})
 
 
@@ -167,8 +181,8 @@ def _clang_special_key(node: dict[str, Any], scope: tuple[str, ...]) -> str:
 
 def clang_noexcept_map(clang_root: dict[str, Any]) -> dict[str, bool]:
     """``{key: is_noexcept}`` for every explicit clang function declaration,
-    keyed by its mangled name and, for a constructor or destructor, also by
-    :func:`special_member_key`. A key two declarations read differently (two
+    keyed by its mangled name and also by :func:`special_member_key` (a
+    constructor or destructor) or :func:`function_decl_key` (any other). A key two declarations read differently (two
     same-arity constructor overloads, say) is left out: unknown."""
     out: dict[str, bool] = {}
     conflicting: set[str] = set()
@@ -197,6 +211,20 @@ def clang_noexcept_map(clang_root: dict[str, Any]) -> dict[str, bool]:
             special = _clang_special_key(node, scope)
             if special:
                 record(special, value)
+            elif kind in ("FunctionDecl", "CXXMethodDecl"):
+                arity = sum(
+                    1
+                    for c in ast_inner(node)
+                    if isinstance(c, dict) and c.get("kind") == "ParmVarDecl"
+                )
+                key = function_decl_key(
+                    "::".join(scope),
+                    str(node.get("name") or ""),
+                    arity,
+                    re.search(r"\bconst\b", quals) is not None,
+                )
+                if key:
+                    record(key, value)
             return
         child_scope = scope
         name = str(node.get("name") or "")
