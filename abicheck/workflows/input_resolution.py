@@ -46,13 +46,14 @@ split.
 
 from __future__ import annotations
 
-import hashlib
 import importlib as _importlib
 import logging
 from typing import TYPE_CHECKING, Any
 
 from ..compile_context import CompileContext
 from ..errors import SnapshotError, ValidationError
+from ..extract.binary_identity import record_binary_sha256
+from ..extract.cache_input_digest import file_digest
 from ..extract.header_exclusions import (
     apply_header_exclusions_to_inputs,
     reject_exclusions_against_a_manifest,
@@ -411,6 +412,7 @@ def resolve_input(
 
     def _finish(snapshot: AbiSnapshot) -> AbiSnapshot:
         if extracted_now:  # ADR-075 D1: a loaded snapshot keeps its recorded scope
+            record_binary_sha256(snapshot, path)  # ADR-090 D1(c) identity
             snapshot = finish_snapshot(
                 snapshot,
                 SnapshotFinish(
@@ -749,11 +751,9 @@ def collect_metadata(path: Path) -> LibraryMetadata | None:
     if text_fmt in ("json", "symvers"):
         return None
 
-    data = path.read_bytes()
+    # The digest `extract.binary_identity` records for a dump, memoized.
     return LibraryMetadata(
-        path=str(path),
-        sha256=hashlib.sha256(data).hexdigest(),
-        size_bytes=len(data),
+        path=str(path), sha256=file_digest(path), size_bytes=path.stat().st_size
     )
 
 

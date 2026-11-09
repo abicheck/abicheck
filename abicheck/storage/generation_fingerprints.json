@@ -19,7 +19,7 @@
       "abicheck/extract/archive_integrity.py": "8d2b9fb73980bf646972da75431adf6437335bd83aa7b14678d531b1084995cb",
       "abicheck/extract/binary_dialect.py": "be8a71c557287ee47f63a49ea98306ac2d44877987cbadd9a554bd3f50119bc2",
       "abicheck/extract/binary_format.py": "4b9f591077fa5c90d2e3a767343d92b098061870403d431694470bc05e5468b3",
-      "abicheck/extract/binary_identity.py": "4645eaf3dddd0a2230a5c694882548476406c57514275fa4c8c1bc152607ca88",
+      "abicheck/extract/binary_identity.py": "6e4f7c0e55443ab906c75d67b5ca11629e2e6fcd59ea0f28976b8eb6651a392b",
       "abicheck/extract/build_mode_capture.py": "8391e4e27b5bb68b7bdd7e3d4bbc7feee5244607507a57f35bd08a90c308ac48",
       "abicheck/extract/builtin_abi.py": "e3f1d24f44d15016e686849a5481a80c271755ec573705226e65874a16fb4da9",
       "abicheck/extract/cache_dep_manifest.py": "b5eac3407ab1506a05647c8b61c33f60eda3789edfab9549c0b57ec20651e08b",
@@ -209,9 +209,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "7233c474bbf29616dfc60029544288f0bdccb3e7d9134a82bffdc8e9fce2a205",
-    "generation": 49,
-    "reason": "comment moved from snapshot.py to model/stack_protector.py"
+    "fingerprint": "09eb5bea03cbbd4130cbaf20044fff0cb6f6964c8e82831280b80cccbc1be7cc",
+    "generation": 50,
+    "reason": "a dump of a binary file records the SHA-256 of the binary's bytes (abicheck.binary_sha256 extension fact) for the identical-input exemption"
   },
   "resolver": {
     "files": {

@@ -40,6 +40,7 @@ from ..model.export_read import ExportReadState
 from ..model.fact import Fact
 from .canonical import canonical_form
 from .extension_fact_catalog import (
+    BINARY_SHA256,
     CU_STACK_PROTECTOR,
     CXX_CONCEPT_CONSTRAINTS,
     CXX_CONCEPT_HEADER_SCAN,
@@ -211,6 +212,7 @@ def sync_model_extension_facts(snap: Any) -> None:
     ADR-079's ``export_read`` and ``cxx_concept_header_scan``. Each write
     path and the evidence digest call this first; it is idempotent."""
     sync_export_read_fact(snap)
+    _sync_binary_sha256(snap)
     scan = getattr(snap, "cxx_concept_header_scan", None)
     if _blocked_reason(snap, CXX_CONCEPT_HEADER_SCAN.section) is not None:
         return
@@ -235,6 +237,28 @@ def sync_model_extension_facts(snap: Any) -> None:
         # None or {}: no unit is claimed, so a stale stored census must go.
         _drop_extension_fact(snap, CU_STACK_PROTECTOR)
     encode_noexcept_unobserved(snap)
+
+
+def _sync_binary_sha256(snap: Any) -> None:
+    """Write ``binary_sha256`` on the ``binary`` section, or drop a stale one
+    when the field was reset to ``None``."""
+    if _blocked_reason(snap, BINARY_SHA256.section) is not None:
+        return
+    digest = getattr(snap, "binary_sha256", None)
+    if isinstance(digest, str):
+        write_extension_fact(snap, BINARY_SHA256, digest)
+    elif digest is None:
+        _drop_extension_fact(snap, BINARY_SHA256)
+
+
+def _apply_binary_sha256(snap: Any) -> None:
+    """Restore ``binary_sha256``. Missing, blocked or undecodable leaves it
+    ``None``: an unknown identity proves no identical-input exemption, which
+    is the conservative answer, so unlike the facts below a bad value is not
+    refused."""
+    fact = read_extension_fact(snap, BINARY_SHA256)
+    if fact.status is FactStatus.PRESENT and isinstance(fact.value, str):
+        snap.binary_sha256 = fact.value
 
 
 def _unobserved_noexcept(snap: Any) -> list[str]:
@@ -323,6 +347,7 @@ def apply_model_extension_facts(snap: Any) -> None:
     no gap -- what every older snapshot reads as. A stored value that does
     not decode is refused rather than read as that no-gap answer."""
     apply_export_read_fact(snap)
+    _apply_binary_sha256(snap)
     _apply_concept_constraints(snap)
     _apply_stack_protector_census(snap)
     _apply_template_defaults(snap)

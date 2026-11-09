@@ -50,7 +50,12 @@ from __future__ import annotations
 #: v40: an ELF dump records each compilation unit's stack-protector setting
 #: (``cu_stack_protector``) and a DWARF variable's ``DW_AT_alignment``. A warm
 #: entry would carry neither.
-SNAPSHOT_CACHE_VERSION: str = "40"
+#:
+#: v45 (v41-v44 were left to changes in flight at the time): a dump of a
+#: binary file records the binary's SHA-256 (``binary_sha256``, ADR-090
+#: D1(c)). A warm entry would carry none, so a stored dump of it could never
+#: be proven the same input as the binary.
+SNAPSHOT_CACHE_VERSION: str = "45"
 # v35: header-derived snapshots now carry public_header_identifiers (schema
 # v55, extract/public_header_identifiers.py). The key also folds in the
 # snapshot schema version from this version on, so the next schema bump
