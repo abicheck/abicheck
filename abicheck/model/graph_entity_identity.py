@@ -73,7 +73,7 @@ from __future__ import annotations
 
 import enum
 import hashlib
-from collections.abc import Collection
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
@@ -465,17 +465,24 @@ def _with_variant_aliases(
     return GraphEntityIdentity(ident.node_id, ident.state, (*ident.aliases, *kept))
 
 
-def _with_header_spelling_alias(
-    ident: GraphEntityIdentity, decl: object
-) -> GraphEntityIdentity:
+def _with_header_spelling_aliases(
+    idents: list[GraphEntityIdentity], decls: Sequence[object]
+) -> list[GraphEntityIdentity]:
     """A declaration bound to an export spelled in another mangling scheme
     (``extract.header_export_binding``) keeps its header parse's own
     spelling as an alias, so an AST edge naming that spelling joins this
-    node. An alias another declaration owns is dropped as ambiguous below."""
-    spelling = bound_header_spelling(decl)
-    if not ident.resolved or not spelling:
-        return ident
-    return _with_variant_aliases(ident, (spelling,))
+    node. An alias another declaration owns is dropped as ambiguous below.
+
+    Only a declaration whose export fact carries diagnostics can hold one,
+    so every other declaration costs one attribute read."""
+    for idx, decl in enumerate(decls):
+        fact = getattr(decl, "binary_exported_fact", None)
+        if fact is None or not fact.diagnostics:
+            continue
+        spelling = bound_header_spelling(decl)
+        if spelling and idents[idx].resolved:
+            idents[idx] = _with_variant_aliases(idents[idx], (spelling,))
+    return idents
 
 
 def _function_identities(
@@ -524,16 +531,18 @@ def snapshot_identities(
     agree; this leaf module cannot compute it itself without importing
     ``model.snapshot`` (see :class:`SnapshotLike`)."""
     occ = UnresolvedOccurrences()
+    decls = snap.declarations
     functions = tuple(
-        occ.allocate(_with_header_spelling_alias(i, f))
-        for i, f in zip(
-            _function_identities(snap, frozenset(export_names)),
-            snap.declarations.functions,
+        occ.allocate(i)
+        for i in _with_header_spelling_aliases(
+            _function_identities(snap, frozenset(export_names)), decls.functions
         )
     )
     variables = tuple(
-        occ.allocate(_with_header_spelling_alias(identity_for_variable(v), v))
-        for v in snap.declarations.variables
+        occ.allocate(i)
+        for i in _with_header_spelling_aliases(
+            [identity_for_variable(v) for v in decls.variables], decls.variables
+        )
     )
     # An alias is only a second spelling of *this* entity while no other
     # declaration owns that spelling as its canonical id (Mach-O: `exit`'s
