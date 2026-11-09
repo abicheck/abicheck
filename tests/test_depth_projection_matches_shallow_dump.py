@@ -515,3 +515,62 @@ def test_binary_projection_matches_binary_only_dump(
     bin_new = dump(v2_lib, headers=[], version="v2")
     unexplained = _unexplained(Run.of(p_old, p_new), Run.of(bin_old, bin_new))
     assert unexplained == {"only_binary_dump": [], "only_projected": []}, unexplained
+
+
+# ── the residual rules excuse only the finding their evidence names ─────────
+
+
+def _run(
+    findings: set[Finding],
+    *,
+    grouped: frozenset[str] = frozenset(),
+    folded: tuple[tuple[Finding, str], ...] = (),
+) -> Run:
+    empty = frozenset[str]()
+    return Run(findings, set(), (empty, empty), (empty, empty), grouped, folded)
+
+
+_FIELD: Finding = ("struct_field_type_changed", "S")
+_RETARGET_T: Finding = ("typedef_base_changed", "T")
+
+
+@pytest.mark.parametrize(
+    ("oracle", "excused"),
+    [
+        pytest.param(
+            _run({_RETARGET_T}, folded=((_FIELD, "T"),)), True, id="folded_under_T"
+        ),
+        # T retargets, but the oracle folded a different field under it.
+        pytest.param(
+            _run({_RETARGET_T}, folded=((("struct_field_type_changed", "U"), "T"),)),
+            False,
+            id="unrelated_field_folded",
+        ),
+        # The field was folded under U, whose retarget the oracle does not report.
+        pytest.param(
+            _run({_RETARGET_T}, folded=((_FIELD, "U"),)), False, id="unreported_root"
+        ),
+        pytest.param(_run({_RETARGET_T}), False, id="unrelated_typedef_only"),
+    ],
+)
+def test_a_typedef_retarget_excuses_only_the_field_it_folded(
+    oracle: Run, excused: bool
+) -> None:
+    reason = _projected_only_reason(_FIELD, _run(set()), oracle)
+    assert (reason == _TYPEDEF_ROOT) is excused
+
+
+@pytest.mark.parametrize(
+    ("grouped", "excused"),
+    [
+        pytest.param(frozenset({"_Z3fooAVX"}), True, id="in_the_group"),
+        pytest.param(frozenset({"_Z3barAVX"}), False, id="outside_the_group"),
+        pytest.param(frozenset(), False, id="no_group"),
+    ],
+)
+def test_a_dispatch_group_excuses_only_its_own_removals(
+    grouped: frozenset[str], excused: bool
+) -> None:
+    oracle = _run({("cpu_dispatch_isa_dropped", "<isa:avx>")}, grouped=grouped)
+    reason = _projected_only_reason(("func_removed", "_Z3fooAVX"), _run(set()), oracle)
+    assert (reason == _GROUPED_REMOVALS) is excused

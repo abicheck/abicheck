@@ -66,6 +66,7 @@ from ..model.name_heuristics import (
     register_name_heuristic,
 )
 from ..model.restrict_qualifier import strip_restrict
+from ..model.semantic_ir_variable_payload import DWARF_PRODUCER
 from ..model.snapshot import AbiSnapshot
 
 __all__ = [
@@ -563,14 +564,15 @@ GENERATION_ERASED_EXTENT_DRIFT = register_name_heuristic(
 
 
 def _types_from_dwarf(snap: AbiSnapshot) -> bool:
-    """Whether *snap*'s types were read from DWARF: debug info present, not
-    header-parsed, and not a PE image (whose debug info is PDB, read into the
-    same metadata, and never spelled bounded arrays as ``T[]``)."""
-    from ..model.debug_evidence import debug_info_evidence
-
-    if snap.from_headers or snap.pe is not None or snap.platform == "pe":
+    """Whether *snap*'s types were read from DWARF, by positive evidence:
+    every canonical entity names the ``dwarf`` producer. The debug block
+    itself cannot say so (PDB, BTF and CTF write into it too, with
+    ``has_dwarf=True``), and an unknown producer is not demoted."""
+    ir = snap.semantic_ir
+    if snap.from_headers or ir is None:
         return False
-    return debug_info_evidence(snap).basic
+    producers = {entity.producer for entity in ir.occurrences.values()}
+    return producers == {DWARF_PRODUCER}
 
 
 def demote_erased_extent_drift(
@@ -587,9 +589,9 @@ def demote_erased_extent_drift(
 
     *restored* is whether a generation between the two declared it restores
     erased bounds. The stale operand is the older generation's, and only one
-    whose types came from DWARF (not headers, not PDB) wrote ``T[]`` for a
-    bounded array, so a header- or PDB-sourced ``T[]`` (a flexible array
-    member) against ``T[8]`` is never demoted.
+    whose types came from DWARF wrote ``T[]`` for a bounded array, so a
+    ``T[]`` read from headers, PDB, BTF or CTF (a flexible array member), or
+    from an unknown producer, against ``T[8]`` is never demoted.
     """
     if not restored or old_generation == new_generation:
         return changes

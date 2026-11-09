@@ -16,10 +16,12 @@ from __future__ import annotations
 import pytest
 
 from abicheck.checker import compare
+from abicheck.extract.semantic_normalizer import normalize_header_ast
 from abicheck.model import AbiSnapshot, RecordType, TypeField
 from abicheck.model.change_catalog.kinds import ChangeKind
 from abicheck.model.change_catalog.registry import Verdict
 from abicheck.model.dwarf_facts import DwarfMetadata
+from abicheck.model.identity import entity_id_for_type
 from abicheck.policy.generation_drift_demotion import (
     GENERATION_DRIFT_RULE,
     is_erased_extent_drift,
@@ -68,28 +70,43 @@ def test_the_generation_44_row_is_what_declares_it(
     assert erased_extents_restored_between(a, b) is expected
 
 
+#: The producer each debug source stamps on its canonical entities; the
+#: debug block itself is shared storage and names none of them.
+_PRODUCER = {"dwarf": "dwarf", "pdb": "pdb", "btf": "btf", "ctf": "ctf"}
+
+
 def _snapshot(field_type: str, *, source: str = "dwarf") -> AbiSnapshot:
     """A one-record snapshot whose types came from *source*: ``dwarf``,
-    ``headers`` (castxml/clang), ``pdb`` (a PE image's debug info, read into
-    the same metadata) or ``symbols`` (no debug info at all)."""
+    ``pdb``, ``btf`` or ``ctf`` (each writes the same debug block, with
+    ``has_dwarf=True``), ``headers`` (castxml), ``unknown`` (a debug block
+    but no producer recorded) or ``symbols`` (no debug info at all)."""
+    record = RecordType(
+        name="rec",
+        kind="struct",
+        size_bits=128,
+        fields=[
+            TypeField(name="id", type="int", offset_bits=0),
+            TypeField(name="tag", type=field_type, offset_bits=32),
+        ],
+        entity_id=entity_id_for_type((), "rec"),
+    )
     snap = AbiSnapshot(
         library="libx.so.1",
         version="1",
-        types=[
-            RecordType(
-                name="rec",
-                kind="struct",
-                size_bits=128,
-                fields=[
-                    TypeField(name="id", type="int", offset_bits=0),
-                    TypeField(name="tag", type=field_type, offset_bits=32),
-                ],
-            )
-        ],
+        types=[record],
         dwarf=DwarfMetadata(has_dwarf=source != "symbols"),
         platform="pe" if source == "pdb" else "elf",
     )
     snap.from_headers = source == "headers"
+    producer = "castxml" if source == "headers" else _PRODUCER.get(source)
+    if producer is not None:
+        snap.semantic_ir = normalize_header_ast(
+            types=[record],
+            enums=[],
+            typedefs_qualified={},
+            typedef_entity_ids={},
+            producer=producer,
+        )
     return snap
 
 
@@ -129,11 +146,22 @@ def test_the_newer_operand_on_the_old_side_is_read_the_same_way() -> None:
 
 @pytest.mark.parametrize(
     ("stale_generation", "source"),
-    [(44, "dwarf"), (43, "headers"), (43, "pdb"), (43, "symbols")],
+    [
+        (44, "dwarf"),
+        (43, "headers"),
+        (43, "pdb"),
+        (43, "btf"),
+        (43, "ctf"),
+        (43, "unknown"),
+        (43, "symbols"),
+    ],
     ids=[
         "same_generation",
         "header_sourced_stale_side",
         "pdb_sourced_stale_side",
+        "btf_sourced_stale_side",
+        "ctf_sourced_stale_side",
+        "unknown_producer_stale_side",
         "no_debug_info_stale_side",
     ],
 )
