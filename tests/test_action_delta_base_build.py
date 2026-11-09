@@ -669,6 +669,8 @@ def test_a_built_base_is_dumped_with_new_side_evidence_and_becomes_the_delta(
         "branch": "main",
         "gate_verdict": outputs["verdict"],
         "operand_match": "loader_name",
+        # A built base is no stored snapshot: nothing stands in for the base.
+        "snapshot_sha": None,
     }
     assert _delta_record(gate)["outcome"] == "snapshot_missing"
     assert _delta_record(gate)["comparison_role"] == "gate"

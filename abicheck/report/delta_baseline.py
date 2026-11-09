@@ -137,6 +137,7 @@ _KNOWN_FIELDS: frozenset[str] = frozenset(
         "branch",
         "gate_verdict",
         "operand_match",
+        "snapshot_sha",
     }
 )
 _FULL_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
@@ -184,6 +185,16 @@ class DeltaBaseline:
     #: snapshot's library with the PR's (one of :data:`DELTA_OPERAND_MATCHES`);
     #: ``None`` when not recorded.
     operand_match: str | None = None
+    #: ``resolved`` only: the commit whose stored snapshot was used -- the
+    #: base itself, or under the Action's ``delta-base-equivalent-paths`` its
+    #: path-equivalent first-parent ancestor. ``None`` when not recorded and
+    #: for every other outcome (no stored snapshot was used).
+    snapshot_sha: str | None = None
+
+    @property
+    def equivalent_ancestor(self) -> bool:
+        """Whether the snapshot is of a path-equivalent ancestor of the base."""
+        return self.snapshot_sha is not None and self.snapshot_sha != self.base_sha
 
     @classmethod
     def from_mapping(cls, data: object) -> DeltaBaseline:
@@ -223,7 +234,18 @@ class DeltaBaseline:
             branch=_optional(data, "branch", _BRANCH),
             gate_verdict=_optional(data, "gate_verdict", _VERDICT),
             operand_match=_operand_match(data),
+            snapshot_sha=_optional(data, "snapshot_sha", _FULL_SHA),
         )
+        if record.snapshot_sha is not None:
+            if record.outcome != "resolved":
+                raise DeltaBaselineError(
+                    f"snapshot_sha is recorded only for outcome 'resolved', got "
+                    f"{record.outcome!r}: no stored snapshot was used"
+                )
+            if record.base_sha is None:
+                raise DeltaBaselineError(
+                    "snapshot_sha needs base_sha: a snapshot stands in for a named base"
+                )
         if record.comparison_role == "delta":
             if record.outcome not in DELTA_MEASURED_OUTCOMES:
                 raise DeltaBaselineError(
@@ -290,4 +312,5 @@ class DeltaBaseline:
             "branch": self.branch,
             "gate_verdict": self.gate_verdict,
             "operand_match": self.operand_match,
+            "snapshot_sha": self.snapshot_sha,
         }

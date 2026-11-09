@@ -2393,22 +2393,26 @@ with open(out, "w", encoding="utf-8") as fh:
 # (with a warning) when the record would not validate, so a malformed delta
 # value can never turn the gate's run into a usage error. The values go
 # through Python and the report module's own validator, never shell text.
+# A `resolved` record also names the commit whose snapshot was used
+# (`snapshot_sha`: the base, or its path-equivalent ancestor under
+# delta-base-equivalent-paths).
 _write_delta_record() {
-  local role="$1" outcome="$2" gate_verdict="${3:-}" operand_match="${4:-}" out
+  local role="$1" outcome="$2" gate_verdict="${3:-}" operand_match="${4:-}" out snap=""
   [[ -n "${_PY_BIN:-}" ]] || return 0
+  [[ "$outcome" == resolved ]] && snap="${ABICHECK_DELTA_SNAPSHOT_SHA:-}"
   out=$(_mktemp_canonical "$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-delta-baseline.XXXXXX")")
   if (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
 import json, sys
 from abicheck.report.delta_baseline import DeltaBaseline
-role, outcome, sha, branch, verdict, match, out = sys.argv[1:8]
+role, outcome, sha, branch, verdict, match, snap, out = sys.argv[1:9]
 doc = {"comparison_role": role, "outcome": outcome, "base_sha": sha or None,
        "branch": branch or None, "gate_verdict": verdict or None,
-       "operand_match": match or None}
+       "operand_match": match or None, "snapshot_sha": snap or None}
 DeltaBaseline.from_mapping(doc)
 with open(out, "w", encoding="utf-8") as fh:
     json.dump(doc, fh)
 ' "$role" "$outcome" "${ABICHECK_DELTA_BASE_SHA:-}" "${ABICHECK_DELTA_BRANCH:-}" \
-      "$gate_verdict" "$operand_match" "$out") 2>/dev/null; then
+      "$gate_verdict" "$operand_match" "$snap" "$out") 2>/dev/null; then
     printf '%s\n' "$out"
   else
     _warning_annotation "abicheck: could not record the delta-baseline $role block in the JSON report (outcome '$outcome'); the comparison itself is unaffected." >&2
@@ -6047,6 +6051,10 @@ _select_delta_report() {
   # (action.yml records it in the analysis context); both render the notes
   # through the same `delta-notes` wording.
   [[ "$code" == resolved || "$code" == base_built ]] || operand_match=""
+  # The fetched snapshot's commit is named only for a delta measured against
+  # it (it differs from the base under delta-base-equivalent-paths).
+  local snapshot_sha=""
+  [[ "$code" == resolved ]] && snapshot_sha="${ABICHECK_DELTA_SNAPSHOT_SHA:-}"
   [[ -n "${GITHUB_OUTPUT:-}" ]] && printf 'delta-comment-outcome=%s\ndelta-operand-match=%s\n' "$code" "$operand_match" >> "$GITHUB_OUTPUT"
   local line
   while IFS= read -r line; do
@@ -6054,7 +6062,7 @@ _select_delta_report() {
   done < <(cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -m abicheck.frontends.action.cli delta-notes \
       --outcome "$code" --base-sha "${ABICHECK_DELTA_BASE_SHA:-}" \
       --branch "${ABICHECK_DELTA_BRANCH:-main}" --gate-verdict "${VERDICT:-}" \
-      --operand-match "$operand_match" \
+      --operand-match "$operand_match" --snapshot-sha "$snapshot_sha" \
       $([[ "${GITHUB_EVENT_NAME:-}" == merge_group ]] && echo --merge-group) 2>/dev/null)
 }
 

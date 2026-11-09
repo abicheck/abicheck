@@ -950,6 +950,23 @@ inputs:
     description: 'Seconds to wait while the base snapshot is still being built.'
     required: false
     default: '600'
+  delta-base-equivalent-paths:
+    description: >
+      delta-baseline only, opt-in. Globs (one per line, relative to the
+      repository root; '**' crosses directories) naming every path that
+      feeds this library's ABI, e.g. 'include/**', 'src/**',
+      'CMakeLists.txt'. When the PR's exact base commit has no snapshot (a
+      paths-filtered or skipped snapshot run, an expired or failed one), the
+      delta uses the snapshot of its nearest first-parent ancestor (at most
+      50 back, provenance-checked like the base's) provided none of these
+      paths differs between the two; the walk stops at the first ancestor
+      where one does. The comment then reads "vs main@<ancestor>
+      (equivalent to <base>)" and the reports record both commits. The list
+      is the project's claim, not verified by abicheck. A shallow checkout
+      is deepened along the base when needed. Empty (default): exact base
+      only.
+    required: false
+    default: ''
   delta-operand-map:
     description: >
       delta-baseline only: declare that the default-branch snapshot's library
@@ -1394,6 +1411,12 @@ outputs:
   delta-base-sha:
     description: 'delta-baseline only: the base commit the delta was measured against.'
     value: ${{ steps.delta-base.outputs.base-sha }}
+  delta-snapshot-sha:
+    description: >
+      delta-baseline only, when the base snapshot resolved: the commit whose
+      snapshot was fetched -- delta-base-sha itself, or under
+      delta-base-equivalent-paths its path-equivalent ancestor.
+    value: ${{ steps.delta-base.outputs.snapshot-sha }}
   delta-comment-outcome:
     description: >
       delta-baseline only: what the PR comment shows -- the lookup outcome,
@@ -1733,8 +1756,16 @@ runs:
         INPUT_PROFILE: ${{ inputs.delta-profile }}
         INPUT_WAIT_TIMEOUT: ${{ inputs.delta-wait-timeout }}
         INPUT_DESTINATION: ${{ runner.temp }}/abicheck-delta-base
+        INPUT_BASE_EQUIVALENT_PATHS: ${{ inputs.delta-base-equivalent-paths }}
       run: |
         [[ -n "$INPUT_WORKFLOW" ]] || { echo "::error::delta-baseline: main needs delta-snapshot-workflow."; exit 1; }
+        # A malformed declaration is a configuration error, not an
+        # unavailable base: fail here rather than as `lookup_failed` below.
+        if [[ -n "${INPUT_BASE_EQUIVALENT_PATHS//[[:space:]]/}" ]]; then
+          python -m abicheck.frontends.action.cli equivalent-pathspecs \
+            --paths "$INPUT_BASE_EQUIVALENT_PATHS" >/dev/null \
+            || { echo "::error::delta-base-equivalent-paths is not usable (the reason is above)."; exit 1; }
+        fi
         # An unexpected failure of the lookup itself is an unavailable base,
         # not a reason to skip the gate: report it and let the comparison run.
         bash "${{ github.action_path }}/actions/fetch-main-snapshot/run.sh" || {
@@ -1809,6 +1840,7 @@ runs:
         ABICHECK_DELTA_SNAPSHOT: ${{ steps.delta-base.outputs.snapshot-path }}
         ABICHECK_DELTA_MESSAGE: ${{ steps.delta-base.outputs.message }}
         ABICHECK_DELTA_BASE_SHA: ${{ steps.delta-base.outputs.base-sha }}
+        ABICHECK_DELTA_SNAPSHOT_SHA: ${{ steps.delta-base.outputs.snapshot-sha }}
         ABICHECK_DELTA_BRANCH: ${{ github.event.repository.default_branch }}
         # delta-on-missing-base: build runs inside run.sh, after the gate
         # comparison and in a sandbox (action/build-delta-base.sh).
@@ -1881,6 +1913,7 @@ runs:
         ABICHECK_CTX_DELTA_BASE_SHA: ${{ steps.run-abicheck.outputs.delta-comment-outcome && steps.delta-base.outputs.base-sha || '' }}
         ABICHECK_CTX_GATE_VERDICT: ${{ steps.run-abicheck.outputs.delta-comment-outcome && steps.run-abicheck.outputs.verdict || '' }}
         ABICHECK_CTX_DELTA_OPERAND_MATCH: ${{ steps.run-abicheck.outputs.delta-operand-match }}
+        ABICHECK_CTX_DELTA_SNAPSHOT_SHA: ${{ steps.run-abicheck.outputs.delta-comment-outcome == 'resolved' && steps.delta-base.outputs.snapshot-sha || '' }}
       run: bash "${{ github.action_path }}/action/pr-report-delivery.sh" stage
 
     - name: Upload PR report artifact

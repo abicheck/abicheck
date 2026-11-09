@@ -350,8 +350,13 @@ INVENTORY: tuple[ToolLookup, ...] = (
         sites=(
             "argv:abicheck/workflows/provenance.py:git",
             "argv:abicheck/workflows/changed_paths.py:git",
+            "argv:abicheck/frontends/action/cli_main_snapshot.py:git",
         ),
-        without="Run provenance and changed-path selection; a missing git leaves those fields empty, not facts.",
+        without=(
+            "Run provenance, changed-path selection and the delta's "
+            "path-equivalent ancestor walk; a missing git leaves those fields "
+            "empty (the walk reads as history_unavailable), not facts."
+        ),
     ),
     # --- fact switches -------------------------------------------------------
     ToolLookup(
@@ -462,6 +467,7 @@ INVENTORY: tuple[ToolLookup, ...] = (
                 "ABICHECK_CTX_DELTA_BASE_SHA",
                 "ABICHECK_CTX_GATE_VERDICT",
                 "ABICHECK_CTX_DELTA_OPERAND_MATCH",
+                "ABICHECK_CTX_DELTA_SNAPSHOT_SHA",
             )
         ),
         without="Progress output, memory tracing and Action run provenance; reports carry them, facts do not.",

@@ -166,6 +166,10 @@ class AnalysisContext:
     #: How the snapshot's library was paired with the PR's
     #: (``abicheck.workflows.delta_operand.MatchRule``), when the delta resolved.
     delta_operand_match: str = ""
+    #: The commit whose stored snapshot the delta was measured against, when
+    #: it is a path-equivalent ancestor of ``delta_base_sha`` (the Action's
+    #: ``delta-base-equivalent-paths``); recorded only for a ``resolved`` delta.
+    delta_snapshot_sha: str = ""
 
     _PATTERNS = {
         "tested_sha": _FULL_SHA,
@@ -184,6 +188,7 @@ class AnalysisContext:
         "delta_base_sha": _FULL_SHA,
         "gate_verdict": _VERDICT,
         "delta_operand_match": _IDENTIFIER,
+        "delta_snapshot_sha": _FULL_SHA,
     }
 
     #: Written only when non-empty (see the fields' comment).
@@ -192,6 +197,7 @@ class AnalysisContext:
         "delta_base_sha",
         "gate_verdict",
         "delta_operand_match",
+        "delta_snapshot_sha",
     )
 
     @classmethod

@@ -1858,6 +1858,28 @@
       "allOf": [
         {
           "if": {
+            "required": [
+              "snapshot_sha"
+            ],
+            "properties": {
+              "snapshot_sha": {
+                "type": "string"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "outcome": {
+                "const": "resolved"
+              },
+              "base_sha": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "if": {
             "properties": {
               "comparison_role": {
                 "const": "delta"
@@ -1978,6 +2000,14 @@
             null
           ],
           "description": "`delta` reports only: how the default-branch snapshot's library was paired with this PR's library before the delta comparison ran (the operand-identity rule, the Action's `delta-operand-match` output): `declared` (`delta-operand-map`), `loader_name` (same SONAME/install name), `loader_name_version` (loader names differ only by version), `file_name` (same path or file name, no loader name on one side), `file_name_version` (file names differ only by version). `null` on a `gate` report: the gate runs before the operands are paired. An `operand_*` refusal is never recorded here, because no delta comparison runs then."
+        },
+        "snapshot_sha": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$",
+          "description": "Outcome `resolved` only: the default-branch commit whose stored snapshot was used (the Action's `delta-snapshot-sha` output). Equal to `base_sha` for an exact snapshot; a different commit when the Action's `delta-base-equivalent-paths` substituted the nearest first-parent ancestor of `base_sha` with a snapshot, under which no declared path differs from `base_sha` (a project claim the CLI does not verify; the PR comment reads `vs <branch>@<snapshot_sha> (equivalent to <base_sha>)`). `null` (or absent, in a block written before the field) for every other outcome, including `base_built` (no stored snapshot was used), and when not recorded. Requires `base_sha`."
         }
       }
     },

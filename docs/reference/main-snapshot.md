@@ -11,6 +11,7 @@ depends_on:
   - abicheck/frontends/action/delta_base_dump.py
   - action/build-delta-base.sh
   - abicheck/frontends/action/main_snapshot_cache.py
+  - abicheck/frontends/action/main_snapshot_ancestor.py
 lifecycle: active
 generated: false
 ---
@@ -72,10 +73,12 @@ Chooses the base commit by an exact rule, then finds the snapshot uploaded
 | `profile` | — | As in `main-snapshot`. |
 | `wait-timeout` | `600` | Seconds to wait while the base's snapshot run is still in progress. Ignored with `cache`. |
 | `destination` | runner temp | Parent directory; the snapshot is extracted into a new subdirectory of it. |
-| `github-token` | `github.token` | Needs `actions: read` (`artifact` only). |
+| `base-equivalent-paths` | — | Opt-in: globs that feed the ABI. When the exact base has no snapshot, use an equivalent ancestor's ([below](#path-equivalent-ancestor-base-equivalent-paths)). |
+| `github-token` | `github.token` | Needs `actions: read` (`artifact`; with `cache` only for `base-equivalent-paths`). |
 
-Outputs: `outcome`, `base-sha`, `snapshot-path` (when resolved), `message`
-(one line for a comment or summary).
+Outputs: `outcome`, `base-sha`, `snapshot-path` and `snapshot-sha` (when
+resolved), `ancestor-walk` (when an ancestor walk ran), `message` (one line
+for a comment or summary).
 
 A snapshot is accepted only if the run that uploaded it is a `push`,
 `workflow_dispatch` or `schedule` run of `workflow` in this repository, on
@@ -103,6 +106,61 @@ other outcome may be read as "no changes".
 | `snapshot_missing` | The base's snapshot run succeeded, but no artifact is listed: expired, deleted or never uploaded (the API cannot tell which). | Push or *Update branch*; check the snapshot workflow's upload step. |
 | `untrusted_source` | An artifact with the right name came from another workflow, event, branch or commit; with `cache`, the entry's `provenance.json` names another repository, ref, commit or key. | Investigate; it is never used. |
 | `lookup_failed` | A GitHub API call or the download failed, or the artifact held no `snapshot.json`; with `cache`, the entry is malformed (unexpected or non-regular files, over the size limit, unreadable JSON). | Retry; this is not "absent". |
+
+### Path-equivalent ancestor (`base-equivalent-paths`)
+
+A snapshot workflow with a `paths:` filter skips the commits that do not touch
+the library, so a PR's exact base often has no snapshot. With
+`base-equivalent-paths` you declare which paths feed the ABI:
+
+```yaml
+      - uses: abicheck/abicheck/actions/fetch-main-snapshot@v1
+        with:
+          workflow: abi-main.yml
+          base-equivalent-paths: |
+            include/**
+            src/**
+            CMakeLists.txt
+```
+
+One glob per line, relative to the repository root (`*` stays within a
+directory, `**` crosses directories; `#` starts a comment line). A leading
+`:`, `!` or `/`, a `..` component, or a control character is refused, and the
+step fails.
+
+When the base's outcome is `base_not_snapshotted`, `snapshot_missing`,
+`base_expired` or `base_failed`, the Action walks the base's first-parent
+history, nearest first, at most 50 commits. It uses the first ancestor that
+has a snapshot passing the same checks as an exact one, applied to the
+**ancestor's** SHA, provided none of the declared paths differs between it
+and the base (`git diff --name-only <ancestor> <base> -- <paths>`). The walk
+stops at the first ancestor where one does: a snapshot from before an ABI
+change is never used, even if a later revert restored the files. A
+`base_pending`, `untrusted_source` or `lookup_failed` base is not walked
+past.
+
+On success `outcome` is `resolved` and `snapshot-sha` names the ancestor
+(`base-sha` is still the base). The message reads "Changes in this PR vs
+`main@<ancestor>` (equivalent to `<base>`)". Otherwise the base's own
+outcome stands, and `ancestor-walk` says why no ancestor qualified:
+
+| `ancestor-walk` | Meaning |
+|---|---|
+| `found` | An equivalent ancestor's snapshot was selected; `outcome` says whether it could be used. |
+| `paths_changed` | A declared path differs at the named ancestor; no nearer one had a snapshot. |
+| `limit_reached` | 50 equivalent ancestors, none with a snapshot. |
+| `history_ended` | The history reached its root commit first. |
+| `history_unavailable` | The checkout is shallow and could not be deepened along the base (`git fetch --deepen`). Use `fetch-depth: 0`. |
+| `lookup_failed` | A candidate's lookup failed; the walk does not step past an unknown. |
+
+With `storage: cache`, the Action learns which commits have an entry from the
+caches list API (exact keys in `refs/heads/<branch>`, so it needs `actions:
+read`). It restores only the chosen exact key and checks that the entry's
+`provenance.json` names the ancestor.
+
+The path list is the project's claim, not something abicheck verifies: a
+path that feeds the ABI but is missing from the list can make a stale
+snapshot stand in. With the input unset nothing is ever substituted.
 
 ## Example
 
@@ -222,8 +280,17 @@ the snapshot is unavailable the comment shows the gate's report under a note
 naming the outcome. The step's exit code, `verdict` and every other output
 come from the gate in all cases; `delta-on-missing-base: fail` adds a separate
 failing step. Outputs: `delta-outcome` (the lookup's outcome),
-`delta-base-sha`, `delta-operand-match`, and `delta-comment-outcome` (what
-the comment shows: the lookup outcome, or one of the outcomes below).
+`delta-base-sha`, `delta-snapshot-sha`, `delta-operand-match`, and
+`delta-comment-outcome` (what the comment shows: the lookup outcome, or one
+of the outcomes below).
+
+`delta-base-equivalent-paths` is the main Action's spelling of
+[`base-equivalent-paths`](#path-equivalent-ancestor-base-equivalent-paths).
+When it substitutes an ancestor, the comment heading reads "Changes in this
+PR vs `main@<ancestor>` (equivalent to `<base>`)" over a note that the path
+list is the project's claim. The direct comment and the fork publisher word it
+identically. `delta-snapshot-sha` names the ancestor. A malformed value
+fails the lookup step instead of reading as an unavailable base.
 
 ### Operand identity: is the snapshot this PR's library?
 
@@ -367,7 +434,11 @@ in [output formats](../use/output-formats.md#gate-or-delta-comparison-delta_base
 | The gate's (the `output-file`, the summary, the SARIF/JUnit sources) | `gate` (`decides_exit_code: true`) | the lookup's outcome, or `unsupported_operand` for a directory/package comparison | `null` -- its own `verdict` is the gate's | `null` -- the gate runs before the operands are paired |
 | The delta's (the one the comment renders, and the one staged for a fork publisher) | `delta` (`decides_exit_code: false`) | `resolved`, or `base_built` when `delta-on-missing-base: build` built the base in this job | the gate's verdict | how the snapshot's library was paired with `new-library` (the `delta-operand-match` output) |
 
-`base_sha` and `branch` are the base commit and default branch on both. The
+`base_sha` and `branch` are the base commit and default branch on both. On a
+`resolved` record, `snapshot_sha` names the commit whose stored snapshot was
+used: `base_sha` itself, or under `delta-base-equivalent-paths` its
+path-equivalent ancestor (the `delta-snapshot-sha` output). It is `null` for
+every other outcome, `base_built` included. The
 gate's block records the lookup as it stood when the gate ran: if the delta
 comparison then produces no report, the comment falls back to the gate's
 report under `rerun_failed`, which the gate's block does not show; the same

@@ -25,6 +25,7 @@ files; every decision is in :mod:`~abicheck.frontends.action.main_snapshot`.
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -41,6 +42,15 @@ from .main_snapshot import (
     resolve_snapshot,
     select_base_commit,
     snapshot_artifact_name,
+)
+from .main_snapshot_ancestor import (
+    MAX_ANCESTORS,
+    WALKABLE_OUTCOMES,
+    AncestorFact,
+    EquivalentPathsError,
+    equivalent_pathspecs,
+    plan_ancestor_walk,
+    walk_message,
 )
 from .main_snapshot_cache import (
     DEFAULT_MAX_ENTRY_BYTES,
@@ -129,6 +139,11 @@ def select_base_cmd(
 @click.option("--artifact-name", required=True)
 @click.option("--merge-group", is_flag=True, default=False)
 @click.option("--lookup-failed", is_flag=True, default=False)
+@click.option(
+    "--equivalent-to",
+    default="",
+    help="The PR's base commit, when --base-sha is a path-equivalent ancestor of it.",
+)
 @click.option("--github-output", type=click.Path(path_type=Path), default=None)
 def resolve_snapshot_cmd(
     artifacts: Path,
@@ -140,12 +155,15 @@ def resolve_snapshot_cmd(
     artifact_name: str,
     merge_group: bool,
     lookup_failed: bool,
+    equivalent_to: str,
     github_output: Path | None,
 ) -> None:
     """Pick the snapshot artifact for --base-sha; exit 3 with an outcome when none.
 
     ARTIFACTS is an ``actions/artifacts?name=`` response, RUNS the snapshot
-    workflow's runs at that SHA in every status.
+    workflow's runs at that SHA in every status. With --equivalent-to, the
+    provenance checks still apply to --base-sha (the ancestor whose snapshot
+    is used), and the message names both commits.
     """
     resolution = resolve_snapshot(
         _rows(artifacts, "artifacts"),
@@ -168,9 +186,10 @@ def resolve_snapshot_cmd(
         run_id=resolution.run_id,
         message=outcome_message(
             resolution.outcome,
-            sha=base_sha,
+            sha=equivalent_to or base_sha,
             branch=branch,
             subject="merge-queue entry" if merge_group else "PR",
+            snapshot_sha=base_sha if equivalent_to else "",
         ),
     )
     click.echo(resolution.message)
@@ -187,6 +206,11 @@ def resolve_snapshot_cmd(
 @click.option(
     "--operand-match", default="", help="delta-operand's matched rule, if any."
 )
+@click.option(
+    "--snapshot-sha",
+    default="",
+    help="The commit whose snapshot was compared, when not --base-sha itself.",
+)
 def delta_notes_cmd(
     outcome: str,
     base_sha: str,
@@ -194,6 +218,7 @@ def delta_notes_cmd(
     gate_verdict: str,
     merge_group: bool,
     operand_match: str,
+    snapshot_sha: str,
 ) -> None:
     """Print the delta-baseline comment notes, one per line."""
     try:
@@ -204,6 +229,7 @@ def delta_notes_cmd(
             gate_verdict=gate_verdict,
             merge_group=merge_group,
             operand_match=operand_match,
+            snapshot_sha=snapshot_sha,
         )
     except ValueError as exc:
         raise click.UsageError(str(exc)) from exc
@@ -265,6 +291,125 @@ def delta_base_dump_args_cmd(
         click.echo(str(exc), err=True)
         sys.exit(EXIT_REFUSED)
     sys.stdout.write("".join(f"{tok}\0" for tok in argv))
+
+
+# ── base-equivalent-paths: the path-equivalent ancestor rule ────────────────
+
+
+@action_cli.command("equivalent-pathspecs")
+@click.option("--paths", required=True, help="The base-equivalent-paths value.")
+def equivalent_pathspecs_cmd(paths: str) -> None:
+    """Print the git pathspecs of a base-equivalent-paths value, NUL-separated.
+
+    Exits 3 with the reason on stderr when the value is not a usable
+    declaration; prints nothing for an empty one (the rule is off).
+    """
+    try:
+        specs = equivalent_pathspecs(paths)
+    except EquivalentPathsError as exc:
+        click.echo(f"base-equivalent-paths: {exc}", err=True)
+        sys.exit(EXIT_REFUSED)
+    sys.stdout.write("".join(f"{spec}\0" for spec in specs))
+
+
+@action_cli.command("ancestor-walkable")
+@click.argument("outcome")
+def ancestor_walkable_cmd(outcome: str) -> None:
+    """Exit 0 when the exact base's OUTCOME lets base-equivalent-paths walk, else 3."""
+    if outcome not in {o.value for o in WALKABLE_OUTCOMES}:
+        sys.exit(EXIT_REFUSED)
+
+
+def _git(*args: str) -> subprocess.CompletedProcess[str]:
+    """Run git in the checkout; a missing git is a failed call, not a crash."""
+    try:
+        return subprocess.run(
+            ["git", *args], capture_output=True, text=True, check=False
+        )
+    except OSError as exc:
+        return subprocess.CompletedProcess(["git", *args], 127, "", str(exc))
+
+
+def _ancestor_facts(
+    base: str, specs: tuple[str, ...], limit: int
+) -> tuple[list[AncestorFact], bool]:
+    """The base's first-parent ancestors (nearest first, up to the first path
+    change) and whether the list ends because the history does.
+
+    Raises :class:`click.ClickException` when git cannot answer (the base is
+    not in this clone).
+    """
+    listed = _git("rev-list", "--first-parent", f"--max-count={limit + 1}", base)
+    if listed.returncode != 0:
+        raise click.ClickException(
+            f"git rev-list {base[:12]} failed: {listed.stderr.strip()}"
+        )
+    shas = listed.stdout.split()[1:]
+    facts: list[AncestorFact] = []
+    for sha in shas:
+        diff = _git("diff", "--name-only", "--no-renames", sha, base, "--", *specs)
+        if diff.returncode != 0:
+            # The tree is not here (a partial or broken clone): what follows
+            # is unknown, not unchanged.
+            return facts, False
+        changed = tuple(diff.stdout.splitlines())
+        facts.append(AncestorFact(sha, changed))
+        if changed:
+            return facts, True
+    if len(shas) >= limit:
+        return facts, True
+    last = shas[-1] if shas else base
+    shallow_file = _git("rev-parse", "--git-path", "shallow").stdout.strip()
+    boundary: set[str] = set()
+    if shallow_file and Path(shallow_file).is_file():
+        boundary = set(Path(shallow_file).read_text(encoding="utf-8").split())
+    if last in boundary:
+        return facts, False
+    parents = _git("rev-list", "--parents", "-n1", last).stdout.split()[1:]
+    return facts, not parents
+
+
+@action_cli.command("plan-ancestor-walk")
+@click.option("--base-sha", required=True)
+@click.option("--paths", required=True, help="The base-equivalent-paths value.")
+@click.option("--branch", default="main")
+@click.option("--limit", type=click.IntRange(1, MAX_ANCESTORS), default=MAX_ANCESTORS)
+@click.option("--github-output", type=click.Path(path_type=Path), required=True)
+def plan_ancestor_walk_cmd(
+    base_sha: str, paths: str, branch: str, limit: int, github_output: Path
+) -> None:
+    """Write the ancestors whose snapshot may stand in for --base-sha.
+
+    Runs ``git`` in the current directory (the checkout). Writes one
+    ``candidate=<sha>`` line per ancestor, nearest first, then
+    ``exhausted=<walk result>`` and ``exhausted-message=...`` for the case
+    none of them has a snapshot.
+    """
+    try:
+        specs = equivalent_pathspecs(paths)
+    except EquivalentPathsError as exc:
+        raise click.UsageError(f"base-equivalent-paths: {exc}") from exc
+    if not specs:
+        raise click.UsageError("base-equivalent-paths is empty")
+    facts, complete = _ancestor_facts(base_sha, specs, limit)
+    plan = plan_ancestor_walk(facts, limit=limit, history_complete=complete)
+    message = walk_message(
+        plan.exhausted,
+        base_sha=base_sha,
+        branch=branch,
+        changed_at=plan.changed_at,
+        changed_paths=plan.changed_paths,
+        tried=len(plan.candidates),
+    )
+    with github_output.open("a", encoding="utf-8") as handle:
+        for sha in plan.candidates:
+            handle.write(f"candidate={sha}\n")
+        handle.write(f"exhausted={plan.exhausted.value}\n")
+        handle.write(f"exhausted-message={' '.join(message.splitlines())}\n")
+    click.echo(
+        f"{len(plan.candidates)} path-equivalent ancestor(s) of {base_sha[:7]}; "
+        f"then {plan.exhausted.value}"
+    )
 
 
 # ── storage: cache ──────────────────────────────────────────────────────────
@@ -359,6 +504,11 @@ def cache_scope_check_cmd(
 @click.option("--destination", type=click.Path(path_type=Path), required=True)
 @click.option("--max-entry-bytes", type=int, default=DEFAULT_MAX_ENTRY_BYTES)
 @click.option("--max-total-bytes", type=int, default=DEFAULT_MAX_TOTAL_BYTES)
+@click.option(
+    "--equivalent-to",
+    default="",
+    help="The PR's base commit, when --base-sha is a path-equivalent ancestor of it.",
+)
 @click.option("--github-output", type=click.Path(path_type=Path), default=None)
 def verify_cached_snapshot_cmd(
     directory: Path,
@@ -371,6 +521,7 @@ def verify_cached_snapshot_cmd(
     destination: Path,
     max_entry_bytes: int,
     max_total_bytes: int,
+    equivalent_to: str,
     github_output: Path | None,
 ) -> None:
     """Check a restored cache entry; exit 3 with an outcome when it is unusable."""
@@ -384,12 +535,14 @@ def verify_cached_snapshot_cmd(
         destination=destination,
         max_entry_bytes=max_entry_bytes,
         max_total_bytes=max_total_bytes,
+        equivalent_to=equivalent_to.strip(),
     )
     _emit(
         github_output,
         outcome=result.outcome.value,
         message=result.message,
         snapshot_path=result.snapshot_path,
+        snapshot_sha=base_sha if result.ok else "",
     )
     click.echo(f"{result.outcome.value}: {result.reason}")
     if not result.ok:
