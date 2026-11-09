@@ -24,7 +24,7 @@ from tests._edit_corpus_expect import ExecTruth, Expectation, Reconciled, reconc
 from tests._edit_corpus_harness import BaselineCache, abicheck_answer, build_new
 from tests._edit_corpus_operators import EditOp
 from tests._edit_corpus_seeds import Seed
-from tests._edit_corpus_toolchains import capability_gap, unavailable
+from tests._edit_corpus_toolchains import capability_gap, unavailable, uses_libstdcxx
 
 
 @dataclass
@@ -95,6 +95,22 @@ def seed_conflict(seed: Seed, config: Config) -> str | None:
     return None
 
 
+def stdlib_mismatch(seed: Seed, config: Config) -> str | None:
+    """A ``std::`` seed whose producer and consumer use different C++ libraries.
+
+    A consumer built against libc++ cannot link a libstdc++ ``std::string``
+    API (or the reverse), whatever the edit; that pairing is not buildable.
+    """
+    if seed.name != "cxx_stdlib" or config.consumer_tc == config.producer:
+        return None
+    if uses_libstdcxx(config.producer) != uses_libstdcxx(config.consumer_tc):
+        return (
+            f"{config.producer.id} and {config.consumer_tc.id} use different C++ standard "
+            "libraries; the std::string seed cannot link across them"
+        )
+    return None
+
+
 def run_cell(op: EditOp, seed: Seed, config: Config, ctx: CellContext) -> CellResult:
     reason = op.requires(config) or seed_conflict(seed, config)
     if reason or not op.applies_to(seed) or seed.lang != config.lang:
@@ -105,7 +121,11 @@ def run_cell(op: EditOp, seed: Seed, config: Config, ctx: CellContext) -> CellRe
             "not-applicable",
             reason or "seed/language mismatch",
         )
-    reason = unavailable(config) or capability_gap(op, config)
+    reason = (
+        unavailable(config)
+        or capability_gap(op, config)
+        or stdlib_mismatch(seed, config)
+    )
     if reason is None and op.rebuild is not None:
         reason = unavailable(replace(config, flags=op.new_flags(config.flags)))
     if reason:

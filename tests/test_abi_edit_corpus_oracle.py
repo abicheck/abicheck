@@ -60,25 +60,23 @@ def _proc(
         ("/opt/rt", "/lib/new" + os.pathsep + "/opt/rt"),
     ],
 )
+@pytest.mark.parametrize("exe", ["/x/consumer", "/x/other"])
 def test_consumer_runs_prepend_the_library_to_an_inherited_search_path(
-    monkeypatch: pytest.MonkeyPatch, inherited: str | None, want: str
+    monkeypatch: pytest.MonkeyPatch, inherited: str | None, want: str, exe: str
 ) -> None:
-    seen: dict[str, str] = {}
-
-    def fake_run(cmd: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
-        env = kw["env"]
-        assert isinstance(env, dict)
-        seen.update(env)
-        return _proc()
-
     if inherited is None:
         monkeypatch.delenv("LD_LIBRARY_PATH", raising=False)
     else:
         monkeypatch.setenv("LD_LIBRARY_PATH", inherited)
-    monkeypatch.setattr(ex.subprocess, "run", fake_run)
-    ex._run(Path("/x/consumer"), Path("/lib/new"))
-    assert seen["LD_LIBRARY_PATH"] == want
-    assert seen["LD_BIND_NOW"] == "1"
+    runner = StrictProcessRunner()
+    runner.expect(
+        argv=[str(Path(exe))],
+        env_contains={"LD_LIBRARY_PATH": want, "LD_BIND_NOW": "1"},
+        returns=_proc(),
+    )
+    runner.install(monkeypatch, ex.subprocess, "run")
+    ex._run(Path(exe), Path("/lib/new"))
+    runner.assert_exhausted()
 
 
 def test_a_hanging_oracle_compile_fails_naming_the_command(
@@ -480,7 +478,10 @@ def _rec_layout(pack: int | None) -> tuple[int, ...]:
     ns: dict[str, object] = {"_fields_": fields}
     if pack is not None:
         ns["_pack_"] = pack
-        ns["_layout_"] = "gcc-sysv"  # explicit, as Python 3.14 requires with _pack_
+        # Python 3.14 requires an explicit _layout_ with _pack_ and accepts only
+        # "ms" there; for these int/double/char members MS packing gives gcc's
+        # -fpack-struct offsets (ctypes' own docs on _pack_).
+        ns["_layout_"] = "ms"
     rec = type("rec", (ctypes.Structure,), ns)
     return (ctypes.sizeof(rec), *(getattr(rec, n).offset for n, _ in fields))
 
@@ -618,3 +619,140 @@ def test_fixed_matrix_checks_producer_and_header_driver_widths(
             v1._skip_wrong_width(
                 seed, _cfg("c++", evidence=evidence, flags=Flags(bits=bits))
             )
+
+
+# --- crashes are never capabilities or source breaks ---------------------------
+
+_CLANG_CRASH = _proc(
+    1,
+    stderr="PLEASE submit a bug report to https://github.com/llvm/llvm-project/issues/\n"
+    "clang: error: clang frontend command failed due to signal\n",
+)
+
+
+@pytest.mark.usefixtures("clean_probe_caches")
+@pytest.mark.parametrize(
+    ("outcome", "broken"),
+    [
+        (_proc(0), False),
+        (_proc(1, stderr="error: invalid value 'c2y' in '-std=c2y'\n"), False),
+        (_CLANG_CRASH, True),
+        (subprocess.TimeoutExpired(["cc"], 60), True),
+    ],
+)
+def test_standard_probe_fails_on_a_crash_and_skips_only_a_rejected_spelling(
+    monkeypatch: pytest.MonkeyPatch, outcome: object, broken: bool
+) -> None:
+    def run(cmd: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
+        if isinstance(outcome, BaseException):
+            raise outcome
+        assert isinstance(outcome, subprocess.CompletedProcess)
+        return outcome
+
+    tcs.std_flag_for_driver.cache_clear()
+    monkeypatch.setattr(tcs.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(tcs.subprocess, "run", run)
+    try:
+        if broken:
+            with pytest.raises(tcs.ToolchainBroken):
+                tcs.std_flag_for_driver("cc", STANDARD_BY_NAME["c17"])
+        else:
+            got = tcs.std_flag_for_driver("cc", STANDARD_BY_NAME["c17"])
+            assert got == ("c17" if outcome.returncode == 0 else None)  # type: ignore[union-attr]
+    finally:
+        tcs.std_flag_for_driver.cache_clear()
+
+
+@pytest.mark.parametrize(
+    ("installed", "outcome", "expected"),
+    [
+        (False, None, False),
+        (True, _proc(0), True),
+        (True, _proc(1, stderr="error: #error not libstdc++\n"), False),
+        (True, _CLANG_CRASH, "broken"),
+        (True, subprocess.TimeoutExpired(["c++"], 60), "broken"),
+    ],
+)
+def test_libstdcxx_probe_distinguishes_absent_other_library_and_broken(
+    monkeypatch: pytest.MonkeyPatch, installed: bool, outcome: object, expected: object
+) -> None:
+    tc = Toolchain("clang", 96, "/x/clang-96", "/x/clang++-96")
+
+    def run(cmd: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
+        assert cmd[0] == "/x/clang++-96"
+        if isinstance(outcome, BaseException):
+            raise outcome
+        assert isinstance(outcome, subprocess.CompletedProcess)
+        return outcome
+
+    tcs.uses_libstdcxx.cache_clear()
+    monkeypatch.setattr(tcs.shutil, "which", lambda name: name if installed else None)
+    monkeypatch.setattr(tcs.subprocess, "run", run)
+    try:
+        if expected == "broken":
+            with pytest.raises(tcs.ToolchainBroken):
+                tcs.uses_libstdcxx(tc)
+        else:
+            assert tcs.uses_libstdcxx(tc) is expected
+    finally:
+        tcs.uses_libstdcxx.cache_clear()
+
+
+def test_a_crashed_new_header_compile_is_a_harness_error_not_a_source_break(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    src = tmp_path / "call.c"
+    src.write_text("int main(void) { return 0; }\n", encoding="utf-8")
+    consumers = ex.ConsumerSet(
+        {"call": tmp_path / "call"}, {"call": RunResult(0, "", "")}
+    )
+    monkeypatch.setattr(ex.ExecutionOracle, "_old", lambda self, *a: (consumers, {}))
+    monkeypatch.setattr(ex, "_run", lambda exe, lib: RunResult(0, "", ""))
+    monkeypatch.setattr(ex, "run_probe", lambda *a: {})
+    monkeypatch.setattr(ex, "execution_unavailable", lambda config: None)
+    monkeypatch.setattr(ex, "_compile", lambda cmd, what: _CLANG_CRASH)
+    built = Built(tmp_path, tmp_path / "libedit.so", tmp_path / "edit_seed.h", None)
+    oracle = ExecutionOracle(tmp_path)
+    with pytest.raises(CompileError, match="crashed") as info:
+        oracle.truth(C_SEED, _cfg(), built, built, {}, Flags(), "t")
+    assert "--- call.c ---" in str(info.value) and "frontend command failed" in str(
+        info.value
+    )
+    # The same compiler exiting 1 on a real diagnostic is a source break.
+    monkeypatch.setattr(
+        ex,
+        "_compile",
+        lambda cmd, what: _proc(1, stderr="call.c:1: error: too few arguments\n"),
+    )
+    truth = oracle.truth(C_SEED, _cfg(), built, built, {}, Flags(), "t")
+    assert truth.source_break and truth.signals == (
+        "source call: error: too few arguments",
+    )
+
+
+@pytest.mark.parametrize(
+    ("producer_libstdcxx", "consumer_libstdcxx", "seed", "blocked"),
+    [
+        (True, False, "cxx_stdlib", True),
+        (False, True, "cxx_stdlib", True),
+        (True, True, "cxx_stdlib", False),
+        (True, False, "cxx_classes", False),
+    ],
+)
+def test_a_std_seed_needs_one_cxx_library_on_both_sides(
+    monkeypatch: pytest.MonkeyPatch,
+    producer_libstdcxx: bool,
+    consumer_libstdcxx: bool,
+    seed: str,
+    blocked: bool,
+) -> None:
+    import tests._edit_corpus_cells as cells
+
+    consumer = Toolchain("clang", 18, "clang", "clang++")
+    monkeypatch.setattr(
+        cells,
+        "uses_libstdcxx",
+        lambda tc: producer_libstdcxx if tc == GCC else consumer_libstdcxx,
+    )
+    reason = cells.stdlib_mismatch(SEED_BY_NAME[seed], _cfg("c++", consumer=consumer))
+    assert (reason is not None) is blocked

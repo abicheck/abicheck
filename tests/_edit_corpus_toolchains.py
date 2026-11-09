@@ -158,8 +158,14 @@ def std_flag_for_driver(driver: str, std: Standard) -> str | None:
                 check=False,
                 timeout=_PROBE_TIMEOUT,
             )
-        except (OSError, subprocess.TimeoutExpired):
-            return None
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            # The driver is on PATH: one that cannot start or hangs is broken,
+            # not missing the standard.
+            raise ToolchainBroken(f"{driver} -std={spelling}: {exc}") from exc
+        if compiler_crashed(proc):
+            raise ToolchainBroken(
+                f"{driver} -std={spelling} crashed (exit {proc.returncode}):\n{proc.stderr}"
+            )
         if proc.returncode == 0:
             return spelling
     return None
@@ -182,7 +188,7 @@ _CRASH = re.compile(
 )
 
 
-def _crashed(proc: subprocess.CompletedProcess[str]) -> bool:
+def compiler_crashed(proc: subprocess.CompletedProcess[str]) -> bool:
     """A compiler that died on a signal or printed a crash report crashed."""
     return proc.returncode < 0 or _CRASH.search(proc.stderr) is not None
 
@@ -217,7 +223,7 @@ def driver_width(
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise ToolchainBroken(f"{driver} {' '.join(flags)}: {exc}") from exc
-    if _crashed(proc):
+    if compiler_crashed(proc):
         raise ToolchainBroken(
             f"{driver} {' '.join(flags)} crashed: {proc.stderr.strip()[-400:]}"
         )
@@ -286,7 +292,7 @@ def _flags_build(
                 raise ToolchainBroken(
                     _failure_report(cmd, src, f"did not run: {exc}", "")
                 ) from exc
-            if _crashed(proc):
+            if compiler_crashed(proc):
                 raise ToolchainBroken(
                     _failure_report(
                         cmd, src, f"crashed (exit {proc.returncode})", proc.stderr
@@ -362,7 +368,13 @@ def _flags_unavailable(tc: Toolchain, lang: str, flags: Flags) -> str | None:
 
 @functools.cache
 def uses_libstdcxx(tc: Toolchain) -> bool:
-    """Whether *tc*'s C++ driver compiles against libstdc++ (``__GLIBCXX__``)."""
+    """Whether *tc*'s C++ driver compiles against libstdc++ (``__GLIBCXX__``).
+
+    False for a driver that is not installed or uses another library; a driver
+    that is installed but cannot run, hangs or crashes raises ``ToolchainBroken``.
+    """
+    if shutil.which(tc.cxx) is None:
+        return False
     try:
         proc = subprocess.run(
             [tc.cxx, "-x", "c++", "-fsyntax-only", "-"],
@@ -372,8 +384,12 @@ def uses_libstdcxx(tc: Toolchain) -> bool:
             check=False,
             timeout=_PROBE_TIMEOUT,
         )
-    except (OSError, subprocess.TimeoutExpired):
-        return False
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ToolchainBroken(f"{tc.cxx} libstdc++ probe: {exc}") from exc
+    if compiler_crashed(proc):
+        raise ToolchainBroken(
+            f"{tc.cxx} crashed on the libstdc++ probe (exit {proc.returncode}):\n{proc.stderr}"
+        )
     return proc.returncode == 0
 
 
@@ -409,7 +425,7 @@ def lacks_feature(tc: Toolchain, std: Standard, feature: str) -> bool:
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise ToolchainBroken(f"{tc.id} feature probe {feature}: {exc}") from exc
-    if _crashed(proc):
+    if compiler_crashed(proc):
         raise ToolchainBroken(
             f"{tc.id} crashed on the {feature} probe: {proc.stderr[-400:]}"
         )

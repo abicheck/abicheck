@@ -39,7 +39,7 @@ from tests._edit_corpus_consumers import CONSUMERS
 from tests._edit_corpus_expect import ExecTruth
 from tests._edit_corpus_harness import Built, CompileError, compile_cmd
 from tests._edit_corpus_seeds import RoleText, Seed
-from tests._edit_corpus_toolchains import execution_unavailable
+from tests._edit_corpus_toolchains import compiler_crashed, execution_unavailable
 
 _RUN_TIMEOUT = 20
 _COMPILE_TIMEOUT = 300
@@ -304,6 +304,13 @@ class ExecutionOracle:
             )
             cmd += ["-w", "-fsyntax-only", "-I", str(new.dir), str(src)]
             proc = _compile(cmd, f"new-header compile of {shape}")
+            if compiler_crashed(proc):
+                # A crashed or killed compiler says nothing about the source.
+                raise CompileError(
+                    f"new-header compile of {shape} crashed (exit {proc.returncode}): "
+                    f"{' '.join(cmd)}\n--- {src.name} ---\n"
+                    f"{src.read_text(encoding='utf-8')}--- stderr ---\n{proc.stderr}"
+                )
             if proc.returncode != 0:
                 source_break = True
                 err = next(
