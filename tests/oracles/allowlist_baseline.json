@@ -1,0 +1,4 @@
+{
+  "description": "Recorded castxml/clang producer differences, keyed by catalog case. Entries are [kind, only_in]. The list may only shrink: a new entry here is a violation.",
+  "allowlist": {}
+}

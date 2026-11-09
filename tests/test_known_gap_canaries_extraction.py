@@ -176,7 +176,10 @@ def test_headerless_additive_change_flags_alignment_on_an_untouched_static(
         c for c in report["changes"] if c["kind"] == "exported_object_alignment_reduced"
     ]
     assert [c["symbol"] for c in flagged] == ["counter"]
-    assert report["verdict"] == "COMPATIBLE_WITH_RISK"
+    # Header-less, so ADR-090 labels the run UNCONFIRMED; the gap is the
+    # risk-level alignment finding still driving the observed verdict.
+    assert report["verdict"] == "UNCONFIRMED"
+    assert report["unconfirmed"]["observed_verdict"] == "COMPATIBLE_WITH_RISK"
 
 
 # -- "A typedef retargeted inside a template argument still reads as a

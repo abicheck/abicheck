@@ -39,11 +39,13 @@ is not satisfied by prose alone: name the test exercising it with inputs
 beyond the reported one (generated/property-based, an exhaustive
 small-domain enumeration, or several independently-chosen sibling cases)
 against a stated oracle that is not the same formula/helper the
-implementation itself uses. Check `tests/regressions/manifest.py`
-(`BUG_CLASSES`/`get()`) first for a matching bug class before restating
-the invariant from scratch — name its `id` here if it already has a home,
-or add a new entry there (not just prose) if this fix closes a genuinely
-new class.
+implementation itself uses. Before answering, check whether the fix is an
+instance of an existing defect family (`tests/regressions/families.py`,
+F1–F18). If it is, name the family id, add the input to that family's sweep
+or harness, and attach the class there. Otherwise check
+`tests/regressions/manifest.py` (`BUG_CLASSES`/`get()`) for a matching
+bug class: name its `id` here if it already has a home, or add a new entry
+there (not just prose) if this fix closes a genuinely new class.
 -->
 
 - Bug class:

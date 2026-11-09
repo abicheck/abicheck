@@ -39,7 +39,16 @@ else
   abicheck dump "${ARGS[@]}"
 fi
 
+# The operand's identity travels with the snapshot, so a pull request whose
+# library moved or was renamed can still be paired with it
+# (abicheck.workflows.delta_operand). It records the path as given; the
+# file and loader names are read from the snapshot itself.
+python -m abicheck.frontends.action.cli operand-record "$OUT_DIR/operand.json" \
+  --library "${INPUT_LIBRARY:-}" --profile "${INPUT_PROFILE:-}" \
+  || _fail "cannot record the snapshot's operand identity."
+
 {
   echo "artifact-name=$NAME"
   echo "snapshot-path=$OUT"
+  echo "snapshot-dir=$OUT_DIR"
 } >> "$GITHUB_OUTPUT"

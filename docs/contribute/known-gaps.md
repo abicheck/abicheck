@@ -195,6 +195,13 @@ current emitter, which is unchanged.
 
 ### False-clean risk
 
+#### The typed `compare()` route omits `exported_not_public` that the CLI reports for the same catalog case (2026-11-08)
+
+**Status (2026-11-08): OPEN.** Found by the typed-API route check in `tests/test_invariant_oracles_catalog.py`.
+[Full write-up](known-gaps/the-typed-compare-route-omits-exported-not-public-that-the-cli-reports-for-the-same-catalog-case.md)
+`false-clean` — the typed route can read a catalog case as having one fewer hygiene finding than the CLI.
+<!-- canary: tests/test_invariant_oracles_catalog.py::test_typed_api_omits_exported_not_public_on_case09 -->
+
 #### A castxml base whose bare leaf two records share is not resolved by the leak walk (2026-11-05)
 
 **Status (2026-11-05): OPEN, narrow.** castxml writes a base class as its bare leaf (`Base`) and, unlike a field or signature slot, records no `type_identities_fact` for it. When two records share that leaf (`lib::detail::Base` and `other::Base`) and C++ name lookup from the derived class's scope does not find the one meant (the base lives in a sibling namespace), the leak walk (`model/type_spelling_resolve.py`) keeps the spelling unresolved rather than guess, so a layout change to that internal base reports no `internal_type_leaks_via_public_api`. The clang backend writes the base as the header did and is unaffected. Closing it needs castxml base identities in the snapshot. `tests/test_detector_frontend_spelling.py` pins the resolved shapes.

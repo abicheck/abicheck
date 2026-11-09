@@ -271,6 +271,7 @@ suppression:
 | `delta-mode` | `auto` | How the base commit is found: `auto`, `merge-commit` or `head` |
 | `delta-profile` | — | Profile suffix used by `main-snapshot`, if any |
 | `delta-wait-timeout` | `600` | Seconds to wait while the base snapshot is still being built |
+| `delta-operand-map` | — | `SNAPSHOT=PR` lines pairing the snapshot's library with `new-library` when no SONAME, path or file name links them; see [operand identity](../reference/main-snapshot.md#operand-identity-is-the-snapshot-this-prs-library) |
 | `delta-on-missing-base` | `report` | `report` explains an unavailable snapshot in the comment; `fail` also fails the job in a separate step |
 | `github-token` | `${{ github.token }}` | Token for the PR comment and baseline auto-fetch (needs `pull-requests: write`) |
 
