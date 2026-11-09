@@ -2640,17 +2640,22 @@ maintainer chose to report it (option B of PR #1960; edit corpus
    whose type spells a changed type; (c) a public record, on both sides,
    with a field that spells one.
 4. *When it fires.* (a) alone proves the break: a consumer's reference to
-   the old name no longer resolves. (b) and (c) prove it when the selections
-   are known on both sides and differ; when only the header parses' selector
-   operations differ (one side at the compiler default), (c) counts only for
-   a record whose size or field offsets changed, the observed effect of the
-   flip.
+   the old name no longer resolves. (b) and (c) prove it when both sides
+   *name* their selection (a header `-D` or a producer flag each) and the two
+   differ. When the flip is weaker -- only the header parses' selector
+   operations differ (one side at the compiler default), or either side's
+   selection is read from its names, which also change when a library just
+   starts or stops using a dual-ABI type -- (c) counts only for a record whose
+   size or field offsets changed, the observed effect of the flip, and (b)
+   does not count. Records are paired old/new by qualified identity, never
+   by a bare name two namespaces can share.
 5. *Partial evidence.* A selector difference in the header parses with no
    affected entity is recorded as `toolchain_flag_drift` (COMPATIBLE), so
    the gate's waiver stays visible (ADR-067) and nothing is gated. A
-   selection known on one side only, or inferred from names with nothing
-   affected, yields no dual-ABI finding; the ordinary symbol and layout
-   findings decide. A binary-only pair with neither debug info nor a
+   selection known on one side only, or inferred from names, yields a
+   dual-ABI finding only through item 4's other evidence (a re-mangled
+   export pair, or a record whose layout moved); without it, no dual-ABI
+   finding is reported and the ordinary symbol and layout findings decide. A binary-only pair with neither debug info nor a
    re-mangled export (a stripped library whose API passes a record holding
    `std::string` by pointer) has no evidence of the flip at all; no finding
    is claimed for it, as for any layout change debug info would be needed

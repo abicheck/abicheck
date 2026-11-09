@@ -68,6 +68,7 @@ from .exported_functions import (
     exported_functions_by_mangled,
     exported_variables_by_mangled,
 )
+from .type_map_pair import Side, TypeMap, TypeMapPair, type_map_key
 
 if TYPE_CHECKING:
     from ..model import AbiSnapshot, RecordType
@@ -92,6 +93,7 @@ class _SideNames:
 
 
 def _side_names(snapshot: AbiSnapshot) -> _SideNames:
+    """The side's exports and their demangled spellings (one pass)."""
     from ..demangle import demangle_batch
 
     exports = {
@@ -176,6 +178,7 @@ def _is_library_record(t: RecordType) -> bool:
 
 
 def _layout_of(t: RecordType) -> tuple[object, ...]:
+    """A record's size and field offsets, the layout a flip moves."""
     return (t.size_bits, tuple((f.name, f.offset_bits) for f in t.fields))
 
 
@@ -184,11 +187,15 @@ def _affected_records(
 ) -> list[str]:
     """Public records on both sides with a field spelling a dual-ABI type;
     with ``layout_must_differ``, only those whose size or field offsets
-    differ (the observed effect of a selection only one side named)."""
-    new_by_name = {t.name: t for t in new.declarations.types}
+    differ (the observed effect of a flip the evidence does not name on
+    both sides). Old and new records are paired by qualified identity
+    (:class:`TypeMapPair`), never by a bare name two namespaces can share."""
+    pairs = TypeMapPair(
+        old=TypeMap(old.declarations.types), new=TypeMap(new.declarations.types)
+    )
     out: set[str] = set()
     for t in old.declarations.types:
-        twin = new_by_name.get(t.name)
+        twin = pairs.counterpart(Side.OLD, t)
         if (
             twin is not None
             and not t.is_template_pattern
@@ -196,7 +203,7 @@ def _affected_records(
             and any(spells_dual_abi_type(f.type) for f in t.fields)
             and (not layout_must_differ or _layout_of(t) != _layout_of(twin))
         ):
-            out.add(t.name)
+            out.add(type_map_key(t))
     return sorted(out)
 
 
@@ -214,12 +221,15 @@ def _affected_variables(old: AbiSnapshot, new: AbiSnapshot) -> list[str]:
 
 
 def _named(items: list[str]) -> str:
+    """The first few *items* for a description, then a count of the rest."""
     head = ", ".join(items[:_NAMED_LIMIT])
     rest = len(items) - _NAMED_LIMIT
     return f"{head} and {rest} more" if rest > 0 else head
 
 
 def _pair_direction(pairs: list[tuple[str, str]]) -> tuple[str, str]:
+    """Each side's selection read off the re-mangled pairs alone (the side
+    whose names carry ``cxx11`` is ``=1``)."""
     old_tagged = sum(1 for o, _ in pairs if "cxx11" in o)
     new_tagged = sum(1 for _, n in pairs if "cxx11" in n)
     if old_tagged == new_tagged:
@@ -232,6 +242,7 @@ def _pair_direction(pairs: list[tuple[str, str]]) -> tuple[str, str]:
 
 
 def _ops_text(snapshot: AbiSnapshot) -> str:
+    """The header parse's selector operations, as ``-D``/``-U`` spellings."""
     contract = snapshot.contract
     raw = contract.profile_fields.get("macro_ops") if contract is not None else None
     ops = [f"-{op}{arg}" for op, arg in runtime_abi_ops(raw)]
@@ -241,6 +252,8 @@ def _ops_text(snapshot: AbiSnapshot) -> str:
 def _side(
     selection: DualAbiSelection | None, snapshot: AbiSnapshot, macro_flip: bool
 ) -> str | None:
+    """How a side's selection is described: its evidence, else (when the
+    header parses' selector operations differ) the operations it ran."""
     if selection is not None:
         return selection.describe()
     if macro_flip:
@@ -257,17 +270,29 @@ def _diff_glibcxx_dual_abi_selection(
     o = dual_abi_selection_of(old, old_names)
     n = dual_abi_selection_of(new, new_names)
     flipped = o is not None and n is not None and o.abi is not n.abi
+    # A flip both sides name outright (a header -D or a producer flag on
+    # each). One read from names is weaker: a library that starts or stops
+    # using a dual-ABI type changes what its names spell without a rebuild
+    # under the other selection. For such a flip a record counts only when
+    # its layout moved, and an exported variable (whose spelling the flip
+    # does not change) is not attributed to it.
+    named_flip = (
+        flipped
+        and o is not None
+        and n is not None
+        and _INFERRED not in (o.source, n.source)
+    )
     # The two header parses ran different operations on the selector macro:
     # a flip unless the side left at the compiler default already had the
     # value the other named, so it needs an observed effect to count.
     macro_flip = _runtime_abi_ops_of(old) != _runtime_abi_ops_of(new)
     pairs = remangled_export_pairs(old, new, old_names, new_names)
     records = (
-        _affected_records(old, new, layout_must_differ=not flipped)
+        _affected_records(old, new, layout_must_differ=not named_flip)
         if flipped or macro_flip
         else []
     )
-    variables = _affected_variables(old, new) if flipped else []
+    variables = _affected_variables(old, new) if named_flip else []
     old_desc = _side(o, old, macro_flip)
     new_desc = _side(n, new, macro_flip)
 
@@ -319,6 +344,7 @@ def _diff_glibcxx_dual_abi_selection(
 
 
 def _runtime_abi_ops_of(snapshot: AbiSnapshot) -> list[tuple[str, str]]:
+    """The side's header-parse operations on a runtime-ABI macro."""
     contract = snapshot.contract
     if contract is None:
         return []

@@ -955,7 +955,7 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "record, and any other differing macro or profile field still "
             "refuses."
         ),
-        fixed_by=(1958, 1960),
+        fixed_by=(1978,),
         seed_tests=(
             "tests/test_glibcxx_dual_abi_integration.py",
             "tests/unit/compare/test_glibcxx_dual_abi_detector.py",

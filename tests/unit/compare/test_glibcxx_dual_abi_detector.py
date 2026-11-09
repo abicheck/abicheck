@@ -474,6 +474,72 @@ def test_debug_info_type_names_select_each_side(direction):
     assert root.new_value.startswith(f"_GLIBCXX_USE_CXX11_ABI={expected[1]} (inferred")
 
 
+def _ns_rec(ns: str, field_type: str, bits: int) -> RecordType:
+    return RecordType(
+        name="Rec",
+        qualified_name=f"{ns}::Rec",
+        kind="struct",
+        size_bits=bits,
+        fields=[TypeField(name="f", type=field_type, offset_bits=0)],
+    )
+
+
+def test_records_sharing_a_bare_name_are_paired_by_qualified_identity():
+    # a::Rec holds a string and keeps its layout; the unrelated b::Rec (an
+    # int) grows. Paired by bare name, a::Rec would meet b::Rec and read as a
+    # moved string-holding record; paired by qualified identity, nothing the
+    # flip changes moved.
+    ops = {"old": [], "new": [("D", "_GLIBCXX_USE_CXX11_ABI=0")]}
+    old = _snap(
+        functions=_RECORD_FN,
+        types=[_ns_rec("a", "string", 256), _ns_rec("b", "int", 32)],
+        macro_ops=ops["old"],
+    )
+    new = _snap(
+        functions=_RECORD_FN,
+        types=[_ns_rec("a", "string", 256), _ns_rec("b", "int", 64)],
+        macro_ops=ops["new"],
+    )
+    result = compare(old, new)
+    assert _dual(result) == []
+    assert ChangeKind.TOOLCHAIN_FLAG_DRIFT in {c.kind for c in result.changes}
+
+    # The same shape with a::Rec's layout moved names it, by its qualified key.
+    moved = _snap(
+        functions=_RECORD_FN,
+        types=[_ns_rec("a", "string", 64), _ns_rec("b", "int", 32)],
+        macro_ops=ops["new"],
+    )
+    (root,) = _dual(compare(old, moved))
+    assert "public record(s) holding a changed type: a::Rec" in root.description
+
+
+def test_a_flip_read_from_names_needs_a_moved_layout():
+    # Each side's names spell a different ABI, but nothing a consumer shares
+    # moved: Rec keeps its layout and the exported string variable keeps its
+    # name. A library that merely started or stopped using a dual-ABI type
+    # changes its names the same way, so no break is claimed.
+    new_abi = "std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >"
+    old_abi = "std::basic_string<char, std::char_traits<char>, std::allocator<char> >"
+    var = Variable(
+        name="lib::banner",
+        mangled="_ZN3lib6bannerE",
+        type="std::string",
+        visibility=Visibility.PUBLIC,
+    )
+    old = _snap(
+        functions=_RECORD_FN,
+        variables=[var],
+        types=[_rec(256), _std_string_record(new_abi)],
+    )
+    new = _snap(
+        functions=_RECORD_FN,
+        variables=[var],
+        types=[_rec(256), _std_string_record(old_abi)],
+    )
+    assert _dual(compare(old, new)) == []
+
+
 # ── ADR-050 gate ───────────────────────────────────────────────────────────
 
 

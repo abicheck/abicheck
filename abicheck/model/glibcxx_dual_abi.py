@@ -90,10 +90,12 @@ def parse_macro_ops(raw: object) -> list[tuple[str, str]]:
 
 
 def _macro_name(arg: str) -> str:
+    """The macro a ``NAME[=VALUE]`` operand names."""
     return arg.split("=", 1)[0].strip()
 
 
 def _is_runtime_abi_op(op: tuple[str, str]) -> bool:
+    """Whether a macro operation acts on a runtime-ABI selector."""
     return _macro_name(op[1]) in RUNTIME_ABI_MACROS
 
 
@@ -119,6 +121,7 @@ def macro_ops_differ_only_in_runtime_abi(old_raw: object, new_raw: object) -> bo
 
 
 def _abi_from_value(value: str) -> GlibcxxDualAbi | None:
+    """The ABI a ``_GLIBCXX_USE_CXX11_ABI`` value selects."""
     value = value.strip()
     if value in ("", "1"):  # ``-D_GLIBCXX_USE_CXX11_ABI`` defines it to 1
         return GlibcxxDualAbi.CXX11
