@@ -690,9 +690,15 @@ per-item status in the
 
 #### Interpreter startup dominates a small-input CLI run
 
-**Status (re-verified 2026-10-09 at `456989f`): OPEN.** Measurement only. The entry says import cost was never investigated, and no lazy-import work is recorded; the Click registration-by-import pattern is unchanged. unverified: wall time was not re-measured.  
-`perf` — On a small input the run is dominated by interpreter startup and import cost, which was never investigated. [Full write-up](known-gaps/interpreter-startup-dominates-a-small-input-cli-run.md)
-<!-- no-canary: wall-time measurement only; not assertable without a timing gate -->
+**Status (2026-11-08): PARTIAL.** Root command implementations now load on demand.
+Fresh-process version and root-help tests assert that the comparison pipeline
+is absent from `sys.modules`; help summaries come from the shipped command
+source, with a real-command fallback when source cannot be read. Root help,
+version and selected-command help were checked byte-for-byte against the
+previous entry point. A complete small comparison still imports the detector
+pipeline; this change does not eliminate that cost.
+[Original write-up](known-gaps/interpreter-startup-dominates-a-small-input-cli-run.md)
+<!-- canary: tests/test_performance_boundaries.py::test_cold_cli_does_not_import_analysis_pipeline -->
 
 #### The `clang -M` include-graph pass
 

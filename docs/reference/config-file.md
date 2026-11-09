@@ -818,7 +818,9 @@ performance:
   `ABICHECK_SIDE_PROCESSES=0`, and for any other pair, the `compare` CLI
   resolves one side after the other and the typed API uses two threads of
   one process. A directory/package comparison sizes its worker
-  pool to the host. Measured on a cold compare of two 60-module C++
+  pool to the host. The existing relaxed cyclic-collector thresholds also
+  remain active through the complete CLI comparison and final report rendering.
+  Measured on a cold compare of two 60-module C++
   libraries: 64 s one side at a time, 42 s with concurrent children, at
   about 1.5x the peak memory. `ABICHECK_PARALLEL_EXTRACTION=0` resolves the
   sides one after the other instead.
@@ -827,6 +829,9 @@ performance:
   side's header parse used goes back to the system before the next side
   starts. A directory/package comparison handles its libraries one at a
   time. On macOS and Windows the sides run one at a time in-process.
+  Loading a JSON snapshot through `load_snapshot` also shares repeated short immutable string values
+  through a bounded per-load pool. This reduces retained memory at the cost
+  of some parsing time; dictionaries and lists remain independently owned.
   Measured on a oneDAL comparison: peak 1.34 → 0.89 GiB for about 17% more
   wall time on that small input (see
   [Memory](../contribute/memory.md#per-side-process-isolation-the-low-memory-profile)).

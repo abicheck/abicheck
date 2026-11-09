@@ -79,9 +79,13 @@ class ExecutionTuning:
     #: resolve them in concurrent child processes rather than two threads
     #: of this one (where ``fork`` is available).
     concurrent_side_processes: bool = False
-    #: Raise the cyclic collector's thresholds while a live dump runs
+    #: Raise the cyclic collector's thresholds during live dumps and comparisons
     #: (``storage.acyclic_json.gc_relaxed``): faster, for a little more peak.
     relaxed_gc: bool = False
+    #: Share repeated immutable JSON strings when reading stored snapshots.
+    #: Keeps mutable containers independent; trades a small parse-time cost
+    #: for lower retained memory of deferred declarations and graph payloads.
+    pool_snapshot_strings: bool = False
 
 
 _TUNING: dict[PerformanceProfile, ExecutionTuning] = {
@@ -93,7 +97,10 @@ _TUNING: dict[PerformanceProfile, ExecutionTuning] = {
         relaxed_gc=True,
     ),
     PerformanceProfile.LOW_MEMORY: ExecutionTuning(
-        sequential_sides=True, isolate_sides=True, sequential_members=True
+        sequential_sides=True,
+        isolate_sides=True,
+        sequential_members=True,
+        pool_snapshot_strings=True,
     ),
 }
 

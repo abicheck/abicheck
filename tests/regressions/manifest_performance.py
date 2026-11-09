@@ -1001,8 +1001,8 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=(
             "tests/test_bundle_facts_streaming_write.py",
             "tests/test_json_stream_encoder.py",
-            # The members themselves, not only the encode transient: a
-            # spooled member is spliced from disk (`PreEncoded`), one blob
+            "tests/test_performance_boundaries.py",
+            # Spool members splice from disk (`PreEncoded`), one blob
             # resident at a time.
             "tests/test_bundle_facts_out_spool.py",
         ),

@@ -56,8 +56,6 @@ except ImportError:  # pragma: no cover - rich-click is a declared dependency
 # re-exports them, and reaching for them there was a `frontends -> compare`
 # import for two value types.
 from ...checker_types import DiffResult
-from ...cli_audit import echo_filtered_surface, echo_reconciled
-from ...workflows.compare_finalize import _merge_redundant_changes
 from . import help as cli_help
 from .options.export import ExportSet
 from .options.params import (
@@ -511,6 +509,9 @@ def _finalize_compare_result(
     classification (``workflows.compare_classify``), from the pre-embed
     operand paths the CLI hands it.
     """
+    from ...cli_audit import echo_filtered_surface, echo_reconciled
+    from ...workflows.compare_finalize import _merge_redundant_changes
+
     if show_redundant and result.redundant_changes:
         _merge_redundant_changes(result)
     # Plan slice 7o: both ledgers are unconditional. They used to be gated

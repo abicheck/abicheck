@@ -17,8 +17,7 @@
 ADR-061 Phase 4. This file declares the Click root group and nothing else --
 every command body, every shared runtime helper and every process-exit
 decision lives in :mod:`abicheck.frontends.cli`. What remains here is the
-group, its `--version`/SIGTERM wiring, and the registration imports whose
-only purpose is the ``@main.command(...)`` side effect.
+group, its `--version`/SIGTERM wiring, and the lazy command registry.
 
 ``abicheck.cli`` was for a long time the documented import path for ~80
 private helpers that had physically moved to sibling modules, kept resolvable
@@ -45,7 +44,10 @@ import click
 # hard-fails.
 from . import deadline
 from .frontends.cli import help as cli_help
-from .frontends.cli.runtime import _AbicheckGroup
+from .frontends.cli.registry import (
+    ROOT_COMMANDS as _ROOT_COMMANDS,
+    LazyGroup as _LazyGroup,
+)
 from .model.tool_version import build_version as _build_version
 
 __all__ = ["main"]
@@ -55,7 +57,7 @@ _ABICHECK_VERSION: str = _build_version()  # release number + checkout commit
 cli_help.configure_rich_help()  # register --help option-group panels (G21.8 / M1)
 
 
-@click.group(cls=_AbicheckGroup)
+@click.group(cls=_LazyGroup, command_specs=_ROOT_COMMANDS)
 @click.version_option(
     version=_ABICHECK_VERSION,
     prog_name="abicheck",
@@ -71,47 +73,9 @@ def main() -> None:
     deadline.install_sigterm_cleanup()
 
 
-# ---------------------------------------------------------------------------
-# Sub-command modules. Imported for side-effect so their @main.command(...)
-# decorators register the commands on the Click group above.
-#
-# When this file is run directly (``python -m abicheck.cli``, distinct from
-# the documented ``python -m abicheck`` entry point in __main__.py but still
-# a common thing to type), Python executes it as the ``__main__`` module --
-# under a DIFFERENT sys.modules key than ``abicheck.cli``. Every module below
-# does ``from ...cli import main``, a fresh relative import that would
-# otherwise re-execute this file a second time under the real ``abicheck.cli``
-# key, producing a second, empty ``main`` Click group; every
-# ``@main.command(...)`` decorator then attaches to that second group, not the
-# one actually running, so `python -m abicheck.cli --help` silently listed only
-# the handful of commands defined directly in this file and omitted every
-# sibling-registered one (scan, deps, ...). Alias the already-running module
-# under its real package name first, so the relative imports below reuse it
-# (Codex review).
-# ---------------------------------------------------------------------------
+# Keep command registration on this group when invoked as python -m abicheck.cli.
 if __name__ == "__main__":
     sys.modules.setdefault("abicheck.cli", sys.modules[__name__])
-
-from . import (  # noqa: E402  — must run after `main` is defined
-    cli_aggregate,  # noqa: F401  — registers aggregate
-    cli_buildsource,  # noqa: F401  — buildsource internals (no command of its own)
-    cli_project,  # noqa: F401  — registers project (validate, plan, history)
-    cli_stack,  # noqa: F401  — registers deps (tree, compare)
-)
-from .cli_options import variant_options  # noqa: E402
-from .frontends.cli.commands import (  # noqa: E402
-    compare as _compare_cmd,  # noqa: F401  — registers compare
-    dump as _dump_cmd,  # noqa: F401  — registers dump
-)
-from .frontends.cli.commands.compare import compare_cmd  # noqa: E402
-
-# ADR-062 A1.7: --variant (side-scoped; --old-variant/--new-variant
-# until plan Phase 7j), applied to the already-
-# registered `compare` command from here (not compare.py itself, capped at
-# 800 lines) -- click.option() appends directly to compare_cmd.params
-# (click.decorators._param_memo's isinstance(f, Command) branch), the same
-# mechanism a stacked @click.option decorator uses, as a function call.
-variant_options(compare_cmd)
 
 if __name__ == "__main__":
     main()
