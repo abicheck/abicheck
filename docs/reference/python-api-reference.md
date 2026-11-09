@@ -475,6 +475,7 @@ Compare two ABI inputs and return the classified diff result.
 | `follow_deps` | `bool` | `False` |
 | `dependency_search_paths` | `tuple[Path, ...]` | `()` |
 | `ld_library_path` | `str` | `''` |
+| `unconfirmed` | `Literal[fail, warn]` | `'fail'` |
 
 **Returns:** `CompareResult`
 

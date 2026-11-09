@@ -6169,6 +6169,17 @@
    "default": "''"
   },
   {
+   "id": "run_compare(unconfirmed)",
+   "owner": "run_compare",
+   "name": "unconfirmed",
+   "annotation": "Literal['fail', 'warn']",
+   "choices": [
+    "fail",
+    "warn"
+   ],
+   "default": "'fail'"
+  },
+  {
    "id": "run_dump(path)",
    "owner": "run_dump",
    "name": "path",

@@ -1224,6 +1224,7 @@ concepts:
       - assurance.unconfirmed
     python:
       - CompareRequest.unconfirmed
+      - run_compare(unconfirmed)
   - concept: action.gate
     tier: action
     workflow:

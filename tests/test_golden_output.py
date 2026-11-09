@@ -217,9 +217,13 @@ def test_golden_compatible_with_risk(update_goldens: bool) -> None:
     old.elf = ElfMetadata(versions_required={"libc.so.6": ["GLIBC_2.5"]})
     new = _snap(ver="2.0")
     new.elf = ElfMetadata(versions_required={"libc.so.6": ["GLIBC_2.5", "GLIBC_2.34"]})
-    # ELF-only on both sides: the observed verdict is COMPATIBLE_WITH_RISK
-    # (asserted below), and the rendered headline is ADR-090's UNCONFIRMED,
-    # since no type-level evidence backs the claim.
+    # DWARF on both sides, so the claim is one type-level evidence backs and
+    # this golden keeps rendering COMPATIBLE_WITH_RISK (without it the same
+    # claim reads UNCONFIRMED -- ADR-090, tested in the reduced-evidence tests).
+    from abicheck.dwarf_metadata import DwarfMetadata
+
+    old.declarations.debug_layout = DwarfMetadata(has_dwarf=True)
+    new.declarations.debug_layout = DwarfMetadata(has_dwarf=True)
     result = _run_golden("compatible_with_risk", old, new, update_goldens)
     assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
     assert {c.kind for c in result.changes} == {
