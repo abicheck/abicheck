@@ -15,9 +15,11 @@ piece 3 landed (main Action `delta-baseline`, `delta-on-missing-base:
 report|fail`, the comment's two notes via `pr_comment --note`, and on the
 artifact (fork) path via `analysis_context`); operand identity landed
 (§ Operand identity: `operand.json`, `delta-operand-map`, `operand_*`
-outcomes); open: piece 4's report-schema field, `on-missing-base: build`,
-the path-equivalent *ancestor* rule (`base-equivalent-paths`), cache storage
-· **Effort:** L
+outcomes); `storage: cache` landed on both Actions
+(`abicheck/frontends/action/main_snapshot_cache.py`; the cache entry carries
+`operand.json` too); open: piece 4's report-schema field, `on-missing-base:
+build`, the path-equivalent *ancestor* rule (`base-equivalent-paths`), a
+`delta-storage` input on the main Action · **Effort:** L
 
 ## Problem
 
@@ -201,7 +203,7 @@ partial delta naming both depths; it never silently narrows the delta.
 | `untrusted_source` | no | "a snapshot exists but did not come from the configured main workflow" |
 | `snapshot_missing` | no | "the snapshot run succeeded but no artifact is listed (expired, deleted, or never uploaded)" — the API no longer lists expired artifacts, so expiry cannot be told apart |
 | `lookup_failed` | no | "the snapshot lookup failed (API error)" — an operational error, never "absent" |
-| `cache_miss` (cache storage) | no | "no cache entry for `<sha7>` — retry, or use `on-missing-base: build`" (the cache cannot tell pending from evicted) |
+| `base_not_snapshotted` (cache storage; the planned `cache_miss` folded into it) | no | "no cache entry for `<sha7>` (not saved yet, evicted, or never saved)" — the cache cannot tell pending from evicted |
 
 On any non-`resolved*` outcome the user picks the fallback with
 `on-missing-base`:
@@ -223,13 +225,13 @@ The release baseline is **never** used as a delta fallback.
 
 | | Workflow artifact (default) | Actions cache (option) |
 |---|---|---|
-| Name / key | `abicheck-main-<full-sha>` (+ `-<profile>` for multi-profile) | `<prefix>-<profile>-<full-sha>` (existing `accepted_main_cache_key`) |
+| Name / key | `abicheck-main-<full-sha>` (+ `-<profile>` for multi-profile) | `abicheck-main-snapshot-<full-sha>[-<profile>]` (*landed*; a namespace of its own, not `accepted_main_cache_key`'s: that one holds a baseline-set and is restored by prefix) |
 | Lookup | `GET /repos/{o}/{r}/actions/artifacts?name=…` → exact name | `actions/cache/restore` with the **exact** key — never `restore-keys` |
-| Provenance check | the uploading run must be a run of the configured workflow in this repository, event `push`/`workflow_dispatch`/`schedule`, on the default branch, conclusion success, and its `head_sha` must equal the requested snapshot SHA (the ancestor's under path equivalence) | none available beyond "written from the default branch's scope"; documented as weaker |
+| Provenance check | the uploading run must be a run of the configured workflow in this repository, event `push`/`workflow_dispatch`/`schedule`, on the default branch, conclusion success, and its `head_sha` must equal the requested snapshot SHA (the ancestor's under path equivalence) | no run to check. *Landed:* the producer saves only from `refs/heads/<default>`; the consumer restores the exact key (no `restore-keys`), refuses anything but regular `snapshot.json` + `provenance.json` within the artifact path's 1 GiB limits, and requires the self-reported `provenance.json` to name the repository, ref, SHA and key (`untrusted_source` otherwise). The consumer refuses (`untrusted_source`) on a PR into another branch and on `merge_group`, whose extra readable scopes other workflows write. A workflow on the PR's own ref can still write the same key into a scope that PR reads first, so a PR can mislead its own delta; extraction (`tar -P`) happens before the checks — documented in `docs/reference/main-snapshot.md` |
 | Duplicates | a re-run uploads the same name again; every eligible candidate was built from the base by the trusted workflow, so the newest is used and the others are logged as superseded. (Comparing archive `digest`s does not work: an artifact zip records upload timestamps.) | keys are immutable; no duplicates |
 | Lifetime | `retention-days` (default 14, max 90 per repo setting) | evicted after 7 days unused and by the 10 GiB LRU, which can evict unrelated caches |
-| Pending detection | list runs of the main workflow with `head_sha == base` and `status != completed` | not possible → only `not found` |
-| Fork PRs | needs `actions: read` on the read-only fork token (to verify on a public and a private repo during implementation) | default-branch caches are readable by PRs, forks included |
+| Pending detection | list runs of the main workflow with `head_sha == base` and `status != completed` | not possible → a miss is `base_not_snapshotted` (the existing outcome; no `cache_miss` was added) |
+| Fork PRs | needs `actions: read` on the read-only fork token (to verify on a public and a private repo during implementation) | default-branch caches are readable by PRs, forks included; no API permission needed |
 
 Artifacts win on exact lookup, provenance, pending detection and explicit
 lifetime, so they are the default. Concurrency is a non-issue in both: names
@@ -288,9 +290,10 @@ work, which publishes the delta report; nothing else changes.
    (or adoption of a prepared snapshot) → upload `abicheck-main-<sha>` with
    `retention-days`; refuses `pull_request`/`pull_request_target` (ADR-047
    §12) and a checkout that is not the commit being named. *Planned:*
-   `baseline` for a multi-library set, and `storage: cache` writing the
-   existing `accepted-main` cache key, after which `update-main-baseline.yml`
+   `baseline` for a multi-library set, after which `update-main-baseline.yml`
    becomes a thin caller of this Action rather than a second implementation.
+   *Landed:* `storage: cache` (+ `branch`, output `cache-key`), under its own
+   key namespace rather than the `accepted-main` one.
 2. **`actions/fetch-main-snapshot`** (consumer). *Landed:* inputs `mode`
    (`merge-commit`/`head`/`auto`), `workflow`, `branch`, `profile`,
    `wait-timeout`, `destination`; outputs `outcome`, `base-sha`,
@@ -298,8 +301,9 @@ work, which publishes the delta report; nothing else changes.
    is `abicheck/frontends/action/main_snapshot.py`, beside
    `baseline_source.py`, because it reuses that package's
    `SourceRun`/`verify_source_run` provenance checks; base selection and
-   outcome typing are pure and unit-tested without credentials. *Planned:*
-   `storage`, `base-equivalent-paths`, and a `snapshot-sha` output (it differs
+   outcome typing are pure and unit-tested without credentials. *Landed:*
+   `storage: cache` (`main_snapshot_cache.py`, `verify-cache.sh`).
+   *Planned:* `base-equivalent-paths`, and a `snapshot-sha` output (it differs
    from `base-sha` only under path equivalence).
 3. **Main Action inputs** (*landed* as `delta-baseline: main`,
    `delta-snapshot-workflow`, `delta-mode`, `delta-profile`,
