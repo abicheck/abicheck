@@ -31,6 +31,7 @@ from abicheck.model import (
 )
 from abicheck.model.build_mode_facts import GlibcxxDualAbi
 from abicheck.model.glibcxx_dual_abi import (
+    dual_abi_from_spellings,
     macro_ops_differ_only_in_runtime_abi,
     normalize_dual_abi_spelling,
     selection_from_macro_ops,
@@ -222,6 +223,51 @@ def test_spells_dual_abi_type(spelling, expected):
     assert spells_dual_abi_type(spelling) is expected
 
 
+@pytest.mark.parametrize(
+    ("spellings", "expected"),
+    [
+        # demangled exports, as c++filt prints each ABI (the _REAL rows)
+        ([r[3] for r in _REAL], GlibcxxDualAbi.CXX11),
+        ([r[4] for r in _REAL], GlibcxxDualAbi.OLD),
+        (["lib::take(std::string const&)"], GlibcxxDualAbi.OLD),
+        # DWARF record names
+        (["std::__cxx11::list<int, std::allocator<int> >"], GlibcxxDualAbi.CXX11),
+        (["std::list<int, std::allocator<int> >"], GlibcxxDualAbi.OLD),
+        (
+            ["std::basic_string<char, std::char_traits<char>, std::allocator<char> >"],
+            GlibcxxDualAbi.OLD,
+        ),
+        # no dual-ABI type: libc++, string_view, vector<int>, user types
+        (
+            [
+                "std::__1::basic_string<char, std::__1::char_traits<char>, std::__1::allocator<char> >"
+            ],
+            None,
+        ),
+        (
+            [
+                "std::basic_string_view<char, std::char_traits<char> >",
+                "f(std::string_view)",
+            ],
+            None,
+        ),
+        (
+            [
+                "std::vector<int, std::allocator<int> >",
+                "my::list<int>",
+                "lib::plain(int)",
+            ],
+            None,
+        ),
+        # both ABIs exported (libstdc++ itself): no single selection
+        ([_REAL[1][3], _REAL[1][4]], None),
+        ([], None),
+    ],
+)
+def test_dual_abi_from_spellings_reads_positive_evidence_only(spellings, expected):
+    assert dual_abi_from_spellings(spellings) is expected
+
+
 # ── detector ───────────────────────────────────────────────────────────────
 
 
@@ -405,6 +451,27 @@ def test_no_selection_and_no_pair_claims_nothing_for_a_record():
     )
     assert _dual(result) == []
     assert ChangeKind.TOOLCHAIN_FLAG_DRIFT not in {c.kind for c in result.changes}
+
+
+def _std_string_record(name: str) -> RecordType:
+    return RecordType(name=name, kind="class", size_bits=256, fields=[])
+
+
+@pytest.mark.parametrize("direction", ["1to0", "0to1"])
+def test_debug_info_type_names_select_each_side(direction):
+    # Binary-only with DWARF, the record passed by pointer: no export is
+    # re-mangled and nothing records a -D; each side's debug-info names
+    # spell its string type, so the flip and the record are known.
+    new_abi = "std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >"
+    old_abi = "std::basic_string<char, std::char_traits<char>, std::allocator<char> >"
+    names = (new_abi, old_abi) if direction == "1to0" else (old_abi, new_abi)
+    old = _snap(functions=_RECORD_FN, types=[_rec(256), _std_string_record(names[0])])
+    new = _snap(functions=_RECORD_FN, types=[_rec(64), _std_string_record(names[1])])
+    (root,) = _dual(compare(old, new))
+    assert "public record(s) holding a changed type: Rec" in root.description
+    expected = ("1", "0") if direction == "1to0" else ("0", "1")
+    assert root.old_value.startswith(f"_GLIBCXX_USE_CXX11_ABI={expected[0]} (inferred")
+    assert root.new_value.startswith(f"_GLIBCXX_USE_CXX11_ABI={expected[1]} (inferred")
 
 
 # ── ADR-050 gate ───────────────────────────────────────────────────────────

@@ -38,6 +38,7 @@ from .build_mode_facts import GlibcxxDualAbi
 __all__ = [
     "RUNTIME_ABI_MACROS",
     "DualAbiSelection",
+    "dual_abi_from_spellings",
     "macro_ops_differ_only_in_runtime_abi",
     "normalize_dual_abi_spelling",
     "parse_macro_ops",
@@ -220,3 +221,33 @@ def spells_dual_abi_type(spelling: str | None) -> bool:
     if not spelling:
         return False
     return bool(_DUAL_ABI_TYPE_RE.search(spelling))
+
+
+# A libstdc++ dual-ABI type in a demangled name or debug-info type name, as
+# each ABI spells it: the new ABI says ``std::__cxx11::``/``[abi:cxx11]``; the
+# old one demangles ``Ss`` to ``std::string``/``std::basic_string<…>`` and its
+# DWARF names ``std::basic_string<…>``/``std::list<…>``. ``std::__1::``
+# (libc++) and ``std::basic_string_view`` match neither.
+_CXX11_SPELLING_RE = re.compile(r"std::__cxx11::|\[abi:cxx11\]")
+_OLD_ABI_SPELLING_RE = re.compile(
+    r"(?<![\w:])std::(?:basic_string<|(?:w|u8|u16|u32)?string\b(?!_view)|list<)"
+)
+
+
+def dual_abi_from_spellings(spellings: Iterable[str]) -> GlibcxxDualAbi | None:
+    """The dual ABI that demangled names or debug-info type names spell a
+    libstdc++ string/list type in: ``CXX11``, ``OLD``, or ``None`` when no
+    such type appears or both do (a library exporting both ABIs, as
+    libstdc++ itself does, has no single selection).
+
+    Positive evidence only: a sample with libstdc++ symbols but no dual-ABI
+    type (``std::vector<int>`` alone) selects nothing."""
+    saw_cxx11 = saw_old = False
+    for spelling in spellings:
+        if _CXX11_SPELLING_RE.search(spelling):
+            saw_cxx11 = True
+        elif _OLD_ABI_SPELLING_RE.search(spelling):
+            saw_old = True
+    if saw_cxx11 == saw_old:
+        return None
+    return GlibcxxDualAbi.CXX11 if saw_cxx11 else GlibcxxDualAbi.OLD

@@ -20,8 +20,8 @@ surface uses a type the selection changes.
 
 Evidence, per side, for the *selection*: the header parse's own ``-D``
 (``profile_fields["macro_ops"]``), else a ``-D_GLIBCXX_USE_CXX11_ABI=N`` the
-compiler recorded in ``DW_AT_producer``, else the build mode inferred from the
-binary's mangled names (``BuildMode.glibcxx_dual_abi``). Evidence for the
+compiler recorded in ``DW_AT_producer``, else what the side's exported names
+(demangled) and debug-info record names spell. Evidence for the
 *affected surface*: an export removed whose dual-ABI twin was added (the two
 demangle to one declaration once the ``__cxx11``/``[abi:cxx11]`` spelling is
 removed), or, when the selection flip is known, an exported variable or a
@@ -47,14 +47,16 @@ the result; this finding names their common cause.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ..detector_registry import registry
 from ..diff_helpers import make_change
-from ..model.build_mode_facts import GlibcxxDualAbi, StdlibFamily
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.glibcxx_dual_abi import (
     DualAbiSelection,
+    dual_abi_from_spellings,
     normalize_dual_abi_spelling,
     runtime_abi_ops,
     selection_from_macro_ops,
@@ -76,10 +78,35 @@ __all__ = ["dual_abi_selection_of", "remangled_export_pairs"]
 #: How many affected entities the description names before "and N more".
 _NAMED_LIMIT = 5
 
-_INFERRED = "inferred from mangled names"
+_INFERRED = "inferred from exported and debug-info names"
 
 
-def dual_abi_selection_of(snapshot: AbiSnapshot) -> DualAbiSelection | None:
+@dataclass(frozen=True)
+class _SideNames:
+    """One side's exports (mangled -> declared name) and their demangled
+    spellings, built once per comparison side and shared by the selection
+    and the pairing."""
+
+    exports: Mapping[str, str]
+    demangled: Mapping[str, str]
+
+
+def _side_names(snapshot: AbiSnapshot) -> _SideNames:
+    from ..demangle import demangle_batch
+
+    exports = {
+        m: f.name for m, f in exported_functions_by_mangled(snapshot).items() if m
+    }
+    exports.update(
+        (m, v.name) for m, v in exported_variables_by_mangled(snapshot).items()
+    )
+    # demangle_batch leaves non-C++ names out of its result.
+    return _SideNames(exports, demangle_batch(sorted(exports)))
+
+
+def dual_abi_selection_of(
+    snapshot: AbiSnapshot, names: _SideNames | None = None
+) -> DualAbiSelection | None:
     """The side's libstdc++ dual-ABI selection, strongest evidence first."""
     contract = snapshot.contract
     if contract is not None:
@@ -87,55 +114,56 @@ def dual_abi_selection_of(snapshot: AbiSnapshot) -> DualAbiSelection | None:
         if selected is not None:
             return selected
     mode = snapshot.build_mode
-    if mode is None:
-        return None
-    producer = mode.provenance.raw_producer or ""
-    selected = selection_from_producer_flags(producer.split())
-    if selected is not None:
-        return selected
-    if mode.stdlib is StdlibFamily.LIBSTDCXX and mode.glibcxx_dual_abi in (
-        GlibcxxDualAbi.CXX11,
-        GlibcxxDualAbi.OLD,
-    ):
-        return DualAbiSelection(mode.glibcxx_dual_abi, _INFERRED)
-    return None
+    if mode is not None:
+        producer = mode.provenance.raw_producer or ""
+        selected = selection_from_producer_flags(producer.split())
+        if selected is not None:
+            return selected
+    return _selection_from_names(snapshot, names or _side_names(snapshot))
 
 
-def _exports(snapshot: AbiSnapshot) -> dict[str, str]:
-    """Exported function and variable mangled names -> declared name."""
-    out = {m: f.name for m, f in exported_functions_by_mangled(snapshot).items() if m}
-    out.update((m, v.name) for m, v in exported_variables_by_mangled(snapshot).items())
-    return out
+def _selection_from_names(
+    snapshot: AbiSnapshot, names: _SideNames
+) -> DualAbiSelection | None:
+    """The selection the side's own names spell: its exports, demangled, and
+    the debug-info names of its record types. Read here, not from the stored
+    ``BuildMode.glibcxx_dual_abi``: that dump-time inference reads mangled
+    names only, so an old-ABI ``std::string`` (the ``Ss`` substitution) and a
+    library whose only use of one is a record field never reach it."""
+    spellings = [*names.demangled.values()]
+    spellings += [t.name for t in snapshot.declarations.types if t.name]
+    abi = dual_abi_from_spellings(spellings)
+    return DualAbiSelection(abi, _INFERRED) if abi is not None else None
 
 
-def remangled_export_pairs(old: AbiSnapshot, new: AbiSnapshot) -> list[tuple[str, str]]:
+def remangled_export_pairs(
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    old_names: _SideNames | None = None,
+    new_names: _SideNames | None = None,
+) -> list[tuple[str, str]]:
     """``(old_mangled, new_mangled)`` for each export the new build no longer
     has whose dual-ABI twin it does: different mangled names, one declaration
     once the dual-ABI spelling is normalized away."""
-    old_exports, new_exports = _exports(old), _exports(new)
-    removed = sorted(set(old_exports) - set(new_exports))
-    added = sorted(set(new_exports) - set(old_exports))
-    if not removed or not added:
-        return []
-    from ..demangle import demangle_batch
-
-    # demangle_batch leaves non-C++ names out of its result.
-    demangled = demangle_batch([*removed, *added])
+    o = old_names or _side_names(old)
+    n = new_names or _side_names(new)
+    removed = sorted(set(o.exports) - set(n.exports))
+    added = sorted(set(n.exports) - set(o.exports))
     added_by_norm: dict[str, list[str]] = {}
     for m in added:
-        if m in demangled:
+        if m in n.demangled:
             added_by_norm.setdefault(
-                normalize_dual_abi_spelling(demangled[m]), []
+                normalize_dual_abi_spelling(n.demangled[m]), []
             ).append(m)
     pairs: list[tuple[str, str]] = []
     for m in removed:
-        text = demangled.get(m)
+        text = o.demangled.get(m)
         if text is None:
             continue
         twins = added_by_norm.get(normalize_dual_abi_spelling(text), [])
         # Exactly one twin: an overload set that collapses to one normalized
         # spelling is ambiguous, not a pair.
-        if len(twins) == 1 and demangled[twins[0]] != text:
+        if len(twins) == 1 and n.demangled[twins[0]] != text:
             pairs.append((m, twins[0]))
     return pairs
 
@@ -225,14 +253,15 @@ def _diff_glibcxx_dual_abi_selection(
     old: AbiSnapshot, new: AbiSnapshot
 ) -> list[Change]:
     """Report a libstdc++ dual-ABI flip whose effect reaches the public surface."""
-    o = dual_abi_selection_of(old)
-    n = dual_abi_selection_of(new)
+    old_names, new_names = _side_names(old), _side_names(new)
+    o = dual_abi_selection_of(old, old_names)
+    n = dual_abi_selection_of(new, new_names)
     flipped = o is not None and n is not None and o.abi is not n.abi
     # The two header parses ran different operations on the selector macro:
     # a flip unless the side left at the compiler default already had the
     # value the other named, so it needs an observed effect to count.
     macro_flip = _runtime_abi_ops_of(old) != _runtime_abi_ops_of(new)
-    pairs = remangled_export_pairs(old, new)
+    pairs = remangled_export_pairs(old, new, old_names, new_names)
     records = (
         _affected_records(old, new, layout_must_differ=not flipped)
         if flipped or macro_flip
@@ -270,7 +299,7 @@ def _diff_glibcxx_dual_abi_selection(
     # (ADR-050 amendment 2026-11-09); with nothing on the surface affected,
     # record that waiver instead of letting it vanish (ADR-067). A flip read
     # only from DW_AT_producer is already the advanced-DWARF toolchain-flag
-    # diff's finding, and one inferred from mangled names, with nothing
+    # diff's finding, and one inferred from names, with nothing
     # affected, is no fact to record.
     if macro_flip and old_desc is not None and new_desc is not None:
         return [

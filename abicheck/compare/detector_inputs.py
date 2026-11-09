@@ -261,12 +261,15 @@ DETECTOR_INPUTS: dict[str, DetectorInputs] = {
                 "selection, and no flip is claimed for it"
             ),
             "build_mode": (
-                "the other selection sources; cleared, the side has no "
-                "selection and no flip is claimed for it"
+                "the DW_AT_producer -D selection source; cleared, the side "
+                "falls back to what its names spell, or has no selection, and "
+                "no flip is claimed for it"
             ),
             "declarations.types": (
-                "public records holding a changed type enrich a known flip; "
-                "cleared, only re-mangled exports prove the break"
+                "debug-info record names are one selection source and public "
+                "records holding a changed type enrich a known flip; cleared, "
+                "the selection falls back to the exported names and only "
+                "re-mangled exports prove the break"
             ),
         },
     ),

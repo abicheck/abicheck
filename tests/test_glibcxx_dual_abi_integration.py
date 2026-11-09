@@ -165,15 +165,27 @@ def test_dual_abi_flip_binary_only_pairs_the_re_mangled_exports(
 @pytest.mark.parametrize(
     ("old_abi", "new_abi"), [(_DEFAULT, _OLD), (_OLD, _DEFAULT)], ids=["1to0", "0to1"]
 )
-def test_record_only_flip_binary_only_still_breaks_on_layout(
-    tmp_path, old_abi, new_abi
-):
-    # Partial evidence: no export is re-mangled and no side records its
-    # selection, so the root cause is not claimed -- the DWARF layout
-    # findings still gate the verdict.
+def test_record_only_flip_binary_only_names_the_root_cause(tmp_path, old_abi, new_abi):
+    # No export is re-mangled (rec_id takes the record by pointer) and no
+    # side records a -D: each side's selection is read from its debug-info
+    # type names (std::__cxx11::basic_string vs std::basic_string).
     exit_code, doc = _pair(tmp_path, "record", old_abi, new_abi, headers=False)
     assert exit_code == 4
+    (root,) = [c for c in doc["changes"] if c["kind"] == "glibcxx_dual_abi_changed"]
+    assert "public record(s) holding a changed type: Rec" in root["description"]
+    old_value = "1" if old_abi is _DEFAULT else "0"
+    new_value = "1" if new_abi is _DEFAULT else "0"
+    assert root["old_value"].startswith(f"_GLIBCXX_USE_CXX11_ABI={old_value} (")
+    assert root["new_value"].startswith(f"_GLIBCXX_USE_CXX11_ABI={new_value} (")
     assert "type_size_changed" in _kinds(doc)
+
+
+@pytest.mark.parametrize("surface", sorted(_HEADERS))
+@pytest.mark.parametrize("abi", [_DEFAULT, _OLD], ids=["default", "abi0"])
+def test_same_selection_binary_only_is_no_dual_abi_change(tmp_path, surface, abi):
+    exit_code, doc = _pair(tmp_path, surface, abi, abi, headers=False)
+    assert exit_code == 0
+    assert "glibcxx_dual_abi_changed" not in _kinds(doc)
 
 
 @pytest.mark.parametrize("surface", sorted(_HEADERS))

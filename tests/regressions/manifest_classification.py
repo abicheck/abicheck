@@ -965,7 +965,12 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "lane": ("headers", "binary+dwarf"),
             "direction": ("1to0", "0to1"),
             "surface": ("std_string_param", "std_list_param", "embedding_record"),
-            "control": ("same_default", "same_abi0"),
+            "selection_evidence": (
+                "header_macro_ops",
+                "re_mangled_exports",
+                "debug_info_type_names",
+            ),
+            "control": ("same_default", "same_abi0", "headers", "binary_only"),
         },
     ),
 )

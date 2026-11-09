@@ -8,7 +8,7 @@
   (BREAKING, exit 4) when the public surface uses `std::string`/`std::list`:
   an export re-mangled into its other-ABI twin, an exported variable of such a
   type, or a public record holding one. Each side's selection (header `-D`,
-  `DW_AT_producer`, or mangled names) and the affected entities are named in
+  `DW_AT_producer`, or the exported and debug-info names) and the affected entities are named in
   the finding, in every report format; the per-entity `func_removed`,
   `func_params_changed` and `type_size_changed` findings stay beside it. A
   flip that reaches nothing is recorded as `toolchain_flag_drift` and does not

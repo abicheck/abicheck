@@ -2622,8 +2622,15 @@ maintainer chose to report it (option B of PR #1960; edit corpus
 3. *Evidence.* Per side, the **selection**: the header parse's own last
    operation on the macro (`profile_fields["macro_ops"]`), else a
    `-D_GLIBCXX_USE_CXX11_ABI=N` the compiler recorded in `DW_AT_producer`,
-   else the binary's `build_mode.glibcxx_dual_abi` inferred from mangled
-   names. A header parse that left the macro at the compiler default has no
+   else what the side's own names spell: its exports demangled and the
+   debug-info names of its record types (`std::__cxx11::basic_string`,
+   `[abi:cxx11]` for `=1`; `std::basic_string<…>`, `std::string`,
+   `std::list<…>` for `=0`), positive evidence only, read at compare time
+   from persisted facts. The stored `BuildMode.glibcxx_dual_abi` is not
+   read: its dump-time inference sees mangled names only, so it misses an
+   old-ABI `std::string` (the `Ss` substitution) and a library whose only
+   use of one is a record field, and reads a libstdc++ sample with no
+   dual-ABI type at all as `=0`. A header parse that left the macro at the compiler default has no
    selection of its own: a GCC configured with
    `--with-default-libstdcxx-abi=gcc4-compatible` defaults to `=0`. The
    **affected surface**: (a) an export the new build lost whose dual-ABI
@@ -2641,12 +2648,13 @@ maintainer chose to report it (option B of PR #1960; edit corpus
 5. *Partial evidence.* A selector difference in the header parses with no
    affected entity is recorded as `toolchain_flag_drift` (COMPATIBLE), so
    the gate's waiver stays visible (ADR-067) and nothing is gated. A
-   selection known on one side only, or inferred from mangled names with
-   nothing affected, yields no dual-ABI finding; the ordinary symbol and
-   layout findings decide. A binary-only pair whose only affected entity is
-   a record passed by pointer has no selection fact (the old ABI's mangled
-   names do not identify libstdc++ in `build_mode`), so its root cause is not
-   claimed; DWARF's `type_size_changed` still gates it.
+   selection known on one side only, or inferred from names with nothing
+   affected, yields no dual-ABI finding; the ordinary symbol and layout
+   findings decide. A binary-only pair with neither debug info nor a
+   re-mangled export (a stripped library whose API passes a record holding
+   `std::string` by pointer) has no evidence of the flip at all; no finding
+   is claimed for it, as for any layout change debug info would be needed
+   to see.
 6. *Disposition.* The per-entity findings the flip causes (`func_removed`,
    `func_added`, `func_params_changed`, `type_size_changed`, …) are recorded
    and reported beside the root; nothing is suppressed or folded (ADR-067).
@@ -2657,7 +2665,10 @@ maintainer chose to report it (option B of PR #1960; edit corpus
 a different compiler family, standard, include set, an unrelated macro, or a
 target triple the binaries do not corroborate. No extractor output changes
 (no `EXTRACTOR_GENERATION` bump): every fact the detector reads is already
-persisted. Tests: `tests/unit/compare/test_glibcxx_dual_abi_detector.py`,
+persisted. Making the dump-time `BuildMode.glibcxx_dual_abi` read the
+same spellings (and stop reading a libstdc++ sample with no dual-ABI type
+as `=0`) changes what a dump records, so it is a separate change with its
+own `EXTRACTOR_GENERATION` bump. Tests: `tests/unit/compare/test_glibcxx_dual_abi_detector.py`,
 `tests/test_glibcxx_dual_abi_integration.py`.
 
 ## References

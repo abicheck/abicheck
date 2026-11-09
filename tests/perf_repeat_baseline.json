@@ -107,7 +107,7 @@
     "abicheck/compare/typedef_spelling_keys.py(typedef_spelling_index)": 2,
     "abicheck/deadline.py(_registration_window_depth)": 13,
     "abicheck/deadline.py(remaining)": 13,
-    "abicheck/demangle.py(_is_itanium_mangled)": 8017,
+    "abicheck/demangle.py(_is_itanium_mangled)": 8813,
     "abicheck/demangle.py(demangle_one_batched)": 1350,
     "abicheck/demangle.py(strip_signature)": 308,
     "abicheck/diff_atomic.py(_has_atomic)": 1004,
@@ -239,7 +239,7 @@
     "abicheck/model/signature_normalization.py(_strip_cv_tokens_outside_nesting)": 35,
     "abicheck/model/signature_normalization.py(canonicalize_function_signature_param_type)": 563,
     "abicheck/model/snapshot.py(AbiSnapshot.canonical_ir)": 488,
-    "abicheck/model/snapshot.py(AbiSnapshot.declarations)": 4689,
+    "abicheck/model/snapshot.py(AbiSnapshot.declarations)": 4717,
     "abicheck/model/snapshot.py(AbiSnapshot.function_map)": 570,
     "abicheck/model/snapshot.py(AbiSnapshot.index)": 196,
     "abicheck/model/snapshot.py(AbiSnapshot.type_by_name)": 312,
@@ -309,5 +309,5 @@
   },
   "mode": "default",
   "n": 40,
-  "total": 237718
+  "total": 238542
 }
