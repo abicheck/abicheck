@@ -182,8 +182,10 @@ itself, distinct from the overall verdict confidence:
   `header-backend-unavailable` (header scoping was requested on a PE/Mach-O
   binary but the header parse failed, so the dump fell back to the export
   table), `export-binding-unresolved` (the headers parsed and were kept, but
-  no declaration could be bound to any export), both recorded on the snapshot
-  as `scope_fallback`; `mangling-fallback` (the pre-2026-11-09 spelling of the
+  no declaration could be bound to any export), `export-binding-partial`
+  (some exports the headers may declare could not be bound to one
+  declaration and are compared from the export table only), all recorded on
+  the snapshot as `scope_fallback`; `mangling-fallback` (the pre-2026-11-09 spelling of the
   latter, which discarded the headers; only older stored snapshots carry it);
   or `no-provenance` (the surface resolved without any declaration
   provenance).

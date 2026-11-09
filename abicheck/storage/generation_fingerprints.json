@@ -73,7 +73,7 @@
       "abicheck/extract/header_ast_cache_producers.py": "aa85ae5d148526267f600b0972ca89afc27b6b8cb3f51b4c781a1526773600b4",
       "abicheck/extract/header_ast_fields.py": "dfa466a2c4172dc4fe44b44c0d7d051238ac20019a4630dc94464ee46c8eab32",
       "abicheck/extract/header_exclusions.py": "254ca6e4ccf7366b9db516183d6814cb865c279845abe7d05051ac2f72bf0884",
-      "abicheck/extract/header_export_binding.py": "2849838510f5461a99938095d4bd3f619599127fa60b66756909124e7f069a15",
+      "abicheck/extract/header_export_binding.py": "9fa8c536a9dadef55a1e18132bb67682a896fd3597362f1545ffcd94a4f40dd5",
       "abicheck/extract/header_order_witness.py": "40a29ffe7ed3751f9bb8e3bbce7f49011569b9d1d0d99947641d9ba178982966",
       "abicheck/extract/header_scan_memo.py": "56f79b5316354b938b08a5f29779c3aaf40481892d947784ec2adb48ab5e83fb",
       "abicheck/extract/header_text.py": "b43a88d7bf1d2e601bb908c78f04cb07e552f9c59f03b678ecc85788b3d146e4",
@@ -163,6 +163,7 @@
       "abicheck/extract/manifest_semantic_ir.py": "9d8a6ddaa619a7d4b214bbeab5c2c0dfef681a6fd9dffd004760b19a62da3b15",
       "abicheck/extract/member_identity.py": "9045a480f6715aa8e3242b147c88eed503566487a49b7ecc6c57209aabbab102",
       "abicheck/extract/metadata_attach.py": "a4d2cba939ecf96036f0c974e723c15e68699d9f5ce847c8e9f8b04f0440fa6d",
+      "abicheck/extract/msvc_signature.py": "0266bd18ccbad37f420e84b7fdf3431a287b72ca1925fa1bac8b2e1d39ec596d",
       "abicheck/extract/occurrence_dependency_scope.py": "d28ca573fecaecec3c67b784c9d44d516d039824e744179f852f5a89dc135d8e",
       "abicheck/extract/ownership.py": "9285bfc00b5dc3948749004cbe9881b5eb034696b59d405bd0e579f9664fb036",
       "abicheck/extract/ownership_stamp.py": "07e5714eac1e1770aa53f09479b7ae240f2f123ee2b7bf223241f6880233d8d7",
@@ -203,9 +204,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "bc4a9076956cf92fa4bedad01eddbd75c16714b05f59473fffc6daf18a7cadb2",
+    "fingerprint": "c330683f467dcab13be2302198e516803f0a376c6a181abb684a5bfb9c5cacab",
     "generation": 44,
-    "reason": "bumped to 44 for a semantic change"
+    "reason": "generation 44 is introduced by this unmerged PR (#1967) and never released; the review follow-ups refine its export binding within the same generation"
   },
   "resolver": {
     "files": {

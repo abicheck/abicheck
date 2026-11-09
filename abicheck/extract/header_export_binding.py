@@ -50,11 +50,12 @@ returned in :class:`ExportBindingOutcome`, never dropped.
 from __future__ import annotations
 
 import logging
-from collections import Counter, defaultdict
+from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
 
 from ..model import AbiSnapshot, Function, Variable, Visibility
+from ..model.bound_export_spelling import HEADER_SPELLING_DIAGNOSTIC_PREFIX
 from ..model.export_index import ExportMatch
 from ..model.fact import Fact
 from ..model.mangled_name import itanium_scope_components, msvc_scope_components
@@ -62,18 +63,27 @@ from ..model.name_decoration import macho_underscore, pe_x86
 from ..model.surface_facts import (
     binary_exported,
     export_match_diagnostic,
-    in_public_surface,
     is_confirmed_false,
     is_confirmed_true,
+)
+from .msvc_signature import (
+    ParamSpelling,
+    canonical_builtin,
+    header_param_spelling,
+    msvc_function_params,
+    param_agrees,
 )
 from .surface_fact_producers import header_ast_surface_facts
 
 __all__ = [
+    "EXPORT_BINDING_PARTIAL",
     "EXPORT_BINDING_UNRESOLVED",
     "ExportBindingOutcome",
     "bind_header_declarations_to_exports",
     "binding_export_names",
     "msvc_builtin_param_types",
+    "msvc_is_data_symbol",
+    "unbound_export_entries",
 ]
 
 _log = logging.getLogger(__name__)
@@ -99,6 +109,10 @@ _SPELLING_GAPS = frozenset(
     }
 )
 
+#: ``AbiSnapshot.scope_fallback`` when some declarations bound but exports the
+#: headers may declare stayed undecided (:attr:`ExportBindingOutcome.undecided`).
+EXPORT_BINDING_PARTIAL = "export-binding-partial"
+
 #: Diagnostic prefix naming the export a declaration was bound to.
 BOUND_EXPORT_DIAGNOSTIC_PREFIX = "bound-export:"
 
@@ -109,31 +123,42 @@ class ExportBindingOutcome:
 
     *direct*: declarations the header backend already matched exactly.
     *bound*: ``(header spelling, export spelling)`` pairs bound here.
-    *ambiguous*: exports whose key several declarations (or several exports)
-    share, or whose decoded signature disagrees with the only candidate.
-    *unbound_exports*: exports no declaration claims after the pass,
-    *ambiguous* included.
+    *ambiguous*: exports whose qualified name parsed declarations carry but
+    that could not be paired with one of them (overloads the decoder cannot
+    tell apart, a decoded signature, qualifier or function/data mismatch).
+    *undetermined*: exports in the other C++ mangling scheme than the header
+    parse whose qualified name could not be decoded at all (operators,
+    structors, template instantiations). Neither may read as "not declared
+    in the headers": the parse cannot tell (see :func:`unbound_export_entries`).
+    *unbound_exports*: every export no declaration claims after the pass.
     """
 
     direct: int
     bound: tuple[tuple[str, str], ...]
     ambiguous: tuple[str, ...]
     unbound_exports: tuple[str, ...]
+    undetermined: tuple[str, ...] = ()
 
     @property
     def any_declaration_bound(self) -> bool:
-        """At least one declaration is in the public surface by export."""
+        """At least one declaration carries export evidence."""
         return self.direct > 0 or bool(self.bound)
+
+    @property
+    def undecided(self) -> tuple[str, ...]:
+        """Exports the parsed headers may declare but no declaration binds."""
+        return (*self.ambiguous, *self.undetermined)
 
 
 def binding_export_names(snap: AbiSnapshot) -> tuple[list[str], bool]:
     """The export spellings a PE/Mach-O snapshot's table carries, and
     whether it is a 32-bit x86 PE (the only machine with C decoration).
 
-    Ordinal-only PE exports have no name to bind and are left out.
+    An ordinal-only PE export is spelled ``ordinal:N``, as the export-table
+    path spells it: it binds to nothing, but still counts as an export.
     """
     if snap.pe is not None:
-        names = [e.name for e in snap.pe.exports if e.name]
+        names = [e.name or f"ordinal:{e.ordinal}" for e in snap.pe.exports]
         return names, snap.pe.machine == "IMAGE_FILE_MACHINE_I386"
     if snap.macho is not None:
         return [e.name for e in snap.macho.exports if e.name], False
@@ -146,6 +171,8 @@ def _itanium_components(spelling: str) -> tuple[str, ...] | None:
 
 
 def _export_key(sym: str, *, x86_32: bool) -> _Key | None:
+    if sym.startswith("ordinal:"):
+        return None
     if sym.startswith("?"):
         comps = msvc_scope_components(sym)
         return ("msvc", tuple(comps)) if comps else None
@@ -166,146 +193,165 @@ def _decl_key(decl: Decl) -> _Key | None:
     if spelling.startswith(("_Z", "__Z")):
         it = _itanium_components(spelling)
         return ("itanium", it) if it else None
-    # A C-linkage declaration: its spelling is its own (unqualified) name.
+    # A C-linkage declaration: its spelling is its own (unqualified) name. A
+    # file-scope `static` has internal linkage and is never an export.
+    if isinstance(decl, Function) and decl.is_static:
+        return None
     if spelling and spelling == decl.name and spelling.isidentifier():
         return ("c", (spelling,))
     return None
 
 
-# MSVC builtin type codes -> the canonical spellings _canonical_builtin
-# produces for a header parameter. Anything else is undecodable here.
-_MSVC_BUILTINS = {
-    "X": "void",
-    "D": "char",
-    "C": "signed char",
-    "E": "unsigned char",
-    "F": "short",
-    "G": "unsigned short",
-    "H": "int",
-    "I": "unsigned int",
-    "J": "long",
-    "K": "unsigned long",
-    "M": "float",
-    "N": "double",
-    "O": "long double",
-    "_N": "bool",
-    "_J": "long long",
-    "_K": "unsigned long long",
-    "_W": "wchar_t",
-    "_S": "char16_t",
-    "_U": "char32_t",
-    "_Q": "char8_t",
-}
-_INT_WORDS = {"short", "int", "long", "signed", "unsigned"}
-_OTHER_BUILTINS = {
-    "void",
-    "bool",
-    "_Bool",
-    "wchar_t",
-    "char8_t",
-    "char16_t",
-    "char32_t",
-    "float",
-}
-
-
-def _canonical_builtin(spelling: str) -> str | None:
-    """One spelling for a builtin parameter type, or ``None``."""
-    words = spelling.replace("const ", " ").replace("volatile ", " ").split()
-    if not words:
-        return None
-    if len(words) == 1 and words[0] in _OTHER_BUILTINS:
-        return "bool" if words[0] == "_Bool" else words[0]
-    allowed = _INT_WORDS | {"char", "double"}
-    if any(w not in allowed for w in words):
-        return None
-    longs = words.count("long")
-    if "double" in words:
-        return "long double" if longs else "double"
-    if "char" in words:
-        if "unsigned" in words:
-            return "unsigned char"
-        return "signed char" if "signed" in words else "char"
-    size = (
-        "short"
-        if "short" in words
-        else ("long long" if longs >= 2 else ("long" if longs else "int"))
-    )
-    return f"unsigned {size}" if "unsigned" in words else size
-
-
-def _msvc_type(code: str, i: int) -> tuple[str | None, int]:
-    if code.startswith("_", i):
-        return _MSVC_BUILTINS.get(code[i : i + 2]), i + 2
-    return _MSVC_BUILTINS.get(code[i : i + 1]), i + 1
-
-
-def msvc_builtin_param_types(sym: str) -> tuple[str, ...] | None:
-    """The parameter types of an MSVC function mangling, when every one is
-    a builtin type; ``None`` for anything this does not decode.
-
-    Handles free functions (``Y`` + calling convention) and member
-    functions (an access code, then for a non-static member an optional
-    ``E`` pointer-size marker and a cv code, then the calling convention).
-    """
+def _msvc_member_codes(sym: str) -> tuple[str, str | None, int] | None:
+    """``(kind, cv, index after the calling convention)`` of an MSVC
+    function mangling; *kind* is ``free``/``static``/``instance`` and *cv*
+    the instance member's cv code (``A`` none, ``B`` const, ``C`` volatile,
+    ``D`` const volatile). ``None`` when not a modelled function form."""
     idx = sym.find("@@")
     if not sym.startswith("?") or idx == -1:
         return None
     code, i = sym, idx + 2
     head = code[i : i + 1]
+    cv: str | None = None
     if head == "Y":
+        kind = "free"
         i += 1
-    elif head in "CKS" and head:  # static members
+    elif head and head in "CKS":
+        kind = "static"
         i += 1
-    elif head in "AEIMQU" and head:  # instance members
+    elif head and head in "AEIMQU":
+        kind = "instance"
         i += 1
         if code.startswith("E", i):
             i += 1
-        if code[i : i + 1] not in ("A", "B", "C", "D"):
+        cv = code[i : i + 1]
+        if cv not in ("A", "B", "C", "D"):
             return None
         i += 1
     else:
         return None
     if code[i : i + 1] not in ("A", "G", "I", "Q"):  # cdecl/stdcall/fastcall/vectorcall
         return None
-    i += 1
-    ret, i = _msvc_type(code, i)
-    if ret is None:
+    return kind, cv, i + 1
+
+
+def msvc_is_data_symbol(sym: str) -> bool | None:
+    """Whether an MSVC mangling names data (``@@`` then a storage digit,
+    e.g. ``?gv@ns@@3HA``) rather than a function; ``None`` if not MSVC."""
+    idx = sym.find("@@")
+    if not sym.startswith("?") or idx == -1:
         return None
-    if code[i:] == "XZ":
-        return ()
-    params: list[str] = []
-    while i < len(code):
-        if code[i:] in ("@Z", "Z"):
-            return tuple(params)
-        t, i = _msvc_type(code, i)
-        if t is None or t == "void":
-            return None
-        params.append(t)
-    return None
+    return sym[idx + 2 : idx + 3].isdigit()
 
 
-def _decl_param_types(decl: Decl) -> tuple[str, ...] | None:
+def msvc_builtin_param_types(sym: str) -> tuple[str, ...] | None:
+    """The parameter types of an MSVC function mangling when every one is a
+    builtin passed by value, else ``None`` (:mod:`.msvc_signature` decodes
+    the wider grammar)."""
+    params = msvc_function_params(sym)
+    if params is None or any(
+        p.indirection or canonical_builtin(p.base) != p.base for p in params
+    ):
+        return None
+    return tuple(p.base for p in params)
+
+
+#: Itanium builtin codes for the canonical spellings, the inverse of what a
+#: non-template function's parameter suffix spells.
+_ITANIUM_BUILTINS = {
+    "void": "v",
+    "bool": "b",
+    "char": "c",
+    "signed char": "a",
+    "unsigned char": "h",
+    "short": "s",
+    "unsigned short": "t",
+    "int": "i",
+    "unsigned int": "j",
+    "long": "l",
+    "unsigned long": "m",
+    "long long": "x",
+    "unsigned long long": "y",
+    "float": "f",
+    "double": "d",
+    "long double": "e",
+    "wchar_t": "w",
+    "char8_t": "Du",
+    "char16_t": "Ds",
+    "char32_t": "Di",
+}
+
+
+def _decl_params(decl: Decl) -> tuple[ParamSpelling, ...] | None:
     if not isinstance(decl, Function):
         return None
-    out: list[str] = []
+    out: list[ParamSpelling] = []
     for p in decl.params:
-        canon = _canonical_builtin(str(getattr(p, "type", "") or ""))
-        if canon is None:
+        spelled = header_param_spelling(str(getattr(p, "type", "") or ""))
+        if spelled is None:
             return None
-        out.append(canon)
+        out.append(spelled)
     return tuple(out)
 
 
+def _params_agree(
+    declared: tuple[ParamSpelling, ...], exported: tuple[ParamSpelling, ...]
+) -> bool:
+    return len(declared) == len(exported) and all(
+        param_agrees(d, e) for d, e in zip(declared, exported, strict=True)
+    )
+
+
 def _signature_agrees(decl: Decl, sym: str) -> bool | None:
-    """``True``/``False`` when both parameter lists decode, else ``None``."""
-    if not isinstance(decl, Function) or not sym.startswith("?"):
+    """Whether *decl* and the export *sym* can be one entity.
+
+    ``False`` on any decoded disagreement: function vs data, a member's
+    const/volatile qualification, or the parameter list (MSVC decoded by
+    :mod:`.msvc_signature`; Itanium checked as the builtin parameter suffix
+    a non-template function spells). ``True`` when the parameter lists
+    decoded and agree, ``None`` when nothing decisive decoded.
+    """
+    is_data = msvc_is_data_symbol(sym)
+    if is_data is not None and is_data != isinstance(decl, Variable):
+        return False
+    if not isinstance(decl, Function):
         return None
-    exported = msvc_builtin_param_types(sym)
-    declared = _decl_param_types(decl)
-    if exported is None or declared is None:
+    declared = _decl_params(decl)
+    if sym.startswith("?"):
+        codes = _msvc_member_codes(sym)
+        if codes is not None and codes[0] == "instance" and codes[1] is not None:
+            const = codes[1] in ("B", "D")
+            volatile = codes[1] in ("C", "D")
+            if const != bool(decl.is_const) or volatile != bool(decl.is_volatile):
+                return False
+        exported = msvc_function_params(sym)
+        if exported is None or declared is None:
+            return None
+        return _params_agree(declared, exported)
+    plain = macho_underscore.decode_itanium(sym)
+    if not plain.startswith("_Z"):
+        return None  # a C name carries no signature
+    comps = _itanium_components(plain)
+    if (
+        declared is None
+        or comps is None
+        or comps[0] == "std"  # `St` substitution: not spelled component-wise
+        or any(p.indirection or p.base not in _ITANIUM_BUILTINS for p in declared)
+    ):
         return None
-    return exported == declared
+    return plain == _itanium_spelling(comps, declared, const=bool(decl.is_const))
+
+
+def _itanium_spelling(
+    comps: tuple[str, ...], params: tuple[ParamSpelling, ...], *, const: bool
+) -> str:
+    """The Itanium mangling of a non-template function with builtin
+    parameters: the oracle a decoded Itanium export is checked against."""
+    names = "".join(f"{len(c)}{c}" for c in comps)
+    args = "".join(_ITANIUM_BUILTINS[p.base] for p in params) or "v"
+    if len(comps) == 1:
+        return f"_Z{names}{args}"
+    return f"_ZN{'K' if const else ''}{names}E{args}"
 
 
 def _claimed_spellings(decls: Iterable[Decl]) -> set[str]:
@@ -325,31 +371,40 @@ def _claimed_spellings(decls: Iterable[Decl]) -> set[str]:
 def _pair(
     decls: list[Decl], syms: list[str]
 ) -> tuple[list[tuple[Decl, str]], list[str]]:
-    """Bind one key's candidates; return the pairs and the refused exports."""
+    """Bind one qualified name's candidates; return the pairs and the
+    refused exports.
+
+    A declaration binds an export only when the signatures decode and agree
+    and the pairing is one-to-one -- never by uniqueness alone, which would
+    bind a function with class-typed parameters in one release (one overload
+    left) and not in the other (two overloads), giving the same function two
+    identities across the pair. Variables and C names carry no signature:
+    they bind when the name is unique on both sides.
+    """
     if len(decls) == 1 and len(syms) == 1:
-        if _signature_agrees(decls[0], syms[0]) is False:
-            return [], syms
-        return [(decls[0], syms[0])], []
-    # Overloads: pair by a fully decoded builtin parameter list, uniquely.
-    by_sig_decl: dict[tuple[str, ...], list[Decl]] = defaultdict(list)
-    for d in decls:
-        sig = _decl_param_types(d)
-        if sig is not None:
-            by_sig_decl[sig].append(d)
-    sigs = {s: msvc_builtin_param_types(s) if s.startswith("?") else None for s in syms}
-    sig_counts = Counter(sig for sig in sigs.values() if sig is not None)
+        verdict = _signature_agrees(decls[0], syms[0])
+        if verdict is True or (
+            verdict is None and not _signature_is_comparable(decls[0], syms[0])
+        ):
+            return [(decls[0], syms[0])], []
+        return [], syms
+    agree = {
+        sym: [d for d in decls if _signature_agrees(d, sym) is True] for sym in syms
+    }
     pairs: list[tuple[Decl, str]] = []
     refused: list[str] = []
-    for sym, sig in sigs.items():
-        if (
-            sig is not None
-            and len(by_sig_decl.get(sig, [])) == 1
-            and sig_counts[sig] == 1
-        ):
-            pairs.append((by_sig_decl[sig][0], sym))
+    for sym, cands in agree.items():
+        if len(cands) == 1 and sum(cands[0] in c for c in agree.values()) == 1:
+            pairs.append((cands[0], sym))
         else:
             refused.append(sym)
     return pairs, refused
+
+
+def _signature_is_comparable(decl: Decl, sym: str) -> bool:
+    """Whether a signature *should* have decided this pairing: a C++
+    function export, whose overloads a signature is what tells apart."""
+    return isinstance(decl, Function) and sym.startswith(("?", "_Z", "__Z"))
 
 
 def _apply(decl: Decl, sym: str) -> None:
@@ -360,6 +415,7 @@ def _apply(decl: Decl, sym: str) -> None:
         True,
         export_match_diagnostic(ExportMatch.DEMANGLED),
         f"{BOUND_EXPORT_DIAGNOSTIC_PREFIX}{sym}",
+        f"{HEADER_SPELLING_DIAGNOSTIC_PREFIX}{decl.mangled}",
         producer=producer,
     )
     decl.visibility = Visibility.PUBLIC
@@ -375,7 +431,9 @@ def bind_header_declarations_to_exports(
     """Bind *snap*'s unexported header declarations to *exports* by a
     normalized identity, in place (see the module docstring)."""
     decls: list[Decl] = [*snap.declarations.functions, *snap.declarations.variables]
-    direct = sum(1 for d in decls if in_public_surface(d))
+    # Export evidence, not public-surface membership: a declaration judged
+    # public without an export (a never-ODR-used CPO) binds no export.
+    direct = sum(1 for d in decls if is_confirmed_true(binary_exported(d)))
     claimed = _claimed_spellings(decls)
     open_exports = [s for s in dict.fromkeys(exports) if s not in claimed]
 
@@ -394,6 +452,9 @@ def bind_header_declarations_to_exports(
         if ekey is not None:
             exports_by_name[ekey[1]].append((ekey[0], sym))
 
+    # The header parse's own mangling scheme(s), read before binding rewrites
+    # any declaration's spelling to an export's.
+    parse_schemes = {_spelling_scheme(d.mangled) for d in decls}
     bound: list[tuple[str, str]] = []
     ambiguous: list[str] = []
     bound_syms: set[str] = set()
@@ -421,9 +482,52 @@ def bind_header_declarations_to_exports(
             len(bound),
         )
     unbound = tuple(s for s in open_exports if s not in bound_syms)
+    undetermined = tuple(
+        s
+        for s in unbound
+        if _export_key(s, x86_32=x86_32) is None
+        and (scheme := _spelling_scheme(s)) in ("itanium", "msvc")
+        and parse_schemes & {"itanium", "msvc"}
+        and scheme not in parse_schemes
+    )
     return ExportBindingOutcome(
         direct=direct,
         bound=tuple(bound),
         ambiguous=tuple(dict.fromkeys(ambiguous)),
         unbound_exports=unbound,
+        undetermined=undetermined,
     )
+
+
+def _spelling_scheme(spelling: str) -> str:
+    if spelling.startswith("?"):
+        return "msvc"
+    if spelling.startswith(("_Z", "__Z")):
+        return "itanium"
+    return "other"
+
+
+def unbound_export_entries(
+    outcome: ExportBindingOutcome, snap: AbiSnapshot, *, x86_32: bool
+) -> list[Function]:
+    """Export-table entries for :attr:`ExportBindingOutcome.undecided`.
+
+    The parsed headers may declare these exports, so they must not read as
+    undeclared (a private export whose removal is filtered out): each is
+    recorded as an export-table entry, exported with its header
+    declaration unknown, the way a headerless dump records every export.
+    """
+    from .export_symbol_identity import itanium_export_function, msvc_export_function
+
+    reason = "export not bound to a parsed header declaration (binding undecided)"
+    entries: list[Function] = []
+    for sym in outcome.undecided:
+        fn = (
+            msvc_export_function(sym, is_x86_32=x86_32)
+            if snap.pe is not None
+            else itanium_export_function(sym)
+        )
+        fn.visibility = Visibility.PUBLIC
+        fn.declared_in_headers_fact = Fact.not_collected(reason)
+        entries.append(fn)
+    return entries

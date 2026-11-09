@@ -54,6 +54,13 @@ def _sides(
 
 def _finding_text(label: str, snap: AbiSnapshot) -> str:
     code = snap.scope_fallback
+    if code == "export-binding-partial":
+        return (
+            f"{SCOPE_FALLBACK_DIMENSION}: some exports of the {label} snapshot "
+            f"could not be bound to one header declaration ({code}), so they "
+            "are compared from the export table only; every other declaration "
+            "and the header types were assessed"
+        )
     if getattr(snap, "from_headers", False):
         # The headers parsed and were kept (``export-binding-unresolved``):
         # types and templates were assessed, export binding was not.

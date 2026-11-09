@@ -470,7 +470,9 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "export-binding-unresolved replaces mangling-fallback), and bind a "
         "declaration to an export spelled in another mangling scheme "
         "(extract/header_export_binding): a bound declaration's mangled "
-        "becomes the export's MSVC/Itanium/decorated spelling. ELF dumps and "
+        "becomes the export's MSVC/Itanium/decorated spelling, and exports the "
+        "headers may declare but that bind to no one declaration are kept as "
+        "export-table entries (export-binding-partial). ELF dumps and "
         "every type or name spelling are unchanged, so no rewrite is needed -- "
         "an older PE/Mach-O snapshot keeps its export-table-only surface"
     ),

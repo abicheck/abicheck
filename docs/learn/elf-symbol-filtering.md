@@ -109,9 +109,12 @@ in those public headers via castxml. This is **best-effort**:
 - If castxml is unavailable, or the headers fail to parse, abicheck emits a warning and
   falls back to the full export table (the previous behavior).
 - For C++ binaries built with **MSVC**, export names use MSVC mangling while castxml
-  emits Itanium-mangled names, so declarations may not match the export table. When no
-  declaration matches, abicheck warns and falls back to the export table. `extern "C"`
-  and MinGW-built exports match by plain name and scope correctly.
+  emits Itanium-mangled names. abicheck binds each declaration to its export by the
+  qualified name and decoded parameter list both manglings encode. A header set that
+  parses is always kept: when no declaration binds, the snapshot records
+  `export-binding-unresolved`, and exports that could not be bound to one declaration
+  are kept as export-table entries (`export-binding-partial`). `extern "C"` and
+  MinGW-built exports match by plain name and scope correctly.
 
 Reachability-based public-surface filtering (keeping only the symbols and types reachable
 from the public API, with an auditable trail of what was filtered and why) is **on by
@@ -121,10 +124,9 @@ printed; opt out for one run with `--contract all`, or project-wide with
 the public-header-declared exported API are recorded as *filtered* rather than reported, while
 internal-type *leaks* are never hidden. Source-header provenance (distinguishing a
 privately-included header from a public one independently of reachability) is implemented
-across castxml, DWARF, and PDB. On PE, a header parse with Itanium names is bound to an
-MSVC DLL's exports by the qualified name both manglings encode; overloads whose parameters
-are not builtin types stay unbound and are compared from the export table only (see
-the known gap "PE: overloads with class-typed parameters stay unbound").
+across castxml, DWARF, and PDB. On PE, overloads whose parameters the MSVC decoder does
+not model (templates, function pointers) stay unbound and are compared from the export
+table only (see the known gap on PE overloads that stay unbound).
 
 See also: [Limitations & Known Boundaries](limitations.md) for the rest of
 abicheck's practical boundary list, and

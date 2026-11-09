@@ -102,6 +102,38 @@ def _write_mixed(root: Path) -> None:
         )
 
 
+# Overloads whose parameters are class types: the MSVC binder cannot tell
+# them apart (known gap), so on PE they stay export-table entries -- and the
+# removal of one must still be reported, as ELF reports it.
+_OVERLOAD_H = """#pragma once
+namespace ns {{
+struct A {{ int x; }};
+struct B {{ int y; }};
+int g(A);{g_b}
+extern "C" int anchor(int);
+}}
+"""
+_OVERLOAD_CPP = """#include "{h}"
+namespace ns {{
+int g(A a) {{ return a.x; }}{g_b_def}
+extern "C" int anchor(int x) {{ return x; }}
+}}
+"""
+
+
+def _write_overloads(root: Path) -> None:
+    for v, keep in (("v1", True), ("v2", False)):
+        (root / f"{v}.h").write_text(
+            _OVERLOAD_H.format(g_b=" int g(B);" if keep else "")
+        )
+        (root / f"{v}.cpp").write_text(
+            _OVERLOAD_CPP.format(
+                h=f"{v}.h",
+                g_b_def=" int g(B b) { return b.y; }" if keep else "",
+            )
+        )
+
+
 def _write_concept(root: Path) -> None:
     bodies = {
         "v1": "requires(T a, T b) { a + b; }",
@@ -130,6 +162,7 @@ SHAPES = {
     "case228": (_copy_case("case228_nontype_template_param_default_changed"), "c++17"),
     "concept": (_write_concept, "c++20"),
     "mixed_c_and_cxx": (_write_mixed, "c++17"),
+    "class_param_overload_removed": (_write_overloads, "c++17"),
 }
 
 
@@ -254,6 +287,7 @@ def _compare(
     cfg = root / f"cfg-{backend}.yml"
     cfg.write_text(f"compile:\n  frontend: {backend}\n")
     report = root / f"{old.suffix[1:]}-{backend}.json"
+    report.unlink(missing_ok=True)  # a failed run must not read a stale report
     proc = subprocess.run(
         abicheck_command(
             "compare",
@@ -311,6 +345,7 @@ def test_the_oracle_sees_the_header_only_changes(built):
         "case228": "template_param_default_changed",
         "concept": "concept_tightened",
         "mixed_c_and_cxx": "func_removed",
+        "class_param_overload_removed": "func_removed",
     }
     for shape, kind in wanted.items():
         root, v1, v2 = built[shape]

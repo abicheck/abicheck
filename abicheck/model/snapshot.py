@@ -337,6 +337,9 @@ class AbiSnapshot:
     #                                  mangling schemes (extract.
     #                                  header_export_binding); the exports are
     #                                  compared from the export table only
+    #   "export-binding-partial"     — headers kept and some declarations bound,
+    #                                  but exports the headers may declare stayed
+    #                                  undecided (kept as export-table entries)
     #   "mangling-fallback"          — legacy (stored snapshots only): headers
     #                                  parsed, nothing matched, and the header
     #                                  surface was discarded

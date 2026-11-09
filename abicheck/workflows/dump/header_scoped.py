@@ -73,8 +73,11 @@ def _try_header_scoped_dump(
     declaration is bound to an export, exactly or by a normalized identity
     across mangling schemes (:mod:`abicheck.extract.header_export_binding`).
     Returns ``(snapshot, "export-binding-unresolved")`` when the headers
-    parsed but no declaration could be bound: the header surface is still
-    kept as type-level evidence, and the code is recorded on the snapshot.
+    parsed but no declaration could be bound, and ``(snapshot,
+    "export-binding-partial")`` when some bound but exports the headers may
+    declare stayed undecided (recorded as export-table entries). Either way
+    the header surface is kept as type-level evidence, and the code is
+    recorded on the snapshot.
     Returns ``(None, "header-backend-unavailable")`` (after a
     ``UserWarning``) only when the header parse itself failed, so the caller
     falls back to export-table mode and records that confidence signal
@@ -262,25 +265,40 @@ def _bind_exports(fmt: str, path: Path, snap: AbiSnapshot) -> str | None:
     when no declaration could be bound to any export, else ``None``.
     """
     from ...extract.header_export_binding import (
+        EXPORT_BINDING_PARTIAL,
         EXPORT_BINDING_UNRESOLVED,
         bind_header_declarations_to_exports,
         binding_export_names,
+        unbound_export_entries,
     )
 
     names, x86_32 = binding_export_names(snap)
     outcome = bind_header_declarations_to_exports(snap, names, x86_32=x86_32)
-    if outcome.ambiguous:
+    undecided = unbound_export_entries(outcome, snap, x86_32=x86_32)
+    if undecided:
+        # Exports the parsed headers may declare stay on the surface as
+        # export-table entries: read as undeclared, their removal would be
+        # filtered out as a private export's.
+        snap.declarations.functions = [*snap.declarations.functions, *undecided]
+        snap._func_by_mangled = None
+        snap._var_by_mangled = None
+        snap._type_by_name = None
         warnings.warn(
-            f"{len(outcome.ambiguous)} export(s) of '{path.name}' ({fmt.upper()}) "
-            "could not be bound to one header declaration (overloaded or "
-            "signature-mismatched across name-mangling schemes), e.g. "
-            f"{outcome.ambiguous[0]!r}; they are compared from the export "
-            "table only.",
+            f"{len(undecided)} export(s) of '{path.name}' ({fmt.upper()}) could "
+            "not be bound to one header declaration across name-mangling "
+            "schemes (overloads, operators, template instantiations, or a "
+            f"signature mismatch), e.g. {outcome.undecided[0]!r}; they are "
+            "compared from the export table only.",
             UserWarning,
             stacklevel=3,
         )
-    if outcome.any_declaration_bound or not names:
+    if not names:
         return None
+    if outcome.any_declaration_bound:
+        if not undecided:
+            return None
+        snap.scope_fallback = EXPORT_BINDING_PARTIAL
+        return EXPORT_BINDING_PARTIAL
     warnings.warn(
         f"None of the provided headers' declarations could be bound to an "
         f"exported symbol of '{path.name}' ({fmt.upper()}): the headers declare "

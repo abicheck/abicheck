@@ -801,11 +801,12 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
         known_gaps=(
             KnownGap(
                 description=(
-                    "PE overloads whose parameters are not builtin types, and "
-                    "MSVC operators/structors/template instantiations, stay "
-                    "unbound and are compared from the export table only."
+                    "PE functions whose MSVC parameter encoding is not decoded "
+                    "(templates, function pointers) and MSVC operators/structors/"
+                    "template instantiations stay unbound; they are kept as "
+                    "export-table entries, so a removal is still reported."
                 ),
-                reference="docs/contribute/known-gaps/pe-overloads-with-class-typed-parameters-stay-unbound.md",
+                reference="docs/contribute/known-gaps/pe-overloads-with-undecoded-parameter-types-stay-unbound.md",
             ),
         ),
     ),

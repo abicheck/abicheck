@@ -10,10 +10,14 @@
   surface but read every C++ declaration as unexported. The dump now binds
   each declaration to its export across mangling schemes (MSVC and Itanium,
   and 32-bit x86 C decoration) by the qualified name both spellings encode.
-  It tells overloads apart by their decoded MSVC parameter list. A header set
-  that parses is always kept as type-level evidence. When nothing could be
-  bound, the snapshot records the new `scope_fallback` code
+  A declaration binds only when the decoded parameter lists agree (builtins,
+  classes and enums, one level of pointer or reference), so overloads are
+  told apart and a function, data or `const` mismatch is refused. A header
+  set that parses is always kept as type-level evidence. When nothing could
+  be bound, the snapshot records the new `scope_fallback` code
   `export-binding-unresolved` (an analysis-assurance note) instead of
-  `mangling-fallback`, and exports that stay unbound are still compared from
-  the export table. The binding pass lives in
-  `abicheck.extract.header_export_binding`.
+  `mangling-fallback`. Exports the headers may declare but that could not be
+  bound (template-typed overloads, MSVC operators) are kept as export-table
+  entries, so their removal is still reported, and the snapshot records
+  `export-binding-partial`. The binding pass lives in
+  `abicheck.extract.header_export_binding` and `abicheck.extract.msvc_signature`.

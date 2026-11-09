@@ -392,10 +392,10 @@ current emitter, which is unchanged.
 `false-clean` — An explicitly supplied header that does not parse on PE/Mach-O is reported as a warning and a binary-depth run instead of a failed acquisition. [Full write-up](known-gaps/a-failed-header-parse-on-pe-or-mach-o-falls-back-to-export-table-mode.md)
 <!-- no-canary: PE/Mach-O only; the macOS lane of tests/test_sided_include_labelled_composition.py pins the current behaviour on darwin -->
 
-#### PE: overloads with class-typed parameters stay unbound across MSVC and Itanium manglings (2026-11-09)
+#### PE: overloads with undecoded parameter types stay unbound across MSVC and Itanium manglings (2026-11-09)
 
-**Status (recorded 2026-11-09): NARROWED.** `extract/header_export_binding.py` binds a header declaration to an export spelled in another C++ mangling scheme (an MSVC DLL against an Itanium header parse, or the reverse), and an undecorated C name to its x86 decoration, by the qualified name both spellings encode. It separates same-named overloads only by a decoded MSVC parameter list of builtin types. Overloads whose parameters are pointers, references or class types, and an MSVC export with no declaration of its qualified name, stay unbound. They are compared from the PE export table only, and the dump warns with a count. A unique name binds without a type check unless its parameters decode.
-`coverage` — On PE, an overload set with non-builtin parameters keeps its export-table comparison but not its header declarations. [Full write-up](known-gaps/pe-overloads-with-class-typed-parameters-stay-unbound.md)
+**Status (recorded 2026-11-09): NARROWED.** `extract/header_export_binding.py` binds a header declaration to an export spelled in another C++ mangling scheme, and an undecorated C name to its x86 decoration, when the qualified names match and the decoded parameter lists agree (`extract/msvc_signature.py`: builtins, classes and enums by value, one level of pointer or reference). A function with template-typed, function-pointer or array parameters, and an MSVC operator, structor or template instantiation, stay unbound. They are kept as export-table entries, so a removal is still reported, the snapshot records `export-binding-partial`, and the dump warns with a count.
+`coverage` — On PE, a function whose MSVC parameter encoding is not decoded keeps its export-table comparison but not its header declaration. [Full write-up](known-gaps/pe-overloads-with-undecoded-parameter-types-stay-unbound.md)
 <!-- canary: tests/test_header_export_binding.py::test_undecodable_overloads_stay_unbound_and_are_reported -->
 
 #### A stored snapshot keeps no record of a partial export-table read

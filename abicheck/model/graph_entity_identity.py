@@ -77,6 +77,7 @@ from collections.abc import Collection
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
+from .bound_export_spelling import bound_header_spelling
 from .graph_identity import (
     _UNRESOLVED_PREFIX,
     _decl_node_id,
@@ -464,6 +465,19 @@ def _with_variant_aliases(
     return GraphEntityIdentity(ident.node_id, ident.state, (*ident.aliases, *kept))
 
 
+def _with_header_spelling_alias(
+    ident: GraphEntityIdentity, decl: object
+) -> GraphEntityIdentity:
+    """A declaration bound to an export spelled in another mangling scheme
+    (``extract.header_export_binding``) keeps its header parse's own
+    spelling as an alias, so an AST edge naming that spelling joins this
+    node. An alias another declaration owns is dropped as ambiguous below."""
+    spelling = bound_header_spelling(decl)
+    if not ident.resolved or not spelling:
+        return ident
+    return _with_variant_aliases(ident, (spelling,))
+
+
 def _function_identities(
     snap: SnapshotLike, exports: frozenset[str]
 ) -> list[GraphEntityIdentity]:
@@ -511,10 +525,15 @@ def snapshot_identities(
     ``model.snapshot`` (see :class:`SnapshotLike`)."""
     occ = UnresolvedOccurrences()
     functions = tuple(
-        occ.allocate(i) for i in _function_identities(snap, frozenset(export_names))
+        occ.allocate(_with_header_spelling_alias(i, f))
+        for i, f in zip(
+            _function_identities(snap, frozenset(export_names)),
+            snap.declarations.functions,
+        )
     )
     variables = tuple(
-        occ.allocate(identity_for_variable(v)) for v in snap.declarations.variables
+        occ.allocate(_with_header_spelling_alias(identity_for_variable(v), v))
+        for v in snap.declarations.variables
     )
     # An alias is only a second spelling of *this* entity while no other
     # declaration owns that spelling as its canonical id (Mach-O: `exit`'s
