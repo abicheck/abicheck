@@ -742,3 +742,150 @@ def test_an_unresolved_lookup_records_no_snapshot(tmp_path: Path) -> None:
     (gate_record,) = _records(calls[0])
     assert gate_record.outcome == "base_not_snapshotted"
     assert gate_record.snapshot_sha is None
+
+
+# ── the planner command's edges, in process ─────────────────────────────────
+
+
+def _plan(tmp_path: Path, base: str, *extra: str, paths: str = "include/**"):
+    out = tmp_path / "plan.out"
+    out.write_text("")
+    res = CliRunner().invoke(
+        action_cli,
+        [
+            "plan-ancestor-walk",
+            "--base-sha",
+            base,
+            "--paths",
+            paths,
+            "--github-output",
+            str(out),
+            *extra,
+        ],
+    )
+    lines = out.read_text().splitlines()
+    fields = dict(
+        line.split("=", 1) for line in lines if not line.startswith("candidate=")
+    )
+    candidates = [
+        line.split("=", 1)[1] for line in lines if line.startswith("candidate=")
+    ]
+    return res, fields, candidates
+
+
+@needs_git
+def test_the_planner_stops_at_its_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, chain = _main_history(tmp_path, ("doc",) * 4)
+    monkeypatch.chdir(repo.path)
+    res, fields, candidates = _plan(tmp_path, chain[-1], "--limit", "2")
+    assert res.exit_code == 0, res.output
+    assert candidates == [chain[3], chain[2]]
+    assert fields["exhausted"] == "limit_reached"
+    assert "none of the 2 nearest" in fields["exhausted-message"]
+
+
+@needs_git
+def test_the_planner_sees_a_shallow_boundary_as_unavailable_history(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, chain = _main_history(tmp_path, ("doc",) * 4)
+    clone = tmp_path / "clone"
+    subprocess.run(
+        ["git", "clone", "-q", "--depth", "2", f"file://{repo.path}", str(clone)],
+        check=True,
+        capture_output=True,
+    )
+    monkeypatch.chdir(clone)
+    res, fields, candidates = _plan(tmp_path, chain[-1])
+    assert res.exit_code == 0, res.output
+    # The one ancestor in the clone is a candidate; past it nothing is known.
+    assert candidates == [chain[-2]]
+    assert fields["exhausted"] == "history_unavailable"
+    assert "fetch-depth: 0" in fields["exhausted-message"]
+
+
+@needs_git
+def test_an_unreadable_tree_ends_the_plan_as_unknown_not_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import abicheck.frontends.action.cli_main_snapshot as mod
+
+    repo, chain = _main_history(tmp_path, ("doc",) * 3)
+    monkeypatch.chdir(repo.path)
+    real = mod._git
+
+    def flaky(*args: str) -> subprocess.CompletedProcess[str]:
+        if args[0] == "diff" and args[3] == chain[1]:
+            return subprocess.CompletedProcess(["git", *args], 128, "", "missing tree")
+        return real(*args)
+
+    monkeypatch.setattr(mod, "_git", flaky)
+    _res, fields, candidates = _plan(tmp_path, chain[-1])
+    assert candidates == [chain[2]]
+    assert fields["exhausted"] == "history_unavailable"
+
+
+@needs_git
+def test_a_base_not_in_the_clone_fails_the_planner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo, _chain = _main_history(tmp_path, ("doc",))
+    monkeypatch.chdir(repo.path)
+    res, _fields, _ = _plan(tmp_path, "f" * 40)
+    assert res.exit_code == 1 and "git rev-list ffffffffffff failed" in res.output
+
+
+@pytest.mark.parametrize(("paths", "needle"), [("!x", "negation"), ("# none", "empty")])
+def test_the_planner_refuses_an_unusable_declaration(
+    tmp_path: Path, paths: str, needle: str
+) -> None:
+    res, _fields, _ = _plan(tmp_path, _BASE, paths=paths)
+    assert res.exit_code == 2 and needle in res.output
+
+
+def test_a_missing_git_is_a_failed_call_not_a_crash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import abicheck.frontends.action.cli_main_snapshot as mod
+
+    monkeypatch.setenv("PATH", "")
+    result = mod._git("--version")
+    assert result.returncode == 127 and result.stdout == ""
+
+
+@pytest.mark.parametrize(
+    ("result", "needle"),
+    [
+        (
+            WalkResult.FOUND,
+            "Used the snapshot of `main@eeeeeee`, identical to `main@aaaaaaa`",
+        ),
+        (
+            WalkResult.PATHS_CHANGED,
+            "4 equivalent ancestor(s) has a snapshot, and a declared path changed at `bbbbbbb` (`a`, `b`, `c` and 2 more)",
+        ),
+        (
+            WalkResult.LIMIT_REACHED,
+            "none of the 4 nearest first-parent ancestors of `main@aaaaaaa`",
+        ),
+        (WalkResult.HISTORY_ENDED, "ends after 4 ancestor(s)"),
+        (WalkResult.HISTORY_UNAVAILABLE, "beyond 4 ancestor(s)"),
+        (WalkResult.LOOKUP_FAILED, "a snapshot lookup failed during the walk"),
+    ],
+)
+def test_every_walk_result_has_its_own_sentence(
+    result: WalkResult, needle: str
+) -> None:
+    from abicheck.frontends.action.main_snapshot_ancestor import walk_message
+
+    text = walk_message(
+        result,
+        base_sha=_BASE,
+        snapshot_sha=_ANCESTOR,
+        changed_at="b" * 40,
+        changed_paths=("a", "b", "c", "d", "e"),
+        tried=4,
+    )
+    assert needle in text
