@@ -101,7 +101,7 @@ Commands below use `PYTHONPATH=.`.
 | Default/debug verdicts | `ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1 PYTHONPATH=. python tests/validate_examples.py --toolchain {gcc,clang} --json` | CI Linux, gcc/clang | 232 catalog cases | gcc: 182 PASS / 7 XFAIL / 43 SKIP; clang: 181 PASS / 8 XFAIL / 1 NOT_APPLICABLE / 42 SKIP | Green default/debug verdict lane. Without the env var, 7 `source_smoke: {mode: run}` cases SKIP instead of running. Under clang `case180_symbol_binding_lost_unique` is `NOT_APPLICABLE`: clang never emits `STB_GNU_UNIQUE`, so its v1/v2 are the same transition-free pair, and the lane checks the `NO_CHANGE` that pair warrants (`not_applicable_expected`) instead of excusing a miss as XFAIL |
 | Runtime smoke | `PYTHONPATH=. python skills-src/evaluation/validation/scripts/run_example_runtime_smoke.py --json` | Linux proof run | 232 catalog cases | 102 DEMONSTRATED / 85 NO_RUNTIME_SIGNAL / 45 SKIP | Passing; no BUILD_ERROR. The runner now compares each app's baseline exit code against a per-case `runtime_baseline_exit` in `ground_truth.json` (default 0) instead of hardcoding zero, so apps that deliberately return a computed value (e.g. case111's `ets(42).local()` returning `42`) are no longer misread as a broken baseline. No case shows a signal against its own baseline library (`BASELINE_SIGNAL`), so every DEMONSTRATED is a v2-only effect — see "Known validation gaps" below for case06's rewrite |
 | Release headers | `ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1 python tests/validate_examples.py --artifact-variant release-headers --json` | CI Linux artifact | 232 catalog cases | 182 PASS / 7 XFAIL / 43 SKIP | Informational; the false-risk regression on `case61_var_added` (`exported_object_alignment_reduced`) is fixed — CastXML now resolves a variable's natural type alignment as declared-alignment corroboration even without an explicit `alignas` override. Without the env var, the same 7 cases SKIP instead |
-| Stripped headers | `ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1 python tests/validate_examples.py --artifact-variant stripped-headers --json` | CI Linux artifact | 232 catalog cases | 178 PASS / 4 FAIL / 7 XFAIL / 43 SKIP | Informational; reduced-evidence signal-loss backlog (below). Without the env var, the same 7 cases SKIP instead |
+| Stripped headers | `ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1 python tests/validate_examples.py --artifact-variant stripped-headers --json` | CI Linux artifact | 232 catalog cases | 162 PASS / 20 FAIL / 7 XFAIL / 43 SKIP | Informational; reduced-evidence signal-loss backlog and header-less `UNCONFIRMED` cases (below). Without the env var, the same 7 cases SKIP instead |
 | Build/source proof | `ABICHECK_TRUSTED_SOURCE_SMOKE_RUN=1 python tests/validate_examples.py case01 case04 case28 case40 case98 case105 case122 case129 case130 case131 case132 case133 --artifact-variant build-source --json` | CI Linux artifact | 12 representative cases | 12 PASS | Required release proof; includes L3 C++ floor and L4 concept/template regressions. Not full L3-L5 catalog coverage — see "Known validation gaps" |
 
 Counts above are from the most recent full catalog run this table was refreshed against; re-run
@@ -211,6 +211,14 @@ trivially-copyable trait from headers, which CastXML does not report. `case89_in
 left this list when the pimpl inline-body detector stopped depending on DWARF
 for the record's namespace (#1470); it is `BREAKING` without debug info now.
 
+Header-less cases in the stripped lane (no `v1.h`/`v2.h`: soname, rpath,
+hardening-flag and toolchain-mode cases such as `case05_soname`,
+`case130_exceptions_mode_flip` and `case138_needed_added`) keep no type-level
+evidence once stripped, so a compatibility claim there reads `UNCONFIRMED`
+with exit 1 instead of the debug build's verdict. The JSON report
+keeps the observed verdict in `unconfirmed.observed_verdict`; these rows are
+counted as FAIL against the debug ground truth, not as detection losses.
+
 Release and stripped full-catalog lanes remain reported-only plus false-positive
 guarded. The fixed ten-case build/source proof is blocking. A complete
 build/source run over every applicable L3-L5 case remains an extended/manual
@@ -220,11 +228,11 @@ Recent build/source and ABI-mode examples:
 
 | Case | Default/debug | Release | Stripped | Build/source |
 |---|---|---|---|---|
-| `case129_struct_return_convention` | PASS (`BREAKING`) | PASS (`BREAKING`) | FAIL (`COMPATIBLE`) | PASS (`BREAKING`) |
-| `case130_exceptions_mode_flip` | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) |
-| `case131_rtti_mode_flip` | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) |
-| `case132_threadsafe_statics_flip` | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) |
-| `case133_tls_model_flip` | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) |
+| `case129_struct_return_convention` | PASS (`BREAKING`) | PASS (`BREAKING`) | FAIL (`UNCONFIRMED`; observed `COMPATIBLE`) | PASS (`BREAKING`) |
+| `case130_exceptions_mode_flip` | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) | FAIL (`UNCONFIRMED`; observed `COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) |
+| `case131_rtti_mode_flip` | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) | FAIL (`UNCONFIRMED`; observed `COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) |
+| `case132_threadsafe_statics_flip` | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) | FAIL (`UNCONFIRMED`; observed `COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) |
+| `case133_tls_model_flip` | PASS (`COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) | FAIL (`UNCONFIRMED`; observed `COMPATIBLE_WITH_RISK`) | PASS (`COMPATIBLE_WITH_RISK`) |
 
 Current mode-specific backlog: stripped headers under-classifies
 `case103_toolchain_flag_drift`, `case117_no_unique_address`,
