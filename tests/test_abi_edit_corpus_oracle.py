@@ -536,3 +536,14 @@ def test_fixed_matrix_checks_producer_and_header_driver_widths(
         v1._skip_wrong_width(
             seed, _cfg("c++", evidence=evidence, flags=Flags(bits=bits))
         )
+    if evidence == "headers":
+        # The producer is right and only the header frontend's driver is not.
+        monkeypatch.setattr(
+            v1,
+            "driver_width",
+            lambda d, *a: None if d == "g++" else f"{d} does not target {bits}-bit",
+        )
+        with pytest.raises(pytest.skip.Exception, match="^c\\+\\+ does not target"):
+            v1._skip_wrong_width(
+                seed, _cfg("c++", evidence=evidence, flags=Flags(bits=bits))
+            )
