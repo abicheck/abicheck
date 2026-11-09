@@ -94,7 +94,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `func_added_elf_only` | COMPATIBLE | 0 | 0 | 0 |
 | `func_export_added` | COMPATIBLE | 2 | 0 | 0 |
 | `func_language_linkage_changed` | BREAKING | 1 | 0 | 0 |
-| `func_removed` | BREAKING | 15 | 1 | 20 |
+| `func_removed` | BREAKING | 15 | 1 | 21 |
 | `func_removed_elf_only` | BREAKING | 5 | 0 | 6 |
 | `func_visibility_changed` | BREAKING | 2 | 0 | 2 |
 | `func_visibility_protected_changed` | RISK | 1 | 0 | 0 |
