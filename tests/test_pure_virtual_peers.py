@@ -9,6 +9,7 @@ peer.
 from __future__ import annotations
 
 import pytest
+from hypothesis import given, strategies as st
 
 from abicheck.compare.pure_virtual_peers import PureVirtualPeers
 from abicheck.extract.surface_fact_producers import debug_info_surface_facts
@@ -87,3 +88,78 @@ def test_a_lookup_answers_the_same_peer_every_time() -> None:
     peers = PureVirtualPeers(side)
     assert [peers.of(_fn()) for _ in range(3)] == [pure, pure, pure]
     assert peers.of(_fn(mangled="_ZNK5Shape4sizeEv")) is None
+
+
+# ── the lookup's contract as invariants over generated sides ────────────────
+
+_NAMES = (M, "_ZN5Shape4kindEv", "_ZNK5Shape4areaEv", "_ZNK6Circle4kindEv")
+_VIS = (Visibility.PUBLIC, Visibility.HIDDEN)
+
+
+@st.composite
+def _decls(draw: st.DrawFn) -> list[tuple[Function, bool]]:
+    """A side: at most one declaration per mangled name (the function map's
+    key), each pure or not, public or hidden, with or without the DWARF
+    surface facts; paired with whether it is confirmed out of contract."""
+    names = draw(st.lists(st.sampled_from(_NAMES), unique=True, max_size=4))
+    side = []
+    for name in names:
+        vis, debug = draw(st.sampled_from(_VIS)), draw(st.booleans())
+        fn = _fn(mangled=name, pure=draw(st.booleans()), vis=vis, debug_info=debug)
+        # Visibility places a declaration out of contract only where no
+        # surface fact speaks; DWARF's facts leave membership unestablished.
+        side.append((fn, vis is Visibility.HIDDEN and not debug))
+    return side
+
+
+def _functions(side: list[tuple[Function, bool]]) -> list[Function]:
+    return [fn for fn, _ in side]
+
+
+def _expected(old: Function, side: list[tuple[Function, bool]]) -> Function | None:
+    """The oracle, read off the generated side: the one pure declaration
+    under *old*'s exact mangled name not placed out of contract, when *old*
+    is virtual."""
+    if not old.is_virtual:
+        return None
+    return next(
+        (
+            f
+            for f, out in side
+            if f.mangled == old.mangled and f.is_pure_virtual and not out
+        ),
+        None,
+    )
+
+
+class TestPureVirtualPeerProperties:
+    @given(
+        side=_decls(),
+        name=st.sampled_from(_NAMES),
+        virtual=st.booleans(),
+    )
+    def test_the_peer_is_exactly_the_in_contract_pure_namesake(
+        self, side: list[tuple[Function, bool]], name: str, virtual: bool
+    ) -> None:
+        old = _fn(mangled=name, virtual=virtual)
+        peers = PureVirtualPeers(_side(*_functions(side)))
+        assert peers.of(old) is _expected(old, side)
+
+    @given(side=_decls(), names=st.lists(st.sampled_from(_NAMES), max_size=6))
+    def test_lookups_do_not_depend_on_order_or_repetition(
+        self, side: list[tuple[Function, bool]], names: list[str]
+    ) -> None:
+        # One instance asked in sequence answers as a fresh instance per ask.
+        snap = _side(*_functions(side))
+        shared = PureVirtualPeers(snap)
+        olds = [_fn(mangled=n) for n in names]
+        assert [shared.of(o) for o in olds] == [
+            PureVirtualPeers(snap).of(o) for o in olds
+        ]
+
+    @given(side=_decls(), name=st.sampled_from(_NAMES))
+    def test_a_peer_never_carries_another_name(
+        self, side: list[tuple[Function, bool]], name: str
+    ) -> None:
+        peer = PureVirtualPeers(_side(*_functions(side))).of(_fn(mangled=name))
+        assert peer is None or (peer.mangled == name and peer.is_pure_virtual)
