@@ -412,6 +412,12 @@ def _reject_config_scoping_for_no_baseline(
             project_cfg.report_baseline_provenance,
             "an audit has no baseline operand whose provenance it could record",
         ),
+        (
+            "report.delta_baseline",
+            project_cfg.report_delta_baseline,
+            "an audit is neither the gate nor the delta comparison of a "
+            "delta-baseline pair",
+        ),
     ):
         if value:
             raise click.UsageError(

@@ -117,6 +117,7 @@ The last column gives the same option on the other surfaces, read from `architec
 | Sub-key | Type | Same option on other surfaces |
 |---|---|---|
 | `baseline_provenance` | str | --set: `--set report.baseline_provenance=VALUE` |
+| `delta_baseline` | str | --set: `--set report.delta_baseline=VALUE` |
 
 ### `resource_limits:`
 
