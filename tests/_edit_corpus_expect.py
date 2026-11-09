@@ -71,10 +71,14 @@ class Expectation:
 
     @property
     def benign(self) -> bool:
-        """The edit is declared not to break consumers' binaries."""
+        """The edit is declared not to break consumers' binaries.
+
+        An ``API_BREAK`` ceiling is a source-only break: already-built
+        consumers must keep running, so a binary break contradicts it.
+        """
         return (
             self.verdict_max is not None
-            and VERDICT_RANK[self.verdict_max] <= VERDICT_RANK["COMPATIBLE_WITH_RISK"]
+            and VERDICT_RANK[self.verdict_max] <= VERDICT_RANK["API_BREAK"]
         )
 
     @property

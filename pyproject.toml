@@ -899,7 +899,7 @@ clangxx = "20.*"
 cmake = "*"
 
 [tool.pixi.feature.integration.tasks]
-test-integration = "pytest tests/ -v -m integration --tb=short"
+test-integration = "pytest tests/ -v -m 'integration and not edit_corpus_nightly and not edit_corpus_weekly' --tb=short"
 
 # libabigail (abidiff/abipkgdiff) + abi-compliance-checker, for the
 # `libabigail`/`abicc` parity markers. Both are conda-forge linux-64-only

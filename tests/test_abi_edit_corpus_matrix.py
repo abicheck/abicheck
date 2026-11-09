@@ -340,6 +340,7 @@ def test_every_rule_fires_for_some_config() -> None:
             Flags(short_enums=True),
             Flags(pack=1),
             Flags(visibility="hidden"),
+            Flags(bits=32),
         )
         for e in EVIDENCE
         for p in (("linux", "elf"), ("win32", "pe"))
@@ -391,6 +392,7 @@ _SRC = ExecTruth(available=True, source_break=True, signals=("source x",))
 _QUIET = ExecTruth(available=True)
 _NONE = ExecTruth(available=False, reason="no loader")
 _HIDDEN = replace(_BREAK, any_of=(), verdict_min="NO_CHANGE", observable=False)
+_SOURCE_ONLY = Expectation(verdict_min="API_BREAK", verdict_max="API_BREAK")
 
 
 @pytest.mark.parametrize(
@@ -415,6 +417,10 @@ _HIDDEN = replace(_BREAK, any_of=(), verdict_min="NO_CHANGE", observable=False)
         (_NONE, _BREAK, "BREAKING", {"TYPE_SIZE_CHANGED"}, "agree"),
         (_NONE, _BENIGN, "BREAKING", set(), "wrong-verdict"),
         (_BROKE, _BREAK, "REFUSED", {"ProfileMismatchError"}, "refused"),
+        # A source-only (API_BREAK ceiling) edit: a binary break contradicts it.
+        (_BROKE, _SOURCE_ONLY, "API_BREAK", set(), "oracle-conflict"),
+        (_SRC, _SOURCE_ONLY, "API_BREAK", set(), "agree"),
+        (_SRC, _SOURCE_ONLY, "NO_CHANGE", set(), "false-clean"),
     ],
 )
 def test_reconcile_classifies_the_three_signals(
@@ -736,6 +742,15 @@ def _minimize_enabled() -> bool:
 
 
 def check_cell(cell: Cell, ctx: CellContext) -> None:
+    """Run *cell*; any failure, including a harness exception, leaves a report."""
+    try:
+        _check_cell(cell, ctx)
+    except Exception as exc:  # a pytest outcome (skip/xfail/fail) is not an Exception
+        _write_report(cell, f"{cell.id}: {type(exc).__name__}: {exc}")
+        raise
+
+
+def _check_cell(cell: Cell, ctx: CellContext) -> None:
     result = run_cell(cell.op, cell.seed, cell.config, ctx)
     if result.status != "ran":
         pytest.skip(f"{result.status}: {result.reason}")
@@ -754,10 +769,15 @@ def check_cell(cell: Cell, ctx: CellContext) -> None:
         return
     report = result.describe()
     if _minimize_enabled():
-        small = minimize(cell.op, cell.seed, result, ctx)
-        report += (
-            "\n\nminimized:\n" + small.describe() + "\n\n" + regression_test(small)
-        )
+        try:
+            small = minimize(cell.op, cell.seed, result, ctx)
+        except Exception as exc:
+            # Keep the original mismatch: a failed shrink must not replace it.
+            report += f"\n\nminimization failed: {type(exc).__name__}: {exc}"
+        else:
+            report += (
+                "\n\nminimized:\n" + small.describe() + "\n\n" + regression_test(small)
+            )
     _write_report(cell, report)
     pytest.fail(report)
 

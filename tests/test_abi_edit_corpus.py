@@ -33,7 +33,7 @@ from tests._edit_corpus_harness import (
 from tests._edit_corpus_known import KNOWN, known_mismatch
 from tests._edit_corpus_operators import OP_BY_NAME, OPERATORS, VERDICT_RANK, matrix
 from tests._edit_corpus_seeds import SEED_BY_NAME, SEEDS
-from tests._edit_corpus_toolchains import capability_gap
+from tests._edit_corpus_toolchains import capability_gap, driver_width
 
 
 def _applies_at_default(op, seed) -> bool:
@@ -218,6 +218,16 @@ def test_edit_produces_declared_ground_truth(
     _skip_without_driver(seed, compiler)
     # A build or extraction exception propagates and fails the cell.
     config = _as_config(seed, compiler)
+    width = driver_width(
+        config.producer.driver(seed.lang),
+        seed.lang,
+        tuple(config.flags.render(config.producer, seed.lang)),
+        config.flags.bits,
+    )
+    if width:
+        # The fixed matrix is declared at the default word size; a compiler
+        # that targets another one would test a different ABI than it claims.
+        pytest.skip(width)
     gap = capability_gap(op, config)
     if gap:
         pytest.skip(gap)

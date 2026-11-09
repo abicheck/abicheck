@@ -443,6 +443,7 @@ _ENUM_SIZE = frozenset(
     {"TYPE_SIZE_CHANGED", "ENUM_UNDERLYING_SIZE_CHANGED", "ENUM_SIZE_FLAG_CHANGED"}
 )
 _OFFSET = frozenset({"STRUCT_FIELD_OFFSET_CHANGED", "TYPE_FIELD_OFFSET_CHANGED"})
+_ALIGN = frozenset({"STRUCT_ALIGNMENT_CHANGED", "TYPE_ALIGNMENT_CHANGED"})
 _FIELD_TYPE = frozenset({"STRUCT_FIELD_TYPE_CHANGED", "TYPE_FIELD_TYPE_CHANGED"})
 
 
@@ -960,6 +961,14 @@ OPERATORS: tuple[EditOp, ...] = (
         _no_edit,
         "rebuilding with -fpack-struct=1 removes padding: offsets and sizes move",
         any_of=(_SIZE | _OFFSET,),
+        rules=(
+            Rule(
+                lambda c: c.flags.bits == 32,
+                {"any_of": (_SIZE | _OFFSET | _ALIGN,)},
+                "i386 aligns a struct member double to 4, so rec has no padding to "
+                "remove: packing keeps every size and offset and lowers only alignof",
+            ),
+        ),
         precondition=_not_already("pack", 1),
         rebuild=_with(pack=1),
     ),

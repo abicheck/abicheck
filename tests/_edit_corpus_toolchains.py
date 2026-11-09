@@ -35,6 +35,7 @@ from tests._edit_corpus_config import (
     Flags,
     Standard,
     Toolchain,
+    host_platform,
 )
 
 _PROBE_TIMEOUT = 60
@@ -101,13 +102,15 @@ def discover() -> tuple[Toolchain, ...]:
         real = os.path.realpath(cc_path)
         if real in seen_bins:
             continue
-        seen_bins.add(real)
         ident = _identify(cc_path)
         # The C++ driver must be the same family and major as the C one;
         # a gcc 13 / g++ 14 pair is not one toolchain (the g++-N pair is found
         # under its own name).
         if ident is None or _identify(cxx_path) != ident:
             continue
+        # Only a validated pair claims its C driver: `gcc` (13) with a
+        # mismatched `g++` must not hide `gcc-13`/`g++-13`, the same binary.
+        seen_bins.add(real)
         found.setdefault(ident, Toolchain(ident[0], ident[1], cc_path, cxx_path))
     if sys.platform == "win32" and shutil.which("cl"):
         found.setdefault(("msvc", 0), Toolchain("msvc", 0, "cl", "cl"))
@@ -170,6 +173,56 @@ class ToolchainBroken(RuntimeError):
     """
 
 
+def _crashed(proc: subprocess.CompletedProcess[str]) -> bool:
+    """A compiler that died on a signal or reported an internal error crashed."""
+    return proc.returncode < 0 or "internal compiler error" in proc.stderr
+
+
+@functools.cache
+def driver_width(
+    driver: str, lang: str, flags: tuple[str, ...], bits: int
+) -> str | None:
+    """None if *driver* with *flags* targets *bits*-bit pointers, else why not.
+
+    Raises ``ToolchainBroken`` when the driver fails for any other reason.
+
+    Used for drivers the harness does not build with but whose target matters,
+    such as the system ``cc``/``c++`` the castxml header frontend emulates.
+    """
+    probe = f"typedef char edit_corpus_target_width[(sizeof(void *) * 8 == {bits}) ? 1 : -1];\n"
+    try:
+        proc = subprocess.run(
+            [
+                driver,
+                *flags,
+                "-x",
+                "c++" if lang == "c++" else "c",
+                "-fsyntax-only",
+                "-",
+            ],
+            input=probe,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_PROBE_TIMEOUT,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ToolchainBroken(f"{driver} {' '.join(flags)}: {exc}") from exc
+    if _crashed(proc):
+        raise ToolchainBroken(
+            f"{driver} {' '.join(flags)} crashed: {proc.stderr.strip()[-400:]}"
+        )
+    if proc.returncode == 0:
+        return None
+    if "edit_corpus_target_width" in proc.stderr:
+        return f"{driver} {' '.join(flags)} does not target {bits}-bit"
+    # Any other failure on a one-line declaration is a broken driver, not a
+    # missing capability.
+    raise ToolchainBroken(
+        f"{driver} {' '.join(flags)} fails a one-line syntax probe: {proc.stderr.strip()[-400:]}"
+    )
+
+
 @functools.cache
 def _flags_build(
     tc: Toolchain, lang: str, flags: Flags, check_width: bool = True
@@ -210,7 +263,13 @@ def _flags_build(
             try:
                 proc = _run(cmd, cwd=tmp)
             except (OSError, subprocess.TimeoutExpired) as exc:
-                return f"{' '.join(cmd)}: {exc}"
+                # The driver was found: one that cannot start or hangs is broken,
+                # not missing a capability.
+                raise ToolchainBroken(f"{' '.join(cmd)}: {exc}") from exc
+            if _crashed(proc):
+                raise ToolchainBroken(
+                    f"{' '.join(cmd)} crashed (exit {proc.returncode}): {proc.stderr.strip()[-400:]}"
+                )
             if proc.returncode != 0:
                 if "edit_corpus_target_width" in proc.stderr:
                     return f"{tc.id} with {' '.join(rendered)} does not target {flags.bits}-bit"
@@ -249,6 +308,63 @@ def uses_libstdcxx(tc: Toolchain) -> bool:
     return proc.returncode == 0
 
 
+# Features a standard names but a compiler may still lack in that mode (gcc 8
+# accepts -std=c++2a without concepts): a snippet only a supporting compiler builds.
+FEATURE_PROBES: dict[str, str] = {
+    "concepts": "template <class T> concept C = sizeof(T) > 0;\n"
+    "template <class T> requires C<T> int f(T) { return 0; }\n",
+    "enum_underlying": "enum corpus_probe_e : unsigned char { CORPUS_PROBE_A };\n",
+    "no_unique_address": "struct E {}; struct S { [[no_unique_address]] E e; int x; };\n",
+}
+
+
+@functools.cache
+def lacks_feature(tc: Toolchain, std: Standard, feature: str) -> bool:
+    """Whether *tc* in *std* mode fails to compile *feature*'s probe."""
+    snippet = FEATURE_PROBES.get(feature)
+    spelling = std_flag(tc, std)
+    if snippet is None or spelling is None:
+        return False
+    lang = "c++" if std.lang == "c++" else "c"
+    try:
+        proc = subprocess.run(
+            [tc.driver(std.lang), f"-std={spelling}", "-x", lang, "-fsyntax-only", "-"],
+            input=snippet,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_PROBE_TIMEOUT,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ToolchainBroken(f"{tc.id} feature probe {feature}: {exc}") from exc
+    if _crashed(proc):
+        raise ToolchainBroken(
+            f"{tc.id} crashed on the {feature} probe: {proc.stderr[-400:]}"
+        )
+    return proc.returncode != 0
+
+
+@functools.cache
+def default_cxx11_abi(tc: Toolchain) -> int | None:
+    """The ``_GLIBCXX_USE_CXX11_ABI`` value *tc*'s libstdc++ defaults to, or None."""
+    src = "#include <string>\nint corpus_abi = _GLIBCXX_USE_CXX11_ABI;\n"
+    for value in (1, 0):
+        try:
+            proc = subprocess.run(
+                [tc.cxx, "-x", "c++", "-fsyntax-only", "-"],
+                input=src + f'static_assert(_GLIBCXX_USE_CXX11_ABI == {value}, "");\n',
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=_PROBE_TIMEOUT,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        if proc.returncode == 0:
+            return value
+    return None
+
+
 def capability_gap(op: object, config: Config) -> str | None:
     """A host capability *op* needs that ``op.requires`` cannot see without probing.
 
@@ -256,14 +372,28 @@ def capability_gap(op: object, config: Config) -> str | None:
     """
     if getattr(op, "needs_libstdcxx", False) and not uses_libstdcxx(config.producer):
         return f"{config.producer.id}'s C++ standard library is not libstdc++"
+    for feature in getattr(op, "features", ()):
+        for tc in dict.fromkeys((config.producer, config.consumer_tc)):
+            if lacks_feature(tc, config.std, feature):
+                return f"{tc.id} does not compile {feature} in -std={config.std.name}"
+    rebuild = getattr(op, "rebuild", None)
+    if rebuild is not None:
+        new_abi = rebuild(Flags()).cxx11_abi
+        if new_abi is not None and config.flags.cxx11_abi is None:
+            if default_cxx11_abi(config.producer) == new_abi:
+                return (
+                    f"{config.producer.id}'s libstdc++ already defaults to "
+                    f"_GLIBCXX_USE_CXX11_ABI={new_abi}: the rebuild changes nothing"
+                )
     return None
 
 
 def unavailable(config: Config) -> str | None:
     """Why *config* cannot be built and compared on this host, or None."""
-    host_fmt = config.platform[1]
-    if host_fmt != "elf" and config.platform[0] != sys.platform:
-        return f"config targets {config.platform}, host is {sys.platform}"
+    if config.platform != host_platform():
+        # No cross toolchain: an ELF config on macOS would build Mach-O and
+        # still enable the ELF execution oracle.
+        return f"config targets {config.platform}, host is {host_platform()}"
     for role, tc, fl in (
         ("producer", config.producer, config.flags),
         ("consumer", config.consumer_tc, config.consumer_fl),
@@ -305,6 +435,17 @@ def unavailable(config: Config) -> str | None:
                 f"the header frontend's system {driver} does not accept "
                 f"-std={config.std.name}; headers evidence cannot be dumped"
             )
+        # ... and it must target the producer's word size with the layout
+        # flags castxml is given (a 64-bit request passes no -m flag).
+        if shutil.which(driver) is not None:
+            reason = driver_width(
+                driver,
+                config.lang,
+                tuple(config.flags.layout_flags(config.producer, config.lang)),
+                config.flags.bits,
+            )
+            if reason:
+                return f"header frontend: {reason}"
     if config.consumer_fl.bits != config.flags.bits:
         return "consumer and producer word sizes differ; nothing can link"
     return None

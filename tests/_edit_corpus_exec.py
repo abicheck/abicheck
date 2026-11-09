@@ -42,6 +42,19 @@ from tests._edit_corpus_seeds import RoleText, Seed
 from tests._edit_corpus_toolchains import execution_unavailable
 
 _RUN_TIMEOUT = 20
+_COMPILE_TIMEOUT = 300
+
+
+def _compile(cmd: list[str], what: str) -> subprocess.CompletedProcess[str]:
+    """Run a compiler command; a hang is a failure naming the command, never a skip."""
+    try:
+        return subprocess.run(
+            cmd, capture_output=True, text=True, check=False, timeout=_COMPILE_TIMEOUT
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise CompileError(
+            f"{what} did not finish in {_COMPILE_TIMEOUT}s: {' '.join(cmd)}"
+        ) from exc
 
 
 @dataclass(frozen=True)
@@ -60,7 +73,11 @@ def _ext(lang: str) -> str:
 
 def _run(exe: Path, lib_dir: Path) -> RunResult:
     env = dict(os.environ)
-    env["LD_LIBRARY_PATH"] = str(lib_dir)
+    # Prepend: a toolchain runtime found through an inherited path stays found.
+    inherited = env.get("LD_LIBRARY_PATH")
+    env["LD_LIBRARY_PATH"] = (
+        os.pathsep.join((str(lib_dir), inherited)) if inherited else str(lib_dir)
+    )
     env["LD_BIND_NOW"] = "1"
     try:
         proc = subprocess.run(
@@ -110,7 +127,7 @@ def build_consumers(
             str(old.dir),
             "-ledit",
         ]
-        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        proc = _compile(cmd, f"consumer {shape}")
         if proc.returncode != 0:
             raise CompileError(
                 f"consumer {shape} does not build against the OLD header: {' '.join(cmd)}\n{proc.stderr}"
@@ -200,7 +217,7 @@ def run_probe(
     src.write_text(_probe_source(probe_expressions(roles, seed.lang)), encoding="utf-8")
     cmd = compile_cmd(config.producer, config, flags, debug=False)
     cmd += ["-w", "-I", str(header_dir), "-o", str(out), str(src)]
-    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    proc = _compile(cmd, "layout probe")
     if proc.returncode != 0:
         raise CompileError(
             f"layout probe does not build: {' '.join(cmd)}\n{proc.stderr}"
@@ -228,12 +245,10 @@ class ExecutionOracle:
         self, seed: Seed, config: Config, old: Built
     ) -> tuple[ConsumerSet, dict[str, str]]:
         key = (seed.name, config.id)
-        if key not in self._consumers:
+        if key not in self._consumers or key not in self._probes:
             base = self._root / f"{seed.name}-{config.id}"
-            self._consumers[key] = build_consumers(
-                seed, config, old, base / "consumers"
-            )
-            self._probes[key] = run_probe(
+            consumers = build_consumers(seed, config, old, base / "consumers")
+            probe = run_probe(
                 seed,
                 config,
                 config.flags,
@@ -241,6 +256,8 @@ class ExecutionOracle:
                 dict(seed.roles),
                 base / "probe-old",
             )
+            # Publish both only once both succeeded, so a failure is retried.
+            self._consumers[key], self._probes[key] = consumers, probe
         return self._consumers[key], self._probes[key]
 
     def truth(
@@ -284,7 +301,7 @@ class ExecutionOracle:
                 config.consumer_tc, config, config.consumer_fl, debug=False
             )
             cmd += ["-w", "-fsyntax-only", "-I", str(new.dir), str(src)]
-            proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            proc = _compile(cmd, f"new-header compile of {shape}")
             if proc.returncode != 0:
                 source_break = True
                 err = next(
@@ -292,14 +309,25 @@ class ExecutionOracle:
                     proc.stderr[:120],
                 )
                 signals.append(f"source {shape}: {err.split(': ', 1)[-1].strip()}")
-        observed = any(sig.startswith(("run ", "source ")) for sig in signals)
         return ExecTruth(
             available=True,
             binary_break=binary_break,
             source_break=source_break,
             signals=tuple(signals),
-            layout_only=binary_break and not observed,
+            layout_only=binary_layout_only(binary_break, signals),
         )
+
+
+def binary_layout_only(
+    binary_break: bool, signals: list[str] | tuple[str, ...]
+) -> bool:
+    """A binary break that no consumer *run* showed rests on the layout probe alone.
+
+    A new-header compile failure is a source signal: it says nothing about
+    whether an already-built consumer still runs, so it cannot make a layout
+    difference an observed binary break.
+    """
+    return binary_break and not any(sig.startswith("run ") for sig in signals)
 
 
 def _describe(want: RunResult, got: RunResult) -> str:
@@ -315,4 +343,8 @@ def _describe(want: RunResult, got: RunResult) -> str:
         if len(old_lines) != len(new_lines):
             diff.append(f"{len(old_lines)} -> {len(new_lines)} lines")
         return "output " + "; ".join(diff[:3])
-    return "loader diagnostics: " + got.stderr.strip().splitlines()[-1][:160]
+    lines = got.stderr.strip().splitlines()
+    if lines:
+        return "loader diagnostics: " + lines[-1][:160]
+    gone = (want.stderr.strip().splitlines() or ["(blank)"])[-1][:160]
+    return "loader diagnostics gone: " + gone
