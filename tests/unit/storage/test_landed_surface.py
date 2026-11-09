@@ -92,6 +92,7 @@ _INTERNAL_MODULES = (
     "abicheck.storage.generation_migrations",
     "abicheck.storage.castxml_array_migration",
     "abicheck.storage.castxml_base_offset_migration",
+    "abicheck.storage.castxml_noexcept_migration",
     "abicheck.storage.clang_vtable_base_migration",
     "abicheck.storage.decode_memo",
     "abicheck.storage.cross_process_lock",

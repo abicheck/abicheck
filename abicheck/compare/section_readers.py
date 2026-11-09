@@ -247,6 +247,7 @@ DETECTOR_SECTIONS: Mapping[str, frozenset[str]] = {
     ),
     "visibility_leak": frozenset(["binary", "declarations", "provenance"]),
     "vtable_identity": frozenset(["binary", "provenance"]),
+    "virtual_slot_removal": frozenset(["binary", "declarations", "types"]),
     "vtable_layout": frozenset(
         ["binary", "debug", "declarations", "provenance", "types"]
     ),

@@ -18,23 +18,9 @@ from dataclasses import dataclass
 from tests._edit_corpus_config import Config
 from tests._edit_corpus_toolchains import uses_libstdcxx
 
-_CXX_SEEDS = frozenset({"cxx_classes", "cxx_stdlib"})
 _CLASSES = frozenset({"cxx_classes"})
 
-GAP_CXX_PARAM = "A C++ parameter change is reported as a removal plus an addition"
-GAP_VIRTUAL_REMOVED = "Removing a virtual method reports no `func_virtual_removed`"
-GAP_NOEXCEPT = "castxml output carries no `noexcept` exception specification"
-GAP_TEMPLATE_DEFAULT = (
-    "A header-only default template-argument change reads `NO_CHANGE` at L2 on castxml"
-)
-GAP_CONCEPT = (
-    "A new `requires`-clause on a header-only template reads `NO_CHANGE` under castxml"
-)
-GAP_DWARF_ARRAY = "A member array-bound change is invisible in DWARF-only comparison"
-GAP_DWARF_PURE = (
-    "DWARF-only comparison reports a virtual that became pure as a plain removal"
-)
-GAP_DWARF_CV = "DWARF-only comparison reports a method's dropped `const` as a removal plus an addition"
+GAP_DWARF_PURE = "A GCC-built DWARF snapshot cannot tell that a virtual became pure"
 GAP_CXX11_ABI = "A `_GLIBCXX_USE_CXX11_ABI` rebuild is refused as a profile mismatch, not reported as a break"
 GAP_O2_STD = (
     "An `-O2` rebuild of a C++ library that uses `std::string` reads as a risk on gcc, "
@@ -94,119 +80,17 @@ class Known:
 
 
 KNOWN: tuple[Known, ...] = (
-    *(
-        Known(
-            op,
-            _CXX_SEEDS,
-            "wrong-kind",
-            _ev("headers"),
-            "the mangled name changes, so old and new are not paired: func_removed + func_added, "
-            "never func_params_changed (binary-only and DWARF evidence pair them)",
-            GAP_CXX_PARAM,
-            issues=frozenset({"missing:FUNC_PARAMS_CHANGED"}),
-            verdicts=frozenset({"BREAKING"}),
-        )
-        for op in ("func_param_append", "func_param_type_change", "func_param_remove")
-    ),
-    Known(
-        "virtual_remove",
-        _CLASSES,
-        "wrong-kind",
-        _ev("dwarf", "headers"),
-        "removal reads func_removed + vtable kinds; func_virtual_removed is never emitted",
-        GAP_VIRTUAL_REMOVED,
-        issues=frozenset({"missing:FUNC_VIRTUAL_REMOVED"}),
-        verdicts=frozenset({"BREAKING"}),
-    ),
-    Known(
-        "method_noexcept_add",
-        _CLASSES,
-        "false-clean",
-        _ev("headers"),
-        "castxml writes no exception specification: NO_CHANGE while an overrider without "
-        "noexcept no longer compiles",
-        GAP_NOEXCEPT,
-        issues=frozenset({"missing:FUNC_NOEXCEPT_ADDED", "weaker-than:API_BREAK"}),
-        verdicts=frozenset({"NO_CHANGE"}),
-    ),
-    Known(
-        "template_default_arg_change",
-        _CLASSES,
-        "wrong-verdict",
-        _ev("headers"),
-        "castxml reads a header-only template default change as NO_CHANGE",
-        GAP_TEMPLATE_DEFAULT,
-        issues=frozenset(
-            {
-                "none-of:DEFAULT_TEMPLATE_ARG_CHANGED|TEMPLATE_PARAM_DEFAULT_CHANGED",
-                "weaker-than:API_BREAK",
-            }
-        ),
-        verdicts=frozenset({"NO_CHANGE"}),
-    ),
-    Known(
-        "concept_constraint_added",
-        _CLASSES,
-        "false-clean",
-        _ev("headers"),
-        "a requires-clause added to a header-only function template reads NO_CHANGE while a "
-        "consumer call stops compiling",
-        GAP_CONCEPT,
-        issues=frozenset(
-            {
-                "none-of:CONCEPT_CONSTRAINT_CHANGED|CONCEPT_TIGHTENED",
-                "weaker-than:API_BREAK",
-            }
-        ),
-        verdicts=frozenset({"NO_CHANGE"}),
-    ),
-    Known(
-        "struct_array_shrink_in_padding",
-        frozenset({"c_core", "cxx_classes"}),
-        "wrong-verdict",
-        lambda c: c.evidence == "dwarf" and (c.flags.pack is None or c.flags.pack > 2),
-        "char[8] -> char[6] reads NO_CHANGE from DWARF (headers report type_field_type_changed)",
-        GAP_DWARF_ARRAY,
-        issues=frozenset(
-            {
-                "none-of:STRUCT_FIELD_TYPE_CHANGED|TYPE_FIELD_TYPE_CHANGED",
-                "weaker-than:API_BREAK",
-            }
-        ),
-        verdicts=frozenset({"NO_CHANGE"}),
-    ),
-    Known(
-        "struct_array_shrink_in_padding",
-        frozenset({"c_core", "cxx_classes"}),
-        "wrong-kind",
-        lambda c: (
-            c.evidence == "dwarf" and c.flags.pack is not None and c.flags.pack <= 2
-        ),
-        "packed, DWARF shows only type_size_changed; the member's type change is not reported",
-        GAP_DWARF_ARRAY,
-        issues=frozenset({"none-of:STRUCT_FIELD_TYPE_CHANGED|TYPE_FIELD_TYPE_CHANGED"}),
-        verdicts=frozenset({"BREAKING"}),
-    ),
     Known(
         "virtual_become_pure",
         _CLASSES,
         "wrong-kind",
-        _ev("dwarf"),
-        "from DWARF the now-pure virtual reads func_removed_elf_only; neither "
-        "func_virtual_became_pure nor type_became_abstract",
+        # clang marks the in-class declaration DW_VIRTUALITY_pure_virtual; GCC
+        # writes DW_VIRTUALITY_virtual, so only a GCC build misses the kind.
+        lambda c: c.evidence == "dwarf" and c.producer.family == "gcc",
+        "from a GCC-built DWARF snapshot the now-pure virtual reads func_removed; "
+        "neither func_virtual_became_pure nor type_became_abstract",
         GAP_DWARF_PURE,
         issues=frozenset({"none-of:FUNC_VIRTUAL_BECAME_PURE|TYPE_BECAME_ABSTRACT"}),
-        verdicts=frozenset({"BREAKING"}),
-    ),
-    Known(
-        "method_const_drop",
-        _CLASSES,
-        "wrong-kind",
-        _ev("dwarf"),
-        "from DWARF the const drop reads func_removed_elf_only + func_added_elf_only; "
-        "func_cv_changed is not emitted (headers emit it)",
-        GAP_DWARF_CV,
-        issues=frozenset({"missing:FUNC_CV_CHANGED"}),
         verdicts=frozenset({"BREAKING"}),
     ),
     Known(

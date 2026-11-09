@@ -29,6 +29,7 @@ from .compare.public_surface import (
     reconciled_function_surfaces,
     should_filter_transitive_runtime_symbols,
 )
+from .compare.pure_virtual_peers import PureVirtualPeers
 from .compare.record_layout import (
     RecordLayoutIndex,
     record_layout_changes,
@@ -1277,15 +1278,13 @@ def _diff_method_qualifiers(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """
     changes: list[Change] = []
     old_by_mangled, new_by_mangled = reconciled_function_surfaces(old, new)
-
-    # --- Same-mangled checks: pure_virtual and is_static don't change mangling ---
-    # is_static: Itanium ABI does NOT encode static-ness in the mangled name
-    # (void Widget::bar() and static void Widget::bar() share the same mangled symbol).
-    # is_pure_virtual: pure_virtual is not part of the mangled name either.
+    pure_peers = PureVirtualPeers(new)  # a now-pure virtual has no new symbol
+    # --- Same-mangled checks: Itanium encodes neither static-ness (Widget::bar()
+    # and static Widget::bar() share a symbol) nor pure-virtual-ness ---
     for mangled, f_old in old_by_mangled.items():
-        if mangled not in new_by_mangled:
+        f_new = new_by_mangled.get(mangled) or pure_peers.of(f_old)
+        if f_new is None:
             continue
-        f_new = new_by_mangled[mangled]
 
         if f_old.is_static != f_new.is_static:
             changes.append(

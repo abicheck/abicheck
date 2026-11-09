@@ -206,7 +206,9 @@ def test_attaching_assurance_twice_does_not_duplicate_warnings(
     attach_analysis_assurance(result, old, new)
     assert result.coverage_warnings == first
     concept = [w for w in first if w.startswith(CONCEPT_GAP_DIMENSION)]
-    assert len(concept) == [old_scan, new_scan].count(True)
+    # Neither side modelled constraints and one side declares one: both
+    # unmodelled sides are named.
+    assert len(concept) == (2 if True in (old_scan, new_scan) else 0)
     assert len(first) == len(set(first))
 
 
@@ -225,8 +227,10 @@ def test_unreadable_header_lowers_comparison_assurance(tmp_path: Path) -> None:
         cxx_concept_header_scan=concept_header_scan([clean, missing])
     )
     assert concept_constraint_gap(read_ok, read_ok) == (False, [])  # type: ignore[arg-type]
+    # The unreadable new side could hide a constraint the clean old side does
+    # not model either, so both unmodelled sides are named.
     gap, notes = concept_constraint_gap(read_ok, read_failed)  # type: ignore[arg-type]
-    assert gap and len(notes) == 1 and "new snapshot" in notes[0]
+    assert gap and len(notes) == 2 and "new snapshot" in notes[1]
     gap, notes = concept_constraint_gap(read_failed, read_failed)  # type: ignore[arg-type]
     assert gap and len(notes) == 2
 

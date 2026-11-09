@@ -301,6 +301,30 @@ SYMBOL_FACTS: list[FactDefinition] = [
     ),
     _E(
         owner="Function",
+        field="is_noexcept",
+        value_type="bool",
+        producing_backends=("castxml", "clang"),
+        persisted=True,
+        identity_relevant=False,
+        comparable=True,
+        suppressible=False,
+        reportable=True,
+        lifecycle=FactLifecycle.CONSUMED,
+        consumed_by=(
+            "abicheck.model.semantic_ir_function_signature:_signature_inputs",
+        ),
+        notes=(
+            "The function's own noexcept exception specification. castxml writes "
+            "none: its backend reads it from the clang AST of the same header "
+            "(extract/headers/castxml/clang_semantics_join.py), and a function in "
+            "a header that spells one the join did not read is NOT_COLLECTED. "
+            "Persisted as the stored bool plus the abicheck.noexcept_unobserved "
+            "extension fact (storage/extension_facts.py), never a per-function "
+            "key; the noexcept detector declines a NOT_COLLECTED side."
+        ),
+    ),
+    _E(
+        owner="Function",
         field="is_compiler_generated",
         value_type="bool | None",
         producing_backends=("castxml",),

@@ -619,11 +619,9 @@ _OWNER_FACT_KEY_TUPLES: dict[str, str] = {
 #: must itself define an ``encode_*`` and a ``decode_*`` function and name
 #: the attribute, or it counts as no wiring at all.
 _SIDE_TABLE_CODECS: tuple[tuple[Path, str, tuple[str, ...]], ...] = (
-    (
-        PKG / "storage" / "extraction_scope_codec.py",
-        "ownership_fact",
-        ("Function", "Variable", "RecordType", "EnumType"),
-    ),
+    (PKG / "storage" / "extraction_scope_codec.py", "ownership_fact", ("Function", "Variable", "RecordType", "EnumType")),
+    # ADR-062 D19: the functions whose noexcept was not observed, as one extension fact.
+    (PKG / "storage" / "extension_facts.py", "is_noexcept_fact", ("Function",)),
 )
 
 

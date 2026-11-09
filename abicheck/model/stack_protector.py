@@ -29,6 +29,12 @@ records switches but none that selects the protector: its setting is
 compiler-default and unknown (``--enable-default-ssp`` toolchains add the
 flag without spelling it). An assembler unit holds no compiled frame and is
 left out.
+
+``AbiSnapshot.cu_stack_protector`` holds the census (extractor generation
+49), persisted as the debug section's ``abicheck.cu_stack_protector``
+extension fact. ``None`` means no DWARF unit was read (a binary-only dump, a
+stripped image without detached debug, PE, Mach-O, an older dump), so a lost
+canary's cause is unknown.
 """
 
 from __future__ import annotations

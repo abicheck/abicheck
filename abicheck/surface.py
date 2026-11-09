@@ -113,15 +113,15 @@ NEVER_FILTER_KIND_NAMES: frozenset[str] = frozenset(
         # by construction outside the declared public surface, which is the
         # thing it exists to say.
         "exported_not_public",
-        # Preprocessor / const-constant findings. Their ``symbol`` is a
-        # constant name, not an exported symbol or a reachable type, so the
-        # normal symbol/type reachability classifier would always demote them.
-        # The dumper only extracts constants whose declaring header classifies
-        # as PUBLIC_HEADER (dumper_castxml._decl_is_public), so they are
-        # public-contract by construction and must not be scoped out.
+        # Constants and C++20 constraints: the ``symbol`` names neither an
+        # export nor a reachable type (an uninstantiated template has none),
+        # and both are recorded only when declared in a PUBLIC_HEADER, so they
+        # are public by construction (clang/concept_constraints.py, constants).
         "constant_changed",
         "constant_removed",
         "constant_added",
+        "concept_tightened",
+        "concept_constraint_changed",
         # ADR-068 plan §3 row 4 (cross-source check migration): the finding's
         # own ``symbol`` is the exported *RTTI* symbol itself (e.g.
         # ``_ZTI12InternalNode``), not a function/variable declaration the

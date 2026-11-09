@@ -720,4 +720,20 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
+    _E(
+        "func_virtual_noexcept_added",
+        _A,
+        impact="`noexcept` was added to a virtual method. Its mangled name and "
+        "vtable slot are unchanged, so built consumers keep working, but an "
+        "overrider declared without `noexcept` in a consumer's derived class "
+        "no longer compiles: an overrider may not have a weaker exception "
+        "specification than the function it overrides ([except.spec]/5). "
+        "Reported beside `func_noexcept_added`, which states the fact itself; "
+        "a `final` method or class cannot be overridden, which a header "
+        "comparison does not rule out here.",
+        description_template="noexcept added to virtual method: {name}",
+        entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
+        operation=_OP.MODIFIED,
+    ),
 ]

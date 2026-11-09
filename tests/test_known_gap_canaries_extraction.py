@@ -290,7 +290,7 @@ def test_reloaded_binary_snapshot_refuses_to_flatten(tmp_path: Path) -> None:
     )
     snap = load_snapshot(_dump(lib))
     # A -g dump also carries the debug section's stack-protector census
-    # (extractor generation 46), a second header extension of the same kind.
+    # (extractor generation 49), a second header extension of the same kind.
     with pytest.raises(
         SnapshotError, match=r"header extensions on \['binary', 'debug'\]"
     ):

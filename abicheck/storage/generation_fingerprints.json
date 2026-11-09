@@ -3,15 +3,15 @@
     "files": {
       "abicheck/btf_metadata.py": "614321e6140b32e7518deb3991dc9b9421107688c952542808ec4da88a17dc73",
       "abicheck/ctf_metadata.py": "42d3f588c6c4567c2a9d43a3ef5b886a753c37dd5357a4199d81d7ffc60d2109",
-      "abicheck/dumper.py": "fcd2874b1a06387a500f483c4fdc094ea47cf57cba897adfd8e9583fae6bb09b",
+      "abicheck/dumper.py": "b7c21a8d7cdad074634f37ff9d827cb2c0658cc08db5e19bf146e9748f10a566",
       "abicheck/dumper_clang.py": "0ee5831454abd776a07706b7c9a69d6fa3136dad37890f70e4103f4c940f3d05",
       "abicheck/dwarf_advanced.py": "3b75113e5d03388ed2740a361a0f618bccb323c9d50bffc7bf39981ac7d20dc1",
       "abicheck/dwarf_metadata.py": "a0621cde6559a0395b00d08aa25cc4cbff74b1121e2083e424e472c44b985512",
       "abicheck/dwarf_presence.py": "7e73580ec7a02fdf24e3815cb89e42aa6fe00e46e8cda6b7fe9d547f06ac3f06",
-      "abicheck/dwarf_snapshot.py": "d94cb9cda1319cb7034c5ed81064d76e64be1b617ef54bd2be9fb3b81ed4f994",
+      "abicheck/dwarf_snapshot.py": "894c4cdf25aa5874f09a3bfbe35c5d41fa5cff421f3be51befc31273929e8e24",
       "abicheck/dwarf_snapshot_datasources.py": "e337f8be3a8ae16350c0639d0be10670d4d5d1197108659fa210fcbbf8a5bdde",
       "abicheck/dwarf_unified.py": "9ecb70b59bb26674ac98ba14ad1211b4103e3a78426a91ed7901e59f1a7d9cdf",
-      "abicheck/dwarf_utils.py": "faa6be4a5de6e58b3c6ba139dc6983b0c6404ed69c348f19d724fc56aa70f5d7",
+      "abicheck/dwarf_utils.py": "804ffe3cfa507b305ca7ff206fee70957e23e20f7eabd7c05eaa1e45a7f3bd8f",
       "abicheck/elf_metadata.py": "e5ca377a85a3380faaa63119f832780fa344ecfad346d81b9cfcc6ee2050ac35",
       "abicheck/extract/__init__.py": "011ec37fad96ea2035983eaaedeba0976940a570900f85db8c03bb7369af742a",
       "abicheck/extract/ar_archive.py": "6fdab7ed7390a20f087f9407eaa3988c0f8c658400bc0ea8c7e193271923956d",
@@ -46,8 +46,9 @@
       "abicheck/extract/dwarf_abi_fact.py": "3a16135cf85dd7e4f7bf6dc6dfe5d0a9445f8d2c84a19030ed3a3fefe666ecbf",
       "abicheck/extract/dwarf_decl_file.py": "a585b6e38dc879b04db4b3d70a8b7131774a8b735df1068e6baafcaac934af42",
       "abicheck/extract/dwarf_layout_backfill.py": "3dcc9efb8907b6b3419b09b1c262f64403a5162148bc3be0a5d51e112ef69a4d",
+      "abicheck/extract/dwarf_member_functions.py": "7ee2f77769f2fd5c53d92e38e5a8b0b048371f70771335f8254338a4d290b3b5",
       "abicheck/extract/dwarf_producer.py": "4b85d88dd77f7dca39669cceb2f494e58c81063ebd35bf59674bbee8504cac5f",
-      "abicheck/extract/dwarf_records.py": "e5f307a55318212f542e46212dc4e3c0f38608c6de6253780df54fb9a800fa6a",
+      "abicheck/extract/dwarf_records.py": "60c9e9aacd78d4ec63a31062a502a7483e64cc106e678aac2bd62048f5e0be55",
       "abicheck/extract/dwarf_scope.py": "1800757661a850338d8cb96d715995ffa8f79354047f68b1ce5e248a72819b20",
       "abicheck/extract/dwarf_subtree_index.py": "45ffbba03c1eeb9f8a1d9ed54ab3f3e2492363d4b56e16944f326154c7654aa9",
       "abicheck/extract/dwarf_type_names.py": "dab8b4167a3c69e3e8d92b4e1cb08ba58df4e9c59fd5f8d064e83c84405c016a",
@@ -73,7 +74,7 @@
       "abicheck/extract/flat_map_dependency_scope.py": "5fa66ab2f8ebdbc37d735e3dbad3b6fe1ae3907d7a98eab5c6e6257842e2ea07",
       "abicheck/extract/header_ast_backend.py": "1f5b15c126b139c49b702b69a4f626ed7d30f8294e15ad116d61387e96d31f16",
       "abicheck/extract/header_ast_cache_producers.py": "aa85ae5d148526267f600b0972ca89afc27b6b8cb3f51b4c781a1526773600b4",
-      "abicheck/extract/header_ast_fields.py": "dfa466a2c4172dc4fe44b44c0d7d051238ac20019a4630dc94464ee46c8eab32",
+      "abicheck/extract/header_ast_fields.py": "326aaf6c7c9ca70bcc880e16651f48aaaf30c6980fa0751dbb0423139a63f679",
       "abicheck/extract/header_exclusions.py": "254ca6e4ccf7366b9db516183d6814cb865c279845abe7d05051ac2f72bf0884",
       "abicheck/extract/header_export_binding.py": "2849838510f5461a99938095d4bd3f619599127fa60b66756909124e7f069a15",
       "abicheck/extract/header_order_witness.py": "40a29ffe7ed3751f9bb8e3bbce7f49011569b9d1d0d99947641d9ba178982966",
@@ -86,14 +87,16 @@
       "abicheck/extract/headers/backend_protocol.py": "144cbe76456b6bceaf56f0edd0f3398f171178a222c8b968d53f8a17ee05a21b",
       "abicheck/extract/headers/castxml/__init__.py": "cebb319d35840200904dde9fe4ad16489124b02327a50d8351b086844ee19943",
       "abicheck/extract/headers/castxml/abi_fundamental.py": "21dc4646f178ebd85b1dfdd84a4aab54ad6792c45906950f7af45d632b1afdd7",
-      "abicheck/extract/headers/castxml/backend.py": "188684d40afc777fcc7c560747342be413e762f05326d2fd3911b04fe3356fef",
+      "abicheck/extract/headers/castxml/backend.py": "837b89d176bfe13d2808f2d77b139e769002099f0166756e868a5fea25bad9b0",
       "abicheck/extract/headers/castxml/calling_convention.py": "147c4be1a5b417eb4a67156e92e8f03f09eef3b7b34703ac22a98ad86d5dde1d",
-      "abicheck/extract/headers/castxml/context.py": "a2a9fc7c8b2f5f06fc122d1628b4681d2a22cd6fffd16f173a48f157ccc1b889",
+      "abicheck/extract/headers/castxml/clang_semantics.py": "85c057c1b5d076b4b5cd3642424ca57eed01e0d6f2d237623575d7e2bc680de9",
+      "abicheck/extract/headers/castxml/clang_semantics_join.py": "42be6baa895fdb4ac23fa4b210e37cc0cf6c0607bd8b4ce046cb5ba18a3d3934",
+      "abicheck/extract/headers/castxml/context.py": "62e82a8c29e18b90579435d8423600bfe316384eb706c36ad2e51062316a584b",
       "abicheck/extract/headers/castxml/dumper.py": "518d94f63c1d4ebea6e1c30d21b9c45166c58a2f33c3c8f5778308a325b3187c",
-      "abicheck/extract/headers/castxml/duplicate_declarations.py": "977b85a15408fa9877b9b686f0bd913af9442e4da5b1d9292975bda7eff424f7",
+      "abicheck/extract/headers/castxml/duplicate_declarations.py": "8668fddc69d8838cc093315726c53d96dd9c878020e675e34a44a435dc54d2f7",
       "abicheck/extract/headers/castxml/enums.py": "e616c768543061d71812378dd92cbcb7b8d00afbb734bcb7b4b5334ee34042aa",
       "abicheck/extract/headers/castxml/function_type_cc.py": "54b78f155f3500d45cc578501e42ae2af256445bfa9819510e805e60df8c9967",
-      "abicheck/extract/headers/castxml/functions.py": "c02b71d44d55e56333242b4bb5b41e411a19903a091dfa1eaac8000204f3c171",
+      "abicheck/extract/headers/castxml/functions.py": "08708f209213c674032e123e2394bf01a4dd60978f16bb9c80589bb038e8682e",
       "abicheck/extract/headers/castxml/hidden_declarations.py": "500abf62faa042e1c33a3ef3897557e263f0c7b1060b60c323d8d34895f5b057",
       "abicheck/extract/headers/castxml/inline_variables.py": "60ee92e7a810d81f113a6f5fb4f218ea6287258948dc9a838fbdef37ef37ea32",
       "abicheck/extract/headers/castxml/location.py": "a5469fedb2774dfdf1b87a49ddc713471c088ecee6ea5ccbfe4d9764012c97e6",
@@ -117,7 +120,7 @@
       "abicheck/extract/headers/clang/attributes.py": "4f35afe72ef319265695d3e199e10c9ef0076db4a5238161b33a076fd3a599fe",
       "abicheck/extract/headers/clang/backend.py": "d51b5909f5ba92f18f90160a95417859f7404e564db9b92dee5a1755d563f61f",
       "abicheck/extract/headers/clang/base_resolution.py": "d8841a88a3a57fdb478c16cd9e1fb69d119c35bb90766456b4750bb0fb12e4c8",
-      "abicheck/extract/headers/clang/concept_constraints.py": "84c3d090cd7bd33dcbd7749d171a355e7ad938b34bd5218036b45c1501787569",
+      "abicheck/extract/headers/clang/concept_constraints.py": "acdd6745f33d330c722b249f2dcce05743a89c6cea5f504263ba3b4256f9f3db",
       "abicheck/extract/headers/clang/constraints.py": "a983103fce6534b18ec8694dd8152c95f1c0626908db92c6698c1082560ffa74",
       "abicheck/extract/headers/clang/context.py": "f4256aadc6bc2ed1cee1cb7b2ad23f2607bdff5eefda8eddabf27f2fe9dd058d",
       "abicheck/extract/headers/clang/enums.py": "7c91b6888bf450d160c29f6e2c624891dc9d5521cb465f43385d2ac09417f120",
@@ -144,6 +147,7 @@
       "abicheck/extract/headers/clang/scope.py": "5b7bf471b1e95184c97da44aed88c8f4b29b36f77699a44255c33a889ea3a4b3",
       "abicheck/extract/headers/clang/streaming.py": "21db95a9e99e3dd51bef00492f9b4eb046d0d3e9d32f3b511391dfdf704dbfff",
       "abicheck/extract/headers/clang/template_decl_walk.py": "ea3d022f01c86057a69229a5ecaba9d5a7b8a476445678c438dc6662bedfada0",
+      "abicheck/extract/headers/clang/template_default_entries.py": "9743b0c4703c5b805820bbbbdd9333046a5a8f2f886a455491b516e282bcc9e8",
       "abicheck/extract/headers/clang/template_default_spelling.py": "dd2f4d32ff440849edc6547afeacd9945502860e4536d158bde3109306908434",
       "abicheck/extract/headers/clang/template_param_indexes.py": "1d54979cca271e1b112652f45f54ddd1356ca5f32e3367a3723aeaacd4e7c68d",
       "abicheck/extract/headers/clang/templates.py": "ee85de87a4180b5bed93d501237f153d1132fd325504c1fdf52fab87c7c95efe",
@@ -152,8 +156,8 @@
       "abicheck/extract/headers/clang/vtable.py": "ec35a377463d0191e013684713b5a049e78a766a16cf74e71354d2e57e3a2931",
       "abicheck/extract/headers/clang_header_argv.py": "644a6454c6a3da3ab5f184cc2d9778d51f141f1e528f86162cccb815f9b17ddb",
       "abicheck/extract/headers/compile_provenance.py": "e4a6bcf30627807081f38f909cd136e5203132c099ea225971ef1d4cf849d82a",
-      "abicheck/extract/headers/concept_scan.py": "547fbfd499fe75fb51bef714ebcd0f8a3f97f621e7bf631224ecead0a3fe0c35",
-      "abicheck/extract/headers/manifest.py": "e0a808fafd37745cd964f4a304820c65a25e2f9d99207abd88312f725ec4bd7e",
+      "abicheck/extract/headers/concept_scan.py": "158155a829223afdcd4f80b5d4dec9a6f7812c4827976a67d068096802465839",
+      "abicheck/extract/headers/manifest.py": "fd7e1715eb7a16e2509232091b4b164d61b241052105af61b9e2b4ba8df44400",
       "abicheck/extract/headers/preprocessor_branches.py": "d3a409d126b0dd1b19a634d4aad25660d372dad931b310cfbaaefc9d769b244d",
       "abicheck/extract/headers/scope_segments.py": "d413edec257eb1334c829263770b66dc2eda3d263c765f699eac9f7e3ace9e65",
       "abicheck/extract/headers/sysinc.py": "f82bd29033ed9d21f2b2af9a29352eb2b52b9c01ba7a09f47509af89017a359a",
@@ -205,9 +209,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "d73fe3547381e676b0806f86b4a0a6311c78aac697042afb1cdd97372b2ce0d6",
-    "generation": 46,
-    "reason": "generation 46 not yet released: a nameless variable definition is read with its specification, the stronger DW_AT_alignment wins, and IFUNC exports count in coverage"
+    "fingerprint": "7233c474bbf29616dfc60029544288f0bdccb3e7d9134a82bffdc8e9fce2a205",
+    "generation": 49,
+    "reason": "comment moved from snapshot.py to model/stack_protector.py"
   },
   "resolver": {
     "files": {
@@ -231,7 +235,7 @@
     },
     "fingerprint": "2981f89e9a1a827c8f992093836e1398f8269858f2cb364e172f465fa6fa1995",
     "generation": 4,
-    "reason": "as-written specialization arguments and a shadow-free fast path fold into resolver generation 4, introduced by this same unmerged PR"
+    "reason": "comment moved from snapshot.py to model/stack_protector.py"
   },
   "source": {
     "files": {
@@ -282,6 +286,6 @@
     },
     "fingerprint": "f50c501e2fa60e778483ccc7a554bbe4203095efa7c1f1ba6c4202ff554fb5d5",
     "generation": 14,
-    "reason": "generation 14 is introduced by this unmerged PR (#1941) and never released; refining which nodes get tu_local changes no stored value"
+    "reason": "comment moved from snapshot.py to model/stack_protector.py"
   }
 }

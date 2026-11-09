@@ -98,6 +98,8 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.FUNC_DELETED,
     ChangeKind.FUNC_NOEXCEPT_ADDED,
     ChangeKind.FUNC_NOEXCEPT_REMOVED,
+    # tests/test_noexcept_header_backends.py: a virtual gaining noexcept.
+    ChangeKind.FUNC_VIRTUAL_NOEXCEPT_ADDED,
     ChangeKind.FUNC_PARAMS_CHANGED,
     ChangeKind.FUNC_PURE_VIRTUAL_ADDED,
     ChangeKind.FUNC_REMOVED,

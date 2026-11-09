@@ -49,6 +49,7 @@ from typing import Any
 
 from .castxml_array_migration import migrate_castxml_array_counts
 from .castxml_base_offset_migration import migrate_castxml_base_offsets
+from .castxml_noexcept_migration import migrate_castxml_noexcept
 from .clang_vtable_base_migration import migrate_clang_vtable_bases
 from .versioning import (
     EXTRACTOR_GENERATION,
@@ -67,6 +68,7 @@ __all__ = [
     "decode_fact_generations",
     "decode_spellings_generation",
     "encode_fact_generations",
+    "erased_extents_restored_between",
     "extractor_generation_of",
     "pending_extent_shift",
     "is_placeholder_reason",
@@ -111,11 +113,21 @@ class GenerationSpellingChange:
     ``N`` as ``N + extent_shift`` for some, but not all, arrays (a stored
     snapshot does not say which backend wrote an extent). Comparison demotes
     a finding whose spellings differ only by that shift instead.
+
+    *restores_erased_extents* says this generation spells an array bound the
+    older DWARF extractor erased (``char[8]`` where it wrote ``char[]``). A
+    stored ``T[]`` does not say what the bound was, so no rewrite is sound;
+    comparison demotes a finding whose spellings differ only by that erasure.
     """
 
     reason: str
     rewrites: tuple[tuple[str, str], ...] = ()
     extent_shift: int = 0
+    #: This generation also declares a load-time rewrite of stored *facts*
+    #: (not spellings), such as ``castxml_noexcept_migration.py``: a document
+    #: from before it re-encodes to different bytes by design.
+    migrates_facts: bool = False
+    restores_erased_extents: bool = False
 
 
 #: Every row's reason cites the commit that introduced the generation and what
@@ -475,6 +487,44 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "an older PE/Mach-O snapshot keeps its export-table-only surface"
     ),
     45: GenerationSpellingChange(
+        "DWARF arrays spell each dimension's bound (dwarf_utils.array_type_info: "
+        "'char[8]', 'int[2][3]', was 'char[]' for every array; a flexible member "
+        "keeps 'T[]') and an array without DW_AT_byte_size records its size as "
+        "count times element size (was 0); DWARF-only snapshots record C++ "
+        "member and namespace-scope functions defined outside their declaration "
+        "(DW_AT_specification, extract/dwarf_member_functions), with the "
+        "declaration's name, scope, return type and 'this' qualifiers (an "
+        'extern "C" one by its plain name), and each virtual\'s vtable slot '
+        "from DW_AT_vtable_elem_location (was 0 or unrecorded). A stored 'T[]' cannot say what bound it "
+        "erased, so no rewrite is sound: comparison demotes a finding whose "
+        "spellings differ only by that erasure (policy/generation_drift_demotion)",
+        restores_erased_extents=True,
+    ),
+    46: GenerationSpellingChange(
+        "no type or name spelling changes. castxml runs read a function's "
+        "noexcept specification and the public headers' C++20 concept and "
+        "template constraints from the clang AST of the same header "
+        "(extract/headers/castxml/clang_semantics_join.py), where castxml "
+        "stored is_noexcept=False for every function and no constraint table; "
+        "a function whose header spells a specification the join could not "
+        "read stores is_noexcept=None (not observed). "
+        "castxml_noexcept_migration.py loads a pre-46 castxml snapshot's C++ "
+        "is_noexcept=False as None, so an older baseline reports no "
+        "func_noexcept_added for an unchanged noexcept function; its missing "
+        "constraint table already reads as not modelled",
+        migrates_facts=True,
+    ),
+    47: GenerationSpellingChange(
+        "no type or name spelling changes. castxml and clang runs set "
+        "cxx_template_defaults (the public headers' template-parameter "
+        "defaults of every class, function, alias and variable template, read "
+        "from the clang AST: extract/headers/clang/template_default_entries.py; "
+        "castxml through castxml/clang_semantics_join.py) where it was unset; "
+        "no rewrite is needed -- an older snapshot reads as not modelled, so a "
+        "castxml side keeps its header-scan gap note and a clang side its "
+        "alias/variable-template gap note"
+    ),
+    48: GenerationSpellingChange(
         "advanced DWARF records a by-value aggregate's triviality as 'unknown' "
         "when the unit carries only its declaration (clang's type homing of "
         "std::string), and takes a type's own DW_AT_calling_convention as the "
@@ -483,7 +533,7 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "runtime. No type or name spelling changes, so no rewrite is needed -- "
         "an older snapshot's declaration-only 'trivial' reads as before"
     ),
-    46: GenerationSpellingChange(
+    49: GenerationSpellingChange(
         "an ELF dump records every compilation unit's stack-protector setting "
         "from its DW_AT_producer (the abicheck.cu_stack_protector extension "
         "fact), and a DWARF-derived variable records its DW_AT_alignment as "
@@ -534,6 +584,17 @@ def pending_extent_shift(old_generation: int, new_generation: int) -> int:
         change.extent_shift
         for introduced, change in SPELLING_MIGRATIONS.items()
         if old_generation < introduced <= new_generation
+    )
+
+
+def erased_extents_restored_between(generation_a: int, generation_b: int) -> bool:
+    """Whether a generation in between the two (either order) started
+    spelling the array bounds an older DWARF extractor erased to ``[]``."""
+    low, high = sorted((generation_a, generation_b))
+    return any(
+        change.restores_erased_extents
+        for introduced, change in SPELLING_MIGRATIONS.items()
+        if low < introduced <= high
     )
 
 
@@ -699,6 +760,7 @@ def migrate_and_describe(
         notices.extend(migrate_castxml_array_counts(document, extractor)[1])
         notices.extend(migrate_castxml_base_offsets(document, extractor)[1])
         notices.extend(migrate_clang_vtable_bases(document, extractor)[1])
+        notices.extend(migrate_castxml_noexcept(document, extractor)[1])
     if spellings >= EXTRACTOR_GENERATION:
         return document, generations, previous, tuple(notices)
     migrated, spelling_notices = _migrate_spellings(document, spellings)
@@ -709,4 +771,6 @@ def migrate_and_describe(
     notices.extend(offset_notices)
     migrated, vtable_notices = migrate_clang_vtable_bases(migrated, spellings)
     notices.extend(vtable_notices)
+    migrated, noexcept_notices = migrate_castxml_noexcept(migrated, spellings)
+    notices.extend(noexcept_notices)
     return migrated, generations, EXTRACTOR_GENERATION, tuple(notices)

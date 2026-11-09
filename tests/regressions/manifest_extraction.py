@@ -91,6 +91,110 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
         },
     ),
     BugClass(
+        id="extraction.dwarf_array_bound_erased",
+        invariant=(
+            "A DWARF array type spells each dimension's bound, outermost "
+            "first, as C writes it (char[8], int[2][3]); only an unbounded "
+            "dimension spells []. A bound change is a member type change even "
+            "when the record's size does not move, and a pre-generation-45 "
+            "DWARF baseline's erased T[] against a fresh T[N] reads as "
+            "extractor drift, never a break."
+        ),
+        fixed_by=(1958, 1962),
+        seed_tests=(
+            "tests/test_dwarf_array_extents.py",
+            "tests/test_dwarf_erased_extent_generation_drift.py",
+            "tests/test_type_spelling_differential_matrix.py",
+        ),
+        public_surfaces=("cli",),  # test_dwarf_array_extents runs `abicheck dump`
+        axes={
+            "compiler": ("gcc", "clang"),
+            "packing": ("natural", "packed"),
+            "array_shape": (
+                "one_dim",
+                "multi_dim",
+                "array_of_struct",
+                "flexible",
+                "zero_length",
+            ),
+            "edit": (
+                "shrink_in_padding",
+                "grow",
+                "reshape",
+                "inner_bound",
+                "unchanged",
+            ),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "castxml spells a multi-dimensional array with its bounds "
+                    "reversed (int[3][2] for int[2][3])."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+            KnownGap(
+                description=(
+                    "No seed test drives a DWARF array-bound change through "
+                    "`abicheck.service` (python-api); the CLI is reached only "
+                    "by `abicheck dump`, and the comparison by "
+                    "`checker.compare()`."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md#phase-5",
+            ),
+        ),
+    ),
+    BugClass(
+        id="extraction.dwarf_out_of_line_definition_dropped",
+        invariant=(
+            "A DWARF-only snapshot records a function defined outside its "
+            "class or namespace -- a definition DIE that names its declaration "
+            "only through DW_AT_specification (and DW_AT_abstract_origin for a "
+            "concrete constructor instance) -- with its declaration's name, "
+            "scope, virtuality, access and the cv/ref qualifiers of its this "
+            "parameter, so a method edit reads as the kind the header lane "
+            "reports (func_cv_changed, func_static_changed, "
+            "func_virtual_became_pure), not as an ELF removal plus addition."
+        ),
+        fixed_by=(1958, 1962),
+        seed_tests=(
+            "tests/test_dwarf_member_functions.py",
+            "tests/test_dwarf_semantic_ir.py",
+            "tests/test_depth_projection_matches_shallow_dump.py",
+        ),
+        public_surfaces=(),  # the seed tests call dump/compare directly
+        axes={
+            "compiler": ("gcc", "clang"),
+            "edit": (
+                "const_drop",
+                "const_add",
+                "volatile_drop",
+                "static_to_member",
+                "return_retype",
+                "became_pure",
+                "unchanged",
+            ),
+            "scope": ("class_member", "namespace_function", "ctor_concrete_instance"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "GCC writes DW_VIRTUALITY_virtual for a pure virtual, so a "
+                    "GCC-built DWARF snapshot cannot report func_virtual_became_pure."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+            KnownGap(
+                description=(
+                    "No seed test reaches a public surface (CLI or "
+                    "`abicheck.service`): the member-function shapes are "
+                    "dumped and compared through `dump()`/`checker.compare()`."
+                ),
+                reference="docs/contribute/plans/bug-class-regression-testing.md#phase-5",
+            ),
+        ),
+    ),
+    BugClass(
         id="extraction.compile_entry_collapsed_to_first_source",
         invariant=(
             "A compile-database entry yields one compile unit per source "
@@ -519,14 +623,18 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "return spellings, declaring header -- are one parameter change when "
             "a parameter written the same resolves to a different type (its "
             "resolved record/enum, that record's layout, or a typedef's target "
-            "changed). A changed written signature, or a mangling change the "
-            "header evidence does not explain, stays a removal and an addition. "
+            "changed), and so are the removal and addition of the one function by "
+            "that name whose written signature was rewritten in the same header "
+            "with the same return type, as the binary-only rule pairs them. A "
+            "retype to a record the old release never declared (case189), an "
+            "overloaded name, or a mangling change the header evidence does not "
+            "explain stays a removal and an addition. "
             "A fundamental type (float _Complex, __int128, a vector or SIMD type, "
             "or a pointer, cv or array of one) is never paired as a rename or "
             "move: a builtin change is a true removal and addition, not 'the same "
             "declaration, renamed'."
         ),
-        fixed_by=(1779, 1812),
+        fixed_by=(1779, 1812, 1958, 1965),
         seed_tests=(
             "tests/test_header_parameter_replacement_pairing.py",
             "tests/test_header_param_change_pairing_integration.py",
@@ -535,6 +643,30 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_graph_reconcile_fundamental.py",
             "tests/test_graph_reconcile_fundamental_cli.py",
         ),
+    ),
+    BugClass(
+        id="classification.removed_virtual_slot_read_as_plain_removal",
+        invariant=(
+            "A virtual method removed together with its vtable slot -- an entry "
+            "of every old vtable that held it, gone from each of those records' "
+            "shorter new vtable, with no new declaration or export left -- "
+            "reports func_virtual_removed beside the function's removal, on the "
+            "header and DWARF lanes alike; removing an override (the slot "
+            "stays) or devirtualizing a method that stays exported does not."
+        ),
+        fixed_by=(1958, 1965),
+        seed_tests=("tests/test_virtual_slot_removal.py",),
+        public_surfaces=("cli", "python-api"),
+        axes={
+            "lane": ("dwarf", "castxml", "clang"),
+            "shape": (
+                "last_virtual_removed",
+                "middle_virtual_removed",
+                "override_removed",
+                "devirtualized",
+                "inherited_by_derived",
+            ),
+        },
     ),
     BugClass(
         id="templates.explicit_instance_removal_read_as_visibility_change",
@@ -692,6 +824,10 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_clang_record_layout_dump.py",
             "tests/test_family_f8_target_parity.py",
             "tests/test_family_f8_catalog_backend_parity.py",
+            # castxml reads noexcept and C++20 constraints from the clang AST
+            # of the same header; without clang they read not observed.
+            "tests/test_noexcept_header_backends.py",
+            "tests/test_castxml_clang_semantics_join.py",
         ),
         public_surfaces=("cli", "python-api"),
         axes={

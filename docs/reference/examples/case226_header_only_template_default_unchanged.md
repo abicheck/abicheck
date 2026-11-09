@@ -40,9 +40,10 @@ abicheck compare old.json new.json
 
 ## Expected abicheck finding
 
-`Verdict: NO_CHANGE` on castxml and clang. No template-default finding. castxml
-still reports the template-default gap, because it cannot record the default. A
-clean-looking NO_CHANGE does not mean the defaults were checked there.
+`Verdict: NO_CHANGE` on castxml and clang. No template-default finding and no
+template-default gap: both backends recorded the default (castxml through its
+clang join). Without clang, castxml names the gap instead, because then it has
+not checked the defaults.
 
 ## Minimum evidence
 

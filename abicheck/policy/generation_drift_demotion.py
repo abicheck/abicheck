@@ -34,6 +34,12 @@ skeleton differs (``T*`` -> ``T&`` stays a break), when a builtin is renamed
 (``int`` -> ``long``), or when the old identifier names a type the old
 snapshot declares (``Foo`` -> ``Bar``).
 
+A generation that declared it restores erased array bounds (its
+``SPELLING_MIGRATIONS`` row's ``restores_erased_extents``) demotes a finding
+whose older DWARF-sourced spelling is the newer one with every run of bounds
+erased to ``[]`` (``char[]`` against ``char[8]``): the older DWARF extractor
+wrote every array that way.
+
 A generation that declared an array-extent shift (its ``SPELLING_MIGRATIONS``
 row's ``extent_shift``, passed in by the workflow) also demotes a finding
 whose spellings differ only by every differing ``[N]`` growing by exactly
@@ -60,12 +66,15 @@ from ..model.name_heuristics import (
     register_name_heuristic,
 )
 from ..model.restrict_qualifier import strip_restrict
+from ..model.semantic_ir_variable_payload import DWARF_PRODUCER
 from ..model.snapshot import AbiSnapshot
 
 __all__ = [
     "GENERATION_DRIFT_REASON",
     "GENERATION_DRIFT_RULE",
+    "demote_erased_extent_drift",
     "demote_generation_spelling_drift",
+    "is_erased_extent_drift",
     "is_extent_shift_drift",
     "is_spelling_only_drift",
 ]
@@ -497,5 +506,118 @@ def demote_restrict_depth_drift(
             f"a restrict-qualified pointer parameter was recorded at depth "
             f"{0 if stale_is_old else 1} by the older extractor and at depth "
             f"{1 if stale_is_old else 0} now)"
+        )
+    return changes
+
+
+#: One run of array bounds (``[8]``, ``[2][3]``, ``[]``) in a spelling.
+_EXTENT_RUN = re.compile(r"(?:\[\s*\d*\s*\])+")
+
+
+def is_erased_extent_drift(stale: str, live: str) -> bool:
+    """Whether *stale* is *live* with every run of array bounds erased: the
+    spelling the pre-45 DWARF extractor wrote for a bounded array
+    (``char[8]`` -> ``char[]``, ``int[2][3]`` -> ``int[]``). An array DIE
+    nested in another wrote one ``[]`` per DIE (``int[][]``), never more
+    than the live spelling has dimensions. Any other difference, a changed
+    bound included, is not."""
+    if stale == live or "[]" not in stale:
+        return False
+    stale_runs, live_runs = _EXTENT_RUN.findall(stale), _EXTENT_RUN.findall(live)
+    # A stale spelling that states any bound is not an erased one.
+    if any(c.isdigit() for run in stale_runs for c in run):
+        return False
+    if len(stale_runs) != len(live_runs) or any(
+        old.count("[") > new.count("[")
+        for old, new in zip(stale_runs, live_runs, strict=True)
+    ):
+        return False
+    return _EXTENT_RUN.sub("[]", live) == _EXTENT_RUN.sub("[]", stale)
+
+
+def _erased_pair_drifts(pair: tuple[str, str], *, stale_is_old: bool) -> bool:
+    old, new = pair
+    return (
+        is_erased_extent_drift(old, new)
+        if stale_is_old
+        else is_erased_extent_drift(new, old)
+    )
+
+
+#: The DWARF array-bound respelling, lowering-only like the rules above.
+GENERATION_ERASED_EXTENT_DRIFT = register_name_heuristic(
+    "generation_erased_extent_drift",
+    owner=__name__,
+    effect=NameHeuristicEffect.LOWER_CONFIDENCE,
+    lowers_from=tuple(sorted(k.name for k in _SPELLING_KINDS)),
+    description=(
+        "a type spelling whose older, DWARF-sourced side is the newer one with "
+        "its array bounds erased to [] -- the spelling a SPELLING_MIGRATIONS "
+        "row declares it stopped writing -- between operands of different "
+        "extractor generations, is extractor drift, not a type change"
+    ),
+    matcher=_erased_pair_drifts,
+    confirmed_by=_GENERATIONS_DIFFER,
+    helpers=(is_erased_extent_drift,),
+    patterns=(_EXTENT_RUN,),
+)
+
+
+def _types_from_dwarf(snap: AbiSnapshot) -> bool:
+    """Whether *snap*'s types were read from DWARF, by positive evidence:
+    every canonical entity names the ``dwarf`` producer. The debug block
+    itself cannot say so (PDB, BTF and CTF write into it too, with
+    ``has_dwarf=True``), and an unknown producer is not demoted."""
+    ir = snap.semantic_ir
+    if snap.from_headers or ir is None:
+        return False
+    producers = {entity.producer for entity in ir.occurrences.values()}
+    return producers == {DWARF_PRODUCER}
+
+
+def demote_erased_extent_drift(
+    changes: list[Change],
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+    old_generation: int,
+    new_generation: int,
+    *,
+    restored: bool,
+) -> list[Change]:
+    """Annotate a finding whose only difference is the array bounds the
+    older operand's DWARF extractor erased as ``COMPATIBLE_WITH_RISK``.
+
+    *restored* is whether a generation between the two declared it restores
+    erased bounds. The stale operand is the older generation's, and only one
+    whose types came from DWARF wrote ``T[]`` for a bounded array, so a
+    ``T[]`` read from headers, PDB, BTF or CTF (a flexible array member), or
+    from an unknown producer, against ``T[8]`` is never demoted.
+    """
+    if not restored or old_generation == new_generation:
+        return changes
+    stale_is_old = old_generation < new_generation
+    if not _types_from_dwarf(old if stale_is_old else new):
+        return changes
+    generations = (old_generation, new_generation)
+    for change in changes:
+        if (
+            change.effective_verdict is not None
+            or change.kind not in _SPELLING_KINDS
+            or not isinstance(change.old_value, str)
+            or not isinstance(change.new_value, str)
+        ):
+            continue
+        pair = (change.old_value, change.new_value)
+        if not GENERATION_ERASED_EXTENT_DRIFT.confirmed(
+            pair, generations, stale_is_old=stale_is_old
+        ):
+            continue
+        change.effective_verdict = Verdict.COMPATIBLE_WITH_RISK
+        change.modulation_rule = GENERATION_DRIFT_RULE
+        change.modulation_reason = (
+            f"{GENERATION_DRIFT_REASON} (old operand extractor generation "
+            f"{old_generation or 'unstated'}, new {new_generation or 'unstated'}; "
+            f"the older DWARF extractor spelled every bounded array as 'T[]', "
+            f"which no load-time rewrite can restore)"
         )
     return changes

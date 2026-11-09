@@ -60,9 +60,11 @@ from .dto import SECTION_SCHEMA_VERSIONS
 __all__ = [
     "CU_STACK_PROTECTOR",
     "CXX_CONCEPT_CONSTRAINTS",
+    "CXX_TEMPLATE_DEFAULTS",
     "CXX_CONCEPT_HEADER_SCAN",
     "EXPORT_READ",
     "EXTENSION_FACTS",
+    "NOEXCEPT_UNOBSERVED",
     "ExtensionFact",
     "ExtensionFactRegistry",
     "ReaderSemantics",
@@ -308,6 +310,74 @@ CXX_CONCEPT_CONSTRAINTS: ExtensionFact[dict[str, str]] = ExtensionFact(
     decode=_str_map,
 )
 
+
+def _str_list(value: Any) -> list[str]:
+    if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+        raise TypeError("expected a list of str")
+    return sorted(set(value))
+
+
+#: The functions whose ``noexcept`` exception specification the producer did
+#: not observe (``Function.is_noexcept_fact`` ``NOT_COLLECTED``, extractor
+#: generation 46): a castxml run whose clang join could not read a header that
+#: spells one. Their mangled names, written on the ``declarations`` section
+#: when there is at least one. Absent, every stored ``is_noexcept`` was
+#: observed. An older reader that ignores it reads those functions as not
+#: ``noexcept`` -- what a castxml snapshot always stored -- so it is optional.
+NOEXCEPT_UNOBSERVED: ExtensionFact[list[str]] = ExtensionFact(
+    name="abicheck.noexcept_unobserved",
+    section="declarations",
+    semantics=ReaderSemantics.OPTIONAL,
+    absent_reads_as="every stored noexcept specification was observed",
+    owner="ADR-062",
+    encode=_str_list,
+    decode=_str_list,
+)
+
+
+def _template_default_map(value: Any) -> dict[str, list[str | None] | None]:
+    """A ``{key: [default | null, ...] | null}`` map (each template's spelled
+    defaults, ``null`` when not known; ``model/template_default_table.py``)."""
+    if not isinstance(value, dict):
+        raise TypeError("expected a {str: list | null} map")
+    out: dict[str, list[str | None] | None] = {}
+    for key in sorted(value):
+        row = value[key]
+        if not isinstance(key, str):
+            raise TypeError("expected a str key")
+        if row is None:
+            out[key] = None
+            continue
+        if not isinstance(row, (list, tuple)) or not all(
+            d is None or isinstance(d, str) for d in row
+        ):
+            raise TypeError("expected a list of str or null")
+        out[key] = list(row)
+    return out
+
+
+#: The public headers' template-parameter defaults (ADR-085 D1) of every
+#: class, function, alias and variable template, read from the clang AST by
+#: both header backends (``AbiSnapshot.cxx_template_defaults``, extractor
+#: generation 47). Written on the ``debug`` section whenever a run modelled
+#: them, the empty map included. Absent, nothing was modelled: the
+#: header-scan gap stays named and no default change is assessed from the
+#: table -- what an older reader that ignores it also does -- so it is
+#: optional.
+CXX_TEMPLATE_DEFAULTS: ExtensionFact[dict[str, list[str | None] | None]] = (
+    ExtensionFact(
+        name="abicheck.cxx_template_defaults",
+        section="debug",
+        semantics=ReaderSemantics.OPTIONAL,
+        absent_reads_as=(
+            "not modelled: no default change is assessed from it, the gap is named"
+        ),
+        owner="ADR-085",
+        encode=_template_default_map,
+        decode=_template_default_map,
+    )
+)
+
 _STACK_PROTECTOR_LEVELS = frozenset(
     {"none", "explicit", "basic", "strong", "all", "unrecorded"}
 )
@@ -326,7 +396,7 @@ def _stack_protector_census(value: Any) -> dict[str, int]:
 
 #: Every compiled unit's stack-protector setting from its ``DW_AT_producer``
 #: (``AbiSnapshot.cu_stack_protector``, ``model/stack_protector.py``,
-#: extractor generation 46). Written on the ``debug`` section whenever DWARF
+#: extractor generation 49). Written on the ``debug`` section whenever DWARF
 #: units were read. Absent, no unit was read: a lost ``__stack_chk_fail``
 #: keeps its RISK with the cause unestablished -- the answer every older
 #: snapshot gives. An older reader that ignores it reports that same RISK,
@@ -344,5 +414,12 @@ CU_STACK_PROTECTOR: ExtensionFact[dict[str, int]] = ExtensionFact(
 #: This build's optional extension facts (ADR-062 D19). Add a fact by
 #: declaring it as a module constant above and listing it here.
 EXTENSION_FACTS = ExtensionFactRegistry(
-    (CU_STACK_PROTECTOR, CXX_CONCEPT_HEADER_SCAN, CXX_CONCEPT_CONSTRAINTS, EXPORT_READ)
+    (
+        CU_STACK_PROTECTOR,
+        CXX_CONCEPT_HEADER_SCAN,
+        CXX_CONCEPT_CONSTRAINTS,
+        CXX_TEMPLATE_DEFAULTS,
+        EXPORT_READ,
+        NOEXCEPT_UNOBSERVED,
+    )
 )

@@ -69,6 +69,7 @@ _NEVER_IN_A_DOCUMENT = (
     "cxx_concept_header_scan",
     "cxx_concept_constraints",
     "cu_stack_protector",
+    "cxx_template_defaults",
     "wire_extensions",
     "spellings_generation",
     "_func_by_mangled",

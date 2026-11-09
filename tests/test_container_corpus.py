@@ -217,12 +217,13 @@ def test_frozen_container_loads_with_no_unexpected_notice(
 
 
 def _spelling_migration_declared(key: str) -> bool:
-    """Whether loading *key* under this build may rewrite stored spellings:
-    a generation after the frozen one declares a rewrite or an extent shift
-    (or the frozen one predates castxml's array-count fix, generation 15)."""
+    """Whether loading *key* under this build may rewrite stored spellings
+    or facts: a generation after the frozen one declares a rewrite, an extent
+    shift or a fact migration (or the frozen one predates castxml's
+    array-count fix, generation 15)."""
     frozen = _entry(key)["generations"]["extractor"]
     return frozen < 15 or any(
-        change.rewrites or change.extent_shift
+        change.rewrites or change.extent_shift or change.migrates_facts
         for introduced, change in SPELLING_MIGRATIONS.items()
         if frozen < introduced <= EXTRACTOR_GENERATION
     )

@@ -43,19 +43,25 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
-from typing import Protocol
+from typing import Any, Protocol
 
 from ..model import EnumType, Function, RecordType, Variable
 from ..model.abi_fundamental import AbiFundamental
 from ..model.fact import Fact
 from ..model.identity import EntityId
 from ..model.semantic_ir import SemanticIR
+from ..model.template_default_table import TemplateDefaults
 from ..storage.header_ast_cache import (
     ast_acquisition_active,
     retain_ast_context_object,
     run_ast_acquisition,
 )
+from .headers.castxml.clang_semantics import (
+    castxml_concept_constraints,
+    castxml_template_defaults,
+)
 from .headers.clang.concept_constraints import collect_cxx_concept_constraints
+from .headers.clang.template_default_entries import collect_cxx_template_defaults
 from .semantic_normalizer import normalize_header_ast
 
 __all__ = ["AST_SCOPE_ATTRIBUTES", "HeaderAstFields", "parse_header_ast_fields"]
@@ -108,18 +114,51 @@ class HeaderAstFields:
     #: The clang parse's C++20 concept/template-constraint table; ``None`` for
     #: castxml, a C parse, or no declared public set (not modelled).
     cxx_concept_constraints: dict[str, str] | None = field(default=None, kw_only=True)
+    #: The public headers' template-parameter defaults (ADR-085 D1), read from
+    #: the clang AST by both backends; ``None`` when not modelled.
+    cxx_template_defaults: dict[str, TemplateDefaults] | None = field(
+        default=None, kw_only=True
+    )
+
+    def clang_ast_tables(self) -> dict[str, Any]:
+        """The snapshot fields read from a clang AST of the headers (the
+        clang backend's own, or castxml's clang join): the concept and
+        template-default tables."""
+        return {
+            "cxx_concept_constraints": self.cxx_concept_constraints,
+            "cxx_template_defaults": self.cxx_template_defaults,
+        }
 
 
-def _concept_constraints(parser: object) -> dict[str, str] | None:
-    """The concept table of a C++ clang parse (``None`` for any other)."""
+def _template_defaults(
+    parser: object, producer: str
+) -> dict[str, TemplateDefaults] | None:
+    """The template-default table of a C++ parse (``None``: not modelled),
+    read the same way as :func:`_concept_constraints`."""
+    root = getattr(parser, AST_SCOPE_ATTRIBUTES[0], None)
+    segs = getattr(parser, "_pub_header_segs", [])
+    dirs = getattr(parser, "_pub_dir_segs", [])
+    have_public_set = bool(getattr(parser, "_have_public_set", False))
+    if producer == "castxml":
+        return castxml_template_defaults(root, segs, dirs, have_public_set)
     if not getattr(parser, "_is_cxx", False):
         return None
-    return collect_cxx_concept_constraints(
-        getattr(parser, AST_SCOPE_ATTRIBUTES[0], None),
-        getattr(parser, "_pub_header_segs", []),
-        getattr(parser, "_pub_dir_segs", []),
-        bool(getattr(parser, "_have_public_set", False)),
-    )
+    return collect_cxx_template_defaults(root, segs, dirs, have_public_set)
+
+
+def _concept_constraints(parser: object, producer: str) -> dict[str, str] | None:
+    """The concept table of a C++ parse (``None``: not modelled). The clang
+    parser reads it from its own AST; the castxml parser's XML root carries
+    the entries its clang join read (``castxml/clang_semantics_join.py``)."""
+    root = getattr(parser, AST_SCOPE_ATTRIBUTES[0], None)
+    segs = getattr(parser, "_pub_header_segs", [])
+    dirs = getattr(parser, "_pub_dir_segs", [])
+    have_public_set = bool(getattr(parser, "_have_public_set", False))
+    if producer == "castxml":
+        return castxml_concept_constraints(root, segs, dirs, have_public_set)
+    if not getattr(parser, "_is_cxx", False):
+        return None
+    return collect_cxx_concept_constraints(root, segs, dirs, have_public_set)
 
 
 def parse_header_ast_fields(
@@ -133,7 +172,7 @@ def parse_header_ast_fields(
     both slower and lossy.  Keep that established per-member binding path, and
     single-flight only the canonical ``SemanticIR`` derived from it.
     """
-    legacy = _parse_header_ast_legacy(parser)
+    legacy = _parse_header_ast_legacy(parser, producer)
     # The shared normalization is keyed on the parsed AST's identity. A
     # parser that does not expose its root cannot be keyed: every such
     # parse would share ``id(None)`` and receive the first one's IR, so it
@@ -160,7 +199,7 @@ def parse_header_ast_fields(
                 # its normalization member-local rather than publishing the
                 # first binary's view under a shared context key.
                 return _normalize_header_ast_fields(legacy, producer=producer)
-            neutral = _parse_header_ast_legacy(neutral_factory())
+            neutral = _parse_header_ast_legacy(neutral_factory(), producer)
             return _normalize_header_ast_fields(neutral, producer=producer)
 
         if neutral_factory is None:
@@ -177,7 +216,9 @@ def parse_header_ast_fields(
     return replace(legacy, semantic_ir=semantic_ir)
 
 
-def _parse_header_ast_legacy(parser: _HeaderAstParser) -> HeaderAstFields:
+def _parse_header_ast_legacy(
+    parser: _HeaderAstParser, producer: str
+) -> HeaderAstFields:
     functions = tuple(parser.parse_functions())
     variables = tuple(parser.parse_variables())
     types = tuple(parser.parse_types())
@@ -199,7 +240,8 @@ def _parse_header_ast_legacy(parser: _HeaderAstParser) -> HeaderAstFields:
         constant_entity_ids=constant_entity_ids,
         # Replaced before this private intermediate leaves this module.
         semantic_ir=SemanticIR(),
-        cxx_concept_constraints=_concept_constraints(parser),
+        cxx_concept_constraints=_concept_constraints(parser, producer),
+        cxx_template_defaults=_template_defaults(parser, producer),
     )
 
 

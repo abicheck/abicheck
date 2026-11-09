@@ -12,7 +12,7 @@
     "abicheck/comparability_profile.py(_toolchain_identity_status)": 14,
     "abicheck/compare/debug_layout_view.py(_layout_channel)": 140,
     "abicheck/compare/debug_layout_view.py(debug_layout_view)": 140,
-    "abicheck/compare/declined_comparisons.py(declined_scope)": 719,
+    "abicheck/compare/declined_comparisons.py(declined_scope)": 733,
     "abicheck/compare/dedup_key.py(hashable_value)": 1661,
     "abicheck/compare/detection_memo.py(detection_memo_scope)": 14,
     "abicheck/compare/detection_memo.py(memoized)": 777,
@@ -183,7 +183,7 @@
     "abicheck/model/export_index.py(snapshot_export_names)": 56,
     "abicheck/model/extraction_scope.py(_both_from_headers)": 14,
     "abicheck/model/extraction_scope.py(compare_extraction_scopes)": 13,
-    "abicheck/model/fact.py(Fact._make)": 854,
+    "abicheck/model/fact.py(Fact._make)": 853,
     "abicheck/model/fact.py(Fact.is_present)": 5694,
     "abicheck/model/fact.py(Fact.not_collected)": 1264,
     "abicheck/model/fact.py(Fact.partial)": 79,
@@ -236,7 +236,7 @@
     "abicheck/model/signature_normalization.py(_strip_cv_tokens_outside_nesting)": 35,
     "abicheck/model/signature_normalization.py(canonicalize_function_signature_param_type)": 563,
     "abicheck/model/snapshot.py(AbiSnapshot.canonical_ir)": 488,
-    "abicheck/model/snapshot.py(AbiSnapshot.declarations)": 4647,
+    "abicheck/model/snapshot.py(AbiSnapshot.declarations)": 4689,
     "abicheck/model/snapshot.py(AbiSnapshot.function_map)": 570,
     "abicheck/model/snapshot.py(AbiSnapshot.index)": 196,
     "abicheck/model/snapshot.py(AbiSnapshot.type_by_name)": 312,
@@ -306,5 +306,5 @@
   },
   "mode": "default",
   "n": 40,
-  "total": 239693
+  "total": 239748
 }

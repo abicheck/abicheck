@@ -665,6 +665,8 @@ def merge_snapshots(castxml_snap: AbiSnapshot, clang_snap: AbiSnapshot) -> AbiSn
         constant_entity_ids=merged_constant_entity_ids,
         # Only clang models concepts; its table (None when not modelled) wins.
         cxx_concept_constraints=clang_snap.cxx_concept_constraints,
+        # The clang side reads every template family itself.
+        cxx_template_defaults=clang_snap.cxx_template_defaults,
         ast_producer="hybrid",
         ast_toolchain={
             **{

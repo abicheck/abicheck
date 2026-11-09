@@ -24,6 +24,7 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
+from ..compare.template_default_table import detect_template_default_table_changes
 from ..compare.template_param_defaults import (
     _pattern_records,
     detect_default_template_arg_changed,
@@ -35,6 +36,7 @@ from ..compare.template_surface import (
     strip_template_args as _callable_stem,
 )
 from ..model.change_catalog.kinds import ChangeKind
+from ..model.template_default_table import split_template_default_key
 from .disposition_ledger import Disposition
 
 if TYPE_CHECKING:
@@ -67,7 +69,12 @@ def _templates_named_by_reported_functions(
     reported = {c.symbol for c in changes if c.kind in _FUNCTION_CHANGE_KINDS}
     if not reported:
         return set()
-    keys = set(_pattern_records(old)) | set(_pattern_records(new))
+    keys = (
+        set(_pattern_records(old))
+        | set(_pattern_records(new))
+        | _table_class_templates(old)
+        | _table_class_templates(new)
+    )
     named: set[str] = set()
     for snap in (old, new):
         name_of = qualified_name_lookup(snap)
@@ -84,6 +91,17 @@ def _templates_named_by_reported_functions(
                     if resolved is not None:
                         named.add(resolved)
     return named
+
+
+def _table_class_templates(snap: AbiSnapshot) -> set[str]:
+    """The class templates *snap*'s template-default table names (a castxml
+    run has no pattern record for them)."""
+    table = snap.cxx_template_defaults or {}
+    return {
+        name
+        for family, name in map(split_template_default_key, table)
+        if family == "class"
+    }
 
 
 def _resolve_spelled_name(
@@ -114,7 +132,9 @@ def detect_template_default_changes(
     """The pipeline entry for ADR-085: the exported-instantiation detector
     (``DEFAULT_TEMPLATE_ARG_CHANGED``, shape A) plus the header-level ones
     (``TEMPLATE_PARAM_DEFAULT_CHANGED``, shape B) for class and function
-    templates alike.
+    templates alike, plus the template-default table's findings for the
+    templates no pattern fact carries (a castxml run, any alias or variable
+    template).
 
     A header-level relation that shape A (an exported instantiation) or shape
     C (a reported function signature) already covers is recorded in the
@@ -131,22 +151,34 @@ def detect_template_default_changes(
         for fn in old.declarations.functions
         if fn.mangled in covered_symbols
     }
+    reported_templates = _templates_named_by_reported_functions(old, new, changes)
     header_findings, suppressed = detect_template_param_default_changed(
         old,
         new,
         instantiation_stems=instantiation_stems,
-        reported_templates=_templates_named_by_reported_functions(old, new, changes),
+        reported_templates=reported_templates,
     )
     function_findings, function_suppressed = (
         detect_function_template_param_default_changed(
             old, new, instantiation_stems=instantiation_stems
         )
     )
+    table_findings, table_suppressed = detect_template_default_table_changes(
+        old,
+        new,
+        instantiation_stems=instantiation_stems,
+        reported_templates=reported_templates,
+    )
     if ledger is not None:
-        for change in [*suppressed, *function_suppressed]:
+        for change in [*suppressed, *function_suppressed, *table_suppressed]:
             ledger.record(
                 change,
                 Disposition.DEDUPLICATED,
                 application_point="detect_template_default_changes",
             )
-    return [*default_template_findings, *header_findings, *function_findings]
+    return [
+        *default_template_findings,
+        *header_findings,
+        *function_findings,
+        *table_findings,
+    ]
