@@ -320,13 +320,20 @@ def ancestor_walkable_cmd(outcome: str) -> None:
         sys.exit(EXIT_REFUSED)
 
 
+#: Seconds one local git query of the ancestor walk may take.
+_GIT_TIMEOUT_S = 60.0
+
+
 def _git(*args: str) -> subprocess.CompletedProcess[str]:
-    """Run git in the checkout; a missing git is a failed call, not a crash."""
+    """Run git in the checkout, bounded; a missing or hung git is a failed
+    call (the walk then reads as ``history_unavailable``), not a crash."""
+    from ...deadline import DeadlineExceeded, run_bounded
+
     try:
-        return subprocess.run(
-            ["git", *args], capture_output=True, text=True, check=False
+        return run_bounded(
+            ["git", *args], timeout=_GIT_TIMEOUT_S, capture_output=True, text=True
         )
-    except OSError as exc:
+    except (OSError, subprocess.TimeoutExpired, DeadlineExceeded) as exc:
         return subprocess.CompletedProcess(["git", *args], 127, "", str(exc))
 
 

@@ -191,11 +191,6 @@ class DeltaBaseline:
     #: for every other outcome (no stored snapshot was used).
     snapshot_sha: str | None = None
 
-    @property
-    def equivalent_ancestor(self) -> bool:
-        """Whether the snapshot is of a path-equivalent ancestor of the base."""
-        return self.snapshot_sha is not None and self.snapshot_sha != self.base_sha
-
     @classmethod
     def from_mapping(cls, data: object) -> DeltaBaseline:
         """Read one record; :class:`DeltaBaselineError` if malformed.

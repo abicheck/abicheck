@@ -679,7 +679,7 @@ def test_the_fork_path_words_it_identically() -> None:
             "gate_verdict": "COMPATIBLE",
         }
     )
-    assert record.equivalent_ancestor
+    assert (record.base_sha, record.snapshot_sha) == (_BASE, _ANCESTOR)
     # A stored delta report with no analysis context renders the same notes.
     assert context_notes({"delta_baseline": record.to_report_dict()}) == direct
 
@@ -727,7 +727,7 @@ def test_the_main_action_comment_and_records_name_both_commits(
     for record in (delta_record, gate_record):
         assert record.base_sha == "a" * 40
         assert record.snapshot_sha == snapshot_sha
-        assert record.equivalent_ancestor is equivalent
+        assert (record.snapshot_sha != record.base_sha) is equivalent
 
 
 @REQUIRES_POSIX_SHELL
