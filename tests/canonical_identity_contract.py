@@ -541,6 +541,9 @@ UNVERIFIED = frozenset(
         # so it varies with value spelling (the same reason as x86_isa_baseline_raised).
         "target_isa_changed",
         "x86_isa_baseline_raised",
+        # old_value/new_value carry each side's dual-ABI selection and its
+        # evidence source, so the identity varies with value spelling.
+        "glibcxx_dual_abi_changed",
     }
 )
 

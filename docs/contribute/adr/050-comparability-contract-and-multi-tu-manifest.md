@@ -2588,6 +2588,78 @@ to see those removals (compare without headers, or `--diagnostic-comparison`).
 Owner: `comparability_profile.macro_ops_detail`. Exit codes, the report shape
 and every other refusal are unchanged.
 
+## Amendment (2026-11-09): a dual-ABI flip is a finding, not a refusal
+
+**Trigger.** The 2026-11-08 amendment kept refusing a header parse run with
+`-D_GLIBCXX_USE_CXX11_ABI=0` on one side (exit 16) and named the macro in the
+reason. That refusal reported no finding for a real, consumer-visible break:
+the two libstdc++ ABIs give `std::string`, `std::wstring` (every
+`basic_string` alias) and `std::list` different layouts and different mangled
+names (`std::__cxx11::`, `[abi:cxx11]`), so consumers built under the old
+selection fail with `undefined symbol` or misread shared objects. The
+maintainer chose to report it (option B of PR #1960; edit corpus
+`rebuild_cxx11_abi_off`).
+
+**Decision.**
+
+1. *Gate.* A `macro_ops` difference in which every differing operation is on
+   a runtime-ABI selector macro (`model/glibcxx_dual_abi.RUNTIME_ABI_MACROS`:
+   `_GLIBCXX_USE_CXX11_ABI`), with the remaining operations equal and in the
+   same order, is waived by the D2 gate
+   (`comparability_profile._unexplained_profile_fields`). The two parses read
+   the same declarations under the other runtime ABI; the difference is the
+   library's ABI change, not an incomparable profile. Every other differing
+   macro or profile field keeps the refusal, including a selector difference
+   that rides alongside one: the reason then lists the operations and says
+   the selector alone would have been compared.
+2. *Finding.* A new kind, `glibcxx_dual_abi_changed`, default verdict
+   **BREAKING** (exit 4 through the normal policy path, entity `binary`,
+   contract subject `binary_wide`). Detector:
+   `compare/glibcxx_dual_abi.py`. The existing
+   `glibcxx_dual_abi_flip_detected` stays what it is, a COMPATIBLE grouping
+   diagnostic of mass symbol churn (ADR-078 D2); it is not a selection fact
+   and does not gate.
+3. *Evidence.* Per side, the **selection**: the header parse's own last
+   operation on the macro (`profile_fields["macro_ops"]`), else a
+   `-D_GLIBCXX_USE_CXX11_ABI=N` the compiler recorded in `DW_AT_producer`,
+   else the binary's `build_mode.glibcxx_dual_abi` inferred from mangled
+   names. A header parse that left the macro at the compiler default has no
+   selection of its own: a GCC configured with
+   `--with-default-libstdcxx-abi=gcc4-compatible` defaults to `=0`. The
+   **affected surface**: (a) an export the new build lost whose dual-ABI
+   twin it gained (both demangle to one declaration once `__cxx11::`,
+   `[abi:cxx11]` and the `basic_string<C, char_traits<C>, allocator<C>>`
+   spelling are normalized away; exactly one twin); (b) an exported variable
+   whose type spells a changed type; (c) a public record, on both sides,
+   with a field that spells one.
+4. *When it fires.* (a) alone proves the break: a consumer's reference to
+   the old name no longer resolves. (b) and (c) prove it when the selections
+   are known on both sides and differ; when only the header parses' selector
+   operations differ (one side at the compiler default), (c) counts only for
+   a record whose size or field offsets changed, the observed effect of the
+   flip.
+5. *Partial evidence.* A selector difference in the header parses with no
+   affected entity is recorded as `toolchain_flag_drift` (COMPATIBLE), so
+   the gate's waiver stays visible (ADR-067) and nothing is gated. A
+   selection known on one side only, or inferred from mangled names with
+   nothing affected, yields no dual-ABI finding; the ordinary symbol and
+   layout findings decide. A binary-only pair whose only affected entity is
+   a record passed by pointer has no selection fact (the old ABI's mangled
+   names do not identify libstdc++ in `build_mode`), so its root cause is not
+   claimed; DWARF's `type_size_changed` still gates it.
+6. *Disposition.* The per-entity findings the flip causes (`func_removed`,
+   `func_added`, `func_params_changed`, `type_size_changed`, …) are recorded
+   and reported beside the root; nothing is suppressed or folded (ADR-067).
+   The root's description names each side's selection and its source, and
+   the affected entities, in every report format (JSON, Markdown, SARIF).
+
+**Unchanged.** Genuinely incomparable profiles still refuse with exit 16:
+a different compiler family, standard, include set, an unrelated macro, or a
+target triple the binaries do not corroborate. No extractor output changes
+(no `EXTRACTOR_GENERATION` bump): every fact the detector reads is already
+persisted. Tests: `tests/unit/compare/test_glibcxx_dual_abi_detector.py`,
+`tests/test_glibcxx_dual_abi_integration.py`.
+
 ## References
 
 - `abicheck/model.py` — `AbiSnapshot`, `ScopeOrigin` (`:131-147`)
