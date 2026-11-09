@@ -42,6 +42,7 @@ from .graph_facts import SurfaceGraphLike
 from .lazy_graph import install_lazy_graph_field
 from .section_availability import SectionAvailability
 from .snapshot_index import build_snapshot_indexes
+from .template_default_table import TemplateDefaults
 
 if TYPE_CHECKING:
     from ..buildsource.model import BuildSourceRef
@@ -187,6 +188,13 @@ class AbiSnapshot:
     # a C parse, no declared public set, an older dump). Persisted as the
     # ``abicheck.cxx_concept_constraints`` extension fact of the debug section.
     cxx_concept_constraints: dict[str, str] | None = field(default=None, kw_only=True)
+    # Public headers' template-parameter defaults (model/template_default_table.py),
+    # read from the clang AST by both header backends; None: not modelled (no
+    # clang join, a C parse, no public set, an older dump). Extension fact
+    # ``abicheck.cxx_template_defaults`` of the debug section.
+    cxx_template_defaults: dict[str, TemplateDefaults] | None = field(
+        default=None, kw_only=True
+    )
 
     # CastXML version-gate outcome (schema v13, ``castxml_policy.py``). None on
     # snapshots not produced by a version-gated CastXML L2 scan (older

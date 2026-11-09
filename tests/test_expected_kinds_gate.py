@@ -26,8 +26,8 @@ import tests.validate_examples as ve  # noqa: E402
 
 _REAL_CURRENT_TARGET = gate.current_target  # before the autouse fixture patches it
 
-_HEADING = "A header-only default template-argument change"
-_HEADINGS = (f"{_HEADING} reads `NO_CHANGE` at L2 on castxml (2026-10-21)",)
+_HEADING = "Without clang, castxml's template-default fallback"
+_HEADINGS = (f"{_HEADING} misses a macro-spelled default (2026-11-09)",)
 _KINDS = ("a_kind", "b_kind", "c_kind")
 _EXPECTED = ["a_kind", "b_kind"]
 _ABSENT = ["c_kind"]

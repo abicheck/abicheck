@@ -37,6 +37,7 @@ from .model.abi_fundamental import AbiFundamental
 from .model.fact import Fact
 from .model.identity import EntityId
 from .model.semantic_ir import SemanticIR
+from .model.template_default_table import TemplateDefaults
 
 
 @dataclass(frozen=True)
@@ -90,6 +91,7 @@ class TuFragment:
     # The clang parse's concept/template-constraint table
     # (extract/headers/clang/concept_constraints.py); None = not modelled.
     cxx_concept_constraints: dict[str, str] | None = None
+    cxx_template_defaults: dict[str, TemplateDefaults] | None = None
 
 
 @dataclass(frozen=True)
@@ -134,6 +136,7 @@ class MergedTuFragments:
     #: Single-TU only, like ``preprocessor_hidden``: None (not modelled, the
     #: concept gap stays named) after a multi-TU merge.
     cxx_concept_constraints: dict[str, str] | None = None
+    cxx_template_defaults: dict[str, TemplateDefaults] | None = None
 
 
 def entity_key(kind: str, name: str) -> tuple[str, str]:

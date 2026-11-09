@@ -15,15 +15,15 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 
 ## Headline
 
-- Total kinds: **426**
-- Kinds with at least one real source: **181**
-- Kinds per source: catalog 160, field_shapes 9, integration 60
+- Total kinds: **427**
+- Kinds with at least one real source: **182**
+- Kinds per source: catalog 160, field_shapes 9, integration 61
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
 | L0 | 129 | 73 |
 | L1 | 62 | 7 |
-| L2 | 74 | 42 |
+| L2 | 75 | 42 |
 | L3 | 15 | 5 |
 | L4 | 10 | 2 |
 | L5 | 15 | 5 |
@@ -287,6 +287,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `func_return_pointee_qualifier_removed` | RISK | 0 | 0 | 1 |
 | `func_variadic_added` | BREAKING | 0 | 0 | 0 |
 | `func_variadic_removed` | BREAKING | 0 | 0 | 0 |
+| `func_virtual_noexcept_added` | API_BREAK | 0 | 0 | 1 |
 | `func_virtual_removed` | BREAKING | 1 | 0 | 0 |
 | `header_binary_context_mismatch` | RISK | 0 | 0 | 0 |
 | `header_only_function_params_changed` | API_BREAK | 1 | 0 | 1 |

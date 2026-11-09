@@ -54,6 +54,7 @@ _BELOW_HEADERS = _BELOW_BUILD | {
     "python_api",
     "contract",
     "cxx_concept_constraints",
+    "cxx_template_defaults",
     "from_headers",
     "declarations.types",
     "declarations.enums",

@@ -49,6 +49,7 @@ from typing import Any
 
 from .castxml_array_migration import migrate_castxml_array_counts
 from .castxml_base_offset_migration import migrate_castxml_base_offsets
+from .castxml_noexcept_migration import migrate_castxml_noexcept
 from .clang_vtable_base_migration import migrate_clang_vtable_bases
 from .versioning import (
     EXTRACTOR_GENERATION,
@@ -122,6 +123,10 @@ class GenerationSpellingChange:
     reason: str
     rewrites: tuple[tuple[str, str], ...] = ()
     extent_shift: int = 0
+    #: This generation also declares a load-time rewrite of stored *facts*
+    #: (not spellings), such as ``castxml_noexcept_migration.py``: a document
+    #: from before it re-encodes to different bytes by design.
+    migrates_facts: bool = False
     restores_erased_extents: bool = False
 
 
@@ -495,6 +500,30 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "spellings differ only by that erasure (policy/generation_drift_demotion)",
         restores_erased_extents=True,
     ),
+    46: GenerationSpellingChange(
+        "no type or name spelling changes. castxml runs read a function's "
+        "noexcept specification and the public headers' C++20 concept and "
+        "template constraints from the clang AST of the same header "
+        "(extract/headers/castxml/clang_semantics_join.py), where castxml "
+        "stored is_noexcept=False for every function and no constraint table; "
+        "a function whose header spells a specification the join could not "
+        "read stores is_noexcept=None (not observed). "
+        "castxml_noexcept_migration.py loads a pre-46 castxml snapshot's C++ "
+        "is_noexcept=False as None, so an older baseline reports no "
+        "func_noexcept_added for an unchanged noexcept function; its missing "
+        "constraint table already reads as not modelled",
+        migrates_facts=True,
+    ),
+    47: GenerationSpellingChange(
+        "no type or name spelling changes. castxml and clang runs set "
+        "cxx_template_defaults (the public headers' template-parameter "
+        "defaults of every class, function, alias and variable template, read "
+        "from the clang AST: extract/headers/clang/template_default_entries.py; "
+        "castxml through castxml/clang_semantics_join.py) where it was unset; "
+        "no rewrite is needed -- an older snapshot reads as not modelled, so a "
+        "castxml side keeps its header-scan gap note and a clang side its "
+        "alias/variable-template gap note"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.
@@ -712,6 +741,7 @@ def migrate_and_describe(
         notices.extend(migrate_castxml_array_counts(document, extractor)[1])
         notices.extend(migrate_castxml_base_offsets(document, extractor)[1])
         notices.extend(migrate_clang_vtable_bases(document, extractor)[1])
+        notices.extend(migrate_castxml_noexcept(document, extractor)[1])
     if spellings >= EXTRACTOR_GENERATION:
         return document, generations, previous, tuple(notices)
     migrated, spelling_notices = _migrate_spellings(document, spellings)
@@ -722,4 +752,6 @@ def migrate_and_describe(
     notices.extend(offset_notices)
     migrated, vtable_notices = migrate_clang_vtable_bases(migrated, spellings)
     notices.extend(vtable_notices)
+    migrated, noexcept_notices = migrate_castxml_noexcept(migrated, spellings)
+    notices.extend(noexcept_notices)
     return migrated, generations, EXTRACTOR_GENERATION, tuple(notices)

@@ -15,13 +15,15 @@
 
 """Assurance gap for C++20 concepts and requires-clauses.
 
-castxml does not model a concept definition or a ``requires`` constraint,
-so a tightened concept reads ``NO_CHANGE`` there. A castxml or clang
-snapshot records whether its public headers declare one
-(``AbiSnapshot.cxx_concept_header_scan``); when a side does and did not model
-them (``AbiSnapshot.cxx_concept_constraints is None`` -- castxml, a multi-TU
-merge, no declared public set), the constraints are an unobserved dimension
-and the rollup reads ``partial``. A clang side that modelled them
+castxml emits no element for a concept or an uninstantiated template; its
+backend reads the constraint table from the clang AST of the same header, so
+without clang a tightened concept would read ``NO_CHANGE`` there. A castxml or
+clang snapshot records whether its public headers declare a concept, a
+``requires``-clause or a type-constraint (``AbiSnapshot.cxx_concept_header_scan``);
+when either side does, every side that did not model constraints
+(``AbiSnapshot.cxx_concept_constraints is None`` -- castxml without its clang
+join, a multi-TU merge, no declared public set) is an unobserved dimension and
+the rollup reads ``partial``. A side that modelled them
 (``compare/concept_constraints.py`` compares the tables) names no gap.
 Like ``_template_defaults``, this is a coverage gap, never a verdict.
 """
@@ -54,20 +56,29 @@ def _sides(
 def concept_constraint_findings(
     old: AbiSnapshot | None, new: AbiSnapshot
 ) -> list[UnobservedFinding]:
-    """One finding per side whose public headers declare a concept or a
-    requires-clause its header backend did not model, or whose headers
-    could not be read to rule one out."""
+    """One finding per side that did not model constraints while either
+    side's public headers declare a concept or a requires-clause (or could
+    not be read to rule one out). The other side counts too: a
+    requires-clause *added* to a template leaves the old headers spelling
+    none, and an unmodelled old side then hides the tightening as surely as
+    an unmodelled new one."""
+    sides = _sides(old, new)
+    constrained = any(
+        snap is not None and snap.cxx_concept_header_scan for _, snap in sides
+    )
+    if not constrained:
+        return []
     return [
         UnobservedFinding(
             CONCEPT_GAP_DIMENSION,
             label,
-            f"{CONCEPT_GAP_DIMENSION}: the public headers of the {label} snapshot "
-            "declare a concept or a requires-clause (or could not be read to rule "
-            "one out), so a change to a template "
-            "constraint is not assessed",
+            f"{CONCEPT_GAP_DIMENSION}: the {label} snapshot did not model C++20 "
+            "constraints while the compared public headers declare a concept or a "
+            "requires-clause (or could not be read to rule one out), so a change "
+            "to a template constraint is not assessed",
         )
-        for label, snap in _sides(old, new)
+        for label, snap in sides
         if snap is not None
-        and snap.cxx_concept_header_scan
+        and snap.cxx_concept_header_scan is not None
         and getattr(snap, "cxx_concept_constraints", None) is None
     ]

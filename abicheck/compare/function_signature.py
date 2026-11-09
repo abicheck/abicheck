@@ -75,6 +75,7 @@ from ..name_classification import (
 )
 from .declined_comparisons import record_declined
 from .detection_memo import memoized
+from .noexcept_change import noexcept_changes
 from .parameter_facts import ParameterView, parameter_view
 from .typedef_respelling import all_respelled
 
@@ -493,33 +494,6 @@ def _check_linkage_change(
     ]
 
 
-def _check_noexcept_change(
-    mangled: str,
-    name: str,
-    old: FunctionSignature,
-    new: FunctionSignature,
-    entity_id: EntityId | None,
-) -> list[Change]:
-    """Emit a change if the noexcept specifier was added or removed."""
-    if old.is_noexcept is None or new.is_noexcept is None:
-        _decline_flag(mangled, "noexcept specifier", old.is_noexcept, new.is_noexcept)
-        return []
-    return bool_transition(
-        old.is_noexcept,
-        new.is_noexcept,
-        mangled,
-        added=(
-            ChangeKind.FUNC_NOEXCEPT_ADDED,
-            f"noexcept specifier added: {name}",
-        ),
-        removed=(
-            ChangeKind.FUNC_NOEXCEPT_REMOVED,
-            f"noexcept specifier removed: {name}",
-        ),
-        entity_id=entity_id,
-    )
-
-
 def _check_virtual_change(
     mangled: str,
     name: str,
@@ -782,7 +756,7 @@ def function_signature_changes(
     changes += _ref_qualifier_changes(mangled, name, old, new, entity_id)
     for check in (
         _check_linkage_change,
-        _check_noexcept_change,
+        noexcept_changes,
         _check_virtual_change,
         hidden_friend_changes,
         _check_explicit_change,

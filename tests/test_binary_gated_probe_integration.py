@@ -234,6 +234,14 @@ PROBES: dict[str, Probe] = {
         "int f(int x) { return x; }",
         header_reaches=False,  # producer is L4 source replay, not castxml
     ),
+    # castxml reads the specification from its clang join (generation 46);
+    # DWARF records no exception specification at all.
+    "func_virtual_noexcept_added": _inline(
+        "struct S { virtual ~S(); virtual int area() const; int w; };",
+        "struct S { virtual ~S(); virtual int area() const noexcept; int w; };",
+        "S::~S() {}\nint S::area() const { return w; }",
+        "S::~S() {}\nint S::area() const noexcept { return w; }",
+    ),
     "public_macro_removed": _inline(
         "#define LIB_MAX 8\nint f(int);",
         "int f(int);",
@@ -336,7 +344,7 @@ UNPROBED: dict[str, str] = {
 }
 
 #: ``BINARY_GATED`` probes whose binary-only (DWARF, no headers) run produces
-#: the kind (probed with gcc at -O0 -g). Since extractor generation 45 a
+#: the kind (probed with gcc at -O0 -g). Since extractor generation 46 a
 #: binary-only dump records C++ member and namespace-scope functions from
 #: their debug declarations, so a method's access, ``explicit``, const
 #: overload and namespace are read from DWARF too. The other ``BINARY_GATED``

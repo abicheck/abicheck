@@ -1,20 +1,17 @@
 # Case 224: Header-Only Template Default Added
 
-**Category:** Template ABI | **Verdict:** 🟢 NO_CHANGE (castxml) / 🟠 API_BREAK (clang)
+**Category:** Template ABI | **Verdict:** 🟢 NO_CHANGE (both backends)
 
 ## Verdict and consumer impact
 
 v1 declares `template <typename T, typename U> struct Box;` with no default for
 `U`. v2 adds `U = int`. Source that already spells both arguments still compiles.
-Source that relies on the single-argument form `Box<char>` starts to compile and
-selects `Box<char, int>`, so the meaning of existing code can change. No symbol
-depends on the default, so there is no binary break.
+The single-argument form `Box<char>` was ill-formed against v1, so no existing
+code can have used it: every previously valid spelling keeps its meaning. No
+symbol depends on the default, so there is no binary break either.
 
-On the default castxml lane the run reads `NO_CHANGE`, with the template-default
-assurance gap. clang records that v1 had no default and that v2 has `int`, and
-reports `template_param_default_changed` as `API_BREAK`.
-
-## Old/new diff
+Both header backends record that v1 had no default and v2 has `int`, and read the
+pure addition as `NO_CHANGE` with no template-default gap. castxml writes no record for an uninstantiated template, so the castxml backend reads the defaults from the clang AST of the same header (its clang join), as the clang backend does. Without clang, a castxml run reads `NO_CHANGE` with run status partial and the gap `template-parameter defaults (castxml cannot record them)`.
 
 ## Old/new diff
 
@@ -35,24 +32,25 @@ abicheck dump -H v2.h --config .abicheck.yml --depth headers -o new.json
 abicheck compare old.json new.json
 ```
 
-Switch `frontend: clang` to see the clang result.
+`frontend: clang` gives the same result.
 
 ## Expected abicheck finding
 
-castxml (default): `Verdict: NO_CHANGE`, `Assurance: partial` with the gap
-`template-parameter defaults (castxml cannot record them)`.
-
-clang: `Verdict: API_BREAK`, `template_param_default_changed`.
+castxml (default) and clang: `Verdict: NO_CHANGE`, no
+`template_param_default_changed`, no template-default gap.
 
 ## Minimum evidence
 
 `min_evidence: L2`, the public header.
 
-## Why abicheck catches it
+## Why abicheck reads it as compatible
 
 The `None`-to-spelling transition is a difference in the recorded per-parameter
-defaults (`compare/template_param_defaults.py`). It is compared like any other
-spelling change, and it is never a clean match with an UNKNOWN side.
+defaults, but one that only adds a default. For a class, alias or variable
+template that changes no valid spelling, so it is not reported. A function
+template's added default is reported, because it can make the template viable
+for a call that an overload served before. A side whose defaults were not
+recorded never compares clean against a recorded one.
 
 ## Runtime failure demonstration
 

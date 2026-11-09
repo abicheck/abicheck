@@ -27,7 +27,9 @@ It is a text heuristic over the headers the parse was given. Comments and
 string/character literals are removed in one lexical pass, so a ``"/*"``
 inside a string does not open a comment, and a ``#if 0`` ... ``#endif``
 block (the one provably inactive branch a text scan can name) is skipped.
-A macro that expands to ``concept``/``requires`` is not seen, and a header
+A type-constraint (``template <std::integral T>``, ``std::integral auto``)
+counts too; so does a non-type parameter of a user type, which the text
+cannot tell apart from one. A macro that expands to ``concept``/``requires`` is not seen, and a header
 included indirectly is not read; both make the scan say ``False`` (no gap
 reported), never a clean pass. A header that cannot be read makes the scan
 ``True``: it cannot rule a concept out, so the dimension is named. A ``#define`` line is
@@ -100,12 +102,128 @@ def _drop_if0_blocks(code: str) -> str:
     return "\n".join(out)
 
 
+#: A constrained placeholder: ``std::integral auto``, ``C<int> auto``. The
+#: specifiers that can stand before a plain ``auto`` do not count.
+_CONSTRAINED_AUTO = re.compile(
+    r"(?<![\w:])((?:::)?[A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)(?:<[^;{}()]*?>)?\s+auto\b"
+)
+_AUTO_SPECIFIERS = frozenset(
+    {
+        "const",
+        "volatile",
+        "static",
+        "inline",
+        "constexpr",
+        "consteval",
+        "constinit",
+        "extern",
+        "virtual",
+        "friend",
+        "return",
+        "typedef",
+        "mutable",
+        "thread_local",
+        "explicit",
+        "register",
+        "else",
+        "do",
+        "case",
+        "co_return",
+        "co_yield",
+        "throw",
+        "typename",
+        "using",
+    }
+)
+#: ``template <`` -- the start of a template parameter list.
+_TEMPLATE_HEAD = re.compile(r"\btemplate\s*<")
+#: A parameter that is a type or a non-type parameter of a builtin type.
+_PLAIN_PARAM_HEAD = frozenset(
+    {
+        "typename",
+        "class",
+        "template",
+        "auto",
+        "bool",
+        "char",
+        "char8_t",
+        "char16_t",
+        "char32_t",
+        "wchar_t",
+        "short",
+        "int",
+        "long",
+        "signed",
+        "unsigned",
+        "float",
+        "double",
+        "const",
+        "volatile",
+        "decltype",
+        "size_t",
+        "std::size_t",
+        "ptrdiff_t",
+        "std::ptrdiff_t",
+        "nullptr_t",
+        "std::nullptr_t",
+    }
+)
+_PARAM_HEAD = re.compile(
+    r"\s*((?:::)?[A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)\b\s*(?:<[^,]*>)?\s*(?:\.\.\.)?\s*[A-Za-z_]"
+)
+
+
+def _template_params(code: str, start: int) -> list[str]:
+    """The top-level parameters of the template list opening at *start*."""
+    depth = 1
+    params: list[str] = []
+    current: list[str] = []
+    for ch in code[start:]:
+        if ch == "<" or ch == "(":
+            depth += 1
+        elif ch in ">)":
+            depth -= 1
+            if depth == 0:
+                break
+        elif ch == "," and depth == 1:
+            params.append("".join(current))
+            current = []
+            continue
+        elif ch in ";{":
+            return []
+        current.append(ch)
+    params.append("".join(current))
+    return params
+
+
+def _spells_type_constraint(code: str) -> bool:
+    """Whether *code* constrains a template parameter (``template <C T>``) or
+    an ``auto`` placeholder (``C auto``). A parameter whose head is not
+    ``typename``/``class`` or a builtin type counts -- a non-type parameter
+    of a user type (``template <Color C>``) does too: the scan errs toward
+    naming the dimension, never toward a clean pass."""
+    for m in _CONSTRAINED_AUTO.finditer(code):
+        if m.group(1) not in _AUTO_SPECIFIERS:
+            return True
+    for m in _TEMPLATE_HEAD.finditer(code):
+        for param in _template_params(code, m.end()):
+            head = _PARAM_HEAD.match(param)
+            if head is not None and head.group(1) not in _PLAIN_PARAM_HEAD:
+                return True
+    return False
+
+
 def header_declares_concept_or_requires(text: str) -> bool:
-    """Whether the header *text* defines a concept or spells a ``requires``
-    clause or expression outside comments, string literals, ``#if 0``
+    """Whether the header *text* defines a concept, spells a ``requires``
+    clause or expression, or constrains a template parameter or ``auto``
+    placeholder with a concept, outside comments, string literals, ``#if 0``
     blocks and preprocessor directives."""
     code = _DIRECTIVE.sub(" ", _drop_if0_blocks(_strip_lexemes(text)))
-    return bool(_CONCEPT_DEFINITION.search(code) or _REQUIRES.search(code))
+    return bool(
+        _CONCEPT_DEFINITION.search(code)
+        or _REQUIRES.search(code)
+        or _spells_type_constraint(code)
+    )
 
 
 def concept_header_scan(paths: Iterable[str | Path]) -> bool:

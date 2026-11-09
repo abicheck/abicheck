@@ -261,17 +261,6 @@
    "frontend_kind_differences": [
     {
      "kinds": [
-      "concept_tightened"
-     ],
-     "only_in": "clang",
-     "modes": [
-      "debug-headers"
-     ],
-     "reason": "castxml emits no element for a concept, so its header lane cannot model the constraint; build-source reports concept_tightened on both frontends through L4 replay",
-     "known_gap": "Catalog known-gap rows read `NO_CHANGE` at debug-headers depth: case105 on castxml (concept) and case98 (`-std` floor) (2026-11-05)"
-    },
-    {
-     "kinds": [
       "exported_not_public"
      ],
      "only_in": "clang",
@@ -283,15 +272,11 @@
    "api_break": true,
    "bad_practice": false,
    "category": "api_break",
-   "description": "A C++20 `concept` (`Addable`) gains an additional requirement (default-constructibility). Already-shipped binary instantiations keep linking, but consumers instantiating `sum<T>` for types that fail the tightened constraint no longer compile. The canonical truth is API_BREAK. It is missed by object/DWARF-only and header/castxml comparison (castxml emits concepts as `<Unimplemented kind=\"Concept\"/>`, no name, no body). The clang header backend models concepts and template constraints (AbiSnapshot.cxx_concept_constraints) and reports `concept_tightened` (API_BREAK) at header depth, as does L4 source-ABI replay when that opt-in evidence is supplied.",
+   "description": "A C++20 `concept` (`Addable`) gains an additional requirement (default-constructibility). Already-shipped binary instantiations keep linking, but consumers instantiating `sum<T>` for types that fail the tightened constraint no longer compile. The canonical truth is API_BREAK. Object/DWARF-only comparison misses it. Both header backends report `concept_tightened` (API_BREAK) at header depth: the clang backend from its own AST (AbiSnapshot.cxx_concept_constraints), the castxml backend from the clang AST of the same header (castxml itself emits concepts as `<Unimplemented kind=\"Concept\"/>`, no name, no body); L4 source-ABI replay reports it too when that opt-in evidence is supplied.",
    "expected": "API_BREAK",
    "expected_absent_kinds": [],
    "expected_kinds": [
     "concept_tightened"
-   ],
-   "known_gap": "castxml-backed header scans cannot observe the C++20 concept constraint because CastXML emits concepts as unnamed <Unimplemented> nodes; their NO_CHANGE verdict is a missed API_BREAK detection caused by insufficient evidence (assurance reads partial with the concept dimension named). The clang header backend models concepts and detects concept_tightened, as does L4 source-ABI replay.",
-   "known_gap_frontends": [
-    "castxml"
    ],
    "min_evidence": "L4",
    "platforms": [
@@ -319,11 +304,6 @@
      ]
     }
    },
-   "known_gap_variants": [
-    "debug-headers",
-    "release-headers",
-    "stripped-headers"
-   ],
    "source_abi_extractor": "clang",
    "source_abi_scope": "headers-only"
   },
@@ -1607,17 +1587,6 @@
    ]
   },
   "case15_noexcept_change": {
-   "expected_kinds_gaps": {
-    "castxml": [
-     {
-      "kinds": [
-       "func_noexcept_removed"
-      ],
-      "reason": "castxml 0.7's XML carries no exception specification for functions or methods (no noexcept attribute), so the castxml header lane cannot observe the noexcept removal; the clang header backend reports func_noexcept_removed.",
-      "known_gap": "castxml output carries no `noexcept` exception specification"
-     }
-    ]
-   },
    "allowed_kinds": [
     "imported_symbol_added",
     "runtime_floor_raised",
@@ -2042,8 +2011,22 @@
     "cet_protection_weakened"
    ],
    "fixture_preconditions": [
-    {"side": "v1", "property": "elf_gnu_property", "includes": ["IBT", "SHSTK"]},
-    {"side": "v2", "property": "elf_gnu_property", "excludes": ["IBT", "SHSTK"]}
+    {
+     "side": "v1",
+     "property": "elf_gnu_property",
+     "includes": [
+      "IBT",
+      "SHSTK"
+     ]
+    },
+    {
+     "side": "v2",
+     "property": "elf_gnu_property",
+     "excludes": [
+      "IBT",
+      "SHSTK"
+     ]
+    }
    ],
    "min_evidence": "L0",
    "platforms": [
@@ -4930,21 +4913,11 @@
    ]
   },
   "case223_header_only_template_default_changed": {
-   "frontend_kind_differences": [
-    {
-     "kinds": [
-      "template_param_default_changed"
-     ],
-     "only_in": "clang",
-     "reason": "castxml emits no uninstantiated template, so the default change is clang-only",
-     "known_gap": "A header-only default template-argument change reads `NO_CHANGE` at L2 on castxml"
-    }
-   ],
    "abi_break": false,
    "api_break": true,
    "bad_practice": false,
    "category": "api_break",
-   "description": "Header-only class template mylib::Box<T, U = int> with its default changed to U = long. Nothing exports or names Box, so no symbol changes and nothing is BREAKING; but consumer source spelling Box<int> now names Box<int, long> (an independent consumer that relies on the field type compiles against v1 and is rejected against v2), so the contract verdict is API_BREAK via template_param_default_changed. castxml cannot observe the change (known_gap_frontends).",
+   "description": "Header-only class template mylib::Box<T, U = int> with its default changed to U = long. Nothing exports or names Box, so no symbol changes and nothing is BREAKING; but consumer source spelling Box<int> now names Box<int, long> (an independent consumer that relies on the field type compiles against v1 and is rejected against v2), so the contract verdict is API_BREAK via template_param_default_changed. Both header backends report it: castxml reads the defaults from the clang AST of the same header (castxml itself emits no uninstantiated template).",
    "expected": "API_BREAK",
    "expected_absent_kinds": [
     "default_template_arg_changed",
@@ -4952,13 +4925,6 @@
    ],
    "expected_kinds": [
     "template_param_default_changed"
-   ],
-   "known_gap": "castxml cannot record template-parameter defaults (ADR-085 D1/D3): on the castxml lane the change reads NO_CHANGE with run status partial and the 'template-parameter defaults (castxml cannot record them)' assurance gap -- a coverage limitation, not a compatibility claim. The clang backend records the defaults and reports the expected kind.",
-   "known_gap_frontends": [
-    "castxml"
-   ],
-   "known_gap_observed": [
-    "NO_CHANGE"
    ],
    "min_evidence": "L2",
    "platforms": [
@@ -5009,34 +4975,17 @@
    ]
   },
   "case225_header_only_template_default_removed": {
-   "frontend_kind_differences": [
-    {
-     "kinds": [
-      "template_param_default_changed"
-     ],
-     "only_in": "clang",
-     "reason": "castxml emits no uninstantiated template, so the default change is clang-only",
-     "known_gap": "A header-only default template-argument change reads `NO_CHANGE` at L2 on castxml"
-    }
-   ],
    "abi_break": false,
    "api_break": true,
    "bad_practice": false,
    "category": "api_break",
-   "description": "Header-only Box<T, U = int>: the default is removed from U. Same header-only shape as case223, in the removal direction: consumer source spelling Box<int> compiles against v1 and is ill-formed against v2, so the contract verdict is API_BREAK via template_param_default_changed. castxml cannot observe the change (known_gap_frontends).",
+   "description": "Header-only Box<T, U = int>: the default is removed from U. Same header-only shape as case223, in the removal direction: consumer source spelling Box<int> compiles against v1 and is ill-formed against v2, so the contract verdict is API_BREAK via template_param_default_changed. Both header backends report it: castxml reads the defaults from the clang AST of the same header (castxml itself emits no uninstantiated template).",
    "expected": "API_BREAK",
    "expected_absent_kinds": [
     "default_template_arg_changed"
    ],
    "expected_kinds": [
     "template_param_default_changed"
-   ],
-   "known_gap": "castxml cannot record template-parameter defaults (ADR-085 D1/D3): on the castxml lane the change reads NO_CHANGE with run status partial and the 'template-parameter defaults (castxml cannot record them)' assurance gap -- a coverage limitation, not a compatibility claim. The clang backend records the defaults and reports the expected kind.",
-   "known_gap_frontends": [
-    "castxml"
-   ],
-   "known_gap_observed": [
-    "NO_CHANGE"
    ],
    "min_evidence": "L2",
    "platforms": [
@@ -5087,21 +5036,11 @@
    ]
   },
   "case227_nested_namespace_template_default_changed": {
-   "frontend_kind_differences": [
-    {
-     "kinds": [
-      "template_param_default_changed"
-     ],
-     "only_in": "clang",
-     "reason": "castxml emits no uninstantiated template, so the default change is clang-only",
-     "known_gap": "A header-only default template-argument change reads `NO_CHANGE` at L2 on castxml"
-    }
-   ],
    "abi_break": false,
    "api_break": true,
    "bad_practice": false,
    "category": "api_break",
-   "description": "The header-only default change of case223 (U = int becomes U = long), with the template in the nested namespace mylib::detail. The qualified-name pairing must match the pattern under its nested scope. Contract verdict API_BREAK via template_param_default_changed; castxml cannot observe the change (known_gap_frontends).",
+   "description": "The header-only default change of case223 (U = int becomes U = long), with the template in the nested namespace mylib::detail. The qualified-name pairing must match the pattern under its nested scope. Contract verdict API_BREAK via template_param_default_changed. Both header backends report it: castxml reads the defaults from the clang AST of the same header (castxml itself emits no uninstantiated template).",
    "expected": "API_BREAK",
    "expected_absent_kinds": [
     "default_template_arg_changed",
@@ -5109,13 +5048,6 @@
    ],
    "expected_kinds": [
     "template_param_default_changed"
-   ],
-   "known_gap": "castxml cannot record template-parameter defaults (ADR-085 D1/D3): on the castxml lane the change reads NO_CHANGE with run status partial and the 'template-parameter defaults (castxml cannot record them)' assurance gap -- a coverage limitation, not a compatibility claim. The clang backend records the defaults and reports the expected kind.",
-   "known_gap_frontends": [
-    "castxml"
-   ],
-   "known_gap_observed": [
-    "NO_CHANGE"
    ],
    "min_evidence": "L2",
    "platforms": [
@@ -5147,34 +5079,17 @@
    }
   },
   "case228_nontype_template_param_default_changed": {
-   "frontend_kind_differences": [
-    {
-     "kinds": [
-      "template_param_default_changed"
-     ],
-     "only_in": "clang",
-     "reason": "castxml emits no uninstantiated template, so the default change is clang-only",
-     "known_gap": "A header-only default template-argument change reads `NO_CHANGE` at L2 on castxml"
-    }
-   ],
    "abi_break": false,
    "api_break": true,
    "bad_practice": false,
    "category": "api_break",
-   "description": "Header-only Buf<T, int N = 4> with its non-type default changed to N = 8. A consumer's Buf<int> changes size (a static_assert on sizeof compiles against v1 and fails against v2), so the contract verdict is API_BREAK via template_param_default_changed; the clang recorder spells non-type defaults (ADR-085 Remaining 3). castxml records nothing (known_gap_frontends).",
+   "description": "Header-only Buf<T, int N = 4> with its non-type default changed to N = 8. A consumer's Buf<int> changes size (a static_assert on sizeof compiles against v1 and fails against v2), so the contract verdict is API_BREAK via template_param_default_changed; the clang recorder spells non-type defaults (ADR-085 Remaining 3). Both header backends report it: castxml reads the defaults from the clang AST of the same header (castxml itself emits no uninstantiated template).",
    "expected": "API_BREAK",
    "expected_absent_kinds": [
     "default_template_arg_changed"
    ],
    "expected_kinds": [
     "template_param_default_changed"
-   ],
-   "known_gap": "castxml cannot record template-parameter defaults (ADR-085 D1/D3): on the castxml lane the change reads NO_CHANGE with run status partial and the 'template-parameter defaults (castxml cannot record them)' assurance gap -- a coverage limitation, not a compatibility claim. The clang backend records the defaults and reports the expected kind.",
-   "known_gap_frontends": [
-    "castxml"
-   ],
-   "known_gap_observed": [
-    "NO_CHANGE"
    ],
    "min_evidence": "L2",
    "platforms": [

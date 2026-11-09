@@ -44,6 +44,7 @@ table.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 from typing import Any
 
@@ -61,7 +62,11 @@ from .ast_inner import ast_inner
 from .constraints import FunctionConstraintIndex
 from .context import is_builtin_file
 
-__all__ = ["collect_cxx_concept_constraints"]
+__all__ = [
+    "collect_cxx_concept_constraints",
+    "concept_constraint_entries",
+    "public_concept_constraints",
+]
 
 
 _SCOPE_KINDS = frozenset({"NamespaceDecl", "CXXRecordDecl"})
@@ -100,6 +105,19 @@ def _node_line(node: dict[str, Any]) -> int | None:
     return None
 
 
+#: A type-constraint before ``auto`` (``std::integral auto``,
+#: ``std::convertible_to<int> auto``), not a cv-qualifier.
+_AUTO_CONSTRAINT = re.compile(
+    r"(?<![\w:])(?!const\b|volatile\b)(?:::)?[A-Za-z_]\w*(?:::[A-Za-z_]\w*)*"
+    r"(?:<[^()]*?>)?\s+(?=auto\b)"
+)
+
+
+def _without_auto_constraints(spelled: str) -> str:
+    """*spelled* with every type-constraint on an ``auto`` placeholder removed."""
+    return _AUTO_CONSTRAINT.sub("", spelled)
+
+
 def _type_param_names(children: list[Any]) -> tuple[str, ...]:
     return tuple(
         str(c.get("name") or "")
@@ -109,19 +127,12 @@ def _type_param_names(children: list[Any]) -> tuple[str, ...]:
 
 
 class _Collector:
-    def __init__(
-        self,
-        root: dict[str, Any],
-        pub_header_segs: list[tuple[str, ...]],
-        pub_dir_segs: list[tuple[str, ...]],
-    ) -> None:
+    def __init__(self, root: dict[str, Any]) -> None:
         self._index = FunctionConstraintIndex(root)
-        self._pub = (pub_header_segs, pub_dir_segs)
-        self.table: dict[str, str] = {}
-        self._ambiguous: set[str] = set()
+        #: ``(key, encoded constraint, declaring header)`` per declaration
+        #: outside a compiler-builtin file, in walk order.
+        self.entries: list[tuple[str, str, str]] = []
         self._walk(root, (), "")
-        for key in self._ambiguous:
-            self.table.pop(key, None)
 
     # -- traversal (pre-order, threading clang's sticky ``loc.file``) --------
 
@@ -149,20 +160,15 @@ class _Collector:
             file = self._walk(child, child_scope, file)
         return file
 
-    def _public(self, node: dict[str, Any], file: str) -> bool:
+    def _header(self, node: dict[str, Any], file: str) -> str:
+        """The declaring header of *node* ("" for a builtin or unknown file)."""
         if not file or is_builtin_file(file):
-            return False
+            return ""
         line = _node_line(node)
-        header = header_from_location(f"{file}:{line}" if line else file)
-        if not header:
-            return False
-        origin = classify_origin(header, *self._pub, have_public_set=True)
-        return origin == ScopeOrigin.PUBLIC_HEADER
+        return header_from_location(f"{file}:{line}" if line else file) or ""
 
-    def _record(self, key: str, value: str) -> None:
-        if self.table.get(key, value) != value:
-            self._ambiguous.add(key)
-        self.table[key] = value
+    def _record(self, key: str, value: str, header: str) -> None:
+        self.entries.append((key, value, header))
 
     # -- concepts ------------------------------------------------------------
 
@@ -173,7 +179,8 @@ class _Collector:
         scope: tuple[str, ...],
         file: str,
     ) -> None:
-        if not self._public(node, file):
+        header = self._header(node, file)
+        if not header:
             return
         names = _type_param_names(children)
         exprs = [c for c in children if _is_expression(c)]
@@ -181,7 +188,7 @@ class _Collector:
         for expr in exprs:
             atoms.extend(self._atoms(expr, names, symbolic_refs=False))
         name = "::".join((*scope, str(node.get("name") or "")))
-        self._record(CONCEPT_KEY_PREFIX + name, encode_conjunctive(atoms))
+        self._record(CONCEPT_KEY_PREFIX + name, encode_conjunctive(atoms), header)
 
     # -- templates -----------------------------------------------------------
 
@@ -211,17 +218,26 @@ class _Collector:
                 constraints.append(child)
             elif ckind in _FUNCTION_KINDS or ckind == "CXXRecordDecl":
                 pattern = pattern or child
-        if pattern is None or not self._public(node, _node_file(pattern, file)):
+        header = (
+            "" if pattern is None else self._header(node, _node_file(pattern, file))
+        )
+        if pattern is None or not header:
             return
         name = "::".join((*scope, str(node.get("name") or "")))
         if kind == "FunctionTemplateDecl":
             constraints.extend(c for c in ast_inner(pattern) if _is_expression(c))
-            spelled = str((pattern.get("type") or {}).get("qualType", ""))
+            # The key is the template's identity, not its constraint: an
+            # abbreviated template's ``std::integral auto`` parameter is
+            # spelled ``auto`` here, so constraining it pairs with the
+            # unconstrained ``auto`` and is compared as a tightening.
+            spelled = _without_auto_constraints(
+                str((pattern.get("type") or {}).get("qualType", ""))
+            )
             name += f"({canonicalize_type_param_references(spelled, names)})"
         atoms: list[str] = []
         for expr in constraints:
             atoms.extend(self._atoms(expr, names, symbolic_refs=True))
-        self._record(TEMPLATE_KEY_PREFIX + name, encode_conjunctive(atoms))
+        self._record(TEMPLATE_KEY_PREFIX + name, encode_conjunctive(atoms), header)
 
     # -- atoms ---------------------------------------------------------------
 
@@ -260,6 +276,38 @@ class _Collector:
         yield _digest("atom", self._index.serialize(expr, names))
 
 
+def concept_constraint_entries(root: dict[str, Any]) -> list[tuple[str, str, str]]:
+    """Every concept and template constraint of a clang ``-ast-dump=json``
+    root, as ``(key, encoded constraint, declaring header)``, before any
+    public-set filtering. JSON-serializable, so a castxml run can carry the
+    entries of its clang join and filter them by its own public set."""
+    return list(_Collector(root).entries)
+
+
+def public_concept_constraints(
+    entries: list[tuple[str, str, str]],
+    pub_header_segs: list[tuple[str, ...]],
+    pub_dir_segs: list[tuple[str, ...]],
+) -> dict[str, str]:
+    """The table of the *entries* declared in a public header. A key two
+    public declarations give different constraints is ambiguous and left
+    out."""
+    table: dict[str, str] = {}
+    ambiguous: set[str] = set()
+    for key, value, header in entries:
+        origin = classify_origin(
+            header, pub_header_segs, pub_dir_segs, have_public_set=True
+        )
+        if origin != ScopeOrigin.PUBLIC_HEADER:
+            continue
+        if table.get(key, value) != value:
+            ambiguous.add(key)
+        table[key] = value
+    for key in ambiguous:
+        table.pop(key, None)
+    return dict(sorted(table.items()))
+
+
 def collect_cxx_concept_constraints(
     root: dict[str, Any] | None,
     pub_header_segs: list[tuple[str, ...]],
@@ -270,4 +318,6 @@ def collect_cxx_concept_constraints(
     when it cannot be modelled (no AST, or no declared public set)."""
     if not isinstance(root, dict) or not have_public_set:
         return None
-    return dict(sorted(_Collector(root, pub_header_segs, pub_dir_segs).table.items()))
+    return public_concept_constraints(
+        concept_constraint_entries(root), pub_header_segs, pub_dir_segs
+    )

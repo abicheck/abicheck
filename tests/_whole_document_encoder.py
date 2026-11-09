@@ -11,6 +11,7 @@ from typing import Any
 
 from abicheck.model import AbiSnapshot
 from abicheck.storage import snapshot_encode as se
+from abicheck.storage.extension_facts import sync_model_extension_facts
 from abicheck.storage.sectioned_document import to_sectioned_document
 from abicheck.storage.snapshot_schema_versions import SCHEMA_VERSION
 from abicheck.storage.wire_extensions import (
@@ -20,7 +21,9 @@ from abicheck.storage.wire_extensions import (
 
 
 def whole_sectioned_document(snap: AbiSnapshot) -> dict[str, Any]:
-    """The sectioned document, built whole (the pre-A2.2 write path)."""
+    """The sectioned document, built whole (the pre-A2.2 write path). Like
+    every write path, it records the model's extension facts first."""
+    sync_model_extension_facts(snap)
     refuse_unwritable_extensions(snap)
     return to_sectioned_document(
         se._snapshot_to_dict(snap, se._encode_value_sorted),

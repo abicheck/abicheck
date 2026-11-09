@@ -76,18 +76,15 @@ L4 source-ABI replay: Verdict: API_BREAK (exit 2)
 
 ## Minimum evidence
 
-`min_evidence: L4` — L0–L2 artifact/header scans cannot observe the
-constraint tightening: the binary is unaffected (same exported symbol,
-same instantiation), and the default header-AST backend (castxml is the
-documented reference; this sandbox has no castxml installed, but the
-gap is backend-independent — see below) emits C++20 `concept` declarations
-as an unnamed, bodyless node with no link to the templates that use it, so
-there's nothing to diff at the header level either. Only the L4 source-ABI
-replay layer (`--sources`/`--build-info`, a clang-AST-based extractor that
-walks the real `ConceptDecl` node and hashes its constraint expression)
-carries the fact abicheck needs. This is verified above against this
-case's real `v1.h`/`v2.h` — the L4 run reports `concept_tightened` with
-verdict `API_BREAK`, matching `ground_truth.json` exactly.
+`min_evidence: L4` — the binary is unaffected (same exported symbol, same
+instantiation), so L0/L1 artifact scans cannot observe the tightening. At
+L2 both header backends report it: the clang backend models concepts and
+template constraints from its own AST, and the castxml backend (castxml
+itself emits a C++20 `concept` as an unnamed, bodyless node) reads the same
+table from the clang AST of the same header; without clang, a castxml run
+reads `partial` and names the concept dimension. The ground-truth floor
+stays `L4` because the L4 source-ABI replay (`--sources`/`--build-info`)
+reports it whichever header backend runs.
 
 ## Why abicheck catches it
 
@@ -96,10 +93,12 @@ the same clang AST used by the L4 replay path and records each concept's
 name plus a hash of its `requires`-expression body.
 `abicheck/buildsource/source_diff.py`'s concept diff compares that hash
 across versions and reports `ChangeKind.CONCEPT_TIGHTENED` (API_BREAK) when
-it changes — a source-level fact no artifact/header comparison can reach,
-because concepts are pure compile-time constraints with no representation
-in the compiled binary or (for either backend tested here) the header-level
-AST.
+it changes. Concepts are pure compile-time constraints with no
+representation in the compiled binary, so only a clang AST carries them: the
+L4 replay's, and at L2 the header backends' (`extract/headers/clang/
+concept_constraints.py`, joined onto castxml runs by
+`extract/headers/castxml/clang_semantics_join.py`), compared by
+`compare/concept_constraints.py`.
 
 ## Runtime failure demonstration
 

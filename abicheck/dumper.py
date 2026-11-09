@@ -857,7 +857,7 @@ def _dump_elf(
         dwarf_layout_coherence=_dwarf_layout_coherence,
         dwarf_layout_coherence_mismatches=_dwarf_layout_coherence_mismatches,
         live_preprocessor_hidden=ast_result.preprocessor_hidden,
-        cxx_concept_constraints=ast_result.cxx_concept_constraints,
+        **ast_result.clang_ast_tables(),
         **_ast_compile_provenance(
             list(ast_result.provenance_headers),
             gcc_options,
@@ -1022,7 +1022,7 @@ def _dump_macho(
             typedef_entity_ids=_ast.typedef_entity_ids,
             constant_entity_ids=_ast.constant_entity_ids,
             semantic_ir=_ast.semantic_ir,
-            cxx_concept_constraints=_ast.cxx_concept_constraints,
+            **_ast.clang_ast_tables(),
             macho=macho_meta,
             # Only reached with headers parsed (no-header returns earlier).
             from_headers=True,
@@ -1160,7 +1160,7 @@ def _dump_pe(
             typedef_entity_ids=_ast.typedef_entity_ids,
             constant_entity_ids=_ast.constant_entity_ids,
             semantic_ir=_ast.semantic_ir,
-            cxx_concept_constraints=_ast.cxx_concept_constraints,
+            **_ast.clang_ast_tables(),
             pe=pe_meta,
             # Only reached with headers parsed (no-header returns earlier).
             from_headers=True,
