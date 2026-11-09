@@ -40,6 +40,7 @@ from ..model.export_read import ExportReadState
 from ..model.fact import Fact
 from .canonical import canonical_form
 from .extension_fact_catalog import (
+    CU_STACK_PROTECTOR,
     CXX_CONCEPT_CONSTRAINTS,
     CXX_CONCEPT_HEADER_SCAN,
     CXX_TEMPLATE_DEFAULTS,
@@ -227,6 +228,12 @@ def sync_model_extension_facts(snap: Any) -> None:
         write_extension_fact(snap, CXX_TEMPLATE_DEFAULTS, defaults)
     elif defaults is None:
         _drop_extension_fact(snap, CXX_TEMPLATE_DEFAULTS)
+    census = getattr(snap, "cu_stack_protector", None)
+    if isinstance(census, dict) and census:
+        write_extension_fact(snap, CU_STACK_PROTECTOR, census)
+    elif not census:
+        # None or {}: no unit is claimed, so a stale stored census must go.
+        _drop_extension_fact(snap, CU_STACK_PROTECTOR)
     encode_noexcept_unobserved(snap)
 
 
@@ -317,6 +324,7 @@ def apply_model_extension_facts(snap: Any) -> None:
     not decode is refused rather than read as that no-gap answer."""
     apply_export_read_fact(snap)
     _apply_concept_constraints(snap)
+    _apply_stack_protector_census(snap)
     _apply_template_defaults(snap)
     decode_noexcept_unobserved(snap)
     scan = read_extension_fact(snap, CXX_CONCEPT_HEADER_SCAN)
@@ -350,6 +358,24 @@ def _apply_concept_constraints(snap: Any) -> None:
     raise SnapshotError(
         "snapshot's cxx_concept_constraints extension fact is unreadable: "
         + "; ".join(str(d) for d in table.diagnostics)
+    )
+
+
+def _apply_stack_protector_census(snap: Any) -> None:
+    """Restore ``cu_stack_protector``. Missing or blocked leaves it ``None``
+    (no unit read: a lost canary's cause stays unknown); a stored value that
+    does not decode is refused rather than read as that unknown."""
+    census = read_extension_fact(snap, CU_STACK_PROTECTOR)
+    if census.status is FactStatus.PRESENT and isinstance(census.value, dict):
+        snap.cu_stack_protector = census.value
+        return
+    if census.status is FactStatus.NOT_COLLECTED:
+        return
+    if _blocked_reason(snap, CU_STACK_PROTECTOR.section) is not None:
+        return
+    raise SnapshotError(
+        "snapshot's cu_stack_protector extension fact is unreadable: "
+        + "; ".join(str(d) for d in census.diagnostics)
     )
 
 

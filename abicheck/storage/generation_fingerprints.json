@@ -5,10 +5,10 @@
       "abicheck/ctf_metadata.py": "42d3f588c6c4567c2a9d43a3ef5b886a753c37dd5357a4199d81d7ffc60d2109",
       "abicheck/dumper.py": "b7c21a8d7cdad074634f37ff9d827cb2c0658cc08db5e19bf146e9748f10a566",
       "abicheck/dumper_clang.py": "0ee5831454abd776a07706b7c9a69d6fa3136dad37890f70e4103f4c940f3d05",
-      "abicheck/dwarf_advanced.py": "91cfc7f410a37e7d7ba3ec922ff2944b81253fde3dcfdb806be032087822b339",
+      "abicheck/dwarf_advanced.py": "3b75113e5d03388ed2740a361a0f618bccb323c9d50bffc7bf39981ac7d20dc1",
       "abicheck/dwarf_metadata.py": "a0621cde6559a0395b00d08aa25cc4cbff74b1121e2083e424e472c44b985512",
       "abicheck/dwarf_presence.py": "7e73580ec7a02fdf24e3815cb89e42aa6fe00e46e8cda6b7fe9d547f06ac3f06",
-      "abicheck/dwarf_snapshot.py": "87ec9da04392474a45d855ef6c6c7e2b849d21cc6ea0d0acd1d13834474ab09d",
+      "abicheck/dwarf_snapshot.py": "894c4cdf25aa5874f09a3bfbe35c5d41fa5cff421f3be51befc31273929e8e24",
       "abicheck/dwarf_snapshot_datasources.py": "e337f8be3a8ae16350c0639d0be10670d4d5d1197108659fa210fcbbf8a5bdde",
       "abicheck/dwarf_unified.py": "9ecb70b59bb26674ac98ba14ad1211b4103e3a78426a91ed7901e59f1a7d9cdf",
       "abicheck/dwarf_utils.py": "804ffe3cfa507b305ca7ff206fee70957e23e20f7eabd7c05eaa1e45a7f3bd8f",
@@ -20,7 +20,7 @@
       "abicheck/extract/binary_dialect.py": "be8a71c557287ee47f63a49ea98306ac2d44877987cbadd9a554bd3f50119bc2",
       "abicheck/extract/binary_format.py": "4b9f591077fa5c90d2e3a767343d92b098061870403d431694470bc05e5468b3",
       "abicheck/extract/binary_identity.py": "4645eaf3dddd0a2230a5c694882548476406c57514275fa4c8c1bc152607ca88",
-      "abicheck/extract/build_mode_capture.py": "7a46c5babcc5bf770a1a38d5a5d3abb49a2b7d9575bda2b210d2e2861ebfb51f",
+      "abicheck/extract/build_mode_capture.py": "8391e4e27b5bb68b7bdd7e3d4bbc7feee5244607507a57f35bd08a90c308ac48",
       "abicheck/extract/builtin_abi.py": "e3f1d24f44d15016e686849a5481a80c271755ec573705226e65874a16fb4da9",
       "abicheck/extract/cache_dep_manifest.py": "b5eac3407ab1506a05647c8b61c33f60eda3789edfab9549c0b57ec20651e08b",
       "abicheck/extract/cache_digest_store.py": "c333f2bf9170d5c87c011f434d3638c944edf07e9670fd4cb84e2f73ac0775f1",
@@ -47,11 +47,13 @@
       "abicheck/extract/dwarf_decl_file.py": "a585b6e38dc879b04db4b3d70a8b7131774a8b735df1068e6baafcaac934af42",
       "abicheck/extract/dwarf_layout_backfill.py": "3dcc9efb8907b6b3419b09b1c262f64403a5162148bc3be0a5d51e112ef69a4d",
       "abicheck/extract/dwarf_member_functions.py": "7ee2f77769f2fd5c53d92e38e5a8b0b048371f70771335f8254338a4d290b3b5",
-      "abicheck/extract/dwarf_producer.py": "86e449f5776fe7aead410ef979dc636837d28c8caae5599d3c22b8c3f442e1c6",
-      "abicheck/extract/dwarf_records.py": "f510a601ba2f763d9b3dc67c090e4c3a0f51237804a4bb7f2b28cb3e1fbc0147",
+      "abicheck/extract/dwarf_producer.py": "4b85d88dd77f7dca39669cceb2f494e58c81063ebd35bf59674bbee8504cac5f",
+      "abicheck/extract/dwarf_records.py": "60c9e9aacd78d4ec63a31062a502a7483e64cc106e678aac2bd62048f5e0be55",
       "abicheck/extract/dwarf_scope.py": "1800757661a850338d8cb96d715995ffa8f79354047f68b1ce5e248a72819b20",
       "abicheck/extract/dwarf_subtree_index.py": "45ffbba03c1eeb9f8a1d9ed54ab3f3e2492363d4b56e16944f326154c7654aa9",
       "abicheck/extract/dwarf_type_names.py": "dab8b4167a3c69e3e8d92b4e1cb08ba58df4e9c59fd5f8d064e83c84405c016a",
+      "abicheck/extract/dwarf_value_abi_trait.py": "74b5b1d1d03fc8547194527a9eefa07f2d2e866cf6fa3be0ae3e7a21403d210b",
+      "abicheck/extract/dwarf_variable_identity.py": "ab35f80066f19d1b8d59d39d1eec43906abb061d31f24f755fabab01a4e9d4fc",
       "abicheck/extract/dwarf_vptr_resolution.py": "756dfe22e692c77de3b06fa3d86959b4e1c1bdd0d3729fae66743e923bbc2a68",
       "abicheck/extract/dwarf_vtable_completeness.py": "8a03fbbb12c5dfd13598251e6dbf8b58ff015e538fb0635f4afbfdb754d054da",
       "abicheck/extract/elf_abi_flags.py": "426d6d97328e32071a84422c130bdefebe31cee85a91146efe8c01f7ce97d87f",
@@ -186,7 +188,7 @@
       "abicheck/extract/semantic_normalizer.py": "ddbbba743b7630a47494ae298468357ff1187b9812d2affa4a3bcbdad4f91f60",
       "abicheck/extract/semantic_normalizer_dwarf.py": "d092c309a8e349f9b699e5931456188485670ef05a8048783496d915fe7a7a83",
       "abicheck/extract/semantic_normalizer_template_args.py": "9e07ae6b02395411ad22cbd02e2acbe3f9d70b5a33283b606a9296ba9d55b1b2",
-      "abicheck/extract/stdlib_local_origin.py": "5ba2ab65b5d264138e07adfa3506ade7706239bcc07cc04e3fb75596ec7b4358",
+      "abicheck/extract/stdlib_local_origin.py": "e44bb8a32af5c09aa91e396a368b15ab4cd3fb93b614bc1b502a5d9787a206dc",
       "abicheck/extract/surface_fact_producers.py": "3a6c9b3a355342de1f4658a2154f9769dde9c1165dd7b90aba7d449f5f6b7cda",
       "abicheck/extract/system_header_layout.py": "3784ee2f9386949eb3db9e4d77f9b92a5211106d72e4de1d004c9ea7f7d1a0cd",
       "abicheck/extract/target_platform.py": "d2f2774c26bd12eb623a64883c2611782cac8f3d84da51248a969bd1f288e739",
@@ -207,9 +209,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "9d317bb220782b8c5c63db9919c58bce0b873273141fbcbf646b11eb06025c26",
-    "generation": 47,
-    "reason": "generation 47: castxml and clang record the public headers' template-parameter defaults of every class, function, alias and variable template from the clang AST (extract/headers/clang/template_default_entries.py; castxml through castxml/clang_semantics_join.py) as AbiSnapshot.cxx_template_defaults"
+    "fingerprint": "7233c474bbf29616dfc60029544288f0bdccb3e7d9134a82bffdc8e9fce2a205",
+    "generation": 49,
+    "reason": "comment moved from snapshot.py to model/stack_protector.py"
   },
   "resolver": {
     "files": {
@@ -233,7 +235,7 @@
     },
     "fingerprint": "2981f89e9a1a827c8f992093836e1398f8269858f2cb364e172f465fa6fa1995",
     "generation": 4,
-    "reason": "as-written specialization arguments and a shadow-free fast path fold into resolver generation 4, introduced by this same unmerged PR"
+    "reason": "comment moved from snapshot.py to model/stack_protector.py"
   },
   "source": {
     "files": {
@@ -284,6 +286,6 @@
     },
     "fingerprint": "f50c501e2fa60e778483ccc7a554bbe4203095efa7c1f1ba6c4202ff554fb5d5",
     "generation": 14,
-    "reason": "generation 14 is introduced by this unmerged PR (#1941) and never released; refining which nodes get tu_local changes no stored value"
+    "reason": "comment moved from snapshot.py to model/stack_protector.py"
   }
 }

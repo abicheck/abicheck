@@ -153,19 +153,31 @@ def test_detached_debug_consulted_only_when_image_has_no_producer(
     lib.write_bytes(b"\x7fELF")
     lang = ENUM_DW_LANG["DW_LANG_C_plus_plus_14"]
     seen: list[Path] = []
+    forwarded: list[object] = []
 
-    def _fake_detached(path: Path) -> tuple[str | None, int | None]:
+    def _fake_detached(
+        path: Path, exported: object = None
+    ) -> tuple[str | None, int | None, dict[str, int] | None]:
         seen.append(path)
-        return "GNU C++17 13.3.0 -g", lang
+        forwarded.append(exported)
+        return "GNU C++17 13.3.0 -g", lang, {"unrecorded": 1}
 
     monkeypatch.setattr(build_mode_capture, "_read_detached_producer", _fake_detached)
+    # The image's exported functions are what the detached DWARF must cover.
+    monkeypatch.setattr(
+        build_mode_capture, "_exported_code_addresses", lambda _e: [0x1040, 0x1100]
+    )
     debug = Path("/nonexistent/libx.debug")
 
-    monkeypatch.setattr(build_mode_capture, "_read_producer", lambda _e: (None, None))
+    monkeypatch.setattr(
+        build_mode_capture, "_read_producer", lambda *_a: (None, None, None)
+    )
     sig = read_elf_build_signals(lib, debug_path=debug)
     assert sig is not None
     assert sig.producer == "GNU C++17 13.3.0 -g" and sig.dwarf_language == lang
+    assert sig.stack_protector == {"unrecorded": 1}
     assert seen == [debug]
+    assert forwarded == [[0x1040, 0x1100]]
 
     # Shallow mode reads neither file's DWARF.
     seen.clear()
@@ -174,7 +186,9 @@ def test_detached_debug_consulted_only_when_image_has_no_producer(
 
     # The image's own producer wins; the debug file is not opened.
     monkeypatch.setattr(
-        build_mode_capture, "_read_producer", lambda _e: ("clang version 18.1.3", 4)
+        build_mode_capture,
+        "_read_producer",
+        lambda *_a: ("clang version 18.1.3", 4, {"unrecorded": 1}),
     )
     sig = read_elf_build_signals(lib, debug_path=debug)
     assert sig is not None and sig.producer == "clang version 18.1.3"
@@ -184,8 +198,9 @@ def test_detached_debug_consulted_only_when_image_has_no_producer(
 def test_unreadable_detached_debug_is_unknown(tmp_path: Path) -> None:
     junk = tmp_path / "x.debug"
     junk.write_bytes(b"not an elf")
-    assert build_mode_capture._read_detached_producer(junk) == (None, None)
+    assert build_mode_capture._read_detached_producer(junk) == (None, None, None)
     assert build_mode_capture._read_detached_producer(tmp_path / "missing") == (
+        None,
         None,
         None,
     )
@@ -562,14 +577,21 @@ def test_best_cu_producer_ranking(
 
 def test_read_producer_needs_real_dwarf(monkeypatch: pytest.MonkeyPatch) -> None:
     from abicheck import dwarf_utils
+    from abicheck.model.stack_protector import level_from_producer
 
     elf = type(
         "_E", (), {"get_dwarf_info": lambda self: _Dwarf({"DW_AT_producer": _GCC})}
     )()
     monkeypatch.setattr(dwarf_utils, "has_real_dwarf_info", lambda _e: False)
-    assert build_mode_capture._read_producer(elf) == (None, None)
+    assert build_mode_capture._read_producer(elf) == (None, None, None)
     monkeypatch.setattr(dwarf_utils, "has_real_dwarf_info", lambda _e: True)
-    assert build_mode_capture._read_producer(elf) == (_GCC, None)
+    # The fake has no .dynsym, so coverage of its code is not established and
+    # the census records one more unit of unknown setting.
+    assert build_mode_capture._read_producer(elf) == (
+        _GCC,
+        None,
+        {level_from_producer(_GCC).value: 2},
+    )
 
 
 def test_read_detached_producer_reads_the_debug_file(
@@ -578,14 +600,23 @@ def test_read_detached_producer_reads_the_debug_file(
     from elftools.elf import elffile
 
     monkeypatch.setattr(elffile, "ELFFile", _FakeElf)
-    monkeypatch.setattr(
-        build_mode_capture,
-        "_read_producer",
-        lambda e: (_GCC, None) if isinstance(e, _FakeElf) else (None, None),
-    )
+    census = {"unrecorded": 1}
+    seen: list[object] = []
+
+    def _fake_read(e: object, exported: object = None) -> tuple[object, ...]:
+        seen.append(exported)
+        return (_GCC, None, census) if isinstance(e, _FakeElf) else (None, None, None)
+
+    monkeypatch.setattr(build_mode_capture, "_read_producer", _fake_read)
     debug = tmp_path / "libx.debug"
     debug.write_bytes(b"\x7fELF")
-    assert build_mode_capture._read_detached_producer(debug) == (_GCC, None)
+    # The image's exported addresses reach the detached reader's coverage check.
+    assert build_mode_capture._read_detached_producer(debug, [0x1040]) == (
+        _GCC,
+        None,
+        census,
+    )
+    assert seen == [[0x1040]]
 
 
 def test_capture_elf_without_source_path_is_untouched() -> None:

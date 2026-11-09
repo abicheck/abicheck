@@ -14,6 +14,7 @@ floor) is smoke-only: it must stay in the ``smoke`` matrix, not ``full-suite``.
 from __future__ import annotations
 
 import re
+import shlex
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -94,3 +95,71 @@ def test_selection_matches_the_canonical_lane(name: str) -> None:
     assert _marker_expr(_COMPAT["jobs"][name]) == _marker_expr(
         _CI["jobs"]["unit-tests"]
     )
+
+
+def _suite_step(job: dict[str, Any]) -> dict[str, Any]:
+    return next(s for s in job["steps"] if "--shard" in str(s.get("run", "")))
+
+
+def _active_suite_command(run: str) -> list[str]:
+    """The shard's pytest invocation as the shell runs it: comment lines
+    dropped, ``\\``-continuations joined, split into argv by ``shlex``. An
+    option that only appears in a comment, or on a different command, is not
+    in it."""
+    lines = [ln for ln in run.splitlines() if not ln.lstrip().startswith("#")]
+    joined = re.sub(r"\\\n", " ", "\n".join(lines))
+    (command,) = [c for c in joined.splitlines() if "pytest tests/" in c]
+    return shlex.split(command)
+
+
+def _minutes(spec: str) -> float:
+    m = re.fullmatch(r"(\d+)([smh]?)", spec)
+    assert m, spec
+    return int(m.group(1)) * {"s": 1 / 60, "": 1 / 60, "m": 1, "h": 60}[m.group(2)]
+
+
+@pytest.mark.parametrize("name", _FULL_JOBS)
+def test_a_hang_is_diagnosed_inside_the_job_budget(name: str) -> None:
+    """A hung shard must name its test and keep its log, not run into the job
+    timeout silently (the 3.15 hang on #1961 left no log at all).
+
+    Each layer must fire before the next one up: faulthandler's C-level stack
+    dump before pytest-timeout's per-test kill, that kill before the shell
+    watchdog, and the shell watchdog (plus its SIGKILL grace) before the job's
+    own ``timeout-minutes``.
+    """
+    job = _COMPAT["jobs"][name]
+    run = str(_suite_step(job)["run"])
+    assert "set -o pipefail" in run  # `| tee` must not mask pytest's status
+    per_test = tomllib.loads((_ROOT / "pyproject.toml").read_text())["tool"]["pytest"][
+        "ini_options"
+    ]["timeout"]
+    argv = _active_suite_command(run)
+    options = [argv[i + 1] for i, tok in enumerate(argv[:-1]) if tok == "-o"]
+    dump = [o for o in options if o.startswith("faulthandler_timeout=")]
+    assert len(dump) == 1, argv
+    assert 0 < int(dump[0].split("=", 1)[1]) < per_test, argv
+    # The signal method cannot interrupt a main thread stuck in C code.
+    assert "timeout_method=thread" in options, argv
+    # The watchdog wraps the pytest command itself, not a sibling command.
+    assert argv[:2] == ["timeout", "--signal=ABRT"], argv
+    watchdog = re.search(
+        r"timeout --signal=ABRT --kill-after=(\d+[smh]?) (\d+[smh]?) ", run
+    )
+    assert watchdog, run
+    kill_after, limit = (_minutes(g) for g in watchdog.groups())
+    assert per_test / 60 < limit
+    assert limit + kill_after < job["timeout-minutes"] - 2  # setup + upload
+    assert re.search(r'--junitxml="\$RUNNER_TEMP/[^"]+"', run)
+    assert re.search(r'\| tee "\$RUNNER_TEMP/[^"]+"', run)
+
+    steps = job["steps"]
+    upload = next(
+        s
+        for s in steps
+        if str(s.get("uses", "")).startswith("actions/upload-artifact@")
+    )
+    assert steps.index(upload) > steps.index(_suite_step(job))
+    assert upload.get("if") == "always()"  # also on failure and cancellation
+    paths = upload["with"]["path"]
+    assert "pytest.log" in paths and "pytest-junit.xml" in paths

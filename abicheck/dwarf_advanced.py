@@ -56,6 +56,12 @@ from .dwarf_utils import (
     resolve_type_die as _resolve_type_die,
 )
 from .extract import dwarf_subtree_index as _dsi
+from .extract.dwarf_value_abi_trait import (
+    comparable_traits,
+    declared_triviality,
+    ret_component as _ret_component,
+    returns_in_registers as _returns_in_registers,
+)
 
 # Fact dataclasses live in the model package (ADR-061 Phase 5): this module
 # parses into them and re-exports them so the historical
@@ -440,6 +446,10 @@ def _value_abi_trait_for_type(
     t = _unwrap_qualifiers(t0, CU, cache=cache)
     if t.tag not in ("DW_TAG_structure_type", "DW_TAG_class_type", "DW_TAG_union_type"):
         return None
+
+    declared = declared_triviality(t)
+    if declared is not None:
+        return declared
 
     nontrivial_cache = cache.nontrivial if cache is not None else None
     # Pass CU so member-type non-triviality (e.g. struct Outer { std::string s; }) is detected
@@ -876,11 +886,6 @@ def _diff_calling_conventions(
     return results, already_reported_cc
 
 
-#: SysV AMD64 returns a trivial aggregate in registers only when it fits in two
-#: eightbytes (<= 16 bytes); larger aggregates are returned via a hidden pointer
-#: regardless of triviality. Used to gate the return-convention classification.
-_SYSV_MAX_REGISTER_RETURN_BYTES = 16
-
 #: Architectures whose by-value aggregate-return rules match the SysV AMD64
 #: model encoded in ``_returns_in_registers`` (trivial-for-calls AND <= 16
 #: bytes AND no unaligned member → registers, else hidden sret pointer). The
@@ -912,8 +917,9 @@ def _diff_value_abi_traits(
     # The sret-flip classification is only sound for the SysV AMD64 return model.
     sysv_return = _sysv_amd64_return_model(old_meta.target_arch, new_meta.target_arch)
     for fname in sorted((old_trait_keys & new_trait_keys) - already_reported_cc):
-        old_trait = old_meta.value_abi_traits[fname]
-        new_trait = new_meta.value_abi_traits[fname]
+        old_trait, new_trait = comparable_traits(
+            old_meta.value_abi_traits[fname], new_meta.value_abi_traits[fname]
+        )
         old_rc = _ret_component(old_trait)
         new_rc = _ret_component(new_trait)
         old_reg = _returns_in_registers(
@@ -966,41 +972,6 @@ def _diff_value_abi_traits(
             )
         # else: identical trait and same return mechanism — nothing to report.
     return results
-
-
-def _returns_in_registers(
-    ret_component: str | None, size: int | None, memory_forced: bool = False
-) -> bool:
-    """Whether a by-value aggregate return is passed in registers (SysV AMD64).
-
-    A struct is register-returned only when it is **trivial for the purposes of
-    calls**, fits in two eightbytes (<= 16 bytes), *and* has no unaligned member.
-    A non-trivial aggregate, a large one, or one with an unaligned member (e.g. a
-    packed struct, ``memory_forced``) is memory-returned via a hidden sret
-    pointer. An unknown size on an otherwise-eligible trivial aggregate is
-    treated as register-eligible (stay conservative — preserves the pre-size-
-    gating behaviour for snapshots/mocks that carry no size).
-    """
-    if ret_component is None or memory_forced:
-        return False
-    # Component is the triviality token: "trivial"/"nontrivial" (or the mock
-    # "v(trivial)"/"v(nontrivial)"). It is non-trivial iff it says so.
-    if "nontrivial" in ret_component:
-        return False
-    return size is None or size <= _SYSV_MAX_REGISTER_RETURN_BYTES
-
-
-def _ret_component(trait: str) -> str | None:
-    """Extract the ``ret:`` component of a value-ABI trait fingerprint.
-
-    Trait strings look like ``"ret:trivial|p0:nontrivial"``; returns the value
-    after ``ret:`` (e.g. ``"trivial"``) or ``None`` when the function has no
-    by-value aggregate return component.
-    """
-    for part in trait.split("|"):
-        if part.startswith("ret:"):
-            return part[4:]
-    return None
 
 
 def _diff_struct_packing(

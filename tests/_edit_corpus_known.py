@@ -22,7 +22,10 @@ _CLASSES = frozenset({"cxx_classes"})
 
 GAP_DWARF_PURE = "A GCC-built DWARF snapshot cannot tell that a virtual became pure"
 GAP_CXX11_ABI = "A `_GLIBCXX_USE_CXX11_ABI` rebuild is refused as a profile mismatch, not reported as a break"
-GAP_O2_STD = "An `-O2` rebuild of a C++ library that uses `std::string` reads as a break or a risk"
+GAP_O2_STD = (
+    "An `-O2` rebuild of a C++ library that uses `std::string` reads as a risk on gcc, "
+    "or a break on MinGW"
+)
 
 
 def _always(_: Config) -> bool:
@@ -95,8 +98,9 @@ KNOWN: tuple[Known, ...] = (
         frozenset({"cxx_stdlib"}),
         "refused",
         _ev("headers"),
-        "the new side's -D_GLIBCXX_USE_CXX11_ABI=0 makes compare raise ProfileMismatchError; "
-        "consumers fail with undefined std::__cxx11 symbols",
+        "the new side's -D_GLIBCXX_USE_CXX11_ABI=0 makes compare raise ProfileMismatchError "
+        "(ADR-050's documented refusal; the reason names the macro); consumers fail with "
+        "undefined std::__cxx11 symbols. Open: whether a runtime-ABI macro should gate instead",
         GAP_CXX11_ABI,
         issues=frozenset({"refused:ProfileMismatchError"}),
         verdicts=frozenset({"REFUSED"}),
@@ -105,12 +109,50 @@ KNOWN: tuple[Known, ...] = (
         "rebuild_optimized",
         frozenset({"cxx_stdlib"}),
         "false-positive",
-        # The exported weak instantiations are libstdc++'s (ELF, and MinGW on
-        # PE); against libc++ (macOS) the rebuild reads NO_CHANGE.
-        lambda c: uses_libstdcxx(c.producer),
-        "-O2 inlines the weak std::string instantiations the -O0 build exported (and drops "
-        "stack canaries); their disappearance reads func_visibility_changed / "
-        "func_removed_elf_only (BREAKING) or a hardening risk, while every consumer still runs",
+        # ELF: the weak std:: copies and covered imports are demoted (ADR-089
+        # A7, #1960); with DWARF every unit's DW_AT_producer shows
+        # -fstack-protector-strong still on, so the lost canary is demoted too.
+        # Binary only, nothing records the flag. clang on ELF reads COMPATIBLE.
+        lambda c: (
+            c.objfmt == "elf" and c.producer.family == "gcc" and c.evidence == "binary"
+        ),
+        "-O2 leaves no frame that needs a stack canary; without debug info no unit "
+        "records -fstack-protector, so stack_canary_removed keeps its RISK (marked as "
+        "weaker evidence); every consumer still runs",
+        GAP_O2_STD,
+        issues=frozenset({"stronger-than:COMPATIBLE"}),
+        verdicts=frozenset({"COMPATIBLE_WITH_RISK"}),
+    ),
+    Known(
+        "rebuild_optimized",
+        frozenset({"c_core"}),
+        "false-positive",
+        # i386 -O0 guards fill_rec's frame and calls __stack_chk_fail; -O2 needs no
+        # canary. With DWARF the per-unit census shows the protector unchanged; the
+        # g_counter placement drop (0x4010 -> 0x4008) is demoted at every level.
+        lambda c: (
+            c.objfmt == "elf"
+            and c.producer.family == "gcc"
+            and c.flags.bits == 32
+            and c.evidence == "binary"
+        ),
+        "-O2 leaves no frame that needs a stack canary; without debug info no unit "
+        "records -fstack-protector-strong, so stack_canary_removed keeps its RISK "
+        "(marked as weaker evidence) while every consumer still runs",
+        GAP_O2_STD,
+        issues=frozenset({"stronger-than:COMPATIBLE"}),
+        verdicts=frozenset({"COMPATIBLE_WITH_RISK"}),
+    ),
+    Known(
+        "rebuild_optimized",
+        frozenset({"cxx_stdlib"}),
+        "false-positive",
+        # PE records no binding, so the coalesced-copy rule has no signal there
+        # (ADR-089's PE limit); against libc++ (macOS) the rebuild reads NO_CHANGE.
+        lambda c: c.objfmt == "pe" and uses_libstdcxx(c.producer),
+        "MinGW: -O2 inlines the std::string instantiations the -O0 build exported; a PE "
+        "export carries no WEAK binding, so their loss reads func_removed / "
+        "func_visibility_changed (BREAKING) while every consumer still runs",
         GAP_O2_STD,
         issues=frozenset({"stronger-than:COMPATIBLE"}),
         verdicts=frozenset({"BREAKING", "COMPATIBLE_WITH_RISK"}),

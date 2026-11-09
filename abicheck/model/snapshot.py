@@ -195,6 +195,7 @@ class AbiSnapshot:
     cxx_template_defaults: dict[str, TemplateDefaults] | None = field(
         default=None, kw_only=True
     )
+    cu_stack_protector: dict[str, int] | None = field(default=None, kw_only=True)
 
     # CastXML version-gate outcome (schema v13, ``castxml_policy.py``). None on
     # snapshots not produced by a version-gated CastXML L2 scan (older
