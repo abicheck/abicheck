@@ -94,3 +94,55 @@ def test_selection_matches_the_canonical_lane(name: str) -> None:
     assert _marker_expr(_COMPAT["jobs"][name]) == _marker_expr(
         _CI["jobs"]["unit-tests"]
     )
+
+
+def _suite_step(job: dict[str, Any]) -> dict[str, Any]:
+    return next(s for s in job["steps"] if "--shard" in str(s.get("run", "")))
+
+
+def _minutes(spec: str) -> float:
+    m = re.fullmatch(r"(\d+)([smh]?)", spec)
+    assert m, spec
+    return int(m.group(1)) * {"s": 1 / 60, "": 1 / 60, "m": 1, "h": 60}[m.group(2)]
+
+
+@pytest.mark.parametrize("name", _FULL_JOBS)
+def test_a_hang_is_diagnosed_inside_the_job_budget(name: str) -> None:
+    """A hung shard must name its test and keep its log, not run into the job
+    timeout silently (the 3.15 hang on #1961 left no log at all).
+
+    Each layer must fire before the next one up: faulthandler's C-level stack
+    dump before pytest-timeout's per-test kill, that kill before the shell
+    watchdog, and the shell watchdog (plus its SIGKILL grace) before the job's
+    own ``timeout-minutes``.
+    """
+    job = _COMPAT["jobs"][name]
+    run = str(_suite_step(job)["run"])
+    assert "set -o pipefail" in run  # `| tee` must not mask pytest's status
+    per_test = tomllib.loads((_ROOT / "pyproject.toml").read_text())["tool"]["pytest"][
+        "ini_options"
+    ]["timeout"]
+    dump = re.search(r"-o faulthandler_timeout=(\d+)", run)
+    assert dump and 0 < int(dump.group(1)) < per_test, run
+    # The signal method cannot interrupt a main thread stuck in C code.
+    assert "-o timeout_method=thread" in run
+    watchdog = re.search(
+        r"timeout --signal=ABRT --kill-after=(\d+[smh]?) (\d+[smh]?) ", run
+    )
+    assert watchdog, run
+    kill_after, limit = (_minutes(g) for g in watchdog.groups())
+    assert per_test / 60 < limit
+    assert limit + kill_after < job["timeout-minutes"] - 2  # setup + upload
+    assert re.search(r'--junitxml="\$RUNNER_TEMP/[^"]+"', run)
+    assert re.search(r'\| tee "\$RUNNER_TEMP/[^"]+"', run)
+
+    steps = job["steps"]
+    upload = next(
+        s
+        for s in steps
+        if str(s.get("uses", "")).startswith("actions/upload-artifact@")
+    )
+    assert steps.index(upload) > steps.index(_suite_step(job))
+    assert upload.get("if") == "always()"  # also on failure and cancellation
+    paths = upload["with"]["path"]
+    assert "pytest.log" in paths and "pytest-junit.xml" in paths
