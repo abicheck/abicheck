@@ -1,0 +1,136 @@
+name: Edit corpus tiers
+
+# The generated ABI edit corpus's nightly and weekly tiers
+# (tests/test_abi_edit_corpus_matrix.py). The PR tier runs in integration.yml;
+# these two are report-only: scheduled or dispatched, never on pull_request,
+# never a required check. A red run means a cell's three signals (execution,
+# expect(config), abicheck) disagree in a way tests/_edit_corpus_known.py does
+# not record; the artifact holds each failing cell minimized to
+# (seed, edit, config) with a ready-to-paste regression test.
+#
+# - nightly: a seeded pairwise covering array over every axis
+#   (ABICHECK_EDIT_CORPUS_SEED: the UTC day of the year, so successive nights
+#   draw different arrays; a dispatch can pin it).
+# - weekly: every operator under the newest toolchain of each family, -m32,
+#   the newest standards, -fabi-version, _GLIBCXX_USE_CXX11_ABI=0 and
+#   mismatched consumers.
+#
+# Toolchains: two gcc and two clang majors plus gcc-multilib, so the version,
+# consumer-family and -m32 axes have more than one buildable value. A config
+# the runner cannot build is reported as a skip with its reason, never passed.
+on:
+  schedule:
+    # 03:17 UTC daily (nightly) and 05:43 UTC Sunday (weekly): outside the
+    # 06:00-09:00 PT busy window and off the hour.
+    - cron: "17 3 * * *"
+    - cron: "43 5 * * 0"
+  workflow_dispatch:
+    inputs:
+      tier:
+        description: Which tier to run
+        type: choice
+        options: [nightly, weekly]
+        default: nightly
+      seed:
+        description: Nightly covering-array seed (digits; empty = UTC day of the year)
+        type: string
+        default: ""
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.run_id }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  corpus:
+    name: corpus (shard ${{ matrix.shard }}/4)
+    runs-on: ubuntu-24.04
+    # Weekly is ~4x the nightly cell count; four shards keep each well inside.
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    env:
+      EVENT_NAME: ${{ github.event_name }}
+      EVENT_SCHEDULE: ${{ github.event.schedule }}
+      INPUT_TIER: ${{ inputs.tier }}
+      INPUT_SEED: ${{ inputs.seed }}
+      SHARD: ${{ matrix.shard }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+        with:
+          persist-credentials: false
+
+      - name: Install toolchains (gcc 13/14, clang 18/19, multilib)
+        uses: ./.github/actions/install-system-deps
+        with:
+          packages: gcc g++ gcc-14 g++-14 clang clang-19 gcc-multilib g++-multilib binutils
+
+      - uses: ./.github/actions/setup-castxml
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: Install test deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Select tier and seed
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            tier="$INPUT_TIER"
+          elif [ "$EVENT_SCHEDULE" = "43 5 * * 0" ]; then
+            tier=weekly
+          else
+            tier=nightly
+          fi
+          case "$tier" in nightly|weekly) ;; *) echo "::error::unknown tier '$tier'"; exit 1 ;; esac
+          seed="${INPUT_SEED:-}"
+          if [ -z "$seed" ]; then seed="$((10#$(date -u +%j)))"; fi
+          case "$seed" in *[!0-9]*) echo "::error::seed must be digits, got '$seed'"; exit 1 ;; esac
+          {
+            echo "ABICHECK_EDIT_CORPUS_TIER=$tier"
+            echo "ABICHECK_EDIT_CORPUS_SEED=$seed"
+            echo "ABICHECK_EDIT_CORPUS_SHARD=$SHARD/4"
+          } >> "$GITHUB_ENV"
+          echo "tier=$tier seed=$seed shard=$SHARD/4"
+
+      - name: Run the tier
+        env:
+          ABICHECK_EDIT_CORPUS_REPORT_DIR: results/cells
+          # Fail a run that executed nothing (a toolchain that vanished).
+          ABICHECK_MIN_EXECUTED: "1"
+        run: |
+          set -euo pipefail
+          mkdir -p results/cells
+          gcc --version | head -1; gcc-14 --version | head -1
+          clang --version | head -1; clang-19 --version | head -1
+          pytest tests/test_abi_edit_corpus_matrix.py \
+            -m "edit_corpus_${ABICHECK_EDIT_CORPUS_TIER}" \
+            -n auto --dist worksteal -q -rfE \
+            --junitxml="results/junit-${ABICHECK_EDIT_CORPUS_TIER}-shard${SHARD}.xml"
+
+      - name: Summary
+        if: ${{ !cancelled() }}
+        run: |
+          n=$(find results/cells -name '*.txt' | wc -l)
+          {
+            echo "### Edit corpus ${ABICHECK_EDIT_CORPUS_TIER:-?} shard ${SHARD}/4 (seed ${ABICHECK_EDIT_CORPUS_SEED:-?})"
+            echo "Unrecorded mismatches: $n (minimized cells in the artifact)."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: edit-corpus-shard${{ matrix.shard }}
+          path: results/
+          retention-days: 30

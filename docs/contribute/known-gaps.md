@@ -203,6 +203,36 @@ dependency walk and debug roots to every member. No open gap remains.
 **Status (2026-10-26): OPEN — gate-semantics decision needed.** A finding folded out as redundant but kept for the verdict is `gating` under the legacy scheme and `non_gating` under a severity config. `result_counts.gating_retained` now partitions the retained findings and the summary names the folded one, so the counts no longer contradict each other; the scheme disagreement remains. [Full write-up](known-gaps/legacy-gate-counts-a-redundant-finding-the-review-groups-omit.md)
 <!-- no-canary: awaits a gate-semantics decision between two schemes that are each internally consistent; no wrong value to pin until the ruling -->
 
+#### A C++ parameter change is reported as a removal plus an addition (2026-11-08)
+
+**Status (2026-11-08): OPEN.** A free C++ function whose parameter list changes gets a new mangled name, and the detector pairs old and new by mangled identity, so the output is `func_removed` + `func_added` (BREAKING) instead of `func_params_changed`. The verdict is right; the kind is not. Found by the generated edit corpus (`tests/test_abi_edit_corpus.py`, `func_param_append`/`func_param_type_change`/`func_param_remove` on the `cxx_classes` seed, gcc and clang), where those cells are strict xfails listed in `KNOWN_MISMATCHES`. The config-matrix corpus (`tests/test_abi_edit_corpus_matrix.py`) reproduces it on the `cxx_stdlib` seed; it is a header-lane gap: binary-only and DWARF-only evidence pair the two and do report `func_params_changed`. `wrong-kind`: consumers filtering on `func_params_changed` miss the break. Owner: `compare/` function pairing.
+<!-- no-canary: the corpus strict xfails fail once the pairing or kind is fixed, prompting removal -->
+
+#### Removing a virtual method reports no `func_virtual_removed` (2026-11-08)
+
+**Status (2026-11-08): OPEN.** Removing a virtual method yields `func_removed`, `type_vtable_changed` and `vtable_slot_count_changed` (all BREAKING), but never `func_virtual_removed`, whose taxonomy entry says BREAKING. The verdict is right; the specific kind is missing. Found by the generated edit corpus (`virtual_remove` on the `cxx_classes` seed, both compilers; strict xfail in `KNOWN_MISMATCHES`). `wrong-kind`. Owner: `policy/` and `compare/` virtual detectors.
+<!-- no-canary: the corpus strict xfails fail once the kind is emitted, prompting removal -->
+
+#### A member array-bound change is invisible in DWARF-only comparison (2026-11-08)
+
+**Status (2026-11-08): OPEN.** `struct rec { …; char tag[8]; }` becoming `char tag[6]` reads `NO_CHANGE` when the snapshots carry DWARF but no header; the header lane reports `type_field_type_changed` for the same pair. With `-fpack-struct=1` the DWARF lane reports only `type_size_changed` (the size really shrinks), still without the member's type change. Found by the config-matrix corpus (`tests/test_abi_edit_corpus_matrix.py`, `struct_array_shrink_in_padding` on `c_core`/`cxx_classes`, evidence `dwarf`, gcc and clang; strict xfails in `tests/_edit_corpus_known.py`). `wrong-verdict` unpacked (a public member's type changed, nothing reported), `wrong-kind` packed. Owner: `extract/` DWARF member-type spelling (array bound).
+<!-- no-canary: the corpus nightly strict xfails (tests/_edit_corpus_known.py) fail once DWARF reports the member type change -->
+
+#### DWARF-only comparison reports a virtual that became pure as a plain removal (2026-11-08)
+
+**Status (2026-11-08): OPEN.** `virtual int kind() const;` becoming `= 0` reads `func_removed_elf_only` (BREAKING) from DWARF-only snapshots; neither `func_virtual_became_pure` nor `type_became_abstract` is emitted (the header lane emits `type_became_abstract`). Verdict right, kind wrong. Found by the config-matrix corpus (`virtual_become_pure`, `cxx_classes`, evidence `dwarf`; strict xfail). `wrong-kind`. Owner: `extract/` DWARF virtuality (`DW_AT_virtuality` pure) and `compare/` virtual detectors.
+<!-- no-canary: the corpus nightly strict xfails (tests/_edit_corpus_known.py) fail once the kind is emitted -->
+
+#### DWARF-only comparison reports a method's dropped `const` as a removal plus an addition (2026-11-08)
+
+**Status (2026-11-08): OPEN.** `virtual int area() const;` becoming non-const changes the mangled name; from DWARF-only snapshots the pair reads `func_removed_elf_only` + `func_added_elf_only` + `type_vtable_changed`, never `func_cv_changed` (the header lane emits it). Verdict right, kind wrong. Found by the config-matrix corpus (`method_const_drop`, `cxx_classes`, evidence `dwarf`; strict xfail). `wrong-kind`. Owner: `compare/` function pairing on DWARF-sourced methods.
+<!-- no-canary: the corpus nightly strict xfails (tests/_edit_corpus_known.py) fail once the kind is emitted -->
+
+#### A `_GLIBCXX_USE_CXX11_ABI` rebuild is refused as a profile mismatch, not reported as a break (2026-11-08)
+
+**Status (2026-11-08): OPEN.** Rebuilding a library whose API passes `std::string` with `-D_GLIBCXX_USE_CXX11_ABI=0` renames every such symbol (`std::__cxx11::basic_string` → `std::basic_string`); consumers built before fail with `undefined symbol`. With headers on both sides and each side's own `-D` passed to the header frontend, `compare` raises `ProfileMismatchError` (`macro_ops` differ) instead of reporting the removal. Refusing is not clean, but it reports no finding for one of the best-known ABI breaks. Found by the config-matrix corpus (`rebuild_cxx11_abi_off`, `cxx_stdlib`, evidence `headers`; strict xfail in both corpus files). `refused`. Owner: `comparability.py` (whether a macro the ABI tag depends on should block comparison or become a finding).
+<!-- no-canary: the corpus strict xfails (PR tier and tests/test_abi_edit_corpus.py) fail once compare reports the pair -->
+
 ### Source-replay twin pairing (L4/L2 Phase 8)
 
 **Status (2026-10-23): OPEN, narrowed.** Two observations are reported by both the header tier and the L4 replay: a header-only inline removal (`INLINE_FUNCTION_REMOVED`) and a C++ `constexpr` value change (`CONSTEXPR_VALUE_CHANGED` / `CONSTANT_CHANGED`). `compare.source_replay_twins.REPLAY_TWINS` keeps the header-tier finding and drops the replay copy, matched by name, one for one. For constants, the match is on the qualified name only: a replay copy whose value disagrees with the header copy is still dropped, and the header copy's value is what is reported. The "L2 tier not run, replay copy kept" case is covered only at unit level, because the replay alone does not produce the copy end to end (a no-header run matches no symbols). For inline removals the match is on the bare function name. Two limits remain there. (a) A header-tier symbol that does not demangle (no `demangled_symbol`, no demangler result) keeps its replay twin visible; this is conservative, not a silent loss. (b) Two overloads of one name pair by count, not by signature, because the replay `Change` carries no parameter list, so which of the two overloads is the twin is not recorded. Both replay copies are still counted in the ledger. Closing (b) needs the replay finding to carry its signature hash.
@@ -240,6 +270,11 @@ current emitter, which is unchanged.
 <!-- canary: tests/test_l4_clang_projection_golden.py::test_pinned_set_matches_the_measured_projection_equivalence -->
 
 ### False-clean risk
+
+#### A new `requires`-clause on a header-only template reads `NO_CHANGE` under castxml (2026-11-08)
+
+**Status (2026-11-08): OPEN.** Adding `requires (sizeof(T) >= 4)` to a header-only function template makes an existing consumer call (`clampv((short)-3)`) stop compiling, but castxml emits no element for an uninstantiated template, so the header lane reads `NO_CHANGE` and neither `concept_tightened` nor `concept_constraint_changed` is reported. Found by the config-matrix corpus's execution oracle (`concept_constraint_added`, `cxx_classes`, C++20/23, gcc and clang, evidence `headers`: the consumer recompiled against the new header fails; strict xfail, also in the PR tier). Same root as the header-only template default entry below. `false-clean`. Owner: `extract/headers/castxml/`.
+<!-- no-canary: the corpus PR-tier strict xfail (tests/_edit_corpus_known.py) fails once the constraint change is reported -->
 
 #### A stripped library compared without headers reads `NO_CHANGE` with `partial` assurance and exit 0 (2026-11-08)
 
@@ -529,7 +564,7 @@ per-item status in the
 
 #### castxml output carries no `noexcept` exception specification (2026-11-06)
 
-**Status (2026-11-06): OPEN.** castxml 0.7 (`--castxml-output=1`) writes no attribute for a function's or method's exception specification, so `extract/headers/castxml/functions.py` always records `is_noexcept=False` (its `noexcept` search of the `attributes` string only matches an annotate attribute) and the castxml header lane never reports `func_noexcept_removed`/`func_noexcept_added`. The clang header backend reads the qualifier from the type spelling and reports it. Seen on case15 (declared in `ground_truth.json` `expected_kinds_gaps`). A fix would need a clang-AST join like `function_type_cc.py` or a source re-read; not done here. `false-clean` on castxml for noexcept changes. Owner: `extract/headers/castxml/`.
+**Status (2026-11-06): OPEN.** castxml 0.7 (`--castxml-output=1`) writes no attribute for a function's or method's exception specification, so `extract/headers/castxml/functions.py` always records `is_noexcept=False` (its `noexcept` search of the `attributes` string only matches an annotate attribute) and the castxml header lane never reports `func_noexcept_removed`/`func_noexcept_added`. The clang header backend reads the qualifier from the type spelling and reports it. Seen on case15 (declared in `ground_truth.json` `expected_kinds_gaps`). A fix would need a clang-AST join like `function_type_cc.py` or a source re-read; not done here. The config-matrix corpus's execution oracle shows the consequence (2026-11-08): `noexcept` added to a virtual reads `NO_CHANGE`, while a consumer's overrider without `noexcept` no longer compiles (`method_noexcept_add`, strict xfail in `tests/_edit_corpus_known.py` and the PR tier). `false-clean` on castxml for noexcept changes. Owner: `extract/headers/castxml/`.
 <!-- no-canary: the expected_kinds gate fails on case15's declaration once castxml reports the kind -->
 
 #### castxml and clang report different change-kind sets for the same case (2026-11-06)
@@ -538,6 +573,11 @@ per-item status in the
 <!-- no-canary: the catalog-nightly kind-parity gate fails on each declaration once it goes stale -->
 
 ### False-positive risk
+
+#### An `-O2` rebuild of a C++ library that uses `std::string` reads as a break or a risk (2026-11-08)
+
+**Status (2026-11-08): OPEN.** Rebuilding the same `std::string`-using library at `-O2` instead of `-O0` inlines the weak (vague-linkage) `std::` template instantiations the `-O0` build exported, and gcc drops stack canaries it no longer needs. abicheck reads that as `func_visibility_changed` (BREAKING, gcc 13, headers), `struct_return_convention_changed` (BREAKING, clang 18, headers), `func_removed_elf_only`/`var_removed_elf_only` (BREAKING, clang 18, binary only) or `stack_canary_removed` plus `visibility_leak` (COMPATIBLE_WITH_RISK, gcc 13, binary only). None of those symbols is the library's interface, and every consumer built against the `-O0` library still runs unchanged against the `-O2` one (execution oracle). The same rebuild of the C and C++ seeds without `std::` instantiations reads COMPATIBLE, and on macOS (libc++, Mach-O) the `std::string` seed's rebuild reads `NO_CHANGE` (integration macOS leg), while MinGW g++ on Windows (libstdc++, PE) reads BREAKING (`func_removed`, `func_visibility_changed`; v1 corpus, integration windows-latest leg), so the gap follows libstdc++, not the object format. Found by the config-matrix corpus (`rebuild_optimized`, `cxx_stdlib`, every evidence level; strict xfail). `false-positive`. Owner: `policy/` (vague-linkage `std::` instantiations are not the library's own surface).
+<!-- no-canary: the corpus nightly strict xfails (tests/_edit_corpus_known.py) fail once the rebuild reads compatible -->
 
 #### A typedef retargeted inside a template argument still reads as a removal plus an addition under headers (2026-10-25)
 

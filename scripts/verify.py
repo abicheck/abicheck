@@ -587,7 +587,7 @@ STEPS: tuple[Step, ...] = (
             # msvc) belongs to that lane, which runs it with the tool
             # installed; selecting it here too ran it twice wherever the tool
             # is present (tests/test_surface_scope_parity.py on Linux).
-            "integration and not libabigail and not abicc and not msvc",
+            "integration and not libabigail and not abicc and not msvc and not edit_corpus_nightly and not edit_corpus_weekly",
             "--tb=short",
             "--durations=30",
             "--ignore=tests/test_abi_examples.py",
