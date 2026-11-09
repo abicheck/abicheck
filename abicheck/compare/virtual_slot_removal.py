@@ -28,7 +28,8 @@ This detector reports it for exactly that shape, from the record vtables
 both sides record (header AST or DWARF), not from the function's own
 evidence, which a binary-only snapshot may not carry:
 
-* the symbol is an entry of some old record's vtable;
+* the symbol is an entry of some old record's vtable and an old function
+  or export (a vtable entry that names no symbol is not a removal);
 * the symbol is gone from the new side: no new declaration and no new
   export under that name (a method that stays and leaves the vtable is the
   devirtualization case, already reported by the signature detector);
@@ -75,13 +76,13 @@ def _records_by_name(snapshot: AbiSnapshot) -> dict[str, list[RecordType]]:
     return by_name
 
 
-def _still_present(snapshot: AbiSnapshot, symbol: str) -> bool:
-    if symbol in snapshot.function_map:
-        return True
+def _function_symbols(snapshot: AbiSnapshot) -> set[str]:
+    """Every function symbol *snapshot* declares or exports."""
+    symbols = set(snapshot.function_map)
     elf = snapshot.elf
-    if elf is None or not elf.symbols:
-        return False
-    return symbol in exported_symbol_names(elf, FUNCTION_SYMBOL_TYPES)
+    if elf is not None and elf.symbols:
+        symbols |= exported_symbol_names(elf, FUNCTION_SYMBOL_TYPES)
+    return symbols
 
 
 def virtual_slot_removals(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
@@ -94,10 +95,15 @@ def virtual_slot_removals(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     if not holders:
         return []
     new_records = _records_by_name(new)
+    old_symbols, new_symbols = _function_symbols(old), _function_symbols(new)
     changes: list[Change] = []
     for symbol, records in holders.items():
-        if _still_present(new, symbol) or not _slot_left_every_holder(
-            symbol, records, new_records
+        # A vtable entry that names no old function or export is not a symbol
+        # this release removed (a spelling, a pure virtual's placeholder).
+        if (
+            symbol not in old_symbols
+            or symbol in new_symbols
+            or not _slot_left_every_holder(symbol, records, new_records)
         ):
             continue
         old_fn = old.function_map.get(symbol)
