@@ -91,6 +91,92 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
         },
     ),
     BugClass(
+        id="extraction.dwarf_array_bound_erased",
+        invariant=(
+            "A DWARF array type spells each dimension's bound, outermost "
+            "first, as C writes it (char[8], int[2][3]); only an unbounded "
+            "dimension spells []. A bound change is a member type change even "
+            "when the record's size does not move, and a pre-generation-44 "
+            "DWARF baseline's erased T[] against a fresh T[N] reads as "
+            "extractor drift, never a break."
+        ),
+        fixed_by=(1958,),
+        seed_tests=(
+            "tests/test_dwarf_array_extents.py",
+            "tests/test_dwarf_erased_extent_generation_drift.py",
+            "tests/test_type_spelling_differential_matrix.py",
+        ),
+        public_surfaces=("cli", "python-api"),
+        axes={
+            "compiler": ("gcc", "clang"),
+            "packing": ("natural", "packed"),
+            "array_shape": (
+                "one_dim",
+                "multi_dim",
+                "array_of_struct",
+                "flexible",
+                "zero_length",
+            ),
+            "edit": (
+                "shrink_in_padding",
+                "grow",
+                "reshape",
+                "inner_bound",
+                "unchanged",
+            ),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "castxml spells a multi-dimensional array with its bounds "
+                    "reversed (int[3][2] for int[2][3])."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
+    BugClass(
+        id="extraction.dwarf_out_of_line_definition_dropped",
+        invariant=(
+            "A DWARF-only snapshot records a function defined outside its "
+            "class or namespace -- a definition DIE that names its declaration "
+            "only through DW_AT_specification (and DW_AT_abstract_origin for a "
+            "concrete constructor instance) -- with its declaration's name, "
+            "scope, virtuality, access and the cv/ref qualifiers of its this "
+            "parameter, so a method edit reads as the kind the header lane "
+            "reports (func_cv_changed, func_static_changed, "
+            "func_virtual_became_pure), not as an ELF removal plus addition."
+        ),
+        fixed_by=(1958,),
+        seed_tests=(
+            "tests/test_dwarf_member_functions.py",
+            "tests/test_dwarf_semantic_ir.py",
+            "tests/test_depth_projection_matches_shallow_dump.py",
+        ),
+        public_surfaces=("cli", "python-api"),
+        axes={
+            "compiler": ("gcc", "clang"),
+            "edit": (
+                "const_drop",
+                "const_add",
+                "volatile_drop",
+                "static_to_member",
+                "became_pure",
+                "unchanged",
+            ),
+            "scope": ("class_member", "namespace_function", "ctor_concrete_instance"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "GCC writes DW_VIRTUALITY_virtual for a pure virtual, so a "
+                    "GCC-built DWARF snapshot cannot report func_virtual_became_pure."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
+    BugClass(
         id="extraction.compile_entry_collapsed_to_first_source",
         invariant=(
             "A compile-database entry yields one compile unit per source "

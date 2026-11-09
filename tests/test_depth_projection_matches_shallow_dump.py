@@ -88,6 +88,18 @@ _TYPE_SCOPE = (
     "classify different exports as internal"
 )
 
+_GROUPED_REMOVALS = (
+    "a binary-only dump groups the removal of debug-declared functions that "
+    "share an ISA suffix into one cpu_dispatch_isa_dropped finding; the "
+    "projection keeps only their export entries, which the grouping does "
+    "not read, so it reports each removal"
+)
+_TYPEDEF_ROOT = (
+    "a binary-only dump reads the typedef behind a field from debug "
+    "declarations and folds the field's type change into that typedef's "
+    "retarget as its root cause (compare/finding_redundancy.py); the "
+    "projection has no typedef to fold under and reports the field"
+)
 _ELF_ONLY_MODE = (
     "the projection runs in elf_only_mode (no surface is declared), where an "
     "export addition/removal is spelled without the _elf_only suffix; the "
@@ -161,6 +173,19 @@ REPLACEMENT_KINDS: frozenset[str] = frozenset(
     {"func_params_changed", "func_likely_renamed"}
 )
 
+#: Projected readings of an export-only removal paired by demangled name
+#: (a template instance whose default argument or instantiation changed):
+#: excused when the binary-only dump reports that symbol's removal, which it
+#: reads from a debug declaration instead (:data:`_DEMANGLED_PAIRING`).
+PAIRED_REMOVAL_READINGS: frozenset[str] = frozenset(
+    {"default_template_arg_changed", "instantiation_missing_from_binary"}
+)
+
+#: Binary-only-dump kinds that group the removal of debug-declared functions
+#: into one finding; each accounts for the projection's export-only removals
+#: of the symbols it groups (:data:`_GROUPED_REMOVALS`).
+GROUPING_KINDS: frozenset[str] = frozenset({"cpu_dispatch_isa_dropped"})
+
 #: Kinds a binary-only dump pairs through a debug subprogram's name; each
 #: accounts for the projection's removal/addition of exports carrying that
 #: name (:data:`_DEBUG_DECLARATIONS`).
@@ -197,6 +222,23 @@ ONLY_BINARY_DUMP: dict[str, str] = {
     "typedef_base_changed": _DEBUG_DECLARATIONS,
     "typedef_removed": _DEBUG_DECLARATIONS,
     "integer_model_changed": _DEBUG_DECLARATIONS,
+    # Since extractor generation 44 a binary-only dump records C++ member
+    # functions and namespace-scope functions from their debug-info
+    # declarations: their cv/ref qualifiers, static-ness, virtuality, access,
+    # deprecation and declaring scope are what these kinds read.
+    "func_cv_changed": _DEBUG_DECLARATIONS,
+    "func_ref_qual_changed": _DEBUG_DECLARATIONS,
+    "func_static_changed": _DEBUG_DECLARATIONS,
+    "func_virtual_added": _DEBUG_DECLARATIONS,
+    "func_virtual_removed": _DEBUG_DECLARATIONS,
+    "virtual_method_added": _DEBUG_DECLARATIONS,
+    "method_access_changed": _DEBUG_DECLARATIONS,
+    "experimental_graduated": _DEBUG_DECLARATIONS,
+    "experimental_removed_without_replacement": _DEBUG_DECLARATIONS,
+    "inline_namespace_version_bumped": _DEBUG_DECLARATIONS,
+    "overload_set_rerouted": _DEBUG_DECLARATIONS,
+    "default_template_arg_changed": _DEBUG_DECLARATIONS,
+    "cpu_dispatch_isa_dropped": _DEBUG_DECLARATIONS,
     # Mach-O (dSYM): a variable's kind read from its debug record.
     "cpo_kind_changed": _DEBUG_DECLARATIONS,
     "base_class_offset_changed": _RECORD_RELATIONS,
@@ -307,9 +349,10 @@ def _unexplained(projected_run: Run, oracle_run: Run) -> dict[str, list[Finding]
         _pair_off(only_b, only_p, b_kind, p_kind)
     replacements = 0
     for p_kind in REPLACEMENT_KINDS:
-        before = len(only_b)
-        _pair_off(only_b, only_p, "func_removed", p_kind)
-        replacements += before - len(only_b)
+        for b_kind in ("func_removed", "func_removed_elf_only"):
+            before = len(only_b)
+            _pair_off(only_b, only_p, b_kind, p_kind)
+            replacements += before - len(only_b)
     for kind, sym in sorted(only_b):
         if replacements and kind in {"func_added", "func_added_elf_only"}:
             only_b.discard((kind, sym))
@@ -373,6 +416,19 @@ def _projected_only_reason(finding: Finding, projected: Run, oracle: Run) -> str
         return ONLY_PROJECTED[kind]
     if finding in oracle.out_of_surface:
         return _SURFACE_SCOPE
+    if kind == "struct_field_type_changed" and any(
+        k == "typedef_base_changed" for k, _ in oracle.findings
+    ):
+        return _TYPEDEF_ROOT
+    if kind in PAIRED_REMOVAL_READINGS and any(
+        (removal, sym) in oracle.findings
+        for removal in ("func_removed", "func_removed_elf_only")
+    ):
+        return _DEMANGLED_PAIRING
+    if kind in {"func_removed", "func_removed_elf_only"} and any(
+        k in GROUPING_KINDS for k, _ in oracle.findings
+    ):
+        return _GROUPED_REMOVALS
     if kind in SYMBOL_PRESENCE_KINDS and oracle.declares_nowhere(sym):
         return _ELF_ONLY_INVENTORY
     if kind in TYPE_SCOPED_KINDS and _scope_differs(sym, projected.types, oracle.types):

@@ -56,7 +56,10 @@ from .dwarf_utils import (
     unwrap_cv_typedef as _unwrap_cv_typedef,
 )
 from .elf_symbol_filter import is_abi_relevant_elf_symbol
-from .extract import dwarf_vtable_completeness as _dvc
+from .extract import (
+    dwarf_member_functions as _members,
+    dwarf_vtable_completeness as _dvc,
+)
 from .extract.dwarf_abi_fact import dwarf_type_abi_fact as _type_abi_fact
 from .extract.dwarf_decl_file import decl_header_location
 from .extract.dwarf_records import (
@@ -103,7 +106,6 @@ from .model.identity import (
     entity_id_for_type,
     entity_id_for_typedef,
 )
-from .model.mangled_name import itanium_scope_components
 
 if TYPE_CHECKING:
     from .dwarf_unified import DwarfSession
@@ -421,6 +423,7 @@ class _DwarfSnapshotBuilder:
 
     def _process_cu(self, CU: Any) -> None:
         """Walk all DIEs in one Compilation Unit."""
+        self._member_scopes = _members.MemberScopes()
         top_die = CU.get_top_DIE()
         stack: collections.deque[tuple[Any, str, ScopePath, AccessLevel]] = (
             collections.deque([(top_die, "", (), AccessLevel.PUBLIC)])
@@ -498,6 +501,8 @@ class _DwarfSnapshotBuilder:
                     stack.append(
                         (child, next_scope, next_scope_path, next_default_access)
                     )
+        for d_die, d_cu, d_scope, d_path, d_access in self._member_scopes.drain():
+            self._process_subprogram(d_die, d_cu, d_scope, d_path, d_access, retry=True)
 
     # -------------------------------------------------------------------
     # Subprogram (function) extraction
@@ -510,17 +515,17 @@ class _DwarfSnapshotBuilder:
         scope: str,
         scope_path: ScopePath = (),
         default_access: AccessLevel = AccessLevel.PUBLIC,
+        retry: bool = False,
     ) -> None:
-        """Extract a function from DW_TAG_subprogram."""
-        name = _attr_str(die, "DW_AT_name")
-        if not name:
+        """Extract a function from DW_TAG_subprogram (a nameless one is a
+        definition whose declaration names it: extract/dwarf_member_functions)."""
+        resolved = self._member_scopes.resolve(
+            die, CU, scope, scope_path, default_access, retry=retry
+        )
+        if resolved is None:
             return
-
-        # Get linkage name (mangled name for C++)
-        linkage_name = _attr_str(die, "DW_AT_linkage_name")
-        if not linkage_name:
-            linkage_name = _attr_str(die, "DW_AT_MIPS_linkage_name")
-        mangled = linkage_name or name
+        name, decl, scope, scope_path, default_access = resolved
+        mangled = _members.chained_linkage_name(die, CU) or name
         qualified_name = f"{scope}::{name}" if scope else name
 
         # Deleted functions intentionally bypass the exported-symbol check so a
@@ -537,16 +542,18 @@ class _DwarfSnapshotBuilder:
         # Future-proofing: check for the attribute and set is_deleted on the Function.
         is_deleted = _attr_bool(die, "DW_AT_deleted")
 
-        # Skip declarations without definitions (DW_AT_declaration=True)
-        # BUT: if it's marked deleted, we still want to record it for cross-reference.
-        if _attr_bool(die, "DW_AT_declaration") and not is_deleted:
+        # Skip declarations without definitions (DW_AT_declaration=True), BUT keep a deleted
+        # one for cross-reference and a member pure virtual (it has no definition DIE).
+        is_pure = _members.is_pure_virtual_member(die, scope_path)
+        if _attr_bool(die, "DW_AT_declaration") and not (is_deleted or is_pure):
             return
 
         exported = self._export_match(mangled, name)
         visibility = _admit_subprogram(
             is_deleted=is_deleted,
             is_exported=exported is not ExportMatch.ABSENT,
-            is_external=_attr_bool(die, "DW_AT_external"),
+            is_external=_attr_bool(die if decl is None else decl, "DW_AT_external"),
+            is_pure_virtual=is_pure,
         )
         if visibility is None:
             return
@@ -569,6 +576,7 @@ class _DwarfSnapshotBuilder:
                 exported=exported,
                 scope_path=scope_path,
                 default_access=default_access,
+                decl=decl if decl is not None else die,
             )
         )
 
@@ -585,6 +593,7 @@ class _DwarfSnapshotBuilder:
         exported: bool | ExportMatch = True,
         scope_path: ScopePath = (),
         default_access: AccessLevel = AccessLevel.PUBLIC,
+        decl: Any = None,
     ) -> Function:
         """Construct a :class:`Function` from a (already surface-admitted)
         ``DW_TAG_subprogram`` DIE. *exported*: the export-set lookup's own
@@ -595,8 +604,11 @@ class _DwarfSnapshotBuilder:
 
         Pure DWARF→model mapping (N-C): admission/dedup live in
         ``_process_subprogram``. Also records referenced type names on the
-        builder so the second extraction pass can reach them.
+        builder so the second extraction pass can reach them. *decl* is the
+        DIE carrying the declaration's attributes (the in-class declaration
+        of a member definition; *die* itself otherwise).
         """
+        attrs = decl if decl is not None else die
         # Return type
         ret_type = "void"
         ret_ptr_depth = 0
@@ -607,59 +619,30 @@ class _DwarfSnapshotBuilder:
 
         # Parameters
         params: list[Param] = []
-        for child in die.iter_children():
-            if child.tag == "DW_TAG_formal_parameter":
-                p = self._process_param(child, CU)
-                if p is not None:
-                    params.append(p)
+        for child in _members.parameter_dies(die, CU):
+            p = self._process_param(child, CU)
+            if p is not None:
+                params.append(p)
 
         # Qualifiers
-        is_virtual = _attr_bool(die, "DW_AT_virtuality") or (
-            _attr_int(die, "DW_AT_virtuality") > 0
-        )
+        is_virtual = _attr_int(attrs, "DW_AT_virtuality") > 0
         is_pure_virtual = (
-            _attr_int(die, "DW_AT_virtuality") == 2
+            _attr_int(attrs, "DW_AT_virtuality") == 2
         )  # DW_VIRTUALITY_pure_virtual
         is_extern_c = not mangled.startswith("_Z")
-        is_static = not _attr_bool(die, "DW_AT_external")
-        # DW_AT_explicit is emitted by g++/clang++ on ctors and conversion ops
-        # whose source-level declaration carries the `explicit` specifier
-        # (C++20 conditional `explicit(bool)` collapses to its resolved bool).
-        # Tri-state: True/False are authoritative readings from DWARF; the
-        # snapshot loader defaults to None for older snapshots that predate
-        # this field, so the diff can distinguish "unknown" from "implicit".
-        #
-        # `_attr_bool` returns False (never None) for a missing attribute
-        # (Codex review, fresh evidence, PR #982), and the compiler only
-        # ever *emits* DW_AT_explicit on a ctor/conversion-operator DIE in
-        # the first place -- so a bare `_attr_bool` read can't distinguish
-        # "confirmed not explicit" (an implicit ctor/conversion op, real
-        # evidence) from "explicit is conceptually inapplicable" (an
-        # ordinary method/free function/destructor, no evidence at all).
-        # Eligibility is derived from the mangled name's own Itanium ctor/
-        # conversion-operator encoding (`{ctor}`/`{op:cv:...}`) -- DWARF
-        # carries no equivalent of castxml/clang's own AST node kind here.
-        _explicit_components = itanium_scope_components(mangled)
-        _is_explicit_eligible = (
-            _explicit_components is not None
-            and bool(_explicit_components)
-            and (
-                _explicit_components[-1] == "{ctor}"
-                or _explicit_components[-1].startswith("{op:cv:")
-            )
-        )
-        is_explicit: bool | None = (
-            _attr_bool(die, "DW_AT_explicit") if _is_explicit_eligible else None
-        )
+        quals = _members.qualifiers_in_scope(attrs, CU, scope_path)
+        # Explicit specifier: see extract/dwarf_member_functions.explicit_specifier.
+        is_explicit_fact = _members.explicit_specifier(mangled, attrs)
+        is_explicit = is_explicit_fact.value
 
         # Access level
-        access_val = _attr_int(die, "DW_AT_accessibility")
+        access_val = _attr_int(attrs, "DW_AT_accessibility")
         access = _access_from_dwarf(access_val, default_access)
 
         # Vtable index
         vtable_index: int | None = None
-        if "DW_AT_vtable_elem_location" in die.attributes:
-            vtable_index = _attr_int(die, "DW_AT_vtable_elem_location")
+        if "DW_AT_vtable_elem_location" in attrs.attributes:
+            vtable_index = _attr_int(attrs, "DW_AT_vtable_elem_location")
 
         return Function(
             name=qualified_name if scope else name,
@@ -672,27 +655,26 @@ class _DwarfSnapshotBuilder:
             is_virtual=is_virtual,
             is_extern_c=is_extern_c,
             vtable_index=vtable_index,
-            is_static=is_static,
+            is_static=quals.is_static,
             is_pure_virtual=is_pure_virtual,
             access=access,
             return_pointer_depth=ret_ptr_depth,
             is_deleted=is_deleted,
             deleted_from_dwarf=is_deleted,
             is_explicit=is_explicit,
+            is_const=quals.is_const,
+            is_volatile=quals.is_volatile,
+            ref_qualifier=quals.ref_qualifier,
             # ADR-063 Phase 2 -- see dwarf_scope.function_entity_id.
             entity_id=_dwarf_function_entity_id(
                 scope_path,
                 name,
-                die,
+                die if _members.linkage_name(die) else attrs,
                 mangled,
                 is_extern_c,
                 tuple(p.type for p in params),
             ),
-            is_explicit_fact=(
-                Fact.present(is_explicit)
-                if _is_explicit_eligible
-                else Fact.not_applicable()
-            ),
+            is_explicit_fact=is_explicit_fact,
         )
 
     def _is_abi_relevant_export(self, name: str) -> bool:

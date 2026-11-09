@@ -268,14 +268,22 @@ FAMILIES: dict[str, Family] = {
         ),
         Family(
             key="F14",
-            title="DWARF type spelling keeps the attribute that makes a type",
+            title="DWARF extraction keeps the attribute that makes a declaration",
             invariant=(
-                "A DWARF type whose identity is an attribute rather than its "
-                "shape (DW_AT_GNU_vector) keeps that attribute in its recorded "
-                "spelling: a vector never collapses onto a plain array's T[] "
-                "spelling, so a same-size vector-versus-array change is reported."
+                "A DWARF entity keeps every attribute its identity rests on, "
+                "not just its shape: a vector keeps DW_AT_GNU_vector (never the "
+                "plain T[] spelling), an array keeps each dimension's bound "
+                "(char[8] -> char[6] is a member type change at any record "
+                "size), and a function defined outside its class or namespace "
+                "keeps the declaration DW_AT_specification names (its name, "
+                "scope and this-qualifiers), so a DWARF-only comparison reports "
+                "the same change kind the header lane does."
             ),
-            harness_tests=("tests/test_type_spelling_differential_matrix.py",),
+            harness_tests=(
+                "tests/test_type_spelling_differential_matrix.py",
+                "tests/test_dwarf_array_extents.py",
+                "tests/test_dwarf_member_functions.py",
+            ),
             planned_reason="",
         ),
         Family(
@@ -547,7 +555,11 @@ _F12 = (
     "extraction.msvc_include_operand_spelling_not_probed",
 )
 _F13 = ("extraction.compile_entry_collapsed_to_first_source",)
-_F14 = ("extraction.vector_type_collapsed_to_plain_array",)
+_F14 = (
+    "extraction.vector_type_collapsed_to_plain_array",
+    "extraction.dwarf_array_bound_erased",
+    "extraction.dwarf_out_of_line_definition_dropped",
+)
 _F15 = (
     "extraction.castxml_vector_element_not_modelled",
     "extraction.castxml_function_type_collapsed_to_opaque_tag",

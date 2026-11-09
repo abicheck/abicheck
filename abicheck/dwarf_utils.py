@@ -135,31 +135,90 @@ def vector_byte_size(die: Any, element_size: int | None) -> int | None:
     return None
 
 
-def array_type_spelling(element: str | None, size: int, is_vector: bool) -> str:
+#: An unsigned ``DW_AT_upper_bound`` of all-ones is GCC's spelling of the
+#: ``-1`` bound of a zero-length (``T[0]``) array in a fixed-width form.
+_ALL_ONES_BOUNDS = frozenset({0xFFFFFFFF, 0xFFFFFFFFFFFFFFFF})
+
+
+def _subrange_count(subrange: Any) -> int | None:
+    """Element count of one ``DW_TAG_subrange_type``, or ``None`` when the
+    DIE states no constant bound (a flexible array member ``T[]``, or a
+    variable-length bound written as an expression or reference)."""
+    attrs = subrange.attributes
+    if "DW_AT_count" in attrs:
+        value = attrs["DW_AT_count"].value
+        return value if isinstance(value, int) and value >= 0 else None
+    if "DW_AT_upper_bound" in attrs:
+        upper = attrs["DW_AT_upper_bound"].value
+        if not isinstance(upper, int):
+            return None
+        if upper in _ALL_ONES_BOUNDS or upper == -1:
+            return 0
+        count = upper - attr_int(subrange, "DW_AT_lower_bound") + 1
+        return count if count >= 0 else None
+    return None
+
+
+def array_extents(die: Any) -> tuple[int | None, ...]:
+    """Each dimension's element count of a ``DW_TAG_array_type``, outermost
+    first (``int[2][3]`` is ``(2, 3)``); ``None`` for an unbounded one."""
+    return tuple(
+        _subrange_count(child)
+        for child in die.iter_children()
+        if child.tag == "DW_TAG_subrange_type"
+    )
+
+
+def array_type_spelling(
+    element: str | None,
+    size: int,
+    is_vector: bool,
+    extents: tuple[int | None, ...] = (),
+) -> str:
     """Spell a DW_TAG_array_type, distinguishing GCC/Clang vector types.
 
     A ``DW_AT_GNU_vector`` array is a ``vector_size`` vector: its lane count
     and vector-ness are part of its identity, so it spells as the source
     spelling ``T __attribute__((vector_size(N)))`` (``N`` in bytes, the same
-    total size the ``DW_AT_byte_size`` carries). A plain array keeps the
-    ``T[]`` form, which never names its element count.
+    total size the ``DW_AT_byte_size`` carries). A plain array spells each
+    dimension's bound the way the header frontends and CTF do (``char[8]``,
+    ``int[2][3]``): the bound is part of the member's type, so ``char[8]`` ->
+    ``char[6]`` is a type change even when the record's size is not. An
+    unbounded dimension (a flexible array member) keeps ``[]``, and an array
+    DIE with no subrange at all spells ``T[]``.
     """
     if is_vector:
         return f"{element or '?'} __attribute__((vector_size({size or 0})))"
     if element is None:
         return "array"
-    return f"{element}[]"
+    if not extents:
+        return f"{element}[]"
+    return element + "".join("[]" if n is None else f"[{n}]" for n in extents)
 
 
 def array_type_info(die: Any, inner: tuple[str, int] | None) -> tuple[str, int]:
-    """Name and byte size of a DW_TAG_array_type from its element's (name, size)."""
+    """Name and byte size of a DW_TAG_array_type from its element's (name, size).
+
+    Arrays rarely carry ``DW_AT_byte_size``; the size is then the product of
+    the dimensions' counts times the element size (0 when a dimension is
+    unbounded or the element size is unknown).
+    """
     is_vector = "DW_AT_GNU_vector" in die.attributes
     element_name = inner[0] if inner is not None else None
     if is_vector:
         size = vector_byte_size(die, inner[1] if inner is not None else None) or 0
-    else:
-        size = attr_int(die, "DW_AT_byte_size")
-    return (array_type_spelling(element_name, size, is_vector), size)
+        return (array_type_spelling(element_name, size, is_vector), size)
+    extents = array_extents(die)
+    size = attr_int(die, "DW_AT_byte_size")
+    if not size and extents and inner is not None and inner[1]:
+        total = inner[1]
+        for count in extents:
+            if count is None:
+                total = 0
+                break
+            total *= count
+        size = total
+    return (array_type_spelling(element_name, size, is_vector, extents), size)
 
 
 #: ``DW_AT_calling_convention`` values a compiler writes on a
