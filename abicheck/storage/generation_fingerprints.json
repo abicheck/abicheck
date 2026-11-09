@@ -46,7 +46,7 @@
       "abicheck/extract/dwarf_abi_fact.py": "3a16135cf85dd7e4f7bf6dc6dfe5d0a9445f8d2c84a19030ed3a3fefe666ecbf",
       "abicheck/extract/dwarf_decl_file.py": "a585b6e38dc879b04db4b3d70a8b7131774a8b735df1068e6baafcaac934af42",
       "abicheck/extract/dwarf_layout_backfill.py": "3dcc9efb8907b6b3419b09b1c262f64403a5162148bc3be0a5d51e112ef69a4d",
-      "abicheck/extract/dwarf_member_functions.py": "7ac8d44af0d591b2707882aca3e751cc39a64c893166bcc644e2dbb305ab21e0",
+      "abicheck/extract/dwarf_member_functions.py": "96af14ad007f95d9d803621482842e533e2dcb549e5ae87f1ed0617bd04f61b4",
       "abicheck/extract/dwarf_producer.py": "86e449f5776fe7aead410ef979dc636837d28c8caae5599d3c22b8c3f442e1c6",
       "abicheck/extract/dwarf_records.py": "f510a601ba2f763d9b3dc67c090e4c3a0f51237804a4bb7f2b28cb3e1fbc0147",
       "abicheck/extract/dwarf_scope.py": "1800757661a850338d8cb96d715995ffa8f79354047f68b1ce5e248a72819b20",
@@ -204,7 +204,7 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "4e5c3354ce9633b97764c0fd2028afbc3ac535bec49d3f898629a4ac4e430359",
+    "fingerprint": "89e00807c7d04fc6ee7bcf34dd1e00456ee8bdd53b3f71f72aabf12aabae5813",
     "generation": 45,
     "reason": "bumped to 45 for a semantic change"
   },

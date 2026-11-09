@@ -202,6 +202,30 @@ def test_no_declaration_is_claimed_without_a_chain_to_one(shape: str) -> None:
     assert members.member_declaration(die, cu) is None
 
 
+# Any DW_AT_inline value marks an abstract instance, never the definition.
+# DWARF 5 Table 3.4 reads DW_INL_not_inlined (0) as no attribute, but GCC
+# writes exactly that value on a constructor's or destructor's abstract root
+# (the D4/C4 DIE its concrete D0/D2 instances point at), so 0 is excluded too
+# (the catalog's binary-projection oracle reads a stray ``_ZN6SensorD4Ev``
+# otherwise).
+@pytest.mark.parametrize(
+    ("inline", "is_definition"),
+    [(None, True), (0, False), (1, False), (2, False), (3, False)],
+)
+def test_only_an_abstract_instance_root_is_not_a_definition(
+    inline: int | None, is_definition: bool
+) -> None:
+    cu = _CU()
+    decl = _die(
+        cu, 10, "DW_TAG_subprogram", {"DW_AT_name": "f", "DW_AT_declaration": True}
+    )
+    attrs: dict[str, Any] = {"DW_AT_specification": _Ref(10)}
+    if inline is not None:
+        attrs["DW_AT_inline"] = inline
+    die = _die(cu, 30, "DW_TAG_subprogram", attrs)
+    assert (members.member_declaration(die, cu) is decl) is is_definition
+
+
 def test_a_linkage_name_absent_from_the_whole_chain_reads_empty() -> None:
     cu = _CU()
     _die(cu, 10, "DW_TAG_subprogram", {"DW_AT_name": "f", "DW_AT_declaration": True})

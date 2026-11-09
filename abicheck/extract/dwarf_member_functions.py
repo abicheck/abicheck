@@ -85,7 +85,10 @@ def member_declaration(die: Any, CU: Any) -> Any | None:
     ``None`` when *die* names no declaration (or the chain is broken).
 
     An abstract instance (``DW_AT_inline``, the out-of-line template a
-    concrete constructor instance points at) is not itself a definition.
+    concrete constructor instance points at) is not itself a definition,
+    whatever the attribute's value: GCC writes ``DW_INL_not_inlined`` on the
+    abstract root of a constructor or destructor (``_ZN1SD4Ev``), which DWARF 5
+    Table 3.4 would read as no attribute at all.
     """
     if "DW_AT_inline" in die.attributes:
         return None

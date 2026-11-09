@@ -314,3 +314,19 @@ def test_reordered_virtuals_read_as_a_vtable_change_from_dwarf(
     }
     assert {"_ZN1A1fEv", "_ZN1A1gEv"} <= moved, result.changes
     assert result.verdict == Verdict.BREAKING
+
+
+@pytest.mark.parametrize("compiler", sorted(_CXX))
+def test_no_abstract_constructor_or_destructor_is_recorded(
+    tmp_path: Path, compiler: str
+) -> None:
+    # GCC writes the C4/D4 abstract root with DW_AT_inline = DW_INL_not_inlined;
+    # it has no code and no symbol, so only the concrete C1/C2/D0/D1/D2 count.
+    snap = _dwarf(_build(tmp_path, compiler, _CLASS, _SOURCE))
+    abstract = [
+        f.mangled
+        for f in snap.declarations.functions
+        if f.mangled.endswith(("C4Ev", "D4Ev"))
+    ]
+    assert abstract == []
+    assert "_ZN3lib5ShapeD2Ev" in {f.mangled for f in snap.declarations.functions}
