@@ -9,7 +9,9 @@ expected value, not the helper's own output).
 from __future__ import annotations
 
 import os
+import struct
 import subprocess
+import sys
 from dataclasses import replace
 from pathlib import Path
 
@@ -31,6 +33,7 @@ from tests._edit_corpus_harness import Built, CompileError
 from tests._edit_corpus_operators import OP_BY_NAME
 from tests._edit_corpus_seeds import C_SEED, SEED_BY_NAME
 from tests._edit_corpus_tiers import Cell
+from tests._strict_process import StrictProcessRunner
 
 GCC = Toolchain("gcc", 13, "gcc", "g++")
 
@@ -208,22 +211,6 @@ def clean_probe_caches() -> object:
         fn.cache_clear()
 
 
-def _flag_runner(failure: object) -> object:
-    """Baseline (no -m32) builds; the -m32 build fails as *failure* says."""
-
-    def run(
-        cmd: list[str], cwd: Path | None = None
-    ) -> subprocess.CompletedProcess[str]:
-        if "-m32" not in cmd:
-            return _proc()
-        if isinstance(failure, BaseException):
-            raise failure
-        assert isinstance(failure, subprocess.CompletedProcess)
-        return failure
-
-    return run
-
-
 @pytest.mark.usefixtures("clean_probe_caches")
 @pytest.mark.parametrize(
     ("failure", "broken"),
@@ -274,12 +261,46 @@ def _flag_runner(failure: object) -> object:
         (OSError("exec format error"), True),
         (_proc(-11, stderr="gcc: internal compiler error: Segmentation fault\n"), True),
         (_proc(4, stderr="gcc: internal compiler error: in foo, at bar.c:1\n"), True),
+        # clang's frontend crash report, with the driver exiting 1.
+        (
+            _proc(
+                1,
+                stderr="PLEASE submit a bug report to https://github.com/llvm/llvm-project/issues/\n"
+                "clang: error: clang frontend command failed due to signal (use -v to see invocation)\n",
+            ),
+            True,
+        ),
+        # A warning that merely names the flag does not explain the failure.
+        (
+            _proc(
+                1,
+                stderr="cc: warning: argument unused during compilation: '-m32'\n"
+                "collect2: error: ld returned 1 exit status\n",
+            ),
+            True,
+        ),
     ],
 )
 def test_flag_probe_skips_only_a_failure_that_names_a_capability(
     monkeypatch: pytest.MonkeyPatch, failure: object, broken: bool
 ) -> None:
-    monkeypatch.setattr(tcs, "_run", _flag_runner(failure))
+    # The -m32 shared-library build fails as *failure* says. Only a failure that
+    # names the capability goes on to the plain baseline (library, then
+    # executable); a broken toolchain stops at the first command.
+    runner = StrictProcessRunner()
+    m32_lib = ["/x/gcc-97", "-m32", "-shared", "-fPIC", "-o", "libprobe.so", "lib.c"]
+    if isinstance(failure, BaseException):
+        runner.expect(argv_contains=m32_lib, raises=failure)
+    else:
+        runner.expect(argv_contains=m32_lib, returns=failure)
+    if not broken:
+        runner.expect(
+            argv_matches=lambda a: "-shared" in a and "-m32" not in a, returns=_proc()
+        )
+        runner.expect(
+            argv_matches=lambda a: "-lprobe" in a and "-m32" not in a, returns=_proc()
+        )
+    runner.install(monkeypatch, tcs, "_run")
     flags = Flags(bits=32)
     if broken:
         with pytest.raises(tcs.ToolchainBroken):
@@ -288,6 +309,7 @@ def test_flag_probe_skips_only_a_failure_that_names_a_capability(
         reason = tcs._flags_unavailable(_PROBE_TC, "c", flags)
         assert isinstance(failure, subprocess.CompletedProcess)
         assert reason is not None and failure.stderr.strip().splitlines()[-1] in reason
+    runner.assert_exhausted()
 
 
 @pytest.mark.usefixtures("clean_probe_caches")
@@ -433,6 +455,45 @@ def test_pack_rebuild_accepts_alignment_only_where_offsets_cannot_move(
     assert (exp.problems("BREAKING", frozenset(kinds)) == []) is ok
 
 
+def _rec_layout(pack: int | None) -> tuple[int, ...]:
+    """sizeof and offsets of ``struct rec {int; double; char[8];}`` at *pack* (x86-64).
+
+    ctypes' ``_pack_`` follows gcc's packing rule, so this is a layout oracle
+    independent of the operator's rule.
+    """
+    import ctypes
+
+    fields = [
+        ("id", ctypes.c_int),
+        ("weight", ctypes.c_double),
+        ("tag", ctypes.c_char * 8),
+    ]
+    ns: dict[str, object] = {"_fields_": fields}
+    if pack is not None:
+        ns["_pack_"] = pack
+        ns["_layout_"] = "gcc-sysv"  # explicit, as Python 3.14 requires with _pack_
+    rec = type("rec", (ctypes.Structure,), ns)
+    return (ctypes.sizeof(rec), *(getattr(rec, n).offset for n, _ in fields))
+
+
+@pytest.mark.skipif(
+    struct.calcsize("P") != 8 or sys.platform == "win32",
+    reason="the layout oracle is the x86-64 SysV host's own ctypes",
+)
+@pytest.mark.parametrize("old_pack", [None, 2, 4, 8])
+def test_pack_rebuild_from_a_packed_old_side_matches_the_layout_oracle(
+    old_pack: int | None,
+) -> None:
+    # Alignment-only is an accepted finding exactly when packing to 1 moves no
+    # size or offset (by an independent layout computation).
+    unchanged = _rec_layout(old_pack) == _rec_layout(1)
+    exp = OP_BY_NAME["rebuild_pack_struct"].expect(_cfg(flags=Flags(pack=old_pack)))
+    accepts_alignment_only = (
+        exp.problems("BREAKING", frozenset({"STRUCT_ALIGNMENT_CHANGED"})) == []
+    )
+    assert accepts_alignment_only is unchanged
+
+
 # --- reporting ------------------------------------------------------------------
 
 
@@ -479,6 +540,7 @@ def test_a_failed_minimization_keeps_the_original_mismatch(
         raise CompileError("shrunk config does not build")
 
     monkeypatch.setenv("ABICHECK_EDIT_CORPUS_REPORT_DIR", str(tmp_path))
+    monkeypatch.setenv("ABICHECK_EDIT_CORPUS_MINIMIZE", "1")
     monkeypatch.setattr(matrix, "run_cell", lambda *a: mismatch)
     monkeypatch.setattr(matrix, "minimize", shrink)
     with pytest.raises(pytest.fail.Exception) as info:

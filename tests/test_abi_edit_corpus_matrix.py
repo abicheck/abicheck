@@ -535,9 +535,11 @@ def test_layout_probe_reads_every_record_and_enum_of_the_c_seed() -> None:
     keys = set(probe_expressions(dict(C_SEED.roles), "c"))
     want = {
         "sizeof(point)",
+        "alignof(point)",
         "offsetof(point,x)",
         "offsetof(point,y)",
         "sizeof(rec)",
+        "alignof(rec)",
         "offsetof(rec,id)",
         "offsetof(rec,weight)",
         "offsetof(rec,tag)",

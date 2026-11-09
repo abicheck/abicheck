@@ -963,10 +963,14 @@ OPERATORS: tuple[EditOp, ...] = (
         any_of=(_SIZE | _OFFSET,),
         rules=(
             Rule(
-                lambda c: c.flags.bits == 32,
+                lambda c: (
+                    c.flags.bits == 32
+                    or (c.flags.pack is not None and c.flags.pack <= 4)
+                ),
                 {"any_of": (_SIZE | _OFFSET | _ALIGN,)},
-                "i386 aligns a struct member double to 4, so rec has no padding to "
-                "remove: packing keeps every size and offset and lowers only alignof",
+                "rec's double already sits at offset 4 (i386 aligns it to 4; an old side "
+                "packed to 2 or 4 caps it there): packing to 1 keeps every size and "
+                "offset and lowers only alignof",
             ),
         ),
         precondition=_not_already("pack", 1),

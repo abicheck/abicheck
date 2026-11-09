@@ -173,9 +173,18 @@ class ToolchainBroken(RuntimeError):
     """
 
 
+# What a crashed compiler prints even when its driver exits with a positive
+# status: gcc's ICE banner and kill reports, clang's frontend crash report.
+_CRASH = re.compile(
+    r"internal compiler error|Killed signal|terminated program|Segmentation fault|"
+    r"core dumped|signal \d+|killed|PLEASE submit a bug report|"
+    r"frontend command failed due to signal|Stack dump:"
+)
+
+
 def _crashed(proc: subprocess.CompletedProcess[str]) -> bool:
-    """A compiler that died on a signal or reported an internal error crashed."""
-    return proc.returncode < 0 or "internal compiler error" in proc.stderr
+    """A compiler that died on a signal or printed a crash report crashed."""
+    return proc.returncode < 0 or _CRASH.search(proc.stderr) is not None
 
 
 @functools.cache
@@ -292,12 +301,12 @@ _MULTILIB_MISSING = re.compile(
 )
 
 
-# A compiler or linker that was killed or crashed: never a missing capability,
-# whatever capability-looking warnings (e.g. ld's "skipping incompatible")
-# came before it.
-_CRASH = re.compile(
-    r"internal compiler error|Killed signal|terminated program|Segmentation fault|"
-    r"core dumped|signal \d+|killed"
+# A diagnostic that rejects an option or target outright.
+_REJECTS_OPTION = re.compile(
+    r"error: (unrecognized|unknown|unsupported|invalid)|"
+    r"unrecognized command[- ]line option|unknown argument|"
+    r"is not supported|unsupported option",
+    re.IGNORECASE,
 )
 
 
@@ -310,8 +319,13 @@ def _names_capability(stderr: str, rendered: list[str]) -> bool:
     """
     if _CRASH.search(stderr):
         return False
+    # A crash is never a missing capability, whatever capability-looking
+    # warnings (e.g. ld's "skipping incompatible") came before it.
     optional = [f for f in rendered if not f.startswith("-O")]
-    if any(f in stderr for f in optional):
+    rejected = [ln for ln in stderr.splitlines() if _REJECTS_OPTION.search(ln)]
+    # The driver must *reject* a requested flag, not merely mention it (a
+    # warning that names the flag says nothing about the failure).
+    if any(f in ln for f in optional for ln in rejected):
         return True
     return "-m32" in rendered and _MULTILIB_MISSING.search(stderr) is not None
 
@@ -352,7 +366,10 @@ FEATURE_PROBES: dict[str, str] = {
     "concepts": "template <class T> concept C = sizeof(T) > 0;\n"
     "template <class T> requires C<T> int f(T) { return 0; }\n",
     "enum_underlying": "enum corpus_probe_e : unsigned char { CORPUS_PROBE_A };\n",
-    "no_unique_address": "struct E {}; struct S { [[no_unique_address]] E e; int x; };\n",
+    # Accepting the attribute is not enough (gcc 8 accepts and ignores it):
+    # the empty member must take no space (Itanium ABI; MSVC is not built).
+    "no_unique_address": "struct E {}; struct S { [[no_unique_address]] E e; int x; };\n"
+    'static_assert(sizeof(S) == sizeof(int), "no_unique_address ignored");\n',
 }
 
 
@@ -390,7 +407,9 @@ def default_cxx11_abi(tc: Toolchain) -> int | None:
         try:
             proc = subprocess.run(
                 [tc.cxx, "-x", "c++", "-fsyntax-only", "-"],
-                input=src + f'static_assert(_GLIBCXX_USE_CXX11_ABI == {value}, "");\n',
+                # A negative array bound, not static_assert: valid in C++98 too.
+                input=src
+                + f"typedef char corpus_abi_is[(_GLIBCXX_USE_CXX11_ABI == {value}) ? 1 : -1];\n",
                 capture_output=True,
                 text=True,
                 check=False,

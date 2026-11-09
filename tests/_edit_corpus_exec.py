@@ -174,6 +174,8 @@ def probe_expressions(roles: dict[str, RoleText], lang: str) -> dict[str, str]:
             name = m.group(1)
             tname = f"struct {name}"
             exprs[f"sizeof({name})"] = f"sizeof({tname})"
+            # GNU __alignof__ works in every C and C++ mode gcc and clang accept.
+            exprs[f"alignof({name})"] = f"__alignof__({tname})"
             for f in _field_names(m.group(2)):
                 exprs[f"offsetof({name},{f})"] = f"offsetof({tname}, {f})"
         for m in _ENUM.finditer(header):
