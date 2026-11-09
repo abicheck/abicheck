@@ -103,7 +103,10 @@ def discover() -> tuple[Toolchain, ...]:
             continue
         seen_bins.add(real)
         ident = _identify(cc_path)
-        if ident is None:
+        # The C++ driver must be the same family and major as the C one;
+        # a gcc 13 / g++ 14 pair is not one toolchain (the g++-N pair is found
+        # under its own name).
+        if ident is None or _identify(cxx_path) != ident:
             continue
         found.setdefault(ident, Toolchain(ident[0], ident[1], cc_path, cxx_path))
     if sys.platform == "win32" and shutil.which("cl"):
@@ -159,10 +162,30 @@ def std_flag_for_driver(driver: str, std: Standard) -> str | None:
     return None
 
 
+class ToolchainBroken(RuntimeError):
+    """An installed toolchain failed to build the plain baseline probe.
+
+    That is a failure, never a skip: a configured compiler that ran and
+    failed proves the lane would test less than it claims.
+    """
+
+
 @functools.cache
-def _flags_build(tc: Toolchain, lang: str, flags: Flags) -> str | None:
-    """None if *flags* builds a shared library and links an executable, else why not."""
+def _flags_build(
+    tc: Toolchain, lang: str, flags: Flags, check_width: bool = True
+) -> str | None:
+    """None if *flags* builds a shared library and links an executable, else why not.
+
+    With *check_width*, the executable also asserts ``sizeof(void *)`` matches
+    ``flags.bits``, so a compiler whose default is another width is reported,
+    not silently tested at the wrong one.
+    """
     ext = "cpp" if lang == "c++" else "c"
+    width = (
+        f"typedef char edit_corpus_target_width[(sizeof(void *) * 8 == {flags.bits}) ? 1 : -1];\n"
+        if check_width
+        else ""
+    )
     with tempfile.TemporaryDirectory(prefix="edit-corpus-probe-") as d:
         tmp = Path(d)
         # Default visibility explicitly, as the seeds do, so -fvisibility=hidden links.
@@ -172,9 +195,12 @@ def _flags_build(tc: Toolchain, lang: str, flags: Flags) -> str | None:
             "#pragma GCC visibility pop\n"
         )
         (tmp / f"main.{ext}").write_text(
-            "int probe_fn(int x);\nint main(void) { return probe_fn(-1); }\n"
-            if lang == "c"
-            else "int probe_fn(int x);\nint main() { return probe_fn(-1); }\n"
+            width
+            + (
+                "int probe_fn(int x);\nint main(void) { return probe_fn(-1); }\n"
+                if lang == "c"
+                else "int probe_fn(int x);\nint main() { return probe_fn(-1); }\n"
+            )
         )
         rendered = flags.render(tc, lang)
         drv = tc.driver(lang)
@@ -186,8 +212,50 @@ def _flags_build(tc: Toolchain, lang: str, flags: Flags) -> str | None:
             except (OSError, subprocess.TimeoutExpired) as exc:
                 return f"{' '.join(cmd)}: {exc}"
             if proc.returncode != 0:
+                if "edit_corpus_target_width" in proc.stderr:
+                    return f"{tc.id} with {' '.join(rendered)} does not target {flags.bits}-bit"
                 tail = (proc.stderr.strip().splitlines() or ["(no stderr)"])[-1]
                 return f"{tc.id} cannot build with {' '.join(rendered)}: {tail}"
+    return None
+
+
+def _flags_unavailable(tc: Toolchain, lang: str, flags: Flags) -> str | None:
+    """Why *flags* cannot be built by *tc*; raises if *tc* cannot build at all."""
+    reason = _flags_build(tc, lang, flags)
+    if reason is None:
+        return None
+    baseline = _flags_build(tc, lang, Flags(), check_width=False)
+    if baseline is not None:
+        raise ToolchainBroken(
+            f"{tc.id} ({tc.driver(lang)}) fails the plain {lang} baseline probe: {baseline}"
+        )
+    return reason
+
+
+@functools.cache
+def uses_libstdcxx(tc: Toolchain) -> bool:
+    """Whether *tc*'s C++ driver compiles against libstdc++ (``__GLIBCXX__``)."""
+    try:
+        proc = subprocess.run(
+            [tc.cxx, "-x", "c++", "-fsyntax-only", "-"],
+            input="#include <string>\n#ifndef __GLIBCXX__\n#error not libstdc++\n#endif\n",
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_PROBE_TIMEOUT,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return proc.returncode == 0
+
+
+def capability_gap(op: object, config: Config) -> str | None:
+    """A host capability *op* needs that ``op.requires`` cannot see without probing.
+
+    Kept out of ``requires`` so collecting the corpus never runs a compiler.
+    """
+    if getattr(op, "needs_libstdcxx", False) and not uses_libstdcxx(config.producer):
+        return f"{config.producer.id}'s C++ standard library is not libstdc++"
     return None
 
 
@@ -208,16 +276,20 @@ def unavailable(config: Config) -> str | None:
                 "seeds declare none; the MSVC lane is not built"
             )
         if sys.platform == "win32":
+            # clang targeting MSVC exports nothing without __declspec(dllexport)
+            # (the seeds declare none). MinGW gcc would auto-export, but the PE
+            # expectations (e.g. the MSVC-ABI no_unique_address rule) are not
+            # validated under MinGW, so the lane is not enabled there yet.
             return (
-                f"{tc.family} targeting Windows exports no symbols without "
-                "__declspec(dllexport); the corpus seeds declare none"
+                f"{tc.family} on Windows: the corpus PE lane is not validated "
+                "(clang/MSVC export nothing without __declspec(dllexport); MinGW untested)"
             )
         reason = fl.unsupported_reason(tc, config.lang)
         if reason:
             return f"{role}: {reason}"
         if std_flag(tc, config.std) is None:
             return f"{role} {tc.id} does not accept -std={config.std.name}"
-        reason = _flags_build(tc, config.lang, fl)
+        reason = _flags_unavailable(tc, config.lang, fl)
         if reason:
             return f"{role}: {reason}"
     if config.evidence == "dwarf" and config.objfmt != "elf":

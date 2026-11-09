@@ -15,6 +15,12 @@
 
 Tiers select cells; they never decide outcomes. A row whose toolchain is not
 installed still appears and is reported unavailable.
+
+Coverage is computed over the drawn rows. A row is then *repaired* where it
+would be meaningless (the standard raised to one the operator's features need,
+a rebuild's target flag reset when the row already has it); pairs that are
+infeasible by construction (a gcc-only flag on clang, ``-fpack-struct`` with
+the ``std::string`` seed) are not covered by any runnable cell.
 """
 
 from __future__ import annotations
@@ -235,6 +241,27 @@ def _repair_std(op: EditOp, lang: str, slot: int, tc: Toolchain) -> Standard:
     return options[idx]
 
 
+def _repair_rebuild(op: EditOp, flags: Flags) -> Flags:
+    """Reset a flag a rebuild edit would set to the value the row already has.
+
+    A rebuild row drawn with its target flag already on (``rebuild_short_enums``
+    with ``short_enums=True``) is a no-op the operator rejects, which would
+    drop every pair that row covers. Resetting just that flag keeps the rest of
+    the row, so those pairs stay covered by a runnable cell.
+    """
+    if op.rebuild is None:
+        return flags
+    base = Flags()
+    sets = op.rebuild(base)  # what the rebuild changes, read off the defaults
+    reset = {
+        name: getattr(base, name)
+        for name in Flags.__dataclass_fields__
+        if getattr(sets, name) != getattr(base, name)
+        and getattr(flags, name) == getattr(sets, name)
+    }
+    return replace(flags, **reset) if reset else flags  # type: ignore[arg-type]
+
+
 def row_to_cell(row: dict[str, object], toolchains: Sequence[Toolchain]) -> Cell | None:
     op_name, seed_name = str(row["cell"]).split("@")
     op, seed = OP_BY_NAME[op_name], SEED_BY_NAME[seed_name]
@@ -255,6 +282,7 @@ def row_to_cell(row: dict[str, object], toolchains: Sequence[Toolchain]) -> Cell
         cxx11_abi=row["cxx11_abi"] if lang == "c++" else None,  # type: ignore[arg-type]
         abi_version=row["abi_version"] if tc.family == "gcc" else None,  # type: ignore[arg-type]
     )
+    flags = _repair_rebuild(op, flags)
     consumer_flags = None
     if row["consumer_flags"] == "flip_short_enums":
         consumer_flags = replace(

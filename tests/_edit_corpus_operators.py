@@ -60,6 +60,9 @@ class EditOp:
     precondition: Callable[[Config], str | None] | None = None
     # A rebuild edit: the new side is built with ``rebuild(flags)``.
     rebuild: Callable[[Flags], Flags] | None = None
+    # Needs the producer's C++ library to be libstdc++; probed at run time by
+    # ``_edit_corpus_toolchains.capability_gap``, never at collection.
+    needs_libstdcxx: bool = False
 
     def applies_to(self, seed: Seed) -> bool:
         return all(r in seed.roles for r in self.roles)
@@ -408,16 +411,21 @@ def _short_enums(c: Config) -> bool:
     return c.flags.short_enums
 
 
-def _packed(c: Config) -> bool:
-    return c.flags.pack is not None
+def _packed_tight(c: Config) -> bool:
+    # struct rec { int; double; char tag[8] } is 20 bytes at pack 1..4. Losing
+    # two tag bytes gives 18 at pack 1 or 2; at pack 4 (or more) it rounds back
+    # up to 20, so only pack <= 2 shrinks the struct.
+    return c.flags.pack is not None and c.flags.pack <= 2
 
 
 def _hidden(c: Config) -> bool:
     return c.flags.visibility == "hidden"
 
 
-def _pe(c: Config) -> bool:
-    return c.objfmt == "pe"
+def _msvc_abi(c: Config) -> bool:
+    # MSVC and clang targeting MSVC ignore [[no_unique_address]]; MinGW gcc on
+    # PE uses the Itanium ABI and honors it.
+    return c.objfmt == "pe" and c.producer.family in ("msvc", "clang")
 
 
 def _with(**kw: object) -> Callable[[Flags], Flags]:
@@ -842,9 +850,9 @@ OPERATORS: tuple[EditOp, ...] = (
         verdict_min="API_BREAK",
         rules=(
             Rule(
-                _packed,
+                _packed_tight,
                 {"any_of": (_FIELD_TYPE, _SIZE), "verdict_min": "BREAKING"},
-                "packed, there is no tail padding: sizeof(struct rec) shrinks by two",
+                "packed to 1 or 2, there is no tail padding: sizeof(struct rec) shrinks by two",
             ),
         ),
         touches=("struct.rec",),
@@ -914,7 +922,7 @@ OPERATORS: tuple[EditOp, ...] = (
         features=("no_unique_address",),
         rules=(
             Rule(
-                _pe,
+                _msvc_abi,
                 {
                     "any_of": (),
                     "verdict_min": "NO_CHANGE",
@@ -966,6 +974,7 @@ OPERATORS: tuple[EditOp, ...] = (
         min_evidence="binary",
         precondition=_libstdcxx,
         rebuild=_with(cxx11_abi=0),
+        needs_libstdcxx=True,
     ),
     EditOp(
         "rebuild_hidden_visibility",

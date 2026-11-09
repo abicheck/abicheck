@@ -8,8 +8,9 @@ check the generator itself (templates, applicability, declared kinds) without a
 toolchain.
 
 A cell that disagrees with its ground truth is a detector finding. It is not
-fixed here: it is recorded in ``KNOWN_MISMATCHES`` as a strict xfail with the
-observed answer, and listed in the PR and ``docs/contribute/known-gaps.md``.
+fixed here: it is recorded in ``tests/_edit_corpus_known.py`` (shared with the
+config matrix) as a strict xfail with the exact issue set and verdict observed,
+and listed in ``docs/contribute/known-gaps.md``.
 """
 
 from __future__ import annotations
@@ -22,9 +23,17 @@ import pytest
 
 from abicheck.model.change_catalog.kinds import ChangeKind
 from tests._edit_corpus_config import Toolchain, default_config
-from tests._edit_corpus_harness import COMPILERS, BaselineCache, run_operator
-from tests._edit_corpus_operators import OPERATORS, VERDICT_RANK, matrix
-from tests._edit_corpus_seeds import SEEDS
+from tests._edit_corpus_expect import issue_keys
+from tests._edit_corpus_harness import (
+    COMPILERS,
+    BaselineCache,
+    _as_config,
+    run_operator,
+)
+from tests._edit_corpus_known import KNOWN, known_mismatch
+from tests._edit_corpus_operators import OP_BY_NAME, OPERATORS, VERDICT_RANK, matrix
+from tests._edit_corpus_seeds import SEED_BY_NAME, SEEDS
+from tests._edit_corpus_toolchains import capability_gap
 
 
 def _applies_at_default(op, seed) -> bool:
@@ -41,67 +50,9 @@ def default_matrix():
     return tuple((op, seed) for op, seed in matrix() if _applies_at_default(op, seed))
 
 
-# (operator, seed, compiler) -> (reason, kind the detector is missing).
-# A documented cell xfails only while its recorded mismatch still reproduces;
-# any other outcome (compile error, crash, different wrong answer) fails. When
-# the detector is fixed the mismatch stops reproducing and the entry must go.
-_CXX_PARAM = (
-    "C++ parameter change reads as FUNC_REMOVED + FUNC_ADDED (the mangled symbol changes, "
-    "so the old and new functions are not paired), never FUNC_PARAMS_CHANGED; verdict is right",
-    "FUNC_PARAMS_CHANGED",
-)
-_CASTXML_NOEXCEPT = (
-    "castxml writes no exception specification, so noexcept added reads NO_CHANGE "
-    "(docs/contribute/known-gaps.md: castxml output carries no noexcept)",
-    "FUNC_NOEXCEPT_ADDED",
-)
-_CASTXML_TEMPLATE_DEFAULT = (
-    "castxml reads a header-only template default change as NO_CHANGE "
-    "(docs/contribute/known-gaps.md: header-only default template argument, castxml side)",
-    "DEFAULT_TEMPLATE_ARG_CHANGED",
-)
-_VIRTUAL_REMOVED = (
-    "removing a virtual reads FUNC_REMOVED plus vtable kinds; FUNC_VIRTUAL_REMOVED is never emitted",
-    "FUNC_VIRTUAL_REMOVED",
-)
-
-_CXX11_ABI = (
-    "a -D_GLIBCXX_USE_CXX11_ABI=0 rebuild makes compare refuse the pair as a profile "
-    "mismatch (docs/contribute/known-gaps.md: _GLIBCXX_USE_CXX11_ABI rebuild refused)",
-    "refused",
-)
-
-_O2_STD = (
-    "an -O2 rebuild drops the weak std::string instantiations the -O0 build exported and "
-    "reads BREAKING (docs/contribute/known-gaps.md: -O2 rebuild of a std::string library)",
-    "stronger than benign",
-)
-
-KNOWN_MISMATCHES: dict[tuple[str, str, str], tuple[str, str]] = {
-    **{
-        (op, "cxx_classes", c): _CXX_PARAM
-        for op in ("func_param_append", "func_param_type_change", "func_param_remove")
-        for c in COMPILERS
-    },
-    **{
-        (op, "cxx_stdlib", c): _CXX_PARAM
-        for op in ("func_param_append", "func_param_type_change", "func_param_remove")
-        for c in COMPILERS
-    },
-    **{("rebuild_cxx11_abi_off", "cxx_stdlib", c): _CXX11_ABI for c in COMPILERS},
-    # libstdc++ on ELF only: on macOS (libc++, Mach-O) the rebuild reads NO_CHANGE.
-    **(
-        {("rebuild_optimized", "cxx_stdlib", c): _O2_STD for c in COMPILERS}
-        if sys.platform.startswith("linux")
-        else {}
-    ),
-    **{("virtual_remove", "cxx_classes", c): _VIRTUAL_REMOVED for c in COMPILERS},
-    **{("method_noexcept_add", "cxx_classes", c): _CASTXML_NOEXCEPT for c in COMPILERS},
-    **{
-        ("template_default_arg_change", "cxx_classes", c): _CASTXML_TEMPLATE_DEFAULT
-        for c in COMPILERS
-    },
-}
+# Mismatches are recorded once, in ``tests/_edit_corpus_known.py``, for this
+# matrix and the config matrix alike. A cell xfails only while its exact issue
+# set and verdict reproduce as recorded; any other outcome fails.
 
 CELLS = [
     pytest.param(op, seed, compiler, id=f"{op.name}-{seed.name}-{compiler}")
@@ -203,14 +154,20 @@ def test_every_operator_declares_some_ground_truth() -> None:
         assert op.expected or op.any_of or op.verdict_max is not None, op.name
 
 
-def test_known_mismatches_name_real_cells() -> None:
-    cells = {
-        (op.name, seed.name, c) for op, seed in default_matrix() for c in COMPILERS
-    }
-    stale = set(KNOWN_MISMATCHES) - cells
-    assert stale == set(), (
-        f"known mismatches for cells that do not exist: {sorted(stale)}"
-    )
+def test_known_mismatches_cover_real_default_cells() -> None:
+    # Each recorded entry this matrix can reach names an (operator, seed) the
+    # default matrix builds; the registry's own integrity is tested with it.
+    pairs = {(op.name, seed.name) for op, seed in default_matrix()}
+    placeholder = Toolchain("gcc", 0, "gcc", "g++")
+    reachable = [
+        (k.op, seed)
+        for k in KNOWN
+        for seed in k.seeds
+        if k.when(cfg := default_config(SEED_BY_NAME[seed].lang, placeholder))
+        and OP_BY_NAME[k.op].requires(cfg) is None
+    ]
+    assert reachable, "no recorded mismatch applies at the default config"
+    assert set(reachable) <= pairs
 
 
 def test_matrix_is_not_silently_shrinking() -> None:
@@ -260,16 +217,21 @@ def test_edit_produces_declared_ground_truth(
 ) -> None:
     _skip_without_driver(seed, compiler)
     # A build or extraction exception propagates and fails the cell.
-    outcome = run_operator(op, seed, compiler, baseline_cache, corpus_root)
-    key = (op.name, seed.name, compiler)
-    if key in KNOWN_MISMATCHES:
-        reason, missing = KNOWN_MISMATCHES[key]
-        assert any(missing in problem for problem in outcome.failures), (
-            f"documented mismatch no longer reproduces (outcome: verdict={outcome.verdict} "
-            f"kinds={sorted(outcome.kinds)} problems={list(outcome.failures)}); "
-            "the detector may be fixed: remove the KNOWN_MISMATCHES entry"
+    config = _as_config(seed, compiler)
+    gap = capability_gap(op, config)
+    if gap:
+        pytest.skip(gap)
+    outcome = run_operator(op, seed, config, baseline_cache, corpus_root)
+    known = known_mismatch(op.name, seed.name, config)
+    if known is not None:
+        issues = issue_keys(outcome.failures)
+        assert issues == known.issues and outcome.verdict in known.verdicts, (
+            f"recorded mismatch {sorted(known.issues)} (verdict in {sorted(known.verdicts)}) "
+            f"no longer reproduces: verdict={outcome.verdict} kinds={sorted(outcome.kinds)} "
+            f"issues={sorted(issues)}. If the detector was fixed, remove the "
+            "tests/_edit_corpus_known.py entry and its known-gaps row."
         )
-        pytest.xfail(reason)
+        pytest.xfail(known.reason)
     assert outcome.failures == (), (
         f"{op.name} on {seed.name} with {compiler}: verdict={outcome.verdict} "
         f"kinds={sorted(outcome.kinds)} problems={list(outcome.failures)} "

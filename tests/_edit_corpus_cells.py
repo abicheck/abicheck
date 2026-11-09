@@ -24,7 +24,7 @@ from tests._edit_corpus_expect import ExecTruth, Expectation, Reconciled, reconc
 from tests._edit_corpus_harness import BaselineCache, abicheck_answer, build_new
 from tests._edit_corpus_operators import EditOp
 from tests._edit_corpus_seeds import Seed
-from tests._edit_corpus_toolchains import unavailable
+from tests._edit_corpus_toolchains import capability_gap, unavailable
 
 
 @dataclass
@@ -105,7 +105,7 @@ def run_cell(op: EditOp, seed: Seed, config: Config, ctx: CellContext) -> CellRe
             "not-applicable",
             reason or "seed/language mismatch",
         )
-    reason = unavailable(config)
+    reason = unavailable(config) or capability_gap(op, config)
     if reason is None and op.rebuild is not None:
         reason = unavailable(replace(config, flags=op.new_flags(config.flags)))
     if reason:

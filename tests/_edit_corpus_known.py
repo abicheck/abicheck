@@ -63,11 +63,12 @@ class Known:
     def expected_cls(self, execution_available: bool) -> str:
         """The class this finding reconciles to on a host with or without execution.
 
-        ``false-clean`` needs the execution oracle to show the break; where it
-        is unavailable (a non-ELF host) the same issues read as the plain
-        verdict or kind mismatch ``reconcile`` gives them.
+        ``false-clean`` and ``false-positive`` need the execution oracle (to
+        show the break, or that consumers still run); where it is unavailable
+        (a non-ELF host) the same issues read as the plain verdict or kind
+        mismatch ``reconcile`` gives them.
         """
-        if execution_available or self.cls != "false-clean":
+        if execution_available or self.cls not in ("false-clean", "false-positive"):
             return self.cls
         verdict_issue = any(
             i.startswith(("weaker-than:", "stronger-than:")) for i in self.issues
@@ -159,7 +160,7 @@ KNOWN: tuple[Known, ...] = (
         "struct_array_shrink_in_padding",
         frozenset({"c_core", "cxx_classes"}),
         "wrong-verdict",
-        lambda c: c.evidence == "dwarf" and c.flags.pack is None,
+        lambda c: c.evidence == "dwarf" and (c.flags.pack is None or c.flags.pack > 2),
         "char[8] -> char[6] reads NO_CHANGE from DWARF (headers report type_field_type_changed)",
         GAP_DWARF_ARRAY,
         issues=frozenset(
@@ -174,7 +175,9 @@ KNOWN: tuple[Known, ...] = (
         "struct_array_shrink_in_padding",
         frozenset({"c_core", "cxx_classes"}),
         "wrong-kind",
-        lambda c: c.evidence == "dwarf" and c.flags.pack is not None,
+        lambda c: (
+            c.evidence == "dwarf" and c.flags.pack is not None and c.flags.pack <= 2
+        ),
         "packed, DWARF shows only type_size_changed; the member's type change is not reported",
         GAP_DWARF_ARRAY,
         issues=frozenset({"none-of:STRUCT_FIELD_TYPE_CHANGED|TYPE_FIELD_TYPE_CHANGED"}),

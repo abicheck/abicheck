@@ -20,7 +20,7 @@ and classifies the cell. Classes, most severe first:
 - ``false-clean``: execution broke (binary, or the consumer no longer
   compiles), the evidence can show it, and abicheck reads compatible.
 - ``false-positive``: abicheck is stronger than the benign ceiling and
-  execution shows nothing.
+  execution ran and shows nothing (without execution it is ``wrong-verdict``).
 - ``wrong-verdict``: any other verdict outside the expected bounds.
 - ``wrong-kind``: the verdict is right, an expected kind is missing.
 - ``refused``: abicheck declined to compare (e.g. a profile mismatch). Not
@@ -197,7 +197,8 @@ def reconcile(
                 return Reconciled("unobservable", problems, exp.note)
             return Reconciled("false-clean", problems, exec_truth.describe_break())
     if any("stronger than benign" in p for p in problems):
-        if not broke:
+        # A false-positive claims consumers are fine: that needs execution.
+        if exec_truth.available and not broke:
             return Reconciled("false-positive", problems)
         return Reconciled("wrong-verdict", problems)
     if any(p.startswith("verdict") for p in problems):

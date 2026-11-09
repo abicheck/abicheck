@@ -219,7 +219,12 @@ def _verdict_band(op: str, config: Config) -> tuple[str, str | None, bool]:
         ),
         (
             "no_unique_address_added",
-            _cfg("c++", std=STANDARD_BY_NAME["c++20"], platform=("win32", "pe")),
+            _cfg(
+                "c++",
+                std=STANDARD_BY_NAME["c++20"],
+                platform=("win32", "pe"),
+                producer=CLANG,
+            ),
             ("NO_CHANGE", "COMPATIBLE_WITH_RISK", True),
         ),
         ("method_noexcept_add", _cfg("c++"), ("API_BREAK", "API_BREAK", True)),
@@ -234,6 +239,56 @@ def test_expectation_is_a_function_of_the_config(
     op: str, config: Config, band: tuple
 ) -> None:
     assert _verdict_band(op, config) == band
+
+
+@pytest.mark.parametrize(
+    ("pack", "size_required"),
+    [(None, False), (1, True), (2, True), (4, False), (8, False)],
+)
+def test_array_shrink_needs_a_size_change_only_where_packing_removes_tail_padding(
+    pack: int | None, size_required: bool
+) -> None:
+    # Independent layout arithmetic for struct rec { int; double; char tag[N]; }
+    # packed to `pack` (None = natural alignment 8).
+    def size(tag: int) -> int:
+        align = 8 if pack is None else min(pack, 8)
+        off = 4
+        off = -(-off // min(align, 8)) * min(align, 8)  # double
+        end = off + 8 + tag
+        return -(-end // align) * align
+
+    assert (size(8) != size(6)) is size_required
+    exp = OP_BY_NAME["struct_array_shrink_in_padding"].expect(
+        _cfg(flags=Flags(pack=pack))
+    )
+    names_size = any("TYPE_SIZE_CHANGED" in g for g in exp.any_of)
+    assert names_size is size_required
+
+
+def test_no_unique_address_rule_names_the_msvc_abi_not_every_pe_target() -> None:
+    std20 = STANDARD_BY_NAME["c++20"]
+    pe = ("win32", "pe")
+    msvc_like = _cfg("c++", std=std20, platform=pe, producer=CLANG)
+    mingw = _cfg("c++", std=std20, platform=pe, producer=GCC)
+    assert (
+        OP_BY_NAME["no_unique_address_added"].expect(msvc_like).verdict_min
+        == "NO_CHANGE"
+    )
+    assert OP_BY_NAME["no_unique_address_added"].expect(mingw).verdict_min == "BREAKING"
+
+
+def test_a_rebuild_row_with_its_target_flag_already_set_is_repaired_not_dropped() -> (
+    None
+):
+    from tests._edit_corpus_tiers import _repair_rebuild
+
+    op = OP_BY_NAME["rebuild_short_enums"]
+    drawn = Flags(opt="O2", short_enums=True, pack=1)
+    fixed = _repair_rebuild(op, drawn)
+    assert fixed == Flags(opt="O2", pack=1)
+    assert op.requires(_cfg(flags=fixed)) is None
+    assert _repair_rebuild(op, Flags(opt="O2")) == Flags(opt="O2")
+    assert _repair_rebuild(OP_BY_NAME["struct_append_field"], drawn) == drawn
 
 
 def test_cxx_signature_edits_are_visible_from_symbols_alone() -> None:
@@ -276,7 +331,7 @@ def test_rebuild_preconditions_reject_a_no_op_rebuild() -> None:
 def test_every_rule_fires_for_some_config() -> None:
     # Vacuity guard: a rule whose predicate never holds is dead ground truth.
     probes = [
-        _cfg(lang, std=s, flags=f, evidence=e, platform=p)
+        _cfg(lang, std=s, flags=f, evidence=e, platform=p, producer=tc)
         for lang in ("c", "c++")
         for s in STANDARDS
         if s.lang == lang
@@ -288,6 +343,7 @@ def test_every_rule_fires_for_some_config() -> None:
         )
         for e in EVIDENCE
         for p in (("linux", "elf"), ("win32", "pe"))
+        for tc in (GCC, CLANG)
     ]
     for op in OPERATORS:
         for rule in op.rules:
@@ -357,6 +413,7 @@ _HIDDEN = replace(_BREAK, any_of=(), verdict_min="NO_CHANGE", observable=False)
         (_QUIET, _BREAK, "API_BREAK", {"TYPE_SIZE_CHANGED"}, "wrong-verdict"),
         (_NONE, _BREAK, "COMPATIBLE", set(), "wrong-verdict"),
         (_NONE, _BREAK, "BREAKING", {"TYPE_SIZE_CHANGED"}, "agree"),
+        (_NONE, _BENIGN, "BREAKING", set(), "wrong-verdict"),
         (_BROKE, _BREAK, "REFUSED", {"ProfileMismatchError"}, "refused"),
     ],
 )
@@ -634,6 +691,36 @@ def test_a_false_clean_degrades_to_its_verdict_class_without_execution() -> None
         got = reconcile(_NONE, exp, verdict, frozenset())
         assert got.cls == k.expected_cls(execution_available=False), k.op
         assert got.cls != "false-clean"
+
+
+def test_discovery_rejects_a_c_and_cxx_driver_pair_of_different_versions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import tests._edit_corpus_toolchains as tcs
+
+    paths = {
+        "gcc": "/x/gcc",
+        "g++": "/x/g++",
+        "gcc-14": "/x/gcc-14",
+        "g++-14": "/x/g++-14",
+    }
+    idents = {
+        "/x/gcc": ("gcc", 13),
+        "/x/g++": ("gcc", 14),
+        "/x/gcc-14": ("gcc", 14),
+        "/x/g++-14": ("gcc", 14),
+    }
+    monkeypatch.setattr(tcs.shutil, "which", lambda name: paths.get(name))
+    monkeypatch.setattr(tcs.os.path, "realpath", lambda p: p)
+    monkeypatch.setattr(tcs, "_identify", lambda path: idents.get(path))
+    monkeypatch.setattr(tcs.sys, "platform", "linux")
+    tcs.discover.cache_clear()
+    try:
+        got = [(t.id, t.cc, t.cxx) for t in tcs.discover()]
+    finally:
+        tcs.discover.cache_clear()
+    # gcc 13 + g++ 14 is not a toolchain; the gcc-14/g++-14 pair is.
+    assert got == [("gcc14", "/x/gcc-14", "/x/g++-14")]
 
 
 # --- integration -------------------------------------------------------------

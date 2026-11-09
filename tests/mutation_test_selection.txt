@@ -18,6 +18,8 @@ tests/test_acknowledgment_release_and_api.py
 tests/test_acknowledgment_twin_identity.py
 tests/test_action_accepted_breaks_notice.py
 tests/test_action_additions_verdict.py
+tests/test_action_delta_baseline.py
+tests/test_action_pr_report_delivery.py
 tests/test_action_step_summary_no_adr.py
 tests/test_action_stored_bundle_facts_preflight.py
 tests/test_action_tombstone_replacements.py
@@ -38,6 +40,7 @@ tests/test_analysis_assurance_graph_completeness.py
 tests/test_analysis_assurance_manifest_targets_outputs.py
 tests/test_analysis_assurance_pack_accounting.py
 tests/test_analysis_assurance_schema_staleness.py
+tests/test_analysis_assurance_unobserved_registry.py
 tests/test_annotations.py
 tests/test_anon_union_fp.py
 tests/test_appcompat.py
@@ -103,6 +106,7 @@ tests/test_clang_inline_semantics.py
 tests/test_clang_param_restrict.py
 tests/test_clang_param_va_list.py
 tests/test_clang_template_index_reuse_e2e.py
+tests/test_clang_vtable_base_migration.py
 tests/test_class_metadata_owner_contract.py
 tests/test_class_metadata_specialization_owner.py
 tests/test_class_template_specialization_absence_unit.py
@@ -188,6 +192,7 @@ tests/test_compatibility_evaluation_frontend.py
 tests/test_compatibility_evaluation_receipts.py
 tests/test_compile_context_parity.py
 tests/test_composition_compat.py
+tests/test_concept_scan_review_fixes.py
 tests/test_confidence_evidence.py
 tests/test_confidence_layout_evidence.py
 tests/test_config_rebalance.py
@@ -237,6 +242,7 @@ tests/test_depth_projection.py
 tests/test_depth_projection_binary_parity.py
 tests/test_depth_vocabulary.py
 tests/test_detector_contracts.py
+tests/test_detector_frontend_spelling.py
 tests/test_detector_kind_map.py
 tests/test_detector_oracle.py
 tests/test_detector_spec.py
