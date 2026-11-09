@@ -157,6 +157,51 @@ def lab(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return tmp_path_factory.mktemp("adr090_matrix")
 
 
+def _expected(
+    kind: str, old: str, new: str, headers: bool, identical: bool
+) -> tuple[frozenset[int], frozenset[str]]:
+    """The oracle: the exit codes and verdicts each cell may produce.
+
+    A symbol-table change is always a break. Byte-identical libraries with no
+    header on either side are one input (D1(c)), clean by construction. With
+    type evidence on both sides, a type-only change is an observed break and
+    no change is a clean claim. Otherwise no change is UNCONFIRMED, and a
+    type-only change is either still observed or UNCONFIRMED -- never clean.
+    """
+    if CHANGES[kind][4]:
+        return frozenset({4}), frozenset({"BREAKING"})
+    typed = [_has_types(side, headers) for side in (old, new)]
+    if identical and not any(typed):
+        return frozenset({0}), frozenset({"NO_CHANGE"})
+    if all(typed):
+        if kind == "no_change":
+            return frozenset({0}), COMPATIBILITY_CLAIMS
+        return frozenset({2, 4}), frozenset({"API_BREAK", "BREAKING"})
+    if kind == "no_change":
+        return frozenset({1}), frozenset({"UNCONFIRMED"})
+    return frozenset({1, 2, 4}), frozenset({"UNCONFIRMED", "API_BREAK", "BREAKING"})
+
+
+def _assert_surfaces_agree(report: dict, rendered: dict[str, str], tag: str) -> None:
+    """UNCONFIRMED on every surface, or on none; a triggered run states no
+    clean claim anywhere."""
+    unconfirmed = report["verdict"] == "UNCONFIRMED"
+    assert (report["run_outcome"]["compatibility"] == "UNCONFIRMED") is unconfirmed, tag
+    assert ("Compatibility: UNCONFIRMED" in rendered["terminal"]) is unconfirmed, tag
+    assert ("`UNCONFIRMED`" in rendered["markdown"]) is unconfirmed, tag
+    if not unconfirmed:
+        return
+    assert report["unconfirmed"]["exit_contribution"] == 1, tag
+    assert report["release_recommendation"]["version_bump"] == "undetermined", tag
+    leaks = [
+        (name, phrase)
+        for name, text in rendered.items()
+        for phrase in CLEAN_CLAIM_PHRASES
+        if phrase in text
+    ]
+    assert leaks == [], tag
+
+
 @pytest.mark.parametrize(("kind", "old", "new", "headers"), CELLS)
 def test_evidence_matrix_never_reads_clean_without_type_evidence(
     lab: Path, kind: str, old: str, new: str, headers: bool
@@ -167,44 +212,16 @@ def test_evidence_matrix_never_reads_clean_without_type_evidence(
     code, report, rendered = _compare(
         lab, old_lib, new_lib, (old_h, new_h) if headers else None, tag
     )
-    symbol_visible = CHANGES[kind][4]
-    both_typed = _has_types(old, headers) and _has_types(new, headers)
-    neither_typed = not _has_types(old, headers) and not _has_types(new, headers)
     # D1(c), decided here from the files themselves: a type-only C change
     # built without -g can compile to byte-identical libraries, which carry
-    # no trace of it at all -- one identical input, NO_CHANGE by construction.
+    # no trace of it at all.
     identical = filecmp.cmp(old_lib, new_lib, shallow=False)
-    verdict = report["verdict"]
-
-    if symbol_visible:
-        assert (code, verdict) == (4, "BREAKING"), tag
-    elif identical and neither_typed:
-        assert (code, verdict) == (0, "NO_CHANGE"), tag
-    elif kind == "no_change":
-        if both_typed:
-            assert code == 0 and verdict in COMPATIBILITY_CLAIMS, tag
-        else:
-            assert (code, verdict) == (1, "UNCONFIRMED"), tag
-    elif both_typed:
-        assert code in (2, 4) and verdict in ("API_BREAK", "BREAKING"), tag
-    else:
-        # Observed through what evidence there is, or narrowed -- never clean.
-        assert code != 0, tag
-        assert verdict not in COMPATIBILITY_CLAIMS, tag
-        if code == 1:
-            assert verdict == "UNCONFIRMED", tag
-
-    # The three surfaces agree: UNCONFIRMED everywhere, or nowhere.
-    unconfirmed = verdict == "UNCONFIRMED"
-    assert (report["run_outcome"]["compatibility"] == "UNCONFIRMED") is unconfirmed, tag
-    assert ("Compatibility: UNCONFIRMED" in rendered["terminal"]) is unconfirmed, tag
-    assert ("`UNCONFIRMED`" in rendered["markdown"]) is unconfirmed, tag
-    if unconfirmed:
-        assert report["unconfirmed"]["exit_contribution"] == 1, tag
-        assert report["release_recommendation"]["version_bump"] == "undetermined", tag
-        for name, text in rendered.items():
-            for phrase in CLEAN_CLAIM_PHRASES:
-                assert phrase not in text, (tag, name, phrase)
+    codes, verdicts = _expected(kind, old, new, headers, identical)
+    assert code in codes, (tag, code)
+    assert report["verdict"] in verdicts, (tag, report["verdict"])
+    # Exit 1 and UNCONFIRMED imply each other on every cell.
+    assert (code == 1) is (report["verdict"] == "UNCONFIRMED"), tag
+    _assert_surfaces_agree(report, rendered, tag)
 
 
 @pytest.mark.parametrize("shape", SHAPES)

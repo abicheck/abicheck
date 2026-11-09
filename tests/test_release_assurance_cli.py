@@ -290,7 +290,12 @@ class TestReleaseAssuranceThroughTheCli:
         assert run.returncode == 1, run.stdout + run.stderr
         doc = json.loads(run.stdout)
         assert doc["exit"]["code"] == 1
-        assert doc["exit"]["reasons"] == ["analysis_assurance"]
+        # ADR-090: the stripped side also has no type-level evidence, so the
+        # UNCONFIRMED axis ties the assurance axis at 1. Both are named.
+        assert sorted(doc["exit"]["reasons"]) == [
+            "analysis_assurance",
+            "unconfirmed_compatibility",
+        ]
         assert doc["analysis_assurance"]["exit_contribution"] == 1
 
     def test_a_one_member_release_agrees_with_the_scalar_path(
@@ -498,16 +503,24 @@ class TestReleaseAssuranceThroughTheCli:
         alone could be right while the digest still collided.
         """
         out = tmp_path / "receipt"
+        # Both runs set ADR-090's UNCONFIRMED axis to warn, so the only gate
+        # that differs between them is the one this test is about.
+        warn = ("--set", "assurance.unconfirmed=warn")
         gated = _compare(
             str(bundle["v1"]),
             str(bundle["v1_nodebug"]),
+            *warn,
             "-o",
             f"json={out}/",
             bundle=bundle,
         )
         assert gated.returncode == 1, gated.stdout + gated.stderr
         ungated = _compare(
-            str(bundle["v1"]), str(bundle["v1_nodebug"]), bundle=bundle, require=False
+            str(bundle["v1"]),
+            str(bundle["v1_nodebug"]),
+            *warn,
+            bundle=bundle,
+            require=False,
         )
         assert ungated.returncode == 0, ungated.stdout + ungated.stderr
 

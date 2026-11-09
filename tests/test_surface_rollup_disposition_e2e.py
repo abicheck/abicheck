@@ -26,6 +26,7 @@ from pathlib import Path
 import pytest
 
 from tests._abicheck_subprocess import abicheck_command, abicheck_env
+from tests._unconfirmed import observed_verdict, passes_but_for_unconfirmed
 
 pytestmark = [
     pytest.mark.integration,
@@ -151,8 +152,10 @@ def test_suppressed_removal_hides_its_roll_up(
         with_headers=with_headers,
         extra=["--suppress", str(_suppress_rule(tmp_path, "gone_fn"))],
     )
-    assert code == 0
-    assert report["verdict"] == "NO_CHANGE"
+    # A header-less pair reads ADR-090 UNCONFIRMED; the disposition decides
+    # the observed verdict either way.
+    assert passes_but_for_unconfirmed(code, report)
+    assert observed_verdict(report) == "NO_CHANGE"
     assert not _visible(report) & {ROLLUP, *_REMOVAL_KINDS}
     suppressed = _suppressed(report)
     assert {c["kind"] for c in suppressed} >= {ROLLUP}
@@ -225,8 +228,10 @@ def test_every_removal_suppressed_hides_the_roll_up(
         with_headers=with_headers,
         extra=["--suppress", str(supp)],
     )
-    assert code == 0
-    assert report["verdict"] == "NO_CHANGE"
+    # A header-less pair reads ADR-090 UNCONFIRMED; the disposition decides
+    # the observed verdict either way.
+    assert passes_but_for_unconfirmed(code, report)
+    assert observed_verdict(report) == "NO_CHANGE"
     assert not _visible(report) & {ROLLUP, *_REMOVAL_KINDS}
     assert report["disposition_audit"]["counts"]["suppressed"] == 3
 
@@ -275,8 +280,10 @@ def test_base_override_leaves_the_roll_up_non_breaking(
         with_headers=with_headers,
         extra=["--policy", str(policy)],
     )
-    assert code == 0
-    assert report["verdict"] == "COMPATIBLE"
+    # A header-less pair reads ADR-090 UNCONFIRMED; the disposition decides
+    # the observed verdict either way.
+    assert passes_but_for_unconfirmed(code, report)
+    assert observed_verdict(report) == "COMPATIBLE"
     # The removal stays visible at its overridden verdict; so does its roll-up.
     assert _visible_symbols(report, _REMOVAL_KINDS) == {"gone_fn"}
     roll_up = [c for c in report["changes"] if c["kind"] == ROLLUP]
@@ -304,8 +311,10 @@ def test_reclassified_removal_leaves_the_roll_up_non_breaking(
         with_headers=with_headers,
         extra=["--policy", str(policy)],
     )
-    assert code == 0
-    assert report["verdict"] == "COMPATIBLE_WITH_RISK"
+    # A header-less pair reads ADR-090 UNCONFIRMED; the disposition decides
+    # the observed verdict either way.
+    assert passes_but_for_unconfirmed(code, report)
+    assert observed_verdict(report) == "COMPATIBLE_WITH_RISK"
     assert _visible_symbols(report, _REMOVAL_KINDS) == {"gone_fn"}
     roll_up = [c for c in report["changes"] if c["kind"] == ROLLUP]
     assert [c["severity"] for c in roll_up] == ["compatible"]
