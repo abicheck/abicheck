@@ -53,6 +53,25 @@ class Built:
 
 
 @dataclass(frozen=True)
+class LinkSpec:
+    """Per-build link options, for an edit that changes how the library links.
+
+    *flags* follow the harness's own (``-shared``, ``-fPIC``, ``-soname``), so a
+    later ``-Wl,-soname,...`` wins; *files* (``(name, text)``: a version
+    script, a linker script) are written beside the library first. ``{dir}``
+    in a flag is replaced by that build directory.
+    """
+
+    flags: tuple[str, ...] = ()
+    files: tuple[tuple[str, str], ...] = ()
+
+    def render(self, out_dir: Path) -> list[str]:
+        for name, text in self.files:
+            (out_dir / name).write_text(text, encoding="utf-8")
+        return [f.replace("{dir}", str(out_dir)) for f in self.flags]
+
+
+@dataclass(frozen=True)
 class Outcome:
     verdict: str
     kinds: frozenset[str]
@@ -111,6 +130,7 @@ def _compile_library(
     out_dir: Path,
     header_text: str,
     source_text: str,
+    link: LinkSpec = LinkSpec(),
 ) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / seed.header_name).write_text(header_text, encoding="utf-8")
@@ -131,6 +151,7 @@ def _compile_library(
         cmd.append(f"-Wl,-install_name,{LIB_NAME}")
     elif sys.platform.startswith("linux"):
         cmd.append(f"-Wl,-soname,{LIB_NAME}")
+    cmd += link.render(out_dir)
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if proc.returncode != 0:
         raise CompileError(
@@ -146,14 +167,16 @@ def build(
     out_dir: Path,
     overrides: dict[str, RoleText] | None = None,
     flags: Flags | None = None,
+    link: LinkSpec = LinkSpec(),
 ) -> Built:
     """Render *seed* (with *overrides*), compile it under *config* and snapshot it.
 
-    *flags* replaces the config's producer flags (a rebuild edit's new side).
+    *flags* replaces the config's producer flags (a rebuild edit's new side);
+    *link* adds link options (an edit's version script, SONAME, extra libs).
     """
     fl = flags or config.flags
     header_text, source_text = seed.render(overrides)
-    so = _compile_library(seed, config, fl, out_dir, header_text, source_text)
+    so = _compile_library(seed, config, fl, out_dir, header_text, source_text, link)
     header = out_dir / seed.header_name
     is_cxx = seed.lang == "c++"
     headers = [header] if config.evidence == "headers" else []
@@ -216,13 +239,17 @@ def _as_config(seed: Seed, config: Config | str) -> Config:
     return default_config(seed.lang, label_toolchain(config))
 
 
-def build_new(op: EditOp, seed: Seed, config: Config, root: Path) -> Built:
+def build_new(
+    op: EditOp, seed: Seed, config: Config, root: Path, link: LinkSpec = LinkSpec()
+) -> Built:
+    """The edited (new) side; *link* is the edit's own link options, if any."""
     return build(
         seed,
         config,
         root / f"{seed.name}-{config.build_id}-{op.name}",
         overrides=op.edit(seed.roles),
         flags=op.new_flags(config.flags),
+        link=link,
     )
 
 

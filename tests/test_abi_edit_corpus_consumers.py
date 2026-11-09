@@ -197,7 +197,7 @@ def test_a_library_pair_is_built_once_for_every_consumer_set(
 ) -> None:
     builds: list[tuple[str, str]] = []
 
-    def fake_build(seed, config, out_dir, overrides=None, flags=None):  # noqa: ANN001
+    def fake_build(seed, config, out_dir, overrides=None, flags=None, link=None):  # noqa: ANN001
         builds.append(("new" if overrides is not None else "old", config.build_id))
         return _built(out_dir)
 
@@ -221,7 +221,9 @@ def test_the_verdict_is_computed_from_the_build_alone(
 ) -> None:
     seen: list[tuple[Path, Path]] = []
     monkeypatch.setattr(
-        harness, "build", lambda s, c, d, overrides=None, flags=None: _built(d)
+        harness,
+        "build",
+        lambda s, c, d, overrides=None, flags=None, link=None: _built(d),
     )
     monkeypatch.setattr(cells, "unavailable", lambda c: None)
     monkeypatch.setattr(cells, "capability_gap", lambda op, c: None)
@@ -771,3 +773,46 @@ def test_the_plan_step_rejects_a_malformed_toolchain_name(
     # Nothing is written: no injected record, no package list.
     assert res.output_lines == []  # type: ignore[attr-defined]
     assert "::error::" in res.stdout  # type: ignore[attr-defined]
+
+
+# --- link options -------------------------------------------------------------
+
+
+def test_link_options_follow_the_defaults_and_their_files_are_written_first(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import subprocess
+
+    seen: list[list[str]] = []
+
+    def run(cmd: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
+        seen.append(cmd)
+        # The version script exists when the linker runs.
+        assert (tmp_path / "out" / "edit.map").read_text() == "V1 { global: *; };\n"
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(harness.subprocess, "run", run)
+    monkeypatch.setattr(harness.sys, "platform", "linux")
+    link = harness.LinkSpec(
+        flags=(
+            "-Wl,--version-script={dir}/edit.map",
+            "-Wl,-soname,libedit.so.2",
+            "-lm",
+        ),
+        files=(("edit.map", "V1 { global: *; };\n"),),
+    )
+    harness._compile_library(
+        C_SEED, _cfg(), Flags(), tmp_path / "out", "int x;\n", "int x;\n", link
+    )
+    (cmd,) = seen
+    out = str(tmp_path / "out")
+    assert cmd[-4:] == [
+        "-Wl,-soname,libedit.so",
+        f"-Wl,--version-script={out}/edit.map",
+        "-Wl,-soname,libedit.so.2",  # after the default, so it wins
+        "-lm",
+    ]
+    # Without link options the command ends at the harness's own SONAME.
+    seen.clear()
+    harness._compile_library(C_SEED, _cfg(), Flags(), tmp_path / "plain", "", "")
+    assert seen[0][-1] == "-Wl,-soname,libedit.so"
