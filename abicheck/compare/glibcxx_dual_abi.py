@@ -62,6 +62,7 @@ from ..model.glibcxx_dual_abi import (
     spells_dual_abi_type,
 )
 from ..model.surface_facts import is_binary_exported
+from ..model.vocabulary import NON_PUBLIC_ORIGINS
 
 if TYPE_CHECKING:
     from ..model import AbiSnapshot, RecordType
@@ -121,7 +122,8 @@ def remangled_export_pairs(old: AbiSnapshot, new: AbiSnapshot) -> list[tuple[str
         return []
     from ..demangle import demangle_batch
 
-    demangled = demangle_batch([m for m in (*removed, *added) if m.startswith("_Z")])
+    # demangle_batch leaves non-C++ names out of its result.
+    demangled = demangle_batch([*removed, *added])
     added_by_norm: dict[str, list[str]] = {}
     for m in added:
         if m in demangled:
@@ -141,10 +143,11 @@ def remangled_export_pairs(old: AbiSnapshot, new: AbiSnapshot) -> list[tuple[str
     return pairs
 
 
-def _is_library_record(name: str) -> bool:
-    return not (
-        name.startswith(("std::", "__gnu_cxx::", "_")) or spells_dual_abi_type(name)
-    )
+def _is_library_record(t: RecordType) -> bool:
+    """A record the library declares: not from a private, system or
+    generated header (the structural origin fact), and not itself one of the
+    runtime types the selection changes."""
+    return t.origin not in NON_PUBLIC_ORIGINS and not spells_dual_abi_type(t.name)
 
 
 def _layout_of(t: RecordType) -> tuple[object, ...]:
@@ -164,7 +167,7 @@ def _affected_records(
         if (
             twin is not None
             and not t.is_template_pattern
-            and _is_library_record(t.name)
+            and _is_library_record(t)
             and any(spells_dual_abi_type(f.type) for f in t.fields)
             and (not layout_must_differ or _layout_of(t) != _layout_of(twin))
         ):
