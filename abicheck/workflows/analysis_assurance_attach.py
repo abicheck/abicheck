@@ -131,16 +131,9 @@ def attach_type_evidence(
     from ..model.type_evidence import TypeEvidenceFacts, type_evidence_facts
     from ..storage.snapshot_evidence import evidence_identity_digests
 
-    # The second attach of one comparison (compare_classify, after
-    # checker.compare) sees the same snapshots: reuse the per-side answers
-    # and decide only the identical-input flag, which needs the hashes that
-    # exist only now.
-    prior = result.type_evidence
-    facts = (
-        prior
-        if prior is not None and prior.old == (None if old is None else prior.old)
-        else type_evidence_facts(old, new)
-    )
+    # Recomputed on every attach, from the snapshots this call was given:
+    # a cached answer from an earlier attach could describe other inputs.
+    facts = type_evidence_facts(old, new)
     if old is not None and facts.old is False and not facts.new:
         old_meta, new_meta = result.old_metadata, result.new_metadata
         if old_meta is not None and new_meta is not None:
