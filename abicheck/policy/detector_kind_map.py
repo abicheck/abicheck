@@ -442,6 +442,7 @@ DETECTOR_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
                 "var_visibility_changed",
             }
         ),
+        "virtual_slot_removal": frozenset({"func_virtual_removed"}),
         "visibility_leak": frozenset({"visibility_leak"}),
         "vtable_identity": frozenset({"vtable_symbol_identity_changed"}),
         "vtable_layout": frozenset(
