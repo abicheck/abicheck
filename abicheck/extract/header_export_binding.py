@@ -68,7 +68,6 @@ from ..model.surface_facts import (
 )
 from .msvc_signature import (
     ParamSpelling,
-    canonical_builtin,
     header_param_spelling,
     msvc_function_params,
     param_agrees,
@@ -81,7 +80,6 @@ __all__ = [
     "ExportBindingOutcome",
     "bind_header_declarations_to_exports",
     "binding_export_names",
-    "msvc_builtin_param_types",
     "msvc_is_data_symbol",
     "unbound_export_entries",
 ]
@@ -242,18 +240,6 @@ def msvc_is_data_symbol(sym: str) -> bool | None:
     if not sym.startswith("?") or idx == -1:
         return None
     return sym[idx + 2 : idx + 3].isdigit()
-
-
-def msvc_builtin_param_types(sym: str) -> tuple[str, ...] | None:
-    """The parameter types of an MSVC function mangling when every one is a
-    builtin passed by value, else ``None`` (:mod:`.msvc_signature` decodes
-    the wider grammar)."""
-    params = msvc_function_params(sym)
-    if params is None or any(
-        p.indirection or canonical_builtin(p.base) != p.base for p in params
-    ):
-        return None
-    return tuple(p.base for p in params)
 
 
 #: Itanium builtin codes for the canonical spellings, the inverse of what a

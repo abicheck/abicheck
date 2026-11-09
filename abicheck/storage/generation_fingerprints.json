@@ -73,7 +73,7 @@
       "abicheck/extract/header_ast_cache_producers.py": "aa85ae5d148526267f600b0972ca89afc27b6b8cb3f51b4c781a1526773600b4",
       "abicheck/extract/header_ast_fields.py": "dfa466a2c4172dc4fe44b44c0d7d051238ac20019a4630dc94464ee46c8eab32",
       "abicheck/extract/header_exclusions.py": "254ca6e4ccf7366b9db516183d6814cb865c279845abe7d05051ac2f72bf0884",
-      "abicheck/extract/header_export_binding.py": "9fa8c536a9dadef55a1e18132bb67682a896fd3597362f1545ffcd94a4f40dd5",
+      "abicheck/extract/header_export_binding.py": "2a6c346af2b233e2cd0c9a20edacd6d37829a7ebc3ab9aefc5446c3648589c56",
       "abicheck/extract/header_order_witness.py": "40a29ffe7ed3751f9bb8e3bbce7f49011569b9d1d0d99947641d9ba178982966",
       "abicheck/extract/header_scan_memo.py": "56f79b5316354b938b08a5f29779c3aaf40481892d947784ec2adb48ab5e83fb",
       "abicheck/extract/header_text.py": "b43a88d7bf1d2e601bb908c78f04cb07e552f9c59f03b678ecc85788b3d146e4",
@@ -204,7 +204,7 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "c330683f467dcab13be2302198e516803f0a376c6a181abb684a5bfb9c5cacab",
+    "fingerprint": "5f938568d6a82cf7519a09783902f76c911253be0dc64a3889d723ea7910530e",
     "generation": 44,
     "reason": "generation 44 is introduced by this unmerged PR (#1967) and never released; the review follow-ups refine its export binding within the same generation"
   },

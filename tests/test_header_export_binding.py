@@ -32,8 +32,8 @@ import pytest
 
 from abicheck.extract.header_export_binding import (
     bind_header_declarations_to_exports,
-    msvc_builtin_param_types,
 )
+from abicheck.extract.msvc_signature import ParamSpelling, msvc_function_params
 from abicheck.extract.surface_fact_producers import header_ast_surface_facts
 from abicheck.model import AbiSnapshot, Function, Param, Variable, Visibility
 from abicheck.model.export_index import ExportMatch
@@ -265,13 +265,14 @@ def test_binding_resets_the_mangled_indexes():
 def test_msvc_parameter_decoder_round_trips(params, member):
     args = "".join(_MSVC[p] for p in params) + "@Z" if params else "XZ"
     sym = f"?f@C@@{member}H{args}"
-    assert msvc_builtin_param_types(sym) == params
+    assert msvc_function_params(sym) == tuple(ParamSpelling(p) for p in params)
 
 
 @pytest.mark.parametrize(
     "sym",
     [
-        "?f@@YAHPEAH@Z",  # pointer parameter: not a builtin by value
+        "?f@@YAHPEAPEAH@Z",  # int** parameter: one level of indirection only
+        "?f@@YAHV?$vector@H@std@@@Z",  # template-typed parameter
         "??0C@@QEAA@XZ",  # constructor
         "?gv@@3HA",  # a variable
         "f",
@@ -279,7 +280,7 @@ def test_msvc_parameter_decoder_round_trips(params, member):
     ],
 )
 def test_msvc_parameter_decoder_refuses_what_it_does_not_model(sym):
-    assert msvc_builtin_param_types(sym) is None
+    assert msvc_function_params(sym) is None
 
 
 @pytest.mark.parametrize("export", ["_Z4cfunv", "?cfun@@YAHXZ"])
@@ -417,7 +418,7 @@ def test_file_scope_static_never_binds_a_decorated_export():
     ],
 )
 def test_non_builtin_return_types_are_skipped(sym, params):
-    assert msvc_builtin_param_types(sym) == params
+    assert msvc_function_params(sym) == tuple(ParamSpelling(p) for p in params)
 
 
 def test_judged_public_declaration_does_not_count_as_bound():
