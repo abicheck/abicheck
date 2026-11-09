@@ -208,16 +208,6 @@ dependency walk and debug roots to every member. No open gap remains.
 **Status (2026-10-26): OPEN — gate-semantics decision needed.** A finding folded out as redundant but kept for the verdict is `gating` under the legacy scheme and `non_gating` under a severity config. `result_counts.gating_retained` now partitions the retained findings and the summary names the folded one, so the counts no longer contradict each other; the scheme disagreement remains. [Full write-up](known-gaps/legacy-gate-counts-a-redundant-finding-the-review-groups-omit.md)
 <!-- no-canary: awaits a gate-semantics decision between two schemes that are each internally consistent; no wrong value to pin until the ruling -->
 
-#### A C++ parameter change is reported as a removal plus an addition (2026-11-08)
-
-**Status (2026-11-08): OPEN.** A free C++ function whose parameter list changes gets a new mangled name, and the detector pairs old and new by mangled identity, so the output is `func_removed` + `func_added` (BREAKING) instead of `func_params_changed`. The verdict is right; the kind is not. Found by the generated edit corpus (`tests/test_abi_edit_corpus.py`, `func_param_append`/`func_param_type_change`/`func_param_remove` on the `cxx_classes` seed, gcc and clang), where those cells are strict xfails listed in `KNOWN_MISMATCHES`. The config-matrix corpus (`tests/test_abi_edit_corpus_matrix.py`) reproduces it on the `cxx_stdlib` seed; it is a header-lane gap: binary-only and DWARF-only evidence pair the two and do report `func_params_changed`. `wrong-kind`: consumers filtering on `func_params_changed` miss the break. Owner: `compare/` function pairing.
-<!-- no-canary: the corpus strict xfails fail once the pairing or kind is fixed, prompting removal -->
-
-#### Removing a virtual method reports no `func_virtual_removed` (2026-11-08)
-
-**Status (2026-11-08): OPEN.** Removing a virtual method yields `func_removed`, `type_vtable_changed` and `vtable_slot_count_changed` (all BREAKING), but never `func_virtual_removed`, whose taxonomy entry says BREAKING. The verdict is right; the specific kind is missing. Found by the generated edit corpus (`virtual_remove` on the `cxx_classes` seed, both compilers; strict xfail in `KNOWN_MISMATCHES`). `wrong-kind`. Owner: `policy/` and `compare/` virtual detectors.
-<!-- no-canary: the corpus strict xfails fail once the kind is emitted, prompting removal -->
-
 #### A member array-bound change is invisible in DWARF-only comparison (2026-11-08)
 
 **Status (2026-11-08): OPEN.** `struct rec { …; char tag[8]; }` becoming `char tag[6]` reads `NO_CHANGE` when the snapshots carry DWARF but no header; the header lane reports `type_field_type_changed` for the same pair. With `-fpack-struct=1` the DWARF lane reports only `type_size_changed` (the size really shrinks), still without the member's type change. Found by the config-matrix corpus (`tests/test_abi_edit_corpus_matrix.py`, `struct_array_shrink_in_padding` on `c_core`/`cxx_classes`, evidence `dwarf`, gcc and clang; strict xfails in `tests/_edit_corpus_known.py`). `wrong-verdict` unpacked (a public member's type changed, nothing reported), `wrong-kind` packed. Owner: `extract/` DWARF member-type spelling (array bound).

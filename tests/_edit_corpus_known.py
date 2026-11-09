@@ -18,11 +18,8 @@ from dataclasses import dataclass
 from tests._edit_corpus_config import Config
 from tests._edit_corpus_toolchains import uses_libstdcxx
 
-_CXX_SEEDS = frozenset({"cxx_classes", "cxx_stdlib"})
 _CLASSES = frozenset({"cxx_classes"})
 
-GAP_CXX_PARAM = "A C++ parameter change is reported as a removal plus an addition"
-GAP_VIRTUAL_REMOVED = "Removing a virtual method reports no `func_virtual_removed`"
 GAP_NOEXCEPT = "castxml output carries no `noexcept` exception specification"
 GAP_TEMPLATE_DEFAULT = (
     "A header-only default template-argument change reads `NO_CHANGE` at L2 on castxml"
@@ -91,30 +88,6 @@ class Known:
 
 
 KNOWN: tuple[Known, ...] = (
-    *(
-        Known(
-            op,
-            _CXX_SEEDS,
-            "wrong-kind",
-            _ev("headers"),
-            "the mangled name changes, so old and new are not paired: func_removed + func_added, "
-            "never func_params_changed (binary-only and DWARF evidence pair them)",
-            GAP_CXX_PARAM,
-            issues=frozenset({"missing:FUNC_PARAMS_CHANGED"}),
-            verdicts=frozenset({"BREAKING"}),
-        )
-        for op in ("func_param_append", "func_param_type_change", "func_param_remove")
-    ),
-    Known(
-        "virtual_remove",
-        _CLASSES,
-        "wrong-kind",
-        _ev("dwarf", "headers"),
-        "removal reads func_removed + vtable kinds; func_virtual_removed is never emitted",
-        GAP_VIRTUAL_REMOVED,
-        issues=frozenset({"missing:FUNC_VIRTUAL_REMOVED"}),
-        verdicts=frozenset({"BREAKING"}),
-    ),
     Known(
         "method_noexcept_add",
         _CLASSES,
