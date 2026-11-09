@@ -11,6 +11,7 @@ depends_on:
   - abicheck/frontends/action/delta_base_dump.py
   - action/build-delta-base.sh
   - abicheck/frontends/action/main_snapshot_cache.py
+  - action.yml
 lifecycle: active
 generated: false
 ---
@@ -194,7 +195,8 @@ reports them as a miss.
 The restored entry is checked in a workspace directory
 (`.abicheck-main-snapshot-cache`, which must not already exist) and removed
 afterwards; the snapshot is copied into a new subdirectory of `destination`.
-The main Action's `delta-baseline` uses artifact storage.
+The main Action's `delta-baseline` reads either backend: see
+[`delta-storage: cache`](#delta-storage-cache-in-the-main-action).
 
 ## `delta-baseline` in the main Action
 
@@ -224,6 +226,47 @@ come from the gate in all cases; `delta-on-missing-base: fail` adds a separate
 failing step. Outputs: `delta-outcome` (the lookup's outcome),
 `delta-base-sha`, `delta-operand-match`, and `delta-comment-outcome` (what
 the comment shows: the lookup outcome, or one of the outcomes below).
+
+### `delta-storage: cache` in the main Action
+
+`delta-storage` names the backend `main-snapshot` saved to, and must match
+its `storage`. With `cache` the main Action runs `fetch-main-snapshot`'s own
+cache path: the same base selection, the same scope refusal, an
+`actions/cache/restore` of the **exact** key (never `restore-keys`), and the
+same entry check — everything in the table above, including its limits.
+
+```yaml
+# producer (push to the default branch)
+      - uses: abicheck/abicheck/actions/main-snapshot@v1
+        with: { library: build/libfoo.so, header: include/, storage: cache }
+# pull-request workflow (permissions: contents: read, pull-requests: write -- no actions: read)
+      - uses: abicheck/abicheck@v1
+        with:
+          abi-baseline: latest-release
+          new-library: build/libfoo.so
+          new-header: include/
+          delta-baseline: main
+          delta-storage: cache                  # no delta-snapshot-workflow
+```
+
+- `delta-snapshot-workflow` is not needed (a cache entry names no producing
+  run to verify; setting it only warns), nor is `actions: read`.
+  `delta-wait-timeout` does not apply.
+- A pull request into another branch and a `merge_group` run are refused
+  before anything is restored (`untrusted_source`), as above;
+  `pull_request_target` runs no delta lookup at all.
+- Every unavailable entry is a named outcome — a miss is
+  `base_not_snapshotted`, an entry for the wrong commit, repository or ref is
+  `untrusted_source`, a malformed entry or a restore that did not complete is
+  `lookup_failed` — and each selected a base commit, so
+  `delta-on-missing-base: build` builds it and `fail` fails the separate
+  step. `operand.json` travels with the entry, so the
+  [operand pairing](#operand-identity-is-the-snapshot-this-prs-library) is
+  the same as from an artifact.
+- The gate is unaffected: a failed restore or check leaves `lookup_failed`
+  and the comparison runs. `delta-outcome` and the reports'
+  `delta_baseline` block carry the cache lookup's outcome; the backend is
+  not recorded in the report.
 
 ### Operand identity: is the snapshot this PR's library?
 

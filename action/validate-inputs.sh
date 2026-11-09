@@ -483,6 +483,10 @@ case "${INPUT_DELTA_BASELINE:-}" in
   '' | main) ;;
   *) _fail "delta-baseline '${INPUT_DELTA_BASELINE}' is not recognized. Use 'main' or leave it unset." ;;
 esac
+case "${INPUT_DELTA_STORAGE:-artifact}" in
+  artifact | cache) ;;
+  *) _fail "delta-storage '${INPUT_DELTA_STORAGE}' is not recognized. Use 'artifact' or 'cache' (the storage actions/main-snapshot saved the snapshot with)." ;;
+esac
 case "${INPUT_DELTA_MODE:-auto}" in
   auto | merge-commit | head) ;;
   *) _fail "delta-mode '${INPUT_DELTA_MODE}' is not recognized. Use 'auto', 'merge-commit' or 'head'." ;;
@@ -499,8 +503,14 @@ if [[ "${INPUT_DELTA_ON_MISSING_BASE:-report}" != build && -n "${_delta_build_cm
   _warn "delta-base-build-command is set but has no effect: it only applies to delta-on-missing-base: build."
 fi
 if [[ "${INPUT_DELTA_BASELINE:-}" == main ]]; then
-  [[ -n "${INPUT_DELTA_SNAPSHOT_WORKFLOW:-}" ]] \
-    || _fail "delta-baseline: main needs delta-snapshot-workflow (the workflow file that runs actions/main-snapshot on the default branch)."
+  # The workflow is what the artifact lookup verifies the uploading run
+  # against; a cache entry records no verifiable producer, so it is unused there.
+  if [[ "${INPUT_DELTA_STORAGE:-artifact}" == artifact ]]; then
+    [[ -n "${INPUT_DELTA_SNAPSHOT_WORKFLOW:-}" ]] \
+      || _fail "delta-baseline: main needs delta-snapshot-workflow (the workflow file that runs actions/main-snapshot on the default branch), or delta-storage: cache."
+  elif [[ -n "${INPUT_DELTA_SNAPSHOT_WORKFLOW:-}" ]]; then
+    _warn "delta-snapshot-workflow is set but has no effect: delta-storage: cache entries record no producing run to verify."
+  fi
   if [[ "$MODE" != compare ]]; then
     _warn "delta-baseline is set but has no effect: it only applies to mode: compare (mode is '$MODE')."
   fi

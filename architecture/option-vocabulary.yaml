@@ -1310,6 +1310,7 @@ concepts:
     action:
       - action:delta-baseline
       - action:delta-snapshot-workflow
+      - action:delta-storage
       - action:delta-mode
       - action:delta-profile
       - action:delta-wait-timeout
