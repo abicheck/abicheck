@@ -53,6 +53,7 @@ from abicheck.cli import main
 from abicheck.dumper import dump
 from abicheck.model.change_catalog.registry import Verdict
 from abicheck.serialization import snapshot_to_json
+from tests._unconfirmed import observed_verdict, passes_but_for_unconfirmed
 
 pytestmark = [
     pytest.mark.integration,
@@ -486,8 +487,10 @@ def test_headerless_additive_change_keeps_placement_alignment_compatible(tmp_pat
     assert flagged[0]["modulation_rule"] == (
         "address-alignment-without-declared-requirement"
     )
-    assert doc["verdict"] == "COMPATIBLE"
-    assert run.returncode == 0, run.stdout
+    # Dumped without headers or -g: the observed verdict is COMPATIBLE, and
+    # the UNCONFIRMED axis alone (no type-level evidence) may raise the exit.
+    assert observed_verdict(doc) == "COMPATIBLE"
+    assert passes_but_for_unconfirmed(run.returncode, doc), run.stdout
 
 
 @pytest.mark.parametrize("cc", ["gcc", "clang"])
