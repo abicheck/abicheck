@@ -216,7 +216,7 @@ def test_castxml_function_default_change_is_reported_through_its_clang_join(
     tmp_path: Path,
 ) -> None:
     # castxml writes no template defaults, but its clang join reads them from
-    # the same header (extractor generation 46), so the change is reported
+    # the same header (extractor generation 47), so the change is reported
     # exactly as on clang and no castxml template-default gap is named.
     _require_castxml()
     _require_clang()

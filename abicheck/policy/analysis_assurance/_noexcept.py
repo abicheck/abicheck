@@ -5,7 +5,7 @@ castxml writes no exception specification; its backend reads ``noexcept``
 from the clang AST of the same header (``extract/headers/castxml/
 clang_semantics_join.py``). When that join could not read a function whose
 header spells one -- no clang, a clang parse error -- or the snapshot is a
-castxml baseline from before extractor generation 45 (which stored a blanket
+castxml baseline from before extractor generation 46 (which stored a blanket
 ``False``), the function's ``is_noexcept_fact`` is ``NOT_COLLECTED`` and the noexcept
 detector declines it. This module names that side, so the rollup reads
 ``partial`` instead of a clean ``complete``. A coverage gap, never a verdict.

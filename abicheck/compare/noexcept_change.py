@@ -4,7 +4,7 @@
 Moved out of :mod:`.function_signature` (at its size cap) when the virtual
 case was added. A side whose specification was not observed
 (``FunctionSignature.is_noexcept is None``: a castxml run whose clang join
-did not read it, a pre-generation-45 castxml baseline) is declined, never
+did not read it, a pre-generation-46 castxml baseline) is declined, never
 read as "no ``noexcept``".
 
 Adding ``noexcept`` to a function is binary compatible and, for a plain

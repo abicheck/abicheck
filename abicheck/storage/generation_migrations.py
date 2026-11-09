@@ -68,6 +68,7 @@ __all__ = [
     "decode_fact_generations",
     "decode_spellings_generation",
     "encode_fact_generations",
+    "erased_extents_restored_between",
     "extractor_generation_of",
     "pending_extent_shift",
     "is_placeholder_reason",
@@ -112,6 +113,11 @@ class GenerationSpellingChange:
     ``N`` as ``N + extent_shift`` for some, but not all, arrays (a stored
     snapshot does not say which backend wrote an extent). Comparison demotes
     a finding whose spellings differ only by that shift instead.
+
+    *restores_erased_extents* says this generation spells an array bound the
+    older DWARF extractor erased (``char[8]`` where it wrote ``char[]``). A
+    stored ``T[]`` does not say what the bound was, so no rewrite is sound;
+    comparison demotes a finding whose spellings differ only by that erasure.
     """
 
     reason: str
@@ -121,6 +127,7 @@ class GenerationSpellingChange:
     #: (not spellings), such as ``castxml_noexcept_migration.py``: a document
     #: from before it re-encodes to different bytes by design.
     migrates_facts: bool = False
+    restores_erased_extents: bool = False
 
 
 #: Every row's reason cites the commit that introduced the generation and what
@@ -480,6 +487,20 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "an older PE/Mach-O snapshot keeps its export-table-only surface"
     ),
     45: GenerationSpellingChange(
+        "DWARF arrays spell each dimension's bound (dwarf_utils.array_type_info: "
+        "'char[8]', 'int[2][3]', was 'char[]' for every array; a flexible member "
+        "keeps 'T[]') and an array without DW_AT_byte_size records its size as "
+        "count times element size (was 0); DWARF-only snapshots record C++ "
+        "member and namespace-scope functions defined outside their declaration "
+        "(DW_AT_specification, extract/dwarf_member_functions), with the "
+        "declaration's name, scope, return type and 'this' qualifiers (an "
+        'extern "C" one by its plain name), and each virtual\'s vtable slot '
+        "from DW_AT_vtable_elem_location (was 0 or unrecorded). A stored 'T[]' cannot say what bound it "
+        "erased, so no rewrite is sound: comparison demotes a finding whose "
+        "spellings differ only by that erasure (policy/generation_drift_demotion)",
+        restores_erased_extents=True,
+    ),
+    46: GenerationSpellingChange(
         "no type or name spelling changes. castxml runs read a function's "
         "noexcept specification and the public headers' C++20 concept and "
         "template constraints from the clang AST of the same header "
@@ -487,13 +508,13 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "stored is_noexcept=False for every function and no constraint table; "
         "a function whose header spells a specification the join could not "
         "read stores is_noexcept=None (not observed). "
-        "castxml_noexcept_migration.py loads a pre-45 castxml snapshot's C++ "
+        "castxml_noexcept_migration.py loads a pre-46 castxml snapshot's C++ "
         "is_noexcept=False as None, so an older baseline reports no "
         "func_noexcept_added for an unchanged noexcept function; its missing "
         "constraint table already reads as not modelled",
         migrates_facts=True,
     ),
-    46: GenerationSpellingChange(
+    47: GenerationSpellingChange(
         "no type or name spelling changes. castxml and clang runs set "
         "cxx_template_defaults (the public headers' template-parameter "
         "defaults of every class, function, alias and variable template, read "
@@ -544,6 +565,17 @@ def pending_extent_shift(old_generation: int, new_generation: int) -> int:
         change.extent_shift
         for introduced, change in SPELLING_MIGRATIONS.items()
         if old_generation < introduced <= new_generation
+    )
+
+
+def erased_extents_restored_between(generation_a: int, generation_b: int) -> bool:
+    """Whether a generation in between the two (either order) started
+    spelling the array bounds an older DWARF extractor erased to ``[]``."""
+    low, high = sorted((generation_a, generation_b))
+    return any(
+        change.restores_erased_extents
+        for introduced, change in SPELLING_MIGRATIONS.items()
+        if low < introduced <= high
     )
 
 

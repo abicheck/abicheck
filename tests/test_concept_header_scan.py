@@ -190,7 +190,7 @@ def test_case105_concept_tightening_through_the_cli_per_backend(
 ) -> None:
     """Catalog case105 (concept tightened) through the public dump/compare CLI:
     both backends detect ``concept_tightened`` and name no concept gap --
-    castxml through its clang join (extractor generation 45). Without a
+    castxml through its clang join (extractor generation 46). Without a
     clang for that join, castxml never reads ``complete`` and names the
     concept dimension on both sides."""
     import shutil

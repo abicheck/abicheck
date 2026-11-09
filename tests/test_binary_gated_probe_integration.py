@@ -234,7 +234,7 @@ PROBES: dict[str, Probe] = {
         "int f(int x) { return x; }",
         header_reaches=False,  # producer is L4 source replay, not castxml
     ),
-    # castxml reads the specification from its clang join (generation 45);
+    # castxml reads the specification from its clang join (generation 46);
     # DWARF records no exception specification at all.
     "func_virtual_noexcept_added": _inline(
         "struct S { virtual ~S(); virtual int area() const; int w; };",
@@ -344,21 +344,28 @@ UNPROBED: dict[str, str] = {
 }
 
 #: ``BINARY_GATED`` probes whose binary-only (DWARF, no headers) run produces
-#: the kind (probed with gcc at -O0 -g). The other ``BINARY_GATED`` probes
-#: reach their kind only with headers: DWARF does not carry ``final``,
-#: ``explicit``, ``mutable``, ``= 0``, enum scoping, access of a static member,
-#: or return/parameter pointee qualifiers in the form the detectors read. Their
+#: the kind (probed with gcc at -O0 -g). Since extractor generation 46 a
+#: binary-only dump records C++ member and namespace-scope functions from
+#: their debug declarations, so a method's access, ``explicit``, const
+#: overload and namespace are read from DWARF too. The other ``BINARY_GATED``
+#: probes reach their kind only with headers: DWARF does not carry ``final``,
+#: ``mutable``, a GCC ``= 0``, enum scoping, access of a static member, or
+#: return/parameter pointee qualifiers in the form the detectors read. Their
 #: ``BINARY_GATED`` placement is therefore conservative (a binary-only run
 #: never produces them, so the gate never acts) and is kept: moving a kind out
 #: needs proof that *no* binary-only input produces it, which one fixture
 #: cannot give, while leaving it costs nothing (ADR-084 "Consequences").
 REACHED_BINARY_ONLY: frozenset[str] = frozenset(
     {
+        "ctor_explicit_added",
         "enum_member_renamed",
+        "experimental_removed_without_replacement",
         "field_access_changed",
         "field_became_const",
         "field_renamed",
         "mandatory_template_param_added",
+        "method_access_changed",
+        "removed_const_overload",
         "source_level_kind_changed",
         "tag_type_renamed",
         "type_removed",

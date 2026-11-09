@@ -20,11 +20,7 @@ from tests._edit_corpus_toolchains import uses_libstdcxx
 
 _CLASSES = frozenset({"cxx_classes"})
 
-GAP_DWARF_ARRAY = "A member array-bound change is invisible in DWARF-only comparison"
-GAP_DWARF_PURE = (
-    "DWARF-only comparison reports a virtual that became pure as a plain removal"
-)
-GAP_DWARF_CV = "DWARF-only comparison reports a method's dropped `const` as a removal plus an addition"
+GAP_DWARF_PURE = "A GCC-built DWARF snapshot cannot tell that a virtual became pure"
 GAP_CXX11_ABI = "A `_GLIBCXX_USE_CXX11_ABI` rebuild is refused as a profile mismatch, not reported as a break"
 GAP_O2_STD = "An `-O2` rebuild of a C++ library that uses `std::string` reads as a break or a risk"
 
@@ -82,52 +78,16 @@ class Known:
 
 KNOWN: tuple[Known, ...] = (
     Known(
-        "struct_array_shrink_in_padding",
-        frozenset({"c_core", "cxx_classes"}),
-        "wrong-verdict",
-        lambda c: c.evidence == "dwarf" and (c.flags.pack is None or c.flags.pack > 2),
-        "char[8] -> char[6] reads NO_CHANGE from DWARF (headers report type_field_type_changed)",
-        GAP_DWARF_ARRAY,
-        issues=frozenset(
-            {
-                "none-of:STRUCT_FIELD_TYPE_CHANGED|TYPE_FIELD_TYPE_CHANGED",
-                "weaker-than:API_BREAK",
-            }
-        ),
-        verdicts=frozenset({"NO_CHANGE"}),
-    ),
-    Known(
-        "struct_array_shrink_in_padding",
-        frozenset({"c_core", "cxx_classes"}),
-        "wrong-kind",
-        lambda c: (
-            c.evidence == "dwarf" and c.flags.pack is not None and c.flags.pack <= 2
-        ),
-        "packed, DWARF shows only type_size_changed; the member's type change is not reported",
-        GAP_DWARF_ARRAY,
-        issues=frozenset({"none-of:STRUCT_FIELD_TYPE_CHANGED|TYPE_FIELD_TYPE_CHANGED"}),
-        verdicts=frozenset({"BREAKING"}),
-    ),
-    Known(
         "virtual_become_pure",
         _CLASSES,
         "wrong-kind",
-        _ev("dwarf"),
-        "from DWARF the now-pure virtual reads func_removed_elf_only; neither "
-        "func_virtual_became_pure nor type_became_abstract",
+        # clang marks the in-class declaration DW_VIRTUALITY_pure_virtual; GCC
+        # writes DW_VIRTUALITY_virtual, so only a GCC build misses the kind.
+        lambda c: c.evidence == "dwarf" and c.producer.family == "gcc",
+        "from a GCC-built DWARF snapshot the now-pure virtual reads func_removed; "
+        "neither func_virtual_became_pure nor type_became_abstract",
         GAP_DWARF_PURE,
         issues=frozenset({"none-of:FUNC_VIRTUAL_BECAME_PURE|TYPE_BECAME_ABSTRACT"}),
-        verdicts=frozenset({"BREAKING"}),
-    ),
-    Known(
-        "method_const_drop",
-        _CLASSES,
-        "wrong-kind",
-        _ev("dwarf"),
-        "from DWARF the const drop reads func_removed_elf_only + func_added_elf_only; "
-        "func_cv_changed is not emitted (headers emit it)",
-        GAP_DWARF_CV,
-        issues=frozenset({"missing:FUNC_CV_CHANGED"}),
         verdicts=frozenset({"BREAKING"}),
     ),
     Known(

@@ -4,11 +4,11 @@
   castxml writes neither a function's `noexcept` nor an uninstantiated
   template, so adding `noexcept` to a virtual or a `requires`-clause to a
   header-only template compared clean. The castxml backend now reads both
-  from the clang AST of the same header (cached; extractor generation 45).
+  from the clang AST of the same header (cached; extractor generation 46).
   Without clang, the affected functions record `noexcept` as not observed:
   the comparison declines them and `analysis_assurance` reads `partial`,
   naming "C++ noexcept exception specifications", instead of `complete`.
-  A pre-45 castxml baseline's `noexcept` values load as not observed;
+  A pre-46 castxml baseline's `noexcept` values load as not observed;
   re-dump it.
 - **Adding `noexcept` to a virtual method is a source break.** An overrider
   without `noexcept` no longer compiles; both header backends now report the

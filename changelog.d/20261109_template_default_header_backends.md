@@ -6,7 +6,7 @@
   reported `template_param_default_changed`. The castxml backend now reads
   every template's defaults from the clang AST of the same header, through
   the same cached join that reads `noexcept` and C++20 constraints, so both
-  backends report the change alike (extractor generation 46). Without clang,
+  backends report the change alike (extractor generation 47). Without clang,
   castxml still reads `NO_CHANGE` with `partial` assurance and
   `template-parameter defaults (castxml cannot record them)` named.
 - **Alias and variable template defaults are compared on both backends.**

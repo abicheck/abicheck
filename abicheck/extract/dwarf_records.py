@@ -205,14 +205,20 @@ def access_from_dwarf(
 
 
 def admit_subprogram(
-    *, is_deleted: bool, is_exported: bool, is_external: bool
+    *,
+    is_deleted: bool,
+    is_exported: bool,
+    is_external: bool,
+    is_pure_virtual: bool = False,
 ) -> Visibility | None:
     """The surface-admission rule for a defined ``DW_TAG_subprogram``:
     its :class:`Visibility`, or ``None`` when the DIE must be dropped.
 
     A subprogram must be in the ELF dynamic export set -- except a deleted
     one, which is kept for cross-reference precisely because it has no symbol
-    in the new binary. An external-linkage definition (``DW_AT_external``,
+    in the new binary, and a member pure virtual's declaration, which has no
+    definition and so no symbol, yet is part of its class's interface (its
+    vtable slot). An external-linkage definition (``DW_AT_external``,
     i.e. not a C ``static``) that is absent from the set had its ELF
     visibility hidden: recorded rather than dropped, so it stays
     distinguishable from an outright removal (``catalog/cases/
@@ -225,6 +231,6 @@ def admit_subprogram(
     surface fact rather than re-deriving it from this return value -- see
     ``extract.surface_fact_producers.debug_info_surface_facts``.
     """
-    if is_deleted or is_exported:
+    if is_deleted or is_exported or is_pure_virtual:
         return Visibility.PUBLIC
     return Visibility.HIDDEN if is_external else None

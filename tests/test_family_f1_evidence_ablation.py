@@ -225,7 +225,7 @@ UNCOVERED: dict[str, str] = {
     "Variable.type_abi_fact": _ABI_FACT_UNCOVERED,
     "Function.return_type_abi_fact": _ABI_FACT_UNCOVERED,
     "AbiSnapshot.cxx_template_defaults": (
-        "header-level template-parameter default table (extractor generation 46); "
+        "header-level template-parameter default table (extractor generation 47); "
         "the H1 corpus has no header-only template whose default differs across "
         "its operands, so the ablation cannot reach it. Its unobserved state "
         "(None) is covered by tests/test_template_default_header_backends.py "
