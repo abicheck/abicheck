@@ -490,20 +490,19 @@ def report(
     return out
 
 
-def check_floor(
-    records: Sequence[CellRecord], ledger: dict, tier: str, *, complete: bool = False
-) -> list[str]:
+def check_floor(records: Sequence[CellRecord], ledger: dict, tier: str) -> list[str]:
     """Floor kinds this run of *tier* failed to verify.
 
-    A partial run (one shard of several) is held only to the floor kinds its
-    own cells expected; ``complete=True`` holds it to the whole floor.
+    *records* must be the whole tier run, every shard merged. One shard cannot
+    be judged on its own: a kind its cells expect may be verified only by a
+    cell in another shard (a skipped or known-xfail cell, or an ``any_of``
+    alternative the cell did not produce, still lists it as expected).
     """
     floor = set(ledger.get("verified_floor", {}).get(tier, ()))
     if not floor:
         return []
-    mine = [r for r in records if r.tier == tier]
-    verified = set().union(*(r.verified for r in mine))
-    owed = floor if complete else floor & set().union(*(set(r.expected) for r in mine))
+    verified = set().union(*(r.verified for r in records if r.tier == tier))
+    owed = floor
     return [
         f"{kind}: in the {tier} verified floor, not verified by this run"
         for kind in sorted(owed - verified)
@@ -646,12 +645,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="append",
         default=[],
         metavar="TIER",
-        help="fail if this tier's run verified less than its ledger floor",
-    )
-    rp.add_argument(
-        "--complete",
-        action="store_true",
-        help="the records are a whole tier run (all shards): hold it to the full floor",
+        help="fail if this tier's run verified less than its ledger floor "
+        "(PATHS must hold every shard's records)",
     )
     rp.add_argument(
         "--raise-floor",
@@ -699,9 +694,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             floors[tier] = sorted(set(floors.get(tier, ())) | (got & scope_set))
         _write_ledger(ledger)
     problems = [
-        p
-        for tier in args.check_floor
-        for p in check_floor(records, ledger, tier, complete=args.complete)
+        p for tier in args.check_floor for p in check_floor(records, ledger, tier)
     ]
     for p in problems:
         print(f"::error::{p}")

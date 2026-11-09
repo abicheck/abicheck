@@ -312,7 +312,7 @@ def _ledger(**floors: list[str]) -> dict:
     return {"declared_covered": [], "declared_uncovered": [], "verified_floor": floors}
 
 
-def test_floor_check_flags_a_dropped_kind_only_where_the_run_owed_it() -> None:
+def test_floor_check_holds_the_merged_run_to_the_whole_floor() -> None:
     ledger = _ledger(pr=["A", "B"])
     # The run's cells expected A and B; only A verified -> B dropped.
     recs = [
@@ -322,16 +322,18 @@ def test_floor_check_flags_a_dropped_kind_only_where_the_run_owed_it() -> None:
     assert cov.check_floor(recs, ledger, "pr") == [
         "B: in the pr verified floor, not verified by this run"
     ]
-    # A shard whose cells never expected B owes only A.
-    shard = [_rec(expected=("A",), produced=("A",))]
-    assert cov.check_floor(shard, ledger, "pr") == []
-    # ...unless the run claims to be the whole tier.
-    assert cov.check_floor(shard, ledger, "pr", complete=True) == [
-        "B: in the pr verified floor, not verified by this run"
+    # Two shards: one's skipped / known-xfail / any_of cells expect A and B
+    # without verifying them; the other verifies both. Only the merge is judged.
+    shard1 = [
+        _rec(status="unavailable", cls="", expected=("A",)),
+        _rec(cls="known-xfail", expected=("B",)),
     ]
+    shard2 = [_rec(expected=("A", "B"), produced=("A", "B"))]
+    assert cov.check_floor([*shard1, *shard2], ledger, "pr") == []
+    assert len(cov.check_floor(shard1, ledger, "pr")) == 2
     # Another tier's records never satisfy this tier's floor.
     other = [_rec(tier="weekly", expected=("A", "B"), produced=("A", "B"))]
-    assert len(cov.check_floor(other, ledger, "pr", complete=True)) == 2
+    assert len(cov.check_floor(other, ledger, "pr")) == 2
 
 
 def test_report_counts_per_tier(tmp_path: Path) -> None:

@@ -135,9 +135,11 @@ declared, when a new declared kind is not written down
 (`python -m tests._edit_corpus_coverage ledger --write`), or when a floor names
 a kind no cell can verify. `verified_floor[tier]` holds the kinds a tier
 verified when it was raised (`report DIR --raise-floor TIER`); a run that
-verifies less fails `--check-floor TIER`. A single shard is held only to the
-floor kinds its own cells expected; the merged run (`--complete`) to the whole
-floor.
+verifies less fails `--check-floor TIER`. Only the merged run (every shard's
+records) is held to the floor: a shard alone is reported, not checked, because
+a kind its skipped, known-xfail or `any_of` cells expect may be verified by a
+cell in another shard. The integration lane's `edit-corpus-coverage` job and
+the scheduled tiers' `report` job merge the shards and check.
 
 **Language-space coverage.** `tests/_edit_corpus_space.py` models the space
 the corpus samples: construct (from the operators' roles and language

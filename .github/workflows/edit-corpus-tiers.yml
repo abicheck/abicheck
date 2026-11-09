@@ -220,11 +220,10 @@ jobs:
             python -m tests._edit_corpus_report results || echo "(no pair report)"
           } >> "$GITHUB_STEP_SUMMARY"
           if [ -d results/coverage ]; then
-            # A shard is held only to the verified-floor kinds its own cells expected.
+            # Reported only: the floor is checked on the merged run (report job).
             python -m tests._edit_corpus_coverage report results/coverage \
               --title "Coverage, shard ${SHARD}/4" \
-              --summary "$GITHUB_STEP_SUMMARY" \
-              --check-floor "${ABICHECK_EDIT_CORPUS_TIER}"
+              --summary "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Upload results
@@ -299,13 +298,14 @@ jobs:
         run: |
           set -euo pipefail
           if [ ! -d results/coverage ]; then echo "::error::no shard uploaded coverage records"; exit 1; fi
-          complete=()
-          case "$CORPUS_RESULT" in success|failure) complete=(--complete) ;; esac
+          # Only a run in which every shard finished can be held to the floor.
+          check=()
+          case "$CORPUS_RESULT" in success|failure) check=(--check-floor "$TIER") ;; esac
           python -m tests._edit_corpus_coverage report results/coverage \
             --title "Edit corpus ${TIER} coverage (${CORPUS_RESULT})" \
             --summary "$GITHUB_STEP_SUMMARY" \
             --json results/coverage-report.json \
-            --check-floor "$TIER" ${complete[@]+"${complete[@]}"}
+            ${check[@]+"${check[@]}"}
 
       - name: Upload the summary
         id: upload
