@@ -97,6 +97,11 @@ PAIRS: dict[str, Pair] = {
             "int {n} __attribute__((vector_size(16)))",
             sites=("param", "field", "typedef"),
         ),
+        # An array bound is part of the member's type even where the record's
+        # size does not move (char[8] -> char[6] stays in S's tail padding):
+        # DWARF spelled every bounded array 'T[]' before generation 45.
+        Pair("char_arr8_vs_arr6", "char {n}[8]", "char {n}[6]", sites=("field",)),
+        Pair("int_arr2x3_vs_2x4", "int {n}[2][3]", "int {n}[2][4]", sites=("field",)),
         Pair("int_vs_long", "int {n}", "long {n}"),
         Pair("i128_vs_ldouble", "__int128 {n}", "long double {n}"),
         Pair("f16_vs_short", "_Float16 {n}", "short {n}"),
