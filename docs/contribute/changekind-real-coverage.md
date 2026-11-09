@@ -16,12 +16,12 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 ## Headline
 
 - Total kinds: **427**
-- Kinds with at least one real source: **182**
-- Kinds per source: catalog 160, field_shapes 9, integration 61
+- Kinds with at least one real source: **183**
+- Kinds per source: catalog 160, field_shapes 9, integration 63
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
-| L0 | 129 | 73 |
+| L0 | 129 | 72 |
 | L1 | 62 | 7 |
 | L2 | 75 | 42 |
 | L3 | 15 | 5 |
@@ -89,7 +89,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `executable_stack_removed` | COMPATIBLE | 2 | 0 | 0 |
 | `experimental_graduated` | COMPATIBLE | 1 | 0 | 0 |
 | `experimental_removed_without_replacement` | API_BREAK | 1 | 0 | 0 |
-| `exported_object_alignment_reduced` | RISK | 0 | 0 | 0 |
+| `exported_object_alignment_reduced` | RISK | 0 | 0 | 3 |
 | `func_added` | COMPATIBLE | 9 | 0 | 8 |
 | `func_added_elf_only` | COMPATIBLE | 0 | 0 | 0 |
 | `func_export_added` | COMPATIBLE | 2 | 0 | 0 |
@@ -149,7 +149,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `runtime_weak_resolution_changed` | RISK | 0 | 0 | 0 |
 | `soname_changed` | RISK | 1 | 0 | 1 |
 | `soname_missing` | COMPATIBLE | 1 | 0 | 0 |
-| `stack_canary_removed` | RISK | 1 | 0 | 0 |
+| `stack_canary_removed` | RISK | 1 | 0 | 3 |
 | `static_tls_introduced` | RISK | 1 | 0 | 0 |
 | `static_tls_removed` | COMPATIBLE | 0 | 0 | 0 |
 | `support_promise_component_introduced` | COMPATIBLE | 0 | 0 | 0 |

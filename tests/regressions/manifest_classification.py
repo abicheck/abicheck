@@ -209,6 +209,58 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="evidence.bound_read_as_measured_value",
+        invariant=(
+            "An observation that only bounds a fact never gates as the fact. "
+            "The largest power of two dividing a symbol's address bounds its "
+            "declared alignment from above, and a binary that no longer calls "
+            "__stack_chk_fail shows no canary was emitted, not that the "
+            "protector flag was weakened. A finding drawn from such a bound "
+            "keeps its RISK only where a corroborating fact establishes it "
+            "(an old declared alignment the new placement fails; a recorded "
+            "per-unit protector setting that weakened). Otherwise it is kept "
+            "and demoted with its rule, or, when the corroborating fact was "
+            "not collected, kept and marked as resting on weaker evidence."
+        ),
+        # Found by the config-matrix edit corpus (#1958) on an -O0 -> -O2
+        # rebuild with no source change; recorded as residues by #1960, which
+        # tried a section sh_addralign cap and reverted it (a stripped image
+        # must dump the same facts).
+        fixed_by=(1958, 1960),
+        seed_tests=(
+            "tests/test_stack_protector_census.py",
+            "tests/test_address_alignment_bound.py",
+            "tests/unit/storage/test_cu_stack_protector_fact.py",
+            "tests/test_rebuild_toolchain_drift_integration.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "compiler": ("gcc", "clang", "clang -grecord-command-line"),
+            "word_size": ("64", "32"),
+            "evidence": ("binary", "dwarf", "headers"),
+            "frontend": ("castxml", "clang"),
+            "census_state": ("unchanged", "weakened", "partial", "unknown"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "castxml 0.7 emits no align attribute on a Variable, so "
+                    "under castxml headers a dropped _Alignas reads as the "
+                    "type's unchanged natural alignment and is not reported."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+            KnownGap(
+                description=(
+                    "Without DWARF (or with clang's default producer string) "
+                    "no unit records the protector, so a canary no frame "
+                    "needs keeps its RISK, marked as weaker evidence."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
+    BugClass(
         id="classification.name_shape_as_contract_membership",
         invariant=(
             "A symbol's spelling answers how it is *represented* and what "

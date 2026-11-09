@@ -1,7 +1,7 @@
 # ADR-089: A DWARF Declaration's File Is Read Correctly, and a Dependency's Unreachable Internals Are Out of Contract
 
 **Date:** 2026-10-23
-**Status:** Accepted (2026-10-23) — implemented for binary + DWARF compares without headers; amended 2026-10-25 for compares with headers and 2026-10-26 for the leak finding's sides (see the amendments below).
+**Status:** Accepted (2026-10-23) — implemented for binary + DWARF compares without headers; amended 2026-10-25 for compares with headers, 2026-10-26 for the leak finding's sides and 2026-11-08 for the verdict of a coalesced dependency copy (see the amendments below).
 
 Governed by: [ADR-061](061-responsibility-package-architecture.md) (owner of each stage), [ADR-062](062-project-snapshot-storage-v2.md) (extractor generation), [ADR-065](065-comparison-scope-selection-and-completeness.md) (absent is not removed), [ADR-067](067-change-intent-acknowledgment-and-disposition-audit.md) (record before disposing).
 
@@ -133,3 +133,23 @@ A record internal on one side and reached on the other keeps its leak in contrac
 ### Verification
 
 `tests/test_contract_dependency_origin.py::test_internal_type_leak_follows_the_record_on_each_side` (every pair of absent / reached / internal / unread, against a hand-written truth table), `tests/test_dependency_record_leak_integration.py` (the corpus shape with a `vec_traits` whose size the library picks and a public function naming it on one side, both directions, stored and live, through the CLI) and the unchanged `tests/test_header_dependency_internals_integration.py`.
+
+## Amendment (2026-11-08): a coalesced dependency copy does not move the verdict
+
+### Context
+
+A3 puts a `WEAK`/`GNU_UNIQUE` export of a dependency-owned entity out of *contract*, but the verdict without `--contract` still scored its appearance or disappearance. Rebuilding an unchanged `std::string`-using library at `-O2` instead of `-O0` (the edit corpus's `rebuild_optimized` cell on `cxx_stdlib`, PR #1958) drops the weak `std::`/`__gnu_cxx::` instantiations the `-O0` build exported. That read `func_removed_elf_only` / `func_visibility_changed` (BREAKING) for the `__gnu_cxx::` ones and `symbol_leaked_from_dependency_changed` (RISK) for the `std::` ones, while every consumer built against the `-O0` library runs against the `-O2` one.
+
+### Decision
+
+**A7.** A presence finding (`func_removed`, `func_removed_elf_only`, `var_removed`, `var_removed_elf_only`, `func_visibility_changed`, `var_visibility_changed`, `symbol_leaked_from_dependency_changed`) whose symbol is `WEAK`/`GNU_UNIQUE` on every side that exports it, and whose owner is a dependency by the symbol-hygiene audit's origin classification (`export_accounting.toolchain_runtime_name_predicate`), is demoted to `COMPATIBLE` through `Change.effective_verdict` with rule `coalesced-dependency-copy` (`policy/toolchain_rebuild_drift.py`). It is recorded, never removed (ADR-067).
+
+A customization point specialized over builtin types only (`std::char_traits<char>`, `std::hash<int>`) is the implementation's own specialization: a program may specialize a standard template only for a program-defined type. `extract/stdlib_local_origin.is_user_specializable_std_symbol` now answers `False` for those.
+
+### Unchanged
+
+A `GLOBAL` export keeps its verdict. A `WEAK` export of the library's own namespace keeps BREAKING (`case217`/`case218`: only a `binding:` policy demotes it). A removal of the library's own export in the same rebuild stays BREAKING.
+
+### Verification
+
+`tests/test_toolchain_rebuild_drift.py` (every presence kind x binding pair x owner, against a hand-written truth table), `tests/test_rebuild_toolchain_drift_integration.py` (gcc and clang, `-O0` -> `-O2`, binary / DWARF / headers; the same rebuild with an own export removed still breaks).

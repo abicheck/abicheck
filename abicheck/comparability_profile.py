@@ -35,6 +35,9 @@ the same shape ``type_reachability.py``'s own
 
 from __future__ import annotations
 
+import json
+from collections.abc import Mapping
+
 from .comparability import (
     _ALL_PROFILE_DIMENSIONS,
     _BUILD_CONTEXT_FIELDS,
@@ -318,6 +321,58 @@ def header_sequence_change_is_scope_confirmed(
     )
 
 
+#: Macros that select a C++ runtime's ABI rather than configure the library's
+#: declarations: flipping one renames or relayouts runtime types in every
+#: signature that uses them (libstdc++'s dual ABI renames ``std::string`` and
+#: ``std::list`` into and out of ``std::__cxx11``).
+_RUNTIME_ABI_MACROS = ("_GLIBCXX_USE_CXX11_ABI",)
+
+
+def _macro_ops(fields: Mapping[str, object]) -> list[str]:
+    """``profile_fields["macro_ops"]`` as ``-DNAME=VALUE``/``-UNAME`` spellings."""
+    raw = fields.get("macro_ops")
+    try:
+        ops = json.loads(raw) if isinstance(raw, str) else []
+    except ValueError:
+        return []
+    return [
+        f"-{op[0]}{op[1]}"
+        for op in ops
+        if isinstance(op, list) and len(op) == 2 and all(isinstance(x, str) for x in op)
+    ]
+
+
+def macro_ops_detail(
+    old_fields: Mapping[str, object], new_fields: Mapping[str, object]
+) -> str:
+    """The macro operations only one side's header parse ran, for a
+    ``macro_ops`` mismatch reason (``""`` when neither side's are readable).
+
+    Names a runtime-ABI selector (:data:`_RUNTIME_ABI_MACROS`) and what to do
+    about it, since that rebuild is itself an ABI change the refusal hides."""
+    old_ops, new_ops = _macro_ops(old_fields), _macro_ops(new_fields)
+    only_old = [o for o in old_ops if o not in new_ops]
+    only_new = [o for o in new_ops if o not in old_ops]
+    if not (only_old or only_new):
+        return ""
+    detail = (
+        f" Macro operations only in old: {', '.join(only_old) or '(none)'}; "
+        f"only in new: {', '.join(only_new) or '(none)'}."
+    )
+    abi = sorted(
+        m for m in _RUNTIME_ABI_MACROS if any(m in op for op in only_old + only_new)
+    )
+    if abi:
+        detail += (
+            f" {', '.join(abi)} selects the C++ runtime's ABI: the rebuild "
+            "renames every symbol whose signature uses std::string or "
+            "std::list, which consumers built before cannot bind. Compare "
+            "without headers, or pass --diagnostic-comparison, to see those "
+            "removals."
+        )
+    return detail
+
+
 def _profile_mismatch_reason(
     unknown_differing: set[str], differing: set[str], unexplained: set[str]
 ) -> str | None:
@@ -463,6 +518,8 @@ def _check_profile_fingerprint_comparable(
     reason = _profile_mismatch_reason(unknown_differing, differing, unexplained)
     if reason is None:
         return None
+    if "macro_ops" in unexplained:
+        reason += macro_ops_detail(old_fields, new_fields)
     if bounded := auto_derived_standard_reason(
         old, new, unknown_differing, unexplained
     ):

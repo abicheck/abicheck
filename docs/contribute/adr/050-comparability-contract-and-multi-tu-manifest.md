@@ -2572,6 +2572,22 @@ floor changed is still decided only by L3 build evidence
 the gate refused for another reason; a bounded pair exits by its verdict, as
 every other non-fatal axis already does.
 
+## Amendment (2026-11-08): a `macro_ops` refusal names the macros
+
+**Trigger.** The edit corpus's `rebuild_cxx11_abi_off` cell (PR #1958): a
+library rebuilt with `-D_GLIBCXX_USE_CXX11_ABI=0`, dumped with headers and
+each side's own `-D`, is refused as `profile_mismatch` (exit 16). The reason
+said only `differing fields: macro_ops`.
+
+**Decision.** The refusal stays: a header parse under different macro
+operations is not comparable, and that is this ADR's contract. Its reason now
+lists the macro operations each side ran that the other did not, and, for a
+macro that selects the C++ runtime's ABI (`_GLIBCXX_USE_CXX11_ABI`), says
+that the rebuild renames every symbol using `std::string`/`std::list` and how
+to see those removals (compare without headers, or `--diagnostic-comparison`).
+Owner: `comparability_profile.macro_ops_detail`. Exit codes, the report shape
+and every other refusal are unchanged.
+
 ## References
 
 - `abicheck/model.py` — `AbiSnapshot`, `ScopeOrigin` (`:131-147`)

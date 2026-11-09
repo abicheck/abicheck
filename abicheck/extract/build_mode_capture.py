@@ -51,11 +51,13 @@ carries), never a fabricated value.
 from __future__ import annotations
 
 import logging
+from bisect import bisect_right
 from dataclasses import dataclass
 from pathlib import Path
 
 from ..model import AbiSnapshot
-from .dwarf_producer import best_cu_producer, decode_attr
+from ..model.stack_protector import stack_protector_census
+from .dwarf_producer import best_cu_from, decode_attr, read_cu_units
 
 log = logging.getLogger(__name__)
 
@@ -74,14 +76,71 @@ class ElfBuildSignals:
     producer: str | None = None
     dwarf_language: int | None = None
     comment: str | None = None
+    #: Every compiled unit's stack-protector setting
+    #: (``model.stack_protector``); ``None`` when no unit was read.
+    stack_protector: dict[str, int] | None = None
 
 
-def _read_producer(elf: object) -> tuple[str | None, int | None]:
+_NO_DWARF: tuple[str | None, int | None, dict[str, int] | None] = (None, None, None)
+
+#: ELF symbol types that are code a compilation unit compiled. pyelftools
+#: names type 10 (``STT_GNU_IFUNC``) ``STT_LOOS`` in some releases.
+_CODE_SYMBOL_TYPES = frozenset({"STT_FUNC", "STT_GNU_IFUNC", "STT_LOOS"})
+
+
+def _exported_code_addresses(elf: object) -> list[int] | None:
+    """Addresses of the functions the image defines in ``.dynsym``; ``None``
+    when it has no readable dynamic symbol table (coverage then unknown)."""
+    section = elf.get_section_by_name(".dynsym")  # type: ignore[attr-defined]
+    if section is None or section.header.sh_type != "SHT_DYNSYM":
+        return None
+    return [
+        sym["st_value"]
+        for sym in section.iter_symbols()
+        if sym["st_info"]["type"] in _CODE_SYMBOL_TYPES
+        and sym["st_shndx"] != "SHN_UNDEF"
+        and sym["st_value"]
+    ]
+
+
+def _code_outside_units(
+    exported: list[int] | None, ranges: list[tuple[int, int]] | None
+) -> bool:
+    """Whether some exported function lies in no unit's code range, or that
+    cannot be established (no symbol table, unreadable ranges)."""
+    if exported is None or ranges is None:
+        return True
+    merged: list[list[int]] = []
+    for lo, hi in sorted(r for r in ranges if r[1] > r[0]):
+        if merged and lo <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], hi)
+        else:
+            merged.append([lo, hi])
+    starts = [lo for lo, _hi in merged]
+    for address in exported:
+        i = bisect_right(starts, address) - 1
+        if i < 0 or address >= merged[i][1]:
+            return True
+    return False
+
+
+def _read_producer(
+    elf: object, exported: list[int] | None = None
+) -> tuple[str | None, int | None, dict[str, int] | None]:
+    """The best CU's producer and language, and every unit's protector.
+    *exported* is the image's exported function addresses (its own when the
+    DWARF is detached), checked against the units' code ranges."""
     from ..dwarf_utils import has_real_dwarf_info
 
     if not has_real_dwarf_info(elf):
-        return None, None
-    return best_cu_producer(elf.get_dwarf_info())  # type: ignore[attr-defined]
+        return _NO_DWARF
+    read = read_cu_units(elf.get_dwarf_info())  # type: ignore[attr-defined]
+    producer, lang = best_cu_from(read.units)
+    census = stack_protector_census(
+        read.units,
+        code_outside_units=_code_outside_units(exported, read.code_ranges),
+    )
+    return producer, lang, census
 
 
 def _read_comment(elf: object) -> str | None:
@@ -97,17 +156,19 @@ def _read_comment(elf: object) -> str | None:
     return "\n".join(parts) or None
 
 
-def _read_detached_producer(debug_path: Path) -> tuple[str | None, int | None]:
-    """The producer/language of a detached ELF debug file (``None`` pair when
-    it cannot be read or carries no CU attributes)."""
+def _read_detached_producer(
+    debug_path: Path, exported: list[int] | None = None
+) -> tuple[str | None, int | None, dict[str, int] | None]:
+    """The producer/language/protector census of a detached ELF debug file
+    (all ``None`` when it cannot be read or carries no CU attributes)."""
     from elftools.elf.elffile import ELFFile
 
     try:
         with debug_path.open("rb") as fh:
-            return _read_producer(ELFFile(fh))  # type: ignore[no-untyped-call]
+            return _read_producer(ELFFile(fh), exported)  # type: ignore[no-untyped-call]
     except Exception as exc:  # noqa: BLE001 - detached debug is optional evidence
         log.debug("build_mode_capture: cannot read %s: %s", debug_path, exc)
-        return None, None
+        return _NO_DWARF
 
 
 def read_elf_build_signals(
@@ -131,20 +192,26 @@ def read_elf_build_signals(
         with path.open("rb") as fh:
             elf = ELFFile(fh)  # type: ignore[no-untyped-call]
             comment = _read_comment(elf)
-            producer: str | None = None
-            lang: int | None = None
+            producer, lang, census = _NO_DWARF
+            exported: list[int] | None = None
             try:
                 if read_dwarf:
-                    producer, lang = _read_producer(elf)
+                    exported = _exported_code_addresses(elf)
+                    producer, lang, census = _read_producer(elf, exported)
             except Exception as exc:  # noqa: BLE001 - DWARF is optional evidence
                 log.debug("build_mode_capture: DWARF read failed: %s", exc)
-                producer, lang = None, None
+                producer, lang, census = _NO_DWARF
     except Exception as exc:  # noqa: BLE001
         log.debug("build_mode_capture: cannot read %s: %s", path, exc)
         return None
     if read_dwarf and producer is None and lang is None and debug_path is not None:
-        producer, lang = _read_detached_producer(debug_path)
-    return ElfBuildSignals(producer=producer, dwarf_language=lang, comment=comment)
+        producer, lang, census = _read_detached_producer(debug_path, exported)
+    return ElfBuildSignals(
+        producer=producer,
+        dwarf_language=lang,
+        comment=comment,
+        stack_protector=census,
+    )
 
 
 def capture_build_mode(
@@ -175,6 +242,8 @@ def _mangled_names(snapshot: AbiSnapshot) -> list[str]:
 def _record(snapshot: AbiSnapshot, signals: ElfBuildSignals) -> AbiSnapshot:
     from ..build_mode import build_mode_from_signals
 
+    if signals.stack_protector is not None:
+        snapshot.cu_stack_protector = signals.stack_protector
     mangled = _mangled_names(snapshot)
     if (
         signals.producer is None

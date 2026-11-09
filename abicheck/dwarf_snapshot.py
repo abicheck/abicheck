@@ -65,6 +65,7 @@ from .extract.dwarf_decl_file import decl_header_location
 from .extract.dwarf_records import (
     access_from_dwarf as _access_from_dwarf,
     admit_subprogram as _admit_subprogram,
+    backfill_variable_alignment as _backfill_variable_alignment,
     default_member_access_for_tag as _default_member_access_for_tag,
     format_qualified_type_name as _format_qualified_type_name,
     local_vptr_member_offset_bits as _local_vptr_member_offset_bits,
@@ -79,6 +80,7 @@ from .extract.dwarf_scope import (
 )
 from .extract.dwarf_subtree_index import open_indexed_dwarf_info
 from .extract.dwarf_type_names import strip_type_decorators as _strip_type_decorators
+from .extract.dwarf_variable_identity import variable_definition_view
 from .extract.dwarf_vptr_resolution import finalize_vptr_offsets
 from .extract.surface_fact_producers import debug_info_surface_facts
 from .model import (
@@ -721,14 +723,12 @@ class _DwarfSnapshotBuilder:
         self, die: Any, CU: Any, scope: str, scope_path: ScopePath = ()
     ) -> None:
         """Extract a variable from DW_TAG_variable."""
-        # Only externally visible variables
+        die, scope, scope_path = variable_definition_view(die, CU, scope, scope_path)
         if not _attr_bool(die, "DW_AT_external"):
             return
-
         name = _attr_str(die, "DW_AT_name")
         if not name:
             return
-
         linkage_name = _attr_str(die, "DW_AT_linkage_name")
         if not linkage_name:
             linkage_name = _attr_str(die, "DW_AT_MIPS_linkage_name")
@@ -739,7 +739,7 @@ class _DwarfSnapshotBuilder:
             return
 
         if mangled in self._seen_var_mangles:
-            return
+            return _backfill_variable_alignment(self.variables, mangled, die)
         self._seen_var_mangles.add(mangled)
 
         type_name, is_const = "?", False
@@ -760,8 +760,8 @@ class _DwarfSnapshotBuilder:
                 **debug_info_surface_facts(exported=var_export),
                 is_const=is_const,
                 type_abi_fact=_type_abi_fact(die, CU),
-                # ADR-063 Phase 2 -- see dwarf_scope.variable_entity_id.
-                entity_id=_dwarf_variable_entity_id(
+                alignment_bits=_attr_int(die, "DW_AT_alignment") * 8 or None,
+                entity_id=_dwarf_variable_entity_id(  # ADR-063 Phase 2: dwarf_scope
                     scope_path, name, mangled, bool(linkage_name)
                 ),
             )

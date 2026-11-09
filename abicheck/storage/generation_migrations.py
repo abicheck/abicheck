@@ -524,6 +524,25 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "castxml side keeps its header-scan gap note and a clang side its "
         "alias/variable-template gap note"
     ),
+    48: GenerationSpellingChange(
+        "advanced DWARF records a by-value aggregate's triviality as 'unknown' "
+        "when the unit carries only its declaration (clang's type homing of "
+        "std::string), and takes a type's own DW_AT_calling_convention as the "
+        "answer when present; the ELF origin of a std customization point "
+        "specialized over builtins only (std::char_traits<char>) is the C++ "
+        "runtime. No type or name spelling changes, so no rewrite is needed -- "
+        "an older snapshot's declaration-only 'trivial' reads as before"
+    ),
+    49: GenerationSpellingChange(
+        "an ELF dump records every compilation unit's stack-protector setting "
+        "from its DW_AT_producer (the abicheck.cu_stack_protector extension "
+        "fact), and a DWARF-derived variable records its DW_AT_alignment as "
+        "alignment_bits (a nameless out-of-line definition, such as clang's "
+        "for a C++ static data member, is read with the declaration it "
+        "completes, so that variable is now recorded). No type or name spelling changes, so no rewrite is "
+        "needed -- an older snapshot reads as no unit recorded (a lost canary "
+        "keeps its RISK) and as no declared DWARF alignment"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.
