@@ -230,6 +230,20 @@ current emitter, which is unchanged.
 **Status (2026-11-08): OPEN.** Adding `requires (sizeof(T) >= 4)` to a header-only function template makes an existing consumer call (`clampv((short)-3)`) stop compiling, but castxml emits no element for an uninstantiated template, so the header lane reads `NO_CHANGE` and neither `concept_tightened` nor `concept_constraint_changed` is reported. Found by the config-matrix corpus's execution oracle (`concept_constraint_added`, `cxx_classes`, C++20/23, gcc and clang, evidence `headers`: the consumer recompiled against the new header fails; strict xfail, also in the PR tier). Same root as the header-only template default entry below. `false-clean`. Owner: `extract/headers/castxml/`.
 <!-- no-canary: the corpus PR-tier strict xfail (tests/_edit_corpus_known.py) fails once the constraint change is reported -->
 
+#### A stripped library compared without headers reads `NO_CHANGE` with `partial` assurance and exit 0 (2026-11-08)
+
+**Status (2026-11-08): OPEN.** Found while building the invariant oracles (`tests/test_invariant_oracles_reduced_evidence.py`).
+[Full write-up](known-gaps/a-stripped-library-compared-without-headers-reads-no-change-with-partial-assurance-and-exit-0.md)
+`false-clean` — a symbols-only compare of a stripped library reads `NO_CHANGE` with exit 0 and an accepted headline.
+<!-- canary: tests/test_invariant_oracles_reduced_evidence.py::test_stripped_pair_gap_is_still_the_current_answer -->
+
+#### The typed `compare()` route omits `exported_not_public` that the CLI reports for the same catalog case (2026-11-08)
+
+**Status (2026-11-08): OPEN.** Found by the typed-API route check in `tests/test_invariant_oracles_catalog.py`.
+[Full write-up](known-gaps/the-typed-compare-route-omits-exported-not-public-that-the-cli-reports-for-the-same-catalog-case.md)
+`false-clean` — the typed route can read a catalog case as having one fewer hygiene finding than the CLI.
+<!-- canary: tests/test_invariant_oracles_catalog.py::test_typed_api_omits_exported_not_public_on_case09 -->
+
 #### A castxml base whose bare leaf two records share is not resolved by the leak walk (2026-11-05)
 
 **Status (2026-11-05): OPEN, narrow.** castxml writes a base class as its bare leaf (`Base`) and, unlike a field or signature slot, records no `type_identities_fact` for it. When two records share that leaf (`lib::detail::Base` and `other::Base`) and C++ name lookup from the derived class's scope does not find the one meant (the base lives in a sibling namespace), the leak walk (`model/type_spelling_resolve.py`) keeps the spelling unresolved rather than guess, so a layout change to that internal base reports no `internal_type_leaks_via_public_api`. The clang backend writes the base as the header did and is unaffected. Closing it needs castxml base identities in the snapshot. `tests/test_detector_frontend_spelling.py` pins the resolved shapes.

@@ -234,6 +234,7 @@ tests/test_ctor_dtor_key_drift.py
 tests/test_debug_evidence_presence.py
 tests/test_declaration_facts_cutover.py
 tests/test_declined_comparisons.py
+tests/test_delta_operand_identity.py
 tests/test_demangle_batching_consumers.py
 tests/test_demangled_symbol_field.py
 tests/test_dependency_types_report.py
