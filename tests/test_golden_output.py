@@ -256,9 +256,7 @@ def test_golden_leaked_dependency_symbol(update_goldens: bool) -> None:
             # definition GLOBAL. A WEAK copy would be a coalesced (COMDAT)
             # instance every consumer emits too, which is compatible
             # (ADR-089 A7, tests/test_toolchain_rebuild_drift.py).
-            _elf_sym(
-                "_ZNSt6thread8_M_startEv", "libstdc++.so.6", SymbolBinding.GLOBAL
-            ),
+            _elf_sym("_ZNSt6thread8_M_startEv", "libstdc++.so.6", SymbolBinding.GLOBAL),
         ],
     )
 
