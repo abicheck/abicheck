@@ -98,7 +98,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `func_removed_elf_only` | BREAKING | 5 | 0 | 6 |
 | `func_visibility_changed` | BREAKING | 2 | 0 | 2 |
 | `func_visibility_protected_changed` | RISK | 1 | 0 | 0 |
-| `glibcxx_dual_abi_changed` | BREAKING | 0 | 0 | 3 |
+| `glibcxx_dual_abi_changed` | BREAKING | 0 | 0 | 4 |
 | `glibcxx_dual_abi_flip_detected` | COMPATIBLE | 1 | 0 | 0 |
 | `hash_style_removed` | RISK | 0 | 0 | 0 |
 | `ifunc_introduced` | COMPATIBLE | 1 | 0 | 0 |
