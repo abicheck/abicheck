@@ -39,9 +39,7 @@ from typing import Any
 
 import pytest
 
-from abicheck.policy.analysis_assurance._concepts import CONCEPT_GAP_DIMENSION
 from tests._abicheck_subprocess import abicheck_command, abicheck_env
-from tests.test_template_default_assurance_gap import _compare as _header_only_compare
 
 #: Every compiled canary pins the answer measured with gcc/castxml/clang on a
 #: Linux ELF host; on Windows or macOS the toolchain, binary format and so the
@@ -54,7 +52,6 @@ pytestmark = [pytest.mark.integration, pytest.mark.known_gap_canary, _LINUX_ONLY
 
 _ROOT = Path(__file__).resolve().parents[1]
 _CASES = _ROOT / "catalog" / "cases"
-_TEMPLATE_GAP = "template-parameter defaults"
 
 
 def _require(*tools: str) -> None:
@@ -145,50 +142,6 @@ def _catalog_sides(
 
 def _kinds(report: dict[str, Any]) -> set[str]:
     return {c["kind"] for c in report["changes"]}
-
-
-def _template_gap_notes(report: dict[str, Any]) -> list[str]:
-    return [
-        n for n in report["analysis_assurance"]["notes"] if n.startswith(_TEMPLATE_GAP)
-    ]
-
-
-# -- "A header-only default template-argument change reads NO_CHANGE at L2 on castxml"
-
-
-def test_castxml_class_template_default_change_reads_partial_no_change(
-    tmp_path: Path,
-) -> None:
-    """castxml cannot record a template default: a changed one reads NO_CHANGE, partial, named."""
-    _require("castxml")
-    report = _header_only_compare(
-        tmp_path,
-        "castxml",
-        "template <class T, class U = int> struct Box { T t; U u; };",
-        "template <class T, class U = long> struct Box { T t; U u; };",
-    )
-    assert report["verdict"] == "NO_CHANGE"
-    assert "template_param_default_changed" not in _kinds(report)
-    assert report["analysis_assurance"]["status"] == "partial"
-    assert any("castxml cannot record them" in n for n in _template_gap_notes(report))
-
-
-def test_clang_macro_spelled_alias_template_default_is_not_seen(tmp_path: Path) -> None:
-    """The clang alias/variable-template scan is textual: a default spelled by a macro is unseen.
-
-    The change is neither reported nor named as a template-defaults gap.
-    """
-    _require("clang")
-    macro = "#define DFLT(x) = x\n"
-    report = _header_only_compare(
-        tmp_path,
-        "clang",
-        macro + "template <class T, class U DFLT(int)> using P = Q<U>;",
-        macro + "template <class T, class U DFLT(long)> using P = Q<U>;",
-    )
-    assert report["verdict"] == "NO_CHANGE"
-    assert "template_param_default_changed" not in _kinds(report)
-    assert _template_gap_notes(report) == []
 
 
 # -- "The clang record-layout pass leaves unnameable records and
@@ -285,41 +238,9 @@ def test_legacy_dumper_dump_leaves_a_clang_record_unsized(
     assert sizes(dump(lib, headers=headers, version="v1")) == [("W", None)]
 
 
-# -- "Catalog known-gap rows at debug-headers depth read NO_CHANGE (case105, case98)"
-
-
-def test_case105_concept_tightening_debug_headers_per_backend(
-    tmp_path: Path,
-) -> None:
-    """castxml cannot see a C++20 concept (NO_CHANGE, partial, dimension
-    named); clang models concepts and detects the tightening, naming no gap."""
-    _require("castxml", "clang", "g++")
-    answers = {}
-    for frontend in ("castxml", "clang"):
-        work = tmp_path / frontend
-        work.mkdir()
-        report = _compare_libraries(
-            work,
-            frontend=frontend,
-            lang="c++",
-            sides=_catalog_sides(
-                "case105_concept_tightening", (["-std=c++20"], ["-std=c++20"])
-            ),
-            debug=True,
-        )
-        named = any(
-            n.startswith(CONCEPT_GAP_DIMENSION)
-            for n in report["analysis_assurance"]["notes"]
-        )
-        answers[frontend] = (
-            report["verdict"],
-            "concept_tightened" in _kinds(report),
-            named,
-        )
-    assert answers == {
-        "castxml": ("NO_CHANGE", False, True),
-        "clang": ("API_BREAK", True, False),
-    }, answers
+# -- "Catalog known-gap rows at debug-headers depth read NO_CHANGE (case98)"
+# case105 (concept) is fixed on both backends; its regression test is
+# tests/test_concept_header_scan.py::test_case105_concept_tightening_through_the_cli_per_backend.
 
 
 def test_case98_standard_floor_reads_partial_no_change_at_debug_headers(

@@ -1,6 +1,6 @@
 # Case 228: Non-Type Template Parameter Default Changed
 
-**Category:** Template ABI | **Verdict:** 🟢 NO_CHANGE on castxml (with a gap); 🟠 API_BREAK on clang
+**Category:** Template ABI | **Verdict:** 🟠 API_BREAK (both backends)
 
 ## Verdict and consumer impact
 
@@ -8,12 +8,9 @@
 non-type. A consumer that writes `Buf<char>` gets an array of a different size, so
 the change is a real source-level change. It does not appear in any symbol.
 
-The validator default lane is castxml, and castxml cannot record the default, so
-its expected result is `NO_CHANGE` with a gap. The clang recorder spells non-type
-defaults, so the same change reads as
-`TEMPLATE_PARAM_DEFAULT_CHANGED`, `API_BREAK`, on clang.
-
-## Old/new diff
+The clang AST spells non-type defaults, and both header backends read them from
+it, so the change reads as `TEMPLATE_PARAM_DEFAULT_CHANGED`, `API_BREAK`, on
+castxml and clang. castxml writes no record for an uninstantiated template, so the castxml backend reads the defaults from the clang AST of the same header (its clang join), as the clang backend does. Without clang, a castxml run reads `NO_CHANGE` with run status partial and the gap `template-parameter defaults (castxml cannot record them)`.
 
 ## Old/new diff
 
@@ -34,14 +31,11 @@ abicheck dump -H v2.h --config .abicheck.yml --depth headers -o new.json
 abicheck compare old.json new.json
 ```
 
-Switch `frontend: clang` to see the clang result (`API_BREAK`,
-`template_param_default_changed`).
+`frontend: clang` gives the same result.
 
 ## Expected abicheck finding
 
-castxml: `Verdict: NO_CHANGE`, `Assurance: partial`. The gap names the template
-default that the backend could not record: `template-parameter defaults`.
-clang: `Verdict: API_BREAK`, `template_param_default_changed`.
+castxml (default) and clang: `Verdict: API_BREAK`, `template_param_default_changed`.
 
 ## Minimum evidence
 
@@ -49,10 +43,10 @@ clang: `Verdict: API_BREAK`, `template_param_default_changed`.
 
 ## Why abicheck catches it
 
-On clang, the non-type default `4` and `8` are both recorded in
-`template_param_defaults_fact`, so the two sides differ and the change is reported.
-On castxml the fact is UNKNOWN and never compares equal to a recorded side, so the
-gap is the honest result.
+The non-type defaults `4` and `8` are both recorded (`AbiSnapshot.cxx_template_defaults`
+on both backends, and `template_param_defaults_fact` on clang's pattern record),
+so the two sides differ and the change is reported. A side whose defaults were
+not recorded never compares equal to a recorded side.
 
 ## Runtime failure demonstration
 

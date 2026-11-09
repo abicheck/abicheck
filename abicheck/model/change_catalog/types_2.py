@@ -709,15 +709,16 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
     _E(
         "template_param_default_changed",
         _A,
-        impact="A class template's default template argument changed in the "
-        "header (`template <class T, class U = T>` becoming `U = int`) and no "
-        "exported instantiation carries it. Nothing in the binary changed, so "
-        "this is not a BREAKING ABI event; a consumer's own `Box<char>` names a "
-        "different type and fails to compile or silently changes meaning. "
-        "Reported only when both sides record the defaults (clang header "
-        "backend). castxml cannot record them, so a castxml run does not "
-        "report this change.",
-        description_template="Class template '{name}' default template argument changed ({detail}). No exported instantiation carries it; consumer source that names the template with the default may now refer to a different type.",
+        impact="A template's default template argument changed in the header "
+        "(`template <class T, class U = T>` becoming `U = int`) -- a class, "
+        "function, alias or variable template -- and no exported instantiation "
+        "carries it. Nothing in the binary changed, so this is not a BREAKING "
+        "ABI event; a consumer's own `Box<char>` names a different type or "
+        "value and fails to compile or silently changes meaning. Reported only "
+        "when both sides recorded the defaults: both header backends read them "
+        "from the clang AST (castxml through its clang join); a castxml run "
+        "without clang names the gap instead.",
+        description_template="Template '{name}' default template argument changed ({detail}). No exported instantiation carries it; consumer source that names the template with the default may now refer to a different type or value.",
         entity=_ENT.TYPE,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,

@@ -264,13 +264,20 @@ def test_fused_walk_matches_asdict_then_sets_to_lists(
 
 def _with_retired_views(obj: Any, projected: Any) -> Any:
     """``asdict`` plus the ADR-063 Phase 10 retired bridge fields, which are
-    ``InitVar`` views ``asdict`` cannot see but the document still carries."""
-    from dataclasses import is_dataclass
+    ``InitVar`` views ``asdict`` cannot see but the document still carries,
+    minus a field declared ``metadata={"wire": False}`` (carried by an
+    extension fact, never a record key)."""
+    from dataclasses import fields, is_dataclass
 
     from abicheck.model.fact import RetiredBridgeField
 
     if is_dataclass(obj) and isinstance(projected, dict):
-        out = {k: _with_retired_views(getattr(obj, k), v) for k, v in projected.items()}
+        off_wire = {f.name for f in fields(obj) if f.metadata.get("wire") is False}
+        out = {
+            k: _with_retired_views(getattr(obj, k), v)
+            for k, v in projected.items()
+            if k not in off_wire
+        }
         for name in type(obj).__dataclass_fields__:
             if isinstance(getattr(type(obj), name, None), RetiredBridgeField):
                 out[name] = getattr(obj, name)

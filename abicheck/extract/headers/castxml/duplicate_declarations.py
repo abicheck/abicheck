@@ -67,7 +67,7 @@ def _cv_free(spelling: str) -> str:
 
 def _signature(
     func: Function,
-) -> tuple[str, tuple[str, ...], bool | None, bool, str | None]:
+) -> tuple[str, tuple[str, ...], bool | None, bool | None, str | None]:
     # Exception specifications are not mangled, so two same-key records can
     # disagree on them; such a pair is not one entity. The source name is not
     # part of it: an asm label binds two names to the one key.

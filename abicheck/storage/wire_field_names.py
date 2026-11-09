@@ -31,10 +31,13 @@ __all__ = ["wire_field_names"]
 def wire_field_names(cls: type) -> tuple[str, ...]:
     """*cls*'s persisted fields in declaration order: its stored fields plus
     any retired bridge views it inherits (ADR-063 Phase 10), computed per
-    concrete class so a subclass's own fields are never dropped."""
-    stored = {f.name for f in dataclass_fields(cls)}
+    concrete class so a subclass's own fields are never dropped. A field
+    declared with ``metadata={"wire": False}`` is carried by an ADR-062 D19
+    extension fact instead (``Function.is_noexcept_fact``) and is not a
+    record key."""
+    stored = {f.name for f in dataclass_fields(cls) if f.metadata.get("wire", True)}
     retired: frozenset[str] = getattr(cls, "__retired_bridge_fields__", frozenset())
     if not retired:
-        return tuple(f.name for f in dataclass_fields(cls))
+        return tuple(f.name for f in dataclass_fields(cls) if f.name in stored)
     declared = cls.__dataclass_fields__  # type: ignore[attr-defined]
     return tuple(n for n in declared if n in stored or n in retired)

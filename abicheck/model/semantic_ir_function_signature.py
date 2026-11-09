@@ -123,12 +123,21 @@ def _signature_inputs(fn: Function) -> tuple[Any, ...]:
         and inline_fact.status in (FactStatus.PRESENT, FactStatus.PARTIAL)
         else None
     )
+    # ``Function.is_noexcept`` unless its producer recorded it NOT_COLLECTED
+    # (a castxml run whose clang join did not read it): then None.
+    noexcept_fact = fn.is_noexcept_fact
+    noexcept = (
+        None
+        if noexcept_fact is not None
+        and noexcept_fact.status not in (FactStatus.PRESENT, FactStatus.PARTIAL)
+        else bool(fn.is_noexcept)
+    )
     params = fn.params
     attrs = fn.contract_attributes
     return (
         declaration_inputs(fn),
         bool(fn.is_extern_c),
-        bool(fn.is_noexcept),
+        noexcept,
         bool(fn.is_virtual),
         fn.is_explicit,
         fn.is_hidden_friend,
@@ -187,7 +196,7 @@ def _facts_from_inputs(inputs: tuple[Any, ...]) -> dict[str, Any]:
         # access).
         **declaration_facts_from_inputs(decl),
         "is_extern_c": _present(extern_c),
-        "is_noexcept": _present(noexcept),
+        "is_noexcept": _NOT_COLLECTED if noexcept is None else _present(noexcept),
         "is_virtual": _present(virtual),
         "is_explicit": _optional(explicit),
         "is_hidden_friend": _optional(hidden_friend),

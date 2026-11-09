@@ -2,7 +2,7 @@
 
 # Detector specification matrix
 
-One row per `ChangeKind` (426 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`catalog/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
+One row per `ChangeKind` (427 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`catalog/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
 
 | ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug | Examples |
 |---|---|---|---|---|---|---|
@@ -149,6 +149,7 @@ One row per `ChangeKind` (426 total). Columns fuse the verdict partition (`check
 | `func_variadic_removed` | breaking | `BREAKING` | `error` | L2 | `func_variadic_removed` | — |
 | `func_virtual_added` | breaking | `BREAKING` | `error` | L1 | `func_virtual_added` | [case68](examples/case68_virtual_method_added.md) |
 | `func_virtual_became_pure` | breaking | `BREAKING` | `error` | L1 | `func_virtual_became_pure` | [case23](examples/case23_pure_virtual_added.md) |
+| `func_virtual_noexcept_added` | api_break | `API_BREAK` | `warning` | L2 | `func_virtual_noexcept_added` | — |
 | `func_virtual_removed` | breaking | `BREAKING` | `error` | L2 | `func_virtual_removed` | [case168](examples/case168_virtual_method_devirtualized.md) |
 | `func_visibility_changed` | breaking | `BREAKING` | `error` | L0 | `func_visibility_changed` | [case06](examples/case06_visibility.md), [case59](examples/case59_func_became_inline.md) |
 | `func_visibility_protected_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `func_visibility_protected_changed` | [case51](examples/case51_protected_visibility.md) |

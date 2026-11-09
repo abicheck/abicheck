@@ -56,16 +56,16 @@ These three deployment-risk kinds come from the toolchain (which
 `GLIBCXX_*` versions v2's throw path happens to need), so the ground truth
 lists them as `allowed_kinds`, not as the case's subject. The subject is
 the `noexcept` removal itself. With headers (`-H v1.h` / `-H v2.h`, L2),
-the clang header backend reports it:
+both header backends report it:
 
 ```text
 - func_noexcept_removed: Buffer::reset() lost noexcept
 ```
 
-The default castxml backend does not: castxml's XML carries no exception
-specification, so this kind is a declared castxml gap
-(`expected_kinds_gaps` in `ground_truth.json`; see
-`docs/contribute/known-gaps.md`).
+castxml's own XML carries no exception specification; the castxml backend
+reads it from the clang AST of the same header. Without clang installed it
+cannot, and the report says so: the comparison is declined and
+`analysis_assurance` reads `partial`, naming the noexcept dimension.
 
 ## Minimum evidence
 

@@ -24,7 +24,7 @@ import pytest
 import abicheck.policy.analysis_assurance as aa_pkg
 from abicheck.checker import compare
 from abicheck.checker_types import DiffResult
-from abicheck.model import AbiSnapshot
+from abicheck.model import AbiSnapshot, Function
 from abicheck.model.elf_facts import ElfMetadata
 from abicheck.model.export_read import ExportReadState
 from abicheck.policy.analysis_assurance import compute_analysis_assurance
@@ -93,6 +93,9 @@ TRIGGERS: dict[str, Callable[[AbiSnapshot], AbiSnapshot]] = {
     ),
     "_export_read": lambda s: dataclasses.replace(
         s, elf=ElfMetadata(export_read=ExportReadState.PARTIAL)
+    ),
+    "_noexcept": lambda s: dataclasses.replace(
+        s, functions=[Function("f", "_Z1fv", "void", is_noexcept=None)]
     ),
 }
 

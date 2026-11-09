@@ -1,6 +1,6 @@
 # Case 223: Header-Only Template Default Changed
 
-**Category:** Template ABI | **Verdict:** 🟢 NO_CHANGE (castxml) / 🟠 API_BREAK (clang)
+**Category:** Template ABI | **Verdict:** 🟠 API_BREAK (both backends)
 
 ## Verdict and consumer impact
 
@@ -10,10 +10,8 @@ names it, so no symbol changes. A consumer that writes `mylib::Box<char>` still
 compiles against v2, but it now selects `Box<char, long>` instead of
 `Box<char, int>`. The change is source-level, not binary.
 
-On the default castxml lane the run reads `NO_CHANGE`, with run status partial
-and the template-default assurance gap: castxml cannot record template parameter
-defaults, so it cannot see this change. The clang backend records the defaults
-and reports `template_param_default_changed` as `API_BREAK`.
+Both header backends report `template_param_default_changed` as `API_BREAK`.
+castxml writes no record for an uninstantiated template, so the castxml backend reads the defaults from the clang AST of the same header (its clang join), as the clang backend does. Without clang, a castxml run reads `NO_CHANGE` with run status partial and the gap `template-parameter defaults (castxml cannot record them)`.
 
 ## Old/new diff
 
@@ -34,19 +32,11 @@ abicheck dump -H v2.h --config .abicheck.yml --depth headers -o new.json
 abicheck compare old.json new.json
 ```
 
-Switch `frontend: clang` to see the clang result.
+`frontend: clang` gives the same result.
 
 ## Expected abicheck finding
 
-castxml (default):
-
-```text
-Verdict: NO_CHANGE
-Assurance: partial
-  gap: template-parameter defaults (castxml cannot record them)
-```
-
-clang:
+castxml (default) and clang:
 
 ```text
 Verdict: API_BREAK
@@ -60,10 +50,12 @@ Verdict: API_BREAK
 
 ## Why abicheck catches it
 
-The clang dumper records `TemplateTypeParmDecl.defaultArg` for class templates.
-`compare/template_param_defaults.py` pairs the pattern by qualified name and
-compares the recorded defaults. castxml writes no record for an uninstantiated
-template, so its snapshot stays UNKNOWN and the run reports the gap.
+Both backends record each template's defaults from the clang AST
+(`AbiSnapshot.cxx_template_defaults`); the clang dumper also records them on the
+class-template pattern. The template is paired by qualified name and the
+recorded defaults are compared (`compare/template_default_table.py`,
+`compare/template_param_defaults.py`). castxml writes no record for an
+uninstantiated template, so it reads the defaults through its clang join.
 
 ## Runtime failure demonstration
 

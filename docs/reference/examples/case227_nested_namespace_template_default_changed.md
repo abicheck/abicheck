@@ -13,7 +13,7 @@
 | **Rule family** | [`nested-namespace-template-default-changed`](by-rule/nested-namespace-template-default-changed.md) |
 | **Subject** | [Template and generic-programming issues](by-subject/template-and-generic-programming-issues.md) |
 
-**Category:** Template ABI | **Verdict:** 🟢 NO_CHANGE (castxml) / 🟠 API_BREAK (clang)
+**Category:** Template ABI | **Verdict:** 🟠 API_BREAK (both backends)
 
 ## Verdict and consumer impact
 
@@ -22,8 +22,7 @@ for `U` changes from `int` to `long`. The qualified-name pairing must match the
 pattern under the nested scope, otherwise a real default change under `detail::`
 would be lost.
 
-The castxml lane reads `NO_CHANGE` with the template-default gap. The clang
-backend reports `template_param_default_changed` as `API_BREAK`.
+Both header backends report `template_param_default_changed` as `API_BREAK`.
 
 ## Old/new diff
 
@@ -37,11 +36,8 @@ Use the same commands as case223, with `v1.h` and `v2.h` from this case.
 
 ## Expected abicheck finding
 
-castxml (default): `Verdict: NO_CHANGE`, `Assurance: partial` with the
-template-default gap.
-
-clang: `Verdict: API_BREAK`, `template_param_default_changed`, named
-`mylib::detail::Box`.
+castxml (default) and clang: `Verdict: API_BREAK`,
+`template_param_default_changed`, named `mylib::detail::Box`.
 
 ## Minimum evidence
 
@@ -49,8 +45,8 @@ clang: `Verdict: API_BREAK`, `template_param_default_changed`, named
 
 ## Why abicheck catches it
 
-Pattern records are keyed by qualified name (`mylib::detail::Box`), so the
-pairing is the same as at the top level.
+Templates are keyed by qualified name (`mylib::detail::Box`), so the pairing is
+the same as at the top level.
 
 ## Runtime failure demonstration
 

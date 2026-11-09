@@ -20,13 +20,6 @@ from tests._edit_corpus_toolchains import uses_libstdcxx
 
 _CLASSES = frozenset({"cxx_classes"})
 
-GAP_NOEXCEPT = "castxml output carries no `noexcept` exception specification"
-GAP_TEMPLATE_DEFAULT = (
-    "A header-only default template-argument change reads `NO_CHANGE` at L2 on castxml"
-)
-GAP_CONCEPT = (
-    "A new `requires`-clause on a header-only template reads `NO_CHANGE` under castxml"
-)
 GAP_DWARF_PURE = "A GCC-built DWARF snapshot cannot tell that a virtual became pure"
 GAP_CXX11_ABI = "A `_GLIBCXX_USE_CXX11_ABI` rebuild is refused as a profile mismatch, not reported as a break"
 GAP_O2_STD = "An `-O2` rebuild of a C++ library that uses `std::string` reads as a break or a risk"
@@ -84,48 +77,6 @@ class Known:
 
 
 KNOWN: tuple[Known, ...] = (
-    Known(
-        "method_noexcept_add",
-        _CLASSES,
-        "false-clean",
-        _ev("headers"),
-        "castxml writes no exception specification: NO_CHANGE while an overrider without "
-        "noexcept no longer compiles",
-        GAP_NOEXCEPT,
-        issues=frozenset({"missing:FUNC_NOEXCEPT_ADDED", "weaker-than:API_BREAK"}),
-        verdicts=frozenset({"NO_CHANGE"}),
-    ),
-    Known(
-        "template_default_arg_change",
-        _CLASSES,
-        "wrong-verdict",
-        _ev("headers"),
-        "castxml reads a header-only template default change as NO_CHANGE",
-        GAP_TEMPLATE_DEFAULT,
-        issues=frozenset(
-            {
-                "none-of:DEFAULT_TEMPLATE_ARG_CHANGED|TEMPLATE_PARAM_DEFAULT_CHANGED",
-                "weaker-than:API_BREAK",
-            }
-        ),
-        verdicts=frozenset({"NO_CHANGE"}),
-    ),
-    Known(
-        "concept_constraint_added",
-        _CLASSES,
-        "false-clean",
-        _ev("headers"),
-        "a requires-clause added to a header-only function template reads NO_CHANGE while a "
-        "consumer call stops compiling",
-        GAP_CONCEPT,
-        issues=frozenset(
-            {
-                "none-of:CONCEPT_CONSTRAINT_CHANGED|CONCEPT_TIGHTENED",
-                "weaker-than:API_BREAK",
-            }
-        ),
-        verdicts=frozenset({"NO_CHANGE"}),
-    ),
     Known(
         "virtual_become_pure",
         _CLASSES,

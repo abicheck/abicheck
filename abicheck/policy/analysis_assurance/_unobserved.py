@@ -51,6 +51,7 @@ from ._depth_projection import (
     depth_projection_findings,
 )
 from ._export_read import EXPORT_READ_DIMENSION, export_read_findings
+from ._noexcept import NOEXCEPT_GAP_DIMENSION, noexcept_findings
 from ._scope_fallback import SCOPE_FALLBACK_DIMENSION, scope_fallback_findings
 from ._template_defaults import (
     TEMPLATE_DEFAULTS_DIMENSION,
@@ -103,6 +104,12 @@ UNOBSERVED_DIMENSIONS: tuple[UnobservedDimension, ...] = (
         CONCEPT_GAP_DIMENSION,
         f"{_PKG}._concepts",
         concept_constraint_findings,
+        coverage_warning=True,
+    ),
+    UnobservedDimension(
+        NOEXCEPT_GAP_DIMENSION,
+        f"{_PKG}._noexcept",
+        noexcept_findings,
         coverage_warning=True,
     ),
     UnobservedDimension(

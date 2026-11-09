@@ -13,15 +13,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""ADR-085 D3: a header-only template-default change is never a silent clean.
+"""ADR-085: a header-only template-default change reads the same on both backends.
 
 Invariant: for every template family (class, function, alias, variable) and every
 parameter kind (type, non-type, template-template), a header pair whose
-default is added, removed or changed either reports
-``template_param_default_changed`` or reads ``partial`` with a named
-template-defaults gap. It never reads ``NO_CHANGE`` with ``complete``
-assurance. The oracle is the header text table below, written by hand: what
-each backend can observe is stated per row, not derived from abicheck.
+default is added, removed or changed gives the same answer on castxml and
+clang: ``template_param_default_changed``, or -- for a default only added to a
+class, alias or variable template -- ``NO_CHANGE``, or, for a default no AST
+walk can spell, ``partial`` with a named template-defaults gap. A change is
+never read as ``NO_CHANGE`` with ``complete`` assurance. The oracle is the
+header text table below, written by hand per row, not derived from abicheck.
+Both backends read the defaults from the clang AST of the header (castxml
+through its clang join); ``tests/test_template_default_header_backends.py``
+covers that join's failure path and checks the outcomes against the compiler.
 
 The fast tests drive the assurance rollup with hand-built snapshots; the
 ``integration`` tests run the public ``abicheck dump``/``compare`` CLI on
@@ -122,148 +126,181 @@ def test_redeclarations_of_one_unrecorded_pattern_count_once() -> None:
 
 _HEADER = "#pragma once\nnamespace m {{\ntemplate <class> struct Q {{}};\ntemplate <class> struct R {{}};\n{body}\n}}\n"
 
-# (id, old body, new body). Every row changes, adds or removes one default.
+# The expected outcome of a row on BOTH backends -- written by hand from the
+# C++ rules, not derived from abicheck. Both backends read every family's
+# defaults from the clang AST of the header (castxml through its clang join),
+# so the same header gives the same answer.
+#
+# REPORT: ``template_param_default_changed`` (code written against the old
+#   header silently gets another type/value, or stops compiling).
+# CLEAN: ``NO_CHANGE``, no template-defaults gap -- a default only *added* to a class,
+#   alias or variable template: every spelling valid before named the argument
+#   and keeps its meaning (case224). A function template's added default is
+#   REPORT (it makes the template viable for a call that omits it).
+# GAP: ``NO_CHANGE``, ``partial``, the gap named -- a default the AST walk
+#   cannot spell (``sizeof(T)``), so the change is not assessed.
+REPORT, CLEAN, GAP = "report", "clean", "gap"
+
+# (id, old body, new body, outcome). Every row changes, adds or removes one default.
 _CHANGED = [
     (
         "class_type_changed",
         "template <class T, class U = T> struct Box { T t; };",
         "template <class T, class U = int> struct Box { T t; };",
+        REPORT,
     ),
     (
         "class_type_added",
         "template <class T, class U> struct Box { T t; };",
         "template <class T, class U = int> struct Box { T t; };",
+        CLEAN,
     ),
     (
         "class_type_removed",
         "template <class T, class U = int> struct Box { T t; };",
         "template <class T, class U> struct Box { T t; };",
+        REPORT,
     ),
     (
         "class_nontype_changed",
         "template <class T, int N = 1> struct Box { T t; };",
         "template <class T, int N = 2> struct Box { T t; };",
+        REPORT,
     ),
     (
         "class_template_template_changed",
         "template <class T, template <class> class C = Q> struct Box { T t; };",
         "template <class T, template <class> class C = R> struct Box { T t; };",
+        REPORT,
     ),
     (
         "function_type_changed",
         "template <class T = int> void f() {}",
         "template <class T = char> void f() {}",
+        REPORT,
     ),
     (
         "function_nontype_changed",
         "template <class T, int N = 1> void f(T) {}",
         "template <class T, int N = 2> void f(T) {}",
+        REPORT,
     ),
     (
         "function_unspelled_changed",
         "template <class T, int N = sizeof(T)> void f(T);",
         "template <class T, int N = sizeof(T) + 1> void f(T);",
+        GAP,
     ),
     (
         "alias_type_changed",
         "template <class T, class U = T> using P = Q<U>;",
         "template <class T, class U = int> using P = Q<U>;",
+        REPORT,
     ),
     (
         "alias_type_added",
         "template <class T, class U> using P = Q<U>;",
         "template <class T, class U = int> using P = Q<U>;",
+        CLEAN,
     ),
     (
         "alias_type_removed",
         "template <class T, class U = int> using P = Q<U>;",
         "template <class T, class U> using P = Q<U>;",
+        REPORT,
     ),
     (
         "alias_nontype_changed",
         "template <class T, int N = 1> using P = Q<T>;",
         "template <class T, int N = 2> using P = Q<T>;",
+        REPORT,
     ),
     (
         "alias_nontype_added",
         "template <class T, int N> using P = Q<T>;",
         "template <class T, int N = 2> using P = Q<T>;",
+        CLEAN,
     ),
     (
         "alias_nontype_removed",
         "template <class T, int N = 2> using P = Q<T>;",
         "template <class T, int N> using P = Q<T>;",
+        REPORT,
     ),
     (
         "alias_template_template_changed",
         "template <class T, template <class> class C = Q> using P = Q<C<T>>;",
         "template <class T, template <class> class C = R> using P = Q<C<T>>;",
+        REPORT,
     ),
     (
         "alias_template_template_added",
         "template <class T, template <class> class C> using P = Q<C<T>>;",
         "template <class T, template <class> class C = R> using P = Q<C<T>>;",
+        CLEAN,
     ),
     (
         "alias_template_template_removed",
         "template <class T, template <class> class C = Q> using P = Q<C<T>>;",
         "template <class T, template <class> class C> using P = Q<C<T>>;",
+        REPORT,
     ),
     (
         "variable_type_changed",
         "template <class T, class U = T> constexpr int V = sizeof(U);",
         "template <class T, class U = int> constexpr int V = sizeof(U);",
+        REPORT,
     ),
     (
         "variable_type_added",
         "template <class T, class U> constexpr int V = sizeof(U);",
         "template <class T, class U = int> constexpr int V = sizeof(U);",
+        CLEAN,
     ),
     (
         "variable_type_removed",
         "template <class T, class U = int> constexpr int V = sizeof(U);",
         "template <class T, class U> constexpr int V = sizeof(U);",
+        REPORT,
     ),
     (
         "variable_nontype_changed",
         "template <class T, int N = 1> constexpr int V = sizeof(T);",
         "template <class T, int N = 2> constexpr int V = sizeof(T);",
+        REPORT,
     ),
     (
         "variable_nontype_added",
         "template <class T, int N> constexpr int V = sizeof(T);",
         "template <class T, int N = 2> constexpr int V = sizeof(T);",
+        CLEAN,
     ),
     (
         "variable_nontype_removed",
         "template <class T, int N = 2> constexpr int V = sizeof(T);",
         "template <class T, int N> constexpr int V = sizeof(T);",
+        REPORT,
     ),
     (
         "variable_template_template_changed",
         "template <class T, template <class> class C = Q> constexpr int V = sizeof(C<T>);",
         "template <class T, template <class> class C = R> constexpr int V = sizeof(C<T>);",
+        REPORT,
     ),
     (
         "variable_template_template_added",
         "template <class T, template <class> class C> constexpr int V = sizeof(C<T>);",
         "template <class T, template <class> class C = R> constexpr int V = sizeof(C<T>);",
+        CLEAN,
     ),
     (
         "variable_template_template_removed",
         "template <class T, template <class> class C = Q> constexpr int V = sizeof(C<T>);",
         "template <class T, template <class> class C> constexpr int V = sizeof(C<T>);",
+        REPORT,
     ),
 ]
 
-# The clang backend records class- and function-template defaults but models
-# neither alias nor variable templates (docs/contribute/known-gaps.md,
-# ADR-085 D3). Its run scans the parsed headers for an alias or variable
-# template with a default and names the gap, so these rows read ``partial``
-# on clang exactly as every row does on castxml.
-_CLANG_UNMODELED = {
-    case for case, _, _ in _CHANGED if case.startswith(("alias_", "variable_"))
-}
 _ALIAS_VARIABLE_UNCHANGED = (
     "template <class T, class U = int> using P = Q<U>;\n"
     "template <class T, int N = 2> constexpr int V = N;"
@@ -326,31 +363,29 @@ def _gap_notes(report: dict[str, Any]) -> list[str]:
 
 @pytest.mark.integration
 @pytest.mark.parametrize("backend", ["castxml", "clang"])
-@pytest.mark.parametrize(("case", "old", "new"), _CHANGED, ids=[c[0] for c in _CHANGED])
-def test_changed_default_is_never_a_silent_clean(
-    tmp_path: Path, backend: str, case: str, old: str, new: str
+@pytest.mark.parametrize(
+    ("case", "old", "new", "outcome"), _CHANGED, ids=[c[0] for c in _CHANGED]
+)
+def test_changed_default_reads_the_same_on_both_backends(
+    tmp_path: Path, backend: str, case: str, old: str, new: str, outcome: str
 ) -> None:
+    """Every family and parameter kind: the hand-written outcome, on castxml
+    and clang alike. Never ``NO_CHANGE`` with ``complete`` assurance for a
+    change that is not a pure addition."""
     _require(backend)
     report = _compare(tmp_path, backend, old, new)
     kinds = {c["kind"] for c in report["changes"]}
+    status = report["analysis_assurance"]["status"]
     reported = "template_param_default_changed" in kinds
-    if backend == "clang" and case.startswith("class_") and case.endswith("_added"):
-        # clang recorded both sides, and an added class-template default
-        # invalidates no previously valid spelling: a clean result here is the
-        # observed answer, not a silent one (case224). A function template's
-        # added default is still reported (it can rebind an overload's call).
-        assert not reported, (case, report["verdict"])
+    assert reported is (outcome == REPORT), (case, report["verdict"], sorted(kinds))
+    if outcome == REPORT:
+        assert report["verdict"] == "API_BREAK", (case, report["verdict"])
+        assert _gap_notes(report) == [], _gap_notes(report)
+    elif outcome == CLEAN:
         assert report["verdict"] == "NO_CHANGE", (case, report["verdict"])
-        return
-    assert reported or (
-        report["analysis_assurance"]["status"] == "partial" and _gap_notes(report)
-    ), (case, report["verdict"], report["analysis_assurance"])
-    # castxml cannot observe the default, and clang does not model alias or
-    # variable templates: either may only report the gap, never a finding.
-    if backend == "castxml" or case in _CLANG_UNMODELED:
-        assert not reported
-        assert report["analysis_assurance"]["status"] == "partial"
-        assert _gap_notes(report)
+        assert _gap_notes(report) == [], _gap_notes(report)
+    else:
+        assert status == "partial" and _gap_notes(report), report["analysis_assurance"]
 
 
 @pytest.mark.integration
@@ -362,9 +397,10 @@ def test_unchanged_default_reports_no_finding(tmp_path: Path, backend: str) -> N
         c["kind"] for c in report["changes"]
     }
     assert report["verdict"] == "NO_CHANGE"
-    # clang recorded every default, so it names no template-defaults gap.
-    if backend == "clang":
-        assert _gap_notes(report) == []
+    # Both backends recorded every default, so neither names a gap.
+    # A castxml header-only dump of a header with no non-template declaration
+    # reads ``partial`` for its unresolved scope, so only this axis is checked.
+    assert _gap_notes(report) == []
 
 
 @pytest.mark.integration
@@ -378,11 +414,11 @@ def test_templates_without_defaults_name_no_gap(tmp_path: Path, backend: str) ->
 
 @pytest.mark.integration
 @pytest.mark.parametrize("backend", ["castxml", "clang"])
-def test_unchanged_alias_variable_default_is_named_not_reported(
+def test_unchanged_alias_variable_default_is_no_finding_and_no_gap(
     tmp_path: Path, backend: str
 ) -> None:
-    """Negative control: an unchanged alias/variable default is no finding.
-    Neither backend records it, so the gap is still named (not ``complete``)."""
+    """Negative control: an unchanged alias/variable default is no finding,
+    and, now that both backends record it, no gap either."""
     _require(backend)
     report = _compare(
         tmp_path, backend, _ALIAS_VARIABLE_UNCHANGED, _ALIAS_VARIABLE_UNCHANGED
@@ -391,8 +427,9 @@ def test_unchanged_alias_variable_default_is_named_not_reported(
         c["kind"] for c in report["changes"]
     }
     assert report["verdict"] == "NO_CHANGE"
-    assert report["analysis_assurance"]["status"] == "partial"
-    assert _gap_notes(report)
+    # A castxml header-only dump of a header with no non-template declaration
+    # reads ``partial`` for its unresolved scope, so only this axis is checked.
+    assert _gap_notes(report) == []
 
 
 @pytest.mark.integration

@@ -451,7 +451,7 @@ def _strip_header_and_above_evidence(
     # headers this projection excludes, so no gap they name applies below it.
     snap.cxx_concept_header_scan = None
     snap.scope_fallback = None
-    snap.cxx_concept_constraints = None
+    snap.cxx_concept_constraints = snap.cxx_template_defaults = None
     # ADR-050 `ExtractionContract`: both fingerprints are computed from
     # header-scope/compile-context inputs this function just discarded.
     # Left alone, `checker.compare()`'s `check_contracts_comparable()` can
