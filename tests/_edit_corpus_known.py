@@ -16,6 +16,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from tests._edit_corpus_config import Config
+from tests._edit_corpus_toolchains import uses_libstdcxx
 
 _CXX_SEEDS = frozenset({"cxx_classes", "cxx_stdlib"})
 _CLASSES = frozenset({"cxx_classes"})
@@ -220,8 +221,9 @@ KNOWN: tuple[Known, ...] = (
         "rebuild_optimized",
         frozenset({"cxx_stdlib"}),
         "false-positive",
-        # libstdc++ on ELF: on macOS (libc++, Mach-O) the rebuild reads NO_CHANGE.
-        lambda c: c.objfmt == "elf",
+        # The exported weak instantiations are libstdc++'s (ELF, and MinGW on
+        # PE); against libc++ (macOS) the rebuild reads NO_CHANGE.
+        lambda c: uses_libstdcxx(c.producer),
         "-O2 inlines the weak std::string instantiations the -O0 build exported (and drops "
         "stack canaries); their disappearance reads func_visibility_changed / "
         "func_removed_elf_only (BREAKING) or a hardening risk, while every consumer still runs",
