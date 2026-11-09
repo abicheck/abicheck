@@ -138,9 +138,42 @@ def evidence_floor(exp: Expectation, config: Config, min_evidence: str) -> Expec
     )
 
 
+# A (build, consumer) pair's status. Only "ran" is a signal: "infeasible" is a
+# mix that cannot work whatever the edit (libstdc++ against libc++, the two
+# _GLIBCXX_USE_CXX11_ABI std::strings, a standard the header does not compile
+# in), "unavailable" a mix this host cannot build. Neither is ever a pass.
+PAIR_STATUSES = ("ran", "infeasible", "unavailable")
+
+
+@dataclass(frozen=True)
+class PairTruth:
+    """What one consumer did against one library build."""
+
+    consumer: str  # ResolvedConsumer.id
+    status: str  # one of PAIR_STATUSES
+    binary_break: bool = False
+    source_break: bool = False
+    signals: tuple[str, ...] = ()
+    reason: str = ""
+
+    @property
+    def outcome(self) -> str:
+        if self.status != "ran":
+            return self.status
+        if self.binary_break:
+            return "binary-break"
+        return "source-break" if self.source_break else "no-break"
+
+
 @dataclass(frozen=True)
 class ExecTruth:
-    """What real consumers did. ``available=False`` means no signal, not 'no break'."""
+    """What real consumers did. ``available=False`` means no signal, not 'no break'.
+
+    ``binary_break``/``source_break`` hold if *any* pair that ran broke (or
+    the build-level layout probe differs): a breaking edit must break at least
+    one consumer, a compatible one must break none. ``pairs`` keeps each
+    (build, consumer) result, infeasible and unavailable pairs included.
+    """
 
     available: bool
     binary_break: bool = False
@@ -151,6 +184,7 @@ class ExecTruth:
     # values differ) with no consumer run diverging: a compiler-measured
     # surrogate for a break, not an observed one.
     layout_only: bool = False
+    pairs: tuple[PairTruth, ...] = ()
 
     def describe_break(self) -> str:
         what = "; ".join(self.signals)

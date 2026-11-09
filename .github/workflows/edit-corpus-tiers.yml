@@ -6,18 +6,33 @@ name: Edit corpus tiers
 # never a required check. A red run means a cell's three signals (execution,
 # expect(config), abicheck) disagree in a way tests/_edit_corpus_known.py does
 # not record; the artifact holds each failing cell minimized to
-# (seed, edit, config) with a ready-to-paste regression test.
+# (seed, edit, config) with a ready-to-paste regression test, and every
+# (build, consumer) pair's outcome (results/pairs/).
 #
-# - nightly: a seeded pairwise covering array over every axis
-#   (ABICHECK_EDIT_CORPUS_SEED: the UTC day of the year, so successive nights
-#   draw different arrays; a dispatch can pin it).
+# - nightly: a seeded pairwise covering array over every axis, the consumer
+#   toolchain/standard/flags included (ABICHECK_EDIT_CORPUS_SEED: the UTC day
+#   of the year, so successive nights draw different arrays; a dispatch can
+#   pin it).
 # - weekly: every operator under the newest toolchain of each family, -m32,
-#   the newest standards, -fabi-version, _GLIBCXX_USE_CXX11_ABI=0 and
-#   mismatched consumers.
+#   the newest standards, -fabi-version, _GLIBCXX_USE_CXX11_ABI=0, and each
+#   library build checked against the full consumer cross (every consumer
+#   toolchain at the build's, the oldest and the newest standard).
+#
+# Build vs consumer toolchains: a library pair is built once by a BUILD
+# toolchain and checked against every CONSUMER toolchain's client programs.
+# Both default to every installed compiler; a dispatch can restrict either
+# (`toolchains`, `consumer_toolchains`: comma-separated gcc-14, clang-19, or a
+# bare family). A named compiler that is not installed fails the run; it is
+# never dropped. Versioned names are apt-installed first.
 #
 # Toolchains: two gcc and two clang majors plus gcc-multilib, so the version,
 # consumer-family and -m32 axes have more than one buildable value. A config
 # the runner cannot build is reported as a skip with its reason, never passed.
+#
+# Scheduled runs are on main only. A failed scheduled run opens ONE tracking
+# issue per tier (matched by exact title) or comments on the open one, with
+# the summary and the run's artifact link; the `notify` job alone has a write
+# permission, and only issues: write.
 on:
   schedule:
     # 03:17 UTC daily (nightly) and 05:43 UTC Sunday (weekly): outside the
@@ -35,6 +50,14 @@ on:
         description: Nightly covering-array seed (digits; empty = UTC day of the year)
         type: string
         default: ""
+      toolchains:
+        description: Build toolchains, comma-separated (e.g. gcc-13 or gcc-14,clang-19; empty = all installed)
+        type: string
+        default: ""
+      consumer_toolchains:
+        description: Consumer toolchains, comma-separated (e.g. gcc-14,clang-18,clang-19; empty = the build selection)
+        type: string
+        default: ""
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.run_id }}
@@ -43,31 +66,112 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  BASE_PACKAGES: gcc g++ gcc-14 g++-14 clang clang-19 gcc-multilib g++-multilib binutils
+
 jobs:
-  corpus:
-    name: corpus (shard ${{ matrix.shard }}/4)
+  plan:
+    name: plan
+    # Scheduled runs only on main (a schedule fires on the default branch;
+    # this keeps a renamed default from silently scheduling another branch).
+    if: github.event_name != 'schedule' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    # Weekly is ~4x the nightly cell count; four shards keep each well inside.
-    timeout-minutes: 90
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3, 4]
+    timeout-minutes: 5
+    outputs:
+      tier: ${{ steps.plan.outputs.tier }}
+      seed: ${{ steps.plan.outputs.seed }}
+      toolchains: ${{ steps.plan.outputs.toolchains }}
+      consumer_toolchains: ${{ steps.plan.outputs.consumer_toolchains }}
+      packages: ${{ steps.plan.outputs.packages }}
     env:
       EVENT_NAME: ${{ github.event_name }}
       EVENT_SCHEDULE: ${{ github.event.schedule }}
       INPUT_TIER: ${{ inputs.tier }}
       INPUT_SEED: ${{ inputs.seed }}
+      INPUT_TOOLCHAINS: ${{ inputs.toolchains }}
+      INPUT_CONSUMERS: ${{ inputs.consumer_toolchains }}
+    steps:
+      - name: Select tier, seed and toolchains
+        id: plan
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            tier="$INPUT_TIER"
+          elif [ "$EVENT_SCHEDULE" = "43 5 * * 0" ]; then
+            tier=weekly
+          else
+            tier=nightly
+          fi
+          case "$tier" in nightly|weekly) ;; *) echo "::error::unknown tier '$tier'"; exit 1 ;; esac
+          seed="${INPUT_SEED:-}"
+          if [ -z "$seed" ]; then seed="$((10#$(date -u +%j)))"; fi
+          case "$seed" in *[!0-9]*) echo "::error::seed must be digits, got '$seed'"; exit 1 ;; esac
+          packages="$BASE_PACKAGES"
+          # normalize SPEC: validate every comma-separated name (the grammar the
+          # harness parses, tests/_edit_corpus_toolchains.py) and print them
+          # rejoined; only that normalized text ever reaches $GITHUB_OUTPUT.
+          normalize() {
+            local spec="$1" out="" raw name
+            if [[ "$spec" == *$'\n'* || "$spec" == *$'\r'* ]]; then
+              echo "toolchain list must be one line" >&2; return 1
+            fi
+            IFS=',' read -ra names <<< "$spec"
+            for raw in "${names[@]}"; do
+              name="${raw//[[:space:]]/}"
+              [ -z "$name" ] && continue
+              if ! [[ "$name" =~ ^(gcc|clang)(-?([0-9]+))?$ ]]; then
+                echo "a toolchain is not FAMILY or FAMILY-MAJOR (gcc, clang on Linux)" >&2; return 1
+              fi
+              out="${out:+$out,}$name"
+            done
+            printf '%s' "$out"
+          }
+          bad="::error::toolchains/consumer_toolchains: use comma-separated FAMILY or FAMILY-MAJOR (gcc-14, clang-19, gcc)"
+          if ! toolchains="$(normalize "${INPUT_TOOLCHAINS:-}")"; then echo "$bad"; exit 1; fi
+          if ! consumers="$(normalize "${INPUT_CONSUMERS:-}")"; then echo "$bad"; exit 1; fi
+          IFS=',' read -ra all <<< "$toolchains,$consumers"
+          for name in "${all[@]}"; do
+            [[ "$name" =~ ^(gcc|clang)(-?([0-9]+))?$ ]] || continue
+            family="${BASH_REMATCH[1]}"; major="${BASH_REMATCH[3]:-}"
+            [ -z "$major" ] && continue
+            if [ "$family" = gcc ]; then pkgs="gcc-$major g++-$major"; else pkgs="clang-$major"; fi
+            case " $packages " in *" $pkgs "*) ;; *) packages="$packages $pkgs" ;; esac
+          done
+          {
+            echo "tier=$tier"
+            echo "seed=$seed"
+            echo "toolchains=$toolchains"
+            echo "consumer_toolchains=$consumers"
+            echo "packages=$packages"
+          } >> "$GITHUB_OUTPUT"
+          echo "tier=$tier seed=$seed toolchains='$toolchains' consumers='$consumers'"
+
+  corpus:
+    name: corpus (shard ${{ matrix.shard }}/4)
+    needs: plan
+    runs-on: ubuntu-24.04
+    # Weekly is ~4x the nightly cell count; four shards keep each well inside.
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    env:
       SHARD: ${{ matrix.shard }}
+      ABICHECK_EDIT_CORPUS_TIER: ${{ needs.plan.outputs.tier }}
+      ABICHECK_EDIT_CORPUS_SEED: ${{ needs.plan.outputs.seed }}
+      ABICHECK_EDIT_CORPUS_SHARD: ${{ matrix.shard }}/4
+      ABICHECK_EDIT_CORPUS_TOOLCHAIN: ${{ needs.plan.outputs.toolchains }}
+      ABICHECK_EDIT_CORPUS_CONSUMER_TOOLCHAIN: ${{ needs.plan.outputs.consumer_toolchains }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
         with:
           persist-credentials: false
 
-      - name: Install toolchains (gcc 13/14, clang 18/19, multilib)
+      - name: Install toolchains (gcc 13/14, clang 18/19, multilib, + requested)
         uses: ./.github/actions/install-system-deps
         with:
-          packages: gcc g++ gcc-14 g++-14 clang clang-19 gcc-multilib g++-multilib binutils
+          packages: ${{ needs.plan.outputs.packages }}
 
       - uses: ./.github/actions/setup-castxml
 
@@ -82,27 +186,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
-      - name: Select tier and seed
-        run: |
-          set -euo pipefail
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            tier="$INPUT_TIER"
-          elif [ "$EVENT_SCHEDULE" = "43 5 * * 0" ]; then
-            tier=weekly
-          else
-            tier=nightly
-          fi
-          case "$tier" in nightly|weekly) ;; *) echo "::error::unknown tier '$tier'"; exit 1 ;; esac
-          seed="${INPUT_SEED:-}"
-          if [ -z "$seed" ]; then seed="$((10#$(date -u +%j)))"; fi
-          case "$seed" in *[!0-9]*) echo "::error::seed must be digits, got '$seed'"; exit 1 ;; esac
-          {
-            echo "ABICHECK_EDIT_CORPUS_TIER=$tier"
-            echo "ABICHECK_EDIT_CORPUS_SEED=$seed"
-            echo "ABICHECK_EDIT_CORPUS_SHARD=$SHARD/4"
-          } >> "$GITHUB_ENV"
-          echo "tier=$tier seed=$seed shard=$SHARD/4"
-
       - name: Run the tier
         env:
           ABICHECK_EDIT_CORPUS_REPORT_DIR: results/cells
@@ -110,13 +193,17 @@ jobs:
           ABICHECK_MIN_EXECUTED: "1"
         run: |
           set -euo pipefail
-          mkdir -p results/cells
+          mkdir -p results/cells results/pairs
+          echo "tier=$ABICHECK_EDIT_CORPUS_TIER seed=$ABICHECK_EDIT_CORPUS_SEED shard=$ABICHECK_EDIT_CORPUS_SHARD"
+          echo "build toolchains: ${ABICHECK_EDIT_CORPUS_TOOLCHAIN:-all installed}"
+          echo "consumer toolchains: ${ABICHECK_EDIT_CORPUS_CONSUMER_TOOLCHAIN:-the build selection}"
           gcc --version | head -1; gcc-14 --version | head -1
           clang --version | head -1; clang-19 --version | head -1
           pytest tests/test_abi_edit_corpus_matrix.py \
             -m "edit_corpus_${ABICHECK_EDIT_CORPUS_TIER}" \
             -n auto --dist worksteal -q -rfE \
-            --junitxml="results/junit-${ABICHECK_EDIT_CORPUS_TIER}-shard${SHARD}.xml"
+            --junitxml="results/junit-${ABICHECK_EDIT_CORPUS_TIER}-shard${SHARD}.xml" \
+            2>&1 | tee "results/pytest-shard${SHARD}.log"
 
       - name: Summary
         if: ${{ !cancelled() }}
@@ -125,6 +212,8 @@ jobs:
           {
             echo "### Edit corpus ${ABICHECK_EDIT_CORPUS_TIER:-?} shard ${SHARD}/4 (seed ${ABICHECK_EDIT_CORPUS_SEED:-?})"
             echo "Unrecorded mismatches: $n (minimized cells in the artifact)."
+            echo
+            python -m tests._edit_corpus_report results || echo "(no pair report)"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload results
@@ -133,4 +222,117 @@ jobs:
         with:
           name: edit-corpus-shard${{ matrix.shard }}
           path: results/
+          if-no-files-found: warn
           retention-days: 30
+
+  report:
+    # Folds every shard's (build, consumer) pairs into one summary, whatever
+    # the shards' outcome, and keeps it as an artifact.
+    name: report
+    needs: [plan, corpus]
+    if: ${{ always() && needs.plan.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      artifact_url: ${{ steps.upload.outputs.artifact-url }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
+        with:
+          python-version: "3.13"
+
+      - name: Download shard results
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          pattern: edit-corpus-shard*
+          path: results
+          merge-multiple: true
+
+      - name: Summarize
+        env:
+          TIER: ${{ needs.plan.outputs.tier }}
+          SEED: ${{ needs.plan.outputs.seed }}
+          CORPUS_RESULT: ${{ needs.corpus.result }}
+        run: |
+          set -euo pipefail
+          mkdir -p results/cells results/pairs
+          n=$(find results/cells -name '*.txt' | wc -l)
+          {
+            echo "### Edit corpus ${TIER} (seed ${SEED}): ${CORPUS_RESULT}"
+            echo
+            echo "Unrecorded mismatches: $n (each minimized, with a regression test, under cells/ in the artifact)."
+            echo
+            python -m tests._edit_corpus_report results
+          } > summary.md
+          cat summary.md >> "$GITHUB_STEP_SUMMARY"
+          cp summary.md results/summary.md
+
+      - name: Upload the summary
+        id: upload
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: edit-corpus-summary
+          path: results/summary.md
+          if-no-files-found: warn
+          retention-days: 30
+
+  notify:
+    # Scheduled runs only: a manual dispatch is watched by whoever started it.
+    # Opens ONE tracking issue per tier (matched by exact title) or comments
+    # on the open one, so a red night does not spawn a new issue every day.
+    # The only job with a write permission, and only issues: write.
+    name: notify (scheduled failure)
+    needs: [plan, corpus, report]
+    if: >-
+      always() && github.event_name == 'schedule' &&
+      (needs.plan.result == 'failure' || needs.corpus.result == 'failure')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Download the summary
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: edit-corpus-summary
+          path: summary
+
+      - name: Open or update the tracking issue
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          SUMMARY_URL: ${{ needs.report.outputs.artifact_url }}
+          TIER: ${{ needs.plan.outputs.tier || 'scheduled' }}
+        run: |
+          set -euo pipefail
+          TITLE="Edit corpus ${TIER} tier failing"
+          export TITLE
+          summary="(no summary was produced; see the run)"
+          if [ -f summary/summary.md ]; then summary="$(head -c 60000 summary/summary.md)"; fi
+          body="$(printf '%s\n' \
+            "The scheduled edit-corpus ${TIER} run failed: ${RUN_URL}" \
+            "" \
+            "Artifacts (per-shard results, minimized failing cells, per-pair JSON): ${RUN_URL}#artifacts" \
+            "Summary artifact: ${SUMMARY_URL:-not uploaded}" \
+            "" \
+            "${summary}" \
+            "" \
+            "Triage: tests/CLAUDE.md \"_edit_corpus_*.py\". Fix a real abicheck bug; record a" \
+            "detector gap in tests/_edit_corpus_known.py with its known-gaps.md row only when it" \
+            "cannot be fixed now. Close this issue once a later scheduled run is green.")"
+          number="$(gh issue list --state open --search "in:title \"${TITLE}\"" \
+            --json number,title --jq "map(select(.title == env.TITLE)) | .[0].number // empty")"
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --body "$body"
+            echo "Commented on #${number}"
+          else
+            gh issue create --title "$TITLE" --body "$body"
+          fi

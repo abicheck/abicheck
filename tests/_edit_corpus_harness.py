@@ -20,7 +20,13 @@ from pathlib import Path
 
 from abicheck.checker import compare
 from abicheck.dumper import dump
-from tests._edit_corpus_config import Config, Flags, Toolchain, default_config
+from tests._edit_corpus_config import (
+    Config,
+    Flags,
+    Standard,
+    Toolchain,
+    default_config,
+)
 from tests._edit_corpus_operators import EditOp
 from tests._edit_corpus_seeds import RoleText, Seed
 from tests._edit_corpus_toolchains import std_flag
@@ -64,11 +70,11 @@ def label_toolchain(label: str) -> Toolchain:
 
 
 def compile_cmd(
-    tc: Toolchain, config: Config, flags: Flags, *, debug: bool
+    tc: Toolchain, std: Standard, flags: Flags, *, debug: bool
 ) -> list[str]:
     """Driver + standard + ABI flags shared by library, consumer and probe builds."""
-    std = std_flag(tc, config.std) or config.std.name
-    cmd = [tc.driver(config.lang), f"-std={std}", *flags.render(tc, config.lang)]
+    spelling = std_flag(tc, std) or std.name
+    cmd = [tc.driver(std.lang), f"-std={spelling}", *flags.render(tc, std.lang)]
     if debug:
         cmd.append("-g")
     return cmd
@@ -111,7 +117,9 @@ def _compile_library(
     src = out_dir / seed.source_name
     src.write_text(source_text, encoding="utf-8")
     so = out_dir / LIB_NAME
-    cmd = compile_cmd(config.producer, config, flags, debug=config.evidence != "binary")
+    cmd = compile_cmd(
+        config.producer, config.std, flags, debug=config.evidence != "binary"
+    )
     cmd += ["-shared", "-I", str(out_dir), "-o", str(so), str(src)]
     # PIC is an ELF/Mach-O concept: clang rejects -fPIC for the Windows target.
     if sys.platform != "win32":
@@ -168,7 +176,11 @@ def build(
 
 
 class BaselineCache:
-    """Old-side builds are identical for every operator on a (seed, config); build once."""
+    """Old-side builds are identical for every operator on a (seed, build); build once.
+
+    Keyed by ``Config.build_id``: the consumers a config names never change
+    the library, so configs that differ only in their consumers share it.
+    """
 
     def __init__(self, root: Path) -> None:
         self._root = root
@@ -176,11 +188,25 @@ class BaselineCache:
 
     def get(self, seed: Seed, config: Config | str) -> Built:
         cfg = _as_config(seed, config)
-        key = (seed.name, cfg.id)
+        key = (seed.name, cfg.build_id)
         if key not in self._cache:
             self._cache[key] = build(
-                seed, cfg, self._root / f"{seed.name}-{cfg.id}-old"
+                seed, cfg, self._root / f"{seed.name}-{cfg.build_id}-old"
             )
+        return self._cache[key]
+
+
+class NewBuildCache:
+    """New-side builds per (operator, seed, build): reused across consumer sets."""
+
+    def __init__(self, root: Path) -> None:
+        self._root = root
+        self._cache: dict[tuple[str, str, str], Built] = {}
+
+    def get(self, op: EditOp, seed: Seed, config: Config) -> Built:
+        key = (op.name, seed.name, config.build_id)
+        if key not in self._cache:
+            self._cache[key] = build_new(op, seed, config, self._root)
         return self._cache[key]
 
 
@@ -194,7 +220,7 @@ def build_new(op: EditOp, seed: Seed, config: Config, root: Path) -> Built:
     return build(
         seed,
         config,
-        root / f"{seed.name}-{config.id}-{op.name}",
+        root / f"{seed.name}-{config.build_id}-{op.name}",
         overrides=op.edit(seed.roles),
         flags=op.new_flags(config.flags),
     )
