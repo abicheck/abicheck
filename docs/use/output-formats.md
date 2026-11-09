@@ -1140,7 +1140,9 @@ schema 3.1) saying which one they are:
 `comparison_role` is `gate` or `delta`, and `decides_exit_code` is `true`
 exactly for `gate`. `outcome` is the base-snapshot lookup's outcome (the
 Action's `delta-outcome` output), or `unsupported_operand` for a
-directory/package comparison; a `delta` report is always `resolved`.
+directory/package comparison; a `delta` report is `resolved`, or
+`base_built` when `delta-on-missing-base: build` built the base commit in the
+PR job after the gate (never on a `gate` report).
 `base_sha` is the default-branch commit the delta is measured against (`null`
 when none was selected), `branch` the branch the snapshot came from, and
 `gate_verdict` -- on the `delta` report only -- the gate's verdict, so a
@@ -1150,8 +1152,9 @@ paired with this PR's library (`declared`, `loader_name`,
 `loader_name_version`, `file_name`, `file_name_version`; the Action's
 `delta-operand-match` output). The delta report's own `verdict` describes this
 PR's changes and never gates. Outcomes decided only after the gate ran --
-`rerun_failed` and the operand-identity refusals (`operand_unmatched`,
-`operand_ambiguous`, `operand_map_invalid`, `operand_unreadable`) -- are never
+`rerun_failed`, a failed base build (`base_build_failed`, `base_dump_failed`)
+and the operand-identity refusals (`operand_unmatched`, `operand_ambiguous`,
+`operand_map_invalid`, `operand_unreadable`) -- are never
 recorded: no delta comparison runs then, the gate's block keeps the lookup's
 outcome, and the PR comment states the final one.
 
