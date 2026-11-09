@@ -635,7 +635,20 @@ _CLANG_CRASH = _proc(
     ("outcome", "broken"),
     [
         (_proc(0), False),
-        (_proc(1, stderr="error: invalid value 'c2y' in '-std=c2y'\n"), False),
+        # gcc's and clang's rejection of the probed spelling.
+        (
+            _proc(1, stderr="cc: error: unrecognized command-line option '{flag}'\n"),
+            False,
+        ),
+        (_proc(1, stderr="error: invalid value 'x' in '{flag}'\n"), False),
+        # A rejection of some other flag is not a rejection of this one.
+        (_proc(1, stderr="error: invalid value 'c2y' in '-std=c2y'\n"), True),
+        # Failures that name no -std= flag: a broken frontend or assembler.
+        (
+            _proc(1, stderr="cc: fatal error: cannot execute 'cc1': No such file\n"),
+            True,
+        ),
+        (_proc(1, stderr=""), True),
         (_CLANG_CRASH, True),
         (subprocess.TimeoutExpired(["cc"], 60), True),
     ],
@@ -647,7 +660,8 @@ def test_standard_probe_fails_on_a_crash_and_skips_only_a_rejected_spelling(
         if isinstance(outcome, BaseException):
             raise outcome
         assert isinstance(outcome, subprocess.CompletedProcess)
-        return outcome
+        flag = next(a for a in cmd if a.startswith("-std="))
+        return _proc(outcome.returncode, stderr=outcome.stderr.replace("{flag}", flag))
 
     tcs.std_flag_for_driver.cache_clear()
     monkeypatch.setattr(tcs.shutil, "which", lambda name: f"/usr/bin/{name}")
@@ -668,7 +682,19 @@ def test_standard_probe_fails_on_a_crash_and_skips_only_a_rejected_spelling(
     [
         (False, None, False),
         (True, _proc(0), True),
-        (True, _proc(1, stderr="error: #error not libstdc++\n"), False),
+        (True, _proc(1, stderr=f"<stdin>:3:2: error: {tcs._NOT_LIBSTDCXX}\n"), False),
+        # Failing before the probe's #error is a broken toolchain, not
+        # another library: missing headers, a frontend that cannot start.
+        (
+            True,
+            _proc(1, stderr="<stdin>:1:10: fatal error: 'string' file not found\n"),
+            "broken",
+        ),
+        (
+            True,
+            _proc(1, stderr="c++: fatal error: cannot execute 'cc1plus'\n"),
+            "broken",
+        ),
         (True, _CLANG_CRASH, "broken"),
         (True, subprocess.TimeoutExpired(["c++"], 60), "broken"),
     ],

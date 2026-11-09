@@ -168,6 +168,14 @@ def std_flag_for_driver(driver: str, std: Standard) -> str | None:
             )
         if proc.returncode == 0:
             return spelling
+        if not _rejects_flag(proc.stderr, f"-std={spelling}"):
+            # Only a diagnostic rejecting this -std= spelling means the driver
+            # lacks it; any other failure (a frontend that cannot start, a
+            # missing assembler) is a broken compiler.
+            raise ToolchainBroken(
+                f"{driver} -std={spelling} failed without rejecting the flag "
+                f"(exit {proc.returncode}):\n{proc.stderr or '(no stderr)'}"
+            )
     return None
 
 
@@ -333,6 +341,17 @@ _REJECTS_OPTION = re.compile(
 )
 
 
+def _rejects_flag(stderr: str, flag: str) -> bool:
+    """Whether *stderr* has a diagnostic line rejecting *flag* by name."""
+    return any(
+        flag in ln and _REJECTS_OPTION.search(ln) for ln in stderr.splitlines()
+    ) and not _CRASH.search(stderr)
+
+
+# The marker the libstdc++ probe's #error prints on another C++ library.
+_NOT_LIBSTDCXX = "corpus probe: not libstdc++"
+
+
 def _names_capability(stderr: str, rendered: list[str]) -> bool:
     """Whether a failed probe's *stderr* names one of the requested capabilities.
 
@@ -378,7 +397,7 @@ def uses_libstdcxx(tc: Toolchain) -> bool:
     try:
         proc = subprocess.run(
             [tc.cxx, "-x", "c++", "-fsyntax-only", "-"],
-            input="#include <string>\n#ifndef __GLIBCXX__\n#error not libstdc++\n#endif\n",
+            input=f"#include <string>\n#ifndef __GLIBCXX__\n#error {_NOT_LIBSTDCXX}\n#endif\n",
             capture_output=True,
             text=True,
             check=False,
@@ -390,7 +409,14 @@ def uses_libstdcxx(tc: Toolchain) -> bool:
         raise ToolchainBroken(
             f"{tc.cxx} crashed on the libstdc++ probe (exit {proc.returncode}):\n{proc.stderr}"
         )
-    return proc.returncode == 0
+    if proc.returncode == 0:
+        return True
+    if _NOT_LIBSTDCXX in proc.stderr:
+        return False  # the probe's own #error: another C++ library
+    raise ToolchainBroken(
+        f"{tc.cxx} failed the libstdc++ probe without reaching its #error "
+        f"(exit {proc.returncode}):\n{proc.stderr or '(no stderr)'}"
+    )
 
 
 # Features a standard names but a compiler may still lack in that mode (gcc 8
