@@ -212,27 +212,31 @@ def test_declared_then_defined_template_default_change_is_reported(
     assert change["new_value"] == "('char',)"
 
 
-def test_castxml_function_default_change_is_a_named_gap_not_a_verdict(
+def test_castxml_function_default_change_is_reported_through_its_clang_join(
     tmp_path: Path,
 ) -> None:
-    # castxml records no template defaults. The header scan names the gap, the
-    # verdict stays NO_CHANGE, and the run reads partial.
+    # castxml writes no template defaults, but its clang join reads them from
+    # the same header (extractor generation 46), so the change is reported
+    # exactly as on clang and no castxml template-default gap is named.
     _require_castxml()
+    _require_clang()
     report = _pair(
         tmp_path,
         _SINGLE.format(default="int"),
         _SINGLE.format(default="char"),
         "castxml",
     )
-    assert report["verdict"] == "NO_CHANGE"
-    assert _changes(report) == []
-    assert report["analysis_assurance"]["status"] == "partial"
-    gap_notes = [
+    assert report["verdict"] == "API_BREAK"
+    (change,) = _changes(report)
+    # castxml carries no per-function default fact, so the finding comes from
+    # the header table and is named by its table key, not clang's ``f()``.
+    assert change["symbol"] == "mylib::f(void ())"
+    assert (change["old_value"], change["new_value"]) == ("('int',)", "('char',)")
+    assert not [
         n
         for n in report["analysis_assurance"]["notes"]
         if "template-parameter defaults (castxml cannot record them)" in n
     ]
-    assert len(gap_notes) == 2
 
 
 def test_function_defaults_round_trip_through_v64_snapshot() -> None:

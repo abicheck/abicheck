@@ -248,8 +248,9 @@ def _k(*kinds: str) -> frozenset[str]:
 #: * ``class_virtual_method_added``: adding a virtual changes the vtable layout
 #:   as well as adding the function.
 #: * ``template_default_argument_changed``: the template's declaration text
-#:   moved, so the replay's body fingerprint moves too. The clang frontend has
-#:   the default facet, which is the primary there; castxml has only the body.
+#:   moved, so the replay's body fingerprint moves too. Both frontends read
+#:   the default facet from the clang AST (castxml through its clang join),
+#:   which is the primary.
 EXPECTED: dict[tuple[str, str], tuple[frozenset[str], frozenset[str]]] = {
     ("free_function_removed", "castxml"): (_k("func_removed"), _k()),
     ("free_function_removed", "clang"): (_k("func_removed"), _k()),
@@ -292,8 +293,8 @@ EXPECTED: dict[tuple[str, str], tuple[frozenset[str], frozenset[str]]] = {
         _k("type_vtable_changed"),
     ),
     ("template_default_argument_changed", "castxml"): (
+        _k("template_param_default_changed"),
         _k("template_body_changed"),
-        _k(),
     ),
     ("template_default_argument_changed", "clang"): (
         _k("template_param_default_changed"),
