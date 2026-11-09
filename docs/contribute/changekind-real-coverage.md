@@ -16,12 +16,12 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 ## Headline
 
 - Total kinds: **426**
-- Kinds with at least one real source: **181**
-- Kinds per source: catalog 160, field_shapes 9, integration 60
+- Kinds with at least one real source: **182**
+- Kinds per source: catalog 160, field_shapes 9, integration 61
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
-| L0 | 129 | 73 |
+| L0 | 129 | 72 |
 | L1 | 62 | 7 |
 | L2 | 74 | 42 |
 | L3 | 15 | 5 |
@@ -89,7 +89,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `executable_stack_removed` | COMPATIBLE | 2 | 0 | 0 |
 | `experimental_graduated` | COMPATIBLE | 1 | 0 | 0 |
 | `experimental_removed_without_replacement` | API_BREAK | 1 | 0 | 0 |
-| `exported_object_alignment_reduced` | RISK | 0 | 0 | 0 |
+| `exported_object_alignment_reduced` | RISK | 0 | 0 | 1 |
 | `func_added` | COMPATIBLE | 9 | 0 | 8 |
 | `func_added_elf_only` | COMPATIBLE | 0 | 0 | 0 |
 | `func_export_added` | COMPATIBLE | 2 | 0 | 0 |

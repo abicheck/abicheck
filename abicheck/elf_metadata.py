@@ -63,6 +63,7 @@ from .extract.elf_symbol_versions import (
     correlate_symbol_versions,
     symbols_of,
 )
+from .extract.elf_value_alignment import symbol_value_alignment
 from .extract.parse_failures import (
     note_export_read_failure,
     recording_export_read_failures,
@@ -779,22 +780,6 @@ def _parse_version_need(section: GNUVerNeedSection, meta: ElfMetadata) -> None:
                 meta.versions_required[lib].append(ver)
 
 
-# Alignment derived from a symbol address is only meaningful up to the page
-# size — PT_LOAD segments map page-aligned, so intra-page alignment survives
-# relocation while anything larger is a load-address accident.
-_PAGE_ALIGNMENT_CAP = 4096
-
-
-def _value_alignment(st_value: int) -> int:
-    """Power-of-two alignment of *st_value*, capped at the page size.
-
-    0 means unknown (st_value of 0 carries no alignment information).
-    """
-    if st_value <= 0:
-        return 0
-    return min(st_value & -st_value, _PAGE_ALIGNMENT_CAP)
-
-
 def _parse_dynsym(section: SymbolTableSection, meta: ElfMetadata) -> None:
     # Every `sym.name` below is a seek plus a chunked read of the linked
     # string table; buffering that table for the duration of the walk turns
@@ -815,6 +800,8 @@ def _parse_dynsym_entries(
     Split from :func:`_parse_dynsym` only so the buffering wraps the whole
     walk in one ``with`` block; the classification logic is unchanged.
     """
+    align_cache: dict[int, int] = {}
+    elffile = getattr(section, "elffile", None)
     for sym in symbols_of(section):
         binding_str = sym.entry.st_info.bind
         type_str = sym.entry.st_info.type
@@ -880,7 +867,9 @@ def _parse_dynsym_entries(
                 is_default=True,
                 visibility=vis_str.replace("STV_", "").lower(),
                 origin_lib=_guess_symbol_origin(name, meta.needed),
-                value_alignment=_value_alignment(int(sym.entry.st_value)),
+                value_alignment=symbol_value_alignment(
+                    elffile, int(sym.entry.st_value), sym.entry.st_shndx, align_cache
+                ),
                 code_hash=(
                     hasher.hash(
                         int(sym.entry.st_value), sym.entry.st_size, sym.entry.st_shndx

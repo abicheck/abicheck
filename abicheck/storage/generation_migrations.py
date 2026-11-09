@@ -480,8 +480,10 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "std::string), and takes a type's own DW_AT_calling_convention as the "
         "answer when present; the ELF origin of a std customization point "
         "specialized over builtins only (std::char_traits<char>) is the C++ "
-        "runtime. No type or name spelling changes, so no rewrite is needed -- "
-        "an older snapshot's declaration-only 'trivial' reads as before"
+        "runtime; an ELF symbol's address-derived value_alignment is capped at "
+        "its section's sh_addralign (extract/elf_value_alignment). No type or "
+        "name spelling changes, so no rewrite is needed -- an older snapshot's "
+        "declaration-only 'trivial' and uncapped alignment read as before"
     ),
 }
 

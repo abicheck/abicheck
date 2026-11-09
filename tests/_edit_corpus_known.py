@@ -237,6 +237,21 @@ KNOWN: tuple[Known, ...] = (
     ),
     Known(
         "rebuild_optimized",
+        frozenset({"c_core"}),
+        "false-positive",
+        # i386 -O0 guards fill_rec's frame and calls __stack_chk_fail; -O2 needs no
+        # canary. The address-alignment noise of the same cell is fixed (#1960).
+        lambda c: (
+            c.objfmt == "elf" and c.producer.family == "gcc" and c.flags.bits == 32
+        ),
+        "-O2 leaves no frame that needs a stack canary, so stack_canary_removed (RISK) is "
+        "reported though -fstack-protector-strong is still on; every consumer still runs",
+        GAP_O2_STD,
+        issues=frozenset({"stronger-than:COMPATIBLE"}),
+        verdicts=frozenset({"COMPATIBLE_WITH_RISK"}),
+    ),
+    Known(
+        "rebuild_optimized",
         frozenset({"cxx_stdlib"}),
         "false-positive",
         # PE records no binding, so the coalesced-copy rule has no signal there

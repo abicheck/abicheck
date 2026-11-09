@@ -50,7 +50,6 @@
     "enum_lost_scoped",
     "evidence_required_missing",
     "executable_stack",
-    "exported_object_alignment_reduced",
     "field_access_changed",
     "field_became_mutable",
     "field_default_initializer_changed",

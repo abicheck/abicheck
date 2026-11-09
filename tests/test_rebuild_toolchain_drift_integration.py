@@ -199,3 +199,84 @@ def test_dual_abi_rebuild_refusal_names_the_macro(tmp_path):
     bin_old = _snap(tmp_path / "old" / "libseed.so", "binary", [])
     bin_new = _snap(tmp_path / "new" / "libseed.so", "binary", [])
     assert compare(bin_old, bin_new).verdict is Verdict.BREAKING
+
+
+def _require_m32() -> None:
+    probe = subprocess.run(
+        ["gcc", "-m32", "-shared", "-fPIC", "-x", "c", "-", "-o", "/dev/null"],
+        input="int x;\n",
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if probe.returncode != 0:
+        pytest.skip(
+            f"gcc -m32 cannot link (gcc-multilib missing): {probe.stderr[-200:]}"
+        )
+
+
+@pytest.mark.parametrize("evidence", _EVIDENCE)
+def test_i386_c_rebuild_leaves_only_the_stack_canary(tmp_path, evidence):
+    """The corpus's minimized cell (rebuild_optimized on c_core, c17 gcc13 -m32).
+
+    The address-placement alignment drop of ``g_counter`` (16 -> 8 in a
+    4-aligned ``.bss``) is gone; ``-O2`` needs no canary, so the recorded
+    ``stack_canary_removed`` RISK is all that is left, as the strict
+    ``tests/_edit_corpus_known.py`` entry records.
+    """
+    _driver("gcc")
+    _require_m32()
+    from tests._edit_corpus_cells import CellContext, run_cell
+    from tests._edit_corpus_config import STANDARD_BY_NAME, Config, Flags
+    from tests._edit_corpus_known import known_mismatch
+    from tests._edit_corpus_operators import OP_BY_NAME
+    from tests._edit_corpus_seeds import SEED_BY_NAME
+    from tests._edit_corpus_toolchains import toolchain
+
+    config = Config(
+        std=STANDARD_BY_NAME["c17"],
+        producer=toolchain("gcc", 13),
+        flags=Flags(bits=32),
+        evidence=evidence,
+    )
+    cell = run_cell(
+        OP_BY_NAME["rebuild_optimized"],
+        SEED_BY_NAME["c_core"],
+        config,
+        CellContext.at(tmp_path),
+    )
+    risky = {
+        k
+        for k in cell.kinds
+        if k.lower() in {c.value for c in RISK_KINDS | BREAKING_KINDS}
+    }
+    assert "EXPORTED_OBJECT_ALIGNMENT_REDUCED" not in cell.kinds, cell.describe()
+    assert risky <= {"STACK_CANARY_REMOVED"}, cell.describe()
+    known = known_mismatch("rebuild_optimized", "c_core", config)
+    if risky:
+        assert known is not None and cell.verdict in known.verdicts, cell.describe()
+    else:
+        assert cell.verdict in ("NO_CHANGE", "COMPATIBLE"), cell.describe()
+
+
+def test_a_real_alignment_loss_still_reports(tmp_path):
+    """Negative control: ``alignas(16)`` dropped from an exported object is a
+    genuine reduction, and the section bound keeps it visible."""
+    cxx = _driver("gcc")
+    snaps = []
+    for name, decl in (
+        ("old", "_Alignas(16) int g_data = 1;"),
+        ("new", "int g_data = 1;"),
+    ):
+        d = tmp_path / name
+        d.mkdir()
+        (d / "lib.c").write_text(
+            f"int pad = 2;\n{decl}\nint get(void) {{ return g_data; }}\n"
+        )
+        so = d / "libal.so"
+        cmd = [cxx, "-O0", "-shared", "-fPIC", "-o", str(so), str(d / "lib.c")]
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        assert proc.returncode == 0, f"{cmd}\n{proc.stderr}"
+        snaps.append(dump(so, [], compiler="cc", lang="c"))
+    kinds = {c.kind.value for c in compare(*snaps).changes}
+    assert "exported_object_alignment_reduced" in kinds, kinds
