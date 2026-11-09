@@ -530,7 +530,7 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "move: a builtin change is a true removal and addition, not 'the same "
             "declaration, renamed'."
         ),
-        fixed_by=(1779, 1812, 1958),
+        fixed_by=(1779, 1812, 1958, 1965),
         seed_tests=(
             "tests/test_header_parameter_replacement_pairing.py",
             "tests/test_header_param_change_pairing_integration.py",
@@ -550,7 +550,7 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "header and DWARF lanes alike; removing an override (the slot "
             "stays) or devirtualizing a method that stays exported does not."
         ),
-        fixed_by=(1958,),
+        fixed_by=(1958, 1965),
         seed_tests=("tests/test_virtual_slot_removal.py",),
         public_surfaces=("cli", "python-api"),
         axes={
