@@ -25,7 +25,12 @@ what it read on the castxml root as one JSON attribute (:data:`SEMANTICS_ATTR`):
   (``Function.is_noexcept_fact`` ``NOT_COLLECTED``), never a guessed ``False``;
 * ``concepts``: the clang concept collector's unfiltered entries
   (``clang/concept_constraints.concept_constraint_entries``) or ``null``. The
-  castxml parser filters them by its own public set.
+  castxml parser filters them by its own public set;
+* ``template_defaults``: the template-parameter defaults of every class,
+  function, alias and variable template
+  (``clang/template_default_entries.template_default_entries``), or ``null``.
+  castxml 0.7 emits no element for an uninstantiated template, so this is the
+  only source of the fact on a castxml run; filtered by the public set too.
 
 The clang result is a sidecar in the AST cache under the castxml cache key,
 like :mod:`.vector_join`; a missing or malformed sidecar is a miss. A clang
@@ -53,8 +58,12 @@ from ..clang.backend import clang_header_dump
 from ..clang.concept_constraints import concept_constraint_entries
 from ..clang.functions import _function_qualifiers
 from ..clang.qualifiers import is_noexcept_qualifier
+from ..clang.template_default_entries import (
+    TemplateDefaultEntry,
+    template_default_entries,
+)
 from ..concept_scan import concept_header_scan
-from .clang_semantics import SEMANTICS_ATTR
+from .clang_semantics import SEMANTICS_ATTR, valid_template_default_entries
 
 log = logging.getLogger(__name__)
 
@@ -240,12 +249,30 @@ def clang_noexcept_map(clang_root: dict[str, Any]) -> dict[str, bool]:
     return out
 
 
-def _valid_sidecar(
-    payload: Any,
-) -> tuple[dict[str, bool], list[tuple[str, str, str]]] | None:
+def _encode_template_defaults(
+    entries: list[TemplateDefaultEntry] | None,
+) -> list[list[Any]] | None:
+    if entries is None:
+        return None
+    return [
+        [key, None if defaults is None else list(defaults), header]
+        for key, defaults, header in entries
+    ]
+
+
+_Sidecar = tuple[
+    dict[str, bool], list[tuple[str, str, str]], list[TemplateDefaultEntry]
+]
+
+
+def _valid_sidecar(payload: Any) -> _Sidecar | None:
     if not isinstance(payload, dict):
         return None
     noexcept, concepts = payload.get("noexcept"), payload.get("concepts")
+    # A sidecar written before the template defaults were joined is a miss.
+    template_defaults = valid_template_default_entries(payload.get("template_defaults"))
+    if template_defaults is None:
+        return None
     if not isinstance(noexcept, dict) or not all(
         isinstance(k, str) and isinstance(v, bool) for k, v in noexcept.items()
     ):
@@ -255,7 +282,7 @@ def _valid_sidecar(
         for e in concepts
     ):
         return None
-    return noexcept, [(e[0], e[1], e[2]) for e in concepts]
+    return noexcept, [(e[0], e[1], e[2]) for e in concepts], template_defaults
 
 
 def _with_semantics(
@@ -263,6 +290,7 @@ def _with_semantics(
     noexcept: dict[str, bool] | None,
     mention_files: frozenset[str],
     concepts: list[tuple[str, str, str]] | None,
+    template_defaults: list[TemplateDefaultEntry] | None,
 ) -> Element:
     carried = Element(root.tag, dict(root.attrib))
     carried.set(
@@ -272,6 +300,7 @@ def _with_semantics(
                 "noexcept": noexcept,
                 "mention_files": sorted(mention_files),
                 "concepts": None if concepts is None else [list(e) for e in concepts],
+                "template_defaults": _encode_template_defaults(template_defaults),
             },
             sort_keys=True,
         ),
@@ -327,7 +356,8 @@ def join_clang_semantics(
     extra_hash_dirs: tuple[Path, ...],
     exported_symbols: frozenset[str],
 ) -> Element:
-    """Return *root* carrying clang's ``noexcept`` and concept facts.
+    """Return *root* carrying clang's ``noexcept``, concept and
+    template-parameter default facts.
 
     A C parse, or a C++ parse none of whose local headers spells an exception
     specification, a concept or a ``requires``-clause, is returned untouched
@@ -351,8 +381,10 @@ def join_clang_semantics(
     )
     if cached is not None:
         cache_dep_manifest.note(cache_dep_manifest.recall(str(entry), entry))
-        noexcept, concepts = cached
-        return _with_semantics(root, noexcept, mention_files, concepts)
+        noexcept, concepts, template_defaults = cached
+        return _with_semantics(
+            root, noexcept, mention_files, concepts, template_defaults
+        )
     try:
         with cache_dep_manifest.recording() as clang_parse:
             clang_root, _kind, _force_cpp = clang_header_dump(
@@ -371,17 +403,24 @@ def join_clang_semantics(
             )
     except (SnapshotError, OSError) as exc:
         log.warning(
-            "clang could not parse the header(s) for noexcept specifications and "
-            "C++20 constraints (%s); castxml records neither, so they are reported "
-            "as not observed",
+            "clang could not parse the header(s) for noexcept specifications, "
+            "C++20 constraints and template-parameter defaults (%s); castxml "
+            "records none of them, so they are reported as not observed",
             exc,
         )
-        return _with_semantics(root, None, mention_files, None)
+        return _with_semantics(root, None, mention_files, None, None)
     noexcept = clang_noexcept_map(clang_root)
     concepts = concept_constraint_entries(clang_root)
+    template_defaults = template_default_entries(clang_root)
     deps = clang_parse.manifest()
     if deps is not None and cache_dep_manifest.write_sidecar(entry, deps):
         store.publish(
-            key, {"noexcept": noexcept, "concepts": [list(e) for e in concepts]}, ()
+            key,
+            {
+                "noexcept": noexcept,
+                "concepts": [list(e) for e in concepts],
+                "template_defaults": _encode_template_defaults(template_defaults),
+            },
+            (),
         )
-    return _with_semantics(root, noexcept, mention_files, concepts)
+    return _with_semantics(root, noexcept, mention_files, concepts, template_defaults)

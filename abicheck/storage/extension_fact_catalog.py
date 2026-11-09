@@ -59,6 +59,7 @@ from .dto import SECTION_SCHEMA_VERSIONS
 
 __all__ = [
     "CXX_CONCEPT_CONSTRAINTS",
+    "CXX_TEMPLATE_DEFAULTS",
     "CXX_CONCEPT_HEADER_SCAN",
     "EXPORT_READ",
     "EXTENSION_FACTS",
@@ -332,8 +333,58 @@ NOEXCEPT_UNOBSERVED: ExtensionFact[list[str]] = ExtensionFact(
     decode=_str_list,
 )
 
+
+def _template_default_map(value: Any) -> dict[str, list[str | None] | None]:
+    """A ``{key: [default | null, ...] | null}`` map (each template's spelled
+    defaults, ``null`` when not known; ``model/template_default_table.py``)."""
+    if not isinstance(value, dict):
+        raise TypeError("expected a {str: list | null} map")
+    out: dict[str, list[str | None] | None] = {}
+    for key in sorted(value):
+        row = value[key]
+        if not isinstance(key, str):
+            raise TypeError("expected a str key")
+        if row is None:
+            out[key] = None
+            continue
+        if not isinstance(row, (list, tuple)) or not all(
+            d is None or isinstance(d, str) for d in row
+        ):
+            raise TypeError("expected a list of str or null")
+        out[key] = list(row)
+    return out
+
+
+#: The public headers' template-parameter defaults (ADR-085 D1) of every
+#: class, function, alias and variable template, read from the clang AST by
+#: both header backends (``AbiSnapshot.cxx_template_defaults``, extractor
+#: generation 45). Written on the ``debug`` section whenever a run modelled
+#: them, the empty map included. Absent, nothing was modelled: the
+#: header-scan gap stays named and no default change is assessed from the
+#: table -- what an older reader that ignores it also does -- so it is
+#: optional.
+CXX_TEMPLATE_DEFAULTS: ExtensionFact[dict[str, list[str | None] | None]] = (
+    ExtensionFact(
+        name="abicheck.cxx_template_defaults",
+        section="debug",
+        semantics=ReaderSemantics.OPTIONAL,
+        absent_reads_as=(
+            "not modelled: no default change is assessed from it, the gap is named"
+        ),
+        owner="ADR-085",
+        encode=_template_default_map,
+        decode=_template_default_map,
+    )
+)
+
 #: This build's optional extension facts (ADR-062 D19). Add a fact by
 #: declaring it as a module constant above and listing it here.
 EXTENSION_FACTS = ExtensionFactRegistry(
-    (CXX_CONCEPT_HEADER_SCAN, CXX_CONCEPT_CONSTRAINTS, EXPORT_READ, NOEXCEPT_UNOBSERVED)
+    (
+        CXX_CONCEPT_HEADER_SCAN,
+        CXX_CONCEPT_CONSTRAINTS,
+        CXX_TEMPLATE_DEFAULTS,
+        EXPORT_READ,
+        NOEXCEPT_UNOBSERVED,
+    )
 )

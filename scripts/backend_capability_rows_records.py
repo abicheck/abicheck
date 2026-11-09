@@ -398,7 +398,10 @@ RECORD_AND_LATER_ROWS: tuple[FactRow, ...] = (
             "parameters (`extract/headers/clang/template_param_indexes.py`); a "
             "default whose spelling is not read (for example `sizeof(T)`) leaves "
             "the whole pattern NOT_COLLECTED. castxml emits no pattern record for "
-            "an uninstantiated template, so it never sets this."
+            "an uninstantiated template, so it never sets this; it compares the "
+            "same defaults from `AbiSnapshot.cxx_template_defaults`, read from "
+            "the clang AST of the header by its clang join "
+            "(`extract/headers/clang/template_default_entries.py`)."
         ),
     ),
     FactRow(

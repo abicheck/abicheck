@@ -483,6 +483,16 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "constraint table already reads as not modelled",
         migrates_facts=True,
     ),
+    45: GenerationSpellingChange(
+        "no type or name spelling changes. castxml and clang runs set "
+        "cxx_template_defaults (the public headers' template-parameter "
+        "defaults of every class, function, alias and variable template, read "
+        "from the clang AST: extract/headers/clang/template_default_entries.py; "
+        "castxml through castxml/clang_semantics_join.py) where it was unset; "
+        "no rewrite is needed -- an older snapshot reads as not modelled, so a "
+        "castxml side keeps its header-scan gap note and a clang side its "
+        "alias/variable-template gap note"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

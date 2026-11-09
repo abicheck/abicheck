@@ -310,8 +310,10 @@ LEADING_ROWS: tuple[FactRow, ...] = (
             "function template's pattern "
             "(`extract/headers/clang/function_template_defaults.py`); a default "
             "whose spelling is not read leaves the pattern NOT_COLLECTED. castxml "
-            "emits no function-template pattern defaults, so its side is "
-            "NOT_COLLECTED and its header scan reports the gap."
+            "emits no function-template pattern, so this fact stays NOT_COLLECTED "
+            "there; both backends also record every template's defaults in "
+            "`AbiSnapshot.cxx_template_defaults` from the clang AST (castxml "
+            "through its clang join), which is what a castxml run compares."
         ),
     ),
     FactRow(

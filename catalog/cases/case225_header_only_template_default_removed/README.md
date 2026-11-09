@@ -1,6 +1,6 @@
 # Case 225: Header-Only Template Default Removed
 
-**Category:** Template ABI | **Verdict:** 🟢 NO_CHANGE (castxml) / 🟠 API_BREAK (clang)
+**Category:** Template ABI | **Verdict:** 🟠 API_BREAK (both backends)
 
 ## Verdict and consumer impact
 
@@ -9,12 +9,8 @@ default. Existing source that writes the one-argument form `Box<char>` stops
 compiling. That is a source break, not a binary break, because no symbol depends
 on the default.
 
-castxml cannot record defaults. Its validator-lane result is
-`NO_CHANGE` with the template-default gap, so it does not see this source break.
-clang records the removal and reports `template_param_default_changed` as
-`API_BREAK`. Read the castxml result as a known blind spot, not a clean pass.
-
-## Old/new diff
+Both header backends record the removal and report
+`template_param_default_changed` as `API_BREAK`. castxml writes no record for an uninstantiated template, so the castxml backend reads the defaults from the clang AST of the same header (its clang join), as the clang backend does. Without clang, a castxml run reads `NO_CHANGE` with run status partial and the gap `template-parameter defaults (castxml cannot record them)`.
 
 ## Old/new diff
 
@@ -35,14 +31,11 @@ abicheck dump -H v2.h --config .abicheck.yml --depth headers -o new.json
 abicheck compare old.json new.json
 ```
 
-Switch `frontend: clang` to see the clang result.
+`frontend: clang` gives the same result.
 
 ## Expected abicheck finding
 
-castxml (default): `Verdict: NO_CHANGE`, `Assurance: partial` with the
-template-default gap.
-
-clang: `Verdict: API_BREAK`, `template_param_default_changed`.
+castxml (default) and clang: `Verdict: API_BREAK`, `template_param_default_changed`.
 
 ## Minimum evidence
 

@@ -3,7 +3,7 @@
     "files": {
       "abicheck/btf_metadata.py": "614321e6140b32e7518deb3991dc9b9421107688c952542808ec4da88a17dc73",
       "abicheck/ctf_metadata.py": "42d3f588c6c4567c2a9d43a3ef5b886a753c37dd5357a4199d81d7ffc60d2109",
-      "abicheck/dumper.py": "fcd2874b1a06387a500f483c4fdc094ea47cf57cba897adfd8e9583fae6bb09b",
+      "abicheck/dumper.py": "b7c21a8d7cdad074634f37ff9d827cb2c0658cc08db5e19bf146e9748f10a566",
       "abicheck/dumper_clang.py": "0ee5831454abd776a07706b7c9a69d6fa3136dad37890f70e4103f4c940f3d05",
       "abicheck/dwarf_advanced.py": "91cfc7f410a37e7d7ba3ec922ff2944b81253fde3dcfdb806be032087822b339",
       "abicheck/dwarf_metadata.py": "a0621cde6559a0395b00d08aa25cc4cbff74b1121e2083e424e472c44b985512",
@@ -71,7 +71,7 @@
       "abicheck/extract/flat_map_dependency_scope.py": "5fa66ab2f8ebdbc37d735e3dbad3b6fe1ae3907d7a98eab5c6e6257842e2ea07",
       "abicheck/extract/header_ast_backend.py": "1f5b15c126b139c49b702b69a4f626ed7d30f8294e15ad116d61387e96d31f16",
       "abicheck/extract/header_ast_cache_producers.py": "aa85ae5d148526267f600b0972ca89afc27b6b8cb3f51b4c781a1526773600b4",
-      "abicheck/extract/header_ast_fields.py": "98874893667a6f345b9f26c1c2ce0d1cd464edb65cc4270d476ba32fa0100724",
+      "abicheck/extract/header_ast_fields.py": "326aaf6c7c9ca70bcc880e16651f48aaaf30c6980fa0751dbb0423139a63f679",
       "abicheck/extract/header_exclusions.py": "254ca6e4ccf7366b9db516183d6814cb865c279845abe7d05051ac2f72bf0884",
       "abicheck/extract/header_order_witness.py": "40a29ffe7ed3751f9bb8e3bbce7f49011569b9d1d0d99947641d9ba178982966",
       "abicheck/extract/header_scan_memo.py": "56f79b5316354b938b08a5f29779c3aaf40481892d947784ec2adb48ab5e83fb",
@@ -85,8 +85,8 @@
       "abicheck/extract/headers/castxml/abi_fundamental.py": "21dc4646f178ebd85b1dfdd84a4aab54ad6792c45906950f7af45d632b1afdd7",
       "abicheck/extract/headers/castxml/backend.py": "837b89d176bfe13d2808f2d77b139e769002099f0166756e868a5fea25bad9b0",
       "abicheck/extract/headers/castxml/calling_convention.py": "147c4be1a5b417eb4a67156e92e8f03f09eef3b7b34703ac22a98ad86d5dde1d",
-      "abicheck/extract/headers/castxml/clang_semantics.py": "b2bdf213d270fc3d914a58b4cba24afb7b1a391338c980c75548e8c6a2dbe6cd",
-      "abicheck/extract/headers/castxml/clang_semantics_join.py": "7443860bb6787d1b26a3d4ccea2375c76e5c68eca9380ca6a0a11a0b2a183b3f",
+      "abicheck/extract/headers/castxml/clang_semantics.py": "85c057c1b5d076b4b5cd3642424ca57eed01e0d6f2d237623575d7e2bc680de9",
+      "abicheck/extract/headers/castxml/clang_semantics_join.py": "42be6baa895fdb4ac23fa4b210e37cc0cf6c0607bd8b4ce046cb5ba18a3d3934",
       "abicheck/extract/headers/castxml/context.py": "62e82a8c29e18b90579435d8423600bfe316384eb706c36ad2e51062316a584b",
       "abicheck/extract/headers/castxml/dumper.py": "518d94f63c1d4ebea6e1c30d21b9c45166c58a2f33c3c8f5778308a325b3187c",
       "abicheck/extract/headers/castxml/duplicate_declarations.py": "8668fddc69d8838cc093315726c53d96dd9c878020e675e34a44a435dc54d2f7",
@@ -143,6 +143,7 @@
       "abicheck/extract/headers/clang/scope.py": "5b7bf471b1e95184c97da44aed88c8f4b29b36f77699a44255c33a889ea3a4b3",
       "abicheck/extract/headers/clang/streaming.py": "21db95a9e99e3dd51bef00492f9b4eb046d0d3e9d32f3b511391dfdf704dbfff",
       "abicheck/extract/headers/clang/template_decl_walk.py": "ea3d022f01c86057a69229a5ecaba9d5a7b8a476445678c438dc6662bedfada0",
+      "abicheck/extract/headers/clang/template_default_entries.py": "1b9d95e72e7bdece2162a060fbaf078a1d23dc4784d03d363912843ee9a9a879",
       "abicheck/extract/headers/clang/template_default_spelling.py": "dd2f4d32ff440849edc6547afeacd9945502860e4536d158bde3109306908434",
       "abicheck/extract/headers/clang/template_param_indexes.py": "1d54979cca271e1b112652f45f54ddd1356ca5f32e3367a3723aeaacd4e7c68d",
       "abicheck/extract/headers/clang/templates.py": "ee85de87a4180b5bed93d501237f153d1132fd325504c1fdf52fab87c7c95efe",
@@ -152,7 +153,7 @@
       "abicheck/extract/headers/clang_header_argv.py": "644a6454c6a3da3ab5f184cc2d9778d51f141f1e528f86162cccb815f9b17ddb",
       "abicheck/extract/headers/compile_provenance.py": "e4a6bcf30627807081f38f909cd136e5203132c099ea225971ef1d4cf849d82a",
       "abicheck/extract/headers/concept_scan.py": "158155a829223afdcd4f80b5d4dec9a6f7812c4827976a67d068096802465839",
-      "abicheck/extract/headers/manifest.py": "e0a808fafd37745cd964f4a304820c65a25e2f9d99207abd88312f725ec4bd7e",
+      "abicheck/extract/headers/manifest.py": "fd7e1715eb7a16e2509232091b4b164d61b241052105af61b9e2b4ba8df44400",
       "abicheck/extract/headers/preprocessor_branches.py": "d3a409d126b0dd1b19a634d4aad25660d372dad931b310cfbaaefc9d769b244d",
       "abicheck/extract/headers/scope_segments.py": "d413edec257eb1334c829263770b66dc2eda3d263c765f699eac9f7e3ace9e65",
       "abicheck/extract/headers/sysinc.py": "f82bd29033ed9d21f2b2af9a29352eb2b52b9c01ba7a09f47509af89017a359a",
@@ -204,9 +205,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "d29b0b752266e297ea1d3688e6202e795a5c73bb88b749914eb4a03d02702915",
-    "generation": 44,
-    "reason": "generation 44: the castxml backend reads noexcept and C++20 constraints from the clang AST of the same header (castxml/clang_semantics_join.py, castxml/clang_semantics.py); join keys do not depend on matching mangling"
+    "fingerprint": "ca9575ed0691baa95138cf01f91e47666385bd88953d22a96d5fd0c878446601",
+    "generation": 45,
+    "reason": "generation 45: castxml and clang record the public headers' template-parameter defaults of every class, function, alias and variable template from the clang AST (extract/headers/clang/template_default_entries.py; castxml through castxml/clang_semantics_join.py) as AbiSnapshot.cxx_template_defaults"
   },
   "resolver": {
     "files": {
