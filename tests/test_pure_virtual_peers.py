@@ -19,6 +19,7 @@ M = "_ZNK5Shape4kindEv"
 
 def _fn(
     *,
+    mangled: str = M,
     virtual: bool = True,
     pure: bool = False,
     vis: Visibility = Visibility.PUBLIC,
@@ -28,7 +29,7 @@ def _fn(
     facts = debug_info_surface_facts(exported=False) if debug_info else {}
     return Function(
         name="Shape::kind",
-        mangled=M,
+        mangled=mangled,
         return_type="int",
         is_virtual=virtual,
         is_pure_virtual=pure,
@@ -58,6 +59,16 @@ def _side(*functions: Function) -> AbiSnapshot:
         pytest.param(_fn(), _fn(), False, id="still_defined"),
         pytest.param(_fn(virtual=False), _fn(pure=True), False, id="old_not_virtual"),
         pytest.param(_fn(), None, False, id="no_declaration"),
+        # A pure declaration under any other name is never the peer: the
+        # const overload, another method, the same method of another record.
+        *(
+            pytest.param(_fn(), _fn(mangled=other, pure=True), False, id=case)
+            for case, other in (
+                ("const_overload", "_ZN5Shape4kindEv"),
+                ("other_method", "_ZNK5Shape4areaEv"),
+                ("other_record", "_ZNK6Circle4kindEv"),
+            )
+        ),
     ],
 )
 def test_a_peer_is_an_in_contract_pure_declaration_of_an_old_virtual(
@@ -68,3 +79,11 @@ def test_a_peer_is_an_in_contract_pure_declaration_of_an_old_virtual(
     assert (peer is not None) is paired
     if paired:
         assert peer is side.function_map[M]
+
+
+def test_a_lookup_answers_the_same_peer_every_time() -> None:
+    pure = _fn(pure=True)
+    side = _side(_fn(mangled="_ZNK5Shape4areaEv", pure=True), pure)
+    peers = PureVirtualPeers(side)
+    assert [peers.of(_fn()) for _ in range(3)] == [pure, pure, pure]
+    assert peers.of(_fn(mangled="_ZNK5Shape4sizeEv")) is None
