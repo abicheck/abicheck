@@ -8,6 +8,8 @@ depends_on:
   - actions/main-snapshot/action.yml
   - actions/fetch-main-snapshot/action.yml
   - abicheck/frontends/action/main_snapshot.py
+  - abicheck/frontends/action/delta_base_dump.py
+  - action/build-delta-base.sh
   - abicheck/frontends/action/main_snapshot_cache.py
 lifecycle: active
 generated: false
@@ -219,8 +221,9 @@ under two notes: what it was measured against, and the gate's verdict. When
 the snapshot is unavailable the comment shows the gate's report under a note
 naming the outcome. The step's exit code, `verdict` and every other output
 come from the gate in all cases; `delta-on-missing-base: fail` adds a separate
-failing step. Outputs: `delta-outcome`, `delta-base-sha`,
-`delta-operand-match`.
+failing step. Outputs: `delta-outcome` (the lookup's outcome),
+`delta-base-sha`, `delta-operand-match`, and `delta-comment-outcome` (what
+the comment shows: the lookup outcome, or one of the outcomes below).
 
 ### Operand identity: is the snapshot this PR's library?
 
@@ -257,7 +260,8 @@ same snapshot library are `operand_ambiguous` (line order never decides).
 Every refusal's reason is also written to the job log as a warning. Every refusal keeps the gate's report in the
 comment under a "Delta unavailable" note; with `delta-on-missing-base: fail`
 an `operand_*` refusal fails the separate "Require the delta base snapshot"
-step like a missing snapshot does.
+step like a missing snapshot does. A base built by
+`delta-on-missing-base: build` goes through the same check.
 
 It runs on `pull_request` and `merge_group` only (a `pull_request_target`
 checkout is the base branch, not the PR), and for a single-library
@@ -273,6 +277,85 @@ trusted publisher validates their shape and writes the notes itself, with the
 wording the direct path uses. A field that fails validation drops the notes
 rather than showing fork-written text.
 
+### `delta-on-missing-base: build`
+
+When the lookup selected an exact base commit but no stored snapshot is
+usable for it (`base_pending`, `base_failed`, `base_not_snapshotted`,
+`base_expired`, `snapshot_missing`, `untrusted_source`, `lookup_failed`), the
+Action can build that commit in the PR job instead of explaining the gap.
+With `storage: cache` the same applies: a miss (`base_not_snapshotted`), a
+refused entry or scope (`untrusted_source`) and a malformed entry
+(`lookup_failed`) concern the cache entry, not which commit is the base, and
+the build never reads the refused entry:
+
+```yaml
+      - uses: actions/checkout@v5
+        with: { fetch-depth: 2, persist-credentials: false }
+      - run: ./build.sh
+      - uses: abicheck/abicheck@v1
+        with:
+          abi-baseline: latest-release
+          new-library: build/libfoo.so
+          new-header: include/
+          delta-baseline: main
+          delta-snapshot-workflow: abi-main.yml
+          delta-on-missing-base: build
+          delta-base-build-command: ./build.sh
+```
+
+1. **After** the normal comparison (the gate) has run, and only when a
+   comment is rendered, the Action checks the base commit out into a git
+   worktree under `runner.temp` (the PR checkout and its build outputs are
+   untouched; a commit missing from a shallow clone is fetched by SHA; the
+   repository is found from `new-library`'s directory, so a checkout under
+   `path:` works) and runs `delta-base-build-command` with
+   `bash -e -o pipefail` from that worktree's root, with `ABICHECK_BASE_SHA`
+   set.
+2. The comparison step dumps the result with this run's **new-side**
+   evidence inputs (`new-library`, `header`/`new-header`,
+   `include`/`new-include`, `new-debug-info`, `sources`, `build-info`,
+   `depth`, `build-config`, the compile context and `compile.*`/`build.*`
+   `set:` lines), each path moved to the same place relative to the base
+   checkout's root, so both sides of the delta are captured at the same
+   evidence depth. Old-side inputs describe the release baseline and are not
+   used. A path outside the PR checkout (other than an include directory,
+   kept as a toolchain directory) cannot be provided by the base build and
+   is refused rather than reused, as is a `--dump-manifest`.
+3. That snapshot is the delta's old side, exactly as a resolved stored
+   snapshot is. The worktree is removed afterwards.
+
+`delta-base-build-command` must therefore leave the library and those
+inputs at the same paths, relative to the checkout root, as the PR build
+does, and must not install over the PR build: when it changes
+`new-library`, the delta is not measured (`base_build_failed`), since it would
+compare the base with itself. Submodules, caches and dependencies are the
+command's job.
+
+The command is isolated from the rest of the job. The gate has already
+compared, so nothing it writes can change the gate's result. Its
+`GITHUB_ENV`, `GITHUB_PATH`, `GITHUB_OUTPUT` and `GITHUB_STEP_SUMMARY` point at
+throwaway files, so it cannot change a later step's environment or forge
+the build's result. No token and none of the Action's inputs are in its
+environment, and the git commands it runs see no `actions/checkout`
+credential. The persisted credential is still in `.git/config`, readable
+by any code the build runs, so check out with `persist-credentials: false`
+(as above). The code it runs is the base commit's, already on the default
+branch.
+
+`base_unknown` and `base_ambiguous` selected no commit, so nothing is built:
+the comment explains them as with `report`. The comment and
+`delta-comment-outcome` name what happened, and the step's status is always
+the gate's:
+
+| `delta-comment-outcome` | Comment |
+|---|---|
+| `base_built` | The delta, headed "Changes in this PR (vs `main@<sha7>`, built in this job …)". |
+| `base_build_failed` | The checkout or `delta-base-build-command` failed; the release comparison is shown and the job log has the build output. |
+| `base_dump_failed` | The build succeeded but its dump failed, or an evidence path cannot be moved into the base checkout; the release comparison is shown. |
+| `rerun_failed` | The comparison against the built base produced no report. |
+
+None of them reads as "no changes", and none of them changes the exit code.
+
 ### The record in the JSON report
 
 Both reports say which comparison they are, in a top-level `delta_baseline`
@@ -282,14 +365,15 @@ in [output formats](../use/output-formats.md#gate-or-delta-comparison-delta_base
 | Report | `comparison_role` | `outcome` | `gate_verdict` | `operand_match` |
 |---|---|---|---|---|
 | The gate's (the `output-file`, the summary, the SARIF/JUnit sources) | `gate` (`decides_exit_code: true`) | the lookup's outcome, or `unsupported_operand` for a directory/package comparison | `null` -- its own `verdict` is the gate's | `null` -- the gate runs before the operands are paired |
-| The delta's (the one the comment renders, and the one staged for a fork publisher) | `delta` (`decides_exit_code: false`) | always `resolved` | the gate's verdict | how the snapshot's library was paired with `new-library` (the `delta-operand-match` output) |
+| The delta's (the one the comment renders, and the one staged for a fork publisher) | `delta` (`decides_exit_code: false`) | `resolved`, or `base_built` when `delta-on-missing-base: build` built the base in this job | the gate's verdict | how the snapshot's library was paired with `new-library` (the `delta-operand-match` output) |
 
 `base_sha` and `branch` are the base commit and default branch on both. The
 gate's block records the lookup as it stood when the gate ran: if the delta
 comparison then produces no report, the comment falls back to the gate's
 report under `rerun_failed`, which the gate's block does not show; the same
-holds for the operand-identity refusals (`operand_*`), which are decided after
-the gate and run no delta comparison. The block
+holds for the operand-identity refusals (`operand_*`) and for a failed base
+build (`base_build_failed`, `base_dump_failed`), which are decided after the
+gate and run no delta comparison. The block
 never changes a verdict or exit code. A record the CLI would refuse is not
 passed at all (the run warns), so the block can never turn the gate's run
 into a usage error.

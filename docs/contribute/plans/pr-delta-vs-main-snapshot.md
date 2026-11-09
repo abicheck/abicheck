@@ -12,17 +12,19 @@ generated: false
 (absent is not removed) · **Status:** pieces 1–2 landed (`actions/main-snapshot`,
 `actions/fetch-main-snapshot`, `abicheck/frontends/action/main_snapshot.py`);
 piece 3 landed (main Action `delta-baseline`, `delta-on-missing-base:
-report|fail`, the comment's two notes via `pr_comment --note`, and on the
-artifact (fork) path via `analysis_context`); operand identity landed
-(§ Operand identity: `operand.json`, `delta-operand-map`, `operand_*`
-outcomes); `storage: cache` landed on both Actions
+report|fail|build` with `delta-base-build-command`, the comment's two notes
+via `pr_comment --note`, and on the artifact (fork) path via
+`analysis_context`); operand identity landed (§ Operand identity:
+`operand.json`, `delta-operand-map`, `operand_*` outcomes, applied to a
+built base too); `storage: cache` landed on both Actions
 (`abicheck/frontends/action/main_snapshot_cache.py`; the cache entry carries
-`operand.json` too); piece 4's report field landed (`delta_baseline` block,
+`operand.json` too, and every cache refusal selected a commit, so `build`
+applies to it); piece 4's report field landed (`delta_baseline` block,
 compare report schema 7.3 / release 3.1, `report.delta_baseline`, with the
-operand pairing as `operand_match`); open: the comment header's equivalence
-note (needs path equivalence), `on-missing-base: build`, the path-equivalent
-*ancestor* rule (`base-equivalent-paths`), a `delta-storage` input on the main
-Action · **Effort:** L
+operand pairing as `operand_match`; a built base's delta report records
+`base_built`); open: the comment header's equivalence note (needs path
+equivalence), the path-equivalent *ancestor* rule (`base-equivalent-paths`),
+a `delta-storage` input on the main Action · **Effort:** L
 
 ## Problem
 
@@ -310,8 +312,14 @@ work, which publishes the delta report; nothing else changes.
    from `base-sha` only under path equivalence).
 3. **Main Action inputs** (*landed* as `delta-baseline: main`,
    `delta-snapshot-workflow`, `delta-mode`, `delta-profile`,
-   `delta-wait-timeout`, `delta-on-missing-base: report|fail`; `build` and a
-   `<path>` value are planned). When set, the Action runs the existing compare twice:
+   `delta-wait-timeout`, `delta-on-missing-base: report|fail|build`,
+   `delta-base-build-command`; a `<path>` value is planned). `build` runs
+   after the gate comparison: it checks the base out into a worktree, runs
+   the command sandboxed (no token or inputs, throwaway runner files), and
+   dumps it with the gate's new-side evidence moved into that worktree
+   (`abicheck/frontends/action/delta_base_dump.py`), so evidence parity holds
+   by construction; its results are the comment-only outcomes `base_built`,
+   `base_build_failed` and `base_dump_failed`. When set, the Action runs the existing compare twice:
    the gate as today, and the delta compare with `pr-comment` routed to the
    delta report and the gate's verdict as one header line ("Release gate:
    ✅ compatible / ❌ breaking — see summary"). The step's exit code comes

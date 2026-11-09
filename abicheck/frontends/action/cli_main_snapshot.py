@@ -13,7 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Commands behind ``actions/main-snapshot`` and ``actions/fetch-main-snapshot``.
+"""Commands behind ``actions/main-snapshot``, ``actions/fetch-main-snapshot`` and the
+main Action's ``delta-baseline``.
 
 A sibling of :mod:`abicheck.frontends.action.cli`, registered on the same
 group. Like its siblings it performs no network I/O: the Actions' shells run
@@ -30,7 +31,9 @@ from pathlib import Path
 import click
 
 from .cli_base import EXIT_REFUSED, _read_json, action_cli
+from .delta_base_dump import BaseDumpRefused, base_dump_argv
 from .main_snapshot import (
+    BUILDABLE_OUTCOMES,
     DeltaOutcome,
     SnapshotExpectation,
     delta_notes,
@@ -206,6 +209,62 @@ def delta_notes_cmd(
         raise click.UsageError(str(exc)) from exc
     for line in lines:
         click.echo(line)
+
+
+@action_cli.command("delta-buildable")
+@click.argument("outcome")
+def delta_buildable_cmd(outcome: str) -> None:
+    """Exit 0 when delta-on-missing-base: build applies to OUTCOME, else 3."""
+    if outcome not in {o.value for o in BUILDABLE_OUTCOMES}:
+        sys.exit(EXIT_REFUSED)
+
+
+@action_cli.command("delta-base-dump-args")
+@click.argument("gate_tail", type=click.Path(exists=True, path_type=Path))
+@click.option("--new-library", required=True)
+@click.option(
+    "--cwd", required=True, help="Directory the gate's relative paths resolve against."
+)
+@click.option(
+    "--checkout", required=True, help="Top-level directory of the PR checkout."
+)
+@click.option("--base-root", required=True, help="The base commit's checkout.")
+@click.option("--output", required=True, help="Snapshot path for `dump -o`.")
+@click.option(
+    "--value-options",
+    default="",
+    help="'|'-separated options of the gate command that take a value.",
+)
+def delta_base_dump_args_cmd(
+    gate_tail: Path,
+    new_library: str,
+    cwd: str,
+    checkout: str,
+    base_root: str,
+    output: str,
+    value_options: str,
+) -> None:
+    """Print, NUL-separated, the ``dump`` argv for a base built in the PR job.
+
+    GATE_TAIL holds the gate ``compare`` argv after its two operands,
+    NUL-separated. Exits 3 with the reason on stderr when the new side's
+    evidence cannot be re-pointed at the base checkout.
+    """
+    tail = [tok for tok in gate_tail.read_bytes().decode("utf-8").split("\0") if tok]
+    try:
+        argv = base_dump_argv(
+            tail,
+            new_library=new_library,
+            cwd=cwd,
+            checkout=checkout,
+            base_root=base_root,
+            output=output,
+            value_options=frozenset(o for o in value_options.split("|") if o),
+        )
+    except BaseDumpRefused as exc:
+        click.echo(str(exc), err=True)
+        sys.exit(EXIT_REFUSED)
+    sys.stdout.write("".join(f"{tok}\0" for tok in argv))
 
 
 # ── storage: cache ──────────────────────────────────────────────────────────

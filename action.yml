@@ -968,8 +968,26 @@ inputs:
       comment and nothing fails. 'fail': additionally fail the job in a
       separate step after the comparison, so the result reads as
       "delta required but unavailable", never as a compatibility break.
+      'build': after the normal comparison, check out the base commit
+      beside this checkout, run delta-base-build-command there, dump it with
+      this run's new-side evidence inputs and use it as the delta base; a
+      failed build is reported in the comment and never changes the step's
+      status. Only for an outcome that selected a base commit (not
+      base_unknown or base_ambiguous), and only when a comment is rendered.
     required: false
     default: 'report'
+  delta-base-build-command:
+    description: >
+      delta-on-missing-base: build only. Shell commands (bash -e) that build
+      the base commit, run from the root of its checkout (a git worktree in
+      runner.temp; ABICHECK_BASE_SHA names the commit). They must leave
+      new-library and the new-side header/debug-info/build inputs at the
+      same paths relative to the checkout root as the PR build does, and
+      must not install over the PR build. They run without the token or the
+      Action's inputs in their environment, and their GITHUB_ENV/GITHUB_PATH/
+      GITHUB_OUTPUT writes are discarded.
+    required: false
+    default: ''
   pr-comment-detail:
     description: >
       Detail level of the comment body: 'summary' (verdict + counts only),
@@ -1376,6 +1394,13 @@ outputs:
   delta-base-sha:
     description: 'delta-baseline only: the base commit the delta was measured against.'
     value: ${{ steps.delta-base.outputs.base-sha }}
+  delta-comment-outcome:
+    description: >
+      delta-baseline only: what the PR comment shows -- the lookup outcome,
+      or 'base_built' / 'base_build_failed' / 'base_dump_failed' after
+      delta-on-missing-base: build, 'rerun_failed', 'unsupported_operand' or an operand_* identity refusal.
+      Empty when no comment was rendered.
+    value: ${{ steps.run-abicheck.outputs.delta-comment-outcome }}
   delta-operand-match:
     description: >
       delta-baseline only: how the snapshot's library was paired with
@@ -1456,6 +1481,7 @@ runs:
         INPUT_DELTA_SNAPSHOT_WORKFLOW: ${{ inputs.delta-snapshot-workflow }}
         INPUT_DELTA_MODE: ${{ inputs.delta-mode }}
         INPUT_DELTA_ON_MISSING_BASE: ${{ inputs.delta-on-missing-base }}
+        INPUT_DELTA_BASE_BUILD_COMMAND: ${{ inputs.delta-base-build-command }}
         # Retired by the ADR-091 renames: tombstones, rejected here (see the
         # Retired inputs block above). Each one's replacement is validated below.
         INPUT_POLICY_FILE: ${{ inputs.policy-file }}
@@ -1784,6 +1810,10 @@ runs:
         ABICHECK_DELTA_MESSAGE: ${{ steps.delta-base.outputs.message }}
         ABICHECK_DELTA_BASE_SHA: ${{ steps.delta-base.outputs.base-sha }}
         ABICHECK_DELTA_BRANCH: ${{ github.event.repository.default_branch }}
+        # delta-on-missing-base: build runs inside run.sh, after the gate
+        # comparison and in a sandbox (action/build-delta-base.sh).
+        ABICHECK_DELTA_ON_MISSING_BASE: ${{ inputs.delta-on-missing-base }}
+        ABICHECK_DELTA_BASE_BUILD_COMMAND: ${{ inputs.delta-base-build-command }}
         INPUT_DELTA_OPERAND_MAP: ${{ inputs.delta-operand-map }}
         INPUT_SOURCES: ${{ inputs.sources }}
         INPUT_BUILD_INFO: ${{ inputs.build-info }}
