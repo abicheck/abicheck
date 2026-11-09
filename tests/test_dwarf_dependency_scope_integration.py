@@ -184,11 +184,10 @@ def test_dependency_tags_are_recorded_and_never_gate(compared) -> None:
     tag_findings = [c for c in _recorded(report) if c["symbol"] in _TAGS]
     assert tag_findings, "the dependency's tag structs changed and must be recorded"
     for finding in tag_findings:
-        in_changes = finding in report["changes"]
-        assert not in_changes or (
-            finding["contract_relevance"] == "PROVEN_OUT_OF_CONTRACT"
-            or finding.get("severity") != "breaking"
-        ), finding
+        # Recorded, and never a gate input: its own contribution to the exit
+        # code is zero, whatever its kind's severity.
+        if finding in report["changes"]:
+            assert finding["gate_contribution"] == 0, finding
 
 
 def test_reached_vector_type_change_stays_in_contract(compared) -> None:

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -137,7 +138,38 @@ def vector_byte_size(die: Any, element_size: int | None) -> int | None:
 
 #: An unsigned ``DW_AT_upper_bound`` of all-ones is GCC's spelling of the
 #: ``-1`` bound of a zero-length (``T[0]``) array in a fixed-width form.
-_ALL_ONES_BOUNDS = frozenset({0xFFFFFFFF, 0xFFFFFFFFFFFFFFFF})
+#: Constant attribute forms, and the all-ones value of each fixed-width one:
+#: GCC writes a ``T[0]`` bound as ``upper = -1`` in the form's own width
+#: (``0xffffffff`` in ``DW_FORM_data4``), while the same value in a wider
+#: form is a real bound. A reference or expression form is not a constant
+#: (a variable-length bound), even when its value decodes as an integer.
+_CONSTANT_FORMS = frozenset(
+    {
+        "DW_FORM_data1",
+        "DW_FORM_data2",
+        "DW_FORM_data4",
+        "DW_FORM_data8",
+        "DW_FORM_sdata",
+        "DW_FORM_udata",
+        "DW_FORM_implicit_const",
+    }
+)
+_ALL_ONES_BY_FORM = {
+    "DW_FORM_data1": 0xFF,
+    "DW_FORM_data2": 0xFFFF,
+    "DW_FORM_data4": 0xFFFFFFFF,
+    "DW_FORM_data8": 0xFFFFFFFFFFFFFFFF,
+}
+
+
+def _constant(subrange: Any, name: str) -> int | None:
+    """*subrange*'s *name* attribute as a constant, ``None`` when absent or
+    not written in a constant form."""
+    attr = subrange.attributes.get(name)
+    if attr is None or attr.form not in _CONSTANT_FORMS:
+        return None
+    value = attr.value
+    return value if isinstance(value, int) else None
 
 
 def _subrange_count(subrange: Any) -> int | None:
@@ -146,17 +178,20 @@ def _subrange_count(subrange: Any) -> int | None:
     variable-length bound written as an expression or reference)."""
     attrs = subrange.attributes
     if "DW_AT_count" in attrs:
-        value = attrs["DW_AT_count"].value
-        return value if isinstance(value, int) and value >= 0 else None
-    if "DW_AT_upper_bound" in attrs:
-        upper = attrs["DW_AT_upper_bound"].value
-        if not isinstance(upper, int):
-            return None
-        if upper in _ALL_ONES_BOUNDS or upper == -1:
-            return 0
-        count = upper - attr_int(subrange, "DW_AT_lower_bound") + 1
-        return count if count >= 0 else None
-    return None
+        count = _constant(subrange, "DW_AT_count")
+        return count if count is not None and count >= 0 else None
+    upper = _constant(subrange, "DW_AT_upper_bound")
+    if upper is None:
+        return None
+    if upper == -1 or upper == _ALL_ONES_BY_FORM.get(attrs["DW_AT_upper_bound"].form):
+        return 0
+    lower: int | None = 0
+    if "DW_AT_lower_bound" in attrs:
+        lower = _constant(subrange, "DW_AT_lower_bound")
+    if lower is None:
+        return None
+    count = upper - lower + 1
+    return count if count >= 0 else None
 
 
 def array_extents(die: Any) -> tuple[int | None, ...]:
@@ -209,6 +244,14 @@ def array_type_info(die: Any, inner: tuple[str, int] | None) -> tuple[str, int]:
         size = vector_byte_size(die, inner[1] if inner is not None else None) or 0
         return (array_type_spelling(element_name, size, is_vector), size)
     extents = array_extents(die)
+    # An array DIE whose element is itself an array DIE (not a typedef of
+    # one): the element's bounds are the inner dimensions, so they follow
+    # this DIE's own (``int[2]`` of ``int[3]`` is ``int[2][3]``).
+    inner_bounds = ""
+    if element_name is not None:
+        nested = _TRAILING_BOUNDS.match(element_name)
+        if nested is not None:
+            element_name, inner_bounds = nested.group(1), nested.group(2)
     size = attr_int(die, "DW_AT_byte_size")
     if not size and extents and inner is not None and inner[1]:
         total = inner[1]
@@ -218,7 +261,13 @@ def array_type_info(die: Any, inner: tuple[str, int] | None) -> tuple[str, int]:
                 break
             total *= count
         size = total
-    return (array_type_spelling(element_name, size, is_vector, extents), size)
+    spelling = array_type_spelling(element_name, size, is_vector, extents)
+    return (spelling + inner_bounds, size)
+
+
+#: The bounds an array spelling ends with (``int[3]``, ``char[][4]``); no
+#: other spelling ends with ``]``.
+_TRAILING_BOUNDS = re.compile(r"^(.*?)((?:\[\d*\])+)$")
 
 
 #: ``DW_AT_calling_convention`` values a compiler writes on a

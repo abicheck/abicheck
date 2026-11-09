@@ -19,6 +19,7 @@ from abicheck.checker import compare
 from abicheck.model import AbiSnapshot, RecordType, TypeField
 from abicheck.model.change_catalog.kinds import ChangeKind
 from abicheck.model.change_catalog.registry import Verdict
+from abicheck.model.dwarf_facts import DwarfMetadata
 from abicheck.policy.generation_drift_demotion import (
     GENERATION_DRIFT_RULE,
     is_erased_extent_drift,
@@ -42,7 +43,13 @@ from abicheck.storage.generation_migrations import (
         ("char[6]", "char[8]", False),  # a real bound change
         ("char[8]", "char[]", False),  # the stale side kept a bound
         ("char", "char[8]", False),  # scalar became an array
-        ("int[][]", "int[2][3]", False),  # not the pre-44 spelling
+        # An array DIE nested in another wrote one ``[]`` per DIE.
+        ("int[][]", "int[2][3]", True),
+        ("int[][]", "int[2][3][4]", True),
+        ("int[][]", "int[8]", False),  # more erased dims than live ones
+        ("int[][3]", "int[2][3]", False),  # the stale side kept a bound
+        ("int[] *[]", "int[2] *[3]", True),  # each run erased on its own
+        ("int[] *", "int[2] *[3]", False),  # a run appeared
     ],
 )
 def test_erased_extent_drift_is_exactly_the_bound_erasure(
@@ -61,7 +68,10 @@ def test_the_generation_44_row_is_what_declares_it(
     assert erased_extents_restored_between(a, b) is expected
 
 
-def _snapshot(field_type: str, *, headers: bool = False) -> AbiSnapshot:
+def _snapshot(field_type: str, *, source: str = "dwarf") -> AbiSnapshot:
+    """A one-record snapshot whose types came from *source*: ``dwarf``,
+    ``headers`` (castxml/clang), ``pdb`` (a PE image's debug info, read into
+    the same metadata) or ``symbols`` (no debug info at all)."""
     snap = AbiSnapshot(
         library="libx.so.1",
         version="1",
@@ -76,8 +86,10 @@ def _snapshot(field_type: str, *, headers: bool = False) -> AbiSnapshot:
                 ],
             )
         ],
+        dwarf=DwarfMetadata(has_dwarf=source != "symbols"),
+        platform="pe" if source == "pdb" else "elf",
     )
-    snap.from_headers = headers
+    snap.from_headers = source == "headers"
     return snap
 
 
@@ -116,14 +128,19 @@ def test_the_newer_operand_on_the_old_side_is_read_the_same_way() -> None:
 
 
 @pytest.mark.parametrize(
-    ("stale_generation", "headers"),
-    [(44, False), (43, True)],
-    ids=["same_generation", "header_sourced_stale_side"],
+    ("stale_generation", "source"),
+    [(44, "dwarf"), (43, "headers"), (43, "pdb"), (43, "symbols")],
+    ids=[
+        "same_generation",
+        "header_sourced_stale_side",
+        "pdb_sourced_stale_side",
+        "no_debug_info_stale_side",
+    ],
 )
 def test_no_demotion_without_an_older_dwarf_sourced_side(
-    stale_generation: int, headers: bool
+    stale_generation: int, source: str
 ) -> None:
-    old = _stamped(_snapshot("char[]", headers=headers), stale_generation)
+    old = _stamped(_snapshot("char[]", source=source), stale_generation)
     result = compare(old, _snapshot("char[8]"))
     assert _field_finding(result).modulation_rule != GENERATION_DRIFT_RULE
     assert result.verdict is Verdict.BREAKING

@@ -13,35 +13,29 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""C++ member functions in a DWARF-only snapshot (extractor generation 44).
+"""C++ member functions in a DWARF-only snapshot.
 
 A member function's DWARF is split in two. The class holds its *declaration*
 (``DW_AT_declaration``, with the name, linkage name, virtuality, vtable slot
 and an artificial ``this`` parameter); the definition sits outside the class
-and names it only through ``DW_AT_specification`` (a concrete constructor or
-destructor instance goes through ``DW_AT_abstract_origin`` first), with no
-``DW_AT_name`` of its own. Before generation 44 the walker skipped both --
-the declaration for being one, the definition for having no name -- so a
-DWARF-only snapshot held no member function at all, and every method change
-read as a bare ELF symbol removal plus addition (``func_removed_elf_only``),
-never as the change it was (``func_cv_changed``,
-``func_virtual_became_pure``).
+and names it through ``DW_AT_specification`` (a concrete constructor or
+destructor instance goes through ``DW_AT_abstract_origin`` first), usually
+with no ``DW_AT_name`` of its own. A namespace-scope function declared in a
+header has the same split.
 
 This module gives the walker what it needs to record them:
 
-* :class:`MemberScopes` remembers each in-class declaration's scope as the
-  walk passes it, so a definition met later resolves its class scope without
-  a parent walk; a definition met *before* its class is deferred and retried
-  at the end of the compile unit.
+* :class:`MemberScopes` remembers each declaration's scope as the walk
+  passes it, so a definition met later resolves its class scope without a
+  parent walk; a definition met *before* its declaration is deferred and
+  retried at the end of the compile unit.
 * :func:`member_declaration` follows a definition to its declaration.
 * :func:`member_qualifiers` reads the cv- and ref-qualifiers of the implicit
   object parameter, which the mangled name encodes (``_ZNK``) but the
   declaration carries only as the ``this`` pointer's pointee type.
 * :func:`is_pure_virtual_declaration`: a pure virtual has no definition, so
-  its declaration is the only DIE there is; clang marks it
-  ``DW_VIRTUALITY_pure_virtual``. GCC (13) writes ``DW_VIRTUALITY_virtual``
-  for a pure virtual too, so a GCC-built pure virtual is still not recorded
-  (``docs/contribute/known-gaps.md``).
+  its declaration is the only DIE there is; it is recognized by
+  ``DW_VIRTUALITY_pure_virtual``.
 """
 
 from __future__ import annotations
@@ -259,8 +253,11 @@ def member_qualifiers(decl: Any, CU: Any) -> MemberQualifiers:
         else ""
     )
     this = _object_parameter(decl, CU)
-    if this is None or "DW_AT_type" not in this.attributes:
+    if this is None:
         return MemberQualifiers(has_this=False, ref_qualifier=ref)
+    if "DW_AT_type" not in this.attributes:
+        # An object parameter whose type is unrecorded: still a ``this``.
+        return MemberQualifiers(has_this=True, ref_qualifier=ref)
     try:
         pointer, _ = _strip_cv(resolve_die_ref(this, "DW_AT_type", CU), CU)
         if pointer is None or pointer.tag != "DW_TAG_pointer_type":
@@ -317,26 +314,30 @@ class MemberScopes:
         """``(name, declaration, scope, scope_path, default_access)`` of the
         subprogram *die*, or ``None`` when it cannot be recorded (yet).
 
-        A named DIE answers for itself (its declaration DIE is ``None``); an
-        in-class declaration is remembered on the way. A nameless definition
-        takes its declaration's name and scope; one whose declaration the walk
-        has not passed yet is deferred (unless this is the *retry*), and one
-        with no linkage name is not a concrete function.
+        An in-class declaration answers for itself and is remembered on the
+        way. A definition linked to a declaration takes that declaration's
+        scope (and its name, when it has none of its own); one whose
+        declaration the walk has not passed yet is deferred (unless this is
+        the *retry*), and a nameless one with no linkage name is not a
+        concrete function. A named DIE with no declaration link answers for
+        itself (its declaration DIE is ``None``).
         """
         name = attr_str(die, "DW_AT_name")
-        if name:
-            if attr_bool(die, "DW_AT_declaration"):
-                self.remember(die, scope, scope_path, default_access)
-            return name, None, scope, scope_path, default_access
+        if attr_bool(die, "DW_AT_declaration"):
+            self.remember(die, scope, scope_path, default_access)
+            return (name, None, scope, scope_path, default_access) if name else None
         decl = member_declaration(die, CU)
         if decl is None:
-            return None
+            return (name, None, scope, scope_path, default_access) if name else None
         found = self.scope_of(decl)
         if found is None:
             if not retry:
                 self.defer((die, CU, scope, scope_path, default_access))
-            return None
-        name = attr_str(decl, "DW_AT_name")
+                return None
+            # The declaration never came by: a named definition still
+            # answers for itself, from where it sits.
+            return (name, None, scope, scope_path, default_access) if name else None
+        name = name or attr_str(decl, "DW_AT_name")
         if not name or not chained_linkage_name(die, CU):
             return None
         return name, decl, found.scope, found.scope_path, found.default_access

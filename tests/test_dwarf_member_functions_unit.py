@@ -150,7 +150,11 @@ def test_an_unreadable_this_reads_unqualified(pointee: str) -> None:
         )
     decl = _die(cu, 1, "DW_TAG_subprogram", {"DW_AT_declaration": True}, (this,))
     q = members.member_qualifiers(decl, cu)
-    assert (q.is_const, q.is_volatile) == (False, False)
+    # The object parameter exists, so the member is not static, whatever its
+    # type DIE says.
+    assert (q.has_this, q.is_const, q.is_volatile) == (True, False, False)
+    scoped = members.qualifiers_in_scope(decl, cu, (Record("C", "public"),))
+    assert scoped.is_static is False
 
 
 def test_a_non_member_is_static_only_without_external_linkage() -> None:
@@ -361,3 +365,71 @@ def test_a_nameless_die_with_no_declaration_records_nothing() -> None:
     scopes = members.MemberScopes()
     assert scopes.resolve(die, cu, "", (), "public", retry=False) is None
     assert list(scopes.drain()) == []
+
+
+def _named_definition_case() -> tuple[_CU, Any, Any, tuple[Any, ...]]:
+    cu = _CU()
+    decl = _die(
+        cu,
+        10,
+        "DW_TAG_subprogram",
+        {
+            "DW_AT_name": "f",
+            "DW_AT_declaration": True,
+            "DW_AT_linkage_name": "_ZN1C1fEv",
+        },
+    )
+    # A definition that repeats the name and still links its declaration.
+    definition = _die(
+        cu,
+        30,
+        "DW_TAG_subprogram",
+        {"DW_AT_name": "f", "DW_AT_specification": _Ref(10)},
+    )
+    return cu, decl, definition, ("C", (Record("C", "public"),), "private")
+
+
+def test_a_named_definition_takes_its_declarations_scope() -> None:
+    cu, decl, definition, member_scope = _named_definition_case()
+    scopes = members.MemberScopes()
+    scopes.remember(decl, *member_scope)
+    assert scopes.resolve(definition, cu, "", (), "public", retry=False) == (
+        "f",
+        decl,
+        *member_scope,
+    )
+
+
+def test_a_named_definition_met_first_is_deferred_then_answers_for_itself() -> None:
+    cu, _decl, definition, _scope = _named_definition_case()
+    scopes = members.MemberScopes()
+    assert scopes.resolve(definition, cu, "", (), "public", retry=False) is None
+    assert [d[0] for d in scopes.drain()] == [definition]
+    # The declaration never came by: recorded from where it sits, as before.
+    assert scopes.resolve(definition, cu, "ns", (), "public", retry=True) == (
+        "f",
+        None,
+        "ns",
+        (),
+        "public",
+    )
+
+
+def test_a_named_die_linked_to_no_declaration_answers_for_itself() -> None:
+    cu = _CU()
+    scopes = members.MemberScopes()
+    target = _die(cu, 10, "DW_TAG_subprogram", {"DW_AT_name": "g"})
+    die = _die(
+        cu,
+        30,
+        "DW_TAG_subprogram",
+        {"DW_AT_name": "f", "DW_AT_specification": _Ref(10)},
+    )
+    assert target is cu.dies[10]
+    assert scopes.resolve(die, cu, "ns", (), "public", retry=False) == (
+        "f",
+        None,
+        "ns",
+        (),
+        "public",
+    )

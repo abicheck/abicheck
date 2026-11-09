@@ -514,13 +514,24 @@ _EXTENT_RUN = re.compile(r"(?:\[\s*\d*\s*\])+")
 
 
 def is_erased_extent_drift(stale: str, live: str) -> bool:
-    """Whether *stale* is *live* with every run of array bounds erased to
-    ``[]`` (and the two differ): the spelling the pre-44 DWARF extractor
-    wrote for a bounded array (``char[8]`` -> ``char[]``, ``int[2][3]`` ->
-    ``int[]``). Any other difference, a changed bound included, is not."""
+    """Whether *stale* is *live* with every run of array bounds erased: the
+    spelling the pre-44 DWARF extractor wrote for a bounded array
+    (``char[8]`` -> ``char[]``, ``int[2][3]`` -> ``int[]``). An array DIE
+    nested in another wrote one ``[]`` per DIE (``int[][]``), never more
+    than the live spelling has dimensions. Any other difference, a changed
+    bound included, is not."""
     if stale == live or "[]" not in stale:
         return False
-    return _EXTENT_RUN.sub("[]", live) == stale
+    stale_runs, live_runs = _EXTENT_RUN.findall(stale), _EXTENT_RUN.findall(live)
+    # A stale spelling that states any bound is not an erased one.
+    if any(c.isdigit() for run in stale_runs for c in run):
+        return False
+    if len(stale_runs) != len(live_runs) or any(
+        old.count("[") > new.count("[")
+        for old, new in zip(stale_runs, live_runs, strict=True)
+    ):
+        return False
+    return _EXTENT_RUN.sub("[]", live) == _EXTENT_RUN.sub("[]", stale)
 
 
 def _erased_pair_drifts(pair: tuple[str, str], *, stale_is_old: bool) -> bool:
@@ -551,6 +562,17 @@ GENERATION_ERASED_EXTENT_DRIFT = register_name_heuristic(
 )
 
 
+def _types_from_dwarf(snap: AbiSnapshot) -> bool:
+    """Whether *snap*'s types were read from DWARF: debug info present, not
+    header-parsed, and not a PE image (whose debug info is PDB, read into the
+    same metadata, and never spelled bounded arrays as ``T[]``)."""
+    from ..model.debug_evidence import debug_info_evidence
+
+    if snap.from_headers or snap.pe is not None or snap.platform == "pe":
+        return False
+    return debug_info_evidence(snap).basic
+
+
 def demote_erased_extent_drift(
     changes: list[Change],
     old: AbiSnapshot,
@@ -565,15 +587,14 @@ def demote_erased_extent_drift(
 
     *restored* is whether a generation between the two declared it restores
     erased bounds. The stale operand is the older generation's, and only one
-    whose types came from debug info (not headers) wrote ``T[]`` for a
-    bounded array, so a header-sourced ``T[]`` (a flexible array member)
-    against ``T[8]`` is never demoted.
+    whose types came from DWARF (not headers, not PDB) wrote ``T[]`` for a
+    bounded array, so a header- or PDB-sourced ``T[]`` (a flexible array
+    member) against ``T[8]`` is never demoted.
     """
     if not restored or old_generation == new_generation:
         return changes
     stale_is_old = old_generation < new_generation
-    stale = old if stale_is_old else new
-    if stale.from_headers:
+    if not _types_from_dwarf(old if stale_is_old else new):
         return changes
     generations = (old_generation, new_generation)
     for change in changes:

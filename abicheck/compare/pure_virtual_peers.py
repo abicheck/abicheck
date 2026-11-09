@@ -17,8 +17,8 @@
 
 A virtual that becomes ``= 0`` loses its definition and so its exported
 symbol, which takes it off the new side's export-narrowed public surface. Its
-only record there is the declaration: the header's, or since extractor
-generation 44 DWARF's in-class declaration DIE (``Function.is_pure_virtual``).
+only record there is the declaration: the header's, or DWARF's in-class
+declaration DIE (``Function.is_pure_virtual``).
 The method-qualifier detector pairs the old virtual with that declaration to
 report ``func_virtual_became_pure`` instead of reading a bare removal.
 """
@@ -26,6 +26,8 @@ report ``func_virtual_became_pure`` instead of reading a bare removal.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+
+from ..model.surface_facts import in_public_contract, is_confirmed_false
 
 if TYPE_CHECKING:
     from ..model import AbiSnapshot, Function
@@ -49,4 +51,13 @@ class PureVirtualPeers:
         if self._functions is None:
             self._functions = self._snapshot.function_map
         peer = self._functions.get(old.mangled)
-        return peer if peer is not None and peer.is_pure_virtual else None
+        # A pure declaration has no symbol, so export evidence says nothing
+        # about it; one the side explicitly places outside its public
+        # contract (an excluded header, a non-public declaration) stays out.
+        if (
+            peer is None
+            or not peer.is_pure_virtual
+            or is_confirmed_false(in_public_contract(peer))
+        ):
+            return None
+        return peer

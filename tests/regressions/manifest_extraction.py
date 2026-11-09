@@ -106,7 +106,7 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_dwarf_erased_extent_generation_drift.py",
             "tests/test_type_spelling_differential_matrix.py",
         ),
-        public_surfaces=("cli", "python-api"),
+        public_surfaces=("cli",),  # test_dwarf_array_extents runs `abicheck dump`
         axes={
             "compiler": ("gcc", "clang"),
             "packing": ("natural", "packed"),
@@ -153,7 +153,7 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_dwarf_semantic_ir.py",
             "tests/test_depth_projection_matches_shallow_dump.py",
         ),
-        public_surfaces=("cli", "python-api"),
+        public_surfaces=(),  # the seed tests call dump/compare directly
         axes={
             "compiler": ("gcc", "clang"),
             "edit": (
@@ -161,6 +161,7 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
                 "const_add",
                 "volatile_drop",
                 "static_to_member",
+                "return_retype",
                 "became_pure",
                 "unchanged",
             ),

@@ -119,6 +119,10 @@ def test_dwarf_records_each_method_with_the_header_lane_qualifiers(
         "_ZN3lib5Shape5countEv": (False, False, True, False),
     }
     assert {k: from_dwarf.get(k) for k in expected} == expected
+    # Every method returns ``int``: read from the declaration when the
+    # out-of-line definition does not repeat ``DW_AT_type``.
+    returns = {f.mangled: f.return_type for f in _dwarf(so).declarations.functions}
+    assert {k: returns.get(k) for k in expected} == dict.fromkeys(expected, "int")
     # castxml records no method ``volatile`` (the mangling's ``V`` and DWARF
     # do), so the header lane is the oracle for the other three facts only.
     assert {k: _without_volatile(from_headers.get(k)) for k in expected} == {
@@ -158,6 +162,20 @@ _CV_EDITS = [
         ("static int count();", "int count();"),
         ("", ""),
         ChangeKind.FUNC_STATIC_CHANGED,
+    ),
+    # The definition leaves ``DW_AT_type`` on the in-class declaration, and
+    # the Itanium mangling does not encode a member's return type.
+    (
+        "return_retype",
+        ("int plain();", "long plain();"),
+        ("int Shape::plain()", "long Shape::plain()"),
+        ChangeKind.FUNC_RETURN_CHANGED,
+    ),
+    (
+        "static_return_retype",
+        ("static int count();", "static double count();"),
+        ("int Shape::count()", "double Shape::count()"),
+        ChangeKind.FUNC_RETURN_CHANGED,
     ),
 ]
 

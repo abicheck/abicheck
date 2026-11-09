@@ -609,12 +609,12 @@ class _DwarfSnapshotBuilder:
         of a member definition; *die* itself otherwise).
         """
         attrs = decl if decl is not None else die
-        # Return type
-        ret_type = "void"
-        ret_ptr_depth = 0
-        if "DW_AT_type" in die.attributes:
-            ret_type, _ = self._resolve_type(die, CU)
-            ret_ptr_depth = self._count_pointer_depth(die, CU)
+        # A definition usually leaves the return type on its declaration.
+        typed = die if "DW_AT_type" in die.attributes else attrs
+        ret_type, ret_ptr_depth = "void", 0
+        if "DW_AT_type" in typed.attributes:
+            ret_type, _ = self._resolve_type(typed, CU)
+            ret_ptr_depth = self._count_pointer_depth(typed, CU)
         self._referenced_type_names.add(ret_type)
 
         # Parameters
@@ -648,7 +648,7 @@ class _DwarfSnapshotBuilder:
             name=qualified_name if scope else name,
             mangled=mangled,
             return_type=ret_type,
-            return_type_abi_fact=_type_abi_fact(die, CU),
+            return_type_abi_fact=_type_abi_fact(typed, CU),
             params=params,
             visibility=visibility,
             **debug_info_surface_facts(exported=exported),

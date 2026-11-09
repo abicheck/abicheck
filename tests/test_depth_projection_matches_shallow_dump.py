@@ -323,15 +323,37 @@ class Run:
     out_of_surface: set[Finding]
     declared: tuple[frozenset[str], frozenset[str]]
     types: TypeScopes
+    #: Each symbol a grouping finding (:data:`GROUPING_KINDS`) names.
+    grouped: frozenset[str] = frozenset()
+    #: Each finding folded into a root type's change, with that root.
+    folded: tuple[tuple[Finding, str], ...] = ()
 
     @classmethod
     def of(cls, old: AbiSnapshot, new: AbiSnapshot) -> Run:
-        findings, out_of_surface = _reported(old, new)
+        result = compare(old, new)
         return cls(
-            findings,
-            out_of_surface,
+            {(c.kind.value, c.symbol) for c in result.changes},
+            {(c.kind.value, c.symbol) for c in result.out_of_surface_changes},
             (_declared(old), _declared(new)),
             (_type_names(old), _type_names(new)),
+            frozenset(
+                s
+                for c in result.changes
+                if c.kind.value in GROUPING_KINDS
+                for s in c.affected_symbols or ()
+            ),
+            tuple(
+                ((c.kind.value, c.symbol), c.caused_by_type)
+                for c in result.redundant_changes
+                if c.caused_by_type
+            ),
+        )
+
+    def folded_under_typedef(self, finding: Finding) -> bool:
+        """The run folded *finding* into a typedef retarget it reports."""
+        return any(
+            folded == finding and ("typedef_base_changed", root) in self.findings
+            for folded, root in self.folded
         )
 
     def declares_nowhere(self, symbol: str) -> bool:
@@ -416,18 +438,14 @@ def _projected_only_reason(finding: Finding, projected: Run, oracle: Run) -> str
         return ONLY_PROJECTED[kind]
     if finding in oracle.out_of_surface:
         return _SURFACE_SCOPE
-    if kind == "struct_field_type_changed" and any(
-        k == "typedef_base_changed" for k, _ in oracle.findings
-    ):
+    if kind == "struct_field_type_changed" and oracle.folded_under_typedef(finding):
         return _TYPEDEF_ROOT
     if kind in PAIRED_REMOVAL_READINGS and any(
         (removal, sym) in oracle.findings
         for removal in ("func_removed", "func_removed_elf_only")
     ):
         return _DEMANGLED_PAIRING
-    if kind in {"func_removed", "func_removed_elf_only"} and any(
-        k in GROUPING_KINDS for k, _ in oracle.findings
-    ):
+    if kind in {"func_removed", "func_removed_elf_only"} and sym in oracle.grouped:
         return _GROUPED_REMOVALS
     if kind in SYMBOL_PRESENCE_KINDS and oracle.declares_nowhere(sym):
         return _ELF_ONLY_INVENTORY

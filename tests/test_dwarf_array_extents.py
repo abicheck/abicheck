@@ -47,7 +47,9 @@ def _attr(value: object, form: str = "DW_FORM_data1") -> SimpleNamespace:
 def _die(tag: str, attrs: dict[str, object], children: tuple = ()) -> SimpleNamespace:
     return SimpleNamespace(
         tag=tag,
-        attributes={k: _attr(v) for k, v in attrs.items()},
+        attributes={
+            k: _attr(*v) if isinstance(v, tuple) else _attr(v) for k, v in attrs.items()
+        },
         iter_children=lambda: iter(children),
     )
 
@@ -83,16 +85,69 @@ _UNIT_CASES = [
     ),
     ("flexible_member", _array(_sub()), ("char", 1), "char[]", 0),
     ("zero_length_count", _array(_sub(count=0)), ("double", 8), "double[0]", 0),
+    # GCC writes ``T[0]`` as ``upper = -1`` in the form's own width; the same
+    # value in a wider form is a real bound.
     (
-        "zero_length_all_ones_bound",
-        _array(_sub(upper_bound=0xFFFFFFFF)),
+        "zero_length_all_ones_data4",
+        _array(_sub(upper_bound=(0xFFFFFFFF, "DW_FORM_data4"))),
         ("double", 8),
         "double[0]",
         0,
     ),
     (
+        "zero_length_all_ones_data8",
+        _array(_sub(upper_bound=(0xFFFFFFFFFFFFFFFF, "DW_FORM_data8"))),
+        ("double", 8),
+        "double[0]",
+        0,
+    ),
+    (
+        "zero_length_all_ones_data1",
+        _array(_sub(upper_bound=(0xFF, "DW_FORM_data1"))),
+        ("char", 1),
+        "char[0]",
+        0,
+    ),
+    (
+        "zero_length_minus_one_sdata",
+        _array(_sub(upper_bound=(-1, "DW_FORM_sdata"))),
+        ("char", 1),
+        "char[0]",
+        0,
+    ),
+    (
+        "huge_bound_in_a_wider_form",
+        _array(_sub(upper_bound=(0xFFFFFFFF, "DW_FORM_data8"))),
+        ("char", 1),
+        "char[4294967296]",
+        4294967296,
+    ),
+    (
         "vla_expression_bound",
-        _array(_sub(upper_bound=[0x91, 0x68])),
+        _array(_sub(upper_bound=([0x91, 0x68], "DW_FORM_exprloc"))),
+        ("int", 4),
+        "int[]",
+        0,
+    ),
+    # A reference-valued bound decodes as an integer DIE offset; it names a
+    # variable, not a count.
+    (
+        "vla_reference_bound",
+        _array(_sub(upper_bound=(0x2A, "DW_FORM_ref4"))),
+        ("int", 4),
+        "int[]",
+        0,
+    ),
+    (
+        "vla_reference_count",
+        _array(_sub(count=(0x2A, "DW_FORM_ref4"))),
+        ("int", 4),
+        "int[]",
+        0,
+    ),
+    (
+        "reference_lower_bound",
+        _array(_sub(lower_bound=(0x2A, "DW_FORM_ref4"), upper_bound=4)),
         ("int", 4),
         "int[]",
         0,
@@ -104,6 +159,17 @@ _UNIT_CASES = [
         "int[3]",
         12,
     ),
+    # An array DIE whose element is another array DIE: the element's bounds
+    # are the inner dimensions, so they follow this DIE's own.
+    ("nested_array_die", _array(_sub(count=2)), ("int[3]", 12), "int[2][3]", 24),
+    (
+        "nested_twice",
+        _array(_sub(count=2)),
+        ("int[3][4]", 48),
+        "int[2][3][4]",
+        96,
+    ),
+    ("nested_unbounded_outer", _array(_sub()), ("int[3]", 12), "int[][3]", 0),
     ("no_subrange", _array(), ("int", 4), "int[]", 0),
     ("unknown_element_size", _array(_sub(count=3)), ("T", 0), "T[3]", 0),
 ]
@@ -191,8 +257,9 @@ def _clang_header_spellings(work: Path) -> dict[str, str]:
         text=True,
         env={**os.environ, "ABICHECK_AST_FRONTEND": "clang"},
     )
-    if proc.returncode != 0:
-        pytest.skip(f"clang header frontend unavailable: {proc.stderr[-400:]}")
+    # ``_need("clang")`` is the capability check: a dump that fails with
+    # clang present is a failure, not a missing tool.
+    assert proc.returncode == 0, proc.stderr[-2000:]
     snap = load_snapshot(out)
     rec = next(t for t in snap.declarations.types if t.name == "S")
     return {f.name: f.type.replace("struct ", "") for f in rec.fields}
