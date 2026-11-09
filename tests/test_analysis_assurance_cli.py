@@ -59,16 +59,20 @@ class TestAnalysisAssuranceCliIntegration:
         assert res.exit_code == 0, res.output
 
     def test_flag_omitted_never_changes_the_exit_code(self, tmp_path: Path) -> None:
-        """A run whose status is not 'complete' (the minimal ELF-only pair)
-        must exit 0 exactly as it always did when the flag isn't passed --
-        purely additive."""
+        """A run whose status is not 'complete' (the minimal ELF-only pair):
+        without the flag the assurance axis contributes nothing -- purely
+        additive. The pair still exits 1, but through ADR-090's separate
+        axis (a NO_CHANGE claim with no type-level evidence), never through
+        this one."""
         res = compare_cli(tmp_path, elf_only_pair())
-        assert res.exit_code == 0, res.output
+        assert res.exit_code == 1, res.output
         payload_res = compare_cli(tmp_path, elf_only_pair(), "-o", "json=-")
         payload = json.loads(payload_res.stdout[payload_res.stdout.index("{") :])
         # Sanity: this fixture really is a non-"complete" case, so the next
         # assertion (flag raises it to 1) is actually testing something.
         assert payload["analysis_assurance"]["status"] != "complete"
+        assert payload["exit"]["analysis_assurance_contribution"] == 0
+        assert payload["exit"]["reasons"] == ["unconfirmed_compatibility"]
 
     def test_json_report_persists_the_exit_contribution_for_aggregate(
         self, tmp_path: Path
@@ -196,10 +200,13 @@ class TestScopedExitFloorAppliedBeforeRendering:
         doc = json.loads(out[out.index("{") :])
         props = doc["runs"][0]["properties"]
         scoped_gate = props["scopedGate"]
-        # Raw consumer scope; exitCode follows the full-library gate (0).
+        # Raw consumer scope. exitCode follows the full-library gate, which
+        # folds ADR-090's UNCONFIRMED floor (this ELF-only pair has no
+        # type-level evidence) exactly as the process does -- never the
+        # consumer scope.
         assert scoped_gate["gateExitCode"] == 0
         assert scoped_gate["scopedExitCode"] == 0
-        assert doc["runs"][0]["invocations"][0]["exitCode"] == 0
+        assert doc["runs"][0]["invocations"][0]["exitCode"] == 1
 
     def test_junit_gate_exit_code_is_the_consumer_scope_alone(
         self, tmp_path: Path
@@ -252,7 +259,8 @@ class TestScopedExitFloorAppliedBeforeRendering:
 
     def test_flag_omitted_scoped_exit_code_still_zero(self, tmp_path: Path) -> None:
         """Sanity: without the flag, the scoped gate stays purely additive --
-        same fixture, same scoping, no floor applied."""
+        same fixture, same scoping, no floor applied. ADR-090's separate
+        UNCONFIRMED axis is set to ``warn`` so only the axis under test acts."""
         old_p, new_p = self._pair(tmp_path)
         res = CliRunner().invoke(
             main,
@@ -262,6 +270,8 @@ class TestScopedExitFloorAppliedBeforeRendering:
                 str(new_p),
                 "--set",
                 'consumers.required_symbols=["_Z5pub_av"]',
+                "--set",
+                "assurance.unconfirmed=warn",
                 "-o",
                 "sarif=-",
             ],

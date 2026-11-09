@@ -465,8 +465,12 @@ class TestNativeCliComparePath:
 
     def test_depth_binary_hides_the_header_only_break(self, tmp_path: Path) -> None:
         old_path, new_path = self._write_pair(tmp_path)
-        code, _ = _invoke("compare", str(old_path), str(new_path), "--depth", "binary")
-        assert code == 0
+        code, out = _invoke(
+            "compare", str(old_path), str(new_path), "--depth", "binary"
+        )
+        # Break hidden (no exit 2); the claim left is ADR-090 UNCONFIRMED.
+        assert code == 1
+        assert "Compatibility: UNCONFIRMED" in out
 
     def test_depth_headers_still_reports_it(self, tmp_path: Path) -> None:
         old_path, new_path = self._write_pair(tmp_path)
@@ -782,7 +786,8 @@ class TestOutOfBandPackCapping:
         code, out = self._invoke_with_pack(
             old_path, new_path, old_pack, new_pack, "binary"
         )
-        assert code == 0
+        # No pack finding gates; binary depth leaves ADR-090 UNCONFIRMED (1).
+        assert code == 1
         assert "fno-rtti" not in out.lower()
         assert "foo" not in out.lower()
 

@@ -34,13 +34,16 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from ..diff_symbols_renames import find_prefix_rename_pairs
+from ..elf_symbol_filter import is_abi_relevant_elf_symbol
 from ..model.binary_naming import strip_vendor_hash
+from ..model.export_entity_name import entity_name_components
 from ..model.name_heuristics import (
     NameHeuristicEffect,
     StructuralFact,
     register_name_heuristic,
     register_severity_raising_heuristic,
 )
+from ..name_classification import is_stdlib_local_name_symbol
 from .internal_namespaces import is_internal_type
 from .template_surface import strip_template_args as _strip_template_args
 
@@ -72,16 +75,82 @@ def _looks_internal(name: str) -> bool:
     return any(pat in lower for pat in _INTERNAL_NAME_PATTERNS)
 
 
+def own_declared_name(symbol: str) -> str:
+    """The name *symbol* declares for itself, without what it merely mentions.
+
+    An Itanium-mangled symbol spells its whole signature: parameter types,
+    template arguments, ABI tags. ``greet(std::string const&)`` mangles to
+    ``_Z5greetRKNSt7__cxx1112basic_stringI...`` -- the ``__`` of libstdc++'s
+    ``__cxx11`` inline namespace belongs to a *parameter's* type, not to
+    ``greet``. A name heuristic must read only the entity's own scope
+    components (``ns::Class::method``), or every public function taking a
+    ``std::string`` (or a ``detail::`` type) reads as an internal helper.
+
+    The components come from the shared structural walker
+    (:func:`~abicheck.model.export_entity_name.entity_name_components`);
+    synthesized ones (``{ctor}``, ``{op:..}``, ``{subst}``) are dropped. A
+    mangling it does not model makes no claim (the empty name), never a
+    whole-string guess. A plain (C) symbol is its own name.
+    """
+    if not symbol.startswith("_Z"):
+        return symbol
+    if symbol.startswith("_ZZ"):
+        # A local entity (``_ZZ<enclosing encoding>E<entity>``): the enclosing
+        # function's own name scopes it, so a local class of
+        # ``mylib::detail::run()`` stays in ``detail``. The local entity's own
+        # name follows the enclosing *parameters*, which are not read here.
+        return own_declared_name("_Z" + symbol[3:])
+    entity = entity_name_components(symbol)
+    if entity is None:
+        return ""
+    if entity.components == ("{op:li}",):
+        # An unscoped literal operator ``operator""_sfx`` (``_Zli<source-name>``):
+        # the walker stops at the operator; its suffix is the declared name.
+        m = _LITERAL_SUFFIX.match(symbol)
+        return f'operator""{symbol[m.end() : m.end() + int(m.group(1))]}' if m else ""
+    return "::".join(c for c in entity.components if not c.startswith("{"))
+
+
+_LITERAL_SUFFIX = re.compile(r"_Zli(\d+)")
+
+
+def _looks_internal_symbol(symbol: str) -> bool:
+    """:func:`_looks_internal` over the symbol's own declared name."""
+    return _looks_internal(own_declared_name(symbol))
+
+
+def internal_looking_export(name: str, filter_transitive_runtime_symbols: bool) -> bool:
+    """Whether the export *name* is the library's own and named like an internal.
+
+    A transitive runtime symbol is not the library's own: a weak
+    ``std::``/``__gnu_cxx::`` instantiation, and a local entity of a runtime
+    function (``basic_string::_M_construct()::_Guard``) alike -- unless the
+    inspected library is the runtime itself (*filter_transitive_runtime_symbols*
+    false).
+    """
+    if not is_abi_relevant_elf_symbol(
+        name, filter_transitive_runtime_symbols=filter_transitive_runtime_symbols
+    ):
+        return False
+    if filter_transitive_runtime_symbols and is_stdlib_local_name_symbol(name):
+        return False
+    return ELF_INTERNAL_SYMBOL_NAME.matches(name)
+
+
 #: Registered name heuristic (design-hardening Phase 5): an internal-looking
 #: export name only *routes to review* -- it raises the informational,
-#: COMPATIBLE ``visibility_leak`` on the OLD library, never a break.
+#: COMPATIBLE ``visibility_leak`` on the OLD library, never a break. It reads
+#: the symbol's own declared name (:func:`own_declared_name`), never the
+#: parameter or template-argument types its mangling also spells.
 ELF_INTERNAL_SYMBOL_NAME = register_name_heuristic(
     "elf_internal_symbol_name",
     owner=__name__,
     effect=NameHeuristicEffect.ROUTE_TO_REVIEW,
     description="an exported ELF-only symbol named *_impl/detail/__... looks internal",
-    matcher=_looks_internal,
+    matcher=_looks_internal_symbol,
+    helpers=(_looks_internal, own_declared_name),
     vocabularies=("_INTERNAL_NAME_PATTERNS",),
+    patterns=(_LITERAL_SUFFIX,),
 )
 
 

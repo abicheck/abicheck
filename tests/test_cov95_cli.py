@@ -2965,7 +2965,7 @@ class TestUsedByScopingWithSnapshotInputs:
                 symbol_coverage=100.0,
             ),
         )
-        result = _invoke("compare", str(old), str(new), "--used-by", str(app))
+        result = _invoke("compare", str(old), str(new), "--used-by", str(app), "--set", "assurance.unconfirmed=warn")  # fmt: skip  # ADR-090 axis off: ELF-only snapshots
         assert result.exit_code == 0
         assert "requires OLD/NEW to be real library binaries" not in (
             result.output or ""

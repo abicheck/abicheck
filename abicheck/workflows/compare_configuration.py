@@ -396,6 +396,7 @@ class ResolvedCompareConfig:
     release_support_promise: str = "off"
     resource_limits_max_bundle_facts_decode_nodes: int | None = None
     require_complete_analysis: bool = False  # former --require-complete-analysis
+    unconfirmed_mode: str = "fail"  # ADR-090 D4: assurance.unconfirmed
     #: ADR-020b §4.1 / ADR-068 D5: the former ``compare --env-matrix FILE``,
     #: now the ``deployment:`` config key -- no CLI override. ``None`` when
     #: unset.
@@ -516,6 +517,7 @@ def resolve_compare_config(
     )
     res_limit_nodes = cfg.resource_limits_max_bundle_facts_decode_nodes if cfg else None
     require_complete_analysis = bool(cfg.assurance_require_complete) if cfg else False
+    unconfirmed_mode = (cfg.assurance_unconfirmed if cfg else None) or "fail"
     deployment = cfg.deployment if cfg else None
 
     return ResolvedCompareConfig(
@@ -548,6 +550,7 @@ def resolve_compare_config(
         release_include_private_dso=release_include_private_dso,
         resource_limits_max_bundle_facts_decode_nodes=res_limit_nodes,
         require_complete_analysis=require_complete_analysis,
+        unconfirmed_mode=unconfirmed_mode,
         deployment=deployment,
     )
 

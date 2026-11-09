@@ -55,6 +55,7 @@ from abicheck.workflows.release_scope import (
     build_stored_baseline_scope_record,
     bundle_analysis_members,
 )
+from tests._unconfirmed import passes_but_for_unconfirmed
 
 # ---------------------------------------------------------------------------
 # The release manifest is enforced over the retained members only (D2)
@@ -845,7 +846,9 @@ class TestNarrowingOutranksAnUnrelatedOldFailure:
         assert scope["unchecked"] == []
         assert doc["run_outcome"]["scope"] == "complete"
         assert doc["exit"]["incomplete_scope_contribution"] == 0
-        assert code == 0
+        # Built without -g and compared without headers: the scope axis adds
+        # nothing, and ADR-090's UNCONFIRMED axis alone may raise 0 -> 1.
+        assert passes_but_for_unconfirmed(code, doc), doc["exit"]
 
 
 class TestStoredLiveDriverSurvivesAMemberExtractionFailure:

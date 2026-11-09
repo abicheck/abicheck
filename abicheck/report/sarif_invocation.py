@@ -65,8 +65,14 @@ def compute_sarif_invocation_exit(
     """
     from ..policy.contract_coverage_exit import coverage_exit_floor
     from ..policy.severity import Verdict
+    from ..policy.unconfirmed_compatibility import (
+        report_compatibility,
+        unconfirmed_exit_contribution,
+    )
 
     coverage_floor = coverage_exit_floor(result)
+    unconfirmed_floor = unconfirmed_exit_contribution(result)
+    compatibility = report_compatibility(result)
     base_exit_code = (
         severity_gate["exitCode"]
         if severity_gate is not None
@@ -79,9 +85,9 @@ def compute_sarif_invocation_exit(
         )
     )
     description = (
-        f"{result.verdict.value} (severity-gated)"
+        f"{compatibility} (severity-gated)"
         if severity_gate is not None
-        else result.verdict.value
+        else compatibility
     )
     if scoped_gate is not None:
         # Informational only -- appended, never substituted (workstream D-S1).
@@ -93,6 +99,78 @@ def compute_sarif_invocation_exit(
         # Names the axis rather than only moving the number, so a reader of
         # the artifact alone can tell a coverage floor from a gate decision.
         description += " + incomplete contract coverage (exit 1)"
+    if unconfirmed_floor:
+        # ADR-090 D3: the same `max` fold the process applies.
+        description += " + no type-level evidence on a compared side (exit 1)"
     return SarifInvocationExit(
-        exit_code=max(base_exit_code, coverage_floor), description=description
+        exit_code=max(base_exit_code, coverage_floor, unconfirmed_floor),
+        description=description,
     )
+
+
+def run_notifications(result: DiffResult) -> dict[str, object]:
+    """The invocation's ``toolExecutionNotifications``, or ``{}`` for none.
+
+    Two run-level conditions are notifications rather than ``results[]``
+    entries, because each is the tool saying the evidence needed to decide
+    was missing, not another finding a consumer would count:
+
+    * contract coverage (ADR-049 plan Section 6.1): one ``error`` entry per
+      coverage failure. Present, possibly empty, whenever the run built a
+      contract context -- "checked, nothing missing" and "never checked"
+      differ -- and absent otherwise. ``level: "error"`` regardless of what
+      the ledger contributed: it describes the evidence, not the gate.
+    * ADR-090 ``UNCONFIRMED``: one ``warning`` entry (maintainer answer 5:
+      ``note`` would repeat the clean-looking mistake) naming the sides
+      without type-level evidence and the remedies.
+
+    ``executionSuccessful`` stays untouched by either (the tool ran to
+    completion); the invocation's ``exitCode`` folds both axes in
+    :func:`compute_sarif_invocation_exit`.
+    """
+    from ..policy.coverage_ledger import coverage_failures_for_context
+    from ..policy.unconfirmed_compatibility import (
+        unconfirmed_block,
+        unconfirmed_summary,
+    )
+
+    notifications: list[dict[str, object]] | None = None
+    ctx = getattr(result, "contract_context", None)
+    if ctx is not None:
+        notifications = [
+            {
+                "level": "error",
+                "message": {
+                    "text": (
+                        f"contract coverage: {f.provider} ({f.side}) could not "
+                        f"close the {f.mode} domain ({f.reason})"
+                    )
+                },
+                "descriptor": {"id": f"abicheck.coverage.{f.reason}"},
+                "properties": {
+                    "provider": f.provider,
+                    "side": f.side,
+                    "recordId": f.record_id,
+                    "contractMode": f.mode,
+                    # Stated per notification so a consumer reading one in
+                    # isolation knows it cannot be waived by a suppression
+                    # rule (plan Section 6.2).
+                    "suppressible": False,
+                },
+            }
+            for f in coverage_failures_for_context(ctx)
+        ]
+    block = unconfirmed_block(result)
+    if block is not None:
+        notifications = [
+            *(notifications or []),
+            {
+                "level": "warning",
+                "message": {"text": unconfirmed_summary(result)},
+                "descriptor": {"id": "abicheck.unconfirmed_compatibility"},
+                "properties": block,
+            },
+        ]
+    if notifications is None:
+        return {}
+    return {"toolExecutionNotifications": notifications}

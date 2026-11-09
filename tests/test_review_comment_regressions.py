@@ -373,6 +373,39 @@ def test_special_cli_runner_accepts_semantic_breaking_exit_code(monkeypatch) -> 
     assert result["returncode"] == 4
 
 
+@pytest.mark.parametrize(
+    ("rc", "reasons", "observed", "passes"),
+    [
+        (1, ["unconfirmed_compatibility"], "COMPATIBLE_WITH_RISK", True),
+        (0, ["unconfirmed_compatibility"], "COMPATIBLE_WITH_RISK", False),
+        (1, [], "COMPATIBLE_WITH_RISK", False),
+        (1, ["unconfirmed_compatibility"], "NO_CHANGE", False),
+    ],
+)
+def test_special_cli_runner_judges_an_unconfirmed_run_by_its_observed_verdict(
+    monkeypatch, rc: int, reasons: list[str], observed: str, passes: bool
+) -> None:
+    """ADR-090: ground truth is the observed verdict; UNCONFIRMED adds exit 1
+    through its own named axis, and nothing else may differ."""
+    special = _load_validation_script("run_special_cli_examples.py")
+    payload = {
+        "verdict": "UNCONFIRMED",
+        "unconfirmed": {"observed_verdict": observed, "mode": "fail"},
+        "exit": {"code": rc, "reasons": reasons},
+        "changes": [{"kind": "kabi_crc_changed"}],
+    }
+    execution = {"returncode": rc, "payload": payload, "message": ""}
+    execution |= {"stdout": "", "stderr": "", "seconds": 0.1}
+    monkeypatch.setattr(special, "_run_json_command", lambda *_a, **_k: execution)
+    result = special._run_compare_case(
+        "case175_kabi_crc_changed",
+        special.COMPARE_CASES["case175_kabi_crc_changed"],
+        {"expected": "COMPATIBLE_WITH_RISK", "expected_kinds": ["kabi_crc_changed"]},
+        10,
+    )
+    assert (result["status"] == "PASS") is passes, result
+
+
 def test_python_case_setup_timeout_is_a_failed_case_not_a_crash(
     monkeypatch, tmp_path: Path
 ) -> None:

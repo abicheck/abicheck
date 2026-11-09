@@ -39,6 +39,7 @@ TYPED_OVERRIDE_CHANNELS: tuple[tuple[str, str, str], ...] = (
         "require_complete_analysis",
         "require_complete_analysis",
     ),
+    ("assurance.unconfirmed", "unconfirmed", "unconfirmed_mode"),  # ADR-090 D4
     ("debug.format", "debug_format", "debug_format"),
     ("debug.dwarf_only", "dwarf_only", "dwarf_only"),
     ("debug.debuginfod", "debuginfod", "debuginfod"),

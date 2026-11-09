@@ -487,7 +487,7 @@
     },
     {
       "path": "abicheck/diff_platform_elf_dynamic.py",
-      "baseline_lines": 1016,
+      "baseline_lines": 1012,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -652,7 +652,7 @@
     },
     {
       "path": "abicheck/junit_report.py",
-      "baseline_lines": 1167,
+      "baseline_lines": 1131,
       "target": "report",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -663,7 +663,7 @@
     },
     {
       "path": "abicheck/name_classification.py",
-      "baseline_lines": 1255,
+      "baseline_lines": 1252,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -740,7 +740,7 @@
     },
     {
       "path": "abicheck/sarif.py",
-      "baseline_lines": 1247,
+      "baseline_lines": 1203,
       "target": "report",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1433,7 +1433,7 @@
     },
     {
       "path": "tests/test_environment_drift.py",
-      "baseline_lines": 1848,
+      "baseline_lines": 1847,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",

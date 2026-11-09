@@ -1727,6 +1727,11 @@
    "default": "None"
   },
   {
+   "id": "assurance.unconfirmed",
+   "kind": "str",
+   "default": "None"
+  },
+  {
    "id": "performance.profile",
    "kind": "str",
    "default": "None"
@@ -5526,6 +5531,17 @@
    "default": "False"
   },
   {
+   "id": "CompareRequest.unconfirmed",
+   "owner": "CompareRequest",
+   "name": "unconfirmed",
+   "annotation": "Literal['fail', 'warn']",
+   "choices": [
+    "fail",
+    "warn"
+   ],
+   "default": "'fail'"
+  },
+  {
    "id": "CompareRequest.changed_paths",
    "owner": "CompareRequest",
    "name": "changed_paths",
@@ -6212,6 +6228,17 @@
    "annotation": "str",
    "choices": null,
    "default": "''"
+  },
+  {
+   "id": "run_compare(unconfirmed)",
+   "owner": "run_compare",
+   "name": "unconfirmed",
+   "annotation": "Literal['fail', 'warn']",
+   "choices": [
+    "fail",
+    "warn"
+   ],
+   "default": "'fail'"
   },
   {
    "id": "run_dump(path)",

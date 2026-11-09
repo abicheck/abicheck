@@ -1,11 +1,15 @@
 """Execution oracle: what real consumers do when the library changes under them.
 
 For a cell ``(op, seed, config)`` with old library ``old`` and new library
-``new`` (both ``libedit.so``, same SONAME):
+``new`` (both ``libedit.so``, same SONAME, built once per ``config.build_id``),
+steps (1) and (3) run once per consumer of ``config.consumer_set`` (its own
+toolchain, standard and flags) against that one library pair, and each
+(build, consumer) pair is reported as a ``PairTruth``; a pair the cell marks
+infeasible or unavailable is reported with its reason and never runs:
 
 1. **Binary truth.** Every consumer shape (``_edit_corpus_consumers``) is
-   compiled against the *old* header with the consumer toolchain and flags,
-   linked against ``old``, and run with ``LD_LIBRARY_PATH`` pointing at
+   compiled against the *old* header with the consumer's toolchain, standard
+   and flags, linked against ``old``, and run with ``LD_LIBRARY_PATH`` pointing at
    ``old`` (twice: a shape whose two old runs differ is nondeterministic and
    is an oracle error) and then at ``new``, with ``LD_BIND_NOW=1`` so a
    missing symbol fails at load. A different exit status, signal, stdout or
@@ -31,12 +35,13 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from tests._edit_corpus_config import Config, Flags
+from tests._edit_corpus_config import Config, Flags, ResolvedConsumer
 from tests._edit_corpus_consumers import CONSUMERS
-from tests._edit_corpus_expect import ExecTruth
+from tests._edit_corpus_expect import ExecTruth, PairTruth
 from tests._edit_corpus_harness import Built, CompileError, compile_cmd
 from tests._edit_corpus_seeds import RoleText, Seed
 from tests._edit_corpus_toolchains import compiler_crashed, execution_unavailable
@@ -105,7 +110,7 @@ class ConsumerSet:
 
 
 def build_consumers(
-    seed: Seed, config: Config, old: Built, out_dir: Path
+    seed: Seed, consumer: ResolvedConsumer, old: Built, out_dir: Path
 ) -> ConsumerSet:
     """Compile each shape against the old header and link it to the old library."""
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -115,7 +120,7 @@ def build_consumers(
         src = out_dir / f"{shape}.{_ext(seed.lang)}"
         src.write_text(text, encoding="utf-8")
         exe = out_dir / shape
-        cmd = compile_cmd(config.consumer_tc, config, config.consumer_fl, debug=False)
+        cmd = compile_cmd(consumer.toolchain, consumer.std, consumer.flags, debug=False)
         cmd += [
             "-w",
             "-I",
@@ -130,7 +135,8 @@ def build_consumers(
         proc = _compile(cmd, f"consumer {shape}")
         if proc.returncode != 0:
             raise CompileError(
-                f"consumer {shape} does not build against the OLD header: {' '.join(cmd)}\n{proc.stderr}"
+                f"consumer {shape} [{consumer.id}] does not build against the OLD header: "
+                f"{' '.join(cmd)}\n{proc.stderr}"
             )
         first, second = _run(exe, old.dir), _run(exe, old.dir)
         if first.key() != second.key():
@@ -217,7 +223,7 @@ def run_probe(
     out.parent.mkdir(parents=True, exist_ok=True)
     src = out.with_suffix(f".{_ext(seed.lang)}")
     src.write_text(_probe_source(probe_expressions(roles, seed.lang)), encoding="utf-8")
-    cmd = compile_cmd(config.producer, config, flags, debug=False)
+    cmd = compile_cmd(config.producer, config.std, flags, debug=False)
     cmd += ["-w", "-I", str(header_dir), "-o", str(out), str(src)]
     proc = _compile(cmd, "layout probe")
     if proc.returncode != 0:
@@ -235,32 +241,50 @@ def run_probe(
 # --- the oracle ------------------------------------------------------------
 
 
+# A pair the cell decided not to run: (consumer, status, reason).
+Blocked = tuple[ResolvedConsumer, str, str]
+
+
 class ExecutionOracle:
-    """Caches old-side consumers and probes per (seed, config)."""
+    """Caches old-side consumers per (seed, build, consumer) and probes per (seed, build)."""
 
     def __init__(self, root: Path) -> None:
         self._root = root
-        self._consumers: dict[tuple[str, str], ConsumerSet] = {}
+        self._consumers: dict[tuple[str, str, str], ConsumerSet] = {}
         self._probes: dict[tuple[str, str], dict[str, str]] = {}
 
+    def _build_dir(self, seed: Seed, config: Config) -> Path:
+        return self._root / f"{seed.name}-{config.build_id}"
+
     def _old(
-        self, seed: Seed, config: Config, old: Built
+        self, seed: Seed, config: Config, old: Built, consumer: ResolvedConsumer
     ) -> tuple[ConsumerSet, dict[str, str]]:
-        key = (seed.name, config.id)
-        if key not in self._consumers or key not in self._probes:
-            base = self._root / f"{seed.name}-{config.id}"
-            consumers = build_consumers(seed, config, old, base / "consumers")
-            probe = run_probe(
-                seed,
-                config,
-                config.flags,
-                old.dir,
-                dict(seed.roles),
-                base / "probe-old",
+        ckey = (seed.name, config.build_id, consumer.id)
+        pkey = (seed.name, config.build_id)
+        base = self._build_dir(seed, config)
+        if ckey not in self._consumers or pkey not in self._probes:
+            consumers = (
+                self._consumers[ckey]
+                if ckey in self._consumers
+                else build_consumers(
+                    seed, consumer, old, base / f"consumers-{consumer.id}"
+                )
+            )
+            probe = (
+                self._probes[pkey]
+                if pkey in self._probes
+                else run_probe(
+                    seed,
+                    config,
+                    config.flags,
+                    old.dir,
+                    dict(seed.roles),
+                    base / "probe-old",
+                )
             )
             # Publish both only once both succeeded, so a failure is retried.
-            self._consumers[key], self._probes[key] = consumers, probe
-        return self._consumers[key], self._probes[key]
+            self._consumers[ckey], self._probes[pkey] = consumers, probe
+        return self._consumers[ckey], self._probes[pkey]
 
     def truth(
         self,
@@ -271,19 +295,31 @@ class ExecutionOracle:
         new_roles: dict[str, RoleText],
         new_flags: Flags,
         tag: str,
+        blocked: Sequence[Blocked] = (),
     ) -> ExecTruth:
         reason = execution_unavailable(config)
         if reason:
             return ExecTruth(available=False, reason=reason)
-        consumers, old_probe = self._old(seed, config, old)
-        signals: list[str] = []
-        binary_break = source_break = False
-        for shape, exe in consumers.exes.items():
-            got = _run(exe, new.dir)
-            want = consumers.baseline[shape]
-            if got.key() != want.key():
-                binary_break = True
-                signals.append(f"run {shape}: {_describe(want, got)}")
+        skip = {c: (status, why) for c, status, why in blocked}
+        pairs: list[PairTruth] = []
+        old_probe: dict[str, str] | None = None
+        for consumer in config.consumer_set:
+            if consumer in skip:
+                status, why = skip[consumer]
+                pairs.append(PairTruth(consumer.id, status, reason=why))
+                continue
+            consumers, old_probe = self._old(seed, config, old, consumer)
+            pairs.append(self._pair(seed, consumer, consumers, new))
+        if old_probe is None:
+            return ExecTruth(
+                available=False,
+                reason="no consumer can run against this build: "
+                + "; ".join(f"{p.consumer}: {p.reason}" for p in pairs),
+                pairs=tuple(pairs),
+            )
+        signals = [sig for p in pairs for sig in p.signals]
+        binary_break = any(p.binary_break for p in pairs)
+        source_break = any(p.source_break for p in pairs)
         roles = {**dict(seed.roles), **new_roles}
         new_probe = run_probe(
             seed,
@@ -291,23 +327,49 @@ class ExecutionOracle:
             new_flags,
             new.dir,
             roles,
-            self._root / f"{seed.name}-{config.id}" / f"probe-{tag}",
+            self._build_dir(seed, config) / f"probe-{tag}",
         )
         for k in sorted(set(old_probe) & set(new_probe)):
             if old_probe[k] != new_probe[k]:
                 binary_break = True
                 signals.append(f"layout {k}: {old_probe[k]} -> {new_probe[k]}")
+        return ExecTruth(
+            available=True,
+            binary_break=binary_break,
+            source_break=source_break,
+            signals=tuple(signals),
+            layout_only=binary_layout_only(binary_break, signals),
+            pairs=tuple(pairs),
+        )
+
+    def _pair(
+        self,
+        seed: Seed,
+        consumer: ResolvedConsumer,
+        consumers: ConsumerSet,
+        new: Built,
+    ) -> PairTruth:
+        """Run one consumer's old-header programs against *new*; recompile them on it."""
+        signals: list[str] = []
+        binary_break = source_break = False
+        tag = f"[{consumer.id}]"
+        for shape, exe in consumers.exes.items():
+            got = _run(exe, new.dir)
+            want = consumers.baseline[shape]
+            if got.key() != want.key():
+                binary_break = True
+                signals.append(f"run {shape} {tag}: {_describe(want, got)}")
         for shape, exe in consumers.exes.items():
             src = exe.with_suffix(f".{_ext(seed.lang)}")
             cmd = compile_cmd(
-                config.consumer_tc, config, config.consumer_fl, debug=False
+                consumer.toolchain, consumer.std, consumer.flags, debug=False
             )
             cmd += ["-w", "-fsyntax-only", "-I", str(new.dir), str(src)]
-            proc = _compile(cmd, f"new-header compile of {shape}")
+            proc = _compile(cmd, f"new-header compile of {shape} {tag}")
             if compiler_crashed(proc):
                 # A crashed or killed compiler says nothing about the source.
                 raise CompileError(
-                    f"new-header compile of {shape} crashed (exit {proc.returncode}): "
+                    f"new-header compile of {shape} {tag} crashed (exit {proc.returncode}): "
                     f"{' '.join(cmd)}\n--- {src.name} ---\n"
                     f"{src.read_text(encoding='utf-8')}--- stderr ---\n{proc.stderr}"
                 )
@@ -317,13 +379,15 @@ class ExecutionOracle:
                     (ln for ln in proc.stderr.splitlines() if "error" in ln),
                     proc.stderr[:120],
                 )
-                signals.append(f"source {shape}: {err.split(': ', 1)[-1].strip()}")
-        return ExecTruth(
-            available=True,
+                signals.append(
+                    f"source {shape} {tag}: {err.split(': ', 1)[-1].strip()}"
+                )
+        return PairTruth(
+            consumer.id,
+            "ran",
             binary_break=binary_break,
             source_break=source_break,
             signals=tuple(signals),
-            layout_only=binary_layout_only(binary_break, signals),
         )
 
 

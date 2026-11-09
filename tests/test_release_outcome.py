@@ -35,6 +35,7 @@ _ORDER = [
     "NO_CHANGE",
     "COMPATIBLE",
     "COMPATIBLE_WITH_RISK",
+    "UNCONFIRMED",  # ADR-090: above every claim, below every observed break
     "API_BREAK",
     "BREAKING",
     "ERROR",

@@ -43,6 +43,7 @@ import pytest
 from elftools.elf.elffile import ELFFile
 
 from tests._abicheck_subprocess import abicheck_command
+from tests._unconfirmed import observed_verdict, passes_but_for_unconfirmed
 
 pytestmark = [
     pytest.mark.integration,
@@ -295,7 +296,33 @@ def test_section_table_loss_keeps_the_export_set(
         assert dump.returncode == 0, mutation + "\n" + dump.stdout + dump.stderr
         assert _elf_facts(out) == intact_facts[name], f"{mutation}: {name} side"
 
-    proc = _compare(tmp_path / "old.so", tmp_path / "new.so")
-    assert proc.returncode == 0, mutation + "\n" + proc.stdout + proc.stderr
-    assert "COMPATIBLE" in proc.stdout, proc.stdout + proc.stderr
+    out = tmp_path / "report.json"
+    proc = subprocess.run(
+        abicheck_command(
+            "compare",
+            str(tmp_path / "old.so"),
+            str(tmp_path / "new.so"),
+            "-o",
+            f"json={out}",
+            "-o",
+            "terminal=-",
+        ),
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    report = json.loads(out.read_text(encoding="utf-8"))
+    # A lost section table also loses .debug_info, so the corrupted side has
+    # no type-level evidence: ADR-090 reports the export-set answer as
+    # UNCONFIRMED (exit 1, that axis alone) and names exactly that side.
+    assert passes_but_for_unconfirmed(proc.returncode, report), (
+        mutation + "\n" + proc.stdout + proc.stderr
+    )
+    assert observed_verdict(report) == "COMPATIBLE", proc.stdout + proc.stderr
+    # A mutation that keeps the section table keeps DWARF, and stays clean.
+    if report["verdict"] == "UNCONFIRMED":
+        expected = ["old", "new"] if side == "both" else [side]
+        assert report["unconfirmed"]["sides_without_type_evidence"] == expected
+    else:
+        assert proc.returncode == 0 and report["verdict"] == "COMPATIBLE"
     assert "Traceback" not in proc.stdout + proc.stderr

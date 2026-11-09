@@ -2,16 +2,28 @@
 
 - **PR** (``pr_cells``): a fixed, deterministic handful of cells, one per
   axis value worth guarding (each flag, each evidence level, a cross-family
-  consumer, a feature-gated standard), so a PR pays seconds, not minutes.
+  consumer, a feature-gated standard), so a PR pays seconds, not minutes;
+  plus ``pr_consumer_cells``: a breaking and a compatible edit per (build
+  family, seed) of a small pairwise array over (build family, consumer
+  family, consumer standard), each library pair checked against all of its
+  consumers, and one dual-ABI cell whose infeasible pair must be reported.
 - **nightly** (``nightly_cells``): a seeded *pairwise covering array* over
-  every axis, including the (operator, seed) cell itself: every pair of axis
-  values appears in at least one row. The seed comes from
+  every axis, including the (operator, seed) cell itself and the consumer
+  axes (toolchain, standard, flags): every pair of axis values appears in at
+  least one row. Each row's build is checked against a consumer built like
+  it *and* the drawn consumer. The seed comes from
   ``ABICHECK_EDIT_CORPUS_SEED`` (default 0), so a run is reproducible from
   its seed.
 - **weekly** (``weekly_cells``): every applicable operator under the
-  newest installed toolchain of each family, with the exotic settings the
+  newest selected toolchain of each family, with the exotic settings the
   nightly does not draw (``-m32``, newest standards, -fabi-version,
-  ``_GLIBCXX_USE_CXX11_ABI=0``, a mismatched consumer).
+  ``_GLIBCXX_USE_CXX11_ABI=0``, mismatched consumer flags) and, on the base
+  build, the full consumer cross: every selected consumer toolchain at the
+  build's, the oldest and the newest standard it accepts.
+
+Toolchains come from ``build_toolchains()`` / ``consumer_toolchains()``
+(``ABICHECK_EDIT_CORPUS_TOOLCHAIN`` / ``..._CONSUMER_TOOLCHAIN``); a selected
+name that is not installed raises at generation, before any cell runs.
 
 Tiers select cells; they never decide outcomes. A row whose toolchain is not
 installed still appears and is reported unavailable.
@@ -35,6 +47,7 @@ from tests._edit_corpus_config import (
     EVIDENCE,
     STANDARDS,
     Config,
+    Consumer,
     Flags,
     Standard,
     Toolchain,
@@ -44,8 +57,10 @@ from tests._edit_corpus_config import (
 from tests._edit_corpus_operators import OP_BY_NAME, EditOp, matrix
 from tests._edit_corpus_seeds import SEED_BY_NAME, Seed
 from tests._edit_corpus_toolchains import (
-    discover,
-    newest,
+    CONSUMER_TOOLCHAIN_ENV,
+    TOOLCHAIN_ENV,
+    build_toolchains,
+    consumer_toolchains,
     std_flag,
     std_flag_for_driver,
 )
@@ -93,8 +108,31 @@ _PR: tuple[tuple[str, str, str, dict[str, object]], ...] = (
 )
 
 
+def _newest(family: str, toolchains: Sequence[Toolchain]) -> Toolchain | None:
+    of = [t for t in toolchains if t.family == family]
+    return of[-1] if of else None
+
+
 def _toolchain(family: str) -> Toolchain | None:
-    return newest(family)
+    return _newest(family, build_toolchains())
+
+
+def _missing(family: str, role: str) -> str:
+    """Why no *role* toolchain of *family* is available: deselected or absent.
+
+    Consumers follow ``CONSUMER_TOOLCHAIN_ENV`` when it is set, else the build
+    selection (``consumer_toolchains``), so the reason names the variable
+    that actually excluded the family.
+    """
+    names = (
+        [CONSUMER_TOOLCHAIN_ENV, TOOLCHAIN_ENV]
+        if role == "consumer"
+        else [TOOLCHAIN_ENV]
+    )
+    for var in names:
+        if os.environ.get(var, "").strip():
+            return f"no selected {role} {family} toolchain ({var})"
+    return f"no {role} {family} toolchain installed"
 
 
 def pr_cells() -> list[Cell | tuple[str, str]]:
@@ -104,30 +142,135 @@ def pr_cells() -> list[Cell | tuple[str, str]]:
         seed = SEED_BY_NAME[seed_name]
         tc = _toolchain(family)
         if tc is None:
-            out.append(
-                (f"{op_name}-{seed_name}-{family}", f"no {family} toolchain installed")
-            )
+            out.append((f"{op_name}-{seed_name}-{family}", _missing(family, "build")))
             continue
         cfg = default_config(seed.lang, tc)
         for key, value in changes.items():
             if key == "std":
                 cfg = replace(cfg, std=next(s for s in STANDARDS if s.name == value))
             elif key == "consumer":
-                other = _toolchain(str(value))
+                other = _newest(str(value), consumer_toolchains())
                 if other is None:
                     out.append(
                         (
                             f"{op_name}-{seed_name}-{family}",
-                            f"no {value} consumer toolchain",
+                            _missing(str(value), "consumer"),
                         )
                     )
                     break
-                cfg = replace(cfg, consumer=other)
+                cfg = replace(cfg, consumers=(Consumer(toolchain=other),))
             else:
                 cfg = replace(cfg, **{key: value})
         else:
             out.append(Cell(OP_BY_NAME[op_name], seed, cfg))
     return out
+
+
+# --- PR tier: build x consumer pairs -----------------------------------------
+
+# seed -> (an edit that must break some consumer, one that must break none).
+_PR_CARRIERS: dict[str, tuple[str, str]] = {
+    "c_core": ("struct_append_field", "func_add"),
+    "cxx_classes": ("virtual_reorder", "enum_class_append"),
+}
+_PR_CONSUMER_FACTORS: dict[str, list[object]] = {
+    "build": ["gcc", "clang"],
+    "consumer": ["same", "other"],
+    "std": ["same", "oldest", "newest"],
+    "seed": sorted(_PR_CARRIERS),
+}
+# A cell whose second consumer is on the other side of libstdc++'s dual ABI:
+# that pair must be reported infeasible, never run and never passed.
+_PR_DUAL_ABI = ("func_param_append", "cxx_stdlib", "gcc")
+
+
+def pr_consumer_rows() -> list[dict[str, object]]:
+    """The PR tier's pairwise array over (build family, consumer family, standard, seed)."""
+    return pairwise(_PR_CONSUMER_FACTORS, seed=0)
+
+
+def consumer_std(op: EditOp, lang: str, which: str, tc: Toolchain) -> Standard | None:
+    """The *oldest*/*newest* standard of *lang* that *tc* accepts and that has
+    every feature *op*'s edited header needs; None for ``same``."""
+    if which == "same":
+        return None
+    options = [
+        s
+        for s in stds(lang)
+        if all(has_feature(s, f) for f in op.features) and std_flag(tc, s) is not None
+    ]
+    if not options:
+        return None
+    return options[0] if which == "oldest" else options[-1]
+
+
+def _pr_consumer_groups() -> dict[tuple[str, str], list[tuple[str, str]]]:
+    groups: dict[tuple[str, str], list[tuple[str, str]]] = {}
+    for row in pr_consumer_rows():
+        key = (str(row["build"]), str(row["seed"]))
+        groups.setdefault(key, []).append((str(row["consumer"]), str(row["std"])))
+    return dict(sorted(groups.items()))
+
+
+def pr_consumer_ids() -> list[str]:
+    """Stable test ids of ``pr_consumer_cells``, computed without probing a compiler."""
+    ids = [
+        f"{op}-{seed}-{family}-consumers"
+        for family, seed in _pr_consumer_groups()
+        for op in _PR_CARRIERS[seed]
+    ]
+    op_name, seed_name, family = _PR_DUAL_ABI
+    return [*ids, f"{op_name}-{seed_name}-{family}-dual-abi"]
+
+
+def pr_consumer_cells() -> list[Cell | tuple[str, str]]:
+    """One library pair per (build family, seed), checked against all its consumers."""
+    out: list[Cell | tuple[str, str]] = []
+    users = consumer_toolchains()
+    for (family, seed_name), specs in _pr_consumer_groups().items():
+        seed = SEED_BY_NAME[seed_name]
+        tc = _toolchain(family)
+        for op_name in _PR_CARRIERS[seed_name]:
+            ident = f"{op_name}-{seed_name}-{family}-consumers"
+            if tc is None:
+                out.append((ident, _missing(family, "build")))
+                continue
+            op = OP_BY_NAME[op_name]
+            consumers: list[Consumer] = [Consumer()]
+            missing = None
+            for who, which in specs:
+                fam = family if who == "same" else _other_family(family)
+                user = _newest(fam, users)
+                if user is None:
+                    missing = _missing(fam, "consumer")
+                    break
+                std = consumer_std(op, seed.lang, which, user)
+                consumers.append(
+                    Consumer(toolchain=None if user == tc else user, std=std)
+                )
+            if missing:
+                out.append((ident, missing))
+                continue
+            cfg = replace(default_config(seed.lang, tc), consumers=tuple(consumers))
+            out.append(Cell(op, seed, cfg))
+    op_name, seed_name, family = _PR_DUAL_ABI
+    tc = _toolchain(family)
+    if tc is None:
+        out.append(
+            (f"{op_name}-{seed_name}-{family}-dual-abi", _missing(family, "build"))
+        )
+    else:
+        seed = SEED_BY_NAME[seed_name]
+        cfg = replace(
+            default_config(seed.lang, tc),
+            consumers=(Consumer(), Consumer(flags=Flags(cxx11_abi=0))),
+        )
+        out.append(Cell(OP_BY_NAME[op_name], seed, cfg))
+    return out
+
+
+def _other_family(family: str) -> str:
+    return "clang" if family == "gcc" else "gcc"
 
 
 # --- pairwise covering array -----------------------------------------------
@@ -143,16 +286,23 @@ def _m32_buildable(toolchains: Sequence[Toolchain]) -> bool:
     return any(_flags_build(t, "c", Flags(bits=32)) is None for t in toolchains)
 
 
-def _factors(toolchains: Sequence[Toolchain]) -> dict[str, list[object]]:
+def _factors(
+    toolchains: Sequence[Toolchain], users: Sequence[Toolchain] | None = None
+) -> dict[str, list[object]]:
     """Every nightly axis. A value the host cannot build still appears and its
     cells are reported unavailable; -m32 is drawn only where some installed
-    toolchain links it (otherwise every such row would be skipped)."""
+    toolchain links it (otherwise every such row would be skipped).
+
+    *toolchains* build libraries, *users* (default: the same) build consumers.
+    """
     cells = [f"{op.name}@{seed.name}" for op, seed in matrix()]
     tc_ids = [t.id for t in toolchains] or ["none"]
+    user_ids = [t.id for t in (toolchains if users is None else users)] or ["none"]
     return {
         "cell": cells,
         "producer": tc_ids,
-        "consumer": ["same", *tc_ids],
+        "consumer": ["same", *user_ids],
+        "consumer_std": ["same", "oldest", "newest"],
         "std": list(range(_STD_SLOTS)),
         "opt": ["O0", "O2"],
         "visibility": ["default", "hidden"],
@@ -262,14 +412,19 @@ def _repair_rebuild(op: EditOp, flags: Flags) -> Flags:
     return replace(flags, **reset) if reset else flags  # type: ignore[arg-type]
 
 
-def row_to_cell(row: dict[str, object], toolchains: Sequence[Toolchain]) -> Cell | None:
+def row_to_cell(
+    row: dict[str, object],
+    toolchains: Sequence[Toolchain],
+    users: Sequence[Toolchain] | None = None,
+) -> Cell | None:
     op_name, seed_name = str(row["cell"]).split("@")
     op, seed = OP_BY_NAME[op_name], SEED_BY_NAME[seed_name]
     by_id = {t.id: t for t in toolchains}
     tc = by_id.get(str(row["producer"]))
     if tc is None:
         return None
-    consumer = by_id.get(str(row["consumer"]))
+    user_by_id = {t.id: t for t in (toolchains if users is None else users)}
+    consumer = user_by_id.get(str(row["consumer"]))
     if consumer == tc:
         consumer = None
     lang = seed.lang
@@ -290,12 +445,19 @@ def row_to_cell(row: dict[str, object], toolchains: Sequence[Toolchain]) -> Cell
             short_enums=not flags.short_enums,
             abi_version=flags.abi_version if (consumer or tc).family == "gcc" else None,
         )
+    drawn = Consumer(
+        toolchain=consumer,
+        std=consumer_std(
+            op, lang, str(row.get("consumer_std", "same")), consumer or tc
+        ),
+        flags=consumer_flags,
+    )
     cfg = Config(
         std=_repair_std(op, lang, int(row["std"]), tc),  # type: ignore[call-overload]
         producer=tc,
         flags=flags,
-        consumer=consumer,
-        consumer_flags=consumer_flags,
+        # The build's own consumer and the drawn one: one library pair, two checks.
+        consumers=(Consumer(), drawn) if drawn != Consumer() else (),
         evidence=str(row["evidence"]),
     )
     return Cell(op, seed, cfg)
@@ -306,9 +468,11 @@ def nightly_seed() -> int:
 
 
 def nightly_cells(seed: int | None = None) -> list[Cell]:
-    toolchains = discover()
-    rows = pairwise(_factors(toolchains), nightly_seed() if seed is None else seed)
-    cells = [row_to_cell(r, toolchains) for r in rows]
+    toolchains, users = build_toolchains(), consumer_toolchains()
+    rows = pairwise(
+        _factors(toolchains, users), nightly_seed() if seed is None else seed
+    )
+    cells = [row_to_cell(r, toolchains, users) for r in rows]
     return shard([c for c in cells if c is not None])
 
 
@@ -336,8 +500,21 @@ def enabled_tiers() -> frozenset[str]:
 # --- weekly -----------------------------------------------------------------
 
 
+def weekly_consumers(
+    op: EditOp, lang: str, tc: Toolchain, users: Sequence[Toolchain]
+) -> tuple[Consumer, ...]:
+    """The full consumer cross: every consumer toolchain at the build's standard,
+    the oldest and the newest it accepts for *op*'s edited header."""
+    out: list[Consumer] = [Consumer()]
+    for user in users:
+        for which in ("same", "oldest", "newest"):
+            std = consumer_std(op, lang, which, user)
+            out.append(Consumer(toolchain=None if user == tc else user, std=std))
+    return tuple(dict.fromkeys(out))
+
+
 def _weekly_configs(
-    lang: str, tc: Toolchain, others: Sequence[Toolchain]
+    lang: str, tc: Toolchain, consumers: tuple[Consumer, ...] = ()
 ) -> list[Config]:
     # Newest standard both the producer and the header frontend's system
     # compiler accept (castxml emulates the system cc/c++).
@@ -350,31 +527,27 @@ def _weekly_configs(
     newest_std = top[-1] if top else stds(lang)[-1]
     base = Config(std=newest_std, producer=tc)
     out = [
-        base,
+        replace(base, consumers=consumers),
         replace(base, flags=Flags(bits=32)),
         replace(base, flags=Flags(opt="O2", visibility="hidden")),
         replace(base, flags=Flags(short_enums=True, pack=1)),
-        replace(base, consumer_flags=Flags(short_enums=True)),
+        replace(base, consumers=(Consumer(flags=Flags(short_enums=True)),)),
     ]
     if tc.family == "gcc":
         out.append(replace(base, flags=Flags(abi_version=11)))
     if lang == "c++":
         out.append(replace(base, flags=Flags(cxx11_abi=0)))
-    if others:
-        out.append(replace(base, consumer=others[-1]))
     return out
 
 
 def weekly_cells() -> list[Cell]:
     cells: list[Cell] = []
-    families = sorted({t.family for t in discover()})
-    for fam in families:
-        tc = newest(fam)
+    toolchains, users = build_toolchains(), consumer_toolchains()
+    for fam in sorted({t.family for t in toolchains}):
+        tc = _newest(fam, toolchains)
         assert tc is not None
-        others = [newest(f) for f in families if f != fam]
         for op, seed in matrix():
-            for cfg in _weekly_configs(
-                seed.lang, tc, [o for o in others if o is not None]
-            ):
+            cross = weekly_consumers(op, seed.lang, tc, users)
+            for cfg in _weekly_configs(seed.lang, tc, cross):
                 cells.append(Cell(op, seed, cfg))
     return shard(cells)

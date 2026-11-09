@@ -25,6 +25,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from ..policy.evaluate import effective_verdict
+from ..policy.unconfirmed_compatibility import report_compatibility, unconfirmed_block
 from .change_json import (
     change_to_dict,
     metadata_dict,
@@ -400,6 +401,13 @@ def add_trailing_fields(
         d["scope"] = scope
 
 
+def add_unconfirmed_block(d: dict[str, object], result: DiffResult) -> None:
+    """ADR-090: the ``unconfirmed`` block, present only on a triggered run."""
+    block = unconfirmed_block(result)
+    if block is not None:
+        d["unconfirmed"] = block
+
+
 def build_json_base(result: DiffResult) -> dict[str, object]:
     """Build the opening header + summary block of the JSON report dict."""
     summary = build_summary(result)
@@ -408,8 +416,11 @@ def build_json_base(result: DiffResult) -> dict[str, object]:
         "library": result.library,
         "old_version": result.old_version,
         "new_version": result.new_version,
-        "verdict": result.verdict.value,
+        # ADR-090 D2: the report's compatibility value -- `UNCONFIRMED` when a
+        # clean verdict rests on a side with no type-level evidence.
+        "verdict": report_compatibility(result),
     }
+    add_unconfirmed_block(d, result)
     add_check_identity(d, result)
     # Library file metadata (path, SHA-256, size) — always present for schema consistency
     d["old_file"] = metadata_dict(getattr(result, "old_metadata", None))

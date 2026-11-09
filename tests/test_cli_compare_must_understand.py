@@ -157,7 +157,9 @@ def test_blocked_types_section_blocks_only_its_readers(
 
 def test_a_clean_pair_with_a_blocked_section_exits_by_policy(tmp_path: Path) -> None:
     """Nothing else changed: the verdict's exit is 0, and
-    `assurance.require_complete` raises it to 1 (exit-codes.md P0.4)."""
+    `assurance.require_complete` raises it to 1 (exit-codes.md P0.4). These
+    snapshots carry no type-level evidence, so ADR-090's separate axis is set
+    to `warn` to isolate the one under test."""
 
     def same(document: dict) -> None:
         document["sections"]["types"]["must_understand"] = ["x_layout_v2"]
@@ -168,10 +170,14 @@ def test_a_clean_pair_with_a_blocked_section_exits_by_policy(tmp_path: Path) -> 
     document = json.loads(snapshot_to_json(_snap("2", ["f"], 32)))
     same(document)
     new.write_text(json.dumps(document), encoding="utf-8")
-    plain = CliRunner().invoke(main, ["compare", str(old), str(new)])
+    plain = CliRunner().invoke(
+        main, ["compare", str(old), str(new), "--set", "assurance.unconfirmed=warn"]
+    )
     assert plain.exit_code == 0, plain.output
     cfg = tmp_path / ".abicheck.yml"
-    cfg.write_text("assurance:\n  require_complete: true\n", encoding="utf-8")
+    cfg.write_text(
+        "assurance:\n  require_complete: true\n  unconfirmed: warn\n", encoding="utf-8"
+    )
     strict = CliRunner().invoke(
         main, ["compare", str(old), str(new), "--config", str(cfg)]
     )
@@ -201,7 +207,10 @@ def test_console_summary_names_the_not_comparable_section(
     document = json.loads(snapshot_to_json(_snap("2", ["f"], 32)))
     document["sections"][section]["must_understand"] = ["x_layout_v2"]
     new.write_text(json.dumps(document), encoding="utf-8")
-    result = CliRunner().invoke(main, ["compare", str(old), str(new)])
+    # ADR-090's axis set to `warn`: this test is about the summary line.
+    result = CliRunner().invoke(
+        main, ["compare", str(old), str(new), "--set", "assurance.unconfirmed=warn"]
+    )
     assert result.exit_code == 0, result.output
     warning = next(
         line

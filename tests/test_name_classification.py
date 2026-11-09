@@ -348,18 +348,29 @@ def test_stdlib_rtti_prefixes_is_canonical_union() -> None:
         "_ZTIN9__gnu_cxx",
         "_ZTSN9__gnu_cxx",
     }
+    # Added after the merge, deliberately: libstdc++ debug-mode RTTI
+    # (``__gnu_debug::_Safe_iterator_base``), filtered like ``__gnu_cxx``'s.
+    added_debug_mode = {
+        "_ZTIN11__gnu_debug",
+        "_ZTSN11__gnu_debug",
+        "_ZTVN11__gnu_debug",
+        "_ZTTN11__gnu_debug",
+    }
     canonical = set(STDLIB_RTTI_PREFIXES)
     assert historical_elf_stdlib_rtti <= canonical
     assert historical_layout_runtime_rtti <= canonical
-    # The canonical set is exactly the union — no stray extra prefixes.
-    assert canonical == historical_elf_stdlib_rtti | historical_layout_runtime_rtti
+    # The canonical set is exactly the union plus the named addition — no
+    # stray extra prefixes.
+    assert canonical == (
+        historical_elf_stdlib_rtti | historical_layout_runtime_rtti | added_debug_mode
+    )
     # No duplicates in the tuple.
     assert len(STDLIB_RTTI_PREFIXES) == len(canonical)
 
     # The only entry layout gained from the merge is _ZTVN10__cxxabiv; for
     # elf_symbol_filter that prefix is already covered by _STDLIB_PREFIXES, so
     # the elf surface filter is unchanged.
-    only_new_for_layout = canonical - historical_layout_runtime_rtti
+    only_new_for_layout = canonical - historical_layout_runtime_rtti - added_debug_mode
     assert only_new_for_layout == (
         historical_elf_stdlib_rtti - historical_layout_runtime_rtti
     )

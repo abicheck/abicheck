@@ -367,8 +367,7 @@ class CompareRequest:
     #: ADR-049 D8 ``--pack`` manifests, resolved as the CLI resolves them
     #: (``workflows.compare_configuration``); a gate pack moves the gate too.
     pack_paths: tuple[Path, ...] = field(default=(), kw_only=True)
-    #: The ``DEFAULTED_COMPARE_PARAMETERS`` stated (the CLI derives its set
-    #: from Click's ``ParameterSource``); ``None`` reads every field as stated.
+    #: The ``DEFAULTED_COMPARE_PARAMETERS`` stated (the CLI derives its set from Click's ``ParameterSource``); ``None`` reads every field as stated.
     stated_settings: frozenset[str] | None = field(default=None, kw_only=True)
     severity_preset: str | None = field(default=None, kw_only=True)  # ADR-064
     severity_abi_breaking: str | None = field(default=None, kw_only=True)  # ADR-088
@@ -376,8 +375,9 @@ class CompareRequest:
     severity_quality_issues: str | None = field(default=None, kw_only=True)
     severity_addition: str | None = field(default=None, kw_only=True)
     require_complete_analysis: bool = field(default=False, kw_only=True)
-    #: ADR-068 / plan §3 #12 (Phase 2c): the resolved changed-path seed
-    #: (``compare --changed-path``, or ``--since`` after its ``git diff``).
+    #: ADR-090 D4 ``assurance.unconfirmed``; ``warn`` keeps the label, exit 0.
+    unconfirmed: Literal["fail", "warn"] = field(default="fail", kw_only=True)
+    #: ADR-068 / plan §3 #12 (Phase 2c): the resolved changed-path seed (``compare --changed-path``, or ``--since`` after its ``git diff``).
     #: Scoping input only -- it produces no finding of its own; it narrows
     #: the L4/L5 points of interest a ``--depth source`` run examines, per
     #: ADR-043 D7 (changed-path scope when a seed exists, else the current

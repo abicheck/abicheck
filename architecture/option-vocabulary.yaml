@@ -1217,6 +1217,14 @@ concepts:
     exceptions:
       - {id: CompareRequest.require_complete_analysis, rule: name, accepted: true, rename: R19, note: python spelling breaks D1;
           the leaf is `require_complete`}
+  - concept: assurance.unconfirmed
+    tier: config
+    renames: []
+    config:
+      - assurance.unconfirmed
+    python:
+      - CompareRequest.unconfirmed
+      - run_compare(unconfirmed)
   - concept: action.gate
     tier: action
     workflow:

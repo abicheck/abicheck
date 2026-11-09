@@ -20,7 +20,13 @@ from pathlib import Path
 
 from abicheck.checker import compare
 from abicheck.dumper import dump
-from tests._edit_corpus_config import Config, Flags, Toolchain, default_config
+from tests._edit_corpus_config import (
+    Config,
+    Flags,
+    Standard,
+    Toolchain,
+    default_config,
+)
 from tests._edit_corpus_operators import EditOp
 from tests._edit_corpus_seeds import RoleText, Seed
 from tests._edit_corpus_toolchains import std_flag
@@ -47,6 +53,25 @@ class Built:
 
 
 @dataclass(frozen=True)
+class LinkSpec:
+    """Per-build link options, for an edit that changes how the library links.
+
+    *flags* follow the harness's own (``-shared``, ``-fPIC``, ``-soname``), so a
+    later ``-Wl,-soname,...`` wins; *files* (``(name, text)``: a version
+    script, a linker script) are written beside the library first. ``{dir}``
+    in a flag is replaced by that build directory.
+    """
+
+    flags: tuple[str, ...] = ()
+    files: tuple[tuple[str, str], ...] = ()
+
+    def render(self, out_dir: Path) -> list[str]:
+        for name, text in self.files:
+            (out_dir / name).write_text(text, encoding="utf-8")
+        return [f.replace("{dir}", str(out_dir)) for f in self.flags]
+
+
+@dataclass(frozen=True)
 class Outcome:
     verdict: str
     kinds: frozenset[str]
@@ -64,11 +89,11 @@ def label_toolchain(label: str) -> Toolchain:
 
 
 def compile_cmd(
-    tc: Toolchain, config: Config, flags: Flags, *, debug: bool
+    tc: Toolchain, std: Standard, flags: Flags, *, debug: bool
 ) -> list[str]:
     """Driver + standard + ABI flags shared by library, consumer and probe builds."""
-    std = std_flag(tc, config.std) or config.std.name
-    cmd = [tc.driver(config.lang), f"-std={std}", *flags.render(tc, config.lang)]
+    spelling = std_flag(tc, std) or std.name
+    cmd = [tc.driver(std.lang), f"-std={spelling}", *flags.render(tc, std.lang)]
     if debug:
         cmd.append("-g")
     return cmd
@@ -105,13 +130,16 @@ def _compile_library(
     out_dir: Path,
     header_text: str,
     source_text: str,
+    link: LinkSpec = LinkSpec(),
 ) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / seed.header_name).write_text(header_text, encoding="utf-8")
     src = out_dir / seed.source_name
     src.write_text(source_text, encoding="utf-8")
     so = out_dir / LIB_NAME
-    cmd = compile_cmd(config.producer, config, flags, debug=config.evidence != "binary")
+    cmd = compile_cmd(
+        config.producer, config.std, flags, debug=config.evidence != "binary"
+    )
     cmd += ["-shared", "-I", str(out_dir), "-o", str(so), str(src)]
     # PIC is an ELF/Mach-O concept: clang rejects -fPIC for the Windows target.
     if sys.platform != "win32":
@@ -123,6 +151,7 @@ def _compile_library(
         cmd.append(f"-Wl,-install_name,{LIB_NAME}")
     elif sys.platform.startswith("linux"):
         cmd.append(f"-Wl,-soname,{LIB_NAME}")
+    cmd += link.render(out_dir)
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if proc.returncode != 0:
         raise CompileError(
@@ -138,14 +167,16 @@ def build(
     out_dir: Path,
     overrides: dict[str, RoleText] | None = None,
     flags: Flags | None = None,
+    link: LinkSpec = LinkSpec(),
 ) -> Built:
     """Render *seed* (with *overrides*), compile it under *config* and snapshot it.
 
-    *flags* replaces the config's producer flags (a rebuild edit's new side).
+    *flags* replaces the config's producer flags (a rebuild edit's new side);
+    *link* adds link options (an edit's version script, SONAME, extra libs).
     """
     fl = flags or config.flags
     header_text, source_text = seed.render(overrides)
-    so = _compile_library(seed, config, fl, out_dir, header_text, source_text)
+    so = _compile_library(seed, config, fl, out_dir, header_text, source_text, link)
     header = out_dir / seed.header_name
     is_cxx = seed.lang == "c++"
     headers = [header] if config.evidence == "headers" else []
@@ -168,7 +199,11 @@ def build(
 
 
 class BaselineCache:
-    """Old-side builds are identical for every operator on a (seed, config); build once."""
+    """Old-side builds are identical for every operator on a (seed, build); build once.
+
+    Keyed by ``Config.build_id``: the consumers a config names never change
+    the library, so configs that differ only in their consumers share it.
+    """
 
     def __init__(self, root: Path) -> None:
         self._root = root
@@ -176,11 +211,25 @@ class BaselineCache:
 
     def get(self, seed: Seed, config: Config | str) -> Built:
         cfg = _as_config(seed, config)
-        key = (seed.name, cfg.id)
+        key = (seed.name, cfg.build_id)
         if key not in self._cache:
             self._cache[key] = build(
-                seed, cfg, self._root / f"{seed.name}-{cfg.id}-old"
+                seed, cfg, self._root / f"{seed.name}-{cfg.build_id}-old"
             )
+        return self._cache[key]
+
+
+class NewBuildCache:
+    """New-side builds per (operator, seed, build): reused across consumer sets."""
+
+    def __init__(self, root: Path) -> None:
+        self._root = root
+        self._cache: dict[tuple[str, str, str], Built] = {}
+
+    def get(self, op: EditOp, seed: Seed, config: Config) -> Built:
+        key = (op.name, seed.name, config.build_id)
+        if key not in self._cache:
+            self._cache[key] = build_new(op, seed, config, self._root)
         return self._cache[key]
 
 
@@ -190,13 +239,17 @@ def _as_config(seed: Seed, config: Config | str) -> Config:
     return default_config(seed.lang, label_toolchain(config))
 
 
-def build_new(op: EditOp, seed: Seed, config: Config, root: Path) -> Built:
+def build_new(
+    op: EditOp, seed: Seed, config: Config, root: Path, link: LinkSpec = LinkSpec()
+) -> Built:
+    """The edited (new) side; *link* is the edit's own link options, if any."""
     return build(
         seed,
         config,
-        root / f"{seed.name}-{config.id}-{op.name}",
+        root / f"{seed.name}-{config.build_id}-{op.name}",
         overrides=op.edit(seed.roles),
         flags=op.new_flags(config.flags),
+        link=link,
     )
 
 

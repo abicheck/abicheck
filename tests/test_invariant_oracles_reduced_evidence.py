@@ -8,9 +8,11 @@ headers) and checks the public CLI output of that run.
 The unstripped pair is the control: it must reach a complete, breaking result,
 so the reduced pair's assertions are not vacuous.
 
-Known gap: a stripped pair compares as ``NO_CHANGE`` with ``partial``
-assurance and exit 0, and the terminal reads ``Gate: ACCEPTED``. The canary
-pins that answer; the invariant tests are strict xfails until it is fixed.
+Fixed by ADR-090: the stripped pair used to compare as ``NO_CHANGE`` with
+``partial`` assurance, exit 0 and ``Gate: ACCEPTED``. It now reads
+``UNCONFIRMED`` with exit 1 on every surface. The former canary is the
+regression test of that answer, and the two invariant tests are no longer
+expected to fail.
 """
 
 from __future__ import annotations
@@ -42,8 +44,6 @@ _V1 = "int add(int a, int b) { return a + b; }\nint keep(void) { return 1; }\n"
 _V2 = (
     "int add(int a, int b, int c) { return a + b + c; }\nint keep(void) { return 1; }\n"
 )
-
-_GAP = "A stripped library compared without headers reads NO_CHANGE with partial assurance (exit 0)"
 
 
 def _build(tmp: Path) -> tuple[Path, Path, Path, Path]:
@@ -120,18 +120,21 @@ def test_unstripped_control_reaches_a_complete_breaking_result(
     assert exit_code == 4
 
 
-@pytest.mark.known_gap_canary
-def test_stripped_pair_gap_is_still_the_current_answer(
+def test_stripped_pair_reads_unconfirmed_and_exits_one(
     pairs: dict[str, tuple[int, dict, str, str]],
 ) -> None:
-    """Canary: the gapped answer (NO_CHANGE, partial, exit 0) while the gap is open."""
-    exit_code, report, _, _ = pairs["stripped"]
-    assert report["verdict"] == "NO_CHANGE"
+    """ADR-090: the reduced run is UNCONFIRMED, exit 1, with the observed
+    verdict kept and both sides named as lacking type-level evidence."""
+    exit_code, report, terminal, _ = pairs["stripped"]
+    assert report["verdict"] == "UNCONFIRMED"
     assert report["analysis_assurance"]["status"] == "partial"
-    assert exit_code == 0
+    assert report["unconfirmed"]["observed_verdict"] == "NO_CHANGE"
+    assert report["unconfirmed"]["sides_without_type_evidence"] == ["old", "new"]
+    assert report["release_recommendation"]["version_bump"] == "undetermined"
+    assert exit_code == 1
+    assert "Gate: REJECTED (exit 1)" in terminal
 
 
-@pytest.mark.xfail(strict=True, reason=f"known gap: {_GAP}")
 def test_stripped_pair_does_not_claim_compatibility_on_partial_evidence(
     pairs: dict[str, tuple[int, dict, str, str]],
 ) -> None:
@@ -140,7 +143,6 @@ def test_stripped_pair_does_not_claim_compatibility_on_partial_evidence(
     assert absence_violations(report) == []
 
 
-@pytest.mark.xfail(strict=True, reason=f"known gap: {_GAP}")
 def test_stripped_pair_renderers_do_not_state_acceptance(
     pairs: dict[str, tuple[int, dict, str, str]],
 ) -> None:

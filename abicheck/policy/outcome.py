@@ -301,13 +301,19 @@ class RunOutcome:
     operational: OperationalStatus
     lifecycle: TargetLifecycle = TargetLifecycle.EXISTING
     scope: ScopeCompleteness = ScopeCompleteness.COMPLETE
+    #: ADR-090: the compatibility claim rests on a side with no type-level
+    #: evidence, so the block states ``UNCONFIRMED`` instead of the verdict.
+    unconfirmed: bool = False
 
     def to_dict(self) -> dict[str, Any]:
+        compatibility: str | None = (
+            self.compatibility.value if self.compatibility is not None else None
+        )
+        if self.unconfirmed:
+            compatibility = "UNCONFIRMED"
         return {
             "schema_version": RUN_OUTCOME_SCHEMA_VERSION,
-            "compatibility": self.compatibility.value
-            if self.compatibility is not None
-            else None,
+            "compatibility": compatibility,
             "assurance": analysis_assurance_dict(self.assurance),
             "gate": self.gate.value,
             "operational": self.operational.value,
@@ -369,6 +375,7 @@ class RunOutcome:
             operational=operational,
             lifecycle=lifecycle,
             scope=scope,
+            unconfirmed=compat_raw == "UNCONFIRMED",
         )
 
 

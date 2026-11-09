@@ -502,6 +502,19 @@ def contract_coverage_declared(data: Mapping[str, Any]) -> bool:
     )
 
 
+def unconfirmed_exit(data: Mapping[str, Any]) -> int:
+    """The report's own ADR-090 ``UNCONFIRMED`` contribution (``0``/``1``),
+    read from ``exit.unconfirmed_contribution`` over the same block traversal
+    as :func:`analysis_assurance_exit`. A pre-7.4 report has no key: ``0``."""
+    for block in contract_coverage_blocks(data):
+        exit_block = block.get("exit")
+        if isinstance(exit_block, Mapping):
+            raw = exit_block.get("unconfirmed_contribution")
+            if _is_valid_contribution(raw):
+                return raw
+    return 0
+
+
 #: Pre-promotion name; ``no_baseline_load.py`` and tests still import it.
 _contract_coverage_declared = contract_coverage_declared
 

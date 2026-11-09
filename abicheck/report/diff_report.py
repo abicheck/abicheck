@@ -43,6 +43,7 @@ from .json_sections import (
     displayed_with_scoped_only,
     scoped_only_extra_causes,
 )
+from .outcome_summary import report_verdict
 
 if TYPE_CHECKING:
     from ..policy.severity import SeverityConfig
@@ -165,7 +166,7 @@ def to_stat_json(
         "library": result.library,
         "old_version": result.old_version,
         "new_version": result.new_version,
-        "verdict": result.verdict.value,
+        "verdict": report_verdict(result),  # ADR-090 D2
         "policy": effective_policy,
         "summary": {
             "breaking": summary.breaking,

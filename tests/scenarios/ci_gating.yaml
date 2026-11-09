@@ -323,3 +323,35 @@ scenarios:
     validates: UC-WF-analysis-assurance
     automated: true
     test: test_sc_analysis_assurance_gate
+
+  - id: SC-UNCONFIRMED-COMPATIBILITY
+    title: A clean claim with no type-level evidence reads UNCONFIRMED and exits 1
+    persona: Library maintainer whose CI compares stripped release builds without headers
+    narrative: >
+      Both snapshots carry only the ELF export table (no DWARF, no headers),
+      and their export tables agree, but they are not one identical input.
+      A parameter, enum or layout change would be invisible to this
+      evidence, so the run cannot confirm compatibility: the JSON verdict and
+      run_outcome read UNCONFIRMED, the observed NO_CHANGE is kept in the
+      unconfirmed block, and the run exits 1 (ADR-090). With
+      assurance.unconfirmed: warn the label stays and the run exits 0. A
+      real symbol removal in the same configuration still exits 4, and the
+      same snapshot compared with itself is NO_CHANGE.
+    flow:
+      - abicheck compare old.json new.json -o json=report.json
+      - abicheck compare old.json new.json --config abicheck.yml -o json=report.json
+    expected:
+      exit_code_default: 1
+      exit_code_warn: 0
+      verdict: UNCONFIRMED
+      unconfirmed:
+        observed_verdict: NO_CHANGE
+        sides_without_type_evidence: [old, new]
+      breaking_pair_exit: 4
+      identical_pair_exit: 0
+    surfaces:
+      - cli: compare
+      - report: compare_report.unconfirmed
+    validates: UC-WF-analysis-assurance
+    automated: true
+    test: test_sc_unconfirmed_compatibility

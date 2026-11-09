@@ -40,9 +40,11 @@ steps:
   - name: compare-binary-only
     run: abicheck compare v1/libwidget.so v2/libwidget.so
     expect:
-      exit_code: 0
+      # No headers, no debug info: the export table cannot show the break,
+      # so the run does not claim compatibility -- UNCONFIRMED, exit 1.
+      exit_code: 1
       stdout_contains:
-        - NO_CHANGE
+        - UNCONFIRMED
   - name: compare-with-headers
     run: >-
       abicheck compare v1/libwidget.so v2/libwidget.so --header old=v1/widget.h --header new=v2/widget.h

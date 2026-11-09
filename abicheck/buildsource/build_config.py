@@ -386,6 +386,12 @@ KEY_TABLE = KeyTable(
         KeySpec("policy.overrides", Kind.DICT_STR, "policy_overrides", {}),
         KeySpec("assurance.require_complete", Kind.BOOL, "assurance_require_complete"),
         KeySpec(
+            "assurance.unconfirmed",
+            Kind.STR,
+            "assurance_unconfirmed",
+            normalize=_enum(("fail", "warn")),
+        ),
+        KeySpec(
             "performance.profile",
             Kind.STR,
             "performance_profile",
@@ -630,6 +636,11 @@ class BuildConfig:
     #: shape as ``gate.fail_on_removed_library`` above. ``None`` = unset (no
     #: exit-1 assurance gate).
     assurance_require_complete: bool | None = None
+    #: ``assurance.unconfirmed`` — ADR-090 D4: ``fail`` (the default when
+    #: unset) exits ``1`` when a compatibility claim rests on a side with no
+    #: type-level evidence; ``warn`` keeps the ``UNCONFIRMED`` label and
+    #: contributes exit ``0``. No value restores the clean label.
+    assurance_unconfirmed: str | None = None
     #: ``deployment:`` — ADR-020b §4.1 / ADR-068 D5: the former
     #: ``compare --env-matrix FILE``. Embeds ``EnvironmentMatrix``'s YAML
     #: shape inline (parsed via ``EnvironmentMatrix.from_dict``) instead of

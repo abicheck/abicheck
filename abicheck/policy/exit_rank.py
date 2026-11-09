@@ -78,6 +78,7 @@ def _dominant_decision(
     no_comparison_completed_contribution: int = 0,
     additions_review_contribution: int = 0,
     unused_rules_contribution: int = 0,
+    unconfirmed_contribution: int = 0,
 ) -> ExitDecision:
     """One of ADR-064's four axes overrides whatever the ordinary
     gate/coverage/assurance fold would otherwise have decided.
@@ -134,6 +135,7 @@ def _dominant_decision(
         "no_comparison_completed_contribution": no_comparison_completed_contribution,
         "additions_review_contribution": additions_review_contribution,
         "unused_rules_contribution": unused_rules_contribution,
+        "unconfirmed_contribution": unconfirmed_contribution,
     }
     # A field that is *also* the dominant axis is not a preserved value: it
     # is set to `code` below. Generic, where this was a hand-written special

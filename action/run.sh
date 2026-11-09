@@ -4440,6 +4440,17 @@ _unused_rules_gated() {
   [[ "$_contribution" == "1" ]]
 }
 
+# ADR-090's UNCONFIRMED axis: the compatibility claim rests on a compared
+# side with no type-level evidence (no debug info, no header AST), under the
+# default `assurance.unconfirmed: fail`. Reported as `exit.unconfirmed_contribution`
+# (report schema 7.4); a report without the key cannot say, which is "not gated".
+_unconfirmed_gated() {
+  local _src _contribution
+  _src=$(_json_report_src)
+  _contribution=$(_report_query "$_src" unconfirmed_contribution)
+  [[ "$_contribution" == "1" ]]
+}
+
 # Informational sibling (Codex review): the report recorded an incomplete
 # scope, gating or accepted under `--on-incomplete-scope warn`. Read from the
 # structured report only, like `_scope_gated`, and never a failure signal --
@@ -4907,6 +4918,10 @@ _resolve_clean_exit_verdict() {
     # which never match this tier), just a verdict the exit-0 branch must
     # not silently launder into a plain COMPATIBLE.
     VERDICT="$_v"
+  elif [[ "$_v" == "UNCONFIRMED" ]]; then
+    # ADR-090 under `assurance.unconfirmed: warn` (exit 0): the label stays,
+    # so the step must not launder it into a plain COMPATIBLE either.
+    VERDICT="$_v"
   fi
 }
 
@@ -5143,7 +5158,7 @@ else
       if [[ "$_exit1_validity" != "ok" ]]; then
         VERDICT="ERROR"
         _error_annotation "abicheck exited 1 without a readable JSON result (report: ${_exit1_validity:-none located}), so no severity, coverage, assurance or scope gate can be attributed -- the invocation failed before producing one. See the command's own error output above."
-      elif _coverage_gated || _assurance_gated || _scope_gated || _additions_gated || _unused_rules_gated; then
+      elif _coverage_gated || _assurance_gated || _scope_gated || _additions_gated || _unused_rules_gated || _unconfirmed_gated; then
         # `compare` shares exit 1 between up to four independent axes
         # (severity policy, ADR-049 contract coverage, P0.4 analysis
         # assurance), so the report's pre-fold `severity.exit_code` is
@@ -5174,6 +5189,20 @@ else
             echo "::warning::abicheck's comparison scope was not fully checked (exit code 1): a selected member went unchecked under scope.on_incomplete: block, or no comparison completed at all. This is NOT an ABI/API break and NOT a severity-policy failure — the compatibility verdict covers the compared members only; see comparison_scope in the JSON report."
             if _assurance_gated; then
               echo "::warning::abicheck also reports incomplete analysis assurance under assurance.require_complete; see analysis_assurance in the JSON report."
+            fi
+            if _unused_rules_gated; then
+              echo "::warning::abicheck also reports policy rules that matched nothing under unused_rules: block; see disposition_audit.unused_rules_review in the JSON report."
+            fi
+          elif _unconfirmed_gated; then
+            # ADR-090: the verdict would have been a compatibility claim,
+            # but a compared side has no type-level evidence to back it.
+            VERDICT="UNCONFIRMED"
+            echo "::warning::abicheck could not confirm compatibility (exit code 1): a compared side has no type-level evidence (no debug info, no header AST), so signature, enum and layout changes on exported symbols cannot be seen. This is NOT an observed ABI/API break. Supply headers for both sides, or compare unstripped debug builds; set assurance.unconfirmed: warn to accept it -- see unconfirmed in the JSON report."
+            if _assurance_gated; then
+              echo "::warning::abicheck also reports incomplete analysis assurance under assurance.require_complete; see analysis_assurance in the JSON report."
+            fi
+            if _additions_gated; then
+              echo "::warning::abicheck also reports public additions not covered by an acknowledgment record; see disposition_audit.unacknowledged_additions_review in the JSON report."
             fi
             if _unused_rules_gated; then
               echo "::warning::abicheck also reports policy rules that matched nothing under unused_rules: block; see disposition_audit.unused_rules_review in the JSON report."
@@ -5441,6 +5470,9 @@ if [[ "${INPUT_ADD_JOB_SUMMARY:-true}" == "true" && "$MODE" != "dump" ]]; then
         # table but no verdict line at all for this tier.
         echo "> **Verdict: COMPATIBLE_WITH_RISK** ⚠️ — Binary-compatible, but carries deployment risk; review advised (see findings below)."
         _scope_accepted_note
+        ;;
+      UNCONFIRMED)
+        echo "> **Verdict: UNCONFIRMED** ❓ — No break was observed, but a compared side has no type-level evidence (no debug info, no header AST), so compatibility cannot be confirmed. Supply headers for both sides, or compare unstripped debug builds."
         ;;
       SEVERITY_ERROR)
         # SEVERITY_ERROR (exit code 1) means a severity-config category is
@@ -6559,6 +6591,14 @@ else
   # contract-coverage check immediately above and for the same reason.
   if _assurance_gated; then
     echo "::error::abicheck's own evidence was not fully complete under assurance.require_complete; see analysis_assurance in the JSON report for what fell short."
+    FINAL_EXIT=1
+  fi
+
+  # ADR-090's UNCONFIRMED axis, unconditional for the same reason: no
+  # fail-on-* input governs it -- `assurance.unconfirmed: warn` is the opt-out,
+  # and under it the report's contribution is 0, so this does not fire.
+  if _unconfirmed_gated; then
+    echo "::error::abicheck could not confirm compatibility: a compared side has no type-level evidence (no debug info, no header AST); see unconfirmed in the JSON report. Supply headers for both sides or compare unstripped debug builds, or accept it with assurance.unconfirmed: warn."
     FINAL_EXIT=1
   fi
 

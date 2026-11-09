@@ -38,6 +38,7 @@ from .model.evidence_status import (
     EvidenceTier,
 )
 from .model.policy_file_protocol import PolicyFileProtocol
+from .model.type_evidence import TypeEvidenceFacts
 from .report_side_facts import ReportSideFacts
 
 
@@ -203,6 +204,15 @@ class DiffResult(ReportSideFacts):
     # annotation here would be circular. Narrow with `isinstance` at any
     # consumption site (see `reporter._add_analysis_assurance`).
     analysis_assurance: object | None = None
+    # ADR-090 D1(b)/(c): which compared sides carried type-level evidence
+    # (debug info or a header AST), and whether the two sides are one
+    # identical input. ``None`` when never evaluated (a hand-built
+    # ``DiffResult``); `policy.unconfirmed_compatibility` reads it.
+    type_evidence: TypeEvidenceFacts | None = None
+    # ADR-090 D4: `.abicheck.yml`'s `assurance.unconfirmed` (`fail` default,
+    # `warn` opt-out), resolved once per run like `policy`/`policy_file`, so
+    # every exit derivation of this result reads the same mode.
+    unconfirmed_mode: Literal["fail", "warn"] = "fail"
     # ``compare --use-cases MANIFEST``'s attribution of this comparison's own
     # findings to the declared use cases whose entrypoints reach them
     # (``policy.use_case_attribution.UseCaseImpact``). ``None`` for every run that
