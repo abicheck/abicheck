@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Unit tests for castxml's clang-semantics join and the generation-44 noexcept migration.
+"""Unit tests for castxml's clang-semantics join and the generation-45 noexcept migration.
 
 The integration oracle is ``tests/test_noexcept_header_backends.py``; these
 pin the pieces it rests on without a compiler: the clang ``noexcept`` map's
@@ -181,7 +181,7 @@ def _doc(producer: str, functions: list[dict]) -> dict:
     return {"ast_producer": producer, "functions": functions}
 
 
-def test_pre_44_castxml_noexcept_false_loads_as_unknown() -> None:
+def test_pre_45_castxml_noexcept_false_loads_as_unknown() -> None:
     doc = _doc(
         "castxml",
         [
@@ -192,7 +192,7 @@ def test_pre_44_castxml_noexcept_false_loads_as_unknown() -> None:
             {"mangled": "_Z1fv"},  # key absent: the stored default False
         ],
     )
-    migrated, notices = migrate_castxml_noexcept(doc, 43)
+    migrated, notices = migrate_castxml_noexcept(doc, 44)
     assert [f.get("is_noexcept", False) for f in migrated["functions"]] == [
         None,
         None,
@@ -205,7 +205,7 @@ def test_pre_44_castxml_noexcept_false_loads_as_unknown() -> None:
 
 
 @pytest.mark.parametrize(
-    ("producer", "generation"), [("clang", 43), ("hybrid", 43), ("castxml", 44)]
+    ("producer", "generation"), [("clang", 44), ("hybrid", 44), ("castxml", 45)]
 )
 def test_migration_leaves_other_producers_and_new_generations(
     producer: str, generation: int

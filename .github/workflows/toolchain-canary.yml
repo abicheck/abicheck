@@ -1,0 +1,470 @@
+name: Toolchain canaries
+
+# Non-blocking canary lanes: the integration marker suite against the NEWEST
+# release of each external tool that abicheck parses output from, so that a
+# tool's output-format drift is a red run here instead of a field report.
+#
+# Why: abicheck reads castxml's --version and AST dumps, GCC's and Apple
+# clang's layout/ABI output, and the integration tests pin only the versions
+# CI installs today. The LLVM lane (clang-latest.yml) found clang 22 AST shape
+# changes the moment it ran against a newer release (#1921); this workflow
+# gives the other tools the same early warning.
+#
+# Legs (each changes ONE toolchain against the pinned baseline, so a red leg
+# is attributable to that tool alone):
+#   castxml-newest  newest CastXML Superbuild release (ubuntu-24.04, 2 shards).
+#                   Downloaded by the release's SHA-256 digest from the GitHub
+#                   API; that digest is the only verification available for a
+#                   "newest" artifact, so an asset without one fails closed.
+#                   The integration suite runs with
+#                   ABICHECK_ALLOW_UNSUPPORTED_CASTXML=1 so a release past
+#                   policy.py's MAX_CASTXML still shows format drift; a separate
+#                   step, without the override, asserts the version policy
+#                   gives the expected answer (refuses an out-of-range release,
+#                   accepts an in-range one). gcc/g++ stay the runner's default.
+#   gcc-newest      the newest GCC release conda-forge ships (ubuntu-24.04,
+#                   2 shards), checked against conda-forge's own index so a
+#                   solver fallback to an older GCC fails the leg. CC/CXX and
+#                   gcc/g++/cc/c++ on PATH all point at it. castxml stays the
+#                   pinned one from setup-castxml.
+#   xcode-newest    the newest released (non-beta, non-RC) Xcode installed on
+#                   the newest GA macOS runner label, macos-26 (bump the label
+#                   when a newer one goes GA). castxml stays the pinned
+#                   conda-forge build that integration.yml uses on macOS.
+#
+# Non-blocking by construction: this workflow runs on a weekly schedule and
+# on manual dispatch only. It is not triggered by pull_request or push, so it
+# is never a PR check and cannot be a required one. Failing legs stay red
+# (no continue-on-error), so they show in the Actions tab, and each failing
+# leg uploads its verify.py log as an artifact. A failing *scheduled* run
+# opens or updates one tracking issue (the `notify` job, the only job with
+# issues: write). Nothing here changes an existing lane, a required check, or
+# an exit code.
+#
+# Triage: docs/contribute/agent-guide/quality-gates.md "Toolchain canaries".
+on:
+  schedule:
+    - cron: '23 5 * * 2'
+  workflow_dispatch:
+
+# One canary run at a time per ref; a second dispatch queues behind the
+# first instead of cancelling a scheduled run mid-way.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  canary:
+    name: canary (${{ matrix.toolchain }}${{ matrix.shard && format(', shard {0}/2', matrix.shard) || '' }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        # Per-leg settings live here so the test step has no expression logic.
+        # The Linux floor and shard split are integration.yml's; the macOS
+        # floor is that step's default.
+        include:
+          - toolchain: castxml
+            os: ubuntu-24.04
+            shard: 1
+            min_executed: '20'
+            addopts: '-n auto --dist worksteal --shard=1/2 --shard-weights=tests/shard_weights_integration.json'
+          - toolchain: castxml
+            os: ubuntu-24.04
+            shard: 2
+            min_executed: '20'
+            addopts: '-n auto --dist worksteal --shard=2/2 --shard-weights=tests/shard_weights_integration.json'
+          - toolchain: gcc
+            os: ubuntu-24.04
+            shard: 1
+            min_executed: '20'
+            addopts: '-n auto --dist worksteal --shard=1/2 --shard-weights=tests/shard_weights_integration.json'
+          - toolchain: gcc
+            os: ubuntu-24.04
+            shard: 2
+            min_executed: '20'
+            addopts: '-n auto --dist worksteal --shard=2/2 --shard-weights=tests/shard_weights_integration.json'
+          - toolchain: xcode
+            # Explicit newest GA label, not macos-latest (which trails it).
+            os: macos-26
+            min_executed: '20'
+            addopts: '-n auto --dist worksteal -v'
+    env:
+      TOOLCHAIN: ${{ matrix.toolchain }}
+      CANARY_LOG: canary-${{ matrix.toolchain }}${{ matrix.shard && format('-shard{0}', matrix.shard) || '' }}.log
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+        with:
+          persist-credentials: false
+
+      - name: Install system deps (Linux)
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/install-system-deps
+        with:
+          packages: gcc g++ cmake clang zlib1g-dev curl ca-certificates
+
+      - name: Set up pinned CastXML (Linux, baseline)
+        # The baseline castxml for the gcc and xcode legs. The castxml leg
+        # replaces it in the next step.
+        if: runner.os == 'Linux' && matrix.toolchain != 'castxml'
+        uses: ./.github/actions/setup-castxml
+
+      - name: Install newest CastXML release (castxml leg)
+        if: runner.os == 'Linux' && matrix.toolchain == 'castxml'
+        shell: bash
+        env:
+          # Authenticated: the unauthenticated API limit (60/h per runner IP,
+          # shared with every other job on that IP) makes the resolve step
+          # flaky. github.token is read-only here (contents: read).
+          GH_API_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Resolve the newest non-prerelease Superbuild release and its asset
+          # for this Ubuntu/arch, with the GitHub-reported SHA-256 digest. The
+          # release JSON is parsed by python -I, not interpolated into shell.
+          work="$(mktemp -d)"
+          curl --fail --location --silent --show-error --retry 3 --retry-all-errors \
+            --header "Authorization: Bearer ${GH_API_TOKEN}" \
+            --header "Accept: application/vnd.github+json" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --output "$work/release.json" \
+            "https://api.github.com/repos/CastXML/CastXMLSuperbuild/releases/latest"
+          . /etc/os-release
+          asset_name="castxml-${ID}-${VERSION_ID}-$(uname -m).tar.gz"
+          # Captured, not read from a process substitution: a failing python
+          # would leave `read` empty and `set -e` would not see it.
+          resolved="$(python -I - "$work/release.json" "$asset_name" <<'PY'
+          import json, sys
+          release = json.load(open(sys.argv[1], encoding="utf-8"))
+          wanted = sys.argv[2]
+          for asset in release.get("assets", []):
+              if asset.get("name") == wanted:
+                  # GitHub reports `digest` only for assets uploaded since it
+                  # began computing them; older assets carry no key or null.
+                  # Both are distinct, explicit failures: the digest is the
+                  # only verification a "newest" artifact has, so fail closed.
+                  if "digest" not in asset or asset["digest"] is None:
+                      sys.exit(
+                          f"::error::GitHub reports no digest for {wanted} in "
+                          f"{release.get('tag_name')} (asset predates digest support "
+                          "or the API omitted it); refusing to run an unverified castxml"
+                      )
+                  digest = str(asset["digest"])
+                  algo, _, value = digest.partition(":")
+                  if algo != "sha256" or len(value) != 64 or any(c not in "0123456789abcdef" for c in value):
+                      sys.exit(f"::error::asset {wanted} has an unusable digest {digest!r}; expected sha256:<64 hex>")
+                  print(release["tag_name"], asset["browser_download_url"], value)
+                  break
+          else:
+              sys.exit(f"::error::no asset named {wanted} in the newest CastXML release")
+          PY
+          )"
+          read -r tag url digest <<< "$resolved"
+          echo "Newest CastXML Superbuild release: ${tag}"
+          echo "Asset: ${url}"
+          curl --fail --location --silent --show-error --retry 3 --retry-all-errors \
+            --output "$work/castxml.tar.gz" "$url"
+          echo "${digest}  $work/castxml.tar.gz" | sha256sum -c -
+          install_dir="$RUNNER_TEMP/castxml-newest"
+          rm -rf "$install_dir" && mkdir -p "$install_dir"
+          tar -xzf "$work/castxml.tar.gz" -C "$install_dir" --strip-components=1
+          [ -x "$install_dir/bin/castxml" ] || { echo "::error::archive has no bin/castxml"; exit 1; }
+          echo "$install_dir/bin" >> "$GITHUB_PATH"
+          rm -rf "$work"
+
+      - name: Install newest GCC from conda-forge (gcc leg)
+        # Ubuntu 24.04's archive stops at GCC 14, so "newest in the archive"
+        # would not be the newest GCC. conda-forge builds every GCC release
+        # (gcc/gxx), so this installs the newest one there, through the same
+        # pinned, checksum-verified micromamba scripts/setup_dev_env.sh uses.
+        if: runner.os == 'Linux' && matrix.toolchain == 'gcc'
+        shell: bash
+        env:
+          MICROMAMBA_VERSION: '2.9.0-0'
+          MICROMAMBA_LINUX_64_SHA256: '366cd9cd8be14df1ab8ed50352a82111082a36686b2d389fdb79a92c3fafb3e3'
+        run: |
+          set -euo pipefail
+          [ "$(uname -m)" = "x86_64" ] || { echo "::error::expected an x86_64 Linux runner"; exit 1; }
+          work="$(mktemp -d)"
+          curl --fail --location --silent --show-error --retry 3 --retry-all-errors \
+            --output "$work/micromamba" \
+            "https://github.com/mamba-org/micromamba-releases/releases/download/${MICROMAMBA_VERSION}/micromamba-linux-64"
+          echo "${MICROMAMBA_LINUX_64_SHA256}  $work/micromamba" | sha256sum -c -
+          chmod +x "$work/micromamba"
+          export MAMBA_ROOT_PREFIX="$RUNNER_TEMP/mamba-root"
+          # The newest gcc version in conda-forge's index: the oracle the
+          # installed one is checked against, so a solver fallback to an
+          # older GCC is a red leg, not a silently stale one.
+          "$work/micromamba" search -c conda-forge gcc --json > "$work/gcc-search.json"
+          newest="$(python3 -I - "$work/gcc-search.json" <<'PY'
+          import json, sys
+          pkgs = json.load(open(sys.argv[1], encoding="utf-8"))["result"]["pkgs"]
+          versions = {p["version"] for p in pkgs if p.get("name") == "gcc"}
+          if not versions:
+              sys.exit("::error::conda-forge search returned no gcc package")
+          def key(v):
+              return tuple(int(x) for x in v.split("."))
+          print(max(versions, key=key))
+          PY
+          )"
+          echo "Newest GCC on conda-forge: ${newest}"
+          env_prefix="$RUNNER_TEMP/gcc-env"
+          "$work/micromamba" create -y -p "$env_prefix" -c conda-forge \
+            "gcc==${newest}" "gxx==${newest}"
+          # A shim dir with only the compiler drivers, so the env's other tools
+          # (zstd, ...) do not shadow the runner's. The drivers find their own
+          # prefixed binutils inside the env.
+          shim="$RUNNER_TEMP/gcc-newest-bin"
+          rm -rf "$shim" && mkdir -p "$shim"
+          for tool in gcc g++ cc c++ cpp; do
+            [ -x "$env_prefix/bin/$tool" ] || { echo "::error::conda-forge gcc env has no bin/$tool"; exit 1; }
+            ln -s "$env_prefix/bin/$tool" "$shim/$tool"
+          done
+          echo "$shim" >> "$GITHUB_PATH"
+          {
+            echo "CC=$shim/gcc"
+            echo "CXX=$shim/g++"
+            echo "GCC_UNDER_TEST=${newest}"
+          } >> "$GITHUB_ENV"
+          rm -rf "$work"
+
+      - name: Select newest released Xcode (xcode leg)
+        if: runner.os == 'macOS' && matrix.toolchain == 'xcode'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Only released Xcodes: the runner image names them Xcode_<ver>.app
+          # (e.g. Xcode_26.1.app), and betas / release candidates carry a
+          # suffix (Xcode_26.2_beta.app, Xcode_26.1_Release_Candidate.app).
+          # A beta toolchain's breakage is not a release abicheck's users
+          # build with, so it is excluded; the bare Xcode.app symlink to the
+          # image default is excluded too. Version-sorted on the bundle name,
+          # so Xcode_26.4 beats Xcode_26.2.
+          xcode="$(find /Applications -maxdepth 1 -name 'Xcode_*.app' -print \
+            | grep -E '/Xcode_[0-9]+(\.[0-9]+)*\.app$' | sort -V | tail -1 || true)"
+          [ -n "$xcode" ] || { echo "::error::no released Xcode_<ver>.app on this runner"; ls -d /Applications/Xcode* || true; exit 1; }
+          sudo xcode-select -s "$xcode/Contents/Developer"
+          # DEVELOPER_DIR pins every later step's xcrun/clang shim to it too.
+          echo "DEVELOPER_DIR=$xcode/Contents/Developer" >> "$GITHUB_ENV"
+          echo "XCODE_UNDER_TEST=$xcode" >> "$GITHUB_ENV"
+          echo "Selected: $xcode"
+          DEVELOPER_DIR="$xcode/Contents/Developer" xcodebuild -version
+
+      - name: Install system deps (macOS)
+        if: runner.os == 'macOS'
+        run: brew install cmake
+
+      - name: Set up pinned CastXML (macOS, baseline)
+        # The same conda-forge castxml 0.7.0 build integration.yml pins for
+        # its macOS leg; see that file for why Homebrew's is not used.
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          MICROMAMBA_VERSION: '2.9.0-0'
+          MICROMAMBA_OSX_ARM64_SHA256: 'ec2a072f028e1a7cf20f3e2e74d5a8127cf5a5f27636375b5359811565f4e5be'
+        run: |
+          set -euo pipefail
+          [ "$(uname -m)" = "arm64" ] || { echo "::error::expected an arm64 macOS runner"; exit 1; }
+          work="$(mktemp -d)"
+          curl --fail --location --silent --show-error --retry 3 --retry-all-errors \
+            --output "$work/micromamba" \
+            "https://github.com/mamba-org/micromamba-releases/releases/download/${MICROMAMBA_VERSION}/micromamba-osx-arm64"
+          echo "${MICROMAMBA_OSX_ARM64_SHA256}  $work/micromamba" | shasum -a 256 -c -
+          chmod +x "$work/micromamba"
+          env_prefix="$RUNNER_TEMP/castxml-env"
+          MAMBA_ROOT_PREFIX="$RUNNER_TEMP/mamba-root" "$work/micromamba" create -y \
+            -p "$env_prefix" -c conda-forge "castxml=0.7.0=hfc9ce51_0"
+          echo "$env_prefix/bin" >> "$GITHUB_PATH"
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+
+      - name: Install package
+        run: pip install -e ".[dev]"
+
+      - name: Record and check the toolchain under test
+        # Writes what each tool reports to the step summary, and checks that the
+        # leg's own tool is the one actually used (a silent fallback to the
+        # baseline would make a red-or-green leg mean nothing).
+        shell: bash
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$*"; exit 1; }
+          # First line of a command's output, read after the command exits.
+          # Not `cmd | head -n 1`: head closes the pipe after one line, the
+          # tool's next write fails (castxml then exits 74, others take
+          # SIGPIPE), and under pipefail that kills this step silently.
+          first_line() { local out; out="$("$@" 2>&1)"; printf '%s\n' "${out%%$'\n'*}"; }
+          cx="$(first_line castxml --version)"
+          cx_path="$(command -v castxml)"
+          cxx_path="$(command -v g++ || command -v c++)"
+          cxx_ver="$(first_line "$cxx_path" --version)"
+          if [ "$TOOLCHAIN" = castxml ]; then
+            [ "$cx_path" = "$RUNNER_TEMP/castxml-newest/bin/castxml" ] \
+              || fail "newest castxml not first on PATH: $cx_path"
+          fi
+          if [ "$TOOLCHAIN" = gcc ]; then
+            shim="$RUNNER_TEMP/gcc-newest-bin"
+            [ "${CC:-}" = "$shim/gcc" ] || fail "CC is '${CC:-}', expected $shim/gcc"
+            [ "${CXX:-}" = "$shim/g++" ] || fail "CXX is '${CXX:-}', expected $shim/g++"
+            # Every driver name a test or build system might call: on PATH,
+            # from the shim, and reporting exactly the newest conda-forge GCC.
+            for tool in gcc cc g++ c++ "$CC" "$CXX"; do
+              where="$(command -v "$tool")"
+              case "$where" in "$shim"/*) ;; *) fail "$tool resolves to $where, not $shim";; esac
+              got="$("$tool" -dumpfullversion)"
+              [ "$got" = "$GCC_UNDER_TEST" ] || fail "$tool reports $got, expected $GCC_UNDER_TEST"
+            done
+          fi
+          if [ "$TOOLCHAIN" = xcode ]; then
+            # Compare physical paths: the runner image ships Xcode bundles
+            # and version aliases as symlinks, and xcode-select / xcrun may
+            # report either spelling.
+            phys() { (cd -P "$1" 2>/dev/null && pwd -P) || printf '%s\n' "$1"; }
+            dev="$(phys "$XCODE_UNDER_TEST/Contents/Developer")"
+            sel="$(phys "$(xcode-select -p)")"
+            [ "$sel" = "$dev" ] || fail "xcode-select -p resolves to $sel, expected $dev"
+            [ "$(phys "${DEVELOPER_DIR:-/nonexistent}")" = "$dev" ] \
+              || fail "DEVELOPER_DIR is '${DEVELOPER_DIR:-}', expected it to resolve to $dev"
+            # /usr/bin/clang and cc are xcrun shims; resolve what they run.
+            for tool in clang clang++ cc c++; do
+              real="$(xcrun --find "$tool")"
+              real="$(phys "$(dirname "$real")")/$(basename "$real")"
+              case "$real" in "$dev"/*) ;; *) fail "xcrun resolves $tool to $real, not inside $dev";; esac
+            done
+            res="$(phys "$(clang -print-resource-dir)")"
+            case "$res" in "$dev"/*) ;; *) fail "clang's resource dir $res is not inside $dev";; esac
+          fi
+          {
+            echo "### toolchain canary: ${TOOLCHAIN}"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| castxml | \`$cx\` at \`$cx_path\` |"
+            echo "| C++ compiler | \`$cxx_ver\` at \`$cxx_path\` |"
+            if [ "$TOOLCHAIN" = gcc ]; then
+              echo "| gcc / cc | \`$(first_line gcc --version)\` / \`$(first_line cc --version)\` |"
+              echo "| CC / CXX | \`$CC\` / \`$CXX\` |"
+            fi
+            if [ "$TOOLCHAIN" = xcode ]; then
+              echo "| Xcode | \`$XCODE_UNDER_TEST\` ($(xcodebuild -version | tr '\n' ' ')) |"
+              echo "| clang | \`$(first_line clang --version)\` at \`$(xcrun --find clang)\` |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: CastXML version policy answer (castxml leg, no override)
+        # The integration step below runs with the override, so it sees format
+        # drift even past MAX_CASTXML. This step runs WITHOUT the override and
+        # asserts the version gate's answer for the newest release: refused
+        # (UnsupportedCastxmlVersionError) when it is outside policy.py's
+        # range, accepted when inside. The expected answer is computed here
+        # from the bare numbers, not by calling the policy's own evaluator.
+        # Runs even when the record step failed: it is an independent answer.
+        if: (success() || failure()) && matrix.toolchain == 'castxml'
+        shell: bash
+        run: |
+          set -euo pipefail
+          env -u ABICHECK_ALLOW_UNSUPPORTED_CASTXML python -I - "$(command -v castxml)" <<'PY'
+          import os, re, subprocess, sys
+          from abicheck.errors import UnsupportedCastxmlVersionError
+          from abicheck.extract.headers.castxml import policy
+          from abicheck.extract.headers.castxml.backend import _resolve_gated_castxml_bin
+
+          assert "ABICHECK_ALLOW_UNSUPPORTED_CASTXML" not in os.environ
+          castxml = sys.argv[1]
+          out = subprocess.run([castxml, "--version"], capture_output=True, text=True, check=True).stdout
+          m = re.search(r"castxml version\s+(\d+)\.(\d+)\.(\d+)", out, re.I)
+          c = re.search(r"(?:clang|LLVM) version\s+(\d+)", out, re.I)
+          if not m or not c:
+              sys.exit(f"::error::cannot read castxml/clang version numbers from: {out!r}")
+          found = tuple(int(g) for g in m.groups())
+          lo = tuple(int(x) for x in policy.MIN_CASTXML.split("."))
+          hi = tuple(int(x) for x in policy.MAX_CASTXML.split("."))
+          expect_ok = lo <= found < hi and int(c.group(1)) >= policy.MIN_CASTXML_CLANG_MAJOR
+          try:
+              _resolve_gated_castxml_bin(castxml)
+              refused = None
+          except UnsupportedCastxmlVersionError as exc:
+              refused = str(exc)
+          desc = (f"castxml {'.'.join(map(str, found))} (clang {c.group(1)}) vs policy "
+                  f">={policy.MIN_CASTXML},<{policy.MAX_CASTXML}, clang>={policy.MIN_CASTXML_CLANG_MAJOR}")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
+              fh.write(f"\n**Version policy:** {desc}: expected "
+                       f"{'accept' if expect_ok else 'refuse'}, got {'accept' if refused is None else 'refuse'}\n")
+          if expect_ok and refused is not None:
+              sys.exit(f"::error::policy refused an in-range release ({desc}):\n{refused}")
+          if not expect_ok and refused is None:
+              sys.exit(f"::error::policy ACCEPTED an out-of-range release without the override ({desc})")
+          print(f"{desc}: policy answer is as expected ({'accepted' if expect_ok else 'refused'})")
+          if not expect_ok:
+              print(f"::notice::newest CastXML is outside the supported range ({desc}); "
+                    "the integration step runs it with ABICHECK_ALLOW_UNSUPPORTED_CASTXML=1")
+          PY
+
+      - name: Integration tests (toolchain canary)
+        # The same verify.py step integration.yml runs, so the canary exercises
+        # exactly the integration marker suite. The Linux legs run as two
+        # shards with the same weights file, so the two together are the whole
+        # suite once. The log is kept for the failure artifact below. Runs
+        # even when the policy step above failed: they are separate answers.
+        if: success() || failure()
+        shell: bash
+        env:
+          ABICHECK_MIN_EXECUTED: ${{ matrix.min_executed }}
+          PYTEST_ADDOPTS: ${{ matrix.addopts }}
+          # castxml leg only: let a release past MAX_CASTXML run, so the leg
+          # reports output-format drift instead of stopping at the version
+          # gate (whose answer the step above asserts separately).
+          ABICHECK_ALLOW_UNSUPPORTED_CASTXML: ${{ matrix.toolchain == 'castxml' && '1' || '' }}
+        run: python scripts/verify.py --profile full --only integration --require-complete 2>&1 | tee "$CANARY_LOG"
+
+      - name: Upload canary log on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: ${{ env.CANARY_LOG }}
+          path: ${{ env.CANARY_LOG }}
+          if-no-files-found: ignore
+          retention-days: 30
+
+  notify:
+    # Scheduled runs only: a manual dispatch is watched by whoever started it.
+    # Opens ONE tracking issue (matched by exact title) or comments on the open
+    # one, so a red week does not spawn a new issue every Tuesday. The only job
+    # with a write permission, and only issues: write.
+    name: notify (scheduled failure)
+    needs: canary
+    if: always() && github.event_name == 'schedule' && needs.canary.result == 'failure'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Open or update the tracking issue
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          TITLE: 'Toolchain canary failing'
+        run: |
+          set -euo pipefail
+          body="$(printf '%s\n' \
+            "The scheduled toolchain canary run failed: ${RUN_URL}" \
+            "" \
+            "Triage (owner: maintainers): docs/contribute/agent-guide/quality-gates.md \"Toolchain canaries\"." \
+            "Close this issue once a later scheduled run is green on every leg.")"
+          number="$(gh issue list --state open --search "in:title \"${TITLE}\"" \
+            --json number,title --jq "map(select(.title == env.TITLE)) | .[0].number // empty")"
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --body "$body"
+            echo "Commented on #${number}"
+          else
+            gh issue create --title "$TITLE" --body "$body"
+          fi

@@ -1154,4 +1154,35 @@ TOOL_SURFACE_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="action.supplied_code_runs_before_the_gate",
+        invariant=(
+            "Code the Action runs on a user's behalf beyond the comparison "
+            "itself (a build command, a base-commit checkout) cannot change "
+            "what the gate compares, the gate's result, or a later step: "
+            "it runs only after the gate comparison has produced its report, "
+            "with no token or Action input in its environment, its "
+            "GITHUB_ENV/GITHUB_PATH/GITHUB_OUTPUT/GITHUB_STEP_SUMMARY writes "
+            "discarded, and its own result written where it cannot forge "
+            "it. A side effect it does have on the PR's inputs (an install "
+            "over new-library) is detected and reads as a named failure, "
+            "never as a measured delta."
+        ),
+        # PR #1956 review: `delta-on-missing-base: build` first ran the
+        # base build as a step before the gate, so a `make install` over
+        # an installed new-library, or a GITHUB_ENV write, reached the gate.
+        fixed_by=(1956,),
+        seed_tests=("tests/test_action_delta_base_build.py",),
+        public_surfaces=("action",),
+        axes={
+            "channel": (
+                "runner-file",
+                "environment",
+                "result-file",
+                "git-credential",
+                "operand-file",
+            ),
+            "ordering": ("before-gate", "after-gate"),
+        },
+    ),
 )

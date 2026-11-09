@@ -48,24 +48,9 @@ from ...header_utils import (
     resolve_inferred_header_roots,
 )
 from ...model import AbiSnapshot
-from ...model.surface_facts import in_public_surface
 
 if TYPE_CHECKING:
     from ...dry_run_estimate import CompileContext
-
-
-def _has_matched_public_surface(snap: AbiSnapshot) -> bool:
-    """True if header parsing matched at least one exported symbol.
-
-    ``dumper._dump_pe`` / ``dumper._dump_macho`` mark a declaration ``PUBLIC``
-    only when its (mangled) name is present in the binary's export table.  When
-    no declaration matches — e.g. an MSVC-mangled C++ DLL parsed with a
-    Clang/GCC toolchain that emits Itanium names — every symbol collapses to
-    ``HIDDEN`` and header scoping has had no effect.
-    """
-    return any(in_public_surface(f) for f in snap.declarations.functions) or any(
-        in_public_surface(v) for v in snap.declarations.variables
-    )
 
 
 def _try_header_scoped_dump(
@@ -84,13 +69,16 @@ def _try_header_scoped_dump(
 ) -> tuple[AbiSnapshot | None, str | None]:
     """Attempt a header-scoped dump for a PE/Mach-O binary.
 
-    Returns ``(snapshot, None)`` when the selected header backend is available
-    *and* at least one declared symbol matched the export table.  Returns
-    ``(None, reason)`` (after emitting a ``UserWarning``) when scoping is
-    unavailable or had no effect, so the caller can fall back to export-table
-    mode and record the structured confidence signal (ADR-024 §D5.3).
-    ``reason`` is one of ``"header-backend-unavailable"`` /
-    ``"mangling-fallback"``.  This mirrors the public-API scoping that
+    Returns ``(snapshot, None)`` when the headers parsed and at least one
+    declaration is bound to an export, exactly or by a normalized identity
+    across mangling schemes (:mod:`abicheck.extract.header_export_binding`).
+    Returns ``(snapshot, "export-binding-unresolved")`` when the headers
+    parsed but no declaration could be bound: the header surface is still
+    kept as type-level evidence, and the code is recorded on the snapshot.
+    Returns ``(None, "header-backend-unavailable")`` (after a
+    ``UserWarning``) only when the header parse itself failed, so the caller
+    falls back to export-table mode and records that confidence signal
+    (ADR-024 §D5.3). This mirrors the public-API scoping that
     ``abidw --headers-dir`` / abi-dumper apply for ELF.
 
     ``lang_explicit`` (G31 Phase C follow-up): forces *lang* on this pass
@@ -258,15 +246,50 @@ def _try_header_scoped_dump(
         )
         return None, "header-backend-unavailable"
 
-    if not _has_matched_public_surface(snap):
+    return snap, _bind_exports(fmt, path, snap)
+
+
+def _bind_exports(fmt: str, path: Path, snap: AbiSnapshot) -> str | None:
+    """Bind header declarations the exact export lookup missed, keeping the
+    parsed header surface whatever the outcome.
+
+    A header set that parsed is type-level evidence even when no
+    declaration's spelling meets an export (an MSVC DLL against an Itanium
+    parse, a template-only header): its types, enums, templates and
+    concepts stay. Exports still unbound remain in the snapshot's own PE/
+    Mach-O export table, which the platform export delta compares. Returns
+    :data:`EXPORT_BINDING_UNRESOLVED` (recorded on the snapshot)
+    when no declaration could be bound to any export, else ``None``.
+    """
+    from ...extract.header_export_binding import (
+        EXPORT_BINDING_UNRESOLVED,
+        bind_header_declarations_to_exports,
+        binding_export_names,
+    )
+
+    names, x86_32 = binding_export_names(snap)
+    outcome = bind_header_declarations_to_exports(snap, names, x86_32=x86_32)
+    if outcome.ambiguous:
         warnings.warn(
-            f"None of the provided headers matched exported symbols in "
-            f"'{path.name}'. This commonly happens when a C++ {fmt.upper()} binary "
-            f"uses a name-mangling scheme (e.g. MSVC) different from the compiler "
-            f"used to parse the headers. Falling back to export-table mode — "
-            f"header-based scoping had no effect.",
+            f"{len(outcome.ambiguous)} export(s) of '{path.name}' ({fmt.upper()}) "
+            "could not be bound to one header declaration (overloaded or "
+            "signature-mismatched across name-mangling schemes), e.g. "
+            f"{outcome.ambiguous[0]!r}; they are compared from the export "
+            "table only.",
             UserWarning,
-            stacklevel=2,
+            stacklevel=3,
         )
-        return None, "mangling-fallback"
-    return snap, None
+    if outcome.any_declaration_bound or not names:
+        return None
+    warnings.warn(
+        f"None of the provided headers' declarations could be bound to an "
+        f"exported symbol of '{path.name}' ({fmt.upper()}): the headers declare "
+        f"no exported entity, or name it under another mangling scheme. The "
+        f"parsed header surface (types, templates, declarations) is kept; "
+        f"{len(outcome.unbound_exports)} export(s) are compared from the export "
+        f"table only.",
+        UserWarning,
+        stacklevel=3,
+    )
+    snap.scope_fallback = EXPORT_BINDING_UNRESOLVED
+    return EXPORT_BINDING_UNRESOLVED

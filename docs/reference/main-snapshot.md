@@ -8,6 +8,9 @@ depends_on:
   - actions/main-snapshot/action.yml
   - actions/fetch-main-snapshot/action.yml
   - abicheck/frontends/action/main_snapshot.py
+  - abicheck/frontends/action/delta_base_dump.py
+  - action/build-delta-base.sh
+  - abicheck/frontends/action/main_snapshot_cache.py
 lifecycle: active
 generated: false
 ---
@@ -25,7 +28,8 @@ standalone Actions remain for custom workflows — pass `snapshot-path` as
 ## `actions/main-snapshot` — on every push to the default branch
 
 Dumps one snapshot (or adopts one you already produced) and uploads it as the
-artifact `abicheck-main-<full sha>[-<profile>]`. It refuses to run on
+artifact `abicheck-main-<full sha>[-<profile>]` — or, with `storage: cache`,
+saves it to the Actions cache (see [Cache storage](#cache-storage)). It refuses to run on
 `pull_request`/`pull_request_target`: a pull request must never write what
 other pull requests are measured against.
 
@@ -36,9 +40,11 @@ other pull requests are measured against.
 | `dump-args` | — | Extra `dump` arguments, one per line; a line such as `-I include` is split on whitespace. Use the same evidence inputs as the PR side. |
 | `snapshot` | — | An already-produced snapshot to upload instead of dumping. |
 | `profile` | — | Name suffix for multi-configuration projects. |
-| `retention-days` | `14` | Artifact lifetime. |
+| `retention-days` | `14` | Artifact lifetime (`storage: artifact`). |
+| `storage` | `artifact` | `artifact` or `cache`. |
+| `branch` | repository default | `storage: cache`: the branch the entry may be saved from; set it on events whose payload names no default branch. |
 
-Outputs: `artifact-name`, `snapshot-path`.
+Outputs: `artifact-name`, `snapshot-path`, `cache-key` (`storage: cache`).
 
 The artifact holds `snapshot.json` and `operand.json`, which records the
 `library` path as given (and `profile`) so a pull request whose library moved
@@ -59,13 +65,14 @@ Chooses the base commit by an exact rule, then finds the snapshot uploaded
 
 | Input | Default | Meaning |
 |---|---|---|
-| `workflow` | *(required)* | The snapshot workflow's file, e.g. `abi-main.yml`. |
+| `workflow` | *(required with `artifact`)* | The snapshot workflow's file, e.g. `abi-main.yml`. Unused with `cache`. |
+| `storage` | `artifact` | Must match the producer's: `artifact` or `cache`. |
 | `mode` | `auto` | `auto`, `merge-commit`, `head`. |
 | `branch` | repository default | Branch the snapshot must come from. |
 | `profile` | — | As in `main-snapshot`. |
-| `wait-timeout` | `600` | Seconds to wait while the base's snapshot run is still in progress. |
+| `wait-timeout` | `600` | Seconds to wait while the base's snapshot run is still in progress. Ignored with `cache`. |
 | `destination` | runner temp | Parent directory; the snapshot is extracted into a new subdirectory of it. |
-| `github-token` | `github.token` | Needs `actions: read`. |
+| `github-token` | `github.token` | Needs `actions: read` (`artifact` only). |
 
 Outputs: `outcome`, `base-sha`, `snapshot-path` (when resolved), `message`
 (one line for a comment or summary).
@@ -91,11 +98,11 @@ other outcome may be read as "no changes".
 | `base_ambiguous` | Head mode found several merge-bases. | Rebase onto or merge the default branch. |
 | `base_pending` | The base's snapshot run was still running after `wait-timeout`. | Re-run when it finishes. |
 | `base_failed` | The base's snapshot run did not succeed. | Fix the default-branch run. |
-| `base_not_snapshotted` | No snapshot run for the base (path filter, `[skip ci]`). | Snapshot every push, or accept no delta. |
+| `base_not_snapshotted` | No snapshot run for the base (path filter, `[skip ci]`); with `cache`, no entry under the exact key (not saved yet, evicted, never saved, or a cache-service error — the cache cannot tell which). | Snapshot every push, or accept no delta; with `cache`, re-run once the snapshot job finished. |
 | `base_expired` | The snapshot passed `retention-days`. | Push or *Update branch*; a re-run reuses the old merge commit. |
 | `snapshot_missing` | The base's snapshot run succeeded, but no artifact is listed: expired, deleted or never uploaded (the API cannot tell which). | Push or *Update branch*; check the snapshot workflow's upload step. |
-| `untrusted_source` | An artifact with the right name came from another workflow, event, branch or commit. | Investigate; it is never used. |
-| `lookup_failed` | A GitHub API call or the download failed, or the artifact held no `snapshot.json`. | Retry; this is not "absent". |
+| `untrusted_source` | An artifact with the right name came from another workflow, event, branch or commit; with `cache`, the entry's `provenance.json` names another repository, ref, commit or key. | Investigate; it is never used. |
+| `lookup_failed` | A GitHub API call or the download failed, or the artifact held no `snapshot.json`; with `cache`, the entry is malformed (unexpected or non-regular files, over the size limit, unreadable JSON). | Retry; this is not "absent". |
 
 ## Example
 
@@ -136,6 +143,59 @@ jobs:
         run: printf '%s\n' "$MESSAGE" >> "$GITHUB_STEP_SUMMARY"
 ```
 
+## Cache storage
+
+`storage: cache` on **both** Actions moves the snapshot from a workflow
+artifact to an Actions-cache entry under the key
+`abicheck-main-snapshot-<full sha>[-<profile>]`. Use it when the
+pull-request job cannot be given `actions: read` — typically fork pull
+requests of a private repository. Default-branch caches are readable from
+every pull request, forks included, with no token at all.
+
+```yaml
+# producer
+      - uses: abicheck/abicheck/actions/main-snapshot@v1
+        with: { library: build/libfoo.so, header: include/, storage: cache }
+# pull-request job (no actions: read needed)
+      - id: base
+        uses: abicheck/abicheck/actions/fetch-main-snapshot@v1
+        with: { storage: cache }
+```
+
+**What is verified.** A cache entry has no producing run the consumer could
+inspect, so `resolved` means less than on the artifact path:
+
+| Check | Artifact | Cache |
+|---|---|---|
+| Bound to the exact base commit | name `abicheck-main-<sha>` + the run's `head_sha` | the exact key only — `restore-keys` is never used, so no other commit's entry can stand in |
+| Who wrote it | the uploading run is a `push`/`workflow_dispatch`/`schedule` run of `workflow`, in this repository, on `branch`, concluded `success` | **not verified.** GitHub's cache scoping limits it: a job reads its own ref's entries, its base branch's and the default branch's. `main-snapshot` saves only from `refs/heads/<branch>`, and `fetch-main-snapshot` refuses (`untrusted_source`, before restoring anything) unless it runs on a pull request **into `branch`** or on `refs/heads/<branch>` itself — a PR into another branch or a `merge_group` run would also read a scope other workflows write. Any workflow on `branch` can still write `branch`'s scope |
+| Origin record | — (the run is the record) | `provenance.json`, written by `main-snapshot`, must name this repository, `refs/heads/<branch>`, the base SHA and the key. It is **self-reported**: anything able to write the scope can write it |
+| Contents | ≤ 1 GiB, safe zip extraction, `snapshot.json` present | `snapshot.json` + `provenance.json` (both JSON objects) and optionally `operand.json`, nothing else, regular files only, ≤ 1 GiB each and in total; `operand.json` is copied beside the snapshot and read by the operand pairing, as from an artifact — checked **after** `actions/cache` has extracted the entry. That extraction (`tar -P`, relative to the workspace) is not limited by abicheck: an entry can place files outside the staging directory before any check runs, as with any `actions/cache` use |
+| In progress / failed run | `base_pending` / `base_failed` | not observable — a miss is `base_not_snapshotted`; `wait-timeout` does not apply |
+| Lifetime | `retention-days` | 7 days unused, and the repository's cache size limit (LRU) |
+| Replacing a bad entry | a re-run uploads a newer one, which wins | impossible: a key is written once. Delete it (`gh cache delete <key>`) and re-run the snapshot job |
+| Runner | any | the same OS family on both sides: the cache version covers the compression method, so an entry saved on Linux is a miss on Windows. `provenance.json` records `runner_os` |
+
+What remains is two ways an entry can be forged. A workflow that runs **on
+the pull request's own ref** can save an entry under the same key, and that
+job's own lookup reads its own scope first, so a pull request can mislead
+its own delta comment. And any workflow running on `branch` — not only the
+snapshot workflow — can write `branch`'s scope, with a `provenance.json`
+that says whatever it likes; that is everyone with push access to `branch`.
+Neither reaches another pull request's comment through a third party's
+scope, and neither reaches the release gate, which this lookup does not
+feed. Prefer `artifact` whenever the pull-request token can have
+`actions: read`.
+
+A cache-service error and a version mismatch (another OS family, another
+compression) both read as `base_not_snapshotted`: `actions/cache/restore`
+reports them as a miss.
+
+The restored entry is checked in a workspace directory
+(`.abicheck-main-snapshot-cache`, which must not already exist) and removed
+afterwards; the snapshot is copied into a new subdirectory of `destination`.
+The main Action's `delta-baseline` uses artifact storage.
+
 ## `delta-baseline` in the main Action
 
 ```yaml
@@ -161,8 +221,9 @@ under two notes: what it was measured against, and the gate's verdict. When
 the snapshot is unavailable the comment shows the gate's report under a note
 naming the outcome. The step's exit code, `verdict` and every other output
 come from the gate in all cases; `delta-on-missing-base: fail` adds a separate
-failing step. Outputs: `delta-outcome`, `delta-base-sha`,
-`delta-operand-match`.
+failing step. Outputs: `delta-outcome` (the lookup's outcome),
+`delta-base-sha`, `delta-operand-match`, and `delta-comment-outcome` (what
+the comment shows: the lookup outcome, or one of the outcomes below).
 
 ### Operand identity: is the snapshot this PR's library?
 
@@ -199,7 +260,8 @@ same snapshot library are `operand_ambiguous` (line order never decides).
 Every refusal's reason is also written to the job log as a warning. Every refusal keeps the gate's report in the
 comment under a "Delta unavailable" note; with `delta-on-missing-base: fail`
 an `operand_*` refusal fails the separate "Require the delta base snapshot"
-step like a missing snapshot does.
+step like a missing snapshot does. A base built by
+`delta-on-missing-base: build` goes through the same check.
 
 It runs on `pull_request` and `merge_group` only (a `pull_request_target`
 checkout is the base branch, not the PR), and for a single-library
@@ -214,3 +276,113 @@ never as text: the
 trusted publisher validates their shape and writes the notes itself, with the
 wording the direct path uses. A field that fails validation drops the notes
 rather than showing fork-written text.
+
+### `delta-on-missing-base: build`
+
+When the lookup selected an exact base commit but no stored snapshot is
+usable for it (`base_pending`, `base_failed`, `base_not_snapshotted`,
+`base_expired`, `snapshot_missing`, `untrusted_source`, `lookup_failed`), the
+Action can build that commit in the PR job instead of explaining the gap.
+With `storage: cache` the same applies: a miss (`base_not_snapshotted`), a
+refused entry or scope (`untrusted_source`) and a malformed entry
+(`lookup_failed`) concern the cache entry, not which commit is the base, and
+the build never reads the refused entry:
+
+```yaml
+      - uses: actions/checkout@v5
+        with: { fetch-depth: 2, persist-credentials: false }
+      - run: ./build.sh
+      - uses: abicheck/abicheck@v1
+        with:
+          abi-baseline: latest-release
+          new-library: build/libfoo.so
+          new-header: include/
+          delta-baseline: main
+          delta-snapshot-workflow: abi-main.yml
+          delta-on-missing-base: build
+          delta-base-build-command: ./build.sh
+```
+
+1. **After** the normal comparison (the gate) has run, and only when a
+   comment is rendered, the Action checks the base commit out into a git
+   worktree under `runner.temp` (the PR checkout and its build outputs are
+   untouched; a commit missing from a shallow clone is fetched by SHA; the
+   repository is found from `new-library`'s directory, so a checkout under
+   `path:` works) and runs `delta-base-build-command` with
+   `bash -e -o pipefail` from that worktree's root, with `ABICHECK_BASE_SHA`
+   set.
+2. The comparison step dumps the result with this run's **new-side**
+   evidence inputs (`new-library`, `header`/`new-header`,
+   `include`/`new-include`, `new-debug-info`, `sources`, `build-info`,
+   `depth`, `build-config`, the compile context and `compile.*`/`build.*`
+   `set:` lines), each path moved to the same place relative to the base
+   checkout's root, so both sides of the delta are captured at the same
+   evidence depth. Old-side inputs describe the release baseline and are not
+   used. A path outside the PR checkout (other than an include directory,
+   kept as a toolchain directory) cannot be provided by the base build and
+   is refused rather than reused, as is a `--dump-manifest`.
+3. That snapshot is the delta's old side, exactly as a resolved stored
+   snapshot is. The worktree is removed afterwards.
+
+`delta-base-build-command` must therefore leave the library and those
+inputs at the same paths, relative to the checkout root, as the PR build
+does, and must not install over the PR build: when it changes
+`new-library`, the delta is not measured (`base_build_failed`), since it would
+compare the base with itself. Submodules, caches and dependencies are the
+command's job.
+
+The command is isolated from the rest of the job. The gate has already
+compared, so nothing it writes can change the gate's result. Its
+`GITHUB_ENV`, `GITHUB_PATH`, `GITHUB_OUTPUT` and `GITHUB_STEP_SUMMARY` point at
+throwaway files, so it cannot change a later step's environment or forge
+the build's result. No token and none of the Action's inputs are in its
+environment, and the git commands it runs see no `actions/checkout`
+credential. The persisted credential is still in `.git/config`, readable
+by any code the build runs, so check out with `persist-credentials: false`
+(as above). The code it runs is the base commit's, already on the default
+branch.
+
+`base_unknown` and `base_ambiguous` selected no commit, so nothing is built:
+the comment explains them as with `report`. The comment and
+`delta-comment-outcome` name what happened, and the step's status is always
+the gate's:
+
+| `delta-comment-outcome` | Comment |
+|---|---|
+| `base_built` | The delta, headed "Changes in this PR (vs `main@<sha7>`, built in this job …)". |
+| `base_build_failed` | The checkout or `delta-base-build-command` failed; the release comparison is shown and the job log has the build output. |
+| `base_dump_failed` | The build succeeded but its dump failed, or an evidence path cannot be moved into the base checkout; the release comparison is shown. |
+| `rerun_failed` | The comparison against the built base produced no report. |
+
+None of them reads as "no changes", and none of them changes the exit code.
+
+### The record in the JSON report
+
+Both reports say which comparison they are, in a top-level `delta_baseline`
+block (compare report schema 7.3, release report schema 3.1; field reference
+in [output formats](../use/output-formats.md#gate-or-delta-comparison-delta_baseline)):
+
+| Report | `comparison_role` | `outcome` | `gate_verdict` | `operand_match` |
+|---|---|---|---|---|
+| The gate's (the `output-file`, the summary, the SARIF/JUnit sources) | `gate` (`decides_exit_code: true`) | the lookup's outcome, or `unsupported_operand` for a directory/package comparison | `null` -- its own `verdict` is the gate's | `null` -- the gate runs before the operands are paired |
+| The delta's (the one the comment renders, and the one staged for a fork publisher) | `delta` (`decides_exit_code: false`) | `resolved`, or `base_built` when `delta-on-missing-base: build` built the base in this job | the gate's verdict | how the snapshot's library was paired with `new-library` (the `delta-operand-match` output) |
+
+`base_sha` and `branch` are the base commit and default branch on both. The
+gate's block records the lookup as it stood when the gate ran: if the delta
+comparison then produces no report, the comment falls back to the gate's
+report under `rerun_failed`, which the gate's block does not show; the same
+holds for the operand-identity refusals (`operand_*`) and for a failed base
+build (`base_build_failed`, `base_dump_failed`), which are decided after the
+gate and run no delta comparison. The block
+never changes a verdict or exit code. A record the CLI would refuse is not
+passed at all (the run warns), so the block can never turn the gate's run
+into a usage error.
+
+A stored report renders its own notes: the fork publisher reads the
+analysis context's `delta_*` fields first and, without them, the report's
+`delta_baseline` block (for the one-target aggregate the fork path stages, the
+block of the one member report it names, read through the same path-safe
+loader as the comment's member rendering) -- a `delta` report is labelled as the delta with the
+recorded gate verdict, an unresolved `gate` report with its outcome. A
+resolved `gate` report rendered on its own carries no note, since it does not
+record whether a delta comparison followed.

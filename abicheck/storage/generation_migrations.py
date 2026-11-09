@@ -470,6 +470,16 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "not captured"
     ),
     44: GenerationSpellingChange(
+        "PE/Mach-O header-scoped dumps keep the parsed header surface when no "
+        "declaration's spelling matches an export (scope_fallback "
+        "export-binding-unresolved replaces mangling-fallback), and bind a "
+        "declaration to an export spelled in another mangling scheme "
+        "(extract/header_export_binding): a bound declaration's mangled "
+        "becomes the export's MSVC/Itanium/decorated spelling. ELF dumps and "
+        "every type or name spelling are unchanged, so no rewrite is needed -- "
+        "an older PE/Mach-O snapshot keeps its export-table-only surface"
+    ),
+    45: GenerationSpellingChange(
         "no type or name spelling changes. castxml runs read a function's "
         "noexcept specification and the public headers' C++20 concept and "
         "template constraints from the clang AST of the same header "
@@ -477,13 +487,13 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "stored is_noexcept=False for every function and no constraint table; "
         "a function whose header spells a specification the join could not "
         "read stores is_noexcept=None (not observed). "
-        "castxml_noexcept_migration.py loads a pre-44 castxml snapshot's C++ "
+        "castxml_noexcept_migration.py loads a pre-45 castxml snapshot's C++ "
         "is_noexcept=False as None, so an older baseline reports no "
         "func_noexcept_added for an unchanged noexcept function; its missing "
         "constraint table already reads as not modelled",
         migrates_facts=True,
     ),
-    45: GenerationSpellingChange(
+    46: GenerationSpellingChange(
         "no type or name spelling changes. castxml and clang runs set "
         "cxx_template_defaults (the public headers' template-parameter "
         "defaults of every class, function, alias and variable template, read "

@@ -234,7 +234,7 @@ PROBES: dict[str, Probe] = {
         "int f(int x) { return x; }",
         header_reaches=False,  # producer is L4 source replay, not castxml
     ),
-    # castxml reads the specification from its clang join (generation 44);
+    # castxml reads the specification from its clang join (generation 45);
     # DWARF records no exception specification at all.
     "func_virtual_noexcept_added": _inline(
         "struct S { virtual ~S(); virtual int area() const; int w; };",

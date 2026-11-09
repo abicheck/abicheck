@@ -104,7 +104,7 @@ with clang to read `noexcept` and C++20 constraints
 records every template's defaults: class, function, alias and variable
 templates, and type, non-type and template-template parameters
 (`extract/headers/clang/template_default_entries.py`,
-`AbiSnapshot.cxx_template_defaults`, extractor generation 45). The clang
+`AbiSnapshot.cxx_template_defaults`, extractor generation 46). The clang
 backend records the same table, which is how it now covers alias and variable
 templates, which it had no model entity for. The decisions that follow keep
 the 2026-10-23 rationale: the verdict reports what was observed, and

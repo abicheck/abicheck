@@ -278,13 +278,6 @@
    "expected_kinds": [
     "concept_tightened"
    ],
-   "known_gap": "macOS integration-tests observes NO_CHANGE for this case on the castxml header backend: the Mach-O export-table scope fallback discards the headers before the clang-AST concept join contributes; see case100_experimental_removed_without_replacement's known_gap for the shared investigation notes. Linux (gcc and clang, both header backends) remains the blocking detector lane.",
-   "known_gap_platforms": [
-    "macos"
-   ],
-   "known_gap_observed": [
-    "NO_CHANGE"
-   ],
    "min_evidence": "L4",
    "platforms": [
     "linux",

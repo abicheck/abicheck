@@ -146,7 +146,7 @@ class Function:
     # Availability lives in is_noexcept_fact (below): NOT_COLLECTED when the
     # producer did not observe the exception specification -- a castxml run
     # whose clang join could not read a header that spells one, or a
-    # pre-generation-44 castxml baseline (which stored a blanket False). A
+    # pre-generation-45 castxml baseline (which stored a blanket False). A
     # constructor given is_noexcept=None records exactly that.
     is_noexcept: bool = False
     is_extern_c: bool = False

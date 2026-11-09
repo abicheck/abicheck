@@ -218,13 +218,13 @@
     },
     "43": {
       "castxml": "castxml version 0.7.0",
-      "commit": "e46af3d55b3b",
+      "commit": "7ff1d1903bd0",
       "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
       "snapshot": "gen43/corpus.json.gz"
     },
     "44": {
       "castxml": "castxml version 0.7.0",
-      "commit": "6c8d4911a78e",
+      "commit": "2949ed11684a",
       "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
       "snapshot": "gen44/corpus.json.gz"
     },
@@ -249,6 +249,7 @@
   },
   "skipped": {
     "16": "generation 16 (castxml function-type declarators) and 17 (clang unspellable template defaults) land together in one PR; main goes from 15 straight to 17, so no main commit ever ran generation 16",
+    "45": "generation 45 (castxml noexcept and C++20 constraints from the clang AST) and 46 (template-parameter defaults from the clang AST, #1966) land together in PR #1961; main goes from 44 straight to 46, so no main commit ever ran generation 45",
     "7": "generations 7 and 8 were intermediate bumps inside PR #1712's branch (clang positional defaults, dependent members); main went from 6 (49529426d) straight to 9 (c23a9ad57), so no main commit ever ran them",
     "8": "generations 7 and 8 were intermediate bumps inside PR #1712's branch (clang positional defaults, dependent members); main went from 6 (49529426d) straight to 9 (c23a9ad57), so no main commit ever ran them"
   },

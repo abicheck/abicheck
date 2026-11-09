@@ -190,7 +190,7 @@ def test_case105_concept_tightening_through_the_cli_per_backend(
 ) -> None:
     """Catalog case105 (concept tightened) through the public dump/compare CLI:
     both backends detect ``concept_tightened`` and name no concept gap --
-    castxml through its clang join (extractor generation 44). Without a
+    castxml through its clang join (extractor generation 45). Without a
     clang for that join, castxml never reads ``complete`` and names the
     concept dimension on both sides."""
     import shutil
@@ -222,18 +222,25 @@ def test_case105_concept_tightening_through_the_cli_per_backend(
         "new_scan": _snapshot_scan(tmp_path / "v2.json"),
     }
     fallback = [n for n in assurance["notes"] if n.startswith(SCOPE_FALLBACK_DIMENSION)]
-    if shutil.which("clang") is not None and not fallback:
-        # clang (or castxml's clang join) models the concepts: the
-        # tightening is detected and no concept gap is named on either side.
+    # The header surface is kept on every format: a fallback note may only
+    # say that no declaration bound to an export (the template-only surface
+    # has no exported declaration on Mach-O/PE), never that the headers were
+    # discarded (bug class extraction.header_surface_discarded_on_export_mismatch).
+    assert all("export-binding-unresolved" in n for n in fallback), diagnostics
+    if shutil.which("clang") is not None:
+        # clang (or castxml's clang join) models the concepts on every
+        # platform: the tightening is detected and no concept gap is named.
         kinds = {c["kind"] for c in report.get("changes", [])}
         assert "concept_tightened" in kinds, diagnostics
         assert named == [], diagnostics
         return
     assert assurance["status"] == "partial", diagnostics
-    # Each side names either the concept dimension (headers parsed: Linux/ELF)
-    # or the export-table fallback (the header-only template surface matches
-    # no Mach-O/PE export, so the headers were discarded) -- never neither.
-    assert len(named) + len(fallback) == 2, diagnostics
+    # castxml cannot model concepts: both sides name the concept dimension,
+    # because both kept their parsed headers.
+    assert [s for s in ("old", "new") if any(f" {s} snapshot" in n for n in named)] == [
+        "old",
+        "new",
+    ], diagnostics
 
 
 def _snapshot_scan(path: Path) -> dict[str, object]:

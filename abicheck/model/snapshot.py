@@ -188,12 +188,10 @@ class AbiSnapshot:
     # a C parse, no declared public set, an older dump). Persisted as the
     # ``abicheck.cxx_concept_constraints`` extension fact of the debug section.
     cxx_concept_constraints: dict[str, str] | None = field(default=None, kw_only=True)
-    # The public headers' template-parameter defaults of every class, function,
-    # alias and variable template (model/template_default_table.py), read from
-    # the clang AST by both header backends. None: not modelled (castxml whose
-    # clang join could not run, a C parse, no declared public set, an older
-    # dump). Persisted as the ``abicheck.cxx_template_defaults`` extension fact
-    # of the debug section.
+    # Public headers' template-parameter defaults (model/template_default_table.py),
+    # read from the clang AST by both header backends; None: not modelled (no
+    # clang join, a C parse, no public set, an older dump). Extension fact
+    # ``abicheck.cxx_template_defaults`` of the debug section.
     cxx_template_defaults: dict[str, TemplateDefaults] | None = field(
         default=None, kw_only=True
     )
@@ -341,9 +339,15 @@ class AbiSnapshot:
     # never requested. Recognised values:
     #   "header-backend-unavailable" — selected header backend missing / header
     #                                  parse failed
-    #   "mangling-fallback"          — headers parsed but no declared symbol
-    #                                  matched the export table (typically MSVC
-    #                                  C++ name mangling)
+    #   "export-binding-unresolved"  — headers parsed and KEPT (from_headers
+    #                                  stays True), but no declaration could be
+    #                                  bound to any export, exactly or across
+    #                                  mangling schemes (extract.
+    #                                  header_export_binding); the exports are
+    #                                  compared from the export table only
+    #   "mangling-fallback"          — legacy (stored snapshots only): headers
+    #                                  parsed, nothing matched, and the header
+    #                                  surface was discarded
     scope_fallback: str | None = None
 
     # Full-stack dependency info (populated by --follow-deps)

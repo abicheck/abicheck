@@ -1258,6 +1258,11 @@ concepts:
     renames: []
     config:
       - report.baseline_provenance
+  - concept: report.delta_baseline
+    tier: config
+    renames: []
+    config:
+      - report.delta_baseline
   - concept: compression
     tier: config
     renames: []
@@ -1309,6 +1314,7 @@ concepts:
       - action:delta-profile
       - action:delta-wait-timeout
       - action:delta-on-missing-base
+      - action:delta-base-build-command
       - action:delta-operand-map
   - concept: aggregate
     tier: core

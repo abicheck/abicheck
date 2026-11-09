@@ -385,7 +385,9 @@ def _seed_flat_graph(
     # genuine header parse, so this was never a real structural scan of the
     # declared types at all (Codex review) — stamping it would let a later real
     # header dump's first structural edge misread as newly added.
-    if not snapshot.scope_fallback:
+    # An ``export-binding-unresolved`` snapshot kept its real header parse
+    # (``from_headers``), so its structural scan is genuine.
+    if not snapshot.scope_fallback or snapshot.from_headers:
         graph.extractor_passes[HEADER_TYPE_GRAPH_PASS] = True
         # Gap A5: every declaration the parsed headers make was walked.
         graph.extractor_passes[HEADER_DECLARATIONS_PASS] = True

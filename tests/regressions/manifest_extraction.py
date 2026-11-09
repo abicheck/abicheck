@@ -780,4 +780,37 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             ),
         ),
     ),
+    BugClass(
+        id="extraction.header_surface_discarded_on_export_mismatch",
+        invariant=(
+            "A PE or Mach-O dump with headers keeps every header declaration "
+            "and type the headers parsed, whether or not any declaration's "
+            "linker spelling meets an export; and a header declaration binds "
+            "to exactly the export it names, whatever mangling scheme each "
+            "side spells it in (Itanium, MSVC, x86 C decoration), and to no "
+            "other. The same sources and headers built for ELF, PE and "
+            "Mach-O therefore yield the same verdict and findings."
+        ),
+        fixed_by=(1967,),
+        seed_tests=(
+            "tests/test_header_export_binding.py",
+            "tests/test_pe_macho_header_binding_integration.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "frontend": ("castxml", "clang"),
+            "format": ("elf", "pe", "macho"),
+            "mangling": ("itanium->msvc", "msvc->itanium", "c->x86-decorated"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "PE overloads whose parameters are not builtin types, and "
+                    "MSVC operators/structors/template instantiations, stay "
+                    "unbound and are compared from the export table only."
+                ),
+                reference="docs/contribute/known-gaps/pe-overloads-with-class-typed-parameters-stay-unbound.md",
+            ),
+        ),
+    ),
 )

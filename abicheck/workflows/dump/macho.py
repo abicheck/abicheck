@@ -53,7 +53,9 @@ def extract_macho(
     """Dump a Mach-O binary (macOS dylib) to an ABI snapshot.
 
     When *headers* are supplied the ABI surface is scoped to declarations in
-    those public headers via castxml; otherwise the full export table is used.
+    those public headers, and a header set that parses is kept even when no
+    declaration binds to an export; otherwise (no headers, or a failed parse)
+    the full export table is used.
     """
     from ...extract.export_table_read import read_exports_or_fail
     from ...macho_metadata import parse_macho_metadata

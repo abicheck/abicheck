@@ -13,9 +13,9 @@ regexTarget = "secret"
 regexes = ['''^_Z[A-Za-z0-9_]+$''']
 
 [[allowlists]]
-description = "Python keyword arguments (`name=value`) read as an `access`/`key` assignment"
+description = "Python keyword arguments (`name=value`, or a bare `name=` before a string literal) read as an `access`/`key` assignment"
 regexTarget = "secret"
-regexes = ['''^[a-z_]+=[A-Za-z_][A-Za-z0-9_.]*$''']
+regexes = ['''^[a-z_]+=([A-Za-z_][A-Za-z0-9_.]*)?$''']
 
 [[allowlists]]
 description = "Bazel aquery fixtures: actionKey values are SHA-256 action digests"

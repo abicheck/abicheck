@@ -318,7 +318,7 @@ def _str_list(value: Any) -> list[str]:
 
 #: The functions whose ``noexcept`` exception specification the producer did
 #: not observe (``Function.is_noexcept_fact`` ``NOT_COLLECTED``, extractor
-#: generation 44): a castxml run whose clang join could not read a header that
+#: generation 45): a castxml run whose clang join could not read a header that
 #: spells one. Their mangled names, written on the ``declarations`` section
 #: when there is at least one. Absent, every stored ``is_noexcept`` was
 #: observed. An older reader that ignores it reads those functions as not
@@ -358,7 +358,7 @@ def _template_default_map(value: Any) -> dict[str, list[str | None] | None]:
 #: The public headers' template-parameter defaults (ADR-085 D1) of every
 #: class, function, alias and variable template, read from the clang AST by
 #: both header backends (``AbiSnapshot.cxx_template_defaults``, extractor
-#: generation 45). Written on the ``debug`` section whenever a run modelled
+#: generation 46). Written on the ``debug`` section whenever a run modelled
 #: them, the empty map included. Absent, nothing was modelled: the
 #: header-scan gap stays named and no default change is assessed from the
 #: table -- what an older reader that ignores it also does -- so it is
