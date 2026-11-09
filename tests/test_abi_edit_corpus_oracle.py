@@ -288,17 +288,20 @@ def test_flag_probe_skips_only_a_failure_that_names_a_capability(
     # names the capability goes on to the plain baseline (library, then
     # executable); a broken toolchain stops at the first command.
     runner = StrictProcessRunner()
-    m32_lib = ["/x/gcc-97", "-m32", "-shared", "-fPIC", "-o", "libprobe.so", "lib.c"]
+    drv = "/x/gcc-97"
+    m32_lib = [drv, "-O0", "-m32", "-shared", "-fPIC", "-o", "libprobe.so", "lib.c"]
     if isinstance(failure, BaseException):
-        runner.expect(argv_contains=m32_lib, raises=failure)
+        runner.expect(argv=m32_lib, raises=failure)
     else:
-        runner.expect(argv_contains=m32_lib, returns=failure)
+        runner.expect(argv=m32_lib, returns=failure)
     if not broken:
         runner.expect(
-            argv_matches=lambda a: "-shared" in a and "-m32" not in a, returns=_proc()
+            argv=[drv, "-O0", "-shared", "-fPIC", "-o", "libprobe.so", "lib.c"],
+            returns=_proc(),
         )
         runner.expect(
-            argv_matches=lambda a: "-lprobe" in a and "-m32" not in a, returns=_proc()
+            argv=[drv, "-O0", "-o", "main", "main.c", "-L.", "-lprobe"],
+            returns=_proc(),
         )
     runner.install(monkeypatch, tcs, "_run")
     flags = Flags(bits=32)
