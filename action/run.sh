@@ -2387,6 +2387,68 @@ with open(out, "w", encoding="utf-8") as fh:
   CMD+=(--set "report.baseline_provenance=@${prov_file}")
 }
 
+# report.delta_baseline (compare report schema 7.3, release 3.1): which
+# comparison of a delta-baseline pair a report is. Writes the record for
+# role $1 (gate|delta) to a new file and prints its path; prints nothing
+# (with a warning) when the record would not validate, so a malformed delta
+# value can never turn the gate's run into a usage error. The values go
+# through Python and the report module's own validator, never shell text.
+_write_delta_record() {
+  local role="$1" outcome="$2" gate_verdict="${3:-}" operand_match="${4:-}" out
+  [[ -n "${_PY_BIN:-}" ]] || return 0
+  out=$(_mktemp_canonical "$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-delta-baseline.XXXXXX")")
+  if (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
+import json, sys
+from abicheck.report.delta_baseline import DeltaBaseline
+role, outcome, sha, branch, verdict, match, out = sys.argv[1:8]
+doc = {"comparison_role": role, "outcome": outcome, "base_sha": sha or None,
+       "branch": branch or None, "gate_verdict": verdict or None,
+       "operand_match": match or None}
+DeltaBaseline.from_mapping(doc)
+with open(out, "w", encoding="utf-8") as fh:
+    json.dump(doc, fh)
+' "$role" "$outcome" "${ABICHECK_DELTA_BASE_SHA:-}" "${ABICHECK_DELTA_BRANCH:-}" \
+      "$gate_verdict" "$operand_match" "$out") 2>/dev/null; then
+    printf '%s\n' "$out"
+  else
+    _warning_annotation "abicheck: could not record the delta-baseline $role block in the JSON report (outcome '$outcome'); the comparison itself is unaffected." >&2
+  fi
+}
+
+# The gate's record: added to the gate command whenever a delta base was
+# looked up, so the release comparison's own report says it is the gate and
+# what the lookup found. A directory/package comparison is recorded as
+# `unsupported_operand` (the same rule `_select_delta_report` applies).
+add_delta_baseline_flag() {
+  [[ -n "${ABICHECK_DELTA_OUTCOME:-}" && "${_NO_BASELINE:-}" != "true" ]] || return 0
+  local outcome="$ABICHECK_DELTA_OUTCOME" rec
+  if [[ "$outcome" == resolved ]] \
+     && { _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" || _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; }; then
+    outcome=unsupported_operand
+  fi
+  # A stored BundleFacts old side is compared by a route that refuses the
+  # key (it renders no such block yet): recording it there would turn the
+  # gate into a usage error, so that gate report goes without the block.
+  local old=""
+  [[ -n "${OLD_OPERAND_INDEX:-}" ]] && old="${CMD[$OLD_OPERAND_INDEX]:-}"
+  # Anchored here: the probe runs from $_PY_SAFE_DIR, where a relative
+  # operand would name a different (usually missing) file. The shared
+  # qualification rule keeps POSIX-absolute and, on Windows, drive/UNC forms.
+  [[ -n "$old" ]] && old=$(_mktemp_canonical "$old")
+  if [[ -n "$old" && -f "$old" ]] && (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
+import sys
+from pathlib import Path
+from abicheck.workflows.bundle_compare_operand import looks_like_stored_bundle_facts
+sys.exit(0 if looks_like_stored_bundle_facts(Path(sys.argv[1])) else 1)
+' "$old") 2>/dev/null; then
+    _notice_annotation "abicheck: the gate compares a stored BundleFacts baseline, whose report does not carry the delta_baseline block yet; the gate itself is unaffected."
+    return 0
+  fi
+  rec=$(_write_delta_record gate "$outcome")
+  [[ -n "$rec" ]] && CMD+=(--set "report.delta_baseline=@${rec}")
+  return 0
+}
+
 # "### Baseline source" step-summary block. Prints nothing when this run
 # compared against no release baseline (a no-baseline audit, or an
 # old-library given directly), so it never claims a source it did not use.
@@ -3450,6 +3512,7 @@ elif [[ "$MODE" == "compare" ]]; then
   # severity-preset is a core flag (--severity-preset, ADR-068): forwarded as-is.
   add_single_flag "--severity-preset" "${INPUT_SEVERITY_PRESET:-}"
   add_baseline_provenance_flag
+  add_delta_baseline_flag
   add_set_flags
   # --budget: time guard (e.g. 15m, 900s, 1h); the step FAILS on overflow
   # (exit 5) -- a budget never silently shrinks scope. Baseline shape only --
@@ -5755,7 +5818,11 @@ _build_json_cmd() {
 # carries its own), rerun for JSON into $1. The step's exit code never comes
 # from here: this rerun only chooses what the PR comment shows.
 _run_delta_json() {
-  local out="$1" i tok saved_json="${PR_JSON:-}"
+  # $2: the operand-identity rule that paired the snapshot with new-library
+  # (recorded in the delta report's delta_baseline block).
+  # $3: the delta's outcome (`resolved`, or `base_built` for a base built in
+  # this job), recorded the same way.
+  local out="$1" match="${2:-}" measured="${3:-resolved}" i tok saved_json="${PR_JSON:-}"
   local -a saved=("${CMD[@]}") delta=()
   for ((i = 0; i < ${#CMD[@]}; i++)); do
     tok="${CMD[$i]}"
@@ -5776,7 +5843,9 @@ _run_delta_json() {
       --set)
         # The release baseline's provenance describes the gate's old side,
         # not the snapshot: a delta report must not claim it.
-        if [[ "${CMD[$((i + 1))]:-}" == report.baseline_provenance=* ]]; then
+        # The gate's own delta_baseline record is replaced by the delta's.
+        if [[ "${CMD[$((i + 1))]:-}" == report.baseline_provenance=* \
+              || "${CMD[$((i + 1))]:-}" == report.delta_baseline=* ]]; then
           i=$((i + 1))
           continue
         fi
@@ -5784,6 +5853,16 @@ _run_delta_json() {
     esac
     delta+=("$tok")
   done
+  local rec
+  rec=$(_write_delta_record delta "$measured" "${VERDICT:-}" "$match")
+  if [[ -n "$rec" ]]; then
+    delta+=(--set "report.delta_baseline=@${rec}")
+  else
+    # Clear any record a config file supplies, so the delta report can never
+    # carry a gate record it does not describe. `""` is YAML's empty string:
+    # the key reads as unset.
+    delta+=(--set 'report.delta_baseline=""')
+  fi
   CMD=("${delta[@]}")
   PR_JSON="$out"
   _build_json_cmd
@@ -5793,56 +5872,181 @@ _run_delta_json() {
   [[ -s "$out" ]]
 }
 
+# delta-on-missing-base: build applies to a lookup outcome that selected an
+# exact base commit (main_snapshot.BUILDABLE_OUTCOMES owns the list).
+_delta_build_requested() {
+  [[ "${ABICHECK_DELTA_ON_MISSING_BASE:-report}" == build && "$1" != resolved ]] || return 1
+  [[ "${ABICHECK_DELTA_BASE_SHA:-}" =~ ^[0-9a-f]{40}$ ]] || return 1
+  (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -m abicheck.frontends.action.cli delta-buildable "$1") >/dev/null 2>&1
+}
+
+# The PR checkout's top level, found from new-library's own directory (a
+# checkout under `path:` is not the working directory), in the shell's
+# physical spelling -- Git for Windows prints `D:/a/...`, `pwd -P` `/d/a/...`.
+_delta_repo_top() {
+  local lib="${CMD[$((OLD_OPERAND_INDEX + 1))]}" dir top
+  dir=$(dirname -- "$lib")
+  top=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null) || top=$(git rev-parse --show-toplevel 2>/dev/null) || return 1
+  [[ -n "$top" ]] && (cd "$top" 2>/dev/null && pwd -P)
+}
+
+_file_fingerprint() {
+  [[ -f "$1" ]] && cksum < "$1" 2>/dev/null || echo absent
+}
+
+# Runs action/build-delta-base.sh (worktree checkout + the sandboxed user
+# command) and sets ABICHECK_DELTA_BUILD_ROOT. Fails when the build failed,
+# or when it changed the gate's new-library: a base build that overwrote the
+# PR's library (an absolute install path) would make the delta compare the
+# base with itself and read as "no changes".
+_build_delta_base() {
+  local repo result lib before
+  repo=$(_delta_repo_top) || {
+    _warning_annotation "abicheck: delta-on-missing-base: build needs new-library inside a git checkout."
+    return 1
+  }
+  lib="${CMD[$((OLD_OPERAND_INDEX + 1))]}"
+  before=$(_file_fingerprint "$lib")
+  result=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-delta-build.XXXXXX") || return 1
+  BASE_SHA="$ABICHECK_DELTA_BASE_SHA" ABICHECK_BASE_BUILD_COMMAND="${ABICHECK_DELTA_BASE_BUILD_COMMAND:-}" \
+    DEST="${RUNNER_TEMP:-/tmp}/abicheck-delta-base-src" RESULT_FILE="$result" REPO_DIR="$repo" \
+    bash "$(dirname "${BASH_SOURCE[0]}")/build-delta-base.sh" >&2 || true
+  _DELTA_BUILD_REPO="$repo"
+  ABICHECK_DELTA_BUILD_ROOT=$(grep '^root=' "$result" | tail -n1 | cut -d= -f2-)
+  grep -qx 'outcome=built' "$result" || return 1
+  if [[ "$(_file_fingerprint "$lib")" != "$before" ]]; then
+    _warning_annotation "abicheck: delta-base-build-command changed new-library outside the base checkout; the delta is not measured. The gate already ran and is unaffected."
+    return 1
+  fi
+  [[ -n "$ABICHECK_DELTA_BUILD_ROOT" && -d "$ABICHECK_DELTA_BUILD_ROOT" ]]
+}
+
+_remove_delta_base_worktree() {
+  [[ -n "${ABICHECK_DELTA_BUILD_ROOT:-}" && -n "${_DELTA_BUILD_REPO:-}" ]] || return 0
+  git -C "$_DELTA_BUILD_REPO" worktree remove --force "$ABICHECK_DELTA_BUILD_ROOT" >/dev/null 2>&1 || true
+}
+
+# delta-on-missing-base: build. Dumps the base commit _build_delta_base
+# built in $ABICHECK_DELTA_BUILD_ROOT with the gate's NEW-side
+# evidence inputs, each path moved into that checkout
+# (abicheck.frontends.action.delta_base_dump owns the rewrite and refuses a
+# path the base build cannot provide), and points ABICHECK_DELTA_SNAPSHOT at
+# the result. Never sets the step's exit code; a failure is reported.
+_dump_delta_base() {
+  # Physical, as _delta_repo_top's checkout path is (a symlinked runner temp).
+  local root="${ABICHECK_DELTA_BUILD_ROOT:-}" here work top tok rc=0
+  here=$(pwd -P)
+  local -a dump=()
+  [[ -n "$root" && -d "$root" && -n "${OLD_OPERAND_INDEX:-}" ]] || return 1
+  top="${_DELTA_BUILD_REPO:-}"
+  [[ -n "$top" ]] || return 1
+  work=$(mktemp -d "${RUNNER_TEMP:-/tmp}/abicheck-delta-dump.XXXXXX") || return 1
+  printf '%s\0' "${CMD[@]:$((OLD_OPERAND_INDEX + 2))}" > "$work/tail"
+  _cli_value_options_init
+  (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -m abicheck.frontends.action.cli delta-base-dump-args \
+      "$work/tail" --new-library "${CMD[$((OLD_OPERAND_INDEX + 1))]}" \
+      --cwd "$here" --checkout "$top" --base-root "$root" \
+      --output "$work/base-snapshot.json" --value-options "${_CLI_VALUE_OPTIONS:-}") \
+      > "$work/argv" 2> "$work/err" || rc=$?
+  if [[ "$rc" != 0 ]]; then
+    _warning_annotation "abicheck: delta base dump refused: $(tr '\n' ' ' < "$work/err")"
+    return 1
+  fi
+  while IFS= read -r -d '' tok; do dump+=("$tok"); done < "$work/argv"
+  _group_start "Dump the delta base (${ABICHECK_DELTA_BASE_SHA:0:7})"
+  "${CMD[0]}" "${dump[@]}" >&2 || rc=$?
+  echo "::endgroup::"
+  if [[ "$rc" != 0 || ! -s "$work/base-snapshot.json" ]]; then
+    _warning_annotation "abicheck: dumping the delta base built in this job failed (exit $rc)."
+    return 1
+  fi
+  # The same operand record actions/main-snapshot uploads beside a stored
+  # snapshot, so the identity check reads both bases alike.
+  (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -m abicheck.frontends.action.cli operand-record \
+      "$work/operand.json" --library "${CMD[$((OLD_OPERAND_INDEX + 1))]}") || return 1
+  ABICHECK_DELTA_SNAPSHOT="$work/base-snapshot.json"
+}
+
+# Is $ABICHECK_DELTA_SNAPSHOT this PR's library? Sets _DELTA_OPERAND_MATCH
+# (the matching rule) and, on a refusal, _DELTA_OPERAND_CODE (the named
+# outcome); returns 0 only on a match. The CLI runs from $_PY_SAFE_DIR, so
+# the operand goes over absolute; --new-given-as keeps the spelling the user
+# wrote (the recorded path).
+_check_delta_operand() {
+  local identity key value new_operand message=""
+  _DELTA_OPERAND_MATCH="" _DELTA_OPERAND_CODE=operand_unreadable
+  new_operand="${CMD[$((OLD_OPERAND_INDEX + 1))]}"
+  [[ "$new_operand" == /* ]] || new_operand="$PWD/$new_operand"
+  identity=$(cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -m abicheck.frontends.action.cli delta-operand \
+      --snapshot "$ABICHECK_DELTA_SNAPSHOT" --new-library "$new_operand" \
+      --new-given-as "${CMD[$((OLD_OPERAND_INDEX + 1))]}" \
+      --map "${INPUT_DELTA_OPERAND_MAP:-}" 2>/dev/null) || true
+  while IFS='=' read -r key value; do
+    case "$key" in
+      outcome) _DELTA_OPERAND_CODE="$value" ;;
+      rule) _DELTA_OPERAND_MATCH="$value" ;;
+      message) [[ -n "$value" ]] && message="$value" ;;
+    esac
+  done <<< "$identity"
+  if [[ "$_DELTA_OPERAND_CODE" == resolved ]]; then
+    [[ -n "$message" ]] && _notice_annotation "abicheck delta operand: $message"
+    return 0
+  fi
+  _DELTA_OPERAND_MATCH=""
+  [[ -n "$message" ]] && _warning_annotation "abicheck delta operand ($_DELTA_OPERAND_CODE): $message"
+  return 1
+}
+
 # Chooses the report the PR comment renders when delta-baseline is set, and
 # the notes that say what it is. Sets PR_RENDER_JSON and PR_NOTES.
 _select_delta_report() {
   PR_RENDER_JSON="$PR_JSON"
   PR_NOTES=()
   [[ -n "${ABICHECK_DELTA_OUTCOME:-}" ]] || return 0
-  local code="$ABICHECK_DELTA_OUTCOME" operand_match="" operand_message="" delta_json identity key value new_operand
-  if [[ "$code" == resolved ]] \
-     && { _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" || _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; }; then
+  local code="$ABICHECK_DELTA_OUTCOME" want_build=false operand_match="" delta_json
+  _delta_build_requested "$code" && want_build=true
+  if [[ "$code" == resolved || "$want_build" == true ]] \
+     && { [[ -z "${OLD_OPERAND_INDEX:-}" ]] \
+          || _is_release_style_operand "${INPUT_OLD_LIBRARY:-}" \
+          || _is_release_style_operand "${INPUT_NEW_LIBRARY:-}"; }; then
+    # No single old library to replace (a directory/package or audit-only
+    # comparison): the gate report must not be labelled as this PR's delta.
     code=unsupported_operand
-  elif [[ "$code" == resolved && -n "${ABICHECK_DELTA_SNAPSHOT:-}" && -n "${OLD_OPERAND_INDEX:-}" ]]; then
-    # Operand identity first (abicheck.workflows.delta_operand): a snapshot
-    # that is not shown to be this PR's library is never compared -- an
-    # unrelated one would read as every symbol removed (ADR-065).
-    # The CLI runs from $_PY_SAFE_DIR, so the operand goes over absolute;
-    # --new-given-as keeps the spelling the user wrote (the recorded path).
-    new_operand="${CMD[$((OLD_OPERAND_INDEX + 1))]}"
-    [[ "$new_operand" == /* ]] || new_operand="$PWD/$new_operand"
-    identity=$(cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -m abicheck.frontends.action.cli delta-operand \
-        --snapshot "$ABICHECK_DELTA_SNAPSHOT" --new-library "$new_operand" \
-        --new-given-as "${CMD[$((OLD_OPERAND_INDEX + 1))]}" \
-        --map "${INPUT_DELTA_OPERAND_MAP:-}" 2>/dev/null) || true
-    code=operand_unreadable
-    while IFS='=' read -r key value; do
-      case "$key" in
-        outcome) code="$value" ;;
-        rule) operand_match="$value" ;;
-        message) [[ -n "$value" ]] && operand_message="$value" ;;
-      esac
-    done <<< "$identity"
-    if [[ -n "${operand_message:-}" ]]; then
-      if [[ "$code" == resolved ]]; then
-        _notice_annotation "abicheck delta operand: $operand_message"
-      else
-        _warning_annotation "abicheck delta operand ($code): $operand_message"
-      fi
+  elif [[ "$want_build" == true ]]; then
+    # delta-on-missing-base: build. This runs from the comment path, after
+    # the gate comparison has already produced its report and exit code, so
+    # nothing the base build does can reach what the gate compared.
+    if ! _build_delta_base; then
+      code=base_build_failed
+    elif ! _dump_delta_base; then
+      code=base_dump_failed
+    else
+      code=base_built
     fi
   fi
-  if [[ "$code" == resolved && -n "${ABICHECK_DELTA_SNAPSHOT:-}" && -n "${OLD_OPERAND_INDEX:-}" ]]; then
+  # Operand identity (abicheck.workflows.delta_operand), for a fetched and a
+  # built base alike: a snapshot that is not shown to be this PR's library
+  # is never compared -- an unrelated one would read as every symbol
+  # removed (ADR-065).
+  if [[ "$code" == resolved && -n "${ABICHECK_DELTA_SNAPSHOT:-}" ]] || [[ "$code" == base_built ]]; then
+    if ! _check_delta_operand; then
+      code="$_DELTA_OPERAND_CODE"
+    fi
+    operand_match="$_DELTA_OPERAND_MATCH"
+  fi
+  if [[ "$code" == resolved && -n "${ABICHECK_DELTA_SNAPSHOT:-}" ]] || [[ "$code" == base_built ]]; then
     delta_json=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-delta-json.XXXXXX")
-    if _run_delta_json "$delta_json"; then
+    if _run_delta_json "$delta_json" "$operand_match" "$code"; then
       PR_RENDER_JSON="$delta_json"
     else
       code=rerun_failed
     fi
   fi
+  _remove_delta_base_worktree
   # The code, not text, is what travels to a fork's trusted publisher
   # (action.yml records it in the analysis context); both render the notes
   # through the same `delta-notes` wording.
-  [[ "$code" == resolved ]] || operand_match=""
+  [[ "$code" == resolved || "$code" == base_built ]] || operand_match=""
   [[ -n "${GITHUB_OUTPUT:-}" ]] && printf 'delta-comment-outcome=%s\ndelta-operand-match=%s\n' "$code" "$operand_match" >> "$GITHUB_OUTPUT"
   local line
   while IFS= read -r line; do

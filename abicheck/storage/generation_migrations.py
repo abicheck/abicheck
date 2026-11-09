@@ -465,6 +465,16 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "not captured"
     ),
     44: GenerationSpellingChange(
+        "PE/Mach-O header-scoped dumps keep the parsed header surface when no "
+        "declaration's spelling matches an export (scope_fallback "
+        "export-binding-unresolved replaces mangling-fallback), and bind a "
+        "declaration to an export spelled in another mangling scheme "
+        "(extract/header_export_binding): a bound declaration's mangled "
+        "becomes the export's MSVC/Itanium/decorated spelling. ELF dumps and "
+        "every type or name spelling are unchanged, so no rewrite is needed -- "
+        "an older PE/Mach-O snapshot keeps its export-table-only surface"
+    ),
+    45: GenerationSpellingChange(
         "advanced DWARF records a by-value aggregate's triviality as 'unknown' "
         "when the unit carries only its declaration (clang's type homing of "
         "std::string), and takes a type's own DW_AT_calling_convention as the "

@@ -207,6 +207,8 @@ topics:
       - action.yml
       - abicheck/model/baseline_provenance.py
       - abicheck/frontends/cli/baseline_provenance.py
+      - abicheck/report/delta_baseline.py
+      - abicheck/frontends/cli/delta_baseline.py
     reference_page: reference/resolve-baseline.md
     task_pages:
       - reference/publish-baseline.md

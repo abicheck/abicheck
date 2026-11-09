@@ -272,7 +272,8 @@ suppression:
 | `delta-profile` | — | Profile suffix used by `main-snapshot`, if any |
 | `delta-wait-timeout` | `600` | Seconds to wait while the base snapshot is still being built |
 | `delta-operand-map` | — | `SNAPSHOT=PR` lines pairing the snapshot's library with `new-library` when no SONAME, path or file name links them; see [operand identity](../reference/main-snapshot.md#operand-identity-is-the-snapshot-this-prs-library) |
-| `delta-on-missing-base` | `report` | `report` explains an unavailable snapshot in the comment; `fail` also fails the job in a separate step |
+| `delta-on-missing-base` | `report` | `report` explains an unavailable snapshot in the comment; `fail` also fails the job in a separate step; `build` builds the base commit in this job with `delta-base-build-command` and uses that as the delta base ([details](../reference/main-snapshot.md#delta-on-missing-base-build)) |
+| `delta-base-build-command` | — | `build` only: commands that build the base commit from the root of its checkout, leaving the library and new-side inputs at the same relative paths |
 | `github-token` | `${{ github.token }}` | Token for the PR comment and baseline auto-fetch (needs `pull-requests: write`) |
 
 !!! note "Pull requests from forks"

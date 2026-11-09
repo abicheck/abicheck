@@ -58,7 +58,7 @@ status line's date and commit.
 
 ## Page layout
 
-Each open entry below has its status line, a risk tag and a short summary; the full write-up, with the history of what was tried, is one file per entry under `docs/contribute/known-gaps/`. Index rows are ranked: the Priority list, then `false-clean` (a run can read cleaner than its evidence), `false-positive` (a finding or failure that is not real), `perf`, and `hygiene` (tests, tooling, schema or code-ownership debt). When you fix, re-check or add an entry, edit its write-up and keep the index row's status line in sync.
+Each open entry below has its status line, a risk tag and a short summary; the full write-up, with the history of what was tried, is one file per entry under `docs/contribute/known-gaps/`. Index rows are ranked: the Priority list, then `false-clean` (a run can read cleaner than its evidence), `false-positive` (a finding or failure that is not real), `perf`, and `hygiene` (tests, tooling, schema or code-ownership debt). `route-divergence` marks two equivalent routes (CLI, typed API, package) that report different findings for one input without a cleaner verdict. When you fix, re-check or add an entry, edit its write-up and keep the index row's status line in sync.
 
 ## Priority
 
@@ -74,6 +74,45 @@ Next, unranked (the `--no-baseline` one-sided-detector gap, the target-platform 
 
 ## Open and partially open gaps
 
+### Parser inputs: corrupt input reads as empty or escapes as an untyped exception
+
+Found by the parser fuzz oracle in `tests/test_parser_fuzz_oracle.py`
+(`tests/_parser_fuzz_oracle.py` holds the oracle: a corrupted input must raise
+an allowed type, record an explicit `partial`/`failed` export read, or read as
+non-empty; a truncated input must lose no fact without such a record; and no
+parse may raise another type or run past its time budget). Each entry below is
+one way the oracle fails. How strict the tests are: a fuzz test for a parser
+with an entry here is marked xfail only when *every* violation it finds matches
+that entry's message pattern (`KnownGap.pattern` in the test module); any other
+violation fails the test, and a run that finds none passes. The fast lane uses
+a fixed Hypothesis seed and may or may not reach a gap; the `slow` lane
+reaches each one. The canary named under each entry asserts the gapped answer
+deterministically and fails when the gap closes.
+
+#### A corrupt PE export directory reads as fewer or zero exports and records no failure (2026-11-08)
+**Status (2026-11-08): OPEN.** `parse_pe_metadata` (`abicheck/pe_metadata.py`) returns normally on a damaged export directory. No `note_export_read_failure` is called on that path, so the ADR-079 read state (`platform_export_read`) is `complete` although exports were lost. Reproduction: the committed `tests/fixtures/containers/sources/corpus_pe.dll` (3 exports) cut to 1405 bytes parses with zero exports; cuts between about 1405 and 1683 bytes keep one or two of the three. A fuzz run finds more cases from byte flips inside the export directory. Owner: `abicheck/pe_metadata.py`, with the export-read recording contract in `abicheck/extract/parse_failures.py`.
+<!-- canary: tests/test_parser_fuzz_oracle.py::test_pe_truncated_export_directory_reads_empty_unrecorded -->
+
+#### A Mach-O cut inside its string table or export trie reads as fewer or zero exports and records no failure (2026-11-08)
+**Status (2026-11-08): OPEN.** `parse_macho_metadata` (`abicheck/macho_metadata.py`) reads a dylib whose `LC_SYMTAB` string table or `LC_DYLD_EXPORTS_TRIE` data runs past the end of the file as having fewer exports (none, for most cuts) with nothing recorded, so the read state is `complete`. Reproduction: the three-export synthetic dylib from `tests/_macho_synthetic.py` (`build_macho_seed`, 236 bytes) cut anywhere from 192 to 232 bytes. Load-command truncations are recorded correctly. Owner: `abicheck/macho_metadata.py` (`_parse_macho_symbols`, `_parse_export_trie`).
+<!-- canary: tests/test_parser_fuzz_oracle.py::test_macho_truncated_string_table_reads_empty_unrecorded -->
+
+#### `parse_dwarf_metadata` reads corrupt DWARF as empty, and lets a `MemoryError` escape (2026-11-08)
+**Status (2026-11-08): OPEN.** Both `parse_dwarf_metadata` readers (`abicheck/dwarf_metadata.py` and the production `abicheck/dwarf_unified.py`) catch only `ELFError`, `OSError` and `ValueError`, swallow per-CU errors, and record nothing. A single corrupted byte in a gcc `-g` shared-object seed (about 3 % of flips in one measured run; any of the first bytes of `.debug_abbrev`) returns no structs, enums or base types with nothing recorded, so the corrupt debug info reads as "no DWARF". Another flip (about 0.3 %) makes pyelftools allocate a decompressed section of arbitrary size, and the `MemoryError` escapes a function whose docstring says "Never raises". The DWARF fuzz tests are `slow` only; the canary is the fast-lane signal. Owner: `abicheck/dwarf_metadata.py`, `abicheck/dwarf_unified.py`, `abicheck/extract/dwarf_subtree_index.py`.
+<!-- canary: tests/test_parser_fuzz_oracle.py::test_dwarf_corrupt_abbrev_table_reads_empty_without_failure -->
+
+#### A clang AST node of the wrong JSON type leaks `TypeError`/`AttributeError` instead of `MalformedClangAstError` (2026-11-08)
+**Status (2026-11-08): OPEN.** `_ClangAstParser` (`abicheck/dumper_clang.py`) refuses a wrong-typed `inner` with `MalformedClangAstError`, but a wrong-typed scalar field does not get the same treatment: an object- or list-valued `kind` raises `TypeError: unhashable type`, a non-string `mangledName` or record `name` raises `AttributeError` (`.startswith`/`.strip`), and a non-object `type` raises `TypeError`. A tree with no `inner`, or `inner: null`, is a valid empty translation unit (`ast_inner` documents `null` as absent) and is not part of this gap. Owner: `abicheck/dumper_clang.py`, `abicheck/extract/headers/clang/ast_inner.py` (the shape validation the readers share).
+<!-- canary: tests/test_parser_fuzz_oracle.py::test_clang_ast_object_valued_kind_leaks_typeerror -->
+
+#### A malformed storage-v2 snapshot leaks `KeyError`/`TypeError`/`AttributeError` instead of a typed error (2026-11-08)
+**Status (2026-11-08): OPEN.** A storage-v2 snapshot document with one function's `mangled` key removed (`sections/declarations/payload/functions[0]`) is accepted by `load_snapshot`, and the `KeyError` surfaces only on the first `declarations` access (`abicheck/model/lazy_declarations.py` -> `abicheck/storage/snapshot_decode_declarations.py`). Structural mutations (dropped keys, wrong node types) leak the same classes: `KeyError` for `return_type`, `status` and `name`, and `TypeError` / `AttributeError` for wrong node types, raised from `load_snapshot` or from the lazy decode, which the harness does not distinguish. The documented contract is `SnapshotError` / `ValidationError`. Owner: `storage/snapshot_decode_declarations.py`, `storage/snapshot_codec.py`.
+<!-- canary: tests/test_parser_fuzz_oracle.py::test_snapshot_missing_function_mangled_key_leaks_keyerror -->
+
+#### Parsers not yet fuzzed (2026-11-08)
+**Status (2026-11-08): OPEN.** `parse_btf_metadata`, `parse_ctf_metadata` and `parse_sycl_metadata` are discovered by `tests/test_parser_fuzz_enrollment.py` but listed in `NOT_ENROLLED` (`tests/_parser_fuzz_oracle.py`): each needs a seed the default lane cannot build (pahole/BPF, gcc `-gctf` with libctf, a SYCL plugin). Their corrupt-input behaviour is unmeasured. Owner: `tests/_parser_fuzz_oracle.py`.
+<!-- no-canary: the gap is an absence of tests, not a parser answer to pin; tests/test_parser_fuzz_enrollment.py keeps the NOT_ENROLLED list honest and fails on an unlisted new parser -->
+
 ### Option vocabulary (ADR-091 follow-ups)
 
 The option-vocabulary migration is complete (ADR-091, Accepted and
@@ -83,6 +122,13 @@ flag only, by design, and a directory/package `compare` now applies the
 dependency walk and debug roots to every member. No open gap remains.
 
 ### Report and detector coverage
+
+#### The typed `compare()` route omits `exported_not_public` that the CLI reports for the same catalog case (2026-11-08)
+
+**Status (2026-11-08): OPEN.** Found by the typed-API route check in `tests/test_invariant_oracles_catalog.py`.
+[Full write-up](known-gaps/the-typed-compare-route-omits-exported-not-public-that-the-cli-reports-for-the-same-catalog-case.md)
+`route-divergence` — the typed route reports a different kind set from the CLI for one catalog case (one hygiene finding missing). The verdict agrees, so no run reads cleaner than its evidence.
+<!-- canary: tests/test_invariant_oracles_catalog.py::test_typed_api_omits_exported_not_public_on_case09 -->
 
 #### The clang record-layout pass leaves unnameable records and alias-template arrays to DWARF (2026-11-04)
 
@@ -157,6 +203,36 @@ dependency walk and debug roots to every member. No open gap remains.
 **Status (2026-10-26): OPEN — gate-semantics decision needed.** A finding folded out as redundant but kept for the verdict is `gating` under the legacy scheme and `non_gating` under a severity config. `result_counts.gating_retained` now partitions the retained findings and the summary names the folded one, so the counts no longer contradict each other; the scheme disagreement remains. [Full write-up](known-gaps/legacy-gate-counts-a-redundant-finding-the-review-groups-omit.md)
 <!-- no-canary: awaits a gate-semantics decision between two schemes that are each internally consistent; no wrong value to pin until the ruling -->
 
+#### A C++ parameter change is reported as a removal plus an addition (2026-11-08)
+
+**Status (2026-11-08): OPEN.** A free C++ function whose parameter list changes gets a new mangled name, and the detector pairs old and new by mangled identity, so the output is `func_removed` + `func_added` (BREAKING) instead of `func_params_changed`. The verdict is right; the kind is not. Found by the generated edit corpus (`tests/test_abi_edit_corpus.py`, `func_param_append`/`func_param_type_change`/`func_param_remove` on the `cxx_classes` seed, gcc and clang), where those cells are strict xfails listed in `KNOWN_MISMATCHES`. The config-matrix corpus (`tests/test_abi_edit_corpus_matrix.py`) reproduces it on the `cxx_stdlib` seed; it is a header-lane gap: binary-only and DWARF-only evidence pair the two and do report `func_params_changed`. `wrong-kind`: consumers filtering on `func_params_changed` miss the break. Owner: `compare/` function pairing.
+<!-- no-canary: the corpus strict xfails fail once the pairing or kind is fixed, prompting removal -->
+
+#### Removing a virtual method reports no `func_virtual_removed` (2026-11-08)
+
+**Status (2026-11-08): OPEN.** Removing a virtual method yields `func_removed`, `type_vtable_changed` and `vtable_slot_count_changed` (all BREAKING), but never `func_virtual_removed`, whose taxonomy entry says BREAKING. The verdict is right; the specific kind is missing. Found by the generated edit corpus (`virtual_remove` on the `cxx_classes` seed, both compilers; strict xfail in `KNOWN_MISMATCHES`). `wrong-kind`. Owner: `policy/` and `compare/` virtual detectors.
+<!-- no-canary: the corpus strict xfails fail once the kind is emitted, prompting removal -->
+
+#### A member array-bound change is invisible in DWARF-only comparison (2026-11-08)
+
+**Status (2026-11-08): OPEN.** `struct rec { …; char tag[8]; }` becoming `char tag[6]` reads `NO_CHANGE` when the snapshots carry DWARF but no header; the header lane reports `type_field_type_changed` for the same pair. With `-fpack-struct=1` the DWARF lane reports only `type_size_changed` (the size really shrinks), still without the member's type change. Found by the config-matrix corpus (`tests/test_abi_edit_corpus_matrix.py`, `struct_array_shrink_in_padding` on `c_core`/`cxx_classes`, evidence `dwarf`, gcc and clang; strict xfails in `tests/_edit_corpus_known.py`). `wrong-verdict` unpacked (a public member's type changed, nothing reported), `wrong-kind` packed. Owner: `extract/` DWARF member-type spelling (array bound).
+<!-- no-canary: the corpus nightly strict xfails (tests/_edit_corpus_known.py) fail once DWARF reports the member type change -->
+
+#### DWARF-only comparison reports a virtual that became pure as a plain removal (2026-11-08)
+
+**Status (2026-11-08): OPEN.** `virtual int kind() const;` becoming `= 0` reads `func_removed_elf_only` (BREAKING) from DWARF-only snapshots; neither `func_virtual_became_pure` nor `type_became_abstract` is emitted (the header lane emits `type_became_abstract`). Verdict right, kind wrong. Found by the config-matrix corpus (`virtual_become_pure`, `cxx_classes`, evidence `dwarf`; strict xfail). `wrong-kind`. Owner: `extract/` DWARF virtuality (`DW_AT_virtuality` pure) and `compare/` virtual detectors.
+<!-- no-canary: the corpus nightly strict xfails (tests/_edit_corpus_known.py) fail once the kind is emitted -->
+
+#### DWARF-only comparison reports a method's dropped `const` as a removal plus an addition (2026-11-08)
+
+**Status (2026-11-08): OPEN.** `virtual int area() const;` becoming non-const changes the mangled name; from DWARF-only snapshots the pair reads `func_removed_elf_only` + `func_added_elf_only` + `type_vtable_changed`, never `func_cv_changed` (the header lane emits it). Verdict right, kind wrong. Found by the config-matrix corpus (`method_const_drop`, `cxx_classes`, evidence `dwarf`; strict xfail). `wrong-kind`. Owner: `compare/` function pairing on DWARF-sourced methods.
+<!-- no-canary: the corpus nightly strict xfails (tests/_edit_corpus_known.py) fail once the kind is emitted -->
+
+#### A `_GLIBCXX_USE_CXX11_ABI` rebuild is refused as a profile mismatch, not reported as a break (2026-11-08)
+
+**Status (2026-11-08): OPEN.** Rebuilding a library whose API passes `std::string` with `-D_GLIBCXX_USE_CXX11_ABI=0` renames every such symbol (`std::__cxx11::basic_string` → `std::basic_string`); consumers built before fail with `undefined symbol`. With headers on both sides and each side's own `-D` passed to the header frontend, `compare` raises `ProfileMismatchError` (`macro_ops` differ) instead of reporting the removal. Refusing is not clean, but it reports no finding for one of the best-known ABI breaks. Since 2026-11-09 the refusal is the documented outcome (ADR-050 amendment 2026-11-08): exit 16, `reason.kind: profile_mismatch`, and the reason names the macro operations only one side ran and, for `_GLIBCXX_USE_CXX11_ABI`, says how to see the renames (compare without headers, or `--diagnostic-comparison`). Whether a runtime-ABI selector macro should instead let the comparison run and gate on the binary-backed removals is an open product decision (exit 16 -> 4; options in PR #1960). Found by the config-matrix corpus (`rebuild_cxx11_abi_off`, `cxx_stdlib`, evidence `headers`; strict xfail in both corpus files). `refused`. Owner: `comparability.py` (whether a macro the ABI tag depends on should block comparison or become a finding).
+<!-- no-canary: the corpus strict xfails (PR tier and tests/test_abi_edit_corpus.py) fail once compare reports the pair -->
+
 ### Source-replay twin pairing (L4/L2 Phase 8)
 
 **Status (2026-10-23): OPEN, narrowed.** Two observations are reported by both the header tier and the L4 replay: a header-only inline removal (`INLINE_FUNCTION_REMOVED`) and a C++ `constexpr` value change (`CONSTEXPR_VALUE_CHANGED` / `CONSTANT_CHANGED`). `compare.source_replay_twins.REPLAY_TWINS` keeps the header-tier finding and drops the replay copy, matched by name, one for one. For constants, the match is on the qualified name only: a replay copy whose value disagrees with the header copy is still dropped, and the header copy's value is what is reported. The "L2 tier not run, replay copy kept" case is covered only at unit level, because the replay alone does not produce the copy end to end (a no-header run matches no symbols). For inline removals the match is on the bare function name. Two limits remain there. (a) A header-tier symbol that does not demangle (no `demangled_symbol`, no demangler result) keeps its replay twin visible; this is conservative, not a silent loss. (b) Two overloads of one name pair by count, not by signature, because the replay `Change` carries no parameter list, so which of the two overloads is the twin is not recorded. Both replay copies are still counted in the ledger. Closing (b) needs the replay finding to carry its signature hash.
@@ -195,6 +271,11 @@ current emitter, which is unchanged.
 
 ### False-clean risk
 
+#### A new `requires`-clause on a header-only template reads `NO_CHANGE` under castxml (2026-11-08)
+
+**Status (2026-11-08): OPEN.** Adding `requires (sizeof(T) >= 4)` to a header-only function template makes an existing consumer call (`clampv((short)-3)`) stop compiling, but castxml emits no element for an uninstantiated template, so the header lane reads `NO_CHANGE` and neither `concept_tightened` nor `concept_constraint_changed` is reported. Found by the config-matrix corpus's execution oracle (`concept_constraint_added`, `cxx_classes`, C++20/23, gcc and clang, evidence `headers`: the consumer recompiled against the new header fails; strict xfail, also in the PR tier). Same root as the header-only template default entry below. `false-clean`. Owner: `extract/headers/castxml/`.
+<!-- no-canary: the corpus PR-tier strict xfail (tests/_edit_corpus_known.py) fails once the constraint change is reported -->
+
 #### A stripped library compared without headers reads `NO_CHANGE` with `partial` assurance and exit 0 (2026-11-08)
 
 **Status (2026-11-08): OPEN.** Found while building the invariant oracles (`tests/test_invariant_oracles_reduced_evidence.py`).
@@ -202,12 +283,12 @@ current emitter, which is unchanged.
 `false-clean` — a symbols-only compare of a stripped library reads `NO_CHANGE` with exit 0 and an accepted headline.
 <!-- canary: tests/test_invariant_oracles_reduced_evidence.py::test_stripped_pair_gap_is_still_the_current_answer -->
 
-#### The typed `compare()` route omits `exported_not_public` that the CLI reports for the same catalog case (2026-11-08)
+#### One-sided DWARF or an unmet `--depth headers` request reads a clean verdict with exit 0 (2026-11-08)
 
-**Status (2026-11-08): OPEN.** Found by the typed-API route check in `tests/test_invariant_oracles_catalog.py`.
-[Full write-up](known-gaps/the-typed-compare-route-omits-exported-not-public-that-the-cli-reports-for-the-same-catalog-case.md)
-`false-clean` — the typed route can read a catalog case as having one fewer hygiene finding than the CLI.
-<!-- canary: tests/test_invariant_oracles_catalog.py::test_typed_api_omits_exported_not_public_on_case09 -->
+**Status (2026-11-08): OPEN.** Found by the evidence-shape oracles (`tests/test_invariant_oracles_evidence_shapes.py`). Sibling shapes of the stripped-pair entry above: an old library with DWARF against a stripped new one reads `COMPATIBLE` (`partial`, `version_bump: patch`), and a stripped pair compared with `--depth headers` and no headers reads `NO_CHANGE` (`failed`). Both exit 0, and every renderer states the clean result. [ADR-090](adr/090-unresolved-surface-is-not-a-clean-verdict.md) (proposed) covers both.
+[Full write-up](known-gaps/one-sided-dwarf-or-an-unmet-depth-headers-request-reads-a-clean-verdict-with-exit-0.md)
+`false-clean` — a compare with type-level evidence on one side only, or with its requested depth unmet, reads clean with exit 0.
+<!-- canary: tests/test_invariant_oracles_evidence_shapes.py::test_one_sided_and_unmet_depth_gap_is_still_the_current_answer -->
 
 #### A castxml base whose bare leaf two records share is not resolved by the leak walk (2026-11-05)
 
@@ -346,6 +427,12 @@ current emitter, which is unchanged.
 `false-clean` — An explicitly supplied header that does not parse on PE/Mach-O is reported as a warning and a binary-depth run instead of a failed acquisition. [Full write-up](known-gaps/a-failed-header-parse-on-pe-or-mach-o-falls-back-to-export-table-mode.md)
 <!-- no-canary: PE/Mach-O only; the macOS lane of tests/test_sided_include_labelled_composition.py pins the current behaviour on darwin -->
 
+#### PE: overloads with class-typed parameters stay unbound across MSVC and Itanium manglings (2026-11-09)
+
+**Status (recorded 2026-11-09): NARROWED.** `extract/header_export_binding.py` binds a header declaration to an export spelled in another C++ mangling scheme (an MSVC DLL against an Itanium header parse, or the reverse), and an undecorated C name to its x86 decoration, by the qualified name both spellings encode. It separates same-named overloads only by a decoded MSVC parameter list of builtin types. Overloads whose parameters are pointers, references or class types, and an MSVC export with no declaration of its qualified name, stay unbound. They are compared from the PE export table only, and the dump warns with a count. A unique name binds without a type check unless its parameters decode.
+`coverage` — On PE, an overload set with non-builtin parameters keeps its export-table comparison but not its header declarations. [Full write-up](known-gaps/pe-overloads-with-class-typed-parameters-stay-unbound.md)
+<!-- canary: tests/test_header_export_binding.py::test_undecodable_overloads_stay_unbound_and_are_reported -->
+
 #### A stored snapshot keeps no record of a partial export-table read
 
 **Status (2026-11-03): PARTIAL — fixed for persistence and consumers ([ADR-079](adr/079-partial-export-table-read-in-the-stored-snapshot.md), stored as the `binary` section's `abicheck.export_read` extension fact, ADR-062 D19); narrowed.** Each platform block's export read is recorded (`complete`/`partial`/`failed`; a document without the fact reads `unrecorded`, never `complete`). The export fact, `exports` coverage, consumer scoping, the comparison (a removal a partial NEW table cannot establish is kept as `COMPATIBLE_WITH_RISK`, rule `partial_export_table_read`), analysis assurance and `run_outcome.scope` honor it, live and stored alike. Tests: `tests/unit/storage/test_export_read_persisted.py`, `tests/test_cli_compare_partial_export_read.py`. Still open: an older baseline cut short has no fact and stays unrecorded (re-dump it); a release/package member's partial read lowers that member's assurance but not the release `comparison_scope` record.  
@@ -483,7 +570,7 @@ per-item status in the
 
 #### castxml output carries no `noexcept` exception specification (2026-11-06)
 
-**Status (2026-11-06): OPEN.** castxml 0.7 (`--castxml-output=1`) writes no attribute for a function's or method's exception specification, so `extract/headers/castxml/functions.py` always records `is_noexcept=False` (its `noexcept` search of the `attributes` string only matches an annotate attribute) and the castxml header lane never reports `func_noexcept_removed`/`func_noexcept_added`. The clang header backend reads the qualifier from the type spelling and reports it. Seen on case15 (declared in `ground_truth.json` `expected_kinds_gaps`). A fix would need a clang-AST join like `function_type_cc.py` or a source re-read; not done here. `false-clean` on castxml for noexcept changes. Owner: `extract/headers/castxml/`.
+**Status (2026-11-06): OPEN.** castxml 0.7 (`--castxml-output=1`) writes no attribute for a function's or method's exception specification, so `extract/headers/castxml/functions.py` always records `is_noexcept=False` (its `noexcept` search of the `attributes` string only matches an annotate attribute) and the castxml header lane never reports `func_noexcept_removed`/`func_noexcept_added`. The clang header backend reads the qualifier from the type spelling and reports it. Seen on case15 (declared in `ground_truth.json` `expected_kinds_gaps`). A fix would need a clang-AST join like `function_type_cc.py` or a source re-read; not done here. The config-matrix corpus's execution oracle shows the consequence (2026-11-08): `noexcept` added to a virtual reads `NO_CHANGE`, while a consumer's overrider without `noexcept` no longer compiles (`method_noexcept_add`, strict xfail in `tests/_edit_corpus_known.py` and the PR tier). `false-clean` on castxml for noexcept changes. Owner: `extract/headers/castxml/`.
 <!-- no-canary: the expected_kinds gate fails on case15's declaration once castxml reports the kind -->
 
 #### castxml and clang report different change-kind sets for the same case (2026-11-06)
@@ -493,10 +580,10 @@ per-item status in the
 
 ### False-positive risk
 
-#### An `-O2` rebuild of a gcc library that needed stack canaries at `-O0` reads `stack_canary_removed` (2026-11-08)
+#### An `-O2` rebuild of a C++ library that uses `std::string` reads as a risk on gcc, or a break on MinGW (2026-11-08)
 
-**Status (2026-11-08): OPEN, narrowed.** Rebuilding an unchanged library at `-O2` can leave no frame that `-fstack-protector-strong` must guard, so the new binary no longer imports `__stack_chk_fail` and abicheck reports `stack_canary_removed` (RISK), though the protector flag is still on. The rest of that rebuild's noise is fixed (weak `std::`/`__gnu_cxx::` copies, version-covered imports, clang's declaration-only `std::string` DIE; ADR-089 A7). A binary without debug info cannot show the flag; with DWARF, `DW_AT_producer` records it, but the snapshot keeps only the first unit's producer string, and one unit is not evidence for the others. Closing it needs a per-unit stack-protector fact in the advanced-DWARF payload (a snapshot schema change). `false-positive` (RISK, exit 0). Owner: `extract/` (DWARF producer flags) and `diff_platform_elf_dynamic._diff_security_hardening`.
-<!-- no-canary: tests/test_rebuild_toolchain_drift_integration.py::test_optimization_rebuild_reads_compatible allows exactly this residue and fails on any other -->
+**Status (2026-11-09): OPEN, narrowed.** Rebuilding the same `std::string`-using library at `-O2` instead of `-O0` inlines the weak (vague-linkage) `std::` template instantiations the `-O0` build exported. On ELF that noise is fixed (ADR-089 A7: weak `std::`/`__gnu_cxx::` copies and version-covered imports are demoted with a recorded rule, and clang's declaration-only `std::string` DIE no longer fakes `struct_return_convention_changed`); clang 18 reads COMPATIBLE at every evidence level. Two residues remain. (1) gcc drops `__stack_chk_fail` because `-O2` leaves no frame `-fstack-protector-strong` must guard, so `stack_canary_removed` (RISK, exit 0) is reported though the flag is still on: a binary without debug info cannot show the flag, and the snapshot keeps only the first unit's `DW_AT_producer`, which is not evidence for the other units. Closing it needs a per-unit stack-protector fact in the advanced-DWARF payload (a schema change). (2) MinGW g++ on Windows (libstdc++, PE) still reads BREAKING (`func_removed`, `func_visibility_changed`; v1 corpus, integration windows-latest leg): a PE export directory records no binding, so the coalesced-copy rule has no signal there (ADR-089's PE limit). On macOS (libc++, Mach-O) the rebuild reads `NO_CHANGE`. Found by the config-matrix corpus (`rebuild_optimized`, `cxx_stdlib`). `false-positive`. Owner: `extract/` (DWARF producer flags, PE coalescing evidence) and `diff_platform_elf_dynamic._diff_security_hardening`.
+<!-- no-canary: the corpus strict xfails (tests/_edit_corpus_known.py, narrowed to gcc and PE) and tests/test_rebuild_toolchain_drift_integration.py::test_optimization_rebuild_reads_compatible fail once the residue moves -->
 
 #### A typedef retargeted inside a template argument still reads as a removal plus an addition under headers (2026-10-25)
 

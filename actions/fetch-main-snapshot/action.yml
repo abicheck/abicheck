@@ -6,7 +6,10 @@ description: >-
   merge_group), the snapshot is the `actions/main-snapshot` artifact for that
   exact commit uploaded by the configured workflow on the default branch, and
   every way it can be unavailable is a named `outcome` -- never a substitute
-  commit and never "no changes". Read-only. Requires the checkout to contain
+  commit and never "no changes". With `storage: cache` the snapshot is the
+  Actions-cache entry under the exact key for that commit instead (no
+  `actions: read` needed; weaker provenance, see
+  docs/reference/main-snapshot.md). Read-only. Requires the checkout to contain
   the base: `fetch-depth: 2` for a merge commit, `0` in head mode.
 
 branding:
@@ -15,8 +18,20 @@ branding:
 
 inputs:
   workflow:
-    description: "The snapshot workflow's file name or path (e.g. `abi-main.yml`)."
-    required: true
+    description: >
+      The snapshot workflow's file name or path (e.g. `abi-main.yml`).
+      Required with `storage: artifact`; unused with `storage: cache`, whose
+      entries do not record a verifiable producer.
+    required: false
+    default: ''
+  storage:
+    description: >
+      Where `actions/main-snapshot` stored the snapshot: `artifact` (default;
+      the uploading run is verified) or `cache` (the exact-key Actions-cache
+      entry; its recorded origin is checked but is self-reported). Must match
+      the producer's `storage`.
+    required: false
+    default: 'artifact'
   mode:
     description: >
       `auto` (default: `merge-group` on merge_group events, otherwise
@@ -34,7 +49,8 @@ inputs:
   wait-timeout:
     description: >
       Seconds to wait while the snapshot run for the base is still in
-      progress (outcome `base_pending`). 0 disables waiting.
+      progress (outcome `base_pending`). 0 disables waiting. Ignored with
+      `storage: cache`, which cannot see a run in progress.
     required: false
     default: '600'
   destination:
@@ -44,7 +60,7 @@ inputs:
     required: false
     default: '${{ runner.temp }}/abicheck-base-snapshot'
   github-token:
-    description: 'Token with `actions: read`.'
+    description: 'Token with `actions: read` (`storage: artifact`; unused with `cache`).'
     required: false
     default: ${{ github.token }}
   python-version:
@@ -58,16 +74,16 @@ outputs:
       `resolved` | `base_unknown` | `base_ambiguous` | `base_pending` |
       `base_failed` | `base_not_snapshotted` | `base_expired` | `snapshot_missing` |
       `untrusted_source` | `lookup_failed`.
-    value: ${{ steps.fetch.outputs.outcome }}
+    value: ${{ steps.cache-verify.outputs.outcome || steps.fetch.outputs.outcome }}
   base-sha:
     description: 'The base commit the delta is measured against (empty when it could not be chosen).'
     value: ${{ steps.fetch.outputs.base-sha }}
   snapshot-path:
     description: 'Path of the extracted snapshot file when `outcome` is `resolved`.'
-    value: ${{ steps.fetch.outputs.snapshot-path }}
+    value: ${{ steps.cache-verify.outputs.snapshot-path || steps.fetch.outputs.snapshot-path }}
   message:
     description: 'One-line text for a PR comment or job summary describing the outcome.'
-    value: ${{ steps.fetch.outputs.message }}
+    value: ${{ steps.cache-verify.outputs.message || steps.fetch.outputs.message }}
 
 runs:
   using: 'composite'
@@ -89,10 +105,36 @@ runs:
         REPO: ${{ github.repository }}
         EVENT_NAME: ${{ github.event_name }}
         MERGE_GROUP_BASE: ${{ github.event.merge_group.base_sha }}
+        PR_BASE_REF: ${{ github.base_ref }}
         INPUT_WORKFLOW: ${{ inputs.workflow }}
+        INPUT_STORAGE: ${{ inputs.storage }}
         INPUT_MODE: ${{ inputs.mode }}
         INPUT_BRANCH: ${{ inputs.branch || github.event.repository.default_branch }}
         INPUT_PROFILE: ${{ inputs.profile }}
         INPUT_WAIT_TIMEOUT: ${{ inputs.wait-timeout }}
         INPUT_DESTINATION: ${{ inputs.destination }}
       run: bash "${{ github.action_path }}/run.sh"
+
+    # storage: cache. The exact key only -- never `restore-keys`, which would
+    # hand back the newest entry for some other commit.
+    - name: Restore the cached snapshot
+      id: cache-restore
+      if: inputs.storage == 'cache' && steps.fetch.outputs.cache-key != ''
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830  # v4
+      with:
+        path: .abicheck-main-snapshot-cache
+        key: ${{ steps.fetch.outputs.cache-key }}
+
+    - name: Verify the cached snapshot
+      id: cache-verify
+      if: inputs.storage == 'cache' && steps.fetch.outputs.cache-key != ''
+      shell: bash
+      env:
+        REPO: ${{ github.repository }}
+        INPUT_BRANCH: ${{ inputs.branch || github.event.repository.default_branch }}
+        INPUT_DESTINATION: ${{ inputs.destination }}
+        BASE_SHA: ${{ steps.fetch.outputs.base-sha }}
+        CACHE_KEY: ${{ steps.fetch.outputs.cache-key }}
+        CACHE_HIT: ${{ steps.cache-restore.outputs.cache-hit }}
+        CACHE_MATCHED_KEY: ${{ steps.cache-restore.outputs.cache-matched-key }}
+      run: bash "${{ github.action_path }}/verify-cache.sh"
