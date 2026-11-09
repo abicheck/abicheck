@@ -58,7 +58,7 @@ status line's date and commit.
 
 ## Page layout
 
-Each open entry below has its status line, a risk tag and a short summary; the full write-up, with the history of what was tried, is one file per entry under `docs/contribute/known-gaps/`. Index rows are ranked: the Priority list, then `false-clean` (a run can read cleaner than its evidence), `false-positive` (a finding or failure that is not real), `perf`, and `hygiene` (tests, tooling, schema or code-ownership debt). When you fix, re-check or add an entry, edit its write-up and keep the index row's status line in sync.
+Each open entry below has its status line, a risk tag and a short summary; the full write-up, with the history of what was tried, is one file per entry under `docs/contribute/known-gaps/`. Index rows are ranked: the Priority list, then `false-clean` (a run can read cleaner than its evidence), `false-positive` (a finding or failure that is not real), `perf`, and `hygiene` (tests, tooling, schema or code-ownership debt). `route-divergence` marks two equivalent routes (CLI, typed API, package) that report different findings for one input without a cleaner verdict. When you fix, re-check or add an entry, edit its write-up and keep the index row's status line in sync.
 
 ## Priority
 
@@ -83,6 +83,13 @@ flag only, by design, and a directory/package `compare` now applies the
 dependency walk and debug roots to every member. No open gap remains.
 
 ### Report and detector coverage
+
+#### The typed `compare()` route omits `exported_not_public` that the CLI reports for the same catalog case (2026-11-08)
+
+**Status (2026-11-08): OPEN.** Found by the typed-API route check in `tests/test_invariant_oracles_catalog.py`.
+[Full write-up](known-gaps/the-typed-compare-route-omits-exported-not-public-that-the-cli-reports-for-the-same-catalog-case.md)
+`route-divergence` — the typed route reports a different kind set from the CLI for one catalog case (one hygiene finding missing). The verdict agrees, so no run reads cleaner than its evidence.
+<!-- canary: tests/test_invariant_oracles_catalog.py::test_typed_api_omits_exported_not_public_on_case09 -->
 
 #### The clang record-layout pass leaves unnameable records and alias-template arrays to DWARF (2026-11-04)
 
@@ -194,6 +201,20 @@ current emitter, which is unchanged.
 <!-- canary: tests/test_l4_clang_projection_golden.py::test_pinned_set_matches_the_measured_projection_equivalence -->
 
 ### False-clean risk
+
+#### A stripped library compared without headers reads `NO_CHANGE` with `partial` assurance and exit 0 (2026-11-08)
+
+**Status (2026-11-08): OPEN.** Found while building the invariant oracles (`tests/test_invariant_oracles_reduced_evidence.py`).
+[Full write-up](known-gaps/a-stripped-library-compared-without-headers-reads-no-change-with-partial-assurance-and-exit-0.md)
+`false-clean` — a symbols-only compare of a stripped library reads `NO_CHANGE` with exit 0 and an accepted headline.
+<!-- canary: tests/test_invariant_oracles_reduced_evidence.py::test_stripped_pair_gap_is_still_the_current_answer -->
+
+#### One-sided DWARF or an unmet `--depth headers` request reads a clean verdict with exit 0 (2026-11-08)
+
+**Status (2026-11-08): OPEN.** Found by the evidence-shape oracles (`tests/test_invariant_oracles_evidence_shapes.py`). Sibling shapes of the stripped-pair entry above: an old library with DWARF against a stripped new one reads `COMPATIBLE` (`partial`, `version_bump: patch`), and a stripped pair compared with `--depth headers` and no headers reads `NO_CHANGE` (`failed`). Both exit 0, and every renderer states the clean result. [ADR-090](adr/090-unresolved-surface-is-not-a-clean-verdict.md) (proposed) covers both.
+[Full write-up](known-gaps/one-sided-dwarf-or-an-unmet-depth-headers-request-reads-a-clean-verdict-with-exit-0.md)
+`false-clean` — a compare with type-level evidence on one side only, or with its requested depth unmet, reads clean with exit 0.
+<!-- canary: tests/test_invariant_oracles_evidence_shapes.py::test_one_sided_and_unmet_depth_gap_is_still_the_current_answer -->
 
 #### A castxml base whose bare leaf two records share is not resolved by the leak walk (2026-11-05)
 

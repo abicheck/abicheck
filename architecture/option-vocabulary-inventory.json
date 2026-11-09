@@ -3564,8 +3564,16 @@
    "action": "actions/fetch-main-snapshot",
    "input": "workflow",
    "status": "live",
-   "required": true,
-   "default": null
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "actions/fetch-main-snapshot:storage",
+   "action": "actions/fetch-main-snapshot",
+   "input": "storage",
+   "status": "live",
+   "required": false,
+   "default": "artifact"
   },
   {
    "id": "actions/fetch-main-snapshot:mode",
@@ -3670,6 +3678,22 @@
    "status": "live",
    "required": false,
    "default": "14"
+  },
+  {
+   "id": "actions/main-snapshot:storage",
+   "action": "actions/main-snapshot",
+   "input": "storage",
+   "status": "live",
+   "required": false,
+   "default": "artifact"
+  },
+  {
+   "id": "actions/main-snapshot:branch",
+   "action": "actions/main-snapshot",
+   "input": "branch",
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "actions/main-snapshot:python-version",

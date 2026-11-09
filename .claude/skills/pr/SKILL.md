@@ -154,3 +154,7 @@ Execution-based evidence is A-tier. Test results, console output. Show the exact
 Describe whether it's a one-way or two-way door. You can walk back through two-way doors, but not one-way doors. A PR that is cheap to roll back is lower risk. Changes that involve destructive actions or hard-to-reverse decisions are one-way doors.
 
 The blast radius is the potential impact or scope of the changes introduced by this PR. Consider all possibilities. Examples are layout shift, breakages for consumers, mobile responsiveness, etc.
+
+### Bug class (fix PRs)
+
+The "Bug class" answer names the class of defect, not the one input that exposed it. Before answering, check `tests/regressions/families.py` (defect families F1–F18). If the fix is an instance of a family's invariant, name the family id and add the input to that family's sweep or harness. A genuinely distinct bug class still gets its own `BugClass` entry in `tests/regressions/manifest.py`, mapped to that family. Use an existing `BugClass.id` when the class already exists. A new family is named only for an invariant no family states. `scripts/check_bugfix_test_contract.py` reads this answer.

@@ -51,6 +51,10 @@
   mechanism a class already covers. `tests/regressions/manifest.py` (that
   plan's Phase 1) is the queryable registry: check `BUG_CLASSES`/`get()`
   there first for a matching `BugClass.id` before restating an invariant
-  from scratch, and add an entry there — not just prose — when a fix
-  closes a genuinely new class.
+  from scratch. Before adding a `BugClass`, check whether the fix is an
+  instance of an existing defect family (`tests/regressions/families.py`,
+  F1–F18). If it is, extend that family's sweep or harness. A genuinely
+  distinct bug class still gets its own `BugClass` entry, mapped to that
+  family, and never lives as prose alone. A new family is added only for an
+  invariant no family states.
 

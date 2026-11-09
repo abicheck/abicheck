@@ -834,3 +834,67 @@ def test_an_unavailable_delta_never_states_a_pairing() -> None:
         len(delta_notes("base_build_failed", base_sha=_SHA, operand_match="declared"))
         == 2
     )
+
+
+# ── storage: cache (fetch-main-snapshot) refusals are buildable ─────────────
+
+
+def _cache_refusals(tmp_path: Path) -> dict[str, DeltaOutcome]:
+    """Every non-resolved answer the real cache verifier gives, by case."""
+    from abicheck.frontends.action.main_snapshot_cache import (
+        CacheExpectation,
+        cache_scope_refusal,
+        provenance_record,
+        snapshot_cache_key,
+        verify_cached_snapshot,
+    )
+
+    key = snapshot_cache_key(_SHA)
+    expected = CacheExpectation(repository="o/r", branch="main", base_sha=_SHA, key=key)
+
+    def entry(name: str, provenance: dict | None, snapshot: str = "{}") -> Path:
+        d = tmp_path / name
+        d.mkdir()
+        (d / "snapshot.json").write_text(snapshot)
+        if provenance is not None:
+            (d / "provenance.json").write_text(json.dumps(provenance))
+        return d
+
+    good = provenance_record(sha=_SHA, key=key, repository="o/r", ref="refs/heads/main")
+    forged = {**good, "repository": "evil/fork"}
+
+    def verify(d: Path, *, hit: bool = True, matched: str = key) -> DeltaOutcome:
+        return verify_cached_snapshot(
+            d,
+            expected,
+            cache_hit=hit,
+            matched_key=matched,
+            destination=tmp_path / "dest",
+        ).outcome
+
+    scope = cache_scope_refusal(
+        event="merge_group",
+        ref="refs/heads/gh-readonly-queue/main/x",
+        base_ref="",
+        branch="main",
+    )
+    assert scope is not None
+    return {
+        "miss": verify(tmp_path / "absent", hit=False),
+        "other key": verify(entry("k", good), matched=key + "-x"),
+        "forged provenance": verify(entry("p", forged)),
+        "malformed entry": verify(entry("m", None)),
+        "unreadable snapshot": verify(entry("u", good, snapshot="[")),
+        "scope": scope.outcome,
+    }
+
+
+def test_every_cache_refusal_selected_a_commit_and_is_buildable(tmp_path: Path) -> None:
+    """A cache refusal is about the cache entry, never about which commit is
+    the base -- git chose that before the lookup -- so `build` applies to
+    every one of them, and building it does not read the refused entry."""
+    outcomes = _cache_refusals(tmp_path)
+    assert DeltaOutcome.RESOLVED not in outcomes.values(), outcomes
+    for case, outcome in outcomes.items():
+        res = CliRunner().invoke(action_cli, ["delta-buildable", outcome.value])
+        assert res.exit_code == 0, f"{case}: {outcome} is not buildable"

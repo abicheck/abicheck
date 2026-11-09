@@ -1,0 +1,5 @@
+{
+  "description": "The castxml/clang producer allowlist, keyed by catalog case, and its recorded baseline. Entries are [kind, only_in]. The allowlist is the one source the producer tests read. It may only shrink: an allowlist entry missing from the baseline is a violation (tests/test_invariant_oracles.py).",
+  "allowlist": {},
+  "baseline": {}
+}

@@ -24,6 +24,7 @@ files; every decision is in :mod:`~abicheck.frontends.action.main_snapshot`.
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -40,6 +41,15 @@ from .main_snapshot import (
     resolve_snapshot,
     select_base_commit,
     snapshot_artifact_name,
+)
+from .main_snapshot_cache import (
+    DEFAULT_MAX_ENTRY_BYTES,
+    DEFAULT_MAX_TOTAL_BYTES,
+    CacheExpectation,
+    cache_scope_refusal,
+    provenance_record,
+    snapshot_cache_key,
+    verify_cached_snapshot,
 )
 
 
@@ -255,6 +265,135 @@ def delta_base_dump_args_cmd(
         click.echo(str(exc), err=True)
         sys.exit(EXIT_REFUSED)
     sys.stdout.write("".join(f"{tok}\0" for tok in argv))
+
+
+# ── storage: cache ──────────────────────────────────────────────────────────
+
+
+@action_cli.command("snapshot-cache-key")
+@click.argument("sha")
+@click.option("--profile", default="", help="Optional profile suffix.")
+def snapshot_cache_key_cmd(sha: str, profile: str) -> None:
+    """Print the Actions-cache key a snapshot of commit SHA is saved under."""
+    try:
+        click.echo(snapshot_cache_key(sha, profile))
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
+
+
+@action_cli.command("write-cache-provenance")
+@click.argument("out", type=click.Path(path_type=Path))
+@click.option("--sha", required=True)
+@click.option("--profile", default="")
+@click.option("--repository", required=True)
+@click.option("--ref", required=True)
+@click.option("--run-id", default="")
+@click.option("--run-attempt", default="")
+@click.option("--workflow-ref", default="")
+@click.option("--event", default="")
+@click.option("--runner-os", default="")
+def write_cache_provenance_cmd(
+    out: Path,
+    sha: str,
+    profile: str,
+    repository: str,
+    ref: str,
+    run_id: str,
+    run_attempt: str,
+    workflow_ref: str,
+    event: str,
+    runner_os: str,
+) -> None:
+    """Write the provenance.json main-snapshot stores beside a cached snapshot.
+
+    Prints the cache key it records, so the save step uses the same one.
+    """
+    try:
+        key = snapshot_cache_key(sha, profile)
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
+    record = provenance_record(
+        sha=sha.strip().lower(),
+        key=key,
+        repository=repository,
+        ref=ref,
+        run_id=run_id,
+        run_attempt=run_attempt,
+        workflow_ref=workflow_ref,
+        event=event,
+        runner_os=runner_os,
+    )
+    out.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+    click.echo(key)
+
+
+@action_cli.command("cache-scope-check")
+@click.option("--event", default="")
+@click.option("--ref", default="")
+@click.option("--base-ref", default="")
+@click.option("--branch", required=True)
+@click.option("--github-output", type=click.Path(path_type=Path), default=None)
+def cache_scope_check_cmd(
+    event: str, ref: str, base_ref: str, branch: str, github_output: Path | None
+) -> None:
+    """Exit 3 with `untrusted_source` when this job may read caches `branch` does not own."""
+    refusal = cache_scope_refusal(
+        event=event, ref=ref, base_ref=base_ref, branch=branch
+    )
+    if refusal is None:
+        click.echo(f"cache scope ok: {event} on {ref or base_ref}")
+        return
+    _emit(github_output, outcome=refusal.outcome.value, message=refusal.message)
+    click.echo(f"{refusal.outcome.value}: {refusal.reason}")
+    sys.exit(EXIT_REFUSED)
+
+
+@action_cli.command("verify-cached-snapshot")
+@click.argument("directory", type=click.Path(path_type=Path))
+@click.option("--repository", required=True)
+@click.option("--branch", required=True)
+@click.option("--base-sha", required=True)
+@click.option("--key", required=True)
+@click.option("--cache-hit", default="", help="actions/cache/restore's cache-hit.")
+@click.option("--matched-key", default="")
+@click.option("--destination", type=click.Path(path_type=Path), required=True)
+@click.option("--max-entry-bytes", type=int, default=DEFAULT_MAX_ENTRY_BYTES)
+@click.option("--max-total-bytes", type=int, default=DEFAULT_MAX_TOTAL_BYTES)
+@click.option("--github-output", type=click.Path(path_type=Path), default=None)
+def verify_cached_snapshot_cmd(
+    directory: Path,
+    repository: str,
+    branch: str,
+    base_sha: str,
+    key: str,
+    cache_hit: str,
+    matched_key: str,
+    destination: Path,
+    max_entry_bytes: int,
+    max_total_bytes: int,
+    github_output: Path | None,
+) -> None:
+    """Check a restored cache entry; exit 3 with an outcome when it is unusable."""
+    result = verify_cached_snapshot(
+        directory,
+        CacheExpectation(
+            repository=repository, branch=branch, base_sha=base_sha, key=key
+        ),
+        cache_hit=cache_hit.strip().lower() == "true",
+        matched_key=matched_key.strip(),
+        destination=destination,
+        max_entry_bytes=max_entry_bytes,
+        max_total_bytes=max_total_bytes,
+    )
+    _emit(
+        github_output,
+        outcome=result.outcome.value,
+        message=result.message,
+        snapshot_path=result.snapshot_path,
+    )
+    click.echo(f"{result.outcome.value}: {result.reason}")
+    if not result.ok:
+        sys.exit(EXIT_REFUSED)
 
 
 @action_cli.command("operand-record")
