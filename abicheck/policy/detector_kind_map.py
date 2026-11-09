@@ -42,6 +42,9 @@ DETECTOR_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
         "atomic_qualifier": frozenset({"atomic_qualifier_changed"}),
         "bit_int_width": frozenset({"bit_int_width_changed"}),
         "char8t_migration": frozenset({"char8t_migration"}),
+        "concept_constraints": frozenset(
+            {"concept_constraint_changed", "concept_tightened"}
+        ),
         "const_overloads": frozenset({"removed_const_overload"}),
         "constants": frozenset(
             {"constant_added", "constant_changed", "constant_removed"}
@@ -368,9 +371,6 @@ DETECTOR_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
         "symbol_renames": frozenset({"symbol_renamed_batch"}),
         "symbol_version_alias": frozenset({"symbol_version_alias_changed"}),
         "target_isa": frozenset({"target_isa_changed"}),
-        "concept_constraints": frozenset(
-            {"concept_constraint_changed", "concept_tightened"}
-        ),
         "template_inner_types": frozenset(
             {"template_param_type_changed", "template_return_type_changed"}
         ),
@@ -441,6 +441,7 @@ DETECTOR_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
                 "var_visibility_changed",
             }
         ),
+        "virtual_slot_removal": frozenset({"func_virtual_removed"}),
         "visibility_leak": frozenset({"visibility_leak"}),
         "vtable_identity": frozenset({"vtable_symbol_identity_changed"}),
         "vtable_layout": frozenset(

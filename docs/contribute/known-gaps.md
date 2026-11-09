@@ -123,6 +123,11 @@ dependency walk and debug roots to every member. No open gap remains.
 
 ### Report and detector coverage
 
+#### The clang header backend records no parameter identities, so a kept-spelling retype stays a removal (2026-11-09)
+
+**Status (2026-11-09): OPEN.** `compare/parameter_replacement.py` pairs a header-declared function whose written parameter spelling is unchanged but resolves to a different type (`V scale(V, float)` with `using V = basic_vec<float>` whose default width changed) by reading `Param.type_identities_fact` and the record layouts it names. The castxml backend collects those identities; the clang backend records them as `not_collected`, so under `ABICHECK_AST_FRONTEND=clang` that pair stays `func_removed` + `func_added` (verdict right, kind wrong). A *rewritten* signature (`add(int, int)` -> `add(int, int, int)`) pairs on both backends: without identities its spelling is read. Closing it needs the clang backend to record each parameter's resolved record/enum identities. `wrong-kind` on clang. Owner: `extract/headers/clang/`.
+<!-- canary: tests/test_header_param_change_pairing_integration.py::test_clang_kept_spelling_default_argument_change_stays_unpaired -->
+
 #### The typed `compare()` route omits `exported_not_public` that the CLI reports for the same catalog case (2026-11-08)
 
 **Status (2026-11-08): OPEN.** Found by the typed-API route check in `tests/test_invariant_oracles_catalog.py`.
@@ -202,16 +207,6 @@ dependency walk and debug roots to every member. No open gap remains.
 
 **Status (2026-10-26): OPEN — gate-semantics decision needed.** A finding folded out as redundant but kept for the verdict is `gating` under the legacy scheme and `non_gating` under a severity config. `result_counts.gating_retained` now partitions the retained findings and the summary names the folded one, so the counts no longer contradict each other; the scheme disagreement remains. [Full write-up](known-gaps/legacy-gate-counts-a-redundant-finding-the-review-groups-omit.md)
 <!-- no-canary: awaits a gate-semantics decision between two schemes that are each internally consistent; no wrong value to pin until the ruling -->
-
-#### A C++ parameter change is reported as a removal plus an addition (2026-11-08)
-
-**Status (2026-11-08): OPEN.** A free C++ function whose parameter list changes gets a new mangled name, and the detector pairs old and new by mangled identity, so the output is `func_removed` + `func_added` (BREAKING) instead of `func_params_changed`. The verdict is right; the kind is not. Found by the generated edit corpus (`tests/test_abi_edit_corpus.py`, `func_param_append`/`func_param_type_change`/`func_param_remove` on the `cxx_classes` seed, gcc and clang), where those cells are strict xfails listed in `KNOWN_MISMATCHES`. The config-matrix corpus (`tests/test_abi_edit_corpus_matrix.py`) reproduces it on the `cxx_stdlib` seed; it is a header-lane gap: binary-only and DWARF-only evidence pair the two and do report `func_params_changed`. `wrong-kind`: consumers filtering on `func_params_changed` miss the break. Owner: `compare/` function pairing.
-<!-- no-canary: the corpus strict xfails fail once the pairing or kind is fixed, prompting removal -->
-
-#### Removing a virtual method reports no `func_virtual_removed` (2026-11-08)
-
-**Status (2026-11-08): OPEN.** Removing a virtual method yields `func_removed`, `type_vtable_changed` and `vtable_slot_count_changed` (all BREAKING), but never `func_virtual_removed`, whose taxonomy entry says BREAKING. The verdict is right; the specific kind is missing. Found by the generated edit corpus (`virtual_remove` on the `cxx_classes` seed, both compilers; strict xfail in `KNOWN_MISMATCHES`). `wrong-kind`. Owner: `policy/` and `compare/` virtual detectors.
-<!-- no-canary: the corpus strict xfails fail once the kind is emitted, prompting removal -->
 
 #### A member array-bound change is invisible in DWARF-only comparison (2026-11-08)
 
