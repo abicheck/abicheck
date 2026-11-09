@@ -296,10 +296,15 @@ jobs:
         run: |
           set -euo pipefail
           fail() { echo "::error::$*"; exit 1; }
-          cx="$(castxml --version 2>&1 | head -n 1)"
+          # First line of a command's output, read after the command exits.
+          # Not `cmd | head -n 1`: head closes the pipe after one line, the
+          # tool's next write fails (castxml then exits 74, others take
+          # SIGPIPE), and under pipefail that kills this step silently.
+          first_line() { local out; out="$("$@" 2>&1)"; printf '%s\n' "${out%%$'\n'*}"; }
+          cx="$(first_line castxml --version)"
           cx_path="$(command -v castxml)"
           cxx_path="$(command -v g++ || command -v c++)"
-          cxx_ver="$("$cxx_path" --version | head -n 1)"
+          cxx_ver="$(first_line "$cxx_path" --version)"
           if [ "$TOOLCHAIN" = castxml ]; then
             [ "$cx_path" = "$RUNNER_TEMP/castxml-newest/bin/castxml" ] \
               || fail "newest castxml not first on PATH: $cx_path"
@@ -318,16 +323,23 @@ jobs:
             done
           fi
           if [ "$TOOLCHAIN" = xcode ]; then
-            dev="$XCODE_UNDER_TEST/Contents/Developer"
-            [ "$(xcode-select -p)" = "$dev" ] || fail "xcode-select -p is $(xcode-select -p), expected $dev"
-            [ "${DEVELOPER_DIR:-}" = "$dev" ] || fail "DEVELOPER_DIR is '${DEVELOPER_DIR:-}', expected $dev"
+            # Compare physical paths: the runner image ships Xcode bundles
+            # and version aliases as symlinks, and xcode-select / xcrun may
+            # report either spelling.
+            phys() { (cd -P "$1" 2>/dev/null && pwd -P) || printf '%s\n' "$1"; }
+            dev="$(phys "$XCODE_UNDER_TEST/Contents/Developer")"
+            sel="$(phys "$(xcode-select -p)")"
+            [ "$sel" = "$dev" ] || fail "xcode-select -p resolves to $sel, expected $dev"
+            [ "$(phys "${DEVELOPER_DIR:-/nonexistent}")" = "$dev" ] \
+              || fail "DEVELOPER_DIR is '${DEVELOPER_DIR:-}', expected it to resolve to $dev"
             # /usr/bin/clang and cc are xcrun shims; resolve what they run.
             for tool in clang clang++ cc c++; do
               real="$(xcrun --find "$tool")"
+              real="$(phys "$(dirname "$real")")/$(basename "$real")"
               case "$real" in "$dev"/*) ;; *) fail "xcrun resolves $tool to $real, not inside $dev";; esac
             done
-            [ "$(clang -print-resource-dir | cut -c1-${#dev})" = "$dev" ] \
-              || fail "clang's resource dir $(clang -print-resource-dir) is not inside $dev"
+            res="$(phys "$(clang -print-resource-dir)")"
+            case "$res" in "$dev"/*) ;; *) fail "clang's resource dir $res is not inside $dev";; esac
           fi
           {
             echo "### toolchain canary: ${TOOLCHAIN}"
@@ -337,12 +349,12 @@ jobs:
             echo "| castxml | \`$cx\` at \`$cx_path\` |"
             echo "| C++ compiler | \`$cxx_ver\` at \`$cxx_path\` |"
             if [ "$TOOLCHAIN" = gcc ]; then
-              echo "| gcc / cc | \`$(gcc --version | head -n 1)\` / \`$(cc --version | head -n 1)\` |"
+              echo "| gcc / cc | \`$(first_line gcc --version)\` / \`$(first_line cc --version)\` |"
               echo "| CC / CXX | \`$CC\` / \`$CXX\` |"
             fi
             if [ "$TOOLCHAIN" = xcode ]; then
               echo "| Xcode | \`$XCODE_UNDER_TEST\` ($(xcodebuild -version | tr '\n' ' ')) |"
-              echo "| clang | \`$(clang --version | head -n 1)\` at \`$(xcrun --find clang)\` |"
+              echo "| clang | \`$(first_line clang --version)\` at \`$(xcrun --find clang)\` |"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -353,7 +365,8 @@ jobs:
         # (UnsupportedCastxmlVersionError) when it is outside policy.py's
         # range, accepted when inside. The expected answer is computed here
         # from the bare numbers, not by calling the policy's own evaluator.
-        if: matrix.toolchain == 'castxml'
+        # Runs even when the record step failed: it is an independent answer.
+        if: (success() || failure()) && matrix.toolchain == 'castxml'
         shell: bash
         run: |
           set -euo pipefail

@@ -1843,7 +1843,7 @@
     },
     "delta_baseline": {
       "type": "object",
-      "description": "Schema 7.3: which comparison of a root GitHub Action `delta-baseline` pair this report is, as the caller asserted it. With `delta-baseline: main` the Action compares the same new side twice: the gate (against the configured release baseline; its verdict is the check's verdict and exit code) and the delta (against the default-branch snapshot of the exact commit the pull request was built on, so the PR comment lists only that PR's changes). Present only when the run was given `report.delta_baseline` (`--set report.delta_baseline=@FILE`). `asserted_by: action` marks the values unverified by the CLI. Informational: never affects `verdict`, `severity` or any exit code; a `delta` report's own verdict never gates. Outcomes decided only after the gate ran (`rerun_failed` and the operand-identity refusals `operand_unmatched`/`operand_ambiguous`/`operand_map_invalid`/`operand_unreadable`) are never recorded: no delta comparison runs then, and the gate's block keeps the lookup's outcome.",
+      "description": "Schema 7.3: which comparison of a root GitHub Action `delta-baseline` pair this report is, as the caller asserted it. With `delta-baseline: main` the Action compares the same new side twice: the gate (against the configured release baseline; its verdict is the check's verdict and exit code) and the delta (against the default-branch snapshot of the exact commit the pull request was built on, so the PR comment lists only that PR's changes). Present only when the run was given `report.delta_baseline` (`--set report.delta_baseline=@FILE`). `asserted_by: action` marks the values unverified by the CLI. Informational: never affects `verdict`, `severity` or any exit code; a `delta` report's own verdict never gates. Outcomes decided only after the gate ran (`rerun_failed`, a failed base build `base_build_failed`/`base_dump_failed`, and the operand-identity refusals `operand_unmatched`/`operand_ambiguous`/`operand_map_invalid`/`operand_unreadable`) are never recorded: no delta comparison runs then, and the gate's block keeps the lookup's outcome.",
       "additionalProperties": false,
       "required": [
         "asserted_by",
@@ -1870,7 +1870,10 @@
                 "const": false
               },
               "outcome": {
-                "const": "resolved"
+                "enum": [
+                  "resolved",
+                  "base_built"
+                ]
               },
               "base_sha": {
                 "type": "string"
@@ -1884,6 +1887,11 @@
             "properties": {
               "decides_exit_code": {
                 "const": true
+              },
+              "outcome": {
+                "not": {
+                  "const": "base_built"
+                }
               },
               "gate_verdict": {
                 "type": "null"
@@ -1928,9 +1936,10 @@
             "snapshot_missing",
             "untrusted_source",
             "lookup_failed",
-            "unsupported_operand"
+            "unsupported_operand",
+            "base_built"
           ],
-          "description": "The base-snapshot outcome (the Action's `delta-outcome` output; meanings in docs/reference/main-snapshot.md), or `unsupported_operand` for a directory/package comparison, which a single-snapshot delta cannot describe. A `delta` report is always `resolved`. On a `gate` report this is the lookup's outcome when the gate ran; the PR comment may still fall back to the gate's report if the delta comparison then produced none."
+          "description": "The base-snapshot outcome (the Action's `delta-outcome` output; meanings in docs/reference/main-snapshot.md), or `unsupported_operand` for a directory/package comparison, which a single-snapshot delta cannot describe. A `delta` report is `resolved`, or `base_built` when `delta-on-missing-base: build` built the base commit in the PR job after the gate (never on a `gate` report). On a `gate` report this is the lookup's outcome when the gate ran; the PR comment may still fall back to the gate's report if the delta comparison then produced none."
         },
         "base_sha": {
           "type": [

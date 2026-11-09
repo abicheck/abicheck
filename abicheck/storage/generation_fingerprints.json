@@ -74,6 +74,7 @@
       "abicheck/extract/header_ast_cache_producers.py": "aa85ae5d148526267f600b0972ca89afc27b6b8cb3f51b4c781a1526773600b4",
       "abicheck/extract/header_ast_fields.py": "dfa466a2c4172dc4fe44b44c0d7d051238ac20019a4630dc94464ee46c8eab32",
       "abicheck/extract/header_exclusions.py": "254ca6e4ccf7366b9db516183d6814cb865c279845abe7d05051ac2f72bf0884",
+      "abicheck/extract/header_export_binding.py": "2849838510f5461a99938095d4bd3f619599127fa60b66756909124e7f069a15",
       "abicheck/extract/header_order_witness.py": "40a29ffe7ed3751f9bb8e3bbce7f49011569b9d1d0d99947641d9ba178982966",
       "abicheck/extract/header_scan_memo.py": "56f79b5316354b938b08a5f29779c3aaf40481892d947784ec2adb48ab5e83fb",
       "abicheck/extract/header_text.py": "b43a88d7bf1d2e601bb908c78f04cb07e552f9c59f03b678ecc85788b3d146e4",
@@ -203,9 +204,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "afb5d45b6a9c64324ae8d0933c9e57381fcafa637b6191a4c090dbb4a66db72c",
-    "generation": 44,
-    "reason": "bumped to 44 for a semantic change"
+    "fingerprint": "85c19ed773be85a89e48fe6ee4f2eaa9d4cb4f033e7b12076a5d064dc00cfb1d",
+    "generation": 45,
+    "reason": "bumped to 45 for a semantic change"
   },
   "resolver": {
     "files": {

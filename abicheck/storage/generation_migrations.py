@@ -472,13 +472,23 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "not captured"
     ),
     44: GenerationSpellingChange(
+        "PE/Mach-O header-scoped dumps keep the parsed header surface when no "
+        "declaration's spelling matches an export (scope_fallback "
+        "export-binding-unresolved replaces mangling-fallback), and bind a "
+        "declaration to an export spelled in another mangling scheme "
+        "(extract/header_export_binding): a bound declaration's mangled "
+        "becomes the export's MSVC/Itanium/decorated spelling. ELF dumps and "
+        "every type or name spelling are unchanged, so no rewrite is needed -- "
+        "an older PE/Mach-O snapshot keeps its export-table-only surface"
+    ),
+    45: GenerationSpellingChange(
         "DWARF arrays spell each dimension's bound (dwarf_utils.array_type_info: "
         "'char[8]', 'int[2][3]', was 'char[]' for every array; a flexible member "
         "keeps 'T[]') and an array without DW_AT_byte_size records its size as "
-        "count times element size (was 0); DWARF-only snapshots record a C++ "
-        "member function from its in-class declaration when its symbol is "
-        "exported (dwarf_snapshot._process_member_declaration), with is_const "
-        "from the 'this' parameter. A stored 'T[]' cannot say what bound it "
+        "count times element size (was 0); DWARF-only snapshots record C++ "
+        "member and namespace-scope functions defined outside their declaration "
+        "(DW_AT_specification, extract/dwarf_member_functions), with the "
+        "declaration's name, scope, return type and 'this' qualifiers. A stored 'T[]' cannot say what bound it "
         "erased, so no rewrite is sound: comparison demotes a finding whose "
         "spellings differ only by that erasure (policy/generation_drift_demotion)",
         restores_erased_extents=True,

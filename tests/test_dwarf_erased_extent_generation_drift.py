@@ -1,7 +1,7 @@
-"""A pre-44 DWARF baseline's ``T[]`` against a fresh ``T[N]`` is drift, not a
+"""A pre-45 DWARF baseline's ``T[]`` against a fresh ``T[N]`` is drift, not a
 break (bug class ``storage.cross_generation_spelling_drift``).
 
-Generation 44 started spelling DWARF array bounds. A stored DWARF-only
+Generation 45 started spelling DWARF array bounds. A stored DWARF-only
 baseline still says ``char[]`` for ``char tag[8]``, and a stored ``T[]``
 cannot say which bound it erased, so no load-time rewrite is sound:
 comparison demotes the finding to ``COMPATIBLE_WITH_RISK`` and keeps it
@@ -31,6 +31,10 @@ from abicheck.storage.generation_migrations import (
     FACT_GENERATIONS_KEY,
     erased_extents_restored_between,
 )
+from abicheck.storage.versioning import EXTRACTOR_GENERATION
+
+#: The generation just before the one that started spelling array bounds.
+_PRE = 44
 
 
 @pytest.mark.parametrize(
@@ -62,9 +66,9 @@ def test_erased_extent_drift_is_exactly_the_bound_erasure(
 
 @pytest.mark.parametrize(
     ("a", "b", "expected"),
-    [(43, 44, True), (44, 43, True), (0, 50, True), (44, 44, False), (42, 43, False)],
+    [(44, 45, True), (45, 44, True), (0, 50, True), (45, 45, False), (43, 44, False)],
 )
-def test_the_generation_44_row_is_what_declares_it(
+def test_the_generation_45_row_is_what_declares_it(
     a: int, b: int, expected: bool
 ) -> None:
     assert erased_extents_restored_between(a, b) is expected
@@ -129,8 +133,8 @@ def _field_finding(result: object):  # type: ignore[no-untyped-def]
 
 
 @pytest.mark.parametrize("live", ["char[8]", "char[2][4]"])
-def test_a_pre_44_dwarf_baseline_reads_the_erasure_as_drift(live: str) -> None:
-    result = compare(_stamped(_snapshot("char[]"), 43), _snapshot(live))
+def test_a_pre_45_dwarf_baseline_reads_the_erasure_as_drift(live: str) -> None:
+    result = compare(_stamped(_snapshot("char[]"), _PRE), _snapshot(live))
     finding = _field_finding(result)
     assert finding.effective_verdict is Verdict.COMPATIBLE_WITH_RISK
     assert finding.modulation_rule == GENERATION_DRIFT_RULE
@@ -140,20 +144,20 @@ def test_a_pre_44_dwarf_baseline_reads_the_erasure_as_drift(live: str) -> None:
 
 
 def test_the_newer_operand_on_the_old_side_is_read_the_same_way() -> None:
-    result = compare(_snapshot("char[8]"), _stamped(_snapshot("char[]"), 43))
+    result = compare(_snapshot("char[8]"), _stamped(_snapshot("char[]"), _PRE))
     assert _field_finding(result).modulation_rule == GENERATION_DRIFT_RULE
 
 
 @pytest.mark.parametrize(
     ("stale_generation", "source"),
     [
-        (44, "dwarf"),
-        (43, "headers"),
-        (43, "pdb"),
-        (43, "btf"),
-        (43, "ctf"),
-        (43, "unknown"),
-        (43, "symbols"),
+        (EXTRACTOR_GENERATION, "dwarf"),
+        (_PRE, "headers"),
+        (_PRE, "pdb"),
+        (_PRE, "btf"),
+        (_PRE, "ctf"),
+        (_PRE, "unknown"),
+        (_PRE, "symbols"),
     ],
     ids=[
         "same_generation",
@@ -175,6 +179,6 @@ def test_no_demotion_without_an_older_dwarf_sourced_side(
 
 
 def test_a_real_element_change_across_generations_stays_breaking() -> None:
-    result = compare(_stamped(_snapshot("char[]"), 43), _snapshot("int[8]"))
+    result = compare(_stamped(_snapshot("char[]"), _PRE), _snapshot("int[8]"))
     assert _field_finding(result).modulation_rule != GENERATION_DRIFT_RULE
     assert result.verdict is Verdict.BREAKING

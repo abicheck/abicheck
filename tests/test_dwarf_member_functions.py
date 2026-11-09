@@ -1,7 +1,7 @@
-"""C++ member functions in DWARF-only snapshots (extractor generation 44).
+"""C++ member functions in DWARF-only snapshots (extractor generation 45).
 
 A member's definition DIE names its in-class declaration only through
-``DW_AT_specification``; before generation 44 the walker dropped both, so a
+``DW_AT_specification``; before generation 45 the walker dropped both, so a
 DWARF-only snapshot held no method and a dropped ``const`` read as an ELF
 symbol removal plus addition (the config-matrix corpus's ``method_const_drop``
 and ``virtual_become_pure`` cells).

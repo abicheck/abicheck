@@ -15,13 +15,15 @@
 
 """Assurance gap for a header-scoped dump that fell back to the export table.
 
-When ``--header`` was given but the header-scoped dump could not be used --
-the header backend failed, or no header declaration matched an exported
-symbol (a header-only template surface on Mach-O/PE, MSVC mangling) -- the
-format adapter records ``AbiSnapshot.scope_fallback`` and keeps only the
-export table. The supplied headers' declarations, and every header-level
-check (concepts, template defaults, field layout), were then never assessed:
-that is a coverage gap, never a verdict, so the rollup reads ``partial``.
+When ``--header`` was given but the header backend failed, the format
+adapter records ``AbiSnapshot.scope_fallback`` (``header-backend-unavailable``)
+and keeps only the export table: the supplied headers' declarations, and
+every header-level check (concepts, template defaults, field layout), were
+never assessed. When the headers parsed but no declaration could be bound
+to an export (``export-binding-unresolved``: a template-only header, or a
+mangling scheme the binding pass cannot relate), the header surface is kept
+and only the export binding is missing. Either is a coverage gap, never a
+verdict, so the rollup reads ``partial``.
 """
 
 from __future__ import annotations
@@ -50,18 +52,31 @@ def _sides(
     return (("old", old), ("new", new))
 
 
+def _finding_text(label: str, snap: AbiSnapshot) -> str:
+    code = snap.scope_fallback
+    if getattr(snap, "from_headers", False):
+        # The headers parsed and were kept (``export-binding-unresolved``):
+        # types and templates were assessed, export binding was not.
+        return (
+            f"{SCOPE_FALLBACK_DIMENSION}: the {label} snapshot's header "
+            f"declarations could not be bound to any export ({code}), so its "
+            "exported functions and variables are compared from the export "
+            "table only; header types and templates were assessed"
+        )
+    return (
+        f"{SCOPE_FALLBACK_DIMENSION}: the {label} snapshot was dumped with "
+        f"headers but fell back to export-table mode ({code}), "
+        "so header-level changes on that side are not assessed"
+    )
+
+
 def scope_fallback_findings(
     old: AbiSnapshot | None, new: AbiSnapshot
 ) -> list[UnobservedFinding]:
-    """One finding per side whose dump discarded its headers."""
+    """One finding per side whose dump discarded its headers, or kept them
+    without binding any declaration to an export."""
     return [
-        UnobservedFinding(
-            SCOPE_FALLBACK_DIMENSION,
-            label,
-            f"{SCOPE_FALLBACK_DIMENSION}: the {label} snapshot was dumped with "
-            f"headers but fell back to export-table mode ({snap.scope_fallback}), "
-            "so header-level changes on that side are not assessed",
-        )
+        UnobservedFinding(SCOPE_FALLBACK_DIMENSION, label, _finding_text(label, snap))
         for label, snap in _sides(old, new)
         if snap is not None and getattr(snap, "scope_fallback", None)
     ]

@@ -14,7 +14,7 @@ contract.
 Two shapes are covered. With an exported function taking the vector by value,
 it is reached through that parameter. Without one, it is reached only through
 the library's own struct field, which spells the library's alias ``lib::V``.
-Since extractor generation 44 a DWARF-only dump records the library's
+Since extractor generation 45 a DWARF-only dump records the library's
 namespace-scope functions (``lib::sum``, ``lib::scale``, defined through
 ``DW_AT_specification``) and so the typedefs they reach: the vector's identity
 change is reported on ``V``, in contract, and the type presence changes are

@@ -594,6 +594,20 @@ def test_flat_model_never_stamps_type_graph_pass_on_scope_fallback() -> None:
     assert graph.extractor_passes == {}
 
 
+def test_flat_model_stamps_passes_when_unbound_headers_were_kept() -> None:
+    # `export-binding-unresolved`: the headers parsed and were kept
+    # (`from_headers`), only the export binding is missing -- the structural
+    # scan is a genuine header parse, unlike the discarded-headers states.
+    public = RecordType(name="Public", kind="struct", origin=ScopeOrigin.UNKNOWN)
+    snap = _snapshot(types=[public], scope_fallback="export-binding-unresolved")
+    snap.from_headers = True
+    graph = build_header_only_graph(snap)
+    assert graph.extractor_passes == {
+        HEADER_TYPE_GRAPH_PASS: True,
+        "header_declarations": True,
+    }
+
+
 # ── header_paths pre-seeding ─────────────────────────────────────────────────
 
 

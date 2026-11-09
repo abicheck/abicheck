@@ -516,7 +516,7 @@ _EXTENT_RUN = re.compile(r"(?:\[\s*\d*\s*\])+")
 
 def is_erased_extent_drift(stale: str, live: str) -> bool:
     """Whether *stale* is *live* with every run of array bounds erased: the
-    spelling the pre-44 DWARF extractor wrote for a bounded array
+    spelling the pre-45 DWARF extractor wrote for a bounded array
     (``char[8]`` -> ``char[]``, ``int[2][3]`` -> ``int[]``). An array DIE
     nested in another wrote one ``[]`` per DIE (``int[][]``), never more
     than the live spelling has dimensions. Any other difference, a changed

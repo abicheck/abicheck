@@ -336,7 +336,7 @@ UNPROBED: dict[str, str] = {
 }
 
 #: ``BINARY_GATED`` probes whose binary-only (DWARF, no headers) run produces
-#: the kind (probed with gcc at -O0 -g). Since extractor generation 44 a
+#: the kind (probed with gcc at -O0 -g). Since extractor generation 45 a
 #: binary-only dump records C++ member and namespace-scope functions from
 #: their debug declarations, so a method's access, ``explicit``, const
 #: overload and namespace are read from DWARF too. The other ``BINARY_GATED``

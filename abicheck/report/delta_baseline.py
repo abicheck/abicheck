@@ -48,7 +48,9 @@ from ..workflows.delta_operand import MatchRule
 __all__ = [
     "DELTA_BASELINE_PATH",
     "DELTA_COMPARISON_ROLES",
+    "DELTA_GATE_OUTCOMES",
     "DELTA_LOOKUP_OUTCOMES",
+    "DELTA_MEASURED_OUTCOMES",
     "DELTA_OPERAND_MATCHES",
     "DELTA_POST_GATE_OUTCOMES",
     "DELTA_REPORT_OUTCOMES",
@@ -79,20 +81,43 @@ DELTA_LOOKUP_OUTCOMES: tuple[str, ...] = (
     "lookup_failed",
 )
 
-#: Every outcome a report may carry: the lookup's, plus ``unsupported_operand``
+#: The outcomes of a measured delta -- the only ones a ``delta`` report
+#: carries: ``resolved`` (a stored snapshot) and ``base_built`` (no stored
+#: snapshot was usable, so ``delta-on-missing-base: build`` built the base
+#: commit in the PR job, after the gate).
+DELTA_MEASURED_OUTCOMES: tuple[str, ...] = ("resolved", "base_built")
+
+#: Every outcome a report may carry: the lookup's, ``unsupported_operand``
 #: (the snapshot resolved, but a directory/package comparison is not one a
-#: single-snapshot delta can describe -- known before the gate runs).
-DELTA_REPORT_OUTCOMES: tuple[str, ...] = (*DELTA_LOOKUP_OUTCOMES, "unsupported_operand")
+#: single-snapshot delta can describe -- known before the gate runs), and
+#: ``base_built`` (a ``delta`` report only: the base was built after the gate,
+#: so no ``gate`` report can record it).
+DELTA_REPORT_OUTCOMES: tuple[str, ...] = (
+    *DELTA_LOOKUP_OUTCOMES,
+    "unsupported_operand",
+    "base_built",
+)
+
+#: The outcomes a ``gate`` report may carry: every report outcome except
+#: ``base_built``, which is decided after the gate ran.
+DELTA_GATE_OUTCOMES: tuple[str, ...] = tuple(
+    o for o in DELTA_REPORT_OUTCOMES if o != "base_built"
+)
 
 #: Outcomes the comment can carry that no report records. Each is decided
 #: after the gate has run, and in each case no delta comparison runs:
-#: ``rerun_failed`` (the delta rerun produced no report) and the operand
+#: ``rerun_failed`` (the delta rerun produced no report), a failed base
+#: build (``base_build_failed``/``base_dump_failed``) and the operand
 #: identity refusals of :mod:`abicheck.workflows.delta_operand` (the snapshot
 #: is not shown to be this PR's library, so it is never compared). The gate
 #: report's own block keeps the lookup's outcome; the analysis context's
 #: ``delta_outcome`` carries the comment's final one.
 DELTA_POST_GATE_OUTCOMES: tuple[str, ...] = (
     "rerun_failed",
+    # delta-on-missing-base: build, after the gate: the base commit could not
+    # be checked out or built, or its build could not be dumped.
+    "base_build_failed",
+    "base_dump_failed",
     "operand_unmatched",
     "operand_ambiguous",
     "operand_map_invalid",
@@ -167,7 +192,7 @@ class DeltaBaseline:
         Unknown keys are refused, not dropped, so a misspelled field never
         reads as an absent one; an empty string reads as absent. The two
         roles' invariants are enforced here, not left to the writer: a delta
-        report exists only for a resolved snapshot of a named commit, and only
+        report exists only for a resolved or built base of a named commit, and only
         a delta report records the gate's verdict (a gate report's own
         ``verdict`` *is* the gate's).
         """
@@ -200,16 +225,22 @@ class DeltaBaseline:
             operand_match=_operand_match(data),
         )
         if record.comparison_role == "delta":
-            if record.outcome != "resolved":
+            if record.outcome not in DELTA_MEASURED_OUTCOMES:
                 raise DeltaBaselineError(
-                    f"a delta report needs outcome resolved, got {record.outcome!r}: "
-                    "without a resolved snapshot there is no delta comparison"
+                    f"a delta report needs outcome {' or '.join(DELTA_MEASURED_OUTCOMES)}, "
+                    f"got {record.outcome!r}: without a resolved or built base "
+                    "there is no delta comparison"
                 )
             if record.base_sha is None or record.gate_verdict is None:
                 raise DeltaBaselineError(
                     "a delta report needs base_sha and gate_verdict: it must say "
                     "what it was measured against and what the gate decided"
                 )
+        elif record.outcome not in DELTA_GATE_OUTCOMES:
+            raise DeltaBaselineError(
+                "base_built is recorded on the delta report only; the base is "
+                "built after the gate ran"
+            )
         elif record.gate_verdict is not None:
             raise DeltaBaselineError(
                 "gate_verdict is recorded on the delta report only; a gate "

@@ -96,7 +96,7 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "A DWARF array type spells each dimension's bound, outermost "
             "first, as C writes it (char[8], int[2][3]); only an unbounded "
             "dimension spells []. A bound change is a member type change even "
-            "when the record's size does not move, and a pre-generation-44 "
+            "when the record's size does not move, and a pre-generation-45 "
             "DWARF baseline's erased T[] against a fresh T[N] reads as "
             "extractor drift, never a break."
         ),
@@ -877,6 +877,39 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
                     "lane once its pin is bumped, not before."
                 ),
                 reference=".github/workflows/clang-latest.yml",
+            ),
+        ),
+    ),
+    BugClass(
+        id="extraction.header_surface_discarded_on_export_mismatch",
+        invariant=(
+            "A PE or Mach-O dump with headers keeps every header declaration "
+            "and type the headers parsed, whether or not any declaration's "
+            "linker spelling meets an export; and a header declaration binds "
+            "to exactly the export it names, whatever mangling scheme each "
+            "side spells it in (Itanium, MSVC, x86 C decoration), and to no "
+            "other. The same sources and headers built for ELF, PE and "
+            "Mach-O therefore yield the same verdict and findings."
+        ),
+        fixed_by=(1967,),
+        seed_tests=(
+            "tests/test_header_export_binding.py",
+            "tests/test_pe_macho_header_binding_integration.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "frontend": ("castxml", "clang"),
+            "format": ("elf", "pe", "macho"),
+            "mangling": ("itanium->msvc", "msvc->itanium", "c->x86-decorated"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "PE overloads whose parameters are not builtin types, and "
+                    "MSVC operators/structors/template instantiations, stay "
+                    "unbound and are compared from the export table only."
+                ),
+                reference="docs/contribute/known-gaps/pe-overloads-with-class-typed-parameters-stay-unbound.md",
             ),
         ),
     ),

@@ -222,7 +222,7 @@ ONLY_BINARY_DUMP: dict[str, str] = {
     "typedef_base_changed": _DEBUG_DECLARATIONS,
     "typedef_removed": _DEBUG_DECLARATIONS,
     "integer_model_changed": _DEBUG_DECLARATIONS,
-    # Since extractor generation 44 a binary-only dump records C++ member
+    # Since extractor generation 45 a binary-only dump records C++ member
     # functions and namespace-scope functions from their debug-info
     # declarations: their cv/ref qualifiers, static-ness, virtuality, access,
     # deprecation and declaring scope are what these kinds read.

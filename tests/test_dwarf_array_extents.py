@@ -1,6 +1,6 @@
-"""DWARF array members keep their bounds (family F14, generation 44).
+"""DWARF array members keep their bounds (family F14, generation 45).
 
-Before generation 44 the DWARF extractor spelled every non-vector array as
+Before generation 45 the DWARF extractor spelled every non-vector array as
 ``T[]``, so ``char tag[8]`` -> ``char tag[6]`` inside a record whose size did
 not move read ``NO_CHANGE`` from a DWARF-only comparison, and a packed record
 reported only its size change.

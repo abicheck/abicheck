@@ -11,7 +11,7 @@
   declaration when the definition does not repeat it), so a dropped `const` reads
   `func_cv_changed` and a clang-built virtual that became pure reads
   `func_virtual_became_pure` instead of an ELF symbol removal plus addition.
-  Extractor generation 44: a stored pre-44 DWARF baseline's `T[]` against a
+  Extractor generation 45: a stored pre-45 DWARF baseline's `T[]` against a
   fresh `T[N]` (DWARF-sourced, not PDB or headers) is demoted to
   `COMPATIBLE_WITH_RISK` as extractor drift (re-dump
   the baseline). A GCC-built pure virtual is still read as a removal (GCC

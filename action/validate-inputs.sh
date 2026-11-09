@@ -488,9 +488,16 @@ case "${INPUT_DELTA_MODE:-auto}" in
   *) _fail "delta-mode '${INPUT_DELTA_MODE}' is not recognized. Use 'auto', 'merge-commit' or 'head'." ;;
 esac
 case "${INPUT_DELTA_ON_MISSING_BASE:-report}" in
-  report | fail) ;;
-  *) _fail "delta-on-missing-base '${INPUT_DELTA_ON_MISSING_BASE}' is not recognized. Use 'report' or 'fail'." ;;
+  report | fail | build) ;;
+  *) _fail "delta-on-missing-base '${INPUT_DELTA_ON_MISSING_BASE}' is not recognized. Use 'report', 'fail' or 'build'." ;;
 esac
+_delta_build_cmd="${INPUT_DELTA_BASE_BUILD_COMMAND:-}"
+if [[ "${INPUT_DELTA_ON_MISSING_BASE:-report}" == build && -z "${_delta_build_cmd//[[:space:]]/}" ]]; then
+  _fail "delta-on-missing-base: build needs delta-base-build-command (the commands that build the base commit from the root of its checkout)."
+fi
+if [[ "${INPUT_DELTA_ON_MISSING_BASE:-report}" != build && -n "${_delta_build_cmd//[[:space:]]/}" ]]; then
+  _warn "delta-base-build-command is set but has no effect: it only applies to delta-on-missing-base: build."
+fi
 if [[ "${INPUT_DELTA_BASELINE:-}" == main ]]; then
   [[ -n "${INPUT_DELTA_SNAPSHOT_WORKFLOW:-}" ]] \
     || _fail "delta-baseline: main needs delta-snapshot-workflow (the workflow file that runs actions/main-snapshot on the default branch)."

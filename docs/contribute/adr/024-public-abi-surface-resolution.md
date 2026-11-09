@@ -286,6 +286,17 @@ surface still falls back to the export table — now disclosed as a
 narrows the impact (declared types still carry their header) but does not, on
 its own, close the mangling gap.
 
+**Amendment (2026-11-09).** A header set that parses is no longer discarded
+when no declaration matches an export. `extract/header_export_binding.py`
+binds declarations to exports across mangling schemes (MSVC and Itanium, and
+x86 C decoration) by the qualified name both spellings encode, separating
+overloads by the decoded MSVC parameter list. The header surface is always
+kept as type-level evidence. A snapshot on which nothing could be bound
+records `scope_fallback: export-binding-unresolved`, which replaces
+`mangling-fallback` for new dumps. `header-backend-unavailable`, a failed
+parse, is unchanged. The residual (overloads with non-builtin parameters) is
+recorded in `docs/contribute/known-gaps.md`.
+
 ---
 
 ## Alternatives considered
