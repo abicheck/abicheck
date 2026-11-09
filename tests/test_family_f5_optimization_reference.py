@@ -94,6 +94,7 @@ R, B, H = "release.memo", "binary.memo", "headers.memo"
 D = "same_content.memo"
 _NEEDS_L5 = "UNCOVERED: L3-L5 build-source graph extraction (needs a compile database + clang); no in-process fixture reaches it"
 COVERAGE: dict[str, str] = {
+    "abicheck.storage.json_strings::memoized::parse_document.shared": "UNCOVERED: H5 CLI cells use balanced; low-memory string pooling has generated stdlib-JSON equivalence, mutable-ownership and reference-bypass guards in tests/test_performance_boundaries.py",
     # ---- memoized functions ----
     "abicheck.storage.code_identity::memoized::abicheck_code_fingerprint": B,
     "abicheck.storage.wire_record_extensions::memoized::_known_fields": "UNCOVERED: a pure per-class field-name set read from the dataclass definition, which never changes within one process; no cell varies a model class. Its output is pinned by tests/unit/storage/test_package_carriers_roundtrip.py (generated nested unknown keys round-trip exactly)",
