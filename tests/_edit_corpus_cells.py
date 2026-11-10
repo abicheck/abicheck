@@ -43,6 +43,7 @@ from tests._edit_corpus_expect import (
 from tests._edit_corpus_harness import BaselineCache, NewBuildCache, abicheck_answer
 from tests._edit_corpus_operators import EditOp
 from tests._edit_corpus_seeds import Seed
+from tests._edit_corpus_space import seed_flags_conflict
 from tests._edit_corpus_toolchains import (
     capability_gap,
     consumer_unavailable,
@@ -138,16 +139,17 @@ class CellResult:
 
 
 def seed_conflict(seed: Seed, config: Config) -> str | None:
-    """A seed x build pair that is ill-formed on its own, whatever the edit."""
+    """A seed x build pair that is ill-formed on its own, whatever the edit.
+
+    The rule lives with the language-space model (``_edit_corpus_space``), so
+    the coverage report counts as infeasible exactly what the generator refuses.
+    """
     return _std_flag_conflict(seed, config.flags)
 
 
 def _std_flag_conflict(seed: Seed, flags: Flags) -> str | None:
-    if seed.name == "cxx_stdlib" and (flags.pack is not None or flags.short_enums):
-        # gcc documents both flags as making code binary-incompatible with
-        # code built without them, and the installed libstdc++ is built without.
-        return "-fpack-struct/-fshort-enums make std::string incompatible with the installed libstdc++"
-    return None
+    """A seed built (or consumed) under *flags* that cannot work: the space model's rule."""
+    return seed_flags_conflict(seed, flags)
 
 
 def stdlib_mismatch(

@@ -524,7 +524,7 @@ def test_a_harness_exception_still_leaves_a_cell_report(
     monkeypatch.setenv("ABICHECK_EDIT_CORPUS_REPORT_DIR", str(tmp_path))
     monkeypatch.setattr(matrix, "run_cell", boom)
     with pytest.raises(CompileError):
-        matrix.check_cell(_cell(), None)  # type: ignore[arg-type]
+        matrix.check_cell(_cell(), None, "nightly")  # type: ignore[arg-type]
     (report,) = tmp_path.iterdir()
     assert "CompileError: library does not build" in report.read_text(encoding="utf-8")
 
@@ -556,7 +556,7 @@ def test_a_failed_minimization_keeps_the_original_mismatch(
     monkeypatch.setattr(matrix, "run_cell", lambda *a: mismatch)
     monkeypatch.setattr(matrix, "minimize", shrink)
     with pytest.raises(pytest.fail.Exception) as info:
-        matrix.check_cell(cell, None)  # type: ignore[arg-type]
+        matrix.check_cell(cell, None, "nightly")  # type: ignore[arg-type]
     text = (tmp_path / f"{cell.id}.txt").read_text(encoding="utf-8")
     for got in (str(info.value), text):
         assert "-> wrong-verdict" in got

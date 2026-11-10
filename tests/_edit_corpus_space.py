@@ -1,0 +1,405 @@
+"""The language space the generated edit corpus samples, and which of it is feasible.
+
+A *point* in the space is one combination of six axes::
+
+    construct x language x standard x config feature x build toolchain
+      x consumer toolchain x evidence
+
+- **construct** (``CONSTRUCTS``): the language construct an edit operator
+  changes, read off the operator's roles (``ROLE_CONSTRUCT``) or, when it needs
+  a language feature, off that feature (``FEATURE_CONSTRUCT``);
+- **language** / **standard**: ``_edit_corpus_config.STANDARDS``;
+- **config feature** (``CONFIG_FEATURES``): one ABI-relevant setting the cell
+  turns on (``baseline`` = none of them), on either side of a rebuild;
+- **build** / **consumer** toolchain: the family that builds the library and
+  the one that builds its consumers (``_edit_corpus_config.FAMILIES``); a
+  (build, consumer) pair that cannot work is infeasible through
+  ``PAIR_RULES``;
+- **evidence**: ``_edit_corpus_config.EVIDENCE``.
+
+``infeasible(point)`` says why a point cannot be a meaningful cell (concepts
+before C++20, a C++-only construct in C, ``-fabi-version`` on clang, a family
+that does not target Linux ELF), or ``None``. ``cell_points`` maps one corpus
+cell (operator, seed, config) onto the points it exercises. The generator
+(``_edit_corpus_cells.seed_conflict``) and the coverage report
+(``_edit_corpus_coverage``) both read this module, so a rule changes in one
+place.
+
+What a covered fraction of this space does NOT mean: a covered point is one
+that some cell *ran*, not one where abicheck was right (that is the ChangeKind
+and mismatch report), and not every edit of that construct (the space has no
+"edit" axis: one operator covers its construct). The axes are the corpus's
+own; a dimension the corpus cannot vary (OS, architecture beyond -m32, link
+order) is not in the denominator at all.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Iterable, Iterator
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+from tests._edit_corpus_config import (
+    EVIDENCE,
+    FAMILIES,
+    FEATURES,
+    STANDARDS,
+    Config,
+    Consumer,
+    Flags,
+    ResolvedConsumer,
+    Standard,
+)
+
+if TYPE_CHECKING:
+    from tests._edit_corpus_operators import EditOp
+    from tests._edit_corpus_seeds import Seed
+
+AXES: tuple[str, ...] = (
+    "construct",
+    "lang",
+    "std",
+    "config",
+    "build",
+    "consumer",
+    "evidence",
+)
+
+# The corpus builds and runs Linux ELF shared libraries only.
+TARGET_FAMILIES: frozenset[str] = frozenset({"gcc", "clang"})
+LANGS: tuple[str, ...] = ("c", "c++")
+
+
+@dataclass(frozen=True)
+class Construct:
+    name: str
+    langs: frozenset[str]
+    # The ``_edit_corpus_config.FEATURES`` entry the construct needs, if any.
+    feature: str | None = None
+
+
+_BOTH = frozenset(LANGS)
+_CXX = frozenset({"c++"})
+
+CONSTRUCTS: tuple[Construct, ...] = (
+    Construct("struct", _BOTH),
+    Construct("enum", _BOTH),
+    Construct("enum_fixed_underlying", _BOTH, "enum_underlying"),
+    Construct("enum_class", _CXX, "enum_class"),
+    Construct("typedef", _BOTH),
+    Construct("function", _BOTH),
+    Construct("inline_function", _BOTH, "inline"),
+    Construct("variable", _BOTH),
+    Construct("visibility_block", _BOTH),
+    Construct("class_virtual", _CXX),
+    Construct("template", _CXX),
+    Construct("concept", _CXX, "concepts"),
+    Construct("no_unique_address", _CXX, "no_unique_address"),
+    Construct("noexcept_type", _CXX, "noexcept_in_type"),
+    Construct("std_string", _CXX, "std_string"),
+)
+CONSTRUCT_BY_NAME: dict[str, Construct] = {c.name: c for c in CONSTRUCTS}
+
+# Seed role -> construct. An exact role wins over its ``prefix.``; a role the
+# map cannot place fails ``test_edit_corpus_space`` (a new seed role must say
+# what it is).
+ROLE_CONSTRUCT: dict[str, str] = {
+    "struct": "struct",
+    "enum.color": "enum",
+    "enum.mode": "enum_class",
+    "typedef": "typedef",
+    "func": "function",
+    "func.greet": "std_string",
+    "func.name_len": "std_string",
+    "var": "variable",
+    "hidden": "visibility_block",
+    "base": "class_virtual",
+    "shape": "class_virtual",
+    "buf": "template",
+    "tmpl": "template",
+}
+
+# Language feature an operator needs -> the construct it exercises.
+FEATURE_CONSTRUCT: dict[str, str] = {
+    c.feature: c.name for c in CONSTRUCTS if c.feature is not None
+}
+
+
+def role_construct(role: str) -> str:
+    if role in ROLE_CONSTRUCT:
+        return ROLE_CONSTRUCT[role]
+    prefix = role.split(".", 1)[0]
+    if prefix in ROLE_CONSTRUCT:
+        return ROLE_CONSTRUCT[prefix]
+    raise KeyError(f"seed role {role!r} has no construct in ROLE_CONSTRUCT")
+
+
+def op_constructs(op: EditOp) -> tuple[str, ...]:
+    """The constructs *op* exercises: its features' if it needs any, else its roles'."""
+    if op.features:
+        names = [FEATURE_CONSTRUCT[f] for f in op.features]
+    else:
+        names = [role_construct(r) for r in op.roles]
+    return tuple(dict.fromkeys(names))
+
+
+# --- config features --------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ConfigFeature:
+    name: str
+    on: Callable[[Flags], bool]
+    # Why the feature cannot apply to (lang, family), or None.
+    gate: Callable[[str, str], str | None] = lambda _lang, _family: None
+
+
+def _cxx_only(lang: str, _family: str) -> str | None:
+    return None if lang == "c++" else "_GLIBCXX_USE_CXX11_ABI is a libstdc++ C++ macro"
+
+
+def _gcc_only(_lang: str, family: str) -> str | None:
+    return None if family == "gcc" else "-fabi-version is a gcc flag"
+
+
+# One entry per ABI-relevant setting a cell can turn on, on either side.
+CONFIG_FEATURES: tuple[ConfigFeature, ...] = (
+    ConfigFeature("O2", lambda f: f.opt == "O2"),
+    ConfigFeature("hidden_visibility", lambda f: f.visibility == "hidden"),
+    ConfigFeature("m32", lambda f: f.bits == 32),
+    ConfigFeature("short_enums", lambda f: f.short_enums),
+    ConfigFeature("packed", lambda f: f.pack is not None),
+    ConfigFeature("cxx11_abi_0", lambda f: f.cxx11_abi == 0, _cxx_only),
+    ConfigFeature("fabi_version", lambda f: f.abi_version is not None, _gcc_only),
+)
+# A setting of the consumer rather than of the flags: consumer flags that
+# differ from the producer's. (The consumer's toolchain is its own axis.)
+CONSUMER_FEATURES: tuple[str, ...] = ("consumer_flags",)
+CONFIG_AXIS: tuple[str, ...] = (
+    "baseline",
+    *(f.name for f in CONFIG_FEATURES),
+    *CONSUMER_FEATURES,
+)
+_FEATURE_BY_NAME = {f.name: f for f in CONFIG_FEATURES}
+
+# Constructs a config feature cannot be combined with, and why. The generator
+# refuses these cells (``seed_conflict``, which ``_edit_corpus_cells`` calls).
+CONSTRUCT_CONFIG_CONFLICTS: dict[tuple[str, str], str] = {
+    ("std_string", "packed"): (
+        "-fpack-struct makes std::string incompatible with the installed libstdc++"
+    ),
+    ("std_string", "short_enums"): (
+        "-fshort-enums makes std::string incompatible with the installed libstdc++"
+    ),
+}
+
+
+def config_features(
+    config: Config,
+    new_flags: Flags | None = None,
+    consumer: ResolvedConsumer | None = None,
+) -> tuple[str, ...]:
+    """The config features a cell turns on: on the build (either side of a
+    rebuild) or on *consumer* (every consumer of the build when None)."""
+    consumers = (consumer,) if consumer is not None else config.consumer_set
+    sides = [config.flags, *(c.flags for c in consumers)]
+    if new_flags is not None:
+        sides.append(new_flags)
+    out = [f.name for f in CONFIG_FEATURES if any(f.on(s) for s in sides)]
+    # Flags differing from what that consumer's family would build the seed with.
+    if any(
+        c.flags != config.resolve(Consumer(toolchain=c.toolchain)).flags
+        for c in consumers
+    ):
+        out.append("consumer_flags")
+    return tuple(out) or ("baseline",)
+
+
+# --- points -----------------------------------------------------------------
+
+
+@dataclass(frozen=True, order=True)
+class Point:
+    construct: str
+    lang: str
+    std: str
+    config: str
+    build: str
+    consumer: str
+    evidence: str
+
+    def axis(self, name: str) -> str:
+        return str(getattr(self, name))
+
+    @property
+    def id(self) -> str:
+        return "/".join(self.axis(a) for a in AXES)
+
+
+_STD_BY_NAME: dict[str, Standard] = {s.name: s for s in STANDARDS}
+
+
+# (build, consumer) pairs that cannot work, whatever the edit: each rule
+# returns why, or None. The toolchain axes (C++ standard library, dual ABI,
+# word size, a consumer standard lacking a feature) plug their pair rules in
+# here, so the generator and the report agree on what is feasible.
+PAIR_RULES: tuple[Callable[[Point], str | None], ...] = ()
+
+
+def infeasible(p: Point) -> str | None:
+    """Why *p* cannot be a meaningful corpus cell, or ``None`` when it can."""
+    std = _STD_BY_NAME[p.std]
+    if std.lang != p.lang:
+        return f"{p.std} is not a {p.lang} standard"
+    for side in (p.build, p.consumer):
+        if side not in TARGET_FAMILIES:
+            return f"{side} does not target Linux ELF, the corpus's only platform"
+    for rule in PAIR_RULES:
+        if (why := rule(p)) is not None:
+            return why
+    con = CONSTRUCT_BY_NAME[p.construct]
+    if p.lang not in con.langs:
+        return f"{p.construct} is not a {p.lang} construct"
+    if con.feature is not None:
+        first = FEATURES[con.feature].get(p.lang)
+        if first is None or std.year < first:
+            return f"{p.construct} needs {con.feature}, which {p.std} lacks"
+    feat = _FEATURE_BY_NAME.get(p.config)
+    if feat is not None and (why := feat.gate(p.lang, p.build)):
+        return why
+    if (why := CONSTRUCT_CONFIG_CONFLICTS.get((p.construct, p.config))) is not None:
+        return why
+    return None
+
+
+def all_points() -> Iterator[Point]:
+    for con in CONSTRUCTS:
+        for std in STANDARDS:
+            for cfg in CONFIG_AXIS:
+                for build in FAMILIES:
+                    for consumer in FAMILIES:
+                        for ev in EVIDENCE:
+                            yield Point(
+                                con.name, std.lang, std.name, cfg, build, consumer, ev
+                            )
+
+
+def feasible_points() -> frozenset[Point]:
+    return frozenset(p for p in all_points() if infeasible(p) is None)
+
+
+def cell_points(op: EditOp, config: Config) -> tuple[Point, ...]:
+    """The points one corpus cell exercises: its constructs x its config
+    features, once per (build, consumer) pair the cell checks."""
+    new = op.new_flags(config.flags) if op.rebuild is not None else None
+    points = (
+        Point(
+            con,
+            config.lang,
+            config.std.name,
+            cfg,
+            config.producer.family,
+            c.toolchain.family,
+            config.evidence,
+        )
+        for c in config.consumer_set
+        for con in op_constructs(op)
+        for cfg in config_features(config, new, c)
+    )
+    return tuple(dict.fromkeys(points))
+
+
+def seed_constructs(seed: Seed) -> tuple[str, ...]:
+    """Every construct a seed's translation unit contains, edited or not."""
+    return tuple(dict.fromkeys(role_construct(r) for r in seed.roles))
+
+
+def seed_flags_conflict(seed: Seed, flags: Flags) -> str | None:
+    """Why *seed* cannot be built (or consumed) under *flags*, whatever the edit.
+
+    The rule is a property of what the translation unit contains: a seed that
+    uses ``std::string`` anywhere cannot be built with a flag that breaks the
+    installed libstdc++'s layout, even when the edited role is a plain
+    function. The generator applies it to the build and to every consumer.
+    """
+    feats = [f.name for f in CONFIG_FEATURES if f.on(flags)]
+    for con in seed_constructs(seed):
+        for cfg in feats:
+            why = CONSTRUCT_CONFIG_CONFLICTS.get((con, cfg))
+            if why is not None:
+                return why
+    return None
+
+
+def seed_conflict(seed: Seed, config: Config) -> str | None:
+    """Why *seed* cannot be built under *config*'s build flags (consumers are
+    per-pair: ``_edit_corpus_cells.pair_blocked``)."""
+    return seed_flags_conflict(seed, config.flags)
+
+
+# --- the report -------------------------------------------------------------
+
+
+def coverage(covered: Iterable[Point], top: int = 20) -> dict[str, object]:
+    """Covered against feasible points: overall, per axis value, and the gaps.
+
+    ``top_uncovered`` ranks feasible uncovered points by how neglected their
+    axis values are (lowest summed per-value coverage first), so the list
+    points at the thinnest regions rather than at an arbitrary corner.
+    """
+    feasible = feasible_points()
+    got = set(covered)
+    impossible = sorted(p.id for p in got - feasible)
+    got &= feasible
+    per_axis: dict[str, dict[str, dict[str, int]]] = {}
+    for axis in AXES:
+        rows: dict[str, dict[str, int]] = {}
+        for p in feasible:
+            row = rows.setdefault(p.axis(axis), {"covered": 0, "feasible": 0})
+            row["feasible"] += 1
+            row["covered"] += p in got
+        per_axis[axis] = dict(sorted(rows.items()))
+
+    def ratio(axis: str, value: str) -> float:
+        row = per_axis[axis][value]
+        return row["covered"] / row["feasible"]
+
+    gaps = sorted(
+        feasible - got,
+        key=lambda p: (sum(ratio(a, p.axis(a)) for a in AXES), p),
+    )
+    return {
+        "feasible": len(feasible),
+        "covered": len(got),
+        "total": sum(1 for _ in all_points()),
+        "per_axis": per_axis,
+        "top_uncovered": [p.id for p in gaps[:top]],
+        # A covered point the model calls infeasible: the model is wrong.
+        "covered_but_infeasible": impossible,
+    }
+
+
+def point_from_id(ident: str) -> Point:
+    parts = ident.split("/")
+    if len(parts) != len(AXES):
+        raise ValueError(f"not a space point id: {ident!r}")
+    return Point(*parts)
+
+
+__all__ = [
+    "AXES",
+    "CONFIG_AXIS",
+    "CONSTRUCTS",
+    "Point",
+    "all_points",
+    "cell_points",
+    "config_features",
+    "seed_conflict",
+    "seed_flags_conflict",
+    "seed_constructs",
+    "coverage",
+    "feasible_points",
+    "infeasible",
+    "op_constructs",
+    "point_from_id",
+]

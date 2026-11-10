@@ -53,6 +53,7 @@ from tests._edit_corpus_config import (
     default_config,
     has_feature,
 )
+from tests._edit_corpus_coverage import make_record, write_record
 from tests._edit_corpus_exec import probe_expressions
 from tests._edit_corpus_expect import (
     MISMATCH_CLASSES,
@@ -773,18 +774,32 @@ def _minimize_enabled() -> bool:
     return os.environ.get("ABICHECK_EDIT_CORPUS_MINIMIZE", "1") != "0"
 
 
-def check_cell(cell: Cell, ctx: CellContext) -> None:
+def check_cell(cell: Cell, ctx: CellContext, tier: str) -> None:
     """Run *cell*; any failure, including a harness exception, leaves a report."""
     try:
-        _check_cell(cell, ctx)
+        _check_cell(cell, ctx, tier)
     except Exception as exc:  # a pytest outcome (skip/xfail/fail) is not an Exception
         _write_report(cell, f"{cell.id}: {type(exc).__name__}: {exc}")
         raise
 
 
-def _check_cell(cell: Cell, ctx: CellContext) -> None:
+def _check_cell(cell: Cell, ctx: CellContext, tier: str) -> None:
     result = run_cell(cell.op, cell.seed, cell.config, ctx)
     _write_pairs(cell, result)
+    # Coverage facts first, so a skip, xfail or failure is recorded too.
+    write_record(
+        make_record(
+            tier,
+            cell.op,
+            cell.seed.name,
+            cell.config,
+            status=result.status,
+            cls=result.cls if result.status == "ran" else "",
+            verdict=result.verdict,
+            produced=result.kinds,
+            expectation=result.expectation,
+        )
+    )
     if result.status != "ran":
         pytest.skip(f"{result.status}: {result.reason}")
     known = known_mismatch(cell.op.name, cell.seed.name, cell.config)
@@ -841,7 +856,7 @@ def test_pr_tier_cell(index: int, cell_ctx: CellContext) -> None:
     cell = pr_cells()[index]
     if not isinstance(cell, Cell):
         pytest.skip(cell[1])
-    check_cell(cell, cell_ctx)
+    check_cell(cell, cell_ctx, "pr")
 
 
 @pytest.mark.integration
@@ -850,7 +865,7 @@ def test_pr_tier_consumer_cell(index: int, cell_ctx: CellContext) -> None:
     cell = pr_consumer_cells()[index]
     if not isinstance(cell, Cell):
         pytest.skip(cell[1])
-    check_cell(cell, cell_ctx)
+    check_cell(cell, cell_ctx, "pr")
 
 
 _TIER_OFF = (
@@ -884,7 +899,7 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
 def _tier_cell(cell: Cell | None, tier: str, ctx: CellContext) -> None:
     if cell is None:
         pytest.skip(_TIER_OFF.format(tier=tier))
-    check_cell(cell, ctx)
+    check_cell(cell, ctx, tier)
 
 
 @pytest.mark.integration
