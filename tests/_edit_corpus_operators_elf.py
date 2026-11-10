@@ -282,18 +282,9 @@ _DYNAMIC = (
         "plain char becomes unsigned: a char value above 127 the library reads from "
         "a caller built signed changes meaning (x86-64 and i386 default to signed)",
         expected=frozenset({"CHAR_SIGNEDNESS_CHANGED"}),
-        rules=(
-            Rule(
-                lambda c: c.producer.family == "clang",
-                {
-                    "expected": frozenset(),
-                    "verdict_min": "NO_CHANGE",
-                    "observable": False,
-                },
-                "clang's DW_AT_producer records no -f switches; nothing else carries "
-                "char signedness (known gap, canary in test_dwarf_lane_extractor_parity)",
-            ),
-        ),
+        # clang records no -f switches in DW_AT_producer, so the clang cell is
+        # a recorded strict xfail (_edit_corpus_known), not an unobservable
+        # edit: it fails loudly once abicheck reads the flip.
         **_RISK,
         min_evidence="dwarf",
     ),
