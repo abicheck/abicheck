@@ -221,7 +221,7 @@ CACHING_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
         # Seen as test_signature_normalization's memo check reading hits=-1324
         # on #1989's CI whenever an earlier test in the worker had zeroed stats.
-        fixed_by=(1989,),
+        fixed_by=(1990,),
         seed_tests=("tests/test_memo_stats_across_clear.py",),
         public_surfaces=(),
         axes={
