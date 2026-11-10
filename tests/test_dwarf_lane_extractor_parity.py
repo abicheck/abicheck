@@ -220,6 +220,134 @@ def test_char_signedness_flip_matches_an_independent_table(
     assert all("signed-char" not in str(r) for r in _diff_toolchain_flags(o, n))
 
 
+# --- the DWARF lane's hook (unit) --------------------------------------------------
+
+
+@pytest.mark.parametrize("table", ["absent", "empty", "read"])
+def test_the_dwarf_lane_adds_records_only_from_a_read_symbol_table(table: str) -> None:
+    from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolType
+    from abicheck.model import AbiSnapshot
+    from abicheck.workflows.dump.elf_fallback import _add_undescribed_exports
+
+    snap = AbiSnapshot(
+        library="libx.so",
+        version="1",
+        functions=[Function(name="f", mangled="f", return_type="int")],
+        variables=[],
+    )
+    meta = {
+        "absent": None,
+        "empty": ElfMetadata(),
+        "read": ElfMetadata(
+            symbols=[
+                ElfSymbol(name="f", sym_type=SymbolType.FUNC, size=8),
+                ElfSymbol(name="g", sym_type=SymbolType.FUNC, size=8),
+                ElfSymbol(name="v", sym_type=SymbolType.OBJECT, size=4),
+            ]
+        ),
+    }[table]
+    _add_undescribed_exports(snap, meta, Path("libx.so"))
+    funcs = {fn.name: fn for fn in snap.declarations.functions}
+    names_v = {v.name for v in snap.declarations.variables}
+    if table == "read":
+        # g and v are exported and undescribed; f keeps its DWARF record.
+        assert set(funcs) == {"f", "g"} and names_v == {"v"}
+        assert funcs["g"].visibility is Visibility.ELF_ONLY
+        assert funcs["f"].return_type == "int"
+    else:
+        # Nothing proves an export exists: the snapshot is left as DWARF built it.
+        assert set(funcs) == {"f"} and names_v == set()
+
+
+# --- the other flag families, through the public entry (unit) --------------------
+
+_VEC_SETS = (
+    frozenset(),
+    frozenset({"-mveclibabi=svml"}),
+    frozenset({"-fveclib=libmvec"}),
+)
+_WCHAR_SETS = (
+    frozenset(),
+    frozenset({"-fshort-wchar"}),
+    frozenset({"-fno-short-wchar"}),
+)
+
+
+_ABI_SETS = (frozenset({"-m64"}), frozenset({"-m64", "-mabi=ms"}))
+
+
+def _flag_meta(  # noqa: ANN202
+    vec: frozenset[str],
+    wchar: frozenset[str],
+    abi: frozenset[str] = _ABI_SETS[0],
+    *,
+    dwarf: bool = True,
+):
+    return AdvancedDwarfMetadata(
+        has_dwarf=dwarf,
+        target_arch="x64",
+        toolchain=ToolchainInfo(
+            producer_string="GNU C17",
+            abi_flags=set(abi),
+            vector_abi_flags=set(vec),
+            wchar_flags=set(wchar),
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    "old,new",
+    list(
+        itertools.product(
+            itertools.product(_VEC_SETS, _WCHAR_SETS, _ABI_SETS), repeat=2
+        )
+    ),
+    ids=str,
+)
+def test_flag_family_changes_match_the_flag_sets(
+    old: tuple[frozenset[str], frozenset[str], frozenset[str]],
+    new: tuple[frozenset[str], frozenset[str], frozenset[str]],
+) -> None:
+    from abicheck.compare.toolchain_flags import (
+        advanced_dwarf_kind_map,
+        toolchain_flag_changes,
+    )
+
+    got = toolchain_flag_changes(_flag_meta(*old), _flag_meta(*new))
+    kinds = [r[0] for r in got]
+    # Independent oracle: vector ABI changes iff the flag sets differ; the wchar
+    # model changes iff exactly one side passes -fshort-wchar.
+    assert ("vector_abi_changed" in kinds) is (old[0] != new[0])
+    short = ("-fshort-wchar" in old[1], "-fshort-wchar" in new[1])
+    assert ("wchar_model_changed" in kinds) is (short[0] != short[1])
+    assert ("toolchain_flag_drift" in kinds) is (old[2] != new[2])
+    assert len(kinds) == len(set(kinds))
+    # The detector maps every kind it can be handed.
+    assert set(kinds) <= set(advanced_dwarf_kind_map())
+    for kind, _sym, desc, old_v, new_v in got:
+        if kind == "vector_abi_changed":
+            assert (old_v or "") == ",".join(sorted(old[0]))
+            assert (new_v or "") == ",".join(sorted(new[0]))
+            for f in old[0] ^ new[0]:
+                assert f in desc
+
+
+@pytest.mark.parametrize("dwarf_side", ["old", "new"])
+def test_no_flag_change_without_dwarf_on_both_sides(dwarf_side: str) -> None:
+    from abicheck.compare.toolchain_flags import toolchain_flag_changes
+
+    a = _flag_meta(_VEC_SETS[1], _WCHAR_SETS[1], dwarf=dwarf_side == "old")
+    b = _flag_meta(_VEC_SETS[2], _WCHAR_SETS[0], dwarf=dwarf_side == "new")
+    assert toolchain_flag_changes(a, b) == []
+    assert {
+        r[0]
+        for r in toolchain_flag_changes(
+            _flag_meta(_VEC_SETS[1], _WCHAR_SETS[1]),
+            _flag_meta(_VEC_SETS[2], _WCHAR_SETS[0]),
+        )
+    } == {"vector_abi_changed", "wchar_model_changed"}
+
+
 # --- real builds ------------------------------------------------------------------
 
 
