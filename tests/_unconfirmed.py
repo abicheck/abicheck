@@ -5,7 +5,7 @@ knows, per cell, which compared sides carry type-level evidence (debug info or
 a header AST). From that it states the one answer ADR-090 allows:
 
 * no side lacks it: the report reads the observed verdict, carries no
-  ``unconfirmed`` block, and the run exits 0;
+  ``unconfirmed`` block, and the run exits 0 for the reason ``clean`` alone;
 * some side lacks it: the report reads ``UNCONFIRMED``, its ``unconfirmed``
   block keeps the observed verdict and names exactly those sides, the exit
   reason is ``unconfirmed_compatibility`` alone, and the run exits 1.
@@ -41,6 +41,7 @@ def assert_claim_outcome(
     if not lacking:
         assert report["verdict"] == observed, context
         assert "unconfirmed" not in report, report.get("unconfirmed")
+        assert report["exit"]["reasons"] == ["clean"], context
         assert code == 0, context
         return
     block = report["unconfirmed"]

@@ -15,7 +15,9 @@ import json
 import shutil
 import subprocess
 import sys
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 import pytest
 from click.testing import CliRunner
@@ -53,7 +55,7 @@ def _build(tmp_path: Path) -> tuple[Path, Path]:
     return old, new
 
 
-def _assert_unconfirmed_no_change(code: int, report: dict) -> None:
+def _assert_unconfirmed_no_change(code: int, report: Mapping[str, Any]) -> None:
     """The run's answer when no rule gates it (ADR-090).
 
     Neither side has DWARF or headers, and the two builds are not byte
