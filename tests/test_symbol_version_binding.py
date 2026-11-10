@@ -26,6 +26,7 @@ import pytest
 from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolBinding, SymbolType
 from abicheck.model import AbiSnapshot
+from tests._abicheck_subprocess import abicheck_command, abicheck_env
 
 NODES = ("LIBX_1.0", "LIBX_2.0")
 
@@ -257,7 +258,8 @@ def test_real_loader_and_compare_agree(
     # loader fails. A binary-only run without debug info is UNCONFIRMED (ADR-090),
     # which may raise a passing exit to 1, never to 4.
     cli = subprocess.run(
-        [sys.executable, "-m", "abicheck", "compare", str(old_so), str(new_so)],
+        abicheck_command("compare", old_so, new_so),
+        env=abicheck_env(),
         capture_output=True,
         text=True,
         check=False,
