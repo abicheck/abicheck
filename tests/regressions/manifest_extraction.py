@@ -956,7 +956,7 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "--budget, so a working tool that answers slowly on a loaded host "
             "records the same fact it records on an idle one."
         ),
-        fixed_by=(0,),
+        fixed_by=(1991,),
         seed_tests=("tests/test_tool_probe_hang_guard.py",),
         public_surfaces=(),
         axes={
