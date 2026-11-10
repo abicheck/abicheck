@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 from tests._abicheck_subprocess import abicheck_command, abicheck_env
-from tests._unconfirmed import passes_but_for_unconfirmed
+from tests._unconfirmed import assert_claim_outcome
 
 pytestmark = [
     pytest.mark.integration,
@@ -118,8 +118,9 @@ def test_base_kind_rule_hides_the_removal_headerless(
         with_headers=False,
         suppress=_suppression(tmp_path, "func_removed"),
     )
-    # Header-less: the clean claim left is ADR-090 UNCONFIRMED.
-    assert passes_but_for_unconfirmed(code, report)
+    # Header-less and built without -g: neither side has type-level evidence,
+    # so the clean claim left reads UNCONFIRMED (ADR-090), exit 1.
+    assert_claim_outcome(code, report, observed="NO_CHANGE", lacking=["old", "new"])
     assert _removal_kinds(report) == ["func_removed_elf_only"]
     # The removal and its public_surface_shrank roll-up (ADR-067 derived).
     assert report["disposition_audit"]["counts"]["suppressed"] == 2
@@ -148,8 +149,9 @@ def test_elf_only_rule_hides_only_the_headerless_removal(
     suppress = _suppression(tmp_path, "func_removed_elf_only")
 
     code, report = _run(tmp_path, pair, with_headers=False, suppress=suppress)
-    # Header-less: the clean claim left is ADR-090 UNCONFIRMED.
-    assert passes_but_for_unconfirmed(code, report)
+    # Header-less and built without -g: neither side has type-level evidence,
+    # so the clean claim left reads UNCONFIRMED (ADR-090), exit 1.
+    assert_claim_outcome(code, report, observed="NO_CHANGE", lacking=["old", "new"])
     assert _removal_kinds(report) == ["func_removed_elf_only"]
 
     # The variant rule does not reach the header-backed kind: the removal stays.

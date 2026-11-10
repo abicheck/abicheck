@@ -43,7 +43,7 @@ import pytest
 from elftools.elf.elffile import ELFFile
 
 from tests._abicheck_subprocess import abicheck_command
-from tests._unconfirmed import observed_verdict, passes_but_for_unconfirmed
+from tests._unconfirmed import assert_claim_outcome
 
 pytestmark = [
     pytest.mark.integration,
@@ -168,6 +168,21 @@ RECOVERED: dict[str, Callable[[bytes], bytes]] = {
     "section_name_index_bad": _bad_name_section_index,
     "dynsym_lost_symtab_kept": _dynsym_lost_symtab_kept,
 }
+
+#: The RECOVERED mutations that take ``.debug_info`` with the section table.
+#: The fixture is built with ``-g``, so a side keeps its type-level evidence
+#: exactly when its section table survives. Stated per mutation, not read
+#: back from the report, so a dump that keeps or drops DWARF unexpectedly
+#: fails the cell.
+LOSES_DEBUG_INFO = frozenset(
+    {
+        "section_table_zeroed",
+        "section_table_offset_zero",
+        "section_count_zero",
+        "section_name_index_bad",
+    }
+)
+assert LOSES_DEBUG_INFO <= set(RECOVERED)
 
 #: Each way the dynamic table itself is lost or corrupt. Refused, every side.
 REFUSED: dict[str, Callable[[bytes], bytes]] = {
@@ -312,17 +327,13 @@ def test_section_table_loss_keeps_the_export_set(
         timeout=300,
     )
     report = json.loads(out.read_text(encoding="utf-8"))
-    # A lost section table also loses .debug_info, so the corrupted side has
+    # A lost section table also loses .debug_info, so each corrupted side has
     # no type-level evidence: ADR-090 reports the export-set answer as
-    # UNCONFIRMED (exit 1, that axis alone) and names exactly that side.
-    assert passes_but_for_unconfirmed(proc.returncode, report), (
-        mutation + "\n" + proc.stdout + proc.stderr
+    # UNCONFIRMED (exit 1) naming exactly those sides. A mutation that keeps
+    # the section table keeps DWARF on both sides and stays a clean COMPATIBLE.
+    corrupted = [s for s in ("old", "new") if side in (s, "both")]
+    lacking = corrupted if mutation in LOSES_DEBUG_INFO else []
+    assert_claim_outcome(
+        proc.returncode, report, observed="COMPATIBLE", lacking=lacking
     )
-    assert observed_verdict(report) == "COMPATIBLE", proc.stdout + proc.stderr
-    # A mutation that keeps the section table keeps DWARF, and stays clean.
-    if report["verdict"] == "UNCONFIRMED":
-        expected = ["old", "new"] if side == "both" else [side]
-        assert report["unconfirmed"]["sides_without_type_evidence"] == expected
-    else:
-        assert proc.returncode == 0 and report["verdict"] == "COMPATIBLE"
     assert "Traceback" not in proc.stdout + proc.stderr

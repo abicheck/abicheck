@@ -15,13 +15,15 @@ import json
 import shutil
 import subprocess
 import sys
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 import pytest
 from click.testing import CliRunner
 
 from abicheck.cli import main
-from tests._unconfirmed import passes_but_for_unconfirmed
+from tests._unconfirmed import assert_claim_outcome
 
 pytestmark = [
     pytest.mark.integration,
@@ -51,6 +53,17 @@ def _build(tmp_path: Path) -> tuple[Path, Path]:
         if proc.returncode != 0:
             pytest.skip(f"gcc failed: {proc.stderr[:200]}")
     return old, new
+
+
+def _assert_unconfirmed_no_change(code: int, report: Mapping[str, Any]) -> None:
+    """The run's answer when no rule gates it (ADR-090).
+
+    Neither side has DWARF or headers, and the two builds are not byte
+    identical (``.symtab`` records each one's source name, ``old.c`` and
+    ``new.c``), so the identical-input exemption does not apply: the observed
+    NO_CHANGE reads UNCONFIRMED for both sides and exits 1 on that axis alone.
+    """
+    assert_claim_outcome(code, report, observed="NO_CHANGE", lacking=["old", "new"])
 
 
 def _policy(tmp_path: Path, rules: str, *, block: bool) -> Path:
@@ -117,7 +130,7 @@ def test_a_stale_dwarf_only_rule_stays_not_evaluated_and_never_blocks(
     old, new = _build(tmp_path)
     policy = _policy(tmp_path, _DWARF_RULE, block=True)
     code, report = _run(tmp_path, old, new, policy)
-    assert passes_but_for_unconfirmed(code, report)  # ADR-090: ELF-only fixture
+    _assert_unconfirmed_no_change(code, report)
     assert _rows_by_index(report)[0]["status"] == "not_evaluated"
     assert report["disposition_audit"]["unused_rules_review"]["unused"] == []
 
@@ -144,7 +157,7 @@ def test_without_the_policy_key_the_stale_rule_is_reported_but_never_blocks(
     old, new = _build(tmp_path)
     policy = _policy(tmp_path, _SYMBOL_RULE, block=False)
     code, report = _run(tmp_path, old, new, policy)
-    assert passes_but_for_unconfirmed(code, report)  # ADR-090: ELF-only fixture
+    _assert_unconfirmed_no_change(code, report)
     assert _rows_by_index(report)[0]["status"] == "unused"
 
 
@@ -186,7 +199,7 @@ def test_a_not_evaluated_rule_is_a_warning_naming_the_missing_evidence(
     policy = _policy_mode(tmp_path, _DWARF_RULE, mode)
     md = tmp_path / "report.md"
     code, report = _run(tmp_path, old, new, policy, "-o", f"markdown={md}")
-    assert passes_but_for_unconfirmed(code, report)  # ADR-090: ELF-only fixture
+    _assert_unconfirmed_no_change(code, report)
     review = report["disposition_audit"]["unused_rules_review"]
     assert review["gate_contribution"] == 0
     (entry,) = review["not_evaluated"]
@@ -202,7 +215,7 @@ def test_under_allow_the_not_evaluated_rule_stays_quiet(tmp_path: Path) -> None:
     old, new = _build(tmp_path)
     policy = _policy_mode(tmp_path, _DWARF_RULE, "allow")
     code, report = _run(tmp_path, old, new, policy)
-    assert passes_but_for_unconfirmed(code, report)  # ADR-090: ELF-only fixture
+    _assert_unconfirmed_no_change(code, report)
     assert "not_evaluated" not in report["disposition_audit"]["unused_rules_review"]
 
 
