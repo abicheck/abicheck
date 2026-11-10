@@ -211,6 +211,26 @@ CACHING_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="perf.memo_store_choice_changes_its_counted_history",
+        invariant=(
+            "A memoized function's hit/miss counters count its calls the same "
+            "way whichever store backs it (functools.lru_cache or the "
+            "dict-backed memo): a clear drops entries, never the counted "
+            "history, and a reset zeroes it. The oracle is a model of the "
+            "calls, not either store's own bookkeeping."
+        ),
+        # Seen as test_signature_normalization's memo check reading hits=-1324
+        # on #1989's CI whenever an earlier test in the worker had zeroed stats.
+        fixed_by=(1989,),
+        seed_tests=("tests/test_memo_stats_across_clear.py",),
+        public_surfaces=(),
+        axes={
+            "store": ("lru_cache", "dict"),
+            "clear": ("function", "registry"),
+            "sequence": ("every op sequence up to length 4",),
+        },
+    ),
+    BugClass(
         id="cache.hit_identity_follows_the_requested_path",
         invariant=(
             "A content-keyed cache entry is served for every path holding the "

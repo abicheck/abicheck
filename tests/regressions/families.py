@@ -117,6 +117,7 @@ FAMILIES: dict[str, Family] = {
                 "tests/test_family_f5_derived_ast_sharing.py",
                 "tests/test_family_f5_packed_type_graph.py",
                 "tests/test_header_dir_expansion_canonical_order.py",
+                "tests/test_memo_stats_across_clear.py",
             ),
         ),
         Family(
@@ -507,6 +508,7 @@ _F5 = tuple(
         "perf.cache_fast_path_bypasses_shared_coordination",
         "perf.derived_cache_must_match_what_recomputing_would_give",
         "cache.computed_output_keyed_without_code_identity",
+        "perf.memo_store_choice_changes_its_counted_history",
         "perf.enumerable_value_space_allocated_per_occurrence",
         "perf.evidence_released_before_its_consumer_runs",
         "perf.fixed_layout_fast_path_field_decoding",
