@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import re
 import sys
 from pathlib import Path
 
@@ -16,6 +17,19 @@ assert _spec and _spec.loader
 gate = importlib.util.module_from_spec(_spec)
 sys.modules["check_bugfix_test_contract"] = gate
 _spec.loader.exec_module(gate)
+
+#: Every environment variable the gate reads, taken from its own source so a
+#: newly read variable is cleared without editing this list.
+GATE_ENV_VARS: tuple[str, ...] = tuple(
+    sorted(
+        set(
+            re.findall(
+                r"""(?:environ\.get|getenv|environ\[)\(?\s*["'](BUGFIX_CONTRACT_\w+)["']""",
+                _PATH.read_text(encoding="utf-8"),
+            )
+        )
+    )
+)
 
 
 COMPLETE_BODY = """\
@@ -43,10 +57,11 @@ def _content_diff(path: str, added: str = "    assert f(2) == 4") -> str:
 
 
 @pytest.fixture(autouse=True)
-def _no_inherited_body_file(monkeypatch: pytest.MonkeyPatch) -> None:
-    # The gate reads BUGFIX_CONTRACT_BODY_FILE from the environment when
-    # main() runs. A caller that validates a real PR description (verify.py's
-    # bugfix-test-contract step) exports it, and every test here that expects
-    # "no body file" would then read the real PR body instead. Each test that
-    # needs a body file sets its own.
-    monkeypatch.delenv("BUGFIX_CONTRACT_BODY_FILE", raising=False)
+def _no_inherited_gate_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The gate reads its base, head, PR title and body file from the
+    # environment when main() runs. A caller that validates a real PR
+    # (verify.py's bugfix-test-contract step, CI) exports them, and every test
+    # here would then judge that PR's title, range or description instead of
+    # its own. Each test that needs one sets its own.
+    for name in GATE_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
