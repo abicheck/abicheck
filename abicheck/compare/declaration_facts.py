@@ -169,12 +169,23 @@ def alignment_changes(
     entity_id: EntityId | None,
 ) -> list[Change]:
     """``VAR_ALIGNMENT_CHANGED`` when both sides recorded a declared
-    alignment and it differs."""
+    alignment and it provably differs.
+
+    A ``PARTIAL`` value is a lower bound (the declared alignment is at least
+    that): it differs from an exact value X only when X is below the bound,
+    and two bounds prove nothing.
+    """
     if old is None or new is None:
         return []
     o, n = old.declared_alignment_bits, new.declared_alignment_bits
     if not (o.is_present and n.is_present) or o.value == n.value:
         return []
+    o_bound = o.status is FactStatus.PARTIAL
+    n_bound = n.status is FactStatus.PARTIAL
+    if o_bound or n_bound:
+        exact, bound = (n, o) if o_bound else (o, n)
+        if (o_bound and n_bound) or not _below(exact.value, bound.value):
+            return []
     return [
         make_change(
             ChangeKind.VAR_ALIGNMENT_CHANGED,
@@ -185,3 +196,8 @@ def alignment_changes(
             entity_id=entity_id,
         )
     ]
+
+
+def _below(exact: int | None, bound: int | None) -> bool:
+    """Whether an exact alignment is provably below a lower bound."""
+    return exact is not None and bound is not None and exact < bound

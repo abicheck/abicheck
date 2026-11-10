@@ -22,8 +22,10 @@ and with headers through castxml and the clang backend.
 
 Oracle, from the source and ``nm`` alone: the declared alignment is the
 specifier or ``int``'s 4 bytes. Where the evidence states declarations
-(DWARF, the clang header backend) a changed declared alignment is reported
-as ``var_alignment_changed`` and an unchanged one never is. At every level, a
+(DWARF, the clang header backend) a declared alignment the recorded facts
+prove changed is reported as ``var_alignment_changed`` and an unchanged one
+never is; a gcc split declaration without a specifier is recorded as a lower
+bound, which an exact value at or above it does not contradict. At every level, a
 reduction the new placement shows against the old declared requirement is
 reported (never vetoed by a value the evidence could not state), and an
 unchanged declaration reports no alignment finding at all.
@@ -54,6 +56,25 @@ _ALIGNMENT_KINDS = frozenset(
 
 def _declared(align: int | None) -> int:
     return align or 4
+
+
+def _bound_only(cc: str, evidence: str, align: int | None) -> bool:
+    """Whether the evidence records only a lower bound for this side.
+
+    gcc writes ``DW_AT_alignment`` on neither entry of an ``extern``
+    declaration / definition split, so a side without a header specifier
+    cannot be told from one whose definition-only specifier was lost: its
+    declared alignment is at least the type's, nothing more.
+    """
+    return cc == "gcc" and evidence == "dwarf" and align is None
+
+
+def _provably_differs(cc: str, evidence: str, old: int | None, new: int | None) -> bool:
+    """Whether the recorded facts prove the declared alignments differ."""
+    lo_o, lo_n = _declared(old), _declared(new)
+    hi_o = float("inf") if _bound_only(cc, evidence, old) else lo_o
+    hi_n = float("inf") if _bound_only(cc, evidence, new) else lo_n
+    return hi_o < lo_n or hi_n < lo_o
 
 
 @functools.cache
@@ -121,7 +142,11 @@ def test_a_header_alignment_change_reads_as_the_declaration_says(
         assert not kinds & _ALIGNMENT_KINDS, kinds
         return
     if evidence in _STATES_DECLARATIONS:
-        assert "var_alignment_changed" in kinds, kinds
+        # Reported exactly when the recorded facts prove it; a lower bound the
+        # other side's exact value meets proves nothing (known gap, canary
+        # test_gcc_dwarf_loses_a_definition_only_alignas).
+        provable = _provably_differs(cc, evidence, old, new)
+        assert ("var_alignment_changed" in kinds) is provable, kinds
     placed_new = _placement(_build(work, cc, new, evidence != "binary"))
     placed_old = _placement(_build(work, cc, old, evidence != "binary"))
     if placed_new < declared_old <= placed_old:

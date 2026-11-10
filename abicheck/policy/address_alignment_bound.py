@@ -33,13 +33,14 @@ the new side proves a reduction only against a requirement the old side
 * the old side declares nothing: both numbers are placements, and the old
   one says nothing about what consumers rely on (rule
   :data:`UNDECLARED_RULE`);
-* the old side's declaration is unknown -- castxml records only a lower
-  bound for a variable whose header spells an alignment specifier
-  (``extract/headers/castxml/variable_alignment``): the placements alone
-  still prove nothing (rule :data:`UNKNOWN_DECLARATION_RULE`), and the
-  reason says so instead of claiming nothing was declared.
+* the old side's declaration is unknown -- its record holds only a lower
+  bound (``PARTIAL``: castxml cannot read a variable's alignment specifier;
+  a gcc declaration/definition split carries ``DW_AT_alignment`` on
+  neither debug entry): the placements alone still prove nothing (rule
+  :data:`UNKNOWN_DECLARATION_RULE`), and the reason says so instead of
+  claiming nothing was declared.
 
-Both demotions set ``effective_verdict`` to ``COMPATIBLE`` and keep the
+All three demotions set ``effective_verdict`` to ``COMPATIBLE`` and keep the
 finding with its rule (ADR-067: annotated, never removed). The section's
 ``sh_addralign`` is deliberately not consulted: a stripped or section-zeroed
 image must yield the same facts as the intact one.
@@ -75,9 +76,9 @@ UNDECLARED_REASON = (
 UNKNOWN_DECLARATION_RULE = "address-alignment-with-unknown-declared-requirement"
 UNKNOWN_DECLARATION_REASON = (
     "both alignments come from symbol addresses, and the old side's declared "
-    "alignment is unknown (its header spells an alignment specifier the header "
-    "backend records only as a lower bound); the placements alone prove no "
-    "reduction -- debug info (DW_AT_alignment) can"
+    "alignment is unknown (its record holds only a lower bound, as a header "
+    "backend or a split declaration/definition in debug info records it); the "
+    "placements alone prove no reduction"
 )
 DECLARED_STILL_MET_RULE = "address-alignment-meets-declared-requirement"
 DECLARED_STILL_MET_REASON = (

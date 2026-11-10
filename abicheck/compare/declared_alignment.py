@@ -37,10 +37,9 @@ def declared_alignment_bits(snap: AbiSnapshot, sym_name: str) -> int | None:
         return None
     recorded = var.alignment_bits_fact
     if recorded is not None and recorded.status is FactStatus.PARTIAL:
-        # A lower bound (castxml cannot see an alignment specifier on a
-        # variable: extract/headers/castxml/variable_alignment): it can
-        # neither corroborate nor veto a placement, and the natural
-        # alignment below would be the same lower bound again.
+        # A lower bound (PARTIAL: the producer could not see the declared
+        # alignment): it can neither corroborate nor veto a placement, and
+        # the natural alignment below would be the same lower bound again.
         return None
     if var.alignment_bits is not None:
         return var.alignment_bits
@@ -74,8 +73,8 @@ def declared_alignment_bits(snap: AbiSnapshot, sym_name: str) -> int | None:
 
 def declared_alignment_is_lower_bound(snap: AbiSnapshot, sym_name: str) -> bool:
     """Whether *snap* records only a lower bound for the variable's declared
-    alignment (``PARTIAL``: castxml cannot read an alignment specifier on a
-    variable), so its declared requirement is unknown rather than absent."""
+    alignment (``PARTIAL``: the producer could not see the declared
+    alignment), so its declared requirement is unknown rather than absent."""
     var = snap.var_by_mangled(sym_name)
     fact = var.alignment_bits_fact if var is not None else None
     return fact is not None and fact.status is FactStatus.PARTIAL

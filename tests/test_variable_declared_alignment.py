@@ -267,3 +267,40 @@ def test_dwarf_variable_alignment_reads_what_the_unit_states(
     else:
         # GCC writes a definition-only specifier on neither DIE.
         assert (fact.status, fact.value) == (FactStatus.PARTIAL, default * 8)
+
+
+# --- comparing a lower bound with an exact value ----------------------------------
+
+_ALIGN_FACTS = [
+    (status, value) for status in ("present", "partial") for value in (32, 128, 512)
+]
+
+
+def _align_set(status: str, value: int) -> tuple[int, float]:
+    """The alignments a recorded fact admits, as an interval [lo, hi]."""
+    return (value, value) if status == "present" else (value, float("inf"))
+
+
+@pytest.mark.parametrize(
+    "old,new", list(itertools.product(_ALIGN_FACTS, repeat=2)), ids=str
+)
+def test_alignment_change_is_reported_only_when_provable(
+    old: tuple[str, int], new: tuple[str, int]
+) -> None:
+    from abicheck.compare.declaration_facts import alignment_changes
+    from abicheck.model.fact import Fact
+
+    def entity(status: str, value: int) -> SimpleNamespace:
+        fact = Fact.present(value) if status == "present" else Fact.partial(value)
+        return SimpleNamespace(declared_alignment_bits=fact)
+
+    got = alignment_changes(
+        "v",
+        "v",
+        entity(*old),
+        entity(*new),
+        entity_id=None,  # type: ignore[arg-type]
+    )
+    (olo, ohi), (nlo, nhi) = _align_set(*old), _align_set(*new)
+    disjoint = ohi < nlo or nhi < olo
+    assert bool(got) is disjoint, (old, new, got)
