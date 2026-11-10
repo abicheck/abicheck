@@ -169,6 +169,11 @@ EXEMPTION_REASONS: dict[str, str] = {
 #: exemption category (maintained by hand -- the completeness test says what
 #: to add or drop).
 HEURISTICS: dict[str, str] = {
+    # The dual-ABI pairing key canonicalizes libstdc++'s basic_string
+    # spellings (and whitespace) in a demangled C++ name: a type spelling.
+    "abicheck.compare.glibcxx_dual_abi::<module>::re:'std::basic_string<\\\\s*(?P<ch>' + '|'.join(_CHAR_TYPES) + ')\\\\s*,\\\\s*...": "spelling",
+    "abicheck.compare.glibcxx_dual_abi::<module>::re:'std::basic_string<\\\\s*(?P<ch>' + '|'.join(_CHAR_TYPES) + ')\\\\s*>'": "spelling",
+    "abicheck.compare.glibcxx_dual_abi::normalize_dual_abi_spelling::re:'\\\\s+'": "spelling",
     "abicheck.diff_bit_int::<module>::re:'\\\\b_BitInt\\\\s*(?:\\\\(\\\\s*(\\\\d+)\\\\s*\\\\)|\\\\[\\\\s*(\\\\d+)-bit storage\\\\s*\\...": "spelling",
     "abicheck.checker::compare::affix.startswith:'rename:'": "own_format",
     "abicheck.model.change::<module>::re:'^[A-Za-z0-9][A-Za-z0-9._-]*@[A-Za-z0-9][A-Za-z0-9._-]*#[A-Za-z0-9][A...": "own_format",

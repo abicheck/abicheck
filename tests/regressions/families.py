@@ -595,7 +595,10 @@ _F9 = (
 )
 _F10 = ("concurrency.abandoned_child_outlives_failed_owner",)
 _F11 = ("measurement.forked_tree_rss_overstates_memory",)
-_F19 = ("classification.removed_virtual_slot_read_as_plain_removal",)
+_F19 = (
+    "classification.removed_virtual_slot_read_as_plain_removal",
+    "comparability.runtime_abi_selector_refused_instead_of_reported",
+)
 _F12 = (
     # The public-root probe read only `/I` from a CL-mode argv, so a `-I` or
     # `/external:I` include root was never probed while the replay read a
