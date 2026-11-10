@@ -31,8 +31,10 @@ binary only, ``stack_canary_removed`` keeps its RISK, marked as weaker
 evidence. An address-derived alignment drop is demoted unless the old side
 declares an alignment the new placement fails.
 
-The ``_GLIBCXX_USE_CXX11_ABI=0`` rebuild under headers is refused as
-``not_comparable`` (ADR-050, exit 16): the refusal must name the macro.
+The ``_GLIBCXX_USE_CXX11_ABI=0`` rebuild under headers is compared and
+reported as ``glibcxx_dual_abi_changed`` (exit 4, ADR-050 amendment
+2026-11-09); adding another macro difference to it keeps the
+``not_comparable`` refusal (exit 16), whose reason names both.
 """
 
 from __future__ import annotations
@@ -172,15 +174,7 @@ def test_own_export_removed_in_the_same_rebuild_still_breaks(tmp_path, cxx, evid
     assert all("name_len" in s for s in broken if not s.startswith("__stack")), broken
 
 
-def test_dual_abi_rebuild_refusal_names_the_macro(tmp_path):
-    cxx = _driver("g++")
-    define = "-D_GLIBCXX_USE_CXX11_ABI=0"
-    old = _snap(_build(tmp_path, "old", cxx, ["-O0"], _SOURCE, True), "headers", [])
-    new = _snap(
-        _build(tmp_path, "new", cxx, ["-O0", define], _SOURCE, True),
-        "headers",
-        [define],
-    )
+def _compare_cli(tmp_path: Path, old, new) -> tuple[int, dict, str]:
     (tmp_path / "old.json").write_text(snapshot_to_json(old))
     (tmp_path / "new.json").write_text(snapshot_to_json(new))
     report = tmp_path / "out.json"
@@ -194,18 +188,48 @@ def test_dual_abi_rebuild_refusal_names_the_macro(tmp_path):
             f"json={report}",
         ],
     )
-    assert run.exit_code == 16, run.output
-    doc = json.loads(report.read_text())
-    assert doc["verdict"] is None
-    assert doc["reason"]["kind"] == "profile_mismatch"
-    message = doc["reason"]["message"]
-    assert "only in new: -D_GLIBCXX_USE_CXX11_ABI=0" in message
-    assert "--diagnostic-comparison" in message
+    return run.exit_code, json.loads(report.read_text()), run.output
 
-    # The binaries alone report the rename the refusal withholds.
+
+def test_dual_abi_rebuild_is_reported_as_a_break(tmp_path):
+    cxx = _driver("g++")
+    define = "-D_GLIBCXX_USE_CXX11_ABI=0"
+    old = _snap(_build(tmp_path, "old", cxx, ["-O0"], _SOURCE, True), "headers", [])
+    new = _snap(
+        _build(tmp_path, "new", cxx, ["-O0", define], _SOURCE, True),
+        "headers",
+        [define],
+    )
+    exit_code, doc, output = _compare_cli(tmp_path, old, new)
+    assert exit_code == 4, output
+    assert doc["verdict"] == "BREAKING"
+    (root,) = [c for c in doc["changes"] if c["kind"] == "glibcxx_dual_abi_changed"]
+    assert "_GLIBCXX_USE_CXX11_ABI=0 (header parse)" in root["new_value"]
+    assert "re-mangled" in root["description"]
+
+    # The binaries alone report the same break.
     bin_old = _snap(tmp_path / "old" / "libseed.so", "binary", [])
     bin_new = _snap(tmp_path / "new" / "libseed.so", "binary", [])
     assert compare(bin_old, bin_new).verdict is Verdict.BREAKING
+
+
+def test_dual_abi_rebuild_with_another_macro_is_still_refused(tmp_path):
+    cxx = _driver("g++")
+    defines = ["-D_GLIBCXX_USE_CXX11_ABI=0", "-DEDIT_SEED_EXTRA=1"]
+    old = _snap(_build(tmp_path, "old", cxx, ["-O0"], _SOURCE, True), "headers", [])
+    new = _snap(
+        _build(tmp_path, "new", cxx, ["-O0", *defines], _SOURCE, True),
+        "headers",
+        defines,
+    )
+    exit_code, doc, output = _compare_cli(tmp_path, old, new)
+    assert exit_code == 16, output
+    assert doc["verdict"] is None
+    assert doc["reason"]["kind"] == "profile_mismatch"
+    message = doc["reason"]["message"]
+    assert "-D_GLIBCXX_USE_CXX11_ABI=0" in message
+    assert "-DEDIT_SEED_EXTRA=1" in message
+    assert "glibcxx_dual_abi_changed" in message
 
 
 #: What a gcc without the 32-bit multilib runtime prints: a missing 32-bit

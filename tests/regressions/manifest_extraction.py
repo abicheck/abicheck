@@ -1031,5 +1031,37 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
                 reference="docs/contribute/known-gaps.md",
             ),
         ),
+        id="extraction.tool_probe_answer_depends_on_host_load",
+        invariant=(
+            "An external-tool call whose answer is recorded (a compiler's "
+            "target, platform, family, version or default standard, its include "
+            "search path, a castxml version, a demangled name, a git commit) "
+            "gives up only on a hung tool: every such call is bounded by the one "
+            "shared hang guard (deadline.PROBE_HANG_TIMEOUT_S) or the active "
+            "--budget, so a working tool that answers slowly on a loaded host "
+            "records the same fact it records on an idle one."
+        ),
+        fixed_by=(1991,),
+        seed_tests=("tests/test_tool_probe_hang_guard.py",),
+        public_surfaces=(),
+        axes={
+            "probe": (
+                "clang_target",
+                "dumpmachine",
+                "target_platform",
+                "compiler_family",
+                "compiler_version",
+                "language_standard",
+            ),
+            "tool_latency": ("within_old_bound", "past_old_bound"),
+            "call_shape": (
+                "timeout_kwarg",
+                "deadline_scope",
+                "local_bound",
+                "module_constant",
+                "process_wait",
+            ),
+        },
+
     ),
 )
