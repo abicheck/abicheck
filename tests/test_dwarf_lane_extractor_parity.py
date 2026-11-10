@@ -298,6 +298,15 @@ _WCHAR_SETS = (
 _ABI_SETS = (frozenset({"-m64"}), frozenset({"-m64", "-mabi=ms"}))
 
 
+def _flag_id(side: object) -> str:
+    """A stable test id: frozenset order varies with each xdist worker's hash seed."""
+    if isinstance(side, (set, frozenset)):
+        return "{" + ",".join(sorted(side)) + "}"
+    if isinstance(side, tuple):
+        return "(" + ";".join(_flag_id(x) for x in side) + ")"
+    return str(side)
+
+
 def _flag_meta(  # noqa: ANN202
     vec: frozenset[str],
     wchar: frozenset[str],
@@ -324,7 +333,7 @@ def _flag_meta(  # noqa: ANN202
             itertools.product(_VEC_SETS, _WCHAR_SETS, _ABI_SETS), repeat=2
         )
     ),
-    ids=str,
+    ids=_flag_id,
 )
 def test_flag_family_changes_match_the_flag_sets(
     old: tuple[frozenset[str], frozenset[str], frozenset[str]],
