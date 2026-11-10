@@ -336,7 +336,7 @@ One row per `ChangeKind` (428 total). Columns fuse the verdict partition (`check
 | `symbol_binding_strengthened` | quality | `COMPATIBLE` | `warning` | L0 | `symbol_binding_strengthened` | [case128](examples/case128_symbol_binding_strengthened.md) |
 | `symbol_elf_visibility_changed` | quality | `COMPATIBLE` | `warning` | L0 | `symbol_elf_visibility_changed` | [case51](examples/case51_protected_visibility.md) |
 | `symbol_leaked_from_dependency_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `symbol_leaked_from_dependency_changed` | — |
-| `symbol_moved_version_node` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `symbol_moved_version_node` | — |
+| `symbol_moved_version_node` | breaking | `BREAKING` | `error` | unspecified | `symbol_moved_version_node` | — |
 | `symbol_renamed_batch` | breaking | `BREAKING` | `error` | unspecified | `symbol_renamed_batch` | — |
 | `symbol_size_changed` | breaking | `BREAKING` | `error` | L0 | `symbol_size_changed` | [case127](examples/case127_data_object_size_changed.md) |
 | `symbol_size_changed_const_object` | breaking | `BREAKING` | `error` | unspecified | `symbol_size_changed_const_object` | — |
