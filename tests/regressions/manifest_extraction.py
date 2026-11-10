@@ -979,6 +979,8 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
                 reference="docs/contribute/known-gaps.md",
             ),
         ),
+    ),
+    BugClass(
         id="extraction.tool_probe_answer_depends_on_host_load",
         invariant=(
             "An external-tool call whose answer is recorded (a compiler's "
