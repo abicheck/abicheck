@@ -223,7 +223,7 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
         # Found by the config-matrix edit corpus's weekly tier: rebuild_optimized
         # on cxx_stdlib with -D_GLIBCXX_USE_CXX11_ABI=0 kept a RISK from the weak
         # std::less<const char*>::operator() the -O0 build exported.
-        fixed_by=(1983,),
+        fixed_by=(1989,),
         seed_tests=(
             "tests/test_std_customization_point_owner.py",
             "tests/test_rebuild_toolchain_drift_integration.py",
