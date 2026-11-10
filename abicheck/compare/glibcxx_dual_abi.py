@@ -83,7 +83,6 @@ __all__ = [
     "export_names",
     "normalize_dual_abi_spelling",
     "pair_remangled_exports",
-    "remangled_export_pairs",
     "runtime_abi_ops_of",
 ]
 
@@ -114,7 +113,7 @@ def normalize_dual_abi_spelling(spelling: str) -> str:
     ``std::basic_string<C, std::char_traits<C>, std::allocator<C> >`` written
     as its ``std::string`` alias, the form the old ABI demangles to.
 
-    The matching key of :func:`remangled_export_pairs`: two exports whose
+    The matching key of :func:`pair_remangled_exports`: two exports whose
     spellings differ but normalize equal are one declaration built under
     the two ABIs.
     """
@@ -191,11 +190,6 @@ def _selection_from_names(
     spellings += [t.name for t in snapshot.declarations.types if t.name]
     abi = dual_abi_from_spellings(spellings)
     return DualAbiSelection(abi, SelectionSource.NAMES) if abi is not None else None
-
-
-def remangled_export_pairs(old: AbiSnapshot, new: AbiSnapshot) -> list[tuple[str, str]]:
-    """:func:`pair_remangled_exports` over two snapshots' exports."""
-    return pair_remangled_exports(export_names(old), export_names(new))
 
 
 def pair_remangled_exports(o: ExportNames, n: ExportNames) -> list[tuple[str, str]]:

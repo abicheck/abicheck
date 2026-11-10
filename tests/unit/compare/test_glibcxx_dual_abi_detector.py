@@ -29,7 +29,6 @@ from abicheck.compare.glibcxx_dual_abi import (
     export_names,
     normalize_dual_abi_spelling,
     pair_remangled_exports,
-    remangled_export_pairs,
 )
 from abicheck.demangle import demangle
 from abicheck.errors import ProfileMismatchError
@@ -850,13 +849,13 @@ def test_mixed_direction_pairs_do_not_claim_one_selection():
 
 
 @needs_demangler
-def test_snapshot_pairing_matches_the_pure_primitive():
+def test_snapshot_export_names_pair_every_real_twin():
+    # export_names reads a snapshot's confirmed exports; the pairing over it
+    # matches the compiler's own twins (the oracle), unchanged ones unpaired.
     old = _snap(functions=_side(_REAL, _CXX11))
     new = _snap(functions=_side(_REAL, _OLD))
-    assert remangled_export_pairs(old, new) == pair_remangled_exports(
-        export_names(old), export_names(new)
-    )
-    assert len(remangled_export_pairs(old, new)) == len(_REAL)
+    pairs = pair_remangled_exports(export_names(old), export_names(new))
+    assert sorted(pairs) == sorted((r[1], r[2]) for r in _REAL)
 
 
 @pytest.mark.parametrize(
