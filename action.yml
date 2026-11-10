@@ -925,14 +925,28 @@ inputs:
       (old-library/abi-baseline). When no snapshot is available the comment
       says why and shows the normal comparison. Empty (default) changes
       nothing. Compare mode on pull_request/merge_group only; needs
-      'actions: read' and a checkout with fetch-depth 2 (0 for
-      delta-mode head).
+      'actions: read' (delta-storage artifact) and a checkout with
+      fetch-depth 2 (0 for delta-mode head).
     required: false
     default: ''
+  delta-storage:
+    description: >
+      Where actions/main-snapshot stored the default-branch snapshot; must
+      match that Action's 'storage'. 'artifact' (default): a workflow
+      artifact, whose uploading run is verified (needs 'actions: read' and
+      delta-snapshot-workflow). 'cache': the Actions-cache entry under the
+      exact key for the base commit -- no token permission needed, so it
+      also serves fork pull requests of a private repository; its origin
+      record is self-reported, and it is refused (outcome untrusted_source)
+      on a pull request into another branch and on merge_group. See
+      docs/reference/main-snapshot.md.
+    required: false
+    default: 'artifact'
   delta-snapshot-workflow:
     description: >
       File name of the workflow that runs actions/main-snapshot on the
-      default branch (e.g. 'abi-main.yml'). Required with delta-baseline.
+      default branch (e.g. 'abi-main.yml'). Required with delta-baseline
+      and delta-storage artifact; unused with delta-storage cache.
     required: false
     default: ''
   delta-mode:
@@ -947,7 +961,9 @@ inputs:
     required: false
     default: ''
   delta-wait-timeout:
-    description: 'Seconds to wait while the base snapshot is still being built.'
+    description: >
+      Seconds to wait while the base snapshot is still being built.
+      delta-storage artifact only: the cache cannot see a run in progress.
     required: false
     default: '600'
   delta-base-equivalent-paths:
@@ -1416,7 +1432,7 @@ outputs:
       docs/reference/main-snapshot.md). Empty when delta-baseline is unset.
       The JSON reports record it too, in their delta_baseline block
       (comparison_role gate or delta).
-    value: ${{ steps.delta-base.outputs.outcome }}
+    value: ${{ steps.delta-cache-verify.outputs.outcome || steps.delta-base.outputs.outcome }}
   delta-base-sha:
     description: 'delta-baseline only: the base commit the delta was measured against.'
     value: ${{ steps.delta-base.outputs.base-sha }}
@@ -1425,7 +1441,7 @@ outputs:
       delta-baseline only, when the base snapshot resolved: the commit whose
       snapshot was fetched -- delta-base-sha itself, or under
       delta-base-equivalent-paths its path-equivalent ancestor.
-    value: ${{ steps.delta-base.outputs.snapshot-sha }}
+    value: ${{ steps.delta-cache-verify.outputs.snapshot-sha || steps.delta-base.outputs.snapshot-sha }}
   delta-comment-outcome:
     description: >
       delta-baseline only: what the PR comment shows -- the lookup outcome,
@@ -1511,6 +1527,7 @@ runs:
         INPUT_MODE: ${{ inputs.mode }}
         INPUT_DELTA_BASELINE: ${{ inputs.delta-baseline }}
         INPUT_DELTA_SNAPSHOT_WORKFLOW: ${{ inputs.delta-snapshot-workflow }}
+        INPUT_DELTA_STORAGE: ${{ inputs.delta-storage }}
         INPUT_DELTA_MODE: ${{ inputs.delta-mode }}
         INPUT_DELTA_ON_MISSING_BASE: ${{ inputs.delta-on-missing-base }}
         INPUT_DELTA_BASE_BUILD_COMMAND: ${{ inputs.delta-base-build-command }}
@@ -1745,9 +1762,15 @@ runs:
       run: bash "${{ github.action_path }}/action/install-abicheck.sh" "${{ github.action_path }}"
 
     # ── 3b. delta-baseline: the PR's exact-base default-branch snapshot ──────
-    # Runs the fetch-main-snapshot Action's own script (a composite cannot
+    # Runs the fetch-main-snapshot Action's own scripts (a composite cannot
     # `uses:` a path relative to itself). Every outcome is a successful step;
-    # only `resolved` yields a snapshot.
+    # only `resolved` yields a snapshot. With delta-storage: cache the three
+    # steps below are fetch-main-snapshot's own: select the base and refuse a
+    # foreign cache scope (run.sh), restore the exact key, verify the entry
+    # (verify-cache.sh). The lookup's result is read everywhere as
+    # `delta-cache-verify.outputs.X || delta-base.outputs.X`: run.sh records
+    # `lookup_failed` before the restore, so a restore or check that did not
+    # complete leaves that, never a `resolved` without a file.
     - name: Fetch delta base snapshot
       id: delta-base
       if: >-
@@ -1759,7 +1782,9 @@ runs:
         REPO: ${{ github.repository }}
         EVENT_NAME: ${{ github.event_name }}
         MERGE_GROUP_BASE: ${{ github.event.merge_group.base_sha }}
+        PR_BASE_REF: ${{ github.base_ref }}
         INPUT_WORKFLOW: ${{ inputs.delta-snapshot-workflow }}
+        INPUT_STORAGE: ${{ inputs.delta-storage }}
         INPUT_MODE: ${{ inputs.delta-mode }}
         INPUT_BRANCH: ${{ github.event.repository.default_branch }}
         INPUT_PROFILE: ${{ inputs.delta-profile }}
@@ -1767,7 +1792,8 @@ runs:
         INPUT_DESTINATION: ${{ runner.temp }}/abicheck-delta-base
         INPUT_BASE_EQUIVALENT_PATHS: ${{ inputs.delta-base-equivalent-paths }}
       run: |
-        [[ -n "$INPUT_WORKFLOW" ]] || { echo "::error::delta-baseline: main needs delta-snapshot-workflow."; exit 1; }
+        [[ "$INPUT_STORAGE" == cache || -n "$INPUT_WORKFLOW" ]] \
+          || { echo "::error::delta-baseline: main needs delta-snapshot-workflow (or delta-storage: cache)."; exit 1; }
         # A malformed declaration is a configuration error, not an
         # unavailable base: fail here rather than as `lookup_failed` below.
         if [[ -n "${INPUT_BASE_EQUIVALENT_PATHS//[[:space:]]/}" ]]; then
@@ -1781,6 +1807,51 @@ runs:
           echo "::warning::abicheck: the delta base lookup failed; the comment shows the release-baseline comparison."
           printf 'outcome=lookup_failed\nmessage=Delta unavailable: the snapshot lookup failed.\n' >> "$GITHUB_OUTPUT"
         }
+
+    # delta-storage: cache. The exact key only -- never `restore-keys`, which
+    # would hand back the newest entry for some other commit. A failed
+    # restore must not cost the gate its run: it leaves run.sh's
+    # `lookup_failed` and the verify step is skipped.
+    - name: Restore delta base snapshot from the cache
+      id: delta-cache-restore
+      if: >-
+        steps.delta-base.outcome == 'success' && inputs.delta-storage == 'cache' &&
+        steps.delta-base.outputs.cache-key != ''
+      continue-on-error: true
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830  # v4
+      with:
+        path: .abicheck-main-snapshot-cache
+        key: ${{ steps.delta-base.outputs.cache-key }}
+
+    - name: Verify delta base snapshot from the cache
+      id: delta-cache-verify
+      if: >-
+        steps.delta-cache-restore.outcome == 'success' && inputs.delta-storage == 'cache' &&
+        steps.delta-base.outputs.cache-key != ''
+      continue-on-error: true
+      shell: bash
+      env:
+        REPO: ${{ github.repository }}
+        INPUT_BRANCH: ${{ github.event.repository.default_branch }}
+        INPUT_DESTINATION: ${{ runner.temp }}/abicheck-delta-base
+        BASE_SHA: ${{ steps.delta-base.outputs.base-sha }}
+        # The commit whose entry was restored: the base, or under
+        # delta-base-equivalent-paths its path-equivalent ancestor.
+        CACHE_SHA: ${{ steps.delta-base.outputs.cache-sha }}
+        CACHE_KEY: ${{ steps.delta-base.outputs.cache-key }}
+        CACHE_HIT: ${{ steps.delta-cache-restore.outputs.cache-hit }}
+        CACHE_MATCHED_KEY: ${{ steps.delta-cache-restore.outputs.cache-matched-key }}
+      run: bash "${{ github.action_path }}/actions/fetch-main-snapshot/verify-cache.sh"
+
+    # A restore that failed (possibly after extracting part of the entry)
+    # skips the check above, which is what removes the staging directory;
+    # remove it here, so a later call of this Action in the same job is not
+    # refused by fetch-main-snapshot's "staging directory already exists".
+    # run.sh refused to start if it pre-existed, so it is this run's own.
+    - name: Clean up after a failed delta cache restore
+      if: steps.delta-cache-restore.outcome == 'failure'
+      shell: bash
+      run: rm -rf -- "${GITHUB_WORKSPACE:-$PWD}/.abicheck-main-snapshot-cache"
 
     # ── 4. Run abicheck ──────────────────────────────────────────────────────
     - name: Run abicheck
@@ -1845,11 +1916,11 @@ runs:
         INPUT_PR_COMMENT_DETAIL: ${{ inputs.pr-comment-detail }}
         INPUT_PR_COMMENT_REPORT_ARTIFACT_URL: ${{ inputs.pr-comment-report-artifact-url }}
         ABICHECK_PR_COMMENT_DELIVERY: ${{ steps.pr-delivery.outputs.delivery }}
-        ABICHECK_DELTA_OUTCOME: ${{ steps.delta-base.outputs.outcome }}
-        ABICHECK_DELTA_SNAPSHOT: ${{ steps.delta-base.outputs.snapshot-path }}
-        ABICHECK_DELTA_MESSAGE: ${{ steps.delta-base.outputs.message }}
+        ABICHECK_DELTA_OUTCOME: ${{ steps.delta-cache-verify.outputs.outcome || steps.delta-base.outputs.outcome }}
+        ABICHECK_DELTA_SNAPSHOT: ${{ steps.delta-cache-verify.outputs.snapshot-path || steps.delta-base.outputs.snapshot-path }}
+        ABICHECK_DELTA_MESSAGE: ${{ steps.delta-cache-verify.outputs.message || steps.delta-base.outputs.message }}
         ABICHECK_DELTA_BASE_SHA: ${{ steps.delta-base.outputs.base-sha }}
-        ABICHECK_DELTA_SNAPSHOT_SHA: ${{ steps.delta-base.outputs.snapshot-sha }}
+        ABICHECK_DELTA_SNAPSHOT_SHA: ${{ steps.delta-cache-verify.outputs.snapshot-sha || steps.delta-base.outputs.snapshot-sha }}
         ABICHECK_DELTA_BRANCH: ${{ github.event.repository.default_branch }}
         # delta-on-missing-base: build runs inside run.sh, after the gate
         # comparison and in a sandbox (action/build-delta-base.sh).
@@ -1882,14 +1953,14 @@ runs:
       if: >-
         always() && inputs.delta-on-missing-base == 'fail' &&
         steps.delta-base.outcome == 'success' &&
-        (steps.delta-base.outputs.outcome != 'resolved' ||
+        ((steps.delta-cache-verify.outputs.outcome || steps.delta-base.outputs.outcome) != 'resolved' ||
          startsWith(steps.run-abicheck.outputs.delta-comment-outcome, 'operand_'))
       shell: bash
       env:
         # A resolved snapshot of a different library (operand identity) is
         # as unavailable as a missing one.
-        DELTA_OUTCOME: ${{ startsWith(steps.run-abicheck.outputs.delta-comment-outcome, 'operand_') && steps.run-abicheck.outputs.delta-comment-outcome || steps.delta-base.outputs.outcome }}
-        DELTA_MESSAGE: ${{ startsWith(steps.run-abicheck.outputs.delta-comment-outcome, 'operand_') && 'the default-branch snapshot is not shown to be the same library as new-library (see delta-operand-map)' || steps.delta-base.outputs.message }}
+        DELTA_OUTCOME: ${{ startsWith(steps.run-abicheck.outputs.delta-comment-outcome, 'operand_') && steps.run-abicheck.outputs.delta-comment-outcome || steps.delta-cache-verify.outputs.outcome || steps.delta-base.outputs.outcome }}
+        DELTA_MESSAGE: ${{ startsWith(steps.run-abicheck.outputs.delta-comment-outcome, 'operand_') && 'the default-branch snapshot is not shown to be the same library as new-library (see delta-operand-map)' || steps.delta-cache-verify.outputs.message || steps.delta-base.outputs.message }}
       run: |
         printf '::error::delta-baseline required (delta-on-missing-base: fail) but unavailable: %s (%s)\n' "$DELTA_MESSAGE" "$DELTA_OUTCOME"
         exit 1
@@ -1922,7 +1993,7 @@ runs:
         ABICHECK_CTX_DELTA_BASE_SHA: ${{ steps.run-abicheck.outputs.delta-comment-outcome && steps.delta-base.outputs.base-sha || '' }}
         ABICHECK_CTX_GATE_VERDICT: ${{ steps.run-abicheck.outputs.delta-comment-outcome && steps.run-abicheck.outputs.verdict || '' }}
         ABICHECK_CTX_DELTA_OPERAND_MATCH: ${{ steps.run-abicheck.outputs.delta-operand-match }}
-        ABICHECK_CTX_DELTA_SNAPSHOT_SHA: ${{ steps.run-abicheck.outputs.delta-comment-outcome == 'resolved' && steps.delta-base.outputs.snapshot-sha || '' }}
+        ABICHECK_CTX_DELTA_SNAPSHOT_SHA: ${{ steps.run-abicheck.outputs.delta-comment-outcome == 'resolved' && (steps.delta-cache-verify.outputs.snapshot-sha || steps.delta-base.outputs.snapshot-sha) || '' }}
       run: bash "${{ github.action_path }}/action/pr-report-delivery.sh" stage
 
     - name: Upload PR report artifact

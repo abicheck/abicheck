@@ -44,6 +44,7 @@ import pytest
 from _action_run_sh_harness import REQUIRES_POSIX_SHELL
 from _workflow_exec import bash_executable, require_bash
 from click.testing import CliRunner
+from test_action_delta_base_build import _delta_record, _run_sh as _run_build
 from test_action_delta_baseline import _run as _run_action
 from test_action_delta_baseline_report import _records
 
@@ -985,3 +986,25 @@ def test_an_unnameable_artifact_fails_the_step_not_reads_as_absent(
     assert result.returncode != 0
     assert "::error::no artifact name for" in result.stderr
     assert "base_not_snapshotted" not in out.read_text()
+
+
+@REQUIRES_POSIX_SHELL
+def test_a_built_base_never_claims_a_stand_in_snapshot(tmp_path: Path) -> None:
+    """``delta-on-missing-base: build`` applies only once the walk found no
+    equivalent ancestor (the base's own outcome stands), and builds the exact
+    base. Even with a snapshot SHA in the environment, the built delta records
+    none and its comment carries no equivalence note."""
+    outputs, calls, body = _run_build(
+        tmp_path, extra={"ABICHECK_DELTA_SNAPSHOT_SHA": _ANCESTOR}
+    )
+    assert outputs["delta-comment-outcome"] == "base_built"
+    base = outputs["_base"]
+    assert f"> {delta_notes('base_built', base_sha=base)[0]}" in body
+    assert "equivalent to" not in body and _ANCESTOR[:7] not in body
+    (dump,) = [c for c in calls if c[0] == "dump"]
+    snap = dump[dump.index("-o") + 1]
+    (delta,) = [c for c in calls if snap in c and c[0] == "compare"]
+    gate = next(c for c in calls if c[0] == "compare" and snap not in c)
+    assert _delta_record(delta)["snapshot_sha"] is None
+    assert _delta_record(delta)["base_sha"] == base
+    assert _delta_record(gate).get("snapshot_sha") is None

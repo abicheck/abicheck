@@ -19,15 +19,17 @@ via `pr_comment --note`, and on the artifact (fork) path via
 built base too); `storage: cache` landed on both Actions
 (`abicheck/frontends/action/main_snapshot_cache.py`; the cache entry carries
 `operand.json` too, and every cache refusal selected a commit, so `build`
-applies to it); piece 4's report field landed (`delta_baseline` block,
+applies to it), and the main Action reads it with `delta-storage: cache`
+(fetch-main-snapshot's own cache steps and refusals, `build`/`fail` included);
+piece 4's report field landed (`delta_baseline` block,
 compare report schema 7.3 / release 3.1, `report.delta_baseline`, with the
 operand pairing as `operand_match`; a built base's delta report records
 `base_built`); the path-equivalent *ancestor* rule landed
 (`base-equivalent-paths` on `fetch-main-snapshot`,
-`delta-base-equivalent-paths` on the main Action;
-`abicheck/frontends/action/main_snapshot_ancestor.py`) with the comment
-header's equivalence note and `delta_baseline.snapshot_sha`; open: a
-`delta-storage` input on the main Action · **Effort:** L
+`delta-base-equivalent-paths` on the main Action, with artifact and cache
+storage; `abicheck/frontends/action/main_snapshot_ancestor.py`) with the
+comment header's equivalence note and `delta_baseline.snapshot_sha` ·
+**Effort:** L
 
 ## Problem
 
@@ -347,7 +349,9 @@ work, which publishes the delta report; nothing else changes.
 3. **Main Action inputs** (*landed* as `delta-baseline: main`,
    `delta-snapshot-workflow`, `delta-mode`, `delta-profile`,
    `delta-wait-timeout`, `delta-on-missing-base: report|fail|build`,
-   `delta-base-build-command`; a `<path>` value is planned). `build` runs
+   `delta-base-build-command`, and `delta-storage: artifact|cache`, which
+   runs `fetch-main-snapshot`'s cache restore and check as steps of the main
+   Action; a `<path>` value is planned). `build` runs
    after the gate comparison: it checks the base out into a worktree, runs
    the command sandboxed (no token or inputs, throwaway runner files), and
    dumps it with the gate's new-side evidence moved into that worktree
