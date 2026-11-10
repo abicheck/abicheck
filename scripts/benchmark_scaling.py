@@ -515,7 +515,7 @@ def _build_version_node_churn(n_funcs: int) -> tuple[AbiSnapshot, AbiSnapshot]:
     """Every exported symbol migrates to a new version node — the LLVM-bump shape.
 
     Field eval iteration 3: ``libLLVM`` 17→18 emitted **36 991**
-    ``symbol_moved_version_node`` risk findings on a routine major bump, because
+    ``symbol_moved_version_node`` findings on a routine major bump, because
     every export moves from the ``LLVM_17`` node to ``LLVM_18``. No scenario
     exercised the version-node diff (``diff_versioning.detect_version_node_changes``)
     or — more importantly — the post-processing fan-out (surface scoping,

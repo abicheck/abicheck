@@ -6,7 +6,14 @@ counts below (119 kinds in Context, 114 in Consequences) were a
 point-in-time snapshot and are now stale — the registry has grown since this
 ADR was written. Treat `len(list(ChangeKind))` in `checker_policy.py` as the
 generated source of truth for the current count, not any number in this
-document.
+document. Amendment (2026-11-10, #1977): `SYMBOL_MOVED_VERSION_NODE` moves
+from the COMPATIBLE_WITH_RISK tier to BREAKING and now means "a surviving
+symbol is no longer defined at a version the old library defined it at"
+(default or compat). Old consumers' versioned references then fail to load,
+so "typically intentional during major releases" is a policy question
+(reclassify the kind in policy), not a reason to score a load failure as a
+risk. A move that keeps every old version stays the compatible
+`SYMBOL_VERSION_ALIAS_CHANGED`.
 **Decision maker:** Nikolay Petrov
 
 ---
@@ -68,6 +75,7 @@ When classifying a new `ChangeKind`, apply these rules in order:
 | `FUNC_DELETED_ELF_FALLBACK` | ELF heuristic: symbol absent from `.dynsym` while header still declares it — binary-incompatible regardless of `= delete`. |
 | `VAR_BECAME_CONST` | Variable moved to `.rodata`; old code writing to it gets SIGSEGV. |
 | `TYPE_BECAME_OPAQUE` | Complete type → forward-declaration only; `sizeof` and field access fail. |
+| `SYMBOL_MOVED_VERSION_NODE` | A surviving symbol is no longer defined at a version the old library defined it at (e.g. `foo@LIBFOO_1.0` gone, `foo@@LIBFOO_2.0` new). Consumers holding `foo@LIBFOO_1.0` fail to load. (Amended 2026-11-10; was COMPATIBLE_WITH_RISK.) |
 | `SYMBOL_VERSION_NODE_REMOVED` | Entire version node removed from version script. All symbols under that node become unresolvable for applications linked against it. Deduplicated with `SYMBOL_VERSION_DEFINED_REMOVED` (the more specific node-level change wins). |
 
 #### COMPATIBLE tier — divergences from ABICC/libabigail
@@ -107,7 +115,6 @@ When classifying a new `ChangeKind`, apply these rules in order:
 | `SYMBOL_VERSION_REQUIRED_ADDED` | New glibc/version requirement. Existing binaries unaffected (already linked). Risk: library won't load on systems with older glibc. |
 | `ENUM_LAST_MEMBER_VALUE_CHANGED` | Sentinel/MAX value changed. Binary-safe but source code using it as array bound may overflow. |
 | `SYMBOL_LEAKED_FROM_DEPENDENCY_CHANGED` | Symbol originates from dependency (libstdc++, libgcc); change is real but root cause is dependency versioning, not library's own API. |
-| `SYMBOL_MOVED_VERSION_NODE` | Symbol migrated between version nodes (e.g., `LIBFOO_1.0` → `LIBFOO_2.0`). Technically breaking for versioned lookups, but typically intentional during major releases. |
 
 ### Migration note for ABICC/libabigail users
 

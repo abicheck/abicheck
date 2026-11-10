@@ -190,6 +190,9 @@ jobs:
       - name: Run the tier
         env:
           ABICHECK_EDIT_CORPUS_REPORT_DIR: results/cells
+          # One ChangeKind/language-space coverage record per cell
+          # (tests/_edit_corpus_coverage.py); the report job merges shards.
+          ABICHECK_EDIT_CORPUS_COVERAGE_DIR: results/coverage
           # Fail a run that executed nothing (a toolchain that vanished).
           ABICHECK_MIN_EXECUTED: "1"
         run: |
@@ -216,6 +219,12 @@ jobs:
             echo
             python -m tests._edit_corpus_report results || echo "(no pair report)"
           } >> "$GITHUB_STEP_SUMMARY"
+          if [ -d results/coverage ]; then
+            # Reported only: the floor is checked on the merged run (report job).
+            python -m tests._edit_corpus_coverage report results/coverage \
+              --title "Coverage, shard ${SHARD}/4" \
+              --summary "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Upload results
         if: always()
@@ -245,6 +254,13 @@ jobs:
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6.3.0
         with:
           python-version: "3.13"
+          cache: "pip"
+
+      - name: Install
+        # The coverage report reads the ChangeKind catalog (abicheck itself).
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
 
       - name: Download shard results
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
@@ -272,13 +288,36 @@ jobs:
           cat summary.md >> "$GITHUB_STEP_SUMMARY"
           cp summary.md results/summary.md
 
+      - name: Coverage
+        # The whole tier's ChangeKind and language-space coverage, every
+        # shard's records merged. When every shard finished it is held to the
+        # tier's verified floor in tests/edit_corpus_coverage_ledger.json (only
+        # `pr` has one today; `report DIR --raise-floor TIER` adds one) and a
+        # covered point the space model calls infeasible fails it.
+        env:
+          TIER: ${{ needs.plan.outputs.tier }}
+          CORPUS_RESULT: ${{ needs.corpus.result }}
+        run: |
+          set -euo pipefail
+          if [ ! -d results/coverage ]; then echo "::error::no shard uploaded coverage records"; exit 1; fi
+          # Only a run in which every shard finished can be held to the floor.
+          check=()
+          case "$CORPUS_RESULT" in success|failure) check=(--check-floor "$TIER") ;; esac
+          python -m tests._edit_corpus_coverage report results/coverage \
+            --title "Edit corpus ${TIER} coverage (${CORPUS_RESULT})" \
+            --summary "$GITHUB_STEP_SUMMARY" \
+            --json results/coverage-report.json \
+            ${check[@]+"${check[@]}"}
+
       - name: Upload the summary
         id: upload
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: edit-corpus-summary
-          path: results/summary.md
+          path: |
+            results/summary.md
+            results/coverage-report.json
           if-no-files-found: warn
           retention-days: 30
 

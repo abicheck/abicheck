@@ -249,13 +249,13 @@ def compiler_search_dirs(cc_bin: str, *, cpp: bool) -> tuple[str, ...]:
     if hit is not None:
         return hit
     try:
-        with deadline.deadline_scope(15.0):
+        with deadline.deadline_scope(deadline.PROBE_HANG_TIMEOUT_S):
             proc = deadline.run_bounded(
                 [cc_bin, "-E", "-x", "c++" if cpp else "c", "-v", "-"],
                 input="",
                 capture_output=True,
                 text=True,
-                timeout=15.0,
+                timeout=deadline.PROBE_HANG_TIMEOUT_S,
             )
         dirs = tuple(
             d for d in parse_include_search_dirs(proc.stderr or "") if Path(d).is_dir()

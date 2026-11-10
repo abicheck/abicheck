@@ -458,7 +458,10 @@ def cached_run_dump(
     if not cache_dep_manifest.verify(deps):
         deps = None
     if initial_key and initial_key == final_key and _write_enabled():
-        _store_key(snap, initial_key, path, deps=deps)
+        # Finished requests never read the raw tier: persisting it too
+        # serializes an entire snapshot no warm execution of this request uses.
+        if finisher is None:
+            _store_key(snap, initial_key, path, deps=deps)
     elif finisher is not None:
         finished_key = ""  # unstable key: finish, but never store
     return _finish_and_store(snap, finisher, finished_key, req, deps)

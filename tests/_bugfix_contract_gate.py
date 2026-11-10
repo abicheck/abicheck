@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import importlib.util
+import os
+import re
 import sys
 from pathlib import Path
 
@@ -16,6 +18,23 @@ assert _spec and _spec.loader
 gate = importlib.util.module_from_spec(_spec)
 sys.modules["check_bugfix_test_contract"] = gate
 _spec.loader.exec_module(gate)
+
+#: The gate's environment namespace: every variable under it is cleared, so a
+#: name the gate reads from a helper module or builds dynamically is covered.
+GATE_ENV_PREFIX = "BUGFIX_CONTRACT_"
+
+#: The variables the gate's own source reads, documentation for the prefix
+#: rule (``test_bugfix_contract_gate_env`` pins it to the argparse defaults).
+GATE_ENV_VARS: tuple[str, ...] = tuple(
+    sorted(
+        set(
+            re.findall(
+                r"""(?:environ\.get|getenv|environ\[)\(?\s*["'](BUGFIX_CONTRACT_\w+)["']""",
+                _PATH.read_text(encoding="utf-8"),
+            )
+        )
+    )
+)
 
 
 COMPLETE_BODY = """\
@@ -42,11 +61,17 @@ def _content_diff(path: str, added: str = "    assert f(2) == 4") -> str:
     )
 
 
+def clear_gate_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unset every ``BUGFIX_CONTRACT_*`` variable for the current test."""
+    for name in [n for n in os.environ if n.startswith(GATE_ENV_PREFIX)]:
+        monkeypatch.delenv(name, raising=False)
+
+
 @pytest.fixture(autouse=True)
-def _no_inherited_body_file(monkeypatch: pytest.MonkeyPatch) -> None:
-    # The gate reads BUGFIX_CONTRACT_BODY_FILE from the environment when
-    # main() runs. A caller that validates a real PR description (verify.py's
-    # bugfix-test-contract step) exports it, and every test here that expects
-    # "no body file" would then read the real PR body instead. Each test that
-    # needs a body file sets its own.
-    monkeypatch.delenv("BUGFIX_CONTRACT_BODY_FILE", raising=False)
+def _no_inherited_gate_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The gate reads its base, head, PR title and body file from the
+    # environment when main() runs. A caller that validates a real PR
+    # (verify.py's bugfix-test-contract step, CI) exports them, and every test
+    # here would then judge that PR's title, range or description instead of
+    # its own. Each test that needs one sets its own.
+    clear_gate_env(monkeypatch)

@@ -205,8 +205,41 @@ jobs:
           # Recorded per test so the shard weights can be refreshed from the
           # artifact below (tests/pytest_shards.py's docstring).
           ABICHECK_DURATIONS_JSON: integration-durations-shard${{ matrix.shard }}.json
+          # The edit corpus's PR tier writes one coverage record per cell
+          # (tests/_edit_corpus_coverage.py); the next step reports them.
+          ABICHECK_EDIT_CORPUS_COVERAGE_DIR: edit-corpus-coverage
           PYTEST_ADDOPTS: -n auto --dist worksteal --shard=${{ matrix.shard }}/2 --shard-weights=tests/shard_weights_integration.json --cov=abicheck --cov-report=xml:coverage-integration.xml
         run: python scripts/verify.py --profile full --only integration --require-complete
+      - name: Edit corpus coverage (Linux)
+        # ChangeKinds this shard's corpus cells verified and the language space
+        # they ran, in the step summary. Reported only: the `pr` verified floor
+        # is checked on both shards merged (the edit-corpus-coverage job), since
+        # a kind one shard's cells expect may be verified only in the other.
+        if: (success() || failure()) && runner.os == 'Linux'
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          # This shard's integration step finished (passed or failed): the
+          # floor job judges a run only when both shards left this marker, so a
+          # cancelled shard is never read as missing records. Written first, so
+          # a failing report below fails this step without hiding the shard.
+          had_records=0
+          [ -d edit-corpus-coverage ] && had_records=1
+          mkdir -p edit-corpus-coverage
+          : > "edit-corpus-coverage/shard-${SHARD}.done"
+          if [ "$had_records" = 1 ]; then
+            python -m tests._edit_corpus_coverage report edit-corpus-coverage \
+              --title "Edit corpus PR-tier coverage (shard ${SHARD}/2)" \
+              --summary "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload edit corpus coverage records
+        if: (success() || failure()) && runner.os == 'Linux'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: edit-corpus-coverage-shard${{ matrix.shard }}
+          path: edit-corpus-coverage
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Upload integration-durations artifact
         if: ${{ always() && runner.os == 'Linux' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
@@ -263,3 +296,62 @@ jobs:
           files: coverage-integration.xml
           flags: integration
           fail_ci_if_error: false
+
+  edit-corpus-coverage:
+    # The PR tier's verified ChangeKind floor (tests/edit_corpus_coverage_ledger.json),
+    # held over both Linux shards' corpus records merged. Judged only when both
+    # shards left their `shard-N.done` marker (their integration step finished),
+    # so a cancelled run is never judged; no records at all fail the job.
+    name: edit corpus coverage floor
+    needs: integration
+    if: always() && (needs.integration.result == 'success' || needs.integration.result == 'failure')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1  # v6
+        with:
+          python-version: '3.14'
+          cache: 'pip'
+      - name: Install package
+        run: pip install -e .
+      - name: Download both shards' records
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          pattern: edit-corpus-coverage-shard*
+          path: edit-corpus-coverage
+          merge-multiple: false
+      - name: Check the PR-tier floor
+        run: |
+          set -euo pipefail
+          # needs.integration.result reads `failure` when one matrix leg failed
+          # and another was cancelled; judge only a run whose two Linux shards
+          # both finished their integration step.
+          # (No artifact at all leaves no directory: find fails, count is 0.)
+          done_shards=$({ find edit-corpus-coverage -name 'shard-*.done' 2>/dev/null || true; } | wc -l)
+          if [ "$done_shards" -lt 2 ]; then
+            echo "::notice::only ${done_shards} of 2 Linux shards finished (cancelled run); the PR-tier floor is not judged"
+            exit 0
+          fi
+          # A shard whose test files hold no corpus cells uploads no records; the
+          # pair of shards must still have recorded the PR tier somewhere.
+          if [ -z "$(find edit-corpus-coverage -name '*.json' -print -quit 2>/dev/null)" ]; then
+            echo "::error::neither Linux shard uploaded edit corpus coverage records"
+            exit 1
+          fi
+          python -m tests._edit_corpus_coverage report edit-corpus-coverage \
+            --title "Edit corpus PR-tier coverage (both shards)" \
+            --summary "$GITHUB_STEP_SUMMARY" --json edit-corpus-coverage-report.json \
+            --check-floor pr
+      - name: Upload the PR-tier coverage report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: edit-corpus-coverage-report
+          path: edit-corpus-coverage-report.json
+          if-no-files-found: ignore
+          retention-days: 30
