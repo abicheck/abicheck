@@ -270,6 +270,7 @@ def verify_cached_snapshot(
     destination: Path,
     max_entry_bytes: int = DEFAULT_MAX_ENTRY_BYTES,
     max_total_bytes: int = DEFAULT_MAX_TOTAL_BYTES,
+    equivalent_to: str = "",
 ) -> CachedSnapshot:
     """Decide what the restored cache entry at *directory* may be used for.
 
@@ -278,9 +279,15 @@ def verify_cached_snapshot(
     ``base_not_snapshotted``: the cache cannot tell "not written yet" from
     "evicted" or "never written", and ``actions/cache/restore`` reports a
     cache-service error as a miss too.
+
+    *equivalent_to* is the PR's base commit when ``expected.base_sha`` is a
+    path-equivalent ancestor of it (``base-equivalent-paths``): every check
+    still binds the entry to the ancestor, and the lines name both commits.
     """
     sha7 = expected.base_sha[:7] or "?"
     where = f"`{expected.branch}@{sha7}`"
+    if equivalent_to and equivalent_to != expected.base_sha:
+        where += f" (the path-equivalent ancestor of `{equivalent_to[:7]}`)"
     if not cache_hit:
         return CachedSnapshot(
             DeltaOutcome.BASE_NOT_SNAPSHOTTED,
@@ -327,7 +334,10 @@ def verify_cached_snapshot(
     return CachedSnapshot(
         DeltaOutcome.RESOLVED,
         outcome_message(
-            DeltaOutcome.RESOLVED, sha=expected.base_sha, branch=expected.branch
+            DeltaOutcome.RESOLVED,
+            sha=equivalent_to or expected.base_sha,
+            branch=expected.branch,
+            snapshot_sha=expected.base_sha if equivalent_to else "",
         ),
         f"cache entry {expected.key}",
         str(target),

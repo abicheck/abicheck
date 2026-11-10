@@ -1137,7 +1137,8 @@ schema 3.1) saying which one they are:
   "base_sha": "4f2c...e1",
   "branch": "main",
   "gate_verdict": "BREAKING",
-  "operand_match": "loader_name"
+  "operand_match": "loader_name",
+  "snapshot_sha": "4f2c...e1"
 }
 ```
 
@@ -1154,7 +1155,11 @@ reader of the delta report alone sees what the check decided. `operand_match`
 -- also on the `delta` report only -- says how the snapshot's library was
 paired with this PR's library (`declared`, `loader_name`,
 `loader_name_version`, `file_name`, `file_name_version`; the Action's
-`delta-operand-match` output). The delta report's own `verdict` describes this
+`delta-operand-match` output). `snapshot_sha` -- on a `resolved` record --
+names the commit whose stored snapshot was used: `base_sha` itself, or,
+under the Action's `delta-base-equivalent-paths`, the nearest first-parent
+ancestor of `base_sha` with a snapshot under which no declared path differs
+(the `delta-snapshot-sha` output; `null` for every other outcome). The delta report's own `verdict` describes this
 PR's changes and never gates. Outcomes decided only after the gate ran --
 `rerun_failed`, a failed base build (`base_build_failed`, `base_dump_failed`)
 and the operand-identity refusals (`operand_unmatched`, `operand_ambiguous`,

@@ -237,6 +237,11 @@ CI's `pr` profile.
   `--edit-corpus-consumer-toolchain`; e.g. `gcc-13` and
   `gcc-14,clang-18,clang-19`); an uninstalled name fails the run.
   `python -m tests._edit_corpus_report RESULTS_DIR` summarizes the pairs.
+  Coverage (`_edit_corpus_coverage.py`, `_edit_corpus_space.py`): read
+  `docs/contribute/testing.md` "Generated ABI edit corpus coverage" before
+  adding an operator, seed role or config axis — a new declared kind needs
+  `python -m tests._edit_corpus_coverage ledger --write`, a new role or axis
+  value needs its construct / config-feature entry in the space model.
 
 ## Field-shapes corpus (`field_shapes/`)
 

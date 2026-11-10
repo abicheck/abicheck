@@ -103,6 +103,7 @@ _CONTEXT_ENV = {
     "delta_base_sha": "ABICHECK_CTX_DELTA_BASE_SHA",
     "gate_verdict": "ABICHECK_CTX_GATE_VERDICT",
     "delta_operand_match": "ABICHECK_CTX_DELTA_OPERAND_MATCH",
+    "delta_snapshot_sha": "ABICHECK_CTX_DELTA_SNAPSHOT_SHA",
 }
 
 

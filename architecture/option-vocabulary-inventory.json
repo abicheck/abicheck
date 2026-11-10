@@ -2450,6 +2450,14 @@
    "default": ""
   },
   {
+   "id": "action:delta-storage",
+   "action": "action",
+   "input": "delta-storage",
+   "status": "live",
+   "required": false,
+   "default": "artifact"
+  },
+  {
    "id": "action:delta-snapshot-workflow",
    "action": "action",
    "input": "delta-snapshot-workflow",
@@ -2480,6 +2488,14 @@
    "status": "live",
    "required": false,
    "default": "600"
+  },
+  {
+   "id": "action:delta-base-equivalent-paths",
+   "action": "action",
+   "input": "delta-base-equivalent-paths",
+   "status": "live",
+   "required": false,
+   "default": ""
   },
   {
    "id": "action:delta-operand-map",
@@ -3605,6 +3621,14 @@
    "id": "actions/fetch-main-snapshot:profile",
    "action": "actions/fetch-main-snapshot",
    "input": "profile",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "actions/fetch-main-snapshot:base-equivalent-paths",
+   "action": "actions/fetch-main-snapshot",
+   "input": "base-equivalent-paths",
    "status": "live",
    "required": false,
    "default": ""

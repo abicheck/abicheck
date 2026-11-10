@@ -6,7 +6,8 @@ description: >-
   merge_group), the snapshot is the `actions/main-snapshot` artifact for that
   exact commit uploaded by the configured workflow on the default branch, and
   every way it can be unavailable is a named `outcome` -- never a substitute
-  commit and never "no changes". With `storage: cache` the snapshot is the
+  commit (except a path-equivalent ancestor under the opt-in
+  `base-equivalent-paths`, reported as `snapshot-sha`) and never "no changes". With `storage: cache` the snapshot is the
   Actions-cache entry under the exact key for that commit instead (no
   `actions: read` needed; weaker provenance, see
   docs/reference/main-snapshot.md). Read-only. Requires the checkout to contain
@@ -46,6 +47,24 @@ inputs:
     description: 'Profile suffix used by main-snapshot, if any.'
     required: false
     default: ''
+  base-equivalent-paths:
+    description: >
+      Opt-in. Globs (one per line, relative to the repository root; `**`
+      crosses directories) naming every path that feeds the library's ABI,
+      e.g. `include/**`, `src/**`, `CMakeLists.txt`. When the exact base has
+      no snapshot (`base_not_snapshotted`, `snapshot_missing`,
+      `base_expired`, `base_failed` -- typical for a `paths:`-filtered
+      snapshot workflow), walk the base's first-parent history (at most 50
+      commits, nearest first) and use the nearest ancestor's snapshot,
+      verified exactly as the base's would be, provided none of these paths
+      differs between it and the base. The walk stops at the first ancestor
+      where one does. The list is the project's claim; abicheck does not
+      verify it. A shallow checkout is deepened along the base, or the walk
+      reports `history_unavailable`. With `storage: cache` it needs
+      `actions: read` to list cache entries. Empty (default): the exact base
+      only.
+    required: false
+    default: ''
   wait-timeout:
     description: >
       Seconds to wait while the snapshot run for the base is still in
@@ -60,7 +79,7 @@ inputs:
     required: false
     default: '${{ runner.temp }}/abicheck-base-snapshot'
   github-token:
-    description: 'Token with `actions: read` (`storage: artifact`; unused with `cache`).'
+    description: 'Token with `actions: read` (`storage: artifact`; with `cache` only for `base-equivalent-paths`).'
     required: false
     default: ${{ github.token }}
   python-version:
@@ -78,6 +97,21 @@ outputs:
   base-sha:
     description: 'The base commit the delta is measured against (empty when it could not be chosen).'
     value: ${{ steps.fetch.outputs.base-sha }}
+  snapshot-sha:
+    description: >
+      When `outcome` is `resolved`: the commit whose snapshot was fetched --
+      `base-sha` itself, or under `base-equivalent-paths` its path-equivalent
+      ancestor. Empty otherwise.
+    value: ${{ steps.cache-verify.outputs.snapshot-sha || steps.fetch.outputs.snapshot-sha }}
+  ancestor-walk:
+    description: >
+      `base-equivalent-paths` only, when the exact base had no snapshot: how
+      the ancestor walk ended -- `found` (an equivalent ancestor's snapshot
+      was selected; `outcome` says whether it could be used), or why none
+      qualified: `paths_changed`, `limit_reached`, `history_ended`,
+      `history_unavailable`, `lookup_failed`. The base's own `outcome` then
+      stands. Empty when no walk ran.
+    value: ${{ steps.fetch.outputs.ancestor-walk }}
   snapshot-path:
     description: 'Path of the extracted snapshot file when `outcome` is `resolved`.'
     value: ${{ steps.cache-verify.outputs.snapshot-path || steps.fetch.outputs.snapshot-path }}
@@ -113,6 +147,7 @@ runs:
         INPUT_PROFILE: ${{ inputs.profile }}
         INPUT_WAIT_TIMEOUT: ${{ inputs.wait-timeout }}
         INPUT_DESTINATION: ${{ inputs.destination }}
+        INPUT_BASE_EQUIVALENT_PATHS: ${{ inputs.base-equivalent-paths }}
       run: bash "${{ github.action_path }}/run.sh"
 
     # storage: cache. The exact key only -- never `restore-keys`, which would
@@ -134,6 +169,7 @@ runs:
         INPUT_BRANCH: ${{ inputs.branch || github.event.repository.default_branch }}
         INPUT_DESTINATION: ${{ inputs.destination }}
         BASE_SHA: ${{ steps.fetch.outputs.base-sha }}
+        CACHE_SHA: ${{ steps.fetch.outputs.cache-sha }}
         CACHE_KEY: ${{ steps.fetch.outputs.cache-key }}
         CACHE_HIT: ${{ steps.cache-restore.outputs.cache-hit }}
         CACHE_MATCHED_KEY: ${{ steps.cache-restore.outputs.cache-matched-key }}

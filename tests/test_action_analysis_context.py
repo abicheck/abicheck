@@ -584,6 +584,7 @@ class TestTheAggregateActionRecordsIt:
             "ABICHECK_CTX_DELTA_BASE_SHA",
             "ABICHECK_CTX_GATE_VERDICT",
             "ABICHECK_CTX_DELTA_OPERAND_MATCH",
+            "ABICHECK_CTX_DELTA_SNAPSHOT_SHA",
         }
         assert set(_CONTEXT_ENV.values()) - main_only == {
             key for key in step["env"] if key.startswith("ABICHECK_CTX_")
