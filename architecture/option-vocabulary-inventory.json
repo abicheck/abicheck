@@ -2450,6 +2450,14 @@
    "default": ""
   },
   {
+   "id": "action:delta-storage",
+   "action": "action",
+   "input": "delta-storage",
+   "status": "live",
+   "required": false,
+   "default": "artifact"
+  },
+  {
    "id": "action:delta-snapshot-workflow",
    "action": "action",
    "input": "delta-snapshot-workflow",

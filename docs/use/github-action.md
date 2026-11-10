@@ -267,10 +267,11 @@ suppression:
 | `pr-comment-via` | `direct` | How the comment reaches the PR: `direct` posts from this job; `artifact` uploads the report for the trusted [`report-pr.yml`](fork-pr-reporting.md) publisher and never posts; `auto` uploads on a fork's (or Dependabot's) `pull_request` run and posts directly otherwise. One path per run, so wiring both never double-posts |
 | `pr-comment-artifact-name` | derived | Artifact name for the upload; empty derives `abicheck-pr-report[-<pr-comment-key>]`, which `report-pr.yml` expects by default |
 | `delta-baseline` | — | `main`: the PR comment shows only this PR's changes, measured against the default-branch snapshot of the PR's exact base commit; the step's status still comes from the normal comparison. See [`main-snapshot` / `fetch-main-snapshot`](../reference/main-snapshot.md#delta-baseline-in-the-main-action) |
-| `delta-snapshot-workflow` | — | Workflow file that runs `main-snapshot` on the default branch; required with `delta-baseline` |
+| `delta-storage` | `artifact` | Where `main-snapshot` stored the snapshot (match its `storage`): `artifact` verifies the uploading run and needs `actions: read`; `cache` needs no token permission (fork PRs of a private repository) but trusts a self-reported origin — see [cache storage](../reference/main-snapshot.md#delta-storage-cache-in-the-main-action) |
+| `delta-snapshot-workflow` | — | Workflow file that runs `main-snapshot` on the default branch; required with `delta-baseline` and `delta-storage: artifact` |
 | `delta-mode` | `auto` | How the base commit is found: `auto`, `merge-commit` or `head` |
 | `delta-profile` | — | Profile suffix used by `main-snapshot`, if any |
-| `delta-wait-timeout` | `600` | Seconds to wait while the base snapshot is still being built |
+| `delta-wait-timeout` | `600` | Seconds to wait while the base snapshot is still being built (`artifact` only: the cache cannot see a run in progress) |
 | `delta-operand-map` | — | `SNAPSHOT=PR` lines pairing the snapshot's library with `new-library` when no SONAME, path or file name links them; see [operand identity](../reference/main-snapshot.md#operand-identity-is-the-snapshot-this-prs-library) |
 | `delta-on-missing-base` | `report` | `report` explains an unavailable snapshot in the comment; `fail` also fails the job in a separate step; `build` builds the base commit in this job with `delta-base-build-command` and uses that as the delta base ([details](../reference/main-snapshot.md#delta-on-missing-base-build)) |
 | `delta-base-build-command` | — | `build` only: commands that build the base commit from the root of its checkout, leaving the library and new-side inputs at the same relative paths |
