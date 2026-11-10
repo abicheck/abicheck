@@ -2,8 +2,9 @@
 
 ``verify.py``'s ``bugfix-test-contract`` step and CI export the PR's title,
 range and body file; the unit tests of that gate run in the same environment
-(``unit-pr``). Before ``_no_inherited_gate_env`` cleared all four, a
-``feat:`` title or an exported base/head made 13 of them judge the real PR.
+(``unit-pr``). Before ``_no_inherited_gate_env`` cleared the whole
+``BUGFIX_CONTRACT_*`` namespace, a ``feat:`` title or an exported base/head
+made 13 of them judge the real PR.
 """
 
 from __future__ import annotations
@@ -16,8 +17,10 @@ from pathlib import Path
 import pytest
 
 from tests._bugfix_contract_gate import (  # noqa: F401
+    GATE_ENV_PREFIX,
     GATE_ENV_VARS,
     _no_inherited_gate_env,
+    clear_gate_env,
 )
 
 _REPO = Path(__file__).resolve().parent.parent
@@ -32,24 +35,43 @@ _READ_BY_THE_GATE = {
 }
 
 
-def test_every_variable_the_gate_reads_is_cleared() -> None:
+def test_the_gate_reads_only_names_under_the_cleared_prefix() -> None:
     assert set(GATE_ENV_VARS) == _READ_BY_THE_GATE
-    assert not [name for name in GATE_ENV_VARS if name in os.environ]
+    assert all(name.startswith(GATE_ENV_PREFIX) for name in _READ_BY_THE_GATE)
 
 
 @pytest.mark.parametrize(
-    "exported",
-    [
-        {"BUGFIX_CONTRACT_TITLE": "feat: not a fix"},
-        {"BUGFIX_CONTRACT_BASE": "HEAD", "BUGFIX_CONTRACT_HEAD": "HEAD"},
-        {"BUGFIX_CONTRACT_BODY_FILE": os.devnull},
-    ],
-    ids=["title", "range", "body-file"],
+    "name",
+    [*sorted(_READ_BY_THE_GATE), "BUGFIX_CONTRACT_FUTURE_KNOB"],
 )
-def test_the_contract_tests_pass_under_a_callers_exported_pr(
-    exported: dict[str, str],
+def test_every_name_in_the_namespace_is_cleared(
+    monkeypatch: pytest.MonkeyPatch, name: str
 ) -> None:
-    env = {**os.environ, **exported, "PYTHONPATH": str(_REPO)}
+    # A name the gate might read later (helper module, built dynamically) is
+    # cleared too; an unrelated variable is left alone.
+    monkeypatch.setenv(name, "inherited")
+    monkeypatch.setenv("BUGFIX_CONTRACTX", "not in the namespace")
+    clear_gate_env(monkeypatch)
+    assert name not in os.environ
+    assert os.environ["BUGFIX_CONTRACTX"] == "not in the namespace"
+
+
+def test_the_contract_tests_pass_under_a_callers_exported_pr() -> None:
+    # The public path: the two contract test modules, run the way unit-pr runs
+    # them, with every variable a caller exports. One subprocess, without the
+    # parent's coverage/pytest plumbing.
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if not k.startswith(("COV_CORE_", "PYTEST_", GATE_ENV_PREFIX))
+    }
+    env.update(
+        PYTHONPATH=str(_REPO),
+        BUGFIX_CONTRACT_TITLE="feat: not a fix",
+        BUGFIX_CONTRACT_BASE="HEAD",
+        BUGFIX_CONTRACT_HEAD="HEAD",
+        BUGFIX_CONTRACT_BODY_FILE=os.devnull,
+    )
     run = subprocess.run(
         [
             sys.executable,
@@ -60,8 +82,6 @@ def test_the_contract_tests_pass_under_a_callers_exported_pr(
             "-q",
             "-p",
             "no:cacheprovider",
-            "-p",
-            "no:randomly",
             "-n",
             "0",
         ],
