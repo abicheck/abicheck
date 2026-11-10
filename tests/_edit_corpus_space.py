@@ -290,12 +290,13 @@ def feasible_points() -> frozenset[Point]:
 
 
 def cell_points(
-    op: EditOp, config: Config, skipped_consumers: frozenset[str] = frozenset()
+    op: EditOp, config: Config, ran_consumers: frozenset[str] = frozenset()
 ) -> tuple[Point, ...]:
     """The points one corpus cell exercises: its constructs x its config
-    features, once per (build, consumer) pair the cell checks. A pair that
-    did not run (``skipped_consumers``: infeasible or unavailable, by
-    ``ResolvedConsumer.id``) exercises nothing."""
+    features, once per (build, consumer) pair that ran (``ran_consumers``, by
+    ``ResolvedConsumer.id``). An allow-list: a pair that was infeasible or
+    unavailable, or a cell with no execution evidence at all (a non-ELF host,
+    no oracle), exercises nothing."""
     new = op.new_flags(config.flags) if op.rebuild is not None else None
     points = (
         Point(
@@ -308,7 +309,7 @@ def cell_points(
             config.evidence,
         )
         for c in config.consumer_set
-        if c.id not in skipped_consumers
+        if c.id in ran_consumers
         for con in op_constructs(op)
         for cfg in config_features(config, new, c)
     )

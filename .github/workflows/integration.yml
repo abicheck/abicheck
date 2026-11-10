@@ -219,16 +219,19 @@ jobs:
         env:
           SHARD: ${{ matrix.shard }}
         run: |
-          if [ -d edit-corpus-coverage ]; then
+          # This shard's integration step finished (passed or failed): the
+          # floor job judges a run only when both shards left this marker, so a
+          # cancelled shard is never read as missing records. Written first, so
+          # a failing report below fails this step without hiding the shard.
+          had_records=0
+          [ -d edit-corpus-coverage ] && had_records=1
+          mkdir -p edit-corpus-coverage
+          : > "edit-corpus-coverage/shard-${SHARD}.done"
+          if [ "$had_records" = 1 ]; then
             python -m tests._edit_corpus_coverage report edit-corpus-coverage \
               --title "Edit corpus PR-tier coverage (shard ${SHARD}/2)" \
               --summary "$GITHUB_STEP_SUMMARY"
           fi
-          # This shard's integration step finished (passed or failed): the
-          # floor job judges a run only when both shards left this marker, so a
-          # cancelled shard is never read as missing records.
-          mkdir -p edit-corpus-coverage
-          : > "edit-corpus-coverage/shard-${SHARD}.done"
       - name: Upload edit corpus coverage records
         if: (success() || failure()) && runner.os == 'Linux'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4

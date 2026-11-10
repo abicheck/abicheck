@@ -30,7 +30,7 @@ from tests._edit_corpus_config import (
     Toolchain,
     default_config,
 )
-from tests._edit_corpus_expect import PASSING_CLASSES, Expectation
+from tests._edit_corpus_expect import PASSING_CLASSES, ExecTruth, Expectation, PairTruth
 from tests._edit_corpus_operators import OP_BY_NAME, OPERATORS
 from tests._edit_corpus_seeds import SEED_BY_NAME, SEEDS
 from tests._edit_corpus_tiers import _PR
@@ -40,6 +40,11 @@ CLANG = Toolchain("clang", 18, "clang", "clang++")
 
 
 # --- ChangeKind scope -----------------------------------------------------------
+
+
+def _all_ran(cfg: Config) -> frozenset[str]:
+    """Every consumer of *cfg* ran (the execution oracle saw each pair)."""
+    return frozenset(c.id for c in cfg.consumer_set)
 
 
 def test_scope_classifies_every_changekind_once() -> None:
@@ -322,7 +327,9 @@ def test_records_round_trip_through_files(tmp_path: Path) -> None:
         cls="agree",
         verdict="BREAKING",
         produced={"TYPE_SIZE_CHANGED", "STRUCT_SIZE_CHANGED"},
+        ran_consumers=_all_ran(cfg),
     )
+    assert r.points
     path = cov.write_record(r, tmp_path)
     assert path is not None and path.parent == tmp_path
     (back,) = cov.load_records([tmp_path])
@@ -467,7 +474,10 @@ def test_every_operator_maps_to_constructs_of_its_seeds_language() -> None:
                         op.name,
                         name,
                     )
-                assert all(p.lang == seed.lang for p in space.cell_points(op, cfg))
+                assert all(
+                    p.lang == seed.lang
+                    for p in space.cell_points(op, cfg, _all_ran(cfg))
+                )
 
 
 def _year_oracle(construct: str, std: str) -> bool:
@@ -585,27 +595,61 @@ def test_a_cell_with_several_consumers_covers_one_point_per_consumer_family() ->
     cfg = default_config("c", GCC).with_(
         consumers=(Consumer(), Consumer(toolchain=CLANG), Consumer(toolchain=CLANG))
     )
-    points = space.cell_points(op, cfg)
+    points = space.cell_points(op, cfg, _all_ran(cfg))
     assert sorted((p.build, p.consumer) for p in points) == [
         ("gcc", "clang"),
         ("gcc", "gcc"),
     ]
 
 
-@pytest.mark.parametrize("skip_clang", [False, True])
-def test_a_pair_that_did_not_run_exercises_no_point(skip_clang: bool) -> None:
+@pytest.mark.parametrize("ran", [(), ("gcc",), ("clang",), ("gcc", "clang")], ids=str)
+def test_only_a_pair_that_ran_exercises_a_point(ran: tuple[str, ...]) -> None:
     op = OP_BY_NAME["struct_append_field"]
     cfg = default_config("c", GCC).with_(
         consumers=(Consumer(), Consumer(toolchain=CLANG))
     )
-    clang_ids = {c.id for c in cfg.consumer_set if c.toolchain.family == "clang"}
-    skipped = frozenset(clang_ids) if skip_clang else frozenset()
-    consumers = {p.consumer for p in space.cell_points(op, cfg, skipped)}
-    assert consumers == ({"gcc"} if skip_clang else {"gcc", "clang"})
+    ids = frozenset(c.id for c in cfg.consumer_set if c.toolchain.family in ran)
+    consumers = {p.consumer for p in space.cell_points(op, cfg, ids)}
+    assert consumers == set(ran)
     rec = cov.make_record(
-        "pr", op, "c_core", cfg, status="ran", cls="agree", skipped_consumers=skipped
+        "pr", op, "c_core", cfg, status="ran", cls="agree", ran_consumers=ids
     )
-    assert {space.point_from_id(p).consumer for p in rec.points} == consumers
+    assert {space.point_from_id(p).consumer for p in rec.points} == set(ran)
+
+
+def _pair(consumer: str, status: str) -> PairTruth:
+    return PairTruth(consumer=consumer, status=status)
+
+
+@pytest.mark.parametrize(
+    ("truth", "want"),
+    [
+        # No oracle, or one that could not run (a non-ELF host has no pairs):
+        # no execution evidence, so no consumer covers a point.
+        (None, set()),
+        (ExecTruth(available=False, reason="host is macho"), set()),
+        (
+            ExecTruth(available=False, pairs=(_pair("a", "ran"),)),
+            set(),
+        ),
+        (
+            ExecTruth(
+                available=True,
+                pairs=(
+                    _pair("a", "ran"),
+                    _pair("b", "infeasible"),
+                    _pair("c", "unavailable"),
+                ),
+            ),
+            {"a"},
+        ),
+    ],
+    ids=["no-oracle", "unavailable", "unavailable-with-pairs", "mixed"],
+)
+def test_ran_consumers_is_an_allow_list(
+    truth: ExecTruth | None, want: set[str]
+) -> None:
+    assert cov.ran_consumers(truth) == want
 
 
 def test_two_tests_running_the_same_cell_keep_distinct_records(tmp_path: Path) -> None:
@@ -639,7 +683,9 @@ def test_the_floor_check_fails_on_a_point_the_model_calls_infeasible(
     ledger_path.write_text(json.dumps(_ledger(pr=[])), encoding="utf-8")
     monkeypatch.setattr(cov, "LEDGER_PATH", ledger_path)
     good = default_config("c", GCC)
-    feasible = space.cell_points(OP_BY_NAME["struct_append_field"], good)[0].id
+    feasible = space.cell_points(
+        OP_BY_NAME["struct_append_field"], good, _all_ran(good)
+    )[0].id
     # A C++-only construct under C: the model calls it infeasible.
     bad = space.Point("concept", "c", "c17", "baseline", "gcc", "gcc", "headers").id
     assert space.infeasible(space.point_from_id(bad)) is not None
@@ -653,7 +699,8 @@ def test_the_floor_check_fails_on_a_point_the_model_calls_infeasible(
 
 def test_a_rebuild_cell_counts_the_flag_it_rebuilds_with() -> None:
     op = OP_BY_NAME["rebuild_short_enums"]
-    (p,) = space.cell_points(op, default_config("c", GCC))
+    cfg0 = default_config("c", GCC)
+    (p,) = space.cell_points(op, cfg0, _all_ran(cfg0))
     assert (p.construct, p.config) == ("enum", "short_enums")
 
 
@@ -731,7 +778,7 @@ def test_every_pr_tier_cell_runs_a_feasible_point() -> None:
                 cfg = cfg.with_(consumers=(Consumer(toolchain=CLANG),))
             else:
                 cfg = cfg.with_(**{key: value})
-        for p in space.cell_points(OP_BY_NAME[op_name], cfg):
+        for p in space.cell_points(OP_BY_NAME[op_name], cfg, _all_ran(cfg)):
             assert space.infeasible(p) is None, (op_name, p.id, space.infeasible(p))
 
 

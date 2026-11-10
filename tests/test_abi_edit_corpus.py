@@ -265,7 +265,8 @@ def test_edit_produces_declared_ground_truth(
             seed.name,
             config,
             status="ran",
-            # No execution oracle here: a cell meeting its expectation agrees.
+            # No execution oracle here: a cell meeting its expectation agrees,
+            # and no consumer ran, so it covers no space point.
             cls="known-xfail"
             if known
             else ("agree" if not outcome.failures else "mismatch"),

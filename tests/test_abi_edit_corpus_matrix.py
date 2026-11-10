@@ -53,7 +53,7 @@ from tests._edit_corpus_config import (
     default_config,
     has_feature,
 )
-from tests._edit_corpus_coverage import make_record, write_record
+from tests._edit_corpus_coverage import make_record, ran_consumers, write_record
 from tests._edit_corpus_exec import probe_expressions
 from tests._edit_corpus_expect import (
     MISMATCH_CLASSES,
@@ -799,11 +799,7 @@ def _check_cell(cell: Cell, ctx: CellContext, tier: str) -> None:
             produced=result.kinds,
             expectation=result.expectation,
             source="matrix",
-            skipped_consumers=frozenset(
-                p.consumer
-                for p in (result.exec_truth.pairs if result.exec_truth else ())
-                if p.status != "ran"
-            ),
+            ran_consumers=ran_consumers(result.exec_truth),
         )
     )
     if result.status != "ran":

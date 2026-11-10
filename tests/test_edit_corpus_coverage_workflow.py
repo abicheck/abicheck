@@ -30,20 +30,31 @@ _FLOOR = find_run_step(_WF, "edit-corpus-coverage", "Check the PR-tier floor")
 _SHARD_REPORT = find_run_step(_WF, "integration", "Edit corpus coverage (Linux)")
 
 
+def _stub_python(tmp_path: Path, rc: int) -> Path:
+    """A ``python`` on PATH that exits *rc*: the report CLI's outcome."""
+    bindir = tmp_path / "bin"
+    bindir.mkdir(exist_ok=True)
+    (bindir / "python").write_text(f"#!/bin/sh\nexit {rc}\n", encoding="utf-8")
+    (bindir / "python").chmod(0o755)
+    return bindir
+
+
 @pytest.mark.parametrize("shard", ["1", "2"])
-@pytest.mark.parametrize("has_records", [False, True], ids=["no-records", "records"])
+@pytest.mark.parametrize(
+    ("has_records", "report_rc", "step_rc"),
+    [(False, 1, 0), (True, 0, 0), (True, 1, 1)],
+    ids=["no-records", "report-ok", "report-fails"],
+)
 def test_a_finished_shard_leaves_its_marker(
-    tmp_path: Path, shard: str, has_records: bool
+    tmp_path: Path, shard: str, has_records: bool, report_rc: int, step_rc: int
 ) -> None:
+    # The marker says "the integration step finished"; it is written before
+    # the report, so a failing report fails the step (and the leg) without
+    # making the floor job read the shard as cancelled.
     require_bash()
     files = {"edit-corpus-coverage/.keep": ""} if has_records else {}
     ws = make_workspace(tmp_path, files=files)
-    # With records present the step also renders the shard report; give it a
-    # stand-in `python` so the test exercises the marker, not the report CLI.
-    bindir = tmp_path / "bin"
-    bindir.mkdir()
-    (bindir / "python").write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-    (bindir / "python").chmod(0o755)
+    bindir = _stub_python(tmp_path, report_rc)
     result = run_step(
         _SHARD_REPORT,
         workspace=ws,
@@ -53,7 +64,7 @@ def test_a_finished_shard_leaves_its_marker(
             "PATH": f"{bindir}:/usr/bin:/bin",
         },
     )
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == step_rc, result.stderr
     assert f"edit-corpus-coverage/shard-{shard}.done" in result.tree()
     assert outside_is_intact(tmp_path)
 
@@ -72,8 +83,16 @@ def test_a_finished_shard_leaves_its_marker(
             1,
             "neither Linux shard uploaded edit corpus coverage records",
         ),
+        # Both finished with records: the report decides (a stub that fails).
+        (("1", "2"), True, 1, ""),
     ],
-    ids=["none-finished", "shard1-only", "shard2-only-with-records", "both-no-records"],
+    ids=[
+        "none-finished",
+        "shard1-only",
+        "shard2-only-with-records",
+        "both-no-records",
+        "both-report-fails",
+    ],
 )
 def test_the_floor_is_judged_only_when_both_shards_finished(
     tmp_path: Path, markers: tuple[str, ...], records: bool, rc: int, message: str
@@ -86,7 +105,12 @@ def test_the_floor_is_judged_only_when_both_shards_finished(
     if records:
         files["edit-corpus-coverage/edit-corpus-coverage-shard2/pr-abc.json"] = "{}"
     ws = make_workspace(tmp_path, files=files)
-    result = run_step(_FLOOR, workspace=ws, env={"GITHUB_STEP_SUMMARY": str(ws / "_s")})
+    bindir = _stub_python(tmp_path, 1)
+    result = run_step(
+        _FLOOR,
+        workspace=ws,
+        env={"GITHUB_STEP_SUMMARY": str(ws / "_s"), "PATH": f"{bindir}:/usr/bin:/bin"},
+    )
     assert result.returncode == rc, result.stdout + result.stderr
     assert message in result.stdout + result.stderr
     assert outside_is_intact(tmp_path)

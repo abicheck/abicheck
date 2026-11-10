@@ -46,7 +46,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from tests._edit_corpus_config import Config
-from tests._edit_corpus_expect import PASSING_CLASSES, Expectation
+from tests._edit_corpus_expect import PASSING_CLASSES, ExecTruth, Expectation
 from tests._edit_corpus_space import (
     cell_points,
     coverage as space_coverage,
@@ -360,11 +360,12 @@ def make_record(
     produced: Iterable[str] = (),
     expectation: Expectation | None = None,
     source: str = "",
-    skipped_consumers: frozenset[str] = frozenset(),
+    ran_consumers: frozenset[str] = frozenset(),
 ) -> CellRecord:
     """One cell's record. *source* names the test that ran it when two tests
     of one tier can run the same (op, seed, config) cell, so their records
-    stay distinct; *skipped_consumers* are the pairs that did not run."""
+    stay distinct; *ran_consumers* are the (build, consumer) pairs that ran
+    (``ran_consumers(exec_truth)``), the only ones that cover a space point."""
     from tests._edit_corpus_operators import EditOp
 
     assert isinstance(op, EditOp)
@@ -381,10 +382,21 @@ def make_record(
         verdict=verdict,
         produced=tuple(sorted(produced)),
         expected=tuple(sorted(expectation_kinds(exp))),
-        points=tuple(p.id for p in cell_points(op, config, skipped_consumers))
+        points=tuple(p.id for p in cell_points(op, config, ran_consumers))
         if ran
         else (),
     )
+
+
+def ran_consumers(exec_truth: ExecTruth | None) -> frozenset[str]:
+    """The consumers whose (build, consumer) pair ran, from a cell's oracle.
+
+    No oracle (``None``) or an unavailable one (a non-ELF host: no pairs at
+    all) is no execution evidence, so no consumer counts.
+    """
+    if exec_truth is None or not exec_truth.available:
+        return frozenset()
+    return frozenset(p.consumer for p in exec_truth.pairs if p.status == "ran")
 
 
 def write_record(
