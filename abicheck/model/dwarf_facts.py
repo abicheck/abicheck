@@ -129,6 +129,17 @@ class ToolchainInfo:
         default_factory=set
     )  # -fshort-wchar / -fno-short-wchar
 
+    @property
+    def records_switches(self) -> bool:
+        """Whether the producer string carries the compiler's command-line switches.
+
+        gcc appends them by default (``-grecord-gcc-switches``:
+        ``"GNU C17 13.2.0 -mtune=generic -O2"``); clang, or gcc with
+        ``-gno-record-gcc-switches``, records none, so an absent flag there
+        says nothing about the build.
+        """
+        return any(token.startswith("-") for token in self.producer_string.split())
+
 
 class AdvancedExtractionStatus(StrEnum):
     """What the advanced DWARF extraction did, recorded by the extraction.
