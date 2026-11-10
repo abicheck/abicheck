@@ -15,16 +15,21 @@ import shutil
 import pytest
 from hypothesis import given, strategies as st
 
+from abicheck.build_mode import build_mode_from_signals
 from abicheck.checker import ChangeKind, compare
 from abicheck.checker_policy import BREAKING_KINDS
 from abicheck.comparability import (
     check_contracts_comparable,
     compute_extraction_contract,
 )
+from abicheck.comparability_profile import macro_ops_detail
 from abicheck.compare.glibcxx_dual_abi import (
     ExportNames,
+    _pair_direction,
+    export_names,
     normalize_dual_abi_spelling,
     pair_remangled_exports,
+    remangled_export_pairs,
 )
 from abicheck.demangle import demangle
 from abicheck.errors import ProfileMismatchError
@@ -776,3 +781,117 @@ class TestMacroOpsWaiverProperties:
         old, new = _json_ops(common + old_abi), _json_ops(common + [extra] + new_abi)
         assert macro_ops_differ_only_in_runtime_abi(old, new) is False
         assert macro_ops_differ_only_in_runtime_abi(new, old) is False
+
+
+# ── evidence branches ──────────────────────────────────────────────────────
+
+
+def _with_producer(snap: AbiSnapshot, flags: str) -> AbiSnapshot:
+    snap.build_mode = build_mode_from_signals(
+        raw_producer=f"GNU C++17 13.3.0 {flags} -g"
+    )
+    return snap
+
+
+def test_producer_flags_name_the_selection_on_both_sides():
+    # No header parse, no re-mangled export: the -D each unit recorded in
+    # DW_AT_producer names the flip, so an unchanged record and an exported
+    # string variable are attributed (both sides *name* their selection).
+    var = Variable(
+        name="lib::banner",
+        mangled="_ZN3lib6bannerE",
+        type="std::string",
+        visibility=Visibility.PUBLIC,
+    )
+    old = _with_producer(
+        _snap(functions=_RECORD_FN, variables=[var], types=[_rec(256)]),
+        "-D_GLIBCXX_USE_CXX11_ABI=1",
+    )
+    new = _with_producer(
+        _snap(functions=_RECORD_FN, variables=[var], types=[_rec(256)]),
+        "-D_GLIBCXX_USE_CXX11_ABI=0",
+    )
+    (root,) = _dual(compare(old, new))
+    assert root.old_value == "_GLIBCXX_USE_CXX11_ABI=1 (DW_AT_producer)"
+    assert root.new_value == "_GLIBCXX_USE_CXX11_ABI=0 (DW_AT_producer)"
+    assert "lib::banner" in root.description and "Rec" in root.description
+
+
+def test_pairs_need_spellings_that_name_different_abis():
+    # Normalize-equal spellings that differ only in spacing, and exports with
+    # no demangled spelling (C names), are never paired.
+    old = ExportNames(
+        {"_Z1fv_a": "f", "c_api": "c_api"},
+        {"_Z1fv_a": "lib::f(int)"},
+    )
+    new = ExportNames(
+        {"_Z1fv_b": "f", "c_api2": "c_api2"},
+        {"_Z1fv_b": "lib::f( int )"},
+    )
+    assert pair_remangled_exports(old, new) == []
+
+
+def test_mixed_direction_pairs_do_not_claim_one_selection():
+    # One export moved to the new ABI, another to the old: the pairs prove a
+    # flip but no single selection per side, so the values say so.
+    take1, take0 = _REAL[1][1], _REAL[1][2]
+    lt1, lt0 = _REAL[3][1], _REAL[3][2]
+    old = ExportNames(
+        {take1: "take", lt0: "ltake"},
+        {take1: _REAL[1][3], lt0: _REAL[3][4]},
+    )
+    new = ExportNames(
+        {take0: "take", lt1: "ltake"},
+        {take0: _REAL[1][4], lt1: _REAL[3][3]},
+    )
+    pairs = pair_remangled_exports(old, new)
+    assert sorted(pairs) == sorted([(take1, take0), (lt0, lt1)])
+    assert _pair_direction(pairs, old, new) == ("one libstdc++ ABI", "the other")
+
+
+@needs_demangler
+def test_snapshot_pairing_matches_the_pure_primitive():
+    old = _snap(functions=_side(_REAL, _CXX11))
+    new = _snap(functions=_side(_REAL, _OLD))
+    assert remangled_export_pairs(old, new) == pair_remangled_exports(
+        export_names(old), export_names(new)
+    )
+    assert len(remangled_export_pairs(old, new)) == len(_REAL)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ('{"D": "_GLIBCXX_USE_CXX11_ABI=0"}', []),
+        ('[["D"], ["D", 1], "x"]', []),
+        ('[["D", "_GLIBCXX_USE_CXX11_ABI=0"]]', [("D", "_GLIBCXX_USE_CXX11_ABI=0")]),
+    ],
+)
+def test_parse_macro_ops_keeps_only_well_formed_operations(raw, expected):
+    assert parse_macro_ops(raw) == expected
+
+
+def test_an_undefined_selector_value_selects_nothing():
+    assert selection_from_macro_ops([("D", "_GLIBCXX_USE_CXX11_ABI=2")]) is None
+    assert selection_from_producer_flags(["-D_GLIBCXX_USE_CXX11_ABI=2"]) is None
+
+
+@pytest.mark.parametrize(
+    ("old_ops", "new_ops", "contains", "absent"),
+    [
+        ([], [], None, "Macro operations"),
+        ([("D", "A")], [("D", "B")], "only in old: -DA; only in new: -DB", "selects"),
+        ([], [("D", "_GLIBCXX_USE_CXX11_ABI=0")], "glibcxx_dual_abi_changed", None),
+    ],
+)
+def test_macro_ops_detail_names_what_differs(old_ops, new_ops, contains, absent):
+    detail = macro_ops_detail(
+        {"macro_ops": json.dumps([list(o) for o in old_ops])},
+        {"macro_ops": json.dumps([list(o) for o in new_ops])},
+    )
+    if contains is None:
+        assert detail == ""
+    else:
+        assert contains in detail
+    if absent is not None:
+        assert absent not in detail

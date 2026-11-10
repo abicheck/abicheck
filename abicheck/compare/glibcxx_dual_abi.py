@@ -218,8 +218,12 @@ def pair_remangled_exports(o: ExportNames, n: ExportNames) -> list[tuple[str, st
             continue
         twins = added_by_norm.get(normalize_dual_abi_spelling(text), [])
         # Exactly one twin: an overload set that collapses to one normalized
-        # spelling is ambiguous, not a pair.
-        if len(twins) == 1 and n.demangled[twins[0]] != text:
+        # spelling is ambiguous, not a pair. And the two spellings must name
+        # different ABIs (``make[abi:cxx11]()`` vs ``make()``): a difference
+        # the normalizer merely ignores, such as spacing, is not a flip.
+        if len(twins) == 1 and dual_abi_from_spellings(
+            [text]
+        ) is not dual_abi_from_spellings([n.demangled[twins[0]]]):
             pairs.append((m, twins[0]))
     return pairs
 
