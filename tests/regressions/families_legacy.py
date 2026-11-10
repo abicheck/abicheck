@@ -106,7 +106,6 @@ LEGACY_UNATTACHED: frozenset[str] = frozenset(
         "perf.optimization_wired_to_one_of_several_equivalent_paths",
         "perf.per_symbol_dto_carries_a_per_instance_dict",
         "perf.pure_content_digest_recomputed_per_consumer",
-        "perf.retention_decided_by_one_switch_not_by_consumers",
         "perf.reuse_key_normalizes_an_ordered_input",
         "perf.shared_projection_read_as_an_owned_copy",
         "perf.shared_resource_gate_keyed_on_a_per_caller_value",
