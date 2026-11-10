@@ -1479,3 +1479,27 @@ Sequencing: Phase 3 lands first. This amendment's own PR is documentation only.
 - Loosening C.8's existing suppressions or the rules in
   `check_fact_set_compatibility`. This amendment adds a layer above them.
 - A new `ChangeKind`, CLI flag, or schema field.
+
+## Amendment (2026-11-09): Clang as the unpinned L2 default
+
+An unpinned `auto` header frontend selects Clang. Explicit `compile.frontend`
+values and the `ABICHECK_AST_FRONTEND` pin retain their existing precedence;
+`hybrid` remains explicit. Backend selection stays pure and shared by request
+preflight, acquisition and cache-key derivation. Tool or parse failures fail
+closed: availability does not silently change the producer.
+
+Clang avoids the additional implicit-member inventory CastXML materializes
+and can reuse its AST for the header graph. Its record layout is enriched by
+the existing built-in layout probe, with the optional companion tool still
+supported. Tests cover size changes and deleted copy constructors both with
+and without input DWARF. This is not a claim that the frontends are identical:
+the catalog's existing frontend-kind differences and implicit-member gaps
+remain applicable. Do not remove implicit-member evidence merely to match
+function counts.
+
+Migration: install Clang for the default L2 path, or pin CastXML to retain the
+previous behavior. Existing snapshots remain immutable and retain their
+producer. Re-dump old and new baselines with a consistent frontend when
+comparability rejects their acquisition contexts; never bypass the guard or
+rewrite the stored producer. The resolved producer participates in cache keys,
+so the default switch cannot serve a CastXML entry as a Clang result.

@@ -24,25 +24,13 @@ it already computed — remains the layout-authoritative L2 backend today. See
 ``docs/contribute/plans/g28-castxml-clang-l2-parity-hardening.md``, "Phase 4
 — a Clang ASTRecordLayout plugin".
 
-This module bridges that gap with a small, OPTIONAL, out-of-process
-companion (``contrib/clang-layout-tool/``, built with LibTooling) that walks
-every complete, non-dependent ``CXXRecordDecl`` and serializes the REAL
-layout ``clang::ASTRecordLayout`` computes internally. It is deliberately
-never a hard dependency (ADR-001's "lightweight, pure-Python tool" stance):
-
-- The binary is resolved via :func:`find_layout_tool_bin` — an explicit
-  ``ABICHECK_CLANG_LAYOUT_TOOL=/path/to/binary`` env var, or a bare
-  ``abicheck-clang-layout-tool`` on ``PATH``. Neither being set/found is the
-  overwhelmingly common case, and is silent (returns ``None``), never an
-  error — a caller simply skips this enrichment.
-- Every failure mode (tool missing, a compile the tool couldn't recover from
-  at all, a timeout, malformed JSON) degrades to "no enrichment happened,"
-  never raises — mirroring the same "degrade gracefully, never abort" policy
-  every other optional evidence layer in this codebase follows (ADR-028 D3).
-- Clang's internal AST API (what the companion tool links against) has no
-  cross-LLVM-release ABI stability guarantee the way CastXML's own versioned
-  XML schema does — this is exactly why it lives as a standalone, optional,
-  separately-built companion rather than a `abicheck` package dependency.
+This module enriches the declaration-only AST with measured record layout.
+An optional LibTooling companion can provide ``clang::ASTRecordLayout``
+facts. Without that companion, the built-in compiler probe collects layout
+for records still missing a size or data size. Neither path invents a
+layout when compilation or collection fails: missing fields stay unverified.
+The companion is selected by ``ABICHECK_CLANG_LAYOUT_TOOL`` or its PATH name;
+it is not a required package dependency.
 
 Only backfills a field that is CURRENTLY ``None``/empty on the snapshot's
 existing ``RecordType`` — never overrides a value another parser already
@@ -660,9 +648,9 @@ def attach_clang_layout(
     A no-op unless ALL of: the snapshot's L2 backend was actually ``"clang"``
     or ``"hybrid"`` (never for pure castxml/DWARF-only/symbols-only — those
     either already have real layout or have no header-AST at all), headers
-    were supplied, and the optional companion tool binary is resolvable
-    (:func:`find_layout_tool_bin` — an explicit opt-in via
-    ``ABICHECK_CLANG_LAYOUT_TOOL``, never a hard dependency). Every failure
+    were supplied, and missing layout can be collected by the optional companion or the
+    built-in probe. The companion is selected by :func:`find_layout_tool_bin`;
+    it is never a hard dependency. Every failure
     past that point (a bad header path, no resolvable clang driver, a
     compile error, a timeout, malformed output) degrades to "no
     enrichment," never raises (ADR-028 D3).

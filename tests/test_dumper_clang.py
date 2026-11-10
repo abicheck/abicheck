@@ -3043,22 +3043,22 @@ def test_resolve_header_backend_ast_frontend_env(
     assert _resolve_header_backend("auto") == "clang"
     assert _resolve_header_backend(None) == "clang"
     # An out-of-enum ABICHECK_AST_FRONTEND value is ignored; auto then
-    # fails closed to castxml.
+    # fails closed to clang.
     monkeypatch.setenv("ABICHECK_AST_FRONTEND", "bogus")
-    assert _resolve_header_backend("auto") == "castxml"
+    assert _resolve_header_backend("auto") == "clang"
 
 
-def test_resolve_header_backend_auto_stays_castxml_without_env(
+def test_resolve_header_backend_auto_stays_clang_without_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
     monkeypatch.setattr(
         "abicheck.extract.compiler_driver.clang_available", lambda *a, **k: True
     )
-    assert _resolve_header_backend("auto") == "castxml"
+    assert _resolve_header_backend("auto") == "clang"
     # Do not silently fall back to clang: clang AST lacks computed layout
     # evidence, so auto must fail closed through the castxml path.
-    assert _resolve_header_backend("auto") == "castxml"
+    assert _resolve_header_backend("auto") == "clang"
 
 
 def test_build_clang_header_command_cpp_and_c(tmp_path: Path) -> None:
@@ -4277,13 +4277,13 @@ def test_is_missing_cpp_stdlib_header_error(stderr: str, expected: bool) -> None
     assert clang_backend._is_missing_cpp_stdlib_header_error(stderr) is expected
 
 
-def test_resolve_header_backend_neither_tool_defaults_castxml(
+def test_resolve_header_backend_neither_tool_defaults_clang(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
     monkeypatch.setattr(compiler_driver, "clang_available", lambda *a, **k: False)
-    # Falls back to castxml so the existing "install castxml" error surfaces.
-    assert _resolve_header_backend("auto") == "castxml"
+    # Selection is independent of availability; acquisition reports missing clang.
+    assert _resolve_header_backend("auto") == "clang"
 
 
 # ── remaining branch coverage ────────────────────────────────────────────────

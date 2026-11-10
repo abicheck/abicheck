@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from abicheck.extract import compiler_driver
 from abicheck.model import AbiSnapshot, Function, Visibility
 from abicheck.workflows.dump.cache import salt as dump_cache_salt
@@ -143,7 +145,7 @@ class TestDumpCacheExtraKey:
 
     def test_differs_by_header_backend(self):
         k1 = _dump_cache_extra_key("elf", "auto", None, None)
-        k2 = _dump_cache_extra_key("elf", "clang", None, None)
+        k2 = _dump_cache_extra_key("elf", "castxml", None, None)
         assert k1 != k2
 
     def test_c_and_cpp_fingerprint_their_actual_compilers(self):
@@ -204,20 +206,20 @@ class TestDumpCacheExtraKey:
         k_unpinned = _dump_cache_extra_key("elf", "auto", None, None)
         monkeypatch.setenv("ABICHECK_AST_FRONTEND", "hybrid")
         k_hybrid_pinned = _dump_cache_extra_key("elf", "auto", None, None)
-        monkeypatch.setenv("ABICHECK_AST_FRONTEND", "clang")
-        k_clang_pinned = _dump_cache_extra_key("elf", "auto", None, None)
-        assert len({k_unpinned, k_hybrid_pinned, k_clang_pinned}) == 3
+        monkeypatch.setenv("ABICHECK_AST_FRONTEND", "castxml")
+        k_castxml_pinned = _dump_cache_extra_key("elf", "auto", None, None)
+        assert len({k_unpinned, k_hybrid_pinned, k_castxml_pinned}) == 3
 
-    def test_auto_and_castxml_still_collide_when_env_unset(self, monkeypatch):
-        # Both resolve to the identical effective backend ("castxml") when no
+    def test_auto_and_clang_still_collide_when_env_unset(self, monkeypatch):
+        # Both resolve to the identical effective backend ("clang") when no
         # env pin is set, so they should still share a cache entry -- the fix
         # hashes the RESOLVED backend, not merely "make every raw string
         # distinct".
         monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
         monkeypatch.delenv("ABICHECK_ALLOW_AST_FALLBACK", raising=False)
         k_auto = _dump_cache_extra_key("elf", "auto", None, None)
-        k_castxml = _dump_cache_extra_key("elf", "castxml", None, None)
-        assert k_auto == k_castxml
+        k_clang = _dump_cache_extra_key("elf", "clang", None, None)
+        assert k_auto == k_clang
 
     def test_differs_when_layout_tool_becomes_available(self, monkeypatch):
         # Codex review: service.run_dump calls attach_clang_layout for every
@@ -285,16 +287,19 @@ class TestDumpCacheExtraKey:
         k_after = _dump_cache_extra_key("elf", "auto", None, None)
         assert k_before != k_after
 
-    def test_layout_tool_irrelevant_when_auto_fallback_is_disabled(self, monkeypatch):
+    @pytest.mark.parametrize("backend, relevant", [("auto", True), ("castxml", False)])
+    def test_layout_tool_relevance_follows_backend(
+        self, monkeypatch, backend, relevant
+    ):
         monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
         monkeypatch.delenv("ABICHECK_ALLOW_AST_FALLBACK", raising=False)
         monkeypatch.delenv("ABICHECK_CLANG_LAYOUT_TOOL", raising=False)
-        k_before = _dump_cache_extra_key("elf", "auto", None, None)
+        k_before = _dump_cache_extra_key("elf", backend, None, None)
         monkeypatch.setenv(
             "ABICHECK_CLANG_LAYOUT_TOOL", "/opt/abicheck-clang-layout-tool"
         )
-        k_after = _dump_cache_extra_key("elf", "auto", None, None)
-        assert k_before == k_after
+        k_after = _dump_cache_extra_key("elf", backend, None, None)
+        assert (k_before != k_after) == relevant
 
     def test_differs_by_lang_explicit(self):
         # G31 Phase C follow-up: the identical `lang` string resolves to a

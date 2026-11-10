@@ -51,7 +51,7 @@ cache warm, identical reports in every run:
   admission gate.
 
 Single-library `compare` and `dump` gain less, since only the old/new sides,
-the per-TU header parses, and (under the default castxml frontend) the header
+the per-TU header parses, and (when CastXML is selected) the header
 graph's own clang parse run in parallel there. That last overlap helps on
 every interpreter when the header cache is cold: 11% faster on 3.13, 15% on
 3.15t, for one library.

@@ -141,7 +141,7 @@ def test_legacy_readers_agree_with_the_plan(
     if pin in PINNABLE_BACKENDS:
         assert _resolve_header_backend(None) == pin
     else:
-        assert _resolve_header_backend(None) == "castxml"
+        assert _resolve_header_backend(None) == "clang"
 
 
 def test_disabled_plan_refuses_fallback_without_probing_clang(clean_env) -> None:

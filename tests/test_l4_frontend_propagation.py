@@ -77,14 +77,14 @@ _ENV_VALUES: tuple[str | None, ...] = (
 
 #: The hand-written oracle for an unstated request: what ``auto`` resolves
 #: to under each environment value. An unrecognised or empty value is
-#: ignored and castxml, the schema reference, stands.
+#: ignored and the Clang default stands.
 _AUTO_BY_ENV: dict[str | None, str] = {
-    None: "castxml",
-    "": "castxml",
+    None: "clang",
+    "": "clang",
     "castxml": "castxml",
     "clang": "clang",
     "hybrid": "hybrid",
-    "nonsense": "castxml",
+    "nonsense": "clang",
 }
 
 

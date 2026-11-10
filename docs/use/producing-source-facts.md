@@ -131,7 +131,7 @@ selects which:
 | Value | Uses |
 |-------|------|
 | `auto` *(default)* | the most-capable **available** backend: clang if present, else castxml |
-| `castxml` | castxml (the default L2 backend) — declarations/types/const values only; an unavailable castxml is **not** upgraded to clang (that would silently change extractor semantics) — extraction is disabled instead |
+| `castxml` | castxml (an explicitly selected L2 backend) — declarations/types/const values only; an unavailable castxml is **not** upgraded to clang (that would silently change extractor semantics) — extraction is disabled instead |
 | `clang` | `clang -ast-dump=json` — richest source facts (also inline/template/constexpr bodies, macros, constructor mangling); falls back to castxml if clang is unavailable |
 
 `auto` prefers clang over castxml when both are present, because clang observes

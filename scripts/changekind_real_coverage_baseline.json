@@ -65,7 +65,6 @@
     "func_became_inline",
     "func_contract_attribute_added",
     "func_contract_attribute_removed",
-    "func_deleted",
     "func_deleted_dwarf",
     "func_deleted_elf_fallback",
     "func_deprecated_removed",
