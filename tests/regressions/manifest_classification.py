@@ -229,7 +229,8 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_rebuild_toolchain_drift_integration.py",
             "tests/test_toolchain_rebuild_drift.py",
         ),
-        public_surfaces=("python-api",),
+        # The seed tests call abicheck.checker/dumper directly, not abicheck.service.
+        public_surfaces=(),
         axes={
             "argument": ("builtin", "qualified builtin", "std type", "program type"),
             "wrapping": ("bare", "std template", "nested std template"),
