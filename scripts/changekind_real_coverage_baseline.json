@@ -192,7 +192,6 @@
     "sycl_runtime_version_changed",
     "symbol_binding_became_unique",
     "symbol_leaked_from_dependency_changed",
-    "symbol_moved_version_node",
     "symbol_renamed_batch",
     "symbol_size_changed_const_object",
     "symbol_size_changed_internal",

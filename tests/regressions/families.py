@@ -621,6 +621,11 @@ _F17 = ("extraction.header_dialect_not_recovered_from_binary",)
 
 #: id -> reason it belongs to no shared family.
 OTHER_REASONS: dict[str, str] = {
+    "classification.unresolvable_symbol_version_scored_as_risk": (
+        "symbol-version binding classification; a single owner "
+        "(diff_versioning.detect_version_node_changes) with its own exhaustive "
+        "loader-rule oracle, no sibling class shares a harness"
+    ),
     "templates.explicit_instance_removal_read_as_visibility_change": (
         "removal-vs-export classification of a template instance; no sibling "
         "shares a harness yet (the removal rule is a single-owner decision in "

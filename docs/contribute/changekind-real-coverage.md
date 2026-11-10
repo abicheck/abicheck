@@ -16,8 +16,8 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 ## Headline
 
 - Total kinds: **427**
-- Kinds with at least one real source: **186**
-- Kinds per source: catalog 160, field_shapes 9, integration 68
+- Kinds with at least one real source: **187**
+- Kinds per source: catalog 160, field_shapes 9, integration 69
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
@@ -27,7 +27,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | L3 | 15 | 5 |
 | L4 | 10 | 2 |
 | L5 | 15 | 5 |
-| unmapped | 121 | 110 |
+| unmapped | 121 | 109 |
 
 ## Most important zero-source kinds (top 20)
 
@@ -483,12 +483,12 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `sycl_plugin_search_path_changed` | RISK | 0 | 0 | 0 |
 | `sycl_runtime_version_changed` | COMPATIBLE | 0 | 0 | 0 |
 | `symbol_leaked_from_dependency_changed` | RISK | 0 | 0 | 0 |
-| `symbol_moved_version_node` | RISK | 0 | 0 | 0 |
+| `symbol_moved_version_node` | BREAKING | 0 | 0 | 1 |
 | `symbol_renamed_batch` | BREAKING | 0 | 0 | 0 |
 | `symbol_size_changed_const_object` | BREAKING | 0 | 0 | 0 |
 | `symbol_size_changed_internal` | BREAKING | 0 | 0 | 0 |
 | `symbol_type_changed` | BREAKING | 0 | 0 | 0 |
-| `symbol_version_alias_changed` | RISK | 0 | 0 | 1 |
+| `symbol_version_alias_changed` | RISK | 0 | 0 | 2 |
 | `symbol_version_required_added_compat` | COMPATIBLE | 0 | 0 | 0 |
 | `symbol_version_required_removed` | COMPATIBLE | 0 | 0 | 0 |
 | `tail_padding_reuse_changed` | RISK | 0 | 0 | 0 |
