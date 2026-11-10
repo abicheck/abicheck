@@ -38,6 +38,7 @@ import sys
 import tempfile
 from collections.abc import Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from tests._edit_corpus_config import (
     FAMILIES,
@@ -48,6 +49,9 @@ from tests._edit_corpus_config import (
     Toolchain,
     host_platform,
 )
+
+if TYPE_CHECKING:
+    from tests._edit_corpus_seeds import Seed
 
 _PROBE_TIMEOUT = 60
 
@@ -720,3 +724,26 @@ def execution_unavailable(config: Config) -> str | None:
     if config.objfmt not in EXECUTION_PLATFORMS:
         return f"execution oracle needs an ELF loader (LD_LIBRARY_PATH); host is {config.objfmt}"
     return None
+
+
+# Build roles whose values only a GNU/ELF link accepts (a version script,
+# ``-z``/``--as-needed`` link flags, ``DT_SONAME``).
+_ELF_LINK_ROLES = ("build.vscript", "build.ldflags", "build.soname")
+
+
+def elf_link_unavailable(seed: Seed, config: Config) -> str | None:
+    """Why *seed* cannot be linked on this host: its build roles are ELF-only.
+
+    A host gap (``unavailable``), not an infeasible mix: the same cell runs on
+    an ELF host. Apple's ld rejects ``--version-script``, ``-z`` and
+    ``--as-needed`` outright.
+    """
+    if config.objfmt == "elf":
+        return None
+    used = [r for r in _ELF_LINK_ROLES if r in seed.roles]
+    if not used:
+        return None
+    return (
+        f"{seed.name} links with ELF-only build roles ({', '.join(used)}); "
+        f"host object format is {config.objfmt}"
+    )

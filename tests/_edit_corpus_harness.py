@@ -28,7 +28,7 @@ from tests._edit_corpus_config import (
     default_config,
 )
 from tests._edit_corpus_operators import EditOp
-from tests._edit_corpus_seeds import RoleText, Seed
+from tests._edit_corpus_seeds import BuildArgs, RoleText, Seed
 from tests._edit_corpus_toolchains import std_flag
 
 # compiler label -> (C driver, C++ driver): the base PR's two fixed lanes.
@@ -69,6 +69,16 @@ class LinkSpec:
         for name, text in self.files:
             (out_dir / name).write_text(text, encoding="utf-8")
         return [f.replace("{dir}", str(out_dir)) for f in self.flags]
+
+
+def _seed_link(extra: BuildArgs) -> LinkSpec:
+    """A seed's build roles as link options: its version script and ldflags."""
+    files: tuple[tuple[str, str], ...] = ()
+    flags: tuple[str, ...] = ()
+    if extra.vscript:
+        files = (("edit.map", extra.vscript + "\n"),)
+        flags = ("-Wl,--version-script={dir}/edit.map",)
+    return LinkSpec(flags=(*flags, *extra.ldflags), files=files)
 
 
 @dataclass(frozen=True)
@@ -131,7 +141,9 @@ def _compile_library(
     header_text: str,
     source_text: str,
     link: LinkSpec = LinkSpec(),
+    extra: BuildArgs | None = None,
 ) -> Path:
+    extra = extra or BuildArgs()
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / seed.header_name).write_text(header_text, encoding="utf-8")
     src = out_dir / seed.source_name
@@ -140,7 +152,7 @@ def _compile_library(
     cmd = compile_cmd(
         config.producer, config.std, flags, debug=config.evidence != "binary"
     )
-    cmd += ["-shared", "-I", str(out_dir), "-o", str(so), str(src)]
+    cmd += [*extra.cflags, "-shared", "-I", str(out_dir), "-o", str(so), str(src)]
     # PIC is an ELF/Mach-O concept: clang rejects -fPIC for the Windows target.
     if sys.platform != "win32":
         cmd.append("-fPIC")
@@ -150,7 +162,12 @@ def _compile_library(
     if sys.platform == "darwin":
         cmd.append(f"-Wl,-install_name,{LIB_NAME}")
     elif sys.platform.startswith("linux"):
-        cmd.append(f"-Wl,-soname,{LIB_NAME}")
+        # A seed's build.soname role overrides the default; "" means no
+        # DT_SONAME at all, which a later -soname flag cannot express.
+        soname = LIB_NAME if extra.soname is None else extra.soname
+        if soname:
+            cmd.append(f"-Wl,-soname,{soname}")
+    cmd += _seed_link(extra).render(out_dir)
     cmd += link.render(out_dir)
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if proc.returncode != 0:
@@ -176,7 +193,16 @@ def build(
     """
     fl = flags or config.flags
     header_text, source_text = seed.render(overrides)
-    so = _compile_library(seed, config, fl, out_dir, header_text, source_text, link)
+    so = _compile_library(
+        seed,
+        config,
+        fl,
+        out_dir,
+        header_text,
+        source_text,
+        link,
+        seed.build_args(overrides),
+    )
     header = out_dir / seed.header_name
     is_cxx = seed.lang == "c++"
     headers = [header] if config.evidence == "headers" else []

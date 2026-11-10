@@ -65,7 +65,7 @@ from tests._edit_corpus_expect import (
 )
 from tests._edit_corpus_known import KNOWN, known_mismatch
 from tests._edit_corpus_operators import OP_BY_NAME, OPERATORS, matrix
-from tests._edit_corpus_seeds import C_SEED, SEED_BY_NAME
+from tests._edit_corpus_seeds import C_SEED, SEED_BY_NAME, SEEDS
 from tests._edit_corpus_tiers import (
     _PR,
     Cell,
@@ -605,7 +605,9 @@ def test_pr_tier_guards_every_axis() -> None:
     assert {ch.get("std") for ch in changes} >= {"c++20", "c23", "c89"}
     assert {fam for _, _, fam, _ in _PR} == {"gcc", "clang"}
     assert all(op in OP_BY_NAME and seed in SEED_BY_NAME for op, seed, _, _ in _PR)
-    assert len(_PR) <= 16  # the PR tier stays a handful
+    # Every seed has a guard, so a seed whose base no longer builds fails a PR.
+    assert {seed for _, seed, _, _ in _PR} == {s.name for s in SEEDS}
+    assert len(_PR) <= 20  # the PR tier stays a handful
 
 
 def test_known_mismatches_name_real_cells_and_failing_classes() -> None:

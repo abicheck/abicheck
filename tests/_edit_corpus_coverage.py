@@ -273,8 +273,22 @@ def expectation_kinds(exp: Expectation) -> frozenset[str]:
     return frozenset(out)
 
 
+def _operators() -> tuple[object, ...]:
+    from tests._edit_corpus_operators import OPERATORS
+
+    return tuple(OPERATORS)
+
+
+def _derived_kinds() -> frozenset[str]:
+    from tests._edit_corpus_opkit import DERIVED_KINDS
+
+    return DERIVED_KINDS
+
+
 def op_declared_kinds(op: object) -> frozenset[str]:
-    """Kinds *op* names under its base expectation or any of its rules."""
+    """Kinds *op* names under its base expectation or any of its rules: what
+    the edit itself stands behind. Kinds that follow from the verdict
+    (``EditOp.with_derived``) are ``op_derived_kinds``, never declared."""
     from tests._edit_corpus_operators import EditOp
 
     assert isinstance(op, EditOp)
@@ -282,7 +296,19 @@ def op_declared_kinds(op: object) -> frozenset[str]:
     out = set(expectation_kinds(base))
     for rule in op.rules:
         out |= expectation_kinds(rule.apply(base))
-    return frozenset(out)
+    return frozenset(out - _derived_kinds())
+
+
+def op_derived_kinds(op: object) -> frozenset[str]:
+    """The derived kinds *op* owes under its base expectation or a rule."""
+    from tests._edit_corpus_operators import EditOp
+
+    assert isinstance(op, EditOp)
+    base = op.base()
+    out = set(expectation_kinds(op.with_derived(base)))
+    for rule in op.rules:
+        out |= expectation_kinds(op.with_derived(rule.apply(base)))
+    return frozenset(out & _derived_kinds())
 
 
 def declared_kinds() -> dict[str, frozenset[str]]:
@@ -321,7 +347,17 @@ class CellRecord:
 
     @property
     def verified(self) -> frozenset[str]:
-        """Expected kinds abicheck produced, in a cell that reconciled as passing."""
+        """Expected kinds abicheck produced, in a cell that reconciled as
+        passing. A derived kind (``DERIVED_KINDS``) is not coverage."""
+        return self._verified_all - _derived_kinds()
+
+    @property
+    def derived_verified(self) -> frozenset[str]:
+        """The derived kinds this passing cell owed and abicheck produced."""
+        return self._verified_all & _derived_kinds()
+
+    @property
+    def _verified_all(self) -> frozenset[str]:
         if not self.ran or self.cls not in PASSING_CLASSES:
             return frozenset()
         return frozenset(self.expected) & frozenset(self.produced)
@@ -422,6 +458,8 @@ class TierCoverage:
     expected: set[str] = field(default_factory=set)
     # kind -> how many ran cells produced it without expecting it
     incidental: dict[str, int] = field(default_factory=dict)
+    # derived kind -> how many passing cells owed and produced it
+    derived: dict[str, int] = field(default_factory=dict)
     points: set[str] = field(default_factory=set)
 
 
@@ -438,6 +476,8 @@ def _by_tier(records: Iterable[CellRecord]) -> dict[str, TierCoverage]:
         t.passing += r.cls in PASSING_CLASSES
         t.produced |= set(r.produced)
         t.verified |= r.verified
+        for kind in r.derived_verified:
+            t.derived[kind] = t.derived.get(kind, 0) + 1
         for kind in r.incidental:
             t.incidental[kind] = t.incidental.get(kind, 0) + 1
         t.points |= set(r.points)
@@ -470,6 +510,9 @@ def report(
             # Produced but not expected: a possible false positive or a
             # missing expectation. Listed, never counted as coverage.
             "produced_not_expected": dict(sorted(t.incidental.items())),
+            # Derived kinds (owed by the verdict, not the edit): cells that
+            # produced them. Not coverage.
+            "derived_verified_cells": dict(sorted(t.derived.items())),
             "space": space_coverage(point_from_id(p) for p in t.points),
         }
     all_points = {p for t in tiers.values() for p in t.points}
@@ -479,6 +522,10 @@ def report(
         "declared_in_scope": len(declared & scope_set),
         "declared_pct_of_scope": _pct(len(declared & scope_set), len(scope_set)),
         "declared_out_of_scope": sorted(declared - scope_set),
+        "derived": {
+            kind: sum(kind in op_derived_kinds(op) for op in _operators())
+            for kind in sorted(_derived_kinds())
+        },
         "uncovered_in_scope": sorted(scope_set - declared),
         "tiers": out_tiers,
         "space": space_coverage(point_from_id(p) for p in all_points),
@@ -553,6 +600,13 @@ def summary_markdown(rep: dict, title: str = "Edit corpus coverage") -> str:
         f"ChangeKinds in scope (Linux ELF + DWARF + headers): **{rep['scope_size']}**; "
         f"declared by operators: **{rep['declared_in_scope']}** ({rep['declared_pct_of_scope']}%)."
     )
+    derived = rep.get("derived") or {}
+    if derived:
+        lines.append(
+            "Derived (owed by a cell's verdict, not by its edit; not counted): "
+            + ", ".join(f"`{k}` by {n} operators" for k, n in derived.items())
+            + "."
+        )
     lines += [
         "",
         "| Tier | Cells ran / recorded | Passing | Verified kinds (in scope) | % of scope | Space points covered / feasible |",

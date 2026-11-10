@@ -20,6 +20,26 @@ from dataclasses import dataclass
 # (header_text, source_text). "" means "no such line in this file".
 RoleText = tuple[str, str]
 
+# Build roles carry how the library is built, not what it declares: their
+# header slot holds the value and no template places them. ``Seed.build_args``
+# reads them; an operator edits one like any other role (a link-level edit:
+# a version script, a SONAME, an extra NEEDED library, a hardening flag).
+BUILD_ROLES: tuple[str, ...] = (
+    "build.cflags",  # extra compile flags, space-separated
+    "build.ldflags",  # extra link flags, space-separated
+    "build.vscript",  # GNU ld version-script text ("" = none)
+    "build.soname",  # DT_SONAME ("" = none); absent role = the harness default
+)
+
+
+@dataclass(frozen=True)
+class BuildArgs:
+    cflags: tuple[str, ...] = ()
+    ldflags: tuple[str, ...] = ()
+    vscript: str = ""
+    # None: the seed has no ``build.soname`` role, the harness picks its default.
+    soname: str | None = None
+
 
 @dataclass(frozen=True)
 class Seed:
@@ -36,6 +56,22 @@ class Seed:
     @property
     def source_name(self) -> str:
         return "edit_seed.c" if self.lang == "c" else "edit_seed.cpp"
+
+    def build_args(self, overrides: Mapping[str, RoleText] | None = None) -> BuildArgs:
+        """The build roles (with *overrides* applied) as compile/link inputs."""
+        current: dict[str, RoleText] = dict(self.roles)
+        if overrides:
+            current.update(overrides)
+
+        def text(role: str) -> str | None:
+            return current[role][0] if role in current else None
+
+        return BuildArgs(
+            cflags=tuple((text("build.cflags") or "").split()),
+            ldflags=tuple((text("build.ldflags") or "").split()),
+            vscript=text("build.vscript") or "",
+            soname=text("build.soname"),
+        )
 
     def render(
         self, overrides: Mapping[str, RoleText] | None = None
@@ -309,5 +345,265 @@ STDLIB_SEED = Seed(
     roles=_STDLIB_ROLES,
 )
 
-SEEDS: tuple[Seed, ...] = (C_SEED, CXX_SEED, STDLIB_SEED)
+# A C library seen as an ELF object: symbol versions, SONAME, NEEDED,
+# hardening, TLS, binding and visibility, exported data, header constants,
+# unions, bitfields, flexible arrays, deprecation and parameter qualifiers.
+# Its role names start with ``elf.`` so the core operators never apply to it.
+_ELF_ROLES: dict[str, RoleText] = {
+    "build.cflags": ("-fstack-protector-strong", ""),
+    "build.ldflags": ("-Wl,--no-as-needed -lm -lgcc_s -Wl,--as-needed -Wl,-z,now", ""),
+    "build.vscript": ("LIBEDIT_1.0 { global: *; };", ""),
+    "build.soname": ("libedit.so", ""),
+    "elf.const": ("static const int EDIT_LIMIT = 16;", ""),
+    "elf.union": ("union num { int i; float f; };", ""),
+    "elf.flags": ("struct flags { int a; int b; int c; };", ""),
+    "elf.buf": ("struct buf { int n; int d[1]; };", ""),
+    "elf.ctx": ("struct ctx { char a; int b; };", ""),
+    "elf.level": ("enum level { LOW, MID, LEVEL_LAST };", ""),
+    "elf.count_t": ("typedef int count_t;", ""),
+    "elf.legacy": (
+        "struct __attribute__((deprecated)) legacy { int x; };\n"
+        "enum __attribute__((deprecated)) old_mode { OLD_A, OLD_B };\n"
+        "extern int g_old __attribute__((deprecated));\n"
+        "__attribute__((deprecated)) int old_api(struct legacy *l, int x);",
+        "int g_old = 4;\nint old_api(struct legacy *l, int x) { return (l ? l->x : 0) + x - 1; }",
+    ),
+    "elf.vget": ("int vget(int x);", "int vget(int x) { return x * 2; }"),
+    "elf.wget": ("int wget(int x);", "int wget(int x) { return x * 3 + 1; }"),
+    "elf.weak": (
+        "int soft(int x);",
+        "__attribute__((weak)) int soft(int x) { return x + 5; }",
+    ),
+    "elf.vsum": (
+        "int vsum(int n);",
+        "int vsum(int n) { char b[32]; memset(b, n, sizeof b); return b[1] + n; }",
+    ),
+    "elf.vfmt": ("int vfmt(int n, ...);", "int vfmt(int n, ...) { return n * 4; }"),
+    "elf.pread": ("int pread_int(int *p);", "int pread_int(int *p) { return *p + 1; }"),
+    "elf.pref": (
+        "int *pref(void);",
+        "static int s_ref = 7;\nint *pref(void) { return &s_ref; }",
+    ),
+    "elf.num_i": ("int num_i(union num u);", "int num_i(union num u) { return u.i; }"),
+    "elf.flags_b": (
+        "int flags_b(struct flags *f);",
+        "int flags_b(struct flags *f) { return f->b + f->c; }",
+    ),
+    "elf.buf_n": (
+        "int buf_n(struct buf *b);",
+        "int buf_n(struct buf *b) { return b->n; }",
+    ),
+    "elf.ctx_a": (
+        "int ctx_a(struct ctx *c);",
+        "int ctx_a(struct ctx *c) { return c->a; }",
+    ),
+    "elf.level_code": (
+        "int level_code(enum level l);",
+        "int level_code(enum level l) { return l == LOW ? 1 : l == MID ? 2 : 3; }",
+    ),
+    "elf.counted": (
+        "count_t counted(count_t c);",
+        "count_t counted(count_t c) { return c + 1; }",
+    ),
+    "elf.tls": (
+        "extern __thread int t_slot;\nint tls_get(void);",
+        "__thread int t_slot = 9;\nint tls_get(void) { return t_slot; }",
+    ),
+    "elf.obj": ("extern int g_obj;", "int g_obj = 11;"),
+    "elf.tab": ("extern const int g_tab[4];", "const int g_tab[4] = {1, 2, 3, 4};"),
+    "elf.k": ("extern const int g_k;", "const int g_k = 3;"),
+    "elf.al": (
+        "extern int g_al __attribute__((aligned(16)));",
+        "int g_al __attribute__((aligned(16))) = 5;",
+    ),
+    "elf.banner": ("extern const char banner[];", 'const char banner[] = "edit";'),
+    # Declarations an operator adds land here.
+    "elf.extra": ("", ""),
+}
+
+ELF_SEED = Seed(
+    name="c_elf",
+    lang="c",
+    header_template=(
+        "#ifndef EDIT_SEED_ELF_H",
+        "#define EDIT_SEED_ELF_H",
+        _VIS_OPEN,
+        "@@elf.const@@",
+        "@@elf.union@@",
+        "@@elf.flags@@",
+        "@@elf.buf@@",
+        "@@elf.ctx@@",
+        "@@elf.level@@",
+        "@@elf.count_t@@",
+        "@@elf.legacy@@",
+        "@@elf.vget@@",
+        "@@elf.wget@@",
+        "@@elf.weak@@",
+        "@@elf.vsum@@",
+        "@@elf.vfmt@@",
+        "@@elf.pread@@",
+        "@@elf.pref@@",
+        "@@elf.num_i@@",
+        "@@elf.flags_b@@",
+        "@@elf.buf_n@@",
+        "@@elf.ctx_a@@",
+        "@@elf.level_code@@",
+        "@@elf.counted@@",
+        "@@elf.tls@@",
+        "@@elf.obj@@",
+        "@@elf.tab@@",
+        "@@elf.k@@",
+        "@@elf.al@@",
+        "@@elf.banner@@",
+        "@@elf.extra@@",
+        _VIS_CLOSE,
+        "#endif",
+    ),
+    source_template=(
+        '#include "edit_seed.h"',
+        "#include <string.h>",
+        "@@elf.legacy@@",
+        "@@elf.vget@@",
+        "@@elf.wget@@",
+        "@@elf.weak@@",
+        "@@elf.vsum@@",
+        "@@elf.vfmt@@",
+        "@@elf.pread@@",
+        "@@elf.pref@@",
+        "@@elf.num_i@@",
+        "@@elf.flags_b@@",
+        "@@elf.buf_n@@",
+        "@@elf.ctx_a@@",
+        "@@elf.level_code@@",
+        "@@elf.counted@@",
+        "@@elf.tls@@",
+        "@@elf.obj@@",
+        "@@elf.tab@@",
+        "@@elf.k@@",
+        "@@elf.al@@",
+        "@@elf.banner@@",
+        "@@elf.extra@@",
+    ),
+    roles=_ELF_ROLES,
+)
+
+# C++ class and linkage shapes: constructors, final, access, static and
+# ref-qualified members, overrides, pure virtuals, inline namespaces, ABI
+# tags, virtual and multiple inheritance, overloads, scoped enums, hidden
+# friends. Role names start with ``x.``.
+_XCXX_ROLES: dict[str, RoleText] = {
+    "x.widget": (
+        "class Widget {\npublic:\n  Widget();\n  explicit Widget(int v);\n"
+        "  virtual ~Widget();\n  virtual int get() const;\n  int v;\n};",
+        "Widget::Widget() : v(1) {}\nWidget::Widget(int x) : v(x) {}\n"
+        "Widget::~Widget() {}\nint Widget::get() const { return v * 10; }",
+    ),
+    "x.gadget": (
+        "struct Gadget { Gadget(long g); long g; };",
+        "Gadget::Gadget(long x) : g(x) {}",
+    ),
+    "x.sealed": (
+        # Polymorphic, so `final` lets callers devirtualize `v()`.
+        "class Sealed final { public: int s; int get() const; "
+        "virtual int v() const; };",
+        "int Sealed::get() const { return s + 1; }\n"
+        "int Sealed::v() const { return s + 2; }",
+    ),
+    "x.calc": (
+        "class Calc {\npublic:\n  int m(int a);\n  int n(int a);\n  int r();\n"
+        "  int g();\n  int g() const;\n  int safe() noexcept;\n  int field;\n"
+        "  int cache;\n};",
+        "int Calc::m(int a) { return a + 1; }\nint Calc::n(int a) { return a + 2; }\n"
+        "int Calc::r() { return 3; }\nint Calc::g() { return 4; }\n"
+        "int Calc::g() const { return 5; }\nint Calc::safe() noexcept { return 6; }",
+    ),
+    "x.poly": (
+        "struct Base { virtual int m(); virtual ~Base(); };\n"
+        "struct Derived : Base { int m(); };",
+        "int Base::m() { return 1; }\nBase::~Base() {}\nint Derived::m() { return 2; }",
+    ),
+    "x.ns": (
+        "namespace lib {\ninline namespace v1 {\nint f1(int a);\nint f2(int a);\n}\n}",
+        "namespace lib {\ninline namespace v1 {\nint f1(int a) { return a + 1; }\n"
+        "int f2(int a) { return a + 2; }\n}\n}",
+    ),
+    "x.tagged": ("int tagf(int a);", "int tagf(int a) { return a * 7; }"),
+    "x.vbase": (
+        "struct VB { int b; virtual ~VB(); };\nstruct VD : VB { int d; virtual ~VD(); };",
+        "VB::~VB() {}\nVD::~VD() {}",
+    ),
+    "x.multi": (
+        "struct B1 { int a; virtual ~B1(); virtual int f1(); };\n"
+        "struct B2 { int b; virtual ~B2(); virtual int f2(); };\n"
+        "struct MI : B1, B2 { virtual ~MI(); int f2(); };",
+        "B1::~B1() {}\nint B1::f1() { return 1; }\nB2::~B2() {}\n"
+        "int B2::f2() { return 2; }\nMI::~MI() {}\nint MI::f2() { return 22; }",
+    ),
+    "x.plain": (
+        "struct Plain { int a; int get(); };",
+        "int Plain::get() { return a + 1; }",
+    ),
+    "x.over": ("int pick(int a);", "int pick(int a) { return a; }"),
+    "x.tone": (
+        "enum tone { T_LO, T_HI };\nint tone_code(tone t);",
+        "int tone_code(tone t) { return t == T_LO ? 1 : 2; }",
+    ),
+    "x.shade": (
+        "enum class shade { dark, light };\nint shade_code(shade s);",
+        "int shade_code(shade s) { return s == shade::dark ? 1 : 2; }",
+    ),
+    "x.cmp": (
+        "struct Cmp { int a; };\nstruct Eq { int a; "
+        "friend bool operator==(Eq x, Eq y) { return x.a == y.a; } };",
+        "",
+    ),
+    "x.extra": ("", ""),
+}
+
+XCXX_SEED = Seed(
+    name="cxx_more",
+    lang="c++",
+    header_template=(
+        "#ifndef EDIT_SEED_MORE_HPP",
+        "#define EDIT_SEED_MORE_HPP",
+        _VIS_OPEN,
+        "@@x.widget@@",
+        "@@x.gadget@@",
+        "@@x.sealed@@",
+        "@@x.calc@@",
+        "@@x.poly@@",
+        "@@x.ns@@",
+        "@@x.tagged@@",
+        "@@x.vbase@@",
+        "@@x.multi@@",
+        "@@x.plain@@",
+        "@@x.over@@",
+        "@@x.tone@@",
+        "@@x.shade@@",
+        "@@x.cmp@@",
+        "@@x.extra@@",
+        _VIS_CLOSE,
+        "#endif",
+    ),
+    source_template=(
+        '#include "edit_seed.h"',
+        "@@x.widget@@",
+        "@@x.gadget@@",
+        "@@x.sealed@@",
+        "@@x.calc@@",
+        "@@x.poly@@",
+        "@@x.ns@@",
+        "@@x.tagged@@",
+        "@@x.vbase@@",
+        "@@x.multi@@",
+        "@@x.plain@@",
+        "@@x.over@@",
+        "@@x.tone@@",
+        "@@x.shade@@",
+        "@@x.extra@@",
+    ),
+    roles=_XCXX_ROLES,
+)
+
+SEEDS: tuple[Seed, ...] = (C_SEED, CXX_SEED, STDLIB_SEED, ELF_SEED, XCXX_SEED)
 SEED_BY_NAME: dict[str, Seed] = {s.name: s for s in SEEDS}
