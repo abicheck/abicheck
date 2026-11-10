@@ -398,7 +398,13 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         any_of=(frozenset({"STRUCT_FIELD_TYPE_CHANGED", "TYPE_FIELD_TYPE_CHANGED"}),),
         rules=(
             Rule(
-                lambda c: c.flags.bits == 64 and c.evidence == "headers",
+                # -fpack-struct=N caps every member's alignment at N, so the
+                # struct's alignment rises only when packing allows 8.
+                lambda c: (
+                    c.flags.bits == 64
+                    and c.evidence == "headers"
+                    and (c.flags.pack is None or c.flags.pack >= 8)
+                ),
                 {
                     "any_of": (
                         frozenset(
@@ -407,7 +413,7 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
                         _ALIGN,
                     )
                 },
-                "x86-64: alignof(point) 4 -> 8, which the header layout records",
+                "x86-64, unpacked: alignof(point) 4 -> 8, which the header layout records",
             ),
         ),
         touches=("struct.point",),

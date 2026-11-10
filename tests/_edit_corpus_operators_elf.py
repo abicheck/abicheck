@@ -130,7 +130,12 @@ _VERSIONING = (
                 r,
                 "elf.wget",
                 None,
+                # Exported under every visibility config: the two versions'
+                # implementations live only in the unit, so -fvisibility=hidden
+                # would otherwise hide both aliases and drop wget entirely.
+                '__attribute__((visibility("default"))) '
                 "int wget_v1(int x) { return x * 3 + 1; }\n"
+                '__attribute__((visibility("default"))) '
                 "int wget_v2(int x) { return x * 3 + 1; }\n"
                 '__asm__(".symver wget_v1, wget@LIBEDIT_1.0");\n'
                 '__asm__(".symver wget_v2, wget@@LIBEDIT_1.1");',
@@ -263,6 +268,19 @@ _DYNAMIC = (
         _cflags("-fno-stack-protector"),
         "the stack canary goes: a hardening loss, not an interface change",
         expected=frozenset({"STACK_CANARY_REMOVED"}),
+        rules=(
+            Rule(
+                lambda c: c.flags.opt == "O2",
+                {
+                    "expected": frozenset(),
+                    "verdict_min": "NO_CHANGE",
+                    "observable": False,
+                },
+                "-O2 leaves the seed no frame that -fstack-protector-strong "
+                "guards: neither build references __stack_chk_fail (checked with "
+                "nm), so dropping the flag changes nothing in the binary",
+            ),
+        ),
         **_AT_MOST_RISK,
         **_BINARY,
     ),
@@ -595,6 +613,18 @@ _TYPES = (
         _decl("elf.ctx", "struct __attribute__((packed)) ctx { char a; int b; };"),
         "packing removes the padding after a: b moves from offset 4 to 1",
         expected=frozenset({"STRUCT_PACKING_CHANGED"}),
+        rules=(
+            Rule(
+                lambda c: c.flags.pack == 1,
+                {
+                    "expected": frozenset(),
+                    "verdict_min": "NO_CHANGE",
+                    "verdict_max": "COMPATIBLE",
+                },
+                "-fpack-struct=1 already packs ctx (b at offset 1): the "
+                "attribute changes no layout",
+            ),
+        ),
     ),
     _op(
         "struct_became_union",

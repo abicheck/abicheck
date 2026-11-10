@@ -202,6 +202,21 @@ _SPECIFIERS = (
         ),
         "unqualified T_LO and integer conversions no longer compile",
         expected=frozenset({"ENUM_BECAME_SCOPED"}),
+        rules=(
+            Rule(
+                lambda c: c.flags.short_enums,
+                {
+                    "expected": frozenset(
+                        {"ENUM_BECAME_SCOPED", "ENUM_UNDERLYING_SIZE_CHANGED"}
+                    ),
+                    "verdict_min": "BREAKING",
+                    "verdict_max": None,
+                },
+                "-fshort-enums packs the unscoped enum into 1 byte; an enum class "
+                "is int-sized whatever the flag, so sizeof(tone) 1 -> 4 also "
+                "breaks every by-value use",
+            ),
+        ),
         **_SOURCE_BREAK,
         **_HEADERS,
     ),
