@@ -73,11 +73,6 @@ _DEFAULT_CHAR_SIGNED: dict[str, bool] = {
 }
 
 
-def _records_switches(producer: str) -> bool:
-    """Whether a DW_AT_producer string carries command-line switches."""
-    return any(token.startswith("-") for token in producer.split())
-
-
 def _char_signedness(meta: AdvancedDwarfMetadata) -> tuple[bool, str] | None:
     """(plain char is signed, label) for one side, or None when unknown.
 
@@ -96,7 +91,7 @@ def _char_signedness(meta: AdvancedDwarfMetadata) -> tuple[bool, str] | None:
     if unsigned or signed:
         flag = sorted(flags & _CHAR_SIGN_FLAGS)[0]
         return (signed, f"{'signed' if signed else 'unsigned'} ({flag})")
-    if not _records_switches(meta.toolchain.producer_string):
+    if not meta.toolchain.records_switches:
         return None
     default = _DEFAULT_CHAR_SIGNED.get(meta.target_arch)
     if default is None:
