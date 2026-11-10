@@ -325,3 +325,117 @@ def test_alignment_change_is_reported_only_when_provable(
     )
     disjoint = not (_admitted(*old, placement[0]) & _admitted(*new, placement[1]))
     assert bool(got) is disjoint, (old, new, placement, got)
+
+
+@pytest.mark.parametrize("known", [("present", 32), ("partial", 32)], ids=str)
+@pytest.mark.parametrize("unknown_side", ["old", "new"])
+def test_an_unknown_alignment_on_either_side_proves_no_change(
+    known: tuple[str, int], unknown_side: str
+) -> None:
+    # Unknown (PRESENT None) admits every alignment, so no pairing is disjoint.
+    from abicheck.compare.declaration_facts import alignment_changes
+    from abicheck.model.fact import Fact
+
+    status, value = known
+    fact = Fact.present(value) if status == "present" else Fact.partial(value)
+    sides = [
+        SimpleNamespace(declared_alignment_bits=fact),
+        SimpleNamespace(declared_alignment_bits=Fact.present(None)),
+    ]
+    old, new = sides if unknown_side == "new" else sides[::-1]
+    got = alignment_changes(
+        "v",
+        "v",
+        old,
+        new,
+        entity_id=None,
+        placement=(64, 64),  # type: ignore[arg-type]
+    )
+    assert got == []
+
+
+# --- what a unit that states nothing usable yields ----------------------------
+
+
+class _HeaderlessCu(_Cu):
+    def __init__(self, header: object) -> None:
+        super().__init__(5, 8)
+        self.header = header  # type: ignore[assignment]
+
+
+@pytest.mark.parametrize(
+    "header",
+    [None, {}, {"version": "five"}, {"version": 5}, {"version": 5, "address_size": 0}],
+    ids=["no-header", "empty", "unparsable", "no-address-size", "zero-address-size"],
+)
+def test_a_unit_that_states_no_version_or_address_size_yields_unknown(header) -> None:
+    # An unreadable header is neither DWARF 5 nor a known address size, so the
+    # type's default cannot be read: unknown, never a guessed value.
+    cu = _HeaderlessCu(header)
+    die = _Die(cu, 50, "DW_TAG_variable", DW_AT_type=_type_chain(cu, "int"))
+    fact = dwarf_variable_alignment_fact(die, cu)
+    assert (fact.status, fact.value) == (FactStatus.PRESENT, None)
+
+
+def test_a_typedef_cycle_yields_unknown_rather_than_recursing() -> None:
+    cu = _Cu(5, 8)
+    _Die(cu, 10, "DW_TAG_typedef", DW_AT_type=11)
+    _Die(cu, 11, "DW_TAG_typedef", DW_AT_type=10)
+    die = _Die(cu, 50, "DW_TAG_variable", DW_AT_type=10)
+    fact = dwarf_variable_alignment_fact(die, cu)
+    assert (fact.status, fact.value) == (FactStatus.PRESENT, None)
+
+
+def test_the_layout_facts_carry_the_alignment_fact() -> None:
+    from abicheck.extract.dwarf_variable_alignment import dwarf_variable_layout_facts
+
+    cu = _Cu(5, 8)
+    die = _Die(cu, 50, "DW_TAG_variable", DW_AT_type=_type_chain(cu, "int"))
+    facts = dwarf_variable_layout_facts(die, cu)
+    assert set(facts) == {"type_abi_fact", "alignment_bits_fact"}
+    got = facts["alignment_bits_fact"]
+    assert (got.status, got.value) == (FactStatus.PRESENT, 32)
+
+
+# --- castxml: a declaring file named only through its location -----------------
+
+
+@pytest.mark.parametrize("spells", [False, True])
+@pytest.mark.parametrize("named_by", ["location", "nothing"])
+def test_castxml_reads_the_declaring_file_from_a_location(spells, named_by) -> None:
+    root = Element("CastXML")
+    SubElement(root, "File", id="f1", name=_VAR_FILE)
+    SubElement(root, "Location", id="l1", file="f1", line="3")
+    SubElement(root, "FundamentalType", id="_1", name="int", size="32", align="32")
+    var = SubElement(root, "Variable", id="_4", name="v", type="_1")
+    if named_by == "location":
+        var.set("location", "l1")
+    table = PreprocessedText({}, "", frozenset({_VAR_FILE}) if spells else frozenset())
+    attach_preprocessed_text(root, table)
+    ctx = CastxmlParserContext(root, set(), set())
+    ctx.build_id_map()
+    fact = variable_alignment_fact(ctx, var, 32)
+    # Oracle: a declaring file castxml did not name cannot be ruled out, so a
+    # nameless declaration is a lower bound; a named file decides by its text.
+    lower_bound = named_by == "nothing" or spells
+    expected = FactStatus.PARTIAL if lower_bound else FactStatus.PRESENT
+    assert (fact.status, fact.value) == (expected, 32)
+
+
+@pytest.mark.parametrize("td_spells", [False, True])
+def test_castxml_a_typedef_cycle_is_read_to_its_depth_bound(td_spells) -> None:
+    # A malformed document whose typedefs name each other: the walk stops at
+    # its depth bound, and every typedef file it met still decides.
+    root = Element("CastXML")
+    SubElement(root, "File", id="f1", name=_VAR_FILE)
+    SubElement(root, "File", id="f2", name=_TD_FILE)
+    SubElement(root, "Typedef", id="_2", name="a", type="_3", file="f2")
+    SubElement(root, "Typedef", id="_3", name="b", type="_2", file="f2")
+    var = SubElement(root, "Variable", id="_4", name="v", type="_2", file="f1")
+    files = frozenset({_TD_FILE}) if td_spells else frozenset()
+    attach_preprocessed_text(root, PreprocessedText({}, "", files))
+    ctx = CastxmlParserContext(root, set(), set())
+    ctx.build_id_map()
+    fact = variable_alignment_fact(ctx, var, 32)
+    expected = FactStatus.PARTIAL if td_spells else FactStatus.PRESENT
+    assert (fact.status, fact.value) == (expected, 32)
