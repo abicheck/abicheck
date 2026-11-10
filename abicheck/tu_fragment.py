@@ -31,6 +31,7 @@ TuFragment`` call sites (tests included) keep working unchanged.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from .model import EnumType, Function, RecordType, Variable
 from .model.abi_fundamental import AbiFundamental
@@ -92,6 +93,7 @@ class TuFragment:
     # (extract/headers/clang/concept_constraints.py); None = not modelled.
     cxx_concept_constraints: dict[str, str] | None = None
     cxx_template_defaults: dict[str, TemplateDefaults] | None = None
+    extraction_provenance: dict[str, Any] | None = field(default=None, kw_only=True)
 
 
 @dataclass(frozen=True)
@@ -137,6 +139,7 @@ class MergedTuFragments:
     #: concept gap stays named) after a multi-TU merge.
     cxx_concept_constraints: dict[str, str] | None = None
     cxx_template_defaults: dict[str, TemplateDefaults] | None = None
+    extraction_provenance: dict[str, Any] | None = field(default=None, kw_only=True)
 
 
 def entity_key(kind: str, name: str) -> tuple[str, str]:

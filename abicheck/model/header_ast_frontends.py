@@ -33,4 +33,4 @@ from __future__ import annotations
 #: SUPPORTED_FRONTENDS`, minus ``"android"`` -- a source-ABI-only value with
 #: no header-AST path of its own). "hybrid" (G28 Phase 3) runs both castxml
 #: and clang and merges them.
-HEADER_AST_FRONTENDS: frozenset[str] = frozenset({"auto", "castxml", "clang", "hybrid"})
+HEADER_AST_FRONTENDS: frozenset[str] = frozenset({"auto", "castxml", "clang", "hybrid", "gcc"})

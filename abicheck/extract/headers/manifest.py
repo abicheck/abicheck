@@ -70,7 +70,8 @@ from ...tu_fragment import (
     entity_key as entity_key,
 )
 from ...tu_merge import merge_fragments as merge_tu_fragments
-from ..header_ast_fields import parse_header_ast_fields
+from ..header_ast_backend import validate_native_gcc_manifest
+from ..header_ast_fields import _HeaderAstParser, parse_header_ast_fields
 from ..manifest_semantic_ir import manifest_semantic_ir
 from ..path_aliases import absolutize_include_roots
 from ..progress import track
@@ -90,15 +91,14 @@ from .toolchain import (
 )
 
 if TYPE_CHECKING:
-    from ...dumper_clang import _ClangAstParser
-    from .castxml.dumper import _CastxmlParser
+    pass
 
 log = logging.getLogger(__name__)
 _TU_PROGRESS = "header AST (translation units)"
 
 #: Signature of ``dumper._header_ast_parser`` -- injected by the caller
 #: rather than imported, see this module's own docstring.
-HeaderAstParserFn = Callable[..., "_CastxmlParser | _ClangAstParser"]
+HeaderAstParserFn = Callable[..., _HeaderAstParser]
 
 # Re-exported for backward compatibility: TuFragment/MergedTuFragments/
 # entity_key used to be defined here (G32 Phase B) and moved to the leaf
@@ -217,6 +217,7 @@ def run_tu_fragment(
         preprocessor_hidden=parser_preprocessor_hidden(parser),
         cxx_concept_constraints=fields.cxx_concept_constraints,
         cxx_template_defaults=fields.cxx_template_defaults,
+        extraction_provenance=fields.extraction_provenance,
     )
 
 
@@ -577,11 +578,18 @@ class ElfHeaderAstResult:
     cxx_concept_constraints: dict[str, str] | None = None
     cxx_template_defaults: dict[str, TemplateDefaults] | None = None
 
+    extraction_provenance: dict[str, Any] | None = field(default=None, kw_only=True)
+
     def clang_ast_tables(self) -> dict[str, Any]:
         """The snapshot fields read from a clang AST of the headers (the
         clang backend's own, or castxml's clang join): the concept and
         template-default tables."""
         return {
+            **(
+                {"dump_provenance": self.extraction_provenance}
+                if self.extraction_provenance is not None
+                else {}
+            ),
             "cxx_concept_constraints": self.cxx_concept_constraints,
             "cxx_template_defaults": self.cxx_template_defaults,
         }
@@ -644,6 +652,7 @@ def resolve_header_ast_result(
     ``extract.headers.castxml.location.visibility``'s own docstring for what
     it changes. ``False`` (the default) for every ordinary binary dump.
     """
+    validate_native_gcc_manifest(backend, dump_manifest is not None)
     if dump_manifest is not None:
         merged = run_tu_loop(
             dump_manifest.translation_units,
@@ -731,6 +740,7 @@ def resolve_header_ast_result(
             preprocessor_hidden=fragment.preprocessor_hidden,
             cxx_concept_constraints=fragment.cxx_concept_constraints,
             cxx_template_defaults=fragment.cxx_template_defaults,
+            extraction_provenance=fragment.extraction_provenance,
         )
         provenance_headers = tuple(headers)
 
@@ -756,6 +766,7 @@ def resolve_header_ast_result(
         preprocessor_hidden=merged.preprocessor_hidden,
         cxx_concept_constraints=merged.cxx_concept_constraints,
         cxx_template_defaults=merged.cxx_template_defaults,
+        extraction_provenance=merged.extraction_provenance,
         # A real manifest carries its occurrence-preserving merged IR.
         semantic_ir=(
             merged.semantic_ir

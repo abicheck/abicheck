@@ -299,7 +299,7 @@ KEY_TABLE = KeyTable(
             "compile.frontend",
             Kind.STR,
             "compile_frontend",
-            normalize=_enum(("auto", "castxml", "clang", "hybrid"), lower=True),
+            normalize=_enum(("auto", "castxml", "clang", "hybrid", "gcc"), lower=True),
         ),
         KeySpec("compile.std", Kind.STR, "compile_std", normalize=_compile_atom),
         KeySpec("compile.include_dirs", Kind.LIST, "compile_include_dirs", []),

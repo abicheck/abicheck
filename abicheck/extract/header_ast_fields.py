@@ -120,11 +120,18 @@ class HeaderAstFields:
         default=None, kw_only=True
     )
 
+    extraction_provenance: dict[str, Any] | None = field(default=None, kw_only=True)
+
     def clang_ast_tables(self) -> dict[str, Any]:
         """The snapshot fields read from a clang AST of the headers (the
         clang backend's own, or castxml's clang join): the concept and
         template-default tables."""
         return {
+            **(
+                {"dump_provenance": self.extraction_provenance}
+                if self.extraction_provenance is not None
+                else {}
+            ),
             "cxx_concept_constraints": self.cxx_concept_constraints,
             "cxx_template_defaults": self.cxx_template_defaults,
         }
@@ -172,6 +179,9 @@ def parse_header_ast_fields(
     both slower and lossy.  Keep that established per-member binding path, and
     single-flight only the canonical ``SemanticIR`` derived from it.
     """
+    native = getattr(parser, "normalized_fields", None)
+    if isinstance(native, HeaderAstFields):
+        return native
     legacy = _parse_header_ast_legacy(parser, producer)
     # The shared normalization is keyed on the parsed AST's identity. A
     # parser that does not expose its root cannot be keyed: every such

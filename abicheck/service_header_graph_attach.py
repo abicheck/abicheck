@@ -137,7 +137,7 @@ def _attach_header_graph(
     # function rather than at the `_dump_elf` call site because `dumper.py`
     # and `workflows/dump/native.py` are both at their debt-ledger line caps.
     memory_trace.mark("dump.primary:done")
-    if not header_graph or not headers:
+    if not header_graph or not headers or snap.ast_producer == "gcc-experimental":
         return snap
     from .buildsource.header_graph import (
         HEADER_INCLUDE_GRAPH_PASS,

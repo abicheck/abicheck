@@ -542,7 +542,7 @@
     },
     {
       "path": "abicheck/dumper.py",
-      "baseline_lines": 1224,
+      "baseline_lines": 1223,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",

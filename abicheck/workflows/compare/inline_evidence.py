@@ -36,7 +36,7 @@ side's ``InputSpec``:
   seed run at the collect mode, the L4 replay on the folded compiler, and
   the changed-path seed;
 * **``--depth source`` under a ``hybrid`` frontend** is rejected on the
-  side's merged frontend (``reject_hybrid_source_frontend``, the rule
+  side's merged frontend (``reject_unsupported_header_frontend_evidence``, the rule
   resolution applies to a request that states ``depth``).
 
 Which inputs the collection consumes is ``inline_dump_evidence_routing``'s
@@ -230,7 +230,7 @@ def _side(
         )
     from ...service_compare_evidence import SideEvidence, dump_cli_compile_db_path
     from ..artifact.dump_execution_options import DumpExecutionOptions
-    from ..artifact.resolve import reject_hybrid_source_frontend
+    from ..artifact.resolve import reject_unsupported_header_frontend_evidence
     from ..compile_config import merge_compile_config
     from ..dump.project_config import resolve_dump_project_config
 
@@ -259,7 +259,7 @@ def _side(
         notify=run.notify,
     )
     collected = dataclasses.replace(side, sources=dump_sources)
-    reject_hybrid_source_frontend(
+    reject_unsupported_header_frontend_evidence(
         run.depth,
         (
             (
