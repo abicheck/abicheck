@@ -402,13 +402,13 @@ def _is_gnu_make_launcher(tool: str) -> bool:
     messages. BSD/non-GNU make implementations can accept different flags or
     print different transcript forms, so skip them cleanly.
     """
-    probe_timeout = 10.0
+    probe_timeout = deadline.PROBE_HANG_TIMEOUT_S
     scan_remaining = deadline.remaining()
     if scan_remaining is not None:
         # run_bounded() honors an active outer deadline verbatim (not
         # min(timeout, left)), so a bare `timeout=` alone would let this
         # probe run for the *whole* remaining scan budget under a generous
-        # --budget instead of its own 10s cap; nest a narrower scope bound
+        # --budget instead of its own hang guard; nest a narrower scope bound
         # by whichever is tighter (Codex review, PR #591, round 2 — mirrors
         # the include-map local-cap fix).
         probe_timeout = min(probe_timeout, scan_remaining)
@@ -424,7 +424,7 @@ def _is_gnu_make_launcher(tool: str) -> bool:
     except deadline.DeadlineExceeded:
         # The nested scope above already restored the OUTER deadline by the
         # time this except runs, so re-checking it here distinguishes "only
-        # this probe's local 10s cap expired" (an ordinary unavailable-tool
+        # this probe's local hang guard expired" (an ordinary unavailable-tool
         # result) from "the enclosing scan --budget is genuinely gone"
         # (propagate, don't misreport it as launcher detection failing and
         # potentially waste more time probing further candidates)

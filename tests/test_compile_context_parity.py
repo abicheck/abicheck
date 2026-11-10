@@ -480,8 +480,8 @@ def test_probe_gnu_system_includes_bounded_by_local_cap_not_full_scan_budget(
         dumper_sysinc._probe_gnu_system_includes("g++", cpp=True)
 
     assert seen_remaining
-    # Bound by the probe's own 15s cap, not the 1800s scan budget.
-    assert seen_remaining[0] is not None and seen_remaining[0] <= 15.5
+    cap = deadline.PROBE_HANG_TIMEOUT_S  # the probe's own bound, not the 1800s budget
+    assert seen_remaining[0] is not None and seen_remaining[0] <= cap + 0.5 < 1800
 
 
 @pytest.mark.parametrize(

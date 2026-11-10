@@ -142,8 +142,8 @@ def test_gnu_make_probe_bounded_by_local_cap_not_full_scan_budget(monkeypatch):
         assert _bq._is_gnu_make_launcher("/usr/bin/make") is True
 
     assert seen_remaining
-    # Bound by the probe's own 10s cap, not the 1800s scan budget.
-    assert seen_remaining[0] is not None and seen_remaining[0] <= 10.5
+    cap = deadline.PROBE_HANG_TIMEOUT_S  # the probe's own bound, not the 1800s budget
+    assert seen_remaining[0] is not None and seen_remaining[0] <= cap + 0.5 < 1800
 
 
 def test_gnu_make_probe_local_cap_hit_with_generous_scan_budget_returns_false(

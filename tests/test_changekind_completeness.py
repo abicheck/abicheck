@@ -528,6 +528,8 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.X86_ISA_BASELINE_RAISED,
     # Producer-side root of the same ISA requirement; tests/unit/compare/test_target_isa_detector.py.
     ChangeKind.TARGET_ISA_CHANGED,
+    # libstdc++ dual-ABI flip root cause; tests/unit/compare/test_glibcxx_dual_abi_detector.py.
+    ChangeKind.GLIBCXX_DUAL_ABI_CHANGED,
     ChangeKind.OS_DEPLOYMENT_FLOOR_RAISED,
     ChangeKind.DYNAMIC_LOADING_FLAGS_CHANGED,
     ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED,

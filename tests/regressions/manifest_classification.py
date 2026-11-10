@@ -942,6 +942,38 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="comparability.runtime_abi_selector_refused_instead_of_reported",
+        invariant=(
+            "A rebuild under the other libstdc++ dual ABI "
+            "(_GLIBCXX_USE_CXX11_ABI) is compared, not refused, on every "
+            "evidence lane: header parses that differ only in that selector "
+            "pass the comparability gate, and when the public surface uses "
+            "a type the selection changes (std::string family, std::list, by "
+            "signature, variable or record) the pair reports "
+            "glibcxx_dual_abi_changed and exits 4, in both directions; a "
+            "same-selection rebuild reports neither the kind nor a drift "
+            "record, and any other differing macro or profile field still "
+            "refuses."
+        ),
+        fixed_by=(1978,),
+        seed_tests=(
+            "tests/test_glibcxx_dual_abi_integration.py",
+            "tests/unit/compare/test_glibcxx_dual_abi_detector.py",
+        ),
+        public_surfaces=("cli",),
+        axes={
+            "lane": ("headers", "binary+dwarf"),
+            "direction": ("1to0", "0to1"),
+            "surface": ("std_string_param", "std_list_param", "embedding_record"),
+            "selection_evidence": (
+                "header_macro_ops",
+                "re_mangled_exports",
+                "debug_info_type_names",
+            ),
+            "control": ("same_default", "same_abi0", "headers", "binary_only"),
+        },
+    ),
+    BugClass(
         id="classification.unresolvable_symbol_version_scored_as_risk",
         invariant=(
             "A symbol-version transition is a binary break exactly when a "

@@ -15,13 +15,13 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 
 ## Headline
 
-- Total kinds: **427**
-- Kinds with at least one real source: **187**
-- Kinds per source: catalog 160, field_shapes 9, integration 69
+- Total kinds: **428**
+- Kinds with at least one real source: **188**
+- Kinds per source: catalog 160, field_shapes 9, integration 70
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
-| L0 | 129 | 72 |
+| L0 | 130 | 72 |
 | L1 | 62 | 7 |
 | L2 | 75 | 40 |
 | L3 | 15 | 5 |
@@ -94,10 +94,11 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `func_added_elf_only` | COMPATIBLE | 0 | 0 | 0 |
 | `func_export_added` | COMPATIBLE | 2 | 0 | 0 |
 | `func_language_linkage_changed` | BREAKING | 1 | 0 | 0 |
-| `func_removed` | BREAKING | 15 | 1 | 22 |
+| `func_removed` | BREAKING | 15 | 1 | 23 |
 | `func_removed_elf_only` | BREAKING | 5 | 0 | 7 |
 | `func_visibility_changed` | BREAKING | 2 | 0 | 2 |
 | `func_visibility_protected_changed` | RISK | 1 | 0 | 0 |
+| `glibcxx_dual_abi_changed` | BREAKING | 0 | 0 | 3 |
 | `glibcxx_dual_abi_flip_detected` | COMPATIBLE | 1 | 0 | 0 |
 | `hash_style_removed` | RISK | 0 | 0 | 0 |
 | `ifunc_introduced` | COMPATIBLE | 1 | 0 | 1 |
@@ -212,7 +213,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `field_renamed` | API_BREAK | 1 | 0 | 0 |
 | `flexible_array_member_changed` | COMPATIBLE | 1 | 0 | 0 |
 | `func_cv_changed` | BREAKING | 1 | 0 | 0 |
-| `func_params_changed` | BREAKING | 5 | 1 | 14 |
+| `func_params_changed` | BREAKING | 5 | 1 | 15 |
 | `func_pure_virtual_added` | BREAKING | 0 | 0 | 0 |
 | `func_return_changed` | BREAKING | 5 | 0 | 6 |
 | `func_static_changed` | BREAKING | 1 | 0 | 0 |
@@ -231,7 +232,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `suppression_would_hide_public_break` | RISK | 0 | 0 | 0 |
 | `time64_abi_changed` | BREAKING | 0 | 0 | 0 |
 | `tls_var_size_changed` | BREAKING | 1 | 0 | 0 |
-| `toolchain_flag_drift` | COMPATIBLE | 1 | 0 | 2 |
+| `toolchain_flag_drift` | COMPATIBLE | 1 | 0 | 3 |
 | `type_alignment_changed` | BREAKING | 1 | 0 | 0 |
 | `type_base_changed` | BREAKING | 3 | 0 | 0 |
 | `type_became_opaque` | BREAKING | 1 | 0 | 0 |
@@ -241,7 +242,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `type_field_type_changed` | BREAKING | 3 | 0 | 5 |
 | `type_kind_changed` | BREAKING | 1 | 0 | 0 |
 | `type_removed` | API_BREAK | 5 | 1 | 3 |
-| `type_size_changed` | BREAKING | 19 | 1 | 4 |
+| `type_size_changed` | BREAKING | 19 | 1 | 6 |
 | `type_vtable_changed` | BREAKING | 3 | 0 | 0 |
 | `typedef_base_changed` | BREAKING | 1 | 0 | 4 |
 | `typedef_removed` | API_BREAK | 2 | 0 | 1 |

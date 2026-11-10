@@ -429,6 +429,15 @@ def drain_reader_queue(
     reader_thread.join(timeout=max(0.0, end - time.monotonic()))
 
 
+#: Hang guard for one external-tool call (a compiler's ``--version``,
+#: ``-dumpmachine`` or ``-E -dM`` probe, ``c++filt``, ``git``). What such a
+#: call answers is recorded, so the bound only tells a hung tool from a slow
+#: one: a working tool on a loaded host (a cold start under antivirus, a
+#: saturated CI runner) still answers within it. An active deadline still
+#: caps every :func:`run_bounded` call, so a ``--budget`` is unaffected.
+PROBE_HANG_TIMEOUT_S = 120.0
+
+
 def run_bounded(
     cmd: list[str],
     *,

@@ -252,6 +252,27 @@ DETECTOR_INPUTS: dict[str, DetectorInputs] = {
     "protected_visibility": _NONE,
     "symbol_version_alias": _NONE,
     "glibcxx_dual_abi": _NONE,
+    "glibcxx_dual_abi_selection": DetectorInputs(
+        tolerates={
+            "contract": (
+                "one source of a side's dual-ABI selection (the header "
+                "parse's macro_ops); cleared, the side falls back to its "
+                "producer flag or mangled-name inference, or has no "
+                "selection, and no flip is claimed for it"
+            ),
+            "build_mode": (
+                "the DW_AT_producer -D selection source; cleared, the side "
+                "falls back to what its names spell, or has no selection, and "
+                "no flip is claimed for it"
+            ),
+            "declarations.types": (
+                "debug-info record names are one selection source and public "
+                "records holding a changed type enrich a known flip; cleared, "
+                "the selection falls back to the exported names and only "
+                "re-mangled exports prove the break"
+            ),
+        },
+    ),
     "inline_namespace": _NONE,
     "vtable_identity": _NONE,
     "abi_surface": _NONE,

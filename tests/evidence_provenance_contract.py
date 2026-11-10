@@ -524,6 +524,7 @@ PROVENANCE_UNVERIFIED = frozenset(
         "whole_program_vtables_mode_changed",
         "target_isa_changed",
         "x86_isa_baseline_raised",
+        "glibcxx_dual_abi_changed",
     }
 )
 

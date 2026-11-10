@@ -478,3 +478,7 @@ rather than relying on access to an actual 32-bit build.
 - ADR-050 (comparability contract) — unaffected: `ExtractionContract`
   fingerprints are computed from decoded snapshot content, identical
   across encodings.
+
+## Amendment (2026-11-09): write the tier the request can consume
+
+A cold request with a finisher writes only its finished entry. A finished-tier miss already re-extracts instead of reading the raw tier, because re-scoping a reloaded raw entry can differ from the cold result. Writing both snapshots therefore adds serialization and retention without helping the next identical request. Raw requests without a finisher still populate their raw entry. Existing entries remain readable; no schema, cache key or evidence changes. A later raw-only request after a finished-only request may need one extraction instead of inheriting a raw entry produced incidentally by that earlier request.

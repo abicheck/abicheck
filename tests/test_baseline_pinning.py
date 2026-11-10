@@ -5,6 +5,7 @@ import tempfile
 from pathlib import Path
 from unittest import mock
 
+from abicheck.deadline import PROBE_HANG_TIMEOUT_S
 from abicheck.model import AbiSnapshot
 from abicheck.serialization import (
     SCHEMA_VERSION,
@@ -131,7 +132,7 @@ class TestStampProvenance:
             ["git", "rev-parse", "HEAD"],
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=PROBE_HANG_TIMEOUT_S,
             check=False,
         )
 
