@@ -243,18 +243,18 @@ def _probe_gnu_system_includes(cc_bin: str, *, cpp: bool) -> list[str]:
     here, the one place that already knows the path exists and can afford a
     ``realpath`` syscall.
 
-    Bounded by the tighter of its own 15s cap and the active deadline, and
+    Bounded by the tighter of its own hang guard and the active deadline, and
     process-group-safe on timeout, same as the main clang/castxml subprocess
-    calls — otherwise a tight ``--budget`` could still spend up to ~15s per
+    calls — otherwise a tight ``--budget`` could still spend a whole hang guard per
     probe (two probes: C and C++) in a slow/hung compiler before the
     budget-aware parse is ever reached (Codex review). Nesting a narrower
     scope also stops a *generous* ``--budget`` from letting a hung probe run
-    for the whole remaining scan budget instead of its own 15s ceiling —
+    for the whole remaining scan budget instead of its own hang guard —
     ``run_bounded()`` honors an active outer deadline verbatim, not
     ``min(timeout, left)`` (Codex review, round 2).
     """
     lang = "c++" if cpp else "c"
-    probe_timeout = 15.0
+    probe_timeout = deadline.PROBE_HANG_TIMEOUT_S
     scan_remaining = deadline.remaining()
     if scan_remaining is not None:
         probe_timeout = min(probe_timeout, scan_remaining)

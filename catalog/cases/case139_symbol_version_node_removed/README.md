@@ -59,9 +59,9 @@ Verdict: BREAKING (exit 4)
     script. Applications linked against symbols under that version node
     will get unresolved symbol errors at load time.
 
-Also reported (risk):
+Also reported (breaking):
 - symbol_moved_version_node: Symbol beta moved from version node LIBX_2.0
-  to LIBX_1.0.
+  to LIBX_1.0 without keeping LIBX_2.0.
 ```
 
 ## Minimum evidence

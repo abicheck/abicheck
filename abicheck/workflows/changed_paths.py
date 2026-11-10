@@ -35,6 +35,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..deadline import PROBE_HANG_TIMEOUT_S
+
 #: The ``--depth source`` collect mode a *seeded* run narrows to, and the
 #: unseeded one it narrows *from*. ADR-043 D7: a source-depth run uses
 #: changed-path scope when a seed is given, else the current library target --
@@ -81,7 +83,7 @@ def git_changed_paths(
             cwd=str(cwd) if cwd is not None else None,
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=PROBE_HANG_TIMEOUT_S,
             check=False,
         )
     except (OSError, subprocess.SubprocessError) as exc:

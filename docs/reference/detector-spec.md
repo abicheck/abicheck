@@ -2,7 +2,7 @@
 
 # Detector specification matrix
 
-One row per `ChangeKind` (427 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`catalog/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
+One row per `ChangeKind` (428 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`catalog/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
 
 | ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug | Examples |
 |---|---|---|---|---|---|---|
@@ -156,6 +156,7 @@ One row per `ChangeKind` (427 total). Columns fuse the verdict partition (`check
 | `generated_file_dependency_unstable` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `generated_file_dependency_unstable` | — |
 | `generated_header_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `generated_header_changed` | — |
 | `generated_header_reaches_public_api` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `generated_header_reaches_public_api` | — |
+| `glibcxx_dual_abi_changed` | breaking | `BREAKING` | `error` | L0 | `glibcxx_dual_abi_changed` | — |
 | `glibcxx_dual_abi_flip_detected` | quality | `COMPATIBLE` | `warning` | L0 | `glibcxx_dual_abi_flip_detected` | [case104](examples/case104_glibcxx_dual_abi_flip.md) |
 | `graph_coverage_insufficient_for_suppression` | quality | `COMPATIBLE` | `warning` | L1 | `graph_coverage_insufficient_for_suppression` | — |
 | `handle_type_changed` | breaking | `BREAKING` | `error` | unspecified | `handle_type_changed` | — |
@@ -335,7 +336,7 @@ One row per `ChangeKind` (427 total). Columns fuse the verdict partition (`check
 | `symbol_binding_strengthened` | quality | `COMPATIBLE` | `warning` | L0 | `symbol_binding_strengthened` | [case128](examples/case128_symbol_binding_strengthened.md) |
 | `symbol_elf_visibility_changed` | quality | `COMPATIBLE` | `warning` | L0 | `symbol_elf_visibility_changed` | [case51](examples/case51_protected_visibility.md) |
 | `symbol_leaked_from_dependency_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `symbol_leaked_from_dependency_changed` | — |
-| `symbol_moved_version_node` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `symbol_moved_version_node` | — |
+| `symbol_moved_version_node` | breaking | `BREAKING` | `error` | unspecified | `symbol_moved_version_node` | — |
 | `symbol_renamed_batch` | breaking | `BREAKING` | `error` | unspecified | `symbol_renamed_batch` | — |
 | `symbol_size_changed` | breaking | `BREAKING` | `error` | L0 | `symbol_size_changed` | [case127](examples/case127_data_object_size_changed.md) |
 | `symbol_size_changed_const_object` | breaking | `BREAKING` | `error` | unspecified | `symbol_size_changed_const_object` | — |

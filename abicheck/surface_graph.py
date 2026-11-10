@@ -512,6 +512,35 @@ def _is_exported(
     return _is_public(decl, public_entity_ids) and is_binary_exported(decl)
 
 
+def _top_fan_in(
+    graph: SurfaceGraph, names: list[str], top_n: int
+) -> list[tuple[str, int]]:
+    """Build one inverse index for a metrics batch, then discard it.
+
+    Source ordinals deduplicate references matching both full and short
+    spellings. Nothing is retained on the snapshot or shared graph.
+    """
+    incoming: dict[str, set[int]] = {}
+    for source, refs in enumerate(graph.type_refs.values()):
+        for ref in refs:
+            incoming.setdefault(ref, set()).add(source)
+    counts: list[tuple[str, int]] = []
+    for name in names:
+        sources = [incoming.get(alias, set()) for alias in graph._aliases(name)]
+        if len(sources) == 1:
+            count = len(sources[0])
+        elif len(sources) == 2:
+            left, right = sources
+            # Intersect instead of copying a large shared short-name bucket
+            # for every qualified type using that alias.
+            count = len(left) + len(right) - len(left & right)
+        else:
+            count = len(set().union(*sources))
+        counts.append((name, count))
+    counts.sort(key=lambda pair: (-pair[1], pair[0]))
+    return [(name, count) for name, count in counts[:top_n] if count > 0]
+
+
 def compute_surface_metrics(
     snap: AbiSnapshot,
     *,
@@ -569,11 +598,7 @@ def compute_surface_metrics(
     # Iterate canonical record names (each real record once, by full name) so a
     # namespaced record is not listed twice under both ``ns::A`` and ``A``.
     canonical_type_names = sorted({rec.name for rec in snap.declarations.types})
-    fan_in = sorted(
-        ((name, graph.fan_in(name)) for name in canonical_type_names),
-        key=lambda kv: (-kv[1], kv[0]),
-    )
-    top_fan_in = [(n, c) for n, c in fan_in[:top_n] if c > 0]
+    top_fan_in = _top_fan_in(graph, canonical_type_names, top_n)
 
     # Per-header declared/exported counts with *overload-preserving* identity:
     # functions are counted by mangled name (so foo(int) and foo(double) count

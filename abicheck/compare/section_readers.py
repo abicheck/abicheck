@@ -115,6 +115,9 @@ DETECTOR_SECTIONS: Mapping[str, frozenset[str]] = {
         ]
     ),
     "glibcxx_dual_abi": frozenset(["declarations"]),
+    "glibcxx_dual_abi_selection": frozenset(
+        ["binary", "declarations", "layout", "types"]
+    ),
     "inline_namespace": frozenset(["declarations"]),
     "integer_model": frozenset(["binary", "declarations"]),
     "kabi": frozenset(["binary"]),

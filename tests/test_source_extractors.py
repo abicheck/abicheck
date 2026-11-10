@@ -1389,7 +1389,7 @@ def test_castxml_tool_version_is_bound_by_deadline_run_bounded(monkeypatch) -> N
     monkeypatch.setattr(castxml_mod.deadline, "run_bounded", fake_run_bounded)
     assert castxml_mod._castxml_tool_version("castxml") == ""
     assert seen["cmd"] == ["castxml", "--version"]
-    assert seen["timeout"] == 5
+    assert seen["timeout"] == deadline.PROBE_HANG_TIMEOUT_S
     castxml_mod._castxml_tool_version.cache_clear()
 
 

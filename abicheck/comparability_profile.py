@@ -35,7 +35,6 @@ the same shape ``type_reachability.py``'s own
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 
 from .comparability import (
@@ -68,6 +67,11 @@ from .comparability_sequences import (
 )
 from .compare.auto_derived_standard import auto_derived_standard_reason
 from .model import AbiSnapshot, ExtractionContract, FactStatus
+from .model.glibcxx_dual_abi import (
+    RUNTIME_ABI_MACROS,
+    macro_ops_differ_only_in_runtime_abi,
+    parse_macro_ops,
+)
 
 
 def _toolchain_identity_status(
@@ -213,6 +217,16 @@ def _unexplained_profile_fields(
         # detector classify it correctly.
         unexplained -= build_candidate
 
+    # ADR-050 amendment (2026-11-09): a header parse that differs only in a
+    # runtime-ABI selector (`-D_GLIBCXX_USE_CXX11_ABI=0` on one side) parsed
+    # the same declarations under the other libstdc++ ABI. That is the
+    # library's own ABI change, reported as `glibcxx_dual_abi_changed`
+    # (compare/glibcxx_dual_abi.py), not an incomparable profile.
+    if "macro_ops" in unexplained and macro_ops_differ_only_in_runtime_abi(
+        old_fields.get("macro_ops"), new_fields.get("macro_ops")
+    ):
+        unexplained.discard("macro_ops")
+
     # abicheck-internal-bugs finding 2 follow-up (Codex review): waive a
     # language_standard-only mismatch that is fully explained by this PR's
     # own probe having been added by an upgrade -- see
@@ -321,25 +335,9 @@ def header_sequence_change_is_scope_confirmed(
     )
 
 
-#: Macros that select a C++ runtime's ABI rather than configure the library's
-#: declarations: flipping one renames or relayouts runtime types in every
-#: signature that uses them (libstdc++'s dual ABI renames ``std::string`` and
-#: ``std::list`` into and out of ``std::__cxx11``).
-_RUNTIME_ABI_MACROS = ("_GLIBCXX_USE_CXX11_ABI",)
-
-
 def _macro_ops(fields: Mapping[str, object]) -> list[str]:
     """``profile_fields["macro_ops"]`` as ``-DNAME=VALUE``/``-UNAME`` spellings."""
-    raw = fields.get("macro_ops")
-    try:
-        ops = json.loads(raw) if isinstance(raw, str) else []
-    except ValueError:
-        return []
-    return [
-        f"-{op[0]}{op[1]}"
-        for op in ops
-        if isinstance(op, list) and len(op) == 2 and all(isinstance(x, str) for x in op)
-    ]
+    return [f"-{op}{arg}" for op, arg in parse_macro_ops(fields.get("macro_ops"))]
 
 
 def macro_ops_detail(
@@ -348,8 +346,9 @@ def macro_ops_detail(
     """The macro operations only one side's header parse ran, for a
     ``macro_ops`` mismatch reason (``""`` when neither side's are readable).
 
-    Names a runtime-ABI selector (:data:`_RUNTIME_ABI_MACROS`) and what to do
-    about it, since that rebuild is itself an ABI change the refusal hides."""
+    When a runtime-ABI selector (:data:`RUNTIME_ABI_MACROS`) is among them,
+    says that it alone would not refuse: the other operations are what keep
+    the refusal, and without them the flip is reported as a finding."""
     old_ops, new_ops = _macro_ops(old_fields), _macro_ops(new_fields)
     only_old = [o for o in old_ops if o not in new_ops]
     only_new = [o for o in new_ops if o not in old_ops]
@@ -360,15 +359,14 @@ def macro_ops_detail(
         f"only in new: {', '.join(only_new) or '(none)'}."
     )
     abi = sorted(
-        m for m in _RUNTIME_ABI_MACROS if any(m in op for op in only_old + only_new)
+        m for m in RUNTIME_ABI_MACROS if any(m in op for op in only_old + only_new)
     )
     if abi:
         detail += (
-            f" {', '.join(abi)} selects the C++ runtime's ABI: the rebuild "
-            "renames every symbol whose signature uses std::string or "
-            "std::list, which consumers built before cannot bind. Compare "
-            "without headers, or pass --diagnostic-comparison, to see those "
-            "removals."
+            f" {', '.join(abi)} selects the C++ runtime's ABI; a difference in "
+            "it alone is compared and reported as glibcxx_dual_abi_changed. "
+            "The other macro operations are what make the header parses "
+            "incomparable: run both dumps with the same ones."
         )
     return detail
 

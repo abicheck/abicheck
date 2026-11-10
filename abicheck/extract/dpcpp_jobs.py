@@ -81,11 +81,15 @@ def _driver_jobs(cmd: list[str]) -> list[list[str]] | None:
     import subprocess
 
     from .._compiler_options import split_command_line
-    from ..deadline import run_bounded
+    from ..deadline import PROBE_HANG_TIMEOUT_S, run_bounded
 
     try:
         proc = run_bounded(
-            [*cmd, "-###"], timeout=30, capture_output=True, text=True, input=""
+            [*cmd, "-###"],
+            timeout=PROBE_HANG_TIMEOUT_S,
+            capture_output=True,
+            text=True,
+            input="",
         )
     except (OSError, subprocess.TimeoutExpired):
         return None

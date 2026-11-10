@@ -33,7 +33,12 @@ from ..._compiler_options import (
     has_explicit_std,
     split_gcc_options,
 )
-from ...deadline import run_bounded, supervised_popen, terminate_process_tree
+from ...deadline import (
+    PROBE_HANG_TIMEOUT_S,
+    run_bounded,
+    supervised_popen,
+    terminate_process_tree,
+)
 from ...dumper_ast_config_cpp20 import _detect_cpp20_headers
 from ...model.execution_cache import memoized, path_witness
 from ...model.header_parse_coverage import HEADER_PARSE_EXCLUDED_METADATA
@@ -138,7 +143,7 @@ def _tool_version_output(selected_path: str, digest: str) -> str:
             try:
                 # A timeout leaves the ``with`` block by exception, which
                 # tears the child's whole group down.
-                process.wait(timeout=10)
+                process.wait(timeout=PROBE_HANG_TIMEOUT_S)
             finally:
                 reader.join(timeout=1)
                 stdout.close()
@@ -165,7 +170,7 @@ def _tool_target_triple(selected_path: str, digest: str) -> str | None:
             [selected_path, "-dumpmachine"],
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
-            timeout=10,
+            timeout=PROBE_HANG_TIMEOUT_S,
             text=True,
         )
     except (OSError, subprocess.TimeoutExpired):
@@ -614,7 +619,7 @@ def _probe_default_language_standard(compiler_bin: str, lang_mode: str) -> str |
             input="",
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=PROBE_HANG_TIMEOUT_S,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
@@ -739,7 +744,9 @@ def _configured_target_triple(
         "-print-target-triple",
     ]
     try:
-        result = run_bounded(cmd, capture_output=True, text=True, timeout=10)
+        result = run_bounded(
+            cmd, capture_output=True, text=True, timeout=PROBE_HANG_TIMEOUT_S
+        )
     except (OSError, subprocess.TimeoutExpired) as exc:
         log.warning("Could not probe effective Clang target: %s", exc)
         return None

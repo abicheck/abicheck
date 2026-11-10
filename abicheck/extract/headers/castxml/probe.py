@@ -68,7 +68,7 @@ def _castxml_version_note(castxml_bin: str = "castxml") -> str:
     """Probe ``castxml --version`` and, when its bundled Clang predates the
     recommended floor, return a one-line upgrade note (else "").
 
-    Best-effort: a probe failure against its OWN 15s cap yields "" so the
+    Best-effort: a probe failure against its OWN hang guard yields "" so the
     base diagnostic still stands. A DeadlineExceeded from the tighter OUTER
     scan deadline instead propagates uncaught (authoritative L2 path, unlike
     an L3+ advisory pass) rather than masquerading as a parse failure —
@@ -77,7 +77,7 @@ def _castxml_version_note(castxml_bin: str = "castxml") -> str:
     both caps meaningful (Codex review, PR #591, rounds 1-2). Only called on
     an actual parse failure, so the extra process is incurred rarely.
     """
-    probe_timeout = 15.0
+    probe_timeout = deadline.PROBE_HANG_TIMEOUT_S
     scan_remaining = deadline.remaining()
     bound_by_scan_deadline = (
         scan_remaining is not None and scan_remaining < probe_timeout
@@ -95,7 +95,7 @@ def _castxml_version_note(castxml_bin: str = "castxml") -> str:
     except deadline.DeadlineExceeded:
         if bound_by_scan_deadline:
             raise
-        # The entry-time snapshot said the local 15s cap was binding, not
+        # The entry-time snapshot said the local hang guard was binding, not
         # the outer scan deadline — but run_bounded's own escalation
         # (SIGTERM -> grace -> SIGKILL, plus a fixed 5s pipe-drain) can push
         # real elapsed time past that snapshot, so the outer deadline can
