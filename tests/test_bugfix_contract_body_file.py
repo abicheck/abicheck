@@ -10,7 +10,7 @@ import pytest
 from tests._bugfix_contract_gate import (  # noqa: F401
     COMPLETE_BODY,
     _content_diff,
-    _no_inherited_body_file,
+    _no_inherited_gate_env,
     gate,
 )
 

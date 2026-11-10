@@ -115,7 +115,9 @@ FAMILIES: dict[str, Family] = {
             harness_tests=(
                 "tests/test_family_f5_optimization_reference.py",
                 "tests/test_family_f5_derived_ast_sharing.py",
+                "tests/test_dump_cache_single_tier.py",
                 "tests/test_family_f5_packed_type_graph.py",
+                "tests/test_surface_metrics_fan_in_index.py",
                 "tests/test_header_dir_expansion_canonical_order.py",
                 "tests/test_memo_stats_across_clear.py",
             ),
@@ -165,6 +167,8 @@ FAMILIES: dict[str, Family] = {
                 # ELF vs PE (MSVC ABI) vs Mach-O cross-builds of one source,
                 # compared through the CLI with -H under both header backends.
                 "tests/test_pe_macho_header_binding_integration.py",
+                # The same toolchain answering slowly records the same facts.
+                "tests/test_tool_probe_hang_guard.py",
             ),
         ),
         Family(
@@ -558,6 +562,9 @@ _F8 = (
     # A PE/Mach-O header parse discarded when no declaration's spelling met an
     # export (an MSVC DLL against an Itanium parse; a template-only header).
     "extraction.header_surface_discarded_on_export_mismatch",
+    # A probe of a slow but working toolchain recorded a different fact than
+    # the same toolchain answering fast (harness: test_slow_tools_still_answer).
+    "extraction.tool_probe_answer_depends_on_host_load",
 )
 _F7 = (
     # Masked by suite-wide shared interpreter state: passed in a full run,
@@ -597,7 +604,10 @@ _F9 = (
 )
 _F10 = ("concurrency.abandoned_child_outlives_failed_owner",)
 _F11 = ("measurement.forked_tree_rss_overstates_memory",)
-_F19 = ("classification.removed_virtual_slot_read_as_plain_removal",)
+_F19 = (
+    "classification.removed_virtual_slot_read_as_plain_removal",
+    "comparability.runtime_abi_selector_refused_instead_of_reported",
+)
 _F12 = (
     # The public-root probe read only `/I` from a CL-mode argv, so a `-I` or
     # `/external:I` include root was never probed while the replay read a

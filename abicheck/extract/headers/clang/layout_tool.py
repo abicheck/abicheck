@@ -66,7 +66,7 @@ from typing import Any
 
 from ...._compiler_options import effective_driver_mode_is_cl
 from ....buildsource.build_query import PRUNED_HEADER_DIR_SEGMENTS
-from ....deadline import run_bounded
+from ....deadline import PROBE_HANG_TIMEOUT_S, run_bounded
 from ....dumper_ast_config_cpp20 import _detect_cpp20_headers
 from ....dumper_clang_errors import _is_missing_cpp_stdlib_header_error
 from ....errors import SnapshotError, ValidationError
@@ -94,8 +94,6 @@ log = logging.getLogger(__name__)
 #: is the opt-in signal — unset means "skip this enrichment entirely."
 LAYOUT_TOOL_ENV_VAR = "ABICHECK_CLANG_LAYOUT_TOOL"
 _DEFAULT_BIN_NAME = "abicheck-clang-layout-tool"
-#: Seconds one layout-tool run may take before it degrades to "no enrichment".
-_LAYOUT_TOOL_TIMEOUT_S = 60
 
 _LAYOUT_SCALAR_FIELDS = (
     "size_bits",
@@ -264,7 +262,7 @@ def run_layout_tool(
             cmd,
             capture_output=True,
             text=True,
-            timeout=_LAYOUT_TOOL_TIMEOUT_S,
+            timeout=PROBE_HANG_TIMEOUT_S,
         )
 
     def _run_shimmed(
@@ -402,7 +400,7 @@ def _run_builtin_layout_dump(
         ]
         try:
             result = run_bounded(
-                cmd, capture_output=True, text=True, timeout=_LAYOUT_TOOL_TIMEOUT_S
+                cmd, capture_output=True, text=True, timeout=PROBE_HANG_TIMEOUT_S
             )
         except (subprocess.SubprocessError, OSError) as exc:
             log.debug("clang record-layout dump failed: %s", exc)

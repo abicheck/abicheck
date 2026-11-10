@@ -240,6 +240,9 @@ DETECTOR_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
             }
         ),
         "glibcxx_dual_abi": frozenset({"glibcxx_dual_abi_flip_detected"}),
+        "glibcxx_dual_abi_selection": frozenset(
+            {"glibcxx_dual_abi_changed", "toolchain_flag_drift"}
+        ),
         "inline_namespace": frozenset({"inline_namespace_moved"}),
         "integer_model": frozenset({"integer_model_changed"}),
         "kabi": frozenset(

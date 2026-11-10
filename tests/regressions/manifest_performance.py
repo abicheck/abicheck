@@ -27,11 +27,15 @@ was found only by profiling a real corpus.
 from __future__ import annotations
 
 from .bug_class_schema import BugClass, KnownGap
+from .manifest_cache_retention import CACHE_RETENTION_BUG_CLASSES
+from .manifest_derived_work import DERIVED_WORK_BUG_CLASSES
 
 __all__ = ["PERFORMANCE_BUG_CLASSES"]
 
 
-PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
+_EXTRACTED_BUG_CLASSES = CACHE_RETENTION_BUG_CLASSES + DERIVED_WORK_BUG_CLASSES
+
+PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = _EXTRACTED_BUG_CLASSES + (
     BugClass(
         id="perf.evidence_released_before_its_consumer_runs",
         invariant=(
@@ -78,58 +82,6 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
                     "the affected findings."
                 ),
                 reference="docs/contribute/measurements/header-graph-attach-memory.md",
-            ),
-        ),
-    ),
-    BugClass(
-        id="perf.pure_content_digest_recomputed_per_consumer",
-        invariant=(
-            "A pure, expensive, content-derived value reached by several "
-            "independent consumers within one run must be computed at "
-            "most once per distinct input, not once per consumer. The "
-            "guard is a count of the expensive work actually performed "
-            "during a real run, bounded by the number of distinct inputs "
-            "— never an assertion that one named consumer uses the cache, "
-            "which forecloses exactly that call site and says nothing "
-            "about the next one added."
-        ),
-        # v19 oneAPI scan: every graph-shaped compare regressed ~1.7-1.8x
-        # against v18 (oneTBB pair 431s -> 740s, self-compare 406s -> 726s).
-        # cProfile put 404s of a 620s run inside
-        # `serialization.snapshot_content_digest` at n=6 over two snapshots;
-        # v18 was n=2. A fourth `same_persisted_content` caller had been
-        # added without anyone noticing the third, and nothing anywhere
-        # measured the count.
-        fixed_by=(1245,),
-        seed_tests=(
-            "tests/test_snapshot_digest_recomputation.py",
-            # The same class in the clang header backend: three pure,
-            # AST-derived template-parameter indexes rebuilt once per
-            # constructed parser rather than once per distinct AST, so a
-            # six-member shared-header fan-out ran each builder 14 times for
-            # 2 distinct answers. Same guard shape, per this class's own
-            # invariant -- a count of the builds a real run performs, bounded
-            # by the number of distinct inputs, not an assertion that one
-            # named call site consults the cache.
-            "tests/test_clang_template_index_reuse.py",
-            "tests/test_clang_template_index_reuse_e2e.py",
-        ),
-        public_surfaces=("cli", "python-api"),
-        axes={
-            "front_end": ("cli", "typed_api"),
-            "pairing": ("content-identical", "genuinely-different"),
-        },
-        known_gaps=(
-            KnownGap(
-                description=(
-                    "The bound is enforced for the pairwise `compare` "
-                    "paths that open a digest scope. Other snapshot-digest "
-                    "consumers outside one — `workflows/"
-                    "bundle_stored_pair_compare.py`'s stored-pair route — "
-                    "are correct but unmemoized, and no gate fails if a "
-                    "future front end forgets to open a scope."
-                ),
-                reference="docs/contribute/plans/bug-class-regression-testing.md",
             ),
         ),
     ),
@@ -767,63 +719,6 @@ PERFORMANCE_BUG_CLASSES: tuple[BugClass, ...] = (
                     "objects only -- the big-endian and ELF32 evidence "
                     "is synthetic, built by pyelftools itself, because "
                     "no such toolchain was available."
-                ),
-                reference="docs/contribute/known-gaps.md",
-            ),
-        ),
-    ),
-    BugClass(
-        id="perf.retention_decided_by_one_switch_not_by_consumers",
-        invariant=(
-            "A retention decision taken for several consumers at once must "
-            "be resolved per consumer and per side, not by one boolean that "
-            "any of them can flip for all of them. A shared switch is not "
-            "merely coarse: it is unfalsifiable, because the side nobody "
-            "reads looks exactly like the side everybody reads, and no test "
-            "of the *output* can tell the difference -- the outputs are "
-            "identical either way, which is precisely why the amplification "
-            "survived. So the guard is a consumer inventory with an "
-            "executable claim attached: the resolved retention says which "
-            "side each requested output reads, and a test asserts the "
-            "unread side is genuinely absent from the member entry rather "
-            "than merely unused. `need_full_snapshots` pinned both sides' "
-            "full `AbiSnapshot` for every member whenever JUnit or "
-            "`--bundle-facts-out` was requested, while every consumer of "
-            "either read only the OLD side; the NEW graph was retained for "
-            "the whole release and never opened."
-        ),
-        fixed_by=(1332,),
-        seed_tests=(
-            "tests/test_release_snapshot_retention.py",
-            "tests/test_compare_release_contract_coverage.py",
-            # The same class, one consumer further: JUnit was resolved as
-            # an OLD-side full-snapshot consumer without anyone checking
-            # what it read, which was four attributes. See
-            # `perf.a_whole_document_retained_for_a_narrow_projection`.
-            "tests/test_junit_symbol_inventory.py",
-            # The last consumer: `--bundle-facts-out` still reads the whole
-            # OLD document, so it is kept whole -- on disk, in a spool,
-            # from the moment the member finishes (weakref reachability,
-            # write peak, byte identity against the eager writer).
-            "tests/test_bundle_facts_out_spool.py",
-        ),
-        public_surfaces=(),
-        axes={
-            "output": ("json", "junit", "bundle-facts-out", "junit+baseline"),
-            "retained_where": ("resident", "spooled"),
-            "side": ("old", "new"),
-            "member_count": ("one", "several"),
-        },
-        known_gaps=(
-            KnownGap(
-                description=(
-                    "The consumer inventory is asserted against the call "
-                    "sites as they are, not derived from them: a future "
-                    "consumer that starts reading `_new_snapshot` would "
-                    "fail the seed test (the key is absent) rather than be "
-                    "prevented from being written, which is the intended "
-                    "direction but is a test-time signal, not a type-level "
-                    "one."
                 ),
                 reference="docs/contribute/known-gaps.md",
             ),

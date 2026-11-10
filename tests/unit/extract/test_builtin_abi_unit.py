@@ -32,6 +32,7 @@ from typing import Any
 import pytest
 from _strict_process import StrictProcessRunner, proc
 
+from abicheck.deadline import PROBE_HANG_TIMEOUT_S
 from abicheck.extract import builtin_abi
 from abicheck.extract.builtin_abi import (
     BUILTIN_ENCODING,
@@ -704,7 +705,11 @@ def test_run_bounded_result_is_passed_through_unchanged(
 
     def fake(argv: list[str], **kwargs: Any) -> Any:
         calls.append(argv)
-        assert kwargs == {"timeout": 60, "capture_output": True, "text": True}
+        assert kwargs == {
+            "timeout": PROBE_HANG_TIMEOUT_S,
+            "capture_output": True,
+            "text": True,
+        }
         return done
 
     monkeypatch.setattr(builtin_abi, "run_bounded", fake)
