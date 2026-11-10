@@ -44,6 +44,7 @@ _PE_FIXTURE = (
 )
 _ELF_SOURCE = "int keep(void) { return 3; }\nint also(int a) { return a + 1; }\n"
 _BOTH = ["old", "new"]
+_SAME_BINARY_NOTE = "old and new binaries are byte-identical"
 
 
 def _invoke(*args: str) -> tuple[int, dict]:
@@ -197,6 +198,14 @@ def test_pe_pairs_read_the_recorded_identity(tmp_path: Path, cell: str) -> None:
     assert_claim_outcome(
         code, report, observed="NO_CHANGE", lacking=[] if proven else _BOTH
     )
+    # The same-binary note reads the same identity: it names the binaries
+    # byte-identical exactly when both sides' bytes are known (live or
+    # recorded) and equal -- never from an older dump that recorded none.
+    binary_note = [w for w in report["coverage_warnings"] if _SAME_BINARY_NOTE in w]
+    expect_note = same_bytes and "older.json" not in (old_key, new_key)
+    assert len(binary_note) == int(expect_note), report["coverage_warnings"]
+    if expect_note:
+        assert f"(sha256 {_sha(stands_for[old_key])[:12]}...)" in binary_note[0]
 
 
 def test_the_cells_exercise_both_answers() -> None:
