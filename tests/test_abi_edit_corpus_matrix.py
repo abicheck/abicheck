@@ -798,6 +798,12 @@ def _check_cell(cell: Cell, ctx: CellContext, tier: str) -> None:
             verdict=result.verdict,
             produced=result.kinds,
             expectation=result.expectation,
+            source="matrix",
+            skipped_consumers=frozenset(
+                p.consumer
+                for p in (result.exec_truth.pairs if result.exec_truth else ())
+                if p.status != "ran"
+            ),
         )
     )
     if result.status != "ran":

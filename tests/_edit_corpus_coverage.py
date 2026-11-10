@@ -12,7 +12,9 @@ each bucket with its reason; every report lists them. Over that scope:
   operators alone, no compiler (``declared_kinds``).
 - *verified*, per tier: a cell expected the kind, abicheck produced it, and
   the cell reconciled to a passing class (``CellRecord.verified``). A strict
-  xfail (``_edit_corpus_known``) or an unobservable cell verifies nothing.
+  xfail (``_edit_corpus_known``) or a skipped cell verifies nothing, and an
+  unobservable cell (below its evidence floor) expects nothing, so it
+  verifies nothing either.
   A kind abicheck produced that the cell did not expect is listed as
   *produced but not expected* (a possible false positive or a missing
   expectation), with its cell count, never as coverage.
@@ -357,7 +359,12 @@ def make_record(
     verdict: str = "",
     produced: Iterable[str] = (),
     expectation: Expectation | None = None,
+    source: str = "",
+    skipped_consumers: frozenset[str] = frozenset(),
 ) -> CellRecord:
+    """One cell's record. *source* names the test that ran it when two tests
+    of one tier can run the same (op, seed, config) cell, so their records
+    stay distinct; *skipped_consumers* are the pairs that did not run."""
     from tests._edit_corpus_operators import EditOp
 
     assert isinstance(op, EditOp)
@@ -365,7 +372,7 @@ def make_record(
     ran = status == "ran"
     return CellRecord(
         tier=tier,
-        cell=f"{op.name}-{seed}-{config.id}",
+        cell=f"{source + ':' if source else ''}{op.name}-{seed}-{config.id}",
         op=op.name,
         seed=seed,
         config=config.id,
@@ -374,7 +381,9 @@ def make_record(
         verdict=verdict,
         produced=tuple(sorted(produced)),
         expected=tuple(sorted(expectation_kinds(exp))),
-        points=tuple(p.id for p in cell_points(op, config)) if ran else (),
+        points=tuple(p.id for p in cell_points(op, config, skipped_consumers))
+        if ran
+        else (),
     )
 
 
@@ -449,9 +458,15 @@ def _pct(n: int, d: int) -> float:
 
 
 def report(
-    records: Sequence[CellRecord], ledger: dict | None = None
+    records: Sequence[CellRecord],
+    ledger: dict | None = None,
+    check_tiers: Sequence[str] = (),
 ) -> dict[str, object]:
-    """Aggregate *records* into the coverage report (JSON-serializable)."""
+    """Aggregate *records* into the coverage report (JSON-serializable).
+
+    ``floor_problems`` is computed only for *check_tiers*: only a merged run
+    can be held to a floor, so a single shard's report never lists drops.
+    """
     scope_set = in_scope()
     declared = set(declared_kinds())
     tiers = _by_tier(records)
@@ -483,11 +498,16 @@ def report(
         "tiers": out_tiers,
         "space": space_coverage(point_from_id(p) for p in all_points),
     }
-    if ledger is not None:
+    if ledger is not None and check_tiers:
         out["floor_problems"] = {
-            name: check_floor(records, ledger, name) for name in tiers
+            name: check_floor(records, ledger, name) for name in check_tiers
         }
     return out
+
+
+def _verified(records: Sequence[CellRecord], tier: str) -> set[str]:
+    """Every kind any cell of *tier* verified."""
+    return set().union(*(r.verified for r in records if r.tier == tier))
 
 
 def check_floor(records: Sequence[CellRecord], ledger: dict, tier: str) -> list[str]:
@@ -501,11 +521,9 @@ def check_floor(records: Sequence[CellRecord], ledger: dict, tier: str) -> list[
     floor = set(ledger.get("verified_floor", {}).get(tier, ()))
     if not floor:
         return []
-    verified = set().union(*(r.verified for r in records if r.tier == tier))
-    owed = floor
     return [
         f"{kind}: in the {tier} verified floor, not verified by this run"
-        for kind in sorted(owed - verified)
+        for kind in sorted(floor - _verified(records, tier))
     ]
 
 
@@ -611,6 +629,8 @@ def load_ledger(path: Path | None = None) -> dict:
 
 def declared_ledger(previous: dict | None = None) -> dict:
     """The ledger's declared side, recomputed; the verified floors are carried over."""
+    from abicheck.model.change_catalog.kinds import ChangeKind
+
     scope_set = in_scope()
     declared = set(declared_kinds())
     return {
@@ -622,6 +642,10 @@ def declared_ledger(previous: dict | None = None) -> dict:
         ),
         "declared_covered": sorted(declared & scope_set),
         "declared_uncovered": sorted(scope_set - declared),
+        # Every other catalog kind, so a kind in none of the three lists is
+        # one added to the catalog after the ledger was written, and a kind
+        # moved into scope by a bucket change is not mistaken for it.
+        "out_of_scope": sorted({k.name for k in ChangeKind} - scope_set),
         "verified_floor": (previous or {}).get("verified_floor", {}),
     }
 
@@ -645,8 +669,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="append",
         default=[],
         metavar="TIER",
-        help="fail if this tier's run verified less than its ledger floor "
-        "(PATHS must hold every shard's records)",
+        help="fail if this tier's run verified less than its ledger floor, or a "
+        "covered point is one the space model calls infeasible (PATHS must hold "
+        "every shard's records)",
     )
     rp.add_argument(
         "--raise-floor",
@@ -669,13 +694,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         same = all(
             fresh[k] == ledger.get(k)
-            for k in ("declared_covered", "declared_uncovered")
+            for k in ("declared_covered", "declared_uncovered", "out_of_scope")
         )
         print("ledger is current" if same else "ledger is stale: run with --write")
         return 0 if same else 1
 
     records = load_records(args.paths)
-    rep = report(records, ledger)
+    rep = report(records, ledger, args.check_floor)
     text = summary_markdown(rep, args.title)
     if args.json_out:
         Path(args.json_out).write_text(
@@ -690,12 +715,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         scope_set = in_scope()
         floors = ledger.setdefault("verified_floor", {})
         for tier in args.raise_floor:
-            got = set().union(*(r.verified for r in records if r.tier == tier))
+            got = _verified(records, tier)
             floors[tier] = sorted(set(floors.get(tier, ())) | (got & scope_set))
         _write_ledger(ledger)
     problems = [
         p for tier in args.check_floor for p in check_floor(records, ledger, tier)
     ]
+    if args.check_floor:
+        # A point a cell covered that the model calls infeasible is a model bug.
+        problems += [
+            f"{p}: covered by a cell, but the space model calls it infeasible"
+            for p in rep["space"]["covered_but_infeasible"]  # type: ignore[index]
+        ]
     for p in problems:
         print(f"::error::{p}")
     return 1 if problems else 0

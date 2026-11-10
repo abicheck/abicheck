@@ -168,6 +168,20 @@ def test_ledger_records_every_gain() -> None:
     )
 
 
+def _unlisted_in_scope(
+    ledger: dict, scope_set: set[str], declared: set[str]
+) -> set[str]:
+    """In-scope kinds no operator declares and the ledger does not list as
+    uncovered, among the kinds the ledger knows (a catalog addition since the
+    ledger was written is in none of its lists, and tolerated)."""
+    known = (
+        set(ledger["declared_covered"])
+        | set(ledger["declared_uncovered"])
+        | set(ledger["out_of_scope"])
+    )
+    return ((scope_set - declared) & known) - set(ledger["declared_uncovered"])
+
+
 def test_ledger_uncovered_list_is_not_stale() -> None:
     ledger = cov.load_ledger()
     scope_set = cov.in_scope()
@@ -180,10 +194,31 @@ def test_ledger_uncovered_list_is_not_stale() -> None:
     )
     # Every in-scope kind is either declared or listed; a ChangeKind added to
     # the catalog after the ledger was written is the one tolerated exception
-    # (it is in neither list) until the ledger is regenerated.
-    known = set(ledger["declared_covered"]) | set(ledger["declared_uncovered"])
-    unlisted = (scope_set - declared) & known - set(ledger["declared_uncovered"])
+    # (it is in none of the ledger's lists) until the ledger is regenerated.
+    # A kind a scope-bucket change moved into scope is in ``out_of_scope``, so
+    # it is not mistaken for a new one.
+    unlisted = _unlisted_in_scope(ledger, scope_set, declared)
     assert not unlisted, sorted(unlisted)
+    moved_out = (
+        set(ledger["declared_covered"]) | set(ledger["declared_uncovered"])
+    ) - scope_set
+    assert not moved_out, (
+        f"kinds left the scope: regenerate the ledger {sorted(moved_out)}"
+    )
+
+
+def test_a_kind_moved_into_scope_is_caught(monkeypatch: pytest.MonkeyPatch) -> None:
+    ledger = cov.declared_ledger(cov.load_ledger())
+    moved = ledger["out_of_scope"][0]
+    real = cov.in_scope()
+    monkeypatch.setattr(cov, "in_scope", lambda: real | {moved})
+    unlisted = _unlisted_in_scope(ledger, cov.in_scope(), set(cov.declared_kinds()))
+    assert unlisted == {moved}
+    # A kind the ledger has never seen (new in the catalog) is tolerated.
+    monkeypatch.setattr(cov, "in_scope", lambda: real | {"BRAND_NEW_KIND"})
+    assert (
+        _unlisted_in_scope(ledger, cov.in_scope(), set(cov.declared_kinds())) == set()
+    )
 
 
 def test_ledger_floors_are_declared_in_scope_kinds() -> None:
@@ -555,6 +590,65 @@ def test_a_cell_with_several_consumers_covers_one_point_per_consumer_family() ->
         ("gcc", "clang"),
         ("gcc", "gcc"),
     ]
+
+
+@pytest.mark.parametrize("skip_clang", [False, True])
+def test_a_pair_that_did_not_run_exercises_no_point(skip_clang: bool) -> None:
+    op = OP_BY_NAME["struct_append_field"]
+    cfg = default_config("c", GCC).with_(
+        consumers=(Consumer(), Consumer(toolchain=CLANG))
+    )
+    clang_ids = {c.id for c in cfg.consumer_set if c.toolchain.family == "clang"}
+    skipped = frozenset(clang_ids) if skip_clang else frozenset()
+    consumers = {p.consumer for p in space.cell_points(op, cfg, skipped)}
+    assert consumers == ({"gcc"} if skip_clang else {"gcc", "clang"})
+    rec = cov.make_record(
+        "pr", op, "c_core", cfg, status="ran", cls="agree", skipped_consumers=skipped
+    )
+    assert {space.point_from_id(p).consumer for p in rec.points} == consumers
+
+
+def test_two_tests_running_the_same_cell_keep_distinct_records(tmp_path: Path) -> None:
+    op = OP_BY_NAME["struct_append_field"]
+    cfg = default_config("c", GCC)
+    paths = {
+        cov.write_record(
+            cov.make_record("pr", op, "c_core", cfg, status="ran", source=src),
+            tmp_path,
+        )
+        for src in ("default", "matrix")
+    }
+    assert len(paths) == 2
+    assert len(cov.load_records([tmp_path])) == 2
+
+
+def test_only_a_checked_tier_reports_floor_drops() -> None:
+    ledger = _ledger(pr=["A"])
+    shard = [_rec(expected=("B",), produced=("B",))]  # A is verified elsewhere
+    assert "floor_problems" not in cov.report(shard, ledger)
+    assert cov.report(shard, ledger, ["pr"])["floor_problems"] == {
+        "pr": ["A: in the pr verified floor, not verified by this run"]
+    }
+    assert "Verified-floor drops" not in cov.summary_markdown(cov.report(shard, ledger))
+
+
+def test_the_floor_check_fails_on_a_point_the_model_calls_infeasible(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ledger_path = tmp_path / "ledger.json"
+    ledger_path.write_text(json.dumps(_ledger(pr=[])), encoding="utf-8")
+    monkeypatch.setattr(cov, "LEDGER_PATH", ledger_path)
+    good = default_config("c", GCC)
+    feasible = space.cell_points(OP_BY_NAME["struct_append_field"], good)[0].id
+    # A C++-only construct under C: the model calls it infeasible.
+    bad = space.Point("concept", "c", "c17", "baseline", "gcc", "gcc", "headers").id
+    assert space.infeasible(space.point_from_id(bad)) is not None
+    for points, rc in (((feasible,), 0), ((feasible, bad), 1)):
+        d = tmp_path / str(rc)
+        cov.write_record(_rec(cell=str(rc), points=points), d)
+        assert cov.main(["report", str(d), "--check-floor", "pr"]) == rc
+    # Without --check-floor the same records only report.
+    assert cov.main(["report", str(tmp_path / "1")]) == 0
 
 
 def test_a_rebuild_cell_counts_the_flag_it_rebuilds_with() -> None:

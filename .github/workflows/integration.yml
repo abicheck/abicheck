@@ -328,4 +328,13 @@ jobs:
           fi
           python -m tests._edit_corpus_coverage report edit-corpus-coverage \
             --title "Edit corpus PR-tier coverage (both shards)" \
-            --summary "$GITHUB_STEP_SUMMARY" --check-floor pr
+            --summary "$GITHUB_STEP_SUMMARY" --json edit-corpus-coverage-report.json \
+            --check-floor pr
+      - name: Upload the PR-tier coverage report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: edit-corpus-coverage-report
+          path: edit-corpus-coverage-report.json
+          if-no-files-found: ignore
+          retention-days: 30

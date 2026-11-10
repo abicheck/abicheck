@@ -139,7 +139,12 @@ verifies less fails `--check-floor TIER`. Only the merged run (every shard's
 records) is held to the floor: a shard alone is reported, not checked, because
 a kind its skipped, known-xfail or `any_of` cells expect may be verified by a
 cell in another shard. The integration lane's `edit-corpus-coverage` job and
-the scheduled tiers' `report` job merge the shards and check.
+the scheduled tiers' `report` job merge the shards and check; the same check
+fails on a covered point the space model calls infeasible (a model bug). Only
+tiers with a floor in the ledger can drop (today `pr`). A (build, consumer)
+pair that did not run (infeasible or unavailable) covers no point, and two
+tests of one tier that run the same cell (the default matrix and the PR-tier
+cells) keep separate records.
 
 **Language-space coverage.** `tests/_edit_corpus_space.py` models the space
 the corpus samples: construct (from the operators' roles and language
