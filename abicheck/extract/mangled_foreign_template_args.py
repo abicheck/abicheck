@@ -66,11 +66,29 @@ def has_foreign_template_argument(name: str) -> bool:
     ``_ZNKSt``, ``_ZSt``, and the ``_ZTV``/``_ZTT``/``_ZTI``/``_ZTS`` special
     names of a std type); anything else returns ``False``.
     """
+    return _scan(name) is True
+
+
+def names_only_runtime_types(name: str) -> bool:
+    """True when a std-prefixed *name* was read to its end and every
+    ``<source-name>`` in it is runtime-owned.
+
+    The opposite proof to :func:`has_foreign_template_argument`: a name the
+    scanner cannot read, or one outside ``std``, answers ``False`` here too,
+    so a caller that needs "no program-defined type" never gets it on a guess.
+    """
+    return _scan(name) is False
+
+
+def _scan(name: str) -> bool | None:
+    """Whether *name* names a non-runtime ``<source-name>``; ``None`` when
+    *name* is not std-prefixed or uses a construct the scanner does not model.
+    """
     # vtable / VTT / typeinfo / typeinfo-name of a std type: the rest of the
     # name is that type's encoding, scanned exactly like a function's.
     body = name[4:] if name.startswith(("_ZTV", "_ZTT", "_ZTI", "_ZTS")) else name[2:]
     if not name.startswith("_Z"):
-        return False
+        return None
     stack: list[tuple[str, bool]]
     if body.startswith(("NSt", "NKSt")):
         i = len(name) - len(body) + body.index("St") + 2
@@ -80,7 +98,7 @@ def has_foreign_template_argument(name: str) -> bool:
         i = len(name) - len(body) + 2
         stack = []
     else:
-        return False
+        return None
     # ``prev_std`` marks "the previous token was St", which scopes the next
     # source-name into std even outside an N chain (``St14default_delete``).
     prev_std = True
@@ -93,10 +111,10 @@ def has_foreign_template_argument(name: str) -> bool:
             # The literal's type is done; what follows is its value.
             while i < n and name[i] != "E":
                 if not (name[i].isalnum() or name[i] == "_"):
-                    return False
+                    return None
                 i += 1
             if i >= n:
-                return False
+                return None
             stack.pop()  # the literal's closing E
             i += 1
             _type_done(stack)
@@ -107,7 +125,7 @@ def has_foreign_template_argument(name: str) -> bool:
                 j += 1
             length = int(name[i:j])
             if length <= 0 or j + length > n:
-                return False
+                return None
             ident = name[j : j + length]
             i = j + length
             if stack and stack[-1][0] == "N":
@@ -146,11 +164,11 @@ def has_foreign_template_argument(name: str) -> bool:
             stack.append(("L", False))
             i += 1
             if name.startswith("_Z", i):
-                return False
+                return None
             continue
         if c == "E":
             if not stack:
-                return False
+                return None
             closed = stack.pop()
             i += 1
             prev_std = False
@@ -167,7 +185,7 @@ def has_foreign_template_argument(name: str) -> bool:
                 continue
             nxt = _skip_seq_id(name, i + 1, "_")
             if nxt is None:
-                return False
+                return None
             # A back-reference to an earlier component; its foreignness was
             # already judged where it first appeared. Opening a nested name
             # with one leaves that chain's scope unknown here, so its later
@@ -180,7 +198,7 @@ def has_foreign_template_argument(name: str) -> bool:
         if c == "T":
             nxt = _skip_seq_id(name, i + 1, "_")
             if nxt is None:
-                return False
+                return None
             i = nxt
             prev_std = False
             continue
@@ -203,7 +221,7 @@ def has_foreign_template_argument(name: str) -> bool:
                 i += 2
                 prev_std = False
                 continue
-            return False
+            return None
         if c in _SKIP_CHARS:
             i += 1
             if c not in "PRKVO":
@@ -214,8 +232,10 @@ def has_foreign_template_argument(name: str) -> bool:
             stack.append(("F", False))
             i += 1
             continue
-        return False
-    return found and not stack
+        return None
+    if stack:
+        return None
+    return found
 
 
 def _strip_local_entity(name: str) -> str | None:
@@ -249,13 +269,26 @@ def has_foreign_template_argument_in_local_name(name: str) -> bool:
     :func:`has_foreign_template_argument`. Any other shape answers ``False``
     ("no evidence"), like the scanner it delegates to.
     """
+    encoding = _local_name_encoding(name)
+    return encoding is not None and has_foreign_template_argument(encoding)
+
+
+def local_name_names_only_runtime_types(name: str) -> bool:
+    """:func:`names_only_runtime_types` for a ``_ZZ``/``_ZGVZ`` local *name*:
+    read through its enclosing function's encoding, ``False`` for any other
+    shape."""
+    encoding = _local_name_encoding(name)
+    return encoding is not None and names_only_runtime_types(encoding)
+
+
+def _local_name_encoding(name: str) -> str | None:
+    """The enclosing function's encoding of a ``_ZZ``/``_ZGVZ`` *name*, as a
+    ``_Z`` name with the local entity removed; ``None`` for any other shape."""
     if name.startswith("_ZZ"):
         body = name[3:]
     elif name.startswith("_ZGVZ"):
         body = name[5:]
     else:
-        return False
+        return None
     encoding = _strip_local_entity(body)
-    if encoding is None:
-        return False
-    return has_foreign_template_argument("_Z" + encoding)
+    return None if encoding is None else "_Z" + encoding

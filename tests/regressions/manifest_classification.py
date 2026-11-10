@@ -209,6 +209,46 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="ownership.std_customization_point_over_runtime_types_read_as_users",
+        invariant=(
+            "A standard customization-point specialization (std::hash, "
+            "std::less, std::char_traits, ...) is the library's only when a "
+            "program-defined type appears in its name ([namespace.std]/2). "
+            "One over builtins, their pointers, references and "
+            "cv-qualifications, or standard types (std::less<const char*>, "
+            "std::hash<std::string>) is the implementation's, so its weak "
+            "copy coalesces like any other runtime instantiation. A name the "
+            "scanner cannot read to its end stays the library's."
+        ),
+        # Found by the config-matrix edit corpus's weekly tier: rebuild_optimized
+        # on cxx_stdlib with -D_GLIBCXX_USE_CXX11_ABI=0 kept a RISK from the weak
+        # std::less<const char*>::operator() the -O0 build exported.
+        fixed_by=(1983,),
+        seed_tests=(
+            "tests/test_std_customization_point_owner.py",
+            "tests/test_rebuild_toolchain_drift_integration.py",
+            "tests/test_toolchain_rebuild_drift.py",
+        ),
+        public_surfaces=("python-api",),
+        axes={
+            "argument": ("builtin", "qualified builtin", "std type", "program type"),
+            "wrapping": ("bare", "std template", "nested std template"),
+            "name_form": ("member", "local static", "guard"),
+            "runtime_abi": ("cxx11", "cxx11abi0"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The origin recorded in a snapshot (elf_metadata, at dump "
+                    "time) still attributes a local static of such a "
+                    "specialization to the library; closing it changes dumped "
+                    "facts and needs an extractor generation."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
+    BugClass(
         id="evidence.bound_read_as_measured_value",
         invariant=(
             "An observation that only bounds a fact never gates as the fact. "
