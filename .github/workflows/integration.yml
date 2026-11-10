@@ -219,7 +219,15 @@ jobs:
         env:
           SHARD: ${{ matrix.shard }}
         run: |
-          if [ -d edit-corpus-coverage ]; then
+          # This shard's integration step finished (passed or failed): the
+          # floor job judges a run only when both shards left this marker, so a
+          # cancelled shard is never read as missing records. Written first, so
+          # a failing report below fails this step without hiding the shard.
+          had_records=0
+          [ -d edit-corpus-coverage ] && had_records=1
+          mkdir -p edit-corpus-coverage
+          : > "edit-corpus-coverage/shard-${SHARD}.done"
+          if [ "$had_records" = 1 ]; then
             python -m tests._edit_corpus_coverage report edit-corpus-coverage \
               --title "Edit corpus PR-tier coverage (shard ${SHARD}/2)" \
               --summary "$GITHUB_STEP_SUMMARY"
@@ -291,9 +299,9 @@ jobs:
 
   edit-corpus-coverage:
     # The PR tier's verified ChangeKind floor (tests/edit_corpus_coverage_ledger.json),
-    # held over both Linux shards' corpus records merged. Runs only when both
-    # shards finished their integration step, so a cancelled run is never
-    # judged; no records at all fail the job.
+    # held over both Linux shards' corpus records merged. Judged only when both
+    # shards left their `shard-N.done` marker (their integration step finished),
+    # so a cancelled run is never judged; no records at all fail the job.
     name: edit corpus coverage floor
     needs: integration
     if: always() && (needs.integration.result == 'success' || needs.integration.result == 'failure')
@@ -320,7 +328,16 @@ jobs:
       - name: Check the PR-tier floor
         run: |
           set -euo pipefail
-          # A shard whose test files hold no corpus cells uploads nothing; the
+          # needs.integration.result reads `failure` when one matrix leg failed
+          # and another was cancelled; judge only a run whose two Linux shards
+          # both finished their integration step.
+          # (No artifact at all leaves no directory: find fails, count is 0.)
+          done_shards=$({ find edit-corpus-coverage -name 'shard-*.done' 2>/dev/null || true; } | wc -l)
+          if [ "$done_shards" -lt 2 ]; then
+            echo "::notice::only ${done_shards} of 2 Linux shards finished (cancelled run); the PR-tier floor is not judged"
+            exit 0
+          fi
+          # A shard whose test files hold no corpus cells uploads no records; the
           # pair of shards must still have recorded the PR tier somewhere.
           if [ -z "$(find edit-corpus-coverage -name '*.json' -print -quit 2>/dev/null)" ]; then
             echo "::error::neither Linux shard uploaded edit corpus coverage records"
@@ -328,4 +345,13 @@ jobs:
           fi
           python -m tests._edit_corpus_coverage report edit-corpus-coverage \
             --title "Edit corpus PR-tier coverage (both shards)" \
-            --summary "$GITHUB_STEP_SUMMARY" --check-floor pr
+            --summary "$GITHUB_STEP_SUMMARY" --json edit-corpus-coverage-report.json \
+            --check-floor pr
+      - name: Upload the PR-tier coverage report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: edit-corpus-coverage-report
+          path: edit-corpus-coverage-report.json
+          if-no-files-found: ignore
+          retention-days: 30

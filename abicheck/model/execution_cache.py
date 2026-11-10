@@ -570,8 +570,16 @@ def _memoize_with_lru(
     cached = functools.lru_cache(maxsize=maxsize)(fn)
     name = f"{fn.__module__}.{fn.__qualname__}"
     stats = _LruStats(name, cached.cache_info)
+
+    def cache_clear() -> None:
+        # ``lru_cache.cache_clear`` also zeroes the engine's counters; keep the
+        # counted history, as the dict-backed memo's clear does.
+        hits, misses = stats.hits, stats.misses
+        cached.cache_clear()
+        stats.hits, stats.misses = hits, misses
+
     with _REGISTRY_LOCK:
-        _REGISTRY[name] = _Registered(stats, cached.cache_clear)
+        _REGISTRY[name] = _Registered(stats, cache_clear)
     env_get = _ENV_DATA.get if _ENV_DATA is not None else None
 
     @functools.wraps(fn)
@@ -583,7 +591,7 @@ def _memoize_with_lru(
             args = cast("tuple[Any, ...]", key_of(args, kwargs))
         return cached(*args)
 
-    wrapper.cache_clear = cached.cache_clear  # type: ignore[attr-defined]
+    wrapper.cache_clear = cache_clear  # type: ignore[attr-defined]
     wrapper.cache_len = lambda: cached.cache_info().currsize  # type: ignore[attr-defined]
     wrapper.stats = stats  # type: ignore[attr-defined]
     return wrapper

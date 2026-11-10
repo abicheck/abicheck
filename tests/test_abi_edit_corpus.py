@@ -15,6 +15,7 @@ and listed in ``docs/contribute/known-gaps.md``.
 
 from __future__ import annotations
 
+import dataclasses
 import shutil
 import sys
 from pathlib import Path
@@ -22,7 +23,7 @@ from pathlib import Path
 import pytest
 
 from abicheck.model.change_catalog.kinds import ChangeKind
-from tests._edit_corpus_config import Toolchain, default_config
+from tests._edit_corpus_config import EVIDENCE, Toolchain, default_config
 from tests._edit_corpus_coverage import make_record, write_record
 from tests._edit_corpus_expect import issue_keys
 from tests._edit_corpus_harness import (
@@ -158,16 +159,25 @@ def test_every_operator_declares_some_ground_truth() -> None:
 def test_known_mismatches_cover_real_default_cells() -> None:
     # Each recorded entry this matrix can reach names an (operator, seed) the
     # default matrix builds; the registry's own integrity is tested with it.
+    # The default config is swept over every evidence level: an entry scoped
+    # to one lane (DWARF, binary) is reachable at that lane's default.
     pairs = {(op.name, seed.name) for op, seed in default_matrix()}
     placeholder = Toolchain("gcc", 0, "gcc", "g++")
     reachable = [
         (k.op, seed)
         for k in KNOWN
         for seed in k.seeds
-        if k.when(cfg := default_config(SEED_BY_NAME[seed].lang, placeholder))
+        for evidence in EVIDENCE
+        if k.when(
+            cfg := dataclasses.replace(
+                default_config(SEED_BY_NAME[seed].lang, placeholder), evidence=evidence
+            )
+        )
         and OP_BY_NAME[k.op].requires(cfg) is None
     ]
-    assert reachable, "no recorded mismatch applies at the default config"
+    assert reachable, (
+        "no recorded mismatch applies at any default-config evidence level"
+    )
     assert set(reachable) <= pairs
 
 
@@ -250,7 +260,11 @@ def test_edit_produces_declared_ground_truth(
         if gap:
             pytest.skip(gap)
     except pytest.skip.Exception:
-        write_record(make_record("pr", op, seed.name, config, status="unavailable"))
+        write_record(
+            make_record(
+                "pr", op, seed.name, config, status="unavailable", source="default"
+            )
+        )
         raise
     outcome = run_operator(op, seed, config, baseline_cache, corpus_root)
     known = known_mismatch(op.name, seed.name, config)
@@ -261,12 +275,14 @@ def test_edit_produces_declared_ground_truth(
             seed.name,
             config,
             status="ran",
-            # No execution oracle here: a cell meeting its expectation agrees.
+            # No execution oracle here: a cell meeting its expectation agrees,
+            # and no consumer ran, so it covers no space point.
             cls="known-xfail"
             if known
             else ("agree" if not outcome.failures else "mismatch"),
             verdict=outcome.verdict,
             produced=outcome.kinds,
+            source="default",
         )
     )
     if known is not None:

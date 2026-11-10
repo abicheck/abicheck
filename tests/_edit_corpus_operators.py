@@ -981,6 +981,9 @@ OPERATORS: tuple[EditOp, ...] = (
         ("func.greet",),
         _no_edit,
         "_GLIBCXX_USE_CXX11_ABI=0 switches std::string to the old ABI: every mangled name changes",
+        # The flip itself is the finding (ADR-050 amendment 2026-11-09): the
+        # re-mangled greet export pairs with its old-ABI twin at every level.
+        expected=frozenset({"GLIBCXX_DUAL_ABI_CHANGED"}),
         # Symbols alone show the old names gone; a tool that pairs by demangled
         # name sees std::__cxx11::basic_string become std::basic_string instead.
         any_of=(_REMOVED | {"FUNC_PARAMS_CHANGED", "FUNC_RETURN_CHANGED"},),

@@ -583,4 +583,9 @@ KIND_NAMES_1: tuple[tuple[str, str, str | None], ...] = (
         "func_virtual_noexcept_added",
         "noexcept added to a virtual method: an existing overrider without noexcept is ill-formed ([except.spec]/5) → API_BREAK (emitted beside func_noexcept_added)",
     ),
+    (
+        "GLIBCXX_DUAL_ABI_CHANGED",
+        "glibcxx_dual_abi_changed",
+        "ADR-050 amendment 2026-11-09: the two builds select different libstdc++ dual ABIs (_GLIBCXX_USE_CXX11_ABI) and the public surface uses std::string/std::list -- re-mangled exports, or a variable/record of a changed type → BREAKING",
+    ),
 )

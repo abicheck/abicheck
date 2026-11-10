@@ -197,13 +197,13 @@ def _castxml_tool_version(
     """
     del _dev, _ino, _mtime_ns, _size  # cache-key only, see docstring
     try:
-        # Bounded by the active scan --budget, not just this call's own 5s
-        # cap (Codex review) -- a stalled probe under a short remaining
-        # budget must fail fast, same as every other subprocess this
-        # extractor runs, rather than silently eating up to 5s of it.
+        # Bounded by the active scan --budget, not just this call's own
+        # hang guard (Codex review) -- a stalled probe under a short
+        # remaining budget must fail fast, same as every other subprocess
+        # this extractor runs.
         r = run_bounded_for_extraction(
             [castxml_bin, "--version"],
-            timeout=5,
+            timeout=deadline.PROBE_HANG_TIMEOUT_S,
             tool_label="castxml --version",
             unit_label=castxml_bin,
             capture_output=True,

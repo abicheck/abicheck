@@ -126,6 +126,7 @@ _EXPECTED_SUBJECT: dict[str, ContractSubject] = {
     "dwarf_info_missing": _BIN,
     "stdlib_implementation_changed": _BIN,
     "glibcxx_dual_abi_flip_detected": _BIN,
+    "glibcxx_dual_abi_changed": _BIN,
     "time64_abi_changed": _BIN,
     "integer_model_changed": _BIN,
     "sycl_plugin_removed": _BIN,

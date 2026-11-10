@@ -290,8 +290,10 @@ jobs:
 
       - name: Coverage
         # The whole tier's ChangeKind and language-space coverage, every
-        # shard's records merged and held to the tier's full verified floor
-        # (tests/edit_corpus_coverage_ledger.json) when every shard finished.
+        # shard's records merged. When every shard finished it is held to the
+        # tier's verified floor in tests/edit_corpus_coverage_ledger.json (only
+        # `pr` has one today; `report DIR --raise-floor TIER` adds one) and a
+        # covered point the space model calls infeasible fails it.
         env:
           TIER: ${{ needs.plan.outputs.tier }}
           CORPUS_RESULT: ${{ needs.corpus.result }}
