@@ -138,11 +138,14 @@ def attach_type_evidence(
     is its live operand's (``LibraryMetadata.sha256``, set by
     ``compare_classify`` before its own call) or, for a stored dump, the
     ``binary_sha256`` it recorded, so a stored dump of a binary and that
-    binary compared live are one input. With a hash on neither side's live
-    operand and not both recorded (a snapshot older than the fact), the
-    snapshots' evidence identity digest decides -- the same identity
-    ``note_if_same_binary_compared`` uses. A live side facing a stored dump
-    that recorded no hash is never proven identical.
+    binary compared live are one input. Equal hashes prove it; with a live
+    side, anything else does not. With neither side live, the snapshots'
+    evidence identity digest still decides when the hashes do not prove it
+    (one is missing, or they differ) -- the identity
+    ``note_if_same_binary_compared`` uses -- so a recorded hash only ever
+    adds an exemption, never removes one a stored pair had before. A live
+    side facing a stored dump that recorded no hash is never proven
+    identical.
     """
     from ..model.type_evidence import type_evidence_facts
     from ..storage.snapshot_evidence import evidence_identity_digests
@@ -154,11 +157,14 @@ def attach_type_evidence(
         old_meta, new_meta = result.old_metadata, result.new_metadata
         old_sha = _side_binary_sha256(old_meta, old)
         new_sha = _side_binary_sha256(new_meta, new)
-        if old_sha is not None and new_sha is not None:
-            identical = old_sha == new_sha
+        if old_sha is not None and old_sha == new_sha:
+            identical = True
         elif old_meta is not None or new_meta is not None:
             identical = False
         else:
+            # Neither side live and no equal recorded hashes: unequal hashes
+            # never override the digest, so two dumps of a rebuild whose
+            # extracted facts agree read as they did before the fact existed.
             # ADR-062 D16's *evidence* identity: two dumps of one binary that
             # differ only in `created_at`, dump path or producer order are one
             # input -- the identity `note_if_same_binary_compared` uses too.

@@ -11,6 +11,7 @@ the literal input tables, never the helpers under test.
 from __future__ import annotations
 
 import hashlib
+import os
 import shutil
 from pathlib import Path
 from typing import Any
@@ -209,3 +210,32 @@ def test_an_extension_set_holding_only_the_hash_has_an_empty_evidence_form() -> 
         }
     )
     assert both.evidence_form() == other.evidence_form() != {}
+
+
+# --- a non-regular live operand has no identity --------------------------
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs POSIX FIFOs")
+def test_a_fifo_operand_has_no_identity(tmp_path: Path) -> None:
+    """``compare <(cat a.so) <(cat b.so)`` hands abicheck two pipes. A pipe has
+    no stable bytes to hash, so it carries no identity at all -- never a shared
+    marker that would prove two different pipes one input -- and nothing reads
+    it here (the dump that reads it is the one consumer)."""
+    from abicheck.workflows.input_resolution import collect_metadata
+
+    fifos = []
+    for name in ("a", "b"):
+        fifo = tmp_path / f"{name}.fifo"
+        os.mkfifo(fifo)
+        fifos.append(fifo)
+    assert [collect_metadata(f) for f in fifos] == [None, None]
+    assert [binary_sha256(f) for f in fifos] == [None, None]
+
+
+def test_a_regular_binary_operand_is_identified_by_its_bytes(tmp_path: Path) -> None:
+    from abicheck.workflows.input_resolution import collect_metadata
+
+    dll = Path(shutil.copy(_PE, tmp_path / "a.dll"))
+    meta = collect_metadata(dll)
+    assert meta is not None
+    assert (meta.sha256, meta.size_bytes) == (_sha(dll), dll.stat().st_size)

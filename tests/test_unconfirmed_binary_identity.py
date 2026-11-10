@@ -136,7 +136,18 @@ _PE_CELLS = {
     # Neither side live and not both recorded: the evidence identity decides,
     # which the recorded hash does not enter, so this pair reads as before.
     "older_stored_vs_stored_identical": ("older.json", "a.json", True),
+    # The same rebuild under the *same* file name (``old/a.dll``,
+    # ``new/a.dll``): the hashes differ, but with neither side live they never
+    # override the evidence identity, and the two dumps' extracted facts and
+    # name agree -- NO_CHANGE, as before the fact existed. Live on either side,
+    # the bytes decide and it stays UNCONFIRMED.
+    "stored_vs_stored_same_name_timestamp_rebuild": ("old/a.json", "new/a.json", True),
+    "stored_vs_live_same_name_timestamp_rebuild": ("old/a.json", "new/a.dll", False),
 }
+
+#: Cells proven by the dumps' unchanged evidence identity, not by bytes:
+#: both stored, one file name, and a rebuild that changed no extracted fact.
+_PROVEN_BY_EVIDENCE = {"stored_vs_stored_same_name_timestamp_rebuild"}
 
 
 def _pe_operands(tmp_path: Path) -> tuple[dict[str, Path], dict[str, Path]]:
@@ -145,6 +156,10 @@ def _pe_operands(tmp_path: Path) -> tuple[dict[str, Path], dict[str, Path]]:
     c = Path(shutil.copy(a, tmp_path / "c.dll"))
     b = _pe_timestamp_rebuild(a, tmp_path / "b.dll")
     a_json = _dump(a, tmp_path / "a.json")
+    (tmp_path / "old").mkdir()
+    (tmp_path / "new").mkdir()
+    old_a = Path(shutil.copy(a, tmp_path / "old" / "a.dll"))
+    new_a = Path(shutil.copy(b, tmp_path / "new" / "a.dll"))
     operands = {
         "a.dll": a,
         "b.dll": b,
@@ -152,9 +167,14 @@ def _pe_operands(tmp_path: Path) -> tuple[dict[str, Path], dict[str, Path]]:
         "b.json": _dump(b, tmp_path / "b.json"),
         "c.json": _dump(c, tmp_path / "c.json"),
         "older.json": _strip_recorded_sha(a_json, tmp_path / "older.json"),
+        "old/a.json": _dump(old_a, tmp_path / "old" / "a.json"),
+        "new/a.json": _dump(new_a, tmp_path / "new" / "a.json"),
+        "new/a.dll": new_a,
     }
     stands_for = {"a.dll": a, "b.dll": b, "a.json": a, "b.json": b, "c.json": c}
-    stands_for["older.json"] = a
+    stands_for.update(
+        {"older.json": a, "old/a.json": a, "new/a.json": b, "new/a.dll": b}
+    )
     return operands, stands_for
 
 
@@ -168,7 +188,10 @@ def test_pe_pairs_read_the_recorded_identity(tmp_path: Path, cell: str) -> None:
     older_vs_live = "older.json" in (old_key, new_key) and (
         old_key.endswith(".dll") or new_key.endswith(".dll")
     )
-    assert proven is (same_bytes and not older_vs_live)
+    if cell in _PROVEN_BY_EVIDENCE:
+        assert not same_bytes and proven  # a real byte difference, still exempt
+    else:
+        assert proven is (same_bytes and not older_vs_live)
     code, report = _invoke("compare", str(operands[old_key]), str(operands[new_key]))
     # The PE fixture has no PDB and no headers: no side has type evidence.
     assert_claim_outcome(
@@ -244,6 +267,15 @@ _ELF_CELLS = {
     "stored_vs_stored_one_byte": ("lib.json", "flip.json", False),
     "older_stored_vs_live_identical": ("older.json", "lib.so", False),
     "linker_script_stored_vs_live_target": ("script.json", "lib.so", True),
+    # The one-byte rebuild under the same file name, both stored. The flipped
+    # byte is in ``.comment``, which the dump reads (the build-mode producer),
+    # so the two dumps' evidence differs too: UNCONFIRMED, exactly as before
+    # the fact existed (the PE same-name cell is the one no fact separates).
+    "stored_vs_stored_same_name_one_byte": (
+        "old/lib.json",
+        "new/lib.json",
+        False,
+    ),
 }
 
 
@@ -266,10 +298,15 @@ def test_elf_pairs_read_the_recorded_identity(tmp_path: Path, cell: str) -> None
         "older.json": _strip_recorded_sha(stored, tmp_path / "older.json"),
         "script.json": _dump(script, tmp_path / "script.json"),
     }
+    for side, binary in (("old", lib), ("new", flip)):
+        (tmp_path / side).mkdir()
+        same_name = Path(shutil.copy(binary, tmp_path / side / "lib.so"))
+        operands[f"{side}/lib.json"] = _dump(same_name, tmp_path / side / "lib.json")
     old_key, new_key, proven = _ELF_CELLS[cell]
     # Oracle: the bytes each operand stands for (a linker script resolves to
     # its target, as the loader's link step would).
     stands_for = {"lib": lib, "copy": copy, "flip": flip, "older": lib, "script": lib}
+    stands_for.update({"old/lib": lib, "new/lib": flip})
     same_bytes = _sha(stands_for[old_key.split(".")[0]]) == _sha(
         stands_for[new_key.split(".")[0]]
     )

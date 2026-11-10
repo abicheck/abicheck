@@ -738,23 +738,20 @@ def _resolve_input_impl(
 
 def collect_metadata(path: Path) -> LibraryMetadata | None:
     """Compute SHA-256 and file size for a library artifact, or ``None`` for a text-based snapshot/manifest (JSON, ``Module.symvers``) -- not a binary, so a same-binary comparison must never claim it."""
-    if path.is_dir():
+    if not path.is_file():
         # A storage-v2 `ProjectSnapshot` package dir (the one directory
         # `resolve_input` resolves rather than rejecting) is not a single
-        # hashable file -- the same "not a binary" no-op the text-format
-        # branches below already apply, without `read_bytes()` raising
-        # `IsADirectoryError` first. Both the CLI and the typed Python API
-        # reach this through `compare_classify._attach_pair_report_fields`
-        # (Codex review).
+        # hashable file, and a FIFO or /dev/fd operand has no stable bytes to
+        # hash (a shared non-regular marker would prove two different pipes
+        # one input): the same "not a binary" no-op as the text formats below.
+        # Both the CLI and the typed Python API reach this through
+        # `compare_classify._attach_pair_report_fields` (Codex review).
         return None
     text_fmt = sniff_text_format(path)
     if text_fmt in ("json", "symvers"):
         return None
-
     # The digest `extract.binary_identity` records for a dump, memoized.
-    return LibraryMetadata(
-        path=str(path), sha256=file_digest(path), size_bytes=path.stat().st_size
-    )
+    return LibraryMetadata(str(path), file_digest(path), path.stat().st_size)
 
 
 def load_env_matrix(path: Path | None) -> EnvironmentMatrix | None:
