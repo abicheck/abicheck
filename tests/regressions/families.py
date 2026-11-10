@@ -164,6 +164,8 @@ FAMILIES: dict[str, Family] = {
                 # ELF vs PE (MSVC ABI) vs Mach-O cross-builds of one source,
                 # compared through the CLI with -H under both header backends.
                 "tests/test_pe_macho_header_binding_integration.py",
+                # The same toolchain answering slowly records the same facts.
+                "tests/test_tool_probe_hang_guard.py",
             ),
         ),
         Family(
@@ -556,6 +558,9 @@ _F8 = (
     # A PE/Mach-O header parse discarded when no declaration's spelling met an
     # export (an MSVC DLL against an Itanium parse; a template-only header).
     "extraction.header_surface_discarded_on_export_mismatch",
+    # A probe of a slow but working toolchain recorded a different fact than
+    # the same toolchain answering fast (harness: test_slow_tools_still_answer).
+    "extraction.tool_probe_answer_depends_on_host_load",
 )
 _F7 = (
     # Masked by suite-wide shared interpreter state: passed in a full run,

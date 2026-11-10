@@ -55,7 +55,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from ...deadline import run_bounded
+from ...deadline import PROBE_HANG_TIMEOUT_S, run_bounded
 from ...extract.compiler_driver import is_intel_sycl_driver
 from ...extract.headers.clang.typedefs import typedef_underlying as _typedef_underlying
 from ...model.execution_cache import memoized, path_witness
@@ -229,7 +229,7 @@ def _clang_compiler_family(clang_bin: str) -> str:
             input="",
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=PROBE_HANG_TIMEOUT_S,
         )
         if r.returncode == 0:
             return "intel-llvm" if "__INTEL_LLVM_COMPILER" in r.stdout else "clang"
@@ -251,7 +251,7 @@ def _clang_compiler_version(clang_bin: str) -> str:
             [clang_bin, "-dumpversion"],
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=PROBE_HANG_TIMEOUT_S,
         )
         return r.stdout.strip() if r.returncode == 0 else ""
     except (OSError, subprocess.TimeoutExpired):

@@ -64,7 +64,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .deadline import run_bounded
+from .deadline import PROBE_HANG_TIMEOUT_S, run_bounded
 from .model.probe_matrix import (
     MatrixSnapshot,
     Probe,
@@ -306,10 +306,10 @@ def _compile_probe(
             cmd,
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=PROBE_HANG_TIMEOUT_S,
         )
     except subprocess.TimeoutExpired:
-        return None, "compilation timed out (60s)"
+        return None, f"compilation timed out ({PROBE_HANG_TIMEOUT_S:g}s)"
     except OSError as e:
         return None, f"failed to invoke {cfg.compiler}: {e}"
     if proc.returncode != 0:
