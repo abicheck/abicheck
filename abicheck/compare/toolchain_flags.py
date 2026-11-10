@@ -73,11 +73,20 @@ _DEFAULT_CHAR_SIGNED: dict[str, bool] = {
 }
 
 
+def _records_switches(producer: str) -> bool:
+    """Whether a DW_AT_producer string carries command-line switches."""
+    return any(token.startswith("-") for token in producer.split())
+
+
 def _char_signedness(meta: AdvancedDwarfMetadata) -> tuple[bool, str] | None:
     """(plain char is signed, label) for one side, or None when unknown.
 
-    An explicit flag decides; otherwise the target's psABI default. Both
-    spellings present (CUs built differently) or an unknown target: None.
+    An explicit flag decides; otherwise the target's psABI default, but only
+    when the producer records its switches at all (gcc's default
+    ``-grecord-gcc-switches``). Clang, or gcc with
+    ``-gno-record-gcc-switches``, records none, so an absent flag there says
+    nothing. Both spellings present (CUs built differently), an unknown
+    target, or a producer that records no switches: None.
     """
     flags = meta.toolchain.abi_flags
     unsigned = bool(flags & _UNSIGNED_CHAR_FLAGS)
@@ -87,6 +96,8 @@ def _char_signedness(meta: AdvancedDwarfMetadata) -> tuple[bool, str] | None:
     if unsigned or signed:
         flag = sorted(flags & _CHAR_SIGN_FLAGS)[0]
         return (signed, f"{'signed' if signed else 'unsigned'} ({flag})")
+    if not _records_switches(meta.toolchain.producer_string):
+        return None
     default = _DEFAULT_CHAR_SIGNED.get(meta.target_arch)
     if default is None:
         return None

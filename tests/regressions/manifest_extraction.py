@@ -957,7 +957,7 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "record paired with a described declaration compares no signature."
         ),
         # Found by the generated edit corpus (#1958) while expanding its operators.
-        fixed_by=(1958,),
+        fixed_by=(1958, 1980),
         seed_tests=("tests/test_dwarf_lane_extractor_parity.py",),
         axes={
             "producer": ("gcc", "clang"),

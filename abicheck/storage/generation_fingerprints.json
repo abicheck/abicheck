@@ -70,7 +70,7 @@
       "abicheck/extract/elf_symbol_tables.py": "20aad46c8363b26b371f367dae054f96c92773551b1adec67628348613f4401f",
       "abicheck/extract/elf_symbol_versions.py": "b2aa29df27ed51b9cbe3f6b94e9c99e391036216621fa35cb72dc922ecf39786",
       "abicheck/extract/env_flags.py": "6a1343268cdfcd4b2ccaf91008d96b611973bf5cab04467c2585f012e1f5466c",
-      "abicheck/extract/export_symbol_identity.py": "2146bd67207411943258124a24271542c8b9767344c1b404aaa9133c0358ff00",
+      "abicheck/extract/export_symbol_identity.py": "fc6262e7eeaf5834cfd354cef88cff7610dcfd30961f42118623635b9c57736d",
       "abicheck/extract/export_table_read.py": "58fdf78460a49cf1f906e3321c76aff912c27a70a3198050d9e532cdbbf39958",
       "abicheck/extract/flat_map_dependency_scope.py": "5fa66ab2f8ebdbc37d735e3dbad3b6fe1ae3907d7a98eab5c6e6257842e2ea07",
       "abicheck/extract/header_ast_backend.py": "1f5b15c126b139c49b702b69a4f626ed7d30f8294e15ad116d61387e96d31f16",
@@ -210,7 +210,7 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "c5ad38bf9cad7959b0e0161733ba7a33507d4ae2d1afe4cda2f9efc32bd7d927",
+    "fingerprint": "b1862cad00f918791e03e1d182bbffb8aae6dc840b47910ccef82ac0b84c5cb6",
     "generation": 50,
     "reason": "generation 50: DWARF-only snapshots record an export-table-only record for each ABI-relevant export no DWARF declaration names (extract/dwarf_export_gaps.py), Function.is_variadic from DW_TAG_unspecified_parameters, and -f[no-][un]signed-char in the advanced DWARF toolchain flags"
   },

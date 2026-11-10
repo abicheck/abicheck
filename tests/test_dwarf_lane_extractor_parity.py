@@ -180,17 +180,23 @@ _FLAG_SETS = {
 _ARCHES = ("x64", "aarch64", "mystery")
 
 
-def _meta(flags: set[str], arch: str) -> AdvancedDwarfMetadata:
+def _meta(flags: set[str], arch: str, records: bool = True) -> AdvancedDwarfMetadata:
+    # A producer that records switches spells them in DW_AT_producer; one that
+    # records none (clang, gcc -gno-record-gcc-switches) carries no flags at all.
+    recorded = set(flags) | {"-m64"} if records else set()
     return AdvancedDwarfMetadata(
         has_dwarf=True,
         target_arch=arch,
         toolchain=ToolchainInfo(
-            producer_string="GNU C17", abi_flags=set(flags) | {"-m64"}
+            producer_string=" ".join(["GNU C17 13.2.0", *sorted(recorded)]),
+            abi_flags=recorded,
         ),
     )
 
 
-def _oracle_signed(flags: str, arch: str) -> bool | None:
+def _oracle_signed(flags: str, arch: str, records: bool = True) -> bool | None:
+    if not records:
+        return None  # nothing recorded: neither a flag nor proof of its absence
     explicit = {
         "signed": True,
         "no-unsigned": True,
@@ -205,19 +211,35 @@ def _oracle_signed(flags: str, arch: str) -> bool | None:
 
 @pytest.mark.parametrize(
     "old,new",
-    list(itertools.product(itertools.product(_FLAG_SETS, _ARCHES), repeat=2)),
+    list(
+        itertools.product(
+            itertools.product(_FLAG_SETS, _ARCHES, (True, False)), repeat=2
+        )
+    ),
     ids=str,
 )
 def test_char_signedness_flip_matches_an_independent_table(
-    old: tuple[str, str], new: tuple[str, str]
+    old: tuple[str, str, bool], new: tuple[str, str, bool]
 ) -> None:
-    o, n = _meta(_FLAG_SETS[old[0]], old[1]), _meta(_FLAG_SETS[new[0]], new[1])
+    o = _meta(_FLAG_SETS[old[0]], old[1], old[2])
+    n = _meta(_FLAG_SETS[new[0]], new[1], new[2])
     want_o, want_n = _oracle_signed(*old), _oracle_signed(*new)
     flips = want_o is not None and want_n is not None and want_o != want_n
     got = _diff_char_signedness(o, n)
     assert bool(got) is flips
     # Never double-reported as generic flag drift.
     assert all("signed-char" not in str(r) for r in _diff_toolchain_flags(o, n))
+
+
+@pytest.mark.known_gap_canary
+def test_a_ctor_variant_folded_into_its_described_family_gets_no_record() -> None:
+    """Canary for known-gaps "The DWARF lane records fewer C++ exports than the
+    symbols-only lane", shape (1): DWARF names only C2, the
+    export table has C1 and C2, and C1 gets no record. When this fails the gap
+    moved: archive the entry."""
+    c2 = Function(name="S::S", mangled="_ZN1SC2Ev", return_type="void")
+    funcs, _ = undescribed_export_records([c2], [], ["_ZN1SC1Ev", "_ZN1SC2Ev"], [])
+    assert funcs == []
 
 
 # --- the DWARF lane's hook (unit) --------------------------------------------------
@@ -448,6 +470,128 @@ def test_an_export_whose_die_has_another_name_is_not_removed(
         )
         assert (result.verdict == Verdict.BREAKING) is (not still_exported)
         assert ChangeKind.FUNC_PARAMS_CHANGED not in kinds
+        # The finding that does describe the edit is still reported.
+        if shape == "ifunc" and a is old:
+            assert ChangeKind.IFUNC_INTRODUCED in kinds
+        if shape == "symver-alias":
+            assert ChangeKind.SYMBOL_VERSION_ALIAS_CHANGED in kinds
+
+
+_VIRTUAL_CXX = (
+    "struct S { virtual ~S(); virtual int f(int); int g(int); };\n"
+    "S::~S() {}\nint S::f(int a) { return a; }\nint S::g(int a) { return a; }\n"
+)
+
+
+def _debug_and_stripped(tmp_path: Path, cxx: str) -> tuple[Path, Path]:
+    if shutil.which(cxx) is None or shutil.which("strip") is None:
+        pytest.skip(f"{cxx} or strip is not installed")
+    dbg = _build(tmp_path, "dbg", _VIRTUAL_CXX, cxx)
+    (tmp_path / "stripped").mkdir()
+    stripped = tmp_path / "stripped" / dbg.name
+    subprocess.run(
+        ["strip", "--strip-debug", "-o", str(stripped), str(dbg)], check=True
+    )
+    return dbg, stripped
+
+
+_SIGNATURE_KINDS = {
+    ChangeKind.FUNC_VIRTUAL_REMOVED,
+    ChangeKind.FUNC_VIRTUAL_ADDED,
+    ChangeKind.FUNC_PARAMS_CHANGED,
+    ChangeKind.FUNC_RETURN_CHANGED,
+}
+
+
+@pytest.mark.integration
+@_ELF_HOST
+@pytest.mark.parametrize("cxx", ["g++", "clang++"])
+def test_a_debug_build_and_its_stripped_copy_report_no_signature_change(
+    tmp_path: Path, cxx: str
+) -> None:
+    """The DWARF side pairs with export-table records of the stripped side;
+    those carry no signature, so no virtual/params/return finding appears
+    (origin/main read func_virtual_removed per virtual, BREAKING)."""
+    dbg, stripped = _debug_and_stripped(tmp_path, cxx)
+    forward = _compare(dbg, stripped)
+    kinds = {c.kind for c in forward.changes}
+    assert not kinds & (
+        _SIGNATURE_KINDS | {ChangeKind.FUNC_REMOVED, ChangeKind.FUNC_REMOVED_ELF_ONLY}
+    ), sorted(k.value for k in kinds)
+    assert forward.verdict != Verdict.BREAKING
+    backward = {c.kind for c in _compare(stripped, dbg).changes}
+    assert not backward & _SIGNATURE_KINDS, sorted(k.value for k in backward)
+
+
+@pytest.mark.integration
+@_ELF_HOST
+@pytest.mark.known_gap_canary
+def test_a_stripped_copy_compared_with_its_debug_build_reads_metadata_removed(
+    tmp_path: Path,
+) -> None:
+    """Canary for known-gaps "The DWARF lane records fewer exports than the
+    symbols-only lane": the stripped side records the D1 variant and the
+    _ZTI/_ZTS/_ZTV objects, the debug side does not, so stripped -> debug reads
+    them removed (BREAKING). When this fails the gap moved: archive the entry."""
+    dbg, stripped = _debug_and_stripped(tmp_path, "g++")
+    result = _compare(stripped, dbg)
+    removed = {
+        c.symbol
+        for c in result.changes
+        if c.kind in (ChangeKind.FUNC_REMOVED_ELF_ONLY, ChangeKind.VAR_REMOVED_ELF_ONLY)
+    }
+    assert removed == {"_ZN1SD1Ev", "_ZTI1S", "_ZTS1S", "_ZTV1S"}
+    assert result.verdict == Verdict.BREAKING
+
+
+@pytest.mark.integration
+@_ELF_HOST
+def test_an_export_compiled_without_debug_info_keeps_its_record(tmp_path: Path) -> None:
+    """Formerly a known-gap canary ("A binary-only dump loses exports with no
+    debug subprogram"): one unit built without -g, the rest with it. The
+    binary-only dump must still declare the undebugged export, so comparing
+    the all--g build with the mixed one reports no removal."""
+    if shutil.which("gcc") is None:
+        pytest.skip("gcc is not installed")
+    from abicheck.dumper import dump
+
+    tmp_path.joinpath("a.c").write_text(
+        "int dbg(int x) { return x; }\n", encoding="utf-8"
+    )
+    tmp_path.joinpath("b.c").write_text(
+        "int nodbg(int x) { return x + 1; }\n", encoding="utf-8"
+    )
+    objs = []
+    for name, flags in (("a", ["-g"]), ("b", [])):
+        obj = tmp_path / f"{name}.o"
+        subprocess.run(
+            ["gcc", *flags, "-c", "-fPIC", str(tmp_path / f"{name}.c"), "-o", str(obj)],
+            check=True,
+        )
+        objs.append(str(obj))
+    full, mixed = tmp_path / "full.so", tmp_path / "mixed.so"
+    srcs = [str(tmp_path / "a.c"), str(tmp_path / "b.c")]
+    subprocess.run(
+        ["gcc", "-g", "-shared", "-fPIC", *srcs, "-o", str(full)], check=True
+    )
+    subprocess.run(["gcc", "-shared", *objs, "-o", str(mixed)], check=True)
+    exported = subprocess.run(
+        ["nm", "-D", str(mixed)], capture_output=True, text=True, check=True
+    )
+    assert " T nodbg" in exported.stdout  # the control: still exported
+    snap = dump(mixed, [], version="2")
+    by_name = {f.name: f for f in snap.declarations.functions}
+    assert set(by_name) == {"dbg", "nodbg"}
+    assert by_name["dbg"].return_type == "int"  # the DWARF record is kept
+    assert by_name["nodbg"].visibility is Visibility.ELF_ONLY  # export-table record
+    result = compare(dump(full, [], version="1"), snap)
+    removed = {
+        c.symbol
+        for c in result.changes
+        if c.kind in (ChangeKind.FUNC_REMOVED, ChangeKind.FUNC_REMOVED_ELF_ONLY)
+    }
+    assert removed == set()
+    assert result.verdict != Verdict.BREAKING
 
 
 @pytest.mark.integration
@@ -480,30 +624,42 @@ def test_variadic_arity_is_read_from_dwarf(tmp_path: Path, cc: str) -> None:
 @pytest.mark.integration
 @_ELF_HOST
 @pytest.mark.parametrize(
-    "old_flag,new_flag,flips",
+    "old,new,flips",
     [
-        ("", "-funsigned-char", True),
-        ("-fsigned-char", "-funsigned-char", True),
-        ("-funsigned-char", "", True),
-        ("", "-fsigned-char", False),  # x86-64's default is signed
+        (("gcc", ""), ("gcc", "-funsigned-char"), True),
+        (("gcc", "-fsigned-char"), ("gcc", "-funsigned-char"), True),
+        (("gcc", "-funsigned-char"), ("gcc", ""), True),
+        (("gcc", ""), ("gcc", "-fsigned-char"), False),  # x86-64's default is signed
+        # Same setting, but one side records no switches: unknown, never a flip.
+        (("gcc", "-funsigned-char"), ("clang", "-funsigned-char"), False),
+        (
+            ("gcc", "-funsigned-char"),
+            ("gcc", "-funsigned-char -gno-record-gcc-switches"),
+            False,
+        ),
+        (("gcc", ""), ("gcc", "-gno-record-gcc-switches"), False),
     ],
+    ids=str,
 )
 def test_a_char_signedness_rebuild_is_named(
-    tmp_path: Path, old_flag: str, new_flag: str, flips: bool
+    tmp_path: Path, old: tuple[str, str], new: tuple[str, str], flips: bool
 ) -> None:
-    if shutil.which("gcc") is None:
-        pytest.skip("gcc is not installed")
     import platform
 
+    for cc in {old[0], new[0]}:
+        if shutil.which(cc) is None:
+            pytest.skip(f"{cc} is not installed")
     if platform.machine() not in ("x86_64", "AMD64"):
         pytest.skip("the expected default (signed char) is x86-64's")
     src = "int cf(char c) { return c; }\n"
-    old = _build(tmp_path, "old", src, "gcc", *([old_flag] if old_flag else []))
-    new = _build(tmp_path, "new", src, "gcc", *([new_flag] if new_flag else []))
-    result = _compare(old, new)
+    o = _build(tmp_path, "old", src, old[0], *old[1].split())
+    n = _build(tmp_path, "new", src, new[0], *new[1].split())
+    result = _compare(o, n)
     kinds = {c.kind for c in result.changes}
     assert (ChangeKind.CHAR_SIGNEDNESS_CHANGED in kinds) is flips
-    assert ChangeKind.TOOLCHAIN_FLAG_DRIFT not in kinds
+    assert ChangeKind.TOOLCHAIN_FLAG_DRIFT not in kinds or old[0] != new[0]
+    if flips:
+        assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
 
 
 @pytest.mark.integration

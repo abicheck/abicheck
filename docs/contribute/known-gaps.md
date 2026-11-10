@@ -272,10 +272,17 @@ current emitter, which is unchanged.
 
 ### False-clean risk
 
+#### The DWARF lane records fewer C++ exports than the symbols-only lane, so ctor/dtor variants and RTTI/vtable objects read as added or removed (2026-11-10)
+
+**Status (2026-11-10): OPEN, narrow.** A debug-backed binary-only dump adds an export-table record only for exports no debug declaration names (`extract/dwarf_export_gaps.py`, #1980): it folds a ctor/dtor export into the variant its debug entry names and skips C++ ABI metadata (`_ZT*`, guard variables). The symbols-only lane records all of them. Two shapes follow: (1) a `C1` that aliases `C2` on one side (no virtual base) and has its own entry on the other reads `func_added` (catalog case167, excused in `tests/test_depth_projection_matches_shallow_dump.py`); (2) a stripped copy compared with its own `-g` build reads `func_removed_elf_only`/`var_removed_elf_only` for the `D1` variant and `_ZTI`/`_ZTS`/`_ZTV`, `BREAKING`. Closing it means recording the folded variants and the ABI metadata as export-table records in the DWARF lane (and checking the undeclared-exports detector still credits them to their class).
+`false-positive` — a compatible library change, or a debug build versus its stripped copy, reports C++ variant or RTTI/vtable exports as added or removed.
+<!-- canary: tests/test_dwarf_lane_extractor_parity.py::test_a_ctor_variant_folded_into_its_described_family_gets_no_record -->
+<!-- canary: tests/test_dwarf_lane_extractor_parity.py::test_a_stripped_copy_compared_with_its_debug_build_reads_metadata_removed -->
+
 #### A clang-built plain-`char` signedness flip reads `NO_CHANGE` at DWARF depth (2026-11-09)
 
-**Status (2026-11-09): OPEN.** The DWARF lane reads `-funsigned-char`/`-fsigned-char` from `DW_AT_producer` (`dwarf_advanced._diff_char_signedness`, extractor generation 50), which gcc records and clang does not unless built with `-grecord-command-line`. A clang rebuild with `-funsigned-char` therefore reports nothing. Closing it means reading the plain `char` base type's `DW_AT_encoding` (`DW_ATE_signed_char`/`DW_ATE_unsigned_char`), a new persisted advanced-DWARF fact. Owner: `dwarf_advanced.py`.
-`false-clean` — a clang-built library's char-signedness flip is invisible without build data.
+**Status (2026-11-10): OPEN.** The DWARF lane reads `-funsigned-char`/`-fsigned-char` from `DW_AT_producer` (`compare/toolchain_flags._diff_char_signedness`, extractor generation 50), which gcc records and clang does not unless built with `-grecord-command-line`; gcc built with `-gno-record-gcc-switches` records nothing either. A side whose producer records no switches has an unknown setting (never the target default), so a clang rebuild with `-funsigned-char` reports nothing. Closing it means reading the plain `char` base type's `DW_AT_encoding` (`DW_ATE_signed_char`/`DW_ATE_unsigned_char`), a new persisted advanced-DWARF fact read by `extract/` and diffed in `compare/toolchain_flags.py`.
+`false-clean` — a clang-built (or switch-less gcc) library's char-signedness flip is invisible without build data.
 <!-- canary: tests/test_dwarf_lane_extractor_parity.py::test_clang_char_signedness_flip_is_still_unread -->
 
 #### A castxml base whose bare leaf two records share is not resolved by the leak walk (2026-11-05)
@@ -588,12 +595,6 @@ per-item status in the
 **Status (2026-10-24 at `9513369`): PARTIAL.** #1751 fixed import edges and leaked-dependency symbols; #1770 fixed the binary/toolchain kinds a stated `public` left `UNKNOWN_UNRESOLVED`. Still open: libstdc++ `_ZGTt` transactional-memory clones are not seen as runtime-owned, and runtime exports make the `exports` domain `unmatched_exports` (even for a byte-identical pair). Pinned by shrink-only lists in the toolchain-drift tests.  
 `false-positive` — Under a stated `--contract public|exports`, a rebuild from unchanged source with a static libstdc++ or clang `-O0` `std::` instantiations exits 1 on unsuppressible coverage failures. [Full write-up](known-gaps/toolchain-runtime-rebuild-fails-stated-contract-coverage.md)
 <!-- no-canary: needs two toolchain versions; already pinned by the shrink-only lists in the toolchain-drift tests -->
-
-#### A binary-only dump loses exports with no debug subprogram, so a still-exported symbol reads as removed (2026-10-25)
-
-**Status (2026-10-25): OPEN.** When debug info yields any function, the binary-only dump declares only debug-confirmed functions. Exports with no subprogram drop out, so a version dumped through the other path disagrees.
-`false-positive` — `abicheck compare libv1.so libv2.so` on catalog case38 reports `Processor::validate` as "dynamic export removed" although `libv2.so` still exports it. [Full write-up](known-gaps/binary-only-dump-drops-exports-without-a-debug-subprogram.md)
-<!-- canary: tests/test_known_gap_canaries_extraction.py::test_binary_only_dump_drops_an_export_compiled_without_debug_info -->
 
 #### Below `source`, `TemplateInstanceAbsence` loses the clang-graph instantiation origins (H2a residual, 2026-10-23)
 

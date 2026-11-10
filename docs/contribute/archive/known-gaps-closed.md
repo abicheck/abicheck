@@ -16,6 +16,10 @@ re-verification status line (2026-10-09, `456989f`). Do not re-open an
 entry from here without reproducing it on current `main`; record a new
 gap on the main page instead.
 
+### A binary-only dump lost exports with no debug subprogram, so a still-exported symbol read as removed (closed 2026-11-10)
+
+**Status (2026-11-10): CLOSED.** When debug info yielded any function, the binary-only dump declared only debug-confirmed functions, so an export compiled without `-g` (or one whose debug entry has another name: an IFUNC, a `.symver` implementation) dropped out and the other version's record read as removed. The DWARF lane now adds an export-table-only record for every ABI-relevant export no debug declaration names, exactly what the symbols-only lane records (`extract/dwarf_export_gaps.py`, extractor generation 50, #1980). The canary is now the regression test `tests/test_dwarf_lane_extractor_parity.py::test_an_export_compiled_without_debug_info_keeps_its_record`. Residual, tracked on the main page as "The DWARF lane records fewer C++ exports than the symbols-only lane": folded ctor/dtor variants and skipped RTTI/vtable objects. [Full write-up](../known-gaps/binary-only-dump-drops-exports-without-a-debug-subprogram.md)
+
 ### Header-less runs flagged `exported_object_alignment_reduced` on an unrelated exported static after an additive change (closed 2026-11-09)
 
 **Status (2026-11-09): CLOSED.** An object's alignment taken from its link-time address only bounds its declared alignment from above, so a neighbour's addition that moves it proves nothing. `policy/address_alignment_bound.py` keeps the finding and demotes it to `COMPATIBLE`, with rule `address-alignment-without-declared-requirement`, unless the old side declares an alignment (header `alignas`/`aligned`, DWARF `DW_AT_alignment`, now extracted at generation 49, or a header-declared arithmetic type) that the new placement fails. A dropped `_Alignas(16)` keeps its RISK under DWARF and clang headers. The former canary is the regression test `tests/test_rebuild_toolchain_drift_integration.py::test_headerless_additive_change_keeps_placement_alignment_compatible`.

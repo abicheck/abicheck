@@ -9,5 +9,10 @@
   `func_variadic_removed` instead of `NO_CHANGE`. A gcc rebuild with
   `-funsigned-char`/`-fsigned-char` that flips plain `char`'s signedness now
   reports `char_signedness_changed` (the x86/Arm/POWER/RISC-V defaults are
-  known; clang records no switches, see known-gaps). Extractor generation 50.
-  Found by the generated edit corpus.
+  used only when the producer records its switches; clang and
+  `-gno-record-gcc-switches` builds record none, so their setting is unknown
+  and never reported as a flip, see known-gaps). A binary-only dump of a
+  library with debug info no longer drops the exports compiled without it,
+  and a `-g` build compared with its stripped copy no longer reads
+  `func_virtual_removed`. Extractor generation 50. Found by the generated
+  edit corpus.

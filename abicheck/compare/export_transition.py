@@ -40,6 +40,7 @@ from ..model.change_catalog.kinds import ChangeKind
 from ..model.edge_coverage import EdgeAnswer
 from ..model.fact import replace_with_fact_sync
 from ..model.surface_facts import (
+    EXPORT_STUB_TYPE,
     has_observed_contract_evidence,
     in_public_contract,
     is_abi_visible,
@@ -67,10 +68,6 @@ __all__ = [
 ]
 
 
-#: The return type an export-table stub carries (``itanium_export_function``).
-_STUB_RETURN_TYPE = "?"
-
-
 def carries_no_signature(f_old: Function, f_new: Function) -> bool:
     """Whether either side of a matched pair is a signatureless export stub.
 
@@ -83,7 +80,7 @@ def carries_no_signature(f_old: Function, f_new: Function) -> bool:
     # ``ELF_ONLY`` declaration, a legacy record with a real return type) is
     # not a stub even where the legacy enum alone would call it one.
     return any(
-        f.return_type == _STUB_RETURN_TYPE
+        f.return_type == EXPORT_STUB_TYPE
         and not f.params
         and is_export_table_only_record(f)
         for f in (f_old, f_new)
