@@ -115,6 +115,7 @@ FAMILIES: dict[str, Family] = {
             harness_tests=(
                 "tests/test_family_f5_optimization_reference.py",
                 "tests/test_family_f5_derived_ast_sharing.py",
+                "tests/test_dump_cache_single_tier.py",
                 "tests/test_family_f5_packed_type_graph.py",
                 "tests/test_surface_metrics_fan_in_index.py",
                 "tests/test_header_dir_expansion_canonical_order.py",
