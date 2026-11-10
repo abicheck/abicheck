@@ -357,6 +357,7 @@ def test_every_rule_fires_for_some_config() -> None:
             Flags(pack=1),
             Flags(visibility="hidden"),
             Flags(bits=32),
+            Flags(opt="O2"),
         )
         for e in EVIDENCE
         for p in (("linux", "elf"), ("win32", "pe"))
