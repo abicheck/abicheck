@@ -247,7 +247,7 @@ def _sync_binary_sha256(snap: Any) -> None:
     digest = getattr(snap, "binary_sha256", None)
     if isinstance(digest, str):
         write_extension_fact(snap, BINARY_SHA256, digest)
-    elif digest is None:
+    else:
         _drop_extension_fact(snap, BINARY_SHA256)
 
 
