@@ -96,6 +96,29 @@ deprecation-window note would need to reach.
   severity or an exit code. The Action skips, with a warning, a record the
   CLI would refuse, so the informational block cannot fail the gate. Owner:
   `abicheck/report/delta_baseline.py` (ADR-061 `report/`).
+- **2026-11-09 (accepted-main delta: the opt-in path-equivalent ancestor).**
+  The exact-commit rule above has one opt-in exception. With
+  `base-equivalent-paths` (`actions/fetch-main-snapshot`) /
+  `delta-base-equivalent-paths` (root Action) set, a base with **no**
+  snapshot (`base_not_snapshotted`, `snapshot_missing`, `base_expired`,
+  `base_failed`; never `base_pending`, `untrusted_source` or
+  `lookup_failed`) may be measured against the snapshot of its nearest
+  first-parent ancestor, at most 50 back, whose tree equals the base's under
+  the declared globs. The walk stops at the first ancestor where one differs.
+  The ancestor's snapshot passes the same provenance checks, bound to the
+  ancestor's SHA (artifact: the producing run's `head_sha`; cache: the exact
+  key and recorded `sha`). A walk that finds nothing leaves the base's own
+  outcome in place and names why (`ancestor-walk`: `paths_changed`,
+  `limit_reached`, `history_ended`, `history_unavailable`, `lookup_failed`).
+  The outcome stays `resolved`, so `delta-on-missing-base` and the gate are
+  unchanged. The substitution is recorded rather than given a new outcome:
+  the `snapshot-sha` / `delta-snapshot-sha` output, `delta_baseline.snapshot_sha`
+  (compare report schema 7.3, added before 7.3 shipped), and the
+  analysis context's `delta_snapshot_sha` for the fork publisher. The PR
+  comment heading reads "vs `main@<snapshot>` (equivalent to `<base>`)", from
+  `delta_notes()` on both paths. The declared paths are the project's claim;
+  abicheck does not verify them. Owner:
+  `abicheck/frontends/action/main_snapshot_ancestor.py`.
 
 ---
 

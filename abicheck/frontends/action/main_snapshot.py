@@ -52,6 +52,7 @@ __all__ = [
     "BUILDABLE_OUTCOMES",
     "COMMENT_ONLY_OUTCOMES",
     "delta_notes",
+    "EQUIVALENCE_NOTE",
     "OPERAND_MATCH_NOTES",
     "DeltaOutcome",
     "SNAPSHOT_ARTIFACT_PREFIX",
@@ -134,12 +135,41 @@ _MESSAGES: dict[DeltaOutcome, str] = {
 }
 
 
+#: ``resolved`` through the path-equivalent ancestor rule
+#: (:mod:`.main_snapshot_ancestor`): the snapshot is of another commit than
+#: the base, and the heading names both.
+_RESOLVED_EQUIVALENT = (
+    "Changes in this {subject} vs `{branch}@{snap7}` (equivalent to `{sha7}`)."
+)
+
+#: The second note of an equivalent-ancestor delta: what the substitution
+#: rests on. The declared paths are the project's claim, not abicheck's.
+EQUIVALENCE_NOTE = (
+    "`{sha7}` has no snapshot; `{snap7}` is its nearest snapshotted first-parent "
+    "ancestor, and no path declared in base-equivalent-paths differs between "
+    "the two (a project claim abicheck does not verify)."
+)
+
+
 def outcome_message(
-    outcome: DeltaOutcome, *, sha: str = "", branch: str = "main", subject: str = "PR"
+    outcome: DeltaOutcome,
+    *,
+    sha: str = "",
+    branch: str = "main",
+    subject: str = "PR",
+    snapshot_sha: str = "",
 ) -> str:
-    """The one-line comment/summary text for *outcome*."""
-    return _MESSAGES[outcome].format(
-        sha7=sha[:7] or "?", branch=branch, subject=subject
+    """The one-line comment/summary text for *outcome*.
+
+    *snapshot_sha* names the commit whose snapshot was used when it is not
+    *sha* itself (``base-equivalent-paths``); it changes only the
+    ``resolved`` heading.
+    """
+    template = _MESSAGES[outcome]
+    if outcome is DeltaOutcome.RESOLVED and snapshot_sha and snapshot_sha != sha:
+        template = _RESOLVED_EQUIVALENT
+    return template.format(
+        sha7=sha[:7] or "?", branch=branch, subject=subject, snap7=snapshot_sha[:7]
     )
 
 
@@ -474,6 +504,7 @@ _MEASURED_OUTCOMES = {DeltaOutcome.RESOLVED.value, "base_built"}
 _KNOWN_MATCH_RULES = {"", "loader_name", "file_name", *OPERAND_MATCH_NOTES}
 
 _GATE_VERDICT = re.compile(r"^[A-Z][A-Z_]{0,39}$")
+_FULL_SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 
 
 def delta_notes(
@@ -484,13 +515,18 @@ def delta_notes(
     gate_verdict: str = "",
     merge_group: bool = False,
     operand_match: str = "",
+    snapshot_sha: str = "",
 ) -> list[str]:
     """The quoted lines a delta-baseline comment carries.
 
-    The outcome line, then -- for a measured delta (``resolved`` or
+    The outcome line, then -- for a ``resolved`` delta whose snapshot is of a
+    path-equivalent ancestor (*snapshot_sha* other than *base_sha*) -- what
+    that substitution rests on, then -- for a measured delta (``resolved`` or
     ``base_built``) whose operand pairing
     is not trivial (*operand_match*, a ``MatchRule`` value) -- how the
     snapshot's library was paired with this PR's, then the gate line.
+    *snapshot_sha* is ignored for any other outcome: no stored snapshot was
+    compared then.
 
     The one place their wording lives: the main Action's direct comment and
     the trusted fork publisher both call this, and the publisher calls it
@@ -512,12 +548,23 @@ def delta_notes(
             sha=base_sha,
             branch=branch or "main",
             subject=subject,
+            snapshot_sha=snapshot_sha if parsed is DeltaOutcome.RESOLVED else "",
         )
     if operand_match not in _KNOWN_MATCH_RULES:
         raise ValueError(f"unknown operand match rule {operand_match!r}")
+    if snapshot_sha and not _FULL_SHA.match(snapshot_sha):
+        raise ValueError(f"snapshot sha {snapshot_sha!r} is not a full commit SHA")
     if first.startswith("Delta unavailable"):
         first += " Showing the release-baseline comparison."
     lines = [first]
+    if (
+        outcome == DeltaOutcome.RESOLVED.value
+        and snapshot_sha
+        and snapshot_sha != base_sha
+    ):
+        lines.append(
+            EQUIVALENCE_NOTE.format(sha7=base_sha[:7] or "?", snap7=snapshot_sha[:7])
+        )
     if outcome in _MEASURED_OUTCOMES and operand_match in OPERAND_MATCH_NOTES:
         lines.append(OPERAND_MATCH_NOTES[operand_match])
     verdict = gate_verdict if _GATE_VERDICT.match(gate_verdict or "") else "unknown"

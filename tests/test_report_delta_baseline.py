@@ -98,6 +98,18 @@ def _inputs(root: Path, route: str) -> tuple[Path, Path]:
 
 def _valid(doc: dict[str, object]) -> bool:
     """The roles' rules, written independently of the reader."""
+    snapshot = doc.get("snapshot_sha")
+    if snapshot:
+        # A stand-in snapshot is a full commit SHA, recorded only for a
+        # resolved lookup of a named base.
+        if not (
+            isinstance(snapshot, str)
+            and len(snapshot) in (40, 64)
+            and set(snapshot) <= set("0123456789abcdef")
+            and doc["outcome"] == "resolved"
+            and doc.get("base_sha")
+        ):
+            return False
     if doc["comparison_role"] == "delta":
         return (
             doc["outcome"] in ("resolved", "base_built")
@@ -121,13 +133,15 @@ _MATCH_RULES = tuple(r.value for r in MatchRule if r.value)
 
 def _domain() -> list[dict[str, object]]:
     docs = []
-    for role, outcome, sha, branch, verdict, match in itertools.product(
+    for role, outcome, sha, branch, verdict, match, snapshot in itertools.product(
         DELTA_COMPARISON_ROLES,
         DELTA_REPORT_OUTCOMES,
         (None, "", _SHA, "d" * 64),
         (None, "main"),
         (None, "BREAKING"),
         (None, "file_name", "declared", "not_a_rule"),
+        # absent, the base itself, a path-equivalent ancestor, not a SHA
+        (None, _SHA, "e" * 40, "e" * 7),
     ):
         doc: dict[str, object] = {"comparison_role": role, "outcome": outcome}
         for key, value in (
@@ -135,6 +149,7 @@ def _domain() -> list[dict[str, object]]:
             ("branch", branch),
             ("gate_verdict", verdict),
             ("operand_match", match),
+            ("snapshot_sha", snapshot),
         ):
             if value is not None:
                 doc[key] = value
@@ -177,6 +192,7 @@ def test_the_whole_domain_is_accepted_exactly_by_the_rules() -> None:
         assert block["outcome"] == doc["outcome"]
         assert block["base_sha"] == (doc.get("base_sha") or None)
         assert block["gate_verdict"] == (doc.get("gate_verdict") or None)
+        assert block["snapshot_sha"] == (doc.get("snapshot_sha") or None)
         # A stored block reads back to the same record.
         assert DeltaBaseline.from_report_block(block) == DeltaBaseline.from_mapping(doc)
     assert accepted > len(DELTA_REPORT_OUTCOMES)
@@ -204,6 +220,8 @@ def test_the_schema_and_the_reader_agree_on_every_stored_block() -> None:
                 "gate_verdict": doc.get("gate_verdict") or None,
                 "operand_match": doc.get("operand_match") or None,
             }
+            if doc.get("snapshot_sha"):
+                block["snapshot_sha"] = doc["snapshot_sha"]
             schema_ok = validator.is_valid(block)
             try:
                 DeltaBaseline.from_report_block(block)

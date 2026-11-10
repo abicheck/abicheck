@@ -24,8 +24,11 @@ applies to it), and the main Action reads it with `delta-storage: cache`
 piece 4's report field landed (`delta_baseline` block,
 compare report schema 7.3 / release 3.1, `report.delta_baseline`, with the
 operand pairing as `operand_match`; a built base's delta report records
-`base_built`); open: the comment header's equivalence note (needs path
-equivalence), the path-equivalent *ancestor* rule (`base-equivalent-paths`) ·
+`base_built`); the path-equivalent *ancestor* rule landed
+(`base-equivalent-paths` on `fetch-main-snapshot`,
+`delta-base-equivalent-paths` on the main Action, with artifact and cache
+storage; `abicheck/frontends/action/main_snapshot_ancestor.py`) with the
+comment header's equivalence note and `delta_baseline.snapshot_sha` ·
 **Effort:** L
 
 ## Problem
@@ -130,18 +133,49 @@ Merge-commit mode removes most of the "old base" problem: GitHub rebuilds the
 merge commit on every push to the PR, and its first parent is always a recent
 default-branch tip. That is why it is the default.
 
-#### Optional: path-equivalent ancestor
+#### Optional: path-equivalent ancestor (landed)
 
 Projects whose main workflow has a `paths:` filter will often hit
-`base_not_snapshotted`. An **opt-in** input (`base-equivalent-paths`) lets the
-fetcher walk first-parent ancestors of the base (bounded, e.g. 50) to the
-nearest snapshotted commit **only if** `git diff --quiet <ancestor> <base> --
-<paths>` holds — i.e. nothing that feeds the ABI changed in between. The
-report records the substitution (`base_commit`, `snapshot_commit`,
-`equivalence: paths`) and the comment shows it. The path list is a project
-claim, not something abicheck verifies; with the input unset there is no
-substitution at all. The provenance check (§ Storage) then applies to the
-ancestor's SHA.
+`base_not_snapshotted`. An **opt-in** input (`base-equivalent-paths` on
+`fetch-main-snapshot`, `delta-base-equivalent-paths` on the main Action:
+globs, one per line, matched with git's `glob` pathspec magic) lets the
+fetcher walk first-parent ancestors of the base to the nearest snapshotted
+commit **only if** `git diff --name-only <ancestor> <base> -- <paths>` is
+empty, i.e. nothing that feeds the ABI changed in between. As landed
+(`abicheck/frontends/action/main_snapshot_ancestor.py`):
+
+- **When.** Only when the exact base has no snapshot: `base_not_snapshotted`,
+  `snapshot_missing`, `base_expired`, `base_failed`. A `base_pending` base is
+  waited for. `untrusted_source` and `lookup_failed` are reported, never
+  stepped around.
+- **How far.** At most 50 first-parent ancestors, nearest first, a fixed bound
+  rather than an input. The walk **stops at the first ancestor whose tree
+  differs** under the paths. A snapshot further back is never used, even when
+  a revert makes the trees equal again.
+- **Which snapshot.** The first candidate with a snapshot that passes the
+  exact-commit checks, applied to the ancestor's SHA (§ Storage). A candidate
+  whose lookup fails ends the walk (`lookup_failed`). With `storage: cache`,
+  which entries exist is read from the caches list API (exact keys in
+  `refs/heads/<branch>`, needs `actions: read`), and only the chosen exact
+  key is restored.
+- **Shallow clones.** When the history ends at a shallow boundary, the
+  fetcher deepens once along the base (`git fetch --deepen=51 origin
+  <base>`, then the branch). If that fails the walk reports
+  `history_unavailable` ("use `fetch-depth: 0`").
+- **Recorded.** The outcome stays `resolved`, so `delta-on-missing-base` and
+  the gate are untouched. Outputs `snapshot-sha` / `delta-snapshot-sha` and
+  `ancestor-walk`; the report's `delta_baseline.snapshot_sha` beside
+  `base_sha`; the analysis context's `delta_snapshot_sha` for the fork
+  publisher. The comment heading reads "Changes in this PR vs
+  `main@<snapshot>` (equivalent to `<base>`)", with a note that the path list
+  is the project's claim. Both the direct and the fork path word it through
+  `delta_notes()`.
+- **Nothing qualifies.** The base's own outcome stands, with a named reason
+  in `ancestor-walk` and the message: `paths_changed` (where, which paths),
+  `limit_reached`, `history_ended`, `history_unavailable`, `lookup_failed`.
+
+The path list is a project claim, not something abicheck verifies; with the
+input unset there is no substitution at all.
 
 ### Operand identity (landed)
 
@@ -201,7 +235,7 @@ partial delta naming both depths; it never silently narrows the delta.
 |---|---|---|
 | `resolved` | yes | the delta, headed "Changes in this PR (vs `main@<sha7>`)" ("this merge-queue entry" for `merge_group`) |
 | `base_unknown` | no | "the base commit could not be determined — check out with `fetch-depth: 2` (`0` in head mode)" |
-| `resolved_equivalent` | yes | the delta + "base `<sha7>` not snapshotted; used `<sha7'>`, identical under declared paths" |
+| `resolved` with `snapshot-sha` ≠ `base-sha` (planned as `resolved_equivalent`; landed as a recorded substitution, not a separate outcome) | yes | "Changes in this PR vs `main@<sha7'>` (equivalent to `<sha7>`)" + "`<sha7>` has no snapshot; `<sha7'>` is its nearest snapshotted first-parent ancestor, and no path declared in base-equivalent-paths differs between the two" |
 | `base_pending` (after `wait-timeout`) | no | "main snapshot for `<sha7>` still being built — re-run when it finishes" |
 | `base_failed` | no | "main snapshot job for `<sha7>` failed (link)" |
 | `base_not_snapshotted` | no | "main workflow did not snapshot `<sha7>` (skipped / filtered)" |
@@ -310,8 +344,8 @@ work, which publishes the delta report; nothing else changes.
    `SourceRun`/`verify_source_run` provenance checks; base selection and
    outcome typing are pure and unit-tested without credentials. *Landed:*
    `storage: cache` (`main_snapshot_cache.py`, `verify-cache.sh`).
-   *Planned:* `base-equivalent-paths`, and a `snapshot-sha` output (it differs
-   from `base-sha` only under path equivalence).
+   *Landed:* `base-equivalent-paths`, and the `snapshot-sha` (it differs
+   from `base-sha` only under path equivalence) and `ancestor-walk` outputs.
 3. **Main Action inputs** (*landed* as `delta-baseline: main`,
    `delta-snapshot-workflow`, `delta-mode`, `delta-profile`,
    `delta-wait-timeout`, `delta-on-missing-base: report|fail|build`,
@@ -328,7 +362,7 @@ work, which publishes the delta report; nothing else changes.
    delta report and the gate's verdict as one header line ("Release gate:
    ✅ compatible / ❌ breaking — see summary"). The step's exit code comes
    from the gate only.
-4. **Report rendering** (*landed*, except the equivalence note): the
+4. **Report rendering** (*landed*): the
    comment's two notes (piece 3), and a versioned report field so the JSON
    report says it too -- the optional top-level `delta_baseline` block
    (compare report schema 7.3, release 3.1; owner `abicheck/report/delta_baseline.py`)
@@ -336,8 +370,12 @@ work, which publishes the delta report; nothing else changes.
    `base_sha`, `branch` and, on the delta report, `gate_verdict`. The Action
    passes it with `--set report.delta_baseline=@FILE` to both commands; the
    fork publisher falls back to it when a report has no delta analysis
-   context. ADR-047's 2026-11-08 amendment. *Planned:* `snapshot_sha` and
-   `equivalence` fields with `base-equivalent-paths`.
+   context. ADR-047's 2026-11-08 amendment. *Landed* (2026-11-09
+   amendment): `snapshot_sha`, the commit whose stored snapshot was used
+   (`resolved` only; differs from `base_sha` under
+   `delta-base-equivalent-paths`), plus the comment's equivalence heading. A
+   separate `equivalence` field was not added: `snapshot_sha != base_sha`
+   says it.
 
 Explicit `old-library` / `old-header` pointing at a snapshot the user staged
 themselves stays supported — the two-compare recipe from the previous
@@ -376,8 +414,12 @@ discussion is the manual form of the same thing.
   exhaustive small identity domain against a hand-written version-stem
   oracle; the map's decisiveness; `run.sh` end to end — an unmatched snapshot
   is never passed to `compare`.
-- **Path-equivalence:** substitution only when the diff is empty under the
-  declared paths; refused otherwise; recorded in the report.
+- **Path-equivalence (landed, `tests/test_action_delta_equivalent_ancestor.py`):**
+  the planner on real git histories over every 3-commit ABI/doc sequence and
+  every snapshot subset, against the definition (nearest snapshotted ancestor
+  with no ABI commit after it); `run.sh` end to end for artifact and cache
+  storage, a shallow clone deepened or reported, untrusted and failed lookups
+  never walked past; the comment and both reports' records.
 - **Gate isolation:** with `on-missing-base: report`/`build`, for every delta
   outcome the step exit code equals the gate-only exit code; with a failing
   gate and a resolved snapshot the delta still runs and its findings appear

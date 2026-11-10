@@ -2490,6 +2490,14 @@
    "default": "600"
   },
   {
+   "id": "action:delta-base-equivalent-paths",
+   "action": "action",
+   "input": "delta-base-equivalent-paths",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
    "id": "action:delta-operand-map",
    "action": "action",
    "input": "delta-operand-map",
@@ -3613,6 +3621,14 @@
    "id": "actions/fetch-main-snapshot:profile",
    "action": "actions/fetch-main-snapshot",
    "input": "profile",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "actions/fetch-main-snapshot:base-equivalent-paths",
+   "action": "actions/fetch-main-snapshot",
+   "input": "base-equivalent-paths",
    "status": "live",
    "required": false,
    "default": ""
