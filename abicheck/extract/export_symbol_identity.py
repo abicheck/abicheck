@@ -57,6 +57,7 @@ from __future__ import annotations
 from ..model import Function, Variable, Visibility
 from ..model.identity import entity_id_for_function, entity_id_for_variable
 from ..model.name_decoration import pe_x86
+from ..model.surface_facts import EXPORT_STUB_TYPE
 from .surface_fact_producers import export_table_surface_facts
 
 __all__ = [
@@ -115,7 +116,7 @@ def itanium_export_function(name: str) -> Function:
     return Function(
         name=name,
         mangled=name,
-        return_type="?",
+        return_type=EXPORT_STUB_TYPE,
         # ELF_ONLY: marks symbols as export-table-only (no header
         # confirmation), so the checker can distinguish a binary-only
         # removal as FUNC_REMOVED_ELF_ONLY.
@@ -140,7 +141,7 @@ def itanium_export_variable(name: str) -> Variable:
     return Variable(
         name=name,
         mangled=name,
-        type="?",
+        type=EXPORT_STUB_TYPE,
         visibility=Visibility.ELF_ONLY,
         # No headers were parsed on this path at all, so "declared in the
         # available headers" is *unknown*, not False -- the distinction
@@ -192,7 +193,7 @@ def msvc_export_function(sym: str, *, is_x86_32: bool = False) -> Function:
     return Function(
         name=sym,
         mangled=sym,
-        return_type="?",
+        return_type=EXPORT_STUB_TYPE,
         visibility=Visibility.ELF_ONLY,
         # No headers were parsed on this path at all, so "declared in the
         # available headers" is *unknown*, not False -- the distinction

@@ -75,6 +75,7 @@ if TYPE_CHECKING:
 __all__ = [
     "DERIVED_FROM_LEGACY",
     "EXPORT_MATCH_DIAGNOSTIC_PREFIX",
+    "EXPORT_STUB_TYPE",
     "SurfaceFactBearing",
     "binary_export_match",
     "binary_exported",
@@ -110,6 +111,10 @@ DERIVED_FROM_LEGACY = "derived-from-legacy-visibility"
 #: :class:`~abicheck.model.export_index.ExportMatch`). Persisted with the
 #: fact's diagnostics, so no stored field is needed to recover the tier.
 EXPORT_MATCH_DIAGNOSTIC_PREFIX = "export-match:"
+
+#: The type an export-table stub carries where a declaration would carry a
+#: return or object type (no header or debug entry described it).
+EXPORT_STUB_TYPE = "?"
 
 
 def export_match_diagnostic(match: ExportMatch) -> str:

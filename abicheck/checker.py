@@ -36,6 +36,7 @@ from .compare.finding_redundancy import (
     ROOT_TYPE_CHANGE_KINDS as _ROOT_TYPE_CHANGE_KINDS,
 )
 from .compare.surface_reconcile import releases_reconciliation
+from .compare.toolchain_flags import advanced_dwarf_kind_map, toolchain_flag_changes
 from .compare.type_layout_diff import (
     diff_struct_layouts,  # noqa: F401 — tests import it from here
 )
@@ -461,17 +462,7 @@ def _diff_advanced_dwarf(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     o: AdvancedDwarfMetadata = _debug_layout_view(old).advanced
     n: AdvancedDwarfMetadata = _debug_layout_view(new).advanced
 
-    _kind_map = {
-        "calling_convention_changed": ChangeKind.CALLING_CONVENTION_CHANGED,
-        "value_abi_trait_changed": ChangeKind.VALUE_ABI_TRAIT_CHANGED,
-        "struct_return_convention_changed": ChangeKind.STRUCT_RETURN_CONVENTION_CHANGED,
-        "struct_packing_changed": ChangeKind.STRUCT_PACKING_CHANGED,
-        "toolchain_flag_drift": ChangeKind.TOOLCHAIN_FLAG_DRIFT,
-        "vector_abi_changed": ChangeKind.VECTOR_ABI_CHANGED,
-        "wchar_model_changed": ChangeKind.WCHAR_MODEL_CHANGED,
-        "type_visibility_changed": ChangeKind.TYPE_VISIBILITY_CHANGED,
-    }
-
+    _kind_map = advanced_dwarf_kind_map()
     return [
         Change(
             kind=_kind_map[kind_str],
@@ -480,7 +471,10 @@ def _diff_advanced_dwarf(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             old_value=old_val,
             new_value=new_val,
         )
-        for kind_str, sym, desc, old_val, new_val in diff_advanced_dwarf(o, n)
+        for kind_str, sym, desc, old_val, new_val in [
+            *diff_advanced_dwarf(o, n),
+            *toolchain_flag_changes(o, n),
+        ]
         if kind_str in _kind_map
     ]
 

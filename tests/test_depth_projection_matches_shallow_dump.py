@@ -112,12 +112,12 @@ _DEMANGLED_PAIRING = (
     "reports a removal plus an addition"
 )
 _ORACLE_EXPORT_NAMES = (
-    "oracle defect: the projection keeps only exports the export table "
-    "confirms, and it declares this symbol on both sides, yet the binary-only "
-    "dump reports it added or removed: when debug info yields any function "
-    "the dump declares only debug-confirmed functions, by debug name, and "
-    "the other exports drop out, so two versions dumped through different "
-    "paths disagree (docs/contribute/known-gaps.md)"
+    "the projection keeps only exports the export table confirms, and it "
+    "declares this symbol on both sides, yet the binary-only dump reports it "
+    "added or removed: a debug-backed dump records a ctor/dtor under the "
+    "variant its debug entry names and folds the export's other variants "
+    "into that family (extract/dwarf_export_gaps.py), so a C1 that aliases "
+    "C2 on one side and has its own entry on the other reads as added"
 )
 _ELF_ONLY_INVENTORY = (
     "the projection, like a symbol-only dump, declares every export; a "

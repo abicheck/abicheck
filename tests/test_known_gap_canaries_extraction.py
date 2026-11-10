@@ -316,61 +316,6 @@ def test_mingw_triple_include_tree_is_not_a_toolchain_dir(
     assert _is_toolchain_compiler_include_dir(tuple(path.split("/"))) is recognized
 
 
-# -- "A binary-only dump loses exports with no debug subprogram, so a
-#    still-exported symbol reads as removed"
-
-
-@pytest.mark.integration
-@_LINUX_ONLY
-def test_binary_only_dump_drops_an_export_compiled_without_debug_info(
-    tmp_path: Path,
-) -> None:
-    _require("gcc")
-    tmp_path.joinpath("a.c").write_text(
-        "int dbg(int x) { return x; }\n", encoding="utf-8"
-    )
-    tmp_path.joinpath("b.c").write_text(
-        "int nodbg(int x) { return x + 1; }\n", encoding="utf-8"
-    )
-    objs = []
-    for name, flags in (("a", ["-g"]), ("b", [])):
-        obj = tmp_path / f"{name}.o"
-        subprocess.run(
-            ["gcc", *flags, "-c", "-fPIC", str(tmp_path / f"{name}.c"), "-o", str(obj)],
-            check=True,
-        )
-        objs.append(str(obj))
-    (tmp_path / "full").mkdir()
-    (tmp_path / "mixed").mkdir()
-    full = tmp_path / "full" / "lib.so"
-    mixed = tmp_path / "mixed" / "lib.so"
-    subprocess.run(
-        [
-            "gcc",
-            "-g",
-            "-shared",
-            "-fPIC",
-            str(tmp_path / "a.c"),
-            str(tmp_path / "b.c"),
-            "-o",
-            str(full),
-        ],
-        check=True,
-    )
-    subprocess.run(["gcc", "-shared", *objs, "-o", str(mixed)], check=True)
-    exported = subprocess.run(
-        ["nm", "-D", str(mixed)], capture_output=True, text=True, check=True
-    )
-    assert " T nodbg" in exported.stdout  # the control: still exported
-    mixed_snap = _dump(mixed)
-    assert sorted(f.name for f in load_snapshot(mixed_snap).declarations.functions) == [
-        "dbg"
-    ]
-    report = _compare(_dump(full), mixed_snap)
-    removed = [c["symbol"] for c in report["changes"] if c["kind"] == "func_removed"]
-    assert removed == ["nodbg"]
-
-
 # -- "`--depth binary` on a header-built snapshot misses debug-only
 #    declaration findings"
 

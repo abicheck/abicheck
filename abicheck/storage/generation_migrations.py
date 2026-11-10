@@ -544,14 +544,14 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "keeps its RISK) and as no declared DWARF alignment"
     ),
     50: GenerationSpellingChange(
-        "every dump of a binary file records the SHA-256 of the binary's bytes "
-        "(the abicheck.binary_sha256 extension fact on the binary section, "
-        "hashed through a GNU ld linker script to its target like a live "
-        "operand), so the identical-input exemption can prove a stored dump and "
-        "a live binary one input. No type or name spelling changes, so no "
-        "rewrite is needed "
-        "-- an older snapshot reads as no recorded identity, which proves no "
-        "identical-input exemption"
+        "no type or name spelling changes. DWARF-only snapshots record an "
+        "export-table-only record for each ABI-relevant export no DWARF "
+        "declaration names (a .symver alias, an IFUNC, a TU built without -g; "
+        "extract/dwarf_export_gaps.py), set Function.is_variadic from "
+        "DW_TAG_unspecified_parameters (was unset), and the advanced DWARF "
+        "toolchain flags include -f[no-][un]signed-char from DW_AT_producer; "
+        "no rewrite is needed -- an older snapshot reads is_variadic as not "
+        "recorded and simply lacks the added records and flags"
     ),
 }
 

@@ -40,7 +40,7 @@ This module gives the walker what it needs to record them:
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import Any
 
@@ -125,7 +125,27 @@ def chained_linkage_name(die: Any, CU: Any) -> str:
     return ""
 
 
-def parameter_dies(die: Any, CU: Any) -> Iterator[Any]:
+def parameters_and_variadic(die: Any, CU: Any) -> tuple[list[Any], bool]:
+    """``parameter_dies`` and whether *die* takes ``...``, in one pass over its
+    children (a ``DW_TAG_unspecified_parameters`` child; every producer emits it
+    for a prototyped variadic function, on the definition DIE too, so its
+    absence is a real "fixed arity").
+    """
+    variadic = False
+
+    def note(child: Any) -> bool:
+        nonlocal variadic
+        if child.tag == "DW_TAG_unspecified_parameters":
+            variadic = True
+        return True
+
+    params = list(parameter_dies(die, CU, observe=note))
+    return params, variadic
+
+
+def parameter_dies(
+    die: Any, CU: Any, observe: Callable[[Any], object] | None = None
+) -> Iterator[Any]:
     """*die*'s declared parameters, artificial ones (``this``) left out.
 
     A concrete instance's parameter usually carries only
@@ -135,6 +155,8 @@ def parameter_dies(die: Any, CU: Any) -> Iterator[Any]:
     repeat its type without repeating the flag.
     """
     for child in die.iter_children():
+        if observe is not None:
+            observe(child)
         if child.tag != "DW_TAG_formal_parameter":
             continue
         origin = None

@@ -51,11 +51,10 @@ from __future__ import annotations
 #: (``cu_stack_protector``) and a DWARF variable's ``DW_AT_alignment``. A warm
 #: entry would carry neither.
 #:
-#: v45 (v41-v44 were left to changes in flight at the time): a dump of a
-#: binary file records the binary's SHA-256 (``binary_sha256``, ADR-090
-#: D1(c)). A warm entry would carry none, so a stored dump of it could never
-#: be proven the same input as the binary.
-SNAPSHOT_CACHE_VERSION: str = "45"
+#: v41: a DWARF-only dump records export-table-only records for exports no
+#: DWARF declaration names, ``Function.is_variadic``, and plain-char
+#: signedness flags. A warm entry would carry none of them.
+SNAPSHOT_CACHE_VERSION: str = "41"
 # v35: header-derived snapshots now carry public_header_identifiers (schema
 # v55, extract/public_header_identifiers.py). The key also folds in the
 # snapshot schema version from this version on, so the next schema bump
