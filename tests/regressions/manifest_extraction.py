@@ -1012,6 +1012,5 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
                 "process_wait",
             ),
         },
-
     ),
 )
