@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any
 from .compare import export_transition as _export_transition
 from .compare.declaration_facts import alignment_changes
 from .compare.declared_alignment import placement_bits
+from .compare.detection_memo import memoized
 from .compare.elf_only_demangle import (
     elf_only_demangled_name as _elf_only_demangled_name,
 )
@@ -275,4 +276,8 @@ def variable_type_index_for(
         lambda var: variable_canonical_entity(var, producer),
         projection_key=producer,
     )
-    return replace(index, placement=placement_bits(snap))
+    # One placement table per snapshot per detector pass: every pairing asks.
+    placement = memoized(
+        "variable_placement_bits", snap, None, lambda: placement_bits(snap)
+    )
+    return replace(index, placement=placement)
