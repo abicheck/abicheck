@@ -39,7 +39,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..deadline import run_bounded
+from ..deadline import PROBE_HANG_TIMEOUT_S, run_bounded
 from ..model.abi_fundamental import AbiFundamental, FundamentalEncoding
 from ..model.execution_cache import memoized
 from ..model.fact import Fact
@@ -205,7 +205,9 @@ def probe_builtin_abi(cc_bin: str, option_tokens: tuple[str, ...]) -> BuiltinAbi
 def _run(argv: list[str]) -> subprocess.CompletedProcess[str] | None:
     """*argv* run under the active deadline, or None when it cannot run."""
     try:
-        return run_bounded(argv, timeout=60, capture_output=True, text=True)
+        return run_bounded(
+            argv, timeout=PROBE_HANG_TIMEOUT_S, capture_output=True, text=True
+        )
     except (OSError, subprocess.SubprocessError):
         return None
 

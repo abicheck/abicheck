@@ -50,7 +50,7 @@ import subprocess
 from collections.abc import Callable
 from typing import Any, cast
 
-from .deadline import run_bounded
+from .deadline import PROBE_HANG_TIMEOUT_S, run_bounded
 from .model.execution_cache import MemoryCache, memoized, reference_mode
 
 _log = logging.getLogger(__name__)
@@ -213,7 +213,7 @@ def demangle(symbol: str, *, accept_macho_prefix: bool = False) -> str | None:
                     cmd,
                     capture_output=True,
                     text=True,
-                    timeout=5,
+                    timeout=PROBE_HANG_TIMEOUT_S,
                 )
                 if result.returncode == 0:
                     out = str(result.stdout).strip()
@@ -422,7 +422,7 @@ def _batch_phase3_cppfilt(remaining: list[str], result: dict[str, str]) -> None:
                     input="\n".join(canonical_inputs),
                     capture_output=True,
                     text=True,
-                    timeout=30,
+                    timeout=PROBE_HANG_TIMEOUT_S,
                 )
                 if proc.returncode != 0:
                     continue

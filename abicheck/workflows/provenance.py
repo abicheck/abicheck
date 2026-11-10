@@ -29,6 +29,8 @@ import os
 import subprocess
 from typing import TYPE_CHECKING
 
+from ..deadline import PROBE_HANG_TIMEOUT_S
+
 if TYPE_CHECKING:
     from ..model import AbiSnapshot
 
@@ -73,7 +75,7 @@ def stamp_provenance(
                 ["git", "rev-parse", "HEAD"],
                 capture_output=True,
                 text=True,
-                timeout=5,
+                timeout=PROBE_HANG_TIMEOUT_S,
                 check=False,
             )
             if result.returncode == 0:

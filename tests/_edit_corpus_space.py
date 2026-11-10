@@ -237,7 +237,8 @@ CONFIG_AXIS: tuple[str, ...] = (
 _FEATURE_BY_NAME = {f.name: f for f in CONFIG_FEATURES}
 
 # Constructs a config feature cannot be combined with, and why. The generator
-# refuses these cells (``seed_conflict``, which ``_edit_corpus_cells`` calls).
+# refuses these cells (``_edit_corpus_cells.seed_conflict`` and ``pair_blocked``
+# call ``seed_flags_conflict``).
 CONSTRUCT_CONFIG_CONFLICTS: dict[tuple[str, str], str] = {
     ("std_string", "packed"): (
         "-fpack-struct makes std::string incompatible with the installed libstdc++"
@@ -342,9 +343,14 @@ def feasible_points() -> frozenset[Point]:
     return frozenset(p for p in all_points() if infeasible(p) is None)
 
 
-def cell_points(op: EditOp, config: Config) -> tuple[Point, ...]:
+def cell_points(
+    op: EditOp, config: Config, ran_consumers: frozenset[str] = frozenset()
+) -> tuple[Point, ...]:
     """The points one corpus cell exercises: its constructs x its config
-    features, once per (build, consumer) pair the cell checks."""
+    features, once per (build, consumer) pair that ran (``ran_consumers``, by
+    ``ResolvedConsumer.id``). An allow-list: a pair that was infeasible or
+    unavailable, or a cell with no execution evidence at all (a non-ELF host,
+    no oracle), exercises nothing."""
     new = op.new_flags(config.flags) if op.rebuild is not None else None
     points = (
         Point(
@@ -357,6 +363,7 @@ def cell_points(op: EditOp, config: Config) -> tuple[Point, ...]:
             config.evidence,
         )
         for c in config.consumer_set
+        if c.id in ran_consumers
         for con in op_constructs(op)
         for cfg in config_features(config, new, c)
     )
@@ -383,12 +390,6 @@ def seed_flags_conflict(seed: Seed, flags: Flags) -> str | None:
             if why is not None:
                 return why
     return None
-
-
-def seed_conflict(seed: Seed, config: Config) -> str | None:
-    """Why *seed* cannot be built under *config*'s build flags (consumers are
-    per-pair: ``_edit_corpus_cells.pair_blocked``)."""
-    return seed_flags_conflict(seed, config.flags)
 
 
 # --- the report -------------------------------------------------------------
@@ -448,7 +449,6 @@ __all__ = [
     "all_points",
     "cell_points",
     "config_features",
-    "seed_conflict",
     "seed_flags_conflict",
     "seed_constructs",
     "coverage",

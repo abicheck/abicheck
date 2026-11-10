@@ -23,7 +23,7 @@ import subprocess
 from collections.abc import Hashable
 
 from .._compiler_options import split_gcc_options
-from ..deadline import run_bounded
+from ..deadline import PROBE_HANG_TIMEOUT_S, run_bounded
 from ..model.execution_cache import memoized, path_witness
 from .castxml_compiler_emulation import emulation_arguments
 from .target_platform import (
@@ -107,7 +107,9 @@ def _probe_target_platform(
     """``(pointer_width, endianness)`` *cc* predefines under *args*."""
     cmd = [cc, *args, "-E", "-dM", "-x", "c++" if cxx else "c", "-"]
     try:
-        r = run_bounded(cmd, input="", capture_output=True, text=True, timeout=10)
+        r = run_bounded(
+            cmd, input="", capture_output=True, text=True, timeout=PROBE_HANG_TIMEOUT_S
+        )
     except (OSError, subprocess.TimeoutExpired):
         return None, None
     return platform_from_macros(r.stdout) if r.returncode == 0 else (None, None)

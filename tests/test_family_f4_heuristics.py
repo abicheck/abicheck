@@ -99,7 +99,9 @@ UNCATEGORIZED_CEILING = 0
 EXEMPTION_CEILINGS: dict[str, int] = {
     # 69: ADR-085 shape C resolves a spelled template-id (C++ type spelling)
     # against the function scope in policy/template_default_changes.py.
-    "spelling": 69,
+    # 72: plus the three basic_string/whitespace canonicalizations of the
+    # dual-ABI pairing key (compare/glibcxx_dual_abi.normalize_dual_abi_spelling).
+    "spelling": 72,
     # 44: the merge with main brought model/symbol_ownership.py into the scan
     # (main made it the vocabulary owner) and main's shared
     # match_frozen_namespace -- both one pre-existing `_Z` mangling check.

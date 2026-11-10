@@ -78,7 +78,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
-from ..deadline import run_bounded
+from ..deadline import PROBE_HANG_TIMEOUT_S, run_bounded
 from ..extract.headers.toolchain import _tool_identity_metadata
 from ..model.execution_cache import memoized
 from .toolchain_bindings import BindingsFile
@@ -288,7 +288,7 @@ def _clang_accepts_target(selected_path: str, digest: str, target: str) -> bool 
             [selected_path, f"--target={target}", "-x", "c", "-fsyntax-only", "-"],
             input="",
             capture_output=True,
-            timeout=10,
+            timeout=PROBE_HANG_TIMEOUT_S,
             text=True,
             env={**os.environ, "LC_ALL": "C"},
         )

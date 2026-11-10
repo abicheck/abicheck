@@ -177,4 +177,23 @@ PLATFORM_ENTRIES_3: list[ChangeKindMeta] = [
         contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
     ),
+    _E(
+        "glibcxx_dual_abi_changed",
+        _B,
+        impact="The two builds select different libstdc++ dual ABIs "
+        "(_GLIBCXX_USE_CXX11_ABI=0 vs =1), and the library's public surface "
+        "uses a type that selection changes: std::string (and the other "
+        "basic_string aliases) and std::list are different types under the "
+        "two ABIs, with different layout and mangled names. A consumer built "
+        "under the old selection fails to link (`undefined symbol` for every "
+        "re-mangled export) or misreads every object of such a type it "
+        "shares with the library. The removed, added, parameter and layout "
+        "findings reported alongside it are consequences of this one cause. "
+        "Restore the old selection, or ship both ABIs (libstdc++'s own "
+        "approach) and bump the SONAME.",
+        description_template="libstdc++ dual ABI changed: {old} → {new} ({detail})",
+        entity=_ENT.BINARY,
+        contract_subject=_CS.BINARY_WIDE,
+        operation=_OP.MODIFIED,
+    ),
 ]
