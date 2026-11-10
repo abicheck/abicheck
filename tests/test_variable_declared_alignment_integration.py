@@ -76,11 +76,28 @@ def _bound_only(cc: str, evidence: str, align: int | None) -> bool:
     return cc == "gcc" and evidence == "dwarf" and align is None
 
 
-def _provably_differs(cc: str, evidence: str, old: int | None, new: int | None) -> bool:
-    """Whether the recorded facts prove the declared alignments differ."""
+def _provably_differs(
+    cc: str,
+    evidence: str,
+    old: int | None,
+    new: int | None,
+    placed: tuple[int, int],
+) -> bool:
+    """Whether the recorded facts prove the declared alignments differ.
+
+    A bound-only side's alignment is at least its type's and at most its
+    address alignment (an object aligned to A sits at a multiple of A; read
+    with ``nm``, not from abicheck); a page-sized placement bounds nothing.
+    """
     lo_o, lo_n = _declared(old), _declared(new)
-    hi_o = float("inf") if _bound_only(cc, evidence, old) else lo_o
-    hi_n = float("inf") if _bound_only(cc, evidence, new) else lo_n
+
+    def high(bound: bool, lo: int, placement: int) -> float:
+        if not bound:
+            return lo
+        return placement if lo <= placement < 4096 else float("inf")
+
+    hi_o = high(_bound_only(cc, evidence, old), lo_o, placed[0])
+    hi_n = high(_bound_only(cc, evidence, new), lo_n, placed[1])
     return hi_o < lo_n or hi_n < lo_o
 
 
@@ -110,8 +127,8 @@ def _snapshot(work: Path, cc: str, align: int | None, evidence: str):
     return dump(so, headers, compiler="cc", lang="c", header_backend=backend)
 
 
-def _placement(so: Path) -> int:
-    """The largest power of two dividing ``g_data``'s address, from ``nm``."""
+def _placement(so: Path, name: str = "g_data") -> int:
+    """The largest power of two dividing *name*'s address, from ``nm``."""
     out = subprocess.run(
         ["nm", "-D", "--defined-only", str(so)],
         capture_output=True,
@@ -121,7 +138,7 @@ def _placement(so: Path) -> int:
     value = next(
         int(line.split()[0], 16)
         for line in out.splitlines()
-        if line.endswith(" g_data")
+        if line.endswith(f" {name}")
     )
     return value & -value if value else 1 << 12
 
@@ -148,13 +165,55 @@ def test_a_header_alignment_change_reads_as_the_declaration_says(
     if declared_old == declared_new:
         assert not kinds & _ALIGNMENT_KINDS, kinds
         return
-    if evidence in _STATES_DECLARATIONS:
-        # Reported exactly when the recorded facts prove it; a lower bound the
-        # other side's exact value meets proves nothing (known gap, canary
-        # test_gcc_dwarf_loses_a_definition_only_alignas).
-        provable = _provably_differs(cc, evidence, old, new)
-        assert ("var_alignment_changed" in kinds) is provable, kinds
     placed_new = _placement(_build(work, cc, new, evidence != "binary"))
     placed_old = _placement(_build(work, cc, old, evidence != "binary"))
+    if evidence in _STATES_DECLARATIONS:
+        # Reported exactly when the recorded facts prove it: gcc's bound-only
+        # side is closed above by its address, so a header specifier dropped
+        # or added is reported whenever the placement rules the other side's
+        # value out (known gap when it does not, canary
+        # test_gcc_dwarf_loses_a_definition_only_alignas).
+        provable = _provably_differs(cc, evidence, old, new, (placed_old, placed_new))
+        assert ("var_alignment_changed" in kinds) is provable, (
+            kinds,
+            placed_old,
+            placed_new,
+        )
     if placed_new < declared_old <= placed_old:
         assert "exported_object_alignment_reduced" in kinds, kinds
+
+
+@pytest.mark.parametrize("lane", ["dwarf", "clang"])
+@pytest.mark.parametrize("cc", ["gcc", "clang"])
+def test_a_retype_that_changes_alignment_reads_alike_in_every_lane(
+    tmp_path: Path, cc: str, lane: str
+) -> None:
+    """``int g`` -> ``double g`` (x86-64: alignof 4 -> 8) is BREAKING through
+    ``var_type_changed``; ``var_alignment_changed`` rides along wherever the
+    evidence states both declarations -- the clang header lane did so before
+    generation 51, and DWARF now agrees with it -- or the old object's address
+    rules the new alignment out (gcc's declaration/definition split records
+    bounds). Never a different verdict."""
+    if shutil.which(cc) is None:
+        pytest.skip(f"{cc} not installed")
+    snaps, placed = [], []
+    for ty in ("int", "double"):
+        d = tmp_path / f"{cc}-{ty}"
+        d.mkdir()
+        (d / "lib.h").write_text(f"extern {ty} g;\n")
+        (d / "lib.c").write_text(f'#include "lib.h"\n{ty} g = 1;\n')
+        so = d / "lib.so"
+        cmd = [cc, "-g", "-O0", "-shared", "-fPIC", "-o", str(so), str(d / "lib.c")]
+        subprocess.run(cmd, check=True, capture_output=True)
+        placed.append(_placement(so, "g"))
+        headers = [d / "lib.h"] if lane == "clang" else []
+        snaps.append(dump(so, headers, compiler="cc", lang="c", header_backend="clang"))
+    result = compare(*snaps)
+    kinds = {c.kind.value for c in result.changes if c.symbol == "g"}
+    assert "var_type_changed" in kinds, kinds
+    assert result.verdict.value == "BREAKING"
+    # gcc DWARF records both sides as bounds (int >= 4, double >= 8 bytes);
+    # they are disjoint only when the old object's address rules out 8.
+    states_both = lane == "clang" or cc == "clang"
+    provable = states_both or placed[0] < 8
+    assert ("var_alignment_changed" in kinds) is provable, (kinds, placed)

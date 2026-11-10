@@ -17,7 +17,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 
 - Total kinds: **427**
 - Kinds with at least one real source: **188**
-- Kinds per source: catalog 160, field_shapes 9, integration 70
+- Kinds per source: catalog 160, field_shapes 9, integration 71
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
@@ -250,7 +250,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `used_reserved_field` | COMPATIBLE | 1 | 0 | 0 |
 | `value_abi_trait_changed` | BREAKING | 1 | 0 | 0 |
 | `var_became_const` | BREAKING | 1 | 0 | 0 |
-| `var_type_changed` | BREAKING | 1 | 0 | 0 |
+| `var_type_changed` | BREAKING | 1 | 0 | 1 |
 | `virtual_base_offset_changed` | BREAKING | 0 | 0 | 0 |
 | `vptr_introduced` | BREAKING | 1 | 0 | 0 |
 | `wchar_model_changed` | RISK | 0 | 0 | 1 |
@@ -331,7 +331,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `type_deprecated_added` | COMPATIBLE | 0 | 0 | 0 |
 | `type_deprecated_removed` | COMPATIBLE | 0 | 0 | 0 |
 | `type_lost_abstract` | COMPATIBLE | 0 | 0 | 0 |
-| `var_alignment_changed` | BREAKING | 0 | 0 | 1 |
+| `var_alignment_changed` | BREAKING | 0 | 0 | 2 |
 | `var_deprecated_added` | COMPATIBLE | 0 | 0 | 0 |
 | `var_deprecated_removed` | COMPATIBLE | 0 | 0 | 0 |
 

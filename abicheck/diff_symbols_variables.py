@@ -23,10 +23,12 @@ cycle). ``diff_symbols._check_variable`` is the sole caller.
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from .compare import export_transition as _export_transition
 from .compare.declaration_facts import alignment_changes
+from .compare.declared_alignment import placement_bits
 from .compare.elf_only_demangle import (
     elf_only_demangled_name as _elf_only_demangled_name,
 )
@@ -234,7 +236,15 @@ def _check_variable(
     old_entity, new_entity = old_index.entity_for(v_old), new_index.entity_for(v_new)
     entity_id = v_old.entity_id or v_new.entity_id
     changes = alignment_changes(
-        mangled, v_old.name, old_entity, new_entity, entity_id=entity_id
+        mangled,
+        v_old.name,
+        old_entity,
+        new_entity,
+        entity_id=entity_id,
+        placement=(
+            old_index.placement_bits(mangled),
+            new_index.placement_bits(mangled),
+        ),
     )
     # The export axis is independent of every type/qualifier comparison and
     # must survive their early returns -- an unknown type on a stripped side
@@ -259,9 +269,10 @@ def variable_type_index_for(
     the *variables* the caller pairs, projecting what the IR cannot name with
     the normalizer's own formula under *snap*'s producer."""
     producer = snap.ast_producer or ""
-    return variable_type_index(
+    index = variable_type_index(
         snap.canonical_ir,
         variables,
         lambda var: variable_canonical_entity(var, producer),
         projection_key=producer,
     )
+    return replace(index, placement=placement_bits(snap))

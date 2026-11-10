@@ -11,5 +11,8 @@
   variable without `DW_AT_alignment` now records its type's default
   alignment, so raising a header's specifier reports `var_alignment_changed`
   (a GCC declaration/definition split records it as a lower bound, since GCC
-  drops a definition-only specifier). Extractor generation 51; re-dump
-  stored baselines to pick it up.
+  drops a definition-only specifier). A lower bound is closed above by the
+  exported object's address alignment, so a header specifier added or dropped
+  on a GCC-built variable is reported whenever its placement rules the other
+  side's value out. Extractor generation 51; re-dump stored baselines to pick
+  it up.

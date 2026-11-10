@@ -13,7 +13,8 @@
 # limitations under the License.
 
 """The declared alignment of an exported variable, for corroborating an
-address-derived alignment change (``diff_platform_elf_symbols``)."""
+address-derived alignment change (``diff_platform_elf_symbols``), and the
+upper bound an exported object's address puts on it (``placement_bits``)."""
 
 from __future__ import annotations
 
@@ -78,3 +79,26 @@ def declared_alignment_is_lower_bound(snap: AbiSnapshot, sym_name: str) -> bool:
     var = snap.var_by_mangled(sym_name)
     fact = var.alignment_bits_fact if var is not None else None
     return fact is not None and fact.status is FactStatus.PARTIAL
+
+
+#: ``ElfSymbol.value_alignment`` is capped at the page size: a symbol there may
+#: be aligned further, so the cap is no upper bound.
+_PAGE_ALIGNMENT_CAP_BYTES = 4096
+
+
+def placement_bits(snap: AbiSnapshot) -> dict[str, int]:
+    """Each exported object's address alignment in bits, by symbol name.
+
+    An object aligned to ``A`` sits at a multiple of ``A``, so the largest
+    power of two dividing its ``st_value`` (``value_alignment``) is an upper
+    bound on its alignment, whatever was declared. Unknown (0) and page-capped
+    values bound nothing and are left out.
+    """
+    elf = snap.elf
+    if elf is None:
+        return {}
+    return {
+        sym.name: sym.value_alignment * 8
+        for sym in elf.symbols
+        if 0 < sym.value_alignment < _PAGE_ALIGNMENT_CAP_BYTES
+    }

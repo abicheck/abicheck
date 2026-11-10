@@ -276,16 +276,37 @@ _ALIGN_FACTS = [
 ]
 
 
-def _align_set(status: str, value: int) -> tuple[int, float]:
-    """The alignments a recorded fact admits, as an interval [lo, hi]."""
-    return (value, value) if status == "present" else (value, float("inf"))
+#: Every power-of-two alignment (bits) a variable can have, for the oracle.
+_ALIGNMENTS = tuple(8 << k for k in range(13))
+#: An exported object's address alignment (bits), or unknown.
+_PLACEMENTS = (None, 64, 256, 1024)
+
+
+def _admitted(status: str, value: int, placement: int | None) -> set[int]:
+    """The alignments a recorded fact admits, enumerated.
+
+    An exact record admits its value. A lower bound admits every alignment
+    at or above it that the object's address still allows (an object aligned
+    to A sits at a multiple of A); an address that contradicts the bound
+    says nothing.
+    """
+    if status == "present":
+        return {value}
+    above = {a for a in _ALIGNMENTS if a >= value}
+    placed = {a for a in above if placement is None or a <= placement}
+    return placed or above
 
 
 @pytest.mark.parametrize(
     "old,new", list(itertools.product(_ALIGN_FACTS, repeat=2)), ids=str
 )
+@pytest.mark.parametrize(
+    "placement", list(itertools.product(_PLACEMENTS, repeat=2)), ids=str
+)
 def test_alignment_change_is_reported_only_when_provable(
-    old: tuple[str, int], new: tuple[str, int]
+    old: tuple[str, int],
+    new: tuple[str, int],
+    placement: tuple[int | None, int | None],
 ) -> None:
     from abicheck.compare.declaration_facts import alignment_changes
     from abicheck.model.fact import Fact
@@ -300,7 +321,7 @@ def test_alignment_change_is_reported_only_when_provable(
         entity(*old),
         entity(*new),
         entity_id=None,  # type: ignore[arg-type]
+        placement=placement,
     )
-    (olo, ohi), (nlo, nhi) = _align_set(*old), _align_set(*new)
-    disjoint = ohi < nlo or nhi < olo
-    assert bool(got) is disjoint, (old, new, got)
+    disjoint = not (_admitted(*old, placement[0]) & _admitted(*new, placement[1]))
+    assert bool(got) is disjoint, (old, new, placement, got)
