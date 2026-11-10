@@ -37,6 +37,7 @@ import functools
 import itertools
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -44,7 +45,13 @@ import pytest
 from abicheck.checker import compare
 from abicheck.dumper import dump
 
-pytestmark = pytest.mark.integration
+# The oracle reads placement with `nm -D` from an ELF .so built with DWARF.
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        sys.platform != "linux", reason="builds ELF .so files with DWARF"
+    ),
+]
 
 _ALIGNS = (None, 16, 64)
 _EVIDENCE = ("binary", "dwarf", "castxml", "clang")
