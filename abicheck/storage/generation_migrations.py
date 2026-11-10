@@ -543,6 +543,16 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "needed -- an older snapshot reads as no unit recorded (a lost canary "
         "keeps its RISK) and as no declared DWARF alignment"
     ),
+    50: GenerationSpellingChange(
+        "Clang ordinary enum representations are obtained from a compiler probe "
+        "instead of assuming int; Clang parameter/return slots record scoped "
+        "record and enum identities through aliases and namespace imports, "
+        "and C++ extern-C declarations at noninitial columns select C++ mode. "
+        "An older stored int cannot reveal its original enum representation, "
+        "and absent slot identities cannot be reconstructed from bare names, "
+        "so no load-time rewrite is sound. Re-dump old Clang baselines for "
+        "these corrected facts; existing type spellings remain unchanged."
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

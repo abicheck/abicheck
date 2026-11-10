@@ -224,7 +224,7 @@ Pin castxml as shown: the feedstock's own floor is looser than abicheck's gate, 
 pip install abicheck
 ```
 
-This gives you binary-only (L0) and debug-info (L1) analysis, snapshot comparison, and every report format. Header analysis (L2) defaults to Clang and needs `clang`/`clang++` on `PATH`. To retain CastXML, select `compile.frontend: castxml` in `.abicheck.yml` or `ABICHECK_AST_FRONTEND=castxml`, and install a supported CastXML. Explicit frontend choices fail closed rather than silently switching producer. Do **not** `pip install castxml`: that is an unmaintained 2022 package abicheck rejects.
+This gives you binary-only (L0) and debug-info (L1) analysis, snapshot comparison, and every report format. For header analysis (L2) you also need a castxml inside the supported range on your `PATH`, or a clang plus `ABICHECK_AST_FRONTEND=clang` (or `.abicheck.yml`'s `compile.frontend: clang` on `dump`/`compare`), since the default frontend resolves to castxml and fails closed without it. Do **not** `pip install castxml`: that is an unmaintained 2022 package abicheck rejects.
 
 Per-platform setup, cross-compilation, and Windows/macOS toolchains: [Install](https://abicheck.github.io/abicheck/start/install/) and [Platform Support](https://abicheck.github.io/abicheck/reference/platforms/).
 

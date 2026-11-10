@@ -454,6 +454,7 @@ ANALYSIS_2_BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=(
             "tests/test_depth_metamorphic_examples.py",
             "tests/unit/compare/test_enum_underlying_size.py",
+            "tests/test_clang_type_evidence.py",
             "tests/test_generated_position_matrix.py",
             "tests/test_family_f1_evidence_ablation.py",
         ),

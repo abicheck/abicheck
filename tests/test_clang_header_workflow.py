@@ -1,4 +1,4 @@
-"""The default frontend preserves explicit-Clang results, including layout without debug."""
+"""Environment and explicit Clang selection preserve layout without debug."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ pytestmark = [
 
 @pytest.mark.parametrize("debug", [False, True])
 @pytest.mark.parametrize("edit", ["layout", "deleted-copy"])
-def test_default_matches_explicit_clang_without_losing_layout(
+def test_environment_matches_explicit_clang_without_losing_layout(
     tmp_path: Path, monkeypatch, debug: bool, edit: str
 ):
     if not shutil.which("g++") or not shutil.which("clang++"):
@@ -68,10 +68,13 @@ def test_default_matches_explicit_clang_without_losing_layout(
         f"new={tmp_path}/new/api.h",
     ]
     reports = []
-    for frontend in ["auto", "clang"]:
+    for frontend in ["environment", "clang"]:
+        monkeypatch.setenv("ABICHECK_AST_FRONTEND", "clang")
+        requested = "auto" if frontend == "environment" else "clang"
         dest = tmp_path / f"{frontend}.json"
         result = CliRunner().invoke(
-            main, [*args, "--set", f"compile.frontend={frontend}", "-o", f"json={dest}"]
+            main,
+            [*args, "--set", f"compile.frontend={requested}", "-o", f"json={dest}"],
         )
         assert dest.exists(), result.output
         doc = json.loads(dest.read_text())
@@ -93,7 +96,7 @@ def test_c_linkage_is_cpp_evidence_at_any_column(tmp_path, monkeypatch, prefix):
     monkeypatch.delenv("ABICHECK_AST_FRONTEND", raising=False)
     header = tmp_path / "api.h"
     header.write_text(prefix + 'extern "C" int api(void);\n')
-    assert _resolve_header_backend("auto") == "clang"
+    assert _resolve_header_backend("auto") == "castxml"
     assert resolve_clang_langmode(None, [header], "clang++")[0] is True
     assert resolve_clang_langmode("c", [header], "clang++")[0] is False
 

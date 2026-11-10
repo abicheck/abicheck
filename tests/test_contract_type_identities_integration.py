@@ -52,6 +52,12 @@ pytestmark = [
     ),
 ]
 
+
+@pytest.fixture(params=["castxml", "clang"], autouse=True)
+def selected_backend(request, monkeypatch):
+    monkeypatch.setenv("ABICHECK_AST_FRONTEND", request.param)
+
+
 _API_H = """#include "../priv/private.h"
 using namespace ns1;
 Cache *api();
@@ -139,7 +145,11 @@ def _run_compare(tmp_path: Path, grown: str, *, operand: str) -> tuple[int, dict
 
 def _size_change_relevance(tmp_path: Path, grown: str) -> tuple[int, str | None]:
     code, doc = _run_compare(tmp_path, grown, operand="file")
-    (size,) = [c for c in doc["changes"] if c["kind"] == "type_size_changed"]
+    (size,) = [
+        c
+        for c in doc["changes"]
+        if c["kind"] in ("type_size_changed", "struct_size_changed")
+    ]
     return code, size.get("contract_relevance")
 
 

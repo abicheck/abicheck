@@ -259,7 +259,7 @@ either way; the L2 graph is just narrower in what it can reach.
 
 The L2 graph's automatic attach still needs `clang`/`clang++` on `PATH` to
 actually see call/type edges — that's true even when the main extraction
-used the CastXML header backend, since the header-graph attach
+used the default CastXML header backend, since the header-graph attach
 always shells out to clang itself. Without a usable clang, it silently
 degrades to a declaration-visibility-only graph (no `DECL_CALLS_DECL`
 edges), so the join below never fires and findings keep their plain

@@ -68,10 +68,10 @@ def _resolve_header_backend(backend: str | None) -> str:
     Precedence: an explicit ``castxml``/``clang``/``hybrid`` is honored
     verbatim (and the caller gets a clear error later if a needed tool is
     missing). ``auto``/``None`` consults the ``ABICHECK_AST_FRONTEND`` env
-    var first, then resolves to clang. Missing tools and parse errors fail closed;
-    explicit castxml and hybrid requests keep their existing semantics.
-    Never auto-resolves to ``hybrid``: running both backends unasked
-    would silently double dump cost (see ``dumper_hybrid.py``).
+    var first, then resolves to castxml (the schema reference). Never
+    auto-falls-back to clang, and never auto-resolves to ``hybrid``: clang
+    JSON AST snapshots lack computed layout, and running both backends
+    unasked would silently double dump cost (see ``dumper_hybrid.py``).
     """
     choice = (backend or "auto").lower()
     if choice in ("castxml", "clang", "hybrid"):
@@ -83,7 +83,7 @@ def _resolve_header_backend(backend: str | None) -> str:
     env = ast_frontend_pin()
     if env in ("castxml", "clang", "hybrid"):
         return env
-    return "clang"
+    return "castxml"
 
 
 def _is_hybrid_request(

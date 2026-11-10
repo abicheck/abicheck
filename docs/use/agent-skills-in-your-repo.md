@@ -90,12 +90,12 @@ Each skill checks `abicheck --version` against its declared range (currently
   hook, e.g. `pip install "abicheck>=0.6,<0.7"`. An agent that has the skill
   but not the CLI will correctly refuse to give a verdict — which is safe,
   but not useful.
-- **Header-level analysis** uses Clang by default. To retain CastXML, set
-  `compile.frontend: castxml` in `.abicheck.yml` or
-  `ABICHECK_AST_FRONTEND=castxml`. Either backend needs your library's build
-  configuration; see [evidence and build-context flags](dump-compare-flags.md).
-  Without headers the skill still works on binaries alone and reports the
-  narrower evidence coverage.
+- **Header-level analysis** uses `castxml` by default; installing clang
+  alone does not switch backends. To use clang instead, set
+  `ABICHECK_AST_FRONTEND=clang` (or pass `--ast-frontend clang`). Either way
+  it needs your library's build configuration; see [evidence and build-context flags](dump-compare-flags.md).
+  Without them the skill still works on binaries alone, and says the
+  conclusion is narrower.
 
 ## Step 3 — point agents at the skills
 

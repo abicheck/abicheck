@@ -1,7 +1,9 @@
-### Changed
-
-- Unpinned `auto` header analysis now selects Clang. Install clang/clang++ or pin `compile.frontend: castxml` to retain CastXML. Explicit frontend requests and environment pins retain precedence; failures do not silently switch producer.
-
 ### Fixed
 
+- Direct Clang header extraction records compiler-confirmed ordinary and packed enum representations, including `-fshort-enums`, instead of assuming `int`.
+- Clang function parameters and returns carry scoped record/enum identities through aliases and namespace imports; ambiguous lookup stays unconfirmed.
 - Recognize C++ `extern "C"` declarations after another declaration on the same header line, while preserving explicit C language requests.
+
+### Documentation
+
+- Explain header frontend selection for GCC, Clang versions and SYCL. The unpinned default remains CastXML; switching every scan to Clang is deferred pending semantic coverage parity.

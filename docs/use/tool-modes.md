@@ -73,7 +73,7 @@ See [Architecture](../learn/architecture.md) for the full per-layer breakdown.
 | Requirement | Mandatory? | Notes |
 |-------------|-----------|-------|
 | Two inputs (`.so`/`.dll`/`.dylib`, JSON snapshot, package, or directory) | ✅ | Core input; mix freely |
-| `castxml` **or** `clang` + a compiler | ⚠️ for header AST | Needed only with public headers. The default `compile.frontend: auto` selects Clang and fails closed if it cannot run. Pin `compile.frontend: castxml` (or `ABICHECK_AST_FRONTEND=castxml`) to retain the former producer. Explicit `hybrid` needs both tools and merges their facts; it is never auto-selected. Clang uses the existing layout-enrichment pass for missing record layout; unavailable facts remain unverified. |
+| `castxml` **or** `clang` + a compiler | ⚠️ for header AST | Needed when you pass `-H`/`--header`. `compile.frontend: auto` resolves to CastXML or the `ABICHECK_AST_FRONTEND` pin. Select Clang with `--set compile.frontend=clang`; opt-in fallback is `compile.ast_frontend_fallback` / `ABICHECK_ALLOW_AST_FALLBACK=1`. Clang records declarations and can enrich host record layouts through its built-in compiler pass or the optional companion; DWARF adds evidence. `hybrid` requires both tools and is never auto-selected. |
 | Debug info (`-g`) | ❌ optional | DWARF/PDB enrich layout, calling-convention, and packing checks |
 | Headers | strongly recommended | Without them abicheck uses DWARF/BTF/CTF (ELF) or PDB (PE) if present, falling back further to L0 binary-metadata analysis when neither headers nor debug info are present — exported symbols plus platform-specific facts (SONAME/dependencies/rpaths on ELF; machine type, imports, delay-load, hardening flags, version/OS floor on PE; install name, dependencies, rpaths, and other load-command facts on Mach-O), never a bare symbol list on any platform (ELF prints an explicit warning either way; PE/Mach-O don't yet); type/signature breaks may be missed |
 
@@ -397,3 +397,56 @@ flowchart LR
 | Cross-platform (PE, Mach-O) | ✅ | ❌ | ❌ | ❌ |
 | Needs compiler | ⚠️ headers only | ❌ | ✅ GCC | ❌ |
 | Needs debug build | ❌ | ❌ | ❌ | ✅ |
+
+
+## Selecting a header frontend for a compiler context
+
+The compiler that built the library, the frontend reading its headers, and the
+compiler building a consumer are separate inputs. Selecting a header backend
+never rebuilds the library and does not certify every possible consumer.
+`auto` remains CastXML unless the environment pins a frontend. Explicit
+`compile.frontend` / `--set compile.frontend=...` choices take precedence over that pin.
+
+| Build / consumer context | Header frontend | Compiler selection and limits |
+|---|---|---|
+| GCC / G++ | CastXML is the conservative default | Pass the matching compiler and public-header flags. CastXML uses its embedded Clang while emulating the selected compiler's predefined macros; it is not GCC's own AST and cannot guarantee every GCC extension. |
+| Clang / Apple Clang | Explicit `clang` | Pass the intended `clang` / `clang++` executable, including a versioned path. An installed newer Clang does not reproduce an older compiler's predefined feature macros automatically. |
+| Intel oneAPI SYCL | Explicit `clang`, with `icpx` / `dpcpp` | Preserve the SYCL flags and requested host/device context. System Clang is not a substitute for DPC++. CastXML/hybrid cannot represent a requested device context. |
+| Several supported consumer toolchains | A separate configured scan per context | Keep the target, language standard, standard library, defines and ABI options for each context. Do not treat one successful scan as a consumer matrix. |
+
+For a direct-Clang parse, `compile.compiler: g++` does **not** select GCC to execute the
+AST pass: that pass resolves a Clang driver. Choose CastXML when GCC macro
+emulation is required. Conversely, select the actual Clang-family executable
+for Clang or SYCL rather than relying on whichever driver happens to be on PATH.
+The dry-run receipt reports the resolved frontend and missing tools.
+
+Keep old/new inputs in the same intended comparison context: for example,
+`_GLIBCXX_USE_CXX11_ABI`, `-fshort-enums`, packing, target architecture, sysroot,
+`-std`, and libstdc++ versus libc++ can affect the contract. Compiler-version
+changes and library-version changes should be separate matrix axes. The stored
+acquisition context is evidence of what was scanned, not a proof that a different
+consumer compiler will accept the same declarations or use the same ABI.
+
+Direct Clang has documented extraction gaps in [known gaps](../contribute/known-gaps.md).
+In particular, a successful parse is not evidence of semantic parity with
+CastXML. The unconditional default change was deferred after the complete CI
+matrix exposed missing type identities, enum representations and template
+coverage differences. Select Clang explicitly for a validated context; changing
+the default requires closing those gaps across the supported workflows.
+
+Compiler references: [CastXML compiler emulation](https://github.com/CastXML/CastXML/blob/master/doc/manual/castxml.1.rst),
+[Clang compatibility](https://clang.llvm.org/docs/UsersManual.html), and
+[oneAPI DPC++ compilation modes](https://intel.github.io/llvm/UsersManual.html).
+
+Extractor generation 50 corrects ordinary Clang enum representations and adds
+function-slot type identities. Re-dump older Clang baselines when using those
+facts: a stored `int` does not reveal whether the original enum was packed,
+and missing identities cannot be recovered safely from a bare type name.
+
+For a producer/consumer split, use the project's `profiles[].compile` and
+`profiles[].consumer_compile` overlays with real toolchain bindings. The
+check-project/check-target workflow dumps the unchanged candidate binary under
+the consumer header context; baseline publication resolves the same consumer
+overlay, so old and new use the same context. This does not compile a client
+program or prove every client's runtime behavior. See the
+[multi-platform profile workflow](../integration/scenarios/multi-platform.md).

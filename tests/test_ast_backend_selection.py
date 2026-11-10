@@ -88,7 +88,7 @@ class TestResolveEffectiveAstBackend:
 
     @pytest.mark.parametrize(
         "requested,expected",
-        [("auto", "clang"), ("castxml", "castxml"), ("clang", "clang")],
+        [("auto", "castxml"), ("castxml", "castxml"), ("clang", "clang")],
     )
     def test_host_context_resolves_normally(self, requested, expected):
         """Under the default "host" context, selection is just the ordinary

@@ -148,6 +148,7 @@ from .extract.headers.clang.template_param_indexes import (
     build_template_param_indexes,
 )
 from .extract.headers.clang.templates import _specialization_spelling
+from .extract.headers.clang.type_identity import TypeIdentityIndex
 from .extract.headers.clang.typedefs import (
     typedef_abi_facts as _typedef_abi_facts,
     typedef_underlying as _typedef_underlying,
@@ -204,10 +205,7 @@ _clang_deprecated_message = _clang_context.clang_deprecated_message
 _clang_var_alignment_bits = clang_var_alignment_bits
 
 
-def _function_qualifiers(qualtype: str) -> str:
-    """See ``extract.headers.clang.functions._function_qualifiers`` (the
-    canonical implementation this delegates to) for the full contract."""
-    return _clang_functions._function_qualifiers(qualtype)
+_function_qualifiers = _clang_functions._function_qualifiers
 
 
 #: Acquisition-scope backend namespace for the template-parameter index
@@ -337,6 +335,7 @@ class _ClangAstParser:
         # See extract.headers.clang.explicit_specialization_records.
         self._explicit_specializations: list[tuple[_Decl, str]] = []
         self._enums: list[_Decl] = []
+        self.enum_underlying_types: dict[str, str] = {}
         self._typedefs: list[_Decl] = []
         # Built lazily (on first param-default/field-default extraction that
         # needs it, via _id_index()) -- a full extra tree walk isn't worth
@@ -386,6 +385,10 @@ class _ClangAstParser:
             access="public",
             extern_c=False,
             in_friend=False,
+        )
+
+        self._type_identities = TypeIdentityIndex(
+            root, self._records, self._enums, self._typedefs
         )
 
     # ── traversal ────────────────────────────────────────────────────────────
@@ -892,6 +895,7 @@ class _ClangAstParser:
         """
         return _clang_functions.parse_functions(
             self._functions,
+            type_identities=self._type_identities,
             builtin_abi=self.builtin_abi,
             exported_dynamic=self._exported_dynamic,
             exported_static=self._exported_static,
@@ -1183,7 +1187,10 @@ class _ClangAstParser:
 
     def parse_enums(self) -> list[EnumType]:
         return _clang_enums.parse_enums(
-            self._typedefs, self._enums, _evaluated_int_value
+            self._typedefs,
+            self._enums,
+            _evaluated_int_value,
+            self.enum_underlying_types,
         )
 
     def parse_typedefs(self) -> dict[str, str]:
@@ -1245,13 +1252,7 @@ class _ClangAstParser:
 _Decl = _clang_context._Decl
 
 
-def _qualtype(node: dict[str, Any]) -> str:
-    """A declaration's own ``type.qualType`` spelling.
-
-    See ``extract.headers.clang.context.qualtype`` (the canonical
-    implementation this delegates to) for the full contract.
-    """
-    return _clang_context.qualtype(node)
+_qualtype = _clang_context.qualtype
 
 
 def _node_file(node: dict[str, Any], current: str) -> str:
@@ -1338,7 +1339,4 @@ _enum_underlying = _clang_enums._enum_underlying
 _enum_constant_value = _clang_enums._enum_constant_value
 
 
-def _owned_tag_id(typedef_node: dict[str, Any]) -> str:
-    """See ``extract.headers.clang.records._owned_tag_id`` (the canonical
-    implementation this delegates to) for the full contract."""
-    return _clang_records._owned_tag_id(typedef_node)
+_owned_tag_id = _clang_records._owned_tag_id
