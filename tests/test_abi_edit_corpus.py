@@ -260,7 +260,11 @@ def test_edit_produces_declared_ground_truth(
         if gap:
             pytest.skip(gap)
     except pytest.skip.Exception:
-        write_record(make_record("pr", op, seed.name, config, status="unavailable"))
+        write_record(
+            make_record(
+                "pr", op, seed.name, config, status="unavailable", source="default"
+            )
+        )
         raise
     outcome = run_operator(op, seed, config, baseline_cache, corpus_root)
     known = known_mismatch(op.name, seed.name, config)
@@ -271,12 +275,14 @@ def test_edit_produces_declared_ground_truth(
             seed.name,
             config,
             status="ran",
-            # No execution oracle here: a cell meeting its expectation agrees.
+            # No execution oracle here: a cell meeting its expectation agrees,
+            # and no consumer ran, so it covers no space point.
             cls="known-xfail"
             if known
             else ("agree" if not outcome.failures else "mismatch"),
             verdict=outcome.verdict,
             produced=outcome.kinds,
+            source="default",
         )
     )
     if known is not None:
