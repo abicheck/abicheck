@@ -953,7 +953,7 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "even when the old node still exists for other symbols."
         ),
         # Found by the generated edit corpus (#1958).
-        fixed_by=(1958,),
+        fixed_by=(1958, 1977),
         seed_tests=("tests/test_symbol_version_binding.py",),
         axes={
             "old version": ("LIBX_1.0", "LIBX_2.0"),

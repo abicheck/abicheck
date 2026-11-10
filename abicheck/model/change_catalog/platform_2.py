@@ -512,12 +512,13 @@ PLATFORM_ENTRIES_2: list[ChangeKindMeta] = [
     _E(
         "symbol_moved_version_node",
         _B,
-        impact="Symbol moved from one version node to another (e.g. LIBFOO_1.0 → "
-        "LIBFOO_2.0) and the old version is no longer provided. Applications "
-        'linked against the old version node fail to load ("undefined symbol: '
-        'foo, version LIBFOO_1.0"). Keep the old version as a non-default alias '
-        "(.symver foo_v1, foo@LIBFOO_1.0) or bump the SONAME.",
-        description_template="Symbol {name} moved from version node {old} to {new} without keeping {old}. Applications linked against {old} fail to load.",
+        impact="A symbol the new library still exports is no longer defined at a "
+        "version the old one defined it at, default or compat (e.g. LIBFOO_1.0 → "
+        "LIBFOO_2.0 with the old version dropped). Applications linked against the "
+        'old version fail to load ("undefined symbol: foo, version LIBFOO_1.0"). '
+        "Keep the old version as a non-default alias (.symver foo_v1, "
+        "foo@LIBFOO_1.0) or bump the SONAME.",
+        description_template="Symbol {name} is no longer defined at version {old} (now {new}). Applications linked against {old} fail to load.",
         entity=_ENT.BINARY,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,

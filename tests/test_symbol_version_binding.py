@@ -62,17 +62,18 @@ def _loader_resolves(ref: tuple[str, str], new: list[ElfSymbol]) -> bool:
     return any(s.name == name and s.version == version for s in new)
 
 
-# One symbol ``foo`` (always present, so no removal muddies the verdict) plus a
-# stable anchor ``bar@@LIBX_1.0`` that keeps both nodes populated (an emptied
-# node is a different, separately-reported change). The new side exports foo
-# at a non-empty subset of the nodes, one of them the default.
-_LAYOUTS = [
-    (old_default, new_versions, new_default)
-    for old_default in NODES
+# One symbol ``foo`` (always present, so no removal muddies the verdict) plus
+# stable anchors ``bar@@LIBX_1.0`` and ``bar2@@LIBX_2.0`` that keep both nodes
+# populated (an emptied node is a different, separately-reported change).
+# Each side exports foo at a non-empty subset of the nodes, one of them the
+# default; the others are non-default (compat) versions.
+_SIDES = [
+    (versions, default)
     for r in (1, 2)
-    for new_versions in itertools.combinations(NODES, r)
-    for new_default in new_versions
+    for versions in itertools.combinations(NODES, r)
+    for default in versions
 ]
+_LAYOUTS = [(old, new) for old in _SIDES for new in _SIDES]
 
 
 def _side(foo_versions: tuple[str, ...], foo_default: str) -> list[ElfSymbol]:
@@ -83,38 +84,80 @@ def _side(foo_versions: tuple[str, ...], foo_default: str) -> list[ElfSymbol]:
     ]
 
 
-@pytest.mark.parametrize("old_default,new_versions,new_default", _LAYOUTS)
+@pytest.mark.parametrize("old_side,new_side", _LAYOUTS, ids=str)
 def test_verdict_follows_whether_old_references_resolve(
-    old_default: str, new_versions: tuple[str, ...], new_default: str
+    old_side: tuple[tuple[str, ...], str], new_side: tuple[tuple[str, ...], str]
 ) -> None:
-    old = _side((old_default,), old_default)
-    new = _side(new_versions, new_default)
-    refs = [(s.name, s.version) for s in old if s.is_default]
+    old, new = _side(*old_side), _side(*new_side)
+    # Every version the old library defined: the default is what a new link
+    # records, a non-default one what a consumer of an older release recorded.
+    refs = [(s.name, s.version) for s in old]
     breaks = not all(_loader_resolves(r, new) for r in refs)
 
     result = compare(_snap(old), _snap(new))
     kinds = {c.kind for c in result.changes}
 
     assert (result.verdict == Verdict.BREAKING) is breaks, (
-        f"{old_default} -> {new_versions} (default {new_default}): "
+        f"{old_side} -> {new_side}: "
         f"verdict {result.verdict.name}, kinds {sorted(k.value for k in kinds)}"
     )
     assert (ChangeKind.SYMBOL_MOVED_VERSION_NODE in kinds) is breaks
-    if new_default != old_default and not breaks:
-        # The kept old version makes the default change a compatible alias change.
+    if new_side[1] != old_side[1] and not breaks:
+        # Every old version kept: the default change is a compatible alias change.
         assert ChangeKind.SYMBOL_VERSION_ALIAS_CHANGED in kinds
 
 
 def test_layout_domain_has_both_outcomes() -> None:
     outcomes = {
-        all(
-            _loader_resolves((s.name, s.version), _side(nv, nd))
-            for s in _side((od,), od)
-            if s.is_default
-        )
-        for od, nv, nd in _LAYOUTS
+        all(_loader_resolves((s.name, s.version), _side(*n)) for s in _side(*o))
+        for o, n in _LAYOUTS
     }
     assert outcomes == {True, False}
+
+
+@pytest.mark.parametrize(
+    "name,old_node,demoted",
+    [
+        # A public symbol whose *name* looks private: the node decides, not the name.
+        ("private_data", "LIBX_1.0", False),
+        ("x_INTERNAL_y", "LIBX_1.0", False),
+        # A symbol bound only to a private node: not public ABI, demoted to a risk.
+        ("helper", "LIBX_PRIVATE", True),
+    ],
+)
+def test_a_lost_version_is_demoted_only_for_a_symbol_on_a_private_node(
+    name: str, old_node: str, demoted: bool
+) -> None:
+    nodes = ["LIBX_1.0", "LIBX_2.0", "LIBX_PRIVATE"]
+
+    def snap(node: str) -> AbiSnapshot:
+        return AbiSnapshot(
+            library="libx.so.1",
+            version="v",
+            functions=[],
+            variables=[],
+            types=[],
+            enums=[],
+            typedefs={},
+            elf=ElfMetadata(
+                soname="libx.so.1",
+                versions_defined=nodes,
+                symbols=[
+                    _sym("bar", "LIBX_1.0", True),
+                    _sym("bar2", "LIBX_2.0", True),
+                    _sym("baz", "LIBX_PRIVATE", True),
+                    _sym(name, node, True),
+                ],
+            ),
+        )
+
+    result = compare(snap(old_node), snap("LIBX_2.0"))
+    moved = [
+        c for c in result.changes if c.kind == ChangeKind.SYMBOL_MOVED_VERSION_NODE
+    ]
+    assert [c.symbol for c in moved] == [name]
+    assert (moved[0].effective_verdict == Verdict.COMPATIBLE_WITH_RISK) is demoted
+    assert (result.verdict == Verdict.BREAKING) is (not demoted)
 
 
 # --- real binaries --------------------------------------------------------------
@@ -203,7 +246,20 @@ def test_real_loader_and_compare_agree(
     )
     assert (run.returncode == 0) is loads, run.stderr  # the oracle, against the loader
     result = compare(dump(old_so, [], version="old"), dump(new_so, [], version="new"))
+    kinds = {c.kind for c in result.changes}
     assert (result.verdict == Verdict.BREAKING) is (not loads), (
         result.verdict,
-        sorted(c.kind.value for c in result.changes),
+        sorted(k.value for k in kinds),
     )
+    assert (ChangeKind.SYMBOL_MOVED_VERSION_NODE in kinds) is (not loads)
+    assert (ChangeKind.SYMBOL_VERSION_ALIAS_CHANGED in kinds) is loads
+    # The public workflow: `abicheck compare` exits 4 (ABI break) exactly when the
+    # loader fails. A binary-only run without debug info is UNCONFIRMED (ADR-090),
+    # which may raise a passing exit to 1, never to 4.
+    cli = subprocess.run(
+        [sys.executable, "-m", "abicheck", "compare", str(old_so), str(new_so)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert (cli.returncode == 4) is (not loads), cli.stdout[-2000:] + cli.stderr[-2000:]

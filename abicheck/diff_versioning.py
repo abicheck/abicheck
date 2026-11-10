@@ -98,10 +98,11 @@ def _version_le(a: tuple[int, ...], b: tuple[int, ...]) -> bool:
 
 # Change kinds whose ``symbol`` field is itself a version-node name (not a
 # symbol name) — for these, the node-name marker test applies directly.
+# SYMBOL_MOVED_VERSION_NODE names a *symbol*: it is demoted through the
+# old-side ``internal_versioned_symbols`` set like any symbol finding.
 _VERSION_NODE_NAME_KINDS = frozenset(
     {
         ChangeKind.SYMBOL_VERSION_NODE_REMOVED,
-        ChangeKind.SYMBOL_MOVED_VERSION_NODE,
         ChangeKind.SYMBOL_VERSION_DEFINED_REMOVED,
         ChangeKind.SYMBOL_VERSION_DEFINED_ADDED,
     }
@@ -649,12 +650,12 @@ def detect_version_node_changes(
 ) -> list[Change]:
     """Compare ELF symbol version definition graphs.
 
-    Builds a version_node → set[symbol_name] mapping for both old and new,
-    then detects:
+    Detects, from each side's defined versions:
       - Removed version nodes (all symbols in that node gone)
-      - Symbols migrated between version nodes without keeping the old
-        version (old consumers cannot bind them; a migration that keeps it is
-        the alias detector's compatible ``SYMBOL_VERSION_ALIAS_CHANGED``)
+      - A surviving symbol no longer defined at a version the old library
+        defined it at, default or not (old consumers cannot bind it; a
+        migration that keeps every old version is the alias detector's
+        compatible ``SYMBOL_VERSION_ALIAS_CHANGED``)
       - New version nodes added (informational, no change emitted here —
         already covered by SYMBOL_VERSION_DEFINED_ADDED)
     """
@@ -678,28 +679,28 @@ def detect_version_node_changes(
             )
         )
 
-    # Detect symbols whose old version a consumer can no longer bind. A
-    # consumer linked against the old library recorded ``sym@old_node``; the
-    # dynamic loader resolves that reference only if the new library still
-    # defines ``sym`` at ``old_node`` (as its default or as a retained
-    # non-default alias). A move that keeps the old version is compatible and
-    # is reported by the alias detector (``SYMBOL_VERSION_ALIAS_CHANGED``); one
-    # that drops it fails to load ("undefined symbol: sym, version old_node").
-    old_sym_to_node = _default_node_by_symbol(old_elf)
-    new_sym_to_node = _default_node_by_symbol(new_elf)
+    # Detect symbols with a version a consumer can no longer bind. A consumer
+    # linked against the old library (or an older one it still served)
+    # recorded ``sym@version``; the dynamic loader resolves that reference only
+    # if the new library still defines ``sym`` at that version, as its default
+    # or as a retained non-default alias. A move that keeps every old version
+    # is compatible and is the alias detector's ``SYMBOL_VERSION_ALIAS_CHANGED``;
+    # one that drops any of them fails to load ("undefined symbol: sym,
+    # version V").
+    old_versions = _defined_versions_by_symbol(old_elf)
     new_versions = _defined_versions_by_symbol(new_elf)
+    new_default = _default_node_by_symbol(new_elf)
 
-    for sym_name in sorted(set(old_sym_to_node) & set(new_sym_to_node)):
-        old_node = old_sym_to_node[sym_name]
-        new_node = new_sym_to_node[sym_name]
-        if old_node != new_node and old_node not in new_versions[sym_name]:
+    for sym_name in sorted(set(old_versions) & set(new_versions)):
+        lost = sorted(old_versions[sym_name] - new_versions[sym_name])
+        if lost:
             changes.append(
                 make_change(
                     ChangeKind.SYMBOL_MOVED_VERSION_NODE,
                     symbol=sym_name,
                     name=sym_name,
-                    old=old_node,
-                    new=new_node,
+                    old=", ".join(lost),
+                    new=new_default[sym_name],
                 )
             )
 
@@ -773,17 +774,17 @@ def _build_version_node_map(elf: ElfMetadata) -> dict[str, set[str]]:
 def _default_node_by_symbol(elf: ElfMetadata) -> dict[str, str]:
     """symbol_name → the defined version node a new link binds it to.
 
-    The default (``@@``) version when the symbol has one, else its only
-    non-default version (first wins), matching what a consumer records.
+    The default (``@@``) version when the symbol has one; with only
+    non-default versions, the lowest-named one (deterministic, for messages).
     """
     default: dict[str, str] = {}
-    other: dict[str, str] = {}
     for sym in elf.symbols:
-        if not sym.version or sym.version not in elf.versions_defined:
-            continue
-        target = default if sym.is_default else other
-        target.setdefault(sym.name, sym.version)
-    return {**other, **default}
+        if sym.is_default and sym.version and sym.version in elf.versions_defined:
+            default.setdefault(sym.name, sym.version)
+    return {
+        name: default.get(name, min(versions))
+        for name, versions in _defined_versions_by_symbol(elf).items()
+    }
 
 
 def _defined_versions_by_symbol(elf: ElfMetadata) -> dict[str, set[str]]:

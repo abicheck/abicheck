@@ -203,7 +203,7 @@ Recovered from `.dynsym` symbol sizes alone by `diff_elf_layout.py`. The Itanium
 |------|-------------|
 | `symbol_version_defined_removed` | A symbol version definition (`GLIBC_2.5`, etc.) was removed from the library. Binaries linked against that version tag cannot find the symbol. |
 | `symbol_version_node_removed` | A version node (e.g., `LIBFOO_1.0`) was entirely removed from the version script. All symbols that were under that node become unresolvable for applications linked against it. More specific than `symbol_version_defined_removed` — includes which symbols were affected. |
-| `symbol_moved_version_node` | A symbol moved from one version node to another (e.g., `LIBFOO_1.0` → `LIBFOO_2.0`) and the new library no longer provides it at the old version. Applications linked against the old version node fail to load (`undefined symbol: foo, version LIBFOO_1.0`). A move that keeps the old version as a non-default alias is the compatible `symbol_version_alias_changed` instead. **Recommended action:** keep the old version (`.symver`) or bump the SONAME. |
+| `symbol_moved_version_node` | A symbol the new library still exports is no longer defined at a version the old library defined it at — its old default (e.g., `LIBFOO_1.0` → `LIBFOO_2.0`) or a retained compat version (`foo@LIBFOO_1.0` beside `foo@@LIBFOO_2.0`). Applications linked against the old version node fail to load (`undefined symbol: foo, version LIBFOO_1.0`). A move that keeps the old version as a non-default alias is the compatible `symbol_version_alias_changed` instead. **Recommended action:** keep the old version (`.symver`) or bump the SONAME. |
 
 
 ### ELF Dynamic Section
