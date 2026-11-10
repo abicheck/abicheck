@@ -169,3 +169,49 @@ def test_real_member_names_follow_the_program_type(tmp_path, dual_abi) -> None:
     got = {n: is_user_specializable_std_symbol(n) for n in picked}
     want = {n: "MyType" in d for n, d in zip(picked, demangled, strict=True)}
     assert got == want
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "_ZNKSt4lessIPKcEclES1_S1_",  # a member, not a local-name form
+        "_Z3fooi",
+        "_ZZ3barvE",  # a local-name opener with no entity to strip
+    ],
+)
+def test_the_local_name_readers_answer_no_for_any_other_shape(name: str) -> None:
+    from abicheck.extract.mangled_foreign_template_args import (
+        has_foreign_template_argument_in_local_name,
+        local_name_names_only_runtime_types,
+    )
+
+    assert local_name_names_only_runtime_types(name) is False
+    assert has_foreign_template_argument_in_local_name(name) is False
+
+
+# One name per construct the std-scope scanner does not read. An unread name
+# proves neither "foreign" nor "runtime-only", so both answers are False.
+_UNREAD = [
+    "foo",  # not an Itanium name
+    "_Z3fooi",  # not std-scoped
+    "_ZNKSt4hashILi$EEclEv",  # a literal value with a non-identifier character
+    "_ZNKSt4hashILi1",  # a literal that never closes
+    "_ZNSt99xE",  # a source-name longer than the rest of the name
+    "_ZNKSt4hashIL_Z1xEEclEv",  # an encoding inside a literal
+    "_ZSt3fooE",  # a closing E with nothing open
+    "_ZNKSt4hashISxEclEv",  # a malformed substitution
+    "_ZNKSt4hashIT$EclEv",  # a malformed template parameter
+    "_ZNKSt4hashIDzEclEv",  # an unknown D-prefixed code
+    "_ZNKSt4hashIi",  # a template argument list that never closes
+]
+
+
+@pytest.mark.parametrize("name", _UNREAD)
+def test_an_unread_name_proves_neither_answer(name: str) -> None:
+    from abicheck.extract.mangled_foreign_template_args import (
+        has_foreign_template_argument,
+        names_only_runtime_types,
+    )
+
+    assert has_foreign_template_argument(name) is False
+    assert names_only_runtime_types(name) is False
