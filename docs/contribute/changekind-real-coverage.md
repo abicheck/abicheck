@@ -16,8 +16,8 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 ## Headline
 
 - Total kinds: **427**
-- Kinds with at least one real source: **185**
-- Kinds per source: catalog 160, field_shapes 9, integration 66
+- Kinds with at least one real source: **186**
+- Kinds per source: catalog 160, field_shapes 9, integration 68
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
@@ -27,7 +27,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | L3 | 15 | 5 |
 | L4 | 10 | 2 |
 | L5 | 15 | 5 |
-| unmapped | 121 | 111 |
+| unmapped | 121 | 110 |
 
 ## Most important zero-source kinds (top 20)
 
@@ -94,13 +94,13 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `func_added_elf_only` | COMPATIBLE | 0 | 0 | 0 |
 | `func_export_added` | COMPATIBLE | 2 | 0 | 0 |
 | `func_language_linkage_changed` | BREAKING | 1 | 0 | 0 |
-| `func_removed` | BREAKING | 15 | 1 | 21 |
-| `func_removed_elf_only` | BREAKING | 5 | 0 | 6 |
+| `func_removed` | BREAKING | 15 | 1 | 22 |
+| `func_removed_elf_only` | BREAKING | 5 | 0 | 7 |
 | `func_visibility_changed` | BREAKING | 2 | 0 | 2 |
 | `func_visibility_protected_changed` | RISK | 1 | 0 | 0 |
 | `glibcxx_dual_abi_flip_detected` | COMPATIBLE | 1 | 0 | 0 |
 | `hash_style_removed` | RISK | 0 | 0 | 0 |
-| `ifunc_introduced` | COMPATIBLE | 1 | 0 | 0 |
+| `ifunc_introduced` | COMPATIBLE | 1 | 0 | 1 |
 | `imported_symbol_added` | RISK | 0 | 0 | 0 |
 | `imported_symbol_removed` | COMPATIBLE | 0 | 0 | 0 |
 | `inline_namespace_moved` | BREAKING | 1 | 0 | 0 |
@@ -488,7 +488,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `symbol_size_changed_const_object` | BREAKING | 0 | 0 | 0 |
 | `symbol_size_changed_internal` | BREAKING | 0 | 0 | 0 |
 | `symbol_type_changed` | BREAKING | 0 | 0 | 0 |
-| `symbol_version_alias_changed` | RISK | 0 | 0 | 0 |
+| `symbol_version_alias_changed` | RISK | 0 | 0 | 1 |
 | `symbol_version_required_added_compat` | COMPATIBLE | 0 | 0 | 0 |
 | `symbol_version_required_removed` | COMPATIBLE | 0 | 0 | 0 |
 | `tail_padding_reuse_changed` | RISK | 0 | 0 | 0 |
