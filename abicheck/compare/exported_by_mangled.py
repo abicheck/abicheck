@@ -13,8 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""A snapshot's confirmed-exported functions by mangled name, shared across
-one comparison.
+"""A snapshot's confirmed-exported functions and variables by mangled name,
+shared across one comparison.
 
 Three mangling detectors (the libstdc++ dual-ABI churn and selection
 detectors, the inline-namespace move) each read the same map from each

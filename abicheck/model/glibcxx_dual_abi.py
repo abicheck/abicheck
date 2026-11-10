@@ -32,15 +32,16 @@ import json
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
+from enum import StrEnum
 
 from .build_mode_facts import GlibcxxDualAbi
 
 __all__ = [
     "RUNTIME_ABI_MACROS",
     "DualAbiSelection",
+    "SelectionSource",
     "dual_abi_from_spellings",
     "macro_ops_differ_only_in_runtime_abi",
-    "normalize_dual_abi_spelling",
     "parse_macro_ops",
     "runtime_abi_ops",
     "selection_from_macro_ops",
@@ -56,19 +57,34 @@ RUNTIME_ABI_MACROS: tuple[str, ...] = ("_GLIBCXX_USE_CXX11_ABI",)
 _MACRO = "_GLIBCXX_USE_CXX11_ABI"
 
 
+class SelectionSource(StrEnum):
+    """Where a side's dual-ABI selection was read from, strongest first."""
+
+    #: A ``-D``/``-U`` the header frontend ran.
+    HEADER_PARSE = "header parse"
+    #: A ``-D`` the compiler recorded in ``DW_AT_producer``.
+    PRODUCER = "DW_AT_producer"
+    #: What the side's own names spell (:func:`dual_abi_from_spellings`).
+    #: Weaker than the two above: those names also change when a library just
+    #: starts or stops using a dual-ABI type.
+    NAMES = "inferred from exported and debug-info names"
+
+    @property
+    def names_the_selection(self) -> bool:
+        """Whether this source states the selection outright (a macro
+        operation), rather than inferring it from what names spell."""
+        return self is not SelectionSource.NAMES
+
+
 @dataclass(frozen=True)
 class DualAbiSelection:
-    """One side's libstdc++ dual-ABI selection and where it was read from.
-
-    ``source`` is ``"header parse"`` (a ``-D`` the header frontend ran) or
-    ``"DW_AT_producer"`` (a ``-D`` the compiler recorded). An inference from
-    mangled names is not a selection fact and has no constructor here.
-    """
+    """One side's libstdc++ dual-ABI selection and where it was read from."""
 
     abi: GlibcxxDualAbi
-    source: str
+    source: SelectionSource
 
     def describe(self) -> str:
+        """``_GLIBCXX_USE_CXX11_ABI=N (source)``, as reports name it."""
         value = "1" if self.abi is GlibcxxDualAbi.CXX11 else "0"
         return f"{_MACRO}={value} ({self.source})"
 
@@ -99,9 +115,10 @@ def _is_runtime_abi_op(op: tuple[str, str]) -> bool:
     return _macro_name(op[1]) in RUNTIME_ABI_MACROS
 
 
-def runtime_abi_ops(raw: object) -> list[tuple[str, str]]:
-    """The header parse's operations on a runtime-ABI macro, in order."""
-    return [op for op in parse_macro_ops(raw) if _is_runtime_abi_op(op)]
+def runtime_abi_ops(ops: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """The operations (:func:`parse_macro_ops`) on a runtime-ABI macro, in
+    order."""
+    return [op for op in ops if _is_runtime_abi_op(op)]
 
 
 def macro_ops_differ_only_in_runtime_abi(old_raw: object, new_raw: object) -> bool:
@@ -130,16 +147,17 @@ def _abi_from_value(value: str) -> GlibcxxDualAbi | None:
     return None  # a value libstdc++ does not define a meaning for here
 
 
-def selection_from_macro_ops(raw: object) -> DualAbiSelection | None:
+def selection_from_macro_ops(ops: list[tuple[str, str]]) -> DualAbiSelection | None:
     """The selection the header parse's last ``_GLIBCXX_USE_CXX11_ABI``
-    operation made, or ``None`` when the parse left it at the compiler's
-    default (no operation, or a final ``-U``).
+    operation (of the parsed *ops*, :func:`parse_macro_ops`) made, or
+    ``None`` when the parse left it at the compiler's default (no
+    operation, or a final ``-U``).
 
     A default is not read as ``=1``: a GCC configured with
     ``--with-default-libstdcxx-abi=gcc4-compatible`` defaults to ``=0``.
     """
     selected: GlibcxxDualAbi | None = None
-    for op, arg in parse_macro_ops(raw):
+    for op, arg in ops:
         if _macro_name(arg) != _MACRO:
             continue
         if op == "U":
@@ -147,7 +165,9 @@ def selection_from_macro_ops(raw: object) -> DualAbiSelection | None:
         elif op == "D":
             _, _, value = arg.partition("=")
             selected = _abi_from_value(value)
-    return DualAbiSelection(selected, "header parse") if selected else None
+    return (
+        DualAbiSelection(selected, SelectionSource.HEADER_PARSE) if selected else None
+    )
 
 
 _PRODUCER_FLAG_RE = re.compile(r"-D_GLIBCXX_USE_CXX11_ABI(?:=(\d+))?")
@@ -167,43 +187,10 @@ def selection_from_producer_flags(flags: Iterable[str]) -> DualAbiSelection | No
                 seen.add(abi)
     if len(seen) != 1:
         return None
-    return DualAbiSelection(next(iter(seen)), "DW_AT_producer")
+    return DualAbiSelection(next(iter(seen)), SelectionSource.PRODUCER)
 
 
 # ── spellings ──────────────────────────────────────────────────────────────
-
-_CHAR_TYPES = ("char", "wchar_t", "char8_t", "char16_t", "char32_t")
-_STRING_ALIAS = {
-    "char": "std::string",
-    "wchar_t": "std::wstring",
-    "char8_t": "std::u8string",
-    "char16_t": "std::u16string",
-    "char32_t": "std::u32string",
-}
-_FULL_STRING_RE = re.compile(
-    r"std::basic_string<\s*(?P<ch>"
-    + "|".join(_CHAR_TYPES)
-    + r")\s*,\s*std::char_traits<\s*(?P=ch)\s*>\s*,\s*std::allocator<\s*(?P=ch)\s*>\s*>"
-)
-_SHORT_STRING_RE = re.compile(
-    r"std::basic_string<\s*(?P<ch>" + "|".join(_CHAR_TYPES) + r")\s*>"
-)
-
-
-def normalize_dual_abi_spelling(spelling: str) -> str:
-    """``spelling`` (a demangled name or type) with the dual-ABI distinction
-    removed: no ``__cxx11::``, no ``[abi:cxx11]``, and every
-    ``std::basic_string<C, std::char_traits<C>, std::allocator<C> >`` written
-    as its ``std::string`` alias, the form the old ABI demangles to.
-
-    Two exports whose spellings differ but normalize equal are the same
-    declaration built under the two ABIs.
-    """
-    out = spelling.replace("[abi:cxx11]", "").replace("__cxx11::", "")
-    out = _FULL_STRING_RE.sub(lambda m: _STRING_ALIAS[m.group("ch")], out)
-    out = _SHORT_STRING_RE.sub(lambda m: _STRING_ALIAS[m.group("ch")], out)
-    return re.sub(r"\s+", " ", out).strip()
-
 
 # A type spelling the dual ABI changes: the string family (with or without
 # ``std::``/``__cxx11::``, as the header backends write fields: ``string``,

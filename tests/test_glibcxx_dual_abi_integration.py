@@ -143,10 +143,18 @@ def test_dual_abi_flip_with_headers_is_a_break(tmp_path, surface, old_abi, new_a
     else:
         assert kinds & {"func_removed", "func_params_changed"}
         assert "re-mangled" in root["description"]
-    # SARIF names the dual ABI too.
-    sarif_text = json.dumps(doc["_sarif"])
-    assert "glibcxx_dual_abi_changed" in sarif_text
-    assert "dual ABI" in sarif_text
+    # SARIF carries the same explanation: each side's selection and source,
+    # the affected entities, and the description naming the dual ABI.
+    (result,) = [
+        r
+        for r in doc["_sarif"]["runs"][0]["results"]
+        if r["ruleId"] == "glibcxx_dual_abi_changed"
+    ]
+    assert result["level"] == "error"
+    assert result["properties"]["oldValue"] == root["old_value"]
+    assert result["properties"]["newValue"] == root["new_value"]
+    assert result["properties"]["affectedSymbols"] == root["affected_symbols"]
+    assert root["description"] in result["message"]["text"]
 
 
 @pytest.mark.parametrize("surface", ["string", "list"])

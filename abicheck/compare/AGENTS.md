@@ -91,6 +91,13 @@ severity, or a CLI flag is in the wrong layer.
   through `diff_symbols_variables.removed_variable`, static data members).
   Limits and rejected variants:
   `docs/contribute/known-gaps/class-template-specialization-members-a-new-header-stops-enumerating.md`.
+- `glibcxx_dual_abi.py` — the libstdc++ dual-ABI root cause (ADR-050
+  amendment 2026-11-09): each side's selection, `pair_remangled_exports()`
+  (an export and its other-ABI twin, keyed by `normalize_dual_abi_spelling`)
+  and `GLIBCXX_DUAL_ABI_CHANGED`. The churn diagnostic
+  `glibcxx_dual_abi_flip_detected` stays in `diff_platform.py`.
+- `exported_by_mangled.py` — a snapshot's confirmed exports by mangled name,
+  memoized per comparison; the mangling detectors share it.
 
 ## Conventions
 

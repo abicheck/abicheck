@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 from .compare.debug_type_scope import debug_layout_scope
 from .compare.edge_query import export_table_covered
 from .compare.elf_alias_pairs import pair_elf_aliases
-from .compare.exported_functions import exported_functions_by_mangled
+from .compare.exported_by_mangled import exported_functions_by_mangled
 from .compare.naming_conventions import INLINE_NAMESPACE_MOVE, _strip_inline_ns
 from .compare.platform_export_delta import (
     both_export_tables_read as _both_export_tables_read,
@@ -1101,7 +1101,7 @@ def _diff_glibcxx_dual_abi(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     single diagnostic instead of hundreds of individual add/remove reports.
     """
     changes: list[Change] = []
-    # Confirmed exports only (see compare/exported_functions.py).
+    # Confirmed exports only (see compare/exported_by_mangled.py).
     old_map = exported_functions_by_mangled(old)
     new_map = exported_functions_by_mangled(new)
 
@@ -1151,7 +1151,7 @@ def _diff_inline_namespace(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     function signature is otherwise identical.
     """
     changes: list[Change] = []
-    # Confirmed exports only (see compare/exported_functions.py).
+    # Confirmed exports only (see compare/exported_by_mangled.py).
     old_map = exported_functions_by_mangled(old)
     new_map = exported_functions_by_mangled(new)
 

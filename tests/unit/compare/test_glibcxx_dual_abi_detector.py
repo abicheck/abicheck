@@ -9,15 +9,22 @@ so the oracle is the compiler, not the normalizer under test.
 from __future__ import annotations
 
 import itertools
+import json
 import shutil
 
 import pytest
+from hypothesis import given, strategies as st
 
 from abicheck.checker import ChangeKind, compare
 from abicheck.checker_policy import BREAKING_KINDS
 from abicheck.comparability import (
     check_contracts_comparable,
     compute_extraction_contract,
+)
+from abicheck.compare.glibcxx_dual_abi import (
+    ExportNames,
+    normalize_dual_abi_spelling,
+    pair_remangled_exports,
 )
 from abicheck.demangle import demangle
 from abicheck.errors import ProfileMismatchError
@@ -31,9 +38,10 @@ from abicheck.model import (
 )
 from abicheck.model.build_mode_facts import GlibcxxDualAbi
 from abicheck.model.glibcxx_dual_abi import (
+    SelectionSource,
     dual_abi_from_spellings,
     macro_ops_differ_only_in_runtime_abi,
-    normalize_dual_abi_spelling,
+    parse_macro_ops,
     selection_from_macro_ops,
     selection_from_producer_flags,
     spells_dual_abi_type,
@@ -154,10 +162,10 @@ def test_normalization_keeps_distinct_declarations_distinct():
     ],
 )
 def test_selection_from_macro_ops_reads_the_last_operation(ops, expected):
-    got = selection_from_macro_ops(ops)
+    got = selection_from_macro_ops(parse_macro_ops(ops))
     assert (got.abi if got else None) is expected
     if got is not None:
-        assert got.source == "header parse"
+        assert got.source is SelectionSource.HEADER_PARSE
 
 
 @pytest.mark.parametrize(
@@ -576,6 +584,32 @@ def test_gate_still_refuses_when_another_macro_differs_too():
     assert "glibcxx_dual_abi_changed" in message
 
 
+@pytest.mark.parametrize(
+    ("old_target", "new_target"),
+    [
+        (("x86_64-linux-gnu", 64), ("aarch64-linux-gnu", 64)),
+        (("x86_64-linux-gnu", 64), ("i686-linux-gnu", 32)),
+    ],
+    ids=["other-arch", "other-width"],
+)
+def test_gate_still_refuses_a_different_architecture_beside_the_selector(
+    old_target, new_target
+):
+    # The waiver covers the selector only: a target the binaries do not
+    # corroborate stays an incomparable profile, with or without the flip.
+    old = _contract_snap(
+        macro_ops=[], target_triple=old_target[0], pointer_width=old_target[1]
+    )
+    new = _contract_snap(
+        macro_ops=[("D", "_GLIBCXX_USE_CXX11_ABI=0")],
+        target_triple=new_target[0],
+        pointer_width=new_target[1],
+    )
+    with pytest.raises(ProfileMismatchError) as excinfo:
+        check_contracts_comparable(old, new)
+    assert "target_triple" in str(excinfo.value)
+
+
 def test_gate_still_refuses_another_profile_field_beside_the_selector():
     old = _contract_snap(macro_ops=[], compiler_family="gcc")
     new = _contract_snap(
@@ -583,3 +617,162 @@ def test_gate_still_refuses_another_profile_field_beside_the_selector():
     )
     with pytest.raises(ProfileMismatchError):
         check_contracts_comparable(old, new)
+
+
+# ── primitive properties (quality-gates.md "Primitive-level property tests") ──
+#
+# A declaration is ``(name, parameter type kind)``. Its spelling under each ABI
+# comes from the hand-written oracle below (how c++filt prints each ABI, in
+# both of the old ABI's printed forms), not from ``normalize_dual_abi_spelling``.
+
+_PARAM_SPELLING = {
+    # kind: (=1 spelling, (=0 spellings ...))
+    "int": ("int", ("int",)),
+    "string": (
+        "std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&",
+        (
+            "std::basic_string<char, std::char_traits<char>, std::allocator<char> > const&",
+            "std::string const&",
+        ),
+    ),
+    "wstring": (
+        "std::__cxx11::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t> > const&",
+        (
+            "std::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t> > const&",
+        ),
+    ),
+    "list": (
+        "std::__cxx11::list<int, std::allocator<int> > const&",
+        ("std::list<int, std::allocator<int> > const&",),
+    ),
+}
+_AFFECTED = {"string", "wstring", "list"}
+
+_decl = st.tuples(
+    st.sampled_from(["f", "g", "h", "take", "give"]),
+    st.sampled_from(sorted(_PARAM_SPELLING)),
+)
+
+
+def _spell(decl: tuple[str, str], abi: int, variant: int = 0) -> str:
+    name, kind = decl
+    new, olds = _PARAM_SPELLING[kind]
+    return f"lib::{name}({new if abi == _CXX11 else olds[variant % len(olds)]})"
+
+
+def _mangled(decl: tuple[str, str], abi: int) -> str:
+    # Distinct mangled names per ABI only where the type's mangling changes.
+    name, kind = decl
+    tag = abi if kind in _AFFECTED else "x"
+    return f"_Z{len(name)}{name}_{kind}_{tag}"
+
+
+def _side_of(exports: dict[tuple[str, str], int], variant: int) -> ExportNames:
+    """``{declaration: abi}`` -> the side's ExportNames, built by the oracle."""
+    names = {_mangled(d, abi): d[0] for d, abi in exports.items()}
+    demangled = {
+        _mangled(d, abi): _spell(d, abi, variant) for d, abi in exports.items()
+    }
+    return ExportNames(names, demangled)
+
+
+_exports = st.dictionaries(_decl, st.sampled_from([_CXX11, _OLD]), max_size=8)
+
+
+class TestRemangledExportPairsProperties:
+    @given(old=_exports, new=_exports, variant=st.integers(0, 1))
+    def test_pairs_only_one_declaration_under_two_abis(self, old, new, variant):
+        """Soundness: every pair is one declaration, removed under one ABI and
+        added under the other, of a type the selection changes."""
+        o, n = _side_of(old, 0), _side_of(new, variant)
+        by_mangled = {
+            **{_mangled(d, a): d for d, a in old.items()},
+            **{_mangled(d, a): d for d, a in new.items()},
+        }
+        for a, b in pair_remangled_exports(o, n):
+            assert a not in n.exports and b not in o.exports
+            assert by_mangled[a] == by_mangled[b]
+            assert by_mangled[a][1] in _AFFECTED
+            assert old[by_mangled[a]] != new[by_mangled[b]]
+
+    @given(old=_exports, new=_exports, variant=st.integers(0, 1))
+    def test_every_flipped_declaration_is_paired(self, old, new, variant):
+        """Completeness: a declaration of an affected type exported on both
+        sides under different ABIs is always paired (every generated
+        declaration has a distinct normalized spelling, so no twin is
+        ambiguous)."""
+        o, n = _side_of(old, 0), _side_of(new, variant)
+        pairs = set(pair_remangled_exports(o, n))
+        for d, abi in old.items():
+            if d in new and new[d] != abi and d[1] in _AFFECTED:
+                assert (_mangled(d, abi), _mangled(d, new[d])) in pairs
+
+    @given(old=_exports, new=_exports)
+    def test_mirror_and_order_independence(self, old, new):
+        """Swapping the sides mirrors the pairs; insertion order is irrelevant."""
+        o, n = _side_of(old, 0), _side_of(new, 0)
+        pairs = pair_remangled_exports(o, n)
+        mirrored = pair_remangled_exports(n, o)
+        assert sorted((b, a) for a, b in pairs) == sorted(mirrored)
+        reversed_o = ExportNames(
+            dict(reversed(list(o.exports.items()))),
+            dict(reversed(list(o.demangled.items()))),
+        )
+        assert pair_remangled_exports(reversed_o, n) == pairs
+
+    @given(decl=_decl, abi=st.sampled_from([_CXX11, _OLD]), variant=st.integers(0, 1))
+    def test_normalization_is_idempotent_and_abi_blind(self, decl, abi, variant):
+        once = normalize_dual_abi_spelling(_spell(decl, abi, variant))
+        assert normalize_dual_abi_spelling(once) == once
+        assert once == normalize_dual_abi_spelling(_spell(decl, 1 - abi, 0))
+
+    @given(
+        a=_decl, b=_decl, abi_a=st.sampled_from([0, 1]), abi_b=st.sampled_from([0, 1])
+    )
+    def test_normalization_keeps_declarations_apart(self, a, b, abi_a, abi_b):
+        same = normalize_dual_abi_spelling(
+            _spell(a, abi_a)
+        ) == normalize_dual_abi_spelling(_spell(b, abi_b))
+        assert same == (a == b)
+
+
+_other_op = st.sampled_from([("D", "NDEBUG"), ("D", "API_V2=1"), ("U", "FOO")])
+_abi_op = st.sampled_from(
+    [
+        ("D", "_GLIBCXX_USE_CXX11_ABI=0"),
+        ("D", "_GLIBCXX_USE_CXX11_ABI=1"),
+        ("U", "_GLIBCXX_USE_CXX11_ABI"),
+    ]
+)
+
+
+def _json_ops(ops) -> str:
+    return json.dumps([list(op) for op in ops])
+
+
+class TestMacroOpsWaiverProperties:
+    @given(
+        common=st.lists(_other_op, max_size=3),
+        old_abi=st.lists(_abi_op, max_size=2),
+        new_abi=st.lists(_abi_op, max_size=2),
+    )
+    def test_selector_only_differences_are_waived(self, common, old_abi, new_abi):
+        """Same other operations, any selector operations: waived exactly when
+        the lists differ at all; symmetric."""
+        old, new = _json_ops(common + old_abi), _json_ops(common + new_abi)
+        expected = (common + old_abi) != (common + new_abi)
+        assert macro_ops_differ_only_in_runtime_abi(old, new) is expected
+        assert macro_ops_differ_only_in_runtime_abi(new, old) is expected
+
+    @given(
+        common=st.lists(_other_op, max_size=3),
+        extra=_other_op,
+        old_abi=st.lists(_abi_op, max_size=2),
+        new_abi=st.lists(_abi_op, max_size=2),
+    )
+    def test_another_operation_difference_is_never_waived(
+        self, common, extra, old_abi, new_abi
+    ):
+        old, new = _json_ops(common + old_abi), _json_ops(common + [extra] + new_abi)
+        assert macro_ops_differ_only_in_runtime_abi(old, new) is False
+        assert macro_ops_differ_only_in_runtime_abi(new, old) is False
