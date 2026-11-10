@@ -11,6 +11,7 @@ from __future__ import annotations
 import itertools
 import json
 import shutil
+from pathlib import Path
 
 import pytest
 from hypothesis import given, strategies as st
@@ -452,6 +453,37 @@ def test_known_flip_with_nothing_affected_is_recorded_not_gated():
     (drift,) = [c for c in result.changes if c.kind is ChangeKind.TOOLCHAIN_FLAG_DRIFT]
     assert drift.old_value == "_GLIBCXX_USE_CXX11_ABI=1 (header parse)"
     assert result.verdict.value in ("NO_CHANGE", "COMPATIBLE")
+
+
+@pytest.mark.parametrize("other", ["binary_only", "scope_only_contract"])
+@pytest.mark.parametrize("header_side", ["old", "new"])
+@pytest.mark.parametrize("bits", [(256, 64), (64, 64)], ids=["moved", "unmoved"])
+def test_one_side_without_a_header_parse_is_no_selector_flip(other, header_side, bits):
+    # Only one side ran a header parse (-D_GLIBCXX_USE_CXX11_ABI=0); the
+    # other ran none (binary-only, or a contract holding only header-scope
+    # inputs) and names no selection. Its missing operations are absent
+    # evidence, not a parse left at the compiler default: no selector drift
+    # is recorded, and a record whose layout moved is left to the layout
+    # findings rather than blamed on the dual ABI.
+    ops = [("D", "_GLIBCXX_USE_CXX11_ABI=0")]
+    sides = {}
+    for role, size in zip(("old", "new"), bits, strict=True):
+        snap = _snap(
+            functions=_RECORD_FN,
+            types=[_rec(size)],
+            macro_ops=ops if role == header_side else None,
+        )
+        if role != header_side and other == "scope_only_contract":
+            snap.contract = compute_extraction_contract(
+                public_header_paths=[Path("/inc/api.h")]
+            )
+            assert snap.contract is not None
+            assert "macro_ops" not in snap.contract.profile_fields
+        sides[role] = snap
+    old, new = sides["old"], sides["new"]
+    result = compare(old, new)
+    assert _dual(result) == []
+    assert ChangeKind.TOOLCHAIN_FLAG_DRIFT not in {c.kind for c in result.changes}
 
 
 def test_no_selection_and_no_pair_claims_nothing_for_a_record():

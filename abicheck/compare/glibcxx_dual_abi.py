@@ -156,6 +156,14 @@ def runtime_abi_ops_of(snapshot: AbiSnapshot) -> list[tuple[str, str]]:
     return runtime_abi_ops(parse_macro_ops(contract.profile_fields.get("macro_ops")))
 
 
+def _ran_header_parse(snapshot: AbiSnapshot) -> bool:
+    """Whether the side's header frontend ran: its contract then records the
+    parse's macro operations (possibly none). A binary-only side, or one whose
+    contract carries only header-scope inputs, has no operations to compare."""
+    contract = snapshot.contract
+    return contract is not None and "macro_ops" in contract.profile_fields
+
+
 def dual_abi_selection_of(
     snapshot: AbiSnapshot,
     names: ExportNames | None = None,
@@ -351,8 +359,12 @@ def _diff_glibcxx_dual_abi_selection(
     )
     # The two header parses ran different operations on the selector macro:
     # a flip unless the side left at the compiler default already had the
-    # value the other named, so it needs an observed effect to count.
-    macro_flip = old_ops != new_ops
+    # value the other named, so it needs an observed effect to count. A side
+    # with no header parse has no operations to compare: its empty list is
+    # absent evidence, not a parse left at the default.
+    macro_flip = (
+        _ran_header_parse(old) and _ran_header_parse(new) and old_ops != new_ops
+    )
     pairs = pair_remangled_exports(old_names, new_names)
     records = (
         _affected_records(old, new, layout_must_differ=not named_flip)
