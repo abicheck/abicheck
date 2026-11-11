@@ -4,7 +4,8 @@ Only the public entry points are used: ``abicheck.dumper.dump`` for the
 snapshots and ``abicheck.checker.compare`` for the verdict. The evidence axis
 decides what the dump is given: ``binary`` builds without ``-g`` and passes no
 header, ``dwarf`` builds with ``-g`` and passes no header, ``headers`` adds the
-public header (castxml, with the standard and the layout-changing flags the
+public header (dumped by ``config.header_backend``: castxml, clang or the
+native gcc plugin, with the standard and the layout-changing flags the
 library was built with). A compiler failure raises ``CompileError``; it is
 never converted into a skip, because a corpus case that did not build proved
 nothing.
@@ -218,7 +219,7 @@ def build(
         version=out_dir.name,
         compiler="c++" if is_cxx else "cc",
         lang="c++" if is_cxx else "c",
-        header_backend="castxml",
+        header_backend=config.header_backend,
         gcc_options=gcc_options if headers else None,
     )
     return Built(dir=out_dir, so=so, header=header, snapshot=snap)

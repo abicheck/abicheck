@@ -153,7 +153,13 @@ the corpus samples: construct (from the operators' roles and language
 features) × language × standard × config feature (`baseline`, `-O2`, hidden
 visibility, `-m32`, `-fshort-enums`, `-fpack-struct`,
 `_GLIBCXX_USE_CXX11_ABI=0`, `-fabi-version`, different consumer flags) × build
-toolchain × consumer toolchain × evidence level. A (build, consumer) pair that
+toolchain × consumer toolchain × evidence level, with the `headers` level
+split by the backend that dumps the headers (`headers.castxml`,
+`headers.clang`, `headers.gcc`: `Config.header_backend`). castxml is the
+reference; every PR-tier cell also runs under clang and the native gcc plugin
+(ADR-092), and the nightly and weekly tiers draw the backend like any other
+axis, so a backend that loses a fact castxml reads fails a cell (or is a
+recorded strict xfail) instead of going unseen. A (build, consumer) pair that
 cannot work is made infeasible by a `PAIR_RULES` entry. `infeasible()`
 names why a point cannot be a meaningful cell (concepts before C++20, a C++
 construct in C, `-fabi-version` on clang, `std::string` under

@@ -45,6 +45,7 @@ from dataclasses import dataclass, replace
 
 from tests._edit_corpus_config import (
     EVIDENCE,
+    HEADER_BACKENDS,
     STANDARDS,
     Config,
     Consumer,
@@ -318,6 +319,8 @@ def _factors(
         "abi_version": [None, 11],
         "consumer_flags": ["same", "flip_short_enums"],
         "evidence": list(EVIDENCE),
+        # Read only when evidence is headers (Config normalizes it otherwise).
+        "header_backend": list(HEADER_BACKENDS),
     }
 
 
@@ -464,6 +467,7 @@ def row_to_cell(
         # The build's own consumer and the drawn one: one library pair, two checks.
         consumers=(Consumer(), drawn) if drawn != Consumer() else (),
         evidence=str(row["evidence"]),
+        header_backend=str(row.get("header_backend", "castxml")),
     )
     return Cell(op, seed, cfg)
 
@@ -542,6 +546,9 @@ def _weekly_configs(
         out.append(replace(base, flags=Flags(abi_version=11)))
     if lang == "c++":
         out.append(replace(base, flags=Flags(cxx11_abi=0)))
+    # The baseline once more per non-reference header backend: every operator
+    # under clang and the native gcc plugin, not only where the draw lands.
+    out.extend(replace(base, header_backend=b) for b in HEADER_BACKENDS[1:])
     return out
 
 

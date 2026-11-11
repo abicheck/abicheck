@@ -184,6 +184,17 @@ jobs:
           cache: 'pip'
       - name: Install package
         run: pip install -e ".[dev]"
+      - name: Build the native GCC header plugin (Linux)
+        if: runner.os == 'Linux'
+        # The edit corpus dumps its headers lane with castxml, clang and the
+        # native gcc plugin (ADR-092; Config.header_backend). The plugin must
+        # match the system gcc that `cc`/`c++` run; without it the gcc-backend
+        # cells read unavailable and cover nothing.
+        run: |
+          set -euo pipefail
+          major=$(gcc -dumpversion | cut -d. -f1)
+          sudo apt-get install -y --no-install-recommends "gcc-${major}-plugin-dev"
+          python -m abicheck.extract.headers.gcc.build --compiler g++
 
       # Every step below runs whatever an earlier *test* step concluded
       # (`success() || failure()` is "not cancelled"): they are independent

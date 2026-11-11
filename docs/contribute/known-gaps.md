@@ -134,6 +134,51 @@ dependency walk and debug roots to every member. No open gap remains.
 **Status (2026-11-08): OPEN.** Since extractor generation 45 a DWARF-only snapshot records C++ member functions, and a clang-built virtual that becomes `= 0` reads `func_virtual_became_pure` (clang marks the in-class declaration `DW_VIRTUALITY_pure_virtual`). GCC 13 writes `DW_VIRTUALITY_virtual` for a pure virtual, so the declaration looks like any other unexported virtual and the pair reads `func_removed` (BREAKING, so the verdict is right; the kind is not). The binary does carry the fact: the class's `_ZTV` object has an `R_X86_64_64` relocation against `__cxa_pure_virtual` in that slot. Closing it needs the ELF reader to map vtable relocations to slots; the DWARF walker already reads each virtual's slot from `DW_AT_vtable_elem_location` (`extract/dwarf_member_functions.vtable_slot`). Found by the config-matrix corpus (`virtual_become_pure`, `cxx_classes`, evidence `dwarf`, gcc). `wrong-kind`. The reverse edit misreads too (2026-11-11): defining a pure virtual (`type_lost_abstract`, `cxx_more`, evidence `dwarf`, gcc) reads `virtual_method_added`, so a COMPATIBLE edit reads BREAKING (`false-positive`); clang reads `func_added`. Owner: `extract/` (ELF vtable relocations, `extract/dwarf_member_functions.py`).
 <!-- canary: tests/test_dwarf_member_functions.py::test_a_virtual_that_became_pure_is_reported_from_gcc_dwarf -->
 
+#### The clang header backend records no record alignment change (2026-11-11)
+
+**Status (2026-11-11): OPEN.** With the clang header backend, widening a member's type (`struct_field_widen`) or a `-fpack-struct` rebuild (`rebuild_pack_struct`) reports the size and offset changes but no `STRUCT_ALIGNMENT_CHANGED`/`TYPE_ALIGNMENT_CHANGED`, which castxml reports. Verdict right (BREAKING), kind missing (`wrong-kind`). Found by the edit corpus's header-backend axis (`Config.header_backend`). Owner: `extract/headers/clang/`.
+<!-- no-canary: the edit corpus is the canary: its strict-xfail entry in tests/_edit_corpus_known.py fails once the backend records the fact -->
+
+#### The clang header backend reads a removed C typedef as BREAKING (2026-11-11)
+
+**Status (2026-11-11): OPEN.** Removing an unused public typedef (`typedef_removed`, `c_elf`) reads BREAKING under the clang header backend; castxml reads at most a source break (`TYPEDEF_REMOVED`). `false-positive`. Found by the edit corpus's header-backend axis (`Config.header_backend`). Owner: `extract/headers/clang/`.
+<!-- no-canary: the edit corpus is the canary: its strict-xfail entry in tests/_edit_corpus_known.py fails once the backend records the fact -->
+
+#### The clang and native gcc header backends record no access for a static data member (2026-11-11)
+
+**Status (2026-11-11): OPEN.** Narrowing or widening the access of a static data member (`static_member_access_narrowed`/`_widened`, `cxx_more`) reads NO_CHANGE under the clang and native gcc header backends; castxml records the member's access and reads `VAR_ACCESS_CHANGED` (API_BREAK) / `VAR_ACCESS_WIDENED`. `wrong-verdict`. Found by the edit corpus's header-backend axis (`Config.header_backend`). Owner: `extract/headers/clang/` and `extract/headers/gcc/`.
+<!-- no-canary: the edit corpus is the canary: its strict-xfail entry in tests/_edit_corpus_known.py fails once the backend records the fact -->
+
+#### The native gcc header backend records no deprecation attributes (2026-11-11)
+
+**Status (2026-11-11): OPEN.** `[[deprecated]]` added to or removed from a type, enum or field (`api_deprecated`, `api_undeprecated`, `field_deprecated_removed`) is not projected by the native gcc header backend (ADR-092), so the `*_DEPRECATED_*` kinds castxml reports are missing. `wrong-kind` / `wrong-verdict`. Found by the edit corpus's header-backend axis (`Config.header_backend`). Owner: `extract/headers/gcc/` (`gcc_facts.cc`, `projection.py`).
+<!-- no-canary: the edit corpus is the canary: its strict-xfail entry in tests/_edit_corpus_known.py fails once the backend records the fact -->
+
+#### The native gcc header backend records no flexible-array, `_Atomic`, opaque-record or const-object facts (2026-11-11)
+
+**Status (2026-11-11): OPEN.** Under the native gcc header backend the corpus misses `FLEXIBLE_ARRAY_MEMBER_CHANGED` (`flexible_array_member`), `ATOMIC_QUALIFIER_CHANGED` (`field_became_atomic`), `TYPE_BECAME_OPAQUE` (`record_became_opaque`) and `SYMBOL_SIZE_CHANGED_CONST_OBJECT` (`const_string_object_grew`); the verdicts are right. `wrong-kind`. Found by the edit corpus's header-backend axis (`Config.header_backend`). Owner: `extract/headers/gcc/` (`gcc_facts.cc`, `projection.py`).
+<!-- no-canary: the edit corpus is the canary: its strict-xfail entry in tests/_edit_corpus_known.py fails once the backend records the fact -->
+
+#### The native gcc header backend records no hidden friends (2026-11-11)
+
+**Status (2026-11-11): OPEN.** An ADL-only friend defined in a class (`hidden_friend_added`/`_removed`, `cxx_more`) is not recorded, so its addition or removal reads NO_CHANGE; castxml reads `HIDDEN_FRIEND_ADDED` / `HIDDEN_FRIEND_REMOVED` (API_BREAK). `wrong-verdict`. Found by the edit corpus's header-backend axis (`Config.header_backend`). Owner: `extract/headers/gcc/` (`gcc_facts.cc`, `projection.py`).
+<!-- no-canary: the edit corpus is the canary: its strict-xfail entry in tests/_edit_corpus_known.py fails once the backend records the fact -->
+
+#### The native gcc header backend records no `restrict` on a parameter (2026-11-11)
+
+**Status (2026-11-11): OPEN.** Dropping `__restrict` from a parameter (`param_restrict_removed`, `cxx_more`) reads NO_CHANGE; castxml reads `PARAM_RESTRICT_CHANGED`. `wrong-verdict`. Found by the edit corpus's header-backend axis (`Config.header_backend`). Owner: `extract/headers/gcc/` (`gcc_facts.cc`, `projection.py`).
+<!-- no-canary: the edit corpus is the canary: its strict-xfail entry in tests/_edit_corpus_known.py fails once the backend records the fact -->
+
+#### The native gcc header backend cannot tell a tightened concept constraint (2026-11-11)
+
+**Status (2026-11-11): OPEN.** Adding a `requires` constraint to a public template (`concept_constraint_added`, `cxx_classes`, C++20 and later) reads `CONCEPT_CONSTRAINT_CHANGED` (COMPATIBLE_WITH_RISK) under the native gcc header backend; castxml reads `CONCEPT_TIGHTENED` (API_BREAK), and a consumer calling it with a now-excluded argument (`clampv(short)`) stops compiling. `false-clean`. Found by the edit corpus's header-backend axis (`Config.header_backend`). Owner: `extract/headers/gcc/` (`gcc_facts.cc`, `projection.py`).
+<!-- no-canary: the edit corpus is the canary: its strict-xfail entry in tests/_edit_corpus_known.py fails once the backend records the fact -->
+
+#### The native gcc header backend records no vptr or pure-virtual facts (2026-11-11)
+
+**Status (2026-11-11): OPEN.** A first virtual (`vptr_introduced`) reads as a layout change without `VPTR_INTRODUCED`, and defining a pure virtual (`type_lost_abstract`) reads `virtual_method_added` (BREAKING) where castxml reads `TYPE_LOST_ABSTRACT` (compatible): the backend records neither the vptr nor purity. `wrong-kind` / `false-positive`. Found by the edit corpus's header-backend axis (`Config.header_backend`). Owner: `extract/headers/gcc/` (`gcc_facts.cc`, `projection.py`).
+<!-- no-canary: the edit corpus is the canary: its strict-xfail entry in tests/_edit_corpus_known.py fails once the backend records the fact -->
+
 #### castxml spells a multi-dimensional array with its bounds reversed (2026-11-08)
 
 **Status (2026-11-08): OPEN.** castxml writes `int m[2][3]` as an `ArrayType` of `ArrayType`, and `extract/headers/castxml/type_resolution.py` appends the outer bound after the inner one, so the member reads `int[3][2]`. The clang header backend and DWARF (generation 45) spell it `int[2][3]`, as C does. Comparing two castxml dumps is self-consistent, but a castxml snapshot against a clang or DWARF one reports a `type_field_type_changed` that is not there, and a reshape `[2][3]` -> `[3][2]` reads as its mirror image. Closing it needs the spelling fixed and a stored-spelling migration for castxml snapshots (every multi-dimensional castxml spelling reverses soundly). `false-positive` across frontends. Owner: `extract/headers/castxml/`.

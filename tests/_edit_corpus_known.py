@@ -30,6 +30,24 @@ GAP_O2_STD = (
 )
 
 
+GAP_CLANG_ALIGN = "The clang header backend records no record alignment change"
+GAP_CLANG_TYPEDEF = "The clang header backend reads a removed C typedef as BREAKING"
+GAP_STATIC_ACCESS = (
+    "The clang and native gcc header backends record no access for a static data member"
+)
+GAP_GCC_DEPRECATED = "The native gcc header backend records no deprecation attributes"
+GAP_GCC_C_SHAPES = (
+    "The native gcc header backend records no flexible-array, `_Atomic`, opaque-record "
+    "or const-object facts"
+)
+GAP_GCC_FRIEND = "The native gcc header backend records no hidden friends"
+GAP_GCC_RESTRICT = "The native gcc header backend records no `restrict` on a parameter"
+GAP_GCC_CONCEPT = (
+    "The native gcc header backend cannot tell a tightened concept constraint"
+)
+GAP_GCC_VTABLE = "The native gcc header backend records no vptr or pure-virtual facts"
+
+
 def _always(_: Config) -> bool:
     return True
 
@@ -80,6 +98,233 @@ class Known:
             and verdict in self.verdicts
         )
 
+
+def _hb(backend: str) -> Callable[[Config], bool]:
+    """Cells whose headers the named backend dumps (castxml is the reference)."""
+    return lambda c: c.evidence == "headers" and c.header_backend == backend
+
+
+def _backend_gap(
+    op: str,
+    seeds: frozenset[str],
+    backend: str,
+    cls: str,
+    reason: str,
+    gap: str,
+    issues: frozenset[str],
+    verdict: str,
+    also: Callable[[Config], bool] = _always,
+) -> Known:
+    hb = _hb(backend)
+    return Known(
+        op,
+        seeds,
+        cls,
+        lambda c: hb(c) and also(c),
+        reason,
+        gap,
+        issues=issues,
+        verdicts=frozenset({verdict}),
+    )
+
+
+_ELF = frozenset({"c_elf"})
+_MORE = frozenset({"cxx_more"})
+_LAYOUT_SEEDS = frozenset({"c_core", "cxx_classes"})
+_ALIGN = frozenset({"none-of:STRUCT_ALIGNMENT_CHANGED|TYPE_ALIGNMENT_CHANGED"})
+
+# Header-backend parity: castxml reads these facts, the named backend does
+# not. Each is being fixed in the backend itself; the entry forces its own
+# removal (a fixed cell no longer reproduces) when the fix lands.
+_BACKEND_GAPS: tuple[Known, ...] = (
+    *(
+        _backend_gap(
+            op,
+            _LAYOUT_SEEDS,
+            "clang",
+            "wrong-kind",
+            "the clang header backend reports the size and offsets but not the "
+            "record's alignment change",
+            GAP_CLANG_ALIGN,
+            _ALIGN,
+            "BREAKING",
+            # Under -fpack-struct the operator owes no alignment change at all.
+            also=lambda c: c.flags.pack is None,
+        )
+        for op in ("struct_field_widen", "rebuild_pack_struct")
+    ),
+    _backend_gap(
+        "typedef_removed",
+        _ELF,
+        "clang",
+        "false-positive",
+        "removing an unused public typedef reads BREAKING under the clang header "
+        "backend; castxml reads it as a source break only",
+        GAP_CLANG_TYPEDEF,
+        frozenset({"stronger-than:API_BREAK"}),
+        "BREAKING",
+    ),
+    *(
+        _backend_gap(
+            op,
+            _MORE,
+            backend,
+            "wrong-verdict",
+            f"the {backend} header backend records no access on a static data "
+            "member, so its narrowing or widening reads NO_CHANGE",
+            GAP_STATIC_ACCESS,
+            frozenset({f"missing:{kind}", f"weaker-than:{floor}"}),
+            "NO_CHANGE",
+        )
+        for backend in ("clang", "gcc")
+        for op, kind, floor in (
+            ("static_member_access_narrowed", "VAR_ACCESS_CHANGED", "API_BREAK"),
+            ("static_member_access_widened", "VAR_ACCESS_WIDENED", "COMPATIBLE"),
+        )
+    ),
+    _backend_gap(
+        "api_deprecated",
+        _ELF,
+        "gcc",
+        "wrong-kind",
+        "the native gcc header backend projects no [[deprecated]] attribute",
+        GAP_GCC_DEPRECATED,
+        frozenset(
+            {
+                "missing:ENUM_DEPRECATED_ADDED",
+                "missing:FIELD_DEPRECATED_ADDED",
+                "missing:TYPE_DEPRECATED_ADDED",
+            }
+        ),
+        "COMPATIBLE",
+    ),
+    _backend_gap(
+        "api_undeprecated",
+        _ELF,
+        "gcc",
+        "wrong-kind",
+        "the native gcc header backend projects no [[deprecated]] attribute",
+        GAP_GCC_DEPRECATED,
+        frozenset(
+            {"missing:ENUM_DEPRECATED_REMOVED", "missing:TYPE_DEPRECATED_REMOVED"}
+        ),
+        "COMPATIBLE",
+    ),
+    _backend_gap(
+        "field_deprecated_removed",
+        _MORE,
+        "gcc",
+        "wrong-verdict",
+        "the native gcc header backend projects no [[deprecated]] attribute",
+        GAP_GCC_DEPRECATED,
+        frozenset({"missing:FIELD_DEPRECATED_REMOVED", "weaker-than:COMPATIBLE"}),
+        "NO_CHANGE",
+    ),
+    *(
+        _backend_gap(
+            op,
+            _ELF,
+            "gcc",
+            cls,
+            f"the native gcc header backend records no fact {kind} is read from",
+            GAP_GCC_C_SHAPES,
+            frozenset({f"missing:{kind}"}),
+            verdict,
+        )
+        for op, kind, cls, verdict in (
+            (
+                "flexible_array_member",
+                "FLEXIBLE_ARRAY_MEMBER_CHANGED",
+                "wrong-kind",
+                "BREAKING",
+            ),
+            (
+                "const_string_object_grew",
+                "SYMBOL_SIZE_CHANGED_CONST_OBJECT",
+                "wrong-kind",
+                "BREAKING",
+            ),
+            (
+                "field_became_atomic",
+                "ATOMIC_QUALIFIER_CHANGED",
+                "wrong-kind",
+                "COMPATIBLE_WITH_RISK",
+            ),
+            ("record_became_opaque", "TYPE_BECAME_OPAQUE", "wrong-kind", "BREAKING"),
+        )
+    ),
+    *(
+        _backend_gap(
+            op,
+            _MORE,
+            "gcc",
+            cls,
+            "the native gcc header backend records no hidden (ADL-only) friend",
+            GAP_GCC_FRIEND,
+            frozenset({f"missing:{kind}", f"weaker-than:{floor}"}),
+            "NO_CHANGE",
+        )
+        for op, kind, floor, cls in (
+            (
+                "hidden_friend_added",
+                "HIDDEN_FRIEND_ADDED",
+                "COMPATIBLE",
+                "wrong-verdict",
+            ),
+            # Consumers calling e1 == e2 stop compiling: the oracle sees it.
+            (
+                "hidden_friend_removed",
+                "HIDDEN_FRIEND_REMOVED",
+                "API_BREAK",
+                "false-clean",
+            ),
+        )
+    ),
+    _backend_gap(
+        "param_restrict_removed",
+        _MORE,
+        "gcc",
+        "wrong-verdict",
+        "the native gcc header backend records no restrict qualifier on a parameter",
+        GAP_GCC_RESTRICT,
+        frozenset({"missing:PARAM_RESTRICT_CHANGED", "weaker-than:COMPATIBLE"}),
+        "NO_CHANGE",
+    ),
+    _backend_gap(
+        "concept_constraint_added",
+        frozenset({"cxx_classes"}),
+        "gcc",
+        "false-clean",
+        "the native gcc header backend reads a newly constrained template as "
+        "concept_constraint_changed (a risk), not concept_tightened: callers "
+        "with a now-excluded argument stop compiling",
+        GAP_GCC_CONCEPT,
+        frozenset({"weaker-than:API_BREAK"}),
+        "COMPATIBLE_WITH_RISK",
+    ),
+    _backend_gap(
+        "vptr_introduced",
+        _MORE,
+        "gcc",
+        "wrong-kind",
+        "the native gcc header backend records no vptr, so the first virtual reads "
+        "as a layout change without vptr_introduced",
+        GAP_GCC_VTABLE,
+        frozenset({"missing:VPTR_INTRODUCED"}),
+        "BREAKING",
+    ),
+    _backend_gap(
+        "type_lost_abstract",
+        _MORE,
+        "gcc",
+        "false-positive",
+        "the native gcc header backend records no pure virtual, so defining one "
+        "reads as a new virtual method (BREAKING)",
+        GAP_GCC_VTABLE,
+        frozenset({"stronger-than:COMPATIBLE_WITH_RISK"}),
+        "BREAKING",
+    ),
+)
 
 KNOWN: tuple[Known, ...] = (
     Known(
@@ -182,6 +427,7 @@ KNOWN: tuple[Known, ...] = (
         issues=frozenset({"stronger-than:COMPATIBLE"}),
         verdicts=frozenset({"BREAKING", "COMPATIBLE_WITH_RISK"}),
     ),
+    *_BACKEND_GAPS,
 )
 
 
