@@ -58,7 +58,7 @@ variable applies only when the configuration sets no `compile.frontend`.
 |---|---|---|---|
 | `castxml` (default) | CastXML | the default; most complete fact coverage | emulates the system `cc`/`c++`, so it sees *that* compiler's header branches only; drops `= delete`d members, elides defaulted template arguments and inline namespaces from names, records no data size |
 | `clang` | clang | Clang is your client compiler, or CastXML cannot parse the headers | sees only explicitly instantiated template specializations (see the parity plan) |
-| `gcc` | GCC + matching `gcc-N-plugin-dev`, plugins built once | GCC is your client compiler and you want GCC itself to read the headers (Linux ELF only, experimental) | several C attributes and C++ facts are not yet projected; see [Native GCC](native-gcc.md) |
+| `gcc` | GCC + matching `gcc-N-plugin-dev`, plugins built once | GCC is your client compiler and you want GCC itself to read the headers (Linux ELF only, experimental) | experimental: partial assurance, no template overload constraints or macro comparison; see [Native GCC](native-gcc.md) |
 | `hybrid` | both CastXML and clang | recovering facts each backend gets wrong alone | the cost of two parses |
 
 The per-fact contract is in [Header-Backend

@@ -15,9 +15,8 @@ which landed the producer/consumer profile split, per-profile `frontend:`,
 per-cell scheduling and cross-profile reconciliation. This plan does not
 redo that work. It closes G34's open items and adds what G34 never measured:
 whether the backends agree.
-**Status:** Experiments done (2026-11-11). Phases 2 and 3 have a fix on an
-open PR (extractor generation 54), pending merge; until it lands they are
-open. Phases 1, 4 and 5 are open.
+**Status:** Experiments done (2026-11-11). Phases 2 and 3 done (extractor
+generation 54). Phases 1, 4 and 5 open.
 
 ## Problem
 
@@ -91,8 +90,9 @@ the Clang record-layout pass. The public `run_dump` /
 | Native GCC | 340 | 28 | as in E1 |
 
 So the Clang alignment failures were a harness artifact, not a product gap.
-The remaining Clang and native GCC failures are real. The generation-54 fix
-(pending merge) brings all three backends to 368/368 through `run_dump`.
+The remaining Clang and native GCC failures were real. The generation-54 fix
+brings all three backends to 368/368 through `run_dump`, and native GCC to
+162/162 on the example catalog.
 
 ### E5 — the example catalog under each backend
 
@@ -201,7 +201,7 @@ All of these must hold for the candidate backend:
 - Acceptance: E1's table regenerates from CI artifacts, and a new gap in
   any backend fails the tier.
 
-### Phase 2 — close the Clang backend gaps (M) — fix pending merge
+### Phase 2 — close the Clang backend gaps (M) — done (generation 54)
 
 - Record layout already comes from the built-in layout pass on the public
   workflow (E1b). The internal `dumper.dump()` skips it; Phase 1 moves the
@@ -212,7 +212,7 @@ All of these must hold for the candidate backend:
 - Each fix needs a bug-class regression test, a capability-matrix row
   update and a generation bump.
 
-### Phase 3 — close the native GCC gaps (M/L) — fix pending merge
+### Phase 3 — close the native GCC gaps (M/L) — done (generation 54)
 
 - Project the attribute and qualifier set listed in E1: deprecation on
   enum/type/field, `_Atomic`, flexible arrays, opaque records, hidden

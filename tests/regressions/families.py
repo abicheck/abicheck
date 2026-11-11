@@ -171,6 +171,10 @@ FAMILIES: dict[str, Family] = {
                 "tests/test_family_f8_target_parity.py",
                 "tests/test_family_f8_symbol_rule_parity.py",
                 "tests/test_family_f8_catalog_backend_parity.py",
+                # Each header backend reports a change's declared ChangeKinds
+                # (Clang, CastXML; native GCC in the native-gcc CI job).
+                "tests/test_header_backend_parity_regressions.py",
+                "tests/test_native_gcc_parity_regressions.py",
                 # ELF vs PE (MSVC ABI) vs Mach-O cross-builds of one source,
                 # compared through the CLI with -H under both header backends.
                 "tests/test_pe_macho_header_binding_integration.py",
