@@ -50,8 +50,8 @@ There is no CLI flag. For a one-off run, set `ABICHECK_AST_FRONTEND`.
 
 | `compile.frontend` | Install | Choose it when | Known gaps today |
 |---|---|---|---|
-| `castxml` (default) | CastXML | the default; most complete fact coverage, including record layout and member access | emulates the system `cc`/`c++`, so it sees *that* compiler's header branches only |
-| `clang` | clang | Clang is your client compiler, or CastXML cannot parse the headers | record alignment, access on static data members (see the parity plan) |
+| `castxml` (default) | CastXML | the default; most complete fact coverage | emulates the system `cc`/`c++`, so it sees *that* compiler's header branches only; drops `= delete`d members, elides defaulted template arguments and inline namespaces from names, records no data size |
+| `clang` | clang | Clang is your client compiler, or CastXML cannot parse the headers | sees only explicitly instantiated template specializations (see the parity plan) |
 | `gcc` | GCC + matching `gcc-N-plugin-dev`, plugins built once | GCC is your client compiler and you want GCC itself to read the headers (Linux ELF only, experimental) | several C attributes and C++ facts are not yet projected; see [Native GCC](native-gcc.md) |
 | `hybrid` | both CastXML and clang | recovering facts each backend gets wrong alone | the cost of two parses |
 

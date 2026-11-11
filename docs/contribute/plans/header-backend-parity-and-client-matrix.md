@@ -15,7 +15,9 @@ which landed the producer/consumer profile split, per-profile `frontend:`,
 per-cell scheduling and cross-profile reconciliation. This plan does not
 redo that work. It closes G34's open items and adds what G34 never measured:
 whether the backends agree.
-**Status:** Experiments done (2026-11-11). Phases 1–5 not started.
+**Status:** Experiments done (2026-11-11). Phases 2 and 3 are closed by the
+extractor-generation-54 fix (the backend-gaps PR that follows this one);
+phases 1, 4 and 5 are open.
 
 ## Problem
 
@@ -75,13 +77,51 @@ Native GCC backend failures:
 | Symbol/type join | `const_string_object_grew` (`SYMBOL_SIZE_CHANGED_CONST_OBJECT` missing) |
 | Over-reported | `type_lost_abstract` (BREAKING, maximum is COMPATIBLE_WITH_RISK) |
 
+### E1b — the same corpus through the public workflow
+
+The harness calls the internal `abicheck.dumper.dump()`, which never runs
+the Clang record-layout pass. The public `run_dump` /
+`run_dump_request` (and the CLI) do run it. Rerunning E1 through
+`run_dump` (`ABICHECK_EDIT_CORPUS_PUBLIC_DUMP=1`) changes the Clang column:
+
+| Backend | Passed | Failed | Remaining causes |
+|---|---|---|---|
+| CastXML | 368 | 0 | — |
+| Clang | 362 | 6 | static-member access (4), typedef removal over-report (2) |
+| Native GCC | 340 | 28 | as in E1 |
+
+So the Clang alignment failures were a harness artifact, not a product gap.
+The remaining Clang and native GCC failures are real, and the generation-54
+fix closes all of them: 368/368 on all three backends through `run_dump`.
+
+### E5 — the example catalog under each backend
+
+`tests/test_example_autodiscovery.py::test_example_pipeline` (232 cases;
+70 skip for every backend: 42 with no recognised source layout, 22 consumer
+source-smoke cases, 5 build-info cases, 1 `_BitInt`):
+
+| Backend | Passed | Failed |
+|---|---|---|
+| CastXML | 162 | 0 |
+| Clang | 162 | 0 |
+| Native GCC | 153 | 9 (a C header parsed as C++ when no language was set) |
+
+The catalog's expectations already allow recorded CastXML/Clang
+differences (`frontend_kind_differences` in `catalog/ground_truth.json`,
+42 cases), so it does not show what CastXML misses. The traced CastXML
+limits recorded there are: a `= delete`d member dropped from the XML,
+defaulted template arguments and inline namespaces elided from record
+names, no data size (so no tail-padding reuse), `extern template` not
+provable, and every implicit special member emitted. Clang's recorded
+limit is that it sees only explicitly instantiated specializations.
+
 ### E2 — the published fact matrix
 
 From the per-fact tables in
 [Header-Backend Capabilities](../../reference/header-backend-capabilities.md),
 which are generated and tested against the code:
 
-- **Only CastXML:** `access`, `vtable_index`, `is_compiler_generated`,
+- **Only CastXML:** `vtable_index`, `is_compiler_generated`,
   `is_noexcept_fact`, `specialization_declared_fact`, several
   `type_identities_fact` rows, and record layout. CastXML is the only
   backend that computes layout itself.
@@ -161,18 +201,18 @@ All of these must hold for the candidate backend:
 - Acceptance: E1's table regenerates from CI artifacts, and a new gap in
   any backend fails the tier.
 
-### Phase 2 — close the Clang backend gaps (M)
+### Phase 2 — close the Clang backend gaps (M) — closed by generation 54
 
-- Record alignment and layout: read them from Clang's record layout
-  (`-fdump-record-layouts-complete` or libclang `clang_Type_getAlignOf`),
-  so the backend no longer depends on CastXML for layout.
+- Record layout already comes from the built-in layout pass on the public
+  workflow (E1b). The internal `dumper.dump()` skips it; Phase 1 moves the
+  harness to `run_dump`.
 - `access` on static data members (`VarDecl` inside a `CXXRecordDecl`).
 - Typedef removal must not add `FUNC_RETURN_CHANGED` when the underlying
   type is unchanged.
 - Each fix needs a bug-class regression test, a capability-matrix row
   update and a generation bump.
 
-### Phase 3 — close the native GCC gaps (M/L)
+### Phase 3 — close the native GCC gaps (M/L) — closed by generation 54
 
 - Project the attribute and qualifier set listed in E1: deprecation on
   enum/type/field, `_Atomic`, flexible arrays, opaque records, hidden
