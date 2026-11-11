@@ -71,7 +71,10 @@ from __future__ import annotations
 #: the cached AST) and a variable's alignment as a lower bound there; a DWARF
 #: 5 variable records its type's default alignment. A warm entry would carry
 #: neither.
-SNAPSHOT_CACHE_VERSION: str = "47"
+#:
+#: v48: a clang dump records a variable's member access (a private or
+#: protected static data member); a warm entry reads every one as public.
+SNAPSHOT_CACHE_VERSION: str = "48"
 # v35: header-derived snapshots now carry public_header_identifiers (schema
 # v55, extract/public_header_identifiers.py). The key also folds in the
 # snapshot schema version from this version on, so the next schema bump
