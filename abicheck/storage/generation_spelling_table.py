@@ -512,6 +512,13 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "snapshot reads the castxml value as declared and a DWARF default as "
         "not recorded, as before"
     ),
+    54: GenerationSpellingChange(
+        "the clang header backend records a variable's member access (a "
+        "static data member declared under private:/protected:), as castxml "
+        "does; no type spelling changes and no rewrite is needed -- the "
+        "var_access detector reads an older clang snapshot's access as not "
+        "recorded (compare.declaration_facts.records_variable_access)"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

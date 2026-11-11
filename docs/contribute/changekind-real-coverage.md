@@ -16,8 +16,8 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 ## Headline
 
 - Total kinds: **428**
-- Kinds with at least one real source: **190**
-- Kinds per source: catalog 160, field_shapes 9, integration 73
+- Kinds with at least one real source: **192**
+- Kinds per source: catalog 160, field_shapes 9, integration 75
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
@@ -27,7 +27,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | L3 | 15 | 5 |
 | L4 | 10 | 2 |
 | L5 | 15 | 5 |
-| unmapped | 121 | 108 |
+| unmapped | 121 | 106 |
 
 ## Most important zero-source kinds (top 20)
 
@@ -506,8 +506,8 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `uninstantiated_template_removed` | API_BREAK | 0 | 0 | 0 |
 | `union_field_type_changed` | BREAKING | 0 | 0 | 0 |
 | `unspecified_return_now_named` | API_BREAK | 0 | 0 | 1 |
-| `var_access_changed` | API_BREAK | 0 | 0 | 0 |
-| `var_access_widened` | COMPATIBLE | 0 | 0 | 0 |
+| `var_access_changed` | API_BREAK | 0 | 0 | 2 |
+| `var_access_widened` | COMPATIBLE | 0 | 0 | 2 |
 | `var_lost_const` | BREAKING | 0 | 0 | 0 |
 | `var_value_changed` | COMPATIBLE | 0 | 0 | 2 |
 | `vector_abi_changed` | BREAKING | 0 | 0 | 0 |

@@ -587,6 +587,23 @@ _XCXX_ROLES: dict[str, RoleText] = {
         "int fill(int* __restrict p, int n) { return p ? n : 0; }\n"
         'extern "C" int cfun(int a) { return a * 3; }',
     ),
+    # A virtual gaining noexcept, a second converting constructor, a VTT
+    # that grows, a field that fits the tail padding, a source-only export.
+    "x.vnx": (
+        "struct VN { virtual int f(); virtual ~VN(); };",
+        "int VN::f() { return 1; }\nVN::~VN() {}",
+    ),
+    "x.ctor2": ("struct CO { CO(int a); int v; };", "CO::CO(int a) : v(a) {}"),
+    "x.vtt": (
+        "struct VA { int a; virtual ~VA(); };\n"
+        "struct VB2 : virtual VA { int b; virtual ~VB2(); };",
+        "VA::~VA() {}\nVB2::~VB2() {}",
+    ),
+    "x.tailpad": (
+        "struct FC { int a; char b; };\nint fc_use(FC* p);",
+        "int fc_use(FC* p) { return p->a; }",
+    ),
+    "x.helper": ("int enp_a(int a);", "int enp_a(int a) { return a; }"),
     "x.extra": ("", ""),
 }
 
@@ -615,6 +632,11 @@ XCXX_SEED = Seed(
         "@@x.shape@@",
         "@@x.ovr@@",
         "@@x.defs@@",
+        "@@x.vnx@@",
+        "@@x.ctor2@@",
+        "@@x.vtt@@",
+        "@@x.tailpad@@",
+        "@@x.helper@@",
         "@@x.extra@@",
         _VIS_CLOSE,
         "#endif",
@@ -638,6 +660,11 @@ XCXX_SEED = Seed(
         "@@x.shape@@",
         "@@x.ovr@@",
         "@@x.defs@@",
+        "@@x.vnx@@",
+        "@@x.ctor2@@",
+        "@@x.vtt@@",
+        "@@x.tailpad@@",
+        "@@x.helper@@",
         "@@x.extra@@",
     ),
     roles=_XCXX_ROLES,

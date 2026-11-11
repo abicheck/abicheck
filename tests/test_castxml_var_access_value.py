@@ -545,13 +545,22 @@ def _kinds(result: object) -> set[ChangeKind]:
 
 
 class TestVarAccessProducerGate:
-    """Only castxml populates this fact (not clang, not "hybrid" either —
-    see ``AbiSnapshot.castxml_var_access_facts_reliable``'s own docstring)."""
+    """castxml, and clang from extractor generation 54, populate this fact;
+    "hybrid" never does (see ``AbiSnapshot.castxml_var_access_facts_reliable``'s
+    own docstring)."""
 
-    def test_clang_vs_castxml_does_not_manufacture_a_finding(self) -> None:
+    def test_pre_generation_54_clang_vs_castxml_does_not_manufacture_a_finding(
+        self,
+    ) -> None:
         old = _snap(ast_producer="clang", variables=[_var(AccessLevel.PUBLIC)])
+        old.fact_generations = (53, 0, 0)  # every variable read public then
         new = _snap(ast_producer="castxml", variables=[_var(AccessLevel.PRIVATE)])
         assert ChangeKind.VAR_ACCESS_CHANGED not in _kinds(compare(old, new))
+
+    def test_current_clang_vs_castxml_compares(self) -> None:
+        old = _snap(ast_producer="clang", variables=[_var(AccessLevel.PUBLIC)])
+        new = _snap(ast_producer="castxml", variables=[_var(AccessLevel.PRIVATE)])
+        assert ChangeKind.VAR_ACCESS_CHANGED in _kinds(compare(old, new))
 
     def test_two_castxml_sides_compare(self) -> None:
         old = _snap(ast_producer="castxml", variables=[_var(AccessLevel.PUBLIC)])
