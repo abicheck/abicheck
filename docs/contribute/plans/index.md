@@ -99,6 +99,7 @@ Completed or decided plans are retained for implementation history:
 | **G14** | Done — CPython extension recognition, `abi3`/Limited-API import-contract check, `scan --abi3` audit | plan retired (`g14-stable-abi-subset.md`, removed after completion) |
 | **G22** | Done — CLI consolidation & interface-contract enforcement ([ADR-037](../adr/037-cli-interface-contract.md)) | plan retired (`g22-cli-consolidation.md`, removed after completion) |
 | **G23** | Done — Python-level API diff for extension modules (`.pyi`/signature surface, 15 `python_api_*` ChangeKinds) | plan retired (`g23-python-level-api-diff.md`, removed after completion) |
+| **Header-backend parity and the client-compiler matrix** | [CastXML/Clang/native GCC parity, default-backend criteria, per-client checks](header-backend-parity-and-client-matrix.md) | builds on [G34](g34-producer-consumer-compiler-profile-separation.md) · Experiments done; phases 1–5 open | L |
 
 ## How to pick up a plan
 

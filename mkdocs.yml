@@ -59,6 +59,7 @@ nav:
       - Evidence, Build-Context & Debug Flags: use/dump-compare-flags.md
       - Evidence Depth: use/evidence-depth.md
       - Native GCC (Experimental): use/native-gcc.md
+      - Scanner Setup by Toolchain: use/scanner-setup-by-toolchain.md
       - Target Ownership: use/target-ownership.md
       - Producing Source Facts: use/producing-source-facts.md
       - Output Formats: use/output-formats.md
@@ -220,6 +221,7 @@ nav:
       - Compatibility Direction: learn/compatibility-direction.md
       - Consumer Models: learn/consumer-models.md
       - Build Profile Comparability: learn/build-profile-comparability.md
+      - "Client Toolchains: One Library, Several ABIs": learn/client-toolchains.md
       - Static & Header-Only Contracts: learn/static-and-header-only.md
     # Steps 1-5 teach the problem and the reader's own promise; from here
     # on the subject is catching breaks -- the categorically different
