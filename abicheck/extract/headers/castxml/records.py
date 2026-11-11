@@ -305,11 +305,18 @@ def parse_record_fields(ctx: CastxmlParserContext, el: Any) -> list[TypeField]:
     return fields
 
 
+def _add_known_offsets(a: int | None, b: int | None) -> int | None:
+    """Sum two offsets, or ``None`` when either is unknown."""
+    if a is None or b is None:
+        return None
+    return a + b
+
+
 def expand_anonymous_field(
     ctx: CastxmlParserContext,
     field_el: Any,
     _depth: int = 0,
-    _outer_offset: int = 0,
+    _outer_offset: int | None = 0,
 ) -> list[TypeField]:
     """Flatten anonymous struct/union field into the parent's field list.
 
@@ -330,7 +337,9 @@ def expand_anonymous_field(
     if type_el is None or type_el.tag not in ("Union", "Struct"):
         return []
 
-    this_offset = _outer_offset + (optional_int_attr(field_el, "offset") or 0)
+    this_offset = _add_known_offsets(
+        _outer_offset, optional_int_attr(field_el, "offset")
+    )
     result: list[TypeField] = []
 
     # Collect inner Field elements (inline children or members attribute)
@@ -354,7 +363,7 @@ def expand_anonymous_field(
                 )
             )
             continue
-        inner_offset = optional_int_attr(inner, "offset") or 0
+        inner_offset = optional_int_attr(inner, "offset")
         bitfield_bits, is_bitfield = parse_bitfield_bits(inner.get("bits"))
         inner_type_id = inner.get("type", "")
         inner_type = type_name(ctx, inner_type_id)
@@ -363,7 +372,7 @@ def expand_anonymous_field(
             TypeField(
                 name=inner_name,
                 type=inner_type,
-                offset_bits=this_offset + inner_offset,
+                offset_bits=_add_known_offsets(this_offset, inner_offset),
                 is_bitfield=is_bitfield,
                 bitfield_bits=bitfield_bits,
                 is_const=inner_const,

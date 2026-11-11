@@ -109,7 +109,7 @@
       "abicheck/extract/headers/castxml/preprocessed_text.py": "084aadae5c167be9a049464e7ac9864f42cc70a90ba0a4bb0aa50878a5a199d6",
       "abicheck/extract/headers/castxml/probe.py": "525ded3c75b147300cfaa460ce8acd62f87533859ff152e2b1f76c4302999bb0",
       "abicheck/extract/headers/castxml/record_traits.py": "6d836b2a2da27a0f12611f9c8dec681a8922ad2c5853f801ec9a94972654cdf1",
-      "abicheck/extract/headers/castxml/records.py": "8041534409b5880594f599090778a905993bb2237e2c769816a1e66b338c1a07",
+      "abicheck/extract/headers/castxml/records.py": "9a5cd042d058f8bc87a345072b81ccbe4eb77ac86ef1c4a59104bfc7d8701486",
       "abicheck/extract/headers/castxml/scope.py": "41cecc8dd996c10a58c022e5dca4003cce9d7775adf674b339cc199fb59297c7",
       "abicheck/extract/headers/castxml/specialization.py": "3f9f021672df1b84de42bc8de5f3c915508b3f3850e0a8acbaa80a3dee04c6f3",
       "abicheck/extract/headers/castxml/type_resolution.py": "3527318ed7d36b2b557c447c9fa0807deec9c594a7f481cf36c860859062552f",
@@ -222,9 +222,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "6898fde9fdff2c9ab4a14c919f1f21ee517d2668676707327264eda88c037369",
+    "fingerprint": "619d21de98a81402ca36a1bd726b403a701f2f26764e3a52336c71ff5ebf3d22",
     "generation": 53,
-    "reason": "opt-in native GCC header backend (ADR-092): a new producer for a request that was previously refused (frontend gcc); castxml/clang/hybrid extraction of the same input records the same facts; backend registry moved out of dumper.py unchanged"
+    "reason": "castxml always emits Field offset; only malformed XML lacking it now records None instead of fabricated 0"
   },
   "resolver": {
     "files": {

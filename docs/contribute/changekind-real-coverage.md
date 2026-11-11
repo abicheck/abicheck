@@ -238,7 +238,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `type_became_opaque` | BREAKING | 1 | 0 | 0 |
 | `type_field_added` | BREAKING | 2 | 0 | 0 |
 | `type_field_added_compatible` | COMPATIBLE | 1 | 0 | 1 |
-| `type_field_offset_changed` | BREAKING | 6 | 0 | 2 |
+| `type_field_offset_changed` | BREAKING | 6 | 0 | 3 |
 | `type_field_type_changed` | BREAKING | 3 | 0 | 5 |
 | `type_kind_changed` | BREAKING | 1 | 0 | 0 |
 | `type_removed` | API_BREAK | 5 | 1 | 3 |

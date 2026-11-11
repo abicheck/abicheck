@@ -1,0 +1,9 @@
+{
+  "_source": "formal/lean/AbiLean/Examples.lean: #eval of AbiLean.fires over domain [none, 0, 32, 64]; regenerate with `lake env lean AbiLean/Examples.lean`",
+  "rows": [
+    [null, null, false], [null, 0, false], [null, 32, false], [null, 64, false],
+    [0, null, false], [0, 0, false], [0, 32, true], [0, 64, true],
+    [32, null, false], [32, 0, true], [32, 32, false], [32, 64, true],
+    [64, null, false], [64, 0, true], [64, 32, true], [64, 64, false]
+  ]
+}
