@@ -215,7 +215,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `func_cv_changed` | BREAKING | 1 | 0 | 0 |
 | `func_params_changed` | BREAKING | 5 | 1 | 15 |
 | `func_pure_virtual_added` | BREAKING | 0 | 0 | 0 |
-| `func_return_changed` | BREAKING | 5 | 0 | 6 |
+| `func_return_changed` | BREAKING | 5 | 0 | 7 |
 | `func_static_changed` | BREAKING | 1 | 0 | 0 |
 | `func_virtual_added` | BREAKING | 1 | 0 | 0 |
 | `func_virtual_became_pure` | BREAKING | 1 | 0 | 1 |

@@ -519,6 +519,15 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "var_access detector reads an older clang snapshot's access as not "
         "recorded (compare.declaration_facts.records_variable_access)"
     ),
+    55: GenerationSpellingChange(
+        "the clang header backend records a function's return-type ABI fact "
+        "when the return type is spelled through a typedef or alias of a "
+        "plain type (clang's function type carries no desugared spelling, so "
+        "the alias is resolved through the header's own typedef "
+        "declarations), as castxml does; no type spelling changes and no "
+        "rewrite is needed -- an older clang snapshot's return fact stays "
+        "NOT_COLLECTED, which never compares equal"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

@@ -58,7 +58,7 @@ and ``context.py``'s ``is_record_definition`` already received.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 from ....model import ExplicitInstantiation, Fact, Function, Param
@@ -105,7 +105,11 @@ from .qualifiers import (
 )
 from .redeclarations import RedeclarationIdentity
 from .restrict_spelling import without_top_level_restrict
-from .return_type import return_type as _return_type
+from .return_type import (
+    alias_targets,
+    desugar_return_alias,
+    return_type as _return_type,
+)
 from .type_identity import TypeIdentityIndex
 
 #: Evaluates a param's default-argument initializer to its snapshot value
@@ -397,8 +401,10 @@ def parse_functions(
     function_constraints: FunctionConstraintIndex | None = None,
     builtin_abi: BuiltinAbi | None = None,
     type_identities: TypeIdentityIndex | None = None,
+    typedefs: Iterable[_Decl] = (),
 ) -> list[Function]:
     funcs: list[Function] = []
+    aliases = alias_targets(typedefs)  # the return type's ABI fact, see there
     source_cache: dict[str, bytes | None] = {}
     redeclared = RedeclarationIdentity()  # out-of-line def -> in-class identity
     for entry in functions:
@@ -590,7 +596,10 @@ def parse_functions(
                 if type_identities
                 else None,
                 return_type_abi_fact=builtin_type_fact(
-                    _return_type(_qualtype_desugared(entry.node)), builtin_abi
+                    desugar_return_alias(
+                        _return_type(_qualtype_desugared(entry.node)), aliases
+                    ),
+                    builtin_abi,
                 ),
                 params=params,
                 visibility=vis,
