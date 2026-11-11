@@ -16,18 +16,18 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 ## Headline
 
 - Total kinds: **428**
-- Kinds with at least one real source: **192**
-- Kinds per source: catalog 160, field_shapes 9, integration 75
+- Kinds with at least one real source: **201**
+- Kinds per source: catalog 160, field_shapes 9, integration 88
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
 | L0 | 130 | 72 |
 | L1 | 62 | 7 |
-| L2 | 75 | 39 |
+| L2 | 75 | 31 |
 | L3 | 15 | 5 |
 | L4 | 10 | 2 |
 | L5 | 15 | 5 |
-| unmapped | 121 | 106 |
+| unmapped | 121 | 105 |
 
 ## Most important zero-source kinds (top 20)
 
@@ -194,7 +194,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | Kind | Verdict | Catalog | Field shapes | Integration |
 |---|---|---:|---:|---:|
 | `abi_equivalent_type_changed` | RISK | 0 | 0 | 1 |
-| `atomic_qualifier_changed` | BREAKING | 1 | 0 | 1 |
+| `atomic_qualifier_changed` | BREAKING | 1 | 0 | 2 |
 | `base_class_offset_changed` | BREAKING | 1 | 0 | 0 |
 | `base_class_position_changed` | BREAKING | 1 | 0 | 0 |
 | `base_class_virtual_changed` | BREAKING | 1 | 0 | 0 |
@@ -211,11 +211,11 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `field_became_volatile` | RISK | 1 | 0 | 0 |
 | `field_bitfield_changed` | BREAKING | 1 | 0 | 0 |
 | `field_renamed` | API_BREAK | 1 | 0 | 0 |
-| `flexible_array_member_changed` | COMPATIBLE | 1 | 0 | 0 |
+| `flexible_array_member_changed` | COMPATIBLE | 1 | 0 | 1 |
 | `func_cv_changed` | BREAKING | 1 | 0 | 0 |
 | `func_params_changed` | BREAKING | 5 | 1 | 15 |
 | `func_pure_virtual_added` | BREAKING | 0 | 0 | 0 |
-| `func_return_changed` | BREAKING | 5 | 0 | 6 |
+| `func_return_changed` | BREAKING | 5 | 0 | 7 |
 | `func_static_changed` | BREAKING | 1 | 0 | 0 |
 | `func_virtual_added` | BREAKING | 1 | 0 | 0 |
 | `func_virtual_became_pure` | BREAKING | 1 | 0 | 1 |
@@ -235,7 +235,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `toolchain_flag_drift` | COMPATIBLE | 1 | 0 | 3 |
 | `type_alignment_changed` | BREAKING | 1 | 0 | 0 |
 | `type_base_changed` | BREAKING | 3 | 0 | 0 |
-| `type_became_opaque` | BREAKING | 1 | 0 | 0 |
+| `type_became_opaque` | BREAKING | 1 | 0 | 1 |
 | `type_field_added` | BREAKING | 2 | 0 | 0 |
 | `type_field_added_compatible` | COMPATIBLE | 1 | 0 | 1 |
 | `type_field_offset_changed` | BREAKING | 6 | 0 | 2 |
@@ -243,7 +243,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `type_kind_changed` | BREAKING | 1 | 0 | 0 |
 | `type_removed` | API_BREAK | 5 | 1 | 3 |
 | `type_size_changed` | BREAKING | 19 | 1 | 7 |
-| `type_vtable_changed` | BREAKING | 3 | 0 | 0 |
+| `type_vtable_changed` | BREAKING | 3 | 0 | 2 |
 | `typedef_base_changed` | BREAKING | 1 | 0 | 4 |
 | `typedef_removed` | API_BREAK | 2 | 0 | 1 |
 | `union_field_added` | COMPATIBLE | 2 | 0 | 0 |
@@ -253,7 +253,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `var_became_const` | BREAKING | 1 | 0 | 0 |
 | `var_type_changed` | BREAKING | 1 | 0 | 1 |
 | `virtual_base_offset_changed` | BREAKING | 0 | 0 | 0 |
-| `vptr_introduced` | BREAKING | 1 | 0 | 0 |
+| `vptr_introduced` | BREAKING | 1 | 0 | 1 |
 | `wchar_model_changed` | RISK | 0 | 0 | 1 |
 
 ## Tier L2
@@ -266,14 +266,14 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `ctor_overload_ambiguity_risk` | RISK | 0 | 0 | 0 |
 | `default_template_arg_changed` | BREAKING | 2 | 0 | 0 |
 | `enum_became_scoped` | API_BREAK | 0 | 0 | 0 |
-| `enum_deprecated_added` | COMPATIBLE | 0 | 0 | 0 |
-| `enum_deprecated_removed` | COMPATIBLE | 0 | 0 | 0 |
+| `enum_deprecated_added` | COMPATIBLE | 0 | 0 | 1 |
+| `enum_deprecated_removed` | COMPATIBLE | 0 | 0 | 1 |
 | `enum_lost_scoped` | RISK | 0 | 0 | 0 |
 | `exported_not_public` | RISK | 2 | 0 | 9 |
 | `field_default_initializer_changed` | COMPATIBLE | 0 | 0 | 0 |
 | `field_default_initializer_removed` | RISK | 0 | 0 | 0 |
-| `field_deprecated_added` | COMPATIBLE | 0 | 0 | 0 |
-| `field_deprecated_removed` | COMPATIBLE | 0 | 0 | 0 |
+| `field_deprecated_added` | COMPATIBLE | 0 | 0 | 1 |
+| `field_deprecated_removed` | COMPATIBLE | 0 | 0 | 1 |
 | `func_contract_attribute_added` | RISK | 0 | 0 | 0 |
 | `func_contract_attribute_removed` | RISK | 0 | 0 | 0 |
 | `func_deprecated_added` | COMPATIBLE | 1 | 0 | 0 |
@@ -292,7 +292,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `func_virtual_removed` | BREAKING | 1 | 0 | 0 |
 | `header_binary_context_mismatch` | RISK | 0 | 0 | 0 |
 | `header_only_function_params_changed` | API_BREAK | 1 | 0 | 1 |
-| `hidden_friend_removed` | API_BREAK | 1 | 1 | 1 |
+| `hidden_friend_removed` | API_BREAK | 1 | 1 | 2 |
 | `inline_body_references_renamed_member` | BREAKING | 1 | 0 | 0 |
 | `instantiation_missing_from_binary` | BREAKING | 1 | 0 | 0 |
 | `internal_template_leaks_via_public_api` | BREAKING | 1 | 0 | 1 |
@@ -304,7 +304,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `param_pointee_qualifier_added` | RISK | 1 | 0 | 0 |
 | `param_pointee_qualifier_changed` | API_BREAK | 0 | 0 | 0 |
 | `param_restrict_added` | RISK | 1 | 0 | 0 |
-| `param_restrict_changed` | COMPATIBLE | 0 | 0 | 0 |
+| `param_restrict_changed` | COMPATIBLE | 0 | 0 | 2 |
 | `private_header_leak` | RISK | 3 | 0 | 0 |
 | `public_consumer_compiled_dependency_changed` | RISK | 1 | 0 | 0 |
 | `public_not_exported` | RISK | 1 | 0 | 5 |
@@ -329,9 +329,9 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `template_param_default_changed` | API_BREAK | 4 | 0 | 2 |
 | `type_became_abstract` | API_BREAK | 0 | 0 | 0 |
 | `type_became_final` | API_BREAK | 1 | 0 | 0 |
-| `type_deprecated_added` | COMPATIBLE | 0 | 0 | 0 |
-| `type_deprecated_removed` | COMPATIBLE | 0 | 0 | 0 |
-| `type_lost_abstract` | COMPATIBLE | 0 | 0 | 0 |
+| `type_deprecated_added` | COMPATIBLE | 0 | 0 | 1 |
+| `type_deprecated_removed` | COMPATIBLE | 0 | 0 | 1 |
+| `type_lost_abstract` | COMPATIBLE | 0 | 0 | 1 |
 | `var_alignment_changed` | BREAKING | 0 | 0 | 2 |
 | `var_deprecated_added` | COMPATIBLE | 0 | 0 | 0 |
 | `var_deprecated_removed` | COMPATIBLE | 0 | 0 | 0 |
@@ -436,7 +436,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `generated_header_reaches_public_api` | RISK | 0 | 0 | 0 |
 | `handle_type_changed` | BREAKING | 0 | 0 | 0 |
 | `header_parse_context_drift` | RISK | 0 | 0 | 0 |
-| `hidden_friend_added` | COMPATIBLE | 0 | 1 | 1 |
+| `hidden_friend_added` | COMPATIBLE | 0 | 1 | 2 |
 | `ifunc_removed` | COMPATIBLE | 0 | 0 | 0 |
 | `include_graph_public_header_drift` | RISK | 0 | 0 | 0 |
 | `inline_body_changed` | RISK | 0 | 0 | 0 |
@@ -486,7 +486,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `symbol_leaked_from_dependency_changed` | RISK | 0 | 0 | 0 |
 | `symbol_moved_version_node` | BREAKING | 0 | 0 | 1 |
 | `symbol_renamed_batch` | BREAKING | 0 | 0 | 0 |
-| `symbol_size_changed_const_object` | BREAKING | 0 | 0 | 0 |
+| `symbol_size_changed_const_object` | BREAKING | 0 | 0 | 1 |
 | `symbol_size_changed_internal` | BREAKING | 0 | 0 | 0 |
 | `symbol_type_changed` | BREAKING | 0 | 0 | 0 |
 | `symbol_version_alias_changed` | RISK | 0 | 0 | 2 |
@@ -506,8 +506,8 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `uninstantiated_template_removed` | API_BREAK | 0 | 0 | 0 |
 | `union_field_type_changed` | BREAKING | 0 | 0 | 0 |
 | `unspecified_return_now_named` | API_BREAK | 0 | 0 | 1 |
-| `var_access_changed` | API_BREAK | 0 | 0 | 2 |
-| `var_access_widened` | COMPATIBLE | 0 | 0 | 2 |
+| `var_access_changed` | API_BREAK | 0 | 0 | 4 |
+| `var_access_widened` | COMPATIBLE | 0 | 0 | 4 |
 | `var_lost_const` | BREAKING | 0 | 0 | 0 |
 | `var_value_changed` | COMPATIBLE | 0 | 0 | 2 |
 | `vector_abi_changed` | BREAKING | 0 | 0 | 0 |

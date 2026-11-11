@@ -25,10 +25,58 @@ three private helpers), with a single call site in ``functions.py``
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable, Mapping
+from typing import Any
 
 from abicheck.model.identity_literals import quoted_literal_spans
 
-__all__ = ["return_type"]
+__all__ = ["alias_targets", "desugar_return_alias", "return_type"]
+
+_SAFE_TARGET_RE = re.compile(r"^[\w\s:]+$")
+_CV_RE = re.compile(
+    r"^((?:\s*\b(?:const|volatile)\b)*)\s*(.*?)\s*((?:\b(?:const|volatile)\b\s*)*)$"
+)
+
+
+def alias_targets(typedefs: Iterable[Any]) -> dict[str, str]:
+    """Alias name -> fully desugared target for every typedef/alias decl whose
+    target is a plain (cv-free, pointer-free) type name, keyed by its
+    qualified name and, when no other alias shares it, by its bare name.
+
+    clang's ``-ast-dump=json`` gives a ``FunctionDecl``'s type no
+    ``desugaredQualType`` (a ``ParmVarDecl`` has one), so a return type
+    spelled through an alias (``count_t f();``) reaches
+    ``builtin_type_fact`` as the bare alias name and records no ABI fact,
+    while castxml, walking its type graph, records the target's.
+    """
+    out: dict[str, str] = {}
+    bare: dict[str, set[str]] = {}
+    for entry in typedefs:
+        name = str(entry.node.get("name", ""))
+        node_type = entry.node.get("type")
+        if not name or not isinstance(node_type, dict):
+            continue
+        target = str(
+            node_type.get("desugaredQualType") or node_type.get("qualType") or ""
+        )
+        if not target or not _SAFE_TARGET_RE.match(target):
+            continue
+        out["::".join([*entry.scope, name])] = target
+        bare.setdefault(name, set()).add(target)
+    for name, targets in bare.items():
+        if len(targets) == 1:
+            out.setdefault(name, next(iter(targets)))
+    return out
+
+
+def desugar_return_alias(spelling: str, targets: Mapping[str, str]) -> str:
+    """*spelling* with a top-level alias name replaced by its target
+    (``const count_t`` -> ``const int``); unchanged when it names none."""
+    m = _CV_RE.match(spelling)
+    if m is None or m.group(2).removeprefix("::") not in targets:
+        return spelling
+    core = targets[m.group(2).removeprefix("::")]
+    return " ".join(p for p in (m.group(1).strip(), core, m.group(3).strip()) if p)
 
 
 def _literal_end_at(literal_spans: list[tuple[int, int]], i: int) -> int | None:

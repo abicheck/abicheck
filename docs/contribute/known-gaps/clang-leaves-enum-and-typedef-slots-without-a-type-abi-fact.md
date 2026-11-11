@@ -11,7 +11,7 @@ generated: false
 
 Index: [Known gaps](../known-gaps.md)
 
-**Status (2026-11-05): OPEN; cause not traced.**
+**Status (2026-11-11): NARROWED; enum cause not traced.** Since extractor generation 55 the clang frontend records the typedef'd `handle_t` return: clang's `-ast-dump=json` gives a `FunctionDecl`'s type no `desugaredQualType`, so the return alias is resolved through the header's own typedef declarations (`extract/headers/clang/return_type.alias_targets`). Only the enum slots remain.
 
 For a header declaring
 

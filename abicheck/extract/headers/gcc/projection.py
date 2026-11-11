@@ -148,6 +148,16 @@ def project(
         return identities(name_rewrites.get(clean(value), value) if value else None)
 
     by_name = {clean(r["name"]): r for r in type_rows.values()}
+    # Befriended function uid -> owning class, a public owner first, then the
+    # first declared (castxml's
+    # `befriending` reading, functions.build_hidden_friend_ids).
+    friend_owner: dict[int, str] = {}
+    for r in sorted(
+        type_rows.values(),
+        key=lambda r: (not policy.public(r.get("source")), r.get("line", 0)),
+    ):
+        for uid in r.get("befriended") or ():
+            friend_owner.setdefault(uid, clean(r["name"]))
     retained = set()
     pending: list[str] = []
 
@@ -214,6 +224,7 @@ def project(
                         else Fact.not_collected(),
                         type_identities_fact=resolved_identity(f["identity"]),
                         type_abi_fact=abi(f.get("abi")),
+                        deprecated_fact=Fact.present(f.get("deprecated")),
                     )
                 )
             bases = r.get("bases", [])
@@ -227,11 +238,17 @@ def project(
                 size_bits=None if dependent else r["size_bits"],
                 alignment_bits=r["alignment_bits"],
                 data_size_bits=r.get("data_size_bits"),
+                vptr_offset_bits_fact=Fact.present(r["vptr_offset_bits"])
+                if "vptr_offset_bits" in r
+                else Fact.not_collected(),
                 is_standard_layout=r.get("standard_layout"),
                 is_trivially_copyable=r.get("trivially_copyable"),
                 is_final=r.get("final"),
                 is_abstract=r.get("abstract"),
                 is_template_pattern=dependent,
+                # A declared-only record (`struct ctx;`): castxml's `incomplete`.
+                is_opaque=r.get("complete") is False and not dependent,
+                deprecated_fact=Fact.present(r.get("deprecated")),
                 fields=fields,
                 source_location=src,
                 source_header=r["source"],
@@ -271,6 +288,7 @@ def project(
                 qualified_name=name if "::" in name else None,
                 members=[EnumMember(m["name"], m["value"]) for m in r["members"]],
                 is_scoped=r.get("scoped"),
+                deprecated_fact=Fact.present(r.get("deprecated")),
                 underlying_type=underlying or "?",
                 source_location=src,
                 source_header=r["source"],
@@ -342,6 +360,8 @@ def project(
                 source_header=r["source"],
                 origin=origin,
                 access=AccessLevel(r["access"]),
+                is_hidden_friend=r.get("uid") in friend_owner,
+                hidden_friend_owner=friend_owner.get(r.get("uid")),
                 entity_id=entity_id_for_function(
                     scope(r), fnleaf, mangled_name=mangled
                 ),

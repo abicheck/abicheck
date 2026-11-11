@@ -826,6 +826,22 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_family_f8_catalog_backend_parity.py",
             # clang records a static data member's access as castxml does.
             "tests/test_clang_variable_access_parity.py",
+            # clang resolves a typedef'd return type for its ABI fact.
+            "tests/test_clang_return_alias_abi_fact.py",
+            # the native gcc backend's variable access reaches the detector.
+            "tests/test_native_gcc_variable_access.py",
+            # the native gcc plugin emits record/enum/field deprecation.
+            "tests/test_native_gcc_deprecation.py",
+            # the native gcc plugin records befriended functions.
+            "tests/test_native_gcc_hidden_friends.py",
+            # the native gcc plugin keeps a C++ parameter's restrict.
+            "tests/test_native_gcc_param_restrict.py",
+            # the native gcc plugin spells C atomic/array types as C does.
+            "tests/test_native_gcc_c_object_facts.py",
+            # the native gcc plugin records the vptr and castxml-style slots.
+            "tests/test_native_gcc_vtable_facts.py",
+            # the native gcc backend records constraints as conjunctive sets.
+            "tests/test_native_gcc_concept_constraints.py",
             # castxml reads noexcept and C++20 constraints from the clang AST
             # of the same header; without clang they read not observed.
             "tests/test_noexcept_header_backends.py",

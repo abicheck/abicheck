@@ -74,7 +74,22 @@ from __future__ import annotations
 #:
 #: v48: a clang dump records a variable's member access (a private or
 #: protected static data member); a warm entry reads every one as public.
-SNAPSHOT_CACHE_VERSION: str = "48"
+#:
+#: v49: a clang dump records the ABI fact of a return type spelled through a
+#: typedef; a warm entry leaves it NOT_COLLECTED.
+#:
+#: v50: a native gcc dump records record, enum and field deprecation.
+#:
+#: v51: a native gcc dump marks befriended functions as hidden friends.
+#:
+#: v52: a native gcc dump records a C++ parameter's top-level restrict.
+#:
+#: v53: a native gcc C dump respells atomic and array types, reads an array object's const and records opaque records.
+#:
+#: v54: a native gcc dump records the vptr offset and castxml-style vtable slots.
+#:
+#: v55: a native gcc dump records constraints as conjunctive atom sets.
+SNAPSHOT_CACHE_VERSION: str = "55"
 # v35: header-derived snapshots now carry public_header_identifiers (schema
 # v55, extract/public_header_identifiers.py). The key also folds in the
 # snapshot schema version from this version on, so the next schema bump

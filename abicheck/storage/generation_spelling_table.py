@@ -519,6 +519,62 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "var_access detector reads an older clang snapshot's access as not "
         "recorded (compare.declaration_facts.records_variable_access)"
     ),
+    55: GenerationSpellingChange(
+        "the clang header backend records a function's return-type ABI fact "
+        "when the return type is spelled through a typedef or alias of a "
+        "plain type (clang's function type carries no desugared spelling, so "
+        "the alias is resolved through the header's own typedef "
+        "declarations), as castxml does; no type spelling changes and no "
+        "rewrite is needed -- an older clang snapshot's return fact stays "
+        "NOT_COLLECTED, which never compares equal"
+    ),
+    56: GenerationSpellingChange(
+        "the native gcc header backend records a record's, an enum's and a "
+        "data member's deprecation marker (plugin protocol schema 3), as "
+        "castxml does; no type spelling changes and no rewrite is needed -- "
+        "an older gcc snapshot read every type and field as not deprecated"
+    ),
+    57: GenerationSpellingChange(
+        "the native gcc header backend records which class befriends each "
+        "function (plugin protocol schema 4) and marks it "
+        "Function.is_hidden_friend with its hidden_friend_owner, as castxml "
+        "does; no type spelling changes and no rewrite is needed -- an "
+        "older gcc snapshot records no hidden friend"
+    ),
+    58: GenerationSpellingChange(
+        "the native gcc header backend reads a C++ parameter's top-level "
+        "restrict from its PARM_DECL (the function type drops it) (plugin "
+        "protocol schema 5), as castxml records it; no type spelling "
+        "changes and no rewrite is needed -- an older gcc snapshot read "
+        "every C++ parameter as unrestricted"
+    ),
+    59: GenerationSpellingChange(
+        "the native gcc header backend spells C types as C does "
+        "(_Atomic(T), [] for an unknown bound or flexible array member, [0] "
+        "for a zero-length array, where it wrote atomic T, [0:] and "
+        "[<unknown>]), reads an array object's const/volatile from its "
+        "element type, and records a declared-only record as opaque (plugin "
+        "protocol schema 6); an older gcc snapshot's C spellings differ, "
+        "which only matters gcc-to-gcc and is not rewritten"
+    ),
+    60: GenerationSpellingChange(
+        "the native gcc header backend records a dynamic class's vptr at "
+        "offset 0 and names vtable slots as castxml does -- a pure or "
+        "deleted virtual by its method, a virtual destructor's slot pair "
+        "once as ~Class -- instead of reading __cxa_pure_virtual and the 0 "
+        "an unemitted destructor clone leaves (plugin protocol schema 7); "
+        "an older gcc snapshot's vtable spellings differ, gcc-to-gcc only, "
+        "not rewritten"
+    ),
+    61: GenerationSpellingChange(
+        "the native gcc header backend records a template's or concept's "
+        "constraint as the shared conjunctive atom set (one hashed atom per "
+        "top-level && conjunct, the empty set for an unconstrained "
+        "template) instead of one opaque gcc-v2 digest, so a tightening is "
+        "decidable; an older gcc snapshot's constraint values are opaque "
+        "and read as concept_constraint_changed against a newer one, "
+        "gcc-to-gcc only, not rewritten"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

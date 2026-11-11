@@ -8,6 +8,8 @@
 #include "tree-pretty-print.h"
 #include "langhooks.h"
 #include "diagnostic.h"
+#include "stringpool.h"
+#include "attribs.h"
 #include <cstdio>
 #include <string>
 #include <unordered_set>
@@ -22,9 +24,35 @@ static std::string q(const char *p) {
     default:if(c<32){char b[8];snprintf(b,sizeof(b),"\\u%04x",c);s+=b;}else s+=c;}
   } return s+"\"";
 }
+#ifndef GCC_CPP
+// One array extent as C spells it: [] for an unknown bound (a flexible array
+// member, an incomplete array), [N] for a constant one -- [0] included, whose
+// domain GCC records as [0, -1]. print_generic_expr writes [0:] and
+// [<unknown>] instead.
+static std::string extent(tree a) {
+  tree dom=TYPE_DOMAIN(a);
+  if(dom&&TYPE_SIZE(a)&&integer_zerop(TYPE_SIZE(a)))return "[0]";
+  if(!dom||!TYPE_MAX_VALUE(dom))return "[]";
+  tree max=TYPE_MAX_VALUE(dom);
+  if(TREE_CODE(max)!=INTEGER_CST)return "[]";
+  if(tree_int_cst_sgn(max)<0)return "[0]";
+  if(!tree_fits_shwi_p(max))return "[]";
+  return "["+std::to_string(tree_to_shwi(max)+1)+"]";
+}
+#endif
 static std::string spelled(tree t) {
 #ifdef GCC_CPP
   if(TYPE_P(t)) return type_as_string(t,TFF_SCOPE | TFF_NO_OMIT_DEFAULT_TEMPLATE_ARGUMENTS);
+#else
+  // The C front end has no type printer of its own; print_generic_expr spells
+  // _Atomic as "atomic" and array extents in its tree form.
+  if(TYPE_P(t) && TREE_CODE(t)==ARRAY_TYPE) {
+    std::string dims;tree e=t;
+    for(;TREE_CODE(e)==ARRAY_TYPE;e=TREE_TYPE(e))dims+=extent(e);
+    return spelled(e)+dims;
+  }
+  if(TYPE_P(t) && TYPE_ATOMIC(t))
+    return "_Atomic("+spelled(build_qualified_type(t,TYPE_QUALS(t)&~TYPE_QUAL_ATOMIC))+")";
 #endif
   char *buf=nullptr; size_t n=0; FILE *f=open_memstream(&buf,&n);
   print_generic_expr(f,t,TDF_NONE); fclose(f); std::string s(buf,n);free(buf);return s;
@@ -113,6 +141,14 @@ static void attributes(tree d) {
   }
   fprintf(out,",\"deprecated\":%s",TREE_DEPRECATED(d)?q(message?message:"").c_str():"null");
 }
+// A deprecation marker: the attribute's message, "" for a bare one, or null.
+static std::string deprecation(tree attrs,bool flagged) {
+  for(tree a=attrs;a;a=TREE_CHAIN(a))if(is_attribute_p("deprecated",get_attribute_name(a))) {
+    tree args=TREE_VALUE(a);
+    return q(args && TREE_VALUE(args) && TREE_CODE(TREE_VALUE(args))==STRING_CST?TREE_STRING_POINTER(TREE_VALUE(args)):"");
+  }
+  return flagged?q(""):"null";
+}
 static bool local_scope(tree ctx) {
   while(ctx && (TYPE_P(ctx)||DECL_P(ctx))) {
     if(TREE_CODE(ctx)==FUNCTION_DECL)return true;
@@ -142,10 +178,12 @@ static void decl(void *data,void *) {
     tree ft=TREE_TYPE(d); abi("return_abi",TREE_TYPE(ft));fprintf(out,",\"return_pointer_depth\":%u",pointer_depth(TREE_TYPE(ft)));
     fprintf(out,",\"variadic\":%s",TYPE_ARG_TYPES(ft)?(stdarg_p(ft)?"true":"false"):"null");
     fprintf(out,",\"return_type\":%s,\"return_identity\":%s,\"parameters\":[",q(spelled(TREE_TYPE(ft)).c_str()).c_str(),identity(TREE_TYPE(ft)).c_str());
+    // C++ drops a parameter's top-level restrict from the function type
+    // ([dcl.fct]/5); its PARM_DECL (DECL_ARGUMENTS) keeps it.
     bool comma=false;unsigned ai=0;tree argument=DECL_ARGUMENTS(d);
     for(tree a=TYPE_ARG_TYPES(ft);a;a=TREE_CHAIN(a)) {
       tree t=TREE_VALUE(a);if(t==void_type_node)break;
-      fprintf(out,"%s{\"type\":%s,\"identity\":%s,\"default\":%s",comma?",":"",q(spelled(t).c_str()).c_str(),identity(t).c_str(),TREE_PURPOSE(a)?q(spelled(TREE_PURPOSE(a)).c_str()).c_str():"null");abi("abi",t);fprintf(out,",\"param_kind\":%s,\"pointer_depth\":%u,\"restrict\":%s",q(param_kind(t)).c_str(),pointer_depth(t),TYPE_RESTRICT(t)?"true":"false");fprintf(out,",\"implicit_this\":%s,\"artificial\":%s,\"name\":%s}",TREE_CODE(ft)==METHOD_TYPE && ai==0?"true":"false",argument && DECL_ARTIFICIAL(argument)?"true":"false",argument?q(name(argument)).c_str():"null");if(argument)argument=DECL_CHAIN(argument);ai++;comma=true;
+      fprintf(out,"%s{\"type\":%s,\"identity\":%s,\"default\":%s",comma?",":"",q(spelled(t).c_str()).c_str(),identity(t).c_str(),TREE_PURPOSE(a)?q(spelled(TREE_PURPOSE(a)).c_str()).c_str():"null");abi("abi",t);fprintf(out,",\"param_kind\":%s,\"pointer_depth\":%u,\"restrict\":%s",q(param_kind(t)).c_str(),pointer_depth(t),(TYPE_RESTRICT(t)||(argument && TYPE_RESTRICT(TREE_TYPE(argument))))?"true":"false");fprintf(out,",\"implicit_this\":%s,\"artificial\":%s,\"name\":%s}",TREE_CODE(ft)==METHOD_TYPE && ai==0?"true":"false",argument && DECL_ARTIFICIAL(argument)?"true":"false",argument?q(name(argument)).c_str():"null");if(argument)argument=DECL_CHAIN(argument);ai++;comma=true;
     }
     fprintf(out,"]");
   }
@@ -171,7 +209,7 @@ static void decl(void *data,void *) {
     tree asmname=DECL_ASSEMBLER_NAME(d);if(asmname)fprintf(out,",\"mangled\":%s",q(IDENTIFIER_POINTER(asmname)).c_str());
   }
 #endif
-  if(code==VAR_DECL) { abi("abi",TREE_TYPE(d)); fprintf(out,",\"const\":%s,\"volatile\":%s,\"tls\":%s",TYPE_READONLY(TREE_TYPE(d))?"true":"false",TYPE_VOLATILE(TREE_TYPE(d))?"true":"false",DECL_THREAD_LOCAL_P(d)?"true":"false"); fprintf(out,",\"size_bits\":%s,\"alignment_bits\":%u",number(DECL_SIZE(d)).c_str(),DECL_ALIGN(d)); fprintf(out,",\"value\":%s",number(DECL_INITIAL(d)).c_str());
+  if(code==VAR_DECL) { abi("abi",TREE_TYPE(d)); tree object=strip_array_types(TREE_TYPE(d)); fprintf(out,",\"const\":%s,\"volatile\":%s,\"tls\":%s",TYPE_READONLY(object)?"true":"false",TYPE_VOLATILE(object)?"true":"false",DECL_THREAD_LOCAL_P(d)?"true":"false"); fprintf(out,",\"size_bits\":%s,\"alignment_bits\":%u",number(DECL_SIZE(d)).c_str(),DECL_ALIGN(d)); fprintf(out,",\"value\":%s",number(DECL_INITIAL(d)).c_str());
     tree init=DECL_INITIAL(d);fprintf(out,",\"value_expression\":%s",init && (TREE_CODE(init)==INTEGER_CST || TREE_CODE(init)==REAL_CST || TREE_CODE(init)==STRING_CST)?q(spelled(init).c_str()).c_str():"null");
   }
   fprintf(out,"}\n");
@@ -189,6 +227,23 @@ static void vgroups(tree b, bool &comma, int depth=0) {
   tree sub;int i;for(i=0;BINFO_BASE_ITERATE(b,i,sub);i++)vgroups(sub,comma,depth+1);
 }
 #endif
+#ifdef GCC_CPP
+// The binfos that own a sub-vtable of t's vtable group, in layout order: the
+// class itself, then every base that is not a primary base (a primary base
+// shares its derived class's vtable).
+static void vtable_owners(tree b,std::vector<tree> &owners,bool root,int depth=0) {
+  if(!b || depth>32)return;
+  if(root || !BINFO_PRIMARY_P(b))owners.push_back(b);
+  tree sub;int i;for(i=0;BINFO_BASE_ITERATE(b,i,sub);i++)vtable_owners(sub,owners,false,depth+1);
+}
+// The method a pure (or deleted) virtual slot names: castxml lists the
+// method, the vtable initializer holds __cxa_pure_virtual.
+static tree slot_method(const std::vector<tree> &owners,int table,int slot) {
+  if(table<0 || (size_t)table>=owners.size() || slot<0)return nullptr;
+  int k=0;for(tree v=BINFO_VIRTUALS(owners[table]);v;v=TREE_CHAIN(v),k++)if(k==slot)return BV_FN(v);
+  return nullptr;
+}
+#endif
 static void type(void *data,void *) {
   tree t=(tree)data; if(!t||!TYPE_P(t)||local_scope(TYPE_CONTEXT(t)))return; t=TYPE_MAIN_VARIANT(t); if(seen_types.count(TYPE_UID(t)))return;
   seen_types.insert(TYPE_UID(t));
@@ -196,9 +251,14 @@ static void type(void *data,void *) {
   if(!RECORD_OR_UNION_TYPE_P(t)&&code!=ENUMERAL_TYPE)return;
   fprintf(out,"{\"kind\":%s,\"name\":%s,\"size_bits\":%s,\"alignment_bits\":%u",
    q(get_tree_code_name(code)).c_str(),q(spelled(t).c_str()).c_str(),number(TYPE_SIZE(t)).c_str(),TYPE_ALIGN(t));
+  fprintf(out,",\"complete\":%s",COMPLETE_TYPE_P(t)?"true":"false");
   scope(TYPE_CONTEXT(t));
   tree type_name=TYPE_NAME(t);fprintf(out,",\"anonymous\":%s",!type_name || (DECL_P(type_name) && !DECL_NAME(type_name))?"true":"false");
   fprintf(out,",\"type_uid\":%u,\"leaf_name\":%s",TYPE_UID(t),q(leaf(t).c_str()).c_str());
+  {tree stub=TYPE_NAME(t)&&DECL_P(TYPE_NAME(t))?TYPE_NAME(t):TYPE_STUB_DECL(t);
+   std::string marker=deprecation(TYPE_ATTRIBUTES(t),TREE_DEPRECATED(t)||(stub&&TREE_DEPRECATED(stub)));
+   if(marker=="null"&&stub)marker=deprecation(DECL_ATTRIBUTES(stub),false);
+   fprintf(out,",\"deprecated\":%s",marker.c_str());}
 #ifdef GCC_CPP
   fprintf(out,",\"dependent\":%s",dependent_type_p(t)?"true":"false");
   if(TREE_CODE(t)==RECORD_TYPE && TYPE_LANG_SPECIFIC(t)) {
@@ -207,6 +267,7 @@ static void type(void *data,void *) {
   if(TREE_CODE(t)==RECORD_TYPE && TYPE_LANG_SPECIFIC(t) && !dependent_type_p(t) && CLASSTYPE_AS_BASE(t))
     fprintf(out,",\"data_size_bits\":%s",number(CLASSTYPE_SIZE(t)).c_str());
   if(TREE_CODE(t)==RECORD_TYPE && TYPE_LANG_SPECIFIC(t) && !dependent_type_p(t)) {
+    fprintf(out,",\"vptr_offset_bits\":%s",TYPE_CONTAINS_VPTR_P(t)?"0":"null");
     fprintf(out,",\"standard_layout\":%s,\"trivially_copyable\":%s,\"abstract\":%s,\"final\":%s",CLASSTYPE_NON_STD_LAYOUT(t)?"false":"true",trivially_copyable_p(t)?"true":"false",ABSTRACT_CLASS_TYPE_P(t)?"true":"false",CLASSTYPE_FINAL(t)?"true":"false");
     fprintf(out,",\"vtable_initializers\":[");bool comma=false;
     for(tree v=CLASSTYPE_VTABLES(t);v;v=DECL_CHAIN(v)) {
@@ -214,13 +275,32 @@ static void type(void *data,void *) {
       fprintf(out,"%s{\"name\":%s,\"initializer_kind\":%s,\"initializer\":%s",comma?",":"",q(name(v)).c_str(),init?q(get_tree_code_name(TREE_CODE(init))).c_str():"null",init?q(spelled(init).c_str()).c_str():"null");
       if(init && TREE_CODE(init)==CONSTRUCTOR) {
         fprintf(out,",\"entries\":[");unsigned int i;tree ix,value;bool sep=false;
+        std::vector<tree> owners;vtable_owners(TYPE_BINFO(t),owners,true);
+        int table=-1,slot=-1;bool dtor_seen=false;
         FOR_EACH_CONSTRUCTOR_ELT(CONSTRUCTOR_ELTS(init),i,ix,value) {
           tree target=value;STRIP_NOPS(target);
           std::string resolved="null";
+          if(slot>=0)slot++;
           if(TREE_CODE(target)==ADDR_EXPR && DECL_P(TREE_OPERAND(target,0))) {
             tree d=TREE_OPERAND(target,0);
-            resolved=q(IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(d)));
-          }
+            const char *asmname=IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(d));
+            // A type-info entry opens the next sub-vtable; its slots follow.
+            if(!strncmp(asmname,"_ZTI",4)){table++;slot=-1;dtor_seen=false;}
+            else if(slot<0)slot=0;
+            if(!strcmp(asmname,"__cxa_pure_virtual")||!strcmp(asmname,"__cxa_deleted_virtual")) {
+              tree m=slot_method(owners,table,slot);
+              if(m)asmname=IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(m));
+            }
+            resolved=q(asmname);
+          } else if(table>=0 && slot<0) slot=0;
+          // A virtual destructor fills two slots (complete, deleting) whose
+          // initializers are 0 until its clones exist: record the pair once,
+          // as castxml does, so the vtable reads the same either way.
+          if(tree m=slot>=0?slot_method(owners,table,slot):nullptr)
+            if(DECL_DESTRUCTOR_P(m)) {
+              resolved=dtor_seen?"null":q((std::string("~")+name(TYPE_NAME(DECL_CONTEXT(m)))).c_str());
+              dtor_seen=true;
+            }
           fprintf(out,"%s{\"index\":%s,\"target\":%s,\"value\":%s}",sep?",":"",(ix ? number(ix) : std::to_string(i)).c_str(),resolved.c_str(),q(spelled(value).c_str()).c_str());sep=true;
         }fprintf(out,"]");
       }
@@ -228,6 +308,16 @@ static void type(void *data,void *) {
     } fprintf(out,"]");
   }
   if(RECORD_OR_UNION_TYPE_P(t) && TYPE_BINFO(t)) { fprintf(out,",\"vtable_candidate_groups\":[");bool comma=false;vgroups(TYPE_BINFO(t),comma);fprintf(out,"]"); }
+  if(CLASS_TYPE_P(t) && TYPE_MAIN_DECL(t)) {
+    // The functions this class befriends (castxml's `befriending`), by DECL_UID.
+    fprintf(out,",\"befriended\":[");bool sep=false;
+    for(tree fl=DECL_FRIENDLIST(TYPE_MAIN_DECL(t));fl;fl=TREE_CHAIN(fl))
+      for(tree f=FRIEND_DECLS(fl);f;f=TREE_CHAIN(f)) {
+        tree d=TREE_VALUE(f);
+        if(d && TREE_CODE(d)==FUNCTION_DECL){fprintf(out,"%s%u",sep?",":"",DECL_UID(d));sep=true;}
+      }
+    fprintf(out,"]");
+  }
 #endif
   tree td=TYPE_NAME(t);if(!td||!DECL_P(td))td=TYPE_STUB_DECL(t);if(td && DECL_P(td))source(td);
 #ifndef GCC_CPP
@@ -255,6 +345,7 @@ static void type(void *data,void *) {
       if(bo&&bi&&tree_fits_uhwi_p(bo)&&tree_fits_uhwi_p(bi)) off=std::to_string(tree_to_uhwi(bo)*BITS_PER_UNIT+tree_to_uhwi(bi));
       fprintf(out,"%s{\"name\":%s,\"type\":%s,\"identity\":%s,\"offset_bits\":%s,\"size_bits\":%s,\"bitfield\":%s,\"artificial\":%s,\"access\":%s",comma?",":"",q(name(f)).c_str(),q(spelled(ftype).c_str()).c_str(),identity(ftype).c_str(),off.c_str(),number(DECL_SIZE(f)).c_str(),DECL_BIT_FIELD(f)?"true":"false",DECL_ARTIFICIAL(f)?"true":"false",q(TREE_PRIVATE(f)?"private":TREE_PROTECTED(f)?"protected":"public").c_str());abi("abi",ftype);
       fprintf(out,",\"const\":%s,\"volatile\":%s",TYPE_READONLY(ftype)?"true":"false",TYPE_VOLATILE(ftype)?"true":"false");
+      fprintf(out,",\"deprecated\":%s",deprecation(DECL_ATTRIBUTES(f),TREE_DEPRECATED(f)).c_str());
 #ifdef GCC_CPP
       fprintf(out,",\"mutable\":%s",DECL_MUTABLE_P(f)?"true":"false");
       tree init=DECL_INITIAL(f);fprintf(out,",\"default\":%s",init && init!=error_mark_node?q(spelled(init).c_str()).c_str():"null");
@@ -324,7 +415,7 @@ int plugin_init(struct plugin_name_args *args,struct plugin_gcc_version *v) {
   if(!plugin_default_version_check(v,&gcc_version))return 1;
   const char *path=nullptr;for(int i=0;i<args->argc;i++)if(!strcmp(args->argv[i].key,"output"))path=args->argv[i].value;
   if(!path)return 1;out=fopen(path,"w");if(!out)return 1;
-  fprintf(out,"{\"kind\":\"compiler\",\"version\":%s,\"schema\":2,\"pointer_bits\":%d,\"char_bits\":%d}\n",q(v->basever).c_str(),POINTER_SIZE,BITS_PER_UNIT);
+  fprintf(out,"{\"kind\":\"compiler\",\"version\":%s,\"schema\":7,\"pointer_bits\":%d,\"char_bits\":%d}\n",q(v->basever).c_str(),POINTER_SIZE,BITS_PER_UNIT);
 #ifndef GCC_CPP
   register_callback(args->base_name,PLUGIN_FINISH_TYPE,type,nullptr);
   register_callback(args->base_name,PLUGIN_FINISH_DECL,decl,nullptr);
