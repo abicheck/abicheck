@@ -658,7 +658,7 @@ RECORD_AND_LATER_ROWS: tuple[FactRow, ...] = (
         _FULL,
         _PARTIAL,
         note=(
-            "Schema v54: the qualified names of the records/enums this type slot resolves to, walked through castxml's own id-referenced type graph (`extract/headers/castxml/type_resolution.type_identities`). clang is `PARTIAL` since extractor generation 51: `-ast-dump=json` gives a slot only as a `qualType` string, so `extract/headers/clang/type_identity.py` resolves it by scoped lookup over the parse's own records, enums, aliases and using-directives, and records `PRESENT` only for a slot naming exactly one record/enum unambiguously. A builtin, a template instance, an ambiguous lookup or anything else stays NOT_COLLECTED (never an empty `PRESENT`), and the public-surface walk falls back to the spelling-only answer for it (docs/contribute/known-gaps.md)."
+            "Schema v54: the qualified names of the records/enums this type slot resolves to, walked through castxml's own id-referenced type graph (`extract/headers/castxml/type_resolution.type_identities`). clang is `PARTIAL` since extractor generation 52: `-ast-dump=json` gives a slot only as a `qualType` string, so `extract/headers/clang/type_identity.py` resolves it by scoped lookup over the parse's own records, enums, aliases and using-directives, and records `PRESENT` only for a slot naming exactly one record/enum unambiguously. A builtin, a template instance, an ambiguous lookup or anything else stays NOT_COLLECTED (never an empty `PRESENT`), and the public-surface walk falls back to the spelling-only answer for it (docs/contribute/known-gaps.md)."
         ),
     ),
     FactRow(
@@ -667,7 +667,7 @@ RECORD_AND_LATER_ROWS: tuple[FactRow, ...] = (
         _FULL,
         _PARTIAL,
         note=(
-            "Schema v54: the qualified names of the records/enums this type slot resolves to, walked through castxml's own id-referenced type graph (`extract/headers/castxml/type_resolution.type_identities`). clang is `PARTIAL` since extractor generation 51: `-ast-dump=json` gives a slot only as a `qualType` string, so `extract/headers/clang/type_identity.py` resolves it by scoped lookup over the parse's own records, enums, aliases and using-directives, and records `PRESENT` only for a slot naming exactly one record/enum unambiguously. A builtin, a template instance, an ambiguous lookup or anything else stays NOT_COLLECTED (never an empty `PRESENT`), and the public-surface walk falls back to the spelling-only answer for it (docs/contribute/known-gaps.md)."
+            "Schema v54: the qualified names of the records/enums this type slot resolves to, walked through castxml's own id-referenced type graph (`extract/headers/castxml/type_resolution.type_identities`). clang is `PARTIAL` since extractor generation 52: `-ast-dump=json` gives a slot only as a `qualType` string, so `extract/headers/clang/type_identity.py` resolves it by scoped lookup over the parse's own records, enums, aliases and using-directives, and records `PRESENT` only for a slot naming exactly one record/enum unambiguously. A builtin, a template instance, an ambiguous lookup or anything else stays NOT_COLLECTED (never an empty `PRESENT`), and the public-surface walk falls back to the spelling-only answer for it (docs/contribute/known-gaps.md)."
         ),
     ),
     FactRow(
@@ -676,7 +676,7 @@ RECORD_AND_LATER_ROWS: tuple[FactRow, ...] = (
         _FULL,
         _NONE,
         note=(
-            "Schema v54: the qualified names of the records/enums this type slot resolves to, walked through castxml's own id-referenced type graph (`extract/headers/castxml/type_resolution.type_identities`). clang resolves only function parameter/return slots (`extract/headers/clang/type_identity.py`, extractor generation 51); this slot stays NOT_COLLECTED on clang and the exact public-surface walk falls back to the spelling-only answer (docs/contribute/known-gaps.md)."
+            "Schema v54: the qualified names of the records/enums this type slot resolves to, walked through castxml's own id-referenced type graph (`extract/headers/castxml/type_resolution.type_identities`). clang resolves only function parameter/return slots (`extract/headers/clang/type_identity.py`, extractor generation 52); this slot stays NOT_COLLECTED on clang and the exact public-surface walk falls back to the spelling-only answer (docs/contribute/known-gaps.md)."
         ),
     ),
     FactRow(
@@ -685,7 +685,7 @@ RECORD_AND_LATER_ROWS: tuple[FactRow, ...] = (
         _FULL,
         _NONE,
         note=(
-            "Schema v54: the qualified names of the records/enums this type slot resolves to, walked through castxml's own id-referenced type graph (`extract/headers/castxml/type_resolution.type_identities`). clang resolves only function parameter/return slots (`extract/headers/clang/type_identity.py`, extractor generation 51); this slot stays NOT_COLLECTED on clang and the exact public-surface walk falls back to the spelling-only answer (docs/contribute/known-gaps.md)."
+            "Schema v54: the qualified names of the records/enums this type slot resolves to, walked through castxml's own id-referenced type graph (`extract/headers/castxml/type_resolution.type_identities`). clang resolves only function parameter/return slots (`extract/headers/clang/type_identity.py`, extractor generation 52); this slot stays NOT_COLLECTED on clang and the exact public-surface walk falls back to the spelling-only answer (docs/contribute/known-gaps.md)."
         ),
     ),
 )

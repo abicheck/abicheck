@@ -73,6 +73,9 @@ FEATURES: dict[str, dict[str, int]] = {
     "concepts": {"c++": 2020},
     "no_unique_address": {"c++": 2020},
     "std_string": {"c++": 2011},
+    "restrict": {"c": 1999},
+    "flexible_array": {"c": 1999},
+    "atomic": {"c": 2011},
 }
 
 

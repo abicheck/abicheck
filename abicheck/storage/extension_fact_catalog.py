@@ -50,7 +50,7 @@ which `scripts/schema_bump_gate.py` checks.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Generic, TypeVar
@@ -58,6 +58,7 @@ from typing import Any, Generic, TypeVar
 from .dto import SECTION_SCHEMA_VERSIONS
 
 __all__ = [
+    "BINARY_SHA256",
     "CU_STACK_PROTECTOR",
     "CXX_CONCEPT_CONSTRAINTS",
     "CXX_TEMPLATE_DEFAULTS",
@@ -65,6 +66,8 @@ __all__ = [
     "EXPORT_READ",
     "EXTENSION_FACTS",
     "NOEXCEPT_UNOBSERVED",
+    "VOLATILE_CAPTURE_FACTS",
+    "evidence_header_extras",
     "ExtensionFact",
     "ExtensionFactRegistry",
     "ReaderSemantics",
@@ -411,10 +414,72 @@ CU_STACK_PROTECTOR: ExtensionFact[dict[str, int]] = ExtensionFact(
     decode=_stack_protector_census,
 )
 
+_SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _sha256_hex(value: Any) -> str:
+    if not isinstance(value, str) or not _SHA256_HEX.match(value):
+        raise ValueError(
+            f"binary_sha256 must be 64 lowercase hex digits, got {value!r}"
+        )
+    return value
+
+
+#: The SHA-256 of the binary's bytes a snapshot was dumped from
+#: (``AbiSnapshot.binary_sha256``, extractor generation 51), read through a
+#: GNU ld linker-script chain to its final target like a live operand's hash.
+#: Written on the ``binary`` section by every dump of a binary file. It lets
+#: ADR-090 D1(c) prove a stored dump and a live binary (or two stored dumps)
+#: one input. Absent, the identity is unproven: a stored-vs-live pair without
+#: type-level evidence reads UNCONFIRMED, the conservative answer every older
+#: snapshot already gives. An older reader that ignores it gives that same
+#: answer, so it is optional.
+BINARY_SHA256: ExtensionFact[str] = ExtensionFact(
+    name="abicheck.binary_sha256",
+    section="binary",
+    semantics=ReaderSemantics.OPTIONAL,
+    absent_reads_as=(
+        "not recorded: the dumped binary's identity is unknown, so no "
+        "identical-input exemption is proven from it"
+    ),
+    owner="ADR-090",
+    encode=_sha256_hex,
+    decode=_sha256_hex,
+)
+
+#: Facts that record the capture, not the evidence: like ``build_id`` among
+#: ``evidence_digest.VOLATILE_CAPTURE_FIELDS``, they stay out of the ADR-062
+#: D16 evidence digest, so two dumps whose extracted facts agree keep one
+#: evidence identity whatever bytes they were read from.
+VOLATILE_CAPTURE_FACTS = frozenset({BINARY_SHA256.name})
+
+
+def evidence_header_extras(
+    header_extras: Mapping[str, Mapping[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Section header extras without :data:`VOLATILE_CAPTURE_FACTS`: what the
+    evidence digest hashes. The writer still persists them; a section left
+    with nothing is dropped, so a capture-only fact alone changes nothing."""
+    out: dict[str, dict[str, Any]] = {}
+    for section, extras in header_extras.items():
+        kept = dict(extras)
+        facts = kept.get("extensions")
+        if isinstance(facts, Mapping):
+            facts = {k: v for k, v in facts.items() if k not in VOLATILE_CAPTURE_FACTS}
+            if facts:
+                kept["extensions"] = facts
+            else:
+                del kept["extensions"]
+        if kept:
+            out[section] = kept
+    return out
+
+
 #: This build's optional extension facts (ADR-062 D19). Add a fact by
 #: declaring it as a module constant above and listing it here.
 EXTENSION_FACTS = ExtensionFactRegistry(
     (
+        BINARY_SHA256,
         CU_STACK_PROTECTOR,
         CXX_CONCEPT_HEADER_SCAN,
         CXX_CONCEPT_CONSTRAINTS,

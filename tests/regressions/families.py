@@ -84,6 +84,9 @@ FAMILIES: dict[str, Family] = {
                 "tests/test_cli_compare_stored_versioned_member_pairing.py",
                 # Operand form x corpus pair differential against live/live.
                 "tests/test_stored_operand_release_differential.py",
+                # A stored dump and the same binary live are one input for
+                # ADR-090's identical-pair exemption (stored/live/older cells).
+                "tests/test_unconfirmed_binary_identity.py",
             ),
         ),
         Family(

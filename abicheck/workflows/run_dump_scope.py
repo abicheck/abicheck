@@ -31,6 +31,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+from ..extract.binary_identity import record_binary_sha256
 from ..extract.dependency_exclusion import (
     dependency_exclusion_scope,
     suppress_dependency_exclusion,
@@ -225,6 +226,10 @@ def wrap_run_dump_with_dependency_scope(
             include_system_declarations, _run_dump_header_roots(bound)
         ):
             snap = uncached_fn(*args, **kwargs)
+        # ADR-090 D1(c): the Tier-1 dump records its binary's identity too.
+        binary = bound.arguments.get("path")
+        if isinstance(binary, (str, Path)):
+            record_binary_sha256(snap, Path(binary))
         return apply_dependency_scope_to_run_dump_result(
             snap, include_system_declarations, bound
         )

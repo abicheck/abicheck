@@ -111,10 +111,92 @@ int main() {
 }
 """
 
+# cxx_more: constructs, derives from and calls through every class, by the
+# old header. A moved base subobject, a thunk offset or a vtable slot shows
+# as a wrong value; a renamed or removed symbol as a load error.
+_MORE_CLASSES = r"""#include <cstdio>
+#include "edit_seed.h"
+struct MyWidget : Widget { int get() const override { return 99; } };
+int main() {
+  Widget w(4);
+  MyWidget mw;
+  Gadget gd = 6L;
+  Sealed s; s.s = 2;
+  Calc c; c.field = 1; c.cache = 2;
+  const Calc& cc = c;
+  std::printf("widget=%d,%d gadget=%ld sealed=%d\n", w.get(), mw.get(), gd.g, s.get());
+  std::printf("calc=%d,%d,%d,%d,%d,%d\n", c.m(1), c.n(1), c.r(), c.g(), cc.g(), c.safe());
+  std::printf("ns=%d,%d tag=%d pick=%d\n", lib::f1(1), lib::f2(1), tagf(2), pick(5));
+  std::printf("tone=%d,%d shade=%d\n", tone_code(T_LO), tone_code(T_HI), shade_code(shade::light));
+  Eq e1{1}, e2{1};
+  Cmp q{3};
+  std::printf("eq=%d cmp=%d\n", (int)(e1 == e2), q.a);
+  return 0;
+}
+"""
+
+_MORE_HIER = r"""#include <cstdio>
+#include "edit_seed.h"
+int main() {
+  Derived d;
+  Base b;
+  Base* pb = &d;
+  VD vd; vd.b = 1; vd.d = 2;
+  VB* pvb = &vd;
+  MI mi; mi.a = 3; mi.b = 4;
+  B2* pb2 = &mi;
+  Plain p; p.a = 5;
+  std::printf("poly=%d,%d vb=%d,%d\n", pb->m(), b.m(), pvb->b, vd.d);
+  std::printf("mi=%d,%d,%d plain=%d sz=%d\n", pb2->f2(), pb2->b, mi.f1(), p.get(),
+              (int)sizeof(MI));
+  return 0;
+}
+"""
+
 _C_SHAPES = {"call": _C_CALL, "alloc": _C_ALLOC, "field": _C_FIELD, "enum": _C_ENUM}
+
+# c_elf: every exported function and object, by the old header. A versioned
+# or retyped symbol, a moved TLS slot or a resized object shows as a load
+# error or a different value.
+_ELF_CALL = r"""#include <stdio.h>
+#include "edit_seed.h"
+int main(void) {
+  int v = 6;
+  union num u;
+  struct flags fl;
+  struct buf b;
+  struct ctx c;
+  u.i = 21;
+  fl.a = 1; fl.b = 2; fl.c = 3;
+  b.n = 4; b.d[0] = 0;
+  c.a = 8; c.b = 9;
+  printf("vget=%d wget=%d soft=%d vsum=%d vfmt=%d\n", vget(2), wget(2), soft(1), vsum(3), vfmt(2, 9));
+  printf("pread=%d pref=%d num=%d flags=%d\n", pread_int(&v), *pref(), num_i(u), flags_b(&fl));
+  printf("buf=%d ctx=%d level=%d,%d counted=%d old=%d\n", buf_n(&b), ctx_a(&c),
+         level_code(LOW), level_code(MID), (int)counted(4), old_api(0, 3));
+  return 0;
+}
+"""
+
+_ELF_DATA = r"""#include <stdio.h>
+#include "edit_seed.h"
+int main(void) {
+  g_obj += 1;
+  g_al += 2;
+  printf("obj=%d al=%d tls=%d slot=%d\n", g_obj, g_al, tls_get(), t_slot);
+  /* g_k is referenced (its removal must fail the load) but not printed: a
+     changed value is the edit's meaning, not a break. */
+  volatile int k = g_k;
+  (void)k;
+  printf("tab=%d,%d banner=%s limit=%d\n", g_tab[0], g_tab[3], banner, EDIT_LIMIT);
+  return 0;
+}
+"""
 
 CONSUMERS: dict[str, dict[str, str]] = {
     "c_core": dict(_C_SHAPES),
     "cxx_classes": {**_C_SHAPES, "derive": _CXX_DERIVE, "modern": _CXX_MODERN},
     "cxx_stdlib": {"stdlib": _CXX_STDLIB},
+    "c_elf": {"call": _ELF_CALL, "data": _ELF_DATA},
+    "cxx_more": {"classes": _MORE_CLASSES, "hier": _MORE_HIER},
 }

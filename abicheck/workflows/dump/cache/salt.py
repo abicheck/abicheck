@@ -55,11 +55,18 @@ from __future__ import annotations
 #: DWARF declaration names, ``Function.is_variadic``, and plain-char
 #: signedness flags. A warm entry would carry none of them.
 #:
-#: v42: a Clang header dump reads each ordinary enum's representation from a
-#: compiler probe (was assumed ``int``) and records scoped record/enum
-#: identities for parameter and return slots. A warm entry would keep the
-#: assumed ``int`` and lack the slot identities.
-SNAPSHOT_CACHE_VERSION: str = "42"
+#: v45 (v42-v44 are left to changes in flight at the time): a dump of a
+#: binary file records the binary's SHA-256 (``binary_sha256``, ADR-090
+#: D1(c)). A warm entry would carry none, so a stored dump of it could never
+#: be proven the same input as the binary.
+#:
+#: v46: a Clang header dump reads each ordinary enum's representation from a
+#: compiler probe (was assumed ``int``), records scoped record/enum identities
+#: for parameter and return slots, and its built-in layout pass follows the
+#: recorded C/C++ mode. A warm v45 entry would keep the assumed ``int`` and
+#: lack those facts; a v42 entry from this change's earlier branch would lack
+#: v45's ``binary_sha256``.
+SNAPSHOT_CACHE_VERSION: str = "46"
 # v35: header-derived snapshots now carry public_header_identifiers (schema
 # v55, extract/public_header_identifiers.py). The key also folds in the
 # snapshot schema version from this version on, so the next schema bump

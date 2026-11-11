@@ -149,11 +149,8 @@ class AbiSnapshot:
     # — see ``fact_provenance`` below for which specific facts were actually
     # castxml-sourced on this merged snapshot, since a whole-snapshot producer
     # tag alone can't tell a caller that.
-    # Keyword-only (Codex review, PR #582): both this and the next field were
-    # inserted ahead of several existing positional fields (platform,
-    # language_profile, ...) — without kw_only, an existing positional
-    # caller shifts silently, e.g. binding "elf" to ast_producer instead of
-    # platform, corrupting provenance rather than failing loudly.
+    # Keyword-only (Codex review, PR #582): positional fields follow, so a
+    # positional caller would bind "elf" here instead of to platform.
     ast_producer: str | None = field(default=None, kw_only=True)
 
     # Resolved L2 executable/compiler identity used to create the header AST.
@@ -196,6 +193,9 @@ class AbiSnapshot:
         default=None, kw_only=True
     )
     cu_stack_protector: dict[str, int] | None = field(default=None, kw_only=True)
+    # SHA-256 of the binary's bytes this snapshot was dumped from (ADR-090 D1(c)
+    # identity; extension fact ``abicheck.binary_sha256``). None: not recorded.
+    binary_sha256: str | None = field(default=None, kw_only=True)
 
     # CastXML version-gate outcome (schema v13, ``castxml_policy.py``). None on
     # snapshots not produced by a version-gated CastXML L2 scan (older

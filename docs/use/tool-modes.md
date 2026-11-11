@@ -438,7 +438,7 @@ Compiler references: [CastXML compiler emulation](https://github.com/CastXML/Cas
 [Clang compatibility](https://clang.llvm.org/docs/UsersManual.html), and
 [oneAPI DPC++ compilation modes](https://intel.github.io/llvm/UsersManual.html).
 
-Extractor generation 51 corrects ordinary Clang enum representations and adds
+Extractor generation 52 corrects ordinary Clang enum representations and adds
 function-slot type identities. Re-dump older Clang baselines when using those
 facts: a stored `int` does not reveal whether the original enum was packed,
 and missing identities cannot be recovered safely from a bare type name.

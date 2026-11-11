@@ -554,17 +554,18 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "recorded and simply lacks the added records and flags"
     ),
     51: GenerationSpellingChange(
-        "Clang ordinary enum representations are obtained from a compiler probe "
-        "instead of assuming int; Clang parameter/return slots record scoped "
-        "record and enum identities through aliases and namespace imports, "
-        "and C++ extern-C declarations at noninitial columns select C++ mode. "
-        "The built-in Clang record-layout pass follows the primary parse's "
-        "recorded C/C++ mode, so a header-only (no DWARF) dump of C++ headers "
-        "reached through a .h now carries record sizes it previously lacked. "
-        "An older stored int cannot reveal its original enum representation, "
-        "and absent slot identities cannot be reconstructed from bare names, "
-        "so no load-time rewrite is sound. Re-dump old Clang baselines for "
-        "these corrected facts; existing type spellings remain unchanged."
+        "every dump of a binary file records the SHA-256 of the binary's bytes "
+        "(the abicheck.binary_sha256 extension fact on the binary section, "
+        "hashed through a GNU ld linker script to its target like a live "
+        "operand), so the identical-input exemption can prove a stored dump and "
+        "a live binary one input. No type or name spelling changes, so no "
+        "rewrite is needed "
+        "-- an older snapshot reads as no recorded identity, which proves no "
+        "identical-input exemption"
+    ),
+    52: GenerationSpellingChange(
+        "Clang ordinary enum representations come from a compiler probe instead of assuming int; Clang parameter/return slots record scoped record/enum identities through aliases and namespace imports; extern-C at a noninitial column selects C++ mode; "
+        "the built-in Clang layout pass follows the primary parse's recorded C/C++ mode, so a no-DWARF dump of C++ headers reached through a .h now carries record sizes. An older int cannot reveal the original representation and absent identities cannot be rebuilt from names: no sound load-time rewrite; re-dump old Clang baselines. Type spellings are unchanged."
     ),
 }
 
