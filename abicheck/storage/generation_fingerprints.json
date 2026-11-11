@@ -4,7 +4,7 @@
       "abicheck/btf_metadata.py": "614321e6140b32e7518deb3991dc9b9421107688c952542808ec4da88a17dc73",
       "abicheck/ctf_metadata.py": "42d3f588c6c4567c2a9d43a3ef5b886a753c37dd5357a4199d81d7ffc60d2109",
       "abicheck/dumper.py": "7cfc03dce4b9968a259d5eba7ba7cf7d3008eb0422a60defd7c4743b88b330a8",
-      "abicheck/dumper_clang.py": "b1b0cc1103993f4b772b40168a83783f4b7823f93f5f3728516a5114db89155a",
+      "abicheck/dumper_clang.py": "6fede49603c1c50db75cb1d2579adb0da9ff607631090ed47553bb6de66ef478",
       "abicheck/dwarf_advanced.py": "e7dc4a394915381a0c67081f14b8301d63677c5c63d1feb4e95c6c3573c111e8",
       "abicheck/dwarf_metadata.py": "a0621cde6559a0395b00d08aa25cc4cbff74b1121e2083e424e472c44b985512",
       "abicheck/dwarf_presence.py": "7e73580ec7a02fdf24e3815cb89e42aa6fe00e46e8cda6b7fe9d547f06ac3f06",
@@ -222,9 +222,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "6898fde9fdff2c9ab4a14c919f1f21ee517d2668676707327264eda88c037369",
-    "generation": 53,
-    "reason": "opt-in native GCC header backend (ADR-092): a new producer for a request that was previously refused (frontend gcc); castxml/clang/hybrid extraction of the same input records the same facts; backend registry moved out of dumper.py unchanged"
+    "fingerprint": "1b2dd0514c7043a4451335b1567023153340fb701bb2a86747c8403746a82470",
+    "generation": 54,
+    "reason": "bumped to 54 for a semantic change"
   },
   "resolver": {
     "files": {

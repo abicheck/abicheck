@@ -217,8 +217,6 @@
     "undocumented_export_ratio_increased",
     "uninstantiated_template_removed",
     "union_field_type_changed",
-    "var_access_changed",
-    "var_access_widened",
     "var_added_elf_only",
     "var_deprecated_added",
     "var_deprecated_removed",
