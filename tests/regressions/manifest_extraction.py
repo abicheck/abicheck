@@ -981,6 +981,58 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
     ),
     BugClass(
+        id="extraction.variable_alignment_misread_as_declared",
+        invariant=(
+            "A variable's alignment is recorded as declared (Fact PRESENT) only "
+            "where the evidence states it, and a value that only bounds it is "
+            "recorded PARTIAL and never vetoes an address reduction: castxml, "
+            "which writes no align on a Variable or Typedef, records the "
+            "type's natural alignment as a lower bound wherever an alignment "
+            "specifier can apply; a DWARF 5 variable without DW_AT_alignment "
+            "records its type's default (DWARF states it), as a lower bound "
+            "on a GCC declaration/definition split; DWARF 4 and records stay "
+            "unknown. A declared alignment change is then reported at every "
+            "level whose evidence states declarations, and an unchanged one "
+            "never is."
+        ),
+        # Found by the generated edit corpus (#1958): a dropped aligned(64)
+        # read NO_CHANGE under castxml headers, a raised one under DWARF.
+        fixed_by=(1958,),
+        seed_tests=(
+            "tests/test_variable_declared_alignment.py",
+            "tests/test_variable_declared_alignment_integration.py",
+            "tests/test_address_alignment_bound.py",
+            "tests/test_rebuild_toolchain_drift_integration.py",
+        ),
+        axes={
+            "compiler": ("gcc", "clang"),
+            "evidence": ("binary", "dwarf", "headers"),
+            "frontend": ("castxml", "clang"),
+            "declared_alignment": ("none", "16", "64"),
+            "dwarf_version": ("4", "5"),
+            "die_form": ("standalone", "completes a declaration", "declaration"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "Under castxml headers a specifier is read only as a lower "
+                    "bound: a dropped one is reported but demoted with the "
+                    "unknown-requirement rule, and a raised one reads "
+                    "NO_CHANGE."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+            KnownGap(
+                description=(
+                    "GCC writes a specifier spelled only on a definition that "
+                    "completes a declaration on neither DIE, so DWARF records "
+                    "the default as a lower bound and a reduction is demoted."
+                ),
+                reference="docs/contribute/known-gaps.md",
+            ),
+        ),
+    ),
+    BugClass(
         id="extraction.tool_probe_answer_depends_on_host_load",
         invariant=(
             "An external-tool call whose answer is recorded (a compiler's "

@@ -217,6 +217,10 @@ ONLY_BINARY_DUMP: dict[str, str] = {
     "param_pointer_level_changed": _DEBUG_DECLARATIONS,
     "return_pointer_level_changed": _DEBUG_DECLARATIONS,
     "var_type_changed": _DEBUG_DECLARATIONS,
+    # Since extractor generation 51 a binary-only dump reads a variable's
+    # alignment from its debug record and the placement address bounds it
+    # (#1982); a header-built snapshot's projection keeps only the export.
+    "var_alignment_changed": _DEBUG_DECLARATIONS,
     "var_became_const": _DEBUG_DECLARATIONS,
     "var_lost_const": _DEBUG_DECLARATIONS,
     "typedef_base_changed": _DEBUG_DECLARATIONS,

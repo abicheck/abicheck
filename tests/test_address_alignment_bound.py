@@ -34,10 +34,12 @@ from abicheck.model.change import Change
 from abicheck.model.change_catalog.kinds import ChangeKind
 from abicheck.model.change_catalog.registry import Verdict
 from abicheck.model.declarations import Variable
+from abicheck.model.fact import Fact
 from abicheck.model.snapshot import AbiSnapshot
 from abicheck.policy.address_alignment_bound import (
     DECLARED_STILL_MET_RULE,
     UNDECLARED_RULE,
+    UNKNOWN_DECLARATION_RULE,
     bound_address_alignment_reductions,
 )
 
@@ -120,3 +122,24 @@ def test_other_findings_and_prior_modulations_are_left_alone() -> None:
     assert prior.modulation_rule == "user-policy"
     assert other.effective_verdict is None
     assert unparseable.effective_verdict is None
+
+
+@pytest.mark.parametrize(
+    ("declared", "old", "new"), [c for c in _CELLS if c[0] is not None]
+)
+def test_a_lower_bound_never_stands_in_for_a_declared_requirement(
+    declared, old, new
+) -> None:
+    """A PARTIAL alignment (castxml's natural alignment where a specifier can
+    apply, a DWARF default GCC may have written for a definition-only
+    specifier) is a lower bound: it neither keeps nor vetoes the reduction,
+    and the demotion says the requirement is unknown, not absent."""
+    snap = _snap(None)
+    var = snap.declarations.variables[0]
+    var.alignment_bits = declared * 8
+    var.alignment_bits_fact = Fact.partial(declared * 8, "lower bound", producer="t")
+    change = _change(old, new)
+    bound_address_alignment_reductions([change], snap)
+    assert change.kind is ChangeKind.EXPORTED_OBJECT_ALIGNMENT_REDUCED
+    assert change.effective_verdict is Verdict.COMPATIBLE
+    assert change.modulation_rule == UNKNOWN_DECLARATION_RULE

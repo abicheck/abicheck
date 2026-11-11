@@ -16,14 +16,14 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 ## Headline
 
 - Total kinds: **428**
-- Kinds with at least one real source: **189**
-- Kinds per source: catalog 160, field_shapes 9, integration 71
+- Kinds with at least one real source: **190**
+- Kinds per source: catalog 160, field_shapes 9, integration 73
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
 | L0 | 130 | 72 |
 | L1 | 62 | 7 |
-| L2 | 75 | 40 |
+| L2 | 75 | 39 |
 | L3 | 15 | 5 |
 | L4 | 10 | 2 |
 | L5 | 15 | 5 |
@@ -89,7 +89,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `executable_stack_removed` | COMPATIBLE | 2 | 0 | 0 |
 | `experimental_graduated` | COMPATIBLE | 1 | 0 | 0 |
 | `experimental_removed_without_replacement` | API_BREAK | 1 | 0 | 0 |
-| `exported_object_alignment_reduced` | RISK | 0 | 0 | 3 |
+| `exported_object_alignment_reduced` | RISK | 0 | 0 | 5 |
 | `func_added` | COMPATIBLE | 9 | 0 | 8 |
 | `func_added_elf_only` | COMPATIBLE | 0 | 0 | 0 |
 | `func_export_added` | COMPATIBLE | 2 | 0 | 0 |
@@ -251,7 +251,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `used_reserved_field` | COMPATIBLE | 1 | 0 | 0 |
 | `value_abi_trait_changed` | BREAKING | 1 | 0 | 0 |
 | `var_became_const` | BREAKING | 1 | 0 | 0 |
-| `var_type_changed` | BREAKING | 1 | 0 | 0 |
+| `var_type_changed` | BREAKING | 1 | 0 | 1 |
 | `virtual_base_offset_changed` | BREAKING | 0 | 0 | 0 |
 | `vptr_introduced` | BREAKING | 1 | 0 | 0 |
 | `wchar_model_changed` | RISK | 0 | 0 | 1 |
@@ -332,7 +332,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `type_deprecated_added` | COMPATIBLE | 0 | 0 | 0 |
 | `type_deprecated_removed` | COMPATIBLE | 0 | 0 | 0 |
 | `type_lost_abstract` | COMPATIBLE | 0 | 0 | 0 |
-| `var_alignment_changed` | BREAKING | 0 | 0 | 0 |
+| `var_alignment_changed` | BREAKING | 0 | 0 | 2 |
 | `var_deprecated_added` | COMPATIBLE | 0 | 0 | 0 |
 | `var_deprecated_removed` | COMPATIBLE | 0 | 0 | 0 |
 
