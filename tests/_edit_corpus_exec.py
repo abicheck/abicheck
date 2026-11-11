@@ -171,13 +171,17 @@ def _field_names(body: str) -> list[str]:
     (``alignas(...)``, ``_Alignas(...)``) are stripped first, so a specified
     field stays a field. A function-pointer member (``int (*cb)(int)``) is a
     field named by its declarator; any other ``(`` left is a member function.
-    A bit-field is skipped (``offsetof`` is ill-formed on it).
+    A bit-field and a static data member are skipped (``offsetof`` is
+    ill-formed on both); an access label (``private:``) is not a declaration.
     """
     names = []
     for decl in body.split(";"):
         decl = _ATTRIBUTE.sub("", decl)
         decl = re.sub(r"\[\[.*?\]\]", "", decl)
         decl = re.sub(r"\b(?:alignas|_Alignas)\s*\([^()]*\)", "", decl)
+        decl = re.sub(r"\b(?:public|protected|private)\s*:(?!:)", "", decl)
+        if re.search(r"\bstatic\b", decl):
+            continue  # a static data member: not part of the layout
         pointer = _FUNC_POINTER.search(decl)
         if pointer:
             names.append(pointer.group(1))

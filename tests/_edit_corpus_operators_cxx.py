@@ -414,4 +414,79 @@ _LINKAGE = (
     ),
 )
 
-CXX_OPERATORS: tuple[EditOp, ...] = (*_SPECIFIERS, *_MEMBERS, *_LINKAGE)
+_QUALIFIERS = (
+    _op(
+        "field_lost_mutable",
+        ("x.quals",),
+        _replace("x.quals", "  mutable int hits;\n", "  int hits;\n"),
+        "code that writes q.hits through a const Quals no longer compiles; "
+        "the layout is unchanged",
+        expected=frozenset({"FIELD_LOST_MUTABLE"}),
+        **_SOURCE_BREAK,
+        **_HEADERS,
+    ),
+    _op(
+        "field_lost_const",
+        ("x.quals",),
+        _replace("x.quals", "  const int k;\n", "  int k;\n"),
+        "dropping const on a member only permits more writes; size, offsets "
+        "and mangled names are unchanged",
+        expected=frozenset({"FIELD_LOST_CONST"}),
+        **_COMPAT_ONLY,
+        **_HEADERS,
+    ),
+    _op(
+        "field_lost_volatile",
+        ("x.quals",),
+        _replace("x.quals", "  volatile int reg;\n", "  int reg;\n"),
+        "the layout is unchanged, but rebuilt code may cache or elide reads "
+        "of reg that the library or hardware relies on, a risk",
+        expected=frozenset({"FIELD_LOST_VOLATILE"}),
+        **_RISK,
+        **_HEADERS,
+    ),
+    _op(
+        "static_member_access_narrowed",
+        ("x.quals",),
+        _replace(
+            "x.quals",
+            "  static int count;\n",
+            "private:\n  static int count;\npublic:\n",
+        ),
+        "outside uses of Quals::count no longer compile; its symbol stays exported",
+        expected=frozenset({"VAR_ACCESS_CHANGED"}),
+        **_SOURCE_BREAK,
+        **_HEADERS,
+    ),
+    _op(
+        "type_lost_abstract",
+        ("x.shape",),
+        _replace(
+            "x.shape",
+            "virtual int area() = 0;",
+            "virtual int area();",
+            source=(
+                "Shape::~Shape() {}",
+                "Shape::~Shape() {}\nint Shape::area() { return 0; }",
+            ),
+        ),
+        "Shape becomes instantiable; the vtable keeps its shape (the pure "
+        "slot now names Shape::area) and no existing use breaks",
+        expected=frozenset({"TYPE_LOST_ABSTRACT"}),
+        verdict_min="COMPATIBLE",
+        verdict_max="COMPATIBLE_WITH_RISK",
+        **_HEADERS,
+    ),
+    _op(
+        "override_specifier_removed",
+        ("x.ovr",),
+        _replace("x.ovr", "int h() override;", "int h();"),
+        "the vtable is unchanged, but a later signature drift in OBase::h "
+        "would silently stop ODer::h overriding it, a risk",
+        expected=frozenset({"FUNC_OVERRIDE_SPECIFIER_REMOVED"}),
+        **_RISK,
+        **_HEADERS,
+    ),
+)
+
+CXX_OPERATORS: tuple[EditOp, ...] = (*_SPECIFIERS, *_MEMBERS, *_LINKAGE, *_QUALIFIERS)

@@ -168,6 +168,9 @@ ROLE_CONSTRUCT: dict[str, str] = {
     "x.cmp": "hidden_friend",
     "x.tone": "enum",
     "x.shade": "enum_class",
+    "x.quals": "class",
+    "x.shape": "class_virtual",
+    "x.ovr": "class_virtual",
     "x": "function",
 }
 

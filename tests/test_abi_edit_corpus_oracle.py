@@ -849,11 +849,17 @@ def test_a_std_seed_needs_one_cxx_library_on_both_sides(
         ("void (* handler )(void *, int)", ["handler"]),
         ("char tag[8]", ["tag"]),
         ("[[deprecated]] int legacy", ["legacy"]),
+        ("private:\n  int hidden", ["hidden"]),
+        ("protected: mutable int hits", ["hits"]),
+        ("public:\n  volatile int reg", ["reg"]),
         # Not fields offsetof can take.
         ("int z()", []),
         ("virtual int z() = 0", []),
         ("int b : 4", []),
         ("alignas(4) int b : 4", []),
+        ("static int count", []),
+        ("private:\n  static int count", []),
+        ("static const int k", []),
     ],
     ids=str,
 )
