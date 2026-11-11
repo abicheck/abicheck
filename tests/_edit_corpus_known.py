@@ -116,6 +116,21 @@ KNOWN: tuple[Known, ...] = (
         verdicts=frozenset({"BREAKING"}),
     ),
     Known(
+        "type_lost_abstract",
+        frozenset({"cxx_more"}),
+        "false-positive",
+        # The reverse of virtual_become_pure: GCC's DWARF marks Shape::area
+        # DW_VIRTUALITY_virtual while it is still pure, so the old snapshot
+        # has no exported area and defining it reads as a new virtual; clang
+        # marks it pure and reads FUNC_ADDED (COMPATIBLE). Consumers still run.
+        lambda c: c.evidence == "dwarf" and c.producer.family == "gcc",
+        "from a GCC-built DWARF snapshot defining a pure virtual reads "
+        "virtual_method_added (BREAKING); the vtable keeps its slot count",
+        GAP_DWARF_PURE,
+        issues=frozenset({"stronger-than:COMPATIBLE_WITH_RISK"}),
+        verdicts=frozenset({"BREAKING"}),
+    ),
+    Known(
         "rebuild_optimized",
         frozenset({"cxx_stdlib"}),
         "false-positive",
