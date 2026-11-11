@@ -680,7 +680,13 @@ for _key, _ids in (
     ("F5", _F5),
     # Found by the compatible-rebuild corpus sweep (F6's own harness lists
     # its integration matrix); an inferred observation gated as the fact.
-    ("F6", ("evidence.bound_read_as_measured_value",)),
+    (
+        "F6",
+        (
+            "evidence.bound_read_as_measured_value",
+            "ownership.std_customization_point_over_runtime_types_read_as_users",
+        ),
+    ),
     ("F7", _F7),
     ("F8", _F8),
     ("F9", _F9),

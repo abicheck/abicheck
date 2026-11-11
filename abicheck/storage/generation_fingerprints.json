@@ -166,7 +166,7 @@
       "abicheck/extract/headers/toolchain.py": "9dfc6f0e091a65d53b62a37c59a68394331f7901b469a30253ae6c0be37ebe3a",
       "abicheck/extract/library_export_facts.py": "02f4f9bdc8ed4ec7215c3f40e4d4183e695d304c44f0ccaa44ec4cd18b72a927",
       "abicheck/extract/macho_build_signals.py": "c277bfdd55f26aae61af66c8fa6c5cdc5fa45acc49a3ae513af5899417db88bb",
-      "abicheck/extract/mangled_foreign_template_args.py": "58892490cdf5173d3e562a8f63abe3b55371beb30aaacbf79d9aecfcd08ca8bc",
+      "abicheck/extract/mangled_foreign_template_args.py": "0175f69f2f2aaf9ac86f8277422bccde1ad29dd7f2c8520c2e0329df65b21e7e",
       "abicheck/extract/manifest_semantic_ir.py": "9d8a6ddaa619a7d4b214bbeab5c2c0dfef681a6fd9dffd004760b19a62da3b15",
       "abicheck/extract/member_identity.py": "9045a480f6715aa8e3242b147c88eed503566487a49b7ecc6c57209aabbab102",
       "abicheck/extract/metadata_attach.py": "a4d2cba939ecf96036f0c974e723c15e68699d9f5ce847c8e9f8b04f0440fa6d",
@@ -189,7 +189,7 @@
       "abicheck/extract/semantic_normalizer.py": "ddbbba743b7630a47494ae298468357ff1187b9812d2affa4a3bcbdad4f91f60",
       "abicheck/extract/semantic_normalizer_dwarf.py": "d092c309a8e349f9b699e5931456188485670ef05a8048783496d915fe7a7a83",
       "abicheck/extract/semantic_normalizer_template_args.py": "9e07ae6b02395411ad22cbd02e2acbe3f9d70b5a33283b606a9296ba9d55b1b2",
-      "abicheck/extract/stdlib_local_origin.py": "e44bb8a32af5c09aa91e396a368b15ab4cd3fb93b614bc1b502a5d9787a206dc",
+      "abicheck/extract/stdlib_local_origin.py": "c489a6ff7e3e66f09f9f50835d7a2e909bb77b8c86ea7571e15d1b15bee216a7",
       "abicheck/extract/surface_fact_producers.py": "3a6c9b3a355342de1f4658a2154f9769dde9c1165dd7b90aba7d449f5f6b7cda",
       "abicheck/extract/system_header_layout.py": "3784ee2f9386949eb3db9e4d77f9b92a5211106d72e4de1d004c9ea7f7d1a0cd",
       "abicheck/extract/target_platform.py": "d2f2774c26bd12eb623a64883c2611782cac8f3d84da51248a969bd1f288e739",
@@ -210,9 +210,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "8528c6f61b0b4b669227f2fc99300331f06a4d609d1608be1bcbedad2f88124b",
+    "fingerprint": "6021bbd8b1bcbbf676e6318b6b5b88feb91e74ef9b18a18bfdbcd0d826f7862c",
     "generation": 51,
-    "reason": "bumped to 51 for a semantic change"
+    "reason": "extract/ std-scope scanner gains a tri-state reading and the customization-point owner uses it; both are read only at compare time, so dumped facts are unchanged"
   },
   "resolver": {
     "files": {
