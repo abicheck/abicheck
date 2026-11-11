@@ -35,6 +35,7 @@ The ``_GLIBCXX_USE_CXX11_ABI=0`` rebuild under headers is compared and
 reported as ``glibcxx_dual_abi_changed`` (exit 4, ADR-050 amendment
 2026-11-09); adding another macro difference to it keeps the
 ``not_comparable`` refusal (exit 16), whose reason names both.
+
 """
 
 from __future__ import annotations
@@ -137,13 +138,34 @@ def _not_compatible(result) -> list[tuple[str, str]]:
     return out
 
 
+# Both libstdc++ runtime ABIs, at C++17 and C++20 (a later -std overrides the
+# default). From C++20 the old (COW) std::string's -O0 build also exports a
+# weak std::less<const char*>::operator(), the implementation's own
+# specialization, which read as the library's (RISK) before the
+# customization-point owner accepted pointers to builtins and standard types.
+_OLD_ABI = "-D_GLIBCXX_USE_CXX11_ABI=0"
+_RUNTIME_ABI = ((), ("-std=c++20",), (_OLD_ABI,), ("-std=c++20", _OLD_ABI))
+
+
+@pytest.mark.parametrize(
+    "abi", _RUNTIME_ABI, ids=("c++17", "c++20", "c++17-abi0", "c++20-abi0")
+)
 @pytest.mark.parametrize("evidence", _EVIDENCE)
 @pytest.mark.parametrize("cxx", _COMPILERS)
-def test_optimization_rebuild_reads_compatible(tmp_path, cxx, evidence):
+def test_optimization_rebuild_reads_compatible(tmp_path, cxx, evidence, abi):
     cxx = _driver(cxx)
     debug = evidence != "binary"
-    old = _snap(_build(tmp_path, "old", cxx, ["-O0"], _SOURCE, debug), evidence, [])
-    new = _snap(_build(tmp_path, "new", cxx, ["-O2"], _SOURCE, debug), evidence, [])
+    defines = list(abi)
+    old = _snap(
+        _build(tmp_path, "old", cxx, ["-O0", *defines], _SOURCE, debug),
+        evidence,
+        defines,
+    )
+    new = _snap(
+        _build(tmp_path, "new", cxx, ["-O2", *defines], _SOURCE, debug),
+        evidence,
+        defines,
+    )
     result = compare(old, new)
     residue = _not_compatible(result)
     # Only the stack-canary observation may remain, and only binary only, where

@@ -622,6 +622,7 @@ tests/test_typedef_cutover.py
 tests/test_typedef_dedup.py
 tests/test_typedef_qualified_collision.py
 tests/test_typedef_version_sentinel.py
+tests/test_unconfirmed_binary_identity.py
 tests/test_unconfirmed_compatibility.py
 tests/test_unconfirmed_route_coverage.py
 tests/test_undeclared_export_shrink.py

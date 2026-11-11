@@ -37,7 +37,11 @@ from ..name_classification import (
     _USER_SPECIALIZABLE_STD_TEMPLATE_RE,
     is_stdlib_local_name_symbol,
 )
-from .mangled_foreign_template_args import has_foreign_template_argument_in_local_name
+from .mangled_foreign_template_args import (
+    has_foreign_template_argument_in_local_name,
+    local_name_names_only_runtime_types,
+    names_only_runtime_types,
+)
 
 __all__ = [
     "find_cxx_stdlib",
@@ -61,45 +65,21 @@ _USER_SPECIALIZABLE_STD_MEMBER_RE = re.compile(
 def is_user_specializable_std_symbol(name: str) -> bool:
     """Whether *name* is a member, local static or guard of a standard
     customization-point template specialization (``std::hash<T>`` and the
-    others in ``name_classification``'s list).
-
-    Such a symbol nominally lives in namespace ``std``, but its body is
-    user-authored, so it is the library's own ABI and never the runtime's.
-    """
-    match = _USER_SPECIALIZABLE_STD_TEMPLATE_RE.match(
-        name
-    ) or _USER_SPECIALIZABLE_STD_MEMBER_RE.match(name)
-    return match is not None and not _builtin_arguments_only(name, match.end())
-
-
-#: ``<builtin-type>`` codes (Itanium ABI 5.1.5): one letter, or ``D`` plus one.
-_BUILTIN_TYPE_CODES = frozenset("abcdefghijlmnostvwxyz")
-_BUILTIN_D_CODES = frozenset("defhinsu")
-
-
-def _builtin_arguments_only(name: str, start: int) -> bool:
-    """Whether the template-argument list opening at *start* (just past its
-    ``I``) holds builtin types only, up to its closing ``E``.
+    others in ``name_classification``'s list) over a program-defined type.
 
     A program may specialize a standard template only for a program-defined
-    type ([namespace.std]/2), so ``std::char_traits<char>`` or
-    ``std::hash<int>`` is the implementation's own specialization, never the
-    library's. Anything this does not read as a builtin (a name, a
-    substitution, a qualifier) answers ``False``, keeping the customization
-    point user-owned.
+    type ([namespace.std]/2), so a specialization whose name involves only
+    builtins, their pointers/references/cv-qualifications and standard types
+    (``std::char_traits<char>``, ``std::less<const char*>``,
+    ``std::hash<std::string>``) is the implementation's own, never the
+    library's. A program-defined type anywhere in the name, or a name the
+    scanner cannot read to its end, keeps the symbol user-owned: its body is
+    user-authored, so it is the library's own ABI.
     """
-    i, count = start, 0
-    while i < len(name):
-        ch = name[i]
-        if ch == "E":
-            return count > 0
-        if ch in _BUILTIN_TYPE_CODES:
-            i += 1
-        elif ch == "D" and i + 1 < len(name) and name[i + 1] in _BUILTIN_D_CODES:
-            i += 2
-        else:
-            return False
-        count += 1
+    if _USER_SPECIALIZABLE_STD_TEMPLATE_RE.match(name):
+        return not local_name_names_only_runtime_types(name)
+    if _USER_SPECIALIZABLE_STD_MEMBER_RE.match(name):
+        return not names_only_runtime_types(name)
     return False
 
 
