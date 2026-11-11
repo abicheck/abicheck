@@ -171,6 +171,7 @@ ROLE_CONSTRUCT: dict[str, str] = {
     "x.quals": "class",
     "x.shape": "class_virtual",
     "x.ovr": "class_virtual",
+    "x.defs": "class",
     "x": "function",
 }
 

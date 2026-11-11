@@ -489,4 +489,109 @@ _QUALIFIERS = (
     ),
 )
 
-CXX_OPERATORS: tuple[EditOp, ...] = (*_SPECIFIERS, *_MEMBERS, *_LINKAGE, *_QUALIFIERS)
+_DEFAULTS = (
+    _op(
+        "field_default_initializer_changed",
+        ("x.defs",),
+        _replace("x.defs", "int depth = 4;", "int depth = 8;"),
+        "a default member initializer is inlined into the caller's own "
+        "constructor code: old binaries keep 4, rebuilt ones get 8; layout "
+        "and symbols are unchanged",
+        expected=frozenset({"FIELD_DEFAULT_INITIALIZER_CHANGED"}),
+        **_COMPAT_ONLY,
+        **_HEADERS,
+    ),
+    _op(
+        "field_default_initializer_removed",
+        ("x.defs",),
+        _replace("x.defs", "int mode = 1;", "int mode;"),
+        "rebuilt callers that relied on the initializer now read an "
+        "indeterminate mode, a behaviour risk; the layout is unchanged",
+        expected=frozenset({"FIELD_DEFAULT_INITIALIZER_REMOVED"}),
+        **_RISK,
+        **_HEADERS,
+    ),
+    _op(
+        "field_deprecated_removed",
+        ("x.defs",),
+        _replace("x.defs", "[[deprecated]] int legacy;", "int legacy;"),
+        "dropping [[deprecated]] only silences a warning",
+        expected=frozenset({"FIELD_DEPRECATED_REMOVED"}),
+        **_COMPAT_ONLY,
+        **_HEADERS,
+    ),
+    _op(
+        "static_member_access_widened",
+        ("x.defs",),
+        _replace(
+            "x.defs",
+            "private:\n  static int total;\npublic:\n",
+            "  static int total;\n",
+        ),
+        "making Cfg::total public only lets more code name it",
+        expected=frozenset({"VAR_ACCESS_WIDENED"}),
+        **_COMPAT_ONLY,
+        **_HEADERS,
+    ),
+    _op(
+        "param_default_value_changed",
+        ("x.defs",),
+        _replace(
+            "x.defs", "int tune(int a, int b = 3);", "int tune(int a, int b = 7);"
+        ),
+        "a default argument is filled in at the call site: old binaries keep "
+        "passing 3, rebuilt callers pass 7; the symbol is unchanged",
+        expected=frozenset({"PARAM_DEFAULT_VALUE_CHANGED"}),
+        **_COMPAT_ONLY,
+        **_HEADERS,
+    ),
+    _op(
+        "param_default_value_removed",
+        ("x.defs",),
+        _replace(
+            "x.defs", "int shrink(int a, int b = 5);", "int shrink(int a, int b);"
+        ),
+        "shrink(1) no longer compiles; old binaries already pass both arguments",
+        expected=frozenset({"PARAM_DEFAULT_VALUE_REMOVED"}),
+        **_SOURCE_BREAK,
+        **_HEADERS,
+    ),
+    _op(
+        "param_restrict_removed",
+        ("x.defs",),
+        _replace(
+            "x.defs",
+            "int fill(int* __restrict p, int n);",
+            "int fill(int* p, int n);",
+            source=("int fill(int* __restrict p, int n)", "int fill(int* p, int n)"),
+        ),
+        "a top-level restrict on a parameter is not part of the function type "
+        "or its mangled name; only the aliasing promise changes",
+        expected=frozenset({"PARAM_RESTRICT_CHANGED"}),
+        **_COMPAT_ONLY,
+        **_HEADERS,
+    ),
+    _op(
+        "extern_c_linkage_removed",
+        ("x.defs",),
+        _replace(
+            "x.defs",
+            'extern "C" int cfun(int a);',
+            "int cfun(int a);",
+            source=('extern "C" int cfun(int a)', "int cfun(int a)"),
+        ),
+        "the export cfun becomes _Z4cfuni: every binary that linked the C name "
+        "fails to load",
+        expected=frozenset({"FUNC_LANGUAGE_LINKAGE_CHANGED"}),
+        rules=(_binary_mangled("FUNC_LANGUAGE_LINKAGE_CHANGED"),),
+        **_BINARY,
+    ),
+)
+
+CXX_OPERATORS: tuple[EditOp, ...] = (
+    *_SPECIFIERS,
+    *_MEMBERS,
+    *_LINKAGE,
+    *_QUALIFIERS,
+    *_DEFAULTS,
+)

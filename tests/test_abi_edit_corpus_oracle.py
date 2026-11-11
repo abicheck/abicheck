@@ -852,6 +852,9 @@ def test_a_std_seed_needs_one_cxx_library_on_both_sides(
         ("private:\n  int hidden", ["hidden"]),
         ("protected: mutable int hits", ["hits"]),
         ("public:\n  volatile int reg", ["reg"]),
+        ("int depth = 4", ["depth"]),
+        ("int mode{1}", ["mode"]),
+        ("char tag[8] = {0}", ["tag"]),
         # Not fields offsetof can take.
         ("int z()", []),
         ("virtual int z() = 0", []),
