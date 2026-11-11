@@ -16,14 +16,14 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 ## Headline
 
 - Total kinds: **428**
-- Kinds with at least one real source: **198**
-- Kinds per source: catalog 160, field_shapes 9, integration 81
+- Kinds with at least one real source: **199**
+- Kinds per source: catalog 160, field_shapes 9, integration 82
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
 | L0 | 130 | 72 |
 | L1 | 62 | 7 |
-| L2 | 75 | 33 |
+| L2 | 75 | 32 |
 | L3 | 15 | 5 |
 | L4 | 10 | 2 |
 | L5 | 15 | 5 |
@@ -304,7 +304,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `param_pointee_qualifier_added` | RISK | 1 | 0 | 0 |
 | `param_pointee_qualifier_changed` | API_BREAK | 0 | 0 | 0 |
 | `param_restrict_added` | RISK | 1 | 0 | 0 |
-| `param_restrict_changed` | COMPATIBLE | 0 | 0 | 0 |
+| `param_restrict_changed` | COMPATIBLE | 0 | 0 | 2 |
 | `private_header_leak` | RISK | 3 | 0 | 0 |
 | `public_consumer_compiled_dependency_changed` | RISK | 1 | 0 | 0 |
 | `public_not_exported` | RISK | 1 | 0 | 5 |

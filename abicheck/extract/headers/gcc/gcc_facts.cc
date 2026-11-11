@@ -152,10 +152,12 @@ static void decl(void *data,void *) {
     tree ft=TREE_TYPE(d); abi("return_abi",TREE_TYPE(ft));fprintf(out,",\"return_pointer_depth\":%u",pointer_depth(TREE_TYPE(ft)));
     fprintf(out,",\"variadic\":%s",TYPE_ARG_TYPES(ft)?(stdarg_p(ft)?"true":"false"):"null");
     fprintf(out,",\"return_type\":%s,\"return_identity\":%s,\"parameters\":[",q(spelled(TREE_TYPE(ft)).c_str()).c_str(),identity(TREE_TYPE(ft)).c_str());
+    // C++ drops a parameter's top-level restrict from the function type
+    // ([dcl.fct]/5); its PARM_DECL (DECL_ARGUMENTS) keeps it.
     bool comma=false;unsigned ai=0;tree argument=DECL_ARGUMENTS(d);
     for(tree a=TYPE_ARG_TYPES(ft);a;a=TREE_CHAIN(a)) {
       tree t=TREE_VALUE(a);if(t==void_type_node)break;
-      fprintf(out,"%s{\"type\":%s,\"identity\":%s,\"default\":%s",comma?",":"",q(spelled(t).c_str()).c_str(),identity(t).c_str(),TREE_PURPOSE(a)?q(spelled(TREE_PURPOSE(a)).c_str()).c_str():"null");abi("abi",t);fprintf(out,",\"param_kind\":%s,\"pointer_depth\":%u,\"restrict\":%s",q(param_kind(t)).c_str(),pointer_depth(t),TYPE_RESTRICT(t)?"true":"false");fprintf(out,",\"implicit_this\":%s,\"artificial\":%s,\"name\":%s}",TREE_CODE(ft)==METHOD_TYPE && ai==0?"true":"false",argument && DECL_ARTIFICIAL(argument)?"true":"false",argument?q(name(argument)).c_str():"null");if(argument)argument=DECL_CHAIN(argument);ai++;comma=true;
+      fprintf(out,"%s{\"type\":%s,\"identity\":%s,\"default\":%s",comma?",":"",q(spelled(t).c_str()).c_str(),identity(t).c_str(),TREE_PURPOSE(a)?q(spelled(TREE_PURPOSE(a)).c_str()).c_str():"null");abi("abi",t);fprintf(out,",\"param_kind\":%s,\"pointer_depth\":%u,\"restrict\":%s",q(param_kind(t)).c_str(),pointer_depth(t),(TYPE_RESTRICT(t)||(argument && TYPE_RESTRICT(TREE_TYPE(argument))))?"true":"false");fprintf(out,",\"implicit_this\":%s,\"artificial\":%s,\"name\":%s}",TREE_CODE(ft)==METHOD_TYPE && ai==0?"true":"false",argument && DECL_ARTIFICIAL(argument)?"true":"false",argument?q(name(argument)).c_str():"null");if(argument)argument=DECL_CHAIN(argument);ai++;comma=true;
     }
     fprintf(out,"]");
   }
@@ -349,7 +351,7 @@ int plugin_init(struct plugin_name_args *args,struct plugin_gcc_version *v) {
   if(!plugin_default_version_check(v,&gcc_version))return 1;
   const char *path=nullptr;for(int i=0;i<args->argc;i++)if(!strcmp(args->argv[i].key,"output"))path=args->argv[i].value;
   if(!path)return 1;out=fopen(path,"w");if(!out)return 1;
-  fprintf(out,"{\"kind\":\"compiler\",\"version\":%s,\"schema\":4,\"pointer_bits\":%d,\"char_bits\":%d}\n",q(v->basever).c_str(),POINTER_SIZE,BITS_PER_UNIT);
+  fprintf(out,"{\"kind\":\"compiler\",\"version\":%s,\"schema\":5,\"pointer_bits\":%d,\"char_bits\":%d}\n",q(v->basever).c_str(),POINTER_SIZE,BITS_PER_UNIT);
 #ifndef GCC_CPP
   register_callback(args->base_name,PLUGIN_FINISH_TYPE,type,nullptr);
   register_callback(args->base_name,PLUGIN_FINISH_DECL,decl,nullptr);
