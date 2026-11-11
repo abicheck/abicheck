@@ -897,6 +897,7 @@ class _ClangAstParser:
             self._functions,
             type_identities=self._type_identities,
             builtin_abi=self.builtin_abi,
+            typedef_abi_facts=self.parse_typedef_abi_facts(),
             exported_dynamic=self._exported_dynamic,
             exported_static=self._exported_static,
             virtual_mangled_names=self._virtual_mangled_names(),
@@ -916,10 +917,8 @@ class _ClangAstParser:
             node = entry.node
             if _is_builtin_file(entry.file):
                 continue
-            # Skip block-scope locals: only namespace/global-scope and static
-            # member variables denote an ABI surface (a local VarDecl is reached
-            # only via a function body, which we do not descend, so this is
-            # defensive).
+            # Skip block-scope locals (defensive: function bodies are not
+            # descended); only namespace-scope and static members are ABI.
             if node.get("storageClass") in ("auto", "register"):
                 continue
             name = str(node.get("name", ""))
@@ -1009,6 +1008,7 @@ class _ClangAstParser:
                         producer="clang",
                     ),
                     is_const=is_const_variable(node, type_name),
+                    access=_clang_context.access_level(entry.access),
                     value=non_const_variable_value(
                         node, type_name, entry.access, self._id_index
                     ),

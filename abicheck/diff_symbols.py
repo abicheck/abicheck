@@ -124,6 +124,7 @@ from .diff_symbols_variables import (
     _var_added,
     addition_evidence,
     removed_variable,
+    var_access_comparable,
     variable_type_index_for,
 )
 from .elf_symbol_filter import (
@@ -1395,14 +1396,11 @@ def _diff_constants(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 def _diff_var_access(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Detect global data access level changes (ABICC: Global_Data_Became_Private/Protected/Public).
 
-    Header-tier, "castxml"-producer-ONLY (not "hybrid" either -- same
-    coverage-shift risk as ``param_va_list`` above). A legacy document whose
-    access facts cannot be trusted loads with ``Variable.access_fact``
-    ``NOT_COLLECTED``, which the per-variable gate declines.
+    Header-tier, for ``VAR_ACCESS_PRODUCERS``. A legacy document whose access
+    facts cannot be trusted (pre-v24 CastXML, pre-generation-54 Clang) loads
+    with ``Variable.access_fact`` ``NOT_COLLECTED``; the per-variable gate declines it.
     """
-    if not both_header_aware(old, new):
-        return []
-    if old.ast_producer != "castxml" or new.ast_producer != "castxml":
+    if not var_access_comparable(old, new):
         return []
     old_map, new_map = reconciled_variable_surfaces(old, new)
     old_index = variable_type_index_for(old, old_map.values())
