@@ -830,6 +830,8 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_clang_return_alias_abi_fact.py",
             # the native gcc backend's variable access reaches the detector.
             "tests/test_native_gcc_variable_access.py",
+            # the native gcc plugin emits record/enum/field deprecation.
+            "tests/test_native_gcc_deprecation.py",
             # castxml reads noexcept and C++20 constraints from the clang AST
             # of the same header; without clang they read not observed.
             "tests/test_noexcept_header_backends.py",

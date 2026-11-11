@@ -135,7 +135,7 @@ def acquire(
             rows = list(map(json.loads, stream))
         if not rows or rows[-1] != {"kind": "end", "errors": 0}:
             raise RuntimeError("Incomplete GCC extraction")
-        if rows[0].get("kind") != "compiler" or rows[0].get("schema") != 2:
+        if rows[0].get("kind") != "compiler" or rows[0].get("schema") != 3:
             raise RuntimeError("Unsupported GCC fact protocol")
         macros, includes = (
             preprocess(compiler, source, flags, language) if preprocessing else ([], [])

@@ -528,6 +528,12 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "rewrite is needed -- an older clang snapshot's return fact stays "
         "NOT_COLLECTED, which never compares equal"
     ),
+    56: GenerationSpellingChange(
+        "the native gcc header backend records a record's, an enum's and a "
+        "data member's deprecation marker (plugin protocol schema 3), as "
+        "castxml does; no type spelling changes and no rewrite is needed -- "
+        "an older gcc snapshot read every type and field as not deprecated"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.
