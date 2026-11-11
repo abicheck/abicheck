@@ -167,7 +167,7 @@
       "abicheck/extract/headers/gcc/acquisition.py": "fb9bdd70cdf68ce038470a5c8acd59e4f1963ad908ec348160c930aa2f153059",
       "abicheck/extract/headers/gcc/backend.py": "36c0ad901501c2fba98fbe867ce9eca07ab6c523d1326fdae78395c4b281092c",
       "abicheck/extract/headers/gcc/build.py": "1ee62182117ee040274b84d482cc3a9a36db2bd2b742d5dca4e892de00002ecb",
-      "abicheck/extract/headers/gcc/contracts.py": "39f28d300049bbdd30bef988250a7d6403e4b69b92ba2bc23a92a24539cf8b12",
+      "abicheck/extract/headers/gcc/contracts.py": "422d8d94d87a9b57bb773869488cef09eb0bb28d2b3cd52cd5e8320734527de7",
       "abicheck/extract/headers/gcc/discovery.py": "f07fdd43ec1e594e95a75a5447e54e3dcbfe5c944c66a305de4e9d7463ee731b",
       "abicheck/extract/headers/gcc/projection.py": "5b99e9c359c3f484c8f3afaa0a28fa2f59ed2a49121577c03d2968b2547de6e8",
       "abicheck/extract/headers/manifest.py": "32ef26892725f05c29fff52d393166a68ea2983f9c1b881d85e046d96ae962b1",
@@ -222,9 +222,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "48f743fb81db386199e2751b960d75f9375130ba06da6449fbc10a51419b4b04",
-    "generation": 60,
-    "reason": "bumped to 60 for a semantic change"
+    "fingerprint": "bd12748fc5cebb14b0dad27f9327bcde11f782439bc3e88dadba6f893f491a1c",
+    "generation": 61,
+    "reason": "bumped to 61 for a semantic change"
   },
   "resolver": {
     "files": {
