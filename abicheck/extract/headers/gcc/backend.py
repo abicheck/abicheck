@@ -4,12 +4,12 @@
 from __future__ import annotations
 
 import json
-import shlex
 import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any
 
+from ...._compiler_options import split_command_line
 from ....errors import SnapshotError
 from ....model import Fact
 from ..backend_protocol import HeaderParseRequest
@@ -62,6 +62,13 @@ class GccBackend:
     def parse(
         self, request: HeaderParseRequest, *, fallback_reason: str | None = None
     ) -> NativeGccParser:
+        if fallback_reason is not None:
+            # Native GCC is only ever an explicit choice (ADR-092): no other
+            # backend falls back into it, so a fallback reason here is a
+            # dispatch bug, not provenance to record.
+            raise SnapshotError(
+                f"Native GCC is never a fallback backend (asked to run because: {fallback_reason})"
+            )
         if request.frontend_context != "host":
             raise SnapshotError("Native GCC does not support SYCL/device contexts")
         if not request.headers:
@@ -73,7 +80,10 @@ class GccBackend:
         )
         compiler = resolve_compiler(cc)
         plugin = find_plugin(compiler, language)
-        flags = [*shlex.split(request.gcc_options or ""), *request.gcc_option_tokens]
+        flags = [
+            *split_command_line(request.gcc_options or "", cl_style=False),
+            *request.gcc_option_tokens,
+        ]
         for inc in request.extra_includes:
             flags.extend(["-I", str(inc.resolve())])
         if request.sysroot:
@@ -104,7 +114,15 @@ class GccBackend:
                 ],
                 public_roots=[Path(p) for p in request.public_dir_paths],
             )
-        except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
+        except (
+            OSError,
+            RuntimeError,
+            ValueError,
+            KeyError,
+            TypeError,
+            AttributeError,
+            subprocess.TimeoutExpired,
+        ) as exc:
             raise SnapshotError(
                 f"Native GCC extraction failed: {exc}. Verify the plugin matches this GCC build. No Clang fallback was attempted."
             ) from exc

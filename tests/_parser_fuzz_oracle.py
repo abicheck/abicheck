@@ -462,6 +462,13 @@ NOT_ENROLLED: dict[str, str] = {
     "abicheck.sycl_metadata:parse_sycl_metadata": (
         "follow-up: reads a plugin directory and needs a SYCL plugin seed"
     ),
+    "abicheck.extract.headers.gcc.backend:NativeGccParser": (
+        "parses no bytes: it holds HeaderAstFields already projected from the "
+        "native GCC plugin's JSONL. Malformed JSONL rows are refused as "
+        "SnapshotError by GccBackend.parse (tests/test_native_gcc_fact_"
+        "integration.py); fuzzing the plugin protocol itself needs a real GCC "
+        "plus a matching plugin, which the default lane does not have"
+    ),
 }
 
 

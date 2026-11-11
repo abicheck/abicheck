@@ -88,11 +88,16 @@ def reject_unsupported_header_frontend_evidence(
     from ...extract.header_ast_backend import validate_native_gcc_manifest
 
     for side, evidence in sides:
-        validate_native_gcc_manifest(_sce.effective_frontend(evidence.compile, header_backend), side.dump_manifest is not None)
+        validate_native_gcc_manifest(
+            _sce.effective_frontend(evidence.compile, header_backend),
+            side.dump_manifest is not None,
+        )
         if _sce.effective_frontend(evidence.compile, header_backend) == "gcc" and (
             depth == "source" or is_raw_source_tree(side.sources)
         ):
-            raise ValidationError("Native GCC is an experimental header backend; source-ABI replay requires a supported source frontend such as Clang.")
+            raise ValidationError(
+                "Native GCC is an experimental header backend; source-ABI replay requires a supported source frontend such as Clang."
+            )
     if depth is None or depth.lower() != "source":
         return
     for side, evidence in sides:

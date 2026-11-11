@@ -1,0 +1,1 @@
+namespace n { struct B { virtual ~B(); virtual int v() const = 0; int x; }; struct D : B { int v() const override; static int s(); }; int free_fn(const B&, int); extern const int limit; extern int counter; }

@@ -45,6 +45,46 @@ from .contracts import (
     vtable_fact,
 )
 
+#: Booleans the C++ plugin emits for every C++ declaration of that row kind
+#: it projects (a function without them has no mangled name and is skipped)
+#: but the C plugin never emits, because C has no such property: member
+#: cv/static, virtual/pure/deleted and linkage specification on functions,
+#: template dependence on records. Variable and field cv are emitted by both.
+_CXX_ONLY_FLAGS: dict[str, frozenset[str]] = {
+    "function_decl": frozenset(
+        {
+            "const",
+            "volatile",
+            "static_member",
+            "pure_virtual",
+            "deleted",
+            "virtual",
+            "extern_c",
+        }
+    ),
+    "record_type": frozenset({"dependent"}),
+    "union_type": frozenset({"dependent"}),
+}
+
+
+def protocol_flag(row: Any, key: str, language: str) -> bool:
+    """A schema-v2 boolean, never an absent key read as ``False``.
+
+    Present: its value. Absent: ``False`` only for a C++-only property under
+    the C plugin, where it does not apply. Any other absence is a protocol
+    violation (a plugin that does not match this reader), raised as
+    ``ValueError`` so the backend fails the dump instead of recording a
+    confirmed ``False``.
+    """
+    if key in row:
+        value = row[key]
+        if not isinstance(value, bool):
+            raise ValueError(f"GCC fact {key!r} is not a boolean: {value!r}")
+        return value
+    if language == "c" and key in _CXX_ONLY_FLAGS.get(row.get("kind", ""), ()):
+        return False
+    raise ValueError(f"GCC fact row {row.get('kind')!r} lacks required boolean {key!r}")
+
 
 def identities(value: Any) -> Any:
     return Fact.present((clean(value),)) if value else Fact.not_collected()
@@ -67,9 +107,6 @@ def project(
     rows: Any,
     header: Path,
     *,
-    library: Any = "prototype.so",
-    version: Any = "unknown",
-    elf: Any = None,
     language: Any = "c++",
     public_headers: Any = (),
     public_roots: Any = (),
@@ -154,9 +191,10 @@ def project(
         origin = policy.origin(r)
         if r["kind"] in ("record_type", "union_type"):
             name = clean(r["name"])
+            dependent = protocol_flag(r, "dependent", language)
             fields = []
             for f in r.get("fields", []):
-                if f.get("artificial") or not f["name"]:
+                if protocol_flag(f, "artificial", language) or not f["name"]:
                     continue
                 fields.append(
                     TypeField(
@@ -166,8 +204,8 @@ def project(
                         is_bitfield=f["bitfield"],
                         bitfield_bits=f["size_bits"] if f["bitfield"] else None,
                         access=AccessLevel(f["access"]),
-                        is_const=f.get("const", False),
-                        is_volatile=f.get("volatile", False),
+                        is_const=protocol_flag(f, "const", language),
+                        is_volatile=protocol_flag(f, "volatile", language),
                         is_mutable_fact=Fact.present(f["mutable"])
                         if "mutable" in f
                         else Fact.not_collected(),
@@ -186,14 +224,14 @@ def project(
                 if r["kind"] == "union_type"
                 else r.get("record_kind", "struct"),
                 is_union=r["kind"] == "union_type",
-                size_bits=None if r.get("dependent") else r["size_bits"],
+                size_bits=None if dependent else r["size_bits"],
                 alignment_bits=r["alignment_bits"],
                 data_size_bits=r.get("data_size_bits"),
                 is_standard_layout=r.get("standard_layout"),
                 is_trivially_copyable=r.get("trivially_copyable"),
                 is_final=r.get("final"),
                 is_abstract=r.get("abstract"),
-                is_template_pattern=r.get("dependent", False),
+                is_template_pattern=dependent,
                 fields=fields,
                 source_location=src,
                 source_header=r["source"],
@@ -216,7 +254,7 @@ def project(
                 template_param_defaults_fact=Fact.present(
                     patterns["::".join((*scope_names(r), leaf(r).split("<")[0]))]
                 )
-                if r.get("dependent")
+                if dependent
                 and "::".join((*scope_names(r), leaf(r).split("<")[0])) in patterns
                 else Fact.not_collected(),
                 entity_id=entity_id_for_type(scope(r), leaf(r)),
@@ -239,7 +277,9 @@ def project(
                 origin=origin,
                 entity_id=entity_id_for_enum(scope(r), leaf(r)),
             )
-        elif r["kind"] == "function_decl" and (not r.get("artificial")):
+        elif r["kind"] == "function_decl" and not protocol_flag(
+            r, "artificial", language
+        ):
             mangled = r.get("mangled")
             if not mangled:
                 continue
@@ -276,8 +316,8 @@ def project(
                 params=params,
                 return_type_identities_fact=resolved_identity(r["return_identity"]),
                 return_type_abi_fact=abi(r.get("return_abi")),
-                is_inline=r.get("inline", False),
-                is_compiler_generated=r.get("artificial", False),
+                is_inline=protocol_flag(r, "inline", language),
+                is_compiler_generated=protocol_flag(r, "artificial", language),
                 is_explicit=r.get("explicit")
                 if r.get("constructor") or r["name"].startswith("operator ")
                 else None,
@@ -285,18 +325,18 @@ def project(
                 deprecated_fact=Fact.present(r.get("deprecated")),
                 is_override=r.get("override"),
                 ref_qualifier=r.get("ref_qualifier", ""),
-                is_virtual=r.get("virtual", False),
-                is_pure_virtual=r.get("pure_virtual", False),
-                is_deleted=r.get("deleted", False),
+                is_virtual=protocol_flag(r, "virtual", language),
+                is_pure_virtual=protocol_flag(r, "pure_virtual", language),
+                is_deleted=protocol_flag(r, "deleted", language),
                 is_noexcept_fact=Fact.present(r["noexcept"])
                 if r.get("noexcept") is not None
                 else Fact.not_collected(),
                 return_pointer_depth=r.get("return_pointer_depth", 0),
-                is_const=r.get("const", False),
-                is_volatile=r.get("volatile", False),
-                is_static=r.get("static_member", False),
+                is_const=protocol_flag(r, "const", language),
+                is_volatile=protocol_flag(r, "volatile", language),
+                is_static=protocol_flag(r, "static_member", language),
                 is_variadic=r.get("variadic"),
-                is_extern_c=language == "c" or r.get("extern_c", False),
+                is_extern_c=language == "c" or protocol_flag(r, "extern_c", language),
                 vtable_index=r.get("vindex"),
                 source_location=src,
                 source_header=r["source"],
@@ -306,7 +346,11 @@ def project(
                     scope(r), fnleaf, mangled_name=mangled
                 ),
             )
-        elif r["kind"] == "var_decl" and (not r.get("artificial")) and r.get("mangled"):
+        elif (
+            r["kind"] == "var_decl"
+            and not protocol_flag(r, "artificial", language)
+            and r.get("mangled")
+        ):
             name = qualified(r)
             mangled = r["mangled"]
             value = r.get("value_expression")
@@ -314,10 +358,10 @@ def project(
                 name=name,
                 mangled=mangled,
                 type=clean(r["type"]),
-                is_const=r["const"],
+                is_const=protocol_flag(r, "const", language),
                 value=value,
                 deprecated_fact=Fact.present(r.get("deprecated")),
-                is_static=not r.get("external_linkage", False),
+                is_static=not protocol_flag(r, "external_linkage", language),
                 alignment_bits=r.get("alignment_bits"),
                 access=AccessLevel(r["access"]),
                 source_header=r["source"],
@@ -332,7 +376,7 @@ def project(
                     is_extern_c=language == "c",
                 ),
             )
-            if r["const"] and value is not None:
+            if protocol_flag(r, "const", language) and value is not None:
                 constants[name] = value
                 constant_ids[name] = entity_id_for_constant(scope(r), r["name"])
         elif (

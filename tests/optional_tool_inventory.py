@@ -280,6 +280,22 @@ INVENTORY: tuple[ToolLookup, ...] = (
         depths=("headers", "build", "source"),
         without="castxml's --castxml-cc driver: preflight refuses the run when it is missing.",
     ),
+    ToolLookup(
+        id="native-gcc",
+        role=_F,
+        sites=(
+            "which:abicheck/extract/headers/gcc/discovery.py:compiler",
+            "env:ABICHECK_GCC_PLUGIN",
+        ),
+        depths=("headers", "build", "source"),
+        without=(
+            "The opt-in native GCC frontend (compile.frontend: gcc, ADR-092) and "
+            "its matching fact plugin. Never consulted unless that frontend is "
+            "selected; then a missing or non-GCC compiler, or a missing, invalid "
+            "or mismatched plugin, fails the dump with no Clang/CastXML fallback "
+            "-- never an empty header surface."
+        ),
+    ),
     # --- input acquisition ---------------------------------------------------
     ToolLookup(
         id="package-extractors",

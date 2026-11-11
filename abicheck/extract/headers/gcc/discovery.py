@@ -8,14 +8,17 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from ....deadline import run_bounded
+from ....deadline import PROBE_HANG_TIMEOUT_S, run_bounded
 from ....errors import SnapshotError
 
 
 def compiler_output(compiler: str, option: str) -> str:
     try:
         result = run_bounded(
-            [compiler, option], timeout=30, capture_output=True, text=True
+            [compiler, option],
+            timeout=PROBE_HANG_TIMEOUT_S,
+            capture_output=True,
+            text=True,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise SnapshotError(f"Cannot probe native GCC {compiler}: {exc}") from exc

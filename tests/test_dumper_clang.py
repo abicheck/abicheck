@@ -3018,13 +3018,16 @@ def test_sticky_file_threaded_to_siblings() -> None:
 def test_resolve_header_backend_explicit() -> None:
     assert _resolve_header_backend("castxml") == "castxml"
     assert _resolve_header_backend("clang") == "clang"
+    # The opt-in native GCC backend (ADR-092) is a known, explicit choice.
+    assert _resolve_header_backend("gcc") == "gcc"
 
 
-def test_resolve_header_backend_rejects_unknown() -> None:
+@pytest.mark.parametrize("name", ["edg", "msvc", "gcc-plugin"])
+def test_resolve_header_backend_rejects_unknown(name: str) -> None:
     from abicheck.errors import ValidationError
 
     with pytest.raises(ValidationError):
-        _resolve_header_backend("gcc")
+        _resolve_header_backend(name)
 
 
 def test_resolve_header_backend_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -4019,7 +4022,9 @@ def test_header_graph_attach_reuses_primary_snapshot_ast(
 
     # Step 1's clang process is injected through the dump's clang backend.
     monkeypatch.setitem(
-        backend_registry.HEADER_AST_BACKENDS, "clang", ClangBackend(runner=_as_runner(_run))
+        backend_registry.HEADER_AST_BACKENDS,
+        "clang",
+        ClangBackend(runner=_as_runner(_run)),
     )
 
     # Step 2 (``service._attach_header_graph``) calls ``clang_header_dump``

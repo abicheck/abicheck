@@ -8,7 +8,6 @@ import os
 import shlex
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
@@ -20,6 +19,7 @@ from abicheck.extract.header_ast_backend import (
 )
 from abicheck.extract.headers.gcc.discovery import find_plugin
 from abicheck.serialization import load_snapshot
+from tests._abicheck_subprocess import abicheck_command, abicheck_module_command
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -42,17 +42,15 @@ def native_plugins(tmp_path_factory: pytest.TempPathFactory) -> tuple[str, Path]
         pytest.skip("matching GCC plugin-dev headers unavailable")
     output = tmp_path_factory.mktemp("native-plugins")
     subprocess.run(
-        [
-            sys.executable,
-            "-m",
+        abicheck_module_command(
             "abicheck.extract.headers.gcc.build",
             "--compiler",
             compiler,
             "--headers",
             sdk,
             "--output",
-            str(output),
-        ],
+            output,
+        ),
         cwd=ROOT,
         check=True,
         capture_output=True,
@@ -81,14 +79,7 @@ def cli(
         executable.chmod(0o755)
     env["PATH"] = str(blocked) + os.pathsep + env.get("PATH", "")
     return subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "abicheck",
-            *args,
-            "--config",
-            str(tmp_path / ".abicheck.yml"),
-        ],
+        abicheck_command(*args, "--config", tmp_path / ".abicheck.yml"),
         cwd=tmp_path,
         env=env,
         text=True,
@@ -123,6 +114,9 @@ def test_real_native_dump_compare_roundtrip(
     native_plugins: tuple[str, Path], tmp_path: Path, language: str
 ) -> None:
     cc, plugin = native_plugins
+    expected_version = subprocess.run(
+        [cc, "-dumpfullversion"], text=True, capture_output=True, check=True
+    ).stdout.strip()
     (tmp_path / ".abicheck.yml").write_text(
         f"compile:\n  frontend: gcc\n  lang: {language}\n  compiler: {cc}\n  options: [-std={'c11' if language == 'c' else 'c++20'}]\n"
     )
@@ -159,6 +153,13 @@ def test_real_native_dump_compare_roundtrip(
         assert snap.dump_provenance and snap.dump_provenance["extraction_limitations"]
         assert snap.dump_provenance["compiler"]["plugin_sha256"]
         assert snap.dump_provenance["compiler"]["headers"] == [str(header)]
+        # The configured compiler, not the system default, produced the facts:
+        # an independent probe of that exact binary, never abicheck's own.
+        selected = os.path.realpath(shutil.which(cc) or cc)
+        recorded = snap.dump_provenance["compiler"]
+        assert os.path.realpath(recorded["driver"]) == selected
+        assert recorded["full_version"] == expected_version
+        assert snap.ast_toolchain["compiler_version"] == expected_version
         assert not (tmp_path / "non-native-frontend-called").exists()
     report = tmp_path / "report.json"
     result = cli(

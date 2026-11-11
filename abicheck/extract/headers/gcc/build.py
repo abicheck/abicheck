@@ -1,36 +1,56 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Build native GCC plugins explicitly: python -m abicheck.extract.headers.gcc.build."""
+"""Build the native GCC fact plugins (gcc_facts.so, gcc_cpp_facts.so) for one exact GCC; scans never build them."""
 
 from __future__ import annotations
 
-import argparse
 import logging
 import os
-import subprocess
 import tempfile
 from pathlib import Path
 
+import click
+
+from ....deadline import run_bounded
 from .discovery import cache_directory, compiler_output, resolve_compiler
 
+#: An explicit, user-invoked plugin compile; generous, but never unbounded.
+BUILD_TIMEOUT_S = 900.0
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--compiler", default="g++")
-    parser.add_argument("--headers", type=Path)
-    parser.add_argument("--output", type=Path)
-    args = parser.parse_args()
-    compiler = resolve_compiler(args.compiler)
-    headers = (
-        args.headers
-        or Path(compiler_output(compiler, "-print-file-name=plugin")) / "include"
+
+@click.command(help=__doc__)
+@click.option(
+    "--compiler",
+    default="g++",
+    show_default=True,
+    help="The exact GCC driver the plugins must match.",
+)
+@click.option(
+    "--headers",
+    type=click.Path(path_type=Path, file_okay=False),
+    default=None,
+    help="GCC plugin-dev include directory (default: <gcc -print-file-name=plugin>/include).",
+)
+@click.option(
+    "--output",
+    type=click.Path(path_type=Path, file_okay=False),
+    default=None,
+    help="Output directory (default: the versioned user cache scans look in).",
+)
+def main(compiler: str, headers: Path | None, output: Path | None) -> None:
+    resolved = resolve_compiler(compiler)
+    include = (
+        headers
+        or Path(compiler_output(resolved, "-print-file-name=plugin")) / "include"
     )
-    if not (headers / "gcc-plugin.h").is_file():
-        parser.error(f"Matching GCC plugin-dev headers are missing: {headers}")
-    output = args.output or cache_directory(compiler)
-    output.mkdir(parents=True, exist_ok=True)
+    if not (include / "gcc-plugin.h").is_file():
+        raise click.UsageError(
+            f"Matching GCC plugin-dev headers are missing: {include}"
+        )
+    target = output or cache_directory(resolved)
+    target.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(level=logging.INFO, format="%(message)s")
-    build_plugin(compiler, headers, output, "gcc_facts.so", [])
-    build_plugin(compiler, headers, output, "gcc_cpp_facts.so", ["-DGCC_CPP"])
+    build_plugin(resolved, include, target, "gcc_facts.so", [])
+    build_plugin(resolved, include, target, "gcc_cpp_facts.so", ["-DGCC_CPP"])
 
 
 def build_plugin(
@@ -40,25 +60,30 @@ def build_plugin(
     # must never mmap a half-written shared object.
     with tempfile.TemporaryDirectory(dir=output) as tmp:
         artifact = Path(tmp) / name
-        subprocess.run(
-            [
-                compiler,
-                "-std=c++17",
-                "-x",
-                "c++",
-                "-O2",
-                "-shared",
-                "-fPIC",
-                "-fno-rtti",
-                *defines,
-                "-I",
-                str(headers),
-                str(Path(__file__).with_name("gcc_facts.cc")),
-                "-o",
-                str(artifact),
-            ],
-            check=True,
+        command = [
+            compiler,
+            "-std=c++17",
+            "-x",
+            "c++",
+            "-O2",
+            "-shared",
+            "-fPIC",
+            "-fno-rtti",
+            *defines,
+            "-I",
+            str(headers),
+            str(Path(__file__).with_name("gcc_facts.cc")),
+            "-o",
+            str(artifact),
+        ]
+        result = run_bounded(
+            command, timeout=BUILD_TIMEOUT_S, capture_output=True, text=True
         )
+        if result.returncode:
+            raise click.ClickException(
+                f"Building {name} failed ({result.returncode}): "
+                f"{' '.join(command)}\n{result.stderr}"
+            )
         os.replace(artifact, output / name)
     logging.getLogger(__name__).info("Built %s", output / name)
 
