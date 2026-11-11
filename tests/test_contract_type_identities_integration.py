@@ -38,6 +38,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -110,6 +111,15 @@ def _build(root: Path, ns1_extra: str, ns2_extra: str, debug: str) -> Path:
     return lib
 
 
+#: ``long long``, not ``long``: on an LLP64 target (Windows) ``long`` is 4
+#: bytes, so ``int; long`` would change only the size -- and a pointer-only
+#: ``Cache`` (no implicit special members on clang, unlike castxml) has its
+#: size change lowered by the case62 opaque-handle rule, leaving nothing that
+#: gates. ``long long`` raises size *and* alignment on LP64 and LLP64 alike,
+#: so the record's break is observable on every platform this test runs on.
+_GROWTH = "long long x;"
+
+
 def _run_compare(
     tmp_path: Path, grown: str, *, operand: str, debug: str
 ) -> tuple[int, dict]:
@@ -119,8 +129,8 @@ def _run_compare(
     old = _build(tmp_path / "v1", "", "", debug)
     new = _build(
         tmp_path / "v2",
-        "long x;" if grown == "ns1" else "",
-        "long x;" if grown == "ns2" else "",
+        _GROWTH if grown == "ns1" else "",
+        _GROWTH if grown == "ns2" else "",
         debug,
     )
     if operand == "dir":
@@ -234,3 +244,26 @@ def test_the_directory_fan_out_agrees_with_the_single_pair(
         # floor, whatever risk findings the platform adds.
         assert dir_code != 4
         assert release["verdict"] != "BREAKING"
+
+
+@pytest.mark.known_gap_canary
+def test_canary_opaque_handle_size_lowering_depends_on_frontend(
+    tmp_path: Path, selected_backend: None, debug_flag: str, monkeypatch
+) -> None:
+    """Known gap (docs/contribute/known-gaps.md, "Opaque-handle size lowering
+    depends on the header frontend"): a size-only growth of the pointer-only
+    ``ns1::Cache`` gates on castxml (its implicit members read as a by-value
+    use) but is lowered on clang without DWARF. Fails -- and the gap entry
+    should be closed -- once both frontends agree."""
+    if not sys.platform.startswith("linux"):
+        pytest.skip("pinned where the divergence was measured (Linux ELF)")
+    if debug_flag != "-g0":
+        pytest.skip("the divergence needs a header-only layout (no DWARF)")
+    monkeypatch.setattr(sys.modules[__name__], "_GROWTH", "int x;")
+    codes = {}
+    for frontend in ("castxml", "clang"):
+        monkeypatch.setenv("ABICHECK_AST_FRONTEND", frontend)
+        codes[frontend], _ = _run_compare(
+            tmp_path / frontend, "ns1", operand="file", debug=debug_flag
+        )
+    assert codes == {"castxml": 4, "clang": 0}

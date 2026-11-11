@@ -113,6 +113,12 @@ deterministically and fails when the gap closes.
 **Status (2026-11-08): OPEN.** `parse_btf_metadata`, `parse_ctf_metadata` and `parse_sycl_metadata` are discovered by `tests/test_parser_fuzz_enrollment.py` but listed in `NOT_ENROLLED` (`tests/_parser_fuzz_oracle.py`): each needs a seed the default lane cannot build (pahole/BPF, gcc `-gctf` with libctf, a SYCL plugin). Their corrupt-input behaviour is unmeasured. Owner: `tests/_parser_fuzz_oracle.py`.
 <!-- no-canary: the gap is an absence of tests, not a parser answer to pin; tests/test_parser_fuzz_enrollment.py keeps the NOT_ENROLLED list honest and fails on an unlisted new parser -->
 
+### Opaque-handle size lowering depends on the header frontend (2026-11-11)
+
+**Status (2026-11-11): OPEN, narrow.** The case62 rule (`diff_filtering._filter_opaque_size_changes`) lowers a size-only growth of a record the public API reaches only through pointers. castxml records implicit special members (`Cache(const Cache&)`), which the usage index reads as a by-value use, so castxml keeps `type_size_changed`; clang records none, so the same headers on clang lower it. When the growth also changes alignment the break still gates on both; when it changes only the size (an `int` field, or `long` on LLP64) castxml reports exit 4 and clang exit 0. Closing it needs the usage index to ignore compiler-generated members (or count them on both frontends) -- a policy decision, not an extraction fix. `tests/test_contract_type_identities_integration.py` grows its fixture by `long long` so it tests identity, not this rule. Owner: `diff_filtering.py` / `policy/`.
+
+<!-- canary: tests/test_contract_type_identities_integration.py::test_canary_opaque_handle_size_lowering_depends_on_frontend -->
+
 ### Option vocabulary (ADR-091 follow-ups)
 
 The option-vocabulary migration is complete (ADR-091, Accepted and
