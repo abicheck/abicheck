@@ -28,7 +28,7 @@ setup fits what you have, and how to cover more than one client toolchain.
 |---|---|---|---|---|
 | The two binaries only | L0/L1 | nothing | exported symbols, versions, SONAME, binary-only removals | types and layout. Without type evidence on either side, an unchanged-looking pair reads `UNCONFIRMED` (exit 1), not a clean pass. |
 | + debug info (DWARF/PDB) | types from the binary | nothing | compiled layout, signatures, member offsets | the header contract: macros, inline code, what clients actually see |
-| + public headers (`-H`) | L2 | a header backend (below) | public surface, types, layout as a client compiler sees it | build-flag drift, source-only changes |
+| + public headers (`-H`) | L2 | a header backend (below) | public surface and types as a client compiler sees them; layout from the backend where debug info does not already give the producer's layout | build-flag drift, source-only changes |
 | + `compile_commands.json` or build data | L3 | the project's compiler | flag and toolchain drift, the header parse under the real flags | source-level behavior |
 | + sources | L4/L5 | the project's compiler | inline, template and macro body changes | — |
 
@@ -36,17 +36,23 @@ The levels are explained in [Evidence &
 Detectability](../learn/evidence-and-detectability.md). `--depth` is
 covered in [Evidence Depth](evidence-depth.md).
 
-**Before a real run**, `abicheck compare --dry-run` checks that the header
-backend starts and parses your headers, and estimates the cost. During a
-run, a backend that is missing or cannot bind names to exports does not
-fail the comparison. The report shows it as `surface_scope.confidence:
-reduced` with a reason (`header-backend-unavailable`,
-`export-binding-unresolved`).
+**Before a real run**, `abicheck compare --dry-run` shows which header
+backend the run will use and whether its tool is installed, and estimates
+the cost. It does not parse your headers. During a run:
+
+- **ELF:** a header pass that needs CastXML fails before extraction when
+  CastXML is missing.
+- **PE and Mach-O:** a missing backend, or headers whose declarations
+  cannot be bound to the exports, fall back to the export table. The report
+  shows `surface_scope.confidence: reduced` with a reason
+  (`header-backend-unavailable`, `export-binding-unresolved`).
 
 ## 2. Pick a header backend
 
 The backend is a configuration key, `compile.frontend` in `.abicheck.yml`.
-There is no CLI flag. For a one-off run, set `ABICHECK_AST_FRONTEND`.
+There is no dedicated CLI flag; for one run, pass `--set
+compile.frontend=<backend>`. The `ABICHECK_AST_FRONTEND` environment
+variable applies only when the configuration sets no `compile.frontend`.
 
 | `compile.frontend` | Install | Choose it when | Known gaps today |
 |---|---|---|---|
@@ -62,8 +68,9 @@ default, are in the [header-backend parity
 plan](../contribute/plans/header-backend-parity-and-client-matrix.md).
 
 **Rule:** parse the headers with a backend of the same family as the
-clients you care about. CastXML stands in for the system GCC. Native GCC
-*is* GCC. Clang is Clang.
+clients you care about. CastXML emulates whatever the system `cc`/`c++`
+is, which may be GCC or Clang; check which before letting it stand in for
+GCC clients. Native GCC *is* GCC. Clang is Clang.
 
 ## 3. One library, several client toolchains
 
@@ -78,16 +85,17 @@ Dump and compare once per client, each with its own backend and flags.
 Keep both sides of a comparison under the same client context:
 
 ```bash
-ABICHECK_AST_FRONTEND=gcc   abicheck compare old/libfoo.so new/libfoo.so -H include/ -o json=gcc-clients.json
+abicheck compare old/libfoo.so new/libfoo.so --header old=old/include --header new=new/include --set compile.frontend=gcc -o json=gcc-clients.json
 ```
 
 ```bash
-ABICHECK_AST_FRONTEND=clang abicheck compare old/libfoo.so new/libfoo.so -H include/ -o json=clang-clients.json
+abicheck compare old/libfoo.so new/libfoo.so --header old=old/include --header new=new/include --set compile.frontend=clang -o json=clang-clients.json
 ```
 
 Do not compare a snapshot taken for GCC clients with one taken for Clang
-clients. abicheck refuses with exit `16` (`not_comparable`), because they
-describe different contracts.
+clients: they describe different contracts. abicheck refuses such a pair
+with exit `16` (`not_comparable`) when both snapshots record their compile
+context; an older snapshot without one cannot be checked this way.
 
 ### Declaring client toolchains for CI
 
@@ -128,10 +136,9 @@ aggregate reconciles findings across profiles. Field reference:
 end: [Multi-Platform scenario](../integration/scenarios/multi-platform.md).
 
 !!! warning "Current limits"
-    The baseline (old) side of a baseline-channel check is not yet dumped
-    under the consumer overlay. A compiler-version mismatch in a binding
-    is caught by `project validate --toolchain-bindings`, not yet before
-    extraction on `dump`/`compare`. Both items are tracked in the
+    A compiler-version mismatch in a binding is caught by `project
+    validate --toolchain-bindings`, not yet before extraction on
+    `dump`/`compare`. This is tracked in the
     [parity plan](../contribute/plans/header-backend-parity-and-client-matrix.md).
 
 ## Checklist

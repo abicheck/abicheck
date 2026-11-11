@@ -15,9 +15,9 @@ which landed the producer/consumer profile split, per-profile `frontend:`,
 per-cell scheduling and cross-profile reconciliation. This plan does not
 redo that work. It closes G34's open items and adds what G34 never measured:
 whether the backends agree.
-**Status:** Experiments done (2026-11-11). Phases 2 and 3 are closed by the
-extractor-generation-54 fix (the backend-gaps PR that follows this one);
-phases 1, 4 and 5 are open.
+**Status:** Experiments done (2026-11-11). Phases 2 and 3 have a fix on an
+open PR (extractor generation 54), pending merge; until it lands they are
+open. Phases 1, 4 and 5 are open.
 
 ## Problem
 
@@ -91,8 +91,8 @@ the Clang record-layout pass. The public `run_dump` /
 | Native GCC | 340 | 28 | as in E1 |
 
 So the Clang alignment failures were a harness artifact, not a product gap.
-The remaining Clang and native GCC failures are real, and the generation-54
-fix closes all of them: 368/368 on all three backends through `run_dump`.
+The remaining Clang and native GCC failures are real. The generation-54 fix
+(pending merge) brings all three backends to 368/368 through `run_dump`.
 
 ### E5 — the example catalog under each backend
 
@@ -201,7 +201,7 @@ All of these must hold for the candidate backend:
 - Acceptance: E1's table regenerates from CI artifacts, and a new gap in
   any backend fails the tier.
 
-### Phase 2 — close the Clang backend gaps (M) — closed by generation 54
+### Phase 2 — close the Clang backend gaps (M) — fix pending merge
 
 - Record layout already comes from the built-in layout pass on the public
   workflow (E1b). The internal `dumper.dump()` skips it; Phase 1 moves the
@@ -212,7 +212,7 @@ All of these must hold for the candidate backend:
 - Each fix needs a bug-class regression test, a capability-matrix row
   update and a generation bump.
 
-### Phase 3 — close the native GCC gaps (M/L) — closed by generation 54
+### Phase 3 — close the native GCC gaps (M/L) — fix pending merge
 
 - Project the attribute and qualifier set listed in E1: deprecation on
   enum/type/field, `_Atomic`, flexible arrays, opaque records, hidden
@@ -228,9 +228,10 @@ G34 already provides `profiles.<id>.consumer_compile` with `frontend:`
 (including `gcc`), bindings, a toolchain probe, per-cell scheduling and
 `AggregateResult.finding_matrix`. Remaining work:
 
-- **Baseline side under the consumer context.** G34 Phase 0 lists this as
-  open: the old side of a `baseline-channel` check must be dumped under
-  the same consumer overlay.
+- **Baseline side under the consumer context.** G34 Phase 0 still lists
+  this as open, but baseline publication already resolves the consumer
+  overlay (`buildsource/baseline_extraction_context.py`). Confirm it end to
+  end with the fixture below and close the G34 item.
 - **Hard fail before extraction** when a binding's probed identity does not
   match `compiler_version` on `dump`/`compare` (G34 Phase A, open).
 - **A fixture project with GCC and Clang client profiles** (G34 Phase B,

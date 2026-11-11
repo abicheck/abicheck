@@ -35,6 +35,8 @@ reacts to the compiler can make two clients see two different contracts:
 A worked example. One header, one library built with GCC:
 
 ```c
+#include <stddef.h>
+
 struct msg {
 #if defined(__clang__)
   long long id;
@@ -46,8 +48,9 @@ struct msg {
 size_t msg_size(const struct msg *);
 ```
 
-A GCC client sees an 8-byte `struct msg`. A Clang client sees a 16-byte
-one. Neither is wrong; they are two contracts. The library itself was
+On x86-64 (LP64, 8-byte-aligned `long long`), a GCC client sees an 8-byte
+`struct msg` and a Clang client a 16-byte one. The exact sizes depend on the
+target; that they differ does not. Neither is wrong; they are two contracts. The library itself was
 compiled with the GCC branch, so a Clang client that passes its own
 `struct msg` into the library is already broken. No change between v1 and
 v2 is needed for that.
