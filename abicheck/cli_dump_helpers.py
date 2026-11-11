@@ -257,7 +257,7 @@ def fold_dump_provenance(
     source_scope = (
         source_abi.coverage.get("replay_scope") if source_abi is not None else None
     )
-    snap.dump_provenance = {
+    snap.dump_provenance = (snap.dump_provenance or {}) | {
         "requested_depth": depth,
         "effective_depth": effective,
         "degraded": (

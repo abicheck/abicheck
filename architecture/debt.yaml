@@ -542,7 +542,7 @@
     },
     {
       "path": "abicheck/dumper.py",
-      "baseline_lines": 1224,
+      "baseline_lines": 1223,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1323,7 +1323,7 @@
     },
     {
       "path": "tests/test_dumper_clang.py",
-      "baseline_lines": 5549,
+      "baseline_lines": 5548,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",

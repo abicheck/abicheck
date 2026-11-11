@@ -1,0 +1,1380 @@
+[
+ {
+  "kind": "compiler",
+  "version": "14.2.0",
+  "schema": 2,
+  "pointer_bits": 64,
+  "char_bits": 8,
+  "driver": "/usr/bin/g++-14",
+  "target": "x86_64-linux-gnu",
+  "full_version": "14.2.0",
+  "language": "c++",
+  "flags": [],
+  "plugin_sha256": "72ad99dc9853fc2087eba16eb475c12ff799b2a8711943ae98897c9082331846",
+  "preprocessing": false,
+  "includes": []
+ },
+ {
+  "kind": "var_decl",
+  "name": "_ZTIN1n1DE",
+  "qualified": "const __si_class_type_info_pseudo_9 _ZTIN1n1DE",
+  "type": "const __si_class_type_info_pseudo_9",
+  "identity": "__si_class_type_info_pseudo_9",
+  "source": "@HEADER@",
+  "line": 1,
+  "system_header": false,
+  "scope": [],
+  "attribute_details": [
+   {
+    "name": "non overlapping",
+    "arguments": []
+   }
+  ],
+  "deprecated": null,
+  "uid": 2851,
+  "type_uid": 1072,
+  "external_linkage": true,
+  "inline": false,
+  "attributes": "non overlapping ",
+  "artificial": true,
+  "access": "public",
+  "mangled": "_ZTIN1n1DE",
+  "abi": null,
+  "const": true,
+  "volatile": false,
+  "tls": false,
+  "size_bits": 192,
+  "alignment_bits": 64,
+  "value": null,
+  "value_expression": null
+ },
+ {
+  "kind": "var_decl",
+  "name": "_ZTIN1n1BE",
+  "qualified": "const __class_type_info_pseudo_8 _ZTIN1n1BE",
+  "type": "const __class_type_info_pseudo_8",
+  "identity": "__class_type_info_pseudo_8",
+  "source": "@HEADER@",
+  "line": 1,
+  "system_header": false,
+  "scope": [],
+  "attribute_details": [
+   {
+    "name": "non overlapping",
+    "arguments": []
+   }
+  ],
+  "deprecated": null,
+  "uid": 2823,
+  "type_uid": 1044,
+  "external_linkage": true,
+  "inline": false,
+  "attributes": "non overlapping ",
+  "artificial": true,
+  "access": "public",
+  "mangled": "_ZTIN1n1BE",
+  "abi": null,
+  "const": true,
+  "volatile": false,
+  "tls": false,
+  "size_bits": 128,
+  "alignment_bits": 64,
+  "value": null,
+  "value_expression": null
+ },
+ {
+  "kind": "var_decl",
+  "name": "counter",
+  "qualified": "int n::counter",
+  "type": "int",
+  "identity": null,
+  "source": "@HEADER@",
+  "line": 1,
+  "system_header": false,
+  "scope": [
+   {
+    "kind": "namespace",
+    "name": "n"
+   }
+  ],
+  "attribute_details": [],
+  "deprecated": null,
+  "uid": 2857,
+  "type_uid": 10,
+  "external_linkage": true,
+  "inline": false,
+  "attributes": null,
+  "artificial": false,
+  "access": "public",
+  "mangled": "_ZN1n7counterE",
+  "abi": {
+   "encoding": "signed",
+   "size": 4,
+   "alignment": 4,
+   "lanes": 0
+  },
+  "const": false,
+  "volatile": false,
+  "tls": false,
+  "size_bits": 32,
+  "alignment_bits": 32,
+  "value": null,
+  "value_expression": null
+ },
+ {
+  "kind": "var_decl",
+  "name": "limit",
+  "qualified": "const int n::limit",
+  "type": "const int",
+  "identity": null,
+  "source": "@HEADER@",
+  "line": 1,
+  "system_header": false,
+  "scope": [
+   {
+    "kind": "namespace",
+    "name": "n"
+   }
+  ],
+  "attribute_details": [],
+  "deprecated": null,
+  "uid": 2856,
+  "type_uid": 10,
+  "external_linkage": true,
+  "inline": false,
+  "attributes": null,
+  "artificial": false,
+  "access": "public",
+  "mangled": "_ZN1n5limitE",
+  "abi": {
+   "encoding": "signed",
+   "size": 4,
+   "alignment": 4,
+   "lanes": 0
+  },
+  "const": true,
+  "volatile": false,
+  "tls": false,
+  "size_bits": 32,
+  "alignment_bits": 32,
+  "value": null,
+  "value_expression": null
+ },
+ {
+  "kind": "function_decl",
+  "name": "free_fn",
+  "qualified": "int n::free_fn(const B&, int)",
+  "type": "int(const n::B&, int)",
+  "identity": null,
+  "source": "@HEADER@",
+  "line": 1,
+  "system_header": false,
+  "scope": [
+   {
+    "kind": "namespace",
+    "name": "n"
+   }
+  ],
+  "attribute_details": [],
+  "deprecated": null,
+  "uid": 2854,
+  "type_uid": 1078,
+  "external_linkage": true,
+  "inline": false,
+  "attributes": null,
+  "artificial": false,
+  "access": "public",
+  "return_abi": {
+   "encoding": "signed",
+   "size": 4,
+   "alignment": 4,
+   "lanes": 0
+  },
+  "return_pointer_depth": 0,
+  "variadic": false,
+  "return_type": "int",
+  "return_identity": null,
+  "parameters": [
+   {
+    "type": "const n::B&",
+    "identity": "n::B",
+    "default": null,
+    "abi": null,
+    "param_kind": "reference",
+    "pointer_depth": 1,
+    "restrict": false,
+    "implicit_this": false,
+    "artificial": false,
+    "name": ""
+   },
+   {
+    "type": "int",
+    "identity": null,
+    "default": null,
+    "abi": {
+     "encoding": "signed",
+     "size": 4,
+     "alignment": 4,
+     "lanes": 0
+    },
+    "param_kind": "value",
+    "pointer_depth": 0,
+    "restrict": false,
+    "implicit_this": false,
+    "artificial": false,
+    "name": ""
+   }
+  ],
+  "override": false,
+  "const": false,
+  "volatile": false,
+  "static_member": false,
+  "pure_virtual": false,
+  "constructor": false,
+  "destructor": false,
+  "clone": false,
+  "explicit": false,
+  "ref_qualifier": "",
+  "deleted": false,
+  "defaulted": false,
+  "constexpr": false,
+  "virtual": false,
+  "vindex": null,
+  "noexcept": false,
+  "extern_c": false,
+  "mangled": "_ZN1n7free_fnERKNS_1BEi"
+ },
+ {
+  "kind": "type_decl",
+  "name": "D",
+  "qualified": "n::D",
+  "type": "n::D",
+  "identity": "n::D",
+  "source": "@HEADER@",
+  "line": 1,
+  "system_header": false,
+  "scope": [
+   {
+    "kind": "namespace",
+    "name": "n"
+   }
+  ],
+  "attribute_details": [],
+  "deprecated": null,
+  "uid": 2824,
+  "type_uid": 1051,
+  "external_linkage": true,
+  "inline": false,
+  "attributes": null,
+  "artificial": true,
+  "access": "public",
+  "abi": null,
+  "underlying_type": "n::D",
+  "implicit_typedef": true
+ },
+ {
+  "kind": "record_type",
+  "name": "n::D",
+  "size_bits": 128,
+  "alignment_bits": 64,
+  "scope": [
+   {
+    "kind": "namespace",
+    "name": "n"
+   }
+  ],
+  "anonymous": false,
+  "type_uid": 1051,
+  "leaf_name": "n::D",
+  "dependent": false,
+  "record_kind": "struct",
+  "specialization_declared": null,
+  "data_size_bits": 96,
+  "standard_layout": false,
+  "trivially_copyable": false,
+  "abstract": false,
+  "final": false,
+  "vtable_initializers": [
+   {
+    "name": "_ZTVN1n1DE",
+    "initializer_kind": "constructor",
+    "initializer": "{(int (*) ()) 0, (int (*) ()) &_ZTIN1n1DE, (int (*) ()) __dt_comp , (int (*) ()) __dt_del , (int (*) ()) v}",
+    "entries": [
+     {
+      "index": 0,
+      "target": null,
+      "value": "(int (*) ()) 0"
+     },
+     {
+      "index": 1,
+      "target": "_ZTIN1n1DE",
+      "value": "(int (*) ()) &_ZTIN1n1DE"
+     },
+     {
+      "index": 2,
+      "target": "_ZN1n1DD1Ev",
+      "value": "(int (*) ()) __dt_comp "
+     },
+     {
+      "index": 3,
+      "target": "_ZN1n1DD0Ev",
+      "value": "(int (*) ()) __dt_del "
+     },
+     {
+      "index": 4,
+      "target": "_ZNK1n1D1vEv",
+      "value": "(int (*) ()) v"
+     }
+    ]
+   }
+  ],
+  "vtable_candidate_groups": [
+   {
+    "type": "n::D",
+    "offset_bytes": 0,
+    "slots": [
+     {
+      "method": "virtual n::D::~D()",
+      "this_adjustment": 0,
+      "vcall_index": null
+     },
+     {
+      "method": "virtual n::D::~D()",
+      "this_adjustment": 0,
+      "vcall_index": null
+     },
+     {
+      "method": "virtual int n::D::v() const",
+      "this_adjustment": 0,
+      "vcall_index": null
+     }
+    ]
+   },
+   {
+    "type": "n::B",
+    "offset_bytes": 0,
+    "slots": [
+     {
+      "method": "virtual n::B::~B()",
+      "this_adjustment": 0,
+      "vcall_index": null
+     },
+     {
+      "method": "virtual n::B::~B()",
+      "this_adjustment": 0,
+      "vcall_index": null
+     },
+     {
+      "method": "virtual int n::B::v() const",
+      "this_adjustment": 0,
+      "vcall_index": null
+     }
+    ]
+   }
+  ],
+  "source": "@HEADER@",
+  "line": 1,
+  "system_header": false,
+  "fields": [
+   {
+    "name": "",
+    "type": "n::B",
+    "identity": "n::B",
+    "offset_bits": 0,
+    "size_bits": 96,
+    "bitfield": false,
+    "artificial": true,
+    "access": "public",
+    "abi": null,
+    "const": false,
+    "volatile": false,
+    "mutable": false,
+    "default": null
+   }
+  ],
+  "bases": [
+   {
+    "type": "n::B",
+    "offset_bytes": 0,
+    "virtual": false
+   }
+  ]
+ },
+ {
+  "kind": "record_type",
+  "name": "n::B",
+  "size_bits": 128,
+  "alignment_bits": 64,
+  "scope": [
+   {
+    "kind": "namespace",
+    "name": "n"
+   }
+  ],
+  "anonymous": false,
+  "type_uid": 1029,
+  "leaf_name": "n::B",
+  "dependent": false,
+  "record_kind": "struct",
+  "specialization_declared": null,
+  "data_size_bits": 96,
+  "standard_layout": false,
+  "trivially_copyable": false,
+  "abstract": true,
+  "final": false,
+  "vtable_initializers": [
+   {
+    "name": "_ZTVN1n1BE",
+    "initializer_kind": "constructor",
+    "initializer": "{(int (*) ()) 0, (int (*) ()) &_ZTIN1n1BE, 0, 0, (int (*) ()) __cxa_pure_virtual}",
+    "entries": [
+     {
+      "index": 0,
+      "target": null,
+      "value": "(int (*) ()) 0"
+     },
+     {
+      "index": 1,
+      "target": "_ZTIN1n1BE",
+      "value": "(int (*) ()) &_ZTIN1n1BE"
+     },
+     {
+      "index": 2,
+      "target": null,
+      "value": "0"
+     },
+     {
+      "index": 3,
+      "target": null,
+      "value": "0"
+     },
+     {
+      "index": 4,
+      "target": "__cxa_pure_virtual",
+      "value": "(int (*) ()) __cxa_pure_virtual"
+     }
+    ]
+   }
+  ],
+  "vtable_candidate_groups": [
+   {
+    "type": "n::B",
+    "offset_bytes": 0,
+    "slots": [
+     {
+      "method": "virtual n::B::~B()",
+      "this_adjustment": 0,
+      "vcall_index": null
+     },
+     {
+      "method": "virtual n::B::~B()",
+      "this_adjustment": 0,
+      "vcall_index": null
+     },
+     {
+      "method": "virtual int n::B::v() const",
+      "this_adjustment": 0,
+      "vcall_index": null
+     }
+    ]
+   }
+  ],
+  "source": "@HEADER@",
+  "line": 1,
+  "system_header": false,
+  "fields": [
+   {
+    "name": "_vptr.B",
+    "type": "int (**)(...)",
+    "identity": null,
+    "offset_bits": 0,
+    "size_bits": 64,
+    "bitfield": false,
+    "artificial": true,
+    "access": "public",
+    "abi": null,
+    "const": false,
+    "volatile": false,
+    "mutable": false,
+    "default": null
+   },
+   {
+    "name": "x",
+    "type": "int",
+    "identity": null,
+    "offset_bits": 64,
+    "size_bits": 32,
+    "bitfield": false,
+    "artificial": false,
+    "access": "public",
+    "abi": {
+     "encoding": "signed",
+     "size": 4,
+     "alignment": 4,
+     "lanes": 0
+    },
+    "const": false,
+    "volatile": false,
+    "mutable": false,
+    "default": null
+   }
+  ],
+  "bases": []
+ },
+ {
+  "kind": "function_decl",
+  "name": "__dt ",
+  "qualified": "virtual n::B::~B()",
+  "type": "void (n::B::)(int) noexcept",
+  "identity": null,
+  "source": "@HEADER@",
+  "line": 1,
+  "system_header": false,
+  "scope": [
+   {
+    "kind": "namespace",
+    "name": "n"
+   },
+   {
+    "kind": "record",
+    "name": "n::B"
+   }
+  ],
+  "attribute_details": [],
+  "deprecated": null,
+  "uid": 2796,
+  "type_uid": 1034,
+  "external_linkage": true,
+  "inline": false,
+  "attributes": null,
+  "artificial": false,
+  "access": "public",
+  "return_abi": null,
+  "return_pointer_depth": 0,
+  "variadic": false,
+  "return_type": "void",
+  "return_identity": null,
+  "parameters": [
+   {
+    "type": "n::B*",
+    "identity": "n::B",
+    "default": null,
+    "abi": null,
+    "param_kind": "pointer",
+    "pointer_depth": 1,
+    "restrict": false,
+    "implicit_this": true,
+    "artificial": true,
+    "name": "this"
+   },
+   {
+    "type": "int",
+    "identity": null,
+    "default": null,
+    "abi": {
+     "encoding": "signed",
+     "size": 4,
+     "alignment": 4,
+     "lanes": 0
+    },
+    "param_kind": "value",
+    "pointer_depth": 0,
+    "restrict": false,
+    "implicit_this": false,
+    "artificial": true,
+    "name": "__in_chrg"
+   }
+  ],
+  "override": false,
+  "const": false,
+  "volatile": false,
+  "static_member": false,
+  "pure_virtual": false,
+  "constructor": false,
+  "destructor": true,
+  "clone": false,
+  "explicit": false,
+  "ref_qualifier": "",
+  "deleted": false,
+  "defaulted": false,
+  "constexpr": false,
+  "virtual": true,
+  "vindex": null,
+  "noexcept": true,
+  "extern_c": false
+ },
+ {
+  "kind": "function_decl",
+  "name": "__dt_base ",
+  "qualified": "n::B::~B()",
+  "type": "void (n::B::)() noexcept (<uninstantiated>)",
+  "identity": null,
+  "source": "@HEADER@",
+  "line": 1,
+  "system_header": false,
+  "scope": [
+   {
+    "kind": "namespace",
+    "name": "n"
+   },
+   {
+    "kind": "record",
+    "name": "n::B"
+   }
+  ],
+  "attribute_details": [],
+  "deprecated": null,
+  "uid": 2810,
+  "type_uid": 1033,
+  "external_linkage": true,
+  "inline": false,
+  "attributes": null,
+  "artificial": false,
+  "access": "public",
+  "return_abi": null,
+  "return_pointer_depth": 0,
+  "variadic": false,
+  "return_type": "void",
+  "return_identity": null,
+  "parameters": [
+   {
+    "type": "n::B*",
+    "identity": "n::B",
+    "default": null,
+    "abi": null,
+    "param_kind": "pointer",
+    "pointer_depth": 1,
+    "restrict": false,
+    "implicit_this": true,
+    "artificial": true,
+    "name": "this"
+   }
+  ],
+  "override": false,
+  "const": false,
+  "volatile": false,
+  "static_member": false,
+  "pure_virtual": false,
+  "constructor": false,
+  "destructor": true,
+  "clone": true,
+  "explicit": false,
+  "ref_qualifier": "",
+  "deleted": false,
+  "defaulted": false,
+  "constexpr": false,
+  "virtual": false,
+  "vindex": null,
+  "noexcept": null,
+  "extern_c": false,
+  "mangled": "_ZN1n1BD2Ev"
+ },
+ {
+  "kind": "function_decl",
+  "name": "__dt_comp ",
+  "qualified": "virtual n::B::~B()",
+  "type": "void (n::B::)() noexcept",
+  "identity": null,
+  "source": "@HEADER@",
+  "line": 1,
+  "system_header": false,
+  "scope": [
+   {
+    "kind": "namespace",
+    "name": "n"
+   },
+   {
+    "kind": "record",
+    "name": "n::B"
+   }
+  ],
+  "attribute_details": [],
+  "deprecated": null,
+  "uid": 2807,
+  "type_uid": 1033,
+  "external_linkage": true,
+  "inline": false,
+  "attributes": null,
+  "artificial": false,
+  "access": "public",
+  "return_abi": null,
+  "return_pointer_depth": 0,
+  "variadic": false,
+  "return_type": "void",
+  "return_identity": null,
+  "parameters": [
+   {
+    "type": "n::B*",
+    "identity": "n::B",
+    "default": null,
+    "abi": null,
+    "param_kind": "pointer",
+    "pointer_depth": 1,
+    "restrict": false,
+    "implicit_this": true,
+    "artificial": true,
+    "name": "this"
+   }
+  ],
+  "override": false,
+  "const": false,
+  "volatile": false,
+  "static_member": false,
+  "pure_virtual": false,
+  "constructor": false,
+  "destructor": true,
+  "clone": true,
+  "explicit": false,
+  "ref_qualifier": "",
+  "deleted": false,
+  "defaulted": false,
+  "constexpr": false,
+  "virtual": true,
+  "vindex": 0,
+  "noexcept": true,
+  "extern_c": false,
+  "mangled": "_ZN1n1BD1Ev"
+ },
+ {
+  "kind": "function_decl",
+  "name": "__dt_del ",
+  "qualified": "virtual n::B::~B()",
+  "type": "void (n::B::)() noexcept (<uninstantiated>)",
+  "identity": null,
+  "source": "@HEADER@",
+  "line": 1,
+  "system_header": false,
+  "scope": [
+   {
+    "kind": "namespace",
+    "name": "n"
+   },
+   {
+    "kind": "record",
+    "name": "n::B"
+   }
+  ],
+  "attribute_details": [],
+  "deprecated": null,
+  "uid": 2804,
+  "type_uid": 1033,
+  "external_linkage": true,
+  "inline": false,
+  "attributes": null,
+  "artificial": false,
+  "access": "public",
+  "return_abi": null,
+  "return_pointer_depth": 0,
+  "variadic": false,
+  "return_type": "void",
+  "return_identity": null,
+  "parameters": [
+   {
+    "type": "n::B*",
+    "identity": "n::B",
+    "default": null,
+    "abi": null,
+    "param_kind": "pointer",
+    "pointer_depth": 1,
+    "restrict": false,
+    "implicit_this": true,
+    "artificial": true,
+    "name": "this"
+   }
+  ],
+  "override": false,
+  "const": false,
+  "volatile": false,
+  "static_member": false,
+  "pure_virtual": false,
+  "constructor": false,
+  "destructor": true,
+  "clone": true,
+  "explicit": false,
+  "ref_qualifier": "",
+  "deleted": false,
+  "defaulted": false,
+  "constexpr": false,
+  "virtual": true,
+  "vindex": 1,
+  "noexcept": null,
+  "extern_c": false,
+  "mangled": "_ZN1n1BD0Ev"
+ },
+ {
+  "kind": "function_decl",
+  "name": "v",
+  "qualified": "virtual int n::B::v() const",
+  "type": "int (n::B::)() const",
+  "identity": null,
+  "source": "@HEADER@",
+  "line": 1,
+  "system_header": false,
+  "scope": [
+   {
+    "kind": "namespace",
+    "name": "n"
+   },
+   {
+    "kind": "record",
+    "name": "n::B"
+   }
+  ],
+  "attribute_details": [],
+  "deprecated": null,
+  "uid": 2800,
+  "type_uid": 1038,
+  "external_linkage": true,
+  "inline": false,
+  "attributes": null,
+  "artificial": false,
+  "access": "public",
+  "return_abi": {
+   "encoding": "signed",
+   "size": 4,
+   "alignment": 4,
+   "lanes": 0
+  },
+  "return_pointer_depth": 0,
+  "variadic": false,
+  "return_type": "int",
+  "return_identity": null,
+  "parameters": [
+   {
+    "type": "const n::B*",
+    "identity": "n::B",
+    "default": null,
+    "abi": null,
+    "param_kind": "pointer",
+    "pointer_depth": 1,
+    "restrict": false,
+    "implicit_this": true,
+    "artificial": true,
+    "name": "this"
+   }
+  ],
+  "override": false,
+  "const": true,
+  "volatile": false,
+  "static_member": false,
+  "pure_virtual": true,
+  "constructor": false,
+  "destructor": false,
+  "clone": false,
+  "explicit": false,
+  "ref_qualifier": "",
+  "deleted": false,
+  "defaulted": false,
+  "constexpr": false,
+  "virtual": true,
+  "vindex": 2,
+  "noexcept": false,
+  "extern_c": false,
+  "mangled": "_ZNK1n1B1vEv"
+ },
+ {
+  "kind": "type_decl",
+  "name": "B",
+  "qualified": "n::B n::B::B",
+  "type": "n::B",
+  "identity": "n::B",
+  "source": "@HEADER@",
+  "line": 1,
+  "system_header": false,
+  "scope": [
+   {
+    "kind": "namespace",
+    "name": "n"
+   },
+   {
+    "kind": "record",
+    "name": "n::B"
+   }
+  ],
+  "attribute_details": [],
+  "deprecated": null,
+  "uid": 2794,
+  "type_uid": 1029,
+  "external_linkage": false,
+  "inline": false,
+  "attributes": null,
+  "artificial": true,
+  "access": "public",
+  "abi": null,
+  "underlying_type": "n::B",
+  "implicit_typedef": false
+ },
+ {
+  "kind": "function_decl",
+  "name": "v",
+  "qualified": "virtual int n::D::v() const",
+  "type": "int (n::D::)() const",
+  "identity": null,
+  "source": "@HEADER@",
+  "line": 1,
+  "system_header": false,
+  "scope": [
+   {
+    "kind": "namespace",
+    "name": "n"
+   },
+   {
+    "kind": "record",
+    "name": "n::D"
+   }
+  ],
+  "attribute_details": [],
+  "deprecated": null,
+  "uid": 2827,
+  "type_uid": 1056,
+  "external_linkage": true,
+  "inline": false,
+  "attributes": null,
+  "artificial": false,
+  "access": "public",
+  "return_abi": {
+   "encoding": "signed",
+   "size": 4,
+   "alignment": 4,
+   "lanes": 0
+  },
+  "return_pointer_depth": 0,
+  "variadic": false,
+  "return_type": "int",
+  "return_identity": null,
+  "parameters": [
+   {
+    "type": "const n::D*",
+    "identity": "n::D",
+    "default": null,
+    "abi": null,
+    "param_kind": "pointer",
+    "pointer_depth": 1,
+    "restrict": false,
+    "implicit_this": true,
+    "artificial": true,
+    "name": "this"
+   }
+  ],
+  "override": true,
+  "const": true,
+  "volatile": false,
+  "static_member": false,
+  "pure_virtual": false,
+  "constructor": false,
+  "destructor": false,
+  "clone": false,
+  "explicit": false,
+  "ref_qualifier": "",
+  "deleted": false,
+  "defaulted": false,
+  "constexpr": false,
+  "virtual": true,
+  "vindex": 2,
+  "noexcept": false,
+  "extern_c": false,
+  "mangled": "_ZNK1n1D1vEv"
+ },
+ {
+  "kind": "function_decl",
+  "name": "s",
+  "qualified": "static int n::D::s()",
+  "type": "int()",
+  "identity": null,
+  "source": "@HEADER@",
+  "line": 1,
+  "system_header": false,
+  "scope": [
+   {
+    "kind": "namespace",
+    "name": "n"
+   },
+   {
+    "kind": "record",
+    "name": "n::D"
+   }
+  ],
+  "attribute_details": [],
+  "deprecated": null,
+  "uid": 2830,
+  "type_uid": 145,
+  "external_linkage": true,
+  "inline": false,
+  "attributes": null,
+  "artificial": false,
+  "access": "public",
+  "return_abi": {
+   "encoding": "signed",
+   "size": 4,
+   "alignment": 4,
+   "lanes": 0
+  },
+  "return_pointer_depth": 0,
+  "variadic": false,
+  "return_type": "int",
+  "return_identity": null,
+  "parameters": [],
+  "override": false,
+  "const": false,
+  "volatile": false,
+  "static_member": true,
+  "pure_virtual": false,
+  "constructor": false,
+  "destructor": false,
+  "clone": false,
+  "explicit": false,
+  "ref_qualifier": "",
+  "deleted": false,
+  "defaulted": false,
+  "constexpr": false,
+  "virtual": false,
+  "vindex": null,
+  "noexcept": false,
+  "extern_c": false,
+  "mangled": "_ZN1n1D1sEv"
+ },
+ {
+  "kind": "type_decl",
+  "name": "D",
+  "qualified": "n::D n::D::D",
+  "type": "n::D",
+  "identity": "n::D",
+  "source": "@HEADER@",
+  "line": 1,
+  "system_header": false,
+  "scope": [
+   {
+    "kind": "namespace",
+    "name": "n"
+   },
+   {
+    "kind": "record",
+    "name": "n::D"
+   }
+  ],
+  "attribute_details": [],
+  "deprecated": null,
+  "uid": 2825,
+  "type_uid": 1051,
+  "external_linkage": false,
+  "inline": false,
+  "attributes": null,
+  "artificial": true,
+  "access": "public",
+  "abi": null,
+  "underlying_type": "n::D",
+  "implicit_typedef": false
+ },
+ {
+  "kind": "function_decl",
+  "name": "__dt ",
+  "qualified": "virtual n::D::~D()",
+  "type": "void (n::D::)(int) noexcept",
+  "identity": null,
+  "source": "@HEADER@",
+  "line": 1,
+  "system_header": false,
+  "scope": [
+   {
+    "kind": "namespace",
+    "name": "n"
+   },
+   {
+    "kind": "record",
+    "name": "n::D"
+   }
+  ],
+  "attribute_details": [],
+  "deprecated": null,
+  "uid": 2832,
+  "type_uid": 1065,
+  "external_linkage": true,
+  "inline": true,
+  "attributes": null,
+  "artificial": true,
+  "access": "public",
+  "return_abi": null,
+  "return_pointer_depth": 0,
+  "variadic": false,
+  "return_type": "void",
+  "return_identity": null,
+  "parameters": [
+   {
+    "type": "n::D*",
+    "identity": "n::D",
+    "default": null,
+    "abi": null,
+    "param_kind": "pointer",
+    "pointer_depth": 1,
+    "restrict": false,
+    "implicit_this": true,
+    "artificial": true,
+    "name": "this"
+   },
+   {
+    "type": "int",
+    "identity": null,
+    "default": null,
+    "abi": {
+     "encoding": "signed",
+     "size": 4,
+     "alignment": 4,
+     "lanes": 0
+    },
+    "param_kind": "value",
+    "pointer_depth": 0,
+    "restrict": false,
+    "implicit_this": false,
+    "artificial": true,
+    "name": "__in_chrg"
+   }
+  ],
+  "override": false,
+  "const": false,
+  "volatile": false,
+  "static_member": false,
+  "pure_virtual": false,
+  "constructor": false,
+  "destructor": true,
+  "clone": false,
+  "explicit": false,
+  "ref_qualifier": "",
+  "deleted": false,
+  "defaulted": true,
+  "constexpr": false,
+  "virtual": true,
+  "vindex": null,
+  "noexcept": true,
+  "extern_c": false
+ },
+ {
+  "kind": "function_decl",
+  "name": "__dt_base ",
+  "qualified": "n::D::~D()",
+  "type": "void (n::D::)() noexcept",
+  "identity": null,
+  "source": "@HEADER@",
+  "line": 1,
+  "system_header": false,
+  "scope": [
+   {
+    "kind": "namespace",
+    "name": "n"
+   },
+   {
+    "kind": "record",
+    "name": "n::D"
+   }
+  ],
+  "attribute_details": [],
+  "deprecated": null,
+  "uid": 2841,
+  "type_uid": 1061,
+  "external_linkage": true,
+  "inline": true,
+  "attributes": null,
+  "artificial": true,
+  "access": "public",
+  "return_abi": null,
+  "return_pointer_depth": 0,
+  "variadic": false,
+  "return_type": "void",
+  "return_identity": null,
+  "parameters": [
+   {
+    "type": "n::D*",
+    "identity": "n::D",
+    "default": null,
+    "abi": null,
+    "param_kind": "pointer",
+    "pointer_depth": 1,
+    "restrict": false,
+    "implicit_this": true,
+    "artificial": true,
+    "name": "this"
+   }
+  ],
+  "override": false,
+  "const": false,
+  "volatile": false,
+  "static_member": false,
+  "pure_virtual": false,
+  "constructor": false,
+  "destructor": true,
+  "clone": true,
+  "explicit": false,
+  "ref_qualifier": "",
+  "deleted": false,
+  "defaulted": true,
+  "constexpr": false,
+  "virtual": false,
+  "vindex": null,
+  "noexcept": true,
+  "extern_c": false,
+  "mangled": "_ZN1n1DD2Ev"
+ },
+ {
+  "kind": "function_decl",
+  "name": "__dt_comp ",
+  "qualified": "virtual n::D::~D()",
+  "type": "void (n::D::)() noexcept",
+  "identity": null,
+  "source": "@HEADER@",
+  "line": 1,
+  "system_header": false,
+  "scope": [
+   {
+    "kind": "namespace",
+    "name": "n"
+   },
+   {
+    "kind": "record",
+    "name": "n::D"
+   }
+  ],
+  "attribute_details": [],
+  "deprecated": null,
+  "uid": 2838,
+  "type_uid": 1061,
+  "external_linkage": true,
+  "inline": true,
+  "attributes": null,
+  "artificial": true,
+  "access": "public",
+  "return_abi": null,
+  "return_pointer_depth": 0,
+  "variadic": false,
+  "return_type": "void",
+  "return_identity": null,
+  "parameters": [
+   {
+    "type": "n::D*",
+    "identity": "n::D",
+    "default": null,
+    "abi": null,
+    "param_kind": "pointer",
+    "pointer_depth": 1,
+    "restrict": false,
+    "implicit_this": true,
+    "artificial": true,
+    "name": "this"
+   }
+  ],
+  "override": false,
+  "const": false,
+  "volatile": false,
+  "static_member": false,
+  "pure_virtual": false,
+  "constructor": false,
+  "destructor": true,
+  "clone": true,
+  "explicit": false,
+  "ref_qualifier": "",
+  "deleted": false,
+  "defaulted": true,
+  "constexpr": false,
+  "virtual": true,
+  "vindex": 0,
+  "noexcept": true,
+  "extern_c": false,
+  "mangled": "_ZN1n1DD1Ev"
+ },
+ {
+  "kind": "function_decl",
+  "name": "__dt_del ",
+  "qualified": "virtual n::D::~D()",
+  "type": "void (n::D::)() noexcept",
+  "identity": null,
+  "source": "@HEADER@",
+  "line": 1,
+  "system_header": false,
+  "scope": [
+   {
+    "kind": "namespace",
+    "name": "n"
+   },
+   {
+    "kind": "record",
+    "name": "n::D"
+   }
+  ],
+  "attribute_details": [],
+  "deprecated": null,
+  "uid": 2835,
+  "type_uid": 1061,
+  "external_linkage": true,
+  "inline": true,
+  "attributes": null,
+  "artificial": true,
+  "access": "public",
+  "return_abi": null,
+  "return_pointer_depth": 0,
+  "variadic": false,
+  "return_type": "void",
+  "return_identity": null,
+  "parameters": [
+   {
+    "type": "n::D*",
+    "identity": "n::D",
+    "default": null,
+    "abi": null,
+    "param_kind": "pointer",
+    "pointer_depth": 1,
+    "restrict": false,
+    "implicit_this": true,
+    "artificial": true,
+    "name": "this"
+   }
+  ],
+  "override": false,
+  "const": false,
+  "volatile": false,
+  "static_member": false,
+  "pure_virtual": false,
+  "constructor": false,
+  "destructor": true,
+  "clone": true,
+  "explicit": false,
+  "ref_qualifier": "",
+  "deleted": false,
+  "defaulted": true,
+  "constexpr": false,
+  "virtual": true,
+  "vindex": 1,
+  "noexcept": true,
+  "extern_c": false,
+  "mangled": "_ZN1n1DD0Ev"
+ },
+ {
+  "kind": "type_decl",
+  "name": "B",
+  "qualified": "n::B",
+  "type": "n::B",
+  "identity": "n::B",
+  "source": "@HEADER@",
+  "line": 1,
+  "system_header": false,
+  "scope": [
+   {
+    "kind": "namespace",
+    "name": "n"
+   }
+  ],
+  "attribute_details": [],
+  "deprecated": null,
+  "uid": 2793,
+  "type_uid": 1029,
+  "external_linkage": true,
+  "inline": false,
+  "attributes": null,
+  "artificial": true,
+  "access": "public",
+  "abi": null,
+  "underlying_type": "n::B",
+  "implicit_typedef": true
+ },
+ {
+  "kind": "end",
+  "errors": 0
+ }
+]

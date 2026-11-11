@@ -51,6 +51,10 @@ from ._depth_projection import (
     depth_projection_findings,
 )
 from ._export_read import EXPORT_READ_DIMENSION, export_read_findings
+from ._extraction_limitations import (
+    EXTRACTION_LIMITATIONS_DIMENSION,
+    extraction_limitation_findings,
+)
 from ._noexcept import NOEXCEPT_GAP_DIMENSION, noexcept_findings
 from ._scope_fallback import SCOPE_FALLBACK_DIMENSION, scope_fallback_findings
 from ._template_defaults import (
@@ -94,6 +98,12 @@ class UnobservedDimension:
 _PKG = __name__.rsplit(".", 1)[0]
 #: The registry, in note-emission order (a constant: nothing to memoize).
 UNOBSERVED_DIMENSIONS: tuple[UnobservedDimension, ...] = (
+    UnobservedDimension(
+        EXTRACTION_LIMITATIONS_DIMENSION,
+        f"{_PKG}._extraction_limitations",
+        extraction_limitation_findings,
+        coverage_warning=True,
+    ),
     UnobservedDimension(
         TEMPLATE_DEFAULTS_DIMENSION,
         f"{_PKG}._template_defaults",

@@ -25,7 +25,7 @@ into a :class:`~abicheck.extract.header_ast_fields.HeaderAstFields`.
 
 Backends take their process runner as a constructor argument, so a test
 supplies a fake runner (or a fake backend) instead of patching a module
-name. ``dumper.HEADER_AST_BACKENDS`` is the registry the dump dispatches
+name. ``extract.headers.backend_registry.HEADER_AST_BACKENDS`` is the registry the dump dispatches
 through.
 """
 

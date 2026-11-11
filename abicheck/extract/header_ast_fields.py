@@ -120,11 +120,18 @@ class HeaderAstFields:
         default=None, kw_only=True
     )
 
+    extraction_provenance: dict[str, Any] | None = field(default=None, kw_only=True)
+
     def clang_ast_tables(self) -> dict[str, Any]:
         """The snapshot fields read from a clang AST of the headers (the
         clang backend's own, or castxml's clang join): the concept and
         template-default tables."""
         return {
+            **(
+                {"dump_provenance": self.extraction_provenance}
+                if self.extraction_provenance is not None
+                else {}
+            ),
             "cxx_concept_constraints": self.cxx_concept_constraints,
             "cxx_template_defaults": self.cxx_template_defaults,
         }
@@ -161,6 +168,15 @@ def _concept_constraints(parser: object, producer: str) -> dict[str, str] | None
     return collect_cxx_concept_constraints(root, segs, dirs, have_public_set)
 
 
+class PrenormalizedHeaderAst:
+    """Base of a header parser whose backend produced :class:`HeaderAstFields`
+    directly (``extract/headers/gcc``), so :func:`parse_header_ast_fields`
+    returns them instead of walking an AST. Lives here so the backend
+    depends on this module, never the reverse."""
+
+    normalized_fields: HeaderAstFields
+
+
 def parse_header_ast_fields(
     parser: _HeaderAstParser, *, producer: str
 ) -> HeaderAstFields:
@@ -172,6 +188,11 @@ def parse_header_ast_fields(
     both slower and lossy.  Keep that established per-member binding path, and
     single-flight only the canonical ``SemanticIR`` derived from it.
     """
+    # A backend that already normalized its facts (native GCC) has no AST to
+    # re-walk. Matched by type, not by probing every parser for an attribute
+    # only that one provides.
+    if isinstance(parser, PrenormalizedHeaderAst):
+        return parser.normalized_fields
     legacy = _parse_header_ast_legacy(parser, producer)
     # The shared normalization is keyed on the parsed AST's identity. A
     # parser that does not expose its root cannot be keyed: every such

@@ -379,6 +379,19 @@ def _dump_cache_extra_key(
             )
         except Exception as exc:  # missing optional backend remains key material
             frontend_tools.append(f"clang-unavailable:{type(exc).__name__}:{exc}")
+    if resolved_backend == "gcc":
+        from ....extract.headers.gcc.discovery import find_plugin, resolve_compiler
+
+        native_cc = resolve_compiler(
+            gcc_path or ((gcc_prefix or "") + ("gcc" if lang == "c" else "g++"))
+        )
+        native_plugin = find_plugin(native_cc, "c" if lang == "c" else "c++")
+        frontend_tools.append(
+            str(native_plugin)
+            + ":"
+            + hashlib.sha256(native_plugin.read_bytes()).hexdigest()
+        )
+        frontend_tools.append(_tool_identity(native_cc))
     compiler_identity = ""
     compiler_bin_for_sysinc = ""
     if resolved_backend in ("castxml", "hybrid"):
@@ -406,6 +419,8 @@ def _dump_cache_extra_key(
     header_graph_clang = ""
     clang_bin_for_sysinc = ""
     try:
+        if resolved_backend == "gcc":
+            raise SnapshotError("Native GCC does not acquire a Clang header graph")
         clang_driver = _clang_driver(compiler, gcc_path, gcc_prefix)
         resolved_path = shutil.which(clang_driver) or clang_driver
         clang_bin_for_sysinc = resolved_path

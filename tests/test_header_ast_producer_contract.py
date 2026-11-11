@@ -29,7 +29,7 @@ from pathlib import Path
 
 import pytest
 
-from abicheck import dumper
+from abicheck.extract.headers import backend_registry
 from abicheck.extract.headers.backend_protocol import HeaderParseRequest
 from abicheck.extract.headers.toolchain import _parser_ast_toolchain
 
@@ -40,7 +40,7 @@ _HAVE_TOOL = {
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("name", sorted(dumper.HEADER_AST_BACKENDS))
+@pytest.mark.parametrize("name", sorted(backend_registry.HEADER_AST_BACKENDS))
 def test_backend_parser_stamps_producer_equal_to_registry_key(
     name: str, tmp_path: Path
 ) -> None:
@@ -48,7 +48,7 @@ def test_backend_parser_stamps_producer_equal_to_registry_key(
         pytest.skip(f"{name} not installed")
     header = tmp_path / "contract.h"
     header.write_text("int contract_fn(int x);\n", encoding="utf-8")
-    backend = dumper.HEADER_AST_BACKENDS[name]
+    backend = backend_registry.HEADER_AST_BACKENDS[name]
 
     parser = backend.parse(
         HeaderParseRequest(headers=[header], extra_includes=[], lang="c")

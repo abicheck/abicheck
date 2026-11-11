@@ -21,10 +21,13 @@ tests/test_action_additions_verdict.py
 tests/test_action_delta_base_build.py
 tests/test_action_delta_baseline.py
 tests/test_action_delta_baseline_report.py
+tests/test_action_delta_equivalent_ancestor.py
+tests/test_action_delta_storage.py
 tests/test_action_pr_report_delivery.py
 tests/test_action_step_summary_no_adr.py
 tests/test_action_stored_bundle_facts_preflight.py
 tests/test_action_tombstone_replacements.py
+tests/test_action_unconfirmed_verdict.py
 tests/test_action_unused_rules_verdict.py
 tests/test_adr061_gap_b_facades.py
 tests/test_adr091_python_renames.py
@@ -286,6 +289,8 @@ tests/test_dumper_hybrid.py
 tests/test_dumper_members.py
 tests/test_dumper_scoping.py
 tests/test_duplicate_mangled.py
+tests/test_dwarf_erased_extent_generation_drift.py
+tests/test_dwarf_lane_extractor_parity.py
 tests/test_dwarf_snapshot.py
 tests/test_edge_cases.py
 tests/test_edge_coverage_readers.py
@@ -408,6 +413,7 @@ tests/test_memory_trace.py
 tests/test_metamorphic_snapshot_relations.py
 tests/test_multi_detector_interaction.py
 tests/test_namespace_move_cross_position_ambiguity.py
+tests/test_native_gcc_fact_integration.py
 tests/test_negative.py
 tests/test_new_detectors.py
 tests/test_no_baseline_compare.py
@@ -445,6 +451,7 @@ tests/test_pattern_verdicts_entity_ids.py
 tests/test_pe_metadata_unit.py
 tests/test_pe_pdb_section_failure.py
 tests/test_perf_report.py
+tests/test_performance_boundaries.py
 tests/test_performance_profile.py
 tests/test_persistent_hygiene_report_noise.py
 tests/test_persistent_hygiene_verdict.py
@@ -593,12 +600,14 @@ tests/test_surface_evidence_asymmetry_properties.py
 tests/test_surface_fact_split.py
 tests/test_surface_graph_sharing.py
 tests/test_surface_metrics_drift.py
+tests/test_surface_metrics_fan_in_index.py
 tests/test_surface_reconciliation_properties.py
 tests/test_surface_rollup_disposition.py
 tests/test_symbol_binding_field.py
 tests/test_symbol_identity_index.py
 tests/test_symbol_origin.py
 tests/test_symbol_renamed_batch_evidence.py
+tests/test_symbol_version_binding.py
 tests/test_symbol_versioning_coexistence.py
 tests/test_template_export_loss_declaration_presence_unit.py
 tests/test_template_instance_absence_shapes.py
@@ -613,6 +622,9 @@ tests/test_typedef_cutover.py
 tests/test_typedef_dedup.py
 tests/test_typedef_qualified_collision.py
 tests/test_typedef_version_sentinel.py
+tests/test_unconfirmed_binary_identity.py
+tests/test_unconfirmed_compatibility.py
+tests/test_unconfirmed_route_coverage.py
 tests/test_undeclared_export_shrink.py
 tests/test_undocumented_export_surface_scope.py
 tests/test_use_case_html_sarif_carriage.py
@@ -629,6 +641,7 @@ tests/test_versioning_policy.py
 tests/test_versioning_policy_wiring.py
 tests/test_view_internal_grammar.py
 tests/test_visibility.py
+tests/test_visibility_leak_owned_name.py
 tests/test_vtable_evidence_guard.py
 tests/test_vtable_layout_identity_pairing.py
 tests/test_vtable_severity.py
@@ -640,6 +653,7 @@ tests/test_workflow_scenarios.py
 tests/test_workflows_compare_execute.py
 tests/test_workflows_history.py
 tests/unit/compare/test_enum_underlying_size.py
+tests/unit/compare/test_glibcxx_dual_abi_detector.py
 tests/unit/compare/test_namespace_move.py
 tests/unit/compare/test_target_isa_detector.py
 tests/unit/extract/test_library_export_read_failures.py

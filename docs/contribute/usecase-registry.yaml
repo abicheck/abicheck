@@ -99,7 +99,7 @@ use_cases:
     status: complete
     user_task: [pr_review, local_check]
     journey_stages: [first_check, pr_review]
-    adrs: []
+    adrs: [ADR-092]
     evidence:
       examples: [catalog/ground_truth.json]
     note: 35 pure-C example pairs (catalog/cases/case*/v1.c).
@@ -110,7 +110,7 @@ use_cases:
     status: complete
     user_task: [pr_review, local_check]
     journey_stages: [first_check, pr_review]
-    adrs: []
+    adrs: [ADR-092]
     evidence:
       examples: [catalog/ground_truth.json]
     note: 52 C++ example pairs (catalog/cases/case*/v1.cpp).

@@ -80,6 +80,9 @@ def _base(version: str) -> AbiSnapshot:
 # One trigger per registered dimension module: mutate a plain snapshot so the
 # provider reports a status-lowering finding for that side.
 TRIGGERS: dict[str, Callable[[AbiSnapshot], AbiSnapshot]] = {
+    "_extraction_limitations": lambda s: dataclasses.replace(
+        s, dump_provenance={"extraction_limitations": ["macro contracts not collected"]}
+    ),
     "_template_defaults": lambda s: dataclasses.replace(
         s, ast_producer="castxml", template_default_header_scan=True
     ),

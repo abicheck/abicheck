@@ -70,7 +70,7 @@ from ..artifact.execute_header_only import (
 from ..artifact.execute_source_only import execute_source_only_dump_request
 from ..artifact.resolve import (
     is_raw_source_tree,
-    reject_hybrid_source_frontend,
+    reject_unsupported_header_frontend_evidence,
 )
 from ..operand_rules import reject_debug_format_for_binaries
 
@@ -199,7 +199,7 @@ def _reject_unsupported_frontends(
             "source tree -- pass a prebuilt evidence pack directory instead, "
             "or use has_sources=True with no inline sources/build_info."
         )
-    reject_hybrid_source_frontend(
+    reject_unsupported_header_frontend_evidence(
         request.depth, ((request.input, evidence),), header_backend
     )
 

@@ -36,7 +36,7 @@ from dataclasses import dataclass
 from ..env_flags import env_flag
 
 #: Backends an ``ABICHECK_AST_FRONTEND`` value may pin; anything else is unset.
-PINNABLE_BACKENDS = frozenset({"castxml", "clang", "hybrid"})
+PINNABLE_BACKENDS = frozenset({"castxml", "clang", "hybrid", "gcc"})
 
 
 def ast_frontend_pin() -> str:

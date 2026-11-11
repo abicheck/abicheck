@@ -42,7 +42,7 @@ def test_compile_frontend_accepts_each_documented_value(value: str) -> None:
 def test_compile_frontend_rejects_unknown_value() -> None:
     with pytest.raises(ValueError, match="frontend must be one of"):
         ProjectTargetsConfig.from_dict(
-            {"profiles": {"linux": {"compile": {"frontend": "gcc"}}}}
+            {"profiles": {"linux": {"compile": {"frontend": "edg"}}}}
         )
 
 
