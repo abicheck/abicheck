@@ -62,6 +62,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from ....model import ExplicitInstantiation, Fact, Function, Param
+from ....model.abi_fundamental import AbiFundamental
 from ....model.identity import (
     canonicalize_type_param_references,
     entity_id_for_function,
@@ -105,7 +106,7 @@ from .qualifiers import (
 )
 from .redeclarations import RedeclarationIdentity
 from .restrict_spelling import without_top_level_restrict
-from .return_type import return_type as _return_type
+from .return_type import return_type as _return_type, typedef_return_fact
 from .type_identity import TypeIdentityIndex
 
 #: Evaluates a param's default-argument initializer to its snapshot value
@@ -397,6 +398,7 @@ def parse_functions(
     function_constraints: FunctionConstraintIndex | None = None,
     builtin_abi: BuiltinAbi | None = None,
     type_identities: TypeIdentityIndex | None = None,
+    typedef_abi_facts: Mapping[str, Fact[AbiFundamental]] | None = None,
 ) -> list[Function]:
     funcs: list[Function] = []
     source_cache: dict[str, bytes | None] = {}
@@ -589,8 +591,13 @@ def parse_functions(
                 )
                 if type_identities
                 else None,
-                return_type_abi_fact=builtin_type_fact(
-                    _return_type(_qualtype_desugared(entry.node)), builtin_abi
+                return_type_abi_fact=typedef_return_fact(
+                    builtin_type_fact(
+                        _return_type(_qualtype_desugared(entry.node)), builtin_abi
+                    ),
+                    ret_type,
+                    entry.scope,
+                    typedef_abi_facts,
                 ),
                 params=params,
                 visibility=vis,

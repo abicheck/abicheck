@@ -50,7 +50,7 @@ import pytest
 from abicheck.checker import compare
 from abicheck.checker_policy import ChangeKind
 from abicheck.dumper import _CastxmlParser
-from abicheck.model import AbiSnapshot, AccessLevel, Fact, Variable
+from abicheck.model import AbiSnapshot, AccessLevel, Fact, FactStatus, Variable
 from tests._legacy_snapshot import as_legacy_baseline
 
 
@@ -540,18 +540,37 @@ def _var(access: AccessLevel) -> Variable:
     return Variable(name="data", mangled="_data", type="int", access=access)
 
 
+_ACCESS_KINDS = {ChangeKind.VAR_ACCESS_CHANGED, ChangeKind.VAR_ACCESS_WIDENED}
+
+
 def _kinds(result: object) -> set[ChangeKind]:
     return {c.kind for c in result.changes}  # type: ignore[attr-defined]
 
 
 class TestVarAccessProducerGate:
-    """Only castxml populates this fact (not clang, not "hybrid" either —
-    see ``AbiSnapshot.castxml_var_access_facts_reliable``'s own docstring)."""
+    """CastXML, Clang (since extractor generation 54) and native GCC record
+    a variable's access; "hybrid" does not say which backend a merged
+    variable came from (``model.snapshot_reliability.VAR_ACCESS_PRODUCERS``)."""
 
-    def test_clang_vs_castxml_does_not_manufacture_a_finding(self) -> None:
-        old = _snap(ast_producer="clang", variables=[_var(AccessLevel.PUBLIC)])
-        new = _snap(ast_producer="castxml", variables=[_var(AccessLevel.PRIVATE)])
-        assert ChangeKind.VAR_ACCESS_CHANGED not in _kinds(compare(old, new))
+    @pytest.mark.parametrize("old_producer", ["castxml", "clang", "gcc-experimental"])
+    @pytest.mark.parametrize("new_producer", ["castxml", "clang", "gcc-experimental"])
+    def test_every_access_producer_pair_compares(
+        self, old_producer: str, new_producer: str
+    ) -> None:
+        old = _snap(ast_producer=old_producer, variables=[_var(AccessLevel.PUBLIC)])
+        new = _snap(ast_producer=new_producer, variables=[_var(AccessLevel.PRIVATE)])
+        assert _kinds(compare(old, new)) & _ACCESS_KINDS == {
+            ChangeKind.VAR_ACCESS_CHANGED
+        }
+
+    def test_pre_generation_54_clang_side_never_compares(self) -> None:
+        # A Clang snapshot from before generation 54 left the omission
+        # sentinel, which persists as access_fact NOT_COLLECTED.
+        stale = Variable(name="data", mangled="_data", type="int")
+        assert stale.access_fact.status is FactStatus.NOT_COLLECTED
+        old = _snap(ast_producer="clang", variables=[stale])
+        new = _snap(ast_producer="clang", variables=[_var(AccessLevel.PRIVATE)])
+        assert _kinds(compare(old, new)) & _ACCESS_KINDS == set()
 
     def test_two_castxml_sides_compare(self) -> None:
         old = _snap(ast_producer="castxml", variables=[_var(AccessLevel.PUBLIC)])

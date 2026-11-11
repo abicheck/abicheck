@@ -71,7 +71,13 @@ from __future__ import annotations
 #: the cached AST) and a variable's alignment as a lower bound there; a DWARF
 #: 5 variable records its type's default alignment. A warm entry would carry
 #: neither.
-SNAPSHOT_CACHE_VERSION: str = "47"
+#:
+#: v48: header-backend parity -- a Clang dump records variable access and a
+#: typedef'd return type's ABI fact; a native GCC dump records deprecation,
+#: completeness, hidden friends, vtable slots, a vptr, const arrays and
+#: restrict, and respells unbounded arrays and _Atomic. A warm entry would
+#: carry none of them.
+SNAPSHOT_CACHE_VERSION: str = "48"
 # v35: header-derived snapshots now carry public_header_identifiers (schema
 # v55, extract/public_header_identifiers.py). The key also folds in the
 # snapshot schema version from this version on, so the next schema bump

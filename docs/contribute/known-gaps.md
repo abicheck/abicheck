@@ -206,8 +206,8 @@ dependency walk and debug roots to every member. No open gap remains.
 
 **Status (2026-11-05): OPEN.** For `handle_t make(Point, Color, Mode, count_t)` castxml records `type_abi_fact` PRESENT for the `Color`/`Mode` parameters and the `handle_t` return; the clang frontend records `NOT_COLLECTED` for them (it does record `count_t`, a typedef of a builtin spelled without a namespace, and every plain builtin). The gap is marked, not empty, so it narrows the ABI-equivalence path rather than manufacturing a break. Found by the default-install invariant suite while comparing frontends; independent of optional tools (the same with every tool present). Cause not traced; `builtin_type_fact` is called on the desugared spelling, and has no enum underlying-type input. Owner: `extract/headers/clang/functions.py`.
 
-`false-positive` — a clang-side enum or typedef retype between ABI-identical types is not downgraded; castxml snapshots are unaffected. [Full write-up](known-gaps/clang-leaves-enum-and-typedef-slots-without-a-type-abi-fact.md)
-<!-- canary: tests/test_default_install_fact_invariants.py::test_clang_leaves_enum_and_typedef_slots_without_an_abi_fact -->
+`false-positive` — a clang-side enum parameter retype between ABI-identical types is not downgraded (the typedef'd return slot was fixed in generation 54); castxml snapshots are unaffected. [Full write-up](known-gaps/clang-leaves-enum-and-typedef-slots-without-a-type-abi-fact.md)
+<!-- canary: tests/test_default_install_fact_invariants.py::test_clang_leaves_enum_slots_without_an_abi_fact -->
 
 #### The standing-inventory headline folds observed compatible findings into one clause (2026-10-28)
 
