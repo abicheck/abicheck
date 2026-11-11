@@ -24,6 +24,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -37,6 +38,14 @@ ROOT = Path(__file__).resolve().parents[1]
 pytestmark = pytest.mark.integration
 
 _TOOL = {"castxml": "castxml", "clang": "clang"}
+
+
+#: The same install name / SONAME on both sides, so neither reads as changed.
+_SAME_LIBRARY_NAME = (
+    ["-Wl,-install_name,@rpath/libparity.so"]
+    if sys.platform == "darwin"
+    else ["-Wl,-soname,libparity.so"]
+)
 
 
 @dataclass(frozen=True)
@@ -101,12 +110,21 @@ def _dump(work: Path, backend: str, side: str, cell: Cell, header_text: str) -> 
     header.write_text(header_text)
     source = work / f"{side}.{src_ext}"
     source.write_text(f'#include "{header.name}"\n{cell.source}')
-    # One library name in a per-side directory: the SONAME (Mach-O: the
-    # install name, which is the output path) must not differ between sides.
+    # One library name for both sides: the default Mach-O install name is the
+    # output path, so give it (and the ELF SONAME) explicitly.
     (work / side).mkdir(exist_ok=True)
     lib = work / side / "libparity.so"
     subprocess.run(
-        [cc, "-shared", "-fPIC", "-g0", str(source), "-o", str(lib)],
+        [
+            cc,
+            "-shared",
+            "-fPIC",
+            "-g0",
+            str(source),
+            "-o",
+            str(lib),
+            *_SAME_LIBRARY_NAME,
+        ],
         check=True,
         capture_output=True,
     )
