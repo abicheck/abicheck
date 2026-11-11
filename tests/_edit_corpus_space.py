@@ -172,6 +172,11 @@ ROLE_CONSTRUCT: dict[str, str] = {
     "x.shape": "class_virtual",
     "x.ovr": "class_virtual",
     "x.defs": "class",
+    "x.vnx": "class_virtual",
+    "x.ctor2": "class",
+    "x.vtt": "inheritance",
+    "x.tailpad": "struct",
+    "x.helper": "function",
     "x": "function",
 }
 

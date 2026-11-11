@@ -16,7 +16,7 @@ per-cell scheduling and cross-profile reconciliation. This plan does not
 redo that work. It closes G34's open items and adds what G34 never measured:
 whether the backends agree.
 **Status:** Experiments done (2026-11-11). Phases 2 and 3 done (extractor
-generation 54). Phases 1, 4 and 5 open.
+generation 55). Phases 1, 4 and 5 open.
 
 ## Problem
 
@@ -90,7 +90,7 @@ the Clang record-layout pass. The public `run_dump` /
 | Native GCC | 340 | 28 | as in E1 |
 
 So the Clang alignment failures were a harness artifact, not a product gap.
-The remaining Clang and native GCC failures were real. The generation-54 fix
+The remaining Clang and native GCC failures were real. The generation-55 fix
 brings all three backends to 368/368 through `run_dump`, and native GCC to
 162/162 on the example catalog.
 
@@ -157,7 +157,7 @@ which requires `qualified_name`. All three backends leave it `None` for a
 global-scope record, in C and in C++ alike. Native GCC also reports a
 spurious `exported_not_public`/`public_not_exported` pair on the same
 library, a binding disagreement that the other two backends do not show.
-Option A is fixed separately (generation 54). It is listed here because it
+Option A is fixed separately (generation 55). It is listed here because it
 holds for every backend.
 
 ## Decision
@@ -201,18 +201,18 @@ All of these must hold for the candidate backend:
 - Acceptance: E1's table regenerates from CI artifacts, and a new gap in
   any backend fails the tier.
 
-### Phase 2 — close the Clang backend gaps (M) — done (generation 54)
+### Phase 2 — close the Clang backend gaps (M) — done (generation 55)
 
 - Record layout already comes from the built-in layout pass on the public
   workflow (E1b). The internal `dumper.dump()` skips it; Phase 1 moves the
   harness to `run_dump`.
-- `access` on static data members (`VarDecl` inside a `CXXRecordDecl`).
+- `access` on static data members (`VarDecl` inside a `CXXRecordDecl`): landed separately in #2001 (generation 54).
 - Typedef removal must not add `FUNC_RETURN_CHANGED` when the underlying
   type is unchanged.
 - Each fix needs a bug-class regression test, a capability-matrix row
   update and a generation bump.
 
-### Phase 3 — close the native GCC gaps (M/L) — done (generation 54)
+### Phase 3 — close the native GCC gaps (M/L) — done (generation 55)
 
 - Project the attribute and qualifier set listed in E1: deprecation on
   enum/type/field, `_Atomic`, flexible arrays, opaque records, hidden

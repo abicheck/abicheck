@@ -824,6 +824,8 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_clang_record_layout_dump.py",
             "tests/test_family_f8_target_parity.py",
             "tests/test_family_f8_catalog_backend_parity.py",
+            # clang records a static data member's access as castxml does.
+            "tests/test_clang_variable_access_parity.py",
             # castxml reads noexcept and C++20 constraints from the clang AST
             # of the same header; without clang they read not observed.
             "tests/test_noexcept_header_backends.py",

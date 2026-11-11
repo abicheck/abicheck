@@ -23,7 +23,11 @@ from typing import Any
 
 from .compare import export_transition as _export_transition
 from .compare.constants import constant_index_pair, diff_constants
-from .compare.declaration_facts import access_changes, deprecation_changes
+from .compare.declaration_facts import (
+    access_changes,
+    deprecation_changes,
+    records_variable_access,
+)
 from .compare.edge_query import export_table_covered
 from .compare.elf_only_demangle import (
     elf_only_demangled_name,
@@ -124,7 +128,6 @@ from .diff_symbols_variables import (
     _var_added,
     addition_evidence,
     removed_variable,
-    var_access_comparable,
     variable_type_index_for,
 )
 from .elf_symbol_filter import (
@@ -1394,13 +1397,12 @@ def _diff_constants(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
 @registry.detector("var_access")
 def _diff_var_access(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
-    """Detect global data access level changes (ABICC: Global_Data_Became_Private/Protected/Public).
-
-    Header-tier, for ``VAR_ACCESS_PRODUCERS``. A legacy document whose access
-    facts cannot be trusted (pre-v24 CastXML, pre-generation-54 Clang) loads
-    with ``Variable.access_fact`` ``NOT_COLLECTED``; the per-variable gate declines it.
-    """
-    if not var_access_comparable(old, new):
+    """Global data access changes (ABICC: Global_Data_Became_Private/...), header-tier,
+    where both producers recorded access (``records_variable_access``); a legacy
+    untrusted ``Variable.access_fact`` loads ``NOT_COLLECTED`` and is declined."""
+    if not both_header_aware(old, new):
+        return []
+    if not (records_variable_access(old) and records_variable_access(new)):
         return []
     old_map, new_map = reconciled_variable_surfaces(old, new)
     old_index = variable_type_index_for(old, old_map.values())

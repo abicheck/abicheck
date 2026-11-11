@@ -252,14 +252,6 @@ __all__ = [
 
 #: Every fact family a snapshot can record as stale, in the historical order
 #: of the retired fields (which is also their wire order).
-#: Header-AST producers whose ``Variable.access`` is a real reading. Clang
-#: since extractor generation 54 (an older Clang snapshot left the omission
-#: sentinel, read as ``NOT_COLLECTED``); not "hybrid", whose merge does not
-#: record which backend a matched variable came from.
-VAR_ACCESS_PRODUCERS: frozenset[str] = frozenset(
-    {"castxml", "clang", "gcc-experimental"}
-)
-
 FACT_FAMILIES: tuple[str, ...] = (
     "header_cv",
     "clang_deprecation",

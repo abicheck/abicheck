@@ -44,7 +44,6 @@ from .model import AbiSnapshot, AccessLevel, Function, Variable
 from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
 from .model.semantic_ir_variable_payload import variable_canonical_entity
-from .model.snapshot_reliability import VAR_ACCESS_PRODUCERS, both_header_aware
 from .model.surface_facts import (
     is_export_confirmed_absent,
     is_export_table_only_record,
@@ -282,19 +281,3 @@ def variable_type_index_for(
         "variable_placement_bits", snap, None, lambda: placement_bits(snap)
     )
     return replace(index, placement=placement)
-
-
-def var_access_comparable(old: AbiSnapshot, new: AbiSnapshot) -> bool:
-    """Whether both snapshots record variable access as header facts.
-
-    Both must carry confirmed header evidence and come from a producer in
-    :data:`~abicheck.model.snapshot_reliability.VAR_ACCESS_PRODUCERS`.
-    """
-    return (
-        both_header_aware(old, new)
-        and {
-            old.ast_producer,
-            new.ast_producer,
-        }
-        <= VAR_ACCESS_PRODUCERS
-    )

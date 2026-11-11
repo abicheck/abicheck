@@ -975,8 +975,7 @@ class _ClangAstParser:
                 has_asm_label=has_asm_label,
                 is_cxx=self._is_cxx,
             )
-            # See `macho_underscore.strip_darwin_itanium_decoration`'s docstring.
-            mangled = _macho.strip_darwin_itanium_decoration(
+            mangled = _macho.strip_darwin_itanium_decoration(  # see its docstring
                 raw_mangled,
                 raw_mangled or name,
                 self._target_triple,
@@ -1008,7 +1007,7 @@ class _ClangAstParser:
                         producer="clang",
                     ),
                     is_const=is_const_variable(node, type_name),
-                    access=_clang_context.access_level(entry.access),
+                    access=self._access_level(entry.access),  # castxml parity
                     value=non_const_variable_value(
                         node, type_name, entry.access, self._id_index
                     ),

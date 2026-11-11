@@ -582,7 +582,7 @@ def test_clang_leaves_enum_slots_without_an_abi_fact(
     """Known gap (docs/contribute/known-gaps.md): for ``make(Point, Color, Mode,
     count_t) -> handle_t`` castxml records the ABI fact of the enum parameters,
     and clang records NOT_COLLECTED for exactly those two slots. Clang records
-    ``count_t``, plain builtins and, since extractor generation 54, the
+    ``count_t``, plain builtins and, since extractor generation 55, the
     typedef'd return with castxml's value. Fails when clang starts recording
     the enum slots, or when the gap widens."""
     mangled = "_ZN3lib4makeENS_5PointENS_5ColorENS_4ModeEj"

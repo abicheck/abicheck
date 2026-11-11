@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
-"""The native GCC projection of the generation-54 parity facts, without GCC.
+"""The native GCC projection of the generation-55 parity facts, without GCC.
 
 The rows are the real schema-v2 captures in ``tests/fixtures/native_gcc/``,
-with the keys the generation-54 plugin adds (``complete``, ``deprecated``,
+with the keys the generation-55 plugin adds (``complete``, ``deprecated``,
 ``atomic``, ``friend`` rows, a slot's ``mangled``) set the way the plugin
 writes them. The end-to-end cells, which build with a real GCC, live in
 ``tests/test_native_gcc_parity_regressions.py`` (native-gcc CI job); these
