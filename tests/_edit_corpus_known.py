@@ -21,7 +21,6 @@ from tests._edit_corpus_toolchains import uses_libstdcxx
 _CLASSES = frozenset({"cxx_classes"})
 
 GAP_DWARF_PURE = "A GCC-built DWARF snapshot cannot tell that a virtual became pure"
-GAP_CXX11_ABI = "A `_GLIBCXX_USE_CXX11_ABI` rebuild is refused as a profile mismatch, not reported as a break"
 GAP_CLANG_CHAR = (
     "A clang-built plain-`char` signedness flip reads `NO_CHANGE` at DWARF depth"
 )
@@ -115,18 +114,6 @@ KNOWN: tuple[Known, ...] = (
         GAP_DWARF_PURE,
         issues=frozenset({"none-of:FUNC_VIRTUAL_BECAME_PURE|TYPE_BECAME_ABSTRACT"}),
         verdicts=frozenset({"BREAKING"}),
-    ),
-    Known(
-        "rebuild_cxx11_abi_off",
-        frozenset({"cxx_stdlib"}),
-        "refused",
-        _ev("headers"),
-        "the new side's -D_GLIBCXX_USE_CXX11_ABI=0 makes compare raise ProfileMismatchError "
-        "(ADR-050's documented refusal; the reason names the macro); consumers fail with "
-        "undefined std::__cxx11 symbols. Open: whether a runtime-ABI macro should gate instead",
-        GAP_CXX11_ABI,
-        issues=frozenset({"refused:ProfileMismatchError"}),
-        verdicts=frozenset({"REFUSED"}),
     ),
     Known(
         "rebuild_optimized",
