@@ -46,8 +46,9 @@ def resolve_compiler(compiler: str) -> str:
     if "clang" in version.lower() or not any(
         word in version.lower() for word in ("gcc", "g++", "free software foundation")
     ):
+        banner = version.splitlines()[0] if version.strip() else "(no --version output)"
         raise SnapshotError(
-            f"Native GCC backend requires a real GCC compiler, got {compiler}: {version.splitlines()[0]}"
+            f"Native GCC backend requires a real GCC compiler, got {compiler}: {banner}"
         )
     return resolved
 

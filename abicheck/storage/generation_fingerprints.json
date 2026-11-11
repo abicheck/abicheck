@@ -164,7 +164,7 @@
       "abicheck/extract/headers/gcc/backend.py": "36c0ad901501c2fba98fbe867ce9eca07ab6c523d1326fdae78395c4b281092c",
       "abicheck/extract/headers/gcc/build.py": "1ee62182117ee040274b84d482cc3a9a36db2bd2b742d5dca4e892de00002ecb",
       "abicheck/extract/headers/gcc/contracts.py": "39f28d300049bbdd30bef988250a7d6403e4b69b92ba2bc23a92a24539cf8b12",
-      "abicheck/extract/headers/gcc/discovery.py": "d009df9cf4960e6ee8199bc77ef80bf52d58a88d69f44d9e6b110f968d560c78",
+      "abicheck/extract/headers/gcc/discovery.py": "f07fdd43ec1e594e95a75a5447e54e3dcbfe5c944c66a305de4e9d7463ee731b",
       "abicheck/extract/headers/gcc/projection.py": "cd3c9d540a363833b9ef2db7633d685154b85d3fd7bccca80495c18666b203c4",
       "abicheck/extract/headers/manifest.py": "32ef26892725f05c29fff52d393166a68ea2983f9c1b881d85e046d96ae962b1",
       "abicheck/extract/headers/preprocessor_branches.py": "d3a409d126b0dd1b19a634d4aad25660d372dad931b310cfbaaefc9d769b244d",
@@ -218,7 +218,7 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "b5d2796557a8017766f3dd455de46cba5cd428ed8e8e814ca84ed152fa38f2d3",
+    "fingerprint": "45e08281f176580d89af91018eb9eb8ee12cf81b0178f29ebf324c96b9029a64",
     "generation": 50,
     "reason": "opt-in native GCC header backend (ADR-092): a new producer for a request that was previously refused (frontend gcc); castxml/clang/hybrid extraction of the same input records the same facts; backend registry moved out of dumper.py unchanged"
   },

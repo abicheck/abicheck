@@ -11,3 +11,4 @@
 
 - Native GCC projection no longer reads an absent plugin key as `False` (virtual, deleted, const, linkage, ...): every schema-v2 boolean is required, only C++-only function/record properties may be absent from the C plugin, and a missing, non-boolean or malformed row fails the dump with no Clang fallback instead of recording confirmed facts or raising a traceback.
 - `python -m abicheck.extract.headers.gcc.build` is a bounded Click command (deadline-supervised compiler run, a clear error on failure); native GCC probes use the shared hang guard and compiler options are tokenized by the canonical splitter.
+- A configured "GCC" that prints no `--version` banner is refused with a clear error instead of an `IndexError` traceback.
