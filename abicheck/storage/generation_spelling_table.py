@@ -541,6 +541,13 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "does; no type spelling changes and no rewrite is needed -- an "
         "older gcc snapshot records no hidden friend"
     ),
+    58: GenerationSpellingChange(
+        "the native gcc header backend reads a C++ parameter's top-level "
+        "restrict from its PARM_DECL (the function type drops it) (plugin "
+        "protocol schema 5), as castxml records it; no type spelling "
+        "changes and no rewrite is needed -- an older gcc snapshot read "
+        "every C++ parameter as unrestricted"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

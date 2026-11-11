@@ -81,7 +81,9 @@ from __future__ import annotations
 #: v50: a native gcc dump records record, enum and field deprecation.
 #:
 #: v51: a native gcc dump marks befriended functions as hidden friends.
-SNAPSHOT_CACHE_VERSION: str = "51"
+#:
+#: v52: a native gcc dump records a C++ parameter's top-level restrict.
+SNAPSHOT_CACHE_VERSION: str = "52"
 # v35: header-derived snapshots now carry public_header_identifiers (schema
 # v55, extract/public_header_identifiers.py). The key also folds in the
 # snapshot schema version from this version on, so the next schema bump

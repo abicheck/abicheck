@@ -115,7 +115,6 @@
     "param_lost_va_list",
     "param_pointee_qualifier_changed",
     "param_renamed",
-    "param_restrict_changed",
     "pe_forwarder_changed",
     "pe_hardening_improved",
     "pe_hardening_weakened",
