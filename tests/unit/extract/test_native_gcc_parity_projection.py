@@ -35,7 +35,8 @@ def _header(tmp_path: Path, name: str) -> Path:
 
 def _rows(name: str, header: Path) -> list[dict[str, Any]]:
     text = (_FIXTURES / f"rows_{name}.json").read_text(encoding="utf-8")
-    return json.loads(text.replace("@HEADER@", str(header)))
+    # Escaped as JSON string content: a Windows path carries backslashes.
+    return json.loads(text.replace("@HEADER@", json.dumps(str(header))[1:-1]))
 
 
 def _record(rows: list[dict[str, Any]], name: str) -> dict[str, Any]:

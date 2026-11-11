@@ -598,6 +598,7 @@ def parse_functions(
                     ret_type,
                     entry.scope,
                     typedef_abi_facts,
+                    entry.template_type_param_names,
                 ),
                 params=params,
                 visibility=vis,

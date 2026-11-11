@@ -117,6 +117,13 @@ def test_the_nearest_declared_typedef_decides(
     assert typedef_return_fact(None, spelling, scope, declared) == expected
 
 
+def test_a_template_parameter_hides_every_typedef_of_its_name() -> None:
+    # typedef int handle_t; template <class handle_t> handle_t make();
+    declared = declared_typedef_facts(_TYPEDEFS)  # type: ignore[arg-type]
+    assert typedef_return_fact(None, "handle_t", (), declared, ("handle_t",)) is None
+    assert typedef_return_fact(None, "handle_t", (), declared, ("U",)) == _INT
+
+
 def test_a_builtin_spelling_is_never_overridden() -> None:
     declared = declared_typedef_facts(_TYPEDEFS)  # type: ignore[arg-type]
     assert typedef_return_fact(_LONG, "handle_t", (), declared) == _LONG

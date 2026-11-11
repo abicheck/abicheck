@@ -444,6 +444,7 @@ def typedef_return_fact(
     spelling: str,
     scope: Sequence[str],
     typedef_abi_facts: Mapping[str, Fact[AbiFundamental] | None] | None,
+    type_param_names: Sequence[str] = (),
 ) -> Fact[AbiFundamental] | None:
     """The ABI fact of a return type spelled through a typedef.
 
@@ -454,13 +455,17 @@ def typedef_return_fact(
     enclosing scope first, as name lookup would. *typedef_abi_facts* names
     every declared typedef, ``None`` for one whose target has no fact (a
     record, say): the nearest declaration decides, so an outer same-named
-    typedef of a builtin is never borrowed for it.
+    typedef of a builtin is never borrowed for it. A template parameter
+    of the function (*type_param_names*) hides every typedef of its name,
+    so its spelling gets no fact at all.
     """
     if builtin is not None or not typedef_abi_facts:
         return builtin
     name = re.sub(r"^(?:const\s+|volatile\s+)+", "", spelling.strip())
     if name.startswith("::"):
         return typedef_abi_facts.get(name[2:])
+    if name in type_param_names:
+        return None
     for depth in range(len(scope), -1, -1):
         key = "::".join((*scope[:depth], name))
         if key in typedef_abi_facts:
