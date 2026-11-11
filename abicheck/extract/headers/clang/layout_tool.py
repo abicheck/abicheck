@@ -61,6 +61,7 @@ from ....errors import SnapshotError, ValidationError
 from ....header_utils import iter_directory_headers, resolve_inferred_header_roots
 from ....model import AbiSnapshot, RecordType, replace_with_fact_sync
 from ....model.export_index import export_names_or_modeled_fallback
+from ....model.header_lang_mode import recorded_lang_mode
 from ....name_classification import strip_anonymous_type_location
 from ...compiler_driver import is_cl_style_driver_name, resolve_clang_bin
 from ..ast_config import _build_clang_header_command
@@ -141,8 +142,16 @@ def run_layout_tool(
     nostdinc: bool = False,
     lang: str | None = None,
     probe_names: list[str] | None = None,
+    resolved_lang_mode: str | None = None,
 ) -> list[dict[str, Any]] | None:
     """Run the G28 Phase 4 layout tool over *resolved_headers*.
+
+    *resolved_lang_mode* is the C/C++ mode the primary header parse resolved
+    (``model.header_lang_mode``). With no explicit *lang*, ``"c++"`` is
+    followed rather than re-deriving C from header text alone, exactly as
+    ``clang_header_dump`` does: the primary pass may have decided C++ from
+    evidence this pass lacks (the export table's mangled names), and a
+    C-mode layout pass over C++ headers dumps nothing. It never demotes.
 
     With ``binary=None`` the built-in path runs instead: the same clang
     compile context over a probe TU taking ``sizeof`` of each of
@@ -172,6 +181,9 @@ def run_layout_tool(
     force_cpp, force_cpp20, _explicit_c, cc_id = resolve_clang_langmode(
         lang, resolved_headers, clang_bin, gcc_options, gcc_option_tokens
     )
+    if not lang and resolved_lang_mode == "c++" and not force_cpp:
+        force_cpp = True
+        force_cpp20 = _detect_cpp20_headers(resolved_headers)
 
     # Re-probe the same host system-include dirs `extract.headers.clang.backend.clang_header_dump`
     # injects (castxml<->clang parity: libstdc++/libc headers a hermetic
@@ -746,5 +758,6 @@ def attach_clang_layout(
         nostdinc=compile.nostdinc if compile is not None else False,
         lang=lang,
         probe_names=probe_names,
+        resolved_lang_mode=recorded_lang_mode(snap.ast_toolchain),
     )
     return apply_layout_facts(snap, records)

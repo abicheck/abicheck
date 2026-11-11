@@ -5,11 +5,10 @@
 from __future__ import annotations
 
 import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
-from elftools.elf.elffile import ELFFile
+from _compiler_sizeof import compiler_sizeof
 
 from abicheck.extract.headers.backend_protocol import HeaderParseRequest
 from abicheck.extract.headers.clang.backend import ClangBackend
@@ -97,20 +96,12 @@ def test_enum_representation_matches_compiled_object_size(
     header.write_text(
         declaration if scope == "global" else "struct Holder { " + declaration + " };\n"
     )
-    source = tmp_path / "probe.c"
     spelling = "Holder::E" if scope == "record" and language == "c++" else "enum E"
-    source.write_text(f'#include "api.h"\nchar oracle[sizeof({spelling})];\n')
-    obj = tmp_path / "probe.o"
-    subprocess.run(
-        [compiler, "-x", language, *flags, "-c", str(source), "-o", str(obj)],
-        check=True,
-        capture_output=True,
+    # Independent, object-format-neutral oracle: the compiler type-checks
+    # candidate sizes; no ELF/Mach-O/COFF reader and no call into the probe.
+    expected = compiler_sizeof(
+        compiler, language, header, spelling, flags=flags, workdir=tmp_path
     )
-    with obj.open("rb") as stream:
-        (symbol,) = (
-            ELFFile(stream).get_section_by_name(".symtab").get_symbol_by_name("oracle")
-        )
-        expected = symbol["st_size"]
     parser = ClangBackend().parse(
         HeaderParseRequest(
             headers=[header],
@@ -121,18 +112,18 @@ def test_enum_representation_matches_compiled_object_size(
         )
     )
     (enum,) = parser.parse_enums()
-    # An independent object-size oracle; no calls to the probe's expression or decoder.
-    sizes = {
-        "char": 1,
-        "signed char": 1,
-        "unsigned char": 1,
-        "short": 2,
-        "unsigned short": 2,
-        "int": 4,
-        "unsigned int": 4,
-        "long": 8,
-        "unsigned long": 8,
-        "long long": 8,
-        "unsigned long long": 8,
-    }
-    assert sizes[enum.underlying_type] == expected
+    # The recorded representation must have the enum's size under the same
+    # compiler and flags -- also from the compiler, so no LP64 table is
+    # assumed (``long`` is 4 bytes on LLP64 targets).
+    assert enum.underlying_type != "?"
+    assert (
+        compiler_sizeof(
+            compiler,
+            language,
+            header,
+            enum.underlying_type,
+            flags=flags,
+            workdir=tmp_path,
+        )
+        == expected
+    )

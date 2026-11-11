@@ -17,6 +17,7 @@ from ...path_aliases import absolutize_include_roots
 from ..ast_config import _build_clang_header_command, clang_aggregate_text
 from ..backend_protocol import HeaderParseRequest
 from ..sysinc import _resolve_clang_system_includes
+from .ast_inner import MalformedClangAstError, ast_inner
 from .context import _Decl, is_builtin_file
 
 _TYPES = (
@@ -128,21 +129,31 @@ def probe_enum_types(
             if offset == len(text):
                 break
             node, offset = decoder.raw_decode(text, offset)
+            if not isinstance(node, dict):
+                raise MalformedClangAstError(
+                    f"enum probe AST record is {type(node).__name__}, expected an object"
+                )
             name = node.get("name", "")
             if not name.startswith(_PREFIX):
                 continue
             i = int(name.removeprefix(_PREFIX))
-            expr = node
-            while expr.get("kind") in (
+            cursor = node
+            while cursor.get("kind") in (
                 "EnumConstantDecl",
                 "ImplicitCastExpr",
                 "ParenExpr",
             ):
-                children = expr.get("inner", [])
+                children = ast_inner(cursor)
                 if len(children) != 1:
                     break
-                expr = children[0]
-            value = expr.get("value") if expr.get("kind") == "ConstantExpr" else None
+                if not isinstance(children[0], dict):
+                    raise MalformedClangAstError(
+                        f"clang AST node {cursor.get('kind')!r} has a non-object child"
+                    )
+                cursor = children[0]
+            value = (
+                cursor.get("value") if cursor.get("kind") == "ConstantExpr" else None
+            )
             if value is not None and 0 < int(value) <= len(_TYPES):
                 answer[str(selected[i].node["id"])] = _TYPES[int(value) - 1]
         return answer
