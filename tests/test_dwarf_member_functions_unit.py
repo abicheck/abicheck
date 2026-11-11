@@ -536,3 +536,17 @@ def test_a_vtable_slot_is_decoded_or_left_unknown(
     )
     assert members.vtable_slot(die) == slot
     assert members.vtable_slot(SimpleNamespace(attributes={})) is None
+
+
+@pytest.mark.parametrize("variadic", [False, True])
+def test_variadic_is_read_from_an_unspecified_parameters_child(variadic: bool) -> None:
+    # DWARF 5 section 3.4.2: a prototyped function taking "..." has a
+    # DW_TAG_unspecified_parameters child after its formal parameters.
+    cu = _CU()
+    kids = [_die(cu, 51, "DW_TAG_formal_parameter", {"DW_AT_type": _Ref(90)})]
+    if variadic:
+        kids.append(_die(cu, 52, "DW_TAG_unspecified_parameters"))
+    fn = _die(cu, 50, "DW_TAG_subprogram", children=tuple(kids))
+    params, got = members.parameters_and_variadic(fn, cu)
+    assert [p.offset for p in params] == [51]
+    assert got is variadic

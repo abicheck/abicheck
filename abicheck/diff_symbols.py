@@ -299,14 +299,12 @@ def _check_function_signature(
     is_llp64: bool = False,
     signatures: tuple[FunctionSignatureIndex, FunctionSignatureIndex] | None = None,
 ) -> list[Change]:
-    """Compare signatures and qualifiers of two matched functions.
-
-    Every signature and qualifier comparison reads each side's
-    ``SemanticIR`` through *signatures* (``compare/function_signature.py``,
-    ADR-063 6B function-signature cohort). Without one -- a caller pairing
-    two functions outside a snapshot comparison -- each side is projected on
-    its own, with the same formula.
-    """
+    """Compare signatures and qualifiers of two matched functions, each side
+    read from its ``SemanticIR`` through *signatures* (compare/function_signature,
+    ADR-063 6B); without one, each side is projected on its own. A pair with an
+    export-table-only side has no signature (export_transition)."""
+    if _export_transition.carries_no_signature(f_old, f_new):
+        return _export_transition.check_function(mangled, f_old, f_new)
     if signatures is None:
         signatures = (
             function_signature_index(None, [f_old]),

@@ -30,7 +30,11 @@ import warnings
 from typing import TYPE_CHECKING
 
 from ...extract.debug_layout_semantic_ir import semantic_ir_from_debug_metadata
-from ...extract.elf_symbol_classify import _populate_elf_visibility
+from ...extract.dwarf_export_gaps import undescribed_export_records
+from ...extract.elf_symbol_classify import (
+    _elf_classify_symbols,
+    _populate_elf_visibility,
+)
 from ...extract.export_symbol_identity import (
     itanium_export_function as _elf_export_function,
     itanium_export_variable as _elf_export_variable,
@@ -171,6 +175,7 @@ def _try_dwarf_snapshot(
                 "No headers provided — using DWARF debug info as primary data source. "
                 "#define constants and default parameter values will be unavailable."
             )
+        _add_undescribed_exports(snap, elf_meta, so_path)
         _populate_elf_visibility(snap, so_path)
         snap.semantic_ir = _dwarf_semantic_ir(snap)
         return snap, []
@@ -180,6 +185,28 @@ def _try_dwarf_snapshot(
     # extracted — they include bases / vtable info that pure-DWARF
     # metadata (DwarfMetadata.structs) does not retain.
     return None, list(snap.declarations.types)
+
+
+def _add_undescribed_exports(
+    snap: AbiSnapshot, elf_meta: ElfMetadata | None, so_path: Path
+) -> None:
+    """Give the DWARF lane the export-table records the symbol-only lane has
+    for exports no DWARF declaration names (``extract.dwarf_export_gaps``).
+
+    Runs before anything indexes *snap*, so the lazily built function and
+    variable maps see the added records.
+    """
+    if elf_meta is None or not elf_meta.symbols:
+        return  # no symbol table read: nothing proves an export exists
+    _, funcs, objects, tls = _elf_classify_symbols(
+        elf_meta, set(), library_name=so_path.name
+    )
+    decls = snap.declarations
+    new_f, new_v = undescribed_export_records(
+        decls.functions, decls.variables, funcs, objects | tls
+    )
+    decls.functions.extend(new_f)
+    decls.variables.extend(new_v)
 
 
 def _build_symbol_only_snapshot(
