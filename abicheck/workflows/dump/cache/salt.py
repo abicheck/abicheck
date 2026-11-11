@@ -66,7 +66,12 @@ from __future__ import annotations
 #: recorded C/C++ mode. A warm v45 entry would keep the assumed ``int`` and
 #: lack those facts; a v42 entry from this change's earlier branch would lack
 #: v45's ``binary_sha256``.
-SNAPSHOT_CACHE_VERSION: str = "46"
+#:
+#: v47: a castxml dump records which files spell an alignment specifier (in
+#: the cached AST) and a variable's alignment as a lower bound there; a DWARF
+#: 5 variable records its type's default alignment. A warm entry would carry
+#: neither.
+SNAPSHOT_CACHE_VERSION: str = "47"
 # v35: header-derived snapshots now carry public_header_identifiers (schema
 # v55, extract/public_header_identifiers.py). The key also folds in the
 # snapshot schema version from this version on, so the next schema bump

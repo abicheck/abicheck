@@ -502,6 +502,16 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "Clang ordinary enum representations come from a compiler probe instead of assuming int; Clang parameter/return slots record scoped record/enum identities through aliases and namespace imports; extern-C at a noninitial column selects C++ mode; "
         "the built-in Clang layout pass follows the primary parse's recorded C/C++ mode, so a no-DWARF dump of C++ headers reached through a .h now carries record sizes. An older int cannot reveal the original representation and absent identities cannot be rebuilt from names: no sound load-time rewrite; re-dump old Clang baselines. Type spellings are unchanged."
     ),
+    53: GenerationSpellingChange(
+        "no type or name spelling changes. A castxml variable's alignment is "
+        "recorded as a lower bound (Fact PARTIAL) when its file, or the file "
+        "of a typedef its type names, spells an alignment specifier in its "
+        "preprocessed code (castxml writes none for a variable); a DWARF 5 "
+        "variable without DW_AT_alignment records its type's default "
+        "alignment where DWARF states it; no rewrite is needed -- an older "
+        "snapshot reads the castxml value as declared and a DWARF default as "
+        "not recorded, as before"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.
