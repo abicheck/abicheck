@@ -212,7 +212,7 @@
     },
     "fingerprint": "c66b7511ba0f0c8b5bc835451526622884a0c2334ff392ed80ff36ebad3020dd",
     "generation": 50,
-    "reason": "generation 50 DWARF export parity remains recorded across current main's extractor inputs"
+    "reason": "generation 50 combines DWARF-lane fact parity with current main extractor inputs"
   },
   "resolver": {
     "files": {

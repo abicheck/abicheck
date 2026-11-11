@@ -99,6 +99,14 @@ def test_variables_follow_the_same_rule() -> None:
     assert {v.mangled for v in new_v} == {"g_alias", "_ZN2ns1vE"}
 
 
+def test_a_declaration_named_only_by_its_source_name_still_describes_it() -> None:
+    # A C declaration whose DIE carries no linkage name reads mangled="": its
+    # plain name is the export name, so the export is described.
+    described = [Function(name="plain_c", mangled="", return_type="int")]
+    new_f, _ = undescribed_export_records(described, [], ("plain_c", "other_c"), ())
+    assert {f.mangled for f in new_f} == {"other_c"}
+
+
 # --- an export-only record has no signature to compare (unit) --------------------
 
 
