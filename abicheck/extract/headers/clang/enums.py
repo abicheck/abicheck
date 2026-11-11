@@ -53,7 +53,10 @@ IntEvaluator = Callable[[dict[str, Any]], "int | None"]
 
 
 def parse_enums(
-    typedefs: list[_Decl], enums: list[_Decl], evaluate_int: IntEvaluator
+    typedefs: list[_Decl],
+    enums: list[_Decl],
+    evaluate_int: IntEvaluator,
+    underlying_types: dict[str, str] | None = None,
 ) -> list[EnumType]:
     result: list[EnumType] = []
     typedef_names_by_enum_id: dict[str, str] = {}
@@ -103,7 +106,9 @@ def parse_enums(
             EnumType(
                 name=name,
                 members=members,
-                underlying_type=_enum_underlying(node),
+                underlying_type=(underlying_types or {}).get(
+                    str(node.get("id", "")), _enum_underlying(node)
+                ),
                 source_location=_source_location(entry),
                 qualified_name=enum_qualified_name,
                 qualified_name_fact=Fact.present(enum_qualified_name),
@@ -128,11 +133,11 @@ def parse_enums(
 
 
 def _enum_underlying(node: dict[str, Any]) -> str:
-    """The enum's fixed underlying type spelling, defaulting to ``int``."""
+    """The enum's fixed underlying type spelling, unknown when the JSON omits it."""
     fixed = node.get("fixedUnderlyingType")
     if isinstance(fixed, dict) and fixed.get("qualType"):
         return str(fixed["qualType"])
-    return "int"
+    return "?"
 
 
 def _enum_constant_value(

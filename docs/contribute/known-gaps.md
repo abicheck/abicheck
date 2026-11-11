@@ -113,6 +113,12 @@ deterministically and fails when the gap closes.
 **Status (2026-11-08): OPEN.** `parse_btf_metadata`, `parse_ctf_metadata` and `parse_sycl_metadata` are discovered by `tests/test_parser_fuzz_enrollment.py` but listed in `NOT_ENROLLED` (`tests/_parser_fuzz_oracle.py`): each needs a seed the default lane cannot build (pahole/BPF, gcc `-gctf` with libctf, a SYCL plugin). Their corrupt-input behaviour is unmeasured. Owner: `tests/_parser_fuzz_oracle.py`.
 <!-- no-canary: the gap is an absence of tests, not a parser answer to pin; tests/test_parser_fuzz_enrollment.py keeps the NOT_ENROLLED list honest and fails on an unlisted new parser -->
 
+### Opaque-handle size lowering depends on the header frontend (2026-11-11)
+
+**Status (2026-11-11): OPEN, narrow.** The case62 rule (`diff_filtering._filter_opaque_size_changes`) lowers a size-only growth of a record the public API reaches only through pointers. castxml records implicit special members (`Cache(const Cache&)`), which the usage index reads as a by-value use, so castxml keeps `type_size_changed`; clang records none, so the same headers on clang lower it. When the growth also changes alignment the break still gates on both; when it changes only the size (an `int` field, or `long` on LLP64) castxml reports exit 4 and clang exit 0. Closing it needs the usage index to ignore compiler-generated members (or count them on both frontends) -- a policy decision, not an extraction fix. `tests/test_contract_type_identities_integration.py` grows its fixture by `long long` so it tests identity, not this rule. Owner: `diff_filtering.py` / `policy/`.
+
+<!-- canary: tests/test_contract_type_identities_integration.py::test_canary_opaque_handle_size_lowering_depends_on_frontend -->
+
 ### Option vocabulary (ADR-091 follow-ups)
 
 The option-vocabulary migration is complete (ADR-091, Accepted and
@@ -138,9 +144,9 @@ dependency walk and debug roots to every member. No open gap remains.
 **Status (2026-11-08): OPEN.** `int touch() volatile;` mangles as `_ZNV...` and DWARF (generation 45) records `is_volatile=True`, but the castxml header lane records `is_volatile=False`, so a dropped or added `volatile` on a method is seen only through the mangled-name change (`func_removed` + `func_added`), not `func_cv_changed`. Owner: `extract/headers/castxml/functions.py`.
 <!-- no-canary: needs castxml; tests/test_dwarf_member_functions.py compares the castxml lane on const/static/virtual only for this reason -->
 
-#### The clang header backend records no parameter identities, so a kept-spelling retype stays a removal (2026-11-09)
+#### Clang cannot resolve every template parameter type identity (2026-11-09)
 
-**Status (2026-11-09): OPEN.** `compare/parameter_replacement.py` pairs a header-declared function whose written parameter spelling is unchanged but resolves to a different type (`V scale(V, float)` with `using V = basic_vec<float>` whose default width changed) by reading `Param.type_identities_fact` and the record layouts it names. The castxml backend collects those identities; the clang backend records them as `not_collected`, so under `ABICHECK_AST_FRONTEND=clang` that pair stays `func_removed` + `func_added` (verdict right, kind wrong). A *rewritten* signature (`add(int, int)` -> `add(int, int, int)`) pairs on both backends: without identities its spelling is read. Closing it needs the clang backend to record each parameter's resolved record/enum identities. `wrong-kind` on clang. Owner: `extract/headers/clang/`.
+**Status (2026-11-11): PARTIAL.** Extractor generation 52 records Clang function-slot identities for named records and enums through scoped aliases and namespace imports, declining ambiguous lookup. Implicit template specializations can still lack a resolvable identity and record layout. `compare/parameter_replacement.py` pairs a header-declared function whose written parameter spelling is unchanged but resolves to a different type (`V scale(V, float)` with `using V = basic_vec<float>` whose default width changed) by reading `Param.type_identities_fact` and the record layouts it names. The castxml backend collects those identities; the clang backend can still record this template instance as `not_collected`, so under `ABICHECK_AST_FRONTEND=clang` that pair stays `func_removed` + `func_added` (verdict right, kind wrong). A *rewritten* signature (`add(int, int)` -> `add(int, int, int)`) pairs on both backends: without identities its spelling is read. Closing it needs the clang backend to record each parameter's resolved record/enum identities. `wrong-kind` on clang. Owner: `extract/headers/clang/`.
 <!-- canary: tests/test_header_param_change_pairing_integration.py::test_clang_kept_spelling_default_argument_change_stays_unpaired -->
 
 #### The typed `compare()` route omits `exported_not_public` that the CLI reports for the same catalog case (2026-11-08)

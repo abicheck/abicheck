@@ -947,6 +947,8 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=(
             "tests/test_export_reconciliation_and_obligations.py",
             "tests/test_contract_type_identities.py",
+            "tests/test_clang_type_evidence.py",
+            "tests/test_contract_type_identities_integration.py",
             # Schema v69: a type slot's ABI fact, not its spelling, decides an
             # ABI-identical retype (`long` against `long long`). The lane tests
             # run the real castxml and clang backends through the CLI.

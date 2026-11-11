@@ -58,9 +58,13 @@ builtins              ``long int``, ``short unsigned   ``long``, ``unsigned shor
                       int``, ``long long unsigned      ``unsigned long long``
                       int``
 declarators           ``const char*``, ``Impl&``       ``const char *``, ``Impl &``
-type identities       ``PRESENT`` with the outermost   not collected (``None``)
-                      record/enum the slot names,
-                      through a typedef
+type identities       ``PRESENT`` with the outermost   function parameter/return
+                      record/enum the slot names,      slots: ``PRESENT`` with the
+                      through a typedef                one record/enum the slot
+                                                       names (through aliases),
+                                                       else ``NOT_COLLECTED``;
+                                                       fields/variables: not
+                                                       collected (``None``)
 function/var names    leaf (opt-in, see ``render``)    leaf (opt-in)
 typedef keys          leaf (``typedefs``), qualified   same as castxml
                       (``typedefs_qualified``)
@@ -439,9 +443,27 @@ class _Renderer:
     def ref(self, text: str, scope: str, *, canonical: bool = False) -> str:
         return spell_type(text, self.fe, scope=scope, canonical=canonical)
 
+    def slot_identities(self, text: str) -> Fact[tuple[str, ...]] | None:
+        """A function parameter/return slot's identities.
+
+        castxml answers as for any slot. clang (``extract/headers/clang/
+        type_identity.py``) only confirms a slot that names exactly one
+        record/enum; a builtin or unresolved slot is ``NOT_COLLECTED``, never
+        an empty ``PRESENT``.
+        """
+        if self.fe is Frontend.CASTXML:
+            return self.identities(text)
+        found = self._found(text)
+        if len(found) == 1:
+            return Fact.present(found)
+        return Fact.not_collected()
+
     def identities(self, text: str) -> Fact[tuple[str, ...]] | None:
         if self.fe is not Frontend.CASTXML or not text:
             return None
+        return Fact.present(self._found(text))
+
+    def _found(self, text: str) -> tuple[str, ...]:
         found: list[str] = []
         seen: set[str] = set()
 
@@ -456,7 +478,7 @@ class _Renderer:
 
         for name in _outer_names(text):
             resolve(name)
-        return Fact.present(tuple(found))
+        return tuple(found)
 
     def scope_path(self, qualified: str) -> tuple[Namespace | Record, ...]:
         parts = split_scope(qualified)[:-1]
@@ -549,7 +571,7 @@ class _Renderer:
             replace_with_fact_sync(
                 p,
                 type=self.ref(p.type, scope),
-                type_identities_fact=self.identities(p.type),
+                type_identities_fact=self.slot_identities(p.type),
             )
             for p in fn.params
         ]
@@ -557,7 +579,7 @@ class _Renderer:
             fn,
             name=self.decl_name(fn.name),
             return_type=self.ref(fn.return_type, scope),
-            return_type_identities_fact=self.identities(fn.return_type),
+            return_type_identities_fact=self.slot_identities(fn.return_type),
             params=params,
         )
 

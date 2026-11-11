@@ -106,6 +106,7 @@ from .qualifiers import (
 from .redeclarations import RedeclarationIdentity
 from .restrict_spelling import without_top_level_restrict
 from .return_type import return_type as _return_type
+from .type_identity import TypeIdentityIndex
 
 #: Evaluates a param's default-argument initializer to its snapshot value
 #: (or ``None`` for an unevaluable one). Matches
@@ -395,6 +396,7 @@ def parse_functions(
     explicit_facts: Mapping[int, Fact[ExplicitInstantiation]] | None = None,
     function_constraints: FunctionConstraintIndex | None = None,
     builtin_abi: BuiltinAbi | None = None,
+    type_identities: TypeIdentityIndex | None = None,
 ) -> list[Function]:
     funcs: list[Function] = []
     source_cache: dict[str, bytes | None] = {}
@@ -524,6 +526,11 @@ def parse_functions(
                 # see `context.qualtype_desugared`'s own docstring (Codex review, PR #1200).
                 kind=_param_kind(_qualtype_desugared(p)),
                 type_abi_fact=builtin_type_fact(_qualtype_desugared(p), builtin_abi),
+                type_identities_fact=type_identities.resolve(
+                    _qualtype_desugared(p), entry.scope
+                )
+                if type_identities
+                else None,
                 # Desugared too: castxml counts through a typedef'd pointer (case73).
                 pointer_depth=_pointer_depth(_qualtype_desugared(p)),
                 # G31 Phase C: castxml was the ONLY producer of this fact (`_resolve_cv_restrict`), so a castxml-vs-clang comparison of unchanged headers reported PARAM_RESTRICT_CHANGED for every restrict-qualified parameter -- the detector compares the two bools directly, with no producer gate to decline on (unlike `deprecated`/`is_scoped` before this phase).
@@ -577,6 +584,11 @@ def parse_functions(
                 name=name,
                 mangled=mangled,
                 return_type=ret_type,
+                return_type_identities_fact=type_identities.resolve(
+                    ret_type, entry.scope
+                )
+                if type_identities
+                else None,
                 return_type_abi_fact=builtin_type_fact(
                     _return_type(_qualtype_desugared(entry.node)), builtin_abi
                 ),

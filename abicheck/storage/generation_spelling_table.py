@@ -498,6 +498,10 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "-- an older snapshot reads as no recorded identity, which proves no "
         "identical-input exemption"
     ),
+    52: GenerationSpellingChange(
+        "Clang ordinary enum representations come from a compiler probe instead of assuming int; Clang parameter/return slots record scoped record/enum identities through aliases and namespace imports; extern-C at a noninitial column selects C++ mode; "
+        "the built-in Clang layout pass follows the primary parse's recorded C/C++ mode, so a no-DWARF dump of C++ headers reached through a .h now carries record sizes. An older int cannot reveal the original representation and absent identities cannot be rebuilt from names: no sound load-time rewrite; re-dump old Clang baselines. Type spellings are unchanged."
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.
