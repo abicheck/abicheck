@@ -838,6 +838,8 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_native_gcc_param_restrict.py",
             # the native gcc plugin spells C atomic/array types as C does.
             "tests/test_native_gcc_c_object_facts.py",
+            # the native gcc plugin records the vptr and castxml-style slots.
+            "tests/test_native_gcc_vtable_facts.py",
             # castxml reads noexcept and C++20 constraints from the clang AST
             # of the same header; without clang they read not observed.
             "tests/test_noexcept_header_backends.py",

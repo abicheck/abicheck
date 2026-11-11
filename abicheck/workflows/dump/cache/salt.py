@@ -85,7 +85,9 @@ from __future__ import annotations
 #: v52: a native gcc dump records a C++ parameter's top-level restrict.
 #:
 #: v53: a native gcc C dump respells atomic and array types, reads an array object's const and records opaque records.
-SNAPSHOT_CACHE_VERSION: str = "53"
+#:
+#: v54: a native gcc dump records the vptr offset and castxml-style vtable slots.
+SNAPSHOT_CACHE_VERSION: str = "54"
 # v35: header-derived snapshots now carry public_header_identifiers (schema
 # v55, extract/public_header_identifiers.py). The key also folds in the
 # snapshot schema version from this version on, so the next schema bump
