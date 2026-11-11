@@ -588,10 +588,140 @@ _DEFAULTS = (
     ),
 )
 
+_SHAPES = (
+    _op(
+        "virtual_noexcept_added",
+        ("x.vnx",),
+        _replace(
+            "x.vnx",
+            "virtual int f();",
+            "virtual int f() noexcept;",
+            source=("int VN::f() {", "int VN::f() noexcept {"),
+        ),
+        "an overrider of VN::f declared without noexcept no longer compiles "
+        "([except.spec]/8); the mangled name and the vtable are unchanged",
+        expected=frozenset({"FUNC_VIRTUAL_NOEXCEPT_ADDED", "FUNC_NOEXCEPT_ADDED"}),
+        **_SOURCE_BREAK,
+        **_HEADERS,
+    ),
+    _op(
+        "converting_ctor_overload_added",
+        ("x.ctor2",),
+        _replace(
+            "x.ctor2",
+            "CO(int a);",
+            "CO(int a);\n  CO(long a);",
+            source=(
+                "CO::CO(int a) : v(a) {}",
+                "CO::CO(int a) : v(a) {}\nCO::CO(long a) : v((int)a) {}",
+            ),
+        ),
+        "CO(int) still wins for an int, but CO(1.5) or CO(2u) becomes ambiguous "
+        "between CO(int) and CO(long): some rebuilt callers stop compiling, no "
+        "existing binary changes",
+        expected=frozenset({"CTOR_OVERLOAD_AMBIGUITY_RISK"}),
+        rules=(
+            Rule(
+                lambda c: c.evidence == "headers",
+                {
+                    "expected": frozenset(
+                        {
+                            "CTOR_OVERLOAD_AMBIGUITY_RISK",
+                            "OVERLOAD_AMBIGUITY_INTRODUCED",
+                        }
+                    )
+                },
+                "the header lane also sees the overload set itself",
+            ),
+        ),
+        **_RISK,
+    ),
+    _op(
+        "vtt_grew",
+        ("x.vtt",),
+        _replace(
+            "x.vtt",
+            "struct VB2 : virtual VA {",
+            "struct VX : virtual VA { int x; virtual ~VX(); };\n"
+            "struct VB2 : virtual VA, virtual VX {",
+            source=("VA::~VA() {}", "VA::~VA() {}\nVX::~VX() {}"),
+        ),
+        "a second virtual base adds construction-vtable entries to VB2's VTT and "
+        "moves VB2's subobjects: binaries built against the old layout break",
+        expected=frozenset({"VTT_SLOT_COUNT_CHANGED"}),
+        **_BINARY,
+    ),
+    _op(
+        "field_added_in_tail_padding",
+        ("x.tailpad",),
+        _replace(
+            "x.tailpad",
+            "struct FC { int a; char b; };",
+            "struct FC { int a; char b; char c; };",
+        ),
+        "c lands in FC's tail padding: size, alignment and every existing "
+        "offset stay put, so old binaries see the same layout",
+        expected=frozenset({"TYPE_FIELD_ADDED_COMPATIBLE"}),
+        rules=(
+            Rule(
+                lambda c: c.flags.pack is not None,
+                {
+                    "expected": frozenset(),
+                    "any_of": (
+                        frozenset({"TYPE_SIZE_CHANGED", "STRUCT_SIZE_CHANGED"}),
+                        frozenset({"TYPE_FIELD_ADDED", "TYPE_FIELD_ADDED_COMPATIBLE"}),
+                    ),
+                    "verdict_min": "BREAKING",
+                    "verdict_max": None,
+                },
+                "-fpack-struct leaves no tail padding: c grows FC from 5 to 6 bytes",
+            ),
+        ),
+        **_COMPAT_ONLY,
+    ),
+    _op(
+        "source_only_export_added",
+        ("x.helper",),
+        _replace(
+            "x.helper",
+            "int enp_a(int a);",
+            "int enp_a(int a);",
+            source=(
+                "int enp_a(int a) { return a; }",
+                "int enp_a(int a) { return a; }\nint enp_hidden_helper(int a) { return a * 9; }",
+            ),
+        ),
+        "a helper defined only in the source becomes a new export no header "
+        "declares: nothing existing changes",
+        expected=frozenset({"FUNC_ADDED_ELF_ONLY"}),
+        rules=(
+            Rule(
+                lambda c: c.flags.visibility == "hidden",
+                {
+                    "expected": frozenset(),
+                    "verdict_min": "NO_CHANGE",
+                    "observable": False,
+                },
+                "under -fvisibility=hidden only declarations inside the header's "
+                "visibility push(default) are exported; the source-only helper "
+                "stays local, so the binary's export table does not change",
+            ),
+            Rule(
+                lambda c: c.evidence in ("binary", "dwarf"),
+                {"expected": frozenset({"FUNC_ADDED"})},
+                "without a header to miss it from, the export is an ordinary addition",
+            ),
+        ),
+        **_COMPAT_ONLY,
+        **_BINARY,
+    ),
+)
+
 CXX_OPERATORS: tuple[EditOp, ...] = (
     *_SPECIFIERS,
     *_MEMBERS,
     *_LINKAGE,
     *_QUALIFIERS,
     *_DEFAULTS,
+    *_SHAPES,
 )
