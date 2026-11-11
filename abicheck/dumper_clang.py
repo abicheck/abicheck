@@ -150,6 +150,7 @@ from .extract.headers.clang.template_param_indexes import (
 from .extract.headers.clang.templates import _specialization_spelling
 from .extract.headers.clang.type_identity import TypeIdentityIndex
 from .extract.headers.clang.typedefs import (
+    declared_typedef_facts as _declared_typedef_facts,
     typedef_abi_facts as _typedef_abi_facts,
     typedef_underlying as _typedef_underlying,
 )
@@ -897,6 +898,7 @@ class _ClangAstParser:
             self._functions,
             type_identities=self._type_identities,
             builtin_abi=self.builtin_abi,
+            typedef_abi_facts=_declared_typedef_facts(self),
             exported_dynamic=self._exported_dynamic,
             exported_static=self._exported_static,
             virtual_mangled_names=self._virtual_mangled_names(),
@@ -916,10 +918,7 @@ class _ClangAstParser:
             node = entry.node
             if _is_builtin_file(entry.file):
                 continue
-            # Skip block-scope locals: only namespace/global-scope and static
-            # member variables denote an ABI surface (a local VarDecl is reached
-            # only via a function body, which we do not descend, so this is
-            # defensive).
+            # Skip block-scope locals (defensive; bodies are not descended).
             if node.get("storageClass") in ("auto", "register"):
                 continue
             name = str(node.get("name", ""))

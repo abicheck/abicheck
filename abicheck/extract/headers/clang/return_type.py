@@ -25,10 +25,13 @@ three private helpers), with a single call site in ``functions.py``
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping, Sequence
 
+from abicheck.model import Fact
+from abicheck.model.abi_fundamental import AbiFundamental
 from abicheck.model.identity_literals import quoted_literal_spans
 
-__all__ = ["return_type"]
+__all__ = ["return_type", "typedef_return_fact"]
 
 
 def _literal_end_at(literal_spans: list[tuple[int, int]], i: int) -> int | None:
@@ -434,3 +437,37 @@ def return_type(qualtype: str) -> str:
             real_start = start
             break
     return qualtype[:real_start].strip()
+
+
+def typedef_return_fact(
+    builtin: Fact[AbiFundamental] | None,
+    spelling: str,
+    scope: Sequence[str],
+    typedef_abi_facts: Mapping[str, Fact[AbiFundamental] | None] | None,
+    type_param_names: Sequence[str] = (),
+) -> Fact[AbiFundamental] | None:
+    """The ABI fact of a return type spelled through a typedef.
+
+    Clang's JSON gives a parameter its own ``desugaredQualType``, but the
+    function's type (``count_t (count_t)``) is not itself sugar and carries
+    none, so a typedef'd return type has no builtin spelling to read. Look
+    the written name up among the TU's typedefs instead, innermost
+    enclosing scope first, as name lookup would. *typedef_abi_facts* names
+    every declared typedef, ``None`` for one whose target has no fact (a
+    record, say): the nearest declaration decides, so an outer same-named
+    typedef of a builtin is never borrowed for it. A template parameter
+    of the function (*type_param_names*) hides every typedef of its name,
+    so its spelling gets no fact at all.
+    """
+    if builtin is not None or not typedef_abi_facts:
+        return builtin
+    name = re.sub(r"^(?:const\s+|volatile\s+)+", "", spelling.strip())
+    if name.startswith("::"):
+        return typedef_abi_facts.get(name[2:])
+    if name in type_param_names:
+        return None
+    for depth in range(len(scope), -1, -1):
+        key = "::".join((*scope[:depth], name))
+        if key in typedef_abi_facts:
+            return typedef_abi_facts[key]
+    return None

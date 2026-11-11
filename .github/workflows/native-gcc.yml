@@ -38,4 +38,4 @@ jobs:
         env:
           ABICHECK_NATIVE_GCC: g++-${{ matrix.gcc }}
           ABICHECK_MIN_EXECUTED: '8'
-        run: python -m pytest tests/test_native_gcc_workflow.py tests/test_native_gcc_fact_integration.py -q --no-cov
+        run: python -m pytest tests/test_native_gcc_workflow.py tests/test_native_gcc_fact_integration.py tests/test_native_gcc_parity_regressions.py -q --no-cov

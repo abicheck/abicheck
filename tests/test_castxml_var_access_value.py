@@ -562,6 +562,18 @@ class TestVarAccessProducerGate:
         new = _snap(ast_producer="castxml", variables=[_var(AccessLevel.PRIVATE)])
         assert ChangeKind.VAR_ACCESS_CHANGED in _kinds(compare(old, new))
 
+    @pytest.mark.parametrize("other", ["castxml", "clang", "gcc-experimental"])
+    def test_native_gcc_compares_with_every_access_producer(self, other: str) -> None:
+        # Native GCC projects each variable's access from its first release.
+        old = _snap(
+            ast_producer="gcc-experimental", variables=[_var(AccessLevel.PUBLIC)]
+        )
+        new = _snap(ast_producer=other, variables=[_var(AccessLevel.PRIVATE)])
+        assert {c.kind for c in compare(old, new).changes} & {
+            ChangeKind.VAR_ACCESS_CHANGED,
+            ChangeKind.VAR_ACCESS_WIDENED,
+        } == {ChangeKind.VAR_ACCESS_CHANGED}
+
     def test_two_castxml_sides_compare(self) -> None:
         old = _snap(ast_producer="castxml", variables=[_var(AccessLevel.PUBLIC)])
         new = _snap(ast_producer="castxml", variables=[_var(AccessLevel.PRIVATE)])

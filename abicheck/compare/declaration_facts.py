@@ -79,11 +79,12 @@ CLANG_VARIABLE_ACCESS_GENERATION = 54
 def records_variable_access(snapshot: AbiSnapshot) -> bool:
     """Whether *snapshot*'s header backend recorded each variable's access.
 
-    castxml always has; clang has since ``CLANG_VARIABLE_ACCESS_GENERATION``
-    (``fact_generations`` is ``None`` for a snapshot this process extracted).
-    A ``hybrid`` merge mixes both and stays excluded.
+    castxml and native GCC always have; clang has since
+    ``CLANG_VARIABLE_ACCESS_GENERATION`` (``fact_generations`` is ``None``
+    for a snapshot this process extracted). A ``hybrid`` merge mixes both
+    and stays excluded.
     """
-    if snapshot.ast_producer == "castxml":
+    if snapshot.ast_producer in ("castxml", "gcc-experimental"):
         return True
     if snapshot.ast_producer != "clang":
         return False

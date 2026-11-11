@@ -85,6 +85,7 @@ sequences:
           - learn/compatibility-direction.md
           - learn/consumer-models.md
           - learn/build-profile-comparability.md
+          - learn/client-toolchains.md
           - learn/static-and-header-only.md
         links:
           - learn/contract-aware-compatibility.md   # member of `concepts`

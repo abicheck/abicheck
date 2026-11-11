@@ -15,6 +15,7 @@ from ....model import (
     EnumMember,
     EnumType,
     Fact,
+    FactStatus,
     Function,
     Param,
     RecordType,
@@ -137,6 +138,11 @@ def project(
         and (not r.get("artificial"))
         and policy.public(r.get("source"))
     }
+    # A function befriended by a class (C++ only): uid -> the befriending class.
+    friend_owner: dict[int, str] = {}
+    for r in rows:
+        if r["kind"] == "friend":
+            friend_owner.setdefault(r["uid"], clean(r["owner"]))
     name_rewrites = {}
     for uid, row in type_rows.items():
         if row.get("anonymous") and uid in anonymous_aliases:
@@ -206,6 +212,9 @@ def project(
                         access=AccessLevel(f["access"]),
                         is_const=protocol_flag(f, "const", language),
                         is_volatile=protocol_flag(f, "volatile", language),
+                        deprecated_fact=Fact.present(f["deprecated"])
+                        if "deprecated" in f
+                        else Fact.not_collected(),
                         is_mutable_fact=Fact.present(f["mutable"])
                         if "mutable" in f
                         else Fact.not_collected(),
@@ -217,6 +226,7 @@ def project(
                     )
                 )
             bases = r.get("bases", [])
+            vtable = vtable_fact(r)
             types[name] = RecordType(
                 name=name,
                 qualified_name=name if "::" in name else None,
@@ -224,6 +234,8 @@ def project(
                 if r["kind"] == "union_type"
                 else r.get("record_kind", "struct"),
                 is_union=r["kind"] == "union_type",
+                is_opaque=r.get("complete") is False,
+                deprecated=r.get("deprecated"),
                 size_bits=None if dependent else r["size_bits"],
                 alignment_bits=r["alignment_bits"],
                 data_size_bits=r.get("data_size_bits"),
@@ -247,7 +259,11 @@ def project(
                     for b in bases
                     if b["offset_bytes"] is not None
                 },
-                vtable_fact=vtable_fact(r),
+                vtable_fact=vtable,
+                # Itanium: a dynamic class's vptr is at offset 0 (CastXML's rule too).
+                vptr_offset_bits_fact=Fact.partial(0 if vtable.value else None)
+                if vtable.status is FactStatus.PRESENT
+                else Fact.not_collected(),
                 specialization_declared_fact=Fact.present(r["specialization_declared"])
                 if r.get("specialization_declared") is not None
                 else Fact.not_collected(),
@@ -271,6 +287,7 @@ def project(
                 qualified_name=name if "::" in name else None,
                 members=[EnumMember(m["name"], m["value"]) for m in r["members"]],
                 is_scoped=r.get("scoped"),
+                deprecated=r.get("deprecated"),
                 underlying_type=underlying or "?",
                 source_location=src,
                 source_header=r["source"],
@@ -317,6 +334,15 @@ def project(
                 return_type_identities_fact=resolved_identity(r["return_identity"]),
                 return_type_abi_fact=abi(r.get("return_abi")),
                 is_inline=protocol_flag(r, "inline", language),
+                is_hidden_friend=r.get("uid") in friend_owner
+                if language == "c++"
+                else None,
+                hidden_friend_owner=friend_owner.get(r.get("uid")),
+                hidden_friend_owner_fact=Fact.present(friend_owner[r["uid"]])
+                if r.get("uid") in friend_owner
+                else Fact.not_applicable()
+                if language == "c++"
+                else Fact.not_collected(),
                 is_compiler_generated=protocol_flag(r, "artificial", language),
                 is_explicit=r.get("explicit")
                 if r.get("constructor") or r["name"].startswith("operator ")
@@ -410,7 +436,7 @@ def project(
         if r["kind"] == "macro" and policy.public(r.get("source"))
     }
     gaps = (
-        "Experimental GCC v2: hidden friends, template overload constraints, anonymous/local declarations, native header graph and macro comparison are incomplete.",
+        "Experimental GCC v2: template overload constraints, anonymous/local declarations, native header graph and macro comparison are incomplete.",
     )
     provenance = {
         "experimental_gcc_schema": 2,
