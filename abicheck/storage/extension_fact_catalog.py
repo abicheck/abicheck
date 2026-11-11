@@ -426,7 +426,7 @@ def _sha256_hex(value: Any) -> str:
 
 
 #: The SHA-256 of the binary's bytes a snapshot was dumped from
-#: (``AbiSnapshot.binary_sha256``, extractor generation 50), read through a
+#: (``AbiSnapshot.binary_sha256``, extractor generation 51), read through a
 #: GNU ld linker-script chain to its final target like a live operand's hash.
 #: Written on the ``binary`` section by every dump of a binary file. It lets
 #: ADR-090 D1(c) prove a stored dump and a live binary (or two stored dumps)

@@ -13,4 +13,4 @@
   rebuild against a stored baseline of the same name still reads `NO_CHANGE`
   when no extracted fact differs). Snapshots written before this release record no hash,
   so compared with a live binary they still read `UNCONFIRMED`; re-dump them
-  to get the exemption. Extractor generation 50.
+  to get the exemption. Extractor generation 51.
