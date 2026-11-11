@@ -119,6 +119,7 @@ FAMILIES: dict[str, Family] = {
             harness_tests=(
                 "tests/test_family_f5_optimization_reference.py",
                 "tests/test_family_f5_derived_ast_sharing.py",
+                "tests/test_dump_cache_single_tier.py",
                 "tests/test_family_f5_packed_type_graph.py",
                 "tests/test_surface_metrics_fan_in_index.py",
                 "tests/test_header_dir_expansion_canonical_order.py",
@@ -622,6 +623,7 @@ _F14 = (
     "extraction.vector_type_collapsed_to_plain_array",
     "extraction.dwarf_array_bound_erased",
     "extraction.dwarf_out_of_line_definition_dropped",
+    "extraction.dwarf_lane_drops_a_recorded_fact",
 )
 _F15 = (
     "extraction.castxml_vector_element_not_modelled",

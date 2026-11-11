@@ -619,12 +619,10 @@ class _DwarfSnapshotBuilder:
             ret_ptr_depth = self._count_pointer_depth(typed, CU)
         self._referenced_type_names.add(ret_type)
 
-        # Parameters
-        params: list[Param] = []
-        for child in _members.parameter_dies(die, CU):
-            p = self._process_param(child, CU)
-            if p is not None:
-                params.append(p)
+        param_dies, is_variadic = _members.parameters_and_variadic(die, CU)
+        params = [
+            p for c in param_dies if (p := self._process_param(c, CU)) is not None
+        ]
 
         # Qualifiers
         is_virtual = _attr_int(attrs, "DW_AT_virtuality") > 0
@@ -664,6 +662,7 @@ class _DwarfSnapshotBuilder:
             is_const=quals.is_const,
             is_volatile=quals.is_volatile,
             ref_qualifier=quals.ref_qualifier,
+            is_variadic=is_variadic,
             # ADR-063 Phase 2 -- see dwarf_scope.function_entity_id.
             entity_id=_dwarf_function_entity_id(
                 scope_path,

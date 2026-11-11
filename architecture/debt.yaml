@@ -267,7 +267,7 @@
     },
     {
       "path": "abicheck/checker.py",
-      "baseline_lines": 1388,
+      "baseline_lines": 1382,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -509,7 +509,7 @@
     },
     {
       "path": "abicheck/diff_symbols.py",
-      "baseline_lines": 1425,
+      "baseline_lines": 1423,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -575,7 +575,7 @@
     },
     {
       "path": "abicheck/dwarf_advanced.py",
-      "baseline_lines": 1143,
+      "baseline_lines": 1037,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -586,7 +586,7 @@
     },
     {
       "path": "abicheck/dwarf_snapshot.py",
-      "baseline_lines": 1690,
+      "baseline_lines": 1689,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",

@@ -506,6 +506,43 @@ def test_pack_rebuild_from_a_packed_old_side_matches_the_layout_oracle(
     assert accepts_alignment_only is unchanged
 
 
+@pytest.mark.parametrize(
+    "flags",
+    [Flags(bits=32), Flags(pack=2), Flags(pack=4), Flags(bits=32, pack=2)],
+    ids=["i386", "old-pack2", "old-pack4", "i386-old-pack2"],
+)
+@pytest.mark.parametrize(
+    ("evidence", "observable"), [("binary", False), ("dwarf", False), ("headers", True)]
+)
+def test_pack_rebuild_alignment_only_needs_the_header_dump(
+    flags: Flags, evidence: str, observable: bool
+) -> None:
+    # Packing to 1 here moves no size or offset, so DWARF (which records no
+    # alignment for an unannotated record) is byte-identical on both sides:
+    # only the header dump, built with the same -fpack-struct, shows alignof
+    # drop. Nightly 2026-11-10 (#1992): clang18/19 -m32 DWARF cells read
+    # false-clean against a rule that demanded a finding from DWARF.
+    exp = OP_BY_NAME["rebuild_pack_struct"].expect(_cfg(flags=flags, evidence=evidence))
+    assert exp.observable is observable
+    clean = exp.problems("NO_CHANGE", frozenset())
+    if observable:
+        assert clean == [
+            "none of ['STRUCT_ALIGNMENT_CHANGED', 'STRUCT_FIELD_OFFSET_CHANGED', "
+            "'STRUCT_SIZE_CHANGED', 'TYPE_ALIGNMENT_CHANGED', "
+            "'TYPE_FIELD_OFFSET_CHANGED', 'TYPE_SIZE_CHANGED'] reported",
+            "verdict NO_CHANGE weaker than required BREAKING",
+        ]
+    else:
+        assert clean == []
+
+
+def test_pack_rebuild_that_moves_offsets_stays_observable_in_dwarf() -> None:
+    # x86-64 default: packing moves `weight` 8 -> 4, which DWARF records.
+    exp = OP_BY_NAME["rebuild_pack_struct"].expect(_cfg(evidence="dwarf"))
+    assert exp.observable is True
+    assert exp.verdict_min == "BREAKING"
+
+
 # --- reporting ------------------------------------------------------------------
 
 

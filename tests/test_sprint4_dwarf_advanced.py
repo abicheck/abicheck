@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from abicheck.checker import ChangeKind, Verdict, compare
+from abicheck.compare.toolchain_flags import toolchain_flag_changes
 from abicheck.dwarf_advanced import (
     AdvancedDwarfMetadata,
     ToolchainInfo,
@@ -68,9 +69,12 @@ def _adv(
 
 
 def test_diff_advanced_dwarf_no_dwarf() -> None:
-    old = _adv(has_dwarf=False)
+    old = _adv(has_dwarf=False, flags={"-fshort-enums"})
     new = _adv(has_dwarf=True)
     assert diff_advanced_dwarf(old, new) == []
+    # The flag families are gated the same way: one side without DWARF has
+    # no producer flags to compare, never "every flag removed".
+    assert toolchain_flag_changes(old, new) == []
 
 
 def test_diff_both_no_dwarf() -> None:
@@ -271,7 +275,7 @@ def test_toolchain_flag_added_compatible_warning() -> None:
 
 
 def test_toolchain_flag_removed() -> None:
-    results = diff_advanced_dwarf(
+    results = toolchain_flag_changes(
         _adv(flags={"-fshort-enums", "-fno-common"}),
         _adv(flags={"-fshort-enums"}),
     )
@@ -281,7 +285,7 @@ def test_toolchain_flag_removed() -> None:
 
 
 def test_toolchain_no_drift_no_change() -> None:
-    results = diff_advanced_dwarf(
+    results = toolchain_flag_changes(
         _adv(flags={"-fshort-enums"}),
         _adv(flags={"-fshort-enums"}),
     )

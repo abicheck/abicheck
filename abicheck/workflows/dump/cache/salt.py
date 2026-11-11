@@ -50,7 +50,16 @@ from __future__ import annotations
 #: v40: an ELF dump records each compilation unit's stack-protector setting
 #: (``cu_stack_protector``) and a DWARF variable's ``DW_AT_alignment``. A warm
 #: entry would carry neither.
-SNAPSHOT_CACHE_VERSION: str = "40"
+#:
+#: v41: a DWARF-only dump records export-table-only records for exports no
+#: DWARF declaration names, ``Function.is_variadic``, and plain-char
+#: signedness flags. A warm entry would carry none of them.
+#:
+#: v42: a Clang header dump reads each ordinary enum's representation from a
+#: compiler probe (was assumed ``int``) and records scoped record/enum
+#: identities for parameter and return slots. A warm entry would keep the
+#: assumed ``int`` and lack the slot identities.
+SNAPSHOT_CACHE_VERSION: str = "42"
 # v35: header-derived snapshots now carry public_header_identifiers (schema
 # v55, extract/public_header_identifiers.py). The key also folds in the
 # snapshot schema version from this version on, so the next schema bump

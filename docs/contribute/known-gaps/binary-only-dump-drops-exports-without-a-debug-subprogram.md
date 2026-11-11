@@ -3,15 +3,15 @@ doc_type: contributor
 audience:
   - contributor
 level: advanced
-lifecycle: active
+lifecycle: historical
 generated: false
 ---
 
 # A binary-only dump loses exports with no debug subprogram, so a still-exported symbol reads as removed (2026-10-25)
 
-Index: [Known gaps](../known-gaps.md)
+Index: [Known gaps — closed and moot](../archive/known-gaps-closed.md)
 
-**Status (2026-10-25): OPEN.** Found by
+**Status (2026-11-10): CLOSED** by #1980 (the DWARF lane records the exports no debug declaration names; see the archive entry). Originally found by
 `tests/test_depth_projection_matches_shallow_dump.py`, where it is excused as
 an oracle defect when the projection proves the symbol is exported on both
 sides.

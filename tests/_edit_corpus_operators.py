@@ -971,6 +971,10 @@ OPERATORS: tuple[EditOp, ...] = (
                 "rec's double already sits at offset 4 (i386 aligns it to 4; an old side "
                 "packed to 2 or 4 caps it there): packing to 1 keeps every size and "
                 "offset and lowers only alignof",
+                # DWARF records no alignment for an unannotated record and the
+                # sizes and offsets it does record are unchanged: only the header
+                # dump (built with the same -fpack-struct) can show alignof drop.
+                min_evidence="headers",
             ),
         ),
         precondition=_not_already("pack", 1),

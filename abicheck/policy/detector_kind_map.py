@@ -29,6 +29,7 @@ DETECTOR_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
         "advanced_dwarf": frozenset(
             {
                 "calling_convention_changed",
+                "char_signedness_changed",
                 "struct_packing_changed",
                 "struct_return_convention_changed",
                 "toolchain_flag_drift",
@@ -479,7 +480,6 @@ NON_DETECTOR_KINDS: frozenset[str] = frozenset(
         "bundle_soname_skew",
         "bundle_unresolved_intra_dependency",
         "call_graph_public_entry_reachability_changed",
-        "char_signedness_changed",
         "compile_context_conflict",
         "constexpr_value_changed",
         "consumer_required_symbol_removed",
