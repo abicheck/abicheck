@@ -80,6 +80,7 @@ class Construct:
 
 _BOTH = frozenset(LANGS)
 _CXX = frozenset({"c++"})
+_C = frozenset({"c"})
 
 CONSTRUCTS: tuple[Construct, ...] = (
     Construct("struct", _BOTH),
@@ -97,6 +98,22 @@ CONSTRUCTS: tuple[Construct, ...] = (
     Construct("no_unique_address", _CXX, "no_unique_address"),
     Construct("noexcept_type", _CXX, "noexcept_in_type"),
     Construct("std_string", _CXX, "std_string"),
+    Construct("restrict_pointer", _C, "restrict"),
+    Construct("flexible_array", _C, "flexible_array"),
+    Construct("atomic", _C, "atomic"),
+    Construct("union", _BOTH),
+    Construct("header_constant", _BOTH),
+    Construct("deprecation", _BOTH),
+    Construct("tls_variable", _BOTH),
+    Construct("symbol_version", _BOTH),
+    Construct("soname", _BOTH),
+    Construct("link_option", _BOTH),
+    Construct("compile_option", _BOTH),
+    Construct("class", _CXX),
+    Construct("inheritance", _CXX),
+    Construct("inline_namespace", _CXX),
+    Construct("abi_tag", _CXX),
+    Construct("hidden_friend", _CXX),
 )
 CONSTRUCT_BY_NAME: dict[str, Construct] = {c.name: c for c in CONSTRUCTS}
 
@@ -117,6 +134,41 @@ ROLE_CONSTRUCT: dict[str, str] = {
     "shape": "class_virtual",
     "buf": "template",
     "tmpl": "template",
+    # c_elf
+    "build.vscript": "symbol_version",
+    "build.soname": "soname",
+    "build.ldflags": "link_option",
+    "build.cflags": "compile_option",
+    "elf.const": "header_constant",
+    "elf.union": "union",
+    "elf.flags": "struct",
+    "elf.buf": "struct",
+    "elf.ctx": "struct",
+    "elf.level": "enum",
+    "elf.count_t": "typedef",
+    "elf.legacy": "deprecation",
+    "elf.tls": "tls_variable",
+    "elf.obj": "variable",
+    "elf.tab": "variable",
+    "elf.k": "variable",
+    "elf.al": "variable",
+    "elf.banner": "variable",
+    "elf": "function",
+    # cxx_more
+    "x.widget": "class",
+    "x.gadget": "class",
+    "x.sealed": "class",
+    "x.calc": "class",
+    "x.plain": "class",
+    "x.poly": "class_virtual",
+    "x.vbase": "inheritance",
+    "x.multi": "inheritance",
+    "x.ns": "inline_namespace",
+    "x.tagged": "abi_tag",
+    "x.cmp": "hidden_friend",
+    "x.tone": "enum",
+    "x.shade": "enum_class",
+    "x": "function",
 }
 
 # Language feature an operator needs -> the construct it exercises.
@@ -135,8 +187,10 @@ def role_construct(role: str) -> str:
 
 
 def op_constructs(op: EditOp) -> tuple[str, ...]:
-    """The constructs *op* exercises: its features' if it needs any, else its roles'."""
-    if op.features:
+    """The constructs *op* exercises: as declared, else its features', else its roles'."""
+    if op.constructs:
+        names = list(op.constructs)
+    elif op.features:
         names = [FEATURE_CONSTRUCT[f] for f in op.features]
     else:
         names = [role_construct(r) for r in op.roles]

@@ -554,14 +554,14 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "recorded and simply lacks the added records and flags"
     ),
     51: GenerationSpellingChange(
-        "no type or name spelling changes. A castxml variable's alignment is "
-        "recorded as a lower bound (Fact PARTIAL) when its file, or the file "
-        "of a typedef its type names, spells an alignment specifier in its "
-        "preprocessed code (castxml writes none for a variable); a DWARF 5 "
-        "variable without DW_AT_alignment records its type's default "
-        "alignment where DWARF states it; no rewrite is needed -- an older "
-        "snapshot reads the castxml value as declared and a DWARF default as "
-        "not recorded, as before"
+        "every dump of a binary file records the SHA-256 of the binary's bytes "
+        "(the abicheck.binary_sha256 extension fact on the binary section, "
+        "hashed through a GNU ld linker script to its target like a live "
+        "operand), so the identical-input exemption can prove a stored dump and "
+        "a live binary one input. No type or name spelling changes, so no "
+        "rewrite is needed "
+        "-- an older snapshot reads as no recorded identity, which proves no "
+        "identical-input exemption"
     ),
 }
 

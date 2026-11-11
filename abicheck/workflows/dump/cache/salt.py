@@ -55,11 +55,11 @@ from __future__ import annotations
 #: DWARF declaration names, ``Function.is_variadic``, and plain-char
 #: signedness flags. A warm entry would carry none of them.
 #:
-#: v42: a castxml dump records which files spell an alignment specifier (in
-#: the cached AST) and a variable's alignment as a lower bound there; a DWARF
-#: 5 variable records its type's default alignment. A warm entry would carry
-#: neither.
-SNAPSHOT_CACHE_VERSION: str = "42"
+#: v45 (v42-v44 are left to changes in flight at the time): a dump of a
+#: binary file records the binary's SHA-256 (``binary_sha256``, ADR-090
+#: D1(c)). A warm entry would carry none, so a stored dump of it could never
+#: be proven the same input as the binary.
+SNAPSHOT_CACHE_VERSION: str = "45"
 # v35: header-derived snapshots now carry public_header_identifiers (schema
 # v55, extract/public_header_identifiers.py). The key also folds in the
 # snapshot schema version from this version on, so the next schema bump

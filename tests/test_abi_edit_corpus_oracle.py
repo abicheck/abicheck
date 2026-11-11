@@ -32,6 +32,7 @@ from tests._edit_corpus_exec import ExecutionOracle, RunResult, binary_layout_on
 from tests._edit_corpus_expect import Expectation, Reconciled
 from tests._edit_corpus_harness import Built, CompileError
 from tests._edit_corpus_operators import OP_BY_NAME
+from tests._edit_corpus_opkit import SONAME_ADVISORY
 from tests._edit_corpus_seeds import C_SEED, SEED_BY_NAME
 from tests._edit_corpus_tiers import Cell
 from tests._strict_process import StrictProcessRunner
@@ -452,16 +453,24 @@ def test_cxx11_rebuild_needs_a_producer_whose_default_abi_differs(
         # only alignof drops (4 -> 1).
         (32, {"STRUCT_ALIGNMENT_CHANGED"}, True),
         (32, {"TYPE_SIZE_CHANGED"}, True),
-        # x86-64 aligns it to 8: packing moves `weight` from 8 to 4.
+        # x86-64 aligns it to 8: packing moves `weight` from 8 to 4, and the
+        # header layout records alignof(rec) 8 -> 1 as well; both are owed.
         (64, {"STRUCT_ALIGNMENT_CHANGED"}, False),
-        (64, {"TYPE_FIELD_OFFSET_CHANGED"}, True),
+        (64, {"TYPE_FIELD_OFFSET_CHANGED"}, False),
+        (64, {"TYPE_FIELD_OFFSET_CHANGED", "TYPE_ALIGNMENT_CHANGED"}, True),
     ],
 )
 def test_pack_rebuild_accepts_alignment_only_where_offsets_cannot_move(
     bits: int, kinds: set[str], ok: bool
 ) -> None:
     exp = OP_BY_NAME["rebuild_pack_struct"].expect(_cfg(flags=Flags(bits=bits)))
-    assert (exp.problems("BREAKING", frozenset(kinds)) == []) is ok
+    assert (exp.problems("BREAKING", _answer(kinds)) == []) is ok
+
+
+def _answer(kinds: set[str]) -> frozenset[str]:
+    """What abicheck reports for a BREAKING rebuild: *kinds* plus its release
+    advisory, which every ELF break under an unchanged SONAME carries."""
+    return frozenset(kinds | {SONAME_ADVISORY})
 
 
 def _rec_layout(pack: int | None) -> tuple[int, ...]:
@@ -501,9 +510,48 @@ def test_pack_rebuild_from_a_packed_old_side_matches_the_layout_oracle(
     unchanged = _rec_layout(old_pack) == _rec_layout(1)
     exp = OP_BY_NAME["rebuild_pack_struct"].expect(_cfg(flags=Flags(pack=old_pack)))
     accepts_alignment_only = (
-        exp.problems("BREAKING", frozenset({"STRUCT_ALIGNMENT_CHANGED"})) == []
+        exp.problems("BREAKING", _answer({"STRUCT_ALIGNMENT_CHANGED"})) == []
     )
     assert accepts_alignment_only is unchanged
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [Flags(bits=32), Flags(pack=2), Flags(pack=4), Flags(bits=32, pack=2)],
+    ids=["i386", "old-pack2", "old-pack4", "i386-old-pack2"],
+)
+@pytest.mark.parametrize(
+    ("evidence", "observable"), [("binary", False), ("dwarf", False), ("headers", True)]
+)
+def test_pack_rebuild_alignment_only_needs_the_header_dump(
+    flags: Flags, evidence: str, observable: bool
+) -> None:
+    # Packing to 1 here moves no size or offset, so DWARF (which records no
+    # alignment for an unannotated record) is byte-identical on both sides:
+    # only the header dump, built with the same -fpack-struct, shows alignof
+    # drop. Nightly 2026-11-10 (#1992): clang18/19 -m32 DWARF cells read
+    # false-clean against a rule that demanded a finding from DWARF.
+    exp = OP_BY_NAME["rebuild_pack_struct"].expect(_cfg(flags=flags, evidence=evidence))
+    assert exp.observable is observable
+    clean = exp.problems("NO_CHANGE", frozenset())
+    if observable:
+        assert clean == [
+            # with_derived: an ELF break under an unchanged SONAME owes the advisory.
+            "missing expected kinds ['SONAME_BUMP_RECOMMENDED']",
+            "none of ['STRUCT_ALIGNMENT_CHANGED', 'STRUCT_FIELD_OFFSET_CHANGED', "
+            "'STRUCT_SIZE_CHANGED', 'TYPE_ALIGNMENT_CHANGED', "
+            "'TYPE_FIELD_OFFSET_CHANGED', 'TYPE_SIZE_CHANGED'] reported",
+            "verdict NO_CHANGE weaker than required BREAKING",
+        ]
+    else:
+        assert clean == []
+
+
+def test_pack_rebuild_that_moves_offsets_stays_observable_in_dwarf() -> None:
+    # x86-64 default: packing moves `weight` 8 -> 4, which DWARF records.
+    exp = OP_BY_NAME["rebuild_pack_struct"].expect(_cfg(evidence="dwarf"))
+    assert exp.observable is True
+    assert exp.verdict_min == "BREAKING"
 
 
 # --- reporting ------------------------------------------------------------------
@@ -786,3 +834,32 @@ def test_a_std_seed_needs_one_cxx_library_on_both_sides(
     (user,) = cfg.consumer_set
     reason = cells.stdlib_mismatch(SEED_BY_NAME[seed], cfg, user)
     assert (reason is not None) is blocked
+
+
+@pytest.mark.parametrize(
+    ("member", "names"),
+    [
+        # Data members offsetof can name, however they are spelled.
+        ("int x", ["x"]),
+        ("alignas(8) int x", ["x"]),
+        ("_Alignas(16) int x", ["x"]),
+        ("[[gnu::aligned(8)]] int x", ["x"]),
+        ("int x __attribute__((aligned(8)))", ["x"]),
+        ("int (*cb)(int)", ["cb"]),
+        ("void (* handler )(void *, int)", ["handler"]),
+        ("char tag[8]", ["tag"]),
+        ("[[deprecated]] int legacy", ["legacy"]),
+        # Not fields offsetof can take.
+        ("int z()", []),
+        ("virtual int z() = 0", []),
+        ("int b : 4", []),
+        ("alignas(4) int b : 4", []),
+    ],
+    ids=str,
+)
+def test_the_layout_probe_names_every_data_member(
+    member: str, names: list[str]
+) -> None:
+    from tests._edit_corpus_exec import _field_names
+
+    assert _field_names(f" {member}; ") == names

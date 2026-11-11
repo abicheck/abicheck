@@ -159,10 +159,33 @@ _STRUCT = re.compile(r"struct\s+(\w+)\s*\{([^{}]*)\}\s*;")
 _ENUM = re.compile(r"enum\s+(class\s+)?(\w+)\s*(?::\s*[\w ]+)?\{([^{}]*)\}\s*;")
 
 
+# __attribute__((...)) with one level of nested parentheses (aligned(8)).
+_ATTRIBUTE = re.compile(r"__attribute__\s*\(\((?:[^()]|\([^()]*\))*\)\)")
+_FUNC_POINTER = re.compile(r"\(\s*\*\s*(\w+)\s*\)\s*\(")
+
+
 def _field_names(body: str) -> list[str]:
+    """The data members ``offsetof`` can name in one record body.
+
+    Attributes (``__attribute__((...))``, ``[[...]]``) and alignment specifiers
+    (``alignas(...)``, ``_Alignas(...)``) are stripped first, so a specified
+    field stays a field. A function-pointer member (``int (*cb)(int)``) is a
+    field named by its declarator; any other ``(`` left is a member function.
+    A bit-field is skipped (``offsetof`` is ill-formed on it).
+    """
     names = []
     for decl in body.split(";"):
-        decl = re.sub(r"\[\[[^\]]*\]\]", "", decl)
+        decl = _ATTRIBUTE.sub("", decl)
+        decl = re.sub(r"\[\[.*?\]\]", "", decl)
+        decl = re.sub(r"\b(?:alignas|_Alignas)\s*\([^()]*\)", "", decl)
+        pointer = _FUNC_POINTER.search(decl)
+        if pointer:
+            names.append(pointer.group(1))
+            continue
+        if "(" in decl:
+            continue  # a member function, not a field
+        if re.search(r"(?<!:):(?!:)", decl):
+            continue  # a bit-field: offsetof is ill-formed on it
         decl = re.sub(r"\[[^\]]*\]", "", decl).strip()
         m = re.search(r"(\w+)\s*$", decl)
         if m and decl.split() and len(decl.split()) >= 2:

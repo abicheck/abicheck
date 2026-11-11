@@ -846,17 +846,15 @@ class TestNarrowingOutranksAnUnrelatedOldFailure:
         assert doc["run_outcome"]["scope"] == "complete"
         assert doc["exit"]["incomplete_scope_contribution"] == 0
         # Built without -g and compared without headers, so neither side has
-        # type-level evidence. The stored side is a snapshot, which records no
-        # binary SHA-256, so D1(c) cannot prove the pair identical: the member's
-        # observed NO_CHANGE reads UNCONFIRMED for both sides (ADR-090), and
-        # that axis alone raises the run to exit 1.
+        # type-level evidence; but the stored member is a dump of this same
+        # .so and records its SHA-256, so ADR-090 D1(c) proves the pair one
+        # input: the exempt identical pair reads NO_CHANGE and exits 0.
         (member,) = doc["libraries"]
-        assert member["verdict"] == "UNCONFIRMED", member
-        assert member["unconfirmed"]["observed_verdict"] == "NO_CHANGE"
-        assert member["unconfirmed"]["sides_without_type_evidence"] == ["old", "new"]
-        assert doc["verdict"] == "UNCONFIRMED"
-        assert doc["exit"]["reasons"] == ["unconfirmed_compatibility"], doc["exit"]
-        assert code == 1
+        assert member["verdict"] == "NO_CHANGE", member
+        assert "unconfirmed" not in member
+        assert doc["verdict"] == "NO_CHANGE"
+        assert doc["exit"]["reasons"] == ["clean"], doc["exit"]
+        assert code == 0
 
 
 class TestStoredLiveDriverSurvivesAMemberExtractionFailure:

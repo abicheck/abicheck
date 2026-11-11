@@ -105,6 +105,11 @@ _PR: tuple[tuple[str, str, str, dict[str, object]], ...] = (
     ("method_noexcept_add", "cxx_classes", "gcc", {}),
     ("concept_constraint_added", "cxx_classes", "clang", {"std": "c++20"}),
     ("rebuild_optimized", "c_core", "gcc", {}),
+    # c_elf / cxx_more: a link-level edit from symbols alone, a C type edit
+    # under DWARF, a C++ hierarchy edit under headers.
+    ("version_script_dropped", "c_elf", "clang", {"evidence": "binary"}),
+    ("union_member_retyped", "c_elf", "gcc", {"evidence": "dwarf"}),
+    ("bases_reordered", "cxx_more", "gcc", {}),
 )
 
 

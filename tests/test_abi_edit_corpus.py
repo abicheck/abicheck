@@ -34,8 +34,12 @@ from tests._edit_corpus_harness import (
 )
 from tests._edit_corpus_known import KNOWN, known_mismatch
 from tests._edit_corpus_operators import OP_BY_NAME, OPERATORS, VERDICT_RANK, matrix
-from tests._edit_corpus_seeds import SEED_BY_NAME, SEEDS
-from tests._edit_corpus_toolchains import capability_gap, driver_width
+from tests._edit_corpus_seeds import BUILD_ROLES, SEED_BY_NAME, SEEDS
+from tests._edit_corpus_toolchains import (
+    capability_gap,
+    driver_width,
+    elf_link_unavailable,
+)
 
 
 def _applies_at_default(op, seed) -> bool:
@@ -81,7 +85,7 @@ def test_operator_names_are_unique_and_nonempty() -> None:
 
 def test_seed_names_are_unique() -> None:
     names = [s.name for s in SEEDS]
-    assert len(names) == len(set(names)) == 3
+    assert len(names) == len(set(names)) == 5
 
 
 def test_every_template_placeholder_is_a_known_role() -> None:
@@ -98,6 +102,11 @@ def test_each_role_text_is_placed_in_the_file_it_belongs_to() -> None:
         header_slots = {ln[2:-2] for ln in seed.header_template if ln.startswith("@@")}
         source_slots = {ln[2:-2] for ln in seed.source_template if ln.startswith("@@")}
         for role, (h, c) in seed.roles.items():
+            if role in BUILD_ROLES:
+                # Read by Seed.build_args, never placed by a template.
+                assert role not in header_slots | source_slots, (seed.name, role)
+                assert not c, f"{seed.name}: build role {role} has source text"
+                continue
             if h:
                 assert role in header_slots, (
                     f"{seed.name}: header text of {role} never rendered"
@@ -125,8 +134,9 @@ def test_every_operator_changes_the_rendered_text() -> None:
     for op, seed in matrix():
         if op.rebuild is not None:
             continue  # a rebuild keeps the source and changes a flag
-        base = seed.render()
-        edited = seed.render(op.edit(seed.roles))
+        edit = op.edit(seed.roles)
+        base = (seed.render(), seed.build_args())
+        edited = (seed.render(edit), seed.build_args(edit))
         assert edited != base, f"{op.name} on {seed.name} is an identity edit"
 
 
@@ -184,7 +194,7 @@ def test_known_mismatches_cover_real_default_cells() -> None:
 def test_matrix_is_not_silently_shrinking() -> None:
     # Guard against an applicability bug emptying the matrix: a shrink is
     # visible here rather than as a green run that tested less.
-    assert len(default_matrix()) >= 60
+    assert len(default_matrix()) >= 160
     assert len(CELLS) == len(default_matrix()) * len(COMPILERS)
 
 
@@ -256,7 +266,9 @@ def test_edit_produces_declared_ground_truth(
         _skip_without_driver(seed, compiler)
         # A build or extraction exception propagates and fails the cell.
         _skip_wrong_width(seed, config)
-        gap = capability_gap(op, config)
+        # A seed linked with ELF-only build roles (a version script, -z,
+        # --as-needed) is a host gap off ELF, as in the tier matrix.
+        gap = elf_link_unavailable(seed, config) or capability_gap(op, config)
         if gap:
             pytest.skip(gap)
     except pytest.skip.Exception:

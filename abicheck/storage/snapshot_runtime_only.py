@@ -88,6 +88,11 @@ RUNTIME_ONLY_SNAPSHOT_FIELDS: Final[Mapping[str, str]] = MappingProxyType(
             "`abicheck.cxx_template_defaults` extension fact and the load "
             "restores it from there (storage/extension_facts.py)"
         ),
+        "binary_sha256": (
+            "never a document key: the writer stores it as the binary section's "
+            "`abicheck.binary_sha256` extension fact and the load restores it "
+            "from there (storage/extension_facts.py)"
+        ),
         "cu_stack_protector": (
             "never a document key: the writer stores it as the debug section's "
             "`abicheck.cu_stack_protector` extension fact and the load "

@@ -57,22 +57,23 @@ def pinned_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 #: Binary content only: no headers, no includes, no version, default lang.
+#: Binary content only: no headers, no includes, no version, default lang.
 #: Re-pinned for ``_SNAPSHOT_CACHE_VERSION`` 36 -> 37 (ElfSymbol.origin_lib now
 #: attributes std template local statics to the C++ runtime), a deliberate bump
 #: that changes every key; again for 37 -> 38 (system include dirs keyed by
 #: spelling, entries validated by a dependency manifest, ADR-062 D11); and for
 #: 38 -> 39 (unknown triviality of a declaration-only DWARF aggregate); and for
 #: 39 -> 40 (per-unit stack-protector census, DWARF variable alignment); and
-#: 40 -> 41 (DWARF-only export records, is_variadic, char signedness flags);
-#: and 41 -> 42 (castxml alignment-specifier files, DWARF default alignment).
-GOLDEN_BINARY_ONLY = "908bbe9d382188d699f7592ccfa6adbad5199ffabd099e6b3f33e61a70df3bd2"
+#: 40 -> 41 (DWARF-only export records, is_variadic, char signedness flags); and
+#: for 41 -> 45 (a dump records its binary's SHA-256).
+GOLDEN_BINARY_ONLY = "b53bd49c274689cc37b0173a59aaf3eb6d8d42dd6c946cd32b4fa27d1e651632"
 
 #: Every named input at once, so a change to any one of them shows here.
 #: Re-pinned when the derivation became content-only (ADR-062 D11: no mtime,
 #: every file under an include root whatever its suffix, a file include hashed
 #: as itself) -- a deliberate re-key of every header-bearing entry; and for
-#: ``_SNAPSHOT_CACHE_VERSION`` 37 -> 38, 38 -> 39, 39 -> 40, 40 -> 41 and 41 -> 42.
-GOLDEN_FULL = "c4151277c8f5d8232454bcf360bd139dcd61e4028536ead504ca6536e7cbd1f6"
+#: ``_SNAPSHOT_CACHE_VERSION`` 37 -> 38, 38 -> 39, 39 -> 40, 40 -> 41 and 41 -> 45.
+GOLDEN_FULL = "a3f3d1acc8766eeaeba4b5308401c44cd7b2a175bd339bc4788847669cbde4ff"
 
 
 def test_binary_only_key_is_pinned(pinned_inputs: Path) -> None:
