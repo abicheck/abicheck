@@ -79,7 +79,9 @@ from __future__ import annotations
 #: typedef; a warm entry leaves it NOT_COLLECTED.
 #:
 #: v50: a native gcc dump records record, enum and field deprecation.
-SNAPSHOT_CACHE_VERSION: str = "50"
+#:
+#: v51: a native gcc dump marks befriended functions as hidden friends.
+SNAPSHOT_CACHE_VERSION: str = "51"
 # v35: header-derived snapshots now carry public_header_identifiers (schema
 # v55, extract/public_header_identifiers.py). The key also folds in the
 # snapshot schema version from this version on, so the next schema bump

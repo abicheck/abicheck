@@ -292,7 +292,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `func_virtual_removed` | BREAKING | 1 | 0 | 0 |
 | `header_binary_context_mismatch` | RISK | 0 | 0 | 0 |
 | `header_only_function_params_changed` | API_BREAK | 1 | 0 | 1 |
-| `hidden_friend_removed` | API_BREAK | 1 | 1 | 1 |
+| `hidden_friend_removed` | API_BREAK | 1 | 1 | 2 |
 | `inline_body_references_renamed_member` | BREAKING | 1 | 0 | 0 |
 | `instantiation_missing_from_binary` | BREAKING | 1 | 0 | 0 |
 | `internal_template_leaks_via_public_api` | BREAKING | 1 | 0 | 1 |
@@ -436,7 +436,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `generated_header_reaches_public_api` | RISK | 0 | 0 | 0 |
 | `handle_type_changed` | BREAKING | 0 | 0 | 0 |
 | `header_parse_context_drift` | RISK | 0 | 0 | 0 |
-| `hidden_friend_added` | COMPATIBLE | 0 | 1 | 1 |
+| `hidden_friend_added` | COMPATIBLE | 0 | 1 | 2 |
 | `ifunc_removed` | COMPATIBLE | 0 | 0 | 0 |
 | `include_graph_public_header_drift` | RISK | 0 | 0 | 0 |
 | `inline_body_changed` | RISK | 0 | 0 | 0 |

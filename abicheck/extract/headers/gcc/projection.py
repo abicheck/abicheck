@@ -148,6 +148,16 @@ def project(
         return identities(name_rewrites.get(clean(value), value) if value else None)
 
     by_name = {clean(r["name"]): r for r in type_rows.values()}
+    # Befriended function uid -> owning class, a public owner first, then the
+    # first declared (castxml's
+    # `befriending` reading, functions.build_hidden_friend_ids).
+    friend_owner: dict[int, str] = {}
+    for r in sorted(
+        type_rows.values(),
+        key=lambda r: (not policy.public(r.get("source")), r.get("line", 0)),
+    ):
+        for uid in r.get("befriended") or ():
+            friend_owner.setdefault(uid, clean(r["name"]))
     retained = set()
     pending: list[str] = []
 
@@ -345,6 +355,8 @@ def project(
                 source_header=r["source"],
                 origin=origin,
                 access=AccessLevel(r["access"]),
+                is_hidden_friend=r.get("uid") in friend_owner,
+                hidden_friend_owner=friend_owner.get(r.get("uid")),
                 entity_id=entity_id_for_function(
                     scope(r), fnleaf, mangled_name=mangled
                 ),

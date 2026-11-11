@@ -242,6 +242,16 @@ static void type(void *data,void *) {
     } fprintf(out,"]");
   }
   if(RECORD_OR_UNION_TYPE_P(t) && TYPE_BINFO(t)) { fprintf(out,",\"vtable_candidate_groups\":[");bool comma=false;vgroups(TYPE_BINFO(t),comma);fprintf(out,"]"); }
+  if(CLASS_TYPE_P(t) && TYPE_MAIN_DECL(t)) {
+    // The functions this class befriends (castxml's `befriending`), by DECL_UID.
+    fprintf(out,",\"befriended\":[");bool sep=false;
+    for(tree fl=DECL_FRIENDLIST(TYPE_MAIN_DECL(t));fl;fl=TREE_CHAIN(fl))
+      for(tree f=FRIEND_DECLS(fl);f;f=TREE_CHAIN(f)) {
+        tree d=TREE_VALUE(f);
+        if(d && TREE_CODE(d)==FUNCTION_DECL){fprintf(out,"%s%u",sep?",":"",DECL_UID(d));sep=true;}
+      }
+    fprintf(out,"]");
+  }
 #endif
   tree td=TYPE_NAME(t);if(!td||!DECL_P(td))td=TYPE_STUB_DECL(t);if(td && DECL_P(td))source(td);
 #ifndef GCC_CPP
@@ -339,7 +349,7 @@ int plugin_init(struct plugin_name_args *args,struct plugin_gcc_version *v) {
   if(!plugin_default_version_check(v,&gcc_version))return 1;
   const char *path=nullptr;for(int i=0;i<args->argc;i++)if(!strcmp(args->argv[i].key,"output"))path=args->argv[i].value;
   if(!path)return 1;out=fopen(path,"w");if(!out)return 1;
-  fprintf(out,"{\"kind\":\"compiler\",\"version\":%s,\"schema\":3,\"pointer_bits\":%d,\"char_bits\":%d}\n",q(v->basever).c_str(),POINTER_SIZE,BITS_PER_UNIT);
+  fprintf(out,"{\"kind\":\"compiler\",\"version\":%s,\"schema\":4,\"pointer_bits\":%d,\"char_bits\":%d}\n",q(v->basever).c_str(),POINTER_SIZE,BITS_PER_UNIT);
 #ifndef GCC_CPP
   register_callback(args->base_name,PLUGIN_FINISH_TYPE,type,nullptr);
   register_callback(args->base_name,PLUGIN_FINISH_DECL,decl,nullptr);
