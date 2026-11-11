@@ -16,14 +16,14 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 ## Headline
 
 - Total kinds: **428**
-- Kinds with at least one real source: **192**
-- Kinds per source: catalog 160, field_shapes 9, integration 75
+- Kinds with at least one real source: **198**
+- Kinds per source: catalog 160, field_shapes 9, integration 81
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
 | L0 | 130 | 72 |
 | L1 | 62 | 7 |
-| L2 | 75 | 39 |
+| L2 | 75 | 33 |
 | L3 | 15 | 5 |
 | L4 | 10 | 2 |
 | L5 | 15 | 5 |
@@ -266,14 +266,14 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `ctor_overload_ambiguity_risk` | RISK | 0 | 0 | 0 |
 | `default_template_arg_changed` | BREAKING | 2 | 0 | 0 |
 | `enum_became_scoped` | API_BREAK | 0 | 0 | 0 |
-| `enum_deprecated_added` | COMPATIBLE | 0 | 0 | 0 |
-| `enum_deprecated_removed` | COMPATIBLE | 0 | 0 | 0 |
+| `enum_deprecated_added` | COMPATIBLE | 0 | 0 | 1 |
+| `enum_deprecated_removed` | COMPATIBLE | 0 | 0 | 1 |
 | `enum_lost_scoped` | RISK | 0 | 0 | 0 |
 | `exported_not_public` | RISK | 2 | 0 | 9 |
 | `field_default_initializer_changed` | COMPATIBLE | 0 | 0 | 0 |
 | `field_default_initializer_removed` | RISK | 0 | 0 | 0 |
-| `field_deprecated_added` | COMPATIBLE | 0 | 0 | 0 |
-| `field_deprecated_removed` | COMPATIBLE | 0 | 0 | 0 |
+| `field_deprecated_added` | COMPATIBLE | 0 | 0 | 1 |
+| `field_deprecated_removed` | COMPATIBLE | 0 | 0 | 1 |
 | `func_contract_attribute_added` | RISK | 0 | 0 | 0 |
 | `func_contract_attribute_removed` | RISK | 0 | 0 | 0 |
 | `func_deprecated_added` | COMPATIBLE | 1 | 0 | 0 |
@@ -329,8 +329,8 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `template_param_default_changed` | API_BREAK | 4 | 0 | 2 |
 | `type_became_abstract` | API_BREAK | 0 | 0 | 0 |
 | `type_became_final` | API_BREAK | 1 | 0 | 0 |
-| `type_deprecated_added` | COMPATIBLE | 0 | 0 | 0 |
-| `type_deprecated_removed` | COMPATIBLE | 0 | 0 | 0 |
+| `type_deprecated_added` | COMPATIBLE | 0 | 0 | 1 |
+| `type_deprecated_removed` | COMPATIBLE | 0 | 0 | 1 |
 | `type_lost_abstract` | COMPATIBLE | 0 | 0 | 0 |
 | `var_alignment_changed` | BREAKING | 0 | 0 | 2 |
 | `var_deprecated_added` | COMPATIBLE | 0 | 0 | 0 |

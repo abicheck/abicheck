@@ -8,6 +8,8 @@
 #include "tree-pretty-print.h"
 #include "langhooks.h"
 #include "diagnostic.h"
+#include "stringpool.h"
+#include "attribs.h"
 #include <cstdio>
 #include <string>
 #include <unordered_set>
@@ -113,6 +115,14 @@ static void attributes(tree d) {
   }
   fprintf(out,",\"deprecated\":%s",TREE_DEPRECATED(d)?q(message?message:"").c_str():"null");
 }
+// A deprecation marker: the attribute's message, "" for a bare one, or null.
+static std::string deprecation(tree attrs,bool flagged) {
+  for(tree a=attrs;a;a=TREE_CHAIN(a))if(is_attribute_p("deprecated",get_attribute_name(a))) {
+    tree args=TREE_VALUE(a);
+    return q(args && TREE_VALUE(args) && TREE_CODE(TREE_VALUE(args))==STRING_CST?TREE_STRING_POINTER(TREE_VALUE(args)):"");
+  }
+  return flagged?q(""):"null";
+}
 static bool local_scope(tree ctx) {
   while(ctx && (TYPE_P(ctx)||DECL_P(ctx))) {
     if(TREE_CODE(ctx)==FUNCTION_DECL)return true;
@@ -199,6 +209,10 @@ static void type(void *data,void *) {
   scope(TYPE_CONTEXT(t));
   tree type_name=TYPE_NAME(t);fprintf(out,",\"anonymous\":%s",!type_name || (DECL_P(type_name) && !DECL_NAME(type_name))?"true":"false");
   fprintf(out,",\"type_uid\":%u,\"leaf_name\":%s",TYPE_UID(t),q(leaf(t).c_str()).c_str());
+  {tree stub=TYPE_NAME(t)&&DECL_P(TYPE_NAME(t))?TYPE_NAME(t):TYPE_STUB_DECL(t);
+   std::string marker=deprecation(TYPE_ATTRIBUTES(t),TREE_DEPRECATED(t)||(stub&&TREE_DEPRECATED(stub)));
+   if(marker=="null"&&stub)marker=deprecation(DECL_ATTRIBUTES(stub),false);
+   fprintf(out,",\"deprecated\":%s",marker.c_str());}
 #ifdef GCC_CPP
   fprintf(out,",\"dependent\":%s",dependent_type_p(t)?"true":"false");
   if(TREE_CODE(t)==RECORD_TYPE && TYPE_LANG_SPECIFIC(t)) {
@@ -255,6 +269,7 @@ static void type(void *data,void *) {
       if(bo&&bi&&tree_fits_uhwi_p(bo)&&tree_fits_uhwi_p(bi)) off=std::to_string(tree_to_uhwi(bo)*BITS_PER_UNIT+tree_to_uhwi(bi));
       fprintf(out,"%s{\"name\":%s,\"type\":%s,\"identity\":%s,\"offset_bits\":%s,\"size_bits\":%s,\"bitfield\":%s,\"artificial\":%s,\"access\":%s",comma?",":"",q(name(f)).c_str(),q(spelled(ftype).c_str()).c_str(),identity(ftype).c_str(),off.c_str(),number(DECL_SIZE(f)).c_str(),DECL_BIT_FIELD(f)?"true":"false",DECL_ARTIFICIAL(f)?"true":"false",q(TREE_PRIVATE(f)?"private":TREE_PROTECTED(f)?"protected":"public").c_str());abi("abi",ftype);
       fprintf(out,",\"const\":%s,\"volatile\":%s",TYPE_READONLY(ftype)?"true":"false",TYPE_VOLATILE(ftype)?"true":"false");
+      fprintf(out,",\"deprecated\":%s",deprecation(DECL_ATTRIBUTES(f),TREE_DEPRECATED(f)).c_str());
 #ifdef GCC_CPP
       fprintf(out,",\"mutable\":%s",DECL_MUTABLE_P(f)?"true":"false");
       tree init=DECL_INITIAL(f);fprintf(out,",\"default\":%s",init && init!=error_mark_node?q(spelled(init).c_str()).c_str():"null");
@@ -324,7 +339,7 @@ int plugin_init(struct plugin_name_args *args,struct plugin_gcc_version *v) {
   if(!plugin_default_version_check(v,&gcc_version))return 1;
   const char *path=nullptr;for(int i=0;i<args->argc;i++)if(!strcmp(args->argv[i].key,"output"))path=args->argv[i].value;
   if(!path)return 1;out=fopen(path,"w");if(!out)return 1;
-  fprintf(out,"{\"kind\":\"compiler\",\"version\":%s,\"schema\":2,\"pointer_bits\":%d,\"char_bits\":%d}\n",q(v->basever).c_str(),POINTER_SIZE,BITS_PER_UNIT);
+  fprintf(out,"{\"kind\":\"compiler\",\"version\":%s,\"schema\":3,\"pointer_bits\":%d,\"char_bits\":%d}\n",q(v->basever).c_str(),POINTER_SIZE,BITS_PER_UNIT);
 #ifndef GCC_CPP
   register_callback(args->base_name,PLUGIN_FINISH_TYPE,type,nullptr);
   register_callback(args->base_name,PLUGIN_FINISH_DECL,decl,nullptr);
