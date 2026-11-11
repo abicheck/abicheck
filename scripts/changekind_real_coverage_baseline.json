@@ -202,7 +202,6 @@
     "toolchain_version_changed",
     "type_became_abstract",
     "type_field_removed",
-    "type_lost_abstract",
     "type_lost_final",
     "type_visibility_changed",
     "typedef_version_sentinel",

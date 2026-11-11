@@ -238,6 +238,9 @@ def project(
                 size_bits=None if dependent else r["size_bits"],
                 alignment_bits=r["alignment_bits"],
                 data_size_bits=r.get("data_size_bits"),
+                vptr_offset_bits_fact=Fact.present(r["vptr_offset_bits"])
+                if "vptr_offset_bits" in r
+                else Fact.not_collected(),
                 is_standard_layout=r.get("standard_layout"),
                 is_trivially_copyable=r.get("trivially_copyable"),
                 is_final=r.get("final"),

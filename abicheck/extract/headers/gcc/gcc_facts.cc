@@ -227,6 +227,23 @@ static void vgroups(tree b, bool &comma, int depth=0) {
   tree sub;int i;for(i=0;BINFO_BASE_ITERATE(b,i,sub);i++)vgroups(sub,comma,depth+1);
 }
 #endif
+#ifdef GCC_CPP
+// The binfos that own a sub-vtable of t's vtable group, in layout order: the
+// class itself, then every base that is not a primary base (a primary base
+// shares its derived class's vtable).
+static void vtable_owners(tree b,std::vector<tree> &owners,bool root,int depth=0) {
+  if(!b || depth>32)return;
+  if(root || !BINFO_PRIMARY_P(b))owners.push_back(b);
+  tree sub;int i;for(i=0;BINFO_BASE_ITERATE(b,i,sub);i++)vtable_owners(sub,owners,false,depth+1);
+}
+// The method a pure (or deleted) virtual slot names: castxml lists the
+// method, the vtable initializer holds __cxa_pure_virtual.
+static tree slot_method(const std::vector<tree> &owners,int table,int slot) {
+  if(table<0 || (size_t)table>=owners.size() || slot<0)return nullptr;
+  int k=0;for(tree v=BINFO_VIRTUALS(owners[table]);v;v=TREE_CHAIN(v),k++)if(k==slot)return BV_FN(v);
+  return nullptr;
+}
+#endif
 static void type(void *data,void *) {
   tree t=(tree)data; if(!t||!TYPE_P(t)||local_scope(TYPE_CONTEXT(t)))return; t=TYPE_MAIN_VARIANT(t); if(seen_types.count(TYPE_UID(t)))return;
   seen_types.insert(TYPE_UID(t));
@@ -250,6 +267,7 @@ static void type(void *data,void *) {
   if(TREE_CODE(t)==RECORD_TYPE && TYPE_LANG_SPECIFIC(t) && !dependent_type_p(t) && CLASSTYPE_AS_BASE(t))
     fprintf(out,",\"data_size_bits\":%s",number(CLASSTYPE_SIZE(t)).c_str());
   if(TREE_CODE(t)==RECORD_TYPE && TYPE_LANG_SPECIFIC(t) && !dependent_type_p(t)) {
+    fprintf(out,",\"vptr_offset_bits\":%s",TYPE_CONTAINS_VPTR_P(t)?"0":"null");
     fprintf(out,",\"standard_layout\":%s,\"trivially_copyable\":%s,\"abstract\":%s,\"final\":%s",CLASSTYPE_NON_STD_LAYOUT(t)?"false":"true",trivially_copyable_p(t)?"true":"false",ABSTRACT_CLASS_TYPE_P(t)?"true":"false",CLASSTYPE_FINAL(t)?"true":"false");
     fprintf(out,",\"vtable_initializers\":[");bool comma=false;
     for(tree v=CLASSTYPE_VTABLES(t);v;v=DECL_CHAIN(v)) {
@@ -257,13 +275,32 @@ static void type(void *data,void *) {
       fprintf(out,"%s{\"name\":%s,\"initializer_kind\":%s,\"initializer\":%s",comma?",":"",q(name(v)).c_str(),init?q(get_tree_code_name(TREE_CODE(init))).c_str():"null",init?q(spelled(init).c_str()).c_str():"null");
       if(init && TREE_CODE(init)==CONSTRUCTOR) {
         fprintf(out,",\"entries\":[");unsigned int i;tree ix,value;bool sep=false;
+        std::vector<tree> owners;vtable_owners(TYPE_BINFO(t),owners,true);
+        int table=-1,slot=-1;bool dtor_seen=false;
         FOR_EACH_CONSTRUCTOR_ELT(CONSTRUCTOR_ELTS(init),i,ix,value) {
           tree target=value;STRIP_NOPS(target);
           std::string resolved="null";
+          if(slot>=0)slot++;
           if(TREE_CODE(target)==ADDR_EXPR && DECL_P(TREE_OPERAND(target,0))) {
             tree d=TREE_OPERAND(target,0);
-            resolved=q(IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(d)));
-          }
+            const char *asmname=IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(d));
+            // A type-info entry opens the next sub-vtable; its slots follow.
+            if(!strncmp(asmname,"_ZTI",4)){table++;slot=-1;dtor_seen=false;}
+            else if(slot<0)slot=0;
+            if(!strcmp(asmname,"__cxa_pure_virtual")||!strcmp(asmname,"__cxa_deleted_virtual")) {
+              tree m=slot_method(owners,table,slot);
+              if(m)asmname=IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(m));
+            }
+            resolved=q(asmname);
+          } else if(table>=0 && slot<0) slot=0;
+          // A virtual destructor fills two slots (complete, deleting) whose
+          // initializers are 0 until its clones exist: record the pair once,
+          // as castxml does, so the vtable reads the same either way.
+          if(tree m=slot>=0?slot_method(owners,table,slot):nullptr)
+            if(DECL_DESTRUCTOR_P(m)) {
+              resolved=dtor_seen?"null":q((std::string("~")+name(TYPE_NAME(DECL_CONTEXT(m)))).c_str());
+              dtor_seen=true;
+            }
           fprintf(out,"%s{\"index\":%s,\"target\":%s,\"value\":%s}",sep?",":"",(ix ? number(ix) : std::to_string(i)).c_str(),resolved.c_str(),q(spelled(value).c_str()).c_str());sep=true;
         }fprintf(out,"]");
       }
@@ -378,7 +415,7 @@ int plugin_init(struct plugin_name_args *args,struct plugin_gcc_version *v) {
   if(!plugin_default_version_check(v,&gcc_version))return 1;
   const char *path=nullptr;for(int i=0;i<args->argc;i++)if(!strcmp(args->argv[i].key,"output"))path=args->argv[i].value;
   if(!path)return 1;out=fopen(path,"w");if(!out)return 1;
-  fprintf(out,"{\"kind\":\"compiler\",\"version\":%s,\"schema\":6,\"pointer_bits\":%d,\"char_bits\":%d}\n",q(v->basever).c_str(),POINTER_SIZE,BITS_PER_UNIT);
+  fprintf(out,"{\"kind\":\"compiler\",\"version\":%s,\"schema\":7,\"pointer_bits\":%d,\"char_bits\":%d}\n",q(v->basever).c_str(),POINTER_SIZE,BITS_PER_UNIT);
 #ifndef GCC_CPP
   register_callback(args->base_name,PLUGIN_FINISH_TYPE,type,nullptr);
   register_callback(args->base_name,PLUGIN_FINISH_DECL,decl,nullptr);

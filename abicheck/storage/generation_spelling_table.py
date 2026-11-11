@@ -557,6 +557,15 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "protocol schema 6); an older gcc snapshot's C spellings differ, "
         "which only matters gcc-to-gcc and is not rewritten"
     ),
+    60: GenerationSpellingChange(
+        "the native gcc header backend records a dynamic class's vptr at "
+        "offset 0 and names vtable slots as castxml does -- a pure or "
+        "deleted virtual by its method, a virtual destructor's slot pair "
+        "once as ~Class -- instead of reading __cxa_pure_virtual and the 0 "
+        "an unemitted destructor clone leaves (plugin protocol schema 7); "
+        "an older gcc snapshot's vtable spellings differ, gcc-to-gcc only, "
+        "not rewritten"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

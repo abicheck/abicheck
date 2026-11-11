@@ -16,14 +16,14 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 ## Headline
 
 - Total kinds: **428**
-- Kinds with at least one real source: **200**
-- Kinds per source: catalog 160, field_shapes 9, integration 85
+- Kinds with at least one real source: **201**
+- Kinds per source: catalog 160, field_shapes 9, integration 88
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
 | L0 | 130 | 72 |
 | L1 | 62 | 7 |
-| L2 | 75 | 32 |
+| L2 | 75 | 31 |
 | L3 | 15 | 5 |
 | L4 | 10 | 2 |
 | L5 | 15 | 5 |
@@ -243,7 +243,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `type_kind_changed` | BREAKING | 1 | 0 | 0 |
 | `type_removed` | API_BREAK | 5 | 1 | 3 |
 | `type_size_changed` | BREAKING | 19 | 1 | 7 |
-| `type_vtable_changed` | BREAKING | 3 | 0 | 0 |
+| `type_vtable_changed` | BREAKING | 3 | 0 | 2 |
 | `typedef_base_changed` | BREAKING | 1 | 0 | 4 |
 | `typedef_removed` | API_BREAK | 2 | 0 | 1 |
 | `union_field_added` | COMPATIBLE | 2 | 0 | 0 |
@@ -253,7 +253,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `var_became_const` | BREAKING | 1 | 0 | 0 |
 | `var_type_changed` | BREAKING | 1 | 0 | 1 |
 | `virtual_base_offset_changed` | BREAKING | 0 | 0 | 0 |
-| `vptr_introduced` | BREAKING | 1 | 0 | 0 |
+| `vptr_introduced` | BREAKING | 1 | 0 | 1 |
 | `wchar_model_changed` | RISK | 0 | 0 | 1 |
 
 ## Tier L2
@@ -331,7 +331,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `type_became_final` | API_BREAK | 1 | 0 | 0 |
 | `type_deprecated_added` | COMPATIBLE | 0 | 0 | 1 |
 | `type_deprecated_removed` | COMPATIBLE | 0 | 0 | 1 |
-| `type_lost_abstract` | COMPATIBLE | 0 | 0 | 0 |
+| `type_lost_abstract` | COMPATIBLE | 0 | 0 | 1 |
 | `var_alignment_changed` | BREAKING | 0 | 0 | 2 |
 | `var_deprecated_added` | COMPATIBLE | 0 | 0 | 0 |
 | `var_deprecated_removed` | COMPATIBLE | 0 | 0 | 0 |
