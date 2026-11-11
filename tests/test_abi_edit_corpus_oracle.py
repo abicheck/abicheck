@@ -200,6 +200,8 @@ def clean_probe_caches() -> object:
         tcs.driver_width,
         tcs.lacks_feature,
         tcs.default_cxx11_abi,
+        tcs.rejects_flags,
+        tcs.predefines,
     ):
         fn.cache_clear()
     yield
@@ -208,6 +210,8 @@ def clean_probe_caches() -> object:
         tcs.driver_width,
         tcs.lacks_feature,
         tcs.default_cxx11_abi,
+        tcs.rejects_flags,
+        tcs.predefines,
     ):
         fn.cache_clear()
 
@@ -440,6 +444,84 @@ def test_cxx11_rebuild_needs_a_producer_whose_default_abi_differs(
     # An explicit old-side ABI is the config's own choice, not the default's.
     monkeypatch.setattr(tcs, "default_cxx11_abi", lambda tc: 0)
     assert tcs.capability_gap(op, _cfg("c++", flags=Flags(cxx11_abi=1))) is None
+
+
+@pytest.mark.parametrize(
+    ("op_name", "macro_default", "rejects", "gap"),
+    [
+        # cet_disabled assumes CET on by default, cet_enabled assumes it off.
+        ("cet_disabled", True, False, None),
+        ("cet_disabled", False, False, "does not predefine __CET__"),
+        ("cet_enabled", False, False, None),
+        ("cet_enabled", True, False, "predefines __CET__"),
+        # A target or linker refusing the flag wins over the default check.
+        ("cet_disabled", True, True, "does not accept -fcf-protection=none"),
+        (
+            "relr_packed_relocs",
+            False,
+            True,
+            "does not accept -Wl,-z,pack-relative-relocs",
+        ),
+        ("relr_packed_relocs", True, False, None),
+    ],
+)
+def test_capability_gap_probes_edit_flags_and_toolchain_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+    op_name: str,
+    macro_default: bool,
+    rejects: bool,
+    gap: str | None,
+) -> None:
+    op = OP_BY_NAME[op_name]
+    seen: list[tuple[str, ...]] = []
+
+    def rejects_flags(tc: Toolchain, flags: tuple[str, ...], bits: int) -> bool:
+        seen.append(flags)
+        return rejects
+
+    monkeypatch.setattr(tcs, "rejects_flags", rejects_flags)
+    monkeypatch.setattr(tcs, "predefines", lambda tc, m, bits: macro_default)
+    reason = tcs.capability_gap(op, _cfg())
+    if gap is None:
+        assert reason is None
+    else:
+        assert reason is not None and gap in reason
+    assert seen == [op.probe_flags]
+
+
+@pytest.mark.usefixtures("clean_probe_caches")
+@pytest.mark.parametrize(
+    ("bits", "rc", "stdout", "rejected", "defined"),
+    [
+        (64, 0, "#define __CET__ 3\n#define __x86_64__ 1\n", False, True),
+        (32, 0, "#define __i386__ 1\n#define __CET_X 1\n", False, False),
+        (64, 1, "", True, False),
+    ],
+)
+def test_flag_and_macro_probes_read_the_driver(
+    monkeypatch: pytest.MonkeyPatch,
+    bits: int,
+    rc: int,
+    stdout: str,
+    rejected: bool,
+    defined: bool,
+) -> None:
+    seen: list[list[str]] = []
+
+    def run(cmd: list[str], **kw: object) -> subprocess.CompletedProcess[str]:
+        seen.append(cmd)
+        return subprocess.CompletedProcess(cmd, rc, stdout, "")
+
+    monkeypatch.setattr(tcs.shutil, "which", lambda name: name)
+    monkeypatch.setattr(tcs.subprocess, "run", run)
+    flags = ("-Wl,-z,pack-relative-relocs",)
+    assert tcs.rejects_flags(_PROBE_TC, flags, bits) is rejected
+    assert tcs.predefines(_PROBE_TC, "__CET__", bits) is defined
+    build, macros = seen
+    assert build[0] == "/x/gcc-97" and flags[0] in build
+    assert "-Wl,--fatal-warnings" in build
+    assert ("-m32" in build) is (bits == 32) and ("-m32" in macros) is (bits == 32)
+    assert "-dM" in macros
 
 
 # --- expectations -------------------------------------------------------------

@@ -313,6 +313,9 @@ _DYNAMIC = (
         "DT_RELR packs the relative relocations: a loader older than glibc "
         "2.36 cannot apply them, so the library no longer loads there",
         expected=frozenset({"DT_RELR_INTRODUCED"}),
+        # binutils < 2.38 warns "-z pack-relative-relocs ignored" and links
+        # without DT_RELR: probed, so such a host reads unavailable.
+        probe_flags=("-Wl,-z,pack-relative-relocs",),
         **_RISK,
         **_BINARY,
     ),
@@ -323,19 +326,11 @@ _DYNAMIC = (
         "the IBT/SHSTK GNU properties go: a CET-enforcing process that loads "
         "the library loses (or refuses) shadow-stack protection",
         expected=frozenset({"CET_PROTECTION_WEAKENED"}),
-        rules=(
-            Rule(
-                lambda c: c.producer.family != "gcc",
-                {
-                    "expected": frozenset(),
-                    "verdict_min": "NO_CHANGE",
-                    "observable": False,
-                },
-                "only the distribution gcc builds with -fcf-protection by "
-                "default; clang's baseline already has no CET properties, so "
-                "=none leaves the binary as it was",
-            ),
-        ),
+        # Only a toolchain that builds with CET by default (distribution gcc;
+        # upstream gcc and clang default to none) can lose it; the target
+        # must also know the flag (x86 only).
+        probe_flags=("-fcf-protection=none",),
+        default_macro=("__CET__", True),
         **_RISK,
         **_BINARY,
     ),
@@ -346,18 +341,9 @@ _DYNAMIC = (
         "the IBT/SHSTK GNU properties appear: a hardening gain, nothing a "
         "consumer can observe",
         expected=frozenset({"CET_PROTECTION_IMPROVED"}),
-        rules=(
-            Rule(
-                lambda c: c.producer.family == "gcc",
-                {
-                    "expected": frozenset(),
-                    "verdict_min": "NO_CHANGE",
-                    "observable": False,
-                },
-                "the distribution gcc already builds with -fcf-protection=full, "
-                "so spelling it out leaves the binary as it was",
-            ),
-        ),
+        # Only a toolchain whose default build has no CET can gain it.
+        probe_flags=("-fcf-protection=full",),
+        default_macro=("__CET__", False),
         **_COMPAT_ONLY,
         **_BINARY,
     ),
