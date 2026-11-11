@@ -889,13 +889,13 @@ class _ClangAstParser:
         ``default_value`` is passed as a bound-method reference (matching
         the ``self._id_index`` bound-method-reference convention already
         used for param/field-default extraction elsewhere in this class):
-        the real evaluator lives in ``dumper_clang_expr.py``, which imports
-        ``diff_cxx_rules`` and so cannot be imported from the
-        ``extract``-classified ``functions.py`` module directly.
+        the real evaluator lives in ``dumper_clang_expr.py`` (imports
+        ``diff_cxx_rules``), not importable from ``extract``'s ``functions.py``.
         """
         return _clang_functions.parse_functions(
             self._functions,
             type_identities=self._type_identities,
+            typedefs=self._typedefs,
             builtin_abi=self.builtin_abi,
             exported_dynamic=self._exported_dynamic,
             exported_static=self._exported_static,
