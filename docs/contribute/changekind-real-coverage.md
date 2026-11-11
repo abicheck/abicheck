@@ -506,8 +506,8 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `uninstantiated_template_removed` | API_BREAK | 0 | 0 | 0 |
 | `union_field_type_changed` | BREAKING | 0 | 0 | 0 |
 | `unspecified_return_now_named` | API_BREAK | 0 | 0 | 1 |
-| `var_access_changed` | API_BREAK | 0 | 0 | 2 |
-| `var_access_widened` | COMPATIBLE | 0 | 0 | 2 |
+| `var_access_changed` | API_BREAK | 0 | 0 | 4 |
+| `var_access_widened` | COMPATIBLE | 0 | 0 | 4 |
 | `var_lost_const` | BREAKING | 0 | 0 | 0 |
 | `var_value_changed` | COMPATIBLE | 0 | 0 | 2 |
 | `vector_abi_changed` | BREAKING | 0 | 0 | 0 |
