@@ -534,6 +534,13 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "castxml does; no type spelling changes and no rewrite is needed -- "
         "an older gcc snapshot read every type and field as not deprecated"
     ),
+    57: GenerationSpellingChange(
+        "the native gcc header backend records which class befriends each "
+        "function (plugin protocol schema 4) and marks it "
+        "Function.is_hidden_friend with its hidden_friend_owner, as castxml "
+        "does; no type spelling changes and no rewrite is needed -- an "
+        "older gcc snapshot records no hidden friend"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

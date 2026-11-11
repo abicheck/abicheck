@@ -164,12 +164,12 @@
       "abicheck/extract/headers/compile_provenance.py": "e4a6bcf30627807081f38f909cd136e5203132c099ea225971ef1d4cf849d82a",
       "abicheck/extract/headers/concept_scan.py": "158155a829223afdcd4f80b5d4dec9a6f7812c4827976a67d068096802465839",
       "abicheck/extract/headers/gcc/__init__.py": "7af60db1abfcfe17ecf135eb0bc8ce9ae3089d3c6101324c087d6cc78dab8b50",
-      "abicheck/extract/headers/gcc/acquisition.py": "855d8e097b631a9c3880aeec34101ce3171bd23f538d27c9ed4760aaed04dac5",
+      "abicheck/extract/headers/gcc/acquisition.py": "ff0195889da07111458145d43ed0abde366cc1b92a9e497d402692e18ef59814",
       "abicheck/extract/headers/gcc/backend.py": "36c0ad901501c2fba98fbe867ce9eca07ab6c523d1326fdae78395c4b281092c",
       "abicheck/extract/headers/gcc/build.py": "1ee62182117ee040274b84d482cc3a9a36db2bd2b742d5dca4e892de00002ecb",
       "abicheck/extract/headers/gcc/contracts.py": "39f28d300049bbdd30bef988250a7d6403e4b69b92ba2bc23a92a24539cf8b12",
       "abicheck/extract/headers/gcc/discovery.py": "f07fdd43ec1e594e95a75a5447e54e3dcbfe5c944c66a305de4e9d7463ee731b",
-      "abicheck/extract/headers/gcc/projection.py": "946104213411e802fbc62c4e77f9a62ac22170b443cd98e2b25843332ed73648",
+      "abicheck/extract/headers/gcc/projection.py": "05ce69e40616ba6da5c2c472e2af70512efc21313c87858a12d740fcf71d0987",
       "abicheck/extract/headers/manifest.py": "32ef26892725f05c29fff52d393166a68ea2983f9c1b881d85e046d96ae962b1",
       "abicheck/extract/headers/preprocessor_branches.py": "d3a409d126b0dd1b19a634d4aad25660d372dad931b310cfbaaefc9d769b244d",
       "abicheck/extract/headers/scope_segments.py": "d413edec257eb1334c829263770b66dc2eda3d263c765f699eac9f7e3ace9e65",
@@ -222,9 +222,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "aa17a9104882ccdcc52acaea1638834b50e7f1c4d0b4c3990dcbd919340c1dba",
-    "generation": 56,
-    "reason": "bumped to 56 for a semantic change"
+    "fingerprint": "39a811de8a2c37c9253a0635e6eac807575d8dbf95bbda2197eb93ca544a4da5",
+    "generation": 57,
+    "reason": "bumped to 57 for a semantic change"
   },
   "resolver": {
     "files": {
