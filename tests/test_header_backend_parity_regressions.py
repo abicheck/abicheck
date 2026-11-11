@@ -101,7 +101,10 @@ def _dump(work: Path, backend: str, side: str, cell: Cell, header_text: str) -> 
     header.write_text(header_text)
     source = work / f"{side}.{src_ext}"
     source.write_text(f'#include "{header.name}"\n{cell.source}')
-    lib = work / f"lib{side}.so"
+    # One library name in a per-side directory: the SONAME (Mach-O: the
+    # install name, which is the output path) must not differ between sides.
+    (work / side).mkdir(exist_ok=True)
+    lib = work / side / "libparity.so"
     subprocess.run(
         [cc, "-shared", "-fPIC", "-g0", str(source), "-o", str(lib)],
         check=True,

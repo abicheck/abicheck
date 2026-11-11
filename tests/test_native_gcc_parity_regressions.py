@@ -283,7 +283,10 @@ def _dump(
     header.write_text(header_text)
     source = work / f"{side}.{'c' if lang == 'c' else 'cpp'}"
     source.write_text(f'#include "{header.name}"\n{source_text}')
-    lib = work / f"lib{side}.so"
+    # One library name in a per-side directory: the SONAME (Mach-O: the
+    # install name, which is the output path) must not differ between sides.
+    (work / side).mkdir(exist_ok=True)
+    lib = work / side / "libparity.so"
     subprocess.run(
         [cc, "-x", lang, "-shared", "-fPIC", "-g0", str(source), "-o", str(lib)],
         check=True,
