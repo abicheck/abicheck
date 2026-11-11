@@ -90,6 +90,7 @@ _INTERNAL_MODULES = (
     "abicheck.storage.dwarf_layout_facts",
     "abicheck.storage.generation_scope",
     "abicheck.storage.generation_migrations",
+    "abicheck.storage.generation_spelling_table",
     "abicheck.storage.castxml_array_migration",
     "abicheck.storage.castxml_base_offset_migration",
     "abicheck.storage.castxml_noexcept_migration",

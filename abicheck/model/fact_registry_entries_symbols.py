@@ -122,7 +122,10 @@ SYMBOL_FACTS: list[FactDefinition] = [
         owner="Variable",
         field="alignment_bits",
         value_type="int | None",
-        producing_backends=("castxml", "clang"),
+        # castxml constructs the Fact sibling (alignment_bits_fact, PARTIAL
+        # where a specifier can apply) and never this literal keyword; the
+        # bridge copies the value (backend_capability_rows.py).
+        producing_backends=("clang",),
         persisted=True,
         identity_relevant=False,
         comparable=True,

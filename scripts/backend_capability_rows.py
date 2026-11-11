@@ -481,10 +481,11 @@ LEADING_ROWS: tuple[FactRow, ...] = (
     FactRow(
         "Variable",
         "alignment_bits",
-        _FULL,
+        _NONE,
         _PARTIAL,
         note=(
-            "castxml reports the compiler-computed alignment for any variable; "
+            "castxml passes no literal alignment_bits keyword: it constructs "
+            "alignment_bits_fact (see that row), which the bridge copies here. "
             "clang reads only an explicit `alignas`/`__attribute__((aligned))` "
             "override, never a type's natural alignment — a tracked gap that "
             "leaves `exported_object_alignment_reduced` without corroboration "
@@ -494,18 +495,19 @@ LEADING_ROWS: tuple[FactRow, ...] = (
     FactRow(
         "Variable",
         "alignment_bits_fact",
-        _NONE,
+        _PARTIAL,
         _NONE,
         note=(
-            "Fact[int | None] sibling of "
-            "alignment_bits. Deliberately NOT constructed as an explicit "
-            "keyword the way qualified_name_fact is -- neither backend "
-            "passes it literally at Variable(...) construction; it is "
-            "correctly derived by the generic bridge_legacy_and_fact "
-            "bridge in __post_init__ from whatever legacy value the "
-            "constructor call actually supplies, so NONE here reflects "
-            "literal-keyword evidence only, not runtime behavior (same "
-            "shape as RecordType.data_size_bits_fact/is_abstract_fact)."
+            "Fact[int | None] sibling of alignment_bits. castxml writes no "
+            "align on a Variable or Typedef, so its parse records the type's "
+            "natural alignment: PRESENT only when neither the variable's file "
+            "nor a typedef's in its type chain spells an alignment specifier "
+            "(extract/headers/castxml/variable_alignment.py), else PARTIAL, a "
+            "lower bound that never vetoes an address reduction (extractor "
+            "generation 51). clang passes the legacy alignment_bits keyword, "
+            "which the generic bridge_legacy_and_fact in __post_init__ turns "
+            "into this fact, so its NONE reflects literal-keyword evidence "
+            "only, not runtime behavior."
         ),
     ),
     FactRow(

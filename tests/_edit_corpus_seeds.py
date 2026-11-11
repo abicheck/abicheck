@@ -557,6 +557,36 @@ _XCXX_ROLES: dict[str, RoleText] = {
         "friend bool operator==(Eq x, Eq y) { return x.a == y.a; } };",
         "",
     ),
+    # Member qualifiers and a static data member: layout-neutral edits.
+    "x.quals": (
+        "struct Quals {\n  mutable int hits;\n  const int k;\n  volatile int reg;\n"
+        "  static int count;\n  int get() const;\n};",
+        "int Quals::count = 0;\nint Quals::get() const { return k + hits; }",
+    ),
+    "x.shape": (
+        "struct Shape { virtual int area() = 0; virtual ~Shape(); };",
+        "Shape::~Shape() {}",
+    ),
+    "x.ovr": (
+        "struct OBase { virtual int h(); virtual ~OBase(); };\n"
+        "struct ODer : OBase { int h() override; };",
+        "int OBase::h() { return 1; }\nOBase::~OBase() {}\nint ODer::h() { return 2; }",
+    ),
+    # Default member initializers, default arguments, deprecation, a
+    # private static member, restrict and extern "C" linkage.
+    "x.defs": (
+        "struct Cfg {\n  int depth = 4;\n  int mode = 1;\n"
+        "  [[deprecated]] int legacy;\nprivate:\n  static int total;\npublic:\n"
+        "  int sum() const;\n};\n"
+        "int tune(int a, int b = 3);\nint shrink(int a, int b = 5);\n"
+        "int fill(int* __restrict p, int n);\n"
+        'extern "C" int cfun(int a);',
+        "int Cfg::total = 0;\nint Cfg::sum() const { return depth + mode + total; }\n"
+        "int tune(int a, int b) { return a + b; }\n"
+        "int shrink(int a, int b) { return a - b; }\n"
+        "int fill(int* __restrict p, int n) { return p ? n : 0; }\n"
+        'extern "C" int cfun(int a) { return a * 3; }',
+    ),
     "x.extra": ("", ""),
 }
 
@@ -581,6 +611,10 @@ XCXX_SEED = Seed(
         "@@x.tone@@",
         "@@x.shade@@",
         "@@x.cmp@@",
+        "@@x.quals@@",
+        "@@x.shape@@",
+        "@@x.ovr@@",
+        "@@x.defs@@",
         "@@x.extra@@",
         _VIS_CLOSE,
         "#endif",
@@ -600,6 +634,10 @@ XCXX_SEED = Seed(
         "@@x.over@@",
         "@@x.tone@@",
         "@@x.shade@@",
+        "@@x.quals@@",
+        "@@x.shape@@",
+        "@@x.ovr@@",
+        "@@x.defs@@",
         "@@x.extra@@",
     ),
     roles=_XCXX_ROLES,

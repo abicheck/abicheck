@@ -84,7 +84,7 @@ Phase 5 section for the design this page's data comes from.
 | `TypeField.type_abi` | `AbiFundamental` | castxml, clang, dwarf | consumed | ✅ | — | ✅ | — | ✅ |
 | `TypeField.type_identities` | `tuple[str, ...]` | castxml | consumed | ✅ | — | — | — | — |
 | `Variable.access` | `AccessLevel` | castxml | consumed | ✅ | — | ✅ | — | ✅ |
-| `Variable.alignment_bits` | `int \| None` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
+| `Variable.alignment_bits` | `int \| None` | clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Variable.binary_exported` | `bool` | castxml, clang, dwarf | persisted | ✅ | — | ✅ | — | ✅ |
 | `Variable.declared_in_headers` | `bool` | castxml, clang | persisted | ✅ | — | ✅ | — | ✅ |
 | `Variable.deprecated` | `str \| None` | castxml, clang | consumed | ✅ | — | ✅ | — | ✅ |

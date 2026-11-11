@@ -98,6 +98,13 @@ class VariableTypeIndex:
 
     index: SemanticIRIndex
     projected: dict[int, CanonicalEntity] = field(default_factory=dict)
+    #: Each exported object's address alignment (bits), an upper bound on its
+    #: alignment (``compare.declared_alignment.placement_bits``).
+    placement: Mapping[str, int] = field(default_factory=dict)
+
+    def placement_bits(self, mangled: str) -> int | None:
+        """The upper bound *mangled*'s address puts on its alignment, if any."""
+        return self.placement.get(mangled)
 
     def entity_for(self, var: Variable) -> CanonicalEntity | None:
         entity = self.projected.get(id(var))

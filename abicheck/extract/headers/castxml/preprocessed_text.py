@@ -43,6 +43,20 @@ log = logging.getLogger(__name__)
 PREPROCESSED_TAG = "AbicheckPreprocessed"
 #: Tag of the element carrying one preprocessed source line.
 LINE_TAG = "AbicheckPreprocessedLine"
+#: Tag of the element naming one file whose preprocessed code spells an
+#: alignment specifier (:data:`ALIGNMENT_SPELLING`).
+ALIGNMENT_FILE_TAG = "AbicheckAlignmentFile"
+
+#: An alignment specifier in preprocessed code: a GNU ``aligned`` attribute
+#: (either spelling), C++ ``alignas``, C11 ``_Alignas``, MSVC
+#: ``__declspec(align(N))``. CastXML records a record's computed alignment
+#: but writes nothing for one of these on a variable or a typedef, so a
+#: variable whose own file, or the file of a typedef its type names, spells
+#: one may be more aligned than CastXML's natural value says
+#: (``castxml/dumper`` records that value as a lower bound only).
+ALIGNMENT_SPELLING = re.compile(
+    r"\b(?:__aligned__|aligned|alignas|_Alignas)\b|__declspec\s*\(\s*align\b"
+)
 
 #: How far above the reported line a declaration's specifiers may start.
 LOOKBACK_LINES = 8
@@ -127,10 +141,24 @@ class PreprocessedText:
     """
 
     def __init__(
-        self, lines: Mapping[str, Mapping[int, str]], default_cc: str = ""
+        self,
+        lines: Mapping[str, Mapping[int, str]],
+        default_cc: str = "",
+        alignment_files: frozenset[str] | None = None,
     ) -> None:
         self.lines = {f: dict(by_line) for f, by_line in lines.items()}
         self.default_cc = default_cc
+        #: :func:`file_key` of every file whose preprocessed code spells an
+        #: alignment specifier. ``None``: not recorded (a document from
+        #: before extractor generation 51), so no file is known not to.
+        self.alignment_files = alignment_files
+
+    def spells_alignment(self, file_name: str) -> bool:
+        """Whether *file_name*'s preprocessed code may spell an alignment
+        specifier (``True`` when the table did not record it)."""
+        if self.alignment_files is None:
+            return True
+        return file_key(file_name) in self.alignment_files
 
     def source_lines(self, file_name: str) -> list[str] | None:
         """*file_name*'s preprocessed lines (unrecorded lines empty), or
@@ -180,9 +208,28 @@ def declaration_windows(
     return out
 
 
+def alignment_files(files: Mapping[str, Mapping[int, str]]) -> frozenset[str]:
+    """The files of a ``-E -dD`` run whose preprocessed code spells an
+    alignment specifier (macros already expanded, directives skipped)."""
+    return frozenset(
+        key
+        for key, by_line in files.items()
+        if ALIGNMENT_SPELLING.search(
+            "\n".join(t for t in by_line.values() if _is_code(t))
+        )
+    )
+
+
 def attach_preprocessed_text(root: Element, table: PreprocessedText) -> None:
     """Record *table* in the CastXML *root* (see the module docstring)."""
-    SubElement(root, PREPROCESSED_TAG, default_cc=table.default_cc)
+    SubElement(
+        root,
+        PREPROCESSED_TAG,
+        default_cc=table.default_cc,
+        alignment_recorded="1" if table.alignment_files is not None else "0",
+    )
+    for key in sorted(table.alignment_files or ()):
+        SubElement(root, ALIGNMENT_FILE_TAG, file=key)
     for key in sorted(table.lines):
         for line, text in sorted(table.lines[key].items()):
             SubElement(
@@ -205,7 +252,12 @@ def read_preprocessed_text(root: Element) -> PreprocessedText | None:
         line_raw = el.get("line", "")
         if el.get("file") and line_raw.isdigit():
             lines.setdefault(el.get("file", ""), {})[int(line_raw)] = el.get("text", "")
-    return PreprocessedText(lines, marker.get("default_cc", ""))
+    aligned = (
+        frozenset(el.get("file", "") for el in root.iter(ALIGNMENT_FILE_TAG))
+        if marker.get("alignment_recorded") == "1"
+        else None
+    )
+    return PreprocessedText(lines, marker.get("default_cc", ""), aligned)
 
 
 def resolve_preprocessed_text(
@@ -242,5 +294,7 @@ def resolve_preprocessed_text(
     if defined_out is not None:
         defined_out.update(defined)
     return PreprocessedText(
-        declaration_windows(root, files, has_cc), target_default_convention(defined)
+        declaration_windows(root, files, has_cc),
+        target_default_convention(defined),
+        alignment_files(files),
     )

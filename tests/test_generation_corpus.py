@@ -49,7 +49,7 @@ from abicheck.storage.extension_fact_catalog import (
     EXPORT_READ,
 )
 from abicheck.storage.extension_facts import write_extension_fact
-from abicheck.storage.generation_migrations import SPELLING_MIGRATIONS
+from abicheck.storage.generation_spelling_table import SPELLING_MIGRATIONS
 from abicheck.storage.snapshot_schema_versions import SCHEMA_VERSION
 from abicheck.storage.versioning import (
     EXTRACTOR_GENERATION,

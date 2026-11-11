@@ -11,7 +11,7 @@ runs before ``pip install``.
 For the ``EXTRACTOR_GENERATION`` G that ``abicheck/storage/versioning.py``
 declares, it requires:
 
-* ``SPELLING_MIGRATIONS`` in ``abicheck/storage/generation_migrations.py`` to
+* ``SPELLING_MIGRATIONS`` in ``abicheck/storage/generation_spelling_table.py`` to
   hold exactly one row per generation 1..G, each with a reason that is not
   empty and not one of that module's ``PLACEHOLDER_REASONS`` -- the row says
   what the bump's audit found, or which rewrites it declares;
@@ -34,7 +34,7 @@ from typing import Protocol
 
 ROOT = Path(__file__).resolve().parent.parent
 VERSIONING = ROOT / "abicheck" / "storage" / "versioning.py"
-MIGRATIONS = ROOT / "abicheck" / "storage" / "generation_migrations.py"
+MIGRATIONS = ROOT / "abicheck" / "storage" / "generation_spelling_table.py"
 CORPUS = ROOT / "tests" / "fixtures" / "generations"
 CHECK = "generation-corpus"
 
@@ -94,7 +94,7 @@ def evaluate(
     tree = ast.parse(migrations_text)
     rows = _rows(tree)
     if rows is None:
-        return ["SPELLING_MIGRATIONS is not a dict literal in generation_migrations.py"]
+        return ["SPELLING_MIGRATIONS is not a dict literal in generation_spelling_table.py"]
     problems: list[str] = []
     expected = set(range(1, generation + 1))
     for missing in sorted(expected - set(rows)):

@@ -52,6 +52,7 @@ from .fact_comparison import compare_facts
 
 if TYPE_CHECKING:
     from ..model.change import Change
+    from ..model.fact import Fact
     from ..model.identity import EntityId
     from ..model.semantic_ir import CanonicalEntity
 
@@ -167,21 +168,63 @@ def alignment_changes(
     new: CanonicalEntity | None,
     *,
     entity_id: EntityId | None,
+    placement: tuple[int | None, int | None] = (None, None),
 ) -> list[Change]:
     """``VAR_ALIGNMENT_CHANGED`` when both sides recorded a declared
-    alignment and it differs."""
+    alignment and it provably differs.
+
+    Each side is an interval. An exact (``PRESENT``) value is itself. A
+    ``PARTIAL`` value is a lower bound, closed above by *placement* when the
+    object's address is known (an object aligned to ``A`` sits at a multiple
+    of ``A``, so its address alignment bounds ``A`` from above). The sides
+    differ provably exactly when their intervals are disjoint: an exact value
+    below a bound, or above the address an unknown declaration sits at.
+    """
     if old is None or new is None:
         return []
     o, n = old.declared_alignment_bits, new.declared_alignment_bits
     if not (o.is_present and n.is_present) or o.value == n.value:
+        return []
+    o_span = _interval(o, placement[0])
+    n_span = _interval(n, placement[1])
+    if o_span is None or n_span is None or not _disjoint(o_span, n_span):
         return []
     return [
         make_change(
             ChangeKind.VAR_ALIGNMENT_CHANGED,
             symbol=mangled,
             name=name,
-            old=str(o.value),
-            new=str(n.value),
+            old=_spell(o_span, n_span),
+            new=_spell(n_span, o_span),
             entity_id=entity_id,
         )
     ]
+
+
+#: (low, high) in bits; ``high`` is None when nothing bounds it from above.
+_Span = tuple[int, int | None]
+
+
+def _interval(fact: Fact[int], placement: int | None) -> _Span | None:
+    """One side's possible declared alignments, or None when unreadable."""
+    if fact.value is None:
+        return None
+    if fact.status is not FactStatus.PARTIAL:
+        return (fact.value, fact.value)
+    high = placement if placement is not None and placement >= fact.value else None
+    return (fact.value, high)
+
+
+def _disjoint(a: _Span, b: _Span) -> bool:
+    return (a[1] is not None and a[1] < b[0]) or (b[1] is not None and b[1] < a[0])
+
+
+def _spell(side: _Span, other: _Span) -> str:
+    """*side*'s value as the proof uses it: exact, or the bound that excludes
+    the other side (``<=`` its address alignment, ``>=`` its lower bound)."""
+    low, high = side
+    if high == low:
+        return str(low)
+    if high is not None and high < other[0]:
+        return f"<={high}"
+    return f">={low}"

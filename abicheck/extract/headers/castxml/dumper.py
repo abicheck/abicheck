@@ -121,6 +121,7 @@ from .typedef_parsing import (
     _deprecation_marker as _deprecation_marker,
     _extract_contract_attributes as _extract_contract_attributes,
 )
+from .variable_alignment import variable_alignment_fact
 from .vector_spellings import load_vector_spellings
 
 
@@ -406,15 +407,13 @@ class _CastxmlParser:
                     # G31: `init`, gated by `_variable_value_eligible`.
                     value=el.get("init") if self._variable_value_eligible(el) else None,
                     source_location=self._source_location(el),
-                    # Explicit alignas/aligned override when castxml emits an
-                    # ``align`` attribute on the Variable itself; falls back to
-                    # the type's own natural (computed) alignment when there is
-                    # no explicit override, so a plain scalar/aggregate global —
-                    # the common case — still carries real declared-alignment
-                    # evidence instead of leaving this None. See
-                    # _type_alignment_bits.
-                    alignment_bits=self._optional_int_attr(el, "align")
-                    or self._type_alignment_bits(el.get("type", "")),
+                    # castxml writes no alignment specifier on a Variable:
+                    # the type's natural alignment, declared only where no
+                    # specifier can apply, else a lower bound
+                    # (castxml/variable_alignment).
+                    alignment_bits_fact=variable_alignment_fact(
+                        self._ctx, el, self._type_alignment_bits(el.get("type", ""))
+                    ),
                     # See RecordType.deprecated for the message-text convention.
                     deprecated=_deprecation_marker(el),
                     # See Variable.is_static's own comment -- mirrors
