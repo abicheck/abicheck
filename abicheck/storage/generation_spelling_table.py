@@ -566,6 +566,15 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "an older gcc snapshot's vtable spellings differ, gcc-to-gcc only, "
         "not rewritten"
     ),
+    61: GenerationSpellingChange(
+        "the native gcc header backend records a template's or concept's "
+        "constraint as the shared conjunctive atom set (one hashed atom per "
+        "top-level && conjunct, the empty set for an unconstrained "
+        "template) instead of one opaque gcc-v2 digest, so a tightening is "
+        "decidable; an older gcc snapshot's constraint values are opaque "
+        "and read as concept_constraint_changed against a newer one, "
+        "gcc-to-gcc only, not rewritten"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.
