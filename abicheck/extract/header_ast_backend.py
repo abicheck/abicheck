@@ -58,7 +58,7 @@ __all__ = [
 ]
 
 # L2 producers; hybrid is explicit because it runs both tools (~2x cost).
-HEADER_BACKENDS = ("auto", "castxml", "clang", "hybrid")
+HEADER_BACKENDS = ("auto", "castxml", "clang", "hybrid", "gcc")
 
 
 def _resolve_header_backend(backend: str | None) -> str:
@@ -74,16 +74,38 @@ def _resolve_header_backend(backend: str | None) -> str:
     unasked would silently double dump cost (see ``dumper_hybrid.py``).
     """
     choice = (backend or "auto").lower()
-    if choice in ("castxml", "clang", "hybrid"):
+    if choice in ("castxml", "clang", "hybrid", "gcc"):
         return choice
     if choice != "auto":
         raise ValidationError(
             f"Unknown AST frontend {backend!r}; expected one of {HEADER_BACKENDS}."
         )
     env = ast_frontend_pin()
-    if env in ("castxml", "clang", "hybrid"):
+    if env in ("castxml", "clang", "hybrid", "gcc"):
         return env
     return "castxml"
+
+
+def validate_native_gcc_format(
+    backend: str, binary_format: str, uses_headers: bool
+) -> None:
+    if (
+        uses_headers
+        and _resolve_header_backend(backend) == "gcc"
+        and binary_format != "elf"
+    ):
+        raise ValidationError(
+            "Native GCC header extraction currently supports ELF only; select a supported frontend for PE/Mach-O."
+        )
+
+
+def validate_native_gcc_manifest(
+    backend: str | None, dump_manifest_given: bool
+) -> None:
+    if _resolve_header_backend(backend) == "gcc" and dump_manifest_given:
+        raise ValidationError(
+            "Native GCC currently supports a single header translation unit; --dump-manifest is not supported."
+        )
 
 
 def _is_hybrid_request(
@@ -97,6 +119,7 @@ def _is_hybrid_request(
     this request" decision lives in this module, so :mod:`abicheck.dumper`
     only dispatches.
     """
+    validate_native_gcc_manifest(backend, dump_manifest_given)
     if _resolve_header_backend(backend) != "hybrid":
         return False
     if dump_manifest_given:
@@ -127,6 +150,10 @@ def _resolve_single_ast_backend(backend: str, frontend_context: str) -> str:
     the three-way backend dispatch it is.
     """
     resolved = _resolve_header_backend(backend)
+    if resolved == "gcc" and frontend_context != "host":
+        raise AstContextMissingError(
+            "Native GCC has no SYCL/device frontend context; select the actual Clang/DPC++ frontend."
+        )
     if resolved == "hybrid":
         # No single parser exists for "hybrid" — must be resolved by
         # dumper_hybrid.run_hybrid_dump, not silently treated as castxml.

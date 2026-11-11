@@ -1,0 +1,168 @@
+[
+ {
+  "kind": "compiler",
+  "version": "14.2.0",
+  "schema": 2,
+  "pointer_bits": 64,
+  "char_bits": 8,
+  "driver": "/usr/bin/gcc-14",
+  "target": "x86_64-linux-gnu",
+  "full_version": "14.2.0",
+  "language": "c",
+  "flags": [],
+  "plugin_sha256": "5044ec0cba82b80d14df6cf65e211db368ed593ccd8f65d4522c0fd7568a2777",
+  "preprocessing": false,
+  "includes": []
+ },
+ {
+  "kind": "record_type",
+  "name": "struct P",
+  "size_bits": 128,
+  "alignment_bits": 64,
+  "scope": [],
+  "anonymous": false,
+  "type_uid": 986,
+  "leaf_name": "P",
+  "source": "@HEADER@",
+  "line": 1,
+  "system_header": false,
+  "fields": [
+   {
+    "name": "a",
+    "type": "int",
+    "identity": null,
+    "offset_bits": 0,
+    "size_bits": 32,
+    "bitfield": false,
+    "artificial": false,
+    "access": "public",
+    "abi": {
+     "encoding": "signed",
+     "size": 4,
+     "alignment": 4,
+     "lanes": 0
+    },
+    "const": false,
+    "volatile": false
+   },
+   {
+    "name": "b",
+    "type": "long int",
+    "identity": null,
+    "offset_bits": 64,
+    "size_bits": 64,
+    "bitfield": false,
+    "artificial": false,
+    "access": "public",
+    "abi": {
+     "encoding": "signed",
+     "size": 8,
+     "alignment": 8,
+     "lanes": 0
+    },
+    "const": false,
+    "volatile": false
+   }
+  ]
+ },
+ {
+  "kind": "function_decl",
+  "name": "f",
+  "qualified": "f",
+  "type": "int <T3dc> (struct P *, int)",
+  "identity": null,
+  "source": "@HEADER@",
+  "line": 2,
+  "system_header": false,
+  "scope": [],
+  "attribute_details": [],
+  "deprecated": null,
+  "uid": 2773,
+  "type_uid": 988,
+  "external_linkage": true,
+  "inline": false,
+  "attributes": null,
+  "artificial": false,
+  "access": "public",
+  "return_abi": {
+   "encoding": "signed",
+   "size": 4,
+   "alignment": 4,
+   "lanes": 0
+  },
+  "return_pointer_depth": 0,
+  "variadic": false,
+  "return_type": "int",
+  "return_identity": null,
+  "parameters": [
+   {
+    "type": "struct P *",
+    "identity": "struct P",
+    "default": null,
+    "abi": null,
+    "param_kind": "pointer",
+    "pointer_depth": 1,
+    "restrict": false,
+    "implicit_this": false,
+    "artificial": false,
+    "name": "p"
+   },
+   {
+    "type": "int",
+    "identity": null,
+    "default": null,
+    "abi": {
+     "encoding": "signed",
+     "size": 4,
+     "alignment": 4,
+     "lanes": 0
+    },
+    "param_kind": "value",
+    "pointer_depth": 0,
+    "restrict": false,
+    "implicit_this": false,
+    "artificial": false,
+    "name": "n"
+   }
+  ],
+  "mangled": "f"
+ },
+ {
+  "kind": "var_decl",
+  "name": "g",
+  "qualified": "g",
+  "type": "int",
+  "identity": null,
+  "source": "@HEADER@",
+  "line": 3,
+  "system_header": false,
+  "scope": [],
+  "attribute_details": [],
+  "deprecated": null,
+  "uid": 2774,
+  "type_uid": 10,
+  "external_linkage": true,
+  "inline": false,
+  "attributes": null,
+  "artificial": false,
+  "access": "public",
+  "mangled": "g",
+  "abi": {
+   "encoding": "signed",
+   "size": 4,
+   "alignment": 4,
+   "lanes": 0
+  },
+  "const": false,
+  "volatile": false,
+  "tls": false,
+  "size_bits": 32,
+  "alignment_bits": 32,
+  "value": null,
+  "value_expression": null
+ },
+ {
+  "kind": "end",
+  "errors": 0
+ }
+]

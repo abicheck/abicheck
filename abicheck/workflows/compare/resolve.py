@@ -190,13 +190,13 @@ def _reject_unsupported_frontends(
     ``build_info`` never feeds L4, so neither is rejected. Mirrors ``cli.py``'s
     own ``--depth source`` + ``--ast-frontend hybrid`` ``UsageError``.
 
-    The ``hybrid`` half is :func:`~abicheck.workflows.artifact.resolve.reject_hybrid_source_frontend`,
+    The ``hybrid`` half is :func:`~abicheck.workflows.artifact.resolve.reject_unsupported_header_frontend_evidence`,
     shared with ``dump``'s own typed path; the ``android`` half names
     ``run_compare_request`` in its message and stays here.
     """
     from ..artifact.resolve import (
         is_raw_source_tree,
-        reject_hybrid_source_frontend,
+        reject_unsupported_header_frontend_evidence,
     )
 
     if frontend_lower == "android" and any(
@@ -208,7 +208,7 @@ def _reject_unsupported_frontends(
             "source tree -- pass a prebuilt evidence pack directory instead, "
             "or use has_sources=True with no inline sources/build_info."
         )
-    reject_hybrid_source_frontend(
+    reject_unsupported_header_frontend_evidence(
         request.depth,
         ((request.old, old_evidence), (request.new, new_evidence)),
         header_backend,

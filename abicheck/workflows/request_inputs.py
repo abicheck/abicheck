@@ -55,7 +55,9 @@ SUPPORTED_LANGS = frozenset({"c", "c++"})
 #: source-ABI replay; ``android`` is a source-ABI-only value (it reuses a
 #: pre-captured header-abi dump and has no header-AST path), so selecting it
 #: without source inputs is a validation error (D9).
-SUPPORTED_FRONTENDS = frozenset({"auto", "castxml", "clang", "hybrid", "android"})
+SUPPORTED_FRONTENDS = frozenset(
+    {"auto", "castxml", "clang", "hybrid", "gcc", "android"}
+)
 
 #: ELF debug formats ``--debug-format`` accepts, matching its ``click.Choice``
 #: exactly (including ``auto``). Compared case-insensitively, the way that

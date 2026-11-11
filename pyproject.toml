@@ -262,6 +262,7 @@ disable_error_code = ["import-untyped", "misc"]
 testpaths = ["tests"]
 pythonpath = ["."]
 markers = [
+    "native_gcc: native GCC compiler/plugin-dev integration without Clang or CastXML",
     "integration: requires castxml, gcc/g++ installed",
     "libabigail: requires abidiff + gcc/g++ — libabigail parity tests",
     "abicc: requires abi-compliance-checker + gcc/g++ — ABICC parity tests",
@@ -298,6 +299,7 @@ timeout = 600
 include = ["abicheck*"]
 
 [tool.setuptools.package-data]
+"abicheck.extract.headers.gcc" = ["gcc_facts.cc"]
 "abicheck.schemas" = ["*.json"]
 "abicheck.policies" = ["*.yaml"]
 # kinds.pyi (the ChangeKind mypy stub -- see kinds.py's own docstring) needs

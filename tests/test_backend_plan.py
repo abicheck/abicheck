@@ -101,7 +101,7 @@ def test_auto_selected_is_unpinned_auto(backend, pin, expected) -> None:
 
 
 def test_pinnable_backends_match_the_frontend_vocabulary() -> None:
-    assert frozenset({"castxml", "clang", "hybrid"}) == PINNABLE_BACKENDS
+    assert frozenset({"castxml", "clang", "hybrid", "gcc"}) == PINNABLE_BACKENDS
 
 
 def test_plan_is_frozen() -> None:

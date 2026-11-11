@@ -753,3 +753,13 @@ adrs:
     use_cases: []
     surfaces:
       - api: abicheck.workflows.service_requests.CompareRequest
+
+  - id: ADR-092
+    file: 092-native-gcc-header-backend.md
+    disposition: partial
+    use_cases: [UC-ARCH-c-library, UC-ARCH-cpp-library]
+    surfaces:
+      - cli: dump --header
+      - cli: compare
+      - api: abicheck.service.run_dump_request
+    missing: Experimental GCC support still lacks native header graphs, full macro/template coverage and multi-TU/source replay.

@@ -60,7 +60,7 @@ from abicheck.extract.compiler_driver import (
     resolve_source_frontend_clang_bin,
 )
 from abicheck.extract.header_ast_backend import _resolve_header_backend
-from abicheck.extract.headers import toolchain as dumper_toolchain
+from abicheck.extract.headers import backend_registry, toolchain as dumper_toolchain
 from abicheck.extract.headers.castxml import backend as cxb
 from abicheck.extract.headers.clang import backend as clang_backend
 from abicheck.extract.headers.clang.backend import ClangBackend, clang_header_dump
@@ -3024,7 +3024,7 @@ def test_resolve_header_backend_rejects_unknown() -> None:
     from abicheck.errors import ValidationError
 
     with pytest.raises(ValidationError):
-        _resolve_header_backend("gcc")
+        _resolve_header_backend("edg")
 
 
 def test_resolve_header_backend_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -4018,9 +4018,8 @@ def test_header_graph_attach_reuses_primary_snapshot_ast(
         return _fake_proc()
 
     # Step 1's clang process is injected through the dump's clang backend.
-    monkeypatch.setitem(
-        dumper.HEADER_AST_BACKENDS, "clang", ClangBackend(runner=_as_runner(_run))
-    )
+    registry = backend_registry.HEADER_AST_BACKENDS
+    monkeypatch.setitem(registry, "clang", ClangBackend(runner=_as_runner(_run)))
 
     # Step 2 (``service._attach_header_graph``) calls ``clang_header_dump``
     # with its default runner, which no caller-side injection reaches; any

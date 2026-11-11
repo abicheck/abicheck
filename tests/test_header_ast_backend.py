@@ -16,7 +16,7 @@
 """The header-AST backend protocol and the clang backend's injected runner
 (lane B, stage B2a).
 
-The dump reaches clang through ``dumper.HEADER_AST_BACKENDS["clang"]``, a
+The dump reaches clang through ``backend_registry.HEADER_AST_BACKENDS["clang"]``, a
 :class:`~abicheck.extract.headers.clang.backend.ClangBackend` whose process
 runner is a constructor argument. These tests pin that seam: the registry,
 the protocol, that the injected runner is the one that runs, and that the
@@ -38,6 +38,7 @@ from abicheck import deadline, dumper
 from abicheck.dumper_clang_errors import run_clang_ast, run_clang_to_ast_file
 from abicheck.errors import SnapshotError
 from abicheck.extract.header_ast_fields import parse_header_ast_fields
+from abicheck.extract.headers import backend_registry
 from abicheck.extract.headers.backend_protocol import (
     HeaderAstBackend,
     HeaderParseRequest,
@@ -64,7 +65,7 @@ class _RecordingRunner:
 
 
 def test_registry_holds_a_default_clang_backend() -> None:
-    backend = dumper.HEADER_AST_BACKENDS["clang"]
+    backend = backend_registry.HEADER_AST_BACKENDS["clang"]
     assert isinstance(backend, ClangBackend)
     assert isinstance(backend, HeaderAstBackend)
     assert backend.name == "clang"
@@ -135,7 +136,7 @@ def test_dump_dispatches_through_the_registry(
     )
     runner = _RecordingRunner()
     monkeypatch.setitem(
-        dumper.HEADER_AST_BACKENDS, "clang", ClangBackend(runner=runner)
+        backend_registry.HEADER_AST_BACKENDS, "clang", ClangBackend(runner=runner)
     )
     snap = dumper.dump(so, [header], header_backend="clang", lang="c")
     assert "abicheck_b2a_dump" in {f.name for f in snap.declarations.functions}
@@ -146,7 +147,7 @@ def test_dump_dispatches_through_the_registry(
 
 
 def test_registry_holds_a_default_castxml_backend() -> None:
-    backend = dumper.HEADER_AST_BACKENDS["castxml"]
+    backend = backend_registry.HEADER_AST_BACKENDS["castxml"]
     assert isinstance(backend, CastxmlBackend)
     assert isinstance(backend, HeaderAstBackend)
     assert backend.name == "castxml"

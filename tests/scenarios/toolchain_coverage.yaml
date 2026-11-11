@@ -84,3 +84,30 @@ scenarios:
     validates: UC-TC-cxx-standard-floor
     automated: true
     test: test_sc_cxx_std_floor
+
+  - id: SC-NATIVE-GCC-DUMP-ROUNDTRIP
+    title: Native GCC header and ELF facts survive a stored comparison
+    persona: C/C++ library maintainer using GCC
+    narrative: >
+      Select compile.frontend gcc with a matching plugin SDK, dump two real
+      artifacts and compare the snapshots without a Clang fallback. Layout
+      breaks remain breaking while incomplete extraction assurance stays partial.
+    flow:
+      - abicheck dump old.so --header old.h --config gcc.yml -o old.json
+      - abicheck dump new.so --header new.h --config gcc.yml -o new.json
+      - abicheck compare old.json new.json -o json=report.json
+    expected:
+      exit_code: 4
+      verdict: BREAKING
+      contains_kind: type_size_changed
+    surfaces:
+      - cli: dump --header
+      - cli: compare
+      - api: abicheck.service.run_dump_request
+    validates: UC-ARCH-cpp-library
+    automated: false
+    status: planned
+    note: >
+      This catalog's central scenario harness does not provision GCC SDKs.
+      The flow is automated separately in tests/test_native_gcc_workflow.py
+      by the dedicated native-gcc CI job on GCC 13 and 14.

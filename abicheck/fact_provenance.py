@@ -92,7 +92,7 @@ def field_fact_key(type_name: str, field_name: str, fact: str) -> str:
 
 
 def fact_producer(snap: AbiSnapshot, key: str) -> str | None:
-    """Which single backend ("castxml"/"clang") actually backs *key* on
+    """Which single backend (including the experimental native GCC adapter) backs *key* on
     *snap*, or ``None`` if that isn't known.
 
     For a fact BOTH backends can independently produce a real, same-backend-
@@ -107,7 +107,7 @@ def fact_producer(snap: AbiSnapshot, key: str) -> str | None:
     ``--ast-frontend castxml``/``--ast-frontend clang`` run already does.
 
     - Not (confirmed) header-aware: None.
-    - ``ast_producer in ("castxml", "clang")``:
+    - ``ast_producer in ("castxml", "clang", "gcc-experimental")``:
       that value unconditionally — every fact on a single-backend snapshot
       came from that one backend.
     - ``ast_producer == "hybrid"``: whatever the merge recorded for *key*
@@ -122,7 +122,7 @@ def fact_producer(snap: AbiSnapshot, key: str) -> str | None:
     # ``NOT_COLLECTED`` (``storage.fact_backfill``), and every consumer of
     # those three facts gates per declaration on that status
     # (``compare.fact_gate.both_facts_present``) before asking this function.
-    if snap.ast_producer in ("castxml", "clang"):
+    if snap.ast_producer in ("castxml", "clang", "gcc-experimental"):
         return snap.ast_producer
     if snap.ast_producer == "hybrid":
         return snap.fact_provenance.get(key)

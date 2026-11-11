@@ -7,7 +7,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 | Disposition | ADRs |
 |---|---|
 | surfaced | 51 |
-| partial | 14 |
+| partial | 15 |
 | gap | 6 |
 | internal | 22 |
 
@@ -108,6 +108,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 | [ADR-086](../adr/086-static-archive-no-baseline-export-audit.md) | surfaced | UC-ARCH-static-lib | `cli: compare --no-baseline` | — |
 | [ADR-087](../adr/087-report-pages-publication.md) | gap | — | — | Proposed, not yet implemented; no publish-report reusable workflow, site generator, or page-link Action input exists yet. |
 | [ADR-088](../adr/088-one-compare-exit-gate.md) | surfaced | — | `api: abicheck.workflows.service_requests.CompareRequest` | — |
+| [ADR-092](../adr/092-native-gcc-header-backend.md) | partial | UC-ARCH-c-library, UC-ARCH-cpp-library | `cli: dump --header`<br>`cli: compare`<br>`api: abicheck.service.run_dump_request` | Experimental GCC support still lacks native header graphs, full macro/template coverage and multi-TU/source replay. |
 
 ## Use cases by user task
 
@@ -152,11 +153,9 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 - ADR-017 action: mode
 - ADR-017 action: pr-comment
 - ADR-017 action: upload-sarif
-- ADR-018 cli: dump
 - ADR-020a action: compile-db
 - ADR-020a cli: dump --build-info
 - ADR-020b api: abicheck.sycl_metadata
-- ADR-020b cli: dump
 - ADR-021a action: debug-info1
 - ADR-021a api: abicheck.debug_resolver
 - ADR-021a cli: dump --debug-info

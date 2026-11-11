@@ -757,7 +757,7 @@ def apply_compile_config_env_toggles(
 
 #: The AST frontends ``--ast-frontend`` accepts, in one place so the sided and
 #: single-valued spellings of the option cannot drift apart.
-AST_FRONTENDS: tuple[str, ...] = ("auto", "castxml", "clang", "hybrid")
+AST_FRONTENDS: tuple[str, ...] = ("auto", "castxml", "clang", "hybrid", "gcc")
 
 
 # ADR-049 D7's `--contract` value resolvers moved to the leaf

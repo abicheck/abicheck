@@ -62,7 +62,7 @@ class TestDumpRequestValidation:
         ("kwargs", "fragment"),
         [
             ({"lang": "rust"}, "unsupported language 'rust'"),
-            ({"frontend": "gcc"}, "unsupported AST frontend 'gcc'"),
+            ({"frontend": "edg"}, "unsupported AST frontend 'edg'"),
             ({"debug_format": "stabs"}, "unsupported debug format 'stabs'"),
             ({"depth": "everything"}, "unsupported depth 'everything'"),
             ({"frontend_context": "gpu"}, "unsupported frontend context 'gpu'"),

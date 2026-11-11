@@ -35,7 +35,7 @@ from .execute import (
 )
 from .resolve import (
     is_raw_source_tree,
-    reject_hybrid_source_frontend,
+    reject_unsupported_header_frontend_evidence,
 )
 from .resolved_plan import ResolvedArtifactPlan
 
@@ -45,6 +45,6 @@ __all__ = [
     "embed_side_build_source",
     "enforce_requested_depth",
     "is_raw_source_tree",
-    "reject_hybrid_source_frontend",
+    "reject_unsupported_header_frontend_evidence",
     "resolve_side_snapshot",
 ]
