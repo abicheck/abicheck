@@ -16,8 +16,8 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 ## Headline
 
 - Total kinds: **428**
-- Kinds with at least one real source: **199**
-- Kinds per source: catalog 160, field_shapes 9, integration 82
+- Kinds with at least one real source: **200**
+- Kinds per source: catalog 160, field_shapes 9, integration 85
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
@@ -27,7 +27,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | L3 | 15 | 5 |
 | L4 | 10 | 2 |
 | L5 | 15 | 5 |
-| unmapped | 121 | 106 |
+| unmapped | 121 | 105 |
 
 ## Most important zero-source kinds (top 20)
 
@@ -194,7 +194,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | Kind | Verdict | Catalog | Field shapes | Integration |
 |---|---|---:|---:|---:|
 | `abi_equivalent_type_changed` | RISK | 0 | 0 | 1 |
-| `atomic_qualifier_changed` | BREAKING | 1 | 0 | 1 |
+| `atomic_qualifier_changed` | BREAKING | 1 | 0 | 2 |
 | `base_class_offset_changed` | BREAKING | 1 | 0 | 0 |
 | `base_class_position_changed` | BREAKING | 1 | 0 | 0 |
 | `base_class_virtual_changed` | BREAKING | 1 | 0 | 0 |
@@ -211,7 +211,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `field_became_volatile` | RISK | 1 | 0 | 0 |
 | `field_bitfield_changed` | BREAKING | 1 | 0 | 0 |
 | `field_renamed` | API_BREAK | 1 | 0 | 0 |
-| `flexible_array_member_changed` | COMPATIBLE | 1 | 0 | 0 |
+| `flexible_array_member_changed` | COMPATIBLE | 1 | 0 | 1 |
 | `func_cv_changed` | BREAKING | 1 | 0 | 0 |
 | `func_params_changed` | BREAKING | 5 | 1 | 15 |
 | `func_pure_virtual_added` | BREAKING | 0 | 0 | 0 |
@@ -235,7 +235,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `toolchain_flag_drift` | COMPATIBLE | 1 | 0 | 3 |
 | `type_alignment_changed` | BREAKING | 1 | 0 | 0 |
 | `type_base_changed` | BREAKING | 3 | 0 | 0 |
-| `type_became_opaque` | BREAKING | 1 | 0 | 0 |
+| `type_became_opaque` | BREAKING | 1 | 0 | 1 |
 | `type_field_added` | BREAKING | 2 | 0 | 0 |
 | `type_field_added_compatible` | COMPATIBLE | 1 | 0 | 1 |
 | `type_field_offset_changed` | BREAKING | 6 | 0 | 2 |
@@ -486,7 +486,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `symbol_leaked_from_dependency_changed` | RISK | 0 | 0 | 0 |
 | `symbol_moved_version_node` | BREAKING | 0 | 0 | 1 |
 | `symbol_renamed_batch` | BREAKING | 0 | 0 | 0 |
-| `symbol_size_changed_const_object` | BREAKING | 0 | 0 | 0 |
+| `symbol_size_changed_const_object` | BREAKING | 0 | 0 | 1 |
 | `symbol_size_changed_internal` | BREAKING | 0 | 0 | 0 |
 | `symbol_type_changed` | BREAKING | 0 | 0 | 0 |
 | `symbol_version_alias_changed` | RISK | 0 | 0 | 2 |

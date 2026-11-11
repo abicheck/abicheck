@@ -836,6 +836,8 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_native_gcc_hidden_friends.py",
             # the native gcc plugin keeps a C++ parameter's restrict.
             "tests/test_native_gcc_param_restrict.py",
+            # the native gcc plugin spells C atomic/array types as C does.
+            "tests/test_native_gcc_c_object_facts.py",
             # castxml reads noexcept and C++20 constraints from the clang AST
             # of the same header; without clang they read not observed.
             "tests/test_noexcept_header_backends.py",
