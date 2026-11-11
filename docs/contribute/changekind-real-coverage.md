@@ -16,8 +16,8 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 ## Headline
 
 - Total kinds: **428**
-- Kinds with at least one real source: **189**
-- Kinds per source: catalog 160, field_shapes 9, integration 72
+- Kinds with at least one real source: **190**
+- Kinds per source: catalog 160, field_shapes 9, integration 73
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
@@ -27,7 +27,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | L3 | 15 | 5 |
 | L4 | 10 | 2 |
 | L5 | 15 | 5 |
-| unmapped | 121 | 109 |
+| unmapped | 121 | 108 |
 
 ## Most important zero-source kinds (top 20)
 
@@ -242,7 +242,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `type_field_type_changed` | BREAKING | 3 | 0 | 5 |
 | `type_kind_changed` | BREAKING | 1 | 0 | 0 |
 | `type_removed` | API_BREAK | 5 | 1 | 3 |
-| `type_size_changed` | BREAKING | 19 | 1 | 6 |
+| `type_size_changed` | BREAKING | 19 | 1 | 7 |
 | `type_vtable_changed` | BREAKING | 3 | 0 | 0 |
 | `typedef_base_changed` | BREAKING | 1 | 0 | 4 |
 | `typedef_removed` | API_BREAK | 2 | 0 | 1 |
@@ -425,7 +425,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `field_lost_volatile` | RISK | 0 | 0 | 0 |
 | `fortify_source_weakened` | RISK | 0 | 0 | 0 |
 | `func_became_inline` | API_BREAK | 0 | 0 | 0 |
-| `func_deleted` | BREAKING | 0 | 0 | 0 |
+| `func_deleted` | BREAKING | 0 | 0 | 1 |
 | `func_deleted_dwarf` | BREAKING | 0 | 0 | 0 |
 | `func_deleted_elf_fallback` | BREAKING | 0 | 0 | 0 |
 | `func_likely_renamed` | BREAKING | 0 | 0 | 0 |

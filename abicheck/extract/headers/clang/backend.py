@@ -86,6 +86,7 @@ from ..toolchain import (
     _tool_identity,
 )
 from .abi_target import with_binary_abi_target
+from .enum_probe import probe_enum_types
 from .error_header_retry import retry_excluding_error_headers
 from .explicit_instantiation import (
     explicit_instantiation_facts,
@@ -665,6 +666,14 @@ class ClangBackend:
         parser.builtin_abi = probe_builtin_abi(
             str(clang_bin), tuple(r.gcc_option_tokens)
         )
+        if resolved_kind is None:
+            parser.enum_underlying_types = probe_enum_types(
+                r,
+                parser._enums,
+                clang_bin=clang_bin,
+                force_cpp=resolved_force_cpp,
+                run_ast=self.runner,
+            )
         if resolved_kind is None:  # a DPC++ dump keeps its facts unset
             parser.explicit_instantiations = _explicit_instantiation_facts(
                 r,

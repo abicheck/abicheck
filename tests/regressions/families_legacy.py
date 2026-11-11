@@ -71,7 +71,6 @@ LEGACY_UNATTACHED: frozenset[str] = frozenset(
         "evidence.richer_model_hides_weaker_observation",
         "evidence.silent_degradation_to_clean_verdict",
         "evidence.spelling_matcher_same_offset_underreport",
-        "evidence.spelling_used_as_a_semantic_model",
         "evidence.stored_snapshot_rederivation",
         "evidence.surface_membership_asymmetry",
         "extraction.ast_wrapper_chain_traversal",

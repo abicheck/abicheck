@@ -61,6 +61,7 @@ FAMILIES: dict[str, Family] = {
                 "tests/test_family_f1_evidence_ablation.py",
                 "tests/test_export_loss_binding_unit.py",
                 "tests/test_dwarf_unknown_triviality.py",
+                "tests/test_clang_type_evidence.py",
             ),
         ),
         Family(
@@ -105,7 +106,10 @@ FAMILIES: dict[str, Family] = {
                 "No finding's severity rests only on a name, suffix or directory "
                 "heuristic without a structural fact confirming or vetoing it."
             ),
-            harness_tests=("tests/test_family_f4_heuristics.py",),
+            harness_tests=(
+                "tests/test_family_f4_heuristics.py",
+                "tests/test_clang_type_evidence.py",
+            ),
             planned_reason="",
         ),
         Family(
@@ -681,7 +685,13 @@ for _key, _ids in (
     ("F5", _F5),
     # Found by the compatible-rebuild corpus sweep (F6's own harness lists
     # its integration matrix); an inferred observation gated as the fact.
-    ("F6", ("evidence.bound_read_as_measured_value",)),
+    (
+        "F6",
+        (
+            "evidence.bound_read_as_measured_value",
+            "ownership.std_customization_point_over_runtime_types_read_as_users",
+        ),
+    ),
     ("F7", _F7),
     ("F8", _F8),
     ("F9", _F9),
