@@ -553,6 +553,16 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "no rewrite is needed -- an older snapshot reads is_variadic as not "
         "recorded and simply lacks the added records and flags"
     ),
+    51: GenerationSpellingChange(
+        "every dump of a binary file records the SHA-256 of the binary's bytes "
+        "(the abicheck.binary_sha256 extension fact on the binary section, "
+        "hashed through a GNU ld linker script to its target like a live "
+        "operand), so the identical-input exemption can prove a stored dump and "
+        "a live binary one input. No type or name spelling changes, so no "
+        "rewrite is needed "
+        "-- an older snapshot reads as no recorded identity, which proves no "
+        "identical-input exemption"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

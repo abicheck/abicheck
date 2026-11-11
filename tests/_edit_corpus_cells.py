@@ -48,6 +48,7 @@ from tests._edit_corpus_toolchains import (
     capability_gap,
     consumer_unavailable,
     default_cxx11_abi,
+    elf_link_unavailable,
     execution_unavailable,
     unavailable,
     uses_libstdcxx,
@@ -249,7 +250,11 @@ def run_cell(op: EditOp, seed: Seed, config: Config, ctx: CellContext) -> CellRe
             "not-applicable",
             reason or "seed/language mismatch",
         )
-    reason = unavailable(config) or capability_gap(op, config)
+    reason = (
+        unavailable(config)
+        or elf_link_unavailable(seed, config)
+        or capability_gap(op, config)
+    )
     if reason is None and op.rebuild is not None:
         reason = unavailable(replace(config, flags=op.new_flags(config.flags)))
     if reason:

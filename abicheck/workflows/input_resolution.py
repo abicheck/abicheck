@@ -46,13 +46,14 @@ split.
 
 from __future__ import annotations
 
-import hashlib
 import importlib as _importlib
 import logging
 from typing import TYPE_CHECKING, Any
 
 from ..compile_context import CompileContext
 from ..errors import SnapshotError, ValidationError
+from ..extract.binary_identity import record_binary_sha256
+from ..extract.cache_input_digest import file_digest
 from ..extract.header_exclusions import (
     apply_header_exclusions_to_inputs,
     reject_exclusions_against_a_manifest,
@@ -411,6 +412,7 @@ def resolve_input(
 
     def _finish(snapshot: AbiSnapshot) -> AbiSnapshot:
         if extracted_now:  # ADR-075 D1: a loaded snapshot keeps its recorded scope
+            record_binary_sha256(snapshot, path)  # ADR-090 D1(c) identity
             snapshot = finish_snapshot(
                 snapshot,
                 SnapshotFinish(
@@ -736,25 +738,20 @@ def _resolve_input_impl(
 
 def collect_metadata(path: Path) -> LibraryMetadata | None:
     """Compute SHA-256 and file size for a library artifact, or ``None`` for a text-based snapshot/manifest (JSON, ``Module.symvers``) -- not a binary, so a same-binary comparison must never claim it."""
-    if path.is_dir():
+    if not path.is_file():
         # A storage-v2 `ProjectSnapshot` package dir (the one directory
         # `resolve_input` resolves rather than rejecting) is not a single
-        # hashable file -- the same "not a binary" no-op the text-format
-        # branches below already apply, without `read_bytes()` raising
-        # `IsADirectoryError` first. Both the CLI and the typed Python API
-        # reach this through `compare_classify._attach_pair_report_fields`
-        # (Codex review).
+        # hashable file, and a FIFO or /dev/fd operand has no stable bytes to
+        # hash (a shared non-regular marker would prove two different pipes
+        # one input): the same "not a binary" no-op as the text formats below.
+        # Both the CLI and the typed Python API reach this through
+        # `compare_classify._attach_pair_report_fields` (Codex review).
         return None
     text_fmt = sniff_text_format(path)
     if text_fmt in ("json", "symvers"):
         return None
-
-    data = path.read_bytes()
-    return LibraryMetadata(
-        path=str(path),
-        sha256=hashlib.sha256(data).hexdigest(),
-        size_bytes=len(data),
-    )
+    # The digest `extract.binary_identity` records for a dump, memoized.
+    return LibraryMetadata(str(path), file_digest(path), path.stat().st_size)
 
 
 def load_env_matrix(path: Path | None) -> EnvironmentMatrix | None:
