@@ -306,6 +306,80 @@ _DYNAMIC = (
         **_RISK,
         min_evidence="dwarf",
     ),
+    _op(
+        "relr_packed_relocs",
+        ("build.ldflags",),
+        _ld("-Wl,-z,pack-relative-relocs"),
+        "DT_RELR packs the relative relocations: a loader older than glibc "
+        "2.36 cannot apply them, so the library no longer loads there",
+        expected=frozenset({"DT_RELR_INTRODUCED"}),
+        # binutils < 2.38 warns "-z pack-relative-relocs ignored" and links
+        # without DT_RELR: probed, so such a host reads unavailable.
+        probe_flags=("-Wl,-z,pack-relative-relocs",),
+        **_RISK,
+        **_BINARY,
+    ),
+    _op(
+        "cet_disabled",
+        ("build.cflags",),
+        _cflags("-fstack-protector-strong -fcf-protection=none"),
+        "the IBT/SHSTK GNU properties go: a CET-enforcing process that loads "
+        "the library loses (or refuses) shadow-stack protection",
+        expected=frozenset({"CET_PROTECTION_WEAKENED"}),
+        # Only a toolchain that builds with CET by default (distribution gcc;
+        # upstream gcc and clang default to none) can lose it; the target
+        # must also know the flag (x86 only).
+        probe_flags=("-fcf-protection=none",),
+        default_macro=("__CET__", True),
+        **_RISK,
+        **_BINARY,
+    ),
+    _op(
+        "cet_enabled",
+        ("build.cflags",),
+        _cflags("-fstack-protector-strong -fcf-protection=full"),
+        "the IBT/SHSTK GNU properties appear: a hardening gain, nothing a "
+        "consumer can observe",
+        expected=frozenset({"CET_PROTECTION_IMPROVED"}),
+        # Only a toolchain whose default build has no CET can gain it.
+        probe_flags=("-fcf-protection=full",),
+        default_macro=("__CET__", False),
+        **_COMPAT_ONLY,
+        **_BINARY,
+    ),
+    _op(
+        "nodelete_flag",
+        ("build.ldflags",),
+        _ld("-Wl,-z,nodelete"),
+        "DF_1_NODELETE makes dlclose a no-op: a plugin host that unloads "
+        "and reloads the library keeps the old copy and its state",
+        expected=frozenset({"DYNAMIC_LOADING_FLAGS_CHANGED"}),
+        **_RISK,
+        **_BINARY,
+    ),
+    _op(
+        "no_common_spelled",
+        ("build.cflags",),
+        _cflags("-fstack-protector-strong -fno-common"),
+        "-fno-common is already the default (gcc 10+, clang 11+): the "
+        "recorded command line drifts, the code does not",
+        expected=frozenset({"TOOLCHAIN_FLAG_DRIFT"}),
+        rules=(
+            Rule(
+                lambda c: c.producer.family != "gcc",
+                {
+                    "expected": frozenset(),
+                    "verdict_min": "NO_CHANGE",
+                    "observable": False,
+                },
+                "clang records no -f switches in DW_AT_producer, and the "
+                "binary is identical",
+            ),
+        ),
+        verdict_min="COMPATIBLE",
+        verdict_max="COMPATIBLE",
+        min_evidence="dwarf",
+    ),
 )
 
 # --- binding, visibility, exported data -----------------------------------------

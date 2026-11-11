@@ -604,6 +604,63 @@ def default_cxx11_abi(tc: Toolchain) -> int | None:
     return None
 
 
+@functools.cache
+def rejects_flags(tc: Toolchain, flags: tuple[str, ...], bits: int = 64) -> bool:
+    """Whether *tc* cannot build a trivial C shared object with *flags*.
+
+    ``--fatal-warnings`` makes GNU ld's "-z X ignored" (an older binutils that
+    does not know the option) a refusal rather than a silent no-op.
+    """
+    if shutil.which(tc.cc) is None:
+        return True
+    width = ["-m32"] if bits == 32 else []
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            proc = subprocess.run(
+                [
+                    tc.cc,
+                    *width,
+                    "-x",
+                    "c",
+                    "-shared",
+                    "-fPIC",
+                    *flags,
+                    "-Wl,--fatal-warnings",
+                    "-o",
+                    os.path.join(tmp, "probe.so"),
+                    "-",
+                ],
+                input="int corpus_probe(int a) { return a + 1; }\n",
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=_PROBE_TIMEOUT,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return True
+    return proc.returncode != 0
+
+
+@functools.cache
+def predefines(tc: Toolchain, macro: str, bits: int = 64) -> bool:
+    """Whether *tc*'s C driver predefines *macro* under its default flags."""
+    if shutil.which(tc.cc) is None:
+        return False
+    width = ["-m32"] if bits == 32 else []
+    try:
+        proc = subprocess.run(
+            [tc.cc, *width, "-x", "c", "-dM", "-E", "-"],
+            input="",
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_PROBE_TIMEOUT,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return proc.returncode == 0 and f"#define {macro} " in proc.stdout
+
+
 def capability_gap(op: object, config: Config) -> str | None:
     """A host capability *op* needs that ``op.requires`` cannot see without probing.
 
@@ -611,6 +668,18 @@ def capability_gap(op: object, config: Config) -> str | None:
     """
     if getattr(op, "needs_libstdcxx", False) and not uses_libstdcxx(config.producer):
         return f"{config.producer.id}'s C++ standard library is not libstdc++"
+    probe = tuple(getattr(op, "probe_flags", ()))
+    if probe and rejects_flags(config.producer, probe, config.flags.bits):
+        return f"{config.producer.id} does not accept {' '.join(probe)} here"
+    default = getattr(op, "default_macro", None)
+    if default is not None:
+        macro, wanted = default
+        if predefines(config.producer, macro, config.flags.bits) != wanted:
+            state = "predefines" if not wanted else "does not predefine"
+            return (
+                f"{config.producer.id} {state} {macro} by default: the edit "
+                "leaves the binary as it was"
+            )
     for feature in getattr(op, "features", ()):
         if lacks_feature(config.producer, config.std, feature):
             return f"{config.producer.id} does not compile {feature} in -std={config.std.name}"

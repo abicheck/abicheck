@@ -48,6 +48,15 @@ class EditOp:
     # Needs the producer's C++ library to be libstdc++; probed at run time by
     # ``_edit_corpus_toolchains.capability_gap``, never at collection.
     needs_libstdcxx: bool = False
+    # Compile/link flags the edit adds that a toolchain or linker may refuse
+    # (a non-x86 target, an older binutils); probed at run time the same way,
+    # and a refusing host makes the cell unavailable, not a build failure.
+    probe_flags: tuple[str, ...] = ()
+    # (macro, predefined): the toolchain default the edit assumes, e.g.
+    # ("__CET__", True) for an edit that turns CET off. Probed at run time; a
+    # toolchain whose default differs leaves the binary unchanged, so the
+    # cell is unavailable rather than given a family-guessed expectation.
+    default_macro: tuple[str, bool] | None = None
     # The language-space constructs the edit exercises, when its roles do not
     # say it (``_edit_corpus_space.op_constructs``); empty = read the roles.
     constructs: tuple[str, ...] = ()
