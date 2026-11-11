@@ -96,13 +96,13 @@ section the document does not write (:func:`refuse_orphaned_header_extras`).
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from ..errors import IncompatibleSnapshotSchemaError, SnapshotError
 from .canonical import canonical_form
 from .dto import SECTION_SCHEMA_VERSIONS
-from .extension_fact_catalog import EXTENSION_FACTS
+from .extension_fact_catalog import EXTENSION_FACTS, evidence_header_extras
 from .wire_record_extensions import (
     RecordExtras,
     collect_record_extras,
@@ -199,20 +199,21 @@ class WireExtensions:
 
     def evidence_form(self) -> dict[str, Any]:
         """The canonical form the `evidence` digest hashes (D14: extensions
-        are inside the evidence and publication digests)."""
-        if self.is_empty():
+        are inside the evidence and publication digests; capture-only facts are not)."""
+        ext = replace(self, header_extras=evidence_header_extras(self.header_extras))
+        if ext.is_empty():
             return {}
         form: dict[str, Any] = canonical_form(
             {
-                "sections": self.passthrough_sections,
-                "versions": self.passthrough_versions,
-                "headers": self.header_extras,
+                "sections": ext.passthrough_sections,
+                "versions": ext.passthrough_versions,
+                "headers": ext.header_extras,
                 "records": {
                     f"{kind}/{key}": [list(item) for item in items]
-                    for (kind, key), items in self.record_extras.items()
+                    for (kind, key), items in ext.record_extras.items()
                 },
-                "availability": self.availability,
-                "must_understand": self.document_must_understand,
+                "availability": ext.availability,
+                "must_understand": ext.document_must_understand,
             }
         )
         return form

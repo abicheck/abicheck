@@ -303,7 +303,11 @@ def _attach_pair_report_fields(
 
         old_digest, new_digest = snapshot_identity_digests(old, new)
     note_if_same_binary_compared(
-        result, old_snapshot_digest=old_digest, new_snapshot_digest=new_digest
+        result,
+        old_snapshot_digest=old_digest,
+        new_snapshot_digest=new_digest,
+        old_binary_sha256=old.binary_sha256,
+        new_binary_sha256=new.binary_sha256,
     )
     # `requested_depth` (the G30 report-identity field `analysis_assurance`
     # gates `depth_satisfied` on): the resolved context's value only when it

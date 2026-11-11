@@ -638,9 +638,18 @@ def note_if_same_binary_compared(
     *,
     old_snapshot_digest: str | None = None,
     new_snapshot_digest: str | None = None,
+    old_binary_sha256: str | None = None,
+    new_binary_sha256: str | None = None,
 ) -> None:
     """Append an L0 coverage warning when *result*'s two compared binaries
     are byte-for-byte identical.
+
+    A side with no live operand is identified by *old_binary_sha256* /
+    *new_binary_sha256*: the hash its stored dump recorded
+    (``AbiSnapshot.binary_sha256``, ADR-090 D1(c)), so a stored dump and
+    the same binary read as one binary here exactly as they do for the
+    identical-pair exemption. Equal hashes fire the binary-level note;
+    anything else falls through to the rules below unchanged.
 
     A comparison against the identical file content necessarily reports
     ``NO_CHANGE`` (there is nothing to diff), and that is the *correct*
@@ -693,10 +702,12 @@ def note_if_same_binary_compared(
     field on the ADR-061 no-growth-baselined ``DiffResult``/``checker.py``.
     """
     old_meta, new_meta = result.old_metadata, result.new_metadata
-    if old_meta is not None and new_meta is not None:
-        if old_meta.sha256 != new_meta.sha256:
-            return
-        digest_prefix = old_meta.sha256[:12]
+    old_sha = old_meta.sha256 if old_meta is not None else old_binary_sha256
+    new_sha = new_meta.sha256 if new_meta is not None else new_binary_sha256
+    if old_meta is not None and new_meta is not None and old_sha != new_sha:
+        return
+    if old_sha and old_sha == new_sha:
+        digest_prefix = old_sha[:12]
         # The two *binaries* being byte-identical says nothing about whether
         # a real change could still be caught: a comparison that also
         # analyzed header/AST evidence (e.g. --old-header/--new-header,

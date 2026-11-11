@@ -32,6 +32,7 @@ from tests._edit_corpus_config import (
 )
 from tests._edit_corpus_expect import PASSING_CLASSES, ExecTruth, Expectation, PairTruth
 from tests._edit_corpus_operators import OP_BY_NAME, OPERATORS
+from tests._edit_corpus_opkit import SONAME_ADVISORY
 from tests._edit_corpus_seeds import SEED_BY_NAME, SEEDS
 from tests._edit_corpus_tiers import _PR
 
@@ -128,7 +129,7 @@ def test_every_scope_bucket_holds_some_kind_and_says_why() -> None:
 
 
 def _independent_declared() -> set[str]:
-    """Every kind any operator names, read off the dataclass fields directly."""
+    """Every kind any operator's edit names, read off the dataclass fields."""
     out: set[str] = set()
     for op in OPERATORS:
         out |= set(op.expected)
@@ -138,7 +139,48 @@ def _independent_declared() -> set[str]:
             out |= set(rule.changes.get("expected", frozenset()))  # type: ignore[arg-type]
             for g in rule.changes.get("any_of", ()):  # type: ignore[union-attr]
                 out |= g
-    return out
+    # Kinds owed by a verdict rather than an edit are not declared coverage;
+    # the hand-listed _SONAME_ADVISORY_ORACLE below pins which edits owe them.
+    return out - {SONAME_ADVISORY}
+
+
+# Hand-listed from what each edit does, not from the derivation's formula: a
+# binary break shipped under the same SONAME owes the release advisory; an
+# addition, a risk, a source-only break or an edit of the SONAME itself does
+# not; below the edit's evidence floor nothing is owed.
+_SONAME_ADVISORY_ORACLE = {
+    # op: (owed at binary evidence, owed at headers evidence)
+    "func_remove": (True, True),
+    "version_script_dropped": (True, True),
+    "symbol_moved_version_node": (True, True),
+    "struct_append_field": (False, True),  # a layout break: needs DWARF or headers
+    "enum_change_value": (False, True),
+    "func_add": (False, False),
+    "rebuild_optimized": (False, False),
+    "soname_changed": (False, False),
+    "soname_dropped": (False, False),
+    "char_made_unsigned": (False, False),  # a risk
+    "header_constant_changed": (False, False),  # a source-only break
+    "param_restrict_added": (False, False),
+}
+
+
+@pytest.mark.parametrize("op_name", sorted(_SONAME_ADVISORY_ORACLE))
+@pytest.mark.parametrize("evidence", ["binary", "headers"])
+@pytest.mark.parametrize(
+    "platform", [("linux", "elf"), ("darwin", "macho"), ("win32", "pe")], ids=str
+)
+def test_the_soname_advisory_is_owed_by_breaks_under_an_unchanged_soname(
+    op_name: str, evidence: str, platform: tuple[str, str]
+) -> None:
+    # Only ELF has a SONAME: a Mach-O or PE build owes no advisory (the
+    # macOS integration job read none for every BREAKING cell).
+    cfg = default_config("c", GCC).with_(evidence=evidence, platform=platform)
+    owed = SONAME_ADVISORY in OP_BY_NAME[op_name].expect(cfg).expected
+    want = (
+        _SONAME_ADVISORY_ORACLE[op_name][evidence == "headers"] and platform[1] == "elf"
+    )
+    assert owed is want
 
 
 def test_declared_kinds_match_an_independent_reading_of_the_operators() -> None:
@@ -492,6 +534,14 @@ def _year_oracle(construct: str, std: str) -> bool:
         "std_string": {"c++": 2011},
         "class_virtual": {"c++": 2011},
         "template": {"c++": 2011},
+        "class": {"c++": 2011},
+        "inheritance": {"c++": 2011},
+        "inline_namespace": {"c++": 2011},
+        "abi_tag": {"c++": 2011},
+        "hidden_friend": {"c++": 2011},
+        "restrict_pointer": {"c": 1999},
+        "flexible_array": {"c": 1999},
+        "atomic": {"c": 2011},
     }.get(construct, {"c": 1989, "c++": 2011})
     s = STANDARD_BY_NAME[std]
     return s.lang in first and s.year >= first[s.lang]
@@ -809,3 +859,52 @@ def test_a_pair_rule_makes_its_build_consumer_pairs_infeasible(
         space.infeasible(next(iter(removed)))
         == "test: libstdc++ build, libc++ consumer"
     )
+
+
+@pytest.mark.parametrize("seed_name", sorted(SEED_BY_NAME))
+@pytest.mark.parametrize(
+    "platform", [("linux", "elf"), ("darwin", "macho"), ("win32", "pe")], ids=str
+)
+def test_only_seeds_with_elf_link_roles_are_unavailable_off_elf(
+    seed_name: str, platform: tuple[str, str]
+) -> None:
+    # Apple's ld rejects --version-script, -z and --as-needed (the macOS
+    # integration job failed every c_elf cell at link time).
+    from tests._edit_corpus_cells import elf_link_unavailable
+
+    seed = SEED_BY_NAME[seed_name]
+    cfg = default_config(seed.lang, GCC).with_(platform=platform)
+    links_elf_only = any(
+        r in seed.roles for r in ("build.vscript", "build.ldflags", "build.soname")
+    )
+    gap = elf_link_unavailable(seed, cfg)
+    assert (gap is not None) is (links_elf_only and platform[1] != "elf"), gap
+
+
+def test_a_derived_kind_is_never_declared_coverage() -> None:
+    declared = cov.declared_kinds()
+    assert SONAME_ADVISORY not in declared
+    owing = {op.name for op in OPERATORS if SONAME_ADVISORY in cov.op_derived_kinds(op)}
+    listed = {name for name, (_, headers) in _SONAME_ADVISORY_ORACLE.items() if headers}
+    # Every hand-listed operator that owes the advisory is counted as owing it.
+    assert listed <= owing
+    rep = cov.report([])
+    assert rep["derived"][SONAME_ADVISORY] == len(owing)
+
+
+def test_a_passing_cell_reports_a_derived_kind_apart_from_coverage() -> None:
+    op = OP_BY_NAME["struct_append_field"]
+    cfg = default_config("c", GCC)
+    rec = cov.make_record(
+        "pr",
+        op,
+        "c_core",
+        cfg,
+        status="ran",
+        cls="agree",
+        verdict="BREAKING",
+        produced=set(op.expect(cfg).expected) | {SONAME_ADVISORY},
+    )
+    assert SONAME_ADVISORY not in rec.verified
+    assert rec.derived_verified == {SONAME_ADVISORY}
+    assert SONAME_ADVISORY not in rec.incidental

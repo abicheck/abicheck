@@ -20,102 +20,32 @@ texts and returns the roles it changes, as ``(header_text, source_text)``.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field, replace
+from collections.abc import Callable
 
-from tests._edit_corpus_config import Config, Flags, has_feature
-from tests._edit_corpus_expect import VERDICT_RANK, Expectation, Rule, evidence_floor
+from tests._edit_corpus_config import Config
+from tests._edit_corpus_expect import VERDICT_RANK, Rule
+from tests._edit_corpus_operators_cxx import CXX_OPERATORS
+from tests._edit_corpus_operators_elf import ELF_OPERATORS
+from tests._edit_corpus_opkit import (
+    _ALIGN,
+    _ENUM_SIZE,
+    _FIELD_TYPE,
+    _OFFSET,
+    _REMOVED,
+    _SIZE,
+    EditOp,
+    Roles,
+    _binary,
+    _binary_mangled,
+    _cxx_binary_else_dwarf,
+    _merge,
+    _no_edit,
+    _set,
+    _with,
+)
 from tests._edit_corpus_seeds import SEEDS, RoleText, Seed
 
-Roles = Mapping[str, RoleText]
-Edit = Callable[[Roles], dict[str, RoleText]]
-
 __all__ = ["OP_BY_NAME", "OPERATORS", "VERDICT_RANK", "EditOp", "applicable", "matrix"]
-
-
-def _no_edit(_: Roles) -> dict[str, RoleText]:
-    return {}
-
-
-@dataclass(frozen=True)
-class EditOp:
-    name: str
-    roles: tuple[str, ...]
-    edit: Edit
-    why: str
-    expected: frozenset[str] = frozenset()
-    any_of: tuple[frozenset[str], ...] = ()
-    verdict_min: str = "BREAKING"
-    verdict_max: str | None = None
-    # Roles this op re-spells; used only to check the edit actually changes text.
-    touches: tuple[str, ...] = field(default=())
-    # Weakest evidence that can show the edit: "binary" (exported symbols),
-    # "dwarf" (types of exported entities), "headers" (declarations only).
-    min_evidence: str | Callable[[Config], str] = "dwarf"
-    # Language features (``_edit_corpus_config.FEATURES``) the edit needs.
-    features: tuple[str, ...] = ()
-    # Config-dependent ground truth, first match wins.
-    rules: tuple[Rule, ...] = ()
-    # Extra applicability (None = applicable, else the reason it is not).
-    precondition: Callable[[Config], str | None] | None = None
-    # A rebuild edit: the new side is built with ``rebuild(flags)``.
-    rebuild: Callable[[Flags], Flags] | None = None
-    # Needs the producer's C++ library to be libstdc++; probed at run time by
-    # ``_edit_corpus_toolchains.capability_gap``, never at collection.
-    needs_libstdcxx: bool = False
-
-    def applies_to(self, seed: Seed) -> bool:
-        return all(r in seed.roles for r in self.roles)
-
-    def requires(self, config: Config) -> str | None:
-        for feat in self.features:
-            if not has_feature(config.std, feat):
-                return f"needs {feat}, which {config.std.name} lacks"
-        if self.precondition is not None:
-            return self.precondition(config)
-        return None
-
-    def base(self) -> Expectation:
-        return Expectation(
-            expected=self.expected,
-            any_of=self.any_of,
-            verdict_min=self.verdict_min,
-            verdict_max=self.verdict_max,
-        )
-
-    def expect(self, config: Config) -> Expectation:
-        exp = self.base()
-        floor = (
-            self.min_evidence(config)
-            if callable(self.min_evidence)
-            else self.min_evidence
-        )
-        for rule in self.rules:
-            if rule.when(config):
-                exp = rule.apply(exp)
-                floor = rule.min_evidence or floor
-                break
-        return evidence_floor(exp, config, floor)
-
-    def new_flags(self, flags: Flags) -> Flags:
-        return self.rebuild(flags) if self.rebuild else flags
-
-
-def _set(
-    roles: Roles, role: str, header: str | None = None, source: str | None = None
-) -> dict[str, RoleText]:
-    """Replace one role's header and/or source text, keeping the other side."""
-    old_h, old_c = roles[role]
-    return {
-        role: (old_h if header is None else header, old_c if source is None else source)
-    }
-
-
-def _merge(*parts: dict[str, RoleText]) -> dict[str, RoleText]:
-    out: dict[str, RoleText] = {}
-    for p in parts:
-        out.update(p)
-    return out
 
 
 # --- struct / layout -------------------------------------------------------
@@ -428,45 +358,7 @@ def _msvc_abi(c: Config) -> bool:
     return c.objfmt == "pe" and c.producer.family in ("msvc", "clang")
 
 
-def _with(**kw: object) -> Callable[[Flags], Flags]:
-    def rebuild(f: Flags) -> Flags:
-        return replace(f, **kw)  # type: ignore[arg-type]
-
-    return rebuild
-
-
-# Removal of an exported function; *_ELF_ONLY is its name when the only
-# evidence is the symbol table.
-_REMOVED = frozenset({"FUNC_REMOVED", "FUNC_REMOVED_ELF_ONLY"})
-_SIZE = frozenset({"TYPE_SIZE_CHANGED", "STRUCT_SIZE_CHANGED"})
-_ENUM_SIZE = frozenset(
-    {"TYPE_SIZE_CHANGED", "ENUM_UNDERLYING_SIZE_CHANGED", "ENUM_SIZE_FLAG_CHANGED"}
-)
-_OFFSET = frozenset({"STRUCT_FIELD_OFFSET_CHANGED", "TYPE_FIELD_OFFSET_CHANGED"})
-_ALIGN = frozenset({"STRUCT_ALIGNMENT_CHANGED", "TYPE_ALIGNMENT_CHANGED"})
-_FIELD_TYPE = frozenset({"STRUCT_FIELD_TYPE_CHANGED", "TYPE_FIELD_TYPE_CHANGED"})
-
-
-def _binary(c: Config) -> bool:
-    return c.evidence == "binary"
-
-
-def _binary_mangled(*kinds: str) -> Rule:
-    # From symbols alone the change shows as the old mangled name gone; a tool
-    # that demangles and pairs may name the specific change instead.
-    return Rule(
-        _binary,
-        {"expected": frozenset(), "any_of": (_REMOVED | frozenset(kinds),)},
-        "binary evidence sees the old mangled symbol disappear (or pairs it by demangled name)",
-    )
-
-
-def _cxx_binary_else_dwarf(c: Config) -> str:
-    # A C++ signature is in the mangled name; a C one is only in debug info.
-    return "binary" if c.lang == "c++" else "dwarf"
-
-
-OPERATORS: tuple[EditOp, ...] = (
+CORE_OPERATORS: tuple[EditOp, ...] = (
     # layout
     EditOp(
         "struct_append_field",
@@ -501,8 +393,29 @@ OPERATORS: tuple[EditOp, ...] = (
         "struct_field_widen",
         ("struct.point",),
         _struct_field_widen,
-        "int -> long long changes the member type and layout",
+        "int -> long long changes the member type and layout; on x86-64 the "
+        "struct's alignment rises from 4 to 8 (i386 aligns long long to 4 in a struct)",
         any_of=(frozenset({"STRUCT_FIELD_TYPE_CHANGED", "TYPE_FIELD_TYPE_CHANGED"}),),
+        rules=(
+            Rule(
+                # -fpack-struct=N caps every member's alignment at N, so the
+                # struct's alignment rises only when packing allows 8.
+                lambda c: (
+                    c.flags.bits == 64
+                    and c.evidence == "headers"
+                    and (c.flags.pack is None or c.flags.pack >= 8)
+                ),
+                {
+                    "any_of": (
+                        frozenset(
+                            {"STRUCT_FIELD_TYPE_CHANGED", "TYPE_FIELD_TYPE_CHANGED"}
+                        ),
+                        _ALIGN,
+                    )
+                },
+                "x86-64, unpacked: alignof(point) 4 -> 8, which the header layout records",
+            ),
+        ),
         touches=("struct.point",),
     ),
     EditOp(
@@ -971,6 +884,16 @@ OPERATORS: tuple[EditOp, ...] = (
                 "rec's double already sits at offset 4 (i386 aligns it to 4; an old side "
                 "packed to 2 or 4 caps it there): packing to 1 keeps every size and "
                 "offset and lowers only alignof",
+                # DWARF records no alignment for an unannotated record and the
+                # sizes and offsets it does record are unchanged: only the header
+                # dump (built with the same -fpack-struct) can show alignof drop.
+                min_evidence="headers",
+            ),
+            Rule(
+                lambda c: c.evidence == "headers",
+                {"any_of": (_SIZE | _OFFSET, _ALIGN)},
+                "x86-64, naturally aligned: alignof(rec) 8 -> 1 as well, which the "
+                "header layout records",
             ),
         ),
         precondition=_not_already("pack", 1),
@@ -1018,6 +941,9 @@ OPERATORS: tuple[EditOp, ...] = (
     ),
 )
 
+
+# Operators for the c_elf and cxx_more seeds live in their own modules.
+OPERATORS: tuple[EditOp, ...] = (*CORE_OPERATORS, *ELF_OPERATORS, *CXX_OPERATORS)
 
 OP_BY_NAME: dict[str, EditOp] = {op.name: op for op in OPERATORS}
 
