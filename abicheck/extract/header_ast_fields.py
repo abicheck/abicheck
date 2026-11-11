@@ -179,9 +179,13 @@ def parse_header_ast_fields(
     both slower and lossy.  Keep that established per-member binding path, and
     single-flight only the canonical ``SemanticIR`` derived from it.
     """
-    native = getattr(parser, "normalized_fields", None)
-    if isinstance(native, HeaderAstFields):
-        return native
+    # The native GCC parser carries fields it already normalized from the
+    # plugin's facts; no AST to re-walk. Matched by type, not by probing
+    # every parser for an attribute only that one provides.
+    from .headers.gcc.backend import NativeGccParser
+
+    if isinstance(parser, NativeGccParser):
+        return parser.normalized_fields
     legacy = _parse_header_ast_legacy(parser, producer)
     # The shared normalization is keyed on the parsed AST's identity. A
     # parser that does not expose its root cannot be keyed: every such

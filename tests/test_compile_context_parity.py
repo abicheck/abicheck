@@ -246,7 +246,7 @@ def test_buildconfig_rejects_bad_compile_frontend() -> None:
     from abicheck.buildsource.inline import BuildConfig
 
     with _pytest.raises(ValueError, match="compile.frontend"):
-        BuildConfig.from_dict({"compile": {"frontend": "gcc"}})
+        BuildConfig.from_dict({"compile": {"frontend": "edg"}})
 
 
 def test_buildconfig_accepts_hybrid_compile_frontend() -> None:
