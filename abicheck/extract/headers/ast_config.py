@@ -386,7 +386,7 @@ _CPP_EXTENSIONS = frozenset({".hpp", ".hxx", ".hh", ".h++", ".tpp"})
 # the C→C++ retry (G16/A3) is never triggered by it — a guarded ``extern "C"``
 # header that fails in C mode failed for a real reason, and retrying as C++ would
 # skip the ``#ifndef __cplusplus`` branches and mask that error (Codex review).
-_EXTERN_C_PATTERN = re.compile(rb'^\s*extern\s+"C"')
+_EXTERN_C_PATTERN = re.compile(rb'^(?!\s*#).*?\bextern\s+"C"')
 
 # Genuinely C++-only constructs: a *valid C* header cannot contain these, so they
 # are a reliable signal that ``--lang c`` was mis-specified and a C++ retry is the
