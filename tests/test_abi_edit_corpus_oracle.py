@@ -536,6 +536,8 @@ def test_pack_rebuild_alignment_only_needs_the_header_dump(
     clean = exp.problems("NO_CHANGE", frozenset())
     if observable:
         assert clean == [
+            # with_derived: an ELF break under an unchanged SONAME owes the advisory.
+            "missing expected kinds ['SONAME_BUMP_RECOMMENDED']",
             "none of ['STRUCT_ALIGNMENT_CHANGED', 'STRUCT_FIELD_OFFSET_CHANGED', "
             "'STRUCT_SIZE_CHANGED', 'TYPE_ALIGNMENT_CHANGED', "
             "'TYPE_FIELD_OFFSET_CHANGED', 'TYPE_SIZE_CHANGED'] reported",
