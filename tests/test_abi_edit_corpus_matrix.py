@@ -293,6 +293,28 @@ def test_no_unique_address_rule_names_the_msvc_abi_not_every_pe_target() -> None
     assert OP_BY_NAME["no_unique_address_added"].expect(mingw).verdict_min == "BREAKING"
 
 
+@pytest.mark.parametrize(
+    ("platform", "vtt_kinds", "export_kind"),
+    [
+        (("linux", "elf"), {"VTT_SLOT_COUNT_CHANGED"}, "FUNC_ADDED_ELF_ONLY"),
+        (("darwin", "macho"), set(), "FUNC_ADDED"),
+        (("win32", "pe"), set(), "FUNC_ADDED"),
+    ],
+)
+def test_elf_symbol_table_kinds_are_owed_only_on_elf(
+    platform: tuple[str, str], vtt_kinds: set[str], export_kind: str
+) -> None:
+    # VTT size and undeclared exports are read from the ELF symbol table; a
+    # Mach-O or PE build still owes the verdict, not the ELF-only kind.
+    config = _cfg("c++", platform=platform, producer=CLANG)
+    vtt = OP_BY_NAME["vtt_grew"].expect(config)
+    assert vtt.expected - {"SONAME_BUMP_RECOMMENDED"} == vtt_kinds
+    assert vtt.verdict_min == "BREAKING"
+    export = OP_BY_NAME["source_only_export_added"].expect(config)
+    assert export.expected == {export_kind}
+    assert export.verdict_min == export.verdict_max == "COMPATIBLE"
+
+
 def test_a_rebuild_row_with_its_target_flag_already_set_is_repaired_not_dropped() -> (
     None
 ):

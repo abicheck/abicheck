@@ -649,6 +649,15 @@ _SHAPES = (
         "a second virtual base adds construction-vtable entries to VB2's VTT and "
         "moves VB2's subobjects: binaries built against the old layout break",
         expected=frozenset({"VTT_SLOT_COUNT_CHANGED"}),
+        rules=(
+            Rule(
+                lambda c: c.objfmt != "elf",
+                {"expected": frozenset()},
+                "the VTT's slot count is read from the size of its _ZTT symbol in "
+                "the ELF symbol table (diff_elf_layout); off ELF the layout break "
+                "is owed only as BREAKING",
+            ),
+        ),
         **_BINARY,
     ),
     _op(
@@ -707,9 +716,10 @@ _SHAPES = (
                 "stays local, so the binary's export table does not change",
             ),
             Rule(
-                lambda c: c.evidence in ("binary", "dwarf"),
+                lambda c: c.evidence in ("binary", "dwarf") or c.objfmt != "elf",
                 {"expected": frozenset({"FUNC_ADDED"})},
-                "without a header to miss it from, the export is an ordinary addition",
+                "without a header to miss it from, or off ELF (the undeclared-export "
+                "check reads the ELF export table), the export is an ordinary addition",
             ),
         ),
         **_COMPAT_ONLY,
