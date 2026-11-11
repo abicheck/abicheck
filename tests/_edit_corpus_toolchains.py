@@ -775,7 +775,18 @@ def header_backend_unavailable(backend: str, lang: str) -> str | None:
     ``python -m abicheck.extract.headers.gcc.build --compiler g++``, or
     ``ABICHECK_GCC_PLUGIN``); the clang backend needs a clang driver. A
     missing one makes the cell unavailable, never a pass.
+
+    Only castxml runs off Linux ELF: the native gcc backend is ELF-only
+    (ADR-092), and the clang backend's corpus ground truth has been checked
+    on ELF alone (on a Windows host it reads a -fshort-enums rebuild as
+    NO_CHANGE). A PE or Mach-O host reports those cells unavailable rather
+    than judging them against unverified expectations.
     """
+    if backend != "castxml" and host_platform()[1] != "elf":
+        return (
+            f"{backend} header backend: the corpus's header-backend axis is "
+            f"validated on Linux ELF only (host is {host_platform()})"
+        )
     if backend == "gcc":
         from abicheck.errors import SnapshotError
         from abicheck.extract.headers.gcc.discovery import find_plugin

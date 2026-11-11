@@ -954,3 +954,38 @@ def test_the_layout_probe_names_every_data_member(
     from tests._edit_corpus_exec import _field_names
 
     assert _field_names(f" {member}; ") == names
+
+
+@pytest.mark.parametrize(
+    ("platform", "backend", "gated"),
+    [
+        (("linux", "elf"), "clang", False),
+        (("win32", "pe"), "clang", True),
+        (("darwin", "macho"), "gcc", True),
+        (("win32", "pe"), "castxml", False),
+        (("darwin", "macho"), "castxml", False),
+    ],
+)
+def test_non_reference_header_backends_run_on_linux_elf_only(
+    monkeypatch: pytest.MonkeyPatch,
+    platform: tuple[str, str],
+    backend: str,
+    gated: bool,
+) -> None:
+    # castxml is the reference everywhere; clang and gcc are judged against
+    # corpus ground truth checked on ELF alone, so elsewhere they read
+    # unavailable instead of failing on unverified expectations.
+    tcs.header_backend_unavailable.cache_clear()
+    monkeypatch.setattr(tcs, "host_platform", lambda: platform)
+    monkeypatch.setattr(tcs.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(
+        "abicheck.extract.headers.gcc.discovery.find_plugin",
+        lambda driver, lang: "/x/plugin.so",
+    )
+    try:
+        reason = tcs.header_backend_unavailable(backend, "c")
+    finally:
+        tcs.header_backend_unavailable.cache_clear()
+    assert (reason is not None and "Linux ELF only" in reason) is gated
+    if not gated:
+        assert reason is None
