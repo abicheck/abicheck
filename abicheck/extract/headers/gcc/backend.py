@@ -12,14 +12,14 @@ from typing import Any
 from ...._compiler_options import split_command_line
 from ....errors import SnapshotError
 from ....model import Fact
-from ...header_ast_fields import HeaderAstFields
+from ...header_ast_fields import HeaderAstFields, PrenormalizedHeaderAst
 from ..backend_protocol import HeaderParseRequest
 from .acquisition import acquire
 from .discovery import find_plugin, resolve_compiler
 from .projection import project
 
 
-class NativeGccParser:
+class NativeGccParser(PrenormalizedHeaderAst):
     """A normalized native result; no Clang AST/XML or synthetic AST nodes."""
 
     def __init__(self, fields: HeaderAstFields, metadata: dict[str, str]) -> None:

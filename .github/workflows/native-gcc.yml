@@ -6,6 +6,7 @@ on:
       - 'tests/test_native_gcc*'
       - 'pyproject.toml'
       - '.github/workflows/native-gcc.yml'
+      - '.github/actions/install-system-deps/**'
   workflow_dispatch:
 permissions:
   contents: read
