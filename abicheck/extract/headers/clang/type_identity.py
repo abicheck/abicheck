@@ -65,6 +65,10 @@ class TypeIdentityIndex:
         self.memo: dict[tuple[str, tuple[str, ...]], Fact[tuple[str, ...]]] = {}
 
     def _namespaces(self, node: dict[str, Any], scope: tuple[str, ...]) -> None:
+        # Same shape contract as the parser's own walk (dumper_clang._walk):
+        # a non-object node holds no declaration to index.
+        if not isinstance(node, dict):
+            return
         if node.get("kind") == "NamespaceDecl" and node.get("name"):
             scope = (*scope, node["name"])
             self.namespace_ids[node.get("id", "")] = "::".join(scope)
@@ -76,6 +80,10 @@ class TypeIdentityIndex:
                 self._namespaces(child, scope)
 
     def _usings(self, node: dict[str, Any], scope: tuple[str, ...]) -> None:
+        # Same shape contract as the parser's own walk (dumper_clang._walk):
+        # a non-object node holds no declaration to index.
+        if not isinstance(node, dict):
+            return
         if node.get("kind") == "NamespaceDecl" and node.get("name"):
             scope = (*scope, node["name"])
         if node.get("kind") == "UsingDirectiveDecl":
