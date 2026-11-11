@@ -64,15 +64,16 @@ def pinned_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 #: spelling, entries validated by a dependency manifest, ADR-062 D11); and for
 #: 38 -> 39 (unknown triviality of a declaration-only DWARF aggregate); and for
 #: 39 -> 40 (per-unit stack-protector census, DWARF variable alignment); and
-#: 40 -> 41 (DWARF-only export records, is_variadic, char signedness flags).
-GOLDEN_BINARY_ONLY = "94c63876cf4e63450745eeaba03fa9e79e5b7ea933ef15600d72bdc175ed881b"
+#: 40 -> 41 (DWARF-only export records, is_variadic, char signedness flags); and
+#: for 41 -> 45 (a dump records its binary's SHA-256).
+GOLDEN_BINARY_ONLY = "b53bd49c274689cc37b0173a59aaf3eb6d8d42dd6c946cd32b4fa27d1e651632"
 
 #: Every named input at once, so a change to any one of them shows here.
 #: Re-pinned when the derivation became content-only (ADR-062 D11: no mtime,
 #: every file under an include root whatever its suffix, a file include hashed
 #: as itself) -- a deliberate re-key of every header-bearing entry; and for
-#: ``_SNAPSHOT_CACHE_VERSION`` 37 -> 38, 38 -> 39, 39 -> 40 and 40 -> 41.
-GOLDEN_FULL = "bb1f848fe8cf90aea78ebf21c17b4cc93cd319f1264615576c6727d0ef898b5d"
+#: ``_SNAPSHOT_CACHE_VERSION`` 37 -> 38, 38 -> 39, 39 -> 40, 40 -> 41 and 41 -> 45.
+GOLDEN_FULL = "a3f3d1acc8766eeaeba4b5308401c44cd7b2a175bd339bc4788847669cbde4ff"
 
 
 def test_binary_only_key_is_pinned(pinned_inputs: Path) -> None:
