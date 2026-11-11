@@ -243,6 +243,8 @@ def project(
                 is_final=r.get("final"),
                 is_abstract=r.get("abstract"),
                 is_template_pattern=dependent,
+                # A declared-only record (`struct ctx;`): castxml's `incomplete`.
+                is_opaque=r.get("complete") is False and not dependent,
                 deprecated_fact=Fact.present(r.get("deprecated")),
                 fields=fields,
                 source_location=src,

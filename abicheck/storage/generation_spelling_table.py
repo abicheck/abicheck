@@ -548,6 +548,15 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "changes and no rewrite is needed -- an older gcc snapshot read "
         "every C++ parameter as unrestricted"
     ),
+    59: GenerationSpellingChange(
+        "the native gcc header backend spells C types as C does "
+        "(_Atomic(T), [] for an unknown bound or flexible array member, [0] "
+        "for a zero-length array, where it wrote atomic T, [0:] and "
+        "[<unknown>]), reads an array object's const/volatile from its "
+        "element type, and records a declared-only record as opaque (plugin "
+        "protocol schema 6); an older gcc snapshot's C spellings differ, "
+        "which only matters gcc-to-gcc and is not rewritten"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

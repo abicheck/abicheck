@@ -187,7 +187,6 @@
     "symbol_binding_became_unique",
     "symbol_leaked_from_dependency_changed",
     "symbol_renamed_batch",
-    "symbol_size_changed_const_object",
     "symbol_size_changed_internal",
     "symbol_type_changed",
     "symbol_version_defined_removed",

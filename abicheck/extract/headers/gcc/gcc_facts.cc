@@ -24,9 +24,35 @@ static std::string q(const char *p) {
     default:if(c<32){char b[8];snprintf(b,sizeof(b),"\\u%04x",c);s+=b;}else s+=c;}
   } return s+"\"";
 }
+#ifndef GCC_CPP
+// One array extent as C spells it: [] for an unknown bound (a flexible array
+// member, an incomplete array), [N] for a constant one -- [0] included, whose
+// domain GCC records as [0, -1]. print_generic_expr writes [0:] and
+// [<unknown>] instead.
+static std::string extent(tree a) {
+  tree dom=TYPE_DOMAIN(a);
+  if(dom&&TYPE_SIZE(a)&&integer_zerop(TYPE_SIZE(a)))return "[0]";
+  if(!dom||!TYPE_MAX_VALUE(dom))return "[]";
+  tree max=TYPE_MAX_VALUE(dom);
+  if(TREE_CODE(max)!=INTEGER_CST)return "[]";
+  if(tree_int_cst_sgn(max)<0)return "[0]";
+  if(!tree_fits_shwi_p(max))return "[]";
+  return "["+std::to_string(tree_to_shwi(max)+1)+"]";
+}
+#endif
 static std::string spelled(tree t) {
 #ifdef GCC_CPP
   if(TYPE_P(t)) return type_as_string(t,TFF_SCOPE | TFF_NO_OMIT_DEFAULT_TEMPLATE_ARGUMENTS);
+#else
+  // The C front end has no type printer of its own; print_generic_expr spells
+  // _Atomic as "atomic" and array extents in its tree form.
+  if(TYPE_P(t) && TREE_CODE(t)==ARRAY_TYPE) {
+    std::string dims;tree e=t;
+    for(;TREE_CODE(e)==ARRAY_TYPE;e=TREE_TYPE(e))dims+=extent(e);
+    return spelled(e)+dims;
+  }
+  if(TYPE_P(t) && TYPE_ATOMIC(t))
+    return "_Atomic("+spelled(build_qualified_type(t,TYPE_QUALS(t)&~TYPE_QUAL_ATOMIC))+")";
 #endif
   char *buf=nullptr; size_t n=0; FILE *f=open_memstream(&buf,&n);
   print_generic_expr(f,t,TDF_NONE); fclose(f); std::string s(buf,n);free(buf);return s;
@@ -183,7 +209,7 @@ static void decl(void *data,void *) {
     tree asmname=DECL_ASSEMBLER_NAME(d);if(asmname)fprintf(out,",\"mangled\":%s",q(IDENTIFIER_POINTER(asmname)).c_str());
   }
 #endif
-  if(code==VAR_DECL) { abi("abi",TREE_TYPE(d)); fprintf(out,",\"const\":%s,\"volatile\":%s,\"tls\":%s",TYPE_READONLY(TREE_TYPE(d))?"true":"false",TYPE_VOLATILE(TREE_TYPE(d))?"true":"false",DECL_THREAD_LOCAL_P(d)?"true":"false"); fprintf(out,",\"size_bits\":%s,\"alignment_bits\":%u",number(DECL_SIZE(d)).c_str(),DECL_ALIGN(d)); fprintf(out,",\"value\":%s",number(DECL_INITIAL(d)).c_str());
+  if(code==VAR_DECL) { abi("abi",TREE_TYPE(d)); tree object=strip_array_types(TREE_TYPE(d)); fprintf(out,",\"const\":%s,\"volatile\":%s,\"tls\":%s",TYPE_READONLY(object)?"true":"false",TYPE_VOLATILE(object)?"true":"false",DECL_THREAD_LOCAL_P(d)?"true":"false"); fprintf(out,",\"size_bits\":%s,\"alignment_bits\":%u",number(DECL_SIZE(d)).c_str(),DECL_ALIGN(d)); fprintf(out,",\"value\":%s",number(DECL_INITIAL(d)).c_str());
     tree init=DECL_INITIAL(d);fprintf(out,",\"value_expression\":%s",init && (TREE_CODE(init)==INTEGER_CST || TREE_CODE(init)==REAL_CST || TREE_CODE(init)==STRING_CST)?q(spelled(init).c_str()).c_str():"null");
   }
   fprintf(out,"}\n");
@@ -208,6 +234,7 @@ static void type(void *data,void *) {
   if(!RECORD_OR_UNION_TYPE_P(t)&&code!=ENUMERAL_TYPE)return;
   fprintf(out,"{\"kind\":%s,\"name\":%s,\"size_bits\":%s,\"alignment_bits\":%u",
    q(get_tree_code_name(code)).c_str(),q(spelled(t).c_str()).c_str(),number(TYPE_SIZE(t)).c_str(),TYPE_ALIGN(t));
+  fprintf(out,",\"complete\":%s",COMPLETE_TYPE_P(t)?"true":"false");
   scope(TYPE_CONTEXT(t));
   tree type_name=TYPE_NAME(t);fprintf(out,",\"anonymous\":%s",!type_name || (DECL_P(type_name) && !DECL_NAME(type_name))?"true":"false");
   fprintf(out,",\"type_uid\":%u,\"leaf_name\":%s",TYPE_UID(t),q(leaf(t).c_str()).c_str());
@@ -351,7 +378,7 @@ int plugin_init(struct plugin_name_args *args,struct plugin_gcc_version *v) {
   if(!plugin_default_version_check(v,&gcc_version))return 1;
   const char *path=nullptr;for(int i=0;i<args->argc;i++)if(!strcmp(args->argv[i].key,"output"))path=args->argv[i].value;
   if(!path)return 1;out=fopen(path,"w");if(!out)return 1;
-  fprintf(out,"{\"kind\":\"compiler\",\"version\":%s,\"schema\":5,\"pointer_bits\":%d,\"char_bits\":%d}\n",q(v->basever).c_str(),POINTER_SIZE,BITS_PER_UNIT);
+  fprintf(out,"{\"kind\":\"compiler\",\"version\":%s,\"schema\":6,\"pointer_bits\":%d,\"char_bits\":%d}\n",q(v->basever).c_str(),POINTER_SIZE,BITS_PER_UNIT);
 #ifndef GCC_CPP
   register_callback(args->base_name,PLUGIN_FINISH_TYPE,type,nullptr);
   register_callback(args->base_name,PLUGIN_FINISH_DECL,decl,nullptr);
