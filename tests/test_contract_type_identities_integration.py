@@ -38,6 +38,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -52,6 +53,23 @@ pytestmark = [
     ),
 ]
 
+
+@pytest.fixture(params=["castxml", "clang"], autouse=True)
+def selected_backend(request, monkeypatch):
+    monkeypatch.setenv("ABICHECK_AST_FRONTEND", request.param)
+
+
+#: ``-g0`` is the L2 path the user relies on most: public headers plus a
+#: binary with no debug info, so every record layout comes from the header
+#: backend itself (on Mach-O, ``-g`` leaves DWARF in the objects, so the
+#: dylib is this case too). A clang layout pass that re-derived C from the
+#: ``.h`` suffix instead of following the primary parse's C++ decision
+#: dumped nothing there, and the reached record's break read exit 0.
+@pytest.fixture(params=["-g", "-g0"], autouse=True)
+def debug_flag(request):
+    return request.param
+
+
 _API_H = """#include "../priv/private.h"
 using namespace ns1;
 Cache *api();
@@ -63,7 +81,7 @@ namespace ns2 { void touch(Cache *) {} }
 """
 
 
-def _build(root: Path, ns1_extra: str, ns2_extra: str) -> Path:
+def _build(root: Path, ns1_extra: str, ns2_extra: str, debug: str) -> Path:
     (root / "inc").mkdir(parents=True)
     (root / "priv").mkdir()
     (root / "priv" / "private.h").write_text(
@@ -77,7 +95,7 @@ def _build(root: Path, ns1_extra: str, ns2_extra: str) -> Path:
         "g++",
         "-shared",
         "-fPIC",
-        "-g",
+        debug,
         f"-I{root}",
         str(root / "a.cpp"),
         "-o",
@@ -93,15 +111,27 @@ def _build(root: Path, ns1_extra: str, ns2_extra: str) -> Path:
     return lib
 
 
-def _run_compare(tmp_path: Path, grown: str, *, operand: str) -> tuple[int, dict]:
+#: ``long long``, not ``long``: on an LLP64 target (Windows) ``long`` is 4
+#: bytes, so ``int; long`` would change only the size -- and a pointer-only
+#: ``Cache`` (no implicit special members on clang, unlike castxml) has its
+#: size change lowered by the case62 opaque-handle rule, leaving nothing that
+#: gates. ``long long`` raises size *and* alignment on LP64 and LLP64 alike,
+#: so the record's break is observable on every platform this test runs on.
+_GROWTH = "long long x;"
+
+
+def _run_compare(
+    tmp_path: Path, grown: str, *, operand: str, debug: str
+) -> tuple[int, dict]:
     """``compare --contract public`` of v1 against a v2 where *grown*'s
     ``Cache`` gained a field; *operand* is ``file`` (one library) or ``dir``
     (the release fan-out over a directory of one)."""
-    old = _build(tmp_path / "v1", "", "")
+    old = _build(tmp_path / "v1", "", "", debug)
     new = _build(
         tmp_path / "v2",
-        "long x;" if grown == "ns1" else "",
-        "long x;" if grown == "ns2" else "",
+        _GROWTH if grown == "ns1" else "",
+        _GROWTH if grown == "ns2" else "",
+        debug,
     )
     if operand == "dir":
         for side, lib in (("d1", old), ("d2", new)):
@@ -137,26 +167,60 @@ def _run_compare(tmp_path: Path, grown: str, *, operand: str) -> tuple[int, dict
     return proc.returncode, json.loads(report.read_text())
 
 
-def _size_change_relevance(tmp_path: Path, grown: str) -> tuple[int, str | None]:
-    code, doc = _run_compare(tmp_path, grown, operand="file")
-    (size,) = [c for c in doc["changes"] if c["kind"] == "type_size_changed"]
-    return code, size.get("contract_relevance")
+#: The record-layout findings a grown ``Cache`` can produce. Which of them
+#: survive is evidence-dependent, not what this file tests: castxml adds
+#: implicit special members taking ``const Cache&``, so its ``Cache`` reads
+#: as used by value; clang records none, ``Cache`` is reached only through
+#: the ``Cache *api()`` factory, and the case62 opaque-handle rule
+#: (``diff_filtering._filter_opaque_size_changes``) lowers the size change
+#: while the alignment change remains.
+_LAYOUT_KINDS = frozenset(
+    {
+        "type_size_changed",
+        "struct_size_changed",
+        "type_alignment_changed",
+        "struct_alignment_changed",
+    }
+)
 
 
-def test_the_reached_records_break_is_in_contract_and_gates(tmp_path: Path) -> None:
-    code, relevance = _size_change_relevance(tmp_path, "ns1")
-    assert relevance == "IN_CONTRACT"
+def _layout_relevances(
+    tmp_path: Path, grown: str, debug: str
+) -> tuple[int, list[str | None]]:
+    code, doc = _run_compare(tmp_path, grown, operand="file", debug=debug)
+    record = f"{grown}::Cache"
+    relevances = [
+        c.get("contract_relevance")
+        for c in doc["changes"]
+        if c["kind"] in _LAYOUT_KINDS
+        and record in (c.get("symbol"), c.get("qualified_name"))
+    ]
+    # Never vacuous: the grown record's layout change must be observed
+    # (on both backends, with and without DWARF) before its relevance means
+    # anything.
+    assert relevances, [(c["kind"], c.get("symbol")) for c in doc["changes"]]
+    return code, relevances
+
+
+def test_the_reached_records_break_is_in_contract_and_gates(
+    tmp_path: Path, debug_flag: str
+) -> None:
+    code, relevances = _layout_relevances(tmp_path, "ns1", debug_flag)
+    assert set(relevances) == {"IN_CONTRACT"}
     assert code == 4
 
 
-def test_the_unreached_siblings_break_is_not_confirmed(tmp_path: Path) -> None:
-    _code, relevance = _size_change_relevance(tmp_path, "ns2")
-    assert relevance != "IN_CONTRACT"
+def test_the_unreached_siblings_break_is_not_confirmed(
+    tmp_path: Path, debug_flag: str
+) -> None:
+    code, relevances = _layout_relevances(tmp_path, "ns2", debug_flag)
+    assert "IN_CONTRACT" not in relevances
+    assert code != 4
 
 
 @pytest.mark.parametrize("grown", ["ns1", "ns2"])
 def test_the_directory_fan_out_agrees_with_the_single_pair(
-    tmp_path: Path, grown: str
+    tmp_path: Path, grown: str, debug_flag: str
 ) -> None:
     # The package lane: one library per directory must reach the decision a
     # single-pair compare of that library does (cardinality invariance).
@@ -164,8 +228,12 @@ def test_the_directory_fan_out_agrees_with_the_single_pair(
     # fixed verdict: Mach-O adds its own risk findings (macOS reports the
     # unreached case as COMPATIBLE_WITH_RISK, Linux as NO_CHANGE), which is
     # not what this test is about.
-    pair_code, pair = _run_compare(tmp_path / "pair", grown, operand="file")
-    dir_code, release = _run_compare(tmp_path / "dir", grown, operand="dir")
+    pair_code, pair = _run_compare(
+        tmp_path / "pair", grown, operand="file", debug=debug_flag
+    )
+    dir_code, release = _run_compare(
+        tmp_path / "dir", grown, operand="dir", debug=debug_flag
+    )
     assert release["verdict"] == pair["verdict"]
     assert dir_code == pair_code
     if grown == "ns1":
@@ -176,3 +244,26 @@ def test_the_directory_fan_out_agrees_with_the_single_pair(
         # floor, whatever risk findings the platform adds.
         assert dir_code != 4
         assert release["verdict"] != "BREAKING"
+
+
+@pytest.mark.known_gap_canary
+def test_canary_opaque_handle_size_lowering_depends_on_frontend(
+    tmp_path: Path, selected_backend: None, debug_flag: str, monkeypatch
+) -> None:
+    """Known gap (docs/contribute/known-gaps.md, "Opaque-handle size lowering
+    depends on the header frontend"): a size-only growth of the pointer-only
+    ``ns1::Cache`` gates on castxml (its implicit members read as a by-value
+    use) but is lowered on clang without DWARF. Fails -- and the gap entry
+    should be closed -- once both frontends agree."""
+    if not sys.platform.startswith("linux"):
+        pytest.skip("pinned where the divergence was measured (Linux ELF)")
+    if debug_flag != "-g0":
+        pytest.skip("the divergence needs a header-only layout (no DWARF)")
+    monkeypatch.setattr(sys.modules[__name__], "_GROWTH", "int x;")
+    codes = {}
+    for frontend in ("castxml", "clang"):
+        monkeypatch.setenv("ABICHECK_AST_FRONTEND", frontend)
+        codes[frontend], _ = _run_compare(
+            tmp_path / frontend, "ns1", operand="file", debug=debug_flag
+        )
+    assert codes == {"castxml": 4, "clang": 0}
