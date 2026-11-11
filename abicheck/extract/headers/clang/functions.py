@@ -398,7 +398,7 @@ def parse_functions(
     function_constraints: FunctionConstraintIndex | None = None,
     builtin_abi: BuiltinAbi | None = None,
     type_identities: TypeIdentityIndex | None = None,
-    typedef_abi_facts: Mapping[str, Fact[AbiFundamental]] | None = None,
+    typedef_abi_facts: Mapping[str, Fact[AbiFundamental] | None] | None = None,
 ) -> list[Function]:
     funcs: list[Function] = []
     source_cache: dict[str, bytes | None] = {}

@@ -58,6 +58,7 @@ class Cell:
     expected: frozenset[str]
     forbidden: frozenset[str]
     verdict: str
+    new_source: str | None = None  # when the edit is in the definitions
 
 
 CELLS = (
@@ -92,6 +93,22 @@ CELLS = (
         "API_BREAK",
     ),
     Cell(
+        # The nearest typedef names a record; a same-named outer typedef of
+        # int must not lend it int's ABI fact, or the real return change
+        # below would read as ABI-equivalent.
+        "shadowed_typedef_return_retyped_cxx",
+        "c++",
+        "typedef int handle_t;\n"
+        "namespace lib { struct H { long a; long b; }; typedef H handle_t;\n"
+        "  handle_t make(int n); }\n",
+        "typedef int handle_t;\nnamespace lib { int make(int n); }\n",
+        "namespace lib { H make(int n) { H h = {n, n}; return h; } }\n",
+        frozenset({"func_return_changed"}),
+        frozenset({"abi_equivalent_type_changed"}),
+        "BREAKING",
+        new_source="namespace lib { int make(int n) { return n; } }\n",
+    ),
+    Cell(
         "namespaced_typedef_return_removed_cxx",
         "c++",
         "namespace lib { typedef long handle_t; handle_t make(int n); }\n",
@@ -104,12 +121,19 @@ CELLS = (
 )
 
 
-def _dump(work: Path, backend: str, side: str, cell: Cell, header_text: str) -> Path:
+def _dump(
+    work: Path,
+    backend: str,
+    side: str,
+    cell: Cell,
+    header_text: str,
+    source_text: str,
+) -> Path:
     ext, src_ext, cc = ("h", "c", "gcc") if cell.lang == "c" else ("hpp", "cpp", "g++")
     header = work / f"{side}.{ext}"
     header.write_text(header_text)
     source = work / f"{side}.{src_ext}"
-    source.write_text(f'#include "{header.name}"\n{cell.source}')
+    source.write_text(f'#include "{header.name}"\n{source_text}')
     # One library name for both sides: the default Mach-O install name is the
     # output path, so give it (and the ELF SONAME) explicitly.
     (work / side).mkdir(exist_ok=True)
@@ -150,8 +174,12 @@ def test_header_backend_reports_the_declared_change(
 ) -> None:
     if not shutil.which(_TOOL[backend]):
         pytest.skip(f"{backend} not installed")
-    old = _dump(tmp_path, backend, "old", cell, cell.old_header)
-    new = _dump(tmp_path, backend, "new", cell, cell.new_header)
+    compiler = "gcc" if cell.lang == "c" else "g++"
+    if not shutil.which(compiler):
+        pytest.skip(f"{compiler} not installed")
+    old = _dump(tmp_path, backend, "old", cell, cell.old_header, cell.source)
+    new_source = cell.new_source if cell.new_source is not None else cell.source
+    new = _dump(tmp_path, backend, "new", cell, cell.new_header, new_source)
     assert load_snapshot(old).ast_producer == backend
     report = tmp_path / "report.json"
     result = subprocess.run(

@@ -443,15 +443,18 @@ def typedef_return_fact(
     builtin: Fact[AbiFundamental] | None,
     spelling: str,
     scope: Sequence[str],
-    typedef_abi_facts: Mapping[str, Fact[AbiFundamental]] | None,
+    typedef_abi_facts: Mapping[str, Fact[AbiFundamental] | None] | None,
 ) -> Fact[AbiFundamental] | None:
     """The ABI fact of a return type spelled through a typedef.
 
     Clang's JSON gives a parameter its own ``desugaredQualType``, but the
     function's type (``count_t (count_t)``) is not itself sugar and carries
     none, so a typedef'd return type has no builtin spelling to read. Look
-    the written name up among the TU's typedef facts instead, innermost
-    enclosing scope first, as name lookup would.
+    the written name up among the TU's typedefs instead, innermost
+    enclosing scope first, as name lookup would. *typedef_abi_facts* names
+    every declared typedef, ``None`` for one whose target has no fact (a
+    record, say): the nearest declaration decides, so an outer same-named
+    typedef of a builtin is never borrowed for it.
     """
     if builtin is not None or not typedef_abi_facts:
         return builtin
@@ -459,7 +462,7 @@ def typedef_return_fact(
     if name.startswith("::"):
         return typedef_abi_facts.get(name[2:])
     for depth in range(len(scope), -1, -1):
-        fact = typedef_abi_facts.get("::".join((*scope[:depth], name)))
-        if fact is not None:
-            return fact
+        key = "::".join((*scope[:depth], name))
+        if key in typedef_abi_facts:
+            return typedef_abi_facts[key]
     return None

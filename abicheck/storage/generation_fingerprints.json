@@ -4,7 +4,7 @@
       "abicheck/btf_metadata.py": "614321e6140b32e7518deb3991dc9b9421107688c952542808ec4da88a17dc73",
       "abicheck/ctf_metadata.py": "42d3f588c6c4567c2a9d43a3ef5b886a753c37dd5357a4199d81d7ffc60d2109",
       "abicheck/dumper.py": "7cfc03dce4b9968a259d5eba7ba7cf7d3008eb0422a60defd7c4743b88b330a8",
-      "abicheck/dumper_clang.py": "9e6c2694bd0a3b4fd96764199f3ee1bd1290fc86b4ba5183f98f6e145add909f",
+      "abicheck/dumper_clang.py": "8e644e9eba0f320a4434eb161cb4b0b513c33b67b80cfb99565425d3b43c8135",
       "abicheck/dwarf_advanced.py": "e7dc4a394915381a0c67081f14b8301d63677c5c63d1feb4e95c6c3573c111e8",
       "abicheck/dwarf_metadata.py": "a0621cde6559a0395b00d08aa25cc4cbff74b1121e2083e424e472c44b985512",
       "abicheck/dwarf_presence.py": "7e73580ec7a02fdf24e3815cb89e42aa6fe00e46e8cda6b7fe9d547f06ac3f06",
@@ -135,7 +135,7 @@
       "abicheck/extract/headers/clang/explicit_specifier.py": "fca63201aaf3d920e2bbb796114c93bd6edc89974083f9900ed26e98de7fc699",
       "abicheck/extract/headers/clang/expr.py": "da2554d914f005f8525e0a411b36e93e3dd3dc80957cc7597245c9257b875994",
       "abicheck/extract/headers/clang/function_template_defaults.py": "af4a42ea00a91238ef8f111fe05c4b6aa625b84fd2fd4e39230b48953ebaf566",
-      "abicheck/extract/headers/clang/functions.py": "4a003ca649bf18970baa6a09597c8de044b392ccbee07b3dd315e52257ac9a77",
+      "abicheck/extract/headers/clang/functions.py": "e1edf4d462d0704d3609e36dc1ae009045f203a21f5736ff6284f061a28f8baf",
       "abicheck/extract/headers/clang/inline_semantics.py": "8284b543b4fa45da23c50fee0f16fd11dab8c43cf43f1cf07334572a822ad04d",
       "abicheck/extract/headers/clang/layout_tool.py": "603a8e1c072ae27ae3aff54dfd421aced36cb3a1505150cadd7d16ff4273672a",
       "abicheck/extract/headers/clang/locations.py": "d4292c937fb928268132c6a3f21a35a5d7576b8164416648ef73815cd07fcddf",
@@ -148,7 +148,7 @@
       "abicheck/extract/headers/clang/records.py": "2bde9f3ecd20c5cdbaa093eb3541ad6029bf0162f528f574afe23392d0069d0c",
       "abicheck/extract/headers/clang/redeclarations.py": "a721440b183b81c24d1faad4c75dbb2241d28bc29c64792d79f99863b56029c8",
       "abicheck/extract/headers/clang/restrict_spelling.py": "309efe53d934303354ef102e0b223363a099c164b2000727e4f591998afa2ec7",
-      "abicheck/extract/headers/clang/return_type.py": "9270af4a836e71b98090149c0b60303547189459e0a649e483f053de53b25283",
+      "abicheck/extract/headers/clang/return_type.py": "1e960c33def1fcf71cb976387ef56ab639c23680936edfd2f83d4ba5a96fd104",
       "abicheck/extract/headers/clang/scope.py": "5b7bf471b1e95184c97da44aed88c8f4b29b36f77699a44255c33a889ea3a4b3",
       "abicheck/extract/headers/clang/streaming.py": "21db95a9e99e3dd51bef00492f9b4eb046d0d3e9d32f3b511391dfdf704dbfff",
       "abicheck/extract/headers/clang/template_decl_walk.py": "ea3d022f01c86057a69229a5ecaba9d5a7b8a476445678c438dc6662bedfada0",
@@ -157,7 +157,7 @@
       "abicheck/extract/headers/clang/template_param_indexes.py": "1d54979cca271e1b112652f45f54ddd1356ca5f32e3367a3723aeaacd4e7c68d",
       "abicheck/extract/headers/clang/templates.py": "ee85de87a4180b5bed93d501237f153d1132fd325504c1fdf52fab87c7c95efe",
       "abicheck/extract/headers/clang/type_identity.py": "702248290b2d42f931f9be5bf8450be3e90327f840e4dcfb357a48feff2f84f7",
-      "abicheck/extract/headers/clang/typedefs.py": "0345022b18ed0a011c4a1420e7b85e77dc3437f1339d5572ff28af29aebc0f3b",
+      "abicheck/extract/headers/clang/typedefs.py": "112486b3fd0a842f45c154334587639f23e9455adc125b93aa90b6dd47804202",
       "abicheck/extract/headers/clang/var_alignment.py": "eebcf9beac1dfe14706b4b7d947791f9593cafb81f2be36643d16d80ab0a7d62",
       "abicheck/extract/headers/clang/vtable.py": "ec35a377463d0191e013684713b5a049e78a766a16cf74e71354d2e57e3a2931",
       "abicheck/extract/headers/clang_header_argv.py": "644a6454c6a3da3ab5f184cc2d9778d51f141f1e528f86162cccb815f9b17ddb",
@@ -169,6 +169,7 @@
       "abicheck/extract/headers/gcc/build.py": "1ee62182117ee040274b84d482cc3a9a36db2bd2b742d5dca4e892de00002ecb",
       "abicheck/extract/headers/gcc/contracts.py": "f8476243858a4d1d0ce59bd6b7c73435fb25d116f73f97926ec6f87c3123b091",
       "abicheck/extract/headers/gcc/discovery.py": "f07fdd43ec1e594e95a75a5447e54e3dcbfe5c944c66a305de4e9d7463ee731b",
+      "abicheck/extract/headers/gcc/gcc_facts.cc": "d2a160738c283569bc93e815f463f3a70e4d715a56e177795d46d9e0df8eed07",
       "abicheck/extract/headers/gcc/projection.py": "e5722bec915e0b39c7dff22211f1e127cfa0cd0b7415b0c74b1dd9da328922cd",
       "abicheck/extract/headers/manifest.py": "32ef26892725f05c29fff52d393166a68ea2983f9c1b881d85e046d96ae962b1",
       "abicheck/extract/headers/preprocessor_branches.py": "d3a409d126b0dd1b19a634d4aad25660d372dad931b310cfbaaefc9d769b244d",
@@ -222,9 +223,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "893deea21f5846944db7488763f874f6644a9b5bce1cd859b6de4741d041639f",
+    "fingerprint": "9bffa621f509afd4548c1cf2e21d5161158cb367a4c33cd35bdbb1c6517a8ad8",
     "generation": 54,
-    "reason": "bumped to 54 for a semantic change"
+    "reason": "same generation-54 change, refined before merge: the Clang typedef'd-return lookup stops at the nearest declared typedef, and the native GCC plugin source joins the fingerprinted extractor scope"
   },
   "resolver": {
     "files": {
