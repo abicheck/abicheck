@@ -32,7 +32,7 @@ GAP_O2_STD = (
 
 GAP_CLANG_TYPEDEF = "The clang header backend reads a removed C typedef as BREAKING"
 GAP_STATIC_ACCESS = (
-    "The clang and native gcc header backends record no access for a static data member"
+    "The native gcc header backend records no access for a static data member"
 )
 GAP_GCC_DEPRECATED = "The native gcc header backend records no deprecation attributes"
 GAP_GCC_C_SHAPES = (
@@ -41,6 +41,7 @@ GAP_GCC_C_SHAPES = (
 )
 GAP_GCC_FRIEND = "The native gcc header backend records no hidden friends"
 GAP_GCC_RESTRICT = "The native gcc header backend records no `restrict` on a parameter"
+GAP_GCC_OVERLOAD = "The native gcc header backend records no overload-set ambiguity"
 GAP_GCC_CONCEPT = (
     "The native gcc header backend cannot tell a tightened concept constraint"
 )
@@ -157,7 +158,8 @@ _BACKEND_GAPS: tuple[Known, ...] = (
             frozenset({f"missing:{kind}", f"weaker-than:{floor}"}),
             "NO_CHANGE",
         )
-        for backend in ("clang", "gcc")
+        # clang records the access since abicheck/abicheck#2001.
+        for backend in ("gcc",)
         for op, kind, floor in (
             ("static_member_access_narrowed", "VAR_ACCESS_CHANGED", "API_BREAK"),
             ("static_member_access_widened", "VAR_ACCESS_WIDENED", "COMPATIBLE"),
@@ -270,6 +272,18 @@ _BACKEND_GAPS: tuple[Known, ...] = (
         GAP_GCC_RESTRICT,
         frozenset({"missing:PARAM_RESTRICT_CHANGED", "weaker-than:COMPATIBLE"}),
         "NO_CHANGE",
+    ),
+    _backend_gap(
+        "converting_ctor_overload_added",
+        _MORE,
+        "gcc",
+        "wrong-kind",
+        "the native gcc header backend reads the new CO(long) constructor's "
+        "ambiguity risk but not the overload set's: overload_ambiguity_introduced "
+        "is missing",
+        GAP_GCC_OVERLOAD,
+        frozenset({"missing:OVERLOAD_AMBIGUITY_INTRODUCED"}),
+        "COMPATIBLE_WITH_RISK",
     ),
     _backend_gap(
         "concept_constraint_added",

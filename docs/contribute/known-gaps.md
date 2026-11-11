@@ -139,9 +139,9 @@ dependency walk and debug roots to every member. No open gap remains.
 **Status (2026-11-11): OPEN.** Removing an unused public typedef (`typedef_removed`, `c_elf`) reads BREAKING under the clang header backend; castxml reads at most a source break (`TYPEDEF_REMOVED`). `false-positive`. Found by the edit corpus's header-backend axis (`Config.header_backend`). Owner: `extract/headers/clang/`.
 <!-- no-canary: the edit corpus is the canary: its strict-xfail entry in tests/_edit_corpus_known.py fails once the backend records the fact -->
 
-#### The clang and native gcc header backends record no access for a static data member (2026-11-11)
+#### The native gcc header backend records no access for a static data member (2026-11-11)
 
-**Status (2026-11-11): OPEN.** Narrowing or widening the access of a static data member (`static_member_access_narrowed`/`_widened`, `cxx_more`) reads NO_CHANGE under the clang and native gcc header backends; castxml records the member's access and reads `VAR_ACCESS_CHANGED` (API_BREAK) / `VAR_ACCESS_WIDENED`. `wrong-verdict`. Found by the edit corpus's header-backend axis (`Config.header_backend`). Owner: `extract/headers/clang/` and `extract/headers/gcc/`.
+**Status (2026-11-11): OPEN.** Narrowing or widening the access of a static data member (`static_member_access_narrowed`/`_widened`, `cxx_more`) reads NO_CHANGE under the native gcc header backend (the clang backend records it since abicheck/abicheck#2001); castxml records the member's access and reads `VAR_ACCESS_CHANGED` (API_BREAK) / `VAR_ACCESS_WIDENED`. `wrong-verdict`. Found by the edit corpus's header-backend axis (`Config.header_backend`). Owner: `compare/declaration_facts.py` (the access gate does not accept gcc snapshots).
 <!-- no-canary: the edit corpus is the canary: its strict-xfail entry in tests/_edit_corpus_known.py fails once the backend records the fact -->
 
 #### The native gcc header backend records no deprecation attributes (2026-11-11)
@@ -162,6 +162,11 @@ dependency walk and debug roots to every member. No open gap remains.
 #### The native gcc header backend records no `restrict` on a parameter (2026-11-11)
 
 **Status (2026-11-11): OPEN.** Dropping `__restrict` from a parameter (`param_restrict_removed`, `cxx_more`) reads NO_CHANGE; castxml reads `PARAM_RESTRICT_CHANGED`. `wrong-verdict`. Found by the edit corpus's header-backend axis (`Config.header_backend`). Owner: `extract/headers/gcc/` (`gcc_facts.cc`, `projection.py`).
+<!-- no-canary: the edit corpus is the canary: its strict-xfail entry in tests/_edit_corpus_known.py fails once the backend records the fact -->
+
+#### The native gcc header backend records no overload-set ambiguity (2026-11-11)
+
+**Status (2026-11-11): OPEN.** Adding `CO(long)` beside `CO(int)` (`converting_ctor_overload_added`, `cxx_more`) reads `CTOR_OVERLOAD_AMBIGUITY_RISK` under the native gcc header backend but not `OVERLOAD_AMBIGUITY_INTRODUCED`, which castxml and clang add from the overload set; the verdict (COMPATIBLE_WITH_RISK) is right. `wrong-kind`. Found by the edit corpus's header-backend axis (`Config.header_backend`). Owner: `extract/headers/gcc/` (`gcc_facts.cc`, `projection.py`).
 <!-- no-canary: the edit corpus is the canary: its strict-xfail entry in tests/_edit_corpus_known.py fails once the backend records the fact -->
 
 #### The native gcc header backend cannot tell a tightened concept constraint (2026-11-11)
