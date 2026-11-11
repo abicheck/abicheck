@@ -222,6 +222,22 @@ def build(
         header_backend=config.header_backend,
         gcc_options=gcc_options if headers else None,
     )
+    if headers and config.header_backend == "clang":
+        # The public dump workflow (``abicheck dump``/``compare``) enriches a
+        # clang-backend snapshot with record layout after ``dump()``; the bare
+        # ``dumper.dump()`` does not (known-gaps "`dumper.dump()` never runs
+        # the clang record-layout pass"). Mirror the workflow, so the corpus
+        # judges what users get.
+        from abicheck.compile_context import CompileContext
+        from abicheck.extract.headers.clang.layout_tool import attach_clang_layout
+
+        snap = attach_clang_layout(
+            snap,
+            headers,
+            [],
+            lang="c++" if is_cxx else "c",
+            compile=CompileContext(gcc_options=gcc_options),
+        )
     return Built(dir=out_dir, so=so, header=header, snapshot=snap)
 
 

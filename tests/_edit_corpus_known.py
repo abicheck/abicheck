@@ -30,7 +30,6 @@ GAP_O2_STD = (
 )
 
 
-GAP_CLANG_ALIGN = "The clang header backend records no record alignment change"
 GAP_CLANG_TYPEDEF = "The clang header backend reads a removed C typedef as BREAKING"
 GAP_STATIC_ACCESS = (
     "The clang and native gcc header backends record no access for a static data member"
@@ -130,29 +129,11 @@ def _backend_gap(
 
 _ELF = frozenset({"c_elf"})
 _MORE = frozenset({"cxx_more"})
-_LAYOUT_SEEDS = frozenset({"c_core", "cxx_classes"})
-_ALIGN = frozenset({"none-of:STRUCT_ALIGNMENT_CHANGED|TYPE_ALIGNMENT_CHANGED"})
 
 # Header-backend parity: castxml reads these facts, the named backend does
 # not. Each is being fixed in the backend itself; the entry forces its own
 # removal (a fixed cell no longer reproduces) when the fix lands.
 _BACKEND_GAPS: tuple[Known, ...] = (
-    *(
-        _backend_gap(
-            op,
-            _LAYOUT_SEEDS,
-            "clang",
-            "wrong-kind",
-            "the clang header backend reports the size and offsets but not the "
-            "record's alignment change",
-            GAP_CLANG_ALIGN,
-            _ALIGN,
-            "BREAKING",
-            # Under -fpack-struct the operator owes no alignment change at all.
-            also=lambda c: c.flags.pack is None,
-        )
-        for op in ("struct_field_widen", "rebuild_pack_struct")
-    ),
     _backend_gap(
         "typedef_removed",
         _ELF,
