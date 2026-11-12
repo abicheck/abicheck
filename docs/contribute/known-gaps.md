@@ -285,6 +285,12 @@ current emitter, which is unchanged.
 `false-clean` — removing a declared, exported ISA tier reads as a risk while pinned consumers fail to load.
 <!-- canary: tests/test_header_backend_fact_gaps_integration.py::test_a_declared_isa_tier_removal_reads_as_a_risk -->
 
+#### The inline-body rename check misses a pimpl holder castxml and clang name by its bare leaf (2026-11-12)
+
+**Status (2026-11-12): PARTIAL.** `diff_cpp_patterns.detect_inline_body_renamed_member` used to pair a removed field of an internal (`detail::`) record only with `type_field_added`, so a renamed member that lands at the end of the record (`type_field_added_compatible`) was never paired; fixed (every field-removal kind now pairs with every field-addition kind, `tests/test_inline_body_rename_field_kinds.py`), and the native gcc backend now reports the edit corpus's `pimpl_member_renamed_under_inline_accessor`. Still open: in the corpus's `cxx_more` seed, castxml and clang record the holder as `Desc` and the internal record as `impl` (bare leaves, the "Type identity: typedef and tag names keyed by bare spelling" gap), while the inline accessor's scope demangles to `lib::Desc`, so the holder never matches and the finding stays missing on those two backends (the field churn still gates). Owner: `compare/` (`diff_cpp_patterns.py`) / `extract/headers/`.
+`false-clean` — the inline-accessor finding is missing on castxml and clang header snapshots of namespaced records.
+<!-- canary: tests/test_header_backend_fact_gaps_integration.py::test_castxml_and_clang_name_the_corpus_pimpl_holder_by_its_bare_leaf -->
+
 #### The unspecified-return check does not know castxml's or clang's closure spelling (2026-11-12)
 
 **Status (2026-11-12): OPEN.** `diff_templates.detect_unspecified_return_now_named` recognises `auto`, `decltype(`, `<lambda` and similar markers. castxml spells an inline function's deduced closure return type `?` and clang `(lambda:file#line)`, so an inline factory that starts returning a named function-pointer type reads no `unspecified_return_now_named` on either; clang additionally reports `func_return_changed` (BREAKING) for a function the old library never exported. The native gcc backend (`make_cb()::<lambda(int)>`) reads it correctly. Found by the edit corpus (`unspecified_return_now_named` on `cxx_more`). Owner: `compare/` (`diff_templates.py`).
@@ -296,12 +302,6 @@ current emitter, which is unchanged.
 **Status (2026-11-12): OPEN.** castxml's XML carries no record data size (dsize), and `extract/headers/castxml/records.py` deliberately derives no `is_standard_layout` from it (a polymorphism heuristic is unsound). `standard_layout_lost` and `tail_padding_reuse_changed` therefore cannot fire on a castxml snapshot (nor on DWARF), where the clang and native gcc backends report them (both COMPATIBLE_WITH_RISK). Found by the edit corpus (`standard_layout_lost`, `record_became_pod_tail_padding` on `cxx_more`). Closing it needs the clang record-layout pass (`attach_clang_layout`) joined onto castxml roots, as it is for clang ones. Owner: `extract/headers/castxml/`.
 `false-clean` — a castxml dump misses a lost standard-layout guarantee or a change in tail-padding reuse.
 <!-- canary: tests/test_header_backend_fact_gaps_integration.py::test_castxml_records_no_standard_layout_or_data_size -->
-
-#### The inline-body rename check ignores a renamed member that reads `type_field_added_compatible` (2026-11-12)
-
-**Status (2026-11-12): OPEN.** `diff_cpp_patterns.detect_inline_body_renamed_member` pairs a removed and an added field of an internal (`detail::`) record, but only `type_field_added`; a renamed member that lands at the end of the record reads `type_field_added_compatible`, so a pimpl whose `count_` became `n_` under an inline public accessor reports the field churn (BREAKING) without `inline_body_references_renamed_member`. Found by the edit corpus (`pimpl_member_renamed_under_inline_accessor` on `cxx_more`, every header backend). Owner: `compare/` (`diff_cpp_patterns.py`).
-`false-clean` — the inline-accessor finding is missing (the field churn still gates).
-<!-- canary: tests/test_header_backend_fact_gaps_integration.py::test_a_pimpl_rename_whose_new_field_reads_compatible_is_not_paired -->
 
 #### clang and gcc header snapshots of the corpus seed drop a renamed tag's instantiation declaration (2026-11-12)
 

@@ -1069,4 +1069,23 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "change": ("swap", "pure addition", "pure removal", "drop one", "drop all"),
         },
     ),
+    BugClass(
+        id="classification.one_sibling_of_a_change_kind_family_read",
+        invariant=(
+            "A detector that reacts to a kind of change (a field removed, a "
+            "field added) reacts to every ChangeKind the catalog uses for it, "
+            "not to the one sibling its author had in mind: a field addition "
+            "is `type_field_added`, `type_field_added_compatible` or "
+            "`union_field_added`, whichever the layout diff chose."
+        ),
+        # Found by the generated edit corpus
+        # (pimpl_member_renamed_under_inline_accessor).
+        fixed_by=(2027,),
+        seed_tests=("tests/test_inline_body_rename_field_kinds.py",),
+        axes={
+            "removal kind": ("type", "struct", "union"),
+            "addition kind": ("type", "type compatible", "union"),
+            "record": ("internal", "public"),
+        },
+    ),
 )

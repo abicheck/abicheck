@@ -248,13 +248,12 @@ _PIMPL = (
 )
 
 
-@pytest.mark.known_gap_canary
-def test_a_pimpl_rename_whose_new_field_reads_compatible_is_not_paired(
+def test_a_pimpl_rename_whose_new_field_reads_compatible_is_paired(
     tmp_path: Path,
 ) -> None:
-    """count_ -> n_ moved to the end: the new field reads
-    type_field_added_compatible, which the inline-body rename check does not
-    pair with the removed one."""
+    """count_ -> n_ moved to the end reads type_field_added_compatible, and the
+    inline-body rename check still pairs it (formerly a known-gap canary). The
+    gcc backend qualifies the holder; castxml and clang do not (canary below)."""
     old = (_PIMPL, "lib::Desc::Desc() : p_(new detail::impl{3, 8}) {}")
     new = (
         _PIMPL.replace("int count_; int cap_;", "int cap_; int n_;").replace(
@@ -262,9 +261,9 @@ def test_a_pimpl_rename_whose_new_field_reads_compatible_is_not_paired(
         ),
         "lib::Desc::Desc() : p_(new detail::impl{8, 3}) {}",
     )
-    verdict, kinds = _kinds(tmp_path, old, new, "c++", "castxml")
+    verdict, kinds = _kinds(tmp_path, old, new, "c++", "gcc")
     assert {"TYPE_FIELD_REMOVED", "TYPE_FIELD_ADDED_COMPATIBLE"} <= kinds
-    assert "INLINE_BODY_REFERENCES_RENAMED_MEMBER" not in kinds
+    assert "INLINE_BODY_REFERENCES_RENAMED_MEMBER" in kinds
 
 
 @pytest.mark.known_gap_canary
@@ -386,3 +385,25 @@ def test_a_declared_isa_tier_removal_reads_as_a_risk(tmp_path: Path) -> None:
     assert "CPU_DISPATCH_ISA_DROPPED" in kinds
     assert "FUNC_REMOVED" not in kinds
     assert verdict == "COMPATIBLE_WITH_RISK"
+
+
+@pytest.mark.known_gap_canary
+@pytest.mark.parametrize("backend", ["castxml", "clang"])
+def test_castxml_and_clang_name_the_corpus_pimpl_holder_by_its_bare_leaf(
+    tmp_path: Path, backend: str
+) -> None:
+    """In the edit corpus's ``cxx_more`` seed the pimpl holder ``lib::Desc`` is
+    recorded as ``Desc`` while its inline accessor demangles to ``lib::Desc``,
+    so the inline-body rename check finds no holder for it."""
+    from tests._edit_corpus_config import default_config
+    from tests._edit_corpus_harness import BaselineCache
+    from tests._edit_corpus_seeds import SEED_BY_NAME
+    from tests._edit_corpus_toolchains import build_toolchains
+
+    gcc = {t.family: t for t in build_toolchains()}.get("gcc")
+    if gcc is None:
+        pytest.skip("no gcc toolchain")
+    cfg = default_config("c++", gcc).with_(header_backend=backend)
+    snap = BaselineCache(tmp_path).get(SEED_BY_NAME["cxx_more"], cfg).snapshot
+    names = {t.name for t in snap.declarations.types if t.name.endswith("Desc")}
+    assert names == {"Desc"}

@@ -47,6 +47,10 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from .compare.field_rename_candidates import (
+    collect_field_rename_candidates as _collect_field_rename_candidates,
+    collect_paired_field_candidates as _collect_paired_field_candidates,
+)
 from .compare.internal_namespaces import DEFAULT_INTERNAL_NAMESPACES
 from .compare.naming_conventions import (  # noqa: F401 -- re-exported
     BUNDLE_SONAME_COHORT,
@@ -616,66 +620,6 @@ def detect_tag_type_renamed(
 # ---------------------------------------------------------------------------
 # case89 — inline accessor references renamed pimpl member
 # ---------------------------------------------------------------------------
-
-
-def _collect_field_rename_candidates(
-    changes: Iterable[Change],
-    namespaces: tuple[str, ...],
-) -> list[tuple[str, str, str]]:
-    """Return ``(record_name, old_field, new_field)`` triples from FIELD_RENAMED changes
-    whose record belongs to an internal namespace.
-
-    FIELD_RENAMED's ``symbol`` is the (possibly namespace-qualified) record
-    name itself — e.g. ``mylib::detail::descriptor_impl`` — not a
-    ``Record::field`` pair; the field names live in ``old_value``/
-    ``new_value``. Splitting on the last ``::`` here used to strip the record
-    name down to its enclosing namespace (or drop it to ``""`` when
-    unqualified), so ``is_internal_type`` never matched and no candidate was
-    ever collected — this detector never actually fired (case89).
-    """
-    del namespaces  # the name is checked at emission (PIMPL_RENAMED_MEMBER)
-    candidates: list[tuple[str, str, str]] = []
-    for ch in changes:
-        if ch.kind != ChangeKind.FIELD_RENAMED:
-            continue
-        record_name = ch.symbol
-        if ch.old_value and ch.new_value:
-            candidates.append((record_name, str(ch.old_value), str(ch.new_value)))
-    return candidates
-
-
-def _collect_paired_field_candidates(
-    changes: Iterable[Change],
-    namespaces: tuple[str, ...],
-) -> list[tuple[str, str, str]]:
-    """Synthesise ``(record_name, old_field, new_field)`` triples from paired
-    TYPE_FIELD_REMOVED / TYPE_FIELD_ADDED changes on the same internal type.
-
-    Covers the case where the AST emitter doesn't produce a FIELD_RENAMED
-    but does produce paired field deltas (a "modernize naming" refactor).
-    """
-    del namespaces  # the name is checked at emission (PIMPL_RENAMED_MEMBER)
-    by_internal: dict[str, tuple[list[str], list[str]]] = defaultdict(lambda: ([], []))
-    for ch in changes:
-        if ch.kind not in (ChangeKind.TYPE_FIELD_REMOVED, ChangeKind.TYPE_FIELD_ADDED):
-            continue
-        # `symbol` for these is typically "Type::field_name"
-        if "::" not in ch.symbol:
-            continue
-        rec, fld = ch.symbol.rsplit("::", 1)
-        removed_list, added_list = by_internal[rec]
-        if ch.kind == ChangeKind.TYPE_FIELD_REMOVED:
-            removed_list.append(fld)
-        else:
-            added_list.append(fld)
-
-    candidates: list[tuple[str, str, str]] = []
-    for rec, (removed, added) in by_internal.items():
-        # Pair positionally — equal count is the strongest hint of a rename batch.
-        if removed and added and len(removed) == len(added):
-            for old_field, new_field in zip(removed, added, strict=False):
-                candidates.append((rec, old_field, new_field))
-    return candidates
 
 
 def _emit_inline_body_findings(

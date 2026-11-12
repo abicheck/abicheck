@@ -36,10 +36,6 @@ GAP_GCC_UNEXPORTED = (
     "The native gcc header backend keeps an unexported declaration PUBLIC"
 )
 GAP_CASTXML_TRAITS = "castxml records no standard-layout trait or data size"
-GAP_PIMPL_COMPAT = (
-    "The inline-body rename check ignores a renamed member that reads "
-    "`type_field_added_compatible`"
-)
 GAP_TAG_DECL = (
     "clang and gcc header snapshots of the corpus seed drop a renamed tag's "
     "instantiation declaration"
@@ -59,6 +55,10 @@ GAP_CLOSURE_RETURN = (
 )
 GAP_CPU_DISPATCH = (
     "The CPU-dispatch roll-up reads the removal of declared ISA kernels as a risk"
+)
+GAP_PIMPL_BARE_HOLDER = (
+    "The inline-body rename check misses a pimpl holder castxml and clang name by "
+    "its bare leaf"
 )
 GAP_O2_STD = (
     "An `-O2` rebuild of a C++ library that uses `std::string` reads as a risk on gcc, "
@@ -284,6 +284,19 @@ _DETECTOR_GAPS: tuple[Known, ...] = (
         issues=frozenset({"missing:SONAME_BUMP_RECOMMENDED", "weaker-than:BREAKING"}),
         verdicts=frozenset({"COMPATIBLE_WITH_RISK"}),
     ),
+    *(
+        _backend_gap(
+            "pimpl_member_renamed_under_inline_accessor",
+            _MORE,
+            backend,
+            "wrong-kind",
+            "the holder is recorded as a bare `Desc`; the accessor's scope is lib::Desc",
+            GAP_PIMPL_BARE_HOLDER,
+            frozenset({"missing:INLINE_BODY_REFERENCES_RENAMED_MEMBER"}),
+            "BREAKING",
+        )
+        for backend in ("castxml", "clang")
+    ),
     _backend_gap(
         "unspecified_return_now_named",
         _MORE,
@@ -303,17 +316,6 @@ _DETECTOR_GAPS: tuple[Known, ...] = (
         GAP_CLOSURE_RETURN,
         frozenset({"missing:UNSPECIFIED_RETURN_NOW_NAMED", "stronger-than:API_BREAK"}),
         "BREAKING",
-    ),
-    Known(
-        "pimpl_member_renamed_under_inline_accessor",
-        _MORE,
-        "wrong-kind",
-        _ev("headers"),
-        "the renamed member reads type_field_added_compatible, which the "
-        "inline-body check does not pair",
-        GAP_PIMPL_COMPAT,
-        issues=frozenset({"missing:INLINE_BODY_REFERENCES_RENAMED_MEMBER"}),
-        verdicts=frozenset({"BREAKING"}),
     ),
     Known(
         "version_stamp_typedef_bumped",
