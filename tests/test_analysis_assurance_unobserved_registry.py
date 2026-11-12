@@ -48,6 +48,7 @@ NON_DIMENSION_MODULES = {
     "_manifest_layers",  # pack-manifest layer statuses
     "_outputs",  # report projections
     "_result",  # the AnalysisAssurance dataclass
+    "_status_ladder",  # the overall-status rollup over the sub-statuses
     "_target_accounting",  # target accounting axis
     "_translation_units",  # TU accounting axis
     "_unobserved",  # the registry

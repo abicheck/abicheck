@@ -97,7 +97,7 @@ projection is the safe direction, never a fabricated ``"complete"``.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from .analysis_assurance_degraded_facts import degraded_reliability_facts
 
@@ -453,7 +453,7 @@ def schema_staleness_status(
     new: AbiSnapshot,
     *,
     same_content: Callable[[], bool] | None = None,
-) -> tuple[str, list[str]]:
+) -> tuple[Literal["clean", "degraded"], list[str]]:
     """``"clean"``/``"degraded"`` plus human-readable notes -- the
     ``analysis_assurance.AnalysisAssurance.schema_staleness_status`` value
     for this *old*/*new* pair.

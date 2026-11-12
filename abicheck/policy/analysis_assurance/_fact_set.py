@@ -18,6 +18,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from ...buildsource.fact_set import check_fact_compatibility
+from ..assurance_status_vocabulary import FactSetComparability
 
 if TYPE_CHECKING:
     from ...buildsource.pack import BuildSourcePack
@@ -48,7 +49,7 @@ def _surface_fact_set_inconsistent(sa: Any) -> bool:
 
 def _fact_set_comparability(
     old_pack: BuildSourcePack | None, new_pack: BuildSourcePack | None
-) -> tuple[str, list[str]]:
+) -> tuple[FactSetComparability, list[str]]:
     """Cross-side L4 fact-set comparability -- the ``analysis_assurance``
     analogue of ``buildsource.source_diff.diff_source_abi``'s own
     ``SOURCE_FACT_COVERAGE_INCOMPLETE`` gating.
