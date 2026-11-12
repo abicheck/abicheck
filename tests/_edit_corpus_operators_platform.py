@@ -265,6 +265,10 @@ _TOOLCHAIN = (
 def _bit_int_toolchain(c: Any) -> str | None:
     if c.producer.family == "gcc" and c.producer.version < 14:
         return "gcc implements _BitInt from 14"
+    if c.evidence == "headers" and c.header_backend == "gcc":
+        # The plugin backend parses with the gcc it was built for (the host
+        # default, gcc 13 on the corpus lanes), whatever built the library.
+        return "the native gcc header backend's gcc may predate _BitInt"
     if c.producer.family not in ("gcc", "clang"):
         return f"{c.producer.family} has no _BitInt"
     return None

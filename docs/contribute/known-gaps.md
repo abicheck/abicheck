@@ -309,6 +309,12 @@ current emitter, which is unchanged.
 
 ### False-clean risk
 
+#### The native gcc header backend records no function the library never emits (2026-11-12)
+
+**Status (2026-11-12): OPEN.** castxml and the clang backend record a header-only function: a `static inline` C function, or a C++ `inline` function no unit of the library calls. The native gcc plugin backend (ADR-092) does not, because gcc never emits it. So removing such a function reads `NO_CHANGE` instead of `inline_function_removed`, and an incompatible parameter change reads nothing instead of `header_only_function_params_changed`, although consumers that call it stop compiling. Found by the edit corpus (`header_inline_removed` on `cxx_alt`, `header_only_function_params_changed` on `c_elf_alt`, `headers.gcc`). Owner: `extract/headers/gcc/`.
+`false-clean` — a source break in a header-only function is invisible under the gcc header backend.
+<!-- no-canary: pinned by the edit corpus's strict-xfail `header_inline_removed` entry in tests/_edit_corpus_known.py, which fails once the answer changes -->
+
 #### The DWARF lane records fewer C++ exports than the symbols-only lane, so ctor/dtor variants and RTTI/vtable objects read as added or removed (2026-11-10)
 
 **Status (2026-11-10): OPEN, narrow.** A debug-backed binary-only dump adds an export-table record only for exports no debug declaration names (`extract/dwarf_export_gaps.py`, #1980): it folds a ctor/dtor export into the variant its debug entry names and skips C++ ABI metadata (`_ZT*`, guard variables). The symbols-only lane records all of them. Two shapes follow: (1) a `C1` that aliases `C2` on one side (no virtual base) and has its own entry on the other reads `func_added` (catalog case167, excused in `tests/test_depth_projection_matches_shallow_dump.py`); (2) a stripped copy compared with its own `-g` build reads `func_removed_elf_only`/`var_removed_elf_only` for the `D1` variant and `_ZTI`/`_ZTS`/`_ZTV`, `BREAKING`. Closing it means recording the folded variants and the ABI metadata as export-table records in the DWARF lane (and checking the undeclared-exports detector still credits them to their class).
