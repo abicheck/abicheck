@@ -156,8 +156,9 @@ _DYNAMIC = (
         "soname_changed",
         ("build.soname",),
         lambda r: _build(r, "build.soname", "libedit.so.2"),
-        "a new SONAME declares a new ABI: consumers needing libedit.so do not load it",
-        expected=frozenset({"SONAME_CHANGED"}),
+        "a new SONAME declares a new ABI: consumers needing libedit.so do not "
+        "load it, although nothing in the interface broke (the bump was unneeded)",
+        expected=frozenset({"SONAME_CHANGED", "SONAME_BUMP_UNNECESSARY"}),
         verdict_min="COMPATIBLE_WITH_RISK",
         **_BINARY,
     ),
@@ -341,6 +342,18 @@ _DYNAMIC = (
         "the IBT/SHSTK GNU properties appear: a hardening gain, nothing a "
         "consumer can observe",
         expected=frozenset({"CET_PROTECTION_IMPROVED"}),
+        rules=(
+            Rule(
+                lambda c: c.flags.bits == 32,
+                {
+                    "expected": frozenset(),
+                    "verdict_min": "NO_CHANGE",
+                    "observable": False,
+                },
+                "the i386 start files carry no IBT/SHSTK property, so the link "
+                "ANDs it away: the -m32 library gains nothing (readelf -n)",
+            ),
+        ),
         # Only a toolchain whose default build has no CET can gain it.
         probe_flags=("-fcf-protection=full",),
         default_macro=("__CET__", False),

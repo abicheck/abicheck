@@ -76,6 +76,8 @@ FEATURES: dict[str, dict[str, int]] = {
     "restrict": {"c": 1999},
     "flexible_array": {"c": 1999},
     "atomic": {"c": 2011},
+    "char8_t": {"c++": 2020},
+    "bit_int": {"c": 2023},
 }
 
 
