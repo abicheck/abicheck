@@ -1,8 +1,10 @@
 """The edit-operator type and the role-editing helpers every operator module shares.
 
 ``EditOp`` is documented in ``_edit_corpus_operators``; the operator tables
-live there (core seeds), in ``_edit_corpus_operators_elf`` (``c_elf``) and in
-``_edit_corpus_operators_cxx`` (``cxx_more``).
+live there (core seeds), in ``_edit_corpus_operators_elf`` (``c_elf``), in
+``_edit_corpus_operators_cxx`` (``cxx_more``) and in
+``_edit_corpus_operators_platform`` (ELF, loader and toolchain facts on
+``c_elf``, ``cxx_more`` and the gated ``c_elf_alt``/``cxx_alt``).
 """
 
 from __future__ import annotations
@@ -62,6 +64,8 @@ class EditOp:
     constructs: tuple[str, ...] = ()
 
     def applies_to(self, seed: Seed) -> bool:
+        if seed.gate_role is not None and seed.gate_role not in self.roles:
+            return False
         return all(r in seed.roles for r in self.roles)
 
     def requires(self, config: Config) -> str | None:

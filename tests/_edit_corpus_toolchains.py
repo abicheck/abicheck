@@ -692,6 +692,14 @@ def capability_gap(op: object, config: Config) -> str | None:
                     f"{config.producer.id}'s libstdc++ already defaults to "
                     f"_GLIBCXX_USE_CXX11_ABI={new_abi}: the rebuild changes nothing"
                 )
+        # A rebuild to another word size needs that target's start files and
+        # libc (32-bit multilib for -m32). The same probe the build roles
+        # pass through: a missing target is a gap, a crash or a hang raises.
+        new_flags = rebuild(config.flags)
+        if new_flags.bits != config.flags.bits:
+            reason = _flags_unavailable(config.producer, config.lang, new_flags)
+            if reason:
+                return reason
     return None
 
 
