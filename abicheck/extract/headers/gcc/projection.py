@@ -214,6 +214,7 @@ def project(
                         else Fact.not_collected(),
                         type_identities_fact=resolved_identity(f["identity"]),
                         type_abi_fact=abi(f.get("abi")),
+                        deprecated_fact=Fact.present(f.get("deprecated")),
                     )
                 )
             bases = r.get("bases", [])
@@ -232,6 +233,7 @@ def project(
                 is_final=r.get("final"),
                 is_abstract=r.get("abstract"),
                 is_template_pattern=dependent,
+                deprecated_fact=Fact.present(r.get("deprecated")),
                 fields=fields,
                 source_location=src,
                 source_header=r["source"],
@@ -271,6 +273,7 @@ def project(
                 qualified_name=name if "::" in name else None,
                 members=[EnumMember(m["name"], m["value"]) for m in r["members"]],
                 is_scoped=r.get("scoped"),
+                deprecated_fact=Fact.present(r.get("deprecated")),
                 underlying_type=underlying or "?",
                 source_location=src,
                 source_header=r["source"],
