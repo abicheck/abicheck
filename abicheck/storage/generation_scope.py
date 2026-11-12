@@ -81,6 +81,9 @@ EXTRACTOR_ROOT_GLOBS: tuple[str, ...] = (
 EXTRACTOR_EXTRA_FILES: tuple[str, ...] = (
     "model/arithmetic_type_spellings.py",
     "header_utils.py",
+    # The native GCC plugin's source: it decides which facts that backend
+    # records, as much as the Python projection does.
+    "extract/headers/gcc/gcc_facts.cc",
 )
 
 #: A module whose file stem contains one of these words is resolver-named and

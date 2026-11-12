@@ -20,9 +20,21 @@ from ....model.template_default_table import (
     template_default_key,
 )
 
+_ATOMIC = re.compile(r"^((?:const |volatile )*)atomic (.+)$")
+_OPEN_ARRAY = re.compile(r"\[(?:0:|<unknown>)\]")
+
 
 def clean(value: Any) -> Any:
-    return re.sub("^(?:struct|union|enum|class)\\s+", "", value)
+    """GCC's type spelling in the spelling the other header backends use.
+
+    GCC prints an ``_Atomic T`` as ``atomic T`` and an array of unknown
+    bound (a flexible array member, ``extern const char s[]``) as
+    ``T[0:]`` or ``T[<unknown>]``; CastXML and Clang write ``_Atomic(T)``
+    and ``T[]``, which is what the type-text detectors read.
+    """
+    value = re.sub("^(?:struct|union|enum|class)\\s+", "", value)
+    value = _OPEN_ARRAY.sub("[]", value)
+    return _ATOMIC.sub(r"\1_Atomic(\2)", value)
 
 
 def scope_names(row: Any) -> Any:
@@ -109,6 +121,21 @@ def templates(rows: Any, policy: Any) -> Any:
 
 
 def vtable_fact(row: Any) -> Any:
+    """The declared virtual-slot sequence of the record's primary vtable.
+
+    Read from the class's own ``BINFO_VIRTUALS`` (the group at offset 0),
+    which every translation unit that sees the class definition has. The
+    emitted vtable initializer is only a fallback: it exists only where the
+    key function is defined, and it spells a pure virtual slot as
+    ``__cxa_pure_virtual``, so a pure method becoming concrete read as a
+    vtable change.
+    """
+    groups = row.get("vtable_candidate_groups")
+    if groups:
+        primary = [g for g in groups if g.get("offset_bytes") == 0][:1]
+        slots = primary[0]["slots"] if primary else []
+        if slots and all(s.get("mangled") for s in slots):
+            return Fact.present([s["mangled"] for s in slots])
     tables = [
         v for v in row.get("vtable_initializers", []) if v["name"].startswith("_ZTV")
     ]

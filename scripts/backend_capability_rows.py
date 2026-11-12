@@ -437,14 +437,18 @@ LEADING_ROWS: tuple[FactRow, ...] = (
         "Variable",
         "access",
         _FULL,
-        _NONE,
+        _FULL,
         note=(
+            "clang side wired at extractor generation 54 from the walk's "
+            "access context (the specifier in force, else the record "
+            "default); `compare.declaration_facts.records_variable_access` "
+            "declines a clang snapshot older than that. "
             "castxml side wired in G31 Phase C continued (schema v24), "
             "reusing the same structured `access` attribute already read "
             "for `Function`/`TypeField` — verified against real castxml "
             "output that a static class member's `<Variable>` element "
-            "carries it too. `diff_symbols._diff_var_access` requires "
-            '`ast_producer == "castxml"` specifically (not "hybrid" — '
+            "carries it too. `diff_symbols._diff_var_access` never "
+            'compares a "hybrid" snapshot — '
             "see `the stale 'castxml_var_access' fact family (model.snapshot_reliability)`'s own "
             "docstring) and gates on that reliability flag for the "
             "pre-v24-legacy-baseline case."

@@ -23,7 +23,11 @@ from typing import Any
 
 from .compare import export_transition as _export_transition
 from .compare.constants import constant_index_pair, diff_constants
-from .compare.declaration_facts import access_changes, deprecation_changes
+from .compare.declaration_facts import (
+    access_changes,
+    deprecation_changes,
+    records_variable_access,
+)
 from .compare.edge_query import export_table_covered
 from .compare.elf_only_demangle import (
     elf_only_demangled_name,
@@ -1393,16 +1397,12 @@ def _diff_constants(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
 
 @registry.detector("var_access")
 def _diff_var_access(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
-    """Detect global data access level changes (ABICC: Global_Data_Became_Private/Protected/Public).
-
-    Header-tier, "castxml"-producer-ONLY (not "hybrid" either -- same
-    coverage-shift risk as ``param_va_list`` above). A legacy document whose
-    access facts cannot be trusted loads with ``Variable.access_fact``
-    ``NOT_COLLECTED``, which the per-variable gate declines.
-    """
+    """Global data access changes (ABICC: Global_Data_Became_Private/...), header-tier,
+    where both producers recorded access (``records_variable_access``); a legacy
+    untrusted ``Variable.access_fact`` loads ``NOT_COLLECTED`` and is declined."""
     if not both_header_aware(old, new):
         return []
-    if old.ast_producer != "castxml" or new.ast_producer != "castxml":
+    if not (records_variable_access(old) and records_variable_access(new)):
         return []
     old_map, new_map = reconciled_variable_surfaces(old, new)
     old_index = variable_type_index_for(old, old_map.values())

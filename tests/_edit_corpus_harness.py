@@ -12,6 +12,7 @@ nothing.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -212,15 +213,33 @@ def build(
     gcc_options = " ".join(
         [f"-std={std}", *fl.layout_flags(config.producer, seed.lang)]
     )
-    snap = dump(
-        so,
-        headers,
-        version=out_dir.name,
-        compiler="c++" if is_cxx else "cc",
-        lang="c++" if is_cxx else "c",
-        header_backend="castxml",
-        gcc_options=gcc_options if headers else None,
-    )
+    backend = os.environ.get("ABICHECK_EDIT_CORPUS_HEADER_BACKEND", "castxml")
+    if os.environ.get("ABICHECK_EDIT_CORPUS_PUBLIC_DUMP"):
+        from abicheck.compile_context import CompileContext
+        from abicheck.service import run_dump
+
+        snap = run_dump(
+            so,
+            "elf",
+            headers,
+            version=out_dir.name,
+            lang="c++" if is_cxx else "c",
+            lang_explicit=True,
+            frontend=backend,
+            compile=CompileContext(
+                gcc_options=gcc_options if headers else None, frontend=backend
+            ),
+        )
+    else:
+        snap = dump(
+            so,
+            headers,
+            version=out_dir.name,
+            compiler="c++" if is_cxx else "cc",
+            lang="c++" if is_cxx else "c",
+            header_backend=backend,
+            gcc_options=gcc_options if headers else None,
+        )
     return Built(dir=out_dir, so=so, header=header, snapshot=snap)
 
 
