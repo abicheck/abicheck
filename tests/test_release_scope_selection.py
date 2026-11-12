@@ -901,8 +901,9 @@ class TestStoredLiveExtractionFailureIsAnOperationalError:
     `extraction_error` and the exit is floored at 4 under either
     `--on-incomplete-scope` policy -- never a warn-accepted scope gap that
     lets a damaged current artifact exit 0. A stored capture's own D8
-    `degraded` marker stays a scope-axis matter (Codex review, nineteenth
-    round)."""
+    `degraded` marker is now an operational error too (ADR-065 D8 wording,
+    found by formal experiment E8); this supersedes the Codex review's
+    nineteenth-round decision that kept it on the scope axis."""
 
     # NEW is discovered by the live fan-out's own rule: valid snapshot files
     # are members by content, and the damaged one is a member because it is
