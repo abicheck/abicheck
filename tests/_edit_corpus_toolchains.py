@@ -761,6 +761,45 @@ def unavailable(config: Config) -> str | None:
             )
             if reason:
                 return f"header frontend: {reason}"
+        reason = header_backend_unavailable(config.header_backend, config.lang)
+        if reason:
+            return reason
+    return None
+
+
+@functools.cache
+def header_backend_unavailable(backend: str, lang: str) -> str | None:
+    """Why *backend* cannot dump *lang* headers on this host, or None.
+
+    The native gcc backend needs a plugin built for the system gcc (ADR-092:
+    ``python -m abicheck.extract.headers.gcc.build --compiler g++``, or
+    ``ABICHECK_GCC_PLUGIN``); the clang backend needs a clang driver. A
+    missing one makes the cell unavailable, never a pass.
+
+    Only castxml runs off Linux ELF: the native gcc backend is ELF-only
+    (ADR-092), and the clang backend's corpus ground truth has been checked
+    on ELF alone (on a Windows host it reads a -fshort-enums rebuild as
+    NO_CHANGE). A PE or Mach-O host reports those cells unavailable rather
+    than judging them against unverified expectations.
+    """
+    if backend != "castxml" and host_platform()[1] != "elf":
+        return (
+            f"{backend} header backend: the corpus's header-backend axis is "
+            f"validated on Linux ELF only (host is {host_platform()})"
+        )
+    if backend == "gcc":
+        from abicheck.errors import SnapshotError
+        from abicheck.extract.headers.gcc.discovery import find_plugin
+
+        driver = "c++" if lang == "c++" else "cc"
+        if shutil.which(driver) is None:
+            return f"gcc header backend: no system {driver}"
+        try:
+            find_plugin(driver, lang)
+        except (SnapshotError, OSError, subprocess.SubprocessError) as exc:
+            return f"gcc header backend: {str(exc).splitlines()[0]}"
+    elif backend == "clang" and shutil.which("clang") is None:
+        return "clang header backend: no clang driver on PATH"
     return None
 
 

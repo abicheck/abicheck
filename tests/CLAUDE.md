@@ -232,7 +232,9 @@ CI's `pr` profile.
   (`ABICHECK_EDIT_CORPUS_SEED`, `ABICHECK_EDIT_CORPUS_SHARD=K/N`); a failing
   cell prints a minimized, ready-to-paste regression test.
   A `Config` is one library *build* (`build_id`: standard, producer, flags,
-  evidence — built and compared once) plus `consumers` (toolchain, standard,
+  evidence and, for `headers`, the header backend — castxml, clang or the
+  native gcc plugin, which needs `python -m abicheck.extract.headers.gcc.build
+  --compiler g++` once or reads unavailable — built and compared once) plus `consumers` (toolchain, standard,
   flags each); the oracle reports every (build, consumer) pair, and a mix
   that cannot work (libstdc++ vs libc++, the dual ABI, a standard the edited
   header needs) is an explicit `infeasible` pair, never a pass. Restrict

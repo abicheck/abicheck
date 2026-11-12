@@ -196,6 +196,10 @@ class Flags:
 # What abicheck is given, weakest first.
 EVIDENCE: tuple[str, ...] = ("binary", "dwarf", "headers")
 EVIDENCE_RANK: dict[str, int] = {e: i for i, e in enumerate(EVIDENCE)}
+#: The header AST backends the ``headers`` lane can dump with (castxml is the
+#: reference; clang and the native gcc plugin, ADR-092, are checked against
+#: the same ground truth). Meaningless below ``headers`` evidence.
+HEADER_BACKENDS: tuple[str, ...] = ("castxml", "clang", "gcc")
 
 
 def host_platform() -> tuple[str, str]:
@@ -246,6 +250,18 @@ class Config:
     consumers: tuple[Consumer, ...] = ()
     evidence: str = "headers"
     platform: tuple[str, str] = field(default_factory=host_platform)
+    # Which backend dumps the headers; ignored below ``headers`` evidence.
+    header_backend: str = "castxml"
+
+    def __post_init__(self) -> None:
+        if self.header_backend not in HEADER_BACKENDS:
+            raise ValueError(
+                f"header_backend {self.header_backend!r} not in {HEADER_BACKENDS}"
+            )
+        if self.evidence != "headers" and self.header_backend != "castxml":
+            # No headers are dumped: normalize, so two spellings of one build
+            # never become two cells.
+            object.__setattr__(self, "header_backend", "castxml")
 
     @property
     def lang(self) -> str:
@@ -282,7 +298,26 @@ class Config:
         abicheck's answer and the operator's expectation depend on this alone;
         consumers only decide what the execution oracle runs.
         """
-        return "-".join([self.std.id, self.producer.id, self.flags.id, self.evidence])
+        return "-".join(
+            [self.std.id, self.producer.id, self.flags.id, self.evidence_label]
+        )
+
+    @property
+    def evidence_label(self) -> str:
+        """The evidence level, plus the header backend when it is not castxml.
+
+        castxml stays implicit so every pre-existing cell id is unchanged.
+        """
+        if self.evidence == "headers" and self.header_backend != "castxml":
+            return f"headers.{self.header_backend}"
+        return self.evidence
+
+    @property
+    def space_evidence(self) -> str:
+        """The evidence axis value in the language-space model (always explicit)."""
+        if self.evidence == "headers":
+            return f"headers.{self.header_backend}"
+        return self.evidence
 
     def consumer_label(self, c: ResolvedConsumer) -> str:
         """*c* relative to the build: ``self``, or the axes that differ."""
@@ -299,7 +334,7 @@ class Config:
         resolved = self.consumer_set
         if resolved != (self.resolve(Consumer()),):
             parts.append("use-" + ",".join(self.consumer_label(c) for c in resolved))
-        parts.append(self.evidence)
+        parts.append(self.evidence_label)
         return "-".join(parts)
 
     def with_(self, **kw: object) -> Config:
