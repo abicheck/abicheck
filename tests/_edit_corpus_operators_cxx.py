@@ -716,10 +716,18 @@ _SHAPES = (
                 "stays local, so the binary's export table does not change",
             ),
             Rule(
-                lambda c: c.evidence in ("binary", "dwarf") or c.objfmt != "elf",
+                lambda c: c.evidence in ("binary", "dwarf"),
                 {"expected": frozenset({"FUNC_ADDED"})},
-                "without a header to miss it from, or off ELF (the undeclared-export "
-                "check reads the ELF export table), the export is an ordinary addition",
+                "without a header to miss it from, the export is an ordinary addition",
+            ),
+            Rule(
+                lambda c: c.objfmt != "elf",
+                {
+                    "expected": frozenset({"FUNC_ADDED"}),
+                    "verdict_max": "COMPATIBLE_WITH_RISK",
+                },
+                "off ELF the export reads as an ordinary addition (func_added_elf_only "
+                "is an ELF kind), and against the public header it is still undeclared",
             ),
             Rule(
                 lambda c: c.evidence == "headers",
