@@ -301,6 +301,12 @@ current emitter, which is unchanged.
 `false-clean` — the source-break finding is missing on castxml and clang (and clang over-reports a binary break).
 <!-- canary: tests/test_header_backend_fact_gaps_integration.py::test_a_closure_return_spelling_is_not_read_as_unspecified -->
 
+#### The contract evaluator places a clang class-template pattern out of contract (2026-11-12)
+
+**Status (2026-11-12): OPEN.** A public header's class template whose default argument changes (`template <typename T, int N = 4> struct Buf` -> `N = 8`) reads `template_param_default_changed` (API_BREAK) on every header backend. On a clang snapshot, though, the contract evaluator marks that finding `PROVEN_OUT_OF_CONTRACT` (`terminal_authoritative_exclusion`, evidence `public_header:old`), so `compare_snapshots` (the CLI verb) rolls the run up to `NO_CHANGE` while castxml, the native gcc backend and bare `checker.compare` say API_BREAK. clang records the pattern (`is_template_pattern`, `source_header` = the public header, no `qualified_name`); castxml and gcc reach the kind without such a record. Found by the edit corpus (`template_default_arg_change` on `cxx_classes`, clang headers). Owner: `policy/` (contract evaluation) / `extract/headers/clang/`.
+`false-clean` — a changed template default in a public header passes the gate on a clang header dump.
+<!-- canary: tests/test_header_backend_fact_gaps_integration.py::test_a_template_default_change_reads_out_of_contract_on_clang -->
+
 #### castxml records no standard-layout trait or data size (2026-11-12)
 
 **Status (2026-11-12): OPEN.** castxml's XML carries no record data size (dsize), and `extract/headers/castxml/records.py` deliberately derives no `is_standard_layout` from it (a polymorphism heuristic is unsound). `standard_layout_lost` and `tail_padding_reuse_changed` therefore cannot fire on a castxml snapshot (nor on DWARF), where the clang and native gcc backends report them (both COMPATIBLE_WITH_RISK). Found by the edit corpus (`standard_layout_lost`, `record_became_pod_tail_padding` on `cxx_more`). Closing it needs the clang record-layout pass (`attach_clang_layout`) joined onto castxml roots, as it is for clang ones. Owner: `extract/headers/castxml/`.
