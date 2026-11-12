@@ -121,10 +121,15 @@ _EXPORTS = (
                 "stays local, so the export table does not change",
             ),
             Rule(
-                lambda c: c.evidence in ("binary", "dwarf") or c.objfmt != "elf",
+                lambda c: c.evidence in ("binary", "dwarf"),
                 {"expected": frozenset({"VAR_ADDED"}), "verdict_max": "COMPATIBLE"},
-                "without a header to miss it from, or off ELF, the export is an "
-                "ordinary addition",
+                "without a header to miss it from, the export is an ordinary addition",
+            ),
+            Rule(
+                lambda c: c.objfmt != "elf",
+                {"expected": frozenset({"VAR_ADDED"})},
+                "off ELF the undeclared-export kind is not owed, but the export a "
+                "header set does not declare is the same hygiene risk",
             ),
         ),
         verdict_min="COMPATIBLE",
