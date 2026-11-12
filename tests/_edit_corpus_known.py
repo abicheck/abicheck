@@ -43,12 +43,12 @@ GAP_BASE_UNVERSIONED = (
 GAP_VECTOR_ABI = (
     "A `-mveclibabi` switch reads as a binary break when no call is vectorized"
 )
-GAP_ALLOCATOR = (
-    "Replacing or dropping the global operator new is demoted or misread as a removal"
-)
 GAP_CLANG_INLINE_STATIC = "An inline function's static local, exported by clang, reads as an undeclared export"
 GAP_UNIQUE_O2_DWARF = "A GNU-unique static whose inline owner was inlined away is not compared at DWARF depth"
 GAP_DUAL_ABI_COW_CHURN = "A C++20 dual-ABI flip is not recognized when the old-ABI string's members are exported"
+GAP_GCC_HEADER_ONLY = (
+    "The native gcc header backend records no function the library never emits"
+)
 GAP_DEFINE_PROFILE = (
     "A macro that changes the build's ABI makes the two header dumps incomparable"
 )
@@ -195,8 +195,24 @@ _PLATFORM: tuple[Known, ...] = (
     Known(
         "header_only_function_params_changed",
         _ALT,
+        "false-clean",
+        _hb("gcc"),
+        "the native gcc backend records no hscale (static inline, never "
+        "emitted), so the signature change reads as nothing",
+        GAP_GCC_HEADER_ONLY,
+        issues=frozenset(
+            {"missing:HEADER_ONLY_FUNCTION_PARAMS_CHANGED", "weaker-than:API_BREAK"}
+        ),
+        verdicts=frozenset({"COMPATIBLE"}),
+        # A gcc consumer only warns on the int -> int * conversion: no
+        # source break, so the same finding reads wrong-verdict.
+        also_cls=frozenset({"wrong-verdict"}),
+    ),
+    Known(
+        "header_only_function_params_changed",
+        _ALT,
         "false-positive",
-        _ev("headers"),
+        lambda c: c.evidence == "headers" and c.header_backend != "gcc",
         "hscale is static inline and never exported, yet its int -> int * "
         "parameter reads param_pointer_level_changed (BREAKING)",
         GAP_HEADER_ONLY_POINTER,
@@ -248,6 +264,17 @@ _PLATFORM: tuple[Known, ...] = (
         GAP_DUAL_ABI_COW_CHURN,
         issues=frozenset({"missing:GLIBCXX_DUAL_ABI_FLIP_DETECTED"}),
         verdicts=_BREAKING,
+    ),
+    Known(
+        "header_inline_removed",
+        _XA,
+        "false-clean",
+        _hb("gcc"),
+        "the native gcc backend records no demo::clampi (header-only, never "
+        "emitted), so its removal reads NO_CHANGE",
+        GAP_GCC_HEADER_ONLY,
+        issues=frozenset({"missing:INLINE_FUNCTION_REMOVED", "weaker-than:API_BREAK"}),
+        verdicts=frozenset({"NO_CHANGE"}),
     ),
     Known(
         "time_bits_64",

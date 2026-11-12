@@ -692,6 +692,13 @@ def capability_gap(op: object, config: Config) -> str | None:
                     f"{config.producer.id}'s libstdc++ already defaults to "
                     f"_GLIBCXX_USE_CXX11_ABI={new_abi}: the rebuild changes nothing"
                 )
+        # A rebuild to another word size needs that target's start files and
+        # libc (32-bit multilib for -m32).
+        new_bits = rebuild(config.flags).bits
+        if new_bits != config.flags.bits and rejects_flags(
+            config.producer, (), new_bits
+        ):
+            return f"{config.producer.id} cannot build a {new_bits}-bit library here"
     return None
 
 
