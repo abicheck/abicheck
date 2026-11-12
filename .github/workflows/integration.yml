@@ -343,7 +343,8 @@ jobs:
           # and another was cancelled; judge only a run whose two Linux shards
           # both finished their integration step.
           # (No artifact at all leaves no directory: find fails, count is 0.)
-          done_shards=$({ find edit-corpus-coverage -name 'shard-*.done' 2>/dev/null || true; } | wc -l)
+          # $(( )) strips the leading blanks BSD `wc -l` pads its count with.
+          done_shards=$(( $({ find edit-corpus-coverage -name 'shard-*.done' 2>/dev/null || true; } | wc -l) ))
           if [ "$done_shards" -lt 2 ]; then
             echo "::notice::only ${done_shards} of 2 Linux shards finished (cancelled run); the PR-tier floor is not judged"
             exit 0
