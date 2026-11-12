@@ -12,9 +12,9 @@ Run date 2026-11-12. Tools: Lean 4.15.0 (core only), gcc 13.3.0, castxml 0.7.0, 
 | E4 | Does one representative per edit class suffice? | **No.** 19% of "insert before f" cases leave f in place, and 25% of "append" cases keep sizeof. Proved sufficient conditions split the classes correctly |
 | E5 | Does abicheck detect all of the bounded space? | **Yes**: 0 mismatches over 3488 field-offset and 1248 size predictions |
 | E6 | Are the model and the extraction sound in practice? | Model = gcc on 2496/2496 layouts. castxml and DWARF extraction = gcc on 2496/2496 each |
-| E7 | Can a finding vanish from the disposition pipeline unrecorded? | The count trigger is sound **iff** no step drops and adds in the same call. A shortest counterexample was found, including the *add-to-bucket* variant the code comment does not name. No real step violates it on the corpus |
+| E7 | Can a finding vanish from the disposition pipeline unrecorded? | A *sufficient* condition for the count trigger: no step drops and adds in the same call. Without it, a shortest counterexample exists, including the *add-to-bucket* variant the code comment does not name. No real step violates the condition on the corpus |
 | E8 | Scope completeness state machine | **Not run** (see [§ Not done](#not-done)) |
-| E9 | Does unknown evidence create findings? | No manufactured claims in 12 erasure sweeps. Two latent "unknown → 0" encodings found in the DWARF layout channel (not reachable from valid DWARF / abicheck-written snapshots) |
+| E9 | Does unknown evidence create findings? | Header channel: no manufactured or changed-value claim in 12 erasure sweeps. The DWARF channel **cannot be swept**: it has no "unknown" value. Two latent "unknown → 0" encodings found there (not reachable from valid DWARF or from snapshots abicheck wrote) |
 
 ## E1. The record-layout space
 
@@ -60,7 +60,8 @@ In the generator:
   fields (`{char a; int b}` → insert `char`), and a trailing field *removed*
   without shrinking sizeof (`{double; int; char}` → drop `char`).
 
-E5 shows abicheck handles all of these correctly today. For the missing two,
+E5 shows abicheck handles the insertion cases correctly today. Removal is
+outside the E1 edit space, so it is **not tested**. For the missing two,
 nothing in the generator would catch a regression.
 
 ## E3/E4. Computed expectations and class reduction
@@ -130,10 +131,13 @@ with additions         : 676 states, VIOLATED
           len(after) + Δbuckets = 0 + 1 = len(before)  => trigger silent
 ```
 
-- **Exact precondition.** The trigger is sound iff a step that does not record
-  its own drops never introduces a new object in the same call. The code
-  comment names "adds and drops"; the model also shows that adding into a
-  *bucket* (not only into `changes`) defeats it.
+- **Sufficient precondition.** The trigger is sound if no step that does not
+  record its own drops introduces a new object in the same call. That is
+  sufficient, not necessary: a mixed call that drops more findings than it
+  adds still trips the trigger and records them. The unsafe shape is a call
+  whose additions are at least as many as its drops. The code comment names
+  "adds and drops"; the model also shows that adding into a *bucket* (not
+  only into `changes`) defeats the trigger.
 - **Implementation check.** `formal/experiments/disposition_step_audit.py`
   wraps the runner over real comparisons (3 snapshot pairs, 7209 kept
   findings, 84 step calls): no step dropped and introduced objects in the same
@@ -148,19 +152,30 @@ with additions         : 676 states, VIOLATED
 
 ## E9. Unknown evidence
 
-`formal/experiments/unknown_evidence_sweep.py` erases one layout fact family
-(`offset_bits`, `size_bits`, `alignment_bits`) on one side of the real E5
-snapshot pairs (castxml and DWARF-only) and checks that every layout claim is
-in the full-evidence truth set (validated in E5):
+`formal/experiments/unknown_evidence_sweep.py` erases one **header-layer**
+layout fact family on one side of the real E5 snapshot pairs (castxml and
+DWARF-only): `TypeField.offset_bits`, and `RecordType` size and alignment,
+including their copy in the snapshot's semantic IR. It then checks every
+header-channel claim, as (kind, subject, old value, new value), against the
+full-evidence truth set validated in E5:
 
 ```
-12 sweeps (3 facts x 2 sides x 2 backends): claims not in truth = 0
+12 sweeps (3 facts x 2 sides x 2 backends):
+  header claims not in truth (incl. changed values) = 0
+  header claims surviving their own erasure         = 0
 ```
 
-When the header offset is erased, the *same true* moves are still reported
-through the independent DWARF `StructLayout` channel
-(`struct_field_offset_changed`). That is correct corroboration, not
-manufacture.
+- **What is not covered.** The DWARF `StructLayout` channel is **not erased
+  and not tested**. `FieldInfo.byte_offset` is an `int` with no "unknown"
+  value to erase to, which is itself finding 1 below. Its findings
+  (`struct_field_offset_changed`, `struct_size_changed`) keep reporting the
+  same true changes from the unerased debug info. The sweep prints them
+  separately and counts none of them as a pass.
+- **Correction to an earlier revision of this report.** That revision erased
+  only `RecordType.size_bits` and `alignment_bits`, not their semantic-IR
+  copy, so the erasure never reached the detector. The "true claims still
+  made" numbers it reported for size and alignment were an artifact of that
+  bug, not corroboration.
 
 Latent "unknown → 0" encodings found by reading the DWARF layout path for E9.
 Both are recorded here, neither is fixed:

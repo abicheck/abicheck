@@ -27,7 +27,7 @@ tested, and what is assumed are kept separate in [§ Boundaries](#boundaries).
 curl -sSfLO https://github.com/leanprover/lean4/releases/download/v4.15.0/lean-4.15.0-linux.tar.zst
 # sha256 af71a2569a9f68337de2434829b3008cd8e32c436e9cb6bd8c84a2c2ba3585c9
 tar --zstd -xf lean-4.15.0-linux.tar.zst && export PATH=$PWD/lean-4.15.0-linux/bin:$PATH
-cd formal/lean && lake build          # prints #print axioms and the truth table
+(cd formal/lean && lake build)        # prints #print axioms and the truth table
 
 formal/fixtures/run_experiment.sh /tmp/out      # gcc + abicheck (castxml)
 pytest tests/test_lean_field_offset_rule.py -q  # add -m integration for the fixture run

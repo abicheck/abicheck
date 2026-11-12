@@ -12,9 +12,10 @@ generated: false
 
 - one representative per layout edit class is **unsound** (E4);
 - abicheck is exact on the bounded layout fragment (E5);
-- the generator never produces padding-absorbed edits (E2);
-- the disposition count trigger has an exact precondition, and no step breaks
-  it on the corpus (E7).
+- the generator covers append-into-padding (`field_added_in_tail_padding`) but
+  not insert-without-move or remove-without-shrink (E2);
+- the disposition count trigger has a sufficient precondition, and no step
+  breaks it on the corpus (E7).
 
 ## Problem
 

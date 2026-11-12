@@ -25,11 +25,11 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.checker import ChangeKind
 from abicheck.diff_types import _diff_type_field_pair
 from abicheck.extract.headers.castxml.context import CastxmlParserContext
 from abicheck.extract.headers.castxml.records import expand_anonymous_field
-from abicheck.model import TypeField
+from abicheck.model.change_catalog.kinds import ChangeKind
+from abicheck.model.entities import TypeField
 
 ROOT = Path(__file__).resolve().parent.parent
 FORMAL = ROOT / "formal"

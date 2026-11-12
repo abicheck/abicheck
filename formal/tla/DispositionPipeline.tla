@@ -13,7 +13,9 @@
    Invariant NothingVanishes: every finding that ever existed is still
    visible, in a bucket, or recorded in the ledger. AddsAllowed toggles
    whether a step that does not record its own drops may introduce new
-   objects in the same call.
+   objects in the same call. Forbidding that is a SUFFICIENT condition for
+   the invariant, not a necessary one: a mixed call that drops more findings
+   than it adds still trips the count trigger and records them.
 
    Checked by formal/tla/check_disposition.py (explicit-state BFS over the
    same transition relation). TLC: `java -cp tla2tools.jar tlc2.TLC

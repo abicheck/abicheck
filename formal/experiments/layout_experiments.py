@@ -174,11 +174,16 @@ def main(out: Path) -> int:
                 by = {f["name"]: f.get("offset_bits") for f in t.get("fields", [])}
                 ext = [by.get(n) for n in names]
                 want = [o * 8 for o in g_offs]
-                size_ok = t.get("size_bits") in (None, g_size * 8)
-                if ext == want and size_ok:
+                size = t.get("size_bits")
+                if size is None:
+                    # a missing size is lost evidence, never agreement
+                    e6b[backend]["size_missing"] += 1
+                elif ext == want and size == g_size * 8:
                     e6b[backend]["agree"] += 1
-                elif any(x is None for x in ext) and all(
-                    x is None or x == w for x, w in zip(ext, want)
+                elif (
+                    size == g_size * 8
+                    and any(x is None for x in ext)
+                    and all(x is None or x == w for x, w in zip(ext, want))
                 ):
                     e6b[backend]["unknown_not_wrong"] += 1
                 else:
@@ -189,7 +194,8 @@ def main(out: Path) -> int:
 
     # E5: abicheck compare vs model prediction
     rep = out / "compare.json"
-    run(
+    rep.unlink(missing_ok=True)  # never read a stale report from an earlier run
+    proc = run(
         [
             "abicheck",
             "compare",
@@ -203,6 +209,10 @@ def main(out: Path) -> int:
             f"json={rep}",
         ]
     )
+    if proc.returncode not in (0, 2, 4) or not rep.exists():
+        # 0/2/4 are verdicts (compatible / source break / ABI break); 64 etc. are errors
+        sys.stderr.write(proc.stderr)
+        raise SystemExit(f"abicheck compare failed with exit {proc.returncode}")
     changes = json.loads(rep.read_text(encoding="utf-8"))["changes"]
     moved_found: set[tuple[str, str]] = set()
     size_found: set[str] = set()

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """E7 (implementation side): check the TLA+ precondition on the real pipeline.
 
-DispositionPipeline.tla shows the count trigger in
-`policy/finding_disposition/pipeline.py::_record_dropped_duplicates` is sound
-iff no step drops a finding *and* introduces a new object (into `changes` or a
-bucket) in the same call, unless it records its own drops. This script wraps
+DispositionPipeline.tla shows a *sufficient* condition for the count trigger in
+`policy/finding_disposition/pipeline.py::_record_dropped_duplicates` to be
+sound: no step drops a finding *and* introduces a new object (into `changes`
+or a bucket) in the same call, unless it records its own drops. It is not
+necessary: a mixed call that drops more than it adds still trips the trigger. This script wraps
 that function, runs real comparisons, and reports per step:
 
   * calls where the step dropped findings and also introduced new objects;
@@ -58,6 +59,7 @@ def main(argv: list[str]) -> int:
     pairs = list(zip(paths[0::2], paths[1::2]))
     total = 0
     skipped = 0
+    compared = 0
     for old_p, new_p in pairs:
         try:
             old, new = load_snapshot(old_p), load_snapshot(new_p)
@@ -66,8 +68,12 @@ def main(argv: list[str]) -> int:
             print(f"skip {old_p}: {type(exc).__name__}: {exc}")
             continue
         r = compare(old, new)
+        compared += 1
         total += len(r.changes)
-    print(f"skipped={skipped}")
+    print(f"compared={compared} skipped={skipped}")
+    if compared == 0:
+        print("no snapshot pair was compared: nothing was audited")
+        return 2
     print(f"pairs={len(pairs)} kept_changes={total} step_calls={sum(calls.values())}")
     print(
         "steps that dropped AND introduced objects in one call:", dict(mixed) or "none"

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import platform
 import shutil
 import sys
 from pathlib import Path
@@ -65,8 +66,10 @@ def test_lean_layout_table_covers_declared_domain() -> None:
 
 @pytest.mark.integration
 @pytest.mark.skipif(
-    not sys.platform.startswith("linux"),
-    reason="Linux ELF experiment (.so, -soname, LD_LIBRARY_PATH)",
+    not sys.platform.startswith("linux")
+    or platform.machine() not in ("x86_64", "aarch64")
+    or sys.maxsize <= 2**32,
+    reason="Linux ELF, LP64 experiment: the Lean table models x86-64/AArch64 alignment",
 )
 def test_e5_e6_layout_model_extraction_and_compare_agree(tmp_path: Path) -> None:
     if shutil.which("gcc") is None or shutil.which("castxml") is None:
