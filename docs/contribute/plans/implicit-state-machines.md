@@ -1,3 +1,10 @@
+---
+doc_type: contributor
+level: expert
+lifecycle: active
+generated: false
+---
+
 # Implicit state machines
 
 Status: Phase 1 in progress (two confirmed bugs fixed, lexer guard added).

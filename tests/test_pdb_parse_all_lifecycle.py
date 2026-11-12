@@ -38,7 +38,10 @@ def _records() -> list[tuple[int, bytes]]:
     struct = _make_lf_structure(
         count=2, prop=0, field_ti=0x1000, byte_size=8, name="Point"
     )
-    return [(LF_FIELDLIST, fields), (LF_STRUCTURE, struct)]
+    # A third, truncated structure record: the parser records it in
+    # ``parse_failures``, so diagnostics kept from a failed call would make a
+    # retry differ from a fresh parse.
+    return [(LF_FIELDLIST, fields), (LF_STRUCTURE, struct), (LF_STRUCTURE, b"\x02")]
 
 
 def _db() -> TypeDatabase:
@@ -66,13 +69,16 @@ def _fail_on_call(n: int, real):  # type: ignore[no-untyped-def]
     return wrapper
 
 
-# Every step of parse_all that can raise: each record (1st, 2nd) and the
-# forward-ref link that follows the record loop.
+# Every step of parse_all that can raise: each record and the forward-ref
+# link that follows the record loop (by then every table is filled).
 _STEPS = [
     ("_parse_record", 1),
     ("_parse_record", 2),
+    ("_parse_record", 3),
     ("_link_forward_refs", 1),
 ]
+
+_UNPARSED = (None, [], [])
 
 
 @pytest.mark.parametrize(("step", "nth"), _STEPS)
@@ -94,6 +100,8 @@ def test_a_failed_parse_is_not_remembered_as_parsed(
     with pytest.raises(_Injected):
         db.parse_all()
     monkeypatch.undo()
+    # Rolled back, not merely re-parsable: nothing from the failed call stays.
+    assert _observable(db) == _UNPARSED
 
     db.parse_all()
     assert _observable(db) == _observable(expected)
