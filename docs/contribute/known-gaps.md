@@ -129,6 +129,12 @@ dependency walk and debug roots to every member. No open gap remains.
 
 ### Report and detector coverage
 
+#### A C++20 dual-ABI flip is not recognized when the old-ABI string's members are exported (2026-11-12)
+
+**Status (2026-11-12): OPEN.** `glibcxx_dual_abi_flip_detected` needs `__cxx11` names to be at least 30% of the removed and added exports. From C++20 the new-ABI `std::string` is `constexpr` and an `-O0` library exports none of its members, while a `-D_GLIBCXX_USE_CXX11_ABI=0` rebuild exports the copy-on-write string's members as weak symbols (`_ZNSs...`, `_ZNKSs...`). Those count as added churn, and `elf_symbol_filter._STDLIB_PREFIXES` does not recognize the `Ss` substitution as the C++ runtime's, so six re-mangled functions fall below the threshold. `glibcxx_dual_abi_changed` and the removals still make it `BREAKING`. Found by the edit corpus (`std_string_abi_flipped` on `cxx_alt`, C++20 and later). Owner: `diff_platform.py`, `elf_symbol_filter.py`.
+`wrong-kind` — the flip is reported as individual changes, not named as a flip.
+<!-- no-canary: pinned by the edit corpus's strict-xfail `std_string_abi_flipped` entry in tests/_edit_corpus_known.py, which fails once the answer changes -->
+
 #### A GNU-unique static whose inline owner was inlined away is not compared at DWARF depth (2026-11-12)
 
 **Status (2026-11-12): OPEN.** At `-O2` gcc inlines a header inline function into its only caller, and the function's static local stays exported as `STB_GNU_UNIQUE`. The binary-only and header-depth compares report the binding change (`symbol_binding_became_unique` when it first appears, `symbol_binding_lost_unique` under `-fno-gnu-unique`); the DWARF-depth compare of the same pair reports `func_added` or nothing. At `-O0`, where the owner is emitted, DWARF depth reports it too. Found by the edit corpus (`gnu_unique_static_added` on `cxx_more`, `gnu_unique_disabled` on `cxx_alt`, gcc `-O2`). Owner: `diff_platform_elf_symbols.py` / the DWARF-depth symbol view.

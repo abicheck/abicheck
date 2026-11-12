@@ -682,7 +682,7 @@ _ALT = (
         ("alt.inl",),
         _decl(
             "alt.inl",
-            "static inline int hscale(int v, int *f) { return v * *f; }\nint huse(int v);",
+            "static __inline__ int hscale(int v, int *f) { return v * *f; }\nint huse(int v);",
             "int huse(int v) { int f = 2; return hscale(v, &f); }",
         ),
         "hscale lives only in the header: callers passing an int no longer compile",

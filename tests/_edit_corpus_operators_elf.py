@@ -342,6 +342,18 @@ _DYNAMIC = (
         "the IBT/SHSTK GNU properties appear: a hardening gain, nothing a "
         "consumer can observe",
         expected=frozenset({"CET_PROTECTION_IMPROVED"}),
+        rules=(
+            Rule(
+                lambda c: c.flags.bits == 32,
+                {
+                    "expected": frozenset(),
+                    "verdict_min": "NO_CHANGE",
+                    "observable": False,
+                },
+                "the i386 start files carry no IBT/SHSTK property, so the link "
+                "ANDs it away: the -m32 library gains nothing (readelf -n)",
+            ),
+        ),
         # Only a toolchain whose default build has no CET can gain it.
         probe_flags=("-fcf-protection=full",),
         default_macro=("__CET__", False),

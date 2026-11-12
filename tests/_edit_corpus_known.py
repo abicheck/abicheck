@@ -48,6 +48,7 @@ GAP_ALLOCATOR = (
 )
 GAP_CLANG_INLINE_STATIC = "An inline function's static local, exported by clang, reads as an undeclared export"
 GAP_UNIQUE_O2_DWARF = "A GNU-unique static whose inline owner was inlined away is not compared at DWARF depth"
+GAP_DUAL_ABI_COW_CHURN = "A C++20 dual-ABI flip is not recognized when the old-ABI string's members are exported"
 GAP_DEFINE_PROFILE = (
     "A macro that changes the build's ABI makes the two header dumps incomparable"
 )
@@ -293,6 +294,18 @@ _PLATFORM: tuple[Known, ...] = (
         verdicts=frozenset({"COMPATIBLE_WITH_RISK"}),
     ),
     Known(
+        "std_string_abi_flipped",
+        _XA,
+        "wrong-kind",
+        lambda c: c.std.year >= 2020,
+        "from C++20 the new-ABI std::string is constexpr and exports nothing, "
+        "while the old COW string exports ~37 weak members (_ZNSs...): they "
+        "dilute the __cxx11 marker share below the flip threshold",
+        GAP_DUAL_ABI_COW_CHURN,
+        issues=frozenset({"missing:GLIBCXX_DUAL_ABI_FLIP_DETECTED"}),
+        verdicts=_BREAKING,
+    ),
+    Known(
         "time_bits_64",
         _ALT,
         "refused",
@@ -404,11 +417,13 @@ KNOWN: tuple[Known, ...] = (
         # Under the pre-C++11 string ABI (-D_GLIBCXX_USE_CXX11_ABI=0) the -O0
         # build has no protected frame either, so no canary is lost and the
         # rebuild reads COMPATIBLE: correct, not part of this gap.
+        # From C++20 the old-ABI -O0 build guards a frame too (the nightly
+        # drew c++20 + cxx11abi0 once the cxx_alt seed joined the array).
         lambda c: (
             c.objfmt == "elf"
             and c.producer.family == "gcc"
             and c.evidence == "binary"
-            and c.flags.cxx11_abi != 0
+            and (c.flags.cxx11_abi != 0 or c.std.year >= 2020)
         ),
         "-O2 leaves no frame that needs a stack canary; without debug info no unit "
         "records -fstack-protector, so stack_canary_removed keeps its RISK (marked as "
