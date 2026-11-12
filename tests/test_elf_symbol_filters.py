@@ -105,8 +105,8 @@ def test_private_double_underscore_symbols_are_filtered(name: str) -> None:
         # operator delete / new
         "_ZdlPv",
         "_ZdlPvSt11align_val_t",
-        "_ZnwStmSt11align_val_t",
-        "_ZnaSt12nothrow_tRKS_",
+        "_ZnwmSt11align_val_t",  # operator new(size_t, align_val_t)
+        "_ZnamRKSt9nothrow_t",  # operator new[](size_t, const nothrow_t&)
         "_ZdaPv",
         # RTTI vtables / typeinfo
         "_ZTVN10__cxxabiv117__class_type_infoE",

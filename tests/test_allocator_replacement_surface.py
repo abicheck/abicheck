@@ -57,13 +57,37 @@ def test_every_replaceable_allocation_function_reads_as_the_runtimes(name: str) 
     assert is_abi_relevant_elf_symbol(name) is False
 
 
-@pytest.mark.parametrize("name", ["_ZN3Foo3nwEm", "_Z4news", "_Z3newv", "api_fn"])
+# A user-declared global overload is the library's own API: consumers that
+# call ``new (pool) T`` bind the library's export, which the runtime lacks.
+_USER_OVERLOADS = [
+    "_ZnwmR4Pool",  # operator new(std::size_t, Pool&)
+    "_ZnamR4Pool",  # operator new[](std::size_t, Pool&)
+    "_ZdlPvR4Pool",  # operator delete(void*, Pool&)
+    "_ZdaPvR4Pool",  # operator delete[](void*, Pool&)
+    "_ZnwjPKci",  # operator new(std::size_t, const char*, int), ILP32
+    "_ZnwmSt11align_val_tR4Pool",  # aligned, with an extra parameter
+]
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["_ZN3Foo3nwEm", "_Z4news", "_Z3newv", "api_fn", *_USER_OVERLOADS],
+)
 def test_a_function_that_only_looks_like_an_allocator_stays_the_librarys(
     name: str,
 ) -> None:
-    # Negative control: a member operator new and plain names that start
-    # with "new" are the library's API.
+    # Negative control: a member operator new, plain names that start with
+    # "new", and user-declared placement overloads are the library's API.
     assert is_abi_relevant_elf_symbol(name) is True
+
+
+@pytest.mark.parametrize("name", _USER_OVERLOADS)
+def test_dropping_a_user_declared_overload_still_breaks(name: str) -> None:
+    # The runtime does not provide it, so its consumers stop linking.
+    result = compare(_snap(["_Znwm", "_ZdlPv", name]), _snap(["_Znwm", "_ZdlPv"]))
+    assert result.verdict is Verdict.BREAKING, sorted(
+        c.kind.name for c in result.changes
+    )
 
 
 def _sym(name: str) -> ElfSymbol:
@@ -131,3 +155,42 @@ def test_removing_the_librarys_own_api_beside_the_allocator_still_breaks() -> No
     new.elf.symbols = [s for s in new.elf.symbols if s.name != "api_fn"]
     result = compare(old, new)
     assert result.verdict is Verdict.BREAKING
+
+
+# Partial changes to the replaced set: dropping operator new while keeping
+# operator delete leaves the runtime's new paired with the library's delete,
+# an interposition change each direction must report.
+_PARTIAL = [
+    (["_Znwm", "_ZdlPv"], ["_ZdlPv"]),
+    (["_Znwm", "_ZdlPv", "_ZdlPvm"], ["_Znwm", "_ZdlPv"]),
+    (["_Znwj", "_Znaj", "_ZdlPv", "_ZdaPv"], ["_Znwj", "_ZdlPv"]),
+    (["_ZnwmSt11align_val_t", "_Znwm", "_ZdlPv"], ["_Znwm", "_ZdlPv"]),
+]
+
+
+@pytest.mark.parametrize(("more", "fewer"), _PARTIAL)
+def test_a_partial_change_to_the_replaced_set_is_reported_each_way(
+    more: list[str], fewer: list[str]
+) -> None:
+    dropped = compare(_snap(more), _snap(fewer))
+    kinds = {c.kind for c in dropped.changes}
+    assert ChangeKind.ALLOCATOR_REPLACEMENT_REMOVED in kinds, sorted(
+        k.name for k in kinds
+    )
+    assert ChangeKind.ALLOCATOR_REPLACEMENT_ADDED not in kinds
+    assert dropped.verdict is Verdict.COMPATIBLE_WITH_RISK
+    gained = compare(_snap(fewer), _snap(more))
+    kinds = {c.kind for c in gained.changes}
+    assert ChangeKind.ALLOCATOR_REPLACEMENT_ADDED in kinds, sorted(
+        k.name for k in kinds
+    )
+    assert ChangeKind.ALLOCATOR_REPLACEMENT_REMOVED not in kinds
+    assert gained.verdict is Verdict.COMPATIBLE_WITH_RISK
+
+
+def test_an_unchanged_replaced_set_reports_nothing() -> None:
+    same = ["_Znwm", "_ZdlPv", "_ZdlPvm"]
+    result = compare(_snap(same), _snap(list(reversed(same))))
+    assert result.verdict is Verdict.NO_CHANGE, sorted(
+        c.kind.name for c in result.changes
+    )
