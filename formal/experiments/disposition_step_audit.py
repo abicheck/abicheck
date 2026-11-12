@@ -55,7 +55,11 @@ pl._record_dropped_duplicates = _wrapped
 
 
 def main(argv: list[str]) -> int:
-    paths = [Path(p) for p in argv]
+    args = argv[1:] if argv[:1] == ["--pairs"] else argv
+    if len(args) % 2:
+        print(f"expected OLD NEW pairs, got an unmatched path: {args[-1]}")
+        return 64
+    paths = [Path(p) for p in args]
     pairs = list(zip(paths[0::2], paths[1::2]))
     total = 0
     skipped = 0
