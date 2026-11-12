@@ -107,8 +107,9 @@ abicheck = oracle          6368 /  6368      6368 /  6368    (findings + verdict
 ```
 
 Per-case mode (each case its own library pair and `compare` run, so the exit
-code is the case's own verdict: 4 for breaking, 0 for compatible) is reported
-under [Cost](#cost).
+code is the case's own verdict: 4 for breaking, 0 for compatible) was run on
+the reduced set and on slice 1/4 of F (1592 cases, `--slice 1/4`): all agree
+on both compilers. Timings are under [Cost](#cost).
 
 ### 5. Reduction with a proved equivalence condition
 
@@ -133,14 +134,20 @@ would be unsound for most operations: the test finds more than half of the
 
 ## Cost
 
-Measured on one 4-core container (Python 3.13, castxml 0.7.0), both
-compilers, wall time:
+Measured on one shared 4-core cloud container (Python 3.13, castxml 0.7.0),
+both compilers, wall time. The container's speed drifted by up to 3× over
+the session, so each cell gives the range of the runs made:
 
 | Set | Cases | Batch (one library pair per compiler) | Per case (own build + compare, 4 jobs) |
 |---|---|---|---|
-| Full F | 6368 | 73 s | ≈ 2.2 h (estimate from the reduced run, 1.2 s per case; full measurement pending) |
-| Reduced | 32 | 4.5 s | 39 s |
-| Ratio | **199×** | 16× | ≈ 200× |
+| Full F | 6368 | 73–77 s (2 runs) | **≈ 3–6 h**: slice 1/4 (1592 cases) measured at 5619 s = 3.5 s/case; an earlier, aborted run reached 2341 cases in 65 min = 1.7 s/case |
+| Reduced | 32 | 4.5–12 s | 39–85 s |
+| Ratio | **199×** | 6–16× | ≈ 200–280× |
+
+Per-case results: the reduced set and slice 1/4 of the full set (1592
+cases) each agree on layout, findings and exit code (0 / 4) for every case on
+both compilers. The remaining three slices were not run per case (≈ 4.5 h);
+their findings and verdicts are covered by the batch run.
 
 The batch ratio is lower than the case ratio because process start-up and
 the castxml parse dominate small batches. Generating and proving costs:
