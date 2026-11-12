@@ -426,11 +426,10 @@ _IDIOMS = (
             "int k3(int a) { return k3_sse42(a); }",
         ),
         "the AVX2 tier is dropped; the dispatchers and the SSE4.2 tier stay: "
-        "callers through k1..k3 are unaffected, callers pinned to a k*_avx2 "
-        "kernel fail to load",
+        "callers through k1..k3 are unaffected, but the k*_avx2 kernels were "
+        "declared and exported, so a caller pinned to one fails to load",
         expected=frozenset({"CPU_DISPATCH_ISA_DROPPED"}),
-        verdict_min="COMPATIBLE_WITH_RISK",
-        verdict_max="BREAKING",
+        verdict_min="BREAKING",
         precondition=_x86,
         **_BINARY,
     ),

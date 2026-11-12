@@ -279,6 +279,12 @@ current emitter, which is unchanged.
 
 ### False-clean risk
 
+#### The CPU-dispatch roll-up reads the removal of declared ISA kernels as a risk (2026-11-12)
+
+**Status (2026-11-12): OPEN, a product ruling to revisit.** `diff_cpp_patterns.detect_cpu_dispatch_isa_dropped` groups the removal of a whole ISA tier (`*_avx2`) into one `cpu_dispatch_isa_dropped` finding (COMPATIBLE_WITH_RISK) and suppresses the per-symbol `func_removed`. That matches the catalog's case83 ruling ("dispatcher-using callers unaffected"). But when the header declares the per-ISA kernels and the library exports them, a consumer that calls one directly fails to load (`undefined symbol: k1_avx2`), so the release is binary-incompatible and the run exits 0. The edit corpus's execution oracle shows the load failure (`cpu_dispatch_isa_dropped` on `c_elf`, headers and DWARF depth; binary-only depth still reports `func_removed`). Closing it needs the roll-up to keep a BREAKING verdict when a removed kernel was in the declared public contract, which changes case83's ground truth: a maintainer decision. Owner: `diff_cpp_patterns.py` / `policy/`.
+`false-clean` — removing a declared, exported ISA tier reads as a risk while pinned consumers fail to load.
+<!-- canary: tests/test_header_backend_fact_gaps_integration.py::test_a_declared_isa_tier_removal_reads_as_a_risk -->
+
 #### Overload-set and instantiation checks group by a demangled name that keeps its signature (2026-11-12)
 
 **Status (2026-11-12): OPEN.** `diff_templates.detect_overload_set_rerouted` groups a header snapshot's functions by `qualified_declaration_name`, which for a mangled declaration is the demangled signature (`route(double)`), so no two overloads share a stem and swapping `route(double)` for `route(float)` beside a surviving `route(int)` reads only `func_removed` + `func_added` (BREAKING either way) without `overload_set_rerouted`. The same demangled name keeps a function template's return type, which is the cause of the instantiation entry above. Found by the edit corpus (`overload_rerouted` on `cxx_more`, every header backend). Owner: `compare/` (`diff_templates.py`).

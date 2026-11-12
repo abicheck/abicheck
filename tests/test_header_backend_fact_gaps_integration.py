@@ -288,12 +288,9 @@ def test_a_renamed_tags_instantiation_declaration_is_dropped_in_the_corpus_seed(
     from tests._edit_corpus_toolchains import build_toolchains
 
     if backend == "gcc":
-        from abicheck.extract.headers.gcc.discovery import find_plugin
-
-        try:
-            find_plugin(shutil.which("g++") or "", "c++")
-        except Exception as exc:
-            pytest.skip(f"native gcc plugin unavailable: {exc}")
+        _require_gcc_plugin("c++")
+    elif shutil.which("clang++") is None:
+        pytest.skip("clang unavailable")
     gcc = {t.family: t for t in build_toolchains()}.get("gcc")
     if gcc is None:
         pytest.skip("no gcc toolchain")
@@ -366,3 +363,34 @@ def test_a_closure_return_spelling_is_not_read_as_unspecified(
     assert f.return_type.startswith(spelling)
     _, kinds = _kinds(tmp_path / "k", _AUTO_OLD, _AUTO_NEW, "c++", backend)
     assert "UNSPECIFIED_RETURN_NOW_NAMED" not in kinds
+
+
+_ISA_H = (
+    "int k1(int a);\nint k2(int a);\nint k3(int a);\n"
+    "int k1_avx2(int a);\nint k2_avx2(int a);\nint k3_avx2(int a);\n"
+    "int k1_sse42(int a);\nint k2_sse42(int a);\nint k3_sse42(int a);"
+)
+_ISA_C = (
+    "\n".join(
+        f"int k{i}_{isa}(int a) {{ return a + {i}; }}"
+        for isa in ("avx2", "sse42")
+        for i in (1, 2, 3)
+    )
+    + "\n"
+    + "\n".join(f"int k{i}(int a) {{ return k{i}_sse42(a); }}" for i in (1, 2, 3))
+)
+
+
+@pytest.mark.known_gap_canary
+def test_a_declared_isa_tier_removal_reads_as_a_risk(tmp_path: Path) -> None:
+    """Dropping the declared, exported k*_avx2 kernels reads
+    cpu_dispatch_isa_dropped (COMPATIBLE_WITH_RISK) with no func_removed,
+    although a consumer calling k1_avx2 fails to load."""
+    new = (
+        "\n".join(line for line in _ISA_H.splitlines() if "avx2" not in line),
+        "\n".join(line for line in _ISA_C.splitlines() if "avx2" not in line),
+    )
+    verdict, kinds = _kinds(tmp_path, (_ISA_H, _ISA_C), new, "c", "castxml")
+    assert "CPU_DISPATCH_ISA_DROPPED" in kinds
+    assert "FUNC_REMOVED" not in kinds
+    assert verdict == "COMPATIBLE_WITH_RISK"

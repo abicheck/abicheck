@@ -64,6 +64,9 @@ GAP_OVERLOAD_STEM = (
 GAP_CLOSURE_RETURN = (
     "The unspecified-return check does not know castxml's or clang's closure spelling"
 )
+GAP_CPU_DISPATCH = (
+    "The CPU-dispatch roll-up reads the removal of declared ISA kernels as a risk"
+)
 GAP_O2_STD = (
     "An `-O2` rebuild of a C++ library that uses `std::string` reads as a risk on gcc, "
     "or a break on MinGW"
@@ -277,6 +280,17 @@ _BACKEND_GAPS: tuple[Known, ...] = (
 
 # Detector gaps that hold on every header backend (and DWARF where noted).
 _DETECTOR_GAPS: tuple[Known, ...] = (
+    Known(
+        "cpu_dispatch_isa_dropped",
+        _ELF,
+        "wrong-verdict",
+        _ev("headers", "dwarf"),
+        "the dropped tier's k*_avx2 exports are rolled up into a RISK finding "
+        "although the header declares them and a pinned consumer fails to load",
+        GAP_CPU_DISPATCH,
+        issues=frozenset({"missing:SONAME_BUMP_RECOMMENDED", "weaker-than:BREAKING"}),
+        verdicts=frozenset({"COMPATIBLE_WITH_RISK"}),
+    ),
     Known(
         "overload_rerouted",
         _MORE,
