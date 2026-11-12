@@ -69,6 +69,7 @@ __all__ = [
     "extractor_generation_of",
     "pending_extent_shift",
     "migrate_and_describe",
+    "retired_function_prefixes_between",
     "without_snapshot_generation_notices",
 ]
 
@@ -124,6 +125,21 @@ def erased_extents_restored_between(generation_a: int, generation_b: int) -> boo
         change.restores_erased_extents
         for introduced, change in SPELLING_MIGRATIONS.items()
         if low < introduced <= high
+    )
+
+
+def retired_function_prefixes_between(
+    generation_a: int, generation_b: int
+) -> tuple[str, ...]:
+    """Function-name prefixes a generation in between the two (either order)
+    stopped recording: an entity the older operand holds only as an extractor
+    artifact."""
+    low, high = sorted((generation_a, generation_b))
+    return tuple(
+        prefix
+        for introduced in sorted(SPELLING_MIGRATIONS)
+        if low < introduced <= high
+        for prefix in SPELLING_MIGRATIONS[introduced].retires_function_prefixes
     )
 
 

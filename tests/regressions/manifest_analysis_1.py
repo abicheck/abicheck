@@ -807,6 +807,7 @@ ANALYSIS_1_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
         fixed_by=(920,),
         seed_tests=(
+            "tests/test_castxml_artificial_builtin_integration.py",
             "tests/test_castxml_compiler_generated.py",
             "tests/test_dumper_clang_compiler_generated.py",
             "tests/test_serialization_function_compiler_generated.py",
