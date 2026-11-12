@@ -42,7 +42,8 @@ def _load(path: Path):  # type: ignore[no-untyped-def]
 
 
 FRAG = _load(FORMAL / "experiments" / "layout_fragment.py")
-DATA = json.loads((FORMAL / "lean" / "fragment_cases.json").read_text(encoding="utf-8"))
+RAW = json.loads((FORMAL / "lean" / "fragment_cases.json").read_text(encoding="utf-8"))
+DATA = FRAG.load_export()
 ROWS: list[dict] = DATA["rows"]
 CLASSES: list[dict] = DATA["classes"]
 SIZES = (1, 2, 4, 8)
@@ -97,11 +98,37 @@ def test_generator_is_a_bijection_onto_the_space() -> None:
 
 
 def test_generator_realizes_leans_gen() -> None:
-    """The C text the generator emits is the rendering of Lean's `gen` for that case."""
+    """The C text the generator emits is the rendering of Lean's `gen`, case by case.
+
+    Lean exports an FNV-1a-64 checksum of `gen c` rendered for every case in
+    `space` order, and the full text for each class representative. The
+    generator's own programs, decoded and put in Lean's order, must give the
+    same checksum (a mismatch in any one case's text changes it).
+    """
     by_case = {FRAG.decode(p): p for p in FRAG.generate()}
-    for r in ROWS:
-        p = by_case[_case(r)]
-        assert (p.old_body, p.new_body) == (r["old_body"], r["new_body"]), r["id"]
+    ordered = [by_case[_case(r)] for r in ROWS]
+    assert str(FRAG.fnv1a64(ordered)) == RAW["gen_fnv1a64"]
+    for cls in CLASSES:
+        p = by_case[_case(ROWS[cls["rep"]])]
+        assert (p.old_body, p.new_body) == (cls["rep_old_body"], cls["rep_new_body"])
+
+
+def test_checksum_detects_a_one_character_change() -> None:
+    """Negative control for the checksum comparison above."""
+    by_case = {FRAG.decode(p): p for p in FRAG.generate()}
+    ordered = [by_case[_case(r)] for r in ROWS]
+    i = len(ordered) // 2
+    bad = (
+        ordered[:i]
+        + [FRAG.Program(ordered[i].old_body, ordered[i].new_body.replace("ins", "inz"))]
+        + ordered[i + 1 :]
+    )
+    assert str(FRAG.fnv1a64(bad)) != RAW["gen_fnv1a64"]
+
+
+def test_export_stays_under_the_large_file_threshold() -> None:
+    """AgentReady flags checked-in files over 1,000,000 bytes (PR readiness gate)."""
+    assert (FORMAL / "lean" / "fragment_cases.json").stat().st_size < 1_000_000
 
 
 @pytest.mark.parametrize(

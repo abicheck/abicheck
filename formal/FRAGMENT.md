@@ -20,7 +20,9 @@ and the 32-case reduced set contains one case of each of the 32 classes
 
 Files: [`lean/AbiLean/Fragment.lean`](lean/AbiLean/Fragment.lean) (space,
 generator, oracle, theorems), [`lean/AbiLean/FragmentExport.lean`](lean/AbiLean/FragmentExport.lean)
-→ [`lean/fragment_cases.json`](lean/fragment_cases.json),
+→ [`lean/fragment_cases.json`](lean/fragment_cases.json) (one compact row
+per case: inputs, old/new layout, class; one row per class: key, findings,
+verdict, representative; the `gen` checksum),
 [`experiments/layout_fragment.py`](experiments/layout_fragment.py) (C
 generator, compiler and abicheck run),
 [`../tests/test_formal_layout_fragment.py`](../tests/test_formal_layout_fragment.py).
@@ -71,7 +73,12 @@ its own enumeration order. `test_generator_is_a_bijection_onto_the_space`
 decodes each of its programs from the C text and checks the result is a
 bijection onto the space predicate, enumerated again in the test with
 `itertools`; `test_generator_realizes_leans_gen` checks that its text for
-every case equals the rendering of Lean's `gen`. Field names are part of a
+every case equals the rendering of Lean's `gen`: the export carries an
+FNV-1a-64 checksum of `gen c` rendered for all 6368 cases in `space` order
+(and the full text for the 32 representatives), and the generator's own
+programs, decoded and put in that order, must reproduce it. Storing the
+checksum instead of every program keeps `fragment_cases.json` at ~370 KB,
+under the repository's 1 MB large-file threshold. Field names are part of a
 case: `{char f0}` with `char ins` at 0 and at 1 give the same type list but
 different cases (in one `f0` moves, in the other it does not).
 
@@ -160,7 +167,7 @@ the castxml parse dominate small batches. Generating and proving costs:
 |---|---|
 | The enumeration is exactly the space, without duplicates, 6368 cases | **proved** (Lean) |
 | The abstract generator is a bijection between the space and its image | **proved** (Lean) |
-| The C generator realizes the abstract one, and is a bijection onto the space | **tested** exhaustively (6368 programs, text compared with Lean's `gen`) |
+| The C generator realizes the abstract one, and is a bijection onto the space | **tested** exhaustively (6368 programs; text compared with Lean's `gen` by checksum over all cases, and verbatim for the 32 representatives) |
 | Oracle findings/verdict per case from the layout model | **computed** in Lean; re-derived by an independent implementation in the tests |
 | Same observable result ⇔ same key; the moved fields form an interval | **proved** (Lean), for the model |
 | The reduced set contains every class once | **tested** exhaustively |

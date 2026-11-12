@@ -77,10 +77,29 @@ def generate() -> list[Program]:
         for n in range(MAX_FIELDS, 0, -1):
             for pos in range(n, -1, -1):
                 for base in itertools.product(SIZES, repeat=n):
-                    old = [(CTYPE[b], f"f{j}") for j, b in enumerate(base)]
-                    new = old[:pos] + [(CTYPE[ins], "ins")] + old[pos:]
-                    out.append(Program(_body(old), _body(new)))
+                    out.append(render(base, pos, ins))
     return out
+
+
+def render(base: tuple[int, ...], pos: int, ins: int) -> Program:
+    """The generator's C program pair for one case."""
+    old = [(CTYPE[b], f"f{j}") for j, b in enumerate(base)]
+    new = old[:pos] + [(CTYPE[ins], "ins")] + old[pos:]
+    return Program(_body(old), _body(new))
+
+
+def fnv1a64(programs: list[Program]) -> int:
+    """FNV-1a-64 over ``old_body\\n new_body\\n`` of each pair, in order.
+
+    Same function as ``fnv1a64``/``genChecksum`` in FragmentExport.lean, so
+    comparing it with the export's ``gen_fnv1a64`` checks the generator's text
+    against Lean's ``gen`` for every case.
+    """
+    h = 14695981039346656037
+    for p in programs:
+        for b in (p.old_body + "\n" + p.new_body + "\n").encode():
+            h = ((h ^ b) * 1099511628211) % 2**64
+    return h
 
 
 _DECL = re.compile(r"(\w+) (\w+);")
@@ -115,7 +134,34 @@ def decode(p: Program) -> tuple[tuple[int, ...], int, int] | None:
 
 
 def load_export() -> dict:
-    return json.loads(EXPORT.read_text(encoding="utf-8"))
+    """The Lean export, with each compact row expanded to a dict.
+
+    A row ``[base, pos, ins, old, new, class]`` becomes ``{"id", "base",
+    "pos", "ins", "old", "new", "class", "rep", "old_body", "new_body"}``; the
+    bodies are this generator's rendering (checked against Lean's ``gen`` by
+    the export's ``gen_fnv1a64``), ``rep`` marks each class's representative.
+    """
+    data = json.loads(EXPORT.read_text(encoding="utf-8"))
+    reps = {c["rep"] for c in data["classes"]}
+    rows = []
+    for i, (base, pos, ins, old, new, cls) in enumerate(data["rows"]):
+        p = render(tuple(base), pos, ins)
+        rows.append(
+            {
+                "id": i,
+                "base": base,
+                "pos": pos,
+                "ins": ins,
+                "old": old,
+                "new": new,
+                "class": cls,
+                "rep": i in reps,
+                "old_body": p.old_body,
+                "new_body": p.new_body,
+            }
+        )
+    data["rows"] = rows
+    return data
 
 
 # --------------------------------------------------------------------- build
