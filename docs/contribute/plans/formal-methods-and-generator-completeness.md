@@ -105,9 +105,10 @@ vptr, templates). Each fragment is one Lean module on a shared core
 ## Next steps after the experiments
 
 1. **Generator:** split the layout operators by the proved conditions, and add
-   padding-absorbed operators (insert or append without a layout change) with
-   *computed* expectations from `formal/lean/layout_table.json`. This closes
-   the false-positive side E2 found uncovered.
+   the two missing padding-absorbed operators: insert without moving later
+   fields, and remove without shrinking sizeof. Append-into-padding already
+   exists (`field_added_in_tail_padding`, #1999). Take their expectations from
+   `formal/lean/layout_table.json`, not from the class.
 2. **Generator space:** add an *edit* axis to `tests/_edit_corpus_space.py`,
    so coverage can say which edit sub-classes ran, not only which constructs.
 3. **Disposition:** decide on E7's proposal (a structural precondition for the

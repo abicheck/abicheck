@@ -7,7 +7,7 @@ Run date 2026-11-12. Tools: Lean 4.15.0 (core only), gcc 13.3.0, castxml 0.7.0, 
 | Id | Question | Answer |
 |---|---|---|
 | E1 | Can the record-layout space be stated so that "gap" is decidable? | **Yes**, for a bounded fragment ([§ E1](#e1-the-record-layout-space)). The generator's own space has no *edit* axis, which is why "coverage" could not express what was missing |
-| E2 | Do the generator's layout expectations hold? Do they have holes? | All 6 C layout operators agree with the model on their seed. Only 1 is valid **class-wide** (proved). The padding-absorbed sub-classes are **not generated at all** |
+| E2 | Do the generator's layout expectations hold? Do they have holes? | All 6 C layout operators agree with the model on their seed. Only 1 is valid **class-wide** (proved). Padding-absorbed sub-classes are barely generated: append-into-tail-padding arrived concurrently in #1999; insert-without-move and remove-without-shrink are still missing |
 | E3 | Can expectations be *computed* from a model instead of hand-written? | **Yes** for layout: Lean computes offsets and sizeof for 1248 edit cases, and the result is exported as a table |
 | E4 | Does one representative per edit class suffice? | **No.** 19% of "insert before f" cases leave f in place, and 25% of "append" cases keep sizeof. Proved sufficient conditions split the classes correctly |
 | E5 | Does abicheck detect all of the bounded space? | **Yes**: 0 mismatches over 3488 field-offset and 1248 size predictions |
@@ -47,12 +47,21 @@ Seed `c_core`: `struct rec { int id; double weight; char tag[8]; }`, `struct poi
 | `struct_array_grow` (`tag[8]`→`[16]`) | offsets kept, 24 → 32 | No: `tag[1]`→`[2]` after a `double` keeps 16 |
 | `struct_array_shrink_in_padding` | layout identical → operator expects API_BREAK | consistent |
 
-**Finding (coverage gap, not an abicheck defect).** Except
-`struct_array_shrink_in_padding`, the generator never produces an edit whose
-change padding absorbs: a field inserted without moving later fields, or a
-field appended or removed without changing sizeof. Those are exactly the cases
-where a *false positive* would show up. E5 shows abicheck handles them
-correctly today. Nothing would catch a regression there.
+**Finding (coverage gap, not an abicheck defect).** The edits whose change
+padding absorbs are exactly the cases where a *false positive* would show up.
+In the generator:
+
+- `struct_array_shrink_in_padding` already covers one of them;
+- `field_added_in_tail_padding` (C++ seed, landed concurrently in #1999,
+  `struct FC { int a; char b; }` + `char c`) covers append-into-tail-padding.
+  It is literally the Lean counterexample `append_class_not_determined`, which
+  proves sizeof stays 8;
+- **still missing**: a field *inserted* in the middle without moving later
+  fields (`{char a; int b}` → insert `char`), and a trailing field *removed*
+  without shrinking sizeof (`{double; int; char}` → drop `char`).
+
+E5 shows abicheck handles all of these correctly today. For the missing two,
+nothing in the generator would catch a regression.
 
 ## E3/E4. Computed expectations and class reduction
 
