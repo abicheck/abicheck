@@ -85,7 +85,8 @@ class DebugRecordFacts:
                 {
                     f.name: f.byte_offset * 8
                     for f in layout.fields
-                    if f.name and not f.bit_size
+                    # An unknown offset is not compared at all (no key).
+                    if f.name and not f.bit_size and f.byte_offset is not None
                 }
             ),
         )
