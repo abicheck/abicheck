@@ -36,9 +36,6 @@ GAP_GCC_UNEXPORTED = (
     "The native gcc header backend keeps an unexported declaration PUBLIC"
 )
 GAP_CASTXML_TRAITS = "castxml records no standard-layout trait or data size"
-GAP_INSTANTIATION_STEM = (
-    "A dropped template instantiation reads only `func_removed` at headers depth"
-)
 GAP_PIMPL_COMPAT = (
     "The inline-body rename check ignores a renamed member that reads "
     "`type_field_added_compatible`"
@@ -56,10 +53,6 @@ GAP_GCC_TYPEDEF_RETURN = (
 )
 GAP_CASTXML_STD_LEAF = (
     "castxml's bare `std` leaf hides a std type passed by value from the idiom check"
-)
-GAP_OVERLOAD_STEM = (
-    "Overload-set and instantiation checks group by a demangled name that keeps "
-    "its signature"
 )
 GAP_CLOSURE_RETURN = (
     "The unspecified-return check does not know castxml's or clang's closure spelling"
@@ -291,16 +284,6 @@ _DETECTOR_GAPS: tuple[Known, ...] = (
         issues=frozenset({"missing:SONAME_BUMP_RECOMMENDED", "weaker-than:BREAKING"}),
         verdicts=frozenset({"COMPATIBLE_WITH_RISK"}),
     ),
-    Known(
-        "overload_rerouted",
-        _MORE,
-        "wrong-kind",
-        _ev("headers"),
-        "overloads are grouped by their demangled signature, so none share a stem",
-        GAP_OVERLOAD_STEM,
-        issues=frozenset({"missing:OVERLOAD_SET_REROUTED"}),
-        verdicts=frozenset({"BREAKING"}),
-    ),
     _backend_gap(
         "unspecified_return_now_named",
         _MORE,
@@ -320,17 +303,6 @@ _DETECTOR_GAPS: tuple[Known, ...] = (
         GAP_CLOSURE_RETURN,
         frozenset({"missing:UNSPECIFIED_RETURN_NOW_NAMED", "stronger-than:API_BREAK"}),
         "BREAKING",
-    ),
-    Known(
-        "explicit_instantiation_dropped",
-        _MORE,
-        "wrong-kind",
-        _ev("headers"),
-        "the demangled stems keep their return types (int getv vs long getv), so "
-        "the dropped instantiation reads only func_removed",
-        GAP_INSTANTIATION_STEM,
-        issues=frozenset({"missing:INSTANTIATION_MISSING_FROM_BINARY"}),
-        verdicts=frozenset({"BREAKING"}),
     ),
     Known(
         "pimpl_member_renamed_under_inline_accessor",

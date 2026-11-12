@@ -1038,4 +1038,35 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "evidence": ("synthetic ElfMetadata", "gcc-built .so + loader run"),
         },
     ),
+    BugClass(
+        id="classification.demangled_signature_used_as_entity_name",
+        invariant=(
+            "A check that groups functions by name (an overload set, the "
+            "instantiations of one template) keys on the entity's name: the "
+            "scope, the leaf and nothing else. The demangled form of a real "
+            "Itanium symbol is a signature -- it carries the parameter list, "
+            "and for a function template the return type -- so keying on it "
+            "puts every overload and every instantiation in a group of its "
+            "own, and the check never fires on a header snapshot (whose "
+            "functions carry real manglings) although it passes on fixtures "
+            "with invented ones."
+        ),
+        # Found by the generated edit corpus (overload_rerouted,
+        # explicit_instantiation_dropped).
+        fixed_by=(2027,),
+        seed_tests=("tests/test_template_stem_real_mangling.py",),
+        axes={
+            "parameter type": (
+                "int",
+                "long",
+                "double",
+                "float",
+                "char",
+                "unsigned int",
+            ),
+            "set size": ("one", "two", "three"),
+            "shape": ("free-function overload", "function-template instantiation"),
+            "change": ("swap", "pure addition", "pure removal", "drop one", "drop all"),
+        },
+    ),
 )

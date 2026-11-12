@@ -229,20 +229,16 @@ _GETV_C = (
 )
 
 
-@pytest.mark.known_gap_canary
-def test_a_dropped_instantiation_reads_only_func_removed_under_headers(
-    tmp_path: Path,
-) -> None:
-    """getv<long> dropped while getv<int> stays: the demangled names keep their
-    return types (``int getv<int>`` vs ``long getv<long>``), so the stems
-    differ and instantiation_missing_from_binary never fires."""
+def test_a_dropped_instantiation_is_reported_under_headers(tmp_path: Path) -> None:
+    """getv<long> dropped while getv<int> stays: the stems match although the
+    demangled names keep their return types (formerly a known-gap canary)."""
     new = (
         _GETV_H.replace("extern template long getv<long>(long);", ""),
         _GETV_C.replace("template long getv<long>(long);", ""),
     )
     verdict, kinds = _kinds(tmp_path, (_GETV_H, _GETV_C), new, "c++", "castxml")
     assert "FUNC_REMOVED" in kinds
-    assert "INSTANTIATION_MISSING_FROM_BINARY" not in kinds
+    assert "INSTANTIATION_MISSING_FROM_BINARY" in kinds
 
 
 _PIMPL = (
@@ -322,13 +318,9 @@ def test_a_return_respelled_through_a_renamed_typedef_reads_breaking(
     assert verdict == "BREAKING"
 
 
-@pytest.mark.known_gap_canary
-def test_an_overload_swapped_for_another_is_not_grouped_as_rerouted(
-    tmp_path: Path,
-) -> None:
-    """route(int)+route(double) -> route(int)+route(float): the overload check
-    groups by the demangled name, which still carries the parameter list
-    (``route(double)``), so no two overloads ever share a stem."""
+def test_an_overload_swapped_for_another_is_reported_rerouted(tmp_path: Path) -> None:
+    """route(int)+route(double) -> route(int)+route(float) on real castxml
+    snapshots (formerly a known-gap canary)."""
     old = (
         "int route(int a);\nint route(double a);",
         "int route(int a) { return a; }\nint route(double a) { return (int)a; }",
@@ -336,7 +328,7 @@ def test_an_overload_swapped_for_another_is_not_grouped_as_rerouted(
     new = tuple(t.replace("double", "float") for t in old)
     _, kinds = _kinds(tmp_path, old, new, "c++", "castxml")  # type: ignore[arg-type]
     assert {"FUNC_REMOVED", "FUNC_ADDED"} <= kinds
-    assert "OVERLOAD_SET_REROUTED" not in kinds
+    assert "OVERLOAD_SET_REROUTED" in kinds
 
 
 _AUTO_OLD = (
