@@ -15,6 +15,7 @@ the expansion, so the harness is known to reproduce the Windows behaviour.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import textwrap
@@ -44,7 +45,10 @@ def _pathspecs(
     (tmp_path / "include").mkdir(exist_ok=True)
     for name in ("include/f0.h", "include/f1.h", "a.h", "b.h"):
         (tmp_path / name).write_text("", encoding="utf-8")
-    env = {"PATH": "", "HOME": str(tmp_path), "PYTHONPATH": str(_REPO)}
+    # Inherit the environment: a Windows child without SYSTEMROOT cannot even
+    # initialise Winsock (asyncio's import fails with WinError 10106).
+    env = {**os.environ, "HOME": str(tmp_path), "PYTHONPATH": str(_REPO)}
+    env.pop("CLICK_DEFAULT", None)
     if click_default:
         env["CLICK_DEFAULT"] = "1"
     return subprocess.run(
