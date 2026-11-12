@@ -59,6 +59,11 @@ class EditOp:
     # toolchain whose default differs leaves the binary unchanged, so the
     # cell is unavailable rather than given a family-guessed expectation.
     default_macro: tuple[str, bool] | None = None
+    # Host CPUs (``platform.machine()``, lower-cased) the edit's asm or ``-m``
+    # switches need: the corpus builds natively, so another host makes the
+    # cell unavailable. Probed by ``capability_gap``, never in ``requires``,
+    # so the cell list (and the PR floor check built from it) is host-free.
+    host_arch: frozenset[str] = frozenset()
     # The language-space constructs the edit exercises, when its roles do not
     # say it (``_edit_corpus_space.op_constructs``); empty = read the roles.
     constructs: tuple[str, ...] = ()

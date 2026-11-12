@@ -13,7 +13,6 @@ import itertools
 import json
 import sys
 from pathlib import Path
-from unittest import mock
 
 import pytest
 
@@ -46,10 +45,6 @@ CLANG = Toolchain("clang", 18, "clang", "clang++")
 # for that platform, not for whatever host runs the check: ``Config.platform``
 # defaults to the host, and expectations differ per object format.
 PR_TIER_PLATFORM = ("linux", "elf")
-# The PR tier's runners are x86-64; operator preconditions that read the host
-# machine (the corpus builds natively, so the host is the target) are judged
-# for that machine, not for an arm64 macOS or AMD64 Windows checking host.
-PR_TIER_MACHINE = "x86_64"
 
 
 def _pr_config(lang: str, toolchain: Toolchain) -> Config:
@@ -58,17 +53,18 @@ def _pr_config(lang: str, toolchain: Toolchain) -> Config:
 
 def _pr_default_matrix() -> list[tuple[object, object]]:
     """The default-matrix cells as the PR tier selects them on its own
-    runners: ``op.requires`` judged for a Linux x86-64 ELF build, where
-    ``test_abi_edit_corpus.default_matrix`` judges them for the host."""
+    runners: ``op.requires`` judged for a Linux ELF build, where
+    ``test_abi_edit_corpus.default_matrix`` judges them for the host. The
+    host CPU is no part of it: an operator that needs x86 declares
+    ``host_arch``, which ``capability_gap`` reads when the cell runs."""
     from tests.test_abi_edit_corpus import matrix
 
     placeholder = Toolchain("gcc", 0, "gcc", "g++")
-    with mock.patch("platform.machine", return_value=PR_TIER_MACHINE):
-        return [
-            (op, seed)
-            for op, seed in matrix()
-            if op.requires(_pr_config(seed.lang, placeholder)) is None
-        ]
+    return [
+        (op, seed)
+        for op, seed in matrix()
+        if op.requires(_pr_config(seed.lang, placeholder)) is None
+    ]
 
 
 # --- ChangeKind scope -----------------------------------------------------------
@@ -348,10 +344,10 @@ def test_pr_tier_expectations_do_not_depend_on_the_checking_host(
     monkeypatch: pytest.MonkeyPatch, host: str, machine: str
 ) -> None:
     """The floor check must give one answer on every unit-test leg: the PR
-    cells, and their expectations, are those of the Linux x86-64 ELF runners,
-    wherever the check runs. Both host facts the corpus reads are varied: the
-    platform (``Config.platform`` defaults to it) and the machine (operator
-    preconditions read it)."""
+    cells, and their expectations, are those of the Linux ELF runners,
+    wherever the check runs. Both host facts are varied: the platform
+    (``Config.platform`` defaults to it) and the machine, which no
+    ``requires`` may read (``host_arch`` is a run-time capability)."""
     linux = _pr_tier_declared()
     monkeypatch.setattr(sys, "platform", host)
     monkeypatch.setattr("platform.machine", lambda: machine)
