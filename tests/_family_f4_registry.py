@@ -169,6 +169,10 @@ EXEMPTION_REASONS: dict[str, str] = {
 #: exemption category (maintained by hand -- the completeness test says what
 #: to add or drop).
 HEURISTICS: dict[str, str] = {
+    # A SPELLING_MIGRATIONS row's retired function-name prefixes (castxml's
+    # compiler-declared __builtin_*, reserved to the implementation) between
+    # operands that straddle the retiring generation (policy/retired_function_drift).
+    "abicheck.policy.retired_function_drift::demote_retired_function_drift::affix.startswith:retired_prefixes": "platform",
     # The dual-ABI pairing key canonicalizes libstdc++'s basic_string
     # spellings (and whitespace) in a demangled C++ name: a type spelling.
     "abicheck.compare.glibcxx_dual_abi::<module>::re:'std::basic_string<\\\\s*(?P<ch>' + '|'.join(_CHAR_TYPES) + ')\\\\s*,\\\\s*...": "spelling",

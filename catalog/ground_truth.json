@@ -2571,7 +2571,7 @@
       "inline_function_removed",
       "public_surface_shrank"
      ],
-     "reason": "refinement, not a loss: these are C++ implicit special members (Context()/operator=/~Context, __builtin_memcpy) castxml synthesizes when debug-headers parses the C header as C++; build-source's --build-info compile command (-std=gnu11) parses it as C, where those members do not exist",
+     "reason": "refinement, not a loss: these are C++ implicit special members (Context()/operator=/~Context) castxml synthesizes when debug-headers parses the C header as C++; build-source's --build-info compile command (-std=gnu11) parses it as C, where those members do not exist",
      "frontends": [
       "castxml"
      ]
@@ -2627,7 +2627,7 @@
       "inline_function_removed",
       "public_surface_shrank"
      ],
-     "reason": "refinement, not a loss: these are C++ implicit special members (Context()/operator=/~Context, __builtin_memcpy) castxml synthesizes when debug-headers parses the C header as C++; build-source's --build-info compile command (-std=gnu11) parses it as C, where those members do not exist",
+     "reason": "refinement, not a loss: these are C++ implicit special members (Context()/operator=/~Context) castxml synthesizes when debug-headers parses the C header as C++; build-source's --build-info compile command (-std=gnu11) parses it as C, where those members do not exist",
      "frontends": [
       "castxml"
      ]

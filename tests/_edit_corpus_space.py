@@ -8,10 +8,12 @@ A *point* in the space is one combination of six axes::
 - **construct** (``CONSTRUCTS``): the language construct an edit operator
   changes, read off the operator's roles (``ROLE_CONSTRUCT``) or, when it needs
   a language feature, off that feature (``FEATURE_CONSTRUCT``);
-- **edit** (``STRUCT_EDIT_CLASSES``, ``edit_values``): the sub-class of the
-  edit within its construct. Record layout splits by its effect on offsets and
-  sizeof (insert/append/remove, absorbed by padding or not); every other
-  construct has the single value ``any``, so its denominator is unchanged;
+- **edit** (``edit_values``): the class of the edit within its construct, as
+  ``_edit_corpus_edit_model`` defines it from C/C++ layout rules, not from the
+  operators. Record layout (``struct``) and base-class layout
+  (``inheritance``) are split; every other construct has the single value
+  ``any``. A model class no operator generates stays in the denominator and
+  is listed by ``edit_classes_without_operator``;
 - **language** / **standard**: ``_edit_corpus_config.STANDARDS``;
 - **config feature** (``CONFIG_FEATURES``): one ABI-relevant setting the cell
   turns on (``baseline`` = none of them), on either side of a rebuild;
@@ -47,6 +49,7 @@ from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from tests import _edit_corpus_edit_model as _model
 from tests._edit_corpus_config import (
     EVIDENCE,
     FAMILIES,
@@ -248,64 +251,94 @@ def op_constructs(op: EditOp) -> tuple[str, ...]:
 
 # --- edit sub-classes -------------------------------------------------------
 #
-# A construct says what an edit touches, not how. Record layout is the one
-# construct whose edits split by their layout effect: whether a member is
-# added or removed, and whether the bytes it takes come from padding (the
-# offsets and sizeof that follow are then unchanged) or move or resize
-# everything after them. ``formal/EXPERIMENTS.md`` (E4) shows why a single
-# representative per class is unsound: the same edit can be absorbed or not
-# depending on the layout it lands in.
+# A construct says what an edit touches, not how. The classes an edit can
+# fall into are defined by ``_edit_corpus_edit_model`` from C/C++ layout rules,
+# independently of the operators: every class there is a value of the edit
+# axis, and so enters the denominator, whether or not an operator generates
+# it. ``formal/EXPERIMENTS.md`` (E4) shows why a single representative per
+# construct is unsound: the same edit can be absorbed or not depending on the
+# layout it lands in.
 #
-# Every other construct has one edit value, ``ANY_EDIT``: its edits are not
-# split, so its denominator is unchanged.
+# ``OP_EDIT_CLASS`` is the other direction: which model class each operator
+# of a split construct exercises. It may only name classes the model has, and
+# every operator of a split construct must be in it (no catch-all class). A
+# model class no operator maps to is reported by
+# ``edit_classes_without_operator`` as an explicit uncovered gap.
 
-ANY_EDIT = "any"
+ANY_EDIT = _model.ANY_EDIT
 
-STRUCT_EDIT_CLASSES: tuple[str, ...] = (
-    "append_grows",
-    "append_absorbed",
-    "insert_absorbed",
-    "remove_shrinks",
-    "remove_absorbed",
-    "reorder_moves",
-    "widen",
-    "array_grow",
-    "array_shrink_absorbed",
-    # Struct edits that change no member layout: packing, qualifiers, bit-fields,
-    # renames, record kind. Named so that every struct operator has one class.
-    "member_other",
-)
-
-# Record-layout operator -> its sub-class. Every ``struct`` operator not listed
-# is ``member_other``. ``insert_moves`` has no operator yet, so it is not a
-# value: a class with no operator would be a coverage claim with nothing behind it.
-LAYOUT_EDIT_CLASS: dict[str, str] = {
-    "struct_append_field": "append_grows",
-    "field_added_in_tail_padding": "append_absorbed",
-    "field_inserted_in_padding": "insert_absorbed",
-    "struct_remove_trailing_field": "remove_shrinks",
-    "field_removed_without_shrink": "remove_absorbed",
-    "struct_swap_fields": "reorder_moves",
-    "struct_field_widen": "widen",
-    "struct_array_grow": "array_grow",
-    "struct_array_shrink_in_padding": "array_shrink_absorbed",
-}
-
-EDIT_CLASSES_BY_CONSTRUCT: dict[str, tuple[str, ...]] = {
-    "struct": STRUCT_EDIT_CLASSES,
+OP_EDIT_CLASS: dict[str, dict[str, str]] = {
+    "struct": {
+        "struct_append_field": "insert_tail_shifts",
+        "field_added_in_tail_padding": "insert_tail_absorbed",
+        "field_inserted_in_padding": "insert_middle_absorbed",
+        "struct_remove_trailing_field": "remove_tail_shifts",
+        "field_removed_without_shrink": "remove_middle_absorbed",
+        "struct_swap_fields": "reorder",
+        "struct_field_widen": "retype_grows",
+        "struct_array_grow": "array_grow_shifts",
+        "struct_array_shrink_in_padding": "array_shrink_absorbed",
+        "rebuild_pack_struct": "packing_change",
+        "record_became_packed": "packing_change",
+        "field_became_bitfield": "field_to_bitfield",
+        "field_renamed": "member_rename",
+        "field_became_const": "member_cv_change",
+        "field_became_volatile": "member_cv_change",
+        "record_became_opaque": "record_opaque",
+        "struct_became_union": "record_kind_change",
+        "record_removed": "record_removed",
+    },
+    "inheritance": {
+        "base_became_virtual": "base_became_virtual",
+        "bases_reordered": "base_reorder",
+        "primary_base_grew": "base_layout_changed",
+        "vtt_grew": "base_add_virtual",
+    },
 }
 
 
 def edit_values(construct: str) -> tuple[str, ...]:
-    """The edit sub-classes a construct's points are split into."""
-    return EDIT_CLASSES_BY_CONSTRUCT.get(construct, (ANY_EDIT,))
+    """The edit classes a construct's points are split into: the model's."""
+    return _model.model_classes(construct)
 
 
 def edit_class(op: EditOp, construct: str) -> str:
-    """The edit sub-class *op* exercises under *construct*."""
-    if construct not in EDIT_CLASSES_BY_CONSTRUCT:
+    """The edit class *op* exercises under *construct*.
+
+    Raises ``KeyError`` for an operator of a split construct that
+    ``OP_EDIT_CLASS`` does not place: a new operator must say which class it
+    generates (``test_edit_corpus_edit_axis`` names it).
+    """
+    if construct not in _model.EDIT_MODEL:
         return ANY_EDIT
-    return LAYOUT_EDIT_CLASS.get(op.name, "member_other")
+    try:
+        return OP_EDIT_CLASS[construct][op.name]
+    except KeyError:
+        raise KeyError(
+            f"operator {op.name!r} edits {construct!r} but has no edit class in "
+            "OP_EDIT_CLASS"
+        ) from None
+
+
+def edit_classes_without_operator() -> tuple[str, ...]:
+    """Model classes (``construct/class``) no operator generates: the gaps."""
+    mapped = {(con, cls) for con, ops in OP_EDIT_CLASS.items() for cls in ops.values()}
+    return tuple(
+        c.id for c in _model.all_model_classes() if (c.construct, c.name) not in mapped
+    )
+
+
+def edit_class_report() -> dict[str, dict[str, list[str]]]:
+    """Per split construct, each model class and the operators that generate it
+    (an empty list is a gap)."""
+    out: dict[str, dict[str, list[str]]] = {}
+    for con, classes in _model.EDIT_MODEL.items():
+        ops = OP_EDIT_CLASS.get(con, {})
+        out[con] = {
+            c.name: sorted(o for o, cls in ops.items() if cls == c.name)
+            for c in classes
+        }
+    return out
 
 
 # --- config features --------------------------------------------------------
@@ -543,6 +576,10 @@ def coverage(covered: Iterable[Point], top: int = 20) -> dict[str, object]:
         row = per_axis[axis][value]
         return row["covered"] / row["feasible"]
 
+    def per_axis_edit(con: str, cls: str) -> dict[str, int]:
+        pts = [p for p in feasible if p.construct == con and p.edit == cls]
+        return {"covered": sum(p in got for p in pts), "feasible": len(pts)}
+
     gaps = sorted(
         feasible - got,
         key=lambda p: (sum(ratio(a, p.axis(a)) for a in AXES), p),
@@ -555,6 +592,20 @@ def coverage(covered: Iterable[Point], top: int = 20) -> dict[str, object]:
         "top_uncovered": [p.id for p in gaps[:top]],
         # A covered point the model calls infeasible: the model is wrong.
         "covered_but_infeasible": impossible,
+        # Per split construct, each model edit class: its generating operators
+        # and covered / feasible points. A class with no operator is still in
+        # the denominator, and listed in ``edit_classes_without_operator``.
+        "edit_classes": {
+            con: {
+                cls: {
+                    "operators": ops,
+                    **per_axis_edit(con, cls),
+                }
+                for cls, ops in classes.items()
+            }
+            for con, classes in edit_class_report().items()
+        },
+        "edit_classes_without_operator": list(edit_classes_without_operator()),
     }
 
 
@@ -576,10 +627,11 @@ __all__ = [
     "AXES",
     "CONFIG_AXIS",
     "CONSTRUCTS",
-    "LAYOUT_EDIT_CLASS",
+    "OP_EDIT_CLASS",
     "Point",
-    "STRUCT_EDIT_CLASSES",
     "edit_class",
+    "edit_class_report",
+    "edit_classes_without_operator",
     "edit_values",
     "SPACE_EVIDENCE",
     "all_points",

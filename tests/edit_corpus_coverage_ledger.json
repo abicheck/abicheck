@@ -276,6 +276,27 @@
     "VAR_EXPORT_ADDED",
     "VIRTUAL_BASE_OFFSET_CHANGED"
   ],
+  "edit_classes_without_operator": [
+    "struct/insert_head_shifts",
+    "struct/insert_middle_shifts",
+    "struct/remove_head_shifts",
+    "struct/remove_middle_shifts",
+    "struct/remove_tail_absorbed",
+    "struct/retype_same_layout",
+    "struct/retype_shrinks",
+    "struct/retype_align_only",
+    "struct/array_grow_absorbed",
+    "struct/array_shrink_shifts",
+    "struct/bitfield_to_field",
+    "struct/bitfield_width_absorbed",
+    "struct/bitfield_width_shifts",
+    "struct/record_align_change",
+    "struct/record_added",
+    "inheritance/base_add_nonvirtual",
+    "inheritance/base_remove",
+    "inheritance/base_became_nonvirtual",
+    "inheritance/base_access_changed"
+  ],
   "out_of_scope": [
     "ABI_RELEVANT_BUILD_FLAG_CHANGED",
     "API_DEPENDS_ON_CONSUMER_ENV",

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -39,6 +40,15 @@ from tests._edit_corpus_tiers import _PR
 
 GCC = Toolchain("gcc", 13, "gcc", "g++")
 CLANG = Toolchain("clang", 18, "clang", "clang++")
+# The PR tier runs, and its verified floor was raised, on Linux ELF only. A
+# ledger check about what those cells expect must build their configurations
+# for that platform, not for whatever host runs the check: ``Config.platform``
+# defaults to the host, and expectations differ per object format.
+PR_TIER_PLATFORM = ("linux", "elf")
+
+
+def _pr_config(lang: str, toolchain: Toolchain) -> Config:
+    return default_config(lang, toolchain).with_(platform=PR_TIER_PLATFORM)
 
 
 # --- ChangeKind scope -----------------------------------------------------------
@@ -284,10 +294,10 @@ def _pr_tier_declared() -> set[str]:
     out: set[str] = set()
     for op, seed in default_matrix():
         for tc in (GCC, CLANG):
-            out |= cov.expectation_kinds(op.expect(default_config(seed.lang, tc)))
+            out |= cov.expectation_kinds(op.expect(_pr_config(seed.lang, tc)))
     for op_name, seed_name, family, changes in _PR:
         seed = SEED_BY_NAME[seed_name]
-        cfg = default_config(seed.lang, GCC if family == "gcc" else CLANG)
+        cfg = _pr_config(seed.lang, GCC if family == "gcc" else CLANG)
         for key, value in changes.items():
             if key == "std":
                 cfg = cfg.with_(std=STANDARD_BY_NAME[str(value)])
@@ -304,6 +314,33 @@ def test_pr_floor_is_reachable_from_the_pr_cells() -> None:
     # A floor kind no PR cell expects could never be verified by a PR run.
     floor = set(cov.load_ledger()["verified_floor"].get("pr", ()))
     assert floor <= _pr_tier_declared()
+
+
+@pytest.mark.parametrize("host", ["linux", "darwin", "win32"])
+def test_pr_tier_expectations_do_not_depend_on_the_checking_host(
+    monkeypatch: pytest.MonkeyPatch, host: str
+) -> None:
+    """The floor check must give one answer on every unit-test leg: the PR
+    cells' expectations are those of Linux ELF, wherever the check runs. On
+    the host's own platform, the same cells expect other kinds (the oracle:
+    a config built for the host differs), so pinning is what makes it hold."""
+    linux = _pr_tier_declared()
+    monkeypatch.setattr(sys, "platform", host)
+    assert _pr_tier_declared() == linux
+    if host != "linux":
+        from tests.test_abi_edit_corpus import default_matrix
+
+        host_kinds = {
+            k
+            for op, seed in default_matrix()
+            for k in cov.expectation_kinds(op.expect(default_config(seed.lang, GCC)))
+        }
+        pinned = {
+            k
+            for op, seed in default_matrix()
+            for k in cov.expectation_kinds(op.expect(_pr_config(seed.lang, GCC)))
+        }
+        assert host_kinds != pinned, "the host platform no longer changes expectations"
 
 
 # --- records and the verified side ------------------------------------------------
@@ -379,7 +416,7 @@ def test_records_round_trip_through_files(tmp_path: Path) -> None:
     assert back == r
     assert back.verified == {"TYPE_SIZE_CHANGED", "STRUCT_SIZE_CHANGED"}
     assert back.points == (
-        "struct/c/c17/baseline/gcc/gcc/headers.castxml/append_grows",
+        "struct/c/c17/baseline/gcc/gcc/headers.castxml/insert_tail_shifts",
     )
 
 
@@ -898,9 +935,15 @@ def test_a_derived_kind_is_never_declared_coverage() -> None:
     assert rep["derived"][SONAME_ADVISORY] == len(owing)
 
 
-def test_a_passing_cell_reports_a_derived_kind_apart_from_coverage() -> None:
+@pytest.mark.parametrize("host", ["linux", "darwin", "win32"])
+def test_a_passing_cell_reports_a_derived_kind_apart_from_coverage(
+    monkeypatch: pytest.MonkeyPatch, host: str
+) -> None:
+    # The SONAME advisory is owed on ELF; the cell is a PR-tier (Linux) cell
+    # whichever host builds its record.
+    monkeypatch.setattr(sys, "platform", host)
     op = OP_BY_NAME["struct_append_field"]
-    cfg = default_config("c", GCC)
+    cfg = _pr_config("c", GCC)
     rec = cov.make_record(
         "pr",
         op,

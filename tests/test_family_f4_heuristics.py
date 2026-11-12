@@ -120,9 +120,12 @@ EXEMPTION_CEILINGS: dict[str, int] = {
     # module moved from the root into a scanned policy subpackage). Format
     # check on abicheck's own key shape, not a naming heuristic.
     "own_format": 50,
-    # 19: minus the allocator prefix vocabulary and its startswith site
-    # (same move).
-    "platform": 19,
+    # 22: plus the retired function-name prefix check (castxml's reserved
+    # __builtin_*, declared by the generation-57 SPELLING_MIGRATIONS row) in
+    # policy/retired_function_drift.
+    # 20: minus the allocator prefix vocabulary and its startswith site,
+    # folded into the exact replaceable-allocator match in elf_symbol_filter.
+    "platform": 20,
     # 9: main replaced the two fnmatch frozen-namespace matchers with one
     # policy.frozen_namespace helper.
     "user_rule": 9,
