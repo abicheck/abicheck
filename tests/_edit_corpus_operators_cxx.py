@@ -17,7 +17,9 @@ from typing import Any
 
 from tests._edit_corpus_expect import Rule
 from tests._edit_corpus_opkit import (
+    _OFFSET,
     _REMOVED,
+    _SIZE,
     Edit,
     EditOp,
     Roles,
@@ -687,6 +689,59 @@ _SHAPES = (
             ),
         ),
         **_COMPAT_ONLY,
+    ),
+    _op(
+        "field_inserted_in_padding",
+        ("x.inspad",),
+        _replace(
+            "x.inspad",
+            "struct IP { char a; int b; };",
+            "struct IP { char a; char x; int b; };",
+        ),
+        "x lands in the hole between IP's a and b: b keeps offset 4 and sizeof "
+        "stays 8, so every existing offset and size is unchanged",
+        expected=frozenset({"TYPE_FIELD_ADDED_COMPATIBLE"}),
+        rules=(
+            Rule(
+                lambda c: c.flags.pack is not None,
+                {
+                    "expected": frozenset(),
+                    "any_of": (_OFFSET, _SIZE),
+                    "verdict_min": "BREAKING",
+                    "verdict_max": None,
+                },
+                "-fpack-struct leaves no hole: x pushes b from offset 1 to 2 and "
+                "sizeof from 5 to 6",
+            ),
+        ),
+        **_COMPAT_ONLY,
+    ),
+    _op(
+        "field_removed_without_shrink",
+        ("x.rmpad",),
+        _replace(
+            "x.rmpad",
+            "struct RP { char a; char x; int b; };",
+            "struct RP { char a; int b; };",
+        ),
+        "x sat in RP's hole: removing it leaves b at offset 4 and sizeof at 8, so "
+        "no offset or size changes, but the removed member is gone for every reader",
+        any_of=(frozenset({"STRUCT_FIELD_REMOVED", "TYPE_FIELD_REMOVED"}),),
+        rules=(
+            Rule(
+                lambda c: c.flags.pack is not None,
+                {
+                    "any_of": (
+                        frozenset({"STRUCT_FIELD_REMOVED", "TYPE_FIELD_REMOVED"}),
+                        _OFFSET,
+                        _SIZE,
+                    ),
+                },
+                "-fpack-struct leaves no hole: removing x pulls b from offset 2 to 1 "
+                "and sizeof from 6 to 5",
+            ),
+        ),
+        touches=("x.rmpad",),
     ),
     _op(
         "source_only_export_added",

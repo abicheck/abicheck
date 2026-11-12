@@ -3,11 +3,15 @@
 A *point* in the space is one combination of six axes::
 
     construct x language x standard x config feature x build toolchain
-      x consumer toolchain x evidence
+      x consumer toolchain x evidence x edit
 
 - **construct** (``CONSTRUCTS``): the language construct an edit operator
   changes, read off the operator's roles (``ROLE_CONSTRUCT``) or, when it needs
   a language feature, off that feature (``FEATURE_CONSTRUCT``);
+- **edit** (``STRUCT_EDIT_CLASSES``, ``edit_values``): the sub-class of the
+  edit within its construct. Record layout splits by its effect on offsets and
+  sizeof (insert/append/remove, absorbed by padding or not); every other
+  construct has the single value ``any``, so its denominator is unchanged;
 - **language** / **standard**: ``_edit_corpus_config.STANDARDS``;
 - **config feature** (``CONFIG_FEATURES``): one ABI-relevant setting the cell
   turns on (``baseline`` = none of them), on either side of a rebuild;
@@ -30,8 +34,9 @@ place.
 
 What a covered fraction of this space does NOT mean: a covered point is one
 that some cell *ran*, not one where abicheck was right (that is the ChangeKind
-and mismatch report), and not every edit of that construct (the space has no
-"edit" axis: one operator covers its construct). The axes are the corpus's
+and mismatch report). A construct's edit sub-classes are covered only where
+the edit axis splits it; a construct with a single ``any`` value is covered by
+any one of its operators. The axes are the corpus's
 own; a dimension the corpus cannot vary (OS, architecture beyond -m32, link
 order) is not in the denominator at all.
 """
@@ -67,6 +72,7 @@ AXES: tuple[str, ...] = (
     "build",
     "consumer",
     "evidence",
+    "edit",
 )
 
 #: The evidence axis: ``headers`` once per header backend.
@@ -187,6 +193,8 @@ ROLE_CONSTRUCT: dict[str, str] = {
     "x.ctor2": "class",
     "x.vtt": "inheritance",
     "x.tailpad": "struct",
+    "x.inspad": "struct",
+    "x.rmpad": "struct",
     "x.helper": "function",
     "x": "function",
 }
@@ -215,6 +223,68 @@ def op_constructs(op: EditOp) -> tuple[str, ...]:
     else:
         names = [role_construct(r) for r in op.roles]
     return tuple(dict.fromkeys(names))
+
+
+# --- edit sub-classes -------------------------------------------------------
+#
+# A construct says what an edit touches, not how. Record layout is the one
+# construct whose edits split by their layout effect: whether a member is
+# added or removed, and whether the bytes it takes come from padding (the
+# offsets and sizeof that follow are then unchanged) or move or resize
+# everything after them. ``formal/EXPERIMENTS.md`` (E4) shows why a single
+# representative per class is unsound: the same edit can be absorbed or not
+# depending on the layout it lands in.
+#
+# Every other construct has one edit value, ``ANY_EDIT``: its edits are not
+# split, so its denominator is unchanged.
+
+ANY_EDIT = "any"
+
+STRUCT_EDIT_CLASSES: tuple[str, ...] = (
+    "append_grows",
+    "append_absorbed",
+    "insert_absorbed",
+    "remove_shrinks",
+    "remove_absorbed",
+    "reorder_moves",
+    "widen",
+    "array_grow",
+    "array_shrink_absorbed",
+    # Struct edits that change no member layout: packing, qualifiers, bit-fields,
+    # renames, record kind. Named so that every struct operator has one class.
+    "member_other",
+)
+
+# Record-layout operator -> its sub-class. Every ``struct`` operator not listed
+# is ``member_other``. ``insert_moves`` has no operator yet, so it is not a
+# value: a class with no operator would be a coverage claim with nothing behind it.
+LAYOUT_EDIT_CLASS: dict[str, str] = {
+    "struct_append_field": "append_grows",
+    "field_added_in_tail_padding": "append_absorbed",
+    "field_inserted_in_padding": "insert_absorbed",
+    "struct_remove_trailing_field": "remove_shrinks",
+    "field_removed_without_shrink": "remove_absorbed",
+    "struct_swap_fields": "reorder_moves",
+    "struct_field_widen": "widen",
+    "struct_array_grow": "array_grow",
+    "struct_array_shrink_in_padding": "array_shrink_absorbed",
+}
+
+EDIT_CLASSES_BY_CONSTRUCT: dict[str, tuple[str, ...]] = {
+    "struct": STRUCT_EDIT_CLASSES,
+}
+
+
+def edit_values(construct: str) -> tuple[str, ...]:
+    """The edit sub-classes a construct's points are split into."""
+    return EDIT_CLASSES_BY_CONSTRUCT.get(construct, (ANY_EDIT,))
+
+
+def edit_class(op: EditOp, construct: str) -> str:
+    """The edit sub-class *op* exercises under *construct*."""
+    if construct not in EDIT_CLASSES_BY_CONSTRUCT:
+        return ANY_EDIT
+    return LAYOUT_EDIT_CLASS.get(op.name, "member_other")
 
 
 # --- config features --------------------------------------------------------
@@ -302,6 +372,8 @@ class Point:
     build: str
     consumer: str
     evidence: str
+    # The edit sub-class (``edit_values``); ``any`` for constructs not split.
+    edit: str = ANY_EDIT
 
     def axis(self, name: str) -> str:
         return str(getattr(self, name))
@@ -344,6 +416,8 @@ def infeasible(p: Point) -> str | None:
         return why
     if (why := CONSTRUCT_CONFIG_CONFLICTS.get((p.construct, p.config))) is not None:
         return why
+    if p.edit not in edit_values(p.construct):
+        return f"{p.edit} is not an edit sub-class of {p.construct}"
     return None
 
 
@@ -354,9 +428,17 @@ def all_points() -> Iterator[Point]:
                 for build in FAMILIES:
                     for consumer in FAMILIES:
                         for ev in SPACE_EVIDENCE:
-                            yield Point(
-                                con.name, std.lang, std.name, cfg, build, consumer, ev
-                            )
+                            for edit in edit_values(con.name):
+                                yield Point(
+                                    con.name,
+                                    std.lang,
+                                    std.name,
+                                    cfg,
+                                    build,
+                                    consumer,
+                                    ev,
+                                    edit,
+                                )
 
 
 def feasible_points() -> frozenset[Point]:
@@ -381,6 +463,7 @@ def cell_points(
             config.producer.family,
             c.toolchain.family,
             config.space_evidence,
+            edit_class(op, con),
         )
         for c in config.consumer_set
         if c.id in ran_consumers
@@ -462,10 +545,15 @@ def point_from_id(ident: str) -> Point:
 
 
 __all__ = [
+    "ANY_EDIT",
     "AXES",
     "CONFIG_AXIS",
     "CONSTRUCTS",
+    "LAYOUT_EDIT_CLASS",
     "Point",
+    "STRUCT_EDIT_CLASSES",
+    "edit_class",
+    "edit_values",
     "SPACE_EVIDENCE",
     "all_points",
     "cell_points",
