@@ -130,6 +130,47 @@ def test_a_set_already_ambiguous_stays_unreported_under_variants() -> None:
     assert not _fires(_synthetic, ("int", "double"), "long")
 
 
+def _variadic(ptype: str, tag: str) -> Function:
+    return Function(
+        name="ns::S::S",
+        mangled=f"_ZN2ns1S{tag}E{_MANGLED[ptype]}z",
+        return_type="void",
+        params=[Param(name="v", type=ptype)],
+        is_variadic=True,
+        visibility=Visibility.PUBLIC,
+    )
+
+
+@pytest.mark.parametrize("variadic_first", [True, False])
+def test_a_variadic_overload_is_a_distinct_declaration(variadic_first: bool) -> None:
+    """``S(int, ...)`` is its own overload, not a symbol of ``S(int)``: beside
+    it ``S s({})`` ranks ``S(int)`` better, so adding ``S(long)`` makes the
+    call ambiguous whatever order the entries come in. Collapsing the two
+    would also have to agree with the single-entry spelling."""
+    plain = _itanium("int")
+    rival = [_variadic("int", "C1"), _variadic("int", "C2")]
+    base = [*rival, *plain] if variadic_first else [*plain, *rival]
+    old, new = _snap(base), _snap([*base, *_itanium("long")])
+    synthetic_base = [*_synthetic("int"), _variadic("int", "C1")]
+    expected = _KIND in {
+        c.kind
+        for c in compare(
+            _snap(synthetic_base), _snap([*synthetic_base, *_synthetic("long")])
+        ).changes
+    }
+    got = _KIND in {c.kind for c in compare(old, new).changes}
+    assert got == expected
+
+
+def test_a_declaration_kept_through_one_of_its_symbols_still_counts() -> None:
+    """``S(int)`` loses its ``C1`` symbol but keeps ``C2``: it is still in the
+    overload set, so adding ``S(long)`` still makes ``S s({})`` ambiguous."""
+    c1, c2 = _itanium("int")
+    old = _snap([c1, c2])
+    new = _snap([c2, *_itanium("long")])
+    assert _KIND in {c.kind for c in compare(old, new).changes}
+
+
 _V1 = "namespace ns { struct CO { CO(int); int v; }; }\n"
 _V2 = "namespace ns { struct CO { CO(int); CO(long); int v; }; }\n"
 _SRC = {

@@ -276,6 +276,7 @@ def _declaration_key(f: Function) -> tuple[object, ...]:
     a backend that reads real symbols records separately."""
     return (
         tuple(p.type for p in f.params),
+        f.is_variadic,
         f.is_static,
         f.is_const,
         f.is_volatile,
@@ -310,11 +311,23 @@ def _diff_overload_ambiguity(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]
         e.name for e in (*old.declarations.enums, *new.declarations.enums)
     )
     old_groups = _groups(old_map.values())
+    # A declaration is kept when any of its symbols survives, not only the
+    # one _groups chose to represent it (a C1 dropped beside a kept C2).
+    surviving = {
+        (ck, _declaration_key(f))
+        for f in old_map.values()
+        if f.mangled in new_map and (ck := callable_key(f)) is not None
+    }
     changes: list[Change] = []
     for key, members in _groups(new_map.values()).items():
         previous = old_groups.get(key, [])
-        kept = [f for f in previous if f.mangled in new_map]
-        for n in (f for f in members if f.mangled not in old_map):
+        kept = [f for f in previous if (key, _declaration_key(f)) in surviving]
+        old_decls = {_declaration_key(f) for f in previous}
+        for n in (
+            f
+            for f in members
+            if f.mangled not in old_map and _declaration_key(f) not in old_decls
+        ):
             change = _first_new_ambiguity(
                 key, n, kept, previous, members, typedefs, enums
             )
