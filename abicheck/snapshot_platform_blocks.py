@@ -262,7 +262,9 @@ def dwarf_from_dict(d: dict[str, Any]) -> Any:
                 FieldInfo(
                     name=f.get("name", ""),
                     type_name=f.get("type_name", "unknown"),
-                    byte_offset=f.get("byte_offset", 0),
+                    # An absent key is unknown (None), never offset 0. Stored
+                    # 0 still decodes as 0; abicheck always writes the key.
+                    byte_offset=f.get("byte_offset"),
                     byte_size=f.get("byte_size", 0),
                     bit_offset=f.get("bit_offset", 0),
                     bit_size=f.get("bit_size", 0),

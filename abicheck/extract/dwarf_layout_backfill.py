@@ -58,7 +58,11 @@ def _record_from_layout(layout: StructLayout) -> RecordType:
             TypeField(
                 name=f.name,
                 type=f.type_name,
-                offset_bits=f.byte_offset * 8 + (f.bit_offset if f.bit_size else 0),
+                offset_bits=(
+                    None
+                    if f.byte_offset is None
+                    else f.byte_offset * 8 + (f.bit_offset if f.bit_size else 0)
+                ),
                 is_bitfield=bool(f.bit_size),
                 bitfield_bits=f.bit_size or None,
             )

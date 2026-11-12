@@ -74,6 +74,10 @@ Next, unranked (the `--no-baseline` one-sided-detector gap, the target-platform 
 
 ## Open and partially open gaps
 
+### DWARF field size 0 means "unknown", so a size change from or to 0 is not reported (2026-11-12)
+**Status (2026-11-12): NARROWED.** `FieldInfo.byte_offset` is now `int | None` (`None` = unknown), and the offset rule fires only when both sides are known (`abicheck/compare/type_layout_diff.py`). `FieldInfo.byte_size` still uses `0` for unknown, so the field type-size rule (`type_size_changed` in `_existing_field_changes`) skips any side at `0`. Two residuals follow from that. (1) A genuine size change `0 -> N` (a flexible array member, or an unresolved type) is missed, never manufactured. (2) In rename pairing (`type_layout_diff.py`, the `old_f.byte_size == c.byte_size` test), an unresolved size on one side makes a renamed field pair fail, so it can be reported as a removal plus an addition. Other `byte_size` readers were audited and are safe: `workflows/dump/dwarf_dependency_types.py` already treats `0` as absent, and `dwarf_metadata.py`'s struct and enum `byte_size == 0` checks skip declaration-only DIEs. Fix: make `byte_size` `int | None` the same way `byte_offset` was made optional, with a reader audit. Do not change the `> 0` guard alone, since a real zero-size member would then be compared. Owner: `abicheck/model/dwarf_facts.py`, `abicheck/snapshot_platform_blocks.py` (`byte_size` default `0`).
+<!-- no-canary: the residual is a missed size change and a rename that is not paired, both of which need a byte_size type change to pin; a canary would only assert today's gapped answer on a synthetic field, and tests/test_dwarf_field_offset_unknown.py already pins the offset half -->
+
 ### Parser inputs: corrupt input reads as empty or escapes as an untyped exception
 
 Found by the parser fuzz oracle in `tests/test_parser_fuzz_oracle.py`
