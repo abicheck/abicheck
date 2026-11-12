@@ -171,6 +171,27 @@ def test_a_declaration_kept_through_one_of_its_symbols_still_counts() -> None:
     assert _KIND in {c.kind for c in compare(old, new).changes}
 
 
+@pytest.mark.parametrize("spell", [_synthetic, _itanium])
+def test_a_retyped_declaration_under_the_same_symbols_is_not_an_added_overload(
+    spell,
+) -> None:
+    """Negative control: the same symbols re-recorded with ``long`` where
+    ``int`` was (a respelling or a changed declaration, not a second
+    overload) leave a one-member set, which cannot be ambiguous."""
+    old = spell("int")
+    new = [
+        Function(
+            name=f.name,
+            mangled=f.mangled,
+            return_type=f.return_type,
+            params=[Param(name="v", type="long")],
+            visibility=f.visibility,
+        )
+        for f in old
+    ]
+    assert _KIND not in {c.kind for c in compare(_snap(old), _snap(new)).changes}
+
+
 _V1 = "namespace ns { struct CO { CO(int); int v; }; }\n"
 _V2 = "namespace ns { struct CO { CO(int); CO(long); int v; }; }\n"
 _SRC = {
