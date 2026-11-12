@@ -18,7 +18,7 @@ The case space, the oracle and the class key come from Lean
 
 Usage::
 
-    layout_fragment.py OUT_DIR [--reduced] [--per-case] [--compilers gcc,clang]
+    layout_fragment.py OUT_DIR [--reduced] [--per-case] [--compilers gcc,clang] [--slice K/N]
 
 writes OUT_DIR/summary.json. Needs gcc/clang, castxml and abicheck on PATH.
 """
@@ -337,17 +337,25 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--compilers", default="gcc,clang")
     ap.add_argument("--jobs", type=int, default=4)
+    ap.add_argument(
+        "--slice",
+        default="1/1",
+        help="K/N: run only the K-th of N contiguous slices (long per-case runs)",
+    )
     a = ap.parse_args(argv)
     data = load_export()
     rows, classes = data["rows"], data["classes"]
     if a.reduced:
         rows = [r for r in rows if r["rep"]]
+    k, n = map(int, a.slice.split("/"))
+    rows = rows[(k - 1) * len(rows) // n : k * len(rows) // n]
     compilers = tuple(a.compilers.split(","))
     t0 = time.perf_counter()
     if a.per_case:
         res = check_per_case(a.out, rows, classes, compilers, a.jobs)
     else:
         res = check_batch(a.out, rows, classes, compilers)
+    res["slice"] = a.slice
     res["mode"] = ("per-case" if a.per_case else "batch") + (
         " reduced" if a.reduced else " full"
     )
