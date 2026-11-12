@@ -191,7 +191,13 @@ unaffected — correct, because the verdict is existential over consumers.
 | Compiler/ABI premises (C layout, SysV x86-64, loads at fixed offsets) | **assumed**; observed with gcc 13.3 on one fixture |
 | Not modelled | widths/partial overlap/bitfields, writes by the consumer, consumer-side allocation, inline functions in headers, C++ bases/vptr, alignment |
 
-## Next rules worth formalising
+## Next steps
+
+The roadmap (generator completeness, Lean/TLA+ roles, experiments E1–E9) is
+[`docs/contribute/plans/formal-methods-and-generator-completeness.md`](../docs/contribute/plans/formal-methods-and-generator-completeness.md).
+Candidate rules if the per-rule line is ever resumed:
+
+### Next rules worth formalising
 
 1. `TYPE_SIZE_CHANGED` with consumer-side allocation (needs a memory model with
    bounds; the conclusion is "out-of-bounds write exists", i.e. UB — state it
