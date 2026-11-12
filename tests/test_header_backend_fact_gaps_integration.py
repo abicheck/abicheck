@@ -417,3 +417,27 @@ def test_castxml_and_clang_name_the_corpus_pimpl_holder_by_its_bare_leaf(
     snap = BaselineCache(tmp_path).get(SEED_BY_NAME["cxx_more"], cfg).snapshot
     names = {t.name for t in snap.declarations.types if t.name.endswith("Desc")}
     assert names == {"Desc"}
+
+
+_BUF_C = "int keep(int x) { return x; }"
+
+
+@pytest.mark.known_gap_canary
+def test_a_template_default_change_reads_out_of_contract_on_clang(
+    tmp_path: Path,
+) -> None:
+    """A public header's class template changes a default argument: the clang
+    snapshot reads template_param_default_changed, but the contract evaluator
+    places the template pattern PROVEN_OUT_OF_CONTRACT, so the CLI verb rolls
+    the run up to NO_CHANGE (castxml and bare ``checker.compare`` say API_BREAK)."""
+    old = (
+        "template <typename T, int N = 4> struct Buf { T data[N]; };\nint keep(int x);",
+        _BUF_C,
+    )
+    new = (
+        "template <typename T, int N = 8> struct Buf { T data[N]; };\nint keep(int x);",
+        _BUF_C,
+    )
+    verdict, kinds = _kinds(tmp_path, old, new, "c++", "clang")
+    assert "TEMPLATE_PARAM_DEFAULT_CHANGED" in kinds
+    assert verdict == "NO_CHANGE"

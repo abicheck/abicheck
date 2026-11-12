@@ -100,8 +100,20 @@ def _added_fields_by_offset(
     for fn in added_names:
         if RESERVED_FIELD.matches(fn):
             continue
-        by_offset.setdefault(new_fields[fn].byte_offset, []).append(new_fields[fn])
+        offset = new_fields[fn].byte_offset
+        if offset is None:  # unknown offset: cannot be paired by offset
+            continue
+        by_offset.setdefault(offset, []).append(new_fields[fn])
     return by_offset
+
+
+def _candidates_at(
+    added_by_offset: dict[int, list[FieldInfo]], offset: int | None
+) -> list[FieldInfo]:
+    """Added fields at *offset*; none when the removed field's offset is unknown."""
+    if offset is None:
+        return []
+    return added_by_offset.get(offset, [])
 
 
 def _removed_field_changes(
@@ -128,7 +140,7 @@ def _removed_field_changes(
             candidate = next(
                 (
                     c
-                    for c in added_by_offset.get(old_f.byte_offset, [])
+                    for c in _candidates_at(added_by_offset, old_f.byte_offset)
                     if c.name not in rename_matched and old_f.type_name == c.type_name
                 ),
                 None,
@@ -191,7 +203,7 @@ def _removed_field_changes(
             candidate = next(
                 (
                     c
-                    for c in added_by_offset.get(old_f.byte_offset, [])
+                    for c in _candidates_at(added_by_offset, old_f.byte_offset)
                     if (
                         c.name not in reserved_matched
                         and c.name not in rename_matched
@@ -238,7 +250,13 @@ def _existing_field_changes(
             continue
         new_f = new_fields[fname]
 
-        if old_f.byte_offset != new_f.byte_offset:
+        # Fires only when both offsets are known and differ (Lean rule,
+        # formal/lean/AbiLean/FieldOffset.lean): unknown is never a change.
+        if (
+            old_f.byte_offset is not None
+            and new_f.byte_offset is not None
+            and old_f.byte_offset != new_f.byte_offset
+        ):
             changes.append(
                 make_change(
                     ChangeKind.STRUCT_FIELD_OFFSET_CHANGED,
