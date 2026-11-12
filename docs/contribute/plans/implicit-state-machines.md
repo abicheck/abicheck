@@ -7,7 +7,7 @@ generated: false
 
 # Implicit state machines
 
-Status: Phases 1 and 2 done. Phases 3–5 not started.
+Status: Phases 1–3 done. Phases 4–5 not started.
 
 ## Why
 
@@ -52,24 +52,15 @@ a misspelled state or an out-of-order call.
 | Inline-graph completeness tie | `call_graph_state` is never `none`, so the re-check was always true; replaced with a plain `else`. No behavior change. |
 | Deprecation status | `DeprecationStatus` `Literal`. |
 
-## Phase 3 — one worse-of fold per value family
+## Phase 3 — one worse-of fold per value family (done)
 
-The verdict and exit-code ladders built with `max()` in eight or more
-places get one owner each in `policy/`, with a rank table that raises on an
-unknown value:
-
-- verdict rank: `workflows/aggregate/fold.py`, `policy/outcome.py:671`,
-  `policy/release_exit_decision.py:266`;
-- exit-code fold: `workflows/release_exit_fold.py`,
-  `workflows/aggregate/scope_axis.py`, `policy/severity.py:578`,
-  `policy/exit_decision_precedence.py:509`;
-- assurance rank: `policy/release_assurance.py:136`.
-- The assurance if-chain in `_compute.py:242–276` becomes a table of
-  (condition, status) rows checked in rank order, with a test that every
-  sub-status field is listed in some row (a new field can no longer default
-  to `complete`).
-- Frozen-namespace promotion in `policy/reclassify.py` (five call sites)
-  moves to one helper.
+| Item | Result |
+|---|---|
+| Verdict order | `policy/release_outcome.py` already owned it. `policy/outcome.worst_real_verdict` ranked by `Verdict`'s *declaration order*; `workflows/aggregate/contracts._VERDICT_RANK` restated the order; `workflows/aggregate/report_gate._LEGACY_SEVERITY` copied `severity.legacy_exit_code`. All three now derive from the owners. |
+| Exit-code folds | `release_exit_fold`, `aggregate/scope_axis`, `severity.compute_exit_code`, `exit_decision_precedence`: `max()` over integers, already one ordering. No change. |
+| Assurance rank | `release_assurance._rank` already ranks an unknown status worst (fails closed). No change. |
+| Assurance if-chain | Done in Phase 2 (`_status_ladder.py`). |
+| Frozen-namespace floor | Seven copies in `reclassify.py`/`reclassify_outcome.py` → `reclassify._frozen_floor`. |
 
 ## Phase 4 — the disposition lifecycle
 
