@@ -126,7 +126,8 @@ _MANGLED_RUNTIME_NAMESPACE = re.compile(
 # (``operator new(std::size_t, Pool&)`` = ``_ZnwmR4Pool``) is the library's.
 _GLOBAL_ALLOCATION_FUNCTION = re.compile(
     r"_Zn[wa][jmy](?:St11align_val_t)?(?:RKSt9nothrow_t)?"
-    r"|_Zd[la]Pv[jmy]?(?:St11align_val_t)?(?:RKSt9nothrow_t)?"
+    # delete: no form takes both a size and a nothrow_t.
+    r"|_Zd[la]Pv(?:[jmy](?:St11align_val_t)?|(?:St11align_val_t)?(?:RKSt9nothrow_t)?)"
 )
 
 

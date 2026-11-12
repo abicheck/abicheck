@@ -50,6 +50,36 @@ ALLOCATORS = sorted(
 )
 
 
+def _every_tail_combination() -> list[str]:
+    """Every new/delete spelling with optional size, align and nothrow parts.
+
+    A superset of the replaceable set: the standard omits, for instance, a
+    sized nothrow delete, which a library may still declare for itself.
+    """
+    out = []
+    for size in (*_SIZE.values(), "y"):
+        for parts in itertools.product(("", "s"), ("", _ALIGN), ("", _NOTHROW)):
+            sized, align, nothrow = parts
+            for op in ("nw", "na"):
+                if sized:  # operator new always takes the size
+                    out.append(f"_Z{op}{size}{align}{nothrow}")
+            for op in ("dl", "da"):
+                out.append(f"_Z{op}Pv{size if sized else ''}{align}{nothrow}")
+    return sorted(set(out))
+
+
+_REPLACEABLE_ANY_SIZE = set(
+    itertools.chain.from_iterable(_replaceable(s) for s in (*_SIZE.values(), "y"))
+)
+
+
+@pytest.mark.parametrize("name", _every_tail_combination())
+def test_exactly_the_replaceable_combinations_read_as_the_runtimes(name: str) -> None:
+    # Exhaustive over the small domain: a spelling outside [new.delete]
+    # (``_ZdlPvmRKSt9nothrow_t``, sized nothrow delete) is the library's own.
+    assert is_abi_relevant_elf_symbol(name) is (name not in _REPLACEABLE_ANY_SIZE)
+
+
 @pytest.mark.parametrize("name", ALLOCATORS)
 def test_every_replaceable_allocation_function_reads_as_the_runtimes(name: str) -> None:
     # The same verdict for new and delete: before the fix _ZdlPv read as the
@@ -66,6 +96,8 @@ _USER_OVERLOADS = [
     "_ZdaPvR4Pool",  # operator delete[](void*, Pool&)
     "_ZnwjPKci",  # operator new(std::size_t, const char*, int), ILP32
     "_ZnwmSt11align_val_tR4Pool",  # aligned, with an extra parameter
+    "_ZdlPvmRKSt9nothrow_t",  # operator delete(void*, size_t, const nothrow_t&)
+    "_ZdaPvmSt11align_val_tRKSt9nothrow_t",  # sized, aligned, nothrow delete[]
 ]
 
 
