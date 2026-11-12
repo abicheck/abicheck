@@ -7,7 +7,7 @@ generated: false
 
 # Implicit state machines
 
-Status: Phases 1–3 done. Phases 4–5 not started.
+Status: Phases 1–4 done. Phase 5 not started.
 
 ## Why
 
@@ -62,22 +62,17 @@ a misspelled state or an out-of-order call.
 | Assurance if-chain | Done in Phase 2 (`_status_ladder.py`). |
 | Frozen-namespace floor | Seven copies in `reclassify.py`/`reclassify_outcome.py` → `reclassify._frozen_floor`. |
 
-## Phase 4 — the disposition lifecycle
+## Phase 4 — the disposition lifecycle (done)
 
-`policy/disposition_ledger.py` plus `disposition_close.py`,
-`disposition_gate.py`, `disposition_acknowledgment.py`:
+| Item | Result |
+|---|---|
+| Transition rules | `policy/disposition_transitions.py`: `scope_out` (consumer scope narrows a record) and `exclude_consumer_only` (D-S1, full-library gate) as pure functions; the ledger and `disposition_close` call them instead of restating the moves. Tested exhaustively over every disposition and flag against a table in the test. |
+| Scope applied once | `DispositionLedger.apply_scope` records the scope. Repeating the same scope is a no-op (`check_appcompat` and `--used-by` can close one result twice); a *different* second scope raises, since it would intersect consumers' scopes instead of taking their union — previously a silent pass with a real break counted out. |
+| Promote-then-narrow | `refresh_promoted` after `apply_scope` now narrows what it promotes against the recorded scope, so the two passes commute. Latent before (the one call site promotes first). |
+| Pipeline step order | `DispositionPipeline` rejects more than one step that establishes the `ctx.kept` alias when it is built. |
+| Asymmetry checked | `exclude_consumer_only` leaves a `non_gating` record unmarked while `scope_out` marks it: not reachable as a bug — a consumer-only record is outside the severity gate's input (so `with_gate` excludes it) and without a severity config is re-answered by its own unchanged kind. |
 
-- one transition table `(from disposition, event) -> to disposition` that
-  every rewrite goes through;
-- a ledger phase (`recording -> promoted -> scoped -> closed`) checked by
-  each method, so `apply_scope` before `refresh_promoted`, or twice, raises;
-- an exhaustive test over every (disposition, event) pair against a table
-  written in the test;
-- `finding_disposition/pipeline.py:246`: validate the step order up front,
-  not only the kept-alias contract.
-
-Owner ADR: [ADR-067](../adr/067-change-intent-acknowledgment-and-disposition-audit.md).
-Needs an ADR amendment if the event set changes.
+No change to the event set, so no ADR-067 amendment.
 
 ## Phase 5 — scanners, lifecycle flags, in-place mutation
 

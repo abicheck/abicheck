@@ -67,6 +67,7 @@ from .disposition_gate import (
     _reset_dated_overlays as _reset_dated_overlays,
     regate_record as regate_record,
 )
+from .disposition_transitions import PROMOTABLE, scope_out
 from .disposition_types import (
     CONSUMER_ONLY_APPLICATION_POINTS as _CONSUMER_ONLY,
     Disposition as Disposition,
@@ -131,6 +132,8 @@ class DispositionLedger:
         #: Loaded suppression lists registered as this run's rule inventory
         #: (:meth:`register_suppression`). Read, never mutated.
         self._inventories: list[object] = []
+        #: The record indices :meth:`apply_scope` kept, once it has run.
+        self._scope: frozenset[int] | None = None
 
     # -- recording -----------------------------------------------------
 
@@ -557,10 +560,7 @@ class DispositionLedger:
 
         gate = _GateContext.of(result)
         for index, (record, change) in enumerate(zip(self._records, self._anchors)):
-            if record.disposition not in (
-                Disposition.OUT_OF_CONTRACT,
-                Disposition.UNRESOLVED_RELEVANCE,
-            ):
+            if record.disposition not in PROMOTABLE:
                 continue
             if (
                 getattr(change, "contract_reason_code", None)
@@ -580,6 +580,10 @@ class DispositionLedger:
                 # from here on decided by the *scoped* gate.
                 scope_decided=True,
             )
+            if self._scope is not None and index not in self._scope:
+                # Promoted after the scope narrowed: narrow it too, so
+                # promote-then-narrow holds whatever order the passes ran in.
+                self._records[index] = scope_out(self._records[index])
 
     def apply_scope(self, in_scope: Iterable[object]) -> None:
         """Narrow the gating set to the findings the *scoped* gate scores.
@@ -610,7 +614,12 @@ class DispositionLedger:
         # by anchor identity then read the record as out of scope and demoted
         # it, though the scoped gate can still fail on the alias the union
         # holds. Both sides resolve membership through the same alias map.
-        scoped = self.indices_for(in_scope)
+        scoped = frozenset(self.indices_for(in_scope))
+        if self._scope is not None and scoped != self._scope:
+            # A second, different scope would intersect the consumers'
+            # relevant sets instead of taking their union (see above).
+            raise RuntimeError("apply_scope with a second scope; pass the union once")
+        self._scope = scoped
         for index, (record, _change) in enumerate(zip(self._records, self._anchors)):
             # Both evaluated dispositions, not just ``gating``: a finding that
             # is *already* non-gating (a compatible addition, say) still has
@@ -629,21 +638,10 @@ class DispositionLedger:
             # so the mark has to come first (found by an exhaustive sweep of
             # the module's own state space, not by a report).
             self._records[index] = record = replace(record, scope_decided=True)
-            if index in scoped:
-                continue
-            if record.disposition in (Disposition.GATING, Disposition.NON_GATING):
-                self._records[index] = replace(
-                    record,
-                    disposition=Disposition.NON_GATING,
-                    gate_excluded=True,
-                )
-            elif record.disposition is Disposition.DEDUPLICATED:
-                # Marked but not relabelled: the consumer does not use this
-                # finding, so no later pass may pull it into the gate -- and
-                # `show_redundant` restoring it into `result.changes` is
-                # exactly such a pass. It keeps saying `deduplicated`, which
-                # is still the true reason it is not a finding of its own.
-                self._records[index] = replace(record, gate_excluded=True)
+            if index not in scoped:
+                # A `deduplicated` row is marked but keeps its label: no later
+                # pass (`show_redundant`) may pull it into the gate.
+                self._records[index] = scope_out(record)
 
     def index_for(self, change: object) -> int | None:
         """The index of *change*'s record, resolving an alias to its anchor.

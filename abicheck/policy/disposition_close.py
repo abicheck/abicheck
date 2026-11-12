@@ -35,7 +35,6 @@ points one way only — closing reads recording, never the reverse.
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from .acknowledgment_breaks import ACCEPTED_BREAK_APPLICATION_POINT
@@ -51,6 +50,7 @@ from .disposition_ledger import (
     _kept_disposition,
     record_suppressed_change,
 )
+from .disposition_transitions import exclude_consumer_only
 from .disposition_types import CONSUMER_ONLY_APPLICATION_POINTS
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -124,14 +124,8 @@ def exclude_from_gate(ledger: DispositionLedger, points: frozenset[str]) -> None
     in the detected/suppressed audit)."""
     records = ledger._records
     for i, r in enumerate(records):
-        if r.application_point not in points:
-            continue
-        if r.disposition is Disposition.GATING:
-            records[i] = replace(
-                r, disposition=Disposition.NON_GATING, gate_excluded=True
-            )
-        elif r.disposition is Disposition.SUPPRESSED:
-            records[i] = replace(r, gate_excluded=True)
+        if r.application_point in points:
+            records[i] = exclude_consumer_only(r)
 
 
 def record_consumer_overlay(

@@ -51,4 +51,23 @@ LIFECYCLE_BUG_CLASSES: tuple[BugClass, ...] = (
         seed_tests=("tests/test_bugfix_contract_line_numbers.py",),
         axes={"hunk line kinds": ("added", "context", "removed")},
     ),
+    BugClass(
+        id="lifecycle.repeated_narrowing_pass_intersects_instead_of_unions",
+        invariant=(
+            "A narrowing pass whose input must be the union of several "
+            "consumers' sets runs once: repeating it with the same set is a "
+            "no-op and a second, different set is rejected, because applying "
+            "it again intersects the sets and silently counts a real finding "
+            "out of the gate. A widening pass run after it is narrowed by the "
+            "same recorded set, so the passes commute. Instance: "
+            "DispositionLedger.apply_scope / refresh_promoted. Family F1: a "
+            "pass may not make the result cleaner than the evidence."
+        ),
+        fixed_by=(2042,),
+        seed_tests=("tests/test_disposition_transitions.py",),
+        axes={
+            "pass order": ("promote_then_scope", "scope_then_promote"),
+            "repeat": ("same scope", "different scope"),
+        },
+    ),
 )
