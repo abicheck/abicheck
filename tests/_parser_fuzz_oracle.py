@@ -282,6 +282,31 @@ def build_shared_object(work: Path, *, debug: bool) -> bytes:
     return out.read_bytes()
 
 
+#: Leading bytes of each object format a host compiler may emit.
+_OBJECT_MAGIC: tuple[tuple[str, tuple[bytes, ...]], ...] = (
+    ("ELF", (b"\x7fELF",)),
+    ("PE/COFF", (b"MZ",)),
+    (
+        "Mach-O",
+        (
+            b"\xcf\xfa\xed\xfe",
+            b"\xce\xfa\xed\xfe",
+            b"\xfe\xed\xfa\xcf",
+            b"\xca\xfe\xba\xbe",
+        ),
+    ),
+)
+
+
+def object_format(data: bytes) -> str:
+    """The object format *data* starts with (``ELF``, ``PE/COFF``, ``Mach-O``), or
+    ``unknown``."""
+    for name, magics in _OBJECT_MAGIC:
+        if data.startswith(magics):
+            return name
+    return "unknown"
+
+
 def build_macho_seed(work: Path) -> bytes:
     """A hand-built x86_64 dylib: three exports in both the nlist and the trie."""
     from _macho_synthetic import N_EXT, N_SECT, MachoSymbol, write_dylib

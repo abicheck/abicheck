@@ -54,6 +54,7 @@ from _parser_fuzz_oracle import (  # noqa: E402
     flip_byte,
     huge_count,
     json_mutate,
+    object_format,
     snapshot_seed_document,
     truncate,
 )
@@ -171,17 +172,33 @@ def _against_gap(prop: Callable[[], None], gap: KnownGap | None) -> None:
 # --------------------------------------------------------------------------
 
 _SEEDS: dict[str, bytes] = {}
+#: Why the host cannot build the ELF/DWARF seeds, once found (see _so_seed).
+_NO_ELF_SEED: list[str] = []
 _SEED_FACTS: dict[str, int] = {}
 
 
 def _so_seed(*, debug: bool) -> bytes:
     key = "dwarf" if debug else "elf"
+    if _NO_ELF_SEED:
+        pytest.skip(_NO_ELF_SEED[0])
     if key not in _SEEDS:
         if shutil.which("gcc") is None:
             pytest.skip("gcc is required to build the ELF/DWARF parser seeds")
         with tempfile.TemporaryDirectory(prefix="parser-fuzz-seed-") as d:
             # A configured gcc that fails raises CalledProcessError: a failure.
-            _SEEDS[key] = build_shared_object(Path(d), debug=debug)
+            seed = build_shared_object(Path(d), debug=debug)
+        # The capability the seeds need is an ELF-producing gcc, not a `gcc` on
+        # PATH: macOS's gcc is clang emitting Mach-O and a Windows gcc is MinGW
+        # emitting PE, and the ELF/DWARF oracles then fuzzed a non-ELF seed
+        # ("elf seed holds no facts", "ELFError: Magic number does not match").
+        fmt = object_format(seed)
+        if fmt != "ELF":
+            _NO_ELF_SEED.append(
+                f"this host's gcc emits {fmt}, not ELF: the ELF/DWARF parser "
+                "seeds need an ELF-targeting gcc"
+            )
+            pytest.skip(_NO_ELF_SEED[0])
+        _SEEDS[key] = seed
     return _SEEDS[key]
 
 
