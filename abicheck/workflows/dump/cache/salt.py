@@ -79,7 +79,9 @@ from __future__ import annotations
 #: type's ABI fact; a native GCC dump records deprecation, completeness,
 #: hidden friends, vtable slots, a vptr, const arrays and restrict, and
 #: respells unbounded arrays and _Atomic. A warm entry would carry none.
-SNAPSHOT_CACHE_VERSION: str = "49"
+#:
+#: v50: a native gcc dump records constraints as conjunctive atom sets.
+SNAPSHOT_CACHE_VERSION: str = "50"
 # v35: header-derived snapshots now carry public_header_identifiers (schema
 # v55, extract/public_header_identifiers.py). The key also folds in the
 # snapshot schema version from this version on, so the next schema bump
