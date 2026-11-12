@@ -4,7 +4,8 @@ Only the public entry points are used: ``abicheck.dumper.dump`` for the
 snapshots and ``abicheck.checker.compare`` for the verdict. The evidence axis
 decides what the dump is given: ``binary`` builds without ``-g`` and passes no
 header, ``dwarf`` builds with ``-g`` and passes no header, ``headers`` adds the
-public header (castxml, with the standard and the layout-changing flags the
+public header (dumped by ``config.header_backend``: castxml, clang or the
+native gcc plugin, with the standard and the layout-changing flags the
 library was built with). A compiler failure raises ``CompileError``; it is
 never converted into a skip, because a corpus case that did not build proved
 nothing.
@@ -12,6 +13,7 @@ nothing.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -212,15 +214,53 @@ def build(
     gcc_options = " ".join(
         [f"-std={std}", *fl.layout_flags(config.producer, seed.lang)]
     )
-    snap = dump(
-        so,
-        headers,
-        version=out_dir.name,
-        compiler="c++" if is_cxx else "cc",
-        lang="c++" if is_cxx else "c",
-        header_backend="castxml",
-        gcc_options=gcc_options if headers else None,
-    )
+    backend = config.header_backend
+    if os.environ.get("ABICHECK_EDIT_CORPUS_PUBLIC_DUMP"):
+        # The public dump workflow end to end (``run_dump``), record-layout
+        # enrichment included.
+        from abicheck.compile_context import CompileContext
+        from abicheck.service import run_dump
+
+        snap = run_dump(
+            so,
+            "elf",
+            headers,
+            version=out_dir.name,
+            lang="c++" if is_cxx else "c",
+            lang_explicit=True,
+            frontend=backend,
+            compile=CompileContext(
+                gcc_options=gcc_options if headers else None, frontend=backend
+            ),
+        )
+    else:
+        snap = dump(
+            so,
+            headers,
+            version=out_dir.name,
+            compiler="c++" if is_cxx else "cc",
+            lang="c++" if is_cxx else "c",
+            header_backend=backend,
+            gcc_options=gcc_options if headers else None,
+        )
+        if headers and backend == "clang":
+            # The public dump workflow (``abicheck dump``/``compare``) enriches
+            # a clang-backend snapshot with record layout after ``dump()``; the
+            # bare ``dumper.dump()`` does not (known-gaps "`dumper.dump()` never
+            # runs the clang record-layout pass"). Mirror the workflow, so the
+            # corpus judges what users get.
+            from abicheck.compile_context import CompileContext
+            from abicheck.extract.headers.clang.layout_tool import (
+                attach_clang_layout,
+            )
+
+            snap = attach_clang_layout(
+                snap,
+                headers,
+                [],
+                lang="c++" if is_cxx else "c",
+                compile=CompileContext(gcc_options=gcc_options),
+            )
     return Built(dir=out_dir, so=so, header=header, snapshot=snap)
 
 

@@ -113,6 +113,26 @@ static void attributes(tree d) {
   }
   fprintf(out,",\"deprecated\":%s",TREE_DEPRECATED(d)?q(message?message:"").c_str():"null");
 }
+// "deprecated" for a decl: null, or its message ("" when it has none).
+static std::string deprecation(tree d) {
+  if(!d || !DECL_P(d) || !TREE_DEPRECATED(d)) return "null";
+  const char *message=nullptr;
+  for(tree a=DECL_ATTRIBUTES(d);a;a=TREE_CHAIN(a))if(TREE_CODE(TREE_PURPOSE(a))==IDENTIFIER_NODE && !strcmp(IDENTIFIER_POINTER(TREE_PURPOSE(a)),"deprecated")) {
+    tree args=TREE_VALUE(a);if(args && TREE_VALUE(args) && TREE_CODE(TREE_VALUE(args))==STRING_CST)message=TREE_STRING_POINTER(TREE_VALUE(args));
+  }
+  return q(message?message:"");
+}
+// A record/enum is deprecated through its tag declaration or its type attributes.
+static std::string type_deprecation(tree t) {
+  tree td=TYPE_NAME(t);if(!td||!DECL_P(td))td=TYPE_STUB_DECL(t);
+  std::string m=deprecation(td);if(m!="null")return m;
+  bool flagged=TREE_DEPRECATED(t);
+  for(tree a=TYPE_ATTRIBUTES(t);a;a=TREE_CHAIN(a))if(TREE_CODE(TREE_PURPOSE(a))==IDENTIFIER_NODE && !strcmp(IDENTIFIER_POINTER(TREE_PURPOSE(a)),"deprecated")) {
+    tree args=TREE_VALUE(a);
+    return q(args && TREE_VALUE(args) && TREE_CODE(TREE_VALUE(args))==STRING_CST?TREE_STRING_POINTER(TREE_VALUE(args)):"");
+  }
+  return flagged?q(""):"null";
+}
 static bool local_scope(tree ctx) {
   while(ctx && (TYPE_P(ctx)||DECL_P(ctx))) {
     if(TREE_CODE(ctx)==FUNCTION_DECL)return true;
@@ -145,7 +165,7 @@ static void decl(void *data,void *) {
     bool comma=false;unsigned ai=0;tree argument=DECL_ARGUMENTS(d);
     for(tree a=TYPE_ARG_TYPES(ft);a;a=TREE_CHAIN(a)) {
       tree t=TREE_VALUE(a);if(t==void_type_node)break;
-      fprintf(out,"%s{\"type\":%s,\"identity\":%s,\"default\":%s",comma?",":"",q(spelled(t).c_str()).c_str(),identity(t).c_str(),TREE_PURPOSE(a)?q(spelled(TREE_PURPOSE(a)).c_str()).c_str():"null");abi("abi",t);fprintf(out,",\"param_kind\":%s,\"pointer_depth\":%u,\"restrict\":%s",q(param_kind(t)).c_str(),pointer_depth(t),TYPE_RESTRICT(t)?"true":"false");fprintf(out,",\"implicit_this\":%s,\"artificial\":%s,\"name\":%s}",TREE_CODE(ft)==METHOD_TYPE && ai==0?"true":"false",argument && DECL_ARTIFICIAL(argument)?"true":"false",argument?q(name(argument)).c_str():"null");if(argument)argument=DECL_CHAIN(argument);ai++;comma=true;
+      fprintf(out,"%s{\"type\":%s,\"identity\":%s,\"default\":%s",comma?",":"",q(spelled(t).c_str()).c_str(),identity(t).c_str(),TREE_PURPOSE(a)?q(spelled(TREE_PURPOSE(a)).c_str()).c_str():"null");abi("abi",t);fprintf(out,",\"param_kind\":%s,\"pointer_depth\":%u,\"restrict\":%s",q(param_kind(t)).c_str(),pointer_depth(t),TYPE_RESTRICT(argument?TREE_TYPE(argument):t)?"true":"false");fprintf(out,",\"implicit_this\":%s,\"artificial\":%s,\"name\":%s}",TREE_CODE(ft)==METHOD_TYPE && ai==0?"true":"false",argument && DECL_ARTIFICIAL(argument)?"true":"false",argument?q(name(argument)).c_str():"null");if(argument)argument=DECL_CHAIN(argument);ai++;comma=true;
     }
     fprintf(out,"]");
   }
@@ -171,7 +191,7 @@ static void decl(void *data,void *) {
     tree asmname=DECL_ASSEMBLER_NAME(d);if(asmname)fprintf(out,",\"mangled\":%s",q(IDENTIFIER_POINTER(asmname)).c_str());
   }
 #endif
-  if(code==VAR_DECL) { abi("abi",TREE_TYPE(d)); fprintf(out,",\"const\":%s,\"volatile\":%s,\"tls\":%s",TYPE_READONLY(TREE_TYPE(d))?"true":"false",TYPE_VOLATILE(TREE_TYPE(d))?"true":"false",DECL_THREAD_LOCAL_P(d)?"true":"false"); fprintf(out,",\"size_bits\":%s,\"alignment_bits\":%u",number(DECL_SIZE(d)).c_str(),DECL_ALIGN(d)); fprintf(out,",\"value\":%s",number(DECL_INITIAL(d)).c_str());
+  if(code==VAR_DECL) { abi("abi",TREE_TYPE(d)); fprintf(out,",\"const\":%s,\"volatile\":%s,\"tls\":%s",TYPE_READONLY(strip_array_types(TREE_TYPE(d)))?"true":"false",TYPE_VOLATILE(strip_array_types(TREE_TYPE(d)))?"true":"false",DECL_THREAD_LOCAL_P(d)?"true":"false"); fprintf(out,",\"size_bits\":%s,\"alignment_bits\":%u",number(DECL_SIZE(d)).c_str(),DECL_ALIGN(d)); fprintf(out,",\"value\":%s",number(DECL_INITIAL(d)).c_str());
     tree init=DECL_INITIAL(d);fprintf(out,",\"value_expression\":%s",init && (TREE_CODE(init)==INTEGER_CST || TREE_CODE(init)==REAL_CST || TREE_CODE(init)==STRING_CST)?q(spelled(init).c_str()).c_str():"null");
   }
   fprintf(out,"}\n");
@@ -183,7 +203,7 @@ static void vgroups(tree b, bool &comma, int depth=0) {
     fprintf(out,"%s{\"type\":%s,\"offset_bytes\":%s,\"slots\":[",comma?",":"",q(spelled(BINFO_TYPE(b)).c_str()).c_str(),number(BINFO_OFFSET(b)).c_str());comma=true;
     bool sep=false;for(tree v=BINFO_VIRTUALS(b);v;v=TREE_CHAIN(v)) {
       tree f=BV_FN(v);
-      fprintf(out,"%s{\"method\":%s,\"this_adjustment\":%s,\"vcall_index\":%s}",sep?",":"",q(lang_hooks.decl_printable_name(f,2)).c_str(),number(BV_DELTA(v)).c_str(),number(BV_VCALL_INDEX(v)).c_str());sep=true;
+      fprintf(out,"%s{\"method\":%s,\"mangled\":%s,\"this_adjustment\":%s,\"vcall_index\":%s}",sep?",":"",q(lang_hooks.decl_printable_name(f,2)).c_str(),q(IDENTIFIER_POINTER(DECL_ASSEMBLER_NAME(f))).c_str(),number(BV_DELTA(v)).c_str(),number(BV_VCALL_INDEX(v)).c_str());sep=true;
     }fprintf(out,"]}");
   }
   tree sub;int i;for(i=0;BINFO_BASE_ITERATE(b,i,sub);i++)vgroups(sub,comma,depth+1);
@@ -199,6 +219,7 @@ static void type(void *data,void *) {
   scope(TYPE_CONTEXT(t));
   tree type_name=TYPE_NAME(t);fprintf(out,",\"anonymous\":%s",!type_name || (DECL_P(type_name) && !DECL_NAME(type_name))?"true":"false");
   fprintf(out,",\"type_uid\":%u,\"leaf_name\":%s",TYPE_UID(t),q(leaf(t).c_str()).c_str());
+  fprintf(out,",\"complete\":%s,\"deprecated\":%s",COMPLETE_TYPE_P(t)?"true":"false",type_deprecation(t).c_str());
 #ifdef GCC_CPP
   fprintf(out,",\"dependent\":%s",dependent_type_p(t)?"true":"false");
   if(TREE_CODE(t)==RECORD_TYPE && TYPE_LANG_SPECIFIC(t)) {
@@ -243,8 +264,8 @@ static void type(void *data,void *) {
     fprintf(out,",\"underlying_type\":%s",underlying&&TYPE_P(underlying)?q(spelled(underlying).c_str()).c_str():"null");
     fprintf(out,",\"precision\":%u,\"unsigned\":%s,\"members\":[",TYPE_PRECISION(t),TYPE_UNSIGNED(t)?"true":"false");
     bool comma=false;for(tree e=TYPE_VALUES(t);e;e=TREE_CHAIN(e)) {
-      tree v=TREE_VALUE(e);if(v&&TREE_CODE(v)==CONST_DECL)v=DECL_INITIAL(v);
-      fprintf(out,"%s{\"name\":%s,\"value\":%s}",comma?",":"",q(IDENTIFIER_POINTER(TREE_PURPOSE(e))).c_str(),number(v).c_str());comma=true;
+      tree v=TREE_VALUE(e);tree cd=v&&TREE_CODE(v)==CONST_DECL?v:nullptr;if(cd)v=DECL_INITIAL(v);
+      fprintf(out,"%s{\"name\":%s,\"value\":%s,\"deprecated\":%s}",comma?",":"",q(IDENTIFIER_POINTER(TREE_PURPOSE(e))).c_str(),number(v).c_str(),deprecation(cd).c_str());comma=true;
     }fprintf(out,"]");
   } else {
     fprintf(out,",\"fields\":[");bool comma=false;
@@ -254,7 +275,8 @@ static void type(void *data,void *) {
       std::string off="null";
       if(bo&&bi&&tree_fits_uhwi_p(bo)&&tree_fits_uhwi_p(bi)) off=std::to_string(tree_to_uhwi(bo)*BITS_PER_UNIT+tree_to_uhwi(bi));
       fprintf(out,"%s{\"name\":%s,\"type\":%s,\"identity\":%s,\"offset_bits\":%s,\"size_bits\":%s,\"bitfield\":%s,\"artificial\":%s,\"access\":%s",comma?",":"",q(name(f)).c_str(),q(spelled(ftype).c_str()).c_str(),identity(ftype).c_str(),off.c_str(),number(DECL_SIZE(f)).c_str(),DECL_BIT_FIELD(f)?"true":"false",DECL_ARTIFICIAL(f)?"true":"false",q(TREE_PRIVATE(f)?"private":TREE_PROTECTED(f)?"protected":"public").c_str());abi("abi",ftype);
-      fprintf(out,",\"const\":%s,\"volatile\":%s",TYPE_READONLY(ftype)?"true":"false",TYPE_VOLATILE(ftype)?"true":"false");
+      fprintf(out,",\"const\":%s,\"volatile\":%s",TYPE_READONLY(strip_array_types(ftype))?"true":"false",TYPE_VOLATILE(strip_array_types(ftype))?"true":"false");
+      fprintf(out,",\"atomic\":%s,\"deprecated\":%s",TYPE_ATOMIC(ftype)?"true":"false",deprecation(f).c_str());
 #ifdef GCC_CPP
       fprintf(out,",\"mutable\":%s",DECL_MUTABLE_P(f)?"true":"false");
       tree init=DECL_INITIAL(f);fprintf(out,",\"default\":%s",init && init!=error_mark_node?q(spelled(init).c_str()).c_str():"null");
@@ -310,6 +332,13 @@ static void visit_type(tree t) {
   t=TYPE_MAIN_VARIANT(t);
   if(!t || (!RECORD_OR_UNION_TYPE_P(t)&&TREE_CODE(t)!=ENUMERAL_TYPE) || local_scope(TYPE_CONTEXT(t)) || seen_types.count(TYPE_UID(t)))return;
   type(t,nullptr);
+  tree main=RECORD_OR_UNION_TYPE_P(t)?TYPE_MAIN_DECL(t):nullptr;
+  if(main && !dependent_type_p(t)) for(tree fl=DECL_FRIENDLIST(main);fl;fl=TREE_CHAIN(fl)) for(tree fr=TREE_VALUE(fl);fr;fr=TREE_CHAIN(fr)) {
+    tree fn=TREE_VALUE(fr);
+    if(!fn || TREE_CODE(fn)!=FUNCTION_DECL)continue;
+    decl(fn,nullptr);
+    fprintf(out,"{\"kind\":\"friend\",\"uid\":%u,\"owner\":%s}\n",DECL_UID(fn),q(spelled(t).c_str()).c_str());
+  }
   if(RECORD_OR_UNION_TYPE_P(t)) for(tree d=TYPE_FIELDS(t);d;d=DECL_CHAIN(d)) {
     if(TREE_CODE(d)==FIELD_DECL)visit_type(TREE_TYPE(d));else visit_decl(d);
   }

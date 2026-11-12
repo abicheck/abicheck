@@ -55,16 +55,41 @@ if TYPE_CHECKING:
     from ..model.fact import Fact
     from ..model.identity import EntityId
     from ..model.semantic_ir import CanonicalEntity
+    from ..model.snapshot import AbiSnapshot
 
 __all__ = [
     "access_changes",
     "alignment_changes",
     "deprecation_changes",
     "is_access_narrowing",
+    "records_variable_access",
 ]
 
 _LOUD = frozenset({FactStatus.FAILED, FactStatus.PARTIAL})
 _RANK = {"public": 0, "protected": 1, "private": 2}
+
+
+#: The extractor generation from which the clang header backend records a
+#: variable's member access (a static data member's ``private:``/
+#: ``protected:``). An older clang snapshot spelled every variable ``public``,
+#: so reading its access would report a private static member as narrowed.
+CLANG_VARIABLE_ACCESS_GENERATION = 54
+
+
+def records_variable_access(snapshot: AbiSnapshot) -> bool:
+    """Whether *snapshot*'s header backend recorded each variable's access.
+
+    castxml and native GCC always have; clang has since
+    ``CLANG_VARIABLE_ACCESS_GENERATION`` (``fact_generations`` is ``None``
+    for a snapshot this process extracted). A ``hybrid`` merge mixes both
+    and stays excluded.
+    """
+    if snapshot.ast_producer in ("castxml", "gcc-experimental"):
+        return True
+    if snapshot.ast_producer != "clang":
+        return False
+    gens = snapshot.fact_generations
+    return gens is None or gens[0] >= CLANG_VARIABLE_ACCESS_GENERATION
 
 
 def is_access_narrowing(old_access: str, new_access: str) -> bool:

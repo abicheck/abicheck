@@ -576,14 +576,15 @@ def test_clang_builtin_abi_facts_are_marked_without_a_linker(
 @pytest.mark.known_gap_canary
 @_NEEDS_CASTXML
 @_NEEDS_CLANG
-def test_clang_leaves_enum_and_typedef_slots_without_an_abi_fact(
+def test_clang_leaves_enum_slots_without_an_abi_fact(
     fixture: Fixture, tmp_path: Path
 ) -> None:
     """Known gap (docs/contribute/known-gaps.md): for ``make(Point, Color, Mode,
-    count_t) -> handle_t`` castxml records the ABI fact of the enum parameters
-    and the typedef'd return, and clang records NOT_COLLECTED for exactly those
-    three slots (it records ``count_t`` and plain builtins). Fails when clang
-    starts recording them, or when the gap widens."""
+    count_t) -> handle_t`` castxml records the ABI fact of the enum parameters,
+    and clang records NOT_COLLECTED for exactly those two slots. Clang records
+    ``count_t``, plain builtins and, since extractor generation 55, the
+    typedef'd return with castxml's value. Fails when clang starts recording
+    the enum slots, or when the gap widens."""
     mangled = "_ZN3lib4makeENS_5PointENS_5ColorENS_4ModeEj"
     slots = {}
     for frontend in FRONTENDS_ONLY:
@@ -608,14 +609,15 @@ def test_clang_leaves_enum_and_typedef_slots_without_an_abi_fact(
         fact = slots["castxml"][slot]
         assert fact.status is FactStatus.PRESENT, (slot, fact)
         assert (fact.value.encoding, fact.value.size) == (encoding, size), slot
-    # The gap: clang marks the enum and typedef'd slots, never a wrong value.
-    for slot in ("Color", "Mode", "return"):
+    # The gap: clang marks the enum slots, never a wrong value.
+    for slot in ("Color", "Mode"):
         fact = slots["clang"][slot]
         assert fact.status is FactStatus.NOT_COLLECTED, (slot, fact)
         assert fact.value is None
-    count_t = slots["clang"]["count_t"]
-    assert count_t.status is FactStatus.PRESENT
-    assert (count_t.value.encoding, count_t.value.size) == expected["count_t"]
+    for slot in ("count_t", "return"):
+        fact = slots["clang"][slot]
+        assert fact.status is FactStatus.PRESENT, (slot, fact)
+        assert fact.value == slots["castxml"][slot].value, slot
 
 
 def _fact_projection(snap: Any) -> dict[str, Any]:

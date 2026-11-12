@@ -30,6 +30,12 @@ GAP_O2_STD = (
 )
 
 
+GAP_GCC_OVERLOAD = "The native gcc header backend records no overload-set ambiguity"
+GAP_GCC_CONCEPT = (
+    "The native gcc header backend cannot tell a tightened concept constraint"
+)
+
+
 def _always(_: Config) -> bool:
     return True
 
@@ -80,6 +86,67 @@ class Known:
             and verdict in self.verdicts
         )
 
+
+def _hb(backend: str) -> Callable[[Config], bool]:
+    """Cells whose headers the named backend dumps (castxml is the reference)."""
+    return lambda c: c.evidence == "headers" and c.header_backend == backend
+
+
+def _backend_gap(
+    op: str,
+    seeds: frozenset[str],
+    backend: str,
+    cls: str,
+    reason: str,
+    gap: str,
+    issues: frozenset[str],
+    verdict: str,
+    also: Callable[[Config], bool] = _always,
+) -> Known:
+    hb = _hb(backend)
+    return Known(
+        op,
+        seeds,
+        cls,
+        lambda c: hb(c) and also(c),
+        reason,
+        gap,
+        issues=issues,
+        verdicts=frozenset({verdict}),
+    )
+
+
+_MORE = frozenset({"cxx_more"})
+
+# Header-backend parity: castxml reads these facts, the named backend does
+# not. Each is being fixed in the backend itself; the entry forces its own
+# removal (a fixed cell no longer reproduces) when the fix lands.
+_BACKEND_GAPS: tuple[Known, ...] = (
+    _backend_gap(
+        "converting_ctor_overload_added",
+        _MORE,
+        "gcc",
+        "wrong-kind",
+        "the native gcc header backend reads the new CO(long) constructor's "
+        "ambiguity risk but not the overload set's: overload_ambiguity_introduced "
+        "is missing",
+        GAP_GCC_OVERLOAD,
+        frozenset({"missing:OVERLOAD_AMBIGUITY_INTRODUCED"}),
+        "COMPATIBLE_WITH_RISK",
+    ),
+    _backend_gap(
+        "concept_constraint_added",
+        frozenset({"cxx_classes"}),
+        "gcc",
+        "false-clean",
+        "the native gcc header backend reads a newly constrained template as "
+        "concept_constraint_changed (a risk), not concept_tightened: callers "
+        "with a now-excluded argument stop compiling",
+        GAP_GCC_CONCEPT,
+        frozenset({"weaker-than:API_BREAK"}),
+        "COMPATIBLE_WITH_RISK",
+    ),
+)
 
 KNOWN: tuple[Known, ...] = (
     Known(
@@ -182,6 +249,7 @@ KNOWN: tuple[Known, ...] = (
         issues=frozenset({"stronger-than:COMPATIBLE"}),
         verdicts=frozenset({"BREAKING", "COMPATIBLE_WITH_RISK"}),
     ),
+    *_BACKEND_GAPS,
 )
 
 

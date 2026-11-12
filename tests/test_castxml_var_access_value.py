@@ -545,13 +545,34 @@ def _kinds(result: object) -> set[ChangeKind]:
 
 
 class TestVarAccessProducerGate:
-    """Only castxml populates this fact (not clang, not "hybrid" either —
-    see ``AbiSnapshot.castxml_var_access_facts_reliable``'s own docstring)."""
+    """castxml, and clang from extractor generation 54, populate this fact;
+    "hybrid" never does (see ``AbiSnapshot.castxml_var_access_facts_reliable``'s
+    own docstring)."""
 
-    def test_clang_vs_castxml_does_not_manufacture_a_finding(self) -> None:
+    def test_pre_generation_54_clang_vs_castxml_does_not_manufacture_a_finding(
+        self,
+    ) -> None:
         old = _snap(ast_producer="clang", variables=[_var(AccessLevel.PUBLIC)])
+        old.fact_generations = (53, 0, 0)  # every variable read public then
         new = _snap(ast_producer="castxml", variables=[_var(AccessLevel.PRIVATE)])
         assert ChangeKind.VAR_ACCESS_CHANGED not in _kinds(compare(old, new))
+
+    def test_current_clang_vs_castxml_compares(self) -> None:
+        old = _snap(ast_producer="clang", variables=[_var(AccessLevel.PUBLIC)])
+        new = _snap(ast_producer="castxml", variables=[_var(AccessLevel.PRIVATE)])
+        assert ChangeKind.VAR_ACCESS_CHANGED in _kinds(compare(old, new))
+
+    @pytest.mark.parametrize("other", ["castxml", "clang", "gcc-experimental"])
+    def test_native_gcc_compares_with_every_access_producer(self, other: str) -> None:
+        # Native GCC projects each variable's access from its first release.
+        old = _snap(
+            ast_producer="gcc-experimental", variables=[_var(AccessLevel.PUBLIC)]
+        )
+        new = _snap(ast_producer=other, variables=[_var(AccessLevel.PRIVATE)])
+        assert {c.kind for c in compare(old, new).changes} & {
+            ChangeKind.VAR_ACCESS_CHANGED,
+            ChangeKind.VAR_ACCESS_WIDENED,
+        } == {ChangeKind.VAR_ACCESS_CHANGED}
 
     def test_two_castxml_sides_compare(self) -> None:
         old = _snap(ast_producer="castxml", variables=[_var(AccessLevel.PUBLIC)])

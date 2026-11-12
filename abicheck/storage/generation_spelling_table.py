@@ -512,6 +512,35 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "snapshot reads the castxml value as declared and a DWARF default as "
         "not recorded, as before"
     ),
+    54: GenerationSpellingChange(
+        "the clang header backend records a variable's member access (a "
+        "static data member declared under private:/protected:), as castxml "
+        "does; no type spelling changes and no rewrite is needed -- the "
+        "var_access detector reads an older clang snapshot's access as not "
+        "recorded (compare.declaration_facts.records_variable_access)"
+    ),
+    55: GenerationSpellingChange(
+        "header-backend parity: a Clang dump records the type-ABI fact of a "
+        "return type spelled through a typedef (the nearest declared typedef "
+        "decides); a native GCC dump records record/enum/field deprecation, "
+        "a record's completeness (opaque), hidden-friend owners, the primary "
+        "vtable's declared slots and a vptr, a const array's constness, a "
+        "parameter's restrict, auto-detects C vs C++ like the other "
+        "backends, and spells an unbounded array T[] (was T[0:] or "
+        "T[<unknown>]) and _Atomic(T) (was atomic T). No load-time rewrite: "
+        "those GCC spellings are not whole words the table can match, and "
+        "only a gcc-experimental snapshot from generations 53-54 carries "
+        "them (the backend landed in 53), so it is re-dumped"
+    ),
+    56: GenerationSpellingChange(
+        "the native gcc header backend records a template's or concept's "
+        "constraint as the shared conjunctive atom set (one hashed atom per "
+        "top-level && conjunct, the empty set for an unconstrained "
+        "template) instead of one opaque gcc-v2 digest, so a tightening is "
+        "decidable; an older gcc snapshot's constraint values are opaque "
+        "and read as concept_constraint_changed against a newer one, "
+        "gcc-to-gcc only, not rewritten"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

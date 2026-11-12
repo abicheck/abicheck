@@ -134,6 +134,16 @@ dependency walk and debug roots to every member. No open gap remains.
 **Status (2026-11-08): OPEN.** Since extractor generation 45 a DWARF-only snapshot records C++ member functions, and a clang-built virtual that becomes `= 0` reads `func_virtual_became_pure` (clang marks the in-class declaration `DW_VIRTUALITY_pure_virtual`). GCC 13 writes `DW_VIRTUALITY_virtual` for a pure virtual, so the declaration looks like any other unexported virtual and the pair reads `func_removed` (BREAKING, so the verdict is right; the kind is not). The binary does carry the fact: the class's `_ZTV` object has an `R_X86_64_64` relocation against `__cxa_pure_virtual` in that slot. Closing it needs the ELF reader to map vtable relocations to slots; the DWARF walker already reads each virtual's slot from `DW_AT_vtable_elem_location` (`extract/dwarf_member_functions.vtable_slot`). Found by the config-matrix corpus (`virtual_become_pure`, `cxx_classes`, evidence `dwarf`, gcc). `wrong-kind`. The reverse edit misreads too (2026-11-11): defining a pure virtual (`type_lost_abstract`, `cxx_more`, evidence `dwarf`, gcc) reads `virtual_method_added`, so a COMPATIBLE edit reads BREAKING (`false-positive`); clang reads `func_added`. Owner: `extract/` (ELF vtable relocations, `extract/dwarf_member_functions.py`).
 <!-- canary: tests/test_dwarf_member_functions.py::test_a_virtual_that_became_pure_is_reported_from_gcc_dwarf -->
 
+#### The native gcc header backend records no overload-set ambiguity (2026-11-11)
+
+**Status (2026-11-11): OPEN.** Adding `CO(long)` beside `CO(int)` (`converting_ctor_overload_added`, `cxx_more`) reads `CTOR_OVERLOAD_AMBIGUITY_RISK` under the native gcc header backend but not `OVERLOAD_AMBIGUITY_INTRODUCED`, which castxml and clang add from the overload set; the verdict (COMPATIBLE_WITH_RISK) is right. `wrong-kind`. Found by the edit corpus's header-backend axis (`Config.header_backend`). Owner: `extract/headers/gcc/` (`gcc_facts.cc`, `projection.py`).
+<!-- no-canary: the edit corpus is the canary: its strict-xfail entry in tests/_edit_corpus_known.py fails once the backend records the fact -->
+
+#### The native gcc header backend cannot tell a tightened concept constraint (2026-11-11)
+
+**Status (2026-11-11): OPEN.** Adding a `requires` constraint to a public template (`concept_constraint_added`, `cxx_classes`, C++20 and later) reads `CONCEPT_CONSTRAINT_CHANGED` (COMPATIBLE_WITH_RISK) under the native gcc header backend; castxml reads `CONCEPT_TIGHTENED` (API_BREAK), and a consumer calling it with a now-excluded argument (`clampv(short)`) stops compiling. `false-clean`. Found by the edit corpus's header-backend axis (`Config.header_backend`). Owner: `extract/headers/gcc/` (`gcc_facts.cc`, `projection.py`).
+<!-- no-canary: the edit corpus is the canary: its strict-xfail entry in tests/_edit_corpus_known.py fails once the backend records the fact -->
+
 #### castxml spells a multi-dimensional array with its bounds reversed (2026-11-08)
 
 **Status (2026-11-08): OPEN.** castxml writes `int m[2][3]` as an `ArrayType` of `ArrayType`, and `extract/headers/castxml/type_resolution.py` appends the outer bound after the inner one, so the member reads `int[3][2]`. The clang header backend and DWARF (generation 45) spell it `int[2][3]`, as C does. Comparing two castxml dumps is self-consistent, but a castxml snapshot against a clang or DWARF one reports a `type_field_type_changed` that is not there, and a reshape `[2][3]` -> `[3][2]` reads as its mirror image. Closing it needs the spelling fixed and a stored-spelling migration for castxml snapshots (every multi-dimensional castxml spelling reverses soundly). `false-positive` across frontends. Owner: `extract/headers/castxml/`.
@@ -202,12 +212,12 @@ dependency walk and debug roots to every member. No open gap remains.
 `false-positive` — an ABI-equivalent builtin retype stays a type change instead of `abi_equivalent_type_changed`; nothing is fabricated. [Full write-up](known-gaps/clang-builtin-abi-probe-needs-a-linker-and-a-runnable-target.md)
 <!-- canary: tests/test_default_install_fact_invariants.py::test_clang_builtin_abi_facts_are_marked_without_a_linker -->
 
-#### Clang leaves enum- and typedef-typed slots without a `type_abi_fact` that castxml records (2026-11-05)
+#### Clang leaves enum-typed parameter slots without a `type_abi_fact` that castxml records (2026-11-05)
 
-**Status (2026-11-05): OPEN.** For `handle_t make(Point, Color, Mode, count_t)` castxml records `type_abi_fact` PRESENT for the `Color`/`Mode` parameters and the `handle_t` return; the clang frontend records `NOT_COLLECTED` for them (it does record `count_t`, a typedef of a builtin spelled without a namespace, and every plain builtin). The gap is marked, not empty, so it narrows the ABI-equivalence path rather than manufacturing a break. Found by the default-install invariant suite while comparing frontends; independent of optional tools (the same with every tool present). Cause not traced; `builtin_type_fact` is called on the desugared spelling, and has no enum underlying-type input. Owner: `extract/headers/clang/functions.py`.
+**Status (2026-11-11): OPEN, narrowed.** For `handle_t make(Point, Color, Mode, count_t)` castxml records `type_abi_fact` PRESENT for the `Color`/`Mode` parameters; the clang frontend records `NOT_COLLECTED` for them (it records `count_t`, every plain builtin and, since extractor generation 55, the typedef'd `handle_t` return). The gap is marked, not empty, so it narrows the ABI-equivalence path rather than manufacturing a break. Found by the default-install invariant suite while comparing frontends; independent of optional tools (the same with every tool present). Cause not traced; `builtin_type_fact` is called on the desugared spelling, and has no enum underlying-type input. Owner: `extract/headers/clang/functions.py`.
 
-`false-positive` — a clang-side enum or typedef retype between ABI-identical types is not downgraded; castxml snapshots are unaffected. [Full write-up](known-gaps/clang-leaves-enum-and-typedef-slots-without-a-type-abi-fact.md)
-<!-- canary: tests/test_default_install_fact_invariants.py::test_clang_leaves_enum_and_typedef_slots_without_an_abi_fact -->
+`false-positive` — a clang-side enum parameter retype between ABI-identical types is not downgraded (the typedef'd return slot was fixed in generation 55); castxml snapshots are unaffected. [Full write-up](known-gaps/clang-leaves-enum-and-typedef-slots-without-a-type-abi-fact.md)
+<!-- canary: tests/test_default_install_fact_invariants.py::test_clang_leaves_enum_slots_without_an_abi_fact -->
 
 #### The standing-inventory headline folds observed compatible findings into one clause (2026-10-28)
 
