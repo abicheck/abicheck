@@ -176,10 +176,12 @@ def test_castxml_records_no_standard_layout_or_data_size(tmp_path: Path) -> None
     assert gcc.data_size_bits == 40
 
 
-@pytest.mark.known_gap_canary
-def test_castxml_spells_a_std_return_type_by_its_bare_leaf(tmp_path: Path) -> None:
-    """castxml writes ``std::string`` as ``string``, so the std-by-value
-    idiom check (which looks for ``std::``) never sees it."""
+def test_castxml_spells_a_std_return_type_by_its_bare_leaf_but_resolves_it(
+    tmp_path: Path,
+) -> None:
+    """castxml writes ``std::string`` as ``string`` and records the resolved
+    ``std::`` identity, which the std-by-value check reads (formerly a
+    known-gap canary)."""
     header = "#include <string>\nstd::string greet_n(int n);"
     source = "std::string greet_n(int n) { return std::string(n, 'x'); }"
     castxml = _function(
@@ -188,6 +190,12 @@ def test_castxml_spells_a_std_return_type_by_its_bare_leaf(tmp_path: Path) -> No
     clang = _function(_dump(tmp_path / "c", header, source, "c++", "clang"), "greet_n")
     assert "std::" not in castxml.return_type
     assert "std::" in clang.return_type
+    from abicheck.model import ParamKind
+    from abicheck.policy.std_by_value import is_std_by_value
+
+    assert is_std_by_value(
+        castxml.return_type, 0, ParamKind.VALUE, castxml.return_type_identities_fact
+    )
 
 
 @pytest.mark.known_gap_canary

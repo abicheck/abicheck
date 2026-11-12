@@ -47,9 +47,6 @@ GAP_TYPEDEF_RETURN = (
 GAP_GCC_TYPEDEF_RETURN = (
     "The native gcc header backend spells a typedef'd return type canonically"
 )
-GAP_CASTXML_STD_LEAF = (
-    "castxml's bare `std` leaf hides a std type passed by value from the idiom check"
-)
 GAP_CLOSURE_RETURN = (
     "A formerly inline function's closure return re-spelled by clang reads "
     "`func_return_changed`"
@@ -259,16 +256,6 @@ _BACKEND_GAPS: tuple[Known, ...] = (
         GAP_GCC_TYPEDEF_RETURN,
         frozenset({"missing:TYPEDEF_VERSION_SENTINEL", "weaker-than:COMPATIBLE"}),
         "NO_CHANGE",
-    ),
-    _backend_gap(
-        "stl_by_value_function_added",
-        frozenset({"cxx_stdlib"}),
-        "castxml",
-        "wrong-kind",
-        "castxml spells std::string as `string`; the std-by-value check misses it",
-        GAP_CASTXML_STD_LEAF,
-        frozenset({"missing:PUBLIC_API_EXPOSES_STL_BY_VALUE"}),
-        "COMPATIBLE_WITH_RISK",
     ),
 )
 

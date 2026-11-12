@@ -946,6 +946,7 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
         fixed_by=(1308,),
         seed_tests=(
+            "tests/test_stl_by_value_resolved_identity.py",
             "tests/test_export_reconciliation_and_obligations.py",
             "tests/test_contract_type_identities.py",
             "tests/test_clang_type_evidence.py",

@@ -18,8 +18,8 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.idioms import _is_std_by_value
 from abicheck.model import ParamKind
+from abicheck.policy.std_by_value import is_std_by_value as _is_std_by_value
 
 _SPELLINGS = [
     "std::size_t", "std::ptrdiff_t", "std::nullptr_t", "std::max_align_t",
