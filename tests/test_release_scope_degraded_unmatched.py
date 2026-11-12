@@ -82,7 +82,7 @@ class TestUnmatchedDegradedMemberIsFailedNotProven:
         # (Names are the materialized filenames, keyed as `<key>-<file>`.)
         assert [n for n in doc[side] if "libonly.so" in n] == list(doc[side]) != []
         assert doc["run_outcome"]["scope"] == "incomplete"
-        assert code == (1 if policy == "block" else 0), doc["run_outcome"]
+        assert code == 4, doc["run_outcome"]  # ADR-065 D8
 
     @pytest.mark.parametrize("degraded_side", ["old", "new"])
     def test_reader_places_the_marker_by_membership(

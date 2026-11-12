@@ -378,7 +378,9 @@ def test_records_round_trip_through_files(tmp_path: Path) -> None:
     (back,) = cov.load_records([tmp_path])
     assert back == r
     assert back.verified == {"TYPE_SIZE_CHANGED", "STRUCT_SIZE_CHANGED"}
-    assert back.points == ("struct/c/c17/baseline/gcc/gcc/headers.castxml",)
+    assert back.points == (
+        "struct/c/c17/baseline/gcc/gcc/headers.castxml/append_grows",
+    )
 
 
 def test_write_record_is_a_no_op_without_a_directory(
@@ -569,7 +571,7 @@ def test_infeasibility_matches_an_independent_oracle_exhaustively() -> None:
         assert why is None or why.strip()
     n_cfg = 1 + 7 + 1
     assert total == (
-        len(space.CONSTRUCTS)
+        sum(len(space.edit_values(c.name)) for c in space.CONSTRUCTS)
         * len(STANDARDS)
         * n_cfg
         * len(FAMILIES) ** 2

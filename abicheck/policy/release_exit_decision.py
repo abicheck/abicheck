@@ -289,6 +289,7 @@ def resolve_release_exit_decision_for_report(
     incomplete_scope_contribution: int = 0,
     no_comparison_completed_contribution: int = 0,
     require_complete_analysis: bool = False,
+    failed_member_contribution: int = 0,
 ) -> ExitDecision:
     """ADR-064 stage 1b: the release fan-out's persisted, explainable
     ``exit`` block.
@@ -347,16 +348,22 @@ def resolve_release_exit_decision_for_report(
     not_comparable = worst_verdict == "not_comparable"
     severity_scheme_active = severity_exit_code is not None
     removed_required_library = fail_on_removed and bool(removed_keys)
-    operational_error_contribution = (
+    # ADR-065 D8: a FAILED member is an operational error. Its record-side
+    # source is *failed_member_contribution* (decided from the scope record,
+    # which also covers an OLD-only degraded member that has no library
+    # result); the library-result scan covers a matched degraded member,
+    # which is recorded with verdict "failed". Every source folds with max.
+    operational_error_contribution = max(
         4
         if (
             worst_verdict == "ERROR"
             or any(
-                isinstance(e, dict) and e.get("verdict") == "ERROR"
+                isinstance(e, dict) and e.get("verdict") in ("ERROR", "failed")
                 for e in library_results
             )
         )
-        else 0
+        else 0,
+        failed_member_contribution,
     )
     verdict_or_severity_contribution = (
         (severity_exit_code or 0)
@@ -399,6 +406,7 @@ def resolve_release_exit_decision_with_assurance(
     release_global_verdict: str = "NO_CHANGE",
     incomplete_scope_exit_contribution: int = 0,
     no_comparison_completed_exit_contribution: int = 0,
+    failed_member_exit_contribution: int = 0,
     assurance_decision: ReleaseAssuranceDecision | None = None,
 ) -> ExitDecision:
     """The release decision a directory/package ``compare`` exits on.
@@ -436,4 +444,5 @@ def resolve_release_exit_decision_with_assurance(
         require_complete_analysis=bool(
             assurance_decision is not None and assurance_decision.require_complete
         ),
+        failed_member_contribution=failed_member_exit_contribution,
     )

@@ -686,7 +686,7 @@ class TestStoredPackageDegradedMember:
         assert [n.split("-")[0] for n in scope["unchecked"]] == ["libfoo.so"]
         assert scope["counts"]["failed"] == 1
         assert doc["run_outcome"]["scope"] == "incomplete"
-        assert code == (1 if policy == "block" else 0)
+        assert code == 4  # ADR-065 D8: a failed member is an operational error
 
     def test_bundle_facts_out_inherits_the_stored_old_marker(
         self, tmp_path: Path
@@ -711,7 +711,7 @@ class TestStoredPackageDegradedMember:
         code, doc = _invoke_json(
             "compare", str(old), str(new), "--bundle-facts-out", str(out)
         )
-        assert code == 0
+        assert code == 4  # ADR-065 D8: the inherited degraded marker is a failed member
         facts = load_bundle_facts(out)
         assert facts.schema_version == 3
         assert [k.split("-")[0] for k in facts.degraded_members] == ["libfoo.so"]

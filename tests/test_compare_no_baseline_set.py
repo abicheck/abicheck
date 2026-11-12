@@ -266,10 +266,11 @@ def test_every_set_shaped_operand_is_audited_per_member(
     if shape == "stored_degraded_single":
         (member,) = doc["members"]
         # The degraded capture is a failed acquisition, never an audit of
-        # incomplete evidence -- and with nothing audited, exit 1 (D7).
+        # incomplete evidence -- and a failed member is an operational
+        # error (ADR-065 D8, exit 4), which outranks D7's nothing-audited 1.
         assert member["acquisition_state"] == "failed"
         assert member["report"] is None
-        assert result.exit_code == 1
+        assert result.exit_code == 4
     else:
         assert {m["acquisition_state"] for m in doc["members"]} == {"declared_absent"}
 
