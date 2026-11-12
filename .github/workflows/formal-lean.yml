@@ -163,3 +163,18 @@ jobs:
           adds="$(python3 -I formal/tla/check_disposition.py --ids 4 --steps 2 --adds)"
           echo "$adds"
           grep -qx 'NothingVanishes: VIOLATED.*' <<<"$adds"
+
+      - name: TLA+ scope-completeness model (check_scope.py, E8)
+        # The faithful spec must hold I1-I3; each seeded mutant must still be
+        # caught, so a checker that silently stops finding violations goes red.
+        # The conformance audit over the real code runs in the unit suite
+        # (tests/test_formal_experiments.py).
+        run: |
+          set -euo pipefail
+          spec="$(python3 -I formal/tla/check_scope.py --members 3)"
+          echo "$spec"
+          grep -qx 'I1, I2, I3: hold on every reachable state' <<<"$spec"
+          for mutant in classify-unguarded warn-clean-zero failed-ops-dropped; do
+            out="$(python3 -I formal/tla/check_scope.py --members 2 --mutant "$mutant")"
+            grep -q '^VIOLATED: ' <<<"$out" || { echo "mutant $mutant not caught"; exit 1; }
+          done

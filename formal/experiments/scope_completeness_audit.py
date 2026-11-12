@@ -138,7 +138,8 @@ def _realise(combo: tuple[str, ...]):  # type: ignore[no-untyped-def]
         elif kind == "unclassified_old":
             old_unc[key] = "could not classify"
             unclassified_errors.append((name, "could not classify"))
-        elif kind == "unclassified_new":
+        elif kind == "unclassified_new":  # OLD present, NEW could not classify
+            old_map[key] = Path("/old") / name
             new_unc[key] = "could not classify"
             unclassified_errors.append((name, "could not classify"))
         elif kind == "absent_old":
@@ -321,7 +322,7 @@ def main(argv: list[str] | None = None) -> int:
             continue
         seen_inv[v[0]] += 1
         print("counterexample:\n    " + _describe(v))
-    return 0
+    return 1 if res.violations else 0
 
 
 if __name__ == "__main__":

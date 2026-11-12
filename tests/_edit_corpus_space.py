@@ -590,6 +590,12 @@ def coverage(covered: Iterable[Point], top: int = 20) -> dict[str, object]:
 
 def point_from_id(ident: str) -> Point:
     parts = ident.split("/")
+    if len(parts) == len(AXES) - 1:
+        # A pre-edit-axis record cannot be mapped: `any` is infeasible for a
+        # struct, so guessing it would report covered-but-infeasible points.
+        raise ValueError(
+            f"point id {ident!r} predates the edit axis; re-record the coverage"
+        )
     if len(parts) != len(AXES):
         raise ValueError(f"not a space point id: {ident!r}")
     return Point(*parts)

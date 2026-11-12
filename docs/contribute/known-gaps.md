@@ -287,6 +287,7 @@ current emitter, which is unchanged.
 
 **Status (2026-11-12): OPEN.** `compare` on a release with a `FAILED` member exits `4` (ADR-065 D8, `policy/release_exit_decision.py`). Aggregating the stored release report does not reproduce that exact value: `workflows/aggregate/scope_axis.py` folds only the `0`/`1` scope contributions, and `load.py`/`report_gate.py` read `run_outcome.operational` through their own mapping. The aggregate target therefore reads non-clean (`exit_code() != 0`) but not `4`. Closing it means folding the release's `operational_error` contribution into the aggregate's per-target gate with the same `max` as `compare`.
 `false-clean` — none (the aggregate still exits non-zero), but the exit code and the gate category disagree with the originating `compare`.
+<!-- canary: tests/test_aggregate_scope_completeness.py::TestStoredDispatchShapeAndAcceptedGaps::test_aggregate_reads_a_failed_member_as_1_not_the_cli_4 -->
 
 #### The DWARF lane records fewer C++ exports than the symbols-only lane, so ctor/dtor variants and RTTI/vtable objects read as added or removed (2026-11-10)
 

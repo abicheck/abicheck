@@ -143,3 +143,70 @@ class TestFailedMemberOperationalError:
         )
         assert ex.code == 4
         assert ExitReason.OPERATIONAL_ERROR in ex.reasons
+
+
+# ---------------------------------------------------------------------------
+# Every consumer of the decision agrees with the exit (self-review of #2019):
+# the PR comment headline and the no-baseline set's run_outcome.
+# ---------------------------------------------------------------------------
+
+
+def _scope_section(states: list[str]) -> dict[str, object]:
+    return {
+        "completeness": "incomplete",
+        "policy": "warn",
+        "incomplete_scope_exit_contribution": 0,
+        "no_comparison_completed": False,
+        "no_comparison_completed_exit_contribution": 0,
+        "members": [{"name": f"lib{i}.so", "state": s} for i, s in enumerate(states)],
+    }
+
+
+@pytest.mark.parametrize(
+    ("states", "blocking"),
+    [
+        (["completed", "failed"], True),  # D8: failed blocks under warn
+        (["completed", "not_supplied"], False),  # warn-accepted gap stays advisory
+        (["completed", "completed"], False),
+    ],
+)
+def test_pr_comment_scope_blocking_follows_a_failed_member(
+    states: list[str], blocking: bool
+) -> None:
+    from abicheck.pr_comment import _from_release
+
+    model = _from_release({"libraries": [], "comparison_scope": _scope_section(states)})
+    assert model.scope_blocking is blocking
+
+
+@pytest.mark.parametrize(
+    ("failed", "expected"), [(True, "extraction_error"), (False, "none")]
+)
+def test_no_baseline_set_run_outcome_names_a_failed_member(
+    failed: bool, expected: str
+) -> None:
+    from abicheck.report.audit_set import _operational
+    from abicheck.workflows.no_baseline_set import (
+        MemberAudit,
+        MemberAuditStatus,
+        NoBaselineSetResult,
+        build_no_baseline_set_record,
+    )
+    from tests.test_no_baseline_set_record import _plan
+
+    plan = _plan(
+        {"liba.so", "libb.so"},
+        failed={"libb.so": "degraded capture"} if failed else None,
+    )
+    audits = tuple(
+        MemberAudit(
+            member=k,
+            path=plan.side.members[k],
+            status=MemberAuditStatus.COMPLETED,
+            reason="ok",
+        )
+        for k in plan.audit_keys
+    )
+    record = build_no_baseline_set_record(plan, list(audits))
+    result = NoBaselineSetResult(plan=plan, audits=audits, record=record)
+    assert _operational(result, evidence_contract=False).value == expected

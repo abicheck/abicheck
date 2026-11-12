@@ -46,7 +46,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from ..policy.outcome import OperationalStatus, PolicyGateDecision, RunOutcome
-from ..policy.scope_completeness import resolve_scope_decision
+from ..policy.scope_completeness import (
+    failed_member_exit_contribution,
+    resolve_scope_decision,
+)
 from .comparison_scope import build_comparison_scope_section, comparison_scope_notice
 from .markdown_text import md_text
 from .no_baseline import (
@@ -216,7 +219,9 @@ def _operational(
     is named."""
     if result.record.no_comparison_completed:
         return OperationalStatus.NO_COMPARISON_COMPLETED
-    if result.operationally_failed:
+    # ADR-065 D8: a FAILED acquisition is an extraction error too, so
+    # run_outcome agrees with the exit axis that folds the same record.
+    if result.operationally_failed or failed_member_exit_contribution(result.record):
         return OperationalStatus.EXTRACTION_ERROR
     if evidence_contract:
         return OperationalStatus.EVIDENCE_CONTRACT_ERROR
