@@ -174,8 +174,14 @@ KNOWN: tuple[Known, ...] = (
         # A7, #1960); with DWARF every unit's DW_AT_producer shows
         # -fstack-protector-strong still on, so the lost canary is demoted too.
         # Binary only, nothing records the flag. clang on ELF reads COMPATIBLE.
+        # Under the pre-C++11 string ABI (-D_GLIBCXX_USE_CXX11_ABI=0) the -O0
+        # build has no protected frame either, so no canary is lost and the
+        # rebuild reads COMPATIBLE: correct, not part of this gap.
         lambda c: (
-            c.objfmt == "elf" and c.producer.family == "gcc" and c.evidence == "binary"
+            c.objfmt == "elf"
+            and c.producer.family == "gcc"
+            and c.evidence == "binary"
+            and c.flags.cxx11_abi != 0
         ),
         "-O2 leaves no frame that needs a stack canary; without debug info no unit "
         "records -fstack-protector, so stack_canary_removed keeps its RISK (marked as "
