@@ -64,6 +64,10 @@ def test_lean_layout_table_covers_declared_domain() -> None:
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="Linux ELF experiment (.so, -soname, LD_LIBRARY_PATH)",
+)
 def test_e5_e6_layout_model_extraction_and_compare_agree(tmp_path: Path) -> None:
     if shutil.which("gcc") is None or shutil.which("castxml") is None:
         pytest.skip("gcc and castxml required")

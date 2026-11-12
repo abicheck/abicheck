@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -120,6 +121,10 @@ def test_unknown_anonymous_offset_cannot_fire_rule() -> None:
 
 
 @pytest.mark.integration
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="Linux ELF experiment (.so, -soname, LD_LIBRARY_PATH)",
+)
 def test_fixture_experiment(tmp_path: Path) -> None:
     from tests._workflow_exec import require_bash
 
