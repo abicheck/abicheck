@@ -220,6 +220,7 @@ def _run(combo: tuple[str, ...], s: Setting):  # type: ignore[no-untyped-def]
         no_comparison_completed_exit_contribution=(
             decision.no_comparison_completed_exit_contribution
         ),
+        failed_member_exit_contribution=decision.failed_member_exit_contribution,
     )
     return record, ex
 

@@ -1071,14 +1071,14 @@ class TestStoredBaselineGating:
         )
         new = _facts_file(tmp_path, "new.bundlefacts.json", libs)
         code, doc = _invoke_json("compare", str(old), str(new))
-        assert code == 0
+        assert code == 4  # ADR-065 D8: failed member is an operational error
         assert doc["run_outcome"]["scope"] == "incomplete"
         assert doc["comparison_scope"]["unchecked"] == ["libdeg.so"]
         assert doc["comparison_scope"]["counts"]["failed"] == 1
         assert [entry["library"] for entry in doc["libraries"]] == ["libok.so"]
         cfg = _release_config(tmp_path, on_incomplete_scope="block")
         code, doc = _invoke_json("compare", str(old), str(new), "--config", str(cfg))
-        assert code == 1
+        assert code == 4
         assert doc["comparison_scope"]["incomplete_scope_exit_contribution"] == 1
 
     def test_stored_pair_every_member_degraded_is_no_comparison_completed(
@@ -1093,7 +1093,7 @@ class TestStoredBaselineGating:
         )
         new = _facts_file(tmp_path, "new.bundlefacts.json", libs)
         code, doc = _invoke_json("compare", str(old), str(new))
-        assert code == 1
+        assert code == 4
         assert doc["run_outcome"]["scope"] == "incomplete"
         assert doc["comparison_scope"]["no_comparison_completed"] is True
 

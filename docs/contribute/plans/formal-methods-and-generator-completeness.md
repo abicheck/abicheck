@@ -18,9 +18,9 @@ generated: false
   gap closed); an insert-that-moves operator is still missing;
 - the disposition count trigger has a sufficient precondition, and no step
   breaks it on the corpus (E7);
-- a FAILED release member exits 0 under `warn` (E8), which conflicts with
-  ADR-065 D8's wording; an earlier reviewed decision keeps stored degraded
-  markers on the scope axis, so the fix awaits a maintainer decision.
+- a FAILED release member exited 0 under `warn` (E8), against ADR-065 D8;
+  every FAILED member is now an operational error (exit 4), superseding the
+  earlier decision that kept stored degraded markers on the scope axis.
 
 ## Problem
 
