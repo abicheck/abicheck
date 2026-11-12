@@ -23,7 +23,12 @@ from pathlib import Path
 import pytest
 
 from abicheck.model.change_catalog.kinds import ChangeKind
-from tests._edit_corpus_config import EVIDENCE, Toolchain, default_config
+from tests._edit_corpus_config import (
+    EVIDENCE,
+    HEADER_BACKENDS,
+    Toolchain,
+    default_config,
+)
 from tests._edit_corpus_coverage import make_record, write_record
 from tests._edit_corpus_expect import issue_keys
 from tests._edit_corpus_harness import (
@@ -39,6 +44,7 @@ from tests._edit_corpus_toolchains import (
     capability_gap,
     driver_width,
     elf_link_unavailable,
+    header_backend_unavailable,
 )
 
 
@@ -60,10 +66,20 @@ def default_matrix():
 # matrix and the config matrix alike. A cell xfails only while its exact issue
 # set and verdict reproduce as recorded; any other outcome fails.
 
+
+def _cell_id(op, seed, compiler: str, backend: str) -> str:
+    # castxml is the reference backend: its cells keep their historical ids.
+    base = f"{op.name}-{seed.name}-{compiler}"
+    return base if backend == "castxml" else f"{base}-hb_{backend}"
+
+
+# Every cell once per header backend: the default config dumps headers, and
+# clang and the native gcc plugin owe the same ground truth castxml does.
 CELLS = [
-    pytest.param(op, seed, compiler, id=f"{op.name}-{seed.name}-{compiler}")
+    pytest.param(op, seed, compiler, backend, id=_cell_id(op, seed, compiler, backend))
     for op, seed in default_matrix()
     for compiler in COMPILERS
+    for backend in HEADER_BACKENDS
 ]
 
 SMOKE_CELLS = {
@@ -195,7 +211,7 @@ def test_matrix_is_not_silently_shrinking() -> None:
     # Guard against an applicability bug emptying the matrix: a shrink is
     # visible here rather than as a green run that tested less.
     assert len(default_matrix()) >= 160
-    assert len(CELLS) == len(default_matrix()) * len(COMPILERS)
+    assert len(CELLS) == len(default_matrix()) * len(COMPILERS) * len(HEADER_BACKENDS)
 
 
 # --- integration: real compilers, real castxml dump, real compare ----------
@@ -257,13 +273,16 @@ def _skip_wrong_width(seed, config) -> None:
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("op,seed,compiler", CELLS)
+@pytest.mark.parametrize("op,seed,compiler,backend", CELLS)
 def test_edit_produces_declared_ground_truth(
-    op, seed, compiler, baseline_cache: BaselineCache, corpus_root: Path
+    op, seed, compiler, backend, baseline_cache: BaselineCache, corpus_root: Path
 ) -> None:
-    config = _as_config(seed, compiler)
+    config = _as_config(seed, compiler).with_(header_backend=backend)
     try:
         _skip_without_driver(seed, compiler)
+        backend_gap = header_backend_unavailable(backend, seed.lang)
+        if backend_gap:
+            pytest.skip(backend_gap)
         # A build or extraction exception propagates and fails the cell.
         _skip_wrong_width(seed, config)
         # A seed linked with ELF-only build roles (a version script, -z,
@@ -327,9 +346,10 @@ def test_smoke_subset_is_exercised() -> None:
 @pytest.mark.parametrize(
     "op,seed,compiler",
     [
-        p
+        pytest.param(*p.values[:3], id=p.id)
         for p in CELLS
         if (p.values[0].name, p.values[1].name, p.values[2]) in SMOKE_CELLS
+        and p.values[3] == "castxml"
     ],
 )
 def test_smoke_cells(
