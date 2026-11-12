@@ -193,10 +193,60 @@ int main(void) {
 }
 """
 
+_ALT_CALL = r"""#include <stdio.h>
+#include "edit_seed.h"
+int main(void) {
+  char dst[64];
+  struct pair2 p = mkpair(5);
+  printf("fast=%d envq=%d rnd=%d chk=%d\n", fast(2), envq(3), rnd(4), chk_copy(dst, "edit", 5));
+  printf("v1=%d,%d,%d pair=%ld,%ld\n", api_v1_open(1), api_v1_read(1), api_v1_close(1), p.a, p.b);
+  printf("ld=%.3f int=%d,%d,%d when=%lld\n", (double)ld_half(3.0L), (int)iscale(2),
+         (int)ishift(3), (int)imix(5, 6), (long long)when_next((time_t)41));
+  printf("inl=%d huse=%d helper=%d\n", hscale(2, 3), huse(4), edit_internal_helper(9));
+  return 0;
+}
+"""
+
+_ALT_DATA = r"""#include <stdio.h>
+#include "edit_seed.h"
+int main(void) {
+  g_alt += 1;
+  printf("alt=%d tie=%d,%d\n", g_alt, t_ie, tie_get());
+  return 0;
+}
+"""
+
+_XA_CALL = r"""#include <cstdio>
+#include <string>
+#include "edit_seed.h"
+int main() {
+  std::string h("hello");
+  Tv t;
+  t.a = 4;
+  lib::Holder ho;
+  ho.impl.a = 2;
+  ho.x = 3;
+  std::printf("uniq=%d,%d str=%d,%d,%s,%s,%d,%s\n", uniq_bump(), uniq_bump(), s_len(h),
+              s_first(h), s_up(h).c_str(), s_cat(h, h).c_str(), (int)s_empty(h),
+              s_make(3).c_str());
+  std::printf("tv=%d holder=%d clamp=%d chars=%d\n", tv_get(t), holder_get(&ho),
+              demo::clampi(9, 0, 5), count_chars("edit"));
+  int iv[3] = {1, 2, 3};
+  float fv[2] = {1.5f, 2.0f};
+  std::printf("walk=%d,%.1f\n", lib::sum_range(iv, iv + 3), (double)lib::sum_range(fv, fv + 2));
+  int *p = new int(7);
+  std::printf("new=%d\n", *p);
+  delete p;
+  return 0;
+}
+"""
+
 CONSUMERS: dict[str, dict[str, str]] = {
     "c_core": dict(_C_SHAPES),
     "cxx_classes": {**_C_SHAPES, "derive": _CXX_DERIVE, "modern": _CXX_MODERN},
     "cxx_stdlib": {"stdlib": _CXX_STDLIB},
     "c_elf": {"call": _ELF_CALL, "data": _ELF_DATA},
+    "c_elf_alt": {"call": _ALT_CALL, "data": _ALT_DATA},
     "cxx_more": {"classes": _MORE_CLASSES, "hier": _MORE_HIER},
+    "cxx_alt": {"call": _XA_CALL},
 }

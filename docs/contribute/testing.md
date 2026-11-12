@@ -111,7 +111,10 @@ a JSON report and a step summary (`integration.yml` for the PR tier,
 shared library with DWARF and public headers can show. `SCOPE_BUCKETS` is that
 partition as data: named buckets (by prefix or name) exclude PE/COFF, Apple,
 Python/NumPy/wheel packaging, SYCL, kernel-module ABI and multi-library bundle
-kinds, and include the `source`-taxonomy kinds a header alone shows (concepts,
+kinds, compile-mode switches only L3 compile commands carry, ELF header facts
+no x86 build can change, executable-only and PE/Mach-O version facts,
+`STT_COMMON` (never in a linked library) and kinds judged against a declared
+deployment floor, and include the `source`-taxonomy kinds a header alone shows (concepts,
 public typedef targets, header-only functions); module buckets take the rest of
 each taxonomy module (`symbols`/`types`/`platform` in, `build`/`source` and the
 source graph out — L3–L5 evidence). Macro, `constexpr` and default-argument

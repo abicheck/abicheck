@@ -28,6 +28,29 @@ GAP_O2_STD = (
     "An `-O2` rebuild of a C++ library that uses `std::string` reads as a risk on gcc, "
     "or a break on MinGW"
 )
+GAP_EMPTY_NODE = "Dropping a version node that binds no symbol reads as a binary break"
+GAP_HEADER_DROPPED_EXPORT = "A function that leaves the public header but stays exported reads as a binary break"
+GAP_NEW_LIB_TAGS = "A version requirement on a newly needed library reads as compatible, whatever its version"
+GAP_HEADER_ONLY_POINTER = (
+    "A pointer-level change of a never-exported header function reads as a binary break"
+)
+GAP_CASTXML_ALIGN = (
+    "castxml headers read a variable's alignment specifier only as a lower bound"
+)
+GAP_BASE_UNVERSIONED = (
+    "An export GNU ld binds to the base version is never reported as unversioned"
+)
+GAP_VECTOR_ABI = (
+    "A `-mveclibabi` switch reads as a binary break when no call is vectorized"
+)
+GAP_ALLOCATOR = (
+    "Replacing or dropping the global operator new is demoted or misread as a removal"
+)
+GAP_CLANG_INLINE_STATIC = "An inline function's static local, exported by clang, reads as an undeclared export"
+GAP_UNIQUE_O2_DWARF = "A GNU-unique static whose inline owner was inlined away is not compared at DWARF depth"
+GAP_DEFINE_PROFILE = (
+    "A macro that changes the build's ABI makes the two header dumps incomparable"
+)
 
 
 def _always(_: Config) -> bool:
@@ -51,6 +74,11 @@ class Known:
     # class, issues and verdict all match; anything else fails.
     issues: frozenset[str]
     verdicts: frozenset[str]
+    # Another class the same finding reconciles to under some consumers: an
+    # over-strong verdict is ``false-positive`` where every consumer runs and
+    # compiles, ``wrong-verdict`` where one observes a source break (a
+    # compiler that rejects an implicit declaration) -- the finding is the same.
+    also_cls: frozenset[str] = frozenset()
 
     def expected_cls(self, execution_available: bool) -> str:
         """The class this finding reconciles to on a host with or without execution.
@@ -75,7 +103,7 @@ class Known:
         execution_available: bool = True,
     ) -> bool:
         return (
-            cls == self.expected_cls(execution_available)
+            (cls == self.expected_cls(execution_available) or cls in self.also_cls)
             and issues == self.issues
             and verdict in self.verdicts
         )
@@ -116,6 +144,205 @@ _MORE = frozenset({"cxx_more"})
 # not. Each is being fixed in the backend itself; the entry forces its own
 # removal (a fixed cell no longer reproduces) when the fix lands.
 _BACKEND_GAPS: tuple[Known, ...] = ()
+
+
+def _headers_vis_default(c: Config) -> bool:
+    return c.evidence == "headers" and c.flags.visibility == "default"
+
+
+_ELF = frozenset({"c_elf"})
+_ALT = frozenset({"c_elf_alt"})
+_XA = frozenset({"cxx_alt"})
+_BREAKING = frozenset({"BREAKING"})
+
+# Platform-level operators (``_edit_corpus_operators_platform``).
+_PLATFORM: tuple[Known, ...] = (
+    Known(
+        "empty_version_node_dropped",
+        _ALT,
+        "false-positive",
+        _always,
+        "a version node no symbol was bound to is dropped: no consumer can "
+        "require it, yet symbol_version_defined_removed keeps its BREAKING default",
+        GAP_EMPTY_NODE,
+        issues=frozenset({"stronger-than:COMPATIBLE_WITH_RISK"}),
+        verdicts=_BREAKING,
+    ),
+    Known(
+        "exported_but_undeclared",
+        _ELF,
+        "false-positive",
+        _headers_vis_default,
+        "wget leaves the header but stays exported; built consumers still run, "
+        "yet the contract removal reads func_removed (BREAKING)",
+        GAP_HEADER_DROPPED_EXPORT,
+        issues=frozenset({"stronger-than:API_BREAK"}),
+        verdicts=_BREAKING,
+        also_cls=frozenset({"wrong-verdict"}),
+    ),
+    Known(
+        "glibc_version_required_added",
+        _ELF,
+        "wrong-kind",
+        lambda c: c.producer.family == "gcc" and c.flags.opt == "O2",
+        "the -O2 gcc build needed nothing from libc before, so GLIBC_2.25 comes "
+        "with a newly needed libc.so.6 and reads symbol_version_required_added_compat",
+        GAP_NEW_LIB_TAGS,
+        issues=frozenset({"missing:SYMBOL_VERSION_REQUIRED_ADDED"}),
+        verdicts=frozenset({"COMPATIBLE_WITH_RISK"}),
+    ),
+    Known(
+        "header_only_function_params_changed",
+        _ALT,
+        "false-positive",
+        _ev("headers"),
+        "hscale is static inline and never exported, yet its int -> int * "
+        "parameter reads param_pointer_level_changed (BREAKING)",
+        GAP_HEADER_ONLY_POINTER,
+        issues=frozenset({"stronger-than:API_BREAK"}),
+        verdicts=_BREAKING,
+        also_cls=frozenset({"wrong-verdict"}),
+    ),
+    Known(
+        "object_alignment_reduced",
+        _ELF,
+        "wrong-verdict",
+        _hb("castxml"),
+        "castxml cannot read g_al's old aligned(16), so the address-derived "
+        "reduction is demoted to COMPATIBLE",
+        GAP_CASTXML_ALIGN,
+        issues=frozenset({"weaker-than:COMPATIBLE_WITH_RISK"}),
+        verdicts=frozenset({"COMPATIBLE"}),
+    ),
+    Known(
+        "unversioned_export_added",
+        _ELF,
+        "wrong-kind",
+        _always,
+        "GNU ld binds the unmatched edit_unv to the base version (index 1), "
+        "which unversioned_exported_symbol deliberately never flags",
+        GAP_BASE_UNVERSIONED,
+        issues=frozenset({"missing:UNVERSIONED_EXPORTED_SYMBOL"}),
+        verdicts=frozenset({"COMPATIBLE"}),
+    ),
+    Known(
+        "vector_math_abi_changed",
+        _ELF,
+        "false-positive",
+        lambda c: c.producer.family == "gcc" and c.evidence in ("dwarf", "headers"),
+        "the seed makes no math call, so -mveclibabi=svml changes no code; "
+        "vector_abi_changed keeps its BREAKING default",
+        GAP_VECTOR_ABI,
+        issues=frozenset({"stronger-than:COMPATIBLE_WITH_RISK"}),
+        verdicts=_BREAKING,
+    ),
+    Known(
+        "allocator_replacement_removed",
+        _XA,
+        "false-positive",
+        _ev("binary", "dwarf"),
+        "the library stops exporting operator new/delete; consumers resolve "
+        "them from the C++ runtime, yet the _Znwm export loss reads "
+        "func_removed_elf_only (BREAKING)",
+        GAP_ALLOCATOR,
+        issues=frozenset({"stronger-than:COMPATIBLE_WITH_RISK"}),
+        verdicts=_BREAKING,
+    ),
+    Known(
+        "allocator_replacement_removed",
+        _XA,
+        "false-positive",
+        _hb("castxml"),
+        "with public headers the allocator finding (named after _ZdlPv, a "
+        "runtime symbol) is scoped out as not-exported, and the _Znwm export "
+        "loss reads func_removed (BREAKING)",
+        GAP_ALLOCATOR,
+        issues=frozenset(
+            {
+                "missing:ALLOCATOR_REPLACEMENT_REMOVED",
+                "stronger-than:COMPATIBLE_WITH_RISK",
+            }
+        ),
+        verdicts=_BREAKING,
+    ),
+    Known(
+        "allocator_replacement_removed",
+        _XA,
+        "wrong-verdict",
+        _hb("clang"),
+        "with public headers the allocator finding is scoped out as "
+        "not-exported, and nothing else is left above COMPATIBLE",
+        GAP_ALLOCATOR,
+        issues=frozenset(
+            {
+                "missing:ALLOCATOR_REPLACEMENT_REMOVED",
+                "weaker-than:COMPATIBLE_WITH_RISK",
+            }
+        ),
+        verdicts=frozenset({"COMPATIBLE"}),
+    ),
+    Known(
+        "allocator_replacement_added",
+        frozenset({"cxx_more"}),
+        "wrong-kind",
+        _ev("headers"),
+        "with public headers the allocator finding (named after _ZdlPv, a "
+        "runtime symbol) is scoped out as not-exported",
+        GAP_ALLOCATOR,
+        issues=frozenset({"missing:ALLOCATOR_REPLACEMENT_ADDED"}),
+        verdicts=frozenset({"COMPATIBLE_WITH_RISK"}),
+    ),
+    Known(
+        "time_bits_64",
+        _ALT,
+        "refused",
+        _ev("headers"),
+        "-D_TIME_BITS=64 reaches the new side's header dump only, so the two "
+        "dumps' parse profiles differ and the compare refuses",
+        GAP_DEFINE_PROFILE,
+        issues=frozenset({"refused:ProfileMismatchError"}),
+        verdicts=frozenset({"REFUSED"}),
+    ),
+    Known(
+        "gnu_unique_static_added",
+        frozenset({"cxx_more"}),
+        "wrong-kind",
+        lambda c: (
+            c.producer.family == "gcc" and c.flags.opt == "O2" and c.evidence == "dwarf"
+        ),
+        "-O2 inlines edit_ctr away; its STB_GNU_UNIQUE static is still exported, "
+        "but the DWARF-depth compare reports only func_added",
+        GAP_UNIQUE_O2_DWARF,
+        issues=frozenset({"missing:SYMBOL_BINDING_BECAME_UNIQUE"}),
+        verdicts=frozenset({"COMPATIBLE"}),
+    ),
+    Known(
+        "gnu_unique_disabled",
+        _XA,
+        "wrong-verdict",
+        lambda c: (
+            c.producer.family == "gcc" and c.flags.opt == "O2" and c.evidence == "dwarf"
+        ),
+        "-O2 inlines uniq_counter away; its static loses STB_GNU_UNIQUE in the "
+        "export table, but the DWARF-depth compare reads NO_CHANGE",
+        GAP_UNIQUE_O2_DWARF,
+        issues=frozenset(
+            {"missing:SYMBOL_BINDING_LOST_UNIQUE", "weaker-than:COMPATIBLE_WITH_RISK"}
+        ),
+        verdicts=frozenset({"NO_CHANGE"}),
+    ),
+    Known(
+        "gnu_unique_static_added",
+        frozenset({"cxx_more"}),
+        "false-positive",
+        lambda c: c.producer.family == "clang" and c.evidence == "headers",
+        "clang exports edit_ctr's static local weak; against the header it "
+        "reads as an undeclared export (RISK) though no source can name it",
+        GAP_CLANG_INLINE_STATIC,
+        issues=frozenset({"stronger-than:COMPATIBLE"}),
+        verdicts=frozenset({"COMPATIBLE_WITH_RISK"}),
+    ),
+)
 
 KNOWN: tuple[Known, ...] = (
     Known(
@@ -225,6 +452,7 @@ KNOWN: tuple[Known, ...] = (
         verdicts=frozenset({"BREAKING", "COMPATIBLE_WITH_RISK"}),
     ),
     *_BACKEND_GAPS,
+    *_PLATFORM,
 )
 
 

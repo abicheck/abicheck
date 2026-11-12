@@ -112,6 +112,8 @@ CONSTRUCTS: tuple[Construct, ...] = (
     Construct("restrict_pointer", _C, "restrict"),
     Construct("flexible_array", _C, "flexible_array"),
     Construct("atomic", _C, "atomic"),
+    Construct("bit_int", _C, "bit_int"),
+    Construct("char8_t", _CXX, "char8_t"),
     Construct("union", _BOTH),
     Construct("header_constant", _BOTH),
     Construct("deprecation", _BOTH),
@@ -165,6 +167,22 @@ ROLE_CONSTRUCT: dict[str, str] = {
     "elf.al": "variable",
     "elf.banner": "variable",
     "elf": "function",
+    # c_elf_alt (alt.gate admits an operator to the seed: no construct)
+    "alt.obj": "variable",
+    "alt.tls": "tls_variable",
+    "alt.pair": "struct",
+    "alt.int": "typedef",
+    "alt.time": "typedef",
+    "alt.inl": "inline_function",
+    "alt": "function",
+    # cxx_alt
+    "xa.uniq": "inline_function",
+    "xa.str": "std_string",
+    "xa.tv": "struct",
+    "xa.leak": "struct",
+    "xa.inl": "inline_function",
+    "xa.tmpl": "template",
+    "xa": "function",
     # cxx_more
     "x.widget": "class",
     "x.gadget": "class",
@@ -191,6 +209,9 @@ ROLE_CONSTRUCT: dict[str, str] = {
     "x": "function",
 }
 
+# Roles that only admit an operator to a seed (``Seed.gate_role``).
+GATE_ROLES = frozenset({"alt.gate", "xa.gate"})
+
 # Language feature an operator needs -> the construct it exercises.
 FEATURE_CONSTRUCT: dict[str, str] = {
     c.feature: c.name for c in CONSTRUCTS if c.feature is not None
@@ -213,7 +234,7 @@ def op_constructs(op: EditOp) -> tuple[str, ...]:
     elif op.features:
         names = [FEATURE_CONSTRUCT[f] for f in op.features]
     else:
-        names = [role_construct(r) for r in op.roles]
+        names = [role_construct(r) for r in op.roles if r not in GATE_ROLES]
     return tuple(dict.fromkeys(names))
 
 

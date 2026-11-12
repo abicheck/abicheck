@@ -156,8 +156,9 @@ _DYNAMIC = (
         "soname_changed",
         ("build.soname",),
         lambda r: _build(r, "build.soname", "libedit.so.2"),
-        "a new SONAME declares a new ABI: consumers needing libedit.so do not load it",
-        expected=frozenset({"SONAME_CHANGED"}),
+        "a new SONAME declares a new ABI: consumers needing libedit.so do not "
+        "load it, although nothing in the interface broke (the bump was unneeded)",
+        expected=frozenset({"SONAME_CHANGED", "SONAME_BUMP_UNNECESSARY"}),
         verdict_min="COMPATIBLE_WITH_RISK",
         **_BINARY,
     ),

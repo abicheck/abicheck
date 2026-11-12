@@ -294,15 +294,22 @@ def test_no_unique_address_rule_names_the_msvc_abi_not_every_pe_target() -> None
 
 
 @pytest.mark.parametrize(
-    ("platform", "vtt_kinds", "export_kind"),
+    ("platform", "vtt_kinds", "export_kind", "export_max"),
     [
-        (("linux", "elf"), {"VTT_SLOT_COUNT_CHANGED"}, "FUNC_ADDED_ELF_ONLY"),
-        (("darwin", "macho"), set(), "FUNC_ADDED"),
-        (("win32", "pe"), set(), "FUNC_ADDED"),
+        # Against the ELF export table and the public header the new export
+        # is undeclared, which the release may read as a risk.
+        (
+            ("linux", "elf"),
+            {"VTT_SLOT_COUNT_CHANGED"},
+            "FUNC_ADDED_ELF_ONLY",
+            "COMPATIBLE_WITH_RISK",
+        ),
+        (("darwin", "macho"), set(), "FUNC_ADDED", "COMPATIBLE"),
+        (("win32", "pe"), set(), "FUNC_ADDED", "COMPATIBLE"),
     ],
 )
 def test_elf_symbol_table_kinds_are_owed_only_on_elf(
-    platform: tuple[str, str], vtt_kinds: set[str], export_kind: str
+    platform: tuple[str, str], vtt_kinds: set[str], export_kind: str, export_max: str
 ) -> None:
     # VTT size and undeclared exports are read from the ELF symbol table; a
     # Mach-O or PE build still owes the verdict, not the ELF-only kind.
@@ -312,7 +319,8 @@ def test_elf_symbol_table_kinds_are_owed_only_on_elf(
     assert vtt.verdict_min == "BREAKING"
     export = OP_BY_NAME["source_only_export_added"].expect(config)
     assert export.expected == {export_kind}
-    assert export.verdict_min == export.verdict_max == "COMPATIBLE"
+    assert export.verdict_min == "COMPATIBLE"
+    assert export.verdict_max == export_max
 
 
 def test_a_rebuild_row_with_its_target_flag_already_set_is_repaired_not_dropped() -> (
