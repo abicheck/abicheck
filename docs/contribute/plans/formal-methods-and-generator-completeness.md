@@ -12,10 +12,15 @@ generated: false
 
 - one representative per layout edit class is **unsound** (E4);
 - abicheck is exact on the bounded layout fragment (E5);
-- the generator covers append-into-padding (`field_added_in_tail_padding`) but
-  not insert-without-move or remove-without-shrink (E2);
+- the generator now covers append-, insert- and remove-into-padding
+  (`field_added_in_tail_padding`, `field_inserted_in_padding`,
+  `field_removed_without_shrink`), checked against the Lean layout table (E2
+  gap closed); an insert-that-moves operator is still missing;
 - the disposition count trigger has a sufficient precondition, and no step
-  breaks it on the corpus (E7).
+  breaks it on the corpus (E7);
+- a FAILED release member exits 0 under `warn` (E8), which conflicts with
+  ADR-065 D8's wording; an earlier reviewed decision keeps stored degraded
+  markers on the scope axis, so the fix awaits a maintainer decision.
 
 ## Problem
 
@@ -105,20 +110,20 @@ vptr, templates). Each fragment is one Lean module on a shared core
 
 ## Next steps after the experiments
 
-1. **Generator:** split the layout operators by the proved conditions, and add
+1. ✅ **Generator:** split the layout operators by the proved conditions, and add
    the two missing padding-absorbed operators: insert without moving later
    fields, and remove without shrinking sizeof. Append-into-padding already
    exists (`field_added_in_tail_padding`, #1999). Take their expectations from
    `formal/lean/layout_table.json`, not from the class.
-2. **Generator space:** add an *edit* axis to `tests/_edit_corpus_space.py`,
+2. ✅ **Generator space:** add an *edit* axis to `tests/_edit_corpus_space.py`,
    so coverage can say which edit sub-classes ran, not only which constructs.
 3. **Disposition:** decide on E7's proposal (a structural precondition for the
    count trigger), and widen
    `test_a_pipeline_step_can_never_drop_a_finding_unrecorded` beyond five
    `FUNC_REMOVED` inputs.
-4. **DWARF layout channel:** make `FieldInfo.byte_offset` optional (schema
+4. ✅ (offset; `byte_size` narrowed in known-gaps) **DWARF layout channel:** make `FieldInfo.byte_offset` optional (schema
    change), and audit `byte_size == 0` as "unknown" (E9).
-5. **E8**, then the next fragments in the stated order: function signatures,
+5. ✅ **E8**, then the next fragments in the stated order: function signatures,
    enums, ELF versioning, C++ layout.
 
 ## Integration rules
