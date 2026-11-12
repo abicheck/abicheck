@@ -54,7 +54,8 @@ GAP_CASTXML_STD_LEAF = (
     "castxml's bare `std` leaf hides a std type passed by value from the idiom check"
 )
 GAP_CLOSURE_RETURN = (
-    "The unspecified-return check does not know castxml's or clang's closure spelling"
+    "A formerly inline function's closure return re-spelled by clang reads "
+    "`func_return_changed`"
 )
 GAP_CPU_DISPATCH = (
     "The CPU-dispatch roll-up reads the removal of declared ISA kernels as a risk"
@@ -345,21 +346,12 @@ _DETECTOR_GAPS: tuple[Known, ...] = (
     _backend_gap(
         "unspecified_return_now_named",
         _MORE,
-        "castxml",
-        "wrong-verdict",
-        "castxml spells the closure return `?`, which the check does not read",
-        GAP_CLOSURE_RETURN,
-        frozenset({"missing:UNSPECIFIED_RETURN_NOW_NAMED", "weaker-than:API_BREAK"}),
-        "COMPATIBLE",
-    ),
-    _backend_gap(
-        "unspecified_return_now_named",
-        _MORE,
         "clang",
         "false-positive",
-        "clang spells the closure return `(lambda:...)`: func_return_changed instead",
+        "the formerly inline (unexported) function's return reads "
+        "func_return_changed (BREAKING) next to the source-level finding",
         GAP_CLOSURE_RETURN,
-        frozenset({"missing:UNSPECIFIED_RETURN_NOW_NAMED", "stronger-than:API_BREAK"}),
+        frozenset({"stronger-than:API_BREAK"}),
         "BREAKING",
     ),
     Known(
