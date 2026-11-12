@@ -95,12 +95,13 @@ def test_coverage_counts_the_edit_sub_class_that_ran() -> None:
         assert rows[cls]["covered"] == 0, cls
 
 
-def test_a_pre_edit_axis_point_id_still_loads_with_an_unknown_edit() -> None:
-    from tests._edit_corpus_space import ANY_EDIT, AXES, point_from_id
+def test_a_pre_edit_axis_point_id_is_refused_not_guessed() -> None:
+    from tests._edit_corpus_space import AXES, point_from_id
 
     current = "/".join(f"v{i}" for i in range(len(AXES)))
     legacy = current.rsplit("/", 1)[0]
     assert point_from_id(current).edit == f"v{len(AXES) - 1}"
-    assert point_from_id(legacy).edit == ANY_EDIT
+    with pytest.raises(ValueError, match="predates the edit axis"):
+        point_from_id(legacy)
     with pytest.raises(ValueError, match="not a space point id"):
         point_from_id("a/b")

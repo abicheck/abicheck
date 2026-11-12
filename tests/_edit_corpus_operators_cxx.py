@@ -703,14 +703,20 @@ _SHAPES = (
         expected=frozenset({"TYPE_FIELD_ADDED_COMPATIBLE"}),
         rules=(
             Rule(
-                lambda c: c.flags.pack is not None,
+                # Only 1-byte packing removes the hole: at pack=2 or 4, b stays
+                # at 2 or 4 on both sides and the insertion is still absorbed.
+                lambda c: c.flags.pack == 1,
                 {
                     "expected": frozenset(),
-                    "any_of": (_OFFSET, _SIZE),
+                    "any_of": (
+                        _OFFSET,
+                        _SIZE,
+                        frozenset({"TYPE_FIELD_ADDED", "TYPE_FIELD_ADDED_COMPATIBLE"}),
+                    ),
                     "verdict_min": "BREAKING",
                     "verdict_max": None,
                 },
-                "-fpack-struct leaves no hole: x pushes b from offset 1 to 2 and "
+                "-fpack-struct=1 leaves no hole: x pushes b from offset 1 to 2 and "
                 "sizeof from 5 to 6",
             ),
         ),
@@ -729,7 +735,7 @@ _SHAPES = (
         any_of=(frozenset({"STRUCT_FIELD_REMOVED", "TYPE_FIELD_REMOVED"}),),
         rules=(
             Rule(
-                lambda c: c.flags.pack is not None,
+                lambda c: c.flags.pack == 1,  # wider packing keeps the hole
                 {
                     "any_of": (
                         frozenset({"STRUCT_FIELD_REMOVED", "TYPE_FIELD_REMOVED"}),
@@ -737,7 +743,7 @@ _SHAPES = (
                         _SIZE,
                     ),
                 },
-                "-fpack-struct leaves no hole: removing x pulls b from offset 2 to 1 "
+                "-fpack-struct=1 leaves no hole: removing x pulls b from offset 2 to 1 "
                 "and sizeof from 6 to 5",
             ),
         ),

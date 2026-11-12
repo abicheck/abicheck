@@ -219,7 +219,7 @@ not change any invariant). Exit is the max over: compatibility (4), removal
 |---|---|
 | state assignment per member | `workflows/release_scope.py::build_release_scope_record` |
 | `unchecked` = expected-not-produced, failed, not-supplied, unsupported, ambiguous, minus proven removals/additions | `model/scope_acquisition.py::unchecked_members` |
-| removal = absent on OLD, NEW proven | `proven_removed_members` |
+| removal = present on OLD, absent on NEW, NEW inventory proven | `proven_removed_members` |
 | D6 / D7 | `policy/scope_completeness.py::resolve_scope_decision` |
 | exit fold | `policy/release_exit_decision.py::resolve_release_exit_decision_with_assurance` → `policy/exit_decision_precedence.py::resolve_release_exit_decision` → `policy/exit_decision.py::resolve_exit_decision` (`max` over contributions) |
 | operational error | `release_exit_decision` sets `operational_error_contribution = 4` when a library result's `verdict` is `"ERROR"` or `"failed"` (or the aggregate `worst_verdict`), `max`ed with `ScopeDecision.failed_member_exit_contribution` (a `FAILED` member in the record; fixed, see Finding below) |
