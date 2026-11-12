@@ -122,7 +122,7 @@ from .report.change_summary import (
     release_change_summary,
     summarize_changes,
 )
-from .report.comparison_scope import comparison_scope_notice
+from .report.comparison_scope import comparison_scope_blocks, comparison_scope_notice
 from .report.evidence_summary import evidence_summary
 
 # A one-directional import: the aggregate adapter reaches only into
@@ -1229,10 +1229,7 @@ def _from_release(
         removed = scope.get("proven_removed")
         added = scope.get("proven_added")
         scope_notice = comparison_scope_notice(scope)
-        scope_blocking = bool(
-            _as_int(scope.get("incomplete_scope_exit_contribution"))
-            or _as_int(scope.get("no_comparison_completed_exit_contribution"))
-        )
+        scope_blocking = comparison_scope_blocks(scope)
         no_comparison_completed = bool(scope.get("no_comparison_completed"))
         unmatched_states = {
             str(m.get("name")): str(m.get("state"))
