@@ -1,1 +1,3 @@
 lean/.lake/
+tla/*.jar
+tla/states/
