@@ -15,7 +15,10 @@ A *point* in the space is one combination of six axes::
   the one that builds its consumers (``_edit_corpus_config.FAMILIES``); a
   (build, consumer) pair that cannot work is infeasible through
   ``PAIR_RULES``;
-- **evidence**: ``_edit_corpus_config.EVIDENCE``.
+- **evidence**: ``_edit_corpus_config.EVIDENCE``, with ``headers`` split by
+  the backend that dumps them (``SPACE_EVIDENCE``: ``headers.castxml``,
+  ``headers.clang``, ``headers.gcc``), so a header backend no cell ran shows
+  as an uncovered axis value rather than vanishing from the denominator.
 
 ``infeasible(point)`` says why a point cannot be a meaningful cell (concepts
 before C++20, a C++-only construct in C, ``-fabi-version`` on clang, a family
@@ -43,6 +46,7 @@ from tests._edit_corpus_config import (
     EVIDENCE,
     FAMILIES,
     FEATURES,
+    HEADER_BACKENDS,
     STANDARDS,
     Config,
     Consumer,
@@ -63,6 +67,13 @@ AXES: tuple[str, ...] = (
     "build",
     "consumer",
     "evidence",
+)
+
+#: The evidence axis: ``headers`` once per header backend.
+SPACE_EVIDENCE: tuple[str, ...] = tuple(
+    ev
+    for e in EVIDENCE
+    for ev in ([f"headers.{b}" for b in HEADER_BACKENDS] if e == "headers" else [e])
 )
 
 # The corpus builds and runs Linux ELF shared libraries only.
@@ -342,7 +353,7 @@ def all_points() -> Iterator[Point]:
             for cfg in CONFIG_AXIS:
                 for build in FAMILIES:
                     for consumer in FAMILIES:
-                        for ev in EVIDENCE:
+                        for ev in SPACE_EVIDENCE:
                             yield Point(
                                 con.name, std.lang, std.name, cfg, build, consumer, ev
                             )
@@ -369,7 +380,7 @@ def cell_points(
             cfg,
             config.producer.family,
             c.toolchain.family,
-            config.evidence,
+            config.space_evidence,
         )
         for c in config.consumer_set
         if c.id in ran_consumers
@@ -455,6 +466,7 @@ __all__ = [
     "CONFIG_AXIS",
     "CONSTRUCTS",
     "Point",
+    "SPACE_EVIDENCE",
     "all_points",
     "cell_points",
     "config_features",

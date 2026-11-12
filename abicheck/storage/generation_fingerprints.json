@@ -167,7 +167,7 @@
       "abicheck/extract/headers/gcc/acquisition.py": "f7ea1e5f5a15f8a4a58a1bdee6f0deca8ede99dece51885754176ba8beff1246",
       "abicheck/extract/headers/gcc/backend.py": "30ebbb0814b501875fa9c814bca08e613f86aaab2ac4382a2da99f6143b7c14a",
       "abicheck/extract/headers/gcc/build.py": "1ee62182117ee040274b84d482cc3a9a36db2bd2b742d5dca4e892de00002ecb",
-      "abicheck/extract/headers/gcc/contracts.py": "f8476243858a4d1d0ce59bd6b7c73435fb25d116f73f97926ec6f87c3123b091",
+      "abicheck/extract/headers/gcc/contracts.py": "419ad694249c1477e89a60d8432bfeed202bf818c4bd4aa62361834ff452a2cf",
       "abicheck/extract/headers/gcc/discovery.py": "f07fdd43ec1e594e95a75a5447e54e3dcbfe5c944c66a305de4e9d7463ee731b",
       "abicheck/extract/headers/gcc/gcc_facts.cc": "d2a160738c283569bc93e815f463f3a70e4d715a56e177795d46d9e0df8eed07",
       "abicheck/extract/headers/gcc/projection.py": "e5722bec915e0b39c7dff22211f1e127cfa0cd0b7415b0c74b1dd9da328922cd",
@@ -223,8 +223,8 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "e26a3bdca63542d652302aa1dac29792a6dad47990760518cd985f716248d440",
-    "generation": 55,
+    "fingerprint": "2d2a78e517a1b938c9cf7c05571e89e381c5b65460cae512bdbaf7ab788d659d",
+    "generation": 56,
     "reason": "castxml always emits Field offset; only malformed XML lacking it now records None instead of fabricated 0"
   },
   "resolver": {

@@ -22,6 +22,7 @@ from tests._edit_corpus_config import (
     EVIDENCE,
     FAMILIES,
     FEATURES,
+    HEADER_BACKENDS,
     STANDARD_BY_NAME,
     STANDARDS,
     Config,
@@ -377,7 +378,7 @@ def test_records_round_trip_through_files(tmp_path: Path) -> None:
     (back,) = cov.load_records([tmp_path])
     assert back == r
     assert back.verified == {"TYPE_SIZE_CHANGED", "STRUCT_SIZE_CHANGED"}
-    assert back.points == ("struct/c/c17/baseline/gcc/gcc/headers",)
+    assert back.points == ("struct/c/c17/baseline/gcc/gcc/headers.castxml",)
 
 
 def test_write_record_is_a_no_op_without_a_directory(
@@ -572,7 +573,8 @@ def test_infeasibility_matches_an_independent_oracle_exhaustively() -> None:
         * len(STANDARDS)
         * n_cfg
         * len(FAMILIES) ** 2
-        * len(EVIDENCE)
+        # headers counts once per header backend.
+        * (len(EVIDENCE) - 1 + len(HEADER_BACKENDS))
     )
 
 
@@ -908,3 +910,27 @@ def test_a_passing_cell_reports_a_derived_kind_apart_from_coverage() -> None:
     assert SONAME_ADVISORY not in rec.verified
     assert rec.derived_verified == {SONAME_ADVISORY}
     assert SONAME_ADVISORY not in rec.incidental
+
+
+@pytest.mark.parametrize("backend", HEADER_BACKENDS)
+@pytest.mark.parametrize("evidence", EVIDENCE)
+def test_header_backend_is_part_of_the_build_only_for_headers(
+    evidence: str, backend: str
+) -> None:
+    base = default_config("c", GCC).with_(evidence=evidence)
+    cfg = base.with_(header_backend=backend)
+    if evidence != "headers":
+        # No header is dumped: every backend spelling is the same build.
+        assert cfg == base and cfg.build_id == base.build_id
+        assert cfg.space_evidence == evidence
+        return
+    # castxml keeps every historical id; the others are distinct builds.
+    assert (cfg.build_id == base.build_id) is (backend == "castxml")
+    assert cfg.id.endswith("headers" if backend == "castxml" else f"headers.{backend}")
+    assert cfg.space_evidence == f"headers.{backend}"
+    assert cfg.space_evidence in space.SPACE_EVIDENCE
+
+
+def test_an_unknown_header_backend_is_refused() -> None:
+    with pytest.raises(ValueError, match="header_backend"):
+        default_config("c", GCC).with_(header_backend="hybrid")
