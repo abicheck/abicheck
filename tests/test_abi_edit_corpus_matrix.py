@@ -296,16 +296,16 @@ def test_no_unique_address_rule_names_the_msvc_abi_not_every_pe_target() -> None
 @pytest.mark.parametrize(
     ("platform", "vtt_kinds", "export_kind", "export_max"),
     [
-        # Against the ELF export table and the public header the new export
-        # is undeclared, which the release may read as a risk.
+        # Against the export table and the public header the new export is
+        # undeclared, which the release may read as a risk.
         (
             ("linux", "elf"),
             {"VTT_SLOT_COUNT_CHANGED"},
             "FUNC_ADDED_ELF_ONLY",
             "COMPATIBLE_WITH_RISK",
         ),
-        (("darwin", "macho"), set(), "FUNC_ADDED", "COMPATIBLE"),
-        (("win32", "pe"), set(), "FUNC_ADDED", "COMPATIBLE"),
+        (("darwin", "macho"), set(), "FUNC_ADDED", "COMPATIBLE_WITH_RISK"),
+        (("win32", "pe"), set(), "FUNC_ADDED", "COMPATIBLE_WITH_RISK"),
     ],
 )
 def test_elf_symbol_table_kinds_are_owed_only_on_elf(

@@ -45,6 +45,12 @@ def _x86(c: Any) -> str | None:
     return None if c.objfmt == "elf" else f"{c.objfmt}: not an x86 ELF target"
 
 
+def _elf(c: Any) -> str | None:
+    # Symbol bindings, ELF visibility and leaked runtime instantiations are
+    # facts of an ELF export table.
+    return None if c.objfmt == "elf" else f"{c.objfmt}: not an ELF export table"
+
+
 def _x86_64(c: Any) -> str | None:
     return _x86(c) or (
         "an i386 build has no x86-64 ISA level" if c.flags.bits == 32 else None
@@ -750,6 +756,7 @@ _CXX = (
         probe_flags=("-fno-gnu-unique",),
         **_RISK,
         **_BINARY,
+        precondition=_elf,
     ),
     _xa(
         "allocator_replacement_removed",
@@ -865,6 +872,7 @@ _CXX = (
         ),
         **_AT_MOST_RISK,
         **_BINARY,
+        precondition=_elf,
     ),
     _op(
         "allocator_replacement_added",
@@ -907,6 +915,7 @@ _CXX = (
         ),
         **_AT_MOST_RISK,
         **_BINARY,
+        precondition=_elf,
     ),
     _op(
         "class_rtti_became_protected",
@@ -923,6 +932,7 @@ _CXX = (
         expected=frozenset({"VTABLE_SYMBOL_IDENTITY_CHANGED"}),
         verdict_min="COMPATIBLE_WITH_RISK",
         **_BINARY,
+        precondition=_elf,
     ),
 )
 
