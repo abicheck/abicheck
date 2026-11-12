@@ -116,3 +116,62 @@ def test_unknown_offset_is_not_compared_in_debug_type_match() -> None:
     # The unknown member has no entry at all, so it is never compared against
     # a header offset; the known one keeps its real bit offset.
     assert dict(facts.field_offsets_bits) == {"known_at": 32}
+
+
+# --- Offset-based pairing (rename / reserved-field activation) -------------
+# A pairing claims "same storage, new name"; it needs both offsets. With
+# either side unknown the pair cannot be established, so the name that left
+# is reported as removed -- never paired with a field at a guessed offset 0.
+
+
+def _named(name: str, offset: int | None) -> FieldInfo:
+    return FieldInfo(name=name, type_name="int", byte_offset=offset, byte_size=4)
+
+
+def _removed_kinds(old: FieldInfo, new: FieldInfo) -> list[ChangeKind]:
+    from abicheck.compare.type_layout_diff import _removed_field_changes
+
+    changes = _removed_field_changes("S", {old.name: old}, {new.name: new})
+    return [c.kind for c in changes]
+
+
+@pytest.mark.parametrize(
+    ("old_name", "paired"),
+    [
+        ("count", ChangeKind.FIELD_RENAMED),
+        ("__reserved1", ChangeKind.USED_RESERVED_FIELD),
+    ],
+)
+@pytest.mark.parametrize(
+    ("old_off", "new_off"), [(None, 0), (0, None), (None, None), (0, 0), (4, 0)]
+)
+def test_offset_pairing_needs_both_offsets_known_and_equal(
+    old_name: str, paired: ChangeKind, old_off: int | None, new_off: int | None
+) -> None:
+    kinds = _removed_kinds(_named(old_name, old_off), _named("flags", new_off))
+    pairs = old_off is not None and old_off == new_off
+    assert kinds == ([paired] if pairs else [ChangeKind.STRUCT_FIELD_REMOVED])
+
+
+def test_anonymous_member_with_an_unknown_inner_offset_is_failed(monkeypatch) -> None:
+    """An inner offset the producer could not evaluate makes every inlined
+    offset unknown, so the container is FAILED rather than summed with 0."""
+    from abicheck import dwarf_metadata as dm
+
+    class _Die:
+        tag = "DW_TAG_member"
+        attributes = {"DW_AT_type": object()}
+
+        def iter_children(self):  # type: ignore[no-untyped-def]
+            return iter([_Die()])
+
+    class _Union(_Die):
+        tag = "DW_TAG_union_type"
+
+    monkeypatch.setattr(dm, "_resolve_ref", lambda die, attr, cu: _Union())
+    monkeypatch.setattr(dm, "_process_member", lambda die, cu, cache: _named("a", None))
+    fact = dm._expand_anonymous_member(_Die(), None, {}, 8)
+    from abicheck.model.fact import FactStatus
+
+    assert fact.status is FactStatus.FAILED
+    assert any("inner member offset is unknown" in d for d in fact.diagnostics)

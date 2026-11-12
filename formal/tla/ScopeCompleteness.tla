@@ -97,14 +97,17 @@ NoComparisonCompleted == Completed = {}
 Incomplete == Unchecked # {} \/ NoComparisonCompleted
 
 Compat  == IF Breaks # {} THEN 4 ELSE 0
+\* Models gate.fail_on_removed_library = TRUE, the configuration in which a
+\* removal can raise the exit at all; with it FALSE, Removal is 0 and I2 is
+\* vacuous. The conformance audit enumerates both settings on the real code.
 Removal == IF Retired # {} THEN 8 ELSE 0
 Ops     == IF Failed # {} THEN 4 ELSE 0
 D6      == IF policy = "block" /\ Incomplete THEN 1 ELSE 0
 D7      == IF NoComparisonCompleted THEN 1 ELSE 0
 
-Exit == Max({Compat, Removal, Ops, D6, D7})
-
 Max(S) == CHOOSE x \in S : \A y \in S : x >= y
+
+Exit == Max({Compat, Removal, Ops, D6, D7})
 
 (* ---- invariants -------------------------------------------------------- *)
 

@@ -145,7 +145,7 @@ def check(n_members: int, spec: Spec = Spec()):
     return len(parent), None
 
 
-def main() -> None:
+def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--members", type=int, default=3)
     ap.add_argument("--mutant", choices=MUTANTS, default=None)
@@ -154,12 +154,14 @@ def main() -> None:
     print(f"states={n} members={a.members} mutant={a.mutant or 'none'}")
     if found is None:
         print("I1, I2, I3: hold on every reachable state")
-        return
+        return 0
     bad, trace = found
     print(f"VIOLATED: {', '.join(bad)}; shortest trace (members, NewProven, policy):")
     for states, proven, policy in trace:
         print(f"   {list(states)} newProven={proven} policy={policy}")
+    # A seeded mutant is expected to be caught; the faithful spec must hold.
+    return 0 if a.mutant else 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
