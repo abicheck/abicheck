@@ -106,7 +106,7 @@
       "abicheck/extract/headers/castxml/names.py": "038abc55f72f11185c0a5ec48d57bff95a1ab894380f7978b6187cd76b044796",
       "abicheck/extract/headers/castxml/out_of_line_inline.py": "7f8a77d82dd9f87865163ffda63e6c5a762887800886ea9f70dae40e378cbd89",
       "abicheck/extract/headers/castxml/policy.py": "fda86c1de147934e620824b9a97262f218bffb7340cbbf394ac5fdd437e47f23",
-      "abicheck/extract/headers/castxml/preprocessed_text.py": "084aadae5c167be9a049464e7ac9864f42cc70a90ba0a4bb0aa50878a5a199d6",
+      "abicheck/extract/headers/castxml/preprocessed_text.py": "88deb48742c22f1e594ba3b73fb20f11c5dd091c690f7c53597aee67478f32ed",
       "abicheck/extract/headers/castxml/probe.py": "525ded3c75b147300cfaa460ce8acd62f87533859ff152e2b1f76c4302999bb0",
       "abicheck/extract/headers/castxml/record_traits.py": "6d836b2a2da27a0f12611f9c8dec681a8922ad2c5853f801ec9a94972654cdf1",
       "abicheck/extract/headers/castxml/records.py": "9a5cd042d058f8bc87a345072b81ccbe4eb77ac86ef1c4a59104bfc7d8701486",
@@ -223,9 +223,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "e3ace878ad4609164b7c13cc7216796cc76bfb3bc1245adffc0e6c1d48afc80e",
+    "fingerprint": "4876449b9ba1e0726fab3c1def98aef9be38f99fc13092ef23e433135de47f5c",
     "generation": 56,
-    "reason": "FieldInfo.byte_offset may now be None (unknown); DWARF extraction still writes every member offset as an int or FAILS the container, so recorded facts are unchanged"
+    "reason": "PreprocessedText now applies file_key to stored keys as well as lookups; every production table is built from parse_preprocessed output, already file_key-normalised, so extraction records the same facts for the same input on the same host"
   },
   "resolver": {
     "files": {
