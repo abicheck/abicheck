@@ -114,6 +114,7 @@ _EXPORTS = (
                 {
                     "expected": frozenset(),
                     "verdict_min": "NO_CHANGE",
+                    "verdict_max": "NO_CHANGE",
                     "observable": False,
                 },
                 "under -fvisibility=hidden only declarations inside the header's "

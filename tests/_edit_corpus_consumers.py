@@ -193,10 +193,49 @@ int main(void) {
 }
 """
 
+# c_elf: the roles the symbols-taxonomy operators edit (qualifiers, conventions,
+# contracts, va_list, tags, renamed entry points, a reserved-name table).
+_ELF_SYMBOLS = r"""#include <stdio.h>
+#include <stdarg.h>
+#include "edit_seed.h"
+static int via_vlog2(const char *fmt, ...) {
+  va_list ap;
+  int r;
+  va_start(ap, fmt);
+  r = vlog2(fmt, ap);
+  va_end(ap);
+  return r;
+}
+int main(void) {
+  int v = 5;
+  char c = 'q';
+  const int **pp = cpp();
+  printf("cref=%d cpp=%d cread=%d msf=%d\n", *cref(), **pp, cread(&v), msf(3, 4));
+  printf("put=%d dupc=%c vlog=%d vlog2=%d\n", put(&c), *dupc(&c), vlog("a", 0),
+         via_vlog2("b", 7));
+  printf("tag=%d,%d init=%d run=%d table=%d,%d\n", widget_tag(WIDGET_A),
+         widget_tag(WIDGET_B), r_init(), r_run(4), _lib_table[0], _lib_table[3]);
+  return 0;
+}
+"""
+
+# cxx_more: the roles the symbols-taxonomy operators edit.
+_MORE_SYMBOLS = r"""#include <cstdio>
+#include "edit_seed.h"
+int main() {
+  std::printf("thrower=%d inl=%d\n", thrower(3), inl_add(2, 5));
+  return 0;
+}
+"""
+
 CONSUMERS: dict[str, dict[str, str]] = {
     "c_core": dict(_C_SHAPES),
     "cxx_classes": {**_C_SHAPES, "derive": _CXX_DERIVE, "modern": _CXX_MODERN},
     "cxx_stdlib": {"stdlib": _CXX_STDLIB},
-    "c_elf": {"call": _ELF_CALL, "data": _ELF_DATA},
-    "cxx_more": {"classes": _MORE_CLASSES, "hier": _MORE_HIER},
+    "c_elf": {"call": _ELF_CALL, "data": _ELF_DATA, "symbols": _ELF_SYMBOLS},
+    "cxx_more": {
+        "classes": _MORE_CLASSES,
+        "hier": _MORE_HIER,
+        "symbols": _MORE_SYMBOLS,
+    },
 }

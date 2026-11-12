@@ -47,16 +47,34 @@ def _build(tmp: Path, header: str, source: str, lang: str) -> tuple[Path, Path]:
     return so, h
 
 
+def _require_gcc_plugin(lang: str) -> None:
+    """Skip only when the optional, build-on-demand plugin is not built; a
+    missing compiler skips before probing, and any other probe failure (a
+    broken driver, a wrong ``ABICHECK_GCC_PLUGIN``) fails the test."""
+    from abicheck.errors import SnapshotError
+    from abicheck.extract.headers.gcc.discovery import find_plugin
+
+    compiler = shutil.which("gcc" if lang == "c" else "g++")
+    if compiler is None:
+        pytest.skip("no gcc driver on PATH")
+    try:
+        find_plugin(compiler, lang)
+    except SnapshotError as exc:
+        if not str(exc).startswith("Native GCC plugin is missing"):
+            raise
+        pytest.skip(f"native gcc plugin not built: {exc}")
+
+
 def _dump(tmp: Path, header: str, source: str, lang: str, backend: str) -> AbiSnapshot:
     if backend == "gcc":
-        from abicheck.extract.headers.gcc.discovery import find_plugin
-
-        try:
-            find_plugin(shutil.which("gcc" if lang == "c" else "g++") or "", lang)
-        except Exception as exc:  # the plugin is built on demand, not by default
-            pytest.skip(f"native gcc plugin unavailable: {exc}")
-    elif shutil.which(backend) is None and backend == "castxml":
+        _require_gcc_plugin(lang)
+    elif backend == "castxml" and shutil.which("castxml") is None:
         pytest.skip("castxml unavailable")
+    elif (
+        backend == "clang"
+        and shutil.which("clang" if lang == "c" else "clang++") is None
+    ):
+        pytest.skip("clang unavailable")
     tmp.mkdir(parents=True, exist_ok=True)
     so, h = _build(tmp, header, source, lang)
     std = "c17" if lang == "c" else "c++14"
