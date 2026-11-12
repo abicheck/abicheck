@@ -545,6 +545,8 @@ def _year_oracle(construct: str, std: str) -> bool:
         "restrict_pointer": {"c": 1999},
         "flexible_array": {"c": 1999},
         "atomic": {"c": 2011},
+        "bit_int": {"c": 2023},
+        "char8_t": {"c++": 2020},
     }.get(construct, {"c": 1989, "c++": 2011})
     s = STANDARD_BY_NAME[std]
     return s.lang in first and s.year >= first[s.lang]
