@@ -358,6 +358,7 @@ class DispositionLedger:
         gated._seen_ids = dict(self._seen_ids)
         gated._seen_keys = dict(self._seen_keys)
         gated._inventories = list(self._inventories)
+        gated._scope = self._scope
         gated._records = [
             regate_record(record, change, result, severity_config, gate, severity_input)
             for record, change in zip(self._records, self._anchors)
@@ -414,6 +415,7 @@ class DispositionLedger:
         superseded._seen_ids = dict(self._seen_ids)
         superseded._seen_keys = dict(self._seen_keys)
         superseded._inventories = list(self._inventories)
+        superseded._scope = self._scope
         superseded._records = [
             replace(
                 record,
@@ -581,8 +583,7 @@ class DispositionLedger:
                 scope_decided=True,
             )
             if self._scope is not None and index not in self._scope:
-                # Promoted after the scope narrowed: narrow it too, so
-                # promote-then-narrow holds whatever order the passes ran in.
+                # Promoted after narrowing: narrow it too (the passes commute).
                 self._records[index] = scope_out(self._records[index])
 
     def apply_scope(self, in_scope: Iterable[object]) -> None:
@@ -616,8 +617,7 @@ class DispositionLedger:
         # holds. Both sides resolve membership through the same alias map.
         scoped = frozenset(self.indices_for(in_scope))
         if self._scope is not None and scoped != self._scope:
-            # A second, different scope would intersect the consumers'
-            # relevant sets instead of taking their union (see above).
+            # A second, different scope would intersect, not union (above).
             raise RuntimeError("apply_scope with a second scope; pass the union once")
         self._scope = scoped
         for index, (record, _change) in enumerate(zip(self._records, self._anchors)):

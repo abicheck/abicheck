@@ -156,3 +156,19 @@ def test_a_pipeline_with_two_aliasing_steps_is_rejected_when_built() -> None:
     extra = SimpleNamespace(name="second", establishes_kept_alias=True)
     with pytest.raises(ValueError, match="more than one step"):
         DispositionPipeline([*DEFAULT_PIPELINE.steps, extra])  # type: ignore[list-item]
+
+
+@pytest.mark.parametrize("copy", ["with_suppressed", "with_gate"])
+def test_a_copied_ledger_keeps_its_applied_scope(copy: str) -> None:
+    """Both projections build a new ledger; the scope must travel with it,
+    or a later promotion escapes it and a different scope is accepted."""
+    ledger, result, used = _promotable_ledger()
+    ledger.apply_scope([used])
+    if copy == "with_suppressed":
+        copied = ledger.with_suppressed([], application_point="test")
+    else:
+        copied = ledger.with_gate(result, None)
+    copied.refresh_promoted(result)
+    assert copied.records[1].disposition is N and copied.records[1].gate_excluded
+    with pytest.raises(RuntimeError, match="second scope"):
+        copied.apply_scope([])
