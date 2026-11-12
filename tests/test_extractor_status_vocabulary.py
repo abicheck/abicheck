@@ -57,3 +57,10 @@ def test_the_legacy_present_spelling_loads_as_ok() -> None:
     rec = ExtractorRecord.from_dict({"name": "bazel", "status": "present"})
     assert rec.status == "ok"
     assert rec.diagnostics == []
+
+
+@pytest.mark.parametrize("raw", [[], {}, ["ok"], {"ok": 1}, 3, None, True])
+def test_a_non_string_stored_status_reads_as_failed_and_loads(raw: object) -> None:
+    rec = ExtractorRecord.from_dict({"name": "x", "status": raw})
+    assert rec.status == "failed"
+    assert any(repr(raw) in d for d in rec.diagnostics)

@@ -428,9 +428,11 @@ def _stored_extractor_status(d: dict[str, Any]) -> ExtractorStatus:
     """A stored status this version does not know reads as FAILED: the
     record's evidence cannot be trusted, and weaker evidence never upgrades
     to a clean ``ok`` (ADR-028/063)."""
-    raw = _LEGACY_STATUS.get(d.get("status", "ok"), d.get("status", "ok"))
+    raw = d.get("status", "ok")
+    if not isinstance(raw, str):  # a hand-edited list/object never aborts a load
+        return ExtractorStatus.FAILED
     try:
-        return ExtractorStatus(raw)
+        return ExtractorStatus(_LEGACY_STATUS.get(raw, raw))
     except ValueError:
         return ExtractorStatus.FAILED
 
@@ -442,6 +444,8 @@ _LEGACY_STATUS = {"present": "ok"}
 
 def _unknown_status_diagnostic(d: dict[str, Any]) -> list[str]:
     raw = d.get("status", "ok")
-    if raw in ExtractorStatus._value2member_map_ or raw in _LEGACY_STATUS:
+    if isinstance(raw, str) and (
+        raw in ExtractorStatus._value2member_map_ or raw in _LEGACY_STATUS
+    ):
         return []
     return [f"unrecognized stored extractor status {raw!r}; read as 'failed'"]

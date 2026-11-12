@@ -99,14 +99,22 @@ Needs an ADR amendment if the event set changes.
   instead of mutating shared `Change`/snapshot objects.
 - `checker_types.py:51`: a result read before its verdict is computed is an
   error, not `NO_CHANGE`.
+- `workflows/release_assurance_members.py`: validate a stored member
+  assurance status against `ASSURANCE_STATUS_ORDER` so an unknown one is
+  reported as such, not shown verbatim (already ranked worst).
 
 ## Dismissed
 
 - `workflows/bundle_facts_stored_compare.py:181` "any value other than
   `warn` becomes `fail`": `assurance.unconfirmed` is validated against
   `fail | warn` when `.abicheck.yml` is loaded (`buildsource/build_config.py`).
-- `workflows/release_assurance_members.py:85` "coerces any value":
-  `AnalysisAssurance.status` is already the typed `AssuranceStatus` `Literal`.
+- `workflows/release_assurance_members.py:85` "coerces any value": the
+  `AssuranceStatus` `Literal` is not checked at runtime, so a stored unknown
+  status does pass through into `MemberAssurance.status` and is shown as is.
+  It is not a silent pass: `release_assurance._rank` ranks it worst and the
+  exit path treats every non-`complete` status as incomplete. Not changed
+  here; validating it against `ASSURANCE_STATUS_ORDER` at the adapter is a
+  Phase 5 follow-up for the report text only.
 
 - `abicheck/sycl_context.py` `_BracketState` "depth can go negative": every
   document starts with `{`/`[` (checked before the scan) and the scan returns
