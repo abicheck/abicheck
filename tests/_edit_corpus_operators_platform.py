@@ -9,6 +9,7 @@ from the loader's and the platform ABI's rules, never from abicheck's answer.
 
 from __future__ import annotations
 
+import platform
 from typing import Any
 
 from tests._edit_corpus_expect import Rule
@@ -36,13 +37,22 @@ from tests._edit_corpus_opkit import (
     _with,
 )
 from tests._edit_corpus_seeds import RoleText
+from tests._edit_corpus_space import role_construct
 
 __all__ = ["PLATFORM_OPERATORS"]
 
 
+_X86_HOSTS = frozenset({"x86_64", "amd64", "i386", "i686"})
+
+
 def _x86(c: Any) -> str | None:
-    # The corpus targets x86 Linux; the asm and -m switches below are x86's.
-    return None if c.objfmt == "elf" else f"{c.objfmt}: not an x86 ELF target"
+    # The corpus targets x86 Linux; the asm and -m switches below are x86's,
+    # and the corpus builds natively, so the host is the target.
+    if c.objfmt != "elf":
+        return f"{c.objfmt}: not an x86 ELF target"
+    if platform.machine().lower() not in _X86_HOSTS:
+        return f"{platform.machine()}: not an x86 host"
+    return None
 
 
 def _elf(c: Any) -> str | None:
@@ -98,7 +108,7 @@ _TEXTREL_SRC = (
     # R_386_32 relocation the loader must apply to the code segment.
     "#ifdef __x86_64__\n"
     '__asm__(".text\\n.p2align 3\\nedit_textref: .quad g_obj\\n.previous");\n'
-    "#else\n"
+    "#elif defined(__i386__)\n"
     '__asm__(".text\\n.p2align 2\\nedit_textref: .long g_obj\\n.previous");\n'
     "#endif"
 )
@@ -472,6 +482,10 @@ def _alt(name: str, roles: tuple[str, ...], edit: Edit, why: str, **kw: Any) -> 
     # (``EditOp.with_derived`` skips it for an operator that reads the
     # SONAME role).
     gate = ("alt.gate",) if "build.soname" in roles else ("alt.gate", "build.soname")
+    # The constructs the edit exercises are its own roles', not the gate's
+    # or the SONAME role added only to skip the advisory.
+    if not kw.get("features"):
+        kw.setdefault("constructs", tuple(dict.fromkeys(map(role_construct, roles))))
     return EditOp(name, (*gate, *roles), edit, why, **kw)
 
 
