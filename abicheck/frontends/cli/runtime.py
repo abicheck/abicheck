@@ -443,6 +443,7 @@ def _exit_compare_release(
     release_global_verdict: str = "NO_CHANGE",
     incomplete_scope_exit_contribution: int = 0,
     no_comparison_completed_exit_contribution: int = 0,
+    failed_member_exit_contribution: int = 0,
     assurance_decision: ReleaseAssuranceDecision | None = None,
 ) -> None:
     """Exit a directory/package ``compare`` with the release's own status code.
@@ -473,6 +474,7 @@ def _exit_compare_release(
         release_global_verdict=release_global_verdict,
         incomplete_scope_exit_contribution=incomplete_scope_exit_contribution,
         no_comparison_completed_exit_contribution=no_comparison_completed_exit_contribution,
+        failed_member_exit_contribution=failed_member_exit_contribution,
         assurance_decision=assurance_decision,
     )
     # ADR-071's assurance notice is worded against every *other* axis ("floored

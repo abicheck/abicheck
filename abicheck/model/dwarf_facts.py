@@ -33,7 +33,11 @@ class FieldInfo:
 
     name: str
     type_name: str  # human-readable type (e.g. "int", "MyStruct *")
-    byte_offset: int  # DW_AT_data_member_location
+    # DW_AT_data_member_location. ``None`` = unknown (the location is absent
+    # from a snapshot that does not carry it, or is unevaluable). Never 0 for
+    # unknown: 0 is a real offset (union members). A consumer compares offsets
+    # only when both sides are known (formal/lean/AbiLean/FieldOffset.lean).
+    byte_offset: int | None
     byte_size: int  # size of the field's type (0 if unknown)
     bit_offset: int = 0  # for bitfields: normalised bit offset from LSB
     bit_size: int = 0  # for bitfields: width in bits (0 = not a bitfield)

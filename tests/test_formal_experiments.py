@@ -92,3 +92,49 @@ def test_e5_e6_layout_model_extraction_and_compare_agree(tmp_path: Path) -> None
     # E4: the edit class alone does not determine the outcome
     assert s["E4_class_outcomes"]["insert_before_field:NOT moved"] > 0
     assert s["E4_class_outcomes"]["append:size SAME"] > 0
+
+
+# --- E8: scope completeness (ADR-065), formal/tla/ScopeCompleteness.tla ----
+
+
+def test_e8_scope_spec_invariants_hold_for_three_members() -> None:
+    chk = _load(FORMAL / "tla" / "check_scope.py")
+    states, found = chk.check(3)
+    assert found is None
+    assert states > 1000  # the space was actually explored
+
+
+@pytest.mark.parametrize(
+    ("mutant", "invariant"),
+    [
+        ("classify-unguarded", "I2 RemovalNeedsProof"),
+        ("warn-clean-zero", "I1 NoCleanZeroComparison"),
+        ("failed-ops-dropped", "I3 FailedNeverClean"),
+    ],
+)
+def test_e8_checker_detects_seeded_spec_faults(mutant: str, invariant: str) -> None:
+    """A checker that cannot fail proves nothing: each seeded fault must
+    produce a counterexample for the invariant it breaks."""
+    chk = _load(FORMAL / "tla" / "check_scope.py")
+    _, found = chk.check(3, chk.Spec(mutant))
+    assert found is not None
+    bad, trace = found
+    assert invariant in bad
+    assert len(trace) >= 2  # a real path, not an initial state
+
+
+def test_e8_real_completeness_code_satisfies_i1_and_i2() -> None:
+    """Conformance on the real aggregation (up to 2 members, all evidence and
+    policy settings): zero comparisons never exit 0, and no removal exit or
+    retired member without NEW's inventory proven."""
+    audit = _load(FORMAL / "experiments" / "scope_completeness_audit.py")
+    res = audit.audit(2)
+    assert res.zero_comparison_runs > 0
+    assert [v for v in res.violations if v[0].startswith("I1")] == []
+    assert [v for v in res.violations if v[0].startswith("I2")] == []
+
+
+def test_e8_failed_member_never_reads_clean_on_real_code() -> None:
+    audit = _load(FORMAL / "experiments" / "scope_completeness_audit.py")
+    res = audit.audit(2)
+    assert [v for v in res.violations if v[0].startswith("I3")] == []

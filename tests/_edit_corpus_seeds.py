@@ -746,6 +746,16 @@ _XCXX_ROLES: dict[str, RoleText] = {
         "struct FC { int a; char b; };\nint fc_use(FC* p);",
         "int fc_use(FC* p) { return p->a; }",
     ),
+    # Layout probes for the padding-absorbed field edits: the hole between
+    # ``a`` and ``b`` (inserted into), and a member that sits in that hole.
+    "x.inspad": (
+        "struct IP { char a; int b; };\nint ip_use(IP* p);",
+        "int ip_use(IP* p) { return p->b; }",
+    ),
+    "x.rmpad": (
+        "struct RP { char a; char x; int b; };\nint rp_use(RP* p);",
+        "int rp_use(RP* p) { return p->b; }",
+    ),
     "x.helper": ("int enp_a(int a);", "int enp_a(int a) { return a; }"),
     "x.extra": ("", ""),
 }
@@ -779,6 +789,8 @@ XCXX_SEED = Seed(
         "@@x.ctor2@@",
         "@@x.vtt@@",
         "@@x.tailpad@@",
+        "@@x.inspad@@",
+        "@@x.rmpad@@",
         "@@x.helper@@",
         "@@x.extra@@",
         _VIS_CLOSE,
@@ -807,6 +819,8 @@ XCXX_SEED = Seed(
         "@@x.ctor2@@",
         "@@x.vtt@@",
         "@@x.tailpad@@",
+        "@@x.inspad@@",
+        "@@x.rmpad@@",
         "@@x.helper@@",
         "@@x.extra@@",
     ),
