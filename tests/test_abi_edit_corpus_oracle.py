@@ -58,8 +58,10 @@ def _proc(
 @pytest.mark.parametrize(
     ("inherited", "want"),
     [
-        (None, "/lib/new"),
-        ("/opt/rt", "/lib/new" + os.pathsep + "/opt/rt"),
+        # The library directory as the OS spells the Path the harness passes
+        # (``\\lib\\new`` on Windows), never a hard-coded POSIX string.
+        (None, str(Path("/lib/new"))),
+        ("/opt/rt", str(Path("/lib/new")) + os.pathsep + "/opt/rt"),
     ],
 )
 @pytest.mark.parametrize("exe", ["/x/consumer", "/x/other"])
