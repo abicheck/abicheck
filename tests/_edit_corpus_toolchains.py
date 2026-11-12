@@ -693,12 +693,13 @@ def capability_gap(op: object, config: Config) -> str | None:
                     f"_GLIBCXX_USE_CXX11_ABI={new_abi}: the rebuild changes nothing"
                 )
         # A rebuild to another word size needs that target's start files and
-        # libc (32-bit multilib for -m32).
-        new_bits = rebuild(config.flags).bits
-        if new_bits != config.flags.bits and rejects_flags(
-            config.producer, (), new_bits
-        ):
-            return f"{config.producer.id} cannot build a {new_bits}-bit library here"
+        # libc (32-bit multilib for -m32). The same probe the build roles
+        # pass through: a missing target is a gap, a crash or a hang raises.
+        new_flags = rebuild(config.flags)
+        if new_flags.bits != config.flags.bits:
+            reason = _flags_unavailable(config.producer, config.lang, new_flags)
+            if reason:
+                return reason
     return None
 
 

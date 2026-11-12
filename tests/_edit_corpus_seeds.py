@@ -519,7 +519,8 @@ _ALT_ROLES: dict[str, RoleText] = {
         # An absolute address in .text: a relocation against the code segment.
         "#ifdef __x86_64__\n"
         '__asm__(".text\\n.p2align 3\\nedit_textref: .quad g_alt\\n.previous");\n'
-        "#else\n"
+        # x86 only: elsewhere an absolute word in .text may not link at all.
+        "#elif defined(__i386__)\n"
         '__asm__(".text\\n.p2align 2\\nedit_textref: .long g_alt\\n.previous");\n'
         "#endif",
     ),
