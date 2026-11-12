@@ -739,9 +739,8 @@ def _is_collected_python_test_module(path: str) -> bool:
 def added_lines_by_path(diff_text: str) -> dict[str, list[tuple[int, str]]]:
     """`path -> [(new-side line number, text), ...]` for every added line.
 
-    The number comes from the hunk header (`--unified=0`, so every line in a
-    hunk is an addition) and the text from the `+` line itself, because both
-    are needed: the text answers "is this blank or a comment", the number
+    The number counts from the hunk header over `+` and context lines, the
+    text is the `+` line itself. Both are needed: the text answers "is this blank or a comment", the number
     answers "is this inside a docstring", and neither question can be
     answered from the other's evidence.
 
@@ -781,6 +780,7 @@ def added_lines_by_path(diff_text: str) -> dict[str, list[tuple[int, str]]]:
             continue
         if line.startswith("+"):
             out.setdefault(current, []).append((next_line, line[1:]))
+        if line.startswith(("+", " ")):  # context lines are new-side lines too
             next_line += 1
     return out
 

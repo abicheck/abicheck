@@ -193,6 +193,90 @@ unaffected — correct, because the verdict is existential over consumers.
 | Compiler/ABI premises (C layout, SysV x86-64, loads at fixed offsets) | **assumed**; observed with gcc 13.3 on one fixture |
 | Not modelled | widths/partial overlap/bitfields, writes by the consumer, consumer-side allocation, inline functions in headers, C++ bases/vptr, alignment |
 
+## TLA+ models: TLC and the Python checkers
+
+`tla/DispositionPipeline.tla` (E7) and `tla/ScopeCompleteness.tla` (E8) are
+checked two ways, and CI compares the two (job `tlc` in
+`.github/workflows/formal-lean.yml`):
+
+* **TLC** (tla2tools `v1.7.4`, TLC 2.19 rev `5a47802`, sha256
+  `936a2620…0e88`; Temurin JRE `21.0.5`) on every `tla/MC_*.cfg`. The jar is
+  downloaded and checksum-verified in CI, never committed (`.gitignore`).
+* **Python BFS** (`tla/check_disposition.py`, `tla/check_scope.py`), separate
+  hand transcriptions of the same `Init`/`Next`.
+* **Correspondence** (`tla/compare_tlc.py`). For each cfg it (1) runs TLC
+  with the invariants and asserts the outcome, and (2) reruns TLC on the same
+  constants with the invariants removed and `-dump dot,actionlabels`, parses
+  every state, and requires the initial states, the reachable states, the
+  labelled transitions, and the states where TLC stutters to equal the Python
+  `graph()`. The constants come from the cfg file, so both checkers always see
+  the same ones. The Python graph has no stuttering edges, so TLC's
+  self-loops are compared against the Python states that have no successor.
+  A violated model must give a TLC counterexample that is a path of the Python
+  graph, from an initial state to a state the Python predicate also rejects.
+  CI also runs it against each seeded-wrong `check_scope.py`
+  (`--python-mutant`), and every one must fail.
+
+```bash
+curl -fsSLO https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar
+echo "936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88  tla2tools.jar" | sha256sum -c - && \
+  python3 -I formal/tla/compare_tlc.py --jar tla2tools.jar
+```
+
+Recorded run (2026-11-12):
+
+| cfg | TLC verdict | reachable states (TLC = Python) | transitions (TLC = Python) | terminal states |
+|---|---|---|---|---|
+| `MC_noadds` (5 ids, 3 steps, no same-call adds) | `NothingVanishes` holds | 3100 | 16573 | 1023 |
+| `MC_adds` (4 ids, 2 steps, adds) | `NothingVanishes` violated, trace length 2 | 983 (458 violating) | 6590 | 585 |
+| `MC_scope` (3 members) | `TypeOK`, I1, I2, I3 hold | 1710 | 4406 | 864 |
+
+**Found by the first TLC run.** The two transcriptions agreed on every
+state and transition. TLC still rejected `ScopeCompleteness.tla`, which the
+Python BFS could not notice:
+
+1. `Exit` used `Max` before defining it. TLA+ has no forward references, so
+   the module did not parse (`Unknown operator: 'Max'`). The definitions are
+   now in order.
+2. Once that was fixed, TLC reported `Deadlock reached` in every finished run,
+   because `Next` had no step once every member was acquired. The spec now
+   has an explicit `Finished` stuttering action. It adds only self-loops, and
+   the reachable set (1710) is unchanged.
+
+`DispositionPipeline.tla` needed no change. Its TLC counterexample for
+`MC_adds` is *drop `f1`, add a new `f2` to `changes`*. The Python BFS's
+shortest trace is *drop 1, add a new 2 to a bucket*. Both have length 2, both
+are paths in both graphs, and both are the E7 count-balancing shape.
+
+**What each checker adds.**
+
+| | TLC | Python BFS |
+|---|---|---|
+| Spec parses, is well-formed, has no deadlock | yes (the Python BFS cannot see a parse or deadlock error) | no |
+| Reachable graph for the cfg constants | yes | yes, compared edge for edge |
+| Invariant verdicts in the cfg | yes | yes, compared verdict and state count |
+| Seeded spec faults (`--mutant`: I1, I2 and I3 each fail) | no: the mutants exist only in Python | yes |
+| Per-state invariant agreement | only the first violating state (TLC stops there) | every state |
+| Link to the real code | no | `experiments/scope_completeness_audit.py`, `experiments/disposition_step_audit.py` reuse the Python predicates on abicheck's functions |
+
+**Remaining gaps.**
+
+* Invariants are compared only as verdicts plus TLC's first counterexample.
+  The per-state truth value of each invariant is evaluated in Python only.
+  TLC does not export it, and the graph run drops the invariants. A
+  transcription error in a predicate that leaves the verdict unchanged would
+  not be caught.
+* The comparison covers the cfg bounds only (≤5 ids, ≤3 steps, 3 members).
+  Larger bounds are neither model-checked nor compared.
+* The seeded mutants are Python-only. TLC is not shown to reject them.
+  Their effect on TLC is inferred from graph equality, plus the fact that
+  they change only the Python side.
+* The TLA+ specs are still hand transcriptions of the implementation. TLC
+  checks the spec, not abicheck. The link to the code is the audits above,
+  on a corpus and on all ≤3-member releases, not a refinement proof.
+* Liveness and fairness are not stated or checked. Only safety invariants
+  are.
+
 ## Next steps
 
 The roadmap (generator completeness, Lean/TLA+ roles, experiments E1–E9) is

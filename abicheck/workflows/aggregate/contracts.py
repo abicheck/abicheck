@@ -61,6 +61,7 @@ from pathlib import Path
 from typing import Any
 
 from abicheck.change_registry_types import Verdict
+from abicheck.policy.release_outcome import compatibility_rank
 
 from .expected_targets import (
     AGGREGATE_MANIFEST_VERSION as AGGREGATE_MANIFEST_VERSION,
@@ -270,13 +271,9 @@ def parse_check_id(target_id: str) -> CheckIdParts | None:
 #: compatibility verdict. Unlike the exit scheme (which collapses the three
 #: non-blocking verdicts), this keeps ``COMPATIBLE_WITH_RISK`` strictly above
 #: ``COMPATIBLE`` so a risk one target flagged is never hidden in the summary.
-_VERDICT_RANK: dict[Verdict, int] = {
-    Verdict.NO_CHANGE: 0,
-    Verdict.COMPATIBLE: 1,
-    Verdict.COMPATIBLE_WITH_RISK: 2,
-    Verdict.API_BREAK: 3,
-    Verdict.BREAKING: 4,
-}
+#: Derived from ``policy.release_outcome``'s one verdict order rather than
+#: restated here.
+_VERDICT_RANK: dict[Verdict, int] = {v: compatibility_rank(v) for v in Verdict}
 
 #: Exit code contributed by an incomplete *required* coverage gap. Deliberately
 #: NOT 4 (an ABI break) or 2 (a source break) — a missing build is an

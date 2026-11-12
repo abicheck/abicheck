@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import platform
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -138,3 +140,93 @@ def test_e8_failed_member_never_reads_clean_on_real_code() -> None:
     audit = _load(FORMAL / "experiments" / "scope_completeness_audit.py")
     res = audit.audit(2)
     assert [v for v in res.violations if v[0].startswith("I3")] == []
+
+
+# --- TLC / Python correspondence (formal/tla/compare_tlc.py) ---------------
+# TLC itself runs in the `tlc` job of .github/workflows/formal-lean.yml. These
+# tests pin the parts that do not need Java: the TLA+ value and DOT parsers,
+# and that each Python checker's full graph agrees with its own BFS.
+
+
+def test_tlc_value_parser_reads_sets_functions_and_scalars() -> None:
+    cmp = _load(FORMAL / "tla" / "compare_tlc.py")
+    assert cmp.parse_value("{}") == frozenset()
+    assert cmp.parse_value("{f1, f2}") == frozenset({("mv", "f1"), ("mv", "f2")})
+    assert cmp.parse_value('(m1 :> "absent" @@ m2 :> "failed")') == (
+        "fn",
+        frozenset({(("mv", "m1"), "absent"), (("mv", "m2"), "failed")}),
+    )
+    assert cmp.parse_value("TRUE") is True
+    assert cmp.parse_value("<<1, -2>>") == (1, -2)
+    with pytest.raises(ValueError):
+        cmp.parse_value("{f1, f2")
+
+
+def test_tlc_dot_parser_maps_states_edges_and_stutter() -> None:
+    """A two-node TLC dump: an initial node (style=filled), a Step edge and a
+    self-loop. The self-loop is stuttering and is reported separately."""
+    cmp = _load(FORMAL / "tla" / "compare_tlc.py")
+    a = r"/\\ x = {f1}\n/\\ n = 0"
+    b = r"/\\ x = {}\n/\\ n = 1"
+    dot = "\n".join(
+        [
+            "strict digraph DiskGraph {",
+            f'1 [label="{a}",style = filled]',
+            '1 -> -2 [label="Step",color="black",fontcolor="black"];',
+            f'-2 [label="{b}"];',
+            '-2 -> -2 [label="Next",color="black",fontcolor="black"];',
+            "}",
+        ]
+    )
+
+    def to_state(v: dict) -> tuple:
+        return (frozenset(x[1] for x in v["x"]), v["n"])
+
+    g = cmp.parse_dot(dot, to_state)
+    sa, sb = (frozenset({"f1"}), 0), (frozenset(), 1)
+    assert g.init == {sa}
+    assert g.states == {sa, sb}
+    assert g.edges == {(sa, "Step", sb)}
+    assert g.stutter == {sb}
+
+
+@pytest.mark.parametrize("cfg", ["MC_noadds.cfg", "MC_adds.cfg", "MC_scope.cfg"])
+def test_python_graph_matches_its_bfs_for_each_tlc_config(cfg: str) -> None:
+    """The graph compare_tlc.py checks against TLC is the one the BFS
+    explores: same reachable set where the invariant holds, and every edge
+    stays inside the reachable set and starts the step counter/acquisition
+    one step further."""
+    cmp = _load(FORMAL / "tla" / "compare_tlc.py")
+    model = next(m for m in cmp.MODELS if m.cfg == cfg)
+    consts = cmp.read_constants(FORMAL / "tla" / cfg)
+    (init, states, edges), n_check, violated, ok, _ = model.python(consts)
+    assert init <= states
+    assert all(s in states and d in states and s != d for s, _l, d in edges)
+    assert {d for _s, _l, d in edges} | init == states
+    assert violated == (model.expected != "holds")
+    if not violated:
+        assert n_check == len(states)
+        assert all(ok(s) for s in states)
+    else:
+        assert any(not ok(s) for s in states)
+
+
+@pytest.mark.skipif(
+    not (os.environ.get("TLA2TOOLS_JAR") and shutil.which("java")),
+    reason="needs java and TLA2TOOLS_JAR (the CI `tlc` job runs this directly)",
+)
+def test_tlc_and_python_state_graphs_agree() -> None:
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            str(FORMAL / "tla" / "compare_tlc.py"),
+            "--jar",
+            os.environ["TLA2TOOLS_JAR"],
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert proc.stdout.count(" AGREE") == 3

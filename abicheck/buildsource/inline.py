@@ -656,7 +656,7 @@ def _maybe_collect_bazel_build_info(
     extractors.append(
         ExtractorRecord(
             name="bazel",
-            status="present" if ev.compile_units else "partial",
+            status="ok" if ev.compile_units else "partial",
             detail=(
                 f"pre-captured {kind} jsonproto from --build-info, "
                 f"{len(ev.compile_units)} compile unit(s)"
