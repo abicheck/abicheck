@@ -319,12 +319,6 @@ current emitter, which is unchanged.
 `false-clean` — a gcc-backend dump misses a renamed return typedef.
 <!-- canary: tests/test_header_backend_fact_gaps_integration.py::test_the_gcc_backend_spells_a_typedef_return_canonically -->
 
-#### castxml's bare `std` leaf hides a std type passed by value from the idiom check (2026-11-12)
-
-**Status (2026-11-12): OPEN.** castxml spells `std::string` in a signature as its bare leaf (`string`), and `idioms._is_std_by_value` looks for `std::` in the spelling, so a new public function returning `std::string` by value reads no `public_api_exposes_stl_by_value` at castxml headers depth; the clang and gcc backends report it (COMPATIBLE_WITH_RISK, the verdict holds through other risk findings). The castxml slot identity facts (`type_identities_fact`) carry the qualified name the check could read. Found by the edit corpus (`stl_by_value_function_added` on `cxx_stdlib`). Owner: `idioms.py` / `pattern_verdicts.py`.
-`false-clean` — a castxml dump misses the std-by-value anti-pattern finding.
-<!-- canary: tests/test_header_backend_fact_gaps_integration.py::test_castxml_spells_a_std_return_type_by_its_bare_leaf -->
-
 #### castxml records no GNU contract attribute on a function (2026-11-12)
 
 **Status (2026-11-12): OPEN.** castxml 0.7 writes no `nonnull`, `returns_nonnull`, `malloc`, `format`, `warn_unused_result` (or any other GNU function attribute but a few x86-32 conventions) into a `<Function>`'s `attributes`, so `extract/headers/castxml/location.py`'s contract-token reader never sees one and `Function.contract_attributes` stays empty on both sides. Adding or dropping such an attribute reads `NO_CHANGE` at castxml headers depth, where the clang and native gcc backends report `func_contract_attribute_added`/`_removed` (COMPATIBLE_WITH_RISK). Found by the edit corpus (`func_contract_attribute_added`/`_removed` on `c_elf`, strict xfails in `tests/_edit_corpus_known.py`). Closing it: recover the tokens from the declaration's own (preprocessed) text, the way `extract/headers/castxml/calling_convention.py` already recovers `ms_abi`/`sysv_abi`. Owner: `extract/headers/castxml/`.

@@ -289,6 +289,8 @@ HEURISTICS: dict[str, str] = {
     "abicheck.compare.variables::_strip_trailing_declarator_const::re:'\\\\bconst\\\\b'": "spelling",
     "abicheck.compare.unnameable_return::<module>::re:'(?<![\\\\w:])auto(?![\\\\w:])'": "spelling",
     "abicheck.compare.unnameable_return::<module>::vocab:_UNSPECIFIED_RETURN_MARKERS": "spelling",
+    "abicheck.policy.std_by_value::<module>::re:'^(?:const\\\\s+|volatile\\\\s+)*(?:::)?std::(?:size_t|ptrdiff_t|nullptr_...": "spelling",
+    "abicheck.policy.std_by_value::_resolves_to_std_record::affix.startswith:'std::'": "platform",
     "abicheck.diff_templates::<module>::re:'(?<![A-Za-z0-9_])decltype$'": "spelling",
     "abicheck.diff_templates::<module>::re:'(?<![A-Za-z0-9_])operator(?![A-Za-z0-9_])'": "spelling",
     "abicheck.diff_templates::<module>::re:'<[^<>]'": "spelling",
