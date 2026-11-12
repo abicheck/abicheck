@@ -33,11 +33,10 @@ from ..model.change_catalog.kind_variants import expand_variant_overrides
 from ..model.change_catalog.kinds import HasKind
 from .classification import Verdict, effective_category
 from .reclassify import (
-    _has_frozen_namespace_violation,
+    _frozen_floor,
     _matched_kind,
     resolve_kind_sets,
 )
-from .release_outcome import compatibility_rank
 
 
 @dataclass(frozen=True)
@@ -88,14 +87,7 @@ def reclassify_outcome_for_change(
         change, *resolve_kind_sets(getattr(policy_file, "base_policy", None), None)
     )
     reclass_v = rule.to_verdict
-    effective_v = (
-        base_v
-        if (
-            _has_frozen_namespace_violation(change)
-            and compatibility_rank(reclass_v) < compatibility_rank(base_v)
-        )
-        else reclass_v
-    )
+    effective_v = _frozen_floor(change, reclass_v, base_v)
     if effective_v == next_priority_v:
         return ReclassifyOutcome(hits=hits, decider=first, changed=False)
     return ReclassifyOutcome(hits=hits, decider=first, changed=True)
@@ -108,10 +100,5 @@ def _next_priority_verdict(change: HasKind, policy_file: object | None) -> Verdi
     base_v = effective_category(change, *resolve_kind_sets(base_policy, None))
     overrides = expand_variant_overrides(getattr(policy_file, "overrides", None))
     if overrides and change.kind in overrides:
-        override_v = cast(Verdict, overrides[change.kind])
-        if _has_frozen_namespace_violation(change) and compatibility_rank(
-            override_v
-        ) < compatibility_rank(base_v):
-            return base_v
-        return override_v
+        return _frozen_floor(change, cast(Verdict, overrides[change.kind]), base_v)
     return base_v

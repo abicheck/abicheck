@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
 if TYPE_CHECKING:
     from ..policy.versioning_policy import VersioningPolicy
@@ -62,6 +62,10 @@ class _History(Protocol):
 __all__ = ["DeprecationComplianceFinding", "evaluate_deprecation_compliance"]
 
 
+#: See the record below for what each value means.
+DeprecationStatus = Literal["conforming", "non_conforming", "unknown"]
+
+
 @dataclass(frozen=True)
 class DeprecationComplianceFinding:
     """One ``removed`` lifecycle event's deprecation-window conformance.
@@ -88,7 +92,7 @@ class DeprecationComplianceFinding:
     deprecated_at_version: str | None
     deprecated_at_index: int | None
     observed_releases: int | None
-    status: str
+    status: DeprecationStatus
     detail: str
 
     def to_dict(self) -> dict[str, object]:
@@ -161,6 +165,7 @@ def evaluate_deprecation_compliance(
                 # deprecation in force at removal time is unobserved, not
                 # the one recorded before the reset.
                 dep = None
+            status: DeprecationStatus
             if dep is None:
                 if min_releases <= 0:
                     status, observed = "conforming", None

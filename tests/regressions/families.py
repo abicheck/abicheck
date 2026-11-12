@@ -62,6 +62,7 @@ FAMILIES: dict[str, Family] = {
                 "tests/test_export_loss_binding_unit.py",
                 "tests/test_dwarf_unknown_triviality.py",
                 "tests/test_clang_type_evidence.py",
+                "tests/test_pdb_parse_all_lifecycle.py",
             ),
         ),
         Family(
@@ -387,6 +388,7 @@ FAMILIES: dict[str, Family] = {
 
 
 _F1 = (
+    "lifecycle.done_flag_set_before_the_work_it_guards",
     "storage.wire_extension_dropped_or_refused",
     "compare.blocked_section_hides_presence",
     "scoping.dependency_internals_in_contract",
@@ -578,6 +580,7 @@ _F8 = (
     "extraction.tool_probe_answer_depends_on_host_load",
 )
 _F7 = (
+    "scanner.position_counter_skips_a_line_kind",
     # Masked by suite-wide shared interpreter state: passed in a full run,
     # failed alone (test isolation), hence F7 rather than OTHER.
     "imports.first_import_order_cycle",

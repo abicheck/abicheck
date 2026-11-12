@@ -708,7 +708,7 @@ class TestPdbMetadataStructLayouts:
 
     def test_valid_struct_extracted(self):
         """Lines 131-148: valid struct with fields is extracted."""
-        from abicheck.pdb_parser import CvMember
+        from abicheck.extract.pdb_codeview_types import CvMember
 
         mock_types = MagicMock()
         cv_struct = MagicMock()
@@ -789,7 +789,7 @@ class TestPdbMetadataEnums:
 
     def test_valid_enum_with_members(self):
         """Lines 205-220: valid enum extracted with members."""
-        from abicheck.pdb_parser import CvEnumerator
+        from abicheck.extract.pdb_codeview_types import CvEnumerator
 
         mock_types = MagicMock()
         cv_enum = MagicMock()

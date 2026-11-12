@@ -22,6 +22,7 @@ from abicheck.policy.outcome import (
     policy_gate_decision_exit_code,
     run_outcome_scope_required,
 )
+from abicheck.policy.severity import legacy_exit_code
 
 COVERAGE_INCOMPLETE_EXIT = 1
 _VALID_GATE_EXIT = frozenset({0, 1, 2, 4})
@@ -31,13 +32,8 @@ _VALID_GATE_EXIT = frozenset({0, 1, 2, 4})
 _RUN_OUTCOME_REQUIRED_KEYS = frozenset(
     {"schema_version", "compatibility", "assurance", "gate", "operational", "lifecycle"}
 )
-_LEGACY_SEVERITY: dict[Verdict, int] = {
-    Verdict.NO_CHANGE: 0,
-    Verdict.COMPATIBLE: 0,
-    Verdict.COMPATIBLE_WITH_RISK: 0,
-    Verdict.API_BREAK: 2,
-    Verdict.BREAKING: 4,
-}
+#: The legacy verdict -> exit mapping, owned by ``policy.severity``.
+_LEGACY_SEVERITY: dict[Verdict, int] = {v: legacy_exit_code(v) for v in Verdict}
 
 
 def _is_schema_valid_run_outcome(data: object) -> bool:

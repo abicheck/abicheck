@@ -15,7 +15,11 @@ name: formal (Lean / TLA+)
 #     checked-in ones, so model drift turns this job red;
 #   * the TLA+ disposition model is explored by check_disposition.py and its
 #     outcomes are asserted (MC_noadds: invariant holds; MC_adds: the
-#     documented counterexample is found).
+#     documented counterexample is found);
+#   * job `tlc` runs TLC itself (tla2tools.jar pinned by release and sha256,
+#     Temurin JRE pinned by version) on every formal/tla/MC_*.cfg and compares
+#     TLC's reachable state graph with the Python BFS checkers'
+#     (formal/tla/compare_tlc.py); any difference turns it red.
 
 on:
   pull_request:
@@ -195,4 +199,71 @@ jobs:
           for mutant in classify-unguarded warn-clean-zero failed-ops-dropped; do
             out="$(python3 -I formal/tla/check_scope.py --members 2 --mutant "$mutant")"
             grep -q '^VIOLATED: ' <<<"$out" || { echo "mutant $mutant not caught"; exit 1; }
+          done
+
+  tlc:
+    name: TLC model check + TLC/Python state-graph correspondence
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      # tla2tools.jar is never committed (.gitignore). It is downloaded from
+      # the immutable v1.7.4 release (not the rolling v1.8.0 pre-release,
+      # whose assets are replaced) and checked against this sha256 before use.
+      TLA_VERSION: 'v1.7.4'
+      TLA_SHA256: '936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88'
+      # The banner that jar prints; a different TLC behind the same URL fails.
+      TLC_BANNER: 'TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)'
+      JAVA_VERSION: '21.0.5'
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@1bcf9fb12cf4aa7d266a90ae39939e61372fe520  # v5.4.0
+        with:
+          distribution: temurin
+          java-package: jre
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Check the Java version
+        run: |
+          set -euo pipefail
+          java -version 2>&1 | tee "${RUNNER_TEMP}/java-version.txt"
+          grep -q "\"${JAVA_VERSION}\"" "${RUNNER_TEMP}/java-version.txt"
+
+      - name: Download tla2tools.jar (pinned by sha256)
+        run: |
+          set -euo pipefail
+          dir="${RUNNER_TEMP}/tla"
+          mkdir -p "$dir"
+          curl -fsSL --retry 3 -o "$dir/tla2tools.jar" \
+            "https://github.com/tlaplus/tlaplus/releases/download/${TLA_VERSION}/tla2tools.jar"
+          echo "${TLA_SHA256}  $dir/tla2tools.jar" | sha256sum -c -
+          echo "TLA2TOOLS_JAR=$dir/tla2tools.jar" >> "$GITHUB_ENV"
+
+      - name: TLC on every spec, compared with the Python BFS
+        # Verdict run on each checked-in MC_*.cfg (MC_noadds and MC_scope must
+        # hold, MC_adds must violate NothingVanishes), then a full -dump dot run
+        # whose initial states, reachable states, transitions and terminal
+        # states must equal check_disposition.py / check_scope.py's for the
+        # same constants.
+        run: |
+          set -euo pipefail
+          python3 -I formal/tla/compare_tlc.py --jar "$TLA2TOOLS_JAR" --workdir "${RUNNER_TEMP}/tlc-work" \
+            | tee "${RUNNER_TEMP}/tlc.out"
+          grep -qxF "TLC: $TLC_BANNER" "${RUNNER_TEMP}/tlc.out"
+          test "$(grep -c ' AGREE$' "${RUNNER_TEMP}/tlc.out")" -eq "$(ls formal/tla/MC_*.cfg | wc -l)"
+
+      - name: The comparison detects a wrong Python checker
+        # Each seeded-wrong check_scope.py variant must make the comparison
+        # fail; a comparison that can never fail proves nothing.
+        run: |
+          set -euo pipefail
+          for m in classify-unguarded warn-clean-zero failed-ops-dropped; do
+            if python3 -I formal/tla/compare_tlc.py --jar "$TLA2TOOLS_JAR" --python-mutant "$m" > "${RUNNER_TEMP}/mut-$m.out" 2>&1; then
+              cat "${RUNNER_TEMP}/mut-$m.out"
+              echo "mutant $m was not detected" >&2
+              exit 1
+            fi
+            grep -m1 '^ERROR' "${RUNNER_TEMP}/mut-$m.out"
           done

@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Explicit-state BFS over ScopeCompleteness.tla's transition relation (E8).
 
-A stand-in for TLC: it enumerates the same Init / Acquire / Classify relation
+An independent transcription of the spec, compared with TLC's reachable graph
+by compare_tlc.py. It enumerates the same Init / Acquire / Classify relation
 and checks I1-I3 on every reachable state with no member left `absent`. The
 exit formula and the state vocabulary are a line-by-line transcription of the
 .tla file (see its header for the mapping to abicheck's code).
@@ -20,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 from collections import deque
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 ABSENT = "absent"
@@ -53,6 +55,8 @@ class Spec:
 
 # A state: (member states tuple, new_proven, policy)
 State = tuple[tuple[str, ...], bool, str]
+#: (initial states, reachable states, transitions as (src, action, dst)).
+Graph = tuple[set[State], set[State], set[tuple[State, str, State]]]
 
 
 def completed(states: tuple[str, ...]) -> list[int]:
@@ -76,21 +80,39 @@ def exit_code(spec: Spec, states: tuple[str, ...], policy: str) -> int:
     return max(compat, removal, ops, d6, d7)
 
 
-def successors(spec: Spec, st: State):
+def labelled_successors(spec: Spec, st: State) -> Iterator[tuple[str, State]]:
+    """(action name, successor) pairs. The spec's ``Finished`` action only
+    adds self-loops on finished runs and is left out."""
     states, proven, policy = st
     # Acquire: one absent member takes any acquisition state.
     for i, s in enumerate(states):
         if s == ABSENT:
             for new in ACQUIRE_STATES:
-                yield (states[:i] + (new,) + states[i + 1 :], proven, policy)
+                yield "Acquire", (states[:i] + (new,) + states[i + 1 :], proven, policy)
     # Classify: not_supplied -> retired, guarded by NewProven (the faithful
     # spec); the mutant drops the guard.
     if (proven or not spec.classify_needs_proof()) and "not_supplied" in states:
         yield (
-            tuple("retired" if s == "not_supplied" else s for s in states),
-            proven,
-            policy,
+            "Classify",
+            (
+                tuple("retired" if s == "not_supplied" else s for s in states),
+                proven,
+                policy,
+            ),
         )
+
+
+def successors(spec: Spec, st: State) -> Iterator[State]:
+    for _label, nxt in labelled_successors(spec, st):
+        yield nxt
+
+
+def initial_states(n_members: int) -> list[State]:
+    return [
+        ((ABSENT,) * n_members, proven, policy)
+        for proven in (False, True)
+        for policy in POLICIES
+    ]
 
 
 def invariant_failures(states: tuple[str, ...], proven: bool, exit_: int) -> list[str]:
@@ -121,11 +143,7 @@ def invariant_violations(spec: Spec, st: State) -> list[str]:
 
 def check(n_members: int, spec: Spec = Spec()):
     """BFS from every Init. Returns (states_explored, first_violation|None)."""
-    init: list[State] = [
-        ((ABSENT,) * n_members, proven, policy)
-        for proven in (False, True)
-        for policy in POLICIES
-    ]
+    init = initial_states(n_members)
     parent: dict[State, State | None] = {s: None for s in init}
     queue = deque(init)
     while queue:
@@ -143,6 +161,24 @@ def check(n_members: int, spec: Spec = Spec()):
                 parent[nxt] = st
                 queue.append(nxt)
     return len(parent), None
+
+
+def graph(n_members: int, spec: Spec = Spec()) -> Graph:
+    """The whole reachable graph: (initial states, reachable states,
+    transitions as (src, action, dst)). Compared with TLC's ``-dump dot``
+    output by compare_tlc.py."""
+    init = initial_states(n_members)
+    seen = set(init)
+    edges: set[tuple[State, str, State]] = set()
+    queue = deque(init)
+    while queue:
+        st = queue.popleft()
+        for label, nxt in labelled_successors(spec, st):
+            edges.add((st, label, nxt))
+            if nxt not in seen:
+                seen.add(nxt)
+                queue.append(nxt)
+    return set(init), seen, edges
 
 
 def main() -> int:
