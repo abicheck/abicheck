@@ -81,7 +81,16 @@ Classify ==
   /\ state' = [i \in Members |-> IF state[i] = "not_supplied" THEN "retired" ELSE state[i]]
   /\ UNCHANGED <<newProven, policy>>
 
-Next == Acquire \/ Classify
+(* A run that has acquired every member (and classified, when it can) is
+   finished, not deadlocked. Without this explicit stuttering step TLC stops
+   at the first finished run with "Deadlock reached". Finished adds only
+   self-loops: it changes no reachable state and no invariant result. *)
+Finished ==
+  /\ \A i \in Members : state[i] # "absent"
+  /\ ~ENABLED Classify
+  /\ UNCHANGED vars
+
+Next == Acquire \/ Classify \/ Finished
 
 Spec == Init /\ [][Next]_vars
 
@@ -102,9 +111,11 @@ Ops     == IF Failed # {} THEN 4 ELSE 0
 D6      == IF policy = "block" /\ Incomplete THEN 1 ELSE 0
 D7      == IF NoComparisonCompleted THEN 1 ELSE 0
 
-Exit == Max({Compat, Removal, Ops, D6, D7})
-
+(* Defined before use: TLA+ has no forward references (TLC rejected the
+   original order with "Unknown operator: `Max'"). *)
 Max(S) == CHOOSE x \in S : \A y \in S : x >= y
+
+Exit == Max({Compat, Removal, Ops, D6, D7})
 
 (* ---- invariants -------------------------------------------------------- *)
 
