@@ -268,13 +268,32 @@ def _signature(f: Function) -> str:
     return f"({', '.join(p.type for p in f.params)})"
 
 
+def _declaration_key(f: Function) -> tuple[object, ...]:
+    """What identifies one declaration within an overload set: two members
+    of a C++ overload set cannot share parameter types and object shape, so
+    entries that do are the same declaration under several symbols -- the
+    Itanium complete/base constructor (``C1``/``C2``) or destructor variants
+    a backend that reads real symbols records separately."""
+    return (
+        tuple(p.type for p in f.params),
+        f.is_variadic,
+        f.is_static,
+        f.is_const,
+        f.is_volatile,
+        f.ref_qualifier or "",
+    )
+
+
 def _groups(functions: Iterable[Function]) -> dict[str, list[Function]]:
-    out: dict[str, list[Function]] = {}
+    """Overload sets by callable, one entry per declaration (see
+    :func:`_declaration_key`); otherwise a declaration recorded under two
+    symbols reads as two overloads that tie, and every witness is withdrawn."""
+    out: dict[str, dict[tuple[object, ...], Function]] = {}
     for f in functions:
         key = callable_key(f)
         if key is not None:
-            out.setdefault(key, []).append(f)
-    return out
+            out.setdefault(key, {}).setdefault(_declaration_key(f), f)
+    return {key: list(members.values()) for key, members in out.items()}
 
 
 @registry.detector("overload_ambiguity")
@@ -292,11 +311,23 @@ def _diff_overload_ambiguity(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]
         e.name for e in (*old.declarations.enums, *new.declarations.enums)
     )
     old_groups = _groups(old_map.values())
+    # A declaration is kept when any of its symbols survives, not only the
+    # one _groups chose to represent it (a C1 dropped beside a kept C2).
+    surviving = {
+        (ck, _declaration_key(f))
+        for f in old_map.values()
+        if f.mangled in new_map and (ck := callable_key(f)) is not None
+    }
     changes: list[Change] = []
     for key, members in _groups(new_map.values()).items():
         previous = old_groups.get(key, [])
-        kept = [f for f in previous if f.mangled in new_map]
-        for n in (f for f in members if f.mangled not in old_map):
+        kept = [f for f in previous if (key, _declaration_key(f)) in surviving]
+        old_decls = {_declaration_key(f) for f in previous}
+        for n in (
+            f
+            for f in members
+            if f.mangled not in old_map and _declaration_key(f) not in old_decls
+        ):
             change = _first_new_ambiguity(
                 key, n, kept, previous, members, typedefs, enums
             )

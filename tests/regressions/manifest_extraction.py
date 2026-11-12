@@ -828,6 +828,8 @@ EXTRACTION_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_clang_variable_access_parity.py",
             # the native gcc backend records constraints as conjunctive sets.
             "tests/test_native_gcc_concept_constraints.py",
+            # an overload set read from real symbols (ctor C1/C2) is one declaration each.
+            "tests/test_overload_ambiguity_symbol_variants.py",
             # castxml reads noexcept and C++20 constraints from the clang AST
             # of the same header; without clang they read not observed.
             "tests/test_noexcept_header_backends.py",
