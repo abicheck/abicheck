@@ -433,6 +433,7 @@ def dispatch(
         library_results=release.library_results,
         incomplete_scope_exit_contribution=outcome.scope_decision.incomplete_scope_exit_contribution,
         no_comparison_completed_exit_contribution=outcome.scope_decision.no_comparison_completed_exit_contribution,
+        failed_member_exit_contribution=outcome.scope_decision.failed_member_exit_contribution,
         assurance_decision=outcome.assurance_decision,
     )
 

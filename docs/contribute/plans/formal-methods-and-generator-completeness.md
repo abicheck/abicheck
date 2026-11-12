@@ -7,15 +7,20 @@ generated: false
 
 # Formal methods: a provably complete edit-corpus space, and where Lean and TLA+ fit
 
-**Status:** Experiments run. E0–E7 and E9 are done, E8 is not; results are in
+**Status:** Experiments run. E0–E9 are done; results are in
 `formal/EXPERIMENTS.md` (repository root). Headline results:
 
 - one representative per layout edit class is **unsound** (E4);
 - abicheck is exact on the bounded layout fragment (E5);
-- the generator covers append-into-padding (`field_added_in_tail_padding`) but
-  not insert-without-move or remove-without-shrink (E2);
+- the generator now covers append-, insert- and remove-into-padding
+  (`field_added_in_tail_padding`, `field_inserted_in_padding`,
+  `field_removed_without_shrink`), checked against the Lean layout table (E2
+  gap closed); an insert-that-moves operator is still missing;
 - the disposition count trigger has a sufficient precondition, and no step
-  breaks it on the corpus (E7).
+  breaks it on the corpus (E7);
+- a FAILED release member exited 0 under `warn` (E8), against ADR-065 D8;
+  every FAILED member is now an operational error (exit 4), superseding the
+  earlier decision that kept stored degraded markers on the scope axis.
 
 ## Problem
 
@@ -91,7 +96,7 @@ does not pay.
 | **E5** ✅ | Close level 4: run abicheck over every exported class; triage misses via `reconcile` / `known-gaps.md` | Does abicheck detect all of P? | Zero unexplained misses for the layout fragment |
 | **E6** ✅ | Close the extraction assumption: in the corpus, compare extracted `offset_bits`/sizes with compiler layout probes for each cell | How sound is extraction (Lean's `EvSound`) in practice? | Disagreement rate per backend (castxml, clang, DWARF) |
 | **E7** ✅ | TLA+ spec of the disposition pipeline (suppression, reclassification, acknowledgment, dedup, scope exclusion) | Can a finding vanish without a recorded rule and reason on some path? | TLC passes for small bounds, or a trace shows the vanishing path |
-| **E8** | TLA+ spec of scope completeness (unselected / expected-not-produced / failed / retired; zero comparisons) | Can any path report a clean pass after zero comparisons, or a removal without inventory? | Same as E7 |
+| **E8** ✅ | TLA+ spec of scope completeness (unselected / expected-not-produced / failed / retired; zero comparisons) | Can any path report a clean pass after zero comparisons, or a removal without inventory? | Same as E7. Result: I1 and I2 hold on the real code; **I3 is violated** under `warn` by degraded members (`formal/EXPERIMENTS.md` § E8) |
 | **E9** ✅ | Generalize E0's "unknown never creates a finding" into a Lean property over the tri-state `Fact` layer (ADR-063), with a Python conformance sweep over detectors | Does the property hold across detectors, not just one? | Sweep lists violating detectors (expect a few; F1 history) |
 
 **Order:** E1 → E2 → E3 → E4 → E5 is the main line toward a complete
@@ -105,20 +110,20 @@ vptr, templates). Each fragment is one Lean module on a shared core
 
 ## Next steps after the experiments
 
-1. **Generator:** split the layout operators by the proved conditions, and add
+1. ✅ **Generator:** split the layout operators by the proved conditions, and add
    the two missing padding-absorbed operators: insert without moving later
    fields, and remove without shrinking sizeof. Append-into-padding already
    exists (`field_added_in_tail_padding`, #1999). Take their expectations from
    `formal/lean/layout_table.json`, not from the class.
-2. **Generator space:** add an *edit* axis to `tests/_edit_corpus_space.py`,
+2. ✅ **Generator space:** add an *edit* axis to `tests/_edit_corpus_space.py`,
    so coverage can say which edit sub-classes ran, not only which constructs.
 3. **Disposition:** decide on E7's proposal (a structural precondition for the
    count trigger), and widen
    `test_a_pipeline_step_can_never_drop_a_finding_unrecorded` beyond five
    `FUNC_REMOVED` inputs.
-4. **DWARF layout channel:** make `FieldInfo.byte_offset` optional (schema
+4. ✅ (offset; `byte_size` narrowed in known-gaps) **DWARF layout channel:** make `FieldInfo.byte_offset` optional (schema
    change), and audit `byte_size == 0` as "unknown" (E9).
-5. **E8**, then the next fragments in the stated order: function signatures,
+5. ✅ **E8**, then the next fragments in the stated order: function signatures,
    enums, ELF versioning, C++ layout.
 
 ## Integration rules
@@ -128,7 +133,10 @@ vptr, templates). Each fragment is one Lean module on a shared core
 - Every exported table (like `formal/lean/fires_truth_table.json`) is
   checked in CI against the generator's own data, so model drift turns the
   build red instead of making the proofs fiction. CI job: optional at
-  first, required once E3 lands.
+  first, required once E3 lands. The job exists: `.github/workflows/formal-lean.yml`
+  (`lake build`, no `sorry`/`admit`/`axiom`, regenerate both JSON tables and
+  `git diff --exit-code` them, run `formal/tla/check_disposition.py`); it is
+  not yet a required status check.
 - Each report states what is proved, what is tested and what is assumed,
   using `formal/README.md` § Boundaries as the template.
 

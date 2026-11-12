@@ -127,7 +127,7 @@ def _build_type_map(snap: AbiSnapshot) -> tuple[dict[str, RecordType], bool]:
             _TypeField(
                 name=fi.name,
                 type=fi.type_name,
-                offset_bits=fi.byte_offset * 8,
+                offset_bits=None if fi.byte_offset is None else fi.byte_offset * 8,
             )
             for fi in layout.fields
         ]
