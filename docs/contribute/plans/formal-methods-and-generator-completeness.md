@@ -128,7 +128,10 @@ vptr, templates). Each fragment is one Lean module on a shared core
 - Every exported table (like `formal/lean/fires_truth_table.json`) is
   checked in CI against the generator's own data, so model drift turns the
   build red instead of making the proofs fiction. CI job: optional at
-  first, required once E3 lands.
+  first, required once E3 lands. The job exists: `.github/workflows/formal-lean.yml`
+  (`lake build`, no `sorry`/`admit`/`axiom`, regenerate both JSON tables and
+  `git diff --exit-code` them, run `formal/tla/check_disposition.py`); it is
+  not yet a required status check.
 - Each report states what is proved, what is tested and what is assumed,
   using `formal/README.md` § Boundaries as the template.
 
