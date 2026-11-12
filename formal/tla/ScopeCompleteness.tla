@@ -102,9 +102,9 @@ Ops     == IF Failed # {} THEN 4 ELSE 0
 D6      == IF policy = "block" /\ Incomplete THEN 1 ELSE 0
 D7      == IF NoComparisonCompleted THEN 1 ELSE 0
 
-Exit == Max({Compat, Removal, Ops, D6, D7})
-
 Max(S) == CHOOSE x \in S : \A y \in S : x >= y
+
+Exit == Max({Compat, Removal, Ops, D6, D7})
 
 (* ---- invariants -------------------------------------------------------- *)
 

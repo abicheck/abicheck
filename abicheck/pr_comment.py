@@ -1229,9 +1229,15 @@ def _from_release(
         removed = scope.get("proven_removed")
         added = scope.get("proven_added")
         scope_notice = comparison_scope_notice(scope)
+        # ADR-065 D8: a FAILED member is an operational error (exit 4)
+        # under any policy, so it blocks even when both 0/1 axes read 0.
         scope_blocking = bool(
             _as_int(scope.get("incomplete_scope_exit_contribution"))
             or _as_int(scope.get("no_comparison_completed_exit_contribution"))
+            or any(
+                isinstance(m, dict) and m.get("state") == "failed"
+                for m in scope.get("members") or []
+            )
         )
         no_comparison_completed = bool(scope.get("no_comparison_completed"))
         unmatched_states = {

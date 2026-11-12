@@ -177,7 +177,7 @@ class ScopeDecision:
     completeness: ScopeCompleteness
     incomplete_scope_exit_contribution: int
     no_comparison_completed_exit_contribution: int
-    failed_member_exit_contribution: int = 0
+    failed_member_exit_contribution: int
 
 
 def resolve_scope_decision(

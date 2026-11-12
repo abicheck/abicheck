@@ -539,6 +539,8 @@ def coverage(covered: Iterable[Point], top: int = 20) -> dict[str, object]:
 
 def point_from_id(ident: str) -> Point:
     parts = ident.split("/")
+    if len(parts) == len(AXES) - 1:  # pre-edit-axis id: the edit is unknown
+        parts.append(ANY_EDIT)
     if len(parts) != len(AXES):
         raise ValueError(f"not a space point id: {ident!r}")
     return Point(*parts)
