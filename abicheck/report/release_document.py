@@ -383,6 +383,7 @@ def _build_live(evaluation: ReleaseEvaluation, show_only: str | None) -> Release
         outcome.global_verdict,
         incomplete_scope_contribution=terms.decision.incomplete_scope_exit_contribution,
         no_comparison_completed_contribution=terms.decision.no_comparison_completed_exit_contribution,
+        failed_member_contribution=terms.decision.failed_member_exit_contribution,
         require_complete_analysis=ev.require_complete_analysis,
     ).to_dict()
     return ReleaseReport(

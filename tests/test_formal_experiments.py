@@ -134,33 +134,7 @@ def test_e8_real_completeness_code_satisfies_i1_and_i2() -> None:
     assert [v for v in res.violations if v[0].startswith("I2")] == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "E8 finding: a FAILED member (degraded capture, ADR-065 D8) that sits "
-        "beside a completed member exits 0 under the default warn policy "
-        "(the operational fold reads only verdict 'ERROR'). Strict: this turns "
-        "red once fixed, so the marker is then removed."
-    ),
-)
 def test_e8_failed_member_never_reads_clean_on_real_code() -> None:
     audit = _load(FORMAL / "experiments" / "scope_completeness_audit.py")
     res = audit.audit(2)
     assert [v for v in res.violations if v[0].startswith("I3")] == []
-
-
-def test_e8_known_i3_violations_are_only_the_degraded_failure_class() -> None:
-    """Pins the shape of the known I3 gap: every violation is a warn-policy
-    run that exits 0 and has a failed member from one of the glue paths
-    (degraded matched, degraded OLD-only, no result recorded). Block is never
-    affected. A new violation shape fails this test."""
-    audit = _load(FORMAL / "experiments" / "scope_completeness_audit.py")
-    res = audit.audit(2)
-    i3 = [v for v in res.violations if v[0].startswith("I3")]
-    assert i3, "expected the known warn-policy gap to reproduce"
-    failing_kinds = {"degraded_matched", "degraded_old", "no_entry"}
-    for _inv, combo, setting, code, _reasons in i3:
-        assert setting.policy == "warn"
-        assert code == 0
-        assert failing_kinds & set(combo)
-    assert len(i3) == len(res.violations)

@@ -283,6 +283,11 @@ current emitter, which is unchanged.
 
 ### False-clean risk
 
+#### `abicheck aggregate` reads a release's failed member as a different exit than `compare` does (2026-11-12)
+
+**Status (2026-11-12): OPEN.** `compare` on a release with a `FAILED` member exits `4` (ADR-065 D8, `policy/release_exit_decision.py`). Aggregating the stored release report does not reproduce that exact value: `workflows/aggregate/scope_axis.py` folds only the `0`/`1` scope contributions, and `load.py`/`report_gate.py` read `run_outcome.operational` through their own mapping. The aggregate target therefore reads non-clean (`exit_code() != 0`) but not `4`. Closing it means folding the release's `operational_error` contribution into the aggregate's per-target gate with the same `max` as `compare`.
+`false-clean` — none (the aggregate still exits non-zero), but the exit code and the gate category disagree with the originating `compare`.
+
 #### The DWARF lane records fewer C++ exports than the symbols-only lane, so ctor/dtor variants and RTTI/vtable objects read as added or removed (2026-11-10)
 
 **Status (2026-11-10): OPEN, narrow.** A debug-backed binary-only dump adds an export-table record only for exports no debug declaration names (`extract/dwarf_export_gaps.py`, #1980): it folds a ctor/dtor export into the variant its debug entry names and skips C++ ABI metadata (`_ZT*`, guard variables). The symbols-only lane records all of them. Two shapes follow: (1) a `C1` that aliases `C2` on one side (no virtual base) and has its own entry on the other reads `func_added` (catalog case167, excused in `tests/test_depth_projection_matches_shallow_dump.py`); (2) a stripped copy compared with its own `-g` build reads `func_removed_elf_only`/`var_removed_elf_only` for the `D1` variant and `_ZTI`/`_ZTS`/`_ZTV`, `BREAKING`. Closing it means recording the folded variants and the ABI metadata as export-table records in the DWARF lane (and checking the undeclared-exports detector still credits them to their class).

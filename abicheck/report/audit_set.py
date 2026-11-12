@@ -272,8 +272,11 @@ def compute_no_baseline_set_document(
         key: max((d.exit_axes.get(key, 0) for d in audited_docs), default=0)
         for key in MEMBER_EXIT_AXES
     }
-    exit_axes["operational_error"] = (
-        OPERATIONAL_ERROR_EXIT if result.operationally_failed else 0
+    # ADR-065 D8: a FAILED member is an operational error, folded with max
+    # beside the run's own operational failure (no separate axis key).
+    exit_axes["operational_error"] = max(
+        OPERATIONAL_ERROR_EXIT if result.operationally_failed else 0,
+        decision.failed_member_exit_contribution,
     )
     exit_axes["incomplete_scope"] = decision.incomplete_scope_exit_contribution
     exit_axes["no_comparison_completed"] = (
