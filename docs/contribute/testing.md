@@ -174,7 +174,9 @@ What these numbers do **not** mean:
   edit that should produce it; one cell under one configuration verified it.
 - A covered space point means a cell *ran* there, not that abicheck was right
   there (mismatches are the corpus test's own result) and not that every edit
-  of that construct ran: the space has no edit axis.
+  of that construct ran. Record-layout edits are split by sub-class (the
+  `edit` axis: insert/append/remove, absorbed by padding or not), but other
+  constructs are not split, so their individual edits are still not counted.
 - The space holds only the corpus's own axes. Architectures beyond `-m32`,
   other operating systems, link order and real-world library shapes are not in
   the denominator, so 100% would still not be "all of C/C++".

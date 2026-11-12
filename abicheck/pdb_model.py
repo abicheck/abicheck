@@ -85,8 +85,12 @@ def _record_from_layout(
     fields: list[TypeField] = []
     for fi in getattr(layout, "fields", []) or []:
         bit_size = getattr(fi, "bit_size", 0) or 0
-        offset_bits = (getattr(fi, "byte_offset", 0) or 0) * 8 + (
-            getattr(fi, "bit_offset", 0) or 0
+        # A None byte_offset is unknown, not 0 (the `or 0` would fabricate one).
+        raw_offset = getattr(fi, "byte_offset", 0)
+        offset_bits = (
+            None
+            if raw_offset is None
+            else raw_offset * 8 + (getattr(fi, "bit_offset", 0) or 0)
         )
         fields.append(
             TypeField(

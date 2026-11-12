@@ -465,15 +465,46 @@ class TestStoredDispatchShapeAndAcceptedGaps:
                 f"json={reports / f'abi-report-{LINUX}.json'}",
             ],
         )
-        expected_exit = 1 if policy == "block" else 0
+        expected_exit = 4  # ADR-065 D8: a failed member is an operational error
+        expected_scope_axis = 1 if policy == "block" else 0
         assert result.exit_code == expected_exit, result.output
         doc = json.loads((reports / f"abi-report-{LINUX}.json").read_text())
         # The stored document is the live release document (schema 2.5).
         assert "release_schema_version" in doc
         agg = aggregate_reports_dir(reports, expected=_expect(LINUX))
-        assert agg.scope_completeness_exit == expected_exit
+        assert agg.scope_completeness_exit == expected_scope_axis
         assert agg.scope_completeness_targets == (LINUX,)
-        assert agg.exit_code() == expected_exit
+        # ADR-065 D8: the aggregate must never read clean for a failed member.
+        assert agg.exit_code() != 0
+
+    @pytest.mark.known_gap_canary
+    def test_aggregate_reads_a_failed_member_as_1_not_the_cli_4(
+        self, tmp_path: Path
+    ) -> None:
+        """Canary (known-gaps.md: aggregate reads a failed member as a
+        different exit): the CLI exits 4 for a FAILED member, the aggregate
+        folds run_outcome.operational differently and reads 1. When this
+        reads 4, the gap is closed: archive the entry and drop the marker."""
+        from test_release_scope_completeness import _elf_snap, _facts_file
+
+        libs = {"libok.so": _elf_snap("libok.so"), "libdeg.so": _elf_snap("libdeg.so")}
+        old = _facts_file(
+            tmp_path, "old.bundlefacts.json", libs, degraded={"libdeg.so": "boom"}
+        )
+        new = _facts_file(tmp_path, "new.bundlefacts.json", libs)
+        reports = tmp_path / "reports"
+        reports.mkdir()
+        from click.testing import CliRunner
+
+        from abicheck.cli import main
+
+        out = reports / f"abi-report-{LINUX}.json"
+        result = CliRunner().invoke(
+            main, ["compare", str(old), str(new), "-o", f"json={out}"]
+        )
+        assert result.exit_code == 4, result.output
+        agg = aggregate_reports_dir(reports, expected=_expect(LINUX))
+        assert agg.exit_code() == 1
 
 
 class TestIncompleteScopePolicyIsInTheDigest:
