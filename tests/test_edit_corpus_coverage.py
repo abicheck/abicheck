@@ -33,9 +33,9 @@ from tests._edit_corpus_config import (
     default_config,
 )
 from tests._edit_corpus_expect import PASSING_CLASSES, ExecTruth, Expectation, PairTruth
-from tests._edit_corpus_operators import OP_BY_NAME, OPERATORS
-from tests._edit_corpus_opkit import SONAME_ADVISORY
-from tests._edit_corpus_seeds import SEED_BY_NAME, SEEDS
+from tests._edit_corpus_operators import OP_BY_NAME, OPERATORS, matrix
+from tests._edit_corpus_opkit import SONAME_ADVISORY, EditOp
+from tests._edit_corpus_seeds import SEED_BY_NAME, SEEDS, Seed
 from tests._edit_corpus_tiers import _PR
 
 GCC = Toolchain("gcc", 13, "gcc", "g++")
@@ -287,12 +287,25 @@ def test_ledger_floors_are_declared_in_scope_kinds() -> None:
         assert set(kinds) <= declared & cov.in_scope(), tier
 
 
+def _pr_matrix() -> list[tuple[EditOp, Seed]]:
+    """The PR tier's (operator, seed) cells as the Linux ELF PR leg runs them.
+
+    ``default_matrix`` filters on the host's own config, so an ELF-only
+    operator drops out on a macOS or Windows leg, where its cell really is
+    skipped. The floor check counts the PR leg's cells wherever it runs.
+    """
+    stand_in = Toolchain("gcc", 0, "gcc", "g++")
+    return [
+        (op, seed)
+        for op, seed in matrix()
+        if op.requires(_pr_config(seed.lang, stand_in)) is None
+    ]
+
+
 def _pr_tier_declared() -> set[str]:
     """Kinds the PR-tier cells expect, from the cell list with stand-in toolchains."""
-    from tests.test_abi_edit_corpus import default_matrix
-
     out: set[str] = set()
-    for op, seed in default_matrix():
+    for op, seed in _pr_matrix():
         for tc in (GCC, CLANG):
             out |= cov.expectation_kinds(op.expect(_pr_config(seed.lang, tc)))
     for op_name, seed_name, family, changes in _PR:
@@ -341,6 +354,35 @@ def test_pr_tier_expectations_do_not_depend_on_the_checking_host(
             for k in cov.expectation_kinds(op.expect(_pr_config(seed.lang, GCC)))
         }
         assert host_kinds != pinned, "the host platform no longer changes expectations"
+
+
+@pytest.mark.parametrize("machine", ["x86_64", "aarch64", "arm64", "AMD64"])
+def test_pr_tier_expectations_do_not_depend_on_the_host_cpu(
+    monkeypatch: pytest.MonkeyPatch, machine: str
+) -> None:
+    """The macOS leg runs on arm64: an x86-only operator must stay in the PR
+    cell list there, its host CPU read as a run-time capability gap."""
+    import platform
+
+    linux_x86 = _pr_tier_declared()
+    monkeypatch.setattr(platform, "machine", lambda: machine)
+    assert _pr_tier_declared() == linux_x86
+
+
+def test_an_x86_only_operator_is_a_capability_gap_on_another_cpu(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import platform
+
+    from tests._edit_corpus_toolchains import capability_gap
+
+    x86_only = [op for op in OPERATORS if op.host_arch]
+    assert x86_only, "no operator declares a host CPU any more"
+    cfg = _pr_config("c", GCC)
+    monkeypatch.setattr(platform, "machine", lambda: "aarch64")
+    for op in x86_only:
+        gap = capability_gap(op, cfg)
+        assert gap and "aarch64" in gap, op.name
 
 
 # --- records and the verified side ------------------------------------------------

@@ -187,7 +187,8 @@ ROLE_CONSTRUCT: dict[str, str] = {
     # cxx_alt
     "xa.uniq": "inline_function",
     "xa.str": "std_string",
-    "xa.tv": "struct",
+    # A user-provided destructor (a special member), not a layout edit.
+    "xa.tv": "class",
     "xa.leak": "struct",
     "xa.inl": "inline_function",
     "xa.tmpl": "template",
@@ -287,6 +288,10 @@ OP_EDIT_CLASS: dict[str, dict[str, str]] = {
         "record_became_opaque": "record_opaque",
         "struct_became_union": "record_kind_change",
         "record_removed": "record_removed",
+        # The returned struct gains a third long at its tail: sizeof 16 -> 24.
+        "returned_struct_grew_past_registers": "insert_tail_shifts",
+        # Holder's embedded detail::Impl member grows (4 -> 8), moving x.
+        "internal_type_grew": "retype_grows",
     },
     "inheritance": {
         "base_became_virtual": "base_became_virtual",

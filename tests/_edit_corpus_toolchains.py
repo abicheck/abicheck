@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import functools
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -666,6 +667,9 @@ def capability_gap(op: object, config: Config) -> str | None:
 
     Kept out of ``requires`` so collecting the corpus never runs a compiler.
     """
+    arch = getattr(op, "host_arch", frozenset())
+    if arch and platform.machine().lower() not in arch:
+        return f"{platform.machine()} host: the edit needs {'/'.join(sorted(arch))}"
     if getattr(op, "needs_libstdcxx", False) and not uses_libstdcxx(config.producer):
         return f"{config.producer.id}'s C++ standard library is not libstdc++"
     probe = tuple(getattr(op, "probe_flags", ()))
