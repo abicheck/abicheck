@@ -284,16 +284,25 @@ def _declaration_key(f: Function) -> tuple[object, ...]:
     )
 
 
-def _groups(functions: Iterable[Function]) -> dict[str, list[Function]]:
-    """Overload sets by callable, one entry per declaration (see
-    :func:`_declaration_key`); otherwise a declaration recorded under two
-    symbols reads as two overloads that tie, and every witness is withdrawn."""
-    out: dict[str, dict[tuple[object, ...], Function]] = {}
+def _groups(
+    functions: Iterable[Function],
+    declaration_keys: dict[int, tuple[object, ...]],
+) -> dict[str, dict[tuple[object, ...], list[Function]]]:
+    """Overload sets by callable, then by declaration (see
+    :func:`_declaration_key`) with every symbol that carries it. The first
+    symbol stands for the declaration; otherwise a declaration recorded under
+    two symbols reads as two overloads that tie, and every witness is
+    withdrawn. *declaration_keys* caches each function object's key across
+    the old and new surface, which share the unchanged ones."""
+    out: dict[str, dict[tuple[object, ...], list[Function]]] = {}
     for f in functions:
         key = callable_key(f)
         if key is not None:
-            out.setdefault(key, {}).setdefault(_declaration_key(f), f)
-    return {key: list(members.values()) for key, members in out.items()}
+            decl = declaration_keys.get(id(f))
+            if decl is None:
+                decl = declaration_keys[id(f)] = _declaration_key(f)
+            out.setdefault(key, {}).setdefault(decl, []).append(f)
+    return out
 
 
 @registry.detector("overload_ambiguity")
@@ -310,26 +319,25 @@ def _diff_overload_ambiguity(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]
     enums = frozenset(
         e.name for e in (*old.declarations.enums, *new.declarations.enums)
     )
-    old_groups = _groups(old_map.values())
-    # A declaration is kept when any of its symbols survives, not only the
-    # one _groups chose to represent it (a C1 dropped beside a kept C2).
-    surviving = {
-        (ck, _declaration_key(f))
-        for f in old_map.values()
-        if f.mangled in new_map and (ck := callable_key(f)) is not None
-    }
+    declaration_keys: dict[int, tuple[object, ...]] = {}
+    old_groups = _groups(old_map.values(), declaration_keys)
     changes: list[Change] = []
-    for key, members in _groups(new_map.values()).items():
-        previous = old_groups.get(key, [])
-        kept = [f for f in previous if (key, _declaration_key(f)) in surviving]
-        old_decls = {_declaration_key(f) for f in previous}
-        for n in (
-            f
-            for f in members
-            if f.mangled not in old_map and _declaration_key(f) not in old_decls
-        ):
+    for key, declarations in _groups(new_map.values(), declaration_keys).items():
+        old_decls = old_groups.get(key, {})
+        previous = [symbols[0] for symbols in old_decls.values()]
+        # A declaration is kept when any of its symbols survives, not only
+        # its representative (a C1 dropped beside a kept C2).
+        kept = [
+            symbols[0]
+            for symbols in old_decls.values()
+            if any(f.mangled in new_map for f in symbols)
+        ]
+        members = [symbols[0] for symbols in declarations.values()]
+        for decl, symbols in declarations.items():
+            if decl in old_decls or any(f.mangled in old_map for f in symbols):
+                continue  # not added: the declaration or its symbol existed
             change = _first_new_ambiguity(
-                key, n, kept, previous, members, typedefs, enums
+                key, symbols[0], kept, previous, members, typedefs, enums
             )
             if change is not None:
                 changes.append(change)
