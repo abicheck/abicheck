@@ -54,6 +54,7 @@ from .markdown_text import md_text
 __all__ = [
     "ComparisonScopeTerms",
     "build_comparison_scope_section",
+    "comparison_scope_blocks",
     "comparison_scope_notice",
     "comparison_scope_terms",
     "render_comparison_scope_markdown",
@@ -166,6 +167,25 @@ def _unchecked_rows(section: Mapping[str, Any]) -> list[Mapping[str, Any]]:
         for m in members
         if isinstance(m, Mapping) and m.get("name") in unchecked_names
     ]
+
+
+def comparison_scope_blocks(section: Mapping[str, Any]) -> bool:
+    """Whether *section* raised the run's exit: either 0/1 scope axis, or a
+    FAILED member -- an operational error (exit 4) under any policy
+    (ADR-065 D8), so it blocks even when both 0/1 axes read 0."""
+
+    def _num(key: str) -> int:
+        value = section.get(key)
+        return value if isinstance(value, int) else 0
+
+    return bool(
+        _num("incomplete_scope_exit_contribution")
+        or _num("no_comparison_completed_exit_contribution")
+        or any(
+            isinstance(m, Mapping) and m.get("state") == "failed"
+            for m in section.get("members") or []
+        )
+    )
 
 
 def comparison_scope_notice(section: Mapping[str, Any]) -> str | None:

@@ -36,6 +36,9 @@ GAP_GCC_UNEXPORTED = (
     "The native gcc header backend keeps an unexported declaration PUBLIC"
 )
 GAP_CASTXML_TRAITS = "castxml records no standard-layout trait or data size"
+GAP_CLANG_TEMPLATE_CONTRACT = (
+    "The contract evaluator places a clang class-template pattern out of contract"
+)
 GAP_TAG_DECL = (
     "clang and gcc header snapshots of the corpus seed drop a renamed tag's "
     "instantiation declaration"
@@ -195,6 +198,16 @@ def _unexported_gap(op: str, seeds: frozenset[str], kind: str) -> Known:
 # Header-backend parity gaps the corpus found (tests/
 # test_header_backend_fact_gaps_integration.py holds their canaries).
 _BACKEND_GAPS: tuple[Known, ...] = (
+    _backend_gap(
+        "template_default_arg_change",
+        _CLASSES,
+        "clang",
+        "wrong-verdict",
+        "the clang Buf pattern reads PROVEN_OUT_OF_CONTRACT, so the CLI verb rolls up NO_CHANGE",
+        GAP_CLANG_TEMPLATE_CONTRACT,
+        frozenset({"weaker-than:API_BREAK"}),
+        "NO_CHANGE",
+    ),
     _contract_gap("func_contract_attribute_added", "FUNC_CONTRACT_ATTRIBUTE_ADDED"),
     _contract_gap("func_contract_attribute_removed", "FUNC_CONTRACT_ATTRIBUTE_REMOVED"),
     *(

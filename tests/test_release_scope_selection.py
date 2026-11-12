@@ -613,9 +613,9 @@ class TestDegradedSingleArtifactPackageRoutesToTheFanOut:
         scope = doc["comparison_scope"]
         assert scope["counts"]["failed"] == 1
         assert scope["no_comparison_completed"] is True
-        assert doc["run_outcome"]["operational"] == "no_comparison_completed"
+        assert doc["run_outcome"]["operational"] == "extraction_error"  # D8 outranks D7
         assert doc["run_outcome"]["compatibility"] is None
-        assert code == 1
+        assert code == 4
 
 
 class TestDamagedMarkerSectionFailsClosed:
@@ -901,8 +901,9 @@ class TestStoredLiveExtractionFailureIsAnOperationalError:
     `extraction_error` and the exit is floored at 4 under either
     `--on-incomplete-scope` policy -- never a warn-accepted scope gap that
     lets a damaged current artifact exit 0. A stored capture's own D8
-    `degraded` marker stays a scope-axis matter (Codex review, nineteenth
-    round)."""
+    `degraded` marker is now an operational error too (ADR-065 D8 wording,
+    found by formal experiment E8); this supersedes the Codex review's
+    nineteenth-round decision that kept it on the scope axis."""
 
     # NEW is discovered by the live fan-out's own rule: valid snapshot files
     # are members by content, and the damaged one is a member because it is
@@ -966,8 +967,8 @@ class TestStoredLiveExtractionFailureIsAnOperationalError:
         for name, snap in libs.items():
             _write(new_dir, f"{name}.json", snap)
         code, doc = _invoke_json("compare", str(old), str(new_dir))
-        assert code == 0, doc
-        assert doc["run_outcome"]["operational"] == "none"
+        assert code == 4, doc  # ADR-065 D8: failed member, not a warn-accepted gap
+        assert doc["run_outcome"]["operational"] == "extraction_error"
         assert doc["extraction_failures"] == {}
         cfg = _release_config(
             tmp_path, on_incomplete_scope="block", name="block.abicheck.yml"
@@ -975,7 +976,7 @@ class TestStoredLiveExtractionFailureIsAnOperationalError:
         code, doc = _invoke_json(
             "compare", str(old), str(new_dir), "--config", str(cfg)
         )
-        assert code == 1
+        assert code == 4
 
     def test_every_member_failing_is_also_no_comparison_completed(
         self, tmp_path: Path

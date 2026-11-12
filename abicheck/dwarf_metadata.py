@@ -406,6 +406,11 @@ def _expand_anonymous_member(
             return Fact.failed(f"inner member location is unevaluable: {exc}")
         if fi is None:
             continue
+        # An inner offset the producer could not evaluate is unknown; every
+        # inlined offset that depends on it is then unknown too, so the
+        # container is FAILED rather than fabricating a sum.
+        if fi.byte_offset is None:
+            return Fact.failed("inner member offset is unknown")
         # Adjust offset: anonymous member byte_offset + inner field offset
         fields.append(
             FieldInfo(

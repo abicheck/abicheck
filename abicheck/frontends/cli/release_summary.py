@@ -172,6 +172,7 @@ def _write_release_summary_file(
         incomplete_scope_contribution=terms.decision.incomplete_scope_exit_contribution,
         no_comparison_completed_contribution=terms.decision.no_comparison_completed_exit_contribution,
         require_complete_analysis=require_complete_analysis,
+        failed_member_contribution=terms.decision.failed_member_exit_contribution,
     ).to_dict()
     record = terms.record
     # This sidecar is documented/contracted to always be full and
@@ -472,6 +473,9 @@ def _finalize_release_output(
             scope_terms.decision.no_comparison_completed_exit_contribution
             if scope_terms
             else 0
+        ),
+        failed_member_exit_contribution=(
+            scope_terms.decision.failed_member_exit_contribution if scope_terms else 0
         ),
         # ADR-071: the whole resolved decision, not just its contribution --
         # `_exit_compare_release` both folds it and formats its notice, and
