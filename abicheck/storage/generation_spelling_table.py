@@ -63,6 +63,13 @@ class GenerationSpellingChange:
     #: from before it re-encodes to different bytes by design.
     migrates_facts: bool = False
     restores_erased_extents: bool = False
+    #: Name prefixes of functions an older generation recorded and this one
+    #: no longer does (an extractor artifact, never a library entity), such
+    #: as castxml's compiler-declared ``__builtin_*``. No load-time rewrite
+    #: can recover the dropped entity soundly, so comparison demotes a
+    #: finding on such a function between operands that straddle this
+    #: generation instead (``policy/retired_function_drift.py``).
+    retires_function_prefixes: tuple[str, ...] = ()
 
 
 #: Every row's reason cites the commit that introduced the generation and what
@@ -545,9 +552,10 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "the castxml backend no longer records a namespace-scope function the "
         'compiler declared itself (artificial="1", e.g. __builtin_memcpy '
         "declared where an implicit copy of an array member uses it); no "
-        "stored type spelling changes, an older castxml snapshot only keeps "
-        "that extra declaration, which reads as removed against a newer one "
-        "and is not rewritten"
+        "stored type spelling changes; an older castxml snapshot's extra "
+        "__builtin_* declaration reads as removed against a newer one, and "
+        "comparison demotes that finding as extractor drift",
+        retires_function_prefixes=("__builtin_",),
     ),
 }
 
