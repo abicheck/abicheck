@@ -16,6 +16,10 @@ re-verification status line (2026-10-09, `456989f`). Do not re-open an
 entry from here without reproducing it on current `main`; record a new
 gap on the main page instead.
 
+### castxml's bare `std` leaf hid a std type passed by value from the idiom check (closed 2026-11-12)
+
+**Status (2026-11-12): CLOSED.** castxml spells `std::string` in a signature as its bare leaf (`string`), and `idioms._is_std_by_value` looked for `std::` in the spelling, so a new public function returning `std::string` by value read no `public_api_exposes_stl_by_value` at castxml headers depth. The check (now `policy/std_by_value.is_std_by_value`) also reads the slot's resolved `type_identities_fact`, which castxml records qualified (`std::basic_string<char>`). Found by the edit corpus (`stl_by_value_function_added`); regression test `tests/test_stl_by_value_resolved_identity.py`.
+
 ### Overload-set and instantiation checks grouped by a demangled signature (closed 2026-11-12)
 
 **Status (2026-11-12): CLOSED.** `diff_templates.detect_overload_set_rerouted` and `detect_missing_instantiations` keyed a header snapshot's functions on `qualified_declaration_name`, which for a real Itanium symbol is the demangled signature: the parameter list, and for a function template a leaked return type (`route(double)`, `long getv<long>(long)`). No two overloads shared a stem, so `overload_set_rerouted` never fired, and two instantiations of one template never matched, so `instantiation_missing_from_binary` never fired at headers depth (DWARF, which names `getv<long>`, did). Both now key on `_cpo_function_stem` (template arguments, parameter list and leaked return type dropped), the reduction the CPO check already used. Found by the edit corpus (`overload_rerouted`, `explicit_instantiation_dropped`); regression test `tests/test_template_stem_real_mangling.py` (an exhaustive domain of real manglings, where the old fixtures used invented ones).
