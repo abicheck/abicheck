@@ -379,7 +379,7 @@ def test_records_round_trip_through_files(tmp_path: Path) -> None:
     assert back == r
     assert back.verified == {"TYPE_SIZE_CHANGED", "STRUCT_SIZE_CHANGED"}
     assert back.points == (
-        "struct/c/c17/baseline/gcc/gcc/headers.castxml/append_grows",
+        "struct/c/c17/baseline/gcc/gcc/headers.castxml/insert_tail_shifts",
     )
 
 
