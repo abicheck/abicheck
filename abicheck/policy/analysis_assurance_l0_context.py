@@ -29,13 +29,17 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from .assurance_status_vocabulary import ContextStatus
+
 if TYPE_CHECKING:
     from ..model import AbiSnapshot
 
 __all__ = ["l0_context_status"]
 
 
-def l0_context_status(old: AbiSnapshot, new: AbiSnapshot) -> tuple[str, list[str]]:
+def l0_context_status(
+    old: AbiSnapshot, new: AbiSnapshot
+) -> tuple[ContextStatus, list[str]]:
     """The L0 analogue of ``analysis_assurance``'s other context-status
     helpers' presence-then-asymmetry shape.
 

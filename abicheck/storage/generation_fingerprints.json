@@ -99,7 +99,7 @@
       "abicheck/extract/headers/castxml/duplicate_declarations.py": "8668fddc69d8838cc093315726c53d96dd9c878020e675e34a44a435dc54d2f7",
       "abicheck/extract/headers/castxml/enums.py": "e616c768543061d71812378dd92cbcb7b8d00afbb734bcb7b4b5334ee34042aa",
       "abicheck/extract/headers/castxml/function_type_cc.py": "54b78f155f3500d45cc578501e42ae2af256445bfa9819510e805e60df8c9967",
-      "abicheck/extract/headers/castxml/functions.py": "08708f209213c674032e123e2394bf01a4dd60978f16bb9c80589bb038e8682e",
+      "abicheck/extract/headers/castxml/functions.py": "99f599d249fa749eb35da270e40a9f3acad7b7fa1ea701091e98df745eefdda4",
       "abicheck/extract/headers/castxml/hidden_declarations.py": "500abf62faa042e1c33a3ef3897557e263f0c7b1060b60c323d8d34895f5b057",
       "abicheck/extract/headers/castxml/inline_variables.py": "60ee92e7a810d81f113a6f5fb4f218ea6287258948dc9a838fbdef37ef37ea32",
       "abicheck/extract/headers/castxml/location.py": "a5469fedb2774dfdf1b87a49ddc713471c088ecee6ea5ccbfe4d9764012c97e6",
@@ -190,6 +190,7 @@
       "abicheck/extract/parse_failures.py": "2e87216b3af05b90487355abfe32f966cec0206e2ba1467005348994264abea4",
       "abicheck/extract/path_aliases.py": "e4df448bdadc691475adfca99c567df6aa76e5cb421d6faf5de1307d368d1560",
       "abicheck/extract/path_segments.py": "c96f59df6fc126e26c6ca2052c6040d3180aa49f6c1265029eeb7206f0466b22",
+      "abicheck/extract/pdb_codeview_types.py": "1bad7440b2b2aa734ee4c292781905eaec8c8c6b34f27bc743a6e5a0705e57d1",
       "abicheck/extract/pdb_fieldlist.py": "38b2a11c7f21eb447efb50d382e8933447727e8e07e64dd7971e4c74f4ed3be0",
       "abicheck/extract/pdb_procedure_spelling.py": "548f5ba703610142184fbc0fc49ce6a3bfe855638582d42c40718f1e895dac02",
       "abicheck/extract/pdb_scope.py": "d5c551c9ceec500c76670cf9ecf4a76f844e4aad2c4ed37f91ab7fc630988753",
@@ -214,18 +215,18 @@
       "abicheck/header_utils.py": "05efbcfa5999722c6651f0802449aad5c20888c0465ab5aa43ee5e872a02586f",
       "abicheck/macho_metadata.py": "9b3fa13cbbc127fcf981289c4b15ff2aaabc6dfd10d7747a7262fd3cfda3e69e",
       "abicheck/model/arithmetic_type_spellings.py": "790e6049cf5607e20d987d2151bacc4ba331f76e24c486b0305102f79f4ae726",
-      "abicheck/pdb_metadata.py": "374231d67b2f90ab9f9f98ce7f839b413aa4e17def57472cb1306fa9587cd103",
+      "abicheck/pdb_metadata.py": "625cd66b393102d529bc87fa110104bd1ad05b071a07efcd3cc9b3946cd1b75d",
       "abicheck/pdb_model.py": "c42cf25e4e3bd4d098575989cec9de94ab9795e171dde08e7b9a93d155a7ebe8",
-      "abicheck/pdb_parser.py": "498bf0baa243b293d090f7910c467c9ce0988ea95edd6125de9692f07194a425",
+      "abicheck/pdb_parser.py": "cfcb071ded9843b10834a236b6d61ca2db9522fb6d18d535a0f3861cb8a6caf6",
       "abicheck/pdb_utils.py": "c170ddb97ffa41a4fd4add3057cbebedc032116408252453c65f3be3b7117817",
       "abicheck/pe_metadata.py": "3ec3675308f06bf355c99c408e1c917dcbae54f974fffb3dfb6a9a3445b6ec6f",
       "abicheck/sycl_metadata.py": "10d6bb8dbd898b6f43c66f898fd1a964790705cadb5addac9d5801e47b341758",
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "e3ace878ad4609164b7c13cc7216796cc76bfb3bc1245adffc0e6c1d48afc80e",
-    "generation": 56,
-    "reason": "FieldInfo.byte_offset may now be None (unknown); DWARF extraction still writes every member offset as an int or FAILS the container, so recorded facts are unchanged"
+    "fingerprint": "02ac0d4940f91d8eb52d4b8796b68933ffdb2fd3723b0f89c2973787915d853b",
+    "generation": 57,
+    "reason": "PDB TypeDatabase.parse_all rolls back on failure and CodeView record dataclasses moved to extract/pdb_codeview_types.py; a successful parse records the same types"
   },
   "resolver": {
     "files": {
@@ -257,7 +258,7 @@
       "abicheck/buildsource/clang_ast_run.py": "6843af8b3adff08e8a8bba93a09437f0edfef8704c21e553ebed45d8d2ebc1a5",
       "abicheck/buildsource/include_graph.py": "66e0153b7bb6887ed532818ee1f8789667551179f40de9a35a34bcfbe415cd99",
       "abicheck/buildsource/include_graph_workers.py": "efd233af0f27f8c50f29eb467e88fe42cb907246de22285a78f8552981d0c027",
-      "abicheck/buildsource/inline_graph_fold.py": "8a4072d004dd1cd2ea21703b28e31b6f77fde1c30eb0dcd7044f8cb70c7d9986",
+      "abicheck/buildsource/inline_graph_fold.py": "adb7db738f350679e27b2e3c79f9da4e127bb0963dd309767144cc15df34057a",
       "abicheck/buildsource/l5_ast_pass.py": "a0617b5baca2532c9838d866ce5776565ba58041550e60554ffa6c73930c6b54",
       "abicheck/buildsource/l5_ast_run.py": "819d2e615617945d0bdb2319765a757a5edbb18fc5b5373e949e83ee2e113e12",
       "abicheck/buildsource/macro_graph.py": "fa410a488ba4986365705ffb34e3201c643a946b2c31383442c7c740a169b8cf",
@@ -298,8 +299,8 @@
       "abicheck/buildsource/type_graph.py": "e836e687fe95d52f6483a70893cff385b8d175284e6f5bebadaa2b805b7387c5",
       "abicheck/buildsource/type_graph_index.py": "456fd36d7d326e2001855f1768bdadee49ab738a9c515f57f557bc5e5b693ced"
     },
-    "fingerprint": "51f5abe7dc62c9ba1b2760c22fdc0241d280abdccacfc96fd5842e92c9d4daa9",
+    "fingerprint": "ae0728ebcdb7834d56d097d0c741df077342899571d044b571095b23f63d00fc",
     "generation": 14,
-    "reason": "probe timeouts raised to the shared hang guard; a tool that answers within the old bound records the same facts"
+    "reason": "inline_graph_fold callback pass: an always-true guard replaced by else; same outcome for every input"
   }
 }

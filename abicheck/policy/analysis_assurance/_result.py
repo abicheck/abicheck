@@ -18,6 +18,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from ..assurance_status_vocabulary import (
+    ContextStatus,
+    FactSetComparability,
+    GraphCompleteness,
+    HeaderContextStatus,
+    SchemaStalenessStatus,
+)
+
 #: Schema version for the ``AnalysisAssurance`` block, versioned
 #: independently of ``REPORT_SCHEMA_VERSION`` (which still gains a MINOR
 #: bump for the new top-level ``analysis_assurance`` report key -- see
@@ -202,13 +210,13 @@ class AnalysisAssurance:
     #: was never examined for the binary-lacking, snapshot-only side), or
     #: ``"not_evaluated"`` (neither side carries a binary -- a pure
     #: header/source-only comparison, a legitimate symmetric shape).
-    l0_context_status: str = "not_evaluated"
+    l0_context_status: ContextStatus = "not_evaluated"
     #: ``"clean"`` (header evidence present on both sides, no drift finding),
     #: ``"drift_detected"`` (a ``header_parse_context_drift`` finding was
     #: raised), ``"asymmetric"`` (only one side carries header/API-level
     #: evidence -- the comparison never examined the other side's headers at
     #: all), or ``"not_evaluated"`` (neither side has header evidence).
-    header_context_status: str = "not_evaluated"
+    header_context_status: HeaderContextStatus = "not_evaluated"
     #: ``"clean"`` (both sides carry usable DWARF/DWARF-advanced debug info),
     #: ``"asymmetric"`` (only one side does -- the DWARF-based struct/enum
     #: layout detectors, e.g. ``diff_platform.py``'s ``_diff_dwarf_types``/
@@ -216,7 +224,7 @@ class AnalysisAssurance:
     #: comparison whenever either side lacks it, so layout evidence for the
     #: missing side was never even attempted), or ``"not_evaluated"``
     #: (neither side has DWARF -- nothing to be asymmetric about).
-    dwarf_context_status: str = "not_evaluated"
+    dwarf_context_status: ContextStatus = "not_evaluated"
     #: ``"clean"`` (both sides carry an L3 ``BuildEvidence`` payload),
     #: ``"asymmetric"`` (only one side does -- the other's build-only
     #: changes were never checked at all;
@@ -224,7 +232,7 @@ class AnalysisAssurance:
     #: emits a ``layer_coverage_asymmetric``/``EVIDENCE_COVERAGE_ASYMMETRIC``
     #: finding naming this same gap), or ``"not_evaluated"`` (neither side
     #: carries L3 build evidence -- nothing to be asymmetric about).
-    l3_context_status: str = "not_evaluated"
+    l3_context_status: ContextStatus = "not_evaluated"
     #: ``"comparable"``, ``"inconsistent"`` (``fact_set_inconsistent`` on
     #: either side's L4 surface, OR a hard ``fact_set`` name/version mismatch
     #: BETWEEN the two sides -- the same cross-side check ``diff_source_abi``'s
@@ -234,7 +242,7 @@ class AnalysisAssurance:
     #: compiler_version/compiler_family, or one side stamped a ``fact_set``
     #: and the other didn't), or ``"not_applicable"`` (neither side carries
     #: an L4 surface).
-    fact_set_comparability: str = "not_applicable"
+    fact_set_comparability: FactSetComparability = "not_applicable"
     #: ``"complete"`` (both sides carry an L5 graph, every observed pass ran
     #: full-project and clean); ``"degraded"`` (``SourceGraphSummary.
     #: degraded_passes`` has a ``True`` entry on either side -- per-TU
@@ -247,7 +255,7 @@ class AnalysisAssurance:
     #: ``extractor_passes``/``narrowed_passes`` at all, so which parts of the
     #: project the graph actually covers cannot be determined); or
     #: ``"not_collected"`` (neither side carries an L5 graph).
-    graph_completeness: str = "not_collected"
+    graph_completeness: GraphCompleteness = "not_collected"
     #: E-S1: see ``_layout.py``.
     layout_unverified_detectors: tuple[str, ...] = field(default_factory=tuple)
     #: Human-readable notes explaining any non-``complete`` status, folded
@@ -271,7 +279,7 @@ class AnalysisAssurance:
     #: otherwise have silently rebound them to the wrong fields the moment
     #: this one was inserted earlier in the list (Codex review, PR #1209
     #: round 10).
-    schema_staleness_status: str = "clean"
+    schema_staleness_status: SchemaStalenessStatus = "clean"
     #: ``"explicit"`` (a front end stated ``--depth``) or ``"implicit"``.
     #: Every gate reads the explicit value only, so this records the
     #: normalization without licensing one. Appended at the END for the

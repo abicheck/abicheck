@@ -8,6 +8,7 @@ import os
 import shlex
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -218,13 +219,24 @@ def test_native_missing_or_invalid_plugin_is_no_snapshot(
         assert "GCC" in result.stderr or "GCC" in result.stdout
 
 
+def _require_real_gxx() -> None:
+    """Skip unless ``g++`` is a real GCC, the capability the native backend
+    needs. A ``g++`` on PATH is not it: on macOS it is Apple clang, which the
+    backend refuses with a SnapshotError (main's macOS leg failed this way)."""
+    from abicheck.extract.headers.gcc.discovery import resolve_compiler
+
+    try:
+        resolve_compiler("g++")
+    except SnapshotError as exc:
+        pytest.skip(f"no real GCC for the native backend: {exc}")
+
+
 def test_native_snapshot_cache_keys_plugin_content(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from abicheck.workflows.dump.cache.key import _dump_cache_extra_key
 
-    if not shutil.which("g++"):
-        pytest.skip("GCC unavailable for cache identity probe")
+    _require_real_gxx()
     plugin = tmp_path / "plugin.so"
     plugin.write_bytes(b"one")
     monkeypatch.setenv("ABICHECK_GCC_PLUGIN", str(plugin))
@@ -357,3 +369,34 @@ def test_native_manifest_is_rejected_during_planning() -> None:
     evidence = SimpleNamespace(compile=None)
     with pytest.raises(ValidationError, match="dump-manifest"):
         reject_unsupported_header_frontend_evidence(None, ((side, evidence),), "gcc")
+
+
+@pytest.mark.parametrize(
+    ("banner", "skips"),
+    [
+        ("Apple clang version 21.0.0 (clang-2100.1.1.101)", True),
+        ("clang version 18.1.3", True),
+        ("g++ (GCC) 13.2.0\nCopyright (C) 2023 Free Software Foundation, Inc.", False),
+    ],
+)
+def test_the_real_gcc_guard_skips_only_for_a_non_gcc(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, banner: str, skips: bool
+) -> None:
+    """A ``g++`` that is clang is a capability absent (skip, reason named); a
+    real GCC passes the guard. The fake prints the banner each compiler does."""
+    if sys.platform == "win32":
+        pytest.skip("the fake g++ is a POSIX shell script")
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    fake = bindir / "g++"
+    fake.write_text(f"#!/bin/sh\ncat <<'EOF'\n{banner}\nEOF\n", encoding="utf-8")
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+    if skips:
+        with pytest.raises(pytest.skip.Exception, match="no real GCC"):
+            _require_real_gxx()
+    else:
+        _require_real_gxx()  # passes: no skip raised
+        from abicheck.extract.headers.gcc.discovery import resolve_compiler
+
+        assert resolve_compiler("g++") == str(fake)

@@ -69,6 +69,8 @@ __all__ = [
 #: failure. A *real* evidence shortfall is always a real non-``complete``
 #: status, never an absent block.
 _NO_BLOCK_STATUS = "complete"
+#: A present block whose status is missing, empty or not a string.
+_UNUSABLE_STATUS = "unknown"
 
 
 def member_assurance_fields(result: Any) -> tuple[str, tuple[str, ...]]:
@@ -82,7 +84,12 @@ def member_assurance_fields(result: Any) -> tuple[str, tuple[str, ...]]:
     aa = getattr(result, "analysis_assurance", None)
     if aa is None:
         return _NO_BLOCK_STATUS, ()
-    status = str(getattr(aa, "status", _NO_BLOCK_STATUS) or _NO_BLOCK_STATUS)
+    # A block that is present but carries no usable status is not evidence of
+    # a complete analysis: `or "complete"` here let an empty status pass a
+    # `require_complete` gate. It now reads as `unknown`, which the fold
+    # ranks worst (`release_assurance._rank`).
+    raw = getattr(aa, "status", None)
+    status = raw if isinstance(raw, str) and raw else _UNUSABLE_STATUS
     return status, tuple(str(n) for n in (getattr(aa, "notes", ()) or ()))
 
 

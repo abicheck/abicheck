@@ -61,6 +61,15 @@ class LayerConfidence(StrEnum):
     UNKNOWN = "unknown"
 
 
+class ExtractorStatus(StrEnum):
+    """Outcome of one extractor run. Values are the serialized spellings."""
+
+    OK = "ok"
+    PARTIAL = "partial"  # ran, but some inputs were not covered
+    FAILED = "failed"
+    SKIPPED = "skipped"  # not applicable or not requested
+
+
 class CoverageStatus(StrEnum):
     """Collection status for an evidence layer in the coverage table (D7)."""
 
@@ -227,7 +236,9 @@ class ExtractorRecord:
 
     name: str  # e.g. "compile_commands", "cmake_file_api", "ninja"
     version: str = ""  # extractor/tool version
-    status: str = "ok"  # ok | partial | failed | skipped
+    # A bare string used to accept any spelling; a typo then read as a status
+    # no consumer recognised. ``__post_init__`` now rejects it.
+    status: ExtractorStatus | str = ExtractorStatus.OK
     inputs: list[str] = field(default_factory=list)  # redacted input descriptors
     artifacts: list[str] = field(
         default_factory=list
@@ -248,6 +259,7 @@ class ExtractorRecord:
     source_side: bool | None = None
 
     def __post_init__(self) -> None:
+        self.status = ExtractorStatus(self.status)
         if self.source_side is None:
             self.source_side = is_source_side_extractor_name(self.name)
 
@@ -283,7 +295,7 @@ class ExtractorRecord:
         return cls(
             name=str(d["name"]),
             version=str(d.get("version", "")),
-            status=str(d.get("status", "ok")),
+            status=_stored_extractor_status(d),
             inputs=list(d.get("inputs", [])),
             artifacts=list(d.get("artifacts", [])),
             detail=str(d.get("detail", "")),
@@ -292,7 +304,7 @@ class ExtractorRecord:
             capabilities=list(d.get("capabilities", [])),
             started_at=str(d.get("started_at", "")),
             finished_at=str(d.get("finished_at", "")),
-            diagnostics=list(d.get("diagnostics", [])),
+            diagnostics=list(d.get("diagnostics", [])) + _unknown_status_diagnostic(d),
             # Absent on records written before the field existed: left to
             # __post_init__, which classifies them by the same name rule.
             source_side=(bool(d["source_side"]) if "source_side" in d else None),
@@ -410,3 +422,30 @@ def _coverage_status(raw: Any) -> CoverageStatus:
         return CoverageStatus(raw if raw is not None else "not_collected")
     except ValueError:
         return CoverageStatus.NOT_COLLECTED
+
+
+def _stored_extractor_status(d: dict[str, Any]) -> ExtractorStatus:
+    """A stored status this version does not know reads as FAILED: the
+    record's evidence cannot be trusted, and weaker evidence never upgrades
+    to a clean ``ok`` (ADR-028/063)."""
+    raw = d.get("status", "ok")
+    if not isinstance(raw, str):  # a hand-edited list/object never aborts a load
+        return ExtractorStatus.FAILED
+    try:
+        return ExtractorStatus(_LEGACY_STATUS.get(raw, raw))
+    except ValueError:
+        return ExtractorStatus.FAILED
+
+
+#: Spellings older versions wrote: the Bazel ``--build-info`` path recorded a
+#: full collection as ``present`` (the coverage-table word) instead of ``ok``.
+_LEGACY_STATUS = {"present": "ok"}
+
+
+def _unknown_status_diagnostic(d: dict[str, Any]) -> list[str]:
+    raw = d.get("status", "ok")
+    if isinstance(raw, str) and (
+        raw in ExtractorStatus._value2member_map_ or raw in _LEGACY_STATUS
+    ):
+        return []
+    return [f"unrecognized stored extractor status {raw!r}; read as 'failed'"]

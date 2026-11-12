@@ -683,11 +683,8 @@ def fold_callback_graph(
         # Never ran at all (e.g. clang unavailable) -- as untrustworthy as a
         # real per-TU diagnostic.
         call_graph_state = "degraded"
-    # "degraded" and "none" share the worst rank on purpose: both land in the
-    # same `degraded_passes` branch below, so which of the two `max()` picks
-    # on a tie (Python keeps the first-seen argument, i.e. `own_state`) never
-    # changes the outcome -- the branch below re-checks both states directly
-    # rather than trusting `worst_state`'s exact spelling in that case.
+    # "degraded" and "none" are one rung: either makes the pass degraded, so
+    # which spelling `max()` keeps on a tie does not matter.
     _STATE_RANK = {"full": 0, "narrowed": 1, "degraded": 2, "none": 2}
     worst_state = max(own_state, call_graph_state, key=_STATE_RANK.__getitem__)
     if worst_state == "full":
@@ -704,7 +701,9 @@ def fold_callback_graph(
             # raising and aborting this whole fold.
             else graph.narrowed_scope.get("call_graph", frozenset())
         )
-    elif own_state != "none" or call_graph_state != "none":
+    else:
+        # `call_graph_state` is never "none", so the old `own_state != "none"
+        # or call_graph_state != "none"` guard here was always true.
         graph.degraded_passes["callback_graph"] = True
     for diag in extractor.diagnostics:
         merged.diagnostics.append(f"callback_graph: {diag}")
