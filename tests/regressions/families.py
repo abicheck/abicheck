@@ -618,6 +618,7 @@ _F11 = ("measurement.forked_tree_rss_overstates_memory",)
 _F19 = (
     "classification.removed_virtual_slot_read_as_plain_removal",
     "comparability.runtime_abi_selector_refused_instead_of_reported",
+    "classification.demangled_signature_used_as_entity_name",
 )
 _F12 = (
     # The public-root probe read only `/I` from a CL-mode argv, so a `-I` or

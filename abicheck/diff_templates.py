@@ -839,10 +839,8 @@ def detect_overload_set_rerouted(
     def _by_stem(snap: AbiSnapshot, funcs: list[Function]) -> dict[str, list[Function]]:
         name_of = qualified_name_lookup(snap)
         out: dict[str, list[Function]] = defaultdict(list)
-        for f in funcs:
-            qname = name_of(f)
-            stem = _strip_template_args(qname)
-            out[stem].append(f)
+        for f in funcs:  # by name: the demangled signature is per-overload
+            out[_cpo_function_stem(name_of(f))].append(f)
         return out
 
     def _overload_key(f: Function) -> tuple[object, ...]:
@@ -1202,18 +1200,18 @@ def detect_missing_instantiations(
     for fn in new.declarations.functions:
         if not is_public_export(fn):
             continue
-        qname = _strip_param_signature(new_name_of(fn))
-        if _looks_like_template_instantiation(qname):
-            surviving_stems.add(_strip_template_args(qname))
+        qname = new_name_of(fn)
+        if _looks_like_template_instantiation(_strip_param_signature(qname)):
+            surviving_stems.add(_cpo_function_stem(qname))
     for fn in old.declarations.functions:
         if not is_public_export(fn):
             continue
         if fn.mangled in new_mangled:
             continue
-        qname = _strip_param_signature(old_name_of(fn))
-        if not _looks_like_template_instantiation(qname):
+        qname = old_name_of(fn)
+        if not _looks_like_template_instantiation(_strip_param_signature(qname)):
             continue
-        stem = _strip_template_args(qname)
+        stem = _cpo_function_stem(qname)  # `int getv<int>(int)` -> `getv`
         if stem not in surviving_stems:
             continue
         findings.append(
