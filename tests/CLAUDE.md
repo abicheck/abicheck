@@ -250,7 +250,10 @@ CI's `pr` profile.
   `docs/contribute/testing.md` "Generated ABI edit corpus coverage" before
   adding an operator, seed role or config axis — a new declared kind needs
   `python -m tests._edit_corpus_coverage ledger --write`, a new role or axis
-  value needs its construct / config-feature entry in the space model.
+  value needs its construct / config-feature entry in the space model, and a
+  new `struct`/`inheritance` operator needs its `OP_EDIT_CLASS` entry. Edit
+  classes come from `_edit_corpus_edit_model.py`, never from the operators: a
+  class with no operator stays in the model as a reported gap.
 
 ## Field-shapes corpus (`field_shapes/`)
 
