@@ -92,3 +92,75 @@ def test_e5_e6_layout_model_extraction_and_compare_agree(tmp_path: Path) -> None
     # E4: the edit class alone does not determine the outcome
     assert s["E4_class_outcomes"]["insert_before_field:NOT moved"] > 0
     assert s["E4_class_outcomes"]["append:size SAME"] > 0
+
+
+# --- E8: scope completeness (ADR-065), formal/tla/ScopeCompleteness.tla ----
+
+
+def test_e8_scope_spec_invariants_hold_for_three_members() -> None:
+    chk = _load(FORMAL / "tla" / "check_scope.py")
+    states, found = chk.check(3)
+    assert found is None
+    assert states > 1000  # the space was actually explored
+
+
+@pytest.mark.parametrize(
+    ("mutant", "invariant"),
+    [
+        ("classify-unguarded", "I2 RemovalNeedsProof"),
+        ("warn-clean-zero", "I1 NoCleanZeroComparison"),
+        ("failed-ops-dropped", "I3 FailedNeverClean"),
+    ],
+)
+def test_e8_checker_detects_seeded_spec_faults(mutant: str, invariant: str) -> None:
+    """A checker that cannot fail proves nothing: each seeded fault must
+    produce a counterexample for the invariant it breaks."""
+    chk = _load(FORMAL / "tla" / "check_scope.py")
+    _, found = chk.check(3, chk.Spec(mutant))
+    assert found is not None
+    bad, trace = found
+    assert invariant in bad
+    assert len(trace) >= 2  # a real path, not an initial state
+
+
+def test_e8_real_completeness_code_satisfies_i1_and_i2() -> None:
+    """Conformance on the real aggregation (up to 2 members, all evidence and
+    policy settings): zero comparisons never exit 0, and no removal exit or
+    retired member without NEW's inventory proven."""
+    audit = _load(FORMAL / "experiments" / "scope_completeness_audit.py")
+    res = audit.audit(2)
+    assert res.zero_comparison_runs > 0
+    assert [v for v in res.violations if v[0].startswith("I1")] == []
+    assert [v for v in res.violations if v[0].startswith("I2")] == []
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "E8 finding: a FAILED member (degraded capture, ADR-065 D8) that sits "
+        "beside a completed member exits 0 under the default warn policy "
+        "(the operational fold reads only verdict 'ERROR'). Strict: this turns "
+        "red once fixed, so the marker is then removed."
+    ),
+)
+def test_e8_failed_member_never_reads_clean_on_real_code() -> None:
+    audit = _load(FORMAL / "experiments" / "scope_completeness_audit.py")
+    res = audit.audit(2)
+    assert [v for v in res.violations if v[0].startswith("I3")] == []
+
+
+def test_e8_known_i3_violations_are_only_the_degraded_failure_class() -> None:
+    """Pins the shape of the known I3 gap: every violation is a warn-policy
+    run that exits 0 and has a failed member from one of the glue paths
+    (degraded matched, degraded OLD-only, no result recorded). Block is never
+    affected. A new violation shape fails this test."""
+    audit = _load(FORMAL / "experiments" / "scope_completeness_audit.py")
+    res = audit.audit(2)
+    i3 = [v for v in res.violations if v[0].startswith("I3")]
+    assert i3, "expected the known warn-policy gap to reproduce"
+    failing_kinds = {"degraded_matched", "degraded_old", "no_entry"}
+    for _inv, combo, setting, code, _reasons in i3:
+        assert setting.policy == "warn"
+        assert code == 0
+        assert failing_kinds & set(combo)
+    assert len(i3) == len(res.violations)

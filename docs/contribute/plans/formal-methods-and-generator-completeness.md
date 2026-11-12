@@ -7,7 +7,7 @@ generated: false
 
 # Formal methods: a provably complete edit-corpus space, and where Lean and TLA+ fit
 
-**Status:** Experiments run. E0–E7 and E9 are done, E8 is not; results are in
+**Status:** Experiments run. E0–E9 are done; results are in
 `formal/EXPERIMENTS.md` (repository root). Headline results:
 
 - one representative per layout edit class is **unsound** (E4);
@@ -91,7 +91,7 @@ does not pay.
 | **E5** ✅ | Close level 4: run abicheck over every exported class; triage misses via `reconcile` / `known-gaps.md` | Does abicheck detect all of P? | Zero unexplained misses for the layout fragment |
 | **E6** ✅ | Close the extraction assumption: in the corpus, compare extracted `offset_bits`/sizes with compiler layout probes for each cell | How sound is extraction (Lean's `EvSound`) in practice? | Disagreement rate per backend (castxml, clang, DWARF) |
 | **E7** ✅ | TLA+ spec of the disposition pipeline (suppression, reclassification, acknowledgment, dedup, scope exclusion) | Can a finding vanish without a recorded rule and reason on some path? | TLC passes for small bounds, or a trace shows the vanishing path |
-| **E8** | TLA+ spec of scope completeness (unselected / expected-not-produced / failed / retired; zero comparisons) | Can any path report a clean pass after zero comparisons, or a removal without inventory? | Same as E7 |
+| **E8** ✅ | TLA+ spec of scope completeness (unselected / expected-not-produced / failed / retired; zero comparisons) | Can any path report a clean pass after zero comparisons, or a removal without inventory? | Same as E7. Result: I1 and I2 hold on the real code; **I3 is violated** under `warn` by degraded members (`formal/EXPERIMENTS.md` § E8) |
 | **E9** ✅ | Generalize E0's "unknown never creates a finding" into a Lean property over the tri-state `Fact` layer (ADR-063), with a Python conformance sweep over detectors | Does the property hold across detectors, not just one? | Sweep lists violating detectors (expect a few; F1 history) |
 
 **Order:** E1 → E2 → E3 → E4 → E5 is the main line toward a complete

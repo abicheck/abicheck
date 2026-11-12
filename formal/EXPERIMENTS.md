@@ -13,7 +13,7 @@ Run date 2026-11-12. Tools: Lean 4.15.0 (core only), gcc 13.3.0, castxml 0.7.0, 
 | E5 | Does abicheck detect all of the bounded space? | **Yes**: 0 mismatches over 3488 field-offset and 1248 size predictions |
 | E6 | Are the model and the extraction sound in practice? | Model = gcc on 2496/2496 layouts. castxml and DWARF extraction = gcc on 2496/2496 each |
 | E7 | Can a finding vanish from the disposition pipeline unrecorded? | A *sufficient* condition for the count trigger: no step drops and adds in the same call. Without it, a shortest counterexample exists, including the *add-to-bucket* variant the code comment does not name. No real step violates the condition on the corpus |
-| E8 | Scope completeness state machine | **Not run** (see [§ Not done](#not-done)) |
+| E8 | Can a path report a clean pass after zero comparisons, or a removal without inventory? | **I1 and I2 hold** on the real aggregation over all ≤2-member releases. **I3 is violated** under the default `warn` policy: a degraded (`failed`) member beside a completed one exits `0` (`clean`). Found by the conformance harness, reproduced with the real functions ([§ E8](#e8-scope-completeness-adr-065)) |
 | E9 | Does unknown evidence create findings? | Header channel: no manufactured or changed-value claim in 12 erasure sweeps. The DWARF channel **cannot be swept**: it has no "unknown" value. Two latent "unknown → 0" encodings found there (not reachable from valid DWARF or from snapshots abicheck wrote) |
 
 ## E1. The record-layout space
@@ -194,13 +194,102 @@ Both are recorded here, neither is fixed:
 An absent `DW_AT_data_member_location` decoding to `0` is **not** a defect:
 DWARF defines it as offset 0 (union members).
 
+## E8. Scope completeness (ADR-065)
+
+Files: `formal/tla/ScopeCompleteness.tla`, `formal/tla/MC_scope.cfg`,
+`formal/tla/check_scope.py` (BFS over the spec), `formal/experiments/scope_completeness_audit.py`
+(conformance against the real code). Tests: `tests/test_formal_experiments.py`.
+
+**What the spec models.** Each release member ends in one acquisition state:
+`unselected` (code `OUT_OF_SCOPE`), `expected_not_produced`, `failed`,
+`not_supplied` (absent, NEW's inventory unproven), `retired` (absent, NEW's
+inventory proven), `compared_ok`, `compared_break`. `retired` is not a
+separate code state: the code keeps `NOT_SUPPLIED` and derives removal from
+`ScopeAcquisitionRecord.proven_removed_members`, so the spec makes that
+derivation an explicit transition. `not_supplied` is added to the six states
+the task named because "mere absence" is what I2 is about. `UNSUPPORTED` and
+`AMBIGUOUS` are out of vocabulary (both are "unchecked" in the code and do
+not change any invariant). Exit is the max over: compatibility (4), removal
+(8), operational failure (4, ADR-065 D8), D6 incomplete scope (1, under
+`block` only), D7 no comparison completed (1, policy-independent).
+
+**Real-code transitions** (from reading `abicheck/`):
+
+| Step | Code |
+|---|---|
+| state assignment per member | `workflows/release_scope.py::build_release_scope_record` |
+| `unchecked` = expected-not-produced, failed, not-supplied, unsupported, ambiguous, minus proven removals/additions | `model/scope_acquisition.py::unchecked_members` |
+| removal = absent on OLD, NEW proven | `proven_removed_members` |
+| D6 / D7 | `policy/scope_completeness.py::resolve_scope_decision` |
+| exit fold | `policy/release_exit_decision.py::resolve_release_exit_decision_with_assurance` → `policy/exit_decision_precedence.py::resolve_release_exit_decision` → `policy/exit_decision.py::resolve_exit_decision` (`max` over contributions) |
+| operational error | `release_exit_decision` sets `operational_error_contribution = 4` **only** when a library result's `verdict == "ERROR"` (or the aggregate `worst_verdict`) |
+
+**Checked results** (`scope_completeness_audit.py`, 11 member kinds, all
+evidence/policy/`fail_on_removed` settings):
+
+```
+members 0..3 : 46848 scenarios, 26240 with zero completed comparisons
+  I1 NoCleanZeroComparison : 0 violations
+  I2 RemovalNeedsProof     : 0 violations
+  I3 FailedNeverClean      : 1396 violations (all policy=warn, exit 0)
+```
+
+The 1396 violations all have the same shape: a member whose failure is
+recorded as `failed` in the scope record but does not produce a library result
+with `verdict == "ERROR"`, beside at least one completed member. Minimal
+counterexample (2 members, one degraded, default `warn`), with the real
+functions and no harness code:
+
+```python
+rec = build_release_scope_record(
+    {"libA.so": Path("/o/libA.so"), "libB.so": Path("/o/libB.so")},
+    {"libA.so": Path("/n/libA.so"), "libB.so": Path("/n/libB.so")},
+    ["libA.so", "libB.so"],
+    [{"library": "libA.so", "verdict": "NO_CHANGE"},
+     {"library": "libB.so", "verdict": "failed", "reason": "degraded capture"}],
+    release_inventory_evidence(old_stored=False, new_stored=False))
+d = resolve_scope_decision(rec, "warn")       # completeness: incomplete
+ex = resolve_release_exit_decision_with_assurance(
+    "NO_CHANGE", False, [], None,
+    library_results=[...same two entries...],
+    incomplete_scope_exit_contribution=d.incomplete_scope_exit_contribution,
+    no_comparison_completed_exit_contribution=d.no_comparison_completed_exit_contribution)
+# ex.code == 0, reasons == ["clean"]; libB.so is FAILED on the record
+```
+
+Under `block` the same run exits `1` (`incomplete_scope`), so the failure is
+not hidden there, but the operational-error exit `4` that a real `ERROR`
+member gets is not reached. The gap is in the glue, not in the scope
+record: `workflows/release_compare.py` records a degraded matched member as
+`"verdict": "failed"` (ADR-065 D8 path), and the operational fold only reads
+`"ERROR"`. Two more paths carry the same shape: a degraded OLD-only member
+(`degraded.old_unmatched` goes into `old_failed` with no library result) and
+a matched member with no library result recorded at all (`no_entry`). I did
+not establish that `no_entry` is reachable from the fan-out; the other two
+are reachable through stored ProjectSnapshot packages marked degraded.
+
+**Not fixed, by instruction.** The fix is either to fold `FAILED`-state
+members into `operational_error_contribution`, or to have the glue write
+`"ERROR"`. The strict xfail `test_e8_failed_member_never_reads_clean_on_real_code`
+turns red when the gap closes, which is the signal to remove its marker.
+
+**Lean/TLC status.** TLC was not run; the spec is checked by the explicit-state
+BFS only, as E7 was. The faithful spec holds on all 1710 reachable states of
+3 members. Each seeded fault is caught (`--mutant classify-unguarded` →
+I2, `warn-clean-zero` → I1, `failed-ops-dropped` → I3), so the invariants are
+not vacuous.
+
+**Not modelled** (stated, not silently missing): new-only members (additions;
+the spec models the removal direction only), `UNSUPPORTED`/`AMBIGUOUS`, the
+severity scheme (`resolve_release_exit_decision` ranks removal above the
+verdict under severity mode; the spec uses a plain max), `fail_on_removed`
+(fixed to `true` in the spec, both values in the harness), and the CLI
+end-to-end path (the harness calls the same functions the release path calls,
+with the glue transcribed; it does not run `abicheck compare` on a directory).
+
 ## Not done
 
-- **E8 (scope completeness in TLA+).** Not run. It needs a faithful model of
-  `ADR-065`'s state machine (unselected / expected-not-produced / failed /
-  retired), and that model has to be extracted from the workflows code first.
-  That is a separate piece of work comparable to E7.
-- **TLC run** of E7 and **SMT** for E2. The bounded spaces were small enough
+- **TLC run** of E7 and E8 and **SMT** for E2. The bounded spaces were small enough
   for exhaustive enumeration, so SMT added nothing here. It becomes relevant
   once the space is too large to enumerate.
 
@@ -214,3 +303,5 @@ DWARF defines it as offset 0 (union members).
 | abicheck = model (E5) | **tested** exhaustively on the fragment; nothing outside it |
 | Disposition trigger precondition (E7) | **model-checked** (BFS, small bounds); implementation **observed** on 3 pairs |
 | No manufactured findings (E9) | **tested** for 3 layout fact families on the fragment |
+| Scope completeness I1 (zero comparisons never pass), I2 (removal needs proof) (E8) | **model-checked** (BFS, 3 members, faithful spec) and **tested** on the real aggregation (≤3 members, all settings); TLC not run |
+| Scope completeness I3 (failed never clean) (E8) | **model-checked** on the spec; **violated** on the real code under `warn` (1396 combinations ≤3 members, minimal size 2); not fixed |
