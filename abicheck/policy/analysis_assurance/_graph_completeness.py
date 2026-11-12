@@ -18,6 +18,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+from ..assurance_status_vocabulary import GraphCompleteness
+
 if TYPE_CHECKING:
     from ...buildsource.pack import BuildSourcePack
     from ...model.source_graph import SourceGraphSummary
@@ -64,7 +66,7 @@ _CONDITIONALLY_APPLICABLE_FAMILIES: dict[str, Callable[[SourceGraphSummary], boo
 
 def _graph_completeness(
     old_pack: BuildSourcePack | None, new_pack: BuildSourcePack | None
-) -> tuple[str, list[str]]:
+) -> tuple[GraphCompleteness, list[str]]:
     """Graph-completeness rollup over both sides' L5 ``SourceGraphSummary``.
 
     Finding (review, P1): the previous implementation only ever looked at

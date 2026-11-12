@@ -7,8 +7,7 @@ generated: false
 
 # Implicit state machines
 
-Status: Phase 1 in progress (two confirmed bugs fixed, lexer guard added).
-Phases 2–5 not started.
+Status: Phases 1 and 2 done. Phases 3–5 not started.
 
 ## Why
 
@@ -43,25 +42,15 @@ a misspelled state or an out-of-order call.
 | 1.2 | `scripts/check_bugfix_test_contract.py` `added_lines_by_path` | Context lines did not advance the new-side line counter. Latent today (the gate diffs with `--unified=0`). | done |
 | 1.3 | `abicheck/buildsource/pattern_facts_lexer.py` | Unknown lexer state fell into the char-literal branch. Explicit branch plus an assertion. | done |
 
-## Phase 2 — typed status vocabularies
+## Phase 2 — typed status vocabularies (done)
 
-Replace bare status strings with `StrEnum`s whose values are the current
-spellings.
-
-- Extractor record status `ok | partial | failed | skipped` —
-  `buildsource/build_query.py`, `extractor_manifest.py`, `inline*.py`,
-  `inline_graph_fold.py`, `inputs_pack.py`.
-- Analysis-assurance status and sub-statuses —
-  `policy/analysis_assurance/_compute.py`, `_context.py`,
-  `_graph_completeness.py`, `_manifest_layers.py`;
-  `policy/release_assurance.py`; `workflows/release_assurance_members.py:85`
-  (stop coercing any value with `str(...)`).
-- Inline-graph completeness `full | narrowed | degraded | none`
-  (`buildsource/inline_graph_fold.py:669`): one rank table; resolve the
-  degraded/none tie explicitly.
-- Deprecation status (`workflows/history_deprecation.py`).
-- Assurance mode `warn | fail` (`workflows/bundle_facts_stored_compare.py:181`):
-  reject unknown values instead of treating them as `fail`.
+| Item | Result |
+|---|---|
+| Extractor status `ok \| partial \| failed \| skipped` | `buildsource.model.ExtractorStatus`; `ExtractorRecord`, `CollectionResult` and `NormalizationResult` reject any other value. A stored record with an unknown value loads as `failed` with a diagnostic, never `ok`. The new check caught the Bazel `--build-info` path writing `present`; fixed to `ok`, and stored `present` loads as `ok`. |
+| Assurance sub-statuses | `Literal` vocabularies in `policy/assurance_status_vocabulary.py`, typed on the producers and on `AnalysisAssurance`. mypy found one undocumented value (`schema_staleness_status = "not_evaluated"` when there is no old snapshot), now part of the vocabulary. |
+| Assurance overall status | `analysis_assurance/_status_ladder.py`: one table per sub-status; a value missing from a table is a `KeyError` and a test failure, not `complete`. Proven equal to the old if-chain over the whole input space. |
+| Inline-graph completeness tie | `call_graph_state` is never `none`, so the re-check was always true; replaced with a plain `else`. No behavior change. |
+| Deprecation status | `DeprecationStatus` `Literal`. |
 
 ## Phase 3 — one worse-of fold per value family
 
@@ -121,6 +110,12 @@ Needs an ADR amendment if the event set changes.
   error, not `NO_CHANGE`.
 
 ## Dismissed
+
+- `workflows/bundle_facts_stored_compare.py:181` "any value other than
+  `warn` becomes `fail`": `assurance.unconfirmed` is validated against
+  `fail | warn` when `.abicheck.yml` is loaded (`buildsource/build_config.py`).
+- `workflows/release_assurance_members.py:85` "coerces any value":
+  `AnalysisAssurance.status` is already the typed `AssuranceStatus` `Literal`.
 
 - `abicheck/sycl_context.py` `_BracketState` "depth can go negative": every
   document starts with `{`/`[` (checked before the scan) and the scan returns

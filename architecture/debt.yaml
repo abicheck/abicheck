@@ -135,7 +135,7 @@
     },
     {
       "path": "abicheck/buildsource/inline_graph_fold.py",
-      "baseline_lines": 890,
+      "baseline_lines": 889,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",

@@ -108,7 +108,9 @@ def test_bazel_aquery_routed_to_adapter(tmp_path: Path) -> None:
     )
     assert routed is True
     assert merged.compile_units  # the CppCompile action became a compile unit
-    assert any(e.name == "bazel" for e in extractors)
+    # A full collection reports "ok" like every other extractor; it used to
+    # write the coverage-table word "present".
+    assert [e.status for e in extractors if e.name == "bazel"] == ["ok"]
 
 
 def test_bazel_aquery_without_sources_leaves_directory_unanchored(

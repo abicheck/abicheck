@@ -45,6 +45,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Literal, Protocol, runtime_checkable
 
+from .model import ExtractorStatus
 from .redaction import DEFAULT_REDACTION, RedactionPolicy
 
 
@@ -311,8 +312,11 @@ class CollectionResult:
     """Raw artifacts produced by ``collect`` (D2). Never normalized verdicts."""
 
     raw_artifacts: list[RawArtifact] = field(default_factory=list)
-    status: str = "ok"  # ok | partial | failed | skipped
+    status: ExtractorStatus | str = ExtractorStatus.OK
     diagnostics: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        self.status = ExtractorStatus(self.status)  # reject unknown spellings
 
 
 @dataclass
@@ -323,8 +327,11 @@ class NormalizationResult:
     #: Maps the declared output ``kind`` (e.g. ``build_evidence``) → its path, so
     #: the driver knows how to fold each normalized file into the pack.
     by_kind: dict[str, Path] = field(default_factory=dict)
-    status: str = "ok"
+    status: ExtractorStatus | str = ExtractorStatus.OK
     diagnostics: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        self.status = ExtractorStatus(self.status)  # reject unknown spellings
 
 
 @dataclass
