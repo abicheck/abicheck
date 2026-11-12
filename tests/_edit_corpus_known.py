@@ -31,9 +31,6 @@ GAP_O2_STD = (
 
 
 GAP_GCC_OVERLOAD = "The native gcc header backend records no overload-set ambiguity"
-GAP_GCC_CONCEPT = (
-    "The native gcc header backend cannot tell a tightened concept constraint"
-)
 
 
 def _always(_: Config) -> bool:
@@ -132,18 +129,6 @@ _BACKEND_GAPS: tuple[Known, ...] = (
         "is missing",
         GAP_GCC_OVERLOAD,
         frozenset({"missing:OVERLOAD_AMBIGUITY_INTRODUCED"}),
-        "COMPATIBLE_WITH_RISK",
-    ),
-    _backend_gap(
-        "concept_constraint_added",
-        frozenset({"cxx_classes"}),
-        "gcc",
-        "false-clean",
-        "the native gcc header backend reads a newly constrained template as "
-        "concept_constraint_changed (a risk), not concept_tightened: callers "
-        "with a now-excluded argument stop compiling",
-        GAP_GCC_CONCEPT,
-        frozenset({"weaker-than:API_BREAK"}),
         "COMPATIBLE_WITH_RISK",
     ),
 )
