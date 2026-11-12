@@ -74,7 +74,12 @@ from __future__ import annotations
 #:
 #: v48: a clang dump records a variable's member access (a private or
 #: protected static data member); a warm entry reads every one as public.
-SNAPSHOT_CACHE_VERSION: str = "48"
+#:
+#: v49: header-backend parity -- a Clang dump records a typedef'd return
+#: type's ABI fact; a native GCC dump records deprecation, completeness,
+#: hidden friends, vtable slots, a vptr, const arrays and restrict, and
+#: respells unbounded arrays and _Atomic. A warm entry would carry none.
+SNAPSHOT_CACHE_VERSION: str = "49"
 # v35: header-derived snapshots now carry public_header_identifiers (schema
 # v55, extract/public_header_identifiers.py). The key also folds in the
 # snapshot schema version from this version on, so the next schema bump

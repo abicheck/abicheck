@@ -843,6 +843,24 @@ topics:
   # and composes the axis with dimension/direction/surface/build-profile
   # (docs/AGENTS.md criterion 2: a genuinely new mental model, not just
   # another variant of an already-explained mechanism).
+  # One library, several client compilers: each client toolchain derives its
+  # own ABI from the same headers (docs/AGENTS.md criterion 2).
+  client-toolchains:
+    canonical_page: learn/client-toolchains.md
+    task_pages:
+      - use/scanner-setup-by-toolchain.md
+    fact_sources:
+      - abicheck/model/header_ast_frontends.py
+      - abicheck/buildsource/project_targets.py
+
+  # Which scanner setup fits the evidence and client compilers a user has.
+  scanner-setup-by-toolchain:
+    canonical_page: use/scanner-setup-by-toolchain.md
+    reference_page: reference/header-backend-capabilities.md
+    fact_sources:
+      - abicheck/extract/header_ast_backend.py
+      - abicheck/model/header_ast_frontends.py
+
   consumer-models:
     canonical_page: learn/consumer-models.md
     fact_sources:

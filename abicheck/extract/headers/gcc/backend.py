@@ -75,7 +75,24 @@ class GccBackend:
         if not request.headers:
             raise SnapshotError("Native GCC requires at least one public header")
         # Honor an explicit language; never retry a failed C parse as C++.
-        language = "c" if request.lang == "c" else "c++"
+        # With none given, decide the way CastXML and Clang do (one shared
+        # rule), so a C header is not parsed as C++ by this backend alone.
+        if request.lang:
+            language = "c" if request.lang == "c" else "c++"
+        else:
+            from ..toolchain import _resolve_force_cpp
+
+            language = (
+                "c++"
+                if _resolve_force_cpp(
+                    None,
+                    list(request.headers),
+                    request.gcc_options,
+                    request.gcc_option_tokens,
+                    frozenset(request.exported_dynamic | request.exported_static),
+                )
+                else "c"
+            )
         cc = request.gcc_path or (
             (request.gcc_prefix or "") + ("gcc" if language == "c" else "g++")
         )

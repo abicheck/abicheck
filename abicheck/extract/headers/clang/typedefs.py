@@ -36,7 +36,12 @@ from .qualifiers import desugared_qualtype
 if TYPE_CHECKING:
     from ...builtin_abi import BuiltinAbi
 
-__all__ = ["TypedefSource", "typedef_abi_facts", "typedef_underlying"]
+__all__ = [
+    "TypedefSource",
+    "declared_typedef_facts",
+    "typedef_abi_facts",
+    "typedef_underlying",
+]
 
 
 class TypedefSource(Protocol):
@@ -69,4 +74,24 @@ def typedef_abi_facts(parser: TypedefSource) -> dict[str, Fact[AbiFundamental]]:
         fact = builtin_type_fact(desugared_qualtype(entry.node), parser.builtin_abi)
         if fact is not None:
             out[parser._qualified(entry)] = fact
+    return out
+
+
+def declared_typedef_facts(
+    parser: TypedefSource,
+) -> dict[str, Fact[AbiFundamental] | None]:
+    """Every user typedef's qualified name -> its target's ABI fact, or
+    ``None`` when the target has none (a record, an enum, a pointer).
+
+    :func:`typedef_abi_facts` keeps only the typedefs that have a fact; a
+    name lookup needs the others too, so a nearer typedef without a fact
+    shadows an outer same-named one that has one.
+    """
+    out: dict[str, Fact[AbiFundamental] | None] = {}
+    for entry in parser._typedefs:
+        if is_builtin_file(entry.file) or not str(entry.node.get("name", "")):
+            continue
+        out[parser._qualified(entry)] = builtin_type_fact(
+            desugared_qualtype(entry.node), parser.builtin_abi
+        )
     return out

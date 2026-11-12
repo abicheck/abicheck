@@ -30,22 +30,10 @@ GAP_O2_STD = (
 )
 
 
-GAP_CLANG_TYPEDEF = "The clang header backend reads a removed C typedef as BREAKING"
-GAP_STATIC_ACCESS = (
-    "The native gcc header backend records no access for a static data member"
-)
-GAP_GCC_DEPRECATED = "The native gcc header backend records no deprecation attributes"
-GAP_GCC_C_SHAPES = (
-    "The native gcc header backend records no flexible-array, `_Atomic`, opaque-record "
-    "or const-object facts"
-)
-GAP_GCC_FRIEND = "The native gcc header backend records no hidden friends"
-GAP_GCC_RESTRICT = "The native gcc header backend records no `restrict` on a parameter"
 GAP_GCC_OVERLOAD = "The native gcc header backend records no overload-set ambiguity"
 GAP_GCC_CONCEPT = (
     "The native gcc header backend cannot tell a tightened concept constraint"
 )
-GAP_GCC_VTABLE = "The native gcc header backend records no vptr or pure-virtual facts"
 
 
 def _always(_: Config) -> bool:
@@ -128,151 +116,12 @@ def _backend_gap(
     )
 
 
-_ELF = frozenset({"c_elf"})
 _MORE = frozenset({"cxx_more"})
 
 # Header-backend parity: castxml reads these facts, the named backend does
 # not. Each is being fixed in the backend itself; the entry forces its own
 # removal (a fixed cell no longer reproduces) when the fix lands.
 _BACKEND_GAPS: tuple[Known, ...] = (
-    _backend_gap(
-        "typedef_removed",
-        _ELF,
-        "clang",
-        "false-positive",
-        "removing an unused public typedef reads BREAKING under the clang header "
-        "backend; castxml reads it as a source break only",
-        GAP_CLANG_TYPEDEF,
-        frozenset({"stronger-than:API_BREAK"}),
-        "BREAKING",
-    ),
-    *(
-        _backend_gap(
-            op,
-            _MORE,
-            backend,
-            "wrong-verdict",
-            f"the {backend} header backend records no access on a static data "
-            "member, so its narrowing or widening reads NO_CHANGE",
-            GAP_STATIC_ACCESS,
-            frozenset({f"missing:{kind}", f"weaker-than:{floor}"}),
-            "NO_CHANGE",
-        )
-        # clang records the access since abicheck/abicheck#2001.
-        for backend in ("gcc",)
-        for op, kind, floor in (
-            ("static_member_access_narrowed", "VAR_ACCESS_CHANGED", "API_BREAK"),
-            ("static_member_access_widened", "VAR_ACCESS_WIDENED", "COMPATIBLE"),
-        )
-    ),
-    _backend_gap(
-        "api_deprecated",
-        _ELF,
-        "gcc",
-        "wrong-kind",
-        "the native gcc header backend projects no [[deprecated]] attribute",
-        GAP_GCC_DEPRECATED,
-        frozenset(
-            {
-                "missing:ENUM_DEPRECATED_ADDED",
-                "missing:FIELD_DEPRECATED_ADDED",
-                "missing:TYPE_DEPRECATED_ADDED",
-            }
-        ),
-        "COMPATIBLE",
-    ),
-    _backend_gap(
-        "api_undeprecated",
-        _ELF,
-        "gcc",
-        "wrong-kind",
-        "the native gcc header backend projects no [[deprecated]] attribute",
-        GAP_GCC_DEPRECATED,
-        frozenset(
-            {"missing:ENUM_DEPRECATED_REMOVED", "missing:TYPE_DEPRECATED_REMOVED"}
-        ),
-        "COMPATIBLE",
-    ),
-    _backend_gap(
-        "field_deprecated_removed",
-        _MORE,
-        "gcc",
-        "wrong-verdict",
-        "the native gcc header backend projects no [[deprecated]] attribute",
-        GAP_GCC_DEPRECATED,
-        frozenset({"missing:FIELD_DEPRECATED_REMOVED", "weaker-than:COMPATIBLE"}),
-        "NO_CHANGE",
-    ),
-    *(
-        _backend_gap(
-            op,
-            _ELF,
-            "gcc",
-            cls,
-            f"the native gcc header backend records no fact {kind} is read from",
-            GAP_GCC_C_SHAPES,
-            frozenset({f"missing:{kind}"}),
-            verdict,
-        )
-        for op, kind, cls, verdict in (
-            (
-                "flexible_array_member",
-                "FLEXIBLE_ARRAY_MEMBER_CHANGED",
-                "wrong-kind",
-                "BREAKING",
-            ),
-            (
-                "const_string_object_grew",
-                "SYMBOL_SIZE_CHANGED_CONST_OBJECT",
-                "wrong-kind",
-                "BREAKING",
-            ),
-            (
-                "field_became_atomic",
-                "ATOMIC_QUALIFIER_CHANGED",
-                "wrong-kind",
-                "COMPATIBLE_WITH_RISK",
-            ),
-            ("record_became_opaque", "TYPE_BECAME_OPAQUE", "wrong-kind", "BREAKING"),
-        )
-    ),
-    *(
-        _backend_gap(
-            op,
-            _MORE,
-            "gcc",
-            cls,
-            "the native gcc header backend records no hidden (ADL-only) friend",
-            GAP_GCC_FRIEND,
-            frozenset({f"missing:{kind}", f"weaker-than:{floor}"}),
-            "NO_CHANGE",
-        )
-        for op, kind, floor, cls in (
-            (
-                "hidden_friend_added",
-                "HIDDEN_FRIEND_ADDED",
-                "COMPATIBLE",
-                "wrong-verdict",
-            ),
-            # Consumers calling e1 == e2 stop compiling: the oracle sees it.
-            (
-                "hidden_friend_removed",
-                "HIDDEN_FRIEND_REMOVED",
-                "API_BREAK",
-                "false-clean",
-            ),
-        )
-    ),
-    _backend_gap(
-        "param_restrict_removed",
-        _MORE,
-        "gcc",
-        "wrong-verdict",
-        "the native gcc header backend records no restrict qualifier on a parameter",
-        GAP_GCC_RESTRICT,
-        frozenset({"missing:PARAM_RESTRICT_CHANGED", "weaker-than:COMPATIBLE"}),
-        "NO_CHANGE",
-    ),
     _backend_gap(
         "converting_ctor_overload_added",
         _MORE,
@@ -296,28 +145,6 @@ _BACKEND_GAPS: tuple[Known, ...] = (
         GAP_GCC_CONCEPT,
         frozenset({"weaker-than:API_BREAK"}),
         "COMPATIBLE_WITH_RISK",
-    ),
-    _backend_gap(
-        "vptr_introduced",
-        _MORE,
-        "gcc",
-        "wrong-kind",
-        "the native gcc header backend records no vptr, so the first virtual reads "
-        "as a layout change without vptr_introduced",
-        GAP_GCC_VTABLE,
-        frozenset({"missing:VPTR_INTRODUCED"}),
-        "BREAKING",
-    ),
-    _backend_gap(
-        "type_lost_abstract",
-        _MORE,
-        "gcc",
-        "false-positive",
-        "the native gcc header backend records no pure virtual, so defining one "
-        "reads as a new virtual method (BREAKING)",
-        GAP_GCC_VTABLE,
-        frozenset({"stronger-than:COMPATIBLE_WITH_RISK"}),
-        "BREAKING",
     ),
 )
 
