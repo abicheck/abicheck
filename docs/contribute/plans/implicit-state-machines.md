@@ -58,7 +58,7 @@ a misspelled state or an out-of-order call.
 |---|---|
 | Verdict order | `policy/release_outcome.py` already owned it. `policy/outcome.worst_real_verdict` ranked by `Verdict`'s *declaration order*; `workflows/aggregate/contracts._VERDICT_RANK` restated the order; `workflows/aggregate/report_gate._LEGACY_SEVERITY` copied `severity.legacy_exit_code`. All three now derive from the owners. |
 | Exit-code folds | `release_exit_fold`, `aggregate/scope_axis`, `severity.compute_exit_code`, `exit_decision_precedence`: `max()` over integers, already one ordering. No change. |
-| Assurance rank | `release_assurance._rank` already ranks an unknown status worst (fails closed). No change. |
+| Assurance rank | `release_assurance._rank` already ranks an unknown status worst. But `release_assurance_members.member_assurance_fields` turned a present block's empty/`None` status into `complete` (`... or "complete"`), so one such member passed `require_complete`; it now reads as `unknown`. A non-empty unknown string still passes through verbatim (ranked worst) — validating it is in Phase 5. |
 | Assurance if-chain | Done in Phase 2 (`_status_ladder.py`). |
 | Frozen-namespace floor | Seven copies in `reclassify.py`/`reclassify_outcome.py` → `reclassify._frozen_floor`. |
 
@@ -108,13 +108,6 @@ Needs an ADR amendment if the event set changes.
 - `workflows/bundle_facts_stored_compare.py:181` "any value other than
   `warn` becomes `fail`": `assurance.unconfirmed` is validated against
   `fail | warn` when `.abicheck.yml` is loaded (`buildsource/build_config.py`).
-- `workflows/release_assurance_members.py:85` "coerces any value": the
-  `AssuranceStatus` `Literal` is not checked at runtime, so a stored unknown
-  status does pass through into `MemberAssurance.status` and is shown as is.
-  It is not a silent pass: `release_assurance._rank` ranks it worst and the
-  exit path treats every non-`complete` status as incomplete. Not changed
-  here; validating it against `ASSURANCE_STATUS_ORDER` at the adapter is a
-  Phase 5 follow-up for the report text only.
 
 - `abicheck/sycl_context.py` `_BracketState` "depth can go negative": every
   document starts with `{`/`[` (checked before the scan) and the scan returns

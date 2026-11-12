@@ -8,6 +8,9 @@
   pre-captured Bazel query was recorded with status `present`, a value no
   other extractor uses and no consumer recognises; it is now `ok`. Stored
   records with `present` load as `ok`.
+- **`assurance.require_complete` on stored releases.** A member whose
+  assurance block carried an empty or missing status was counted as
+  `complete` and let the gate pass; it now counts as incomplete.
 - The pattern-facts C lexer rejects an unknown internal state instead of
   scanning it as a character literal.
 
