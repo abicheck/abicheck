@@ -211,8 +211,13 @@ def build(
     std = dump_std_spelling(config)
     # The header frontend reads the header the way the library was built:
     # same standard, same layout-changing flags.
+    # A build role's macro definitions (-D/-U) change what the header
+    # declares (``_TIME_BITS=64`` widens time_t), so the dump gets them too.
+    defines = [
+        f for f in seed.build_args(overrides).cflags if f.startswith(("-D", "-U"))
+    ]
     gcc_options = " ".join(
-        [f"-std={std}", *fl.layout_flags(config.producer, seed.lang)]
+        [f"-std={std}", *fl.layout_flags(config.producer, seed.lang), *defines]
     )
     backend = config.header_backend
     if os.environ.get("ABICHECK_EDIT_CORPUS_PUBLIC_DUMP"):
@@ -242,6 +247,11 @@ def build(
             lang="c++" if is_cxx else "c",
             header_backend=backend,
             gcc_options=gcc_options if headers else None,
+            # ``abicheck dump -H`` tags each header it is given public
+            # (ADR-015 provenance); the bare ``dump()`` only does when told,
+            # and without it the cross-source checks (public-not-exported,
+            # exported-not-public) never run.
+            public_headers=headers or None,
         )
         if headers and backend == "clang":
             # The public dump workflow (``abicheck dump``/``compare``) enriches

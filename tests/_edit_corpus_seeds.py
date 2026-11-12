@@ -48,6 +48,10 @@ class Seed:
     header_template: tuple[str, ...]
     source_template: tuple[str, ...]
     roles: Mapping[str, RoleText]
+    # A seed whose baseline differs on purpose (a build that already carries a
+    # feature an edit then removes) takes only the operators written for it:
+    # an operator applies only when its roles include ``gate_role``.
+    gate_role: str | None = None
 
     @property
     def header_name(self) -> str:
@@ -545,6 +549,145 @@ ELF_SEED = Seed(
     roles=_ELF_ROLES,
 )
 
+# A second C library seen as an ELF object, whose *baseline* already carries
+# what a c_elf edit adds: an executable stack, packed relative relocations,
+# DT_RPATH, a text relocation, initial-exec TLS, an IFUNC, a symbol-less
+# version node, fortified and newer-glibc imports, no SONAME. An edit removes
+# one. Only operators that name ``alt.gate`` apply (``Seed.gate_role``), so
+# c_elf's link edits, which rewrite the flags from c_elf's own baseline, do
+# not land here. Role names start with ``alt.``.
+_ALT_LDFLAGS = (
+    "-Wl,--no-as-needed -lm -lgcc_s -Wl,--as-needed -Wl,-z,now -Wl,-z,execstack "
+    "-Wl,-z,pack-relative-relocs -Wl,-z,notext -Wl,-rpath,/opt/edit/lib "
+    "-Wl,--disable-new-dtags"
+)
+_ALT_ROLES: dict[str, RoleText] = {
+    "build.cflags": ("-fstack-protector-strong -ftls-model=initial-exec", ""),
+    "build.ldflags": (_ALT_LDFLAGS, ""),
+    # LIBEDIT_1.1 binds no symbol: no consumer can ever require it.
+    "build.vscript": (
+        "LIBEDIT_1.0 { global: *; };\nLIBEDIT_1.1 { local: edit_no_such_*; } LIBEDIT_1.0;",
+        "",
+    ),
+    "build.soname": ("", ""),
+    "alt.gate": ("", ""),
+    "alt.obj": ("extern int g_alt;", "int g_alt = 1;"),
+    "alt.textrel": (
+        "",
+        # An absolute address in .text: a relocation against the code segment.
+        "#ifdef __x86_64__\n"
+        '__asm__(".text\\n.p2align 3\\nedit_textref: .quad g_alt\\n.previous");\n'
+        # x86 only: elsewhere an absolute word in .text may not link at all.
+        "#elif defined(__i386__)\n"
+        '__asm__(".text\\n.p2align 2\\nedit_textref: .long g_alt\\n.previous");\n'
+        "#endif",
+    ),
+    "alt.tls": (
+        "extern __thread int t_ie;\nint tie_get(void);",
+        "__thread int t_ie = 4;\nint tie_get(void) { return t_ie; }",
+    ),
+    "alt.ifunc": (
+        "int fast(int x);",
+        "static int fast_impl(int x) { return x + 7; }\n"
+        "static void *fast_resolve(void) { return (void *)fast_impl; }\n"
+        'int fast(int x) __attribute__((ifunc("fast_resolve")));',
+    ),
+    "alt.env": (
+        "int envq(int x);",
+        "#include <stdlib.h>\n"
+        'int envq(int x) { return x + (getenv("EDIT_CORPUS_NONE") != 0); }',
+    ),
+    "alt.rnd": (
+        "int rnd(int x);",
+        "#include <sys/random.h>\n"
+        "int rnd(int x) { return x + (int)getrandom((void *)0, 0, 0); }",
+    ),
+    "alt.chk": (
+        "int chk_copy(char *dst, const char *src, int n);",
+        "#include <stddef.h>\n"
+        "void *__memcpy_chk(void *d, const void *s, size_t n, size_t dn);\n"
+        "int chk_copy(char *dst, const char *src, int n) "
+        "{ __memcpy_chk(dst, src, (size_t)n, 64); return n; }",
+    ),
+    "alt.ver": (
+        "int api_v1_open(int x);\nint api_v1_read(int x);\nint api_v1_close(int x);",
+        "int api_v1_open(int x) { return x + 1; }\n"
+        "int api_v1_read(int x) { return x + 2; }\n"
+        "int api_v1_close(int x) { return x + 3; }",
+    ),
+    "alt.pair": (
+        "struct pair2 { long a; long b; };\nstruct pair2 mkpair(long a);",
+        "struct pair2 mkpair(long a) { struct pair2 p = { a, a + 1 }; return p; }",
+    ),
+    "alt.ld": (
+        "long double ld_half(long double x);",
+        "long double ld_half(long double x) { return x / 2; }",
+    ),
+    "alt.int": (
+        "typedef int edit_int;\nedit_int iscale(edit_int v);\nedit_int ishift(edit_int v);\n"
+        "edit_int imix(edit_int a, edit_int b);",
+        "edit_int iscale(edit_int v) { return v * 3; }\n"
+        "edit_int ishift(edit_int v) { return v << 1; }\n"
+        "edit_int imix(edit_int a, edit_int b) { return a ^ b; }",
+    ),
+    "alt.time": (
+        "#include <time.h>\ntime_t when_next(time_t t);",
+        "time_t when_next(time_t t) { return t + 1; }",
+    ),
+    "alt.inl": (
+        "static __inline__ int hscale(int v, int f) { return v * f; }\nint huse(int v);",
+        "int huse(int v) { return hscale(v, 2); }",
+    ),
+    "alt.helper": (
+        "int edit_internal_helper(int x);",
+        "int edit_internal_helper(int x) { return x - 1; }",
+    ),
+}
+
+ALT_SEED = Seed(
+    name="c_elf_alt",
+    lang="c",
+    header_template=(
+        "#ifndef EDIT_SEED_ALT_H",
+        "#define EDIT_SEED_ALT_H",
+        _VIS_OPEN,
+        "@@alt.obj@@",
+        "@@alt.tls@@",
+        "@@alt.ifunc@@",
+        "@@alt.env@@",
+        "@@alt.rnd@@",
+        "@@alt.chk@@",
+        "@@alt.ver@@",
+        "@@alt.pair@@",
+        "@@alt.ld@@",
+        "@@alt.int@@",
+        "@@alt.time@@",
+        "@@alt.inl@@",
+        "@@alt.helper@@",
+        _VIS_CLOSE,
+        "#endif",
+    ),
+    source_template=(
+        '#include "edit_seed.h"',
+        "@@alt.obj@@",
+        "@@alt.textrel@@",
+        "@@alt.tls@@",
+        "@@alt.ifunc@@",
+        "@@alt.env@@",
+        "@@alt.rnd@@",
+        "@@alt.chk@@",
+        "@@alt.ver@@",
+        "@@alt.pair@@",
+        "@@alt.ld@@",
+        "@@alt.int@@",
+        "@@alt.time@@",
+        "@@alt.inl@@",
+        "@@alt.helper@@",
+    ),
+    roles=_ALT_ROLES,
+    gate_role="alt.gate",
+)
+
 # C++ class and linkage shapes: constructors, final, access, static and
 # ref-qualified members, overrides, pure virtuals, inline namespaces, ABI
 # tags, virtual and multiple inheritance, overloads, scoped enums, hidden
@@ -754,5 +897,114 @@ XCXX_SEED = Seed(
     roles=_XCXX_ROLES,
 )
 
-SEEDS: tuple[Seed, ...] = (C_SEED, CXX_SEED, STDLIB_SEED, ELF_SEED, XCXX_SEED)
+# A second C++ library whose baseline carries what a cxx_more edit could
+# add: a GNU-unique static, replaced global allocation functions, std::string
+# signatures, a by-value trivially copyable struct, an internal type a public
+# one embeds, a header-only inline. Gated like c_elf_alt (``xa.gate``).
+_NOEXCEPT = "noexcept"
+_DEFAULT_VIS = '__attribute__((visibility("default")))'
+_XA_ROLES: dict[str, RoleText] = {
+    "build.cflags": ("", ""),
+    "xa.gate": ("", ""),
+    "xa.uniq": (
+        "inline int &uniq_counter() { static int n = 0; return n; }\nint uniq_bump();",
+        "int uniq_bump() { return ++uniq_counter(); }",
+    ),
+    "xa.alloc": (
+        "",
+        # Default visibility, so -fvisibility=hidden still exports them.
+        f"{_DEFAULT_VIS} void *operator new(std::size_t n) "
+        "{ void *p = std::malloc(n ? n : 1); if (!p) throw std::bad_alloc(); return p; }\n"
+        f"{_DEFAULT_VIS} void operator delete(void *p) {_NOEXCEPT} {{ std::free(p); }}\n"
+        f"{_DEFAULT_VIS} void operator delete(void *p, std::size_t) {_NOEXCEPT} "
+        "{ std::free(p); }",
+    ),
+    "xa.str": (
+        "int s_len(const std::string &s);\nint s_first(const std::string &s);\n"
+        "std::string s_up(const std::string &s);\nstd::string s_cat(const std::string &a, "
+        "const std::string &b);\nbool s_empty(const std::string &s);\n"
+        "std::string s_make(int n);",
+        "int s_len(const std::string &s) { return (int)s.size(); }\n"
+        "int s_first(const std::string &s) { return s.empty() ? 0 : s[0]; }\n"
+        "std::string s_up(const std::string &s) { std::string r = s; "
+        "for (char &c : r) if (c >= 'a' && c <= 'z') c = (char)(c - 32); return r; }\n"
+        "std::string s_cat(const std::string &a, const std::string &b) { return a + b; }\n"
+        "bool s_empty(const std::string &s) { return s.empty(); }\n"
+        "std::string s_make(int n) { return std::string((std::size_t)n, 'x'); }",
+    ),
+    "xa.tv": (
+        "struct Tv { int a; };\nint tv_get(Tv t);",
+        "int tv_get(Tv t) { return t.a + 1; }",
+    ),
+    "xa.leak": (
+        "namespace lib {\nnamespace detail { struct Impl { int a; }; }\n"
+        "struct Holder { detail::Impl impl; int x; };\nint holder_get(const Holder *h);\n}",
+        "namespace lib { int holder_get(const Holder *h) { return h->impl.a + h->x; } }",
+    ),
+    # Never called by the library, so never emitted: header-only.
+    "xa.inl": (
+        "namespace demo { inline int clampi(int v, int lo, int hi) "
+        "{ return v < lo ? lo : v > hi ? hi : v; } }",
+        "",
+    ),
+    # Two explicit instantiations of an internal template, declared
+    # ``extern template`` in the header and reached through a public inline.
+    "xa.tmpl": (
+        'namespace lib {\nnamespace __detail {\ntemplate <class T> __attribute__((visibility("default"))) T walk(T *a, T *b);\n'
+        "extern template int walk<int>(int *, int *);\n"
+        "extern template float walk<float>(float *, float *);\n}\n"
+        "template <class T> inline T sum_range(T *a, T *b) { return __detail::walk<T>(a, b); }\n}",
+        "namespace lib { namespace __detail {\n"
+        "template <class T> T walk(T *a, T *b) { T s = T(); for (; a != b; ++a) s += *a; return s; }\n"
+        "template int walk<int>(int *, int *);\ntemplate float walk<float>(float *, float *);\n} }",
+    ),
+    "xa.ch": (
+        "int count_chars(const char *s);",
+        "int count_chars(const char *s) { int n = 0; while (s[n]) ++n; return n; }",
+    ),
+}
+
+XA_SEED = Seed(
+    name="cxx_alt",
+    lang="c++",
+    header_template=(
+        "#ifndef EDIT_SEED_XA_HPP",
+        "#define EDIT_SEED_XA_HPP",
+        "#include <string>",
+        _VIS_OPEN,
+        "@@xa.uniq@@",
+        "@@xa.str@@",
+        "@@xa.tv@@",
+        "@@xa.leak@@",
+        "@@xa.inl@@",
+        "@@xa.tmpl@@",
+        "@@xa.ch@@",
+        _VIS_CLOSE,
+        "#endif",
+    ),
+    source_template=(
+        '#include "edit_seed.h"',
+        "#include <cstdlib>",
+        "#include <new>",
+        "@@xa.uniq@@",
+        "@@xa.alloc@@",
+        "@@xa.str@@",
+        "@@xa.tv@@",
+        "@@xa.leak@@",
+        "@@xa.tmpl@@",
+        "@@xa.ch@@",
+    ),
+    roles=_XA_ROLES,
+    gate_role="xa.gate",
+)
+
+SEEDS: tuple[Seed, ...] = (
+    C_SEED,
+    CXX_SEED,
+    STDLIB_SEED,
+    ELF_SEED,
+    ALT_SEED,
+    XCXX_SEED,
+    XA_SEED,
+)
 SEED_BY_NAME: dict[str, Seed] = {s.name: s for s in SEEDS}
