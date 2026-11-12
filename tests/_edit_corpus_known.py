@@ -526,27 +526,11 @@ _PLATFORM: tuple[Known, ...] = (
     Known(
         "allocator_replacement_removed",
         _XA,
-        "false-positive",
-        lambda c: c.evidence == "headers" and c.header_backend in ("castxml", "gcc"),
-        "with public headers the allocator finding (named after _ZdlPv, a "
-        "runtime symbol) is scoped out as not-exported, and the _Znwm export "
-        "loss reads func_removed (BREAKING)",
-        GAP_ALLOCATOR,
-        issues=frozenset(
-            {
-                "missing:ALLOCATOR_REPLACEMENT_REMOVED",
-                "stronger-than:COMPATIBLE_WITH_RISK",
-            }
-        ),
-        verdicts=_BREAKING,
-    ),
-    Known(
-        "allocator_replacement_removed",
-        _XA,
         "wrong-verdict",
-        _hb("clang"),
-        "with public headers the allocator finding is scoped out as "
-        "not-exported, and nothing else is left above COMPATIBLE",
+        _ev("headers"),
+        "with public headers (the CLI's compare verb) the allocator finding "
+        "is scoped out as not-exported, and nothing else is left above "
+        "COMPATIBLE, on every header backend",
         GAP_ALLOCATOR,
         issues=frozenset(
             {
@@ -585,10 +569,11 @@ _PLATFORM: tuple[Known, ...] = (
         "false-clean",
         _hb("gcc"),
         "the native gcc backend records no demo::clampi (header-only, never "
-        "emitted), so its removal reads NO_CHANGE",
+        "emitted), so its removal reads only the public-surface shrink "
+        "(COMPATIBLE), not the source break",
         GAP_GCC_HEADER_ONLY,
         issues=frozenset({"missing:INLINE_FUNCTION_REMOVED", "weaker-than:API_BREAK"}),
-        verdicts=frozenset({"NO_CHANGE"}),
+        verdicts=frozenset({"COMPATIBLE"}),
     ),
     Known(
         "time_bits_64",
