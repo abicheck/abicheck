@@ -744,7 +744,13 @@ def unavailable(config: Config) -> str | None:
     if config.evidence == "headers":
         # castxml emulates the system cc/c++, not the producer: the standard
         # must be spellable there too (gcc 13 has no -std=c++26).
-        driver = "c++" if config.lang == "c++" else "cc"
+        # The clang backend runs clang itself, so its driver decides.
+        if config.header_backend == "clang":
+            driver = "clang++" if config.lang == "c++" else "clang"
+        else:
+            driver = "c++" if config.lang == "c++" else "cc"
+        if shutil.which(driver) is None and config.header_backend == "clang":
+            return f"clang header backend: no {driver} driver on PATH"
         if std_flag_for_driver(driver, config.std) is None:
             return (
                 f"the header frontend's system {driver} does not accept "
