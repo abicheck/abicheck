@@ -35,6 +35,35 @@ GAP_GCC_THROW = (
 GAP_GCC_UNEXPORTED = (
     "The native gcc header backend keeps an unexported declaration PUBLIC"
 )
+GAP_CASTXML_TRAITS = "castxml records no standard-layout trait or data size"
+GAP_INSTANTIATION_STEM = (
+    "A dropped template instantiation reads only `func_removed` at headers depth"
+)
+GAP_PIMPL_COMPAT = (
+    "The inline-body rename check ignores a renamed member that reads "
+    "`type_field_added_compatible`"
+)
+GAP_TAG_DECL = (
+    "clang and gcc header snapshots of the corpus seed drop a renamed tag's "
+    "instantiation declaration"
+)
+GAP_TYPEDEF_RETURN = (
+    "A return type re-spelled through a renamed typedef of the same type reads "
+    "`func_return_changed`"
+)
+GAP_GCC_TYPEDEF_RETURN = (
+    "The native gcc header backend spells a typedef'd return type canonically"
+)
+GAP_CASTXML_STD_LEAF = (
+    "castxml's bare `std` leaf hides a std type passed by value from the idiom check"
+)
+GAP_OVERLOAD_STEM = (
+    "Overload-set and instantiation checks group by a demangled name that keeps "
+    "its signature"
+)
+GAP_CLOSURE_RETURN = (
+    "The unspecified-return check does not know castxml's or clang's closure spelling"
+)
 GAP_O2_STD = (
     "An `-O2` rebuild of a C++ library that uses `std::string` reads as a risk on gcc, "
     "or a break on MinGW"
@@ -194,6 +223,126 @@ _BACKEND_GAPS: tuple[Known, ...] = (
     ),
     _unexported_gap("declared_exports_defined", _ELF, "FUNC_EXPORT_ADDED"),
     _unexported_gap("inline_function_outlined", _MORE, "FUNC_LOST_INLINE"),
+    *(
+        _backend_gap(
+            op,
+            _MORE,
+            "castxml",
+            "wrong-verdict",
+            "castxml records no standard-layout trait or data size",
+            GAP_CASTXML_TRAITS,
+            frozenset({f"missing:{kind}", "weaker-than:COMPATIBLE_WITH_RISK"}),
+            "NO_CHANGE",
+        )
+        for op, kind in (
+            ("standard_layout_lost", "STANDARD_LAYOUT_LOST"),
+            ("record_became_pod_tail_padding", "TAIL_PADDING_REUSE_CHANGED"),
+        )
+    ),
+    *(
+        _backend_gap(
+            "tag_type_renamed",
+            _MORE,
+            backend,
+            "wrong-kind",
+            "the new run<quick_tag> declaration is missing from the snapshot, so "
+            "the rename has no added symbol to pair",
+            GAP_TAG_DECL,
+            frozenset({"missing:TAG_TYPE_RENAMED"}),
+            "BREAKING",
+        )
+        for backend in ("clang", "gcc")
+    ),
+    _backend_gap(
+        "version_stamp_typedef_bumped",
+        _ELF,
+        "gcc",
+        "wrong-verdict",
+        "the gcc plugin spells the typedef'd return canonically: no change seen",
+        GAP_GCC_TYPEDEF_RETURN,
+        frozenset({"missing:TYPEDEF_VERSION_SENTINEL", "weaker-than:COMPATIBLE"}),
+        "NO_CHANGE",
+    ),
+    _backend_gap(
+        "stl_by_value_function_added",
+        frozenset({"cxx_stdlib"}),
+        "castxml",
+        "wrong-kind",
+        "castxml spells std::string as `string`; the std-by-value check misses it",
+        GAP_CASTXML_STD_LEAF,
+        frozenset({"missing:PUBLIC_API_EXPOSES_STL_BY_VALUE"}),
+        "COMPATIBLE_WITH_RISK",
+    ),
+)
+
+# Detector gaps that hold on every header backend (and DWARF where noted).
+_DETECTOR_GAPS: tuple[Known, ...] = (
+    Known(
+        "overload_rerouted",
+        _MORE,
+        "wrong-kind",
+        _ev("headers"),
+        "overloads are grouped by their demangled signature, so none share a stem",
+        GAP_OVERLOAD_STEM,
+        issues=frozenset({"missing:OVERLOAD_SET_REROUTED"}),
+        verdicts=frozenset({"BREAKING"}),
+    ),
+    _backend_gap(
+        "unspecified_return_now_named",
+        _MORE,
+        "castxml",
+        "wrong-verdict",
+        "castxml spells the closure return `?`, which the check does not read",
+        GAP_CLOSURE_RETURN,
+        frozenset({"missing:UNSPECIFIED_RETURN_NOW_NAMED", "weaker-than:API_BREAK"}),
+        "COMPATIBLE",
+    ),
+    _backend_gap(
+        "unspecified_return_now_named",
+        _MORE,
+        "clang",
+        "false-positive",
+        "clang spells the closure return `(lambda:...)`: func_return_changed instead",
+        GAP_CLOSURE_RETURN,
+        frozenset({"missing:UNSPECIFIED_RETURN_NOW_NAMED", "stronger-than:API_BREAK"}),
+        "BREAKING",
+    ),
+    Known(
+        "explicit_instantiation_dropped",
+        _MORE,
+        "wrong-kind",
+        _ev("headers"),
+        "the demangled stems keep their return types (int getv vs long getv), so "
+        "the dropped instantiation reads only func_removed",
+        GAP_INSTANTIATION_STEM,
+        issues=frozenset({"missing:INSTANTIATION_MISSING_FROM_BINARY"}),
+        verdicts=frozenset({"BREAKING"}),
+    ),
+    Known(
+        "pimpl_member_renamed_under_inline_accessor",
+        _MORE,
+        "wrong-kind",
+        _ev("headers"),
+        "the renamed member reads type_field_added_compatible, which the "
+        "inline-body check does not pair",
+        GAP_PIMPL_COMPAT,
+        issues=frozenset({"missing:INLINE_BODY_REFERENCES_RENAMED_MEMBER"}),
+        verdicts=frozenset({"BREAKING"}),
+    ),
+    Known(
+        "version_stamp_typedef_bumped",
+        _ELF,
+        "false-positive",
+        lambda c: (
+            c.evidence == "dwarf"
+            or (c.evidence == "headers" and c.header_backend in ("castxml", "clang"))
+        ),
+        "the return re-spelled through the renamed typedef reads "
+        "func_return_changed (BREAKING) though the call is unchanged",
+        GAP_TYPEDEF_RETURN,
+        issues=frozenset({"stronger-than:API_BREAK"}),
+        verdicts=frozenset({"BREAKING"}),
+    ),
 )
 
 KNOWN: tuple[Known, ...] = (
@@ -324,6 +473,7 @@ KNOWN: tuple[Known, ...] = (
         verdicts=frozenset({"NO_CHANGE"}),
     ),
     *_BACKEND_GAPS,
+    *_DETECTOR_GAPS,
 )
 
 

@@ -931,9 +931,8 @@ def test_a_std_seed_needs_one_cxx_library_on_both_sides(
         ("void (* handler )(void *, int)", ["handler"]),
         ("char tag[8]", ["tag"]),
         ("[[deprecated]] int legacy", ["legacy"]),
-        ("private:\n  int hidden", ["hidden"]),
-        ("protected: mutable int hits", ["hits"]),
         ("public:\n  volatile int reg", ["reg"]),
+        ("private:\n  int hidden;\npublic:\n  int shown", ["shown"]),
         ("int depth = 4", ["depth"]),
         ("int mode{1}", ["mode"]),
         ("char tag[8] = {0}", ["tag"]),
@@ -944,6 +943,9 @@ def test_a_std_seed_needs_one_cxx_library_on_both_sides(
         ("alignas(4) int b : 4", []),
         ("static int count", []),
         ("private:\n  static int count", []),
+        # offsetof from outside the class cannot name a non-public member.
+        ("private:\n  int hidden", []),
+        ("protected: mutable int hits", []),
         ("static const int k", []),
     ],
     ids=str,
@@ -989,3 +991,18 @@ def test_non_reference_header_backends_run_on_linux_elf_only(
     assert (reason is not None and "Linux ELF only" in reason) is gated
     if not gated:
         assert reason is None
+
+
+def test_the_layout_probe_skips_a_record_declared_in_a_namespace() -> None:
+    # ``struct N`` in the probe would name a global record, not lib::N.
+    from tests._edit_corpus_exec import probe_expressions
+
+    roles = {
+        "ns": ("namespace lib { struct N { int a; }; }", ""),
+        "top": ("struct T { int a; };", ""),
+    }
+    assert set(probe_expressions(roles, "c++")) == {
+        "sizeof(T)",
+        "alignof(T)",
+        "offsetof(T,a)",
+    }

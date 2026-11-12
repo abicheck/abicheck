@@ -173,14 +173,22 @@ def _field_names(body: str) -> list[str]:
     field named by its declarator; any other ``(`` left is a member function.
     A bit-field and a static data member are skipped (``offsetof`` is
     ill-formed on both); an access label (``private:``) is not a declaration,
-    and a default member initializer (``= 4``, ``{4}``) is not the name.
+    but a member it makes private or protected is skipped (``offsetof`` from
+    outside the class cannot name it), and a default member initializer
+    (``= 4``, ``{4}``) is not the name.
     """
     names = []
+    accessible = True  # a ``struct`` body starts public
     for decl in body.split(";"):
         decl = _ATTRIBUTE.sub("", decl)
         decl = re.sub(r"\[\[.*?\]\]", "", decl)
         decl = re.sub(r"\b(?:alignas|_Alignas)\s*\([^()]*\)", "", decl)
+        labels = re.findall(r"\b(public|protected|private)\s*:(?!:)", decl)
+        if labels:
+            accessible = labels[-1] == "public"
         decl = re.sub(r"\b(?:public|protected|private)\s*:(?!:)", "", decl)
+        if not accessible:
+            continue  # offsetof cannot name a private or protected member
         if re.search(r"\bstatic\b", decl):
             continue  # a static data member: not part of the layout
         pointer = _FUNC_POINTER.search(decl)
@@ -205,6 +213,8 @@ def probe_expressions(roles: dict[str, RoleText], lang: str) -> dict[str, str]:
     for role, (header, _) in sorted(roles.items()):
         if not header or "template" in header:
             continue  # a template has no layout until instantiated
+        if re.search(r"\bnamespace\b", header):
+            continue  # ``struct N`` would name a global record, not lib::N
         for m in _STRUCT.finditer(header):
             name = m.group(1)
             tname = f"struct {name}"
