@@ -135,7 +135,9 @@ def _record_type_from_layout(name: str, layout: StructLayout) -> RecordType:
         TypeField(
             name=fi.name,
             type=fi.type_name,
-            offset_bits=fi.byte_offset * 8 + fi.bit_offset,
+            offset_bits=(
+                None if fi.byte_offset is None else fi.byte_offset * 8 + fi.bit_offset
+            ),
             is_bitfield=fi.bit_size > 0,
             bitfield_bits=fi.bit_size if fi.bit_size > 0 else None,
             # Neither BTF nor CTF's own on-disk encoding carries a member's

@@ -1,0 +1,180 @@
+name: formal (Lean / TLA+)
+
+# Development-tool checks for the formal experiments under `formal/`
+# (see docs/contribute/plans/formal-methods-and-generator-completeness.md,
+# "Integration rules"). Lean and TLA+ are never an abicheck dependency; this
+# job only proves that the checked-in model artifacts still match what the
+# models compute. It is optional (not a required status check) until the
+# plan's E3 gate makes it required.
+#
+#   * the Lean toolchain is the exact release tarball named in
+#     formal/lean/lean-toolchain, checked against the sha256 recorded in
+#     formal/README.md (no curl | sh installer);
+#   * `lake build` must succeed and no proof may be `sorry`/`admit`/`axiom`;
+#   * the exported tables are regenerated and must be byte-identical to the
+#     checked-in ones, so model drift turns this job red;
+#   * the TLA+ disposition model is explored by check_disposition.py and its
+#     outcomes are asserted (MC_noadds: invariant holds; MC_adds: the
+#     documented counterexample is found).
+
+on:
+  pull_request:
+    paths:
+      - 'formal/**'
+      - 'tests/test_lean_field_offset_rule.py'
+      - 'tests/test_formal_experiments.py'
+      - '.github/workflows/formal-lean.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'formal/**'
+      - 'tests/test_lean_field_offset_rule.py'
+      - 'tests/test_formal_experiments.py'
+      - '.github/workflows/formal-lean.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref) || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lean-and-tla:
+    name: lean build, table drift, TLA+ disposition
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      # Must equal the version in formal/lean/lean-toolchain (checked below).
+      LEAN_VERSION: '4.15.0'
+      # sha256 of lean-4.15.0-linux.tar.zst, as recorded in formal/README.md.
+      LEAN_SHA256: 'af71a2569a9f68337de2434829b3008cd8e32c436e9cb6bd8c84a2c2ba3585c9'
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+        with:
+          persist-credentials: false
+
+      - name: Check the pinned Lean version against lean-toolchain
+        run: |
+          set -euo pipefail
+          expected="leanprover/lean4:v${LEAN_VERSION}"
+          actual="$(tr -d '[:space:]' < formal/lean/lean-toolchain)"
+          if [ "$actual" != "$expected" ]; then
+            echo "formal/lean/lean-toolchain is '$actual', workflow pins '$expected'" >&2
+            exit 1
+          fi
+
+      - name: Install Lean from the official release tarball
+        # Pinned by sha256; the tarball is verified before anything is
+        # extracted. Lean is installed under $RUNNER_TEMP, not the workspace.
+        run: |
+          set -euo pipefail
+          work="${RUNNER_TEMP}/lean-install"
+          mkdir -p "$work"
+          cd "$work"
+          url="https://github.com/leanprover/lean4/releases/download/v${LEAN_VERSION}/lean-${LEAN_VERSION}-linux.tar.zst"
+          curl -fsSL --retry 3 -o lean.tar.zst "$url"
+          echo "${LEAN_SHA256}  lean.tar.zst" | sha256sum -c -
+          command -v zstd >/dev/null || sudo apt-get install -y --no-install-recommends zstd
+          tar --zstd -xf lean.tar.zst
+          bin="$work/lean-${LEAN_VERSION}-linux/bin"
+          echo "$bin" >> "$GITHUB_PATH"
+          "$bin/lean" --version
+          "$bin/lake" --version
+
+      - name: lake build
+        working-directory: formal/lean
+        run: |
+          set -euo pipefail
+          lake build
+
+      - name: No sorry, admit or axiom in the Lean sources
+        run: |
+          set -euo pipefail
+          files=(formal/lean/AbiLean/*.lean)
+          test "${#files[@]}" -gt 0
+          # A proof gap or an unproved postulate would be a silent hole in the
+          # model. Matches whole words in code and a declaration line starting
+          # with `axiom`; prose such as "axiom audit" in a comment is fine.
+          if grep -nE '\b(sorry|admit)\b|^[[:space:]]*axiom[[:space:]]' "${files[@]}"; then
+            echo "forbidden proof escape found (sorry/admit/axiom)" >&2
+            exit 1
+          fi
+
+      - name: Regenerate the exported tables
+        working-directory: formal/lean
+        run: |
+          set -euo pipefail
+          # layout_table.json is written by the file itself (LayoutExport.lean
+          # #eval IO.FS.writeFile, into the current directory).
+          lake env lean AbiLean/LayoutExport.lean
+          # fires_truth_table.json: Examples.lean prints the rule's truth table
+          # as a Lean list on stdout. Convert that list into the checked-in
+          # file's exact layout (4 rows per line, same header).
+          lake env lean AbiLean/Examples.lean > "${RUNNER_TEMP}/examples.out"
+          python3 -I - "${RUNNER_TEMP}/examples.out" fires_truth_table.json <<'PY'
+          import re
+          import sys
+
+          src, dst = sys.argv[1], sys.argv[2]
+          text = open(src, encoding="utf-8").read()
+          pairs = re.findall(
+              r"\((none|some \d+), (none|some \d+), (true|false)\)", text
+          )
+          if len(pairs) != 16:
+              sys.exit(f"expected the 4x4 truth table, found {len(pairs)} rows")
+
+          def val(s):
+              return "null" if s == "none" else s.split()[1]
+
+          rows = [
+              f"[{val(a)}, {val(b)}, {c}]" for a, b, c in pairs
+          ]
+          body = ",\n".join(
+              "    " + ", ".join(rows[i : i + 4]) for i in range(0, len(rows), 4)
+          )
+          source = (
+              "formal/lean/AbiLean/Examples.lean: #eval of AbiLean.fires over "
+              "domain [none, 0, 32, 64]; regenerate with `lake env lean "
+              "AbiLean/Examples.lean`"
+          )
+          with open(dst, "w", encoding="utf-8") as fh:
+              fh.write(
+                  '{\n  "_source": "' + source + '",\n  "rows": [\n'
+                  + body + "\n  ]\n}\n"
+              )
+          PY
+
+      - name: Exported tables match the checked-in files
+        run: |
+          set -euo pipefail
+          git diff --exit-code -- 'formal/lean/*.json'
+
+      - name: TLA+ disposition model (check_disposition.py)
+        # Same configurations as formal/tla/MC_*.cfg. The no-additions run must
+        # hold NothingVanishes; the with-additions run is the documented
+        # counterexample (formal/EXPERIMENTS.md, E7) and must still be found.
+        run: |
+          set -euo pipefail
+          noadds="$(python3 -I formal/tla/check_disposition.py --ids 5 --steps 3)"
+          echo "$noadds"
+          grep -qx 'NothingVanishes: holds' <<<"$noadds"
+          adds="$(python3 -I formal/tla/check_disposition.py --ids 4 --steps 2 --adds)"
+          echo "$adds"
+          grep -qx 'NothingVanishes: VIOLATED.*' <<<"$adds"
+
+      - name: TLA+ scope-completeness model (check_scope.py, E8)
+        # The faithful spec must hold I1-I3; each seeded mutant must still be
+        # caught, so a checker that silently stops finding violations goes red.
+        # The conformance audit over the real code runs in the unit suite
+        # (tests/test_formal_experiments.py).
+        run: |
+          set -euo pipefail
+          spec="$(python3 -I formal/tla/check_scope.py --members 3)"
+          echo "$spec"
+          grep -qx 'I1, I2, I3: hold on every reachable state' <<<"$spec"
+          for mutant in classify-unguarded warn-clean-zero failed-ops-dropped; do
+            out="$(python3 -I formal/tla/check_scope.py --members 2 --mutant "$mutant")"
+            grep -q '^VIOLATED: ' <<<"$out" || { echo "mutant $mutant not caught"; exit 1; }
+          done

@@ -56,6 +56,7 @@ __all__ = [
     "INCOMPLETE_SCOPE_POLICIES",
     "ScopeDecision",
     "incomplete_scope_diagnostic",
+    "failed_member_exit_contribution",
     "incomplete_scope_exit_contribution",
     "no_comparison_completed_exit_contribution",
     "resolve_scope_decision",
@@ -129,6 +130,23 @@ def incomplete_scope_exit_contribution(
     return 1 if record.is_incomplete else 0
 
 
+def failed_member_exit_contribution(
+    record: ScopeAcquisitionRecord | None,
+) -> int:
+    """ADR-065 D8's ``0``/``4``: ``4`` iff some member is ``FAILED``.
+
+    A failed extraction or comparison is an operational error in the
+    outcome, not a completeness question, so it is *not* policy-dependent:
+    ``warn`` cannot downgrade it the way it accepts a merely unchecked
+    member. ``0`` for a scalar run (no record). Folded with ``max`` by
+    ``release_exit_decision`` beside the other operational-error sources.
+    """
+    if record is None:
+        return 0
+    failed = any(m.state is AcquisitionState.FAILED for m in record.members)
+    return 4 if failed else 0
+
+
 def no_comparison_completed_exit_contribution(
     record: ScopeAcquisitionRecord | None,
 ) -> int:
@@ -159,6 +177,7 @@ class ScopeDecision:
     completeness: ScopeCompleteness
     incomplete_scope_exit_contribution: int
     no_comparison_completed_exit_contribution: int
+    failed_member_exit_contribution: int
 
 
 def resolve_scope_decision(
@@ -178,6 +197,7 @@ def resolve_scope_decision(
         no_comparison_completed_exit_contribution=(
             no_comparison_completed_exit_contribution(record)
         ),
+        failed_member_exit_contribution=failed_member_exit_contribution(record),
     )
 
 
