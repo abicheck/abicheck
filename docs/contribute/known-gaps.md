@@ -287,6 +287,7 @@ current emitter, which is unchanged.
 
 **Status (2026-11-12): OPEN.** `compare` on a release with a `FAILED` member exits `4` (ADR-065 D8, `policy/release_exit_decision.py`). Aggregating the stored release report does not reproduce that exact value: `workflows/aggregate/scope_axis.py` folds only the `0`/`1` scope contributions, and `load.py`/`report_gate.py` read `run_outcome.operational` through their own mapping. The aggregate target therefore reads non-clean (`exit_code() != 0`) but not `4`. Closing it means folding the release's `operational_error` contribution into the aggregate's per-target gate with the same `max` as `compare`.
 `false-clean` — none (the aggregate still exits non-zero), but the exit code and the gate category disagree with the originating `compare`.
+<!-- no-canary: pinning it needs a stored multi-member release report with a FAILED member fed through `abicheck aggregate`; no such fixture exists yet, and the entry's false-clean impact is none -->
 
 #### The DWARF lane records fewer C++ exports than the symbols-only lane, so ctor/dtor variants and RTTI/vtable objects read as added or removed (2026-11-10)
 
@@ -578,6 +579,11 @@ per-item status in the
 <!-- no-canary: the catalog-nightly kind-parity gate fails on each declaration once it goes stale -->
 
 ### False-positive risk
+
+#### Affected-symbol attribution ignores identifier boundaries (2026-11-12)
+
+**Status (2026-11-12): OPEN.** `affected_symbols` on a type finding is built by `diff_filtering._build_type_to_funcs` (and `_build_type_embed_index` for embedding), which relates a changed type to every public function whose signature type string *contains* the type's name (`_SubstringMatcher`, documented as "identical substring semantics" to the `tname in ft` loop it replaced). With no identifier boundary, a change to `struct s1` is attributed to functions taking `struct s10 *`, `struct s100 *`, …: the closed layout fragment (`formal/FRAGMENT.md`) observed `use_s10 … use_s199` on `s1`'s findings. Findings, kinds and verdicts are unaffected (attribution only); consumer-impact views, appcompat matching on mangled names and report "affected functions" lists over-report. Fix: match on identifier boundaries in the matcher's output (a needle hit counts only when the characters before and after it are not `[A-Za-z0-9_]`, and `::` scoping is respected), keeping the single Aho-Corasick pass; check `compare/type_symbol_disambiguation.attribute_scoped_types` still sees the same candidates. Do not switch to exact-token equality on the whole ref: `const Widget &` and `Widget *` must still match `Widget`. Owner: `abicheck/diff_filtering.py`.
+<!-- canary: tests/test_affected_symbols_identifier_boundary_gap.py::test_type_name_prefix_of_another_type_is_attributed_to_its_functions -->
 
 #### `func_virtual_noexcept_added` does not rule out a `final` method or class (2026-11-08)
 

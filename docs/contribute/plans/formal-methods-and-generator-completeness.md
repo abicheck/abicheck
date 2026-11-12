@@ -7,10 +7,14 @@ generated: false
 
 # Formal methods: a provably complete edit-corpus space, and where Lean and TLA+ fit
 
-**Status:** Experiments run. E0–E9 are done; results are in
+**Status:** Experiments run. E0–E10 are done; results are in
 `formal/EXPERIMENTS.md` (repository root). Headline results:
 
 - one representative per layout edit class is **unsound** (E4);
+- generator completeness is proved only for one explicitly stated fragment
+  (E10, `formal/FRAGMENT.md`): 6368 cases, bijective generator, every case
+  compiled with gcc and clang and checked with abicheck, 32 proved
+  equivalence classes. E3's table alone is not a completeness result;
 - abicheck is exact on the bounded layout fragment (E5);
 - the generator now covers append-, insert- and remove-into-padding
   (`field_added_in_tail_padding`, `field_inserted_in_padding`,
@@ -91,13 +95,14 @@ does not pay.
 | **E0** ✅ | Lean model of `TYPE_FIELD_OFFSET_CHANGED` + fixtures (`formal/`) | Does a rule-level model find anything real? | Yes: the castxml unknown-offset-as-0 defect (fixed in #2013) |
 | **E1** ✅ | Write the space **M/P** for record layout as a document: axes, values, explicit exclusions (union, bit-fields, templates, inline, LTO, …) | Can the space be stated so that "gap" is decidable? | Every existing layout operator maps to a point; every axis value is named |
 | **E2** ✅ | SMT/Alloy check of the current layout `expect(config)` tables against E1 | Do the hand-written tables have holes or contradictions? | A list of uncovered or contradictory cells (possibly empty) |
-| **E3** ✅ | Lean pilot on the layout fragment: operators in the model, proofs of totality, surjectivity and oracle soundness; export the class table | Can expectations be *computed* and proved instead of hand-written? | Exported table matches `expect` for 3–4 operators; mismatches triaged |
+| **E3** ✅ (computed table only) | Lean pilot on the layout fragment: operators in the model, export the class table. Done: offsets and sizeof are computed by Lean for 1248 cases and checked against `expect` and gcc. **Not done by E3**: totality, surjectivity and oracle soundness — the table was not tied to an independently stated space or to the generator; see E10 | Can expectations be *computed* and proved instead of hand-written? | Exported table matches `expect` for 3–4 operators; mismatches triaged |
 | **E4** ✅ | The first **class-reduction theorem**: one representative per class gives the same verdict as the whole class | Is the "complete" claim of a reduced corpus provable? | Theorem proved for one layout class, or a counterexample showing the class split is wrong |
 | **E5** ✅ | Close level 4: run abicheck over every exported class; triage misses via `reconcile` / `known-gaps.md` | Does abicheck detect all of P? | Zero unexplained misses for the layout fragment |
 | **E6** ✅ | Close the extraction assumption: in the corpus, compare extracted `offset_bits`/sizes with compiler layout probes for each cell | How sound is extraction (Lean's `EvSound`) in practice? | Disagreement rate per backend (castxml, clang, DWARF) |
 | **E7** ✅ | TLA+ spec of the disposition pipeline (suppression, reclassification, acknowledgment, dedup, scope exclusion) | Can a finding vanish without a recorded rule and reason on some path? | TLC passes for small bounds, or a trace shows the vanishing path |
 | **E8** ✅ | TLA+ spec of scope completeness (unselected / expected-not-produced / failed / retired; zero comparisons) | Can any path report a clean pass after zero comparisons, or a removal without inventory? | Same as E7. Result: I1 and I2 hold on the real code; **I3 is violated** under `warn` by degraded members (`formal/EXPERIMENTS.md` § E8) |
 | **E9** ✅ | Generalize E0's "unknown never creates a finding" into a Lean property over the tri-state `Fact` layer (ADR-063), with a Python conformance sweep over detectors | Does the property hold across detectors, not just one? | Sweep lists violating detectors (expect a few; F1 history) |
+| **E10** ✅ | Close one fragment end to end: insert one scalar field (size = alignment ∈ {1,2,4,8}) into a 1–4 field scalar struct, LP64 SysV (`formal/FRAGMENT.md`) | Is "the generator is complete" provable for an explicitly given space, at what cost? | Yes: enumeration = space and generator bijection **proved**; oracle per case; gcc + clang + abicheck agree on all 6368 cases; same observable ⇔ same key **proved**; reduced set of 32 covers every class (tested). The reduction's transfer to the implementation is an assumption, stated there |
 
 **Order:** E1 → E2 → E3 → E4 → E5 is the main line toward a complete
 generator. E6 runs alongside, from E1 on. E7–E8 are independent of it and
