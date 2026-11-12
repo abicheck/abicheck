@@ -207,6 +207,19 @@ def _field_names(body: str) -> list[str]:
     return names
 
 
+def _namespace_at(header: str, pos: int) -> str:
+    """The ``ns::`` qualification (C++ ``namespace`` blocks) open at *pos*."""
+    stack: list[str | None] = []
+    for m in re.finditer(r"\bnamespace\s+(\w+)\s*\{|\{|\}", header[:pos]):
+        if m.group(1):
+            stack.append(m.group(1))
+        elif m.group(0) == "{":
+            stack.append(None)
+        elif stack:
+            stack.pop()
+    return "".join(f"{n}::" for n in stack if n)
+
+
 def probe_expressions(roles: dict[str, RoleText], lang: str) -> dict[str, str]:
     """key -> C expression for every record/enum the header roles declare."""
     exprs: dict[str, str] = {}
@@ -216,7 +229,7 @@ def probe_expressions(roles: dict[str, RoleText], lang: str) -> dict[str, str]:
         if re.search(r"\bnamespace\b", header):
             continue  # ``struct N`` would name a global record, not lib::N
         for m in _STRUCT.finditer(header):
-            name = m.group(1)
+            name = _namespace_at(header, m.start()) + m.group(1)
             tname = f"struct {name}"
             exprs[f"sizeof({name})"] = f"sizeof({tname})"
             # GNU __alignof__ works in every C and C++ mode gcc and clang accept.
