@@ -7,6 +7,7 @@
     v2: struct rec { int a; int x; int b; };   a@0 x@4 b@8
 -/
 import AbiLean.FieldOffset
+import AbiLean.Layout
 
 namespace AbiLean.Examples
 open AbiLean
@@ -166,3 +167,10 @@ end AbiLean.Examples
 def AbiLean.Examples.domain : List (Option Nat) := [none, some 0, some 32, some 64]
 #eval (AbiLean.Examples.domain.flatMap fun a => AbiLean.Examples.domain.map fun b =>
   (a, b, AbiLean.fires ⟨"f", a, b⟩))
+#print axioms AbiLean.Layout.insert_prefix_unchanged
+#print axioms AbiLean.Layout.offsetsFrom_mono
+#print axioms AbiLean.Layout.insert_moves_next
+#print axioms AbiLean.Layout.append_grows_size
+#print axioms AbiLean.Layout.append_long_always_grows
+#print axioms AbiLean.Layout.insert_class_not_determined
+#print axioms AbiLean.Layout.append_class_not_determined

@@ -7,8 +7,14 @@ generated: false
 
 # Formal methods: a provably complete edit-corpus space, and where Lean and TLA+ fit
 
-**Status:** Proposed. Experiment E0 is done (`formal/`, PR #2013); nothing
-after it has started.
+**Status:** Experiments run. E0–E7 and E9 are done, E8 is not; results are in
+`formal/EXPERIMENTS.md` (repository root). Headline results:
+
+- one representative per layout edit class is **unsound** (E4);
+- abicheck is exact on the bounded layout fragment (E5);
+- the generator never produces padding-absorbed edits (E2);
+- the disposition count trigger has an exact precondition, and no step breaks
+  it on the corpus (E7).
 
 ## Problem
 
@@ -77,15 +83,15 @@ does not pay.
 | Id | Experiment | Question it answers | Exit criterion |
 |---|---|---|---|
 | **E0** ✅ | Lean model of `TYPE_FIELD_OFFSET_CHANGED` + fixtures (`formal/`) | Does a rule-level model find anything real? | Yes: the castxml unknown-offset-as-0 defect (fixed in #2013) |
-| **E1** | Write the space **M/P** for record layout as a document: axes, values, explicit exclusions (union, bit-fields, templates, inline, LTO, …) | Can the space be stated so that "gap" is decidable? | Every existing layout operator maps to a point; every axis value is named |
-| **E2** | SMT/Alloy check of the current layout `expect(config)` tables against E1 | Do the hand-written tables have holes or contradictions? | A list of uncovered or contradictory cells (possibly empty) |
-| **E3** | Lean pilot on the layout fragment: operators in the model, proofs of totality, surjectivity and oracle soundness; export the class table | Can expectations be *computed* and proved instead of hand-written? | Exported table matches `expect` for 3–4 operators; mismatches triaged |
-| **E4** | The first **class-reduction theorem**: one representative per class gives the same verdict as the whole class | Is the "complete" claim of a reduced corpus provable? | Theorem proved for one layout class, or a counterexample showing the class split is wrong |
-| **E5** | Close level 4: run abicheck over every exported class; triage misses via `reconcile` / `known-gaps.md` | Does abicheck detect all of P? | Zero unexplained misses for the layout fragment |
-| **E6** | Close the extraction assumption: in the corpus, compare extracted `offset_bits`/sizes with compiler layout probes for each cell | How sound is extraction (Lean's `EvSound`) in practice? | Disagreement rate per backend (castxml, clang, DWARF) |
-| **E7** | TLA+ spec of the disposition pipeline (suppression, reclassification, acknowledgment, dedup, scope exclusion) | Can a finding vanish without a recorded rule and reason on some path? | TLC passes for small bounds, or a trace shows the vanishing path |
+| **E1** ✅ | Write the space **M/P** for record layout as a document: axes, values, explicit exclusions (union, bit-fields, templates, inline, LTO, …) | Can the space be stated so that "gap" is decidable? | Every existing layout operator maps to a point; every axis value is named |
+| **E2** ✅ | SMT/Alloy check of the current layout `expect(config)` tables against E1 | Do the hand-written tables have holes or contradictions? | A list of uncovered or contradictory cells (possibly empty) |
+| **E3** ✅ | Lean pilot on the layout fragment: operators in the model, proofs of totality, surjectivity and oracle soundness; export the class table | Can expectations be *computed* and proved instead of hand-written? | Exported table matches `expect` for 3–4 operators; mismatches triaged |
+| **E4** ✅ | The first **class-reduction theorem**: one representative per class gives the same verdict as the whole class | Is the "complete" claim of a reduced corpus provable? | Theorem proved for one layout class, or a counterexample showing the class split is wrong |
+| **E5** ✅ | Close level 4: run abicheck over every exported class; triage misses via `reconcile` / `known-gaps.md` | Does abicheck detect all of P? | Zero unexplained misses for the layout fragment |
+| **E6** ✅ | Close the extraction assumption: in the corpus, compare extracted `offset_bits`/sizes with compiler layout probes for each cell | How sound is extraction (Lean's `EvSound`) in practice? | Disagreement rate per backend (castxml, clang, DWARF) |
+| **E7** ✅ | TLA+ spec of the disposition pipeline (suppression, reclassification, acknowledgment, dedup, scope exclusion) | Can a finding vanish without a recorded rule and reason on some path? | TLC passes for small bounds, or a trace shows the vanishing path |
 | **E8** | TLA+ spec of scope completeness (unselected / expected-not-produced / failed / retired; zero comparisons) | Can any path report a clean pass after zero comparisons, or a removal without inventory? | Same as E7 |
-| **E9** | Generalize E0's "unknown never creates a finding" into a Lean property over the tri-state `Fact` layer (ADR-063), with a Python conformance sweep over detectors | Does the property hold across detectors, not just one? | Sweep lists violating detectors (expect a few; F1 history) |
+| **E9** ✅ | Generalize E0's "unknown never creates a finding" into a Lean property over the tri-state `Fact` layer (ADR-063), with a Python conformance sweep over detectors | Does the property hold across detectors, not just one? | Sweep lists violating detectors (expect a few; F1 history) |
 
 **Order:** E1 → E2 → E3 → E4 → E5 is the main line toward a complete
 generator. E6 runs alongside, from E1 on. E7–E8 are independent of it and
@@ -95,6 +101,23 @@ can start any time. E9 comes after E3, once the shared model core exists.
 signatures and parameters, enums, ELF symbols and versioning, C++ (bases,
 vptr, templates). Each fragment is one Lean module on a shared core
 (consumer, contract, unknown evidence).
+
+## Next steps after the experiments
+
+1. **Generator:** split the layout operators by the proved conditions, and add
+   padding-absorbed operators (insert or append without a layout change) with
+   *computed* expectations from `formal/lean/layout_table.json`. This closes
+   the false-positive side E2 found uncovered.
+2. **Generator space:** add an *edit* axis to `tests/_edit_corpus_space.py`,
+   so coverage can say which edit sub-classes ran, not only which constructs.
+3. **Disposition:** decide on E7's proposal (a structural precondition for the
+   count trigger), and widen
+   `test_a_pipeline_step_can_never_drop_a_finding_unrecorded` beyond five
+   `FUNC_REMOVED` inputs.
+4. **DWARF layout channel:** make `FieldInfo.byte_offset` optional (schema
+   change), and audit `byte_size == 0` as "unknown" (E9).
+5. **E8**, then the next fragments in the stated order: function signatures,
+   enums, ELF versioning, C++ layout.
 
 ## Integration rules
 

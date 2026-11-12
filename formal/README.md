@@ -13,6 +13,8 @@ tested, and what is assumed are kept separate in [§ Boundaries](#boundaries).
 |---|---|
 | `lean/AbiLean/FieldOffset.lean` | model, rule, theorems |
 | `lean/AbiLean/Examples.lean` | non-vacuity witnesses, negative checks N1–N6, `#print axioms`, truth-table `#eval` |
+| `lean/AbiLean/Layout.lean`, `lean/AbiLean/LayoutExport.lean`, `lean/layout_table.json` | layout model with alignment, class-reduction theorems, exported 1248-case table (experiments E2–E6) |
+| `tla/`, `experiments/`, `EXPERIMENTS.md` | experiments E1–E9 and their results |
 | `lean/fires_truth_table.json` | the rule's truth table as computed by Lean (test oracle) |
 | `fixtures/` | old/new C library (exposed and opaque record), four old consumers, `run_experiment.sh` |
 | `../tests/test_lean_field_offset_rule.py` | conformance + regression tests |
