@@ -120,8 +120,11 @@ Invariant `NothingVanishes`: every finding is visible, in a bucket, or in the
 ledger.
 
 Checked with `formal/tla/check_disposition.py`, an explicit-state BFS over the
-same transition relation. **TLC itself was not run**: executing the downloaded
-`tla2tools.jar` was blocked in this environment. `MC_*.cfg` are ready for TLC.
+same transition relation, and by **TLC** (2026-11-12, tla2tools v1.7.4) on
+`MC_noadds.cfg`/`MC_adds.cfg`. TLC's reachable graph equals the BFS graph
+state for state and edge for edge (`formal/tla/compare_tlc.py`, CI job `tlc`;
+see [README § TLA+ models](README.md#tla-models-tlc-and-the-python-checkers)).
+TLC's `MC_adds` counterexample is the add-to-`changes` twin of the trace below.
 
 ```
 no same-call additions : 3100 states, NothingVanishes holds
@@ -286,8 +289,11 @@ Note: running `formal/experiments/scope_completeness_audit.py` directly
 imports whichever `abicheck` is first on `sys.path`. From a worktree, set
 `PYTHONPATH=$PWD` or the audit reads the editable install of another checkout.
 
-**Lean/TLC status.** TLC was not run; the spec is checked by the explicit-state
-BFS only, as E7 was. The faithful spec holds on all 1710 reachable states of
+**TLC status.** TLC (2026-11-12) first rejected the spec: `Max` was used
+before its definition, then every finished run was reported as a deadlock.
+Both are fixed in the spec (definition order, explicit `Finished`
+stuttering). TLC now holds `TypeOK`, I1, I2 and I3 on 1710 states, and its
+graph equals the BFS graph (`formal/tla/compare_tlc.py`). The faithful spec holds on all 1710 reachable states of
 3 members. Each seeded fault is caught (`--mutant classify-unguarded` →
 I2, `warn-clean-zero` → I1, `failed-ops-dropped` → I3), so the invariants are
 not vacuous.
@@ -302,7 +308,7 @@ with the glue transcribed; it does not run `abicheck compare` on a directory).
 
 ## Not done
 
-- **TLC run** of E7 and E8 and **SMT** for E2. The bounded spaces were small enough
+- **SMT** for E2. (The TLC run of E7 and E8 is done, see README § TLA+ models.) The bounded spaces were small enough
   for exhaustive enumeration, so SMT added nothing here. It becomes relevant
   once the space is too large to enumerate.
 
@@ -314,7 +320,7 @@ with the glue transcribed; it does not run `abicheck compare` on a directory).
 | Model = gcc layout (E6a) | **tested** exhaustively on the bounded fragment |
 | Extraction = gcc (E6b) | **tested** on the same fragment, two backends |
 | abicheck = model (E5) | **tested** exhaustively on the fragment; nothing outside it |
-| Disposition trigger precondition (E7) | **model-checked** (BFS, small bounds); implementation **observed** on 3 pairs |
+| Disposition trigger precondition (E7) | **model-checked** (TLC and BFS, graphs equal, small bounds); implementation **observed** on 3 pairs |
 | No manufactured findings (E9) | **tested** for 3 layout fact families on the fragment |
-| Scope completeness I1 (zero comparisons never pass), I2 (removal needs proof) (E8) | **model-checked** (BFS, 3 members, faithful spec) and **tested** on the real aggregation (≤3 members, all settings); TLC not run |
+| Scope completeness I1 (zero comparisons never pass), I2 (removal needs proof) (E8) | **model-checked** (TLC and BFS, graphs equal, 3 members, faithful spec) and **tested** on the real aggregation (≤3 members, all settings) |
 | Scope completeness I3 (failed never clean) (E8) | **model-checked** on the spec; **fixed** on the real code (0 violations over 46848 combinations ≤3 members, all settings) |

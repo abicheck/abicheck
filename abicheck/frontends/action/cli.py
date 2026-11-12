@@ -585,4 +585,12 @@ if __name__ == "__main__":  # pragma: no cover - exercised via subprocess
     # (running as the canonical module) both land on it. Defining the group
     # here instead would give the two module objects two different groups,
     # and every sibling command would fail with Click's "No such command".
-    action_cli()
+    #
+    # windows_expand_args=False: on Windows, Click otherwise globs every
+    # argument and expands ~ and $VAR in it, as a stand-in for a Unix shell.
+    # This CLI is only ever invoked by the Action's scripts with values taken
+    # verbatim from workflow inputs -- glob patterns such as
+    # `base-equivalent-paths: include/**`, paths, refs -- so the expansion
+    # turned `--paths include/**` into a list of files and the command failed
+    # with "Got unexpected extra argument".
+    action_cli(windows_expand_args=False)

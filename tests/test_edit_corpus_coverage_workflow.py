@@ -10,6 +10,7 @@ judged only with both markers. These tests execute the steps themselves.
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import pytest
@@ -37,6 +38,17 @@ def _stub_python(tmp_path: Path, rc: int) -> Path:
     (bindir / "python").write_text(f"#!/bin/sh\nexit {rc}\n", encoding="utf-8")
     (bindir / "python").chmod(0o755)
     return bindir
+
+
+def _stub_bsd_wc(bindir: Path) -> None:
+    """A ``wc`` that pads its count like BSD/macOS ``wc -l`` (``       2``)."""
+    real = shutil.which("wc")
+    assert real is not None
+    (bindir / "wc").write_text(
+        f"#!/bin/sh\nn=$({real} \"$@\" | tr -d ' ')\nprintf '%8s\\n' \"$n\"\n",
+        encoding="utf-8",
+    )
+    (bindir / "wc").chmod(0o755)
 
 
 @pytest.mark.parametrize("shard", ["1", "2"])
@@ -94,9 +106,17 @@ def test_a_finished_shard_leaves_its_marker(
         "both-report-fails",
     ],
 )
+@pytest.mark.parametrize("bsd_wc", [False, True], ids=["gnu-wc", "bsd-wc"])
 def test_the_floor_is_judged_only_when_both_shards_finished(
-    tmp_path: Path, markers: tuple[str, ...], records: bool, rc: int, message: str
+    tmp_path: Path,
+    markers: tuple[str, ...],
+    records: bool,
+    rc: int,
+    message: str,
+    bsd_wc: bool,
 ) -> None:
+    # The count is read through `wc -l`, which BSD pads with blanks: the step
+    # must give the same answer under either wc (macOS runs this test).
     require_bash()
     files = {
         f"edit-corpus-coverage/edit-corpus-coverage-shard{m}/shard-{m}.done": ""
@@ -106,6 +126,8 @@ def test_the_floor_is_judged_only_when_both_shards_finished(
         files["edit-corpus-coverage/edit-corpus-coverage-shard2/pr-abc.json"] = "{}"
     ws = make_workspace(tmp_path, files=files)
     bindir = _stub_python(tmp_path, 1)
+    if bsd_wc:
+        _stub_bsd_wc(bindir)
     result = run_step(
         _FLOOR,
         workspace=ws,

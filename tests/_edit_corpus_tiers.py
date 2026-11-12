@@ -111,6 +111,10 @@ _PR: tuple[tuple[str, str, str, dict[str, object]], ...] = (
     ("version_script_dropped", "c_elf", "clang", {"evidence": "binary"}),
     ("union_member_retyped", "c_elf", "gcc", {"evidence": "dwarf"}),
     ("bases_reordered", "cxx_more", "gcc", {}),
+    # c_elf_alt / cxx_alt: a reverse link edit from symbols alone, an
+    # internal type reached through a public one under headers.
+    ("executable_stack_removed", "c_elf_alt", "gcc", {"evidence": "binary"}),
+    ("internal_type_grew", "cxx_alt", "clang", {}),
 )
 
 

@@ -163,10 +163,32 @@ def _declared_extent_shift(old: str, new: str, generation: int) -> bool:
     )
 
 
+def _retired_between(function_name: str, generation: int, new_generation: int) -> bool:
+    """Whether a generation in (*generation*, *new_generation*] declares it
+    stopped recording functions named like this (an extractor artifact)."""
+    return any(
+        function_name.startswith(change.retires_function_prefixes)
+        for introduced, change in SPELLING_MIGRATIONS.items()
+        if generation < introduced <= new_generation
+        and change.retires_function_prefixes
+    )
+
+
 def _undeclared_respellings(
-    old: dict[str, Any], new: dict[str, Any], generation: int
+    old: dict[str, Any],
+    new: dict[str, Any],
+    generation: int,
+    new_generation: int = EXTRACTOR_GENERATION,
 ) -> list[str]:
     old_s, new_s = _spellings(old), _spellings(new)
+    # A generation in between that declares it retired an extractor-artifact
+    # function (castxml's compiler builtins at 57) drops it from the older
+    # side before any spelling is compared; nothing else may.
+    old_s = {
+        key: spelling
+        for key, spelling in old_s.items()
+        if not _retired_between(key[1], generation, new_generation)
+    }
     assert set(old_s) == set(new_s), "the entity sets must match first"
     return [
         f"{key}: {old_s[key]!r} -> {new_s[key]!r}"
@@ -293,7 +315,10 @@ def test_frozen_dump_compares_clean_against_newest_frozen(generation: int) -> No
     assert _gating(result) == []
     assert (
         _undeclared_respellings(
-            _frozen_document(generation), _frozen_document(newest), generation
+            _frozen_document(generation),
+            _frozen_document(newest),
+            generation,
+            newest,
         )
         == []
     )
@@ -394,7 +419,10 @@ def test_every_respelling_against_fresh_dump_is_a_declared_migration(
     ``SPELLING_MIGRATIONS`` rule mapping one to the other, fails here."""
     fresh = json.loads(fresh_dump.read_text(encoding="utf-8"))
     assert (
-        _undeclared_respellings(_frozen_document(generation), fresh, generation) == []
+        _undeclared_respellings(
+            _frozen_document(generation), fresh, generation, EXTRACTOR_GENERATION
+        )
+        == []
     )
 
 

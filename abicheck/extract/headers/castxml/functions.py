@@ -462,6 +462,12 @@ def parse_function_element(
     # Skip compiler built-ins and command-line synthetic declarations
     if is_builtin_element(ctx, el):
         return None
+    # A namespace-scope function the compiler declared itself: a library
+    # builtin (``__builtin_memcpy``) clang declares implicitly where an
+    # implicit copy of an array member uses it, located at that record in the
+    # user's header. No user wrote it and no library owes an export for it.
+    if el.tag == "Function" and el.get("artificial") == "1":
+        return None
     # castxml's own XML `mangled` attribute is always the pure, undecorated
     # Itanium spelling even under an explicit Darwin `--target=` (unlike
     # clang's own `-ast-dump=json` `mangledName`, which genuinely does

@@ -99,7 +99,7 @@
       "abicheck/extract/headers/castxml/duplicate_declarations.py": "8668fddc69d8838cc093315726c53d96dd9c878020e675e34a44a435dc54d2f7",
       "abicheck/extract/headers/castxml/enums.py": "e616c768543061d71812378dd92cbcb7b8d00afbb734bcb7b4b5334ee34042aa",
       "abicheck/extract/headers/castxml/function_type_cc.py": "54b78f155f3500d45cc578501e42ae2af256445bfa9819510e805e60df8c9967",
-      "abicheck/extract/headers/castxml/functions.py": "08708f209213c674032e123e2394bf01a4dd60978f16bb9c80589bb038e8682e",
+      "abicheck/extract/headers/castxml/functions.py": "99f599d249fa749eb35da270e40a9f3acad7b7fa1ea701091e98df745eefdda4",
       "abicheck/extract/headers/castxml/hidden_declarations.py": "500abf62faa042e1c33a3ef3897557e263f0c7b1060b60c323d8d34895f5b057",
       "abicheck/extract/headers/castxml/inline_variables.py": "60ee92e7a810d81f113a6f5fb4f218ea6287258948dc9a838fbdef37ef37ea32",
       "abicheck/extract/headers/castxml/location.py": "a5469fedb2774dfdf1b87a49ddc713471c088ecee6ea5ccbfe4d9764012c97e6",
@@ -224,8 +224,8 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "f631c6c8b7e4da9193faaa988c3fdb285555632cbb3ec8ec9a21d0c8a8696096",
-    "generation": 56,
+    "fingerprint": "02ac0d4940f91d8eb52d4b8796b68933ffdb2fd3723b0f89c2973787915d853b",
+    "generation": 57,
     "reason": "PDB TypeDatabase.parse_all rolls back on failure and CodeView record dataclasses moved to extract/pdb_codeview_types.py; a successful parse records the same types"
   },
   "resolver": {
@@ -301,6 +301,6 @@
     },
     "fingerprint": "ae0728ebcdb7834d56d097d0c741df077342899571d044b571095b23f63d00fc",
     "generation": 14,
-    "reason": "inline_graph_fold callback pass: an always-true guard replaced by else; same degraded/narrowed/full outcome for every input"
+    "reason": "inline_graph_fold callback pass: an always-true guard replaced by else; same outcome for every input"
   }
 }
