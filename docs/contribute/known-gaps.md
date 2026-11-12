@@ -291,12 +291,6 @@ current emitter, which is unchanged.
 `false-clean` — the inline-accessor finding is missing on castxml and clang header snapshots of namespaced records.
 <!-- canary: tests/test_header_backend_fact_gaps_integration.py::test_castxml_and_clang_name_the_corpus_pimpl_holder_by_its_bare_leaf -->
 
-#### The unspecified-return check does not know castxml's or clang's closure spelling (2026-11-12)
-
-**Status (2026-11-12): OPEN.** `diff_templates.detect_unspecified_return_now_named` recognises `auto`, `decltype(`, `<lambda` and similar markers. castxml spells an inline function's deduced closure return type `?` and clang `(lambda:file#line)`, so an inline factory that starts returning a named function-pointer type reads no `unspecified_return_now_named` on either; clang additionally reports `func_return_changed` (BREAKING) for a function the old library never exported. The native gcc backend (`make_cb()::<lambda(int)>`) reads it correctly. Found by the edit corpus (`unspecified_return_now_named` on `cxx_more`). Owner: `compare/` (`diff_templates.py`).
-`false-clean` — the source-break finding is missing on castxml and clang (and clang over-reports a binary break).
-<!-- canary: tests/test_header_backend_fact_gaps_integration.py::test_a_closure_return_spelling_is_not_read_as_unspecified -->
-
 #### castxml records no standard-layout trait or data size (2026-11-12)
 
 **Status (2026-11-12): OPEN.** castxml's XML carries no record data size (dsize), and `extract/headers/castxml/records.py` deliberately derives no `is_standard_layout` from it (a polymorphism heuristic is unsound). `standard_layout_lost` and `tail_padding_reuse_changed` therefore cannot fire on a castxml snapshot (nor on DWARF), where the clang and native gcc backends report them (both COMPATIBLE_WITH_RISK). Found by the edit corpus (`standard_layout_lost`, `record_became_pod_tail_padding` on `cxx_more`). Closing it needs the clang record-layout pass (`attach_clang_layout`) joined onto castxml roots, as it is for clang ones. Owner: `extract/headers/castxml/`.
@@ -635,6 +629,12 @@ per-item status in the
 <!-- no-canary: the catalog-nightly kind-parity gate fails on each declaration once it goes stale -->
 
 ### False-positive risk
+
+#### A formerly inline function's closure return re-spelled by clang reads `func_return_changed` (2026-11-12)
+
+**Status (2026-11-12): PARTIAL.** `diff_templates.detect_unspecified_return_now_named` did not know castxml's (`?`) or clang's (`(lambda:f.h#1)`) spelling of a deduced closure return type; fixed (`tests/test_unspecified_return_backend_spellings.py`), so the edit corpus's `unspecified_return_now_named` reads the finding on every header backend. Still open, clang only: the inline factory the old library never exported, now an exported function returning a named type, also reads `func_return_changed` (BREAKING). No old binary called the library's copy (each inlined its own), so no built consumer breaks. castxml's `?` is treated as unknown by the return comparison, and the gcc backend does not pair the two sides (its own unexported-declaration gap). Closing it needs the return comparison to discount a pair whose old side had no export. Owner: `compare/` (`function_signature.py`).
+`false-positive` — on clang headers, moving an inline closure factory out of line reads as a binary break.
+<!-- canary: tests/test_header_backend_fact_gaps_integration.py::test_a_closure_return_spelling_is_read_as_unspecified_on_every_backend -->
 
 #### A return type re-spelled through a renamed typedef of the same type reads `func_return_changed` (2026-11-12)
 

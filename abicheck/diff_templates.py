@@ -68,6 +68,7 @@ from .compare.template_surface import (
     strip_template_args as _strip_template_args,
     template_angle_depth,
 )
+from .compare.unnameable_return import return_is_unspecified as _return_is_unspecified
 from .diff_helpers import make_change
 from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
@@ -1054,28 +1055,6 @@ def detect_mandatory_template_param_added(
 # ---------------------------------------------------------------------------
 # UNSPECIFIED_RETURN_NOW_NAMED
 # ---------------------------------------------------------------------------
-
-
-# Return-type spellings we treat as "unspecified". These all share the
-# property that the consumer must use ``auto`` to capture the result.
-_UNSPECIFIED_RETURN_MARKERS: tuple[str, ...] = (
-    "auto",
-    "__lambda",
-    "(unnamed",
-    "(anonymous",
-    "{lambda",
-    "<lambda",
-    "decltype(",
-)
-
-
-def _return_is_unspecified(rt: str) -> bool:
-    if not rt:
-        return False
-    rt = rt.strip()
-    if rt == "auto":
-        return True
-    return any(m in rt for m in _UNSPECIFIED_RETURN_MARKERS)
 
 
 def detect_unspecified_return_now_named(

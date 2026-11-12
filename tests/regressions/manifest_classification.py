@@ -1088,4 +1088,32 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "record": ("internal", "public"),
         },
     ),
+    BugClass(
+        id="evidence.one_backend_spelling_of_an_unnameable_type",
+        invariant=(
+            "A check that recognises a type with no name (a closure, an "
+            "undeduced placeholder, an anonymous class) recognises it in "
+            "every spelling a header backend or DWARF writes for it -- "
+            "castxml's `?`, clang's `(lambda at ...)`/`(lambda:...)`, gcc's "
+            "`f()::<lambda(int)>` -- and matches a keyword such as `auto` "
+            "as a word, never as part of a name (`automaton *`)."
+        ),
+        # Found by the generated edit corpus (unspecified_return_now_named).
+        fixed_by=(2027,),
+        seed_tests=("tests/test_unspecified_return_backend_spellings.py",),
+        axes={
+            "backend spelling": (
+                "castxml ?",
+                "clang lambda at",
+                "clang lambda:",
+                "gcc <lambda>",
+                "auto",
+                "decltype",
+                "anonymous",
+                "unnamed",
+            ),
+            "direction": ("now named", "now unnamed"),
+            "control": ("named to named", "unnamed to unnamed"),
+        },
+    ),
 )

@@ -344,16 +344,18 @@ _AUTO_NEW = (
 @pytest.mark.parametrize(
     ("backend", "spelling"), [("castxml", "?"), ("clang", "(lambda:")]
 )
-def test_a_closure_return_spelling_is_not_read_as_unspecified(
+def test_a_closure_return_spelling_is_read_as_unspecified_on_every_backend(
     tmp_path: Path, backend: str, spelling: str
 ) -> None:
     """castxml spells a deduced closure return ``?`` and clang ``(lambda:...)``;
-    the unspecified-return check knows neither, so naming the return type
-    reads no unspecified_return_now_named (and on clang a func_return_changed)."""
+    both now read unspecified_return_now_named. The canary half: clang also
+    reads func_return_changed (BREAKING) for the formerly inline function."""
     f = _function(_dump(tmp_path / "d", *_AUTO_OLD, "c++", backend), "make_cb")
     assert f.return_type.startswith(spelling)
-    _, kinds = _kinds(tmp_path / "k", _AUTO_OLD, _AUTO_NEW, "c++", backend)
-    assert "UNSPECIFIED_RETURN_NOW_NAMED" not in kinds
+    verdict, kinds = _kinds(tmp_path / "k", _AUTO_OLD, _AUTO_NEW, "c++", backend)
+    assert "UNSPECIFIED_RETURN_NOW_NAMED" in kinds
+    assert ("FUNC_RETURN_CHANGED" in kinds) == (backend == "clang")
+    assert (verdict == "BREAKING") == (backend == "clang")
 
 
 _ISA_H = (
