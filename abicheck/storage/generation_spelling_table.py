@@ -541,6 +541,14 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "and read as concept_constraint_changed against a newer one, "
         "gcc-to-gcc only, not rewritten"
     ),
+    57: GenerationSpellingChange(
+        "the castxml backend no longer records a namespace-scope function the "
+        'compiler declared itself (artificial="1", e.g. __builtin_memcpy '
+        "declared where an implicit copy of an array member uses it); no "
+        "stored type spelling changes, an older castxml snapshot only keeps "
+        "that extra declaration, which reads as removed against a newer one "
+        "and is not rewritten"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.
