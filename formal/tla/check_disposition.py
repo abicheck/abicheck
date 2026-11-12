@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 from collections import deque
+from collections.abc import Iterator
 from itertools import chain, combinations
 
 
@@ -40,7 +41,15 @@ def initial_states(n_ids: int) -> list[State]:
     return [(c, frozenset(), frozenset(), c, ids - c, 0) for c in subsets(ids) if c]
 
 
-def successors(state: State, max_steps: int, adds: bool):
+#: A Step choice: the (D, M, A, B) subsets of the spec's existential.
+Choice = tuple[frozenset[int], frozenset[int], frozenset[int], frozenset[int]]
+#: (initial states, reachable states, transitions as (src, action, dst)).
+Graph = tuple[set[State], set[State], set[tuple[State, str, State]]]
+
+
+def successors(
+    state: State, max_steps: int, adds: bool
+) -> Iterator[tuple[Choice, State]]:
     """The spec's Step, one (D, M, A, B) choice at a time. The stuttering
     disjunct of Next (``steps = MaxSteps /\\ UNCHANGED vars``) only adds
     self-loops and is left out."""
@@ -88,7 +97,7 @@ def check(n_ids: int, max_steps: int, adds: bool):
     return len(parent), None
 
 
-def graph(n_ids: int, max_steps: int, adds: bool):
+def graph(n_ids: int, max_steps: int, adds: bool) -> Graph:
     """The whole reachable graph, not stopping at a violation: (initial
     states, reachable states, transitions as (src, "Step", dst)). Compared
     with TLC's ``-dump dot`` output by compare_tlc.py."""

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 from collections import deque
+from collections.abc import Iterator
 from dataclasses import dataclass
 
 ABSENT = "absent"
@@ -54,6 +55,8 @@ class Spec:
 
 # A state: (member states tuple, new_proven, policy)
 State = tuple[tuple[str, ...], bool, str]
+#: (initial states, reachable states, transitions as (src, action, dst)).
+Graph = tuple[set[State], set[State], set[tuple[State, str, State]]]
 
 
 def completed(states: tuple[str, ...]) -> list[int]:
@@ -77,7 +80,7 @@ def exit_code(spec: Spec, states: tuple[str, ...], policy: str) -> int:
     return max(compat, removal, ops, d6, d7)
 
 
-def labelled_successors(spec: Spec, st: State):
+def labelled_successors(spec: Spec, st: State) -> Iterator[tuple[str, State]]:
     """(action name, successor) pairs. The spec's ``Finished`` action only
     adds self-loops on finished runs and is left out."""
     states, proven, policy = st
@@ -99,7 +102,7 @@ def labelled_successors(spec: Spec, st: State):
         )
 
 
-def successors(spec: Spec, st: State):
+def successors(spec: Spec, st: State) -> Iterator[State]:
     for _label, nxt in labelled_successors(spec, st):
         yield nxt
 
@@ -160,7 +163,7 @@ def check(n_members: int, spec: Spec = Spec()):
     return len(parent), None
 
 
-def graph(n_members: int, spec: Spec = Spec()):
+def graph(n_members: int, spec: Spec = Spec()) -> Graph:
     """The whole reachable graph: (initial states, reachable states,
     transitions as (src, action, dst)). Compared with TLC's ``-dump dot``
     output by compare_tlc.py."""

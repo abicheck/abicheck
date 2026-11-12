@@ -34,8 +34,10 @@ import re
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, NamedTuple
 
 HERE = Path(__file__).resolve().parent
 
@@ -243,13 +245,28 @@ def read_constants(cfg: Path) -> dict[str, object]:
     return out
 
 
+class PythonSide(NamedTuple):
+    """What a Python checker contributes to one comparison. Both models
+    return this shape; states are each checker's own state tuples."""
+
+    graph: tuple[
+        set[Any], set[Any], set[tuple[Any, str, Any]]
+    ]  # init, reachable, edges
+    n_check: int  # states check() explored (all of them when the invariant holds)
+    violated: bool  # check() found an invariant violation
+    invariant_ok: Callable[[Any], bool]  # the checker's invariant predicate
+    to_state: Callable[[dict[str, Any]], Any]  # TLC {var: value} -> checker state
+
+
 @dataclass
 class Model:
     cfg: str
     module: str
     expected: str  # "holds" or the name of the invariant TLC must report
 
-    def python(self, consts: dict[str, object], mutant: str | None = None):  # type: ignore[no-untyped-def]
+    def python(
+        self, consts: dict[str, object], mutant: str | None = None
+    ) -> PythonSide:
         """(graph, check() state count, check() found a violation,
         invariant predicate, TLC-state converter) for this model. ``mutant``
         seeds a known-wrong check_scope.py variant, to show the comparison
@@ -278,7 +295,9 @@ class Model:
 
             g = chk.graph(n, steps, adds)
             n_check, trace = chk.check(n, steps, adds)
-            return g, n_check, trace is not None, chk.nothing_vanishes, to_state
+            return PythonSide(
+                g, n_check, trace is not None, chk.nothing_vanishes, to_state
+            )
         if self.module == "ScopeCompleteness":
             chk = _load("check_scope")
             members = consts["Members"]
@@ -303,7 +322,7 @@ class Model:
             def ok(st: tuple) -> bool:
                 return not chk.invariant_violations(spec, st)
 
-            return g, n_check, found is not None, ok, to_state
+            return PythonSide(g, n_check, found is not None, ok, to_state)
         raise ValueError(self.module)
 
 

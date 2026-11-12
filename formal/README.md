@@ -219,8 +219,8 @@ checked two ways, and CI compares the two (job `tlc` in
 
 ```bash
 curl -fsSLO https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar
-echo "936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88  tla2tools.jar" | sha256sum -c -
-python3 -I formal/tla/compare_tlc.py --jar tla2tools.jar
+echo "936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88  tla2tools.jar" | sha256sum -c - && \
+  python3 -I formal/tla/compare_tlc.py --jar tla2tools.jar
 ```
 
 Recorded run (2026-11-12):
