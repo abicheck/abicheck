@@ -43,7 +43,7 @@ from tests._edit_corpus_expect import (
 from tests._edit_corpus_harness import BaselineCache, NewBuildCache, abicheck_answer
 from tests._edit_corpus_operators import EditOp
 from tests._edit_corpus_seeds import Seed
-from tests._edit_corpus_space import seed_flags_conflict
+from tests._edit_corpus_space import seed_constructs, seed_flags_conflict
 from tests._edit_corpus_toolchains import (
     capability_gap,
     consumer_unavailable,
@@ -153,6 +153,11 @@ def _std_flag_conflict(seed: Seed, flags: Flags) -> str | None:
     return seed_flags_conflict(seed, flags)
 
 
+def _has_std_string(seed: Seed) -> bool:
+    """The seed passes ``std::string`` across its boundary (cxx_stdlib, cxx_alt)."""
+    return "std_string" in seed_constructs(seed)
+
+
 def stdlib_mismatch(
     seed: Seed, config: Config, consumer: ResolvedConsumer
 ) -> str | None:
@@ -162,7 +167,7 @@ def stdlib_mismatch(
     API (or the reverse), whatever the edit; that pairing is not buildable.
     """
     tc = consumer.toolchain
-    if seed.name != "cxx_stdlib" or tc == config.producer:
+    if not _has_std_string(seed) or tc == config.producer:
         return None
     if uses_libstdcxx(config.producer) != uses_libstdcxx(tc):
         return (
@@ -185,7 +190,7 @@ def dual_abi_mismatch(
     types with different mangled names: the consumer cannot link the old
     library at all, so the pair says nothing about the edit.
     """
-    if seed.name != "cxx_stdlib":
+    if not _has_std_string(seed):
         return None
     if not (uses_libstdcxx(config.producer) and uses_libstdcxx(consumer.toolchain)):
         return None

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -92,6 +93,94 @@ def _offsets_moved(row: dict, k: int) -> bool:
 
 def _mentions(exp, group: frozenset[str]) -> bool:
     return bool(expectation_kinds(exp) & group)
+
+
+# --- the table's composition ---------------------------------------------------
+#
+# The axes, written here from ``AbiLean/LayoutExport.lean``'s definitions
+# (``types``, ``bases``, ``List.range (b.length + 1)``), not read back from the
+# table or from any enumerator: four scalar types, bases of one to three
+# fields, every insertion position 0..len(base), every inserted type.
+TABLE_TYPES: tuple[str, ...] = ("char", "short", "int", "double")
+TABLE_BASE_LENGTHS: tuple[int, ...] = (1, 2, 3)
+# SysV x86-64 size (= alignment) of each scalar, for the independent oracle.
+SCALAR_SIZE: dict[str, int] = {"char": 1, "short": 2, "int": 4, "double": 8}
+
+
+def _row_key(r: dict) -> tuple[tuple[str, ...], int, str]:
+    return (tuple(r["base"]), r["insert_at"], r["inserted"])
+
+
+def _expected_keys() -> list[tuple[tuple[str, ...], int, str]]:
+    keys = []
+    for n in TABLE_BASE_LENGTHS:
+        for base in _cartesian(TABLE_TYPES, n):
+            for k in range(n + 1):
+                for t in TABLE_TYPES:
+                    keys.append((base, k, t))
+    return keys
+
+
+def _cartesian(values: tuple[str, ...], n: int) -> list[tuple[str, ...]]:
+    out: list[tuple[str, ...]] = [()]
+    for _ in range(n):
+        out = [prefix + (v,) for prefix in out for v in values]
+    return out
+
+
+def _layout(fields: list[str]) -> tuple[list[int], int]:
+    """Offsets and sizeof of a record of scalar *fields* (natural alignment)."""
+    off, offsets, align = 0, [], 1
+    for f in fields:
+        a = SCALAR_SIZE[f]
+        off = (off + a - 1) // a * a
+        offsets.append(off)
+        off += a
+        align = max(align, a)
+    return offsets, (off + align - 1) // align * align
+
+
+def _composition_problems(rows: list[dict]) -> list[str]:
+    keys = [_row_key(r) for r in rows]
+    want = _expected_keys()
+    problems = [f"repeated key {k}" for k, n in Counter(keys).items() if n > 1]
+    problems += [f"missing key {k}" for k in sorted(set(want) - set(keys))]
+    problems += [f"unexpected key {k}" for k in sorted(set(keys) - set(want))]
+    return problems
+
+
+def test_the_table_is_exactly_the_cartesian_product_of_its_axes() -> None:
+    rows = _table_rows()
+    assert _composition_problems(rows) == []
+    # The product itself has no repeats (it is the oracle; pin its size).
+    want = _expected_keys()
+    assert (
+        len(set(want))
+        == len(want)
+        == sum(4**n * (n + 1) * 4 for n in TABLE_BASE_LENGTHS)
+    )
+
+
+def test_a_duplicated_neighbour_row_is_caught() -> None:
+    """Mutation check: replacing one row with a copy of its neighbour keeps the
+    row count and must still fail the composition check, twice over (a
+    repeated key and a missing one)."""
+    rows = _table_rows()
+    for i in (0, len(rows) // 2, len(rows) - 1):
+        j = i - 1 if i else 1
+        mutated = [*rows[:i], rows[j], *rows[i + 1 :]]
+        assert len(mutated) == len(rows)
+        problems = _composition_problems(mutated)
+        assert f"repeated key {_row_key(rows[j])}" in problems
+        assert f"missing key {_row_key(rows[i])}" in problems
+
+
+def test_every_row_matches_an_independent_layout_oracle() -> None:
+    for r in _table_rows():
+        base = list(r["base"])
+        new = base[: r["insert_at"]] + [r["inserted"]] + base[r["insert_at"] :]
+        assert _layout(base) == (r["old_offsets"], r["old_size"]), r
+        assert _layout(new) == (r["new_offsets"], r["new_size"]), r
 
 
 def test_helper_reads_a_moving_insertion_as_moving() -> None:

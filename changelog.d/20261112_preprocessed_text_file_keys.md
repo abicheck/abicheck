@@ -6,4 +6,4 @@
   separators, `./` or `..` segments) still finds the file instead of
   treating it as one that spells no alignment specifier. Tables the backend
   builds itself were already normalised, so extraction output on a single
-  host is unchanged (extractor generation stays 56).
+  host is unchanged (the extractor generation is not bumped).

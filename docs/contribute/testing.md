@@ -111,7 +111,10 @@ a JSON report and a step summary (`integration.yml` for the PR tier,
 shared library with DWARF and public headers can show. `SCOPE_BUCKETS` is that
 partition as data: named buckets (by prefix or name) exclude PE/COFF, Apple,
 Python/NumPy/wheel packaging, SYCL, kernel-module ABI and multi-library bundle
-kinds, and include the `source`-taxonomy kinds a header alone shows (concepts,
+kinds, compile-mode switches only L3 compile commands carry, ELF header facts
+no x86 build can change, executable-only and PE/Mach-O version facts,
+`STT_COMMON` (never in a linked library) and kinds judged against a declared
+deployment floor, and include the `source`-taxonomy kinds a header alone shows (concepts,
 public typedef targets, header-only functions); module buckets take the rest of
 each taxonomy module (`symbols`/`types`/`platform` in, `build`/`source` and the
 source graph out — L3–L5 evidence). Macro, `constexpr` and default-argument
@@ -168,15 +171,37 @@ refuses the same combinations through the same module. The report gives
 covered against feasible points overall and per axis value, and the top
 uncovered feasible points ranked by how thinly their axis values are covered.
 
+The `edit` axis comes from `tests/_edit_corpus_edit_model.py`, which defines
+the edit classes from C/C++ layout rules and imports nothing from the
+operators. Record layout (`struct`) is split by member insert or remove ×
+head, middle or tail × *shifts* (another offset or sizeof changes) or
+*absorbed* (padding takes it). Head × absorbed is excluded because a layout
+rule rules it out, and a test checks that against the Lean layout table. The
+model also has classes for reorder, retype (same layout, grows, shrinks,
+alignment only), array bound changes, bit-fields, record-level edits and
+rename/cv. Base-class layout (`inheritance`) is split by base added
+(non-virtual or virtual), removed, reordered, made virtual or non-virtual,
+resized, or given a new access. Every other construct has the single class
+`any`. `OP_EDIT_CLASS` in `_edit_corpus_space.py` maps each operator of a
+split construct to its class. It may only name model classes, and an
+operator it does not place fails `tests/test_edit_corpus_edit_axis.py`.
+Every model class is in the denominator, whether or not an operator generates
+it. A class with no operator is an explicit gap: the summary lists it as
+**none (gap)**, and the ledger's `edit_classes_without_operator` records it
+(`ledger --write` regenerates that list, and `ledger` fails while the list is
+stale). To close a gap, add an operator and place it in `OP_EDIT_CLASS`. Do
+not remove the class from the model.
+
 What these numbers do **not** mean:
 
 - A verified ChangeKind is not proof that abicheck reports that kind for every
   edit that should produce it; one cell under one configuration verified it.
 - A covered space point means a cell *ran* there, not that abicheck was right
   there (mismatches are the corpus test's own result) and not that every edit
-  of that construct ran. Record-layout edits are split by sub-class (the
-  `edit` axis: insert/append/remove, absorbed by padding or not), but other
-  constructs are not split, so their individual edits are still not counted.
+  of that construct ran. Record-layout and base-class edits are split by the
+  edit model's classes, but other constructs are not split, so their
+  individual edits are still not counted, and a class's points are covered by
+  one operator, not by every layout that class can land in.
 - The space holds only the corpus's own axes. Architectures beyond `-m32`,
   other operating systems, link order and real-world library shapes are not in
   the denominator, so 100% would still not be "all of C/C++".

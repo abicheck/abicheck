@@ -116,8 +116,11 @@ jobs:
             if [[ "$spec" == *$'\n'* || "$spec" == *$'\r'* ]]; then
               echo "toolchain list must be one line" >&2; return 1
             fi
+            local -a names=()
             IFS=',' read -ra names <<< "$spec"
-            for raw in "${names[@]}"; do
+            # ${a[@]+"${a[@]}"}: an empty spec leaves names empty, and bash 3.2
+            # (macOS) rejects "${names[@]}" on an empty array under set -u.
+            for raw in ${names[@]+"${names[@]}"}; do
               name="${raw//[[:space:]]/}"
               [ -z "$name" ] && continue
               if ! [[ "$name" =~ ^(gcc|clang)(-?([0-9]+))?$ ]]; then

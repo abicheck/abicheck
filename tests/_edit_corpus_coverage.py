@@ -45,6 +45,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from tests import _edit_corpus_space as space_model
 from tests._edit_corpus_config import Config
 from tests._edit_corpus_expect import PASSING_CLASSES, ExecTruth, Expectation
 from tests._edit_corpus_space import (
@@ -56,6 +57,14 @@ from tests._edit_corpus_space import (
 LEDGER_PATH = Path(__file__).with_name("edit_corpus_coverage_ledger.json")
 COVERAGE_DIR_ENV = "ABICHECK_EDIT_CORPUS_COVERAGE_DIR"
 TIERS: tuple[str, ...] = ("pr", "nightly", "weekly")
+# The ledger keys ``ledger`` recomputes and checks (``verified_floor`` is
+# raised from runs instead).
+LEDGER_DECLARED_KEYS: tuple[str, ...] = (
+    "declared_covered",
+    "declared_uncovered",
+    "out_of_scope",
+    "edit_classes_without_operator",
+)
 
 # --- scope --------------------------------------------------------------------
 
@@ -132,6 +141,68 @@ SCOPE_BUCKETS: tuple[ScopeBucket, ...] = (
         False,
         "multi-library bundle scope; a corpus cell is one library",
         ("bundle_",),
+    ),
+    ScopeBucket(
+        "build_mode_options",
+        False,
+        "a compile-mode switch read only from L3 compile commands "
+        "(build_diff); nothing in the binary, DWARF or headers carries it",
+        names=frozenset(
+            {
+                "exceptions_mode_changed",
+                "float_abi_changed",
+                "lto_mode_changed",
+                "rtti_mode_changed",
+                "sanitizer_mode_changed",
+                "struct_packing_mode_changed",
+                "threadsafe_statics_mode_changed",
+                "tls_model_changed",
+                "whole_program_vtables_mode_changed",
+            }
+        ),
+    ),
+    ScopeBucket(
+        "non_x86_elf",
+        False,
+        "an ELF header or note fact no x86/x86-64 build can change "
+        "(AArch64 BTI/PAC, e_flags, byte order, a non-GNU OS ABI); the "
+        "corpus's toolchains target x86",
+        names=frozenset(
+            {
+                "branch_protection_improved",
+                "branch_protection_weakened",
+                "elf_abi_flags_changed",
+                "elf_endianness_changed",
+                "elf_osabi_changed",
+            }
+        ),
+    ),
+    ScopeBucket(
+        "executable_only",
+        False,
+        "a property of an executable (PT_INTERP, DF_1_PIE); a shared library "
+        "linked with -shared has neither",
+        names=frozenset({"interpreter_changed", "pie_disabled"}),
+    ),
+    ScopeBucket(
+        "pe_macho_version",
+        False,
+        "a PE file version or Mach-O current_version; an ELF library has no such field",
+        names=frozenset({"library_version_downgraded"}),
+    ),
+    ScopeBucket(
+        "unlinkable_symbol_shape",
+        False,
+        "STT_COMMON exists only in relocatable objects: the linker allocates "
+        "a common symbol in .bss, so a linked shared library never has one",
+        names=frozenset({"common_symbol_risk"}),
+    ),
+    ScopeBucket(
+        "declared_deployment_floor",
+        False,
+        "judged against a declared deployment floor (`.abicheck.yml` "
+        "runtime_floors), a policy input the corpus does not give",
+        names=frozenset({"platform_baseline_floor_raised"}),
     ),
     # --- named, in scope: source-taxonomy kinds a public header alone shows.
     # Macro values, constexpr values, default-argument values, a removed public
@@ -624,6 +695,33 @@ def _produced_not_expected_lines(rep: dict) -> list[str]:
     return [*lines, "", "</details>"]
 
 
+def _edit_class_lines(sp: dict) -> list[str]:
+    """The edit-class model: every class, its operators, and the gaps."""
+    classes = sp.get("edit_classes") or {}
+    total = sum(len(c) for c in classes.values())
+    gaps = sp.get("edit_classes_without_operator") or []
+    if not total:
+        return []
+    lines = [
+        "",
+        f"Edit classes in the model (`tests/_edit_corpus_edit_model.py`): **{total}**; "
+        f"with a generating operator: **{total - len(gaps)}**; "
+        f"with none (uncovered gaps, still in the denominator): **{len(gaps)}**.",
+        "",
+        "<details><summary>Edit classes</summary>",
+        "",
+        "| Class | Operators | Points covered / feasible |",
+        "|---|---|---:|",
+    ]
+    for con, rows in classes.items():
+        for cls, row in rows.items():
+            ops = ", ".join(f"`{o}`" for o in row["operators"]) or "**none (gap)**"
+            lines.append(
+                f"| `{con}/{cls}` | {ops} | {row['covered']} / {row['feasible']} |"
+            )
+    return [*lines, "", "</details>"]
+
+
 def summary_markdown(rep: dict, title: str = "Edit corpus coverage") -> str:
     lines = [f"### {title}", ""]
     lines.append(
@@ -673,6 +771,7 @@ def summary_markdown(rep: dict, title: str = "Edit corpus coverage") -> str:
         lines += ["", "<details><summary>Top uncovered feasible points</summary>", ""]
         lines += [f"- `{p}`" for p in sp["top_uncovered"]]  # type: ignore[index]
         lines += ["", "</details>"]
+    lines += _edit_class_lines(sp)
     if sp["covered_but_infeasible"]:  # type: ignore[index]
         lines += [
             "",
@@ -713,6 +812,11 @@ def declared_ledger(previous: dict | None = None) -> dict:
         # moved into scope by a bucket change is not mistaken for it.
         "out_of_scope": sorted({k.name for k in ChangeKind} - scope_set),
         "verified_floor": (previous or {}).get("verified_floor", {}),
+        # Edit classes of the space model (``_edit_corpus_edit_model``) that no
+        # operator generates: uncovered gaps, kept in the denominator.
+        "edit_classes_without_operator": list(
+            space_model.edit_classes_without_operator()
+        ),
     }
 
 
@@ -758,10 +862,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.write:
             _write_ledger(fresh)
             return 0
-        same = all(
-            fresh[k] == ledger.get(k)
-            for k in ("declared_covered", "declared_uncovered", "out_of_scope")
-        )
+        same = all(fresh[k] == ledger.get(k) for k in LEDGER_DECLARED_KEYS)
         print("ledger is current" if same else "ledger is stale: run with --write")
         return 0 if same else 1
 

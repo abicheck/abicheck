@@ -31,10 +31,12 @@ from ..policy.generation_drift_demotion import (
     demote_generation_spelling_drift,
     demote_restrict_depth_drift,
 )
+from ..policy.retired_function_drift import demote_retired_function_drift
 from ..storage.generation_migrations import (
     erased_extents_restored_between,
     extractor_generation_of,
     pending_extent_shift,
+    retired_function_prefixes_between,
 )
 
 __all__ = [
@@ -92,8 +94,14 @@ def demote_cross_generation_drift(
         new_generation,
         restored=erased_extents_restored_between(old_generation, new_generation),
     )
-    return demote_restrict_depth_drift(
+    changes = demote_restrict_depth_drift(
         changes, old, new, old_generation, new_generation
+    )
+    return demote_retired_function_drift(
+        changes,
+        retired_function_prefixes_between(old_generation, new_generation),
+        old_generation,
+        new_generation,
     )
 
 
