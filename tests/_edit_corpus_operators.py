@@ -26,6 +26,7 @@ from tests._edit_corpus_config import Config
 from tests._edit_corpus_expect import VERDICT_RANK, Rule
 from tests._edit_corpus_operators_cxx import CXX_OPERATORS
 from tests._edit_corpus_operators_elf import ELF_OPERATORS
+from tests._edit_corpus_operators_symbols import SYMBOL_OPERATORS
 from tests._edit_corpus_opkit import (
     _ALIGN,
     _ENUM_SIZE,
@@ -620,9 +621,12 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         "static_inline_helper_added",
         ("func.handle",),
         _static_inline_helper,
-        "a new static inline helper exports no symbol",
+        # The binary is unchanged; against the headers' public-header set
+        # (``abicheck dump -H``) the helper is a new source-level entry
+        # point, a compatible API addition.
+        "a new static inline helper exports no symbol; at most it adds to the API",
         verdict_min="NO_CHANGE",
-        verdict_max="NO_CHANGE",
+        verdict_max="COMPATIBLE",
         min_evidence="headers",
         features=("inline",),
         touches=("func.handle",),
@@ -943,7 +947,12 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
 
 
 # Operators for the c_elf and cxx_more seeds live in their own modules.
-OPERATORS: tuple[EditOp, ...] = (*CORE_OPERATORS, *ELF_OPERATORS, *CXX_OPERATORS)
+OPERATORS: tuple[EditOp, ...] = (
+    *CORE_OPERATORS,
+    *ELF_OPERATORS,
+    *CXX_OPERATORS,
+    *SYMBOL_OPERATORS,
+)
 
 OP_BY_NAME: dict[str, EditOp] = {op.name: op for op in OPERATORS}
 

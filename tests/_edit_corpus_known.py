@@ -24,6 +24,17 @@ GAP_DWARF_PURE = "A GCC-built DWARF snapshot cannot tell that a virtual became p
 GAP_CLANG_CHAR = (
     "A clang-built plain-`char` signedness flip reads `NO_CHANGE` at DWARF depth"
 )
+GAP_CASTXML_VAR_ALIGN = (
+    "castxml headers read a variable's alignment specifier only as a lower bound"
+)
+GAP_CASTXML_CONTRACT = "castxml records no GNU contract attribute on a function"
+GAP_VA_LIST = "Only the clang header backend marks a `va_list` parameter"
+GAP_GCC_THROW = (
+    "The native gcc header backend records no dynamic exception specification"
+)
+GAP_GCC_UNEXPORTED = (
+    "The native gcc header backend keeps an unexported declaration PUBLIC"
+)
 GAP_O2_STD = (
     "An `-O2` rebuild of a C++ library that uses `std::string` reads as a risk on gcc, "
     "or a break on MinGW"
@@ -112,10 +123,78 @@ def _backend_gap(
 
 _MORE = frozenset({"cxx_more"})
 
-# Header-backend parity: castxml reads these facts, the named backend does
-# not. Each is being fixed in the backend itself; the entry forces its own
-# removal (a fixed cell no longer reproduces) when the fix lands.
-_BACKEND_GAPS: tuple[Known, ...] = ()
+_ELF = frozenset({"c_elf"})
+
+
+def _contract_gap(op: str, kind: str) -> Known:
+    return _backend_gap(
+        op,
+        _ELF,
+        "castxml",
+        "wrong-verdict",
+        "castxml writes no nonnull/returns_nonnull on a <Function>: the "
+        "contract change reads NO_CHANGE",
+        GAP_CASTXML_CONTRACT,
+        frozenset({f"missing:{kind}", "weaker-than:COMPATIBLE_WITH_RISK"}),
+        "NO_CHANGE",
+    )
+
+
+def _va_list_gap(op: str, kind: str, backend: str) -> Known:
+    return _backend_gap(
+        op,
+        _ELF,
+        backend,
+        "wrong-kind",
+        f"{backend} never establishes Param.is_va_list: only func_params_changed",
+        GAP_VA_LIST,
+        frozenset({f"missing:{kind}"}),
+        "BREAKING",
+    )
+
+
+def _unexported_gap(op: str, seeds: frozenset[str], kind: str) -> Known:
+    return _backend_gap(
+        op,
+        seeds,
+        "gcc",
+        "wrong-kind",
+        "the gcc backend records the unexported declaration PUBLIC, so the "
+        "pair does not match and the change reads func_added",
+        GAP_GCC_UNEXPORTED,
+        frozenset({f"missing:{kind}"}),
+        "COMPATIBLE",
+    )
+
+
+# Header-backend parity gaps the corpus found (tests/
+# test_header_backend_fact_gaps_integration.py holds their canaries).
+_BACKEND_GAPS: tuple[Known, ...] = (
+    _contract_gap("func_contract_attribute_added", "FUNC_CONTRACT_ATTRIBUTE_ADDED"),
+    _contract_gap("func_contract_attribute_removed", "FUNC_CONTRACT_ATTRIBUTE_REMOVED"),
+    *(
+        _va_list_gap(op, kind, backend)
+        for op, kind in (
+            ("param_became_va_list", "PARAM_BECAME_VA_LIST"),
+            ("param_lost_va_list", "PARAM_LOST_VA_LIST"),
+        )
+        for backend in ("castxml", "gcc")
+    ),
+    _backend_gap(
+        "func_exception_spec_widened",
+        _MORE,
+        "gcc",
+        "wrong-verdict",
+        "the gcc plugin emits no dynamic exception specification",
+        GAP_GCC_THROW,
+        frozenset(
+            {"missing:FUNC_EXCEPTION_SPEC_CHANGED", "weaker-than:COMPATIBLE_WITH_RISK"}
+        ),
+        "COMPATIBLE",
+    ),
+    _unexported_gap("declared_exports_defined", _ELF, "FUNC_EXPORT_ADDED"),
+    _unexported_gap("inline_function_outlined", _MORE, "FUNC_LOST_INLINE"),
+)
 
 KNOWN: tuple[Known, ...] = (
     Known(
@@ -223,6 +302,26 @@ KNOWN: tuple[Known, ...] = (
         GAP_O2_STD,
         issues=frozenset({"stronger-than:COMPATIBLE"}),
         verdicts=frozenset({"BREAKING", "COMPATIBLE_WITH_RISK"}),
+    ),
+    Known(
+        "var_alignment_raised",
+        frozenset({"c_elf"}),
+        "wrong-verdict",
+        # castxml 0.7 writes no align on a <Variable>: both sides record int's
+        # natural alignment as a lower bound, and the raised specifier leaves
+        # the address bounds overlapping. DWARF and the clang/gcc backends read it.
+        _hb("castxml"),
+        "castxml records no alignment specifier on a variable, so a raised "
+        "aligned(16) -> aligned(64) reads NO_CHANGE at castxml headers depth",
+        GAP_CASTXML_VAR_ALIGN,
+        issues=frozenset(
+            {
+                "missing:SONAME_BUMP_RECOMMENDED",
+                "missing:VAR_ALIGNMENT_CHANGED",
+                "weaker-than:BREAKING",
+            }
+        ),
+        verdicts=frozenset({"NO_CHANGE"}),
     ),
     *_BACKEND_GAPS,
 )

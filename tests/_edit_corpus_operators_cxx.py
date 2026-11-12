@@ -701,7 +701,9 @@ _SHAPES = (
             ),
         ),
         "a helper defined only in the source becomes a new export no header "
-        "declares: nothing existing changes",
+        "declares: nothing existing changes, but against the headers' public "
+        "contract it is an accidental export consumers can start binding to "
+        "(an ABI-hygiene risk, ADR-035)",
         expected=frozenset({"FUNC_ADDED_ELF_ONLY"}),
         rules=(
             Rule(
@@ -717,12 +719,13 @@ _SHAPES = (
             ),
             Rule(
                 lambda c: c.evidence in ("binary", "dwarf") or c.objfmt != "elf",
-                {"expected": frozenset({"FUNC_ADDED"})},
+                {"expected": frozenset({"FUNC_ADDED"}), "verdict_max": "COMPATIBLE"},
                 "without a header to miss it from, or off ELF (the undeclared-export "
                 "check reads the ELF export table), the export is an ordinary addition",
             ),
         ),
-        **_COMPAT_ONLY,
+        verdict_min="COMPATIBLE",
+        verdict_max="COMPATIBLE_WITH_RISK",
         **_BINARY,
     ),
 )

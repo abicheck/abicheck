@@ -133,6 +133,21 @@ SCOPE_BUCKETS: tuple[ScopeBucket, ...] = (
         "multi-library bundle scope; a corpus cell is one library",
         ("bundle_",),
     ),
+    ScopeBucket(
+        "needs_source_graph",
+        False,
+        "needs the L5 source graph (call/reference edges from public entries), "
+        "though the catalog files it under symbols",
+        names=frozenset({"internal_symbol_required_by_public_api"}),
+    ),
+    ScopeBucket(
+        "no_extractor_fact",
+        False,
+        "no extractor records the fact the detector reads, so no edit of a real "
+        "library reaches it: every backend and DWARF flatten an anonymous "
+        "member into its parent's fields",
+        names=frozenset({"anon_field_changed"}),
+    ),
     # --- named, in scope: source-taxonomy kinds a public header alone shows.
     # Macro values, constexpr values, default-argument values, a removed public
     # typedef and an uninstantiated template stay out (module bucket below):

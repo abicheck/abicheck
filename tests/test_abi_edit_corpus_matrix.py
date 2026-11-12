@@ -312,7 +312,11 @@ def test_elf_symbol_table_kinds_are_owed_only_on_elf(
     assert vtt.verdict_min == "BREAKING"
     export = OP_BY_NAME["source_only_export_added"].expect(config)
     assert export.expected == {export_kind}
-    assert export.verdict_min == export.verdict_max == "COMPATIBLE"
+    assert export.verdict_min == "COMPATIBLE"
+    # Against the headers' public-header set an undeclared ELF export is an
+    # ABI-hygiene risk; off ELF it is an ordinary addition.
+    elf = platform[1] == "elf"
+    assert export.verdict_max == ("COMPATIBLE_WITH_RISK" if elf else "COMPATIBLE")
 
 
 def test_a_rebuild_row_with_its_target_flag_already_set_is_repaired_not_dropped() -> (
