@@ -220,9 +220,12 @@ CI's `pr` profile.
 - `_edit_corpus_*.py` — the generated ABI edit corpus: seeds and operators
   (`requires(config)`/`expect(config)`; tables in `_edit_corpus_operators.py`
   for the core seeds, `_operators_elf.py` for `c_elf`, `_operators_cxx.py`
-  for `cxx_more`, the `EditOp` type in `_edit_corpus_opkit.py`; a seed's
+  for `cxx_more`, `_operators_platform.py` for ELF/loader/toolchain-level
+  edits, the `EditOp` type in `_edit_corpus_opkit.py`; a seed's
   `build.*` roles carry compile/link inputs — version script, SONAME, flags —
-  that an operator edits like a declaration), the `Config` axes and toolchain
+  that an operator edits like a declaration; a seed with a `gate_role`
+  (`c_elf_alt`, `cxx_alt`: baselines that already carry a feature an edit
+  removes) takes only operators naming that role), the `Config` axes and toolchain
   registry, the execution oracle (consumers run against old and new library,
   layout probes, new-header compiles) and `reconcile` (false-clean first).
   Record a mismatch in `_edit_corpus_known.py` with a `known-gaps.md` row;
