@@ -46,8 +46,9 @@ def _x86(c: Any) -> str | None:
 
 
 def _elf(c: Any) -> str | None:
-    # Symbol bindings, ELF visibility and leaked runtime instantiations are
-    # facts of an ELF export table.
+    # Symbol bindings, ELF visibility, leaked runtime instantiations and
+    # process-wide allocator interposition (a Mach-O two-level namespace
+    # binds operator new per image) are facts of an ELF export table.
     return None if c.objfmt == "elf" else f"{c.objfmt}: not an ELF export table"
 
 
@@ -767,6 +768,7 @@ _CXX = (
         expected=frozenset({"ALLOCATOR_REPLACEMENT_REMOVED"}),
         **_RISK,
         **_BINARY,
+        precondition=_elf,
     ),
     _xa(
         "std_string_abi_flipped",
@@ -891,6 +893,7 @@ _CXX = (
         expected=frozenset({"ALLOCATOR_REPLACEMENT_ADDED"}),
         **_RISK,
         **_BINARY,
+        precondition=_elf,
     ),
     _op(
         "std_template_instance_exported",
