@@ -30,9 +30,6 @@ GAP_O2_STD = (
 )
 
 
-GAP_GCC_OVERLOAD = "The native gcc header backend records no overload-set ambiguity"
-
-
 def _always(_: Config) -> bool:
     return True
 
@@ -118,20 +115,7 @@ _MORE = frozenset({"cxx_more"})
 # Header-backend parity: castxml reads these facts, the named backend does
 # not. Each is being fixed in the backend itself; the entry forces its own
 # removal (a fixed cell no longer reproduces) when the fix lands.
-_BACKEND_GAPS: tuple[Known, ...] = (
-    _backend_gap(
-        "converting_ctor_overload_added",
-        _MORE,
-        "gcc",
-        "wrong-kind",
-        "the native gcc header backend reads the new CO(long) constructor's "
-        "ambiguity risk but not the overload set's: overload_ambiguity_introduced "
-        "is missing",
-        GAP_GCC_OVERLOAD,
-        frozenset({"missing:OVERLOAD_AMBIGUITY_INTRODUCED"}),
-        "COMPATIBLE_WITH_RISK",
-    ),
-)
+_BACKEND_GAPS: tuple[Known, ...] = ()
 
 KNOWN: tuple[Known, ...] = (
     Known(

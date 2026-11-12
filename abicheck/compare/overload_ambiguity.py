@@ -268,13 +268,31 @@ def _signature(f: Function) -> str:
     return f"({', '.join(p.type for p in f.params)})"
 
 
+def _declaration_key(f: Function) -> tuple[object, ...]:
+    """What identifies one declaration within an overload set: two members
+    of a C++ overload set cannot share parameter types and object shape, so
+    entries that do are the same declaration under several symbols -- the
+    Itanium complete/base constructor (``C1``/``C2``) or destructor variants
+    a backend that reads real symbols records separately."""
+    return (
+        tuple(p.type for p in f.params),
+        f.is_static,
+        f.is_const,
+        f.is_volatile,
+        f.ref_qualifier or "",
+    )
+
+
 def _groups(functions: Iterable[Function]) -> dict[str, list[Function]]:
-    out: dict[str, list[Function]] = {}
+    """Overload sets by callable, one entry per declaration (see
+    :func:`_declaration_key`); otherwise a declaration recorded under two
+    symbols reads as two overloads that tie, and every witness is withdrawn."""
+    out: dict[str, dict[tuple[object, ...], Function]] = {}
     for f in functions:
         key = callable_key(f)
         if key is not None:
-            out.setdefault(key, []).append(f)
-    return out
+            out.setdefault(key, {}).setdefault(_declaration_key(f), f)
+    return {key: list(members.values()) for key, members in out.items()}
 
 
 @registry.detector("overload_ambiguity")
