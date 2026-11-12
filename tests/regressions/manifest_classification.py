@@ -178,7 +178,10 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "code must also not contradict the evidence it rests on."
         ),
         fixed_by=(1321,),
-        seed_tests=("tests/test_undocumented_export_surface_scope.py",),
+        seed_tests=(
+            "tests/test_undocumented_export_surface_scope.py",
+            "tests/test_allocator_replacement_surface.py",
+        ),
         public_surfaces=("compare --scope-public-headers",),
         axes={
             "direction": ("added", "removed", "property churn"),

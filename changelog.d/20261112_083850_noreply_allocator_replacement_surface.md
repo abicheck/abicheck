@@ -1,0 +1,3 @@
+### Fixed
+
+- **A replaced global `operator new` is reported, and dropping it is no longer a break.** With public headers, `allocator_replacement_added`/`_removed` were scoped out as `not-exported` because the finding was named after an allocation function the export classifier treats as the C++ runtime's; the finding is now labelled `<global-allocator>`, a library-level subject scoping keeps. The runtime-symbol filter also spelled `operator new` as `_ZnwSt`, which no mangling uses, so a library that stopped exporting `_Znwm` read `func_removed_elf_only` (`BREAKING`) although consumers resolve `operator new` from the C++ runtime; every global `operator new`/`new[]` overload now reads as the runtime's, like `operator delete` already did.

@@ -98,9 +98,15 @@ _STDLIB_PREFIXES = (
     "_ZNKRSt",  # const/ref-qualified std:: methods
     "_ZNVRSt",  # volatile/ref-qualified std:: methods
     "_ZNSt3__1",  # libc++ inline-namespace __1
+    # The global allocation functions, every overload (sized, aligned,
+    # nothrow): ``operator new(std::size_t)`` mangles as ``_Znwm`` (``_Znwj``
+    # on ILP32), never ``_ZnwSt`` -- that spelling matched no symbol, so a
+    # library's replaced ``operator new`` read as its own API while its
+    # ``operator delete`` (``_ZdlPv``) read as the runtime's. A replacement
+    # is reported once, as ``allocator_replacement_*``.
+    "_Znw",  # operator new
+    "_Zna",  # operator new[]
     "_ZdlPv",  # operator delete(void*)
-    "_ZnwSt",  # operator new(std::size_t)
-    "_ZnaSt",  # operator new[](std::size_t)
     "_ZdaPv",  # operator delete[](void*)
     "_ZTVN10__cxxabiv",  # vtables for RTTI (typeinfo infrastructure)
     "_ZSt",  # std:: global symbols (e.g. _ZSt4cout)

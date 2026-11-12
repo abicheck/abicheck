@@ -238,62 +238,6 @@ _PLATFORM: tuple[Known, ...] = (
         verdicts=_BREAKING,
     ),
     Known(
-        "allocator_replacement_removed",
-        _XA,
-        "false-positive",
-        _ev("binary", "dwarf"),
-        "the library stops exporting operator new/delete; consumers resolve "
-        "them from the C++ runtime, yet the _Znwm export loss reads "
-        "func_removed_elf_only (BREAKING)",
-        GAP_ALLOCATOR,
-        issues=frozenset({"stronger-than:COMPATIBLE_WITH_RISK"}),
-        verdicts=_BREAKING,
-    ),
-    Known(
-        "allocator_replacement_removed",
-        _XA,
-        "false-positive",
-        _hb("castxml"),
-        "with public headers the allocator finding (named after _ZdlPv, a "
-        "runtime symbol) is scoped out as not-exported, and the _Znwm export "
-        "loss reads func_removed (BREAKING)",
-        GAP_ALLOCATOR,
-        issues=frozenset(
-            {
-                "missing:ALLOCATOR_REPLACEMENT_REMOVED",
-                "stronger-than:COMPATIBLE_WITH_RISK",
-            }
-        ),
-        verdicts=_BREAKING,
-    ),
-    Known(
-        "allocator_replacement_removed",
-        _XA,
-        "wrong-verdict",
-        _hb("clang"),
-        "with public headers the allocator finding is scoped out as "
-        "not-exported, and nothing else is left above COMPATIBLE",
-        GAP_ALLOCATOR,
-        issues=frozenset(
-            {
-                "missing:ALLOCATOR_REPLACEMENT_REMOVED",
-                "weaker-than:COMPATIBLE_WITH_RISK",
-            }
-        ),
-        verdicts=frozenset({"COMPATIBLE"}),
-    ),
-    Known(
-        "allocator_replacement_added",
-        frozenset({"cxx_more"}),
-        "wrong-kind",
-        _ev("headers"),
-        "with public headers the allocator finding (named after _ZdlPv, a "
-        "runtime symbol) is scoped out as not-exported",
-        GAP_ALLOCATOR,
-        issues=frozenset({"missing:ALLOCATOR_REPLACEMENT_ADDED"}),
-        verdicts=frozenset({"COMPATIBLE_WITH_RISK"}),
-    ),
-    Known(
         "std_string_abi_flipped",
         _XA,
         "wrong-kind",

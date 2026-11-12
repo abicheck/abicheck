@@ -792,12 +792,12 @@ def _diff_elf_import_set(old_elf: Any, new_elf: Any) -> list[Change]:
 def _diff_allocator_replacement(old_elf: Any, new_elf: Any) -> list[Change]:
     """Detect a library starting/stopping to export global operator new/delete.
 
-    These symbols interpose allocation for the whole process, so their
-    presence flipping is a loader-level contract change even though the
-    symbol-level diff also reports the individual adds/removes. Fires once per
-    direction at the library level. Gated on captured ELF identity, not on the
-    symbol lists being non-empty — an export table that is empty on one side
-    is still evidence about which allocator symbols it (doesn't) export.
+    These symbols interpose allocation for the whole process: a loader-level
+    contract change, reported once per direction under the library-level
+    label ``<global-allocator>`` (an allocator's own name reads as the C++
+    runtime's, so public-surface scoping would drop the finding as
+    not-exported). Gated on captured ELF identity, not on non-empty symbol
+    lists: an empty export table is still evidence of what it exports.
     """
     if not both_captured_elf_identity(old_elf, new_elf):
         return []
@@ -819,7 +819,7 @@ def _diff_allocator_replacement(old_elf: Any, new_elf: Any) -> list[Change]:
         return [
             make_change(
                 ChangeKind.ALLOCATOR_REPLACEMENT_ADDED,
-                symbol=first,
+                symbol="<global-allocator>",
                 detail=f"{first}{suffix}",
                 new_value=str(len(new_alloc)),
             )
@@ -829,7 +829,7 @@ def _diff_allocator_replacement(old_elf: Any, new_elf: Any) -> list[Change]:
     return [
         make_change(
             ChangeKind.ALLOCATOR_REPLACEMENT_REMOVED,
-            symbol=first,
+            symbol="<global-allocator>",
             detail=f"{first}{suffix}",
             old_value=str(len(old_alloc)),
         )
