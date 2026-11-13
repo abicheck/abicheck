@@ -91,11 +91,12 @@ class TestUnknownTypeWarning:
         assert name == "my_vendor_type"
 
     def test_fallback_returns_tag_name_for_unknown(self) -> None:
-        """_compute_fallback_type_info must return (tag, 0) for unknown tagless DIE."""
+        """_compute_fallback_type_info must return (tag, None) for unknown tagless DIE:
+        its size is not observed, so it is unknown, never a real 0 (generation 58)."""
         die = _MockDie(tag="DW_TAG_some_unknown", offset=1)
         name, size = _compute_fallback_type_info(die, "DW_TAG_some_unknown")
         assert name == "DW_TAG_some_unknown"  # falls back to tag string
-        assert size == 0
+        assert size is None
 
     def test_fallback_returns_unknown_for_empty_tag(self) -> None:
         """When both name and tag are empty, return 'unknown'."""
