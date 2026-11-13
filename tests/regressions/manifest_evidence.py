@@ -851,6 +851,10 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             "tests/test_extract_absent_key_as_value.py",
             "tests/test_clang_explicit_specifier.py",
             "tests/test_concept_constraint_direction.py",
+            # a corrupt PE/Mach-O/DWARF/storage-v2 input read as a smaller
+            # surface: the parser regressions and the CLI matrix
+            "tests/test_parser_fuzz_oracle.py",
+            "tests/test_corrupt_input_matrix.py",
         ),
         known_gaps=(
             KnownGap(

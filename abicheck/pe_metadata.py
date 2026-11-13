@@ -164,6 +164,86 @@ def _parse_pe_version_resource(pe: Any, meta: PeMetadata) -> None:
         break  # only first entry
 
 
+def _rva_range_in_file(pe: Any, rva: int, size: int) -> bool:
+    """Whether the *size* bytes at *rva* are held by the file's raw data."""
+    if not size:
+        return True
+    offset = pe.get_offset_from_rva(rva)
+    return offset is not None and 0 <= offset and offset + size <= len(pe.__data__)
+
+
+def _note_truncated_image(pe: Any) -> None:
+    """Record a failure for a PE image whose bytes end before its tables do.
+
+    pefile reads past-the-end data as absent rather than raising: an export
+    directory whose name strings are cut reads as fewer names, one whose RVA
+    lies past the end of the file as no export directory at all, and a
+    section whose raw data is cut as a shorter one. Each is a truncated
+    image (the Windows loader refuses to map it), never a smaller export table.
+    """
+    size = len(pe.__data__)
+    header_end = (
+        pe.DOS_HEADER.e_lfanew
+        + 24
+        + pe.FILE_HEADER.SizeOfOptionalHeader
+        + 40 * pe.FILE_HEADER.NumberOfSections
+    )
+    if header_end > size or len(pe.sections) < pe.FILE_HEADER.NumberOfSections:
+        note_export_read_failure(
+            f"PE headers end at byte {header_end} of a {size}-byte file and "
+            f"{len(pe.sections)} of {pe.FILE_HEADER.NumberOfSections} section "
+            "headers were readable (truncated image)"
+        )
+    for section in pe.sections:
+        end = section.PointerToRawData + section.SizeOfRawData
+        if section.SizeOfRawData and end > size:
+            name = section.Name.rstrip(b"\0").decode("ascii", errors="replace")
+            note_export_read_failure(
+                f"PE section {name!r} ends at byte {end} of a {size}-byte file "
+                "(truncated image)"
+            )
+    optional = getattr(pe, "OPTIONAL_HEADER", None)
+    directories = getattr(optional, "DATA_DIRECTORY", [])
+    if getattr(optional, "Magic", None) not in (0x10B, 0x20B):
+        # No PE32/PE32+ optional header: the data directories (the export
+        # directory among them) were never located.
+        note_export_read_failure("PE optional header unreadable")
+        return
+    if not directories:
+        # A header may declare zero data directories (NumberOfRvaAndSizes):
+        # no export directory, not a lost one. A positive count read as none
+        # is a cut header.
+        if getattr(optional, "NumberOfRvaAndSizes", 0):
+            note_export_read_failure("PE data directories declared but unreadable")
+        return
+    entry = directories[0]
+    if entry is None or not entry.VirtualAddress:
+        return  # no export directory declared: a DLL exporting nothing
+    if not _rva_range_in_file(pe, entry.VirtualAddress, entry.Size):
+        note_export_read_failure(
+            f"PE export directory (RVA 0x{entry.VirtualAddress:x}, "
+            f"{entry.Size} bytes) is not held by the {size}-byte file"
+        )
+    export = getattr(pe, "DIRECTORY_ENTRY_EXPORT", None)
+    if export is None:
+        note_export_read_failure("PE export directory declared but unreadable")
+        return
+    hdr = export.struct
+    for what, rva, length in (
+        ("function table", hdr.AddressOfFunctions, 4 * hdr.NumberOfFunctions),
+        ("name table", hdr.AddressOfNames, 4 * hdr.NumberOfNames),
+        ("name-ordinal table", hdr.AddressOfNameOrdinals, 2 * hdr.NumberOfNames),
+    ):
+        if not _rva_range_in_file(pe, rva, length):
+            note_export_read_failure(f"PE export {what} runs past the end of the file")
+    named = sum(1 for sym in export.symbols if sym.name)
+    if named < hdr.NumberOfNames:
+        note_export_read_failure(
+            f"PE export directory names {hdr.NumberOfNames} exports but "
+            f"{named} names were readable"
+        )
+
+
 def _parse(dll_path: Path) -> PeMetadata:
     """Parse PE metadata from *dll_path* using pefile."""
     with open_pe(dll_path) as pe:
@@ -180,6 +260,7 @@ def _parse(dll_path: Path) -> PeMetadata:
             ]
         )
 
+        _note_truncated_image(pe)
         meta = PeMetadata()
         # A successful parse captures the delay-load surface even when the
         # directory is absent ({} = "verified none"), keeping None reserved

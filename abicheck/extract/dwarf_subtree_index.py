@@ -550,13 +550,13 @@ def _indexed_iter_DIE_children(self: Any, die: Any) -> Any:
             return
         yield child
         if not child.has_children:
-            cur_offset += child.size
+            cur_offset = _next_sibling(self, child, cur_offset + child.size)
             continue
         sibling = child.attributes.get("DW_AT_sibling")
         if sibling is not None and sibling.form in _CU_RELATIVE_REF_FORMS:
             # The producer said where the next sibling is (GCC does): the
             # stock rule, and no reason to scan the unit at all.
-            cur_offset = sibling.value + self.cu_offset
+            cur_offset = _next_sibling(self, child, sibling.value + self.cu_offset)
             continue
         index = _index_for(self)
         end = index.ends.get(child.offset) if index is not None else None
@@ -565,7 +565,28 @@ def _indexed_iter_DIE_children(self: Any, die: Any) -> Any:
             # parent's children the stock way from here.
             yield from _stock_children_from(self, die, child)
             return
-        cur_offset = end
+        cur_offset = _next_sibling(self, child, end)
+
+
+def _next_sibling(CU: Any, child: Any, offset: int) -> int:
+    """*offset* as *child*'s next sibling, refused unless it moves forward and
+    stays inside the unit.
+
+    A corrupt abbreviation can decode some attribute as ``DW_AT_sibling``
+    with a garbage value; pointing back at *child* (or before it) made the
+    walk loop forever, and pointing past the unit read another unit's bytes.
+    The children list ends in a null entry inside the unit, so the next
+    sibling is always after *child* and before the unit's end. A refusal is a
+    ``ValueError``: the readers' per-unit guards record it as an unreadable
+    unit.
+    """
+    unit_end = int(CU.cu_offset) + int(CU.size)
+    if not int(child.offset) < offset < unit_end:
+        raise ValueError(
+            f"DIE at {child.offset}: next sibling offset {offset} is not after it "
+            f"inside the unit ending at {unit_end}"
+        )
+    return offset
 
 
 def iter_children_tagged(die: Any, tags: frozenset[str]) -> Iterator[Any]:
@@ -642,7 +663,17 @@ def iter_formal_parameter_type_refs(die: Any) -> Iterator[tuple[Any, Any]]:
 def _stock_children_from(CU: Any, die: Any, current: Any) -> Any:
     """Yield *die*'s children after *current* using pyelftools' own stepping."""
     started = False
+    last = int(die.offset)
+    unit_end = int(CU.cu_offset) + int(CU.size)
     for child in type(CU).iter_DIE_children(CU, die):
+        # pyelftools follows DW_AT_sibling as written: the same forward-and-
+        # inside-the-unit rule as _next_sibling, or a corrupt sibling loops.
+        if not last < int(child.offset) < unit_end:
+            raise ValueError(
+                f"DIE at {child.offset} does not follow {last} inside the unit "
+                f"ending at {unit_end}"
+            )
+        last = int(child.offset)
         if started:
             yield child
         elif child.offset == current.offset:

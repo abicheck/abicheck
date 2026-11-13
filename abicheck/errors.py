@@ -81,6 +81,20 @@ class HeaderToolchainError(SnapshotError):
     """
 
 
+class MalformedSnapshotError(SnapshotError, TypeError, ValueError):
+    """Raised when a stored snapshot document has the wrong shape: a required
+    key is missing or a node has the wrong JSON type.
+
+    A :class:`SnapshotError` for every reader that reports a bad snapshot,
+    and also a ``TypeError``/``ValueError`` -- the "malformed package" signal
+    the storage layer's callers already catch (``abicheck/storage/AGENTS.md``,
+    invariant 6) -- so translating a decoder's bare ``KeyError`` or
+    ``AttributeError`` into it narrows what escapes without changing what any
+    existing ``except`` clause catches. Raised only by
+    :func:`abicheck.storage.malformed_document.malformed_document_errors`.
+    """
+
+
 class IncompatibleSnapshotSchemaError(SnapshotError):
     """Raised when a persisted snapshot's ``schema_version`` is both newer
     than this reader's ``serialization.SCHEMA_VERSION`` and at or above

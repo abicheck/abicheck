@@ -40,6 +40,7 @@ from ...extract.export_symbol_identity import (
     itanium_export_variable as _elf_export_variable,
 )
 from ...extract.headers.toolchain import _safe_mtime, _safe_size
+from ...extract.parse_failures import debug_info_read_required
 from ...extract.semantic_normalizer import normalize_header_ast
 from ...model import AbiSnapshot, RecordType
 from ...model.semantic_ir import SemanticIR
@@ -153,7 +154,8 @@ def _try_dwarf_snapshot(
             stacklevel=3,
         )
 
-    with memory_trace.phase("dump.dwarf_snapshot"):
+    # A CU the walk could not parse is an error, never a smaller type surface.
+    with memory_trace.phase("dump.dwarf_snapshot"), debug_info_read_required(so_path):
         snap = build_snapshot_from_dwarf(
             so_path,
             elf_meta,
