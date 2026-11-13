@@ -24,13 +24,25 @@ from typing import Any
 import pytest
 
 from abicheck import dwarf_metadata as dm
+from abicheck.compare.debug_layout_view import debug_layout_view
 from abicheck.compare.type_layout_diff import (
     _existing_field_changes,
     _removed_field_changes,
+    diff_struct_layouts,
 )
 from abicheck.model.change_catalog.kinds import ChangeKind
-from abicheck.model.dwarf_facts import FieldInfo, StructLayout
+from abicheck.model.dwarf_facts import DwarfMetadata, FieldInfo, StructLayout
+from abicheck.model.snapshot import AbiSnapshot
+from abicheck.serialization import snapshot_from_dict, snapshot_to_dict
 from abicheck.snapshot_platform_blocks import dwarf_from_dict
+from abicheck.storage.dwarf_field_size_migration import (
+    DWARF_FIELD_SIZE_GENERATION,
+    migrate_dwarf_field_size_unknown,
+)
+from abicheck.storage.generation_migrations import (
+    FACT_GENERATIONS_KEY,
+    migrate_and_describe,
+)
 from abicheck.storage.snapshot_encode import _encode_value
 
 _DOMAIN: tuple[int | None, ...] = (None, 0, 4, 8)
@@ -224,3 +236,101 @@ def test_legacy_member_decodes_missing_size_as_unknown(
     legacy = {"structs": {"S": {"name": "S", "byte_size": 8, "fields": [member]}}}
     (field,) = dwarf_from_dict(legacy).structs["S"].fields
     assert field.byte_size == expected
+
+
+# --- Generation-58 migration: a stored 0 from an older build is unknown ----
+
+
+def _dwarf_doc(sizes: list[int | None]) -> dict[str, Any]:
+    fields = [
+        {"name": f"m{i}", "type_name": "int", "byte_offset": 4 * i, "byte_size": s}
+        for i, s in enumerate(sizes)
+    ]
+    layout = {"name": "S", "byte_size": 8, "alignment": 4, "fields": fields}
+    return {"structs": {"S": layout}, "enums": {}, "base_types": {}}
+
+
+def _sizes(doc: dict[str, Any]) -> list[int | None]:
+    return [f["byte_size"] for f in doc["structs"]["S"]["fields"]]
+
+
+def test_migration_reads_stored_zero_as_unknown_before_generation_58() -> None:
+    doc = {"dwarf": _dwarf_doc([0, 8, None, 0])}
+    migrated, notices = migrate_dwarf_field_size_unknown(doc, 57)
+    assert _sizes(migrated["dwarf"]) == [None, 8, None, None]
+    assert len(notices) == 1
+    assert "read 2 stored DWARF member size(s) of 0 as not observed" in notices[0]
+    # Never mutated in place: the caller's document keeps its stored zeros.
+    assert _sizes(doc["dwarf"]) == [0, 8, None, 0]
+
+
+def test_migration_is_a_no_op_from_generation_58() -> None:
+    doc = {"dwarf": _dwarf_doc([0, 8])}
+    migrated, notices = migrate_dwarf_field_size_unknown(
+        doc, DWARF_FIELD_SIZE_GENERATION
+    )
+    assert migrated is doc
+    assert notices == []
+    assert _sizes(migrated["dwarf"]) == [0, 8]
+
+
+def test_migration_lowers_odr_conflict_variants_too() -> None:
+    dwarf = _dwarf_doc([0])
+    dwarf["struct_odr_conflicts"] = {"S": [_dwarf_doc([0])["structs"]["S"]]}
+    migrated, _ = migrate_dwarf_field_size_unknown({"dwarf": dwarf}, 57)
+    (variant,) = migrated["dwarf"]["struct_odr_conflicts"]["S"]
+    assert [f["byte_size"] for f in variant["fields"]] == [None]
+
+
+def test_load_migrates_a_generation_57_snapshot_and_reports_it() -> None:
+    doc = {"dwarf": _dwarf_doc([0, 8])}
+    doc[FACT_GENERATIONS_KEY] = {"extractor": 57, "resolver": 2, "source": 0}
+    _, _, _, notices = migrate_and_describe(doc)
+    assert any("read 1 stored DWARF member size(s) of 0" in n for n in notices)
+
+
+def _layout_snapshot(size: int | None, generation: int) -> AbiSnapshot:
+    layout = StructLayout(
+        name="S",
+        byte_size=8,
+        alignment=4,
+        fields=[_field("f", 0, size)],
+    )
+    snap = AbiSnapshot(
+        library="libx.so.1",
+        version="1",
+        dwarf=DwarfMetadata(structs={"S": layout}),
+    )
+    doc = snapshot_to_dict(snap)
+    doc[FACT_GENERATIONS_KEY] = {"extractor": generation, "resolver": 2, "source": 0}
+    return snapshot_from_dict(doc)
+
+
+def _size_findings(old: AbiSnapshot, new: AbiSnapshot) -> list[str]:
+    changes = diff_struct_layouts(
+        debug_layout_view(old).layout, debug_layout_view(new).layout
+    )
+    return [
+        c.description for c in changes if c.kind is ChangeKind.STRUCT_FIELD_TYPE_CHANGED
+    ]
+
+
+def test_generation_57_zero_does_not_fabricate_a_size_change() -> None:
+    """A stored 0 from a pre-58 baseline is unknown: no 0 -> 8 finding."""
+    old = _layout_snapshot(0, generation=57)
+    new = _layout_snapshot(8, generation=DWARF_FIELD_SIZE_GENERATION)
+    assert _size_findings(old, new) == []
+
+
+def test_generation_58_zero_to_known_size_fires() -> None:
+    """A stored 0 from generation 58 is a real zero: 0 -> 8 is a change."""
+    old = _layout_snapshot(0, generation=DWARF_FIELD_SIZE_GENERATION)
+    new = _layout_snapshot(8, generation=DWARF_FIELD_SIZE_GENERATION)
+    assert _size_findings(old, new) == ["Field type changed: S::f int(0B) → int(8B)"]
+
+
+def test_generation_57_known_size_still_compares_known() -> None:
+    """A pre-58 known size is not touched: 4 -> 8 still fires."""
+    old = _layout_snapshot(4, generation=57)
+    new = _layout_snapshot(8, generation=DWARF_FIELD_SIZE_GENERATION)
+    assert _size_findings(old, new) == ["Field type changed: S::f int(4B) → int(8B)"]

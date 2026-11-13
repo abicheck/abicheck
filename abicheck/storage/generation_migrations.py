@@ -50,6 +50,7 @@ from .castxml_array_migration import migrate_castxml_array_counts
 from .castxml_base_offset_migration import migrate_castxml_base_offsets
 from .castxml_noexcept_migration import migrate_castxml_noexcept
 from .clang_vtable_base_migration import migrate_clang_vtable_bases
+from .dwarf_field_size_migration import migrate_dwarf_field_size_unknown
 from .generation_spelling_table import SPELLING_MIGRATIONS
 from .versioning import (
     EXTRACTOR_GENERATION,
@@ -318,4 +319,6 @@ def migrate_and_describe(
     notices.extend(vtable_notices)
     migrated, noexcept_notices = migrate_castxml_noexcept(migrated, spellings)
     notices.extend(noexcept_notices)
+    migrated, field_size_notices = migrate_dwarf_field_size_unknown(migrated, spellings)
+    notices.extend(field_size_notices)
     return migrated, generations, EXTRACTOR_GENERATION, tuple(notices)
