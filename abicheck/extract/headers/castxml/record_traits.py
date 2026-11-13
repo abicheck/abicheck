@@ -411,6 +411,12 @@ def _data_member_rules(
     if len(subobjects) != len(set(subobjects)):
         return False
     if not fields:
+        # An inherited first data member (``struct D : E, B {}`` with
+        # ``B { E e; }``) is not checked against M(D): GCC and Clang both call
+        # such a D standard-layout, so the literal N4659 wording would report a
+        # STANDARD_LAYOUT_LOST no compiler sees (LLVM #47741). Pinned against
+        # the compiler by ``LayoutInheritedFirst`` in
+        # tests/test_castxml_record_traits_layout_integration.py.
         return hierarchy
     # [class.prop]/3.8: no base class in M(D), the first-member type set.
     first_types = _first_member_types(ctx, fields[0].get("type", ""))

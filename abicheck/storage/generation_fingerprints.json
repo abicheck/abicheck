@@ -110,7 +110,7 @@
       "abicheck/extract/headers/castxml/policy.py": "fda86c1de147934e620824b9a97262f218bffb7340cbbf394ac5fdd437e47f23",
       "abicheck/extract/headers/castxml/preprocessed_text.py": "88deb48742c22f1e594ba3b73fb20f11c5dd091c690f7c53597aee67478f32ed",
       "abicheck/extract/headers/castxml/probe.py": "525ded3c75b147300cfaa460ce8acd62f87533859ff152e2b1f76c4302999bb0",
-      "abicheck/extract/headers/castxml/record_traits.py": "6fceeb3f5c58dd409a5ea80cfc8c584014b3fd5fabd56c5ae72fefa8eca16330",
+      "abicheck/extract/headers/castxml/record_traits.py": "33f86b99062a857be55238e0211dd3dd38467ff212f85741df2a404603d6411e",
       "abicheck/extract/headers/castxml/records.py": "5130cd54a4547cf0ce1cb3bf139459348c6901d0f3bf41d4ea461c8f8f73e60c",
       "abicheck/extract/headers/castxml/scope.py": "41cecc8dd996c10a58c022e5dca4003cce9d7775adf674b339cc199fb59297c7",
       "abicheck/extract/headers/castxml/specialization.py": "3f9f021672df1b84de42bc8de5f3c915508b3f3850e0a8acbaa80a3dee04c6f3",
@@ -226,9 +226,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "6f1cb5c5283f4de9d08eae9ba91e240eaf2610de030e1c359226391e7f4be62a",
+    "fingerprint": "99e5079897d779f87ea650f954ed36b743c8bbd02ccbe0793302c8289b38e6ff",
     "generation": 61,
-    "reason": "bumped to 61 for a semantic change"
+    "reason": "comment only in castxml record_traits: documents that an inherited first data member follows GCC/Clang rather than the literal M(D) wording; no extractor behaviour change"
   },
   "resolver": {
     "files": {
