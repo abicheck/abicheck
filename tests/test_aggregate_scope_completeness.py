@@ -612,3 +612,32 @@ class TestExtractionErrorSurvivesAggregation:
         assert doc["run_outcome"]["operational"] == "extraction_error"
         agg = aggregate_reports_dir(reports, expected=_expect(LINUX))
         assert agg.exit_code() == 4
+
+
+def test_fold_operational_error_exit_raises_never_lowers() -> None:
+    """ADR-065 D8: the persisted operational-error contribution raises a gate
+    to 4 (also on the not_comparable return path), and never lowers one."""
+    from abicheck.workflows.aggregate.report_gate import GateInfo
+    from abicheck.workflows.aggregate.scope_axis import fold_operational_error_exit
+
+    failed = {"exit": {"operational_error_contribution": 4}}
+    clean = {"exit": {"operational_error_contribution": 0}}
+    for start in (0, 1, 2, 4, 8):
+        gate = GateInfo(
+            exit_code=start,
+            blocking=start != 0,
+            blocking_categories=(),
+            from_report=True,
+        )
+        assert fold_operational_error_exit(gate, failed).exit_code == max(start, 4)
+        assert fold_operational_error_exit(gate, clean).exit_code == start
+    # a bool is not the integer 4
+    gate = GateInfo(
+        exit_code=0, blocking=False, blocking_categories=(), from_report=True
+    )
+    assert (
+        fold_operational_error_exit(
+            gate, {"exit": {"operational_error_contribution": True}}
+        ).exit_code
+        == 0
+    )

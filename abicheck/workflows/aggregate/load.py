@@ -542,7 +542,8 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
         return _LoadedReport(
             target_id=target_id,
             verdict=compat_verdict,
-            gate=release_gate,
+            # ADR-065 D8: a refused release can also carry a FAILED member.
+            gate=fold_operational_error_exit(release_gate, data),
             library=data.get("library"),
             head_sha=head_sha,
             reason=(
