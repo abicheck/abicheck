@@ -210,3 +210,33 @@ def test_no_baseline_set_run_outcome_names_a_failed_member(
     record = build_no_baseline_set_record(plan, list(audits))
     result = NoBaselineSetResult(plan=plan, audits=audits, record=record)
     assert _operational(result, evidence_contract=False).value == expected
+
+
+class TestFailedMemberReportedVerdict:
+    def test_json_verdict_reads_a_failed_member_as_error_beside_exit_4(
+        self, tmp_path: Path
+    ) -> None:
+        """Public CLI path (bundle-facts release): a degraded OLD-only member
+        exits 4, so the report's own worst verdict must not read ``NO_CHANGE``
+        beside it -- a failed member ranks like an operational ``ERROR``
+        (``policy.release_outcome.RELEASE_VERDICT_ORDER``)."""
+        import json
+
+        from click.testing import CliRunner
+        from test_release_scope_completeness import _elf_snap, _facts_file
+
+        from abicheck.cli import main
+
+        libs = {"libok.so": _elf_snap("libok.so"), "libdeg.so": _elf_snap("libdeg.so")}
+        old = _facts_file(
+            tmp_path, "old.bundlefacts.json", libs, degraded={"libdeg.so": "boom"}
+        )
+        new = _facts_file(tmp_path, "new.bundlefacts.json", libs)
+        out = tmp_path / "report.json"
+        result = CliRunner().invoke(
+            main, ["compare", str(old), str(new), "-o", f"json={out}"]
+        )
+        assert result.exit_code == 4, result.output
+        doc = json.loads(out.read_text())
+        assert doc["exit"]["code"] == 4
+        assert doc["verdict"] == "ERROR"

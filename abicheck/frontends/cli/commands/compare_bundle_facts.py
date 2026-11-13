@@ -388,7 +388,12 @@ def dispatch(
     details = stored_document_details(result, new_is_stored=new_is_stored)
     release = stored_release_evaluation(
         result,
-        worst_verdict=stored_reported_verdict(result),
+        worst_verdict=stored_reported_verdict(
+            result,
+            failed_member_exit_contribution=(
+                outcome.scope_decision.failed_member_exit_contribution
+            ),
+        ),
         old_facts_path=request.old_facts_path,
         new_dir=request.new_input,
         scope_terms=scope_terms,
@@ -425,7 +430,12 @@ def dispatch(
             )
 
     _exit_compare_release(
-        stored_reported_verdict(result),
+        stored_reported_verdict(
+            result,
+            failed_member_exit_contribution=(
+                outcome.scope_decision.failed_member_exit_contribution
+            ),
+        ),
         fail_on_removed=False,
         removed_keys=[],
         # Every member axis (ADR-090's UNCONFIRMED floor among them) folds
