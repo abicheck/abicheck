@@ -319,11 +319,11 @@ current emitter, which is unchanged.
 `false-clean` — removing a declared, exported ISA tier reads as a risk while pinned consumers fail to load.
 <!-- canary: tests/test_header_backend_fact_gaps_integration.py::test_a_declared_isa_tier_removal_reads_as_a_risk -->
 
-#### The unspecified-return check does not know castxml's or clang's closure spelling (2026-11-12)
+#### The inline-body rename check misses a pimpl holder castxml and clang name by its bare leaf (2026-11-12)
 
-**Status (2026-11-12): OPEN.** `diff_templates.detect_unspecified_return_now_named` recognises `auto`, `decltype(`, `<lambda` and similar markers. castxml spells an inline function's deduced closure return type `?` and clang `(lambda:file#line)`, so an inline factory that starts returning a named function-pointer type reads no `unspecified_return_now_named` on either; clang additionally reports `func_return_changed` (BREAKING) for a function the old library never exported. The native gcc backend (`make_cb()::<lambda(int)>`) reads it correctly. Found by the edit corpus (`unspecified_return_now_named` on `cxx_more`). Owner: `compare/` (`diff_templates.py`).
-`false-clean` — the source-break finding is missing on castxml and clang (and clang over-reports a binary break).
-<!-- canary: tests/test_header_backend_fact_gaps_integration.py::test_a_closure_return_spelling_is_not_read_as_unspecified -->
+**Status (2026-11-12): PARTIAL.** `diff_cpp_patterns.detect_inline_body_renamed_member` used to pair a removed field of an internal (`detail::`) record only with `type_field_added`, so a renamed member that lands at the end of the record (`type_field_added_compatible`) was never paired; fixed (every field-removal kind now pairs with every field-addition kind, `tests/test_inline_body_rename_field_kinds.py`), and the native gcc backend now reports the edit corpus's `pimpl_member_renamed_under_inline_accessor`. Still open: in the corpus's `cxx_more` seed, castxml and clang record the holder as `Desc` and the internal record as `impl` (bare leaves, the "Type identity: typedef and tag names keyed by bare spelling" gap), while the inline accessor's scope demangles to `lib::Desc`, so the holder never matches and the finding stays missing on those two backends (the field churn still gates). Owner: `compare/` (`diff_cpp_patterns.py`) / `extract/headers/`.
+`false-clean` — the inline-accessor finding is missing on castxml and clang header snapshots of namespaced records.
+<!-- canary: tests/test_header_backend_fact_gaps_integration.py::test_castxml_and_clang_name_the_corpus_pimpl_holder_by_its_bare_leaf -->
 
 #### The contract evaluator places a clang class-template pattern out of contract (2026-11-12)
 
@@ -337,12 +337,6 @@ current emitter, which is unchanged.
 `false-clean` — a castxml dump misses a lost standard-layout guarantee or a change in tail-padding reuse.
 <!-- canary: tests/test_header_backend_fact_gaps_integration.py::test_castxml_records_no_standard_layout_or_data_size -->
 
-#### The inline-body rename check ignores a renamed member that reads `type_field_added_compatible` (2026-11-12)
-
-**Status (2026-11-12): OPEN.** `diff_cpp_patterns.detect_inline_body_renamed_member` pairs a removed and an added field of an internal (`detail::`) record, but only `type_field_added`; a renamed member that lands at the end of the record reads `type_field_added_compatible`, so a pimpl whose `count_` became `n_` under an inline public accessor reports the field churn (BREAKING) without `inline_body_references_renamed_member`. Found by the edit corpus (`pimpl_member_renamed_under_inline_accessor` on `cxx_more`, every header backend). Owner: `compare/` (`diff_cpp_patterns.py`).
-`false-clean` — the inline-accessor finding is missing (the field churn still gates).
-<!-- canary: tests/test_header_backend_fact_gaps_integration.py::test_a_pimpl_rename_whose_new_field_reads_compatible_is_not_paired -->
-
 #### clang and gcc header snapshots of the corpus seed drop a renamed tag's instantiation declaration (2026-11-12)
 
 **Status (2026-11-12): OPEN, untraced.** In the edit corpus's `cxx_more` seed, renaming `lib::fast_tag` to `quick_tag` (with its `extern template int run<...>()` declaration and explicit instantiation) leaves the clang and native gcc header snapshots without `run<quick_tag>`, although the old side records `run<fast_tag>`; the export reads `func_added_elf_only` and `tag_type_renamed` has no added symbol to pair. castxml keeps it, and a header holding only these two declarations keeps it on every backend, so a neighbouring declaration of the seed is involved. Found by the edit corpus (`tag_type_renamed`). Owner: `extract/headers/`.
@@ -354,12 +348,6 @@ current emitter, which is unchanged.
 **Status (2026-11-12): OPEN.** The gcc plugin records a function whose return type is spelled through a typedef with the canonical type (`const char *`), so a renamed typedef (`typedef_version_sentinel`, or any alias rename) is invisible at gcc headers depth, where castxml and clang keep the typedef name. Found by the edit corpus (`version_stamp_typedef_bumped` on `c_elf`). Owner: `extract/headers/gcc/`.
 `false-clean` — a gcc-backend dump misses a renamed return typedef.
 <!-- canary: tests/test_header_backend_fact_gaps_integration.py::test_the_gcc_backend_spells_a_typedef_return_canonically -->
-
-#### castxml's bare `std` leaf hides a std type passed by value from the idiom check (2026-11-12)
-
-**Status (2026-11-12): OPEN.** castxml spells `std::string` in a signature as its bare leaf (`string`), and `idioms._is_std_by_value` looks for `std::` in the spelling, so a new public function returning `std::string` by value reads no `public_api_exposes_stl_by_value` at castxml headers depth; the clang and gcc backends report it (COMPATIBLE_WITH_RISK, the verdict holds through other risk findings). The castxml slot identity facts (`type_identities_fact`) carry the qualified name the check could read. Found by the edit corpus (`stl_by_value_function_added` on `cxx_stdlib`). Owner: `idioms.py` / `pattern_verdicts.py`.
-`false-clean` — a castxml dump misses the std-by-value anti-pattern finding.
-<!-- canary: tests/test_header_backend_fact_gaps_integration.py::test_castxml_spells_a_std_return_type_by_its_bare_leaf -->
 
 #### castxml records no GNU contract attribute on a function (2026-11-12)
 
@@ -687,6 +675,12 @@ per-item status in the
 <!-- no-canary: the catalog-nightly kind-parity gate fails on each declaration once it goes stale -->
 
 ### False-positive risk
+
+#### A formerly inline function's closure return re-spelled by clang reads `func_return_changed` (2026-11-12)
+
+**Status (2026-11-12): PARTIAL.** `diff_templates.detect_unspecified_return_now_named` did not know castxml's (`?`) or clang's (`(lambda:f.h#1)`) spelling of a deduced closure return type; fixed (`tests/test_unspecified_return_backend_spellings.py`), so the edit corpus's `unspecified_return_now_named` reads the finding on every header backend. Still open, clang only: the inline factory the old library never exported, now an exported function returning a named type, also reads `func_return_changed` (BREAKING). No old binary called the library's copy (each inlined its own), so no built consumer breaks. castxml's `?` is treated as unknown by the return comparison, and the gcc backend does not pair the two sides (its own unexported-declaration gap). Closing it needs the return comparison to discount a pair whose old side had no export. Owner: `compare/` (`function_signature.py`).
+`false-positive` — on clang headers, moving an inline closure factory out of line reads as a binary break.
+<!-- canary: tests/test_header_backend_fact_gaps_integration.py::test_a_closure_return_spelling_is_read_as_unspecified_on_every_backend -->
 
 #### A return type re-spelled through a renamed typedef of the same type reads `func_return_changed` (2026-11-12)
 

@@ -39,10 +39,6 @@ GAP_CASTXML_TRAITS = "castxml records no standard-layout trait or data size"
 GAP_CLANG_TEMPLATE_CONTRACT = (
     "The contract evaluator places a clang class-template pattern out of contract"
 )
-GAP_PIMPL_COMPAT = (
-    "The inline-body rename check ignores a renamed member that reads "
-    "`type_field_added_compatible`"
-)
 GAP_TAG_DECL = (
     "clang and gcc header snapshots of the corpus seed drop a renamed tag's "
     "instantiation declaration"
@@ -54,14 +50,16 @@ GAP_TYPEDEF_RETURN = (
 GAP_GCC_TYPEDEF_RETURN = (
     "The native gcc header backend spells a typedef'd return type canonically"
 )
-GAP_CASTXML_STD_LEAF = (
-    "castxml's bare `std` leaf hides a std type passed by value from the idiom check"
-)
 GAP_CLOSURE_RETURN = (
-    "The unspecified-return check does not know castxml's or clang's closure spelling"
+    "A formerly inline function's closure return re-spelled by clang reads "
+    "`func_return_changed`"
 )
 GAP_CPU_DISPATCH = (
     "The CPU-dispatch roll-up reads the removal of declared ISA kernels as a risk"
+)
+GAP_PIMPL_BARE_HOLDER = (
+    "The inline-body rename check misses a pimpl holder castxml and clang name by "
+    "its bare leaf"
 )
 GAP_O2_STD = (
     "An `-O2` rebuild of a C++ library that uses `std::string` reads as a risk on gcc, "
@@ -304,16 +302,6 @@ _BACKEND_GAPS: tuple[Known, ...] = (
         frozenset({"missing:TYPEDEF_VERSION_SENTINEL", "weaker-than:COMPATIBLE"}),
         "NO_CHANGE",
     ),
-    _backend_gap(
-        "stl_by_value_function_added",
-        frozenset({"cxx_stdlib"}),
-        "castxml",
-        "wrong-kind",
-        "castxml spells std::string as `string`; the std-by-value check misses it",
-        GAP_CASTXML_STD_LEAF,
-        frozenset({"missing:PUBLIC_API_EXPOSES_STL_BY_VALUE"}),
-        "COMPATIBLE_WITH_RISK",
-    ),
 )
 
 # Detector gaps that hold on every header backend (and DWARF where noted).
@@ -329,36 +317,29 @@ _DETECTOR_GAPS: tuple[Known, ...] = (
         issues=frozenset({"missing:SONAME_BUMP_RECOMMENDED", "weaker-than:BREAKING"}),
         verdicts=frozenset({"COMPATIBLE_WITH_RISK"}),
     ),
-    _backend_gap(
-        "unspecified_return_now_named",
-        _MORE,
-        "castxml",
-        "wrong-verdict",
-        "castxml spells the closure return `?`, which the check does not read",
-        GAP_CLOSURE_RETURN,
-        frozenset({"missing:UNSPECIFIED_RETURN_NOW_NAMED", "weaker-than:API_BREAK"}),
-        "COMPATIBLE",
+    *(
+        _backend_gap(
+            "pimpl_member_renamed_under_inline_accessor",
+            _MORE,
+            backend,
+            "wrong-kind",
+            "the holder is recorded as a bare `Desc`; the accessor's scope is lib::Desc",
+            GAP_PIMPL_BARE_HOLDER,
+            frozenset({"missing:INLINE_BODY_REFERENCES_RENAMED_MEMBER"}),
+            "BREAKING",
+        )
+        for backend in ("castxml", "clang")
     ),
     _backend_gap(
         "unspecified_return_now_named",
         _MORE,
         "clang",
         "false-positive",
-        "clang spells the closure return `(lambda:...)`: func_return_changed instead",
+        "the formerly inline (unexported) function's return reads "
+        "func_return_changed (BREAKING) next to the source-level finding",
         GAP_CLOSURE_RETURN,
-        frozenset({"missing:UNSPECIFIED_RETURN_NOW_NAMED", "stronger-than:API_BREAK"}),
+        frozenset({"stronger-than:API_BREAK"}),
         "BREAKING",
-    ),
-    Known(
-        "pimpl_member_renamed_under_inline_accessor",
-        _MORE,
-        "wrong-kind",
-        _ev("headers"),
-        "the renamed member reads type_field_added_compatible, which the "
-        "inline-body check does not pair",
-        GAP_PIMPL_COMPAT,
-        issues=frozenset({"missing:INLINE_BODY_REFERENCES_RENAMED_MEMBER"}),
-        verdicts=frozenset({"BREAKING"}),
     ),
     Known(
         "version_stamp_typedef_bumped",

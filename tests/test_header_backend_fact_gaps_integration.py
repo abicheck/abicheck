@@ -176,10 +176,12 @@ def test_castxml_records_no_standard_layout_or_data_size(tmp_path: Path) -> None
     assert gcc.data_size_bits == 40
 
 
-@pytest.mark.known_gap_canary
-def test_castxml_spells_a_std_return_type_by_its_bare_leaf(tmp_path: Path) -> None:
-    """castxml writes ``std::string`` as ``string``, so the std-by-value
-    idiom check (which looks for ``std::``) never sees it."""
+def test_castxml_spells_a_std_return_type_by_its_bare_leaf_but_resolves_it(
+    tmp_path: Path,
+) -> None:
+    """castxml writes ``std::string`` as ``string`` and records the resolved
+    ``std::`` identity, which the std-by-value check reads (formerly a
+    known-gap canary)."""
     header = "#include <string>\nstd::string greet_n(int n);"
     source = "std::string greet_n(int n) { return std::string(n, 'x'); }"
     castxml = _function(
@@ -188,6 +190,12 @@ def test_castxml_spells_a_std_return_type_by_its_bare_leaf(tmp_path: Path) -> No
     clang = _function(_dump(tmp_path / "c", header, source, "c++", "clang"), "greet_n")
     assert "std::" not in castxml.return_type
     assert "std::" in clang.return_type
+    from abicheck.model import ParamKind
+    from abicheck.policy.std_by_value import is_std_by_value
+
+    assert is_std_by_value(
+        castxml.return_type, 0, ParamKind.VALUE, castxml.return_type_identities_fact
+    )
 
 
 @pytest.mark.known_gap_canary
@@ -248,13 +256,12 @@ _PIMPL = (
 )
 
 
-@pytest.mark.known_gap_canary
-def test_a_pimpl_rename_whose_new_field_reads_compatible_is_not_paired(
+def test_a_pimpl_rename_whose_new_field_reads_compatible_is_paired(
     tmp_path: Path,
 ) -> None:
-    """count_ -> n_ moved to the end: the new field reads
-    type_field_added_compatible, which the inline-body rename check does not
-    pair with the removed one."""
+    """count_ -> n_ moved to the end reads type_field_added_compatible, and the
+    inline-body rename check still pairs it (formerly a known-gap canary). The
+    gcc backend qualifies the holder; castxml and clang do not (canary below)."""
     old = (_PIMPL, "lib::Desc::Desc() : p_(new detail::impl{3, 8}) {}")
     new = (
         _PIMPL.replace("int count_; int cap_;", "int cap_; int n_;").replace(
@@ -262,9 +269,9 @@ def test_a_pimpl_rename_whose_new_field_reads_compatible_is_not_paired(
         ),
         "lib::Desc::Desc() : p_(new detail::impl{8, 3}) {}",
     )
-    verdict, kinds = _kinds(tmp_path, old, new, "c++", "castxml")
+    verdict, kinds = _kinds(tmp_path, old, new, "c++", "gcc")
     assert {"TYPE_FIELD_REMOVED", "TYPE_FIELD_ADDED_COMPATIBLE"} <= kinds
-    assert "INLINE_BODY_REFERENCES_RENAMED_MEMBER" not in kinds
+    assert "INLINE_BODY_REFERENCES_RENAMED_MEMBER" in kinds
 
 
 @pytest.mark.known_gap_canary
@@ -345,16 +352,18 @@ _AUTO_NEW = (
 @pytest.mark.parametrize(
     ("backend", "spelling"), [("castxml", "?"), ("clang", "(lambda:")]
 )
-def test_a_closure_return_spelling_is_not_read_as_unspecified(
+def test_a_closure_return_spelling_is_read_as_unspecified_on_every_backend(
     tmp_path: Path, backend: str, spelling: str
 ) -> None:
     """castxml spells a deduced closure return ``?`` and clang ``(lambda:...)``;
-    the unspecified-return check knows neither, so naming the return type
-    reads no unspecified_return_now_named (and on clang a func_return_changed)."""
+    both now read unspecified_return_now_named. The canary half: clang also
+    reads func_return_changed (BREAKING) for the formerly inline function."""
     f = _function(_dump(tmp_path / "d", *_AUTO_OLD, "c++", backend), "make_cb")
     assert f.return_type.startswith(spelling)
-    _, kinds = _kinds(tmp_path / "k", _AUTO_OLD, _AUTO_NEW, "c++", backend)
-    assert "UNSPECIFIED_RETURN_NOW_NAMED" not in kinds
+    verdict, kinds = _kinds(tmp_path / "k", _AUTO_OLD, _AUTO_NEW, "c++", backend)
+    assert "UNSPECIFIED_RETURN_NOW_NAMED" in kinds
+    assert ("FUNC_RETURN_CHANGED" in kinds) == (backend == "clang")
+    assert (verdict == "BREAKING") == (backend == "clang")
 
 
 _ISA_H = (
@@ -386,6 +395,28 @@ def test_a_declared_isa_tier_removal_reads_as_a_risk(tmp_path: Path) -> None:
     assert "CPU_DISPATCH_ISA_DROPPED" in kinds
     assert "FUNC_REMOVED" not in kinds
     assert verdict == "COMPATIBLE_WITH_RISK"
+
+
+@pytest.mark.known_gap_canary
+@pytest.mark.parametrize("backend", ["castxml", "clang"])
+def test_castxml_and_clang_name_the_corpus_pimpl_holder_by_its_bare_leaf(
+    tmp_path: Path, backend: str
+) -> None:
+    """In the edit corpus's ``cxx_more`` seed the pimpl holder ``lib::Desc`` is
+    recorded as ``Desc`` while its inline accessor demangles to ``lib::Desc``,
+    so the inline-body rename check finds no holder for it."""
+    from tests._edit_corpus_config import default_config
+    from tests._edit_corpus_harness import BaselineCache
+    from tests._edit_corpus_seeds import SEED_BY_NAME
+    from tests._edit_corpus_toolchains import build_toolchains
+
+    gcc = {t.family: t for t in build_toolchains()}.get("gcc")
+    if gcc is None:
+        pytest.skip("no gcc toolchain")
+    cfg = default_config("c++", gcc).with_(header_backend=backend)
+    snap = BaselineCache(tmp_path).get(SEED_BY_NAME["cxx_more"], cfg).snapshot
+    names = {t.name for t in snap.declarations.types if t.name.endswith("Desc")}
+    assert names == {"Desc"}
 
 
 _BUF_C = "int keep(int x) { return x; }"
