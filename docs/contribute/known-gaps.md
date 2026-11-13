@@ -325,6 +325,12 @@ current emitter, which is unchanged.
 `false-clean` — the inline-accessor finding is missing on castxml and clang header snapshots of namespaced records.
 <!-- canary: tests/test_header_backend_fact_gaps_integration.py::test_castxml_and_clang_name_the_corpus_pimpl_holder_by_its_bare_leaf -->
 
+#### The unnamed-type check reads only an ELF export table (2026-11-13)
+
+**Status (2026-11-13): OPEN.** `diff_unnamed_types` (`unnamed_type_in_public_abi`, COMPATIBLE_WITH_RISK) declares `requires_support` on ELF metadata for both sides and collects names from `snap.elf`, so on a Mach-O library, or a MinGW-built PE one, a new export whose Itanium mangled name embeds an unnamed type (`Ut_`) is never examined, although its name depends on declaration order exactly as on ELF. The run reads only `func_added` (COMPATIBLE). Found by the edit corpus (`unnamed_type_export_added` on `cxx_more`, macOS integration lane). Closing it means reading the export names from the platform-neutral export index (Mach-O names carry an extra leading `_`; MSVC manglings have no `Ut_` production). Owner: `diff_unnamed_types.py` (`compare/`).
+`false-clean` — the declaration-order hazard of an unnamed type in a new export is unreported off ELF.
+<!-- no-canary: pinned by the edit corpus's strict-xfail `unnamed_type_export_added` entry in tests/_edit_corpus_known.py, which fails once the answer changes -->
+
 #### The contract evaluator places a clang class-template pattern out of contract (2026-11-12)
 
 **Status (2026-11-12): OPEN.** A public header's class template whose default argument changes (`template <typename T, int N = 4> struct Buf` -> `N = 8`) reads `template_param_default_changed` (API_BREAK) on every header backend. On a clang snapshot, though, the contract evaluator marks that finding `PROVEN_OUT_OF_CONTRACT` (`terminal_authoritative_exclusion`, evidence `public_header:old`), so `compare_snapshots` (the CLI verb) rolls the run up to `NO_CHANGE` while castxml, the native gcc backend and bare `checker.compare` say API_BREAK. clang records the pattern (`is_template_pattern`, `source_header` = the public header, no `qualified_name`); castxml and gcc reach the kind without such a record. Found by the edit corpus (`template_default_arg_change` on `cxx_classes`, clang headers). Owner: `policy/` (contract evaluation) / `extract/headers/clang/`.

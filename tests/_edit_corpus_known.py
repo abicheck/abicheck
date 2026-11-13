@@ -36,6 +36,7 @@ GAP_GCC_UNEXPORTED = (
     "The native gcc header backend keeps an unexported declaration PUBLIC"
 )
 GAP_CASTXML_TRAITS = "castxml records no standard-layout trait or data size"
+GAP_UNNAMED_NON_ELF = "The unnamed-type check reads only an ELF export table"
 GAP_CLANG_TEMPLATE_CONTRACT = (
     "The contract evaluator places a clang class-template pattern out of contract"
 )
@@ -303,6 +304,19 @@ _BACKEND_GAPS: tuple[Known, ...] = (
 
 # Detector gaps that hold on every header backend (and DWARF where noted).
 _DETECTOR_GAPS: tuple[Known, ...] = (
+    Known(
+        "unnamed_type_export_added",
+        _MORE,
+        "false-clean",
+        lambda c: c.objfmt != "elf",
+        "diff_unnamed_types requires ELF metadata on both sides, so a Mach-O "
+        "or (MinGW) PE export whose Itanium name embeds Ut_ is never checked",
+        GAP_UNNAMED_NON_ELF,
+        issues=frozenset(
+            {"missing:UNNAMED_TYPE_IN_PUBLIC_ABI", "weaker-than:COMPATIBLE_WITH_RISK"}
+        ),
+        verdicts=frozenset({"COMPATIBLE"}),
+    ),
     Known(
         "cpu_dispatch_isa_dropped",
         _ELF,
