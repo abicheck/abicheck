@@ -145,23 +145,12 @@ class TestBackendEquivalence:
     def test_a_reordered_real_ir_is_used_directly_and_emits_in_alias_order(
         self, ir_order: tuple[str, ...]
     ) -> None:
-        """ADR-063 Track T3: ``typedef_index_pair`` no longer adjudicates
-        against a legacy alias map's order -- an IR holding the right aliases
-        in a *different* order than the legacy map is used directly (its
-        findings carry the IR's entity ids), not replaced by the adapter.
-
-        Neither container's order reaches the report, though: findings come
-        out in alias order whatever order the IR or the legacy map holds,
-        because a stored snapshot does not keep a live one's insertion order
-        and the report must not depend on which of the two was compared
-        (``test_live_stored_operand_property.py``).
-        """
+        """ADR-063 T3: a reordered real IR is used directly (entity ids set),
+        yet findings follow alias order, not either container's: a stored
+        snapshot loses insertion order (test_live_stored_operand_property)."""
         maps = {"A": "int", "B": "int", "C": "int"}
         reordered = dict.fromkeys(ir_order, "int")
-        snap = _snap(
-            typedefs_qualified=maps,
-            semantic_ir=_ir_backed(reordered).ir,
-        )
+        snap = _snap(typedefs_qualified=maps, semantic_ir=_ir_backed(reordered).ir)
         old_index, _ = typedef_index_pair(
             snap, snap, old_typedefs=maps, new_typedefs=maps
         )
