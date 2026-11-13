@@ -35,7 +35,7 @@ GAP_GCC_THROW = (
 GAP_GCC_UNEXPORTED = (
     "The native gcc header backend keeps an unexported declaration PUBLIC"
 )
-GAP_CASTXML_TRAITS = "castxml records no standard-layout trait or data size"
+GAP_CASTXML_TRAITS = "castxml records no record data size"
 GAP_UNNAMED_NON_ELF = "The unnamed-type check reads only an ELF export table"
 GAP_CLANG_TEMPLATE_CONTRACT = (
     "The contract evaluator places a clang class-template pattern out of contract"
@@ -266,13 +266,12 @@ _BACKEND_GAPS: tuple[Known, ...] = (
             _MORE,
             "castxml",
             "wrong-verdict",
-            "castxml records no standard-layout trait or data size",
+            "castxml records no data size",
             GAP_CASTXML_TRAITS,
             frozenset({f"missing:{kind}", "weaker-than:COMPATIBLE_WITH_RISK"}),
             "NO_CHANGE",
         )
         for op, kind in (
-            ("standard_layout_lost", "STANDARD_LAYOUT_LOST"),
             ("record_became_pod_tail_padding", "TAIL_PADDING_REUSE_CHANGED"),
         )
     ),

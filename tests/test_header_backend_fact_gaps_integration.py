@@ -163,14 +163,14 @@ def _record(snap: AbiSnapshot, name: str):  # type: ignore[no-untyped-def]
 
 
 @pytest.mark.known_gap_canary
-def test_castxml_records_no_standard_layout_or_data_size(tmp_path: Path) -> None:
-    """castxml's XML has no data size (dsize) and abicheck derives no
-    standard-layout trait from it; the native gcc backend records both."""
+def test_castxml_records_no_data_size(tmp_path: Path) -> None:
+    """castxml's XML has no data size (dsize); the native gcc backend records
+    it. (castxml's standard-layout trait is now derived, so both agree on it.)"""
     header = "struct TP {\n  int get() const;\nprivate:\n  int a;\n  char b;\n};"
     source = "int TP::get() const { return a + b; }"
     castxml = _record(_dump(tmp_path / "x", header, source, "c++", "castxml"), "TP")
     gcc = _record(_dump(tmp_path / "g", header, source, "c++", "gcc"), "TP")
-    assert castxml.is_standard_layout is None
+    assert castxml.is_standard_layout is True
     assert castxml.data_size_bits is None
     assert gcc.is_standard_layout is True
     assert gcc.data_size_bits == 40

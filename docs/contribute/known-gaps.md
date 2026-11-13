@@ -332,11 +332,11 @@ current emitter, which is unchanged.
 `false-clean` — a changed template default in a public header passes the gate on a clang header dump.
 <!-- canary: tests/test_header_backend_fact_gaps_integration.py::test_a_template_default_change_reads_out_of_contract_on_clang -->
 
-#### castxml records no standard-layout trait or data size (2026-11-12)
+#### castxml records no record data size (2026-11-12)
 
-**Status (2026-11-12): OPEN.** castxml's XML carries no record data size (dsize), and `extract/headers/castxml/records.py` deliberately derives no `is_standard_layout` from it (a polymorphism heuristic is unsound). `standard_layout_lost` and `tail_padding_reuse_changed` therefore cannot fire on a castxml snapshot (nor on DWARF), where the clang and native gcc backends report them (both COMPATIBLE_WITH_RISK). Found by the edit corpus (`standard_layout_lost`, `record_became_pod_tail_padding` on `cxx_more`). Closing it needs the clang record-layout pass (`attach_clang_layout`) joined onto castxml roots, as it is for clang ones. Owner: `extract/headers/castxml/`.
-`false-clean` — a castxml dump misses a lost standard-layout guarantee or a change in tail-padding reuse.
-<!-- canary: tests/test_header_backend_fact_gaps_integration.py::test_castxml_records_no_standard_layout_or_data_size -->
+**Status (2026-11-13): OPEN, narrowed.** castxml's XML carries no record data size (dsize), so `tail_padding_reuse_changed` cannot fire on a castxml snapshot (nor on DWARF), where the clang and native gcc backends report it (COMPATIBLE_WITH_RISK). The standard-layout half closed with #2058: `extract/headers/castxml/record_traits.py` now derives `is_standard_layout`, and `standard_layout_lost` reads on castxml. Found by the edit corpus (`record_became_pod_tail_padding` on `cxx_more`). Closing it needs the clang record-layout pass (`attach_clang_layout`) joined onto castxml roots, as it is for clang ones. Owner: `extract/headers/castxml/`.
+`false-clean` — a castxml dump misses a change in tail-padding reuse.
+<!-- canary: tests/test_header_backend_fact_gaps_integration.py::test_castxml_records_no_data_size -->
 
 #### clang and gcc header snapshots of the corpus seed drop a renamed tag's instantiation declaration (2026-11-12)
 
