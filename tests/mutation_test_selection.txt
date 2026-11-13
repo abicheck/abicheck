@@ -33,9 +33,11 @@ tests/test_adr061_gap_b_facades.py
 tests/test_adr091_python_renames.py
 tests/test_advanced_extraction_status.py
 tests/test_adversarial_inputs.py
+tests/test_affected_symbols_identifier_boundary_gap.py
 tests/test_agent_skills_drift.py
 tests/test_aggregate_findings.py
 tests/test_aggregate_scope_completeness.py
+tests/test_allocator_replacement_surface.py
 tests/test_analysis_assurance.py
 tests/test_analysis_assurance_cli.py
 tests/test_analysis_assurance_content_identity.py
@@ -282,6 +284,7 @@ tests/test_disposition_reclassification.py
 tests/test_disposition_rule_inventory.py
 tests/test_disposition_scope_matrix.py
 tests/test_disposition_state_sweep.py
+tests/test_disposition_transitions.py
 tests/test_dump_bundle_facts.py
 tests/test_dump_pe_macho_unit.py
 tests/test_dumper_contract_wiring.py
@@ -401,6 +404,7 @@ tests/test_lambda_closure_type_classification.py
 tests/test_lambda_identity_ordinal.py
 tests/test_layer_coverage.py
 tests/test_lazy_graph_loading.py
+tests/test_lean_field_offset_rule.py
 tests/test_libabigail_parity_extended.py
 tests/test_libuv_private_type_churn.py
 tests/test_macho_export_linkage_binding.py
@@ -431,6 +435,7 @@ tests/test_one_comparison_product_parity.py
 tests/test_opaque_identity_tiers.py
 tests/test_orphan_struct.py
 tests/test_overload_ambiguity.py
+tests/test_overload_ambiguity_symbol_variants.py
 tests/test_override_elf_only_variant.py
 tests/test_ownership_relations.py
 tests/test_p3_feature_gaps.py
@@ -497,6 +502,7 @@ tests/test_release_compare_run_inputs.py
 tests/test_release_compare_workflow.py
 tests/test_release_disposition_disclosure.py
 tests/test_release_evaluation_config.py
+tests/test_release_failed_member_exit.py
 tests/test_release_header_exclusions.py
 tests/test_release_html_pe_macho_deps.py
 tests/test_release_html_report.py
@@ -538,6 +544,7 @@ tests/test_report_sections.py
 tests/test_report_summary.py
 tests/test_reporter.py
 tests/test_reporter_side_facts.py
+tests/test_retired_function_drift.py
 tests/test_return_pointee_qualifier_direction.py
 tests/test_review_fixes.py
 tests/test_root_cause_scoped_only_evidence.py
@@ -636,6 +643,7 @@ tests/test_variable_cutover.py
 tests/test_variable_identity_dedup.py
 tests/test_variable_removal_evidence_kind.py
 tests/test_vector_abi.py
+tests/test_verdict_semantic_oracle.py
 tests/test_versioned_symbol_scheme.py
 tests/test_versioning_policy.py
 tests/test_versioning_policy_wiring.py

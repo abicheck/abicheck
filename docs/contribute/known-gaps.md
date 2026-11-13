@@ -920,9 +920,9 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 
 #### The weekly `Mutation testing` scheduled lane (`.github/workflows/mutation.yml`, job `mutmut (detector core)`) can outgrow its own job timeout before producing a receipt — investigated, partially mitigated, not fully fixed
 
-**Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** .github/workflows/mutation.yml:327 timeout-minutes: 355 (mitigation landed). The entry itself says there is no measurement that a full run completes, and only_mutate scoping/splitting is not done.  
-`hygiene` — The weekly `mutmut (detector core)` job's timeout was raised to 355 minutes, but no run is measured to finish inside it and `only_mutate` scoping/splitting is not done. [Full write-up](known-gaps/the-weekly-mutation-testing-scheduled-lane.md)
-<!-- no-canary: CI-lane runtime residual; only a full scheduled run can measure it -->
+**Status (re-measured 2026-11-13 at `509cb0d`): PARTIAL.** The lane is split into 16 shards, but `mutation-baseline.json` has never been committed, so drift never gates: the weekly run of 2026-11-09 (run `42650485644`) finished 10 of 16 record shards and 6 hit the 20,700 s mutmut cap (shard 12 measured 194 of its 3,673 mutants), and the gate refuses a baseline that does not partition `only_mutate`.  
+`hygiene` — No mutation baseline is committed, so the weekly lane records instead of gating drift; shards are balanced by mutant count, not test cost, and 6 of 16 overrun the job ceiling. Bootstrap path in the [full write-up](known-gaps/the-weekly-mutation-testing-scheduled-lane.md).
+<!-- canary: tests/test_mutation_workflow_contract.py::test_no_mutation_baseline_is_committed_yet -->
 
 #### `compare`'s migrated cross-source checks drop `--since`'s changed-path confidence boost
 
