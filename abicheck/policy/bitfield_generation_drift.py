@@ -13,14 +13,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Demote a gcc-plugin byte-aligned bit-field read across extractor generation 60
+"""Demote a gcc-plugin byte-aligned bit-field read across extractor generation 61
 (ADR-062 D2 fallback; bug class ``storage.cross_generation_spelling_drift``).
 
-Before generation 60 the native gcc header plugin read ``DECL_BIT_FIELD``,
+Before generation 61 the native gcc header plugin read ``DECL_BIT_FIELD``,
 which GCC clears for a bit-field that sits on a byte boundary with a
 whole-byte width (``unsigned a : 8`` at offset 0): such a field was stored as
-a plain member. From generation 60 the plugin reads ``DECL_C_BIT_FIELD`` and
-stores it as a bit-field of that width. A pre-60 gcc-plugin baseline compared
+a plain member. From generation 61 the plugin reads ``DECL_C_BIT_FIELD`` and
+stores it as a bit-field of that width. A pre-61 gcc-plugin baseline compared
 with a newer snapshot of the same header therefore shows
 ``FIELD_BITFIELD_CHANGED`` (``bits=None`` against ``bits=8``) that the header
 does not cause.
@@ -47,7 +47,7 @@ __all__ = ["GCC_BITFIELD_FIX_GENERATION", "demote_gcc_byte_bitfield_drift"]
 
 #: The first extractor generation whose gcc plugin keeps a byte-aligned
 #: bit-field marked as a bit-field.
-GCC_BITFIELD_FIX_GENERATION = 60
+GCC_BITFIELD_FIX_GENERATION = 61
 _GCC_PRODUCER = "gcc-experimental"
 #: The values ``diff_types`` writes on ``FIELD_BITFIELD_CHANGED`` for "not a
 #: bit-field" and for a whole-byte bit-field width (up to a 128-bit unit).
@@ -62,7 +62,7 @@ def demote_gcc_byte_bitfield_drift(
     old_generation: int,
     new_generation: int,
 ) -> list[Change]:
-    """Annotate the pre-60 gcc-plugin byte-aligned bit-field artifact as
+    """Annotate the pre-61 gcc-plugin byte-aligned bit-field artifact as
     ``COMPATIBLE_WITH_RISK`` (see the module docstring)."""
     if old_generation == new_generation:
         return changes

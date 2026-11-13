@@ -576,6 +576,17 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "no stored type spelling changes, nothing rewritten"
     ),
     60: GenerationSpellingChange(
+        "a header dump whose optional pass failed (a castxml clang join for "
+        "vector/complex/_BitInt spellings, calling conventions or const "
+        "variable templates; the clang explicit-instantiation text pass; the "
+        "clang record-layout pass), or that left a declaration type spelled "
+        "`Unimplemented`, now records the gap under "
+        "dump_provenance.extraction_limitations; a pass that ran records "
+        "exactly what it did before; no stored type spelling changes and "
+        "nothing is rewritten (an older gapped snapshot carries no record of "
+        "which pass failed, so there is nothing to migrate)"
+    ),
+    61: GenerationSpellingChange(
         "the castxml and clang header backends now record each base class's "
         "access specifier (base_access fact; a missing specifier is not "
         "collected), as does the native gcc plugin, which also keeps a "
@@ -583,7 +594,7 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "(including the one-subobject-per-type rule and the recursive first-member "
         "set) and no longer loses a copy constructor declared beside a defaulted "
         "constructor; only those record facts can change: an older snapshot "
-        "reads base access and the castxml traits as unknown, and a pre-60 "
+        "reads base access and the castxml traits as unknown, and a pre-61 "
         "gcc-plugin byte-aligned bit-field difference is demoted at comparison "
         "(policy/bitfield_generation_drift.py); no stored type spelling changes, "
         "nothing rewritten"

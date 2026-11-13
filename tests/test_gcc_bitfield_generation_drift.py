@@ -1,10 +1,10 @@
-"""The pre-generation-60 gcc-plugin byte-aligned bit-field drift is annotated, nothing else.
+"""The pre-generation-61 gcc-plugin byte-aligned bit-field drift is annotated, nothing else.
 
-Before generation 60 the native gcc header plugin stored a byte-aligned,
+Before generation 61 the native gcc header plugin stored a byte-aligned,
 whole-byte bit-field (``unsigned a : 8`` at offset 0) as a plain member. The
 oracle below states, independently of the implementation, exactly which
 ``FIELD_BITFIELD_CHANGED`` findings that artifact can produce: across the
-generation-60 boundary, with a gcc-plugin stale operand, the stale side not a
+generation-61 boundary, with a gcc-plugin stale operand, the stale side not a
 bit-field and the fresh side a bit-field of a positive multiple of 8 bits.
 Every other combination must keep its verdict.
 """
@@ -23,7 +23,7 @@ from abicheck.policy.bitfield_generation_drift import demote_gcc_byte_bitfield_d
 from abicheck.workflows import generation_drift
 
 _PRODUCERS = ("gcc-experimental", "castxml", "clang", None)
-_GENERATIONS = (0, 58, 59, 60, 61)
+_GENERATIONS = (0, 59, 60, 61, 62)
 _BITS = ("None", "1", "4", "8", "16", "24", "32")
 
 
@@ -43,7 +43,7 @@ def _artifact(
         stale_gen, fresh_gen, stale_prod = new_gen, old_gen, new_prod
         stale_bits, fresh_bits = new_bits, old_bits
     return (
-        stale_gen < 60 <= fresh_gen
+        stale_gen < 61 <= fresh_gen
         and stale_prod == "gcc-experimental"
         and stale_bits == "None"
         and fresh_bits != "None"
@@ -57,7 +57,7 @@ CASES = list(
 
 
 @pytest.mark.parametrize("case", [CASES], ids=["exhaustive"])
-def test_only_the_pre60_gcc_byte_bitfield_shape_is_annotated(case) -> None:
+def test_only_the_pre61_gcc_byte_bitfield_shape_is_annotated(case) -> None:
     mismatches = []
     for old_gen, new_gen, old_prod, new_prod, old_bits, new_bits in case:
         change = Change(
@@ -88,7 +88,7 @@ def test_annotation_keeps_the_finding_with_rule_and_reason() -> None:
         new_value="bits=8",
     )
     out = demote_gcc_byte_bitfield_drift(
-        [change], _snap("gcc-experimental"), _snap("gcc-experimental"), 59, 60
+        [change], _snap("gcc-experimental"), _snap("gcc-experimental"), 60, 61
     )
     assert out == [change]
     assert change.modulation_rule == "extractor_generation_drift"
@@ -112,20 +112,20 @@ def test_other_kinds_and_modulated_findings_are_untouched() -> None:
     )
     prior.effective_verdict = Verdict.BREAKING
     demote_gcc_byte_bitfield_drift(
-        [other, prior], _snap("gcc-experimental"), _snap(None), 59, 60
+        [other, prior], _snap("gcc-experimental"), _snap(None), 60, 61
     )
     assert other.effective_verdict is None
     assert prior.effective_verdict is Verdict.BREAKING
 
 
-def test_a_stored_gen59_gcc_baseline_against_a_live_dump_is_annotated() -> None:
-    """Through the workflow: a stored pre-60 gcc-plugin baseline (stamped
-    generation 59) against a live dump (current generation)."""
+def test_a_stored_gen60_gcc_baseline_against_a_live_dump_is_annotated() -> None:
+    """Through the workflow: a stored pre-61 gcc-plugin baseline (stamped
+    generation 60) against a live dump (current generation)."""
     stored = AbiSnapshot(
         library="libx.so",
         version="1",
         ast_producer="gcc-experimental",
-        fact_generations=(59, 0, 0),
+        fact_generations=(60, 0, 0),
     )
     live = _snap("gcc-experimental")
     change = Change(
