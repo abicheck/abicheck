@@ -310,6 +310,12 @@ current emitter, which is unchanged.
 
 ### False-clean risk
 
+#### A failed bundle snapshot build is reported but does not floor the exit code (2026-11-13)
+
+**Status (2026-11-13): OPEN.** When a release's bundle snapshot cannot be built, `run_bundle_analysis` records `bundle snapshot could not be built: ...` in `BundleDiffResult.analysis_errors`. JSON (`bundle_analysis_errors`) and Markdown show it. No exit axis reads it, so a release that is otherwise clean still exits 0. ADR-071 §3 keeps assurance per-pair, and a new `0 -> 1` axis needs an ADR. Owner: `policy/release_exit_decision.py`.
+`false-clean` — a release whose cross-library analysis failed exits 0 when its per-library results are clean. [Full write-up](known-gaps/a-failed-bundle-snapshot-build-does-not-floor-the-exit-code.md)
+<!-- canary: tests/test_fail_closed_error_paths.py::test_failed_bundle_axis_does_not_floor_the_release_exit_code -->
+
 #### castxml records no GNU contract attribute on a function (2026-11-12)
 
 **Status (2026-11-12): OPEN.** castxml 0.7 writes no `nonnull`, `returns_nonnull`, `malloc`, `format`, `warn_unused_result` (or any other GNU function attribute but a few x86-32 conventions) into a `<Function>`'s `attributes`, so `extract/headers/castxml/location.py`'s contract-token reader never sees one and `Function.contract_attributes` stays empty on both sides. Adding or dropping such an attribute reads `NO_CHANGE` at castxml headers depth, where the clang and native gcc backends report `func_contract_attribute_added`/`_removed` (COMPATIBLE_WITH_RISK). Found by the edit corpus (`func_contract_attribute_added`/`_removed` on `c_elf`, strict xfails in `tests/_edit_corpus_known.py`). Closing it: recover the tokens from the declaration's own (preprocessed) text, the way `extract/headers/castxml/calling_convention.py` already recovers `ms_abi`/`sysv_abi`. Owner: `extract/headers/castxml/`.
