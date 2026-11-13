@@ -15,9 +15,9 @@ from __future__ import annotations
 import shutil
 import subprocess
 from pathlib import Path
-from xml.etree.ElementTree import parse
 
 import pytest
+from defusedxml.ElementTree import parse
 
 from abicheck.extract.headers.castxml.context import CastxmlParserContext
 from abicheck.extract.headers.castxml.record_traits import (
