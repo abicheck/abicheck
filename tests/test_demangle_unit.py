@@ -380,11 +380,10 @@ class TestDemangle:
                 )
                 result = _mod.demangle("__ZN3foo3barEv", accept_macho_prefix=True)
         assert result == "foo::bar()"
-        # The canonical (single-underscore) form must reach the subprocess,
-        # not the raw Mach-O `__Z...` spelling.
-        called_args = mock_run.call_args[0][0]
-        assert "_ZN3foo3barEv" in called_args
-        assert "__ZN3foo3barEv" not in called_args
+        # The canonical (single-underscore) form must reach the subprocess
+        # (on stdin, never argv), not the raw Mach-O `__Z...` spelling.
+        assert mock_run.call_args.kwargs["input"].split("\n") == ["_ZN3foo3barEv"]
+        assert "__ZN3foo3barEv" not in mock_run.call_args[0][0]
 
     def test_macho_prefixed_malformed_name_via_cppfilt_is_not_demangled(self):
         """Codex review, fresh evidence: c++filt exits 0 and simply echoes
