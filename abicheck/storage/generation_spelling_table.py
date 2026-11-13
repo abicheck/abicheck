@@ -557,6 +557,13 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "comparison demotes that finding as extractor drift",
         retires_function_prefixes=("__builtin_",),
     ),
+    58: GenerationSpellingChange(
+        "DWARF member byte_size: a member whose type size is not evaluable is "
+        "unknown (None) instead of 0, while a flexible array of a known element "
+        "stays 0; BTF, CTF and PDB map their unresolved 0 to unknown. No stored "
+        "type spelling changes and no load-time rewrite: a stored 0 still reads "
+        "as 0 (a legacy unknown 0 against a new known size can read as 0 -> N)"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

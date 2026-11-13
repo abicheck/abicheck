@@ -107,6 +107,16 @@ def _added_fields_by_offset(
     return by_offset
 
 
+def _sizes_compatible(old: int | None, new: int | None) -> bool:
+    """Rename pairing's size criterion: an unknown size on either side does
+    not block a pair; two known sizes must be equal."""
+    return old is None or new is None or old == new
+
+
+def _size_text(size: int | None) -> str:
+    return "unknown" if size is None else f"{size}B"
+
+
 def _candidates_at(
     added_by_offset: dict[int, list[FieldInfo]], offset: int | None
 ) -> list[FieldInfo]:
@@ -181,7 +191,8 @@ def _removed_field_changes(
             # size/bit-layout across versions (e.g. "Word" widened
             # 4B->8B elsewhere, or a bit-field at the same byte offset
             # changing width) without the spelling changing at all, so
-            # also require byte_size and bit_offset/bit_size to match
+            # also require byte_size (when known on both sides) and
+            # bit_offset/bit_size to match
             # (caught in review — three times now). This is strictly
             # narrower than a real rename check would ideally be (a
             # harmless "struct Foo *" vs "Foo *" spelling difference now
@@ -208,7 +219,7 @@ def _removed_field_changes(
                         c.name not in reserved_matched
                         and c.name not in rename_matched
                         and old_f.type_name == c.type_name
-                        and old_f.byte_size == c.byte_size
+                        and _sizes_compatible(old_f.byte_size, c.byte_size)
                         and old_f.bit_offset == c.bit_offset
                         and old_f.bit_size == c.bit_size
                     )
@@ -283,9 +294,11 @@ def _existing_field_changes(
         ) != _normalize_type_name(new_f.type_name) and not cv_qualifiers_only_differ(
             old_f.type_name, new_f.type_name
         )
+        # Fires only when both sizes are known and differ: an unknown size
+        # (None) is never a change, and a real 0 -> N is one.
         type_size_changed = (
-            old_f.byte_size > 0
-            and new_f.byte_size > 0
+            old_f.byte_size is not None
+            and new_f.byte_size is not None
             and old_f.byte_size != new_f.byte_size
         )
         if type_name_changed or type_size_changed:
@@ -295,8 +308,8 @@ def _existing_field_changes(
                     symbol=f"{name}::{fname}",
                     name=name,
                     detail=fname,
-                    old=f"{old_f.type_name}({old_f.byte_size}B)",
-                    new=f"{new_f.type_name}({new_f.byte_size}B)",
+                    old=f"{old_f.type_name}({_size_text(old_f.byte_size)})",
+                    new=f"{new_f.type_name}({_size_text(new_f.byte_size)})",
                     old_value=old_f.type_name,
                     new_value=new_f.type_name,
                     field_name=fname,

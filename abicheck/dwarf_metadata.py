@@ -62,6 +62,7 @@ from elftools.elf.elffile import ELFFile
 
 from .dwarf_utils import (
     BASE_PRUNE_TAGS,
+    _strided,
     array_type_info,
     attr_bool as _attr_bool,  # noqa: F401
     attr_int as _attr_int,
@@ -151,7 +152,7 @@ def _parse(f: Any, so_path: Path) -> DwarfMetadata:
     dwarf = open_indexed_dwarf_info(elf)
 
     # Per-parse type-resolution cache: (cu_offset, die_offset) → (name, byte_size)
-    type_cache: dict[tuple[int, int], tuple[str, int]] = {}
+    type_cache: dict[tuple[int, int], tuple[str, int | None]] = {}
 
     for CU in dwarf.iter_CUs():  # type: ignore[no-untyped-call]
         try:
@@ -165,7 +166,7 @@ def _parse(f: Any, so_path: Path) -> DwarfMetadata:
 def _process_cu(
     CU: Any,
     meta: DwarfMetadata,
-    type_cache: dict[tuple[int, int], tuple[str, int]],
+    type_cache: dict[tuple[int, int], tuple[str, int | None]],
 ) -> None:
     """Walk all DIEs in one Compilation Unit (iterative, no recursion)."""
     top_die = CU.get_top_DIE()
@@ -176,7 +177,7 @@ def _walk_die_iter(
     root_die: Any,
     meta: DwarfMetadata,
     CU: Any,
-    type_cache: dict[tuple[int, int], tuple[str, int]],
+    type_cache: dict[tuple[int, int], tuple[str, int | None]],
 ) -> None:
     """Iterative depth-first DIE traversal with scope-qualified names.
 
@@ -230,7 +231,7 @@ def _process_typedef(
     die: Any,
     meta: DwarfMetadata,
     CU: Any,
-    type_cache: dict[tuple[int, int], tuple[str, int]],
+    type_cache: dict[tuple[int, int], tuple[str, int | None]],
 ) -> None:
     """If a typedef points to an anonymous struct/enum, register it under the typedef name."""
     typedef_name = _attr_str(die, "DW_AT_name")
@@ -265,7 +266,7 @@ def _process_struct(
     die: Any,
     meta: DwarfMetadata,
     CU: Any,
-    type_cache: dict[tuple[int, int], tuple[str, int]],
+    type_cache: dict[tuple[int, int], tuple[str, int | None]],
     scope_prefix: str = "",
 ) -> None:
     name = _attr_str(die, "DW_AT_name")
@@ -279,7 +280,7 @@ def _process_struct_named(
     die: Any,
     meta: DwarfMetadata,
     CU: Any,
-    type_cache: dict[tuple[int, int], tuple[str, int]],
+    type_cache: dict[tuple[int, int], tuple[str, int | None]],
     override_name: str | None,
 ) -> None:
     name = override_name or _attr_str(die, "DW_AT_name")
@@ -366,7 +367,7 @@ def _record_odr_conflict(
 def _expand_anonymous_member(
     die: Any,
     CU: Any,
-    type_cache: dict[tuple[int, int], tuple[str, int]],
+    type_cache: dict[tuple[int, int], tuple[str, int | None]],
     byte_offset: int | None,
 ) -> Fact[list[FieldInfo]]:
     """Inline the fields of an anonymous struct/union member.
@@ -439,7 +440,7 @@ class _UnevaluableMemberLocation(Exception):
 def _process_member(
     die: Any,
     CU: Any,
-    type_cache: dict[tuple[int, int], tuple[str, int]],
+    type_cache: dict[tuple[int, int], tuple[str, int | None]],
 ) -> FieldInfo | None:
     name = _attr_str(die, "DW_AT_name")
     if not name:
@@ -543,27 +544,43 @@ def _process_enum_named(
 # ---------------------------------------------------------------------------
 
 
+def _attr_size(die: Any) -> int | None:
+    """``DW_AT_byte_size`` of *die*, or ``None`` when the attribute is absent.
+
+    Absent is unknown, never zero: a real zero (a flexible array member, an
+    empty aggregate) carries the attribute or a known element size. The
+    shared ``attr_int`` helper returns 0 for both, so type sizes read through
+    this instead.
+    """
+    if "DW_AT_byte_size" not in die.attributes:
+        return None
+    return _attr_int(die, "DW_AT_byte_size")
+
+
 def _resolve_type(
     die: Any,
     CU: Any,
-    cache: dict[tuple[int, int], tuple[str, int]],
-) -> tuple[str, int]:
-    """Return (type_name, byte_size) for the type referenced by *die*."""
+    cache: dict[tuple[int, int], tuple[str, int | None]],
+) -> tuple[str, int | None]:
+    """Return (type_name, byte_size) for the type referenced by *die*.
+
+    ``byte_size`` is ``None`` when the member's type size is not evaluable.
+    """
     if "DW_AT_type" not in die.attributes:
-        return ("unknown", 0)
+        return ("unknown", None)
     try:
         type_die = _resolve_ref(die, "DW_AT_type", CU)
         return _die_to_type_info(type_die, CU, depth=0, cache=cache)
     except Exception:  # noqa: BLE001
-        return ("unknown", 0)
+        return ("unknown", None)
 
 
 def _die_to_type_info(  # noqa: PLR0911
     die: Any,
     CU: Any,
     depth: int,
-    cache: dict[tuple[int, int], tuple[str, int]],
-) -> tuple[str, int]:
+    cache: dict[tuple[int, int], tuple[str, int | None]],
+) -> tuple[str, int | None]:
     """Recursively resolve a type DIE to (name, byte_size).
 
     Memoised by (CU.cu_offset, die.offset) so each unique type is resolved
@@ -571,7 +588,7 @@ def _die_to_type_info(  # noqa: PLR0911
     Depth limit = 8 guards against pathological typedef chains.
     """
     if depth > 8:
-        return ("...", 0)
+        return ("...", None)
 
     cache_key = (CU.cu_offset, die.offset)
     if cache_key in cache:
@@ -586,14 +603,14 @@ def _compute_type_info(
     die: Any,
     CU: Any,
     depth: int,
-    cache: dict[tuple[int, int], tuple[str, int]],
-) -> tuple[str, int]:
+    cache: dict[tuple[int, int], tuple[str, int | None]],
+) -> tuple[str, int | None]:
     tag = die.tag
 
     if tag == "DW_TAG_base_type":
         return (
             _base_type_name(die),
-            _attr_int(die, "DW_AT_byte_size"),
+            _attr_size(die),
         )
 
     if tag in ("DW_TAG_structure_type", "DW_TAG_class_type", "DW_TAG_union_type"):
@@ -601,7 +618,7 @@ def _compute_type_info(
 
     if tag == "DW_TAG_enumeration_type":
         name = _attr_str(die, "DW_AT_name") or "<enum>"
-        return (f"enum {name}", _attr_int(die, "DW_AT_byte_size"))
+        return (f"enum {name}", _attr_size(die))
 
     if tag == "DW_TAG_pointer_type":
         target = pointee_subroutine(die, CU)
@@ -611,7 +628,7 @@ def _compute_type_info(
                 lambda d: _resolve_inner_type_name(d, CU, depth, cache),
                 pointer=True,
             )
-            return (spelled, _attr_int(die, "DW_AT_byte_size") or 0)
+            return (spelled, _attr_size(die))
         return _compute_pointer_like_info(
             die, CU, depth, cache, suffix=" *", fallback="void *"
         )
@@ -641,29 +658,29 @@ def _compute_type_info(
         spelled = subroutine_spelling(
             die, lambda d: _resolve_inner_type_name(d, CU, depth, cache), pointer=False
         )
-        return (spelled, _attr_int(die, "DW_AT_byte_size"))
+        return (spelled, _attr_size(die))
 
     return _compute_fallback_type_info(die, tag)
 
 
-def _compute_record_type_info(die: Any) -> tuple[str, int]:
+def _compute_record_type_info(die: Any) -> tuple[str, int | None]:
     name = _attr_str(die, "DW_AT_name") or "<anon>"
     # Use bare names for struct/class/union to match castxml naming.
     # Prefixes like "struct Foo" vs "Foo" can cause false type-drift reports
     # when comparing DWARF-derived layouts to castxml/header-derived models.
-    return (name, _attr_int(die, "DW_AT_byte_size"))
+    return (name, _attr_size(die))
 
 
 def _compute_pointer_like_info(
     die: Any,
     CU: Any,
     depth: int,
-    cache: dict[tuple[int, int], tuple[str, int]],
+    cache: dict[tuple[int, int], tuple[str, int | None]],
     suffix: str,
     fallback: str,
-) -> tuple[str, int]:
+) -> tuple[str, int | None]:
     pointee = _resolve_inner_type_name(die, CU, depth, cache)
-    size = _attr_int(die, "DW_AT_byte_size") or 0
+    size = _attr_size(die)
     if pointee is None:
         return (fallback, size)
     return (f"{pointee}{suffix}", size)
@@ -673,12 +690,12 @@ def _compute_qualified_type_info(
     die: Any,
     CU: Any,
     depth: int,
-    cache: dict[tuple[int, int], tuple[str, int]],
+    cache: dict[tuple[int, int], tuple[str, int | None]],
     qualifier: str,
-) -> tuple[str, int]:
+) -> tuple[str, int | None]:
     inner = _resolve_inner_type_info(die, CU, depth, cache)
     if inner is None:
-        return (qualifier, 0)
+        return (qualifier, None)
     inner_name, size = inner
     return (f"{qualifier} {inner_name}", size)
 
@@ -687,12 +704,12 @@ def _compute_typedef_info(
     die: Any,
     CU: Any,
     depth: int,
-    cache: dict[tuple[int, int], tuple[str, int]],
-) -> tuple[str, int]:
+    cache: dict[tuple[int, int], tuple[str, int | None]],
+) -> tuple[str, int | None]:
     name = _attr_str(die, "DW_AT_name")
     inner = _resolve_inner_type_info(die, CU, depth, cache)
     if inner is None:
-        return (name or "typedef", 0)
+        return (name or "typedef", None)
     inner_name, size = inner
     return (name or inner_name, size)
 
@@ -701,17 +718,29 @@ def _compute_array_type_info(
     die: Any,
     CU: Any,
     depth: int,
-    cache: dict[tuple[int, int], tuple[str, int]],
-) -> tuple[str, int]:
-    return array_type_info(die, _resolve_inner_type_info(die, CU, depth, cache))
+    cache: dict[tuple[int, int], tuple[str, int | None]],
+) -> tuple[str, int | None]:
+    inner = _resolve_inner_type_info(die, CU, depth, cache)
+    # array_type_info reads an unknown element size as 0. A 0 is a real size
+    # only for an unbounded or zero-length array of a known element (a
+    # flexible array member); with the element unknown the array is unknown.
+    element = None if inner is None else (inner[0], inner[1] or 0)
+    name, size = array_type_info(die, element)
+    if "DW_AT_byte_size" in die.attributes:
+        return (name, size)
+    element_unknown = inner is None or inner[1] is None
+    unevaluable = element_unknown or _strided(die)
+    if unevaluable or ("DW_AT_GNU_vector" in die.attributes and size == 0):
+        return (name, None)
+    return (name, size)
 
 
 def _resolve_inner_type_info(
     die: Any,
     CU: Any,
     depth: int,
-    cache: dict[tuple[int, int], tuple[str, int]],
-) -> tuple[str, int] | None:
+    cache: dict[tuple[int, int], tuple[str, int | None]],
+) -> tuple[str, int | None] | None:
     if "DW_AT_type" not in die.attributes:
         return None
     try:
@@ -725,15 +754,15 @@ def _resolve_inner_type_name(
     die: Any,
     CU: Any,
     depth: int,
-    cache: dict[tuple[int, int], tuple[str, int]],
+    cache: dict[tuple[int, int], tuple[str, int | None]],
 ) -> str | None:
     inner = _resolve_inner_type_info(die, CU, depth, cache)
     return inner[0] if inner is not None else None
 
 
-def _compute_fallback_type_info(die: Any, tag: str) -> tuple[str, int]:
+def _compute_fallback_type_info(die: Any, tag: str) -> tuple[str, int | None]:
     name = _attr_str(die, "DW_AT_name")
-    size = _attr_int(die, "DW_AT_byte_size")
+    size = _attr_size(die)
     # Log unknown DWARF type tags so gaps in type resolution are visible.
     # This helps diagnose missing coverage for new/vendor-specific DWARF extensions.
     # abi-dumper #6: __unknown__ type entries should produce a diagnostic.

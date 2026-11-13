@@ -60,7 +60,7 @@ def test_dwarf_metadata_die_to_type_info_depth_limit_and_cache():
     )
     cache: dict[tuple[int, int], tuple[str, int]] = {}
 
-    assert dm._die_to_type_info(die, cu, depth=9, cache=cache) == ("...", 0)
+    assert dm._die_to_type_info(die, cu, depth=9, cache=cache) == ("...", None)
 
     first = dm._die_to_type_info(die, cu, depth=0, cache=cache)
     second = dm._die_to_type_info(die, cu, depth=0, cache=cache)

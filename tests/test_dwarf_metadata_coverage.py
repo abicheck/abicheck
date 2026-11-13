@@ -733,17 +733,17 @@ class TestComputeTypeInfo:
     def test_qualified_no_inner(self):
         const = _Die("DW_TAG_const_type", {})
         result = _compute_type_info(const, _CU(), 0, {})
-        assert result == ("const", 0)
+        assert result == ("const", None)
 
     def test_typedef_no_inner(self):
         td = _Die("DW_TAG_typedef", {"DW_AT_name": "foo"})
         result = _compute_type_info(td, _CU(), 0, {})
-        assert result == ("foo", 0)
+        assert result == ("foo", None)
 
     def test_typedef_unnamed_no_inner(self):
         td = _Die("DW_TAG_typedef", {})
         result = _compute_type_info(td, _CU(), 0, {})
-        assert result == ("typedef", 0)
+        assert result == ("typedef", None)
 
     def test_reference_type(self):
         base = _Die(
@@ -810,7 +810,7 @@ class TestComputeFallbackTypeInfo:
 class TestResolveType:
     def test_no_type_attr(self):
         die = _Die("DW_TAG_member", {"DW_AT_name": "x"})
-        assert _resolve_type(die, _CU(), {}) == ("unknown", 0)
+        assert _resolve_type(die, _CU(), {}) == ("unknown", None)
 
     def test_error_in_resolution(self):
         die = _Die(
@@ -823,7 +823,7 @@ class TestResolveType:
         with patch(
             "abicheck.dwarf_metadata._resolve_ref", side_effect=RuntimeError("bad")
         ):
-            assert _resolve_type(die, _CU(), {}) == ("unknown", 0)
+            assert _resolve_type(die, _CU(), {}) == ("unknown", None)
 
 
 # ── _resolve_inner_type_info ──────────────────────────────────────────
