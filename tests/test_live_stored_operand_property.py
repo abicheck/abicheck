@@ -98,6 +98,19 @@ class _Pair(tuple):
 
 
 @st.composite
+def independent_pair(draw: st.DrawFn) -> _Pair:
+    """Two independently drawn snapshots.
+
+    Built inside a composite, not as ``st.tuples(...).map(_Pair)``: a mapped
+    strategy's counterexample is printed from the pre-map tuple of bare
+    ``AbiSnapshot`` objects, whose retired fields raise on access, so a real
+    failure (a ``UnicodeEncodeError`` from ``c++filt`` on Windows) was
+    reported as an ``AttributeError`` from the printer instead.
+    """
+    return _Pair((draw(snapshot_st()), draw(snapshot_st())))
+
+
+@st.composite
 def related_pair(draw: st.DrawFn) -> _Pair:
     """One drawn surface and an edited copy: some entries kept, some removed,
     some modified in place, some added."""
@@ -195,7 +208,7 @@ def related_pair(draw: st.DrawFn) -> _Pair:
 
 
 @_SETTINGS
-@given(pair=st.tuples(snapshot_st(), snapshot_st()).map(_Pair))
+@given(pair=independent_pair())
 def test_independent_pair_report_is_operand_form_invariant(pair: _Pair) -> None:
     _assert_operand_form_invariant(*pair)
 
