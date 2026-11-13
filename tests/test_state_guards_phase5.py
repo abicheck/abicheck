@@ -97,8 +97,9 @@ def test_digit_separators_keep_structural_braces_visible() -> None:
     """``1'000`` is a number, not a char literal: the braces between two such
     separators are real structure (CodeRabbit review). ``struct B`` opens on
     the line ``A`` closes on, which this one-opener-per-line scanner does not
-    record, so the guarded field is left out (conservative) -- what must never
-    happen is ``x`` being misattributed to ``A``, which the base code did."""
+    record, so the guarded field is left out (conservative), as on main -- what
+    must never happen is ``x`` being misattributed to ``A``, which this PR's
+    first literal regex did."""
     from abicheck.header_conditionals import scan_conditional_fields
 
     src = (
