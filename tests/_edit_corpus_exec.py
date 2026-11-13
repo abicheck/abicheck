@@ -226,8 +226,11 @@ def probe_expressions(roles: dict[str, RoleText], lang: str) -> dict[str, str]:
     for role, (header, _) in sorted(roles.items()):
         if not header or "template" in header:
             continue  # a template has no layout until instantiated
-        if re.search(r"\bnamespace\b", header):
-            continue  # ``struct N`` would name a global record, not lib::N
+        if re.search(r"\bnamespace\s*(?:\w+\s*::|\{)", header):
+            # ``_namespace_at`` spells only ``namespace NAME {``: a nested
+            # ``namespace a::b {`` or an anonymous one would leave ``struct N``
+            # naming a global record.
+            continue
         for m in _STRUCT.finditer(header):
             name = _namespace_at(header, m.start()) + m.group(1)
             tname = f"struct {name}"

@@ -322,6 +322,12 @@ current emitter, which is unchanged.
 `false-clean` — the inline-accessor finding is missing on castxml and clang header snapshots of namespaced records.
 <!-- canary: tests/test_header_backend_fact_gaps_integration.py::test_castxml_and_clang_name_the_corpus_pimpl_holder_by_its_bare_leaf -->
 
+#### Overload sets of two class-template specializations are compared as one (2026-11-13)
+
+**Status (2026-11-13): OPEN.** `diff_templates.detect_overload_set_rerouted` groups functions by a stem that drops every template argument list, the enclosing class's included, so `C<int>::f` and `C<long>::f` share one overload set. When each specialization loses one overload and gains another (`C<int>::f`: `{f(int), f(double)}` -> `{f(int), f(float)}`, and the reverse for `C<long>`), the merged old and new sets are equal and no `overload_set_rerouted` is reported. The removed overloads still read `func_removed`, so the release still gates, but the re-routing explanation is missing. `main` grouped by `_strip_template_args` with the same effect; #2028 kept it. Closing it means keying on the enclosing scope with its template arguments, normalized so that two backends' spellings (`C<long>`, `C<long int>`) still match. Found by review on #2049. Owner: `diff_templates.py` (`compare/`).
+`false-clean` — a reroute inside one class-template specialization is unreported when another specialization of the same template moves the opposite way.
+<!-- canary: tests/test_template_stem_real_mangling.py::test_two_specializations_swapping_overloads_read_as_no_reroute -->
+
 #### The unnamed-type check reads only an ELF export table (2026-11-13)
 
 **Status (2026-11-13): OPEN.** `diff_unnamed_types` (`unnamed_type_in_public_abi`, COMPATIBLE_WITH_RISK) declares `requires_support` on ELF metadata for both sides and collects names from `snap.elf`, so on a Mach-O library, or a MinGW-built PE one, a new export whose Itanium mangled name embeds an unnamed type (`Ut_`) is never examined, although its name depends on declaration order exactly as on ELF. The run reads only `func_added` (COMPATIBLE). Found by the edit corpus (`unnamed_type_export_added` on `cxx_more`, macOS integration lane). Closing it means reading the export names from the platform-neutral export index (Mach-O names carry an extra leading `_`; MSVC manglings have no `Ut_` production). Owner: `diff_unnamed_types.py` (`compare/`).

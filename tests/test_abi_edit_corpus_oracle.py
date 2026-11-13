@@ -995,16 +995,25 @@ def test_non_reference_header_backends_run_on_linux_elf_only(
         assert reason is None
 
 
-def test_the_layout_probe_skips_a_record_declared_in_a_namespace() -> None:
-    # ``struct N`` in the probe would name a global record, not lib::N.
+def test_the_layout_probe_qualifies_a_record_declared_in_a_namespace() -> None:
+    # A record in ``namespace NAME {`` blocks is probed by its qualified name;
+    # a form the qualifier cannot spell (``namespace a::b {``, an anonymous
+    # namespace) skips the role rather than probe a global ``struct N``.
     from tests._edit_corpus_exec import probe_expressions
 
     roles = {
-        "ns": ("namespace lib { struct N { int a; }; }", ""),
+        "ns": ("namespace lib { namespace detail { struct N { int a; }; } }", ""),
         "top": ("struct T { int a; };", ""),
+        "nested": ("namespace a::b { struct M { int a; }; }", ""),
+        "anon": ("namespace { struct A { int a; }; }", ""),
     }
-    assert set(probe_expressions(roles, "c++")) == {
+    exprs = probe_expressions(roles, "c++")
+    assert set(exprs) == {
         "sizeof(T)",
         "alignof(T)",
         "offsetof(T,a)",
+        "sizeof(lib::detail::N)",
+        "alignof(lib::detail::N)",
+        "offsetof(lib::detail::N,a)",
     }
+    assert exprs["sizeof(lib::detail::N)"] == "sizeof(struct lib::detail::N)"

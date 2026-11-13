@@ -132,3 +132,28 @@ def test_dropping_every_instantiation_is_not_a_missing_one() -> None:
     # Negative control: no instantiation of the template survives.
     old = _snap([_instantiation("getv", "i"), _instantiation("getv", "l")])
     assert detect_missing_instantiations(old, _snap([])) == []
+
+
+def _member(spec: str, code: str) -> Function:
+    # ``C<T>::f(P)`` with its real Itanium mangling: _ZN1CI<T>E1fE<P>.
+    return Function(
+        name=f"C<{_BUILTINS[spec]}>::f",
+        mangled=f"_ZN1CI{spec}E1fE{code}",
+        return_type="int",
+        params=[Param(name="a", type=_BUILTINS[code])],
+        visibility=Visibility.PUBLIC,
+    )
+
+
+@pytest.mark.known_gap_canary
+def test_two_specializations_swapping_overloads_read_as_no_reroute() -> None:
+    # Known gap: the overload-set key drops the enclosing class's template
+    # arguments, so C<int>::f and C<long>::f share one set. Each specialization
+    # loses one overload and gains another, yet the merged sets are equal.
+    old = _snap(
+        [_member("i", "i"), _member("i", "d"), _member("l", "i"), _member("l", "f")]
+    )
+    new = _snap(
+        [_member("i", "i"), _member("i", "f"), _member("l", "i"), _member("l", "d")]
+    )
+    assert detect_overload_set_rerouted(old, new) == []
