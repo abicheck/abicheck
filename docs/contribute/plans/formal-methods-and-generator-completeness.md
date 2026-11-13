@@ -34,7 +34,7 @@ generated: false
 We want two claims, and today we can state neither precisely:
 
 1. **The generator is complete.** The generated ABI edit corpus
-   (`tests/_edit_corpus_*`, space model in `abiforge/model/space.py`)
+   (`abiforge/`, formerly `tests/_edit_corpus_*`; space model in `abiforge/model/space.py`)
    covers its space without gaps, and every generated case has a correct
    expected outcome.
 2. **abicheck detects that space.** Every case in it gets the expected

@@ -24,6 +24,10 @@ import os
 import subprocess
 from collections.abc import Iterator, Sequence
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from abicheck.model.snapshot import AbiSnapshot
 
 #: The verdict an adapter returns when the checker refuses to compare.
 REFUSED = "REFUSED"
@@ -41,7 +45,7 @@ def snapshot(
     is_cxx: bool,
     backend: str,
     gcc_options: str | None,
-) -> object:
+) -> AbiSnapshot:
     """abicheck's snapshot of one built library, made the way users get it."""
     from abicheck.compile_context import CompileContext
     from abicheck.dumper import dump
@@ -51,7 +55,7 @@ def snapshot(
     if os.environ.get(PUBLIC_DUMP_ENV):
         # The public dump workflow end to end (``run_dump``), record-layout
         # enrichment included.
-        from abicheck.service import run_dump
+        from abicheck.workflows.dump.native import run_dump
 
         snap = run_dump(
             so,
@@ -109,7 +113,7 @@ def snapshot(
     return snap
 
 
-def answer(old: object, new: object) -> tuple[str, frozenset[str]]:
+def answer(old: AbiSnapshot, new: AbiSnapshot) -> tuple[str, frozenset[str]]:
     """(verdict name, ChangeKind names); ``REFUSED`` plus the error type on refusal.
 
     A refusal (``abicheck.errors.AbicheckError``, e.g. a profile mismatch) is
@@ -119,7 +123,7 @@ def answer(old: object, new: object) -> tuple[str, frozenset[str]]:
     from abicheck.errors import AbicheckError
 
     try:
-        result = compare(old, new)  # type: ignore[arg-type]
+        result = compare(old, new)
     except AbicheckError as exc:
         return REFUSED, frozenset({type(exc).__name__})
     return result.verdict.name, frozenset(c.kind.name for c in result.changes)

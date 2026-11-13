@@ -25,10 +25,10 @@ _OPTIONS = {
 }
 
 
-def add_pytest_options(parser: object) -> None:
+def add_pytest_options(parser: pytest.Parser) -> None:
     """Register the CLI spellings of the two selection variables (conftest)."""
     for opt, var in _OPTIONS.items():
-        parser.addoption(  # type: ignore[attr-defined]
+        parser.addoption(
             opt,
             default=None,
             metavar="NAMES",
@@ -36,14 +36,14 @@ def add_pytest_options(parser: object) -> None:
         )
 
 
-def apply_pytest_options(config: object) -> None:
+def apply_pytest_options(config: pytest.Config) -> None:
     """Export the options as the env variables, validated, before collection.
 
     Runs in every xdist worker too, so workers see the same selection. A
     malformed name fails the session here, not at the first generated cell.
     """
     for opt, var in _OPTIONS.items():
-        value = config.getoption(opt, default=None)  # type: ignore[attr-defined]
+        value = config.getoption(opt, default=None)
         if value is not None:
             from abiforge.run.toolchains import (
                 ToolchainSelectionError,

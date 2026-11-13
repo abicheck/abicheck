@@ -30,9 +30,10 @@ A point is `(base layout, edit, consumer use, evidence)`:
 
 Target: SysV x86-64 C ABI, gcc. Lean model: `formal/lean/AbiLean/Layout.lean`.
 
-**Why the generator could not express this.** `abiforge/model/space.py`
-says explicitly that its space "has no 'edit' axis: one operator covers its
-construct". A covered *construct* (`struct`) says nothing about which edit
+**Why the generator could not express this.** At the time of E1, the space
+model (then `tests/_edit_corpus_space.py`; now `abiforge/model/space.py`, which
+has the edit axis this finding led to) said explicitly that its space "has no
+'edit' axis: one operator covers its construct". A covered *construct* (`struct`) says nothing about which edit
 sub-classes ran, so the gap in E2 was invisible to the coverage ledger.
 
 ## E2. Generator operators vs. the model
