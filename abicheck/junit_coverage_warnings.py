@@ -22,12 +22,19 @@ Split out as its own leaf module rather than grown inline in
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
+from typing import TYPE_CHECKING
 
 from .checker_types import DiffResult
 from .confidence import SAME_BINARY_WARNING_MARKER
+from .report.analysis_caveats import CAVEAT_HEADING, analysis_caveats_for
+
+if TYPE_CHECKING:
+    from .report.envelope import ReportEnvelope
 
 
-def append_coverage_warnings_suite(root: ET.Element, result: DiffResult) -> int:
+def append_coverage_warnings_suite(
+    root: ET.Element, result: DiffResult, envelope: ReportEnvelope | None = None
+) -> int:
     """Append the same-binary ``coverage_warnings`` entry as a passing testcase, returning the count.
 
     Nothing at all when there is no such warning, so an ordinary report is
@@ -45,9 +52,10 @@ def append_coverage_warnings_suite(root: ET.Element, result: DiffResult) -> int:
     ``<error>``/``<failure>`` -- since this is advisory and must not turn a
     green JUnit-consuming build red.
     """
+    caveats = _append_analysis_caveats_suite(root, result, envelope)
     warnings = [w for w in result.coverage_warnings if SAME_BINARY_WARNING_MARKER in w]
     if not warnings:
-        return 0
+        return caveats
     library = getattr(result, "library", "") or "unknown"
     suite = ET.SubElement(root, "testsuite")
     suite.set("name", f"abicheck.coverage_warnings.{library}")
@@ -60,4 +68,36 @@ def append_coverage_warnings_suite(root: ET.Element, result: DiffResult) -> int:
         case.set("name", f"warning[{i}]")
         out = ET.SubElement(case, "system-out")
         out.text = warning
-    return len(warnings)
+    return caveats + len(warnings)
+
+
+def _append_analysis_caveats_suite(
+    root: ET.Element, result: DiffResult, envelope: ReportEnvelope | None
+) -> int:
+    """One ``<skipped>`` testcase per ``report/analysis_caveats.py`` fact,
+    returning the count.
+
+    A failed snapshot section, a forced not-comparable comparison or a
+    ``NOT_EVALUATED`` finding means part of the comparison never ran --
+    JUnit's ``skipped`` ("not executed") is exactly that, where a passing
+    testcase would read as checked-and-compatible and a failure would claim
+    a break nobody observed. Skipped, so it neither turns a JUnit-consuming
+    build red nor disappears from the dashboard. Nothing for a complete run.
+    """
+    caveats = analysis_caveats_for(result, envelope)
+    if not caveats:
+        return 0
+    library = getattr(result, "library", "") or "unknown"
+    suite = ET.SubElement(root, "testsuite")
+    suite.set("name", f"abicheck.analysis_incomplete.{library}")
+    suite.set("tests", str(len(caveats)))
+    suite.set("failures", "0")
+    suite.set("errors", "0")
+    suite.set("skipped", str(len(caveats)))
+    for caveat in caveats:
+        case = ET.SubElement(suite, "testcase")
+        case.set("classname", f"abicheck.analysis_incomplete.{library}")
+        case.set("name", caveat.key)
+        skipped = ET.SubElement(case, "skipped")
+        skipped.set("message", f"{CAVEAT_HEADING}: {caveat.message}")
+    return len(caveats)

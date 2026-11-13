@@ -94,6 +94,7 @@ def to_stat(result: DiffResult, *, envelope: ReportEnvelope) -> str:
     blocks CI. The disposition note is read from the envelope's shared
     document, not recomputed from the ledger.
     """
+    from .analysis_caveats import analysis_caveats_for
     from .change_inventory import render_change_inventory_json
     from .document import ReportDocument
     from .render_text import render_stat_document
@@ -125,6 +126,8 @@ def to_stat(result: DiffResult, *, envelope: ReportEnvelope) -> str:
             )
         ),
     }
+    if caveats := analysis_caveats_for(result, envelope):
+        d["analysis_caveats"] = [c.key for c in caveats]
     # Codex review: oneline/`--stat` lacked the deployment digest.
     if (_dig := getattr(result, "env_matrix_source_sha256", None)) is not None:
         d["env_matrix_source_sha256"] = _dig

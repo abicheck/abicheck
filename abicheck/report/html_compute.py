@@ -42,6 +42,7 @@ from typing import TYPE_CHECKING, Any, cast
 from ..checker_types import DiffResult
 from ..html_template import _CSS as _CSS
 from ..model.change_catalog.kinds import HasKind
+from .analysis_caveats import analysis_caveats_for
 from .change_operation import entity_for_change
 from .change_summary import ENTITY_LABELS, UNCLASSIFIED_LABEL
 
@@ -642,6 +643,11 @@ def build_html_document(
             ),
             "sections": sections,
             "empty_state": empty_state,
+            "analysis_caveats": [
+                c.message for c in analysis_caveats_for(result, envelope)
+            ]
+            if isinstance(result, DiffResult)
+            else [],
         }
     )
 

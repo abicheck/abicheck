@@ -36,6 +36,7 @@ whose size it can state exactly.
 from __future__ import annotations
 
 from .pr_comment_base import CommentModel, escape_cell
+from .report.analysis_caveats import CAVEAT_HEADING
 from .report.evidence_summary import tier_label
 
 # ---------------------------------------------------------------------------
@@ -198,6 +199,11 @@ def _evidence_block(model: CommentModel) -> list[str]:
         first.append(f"Evidence: {sources}")
     if first:
         out += ["> " + " · ".join(first), ""]
+    # Never collapsed or capped: each one says part of the comparison did
+    # not run, so the verdict above it is not a clean result.
+    out += [f"> ⚠️ **{CAVEAT_HEADING}:** {escape_cell(c)}" for c in ev.analysis_caveats]
+    if ev.analysis_caveats:
+        out.append("")
     if ev.coverage_warnings:
         shown = list(ev.coverage_warnings[:_EVIDENCE_ITEMS_INLINE])
         out.append(
