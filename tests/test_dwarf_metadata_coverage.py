@@ -43,13 +43,21 @@ class _Attr:
         self.form = form
 
 
+def _wrap_attr(value):
+    """A raw attribute value as a DIE attribute. A plain integer is written as
+    a constant (``DW_FORM_data4``), as compilers write sizes and bounds; any
+    other raw value keeps the reference default."""
+    if isinstance(value, _Attr):
+        return value
+    if isinstance(value, int) and not isinstance(value, bool):
+        return _Attr(value, "DW_FORM_data4")
+    return _Attr(value)
+
+
 class _Die:
     def __init__(self, tag, attrs=None, children=None, offset=0):
         self.tag = tag
-        self.attributes = {
-            k: _Attr(v) if not isinstance(v, _Attr) else v
-            for k, v in (attrs or {}).items()
-        }
+        self.attributes = {k: _wrap_attr(v) for k, v in (attrs or {}).items()}
         self._children = list(children or [])
         self.offset = offset
 

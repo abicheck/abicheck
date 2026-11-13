@@ -6,12 +6,12 @@
       "abicheck/dumper.py": "7cfc03dce4b9968a259d5eba7ba7cf7d3008eb0422a60defd7c4743b88b330a8",
       "abicheck/dumper_clang.py": "5fd0f5d29bf26c35b68c0389ed98c30ab52e462c529614ce0195b16fa4f3684c",
       "abicheck/dwarf_advanced.py": "e7dc4a394915381a0c67081f14b8301d63677c5c63d1feb4e95c6c3573c111e8",
-      "abicheck/dwarf_metadata.py": "3dc53e7ea80a18e30d87a1f1687ce3029a608fe0f8e018347015d3c2ca30213b",
+      "abicheck/dwarf_metadata.py": "307f2e9cdc04c8feb304bc108928e65a7cb031ebf51803481acda38a33c3b501",
       "abicheck/dwarf_presence.py": "7e73580ec7a02fdf24e3815cb89e42aa6fe00e46e8cda6b7fe9d547f06ac3f06",
       "abicheck/dwarf_snapshot.py": "0bc0c4ab892ad7e4b3a8f4f9c991045109667638e012337ec349204122435fb8",
       "abicheck/dwarf_snapshot_datasources.py": "e337f8be3a8ae16350c0639d0be10670d4d5d1197108659fa210fcbbf8a5bdde",
       "abicheck/dwarf_unified.py": "f6b778277a80aa4d010535db68e1f7363735cbc78ee5c13dc0ee38b52c319ce8",
-      "abicheck/dwarf_utils.py": "804ffe3cfa507b305ca7ff206fee70957e23e20f7eabd7c05eaa1e45a7f3bd8f",
+      "abicheck/dwarf_utils.py": "a4c1c20c68df083db70dbc01bfd00a2d9cc53dbfceb0f31cbf4d6382f75f74ff",
       "abicheck/elf_metadata.py": "e5ca377a85a3380faaa63119f832780fa344ecfad346d81b9cfcc6ee2050ac35",
       "abicheck/extract/__init__.py": "011ec37fad96ea2035983eaaedeba0976940a570900f85db8c03bb7369af742a",
       "abicheck/extract/ar_archive.py": "6fdab7ed7390a20f087f9407eaa3988c0f8c658400bc0ea8c7e193271923956d",
@@ -224,9 +224,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "fc6afabc0391b75fbcf0e3dfbde3722a2e5d948c855acef463cca86000286f12",
+    "fingerprint": "d97ab054df82d8a173c44ebf489448c18ec4c4561a1a3a313557038177561f95",
     "generation": 58,
-    "reason": "DWARF member byte_size is None (unknown) instead of 0 where the type size is not evaluable; flexible arrays of a known element stay 0"
+    "reason": "generation 58 is unreleased (this PR's own bump, not on main): refines the same change before any stored 58 snapshot exists; non-constant byte_size and array bounds read as unknown"
   },
   "resolver": {
     "files": {

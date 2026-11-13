@@ -87,17 +87,18 @@ def _struct_size_and_alignment_changes(
 def _added_fields_by_offset(
     added_names: AbstractSet[str], new_fields: dict[str, FieldInfo]
 ) -> dict[int, list[FieldInfo]]:
-    """Added, non-reserved fields indexed by ``byte_offset``.
+    """Added, non-reserved fields indexed by ``byte_offset``, each group sorted
+    by name.
 
     A list per offset, not a single value: two renamed bit-fields can
     legitimately share a byte_offset (e.g. two 1-bit flags in the same
     storage byte), and a plain ``dict[int, FieldInfo]`` comprehension would
-    silently keep only the last one, leaving every other same-byte bit-field
-    with no candidate to match against and falling through to a false
-    STRUCT_FIELD_REMOVED (caught in review).
+    silently keep only the last one. The sort makes the candidate order a
+    function of the field names, not of set iteration order, so the pairing
+    below cannot depend on how the caller built its dicts.
     """
     by_offset: dict[int, list[FieldInfo]] = {}
-    for fn in added_names:
+    for fn in sorted(added_names):
         if RESERVED_FIELD.matches(fn):
             continue
         offset = new_fields[fn].byte_offset
@@ -126,128 +127,158 @@ def _candidates_at(
     return added_by_offset.get(offset, [])
 
 
+def _rename_pairs(
+    removed: list[tuple[str, FieldInfo]],
+    added_by_offset: dict[int, list[FieldInfo]],
+    excluded: set[str],
+) -> dict[str, str]:
+    """One-to-one pure-rename pairs, as ``{removed name: added name}``.
+
+    A pair needs the same offset, spelling and bit layout; its size must match
+    when both sizes are known (an unknown size matches any size). The pairing
+    is a maximum bipartite matching, so no pairing is lost that an alternative
+    assignment would keep, and it is deterministic:
+
+    * removed fields and candidates are visited in name order, so the result
+      depends on the names, never on dict insertion order;
+    * the matching is first grown over exact-size edges only, so a known size
+      keeps its exact partner; then augmented over the wildcard edges, which
+      only adds pairs and never breaks one (Kuhn's augmenting paths);
+    * a candidate is used at most once, and *excluded* names are never used.
+    """
+    left = [(fname, old_f) for fname, old_f in removed if old_f.byte_offset is not None]
+
+    def edges(exact_only: bool) -> dict[str, list[str]]:
+        adjacency: dict[str, list[str]] = {}
+        for fname, old_f in left:
+            targets: list[str] = []
+            for c in _candidates_at(added_by_offset, old_f.byte_offset):
+                if c.name in excluded:
+                    continue
+                if not (
+                    old_f.type_name == c.type_name
+                    and old_f.bit_offset == c.bit_offset
+                    and old_f.bit_size == c.bit_size
+                ):
+                    continue
+                if exact_only:
+                    exact = (
+                        old_f.byte_size is not None and old_f.byte_size == c.byte_size
+                    )
+                    if not exact:
+                        continue
+                elif not _sizes_compatible(old_f.byte_size, c.byte_size):
+                    continue
+                targets.append(c.name)
+            adjacency[fname] = targets
+        return adjacency
+
+    match_left: dict[str, str] = {}
+    match_right: dict[str, str] = {}
+
+    def augment(u: str, adjacency: dict[str, list[str]], seen: set[str]) -> bool:
+        for v in adjacency[u]:
+            if v in seen:
+                continue
+            seen.add(v)
+            owner = match_right.get(v)
+            if owner is None or augment(owner, adjacency, seen):
+                match_right[v] = u
+                match_left[u] = v
+                return True
+        return False
+
+    exact_adjacency = edges(exact_only=True)
+    for fname, _ in left:
+        augment(fname, exact_adjacency, set())
+    all_adjacency = edges(exact_only=False)
+    for fname, _ in left:
+        if fname not in match_left:
+            augment(fname, all_adjacency, set())
+    return match_left
+
+
 def _removed_field_changes(
     name: str, old_fields: dict[str, FieldInfo], new_fields: dict[str, FieldInfo]
 ) -> list[Change]:
     """Fields gone from the new side: a reserved-field activation, a pure
-    rename, or a genuine removal."""
-    changes: list[Change] = []
+    rename, or a genuine removal.
+
+    Reserved fields are paired first (by offset and spelling, greedily in
+    name order). Pure renames are then paired one-to-one over the candidates
+    the reserved pass left free, by :func:`_rename_pairs`. Changes are emitted
+    in the removed fields' name order.
+    """
     removed_names = sorted(old_fields.keys() - new_fields.keys())
     added_by_offset = _added_fields_by_offset(
         new_fields.keys() - old_fields.keys(), new_fields
     )
-    reserved_matched: set[str] = set()
-    # Tracks candidates already consumed by a pure-rename match below, so a
-    # second removed field at the same offset (overlapping anonymous-union
-    # members) can't also claim it -- otherwise both would report
-    # FIELD_RENAMED to the same target, hiding that one was genuinely
-    # dropped (caught in review).
-    rename_matched: set[str] = set()
 
+    reserved_matched: dict[str, str] = {}
     for fname in removed_names:
         old_f = old_fields[fname]
-        if RESERVED_FIELD.matches(fname):
-            candidate = next(
-                (
-                    c
-                    for c in _candidates_at(added_by_offset, old_f.byte_offset)
-                    if c.name not in rename_matched and old_f.type_name == c.type_name
-                ),
-                None,
-            )
-            if candidate is not None:
-                changes.append(
-                    make_change(
-                        ChangeKind.USED_RESERVED_FIELD,
-                        symbol=name,
-                        name=name,
-                        old=fname,
-                        new=candidate.name,
-                    )
-                )
-                reserved_matched.add(candidate.name)
-                continue
-        else:
-            # Pure rename: same offset, identical type, different name.
-            # Report FIELD_RENAMED (API_BREAK) directly instead of a
-            # STRUCT_FIELD_REMOVED that would falsely claim the field no
-            # longer exists — mirrors the rename-skip for enum members below
-            # (ENUM_MEMBER_RENAMED). Doesn't depend on `_diff_field_renames`
-            # (a different model, its own type-name strings) also firing for
-            # the pair -- relying on that could silently drop the finding
-            # when the two extractors spell the type differently (caught in
-            # review); the post-processing dedup pass collapses a duplicate.
-            # _normalize_type_name is lossy by design (it also strips
-            # pointer/reference sigils to compare "struct Foo *" against
-            # "Foo" for the *tag-spelling* case), so it alone would equate
-            # "Foo *" with "Foo" and even a byte-size guard cannot save
-            # it: a same-size pointer-to-inline-value retype (e.g.
-            # "Handle *" (8B) -> an 8-byte-by-value "Handle") would still
-            # pass a size check while being a real layout/representation
-            # break (caught in review — twice). Require exact, non-lossy
-            # equality of the raw type spelling instead of any
-            # normalized comparison. Spelling alone is still not enough,
-            # though: the *same* typedef name can resolve to a different
-            # size/bit-layout across versions (e.g. "Word" widened
-            # 4B->8B elsewhere, or a bit-field at the same byte offset
-            # changing width) without the spelling changing at all, so
-            # also require byte_size (when known on both sides) and
-            # bit_offset/bit_size to match
-            # (caught in review — three times now). This is strictly
-            # narrower than a real rename check would ideally be (a
-            # harmless "struct Foo *" vs "Foo *" spelling difference now
-            # falls through to STRUCT_FIELD_REMOVED instead of
-            # FIELD_RENAMED) but never misclassifies a genuine type or
-            # layout change as a bare rename. Scanning the full
-            # same-offset candidate list (not just one arbitrary entry)
-            # also matters when two bit-fields share a byte_offset —
-            # each removed bit-field must find *its own* matching
-            # candidate by bit position/width, not whichever one a
-            # single-value dict happened to keep (caught in review —
-            # four times now). And a matched candidate must be excluded
-            # from further matches (`rename_matched`) — otherwise two
-            # removed fields with identical layout at the same offset
-            # (overlapping anonymous-union members collapsing to one
-            # field) would both claim the same new field as their
-            # rename target, hiding that one of them was genuinely
-            # dropped (caught in review — five times now).
-            candidate = next(
-                (
-                    c
-                    for c in _candidates_at(added_by_offset, old_f.byte_offset)
-                    if (
-                        c.name not in reserved_matched
-                        and c.name not in rename_matched
-                        and old_f.type_name == c.type_name
-                        and _sizes_compatible(old_f.byte_size, c.byte_size)
-                        and old_f.bit_offset == c.bit_offset
-                        and old_f.bit_size == c.bit_size
-                    )
-                ),
-                None,
-            )
-            if candidate is not None:
-                rename_matched.add(candidate.name)
-                changes.append(
-                    make_change(
-                        ChangeKind.FIELD_RENAMED,
-                        symbol=name,
-                        name=name,
-                        old=fname,
-                        new=candidate.name,
-                    )
-                )
-                continue
-        changes.append(
-            make_change(
-                ChangeKind.STRUCT_FIELD_REMOVED,
-                symbol=f"{name}::{fname}",
-                name=name,
-                detail=fname,
-                old_value=f"{old_fields[fname].type_name}",
-                field_name=fname,
-            )
+        if not RESERVED_FIELD.matches(fname):
+            continue
+        candidate = next(
+            (
+                c
+                for c in _candidates_at(added_by_offset, old_f.byte_offset)
+                if c.name not in reserved_matched.values()
+                and old_f.type_name == c.type_name
+            ),
+            None,
         )
+        if candidate is not None:
+            reserved_matched[fname] = candidate.name
+
+    plain_removed = [
+        (fname, old_fields[fname])
+        for fname in removed_names
+        if not RESERVED_FIELD.matches(fname)
+    ]
+    renames = _rename_pairs(
+        plain_removed, added_by_offset, set(reserved_matched.values())
+    )
+
+    changes: list[Change] = []
+    for fname in removed_names:
+        old_f = old_fields[fname]
+        if fname in reserved_matched:
+            changes.append(
+                make_change(
+                    ChangeKind.USED_RESERVED_FIELD,
+                    symbol=name,
+                    name=name,
+                    old=fname,
+                    new=reserved_matched[fname],
+                )
+            )
+        elif fname in renames:
+            # Pure rename: same offset and spelling, different name. Reported
+            # as FIELD_RENAMED (API_BREAK) rather than a STRUCT_FIELD_REMOVED
+            # that would claim the field no longer exists. The raw type
+            # spelling must match exactly: a normalized comparison would equate
+            # "Handle *" with "Handle", a real representation change.
+            changes.append(
+                make_change(
+                    ChangeKind.FIELD_RENAMED,
+                    symbol=name,
+                    name=name,
+                    old=fname,
+                    new=renames[fname],
+                )
+            )
+        else:
+            changes.append(
+                make_change(
+                    ChangeKind.STRUCT_FIELD_REMOVED,
+                    symbol=f"{name}::{fname}",
+                    name=name,
+                    detail=fname,
+                    old_value=f"{old_f.type_name}",
+                    field_name=fname,
+                )
+            )
     return changes
 
 

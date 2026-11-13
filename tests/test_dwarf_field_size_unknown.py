@@ -121,8 +121,9 @@ def test_rename_still_blocked_by_known_size_mismatch() -> None:
 
 
 class _Attr:
-    def __init__(self, value: Any) -> None:
+    def __init__(self, value: Any, form: str = "DW_FORM_data4") -> None:
         self.value = value
+        self.form = form
 
 
 class _Die:
@@ -135,7 +136,9 @@ class _Die:
     ) -> None:
         self.tag = tag
         self.offset = offset
-        self.attributes = {k: _Attr(v) for k, v in (attrs or {}).items()}
+        self.attributes = {
+            k: v if isinstance(v, _Attr) else _Attr(v) for k, v in (attrs or {}).items()
+        }
         self._children = list(children)
 
     def iter_children(self) -> Any:
@@ -336,3 +339,167 @@ def test_generation_57_known_size_still_compares_known() -> None:
     old = _layout_snapshot(4, generation=57)
     new = _layout_snapshot(8, generation=DWARF_FIELD_SIZE_GENERATION)
     assert _size_findings(old, new) == ["Field type changed: S::f int(4B) → int(8B)"]
+
+
+# --- Rename pairing is order-independent and maximal ------------------------
+# Several removed and added fields share one offset, spelling and bit layout,
+# so only their sizes distinguish them. The classification must be a function
+# of the sizes and names, never of dict insertion order, and must pair as many
+# fields as a brute-force maximum matching would.
+
+
+def _pairing_outcome(
+    old_items: list[tuple[str, int | None]],
+    new_items: list[tuple[str, int | None]],
+    old_order: tuple[int, ...],
+    new_order: tuple[int, ...],
+) -> list[tuple[str, str, str | None, str | None]]:
+    old = {
+        n: FieldInfo(name=n, type_name="int", byte_offset=4, byte_size=s)
+        for n, s in (old_items[i] for i in old_order)
+    }
+    new = {
+        n: FieldInfo(name=n, type_name="int", byte_offset=4, byte_size=s)
+        for n, s in (new_items[i] for i in new_order)
+    }
+    changes = _removed_field_changes("S", old, new)
+    return sorted((c.kind.value, c.symbol, c.old_value, c.new_value) for c in changes)
+
+
+def _max_pairs_oracle(old_sizes: list[int | None], new_sizes: list[int | None]) -> int:
+    """Largest set of one-to-one pairs whose sizes agree (unknown matches any)."""
+    best = 0
+
+    def search(i: int, used: frozenset[int], count: int) -> None:
+        nonlocal best
+        if i == len(old_sizes):
+            best = max(best, count)
+            return
+        search(i + 1, used, count)  # old field i stays unpaired
+        for j, new_size in enumerate(new_sizes):
+            if j in used:
+                continue
+            old_size = old_sizes[i]
+            if old_size is None or new_size is None or old_size == new_size:
+                search(i + 1, used | {j}, count + 1)
+
+    search(0, frozenset(), 0)
+    return best
+
+
+_PAIRING_SIZES: tuple[int | None, ...] = (None, 4, 8)
+_PAIRING_CASES = [
+    (old_sizes, new_sizes)
+    for old_sizes in itertools.product(_PAIRING_SIZES, repeat=2)
+    for new_sizes in itertools.product(_PAIRING_SIZES, repeat=3)
+]
+
+
+@pytest.mark.parametrize(("old_sizes", "new_sizes"), _PAIRING_CASES)
+def test_rename_pairing_ignores_dict_insertion_order(
+    old_sizes: tuple[int | None, ...], new_sizes: tuple[int | None, ...]
+) -> None:
+    old_items = [(f"o{i}", s) for i, s in enumerate(old_sizes)]
+    new_items = [(f"n{j}", s) for j, s in enumerate(new_sizes)]
+    reference = _pairing_outcome(old_items, new_items, (0, 1), (0, 1, 2))
+    for old_order in itertools.permutations(range(2)):
+        for new_order in itertools.permutations(range(3)):
+            outcome = _pairing_outcome(old_items, new_items, old_order, new_order)
+            assert outcome == reference, (old_order, new_order)
+
+
+@pytest.mark.parametrize(("old_sizes", "new_sizes"), _PAIRING_CASES)
+def test_rename_pairing_is_maximal(
+    old_sizes: tuple[int | None, ...], new_sizes: tuple[int | None, ...]
+) -> None:
+    old_items = [(f"o{i}", s) for i, s in enumerate(old_sizes)]
+    new_items = [(f"n{j}", s) for j, s in enumerate(new_sizes)]
+    outcome = _pairing_outcome(old_items, new_items, (0, 1), (0, 1, 2))
+    renames = [o for o in outcome if o[0] == ChangeKind.FIELD_RENAMED.value]
+    assert len(renames) == _max_pairs_oracle(list(old_sizes), list(new_sizes))
+
+
+def test_unknown_removed_field_does_not_take_the_known_match() -> None:
+    """The reported example: a(None), b(4) removed; x(4), y(8) added. b must
+    pair with x (exact size); a takes y as the wildcard."""
+    outcome = _pairing_outcome(
+        [("a", None), ("b", 4)], [("x", 4), ("y", 8)], (0, 1), (0, 1)
+    )
+    assert ("field_renamed", "S", "b", "x") in outcome
+    assert ("field_renamed", "S", "a", "y") in outcome
+
+
+# --- Constant versus non-constant sizes and bounds --------------------------
+# A DW_AT_byte_size or array bound written as an expression, a reference or a
+# block is a value the producer cannot read: unknown, never the 0 that the
+# integer helper would give for a non-integer value.
+
+
+@pytest.mark.parametrize(
+    ("form", "value", "expected"),
+    [
+        ("DW_FORM_data1", 4, 4),
+        ("DW_FORM_data2", 4, 4),
+        ("DW_FORM_data4", 4, 4),
+        ("DW_FORM_data8", 8, 8),
+        ("DW_FORM_sdata", 4, 4),
+        ("DW_FORM_udata", 4, 4),
+        ("DW_FORM_implicit_const", 4, 4),
+        ("DW_FORM_exprloc", [0x23, 4], None),
+        ("DW_FORM_block1", [1, 2], None),
+        ("DW_FORM_ref4", 16, None),
+        ("DW_FORM_ref_addr", 16, None),
+    ],
+)
+def test_byte_size_is_read_only_from_a_constant_form(
+    form: str, value: Any, expected: int | None
+) -> None:
+    die = _Die("DW_TAG_base_type", 1, {"DW_AT_byte_size": _Attr(value, form)})
+    assert dm._attr_size(die) == expected
+
+
+@pytest.mark.usefixtures("_refs")
+def test_non_constant_member_type_size_is_unknown() -> None:
+    base = _Die(
+        "DW_TAG_base_type",
+        2,
+        {"DW_AT_name": "vla_t", "DW_AT_byte_size": _Attr([0x23, 4], "DW_FORM_exprloc")},
+    )
+    assert _size_of(_Die("DW_TAG_member", 3, {"DW_AT_type": base})) is None
+
+
+def _array_of_int(bound: str, value: Any, form: str) -> _Die:
+    int_t = _Die("DW_TAG_base_type", 2, {"DW_AT_name": "int", "DW_AT_byte_size": 4})
+    subrange = _Die("DW_TAG_subrange_type", 4, {bound: _Attr(value, form)})
+    return _Die("DW_TAG_array_type", 3, {"DW_AT_type": int_t}, children=(subrange,))
+
+
+@pytest.mark.usefixtures("_refs")
+@pytest.mark.parametrize(
+    ("bound", "value", "form", "expected"),
+    [
+        ("DW_AT_count", 4, "DW_FORM_data1", 16),  # a constant bound: 4 ints
+        ("DW_AT_count", [0x23, 4], "DW_FORM_exprloc", None),  # variable length
+        ("DW_AT_upper_bound", 99, "DW_FORM_ref4", None),  # a reference bound
+        ("DW_AT_upper_bound", [0x91, 0], "DW_FORM_exprloc", None),
+    ],
+)
+def test_array_bound_must_be_constant_or_the_size_is_unknown(
+    bound: str, value: Any, form: str, expected: int | None
+) -> None:
+    arr = _array_of_int(bound, value, form)
+    assert _size_of(_Die("DW_TAG_member", 5, {"DW_AT_type": arr})) == expected
+
+
+@pytest.mark.usefixtures("_refs")
+def test_absent_bound_stays_a_real_zero_for_a_flexible_array() -> None:
+    """No bound at all is a flexible array member: its 0 is real, unlike a
+    bound written as an expression above."""
+    int_t = _Die("DW_TAG_base_type", 2, {"DW_AT_name": "int", "DW_AT_byte_size": 4})
+    flex = _Die(
+        "DW_TAG_array_type",
+        3,
+        {"DW_AT_type": int_t},
+        children=(_Die("DW_TAG_subrange_type", 4),),
+    )
+    assert _size_of(_Die("DW_TAG_member", 5, {"DW_AT_type": flex})) == 0

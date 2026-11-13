@@ -563,7 +563,8 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "stays 0; BTF, CTF and PDB map their unresolved 0 to unknown. No stored "
         "type spelling changes; a stored DWARF member size of 0 from an older "
         "generation loads as unknown (storage/dwarf_field_size_migration.py), "
-        "so it cannot fabricate a 0 -> N change"
+        "so it cannot fabricate a 0 -> N change",
+        migrates_facts=True,
     ),
 }
 

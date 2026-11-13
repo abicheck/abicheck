@@ -65,11 +65,13 @@ from .dwarf_utils import (
     _strided,
     array_type_info,
     attr_bool as _attr_bool,  # noqa: F401
+    attr_constant,
     attr_int as _attr_int,
     attr_str as _attr_str,
     base_type_name as _base_type_name,
     decode_member_location as _decode_member_location,
     has_real_dwarf_info,
+    has_unevaluable_bound,
     pointee_subroutine,
     resolve_die_ref as _resolve_ref,
     subroutine_spelling,
@@ -545,16 +547,14 @@ def _process_enum_named(
 
 
 def _attr_size(die: Any) -> int | None:
-    """``DW_AT_byte_size`` of *die*, or ``None`` when the attribute is absent.
+    """``DW_AT_byte_size`` of *die* as a constant, or ``None`` when it is absent
+    or not written in a constant form (an expression, a reference).
 
-    Absent is unknown, never zero: a real zero (a flexible array member, an
-    empty aggregate) carries the attribute or a known element size. The
-    shared ``attr_int`` helper returns 0 for both, so type sizes read through
-    this instead.
+    Unknown is never zero: a real zero (a flexible array member, an empty
+    aggregate) is a constant 0. The shared ``attr_int`` helper returns 0 for
+    absent and for non-constant values alike, so type sizes read through this.
     """
-    if "DW_AT_byte_size" not in die.attributes:
-        return None
-    return _attr_int(die, "DW_AT_byte_size")
+    return attr_constant(die, "DW_AT_byte_size")
 
 
 def _resolve_type(
@@ -727,7 +727,12 @@ def _compute_array_type_info(
     element = None if inner is None else (inner[0], inner[1] or 0)
     name, size = array_type_info(die, element)
     if "DW_AT_byte_size" in die.attributes:
-        return (name, size)
+        return (name, attr_constant(die, "DW_AT_byte_size"))
+    # A bound written as an expression or a reference is a variable length the
+    # producer cannot evaluate: unknown. An absent bound is a flexible array,
+    # and its 0 is real when the element size is known.
+    if has_unevaluable_bound(die):
+        return (name, None)
     element_unknown = inner is None or inner[1] is None
     unevaluable = element_unknown or _strided(die)
     if unevaluable or ("DW_AT_GNU_vector" in die.attributes and size == 0):
