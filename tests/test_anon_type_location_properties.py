@@ -30,7 +30,7 @@ function's actual contract as invariants over the input space instead.
 from __future__ import annotations
 
 import pytest
-from hypothesis import given, settings, strategies as st
+from hypothesis import example, given, settings, strategies as st
 
 from abicheck.name_classification import strip_anonymous_type_location
 
@@ -81,6 +81,13 @@ def _rooted_path(root: str, basename: str) -> str:
 
 
 @given(kind=_KIND, root_a=_ROOT, root_b=_ROOT, basename=_PATH, line_col=_LINE_COL)
+# Found by Hypothesis on main: a basename with leading whitespace, bare on one
+# side and under a root on the other. The bare spelling's "at  :0:0" lets the
+# separator \s+ consume the basename's space, so the two identities differed.
+@example(kind="lambda", root_a="", root_b="0", basename=" ", line_col=(0, 0))
+@example(
+    kind="unnamed struct", root_a="", root_b="/src", basename=" a.h", line_col=(4, 3)
+)
 @settings(max_examples=300)
 def test_same_declaration_different_checkout_roots_match(
     kind: str, root_a: str, root_b: str, basename: str, line_col: tuple[int, int]
@@ -113,6 +120,8 @@ def test_same_declaration_different_checkout_roots_match(
     basename_b=_PATH,
     line_col=_LINE_COL,
 )
+@example(kind="lambda", basename_a=" a", basename_b="a", line_col=(1, 2))
+@example(kind="lambda", basename_a="a ", basename_b="a", line_col=(1, 2))
 @settings(max_examples=300)
 def test_different_headers_same_position_stay_distinct(
     kind: str, basename_a: str, basename_b: str, line_col: tuple[int, int]
@@ -122,7 +131,10 @@ def test_different_headers_same_position_stay_distinct(
     must never strip down to the same identity -- :line:col alone cannot
     tell them apart, since two distinct files can each legitimately
     declare their own anonymous/lambda type at the same coordinates."""
-    if basename_a == basename_b:
+    # Leading whitespace is not representable in the "at <path>" spelling:
+    # it is the separator after "at", so " a.h" and "a.h" spell the same
+    # declaring header (see _declaring_header_discriminator).
+    if basename_a.lstrip() == basename_b.lstrip():
         return  # not the case under test
     line, col = line_col
     a = strip_anonymous_type_location(_spelling(kind, basename_a, line, col))

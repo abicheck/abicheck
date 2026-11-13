@@ -663,7 +663,7 @@
     },
     {
       "path": "abicheck/name_classification.py",
-      "baseline_lines": 1252,
+      "baseline_lines": 1251,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
