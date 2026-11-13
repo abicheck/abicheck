@@ -652,7 +652,12 @@ KNOWN: tuple[Known, ...] = (
         "false-positive",
         # PE records no binding, so the coalesced-copy rule has no signal there
         # (ADR-089's PE limit); against libc++ (macOS) the rebuild reads NO_CHANGE.
-        lambda c: c.objfmt == "pe" and uses_libstdcxx(c.producer),
+        # With headers the lost instantiations are exports no public header
+        # declares (exported_not_public), so the CLI's pipeline demotes their
+        # removal and the rebuild reads COMPATIBLE: correct, not this gap.
+        lambda c: (
+            c.objfmt == "pe" and uses_libstdcxx(c.producer) and c.evidence != "headers"
+        ),
         "MinGW: -O2 inlines the std::string instantiations the -O0 build exported; a PE "
         "export carries no WEAK binding, so their loss reads func_removed / "
         "func_visibility_changed (BREAKING) while every consumer still runs",
