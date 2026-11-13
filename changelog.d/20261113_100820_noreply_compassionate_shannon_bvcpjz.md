@@ -71,3 +71,7 @@ it should read in CHANGELOG.md. Delete the other sections.
   `--policy-file`.
 
 -->
+  A baseline stored by the plugin before extractor generation 60 compared
+  with a newer snapshot shows that difference as `field_bitfield_changed`;
+  it is annotated `COMPATIBLE_WITH_RISK` ("extractor-generation drift;
+  re-dump baseline") instead of reading as a break.

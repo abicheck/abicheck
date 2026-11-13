@@ -226,7 +226,7 @@
     },
     "fingerprint": "87fd25694c2ce572c02371378873ea8029f5ba12cc5cd9a9f39270bf2f4b578f",
     "generation": 60,
-    "reason": "folds the castxml standard-layout rules /3.7 and /3.8 and comment-aware defaulted detection (CodeRabbit review) into generation 60, introduced by this same unreleased change, which already declares the castxml is_standard_layout and trivially-copyable facts"
+    "reason": "generation 60 note text only (documents the gcc-plugin bit-field comparison demotion); no extractor behaviour change"
   },
   "resolver": {
     "files": {

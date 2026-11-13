@@ -582,8 +582,11 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "byte-aligned bit-field marked as a bit-field (DECL_C_BIT_FIELD); castxml derives is_standard_layout from the C++ rules "
         "(including the one-subobject-per-type rule and the recursive first-member "
         "set) and no longer loses a copy constructor declared beside a defaulted "
-        "constructor; only those record facts can change, an older snapshot "
-        "reads them as unknown; no stored type spelling changes, nothing rewritten"
+        "constructor; only those record facts can change: an older snapshot "
+        "reads base access and the castxml traits as unknown, and a pre-60 "
+        "gcc-plugin byte-aligned bit-field difference is demoted at comparison "
+        "(policy/bitfield_generation_drift.py); no stored type spelling changes, "
+        "nothing rewritten"
     ),
 }
 
