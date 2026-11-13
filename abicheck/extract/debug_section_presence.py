@@ -32,30 +32,16 @@ from .parse_failures import note_debug_info_read_failure
 
 __all__ = ["note_orphaned_debug_sections", "note_unit_past_section"]
 
-#: Sections that describe ``.debug_info``'s units and exist for no other use
-#: (``.debug_frame`` and ``.debug_gdb_scripts`` stand alone, so are not here).
-_UNIT_COMPANIONS = tuple(
-    prefix + name
-    for name in (
-        "abbrev",
-        "aranges",
-        "line",
-        "line_str",
-        "str",
-        "str_offsets",
-        "addr",
-        "loclists",
-        "rnglists",
-        "loc",
-        "ranges",
-    )
-    for prefix in (".debug_", ".zdebug_")
-)
+#: The abbreviation table exists only to decode ``.debug_info``'s units. The
+#: string and line sections do not prove a unit section: a ``-g`` link of an
+#: empty translation unit carries ``.debug_str``/``.debug_line_str`` and no
+#: ``.debug_info`` (``catalog/cases/case16_inline_to_non_inline``'s v1).
+_UNIT_COMPANIONS = (".debug_abbrev", ".zdebug_abbrev")
 
 
 def note_orphaned_debug_sections(elf: Any) -> None:
-    """Record a failure when *elf* (with no ``.debug_info``) still carries a
-    section only a ``.debug_info`` uses (its abbreviations, lines, strings...).
+    """Record a failure when *elf* (with no ``.debug_info``) still carries the
+    abbreviation table only a ``.debug_info`` uses.
 
     A section-name table that cannot be read at all hides every debug section
     with the rest; that is the section-table loss

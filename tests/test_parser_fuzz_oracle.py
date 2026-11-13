@@ -25,6 +25,7 @@ import io
 import json
 import re
 import shutil
+import subprocess
 import tempfile
 import threading
 import time
@@ -776,6 +777,34 @@ def test_unreadable_dwarf_is_recorded_not_empty(
     assert sink, (
         f"{corruption}: unreadable DWARF read as {_dwarf_facts(meta)} facts, unrecorded"
     )
+
+
+def test_an_empty_debug_build_records_no_debug_failure(tmp_path: Path) -> None:
+    """A ``-g`` shared object from an empty translation unit carries
+    ``.debug_str``/``.debug_line_str`` but no ``.debug_info``: debug info that
+    describes nothing, not a lost unit section (the v1 library of
+    ``catalog/cases/case16_inline_to_non_inline``)."""
+    from elftools.elf.elffile import ELFFile
+
+    if shutil.which("gcc") is None:
+        pytest.skip("gcc is required to build the empty -g object")
+    src = tmp_path / "empty.c"
+    src.write_text("/* nothing to compile */\n")
+    out = tmp_path / "libempty.so"
+    subprocess.run(
+        ["gcc", "-shared", "-fPIC", "-g", "-o", str(out), str(src)],
+        check=True,
+        capture_output=True,
+    )
+    data = out.read_bytes()
+    if not data.startswith(b"\x7fELF"):
+        pytest.skip("the host gcc does not link ELF shared objects")
+    names = {sec.name for sec in ELFFile(io.BytesIO(data)).iter_sections()}
+    assert ".debug_info" not in names
+    for parse in (parse_dwarf_metadata, parse_dwarf_metadata_unified):
+        meta, sink = _parse_recorded(parse, data, "libempty.so")
+        assert sink == []
+        assert _dwarf_facts(meta) == 0
 
 
 def test_a_stripped_object_records_no_debug_failure() -> None:
