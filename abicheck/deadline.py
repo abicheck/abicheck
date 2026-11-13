@@ -301,6 +301,8 @@ def supervised_popen(
     stdout: Any = None,
     stderr: Any = None,
     text: bool = False,
+    encoding: str | None = None,
+    errors: str | None = None,
 ) -> Iterator[subprocess.Popen[Any]]:
     """Start *cmd* as a supervised child and yield its ``Popen`` handle.
 
@@ -375,6 +377,8 @@ def supervised_popen(
             stdout=stdout,
             stderr=stderr,
             text=text,
+            encoding=encoding,
+            errors=errors,
             start_new_session=use_pgroup,
         )
     finally:
@@ -449,8 +453,10 @@ def run_bounded(
     stdout: Any = None,
     stderr: Any = None,
     input: Any = None,
+    encoding: str | None = None,
+    errors: str | None = None,
 ) -> subprocess.CompletedProcess[Any]:
-    """``subprocess.run``, but bounded by the active deadline and safe to kill.
+    """``subprocess.run`` (*encoding*/*errors* too), bounded by the deadline and safe to kill.
 
     *input*, like ``subprocess.run``'s, feeds the child's stdin and implies a
     piped stdin — without it the child inherits this process's stdin, which
@@ -496,6 +502,8 @@ def run_bounded(
         stdout=stdout,
         stderr=stderr,
         text=text,
+        encoding=encoding,
+        errors=errors,
     ) as proc:
         try:
             if token is None:
