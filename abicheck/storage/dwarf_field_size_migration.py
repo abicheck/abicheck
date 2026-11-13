@@ -28,6 +28,8 @@ __all__ = ["DWARF_FIELD_SIZE_GENERATION", "migrate_dwarf_field_size_unknown"]
 #: The extractor generation that began writing an unknown member size as null.
 DWARF_FIELD_SIZE_GENERATION = 58
 
+_ABSENT = object()
+
 
 def _lowered_layout(layout: Any, hits: list[int]) -> Any:
     if not isinstance(layout, Mapping) or not isinstance(layout.get("fields"), list):
@@ -35,11 +37,15 @@ def _lowered_layout(layout: Any, hits: list[int]) -> Any:
     fields: list[Any] = []
     changed = False
     for member in layout["fields"]:
-        if (
-            isinstance(member, Mapping)
-            and member.get("byte_size") == 0
-            and not isinstance(member.get("byte_size"), bool)
-        ):
+        has_size = isinstance(member, Mapping) and "byte_size" in member
+        size = member["byte_size"] if has_size else _ABSENT
+        if has_size and size is None:
+            # Already unknown: a pre-58 document re-saved after this migration
+            # ran keeps its pre-58 stamp. Count it so the load notice is the
+            # same whichever encoding the document went through.
+            hits[0] += 1
+            fields.append(member)
+        elif has_size and size == 0 and not isinstance(size, bool):
             hits[0] += 1
             fields.append({**member, "byte_size": None})
             changed = True

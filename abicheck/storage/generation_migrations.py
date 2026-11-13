@@ -307,6 +307,7 @@ def migrate_and_describe(
         notices.extend(migrate_castxml_base_offsets(document, extractor)[1])
         notices.extend(migrate_clang_vtable_bases(document, extractor)[1])
         notices.extend(migrate_castxml_noexcept(document, extractor)[1])
+        notices.extend(migrate_dwarf_field_size_unknown(document, extractor)[1])
     if spellings >= EXTRACTOR_GENERATION:
         return document, generations, previous, tuple(notices)
     migrated, spelling_notices = _migrate_spellings(document, spellings)

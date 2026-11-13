@@ -259,7 +259,9 @@ def test_migration_reads_stored_zero_as_unknown_before_generation_58() -> None:
     migrated, notices = migrate_dwarf_field_size_unknown(doc, 57)
     assert _sizes(migrated["dwarf"]) == [None, 8, None, None]
     assert len(notices) == 1
-    assert "read 2 stored DWARF member size(s) of 0 as not observed" in notices[0]
+    # A stored null under a pre-58 stamp (a re-saved migrated document) counts
+    # too, so the notice is encoding-independent.
+    assert "read 3 stored DWARF member size(s) of 0 as not observed" in notices[0]
     # Never mutated in place: the caller's document keeps its stored zeros.
     assert _sizes(doc["dwarf"]) == [0, 8, None, 0]
 
