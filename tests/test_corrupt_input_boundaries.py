@@ -266,3 +266,55 @@ def test_a_macho_trie_listing_nothing_against_a_defining_nlist_is_recorded(
         assert bool(sink) is expect_recorded, path.name
         if not expect_recorded:
             assert sorted(e.name for e in meta.exports) == ["add", "sub"]
+
+
+def _sibling_rewritten(so: Path, target: str) -> bytes:
+    """*so* with its first ``ref4`` ``DW_AT_sibling`` aimed at *target*."""
+    from elftools.elf.elffile import ELFFile
+
+    data = bytearray(so.read_bytes())
+    with so.open("rb") as fh:
+        elf = ELFFile(fh)
+        info = elf.get_section_by_name(".debug_info")
+        assert info is not None
+        for cu in elf.get_dwarf_info().iter_CUs():
+            top = cu.get_top_DIE()
+            for die in cu.iter_DIEs():
+                sibling = die.attributes.get("DW_AT_sibling")
+                if sibling is None or sibling.form != "DW_FORM_ref4":
+                    continue
+                value = {
+                    "itself": die.offset - cu.cu_offset,
+                    "the unit's first DIE": top.offset - cu.cu_offset,
+                    "past the unit's end": cu.size + 64,
+                }[target]
+                struct.pack_into("<I", data, info["sh_offset"] + sibling.offset, value)
+                return bytes(data)
+    pytest.skip("the gcc seed carries no ref4 DW_AT_sibling")
+
+
+@pytest.mark.parametrize(
+    "target", ("itself", "the unit's first DIE", "past the unit's end")
+)
+@pytest.mark.parametrize(
+    "module", ("abicheck.dwarf_unified", "abicheck.dwarf_metadata")
+)
+def test_a_sibling_reference_that_does_not_advance_is_recorded_not_a_hang(
+    tmp_path: Path, module: str, target: str
+) -> None:
+    """A corrupt ``DW_AT_sibling`` aimed backwards or out of the unit made the
+    child walk loop forever (the py3.15 CI lane hung on an abbreviation byte
+    that decoded an attribute as a sibling). Each reader now finishes within
+    its budget and records the unit as unreadable."""
+    import importlib
+
+    from tests._parser_fuzz_oracle import call_with_budget
+
+    so = _elf_with_debug(tmp_path)
+    corrupt = tmp_path / "corrupt.so"
+    corrupt.write_bytes(_sibling_rewritten(so, target))
+    reader = importlib.import_module(module)
+    sink = call_with_budget(
+        lambda: _recorded_debug(lambda: reader.parse_dwarf_metadata(corrupt)), 20.0
+    )
+    assert sink, f"{module}: a sibling aimed at {target} read without a failure"

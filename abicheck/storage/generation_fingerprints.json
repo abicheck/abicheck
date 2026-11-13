@@ -52,7 +52,7 @@
       "abicheck/extract/dwarf_producer.py": "4b85d88dd77f7dca39669cceb2f494e58c81063ebd35bf59674bbee8504cac5f",
       "abicheck/extract/dwarf_records.py": "60c9e9aacd78d4ec63a31062a502a7483e64cc106e678aac2bd62048f5e0be55",
       "abicheck/extract/dwarf_scope.py": "1800757661a850338d8cb96d715995ffa8f79354047f68b1ce5e248a72819b20",
-      "abicheck/extract/dwarf_subtree_index.py": "45ffbba03c1eeb9f8a1d9ed54ab3f3e2492363d4b56e16944f326154c7654aa9",
+      "abicheck/extract/dwarf_subtree_index.py": "8b7f4ac18be79326c91f6dac62781753e25d949ec688dd4c29d4a1236407d68d",
       "abicheck/extract/dwarf_type_names.py": "dab8b4167a3c69e3e8d92b4e1cb08ba58df4e9c59fd5f8d064e83c84405c016a",
       "abicheck/extract/dwarf_value_abi_trait.py": "74b5b1d1d03fc8547194527a9eefa07f2d2e866cf6fa3be0ae3e7a21403d210b",
       "abicheck/extract/dwarf_variable_alignment.py": "4973a5d8e5619f640e54977dbb434e14df738fd25f0fdd6f24c7aa12cb6c5e0a",
@@ -225,9 +225,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "5dbbcfcf81258505ebf5fe26e1ebc553ccf63951b65a1f405a119478f35a60ac",
+    "fingerprint": "879da318445d879506b0a1798b9b7056a7eaaf3ff481b6edea47f5648f959699",
     "generation": 59,
-    "reason": "Returns parse_dwarf's own result object from the detached-debug-file check; no recorded fact changes."
+    "reason": "A DW_AT_sibling that does not advance inside its unit is refused as an unreadable unit instead of looping forever; well-formed DWARF walks the same DIEs in the same order."
   },
   "resolver": {
     "files": {

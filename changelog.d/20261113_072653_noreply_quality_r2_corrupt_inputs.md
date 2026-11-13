@@ -18,3 +18,6 @@
   access) instead of a bare `KeyError`/`TypeError`/`AttributeError`; it is a
   `SnapshotError` and still a `TypeError`/`ValueError`, so existing handlers
   keep catching it.
+- **A corrupt DWARF sibling reference no longer hangs a dump** — a
+  `DW_AT_sibling` pointing back at its own entry (or out of its unit) made
+  the debug-info walk loop forever; it is now refused as an unreadable unit.
