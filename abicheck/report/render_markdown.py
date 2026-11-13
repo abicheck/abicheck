@@ -46,6 +46,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ..model.change import Change
+from .analysis_caveats import CAVEAT_HEADING
 from .kind_rollup import KindRollup
 from .markdown_budget import NOTE_ITEM_LIMIT, clip, clip_name, more_line, split_items
 from .markdown_text import md_text
@@ -533,6 +534,17 @@ class RttiNote:
     internal: int
     total: int
     public: int
+
+
+def render_analysis_caveats(messages: list[str] | tuple[str, ...]) -> list[str]:
+    """The ``report/analysis_caveats.py`` block: one quoted line per
+    incomplete-analysis fact, directly under the headline verdict so a clean
+    verdict is never read without its qualification. Empty for a complete run."""
+    if not messages:
+        return []
+    return [f"> \u26a0\ufe0f **{CAVEAT_HEADING}:** {md_text(m)}" for m in messages] + [
+        ""
+    ]
 
 
 def render_rtti_note(note: RttiNote | None) -> list[str]:

@@ -7,6 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from .analysis_caveats import CAVEAT_HEADING
 from .disposition_audit import DispositionAudit, render_disposition_audit_lines
 from .markdown_text import md_text
 from .result_counts import held_out_note
@@ -58,6 +59,9 @@ class ReviewDigest:
     #: Empty for every run with ADR-027's opt-in `--pattern-verdicts` off.
     pattern_modulations: tuple[Any, ...] = ()
     review_groups: tuple[dict[str, Any], ...] = ()
+    #: `report/analysis_caveats.py` messages the banners above do not
+    #: already state; each renders under the "Analysis incomplete" heading.
+    analysis_caveats: tuple[str, ...] = ()
     policy: str = "strict_abi"
     gate_exit_code: int | None = None
     result_counts: dict[str, int] = field(default_factory=dict)
@@ -113,6 +117,9 @@ def render_review_digest(digest: ReviewDigest) -> str:
         ]
     if digest.coverage_warnings:
         lines += [f"> ⚠️ {w}" for w in digest.coverage_warnings]
+        lines.append("")
+    if digest.analysis_caveats:
+        lines += [f"> ⚠️ **{CAVEAT_HEADING}:** {c}" for c in digest.analysis_caveats]
         lines.append("")
     if digest.evidence_summary:
         lines += [f"**Evidence:** {digest.evidence_summary}.", ""]
@@ -310,6 +317,9 @@ def render_terminal_digest(digest: ReviewDigest) -> str:
         )
     lines.extend(
         f"WARNING: {compact(warning, 300)}" for warning in digest.coverage_warnings
+    )
+    lines.extend(
+        f"WARNING: {CAVEAT_HEADING}: {compact(c, 300)}" for c in digest.analysis_caveats
     )
     if digest.result_counts:
         c = digest.result_counts

@@ -49,6 +49,7 @@ from .render_html import (
     ScopedVerdictData,
     SummaryCategoryRow,
     SummaryTableData,
+    render_analysis_caveats_html,
     render_changes_table,
     render_confidence,
     render_file_metadata,
@@ -243,6 +244,8 @@ def _render_native_html_document(d: Mapping[str, Any]) -> str:
     nav = _nav_bar_from_mapping(d["nav_bar"])
     nav_html = render_nav_bar(nav)
     confidence_html = render_confidence(_confidence_from_mapping(d["confidence"]))
+    caveats = d.get("analysis_caveats") or []
+    caveats_html = render_analysis_caveats_html(caveats)
     edge_coverage_html = render_edge_coverage_html(
         edge_coverage_section_from_mapping(d.get("edge_coverage"))
     )
@@ -310,8 +313,13 @@ def _render_native_html_document(d: Mapping[str, Any]) -> str:
         else:
             section_htmls.append(
                 "<div class='section'><p class='empty'>"
-                "No ABI changes detected between the two versions."
-                "</p></div>"
+                + (
+                    "No ABI changes detected in what could be analysed "
+                    "(analysis incomplete — see above)."
+                    if caveats
+                    else "No ABI changes detected between the two versions."
+                )
+                + "</p></div>"
             )
 
     sections_html = "\n".join(section_htmls)
@@ -396,7 +404,7 @@ def _render_native_html_document(d: Mapping[str, Any]) -> str:
     </span>
   </div>
 </div>
-
+{caveats_html}
 {gate_html}
 {scoped_html}{versioning_html}
 {confidence_html}

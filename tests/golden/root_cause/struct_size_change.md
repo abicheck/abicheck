@@ -27,6 +27,8 @@
 > ⚠️ Detector 'advanced_dwarf' disabled: missing DWARF advanced metadata
 > ⚠️ No binary metadata available; verdict is based on header analysis only
 
+> ⚠️ **Analysis incomplete:** public-header scoping could not resolve the public surface and fell back to the full export table; manual review required
+
 
 ## Disposition audit
 

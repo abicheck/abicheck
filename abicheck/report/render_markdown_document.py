@@ -137,6 +137,7 @@ from .render_markdown import (
     SeveritySummary,
     SuppressedEntry,
     SuppressionNote,
+    render_analysis_caveats,
     render_confidence_section,
     render_environment_drift_section,
     render_footer,
@@ -534,6 +535,7 @@ def render_markdown_document(doc: ReportDocument) -> str:
     """Project a full-mode ``ReportDocument`` to its Markdown text."""
     d: dict[str, Any] = doc.to_mapping()
     lines: list[str] = render_headline_table(HeadlineTable(**d["headline"]))
+    lines += render_analysis_caveats(d.get("analysis_caveats") or [])
     lines += render_rtti_note(
         None if d["rtti_note"] is None else RttiNote(**d["rtti_note"])
     )
