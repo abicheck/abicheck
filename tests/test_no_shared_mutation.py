@@ -161,3 +161,18 @@ def test_an_enriched_copy_is_not_a_second_detection(aliased: bool) -> None:
         assert ledger.detected_total == before
     else:
         assert ledger.detected_total == before + 1
+
+
+def test_alias_is_a_no_op_without_a_ledger_or_an_unrecorded_original() -> None:
+    """No ledger, or an original the ledger never recorded: nothing aliased,
+    so the copy still counts as its own detection."""
+    from abicheck.policy.disposition_close import alias_recorded_change
+
+    result = _recorded_result()
+    ledger = result.disposition_ledger
+    copy = dataclasses.replace(result.changes[0])
+    alias_recorded_change(None, copy, result.changes[0])
+    stranger = dataclasses.replace(result.changes[0])
+    alias_recorded_change(ledger, copy, stranger)
+    assert ledger.index_for(stranger) is None
+    assert ledger.index_for(copy) is None
