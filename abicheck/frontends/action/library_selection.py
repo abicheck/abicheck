@@ -523,8 +523,17 @@ def resolve_library_set(
     require_elf: bool = True,
     require_same_machine: bool = True,
     bindings: Mapping[str, str] | None = None,
+    only: str | None = None,
 ) -> list[ResolvedLibrary]:
     """Resolve a declarative component spec against the tree at *root*.
+
+    *only*, when given, names the one component to resolve. The whole
+    declaration is still parsed and its names checked for duplicates, so a
+    malformed sibling entry is refused the same way it is for the baseline
+    side; but only the selected component's paths have to exist. That is what
+    lets a per-target compare job (one library built, or one matrix leg) read
+    the very file ``actions/baseline`` dumped the whole set from, instead of
+    restating that target's header/include list in its own workflow.
 
     *bindings*, when given, fills ``${NAME}`` placeholders in the declaration
     before it is parsed -- see :func:`bind_declaration` for exactly what that
@@ -561,6 +570,13 @@ def resolve_library_set(
                 "while the manifest still lists both."
             )
         seen[parsed.name] = index
+    if only is not None:
+        if only not in seen:
+            raise SelectionError(
+                f"component {only!r} is not declared in the library spec; "
+                f"declared: {', '.join(sorted(seen))}"
+            )
+        specs = [specs[seen[only]]]
 
     resolved: list[ResolvedLibrary] = []
     for parsed in specs:
