@@ -619,6 +619,8 @@ _F19 = (
     "classification.removed_virtual_slot_read_as_plain_removal",
     "comparability.runtime_abi_selector_refused_instead_of_reported",
     "classification.demangled_signature_used_as_entity_name",
+    "classification.one_sibling_of_a_change_kind_family_read",
+    "evidence.one_backend_spelling_of_an_unnameable_type",
 )
 _F12 = (
     # The public-root probe read only `/I` from a CL-mode argv, so a `-I` or
