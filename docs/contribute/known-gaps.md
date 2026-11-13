@@ -669,12 +669,6 @@ per-item status in the
 `false-positive` — a switch that changed no code gates as a binary break.
 <!-- no-canary: pinned by the edit corpus's strict-xfail `vector_math_abi_changed` entry in tests/_edit_corpus_known.py, which fails once the answer changes -->
 
-#### Replacing or dropping the global operator new is demoted or misread as a removal (2026-11-12)
-
-**Status (2026-11-12): OPEN.** `allocator_replacement_added`/`_removed` name the first allocator export (`_ZdlPv`), which `elf_symbol_filter` treats as a transitive runtime symbol, so with public headers public-surface scoping demotes the finding as `not-exported`. The removal direction also reports the lost `_Znwm` export as `func_removed`/`func_removed_elf_only` (`BREAKING`), though consumers resolve `operator new` from the C++ runtime and keep running (`_STDLIB_PREFIXES` spells it `_ZnwSt`, a mangling no `operator new` has). Found by the edit corpus (`allocator_replacement_added` on `cxx_more`, `allocator_replacement_removed` on `cxx_alt`). Owner: `surface.py`, `elf_symbol_filter.py`.
-`false-positive` — the allocator interposition finding disappears while an export loss nobody depends on gates as a break.
-<!-- no-canary: pinned by the edit corpus's strict-xfail `allocator_replacement_removed` entry in tests/_edit_corpus_known.py, which fails once the answer changes -->
-
 #### An inline function's static local, exported by clang, reads as an undeclared export (2026-11-12)
 
 **Status (2026-11-12): OPEN.** clang emits a public-header inline function's static local (`_ZZ8edit_ctrvE1n`) as a weak export (gcc as `STB_GNU_UNIQUE`). With public headers the new export reads as `exported_not_public` and the addition becomes `COMPATIBLE_WITH_RISK`, though no source can name a function-local static: it exists only to keep the inline function's ODR. Found by the edit corpus (`gnu_unique_static_added` on `cxx_more`, clang). Owner: `buildsource/cross_source_checks.py` (`exported_not_public`).

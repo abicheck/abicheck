@@ -54,9 +54,6 @@ GAP_BASE_UNVERSIONED = (
 GAP_VECTOR_ABI = (
     "A `-mveclibabi` switch reads as a binary break when no call is vectorized"
 )
-GAP_ALLOCATOR = (
-    "Replacing or dropping the global operator new is demoted or misread as a removal"
-)
 GAP_CLANG_INLINE_STATIC = "An inline function's static local, exported by clang, reads as an undeclared export"
 GAP_UNIQUE_O2_DWARF = "A GNU-unique static whose inline owner was inlined away is not compared at DWARF depth"
 GAP_DUAL_ABI_COW_CHURN = "A C++20 dual-ABI flip is not recognized when the old-ABI string's members are exported"
@@ -334,62 +331,6 @@ _PLATFORM: tuple[Known, ...] = (
         GAP_VECTOR_ABI,
         issues=frozenset({"stronger-than:COMPATIBLE_WITH_RISK"}),
         verdicts=_BREAKING,
-    ),
-    Known(
-        "allocator_replacement_removed",
-        _XA,
-        "false-positive",
-        _ev("binary", "dwarf"),
-        "the library stops exporting operator new/delete; consumers resolve "
-        "them from the C++ runtime, yet the _Znwm export loss reads "
-        "func_removed_elf_only (BREAKING)",
-        GAP_ALLOCATOR,
-        issues=frozenset({"stronger-than:COMPATIBLE_WITH_RISK"}),
-        verdicts=_BREAKING,
-    ),
-    Known(
-        "allocator_replacement_removed",
-        _XA,
-        "false-positive",
-        lambda c: c.evidence == "headers" and c.header_backend in ("castxml", "gcc"),
-        "with public headers the allocator finding (named after _ZdlPv, a "
-        "runtime symbol) is scoped out as not-exported, and the _Znwm export "
-        "loss reads func_removed (BREAKING)",
-        GAP_ALLOCATOR,
-        issues=frozenset(
-            {
-                "missing:ALLOCATOR_REPLACEMENT_REMOVED",
-                "stronger-than:COMPATIBLE_WITH_RISK",
-            }
-        ),
-        verdicts=_BREAKING,
-    ),
-    Known(
-        "allocator_replacement_removed",
-        _XA,
-        "wrong-verdict",
-        _hb("clang"),
-        "with public headers the allocator finding is scoped out as "
-        "not-exported, and nothing else is left above COMPATIBLE",
-        GAP_ALLOCATOR,
-        issues=frozenset(
-            {
-                "missing:ALLOCATOR_REPLACEMENT_REMOVED",
-                "weaker-than:COMPATIBLE_WITH_RISK",
-            }
-        ),
-        verdicts=frozenset({"COMPATIBLE"}),
-    ),
-    Known(
-        "allocator_replacement_added",
-        frozenset({"cxx_more"}),
-        "wrong-kind",
-        _ev("headers"),
-        "with public headers the allocator finding (named after _ZdlPv, a "
-        "runtime symbol) is scoped out as not-exported",
-        GAP_ALLOCATOR,
-        issues=frozenset({"missing:ALLOCATOR_REPLACEMENT_ADDED"}),
-        verdicts=frozenset({"COMPATIBLE_WITH_RISK"}),
     ),
     Known(
         "std_string_abi_flipped",

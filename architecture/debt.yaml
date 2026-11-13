@@ -498,7 +498,7 @@
     },
     {
       "path": "abicheck/diff_platform_elf_symbols.py",
-      "baseline_lines": 836,
+      "baseline_lines": 815,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",

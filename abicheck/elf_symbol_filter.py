@@ -98,10 +98,6 @@ _STDLIB_PREFIXES = (
     "_ZNKRSt",  # const/ref-qualified std:: methods
     "_ZNVRSt",  # volatile/ref-qualified std:: methods
     "_ZNSt3__1",  # libc++ inline-namespace __1
-    "_ZdlPv",  # operator delete(void*)
-    "_ZnwSt",  # operator new(std::size_t)
-    "_ZnaSt",  # operator new[](std::size_t)
-    "_ZdaPv",  # operator delete[](void*)
     "_ZTVN10__cxxabiv",  # vtables for RTTI (typeinfo infrastructure)
     "_ZSt",  # std:: global symbols (e.g. _ZSt4cout)
 )
@@ -120,6 +116,24 @@ _TRANSITIVE_RUNTIME_PREFIXES: tuple[str, ...] = tuple(_STDLIB_PREFIXES) + tuple(
 _MANGLED_RUNTIME_NAMESPACE = re.compile(
     r"_ZN[rVK]*[RO]?(?:9__gnu_cxx|11__gnu_debug|10__cxxabiv1)"
 )
+
+# The replaceable global allocation functions ([new.delete.single],
+# [new.delete.array]): plain, sized, aligned and nothrow operator new/new[]/
+# delete/delete[], for any std::size_t (``j`` ILP32, ``m`` LP64, ``y`` LLP64).
+# The C++ runtime supplies them, so a library's copy is an interposition,
+# reported once as ``allocator_replacement_*`` -- not the library's own API.
+# The match is exact: a placement or user-declared overload
+# (``operator new(std::size_t, Pool&)`` = ``_ZnwmR4Pool``) is the library's.
+_GLOBAL_ALLOCATION_FUNCTION = re.compile(
+    r"_Zn[wa][jmy](?:St11align_val_t)?(?:RKSt9nothrow_t)?"
+    # delete: no form takes both a size and a nothrow_t.
+    r"|_Zd[la]Pv(?:[jmy](?:St11align_val_t)?|(?:St11align_val_t)?(?:RKSt9nothrow_t)?)"
+)
+
+
+def is_global_allocation_function(name: str) -> bool:
+    """Whether *name* mangles a replaceable global operator new/delete."""
+    return _GLOBAL_ALLOCATION_FUNCTION.fullmatch(name) is not None
 
 
 #: Public read-only view of the linker-reserved names, for tests and callers
@@ -182,6 +196,7 @@ def is_abi_relevant_elf_symbol(
     if filter_transitive_runtime_symbols and (
         name.startswith(_TRANSITIVE_RUNTIME_PREFIXES)
         or _MANGLED_RUNTIME_NAMESPACE.match(name) is not None
+        or is_global_allocation_function(name)
     ):
         return False
 
