@@ -630,7 +630,7 @@
     },
     {
       "path": "abicheck/header_conditionals.py",
-      "baseline_lines": 1369,
+      "baseline_lines": 1367,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",

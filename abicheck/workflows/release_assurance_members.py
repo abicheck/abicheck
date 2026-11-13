@@ -45,6 +45,7 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from ..policy.release_assurance import (
+    ASSURANCE_STATUS_ORDER,
     MemberAssurance,
     resolve_release_assurance_decision,
 )
@@ -89,8 +90,13 @@ def member_assurance_fields(result: Any) -> tuple[str, tuple[str, ...]]:
     # `require_complete` gate. It now reads as `unknown`, which the fold
     # ranks worst (`release_assurance._rank`).
     raw = getattr(aa, "status", None)
-    status = raw if isinstance(raw, str) and raw else _UNUSABLE_STATUS
-    return status, tuple(str(n) for n in (getattr(aa, "notes", ()) or ()))
+    notes = tuple(str(n) for n in (getattr(aa, "notes", ()) or ()))
+    if isinstance(raw, str) and raw in ASSURANCE_STATUS_ORDER:
+        return raw, notes
+    # Any other value (empty, a non-string, a spelling this build does not
+    # know) is reported as `unknown` with the value it carried, instead of
+    # the value verbatim; the fold ranks it worst either way.
+    return _UNUSABLE_STATUS, (*notes, f"unrecognized assurance status {raw!r}")
 
 
 def release_assurance_from_results(

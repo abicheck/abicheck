@@ -3508,6 +3508,14 @@
           ],
           "description": "ADR-065 D7: 1 whenever no_comparison_completed is true, under either policy -- a run that compared nothing is never a clean pass."
         },
+        "failed_member_exit_contribution": {
+          "type": "integer",
+          "enum": [
+            0,
+            4
+          ],
+          "description": "ADR-065 D8: 4 when any member is failed (a failed extraction or comparison is an operational error, so warn cannot downgrade it), else 0. Optional: absent from blocks written before this key existed; a consumer that wants it feature-detects the key. The exit block folds the same number with max beside its other operational sources."
+        },
         "selection": {
           "type": "string",
           "enum": [

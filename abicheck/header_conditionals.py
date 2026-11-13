@@ -310,8 +310,6 @@ def defines_from_compile_db(
 
 # ── conditional-field source scan ────────────────────────────────────────────
 
-_COMMENT_BLOCK = re.compile(r"/\*.*?\*/", re.DOTALL)
-_COMMENT_LINE = re.compile(r"//[^\n]*")
 _RECORD_OPEN = re.compile(r"\b(struct|class|union)\s+([A-Za-z_]\w*)\b")
 # A ``namespace`` opener: a named (possibly ``a::b``) or anonymous namespace. Must
 # be anchored so ``using namespace std;`` is not mistaken for a scope opener.
@@ -352,7 +350,10 @@ class _NegGuard:
 
 
 def _strip_comments(source: str) -> str:
-    return _COMMENT_LINE.sub("", _COMMENT_BLOCK.sub("", source))
+    """Comments blanked by the shared literal-aware lexer (newlines kept)."""
+    from .buildsource.pattern_facts_lexer import _blank_comments_and_strings
+
+    return _blank_comments_and_strings(source, blank_strings=False)
 
 
 def _include_guard_macro(lines: list[str]) -> str | None:
@@ -761,12 +762,7 @@ def _track_braces(state: _ScanState, line: str) -> None:
                 state.pending = None
             state.brace_depth += 1
         elif ch == ";" and state.pending is not None:
-            # A ``;`` reached before the pending opener's ``{`` terminates a
-            # *split* forward declaration (``struct S`` then ``;`` on the next
-            # line). Clear ``pending`` so a later ``struct T { … }`` opens its
-            # own scope instead of being keyed to ``S`` — otherwise ``T``'s
-            # guarded fields would be misattributed to ``S`` and could
-            # reconcile away a real ``S`` field change (Codex review #498).
+            # ``;`` before the pending ``{`` ends a split forward decl (Codex #498).
             state.pending = None
         elif ch == "}":
             state.brace_depth = max(0, state.brace_depth - 1)
@@ -791,10 +787,14 @@ def scan_conditional_fields(source: str) -> dict[str, dict[str, dict[str, object
     ``RecordType.name`` (Codex review #498). Best-effort and conservative — see
     the module docstring for what is deliberately not recorded.
     """
+    from .buildsource.pattern_facts_lexer import _blank_comments_and_strings
+
     src = _strip_comments(source)
-    lines = src.splitlines()
+    lines = src.split("\n")
+    # Braces count on a copy with comment/literal contents blanked (shared lexer).
+    code = _blank_comments_and_strings(src).split("\n")
     state = _ScanState(_include_guard_macro(lines))
-    for raw in lines:
+    for raw, code_line in zip(lines, code, strict=True):
         line = raw.strip()
         if not line:
             continue
@@ -812,7 +812,7 @@ def scan_conditional_fields(source: str) -> dict[str, dict[str, dict[str, object
             _capture_guarded_field(state, rec_here, line)
         if state.pending is None:
             state.pending = _detect_scope_opener(line)
-        _track_braces(state, line)
+        _track_braces(state, code_line)
     return {rec: fields for rec, fields in state.registry.items() if fields}
 
 

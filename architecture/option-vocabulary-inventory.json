@@ -1898,6 +1898,22 @@
    "default": null
   },
   {
+   "id": "action:library-spec",
+   "action": "action",
+   "input": "library-spec",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
+   "id": "action:library-spec-target",
+   "action": "action",
+   "input": "library-spec-target",
+   "status": "live",
+   "required": false,
+   "default": ""
+  },
+  {
    "id": "action:old-label",
    "action": "action",
    "input": "old-label",

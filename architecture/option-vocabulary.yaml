@@ -1417,6 +1417,13 @@ concepts:
       - actions/check-target:expected-baseline-generation
       - actions/check-target:expected-project-ref
       - actions/check-target:allow-new-target
+  - concept: action.library_spec
+    tier: action
+    workflow: []
+    renames: []
+    action:
+      - action:library-spec
+      - action:library-spec-target
   - concept: action.runtime
     tier: action
     workflow:
