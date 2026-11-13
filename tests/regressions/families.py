@@ -90,6 +90,9 @@ FAMILIES: dict[str, Family] = {
                 # A stored dump and the same binary live are one input for
                 # ADR-090's identical-pair exemption (stored/live/older cells).
                 "tests/test_unconfirmed_binary_identity.py",
+                # The whole scalar report, live vs stored operand, over
+                # generated pairs (finding order included).
+                "tests/test_live_stored_operand_property.py",
             ),
         ),
         Family(
