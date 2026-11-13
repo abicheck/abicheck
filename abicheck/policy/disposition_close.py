@@ -128,6 +128,26 @@ def exclude_from_gate(ledger: DispositionLedger, points: frozenset[str]) -> None
             records[i] = exclude_consumer_only(r)
 
 
+def alias_recorded_change(
+    ledger: DispositionLedger | None, copy: object, original: object
+) -> None:
+    """Make *copy* resolve to *original*'s record (an enriched copy of a
+    recorded finding is the same observation, not a new detection).
+
+    The ledger keys records by object identity; a consumer view that copies
+    a ``DiffResult.changes`` element to annotate it must not read as a second
+    detection when the copy later reaches ``close_consumer_scope``. A no-op
+    when *original* was never recorded.
+    """
+    if ledger is None:
+        return
+    index = ledger.index_for(original)
+    if index is None:
+        return
+    ledger._seen_ids[id(copy)] = index  # noqa: SLF001 - the ledger's alias map
+    ledger._aliases.append(copy)  # noqa: SLF001 - keeps the id from being reused
+
+
 def record_consumer_overlay(
     ledger: DispositionLedger | None,
     change: Change,

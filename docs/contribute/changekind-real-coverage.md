@@ -15,16 +15,16 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 
 ## Headline
 
-- Total kinds: **428**
-- Kinds with at least one real source: **192**
+- Total kinds: **429**
+- Kinds with at least one real source: **193**
 - Kinds backed by a compiled fixture (catalog `expected_kinds` or an edit-corpus `verified_floor`; ledger `scripts/changekind_fixture_ledger.json`): **205**
-- Kinds per source: catalog 160, field_shapes 9, integration 75
+- Kinds per source: catalog 160, field_shapes 9, integration 76
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
 | L0 | 130 | 72 |
 | L1 | 62 | 7 |
-| L2 | 75 | 39 |
+| L2 | 76 | 39 |
 | L3 | 15 | 5 |
 | L4 | 10 | 2 |
 | L5 | 15 | 5 |
@@ -261,6 +261,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 
 | Kind | Verdict | Catalog | Field shapes | Integration |
 |---|---|---:|---:|---:|
+| `base_class_access_narrowed` | API_BREAK | 0 | 0 | 2 |
 | `constant_changed` | API_BREAK | 1 | 0 | 2 |
 | `cpo_kind_changed` | BREAKING | 1 | 0 | 0 |
 | `ctor_explicit_added` | API_BREAK | 1 | 0 | 0 |

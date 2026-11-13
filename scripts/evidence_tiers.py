@@ -357,6 +357,7 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     # ── L2: needs the public-header AST (source-only API, scoping, decls) ──
     "ctor_explicit_added": "L2",
     "type_became_final": "L2",
+    "base_class_access_narrowed": "L2",
     "hidden_friend_removed": "L2",
     "default_template_arg_changed": "L2",
     "cpo_kind_changed": "L2",

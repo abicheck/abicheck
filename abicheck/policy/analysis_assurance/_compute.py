@@ -111,6 +111,10 @@ def compute_analysis_assurance(
             requested_depth=result.requested_depth,
             requested_depth_source=depth_request_source(result.requested_depth),
             notes=(NOT_COMPARABLE_NOTE,),
+            # A section the producer failed to collect is still a recorded
+            # fact of this run; the forced-through comparison does not erase
+            # it (AGENTS.md "Weaker evidence narrows conclusions").
+            section_availability=section_availability_entries(old, new),
         )
 
     # Bounded (non-fatal) comparability mismatch -- owner:

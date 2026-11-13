@@ -263,6 +263,13 @@ class RecordType:
     # assigned again after this phase).
     bases_fact: Fact[list[str]] | None = field(default=None, kw_only=True)
     virtual_bases_fact: Fact[list[str]] | None = field(default=None, kw_only=True)
+    # Base-class access specifier per base name (direct and virtual), spelled
+    # "public"/"protected"/"private". Keys are the same spellings as
+    # bases/virtual_bases. Absent or NOT_COLLECTED means "unknown" (e.g. an
+    # older snapshot, or DWARF which this slice does not read), never "public".
+    base_access_fact: Fact[dict[str, str]] = field(
+        default_factory=Fact.not_collected, kw_only=True
+    )
     vtable_fact: Fact[list[str]] | None = field(default=None, kw_only=True)
     vptr_offset_bits_fact: Fact[int | None] | None = field(default=None, kw_only=True)
 
@@ -387,6 +394,12 @@ class RecordType:
         _, self.vtable_fact = bridge_legacy_and_fact(
             vtable, self.vtable_fact, _OMITTED_VTABLE, []
         )
+        # base_access has no legacy plain-value sibling, so a pre-v26 document
+        # (below the fact-decode threshold) hands in None. Coerce it to the
+        # same NOT_COLLECTED the current-schema reader produces, so a save ->
+        # load -> save is a fixed point (unknown in both, never a change).
+        if self.base_access_fact is None:
+            self.base_access_fact = Fact.not_collected()
         _, self.vptr_offset_bits_fact = bridge_legacy_and_fact(
             vptr_offset_bits,
             self.vptr_offset_bits_fact,

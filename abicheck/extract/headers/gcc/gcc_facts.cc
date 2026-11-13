@@ -4,6 +4,8 @@
 #include "tree.h"
 #ifdef GCC_CPP
 #include "cp/cp-tree.h"
+#else
+#include "c-family/c-common.h"  // DECL_C_BIT_FIELD (cp-tree.h brings it in C++)
 #endif
 #include "tree-pretty-print.h"
 #include "langhooks.h"
@@ -274,7 +276,7 @@ static void type(void *data,void *) {
       tree ftype=DECL_BIT_FIELD_TYPE(f)?DECL_BIT_FIELD_TYPE(f):TREE_TYPE(f);
       std::string off="null";
       if(bo&&bi&&tree_fits_uhwi_p(bo)&&tree_fits_uhwi_p(bi)) off=std::to_string(tree_to_uhwi(bo)*BITS_PER_UNIT+tree_to_uhwi(bi));
-      fprintf(out,"%s{\"name\":%s,\"type\":%s,\"identity\":%s,\"offset_bits\":%s,\"size_bits\":%s,\"bitfield\":%s,\"artificial\":%s,\"access\":%s",comma?",":"",q(name(f)).c_str(),q(spelled(ftype).c_str()).c_str(),identity(ftype).c_str(),off.c_str(),number(DECL_SIZE(f)).c_str(),DECL_BIT_FIELD(f)?"true":"false",DECL_ARTIFICIAL(f)?"true":"false",q(TREE_PRIVATE(f)?"private":TREE_PROTECTED(f)?"protected":"public").c_str());abi("abi",ftype);
+      fprintf(out,"%s{\"name\":%s,\"type\":%s,\"identity\":%s,\"offset_bits\":%s,\"size_bits\":%s,\"bitfield\":%s,\"artificial\":%s,\"access\":%s",comma?",":"",q(name(f)).c_str(),q(spelled(ftype).c_str()).c_str(),identity(ftype).c_str(),off.c_str(),number(DECL_SIZE(f)).c_str(),DECL_C_BIT_FIELD(f)?"true":"false",DECL_ARTIFICIAL(f)?"true":"false",q(TREE_PRIVATE(f)?"private":TREE_PROTECTED(f)?"protected":"public").c_str());abi("abi",ftype);
       fprintf(out,",\"const\":%s,\"volatile\":%s",TYPE_READONLY(strip_array_types(ftype))?"true":"false",TYPE_VOLATILE(strip_array_types(ftype))?"true":"false");
       fprintf(out,",\"atomic\":%s,\"deprecated\":%s",TYPE_ATOMIC(ftype)?"true":"false",deprecation(f).c_str());
 #ifdef GCC_CPP
@@ -286,7 +288,9 @@ static void type(void *data,void *) {
     if(RECORD_OR_UNION_TYPE_P(t) && TYPE_BINFO(t)) {
       fprintf(out,",\"bases\":[");tree b;int i;bool sep=false;
       for(i=0;BINFO_BASE_ITERATE(TYPE_BINFO(t),i,b);i++) {
-        fprintf(out,"%s{\"type\":%s,\"offset_bytes\":%s,\"virtual\":%s}",sep?",":"",q(spelled(BINFO_TYPE(b)).c_str()).c_str(),number(BINFO_OFFSET(b)).c_str(),BINFO_VIRTUAL_P(b)?"true":"false");sep=true;
+        tree acc=BINFO_BASE_ACCESSES(TYPE_BINFO(t))?BINFO_BASE_ACCESS(TYPE_BINFO(t),i):NULL_TREE;
+        const char*access=acc==access_public_node?"public":acc==access_protected_node?"protected":acc==access_private_node?"private":"";
+        fprintf(out,"%s{\"type\":%s,\"offset_bytes\":%s,\"virtual\":%s,\"access\":%s}",sep?",":"",q(spelled(BINFO_TYPE(b)).c_str()).c_str(),number(BINFO_OFFSET(b)).c_str(),BINFO_VIRTUAL_P(b)?"true":"false",q(access).c_str());sep=true;
       }fprintf(out,"]");
     }
   }fprintf(out,"}\n");

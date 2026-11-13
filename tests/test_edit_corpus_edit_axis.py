@@ -74,6 +74,7 @@ EXPECTED_STRUCT = _MEMBER | {
     "record_triviality_change",
     "member_rename",
     "member_cv_change",
+    "member_access_change",
 }
 EXPECTED_INHERITANCE = {
     "base_add_nonvirtual",
@@ -192,7 +193,8 @@ def test_gaps_are_the_model_classes_no_operator_maps_to() -> None:
         if (con, cls) not in mapped
     )
     assert sorted(space.edit_classes_without_operator()) == want
-    assert want, "every model class has an operator: drop this guard deliberately"
+    # Every model class has an operator (the layout operators closed the last
+    # 19 gaps); a class added to the model without one shows up in ``want``.
 
 
 # --- the gaps are visible -------------------------------------------------------

@@ -183,7 +183,7 @@
   "excluded_header_matching": "glob",
   "excluded_header_patterns": [],
   "fact_generations": {
-    "extractor": 59,
+    "extractor": 61,
     "resolver": 4,
     "source": 14
   },
@@ -320,6 +320,11 @@
   "types": [
     {
       "alignment_bits": null,
+      "base_access_fact": {
+        "diagnostics": [],
+        "status": "not_collected",
+        "value": null
+      },
       "base_offsets": {},
       "bases": [],
       "bases_fact": {

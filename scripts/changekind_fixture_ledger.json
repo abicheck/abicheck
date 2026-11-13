@@ -1,9 +1,9 @@
 {
   "_comment": "Real-fixture backing per ChangeKind: catalog expected_kinds and the edit corpus verified_floor. A kind listed under `backed` may not lose every source (tests/test_changekind_real_coverage.py). Regenerate with `python scripts/changekind_real_coverage.py --write-fixture-ledger`.",
   "summary": {
-    "total_kinds": 428,
+    "total_kinds": 429,
     "backed": 205,
-    "unbacked": 223
+    "unbacked": 224
   },
   "backed": {
     "abi_relevant_build_flag_changed": [
@@ -807,6 +807,7 @@
     "allocator_replacement_removed",
     "anon_field_changed",
     "api_depends_on_consumer_env",
+    "base_class_access_narrowed",
     "behavioural_default_changed",
     "bind_now_disabled",
     "branch_protection_improved",

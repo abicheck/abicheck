@@ -217,6 +217,8 @@ ROLE_CONSTRUCT: dict[str, str] = {
     "x.inspad": "struct",
     "x.rmpad": "struct",
     "x.helper": "function",
+    "lay": "struct",
+    "layb": "inheritance",
     "x": "function",
 }
 
@@ -292,12 +294,33 @@ OP_EDIT_CLASS: dict[str, dict[str, str]] = {
         # member whose type grew, not a member appended at the tail.
         "internal_type_grew": "retype_grows",
         "by_value_struct_became_nontrivial": "record_triviality_change",
+        "field_inserted_at_head": "insert_head_shifts",
+        "field_inserted_in_middle": "insert_middle_shifts",
+        "field_removed_at_head": "remove_head_shifts",
+        "field_removed_in_middle": "remove_middle_shifts",
+        "field_removed_into_tail_padding": "remove_tail_absorbed",
+        "field_retyped_same_layout": "retype_same_layout",
+        "field_retyped_smaller": "retype_shrinks",
+        "field_retyped_alignment_only": "retype_align_only",
+        "array_shrunk_shifting": "array_shrink_shifts",
+        "array_grown_into_padding": "array_grow_absorbed",
+        "bitfield_width_within_unit": "bitfield_width_absorbed",
+        "bitfield_width_crosses_unit": "bitfield_width_shifts",
+        "bitfield_became_field": "bitfield_to_field",
+        "record_alignment_raised": "record_align_change",
+        "cxx_record_added": "record_added",
+        "record_lost_trivially_copyable": "record_triviality_change",
+        "record_lost_standard_layout": "member_access_change",
     },
     "inheritance": {
         "base_became_virtual": "base_became_virtual",
         "bases_reordered": "base_reorder",
         "primary_base_grew": "base_layout_changed",
         "vtt_grew": "base_add_virtual",
+        "base_removed": "base_remove",
+        "base_added_nonvirtual": "base_add_nonvirtual",
+        "base_became_nonvirtual": "base_became_nonvirtual",
+        "base_access_narrowed": "base_access_changed",
     },
 }
 

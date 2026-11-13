@@ -140,7 +140,11 @@ class TestEnrichCoveredChangesRefreshesCache:
         )
         assert explained.is_direct()
 
-        _enrich_covered_changes([change], {"_Z9dispatchv": explained}, graph)
+        enriched = [change]
+
+        _enrich_covered_changes(enriched, {"_Z9dispatchv": explained}, graph)
+
+        change = enriched[0]
 
         assert change.affected_public_roots == ["run"]
         refreshed = change.impact_assessment
@@ -193,7 +197,11 @@ class TestAttachConsumerImpactStampsReachability:
             public_entries=("run",),
         )
 
-        _enrich_covered_changes([change], {"_Z9dispatchv": explained}, graph)
+        enriched = [change]
+
+        _enrich_covered_changes(enriched, {"_Z9dispatchv": explained}, graph)
+
+        change = enriched[0]
 
         assert change.public_reachable is True
         assert change.reachability_kind == "consumer_proven"
@@ -527,7 +535,11 @@ class TestMergeConsumerImpactPaths:
             ),
         }
 
-        _enrich_covered_changes([change], explanations, graph)
+        enriched = [change]
+
+        _enrich_covered_changes(enriched, explanations, graph)
+
+        change = enriched[0]
 
         # Both symbols' public entries must be represented, not just the
         # first one found in dict iteration order.

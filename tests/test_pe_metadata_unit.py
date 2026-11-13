@@ -31,6 +31,7 @@ from abicheck.pe_metadata import (
     PeSymbolType,
     parse_pe_metadata,
 )
+from tests._pe_mock import structurally_whole
 
 # ── PeMetadata dataclass ────────────────────────────────────────────────
 
@@ -400,6 +401,7 @@ class TestParsePeMetadata:
         exp2.ordinal = 2
         exp2.forwarder = b"OTHER.init"
         mock_pe.DIRECTORY_ENTRY_EXPORT.symbols = [exp1, exp2]
+        structurally_whole(mock_pe, named_exports=2)
 
         # Imports
         imp_entry = MagicMock()
@@ -457,6 +459,7 @@ class TestParsePeMetadata:
         mock_pe.OPTIONAL_HEADER.DllCharacteristics = 0
         # No exports/imports
         del mock_pe.DIRECTORY_ENTRY_EXPORT
+        structurally_whole(mock_pe)
         del mock_pe.DIRECTORY_ENTRY_IMPORT
 
         # Version resource
@@ -518,6 +521,7 @@ class TestParsePeMetadata:
         mock_pe.FILE_HEADER.Characteristics = 0x2022
         mock_pe.OPTIONAL_HEADER = SimpleNamespace(DllCharacteristics=0x0100)
         del mock_pe.DIRECTORY_ENTRY_EXPORT
+        structurally_whole(mock_pe)
         del mock_pe.DIRECTORY_ENTRY_IMPORT
         del mock_pe.VS_FIXEDFILEINFO
 

@@ -141,4 +141,20 @@ LIFECYCLE_BUG_CLASSES: tuple[BugClass, ...] = (
             "branch": ("#elif 0", "#elif 0 chain", "#elif X", "#else", "nested #if X")
         },
     ),
+    BugClass(
+        id="lifecycle.view_annotation_written_onto_a_shared_finding",
+        invariant=(
+            "A per-consumer view that annotates a finding writes the annotation "
+            "to its own copy, never to the DiffResult.changes object every other "
+            "view reads; the copy stays the same disposition-ledger record, so "
+            "the audit does not count it twice. Instance: --used-by consumer "
+            "proof paths (consumer_impact.enrich_covered_changes). Family F2."
+        ),
+        fixed_by=(2055,),
+        seed_tests=("tests/test_no_shared_mutation.py",),
+        axes={
+            "consumers": ("one", "two over the same finding"),
+            "ledger alias": ("aliased", "bare copy"),
+        },
+    ),
 )

@@ -947,6 +947,11 @@ _XCXX_ROLES: dict[str, RoleText] = {
     "x.extra": ("", ""),
 }
 
+from tests._edit_corpus_seed_layout import LAYOUT_ROLES as _LAYOUT_ROLES  # noqa: E402
+
+_XCXX_ROLES.update(_LAYOUT_ROLES)
+_LAYOUT_SLOTS: tuple[str, ...] = tuple(f"@@{r}@@" for r in _LAYOUT_ROLES)
+
 XCXX_SEED = Seed(
     name="cxx_more",
     lang="c++",
@@ -996,6 +1001,7 @@ XCXX_SEED = Seed(
         "@@x.autoret@@",
         "@@x.kind@@",
         "@@x.extra@@",
+        *_LAYOUT_SLOTS,
         _VIS_CLOSE,
         "#endif",
     ),
@@ -1042,6 +1048,7 @@ XCXX_SEED = Seed(
         "@@x.autoret@@",
         "@@x.kind@@",
         "@@x.extra@@",
+        *_LAYOUT_SLOTS,
     ),
     roles=_XCXX_ROLES,
 )

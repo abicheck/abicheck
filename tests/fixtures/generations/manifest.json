@@ -306,11 +306,23 @@
       "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
       "snapshot": "gen58/corpus.json.gz"
     },
+    "59": {
+      "castxml": "castxml version 0.7.0",
+      "commit": "5128aae32894",
+      "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+      "snapshot": "gen59/corpus.json.gz"
+    },
     "6": {
       "castxml": "castxml version 0.7.0",
       "commit": "6f640dd33189",
       "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
       "snapshot": "gen6/corpus.json.gz"
+    },
+    "60": {
+      "castxml": "castxml version 0.7.0",
+      "commit": "b607a2537f87",
+      "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
+      "snapshot": "gen60/corpus.json.gz"
     },
     "9": {
       "castxml": "castxml version 0.7.0",

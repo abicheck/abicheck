@@ -80,6 +80,19 @@ RECORD_AND_LATER_ROWS: tuple[FactRow, ...] = (
     ),
     FactRow(
         "RecordType",
+        "base_access_fact",
+        _FULL,
+        _FULL,
+        note=(
+            "Base name -> access specifier (public/protected/private). Both "
+            "header backends read it (castxml `<Base access>`, clang's base "
+            "`access`); a base with no recognised specifier makes the whole "
+            "map not collected. DWARF does not record it. Activates "
+            "`BASE_CLASS_ACCESS_NARROWED`."
+        ),
+    ),
+    FactRow(
+        "RecordType",
         "vtable",
         _FULL,
         _FULL,
@@ -223,14 +236,16 @@ RECORD_AND_LATER_ROWS: tuple[FactRow, ...] = (
     FactRow(
         "RecordType",
         "is_standard_layout",
-        _NONE,
+        _PARTIAL,
         _FULL,
         hybrid_backfilled=True,
         note=(
             "A semantic trait clang computes independent of any layout pass "
-            "(`definitionData.isStandardLayout`, present only when true), and "
-            "one castxml's schema genuinely does not expose. Wiring it in G31 "
-            "Phase C activated `STANDARD_LAYOUT_LOST`, dead code until then."
+            "(`definitionData.isStandardLayout`, present only when true). "
+            "castxml derives it tri-state from [class.prop]/3 over the fields, "
+            "access specifiers, bases and virtual members it emits "
+            "(`extract/headers/castxml/record_traits.py`), unknown where a base "
+            "cannot be resolved. Activates `STANDARD_LAYOUT_LOST`."
         ),
     ),
     FactRow(
@@ -255,7 +270,7 @@ RECORD_AND_LATER_ROWS: tuple[FactRow, ...] = (
         note=(
             "clang computes the trait; castxml derives it tri-state from the "
             "special members it emits (`extract/headers/castxml/"
-            "record_traits.py`), unknown for a `= default` member. Activated "
+            "record_traits.py`); a first-declaration `= default` member is trivial. Activated "
             "`TRIVIALLY_COPYABLE_LOST`."
         ),
     ),

@@ -42,7 +42,9 @@ from abicheck.errors import (
     IncompatibleSnapshotSchemaError,
     ProfileMismatchError,
     ScopeMismatchError,
+    SnapshotError,
     UnsupportedArtifactError,
+    ValidationError,
 )
 from abicheck.frontends.cli.release_member_reporter import CliReleaseReporter
 from abicheck.workflows.release_members import (
@@ -140,6 +142,34 @@ class TestOrderIsLoadBearing:
     def test_an_unsupported_artifact_is_not_swallowed_either(self) -> None:
         assert isinstance(UnsupportedArtifactError("x"), Exception)
         assert _entry(UnsupportedArtifactError("x"))["verdict"] == "unsupported"
+
+    @pytest.mark.parametrize(
+        "exc",
+        (
+            SnapshotError("export table of libfoo.so was not read: truncated"),
+            ValidationError("Cannot detect format of 'libfoo.so'"),
+        ),
+    )
+    def test_an_unreadable_input_is_a_stated_error_without_a_traceback(
+        self, exc: BaseException, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A refused input is an ``ERROR`` member that states its own message;
+        the "unexpected failure" traceback is reserved for abicheck defects."""
+        with caplog.at_level("ERROR", logger="abicheck.release"):
+            entry = _entry(exc)
+        assert entry["verdict"] == "ERROR"
+        assert entry["error"] == str(exc)
+        assert entry["error_type"] == type(exc).__name__
+        assert not [r for r in caplog.records if "unexpected failure" in r.getMessage()]
+
+    def test_a_defect_still_logs_its_traceback(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level("ERROR", logger="abicheck.release"):
+            entry = _entry(RuntimeError("boom"))
+        assert entry["verdict"] == "ERROR"
+        [record] = [r for r in caplog.records if "unexpected failure" in r.getMessage()]
+        assert record.exc_info is not None
 
     def test_a_click_error_uses_format_message_not_str(self) -> None:
         """`ClickException.format_message()`, not `str(exc)`.

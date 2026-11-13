@@ -1,6 +1,6 @@
 {
   "description": "Formal detector specification matrix (generated).",
-  "count": 428,
+  "count": 429,
   "detectors": [
     {
       "kind": "abi_equivalent_type_changed",
@@ -82,6 +82,15 @@
       "min_evidence": "L1",
       "doc_slug": "atomic_qualifier_changed",
       "examples": "case116_atomic_qualifier_changed"
+    },
+    {
+      "kind": "base_class_access_narrowed",
+      "category": "api_break",
+      "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "base_class_access_narrowed",
+      "examples": ""
     },
     {
       "kind": "base_class_offset_changed",

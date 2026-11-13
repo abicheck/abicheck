@@ -246,6 +246,15 @@ TYPES_ENTRIES_2: list[ChangeKindMeta] = [
         operation=_OP.MODIFIED,
     ),
     _E(
+        "base_class_access_narrowed",
+        _A,
+        impact="A base-class specifier became more restrictive (public -> protected/private or protected -> private). Code that converts a derived pointer or reference to the base, or uses the base's members through the derived type, no longer compiles. Layout and mangled names are unchanged; detected from header (castxml/clang) evidence only.",
+        description_template="Base class access narrowed: {name}: base {detail} {old} → {new}",
+        entity=_ENT.TYPE,
+        contract_subject=_CS.DECLARATION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
         "type_base_changed",
         _B,
         impact="Base class layout change shifts derived member offsets and vtable pointers; this-pointer arithmetic breaks.",

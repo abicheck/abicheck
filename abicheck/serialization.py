@@ -89,6 +89,7 @@ if TYPE_CHECKING:
 from .model import AbiSnapshot
 from .model.lazy_declarations import defer_declaration_step
 from .policy.analysis_assurance_degraded_facts import degraded_reliability_facts
+from .storage.malformed_document import malformed_document_errors
 from .storage.sectioned_document import (
     from_sectioned_document as from_sectioned_document,
     is_sectioned_document as is_sectioned_document,
@@ -115,6 +116,14 @@ from .workflows.snapshot_load import (
 
 
 def snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
+    """Rehydrate *d* (:func:`_snapshot_from_dict`); a document of the wrong
+    shape raises :class:`~abicheck.errors.SnapshotError`, never a bare
+    ``KeyError``/``TypeError`` (``storage.malformed_document``)."""
+    with malformed_document_errors():
+        return _snapshot_from_dict(d)
+
+
+def _snapshot_from_dict(d: dict[str, Any]) -> AbiSnapshot:
     """Rehydrate an :class:`AbiSnapshot` from its ``snapshot_to_dict()``
     (or single-file sectioned, ADR-062/063 Phase 8) shape.
 

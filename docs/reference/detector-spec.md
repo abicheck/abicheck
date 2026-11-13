@@ -2,7 +2,7 @@
 
 # Detector specification matrix
 
-One row per `ChangeKind` (428 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`catalog/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
+One row per `ChangeKind` (429 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`catalog/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
 
 | ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug | Examples |
 |---|---|---|---|---|---|---|
@@ -15,6 +15,7 @@ One row per `ChangeKind` (428 total). Columns fuse the verdict partition (`check
 | `anon_field_changed` | breaking | `BREAKING` | `error` | unspecified | `anon_field_changed` | — |
 | `api_depends_on_consumer_env` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `api_depends_on_consumer_env` | — |
 | `atomic_qualifier_changed` | breaking | `BREAKING` | `error` | L1 | `atomic_qualifier_changed` | [case116](examples/case116_atomic_qualifier_changed.md) |
+| `base_class_access_narrowed` | api_break | `API_BREAK` | `warning` | L2 | `base_class_access_narrowed` | — |
 | `base_class_offset_changed` | breaking | `BREAKING` | `error` | L1 | `base_class_offset_changed` | [case140](examples/case140_empty_base_optimization_lost.md) |
 | `base_class_position_changed` | breaking | `BREAKING` | `error` | L1 | `base_class_position_changed` | [case60](examples/case60_base_class_position_changed.md) |
 | `base_class_virtual_changed` | breaking | `BREAKING` | `error` | L1 | `base_class_virtual_changed` | [case167](examples/case167_base_became_virtual.md) |

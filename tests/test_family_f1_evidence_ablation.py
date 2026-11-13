@@ -150,6 +150,12 @@ _ABI_FACT_UNCOVERED = (
 )
 
 UNCOVERED: dict[str, str] = {
+    "RecordType.base_access_fact": (
+        "header-only base access map; the H1 corpus has no record whose base "
+        "specifier differs between sides. Unknown-vs-present is covered by "
+        "tests/test_base_class_access.py (unknown on either side declines the "
+        "comparison) and tests/test_base_class_access_integration.py"
+    ),
     "AbiSnapshot.wire_extensions": (
         "storage-only carrier of a stored document's D14/D15 extras, read by "
         "the writers and the evidence digest, never by a detector; covered by "

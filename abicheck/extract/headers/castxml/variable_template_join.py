@@ -29,6 +29,7 @@ from ....errors import SnapshotError
 from ....model.arithmetic_type_spellings import is_arithmetic_spelling
 from ....storage.ast_cache_location import ast_cache_store
 from ... import cache_dep_manifest
+from ...extraction_limitations import with_join_gap
 from ..clang.ast_inner import ast_inner
 from ..clang.backend import clang_header_dump
 from ..clang.expr import _initializer_value
@@ -36,6 +37,12 @@ from ..clang.expr import _initializer_value
 log = logging.getLogger(__name__)
 
 VARIABLE_TEMPLATE_SIDECAR_BACKEND = "castxml-variable-templates"
+
+#: The limitation a failed join leaves on the castxml root.
+VARIABLE_TEMPLATE_JOIN_GAP = (
+    "const variable templates: castxml cannot record them and its clang join "
+    "failed, so their values are not assessed"
+)
 
 #: A declaration that can be a variable template: ``template <...>`` directly
 #: followed by a const-qualified variable with an initializer. A function
@@ -323,7 +330,8 @@ def join_variable_templates(
     """Return *root* with the clang-derived const variable templates written in.
 
     A header whose text cannot declare one costs nothing. A clang failure leaves
-    the templates absent and is logged; nothing is published for it.
+    the templates absent, is logged, and is recorded on the returned root
+    (:data:`VARIABLE_TEMPLATE_JOIN_GAP`); nothing is published for it.
     """
     if not has_variable_template_text(headers):
         return root
@@ -361,7 +369,8 @@ def join_variable_templates(
             "variable templates stay unseen on the castxml path",
             exc,
         )
-        return root
+        cache_dep_manifest.note_uncacheable()
+        return with_join_gap(root, VARIABLE_TEMPLATE_JOIN_GAP)
     entries = clang_const_variable_templates(clang_root, headers)
     deps = clang_parse.manifest()
     if deps is not None and cache_dep_manifest.write_sidecar(entry, deps):

@@ -27,7 +27,9 @@ from ..errors import (
     IncompatibleSnapshotSchemaError,
     ProfileMismatchError,
     ScopeMismatchError,
+    SnapshotError,
     UnsupportedArtifactError,
+    ValidationError,
 )
 
 __all__ = ["MemberFailure", "classify_member_failure", "dispatch_failure_entry"]
@@ -87,6 +89,11 @@ def classify_member_failure(exc: BaseException, *, library: str) -> MemberFailur
             {"library": library, "verdict": "unsupported", "reason": str(exc)}
         )
     stated = _stated_message(exc)
+    if stated is None and isinstance(exc, SnapshotError | ValidationError):
+        # An input this build read and refused (a truncated or corrupt
+        # binary, an undetectable format) states its own diagnostic: still an
+        # ERROR member, but not an abicheck defect owed a traceback.
+        stated = str(exc)
     if stated is not None:
         return MemberFailure(
             {

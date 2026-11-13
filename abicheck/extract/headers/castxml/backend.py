@@ -54,6 +54,7 @@ from ....storage.tu_parse_store import TuParseStore
 from ... import cache_dep_manifest
 from ...cache_input_digest import compiler_search_dirs, search_dirs_material
 from ...castxml_header_compat import is_aggregate_file, write_castxml_aggregate
+from ...extraction_limitations import join_gaps, note_parser_limitation
 from ...path_aliases import absolutize_include_roots
 from ..ast_config import (
     _build_castxml_command,
@@ -657,6 +658,8 @@ class CastxmlBackend:
             no_binary_evidence=r.no_binary_evidence,
             plain_char_unsigned=plain_char,
         )
+        for gap in join_gaps(xml_root):
+            note_parser_limitation(parser, gap)
         setattr(
             parser,
             "_abicheck_neutral_factory",

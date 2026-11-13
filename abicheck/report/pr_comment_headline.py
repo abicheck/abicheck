@@ -189,7 +189,12 @@ def _quiet_headline(model: CommentModel, safe_count: int) -> tuple[str, str]:
     Advisory limitations still outrank "nothing to report": a clean set of
     compared members says nothing about the members that were not compared.
     """
-    if model.has_incomplete:
+    if model.has_incomplete or (
+        model.evidence is not None and model.evidence.analysis_caveats
+    ):
+        # A failed section, a forced not-comparable comparison or a
+        # NOT_EVALUATED finding (report/analysis_caveats.py) is a run that
+        # did not finish checking, never "No ABI changes".
         return "⚠️", "Analysis coverage reduced"
     if model.scope_notice is not None:
         # `warn` (the default): the compared members are clean, but the

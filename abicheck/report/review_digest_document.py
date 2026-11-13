@@ -119,6 +119,7 @@ def build_review_digest_document(
         # result with no rule and no reason (Codex review, PR #1284).
         "pattern_modulations": list(digest.pattern_modulations),
         "review_groups": list(digest.review_groups),
+        "analysis_caveats": list(digest.analysis_caveats),
         "policy": digest.policy,
         "gate_exit_code": digest.gate_exit_code,
         "result_counts": digest.result_counts,
@@ -181,6 +182,7 @@ def _review_digest_from_mapping(d: Mapping[str, Any]) -> ReviewDigest:
         env_matrix_source_sha256=d.get("env_matrix_source_sha256"),
         pattern_modulations=tuple(d.get("pattern_modulations") or ()),
         review_groups=tuple(d.get("review_groups") or ()),
+        analysis_caveats=tuple(d.get("analysis_caveats") or ()),
         policy=d.get("policy", "strict_abi"),
         gate_exit_code=d.get("gate_exit_code"),
         result_counts=dict(d.get("result_counts") or {}),
