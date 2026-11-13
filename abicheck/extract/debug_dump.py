@@ -182,7 +182,12 @@ def _parse_dwarf_source(
     """
     from ..model.dwarf_facts import AdvancedExtractionStatus
 
-    meta, adv = parse_dwarf(dwarf_path, _session_out=session_out)
-    if dwarf_path != so_path and adv.extraction is AdvancedExtractionStatus.FAILED:
+    result: tuple[DwarfMetadata, AdvancedDwarfMetadata] = parse_dwarf(
+        dwarf_path, _session_out=session_out
+    )
+    if (
+        dwarf_path != so_path
+        and result[1].extraction is AdvancedExtractionStatus.FAILED
+    ):
         note_debug_info_read_failure(f"detached debug file {dwarf_path} is unreadable")
-    return meta, adv
+    return result  # the reader's own result, unrepacked

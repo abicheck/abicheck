@@ -144,3 +144,125 @@ def test_a_malformed_lazily_decoded_surface_graph_is_a_typed_error(
     decode_surface_graph({"surface_graph": graph}, snap)
     with pytest.raises(MalformedSnapshotError, match="malformed surface graph"):
         _ = snap.surface_graph
+
+
+# --------------------------------------------------------------------------
+# Failures past DWARF detection are recorded on every reader path, including
+# the ones a well-formed seed never reaches (an indexer or unit-walk raising,
+# the snapshot builder's own open). Failures before detection (not ELF) are
+# the export reader's, and record nothing here.
+# --------------------------------------------------------------------------
+
+
+def _recorded_debug(fn: object) -> list[str]:
+    from abicheck.extract.parse_failures import recording_debug_info_read_failures
+
+    with recording_debug_info_read_failures() as sink:
+        fn()  # type: ignore[operator]
+    return sink
+
+
+@pytest.mark.parametrize(
+    "module", ("abicheck.dwarf_unified", "abicheck.dwarf_metadata")
+)
+@pytest.mark.parametrize("error", (MemoryError(), ValueError("bad index")))
+def test_a_dwarf_indexer_failure_after_detection_is_recorded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, module: str, error: Exception
+) -> None:
+    """Both readers locate ``.debug_info``, then the indexer raises (a
+    ``MemoryError`` from a bogus decompressed size included): recorded, and
+    the reader still never raises."""
+    import importlib
+
+    so = _elf_with_debug(tmp_path)
+    reader = importlib.import_module(module)
+
+    def boom(_elf: object) -> object:
+        raise error
+
+    monkeypatch.setattr(reader, "open_indexed_dwarf_info", boom)
+    sink = _recorded_debug(lambda: reader.parse_dwarf_metadata(so))
+    assert sink, f"{module}: an indexer {type(error).__name__} read as no DWARF"
+
+
+def test_a_unit_walk_failure_in_the_unified_reader_is_recorded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``iter_CUs()`` itself raising (a malformed unit header before any
+    per-unit guard) is recorded and reads as a failed extraction."""
+    from abicheck import dwarf_unified
+    from abicheck.model.dwarf_facts import AdvancedExtractionStatus
+
+    so = _elf_with_debug(tmp_path)
+
+    def boom(_session: object) -> object:
+        raise ValueError("unit header past the section")
+
+    monkeypatch.setattr(dwarf_unified, "parse_dwarf_from_session", boom)
+    result: list[object] = []
+    sink = _recorded_debug(lambda: result.append(dwarf_unified.parse_dwarf(so)))
+    assert sink
+    _meta, adv = result[0]  # type: ignore[misc]
+    assert adv.extraction is AdvancedExtractionStatus.FAILED
+
+
+def _snapshot_builder_records(path: Path) -> list[str]:
+    from abicheck.dwarf_snapshot import _DwarfSnapshotBuilder
+    from abicheck.elf_metadata import parse_elf_metadata
+
+    builder = _DwarfSnapshotBuilder(path, parse_elf_metadata(path))
+    return _recorded_debug(builder.extract)
+
+
+def test_the_snapshot_builder_records_corrupt_dwarf_on_its_own_open(
+    tmp_path: Path,
+) -> None:
+    """The builder's open-it-here path (no shared session) records a corrupt
+    abbreviation table like the metadata readers do."""
+    from elftools.elf.elffile import ELFFile
+
+    so = _elf_with_debug(tmp_path)
+    data = bytearray(so.read_bytes())
+    with so.open("rb") as fh:
+        abbrev = ELFFile(fh).get_section_by_name(".debug_abbrev")
+        assert abbrev is not None
+        at = abbrev["sh_offset"]
+    data[at] ^= 0xFF
+    corrupt = tmp_path / "corrupt.so"
+    corrupt.write_bytes(bytes(data))
+    assert _snapshot_builder_records(so) == []
+    assert _snapshot_builder_records(corrupt)
+
+
+def test_the_snapshot_builder_leaves_a_non_elf_to_the_export_reader(
+    tmp_path: Path,
+) -> None:
+    """A file that is not ELF fails before DWARF is located: nothing is
+    recorded here (the export reader refuses it first)."""
+    from abicheck.dwarf_snapshot import _DwarfSnapshotBuilder
+    from abicheck.model.elf_facts import ElfMetadata
+
+    not_elf = tmp_path / "lib.so"
+    not_elf.write_bytes(b"not an ELF file")
+    builder = _DwarfSnapshotBuilder(not_elf, ElfMetadata())
+    assert _recorded_debug(builder.extract) == []
+
+
+def test_a_macho_trie_listing_nothing_against_a_defining_nlist_is_recorded(
+    tmp_path: Path,
+) -> None:
+    """An export trie that parses to no exports while the symbol table defines
+    some was misread, not emptied: a recorded failure. The same dylib with no
+    trie at all keeps its nlist exports and records nothing."""
+    from abicheck.macho_metadata import parse_macho_metadata
+    from tests._macho_synthetic import N_EXT, N_SECT, MachoSymbol, write_dylib
+
+    symbols = [MachoSymbol(n, N_EXT | N_SECT) for n in ("_add", "_sub")]
+    empty_trie = write_dylib(tmp_path / "empty.dylib", symbols, export_trie=[])
+    no_trie = write_dylib(tmp_path / "plain.dylib", symbols)
+    for path, expect_recorded in ((empty_trie, True), (no_trie, False)):
+        with recording_export_read_failures() as sink:
+            meta = parse_macho_metadata(path)
+        assert bool(sink) is expect_recorded, path.name
+        if not expect_recorded:
+            assert sorted(e.name for e in meta.exports) == ["add", "sub"]

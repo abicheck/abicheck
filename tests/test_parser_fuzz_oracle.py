@@ -704,6 +704,7 @@ def test_every_truncation_records_a_failure_or_keeps_every_export(
     parse: Callable[[Path], Any],
     names: Callable[[Any], frozenset[str]],
     suffix: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Every cut of the seed, at every byte, either records an export-table
     failure or still reads the intact seed's whole export set.
@@ -711,7 +712,14 @@ def test_every_truncation_records_a_failure_or_keeps_every_export(
     The 2026-11-08 gaps were the PE seed cut to 1405-1683 bytes reading as
     zero to two of its three exports, and the Mach-O seed cut in its string
     table or export trie reading as none, both with nothing recorded.
+
+    ``pefile.PE.__init__`` closes a file it refuses, and ``close()`` ends in
+    an unconditional full ``gc.collect()``. Late in a suite shard the worker
+    holds about a gigabyte, so thousands of refused cuts cost minutes (it
+    timed out a CI shard). The collector has no bearing on what a parse
+    returns, so it is stubbed for the sweep.
     """
+    monkeypatch.setattr("gc.collect", lambda generation=2: 0)
     data = seed()
     intact, intact_sink = _parse_recorded(parse, data, f"seed{suffix}")
     assert intact_sink == []
