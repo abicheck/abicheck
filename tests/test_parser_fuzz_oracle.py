@@ -55,6 +55,7 @@ from _parser_fuzz_oracle import (  # noqa: E402
     huge_count,
     json_mutate,
     object_format,
+    section_names_unusable,
     snapshot_seed_document,
     truncate,
 )
@@ -76,6 +77,7 @@ from abicheck.errors import AbicheckError  # noqa: E402
 from abicheck.extract.headers.castxml.dumper import _CastxmlParser  # noqa: E402
 from abicheck.extract.parse_failures import (  # noqa: E402
     note_export_read_failure,
+    recording_debug_info_read_failures,
     recording_export_read_failures,
 )
 from abicheck.macho_metadata import parse_macho_metadata  # noqa: E402
@@ -110,32 +112,15 @@ class KnownGap:
     pattern: str
 
 
-PE_GAP = KnownGap(
-    "known gap: a truncated or corrupted PE export directory reads as fewer or "
-    "zero exports with the read 'complete'; no failure is recorded",
-    r"^pe: silent (empty read|partial loss) ",
-)
-MACHO_GAP = KnownGap(
-    "known gap: a Mach-O cut inside its string table or export trie reads as "
-    "fewer or zero exports with the read 'complete'; no failure is recorded",
-    r"^macho: silent (empty read|partial loss) ",
-)
 DWARF_GAP = KnownGap(
-    "known gap: parse_dwarf_metadata swallows ELF and per-CU errors without a "
-    "recorded failure, and lets a MemoryError escape: corrupt DWARF reads as "
-    "empty or crashes",
-    r"^dwarf(_unified)?: (silent (empty read|partial loss) |unexpected MemoryError: )",
+    "known gap: a corrupted .debug_abbrev entry that still parses ends the "
+    "DIE stream early, so the DWARF readers read no types and record nothing",
+    r"^dwarf(_unified)?: silent (empty read|partial loss) ",
 )
 CLANG_GAP = KnownGap(
     "known gap: a clang AST node of the wrong JSON type leaks TypeError or "
     "AttributeError instead of MalformedClangAstError",
     r"^clang: unexpected (TypeError|AttributeError): ",
-)
-SNAPSHOT_GAP = KnownGap(
-    "known gap: a malformed storage-v2 snapshot document leaks KeyError, "
-    "TypeError or AttributeError (eagerly from load, or lazily on first "
-    "declarations access) instead of a typed SnapshotError/ValidationError",
-    r"^snapshot: unexpected (KeyError|TypeError|AttributeError): ",
 )
 
 
@@ -217,6 +202,8 @@ class BytesSpec:
     facts: Callable[[Any], int]
     export_index: Callable[[Any], Any] | None = None
     allowed: tuple[type[BaseException], ...] = ()
+    #: A debug-info reader: a recorded debug-info failure is its failure record.
+    debug_info: bool = False
 
 
 def _exports(index_of: Callable[[Any], Any]) -> Callable[[Any], int]:
@@ -258,13 +245,18 @@ MACHO = BytesSpec(
     export_index=build_raw_export_index_from_macho,
 )
 DWARF = BytesSpec(
-    "dwarf", lambda: _so_seed(debug=True), parse_dwarf_metadata, _dwarf_facts
+    "dwarf",
+    lambda: _so_seed(debug=True),
+    parse_dwarf_metadata,
+    _dwarf_facts,
+    debug_info=True,
 )
 DWARF_UNIFIED = BytesSpec(
     "dwarf_unified",
     lambda: _so_seed(debug=True),
     parse_dwarf_metadata_unified,
     _dwarf_facts,
+    debug_info=True,
 )
 SNAPSHOT_BYTES = BytesSpec(
     "snapshot",
@@ -309,7 +301,8 @@ def _bytes_case(spec: BytesSpec, mutation: tuple[str, int, int]) -> Outcome:
         work = Path(d)
         seed_facts = _seed_facts(spec, work)
         target = work / "mut.bin"
-        target.write_bytes(_bytes_mutation(spec.seed(), *mutation))
+        mutated = _bytes_mutation(spec.seed(), *mutation)
+        target.write_bytes(mutated)
         return enforce(
             spec.name,
             lambda: spec.parse(target),
@@ -318,6 +311,8 @@ def _bytes_case(spec: BytesSpec, mutation: tuple[str, int, int]) -> Outcome:
             allowed=spec.allowed,
             export_index=spec.export_index,
             strict_loss=mutation[0] == "truncate",
+            debug_info=spec.debug_info,
+            absent_ok=spec.debug_info and section_names_unusable(mutated),
         )
 
 
@@ -345,21 +340,21 @@ def test_elf_slow() -> None:  # test-quality: ok enforce() asserts
 
 
 def test_pe_fast() -> None:  # test-quality: ok enforce() asserts
-    _against_gap(_bytes_property(PE, FAST), PE_GAP)
+    _against_gap(_bytes_property(PE, FAST), None)
 
 
 @pytest.mark.slow
 def test_pe_slow() -> None:  # test-quality: ok enforce() asserts
-    _against_gap(_bytes_property(PE, SLOW), PE_GAP)
+    _against_gap(_bytes_property(PE, SLOW), None)
 
 
 def test_macho_fast() -> None:  # test-quality: ok enforce() asserts
-    _against_gap(_bytes_property(MACHO, FAST), MACHO_GAP)
+    _against_gap(_bytes_property(MACHO, FAST), None)
 
 
 @pytest.mark.slow
 def test_macho_slow() -> None:  # test-quality: ok enforce() asserts
-    _against_gap(_bytes_property(MACHO, SLOW), MACHO_GAP)
+    _against_gap(_bytes_property(MACHO, SLOW), None)
 
 
 @pytest.mark.slow
@@ -494,21 +489,21 @@ def _snapshot_struct_property(profile: dict[str, Any]) -> Callable[[], None]:
 
 
 def test_snapshot_bytes_fast() -> None:  # test-quality: ok enforce() asserts
-    _against_gap(_bytes_property(SNAPSHOT_BYTES, FAST), SNAPSHOT_GAP)
+    _against_gap(_bytes_property(SNAPSHOT_BYTES, FAST), None)
 
 
 @pytest.mark.slow
 def test_snapshot_bytes_slow() -> None:  # test-quality: ok enforce() asserts
-    _against_gap(_bytes_property(SNAPSHOT_BYTES, SLOW), SNAPSHOT_GAP)
+    _against_gap(_bytes_property(SNAPSHOT_BYTES, SLOW), None)
 
 
 def test_snapshot_struct_fast() -> None:  # test-quality: ok enforce() asserts
-    _against_gap(_snapshot_struct_property(FAST), SNAPSHOT_GAP)
+    _against_gap(_snapshot_struct_property(FAST), None)
 
 
 @pytest.mark.slow
 def test_snapshot_struct_slow() -> None:  # test-quality: ok enforce() asserts
-    _against_gap(_snapshot_struct_property(SLOW), SNAPSHOT_GAP)
+    _against_gap(_snapshot_struct_property(SLOW), None)
 
 
 # --------------------------------------------------------------------------
@@ -620,12 +615,18 @@ def test_oracle_reports_a_hang_as_a_violation() -> None:
         stop.set()
 
 
+#: A stand-in gap for the harness's own tests (the PE gap they used is closed).
+_HARNESS_GAP = KnownGap(
+    "known gap: harness example", r"^pe: silent (empty read|partial loss) "
+)
+
+
 def test_against_gap_fails_on_a_violation_outside_the_gap() -> None:
     def prop() -> None:
         raise OracleViolation("pe: unexpected KeyError: 'x'")
 
     with pytest.raises(OracleViolation, match="unexpected KeyError"):
-        _against_gap(prop, PE_GAP)
+        _against_gap(prop, _HARNESS_GAP)
 
 
 def test_against_gap_fails_when_one_group_member_is_outside_the_gap() -> None:
@@ -639,7 +640,7 @@ def test_against_gap_fails_when_one_group_member_is_outside_the_gap() -> None:
         )
 
     with pytest.raises(ExceptionGroup):
-        _against_gap(prop, PE_GAP)
+        _against_gap(prop, _HARNESS_GAP)
 
 
 def test_against_gap_xfails_on_the_gap_own_violations() -> None:
@@ -653,63 +654,135 @@ def test_against_gap_xfails_on_the_gap_own_violations() -> None:
         )
 
     with pytest.raises(pytest.xfail.Exception, match="known gap"):
-        _against_gap(prop, PE_GAP)
+        _against_gap(prop, _HARNESS_GAP)
 
 
 # --------------------------------------------------------------------------
-# Known-gap canaries: each asserts the gap's *current* answer and passes today.
-# They fail when the gap closes; see docs/contribute/known-gaps.md.
+# Regressions for gaps this suite found and that are now closed (2026-11-13):
+# a corrupt PE export directory, a Mach-O cut in its string table or export
+# trie, corrupt DWARF, and a malformed storage-v2 document. Each states the
+# invariant over a small exhaustive domain, judged against the intact seed's
+# own parse rather than the parser's recording helper.
 # --------------------------------------------------------------------------
 
 
 def _parse_recorded(
     parse: Callable[[Path], Any], data: bytes, name: str
 ) -> tuple[Any, list[str]]:
+    """``parse`` of *data*, plus every export-table and debug-info failure it
+    recorded."""
     with tempfile.TemporaryDirectory(prefix="parser-fuzz-") as d:
         target = Path(d) / name
         target.write_bytes(data)
-        with recording_export_read_failures() as sink:
+        with (
+            recording_export_read_failures() as sink,
+            recording_debug_info_read_failures() as debug_sink,
+        ):
             meta = parse(target)
-    return meta, sink
+    return meta, [*sink, *debug_sink]
 
 
-@pytest.mark.known_gap_canary
-def test_pe_truncated_export_directory_reads_empty_unrecorded() -> None:
-    """The committed DLL cut to 1405 bytes parses, returns no exports, and records
-    no failure: export_read stays 'unrecorded'."""
+def _pe_names(meta: Any) -> frozenset[str]:
+    return frozenset(e.name for e in meta.exports)
+
+
+def _macho_names(meta: Any) -> frozenset[str]:
+    return all_export_names(build_raw_export_index_from_macho(meta))
+
+
+@pytest.mark.parametrize(
+    ("fmt", "seed", "parse", "names", "suffix"),
+    (
+        ("pe", lambda: PE_SEED.read_bytes(), parse_pe_metadata, _pe_names, ".dll"),
+        ("macho", lambda: _macho_seed(), parse_macho_metadata, _macho_names, ".dylib"),
+    ),
+)
+def test_every_truncation_records_a_failure_or_keeps_every_export(
+    fmt: str,
+    seed: Callable[[], bytes],
+    parse: Callable[[Path], Any],
+    names: Callable[[Any], frozenset[str]],
+    suffix: str,
+) -> None:
+    """Every cut of the seed, at every byte, either records an export-table
+    failure or still reads the intact seed's whole export set.
+
+    The 2026-11-08 gaps were the PE seed cut to 1405-1683 bytes reading as
+    zero to two of its three exports, and the Mach-O seed cut in its string
+    table or export trie reading as none, both with nothing recorded.
+    """
+    data = seed()
+    intact, intact_sink = _parse_recorded(parse, data, f"seed{suffix}")
+    assert intact_sink == []
+    expected = names(intact)
+    assert len(expected) == 3, f"{fmt} seed should export three names"
+    silent = []
+    for cut in range(len(data)):
+        meta, sink = _parse_recorded(parse, data[:cut], f"cut{suffix}")
+        if not sink and names(meta) != expected:
+            silent.append((cut, sorted(names(meta))))
+    assert silent == [], f"{fmt}: cuts that lost exports silently: {silent[:5]}"
+
+
+def test_pe_cut_inside_export_names_is_recorded() -> None:
+    """The reported reproduction: the committed DLL cut to 1405 bytes."""
     meta, sink = _parse_recorded(
         parse_pe_metadata, PE_SEED.read_bytes()[:1405], "pe.dll"
     )
     assert meta.exports == []
-    assert sink == []
-    assert meta.export_read == "unrecorded"
+    assert any("truncated image" in reason or "export" in reason for reason in sink)
 
 
-@pytest.mark.known_gap_canary
-def test_macho_truncated_string_table_reads_empty_unrecorded() -> None:
-    """The Mach-O seed cut before its string table ends parses with no exports
-    and no recorded failure."""
-    seed = _macho_seed()
-    meta, sink = _parse_recorded(
-        parse_macho_metadata, seed[: len(seed) - 40], "m.dylib"
-    )
-    assert all_export_names(build_raw_export_index_from_macho(meta)) == frozenset()
-    assert sink == []
-    assert meta.export_read == "unrecorded"
+@pytest.mark.parametrize("parse", (parse_dwarf_metadata, parse_dwarf_metadata_unified))
+@pytest.mark.parametrize(
+    "corruption",
+    ("abbrev_first_byte", "debug_info_name_lost", "debug_info_unit_length"),
+)
+def test_unreadable_dwarf_is_recorded_not_empty(
+    parse: Callable[[Path], Any], corruption: str
+) -> None:
+    """Debug info that is present but unreadable records a debug-info failure.
 
-
-@pytest.mark.known_gap_canary
-def test_dwarf_corrupt_abbrev_table_reads_empty_without_failure() -> None:
-    """Flipping the first byte of ``.debug_abbrev`` makes both DWARF readers return
-    no structs, enums or base types, with no failure recorded and no exception."""
+    Three independent ways one corrupted field hides the DWARF of a gcc
+    ``-g`` seed: the abbreviation table's first byte, the ``.debug_info``
+    section header's name, and the first unit's length. Each used to
+    read as "no DWARF" (no structs, no enums), which a compare then reported
+    as those types having been added.
+    """
     from elftools.elf.elffile import ELFFile
 
     seed = _so_seed(debug=True)
-    abbrev = ELFFile(io.BytesIO(seed)).get_section_by_name(".debug_abbrev")
-    assert abbrev is not None, "the -g seed has no .debug_abbrev"
-    corrupt = flip_byte(seed, abbrev["sh_offset"], 0xFF)
+    elf = ELFFile(io.BytesIO(seed))
+    if corruption == "abbrev_first_byte":
+        abbrev = elf.get_section_by_name(".debug_abbrev")
+        assert abbrev is not None, "the -g seed has no .debug_abbrev"
+        corrupt = flip_byte(seed, abbrev["sh_offset"], 0xFF)
+    elif corruption == "debug_info_name_lost":
+        index = next(
+            i for i, sec in enumerate(elf.iter_sections()) if sec.name == ".debug_info"
+        )
+        at = elf.header["e_shoff"] + index * elf.header["e_shentsize"]
+        # sh_name -> offset 0 of .shstrtab, the empty name.
+        corrupt = seed[:at] + b"\0\0\0\0" + seed[at + 4 :]
+    else:
+        info = elf.get_section_by_name(".debug_info")
+        assert info is not None
+        at = info["sh_offset"]
+        # The first unit's length claims more bytes than the section holds.
+        corrupt = seed[:at] + b"\xf0\xff\xff\x0f" + seed[at + 4 :]
+    intact, intact_sink = _parse_recorded(parse, seed, "seed.so")
+    assert intact_sink == [] and _dwarf_facts(intact) > 0
+    meta, sink = _parse_recorded(parse, corrupt, "corrupt.so")
+    assert sink, (
+        f"{corruption}: unreadable DWARF read as {_dwarf_facts(meta)} facts, unrecorded"
+    )
+
+
+def test_a_stripped_object_records_no_debug_failure() -> None:
+    """The other half of the rule: no debug sections at all is absence, not a
+    failure (``-g`` off), so the debug-info read records nothing."""
     for parse in (parse_dwarf_metadata, parse_dwarf_metadata_unified):
-        meta, sink = _parse_recorded(parse, corrupt, "corrupt.so")
+        meta, sink = _parse_recorded(parse, _so_seed(debug=False), "plain.so")
         assert sink == []
         assert _dwarf_facts(meta) == 0
 
@@ -724,14 +797,63 @@ def test_clang_ast_object_valued_kind_leaks_typeerror() -> None:
         _clang_facts(tree)
 
 
-@pytest.mark.known_gap_canary
-def test_snapshot_missing_function_mangled_key_leaks_keyerror() -> None:
-    """Dropping one function's ``mangled`` key from a storage-v2 snapshot is not a
-    typed error: load or first declarations access raises KeyError."""
+def _function_key_drops() -> list[str]:
+    return sorted(
+        snapshot_seed_document()["sections"]["declarations"]["payload"]["functions"][0]
+    )
+
+
+@pytest.mark.parametrize("key", ("mangled", "name", "return_type"))
+def test_snapshot_missing_function_key_is_a_snapshot_error(key: str) -> None:
+    """A storage-v2 document with a required function key removed is a typed
+    ``SnapshotError`` at load or first declarations access -- not the
+    ``KeyError`` it used to leak (2026-11-08)."""
+    from abicheck.errors import SnapshotError
+
+    assert key in _function_key_drops()
     doc = snapshot_seed_document()
-    del doc["sections"]["declarations"]["payload"]["functions"][0]["mangled"]
+    del doc["sections"]["declarations"]["payload"]["functions"][0][key]
     with tempfile.TemporaryDirectory(prefix="parser-fuzz-") as d:
-        target = Path(d) / "snap-no-mangled.json"
+        target = Path(d) / f"snap-no-{key}.json"
         target.write_bytes(json.dumps(doc).encode())
-        with pytest.raises(KeyError, match="mangled"):
+        with pytest.raises(SnapshotError, match="malformed snapshot document"):
             load_snapshot(target).declarations
+
+
+@pytest.mark.parametrize("value", (None, "x", 7, ["list"], True))
+def test_snapshot_function_entry_of_the_wrong_type_is_a_snapshot_error(
+    value: Any,
+) -> None:
+    """A function entry that is not an object raises ``SnapshotError``."""
+    from abicheck.errors import SnapshotError
+
+    doc = snapshot_seed_document()
+    doc["sections"]["declarations"]["payload"]["functions"][0] = value
+    with tempfile.TemporaryDirectory(prefix="parser-fuzz-") as d:
+        target = Path(d) / "snap-bad-entry.json"
+        target.write_bytes(json.dumps(doc).encode())
+        with pytest.raises(SnapshotError):
+            load_snapshot(target).declarations
+
+
+@pytest.mark.known_gap_canary
+def test_dwarf_abbrev_entry_that_still_parses_reads_empty_unrecorded() -> None:
+    """Some single-byte change inside ``.debug_abbrev`` leaves every abbreviation
+    decodable but ends the first unit's DIE stream early: the unified reader
+    returns no structs, enums or base types and records no failure.
+
+    The search stops at the first such byte; on the gcc seed several exist
+    (e.g. zeroing byte 24). The gap closes when no byte produces this."""
+    from elftools.elf.elffile import ELFFile
+
+    seed = _so_seed(debug=True)
+    abbrev = ELFFile(io.BytesIO(seed)).get_section_by_name(".debug_abbrev")
+    assert abbrev is not None
+    found = None
+    for i in range(abbrev["sh_size"]):
+        corrupt = flip_byte(seed, abbrev["sh_offset"] + i, 0)
+        meta, sink = _parse_recorded(parse_dwarf_metadata_unified, corrupt, "c.so")
+        if not sink and _dwarf_facts(meta) == 0:
+            found = i
+            break
+    assert found is not None

@@ -59,6 +59,7 @@ FAMILIES: dict[str, Family] = {
             ),
             harness_tests=(
                 "tests/test_family_f1_evidence_ablation.py",
+                "tests/test_corrupt_input_matrix.py",
                 "tests/test_export_loss_binding_unit.py",
                 "tests/test_dwarf_unknown_triviality.py",
                 "tests/test_clang_type_evidence.py",

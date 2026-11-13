@@ -34,7 +34,6 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from elftools.common.exceptions import ELFError
 from elftools.elf.elffile import ELFFile
 
 from .dwarf_snapshot_datasources import show_data_sources as show_data_sources
@@ -83,6 +82,7 @@ from .extract.dwarf_type_names import strip_type_decorators as _strip_type_decor
 from .extract.dwarf_variable_alignment import dwarf_variable_layout_facts
 from .extract.dwarf_variable_identity import variable_definition_view
 from .extract.dwarf_vptr_resolution import finalize_vptr_offsets
+from .extract.parse_failures import note_debug_info_read_failure
 from .extract.surface_fact_producers import debug_info_surface_facts
 from .model import (
     AccessLevel,
@@ -373,12 +373,9 @@ class _DwarfSnapshotBuilder:
                     return
                 self._walk_dwarf(open_indexed_dwarf_info(elf))
 
-        except (ELFError, OSError, ValueError) as exc:
-            log.warning(
-                "dwarf_snapshot: failed to parse %s: %s",
-                self._elf_path,
-                exc,
-            )
+        except Exception as exc:  # noqa: BLE001 - recorded, so never an empty surface
+            log.warning("dwarf_snapshot: failed to parse %s: %s", self._elf_path, exc)
+            note_debug_info_read_failure(f"DWARF unreadable: {exc!r}")
 
     def _walk_dwarf(self, dwarf: Any) -> None:
         """Walk every CU of *dwarf*, then filter to exported reachability.
@@ -400,9 +397,10 @@ class _DwarfSnapshotBuilder:
                 self._process_cu(CU)
             except Exception as exc:  # noqa: BLE001
                 log.warning(
-                    "dwarf_snapshot: skipping CU in %s: %s",
-                    self._elf_path,
-                    exc,
+                    "dwarf_snapshot: skipping CU in %s: %s", self._elf_path, exc
+                )
+                note_debug_info_read_failure(
+                    f"CU at {CU.cu_offset} unreadable: {exc!r}"
                 )
             if low_memory:
                 free_cu_die_cache(CU)

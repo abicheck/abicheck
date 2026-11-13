@@ -13,6 +13,8 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .parse_failures import debug_info_read_required
+
 if TYPE_CHECKING:
     from ..dwarf_advanced import AdvancedDwarfMetadata
     from ..dwarf_metadata import DwarfMetadata
@@ -107,7 +109,8 @@ def _resolve_debug_metadata(
         from ..dwarf_unified import parse_dwarf
 
         _resolved("dwarf")
-        return parse_dwarf(dwarf_path, _session_out=_session_out)
+        with debug_info_read_required(dwarf_path):
+            return parse_dwarf(dwarf_path, _session_out=_session_out)
 
     if debug_format is not None:
         raise ValueError(
@@ -131,7 +134,10 @@ def _resolve_debug_metadata(
                 return btf.to_dwarf_metadata(), AdvancedDwarfMetadata()
 
     # DWARF > BTF > CTF for userspace (or kernel fallback)
-    dwarf_meta, dwarf_adv = parse_dwarf(dwarf_path, _session_out=_session_out)
+    # Present-but-unreadable DWARF is an error, not "no debug info": falling
+    # through to BTF/CTF or symbols-only would read the lost types as absent.
+    with debug_info_read_required(dwarf_path):
+        dwarf_meta, dwarf_adv = parse_dwarf(dwarf_path, _session_out=_session_out)
     if dwarf_meta.has_dwarf:
         _resolved("dwarf")
         return dwarf_meta, dwarf_adv

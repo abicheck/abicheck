@@ -79,8 +79,8 @@ Next, unranked (the `--no-baseline` one-sided-detector gap, the target-platform 
 
 Found by the parser fuzz oracle in `tests/test_parser_fuzz_oracle.py`
 (`tests/_parser_fuzz_oracle.py` holds the oracle: a corrupted input must raise
-an allowed type, record an explicit `partial`/`failed` export read, or read as
-non-empty; a truncated input must lose no fact without such a record; and no
+an allowed type, record an explicit `partial`/`failed` export read (or, for a
+debug-info reader, a debug-info read failure), or read as non-empty; a truncated input must lose no fact without such a record; and no
 parse may raise another type or run past its time budget). Each entry below is
 one way the oracle fails. How strict the tests are: a fuzz test for a parser
 with an entry here is marked xfail only when *every* violation it finds matches
@@ -90,25 +90,17 @@ a fixed Hypothesis seed and may or may not reach a gap; the `slow` lane
 reaches each one. The canary named under each entry asserts the gapped answer
 deterministically and fails when the gap closes.
 
-#### A corrupt PE export directory reads as fewer or zero exports and records no failure (2026-11-08)
-**Status (2026-11-08): OPEN.** `parse_pe_metadata` (`abicheck/pe_metadata.py`) returns normally on a damaged export directory. No `note_export_read_failure` is called on that path, so the ADR-079 read state (`platform_export_read`) is `complete` although exports were lost. Reproduction: the committed `tests/fixtures/containers/sources/corpus_pe.dll` (3 exports) cut to 1405 bytes parses with zero exports; cuts between about 1405 and 1683 bytes keep one or two of the three. A fuzz run finds more cases from byte flips inside the export directory. Owner: `abicheck/pe_metadata.py`, with the export-read recording contract in `abicheck/extract/parse_failures.py`.
-<!-- canary: tests/test_parser_fuzz_oracle.py::test_pe_truncated_export_directory_reads_empty_unrecorded -->
+The PE, Mach-O, DWARF and storage-v2 entries were closed on 2026-11-13 (see
+the archive); the CLI-level matrix over the same inputs is
+`tests/test_corrupt_input_matrix.py`.
 
-#### A Mach-O cut inside its string table or export trie reads as fewer or zero exports and records no failure (2026-11-08)
-**Status (2026-11-08): OPEN.** `parse_macho_metadata` (`abicheck/macho_metadata.py`) reads a dylib whose `LC_SYMTAB` string table or `LC_DYLD_EXPORTS_TRIE` data runs past the end of the file as having fewer exports (none, for most cuts) with nothing recorded, so the read state is `complete`. Reproduction: the three-export synthetic dylib from `tests/_macho_synthetic.py` (`build_macho_seed`, 236 bytes) cut anywhere from 192 to 232 bytes. Load-command truncations are recorded correctly. Owner: `abicheck/macho_metadata.py` (`_parse_macho_symbols`, `_parse_export_trie`).
-<!-- canary: tests/test_parser_fuzz_oracle.py::test_macho_truncated_string_table_reads_empty_unrecorded -->
-
-#### `parse_dwarf_metadata` reads corrupt DWARF as empty, and lets a `MemoryError` escape (2026-11-08)
-**Status (2026-11-08): OPEN.** Both `parse_dwarf_metadata` readers (`abicheck/dwarf_metadata.py` and the production `abicheck/dwarf_unified.py`) catch only `ELFError`, `OSError` and `ValueError`, swallow per-CU errors, and record nothing. A single corrupted byte in a gcc `-g` shared-object seed (about 3 % of flips in one measured run; any of the first bytes of `.debug_abbrev`) returns no structs, enums or base types with nothing recorded, so the corrupt debug info reads as "no DWARF". Another flip (about 0.3 %) makes pyelftools allocate a decompressed section of arbitrary size, and the `MemoryError` escapes a function whose docstring says "Never raises". The DWARF fuzz tests are `slow` only; the canary is the fast-lane signal. Owner: `abicheck/dwarf_metadata.py`, `abicheck/dwarf_unified.py`, `abicheck/extract/dwarf_subtree_index.py`.
-<!-- canary: tests/test_parser_fuzz_oracle.py::test_dwarf_corrupt_abbrev_table_reads_empty_without_failure -->
+#### A corrupted `.debug_abbrev` entry that still parses reads as no types (2026-11-13)
+**Status (2026-11-13): NARROWED.** The residual of the closed corrupt-DWARF gap (archive, 2026-11-13). Every DWARF failure that raises, a unit longer than `.debug_info`, and a `.debug_info` whose section header name was lost are now recorded and refuse the dump. One byte changed inside `.debug_abbrev` can still leave every abbreviation decodable while the DIE stream of the first unit ends early: on the gcc `-g` seed, zeroing any of seven abbreviation bytes (for example byte 24) makes both readers return no structs, enums or base types with nothing recorded, so a compare reads the lost types as added. Detecting it needs a structural check that a unit's top DIE subtree reaches the unit's end. That is a second full DIE walk per unit, not yet measured against the performance gates. Owner: `abicheck/dwarf_unified.py`, `abicheck/dwarf_metadata.py`, `abicheck/extract/debug_section_presence.py`.
+<!-- canary: tests/test_parser_fuzz_oracle.py::test_dwarf_abbrev_entry_that_still_parses_reads_empty_unrecorded -->
 
 #### A clang AST node of the wrong JSON type leaks `TypeError`/`AttributeError` instead of `MalformedClangAstError` (2026-11-08)
 **Status (2026-11-08): OPEN.** `_ClangAstParser` (`abicheck/dumper_clang.py`) refuses a wrong-typed `inner` with `MalformedClangAstError`, but a wrong-typed scalar field does not get the same treatment: an object- or list-valued `kind` raises `TypeError: unhashable type`, a non-string `mangledName` or record `name` raises `AttributeError` (`.startswith`/`.strip`), and a non-object `type` raises `TypeError`. A tree with no `inner`, or `inner: null`, is a valid empty translation unit (`ast_inner` documents `null` as absent) and is not part of this gap. Owner: `abicheck/dumper_clang.py`, `abicheck/extract/headers/clang/ast_inner.py` (the shape validation the readers share).
 <!-- canary: tests/test_parser_fuzz_oracle.py::test_clang_ast_object_valued_kind_leaks_typeerror -->
-
-#### A malformed storage-v2 snapshot leaks `KeyError`/`TypeError`/`AttributeError` instead of a typed error (2026-11-08)
-**Status (2026-11-08): OPEN.** A storage-v2 snapshot document with one function's `mangled` key removed (`sections/declarations/payload/functions[0]`) is accepted by `load_snapshot`, and the `KeyError` surfaces only on the first `declarations` access (`abicheck/model/lazy_declarations.py` -> `abicheck/storage/snapshot_decode_declarations.py`). Structural mutations (dropped keys, wrong node types) leak the same classes: `KeyError` for `return_type`, `status` and `name`, and `TypeError` / `AttributeError` for wrong node types, raised from `load_snapshot` or from the lazy decode, which the harness does not distinguish. The documented contract is `SnapshotError` / `ValidationError`. Owner: `storage/snapshot_decode_declarations.py`, `storage/snapshot_codec.py`.
-<!-- canary: tests/test_parser_fuzz_oracle.py::test_snapshot_missing_function_mangled_key_leaks_keyerror -->
 
 #### Parsers not yet fuzzed (2026-11-08)
 **Status (2026-11-08): OPEN.** `parse_btf_metadata`, `parse_ctf_metadata` and `parse_sycl_metadata` are discovered by `tests/test_parser_fuzz_enrollment.py` but listed in `NOT_ENROLLED` (`tests/_parser_fuzz_oracle.py`): each needs a seed the default lane cannot build (pahole/BPF, gcc `-gctf` with libctf, a SYCL plugin). Their corrupt-input behaviour is unmeasured. Owner: `tests/_parser_fuzz_oracle.py`.

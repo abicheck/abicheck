@@ -82,6 +82,7 @@ from .fact_codec import (
     evidenced_producers,
 )
 from .generation_migrations import migrate_and_describe
+from .malformed_document import malformed_document_errors
 from .section_states import apply_section_states
 from .sectioned_document import from_sectioned_document, is_sectioned_document
 from .semantic_ir_codec import decode_semantic_ir
@@ -121,6 +122,15 @@ from .wire_extensions import WIRE_EXTENSIONS_KEY, attach as attach_wire_extensio
 
 def decode_snapshot(
     d: dict[str, Any], *, max_known_schema_version: int = SCHEMA_VERSION
+) -> tuple[AbiSnapshot, int]:
+    """Decode document *d*; a malformed shape raises ``SnapshotError``
+    (``storage.malformed_document``), never a bare ``KeyError``/``TypeError``."""
+    with malformed_document_errors():
+        return _decode_snapshot(d, max_known_schema_version=max_known_schema_version)
+
+
+def _decode_snapshot(
+    d: dict[str, Any], *, max_known_schema_version: int
 ) -> tuple[AbiSnapshot, int]:
     # `max_known_schema_version` defaults to this module's own SCHEMA_VERSION
     # but is accepted as an explicit parameter so `abicheck.serialization`'s

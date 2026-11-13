@@ -646,6 +646,14 @@ def _resolve_input_impl(
             raise SnapshotError(
                 f"Failed to load JSON snapshot '{path}': {exc}"
             ) from exc
+        except SnapshotError as exc:
+            # The storage boundary's own malformed-document error gets the
+            # same path context; a subclass (schema, profile) keeps its type.
+            if type(exc) is not SnapshotError:
+                raise
+            raise SnapshotError(
+                f"Failed to load JSON snapshot '{path}': {exc}"
+            ) from exc
 
     # GNU ld linker script (e.g. the ``libfoo.so`` dev symlink is the text
     # ``INPUT(libfoo.so.1)``): follow it to the real shared library.

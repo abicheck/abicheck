@@ -35,6 +35,32 @@ from abicheck.pe_metadata import (
 # ── PeMetadata dataclass ────────────────────────────────────────────────
 
 
+def _structurally_whole(mock_pe: MagicMock, *, named_exports: int = 0) -> None:
+    """Give a mocked ``pefile.PE`` the header fields of an image the file
+    holds entirely, so ``_note_truncated_image`` records nothing."""
+    from types import SimpleNamespace
+
+    mock_pe.__data__ = bytes(0x1000)
+    mock_pe.DOS_HEADER.e_lfanew = 0x80
+    mock_pe.FILE_HEADER.SizeOfOptionalHeader = 0xF0
+    mock_pe.FILE_HEADER.NumberOfSections = 0
+    mock_pe.sections = []
+    mock_pe.OPTIONAL_HEADER.Magic = 0x20B
+    va = 0x2000 if named_exports else 0
+    mock_pe.OPTIONAL_HEADER.DATA_DIRECTORY = [
+        SimpleNamespace(VirtualAddress=va, Size=0x40)
+    ]
+    mock_pe.get_offset_from_rva = MagicMock(return_value=0x400)
+    if named_exports:
+        mock_pe.DIRECTORY_ENTRY_EXPORT.struct = SimpleNamespace(
+            AddressOfFunctions=0x2040,
+            NumberOfFunctions=named_exports,
+            AddressOfNames=0x2060,
+            NumberOfNames=named_exports,
+            AddressOfNameOrdinals=0x2080,
+        )
+
+
 class TestPeMetadataDataclass:
     def test_default_construction(self):
         meta = PeMetadata()
@@ -400,6 +426,7 @@ class TestParsePeMetadata:
         exp2.ordinal = 2
         exp2.forwarder = b"OTHER.init"
         mock_pe.DIRECTORY_ENTRY_EXPORT.symbols = [exp1, exp2]
+        _structurally_whole(mock_pe, named_exports=2)
 
         # Imports
         imp_entry = MagicMock()
@@ -457,6 +484,7 @@ class TestParsePeMetadata:
         mock_pe.OPTIONAL_HEADER.DllCharacteristics = 0
         # No exports/imports
         del mock_pe.DIRECTORY_ENTRY_EXPORT
+        _structurally_whole(mock_pe)
         del mock_pe.DIRECTORY_ENTRY_IMPORT
 
         # Version resource
@@ -518,6 +546,7 @@ class TestParsePeMetadata:
         mock_pe.FILE_HEADER.Characteristics = 0x2022
         mock_pe.OPTIONAL_HEADER = SimpleNamespace(DllCharacteristics=0x0100)
         del mock_pe.DIRECTORY_ENTRY_EXPORT
+        _structurally_whole(mock_pe)
         del mock_pe.DIRECTORY_ENTRY_IMPORT
         del mock_pe.VS_FIXEDFILEINFO
 

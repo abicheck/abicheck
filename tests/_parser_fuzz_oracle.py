@@ -46,7 +46,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from abicheck.extract.parse_failures import recording_export_read_failures
+from abicheck.extract.parse_failures import (
+    recording_debug_info_read_failures,
+    recording_export_read_failures,
+)
 from abicheck.model.export_read import ExportReadState, export_read_state
 
 TIME_BUDGET_S = 20.0
@@ -94,6 +97,8 @@ def enforce(
     allowed: tuple[type[BaseException], ...] = (),
     export_index: Callable[[Any], Any] | None = None,
     strict_loss: bool = False,
+    debug_info: bool = False,
+    absent_ok: bool = False,
     budget_s: float = TIME_BUDGET_S,
 ) -> Outcome:
     """Run *run* once and enforce the oracle. Raises :class:`OracleViolation`.
@@ -102,8 +107,15 @@ def enforce(
     ``export_index`` (export-table parsers only) maps the result to its
     ``RawExportIndex``, which makes the ADR-079 read state the judge of loss.
     ``strict_loss`` turns on check 3 (the mutation was a truncation).
+    ``debug_info`` (debug-info readers only) accepts a recorded
+    ``note_debug_info_read_failure`` as the explicit failure record.
+    ``absent_ok`` excuses an empty read the input itself makes absent (see
+    :func:`section_names_unusable`).
     """
-    with recording_export_read_failures() as sink:
+    with (
+        recording_export_read_failures() as sink,
+        recording_debug_info_read_failures() as debug_sink,
+    ):
         try:
             # The fact count runs inside the classified block: a lazily decoded
             # result can fail on first access, and that failure is the parser's.
@@ -130,6 +142,14 @@ def enforce(
             return Outcome(f"recorded:{state.value}", n)
     elif sink:
         raise OracleViolation(f"{name}: failure recorded by a parser with no channel")
+    if debug_sink:
+        if not debug_info:
+            raise OracleViolation(
+                f"{name}: debug-info failure recorded by a non-debug-info parser"
+            )
+        return Outcome("recorded:failed", n)
+    if absent_ok and n == 0:
+        return Outcome("absent", 0)
     if seed_facts > 0 and n == 0:
         raise OracleViolation(
             f"{name}: silent empty read (seed had {seed_facts} facts, result has 0, "
@@ -500,3 +520,32 @@ NOT_ENROLLED: dict[str, str] = {
 def iter_enrolled_entries() -> Iterator[str]:
     for enrollment in ENROLLED:
         yield enrollment.entry
+
+
+def section_names_unusable(data: bytes) -> bool:
+    """Whether ELF *data*'s section headers or section-name table are unusable.
+
+    Then no section can be located by name, so the debug sections are absent
+    with the rest: the section-table loss that
+    ``tests/test_export_table_unreadable_matrix.py`` pins as recovered from
+    the loader view without debug info (``LOSES_DEBUG_INFO``). A DWARF reader
+    reading such an input as having no DWARF is that contract, not a silent
+    empty read.
+    """
+    import io as _io
+
+    from elftools.elf.elffile import ELFFile
+
+    try:
+        elf = ELFFile(_io.BytesIO(data))
+        shnum = elf.num_sections()
+        if not shnum:
+            return True
+        index = elf.header["e_shstrndx"]
+        if index == 0xFFFF:  # SHN_XINDEX: the index lives in section 0's sh_link
+            index = elf.get_section(0).header["sh_link"]
+        if not index or index >= shnum:
+            return True
+        return bool(elf.get_section(index).header["sh_type"] != "SHT_STRTAB")
+    except Exception:  # noqa: BLE001 - unreadable headers are unusable headers
+        return True
