@@ -575,6 +575,17 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "bracket drive its depth negative (balanced input unchanged); "
         "no stored type spelling changes, nothing rewritten"
     ),
+    60: GenerationSpellingChange(
+        "a header dump whose optional pass failed (a castxml clang join for "
+        "vector/complex/_BitInt spellings, calling conventions or const "
+        "variable templates; the clang explicit-instantiation text pass; the "
+        "clang record-layout pass), or that left a declaration type spelled "
+        "`Unimplemented`, now records the gap under "
+        "dump_provenance.extraction_limitations; a pass that ran records "
+        "exactly what it did before; no stored type spelling changes and "
+        "nothing is rewritten (an older gapped snapshot carries no record of "
+        "which pass failed, so there is nothing to migrate)"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

@@ -12,4 +12,4 @@
   names the gap, live and from a stored snapshot. A multi-TU manifest dump
   keeps every unit's limitations. A dump whose optional pass failed is no
   longer stored in the snapshot cache, so the next run retries the pass
-  instead of reusing the gapped snapshot.
+  instead of reusing the gapped snapshot. Extractor generation 60.
