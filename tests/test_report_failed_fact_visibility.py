@@ -35,12 +35,12 @@ import itertools
 import json
 import re
 import tempfile
-import xml.etree.ElementTree as ET
 from collections.abc import Callable
 from functools import cache
 from pathlib import Path
 
 import pytest
+from defusedxml.ElementTree import fromstring as xml_fromstring
 
 from abicheck.checker import compare
 from abicheck.checker_types import DiffResult
@@ -302,7 +302,7 @@ def test_sarif_carries_every_fact_machine_readably(facts: frozenset[str]) -> Non
 
 @pytest.mark.parametrize("facts", _SUBSETS, ids=_ids)
 def test_junit_reports_every_fact_as_skipped(facts: frozenset[str]) -> None:
-    root = ET.fromstring(_rendered(facts)["junit"])
+    root = xml_fromstring(_rendered(facts)["junit"])
     skipped = {
         case.get("name")
         for suite in root.iter("testsuite")
