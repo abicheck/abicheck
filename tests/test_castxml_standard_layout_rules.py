@@ -274,3 +274,72 @@ def test_a_base_without_a_known_access_leaves_the_map_unknown() -> None:
     assert rec.base_access_fact.status is FactStatus.NOT_COLLECTED
     # The traits ride along: no virtual base, no data -> standard-layout.
     assert rec.is_standard_layout is True
+
+
+EDGE_CASES: list[tuple[str, str, bool | None]] = [
+    # A base reached through a typedef is the same base.
+    (
+        "base-through-typedef",
+        _struct("_B", "_k")
+        + _field("_k")
+        + '<Typedef id="_tb" name="TB" type="_B"/>'
+        + _struct("_S", "_d", '<Base type="_tb" access="public" virtual="0"/>')
+        + _field("_d"),
+        False,
+    ),
+    # A member of a type castxml does not model (here an unknown tag) is unknown.
+    (
+        "member-unknown-type-tag",
+        _struct("_S", "_a")
+        + '<Unimplemented id="_u" kind="Weird"/>'
+        + _field("_a", "_u"),
+        None,
+    ),
+    # An incomplete base leaves the data-member rule unknown.
+    (
+        "incomplete-base",
+        _struct("_B", extra='incomplete="1"')
+        + _struct("_S", "_d", '<Base type="_B" access="public" virtual="0"/>')
+        + _field("_d"),
+        None,
+    ),
+    # The first member's own type is incomplete: M(D) is unknown.
+    (
+        "first-member-incomplete",
+        _struct("_E")
+        + _struct("_I", extra='incomplete="1"')
+        + _struct("_S", "_i", '<Base type="_E" access="public" virtual="0"/>')
+        + '<PointerType id="_p" type="_I"/>'
+        + _field("_i", "_I"),
+        None,
+    ),
+    # The first member's type is unresolved: M(D) is unknown.
+    (
+        "first-member-unresolved",
+        _struct("_E")
+        + _struct("_S", "_i", '<Base type="_E" access="public" virtual="0"/>')
+        + _field("_i", "_nope"),
+        None,
+    ),
+    # The first member's first member is unresolved: M(D) is unknown.
+    (
+        "nested-first-member-unresolved",
+        _struct("_E")
+        + _struct("_IN", "_q")
+        + _field("_q", "_nope")
+        + _struct("_S", "_i", '<Base type="_E" access="public" virtual="0"/>')
+        + _field("_i", "_IN"),
+        None,
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("body", "want"),
+    [(b, w) for _, b, w in EDGE_CASES],
+    ids=[c[0] for c in EDGE_CASES],
+)
+def test_standard_layout_unknown_and_wrapper_edges(
+    body: str, want: bool | None
+) -> None:
+    assert _trait(body) is want

@@ -167,3 +167,94 @@ def test_an_unreadable_header_is_unknown(tmp_path: Path) -> None:
     ctx = CastxmlParserContext(fromstring(xml), set(), set())
     ctx.build_id_map()
     assert trivially_copyable(ctx, ctx.id_map["_S"]) is None
+
+
+def _plain(members: str, ids: str, extra_types: str = "") -> bool | None:
+    xml = (
+        f"<CastXML>{_TYPES}{extra_types}"
+        f'<Struct id="_S" name="S" members="_a {ids}"/>'
+        f"{members}</CastXML>"
+    )
+    ctx = CastxmlParserContext(fromstring(xml), set(), set())
+    ctx.build_id_map()
+    return trivially_copyable(ctx, ctx.id_map["_S"])
+
+
+@pytest.mark.parametrize(
+    ("members", "ids", "extra", "want"),
+    [
+        # A member through a typedef keeps its scalar trait.
+        (
+            '<Field id="_a" name="a" type="_td" access="public"/>' + _IMPLICIT_COPY,
+            "_ic",
+            '<Typedef id="_td" name="T" type="_int"/>',
+            True,
+        ),
+        # A member whose type castxml does not resolve is unknown.
+        (
+            '<Field id="_a" name="a" type="_nope" access="public"/>' + _IMPLICIT_COPY,
+            "_ic",
+            "",
+            None,
+        ),
+        # A reference member is not a scalar the trait can prove.
+        (
+            '<Field id="_a" name="a" type="_ref" access="public"/>' + _IMPLICIT_COPY,
+            "_ic",
+            "",
+            None,
+        ),
+        # A user-declared special member without a source location is unknown.
+        (
+            '<Field id="_a" name="a" type="_int" access="public"/>'
+            '<Constructor id="_c" name="S"><Argument type="_ref"/></Constructor>',
+            "_c",
+            "",
+            None,
+        ),
+        # A non-assignment operator is not a special member.
+        (
+            '<Field id="_a" name="a" type="_int" access="public"/>'
+            + _IMPLICIT_COPY
+            + '<OperatorMethod id="_o" name="+"><Argument type="_ref"/></OperatorMethod>',
+            "_ic _o",
+            "",
+            True,
+        ),
+        # An unrelated record elsewhere in the document changes nothing.
+        (
+            '<Field id="_a" name="a" type="_int" access="public"/>' + _IMPLICIT_COPY,
+            "_ic",
+            '<Struct id="_VB" name="VB" members=""/>',
+            True,
+        ),
+    ],
+    ids=[
+        "typedef-member",
+        "unresolved-member",
+        "reference-member",
+        "no-location",
+        "operator-plus",
+        "plain-with-unrelated",
+    ],
+)
+def test_trivially_copyable_member_edges(
+    members: str, ids: str, extra: str, want
+) -> None:
+    assert _plain(members, ids, extra) is want
+
+
+def test_virtual_base_and_incomplete_record() -> None:
+    xml = (
+        f"<CastXML>{_TYPES}"
+        '<Struct id="_VB" name="VB" members=""/>'
+        '<Struct id="_S" name="S" members="_ic"><Base type="_VB" access="public" virtual="1"/></Struct>'
+        f"{_IMPLICIT_COPY}"
+        '<Struct id="_X" name="X" incomplete="1"/></CastXML>'
+    )
+    ctx = CastxmlParserContext(fromstring(xml), set(), set())
+    ctx.build_id_map()
+    assert trivially_copyable(ctx, ctx.id_map["_S"]) is False
+    assert trivially_copyable(ctx, ctx.id_map["_X"]) is None
+    # A second query reads the cached answer.
+    assert trivially_copyable(ctx, ctx.id_map["_S"]) is False
