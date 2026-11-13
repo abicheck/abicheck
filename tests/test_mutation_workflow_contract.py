@@ -462,9 +462,7 @@ def test_no_mutation_baseline_is_committed_yet() -> None:
     into a check that the committed baseline partitions only_mutate."""
     assert not (REPO_ROOT / "mutation-baseline.json").exists()
     record_step = next(
-        s
-        for s in _workflow()["jobs"]["resolve"]["steps"]
-        if s.get("id") == "baseline"
+        s for s in _workflow()["jobs"]["resolve"]["steps"] if s.get("id") == "baseline"
     )
     # The bootstrap the gap entry relies on: a schedule with no baseline records.
     assert (
