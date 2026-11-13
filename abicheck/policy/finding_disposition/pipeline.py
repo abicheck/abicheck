@@ -252,6 +252,13 @@ class DispositionPipeline:
 
     def __init__(self, steps: list[PipelineStep]) -> None:
         self.steps = list(steps)
+        # Checked when the pipeline is built, not discovered mid-run: a second
+        # aliasing step would silently rebind ``ctx.kept`` (see ``run``).
+        aliasing = [
+            s.name for s in self.steps if getattr(s, "establishes_kept_alias", False)
+        ]
+        if len(aliasing) > 1:
+            raise ValueError(f"more than one step establishes ctx.kept: {aliasing}")
 
     def run(
         self,

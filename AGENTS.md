@@ -1,5 +1,7 @@
 # AGENTS.md — Canonical instructions for coding agents working on abicheck
 
+You own the codebase.
+
 This is the **canonical, vendor-neutral** repository contract. Tool-specific
 surfaces are thin adapters pointing here: `CLAUDE.md` (imports this file via
 `@AGENTS.md`) and `.github/copilot-instructions.md`. Edit repository-wide

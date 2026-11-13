@@ -332,4 +332,10 @@ __all__ = ["RELEASE_SCHEMA_VERSION"]
 #:       ``report.delta_baseline``. Same shape as the compare report's schema
 #:       7.3 block (``report/delta_baseline.py``); absent when the run was
 #:       given none. Informational and additive.
-RELEASE_SCHEMA_VERSION = "3.1"
+#: - ``3.2`` adds ``comparison_scope.failed_member_exit_contribution`` (ADR-065 D8,
+#:       the same ``0``/``4`` the ``comparison_scope`` block's siblings carry),
+#:       copied off the scope decision that folds into the exit. Additive and
+#:       optional: present on a release's ``comparison_scope`` block, which the
+#:       release document embeds unchanged; a pre-3.2 consumer reads nothing
+#:       differently.
+RELEASE_SCHEMA_VERSION = "3.2"
