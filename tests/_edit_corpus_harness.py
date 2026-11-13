@@ -1,7 +1,7 @@
 """Build old/new libraries from a seed, an operator and a ``Config``; run abicheck.
 
 Only the public entry points are used: ``abicheck.dumper.dump`` for the
-snapshots and ``abicheck.checker.compare`` for the verdict. The evidence axis
+snapshots and ``abicheck.workflows.compare_policy.compare_snapshots`` (the CLI's compare verb) for the verdict. The evidence axis
 decides what the dump is given: ``binary`` builds without ``-g`` and passes no
 header, ``dwarf`` builds with ``-g`` and passes no header, ``headers`` adds the
 public header (dumped by ``config.header_backend``: castxml, clang or the
@@ -20,8 +20,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from abicheck.checker import compare
 from abicheck.dumper import dump
+from abicheck.workflows.compare_policy import compare_snapshots
 from tests._edit_corpus_config import (
     Config,
     Flags,
@@ -351,7 +351,10 @@ def abicheck_answer(old: Built, new: Built) -> tuple[str, frozenset[str]]:
     from abicheck.errors import AbicheckError
 
     try:
-        result = compare(old.snapshot, new.snapshot)
+        # The Tier-2 snapshot verb the CLI's ``compare`` reaches: pattern
+        # verdicts, surface metrics, build-context reconciliation and each
+        # side's resolved public surface, as users get them (ADR-068 D4).
+        result = compare_snapshots(old.snapshot, new.snapshot)
     except AbicheckError as exc:
         return REFUSED, frozenset({type(exc).__name__})
     return result.verdict.name, frozenset(c.kind.name for c in result.changes)

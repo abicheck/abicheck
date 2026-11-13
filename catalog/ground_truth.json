@@ -3670,7 +3670,6 @@
    "frontend_kind_differences": [
     {
      "kinds": [
-      "overload_set_rerouted",
       "public_surface_grew"
      ],
      "only_in": "castxml",

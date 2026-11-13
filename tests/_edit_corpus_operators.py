@@ -28,6 +28,7 @@ from tests._edit_corpus_operators_cxx import CXX_OPERATORS
 from tests._edit_corpus_operators_elf import ELF_OPERATORS
 from tests._edit_corpus_operators_platform import PLATFORM_OPERATORS
 from tests._edit_corpus_operators_symbols import SYMBOL_OPERATORS
+from tests._edit_corpus_operators_types import TYPE_OPERATORS
 from tests._edit_corpus_opkit import (
     _ALIGN,
     _ENUM_SIZE,
@@ -954,6 +955,7 @@ OPERATORS: tuple[EditOp, ...] = (
     *PLATFORM_OPERATORS,
     *CXX_OPERATORS,
     *SYMBOL_OPERATORS,
+    *TYPE_OPERATORS,
 )
 
 OP_BY_NAME: dict[str, EditOp] = {op.name: op for op in OPERATORS}
