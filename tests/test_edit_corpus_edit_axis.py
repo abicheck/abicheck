@@ -71,6 +71,7 @@ EXPECTED_STRUCT = _MEMBER | {
     "record_opaque",
     "record_removed",
     "record_added",
+    "record_triviality_change",
     "member_rename",
     "member_cv_change",
 }

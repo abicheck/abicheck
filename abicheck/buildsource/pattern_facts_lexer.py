@@ -112,7 +112,7 @@ def _blank_comments_and_strings(text: str, blank_strings: bool = True) -> str:
                 i = j
                 continue
             i, state = _blank_scan_block_comment(text, i, out)
-        else:  # string | char
+        elif state == "string" or state == "char":
             m = (_STRING_STOP_RE if state == "string" else _CHAR_STOP_RE).search(
                 text, i
             )
@@ -123,6 +123,10 @@ def _blank_comments_and_strings(text: str, blank_strings: bool = True) -> str:
                 i = j
                 continue
             i, state = _blank_scan_literal(text, i, out, state, blank_strings)
+        else:
+            # A step returning a state this loop does not know used to fall
+            # into the literal branch and be scanned as a char literal.
+            raise AssertionError(f"pattern-facts lexer: unknown state {state!r}")
     return "".join(out)
 
 

@@ -27,6 +27,7 @@ import struct
 
 from abicheck.checker import ChangeKind, Verdict, compare
 from abicheck.dwarf_advanced import AdvancedDwarfMetadata
+from abicheck.extract.pdb_codeview_types import CvOneMethod, CvStruct
 from abicheck.model import AbiSnapshot
 from abicheck.pdb_metadata import _extract_method_calling_conventions
 from abicheck.pdb_parser import (
@@ -34,8 +35,6 @@ from abicheck.pdb_parser import (
     LF_MFUNCTION,
     LF_ONEMETHOD,
     LF_PROCEDURE,
-    CvOneMethod,
-    CvStruct,
     TpiRecord,
     TpiStream,
     TypeDatabase,

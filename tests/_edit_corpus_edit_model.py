@@ -121,6 +121,12 @@ _STRUCT_OTHER: tuple[tuple[str, str], ...] = (
     ("record_opaque", "the record's definition is withdrawn (made opaque)"),
     ("record_removed", "the record is removed from the interface"),
     ("record_added", "a new record is added to the interface"),
+    (
+        "record_triviality_change",
+        "the record becomes non-trivial for calls, or trivial again (a "
+        "user-provided destructor or copy constructor), which changes how it is "
+        "passed by value without changing its layout",
+    ),
     ("member_rename", "a member is renamed, layout unchanged"),
     ("member_cv_change", "a member gains or loses const/volatile"),
 )

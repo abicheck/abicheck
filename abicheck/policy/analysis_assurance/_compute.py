@@ -45,7 +45,8 @@ from ._fact_set import _fact_set_comparability
 from ._graph_completeness import _graph_completeness
 from ._layout import layout_unverified_detectors as _layout_unverified_detectors
 from ._manifest_layers import _manifest_layer_incompleteness
-from ._result import AnalysisAssurance, AssuranceStatus
+from ._result import AnalysisAssurance
+from ._status_ladder import overall_status
 from ._target_accounting import _target_accounting
 from ._translation_units import _translation_units
 from ._unobserved import collect_unobserved
@@ -247,33 +248,28 @@ def compute_analysis_assurance(
         and result.contract_context is None
         and result.evidence_tier == EvidenceTier.ELF_ONLY
     )
-    if fact_set_comparability == "inconsistent":
-        status: AssuranceStatus = "failed"
-    elif explicit_depth is not None and depth_satisfied is False:
-        status = "failed"
-    elif (
-        l0_context_status == "asymmetric"
-        or header_context_status in ("drift_detected", "asymmetric")
-        or dwarf_context_status == "asymmetric"
-        or l3_context_status == "asymmetric"
-        or schema_staleness_status == "degraded"
-        or graph_completeness in ("degraded", "narrowed", "unknown")
-        or (tu_accounting.failed or 0) > 0
-        or not result.scope_resolved
-        or result.contract_coverage == "partial"
-        or fact_set_comparability == "unknown"
-        or l4_present_without_accounting
-        or manifest_layer_incomplete
-        or (export_accounting.unaccounted or 0) > 0
-        or target_unresolved
-        or is_comparability_bounded(result.comparability_assurance)
-        or unobserved_gap
-    ):
-        status = "partial"
-    elif nothing_requested:
-        status = "not_requested"
-    else:
-        status = "complete"
+    status = overall_status(
+        fact_set_comparability=fact_set_comparability,
+        depth_unsatisfied=explicit_depth is not None and depth_satisfied is False,
+        l0_context_status=l0_context_status,
+        header_context_status=header_context_status,
+        dwarf_context_status=dwarf_context_status,
+        l3_context_status=l3_context_status,
+        schema_staleness_status=schema_staleness_status,
+        graph_completeness=graph_completeness,
+        other_shortfall=(
+            (tu_accounting.failed or 0) > 0
+            or not result.scope_resolved
+            or result.contract_coverage == "partial"
+            or l4_present_without_accounting
+            or manifest_layer_incomplete
+            or (export_accounting.unaccounted or 0) > 0
+            or target_unresolved
+            or is_comparability_bounded(result.comparability_assurance)
+            or unobserved_gap
+        ),
+        nothing_requested=nothing_requested,
+    )
 
     return AnalysisAssurance(
         status=status,

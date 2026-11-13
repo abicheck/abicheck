@@ -40,6 +40,19 @@ from pathlib import Path
 from typing import Any
 
 from .errors import ValidationError
+from .extract.pdb_codeview_types import (
+    CvArray,
+    CvBitfield,
+    CvEnum,
+    CvEnumerator,
+    CvMember,
+    CvMemberFunction,
+    CvModifier,
+    CvOneMethod,
+    CvPointer,
+    CvProcedure,
+    CvStruct,
+)
 from .extract.pdb_fieldlist import read_cstring, read_numeric_leaf, walk_fieldlist
 from .extract.pdb_procedure_spelling import _CC_NAMES, procedure_spelling
 
@@ -617,132 +630,6 @@ def parse_dbi_stream(data: bytes) -> DbiStream:
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class CvStruct:
-    """Parsed LF_STRUCTURE / LF_CLASS / LF_UNION."""
-
-    type_index: int
-    name: str
-    field_list_ti: int
-    byte_size: int
-    is_forward_ref: bool
-    is_packed: bool
-    is_union: bool
-    count: int  # number of members
-
-
-@dataclass
-class CvEnum:
-    """Parsed LF_ENUM."""
-
-    type_index: int
-    name: str
-    field_list_ti: int
-    underlying_type_ti: int
-    is_forward_ref: bool
-    count: int
-
-
-@dataclass
-class CvMember:
-    """Parsed LF_MEMBER (non-static data member)."""
-
-    name: str
-    type_ti: int
-    offset: int
-    access: int  # CV_fldattr_t access bits
-
-
-@dataclass
-class CvEnumerator:
-    """Parsed LF_ENUMERATE."""
-
-    name: str
-    value: int
-
-
-@dataclass
-class CvOneMethod:
-    """Parsed LF_ONEMETHOD (non-overloaded member function).
-
-    Carries the method's function-type index so the calling convention of the
-    referenced LF_MFUNCTION/LF_PROCEDURE can be resolved by name — the piece
-    the PDB path needs to feed ``AdvancedDwarfMetadata.calling_conventions``
-    (a PDB has no DWARF-style per-symbol linkage, but methods are named right
-    in their class's fieldlist).
-    """
-
-    name: str
-    type_ti: int
-
-
-@dataclass
-class CvProcedure:
-    """Parsed LF_PROCEDURE."""
-
-    type_index: int
-    return_type_ti: int
-    calling_convention: int
-    param_count: int
-    arglist_ti: int
-
-
-@dataclass
-class CvMemberFunction:
-    """Parsed LF_MFUNCTION."""
-
-    type_index: int
-    return_type_ti: int
-    class_type_ti: int
-    this_type_ti: int
-    calling_convention: int
-    param_count: int
-    arglist_ti: int
-    this_adjust: int
-
-
-@dataclass
-class CvPointer:
-    """Parsed LF_POINTER."""
-
-    type_index: int
-    referent_ti: int
-    attrs: int
-    byte_size: int
-
-
-@dataclass
-class CvArray:
-    """Parsed LF_ARRAY."""
-
-    type_index: int
-    element_type_ti: int
-    index_type_ti: int
-    byte_size: int
-    name: str
-
-
-@dataclass
-class CvModifier:
-    """Parsed LF_MODIFIER."""
-
-    type_index: int
-    modified_ti: int
-    is_const: bool
-    is_volatile: bool
-    is_unaligned: bool
-
-
-@dataclass
-class CvBitfield:
-    """Parsed LF_BITFIELD."""
-
-    type_index: int
-    underlying_ti: int
-    length: int  # bit width
-    position: int  # bit position
-
-
 def _link_forward_refs(records: Mapping[int, CvStruct | CvEnum]) -> dict[int, int]:
     """Forward-ref type index -> the definition it names, within one kind.
 
@@ -795,10 +682,40 @@ class TypeDatabase:
 
     def parse_all(self) -> None:
         """Parse all TPI records into structured objects."""
+        # ``_parsed`` is set only once every step below has finished: setting
+        # it first left an exception from any step (an unexpected record
+        # error, the forward-ref link, the enum check) with a half-filled
+        # parser that every later call accepted as complete.
         if self._parsed:
             return
+        try:
+            self._parse_all_steps()
+        except BaseException:
+            self._reset_parsed_state()
+            raise
         self._parsed = True
 
+    def _reset_parsed_state(self) -> None:
+        """Return to the unparsed state so a retry starts from nothing."""
+        for table in (
+            self._structs,
+            self._enums,
+            self._procedures,
+            self._mfunctions,
+            self._pointers,
+            self._arrays,
+            self._modifiers,
+            self._bitfields,
+            self._fieldlists,
+            self._arglists,
+            self._fwd_to_def,
+            self._name_cache,
+            self._size_cache,
+        ):
+            table.clear()
+        self.parse_failures.clear()
+
+    def _parse_all_steps(self) -> None:
         for rec in self._tpi.records:
             try:
                 self._parse_record(rec)
