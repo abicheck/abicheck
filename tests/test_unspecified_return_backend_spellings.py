@@ -80,3 +80,22 @@ def test_two_backends_spelling_of_unnamed_returns_are_not_this_kind(
     old: str, new: str
 ) -> None:
     assert detect_unspecified_return_now_named(_snap(old), _snap(new)) == []
+
+
+@pytest.mark.parametrize(
+    ("spelling", "unspecified"),
+    [
+        ("", False),  # no return-type fact at all
+        ("   ", False),
+        (" auto ", True),
+        ("const auto &", True),
+        ("automaton *", False),
+        ("ns::auto_ptr<int>", False),
+    ],
+)
+def test_return_is_unspecified_reads_whole_spellings(
+    spelling: str, unspecified: bool
+) -> None:
+    from abicheck.compare.unnameable_return import return_is_unspecified
+
+    assert return_is_unspecified(spelling) is unspecified

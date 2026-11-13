@@ -111,3 +111,29 @@ def test_two_unrelated_kinds_never_pair() -> None:
         ChangeKind.TYPE_FIELD_REMOVED, ChangeKind.TYPE_FIELD_ADDED
     )
     assert detect_inline_body_renamed_member(old, new, changes[:1]) == []
+
+
+def test_rename_candidates_read_only_field_renames_with_both_names() -> None:
+    from abicheck.compare.field_rename_candidates import collect_field_rename_candidates
+
+    changes = [
+        Change(ChangeKind.FIELD_RENAMED, _IMPL, "renamed", "old_v", "new_v"),
+        Change(ChangeKind.FIELD_RENAMED, _IMPL, "no new name", "old_w", None),
+        Change(ChangeKind.TYPE_FIELD_REMOVED, f"{_IMPL}::x", "removed", "x", None),
+    ]
+    assert collect_field_rename_candidates(changes, ("detail",)) == [
+        (_IMPL, "old_v", "new_v")
+    ]
+
+
+def test_paired_candidates_skip_other_kinds_and_unqualified_symbols() -> None:
+    from abicheck.compare.field_rename_candidates import collect_paired_field_candidates
+
+    changes = [
+        # neither a field removal nor a field addition
+        Change(ChangeKind.FIELD_RENAMED, _IMPL, "renamed", "a", "b"),
+        # no ``Record::field`` qualification: nothing to pair on
+        Change(ChangeKind.TYPE_FIELD_REMOVED, "loose", "removed"),
+        Change(ChangeKind.TYPE_FIELD_ADDED, "other", "added"),
+    ]
+    assert collect_paired_field_candidates(changes, ("detail",)) == []

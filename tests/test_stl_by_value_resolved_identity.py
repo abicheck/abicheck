@@ -48,6 +48,9 @@ CASES = [
     ("std::vector<int, std::allocator<int> >", None, 0, ParamKind.VALUE, True),
     ("std::size_t", None, 0, ParamKind.VALUE, False),
     ("const std::string &", None, 0, ParamKind.REFERENCE, False),
+    # the indirection recorded only in the slot kind, not in the spelling
+    ("std::string", None, 0, ParamKind.REFERENCE, False),
+    ("string", _ids("std::basic_string<char>"), 0, ParamKind.RVALUE_REF, False),
     # an identity that was not collected never makes a slot a std class
     ("string", Fact.not_collected("clang JSON"), 0, ParamKind.VALUE, False),
 ]
