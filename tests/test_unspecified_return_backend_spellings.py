@@ -23,6 +23,7 @@ import pytest
 from abicheck.checker_policy import ChangeKind
 from abicheck.diff_templates import detect_unspecified_return_now_named
 from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.model.fact import Fact
 
 UNNAMED = (
     "?",  # castxml 0.7, a deduced closure return
@@ -99,3 +100,35 @@ def test_return_is_unspecified_reads_whole_spellings(
     from abicheck.compare.unnameable_return import return_is_unspecified
 
     assert return_is_unspecified(spelling) is unspecified
+
+
+def _stub_snap() -> AbiSnapshot:
+    """The same export read from a stripped binary's export table alone."""
+    fn = Function(
+        name="make_cb",
+        mangled="_Z7make_cbv",
+        return_type="?",
+        params=[],
+        visibility=Visibility.ELF_ONLY,
+        # The facts a stripped dump records: exported, no contract evidence.
+        binary_exported_fact=Fact.present(True),
+        in_public_contract_fact=Fact.not_collected("export-table entry"),
+        declared_in_headers_fact=Fact.not_collected("no headers parsed"),
+    )
+    snap = AbiSnapshot(library="l", version="0", functions=[fn], variables=[], types=[])
+    snap.elf_only_mode = True
+    return snap
+
+
+@pytest.mark.parametrize("spelling", UNNAMED + NAMED)
+@pytest.mark.parametrize("stub_side", ["old", "new"])
+def test_an_export_table_stub_settles_no_return_direction(
+    spelling: str, stub_side: str
+) -> None:
+    # Bug class: a no-evidence placeholder read as an observed fact. An
+    # export-table stub writes "?" because it knows no return type at all
+    # (a stripped side of a one-sided DWARF run), so against any spelling on
+    # the other side, in either order, nothing about the return is observed.
+    typed = _snap(spelling)
+    old, new = (_stub_snap(), typed) if stub_side == "old" else (typed, _stub_snap())
+    assert detect_unspecified_return_now_named(old, new) == []
