@@ -38,7 +38,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 
-from tests._edit_corpus_config import EVIDENCE_RANK, Config
+from abiforge.model.config import EVIDENCE_RANK, Config
 
 # Verdict names in increasing severity (see abicheck.checker_types.Verdict).
 VERDICT_RANK: dict[str, int] = {

@@ -35,6 +35,8 @@ on:
     paths:
       - 'abicheck/**'
       - 'tests/**'
+      # abiforge, the edit-corpus generator the PR tier runs.
+      - 'abiforge/**'
       - 'examples/**'
       - 'catalog/**'
       - '.github/workflows/**'
@@ -217,7 +219,7 @@ jobs:
           # artifact below (tests/pytest_shards.py's docstring).
           ABICHECK_DURATIONS_JSON: integration-durations-shard${{ matrix.shard }}.json
           # The edit corpus's PR tier writes one coverage record per cell
-          # (tests/_edit_corpus_coverage.py); the next step reports them.
+          # (abiforge/coverage.py); the next step reports them.
           ABICHECK_EDIT_CORPUS_COVERAGE_DIR: edit-corpus-coverage
           PYTEST_ADDOPTS: -n auto --dist worksteal --shard=${{ matrix.shard }}/2 --shard-weights=tests/shard_weights_integration.json --cov=abicheck --cov-report=xml:coverage-integration.xml
         run: python scripts/verify.py --profile full --only integration --require-complete
@@ -239,7 +241,7 @@ jobs:
           mkdir -p edit-corpus-coverage
           : > "edit-corpus-coverage/shard-${SHARD}.done"
           if [ "$had_records" = 1 ]; then
-            python -m tests._edit_corpus_coverage report edit-corpus-coverage \
+            python -m abiforge.coverage report edit-corpus-coverage \
               --title "Edit corpus PR-tier coverage (shard ${SHARD}/2)" \
               --summary "$GITHUB_STEP_SUMMARY"
           fi
@@ -309,7 +311,7 @@ jobs:
           fail_ci_if_error: false
 
   edit-corpus-coverage:
-    # The PR tier's verified ChangeKind floor (tests/edit_corpus_coverage_ledger.json),
+    # The PR tier's verified ChangeKind floor (abiforge/coverage_ledger.json),
     # held over both Linux shards' corpus records merged. Judged only when both
     # shards left their `shard-N.done` marker (their integration step finished),
     # so a cancelled run is never judged; no records at all fail the job.
@@ -355,7 +357,7 @@ jobs:
             echo "::error::neither Linux shard uploaded edit corpus coverage records"
             exit 1
           fi
-          python -m tests._edit_corpus_coverage report edit-corpus-coverage \
+          python -m abiforge.coverage report edit-corpus-coverage \
             --title "Edit corpus PR-tier coverage (both shards)" \
             --summary "$GITHUB_STEP_SUMMARY" --json edit-corpus-coverage-report.json \
             --check-floor pr

@@ -43,7 +43,7 @@ abicheck.extract.headers.gcc.build`, after installing `gcc-13-plugin-dev`.
 
 ### E1 — the generated edit corpus under each backend
 
-`tests/_edit_corpus_harness.py` pins `header_backend="castxml"`. For the
+`abiforge/run/harness.py` pins `header_backend="castxml"`. For the
 experiment it read `ABICHECK_EDIT_CORPUS_HEADER_BACKEND` instead. The PR
 tier (`tests/test_abi_edit_corpus.py -m integration`, 371 cells) then ran
 once per backend:
@@ -54,7 +54,7 @@ once per backend:
 | Clang | 354 | 14 | 7 (each fails under both GCC- and Clang-built libraries) |
 | Native GCC | 340 | 28 | 14 |
 
-**Caveat.** The corpus, its expectations and `_edit_corpus_known.py` were
+**Caveat.** The corpus, its expectations and `abiforge.known` were
 calibrated against CastXML. A clean CastXML column therefore shows that
 nothing regressed. It does not show that CastXML is better than the other
 backends. The failures are still real gaps in our backends.
@@ -178,7 +178,7 @@ clients.
 
 All of these must hold for the candidate backend:
 
-1. Zero E1 failures on the PR tier, with the same `_edit_corpus_known.py`
+1. Zero E1 failures on the PR tier, with the same `abiforge.known`
    entries as CastXML or a recorded reason for each difference.
 2. Nightly-tier parity with CastXML within the documented known gaps.
 3. No new `❌ No` rows in the fact matrix where CastXML has `✅ Yes`
@@ -193,7 +193,7 @@ All of these must hold for the candidate backend:
 ### Phase 1 — a backend axis in the oracle corpus (S/M)
 
 - Make `header_backend` an axis of the edit-corpus `Config`, not an
-  environment variable. Each backend gets its own `_edit_corpus_known.py`
+  environment variable. Each backend gets its own `abiforge.known`
   section.
 - Run Clang and native GCC in the nightly tier. Native GCC needs the plugin
   build step and `gcc-N-plugin-dev` in CI.

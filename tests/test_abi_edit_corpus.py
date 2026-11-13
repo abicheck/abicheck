@@ -1,6 +1,6 @@
 """Generated ABI corpus: each semantic edit must produce its declared ground truth.
 
-Ground truth is declared per edit operator in ``_edit_corpus_operators.py`` from
+Ground truth is declared per edit operator in ``abiforge.operators`` from
 the edit's meaning. The integration matrix builds every applicable
 (operator, seed, compiler) cell with gcc and clang, runs ``abicheck compare``
 through the public API, and asserts the expected kinds and verdict. Fast tests
@@ -8,7 +8,7 @@ check the generator itself (templates, applicability, declared kinds) without a
 toolchain.
 
 A cell that disagrees with its ground truth is a detector finding. It is not
-fixed here: it is recorded in ``tests/_edit_corpus_known.py`` (shared with the
+fixed here: it is recorded in ``abiforge/known.py`` (shared with the
 config matrix) as a strict xfail with the exact issue set and verdict observed,
 and listed in ``docs/contribute/known-gaps.md``.
 """
@@ -23,24 +23,24 @@ from pathlib import Path
 import pytest
 
 from abicheck.model.change_catalog.kinds import ChangeKind
-from tests._edit_corpus_config import (
+from abiforge.coverage import make_record, write_record
+from abiforge.known import KNOWN, known_mismatch
+from abiforge.model.config import (
     EVIDENCE,
     HEADER_BACKENDS,
     Toolchain,
     default_config,
 )
-from tests._edit_corpus_coverage import make_record, write_record
-from tests._edit_corpus_expect import issue_keys
-from tests._edit_corpus_harness import (
+from abiforge.model.expect import issue_keys
+from abiforge.model.seeds import BUILD_ROLES, SEED_BY_NAME, SEEDS
+from abiforge.operators import OP_BY_NAME, OPERATORS, VERDICT_RANK, matrix
+from abiforge.run.harness import (
     COMPILERS,
     BaselineCache,
     _as_config,
     run_operator,
 )
-from tests._edit_corpus_known import KNOWN, known_mismatch
-from tests._edit_corpus_operators import OP_BY_NAME, OPERATORS, VERDICT_RANK, matrix
-from tests._edit_corpus_seeds import BUILD_ROLES, SEED_BY_NAME, SEEDS
-from tests._edit_corpus_toolchains import (
+from abiforge.run.toolchains import (
     capability_gap,
     driver_width,
     elf_link_unavailable,
@@ -62,7 +62,7 @@ def default_matrix():
     return tuple((op, seed) for op, seed in matrix() if _applies_at_default(op, seed))
 
 
-# Mismatches are recorded once, in ``tests/_edit_corpus_known.py``, for this
+# Mismatches are recorded once, in ``abiforge/known.py``, for this
 # matrix and the config matrix alike. A cell xfails only while its exact issue
 # set and verdict reproduce as recorded; any other outcome fails.
 
@@ -322,7 +322,7 @@ def test_edit_produces_declared_ground_truth(
             f"recorded mismatch {sorted(known.issues)} (verdict in {sorted(known.verdicts)}) "
             f"no longer reproduces: verdict={outcome.verdict} kinds={sorted(outcome.kinds)} "
             f"issues={sorted(issues)}. If the detector was fixed, remove the "
-            "tests/_edit_corpus_known.py entry and its known-gaps row."
+            "abiforge/known.py entry and its known-gaps row."
         )
         pytest.xfail(known.reason)
     assert outcome.failures == (), (

@@ -575,7 +575,7 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         metavar="PATH",
         help="Per-file seconds that balance --shard (default tests/shard_weights.json, the unit lane's; the integration lane passes its own).",
     )
-    from tests._edit_corpus_toolchains import add_pytest_options as add_corpus_options
+    from tests._abiforge_pytest import add_pytest_options as add_corpus_options
     from tests.pytest_collect_partition import add_option as add_partition_option
     from tests.pytest_marker_prefilter import add_option
 
@@ -749,7 +749,7 @@ def _make_git_hermetic() -> None:
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    from tests._edit_corpus_toolchains import apply_pytest_options
+    from tests._abiforge_pytest import apply_pytest_options
 
     _keep_mutmut_stats_out_of_child_processes()
     _make_git_hermetic()

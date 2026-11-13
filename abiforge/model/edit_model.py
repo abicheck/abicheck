@@ -6,7 +6,7 @@ C++ ABI's base-subobject layout), not from what the generator happens to
 implement. It imports nothing from the operator registry: the coverage
 denominator is this model, and an edit class no operator generates is an
 uncovered gap in the report and the ledger
-(``_edit_corpus_space.edit_classes_without_operator``), never a class that is
+(``abiforge.model.space.edit_classes_without_operator``), never a class that is
 left out. ``tests/test_edit_corpus_edit_axis.py`` checks both directions.
 
 The model splits two constructs:

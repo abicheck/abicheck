@@ -1,6 +1,6 @@
 """Edit operators for the ``c_elf`` seed: platform-level facts of the ELF object.
 
-Companion of ``_edit_corpus_operators_elf`` (same seed, same conventions):
+Companion of ``abiforge.operators.elf`` (same seed, same conventions):
 each edit changes how the library is built or what its object file carries --
 its ELF header, program headers, dynamic section, imports, symbol table
 representation, or the debug info it ships -- and declares its ground truth
@@ -11,8 +11,20 @@ from __future__ import annotations
 
 from typing import Any
 
-from tests._edit_corpus_expect import Rule
-from tests._edit_corpus_operators_elf import (
+from abiforge.model.expect import Rule
+from abiforge.model.opkit import (
+    _REMOVED,
+    Edit,
+    EditOp,
+    Roles,
+    _merge,
+    _no_edit,
+    _set,
+    _with,
+)
+from abiforge.model.seeds import RoleText
+from abiforge.model.space import role_construct
+from abiforge.operators.elf import (
     _AT_MOST_RISK,
     _BINARY,
     _COMPAT_ONLY,
@@ -25,18 +37,6 @@ from tests._edit_corpus_operators_elf import (
     _op,
     _vscript,
 )
-from tests._edit_corpus_opkit import (
-    _REMOVED,
-    Edit,
-    EditOp,
-    Roles,
-    _merge,
-    _no_edit,
-    _set,
-    _with,
-)
-from tests._edit_corpus_seeds import RoleText
-from tests._edit_corpus_space import role_construct
 
 __all__ = ["PLATFORM_OPERATORS"]
 

@@ -15,10 +15,10 @@ from typing import Any, cast
 
 import pytest
 
-from tests import _edit_corpus_cells as cells
-from tests._edit_corpus_config import Toolchain, default_config
-from tests._edit_corpus_operators import OP_BY_NAME, OPERATORS
-from tests._edit_corpus_seeds import SEEDS
+from abiforge.model.config import Toolchain, default_config
+from abiforge.model.seeds import SEEDS
+from abiforge.operators import OP_BY_NAME, OPERATORS
+from abiforge.run import cells as cells
 
 GCC = Toolchain("gcc", 13, "gcc", "g++")
 LINUX_ELF = ("linux", "elf")
@@ -98,7 +98,7 @@ def test_an_x86_host_has_no_cpu_gap(
 ) -> None:
     """The control: on x86 the CPU check passes, whatever the spelling of
     ``platform.machine()`` (Linux ``x86_64``, Windows ``AMD64``, 32-bit)."""
-    from tests._edit_corpus_toolchains import capability_gap
+    from abiforge.run.toolchains import capability_gap
 
     monkeypatch.setattr(platform, "machine", lambda: machine)
     # Stop at the CPU check: the op's later probes run a compiler.

@@ -23,11 +23,11 @@ from pathlib import Path
 
 import pytest
 
-from tests._edit_corpus_config import Toolchain, default_config
-from tests._edit_corpus_coverage import expectation_kinds
-from tests._edit_corpus_operators import OP_BY_NAME
-from tests._edit_corpus_opkit import _OFFSET, _SIZE
-from tests._edit_corpus_seeds import XCXX_SEED
+from abiforge.coverage import expectation_kinds
+from abiforge.model.config import Toolchain, default_config
+from abiforge.model.opkit import _OFFSET, _SIZE
+from abiforge.model.seeds import XCXX_SEED
+from abiforge.operators import OP_BY_NAME
 
 TABLE_PATH = (
     Path(__file__).resolve().parents[1] / "formal" / "lean" / "layout_table.json"
