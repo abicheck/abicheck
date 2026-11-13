@@ -51,6 +51,7 @@ _DECLS: dict[str, tuple[str, bool | None, bool | None]] = {
     "LayoutNestedLater": ("struct LayoutLE {};\nstruct LayoutLI { int x; LayoutLE e; };\nstruct LayoutNestedLater : LayoutLE { LayoutLI first; };", True, None),
     "LayoutArrayOfBase": ("struct LayoutAE {};\nstruct LayoutArrayOfBase : LayoutAE { LayoutAE a[2]; };", False, None),
     "LayoutUnionFirst": ("struct LayoutUE {};\nunion LayoutUU { int i; LayoutUE e; };\nstruct LayoutUnionFirst : LayoutUE { LayoutUU u; };", False, None),
+    "LayoutInheritedFirst": ("struct LayoutIE {};\nstruct LayoutIB { LayoutIE e; };\nstruct LayoutInheritedFirst : LayoutIE, LayoutIB {};", True, None),
     "LayoutCommentDefault": ("struct LayoutCommentDefault { int a; LayoutCommentDefault() = default; LayoutCommentDefault(const LayoutCommentDefault &) /* = default */; };", True, False),
 }  # fmt: skip
 
