@@ -105,6 +105,17 @@ from .run_selection import SourceRunRejected
     default=None,
     help="Append libraries=<json> (and machine=) to this GITHUB_OUTPUT file.",
 )
+@click.option(
+    "--target",
+    default=None,
+    metavar="NAME",
+    help=(
+        "Resolve only the component named NAME, and additionally write its "
+        "artifact=, header= and include= (space-separated) to --github-output: "
+        "the per-target values the root Action's compare consumes, so a gate "
+        "job reads the same spec actions/baseline dumped the set from."
+    ),
+)
 def resolve_libraries_cmd(
     spec: Path,
     root: Path,
@@ -113,6 +124,7 @@ def resolve_libraries_cmd(
     out: Path | None,
     bind: tuple[str, ...],
     github_output: Path | None,
+    target: str | None,
 ) -> None:
     """Resolve declarative component SPEC into ``actions/baseline``'s ``libraries``.
 
@@ -148,6 +160,7 @@ def resolve_libraries_cmd(
             require_elf=require_elf,
             require_same_machine=require_same_machine,
             bindings=bindings,
+            only=target,
         )
     except SelectionError as exc:
         click.echo(f"library selection refused: {exc}", err=True)
@@ -163,6 +176,11 @@ def resolve_libraries_cmd(
             handle.write(f"libraries={serialized}\n")
             handle.write(f"machine={machines[0] if len(machines) == 1 else ''}\n")
             handle.write(f"library-count={len(resolved)}\n")
+            if target is not None:
+                selected = resolved[0].as_entry()
+                handle.write(f"artifact={selected['artifact']}\n")
+                handle.write(f"header={selected.get('header', '')}\n")
+                handle.write(f"include={selected.get('include', '')}\n")
     click.echo(serialized)
     for library in resolved:
         click.echo(

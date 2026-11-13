@@ -265,7 +265,11 @@ def dwarf_from_dict(d: dict[str, Any]) -> Any:
                     # An absent key is unknown (None), never offset 0. Stored
                     # 0 still decodes as 0; abicheck always writes the key.
                     byte_offset=f.get("byte_offset"),
-                    byte_size=f.get("byte_size", 0),
+                    # An absent key is unknown (None). A stored 0 decodes as 0:
+                    # a snapshot from before generation 58 has its unknown 0
+                    # rewritten to None by storage/dwarf_field_size_migration.py
+                    # before this decoder runs, so 0 here is always a real zero.
+                    byte_size=f.get("byte_size"),
                     bit_offset=f.get("bit_offset", 0),
                     bit_size=f.get("bit_size", 0),
                     # Schema v69: a pre-v69 member decodes to an unset fact.

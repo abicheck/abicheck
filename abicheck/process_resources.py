@@ -550,6 +550,10 @@ class BudgetedExecutor(Executor):
         self._released = False
 
     def submit(self, fn: Callable[..., _T], /, *args: Any, **kwargs: Any) -> Future[_T]:
+        # The same rule whichever inner executor was granted: a thread pool
+        # rejects work after shutdown, but the inline one ran it anyway.
+        if self._released:
+            raise RuntimeError("cannot schedule new futures after shutdown")
         return self._inner.submit(fn, *args, **kwargs)
 
     def shutdown(self, wait: bool = True, *, cancel_futures: bool = False) -> None:

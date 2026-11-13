@@ -640,7 +640,7 @@ def _extract_structs(
                     name=m_name,
                     type_name=resolver.name(m_type),
                     byte_offset=byte_offset,
-                    byte_size=resolver.size(m_type),
+                    byte_size=resolver.size(m_type) or None,
                     bit_offset=bit_offset if bit_offset else 0,
                     bit_size=0,  # CTF doesn't encode bitfield size directly
                 )

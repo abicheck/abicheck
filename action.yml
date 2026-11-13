@@ -203,6 +203,32 @@ inputs:
       added alongside `include` instead.
     required: false
 
+  library-spec:
+    description: >
+      Path to the same declarative library spec `actions/baseline` takes as
+      its `library-spec` (a JSON array of `{name, artifact, header,
+      header_exclude, include}` glob entries, relative to the working
+      directory). With `library-spec-target`, the named component's resolved
+      artifact, headers and include roots become this run's `new-library`,
+      `new-header` and `new-include` -- so the baseline job and the compare
+      gate read one checked-in declaration instead of each restating every
+      library's header/include list. Setting `new-library`, `header`,
+      `new-header`, `include` or `new-include` as well is refused: two
+      declarations of one target is the drift this input removes. The old
+      side is expected to be a snapshot or baseline (`old-library`/
+      `abi-baseline`), whose headers are already recorded; for a binary old
+      side, give `old-header`/`old-include` explicitly. `${NAME}`
+      placeholders are not bound here, so a spec that uses them is refused.
+    required: false
+    default: ''
+  library-spec-target:
+    description: >
+      The component `name` in `library-spec` this run compares. Required
+      when `library-spec` is set. Only this component's paths have to exist;
+      the rest of the spec is still parsed and checked for duplicate names.
+    required: false
+    default: ''
+
   # ── Version labels ──────────────────────────────────────────────────────────
   old-label:
     description: 'Version label for the old library (embedded in reports).'
@@ -1761,6 +1787,21 @@ runs:
       # already installed identical source into the same interpreter.
       run: bash "${{ github.action_path }}/action/install-abicheck.sh" "${{ github.action_path }}"
 
+    # ── 3a. library-spec: this target's artifact/headers from the shared spec ─
+    - name: Resolve library-spec target
+      id: library-spec
+      if: inputs.library-spec != ''
+      shell: bash
+      env:
+        INPUT_LIBRARY_SPEC: ${{ inputs.library-spec }}
+        INPUT_LIBRARY_SPEC_TARGET: ${{ inputs.library-spec-target }}
+        INPUT_NEW_LIBRARY: ${{ inputs.new-library }}
+        INPUT_HEADER: ${{ inputs.header }}
+        INPUT_NEW_HEADER: ${{ inputs.new-header }}
+        INPUT_INCLUDE: ${{ inputs.include }}
+        INPUT_NEW_INCLUDE: ${{ inputs.new-include }}
+      run: bash "${{ github.action_path }}/action/resolve-library-spec.sh"
+
     # ── 3b. delta-baseline: the PR's exact-base default-branch snapshot ──────
     # Runs the fetch-main-snapshot Action's own scripts (a composite cannot
     # `uses:` a path relative to itself). Every outcome is a successful step;
@@ -1860,15 +1901,15 @@ runs:
       env:
         INPUT_MODE: ${{ inputs.mode }}
         INPUT_OLD_LIBRARY: ${{ inputs.old-library }}
-        INPUT_NEW_LIBRARY: ${{ inputs.new-library }}
+        INPUT_NEW_LIBRARY: ${{ steps.library-spec.outputs.artifact || inputs.new-library }}
         INPUT_NEW_LIBRARY_SET: ${{ inputs.new-library-set }}
         INPUT_HEADER: ${{ inputs.header }}
         INPUT_OLD_HEADER: ${{ inputs.old-header }}
-        INPUT_NEW_HEADER: ${{ inputs.new-header }}
+        INPUT_NEW_HEADER: ${{ steps.library-spec.outputs.header || inputs.new-header }}
         INPUT_BUILD_TARGET: ${{ inputs.build-target }}
         INPUT_INCLUDE: ${{ inputs.include }}
         INPUT_OLD_INCLUDE: ${{ inputs.old-include }}
-        INPUT_NEW_INCLUDE: ${{ inputs.new-include }}
+        INPUT_NEW_INCLUDE: ${{ steps.library-spec.outputs.include || inputs.new-include }}
         INPUT_OLD_LABEL: ${{ inputs.old-label }}
         INPUT_NEW_LABEL: ${{ inputs.new-label }}
         INPUT_FORMAT: ${{ inputs.format }}

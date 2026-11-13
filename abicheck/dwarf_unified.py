@@ -192,7 +192,7 @@ def parse_dwarf_from_session(
 
     # Per-binary type-resolution cache: (cu_offset, die_offset) → (type_name, byte_size).
     # DIE offsets are only unique within one ELF file — do not share across binaries.
-    type_cache: dict[tuple[int, int], tuple[str, int]] = {}
+    type_cache: dict[tuple[int, int], tuple[str, int | None]] = {}
 
     for CU in session.dwarf.iter_CUs():
         try:
