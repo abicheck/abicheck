@@ -78,7 +78,7 @@ No change to the event set, so no ADR-067 amendment.
 
 | Item | Status |
 |---|---|
-| `extract/headers/concept_scan.py`: `#elif 0` after `#if 0` was read as live code | **done** (extractor generation 58; generation 57 frozen) |
+| `extract/headers/concept_scan.py`: `#elif 0` after `#if 0` was read as live code | **done** (extractor generation 59; generation 57 frozen) |
 | `header_conditionals.py`: braces inside string/char literals opened/closed scopes | **done** (literals blanked before brace tracking) |
 | `deadline.py`: an unbalanced registration-window exit drove the depth negative, so a deferred SIGTERM was never replayed | **done** (raises at the unbalanced exit) |
 | `process_resources.BudgetedExecutor`: accepted work after shutdown when it ran inline (the thread pool already rejected it) | **done** |

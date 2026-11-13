@@ -132,7 +132,7 @@ LIFECYCLE_BUG_CLASSES: tuple[BugClass, ...] = (
             "A text scan that skips provably dead preprocessor branches skips "
             "every branch whose condition is the literal 0, including an "
             "#elif 0 after #if 0; only a branch that can be live is read. "
-            "Instance: the C++20 concept pre-scan (extractor generation 58). "
+            "Instance: the C++20 concept pre-scan (extractor generation 59). "
             "Family F4."
         ),
         fixed_by=(2054,),

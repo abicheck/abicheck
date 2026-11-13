@@ -3,7 +3,7 @@
 The concept pre-scan read the body of an ``#elif 0`` that follows ``#if 0``
 as live code, so a ``concept`` spelled only there made the snapshot record
 ``concept constraints unobserved`` for a header that has none (extractor
-generation 58). Oracle: the code lines a preprocessor keeps, written here.
+generation 59). Oracle: the code lines a preprocessor keeps, written here.
 """
 
 from __future__ import annotations
