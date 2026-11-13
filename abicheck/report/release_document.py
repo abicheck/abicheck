@@ -413,17 +413,22 @@ def _build_live(evaluation: ReleaseEvaluation, show_only: str | None) -> Release
     )
 
 
-def stored_reported_verdict(result: Any) -> str:
+def stored_reported_verdict(
+    result: Any, *, failed_member_exit_contribution: int = 0
+) -> str:
     """A stored-operand comparison's reported verdict: the release-outcome
     fold over its sentinels and verdict -- ``"not_comparable"`` (ADR-050 D2)
     when a matched pair's contracts disagreed, else ``"ERROR"`` when a NEW
-    member failed extraction (ADR-065 D1), else the verdict. The ranking is
-    ``policy.release_outcome``'s; the exit and the document both read this."""
+    member failed extraction (ADR-065 D1) or the scope decision carries a
+    FAILED member (*failed_member_exit_contribution*, ADR-065 D8), else the
+    verdict. The ranking is ``policy.release_outcome``'s; the exit and the
+    document both read this."""
     from ..policy.unconfirmed_compatibility import report_compatibility
 
     sentinels = [
         *(["not_comparable"] if result.not_comparable_members else []),
         *(["ERROR"] if result.extraction_failures else []),
+        *(["ERROR"] if failed_member_exit_contribution else []),
         # ADR-090: each member's own report value, as the live fan-out folds
         # its entries -- an UNCONFIRMED member outranks a clean claim.
         *(report_compatibility(d) for d in getattr(result, "per_library", ()) or ()),

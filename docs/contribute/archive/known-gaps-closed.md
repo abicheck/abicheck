@@ -16,7 +16,13 @@ re-verification status line (2026-10-09, `456989f`). Do not re-open an
 entry from here without reproducing it on current `main`; record a new
 gap on the main page instead.
 
+### `abicheck aggregate` reads a release's failed member as a different exit than `compare` does (closed 2026-11-13)
+
+**Status (2026-11-13): CLOSED.** `compare` on a release with a `FAILED` member exits `4` (ADR-065 D8, `policy/release_exit_decision.py`). Aggregating the stored release report does not reproduce that exact value: `workflows/aggregate/scope_axis.py` folds only the `0`/`1` scope contributions, and `load.py`/`report_gate.py` read `run_outcome.operational` through their own mapping. The aggregate target therefore reads non-clean (`exit_code() != 0`) but not `4`. Closing it means folding the release's `operational_error` contribution into the aggregate's per-target gate with the same `max` as `compare`.
+`false-clean` — none (the aggregate still exits non-zero), but the exit code and the gate category disagree with the originating `compare`.
+
 ### DWARF field size 0 means "unknown", so a size change from or to 0 is not reported (closed 2026-11-12)
+
 **Status (2026-11-12): CLOSED.** `FieldInfo.byte_size` is now `int | None` (`None` = unknown), the same change `byte_offset` got in #2019. The DWARF producer (`abicheck/dwarf_metadata.py`) records `None` when a member's type size is not evaluable (no `DW_AT_type`, an unresolvable type, a base type or aggregate with no `DW_AT_byte_size`, an array of an unknown element) and a real `0` for a flexible array of a known element. BTF, CTF and PDB map their resolver's unresolved `0` to `None`. The size rule (`_existing_field_changes`, `abicheck/compare/type_layout_diff.py`) fires only when both sizes are known and differ, so `0 -> N` is reported and an unknown size never is. Rename pairing treats an unknown size as compatible on that criterion. A stored `0` decodes as `0` and an absent key as `None`, as for offsets. A snapshot from before generation 58 has its stored `0` member sizes read as unknown by a load-time migration (`abicheck/storage/dwarf_field_size_migration.py`), so a legacy unknown `0` cannot fabricate a `0 -> N` change. Readers audited: `compare/type_layout_diff.py` (pairing and rule), `workflows/dump/dwarf_dependency_types.py` (falsy test, None-safe), and the `dwarf_metadata.py` pass-through. Pinned by `tests/test_dwarf_field_size_unknown.py`.
 
 ### A binary-only dump lost exports with no debug subprogram, so a still-exported symbol read as removed (closed 2026-11-10)
