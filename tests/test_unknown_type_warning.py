@@ -74,8 +74,9 @@ class TestUnknownTypeWarning:
         """Unknown DWARF tag that HAS a name attribute must NOT warn (has useful info)."""
 
         class _Attr:
-            def __init__(self, value: object) -> None:
+            def __init__(self, value: object, form: str = "DW_FORM_data4") -> None:
                 self.value = value
+                self.form = form  # pyelftools always states a form
 
         die = _MockDie(
             tag="DW_TAG_vendor_custom",
@@ -111,8 +112,9 @@ class TestUnknownTypeWarning:
 
         # This tests that normal code paths don't accidentally trigger warnings
         class _Attr:
-            def __init__(self, value: object) -> None:
+            def __init__(self, value: object, form: str = "DW_FORM_data4") -> None:
                 self.value = value
+                self.form = form  # pyelftools always states a form
 
         # Directly test that a DIE with a known-type name doesn't warn via fallback
         die = _MockDie(

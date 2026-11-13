@@ -24,7 +24,7 @@ class TestComputeRecordTypeInfo:
             tag=tag,
             attributes={
                 "DW_AT_name": SimpleNamespace(value=name.encode()),
-                "DW_AT_byte_size": SimpleNamespace(value=size),
+                "DW_AT_byte_size": SimpleNamespace(value=size, form="DW_FORM_data4"),
             },
         )
 
