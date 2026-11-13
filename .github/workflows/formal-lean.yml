@@ -27,6 +27,7 @@ on:
       - 'formal/**'
       - 'tests/test_lean_field_offset_rule.py'
       - 'tests/test_formal_experiments.py'
+      - 'tests/test_formal_layout_fragment.py'
       - '.github/workflows/formal-lean.yml'
   push:
     branches: [main]
@@ -34,6 +35,7 @@ on:
       - 'formal/**'
       - 'tests/test_lean_field_offset_rule.py'
       - 'tests/test_formal_experiments.py'
+      - 'tests/test_formal_layout_fragment.py'
       - '.github/workflows/formal-lean.yml'
   workflow_dispatch:
 
@@ -113,6 +115,9 @@ jobs:
           # layout_table.json is written by the file itself (LayoutExport.lean
           # #eval IO.FS.writeFile, into the current directory).
           lake env lean AbiLean/LayoutExport.lean
+          # fragment_cases.json: the closed layout fragment (formal/FRAGMENT.md),
+          # also written by the file itself.
+          lake env lean AbiLean/FragmentExport.lean
           # fires_truth_table.json: Examples.lean prints the rule's truth table
           # as a Lean list on stdout. Convert that list into the checked-in
           # file's exact layout (4 rows per line, same header).
@@ -149,6 +154,19 @@ jobs:
                   + body + "\n  ]\n}\n"
               )
           PY
+
+      - name: Fragment checks against the regenerated export
+        # Space = independent enumeration, C generator = Lean's gen and a
+        # bijection onto the space, oracle = reference layout rule, reduced
+        # set covers every class. Python-only (no compiler); the compiler and
+        # abicheck run is the `integration` lane.
+        run: |
+          set -euo pipefail
+          # system Python is externally managed (PEP 668): use a throwaway venv
+          python3 -m venv "${RUNNER_TEMP}/fragment-venv"
+          "${RUNNER_TEMP}/fragment-venv/bin/pip" install --quiet pytest
+          "${RUNNER_TEMP}/fragment-venv/bin/python" -m pytest -q -p no:cacheprovider --noconftest \
+            -m "not integration" tests/test_formal_layout_fragment.py
 
       - name: Exported tables match the checked-in files
         run: |
