@@ -931,7 +931,7 @@ def to_sarif(
                         # finding. Absent (not empty) when the run computed no
                         # contract context, so an ordinary document is
                         # unchanged.
-                        **run_notifications(result),
+                        **run_notifications(result, envelope),
                         # Always true: this reports the SARIF tool run, which
                         # completed. It must not encode the ABI/severity gate
                         # outcome — see the docstring above.

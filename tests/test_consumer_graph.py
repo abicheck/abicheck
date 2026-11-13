@@ -664,6 +664,20 @@ def _elf_facts(snap: AbiSnapshot, label: str | None = None) -> LibraryExportFact
     )
 
 
+def _in_app(result: AppCompatResult, original: Change) -> Change:
+    """The consumer's own finding for *original*.
+
+    Enrichment never writes to the library-wide ``Change``; it replaces it in
+    the consumer's list with a copy, so assertions read the copy from there.
+    """
+    (found,) = [
+        c
+        for c in result.breaking_for_app
+        if c.kind == original.kind and c.symbol == original.symbol
+    ]
+    return found
+
+
 def _scope(
     diff: DiffResult,
     app: Path,
@@ -851,7 +865,7 @@ class TestCoveredChangeEnrichment:
     """ADR-057 D8: the ordinary flow, where the diff already has its own
     `FUNC_REMOVED` for the missing symbol so no overlay is created."""
 
-    def _run(self, tmp_path: Path, *, prior_evidence: bool = False):
+    def _run(self, tmp_path: Path, *, prior_evidence: bool = False, relevance=None):  # type: ignore[no-untyped-def]
         old = AbiSnapshot(
             library="libtrain.so.1",
             version="1.0",
@@ -871,6 +885,7 @@ class TestCoveredChangeEnrichment:
         removed = Change(ChangeKind.FUNC_REMOVED, _DISPATCHER, "removed")
         if prior_evidence:
             removed.reachability_proof_path = "already computed by another producer"
+        removed.contract_relevance = relevance
         diff = DiffResult(
             old_version="1.0",
             new_version="2.0",
@@ -880,7 +895,7 @@ class TestCoveredChangeEnrichment:
         )
         reqs = AppRequirements(undefined_symbols={"_Z5trainv", _DISPATCHER})
         result = _scope(diff, tmp_path / "training-service", reqs, old, new)
-        return result, removed
+        return result, _in_app(result, removed)
 
     def test_the_existing_removal_finding_gets_the_proof_path(
         self, tmp_path: Path
@@ -897,6 +912,29 @@ class TestCoveredChangeEnrichment:
         assert removed.affected_public_roots == ["train"]
         assert removed.impact_proof_path is not None
         assert removed.impact_proof_path[-1]["id"] == symbol_node_id(_DISPATCHER)
+
+    def test_a_consumer_promotion_reaches_the_shared_finding(
+        self, tmp_path: Path
+    ) -> None:
+        """ADR-049 §4.3: a consumer that uses an out-of-contract finding
+        promotes it. The promotion lands on the shared finding the ledger
+        anchors and the full verdict reads (CodeRabbit on #2055), while the
+        consumer's proof path stays on the consumer's copy only."""
+        from abicheck.contract_relevance_types import (
+            EXPLICIT_SCOPE_REASON_CODE,
+            ContractRelevance,
+        )
+
+        result, copy = self._run(
+            tmp_path, relevance=ContractRelevance.PROVEN_OUT_OF_CONTRACT
+        )
+        (original,) = result.full_diff.changes
+        assert copy is not original
+        for change in (copy, original):
+            assert change.contract_relevance is ContractRelevance.IN_CONTRACT
+            assert change.contract_reason_code == EXPLICIT_SCOPE_REASON_CODE
+        assert copy.impact_proof_path is not None
+        assert original.impact_proof_path is None
 
     def test_the_wording_on_a_shared_finding_names_no_consumer(
         self, tmp_path: Path
@@ -984,8 +1022,8 @@ class TestDirectRequirementAndFallthroughs:
         self, tmp_path: Path
     ) -> None:
         removed = Change(ChangeKind.FUNC_REMOVED, "_Z5trainv", "removed")
-        self._run(tmp_path, changes=[removed])
-        assert removed.reachability_proof_path == (
+        result = self._run(tmp_path, changes=[removed])
+        assert _in_app(result, removed).reachability_proof_path == (
             "_Z5trainv is declared by public entry train"
         )
 
@@ -997,7 +1035,9 @@ class TestDirectRequirementAndFallthroughs:
         matching = Change(ChangeKind.FUNC_REMOVED, "_Z5trainv", "removed")
         unrelated = Change(ChangeKind.TYPE_SIZE_CHANGED, "SomeType", "grew")
         unrelated.affected_symbols = ["_Z5trainv"]
-        self._run(tmp_path, changes=[matching, unrelated])
+        result = self._run(tmp_path, changes=[matching, unrelated])
+        matching = _in_app(result, matching)
+        unrelated = _in_app(result, unrelated)
         assert matching.reachability_proof_path is not None
         # Relevant to the app (via affected_symbols) but not itself the
         # explained symbol -- enrichment must skip it, not raise or mislabel.
@@ -1023,7 +1063,9 @@ class TestDirectRequirementAndFallthroughs:
             verdict=Verdict.BREAKING,
         )
         reqs = AppRequirements(undefined_symbols={"_Z5trainv", "_Z4noopv"})
-        _scope(diff, tmp_path / "training-service", reqs, old, new)
+        result = _scope(diff, tmp_path / "training-service", reqs, old, new)
+        explainable = _in_app(result, explainable)
+        opaque = _in_app(result, opaque)
         assert explainable.reachability_proof_path is not None
         assert opaque.reachability_proof_path is None
         assert opaque.impact_proof_path is None

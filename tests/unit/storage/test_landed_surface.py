@@ -112,6 +112,7 @@ _INTERNAL_MODULES = (
     "abicheck.storage.transport_digest",
     "abicheck.storage.snapshot_section_stream",
     "abicheck.storage.snapshot_record_compaction",
+    "abicheck.storage.malformed_document",
 )
 
 

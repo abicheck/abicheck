@@ -63,7 +63,12 @@ from .dwarf_advanced import (
 )
 from .dwarf_metadata import DwarfMetadata, _process_cu_impl as _meta_process_cu
 from .dwarf_utils import dwarf_low_memory_mode, free_cu_die_cache, has_real_dwarf_info
+from .extract.debug_section_presence import (
+    note_orphaned_debug_sections,
+    note_unit_past_section,
+)
 from .extract.dwarf_subtree_index import open_indexed_dwarf_info
+from .extract.parse_failures import note_debug_info_read_failure
 from .extract.progress import timed
 from .model.dwarf_facts import AdvancedExtractionStatus
 
@@ -133,6 +138,7 @@ def _open_dwarf_session_with_status(
     except OSError as exc:
         log.warning("parse_dwarf: failed to open/parse %s: %s", so_path, exc)
         return None, AdvancedExtractionStatus.FAILED
+    located = False  # a failure before DWARF is found is the ELF reader's
     try:
         st = os.fstat(f.fileno())
         if not stat.S_ISREG(st.st_mode):
@@ -144,9 +150,11 @@ def _open_dwarf_session_with_status(
 
         if not has_real_dwarf_info(elf):
             log.debug("parse_dwarf: no DWARF info in %s", so_path)
+            note_orphaned_debug_sections(elf)
             f.close()
             return None, AdvancedExtractionStatus.COMPLETED
 
+        located = True
         dwarf = open_indexed_dwarf_info(elf)
         session = DwarfSession(
             path=Path(so_path),
@@ -162,6 +170,8 @@ def _open_dwarf_session_with_status(
         # ``with open()`` block that closed on *any* exception; match that here
         # so the "never raises" contract holds and no descriptor leaks.
         log.warning("parse_dwarf: failed to open/parse %s: %s", so_path, exc)
+        if located:
+            note_debug_info_read_failure(f"DWARF open failed: {exc!r}")
         f.close()
         return None, AdvancedExtractionStatus.FAILED
 
@@ -195,14 +205,17 @@ def parse_dwarf_from_session(
     type_cache: dict[tuple[int, int], tuple[str, int | None]] = {}
 
     for CU in session.dwarf.iter_CUs():
+        note_unit_past_section(CU, session.dwarf)
         try:
             _meta_process_cu(CU, meta, type_cache)
         except Exception as exc:  # noqa: BLE001
             log.warning("parse_dwarf: meta CU skipped in %s: %s", session.path, exc)
+            note_debug_info_read_failure(f"CU at {CU.cu_offset} unreadable: {exc!r}")
         try:
             _adv_process_cu(CU, adv)
         except (ELFError, OSError, ValueError, KeyError) as exc:
             log.warning("parse_dwarf: adv CU skipped in %s: %s", session.path, exc)
+            note_debug_info_read_failure(f"CU at {CU.cu_offset} unreadable: {exc!r}")
         if low_memory:
             free_cu_die_cache(CU)
 
@@ -243,6 +256,7 @@ def parse_dwarf(
         # Close the session and fall back to empty metadata (the caller then
         # degrades to symbol-only) rather than leaking the handle / aborting.
         log.warning("parse_dwarf: failed to parse CUs in %s: %s", so_path, exc)
+        note_debug_info_read_failure(f"DWARF compilation units unreadable: {exc!r}")
         session.close()
         return DwarfMetadata(), AdvancedDwarfMetadata(
             extraction=AdvancedExtractionStatus.FAILED

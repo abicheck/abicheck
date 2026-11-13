@@ -70,6 +70,7 @@ from ..policy.consumer_requirement_evaluation import (
     uncovered_missing_symbols,
 )
 from ..policy.disposition_close import (
+    alias_recorded_change,
     ledger_for,
     record_and_maybe_suppress_overlay,
 )
@@ -412,8 +413,16 @@ def scope_diff_to_consumer_facts(
             breaking_for_app.append(overreach)
     # After the overlay loop: an overlay already carries its own explanation,
     # so only the shared library-diff findings are enriched here.
+    replaced_originals: list[Change] = []
     if joined_graph is not None and consumer_impact:
+        before_enrichment = list(breaking_for_app)
         enrich_covered_changes(breaking_for_app, consumer_impact, joined_graph)
+        # The enriched entries are copies (the shared DiffResult.changes
+        # objects are not written to); each stays the same ledger record.
+        for original, enriched in zip(before_enrichment, breaking_for_app):
+            if enriched is not original:
+                alias_recorded_change(overlay_ledger, enriched, original)
+                replaced_originals.append(original)
     if suppressed_missing:
         missing_symbols = [s for s in missing_symbols if s not in suppressed_missing]
     verdict = appcompat_verdict(
@@ -424,8 +433,14 @@ def scope_diff_to_consumer_facts(
         policy,
         policy_file,
     )
+    # Promotion is a fact about the finding, not this consumer's view: it
+    # also reaches the originals the ledger anchors and the verdict reads.
     _finalize_consumer_scope_diff(
-        diff, overlay_ledger, breaking_for_app, policy=policy, policy_file=policy_file
+        diff,
+        overlay_ledger,
+        breaking_for_app + replaced_originals,
+        policy=policy,
+        policy_file=policy_file,
     )
     # ADR-067: the ledger is *not* closed here. This runs once per `--used-by`
     # consumer, and under a scoped gate (`scope_decides_exit=True`)

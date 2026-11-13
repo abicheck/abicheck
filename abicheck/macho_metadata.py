@@ -43,6 +43,8 @@ from macholib.mach_o import (  # type: ignore[import-untyped]
     LC_SEGMENT_64,
     LC_SYMTAB,
     LC_VERSION_MIN_MACOSX,
+    MH_CIGAM_64,
+    MH_MAGIC_64,
     N_EXT,
     N_PEXT,
     N_TYPE,
@@ -187,7 +189,9 @@ def _walk_export_trie(data: bytes) -> list[tuple[str, int]]:
 
     def visit(off: int, prefix: str, depth: int) -> None:
         nonlocal child_entries, symbol_bytes
-        if depth > _TRIE_MAX_DEPTH or off in visited or off >= len(data):
+        if off >= len(data):
+            raise ValueError(f"export trie node offset {off} past the trie's end")
+        if depth > _TRIE_MAX_DEPTH or off in visited:
             return
         if len(visited) >= _TRIE_MAX_NODES:
             raise ValueError("export trie node budget exceeded")
@@ -202,7 +206,9 @@ def _walk_export_trie(data: bytes) -> list[tuple[str, int]]:
         # size field; the child list starts right past it.
         pos += terminal_size
         if pos >= len(data):
-            return
+            # Every node ends in a child count; a node cut before it is a
+            # truncated trie, not a leaf.
+            raise ValueError("export trie node has no child count")
         child_count = data[pos]
         if child_entries + child_count > _TRIE_MAX_CHILDREN:
             raise ValueError("export trie child-entry budget exceeded")
@@ -211,7 +217,7 @@ def _walk_export_trie(data: bytes) -> list[tuple[str, int]]:
         for _ in range(child_count):
             end = data.find(b"\x00", pos)
             if end < 0:
-                return
+                raise ValueError("export trie edge label is unterminated")
             edge_bytes = end - pos
             if len(prefix) + edge_bytes > _TRIE_MAX_SYMBOL_LENGTH:
                 raise ValueError("export trie symbol-name budget exceeded")
@@ -277,6 +283,14 @@ def _parse_export_trie(dylib_path: Path, header: Any, meta: MachoMetadata) -> No
         if name:
             trie_flags.setdefault(name, flags)
 
+    if not trie_flags and meta.exports:
+        # The nlist's exports are already filtered to defined, non-private
+        # externals; a trie listing none of them was misread, not emptied.
+        note_export_read_failure(
+            f"Mach-O export trie lists no exports while the symbol table "
+            f"defines {len(meta.exports)}"
+        )
+        return
     kept: dict[str, MachoExport] = {}
     for export in meta.exports:
         if export.name in trie_flags:
@@ -458,6 +472,7 @@ def _parse(dylib_path: Path) -> MachoMetadata:
     meta = MachoMetadata()
     _parse_macho_header_fields(macho, header.header, meta)
     _parse_macho_load_commands(header, meta)
+    _note_tables_past_end(dylib_path, header)
 
     # Parse exported symbols via SymbolTable
     _parse_macho_symbols(
@@ -481,6 +496,46 @@ def _parse(dylib_path: Path) -> MachoMetadata:
         )
 
     return meta
+
+
+def _export_table_ranges(header: Any) -> list[tuple[str, int, int]]:
+    """``(what, offset, size)`` of every byte range the export read needs,
+    relative to the slice: the nlist table, its string table, the export trie."""
+    magic = getattr(header, "MH_MAGIC", MH_MAGIC_64)
+    nlist_size = 16 if magic in (MH_MAGIC_64, MH_CIGAM_64) else 12
+    ranges: list[tuple[str, int, int]] = []
+    for lc, cmd, _data in header.commands:
+        if lc.cmd == LC_SYMTAB:
+            ranges.append(("symbol table", cmd.symoff, cmd.nsyms * nlist_size))
+            ranges.append(("string table", cmd.stroff, cmd.strsize))
+        elif lc.cmd in (LC_DYLD_INFO, LC_DYLD_INFO_ONLY):
+            ranges.append(("export trie", cmd.export_off, cmd.export_size))
+        elif lc.cmd == _LC_DYLD_EXPORTS_TRIE:
+            ranges.append(("export trie", cmd.dataoff, cmd.datasize))
+    return ranges
+
+
+def _note_tables_past_end(dylib_path: Path, header: Any) -> None:
+    """Record a failure for each export-read range that runs past the slice.
+
+    macholib and the trie walk read a cut table as a shorter one: a string
+    table cut mid-name yields fewer names, a cut trie fewer exports, and
+    neither raises. A range the file does not hold is a truncated image, not
+    a smaller export table (dyld refuses to map it).
+    """
+    ranges = _export_table_ranges(header)
+    if not ranges:
+        return
+    start = int(getattr(header, "offset", 0))
+    available = os.path.getsize(dylib_path) - start
+    if getattr(header, "size", 0):
+        available = min(available, int(header.size))
+    for what, offset, size in ranges:
+        if size and int(offset) + int(size) > available:
+            note_export_read_failure(
+                f"Mach-O {what} ends at byte {int(offset) + int(size)} of a "
+                f"{available}-byte image (truncated)"
+            )
 
 
 def _parse_macho_symbols(

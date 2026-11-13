@@ -921,6 +921,7 @@ class TestPdbMetadataToolchainInfo:
 # ============================================================================
 
 from abicheck.pe_metadata import parse_pe_metadata
+from tests._pe_mock import structurally_whole
 
 
 class TestPeMetadataNonRegularFile:
@@ -945,16 +946,13 @@ class TestPeMetadataNoExports:
         dll = tmp_path / "test.dll"
         dll.write_bytes(b"fake")
 
-        mock_pe = MagicMock()
+        mock_pe = structurally_whole(MagicMock())
         mock_pe.FILE_HEADER.Machine = 0x8664
         mock_pe.FILE_HEADER.Characteristics = 0x2022
-        # No OPTIONAL_HEADER
+        # No OPTIONAL_HEADER, export or import directory, or version resource
         del mock_pe.OPTIONAL_HEADER
-        # No DIRECTORY_ENTRY_EXPORT
         del mock_pe.DIRECTORY_ENTRY_EXPORT
-        # No DIRECTORY_ENTRY_IMPORT
         del mock_pe.DIRECTORY_ENTRY_IMPORT
-        # No VS_FIXEDFILEINFO
         del mock_pe.VS_FIXEDFILEINFO
 
         with (
@@ -988,7 +986,7 @@ class TestPeMetadataOrdinalOnlyExports:
         mock_import.dll = b"KERNEL32.dll"
         mock_import.imports = [mock_imp_entry]
 
-        mock_pe = MagicMock()
+        mock_pe = structurally_whole(MagicMock())
         mock_pe.FILE_HEADER.Machine = 0x8664
         mock_pe.FILE_HEADER.Characteristics = 0x2022
         mock_pe.OPTIONAL_HEADER.DllCharacteristics = 0x8160
@@ -1022,7 +1020,7 @@ class TestPeMetadataVersionResource:
         mock_finfo.ProductVersionMS = (10 << 16) | 0
         mock_finfo.ProductVersionLS = (19041 << 16) | 1
 
-        mock_pe = MagicMock()
+        mock_pe = structurally_whole(MagicMock())
         mock_pe.FILE_HEADER.Machine = 0x8664
         mock_pe.FILE_HEADER.Characteristics = 0
         mock_pe.OPTIONAL_HEADER.DllCharacteristics = 0

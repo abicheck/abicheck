@@ -3772,38 +3772,45 @@ trap 'rm -f "$STDERR_FILE" "${_STDOUT_JSON_FILE:-}" "${PR_JSON:-}" "${_RELEASE_T
 # staleness bug it was fixing. Fixed non-destructively instead: record
 # each path's (mtime, size) fingerprint before running, and only trust it
 # afterward if that fingerprint changed (or the path didn't exist before).
-# GNU (`stat -c`) and BSD/macOS (`stat -f`) spell this differently, and a
-# stat that cannot report nanoseconds would miss a same-second, same-size
-# rewrite -- so a native answer is used only when it has exactly the
-# `<seconds>.<9 digits>:<size>` shape, and `_PY_BIN`'s `os.stat` answers
-# otherwise. The native path matters because this runs up to ten times per
-# invocation and an interpreter start costs ~30ms each; the two spellings
-# never mix within one run, since the first that validates on this host
-# answers every call. A missing path answers "" without spawning anything.
-#
-# The shape alone does not prove precision: some `stat` builds print nine
-# digits rounded to 100ns (`1790000000.123456700`), which would read a 1ns
-# rewrite as unchanged. So the native path is trusted only after
-# `_fingerprint_probe_native` has seen it round-trip an exact nanosecond
-# mtime on this host, once per run, at top level (the helper itself runs in
-# `$(...)` subshells, where a cached flag would not survive). Until the probe
-# says "yes" -- including when it never ran -- `os.stat` answers.
-_fingerprint_probe_native() {
-  _FP_NATIVE_OK=no
-  [[ -n "$_PY_BIN" && -n "${_PY_SAFE_DIR:-}" ]] || return 0
-  local _probe="$_PY_SAFE_DIR/.fingerprint-probe" _want="1790000000.123456789:0" _got
-  (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
+# Every answer is `<seconds>.<9 digits>:<size>`, exact to the nanosecond, so a
+# same-second, same-size rewrite still reads as changed. `_PY_BIN`'s
+# `os.stat(...).st_mtime_ns` is the exact source; GNU (`stat -c`) and
+# BSD/macOS (`stat -f`) can answer the same spelling without an interpreter
+# start (~30ms, and this runs up to ten times per invocation). A native stat
+# is trusted only after `_file_fingerprint_select` proved, once per run, that
+# it reproduces a known all-digits nanosecond mtime exactly: output *shape*
+# proves nothing -- uutils' `stat` (Ubuntu 26.04's default) prints
+# `%.9Y` as `.123456700` for a `.123456789` file, collapsing writes 1ns apart
+# into one fingerprint. Any doubt answers with `os.stat`, in the same
+# spelling, so the implementations never disagree about an unchanged file.
+# A missing path answers "" without spawning anything.
+_file_fingerprint_select() {
+  # Sets _FILE_FINGERPRINT_NATIVE to `gnu`, `bsd`, or "" (use os.stat). The
+  # probe's mtime is set and read back by os.stat, so the expectation never
+  # comes from the stat under test; a filesystem that cannot keep that
+  # nanosecond value proves nothing, and the native path stays off.
+  _FILE_FINGERPRINT_NATIVE=""
+  [[ -n "$_PY_BIN" && -n "${_PY_SAFE_DIR:-}" && -d "$_PY_SAFE_DIR" ]] || return 0
+  local _probe="$_PY_SAFE_DIR/.abicheck-fingerprint-probe" _expected
+  _expected="$(cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
 import os, sys
-p = sys.argv[1]
-open(p, "w").close()
-os.utime(p, ns=(1790000000123456789, 1790000000123456789))
-sys.exit(0 if os.stat(p).st_mtime_ns == 1790000000123456789 else 1)
-' "$_probe") 2>/dev/null || { rm -f -- "$_probe"; return 0; }
-  _got="$(stat -c '%.9Y:%s' -- "$_probe" 2>/dev/null)"
-  [[ "$_got" == "$_want" ]] || _got="$(stat -f '%.9Fm:%z' "$_probe" 2>/dev/null)"
-  [[ "$_got" == "$_want" ]] && _FP_NATIVE_OK=yes
+path, ns = sys.argv[1], 1_790_000_000_123_456_789
+with open(path, "wb") as handle:
+    handle.write(b"probe")
+os.utime(path, ns=(ns, ns))
+st = os.stat(path)
+if st.st_mtime_ns == ns:
+    seconds, fraction = divmod(st.st_mtime_ns, 1_000_000_000)
+    print(f"{seconds}.{fraction:09d}:{st.st_size}")
+' "$_probe" 2>/dev/null)"
+  if [[ -n "$_expected" ]]; then
+    if [[ "$(stat -c '%.9Y:%s' -- "$_probe" 2>/dev/null)" == "$_expected" ]]; then
+      _FILE_FINGERPRINT_NATIVE=gnu
+    elif [[ "$(stat -f '%.9Fm:%z' "$_probe" 2>/dev/null)" == "$_expected" ]]; then
+      _FILE_FINGERPRINT_NATIVE=bsd
+    fi
+  fi
   rm -f -- "$_probe"
-  return 0
 }
 _file_fingerprint() {
   # Empty output means "does not exist" -- a fingerprint that can never
@@ -3819,15 +3826,14 @@ _file_fingerprint() {
     _fingerprint_path="$PWD/$_fingerprint_path"
   fi
   [[ -e "$_fingerprint_path" ]] || return 0
-  local _native _shape='^[0-9]+\.[0-9]{9}:[0-9]+$'
-  if [[ "${_FP_NATIVE_OK:-}" == yes ]]; then
-    _native="$(stat -c '%.9Y:%s' -- "$_fingerprint_path" 2>/dev/null)"
-    [[ "$_native" =~ $_shape ]] \
-      || _native="$(stat -f '%.9Fm:%z' "$_fingerprint_path" 2>/dev/null)"
-    if [[ "$_native" =~ $_shape ]]; then
-      printf '%s\n' "$_native"
-      return 0
-    fi
+  local _native="" _shape='^[0-9]+\.[0-9]{9}:[0-9]+$'
+  case "${_FILE_FINGERPRINT_NATIVE:-}" in
+    gnu) _native="$(stat -c '%.9Y:%s' -- "$_fingerprint_path" 2>/dev/null)" ;;
+    bsd) _native="$(stat -f '%.9Fm:%z' "$_fingerprint_path" 2>/dev/null)" ;;
+  esac
+  if [[ "$_native" =~ $_shape ]]; then
+    printf '%s\n' "$_native"
+    return 0
   fi
   (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
 import os, sys
@@ -3836,10 +3842,11 @@ try:
 except OSError:
     pass
 else:
-    print(f"{st.st_mtime_ns}:{st.st_size}")
+    seconds, fraction = divmod(st.st_mtime_ns, 1_000_000_000)
+    print(f"{seconds}.{fraction:09d}:{st.st_size}")
 ' "$_fingerprint_path") 2>/dev/null
 }
-_fingerprint_probe_native
+_file_fingerprint_select
 _output_file_pre_fp=""
 if [[ -n "${_EFFECTIVE_OUTPUT_FILE:-}" ]]; then
   _output_file_pre_fp="$(_file_fingerprint "$_EFFECTIVE_OUTPUT_FILE")"
@@ -5954,7 +5961,9 @@ _delta_repo_top() {
   [[ -n "$top" ]] && (cd "$top" 2>/dev/null && pwd -P)
 }
 
-_file_fingerprint() {
+# Named apart from the report-freshness `_file_fingerprint` above: redefining
+# that name here silently swapped every later caller to a cksum token.
+_delta_library_checksum() {
   [[ -f "$1" ]] && cksum < "$1" 2>/dev/null || echo absent
 }
 
@@ -5970,7 +5979,7 @@ _build_delta_base() {
     return 1
   }
   lib="${CMD[$((OLD_OPERAND_INDEX + 1))]}"
-  before=$(_file_fingerprint "$lib")
+  before=$(_delta_library_checksum "$lib")
   result=$(mktemp "${RUNNER_TEMP:-/tmp}/abicheck-delta-build.XXXXXX") || return 1
   BASE_SHA="$ABICHECK_DELTA_BASE_SHA" ABICHECK_BASE_BUILD_COMMAND="${ABICHECK_DELTA_BASE_BUILD_COMMAND:-}" \
     DEST="${RUNNER_TEMP:-/tmp}/abicheck-delta-base-src" RESULT_FILE="$result" REPO_DIR="$repo" \
@@ -5978,7 +5987,7 @@ _build_delta_base() {
   _DELTA_BUILD_REPO="$repo"
   ABICHECK_DELTA_BUILD_ROOT=$(grep '^root=' "$result" | tail -n1 | cut -d= -f2-)
   grep -qx 'outcome=built' "$result" || return 1
-  if [[ "$(_file_fingerprint "$lib")" != "$before" ]]; then
+  if [[ "$(_delta_library_checksum "$lib")" != "$before" ]]; then
     _warning_annotation "abicheck: delta-base-build-command changed new-library outside the base checkout; the delta is not measured. The gate already ran and is unaffected."
     return 1
   fi

@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+from .parse_failures import debug_info_read_required, note_debug_info_read_failure
 
 if TYPE_CHECKING:
     from ..dwarf_advanced import AdvancedDwarfMetadata
@@ -107,7 +109,8 @@ def _resolve_debug_metadata(
         from ..dwarf_unified import parse_dwarf
 
         _resolved("dwarf")
-        return parse_dwarf(dwarf_path, _session_out=_session_out)
+        with debug_info_read_required(dwarf_path):
+            return _parse_dwarf_source(parse_dwarf, dwarf_path, so_path, _session_out)
 
     if debug_format is not None:
         raise ValueError(
@@ -131,7 +134,12 @@ def _resolve_debug_metadata(
                 return btf.to_dwarf_metadata(), AdvancedDwarfMetadata()
 
     # DWARF > BTF > CTF for userspace (or kernel fallback)
-    dwarf_meta, dwarf_adv = parse_dwarf(dwarf_path, _session_out=_session_out)
+    # Present-but-unreadable DWARF is an error, not "no debug info": falling
+    # through to BTF/CTF or symbols-only would read the lost types as absent.
+    with debug_info_read_required(dwarf_path):
+        dwarf_meta, dwarf_adv = _parse_dwarf_source(
+            parse_dwarf, dwarf_path, so_path, _session_out
+        )
     if dwarf_meta.has_dwarf:
         _resolved("dwarf")
         return dwarf_meta, dwarf_adv
@@ -155,3 +163,31 @@ def _resolve_debug_metadata(
     # No debug info at all — return empty DWARF metadata
     _resolved(None)
     return dwarf_meta, dwarf_adv
+
+
+def _parse_dwarf_source(
+    parse_dwarf: Any,
+    dwarf_path: Path,
+    so_path: Path,
+    session_out: list[DwarfSession] | None,
+) -> tuple[DwarfMetadata, AdvancedDwarfMetadata]:
+    """``parse_dwarf(dwarf_path)``, recording a detached debug file it could
+    not open at all.
+
+    The readers record a failure only once they have located DWARF: a
+    *so_path* that is not ELF is the export reader's to refuse. A detached
+    debug file (``--debug-root``/``--debuginfod``) has no such reader, so a
+    ``FAILED`` open of one is recorded here rather than falling back to a
+    symbols-only dump of a binary whose debug info was requested and found.
+    """
+    from ..model.dwarf_facts import AdvancedExtractionStatus
+
+    result: tuple[DwarfMetadata, AdvancedDwarfMetadata] = parse_dwarf(
+        dwarf_path, _session_out=session_out
+    )
+    if (
+        dwarf_path != so_path
+        and result[1].extraction is AdvancedExtractionStatus.FAILED
+    ):
+        note_debug_info_read_failure(f"detached debug file {dwarf_path} is unreadable")
+    return result  # the reader's own result, unrepacked

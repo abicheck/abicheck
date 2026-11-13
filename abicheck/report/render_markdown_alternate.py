@@ -81,6 +81,7 @@ from .render_markdown import (
     RootCauseSectionData,
     SeverityRow,
     SeveritySummary,
+    render_analysis_caveats,
     render_footer,
     render_impact_table,
     render_out_of_surface_note,
@@ -121,6 +122,7 @@ def _render_view_preamble(d: Mapping[str, Any]) -> list[str]:
     if d["coverage_warnings"]:
         lines += [f"> ⚠️ {w}" for w in d["coverage_warnings"]]
         lines.append("")
+    lines += render_analysis_caveats(d.get("analysis_caveats") or [])
     if d["recommendation"] is not None:
         lines += render_recommendation_section(
             RecommendationSection(**d["recommendation"])

@@ -27,6 +27,7 @@ source graph.
 
 from __future__ import annotations
 
+import dataclasses
 from typing import TYPE_CHECKING
 
 from ..impact.engine import assess_change
@@ -214,7 +215,9 @@ def enrich_covered_changes(
     These `Change` objects are shared with ``DiffResult.changes``, so the
     prose written here is deliberately consumer-neutral (see
     :func:`_format_consumer_impact`) and only findings with no evidence of
-    their own are touched.
+    their own are touched. Each enriched entry is replaced in *changes* by a
+    copy: the shared originals are never written to, and a caller reads the
+    enriched findings back from its own list.
 
     Refreshes ``change.impact_assessment`` after attaching (Codex review,
     fresh evidence): a change reaching this point with a *cached but
@@ -246,7 +249,7 @@ def enrich_covered_changes(
     proof path, reporting a narrower explanation than the same logic
     already claims this finding accounts for.
     """
-    for change in changes:
+    for index, change in enumerate(changes):
         if _has_impact_evidence(change):
             continue
         matches = [
@@ -255,9 +258,17 @@ def enrich_covered_changes(
         if not matches:
             continue
         explained = _merge_consumer_impact_paths(matches)
-        attach_consumer_impact(change, explained, graph, name_consumer=False)
-        change.impact_assessment = None
-        change.impact_assessment = assess_change(change)
+        # Enrich a copy, never the caller's object: the same Change is also
+        # DiffResult.changes' element, read by the library-wide report and by
+        # every other --used-by app scoped against that diff. Writing the
+        # consumer's path onto it leaked that path into both views and made
+        # the first app's walk win for every later app. The copy goes back
+        # into the caller's list, which is what the caller reads from.
+        enriched = dataclasses.replace(change)
+        attach_consumer_impact(enriched, explained, graph, name_consumer=False)
+        enriched.impact_assessment = None
+        enriched.impact_assessment = assess_change(enriched)
+        changes[index] = enriched
 
 
 def _merge_consumer_impact_paths(

@@ -338,12 +338,22 @@ class TestExportTrie:
         assert _walk_export_trie(blob) == []
 
     def test_walk_truncated_after_terminal(self):
-        # Node ends right after the (empty) terminal payload — no child count.
-        assert _walk_export_trie(b"\x00") == []
+        # Node ends right after the (empty) terminal payload -- no child
+        # count. A cut trie is malformed, never an empty export table (the
+        # canonical empty trie is b"\x00\x00").
+        with pytest.raises(ValueError, match="no child count"):
+            _walk_export_trie(b"\x00")
+        assert _walk_export_trie(b"\x00\x00") == []
 
     def test_walk_edge_missing_nul(self):
         # Child edge string runs off the end of the blob without a NUL.
-        assert _walk_export_trie(b"\x00\x01abc") == []
+        with pytest.raises(ValueError, match="unterminated"):
+            _walk_export_trie(b"\x00\x01abc")
+
+    def test_walk_child_offset_past_end(self):
+        # An edge whose child offset points past the blob is a cut trie.
+        with pytest.raises(ValueError, match="past the trie's end"):
+            _walk_export_trie(b"\x00\x01_a\x00\x40")
 
 
 #: File offset the trie is written at in the fixtures (export_off=0 means
