@@ -41,9 +41,13 @@ pytestmark = pytest.mark.skipif(os.name == "nt", reason="needs a POSIX shell")
 
 
 def _helper() -> str:
+    """The native-precision probe, the helper, and the probe's top-level call,
+    as ``run.sh`` runs them."""
     text = RUN_SH.read_text(encoding="utf-8")
-    start = text.index("_file_fingerprint() {")
-    return text[start : text.index("\n}\n", start) + 3]
+    start = text.index("_fingerprint_probe_native() {")
+    helper = text.index("_file_fingerprint() {", start)
+    end = text.index("\n}\n", helper) + 3
+    return text[start:end] + "_fingerprint_probe_native\n"
 
 
 def _fingerprints(
@@ -106,9 +110,12 @@ _STATES = [
         None,  # this host's native stat
         'echo "%.9Y:%s"',  # a stat that echoes the format literally
         'echo "1790000000:10"',  # a stat without sub-second precision
+        # Nine digits, but rounded to 100ns: the shape matches, the precision
+        # does not (seen on CI runners). The probe must reject it.
+        'echo "1790000000.123456700:10"',
         "exit 1",  # no usable stat at all
     ],
-    ids=["native", "literal-format", "whole-seconds", "failing"],
+    ids=["native", "literal-format", "whole-seconds", "rounded-100ns", "failing"],
 )
 def test_fingerprints_are_equal_exactly_when_stat_says_so(
     tmp_path: Path, fake_stat: str | None

@@ -3780,6 +3780,31 @@ trap 'rm -f "$STDERR_FILE" "${_STDOUT_JSON_FILE:-}" "${PR_JSON:-}" "${_RELEASE_T
 # invocation and an interpreter start costs ~30ms each; the two spellings
 # never mix within one run, since the first that validates on this host
 # answers every call. A missing path answers "" without spawning anything.
+#
+# The shape alone does not prove precision: some `stat` builds print nine
+# digits rounded to 100ns (`1790000000.123456700`), which would read a 1ns
+# rewrite as unchanged. So the native path is trusted only after
+# `_fingerprint_probe_native` has seen it round-trip an exact nanosecond
+# mtime on this host, once per run, at top level (the helper itself runs in
+# `$(...)` subshells, where a cached flag would not survive). Until the probe
+# says "yes" -- including when it never ran -- `os.stat` answers.
+_fingerprint_probe_native() {
+  _FP_NATIVE_OK=no
+  [[ -n "$_PY_BIN" && -n "${_PY_SAFE_DIR:-}" ]] || return 0
+  local _probe="$_PY_SAFE_DIR/.fingerprint-probe" _want="1790000000.123456789:0" _got
+  (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
+import os, sys
+p = sys.argv[1]
+open(p, "w").close()
+os.utime(p, ns=(1790000000123456789, 1790000000123456789))
+sys.exit(0 if os.stat(p).st_mtime_ns == 1790000000123456789 else 1)
+' "$_probe") 2>/dev/null || { rm -f -- "$_probe"; return 0; }
+  _got="$(stat -c '%.9Y:%s' -- "$_probe" 2>/dev/null)"
+  [[ "$_got" == "$_want" ]] || _got="$(stat -f '%.9Fm:%z' "$_probe" 2>/dev/null)"
+  [[ "$_got" == "$_want" ]] && _FP_NATIVE_OK=yes
+  rm -f -- "$_probe"
+  return 0
+}
 _file_fingerprint() {
   # Empty output means "does not exist" -- a fingerprint that can never
   # equal a real file's, so "did not exist before, exists now" always
@@ -3795,12 +3820,14 @@ _file_fingerprint() {
   fi
   [[ -e "$_fingerprint_path" ]] || return 0
   local _native _shape='^[0-9]+\.[0-9]{9}:[0-9]+$'
-  _native="$(stat -c '%.9Y:%s' -- "$_fingerprint_path" 2>/dev/null)"
-  [[ "$_native" =~ $_shape ]] \
-    || _native="$(stat -f '%.9Fm:%z' "$_fingerprint_path" 2>/dev/null)"
-  if [[ "$_native" =~ $_shape ]]; then
-    printf '%s\n' "$_native"
-    return 0
+  if [[ "${_FP_NATIVE_OK:-}" == yes ]]; then
+    _native="$(stat -c '%.9Y:%s' -- "$_fingerprint_path" 2>/dev/null)"
+    [[ "$_native" =~ $_shape ]] \
+      || _native="$(stat -f '%.9Fm:%z' "$_fingerprint_path" 2>/dev/null)"
+    if [[ "$_native" =~ $_shape ]]; then
+      printf '%s\n' "$_native"
+      return 0
+    fi
   fi
   (cd "$_PY_SAFE_DIR" && PYTHONPATH= "$_PY_BIN" -c '
 import os, sys
@@ -3812,6 +3839,7 @@ else:
     print(f"{st.st_mtime_ns}:{st.st_size}")
 ' "$_fingerprint_path") 2>/dev/null
 }
+_fingerprint_probe_native
 _output_file_pre_fp=""
 if [[ -n "${_EFFECTIVE_OUTPUT_FILE:-}" ]]; then
   _output_file_pre_fp="$(_file_fingerprint "$_EFFECTIVE_OUTPUT_FILE")"
