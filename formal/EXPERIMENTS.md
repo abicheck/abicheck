@@ -6,7 +6,7 @@ Run date 2026-11-12. Tools: Lean 4.15.0 (core only), gcc 13.3.0, castxml 0.7.0, 
 
 | Id | Question | Answer |
 |---|---|---|
-| E1 | Can the record-layout space be stated so that "gap" is decidable? | **Yes**, for a bounded fragment ([§ E1](#e1-the-record-layout-space)). The generator's own space has no *edit* axis, which is why "coverage" could not express what was missing |
+| E1 | Can the record-layout space be stated so that "gap" is decidable? | **Yes**, for a bounded fragment ([§ E1](#e1-the-record-layout-space)). The generator's space then had no *edit* axis, which is why "coverage" could not express what was missing (abiforge's space has one now) |
 | E2 | Do the generator's layout expectations hold? Do they have holes? | All 6 C layout operators agree with the model on their seed. Only 1 is valid **class-wide** (proved). Padding-absorbed sub-classes are barely generated: append-into-tail-padding arrived concurrently in #1999; insert-without-move and remove-without-shrink are still missing |
 | E3 | Can expectations be *computed* from a model instead of hand-written? | **Yes** for layout: Lean computes offsets and sizeof for 1248 edit cases, and the result is exported as a table. **Not shown by E3**: that the table's cases are exactly a stated space, that the generator covers that space, or that every case has an oracle and a passing run. The offset/size theorems are properties of the layout *model*; the "done" mark is not a proof of generator completeness or of surjectivity of the chain (see E10) |
 | E4 | Does one representative per edit class suffice? | **No.** 19% of "insert before f" cases leave f in place, and 25% of "append" cases keep sizeof. Proved sufficient conditions split the classes correctly |
