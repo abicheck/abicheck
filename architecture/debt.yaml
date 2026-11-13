@@ -498,7 +498,7 @@
     },
     {
       "path": "abicheck/diff_platform_elf_symbols.py",
-      "baseline_lines": 836,
+      "baseline_lines": 815,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -663,7 +663,7 @@
     },
     {
       "path": "abicheck/name_classification.py",
-      "baseline_lines": 1252,
+      "baseline_lines": 1251,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",

@@ -9,7 +9,6 @@ from the loader's and the platform ABI's rules, never from abicheck's answer.
 
 from __future__ import annotations
 
-import platform
 from typing import Any
 
 from tests._edit_corpus_expect import Rule
@@ -46,13 +45,10 @@ _X86_HOSTS = frozenset({"x86_64", "amd64", "i386", "i686"})
 
 
 def _x86(c: Any) -> str | None:
-    # The corpus targets x86 Linux; the asm and -m switches below are x86's,
-    # and the corpus builds natively, so the host is the target.
-    if c.objfmt != "elf":
-        return f"{c.objfmt}: not an x86 ELF target"
-    if platform.machine().lower() not in _X86_HOSTS:
-        return f"{platform.machine()}: not an x86 host"
-    return None
+    # The corpus targets x86 Linux; the asm and -m switches below are x86's.
+    # The host CPU is a capability (``host_arch=_X86_HOSTS``, probed by
+    # ``capability_gap``), not a config fact: the cell list stays host-free.
+    return None if c.objfmt == "elf" else f"{c.objfmt}: not an x86 ELF target"
 
 
 def _elf(c: Any) -> str | None:
@@ -131,6 +127,7 @@ _DYNAMIC = (
         "(DT_TEXTREL): refused under W^X policies, and the pages stop being shared",
         expected=frozenset({"TEXT_RELOCATION_INTRODUCED"}),
         precondition=_x86,
+        host_arch=_X86_HOSTS,
         **_RISK,
         **_BINARY,
     ),
@@ -163,6 +160,7 @@ _DYNAMIC = (
         "glibc with ISA-level checks refuses to load the library on an older CPU",
         expected=frozenset({"X86_ISA_BASELINE_RAISED"}),
         precondition=_x86_64,
+        host_arch=_X86_HOSTS,
         probe_flags=("-Wl,-z,x86-64-v3",),
         **_RISK,
         **_BINARY,
@@ -188,6 +186,7 @@ _DYNAMIC = (
             ),
         ),
         precondition=_x86,
+        host_arch=_X86_HOSTS,
         min_evidence="dwarf",
         **_RISK,
     ),
@@ -224,6 +223,7 @@ _TOOLCHAIN = (
             ),
         ),
         precondition=_x86,
+        host_arch=_X86_HOSTS,
         # A gcc switch: clang refuses it, so its cells read unavailable.
         probe_flags=("-mveclibabi=svml",),
         min_evidence="dwarf",
@@ -375,6 +375,7 @@ _IMPORTS = (
             ),
         ),
         precondition=_x86_64,
+        host_arch=_X86_HOSTS,
         **_AT_MOST_RISK,
         **_BINARY,
     ),
@@ -556,6 +557,7 @@ _ALT = (
         "no relocation against .text remains: the code pages stay read-only",
         expected=frozenset({"TEXT_RELOCATION_REMOVED"}),
         precondition=_x86,
+        host_arch=_X86_HOSTS,
         **_COMPAT_ONLY,
         **_BINARY,
     ),
@@ -660,6 +662,7 @@ _ALT = (
         "hidden pointer the caller passes: old callers pass none",
         expected=frozenset({"STRUCT_RETURN_CONVENTION_CHANGED"}),
         precondition=_x86_64,
+        host_arch=_X86_HOSTS,
         min_evidence="dwarf",
     ),
     _alt(
@@ -670,6 +673,7 @@ _ALT = (
         "reads its argument from another register class than callers pass it in",
         expected=frozenset({"LONG_DOUBLE_ABI_CHANGED"}),
         precondition=_x86,
+        host_arch=_X86_HOSTS,
         probe_flags=("-mlong-double-64",),
         min_evidence="dwarf",
     ),
@@ -688,6 +692,7 @@ _ALT = (
         "return typed edit_int changes size together",
         expected=frozenset({"INTEGER_MODEL_CHANGED"}),
         precondition=_x86_64,
+        host_arch=_X86_HOSTS,
         min_evidence="dwarf",
     ),
     _alt(
@@ -811,6 +816,7 @@ _CXX = (
         "passed by invisible reference, where old callers pass it in a register",
         expected=frozenset({"VALUE_ABI_TRAIT_CHANGED"}),
         precondition=_x86_64,
+        host_arch=_X86_HOSTS,
         min_evidence="dwarf",
     ),
     _xa(

@@ -762,7 +762,9 @@ _SHAPES = (
             ),
         ),
         "a helper defined only in the source becomes a new export no header "
-        "declares: nothing existing changes",
+        "declares: nothing existing changes, but against the headers' public "
+        "contract it is an accidental export consumers can start binding to "
+        "(an ABI-hygiene risk, ADR-035)",
         expected=frozenset({"FUNC_ADDED_ELF_ONLY"}),
         rules=(
             Rule(
@@ -770,6 +772,7 @@ _SHAPES = (
                 {
                     "expected": frozenset(),
                     "verdict_min": "NO_CHANGE",
+                    "verdict_max": "NO_CHANGE",
                     "observable": False,
                 },
                 "under -fvisibility=hidden only declarations inside the header's "
@@ -778,27 +781,19 @@ _SHAPES = (
             ),
             Rule(
                 lambda c: c.evidence in ("binary", "dwarf"),
-                {"expected": frozenset({"FUNC_ADDED"})},
+                {"expected": frozenset({"FUNC_ADDED"}), "verdict_max": "COMPATIBLE"},
                 "without a header to miss it from, the export is an ordinary addition",
             ),
             Rule(
                 lambda c: c.objfmt != "elf",
-                {
-                    "expected": frozenset({"FUNC_ADDED"}),
-                    "verdict_max": "COMPATIBLE_WITH_RISK",
-                },
-                "off ELF the export reads as an ordinary addition (func_added_elf_only "
-                "is an ELF kind), and against the public header it is still undeclared",
-            ),
-            Rule(
-                lambda c: c.evidence == "headers",
-                {"verdict_max": "COMPATIBLE_WITH_RISK"},
-                "against the public header the new export is undeclared: nothing "
-                "existing changes, but a consumer may bind a symbol the library "
-                "never promised, so the release may read it as a risk",
+                {"expected": frozenset({"FUNC_ADDED"})},
+                "off ELF the undeclared-export kind (read from the ELF export table) "
+                "is not owed, but the export a header set does not declare is the "
+                "same hygiene risk on a Mach-O or PE export table",
             ),
         ),
-        **_COMPAT_ONLY,
+        verdict_min="COMPATIBLE",
+        verdict_max="COMPATIBLE_WITH_RISK",
         **_BINARY,
     ),
 )

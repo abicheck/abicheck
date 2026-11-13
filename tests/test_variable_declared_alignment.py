@@ -37,6 +37,7 @@ from abicheck.extract.headers.castxml.preprocessed_text import (
     PreprocessedText,
     alignment_files,
     attach_preprocessed_text,
+    file_key,
     read_preprocessed_text,
 )
 from abicheck.extract.headers.castxml.variable_alignment import (
@@ -83,7 +84,10 @@ def test_the_alignment_file_set_survives_the_document_round_trip(recorded) -> No
     attach_preprocessed_text(root, PreprocessedText({}, "cdecl", recorded))
     table = read_preprocessed_text(root)
     assert table is not None
-    assert table.alignment_files == recorded
+    # Stored as file_key spellings (on Windows "/x/a.h" is "\\x\\a.h").
+    assert table.alignment_files == (
+        None if recorded is None else frozenset(map(file_key, recorded))
+    )
     # Not recorded means no file is known to be free of a specifier.
     assert table.spells_alignment("/x/b.h") is (recorded is None)
     assert table.spells_alignment("/x/a.h") is (

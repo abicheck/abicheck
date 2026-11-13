@@ -882,11 +882,21 @@ class TestAllocatorReplacement:
         assert ChangeKind.ALLOCATOR_REPLACEMENT_REMOVED in _kinds(r)
 
     def test_stable_replacement_no_finding(self):
-        old = _elf(symbols=[_func("_Znwm")])
-        new = _elf(symbols=[_func("_Znwm"), _func("_ZdaPv")])
+        old = _elf(symbols=[_func("_Znwm"), _func("_ZdaPv")])
+        new = _elf(symbols=[_func("_ZdaPv"), _func("_Znwm")])
         r = compare(_snap(old), _snap(new))
         kinds = _kinds(r)
         assert ChangeKind.ALLOCATOR_REPLACEMENT_ADDED not in kinds
+        assert ChangeKind.ALLOCATOR_REPLACEMENT_REMOVED not in kinds
+
+    def test_growing_the_replaced_set_is_reported(self):
+        # Gaining operator delete[] beside an already-replaced operator new
+        # changes which delete[] the whole process calls: the replaced *set*
+        # is the contract, not merely whether one exists.
+        old = _elf(symbols=[_func("_Znwm")])
+        new = _elf(symbols=[_func("_Znwm"), _func("_ZdaPv")])
+        kinds = _kinds(compare(_snap(old), _snap(new)))
+        assert ChangeKind.ALLOCATOR_REPLACEMENT_ADDED in kinds
         assert ChangeKind.ALLOCATOR_REPLACEMENT_REMOVED not in kinds
 
     def test_member_operator_not_matched(self):

@@ -178,8 +178,8 @@ head, middle or tail × *shifts* (another offset or sizeof changes) or
 *absorbed* (padding takes it). Head × absorbed is excluded because a layout
 rule rules it out, and a test checks that against the Lean layout table. The
 model also has classes for reorder, retype (same layout, grows, shrinks,
-alignment only), array bound changes, bit-fields, record-level edits and
-rename/cv. Base-class layout (`inheritance`) is split by base added
+alignment only), array bound changes, bit-fields, record-level edits
+(including a change of triviality for calls) and rename/cv. Base-class layout (`inheritance`) is split by base added
 (non-virtual or virtual), removed, reordered, made virtual or non-virtual,
 resized, or given a new access. Every other construct has the single class
 `any`. `OP_EDIT_CLASS` in `_edit_corpus_space.py` maps each operator of a

@@ -12,7 +12,6 @@ pin the projection's reading of each key so the default lane covers it.
 from __future__ import annotations
 
 import copy
-import json
 from pathlib import Path
 from typing import Any
 
@@ -23,20 +22,10 @@ from abicheck.extract.headers.gcc import backend as gcc_backend
 from abicheck.extract.headers.gcc.contracts import clean, vtable_fact
 from abicheck.extract.headers.gcc.projection import project
 from abicheck.model import Fact, FactStatus
+from tests._native_gcc_fixtures import fixture_header, fixture_rows
 
-_FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "native_gcc"
-
-
-def _header(tmp_path: Path, name: str) -> Path:
-    header = tmp_path / ("c.h" if name == "c" else "cpp.h")
-    header.write_text((_FIXTURES / header.name).read_text(encoding="utf-8"))
-    return header
-
-
-def _rows(name: str, header: Path) -> list[dict[str, Any]]:
-    text = (_FIXTURES / f"rows_{name}.json").read_text(encoding="utf-8")
-    # Escaped as JSON string content: a Windows path carries backslashes.
-    return json.loads(text.replace("@HEADER@", json.dumps(str(header))[1:-1]))
+_rows = fixture_rows
+_header = fixture_header
 
 
 def _record(rows: list[dict[str, Any]], name: str) -> dict[str, Any]:

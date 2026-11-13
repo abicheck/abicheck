@@ -1,4 +1,4 @@
-# Formal-methods experiments E1–E9: results
+# Formal-methods experiments E1–E10: results
 
 Roadmap and rationale: [`docs/contribute/plans/formal-methods-and-generator-completeness.md`](../docs/contribute/plans/formal-methods-and-generator-completeness.md).
 E0 (the `TYPE_FIELD_OFFSET_CHANGED` rule) is in [`README.md`](README.md).
@@ -8,12 +8,13 @@ Run date 2026-11-12. Tools: Lean 4.15.0 (core only), gcc 13.3.0, castxml 0.7.0, 
 |---|---|---|
 | E1 | Can the record-layout space be stated so that "gap" is decidable? | **Yes**, for a bounded fragment ([§ E1](#e1-the-record-layout-space)). The generator's own space has no *edit* axis, which is why "coverage" could not express what was missing |
 | E2 | Do the generator's layout expectations hold? Do they have holes? | All 6 C layout operators agree with the model on their seed. Only 1 is valid **class-wide** (proved). Padding-absorbed sub-classes are barely generated: append-into-tail-padding arrived concurrently in #1999; insert-without-move and remove-without-shrink are still missing |
-| E3 | Can expectations be *computed* from a model instead of hand-written? | **Yes** for layout: Lean computes offsets and sizeof for 1248 edit cases, and the result is exported as a table |
+| E3 | Can expectations be *computed* from a model instead of hand-written? | **Yes** for layout: Lean computes offsets and sizeof for 1248 edit cases, and the result is exported as a table. **Not shown by E3**: that the table's cases are exactly a stated space, that the generator covers that space, or that every case has an oracle and a passing run. The offset/size theorems are properties of the layout *model*; the "done" mark is not a proof of generator completeness or of surjectivity of the chain (see E10) |
 | E4 | Does one representative per edit class suffice? | **No.** 19% of "insert before f" cases leave f in place, and 25% of "append" cases keep sizeof. Proved sufficient conditions split the classes correctly |
 | E5 | Does abicheck detect all of the bounded space? | **Yes**: 0 mismatches over 3488 field-offset and 1248 size predictions |
 | E6 | Are the model and the extraction sound in practice? | Model = gcc on 2496/2496 layouts. castxml and DWARF extraction = gcc on 2496/2496 each |
 | E7 | Can a finding vanish from the disposition pipeline unrecorded? | A *sufficient* condition for the count trigger: no step drops and adds in the same call. Without it, a shortest counterexample exists, including the *add-to-bucket* variant the code comment does not name. No real step violates the condition on the corpus |
 | E8 | Can a path report a clean pass after zero comparisons, or a removal without inventory? | **I1 and I2 hold** on the real aggregation over all ≤3-member releases. **I3 was violated** under the default `warn` policy (a degraded `failed` member beside a completed one exited `0`); **fixed**, now 0 violations ([§ E8](#e8-scope-completeness-adr-065)) |
+| E10 | Can one layout fragment be closed end to end: explicit space, generator proved to cover it, oracle, compiler and abicheck run on every case, proved reduction? | **Yes**, for "insert one scalar field into a 1–4 field scalar struct", LP64 SysV: 6368 cases, generator bijection **proved**, gcc and clang = model on 12736/12736 layouts each, abicheck = oracle on 6368/6368 per compiler; same observable ⇔ same key **proved**, 32 classes, reduced set 199× smaller ([`FRAGMENT.md`](FRAGMENT.md)) |
 | E9 | Does unknown evidence create findings? | Header channel: no manufactured or changed-value claim in 12 erasure sweeps. The DWARF channel **cannot be swept**: it has no "unknown" value. Two latent "unknown → 0" encodings found there (not reachable from valid DWARF or from snapshots abicheck wrote) |
 
 ## E1. The record-layout space
@@ -65,6 +66,16 @@ outside the E1 edit space, so it is **not tested**. For the missing two,
 nothing in the generator would catch a regression.
 
 ## E3/E4. Computed expectations and class reduction
+
+**What E3 established, exactly.** The layout model computes offsets and
+sizeof for the exported cases, and the theorems below hold for the model.
+E3 did **not** define the case space independently of the table, prove that
+the table or the generator covers it, give every case an expected finding and
+verdict, or prove when cases may be merged: the plan's original E3 wording
+("proofs of totality, surjectivity and oracle soundness") was not met by this
+pilot. A covered operation name is not a covered class either: the padding
+counterexamples below are cases with the same operation and different
+results. All of that is done for one fragment in E10 ([`FRAGMENT.md`](FRAGMENT.md)).
 
 Lean (`AbiLean.Layout`), no `sorry`, axioms only `propext`/`Quot.sound`:
 
@@ -317,6 +328,10 @@ with the glue transcribed; it does not run `abicheck compare` on a directory).
 | Claim | Status |
 |---|---|
 | Layout theorems (E4) | **proved** in Lean for the model |
+| E3 table = a complete space / generator complete | **not established by E3**; established for one fragment only by E10 |
+| Fragment F (E10): enumeration = space, generator bijection, same observable ⇔ same key | **proved** in Lean |
+| Fragment F: C generator realizes Lean's `gen`; reduced set covers every class | **tested** exhaustively |
+| Fragment F: gcc/clang = model, abicheck = oracle | **tested** exhaustively (6368 cases × 2 compilers); a reduced-set-only run relies on an **assumed** transfer ([`FRAGMENT.md`](FRAGMENT.md) § What is and is not proved) |
 | Model = gcc layout (E6a) | **tested** exhaustively on the bounded fragment |
 | Extraction = gcc (E6b) | **tested** on the same fragment, two backends |
 | abicheck = model (E5) | **tested** exhaustively on the fragment; nothing outside it |

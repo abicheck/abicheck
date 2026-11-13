@@ -51,6 +51,22 @@ def _pr_config(lang: str, toolchain: Toolchain) -> Config:
     return default_config(lang, toolchain).with_(platform=PR_TIER_PLATFORM)
 
 
+def _pr_default_matrix() -> list[tuple[object, object]]:
+    """The default-matrix cells as the PR tier selects them on its own
+    runners: ``op.requires`` judged for a Linux ELF build, where
+    ``test_abi_edit_corpus.default_matrix`` judges them for the host. The
+    host CPU is no part of it: an operator that needs x86 declares
+    ``host_arch``, which ``capability_gap`` reads when the cell runs."""
+    from tests.test_abi_edit_corpus import matrix
+
+    placeholder = Toolchain("gcc", 0, "gcc", "g++")
+    return [
+        (op, seed)
+        for op, seed in matrix()
+        if op.requires(_pr_config(seed.lang, placeholder)) is None
+    ]
+
+
 # --- ChangeKind scope -----------------------------------------------------------
 
 
@@ -289,10 +305,8 @@ def test_ledger_floors_are_declared_in_scope_kinds() -> None:
 
 def _pr_tier_declared() -> set[str]:
     """Kinds the PR-tier cells expect, from the cell list with stand-in toolchains."""
-    from tests.test_abi_edit_corpus import default_matrix
-
     out: set[str] = set()
-    for op, seed in default_matrix():
+    for op, seed in _pr_default_matrix():
         for tc in (GCC, CLANG):
             out |= cov.expectation_kinds(op.expect(_pr_config(seed.lang, tc)))
     for op_name, seed_name, family, changes in _PR:
@@ -316,18 +330,31 @@ def test_pr_floor_is_reachable_from_the_pr_cells() -> None:
     assert floor <= _pr_tier_declared()
 
 
-@pytest.mark.parametrize("host", ["linux", "darwin", "win32"])
+# The unit-test legs' hosts: (sys.platform, platform.machine()).
+_HOSTS = [
+    ("linux", "x86_64"),
+    ("darwin", "arm64"),
+    ("win32", "AMD64"),
+    ("linux", "aarch64"),
+]
+
+
+@pytest.mark.parametrize(("host", "machine"), _HOSTS, ids=lambda v: str(v))
 def test_pr_tier_expectations_do_not_depend_on_the_checking_host(
-    monkeypatch: pytest.MonkeyPatch, host: str
+    monkeypatch: pytest.MonkeyPatch, host: str, machine: str
 ) -> None:
     """The floor check must give one answer on every unit-test leg: the PR
-    cells' expectations are those of Linux ELF, wherever the check runs. On
-    the host's own platform, the same cells expect other kinds (the oracle:
-    a config built for the host differs), so pinning is what makes it hold."""
+    cells, and their expectations, are those of the Linux ELF runners,
+    wherever the check runs. Both host facts are varied: the platform
+    (``Config.platform`` defaults to it) and the machine, which no
+    ``requires`` may read (``host_arch`` is a run-time capability)."""
     linux = _pr_tier_declared()
     monkeypatch.setattr(sys, "platform", host)
+    monkeypatch.setattr("platform.machine", lambda: machine)
     assert _pr_tier_declared() == linux
     if host != "linux":
+        # Control: built for the host, the same cells expect other kinds, so
+        # the pin is what makes the check host-independent.
         from tests.test_abi_edit_corpus import default_matrix
 
         host_kinds = {
@@ -335,12 +362,7 @@ def test_pr_tier_expectations_do_not_depend_on_the_checking_host(
             for op, seed in default_matrix()
             for k in cov.expectation_kinds(op.expect(default_config(seed.lang, GCC)))
         }
-        pinned = {
-            k
-            for op, seed in default_matrix()
-            for k in cov.expectation_kinds(op.expect(_pr_config(seed.lang, GCC)))
-        }
-        assert host_kinds != pinned, "the host platform no longer changes expectations"
+        assert host_kinds != linux, "the host platform no longer changes expectations"
 
 
 # --- records and the verified side ------------------------------------------------

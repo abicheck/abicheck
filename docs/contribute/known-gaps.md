@@ -313,6 +313,30 @@ current emitter, which is unchanged.
 
 ### False-clean risk
 
+#### castxml records no GNU contract attribute on a function (2026-11-12)
+
+**Status (2026-11-12): OPEN.** castxml 0.7 writes no `nonnull`, `returns_nonnull`, `malloc`, `format`, `warn_unused_result` (or any other GNU function attribute but a few x86-32 conventions) into a `<Function>`'s `attributes`, so `extract/headers/castxml/location.py`'s contract-token reader never sees one and `Function.contract_attributes` stays empty on both sides. Adding or dropping such an attribute reads `NO_CHANGE` at castxml headers depth, where the clang and native gcc backends report `func_contract_attribute_added`/`_removed` (COMPATIBLE_WITH_RISK). Found by the edit corpus (`func_contract_attribute_added`/`_removed` on `c_elf`, strict xfails in `tests/_edit_corpus_known.py`). Closing it: recover the tokens from the declaration's own (preprocessed) text, the way `extract/headers/castxml/calling_convention.py` already recovers `ms_abi`/`sysv_abi`. Owner: `extract/headers/castxml/`.
+`false-clean` — a castxml dump misses a function's added or withdrawn contract attribute.
+<!-- canary: tests/test_header_backend_fact_gaps_integration.py::test_castxml_records_no_gnu_contract_attribute -->
+
+#### Only the clang header backend marks a `va_list` parameter (2026-11-12)
+
+**Status (2026-11-12): OPEN.** `Param.is_va_list` is read by the clang backend alone (`extract/headers/clang/qualifiers.py`, the x86-64 `__va_list_tag *` spelling); castxml and the native gcc plugin never establish it, and DWARF marks it unsupported. A parameter that becomes or stops being a `va_list` therefore reads only `func_params_changed` at castxml and gcc headers depth, without `param_became_va_list`/`param_lost_va_list`. The verdict is unaffected (the parameter type change gates on its own). Found by the edit corpus (`param_became_va_list`/`param_lost_va_list` on `c_elf`). Owner: `extract/headers/castxml/`, `extract/headers/gcc/`.
+`false-clean` — the va_list-specific finding is missing on two of three header backends.
+<!-- canary: tests/test_header_backend_fact_gaps_integration.py::test_only_the_clang_backend_marks_a_va_list_parameter -->
+
+#### The native gcc header backend records no dynamic exception specification (2026-11-12)
+
+**Status (2026-11-12): OPEN.** `Function.exception_spec` comes from castxml's `throw` attribute and clang's `throw(...)` spelling; the gcc plugin (`extract/headers/gcc/gcc_facts.cc`, `projection.py`) emits no `TYPE_RAISES_EXCEPTIONS` list, so a C++14 `throw(int)` -> `throw(int, long)` reads `NO_CHANGE` at gcc headers depth where castxml and clang report `func_exception_spec_changed` (COMPATIBLE_WITH_RISK). Found by the edit corpus (`func_exception_spec_widened` on `cxx_more`, before C++17). Owner: `extract/headers/gcc/`.
+`false-clean` — a gcc-backend dump misses a changed dynamic exception specification.
+<!-- canary: tests/test_header_backend_fact_gaps_integration.py::test_the_gcc_backend_records_no_dynamic_exception_spec -->
+
+#### The native gcc header backend keeps an unexported declaration PUBLIC (2026-11-12)
+
+**Status (2026-11-12): OPEN.** A function a public header declares but the library does not export is recorded `Visibility.HIDDEN` (with `binary_exported` false) by castxml and clang, but `Visibility.PUBLIC` (with `binary_exported` false) by the gcc plugin backend (`extract/headers/gcc/backend.py` sets only the surface facts). The old and new sides of a declaration that gains an export, or of an inline function moved out of line, then fail to pair, and the change reads `func_added` instead of `func_export_added`/`func_lost_inline` (both COMPATIBLE, so the verdict holds). Found by the edit corpus (`declared_exports_defined` on `c_elf`, `inline_function_outlined` on `cxx_more`). Owner: `extract/headers/gcc/`.
+`false-clean` — a gcc-backend dump reports a gained export or a lost `inline` as a plain addition.
+<!-- canary: tests/test_header_backend_fact_gaps_integration.py::test_the_gcc_backend_keeps_an_unexported_declaration_public -->
+
 #### The native gcc header backend records no function the library never emits (2026-11-12)
 
 **Status (2026-11-12): OPEN.** castxml and the clang backend record a header-only function: a `static inline` C function, or a C++ `inline` function no unit of the library calls. The native gcc plugin backend (ADR-092) does not, because gcc never emits it. So removing such a function reads `NO_CHANGE` instead of `inline_function_removed`, and an incompatible parameter change reads nothing instead of `header_only_function_params_changed`, although consumers that call it stop compiling. Found by the edit corpus (`header_inline_removed` on `cxx_alt`, `header_only_function_params_changed` on `c_elf_alt`, `headers.gcc`). Owner: `extract/headers/gcc/`.
@@ -616,6 +640,11 @@ per-item status in the
 
 ### False-positive risk
 
+#### Affected-symbol attribution ignores identifier boundaries (2026-11-12)
+
+**Status (2026-11-12): OPEN.** `affected_symbols` on a type finding is built by `diff_filtering._build_type_to_funcs` (and `_build_type_embed_index` for embedding), which relates a changed type to every public function whose signature type string *contains* the type's name (`_SubstringMatcher`, documented as "identical substring semantics" to the `tname in ft` loop it replaced). With no identifier boundary, a change to `struct s1` is attributed to functions taking `struct s10 *`, `struct s100 *`, …: the closed layout fragment (`formal/FRAGMENT.md`) observed `use_s10 … use_s199` on `s1`'s findings. Findings, kinds and verdicts are unaffected (attribution only); consumer-impact views, appcompat matching on mangled names and report "affected functions" lists over-report. Fix: match on identifier boundaries in the matcher's output (a needle hit counts only when the characters before and after it are not `[A-Za-z0-9_]`, and `::` scoping is respected), keeping the single Aho-Corasick pass; check `compare/type_symbol_disambiguation.attribute_scoped_types` still sees the same candidates. Do not switch to exact-token equality on the whole ref: `const Widget &` and `Widget *` must still match `Widget`. Owner: `abicheck/diff_filtering.py`.
+<!-- canary: tests/test_affected_symbols_identifier_boundary_gap.py::test_type_name_prefix_of_another_type_is_attributed_to_its_functions -->
+
 #### Dropping a version node that binds no symbol reads as a binary break (2026-11-12)
 
 **Status (2026-11-12): OPEN.** A version script that drops a node no exported symbol was bound to (`LIBEDIT_1.1 { local: ...; } LIBEDIT_1.0;`) removes a `.gnu.version_d` entry no consumer can have recorded in its `.gnu.version_r`, since a consumer records only the versions of symbols it binds. `symbol_version_defined_removed` fires on its own exactly in this case (with a bound symbol, `symbol_version_node_removed` wins the dedup) and keeps its `BREAKING` default. Found by the edit corpus (`empty_version_node_dropped` on `c_elf_alt`; every consumer still loads). Owner: `diff_platform_elf_symbols.py` / the `symbol_version_defined_removed` taxonomy entry.
@@ -639,12 +668,6 @@ per-item status in the
 **Status (2026-11-12): OPEN.** `vector_abi_changed` compares the `-mveclibabi=`/`-fveclib=` switches each unit's `DW_AT_producer` records and keeps its `BREAKING` default whatever the code does. A library that makes no vectorizable math call is byte-identical apart from the producer string, yet the rebuild gates as a break. Closing it needs evidence that a vectorized math entry point (an SVML or libmvec import) actually changed. Found by the edit corpus (`vector_math_abi_changed` on `c_elf`, gcc). Owner: `compare/toolchain_flags.py`.
 `false-positive` — a switch that changed no code gates as a binary break.
 <!-- no-canary: pinned by the edit corpus's strict-xfail `vector_math_abi_changed` entry in tests/_edit_corpus_known.py, which fails once the answer changes -->
-
-#### Replacing or dropping the global operator new is demoted or misread as a removal (2026-11-12)
-
-**Status (2026-11-12): OPEN.** `allocator_replacement_added`/`_removed` name the first allocator export (`_ZdlPv`), which `elf_symbol_filter` treats as a transitive runtime symbol, so with public headers public-surface scoping demotes the finding as `not-exported`. The removal direction also reports the lost `_Znwm` export as `func_removed`/`func_removed_elf_only` (`BREAKING`), though consumers resolve `operator new` from the C++ runtime and keep running (`_STDLIB_PREFIXES` spells it `_ZnwSt`, a mangling no `operator new` has). Found by the edit corpus (`allocator_replacement_added` on `cxx_more`, `allocator_replacement_removed` on `cxx_alt`). Owner: `surface.py`, `elf_symbol_filter.py`.
-`false-positive` — the allocator interposition finding disappears while an export loss nobody depends on gates as a break.
-<!-- no-canary: pinned by the edit corpus's strict-xfail `allocator_replacement_removed` entry in tests/_edit_corpus_known.py, which fails once the answer changes -->
 
 #### An inline function's static local, exported by clang, reads as an undeclared export (2026-11-12)
 

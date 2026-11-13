@@ -17,7 +17,6 @@ the C plugin, where they do not apply.
 from __future__ import annotations
 
 import copy
-import json
 from pathlib import Path
 from typing import Any
 
@@ -27,8 +26,8 @@ from abicheck.errors import SnapshotError
 from abicheck.extract.headers.backend_protocol import HeaderParseRequest
 from abicheck.extract.headers.gcc import backend as gcc_backend
 from abicheck.extract.headers.gcc.projection import project
+from tests._native_gcc_fixtures import fixture_header, fixture_rows
 
-_FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "native_gcc"
 #: Booleans a projected row of each kind carries, as the plugin emits them.
 _FUNCTION_FLAGS = ("artificial", "inline")
 _VARIABLE_FLAGS = ("artificial", "external_linkage", "const")
@@ -43,17 +42,8 @@ _CXX_FUNCTION_FLAGS = (
 )
 
 
-def _rows(name: str, header: Path) -> list[dict[str, Any]]:
-    text = (_FIXTURES / f"rows_{name}.json").read_text(encoding="utf-8")
-    return json.loads(text.replace("@HEADER@", str(header)))
-
-
-def _header(tmp_path: Path, name: str) -> Path:
-    header = tmp_path / ("c.h" if name == "c" else "cpp.h")
-    header.write_text(
-        (_FIXTURES / header.name).read_text(encoding="utf-8"), encoding="utf-8"
-    )
-    return header
+_rows = fixture_rows
+_header = fixture_header
 
 
 def _project(rows: list[dict[str, Any]], header: Path, language: str) -> Any:

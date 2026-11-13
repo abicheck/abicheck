@@ -36,6 +36,7 @@ from .diff_versioning import (  # noqa: F401 — re-exported for existing caller
     _UNPARSEABLE_VERSION as _UNPARSEABLE_VERSION,
     _parse_abi_version_tag as _parse_abi_version_tag,
 )
+from .elf_symbol_filter import is_global_allocation_function
 from .model import AbiSnapshot, stdlib_namespaces_excluded
 from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
@@ -696,23 +697,6 @@ def _diff_elf_symbol_pair(
 
 # ── Import-surface and allocator-replacement detectors (coverage extension) ──
 
-#: Itanium manglings of the *global* (non-placement, non-member) operator
-#: new/delete family: _Znw/_Zna = operator new/new[], _Zdl/_Zda = delete/
-#: delete[] (plain, aligned, nothrow, and sized variants all share these
-#: prefixes). Member operators mangle inside their class (_ZN...) and never
-#: start with these tokens.
-_ALLOCATOR_MANGLING_PREFIXES = ("_Znw", "_Zna", "_Zdl", "_Zda")
-
-#: Placement new/delete forms, which are NOT replaceable global allocation
-#: functions — they only serve explicit placement call sites, so their
-#: presence flipping is not an allocator-contract change. Placement new is
-#: ``operator new(size_t, void*)`` → ``_Zn[wa][jmy]Pv``; placement delete is
-#: ``operator delete(void*, void*)`` → ``_Zd[la]Pv{S_|Pv}`` (the second void*
-#: is spelled ``S_`` by Itanium substitution, or ``Pv`` unsubstituted). Sized
-#: (``_ZdlPvm``), aligned (``…St11align_val_t``) and nothrow delete keep a
-#: non-pointer second parameter and are correctly left in the replaceable set.
-_PLACEMENT_OPERATOR_RE = re.compile(r"^_Zn[wa][jmy]Pv|^_Zd[la]Pv(?:S_|Pv)")
-
 
 def _diff_elf_import_set(old_elf: Any, new_elf: Any) -> list[Change]:
     """Diff the undefined-symbol (import) surface of the two binaries.
@@ -792,45 +776,40 @@ def _diff_elf_import_set(old_elf: Any, new_elf: Any) -> list[Change]:
 def _diff_allocator_replacement(old_elf: Any, new_elf: Any) -> list[Change]:
     """Detect a library starting/stopping to export global operator new/delete.
 
-    These symbols interpose allocation for the whole process, so their
-    presence flipping is a loader-level contract change even though the
-    symbol-level diff also reports the individual adds/removes. Fires once per
-    direction at the library level. Gated on captured ELF identity, not on the
-    symbol lists being non-empty — an export table that is empty on one side
-    is still evidence about which allocator symbols it (doesn't) export.
+    These symbols interpose allocation for the whole process: a loader-level
+    contract change, reported once per direction under the library-level
+    label ``<global-allocator>`` (an allocator's own name reads as the C++
+    runtime's, so public-surface scoping would drop the finding as
+    not-exported). The replaced *set* is compared, so dropping ``operator
+    new`` while keeping ``operator delete`` reports too. Gated on captured ELF
+    identity, not on non-empty symbol lists: an empty export table is still
+    evidence of what it exports.
     """
     if not both_captured_elf_identity(old_elf, new_elf):
         return []
-    old_syms = getattr(old_elf, "symbols", None) or []
-    new_syms = getattr(new_elf, "symbols", None) or []
-
-    def _is_global_allocator(name: str) -> bool:
-        return name.startswith(_ALLOCATOR_MANGLING_PREFIXES) and not (
-            _PLACEMENT_OPERATOR_RE.match(name)
-        )
-
-    old_alloc = sorted(s.name for s in old_syms if _is_global_allocator(s.name))
-    new_alloc = sorted(s.name for s in new_syms if _is_global_allocator(s.name))
-    if bool(old_alloc) == bool(new_alloc):
-        return []
-    if new_alloc:
-        first = new_alloc[0]
-        suffix = f" (+{len(new_alloc) - 1} more)" if len(new_alloc) > 1 else ""
-        return [
-            make_change(
-                ChangeKind.ALLOCATOR_REPLACEMENT_ADDED,
-                symbol=first,
-                detail=f"{first}{suffix}",
-                new_value=str(len(new_alloc)),
+    old = {
+        s.name
+        for s in getattr(old_elf, "symbols", None) or []
+        if is_global_allocation_function(s.name)
+    }
+    new = {
+        s.name
+        for s in getattr(new_elf, "symbols", None) or []
+        if is_global_allocation_function(s.name)
+    }
+    changes: list[Change] = []
+    for kind, names, side in (
+        (ChangeKind.ALLOCATOR_REPLACEMENT_ADDED, sorted(new - old), "new_value"),
+        (ChangeKind.ALLOCATOR_REPLACEMENT_REMOVED, sorted(old - new), "old_value"),
+    ):
+        if names:
+            more = f" (+{len(names) - 1} more)" if len(names) > 1 else ""
+            changes.append(
+                make_change(
+                    kind,
+                    symbol="<global-allocator>",
+                    detail=f"{names[0]}{more}",
+                    **{side: str(len(names))},
+                )
             )
-        ]
-    first = old_alloc[0]
-    suffix = f" (+{len(old_alloc) - 1} more)" if len(old_alloc) > 1 else ""
-    return [
-        make_change(
-            ChangeKind.ALLOCATOR_REPLACEMENT_REMOVED,
-            symbol=first,
-            detail=f"{first}{suffix}",
-            old_value=str(len(old_alloc)),
-        )
-    ]
+    return changes

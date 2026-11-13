@@ -603,23 +603,22 @@ def has_anonymous_type_location(name: str) -> bool:
 
 
 def _declaring_header_discriminator(path: str) -> str:
-    """Checkout-independent discriminator derived from *path*'s own
-    basename (the declaring header's filename), used alongside
-    ``:<line>:<col>`` to distinguish two anonymous/lambda declarations that
-    share the same coordinates but live in DIFFERENT headers (Codex
-    review, round 8, fresh evidence): keeping only ``:<line>:<col>``
-    collapsed ``guard<(lambda at /src/one.hpp:4:3)>`` and ``guard<(lambda
-    at /src/two.hpp:4:3)>`` onto the identical identity
-    ``guard<(lambda:4:3)>``, since both files can legitimately declare
-    their own lambda at line 4, column 3. The basename alone (not the full
-    path, which embeds the checkout root) is stable across checkouts of
-    the same source tree while still separating two distinctly-named
-    headers -- the only residual collision is two DIFFERENT headers
-    sharing both a basename AND the same line:col, an accepted, narrower
-    limitation than the pre-fix "any two headers" collision.
+    """Checkout-independent discriminator: *path*'s basename (the declaring
+    header's filename), kept alongside ``:<line>:<col>`` so two anonymous/
+    lambda declarations at the same coordinates in DIFFERENT headers stay
+    distinct (Codex review, round 8): ``:line:col`` alone collapsed
+    ``guard<(lambda at /src/one.hpp:4:3)>`` and ``guard<(lambda at
+    /src/two.hpp:4:3)>`` onto ``guard<(lambda:4:3)>``. The basename, unlike
+    the full path, is stable across checkouts; the residual collision is two
+    headers sharing both a basename and the same line:col (accepted).
+
+    Leading whitespace is dropped: whitespace is also the separator after
+    ``at``, so a bare basename's leading space is consumed as separator,
+    while under a root (``at /root/ a.h``) it survives. Keeping it would make
+    the identity depend on whether a root precedes the basename.
     """
     posix = path.replace("\\", "/")
-    return posix.rsplit("/", 1)[-1]
+    return posix.rsplit("/", 1)[-1].lstrip()
 
 
 def _quoted_spans(name: str) -> list[tuple[int, int]]:

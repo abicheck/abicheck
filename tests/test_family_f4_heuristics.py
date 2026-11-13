@@ -107,7 +107,9 @@ EXEMPTION_CEILINGS: dict[str, int] = {
     # match_frozen_namespace -- both one pre-existing `_Z` mangling check.
     # 41: minus three sites the Phase 3 decoration codecs deleted
     # (export_join._macho_shifted, the rename parser's ctor/dtor scan).
-    "grammar": 46,
+    # 45: minus the allocator placement regex, folded into the exact
+    # replaceable-allocator match in elf_symbol_filter (not a scanned owner).
+    "grammar": 45,
     # 43: minus outcome_release.unclassified_release_contribution_fields,
     # moved into its test (dead-code plan, Stage D).
     # 49: plus the two path-prefix checks in manifest_tu_scope_field, moved
@@ -121,7 +123,9 @@ EXEMPTION_CEILINGS: dict[str, int] = {
     # 22: plus the retired function-name prefix check (castxml's reserved
     # __builtin_*, declared by the generation-57 SPELLING_MIGRATIONS row) in
     # policy/retired_function_drift.
-    "platform": 22,
+    # 20: minus the allocator prefix vocabulary and its startswith site,
+    # folded into the exact replaceable-allocator match in elf_symbol_filter.
+    "platform": 20,
     # 9: main replaced the two fnmatch frozen-namespace matchers with one
     # policy.frozen_namespace helper.
     "user_rule": 9,

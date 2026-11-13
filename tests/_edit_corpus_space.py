@@ -287,6 +287,11 @@ OP_EDIT_CLASS: dict[str, dict[str, str]] = {
         "record_became_opaque": "record_opaque",
         "struct_became_union": "record_kind_change",
         "record_removed": "record_removed",
+        "returned_struct_grew_past_registers": "insert_tail_shifts",
+        # Holder embeds detail::Impl by value; Impl grows, moving Holder::x: a
+        # member whose type grew, not a member appended at the tail.
+        "internal_type_grew": "retype_grows",
+        "by_value_struct_became_nontrivial": "record_triviality_change",
     },
     "inheritance": {
         "base_became_virtual": "base_became_virtual",

@@ -228,6 +228,10 @@ CI's `pr` profile.
   removes) takes only operators naming that role), the `Config` axes and toolchain
   registry, the execution oracle (consumers run against old and new library,
   layout probes, new-header compiles) and `reconcile` (false-clean first).
+  `requires` must not read the host: a host capability (CPU, libstdc++, a
+  flag the toolchain may refuse) is an `EditOp` field (`host_arch`,
+  `needs_libstdcxx`, `probe_flags`) that `capability_gap` turns into an
+  *unavailable* cell at run time.
   Record a mismatch in `_edit_corpus_known.py` with a `known-gaps.md` row;
   change an expectation only from the edit's ABI meaning (an `oracle-conflict`
   means it is wrong), never to match abicheck's answer. Nightly: `ABICHECK_EDIT_CORPUS_TIER=nightly pytest
