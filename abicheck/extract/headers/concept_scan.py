@@ -92,7 +92,9 @@ def _drop_if0_blocks(code: str) -> str:
                     depth += 1
                 elif kw == "endif":
                     depth -= 1
-                elif depth == 1:  # else/elif of the #if 0 group itself
+                elif depth == 1 and not (kw == "elif" and m.group(2).strip() == "0"):
+                    # else/elif of the #if 0 group itself; an `#elif 0` is
+                    # just as dead, so the group keeps being skipped.
                     depth = 0
             continue
         if m and m.group(1) == "if" and m.group(2).strip() == "0":

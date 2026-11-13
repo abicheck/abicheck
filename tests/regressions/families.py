@@ -113,6 +113,7 @@ FAMILIES: dict[str, Family] = {
                 "tests/test_family_f4_heuristics.py",
                 "tests/test_state_guards_phase5.py",
                 "tests/test_clang_type_evidence.py",
+                "tests/test_concept_scan_elif0.py",
             ),
             planned_reason="",
         ),
@@ -505,6 +506,7 @@ _F3 = (
     "identity.benign_duplicate_declaration_key",
 )
 _F4 = (
+    "scanner.dead_preprocessor_branch_read_as_live",
     "scanner.delimiter_inside_a_literal_counted_as_structure",
     "classification.name_shape_as_contract_membership",
     "classification.declaration_existence_as_export_obligation",

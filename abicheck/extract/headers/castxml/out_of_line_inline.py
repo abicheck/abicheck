@@ -100,7 +100,7 @@ def _top_level_commas(inner: str) -> int:
         if ch in "([{":
             depth += 1
         elif ch in ")]}":
-            depth -= 1
+            depth = max(0, depth - 1)
         elif depth == 0 and ch == "<":
             angle += 1
         elif depth == 0 and ch == ">" and angle:

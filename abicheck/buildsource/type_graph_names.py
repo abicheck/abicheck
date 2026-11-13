@@ -86,7 +86,7 @@ def _top_level_paren_index(s: str) -> int:
         if c == "<":
             depth += 1
         elif c == ">":
-            depth -= 1
+            depth = max(0, depth - 1)
         elif c == "(" and depth == 0:
             return i
     return -1
@@ -176,7 +176,7 @@ def _split_top_level_commas(s: str) -> list[str]:
         if c in "<(":
             depth += 1
         elif c in ">)":
-            depth -= 1
+            depth = max(0, depth - 1)
         if c == "," and depth == 0:
             parts.append("".join(cur))
             cur = []

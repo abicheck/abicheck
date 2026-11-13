@@ -85,7 +85,7 @@ def namespace_suffix_spellings(identity: str) -> list[str]:
         if ch == "<":
             depth += 1
         elif ch == ">":
-            depth -= 1
+            depth = max(0, depth - 1)
         elif ch == ":" and depth == 0 and i + 1 < n and identity[i + 1] == ":":
             splits.append(i + 2)
             i += 1
