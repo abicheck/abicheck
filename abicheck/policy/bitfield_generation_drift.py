@@ -37,8 +37,6 @@ untouched.
 
 from __future__ import annotations
 
-import re
-
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.change_catalog.registry import Verdict
@@ -51,18 +49,10 @@ __all__ = ["GCC_BITFIELD_FIX_GENERATION", "demote_gcc_byte_bitfield_drift"]
 #: bit-field marked as a bit-field.
 GCC_BITFIELD_FIX_GENERATION = 60
 _GCC_PRODUCER = "gcc-experimental"
-_BITS_RE = re.compile(r"^bits=(None|\d+)$")
-
-
-def _bits(value: object) -> int | None | bool:
-    """The width in a ``bits=N`` value, ``None`` for ``bits=None``, and
-    ``False`` for anything else (not this finding's shape)."""
-    if not isinstance(value, str):
-        return False
-    m = _BITS_RE.match(value)
-    if m is None:
-        return False
-    return None if m.group(1) == "None" else int(m.group(1))
+#: The values ``diff_types`` writes on ``FIELD_BITFIELD_CHANGED`` for "not a
+#: bit-field" and for a whole-byte bit-field width (up to a 128-bit unit).
+_NOT_A_BITFIELD = "bits=None"
+_WHOLE_BYTE_WIDTHS = frozenset(f"bits={8 * k}" for k in range(1, 17))
 
 
 def demote_gcc_byte_bitfield_drift(
@@ -91,13 +81,12 @@ def demote_gcc_byte_bitfield_drift(
             or change.effective_verdict is not None
         ):
             continue
-        old_bits, new_bits = _bits(change.old_value), _bits(change.new_value)
-        stale_bits, fresh_bits = (
-            (old_bits, new_bits) if stale_is_old else (new_bits, old_bits)
+        stale_value, fresh_value = (
+            (change.old_value, change.new_value)
+            if stale_is_old
+            else (change.new_value, change.old_value)
         )
-        if stale_bits is not None or not isinstance(fresh_bits, int):
-            continue
-        if isinstance(fresh_bits, bool) or fresh_bits <= 0 or fresh_bits % 8:
+        if stale_value != _NOT_A_BITFIELD or fresh_value not in _WHOLE_BYTE_WIDTHS:
             continue
         change.effective_verdict = Verdict.COMPATIBLE_WITH_RISK
         change.modulation_rule = GENERATION_DRIFT_RULE
@@ -105,6 +94,6 @@ def demote_gcc_byte_bitfield_drift(
             f"{GENERATION_DRIFT_REASON} (old operand extractor generation "
             f"{old_generation or 'unstated'}, new {new_generation or 'unstated'}; "
             f"the gcc plugin before generation {GCC_BITFIELD_FIX_GENERATION} "
-            f"stored a byte-aligned {fresh_bits}-bit bit-field as a plain member)"
+            f"stored a byte-aligned bit-field ({fresh_value}) as a plain member)"
         )
     return changes

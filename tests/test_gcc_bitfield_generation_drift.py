@@ -92,7 +92,7 @@ def test_annotation_keeps_the_finding_with_rule_and_reason() -> None:
     )
     assert out == [change]
     assert change.modulation_rule == "extractor_generation_drift"
-    assert "8-bit bit-field" in (change.modulation_reason or "")
+    assert "byte-aligned bit-field (bits=8)" in (change.modulation_reason or "")
 
 
 def test_other_kinds_and_modulated_findings_are_untouched() -> None:
