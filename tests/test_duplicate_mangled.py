@@ -18,8 +18,23 @@ unstable diffs when template instantiations appeared in multiple TUs.
 
 from __future__ import annotations
 
+import json
+import tempfile
+from pathlib import Path
+
+from hypothesis import HealthCheck, given, settings, strategies as st
+
 from abicheck.checker import ChangeKind, Verdict, compare
-from abicheck.model import AbiSnapshot, Function, Visibility
+from abicheck.model import (
+    AbiSnapshot,
+    Function,
+    RecordType,
+    TypeField,
+    Variable,
+    Visibility,
+)
+from abicheck.report import diff_report as _reporter
+from abicheck.serialization import load_snapshot, save_snapshot
 
 
 def _func(
@@ -222,3 +237,165 @@ class TestDuplicateMangledSymbols:
             snap.index()
             snap.index()
         assert mock_warn.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# First-wins survives a stored roundtrip (the stored-operand form)
+# ---------------------------------------------------------------------------
+#
+# The policy above is only safe if a *stored* snapshot keeps every duplicate in
+# its original order: otherwise a baseline file could resolve a different
+# winner than the live snapshot it was saved from, and the same comparison
+# would report different findings depending on the operand form. The oracle
+# is a plain first-occurrence scan over the declaration list, not the index.
+
+_MANGLED_POOL = st.sampled_from(["_Z1av", "_Z1bv", "_Z1cv"])
+_TYPES = st.sampled_from(["void", "int", "long", "char*"])
+
+
+def _roundtrip(snap: AbiSnapshot) -> AbiSnapshot:
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "snap.json"
+        save_snapshot(snap, path)
+        return load_snapshot(path)
+
+
+def _first_by(items: list, key: str) -> dict:
+    first: dict = {}
+    for item in items:
+        first.setdefault(getattr(item, key), item)
+    return first
+
+
+def _signature(entry: object) -> tuple:
+    if isinstance(entry, Function):
+        return ("f", entry.name, entry.return_type)
+    if isinstance(entry, Variable):
+        return ("v", entry.name, entry.type)
+    assert isinstance(entry, RecordType)
+    return ("t", entry.size_bits, tuple(f.type for f in entry.fields))
+
+
+#: One side as plain data -- (functions, variables, types) of (name, key,
+#: type) triples -- so Hypothesis can print a counterexample (its dataclass
+#: pretty-printer trips over ``AbiSnapshot``'s retired ``functions`` field).
+_Spec = tuple[
+    tuple[tuple[str, str], ...],
+    tuple[tuple[str, str], ...],
+    tuple[tuple[str, int, str], ...],
+]
+
+_SPEC_ST = st.tuples(
+    st.lists(st.tuples(_MANGLED_POOL, _TYPES), max_size=5).map(tuple),
+    st.lists(st.tuples(st.sampled_from(["g1", "g2"]), _TYPES), max_size=4).map(tuple),
+    st.lists(
+        st.tuples(st.sampled_from(["S", "T"]), st.sampled_from([32, 64]), _TYPES),
+        max_size=3,
+    ).map(tuple),
+)
+
+
+def _colliding_snapshot(spec: _Spec, version: str) -> AbiSnapshot:
+    functions, variables, types = spec
+    return AbiSnapshot(
+        library="libdup.so",
+        version=version,
+        functions=[
+            _func(f"fn_{i}", mangled, return_type=ret)
+            for i, (mangled, ret) in enumerate(functions)
+        ],
+        variables=[
+            Variable(
+                name=f"var_{i}", mangled=mangled, type=typ, visibility=Visibility.PUBLIC
+            )
+            for i, (mangled, typ) in enumerate(variables)
+        ],
+        types=[
+            RecordType(
+                name=name,
+                kind="struct",
+                size_bits=size,
+                fields=[TypeField(name="x", type=typ, offset_bits=0)],
+            )
+            for name, size, typ in types
+        ],
+    )
+
+
+def _winners(snap: AbiSnapshot) -> dict[str, tuple]:
+    return {
+        **{f"f:{k}": _signature(v) for k, v in snap.function_map.items()},
+        **{f"v:{k}": _signature(v) for k, v in snap.variable_map.items()},
+        **{
+            f"t:{t.name}": _signature(snap.type_by_name(t.name))
+            for t in snap.declarations.types
+        },
+    }
+
+
+def _oracle_winners(snap: AbiSnapshot) -> dict[str, tuple]:
+    decls = snap.declarations
+    return {
+        **{
+            f"f:{k}": _signature(v)
+            for k, v in _first_by(list(decls.functions), "mangled").items()
+        },
+        **{
+            f"v:{k}": _signature(v)
+            for k, v in _first_by(list(decls.variables), "mangled").items()
+        },
+        **{
+            f"t:{k}": _signature(v)
+            for k, v in _first_by(list(snap.declarations.types), "name").items()
+        },
+    }
+
+
+class TestDuplicateMangledStoredRoundtrip:
+    def test_conflicting_entries_keep_winner_and_findings_after_roundtrip(self) -> None:
+        mangled = "_Z3foov"
+        old = AbiSnapshot(
+            library="lib.so",
+            version="1.0",
+            functions=[
+                _func("foo", mangled, return_type="void"),
+                _func("foo_alt", mangled, return_type="int"),
+            ],
+        )
+        new = AbiSnapshot(
+            library="lib.so",
+            version="2.0",
+            functions=[_func("foo", mangled, return_type="int")],
+        )
+        stored_old = _roundtrip(old)
+
+        assert stored_old.function_map[mangled].name == "foo"
+        assert stored_old.function_map[mangled].return_type == "void"
+        for a, b in ((old, new), (new, old)):
+            live = compare(a, b)
+            stored = compare(_roundtrip(a), _roundtrip(b))
+            assert [(c.kind, c.symbol) for c in live.changes] == [
+                (ChangeKind.FUNC_RETURN_CHANGED, mangled)
+            ]
+            assert json.loads(_reporter.to_json(stored)) == json.loads(
+                _reporter.to_json(live)
+            )
+        # Both duplicates are kept in the stored document, in order.
+        assert [f.name for f in stored_old.declarations.functions] == ["foo", "foo_alt"]
+
+    @settings(
+        max_examples=80, deadline=None, suppress_health_check=[HealthCheck.too_slow]
+    )
+    @given(old_spec=_SPEC_ST, new_spec=_SPEC_ST)
+    def test_first_wins_is_stable_across_roundtrip(
+        self, old_spec: _Spec, new_spec: _Spec
+    ) -> None:
+        old = _colliding_snapshot(old_spec, "1.0")
+        new = _colliding_snapshot(new_spec, "2.0")
+        stored_old, stored_new = _roundtrip(old), _roundtrip(new)
+        for live, stored in ((old, stored_old), (new, stored_new)):
+            assert _winners(live) == _oracle_winners(live)
+            assert _winners(stored) == _winners(live)
+        assert json.loads(
+            _reporter.to_json(compare(stored_old, stored_new))
+        ) == json.loads(_reporter.to_json(compare(old, new)))

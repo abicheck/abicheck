@@ -27,6 +27,9 @@ the pre-migration behavior) that is not the mechanism under test.
 
 from __future__ import annotations
 
+import itertools
+
+import pytest
 from hypothesis import given, settings, strategies as st
 
 from abicheck.checker_policy import ChangeKind
@@ -138,18 +141,23 @@ class TestBackendEquivalence:
             assert change.entity_id is not None
             assert change.entity_id.kind is EntityKind.TYPEDEF
 
-    def test_the_real_ir_own_order_is_emitted_directly(self) -> None:
+    @pytest.mark.parametrize("ir_order", list(itertools.permutations(("A", "B", "C"))))
+    def test_a_reordered_real_ir_is_used_directly_and_emits_in_alias_order(
+        self, ir_order: tuple[str, ...]
+    ) -> None:
         """ADR-063 Track T3: ``typedef_index_pair`` no longer adjudicates
-        against a legacy alias map's order -- since both sides carry a real
-        ``SemanticIR`` here, it is used directly, in whatever order it
-        itself carries, not the legacy map's order. (Before T3, an IR
-        holding the right aliases in a *different* order than the legacy
-        map fell back to the adapter, which emits in the legacy map's
-        order; that fallback no longer exists once both sides have a real
-        IR.)
+        against a legacy alias map's order -- an IR holding the right aliases
+        in a *different* order than the legacy map is used directly (its
+        findings carry the IR's entity ids), not replaced by the adapter.
+
+        Neither container's order reaches the report, though: findings come
+        out in alias order whatever order the IR or the legacy map holds,
+        because a stored snapshot does not keep a live one's insertion order
+        and the report must not depend on which of the two was compared
+        (``test_live_stored_operand_property.py``).
         """
         maps = {"A": "int", "B": "int", "C": "int"}
-        reordered = {"C": "int", "A": "int", "B": "int"}
+        reordered = dict.fromkeys(ir_order, "int")
         snap = _snap(
             typedefs_qualified=maps,
             semantic_ir=_ir_backed(reordered).ir,
@@ -157,8 +165,12 @@ class TestBackendEquivalence:
         old_index, _ = typedef_index_pair(
             snap, snap, old_typedefs=maps, new_typedefs=maps
         )
-        emitted = [c.symbol for c in _run(old_index, SemanticIRIndex(SemanticIR()))]
-        assert emitted == ["C", "A", "B"]
+        emitted = _run(old_index, SemanticIRIndex(SemanticIR()))
+        assert [c.symbol for c in emitted] == ["A", "B", "C"]
+        assert all(
+            c.entity_id is not None and c.entity_id.kind is EntityKind.TYPEDEF
+            for c in emitted
+        )
 
 
 # -- behavior preservation, case by case -----------------------------------
