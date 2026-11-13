@@ -1017,3 +1017,34 @@ def test_the_layout_probe_qualifies_a_record_declared_in_a_namespace() -> None:
         "offsetof(lib::detail::N,a)",
     }
     assert exprs["sizeof(lib::detail::N)"] == "sizeof(struct lib::detail::N)"
+
+
+def test_the_layout_probe_skips_only_records_it_cannot_qualify() -> None:
+    # One role mixing every form: only the records inside ``namespace a::b {``
+    # or an anonymous namespace are skipped; the rest keep their probes, and an
+    # enum in a named namespace is probed by its qualified name.
+    from tests._edit_corpus_exec import probe_expressions
+
+    header = (
+        "namespace a::b { struct M { int x; }; }\n"
+        "namespace { struct A { int x; }; }\n"
+        "using namespace std;\n"
+        "struct T { int x; };\n"
+        "namespace lib { enum E { e0, e1 }; enum class F { f0 }; struct N { int y; }; }\n"
+    )
+    exprs = probe_expressions({"mixed": (header, "")}, "c++")
+    assert set(exprs) == {
+        "sizeof(T)",
+        "alignof(T)",
+        "offsetof(T,x)",
+        "sizeof(lib::N)",
+        "alignof(lib::N)",
+        "offsetof(lib::N,y)",
+        "sizeof(enum lib::E)",
+        "lib::E::e0",
+        "lib::E::e1",
+        "sizeof(enum lib::F)",
+        "lib::F::f0",
+    }
+    assert exprs["lib::E::e1"] == "(long long)(lib::e1)"
+    assert exprs["lib::F::f0"] == "(long long)(lib::F::f0)"
