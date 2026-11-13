@@ -532,7 +532,10 @@ def _extract_structs(
                     name=m_name,
                     type_name=resolver.name(m_type),
                     byte_offset=byte_offset,
-                    byte_size=resolver.size(m_type),
+                    # BTF's resolver reports 0 for an unresolvable type; that is
+                    # unknown here, not a real zero (narrowed: a real 0 is then
+                    # also unknown, so a 0 -> N size change is not reported).
+                    byte_size=resolver.size(m_type) or None,
                     bit_offset=bit_offset,
                     bit_size=bit_size,
                 )

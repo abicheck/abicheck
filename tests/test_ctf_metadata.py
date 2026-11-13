@@ -987,7 +987,7 @@ class TestCtfResolverThroughExtraction:
         b.add_type("s", CTF_K_STRUCT, 1, 0, extra=members)
 
         meta = parse_ctf_from_bytes(b.build())
-        assert meta.structs["s"].fields[0].byte_size == 0
+        assert meta.structs["s"].fields[0].byte_size is None
 
     def test_resolver_size_pointer(self) -> None:
         """Pointer size is 8 (64-bit assumed)."""

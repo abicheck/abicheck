@@ -326,7 +326,8 @@ def _extract_fields(types: TypeDatabase, cv_struct: CvStruct) -> list[FieldInfo]
             continue
 
         type_name = types.type_name(member.type_ti)
-        byte_size = types.type_size(member.type_ti)
+        # The PDB resolver reports 0 for an unresolvable type: unknown here.
+        byte_size: int | None = types.type_size(member.type_ti) or None
         bit_offset = 0
         bit_size = 0
 
@@ -337,7 +338,7 @@ def _extract_fields(types: TypeDatabase, cv_struct: CvStruct) -> list[FieldInfo]
             bit_offset = bf.position
             # For bitfields, resolve the underlying type name and size
             type_name = types.type_name(bf.underlying_ti)
-            byte_size = types.type_size(bf.underlying_ti)
+            byte_size = types.type_size(bf.underlying_ti) or None
 
         fields.append(
             FieldInfo(

@@ -74,8 +74,9 @@ class TestUnknownTypeWarning:
         """Unknown DWARF tag that HAS a name attribute must NOT warn (has useful info)."""
 
         class _Attr:
-            def __init__(self, value: object) -> None:
+            def __init__(self, value: object, form: str = "DW_FORM_data4") -> None:
                 self.value = value
+                self.form = form  # pyelftools always states a form
 
         die = _MockDie(
             tag="DW_TAG_vendor_custom",
@@ -91,11 +92,12 @@ class TestUnknownTypeWarning:
         assert name == "my_vendor_type"
 
     def test_fallback_returns_tag_name_for_unknown(self) -> None:
-        """_compute_fallback_type_info must return (tag, 0) for unknown tagless DIE."""
+        """_compute_fallback_type_info must return (tag, None) for unknown tagless DIE:
+        its size is not observed, so it is unknown, never a real 0 (generation 58)."""
         die = _MockDie(tag="DW_TAG_some_unknown", offset=1)
         name, size = _compute_fallback_type_info(die, "DW_TAG_some_unknown")
         assert name == "DW_TAG_some_unknown"  # falls back to tag string
-        assert size == 0
+        assert size is None
 
     def test_fallback_returns_unknown_for_empty_tag(self) -> None:
         """When both name and tag are empty, return 'unknown'."""
@@ -110,8 +112,9 @@ class TestUnknownTypeWarning:
 
         # This tests that normal code paths don't accidentally trigger warnings
         class _Attr:
-            def __init__(self, value: object) -> None:
+            def __init__(self, value: object, form: str = "DW_FORM_data4") -> None:
                 self.value = value
+                self.form = form  # pyelftools always states a form
 
         # Directly test that a DIE with a known-type name doesn't warn via fallback
         die = _MockDie(
