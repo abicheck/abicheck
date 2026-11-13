@@ -1089,14 +1089,14 @@ def detect_unspecified_return_now_named(
     changes: list[Change] = []
     for key in sorted(set(old_idx) & set(new_idx)):
         old_f, new_f = old_idx[key], new_idx[key]
-        # An export-table stub's "?" means "no evidence", not a backend's
-        # spelling of an unnameable type: it settles neither direction.
-        if is_export_table_only_record(old_f) or is_export_table_only_record(new_f):
-            continue
         old_rt, new_rt = old_f.return_type, new_f.return_type
         old_unspec = _return_is_unspecified(old_rt)
         new_unspec = _return_is_unspecified(new_rt)
         if old_unspec == new_unspec:
+            continue
+        # An export-table stub's "?" means "no evidence", not a backend's
+        # spelling of an unnameable type: it settles neither direction.
+        if is_export_table_only_record(old_f) or is_export_table_only_record(new_f):
             continue
         qname, _params = key
         if old_unspec:
