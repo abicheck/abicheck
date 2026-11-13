@@ -48,6 +48,7 @@ from ..policy.unconfirmed_compatibility import (
     is_unconfirmed,
     report_compatibility,
 )
+from .analysis_caveats import analysis_caveats_for
 from .envelope import resolved_gate, resolved_scoped_gate
 from .finding import build_report_findings
 from .policy_facts import kind_sets_for
@@ -139,6 +140,20 @@ def headline_verdict(result: DiffResult) -> tuple[str, str]:
     return VERDICT_EMOJI[result.verdict], VERDICT_LABEL[result.verdict]
 
 
+#: The merge-effect phrase of a clean-reading outcome whose analysis is
+#: incomplete (``report/analysis_caveats.py``): a verdict no failed fact
+#: contradicts may still not be called "safe to merge" when part of the
+#: comparison never ran (AGENTS.md "Weaker evidence narrows conclusions").
+INCOMPLETE_MERGE_EFFECT: Mapping[Verdict, str] = {
+    Verdict.NO_CHANGE: "no ABI/API change observed — analysis incomplete, not a clean result",
+    Verdict.COMPATIBLE: "backward-compatible as far as observed — analysis incomplete, not a clean result",
+}
+INCOMPLETE_GATE_PASS_EFFECT = (
+    "no error-level findings under the configured severity policy — "
+    "analysis incomplete, not a clean result"
+)
+
+
 def gate_merge_effect(exit_code: int) -> str:
     """The two merge-effect phrases, keyed by the resolved severity exit code."""
     if exit_code == 0:
@@ -162,11 +177,17 @@ class OutcomeSummary:
     unconfirmed: bool = False
     #: A lacking side's headers were supplied but scoping fell back.
     header_scope_fell_back: bool = False
+    #: The shared document holds an incomplete-analysis fact
+    #: (``report/analysis_caveats.py``), so no phrase may call it safe.
+    incomplete: bool = False
 
     @property
     def verdict_emoji(self) -> str:
         if self.unconfirmed:
             return UNCONFIRMED_EMOJI
+        if self.incomplete and self.verdict in INCOMPLETE_MERGE_EFFECT:
+            # A green check over an incomplete analysis reads as clean.
+            return "⚠️"
         return VERDICT_EMOJI.get(self.verdict, "?")
 
     @property
@@ -183,7 +204,11 @@ class OutcomeSummary:
                 return UNCONFIRMED_FALLBACK_MERGE_EFFECT
             return UNCONFIRMED_MERGE_EFFECT
         if self.gate is not None:
+            if self.incomplete and self.gate.exit_code == 0:
+                return INCOMPLETE_GATE_PASS_EFFECT
             return gate_merge_effect(self.gate.exit_code)
+        if self.incomplete and self.verdict in INCOMPLETE_MERGE_EFFECT:
+            return INCOMPLETE_MERGE_EFFECT[self.verdict]
         return VERDICT_MERGE_EFFECT.get(self.verdict, "")
 
     @property
@@ -214,6 +239,7 @@ def project_outcome(
         header_scope_fell_back=bool(
             getattr(getattr(result, "type_evidence", None), "header_scope_fallback", ())
         ),
+        incomplete=bool(analysis_caveats_for(result, envelope)),
     )
 
 

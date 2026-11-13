@@ -36,6 +36,7 @@ from . import (
     render_review as _review,
     review_compute as _review_compute,
 )
+from .analysis_caveats import analysis_caveats_for
 from .disposition_audit import disposition_audit_reusing_document
 from .outcome_summary import project_outcome
 from .policy_facts import (
@@ -95,6 +96,19 @@ def compute_review_digest(
     coverage_warnings = _review_compute.not_comparable_warnings(
         result
     ) + _review_compute.compact_coverage_warnings(result.coverage_warnings or ())
+
+    # Incomplete-analysis facts (`report/analysis_caveats.py`) the two
+    # banners above do not already state: the manual-review banner is the
+    # unresolved-scope caveat, and a not-comparable assurance note names the
+    # same unavailable sections the section caveat would.
+    covered = {"scope_unresolved"} if manual_review_banner else set()
+    if _review_compute.not_comparable_warnings(result):
+        covered.add("section_unavailable")
+    analysis_caveats = tuple(
+        c.message
+        for c in analysis_caveats_for(result, envelope)
+        if c.key not in covered
+    )
 
     scoped = result.scope_to_public_surface
     additions_label = "Public additions" if scoped else "Additions"
@@ -168,6 +182,7 @@ def compute_review_digest(
         env_matrix_source_sha256=result.env_matrix_source_sha256,
         pattern_modulations=tuple(getattr(result, "pattern_modulations", ()) or ()),
         review_groups=groups,
+        analysis_caveats=analysis_caveats,
         review_group_use_cases=_review_compute.use_cases_by_group(groups, uc),
         result_counts=result_counts or {},
         policy=result.policy or "strict_abi",

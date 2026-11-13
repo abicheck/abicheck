@@ -993,7 +993,7 @@ def to_junit_xml(
     # the assertion failed"). Emitting it as a passing testcase, or omitting
     # it, would let a CI dashboard read "no evidence" as "compatible".
     errors = append_coverage_suite(root, result)
-    warnings = append_coverage_warnings_suite(root, result)
+    warnings = append_coverage_warnings_suite(root, result, envelope)
     unconfirmed = append_unconfirmed_suite(root, result)  # ADR-090
     # Roll up counts
     root.set("tests", str(int(ts.get("tests", "0")) + errors + warnings + unconfirmed))

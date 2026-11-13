@@ -644,6 +644,13 @@ ANALYSIS_1_BUG_CLASSES: tuple[BugClass, ...] = (
         fixed_by=(834, 838, 860, 883, 932, 1963),
         seed_tests=(
             "tests/test_fact_conservation_properties.py",
+            # Every subset of five incomplete-analysis facts (failed section,
+            # forced not-comparable, partial contract coverage, NOT_EVALUATED
+            # finding, unresolved surface) x every pair-report format: each
+            # format shows each fact, and none reads "safe to merge" / "no
+            # changes" without the caveat. Oracle: the JSON report's own
+            # fields, read independently of `report/analysis_caveats.py`.
+            "tests/test_report_failed_fact_visibility.py",
             # ADR-090 (#1963): a NO_CHANGE/COMPATIBLE/COMPATIBLE_WITH_RISK claim
             # on a side with neither debug info nor a header AST (a stripped
             # pair without headers) read clean at exit 0; it now reads
