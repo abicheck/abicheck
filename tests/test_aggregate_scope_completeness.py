@@ -477,14 +477,11 @@ class TestStoredDispatchShapeAndAcceptedGaps:
         # ADR-065 D8: the aggregate must never read clean for a failed member.
         assert agg.exit_code() != 0
 
-    @pytest.mark.known_gap_canary
-    def test_aggregate_reads_a_failed_member_as_1_not_the_cli_4(
-        self, tmp_path: Path
-    ) -> None:
-        """Canary (known-gaps.md: aggregate reads a failed member as a
-        different exit): the CLI exits 4 for a FAILED member, the aggregate
-        folds run_outcome.operational differently and reads 1. When this
-        reads 4, the gap is closed: archive the entry and drop the marker."""
+    def test_aggregate_reads_a_failed_member_as_the_cli_4(self, tmp_path: Path) -> None:
+        """ADR-065 D8: a release with a FAILED member exits 4 under ``compare``
+        and the aggregate of its stored report reads the same 4 -- the
+        persisted operational-error contribution is folded, not
+        ``run_outcome.operational`` (which maps to 1)."""
         from test_release_scope_completeness import _elf_snap, _facts_file
 
         libs = {"libok.so": _elf_snap("libok.so"), "libdeg.so": _elf_snap("libdeg.so")}
@@ -504,7 +501,7 @@ class TestStoredDispatchShapeAndAcceptedGaps:
         )
         assert result.exit_code == 4, result.output
         agg = aggregate_reports_dir(reports, expected=_expect(LINUX))
-        assert agg.exit_code() == 1
+        assert agg.exit_code() == 4
 
 
 class TestIncompleteScopePolicyIsInTheDigest:

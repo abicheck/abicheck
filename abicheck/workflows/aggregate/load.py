@@ -68,6 +68,7 @@ from .report_gate import (
 )
 from .scope_axis import (
     declares_null_compatibility,
+    fold_operational_error_exit,
     scope_completeness_exit,
     scope_completeness_incomplete,
 )
@@ -732,6 +733,9 @@ def _load_report_file(path: Path, *, prefix: str) -> _LoadedReport:
                     sorted(set(gate.blocking_categories) | extra_categories)
                 ),
             )
+    if gate is not None:
+        # ADR-065 D8: the release's own FAILED-member/ERROR contribution.
+        gate = fold_operational_error_exit(gate, data)
     raw_verdict = data.get("verdict")
     if verdict is not None and declares_null_compatibility(data):
         # ADR-065 D7: the gate above still folds `operational`/the scope
