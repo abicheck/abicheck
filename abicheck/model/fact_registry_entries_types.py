@@ -68,6 +68,23 @@ TYPE_FACTS: list[FactDefinition] = [
     ),
     _E(
         owner="RecordType",
+        field="base_access",
+        value_type="dict[str, str]",
+        producing_backends=("castxml", "clang"),
+        persisted=True,
+        identity_relevant=False,
+        comparable=True,
+        suppressible=False,
+        reportable=True,
+        lifecycle=FactLifecycle.CONSUMED,
+        consumed_by=("abicheck.compare.base_class_diff:_diff_base_access",),
+        notes=(
+            "Base access specifier per base name. Not produced by DWARF in "
+            "this slice, so a DWARF-only side is unknown, never public."
+        ),
+    ),
+    _E(
+        owner="RecordType",
         field="vtable",
         value_type="list[str]",
         producing_backends=("castxml", "clang", "dwarf"),
@@ -159,7 +176,7 @@ TYPE_FACTS: list[FactDefinition] = [
         owner="RecordType",
         field="is_standard_layout",
         value_type="bool | None",
-        producing_backends=("clang",),
+        producing_backends=("castxml", "clang"),
         persisted=True,
         identity_relevant=False,
         comparable=True,

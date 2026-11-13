@@ -83,6 +83,7 @@ class Row:
 L2_ONLY_KINDS: frozenset[str] = frozenset(
     {
         "ANON_FIELD_CHANGED",
+        "BASE_CLASS_ACCESS_NARROWED",
         "BASE_CLASS_POSITION_CHANGED",
         "BASE_CLASS_VIRTUAL_CHANGED",
         "CALLING_CONVENTION_CHANGED",

@@ -28,8 +28,10 @@ from __future__ import annotations
 
 from ..diff_helpers import make_change
 from ..model import RecordType
+from ..model.availability import FactStatus
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
+from ..model.identity import EntityId
 from .fact_comparison import compare_facts
 
 
@@ -155,4 +157,59 @@ def diff_bases(name: str, t_old: RecordType, t_new: RecordType) -> list[Change]:
                     )
                 )
 
+    changes.extend(_diff_base_access(name, t_old, t_new, entity_id))
+    return changes
+
+
+#: Narrowing order for a base-class access specifier: a higher rank is more
+#: restrictive, so a rank increase is a narrowing (a consumer that relied on
+#: the wider access no longer compiles).
+_ACCESS_RANK: dict[str, int] = {"public": 0, "protected": 1, "private": 2}
+
+
+def _diff_base_access(
+    name: str, t_old: RecordType, t_new: RecordType, entity_id: EntityId | None
+) -> list[Change]:
+    """``BASE_CLASS_ACCESS_NARROWED`` for every base present on both sides whose
+    specifier became more restrictive.
+
+    Only bases named on both sides are compared: a base that was added or
+    removed is already a ``TYPE_BASE_CHANGED`` hierarchy change. Widening
+    (private/protected -> public, protected -> public) is source- and
+    binary-compatible and is not reported. A side whose access evidence is
+    incomplete (not collected, failed, or partial), or a base whose specifier
+    is not one of the three known spellings, is unknown and is never compared
+    as a change.
+    """
+    old_f, new_f = t_old.base_access_fact, t_new.base_access_fact
+    # Only two PRESENT, non-empty maps can hold a narrowing (most records have
+    # no base at all); any other status (not collected, failed, partial) is
+    # unknown and never compared.
+    if not (
+        old_f.status is FactStatus.PRESENT
+        and new_f.status is FactStatus.PRESENT
+        and old_f.value
+        and new_f.value
+    ):
+        return []
+    old_map: dict[str, str] = old_f.value
+    new_map: dict[str, str] = new_f.value
+    changes: list[Change] = []
+    for base in sorted(set(old_map) & set(new_map)):
+        old_acc = old_map[base]
+        new_acc = new_map[base]
+        if old_acc not in _ACCESS_RANK or new_acc not in _ACCESS_RANK:
+            continue
+        if _ACCESS_RANK[new_acc] > _ACCESS_RANK[old_acc]:
+            changes.append(
+                make_change(
+                    ChangeKind.BASE_CLASS_ACCESS_NARROWED,
+                    symbol=name,
+                    name=name,
+                    detail=base,
+                    old=old_acc,
+                    new=new_acc,
+                    entity_id=entity_id,
+                )
+            )
     return changes

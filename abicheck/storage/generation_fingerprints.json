@@ -96,7 +96,7 @@
       "abicheck/extract/headers/castxml/calling_convention.py": "147c4be1a5b417eb4a67156e92e8f03f09eef3b7b34703ac22a98ad86d5dde1d",
       "abicheck/extract/headers/castxml/clang_semantics.py": "85c057c1b5d076b4b5cd3642424ca57eed01e0d6f2d237623575d7e2bc680de9",
       "abicheck/extract/headers/castxml/clang_semantics_join.py": "549b6d6e1ea75069066a3d3eaa8c0d6f57a9e7bb4974eaed7e970e86b494fc9e",
-      "abicheck/extract/headers/castxml/context.py": "62e82a8c29e18b90579435d8423600bfe316384eb706c36ad2e51062316a584b",
+      "abicheck/extract/headers/castxml/context.py": "fc0160b631e7d61702662eec603f98bc92f09f4cd3fbedfef3154f1da9d20381",
       "abicheck/extract/headers/castxml/dumper.py": "96da3347324c36084895760802862cb4e0b5044ced6930a7dfb88a1b36fe92a0",
       "abicheck/extract/headers/castxml/duplicate_declarations.py": "8668fddc69d8838cc093315726c53d96dd9c878020e675e34a44a435dc54d2f7",
       "abicheck/extract/headers/castxml/enums.py": "e616c768543061d71812378dd92cbcb7b8d00afbb734bcb7b4b5334ee34042aa",
@@ -110,8 +110,8 @@
       "abicheck/extract/headers/castxml/policy.py": "fda86c1de147934e620824b9a97262f218bffb7340cbbf394ac5fdd437e47f23",
       "abicheck/extract/headers/castxml/preprocessed_text.py": "88deb48742c22f1e594ba3b73fb20f11c5dd091c690f7c53597aee67478f32ed",
       "abicheck/extract/headers/castxml/probe.py": "525ded3c75b147300cfaa460ce8acd62f87533859ff152e2b1f76c4302999bb0",
-      "abicheck/extract/headers/castxml/record_traits.py": "6d836b2a2da27a0f12611f9c8dec681a8922ad2c5853f801ec9a94972654cdf1",
-      "abicheck/extract/headers/castxml/records.py": "9a5cd042d058f8bc87a345072b81ccbe4eb77ac86ef1c4a59104bfc7d8701486",
+      "abicheck/extract/headers/castxml/record_traits.py": "33f86b99062a857be55238e0211dd3dd38467ff212f85741df2a404603d6411e",
+      "abicheck/extract/headers/castxml/records.py": "5130cd54a4547cf0ce1cb3bf139459348c6901d0f3bf41d4ea461c8f8f73e60c",
       "abicheck/extract/headers/castxml/scope.py": "41cecc8dd996c10a58c022e5dca4003cce9d7775adf674b339cc199fb59297c7",
       "abicheck/extract/headers/castxml/specialization.py": "3f9f021672df1b84de42bc8de5f3c915508b3f3850e0a8acbaa80a3dee04c6f3",
       "abicheck/extract/headers/castxml/type_resolution.py": "3527318ed7d36b2b557c447c9fa0807deec9c594a7f481cf36c860859062552f",
@@ -147,7 +147,7 @@
       "abicheck/extract/headers/clang/pointer_depth.py": "88afcca3b65a1a95f6cea563085af926b45e5ed2d8e1bdd74b9332a129b07441",
       "abicheck/extract/headers/clang/qualifiers.py": "578b33e005de04a66073d7081267b78e777168fa34bd9bc4c689e5d4c0fe5fa7",
       "abicheck/extract/headers/clang/record_layout_dump.py": "7f23ea96a2d5b2cb463c52ce74d0a1f30efebedc53e67b4e10ee5c9fa4821880",
-      "abicheck/extract/headers/clang/records.py": "2bde9f3ecd20c5cdbaa093eb3541ad6029bf0162f528f574afe23392d0069d0c",
+      "abicheck/extract/headers/clang/records.py": "214671b358860f0fa02318f91701ba079de8a8e4fcef601d68f0613911ca36cf",
       "abicheck/extract/headers/clang/redeclarations.py": "a721440b183b81c24d1faad4c75dbb2241d28bc29c64792d79f99863b56029c8",
       "abicheck/extract/headers/clang/restrict_spelling.py": "309efe53d934303354ef102e0b223363a099c164b2000727e4f591998afa2ec7",
       "abicheck/extract/headers/clang/return_type.py": "54e08ddf2425bc34e2ab9c6295ab4d79d40bc0d78f53d7b0919ba89c7c556fe8",
@@ -171,8 +171,8 @@
       "abicheck/extract/headers/gcc/build.py": "1ee62182117ee040274b84d482cc3a9a36db2bd2b742d5dca4e892de00002ecb",
       "abicheck/extract/headers/gcc/contracts.py": "419ad694249c1477e89a60d8432bfeed202bf818c4bd4aa62361834ff452a2cf",
       "abicheck/extract/headers/gcc/discovery.py": "f07fdd43ec1e594e95a75a5447e54e3dcbfe5c944c66a305de4e9d7463ee731b",
-      "abicheck/extract/headers/gcc/gcc_facts.cc": "d2a160738c283569bc93e815f463f3a70e4d715a56e177795d46d9e0df8eed07",
-      "abicheck/extract/headers/gcc/projection.py": "e5722bec915e0b39c7dff22211f1e127cfa0cd0b7415b0c74b1dd9da328922cd",
+      "abicheck/extract/headers/gcc/gcc_facts.cc": "be8e1385198464d2888bd4a1c242b2dd2d5000506a38a8971ca194ecaca63ffe",
+      "abicheck/extract/headers/gcc/projection.py": "fef7d3679e17dd70f119d88be2ae20ea28039f08a39e2cd5644e35bf744313c4",
       "abicheck/extract/headers/manifest.py": "7f8877eda4c5682fd9b87bee878d707d263c1b25193cf70c9c8a3af323536e57",
       "abicheck/extract/headers/preprocessor_branches.py": "d3a409d126b0dd1b19a634d4aad25660d372dad931b310cfbaaefc9d769b244d",
       "abicheck/extract/headers/scope_segments.py": "d413edec257eb1334c829263770b66dc2eda3d263c765f699eac9f7e3ace9e65",
@@ -226,9 +226,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "65e4d21ebbed7c34f3b2c61bc4cc407491b53deafb11395bc1b8b0878f0156cf",
-    "generation": 60,
-    "reason": "merge of main (#2059 corrupt-input fixes, #2055) into the generation-60 branch; generation 60's own change is unchanged"
+    "fingerprint": "99e5079897d779f87ea650f954ed36b743c8bbd02ccbe0793302c8289b38e6ff",
+    "generation": 61,
+    "reason": "comment only in castxml record_traits: documents that an inherited first data member follows GCC/Clang rather than the literal M(D) wording; no extractor behaviour change"
   },
   "resolver": {
     "files": {

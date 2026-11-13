@@ -261,7 +261,7 @@ def test_hybrid_takes_clang_for_a_backfilled_castxml_gap(caps) -> None:
     row = next(
         r
         for r in caps.FACT_ROWS
-        if (r.owner, r.field) == ("RecordType", "is_standard_layout")
+        if (r.owner, r.field) == ("RecordType", "is_template_pattern")
     )
     assert row.hybrid_backfilled
     assert row.castxml is caps.Capability.NONE

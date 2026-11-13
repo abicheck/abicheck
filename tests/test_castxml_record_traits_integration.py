@@ -11,9 +11,9 @@ from __future__ import annotations
 import shutil
 import subprocess
 from pathlib import Path
-from xml.etree.ElementTree import parse
 
 import pytest
+from defusedxml.ElementTree import parse
 
 from abicheck.extract.headers.castxml.context import CastxmlParserContext
 from abicheck.extract.headers.castxml.record_traits import trivially_copyable
@@ -23,7 +23,7 @@ pytestmark = pytest.mark.integration
 _DECLS = {
     "Plain": ("struct Plain { double x; double y; };", True),
     "UserDtor": ("struct UserDtor { int x; ~UserDtor() {} };", False),
-    "DefaultedDtor": ("struct DefaultedDtor { int x; ~DefaultedDtor() = default; };", None),
+    "DefaultedDtor": ("struct DefaultedDtor { int x; ~DefaultedDtor() = default; };", True),
     "OutOfLineDtor": ("struct OutOfLineDtor { int x; ~OutOfLineDtor(); };", False),
     "UserCopy": ("struct UserCopy { int x; UserCopy(const UserCopy &); UserCopy(); };", False),
     "UserAssign": ("struct UserAssign { int x; UserAssign &operator=(const UserAssign &o) { x = o.x; return *this; } };", False),

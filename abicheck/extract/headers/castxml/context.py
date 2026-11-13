@@ -120,6 +120,8 @@ class CastxmlParserContext:
         self.preprocessor_hidden = read_hidden_declarations(root)
         #: ``record_traits.trivially_copyable`` memo, keyed by element id.
         self.trivially_copyable_cache: dict[str, bool | None] = {}
+        #: ``record_traits.standard_layout`` memo, keyed by element id.
+        self.standard_layout_cache: dict[str, bool | None] = {}
         # Per-file index / per-directory file list for
         # ``out_of_line_inline.declared_inline_out_of_line``.
         self.out_of_line_inline_index: dict[str, dict[tuple[str, str], set[int]]] = {}

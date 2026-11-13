@@ -70,7 +70,7 @@ from .names import (
     _virtual_method_mangled_name,
     _vt_sort_key,
 )
-from .record_traits import trivially_copyable
+from .record_traits import standard_layout, trivially_copyable
 from .scope import scope_path
 from .specialization import specialization_declared
 from .type_resolution import (
@@ -159,6 +159,24 @@ def build_record_type(
 
     bases = [] if is_opaque else _base_names(virtual=False)
     virtual_bases = [] if is_opaque else _base_names(virtual=True)
+    # Base access specifiers (public/protected/private) for the same base
+    # spellings. castxml writes `access` on every <Base>; a base without a
+    # recognised access is unknown, so the whole map is NOT_COLLECTED rather
+    # than guessing a default for that one base.
+    base_access: dict[str, str] | None = {}
+    if not is_opaque:
+        for b in el:
+            if b.tag != "Base":
+                continue
+            acc = b.get("access")
+            if acc not in ("public", "protected", "private"):
+                base_access = None
+                break
+            assert base_access is not None
+            base_access[type_name(ctx, b.get("type", ""))] = acc
+    base_access_fact = (
+        Fact.not_collected() if base_access is None else Fact.present(base_access)
+    )
     # Polymorphic (non-empty vtable) → vtable pointer at offset 0; None when non-polymorphic so the diff can tell "gained a vptr" apart.
     vptr_offset_bits = 0 if vtable else None
     # Direct (non-virtual) base subobject offsets from each ``<Base offset=...>``. CastXML writes that offset in bytes; ``RecordType.base_offsets`` is bits, as DWARF and the clang layout pass record it, so a castxml snapshot compares against theirs (storage/castxml_base_offset_migration.py converts an older stored one).
@@ -169,7 +187,8 @@ def build_record_type(
                 off = optional_int_attr(b, "offset")
                 if off is not None:
                     base_offsets[type_name(ctx, b.get("type", ""))] = off * 8
-    # is_standard_layout / data_size_bits are left None: "not polymorphic and no virtual bases" is not a sound standard-layout signal (a mixed-access class is already non-standard-layout, so the heuristic would flip True→False on gaining a virtual and emit a spurious STANDARD_LAYOUT_LOST) (Codex review #345). is_trivially_copyable is derived from the special members CastXML emits, tri-state (record_traits.py).
+    # data_size_bits is left None. is_standard_layout is derived from the C++ rules over the fields, access specifiers, bases and virtual members CastXML emits, tri-state (record_traits.py); "not polymorphic and no virtual bases" alone is still not used as a standard-layout signal (a mixed-access class is non-standard-layout whatever its vtable). is_trivially_copyable is derived from the special members CastXML emits, tri-state (record_traits.py).
+    standard = standard_layout(ctx, el)  # None for an incomplete record
     trivially = trivially_copyable(ctx, el)  # None for an incomplete record
     # castxml records the `final` class-key specifier as a `final` token
     # inside the compound ``attributes`` string (e.g. ``attributes="final"``),
@@ -204,6 +223,7 @@ def build_record_type(
         # castxml genuinely resolves these itself (real semantic analysis, not a heuristic reconstruction), opaque or not -- stated explicitly (kept as individual kwargs, not a **record_layout_facts() spread, so scripts/backend_capabilities.py's AST scanner can still see each field named).
         bases_fact=Fact.present(bases),
         virtual_bases_fact=Fact.present(virtual_bases),
+        base_access_fact=base_access_fact,
         vtable_fact=Fact.present(vtable),
         # 0-if-vtable-else-None is the Itanium primary-base heuristic above, not a real offset read -- partial, not present (Codex review; matches vptr_offset_bits's own PARTIAL row).
         vptr_offset_bits_fact=Fact.partial(vptr_offset_bits),
@@ -220,6 +240,7 @@ def build_record_type(
             ctx, el, el.get("name", "")
         ),
         is_trivially_copyable=trivially,
+        is_standard_layout=standard,
         # ADR-063 Phase 5: Fact[bool | None] sibling of is_final -- see the
         # local variable's own comment above for why this is always a real,
         # concrete determination on the castxml path.

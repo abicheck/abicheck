@@ -129,6 +129,10 @@ _STRUCT_OTHER: tuple[tuple[str, str], ...] = (
     ),
     ("member_rename", "a member is renamed, layout unchanged"),
     ("member_cv_change", "a member gains or loses const/volatile"),
+    (
+        "member_access_change",
+        "a member's access (public/protected/private) changes, layout unchanged",
+    ),
 )
 
 STRUCT_EDIT_CLASSES: tuple[EditClass, ...] = _member_edits() + tuple(

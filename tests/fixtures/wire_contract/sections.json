@@ -104,14 +104,14 @@
         "version"
       ],
       "section_schema_version": 1,
-      "sha256": "029bd355919069b6f22716190f6c35aa8aeab325042ead94f1dc45177964ee03"
+      "sha256": "dace9c981e71ea49e5667623fe2ee8639dde28921c1f81a66353af20578bd511"
     },
     "types": {
       "fields": [
         "types"
       ],
       "section_schema_version": 1,
-      "sha256": "1cb34ca45c3a41353ddfeaa0248f4718288721eeb700bf0c13ddc716947e90f3"
+      "sha256": "a0c7e2e414a5725010f59917f6d8ac9485169118f6a0ad91245616352081eab4"
     }
   }
 }

@@ -110,8 +110,11 @@ def _facts(backend: HeaderAstBackend, header: Path, lang: str | None) -> dict[st
             (e.name, tuple((m.name, m.value) for m in e.members)) for e in fields.enums
         ),
         "typedefs": sorted(fields.typedefs),
+        # Keyed on the repr so a record with an unknown (None) trait sorts
+        # beside one with a known bool instead of failing the comparison.
         "standard_layout": sorted(
-            (t.name, getattr(t, "is_standard_layout", None)) for t in fields.types
+            ((t.name, getattr(t, "is_standard_layout", None)) for t in fields.types),
+            key=repr,
         ),
     }
 
@@ -140,18 +143,20 @@ KNOWN_GAPS: dict[tuple[str, str | None, str], tuple[Any, Any]] = {
         ["Pod", "Pod", "Pod", "operator=", "operator=", "~Pod"],
         [],
     ),
-    # Unsupported on one producer: castxml exposes no C++ layout traits.
-    ("cpp.h", "c++", "standard_layout"): (
-        [("Point", None), ("Widget", None)],
-        [("Point", True), ("Widget", False)],
-    ),
-    ("pod.h", "c++", "standard_layout"): ([("Pod", None)], [("Pod", True)]),
+    # Unsupported on one producer: castxml parses every header as C++ and
+    # derives standard layout from [class.prop]/3 (a C struct is
+    # standard-layout); clang in C mode has no C++ layout traits and reports
+    # unknown. On C++ headers the two agree, so they are not listed.
+    ("plain.h", "c", "standard_layout"): ([("Node", True)], [("Node", None)]),
+    ("pod.h", None, "standard_layout"): ([("Pod", True)], [("Pod", None)]),
     # Known gap (tag-namespace conflation): clang keys `struct Foo` and the
     # anonymous struct typedef'd to `Foo` by one identity, so the opaque tag
     # declaration is dropped; castxml keeps both records.
     ("tag.h", "c", "types"): ([("Foo", ()), ("Foo", ("x",))], [("Foo", ("x",))]),
+    # The same conflation, plus the C-mode trait gap above: castxml's opaque
+    # tag record is unknown and its definition standard-layout.
     ("tag.h", "c", "standard_layout"): (
-        [("Foo", None), ("Foo", None)],
+        [("Foo", None), ("Foo", True)],
         [("Foo", None)],
     ),
 }

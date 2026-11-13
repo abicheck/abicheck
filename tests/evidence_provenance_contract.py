@@ -464,6 +464,7 @@ PROVENANCE_UNVERIFIED = frozenset(
         "type_base_changed",
         "type_became_abstract",
         "type_became_final",
+        "base_class_access_narrowed",
         "type_became_opaque",
         "type_deprecated_added",
         "type_deprecated_removed",
