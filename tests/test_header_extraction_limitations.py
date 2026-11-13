@@ -487,3 +487,49 @@ def test_snapshot_limitation_keeps_existing_provenance() -> None:
         EXTRACTION_LIMITATIONS_KEY: ["r"],
     }
     assert provenance_with_limitations(None, ["", ""]) is None
+
+
+@pytest.mark.parametrize(
+    ("facts", "gapped"),
+    [(None, True), ({}, False), ({1: object()}, False)],
+)
+def test_explicit_instantiation_facts_reach_the_parser_and_name_a_failed_pass(
+    facts: Any, gapped: bool
+) -> None:
+    import abicheck.extract.headers.clang.backend as cb
+
+    parser = _FakeParser([])
+    with cache_dep_manifest.recording() as rec:
+        cb._apply_explicit_instantiations(parser, facts)
+    assert parser.explicit_instantiations == (facts or {})
+    assert parser_limitations(parser) == (
+        (cb.EXPLICIT_INSTANTIATION_GAP,) if gapped else ()
+    )
+    assert (rec.manifest() is None) is gapped
+
+
+def test_layout_pass_that_cannot_resolve_its_headers_names_the_gap(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A header input the pass cannot expand is a failed pass too."""
+    import abicheck.extract.headers.clang.layout_tool as lt
+
+    monkeypatch.setattr(lt, "find_layout_tool_bin", lambda: "/fake/tool")
+    snap = AbiSnapshot(
+        library="l",
+        version="1",
+        ast_producer="clang",
+        types=[RecordType(name="A", kind="struct")],
+    )
+    with cache_dep_manifest.recording() as rec:
+        out = lt.attach_clang_layout(
+            snap, [tmp_path / "missing.h"], [], lang=None, compile=None
+        )
+    (reason,) = out.dump_provenance[EXTRACTION_LIMITATIONS_KEY]
+    assert "1 record(s)" in reason
+    assert rec.manifest() is None
+
+
+@pytest.mark.parametrize("root", [None, "GCC_XML", {"abicheck-clang-join-gaps": "[]"}])
+def test_join_gaps_of_a_non_element_root_is_empty(root: object) -> None:
+    assert join_gaps(root) == ()

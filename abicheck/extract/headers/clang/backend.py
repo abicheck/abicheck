@@ -485,6 +485,17 @@ def clang_header_dump(
             _p.unlink(missing_ok=True)
 
 
+def _apply_explicit_instantiations(
+    parser: Any, facts: dict[int, Fact[ExplicitInstantiation]] | None
+) -> None:
+    """Give *parser* the text pass's *facts*; ``None`` (a failed pass) leaves
+    them unset, names the gap and keeps the dump out of the snapshot cache."""
+    if facts is None:
+        note_parser_limitation(parser, EXPLICIT_INSTANTIATION_GAP)
+        cache_dep_manifest.note_uncacheable()
+    parser.explicit_instantiations = facts or {}
+
+
 def _explicit_instantiation_facts(
     request: HeaderParseRequest,
     ast_root: dict[str, Any],
@@ -691,10 +702,7 @@ class ClangBackend:
                 force_cpp=resolved_force_cpp,
                 run_ast=self.runner,
             )
-            if explicit is None:
-                note_parser_limitation(parser, EXPLICIT_INSTANTIATION_GAP)
-                cache_dep_manifest.note_uncacheable()
-            parser.explicit_instantiations = explicit or {}
+            _apply_explicit_instantiations(parser, explicit)
         setattr(
             parser,
             "_abicheck_neutral_factory",
