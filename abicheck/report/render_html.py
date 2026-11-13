@@ -63,6 +63,7 @@ from dataclasses import dataclass
 
 from ..demangle import demangle as _demangle_symbol, demangle_text
 from ..html_template import _VERDICT_STYLE
+from .analysis_caveats import CAVEAT_HEADING
 
 
 def verdict_icon(verdict: str) -> str:
@@ -656,6 +657,21 @@ class ScopedVerdictData:
     verdict_value: str
     exit_code: int | None
     exit_code_scheme: str | None
+
+
+def render_analysis_caveats_html(messages: list[str] | tuple[str, ...]) -> str:
+    """The ``report/analysis_caveats.py`` block, directly under the verdict
+    box so a clean verdict is never shown without its qualification. Empty
+    for a complete run."""
+    if not messages:
+        return ""
+    items = "".join(f"<li>{html.escape(m)}</li>" for m in messages)
+    return (
+        "<div class='section analysis-caveats' style='background:#fff3e0; "
+        "padding:10px; border-left:4px solid #e65100;'>"
+        f"<strong>⚠️ {CAVEAT_HEADING}</strong> — this result is not a clean "
+        f"compatibility claim:<ul>{items}</ul></div>"
+    )
 
 
 def render_scoped_verdict(data: ScopedVerdictData | None) -> str:

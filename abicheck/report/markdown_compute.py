@@ -34,6 +34,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import asdict, replace
 from typing import Any
 
+from ..checker_types import DiffResult
+from .analysis_caveats import analysis_caveats_for
 from .change_inventory import headline_hygiene_fields, unstamped
 from .disposition_audit import (
     disposition_audit_dict_reusing_document,
@@ -204,6 +206,17 @@ def _not_evaluated_mapping(
     }
 
 
+def _no_changes_message(result: Any, envelope: ReportEnvelope | None) -> str:
+    """The empty-report line, qualified when the analysis did not complete
+    (``report/analysis_caveats.py``): "no changes" over a failed section is
+    a claim about evidence that was never read."""
+    if isinstance(result, DiffResult) and analysis_caveats_for(result, envelope):
+        return (
+            "_No ABI changes detected in what could be analysed (analysis incomplete)._"
+        )
+    return "_No ABI changes detected._"
+
+
 def build_markdown_document(
     result: Any,
     *,
@@ -303,6 +316,7 @@ def build_markdown_document(
         "report_mode": "full",
         "demangle": demangle,
         "headline": asdict(headline_table),
+        "analysis_caveats": [c.message for c in analysis_caveats_for(result, envelope)],
         "rtti_note": _opt_asdict(compute_rtti_note(breaking)),
         "confidence": _opt_asdict(compute_confidence_section(result)),
         "edge_coverage": _opt_asdict(compute_edge_coverage_section(result)),
@@ -344,7 +358,7 @@ def build_markdown_document(
             else (
                 "_No changes match the current filter._"
                 if (show_only and result.changes)
-                else "_No ABI changes detected._"
+                else _no_changes_message(result, envelope)
             )
         ),
         # ADR-067 D3: the counts belong in every projection, and the three
@@ -442,6 +456,7 @@ def _view_preamble_mapping(
         "coverage_warnings": (
             list(result.coverage_warnings) if result.coverage_warnings else []
         ),
+        "analysis_caveats": [c.message for c in analysis_caveats_for(result, envelope)],
         "recommendation": (
             asdict(compute_recommendation_section(result))
             if show_recommendation
@@ -552,7 +567,7 @@ def build_root_cause_document(
             else (
                 "_No changes match the current filter._"
                 if (show_only and result.changes)
-                else "_No ABI changes detected._"
+                else _no_changes_message(result, envelope)
             )
         ),
         "redundancy_note": _opt_asdict(compute_redundancy_note(result)),

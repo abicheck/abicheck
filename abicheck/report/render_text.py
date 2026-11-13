@@ -34,6 +34,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from .analysis_caveats import CAVEAT_HEADING
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
@@ -238,13 +240,25 @@ def render_stat_document(document: ReportDocument) -> str:
         inventory = None
     digest = d.get("env_matrix_source_sha256")
     deployment_note = f"; deployment floor {digest}" if digest is not None else ""
-    return format_stat_line(
-        str(d["verdict_label"]),
-        outcomes={key: summary[key] for key, _noun in OUTCOME_BUCKETS},
-        total_changes=summary["total_changes"],
-        redundant_count=redundant_count,
-        gate_note=gate_note,
-        audit_note=audit_note,
-        deployment_note=deployment_note,
-        change_inventory=inventory,
+    # `report/analysis_caveats.py` keys: a one-line view must not read "no
+    # changes" over a run whose analysis did not complete.
+    caveats = d.get("analysis_caveats") or []
+    assert isinstance(caveats, list)
+    caveat_note = (
+        f" [{CAVEAT_HEADING.lower()}: {', '.join(str(k) for k in caveats)}]"
+        if caveats
+        else ""
+    )
+    return (
+        format_stat_line(
+            str(d["verdict_label"]),
+            outcomes={key: summary[key] for key, _noun in OUTCOME_BUCKETS},
+            total_changes=summary["total_changes"],
+            redundant_count=redundant_count,
+            gate_note=gate_note,
+            audit_note=audit_note,
+            deployment_note=deployment_note,
+            change_inventory=inventory,
+        )
+        + caveat_note
     )

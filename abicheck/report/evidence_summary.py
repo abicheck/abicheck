@@ -44,6 +44,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from ..confidence import depth_exclusion_summary, detector_disablement_warning
+from .analysis_caveats import analysis_caveats
 
 #: Human-readable label per ``evidence_tiers`` token, where the raw token is
 #: not already self-explanatory to a maintainer. An unrecognised tier is
@@ -115,6 +116,11 @@ class EvidenceSummary:
     detector_disablement_warnings: tuple[str, ...] = ()
     #: Detectors that did not run, or ran with a stated coverage gap.
     detector_gaps: tuple[DetectorGap, ...] = ()
+    #: ``report/analysis_caveats.py`` messages: facts that leave the run
+    #: incomplete (a failed section, a forced not-comparable comparison, a
+    #: ``NOT_EVALUATED`` finding, an unresolved public surface). Always a
+    #: limitation a maintainer must act on.
+    analysis_caveats: tuple[str, ...] = ()
 
     @property
     def has_limitations(self) -> bool:
@@ -137,7 +143,7 @@ class EvidenceSummary:
           own. ``coverage_warnings`` is where the producer states the
           limitations it considers material.
         """
-        return bool(self.coverage_warnings)
+        return bool(self.coverage_warnings or self.analysis_caveats)
 
     @property
     def is_empty(self) -> bool:
@@ -147,6 +153,7 @@ class EvidenceSummary:
             or self.evidence_tiers
             or self.coverage_warnings
             or self.detector_gaps
+            or self.analysis_caveats
         )
 
 
@@ -242,6 +249,7 @@ def evidence_summary(report: Mapping[str, object]) -> EvidenceSummary:
         coverage_warnings=material,
         detector_disablement_warnings=disablement,
         detector_gaps=gaps,
+        analysis_caveats=tuple(c.message for c in analysis_caveats(report)),
     )
 
 

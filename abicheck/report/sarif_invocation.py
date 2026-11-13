@@ -23,8 +23,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from .analysis_caveats import CAVEAT_HEADING, analysis_caveats_for
+
 if TYPE_CHECKING:
     from ..checker_types import DiffResult
+    from .envelope import ReportEnvelope
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,7 +111,9 @@ def compute_sarif_invocation_exit(
     )
 
 
-def run_notifications(result: DiffResult) -> dict[str, object]:
+def run_notifications(
+    result: DiffResult, envelope: ReportEnvelope | None = None
+) -> dict[str, object]:
     """The invocation's ``toolExecutionNotifications``, or ``{}`` for none.
 
     Two run-level conditions are notifications rather than ``results[]``
@@ -124,7 +129,13 @@ def run_notifications(result: DiffResult) -> dict[str, object]:
       ``note`` would repeat the clean-looking mistake) naming the sides
       without type-level evidence and the remedies.
 
-    ``executionSuccessful`` stays untouched by either (the tool ran to
+    * an incomplete analysis (``report/analysis_caveats.py``): one
+      ``warning`` entry per caveat, ``descriptor.id``
+      ``abicheck.analysis_incomplete.<key>``, so a failed section, a forced
+      not-comparable run or a ``NOT_EVALUATED`` finding is machine-readable
+      in SARIF too and a clean-looking empty ``results[]`` is qualified.
+
+    ``executionSuccessful`` stays untouched by any of them (the tool ran to
     completion); the invocation's ``exitCode`` folds both axes in
     :func:`compute_sarif_invocation_exit`.
     """
@@ -171,6 +182,17 @@ def run_notifications(result: DiffResult) -> dict[str, object]:
                 "properties": block,
             },
         ]
+    caveats: list[dict[str, object]] = [
+        {
+            "level": "warning",
+            "message": {"text": f"{CAVEAT_HEADING}: {c.message}"},
+            "descriptor": {"id": f"abicheck.analysis_incomplete.{c.key}"},
+            "properties": {"caveat": c.key},
+        }
+        for c in analysis_caveats_for(result, envelope)
+    ]
+    if caveats:
+        notifications = [*(notifications or []), *caveats]
     if notifications is None:
         return {}
     return {"toolExecutionNotifications": notifications}
