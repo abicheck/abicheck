@@ -63,6 +63,7 @@ FAMILIES: dict[str, Family] = {
                 "tests/test_dwarf_unknown_triviality.py",
                 "tests/test_clang_type_evidence.py",
                 "tests/test_pdb_parse_all_lifecycle.py",
+                "tests/test_disposition_transitions.py",
             ),
         ),
         Family(
@@ -388,6 +389,7 @@ FAMILIES: dict[str, Family] = {
 
 
 _F1 = (
+    "lifecycle.repeated_narrowing_pass_intersects_instead_of_unions",
     "lifecycle.done_flag_set_before_the_work_it_guards",
     "storage.wire_extension_dropped_or_refused",
     "compare.blocked_section_hides_presence",

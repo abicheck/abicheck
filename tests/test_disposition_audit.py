@@ -1026,10 +1026,13 @@ def test_one_close_over_the_union_not_one_per_consumer() -> None:
     close_consumer_scope(
         per_consumer, result_b, gating=[result_b.changes[0]], scope_decides_exit=True
     )
-    close_consumer_scope(
-        per_consumer, result_b, gating=[result_b.changes[1]], scope_decides_exit=True
-    )
-    assert per_consumer.effective_total == 0
+    with pytest.raises(RuntimeError, match="second scope"):
+        close_consumer_scope(
+            per_consumer,
+            result_b,
+            gating=[result_b.changes[1]],
+            scope_decides_exit=True,
+        )
 
 
 def test_synthesized_scoped_findings_join_the_audit() -> None:
