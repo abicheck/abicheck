@@ -77,6 +77,7 @@ FAMILIES: dict[str, Family] = {
             ),
             harness_tests=(
                 "tests/test_family_f2_route_parity.py",
+                "tests/test_no_shared_mutation.py",
                 "tests/test_family_f2_live_route_matrix.py",
                 "tests/test_family_f2_release_member_parity.py",
                 "tests/test_metamorphic_snapshot_relations.py",
@@ -432,6 +433,7 @@ _F1 = (
     "evidence.malformed_input_yields_value",
 )
 _F2 = (
+    "lifecycle.view_annotation_written_onto_a_shared_finding",
     "report.cross_producer_disagreement_on_one_symbol",
     # The L2 header pass and the L5 pass derived different fact families
     # from the same AST.
