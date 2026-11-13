@@ -430,6 +430,18 @@ def note(manifest: DepManifest | None) -> None:
             _JOURNAL.append(manifest)
 
 
+def note_uncacheable() -> None:
+    """Report that a parse result just used came from a failed optional pass.
+
+    A clang join or enrichment pass that failed is transient (no clang, a
+    timeout): its result names the gap, but a snapshot built from it must
+    not be served to a later run that could read the facts. Noting it as a
+    parse of unknown dependencies makes the open recording's manifest
+    ``None``, so the snapshot cache stores nothing for that dump.
+    """
+    note(None)
+
+
 @dataclass
 class Recording:
     """The parses noted since :func:`recording` opened."""

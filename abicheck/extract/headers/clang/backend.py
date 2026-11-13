@@ -71,6 +71,7 @@ from ...compiler_driver import (
     resolve_clang_bin,
     resolve_dpcpp_acquisition,
 )
+from ...extraction_limitations import note_parser_limitation
 from ...path_aliases import absolutize_include_roots
 from ..ast_config import (
     _build_clang_header_command,
@@ -98,6 +99,12 @@ from .locations import materialize_locations
 # The orchestrator's logger name, kept from before the move so callers and
 # tests capturing "abicheck.dumper" logging see no change.
 log = logging.getLogger("abicheck.dumper")
+
+#: The limitation a failed explicit-instantiation text pass leaves on the parse.
+EXPLICIT_INSTANTIATION_GAP = (
+    "explicit template instantiations and specializations: the clang text AST "
+    "pass failed, so removing one from a header is judged only by its export"
+)
 
 #: Runs one clang command (``cmd``, ``timeout``, ``on_created``) and returns
 #: the completed process; the default checks the scan deadline first.
@@ -485,14 +492,16 @@ def _explicit_instantiation_facts(
     clang_bin: str,
     force_cpp: bool,
     run_ast: ClangAstRunner,
-) -> dict[int, Fact[ExplicitInstantiation]]:
+) -> dict[int, Fact[ExplicitInstantiation]] | None:
     """The explicit-instantiation facts of *ast_root*, from a text AST pass.
 
     Runs one extra ``clang -Xclang -ast-dump`` over the same aggregate header
     the JSON pass used, only when a header spells an explicit instantiation or
     specialization (:func:`may_hold_explicit_instantiation`). Not cached: a warm
-    and a cold dump read the same facts. A failed text pass leaves the facts
-    unset (``NOT_COLLECTED``) rather than guessing their kind.
+    and a cold dump read the same facts. A failed text pass answers ``None``:
+    the facts stay unset (``NOT_COLLECTED``) rather than guessed, and the
+    caller records the gap (:data:`EXPLICIT_INSTANTIATION_GAP`), since an
+    unset fact reads as an implicit instance the removal rule then excuses.
     """
     try:
         texts = [
@@ -543,13 +552,13 @@ def _explicit_instantiation_facts(
             log.warning(
                 "clang text AST pass timed out; explicit-instantiation facts left unset"
             )
-            return {}
+            return None
         if run.returncode != 0 or not dumps:
             log.debug(
                 "clang text AST pass failed (rc=%s); explicit-instantiation facts left unset",
                 run.returncode,
             )
-            return {}
+            return None
         dump = parse_explicit_dump(
             dumps[0].read_text(encoding="utf-8", errors="replace")
         )
@@ -675,13 +684,17 @@ class ClangBackend:
                 run_ast=self.runner,
             )
         if resolved_kind is None:  # a DPC++ dump keeps its facts unset
-            parser.explicit_instantiations = _explicit_instantiation_facts(
+            explicit = _explicit_instantiation_facts(
                 r,
                 ast_root,
                 clang_bin=clang_bin,
                 force_cpp=resolved_force_cpp,
                 run_ast=self.runner,
             )
+            if explicit is None:
+                note_parser_limitation(parser, EXPLICIT_INSTANTIATION_GAP)
+                cache_dep_manifest.note_uncacheable()
+            parser.explicit_instantiations = explicit or {}
         setattr(
             parser,
             "_abicheck_neutral_factory",

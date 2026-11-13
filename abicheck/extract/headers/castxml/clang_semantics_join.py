@@ -408,6 +408,7 @@ def join_clang_semantics(
             "records none of them, so they are reported as not observed",
             exc,
         )
+        cache_dep_manifest.note_uncacheable()
         return _with_semantics(root, None, mention_files, None, None)
     noexcept = clang_noexcept_map(clang_root)
     concepts = concept_constraint_entries(clang_root)

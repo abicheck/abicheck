@@ -370,6 +370,7 @@ def test_clang_launch_failure_leaves_vectors_unresolved(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     import abicheck.extract.headers.castxml.vector_join as vj
+    from abicheck.extract.extraction_limitations import join_gaps as vj_join_gaps
 
     tmp_root = tmp_path
 
@@ -411,5 +412,8 @@ def test_clang_launch_failure_leaves_vectors_unresolved(
         extra_hash_dirs=(),
         exported_symbols=frozenset(),
     )
-    assert returned is root
+    # The vectors stay as castxml wrote them, on a copy that names the failed
+    # join so the snapshot reads the gap instead of an empty clean spelling.
+    assert [el.get("id") for el in returned] == [el.get("id") for el in root]
+    assert len(vj_join_gaps(returned)) == 1
     assert store.published == []
