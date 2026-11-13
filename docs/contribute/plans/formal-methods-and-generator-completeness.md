@@ -19,7 +19,10 @@ generated: false
 - the generator now covers append-, insert- and remove-into-padding
   (`field_added_in_tail_padding`, `field_inserted_in_padding`,
   `field_removed_without_shrink`), checked against the Lean layout table (E2
-  gap closed); an insert-that-moves operator is still missing;
+  gap closed); since 2026-11-13 every record- and base-layout class of
+  `tests/_edit_corpus_edit_model.py` has an operator
+  (`tests/_edit_corpus_operators_layout.py`), so `edit_classes_without_operator`
+  is empty;
 - the disposition count trigger has a sufficient precondition, and no step
   breaks it on the corpus (E7);
 - a FAILED release member exited 0 under `warn` (E8), against ADR-065 D8;

@@ -26,6 +26,7 @@ from tests._edit_corpus_config import Config
 from tests._edit_corpus_expect import VERDICT_RANK, Rule
 from tests._edit_corpus_operators_cxx import CXX_OPERATORS
 from tests._edit_corpus_operators_elf import ELF_OPERATORS
+from tests._edit_corpus_operators_layout import LAYOUT_OPERATORS
 from tests._edit_corpus_operators_platform import PLATFORM_OPERATORS
 from tests._edit_corpus_operators_symbols import SYMBOL_OPERATORS
 from tests._edit_corpus_opkit import (
@@ -953,6 +954,7 @@ OPERATORS: tuple[EditOp, ...] = (
     *ELF_OPERATORS,
     *PLATFORM_OPERATORS,
     *CXX_OPERATORS,
+    *LAYOUT_OPERATORS,
     *SYMBOL_OPERATORS,
 )
 
