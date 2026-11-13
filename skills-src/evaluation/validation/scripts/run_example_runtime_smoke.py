@@ -35,9 +35,20 @@ GROUND_TRUTH = example_catalog.GROUND_TRUTH_PATH
 SCHEMA_VERSION = "example_runtime_smoke.v1"
 
 
+#: The BREAKING cases whose break an unchanged old consumer asserts at runtime
+#: (its exit status changes when libv2 replaces libv1), measured on Linux.
+#: A recorded case that runs and no longer asserts is PROOF_REGRESSED; the
+#: count may only grow (tests/test_runtime_consumer_proof_ledger.py).
+CONSUMER_PROOF_LEDGER = (
+    REPO_DIR / "skills-src/evaluation/validation/data/runtime_consumer_proof.json"
+)
+
 #: Statuses that mean the runtime proof failed: it could not be established
-#: (BUILD_ERROR, BASELINE_SIGNAL) or it contradicts the case's ground truth.
-PROOF_FAILURE_STATUSES = frozenset({"BUILD_ERROR", "BASELINE_SIGNAL", "CONTRADICTED"})
+#: (BUILD_ERROR, BASELINE_SIGNAL), it contradicts the case's ground truth, or a
+#: recorded consumer-assertion proof of a BREAKING case was lost.
+PROOF_FAILURE_STATUSES = frozenset(
+    {"BUILD_ERROR", "BASELINE_SIGNAL", "CONTRADICTED", "PROOF_REGRESSED"}
+)
 #: Signals that mean the unchanged consumer's own check failed or it crashed /
 #: hung -- a consumer assertion, not merely different output.
 _ASSERTION_SIGNALS = frozenset({"nonzero", "timeout"})
@@ -63,6 +74,74 @@ def contradicts_ground_truth(entry: dict[str, object], signal: str) -> bool:
         and not entry.get("behavioral_break")
         and proof_strength(signal) == "consumer_assertion"
     )
+
+
+def breaking_proof_summary(results: list[dict[str, object]]) -> dict[str, int]:
+    """Denominators for BREAKING claims: how many a consumer assertion proves,
+    how many only change output, and how many show no runtime signal at all."""
+    out = {"breaking": 0, "consumer_assertion": 0, "output_only": 0, "none": 0}
+    for row in results:
+        if row.get("expected") != "BREAKING":
+            continue
+        out["breaking"] += 1
+        proof = str(row.get("proof", ""))
+        if proof in out:
+            out[proof] += 1
+    out["not_run"] = out["breaking"] - out["consumer_assertion"] - out["output_only"]
+    out["not_run"] -= out["none"]
+    return out
+
+
+def apply_consumer_proof_ledger(
+    results: list[dict[str, object]], ledger: dict[str, object], platform: str
+) -> list[str]:
+    """Mark a recorded consumer-assertion case that ran without asserting as
+    PROOF_REGRESSED; return those case ids. Only on the ledger's platform."""
+    if ledger.get("platform") != platform:
+        return []
+    recorded = set(ledger.get("consumer_assertion", ()))  # type: ignore[arg-type]
+    regressed = []
+    for row in results:
+        case = row.get("case_id")
+        if case not in recorded or row.get("status") in {
+            "SKIP",
+            *PROOF_FAILURE_STATUSES,
+        }:
+            continue
+        if row.get("proof") != "consumer_assertion":
+            row["status"] = "PROOF_REGRESSED"
+            row["message"] = (
+                f"recorded consumer-assertion proof lost: runtime_signal="
+                f"{row.get('runtime_signal')!r} ({CONSUMER_PROOF_LEDGER.name})"
+            )
+            regressed.append(str(case))
+    return regressed
+
+
+def consumer_proof_ledger(
+    results: list[dict[str, object]], platform: str, measured_at: str
+) -> dict[str, object]:
+    """The ledger a full run records: every BREAKING case, split by proof."""
+    breaking = [r for r in results if r.get("expected") == "BREAKING"]
+    asserted = sorted(
+        str(r["case_id"]) for r in breaking if r.get("proof") == "consumer_assertion"
+    )
+    return {
+        "_comment": (
+            "BREAKING catalog cases whose old consumer fails its own check against "
+            "the new library (run_example_runtime_smoke.py). Re-record from a full "
+            "run with --write-proof-ledger; the consumer_assertion list may only grow."
+        ),
+        "platform": platform,
+        "measured_at": measured_at,
+        "summary": breaking_proof_summary(results),
+        "consumer_assertion": asserted,
+        "breaking_without_consumer_assertion": {
+            str(r["case_id"]): str(r.get("proof") or r.get("status"))
+            for r in sorted(breaking, key=lambda r: str(r["case_id"]))
+            if r.get("proof") != "consumer_assertion"
+        },
+    }
 
 
 def _platform() -> str:
@@ -452,6 +531,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("filters", nargs="*", help="Case-name substrings to run")
     parser.add_argument("--build-type", default="Debug", choices=("Debug", "Release"))
     parser.add_argument("--json", action="store_true", dest="json_out")
+    parser.add_argument(
+        "--write-proof-ledger",
+        metavar="COMMIT",
+        help="full run only: re-record the consumer-proof ledger, naming COMMIT",
+    )
     args = parser.parse_args(argv)
 
     with GROUND_TRUTH.open(encoding="utf-8") as f:
@@ -478,6 +562,13 @@ def main(argv: list[str] | None = None) -> int:
             )
             for name in names
         ]
+    if args.write_proof_ledger:
+        if args.filters:
+            parser.error("--write-proof-ledger needs a full run (no case filters)")
+        ledger = consumer_proof_ledger(results, _platform(), args.write_proof_ledger)
+        CONSUMER_PROOF_LEDGER.write_text(json.dumps(ledger, indent=2) + "\n")
+    ledger = json.loads(CONSUMER_PROOF_LEDGER.read_text(encoding="utf-8"))
+    apply_consumer_proof_ledger(results, ledger, _platform())
 
     payload = {
         "schema_version": SCHEMA_VERSION,
@@ -493,12 +584,14 @@ def main(argv: list[str] | None = None) -> int:
         "selected_cases": len(names),
         "ground_truth_cases": len(truth),
         "summary": _counts(results),
+        "breaking_proof": breaking_proof_summary(results),
         "results": results,
     }
     if args.json_out:
         print(json.dumps(payload, indent=2))
     else:
         print(json.dumps(payload["summary"], indent=2))
+        print(json.dumps({"breaking_proof": payload["breaking_proof"]}, indent=2))
         for result in results:
             if result["status"] not in {"DEMONSTRATED", "NO_RUNTIME_SIGNAL", "SKIP"}:
                 print(

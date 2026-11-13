@@ -436,7 +436,13 @@ class TestUnderlyingFactAlignment:
 
 
 class TestExpectedKindsVerdictAlignment:
-    """Verify expected_kinds are consistent with the case's expected verdict."""
+    """Consistency tests, not an oracle: a case's expected_kinds agree with its
+    expected verdict *as the registry classifies those kinds*.
+
+    The kinds' verdicts are read from ``REGISTRY.entries[...].default_verdict``,
+    so a wrong default_verdict moves both sides together. The independent,
+    ABI-semantics expected-verdict table is ``tests/test_verdict_semantic_oracle.py``.
+    """
 
     def test_breaking_cases_have_at_least_one_breaking_kind(
         self, verdicts: dict

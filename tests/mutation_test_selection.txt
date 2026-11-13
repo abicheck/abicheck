@@ -636,6 +636,7 @@ tests/test_variable_cutover.py
 tests/test_variable_identity_dedup.py
 tests/test_variable_removal_evidence_kind.py
 tests/test_vector_abi.py
+tests/test_verdict_semantic_oracle.py
 tests/test_versioned_symbol_scheme.py
 tests/test_versioning_policy.py
 tests/test_versioning_policy_wiring.py

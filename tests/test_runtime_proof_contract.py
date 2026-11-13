@@ -51,6 +51,7 @@ def _runtime_artifact(matrix: ModuleType, statuses: dict[str, str]) -> dict:
         ("BUILD_ERROR", True),
         ("BASELINE_SIGNAL", True),  # an invalid baseline voids the proof
         ("CONTRADICTED", True),  # a clean case whose old consumer failed
+        ("PROOF_REGRESSED", True),  # a recorded BREAKING consumer proof was lost
     ],
 )
 def test_runtime_proof_failure_statuses(status: str, fails: bool) -> None:

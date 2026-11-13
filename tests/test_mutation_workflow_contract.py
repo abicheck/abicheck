@@ -453,6 +453,26 @@ def test_the_scheduled_lane_requires_a_baseline() -> None:
     assert "--require-baseline" in scheduled["run"]
 
 
+@pytest.mark.known_gap_canary
+def test_no_mutation_baseline_is_committed_yet() -> None:
+    """Known gap (docs/contribute/known-gaps.md, weekly mutation lane): no
+    record run has produced a merged baseline, so none is committed and the
+    weekly lane bootstraps one instead of gating drift. Fails once
+    mutation-baseline.json is committed: archive the entry then, and turn this
+    into a check that the committed baseline partitions only_mutate."""
+    assert not (REPO_ROOT / "mutation-baseline.json").exists()
+    record_step = next(
+        s
+        for s in _workflow()["jobs"]["resolve"]["steps"]
+        if s.get("id") == "baseline"
+    )
+    # The bootstrap the gap entry relies on: a schedule with no baseline records.
+    assert (
+        '"$GITHUB_EVENT_NAME" = "schedule" ] && [ "$present" != "true" ]; then record=true'
+        in record_step["run"]
+    )
+
+
 def test_every_mutated_module_exists() -> None:
     missing = [p for p in _only_mutate() if not (REPO_ROOT / p).is_file()]
     assert not missing, f"[tool.mutmut].only_mutate names missing files: {missing}"

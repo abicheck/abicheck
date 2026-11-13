@@ -138,3 +138,77 @@ def test_catalog_and_field_shape_scans_read_expected_kinds(tmp_path: Path) -> No
         json.dumps({"expected_kinds": ["a"]}), encoding="utf-8"
     )
     assert cov.scan_field_shapes(tmp_path) == {"a": {"s1"}}
+
+
+# ---------------------------------------------------------------------------
+# Real-fixture backing ledger (no-shrink): a kind a compiled catalog case or an
+# edit-corpus verified floor produces may not fall back to hand-built snapshots.
+# ---------------------------------------------------------------------------
+
+
+def _fixture_ledger() -> dict:
+    return json.loads(cov.FIXTURE_LEDGER_PATH.read_text(encoding="utf-8"))
+
+
+@pytest.mark.repo_scan
+def test_no_kind_loses_its_real_fixture_backing() -> None:
+    lost = cov.lost_backing(_fixture_ledger(), cov.fixture_backing())
+    assert not lost, (
+        f"ChangeKind(s) lost every real-fixture source (catalog expected_kinds or an "
+        f"edit-corpus verified_floor): {lost}. Restore a compiled fixture that produces "
+        f"them; do not drop them from {cov.FIXTURE_LEDGER_PATH.name}."
+    )
+
+
+@pytest.mark.repo_scan
+def test_fixture_ledger_matches_its_sources() -> None:
+    current = cov.fixture_ledger(cov.fixture_backing())
+    assert _fixture_ledger() == current, (
+        f"{cov.FIXTURE_LEDGER_PATH.name} is stale: run "
+        "`python scripts/changekind_real_coverage.py --write-fixture-ledger` and "
+        "review the diff (a removed source must be a deliberate edit)."
+    )
+
+
+def test_removing_a_sole_backing_case_fails_the_gate(tmp_path: Path) -> None:
+    """Negative control: delete the expected_kinds of a case that is the only
+    backing of some kind, and the no-shrink gate names exactly that kind."""
+    ledger = _fixture_ledger()
+    sole = {
+        kind: sources[0].removeprefix("catalog:")
+        for kind, sources in ledger["backed"].items()
+        if len(sources) == 1 and sources[0].startswith("catalog:")
+    }
+    assert sole, "no kind is backed by exactly one catalog case; pick another control"
+    kind, case = sorted(sole.items())[0]
+    gt = json.loads(cov.CATALOG_GT.read_text(encoding="utf-8"))
+    gt["verdicts"][case]["expected_kinds"] = []
+    edited = tmp_path / "ground_truth.json"
+    edited.write_text(json.dumps(gt), encoding="utf-8")
+    backing = cov.fixture_backing(catalog=cov.scan_catalog(edited))
+    assert kind in cov.lost_backing(ledger, backing)
+    # ... and an unedited catalog loses nothing.
+    assert cov.lost_backing(ledger, cov.fixture_backing()) == []
+
+
+def test_edit_corpus_floor_and_backing_union(tmp_path: Path) -> None:
+    led = tmp_path / "ledger.json"
+    led.write_text(
+        json.dumps({"verified_floor": {"pr": ["FUNC_REMOVED", "NOT_A_KIND"]}}),
+        encoding="utf-8",
+    )
+    kinds = {"func_removed": "FUNC_REMOVED", "func_added": "FUNC_ADDED"}
+    floor = cov.scan_edit_corpus_floor(led, kinds=kinds)
+    assert floor == {"func_removed": {"edit_corpus:pr"}}
+    backing = cov.fixture_backing(
+        kinds=kinds, catalog={"func_removed": {"case01"}}, floor=floor
+    )
+    assert backing == {
+        "func_added": [],
+        "func_removed": ["catalog:case01", "edit_corpus:pr"],
+    }
+    ledger = cov.fixture_ledger(backing)
+    assert ledger["summary"] == {"total_kinds": 2, "backed": 1, "unbacked": 1}
+    assert cov.lost_backing(ledger, {**backing, "func_removed": []}) == ["func_removed"]
+    # A kind deleted from ChangeKind is not "lost backing".
+    assert cov.lost_backing(ledger, {"func_added": []}) == []
