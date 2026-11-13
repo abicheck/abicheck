@@ -42,3 +42,8 @@ mutation-receipt.json
 mutmut-results.txt
 # explain-abi-change eval fixtures build their environment in place (setup.sh)
 skills-src/evaluation/agents/skills/fixtures/*/env/
+
+# TLA+ tools: downloaded and checksum-verified in CI (formal-lean.yml), never committed.
+tla2tools.jar
+formal/tla/states/
+formal/tla/*.dot

@@ -56,6 +56,7 @@ from .manifest_evidence import EVIDENCE_BUG_CLASSES
 from .manifest_extraction import EXTRACTION_BUG_CLASSES
 from .manifest_guards import GUARD_BUG_CLASSES
 from .manifest_integration import INTEGRATION_BUG_CLASSES
+from .manifest_lifecycle import LIFECYCLE_BUG_CLASSES
 from .manifest_measurement import MEASUREMENT_BUG_CLASSES
 from .manifest_performance import PERFORMANCE_BUG_CLASSES
 from .manifest_report import REPORT_BUG_CLASSES
@@ -87,6 +88,7 @@ BUG_CLASSES: tuple[BugClass, ...] = (
     + TEST_HARNESS_BUG_CLASSES
     + TOOL_SURFACE_BUG_CLASSES
     + MEASUREMENT_BUG_CLASSES
+    + LIFECYCLE_BUG_CLASSES
 )
 
 _BY_ID: dict[str, BugClass] = {bc.id: bc for bc in BUG_CLASSES}

@@ -40,6 +40,12 @@ import re
 import struct
 from pathlib import Path
 
+from .extract.pdb_codeview_types import (
+    CvEnumerator,
+    CvMember,
+    CvOneMethod,
+    CvStruct,
+)
 from .model.dwarf_facts import (
     AdvancedDwarfMetadata,
     DwarfMetadata,
@@ -50,10 +56,6 @@ from .model.dwarf_facts import (
 )
 from .model.qualified_name_split import split_top_level_scopes
 from .pdb_parser import (
-    CvEnumerator,
-    CvMember,
-    CvOneMethod,
-    CvStruct,
     PdbFile,
     TypeDatabase,
     parse_pdb,

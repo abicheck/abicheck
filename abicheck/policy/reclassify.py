@@ -576,6 +576,17 @@ def _has_frozen_namespace_violation(change: HasKind) -> bool:
     return isinstance(fnv, str) and bool(fnv)
 
 
+def _frozen_floor(change: HasKind, requested: Verdict, floor: Verdict) -> Verdict:
+    """*requested*, unless *change* violates a frozen namespace and
+    *requested* is weaker than *floor*: policy may not relax such a finding.
+    The one copy of a rule the resolvers used to restate at each branch."""
+    if _has_frozen_namespace_violation(change) and compatibility_rank(
+        requested
+    ) < compatibility_rank(floor):
+        return floor
+    return requested
+
+
 def _raw_verdict_for_kind(kind: ChangeKind, kind_sets: KindSets) -> Verdict:
     """Return the verdict for *kind* without per-finding overrides."""
     breaking, api_break, compatible, risk = kind_sets
@@ -622,12 +633,7 @@ def effective_verdict_for_change(
     eff = getattr(change, "effective_verdict", None)
     gated = is_binary_gate_demoted(change)
     if isinstance(eff, Verdict) and not gated:
-        raw_v = _raw_verdict_for_kind(kind, base_sets)
-        if _has_frozen_namespace_violation(change) and compatibility_rank(
-            eff
-        ) < compatibility_rank(raw_v):
-            return raw_v
-        return eff
+        return _frozen_floor(change, eff, _raw_verdict_for_kind(kind, base_sets))
 
     # ADR-084: a binary-gate demotion is a cap, not an override. The policy
     # decides the verdict first (a named policy's relaxation or a policy-file
@@ -665,22 +671,14 @@ def _policy_chain_verdict(
     if reclassify_rules:
         reclass_v = first_matching_reclassify_verdict(reclassify_rules, change, today)
         if reclass_v is not None:
-            base_v = effective_category(change, *base_sets)
-            if _has_frozen_namespace_violation(change) and compatibility_rank(
-                reclass_v
-            ) < compatibility_rank(base_v):
-                return base_v
-            return reclass_v
+            return _frozen_floor(
+                change, reclass_v, effective_category(change, *base_sets)
+            )
 
     overrides = expand_variant_overrides(getattr(policy_file, "overrides", None))
     if overrides and kind in overrides:
-        base_v = effective_category(change, *base_sets)
         override_v = cast(Verdict, overrides[kind])
-        if _has_frozen_namespace_violation(change) and compatibility_rank(
-            override_v
-        ) < compatibility_rank(base_v):
-            return base_v
-        return override_v
+        return _frozen_floor(change, override_v, effective_category(change, *base_sets))
     # Reuses `base_sets` (already computed above from `policy_file.
     # base_policy` when a policy_file is given) rather than recomputing from
     # the outer `policy`/`kind_sets` parameters directly (Codex review,
@@ -759,12 +757,7 @@ def reclassify_rule_for_change(
     # regardless of whether the floor would already have clamped it.
     if overrides and kind in overrides:
         override_v = cast(Verdict, overrides[kind])
-        if _has_frozen_namespace_violation(change) and compatibility_rank(
-            override_v
-        ) < compatibility_rank(base_v):
-            next_priority_v = base_v
-        else:
-            next_priority_v = override_v
+        next_priority_v = _frozen_floor(change, override_v, base_v)
     else:
         next_priority_v = base_v
     for rule in reclassify_rules_for_kind(rules, change.kind.value):
@@ -784,14 +777,7 @@ def reclassify_rule_for_change(
             # to a weaker base_v than the override would have given: the
             # rule genuinely changed the outcome from what overrides: alone
             # would have produced, just not to the verdict it asked for).
-            effective_v = (
-                base_v
-                if (
-                    _has_frozen_namespace_violation(change)
-                    and compatibility_rank(reclass_v) < compatibility_rank(base_v)
-                )
-                else reclass_v
-            )
+            effective_v = _frozen_floor(change, reclass_v, base_v)
             if effective_v == next_priority_v:
                 return None
             return rule

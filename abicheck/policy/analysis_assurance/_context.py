@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 from ...checker_types import DiffResult
 from ...model import AbiSnapshot
 from ...model.change_catalog.kinds import ChangeKind
+from ..assurance_status_vocabulary import ContextStatus, HeaderContextStatus
 
 if TYPE_CHECKING:
     from ...buildsource.pack import BuildSourcePack
@@ -27,7 +28,7 @@ if TYPE_CHECKING:
 
 def _header_context_status(
     result: DiffResult, old: AbiSnapshot, new: AbiSnapshot
-) -> tuple[str, list[str]]:
+) -> tuple[HeaderContextStatus, list[str]]:
     """Header/API-level evidence status for this comparison.
 
     Finding (review, P1): the previous implementation used ``or`` to decide
@@ -71,7 +72,9 @@ def _header_context_status(
     return "clean", []
 
 
-def _dwarf_context_status(old: AbiSnapshot, new: AbiSnapshot) -> tuple[str, list[str]]:
+def _dwarf_context_status(
+    old: AbiSnapshot, new: AbiSnapshot
+) -> tuple[ContextStatus, list[str]]:
     """Per-side DWARF/DWARF-advanced evidence status -- the DWARF analogue of
     :func:`_header_context_status`'s presence-then-asymmetry shape.
 
@@ -202,7 +205,7 @@ def _advanced_provenance_notes(old: AbiSnapshot, new: AbiSnapshot) -> list[str]:
 
 def _l3_context_status(
     old_pack: BuildSourcePack | None, new_pack: BuildSourcePack | None
-) -> tuple[str, list[str]]:
+) -> tuple[ContextStatus, list[str]]:
     """Per-side L3 ``BuildEvidence`` presence status -- the L3 analogue of
     :func:`_header_context_status`'s/:func:`_dwarf_context_status`'s
     presence-then-asymmetry shape.
