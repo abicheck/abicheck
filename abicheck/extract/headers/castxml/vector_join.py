@@ -21,6 +21,7 @@ from xml.etree.ElementTree import Element
 from ....errors import SnapshotError
 from ....storage.ast_cache_location import ast_cache_store
 from ... import cache_dep_manifest
+from ...extraction_limitations import with_join_gap
 from ..clang.backend import clang_header_dump
 from .function_type_cc import (
     files_mention_calling_convention,
@@ -38,6 +39,15 @@ log = logging.getLogger(__name__)
 
 #: The AST-cache namespace of the sidecar, distinct from the castxml XML entry.
 VECTOR_SIDECAR_BACKEND = "castxml-vectors"
+
+#: The limitation a failed join leaves on the castxml root: the vector,
+#: complex and ``_BitInt`` spellings and the function-type calling conventions
+#: this join supplies stay as castxml wrote them (unspelled or dropped).
+VECTOR_JOIN_GAP = (
+    "vector, complex and _BitInt type spellings and function-type calling "
+    "conventions: castxml cannot record them and its clang join failed, so a "
+    "change to one is not assessed"
+)
 
 
 def _string_map(payload: Any) -> dict[str, str] | None:
@@ -88,8 +98,9 @@ def join_vector_spellings(
 
     A root with neither a vector node nor a function-type declaration whose
     files spell some calling convention is returned untouched and costs nothing. A clang failure leaves those nodes
-    as castxml wrote them and is logged; nothing is published for it, so the
-    next run tries again.
+    as castxml wrote them, is logged, and is recorded on the returned root
+    (:data:`VECTOR_JOIN_GAP`) so the snapshot names the gap; nothing is
+    published for it, so the next run tries again.
     """
     if not has_vector_nodes(root) and not (
         has_function_type_nodes(root) and files_mention_calling_convention(root)
@@ -133,7 +144,8 @@ def join_vector_spellings(
             "wrote them",
             exc,
         )
-        return root
+        cache_dep_manifest.note_uncacheable()
+        return with_join_gap(root, VECTOR_JOIN_GAP)
     resolved = resolve_vector_spellings(root, clang_root)
     conventions = resolve_function_type_cc(root, clang_root)
     deps = clang_parse.manifest()

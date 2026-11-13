@@ -63,7 +63,9 @@ from ....model import AbiSnapshot, RecordType, replace_with_fact_sync
 from ....model.export_index import export_names_or_modeled_fallback
 from ....model.header_lang_mode import recorded_lang_mode
 from ....name_classification import strip_anonymous_type_location
+from ... import cache_dep_manifest
 from ...compiler_driver import is_cl_style_driver_name, resolve_clang_bin
+from ...extraction_limitations import add_snapshot_limitation
 from ..ast_config import _build_clang_header_command
 from ..sysinc import _resolve_clang_system_includes, _resolve_probe_compiler
 from .abi_target import binary_abi_target_token
@@ -703,20 +705,22 @@ def attach_clang_layout(
         # layout data (Codex review).
         return snap
     binary = find_layout_tool_bin()
+    # Records still lacking a size: the built-in fallback probes only these,
+    # and a failed pass leaves exactly these unverified.
+    missing = sorted(
+        {
+            t.qualified_name or t.name
+            for t in snap.declarations.types
+            # DWARF backfill fills size but never dsize, which the
+            # tail-padding check needs, so those records are probed too.
+            if (t.size_bits is None or t.data_size_bits is None)
+            and not t.is_template_pattern
+            and probeable_record_name(t.qualified_name or t.name)
+        }
+    )
     probe_names: list[str] | None = None
     if binary is None:
-        # Built-in fallback: only records still lacking a size are probed.
-        probe_names = sorted(
-            {
-                t.qualified_name or t.name
-                for t in snap.declarations.types
-                # DWARF backfill fills size but never dsize, which the
-                # tail-padding check needs, so those records are probed too.
-                if (t.size_bits is None or t.data_size_bits is None)
-                and not t.is_template_pattern
-                and probeable_record_name(t.qualified_name or t.name)
-            }
-        )
+        probe_names = missing
         if not probe_names:
             return snap
     try:
@@ -734,7 +738,7 @@ def attach_clang_layout(
             deferred
         )
     except (SnapshotError, ValidationError):
-        return snap
+        return _layout_unavailable(snap, missing)
     compiler = "cc" if lang == "c" else "c++"
     if (target := _binary_abi_target(snap, compiler, compile, eff_tokens)) is not None:
         eff_tokens = (*eff_tokens, target)
@@ -760,4 +764,26 @@ def attach_clang_layout(
         probe_names=probe_names,
         resolved_lang_mode=recorded_lang_mode(snap.ast_toolchain),
     )
+    if records is None:
+        return _layout_unavailable(snap, missing)
     return apply_layout_facts(snap, records)
+
+
+#: The limitation a failed layout pass leaves on a clang/hybrid snapshot.
+LAYOUT_UNAVAILABLE_GAP = (
+    "clang record layout: the layout pass failed, so {count} record(s) carry "
+    "no compiled size or offsets and a layout-only change to one is not "
+    "assessed"
+)
+
+
+def _layout_unavailable(snap: AbiSnapshot, missing: list[str]) -> AbiSnapshot:
+    """*snap*, naming the records a failed layout pass left without layout.
+
+    The failure still never raises (ADR-028 D3); it lowers assurance instead
+    of reading as a layout that was checked and found unchanged.
+    """
+    if missing:
+        cache_dep_manifest.note_uncacheable()
+        add_snapshot_limitation(snap, LAYOUT_UNAVAILABLE_GAP.format(count=len(missing)))
+    return snap

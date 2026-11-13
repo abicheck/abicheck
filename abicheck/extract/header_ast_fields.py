@@ -56,6 +56,11 @@ from ..storage.header_ast_cache import (
     retain_ast_context_object,
     run_ast_acquisition,
 )
+from .extraction_limitations import (
+    parser_limitations,
+    provenance_with_limitations,
+    unresolved_spelling_limitation,
+)
 from .headers.castxml.clang_semantics import (
     castxml_concept_constraints,
     castxml_template_defaults,
@@ -263,6 +268,18 @@ def _parse_header_ast_legacy(
         semantic_ir=SemanticIR(),
         cxx_concept_constraints=_concept_constraints(parser, producer),
         cxx_template_defaults=_template_defaults(parser, producer),
+        # What the parse could not read stays visible (ADR-063/064): its own
+        # failed optional passes, and type spellings it left unresolved.
+        extraction_provenance=provenance_with_limitations(
+            None,
+            [
+                *parser_limitations(parser),
+                unresolved_spelling_limitation(
+                    functions, variables, types, typedefs_qualified
+                )
+                or "",
+            ],
+        ),
     )
 
 

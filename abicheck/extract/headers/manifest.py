@@ -70,6 +70,7 @@ from ...tu_fragment import (
     entity_key as entity_key,
 )
 from ...tu_merge import merge_fragments as merge_tu_fragments
+from ..extraction_limitations import merged_extraction_provenance
 from ..header_ast_backend import validate_native_gcc_manifest
 from ..header_ast_fields import _HeaderAstParser, parse_header_ast_fields
 from ..manifest_semantic_ir import manifest_semantic_ir
@@ -535,7 +536,14 @@ def run_tu_loop(
     )
     # ADR-063 Phase 6: built from the raw, pre-merge `fragments`, not
     # `merged`'s own already-folded flat fields -- see the docstring below.
-    return _dataclasses_replace(merged, semantic_ir=manifest_semantic_ir(fragments))
+    return _dataclasses_replace(
+        merged,
+        semantic_ir=manifest_semantic_ir(fragments),
+        # Any unit's extraction gap is the merged snapshot's gap.
+        extraction_provenance=merged_extraction_provenance(
+            f.extraction_provenance for f in fragments
+        ),
+    )
 
 
 @dataclass(frozen=True)
