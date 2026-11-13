@@ -146,12 +146,24 @@ class PreprocessedText:
         default_cc: str = "",
         alignment_files: frozenset[str] | None = None,
     ) -> None:
-        self.lines = {f: dict(by_line) for f, by_line in lines.items()}
+        # Every key goes through file_key here, once, so a lookup (which
+        # keys its argument the same way) matches however the caller or a
+        # stored document spelled the path. Keyed only on lookup, a table
+        # built from POSIX names missed every file on Windows, where
+        # file_key turns "/x/a.h" into "\\x\\a.h" -- and a missed file reads
+        # as one that spells no alignment specifier.
+        self.lines: dict[str, dict[int, str]] = {}
+        for f, by_line in lines.items():
+            self.lines.setdefault(file_key(f), {}).update(by_line)
         self.default_cc = default_cc
         #: :func:`file_key` of every file whose preprocessed code spells an
         #: alignment specifier. ``None``: not recorded (a document from
         #: before extractor generation 51), so no file is known not to.
-        self.alignment_files = alignment_files
+        self.alignment_files = (
+            None
+            if alignment_files is None
+            else frozenset(file_key(f) for f in alignment_files)
+        )
 
     def spells_alignment(self, file_name: str) -> bool:
         """Whether *file_name*'s preprocessed code may spell an alignment
