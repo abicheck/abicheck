@@ -207,14 +207,9 @@ def demangle(symbol: str, *, accept_macho_prefix: bool = False) -> str | None:
             _log.debug("cxxfilt demangling failed for %s", symbol)
     global _cppfilt_binary_confirmed_missing  # noqa: PLW0603
     if not _cppfilt_binary_confirmed_missing:
-        for cmd in _cppfilt_single_commands(canonical):
+        for cmd in _cppfilt_commands():
             try:
-                result = run_bounded(
-                    cmd,
-                    capture_output=True,
-                    text=True,
-                    timeout=PROBE_HANG_TIMEOUT_S,
-                )
+                result = _run_cppfilt(cmd, [canonical])
                 if result.returncode == 0:
                     out = str(result.stdout).strip()
                     # Compare against the canonical input, not the original
@@ -396,12 +391,34 @@ def _batch_phase2_cxxfilt(uncached: list[str], result: dict[str, str]) -> list[s
     return remaining
 
 
-def _cppfilt_single_commands(symbol: str) -> tuple[list[str], ...]:
-    return (["c++filt", symbol], ["c++filt", "--no-strip-underscore", symbol])
-
-
-def _cppfilt_batch_commands() -> tuple[list[str], ...]:
+def _cppfilt_commands() -> tuple[list[str], ...]:
     return (["c++filt"], ["c++filt", "--no-strip-underscore"])
+
+
+#: ``c++filt``'s I/O encoding. Symbol names are byte strings that GCC and
+#: Clang emit as UTF-8 (a non-ASCII identifier mangles to its raw UTF-8
+#: bytes), and ``c++filt`` passes bytes through. Text mode's default would
+#: instead use the host locale -- cp1252 on Windows before Python 3.15 --
+#: which cannot encode such a name at all, so a whole demangle batch raised
+#: ``UnicodeEncodeError``. ``surrogateescape`` keeps any str, including one
+#: decoded from non-UTF-8 ELF bytes, round-tripping exactly. Names go on
+#: stdin, never argv: Windows converts a native program's argv through the
+#: ANSI code page, which would corrupt the same names silently.
+_CPPFILT_ENCODING = "utf-8"
+_CPPFILT_ERRORS = "surrogateescape"
+
+
+def _run_cppfilt(cmd: list[str], names: list[str]) -> subprocess.CompletedProcess[str]:
+    """Feed *names* (one per line) to ``c++filt`` on stdin, locale-independently."""
+    return run_bounded(
+        cmd,
+        input="\n".join(names),
+        capture_output=True,
+        text=True,
+        encoding=_CPPFILT_ENCODING,
+        errors=_CPPFILT_ERRORS,
+        timeout=PROBE_HANG_TIMEOUT_S,
+    )
 
 
 def _batch_phase3_cppfilt(remaining: list[str], result: dict[str, str]) -> None:
@@ -411,19 +428,13 @@ def _batch_phase3_cppfilt(remaining: list[str], result: dict[str, str]) -> None:
     any_cppfilt_succeeded = False
     success_set: set[str] = set()
     if not _cppfilt_binary_confirmed_missing:
-        for cmd in _cppfilt_batch_commands():
+        for cmd in _cppfilt_commands():
             if not unresolved:
                 break
             success_set = set()
             canonical_inputs = [_canonical_mangled(s) for s in unresolved]
             try:
-                proc = run_bounded(
-                    cmd,
-                    input="\n".join(canonical_inputs),
-                    capture_output=True,
-                    text=True,
-                    timeout=PROBE_HANG_TIMEOUT_S,
-                )
+                proc = _run_cppfilt(cmd, canonical_inputs)
                 if proc.returncode != 0:
                     continue
                 any_cppfilt_succeeded = True

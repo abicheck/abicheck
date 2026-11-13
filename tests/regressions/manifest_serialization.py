@@ -508,4 +508,83 @@ SERIALIZATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "operand": ("single-file", "directory-package", "live"),
         },
     ),
+    BugClass(
+        id="tooling.host_tool_output_trusted_by_its_shape",
+        invariant=(
+            "A token built from a host tool's output -- the Action's report "
+            "freshness fingerprint `<seconds>.<9 digits>:<size>` -- is "
+            "trusted only after the tool proved it reproduces a known value "
+            "exactly, never because its output has the expected shape. "
+            "Ubuntu 26.04's default `stat` (uutils) prints `%.9Y` with nine "
+            "digits but only 100ns of precision, so two writes 1ns apart "
+            "fingerprinted equal and a stale report could pass as this run's. "
+            "The expectation comes from an independent source (os.stat's "
+            "st_mtime_ns on a probe file whose mtime it set), and every "
+            "implementation answers in one spelling, so falling back never "
+            "makes an unchanged file read as changed."
+        ),
+        # #1427 added the native fast path and its shape-only validation;
+        # the escape surfaced when ubuntu-latest moved to 26.04.
+        fixed_by=(1427,),
+        seed_tests=("tests/test_action_run_sh_file_fingerprint.py",),
+        # Executes run.sh's own helper text in bash, not the whole Action.
+        public_surfaces=(),
+        axes={
+            "stat": (
+                "native",
+                "literal-format",
+                "whole-seconds",
+                "failing",
+                "truncated-100ns",
+                "float64",
+            ),
+            "state_pair": ("1ns apart", "1 byte apart", "1s apart", "identical"),
+        },
+        known_gaps=(
+            KnownGap(
+                description=(
+                    "The probe proves one all-digits value on the probe "
+                    "directory's filesystem; a stat exact for that value "
+                    "but lossy for another is not excluded, and a report "
+                    "destination on a coarser filesystem than the probe "
+                    "directory is fingerprinted at that filesystem's own "
+                    "granularity, as before."
+                ),
+                reference="action/run.sh _file_fingerprint_select",
+            ),
+        ),
+    ),
+    BugClass(
+        id="tooling.child_process_text_in_the_host_locale",
+        invariant=(
+            "Text exchanged with a child process whose data has an encoding "
+            "of its own is encoded and decoded in that encoding, not the "
+            "host locale's: c++filt reads and writes UTF-8 symbol names, but "
+            "text-mode I/O with no encoding used cp1252 on Windows before "
+            "Python 3.15, so one non-ASCII `_Z` name made demangle_batch "
+            "raise UnicodeEncodeError for the whole batch. Names travel on "
+            "stdin (Windows re-encodes a native child's argv through the "
+            "ANSI code page), with surrogateescape so any str round-trips, "
+            "and the answer is the same under every host encoding."
+        ),
+        # #2052's live/stored property test was the first default-lane test
+        # to feed generated non-ASCII names through compare() on Windows.
+        fixed_by=(2052,),
+        seed_tests=(
+            "tests/test_demangle_host_locale_independence.py",
+            "tests/test_live_stored_operand_property.py",
+        ),
+        public_surfaces=(),
+        axes={
+            "locale_encoding": ("ascii", "latin-1", "cp1252", "utf-8"),
+            "name": (
+                "ascii",
+                "latin-1 range",
+                "bmp",
+                "astral",
+                "lone surrogate",
+            ),
+            "path": ("demangle_batch", "demangle"),
+        },
+    ),
 )
