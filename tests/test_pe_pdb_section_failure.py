@@ -1,8 +1,9 @@
 # Copyright 2026 Nikolay Petrov
 # SPDX-License-Identifier: Apache-2.0
-"""ADR-062 D15's producer side: a PE dump whose located PDB fails to parse
-records its ``debug`` section as ``failed`` with the diagnostic -- never an
-empty present section -- while an absent PDB stays merely not collected.
+"""ADR-062 D15's producer side: a PE dump whose PDB lookup raises, or whose
+located PDB fails to parse, records its ``debug`` section as ``failed`` with
+the diagnostic -- never an empty present section -- while an absent PDB
+(`locate_pdb` returning ``None``) stays merely not collected.
 
 Driven through the PE adapter with the platform parsers substituted (their
 owners are ``pe_metadata``/``pdb_metadata``, not the module under test), then
@@ -30,7 +31,8 @@ from abicheck.workflows.dump.pe import extract_pe
 #: PDB outcome -> (whether `debug` must be failed, the diagnostic needle).
 _OUTCOMES = {
     "absent": (False, None),
-    "lookup_error": (False, None),
+    # A raising lookup leaves "is there a PDB?" unanswered: failed, not absent.
+    "lookup_error": (True, "no pdb support on this host"),
     "parse_error": (True, "bad stream 7"),
     "parse_crash": (True, "unexpected end"),
     "parsed": (False, None),
@@ -68,7 +70,7 @@ def _dump(monkeypatch, tmp_path: Path, outcome: str, exports: list[str]):
 
 
 @pytest.mark.parametrize("outcome", sorted(_OUTCOMES))
-def test_only_a_located_pdb_that_fails_marks_debug_failed(
+def test_only_a_failed_pdb_lookup_or_parse_marks_debug_failed(
     monkeypatch, tmp_path: Path, outcome: str
 ) -> None:
     failed, needle = _OUTCOMES[outcome]

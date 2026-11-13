@@ -83,6 +83,16 @@ python skills-src/evaluation/validation/scripts/run_bundle_examples.py --json > 
 python skills-src/evaluation/validation/scripts/run_special_cli_examples.py --json > results/special-cli-examples.json
 ```
 
+The runtime smoke also reports `breaking_proof`: of the BREAKING cases, how
+many an unchanged old consumer *asserts* (its exit status changes when libv2
+replaces libv1), how many only change output, and how many show no runtime
+signal. The cases with a consumer assertion are recorded in
+`skills-src/evaluation/validation/data/runtime_consumer_proof.json`; on Linux a
+recorded case that runs without asserting is `PROOF_REGRESSED` and fails the
+lane, and `tests/test_runtime_consumer_proof_ledger.py` keeps the count from
+shrinking. After a deliberate change, re-record from a full run with
+`--write-proof-ledger <commit>` and raise that test's floor.
+
 ### 3. Aggregate one row per case
 
 ```bash

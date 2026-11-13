@@ -182,6 +182,32 @@ def _constant(subrange: Any, name: str) -> int | None:
     return value if isinstance(value, int) else None
 
 
+def attr_constant(die: Any, name: str) -> int | None:
+    """*die*'s *name* attribute as an integer constant; ``None`` when it is
+    absent or written in a non-constant form (an expression block, a
+    reference, a block). Unlike :func:`attr_int`, which reads 0 for both,
+    "not constant" stays distinct from a real zero."""
+    return _constant(die, name)
+
+
+def has_unevaluable_bound(die: Any) -> bool:
+    """Whether an array DIE states a bound (``DW_AT_count`` or
+    ``DW_AT_upper_bound``) on a subrange whose element count cannot be
+    evaluated: a non-constant count or upper bound, or a constant upper bound
+    over a non-constant ``DW_AT_lower_bound``. Such a size is unknown. An
+    *absent* bound is different: it is an unbounded array (a flexible array
+    member), whose size the element size decides."""
+    for child in die.iter_children():
+        if child.tag != "DW_TAG_subrange_type":
+            continue
+        states_bound = (
+            "DW_AT_count" in child.attributes or "DW_AT_upper_bound" in child.attributes
+        )
+        if states_bound and _subrange_count(child) is None:
+            return True
+    return False
+
+
 def _subrange_count(subrange: Any) -> int | None:
     """Element count of one ``DW_TAG_subrange_type``, or ``None`` when the
     DIE states no constant bound (a flexible array member ``T[]``, or a

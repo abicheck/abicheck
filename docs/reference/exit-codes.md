@@ -110,7 +110,10 @@ A `failed` member is also an **operational error**, independent of
 could not classify, or that no reader can open (text, an empty file, JSON
 that is no snapshot -- paired or one-sided alike) is listed as an `ERROR`
 library with its reason, sets `run_outcome.operational: extraction_error`,
-and contributes `4` through `exit.operational_error_contribution`. The two
+and contributes `4` through `exit.operational_error_contribution`. The
+same `4` is recorded on the release's `comparison_scope` block as
+`failed_member_exit_contribution` (schema 7.5), so a JSON consumer can see why
+the run exits `4` without reading `run_outcome.operational`. The two
 axes fold with `max`: such a run exits `4` under `warn` and under `block`,
 while a member that is merely `not_supplied` or `unsupported` contributes
 the completeness axis alone. This is the same `4` the

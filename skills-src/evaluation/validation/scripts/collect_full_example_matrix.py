@@ -256,12 +256,18 @@ def _artifact_errors(
             "NO_RUNTIME_SIGNAL",
             "BASELINE_SIGNAL",
             "CONTRADICTED",
+            "PROOF_REGRESSED",
             "SKIP",
             "BUILD_ERROR",
         }
         # An invalid baseline (the unmodified app misbehaving against libv1)
         # voids the swap comparison, so it fails the lane like a build error.
-        bad_statuses = {"BUILD_ERROR", "BASELINE_SIGNAL", "CONTRADICTED"}
+        bad_statuses = {
+            "BUILD_ERROR",
+            "BASELINE_SIGNAL",
+            "CONTRADICTED",
+            "PROOF_REGRESSED",
+        }
     else:
         if data.get("platform") != "linux":
             errors.append(

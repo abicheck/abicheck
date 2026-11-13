@@ -45,11 +45,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ..bundle_manifest import manifest_from_dict
+from ..errors import SnapshotError
 from ..project_snapshot_legacy import (
     is_project_snapshot_package_dir,
     materialize_release_variant_artifacts,
 )
 from ..project_snapshot_store import read_manifest_summary
+from ..snapshot_io import read_snapshot_bytes
+from ..storage.package import MANIFEST_RELPATH
 from ..storage.variant_composition import (
     read_variant_composition_degraded_members,
     read_variant_composition_inventory_complete,
@@ -73,6 +76,25 @@ __all__ = [
 ]
 
 
+def _is_foreign_manifest(manifest_file: Path) -> bool:
+    """Whether *manifest_file* decodes to a JSON object that is plainly not a
+    `ProjectSnapshot` manifest: it carries no ``versions`` key, which every
+    `PackageManifest.to_dict` writes. A `BuildSourcePack` manifest shares the
+    file name at its own directory root.
+
+    Only a positively decoded, differently-shaped document is foreign. An
+    unreadable or undecodable file is not, so it reaches
+    `read_manifest_summary` and raises there.
+    """
+    import json
+
+    try:
+        data = json.loads(read_snapshot_bytes(manifest_file))
+    except (OSError, ValueError, SnapshotError):
+        return False
+    return isinstance(data, dict) and "versions" not in data
+
+
 def read_embedded_manifest(
     root: str | Path, variant_id: str | None = None
 ) -> InstantiationManifest | None:
@@ -91,16 +113,28 @@ def read_embedded_manifest(
     carrying a manifest -- for a caller (or a genuinely single-variant
     package) with no selection to thread through.
 
-    Returns `None` for anything genuinely absent: an unreadable package, no
-    declared variants, or no variant carrying a manifest. Once a section is
-    confirmed declared, a decode failure propagates (see
+    Returns `None` for anything genuinely absent: no `manifest.json`, another
+    format's `manifest.json` (a JSON object with no `versions` key), no
+    declared variants, or no variant carrying a manifest. A `ProjectSnapshot`
+    `manifest.json` that is corrupt, unreadable or refused by this build
+    raises (`read_manifest_summary`'s own `ValueError`/`OSError`/
+    `SnapshotError`), and once a
+    section is confirmed declared, a decode failure propagates (see
     `read_variant_composition_manifest_payload`'s own docstring) rather than
     reading the same as "no manifest was ever recorded".
     """
-    try:
-        summary = read_manifest_summary(root)
-    except Exception:
+    root_path = Path(root)
+    manifest_file = root_path / MANIFEST_RELPATH
+    if not manifest_file.is_file():
+        # Genuinely absent: a plain directory, not a stored package.
         return None
+    if _is_foreign_manifest(manifest_file):
+        # Another format's `manifest.json` (a `BuildSourcePack`): this is not
+        # a `ProjectSnapshot` package, so it has no embedded manifest.
+        return None
+    # A `ProjectSnapshot` manifest that is corrupt, unreadable, or refused
+    # by this build propagates: it is not the same as "no manifest".
+    summary = read_manifest_summary(root_path)
     variant_ids = (
         (variant_id,) if variant_id is not None else tuple(summary.variant_ids)
     )

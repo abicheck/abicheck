@@ -74,9 +74,6 @@ Next, unranked (the `--no-baseline` one-sided-detector gap, the target-platform 
 
 ## Open and partially open gaps
 
-### DWARF field size 0 means "unknown", so a size change from or to 0 is not reported (2026-11-12)
-**Status (2026-11-12): NARROWED.** `FieldInfo.byte_offset` is now `int | None` (`None` = unknown), and the offset rule fires only when both sides are known (`abicheck/compare/type_layout_diff.py`). `FieldInfo.byte_size` still uses `0` for unknown, so the field type-size rule (`type_size_changed` in `_existing_field_changes`) skips any side at `0`. Two residuals follow from that. (1) A genuine size change `0 -> N` (a flexible array member, or an unresolved type) is missed, never manufactured. (2) In rename pairing (`type_layout_diff.py`, the `old_f.byte_size == c.byte_size` test), an unresolved size on one side makes a renamed field pair fail, so it can be reported as a removal plus an addition. Other `byte_size` readers were audited and are safe: `workflows/dump/dwarf_dependency_types.py` already treats `0` as absent, and `dwarf_metadata.py`'s struct and enum `byte_size == 0` checks skip declaration-only DIEs. Fix: make `byte_size` `int | None` the same way `byte_offset` was made optional, with a reader audit. Do not change the `> 0` guard alone, since a real zero-size member would then be compared. Owner: `abicheck/model/dwarf_facts.py`, `abicheck/snapshot_platform_blocks.py` (`byte_size` default `0`).
-<!-- no-canary: the residual is a missed size change and a rename that is not paired, both of which need a byte_size type change to pin; a canary would only assert today's gapped answer on a synthetic field, and tests/test_dwarf_field_offset_unknown.py already pins the offset half -->
 
 ### Parser inputs: corrupt input reads as empty or escapes as an untyped exception
 
@@ -355,6 +352,12 @@ current emitter, which is unchanged.
 `false-clean` — a gcc-backend dump misses a renamed return typedef.
 <!-- canary: tests/test_header_backend_fact_gaps_integration.py::test_the_gcc_backend_spells_a_typedef_return_canonically -->
 
+#### A failed bundle snapshot build is reported but does not floor the exit code (2026-11-13)
+
+**Status (2026-11-13): OPEN.** When a release's bundle snapshot cannot be built, `run_bundle_analysis` records `bundle snapshot could not be built: ...` in `BundleDiffResult.analysis_errors`. JSON (`bundle_analysis_errors`) and Markdown show it. No exit axis reads it, so a release that is otherwise clean still exits 0. ADR-071 §3 keeps assurance per-pair, and a new `0 -> 1` axis needs an ADR. Owner: `policy/release_exit_decision.py`.
+`false-clean` — a release whose cross-library analysis failed exits 0 when its per-library results are clean. [Full write-up](known-gaps/a-failed-bundle-snapshot-build-does-not-floor-the-exit-code.md)
+<!-- canary: tests/test_fail_closed_error_paths.py::test_failed_bundle_axis_does_not_floor_the_release_exit_code -->
+
 #### castxml records no GNU contract attribute on a function (2026-11-12)
 
 **Status (2026-11-12): OPEN.** castxml 0.7 writes no `nonnull`, `returns_nonnull`, `malloc`, `format`, `warn_unused_result` (or any other GNU function attribute but a few x86-32 conventions) into a `<Function>`'s `attributes`, so `extract/headers/castxml/location.py`'s contract-token reader never sees one and `Function.contract_attributes` stays empty on both sides. Adding or dropping such an attribute reads `NO_CHANGE` at castxml headers depth, where the clang and native gcc backends report `func_contract_attribute_added`/`_removed` (COMPATIBLE_WITH_RISK). Found by the edit corpus (`func_contract_attribute_added`/`_removed` on `c_elf`, strict xfails in `tests/_edit_corpus_known.py`). Closing it: recover the tokens from the declaration's own (preprocessed) text, the way `extract/headers/castxml/calling_convention.py` already recovers `ms_abi`/`sysv_abi`. Owner: `extract/headers/castxml/`.
@@ -384,12 +387,6 @@ current emitter, which is unchanged.
 **Status (2026-11-12): OPEN.** castxml and the clang backend record a header-only function: a `static inline` C function, or a C++ `inline` function no unit of the library calls. The native gcc plugin backend (ADR-092) does not, because gcc never emits it. So removing such a function reads `NO_CHANGE` (`COMPATIBLE` through the CLI's compare verb, which still reports the public-surface shrink) instead of `inline_function_removed`, and an incompatible parameter change reads nothing instead of `header_only_function_params_changed`, although consumers that call it stop compiling. Found by the edit corpus (`header_inline_removed` on `cxx_alt`, `header_only_function_params_changed` on `c_elf_alt`, `headers.gcc`). Owner: `extract/headers/gcc/`.
 `false-clean` — a source break in a header-only function is invisible under the gcc header backend.
 <!-- no-canary: pinned by the edit corpus's strict-xfail `header_inline_removed` entry in tests/_edit_corpus_known.py, which fails once the answer changes -->
-
-#### `abicheck aggregate` reads a release's failed member as a different exit than `compare` does (2026-11-12)
-
-**Status (2026-11-12): OPEN.** `compare` on a release with a `FAILED` member exits `4` (ADR-065 D8, `policy/release_exit_decision.py`). Aggregating the stored release report does not reproduce that exact value: `workflows/aggregate/scope_axis.py` folds only the `0`/`1` scope contributions, and `load.py`/`report_gate.py` read `run_outcome.operational` through their own mapping. The aggregate target therefore reads non-clean (`exit_code() != 0`) but not `4`. Closing it means folding the release's `operational_error` contribution into the aggregate's per-target gate with the same `max` as `compare`.
-`false-clean` — none (the aggregate still exits non-zero), but the exit code and the gate category disagree with the originating `compare`.
-<!-- canary: tests/test_aggregate_scope_completeness.py::TestStoredDispatchShapeAndAcceptedGaps::test_aggregate_reads_a_failed_member_as_1_not_the_cli_4 -->
 
 #### The DWARF lane records fewer C++ exports than the symbols-only lane, so ctor/dtor variants and RTTI/vtable objects read as added or removed (2026-11-10)
 
@@ -977,9 +974,9 @@ Do not re-attempt token-claiming. A header's export tokens cannot tell whether i
 
 #### The weekly `Mutation testing` scheduled lane (`.github/workflows/mutation.yml`, job `mutmut (detector core)`) can outgrow its own job timeout before producing a receipt — investigated, partially mitigated, not fully fixed
 
-**Status (re-verified 2026-10-09 at `456989f`): PARTIAL.** .github/workflows/mutation.yml:327 timeout-minutes: 355 (mitigation landed). The entry itself says there is no measurement that a full run completes, and only_mutate scoping/splitting is not done.  
-`hygiene` — The weekly `mutmut (detector core)` job's timeout was raised to 355 minutes, but no run is measured to finish inside it and `only_mutate` scoping/splitting is not done. [Full write-up](known-gaps/the-weekly-mutation-testing-scheduled-lane.md)
-<!-- no-canary: CI-lane runtime residual; only a full scheduled run can measure it -->
+**Status (re-measured 2026-11-13 at `509cb0d`): PARTIAL.** The lane is split into 16 shards, but `mutation-baseline.json` has never been committed, so drift never gates: the weekly run of 2026-11-09 (run `42650485644`) finished 10 of 16 record shards and 6 hit the 20,700 s mutmut cap (shard 12 measured 194 of its 3,673 mutants), and the gate refuses a baseline that does not partition `only_mutate`.  
+`hygiene` — No mutation baseline is committed, so the weekly lane records instead of gating drift; shards are balanced by mutant count, not test cost, and 6 of 16 overrun the job ceiling. Bootstrap path in the [full write-up](known-gaps/the-weekly-mutation-testing-scheduled-lane.md).
+<!-- canary: tests/test_mutation_workflow_contract.py::test_no_mutation_baseline_is_committed_yet -->
 
 #### `compare`'s migrated cross-source checks drop `--since`'s changed-path confidence boost
 

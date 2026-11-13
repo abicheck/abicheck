@@ -34,6 +34,8 @@ from collections.abc import Collection
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from abicheck.policy.release_outcome import worse_release_verdict
+
 from .comparison_scope import ComparisonScopeTerms, comparison_scope_terms
 from .release_assurance_section import ReleaseAssuranceTerms, release_assurance_terms
 from .release_findings import project_release_library_results
@@ -88,6 +90,14 @@ def project_release_outcome(
         show_only=show_only,
         show_impact=show_impact,
     )
+    # ADR-065 D8: a FAILED member -- matched (a "failed" library result) or
+    # OLD-only (no library result at all, only the scope record knows) --
+    # ranks like an operational ERROR in the reported verdict, the same
+    # sentinel a stored run's extraction failure already reads as
+    # (``stored_reported_verdict``). Without it a report says NO_CHANGE beside
+    # the exit 4 its own ``exit`` block states.
+    if outcome.scope_decision.failed_member_exit_contribution:
+        worst_verdict = worse_release_verdict(worst_verdict, "ERROR")
     # "One product fact, reported once": fold findings several members
     # reported identically out of the per-library tables and assemble the
     # release public-surface section every format reads.

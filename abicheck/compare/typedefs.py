@@ -235,7 +235,11 @@ def diff_typedefs(
     new_aliases = _aliases(new_index)
     new_alias_keys = frozenset(new_aliases)
 
-    for alias, old_ids in old_aliases.items():
+    # Sorted by alias, not the map's insertion order: a stored snapshot's
+    # typedef map is written key-sorted, so insertion order differs between a
+    # live operand and the same snapshot loaded back, and the findings' order
+    # in the report must not depend on which of the two was compared.
+    for alias, old_ids in sorted(old_aliases.items(), key=lambda item: item[0]):
         # Full alias: correct for both legacy-DWARF's and the qualified
         # map's keys.
         if is_non_abi_surface_type(

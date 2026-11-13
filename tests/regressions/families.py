@@ -64,6 +64,7 @@ FAMILIES: dict[str, Family] = {
                 "tests/test_clang_type_evidence.py",
                 "tests/test_pdb_parse_all_lifecycle.py",
                 "tests/test_disposition_transitions.py",
+                "tests/test_state_guards_phase5.py",
             ),
         ),
         Family(
@@ -89,6 +90,9 @@ FAMILIES: dict[str, Family] = {
                 # A stored dump and the same binary live are one input for
                 # ADR-090's identical-pair exemption (stored/live/older cells).
                 "tests/test_unconfirmed_binary_identity.py",
+                # The whole scalar report, live vs stored operand, over
+                # generated pairs (finding order included).
+                "tests/test_live_stored_operand_property.py",
             ),
         ),
         Family(
@@ -110,7 +114,9 @@ FAMILIES: dict[str, Family] = {
             ),
             harness_tests=(
                 "tests/test_family_f4_heuristics.py",
+                "tests/test_state_guards_phase5.py",
                 "tests/test_clang_type_evidence.py",
+                "tests/test_concept_scan_elif0.py",
             ),
             planned_reason="",
         ),
@@ -389,6 +395,7 @@ FAMILIES: dict[str, Family] = {
 
 
 _F1 = (
+    "report.unrecognized_status_shown_as_a_known_one",
     "lifecycle.repeated_narrowing_pass_intersects_instead_of_unions",
     "lifecycle.done_flag_set_before_the_work_it_guards",
     "storage.wire_extension_dropped_or_refused",
@@ -502,6 +509,8 @@ _F3 = (
     "identity.benign_duplicate_declaration_key",
 )
 _F4 = (
+    "scanner.dead_preprocessor_branch_read_as_live",
+    "scanner.delimiter_inside_a_literal_counted_as_structure",
     "classification.name_shape_as_contract_membership",
     "classification.declaration_existence_as_export_obligation",
     "classification.demotion_applied_beyond_its_justification",
@@ -618,7 +627,10 @@ _F9 = (
     "serialization.stored_bytes_depend_on_producer_iteration_order",
     "concurrency.per_thread_state_in_inherited_context",
 )
-_F10 = ("concurrency.abandoned_child_outlives_failed_owner",)
+_F10 = (
+    "concurrency.abandoned_child_outlives_failed_owner",
+    "lifecycle.counter_or_handle_used_past_its_release",
+)
 _F11 = ("measurement.forked_tree_rss_overstates_memory",)
 _F19 = (
     "classification.removed_virtual_slot_read_as_plain_removal",

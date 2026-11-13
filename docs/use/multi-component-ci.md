@@ -91,6 +91,26 @@ per-component content digests. Because the snapshots are self-contained, every
 later job compares them with the original build tree gone, and nothing
 re-extracts.
 
+### Reuse the same spec in a per-target compare gate
+
+A gate that runs the root Action once per library (a matrix over component
+names) reads the same file instead of restating each library's
+`new-header`/`new-include`:
+
+```yaml
+- uses: abicheck/abicheck@<pinned-sha>
+  with:
+    mode: compare
+    old-library: ${{ steps.baseline.outputs.snapshot-path }}
+    library-spec: .ci/abicheck-components.json
+    library-spec-target: ${{ matrix.component }}
+```
+
+The named component's artifact, headers and include roots become the run's
+`new-library`, `new-header` and `new-include`; setting any of those (or
+`header`/`include`) as well is refused. Relative patterns resolve against the
+working directory, and `${NAME}` placeholders are not bound on this path.
+
 ## 3. Name the snapshots in the comparing job
 
 The capture ran in another job; this one downloaded the artifact. Do **not**

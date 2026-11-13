@@ -541,11 +541,10 @@ class TestCompareReleaseErrorPaths:
             )
         assert exc_info.value.code == 8
 
-    def test_bundle_analysis_snapshot_failure_returns_none(
-        self, tmp_path: Path
-    ) -> None:
-        """If build_bundle_snapshot raises, _run_bundle_analysis should
-        log a warning and return None instead of crashing the run."""
+    def test_bundle_analysis_snapshot_failure_is_recorded(self, tmp_path: Path) -> None:
+        """If build_bundle_snapshot raises, _run_bundle_analysis must not
+        crash the run, and must not drop the bundle axis either: it returns
+        a result recording the failure in ``analysis_errors``."""
         from abicheck.workflows.release_bundle import (
             run_bundle_analysis as _run_bundle_analysis,
         )
@@ -566,7 +565,11 @@ class TestCompareReleaseErrorPaths:
                 manifest_path=None,
                 bundle_system_providers=(),
             )
-        assert result is None
+        assert result is not None
+        assert result.bundle_findings == []
+        assert result.analysis_errors == [
+            "bundle snapshot could not be built: snapshot kaboom"
+        ]
 
     def test_system_providers_with_comma_survive_intact(self, tmp_path: Path) -> None:
         """Codex review, fresh evidence: bundle_system_providers is a real

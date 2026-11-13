@@ -38,6 +38,16 @@ Usage::
 The shrink-only zero-source baseline is
 ``scripts/changekind_real_coverage_baseline.json``, gated by
 ``tests/test_changekind_real_coverage.py``.
+
+Real-fixture backing ledger
+    A narrower question than "any real source": which kinds a *compiled
+    fixture* is declared to produce -- a catalog case's ``expected_kinds`` or
+    a tier of the generated edit corpus's ``verified_floor``
+    (``tests/edit_corpus_coverage_ledger.json``). The lexical integration scan
+    and field shapes do not count. ``--write-fixture-ledger`` records it in
+    ``scripts/changekind_fixture_ledger.json``; the test fails when a recorded
+    kind loses every backing source (no-shrink) and when the ledger drifts
+    from the sources (so a dropped source is a visible ledger edit).
 """
 
 from __future__ import annotations
@@ -56,6 +66,8 @@ CATALOG_GT = ROOT / "catalog" / "ground_truth.json"
 FIELD_SHAPES = TESTS / "field_shapes"
 DOC_PATH = ROOT / "docs" / "contribute" / "changekind-real-coverage.md"
 BASELINE_PATH = SCRIPTS / "changekind_real_coverage_baseline.json"
+EDIT_CORPUS_LEDGER = TESTS / "edit_corpus_coverage_ledger.json"
+FIXTURE_LEDGER_PATH = SCRIPTS / "changekind_fixture_ledger.json"
 SOURCES = ("catalog", "field_shapes", "integration")
 TOP_N = 20
 
@@ -113,6 +125,69 @@ def scan_field_shapes(root: Path = FIELD_SHAPES) -> dict[str, set[str]]:
         for kind in data.get("expected_kinds") or []:
             out.setdefault(kind, set()).add(gt.parent.name)
     return out
+
+
+def scan_edit_corpus_floor(
+    path: Path = EDIT_CORPUS_LEDGER, kinds: dict[str, str] | None = None
+) -> dict[str, set[str]]:
+    """Kinds an edit-corpus tier verified, as ``{value: {"edit_corpus:<tier>"}}``.
+
+    ``verified_floor`` names kinds by member name; a name that is no longer a
+    ``ChangeKind`` is skipped (the edit corpus's own ledger test owns it).
+    """
+    kinds = kinds if kinds is not None else all_kinds()
+    by_name = {name: value for value, name in kinds.items()}
+    floors = json.loads(path.read_text(encoding="utf-8")).get("verified_floor", {})
+    out: dict[str, set[str]] = {}
+    for tier, names in floors.items():
+        for name in names:
+            if name in by_name:
+                out.setdefault(by_name[name], set()).add(f"edit_corpus:{tier}")
+    return out
+
+
+def fixture_backing(
+    kinds: dict[str, str] | None = None,
+    catalog: dict[str, set[str]] | None = None,
+    floor: dict[str, set[str]] | None = None,
+) -> dict[str, list[str]]:
+    """Every kind's real-fixture sources (``catalog:<case>``, ``edit_corpus:<tier>``)."""
+    kinds = kinds if kinds is not None else all_kinds()
+    catalog = catalog if catalog is not None else scan_catalog()
+    floor = floor if floor is not None else scan_edit_corpus_floor(kinds=kinds)
+    return {
+        value: sorted(
+            {f"catalog:{case}" for case in catalog.get(value, ())}
+            | floor.get(value, set())
+        )
+        for value in sorted(kinds)
+    }
+
+
+def fixture_ledger(backing: dict[str, list[str]]) -> dict[str, object]:
+    backed = {k: v for k, v in backing.items() if v}
+    return {
+        "_comment": (
+            "Real-fixture backing per ChangeKind: catalog expected_kinds and the "
+            "edit corpus verified_floor. A kind listed under `backed` may not lose "
+            "every source (tests/test_changekind_real_coverage.py). Regenerate with "
+            "`python scripts/changekind_real_coverage.py --write-fixture-ledger`."
+        ),
+        "summary": {
+            "total_kinds": len(backing),
+            "backed": len(backed),
+            "unbacked": len(backing) - len(backed),
+        },
+        "backed": backed,
+        "unbacked": sorted(k for k, v in backing.items() if not v),
+    }
+
+
+def lost_backing(ledger: dict, backing: dict[str, list[str]]) -> list[str]:
+    """Recorded-backed kinds that are still ``ChangeKind``s but have no source now."""
+    return sorted(
+        k for k in ledger.get("backed", {}) if k in backing and not backing[k]
+    )
 
 
 def _is_mark(node: ast.AST, name: str) -> bool:
@@ -314,6 +389,7 @@ def summary(inv: dict[str, dict[str, object]]) -> dict[str, object]:
     return {
         "total_kinds": len(inv),
         "with_real_source": sum(1 for v in inv.values() if v["source_count"]),
+        "fixture_backed": sum(1 for v in fixture_backing().values() if v),
         "by_source": {
             s: sum(1 for v in inv.values() if v["sources"][s]) for s in SOURCES
         },  # type: ignore[index]
@@ -350,6 +426,9 @@ def render_markdown(inv: dict[str, dict[str, object]]) -> str:
         "",
         f"- Total kinds: **{s['total_kinds']}**",
         f"- Kinds with at least one real source: **{s['with_real_source']}**",
+        "- Kinds backed by a compiled fixture (catalog `expected_kinds` or an edit-corpus "
+        f"`verified_floor`; ledger `scripts/changekind_fixture_ledger.json`): "
+        f"**{s['fixture_backed']}**",
         "- Kinds per source: "
         + ", ".join(f"{k} {v}" for k, v in s["by_source"].items()),  # type: ignore[attr-defined]
         "",
@@ -392,7 +471,17 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--write-baseline", action="store_true", help="rewrite the zero-source baseline"
     )
+    ap.add_argument(
+        "--write-fixture-ledger",
+        action="store_true",
+        help="rewrite the per-kind real-fixture backing ledger",
+    )
     args = ap.parse_args(argv)
+    if args.write_fixture_ledger:
+        FIXTURE_LEDGER_PATH.write_text(
+            json.dumps(fixture_ledger(fixture_backing()), indent=2) + "\n",
+            encoding="utf-8",
+        )
     inv = build_inventory()
     if args.json:
         args.json.write_text(

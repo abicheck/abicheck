@@ -70,4 +70,75 @@ LIFECYCLE_BUG_CLASSES: tuple[BugClass, ...] = (
             "repeat": ("same scope", "different scope"),
         },
     ),
+    BugClass(
+        id="scanner.delimiter_inside_a_literal_counted_as_structure",
+        invariant=(
+            "A text scanner that tracks nesting by delimiter characters "
+            "ignores delimiters inside string and character literals; a "
+            "literal's contents never open or close a scope. Instance: "
+            "header_conditionals counted a '}' in a member initializer and "
+            "closed the record early. Family F4 (structure over spelling)."
+        ),
+        fixed_by=(2048,),
+        seed_tests=("tests/test_state_guards_phase5.py",),
+        axes={"literal": ("string", "char", "escaped quote", "several braces", "none")},
+    ),
+    BugClass(
+        id="lifecycle.counter_or_handle_used_past_its_release",
+        invariant=(
+            "A paired enter/exit counter never goes below zero and a released "
+            "resource rejects further use, the same way on every backend: an "
+            "unbalanced exit fails where it happens instead of leaving a state "
+            "the counter can never return from. Instances: the deadline "
+            "registration window (a deferred SIGTERM was lost) and "
+            "BudgetedExecutor's inline path accepting work after shutdown. "
+            "Family F10 (process lifecycle on failure paths)."
+        ),
+        fixed_by=(2048, 2054),
+        seed_tests=(
+            "tests/test_state_guards_phase5.py",
+            "tests/test_bracket_depth_clamp.py",
+        ),
+        axes={
+            "executor": ("thread pool", "inline"),
+            "depth": ("1", "2", "3", "extra exit"),
+            "scanner closer": (")", ">", ">>", "]", "}"),
+        },
+    ),
+    BugClass(
+        id="report.unrecognized_status_shown_as_a_known_one",
+        invariant=(
+            "A stored status outside the known vocabulary is reported as "
+            "'unknown' with the value it carried, never verbatim as if it were "
+            "a status, and it ranks worst. Instance: release member assurance "
+            "status. Family F1."
+        ),
+        fixed_by=(2048,),
+        seed_tests=("tests/test_state_guards_phase5.py",),
+        axes={
+            "status": (
+                "each known",
+                "unknown string",
+                "case variant",
+                "empty",
+                "None",
+                "int",
+            )
+        },
+    ),
+    BugClass(
+        id="scanner.dead_preprocessor_branch_read_as_live",
+        invariant=(
+            "A text scan that skips provably dead preprocessor branches skips "
+            "every branch whose condition is the literal 0, including an "
+            "#elif 0 after #if 0; only a branch that can be live is read. "
+            "Instance: the C++20 concept pre-scan (extractor generation 59). "
+            "Family F4."
+        ),
+        fixed_by=(2054,),
+        seed_tests=("tests/test_concept_scan_elif0.py",),
+        axes={
+            "branch": ("#elif 0", "#elif 0 chain", "#elif X", "#else", "nested #if X")
+        },
+    ),
 )

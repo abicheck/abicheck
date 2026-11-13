@@ -1,17 +1,17 @@
 {
   "extractor": {
     "files": {
-      "abicheck/btf_metadata.py": "614321e6140b32e7518deb3991dc9b9421107688c952542808ec4da88a17dc73",
-      "abicheck/ctf_metadata.py": "42d3f588c6c4567c2a9d43a3ef5b886a753c37dd5357a4199d81d7ffc60d2109",
+      "abicheck/btf_metadata.py": "b06d284fa0c02eb054bd240cacc01356bed592fd2eb9d9d25b08cd5e33fdb12c",
+      "abicheck/ctf_metadata.py": "97413edf3222a6c2355d3c7f8731859f759411a58876c211713c616a4fc3d689",
       "abicheck/dumper.py": "7cfc03dce4b9968a259d5eba7ba7cf7d3008eb0422a60defd7c4743b88b330a8",
       "abicheck/dumper_clang.py": "5fd0f5d29bf26c35b68c0389ed98c30ab52e462c529614ce0195b16fa4f3684c",
       "abicheck/dwarf_advanced.py": "e7dc4a394915381a0c67081f14b8301d63677c5c63d1feb4e95c6c3573c111e8",
-      "abicheck/dwarf_metadata.py": "43bc4364d2acf7f64024fda9247086aad5efd950edce31a4b2d7d12085716030",
+      "abicheck/dwarf_metadata.py": "307f2e9cdc04c8feb304bc108928e65a7cb031ebf51803481acda38a33c3b501",
       "abicheck/dwarf_presence.py": "7e73580ec7a02fdf24e3815cb89e42aa6fe00e46e8cda6b7fe9d547f06ac3f06",
       "abicheck/dwarf_snapshot.py": "0bc0c4ab892ad7e4b3a8f4f9c991045109667638e012337ec349204122435fb8",
       "abicheck/dwarf_snapshot_datasources.py": "e337f8be3a8ae16350c0639d0be10670d4d5d1197108659fa210fcbbf8a5bdde",
-      "abicheck/dwarf_unified.py": "9ecb70b59bb26674ac98ba14ad1211b4103e3a78426a91ed7901e59f1a7d9cdf",
-      "abicheck/dwarf_utils.py": "804ffe3cfa507b305ca7ff206fee70957e23e20f7eabd7c05eaa1e45a7f3bd8f",
+      "abicheck/dwarf_unified.py": "f6b778277a80aa4d010535db68e1f7363735cbc78ee5c13dc0ee38b52c319ce8",
+      "abicheck/dwarf_utils.py": "7d94088db18ebd8e734e6259c5fa784709fd19417ad02c3e243c8b41a18212eb",
       "abicheck/elf_metadata.py": "e5ca377a85a3380faaa63119f832780fa344ecfad346d81b9cfcc6ee2050ac35",
       "abicheck/extract/__init__.py": "011ec37fad96ea2035983eaaedeba0976940a570900f85db8c03bb7369af742a",
       "abicheck/extract/ar_archive.py": "6fdab7ed7390a20f087f9407eaa3988c0f8c658400bc0ea8c7e193271923956d",
@@ -104,7 +104,7 @@
       "abicheck/extract/headers/castxml/inline_variables.py": "60ee92e7a810d81f113a6f5fb4f218ea6287258948dc9a838fbdef37ef37ea32",
       "abicheck/extract/headers/castxml/location.py": "a5469fedb2774dfdf1b87a49ddc713471c088ecee6ea5ccbfe4d9764012c97e6",
       "abicheck/extract/headers/castxml/names.py": "038abc55f72f11185c0a5ec48d57bff95a1ab894380f7978b6187cd76b044796",
-      "abicheck/extract/headers/castxml/out_of_line_inline.py": "7f8a77d82dd9f87865163ffda63e6c5a762887800886ea9f70dae40e378cbd89",
+      "abicheck/extract/headers/castxml/out_of_line_inline.py": "79be984938819c77feb6ed867552f99e0245f0ff0fce78cf57b2cb7198730246",
       "abicheck/extract/headers/castxml/policy.py": "fda86c1de147934e620824b9a97262f218bffb7340cbbf394ac5fdd437e47f23",
       "abicheck/extract/headers/castxml/preprocessed_text.py": "88deb48742c22f1e594ba3b73fb20f11c5dd091c690f7c53597aee67478f32ed",
       "abicheck/extract/headers/castxml/probe.py": "525ded3c75b147300cfaa460ce8acd62f87533859ff152e2b1f76c4302999bb0",
@@ -162,7 +162,7 @@
       "abicheck/extract/headers/clang/vtable.py": "ec35a377463d0191e013684713b5a049e78a766a16cf74e71354d2e57e3a2931",
       "abicheck/extract/headers/clang_header_argv.py": "644a6454c6a3da3ab5f184cc2d9778d51f141f1e528f86162cccb815f9b17ddb",
       "abicheck/extract/headers/compile_provenance.py": "e4a6bcf30627807081f38f909cd136e5203132c099ea225971ef1d4cf849d82a",
-      "abicheck/extract/headers/concept_scan.py": "158155a829223afdcd4f80b5d4dec9a6f7812c4827976a67d068096802465839",
+      "abicheck/extract/headers/concept_scan.py": "7a167192c477da03874aede4cc3384f29945bc8fefb1372a48ea190d019eabbe",
       "abicheck/extract/headers/gcc/__init__.py": "7af60db1abfcfe17ecf135eb0bc8ce9ae3089d3c6101324c087d6cc78dab8b50",
       "abicheck/extract/headers/gcc/acquisition.py": "f7ea1e5f5a15f8a4a58a1bdee6f0deca8ede99dece51885754176ba8beff1246",
       "abicheck/extract/headers/gcc/backend.py": "30ebbb0814b501875fa9c814bca08e613f86aaab2ac4382a2da99f6143b7c14a",
@@ -215,7 +215,7 @@
       "abicheck/header_utils.py": "05efbcfa5999722c6651f0802449aad5c20888c0465ab5aa43ee5e872a02586f",
       "abicheck/macho_metadata.py": "9b3fa13cbbc127fcf981289c4b15ff2aaabc6dfd10d7747a7262fd3cfda3e69e",
       "abicheck/model/arithmetic_type_spellings.py": "790e6049cf5607e20d987d2151bacc4ba331f76e24c486b0305102f79f4ae726",
-      "abicheck/pdb_metadata.py": "625cd66b393102d529bc87fa110104bd1ad05b071a07efcd3cc9b3946cd1b75d",
+      "abicheck/pdb_metadata.py": "d9e3674206483d001ebfd2853748b657a33d1f36cf9c99d63ed4c7a9669cf353",
       "abicheck/pdb_model.py": "c42cf25e4e3bd4d098575989cec9de94ab9795e171dde08e7b9a93d155a7ebe8",
       "abicheck/pdb_parser.py": "cfcb071ded9843b10834a236b6d61ca2db9522fb6d18d535a0f3861cb8a6caf6",
       "abicheck/pdb_utils.py": "c170ddb97ffa41a4fd4add3057cbebedc032116408252453c65f3be3b7117817",
@@ -224,9 +224,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "dcefde53ed9c2f33c560c140414d80739ff1bd2d9f13c8652f21bd9a162bc83d",
-    "generation": 57,
-    "reason": "PreprocessedText now applies file_key to stored keys as well as lookups; every production table is built from parse_preprocessed output, already file_key-normalised, so extraction records the same facts for the same input on the same host"
+    "fingerprint": "602005cb88bb7dc9d7c7ef5c04f1d5138db9a09369620cf9841c70e9fa316eb5",
+    "generation": 59,
+    "reason": "bumped to 59 for a semantic change"
   },
   "resolver": {
     "files": {

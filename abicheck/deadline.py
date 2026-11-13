@@ -692,7 +692,12 @@ def _enter_registration_window() -> None:
 
 def _exit_registration_window() -> None:
     global _deferred_sigterm
-    _registration_window.depth = _registration_window_depth() - 1
+    depth = _registration_window_depth()
+    if depth <= 0:
+        # Below zero the depth never returns to 0, so a deferred SIGTERM
+        # would never be replayed: fail at the unbalanced exit instead.
+        raise RuntimeError("registration window exited more times than entered")
+    _registration_window.depth = depth - 1
     # Only the main thread can have deferred the handler (CPython runs it
     # nowhere else), and only the main thread may replay it: the handler
     # calls signal.signal(), which raises off the main thread. A worker

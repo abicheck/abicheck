@@ -101,7 +101,13 @@ class TestClassifyChange:
 
     @pytest.mark.parametrize("kind", list(ChangeKind), ids=lambda k: k.value)
     def test_exhaustive_all_kinds_classified(self, kind: ChangeKind) -> None:
-        """Every ChangeKind must map to a real category, never the fail-safe default."""
+        """Consistency test, not an oracle: every ChangeKind maps to a real
+        category, and that category agrees with the registry-derived kind sets.
+
+        Both sides come from ``default_verdict``, so a wrong verdict passes here.
+        The independent expected-verdict oracle is
+        ``tests/test_verdict_semantic_oracle.py``.
+        """
         from abicheck.checker_policy import (
             ADDITION_KINDS,
             API_BREAK_KINDS,
