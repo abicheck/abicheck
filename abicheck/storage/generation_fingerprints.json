@@ -108,7 +108,7 @@
       "abicheck/extract/headers/castxml/policy.py": "fda86c1de147934e620824b9a97262f218bffb7340cbbf394ac5fdd437e47f23",
       "abicheck/extract/headers/castxml/preprocessed_text.py": "88deb48742c22f1e594ba3b73fb20f11c5dd091c690f7c53597aee67478f32ed",
       "abicheck/extract/headers/castxml/probe.py": "525ded3c75b147300cfaa460ce8acd62f87533859ff152e2b1f76c4302999bb0",
-      "abicheck/extract/headers/castxml/record_traits.py": "1a754e5d26614c65f65b45d14a54c56cd368f7af4e9245898d9d84cc97b9aec3",
+      "abicheck/extract/headers/castxml/record_traits.py": "6fceeb3f5c58dd409a5ea80cfc8c584014b3fd5fabd56c5ae72fefa8eca16330",
       "abicheck/extract/headers/castxml/records.py": "5130cd54a4547cf0ce1cb3bf139459348c6901d0f3bf41d4ea461c8f8f73e60c",
       "abicheck/extract/headers/castxml/scope.py": "41cecc8dd996c10a58c022e5dca4003cce9d7775adf674b339cc199fb59297c7",
       "abicheck/extract/headers/castxml/specialization.py": "3f9f021672df1b84de42bc8de5f3c915508b3f3850e0a8acbaa80a3dee04c6f3",
@@ -224,9 +224,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "1f7517d3d82bec5246fd25262350775d277a0745e934a89132e6a27bd964a9c0",
+    "fingerprint": "87fd25694c2ce572c02371378873ea8029f5ba12cc5cd9a9f39270bf2f4b578f",
     "generation": 60,
-    "reason": "folds the native gcc plugin's base access and DECL_C_BIT_FIELD fix into generation 60, which is introduced by this same unreleased change and already declares those record facts"
+    "reason": "folds the castxml standard-layout rules /3.7 and /3.8 and comment-aware defaulted detection (CodeRabbit review) into generation 60, introduced by this same unreleased change, which already declares the castxml is_standard_layout and trivially-copyable facts"
   },
   "resolver": {
     "files": {

@@ -155,14 +155,69 @@ CASES: list[tuple[str, str, bool | None]] = [
         + _field("_f", "_F"),
         True,
     ),
-    # An array first member leaves the element-type rule undecided.
+    # [class.prop]/3.8 looks through arrays: an int array is not a base.
     (
-        "first-member-array",
+        "first-member-int-array",
         _struct("_E")
         + '<ArrayType id="_arr" type="_int" min="0" max="1"/>'
         + _struct("_S", "_a", '<Base type="_E" access="public" virtual="0"/>')
         + _field("_a", "_arr"),
-        None,
+        True,
+    ),
+    # ... and an array of the base type is in M(D).
+    (
+        "first-member-array-of-base",
+        _struct("_E")
+        + '<ArrayType id="_arr" type="_E" min="0" max="1"/>'
+        + _struct("_S", "_a", '<Base type="_E" access="public" virtual="0"/>')
+        + _field("_a", "_arr"),
+        False,
+    ),
+    # M(D) recurses through the first member's own first member.
+    (
+        "nested-first-member-is-base",
+        _struct("_E")
+        + _struct("_IN", "_e")
+        + _field("_e", "_E")
+        + _struct("_S", "_i", '<Base type="_E" access="public" virtual="0"/>')
+        + _field("_i", "_IN"),
+        False,
+    ),
+    # A base that is a *later* member of the first member is not in M(D).
+    (
+        "nested-later-member-is-base",
+        _struct("_E")
+        + _struct("_IN", "_x _e")
+        + _field("_x")
+        + _field("_e", "_E")
+        + _struct("_S", "_i", '<Base type="_E" access="public" virtual="0"/>')
+        + _field("_i", "_IN"),
+        True,
+    ),
+    # A union contributes every member type to M(D).
+    (
+        "union-first-member-holds-base",
+        _struct("_E")
+        + '<Union id="_U" name="_U" members="_ui _ue"/>'
+        + _field("_ui")
+        + _field("_ue", "_E")
+        + _struct("_S", "_u", '<Base type="_E" access="public" virtual="0"/>')
+        + _field("_u", "_U"),
+        False,
+    ),
+    # [class.prop]/3.7: two base subobjects of the same (empty) type.
+    (
+        "repeated-empty-base-subobject",
+        _struct("_E")
+        + _struct("_L", "", '<Base type="_E" access="public" virtual="0"/>')
+        + _struct("_R", "", '<Base type="_E" access="public" virtual="0"/>')
+        + _struct(
+            "_S",
+            "",
+            '<Base type="_L" access="public" virtual="0"/>'
+            '<Base type="_R" access="public" virtual="0"/>',
+        ),
+        False,
     ),
 ]
 

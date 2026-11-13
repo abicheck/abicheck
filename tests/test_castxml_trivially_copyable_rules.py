@@ -73,6 +73,21 @@ CASES: list[tuple[str, str, str, str, bool | None]] = [
         "_c",
         False,
     ),
+    # `= default` inside a comment is not a declaration token.
+    (
+        "default-in-block-comment",
+        "struct S { int a; S(const S&) /* = default */; };",
+        _copy(1),
+        "_c",
+        False,
+    ),
+    (
+        "default-in-line-comment",
+        "struct S { int a; S(const S&); // = default\n};",
+        _copy(1),
+        "_c",
+        False,
+    ),
     # A user-provided move constructor.
     ("move-user", "struct S { int a; S(S&&); };", _copy(1, "_rref"), "_c", False),
     # A defaulted copy assignment, with the implicit copy constructor present.

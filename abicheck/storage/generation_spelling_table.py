@@ -580,7 +580,8 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "access specifier (base_access fact; a missing specifier is not "
         "collected), as does the native gcc plugin, which also keeps a "
         "byte-aligned bit-field marked as a bit-field (DECL_C_BIT_FIELD); castxml derives is_standard_layout from the C++ rules "
-        "and no longer loses a copy constructor declared beside a defaulted "
+        "(including the one-subobject-per-type rule and the recursive first-member "
+        "set) and no longer loses a copy constructor declared beside a defaulted "
         "constructor; only those record facts can change, an older snapshot "
         "reads them as unknown; no stored type spelling changes, nothing rewritten"
     ),

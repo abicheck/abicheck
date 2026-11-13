@@ -50,6 +50,8 @@ _TRANSPARENT_TAGS = frozenset(
     {"CvQualifiedType", "Typedef", "ElaboratedType", "ArrayType"}
 )
 _DEFAULTED_RE = re.compile(r"=\s*default\b")
+_BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
+_LINE_COMMENT_RE = re.compile(r"//[^\n]*")
 #: How many lines a special member's declaration may span.
 _DECL_LINES = 4
 
@@ -120,6 +122,10 @@ def _defaulted_on_declaration(
     if not 0 <= start < len(lines):
         return None
     text = "\n".join(lines[start : start + _DECL_LINES])
+    # Comments carry no declaration tokens: `S(const S&) /* = default */;` is
+    # user-provided. Blank them out before reading the declarator.
+    text = _BLOCK_COMMENT_RE.sub(" ", text)
+    text = _LINE_COMMENT_RE.sub("", text)
     name = re.escape(member.get("name", ""))
     if member.tag == "Destructor":
         declarator = rf"~\s*{name}\s*\("
@@ -323,24 +329,52 @@ def _has_data_members(
     return None if None in flags else False
 
 
-def _base_record_ids(
+def _base_subobjects(
     ctx: CastxmlParserContext, el: Element, depth: int = 0
-) -> set[str] | None:
-    """Ids of every base record of *el*, direct or indirect; ``None`` when a
-    base cannot be resolved."""
-    ids: set[str] = set()
+) -> list[str] | None:
+    """Ids of every base subobject of *el* along every inheritance path, one
+    entry per occurrence (``D : L, R`` with ``L : E`` and ``R : E`` lists
+    ``E`` twice); ``None`` when a base cannot be resolved."""
+    ids: list[str] = []
     for b in el:
         if b.tag != "Base":
             continue
         base = _record_of(ctx, b.get("type", ""))
         if base is None or depth > 32:
             return None
-        ids.add(base.get("id", ""))
-        inner = _base_record_ids(ctx, base, depth + 1)
+        ids.append(base.get("id", ""))
+        inner = _base_subobjects(ctx, base, depth + 1)
         if inner is None:
             return None
-        ids |= inner
+        ids += inner
     return ids
+
+
+def _first_member_types(
+    ctx: CastxmlParserContext, type_id: str, depth: int = 0
+) -> set[str] | None:
+    """Record ids in C++ [class.prop]/3's set M(X) for the type *type_id*,
+    including the type itself when it is a record: an array contributes its
+    element type, a union every member type, a non-union class its first
+    non-static data member's type, each recursively. ``None`` when a type in
+    the chain cannot be resolved."""
+    el = ctx.id_map.get(type_id)
+    if el is None or depth > 32:
+        return None
+    if el.tag in _NAMED_TAGS or el.tag == "ArrayType":
+        return _first_member_types(ctx, el.get("type", ""), depth + 1)
+    if el.tag not in _RECORD_TAGS:
+        return set()
+    if el.get("incomplete") == "1":
+        return None
+    out = {el.get("id", "")}
+    fields = [m for m in _members(ctx, el) if m.tag == "Field"]
+    for f in fields if el.tag == "Union" else fields[:1]:
+        inner = _first_member_types(ctx, f.get("type", ""), depth + 1)
+        if inner is None:
+            return None
+        out |= inner
+    return out
 
 
 def _data_member_rules(
@@ -349,9 +383,9 @@ def _data_member_rules(
     fields: list[Element],
     bases: list[Element],
 ) -> bool | None:
-    """[class.prop]/3.5 (data members in at most one class of the hierarchy,
-    and none in the most derived one when a base has some) and /3.6 (no base
-    of the first member's type)."""
+    """[class.prop]/3.6 (data members in at most one class of the hierarchy,
+    and none in the most derived one when a base has some), /3.7 (one base
+    subobject per type) and /3.8 (no base in the first-member set M(D))."""
     flags = [
         None
         if (base := _record_of(ctx, b.get("type", ""))) is None
@@ -368,18 +402,21 @@ def _data_member_rules(
         if with_data >= 2:
             return False
         hierarchy = None if with_data + unknown >= 2 else True
-    if not fields or not bases:
+    if not bases:
         return hierarchy
-    first = fields[0]
-    if ctx.id_map.get(first.get("type", ""), first).tag == "ArrayType":
+    subobjects = _base_subobjects(ctx, el)
+    if subobjects is None:
         return None
-    first_record = _record_of(ctx, first.get("type", ""))
-    if first_record is None:
+    # [class.prop]/3.7: at most one base class subobject of any given type.
+    if len(subobjects) != len(set(subobjects)):
+        return False
+    if not fields:
         return hierarchy
-    base_ids = _base_record_ids(ctx, el)
-    if base_ids is None:
+    # [class.prop]/3.8: no base class in M(D), the first-member type set.
+    first_types = _first_member_types(ctx, fields[0].get("type", ""))
+    if first_types is None:
         return None
-    if first_record.get("id", "") in base_ids:
+    if first_types & set(subobjects):
         return False
     return hierarchy
 

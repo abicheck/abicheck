@@ -46,7 +46,25 @@ _DECLS: dict[str, tuple[str, bool | None, bool | None]] = {
     "LayoutUserDtor": ("struct LayoutUserDtor { int x; ~LayoutUserDtor() {} };", True, False),
     "LayoutDefaultedDtor": ("struct LayoutDefaultedDtor { int x; ~LayoutDefaultedDtor() = default; };", True, True),
     "LayoutOutOfLineDtor": ("struct LayoutOutOfLineDtor { int x; ~LayoutOutOfLineDtor(); };", True, False),
+    "LayoutRepeatedBase": ("struct LayoutRE {};\nstruct LayoutRL : LayoutRE {};\nstruct LayoutRR : LayoutRE {};\nstruct LayoutRepeatedBase : LayoutRL, LayoutRR {};", False, None),
+    "LayoutNestedFirst": ("struct LayoutNE {};\nstruct LayoutNI { LayoutNE e; };\nstruct LayoutNestedFirst : LayoutNE { LayoutNI first; };", False, None),
+    "LayoutNestedLater": ("struct LayoutLE {};\nstruct LayoutLI { int x; LayoutLE e; };\nstruct LayoutNestedLater : LayoutLE { LayoutLI first; };", True, None),
+    "LayoutArrayOfBase": ("struct LayoutAE {};\nstruct LayoutArrayOfBase : LayoutAE { LayoutAE a[2]; };", False, None),
+    "LayoutUnionFirst": ("struct LayoutUE {};\nunion LayoutUU { int i; LayoutUE e; };\nstruct LayoutUnionFirst : LayoutUE { LayoutUU u; };", False, None),
+    "LayoutCommentDefault": ("struct LayoutCommentDefault { int a; LayoutCommentDefault() = default; LayoutCommentDefault(const LayoutCommentDefault &) /* = default */; };", True, False),
 }  # fmt: skip
+
+
+#: Shapes where g++'s ``__is_standard_layout`` checks only the immediate first
+#: member, not C++17 [class.prop]/3's recursive first-member set M(D): g++
+#: answers ``True`` and still places the first member at offset 1 to keep the
+#: two base subobjects apart. clang++ follows the standard, so it is the oracle
+#: for these; with only g++ installed their compiler comparison is skipped
+#: (the expected value from the standard is still asserted).
+_GCC_SHALLOW_M_SET = frozenset(
+    {"LayoutNestedFirst", "LayoutArrayOfBase", "LayoutUnionFirst"}
+)
+_ORACLE = shutil.which("clang++") or "g++"
 
 
 def _compiler_traits(header: Path, name: str) -> tuple[bool, bool]:
@@ -56,7 +74,7 @@ def _compiler_traits(header: Path, name: str) -> tuple[bool, bool]:
     )
     sl = (
         subprocess.run(
-            ["g++", "-std=c++17", "-fsyntax-only", str(probe)], capture_output=True
+            [_ORACLE, "-std=c++17", "-fsyntax-only", str(probe)], capture_output=True
         ).returncode
         == 0
     )
@@ -65,7 +83,7 @@ def _compiler_traits(header: Path, name: str) -> tuple[bool, bool]:
     )
     tc = (
         subprocess.run(
-            ["g++", "-std=c++17", "-fsyntax-only", str(probe)], capture_output=True
+            [_ORACLE, "-std=c++17", "-fsyntax-only", str(probe)], capture_output=True
         ).returncode
         == 0
     )
@@ -93,7 +111,8 @@ def test_layout_traits_agree_with_compiler(tmp_path: Path) -> None:
         got_sl = standard_layout(ctx, records[name])
         got_tc = trivially_copyable(ctx, records[name])
         cc_sl, cc_tc = _compiler_traits(header, name)
-        if got_sl is not None:
+        gcc_deviates = name in _GCC_SHALLOW_M_SET and _ORACLE == "g++"
+        if got_sl is not None and not gcc_deviates:
             assert got_sl is cc_sl, (name, "standard_layout", got_sl)
         if got_tc is not None:
             assert got_tc is cc_tc, (name, "trivially_copyable", got_tc)
