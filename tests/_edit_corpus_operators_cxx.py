@@ -339,7 +339,10 @@ _LINKAGE = (
             ),
         ),
         "lib::v1::f1 becomes lib::v2::f1: every mangled name changes, the spelling does not",
-        expected=frozenset({"INLINE_NAMESPACE_MOVED"}),
+        # v1 -> v2 is also a version bump of the inline namespace.
+        expected=frozenset(
+            {"INLINE_NAMESPACE_MOVED", "INLINE_NAMESPACE_VERSION_BUMPED"}
+        ),
         rules=(_binary_mangled("INLINE_NAMESPACE_MOVED", "FUNC_LIKELY_RENAMED"),),
         **_BINARY,
     ),

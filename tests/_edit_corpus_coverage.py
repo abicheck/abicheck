@@ -144,9 +144,28 @@ SCOPE_BUCKETS: tuple[ScopeBucket, ...] = (
         "no_extractor_fact",
         False,
         "no extractor records the fact the detector reads, so no edit of a real "
-        "library reaches it: every backend and DWARF flatten an anonymous "
-        "member into its parent's fields",
-        names=frozenset({"anon_field_changed"}),
+        "library reaches it: every backend and DWARF flatten an anonymous member "
+        "into its parent's fields, no header backend models a using-declaration, "
+        "and nothing produces a type-visibility fact",
+        names=frozenset(
+            {"anon_field_changed", "std_reexport_removed", "type_visibility_changed"}
+        ),
+    ),
+    ScopeBucket(
+        "stdlib_switch",
+        False,
+        "needs a libc++ build (a libstdc++/libc++ switch or a libc++ ABI version); "
+        "every corpus toolchain links libstdc++",
+        names=frozenset(
+            {"stdlib_implementation_changed", "libcpp_abi_version_changed"}
+        ),
+    ),
+    ScopeBucket(
+        "evidence_asymmetry",
+        False,
+        "an evidence difference between the two dumps, not an edit: both sides of "
+        "a cell are dumped at the same evidence level",
+        names=frozenset({"layout_unverifiable"}),
     ),
     ScopeBucket(
         "build_mode_options",

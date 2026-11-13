@@ -35,6 +35,34 @@ GAP_GCC_THROW = (
 GAP_GCC_UNEXPORTED = (
     "The native gcc header backend keeps an unexported declaration PUBLIC"
 )
+GAP_CASTXML_TRAITS = "castxml records no standard-layout trait or data size"
+GAP_CLANG_TEMPLATE_CONTRACT = (
+    "The contract evaluator places a clang class-template pattern out of contract"
+)
+GAP_PIMPL_COMPAT = (
+    "The inline-body rename check ignores a renamed member that reads "
+    "`type_field_added_compatible`"
+)
+GAP_TAG_DECL = (
+    "clang and gcc header snapshots of the corpus seed drop a renamed tag's "
+    "instantiation declaration"
+)
+GAP_TYPEDEF_RETURN = (
+    "A return type re-spelled through a renamed typedef of the same type reads "
+    "`func_return_changed`"
+)
+GAP_GCC_TYPEDEF_RETURN = (
+    "The native gcc header backend spells a typedef'd return type canonically"
+)
+GAP_CASTXML_STD_LEAF = (
+    "castxml's bare `std` leaf hides a std type passed by value from the idiom check"
+)
+GAP_CLOSURE_RETURN = (
+    "The unspecified-return check does not know castxml's or clang's closure spelling"
+)
+GAP_CPU_DISPATCH = (
+    "The CPU-dispatch roll-up reads the removal of declared ISA kernels as a risk"
+)
 GAP_O2_STD = (
     "An `-O2` rebuild of a C++ library that uses `std::string` reads as a risk on gcc, "
     "or a break on MinGW"
@@ -202,6 +230,16 @@ def _unexported_gap(op: str, seeds: frozenset[str], kind: str) -> Known:
 # Header-backend parity gaps the corpus found (tests/
 # test_header_backend_fact_gaps_integration.py holds their canaries).
 _BACKEND_GAPS: tuple[Known, ...] = (
+    _backend_gap(
+        "template_default_arg_change",
+        _CLASSES,
+        "clang",
+        "wrong-verdict",
+        "the clang Buf pattern reads PROVEN_OUT_OF_CONTRACT, so the CLI verb rolls up NO_CHANGE",
+        GAP_CLANG_TEMPLATE_CONTRACT,
+        frozenset({"weaker-than:API_BREAK"}),
+        "NO_CHANGE",
+    ),
     _contract_gap("func_contract_attribute_added", "FUNC_CONTRACT_ATTRIBUTE_ADDED"),
     _contract_gap("func_contract_attribute_removed", "FUNC_CONTRACT_ATTRIBUTE_REMOVED"),
     *(
@@ -226,6 +264,116 @@ _BACKEND_GAPS: tuple[Known, ...] = (
     ),
     _unexported_gap("declared_exports_defined", _ELF, "FUNC_EXPORT_ADDED"),
     _unexported_gap("inline_function_outlined", _MORE, "FUNC_LOST_INLINE"),
+    *(
+        _backend_gap(
+            op,
+            _MORE,
+            "castxml",
+            "wrong-verdict",
+            "castxml records no standard-layout trait or data size",
+            GAP_CASTXML_TRAITS,
+            frozenset({f"missing:{kind}", "weaker-than:COMPATIBLE_WITH_RISK"}),
+            "NO_CHANGE",
+        )
+        for op, kind in (
+            ("standard_layout_lost", "STANDARD_LAYOUT_LOST"),
+            ("record_became_pod_tail_padding", "TAIL_PADDING_REUSE_CHANGED"),
+        )
+    ),
+    *(
+        _backend_gap(
+            "tag_type_renamed",
+            _MORE,
+            backend,
+            "wrong-kind",
+            "the new run<quick_tag> declaration is missing from the snapshot, so "
+            "the rename has no added symbol to pair",
+            GAP_TAG_DECL,
+            frozenset({"missing:TAG_TYPE_RENAMED"}),
+            "BREAKING",
+        )
+        for backend in ("clang", "gcc")
+    ),
+    _backend_gap(
+        "version_stamp_typedef_bumped",
+        _ELF,
+        "gcc",
+        "wrong-verdict",
+        "the gcc plugin spells the typedef'd return canonically: no change seen",
+        GAP_GCC_TYPEDEF_RETURN,
+        frozenset({"missing:TYPEDEF_VERSION_SENTINEL", "weaker-than:COMPATIBLE"}),
+        "NO_CHANGE",
+    ),
+    _backend_gap(
+        "stl_by_value_function_added",
+        frozenset({"cxx_stdlib"}),
+        "castxml",
+        "wrong-kind",
+        "castxml spells std::string as `string`; the std-by-value check misses it",
+        GAP_CASTXML_STD_LEAF,
+        frozenset({"missing:PUBLIC_API_EXPOSES_STL_BY_VALUE"}),
+        "COMPATIBLE_WITH_RISK",
+    ),
+)
+
+# Detector gaps that hold on every header backend (and DWARF where noted).
+_DETECTOR_GAPS: tuple[Known, ...] = (
+    Known(
+        "cpu_dispatch_isa_dropped",
+        _ELF,
+        "wrong-verdict",
+        _ev("headers", "dwarf"),
+        "the dropped tier's k*_avx2 exports are rolled up into a RISK finding "
+        "although the header declares them and a pinned consumer fails to load",
+        GAP_CPU_DISPATCH,
+        issues=frozenset({"missing:SONAME_BUMP_RECOMMENDED", "weaker-than:BREAKING"}),
+        verdicts=frozenset({"COMPATIBLE_WITH_RISK"}),
+    ),
+    _backend_gap(
+        "unspecified_return_now_named",
+        _MORE,
+        "castxml",
+        "wrong-verdict",
+        "castxml spells the closure return `?`, which the check does not read",
+        GAP_CLOSURE_RETURN,
+        frozenset({"missing:UNSPECIFIED_RETURN_NOW_NAMED", "weaker-than:API_BREAK"}),
+        "COMPATIBLE",
+    ),
+    _backend_gap(
+        "unspecified_return_now_named",
+        _MORE,
+        "clang",
+        "false-positive",
+        "clang spells the closure return `(lambda:...)`: func_return_changed instead",
+        GAP_CLOSURE_RETURN,
+        frozenset({"missing:UNSPECIFIED_RETURN_NOW_NAMED", "stronger-than:API_BREAK"}),
+        "BREAKING",
+    ),
+    Known(
+        "pimpl_member_renamed_under_inline_accessor",
+        _MORE,
+        "wrong-kind",
+        _ev("headers"),
+        "the renamed member reads type_field_added_compatible, which the "
+        "inline-body check does not pair",
+        GAP_PIMPL_COMPAT,
+        issues=frozenset({"missing:INLINE_BODY_REFERENCES_RENAMED_MEMBER"}),
+        verdicts=frozenset({"BREAKING"}),
+    ),
+    Known(
+        "version_stamp_typedef_bumped",
+        _ELF,
+        "false-positive",
+        lambda c: (
+            c.evidence == "dwarf"
+            or (c.evidence == "headers" and c.header_backend in ("castxml", "clang"))
+        ),
+        "the return re-spelled through the renamed typedef reads "
+        "func_return_changed (BREAKING) though the call is unchanged",
+        GAP_TYPEDEF_RETURN,
+        issues=frozenset({"stronger-than:API_BREAK"}),
+        verdicts=frozenset({"BREAKING"}),
+    ),
 )
 
 
@@ -350,27 +498,11 @@ _PLATFORM: tuple[Known, ...] = (
     Known(
         "allocator_replacement_removed",
         _XA,
-        "false-positive",
-        lambda c: c.evidence == "headers" and c.header_backend in ("castxml", "gcc"),
-        "with public headers the allocator finding (named after _ZdlPv, a "
-        "runtime symbol) is scoped out as not-exported, and the _Znwm export "
-        "loss reads func_removed (BREAKING)",
-        GAP_ALLOCATOR,
-        issues=frozenset(
-            {
-                "missing:ALLOCATOR_REPLACEMENT_REMOVED",
-                "stronger-than:COMPATIBLE_WITH_RISK",
-            }
-        ),
-        verdicts=_BREAKING,
-    ),
-    Known(
-        "allocator_replacement_removed",
-        _XA,
         "wrong-verdict",
-        _hb("clang"),
-        "with public headers the allocator finding is scoped out as "
-        "not-exported, and nothing else is left above COMPATIBLE",
+        _ev("headers"),
+        "with public headers (the CLI's compare verb) the allocator finding "
+        "is scoped out as not-exported, and nothing else is left above "
+        "COMPATIBLE, on every header backend",
         GAP_ALLOCATOR,
         issues=frozenset(
             {
@@ -409,10 +541,11 @@ _PLATFORM: tuple[Known, ...] = (
         "false-clean",
         _hb("gcc"),
         "the native gcc backend records no demo::clampi (header-only, never "
-        "emitted), so its removal reads NO_CHANGE",
+        "emitted), so its removal reads only the public-surface shrink "
+        "(COMPATIBLE), not the source break",
         GAP_GCC_HEADER_ONLY,
         issues=frozenset({"missing:INLINE_FUNCTION_REMOVED", "weaker-than:API_BREAK"}),
-        verdicts=frozenset({"NO_CHANGE"}),
+        verdicts=frozenset({"COMPATIBLE"}),
     ),
     Known(
         "time_bits_64",
@@ -596,6 +729,7 @@ KNOWN: tuple[Known, ...] = (
         verdicts=frozenset({"NO_CHANGE"}),
     ),
     *_BACKEND_GAPS,
+    *_DETECTOR_GAPS,
     *_PLATFORM,
 )
 
