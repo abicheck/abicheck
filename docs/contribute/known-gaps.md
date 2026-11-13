@@ -320,6 +320,7 @@ current emitter, which is unchanged.
 
 **Status (2026-11-13): OPEN.** GCC and Clang emit only a declaration DIE (`DW_AT_declaration`, no size, no children) for a class with a virtual base and no key function in a TU that never constructs it. `dwarf_snapshot._process_record_type_named` drops such DIEs, so when the old library carries only the declaration and the new one the definition, the type and its bases read `type_added` and the run is COMPATIBLE: a 16 -> 8 byte size change and a lost virtual base vanish at DWARF-only depth. Header evidence is unaffected. Found by the edit corpus (`base_became_nonvirtual`; the seed now constructs the type, so the corpus no longer exercises this shape). Closing it: keep a declaration-only record as an incomplete fact and report the one-sided layout as unconfirmed (assurance axis), never as an addition. Owner: `extract/` (DWARF snapshot builder), `compare/`.
 `false-clean` — a layout break on a type the old binary only declares reads COMPATIBLE at DWARF depth.
+<!-- canary: tests/test_dwarf_declaration_only_record_integration.py::test_declaration_only_old_record_reads_as_added -->
 
 #### castxml records no GNU contract attribute on a function (2026-11-12)
 

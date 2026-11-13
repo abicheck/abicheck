@@ -137,6 +137,7 @@ UNVERIFIED = frozenset(
         "api_depends_on_consumer_env",
         "base_class_offset_changed",
         "base_class_position_changed",
+        "base_class_access_narrowed",
         "base_class_virtual_changed",
         "behavioural_default_changed",
         "bind_now_disabled",

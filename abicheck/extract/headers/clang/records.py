@@ -264,6 +264,7 @@ def _build_record(
             # Empty lists are the parse's own answer -- matches dumper_castxml.py's opaque-record Fact stance.
             bases_fact=Fact.present([]),
             virtual_bases_fact=Fact.present([]),
+            base_access_fact=Fact.present({}),
             vtable_fact=Fact.present([]),
             vptr_offset_bits_fact=Fact.partial(
                 None
@@ -276,7 +277,12 @@ def _build_record(
     fields = _parse_fields(
         node, evaluate_bitfield_int, field_default_value, builtin_abi
     )
-    bases, virtual_bases, _base_access = _parse_bases(node)
+    bases, virtual_bases, base_access_map = _parse_bases(node)
+    base_access_fact = (
+        Fact.not_collected()
+        if any(v == "" for v in base_access_map.values())
+        else Fact.present(base_access_map)
+    )
     injected = _anonymous_member_names(node)
     is_standard_layout, is_trivially_copyable = clang_record_type_traits(node)
     # G31 Phase C: reconstruct the vtable (and, from it, the same
@@ -376,6 +382,7 @@ def _build_record(
         # Stated explicitly -- this parse genuinely resolved these. vptr_offset_bits_fact is `partial`, not `present`: 0-if-vtable-else-None is the Itanium primary-base heuristic, not a real offset read (matches vptr_offset_bits's own PARTIAL row).
         bases_fact=Fact.present(bases),
         virtual_bases_fact=Fact.present(virtual_bases),
+        base_access_fact=base_access_fact,
         vtable_fact=vtable_fact,
         vptr_offset_bits_fact=Fact.partial(0 if vtable else None),
         # ADR-063 Phase 2 -- see the opaque branch above.
@@ -600,7 +607,10 @@ def _parse_bases(node: dict[str, Any]) -> tuple[list[str], list[str], dict[str, 
             virtual_bases.append(bname)
         else:
             bases.append(bname)
-        access[bname] = str(b.get("access", "public"))
+        # An absent or unrecognised specifier is recorded as "" (unknown),
+        # never defaulted to "public": the caller withholds the whole map then.
+        acc = b.get("access")
+        access[bname] = acc if acc in ("public", "protected", "private") else ""
     return bases, virtual_bases, access
 
 

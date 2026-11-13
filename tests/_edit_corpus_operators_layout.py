@@ -341,7 +341,7 @@ _BASES = (
         ),
         "public -> private base: layout and symbols are unchanged, but code "
         "converting LD3* to LB3* or naming k through LD3 no longer compiles",
-        any_of=(frozenset({"TYPE_BASE_CHANGED"}),),
+        any_of=(frozenset({"BASE_CLASS_ACCESS_NARROWED", "TYPE_BASE_CHANGED"}),),
         verdict_min="API_BREAK",
         min_evidence="headers",
     ),

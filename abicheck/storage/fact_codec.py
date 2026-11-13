@@ -108,6 +108,7 @@ __all__ = [
 _TYPE_FACT_KEYS = (
     "bases_fact",
     "virtual_bases_fact",
+    "base_access_fact",
     "vtable_fact",
     "vptr_offset_bits_fact",
     "is_final_fact",
@@ -301,6 +302,9 @@ def decode_record_facts(t: dict[str, Any], schema_version: int) -> dict[str, Any
     return {
         "bases_fact": decode_fact(t.get("bases_fact"), schema_version),
         "virtual_bases_fact": decode_fact(t.get("virtual_bases_fact"), schema_version),
+        # A pre-existing snapshot has no key: decode_fact reads that as None,
+        # i.e. unknown, which diff_bases declines to compare (never a change).
+        "base_access_fact": decode_fact(t.get("base_access_fact"), schema_version),
         "vtable_fact": decode_fact(t.get("vtable_fact"), schema_version),
         "vptr_offset_bits_fact": decode_fact(
             t.get("vptr_offset_bits_fact"), schema_version

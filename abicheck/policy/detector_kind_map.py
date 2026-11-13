@@ -392,6 +392,7 @@ DETECTOR_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
         ),
         "types": frozenset(
             {
+                "base_class_access_narrowed",
                 "base_class_position_changed",
                 "base_class_virtual_changed",
                 "field_bitfield_changed",

@@ -127,6 +127,9 @@ BINARY_GATED: frozenset[ChangeKind] = frozenset(
 #: Each kind's producer needs header, source or build data, which a
 #: binary-only input does not carry. The reason names that input.
 NON_BINARY_REASONS: Mapping[ChangeKind, str] = {
+    ChangeKind.BASE_CLASS_ACCESS_NARROWED: (
+        "header base-class access specifiers (compare/base_class_diff)"
+    ),
     ChangeKind.CONCEPT_TIGHTENED: (
         "header constraint tables (compare/concept_constraints) or L4 source replay"
     ),

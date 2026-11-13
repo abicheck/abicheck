@@ -36,6 +36,7 @@ X86_ONLY = {
     "long_double_made_64bit",
     "integer_typedef_widened",
     "by_value_struct_became_nontrivial",
+    "record_lost_trivially_copyable",
 }
 X86_MACHINES = ["x86_64", "AMD64", "i686"]
 OTHER_MACHINES = ["aarch64", "arm64", "ppc64le", "riscv64"]

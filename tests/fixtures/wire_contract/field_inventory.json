@@ -424,6 +424,7 @@
         ],
         "types[]": [
           "alignment_bits",
+          "base_access_fact",
           "base_offsets",
           "bases",
           "bases_fact",

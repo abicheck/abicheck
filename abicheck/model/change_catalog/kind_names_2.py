@@ -585,4 +585,9 @@ KIND_NAMES_2: tuple[tuple[str, str, str | None], ...] = (
         "target_isa_changed",
         "the compiled instruction-set target differs between the two builds (-march / -m<feature> from DW_AT_producer, GNU_PROPERTY_X86_ISA_1_NEEDED) — a raised requirement means CPUs without the new features can no longer run the library, and layout/mangling findings may be its consequences → RISK",
     ),
+    (
+        "BASE_CLASS_ACCESS_NARROWED",
+        "base_class_access_narrowed",
+        "a base-class specifier narrowed (public -> protected/private, or protected -> private): consumers that convert a derived pointer to the base or reach the base's members through the derived type no longer compile. Layout and symbols are unchanged -- header-only (castxml/clang) evidence -- so this is API_BREAK, not BREAKING. Widening is compatible and not reported. -- base access narrowed -> API_BREAK",
+    ),
 )
