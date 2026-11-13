@@ -310,8 +310,6 @@ def defines_from_compile_db(
 
 # ── conditional-field source scan ────────────────────────────────────────────
 
-_COMMENT_BLOCK = re.compile(r"/\*.*?\*/", re.DOTALL)
-_COMMENT_LINE = re.compile(r"//[^\n]*")
 _RECORD_OPEN = re.compile(r"\b(struct|class|union)\s+([A-Za-z_]\w*)\b")
 # A ``namespace`` opener: a named (possibly ``a::b``) or anonymous namespace. Must
 # be anchored so ``using namespace std;`` is not mistaken for a scope opener.
@@ -352,7 +350,10 @@ class _NegGuard:
 
 
 def _strip_comments(source: str) -> str:
-    return _COMMENT_LINE.sub("", _COMMENT_BLOCK.sub("", source))
+    """Comments blanked by the shared literal-aware lexer (newlines kept)."""
+    from .buildsource.pattern_facts_lexer import _blank_comments_and_strings
+
+    return _blank_comments_and_strings(source, blank_strings=False)
 
 
 def _include_guard_macro(lines: list[str]) -> str | None:

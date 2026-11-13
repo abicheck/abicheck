@@ -80,6 +80,9 @@ def test_only_a_known_member_status_is_reported_as_itself(status: object) -> Non
         'const char* p = R"({ " })";',  # raw string with an inner quote
         'const char* p = R"d(\n }\n)d";',  # raw string across lines
         "int n = 1'000; long m = 2'000'000;",  # digit separators are code
+        'const char* p = R"(// })";',  # comment marker inside a raw string
+        'const char* p = "// }";',  # ... and inside an ordinary string
+        'const char* p = "/* }";',
     ],
 )
 def test_a_brace_inside_a_literal_neither_opens_nor_closes_a_scope(member: str) -> None:
@@ -104,3 +107,21 @@ def test_digit_separators_keep_structural_braces_visible() -> None:
     )
     fields = scan_conditional_fields(src)
     assert "x" not in fields.get("A", {}), fields
+
+
+@pytest.mark.parametrize("literal", ['R"(// })"', '"// }"', 'R"(/* })"', '"/* }"'])
+def test_a_comment_marker_inside_a_literal_does_not_swallow_the_next_record(
+    literal: str,
+) -> None:
+    """Comment stripping ran before the literal-aware lexer, so ``//`` inside
+    a string deleted the string's closing delimiter and the rest of the file
+    read as one unterminated literal (CodeRabbit review)."""
+    from abicheck.header_conditionals import scan_conditional_fields
+
+    src = (
+        f"struct A {{\n  const char* p = {literal};\n}};\n"
+        "struct B {\n#ifdef X\n  int y;\n#endif\n};\n"
+    )
+    fields = scan_conditional_fields(src)
+    assert fields.get("B", {}).get("y", {}).get("guard") == "X", fields
+    assert "y" not in fields.get("A", {}), fields
