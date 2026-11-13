@@ -34,7 +34,8 @@ from collections.abc import Collection
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from ..policy.release_outcome import worse_release_verdict
+from abicheck.policy.release_outcome import worse_release_verdict
+
 from .comparison_scope import ComparisonScopeTerms, comparison_scope_terms
 from .release_assurance_section import ReleaseAssuranceTerms, release_assurance_terms
 from .release_findings import project_release_library_results
