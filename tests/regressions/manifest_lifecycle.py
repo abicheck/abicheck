@@ -94,11 +94,15 @@ LIFECYCLE_BUG_CLASSES: tuple[BugClass, ...] = (
             "BudgetedExecutor's inline path accepting work after shutdown. "
             "Family F10 (process lifecycle on failure paths)."
         ),
-        fixed_by=(2048,),
-        seed_tests=("tests/test_state_guards_phase5.py",),
+        fixed_by=(2048, 2054),
+        seed_tests=(
+            "tests/test_state_guards_phase5.py",
+            "tests/test_bracket_depth_clamp.py",
+        ),
         axes={
             "executor": ("thread pool", "inline"),
             "depth": ("1", "2", "3", "extra exit"),
+            "scanner closer": (")", ">", ">>", "]", "}"),
         },
     ),
     BugClass(
@@ -120,6 +124,21 @@ LIFECYCLE_BUG_CLASSES: tuple[BugClass, ...] = (
                 "None",
                 "int",
             )
+        },
+    ),
+    BugClass(
+        id="scanner.dead_preprocessor_branch_read_as_live",
+        invariant=(
+            "A text scan that skips provably dead preprocessor branches skips "
+            "every branch whose condition is the literal 0, including an "
+            "#elif 0 after #if 0; only a branch that can be live is read. "
+            "Instance: the C++20 concept pre-scan (extractor generation 59). "
+            "Family F4."
+        ),
+        fixed_by=(2054,),
+        seed_tests=("tests/test_concept_scan_elif0.py",),
+        axes={
+            "branch": ("#elif 0", "#elif 0 chain", "#elif X", "#else", "nested #if X")
         },
     ),
 )

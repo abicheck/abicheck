@@ -104,7 +104,7 @@
       "abicheck/extract/headers/castxml/inline_variables.py": "60ee92e7a810d81f113a6f5fb4f218ea6287258948dc9a838fbdef37ef37ea32",
       "abicheck/extract/headers/castxml/location.py": "a5469fedb2774dfdf1b87a49ddc713471c088ecee6ea5ccbfe4d9764012c97e6",
       "abicheck/extract/headers/castxml/names.py": "038abc55f72f11185c0a5ec48d57bff95a1ab894380f7978b6187cd76b044796",
-      "abicheck/extract/headers/castxml/out_of_line_inline.py": "7f8a77d82dd9f87865163ffda63e6c5a762887800886ea9f70dae40e378cbd89",
+      "abicheck/extract/headers/castxml/out_of_line_inline.py": "79be984938819c77feb6ed867552f99e0245f0ff0fce78cf57b2cb7198730246",
       "abicheck/extract/headers/castxml/policy.py": "fda86c1de147934e620824b9a97262f218bffb7340cbbf394ac5fdd437e47f23",
       "abicheck/extract/headers/castxml/preprocessed_text.py": "88deb48742c22f1e594ba3b73fb20f11c5dd091c690f7c53597aee67478f32ed",
       "abicheck/extract/headers/castxml/probe.py": "525ded3c75b147300cfaa460ce8acd62f87533859ff152e2b1f76c4302999bb0",
@@ -162,7 +162,7 @@
       "abicheck/extract/headers/clang/vtable.py": "ec35a377463d0191e013684713b5a049e78a766a16cf74e71354d2e57e3a2931",
       "abicheck/extract/headers/clang_header_argv.py": "644a6454c6a3da3ab5f184cc2d9778d51f141f1e528f86162cccb815f9b17ddb",
       "abicheck/extract/headers/compile_provenance.py": "e4a6bcf30627807081f38f909cd136e5203132c099ea225971ef1d4cf849d82a",
-      "abicheck/extract/headers/concept_scan.py": "158155a829223afdcd4f80b5d4dec9a6f7812c4827976a67d068096802465839",
+      "abicheck/extract/headers/concept_scan.py": "7a167192c477da03874aede4cc3384f29945bc8fefb1372a48ea190d019eabbe",
       "abicheck/extract/headers/gcc/__init__.py": "7af60db1abfcfe17ecf135eb0bc8ce9ae3089d3c6101324c087d6cc78dab8b50",
       "abicheck/extract/headers/gcc/acquisition.py": "f7ea1e5f5a15f8a4a58a1bdee6f0deca8ede99dece51885754176ba8beff1246",
       "abicheck/extract/headers/gcc/backend.py": "30ebbb0814b501875fa9c814bca08e613f86aaab2ac4382a2da99f6143b7c14a",
@@ -224,9 +224,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "891be9d8f8369c1d5d4ebad442be1a05fef8e5ea9e35393ab9526b096c9f6446",
-    "generation": 58,
-    "reason": "PR #2047 review: a constant upper bound over a non-constant lower bound reads unknown; generation 58 is this PR's own unreleased bump"
+    "fingerprint": "602005cb88bb7dc9d7c7ef5c04f1d5138db9a09369620cf9841c70e9fa316eb5",
+    "generation": 59,
+    "reason": "bumped to 59 for a semantic change"
   },
   "resolver": {
     "files": {

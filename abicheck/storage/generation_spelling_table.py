@@ -566,6 +566,15 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "so it cannot fabricate a 0 -> N change",
         migrates_facts=True,
     ),
+    59: GenerationSpellingChange(
+        "the C++20 concept pre-scan no longer reads the body of an `#elif 0` "
+        "that follows an `#if 0` as live code; only the stored "
+        "concept-constraints-unobserved fact can change, and only for a "
+        "header whose sole concept/requires spelling sat in such a branch; "
+        "the castxml out-of-line inline scan no longer lets a stray closing "
+        "bracket drive its depth negative (balanced input unchanged); "
+        "no stored type spelling changes, nothing rewritten"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

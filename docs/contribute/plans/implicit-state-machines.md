@@ -78,16 +78,17 @@ No change to the event set, so no ADR-067 amendment.
 
 | Item | Status |
 |---|---|
-| `extract/headers/concept_scan.py`: `#elif 0` after `#if 0` is read as live code | open: the scan's result is a stored snapshot fact, so the fix needs an `EXTRACTOR_GENERATION` bump (frozen corpus, spelling row, fixture regeneration) in its own PR |
+| `extract/headers/concept_scan.py`: `#elif 0` after `#if 0` was read as live code | **done** (extractor generation 59; generation 57 frozen) |
 | `header_conditionals.py`: braces inside string/char literals opened/closed scopes | **done** (literals blanked before brace tracking) |
 | `deadline.py`: an unbalanced registration-window exit drove the depth negative, so a deferred SIGTERM was never replayed | **done** (raises at the unbalanced exit) |
 | `process_resources.BudgetedExecutor`: accepted work after shutdown when it ran inline (the thread pool already rejected it) | **done** |
 | `workflows/release_assurance_members.py`: an unknown member assurance status was shown verbatim | **done** (reported as `unknown` with the original value in its notes; ranked worst as before) |
 | `demangle.py` availability latches | **dismissed**: the flags never gate the `import cxxfilt` attempt, so a backend is retried every call; "missing" and "broken" come from distinct exception kinds of the same import |
 | One shared C/C++ lexer for `pattern_facts_lexer.py` and `macro_graph.py:566` | open: `macro_graph` needs per-line "starts inside a block comment" state the shared lexer does not expose; raw strings are still unmodelled there |
-| Bracket-depth counters (~20 scanners): one policy for an unbalanced closer | open |
-| `extract/headers/clang/locations.py:79`: check document order | open |
-| `consumer_impact.py:494`, `depth_projection.py:465/665`: return new values instead of mutating shared objects | open |
+| Bracket-depth counters: one policy for an unbalanced closer | **done**: four scanners could go negative and now clamp (`type_graph_names` x2, `namespace_spelling`, castxml `out_of_line_inline`); the other sweep sites start on an opener, are already guarded (`and depth`, `elif depth == 0`), or stop at `depth <= 0` |
+| `extract/headers/clang/locations.py:79`: check document order | **dismissed**: the one stateful caller (`header_graph_ast_stream.project_header_graph_ast_file`) walks top-level declarations once, forward; replay builds a fresh `LocationMaterializer` per element from its recorded state; and clang legitimately moves a line backwards within one file (implicit members after fields), so a backwards-line guard would fire on valid input |
+| `depth_projection.py:465/665` in-place writes | **dismissed**: both write to the fresh copy `project_snapshot_to_depth` makes (`copy.deepcopy`/`copy.copy`), pinned by `test_depth_projection_ownership.py` |
+| `workflows/consumer_impact.enrich_covered_changes` writes a consumer's proof path onto `DiffResult.changes` objects | **open, confirmed bug**: the path leaks into the library-wide report and into later `--used-by` consumers (the first app's walk wins; suppression reads `reachability_state`). Copying the `Change` fixes the leak but the copy must stay tied to the original's ledger record: `close_consumer_scope` records `also_detected` by identity without a `dedupe_key`, so a bare copy would be counted as a new detection |
 | `checker_types.py:51`: a result read before its verdict is computed reads `NO_CHANGE` | open (public dataclass default; needs its own change) |
 
 ## Dismissed
