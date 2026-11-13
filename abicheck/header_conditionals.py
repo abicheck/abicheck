@@ -312,6 +312,7 @@ def defines_from_compile_db(
 
 _COMMENT_BLOCK = re.compile(r"/\*.*?\*/", re.DOTALL)
 _COMMENT_LINE = re.compile(r"//[^\n]*")
+_LITERAL = re.compile(r"\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'")  # braces: text
 _RECORD_OPEN = re.compile(r"\b(struct|class|union)\s+([A-Za-z_]\w*)\b")
 # A ``namespace`` opener: a named (possibly ``a::b``) or anonymous namespace. Must
 # be anchored so ``using namespace std;`` is not mistaken for a scope opener.
@@ -754,19 +755,16 @@ def _close_scope(state: _ScanState) -> None:
 
 def _track_braces(state: _ScanState, line: str) -> None:
     """Advance ``brace_depth`` across *line*, opening/closing scopes as braces pass."""
-    for ch in line:
+    for ch in _LITERAL.sub('""', line):
         if ch == "{":
             if state.pending is not None:
                 _open_pending_scope(state, state.pending)
                 state.pending = None
             state.brace_depth += 1
         elif ch == ";" and state.pending is not None:
-            # A ``;`` reached before the pending opener's ``{`` terminates a
-            # *split* forward declaration (``struct S`` then ``;`` on the next
-            # line). Clear ``pending`` so a later ``struct T { … }`` opens its
-            # own scope instead of being keyed to ``S`` — otherwise ``T``'s
-            # guarded fields would be misattributed to ``S`` and could
-            # reconcile away a real ``S`` field change (Codex review #498).
+            # A ``;`` before the pending ``{`` ends a split forward declaration
+            # (``struct S`` then ``;``): a later ``struct T { … }`` must open its
+            # own scope, not be keyed to ``S`` (Codex review #498).
             state.pending = None
         elif ch == "}":
             state.brace_depth = max(0, state.brace_depth - 1)
