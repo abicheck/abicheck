@@ -296,7 +296,7 @@
     },
     "57": {
       "castxml": "castxml version 0.7.0",
-      "commit": "78bfeb39c43e",
+      "commit": "d2a5e015c691",
       "compiler": "g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
       "snapshot": "gen57/corpus.json.gz"
     },

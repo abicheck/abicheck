@@ -38,7 +38,11 @@ class FieldInfo:
     # unknown: 0 is a real offset (union members). A consumer compares offsets
     # only when both sides are known (formal/lean/AbiLean/FieldOffset.lean).
     byte_offset: int | None
-    byte_size: int  # size of the field's type (0 if unknown)
+    # Size of the field's type. ``None`` = unknown (no evaluable DW_AT_byte_size
+    # for the member's type). Never 0 for unknown: 0 is a real size (a flexible
+    # array member, a zero-size aggregate). A consumer compares sizes only when
+    # both sides are known.
+    byte_size: int | None
     bit_offset: int = 0  # for bitfields: normalised bit offset from LSB
     bit_size: int = 0  # for bitfields: width in bits (0 = not a bitfield)
     # Schema v69: the ABI fact of the member's type (model/abi_fundamental.py),

@@ -55,12 +55,12 @@ def test_dwarf_metadata_die_to_type_info_depth_limit_and_cache():
     cu = SimpleNamespace(cu_offset=1)
     die = _Die(
         "DW_TAG_base_type",
-        {"DW_AT_name": _Attr("int"), "DW_AT_byte_size": _Attr(4)},
+        {"DW_AT_name": _Attr("int"), "DW_AT_byte_size": _Attr(4, "DW_FORM_data4")},
         offset=9,
     )
     cache: dict[tuple[int, int], tuple[str, int]] = {}
 
-    assert dm._die_to_type_info(die, cu, depth=9, cache=cache) == ("...", 0)
+    assert dm._die_to_type_info(die, cu, depth=9, cache=cache) == ("...", None)
 
     first = dm._die_to_type_info(die, cu, depth=0, cache=cache)
     second = dm._die_to_type_info(die, cu, depth=0, cache=cache)
@@ -73,7 +73,8 @@ def test_dwarf_metadata_compute_type_info_pointer_fallback_on_resolution_error(
     monkeypatch,
 ):
     die = _Die(
-        "DW_TAG_pointer_type", {"DW_AT_type": _Attr(3), "DW_AT_byte_size": _Attr(8)}
+        "DW_TAG_pointer_type",
+        {"DW_AT_type": _Attr(3), "DW_AT_byte_size": _Attr(8, "DW_FORM_data4")},
     )
     monkeypatch.setattr(
         dm,
@@ -123,7 +124,7 @@ def test_dwarf_metadata_unevaluable_member_location_is_not_recorded_as_zero():
 def test_dwarf_advanced_get_type_align_follows_typedef_chain_and_alignment_attr():
     base = _Die(
         "DW_TAG_base_type",
-        {"DW_AT_alignment": _Attr(8), "DW_AT_byte_size": _Attr(8)},
+        {"DW_AT_alignment": _Attr(8), "DW_AT_byte_size": _Attr(8, "DW_FORM_data4")},
         offset=30,
     )
     typedef = _Die(
@@ -167,7 +168,7 @@ def test_dwarf_advanced_check_packed_detects_misaligned_field(monkeypatch):
     )
     struct_die = _Die(
         "DW_TAG_structure_type",
-        {"DW_AT_name": _Attr("S"), "DW_AT_byte_size": _Attr(8)},
+        {"DW_AT_name": _Attr("S"), "DW_AT_byte_size": _Attr(8, "DW_FORM_data4")},
         [member],
     )
 

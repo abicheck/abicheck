@@ -558,13 +558,13 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         retires_function_prefixes=("__builtin_",),
     ),
     58: GenerationSpellingChange(
-        "the C++20 concept pre-scan no longer reads the body of an `#elif 0` "
-        "that follows an `#if 0` as live code; only the stored "
-        "concept-constraints-unobserved fact can change, and only for a "
-        "header whose sole concept/requires spelling sat in such a branch; "
-        "the castxml out-of-line inline scan no longer lets a stray closing "
-        "bracket drive its depth negative (balanced input unchanged); "
-        "no stored type spelling changes, nothing rewritten"
+        "DWARF member byte_size: a member whose type size is not evaluable is "
+        "unknown (None) instead of 0, while a flexible array of a known element "
+        "stays 0; BTF, CTF and PDB map their unresolved 0 to unknown. No stored "
+        "type spelling changes; a stored DWARF member size of 0 from an older "
+        "generation loads as unknown (storage/dwarf_field_size_migration.py), "
+        "so it cannot fabricate a 0 -> N change",
+        migrates_facts=True,
     ),
 }
 
