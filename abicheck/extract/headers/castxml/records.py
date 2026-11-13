@@ -70,7 +70,7 @@ from .names import (
     _virtual_method_mangled_name,
     _vt_sort_key,
 )
-from .record_traits import trivially_copyable
+from .record_traits import standard_layout, trivially_copyable
 from .scope import scope_path
 from .specialization import specialization_declared
 from .type_resolution import (
@@ -169,7 +169,8 @@ def build_record_type(
                 off = optional_int_attr(b, "offset")
                 if off is not None:
                     base_offsets[type_name(ctx, b.get("type", ""))] = off * 8
-    # is_standard_layout / data_size_bits are left None: "not polymorphic and no virtual bases" is not a sound standard-layout signal (a mixed-access class is already non-standard-layout, so the heuristic would flip True→False on gaining a virtual and emit a spurious STANDARD_LAYOUT_LOST) (Codex review #345). is_trivially_copyable is derived from the special members CastXML emits, tri-state (record_traits.py).
+    # data_size_bits is left None. is_standard_layout is derived from the C++ rules over the fields, access specifiers, bases and virtual members CastXML emits, tri-state (record_traits.py); "not polymorphic and no virtual bases" alone is still not used as a standard-layout signal (a mixed-access class is non-standard-layout whatever its vtable). is_trivially_copyable is derived from the special members CastXML emits, tri-state (record_traits.py).
+    standard = standard_layout(ctx, el)  # None for an incomplete record
     trivially = trivially_copyable(ctx, el)  # None for an incomplete record
     # castxml records the `final` class-key specifier as a `final` token
     # inside the compound ``attributes`` string (e.g. ``attributes="final"``),
@@ -220,6 +221,7 @@ def build_record_type(
             ctx, el, el.get("name", "")
         ),
         is_trivially_copyable=trivially,
+        is_standard_layout=standard,
         # ADR-063 Phase 5: Fact[bool | None] sibling of is_final -- see the
         # local variable's own comment above for why this is always a real,
         # concrete determination on the castxml path.

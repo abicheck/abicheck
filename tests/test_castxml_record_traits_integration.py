@@ -23,7 +23,7 @@ pytestmark = pytest.mark.integration
 _DECLS = {
     "Plain": ("struct Plain { double x; double y; };", True),
     "UserDtor": ("struct UserDtor { int x; ~UserDtor() {} };", False),
-    "DefaultedDtor": ("struct DefaultedDtor { int x; ~DefaultedDtor() = default; };", None),
+    "DefaultedDtor": ("struct DefaultedDtor { int x; ~DefaultedDtor() = default; };", True),
     "OutOfLineDtor": ("struct OutOfLineDtor { int x; ~OutOfLineDtor(); };", False),
     "UserCopy": ("struct UserCopy { int x; UserCopy(const UserCopy &); UserCopy(); };", False),
     "UserAssign": ("struct UserAssign { int x; UserAssign &operator=(const UserAssign &o) { x = o.x; return *this; } };", False),
