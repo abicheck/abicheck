@@ -68,3 +68,30 @@ def test_the_rules_see_a_real_import() -> None:
         assert _imported_roots(sample) == {"abicheck", "tests"}
     finally:
         sample.unlink()
+
+
+def test_pytest_glue_spells_abiforge_env_names() -> None:
+    """The glue spells the variables without importing abiforge; they must match."""
+    from abiforge.run import toolchains
+    from tests import _abiforge_pytest as glue
+
+    assert glue.TOOLCHAIN_ENV == toolchains.TOOLCHAIN_ENV
+    assert glue.CONSUMER_TOOLCHAIN_ENV == toolchains.CONSUMER_TOOLCHAIN_ENV
+
+
+def test_registering_the_options_needs_no_abiforge() -> None:
+    """The wheel smoke lane runs conftest without abiforge importable."""
+    tree = ast.parse(
+        (Path(__file__).with_name("_abiforge_pytest.py")).read_text(encoding="utf-8")
+    )
+    top_level = {
+        (n.module or "").split(".")[0]
+        for n in tree.body
+        if isinstance(n, ast.ImportFrom)
+    } | {
+        a.name.split(".")[0]
+        for n in tree.body
+        if isinstance(n, ast.Import)
+        for a in n.names
+    }
+    assert "abiforge" not in top_level

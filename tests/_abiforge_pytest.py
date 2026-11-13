@@ -12,13 +12,12 @@ import os
 
 import pytest
 
-from abiforge.run.toolchains import (
-    CONSUMER_TOOLCHAIN_ENV,
-    TOOLCHAIN_ENV,
-    ToolchainSelectionError,
-    discover,
-    select,
-)
+#: The environment variables abiforge reads (``abiforge.run.toolchains``).
+#: Spelled here so registering the options needs no abiforge import: the
+#: wheel smoke lane runs this conftest without the repository root on
+#: ``sys.path``. ``tests/test_abiforge_boundaries.py`` pins them to abiforge's.
+TOOLCHAIN_ENV = "ABICHECK_EDIT_CORPUS_TOOLCHAIN"
+CONSUMER_TOOLCHAIN_ENV = "ABICHECK_EDIT_CORPUS_CONSUMER_TOOLCHAIN"
 
 _OPTIONS = {
     "--edit-corpus-toolchain": TOOLCHAIN_ENV,
@@ -46,6 +45,12 @@ def apply_pytest_options(config: object) -> None:
     for opt, var in _OPTIONS.items():
         value = config.getoption(opt, default=None)  # type: ignore[attr-defined]
         if value is not None:
+            from abiforge.run.toolchains import (
+                ToolchainSelectionError,
+                discover,
+                select,
+            )
+
             try:
                 # Names *and* installation: a missing compiler fails the session.
                 select(value, discover(), var)
