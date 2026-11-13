@@ -46,357 +46,360 @@ class Family:
     planned_reason: str = ""
 
 
-FAMILIES: dict[str, Family] = {
-    f.key: f
-    for f in (
-        Family(
-            key="F1",
-            title="Unknown is not a value",
-            invariant=(
-                "Removing, failing or truncating any evidence input never makes "
-                "the result cleaner, never adds a BREAKING finding, and never "
-                "raises assurance."
-            ),
-            harness_tests=(
-                "tests/test_family_f1_evidence_ablation.py",
-                "tests/test_corrupt_input_matrix.py",
-                "tests/test_export_loss_binding_unit.py",
-                "tests/test_dwarf_unknown_triviality.py",
-                "tests/test_clang_type_evidence.py",
-                "tests/test_pdb_parse_all_lifecycle.py",
-                "tests/test_disposition_transitions.py",
-                "tests/test_state_guards_phase5.py",
-                "tests/test_header_extraction_limitations.py",
-            ),
+_FAMILY_LIST: tuple[Family, ...] = (
+    Family(
+        key="F1",
+        title="Unknown is not a value",
+        invariant=(
+            "Removing, failing or truncating any evidence input never makes "
+            "the result cleaner, never adds a BREAKING finding, and never "
+            "raises assurance."
         ),
-        Family(
-            key="F2",
-            title="Route parity",
-            invariant=(
-                "The same semantic request yields the same normalized report "
-                "through every route (CLI, typed API, scalar vs release member, "
-                "stored vs live operand, dry run vs execution)."
-            ),
-            harness_tests=(
-                "tests/test_family_f2_route_parity.py",
-                "tests/test_no_shared_mutation.py",
-                "tests/test_family_f2_live_route_matrix.py",
-                "tests/test_family_f2_release_member_parity.py",
-                "tests/test_metamorphic_snapshot_relations.py",
-                "tests/test_metamorphic_source_relations.py",
-                "tests/test_live_stored_census_parity.py",
-                # Stored-vs-live release member pairing against the live/live
-                # CLI run, over member naming x capture route.
-                "tests/test_cli_compare_stored_versioned_member_pairing.py",
-                # Operand form x corpus pair differential against live/live.
-                "tests/test_stored_operand_release_differential.py",
-                # A stored dump and the same binary live are one input for
-                # ADR-090's identical-pair exemption (stored/live/older cells).
-                "tests/test_unconfirmed_binary_identity.py",
-                # The whole scalar report, live vs stored operand, over
-                # generated pairs (finding order included).
-                "tests/test_live_stored_operand_property.py",
-            ),
+        harness_tests=(
+            "tests/test_family_f1_evidence_ablation.py",
+            "tests/test_corrupt_input_matrix.py",
+            "tests/test_export_loss_binding_unit.py",
+            "tests/test_dwarf_unknown_triviality.py",
+            "tests/test_clang_type_evidence.py",
+            "tests/test_pdb_parse_all_lifecycle.py",
+            "tests/test_disposition_transitions.py",
+            "tests/test_state_guards_phase5.py",
+            "tests/test_header_extraction_limitations.py",
         ),
-        Family(
-            key="F3",
-            title="Identity is semantic",
-            invariant=(
-                "Identity keys are invariant under environment transforms "
-                "(checkout location, symlinks, hash seed, input order, platform "
-                "decoration) and distinct entities stay distinct."
-            ),
-            harness_tests=("tests/test_family_f3_identity.py",),
+    ),
+    Family(
+        key="F2",
+        title="Route parity",
+        invariant=(
+            "The same semantic request yields the same normalized report "
+            "through every route (CLI, typed API, scalar vs release member, "
+            "stored vs live operand, dry run vs execution)."
         ),
-        Family(
-            key="F4",
-            title="Structure over spelling",
-            invariant=(
-                "No finding's severity rests only on a name, suffix or directory "
-                "heuristic without a structural fact confirming or vetoing it."
-            ),
-            harness_tests=(
-                "tests/test_family_f4_heuristics.py",
-                "tests/test_state_guards_phase5.py",
-                "tests/test_clang_type_evidence.py",
-                "tests/test_concept_scan_elif0.py",
-            ),
-            planned_reason="",
+        harness_tests=(
+            "tests/test_family_f2_route_parity.py",
+            "tests/test_no_shared_mutation.py",
+            "tests/test_family_f2_live_route_matrix.py",
+            "tests/test_family_f2_release_member_parity.py",
+            "tests/test_metamorphic_snapshot_relations.py",
+            "tests/test_metamorphic_source_relations.py",
+            "tests/test_live_stored_census_parity.py",
+            # Stored-vs-live release member pairing against the live/live
+            # CLI run, over member naming x capture route.
+            "tests/test_cli_compare_stored_versioned_member_pairing.py",
+            # Operand form x corpus pair differential against live/live.
+            "tests/test_stored_operand_release_differential.py",
+            # A stored dump and the same binary live are one input for
+            # ADR-090's identical-pair exemption (stored/live/older cells).
+            "tests/test_unconfirmed_binary_identity.py",
+            # The whole scalar report, live vs stored operand, over
+            # generated pairs (finding order included).
+            "tests/test_live_stored_operand_property.py",
         ),
-        Family(
-            key="F5",
-            title="Optimization equals reference",
-            invariant=(
-                "Every cache, memo, fast path, narrowing and parallel fan-out "
-                "produces output identical to the unoptimized serial run."
-            ),
-            harness_tests=(
-                "tests/test_family_f5_optimization_reference.py",
-                "tests/test_family_f5_derived_ast_sharing.py",
-                "tests/test_dump_cache_single_tier.py",
-                "tests/test_family_f5_packed_type_graph.py",
-                "tests/test_surface_metrics_fan_in_index.py",
-                "tests/test_header_dir_expansion_canonical_order.py",
-                "tests/test_memo_stats_across_clear.py",
-            ),
+    ),
+    Family(
+        key="F3",
+        title="Identity is semantic",
+        invariant=(
+            "Identity keys are invariant under environment transforms "
+            "(checkout location, symlinks, hash seed, input order, platform "
+            "decoration) and distinct entities stay distinct."
         ),
-        Family(
-            key="F6",
-            title="Compatible real-library pair has no break",
-            invariant=(
-                "A known-compatible real release pair produces no BREAKING or "
-                "API_BREAK finding."
-            ),
-            harness_tests=(
-                "tests/test_family_f6_corpus.py",
-                "tests/test_rebuild_toolchain_drift_integration.py",
-                "tests/test_toolchain_rebuild_drift.py",
-            ),
-            planned_reason="",
+        harness_tests=("tests/test_family_f3_identity.py",),
+    ),
+    Family(
+        key="F4",
+        title="Structure over spelling",
+        invariant=(
+            "No finding's severity rests only on a name, suffix or directory "
+            "heuristic without a structural fact confirming or vetoing it."
         ),
-        Family(
-            key="F7",
-            title="Test and harness integrity",
-            invariant=(
-                "A test proves the path it claims actually ran, its oracle is "
-                "independent of the implementation, and fixtures cannot build "
-                "states the types forbid."
-            ),
-            harness_tests=(
-                "tests/test_regressions_families.py",
-                "tests/test_family_f7_mutant_replay.py",
-                "tests/test_conftest_cache_isolation.py",
-            ),
+        harness_tests=(
+            "tests/test_family_f4_heuristics.py",
+            "tests/test_state_guards_phase5.py",
+            "tests/test_clang_type_evidence.py",
+            "tests/test_concept_scan_elif0.py",
         ),
-        Family(
-            key="F8",
-            title="Target and toolchain parity",
-            invariant=(
-                "The same sources and headers built or dumped for another target, "
-                "or through another toolchain's install layout, parse and yield "
-                "the same declaration surface and the same artifact facts; "
-                "target-specific evidence may add facts, never remove or "
-                "relocate the library's own."
-            ),
-            harness_tests=(
-                "tests/test_family_f8_target_parity.py",
-                "tests/test_family_f8_symbol_rule_parity.py",
-                "tests/test_family_f8_catalog_backend_parity.py",
-                # Each header backend reports a change's declared ChangeKinds
-                # (Clang, CastXML; native GCC in the native-gcc CI job).
-                "tests/test_header_backend_parity_regressions.py",
-                "tests/test_native_gcc_parity_regressions.py",
-                # ELF vs PE (MSVC ABI) vs Mach-O cross-builds of one source,
-                # compared through the CLI with -H under both header backends.
-                "tests/test_pe_macho_header_binding_integration.py",
-                # The same toolchain answering slowly records the same facts.
-                "tests/test_tool_probe_hang_guard.py",
-            ),
+        planned_reason="",
+    ),
+    Family(
+        key="F5",
+        title="Optimization equals reference",
+        invariant=(
+            "Every cache, memo, fast path, narrowing and parallel fan-out "
+            "produces output identical to the unoptimized serial run."
         ),
-        Family(
-            key="F9",
-            title="Host-interpreter parity",
-            invariant=(
-                "abicheck produces the same persisted tokens and the same "
-                "thread isolation on every supported Python, GIL and "
-                "free-threaded alike; behavior that newer interpreters change "
-                "(how json encodes str subclasses, whether a thread inherits "
-                "its parent's context) is pinned against a declared oracle, "
-                "not a same-interpreter round trip."
-            ),
-            harness_tests=(
-                "tests/test_str_enum_serialized_token.py",
-                "tests/test_ast_memo_slot_thread_context.py",
-                "tests/test_snapshot_byte_reproducibility.py",
-                "tests/test_demangle_host_locale_independence.py",
-            ),
+        harness_tests=(
+            "tests/test_family_f5_optimization_reference.py",
+            "tests/test_family_f5_derived_ast_sharing.py",
+            "tests/test_dump_cache_single_tier.py",
+            "tests/test_family_f5_packed_type_graph.py",
+            "tests/test_surface_metrics_fan_in_index.py",
+            "tests/test_header_dir_expansion_canonical_order.py",
+            "tests/test_memo_stats_across_clear.py",
         ),
-        Family(
-            key="F10",
-            title="Process lifecycle on failure paths",
-            invariant=(
-                "After an owner fails or is interrupted, no child process it started "
-                "outlives it and no shared budget slot stays held; a successful owner "
-                "is never cancelled. The interpreter joins pool workers at exit, so an "
-                "abandoned child delays the whole process, not only the failing call."
-            ),
-            harness_tests=(
-                "tests/test_cancel_token.py",
-                "tests/test_header_graph_prefetch.py",
-            ),
+    ),
+    Family(
+        key="F6",
+        title="Compatible real-library pair has no break",
+        invariant=(
+            "A known-compatible real release pair produces no BREAKING or "
+            "API_BREAK finding."
         ),
-        Family(
-            key="F19",
-            title="An edit reads as its own kind on every evidence lane",
-            invariant=(
-                "One source edit is reported with the change kind the catalog "
-                "names for it whichever evidence lane observed it (binary "
-                "symbols, DWARF, castxml or clang headers): a parameter-list "
-                "change is func_params_changed, a removed virtual's lost slot is "
-                "func_virtual_removed, never only the removal and addition of "
-                "the mangled names the edit produced."
-            ),
-            harness_tests=(),
-            planned_reason=(
-                "The harness is the generated ABI edit corpus (PR #1958: each "
-                "edit operator run through every evidence lane and reconciled "
-                "against the edit's own expected kinds), which lands separately; "
-                "until then the seed tests of each class carry the lanes."
-            ),
+        harness_tests=(
+            "tests/test_family_f6_corpus.py",
+            "tests/test_rebuild_toolchain_drift_integration.py",
+            "tests/test_toolchain_rebuild_drift.py",
         ),
-        Family(
-            key="F11",
-            title="Measurement judges what it claims to measure",
-            invariant=(
-                "A budget or gate on a sampled quantity judges the quantity its name "
-                "and documentation claim: a process tree's footprint is the sum of "
-                "proportional set sizes, not a sum of resident sizes that counts "
-                "shared pages once per process."
-            ),
-            harness_tests=(),
-            planned_reason=(
-                "One class so far; revisit when a second class has a budget read off "
-                "the wrong sampled quantity and the two share one mechanism."
-            ),
+        planned_reason="",
+    ),
+    Family(
+        key="F7",
+        title="Test and harness integrity",
+        invariant=(
+            "A test proves the path it claims actually ran, its oracle is "
+            "independent of the implementation, and fixtures cannot build "
+            "states the types forbid."
         ),
-        Family(
-            key="F12",
-            title="Argv replay and public-root probe read the same operands",
-            invariant=(
-                "Every spelling a compiler driver accepts for one include-search "
-                "operand is read by every consumer of the compile unit: the "
-                "public-root probe reads each CL-mode spelling. Replay parity with "
-                "the probe is tracked as the remaining gap in known-gaps.md, not "
-                "yet met."
-            ),
-            harness_tests=(),
-            planned_reason=(
-                "One class so far; revisit when a second class has a consumer "
-                "that reads a driver's option spellings differently from the "
-                "replay, and the two share one mechanism."
-            ),
+        harness_tests=(
+            "tests/test_regressions_families.py",
+            "tests/test_family_f7_mutant_replay.py",
+            "tests/test_conftest_cache_isolation.py",
         ),
-        Family(
-            key="F13",
-            title="Build inputs route to their own units",
-            invariant=(
-                "Every source operand a build input names becomes exactly one "
-                "compile unit owned by that operand, and a link with no source "
-                "operand compiles nothing: no operand is dropped, and no link "
-                "object is taken for a source, by collapsing a record onto its "
-                "first operand."
-            ),
-            harness_tests=(),
-            planned_reason=(
-                "One class so far, pinned by its own seed test; revisit when a "
-                "second build-input adapter (Bazel, Ninja, make) collapses operands "
-                "the same way and a shared operand-shape harness can enumerate them."
-            ),
+    ),
+    Family(
+        key="F8",
+        title="Target and toolchain parity",
+        invariant=(
+            "The same sources and headers built or dumped for another target, "
+            "or through another toolchain's install layout, parse and yield "
+            "the same declaration surface and the same artifact facts; "
+            "target-specific evidence may add facts, never remove or "
+            "relocate the library's own."
         ),
-        Family(
-            key="F17",
-            title="Header parse uses the dialect the binary was built with",
-            invariant=(
-                "A header parse of a library with no build data takes its C++ "
-                "standard and target flags from the binary's own build record, so "
-                "a declaration that needs the dialect the library was compiled "
-                "with parses, and a caller's explicit choice still wins."
-            ),
-            harness_tests=(),
-            planned_reason=(
-                "One class so far; revisit when a second build fact read from the "
-                "binary (for example a sanitizer or a libc selection) feeds the same "
-                "header parse and the two share one mechanism."
-            ),
+        harness_tests=(
+            "tests/test_family_f8_target_parity.py",
+            "tests/test_family_f8_symbol_rule_parity.py",
+            "tests/test_family_f8_catalog_backend_parity.py",
+            # Each header backend reports a change's declared ChangeKinds
+            # (Clang, CastXML; native GCC in the native-gcc CI job).
+            "tests/test_header_backend_parity_regressions.py",
+            "tests/test_native_gcc_parity_regressions.py",
+            # ELF vs PE (MSVC ABI) vs Mach-O cross-builds of one source,
+            # compared through the CLI with -H under both header backends.
+            "tests/test_pe_macho_header_binding_integration.py",
+            # The same toolchain answering slowly records the same facts.
+            "tests/test_tool_probe_hang_guard.py",
         ),
-        Family(
-            key="F15",
-            title="castxml type nodes keep the spelling that tells two types apart",
-            invariant=(
-                "A castxml type node (a vector's element type, a function type's "
-                "declarator) resolves to the spelling clang gives for the same "
-                "declaration and never collapses to an opaque tag, so a header "
-                "comparison sees the change."
-            ),
-            harness_tests=("tests/test_type_spelling_differential_matrix.py",),
-            planned_reason="",
+    ),
+    Family(
+        key="F9",
+        title="Host-interpreter parity",
+        invariant=(
+            "abicheck produces the same persisted tokens and the same "
+            "thread isolation on every supported Python, GIL and "
+            "free-threaded alike; behavior that newer interpreters change "
+            "(how json encodes str subclasses, whether a thread inherits "
+            "its parent's context) is pinned against a declared oracle, "
+            "not a same-interpreter round trip."
         ),
-        Family(
-            key="F14",
-            title="DWARF extraction keeps the attribute that makes a declaration",
-            invariant=(
-                "A DWARF entity keeps every attribute its identity rests on, "
-                "not just its shape: a vector keeps DW_AT_GNU_vector (never the "
-                "plain T[] spelling), an array keeps each dimension's bound "
-                "(char[8] -> char[6] is a member type change at any record "
-                "size), and a function defined outside its class or namespace "
-                "keeps the declaration DW_AT_specification names (its name, "
-                "scope and this-qualifiers), so a DWARF-only comparison reports "
-                "the same change kind the header lane does."
-            ),
-            harness_tests=(
-                "tests/test_type_spelling_differential_matrix.py",
-                "tests/test_dwarf_array_extents.py",
-                "tests/test_dwarf_member_functions.py",
-            ),
-            planned_reason="",
+        harness_tests=(
+            "tests/test_str_enum_serialized_token.py",
+            "tests/test_ast_memo_slot_thread_context.py",
+            "tests/test_snapshot_byte_reproducibility.py",
+            "tests/test_demangle_host_locale_independence.py",
         ),
-        Family(
-            key="F16",
-            title="Human output stays within its display budget",
-            invariant=(
-                "A bounded human rendering (Markdown report, review digest, "
-                "compact summary) stays within a fixed size however many "
-                "non-gating findings the run carries, budgets each group it "
-                "caps independently, and states every population it cut with "
-                "its full count; machine formats keep every finding."
-            ),
-            harness_tests=("tests/unit/report/test_markdown_report_budget.py",),
+    ),
+    Family(
+        key="F10",
+        title="Process lifecycle on failure paths",
+        invariant=(
+            "After an owner fails or is interrupted, no child process it started "
+            "outlives it and no shared budget slot stays held; a successful owner "
+            "is never cancelled. The interpreter joins pool workers at exit, so an "
+            "abandoned child delays the whole process, not only the failing call."
         ),
-        Family(
-            key="F18",
-            title="A publish never exposes a half-written package",
-            invariant=(
-                "Whatever happens to a publish -- a failed check, an "
-                "interruption at any write, a concurrent writer, or a "
-                "successful republish under the same ids -- readers see either "
-                "the previous package or the new one, whole; no file a live "
-                "manifest names is ever rewritten in place."
-            ),
-            harness_tests=("tests/test_package_immutable_publication.py",),
+        harness_tests=(
+            "tests/test_cancel_token.py",
+            "tests/test_header_graph_prefetch.py",
         ),
-        Family(
-            key="F19",
-            title="The Action's trust boundary is executed, not read",
-            invariant=(
-                "A hostile or careless value crossing into the Action -- an "
-                "input that reaches a shell or workflow command, a build "
-                "command run for the user -- cannot run as the Action's own "
-                "code, forge a workflow command or result, or reach what the "
-                "gate compares or a later step's environment; each property "
-                "is shown by executing the step against that value, never by "
-                "reading the step's text."
-            ),
-            harness_tests=(
-                "tests/test_action_run_sh_injection.py",
-                "tests/test_action_delta_base_build.py",
-                "tests/test_action_run_sh_file_fingerprint.py",
-            ),
+    ),
+    Family(
+        key="F20",
+        title="An edit reads as its own kind on every evidence lane",
+        invariant=(
+            "One source edit is reported with the change kind the catalog "
+            "names for it whichever evidence lane observed it (binary "
+            "symbols, DWARF, castxml or clang headers): a parameter-list "
+            "change is func_params_changed, a removed virtual's lost slot is "
+            "func_virtual_removed, never only the removal and addition of "
+            "the mangled names the edit produced."
         ),
-        Family(
-            key="OTHER",
-            title="CI, tooling, storage and trust-boundary surfaces",
-            invariant=(
-                "No shared generalized harness; each class keeps its own seed tests."
-            ),
-            harness_tests=(),
-            planned_reason=(
-                "Heterogeneous CI/shell/storage/report-rendering mechanisms; "
-                "revisit when three or more classes share one mechanism."
-            ),
+        harness_tests=(),
+        planned_reason=(
+            "The harness is the generated ABI edit corpus (PR #1958: each "
+            "edit operator run through every evidence lane and reconciled "
+            "against the edit's own expected kinds), which lands separately; "
+            "until then the seed tests of each class carry the lanes."
         ),
-    )
-}
+    ),
+    Family(
+        key="F11",
+        title="Measurement judges what it claims to measure",
+        invariant=(
+            "A budget or gate on a sampled quantity judges the quantity its name "
+            "and documentation claim: a process tree's footprint is the sum of "
+            "proportional set sizes, not a sum of resident sizes that counts "
+            "shared pages once per process."
+        ),
+        harness_tests=(),
+        planned_reason=(
+            "One class so far; revisit when a second class has a budget read off "
+            "the wrong sampled quantity and the two share one mechanism."
+        ),
+    ),
+    Family(
+        key="F12",
+        title="Argv replay and public-root probe read the same operands",
+        invariant=(
+            "Every spelling a compiler driver accepts for one include-search "
+            "operand is read by every consumer of the compile unit: the "
+            "public-root probe reads each CL-mode spelling. Replay parity with "
+            "the probe is tracked as the remaining gap in known-gaps.md, not "
+            "yet met."
+        ),
+        harness_tests=(),
+        planned_reason=(
+            "One class so far; revisit when a second class has a consumer "
+            "that reads a driver's option spellings differently from the "
+            "replay, and the two share one mechanism."
+        ),
+    ),
+    Family(
+        key="F13",
+        title="Build inputs route to their own units",
+        invariant=(
+            "Every source operand a build input names becomes exactly one "
+            "compile unit owned by that operand, and a link with no source "
+            "operand compiles nothing: no operand is dropped, and no link "
+            "object is taken for a source, by collapsing a record onto its "
+            "first operand."
+        ),
+        harness_tests=(),
+        planned_reason=(
+            "One class so far, pinned by its own seed test; revisit when a "
+            "second build-input adapter (Bazel, Ninja, make) collapses operands "
+            "the same way and a shared operand-shape harness can enumerate them."
+        ),
+    ),
+    Family(
+        key="F17",
+        title="Header parse uses the dialect the binary was built with",
+        invariant=(
+            "A header parse of a library with no build data takes its C++ "
+            "standard and target flags from the binary's own build record, so "
+            "a declaration that needs the dialect the library was compiled "
+            "with parses, and a caller's explicit choice still wins."
+        ),
+        harness_tests=(),
+        planned_reason=(
+            "One class so far; revisit when a second build fact read from the "
+            "binary (for example a sanitizer or a libc selection) feeds the same "
+            "header parse and the two share one mechanism."
+        ),
+    ),
+    Family(
+        key="F15",
+        title="castxml type nodes keep the spelling that tells two types apart",
+        invariant=(
+            "A castxml type node (a vector's element type, a function type's "
+            "declarator) resolves to the spelling clang gives for the same "
+            "declaration and never collapses to an opaque tag, so a header "
+            "comparison sees the change."
+        ),
+        harness_tests=("tests/test_type_spelling_differential_matrix.py",),
+        planned_reason="",
+    ),
+    Family(
+        key="F14",
+        title="DWARF extraction keeps the attribute that makes a declaration",
+        invariant=(
+            "A DWARF entity keeps every attribute its identity rests on, "
+            "not just its shape: a vector keeps DW_AT_GNU_vector (never the "
+            "plain T[] spelling), an array keeps each dimension's bound "
+            "(char[8] -> char[6] is a member type change at any record "
+            "size), and a function defined outside its class or namespace "
+            "keeps the declaration DW_AT_specification names (its name, "
+            "scope and this-qualifiers), so a DWARF-only comparison reports "
+            "the same change kind the header lane does."
+        ),
+        harness_tests=(
+            "tests/test_type_spelling_differential_matrix.py",
+            "tests/test_dwarf_array_extents.py",
+            "tests/test_dwarf_member_functions.py",
+        ),
+        planned_reason="",
+    ),
+    Family(
+        key="F16",
+        title="Human output stays within its display budget",
+        invariant=(
+            "A bounded human rendering (Markdown report, review digest, "
+            "compact summary) stays within a fixed size however many "
+            "non-gating findings the run carries, budgets each group it "
+            "caps independently, and states every population it cut with "
+            "its full count; machine formats keep every finding."
+        ),
+        harness_tests=("tests/unit/report/test_markdown_report_budget.py",),
+    ),
+    Family(
+        key="F18",
+        title="A publish never exposes a half-written package",
+        invariant=(
+            "Whatever happens to a publish -- a failed check, an "
+            "interruption at any write, a concurrent writer, or a "
+            "successful republish under the same ids -- readers see either "
+            "the previous package or the new one, whole; no file a live "
+            "manifest names is ever rewritten in place."
+        ),
+        harness_tests=("tests/test_package_immutable_publication.py",),
+    ),
+    Family(
+        key="F19",
+        title="The Action's trust boundary is executed, not read",
+        invariant=(
+            "A hostile or careless value crossing into the Action -- an "
+            "input that reaches a shell or workflow command, a build "
+            "command run for the user -- cannot run as the Action's own "
+            "code, forge a workflow command or result, or reach what the "
+            "gate compares or a later step's environment; each property "
+            "is shown by executing the step against that value, never by "
+            "reading the step's text."
+        ),
+        harness_tests=(
+            "tests/test_action_run_sh_injection.py",
+            "tests/test_action_delta_base_build.py",
+            "tests/test_action_run_sh_file_fingerprint.py",
+        ),
+    ),
+    Family(
+        key="OTHER",
+        title="CI, tooling, storage and trust-boundary surfaces",
+        invariant=(
+            "No shared generalized harness; each class keeps its own seed tests."
+        ),
+        harness_tests=(),
+        planned_reason=(
+            "Heterogeneous CI/shell/storage/report-rendering mechanisms; "
+            "revisit when three or more classes share one mechanism."
+        ),
+    ),
+)
+_dup_keys = sorted(
+    {f.key for f in _FAMILY_LIST if [g.key for g in _FAMILY_LIST].count(f.key) > 1}
+)
+if _dup_keys:
+    raise ValueError(f"family keys declared twice: {_dup_keys}")
+FAMILIES: dict[str, Family] = {f.key: f for f in _FAMILY_LIST}
 
 
 _F1 = (
@@ -640,7 +643,7 @@ _F10 = (
     "lifecycle.counter_or_handle_used_past_its_release",
 )
 _F11 = ("measurement.forked_tree_rss_overstates_memory",)
-_F19 = (
+_F20 = (
     "classification.removed_virtual_slot_read_as_plain_removal",
     "comparability.runtime_abi_selector_refused_instead_of_reported",
     "classification.demangled_signature_used_as_entity_name",
@@ -729,7 +732,7 @@ for _key, _ids in (
     ("F9", _F9),
     ("F10", _F10),
     ("F11", _F11),
-    ("F19", _F19),
+    ("F20", _F20),
     ("F12", _F12),
     ("F13", _F13),
     ("F14", _F14),
