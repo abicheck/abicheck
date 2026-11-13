@@ -855,6 +855,10 @@ EVIDENCE_BUG_CLASSES: tuple[BugClass, ...] = (
             # and layout passes) recorded as an extraction limitation
             "tests/test_header_extraction_limitations.py",
             "tests/test_castxml_clang_join_failure_integration.py",
+            # a corrupt PE/Mach-O/DWARF/storage-v2 input read as a smaller
+            # surface: the parser regressions and the CLI matrix
+            "tests/test_parser_fuzz_oracle.py",
+            "tests/test_corrupt_input_matrix.py",
         ),
         known_gaps=(
             KnownGap(

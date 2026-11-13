@@ -71,6 +71,7 @@ from .fact_schema_versions import (
     _MIN_SCHEMA_VERSION_FOR_TYPEFIELD_CV_FACTS,
     _MIN_SCHEMA_VERSION_FOR_TYPEFIELD_VALUE_FACTS,
 )
+from .malformed_document import malformed_document_errors
 from .semantic_ir_codec import (
     PredecodedSemanticIR,
     decode_semantic_ir,
@@ -182,7 +183,7 @@ def decode_lazily(d: dict[str, Any], schema_version: int) -> AbiSnapshot:
     def build() -> AbiSnapshot:
         # Same scheduling as `serialization.load_snapshot`'s eager decode:
         # the decode allocates millions of acyclic containers.
-        with gc_paused():
+        with gc_paused(), malformed_document_errors():
             return _build()
 
     def _build() -> AbiSnapshot:

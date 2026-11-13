@@ -57,7 +57,6 @@ import stat
 from pathlib import Path
 from typing import Any
 
-from elftools.common.exceptions import ELFError
 from elftools.elf.elffile import ELFFile
 
 from .dwarf_utils import (
@@ -76,12 +75,14 @@ from .dwarf_utils import (
     resolve_die_ref as _resolve_ref,
     subroutine_spelling,
 )
+from .extract import debug_section_presence as _sections
 
 # Fact dataclasses live in the model package (ADR-061 Phase 5): this module
 # parses into them and re-exports them so the historical
 # ``from abicheck.dwarf_metadata import DwarfMetadata`` spelling keeps resolving.
 from .extract.dwarf_abi_fact import dwarf_type_abi_fact
 from .extract.dwarf_subtree_index import open_indexed_dwarf_info
+from .extract.parse_failures import note_debug_info_read_failure
 from .model.abi_fundamental import AbiFundamental
 from .model.availability import FactStatus
 from .model.dwarf_facts import (
@@ -132,7 +133,7 @@ def parse_dwarf_metadata(so_path: Path) -> DwarfMetadata:
                 log.warning("parse_dwarf_metadata: not a regular file: %s", so_path)
                 return DwarfMetadata()
             return _parse(f, so_path)
-    except (ELFError, OSError, ValueError) as exc:
+    except Exception as exc:  # noqa: BLE001 - "never raises" includes MemoryError
         log.warning("parse_dwarf_metadata: failed to open/parse %s: %s", so_path, exc)
         return DwarfMetadata()
 
@@ -148,20 +149,25 @@ def _parse(f: Any, so_path: Path) -> DwarfMetadata:
 
     if not has_real_dwarf_info(elf):
         log.debug("parse_dwarf_metadata: no DWARF info in %s", so_path)
+        _sections.note_orphaned_debug_sections(elf)
         return meta
 
     meta.has_dwarf = True
-    dwarf = open_indexed_dwarf_info(elf)
-
-    # Per-parse type-resolution cache: (cu_offset, die_offset) → (name, byte_size)
-    type_cache: dict[tuple[int, int], tuple[str, int | None]] = {}
-
-    for CU in dwarf.iter_CUs():  # type: ignore[no-untyped-call]
-        try:
-            _process_cu(CU, meta, type_cache)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("parse_dwarf_metadata: skipping CU in %s: %s", so_path, exc)
-
+    try:  # past detection, a failure is recorded, never read as "no DWARF"
+        dwarf = open_indexed_dwarf_info(elf)
+        type_cache: dict[tuple[int, int], tuple[str, int | None]] = {}  # per parse
+        for CU in dwarf.iter_CUs():  # type: ignore[no-untyped-call]
+            _sections.note_unit_past_section(CU, dwarf)
+            try:
+                _process_cu(CU, meta, type_cache)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("parse_dwarf_metadata: skipping CU in %s: %s", so_path, exc)
+                note_debug_info_read_failure(
+                    f"CU at {CU.cu_offset} unreadable: {exc!r}"
+                )
+    except Exception as exc:  # noqa: BLE001 - includes a MemoryError from a bad size
+        log.warning("parse_dwarf_metadata: DWARF unreadable in %s: %s", so_path, exc)
+        note_debug_info_read_failure(f"DWARF unreadable: {exc!r}")
     return meta
 
 

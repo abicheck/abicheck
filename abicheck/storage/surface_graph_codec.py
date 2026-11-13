@@ -182,11 +182,15 @@ def _graph_decoder(load_payload: Callable[[], Any]) -> Callable[[], Any]:
     def decode() -> Any:
         from ..model.graph_identity import identity_normalization_memo
         from ..model.source_graph import SourceGraphSummary
+        from .malformed_document import malformed_document_errors
 
-        payload = load_payload()
-        if is_graph_table(payload):
-            return decode_graph_table(payload)
-        with identity_normalization_memo():
-            return SourceGraphSummary.from_dict(payload)  # pre-v49 document
+        # Decoded on first graph access, outside the snapshot load's own
+        # boundary: a malformed graph is a typed error here too.
+        with malformed_document_errors("surface graph"):
+            payload = load_payload()
+            if is_graph_table(payload):
+                return decode_graph_table(payload)
+            with identity_normalization_memo():
+                return SourceGraphSummary.from_dict(payload)  # pre-v49 document
 
     return decode
