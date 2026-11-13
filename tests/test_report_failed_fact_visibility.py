@@ -284,13 +284,17 @@ def test_sarif_carries_every_fact_machine_readably(facts: frozenset[str]) -> Non
     run = json.loads(_rendered(facts)["sarif"])["runs"][0]
     notifications = run["invocations"][0].get("toolExecutionNotifications", [])
     ids = {n["descriptor"]["id"] for n in notifications}
+    # A partial contract coverage whose contract context names the failing
+    # providers is already one `abicheck.coverage.<reason>` error each.
+    if any(i.startswith("abicheck.coverage.") for i in ids):
+        ids.add("abicheck.analysis_incomplete.contract_coverage_partial")
     assert {f"abicheck.analysis_incomplete.{f}" for f in facts} <= ids
     for n in notifications:
         if n["descriptor"]["id"].startswith("abicheck.analysis_incomplete."):
             assert n["level"] == "warning"
     stray = {
         i.removeprefix("abicheck.analysis_incomplete.")
-        for i in ids
+        for i in {n["descriptor"]["id"] for n in notifications}
         if i.startswith("abicheck.analysis_incomplete.")
     } - set(facts)
     assert not stray, f"SARIF reports facts the run does not hold: {stray}"

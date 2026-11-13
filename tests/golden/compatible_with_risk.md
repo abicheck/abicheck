@@ -10,6 +10,8 @@
 | Deployment risk changes | 2 |
 | Compatible changes | 0 |
 
+> ⚠️ **Analysis incomplete:** public-header scoping could not resolve the public surface and fell back to the full export table; manual review required
+
 ## Analysis Confidence
 
 | Field | Value |

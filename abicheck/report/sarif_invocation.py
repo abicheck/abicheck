@@ -190,6 +190,9 @@ def run_notifications(
             "properties": {"caveat": c.key},
         }
         for c in analysis_caveats_for(result, envelope)
+        # The per-failure coverage notifications above already state a
+        # partial contract coverage, one `error` per provider.
+        if not (c.key == "contract_coverage_partial" and notifications)
     ]
     if caveats:
         notifications = [*(notifications or []), *caveats]

@@ -402,7 +402,15 @@ class TestDownstreamConsumers:
 
         doc = to_sarif(self._result())
         invocation = doc["runs"][0]["invocations"][0]
-        notifications = invocation["toolExecutionNotifications"]
+        # The findings the uncovered domain left NOT_EVALUATED add their own
+        # `abicheck.analysis_incomplete.*` warning; this asserts the
+        # coverage notifications themselves.
+        notifications = [
+            n
+            for n in invocation["toolExecutionNotifications"]
+            if n["descriptor"]["id"].startswith("abicheck.coverage.")
+        ]
+        assert len(notifications) == 2
         assert {n["properties"]["provider"] for n in notifications} == {"export_table"}
         assert {n["properties"]["side"] for n in notifications} == {"old", "new"}
         assert all(n["properties"]["suppressible"] is False for n in notifications)

@@ -171,10 +171,15 @@ def analysis_caveats_for(
     document would be a second report build per render)."""
     if envelope is not None:
         return analysis_caveats(envelope.document.to_mapping())
+    from ..checker_types import DiffResult
     from ..policy.analysis_assurance import analysis_assurance_report_dict
     from .change_json import scope_dict
     from .disposition_audit import disposition_audit_dict_reusing_document
 
+    if not isinstance(result, DiffResult):
+        # A duck-typed stand-in (a test's verdict-only stub) carries none of
+        # the facts these fields are read from.
+        return ()
     return analysis_caveats(
         {
             "analysis_assurance": analysis_assurance_report_dict(result),
