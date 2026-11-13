@@ -503,3 +503,27 @@ def test_absent_bound_stays_a_real_zero_for_a_flexible_array() -> None:
         children=(_Die("DW_TAG_subrange_type", 4),),
     )
     assert _size_of(_Die("DW_TAG_member", 5, {"DW_AT_type": flex})) == 0
+
+
+@pytest.mark.usefixtures("_refs")
+@pytest.mark.parametrize(
+    ("lower", "expected"),
+    [
+        (_Attr(1, "DW_FORM_data1"), 12),  # constant lower bound: [1..3] -> 3 ints
+        (_Attr([0x91, 0], "DW_FORM_exprloc"), None),  # non-constant lower bound
+        (_Attr(99, "DW_FORM_ref4"), None),  # reference lower bound
+    ],
+)
+def test_a_non_constant_lower_bound_under_a_constant_upper_bound_is_unknown(
+    lower: Any, expected: int | None
+) -> None:
+    """A constant upper bound over a lower bound that cannot be evaluated
+    still has no element count: unknown, never the flexible-array 0."""
+    int_t = _Die("DW_TAG_base_type", 2, {"DW_AT_name": "int", "DW_AT_byte_size": 4})
+    subrange = _Die(
+        "DW_TAG_subrange_type",
+        4,
+        {"DW_AT_upper_bound": _Attr(3, "DW_FORM_data1"), "DW_AT_lower_bound": lower},
+    )
+    arr = _Die("DW_TAG_array_type", 3, {"DW_AT_type": int_t}, children=(subrange,))
+    assert _size_of(_Die("DW_TAG_member", 5, {"DW_AT_type": arr})) == expected

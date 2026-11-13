@@ -192,15 +192,19 @@ def attr_constant(die: Any, name: str) -> int | None:
 
 def has_unevaluable_bound(die: Any) -> bool:
     """Whether an array DIE states a bound (``DW_AT_count`` or
-    ``DW_AT_upper_bound``) on a subrange that is not a constant. Such a size
-    is unknown. An *absent* bound is different: it is an unbounded array (a
-    flexible array member), whose size the element size decides."""
+    ``DW_AT_upper_bound``) on a subrange whose element count cannot be
+    evaluated: a non-constant count or upper bound, or a constant upper bound
+    over a non-constant ``DW_AT_lower_bound``. Such a size is unknown. An
+    *absent* bound is different: it is an unbounded array (a flexible array
+    member), whose size the element size decides."""
     for child in die.iter_children():
         if child.tag != "DW_TAG_subrange_type":
             continue
-        for name in ("DW_AT_count", "DW_AT_upper_bound"):
-            if name in child.attributes and _constant(child, name) is None:
-                return True
+        states_bound = (
+            "DW_AT_count" in child.attributes or "DW_AT_upper_bound" in child.attributes
+        )
+        if states_bound and _subrange_count(child) is None:
+            return True
     return False
 
 
