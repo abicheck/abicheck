@@ -40,7 +40,6 @@ __all__ = [
     "AnalysisCaveat",
     "analysis_caveats",
     "analysis_caveats_for",
-    "caveat_dicts",
 ]
 
 #: The one phrase every format prefixes its caveat block with, so a reader --
@@ -72,9 +71,6 @@ class AnalysisCaveat:
 
     key: str
     message: str
-
-    def to_dict(self) -> dict[str, str]:
-        return {"key": self.key, "message": self.message}
 
 
 def _mapping(value: object) -> Mapping[str, object]:
@@ -192,8 +188,3 @@ def analysis_caveats_for(
             "scope": scope_dict(result),
         }
     )
-
-
-def caveat_dicts(caveats: Sequence[AnalysisCaveat]) -> list[dict[str, str]]:
-    """JSON-safe form, for a format that folds them into its own document."""
-    return [c.to_dict() for c in caveats]

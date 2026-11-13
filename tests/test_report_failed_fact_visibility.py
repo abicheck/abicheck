@@ -378,3 +378,34 @@ def test_suppressed_and_not_evaluated_detectors_stay_visible(fmt: str) -> None:
     text = _fold(_suppressed_run()[fmt])
     assert "suppressed" in text
     assert "not evaluated" in text
+
+
+@pytest.mark.parametrize(
+    ("status", "caveat"),
+    [
+        (SectionStatus.FAILED, True),
+        (SectionStatus.BLOCKED, True),
+        (SectionStatus.NOT_COLLECTED, True),
+        # Read as its defaults, the pre-table reading: reported, but it does
+        # not narrow the comparison (`SectionStatus.narrows`).
+        (SectionStatus.UNRECORDED, False),
+    ],
+)
+def test_section_status_caveat_follows_narrows(
+    status: SectionStatus, caveat: bool
+) -> None:
+    """Every section status, against the model's own ``narrows`` contract:
+    only a status whose fields stand in for missing evidence is a caveat."""
+    old = AbiSnapshot(library="libx.so.1", version="1", functions=[_fn("f")])
+    narrowing = {"unreadable_sections": (("types", _DIAG),)} if status.narrows else {}
+    new = AbiSnapshot(
+        library="libx.so.1",
+        version="2",
+        functions=[_fn("f")],
+        section_availability=(SectionAvailability("types", status, (_DIAG,)),),
+        **narrowing,
+    )
+    out = _render_all(compare(old, new), old, new)
+    assert ("section_unavailable" in out["stat"]) is caveat
+    assert (_CAVEAT in _fold(out["markdown"])) is caveat
+    assert caveat is status.narrows
