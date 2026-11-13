@@ -169,8 +169,8 @@
       "abicheck/extract/headers/gcc/build.py": "1ee62182117ee040274b84d482cc3a9a36db2bd2b742d5dca4e892de00002ecb",
       "abicheck/extract/headers/gcc/contracts.py": "419ad694249c1477e89a60d8432bfeed202bf818c4bd4aa62361834ff452a2cf",
       "abicheck/extract/headers/gcc/discovery.py": "f07fdd43ec1e594e95a75a5447e54e3dcbfe5c944c66a305de4e9d7463ee731b",
-      "abicheck/extract/headers/gcc/gcc_facts.cc": "d2a160738c283569bc93e815f463f3a70e4d715a56e177795d46d9e0df8eed07",
-      "abicheck/extract/headers/gcc/projection.py": "e5722bec915e0b39c7dff22211f1e127cfa0cd0b7415b0c74b1dd9da328922cd",
+      "abicheck/extract/headers/gcc/gcc_facts.cc": "be8e1385198464d2888bd4a1c242b2dd2d5000506a38a8971ca194ecaca63ffe",
+      "abicheck/extract/headers/gcc/projection.py": "fef7d3679e17dd70f119d88be2ae20ea28039f08a39e2cd5644e35bf744313c4",
       "abicheck/extract/headers/manifest.py": "32ef26892725f05c29fff52d393166a68ea2983f9c1b881d85e046d96ae962b1",
       "abicheck/extract/headers/preprocessor_branches.py": "d3a409d126b0dd1b19a634d4aad25660d372dad931b310cfbaaefc9d769b244d",
       "abicheck/extract/headers/scope_segments.py": "d413edec257eb1334c829263770b66dc2eda3d263c765f699eac9f7e3ace9e65",
@@ -224,9 +224,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "39eb118f864a06f3b51af13178f35032b8d26b1f5206c02e838ef2600984a6d1",
+    "fingerprint": "1f7517d3d82bec5246fd25262350775d277a0745e934a89132e6a27bd964a9c0",
     "generation": 60,
-    "reason": "bumped to 60 for a semantic change"
+    "reason": "folds the native gcc plugin's base access and DECL_C_BIT_FIELD fix into generation 60, which is introduced by this same unreleased change and already declares those record facts"
   },
   "resolver": {
     "files": {

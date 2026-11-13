@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,10 @@ from tests._abicheck_subprocess import abicheck_command
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(shutil.which("g++") is None, reason="g++ not installed"),
+    # The gap is in the ELF/DWARF path; g++ on Windows builds a PE image.
+    pytest.mark.skipif(
+        not sys.platform.startswith("linux"), reason="Linux ELF/DWARF only"
+    ),
 ]
 
 OLD = "struct LB2 { int k; };\nstruct LD2 : virtual LB2 { int d; };\nint ld2_use(LD2* p) { return p->d; }\n"

@@ -227,6 +227,17 @@ def project(
                 )
             bases = r.get("bases", [])
             vtable = vtable_fact(r)
+            # Base access specifiers; a base with none recognised (or a plugin
+            # build older than the field) leaves the whole map unknown.
+            access_map = {clean(b["type"]): b.get("access", "") for b in bases}
+            base_access_fact = (
+                Fact.not_collected()
+                if any(
+                    v not in ("public", "protected", "private")
+                    for v in access_map.values()
+                )
+                else Fact.present(access_map)
+            )
             types[name] = RecordType(
                 name=name,
                 qualified_name=name if "::" in name else None,
@@ -254,6 +265,7 @@ def project(
                 virtual_bases_fact=Fact.present(
                     [clean(b["type"]) for b in bases if b["virtual"]]
                 ),
+                base_access_fact=base_access_fact,
                 base_offsets={
                     clean(b["type"]): b["offset_bytes"] * 8
                     for b in bases

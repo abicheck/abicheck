@@ -182,9 +182,9 @@ def _diff_base_access(
     as a change.
     """
     old_f, new_f = t_old.base_access_fact, t_new.base_access_fact
-    # Cheap pre-filter, before compare_facts: only two PRESENT, non-empty
-    # maps can hold a narrowing (most records have no base at all), and any
-    # other status is not comparable anyway.
+    # Only two PRESENT, non-empty maps can hold a narrowing (most records have
+    # no base at all); any other status (not collected, failed, partial) is
+    # unknown and never compared.
     if not (
         old_f.status is FactStatus.PRESENT
         and new_f.status is FactStatus.PRESENT
@@ -192,11 +192,8 @@ def _diff_base_access(
         and new_f.value
     ):
         return []
-    cmp = compare_facts(old_f, new_f, {})
-    if not cmp.is_comparable or cmp.degraded:
-        return []
-    old_map: dict[str, str] = cmp.old_value or {}
-    new_map: dict[str, str] = cmp.new_value or {}
+    old_map: dict[str, str] = old_f.value
+    new_map: dict[str, str] = new_f.value
     changes: list[Change] = []
     for base in sorted(set(old_map) & set(new_map)):
         old_acc = old_map[base]
