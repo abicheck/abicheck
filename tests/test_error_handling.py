@@ -115,7 +115,11 @@ class TestSerializationErrorHandling:
     """Serialization should handle malformed/incomplete JSON gracefully."""
 
     def test_missing_required_fields(self):
-        with pytest.raises(KeyError):
+        """A document missing a required key is a typed ``SnapshotError``
+        naming the key, not a bare ``KeyError``."""
+        from abicheck.errors import SnapshotError
+
+        with pytest.raises(SnapshotError, match="missing key 'library'"):
             snapshot_from_dict({})
 
     def test_minimal_valid_dict(self):

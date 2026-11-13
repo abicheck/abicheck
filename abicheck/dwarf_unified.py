@@ -138,6 +138,7 @@ def _open_dwarf_session_with_status(
     except OSError as exc:
         log.warning("parse_dwarf: failed to open/parse %s: %s", so_path, exc)
         return None, AdvancedExtractionStatus.FAILED
+    located = False  # a failure before DWARF is found is the ELF reader's
     try:
         st = os.fstat(f.fileno())
         if not stat.S_ISREG(st.st_mode):
@@ -153,6 +154,7 @@ def _open_dwarf_session_with_status(
             f.close()
             return None, AdvancedExtractionStatus.COMPLETED
 
+        located = True
         dwarf = open_indexed_dwarf_info(elf)
         session = DwarfSession(
             path=Path(so_path),
@@ -168,7 +170,8 @@ def _open_dwarf_session_with_status(
         # ``with open()`` block that closed on *any* exception; match that here
         # so the "never raises" contract holds and no descriptor leaks.
         log.warning("parse_dwarf: failed to open/parse %s: %s", so_path, exc)
-        note_debug_info_read_failure(f"DWARF open failed: {exc!r}")
+        if located:
+            note_debug_info_read_failure(f"DWARF open failed: {exc!r}")
         f.close()
         return None, AdvancedExtractionStatus.FAILED
 

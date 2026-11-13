@@ -356,26 +356,24 @@ class _DwarfSnapshotBuilder:
         ] = {}
 
     def extract(self, session: DwarfSession | None = None) -> None:
-        """Walk DWARF and populate result lists.
-
-        When *session* is provided, its already-open ``DWARFInfo`` is reused
-        (the metadata passes warmed the DIE cache); otherwise the ELF is opened
-        here. Both paths produce identical results.
-        """
+        """Walk DWARF and populate result lists, reusing *session*'s open
+        ``DWARFInfo`` when given (the metadata passes warmed its DIE cache),
+        else opening the ELF here. Both paths produce identical results."""
         if session is not None:
             self._walk_dwarf(session.dwarf)
             return
-
+        located = False  # a failure before DWARF is found is the ELF reader's
         try:
             with open(self._elf_path, "rb") as f:
                 elf = ELFFile(f)  # type: ignore[no-untyped-call]
                 if not has_real_dwarf_info(elf):
                     return
+                located = True
                 self._walk_dwarf(open_indexed_dwarf_info(elf))
-
         except Exception as exc:  # noqa: BLE001 - recorded, so never an empty surface
             log.warning("dwarf_snapshot: failed to parse %s: %s", self._elf_path, exc)
-            note_debug_info_read_failure(f"DWARF unreadable: {exc!r}")
+            if located:
+                note_debug_info_read_failure(f"DWARF unreadable: {exc!r}")
 
     def _walk_dwarf(self, dwarf: Any) -> None:
         """Walk every CU of *dwarf*, then filter to exported reachability.

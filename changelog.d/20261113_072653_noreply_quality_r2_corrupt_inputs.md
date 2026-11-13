@@ -12,6 +12,8 @@
   `ERROR` (exit 4) without an "unexpected failure" traceback. Present but
   unreadable DWARF refuses the whole dump rather than comparing a partial
   type set; to compare the exported symbols alone, strip the debug sections
-  (`objcopy --strip-debug`). A malformed storage-v2 snapshot now raises
-  `SnapshotError` from `load_snapshot` (or on first `declarations` access)
-  instead of `KeyError`/`TypeError`/`AttributeError`.
+  (`strip -g`). A malformed storage-v2 snapshot now raises the new
+  `MalformedSnapshotError` from `load_snapshot` (or on first `declarations`
+  access) instead of a bare `KeyError`/`TypeError`/`AttributeError`; it is a
+  `SnapshotError` and still a `TypeError`/`ValueError`, so existing handlers
+  keep catching it.

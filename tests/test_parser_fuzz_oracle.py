@@ -849,11 +849,23 @@ def test_dwarf_abbrev_entry_that_still_parses_reads_empty_unrecorded() -> None:
     seed = _so_seed(debug=True)
     abbrev = ELFFile(io.BytesIO(seed)).get_section_by_name(".debug_abbrev")
     assert abbrev is not None
-    found = None
-    for i in range(abbrev["sh_size"]):
-        corrupt = flip_byte(seed, abbrev["sh_offset"] + i, 0)
-        meta, sink = _parse_recorded(parse_dwarf_metadata_unified, corrupt, "c.so")
-        if not sink and _dwarf_facts(meta) == 0:
-            found = i
-            break
-    assert found is not None
+    gapped = [
+        i
+        for i in range(abbrev["sh_size"])
+        if _abbrev_flip_reads_empty_unrecorded(seed, abbrev["sh_offset"] + i)
+    ]
+    assert gapped, "no abbreviation byte reads as no types any more: the gap closed"
+    # The same answer from the legacy reader at the first gapped byte.
+    meta, sink = _parse_recorded(
+        parse_dwarf_metadata,
+        flip_byte(seed, abbrev["sh_offset"] + gapped[0], 0),
+        "c.so",
+    )
+    assert (sink, _dwarf_facts(meta)) == ([], 0)
+
+
+def _abbrev_flip_reads_empty_unrecorded(seed: bytes, at: int) -> bool:
+    meta, sink = _parse_recorded(
+        parse_dwarf_metadata_unified, flip_byte(seed, at, 0), "c.so"
+    )
+    return not sink and _dwarf_facts(meta) == 0

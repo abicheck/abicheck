@@ -19,7 +19,7 @@ The snapshot decoders index the document directly (``fn["mangled"]``,
 ``t["fields"]``), so a document missing a required key, or holding a node of
 the wrong JSON type, raised ``KeyError``/``TypeError``/``AttributeError`` --
 eagerly from ``load_snapshot`` or lazily on first ``declarations`` access --
-where the documented contract is :class:`~abicheck.errors.SnapshotError`.
+where the documented contract is a typed error.
 Each decode entry point (the eager ``decode_snapshot`` and the lazy
 declaration-store build) runs inside :func:`malformed_document_errors`, so
 every decoder below them inherits the contract instead of each validating its
@@ -31,7 +31,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from ..errors import AbicheckError, SnapshotError
+from ..errors import AbicheckError, MalformedSnapshotError
 
 __all__ = ["malformed_document_errors"]
 
@@ -41,11 +41,13 @@ _SHAPE_ERRORS = (KeyError, TypeError, AttributeError, IndexError)
 
 @contextmanager
 def malformed_document_errors(what: str = "snapshot document") -> Iterator[None]:
-    """Re-raise a shape error from the block as :class:`SnapshotError`.
+    """Re-raise a shape error from the block as
+    :class:`~abicheck.errors.MalformedSnapshotError`.
 
-    An :class:`~abicheck.errors.AbicheckError` (already typed, e.g. a
-    ``ValidationError`` or an ``IncompatibleSnapshotSchemaError``) passes
-    through unchanged.
+    That error is a ``SnapshotError`` and still a ``TypeError``/``ValueError``,
+    so no existing handler stops catching it. A plain ``ValueError`` (the
+    storage layer's own refusal, already a "malformed package" signal) and an
+    :class:`~abicheck.errors.AbicheckError` (already typed) pass through.
     """
     try:
         yield
@@ -53,6 +55,6 @@ def malformed_document_errors(what: str = "snapshot document") -> Iterator[None]
         raise
     except _SHAPE_ERRORS as exc:
         detail = f"missing key {exc}" if isinstance(exc, KeyError) else str(exc)
-        raise SnapshotError(
+        raise MalformedSnapshotError(
             f"malformed {what}: {type(exc).__name__}: {detail}"
         ) from exc

@@ -135,7 +135,6 @@ def parse_dwarf_metadata(so_path: Path) -> DwarfMetadata:
             return _parse(f, so_path)
     except Exception as exc:  # noqa: BLE001 - "never raises" includes MemoryError
         log.warning("parse_dwarf_metadata: failed to open/parse %s: %s", so_path, exc)
-        note_debug_info_read_failure(f"DWARF unreadable: {exc!r}")
         return DwarfMetadata()
 
 
@@ -154,19 +153,21 @@ def _parse(f: Any, so_path: Path) -> DwarfMetadata:
         return meta
 
     meta.has_dwarf = True
-    dwarf = open_indexed_dwarf_info(elf)
-
-    # Per-parse type-resolution cache: (cu_offset, die_offset) → (name, byte_size)
-    type_cache: dict[tuple[int, int], tuple[str, int | None]] = {}
-
-    for CU in dwarf.iter_CUs():  # type: ignore[no-untyped-call]
-        _sections.note_unit_past_section(CU, dwarf)
-        try:
-            _process_cu(CU, meta, type_cache)
-        except Exception as exc:  # noqa: BLE001
-            log.warning("parse_dwarf_metadata: skipping CU in %s: %s", so_path, exc)
-            note_debug_info_read_failure(f"CU at {CU.cu_offset} unreadable: {exc!r}")
-
+    try:  # past detection, a failure is recorded, never read as "no DWARF"
+        dwarf = open_indexed_dwarf_info(elf)
+        type_cache: dict[tuple[int, int], tuple[str, int | None]] = {}  # per parse
+        for CU in dwarf.iter_CUs():  # type: ignore[no-untyped-call]
+            _sections.note_unit_past_section(CU, dwarf)
+            try:
+                _process_cu(CU, meta, type_cache)
+            except Exception as exc:  # noqa: BLE001
+                log.warning("parse_dwarf_metadata: skipping CU in %s: %s", so_path, exc)
+                note_debug_info_read_failure(
+                    f"CU at {CU.cu_offset} unreadable: {exc!r}"
+                )
+    except Exception as exc:  # noqa: BLE001 - includes a MemoryError from a bad size
+        log.warning("parse_dwarf_metadata: DWARF unreadable in %s: %s", so_path, exc)
+        note_debug_info_read_failure(f"DWARF unreadable: {exc!r}")
     return meta
 
 

@@ -202,10 +202,9 @@ def _note_truncated_image(pe: Any) -> None:
                 f"PE section {name!r} ends at byte {end} of a {size}-byte file "
                 "(truncated image)"
             )
-    directories = getattr(pe.OPTIONAL_HEADER, "DATA_DIRECTORY", [])
-    if getattr(pe.OPTIONAL_HEADER, "Magic", None) not in (0x10B, 0x20B) or not (
-        directories
-    ):
+    optional = getattr(pe, "OPTIONAL_HEADER", None)
+    directories = getattr(optional, "DATA_DIRECTORY", [])
+    if getattr(optional, "Magic", None) not in (0x10B, 0x20B) or not directories:
         # No PE32/PE32+ optional header: the data directories (the export
         # directory among them) were never located.
         note_export_read_failure("PE optional header unreadable")

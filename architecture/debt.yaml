@@ -586,7 +586,7 @@
     },
     {
       "path": "abicheck/dwarf_snapshot.py",
-      "baseline_lines": 1687,
+      "baseline_lines": 1685,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1565,7 +1565,7 @@
     },
     {
       "path": "tests/test_platform_coverage_gaps.py",
-      "baseline_lines": 1281,
+      "baseline_lines": 1279,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",

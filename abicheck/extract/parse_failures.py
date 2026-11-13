@@ -123,5 +123,5 @@ def debug_info_read_required(binary: Any) -> Iterator[None]:
         raise SnapshotError(
             f"debug info of {binary} is present but could not be read: {reasons}"
             " (to compare its exported symbols without it, strip the debug"
-            " sections, e.g. `objcopy --strip-debug`)"
+            " sections with `strip -g`)"
         )
