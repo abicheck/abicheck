@@ -77,6 +77,9 @@ def test_only_a_known_member_status_is_reported_as_itself(status: object) -> Non
         'const char* p = "\\"}";',  # escaped quote before the brace
         'const char* p = "}}{";',
         "int n = 0;",  # control: no literal at all
+        'const char* p = R"({ " })";',  # raw string with an inner quote
+        'const char* p = R"d(\n }\n)d";',  # raw string across lines
+        "int n = 1'000; long m = 2'000'000;",  # digit separators are code
     ],
 )
 def test_a_brace_inside_a_literal_neither_opens_nor_closes_a_scope(member: str) -> None:
@@ -85,3 +88,19 @@ def test_a_brace_inside_a_literal_neither_opens_nor_closes_a_scope(member: str) 
     src = f"struct A {{\n  {member}\n#ifdef X\n  int x;\n#endif\n}};\n"
     fields = scan_conditional_fields(src)
     assert fields.get("A", {}).get("x", {}).get("guard") == "X", fields
+
+
+def test_digit_separators_keep_structural_braces_visible() -> None:
+    """``1'000`` is a number, not a char literal: the braces between two such
+    separators are real structure (CodeRabbit review). ``struct B`` opens on
+    the line ``A`` closes on, which this one-opener-per-line scanner does not
+    record, so the guarded field is left out (conservative) -- what must never
+    happen is ``x`` being misattributed to ``A``, which the base code did."""
+    from abicheck.header_conditionals import scan_conditional_fields
+
+    src = (
+        "struct A {\n  int a = 1'000; }; struct B { int b = 2'000;\n"
+        "#ifdef X\n  int x;\n#endif\n};\n"
+    )
+    fields = scan_conditional_fields(src)
+    assert "x" not in fields.get("A", {}), fields

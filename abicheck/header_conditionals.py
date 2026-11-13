@@ -312,7 +312,6 @@ def defines_from_compile_db(
 
 _COMMENT_BLOCK = re.compile(r"/\*.*?\*/", re.DOTALL)
 _COMMENT_LINE = re.compile(r"//[^\n]*")
-_LITERAL = re.compile(r"\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'")  # braces: text
 _RECORD_OPEN = re.compile(r"\b(struct|class|union)\s+([A-Za-z_]\w*)\b")
 # A ``namespace`` opener: a named (possibly ``a::b``) or anonymous namespace. Must
 # be anchored so ``using namespace std;`` is not mistaken for a scope opener.
@@ -755,16 +754,14 @@ def _close_scope(state: _ScanState) -> None:
 
 def _track_braces(state: _ScanState, line: str) -> None:
     """Advance ``brace_depth`` across *line*, opening/closing scopes as braces pass."""
-    for ch in _LITERAL.sub('""', line):
+    for ch in line:
         if ch == "{":
             if state.pending is not None:
                 _open_pending_scope(state, state.pending)
                 state.pending = None
             state.brace_depth += 1
         elif ch == ";" and state.pending is not None:
-            # A ``;`` before the pending ``{`` ends a split forward declaration
-            # (``struct S`` then ``;``): a later ``struct T { … }`` must open its
-            # own scope, not be keyed to ``S`` (Codex review #498).
+            # ``;`` before the pending ``{`` ends a split forward decl (Codex #498).
             state.pending = None
         elif ch == "}":
             state.brace_depth = max(0, state.brace_depth - 1)
@@ -789,10 +786,14 @@ def scan_conditional_fields(source: str) -> dict[str, dict[str, dict[str, object
     ``RecordType.name`` (Codex review #498). Best-effort and conservative — see
     the module docstring for what is deliberately not recorded.
     """
+    from .buildsource.pattern_facts_lexer import _blank_comments_and_strings
+
     src = _strip_comments(source)
-    lines = src.splitlines()
+    lines = src.split("\n")
+    # Braces count on a copy with comment/literal contents blanked (shared lexer).
+    code = _blank_comments_and_strings(src).split("\n")
     state = _ScanState(_include_guard_macro(lines))
-    for raw in lines:
+    for raw, code_line in zip(lines, code, strict=True):
         line = raw.strip()
         if not line:
             continue
@@ -810,7 +811,7 @@ def scan_conditional_fields(source: str) -> dict[str, dict[str, dict[str, object
             _capture_guarded_field(state, rec_here, line)
         if state.pending is None:
             state.pending = _detect_scope_opener(line)
-        _track_braces(state, line)
+        _track_braces(state, code_line)
     return {rec: fields for rec, fields in state.registry.items() if fields}
 
 
