@@ -37,12 +37,18 @@ from abicheck.storage.surface_graph_codec import decode_surface_graph
 from tests._corrupt_input_matrix import PE_SEED
 
 
-def _elf_with_debug(tmp_path: Path) -> Path:
+@pytest.fixture(scope="module")
+def _elf_seed(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """One gcc ``-g`` shared object for the whole module (gcc runs once).
+
+    Same capability rule as the parser fuzz seeds: no gcc, or a gcc that
+    does not emit ELF, skips; a configured gcc that fails is a failure."""
     if shutil.which("gcc") is None:
         pytest.skip("gcc is required to build the ELF object")
-    src = tmp_path / "lib.c"
+    build = tmp_path_factory.mktemp("elf-seed")
+    src = build / "lib.c"
     src.write_text("struct p { int x; };\nint get(struct p v) { return v.x; }\n")
-    out = tmp_path / "lib.so"
+    out = build / "lib.so"
     subprocess.run(
         ["gcc", "-shared", "-fPIC", "-g", "-o", str(out), str(src)],
         check=True,
@@ -53,16 +59,24 @@ def _elf_with_debug(tmp_path: Path) -> Path:
     return out
 
 
+@pytest.fixture
+def elf_with_debug(_elf_seed: Path, tmp_path: Path) -> Path:
+    """A private copy of the seed in this test's directory."""
+    out = tmp_path / "lib.so"
+    shutil.copyfile(_elf_seed, out)
+    return out
+
+
 @pytest.mark.parametrize("debug_format", (None, "dwarf"))
 @pytest.mark.parametrize(
     "detached", (b"", b"not an ELF file at all", b"\x7fELF\x02\x01\x01")
 )
 def test_an_unreadable_detached_debug_file_refuses_the_dump(
-    tmp_path: Path, debug_format: str | None, detached: bytes
+    tmp_path: Path, elf_with_debug: Path, debug_format: str | None, detached: bytes
 ) -> None:
     """Auto-detect and explicit ``dwarf``: a detached file that is empty, not
     ELF, or a cut ELF header is refused, never a symbols-only dump."""
-    so = _elf_with_debug(tmp_path)
+    so = elf_with_debug
     debug_file = tmp_path / "lib.so.debug"
     debug_file.write_bytes(detached)
     with (
@@ -72,10 +86,12 @@ def test_an_unreadable_detached_debug_file_refuses_the_dump(
         _resolve_debug_metadata(so, debug_format, dwarf_source=debug_file)
 
 
-def test_a_readable_detached_debug_file_is_read(tmp_path: Path) -> None:
+def test_a_readable_detached_debug_file_is_read(
+    tmp_path: Path, elf_with_debug: Path
+) -> None:
     """The control: a real detached debug file (here, an unstripped copy) reads
     its types and records nothing."""
-    so = _elf_with_debug(tmp_path)
+    so = elf_with_debug
     debug_file = tmp_path / "lib.so.debug"
     debug_file.write_bytes(so.read_bytes())
     with debug_info_read_required(so):
@@ -167,14 +183,18 @@ def _recorded_debug(fn: object) -> list[str]:
 )
 @pytest.mark.parametrize("error", (MemoryError(), ValueError("bad index")))
 def test_a_dwarf_indexer_failure_after_detection_is_recorded(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, module: str, error: Exception
+    tmp_path: Path,
+    elf_with_debug: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    module: str,
+    error: Exception,
 ) -> None:
     """Both readers locate ``.debug_info``, then the indexer raises (a
     ``MemoryError`` from a bogus decompressed size included): recorded, and
     the reader still never raises."""
     import importlib
 
-    so = _elf_with_debug(tmp_path)
+    so = elf_with_debug
     reader = importlib.import_module(module)
 
     def boom(_elf: object) -> object:
@@ -186,14 +206,14 @@ def test_a_dwarf_indexer_failure_after_detection_is_recorded(
 
 
 def test_a_unit_walk_failure_in_the_unified_reader_is_recorded(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, elf_with_debug: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """``iter_CUs()`` itself raising (a malformed unit header before any
     per-unit guard) is recorded and reads as a failed extraction."""
     from abicheck import dwarf_unified
     from abicheck.model.dwarf_facts import AdvancedExtractionStatus
 
-    so = _elf_with_debug(tmp_path)
+    so = elf_with_debug
 
     def boom(_session: object) -> object:
         raise ValueError("unit header past the section")
@@ -216,12 +236,13 @@ def _snapshot_builder_records(path: Path) -> list[str]:
 
 def test_the_snapshot_builder_records_corrupt_dwarf_on_its_own_open(
     tmp_path: Path,
+    elf_with_debug: Path,
 ) -> None:
     """The builder's open-it-here path (no shared session) records a corrupt
     abbreviation table like the metadata readers do."""
     from elftools.elf.elffile import ELFFile
 
-    so = _elf_with_debug(tmp_path)
+    so = elf_with_debug
     data = bytearray(so.read_bytes())
     with so.open("rb") as fh:
         abbrev = ELFFile(fh).get_section_by_name(".debug_abbrev")
@@ -300,7 +321,7 @@ def _sibling_rewritten(so: Path, target: str) -> bytes:
     "module", ("abicheck.dwarf_unified", "abicheck.dwarf_metadata")
 )
 def test_a_sibling_reference_that_does_not_advance_is_recorded_not_a_hang(
-    tmp_path: Path, module: str, target: str
+    tmp_path: Path, elf_with_debug: Path, module: str, target: str
 ) -> None:
     """A corrupt ``DW_AT_sibling`` aimed backwards or out of the unit made the
     child walk loop forever (the py3.15 CI lane hung on an abbreviation byte
@@ -310,7 +331,7 @@ def test_a_sibling_reference_that_does_not_advance_is_recorded_not_a_hang(
 
     from tests._parser_fuzz_oracle import call_with_budget
 
-    so = _elf_with_debug(tmp_path)
+    so = elf_with_debug
     corrupt = tmp_path / "corrupt.so"
     corrupt.write_bytes(_sibling_rewritten(so, target))
     reader = importlib.import_module(module)
