@@ -143,6 +143,21 @@ SCOPE_BUCKETS: tuple[ScopeBucket, ...] = (
         ("bundle_",),
     ),
     ScopeBucket(
+        "needs_source_graph",
+        False,
+        "needs the L5 source graph (call/reference edges from public entries), "
+        "though the catalog files it under symbols",
+        names=frozenset({"internal_symbol_required_by_public_api"}),
+    ),
+    ScopeBucket(
+        "no_extractor_fact",
+        False,
+        "no extractor records the fact the detector reads, so no edit of a real "
+        "library reaches it: every backend and DWARF flatten an anonymous "
+        "member into its parent's fields",
+        names=frozenset({"anon_field_changed"}),
+    ),
+    ScopeBucket(
         "build_mode_options",
         False,
         "a compile-mode switch read only from L3 compile commands "

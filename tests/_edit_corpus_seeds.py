@@ -421,6 +421,43 @@ _ELF_ROLES: dict[str, RoleText] = {
         "int g_al __attribute__((aligned(16))) = 5;",
     ),
     "elf.banner": ("extern const char banner[];", 'const char banner[] = "edit";'),
+    "elf.cref": (
+        "const int *cref(void);",
+        "static int s_cref = 8;\nconst int *cref(void) { return &s_cref; }",
+    ),
+    "elf.cpp": (
+        "const int **cpp(void);",
+        "static const int s_cpp = 9;\nstatic const int *s_cppp = &s_cpp;\n"
+        "const int **cpp(void) { return &s_cppp; }",
+    ),
+    "elf.ms": ("int msf(int a, int b);", "int msf(int a, int b) { return a * b + 1; }"),
+    "elf.attr": (
+        "int put(char *p);\nchar *dupc(char *s) __attribute__((returns_nonnull));",
+        "int put(char *p) { return p ? *p : 0; }\n"
+        "static char s_dupc[2];\nchar *dupc(char *s) { return s ? s : s_dupc; }",
+    ),
+    # Declared, not defined: the declaration names no export until one is added.
+    "elf.late": ("int late_f(int x);\nextern int g_late;", ""),
+    "elf.va": (
+        "int vlog(const char *fmt, void *ap);\nint vlog2(const char *fmt, va_list ap);",
+        "int vlog(const char *fmt, void *ap) { return fmt[0] + (ap != 0); }\n"
+        "int vlog2(const char *fmt, va_list ap) { return fmt[0] + va_arg(ap, int); }",
+    ),
+    "elf.ser": (
+        "enum widget_tag_id { WIDGET_A = 1, WIDGET_B = 2 };\n"
+        "int widget_tag(enum widget_tag_id t);",
+        "int widget_tag(enum widget_tag_id t) { return t == WIDGET_A ? 10 : 20; }",
+    ),
+    "elf.ren": (
+        "int r_init(void);\nint r_run(int n);",
+        "int r_init(void) { return 1; }\nint r_run(int n) { return n + 1; }",
+    ),
+    # A reserved-name exported table (glibc's `_IO_2_1_stdin_` shape).
+    "elf.itab": ("extern int _lib_table[4];", "int _lib_table[4] = {1, 2, 3, 4};"),
+    "elf.cread": (
+        "int cread(const int *p);",
+        "int cread(const int *p) { return *p + 2; }",
+    ),
     # Declarations an operator adds land here.
     "elf.extra": ("", ""),
 }
@@ -431,6 +468,7 @@ ELF_SEED = Seed(
     header_template=(
         "#ifndef EDIT_SEED_ELF_H",
         "#define EDIT_SEED_ELF_H",
+        "#include <stdarg.h>",
         _VIS_OPEN,
         "@@elf.const@@",
         "@@elf.union@@",
@@ -459,6 +497,16 @@ ELF_SEED = Seed(
         "@@elf.k@@",
         "@@elf.al@@",
         "@@elf.banner@@",
+        "@@elf.cref@@",
+        "@@elf.cpp@@",
+        "@@elf.cread@@",
+        "@@elf.ms@@",
+        "@@elf.attr@@",
+        "@@elf.late@@",
+        "@@elf.va@@",
+        "@@elf.ser@@",
+        "@@elf.ren@@",
+        "@@elf.itab@@",
         "@@elf.extra@@",
         _VIS_CLOSE,
         "#endif",
@@ -486,6 +534,16 @@ ELF_SEED = Seed(
         "@@elf.k@@",
         "@@elf.al@@",
         "@@elf.banner@@",
+        "@@elf.cref@@",
+        "@@elf.cpp@@",
+        "@@elf.cread@@",
+        "@@elf.ms@@",
+        "@@elf.attr@@",
+        "@@elf.late@@",
+        "@@elf.va@@",
+        "@@elf.ser@@",
+        "@@elf.ren@@",
+        "@@elf.itab@@",
         "@@elf.extra@@",
     ),
     roles=_ELF_ROLES,
@@ -757,6 +815,14 @@ _XCXX_ROLES: dict[str, RoleText] = {
         "int rp_use(RP* p) { return p->b; }",
     ),
     "x.helper": ("int enp_a(int a);", "int enp_a(int a) { return a; }"),
+    # A dynamic exception specification (before C++17) and an inline function.
+    "x.throws": (
+        "#if __cplusplus >= 201703L\n#define EDIT_THROWS(...)\n#else\n"
+        "#define EDIT_THROWS(...) throw(__VA_ARGS__)\n#endif\n"
+        "int thrower(int a) EDIT_THROWS(int);",
+        "int thrower(int a) EDIT_THROWS(int) { if (a < 0) throw 1; return a; }",
+    ),
+    "x.inl": ("inline int inl_add(int a, int b) { return a + b; }", ""),
     "x.extra": ("", ""),
 }
 
@@ -792,6 +858,8 @@ XCXX_SEED = Seed(
         "@@x.inspad@@",
         "@@x.rmpad@@",
         "@@x.helper@@",
+        "@@x.throws@@",
+        "@@x.inl@@",
         "@@x.extra@@",
         _VIS_CLOSE,
         "#endif",
@@ -822,6 +890,8 @@ XCXX_SEED = Seed(
         "@@x.inspad@@",
         "@@x.rmpad@@",
         "@@x.helper@@",
+        "@@x.throws@@",
+        "@@x.inl@@",
         "@@x.extra@@",
     ),
     roles=_XCXX_ROLES,

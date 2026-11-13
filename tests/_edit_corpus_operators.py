@@ -27,6 +27,7 @@ from tests._edit_corpus_expect import VERDICT_RANK, Rule
 from tests._edit_corpus_operators_cxx import CXX_OPERATORS
 from tests._edit_corpus_operators_elf import ELF_OPERATORS
 from tests._edit_corpus_operators_platform import PLATFORM_OPERATORS
+from tests._edit_corpus_operators_symbols import SYMBOL_OPERATORS
 from tests._edit_corpus_opkit import (
     _ALIGN,
     _ENUM_SIZE,
@@ -621,9 +622,10 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         "static_inline_helper_added",
         ("func.handle",),
         _static_inline_helper,
-        # A header-only function is new public API with no symbol: an
-        # addition, which a release reports, never a break.
-        "a new static inline helper exports no symbol; the header gains an API",
+        # The binary is unchanged; against the headers' public-header set
+        # (``abicheck dump -H``) the helper is a new source-level entry
+        # point, a compatible API addition.
+        "a new static inline helper exports no symbol; at most it adds to the API",
         verdict_min="NO_CHANGE",
         verdict_max="COMPATIBLE",
         min_evidence="headers",
@@ -951,6 +953,7 @@ OPERATORS: tuple[EditOp, ...] = (
     *ELF_OPERATORS,
     *PLATFORM_OPERATORS,
     *CXX_OPERATORS,
+    *SYMBOL_OPERATORS,
 )
 
 OP_BY_NAME: dict[str, EditOp] = {op.name: op for op in OPERATORS}

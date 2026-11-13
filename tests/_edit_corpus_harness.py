@@ -271,6 +271,15 @@ def build(
                 lang="c++" if is_cxx else "c",
                 compile=CompileContext(gcc_options=gcc_options),
             )
+    if headers:
+        # ``abicheck dump -H`` takes the headers it parses as the library's
+        # public-header set and classifies every declaration's origin against
+        # it (``finish_provenance``); the bare ``dumper.dump()`` leaves origin
+        # unknown, so a declared-but-unexported entry has no public-contract
+        # fact and its gained export reads as a plain addition. Mirror it.
+        from abicheck.workflows.snapshot_factory import finish_provenance
+
+        snap = finish_provenance(snap, headers, None)
     return Built(dir=out_dir, so=so, header=header, snapshot=snap)
 
 
