@@ -865,7 +865,7 @@ class TestCoveredChangeEnrichment:
     """ADR-057 D8: the ordinary flow, where the diff already has its own
     `FUNC_REMOVED` for the missing symbol so no overlay is created."""
 
-    def _run(self, tmp_path: Path, *, prior_evidence: bool = False):
+    def _run(self, tmp_path: Path, *, prior_evidence: bool = False, relevance=None):  # type: ignore[no-untyped-def]
         old = AbiSnapshot(
             library="libtrain.so.1",
             version="1.0",
@@ -885,6 +885,7 @@ class TestCoveredChangeEnrichment:
         removed = Change(ChangeKind.FUNC_REMOVED, _DISPATCHER, "removed")
         if prior_evidence:
             removed.reachability_proof_path = "already computed by another producer"
+        removed.contract_relevance = relevance
         diff = DiffResult(
             old_version="1.0",
             new_version="2.0",
@@ -911,6 +912,29 @@ class TestCoveredChangeEnrichment:
         assert removed.affected_public_roots == ["train"]
         assert removed.impact_proof_path is not None
         assert removed.impact_proof_path[-1]["id"] == symbol_node_id(_DISPATCHER)
+
+    def test_a_consumer_promotion_reaches_the_shared_finding(
+        self, tmp_path: Path
+    ) -> None:
+        """ADR-049 §4.3: a consumer that uses an out-of-contract finding
+        promotes it. The promotion lands on the shared finding the ledger
+        anchors and the full verdict reads (CodeRabbit on #2055), while the
+        consumer's proof path stays on the consumer's copy only."""
+        from abicheck.contract_relevance_types import (
+            EXPLICIT_SCOPE_REASON_CODE,
+            ContractRelevance,
+        )
+
+        result, copy = self._run(
+            tmp_path, relevance=ContractRelevance.PROVEN_OUT_OF_CONTRACT
+        )
+        (original,) = result.full_diff.changes
+        assert copy is not original
+        for change in (copy, original):
+            assert change.contract_relevance is ContractRelevance.IN_CONTRACT
+            assert change.contract_reason_code == EXPLICIT_SCOPE_REASON_CODE
+        assert copy.impact_proof_path is not None
+        assert original.impact_proof_path is None
 
     def test_the_wording_on_a_shared_finding_names_no_consumer(
         self, tmp_path: Path
