@@ -399,10 +399,10 @@ def test_the_block_is_stated_and_never_changes_the_decision(
         )
         assert _decision(report) == _decision(plain_doc), doc
         if route == "pair":
-            assert report["report_schema_version"] == REPORT_SCHEMA_VERSION == "7.4"
+            assert report["report_schema_version"] == REPORT_SCHEMA_VERSION == "7.5"
             validate_instance(report, load_compare_report_schema())
         else:
-            assert report["release_schema_version"] == RELEASE_SCHEMA_VERSION == "3.1"
+            assert report["release_schema_version"] == RELEASE_SCHEMA_VERSION == "3.2"
 
 
 @pytest.mark.parametrize("route", ["pair", "release"])

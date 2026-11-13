@@ -135,6 +135,9 @@ def build_comparison_scope_section(decision: ScopeDecision) -> dict[str, Any]:
         "no_comparison_completed_exit_contribution": (
             decision.no_comparison_completed_exit_contribution
         ),
+        # ADR-065 D8: 4 when a member is FAILED (an operational error, under
+        # any policy); 0 otherwise. Copied off the decision, like its siblings.
+        "failed_member_exit_contribution": decision.failed_member_exit_contribution,
         "selection": record.selection,
         "selection_reason": record.selection_reason,
         "old_inventory": record.old_inventory.to_dict(),

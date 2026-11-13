@@ -210,3 +210,91 @@ def test_no_baseline_set_run_outcome_names_a_failed_member(
     record = build_no_baseline_set_record(plan, list(audits))
     result = NoBaselineSetResult(plan=plan, audits=audits, record=record)
     assert _operational(result, evidence_contract=False).value == expected
+
+
+# ---------------------------------------------------------------------------
+# ADR-065 D8 on the report: the release's comparison_scope block carries the
+# same 0/4 the exit folds, so a JSON consumer sees why the exit is 4.
+# Drives the real `compare` fan-out over stored packages (libA identical on
+# both sides = NO_CHANGE; libB degraded on NEW = FAILED).
+# ---------------------------------------------------------------------------
+
+from schema_validation import validate_instance  # noqa: E402
+from test_release_scope_bundle import _lib  # noqa: E402
+from test_release_scope_completeness import (  # noqa: E402
+    _invoke_json,
+    _release_config,
+    _write_stored_package,
+)
+
+from abicheck.schemas import load_compare_report_schema  # noqa: E402
+
+
+def _release_pair(tmp_path: Path, *, degraded: bool) -> tuple[Path, Path]:
+    # Two members on both sides, so the run is a release (not a scalar pair).
+    shared = {
+        "libA.so": _lib("libA.so", exports=("a",)),
+        "libC.so": _lib("libC.so", exports=("c",)),
+    }
+    old, new = tmp_path / "old_pkg", tmp_path / "new_pkg"
+    _write_stored_package(old, shared)
+    if degraded:
+        extra = {"libB.so": _lib("libB.so", exports=("b",))}
+        _write_stored_package(
+            new, {**shared, **extra}, degraded={"libB.so": "dump failed: boom"}
+        )
+    else:
+        _write_stored_package(new, shared)
+    return old, new
+
+
+@pytest.mark.parametrize("policy", ["warn", "block"])
+def test_release_scope_block_reports_failed_member_contribution_4(
+    tmp_path: Path, policy: str
+) -> None:
+    old, new = _release_pair(tmp_path, degraded=True)
+    cfg = _release_config(tmp_path, on_incomplete_scope=policy)
+    code, doc = _invoke_json("compare", str(old), str(new), "--config", str(cfg))
+    assert code == 4
+    scope = doc["comparison_scope"]
+    assert scope["failed_member_exit_contribution"] == 4
+    assert (
+        scope["failed_member_exit_contribution"]
+        == (doc["exit"]["operational_error_contribution"])
+    )
+    verdicts = sorted(lib["verdict"] for lib in doc["libraries"])
+    assert verdicts == ["NO_CHANGE", "NO_CHANGE"]
+
+
+@pytest.mark.parametrize("policy", ["warn", "block"])
+def test_all_clean_release_reports_failed_member_contribution_0(
+    tmp_path: Path, policy: str
+) -> None:
+    old, new = _release_pair(tmp_path, degraded=False)
+    cfg = _release_config(tmp_path, on_incomplete_scope=policy)
+    code, doc = _invoke_json("compare", str(old), str(new), "--config", str(cfg))
+    assert code == 0
+    assert doc["comparison_scope"]["failed_member_exit_contribution"] == 0
+
+
+@pytest.mark.parametrize("degraded", [True, False])
+def test_failed_member_contribution_validates_against_schema(
+    tmp_path: Path, degraded: bool
+) -> None:
+    old, new = _release_pair(tmp_path, degraded=degraded)
+    cfg = _release_config(tmp_path, on_incomplete_scope="warn")
+    _, doc = _invoke_json("compare", str(old), str(new), "--config", str(cfg))
+    defs = load_compare_report_schema()["$defs"]
+    # Only $defs: the root schema's own `required` belongs to the whole report.
+    validate_instance(
+        doc["comparison_scope"],
+        {"$defs": defs, "$ref": "#/$defs/comparison_scope"},
+    )
+    expected = 4 if degraded else 0
+    assert doc["comparison_scope"]["failed_member_exit_contribution"] == expected
+
+
+def test_failed_member_contribution_is_optional_in_schema() -> None:
+    scope = load_compare_report_schema()["$defs"]["comparison_scope"]
+    assert scope["properties"]["failed_member_exit_contribution"]["enum"] == [0, 4]
+    assert "failed_member_exit_contribution" not in scope["required"]
