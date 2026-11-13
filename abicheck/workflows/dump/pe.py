@@ -58,19 +58,23 @@ def extract_pdb_debug_outcome(
     """:func:`extract_pdb_debug`, plus why a *located* PDB failed to parse.
 
     The third element is ``None`` when the PDB parsed or none was found (an
-    absent optional input is not collected, never failed), and the parse
-    error otherwise -- ADR-062 D15's whole-extractor failure of the
+    absent optional input is not collected, never failed), and the lookup or
+    parse error otherwise -- ADR-062 D15's whole-extractor failure of the
     ``debug`` section, which :func:`extract_pe` records instead of writing
     an empty present section.
     """
-    try:
-        from ...pdb_metadata import parse_pdb_debug_info
-        from ...pdb_utils import locate_pdb
+    from ...pdb_metadata import parse_pdb_debug_info
+    from ...pdb_utils import locate_pdb
 
+    try:
         pdb_file = locate_pdb(path, pdb_path_override=pdb_path, allow_network=False)
     except Exception as exc:  # noqa: BLE001
+        # `locate_pdb` answers "no PDB" with `None`; raising means the lookup
+        # itself failed, so whether a PDB exists is unknown. That is the same
+        # whole-extractor failure as a parse error (ADR-062 D15), not an
+        # absent optional input.
         _logger.warning("PDB lookup failed for %s: %s", path, exc)
-        return None, None, None
+        return None, None, f"pdb lookup: {path.name}: {exc}"
     if pdb_file is None:
         _logger.debug("No PDB file found for %s", path)
         return None, None, None

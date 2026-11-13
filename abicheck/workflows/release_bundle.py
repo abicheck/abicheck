@@ -13,7 +13,8 @@ translates into the same exit codes and messages: a bad ``--manifest`` file is
 a :class:`~abicheck.errors.ReleaseOperandContentError` (exit 1), an
 undecodable embedded manifest or an unwritable ``--bundle-facts-out`` a
 :class:`~abicheck.errors.ReleaseOperandUsageError`. Bundle *analysis* stays
-additive: its failures degrade to warnings through *notice*.
+additive: its failures are recorded in ``BundleDiffResult.analysis_errors``
+(and echoed through *notice*) while the per-library results stand.
 """
 
 from __future__ import annotations
@@ -132,11 +133,11 @@ def run_bundle_analysis(
     """Run bundle-level (ADR-023) analysis over a release's member results.
 
     Reuses the per-library :class:`DiffResult`\\ s the member fan-out already
-    computed -- no second per-pair compare. Returns ``None`` when there is
-    nothing to analyze or the bundle snapshot cannot be built (reported via
-    *notice* as a warning: bundle analysis is additive). A failure inside the
-    analysis itself is recorded in the result's ``analysis_errors`` (G38
-    Phase 11) and re-surfaced through *notice*.
+    computed -- no second per-pair compare. Returns ``None`` only when there
+    is nothing to analyze. A bundle snapshot that cannot be built, or a
+    failure inside the analysis itself, is recorded in the result's
+    ``analysis_errors`` (G38 Phase 11) and re-surfaced through *notice*: the
+    bundle axis reads as failed, never as absent.
 
     *old_snapshots*/*new_snapshots* (G38 Phase 4) are keyed by each member's
     bundle-canonical key (``_bundle_key`` on its entry) and feed the
@@ -174,9 +175,25 @@ def run_bundle_analysis(
             dict(new_map), resolved_evidence=new_snapshots
         )
     except Exception as exc:
-        # Additive degradation: the per-library report is still useful.
-        notice(f"Warning: bundle analysis skipped: {exc}")
-        return None
+        # ADR-063/064: a failed extractor is an explicit FAILED fact, never an
+        # absent axis. The per-library results stay (additive degradation),
+        # but the bundle axis is recorded as failed in `analysis_errors` --
+        # the same structured record a raising `compare_bundle` leaves -- so
+        # the report says "nothing was checked", not "nothing was found".
+        # The exit code is not raised: see known-gaps.md "A failed bundle
+        # snapshot build is reported but does not floor the exit code".
+        failed = BundleDiffResult(
+            old_root=old_root if old_root is not None else Path(),
+            new_root=new_root if new_root is not None else Path(),
+            per_library=list(per_lib_results),
+            policy=policy,
+            analysis_errors=[f"bundle snapshot could not be built: {exc}"],
+        )
+        if manifest_note is not None:
+            failed.analysis_errors.append(manifest_note)
+        for err in failed.analysis_errors:
+            notice(f"Warning: {err}")
+        return failed
 
     result = analyze_bundle(
         old_snap,

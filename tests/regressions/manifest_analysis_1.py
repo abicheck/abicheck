@@ -697,6 +697,11 @@ ANALYSIS_1_BUG_CLASSES: tuple[BugClass, ...] = (
             # rather than reading the parser's empty result as "exports nothing".
             "tests/test_export_read_verdict_callers.py",
             "tests/test_dynamic_table_loader_view.py",
+            # Audit at 509cb0d: a failed bundle snapshot build dropped the
+            # bundle axis (now a recorded `analysis_errors` fact), an
+            # unmapped verdict exited 0, a corrupt package manifest read as
+            # "no manifest", and a failed PDB lookup read as "no PDB".
+            "tests/test_fail_closed_error_paths.py",
             # A clang AST whose `inner` is a number, string, mapping or null
             # (or holds non-object children) read as "call graph ran, found
             # nothing": the readers treat a wrong-typed container as empty.

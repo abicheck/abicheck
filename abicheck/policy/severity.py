@@ -523,8 +523,18 @@ def legacy_exit_code(verdict: Verdict) -> int:
     non-severity-aware flows, so `compare` and `compare-release` cannot drift
     apart. Flow-specific floors (operational ERROR→4, removed-library→8) are
     applied by the caller on top of this base.
+
+    Total over `Verdict`: a verdict with no mapping raises `ValueError`
+    instead of defaulting to ``0``.
     """
-    return _LEGACY_VERDICT_EXIT_CODE.get(verdict, 0)
+    try:
+        return _LEGACY_VERDICT_EXIT_CODE[verdict]
+    except KeyError:
+        # Fail closed: an unmapped verdict (a new `Verdict` member, or a
+        # stray value) must never read as exit 0, a clean pass.
+        raise ValueError(
+            f"no legacy exit code is defined for verdict {verdict!r}"
+        ) from None
 
 
 def missing_contract_exit_code(config: SeverityConfig) -> int:
