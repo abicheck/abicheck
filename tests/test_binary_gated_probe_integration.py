@@ -140,6 +140,11 @@ PROBES: dict[str, Probe] = {
         "class S { public: int a; int get(); private: int b; };\nint use(S*);",
         "int S::get() { return b; }\nint use(S* s) { return s->a; }",
     ),
+    "base_class_access_narrowed": _inline(
+        "struct B { int k; };\nstruct S : public B { int d; };\nint use(S*);",
+        "struct B { int k; };\nstruct S : private B { int d; };\nint use(S*);",
+        "int use(S* s) { return s->d; }",
+    ),
     "field_became_const": _inline(
         "struct S { int a; int b; };\nint use(S*);",
         "struct S { const int a; int b; };\nint use(S*);",
