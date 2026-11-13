@@ -7,7 +7,7 @@ generated: false
 
 # Implicit state machines
 
-Status: Phases 1–4 done. Phase 5 not started.
+Status: Phases 1–4 done; Phase 5 partly done (see its table).
 
 ## Why
 
@@ -76,27 +76,19 @@ No change to the event set, so no ADR-067 amendment.
 
 ## Phase 5 — scanners, lifecycle flags, in-place mutation
 
-- One shared C/C++ comment/literal lexer for
-  `buildsource/pattern_facts_lexer.py` and `buildsource/macro_graph.py:566`
-  (the second lacks raw strings).
-- `header_conditionals.py:482`: count braces outside string/char literals;
-  clear `pending` at a new declaration, not only at `;`.
-- `extract/headers/concept_scan.py:85`: re-evaluate `#elif` after `#else`
-  inside an `#if 0` group.
-- Bracket-depth counters: one policy for unbalanced closers (clamp, and
-  record it) across the ~20 scanners listed in the sweep.
-- `deadline.py`: assert the registration-window depth never goes negative.
-- `demangle.py:59–93`: one backend-availability enum instead of three
-  independent latches; set under a lock.
-- `process_resources.py:550`: reject `submit()` after the grant is released.
-- `extract/headers/clang/locations.py:79`: check document order.
-- `consumer_impact.py:494`, `depth_projection.py:465/665`: return new values
-  instead of mutating shared `Change`/snapshot objects.
-- `checker_types.py:51`: a result read before its verdict is computed is an
-  error, not `NO_CHANGE`.
-- `workflows/release_assurance_members.py`: validate a stored member
-  assurance status against `ASSURANCE_STATUS_ORDER` so an unknown one is
-  reported as such, not shown verbatim (already ranked worst).
+| Item | Status |
+|---|---|
+| `extract/headers/concept_scan.py`: `#elif 0` after `#if 0` is read as live code | open: the scan's result is a stored snapshot fact, so the fix needs an `EXTRACTOR_GENERATION` bump (frozen corpus, spelling row, fixture regeneration) in its own PR |
+| `header_conditionals.py`: braces inside string/char literals opened/closed scopes | **done** (literals blanked before brace tracking) |
+| `deadline.py`: an unbalanced registration-window exit drove the depth negative, so a deferred SIGTERM was never replayed | **done** (raises at the unbalanced exit) |
+| `process_resources.BudgetedExecutor`: accepted work after shutdown when it ran inline (the thread pool already rejected it) | **done** |
+| `workflows/release_assurance_members.py`: an unknown member assurance status was shown verbatim | **done** (reported as `unknown` with the original value in its notes; ranked worst as before) |
+| `demangle.py` availability latches | **dismissed**: the flags never gate the `import cxxfilt` attempt, so a backend is retried every call; "missing" and "broken" come from distinct exception kinds of the same import |
+| One shared C/C++ lexer for `pattern_facts_lexer.py` and `macro_graph.py:566` | open: `macro_graph` needs per-line "starts inside a block comment" state the shared lexer does not expose; raw strings are still unmodelled there |
+| Bracket-depth counters (~20 scanners): one policy for an unbalanced closer | open |
+| `extract/headers/clang/locations.py:79`: check document order | open |
+| `consumer_impact.py:494`, `depth_projection.py:465/665`: return new values instead of mutating shared objects | open |
+| `checker_types.py:51`: a result read before its verdict is computed reads `NO_CHANGE` | open (public dataclass default; needs its own change) |
 
 ## Dismissed
 
