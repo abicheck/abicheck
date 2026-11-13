@@ -204,10 +204,17 @@ def _note_truncated_image(pe: Any) -> None:
             )
     optional = getattr(pe, "OPTIONAL_HEADER", None)
     directories = getattr(optional, "DATA_DIRECTORY", [])
-    if getattr(optional, "Magic", None) not in (0x10B, 0x20B) or not directories:
+    if getattr(optional, "Magic", None) not in (0x10B, 0x20B):
         # No PE32/PE32+ optional header: the data directories (the export
         # directory among them) were never located.
         note_export_read_failure("PE optional header unreadable")
+        return
+    if not directories:
+        # A header may declare zero data directories (NumberOfRvaAndSizes):
+        # no export directory, not a lost one. A positive count read as none
+        # is a cut header.
+        if getattr(optional, "NumberOfRvaAndSizes", 0):
+            note_export_read_failure("PE data directories declared but unreadable")
         return
     entry = directories[0]
     if entry is None or not entry.VirtualAddress:

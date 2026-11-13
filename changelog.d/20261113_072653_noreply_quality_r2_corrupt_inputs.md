@@ -8,7 +8,8 @@
   unit) used to be read as a smaller surface: two identically damaged copies
   compared `NO_CHANGE` (exit 0), and a damaged OLD side read its lost types
   as added (`COMPATIBLE`, exit 0). `dump` and `compare` now refuse such an
-  input with exit 1 and say why; a directory compare reports the member as
+  input with exit 1 and say why (a detached `--debug-root` file that
+  cannot be opened is refused the same way); a directory compare reports the member as
   `ERROR` (exit 4) without an "unexpected failure" traceback. Present but
   unreadable DWARF refuses the whole dump rather than comparing a partial
   type set; to compare the exported symbols alone, strip the debug sections
