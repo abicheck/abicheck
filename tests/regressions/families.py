@@ -205,6 +205,7 @@ FAMILIES: dict[str, Family] = {
                 "tests/test_str_enum_serialized_token.py",
                 "tests/test_ast_memo_slot_thread_context.py",
                 "tests/test_snapshot_byte_reproducibility.py",
+                "tests/test_demangle_host_locale_independence.py",
             ),
         ),
         Family(
@@ -376,6 +377,7 @@ FAMILIES: dict[str, Family] = {
             harness_tests=(
                 "tests/test_action_run_sh_injection.py",
                 "tests/test_action_delta_base_build.py",
+                "tests/test_action_run_sh_file_fingerprint.py",
             ),
         ),
         Family(
@@ -626,6 +628,8 @@ _F9 = (
     # Stored bytes followed hash-seed-dependent producer insertion order.
     "serialization.stored_bytes_depend_on_producer_iteration_order",
     "concurrency.per_thread_state_in_inherited_context",
+    # Subprocess text followed the host locale (cp1252 on Windows < 3.15).
+    "tooling.child_process_text_in_the_host_locale",
 )
 _F10 = (
     "concurrency.abandoned_child_outlives_failed_owner",
@@ -737,6 +741,8 @@ for _key, _ids in (
         (
             "trust_boundary.shell_workflow_injection",
             "action.supplied_code_runs_before_the_gate",
+            # A stale report at a destination read as this run's result.
+            "tooling.host_tool_output_trusted_by_its_shape",
         ),
     ),
     ("OTHER", tuple(OTHER_REASONS)),

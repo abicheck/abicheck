@@ -21,7 +21,9 @@ helper's own output format): two states of a file fingerprint equal exactly
 when their ``(st_mtime_ns, st_size)`` are equal, a missing path answers "",
 and that holds whichever implementation answers -- the native ``stat`` fast
 path or the ``os.stat`` fallback used when ``stat`` cannot report
-nanoseconds.
+nanoseconds *exactly*. A stat whose output has the right shape but loses
+digits (uutils' ``stat`` on Ubuntu 26.04 prints ``.123456700`` for a
+``.123456789`` mtime) must be detected and bypassed, never trusted.
 """
 
 from __future__ import annotations
@@ -41,9 +43,11 @@ pytestmark = pytest.mark.skipif(os.name == "nt", reason="needs a POSIX shell")
 
 
 def _helper() -> str:
+    """The probe, the fingerprint helper, and run.sh's own top-level probe call."""
     text = RUN_SH.read_text(encoding="utf-8")
-    start = text.index("_file_fingerprint() {")
-    return text[start : text.index("\n}\n", start) + 3]
+    start = text.index("_file_fingerprint_select() {")
+    call = "\n_file_fingerprint_select\n"
+    return text[start : text.index(call, start) + len(call)]
 
 
 def _fingerprints(
@@ -88,6 +92,21 @@ def _fingerprints(
     return lines
 
 
+def _lossy_stat(fraction_expr: str) -> str:
+    """A ``stat`` stub printing ``<s>.<9 digits>:<size>`` with a lossy fraction.
+
+    *fraction_expr* computes the printed nanoseconds from ``s, f =
+    divmod(st_mtime_ns, 10**9)`` and ``st``; the path is the last argument in
+    both the GNU (``-c FMT -- PATH``) and BSD (``-f FMT PATH``) spellings.
+    """
+    program = (
+        "import os, sys; st = os.stat(sys.argv[-1]); "
+        "s, f = divmod(st.st_mtime_ns, 10**9); "
+        f"print(f'{{s}}.{{min(max({fraction_expr}, 0), 10**9 - 1):09d}}:{{st.st_size}}')"
+    )
+    return f'exec {shlex.quote(sys.executable)} -c {shlex.quote(program)} "$@"'
+
+
 # Independently chosen (mtime_ns, size) states, including the one the
 # fingerprint exists to catch: a rewrite inside the same second, same size.
 _BASE_NS = 1_790_000_000_123_456_789
@@ -107,8 +126,20 @@ _STATES = [
         'echo "%.9Y:%s"',  # a stat that echoes the format literally
         'echo "1790000000:10"',  # a stat without sub-second precision
         "exit 1",  # no usable stat at all
+        # Right shape, wrong digits: the two ways a real stat has lost
+        # nanoseconds. Both answer for the GNU and the BSD spelling, so the
+        # probe -- not a failed format -- has to be what rejects them.
+        _lossy_stat("f // 100 * 100"),  # truncated to 100ns (uutils)
+        _lossy_stat("round((st.st_mtime_ns / 1e9 - s) * 1e9)"),  # via a double
     ],
-    ids=["native", "literal-format", "whole-seconds", "failing"],
+    ids=[
+        "native",
+        "literal-format",
+        "whole-seconds",
+        "failing",
+        "truncated-100ns",
+        "float64",
+    ],
 )
 def test_fingerprints_are_equal_exactly_when_stat_says_so(
     tmp_path: Path, fake_stat: str | None
