@@ -263,15 +263,18 @@ def _stable_leading_template_args(old_args: str, new_args: str) -> bool:
     args supplied by the user must remain identical between old and
     new substituted forms.
 
-    Single-arg templates are accepted as a degenerate case (no leading
-    args to compare; the only arg IS the trailing position).
+    A single-argument template is rejected: with no leading argument kept,
+    nothing distinguishes a changed default from an explicit change of the
+    one argument (a renamed tag type, ``kfam<ktag_a>`` -> ``kfam<ktag_b>``).
+    A real single-parameter default change is reported from header evidence
+    by ``TEMPLATE_PARAM_DEFAULT_CHANGED`` instead.
 
     >>> _stable_leading_template_args("float, A", "float, B")
     True
     >>> _stable_leading_template_args("float, A", "double, B")
     False
-    >>> _stable_leading_template_args("A", "B")  # 1-arg degenerate case
-    True
+    >>> _stable_leading_template_args("A", "B")  # one argument: undecidable
+    False
     """
     # An empty argument list has nothing to compare. Checked up front, not left
     # to the splitter, which yields one empty part for "" (the legacy splitter
@@ -280,9 +283,6 @@ def _stable_leading_template_args(old_args: str, new_args: str) -> bool:
         return False
     old_list = [p.strip() for p in _split_top_level_commas(old_args)]
     new_list = [p.strip() for p in _split_top_level_commas(new_args)]
-    # Degenerate single-arg template: nothing leading to compare.
-    if len(old_list) == 1 and len(new_list) == 1:
-        return True
     # Same length, identical leading prefix of size >= 1.
     if len(old_list) != len(new_list):
         return False
@@ -390,7 +390,13 @@ def detect_default_template_arg_changed(
     added_by_entity: dict[str, list[Function]] = defaultdict(list)
     old_name_of = qualified_name_lookup(old)
     new_name_of = qualified_name_lookup(new)
+    old_mangled = {f.mangled for f in old_funcs}
     for fn in new_funcs:
+        # Only a newly added instantiation can be the re-mangled form of a
+        # removed one; a sibling that existed before (ktwice<int> beside a
+        # dropped ktwice<double>) proves nothing about a default.
+        if fn.mangled in old_mangled:
+            continue
         qname = new_name_of(fn)
         added_by_entity[_callable_stem(qname)].append(fn)
     findings: list[Change] = []
