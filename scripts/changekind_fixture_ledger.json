@@ -2,11 +2,12 @@
   "_comment": "Real-fixture backing per ChangeKind: catalog expected_kinds and the edit corpus verified_floor. A kind listed under `backed` may not lose every source (tests/test_changekind_real_coverage.py). Regenerate with `python scripts/changekind_real_coverage.py --write-fixture-ledger`.",
   "summary": {
     "total_kinds": 431,
-    "backed": 281,
-    "unbacked": 150
+    "backed": 285,
+    "unbacked": 146
   },
   "backed": {
     "abi_equivalent_type_changed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "abi_relevant_build_flag_changed": [
@@ -14,39 +15,49 @@
       "edit_corpus:pr"
     ],
     "abi_surface_explosion": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "abi_tag_changed": [
       "catalog:case113_abi_tag_changed",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "allocator_replacement_added": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "allocator_replacement_removed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "atomic_qualifier_changed": [
       "catalog:case116_atomic_qualifier_changed",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "base_class_access_narrowed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "base_class_offset_changed": [
       "catalog:case140_empty_base_optimization_lost",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "base_class_position_changed": [
       "catalog:case60_base_class_position_changed",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "base_class_virtual_changed": [
       "catalog:case167_base_became_virtual",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "bit_int_width_changed": [
-      "catalog:case115_bit_int_width_changed"
+      "catalog:case115_bit_int_width_changed",
+      "edit_corpus:nightly"
     ],
     "bundle_intra_dep_removed": [
       "catalog:case90_bundle_intra_dep_removed"
@@ -68,13 +79,16 @@
       "catalog:case212_calling_convention_macro_undefined_after_use",
       "catalog:case213_calling_convention_function_like_macro_changed",
       "catalog:case64_calling_convention_changed",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "cet_protection_improved": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "cet_protection_weakened": [
       "catalog:case179_cet_protection_weakened",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "char8t_migration": [
@@ -82,38 +96,48 @@
     ],
     "char_signedness_changed": [
       "catalog:case155_char_signedness_flip",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "concept_tightened": [
       "catalog:case105_concept_tightening",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "constant_added": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "constant_changed": [
       "catalog:case124_header_constant_value_changed",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "constant_removed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "cpo_kind_changed": [
       "catalog:case88_cpo_kind_changed",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "cpu_dispatch_isa_dropped": [
       "catalog:case83_cpu_dispatch_isa_dropped",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "ctor_explicit_added": [
       "catalog:case106_ctor_became_explicit",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "ctor_explicit_removed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "ctor_overload_ambiguity_risk": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "declaration_identity_reconciled_unresolved": [
@@ -127,52 +151,66 @@
       "catalog:case87_default_template_arg_changed"
     ],
     "dt_relr_introduced": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "dt_relr_removed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "dwarf_info_missing": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "dynamic_loading_flags_changed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "elf_init_fini_changed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "enum_became_scoped": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "enum_deprecated_added": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "enum_deprecated_removed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "enum_last_member_value_changed": [
       "catalog:case41_type_changes",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "enum_lost_scoped": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "enum_member_added": [
       "catalog:case25_enum_member_added",
       "catalog:case41_type_changes",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "enum_member_removed": [
       "catalog:case19_enum_member_removed",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "enum_member_renamed": [
       "catalog:case31_enum_rename",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "enum_member_value_changed": [
       "catalog:case08_enum_value_change",
       "catalog:case20_enum_member_value_changed",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "enum_size_flag_changed": [
@@ -180,6 +218,7 @@
     ],
     "enum_underlying_size_changed": [
       "catalog:case57_enum_underlying_size_changed",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "exceptions_mode_changed": [
@@ -187,19 +226,23 @@
       "edit_corpus:pr"
     ],
     "executable_stack": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "executable_stack_removed": [
       "catalog:case136_executable_stack_removed",
       "catalog:case49_executable_stack",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "experimental_graduated": [
       "catalog:case99_experimental_graduated",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "experimental_removed_without_replacement": [
       "catalog:case100_experimental_removed_without_replacement",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "exported_not_public": [
@@ -207,59 +250,75 @@
       "catalog:case150_xcheck_export_public_pair"
     ],
     "exported_object_alignment_reduced": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "exported_symbol_source_owner_changed": [
       "catalog:case162_symbol_source_owner_changed"
     ],
     "field_access_changed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "field_became_const": [
       "catalog:case30_field_qualifiers",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "field_became_mutable": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "field_became_volatile": [
       "catalog:case30_field_qualifiers",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "field_bitfield_changed": [
       "catalog:case63_bitfield_changed",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "field_default_initializer_changed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "field_default_initializer_removed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "field_deprecated_added": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "field_deprecated_removed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "field_lost_const": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "field_lost_mutable": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "field_lost_volatile": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "field_renamed": [
       "catalog:case35_field_rename",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "flexible_array_member_changed": [
       "catalog:case70_flexible_array_member_changed",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "fortify_source_weakened": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "func_added": [
@@ -272,57 +331,78 @@
       "catalog:case53_namespace_pollution",
       "catalog:case62_type_field_added_compatible",
       "catalog:case99_experimental_graduated",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "func_added_elf_only": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "func_became_inline": [
       "edit_corpus:pr"
     ],
     "func_contract_attribute_added": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "func_contract_attribute_removed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "func_cv_changed": [
       "catalog:case22_method_const_changed",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "func_deleted": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
+    ],
+    "func_deleted_dwarf": [
+      "edit_corpus:nightly"
     ],
     "func_deprecated_added": [
       "catalog:case205_public_function_marked_deprecated",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "func_deprecated_removed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "func_export_added": [
       "catalog:case16_inline_to_non_inline",
       "catalog:case47_inline_to_outlined",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "func_language_linkage_changed": [
       "catalog:case66_language_linkage_changed",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
+    "func_likely_renamed": [
+      "edit_corpus:nightly"
+    ],
     "func_lost_inline": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "func_noexcept_added": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "func_noexcept_removed": [
       "catalog:case15_noexcept_change",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "func_override_specifier_added": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "func_override_specifier_removed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "func_params_changed": [
@@ -331,10 +411,12 @@
       "catalog:case199_public_function_parameter_added",
       "catalog:case201_public_function_parameters_reordered",
       "catalog:case46_pointer_chain_type_change",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "func_ref_qual_changed": [
       "catalog:case166_ref_qualifier_added",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "func_removed": [
@@ -353,6 +435,7 @@
       "catalog:case53_namespace_pollution",
       "catalog:case78_task_arena_attach_tag",
       "catalog:case85_internal_template_signature_changed",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "func_removed_elf_only": [
@@ -360,7 +443,8 @@
       "catalog:case217_export_loss_weak_binding_demoted",
       "catalog:case218_export_loss_strong_binding_stays_breaking",
       "catalog:case86_tag_struct_renamed",
-      "catalog:case97_api_depends_on_consumer_env"
+      "catalog:case97_api_depends_on_consumer_env",
+      "edit_corpus:nightly"
     ],
     "func_return_changed": [
       "catalog:case102_frozen_runtime_signature_changed",
@@ -368,27 +452,34 @@
       "catalog:case46_pointer_chain_type_change",
       "catalog:case70_flexible_array_member_changed",
       "catalog:case72_covariant_return_changed",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "func_return_pointee_qualifier_added": [
       "catalog:case211_return_pointee_gained_const",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "func_return_pointee_qualifier_changed": [
       "catalog:case215_return_double_pointer_lost_const",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "func_return_pointee_qualifier_removed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "func_static_changed": [
       "catalog:case21_method_became_static",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "func_variadic_added": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "func_variadic_removed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "func_virtual_added": [
@@ -396,35 +487,44 @@
     ],
     "func_virtual_became_pure": [
       "catalog:case23_pure_virtual_added",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "func_virtual_noexcept_added": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "func_virtual_removed": [
       "catalog:case168_virtual_method_devirtualized",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "func_visibility_changed": [
       "catalog:case06_visibility",
       "catalog:case59_func_became_inline",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "func_visibility_protected_changed": [
       "catalog:case51_protected_visibility",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "glibcxx_dual_abi_changed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "glibcxx_dual_abi_flip_detected": [
       "catalog:case104_glibcxx_dual_abi_flip",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "handle_type_changed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "hash_style_removed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "header_build_context_mismatch": [
@@ -434,27 +534,34 @@
       "catalog:case122_template_signature_uninstantiated"
     ],
     "hidden_friend_added": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "hidden_friend_removed": [
       "catalog:case96_hidden_friend_removed",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "ifunc_introduced": [
       "catalog:case29_ifunc_transition",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "ifunc_removed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "imported_symbol_added": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "imported_symbol_removed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "inline_body_references_renamed_member": [
       "catalog:case89_inline_accessor_renamed_pimpl_member",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "inline_function_removed": [
@@ -463,18 +570,22 @@
     ],
     "inline_namespace_moved": [
       "catalog:case71_inline_namespace_moved",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "inline_namespace_version_bumped": [
       "catalog:case101_inline_namespace_version_bumped",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "instantiation_missing_from_binary": [
       "catalog:case79_missing_template_instantiation",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "integer_model_changed": [
       "catalog:case112_lp64_ilp64",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "internal_symbol_required_by_public_api": [
@@ -498,6 +609,7 @@
     ],
     "long_double_abi_changed": [
       "catalog:case177_long_double_abi_changed",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "lto_mode_changed": [
@@ -505,30 +617,37 @@
       "edit_corpus:pr"
     ],
     "mandatory_template_param_added": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "method_access_changed": [
       "catalog:case34_access_level",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "needed_added": [
       "catalog:case138_needed_added",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "needed_order_changed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "needed_removed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "odr_type_variant": [
       "catalog:case149_xcheck_odr_variant"
     ],
     "opaque_invariant_broken": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "overload_added": [
       "catalog:case169_overload_added",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "overload_ambiguity_introduced": [
@@ -536,46 +655,58 @@
       "edit_corpus:pr"
     ],
     "overload_set_rerouted": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "param_became_va_list": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "param_default_value_changed": [
       "catalog:case32_param_defaults",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "param_default_value_removed": [
       "catalog:case123_default_argument_removed",
       "catalog:case32_param_defaults",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "param_lost_va_list": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "param_pointee_qualifier_added": [
       "catalog:case186_c_api_pointee_const_abi_neutral",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "param_pointee_qualifier_changed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "param_pointer_level_changed": [
       "catalog:case33_pointer_level",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "param_renamed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "param_restrict_added": [
       "catalog:case207_pointer_parameter_gained_restrict",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "param_restrict_changed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "polymorphic_type_non_virtual_dtor": [
       "catalog:case165_polymorphic_nonvirtual_dtor",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "private_header_leak": [
@@ -584,6 +715,7 @@
       "catalog:case151_xcheck_provider_matrix"
     ],
     "protected_visibility_changed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "public_api_exposes_stl_by_value": [
@@ -613,6 +745,7 @@
     ],
     "public_not_exported": [
       "catalog:case150_xcheck_export_public_pair",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "public_to_internal_dependency": [
@@ -629,24 +762,30 @@
     ],
     "relro_weakened": [
       "catalog:case134_relro_weakened",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "removed_const_overload": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "return_pointer_level_changed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "rpath_changed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "rpath_type_changed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "rtti_for_internal_type": [
       "catalog:case146_audit_rtti_for_internal"
     ],
     "rtti_inheritance_changed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "rtti_mode_changed": [
@@ -656,6 +795,7 @@
     "runpath_changed": [
       "catalog:case137_runpath_changed",
       "catalog:case52_rpath_leak",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "runtime_floor_raised": [
@@ -666,28 +806,35 @@
     ],
     "secondary_vtable_group_changed": [
       "catalog:case174_secondary_vtable_group_changed",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "serialization_tag_changed": [
       "catalog:case81_serialization_tag_reassigned",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "soname_bump_unnecessary": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "soname_changed": [
       "catalog:case50_soname_inconsistent",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "soname_missing": [
       "catalog:case05_soname",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "source_level_kind_changed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "stack_canary_removed": [
       "catalog:case135_stack_canary_removed",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "standard_layout_lost": [
@@ -695,19 +842,23 @@
     ],
     "static_tls_introduced": [
       "catalog:case171_static_tls_introduced",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "static_tls_removed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "stdlib_debug_mode_changed": [
       "edit_corpus:pr"
     ],
     "struct_field_type_changed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "struct_packing_changed": [
       "catalog:case56_struct_packing_changed",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "struct_packing_mode_changed": [
@@ -716,6 +867,7 @@
     ],
     "struct_return_convention_changed": [
       "catalog:case129_struct_return_convention",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "struct_size_changed": [
@@ -725,73 +877,92 @@
       "catalog:case82_sycl_overload_set_removed"
     ],
     "symbol_binding_became_unique": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "symbol_binding_changed": [
       "catalog:case27_symbol_binding_weakened",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "symbol_binding_lost_unique": [
       "catalog:case180_symbol_binding_lost_unique",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "symbol_binding_strengthened": [
       "catalog:case128_symbol_binding_strengthened",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "symbol_elf_visibility_changed": [
       "catalog:case51_protected_visibility"
     ],
     "symbol_leaked_from_dependency_changed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "symbol_moved_version_node": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "symbol_renamed_batch": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "symbol_size_changed": [
       "catalog:case127_data_object_size_changed",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "symbol_size_changed_const_object": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "symbol_size_changed_internal": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "symbol_type_changed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "symbol_version_alias_changed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "symbol_version_defined_added": [
       "catalog:case13_symbol_versioning",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "symbol_version_node_removed": [
       "catalog:case139_symbol_version_node_removed",
       "catalog:case183_internal_version_node_churn",
       "catalog:case65_symbol_version_removed",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "symbol_version_required_added": [
       "catalog:case170_env_runtime_floor_raised",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "symbol_version_required_added_compat": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "symbol_version_required_removed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "symbolic_binding_mode_changed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "tag_type_renamed": [
       "catalog:case86_tag_struct_renamed",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "tail_padding_reuse_changed": [
@@ -801,6 +972,7 @@
       "catalog:case161_target_dependency_added"
     ],
     "target_isa_changed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "template_param_default_changed": [
@@ -808,18 +980,23 @@
       "catalog:case225_header_only_template_default_removed",
       "catalog:case227_nested_namespace_template_default_changed",
       "catalog:case228_nontype_template_param_default_changed",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "template_param_type_changed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "template_return_type_changed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "text_relocation_introduced": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "text_relocation_removed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "threadsafe_statics_mode_changed": [
@@ -832,43 +1009,54 @@
     ],
     "tls_var_size_changed": [
       "catalog:case67_tls_var_size_changed",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "toolchain_flag_drift": [
       "catalog:case103_toolchain_flag_drift",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "trivially_copyable_lost": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "type_added": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "type_alignment_changed": [
       "catalog:case42_type_alignment_changed",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "type_base_changed": [
       "catalog:case188_public_class_private_base_class",
       "catalog:case37_base_class",
       "catalog:case72_covariant_return_changed",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "type_became_abstract": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "type_became_final": [
       "catalog:case125_class_became_final",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "type_became_opaque": [
       "catalog:case28_typedef_opaque",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "type_deprecated_added": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "type_deprecated_removed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "type_field_added": [
@@ -877,6 +1065,7 @@
     ],
     "type_field_added_compatible": [
       "catalog:case94_empty_tag_gained_state",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "type_field_offset_changed": [
@@ -886,25 +1075,31 @@
       "catalog:case203_class_gained_vtable_pointer",
       "catalog:case43_base_class_member_added",
       "catalog:case77_detail_templated_base_changed",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "type_field_removed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "type_field_type_changed": [
       "catalog:case187_public_struct_private_field_type",
       "catalog:case45_multi_dim_array_change",
       "catalog:case80_pimpl_shared_to_unique",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "type_kind_changed": [
       "catalog:case55_type_kind_changed",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "type_lost_abstract": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "type_lost_final": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "type_removed": [
@@ -913,6 +1108,7 @@
       "catalog:case109_flow_graph_policy_renames",
       "catalog:case41_type_changes",
       "catalog:case78_task_arena_attach_tag",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "type_size_changed": [
@@ -935,40 +1131,49 @@
       "catalog:case77_detail_templated_base_changed",
       "catalog:case80_pimpl_shared_to_unique",
       "catalog:case94_empty_tag_gained_state",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "type_vtable_changed": [
       "catalog:case09_cpp_vtable",
       "catalog:case38_virtual_methods",
       "catalog:case72_covariant_return_changed",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "typedef_base_changed": [
       "catalog:case73_typedef_underlying_changed",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "typedef_removed": [
       "catalog:case109_flow_graph_policy_renames",
       "catalog:case95_allocator_nested_typedef_removed",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "typedef_version_sentinel": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "union_field_added": [
       "catalog:case26_union_field_added",
       "catalog:case26b_union_field_added_compatible",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "union_field_removed": [
       "catalog:case24_union_field_removed",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "union_field_type_changed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "unnamed_type_in_public_abi": [
       "catalog:case178_unnamed_type_in_public_abi",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "unversioned_exported_symbol": [
@@ -976,6 +1181,7 @@
     ],
     "used_reserved_field": [
       "catalog:case54_used_reserved_field",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "value_abi_trait_changed": [
@@ -983,93 +1189,125 @@
       "edit_corpus:pr"
     ],
     "var_access_changed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "var_access_widened": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "var_added": [
       "catalog:case61_var_added",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "var_added_elf_only": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "var_alignment_changed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "var_became_const": [
       "catalog:case39_var_const",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "var_deprecated_added": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "var_deprecated_removed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "var_export_added": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "var_lost_const": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "var_removed": [
       "catalog:case58_var_removed",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
+    ],
+    "var_removed_elf_only": [
+      "edit_corpus:nightly"
     ],
     "var_type_changed": [
       "catalog:case11_global_var_type",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "var_value_changed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "var_visibility_changed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "version_script_missing": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "versioned_symbol_scheme_detected": [
       "catalog:case141_versioned_symbol_scheme",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "virtual_base_offset_changed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
+    ],
+    "visibility_leak": [
+      "edit_corpus:nightly"
     ],
     "vptr_introduced": [
       "catalog:case203_class_gained_vtable_pointer",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "vtable_slot_count_changed": [
       "catalog:case142_vtable_slot_count_binary_only",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "vtable_symbol_identity_changed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "vtable_thunk_offset_changed": [
       "catalog:case172_vtable_thunk_offset_changed",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "vtable_thunk_set_changed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "vtt_slot_count_changed": [
       "catalog:case173_vtt_slot_count_changed",
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "wchar_model_changed": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "whole_program_vtables_mode_changed": [
       "edit_corpus:pr"
     ],
     "writable_executable_segment": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
     "x86_isa_baseline_raised": [
+      "edit_corpus:nightly",
       "edit_corpus:pr"
     ]
   },
@@ -1111,10 +1349,8 @@
     "elf_osabi_changed",
     "evidence_required_missing",
     "float_abi_changed",
-    "func_deleted_dwarf",
     "func_deleted_elf_fallback",
     "func_exception_spec_changed",
-    "func_likely_renamed",
     "func_pure_virtual_added",
     "generated_file_dependency_unstable",
     "generated_header_changed",
@@ -1217,10 +1453,8 @@
     "undocumented_export_ratio_increased",
     "uninstantiated_template_removed",
     "unspecified_return_now_named",
-    "var_removed_elf_only",
     "vector_abi_changed",
     "virtual_method_added",
-    "visibility_leak",
     "wheel_closure_dependency_violation",
     "wheel_rpath_not_portable",
     "wheel_tag_architecture_mismatch"
