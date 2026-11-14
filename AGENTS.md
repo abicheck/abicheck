@@ -256,6 +256,11 @@ Follow the pointer whose trigger matches your task:
    `compare/finding_identity/change_kinds._TYPE_BEARING_DISCRIMINATOR_KINDS`), `VALUE_INSENSITIVE`,
    or `UNVERIFIED`. `tests/test_canonical_finding_id_completeness.py` fails
    until you do.
+6. Declare `observable_at=` (ADR-093): the minimal evidence configurations
+   that observe the fact, built with `observability.observable(...)`, plus a
+   `rationale` when `{B}` alone is not enough; declare `relations=` if the
+   kind is a variant, twin, subsumed or implied finding. A new kind may not
+   be `UNCLASSIFIED` (`tests/test_change_kind_observability_complete.py`).
 
 ## Conventions
 
