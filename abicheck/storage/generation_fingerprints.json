@@ -96,7 +96,8 @@
       "abicheck/extract/headers/castxml/calling_convention.py": "147c4be1a5b417eb4a67156e92e8f03f09eef3b7b34703ac22a98ad86d5dde1d",
       "abicheck/extract/headers/castxml/clang_semantics.py": "85c057c1b5d076b4b5cd3642424ca57eed01e0d6f2d237623575d7e2bc680de9",
       "abicheck/extract/headers/castxml/clang_semantics_join.py": "549b6d6e1ea75069066a3d3eaa8c0d6f57a9e7bb4974eaed7e970e86b494fc9e",
-      "abicheck/extract/headers/castxml/context.py": "fc0160b631e7d61702662eec603f98bc92f09f4cd3fbedfef3154f1da9d20381",
+      "abicheck/extract/headers/castxml/context.py": "4d71901d4f35d90a790156e9d6963b891ebe533311eb1f090b397bfb9284ad85",
+      "abicheck/extract/headers/castxml/data_size.py": "17a7972852aa7d044a313c3e6c7d16b72c87f66d3a89fe2f9216252bde585eb2",
       "abicheck/extract/headers/castxml/dumper.py": "96da3347324c36084895760802862cb4e0b5044ced6930a7dfb88a1b36fe92a0",
       "abicheck/extract/headers/castxml/duplicate_declarations.py": "8668fddc69d8838cc093315726c53d96dd9c878020e675e34a44a435dc54d2f7",
       "abicheck/extract/headers/castxml/enums.py": "e616c768543061d71812378dd92cbcb7b8d00afbb734bcb7b4b5334ee34042aa",
@@ -111,7 +112,7 @@
       "abicheck/extract/headers/castxml/preprocessed_text.py": "88deb48742c22f1e594ba3b73fb20f11c5dd091c690f7c53597aee67478f32ed",
       "abicheck/extract/headers/castxml/probe.py": "525ded3c75b147300cfaa460ce8acd62f87533859ff152e2b1f76c4302999bb0",
       "abicheck/extract/headers/castxml/record_traits.py": "33f86b99062a857be55238e0211dd3dd38467ff212f85741df2a404603d6411e",
-      "abicheck/extract/headers/castxml/records.py": "5130cd54a4547cf0ce1cb3bf139459348c6901d0f3bf41d4ea461c8f8f73e60c",
+      "abicheck/extract/headers/castxml/records.py": "154b766dafc01b3ceec3d95312396a174cc39f17947902ce40f4be4011318493",
       "abicheck/extract/headers/castxml/scope.py": "41cecc8dd996c10a58c022e5dca4003cce9d7775adf674b339cc199fb59297c7",
       "abicheck/extract/headers/castxml/specialization.py": "3f9f021672df1b84de42bc8de5f3c915508b3f3850e0a8acbaa80a3dee04c6f3",
       "abicheck/extract/headers/castxml/type_resolution.py": "3527318ed7d36b2b557c447c9fa0807deec9c594a7f481cf36c860859062552f",
@@ -226,9 +227,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "deb44e6a92302dd081e0f6ccce63d48498083711179e1face36afb63d0aad7a5",
+    "fingerprint": "39425f3d5fca0f26df6d2d360642ed2d511a364a1fdeae0501ac750f2f71aa45",
     "generation": 62,
-    "reason": "bumped to 62 for a semantic change"
+    "reason": "generation 62 (unreleased, same change) also derives castxml record data size (extract/headers/castxml/data_size.py) beside typedef provenance; both are recorded under the one 62 bump"
   },
   "resolver": {
     "files": {
