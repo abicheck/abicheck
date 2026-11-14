@@ -77,6 +77,14 @@ def _debug(snap: AbiSnapshot) -> bool:
 # reason that contains the fragment is only honest when the predicate holds.
 _PRECONDITIONS: tuple[tuple[str, Predicate], ...] = (
     ("missing ELF metadata", lambda o, n: o.elf is None or n.elf is None),
+    (
+        # No binary format's metadata (ELF, PE, Mach-O) on a side: no export
+        # table to read, whichever format the other side has.
+        "missing binary export table on one side",
+        lambda o, n: any(
+            s.elf is None and s.pe is None and s.macho is None for s in (o, n)
+        ),
+    ),
     ("missing PE metadata", lambda o, n: o.pe is None or n.pe is None),
     ("missing Mach-O metadata", lambda o, n: o.macho is None or n.macho is None),
     (
