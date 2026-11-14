@@ -247,3 +247,10 @@ class CastxmlParserContext:
 
     def resolve(self, id_: str) -> Element | None:
         return self.id_map.get(id_)
+
+
+def member_elements(ctx: CastxmlParserContext, el: Element) -> list[Element]:
+    """The resolved elements of *el*'s ``members`` id list, skipping ids the
+    id map does not hold."""
+    found = (ctx.id_map.get(mid) for mid in el.get("members", "").split())
+    return [m for m in found if m is not None]

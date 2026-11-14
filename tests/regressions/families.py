@@ -192,6 +192,8 @@ FAMILIES: dict[str, Family] = {
                 "tests/test_pe_macho_header_binding_integration.py",
                 # The same toolchain answering slowly records the same facts.
                 "tests/test_tool_probe_hang_guard.py",
+                # castxml's derived data size against each target's compilers.
+                "tests/test_castxml_data_size_integration.py",
             ),
         ),
         Family(
@@ -596,8 +598,10 @@ _F8 = (
     # A probe of a slow but working toolchain recorded a different fact than
     # the same toolchain answering fast (harness: test_slow_tools_still_answer).
     "extraction.tool_probe_answer_depends_on_host_load",
+    "extraction.layout_derivation_ignores_the_targets_layout_rule",
 )
 _F7 = (
+    "harness.drives_a_configuration_no_front_end_produces",
     "scanner.position_counter_skips_a_line_kind",
     # Masked by suite-wide shared interpreter state: passed in a full run,
     # failed alone (test isolation), hence F7 rather than OTHER.

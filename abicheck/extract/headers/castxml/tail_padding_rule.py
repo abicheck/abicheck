@@ -36,7 +36,7 @@ from collections.abc import Callable
 from enum import StrEnum
 from xml.etree.ElementTree import Element
 
-from .context import CastxmlParserContext
+from .context import CastxmlParserContext, member_elements as _members
 
 _MAX_DEPTH = 32
 
@@ -91,6 +91,14 @@ def rule_of(ctx: CastxmlParserContext) -> TailPaddingRule | None:
     return tail_padding_rule(ctx.target_triple)
 
 
+def ms_bitfields(ctx: CastxmlParserContext) -> bool:
+    """Whether the target lays bit-fields out by Microsoft's rules (MinGW's
+    default ``-mms-bitfields``): a bit-field then fills a whole unit of its
+    declared type, which the generic Itanium bit arithmetic does not model."""
+    t = (ctx.target_triple or "").lower()
+    return "mingw" in t or "windows-gnu" in t
+
+
 # --- C++11 POD: trivial and standard-layout ------------------------------------
 
 
@@ -121,11 +129,6 @@ def _all(verdicts: list[bool | None]) -> bool | None:
     if False in verdicts:
         return False
     return None if None in verdicts else True
-
-
-def _members(ctx: CastxmlParserContext, el: Element) -> list[Element]:
-    found = (ctx.id_map.get(mid) for mid in el.get("members", "").split())
-    return [m for m in found if m is not None]
 
 
 def _record(ctx: CastxmlParserContext, type_id: str) -> Element | None:

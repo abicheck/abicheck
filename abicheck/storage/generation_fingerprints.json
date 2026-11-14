@@ -96,8 +96,8 @@
       "abicheck/extract/headers/castxml/calling_convention.py": "147c4be1a5b417eb4a67156e92e8f03f09eef3b7b34703ac22a98ad86d5dde1d",
       "abicheck/extract/headers/castxml/clang_semantics.py": "85c057c1b5d076b4b5cd3642424ca57eed01e0d6f2d237623575d7e2bc680de9",
       "abicheck/extract/headers/castxml/clang_semantics_join.py": "549b6d6e1ea75069066a3d3eaa8c0d6f57a9e7bb4974eaed7e970e86b494fc9e",
-      "abicheck/extract/headers/castxml/context.py": "a0289de870308f1a1d4a966e56c3b6fe17062c686f49ce9135286dadc9385008",
-      "abicheck/extract/headers/castxml/data_size.py": "184e3d2a8c9ad95f19c4da4477f48f791b86954fbc3dd3a1148061efa3ed7ab3",
+      "abicheck/extract/headers/castxml/context.py": "070c7baac7c222b2d95d5bd3ea47818acf563eb885ec93d0aff5c3e167f9a86c",
+      "abicheck/extract/headers/castxml/data_size.py": "3cbdb4a3d4b0262c7c6907828a03217ec52c328ac54f08b3c626e4060bbf7f5a",
       "abicheck/extract/headers/castxml/dumper.py": "2db760721d15c66a9cd9eb6092afc27c186a51f5df639d0c970e6d5f393d512d",
       "abicheck/extract/headers/castxml/duplicate_declarations.py": "8668fddc69d8838cc093315726c53d96dd9c878020e675e34a44a435dc54d2f7",
       "abicheck/extract/headers/castxml/enums.py": "e616c768543061d71812378dd92cbcb7b8d00afbb734bcb7b4b5334ee34042aa",
@@ -111,11 +111,11 @@
       "abicheck/extract/headers/castxml/policy.py": "fda86c1de147934e620824b9a97262f218bffb7340cbbf394ac5fdd437e47f23",
       "abicheck/extract/headers/castxml/preprocessed_text.py": "88deb48742c22f1e594ba3b73fb20f11c5dd091c690f7c53597aee67478f32ed",
       "abicheck/extract/headers/castxml/probe.py": "525ded3c75b147300cfaa460ce8acd62f87533859ff152e2b1f76c4302999bb0",
-      "abicheck/extract/headers/castxml/record_traits.py": "33f86b99062a857be55238e0211dd3dd38467ff212f85741df2a404603d6411e",
+      "abicheck/extract/headers/castxml/record_traits.py": "6629c39e79895bf222488f062b48f03c778fd489745f25c1ba2c0548c8113f8f",
       "abicheck/extract/headers/castxml/records.py": "154b766dafc01b3ceec3d95312396a174cc39f17947902ce40f4be4011318493",
       "abicheck/extract/headers/castxml/scope.py": "41cecc8dd996c10a58c022e5dca4003cce9d7775adf674b339cc199fb59297c7",
       "abicheck/extract/headers/castxml/specialization.py": "3f9f021672df1b84de42bc8de5f3c915508b3f3850e0a8acbaa80a3dee04c6f3",
-      "abicheck/extract/headers/castxml/tail_padding_rule.py": "bc07dca9702f1ab78d62b3d8bc3dfdcfdf72be96662ea543ed48587aa8b29703",
+      "abicheck/extract/headers/castxml/tail_padding_rule.py": "bd3e7a2358b74d836d9b936351b192704b4e5340f7912b0b86be640491f597a5",
       "abicheck/extract/headers/castxml/type_resolution.py": "3527318ed7d36b2b557c447c9fa0807deec9c594a7f481cf36c860859062552f",
       "abicheck/extract/headers/castxml/typedef_parsing.py": "332587638d5d4b7caebbc20fa44b69c314771fffa5839a15dec59eaba3caaf93",
       "abicheck/extract/headers/castxml/variable_alignment.py": "bb80daf71b211c4df53f7698cde27499f0d2448780625ecc642c7b6cea6e9967",
@@ -228,9 +228,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "24d4df72f2f4fbb9c260b29e45a06bd0a8a8e831e5fb61c09c173c30ec468d13",
-    "generation": 62,
-    "reason": "refines generation 62 within the same unreleased PR: castxml data size by the target's tail-padding rule (nvsize allocation, MSVC/unknown targets unknown) and typedef origins weighed over both maps; generation 62 is not on main, so no released snapshot carries the earlier derivation"
+    "fingerprint": "d4bf3db392dce58eb439135aafeb8004b443397b5676d909e0d90f51f51d6921",
+    "generation": 63,
+    "reason": "bumped to 63 for a semantic change"
   },
   "resolver": {
     "files": {

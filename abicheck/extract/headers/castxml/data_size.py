@@ -67,8 +67,8 @@ from pathlib import Path
 from typing import Protocol
 from xml.etree.ElementTree import Element
 
-from .context import CastxmlParserContext
-from .tail_padding_rule import TailPaddingRule, pod11, rule_of
+from .context import CastxmlParserContext, member_elements as _members
+from .tail_padding_rule import TailPaddingRule, ms_bitfields, pod11, rule_of
 
 _RECORD_TAGS = frozenset({"Struct", "Class", "Union"})
 _NAMED_TAGS = frozenset({"CvQualifiedType", "Typedef", "ElaboratedType"})
@@ -155,11 +155,6 @@ def _is_cxx(ctx: CastxmlParserContext) -> bool:
     if ctx.is_cxx_document is None:
         ctx.is_cxx_document = any(el.tag in _CXX_ONLY_TAGS for el in ctx.root)
     return ctx.is_cxx_document
-
-
-def _members(ctx: CastxmlParserContext, el: Element) -> list[Element]:
-    found = (ctx.id_map.get(mid) for mid in el.get("members", "").split())
-    return [m for m in found if m is not None]
 
 
 def _strip(ctx: CastxmlParserContext, type_id: str) -> Element | None:
@@ -551,6 +546,10 @@ def _sizes(
     if size is None or pod is None:
         return _UNKNOWN
     if pod:
+        # An empty POD (C++11 POD admits an empty base) still sits at offset
+        # 0 under the empty-base optimization, so nothing follows its byte.
+        if el.tag != "Union" and _is_empty(ctx, el) is True:
+            return 0, 0
         return size, size
     if el.tag == "Union" or _has_virtual_base(ctx, el) is not False:
         return _UNKNOWN
@@ -612,6 +611,8 @@ def _field_end(ctx: CastxmlParserContext, f: Element) -> tuple[int, int] | None:
         return None
     bits = _int(f, "bits")
     if bits is not None:
+        if ms_bitfields(ctx):
+            return None  # MinGW lays bit-fields out by Microsoft's rules
         return (off + bits, off + bits)
     type_id = f.get("type", "")
     size = _type_size_bits(ctx, type_id)

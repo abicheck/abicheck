@@ -176,4 +176,42 @@ LIFECYCLE_BUG_CLASSES: tuple[BugClass, ...] = (
             "ledger alias": ("aliased", "bare copy"),
         },
     ),
+    BugClass(
+        id="extraction.layout_derivation_ignores_the_targets_layout_rule",
+        invariant=(
+            "A layout fact derived from header facts (castxml data size) "
+            "equals what every compiler of the target lays out, or is unknown; "
+            "a target rule the derivation does not model (MinGW's Microsoft "
+            "bit-fields) leaves it unknown, and an empty record has no data "
+            "under either POD rule. Oracle: the compilers' own member "
+            "placement. Family F8."
+        ),
+        fixed_by=(2064,),
+        seed_tests=(
+            "tests/test_castxml_data_size.py",
+            "tests/test_castxml_data_size_integration.py",
+        ),
+        axes={
+            "target": (
+                "linux-gnu",
+                "w64-mingw32",
+                "windows-gnu",
+                "cygwin",
+                "apple arm64",
+            ),
+            "shape": ("bit-field", "empty POD", "empty non-POD"),
+        },
+    ),
+    BugClass(
+        id="harness.drives_a_configuration_no_front_end_produces",
+        invariant=(
+            "A harness that stands in for a front end resolves its inputs the "
+            "way that front end does; the example pipeline passes its headers "
+            "as the public-header set, as -H resolves, so a declaration's "
+            "origin matches the CLI's. Family F7."
+        ),
+        fixed_by=(2064,),
+        seed_tests=("tests/test_example_autodiscovery.py",),
+        axes={"inputs": ("headers only", "headers as the public set")},
+    ),
 )
