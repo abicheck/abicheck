@@ -41,12 +41,95 @@ _LC_DYLD_EXPORTS_TRIE = 0x80000033
 
 @dataclass(frozen=True)
 class MachoSymbol:
-    """One nlist64 entry: ``name`` is written with the C leading underscore."""
+    """One nlist64 entry: ``name`` is written with the C leading underscore.
+
+    ``n_value`` is the symbol's address; the default 0 suits symbols whose
+    address no test reads.
+    """
 
     name: str
     n_type: int
     n_sect: int = 1
     n_desc: int = 0
+    n_value: int = 0
+
+
+#: One section of a synthetic image: ``(segname, sectname, addr, size)``.
+#: Consecutive sections sharing a ``segname`` share one LC_SEGMENT_64, and
+#: section ordinals run across the segments in load-command order (1-based),
+#: as ``n_sect`` numbers them.
+SectionSpec = tuple[str, str, int, int]
+
+
+def _segment_commands(sections: Sequence[SectionSpec] | None) -> tuple[bytes, int]:
+    """LC_SEGMENT_64 commands for *sections* and their count.
+
+    Without *sections* this is one empty ``__TEXT`` segment.
+    """
+    if sections is None:
+        return (
+            struct.pack(
+                "<II16sQQQQiiII",
+                _LC_SEGMENT_64,
+                72,
+                b"__TEXT".ljust(16, b"\x00"),
+                0,
+                0,
+                0,
+                0,
+                7,
+                5,
+                0,
+                0,
+            ),
+            1,
+        )
+    out = bytearray()
+    groups: list[tuple[str, list[SectionSpec]]] = []
+    for spec in sections:
+        if groups and groups[-1][0] == spec[0]:
+            groups[-1][1].append(spec)
+        else:
+            groups.append((spec[0], [spec]))
+    for segname, specs in groups:
+        lo = min(addr for _s, _n, addr, _size in specs)
+        hi = max(addr + size for _s, _n, addr, size in specs)
+        body = b"".join(
+            struct.pack(
+                "<16s16sQQIIIIIIII",
+                sectname.encode().ljust(16, b"\x00"),
+                seg.encode().ljust(16, b"\x00"),
+                addr,
+                size,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+            )
+            for seg, sectname, addr, size in specs
+        )
+        out += (
+            struct.pack(
+                "<II16sQQQQiiII",
+                _LC_SEGMENT_64,
+                72 + len(body),
+                segname.encode().ljust(16, b"\x00"),
+                lo,
+                hi - lo,
+                0,
+                0,
+                7,
+                5,
+                len(specs),
+                0,
+            )
+            + body
+        )
+    return bytes(out), len(groups)
 
 
 def _uleb128(value: int) -> bytes:
@@ -99,12 +182,15 @@ def write_dylib(
     symbols: list[MachoSymbol],
     *,
     export_trie: Sequence[tuple[str, int]] | None = None,
+    sections: Sequence[SectionSpec] | None = None,
 ) -> Path:
     """Write a dylib whose symbol table holds *symbols* and return *path*.
 
     With *export_trie* (``(name, flags)`` pairs, names with the leading
     underscore) the image also carries an LC_DYLD_EXPORTS_TRIE listing them;
     without it the image has no trie and its nlist is the only export table.
+    With *sections* the image's segments carry those sections (see
+    :data:`SectionSpec`); without it one empty ``__TEXT`` segment is written.
     """
     strtab = bytearray(b"\x00")
     entries = []
@@ -112,22 +198,11 @@ def write_dylib(
         offset = len(strtab)
         strtab += sym.name.encode() + b"\x00"
         entries.append(
-            struct.pack("<IBBHQ", offset, sym.n_type, sym.n_sect, sym.n_desc, 0)
+            struct.pack(
+                "<IBBHQ", offset, sym.n_type, sym.n_sect, sym.n_desc, sym.n_value
+            )
         )
-    segment = struct.pack(
-        "<II16sQQQQiiII",
-        _LC_SEGMENT_64,
-        72,
-        b"__TEXT".ljust(16, b"\x00"),
-        0,
-        0,
-        0,
-        0,
-        7,
-        5,
-        0,
-        0,
-    )
+    segment, segment_count = _segment_commands(sections)
     trie_cmd_size = 16 if export_trie is not None else 0
     header_size = 32
     symtab_off = header_size + len(segment) + 24 + trie_cmd_size
@@ -138,10 +213,10 @@ def write_dylib(
     trie = build_export_trie(export_trie) if export_trie is not None else b""
     trie_off = stroff + len(strtab)
     commands = segment + symtab
-    ncmds = 2
+    ncmds = segment_count + 1
     if export_trie is not None:
         commands += struct.pack("<IIII", _LC_DYLD_EXPORTS_TRIE, 16, trie_off, len(trie))
-        ncmds = 3
+        ncmds += 1
     header = struct.pack(
         "<IIIIIIII",
         _MH_MAGIC_64,

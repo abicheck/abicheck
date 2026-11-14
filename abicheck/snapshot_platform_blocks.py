@@ -217,6 +217,7 @@ def macho_from_dict(macho: dict[str, Any], schema_version: int) -> Any:
             sym_type=MachoSymbolType(x.get("sym_type", "exported")),
             is_weak=x.get("is_weak", False),
             is_data=x.get("is_data", False),
+            size=x.get("size"),
         )
         for x in macho.get("exports", [])
     ]

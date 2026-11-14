@@ -186,6 +186,7 @@
       "abicheck/extract/headers/toolchain.py": "9dfc6f0e091a65d53b62a37c59a68394331f7901b469a30253ae6c0be37ebe3a",
       "abicheck/extract/library_export_facts.py": "02f4f9bdc8ed4ec7215c3f40e4d4183e695d304c44f0ccaa44ec4cd18b72a927",
       "abicheck/extract/macho_build_signals.py": "c277bfdd55f26aae61af66c8fa6c5cdc5fa45acc49a3ae513af5899417db88bb",
+      "abicheck/extract/macho_object_sizes.py": "2d5603245b9a431084c4cd2f9443f6c53a74338f070d7ce65024eb6cafb0b397",
       "abicheck/extract/mangled_foreign_template_args.py": "0175f69f2f2aaf9ac86f8277422bccde1ad29dd7f2c8520c2e0329df65b21e7e",
       "abicheck/extract/manifest_semantic_ir.py": "9d8a6ddaa619a7d4b214bbeab5c2c0dfef681a6fd9dffd004760b19a62da3b15",
       "abicheck/extract/member_identity.py": "9045a480f6715aa8e3242b147c88eed503566487a49b7ecc6c57209aabbab102",
@@ -220,7 +221,7 @@
       "abicheck/extract/unparseable_header_fallback.py": "a9aae1490ad88bb1f1bd9ddfe96681d4a3b9558436446305c66fb44f0003c2f6",
       "abicheck/extract/wheel_tags.py": "0a6eff34860223c9efb0fc2d62469804d50d59ae1825c726abafaf7c898789db",
       "abicheck/header_utils.py": "05efbcfa5999722c6651f0802449aad5c20888c0465ab5aa43ee5e872a02586f",
-      "abicheck/macho_metadata.py": "d66b53ea9c6bbc01b24d8b4f8619471e44d859f976de99d47eda4f8f92369700",
+      "abicheck/macho_metadata.py": "c08ed4ea5f8e0fe47154aba431d9b0d48f46e890e64577bd44b4deba7086c05e",
       "abicheck/model/arithmetic_type_spellings.py": "790e6049cf5607e20d987d2151bacc4ba331f76e24c486b0305102f79f4ae726",
       "abicheck/pdb_metadata.py": "d9e3674206483d001ebfd2853748b657a33d1f36cf9c99d63ed4c7a9669cf353",
       "abicheck/pdb_model.py": "c42cf25e4e3bd4d098575989cec9de94ab9795e171dde08e7b9a93d155a7ebe8",
@@ -231,9 +232,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "7bb2c6035cb58082b4e8a7d262cda74ed7e34d334922ab216c41a5ba80a2e419",
-    "generation": 71,
-    "reason": "review-2063 follow-ups: header_export_binding calls AbiSnapshot.invalidate_indexes() instead of clearing the same private caches; extraction output unchanged"
+    "fingerprint": "25adcdcf74a06d245fbf37d277ad1dd047a516271fc1c1af7727997e104e925d",
+    "generation": 72,
+    "reason": "WS-4 PR1: Mach-O export records derived _ZTV/_ZTI/_ZTT object sizes (MachoExport.size)"
   },
   "resolver": {
     "files": {

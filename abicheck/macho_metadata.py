@@ -47,6 +47,7 @@ from macholib.mach_o import (  # type: ignore[import-untyped]
     MH_MAGIC_64,
     N_EXT,
     N_PEXT,
+    N_SECT,
     N_TYPE,
     N_UNDF,
     N_WEAK_DEF,
@@ -54,6 +55,7 @@ from macholib.mach_o import (  # type: ignore[import-untyped]
 from macholib.MachO import MachO  # type: ignore[import-untyped]
 from macholib.SymbolTable import SymbolTable  # type: ignore[import-untyped]
 
+from .extract.macho_object_sizes import derive_object_sizes
 from .extract.parse_failures import note_export_read_failure
 
 # Fact dataclasses live in the model package (ADR-061 Phase 5): this module
@@ -444,6 +446,36 @@ def _parse_macho_load_commands(header: Any, meta: MachoMetadata) -> None:
     sync_present_facts(meta, "weak_dependent_libs")
 
 
+def _section_extents(header: Any) -> dict[int, tuple[int, int]]:
+    """1-based section ordinal → ``(address, size)`` from the segment commands."""
+    extents: dict[int, tuple[int, int]] = {}
+    ordinal = 1
+    for lc, _cmd, data in header.commands:
+        if lc.cmd in (LC_SEGMENT, LC_SEGMENT_64) and isinstance(data, list):
+            for sect in data:
+                extents[ordinal] = (int(sect.addr), int(sect.size))
+                ordinal += 1
+    return extents
+
+
+def _defined_section_symbols(nlists: Any) -> list[tuple[int, int, str]]:
+    """``(n_sect, n_value, name)`` for every defined symbol of an nlist table.
+
+    Only ``N_SECT`` entries are symbols with an address; stab (debug) entries
+    and undefined or absolute ones are skipped. The leading underscore is
+    stripped as it is for exports, so names match across both reads.
+    """
+    out: list[tuple[int, int, str]] = []
+    for nlist_entry, name_bytes in nlists:
+        if (int(nlist_entry.n_type) & N_TYPE) != N_SECT:
+            continue
+        raw = name_bytes.decode("utf-8", errors="replace") if name_bytes else ""
+        out.append(
+            (int(nlist_entry.n_sect), int(nlist_entry.n_value), raw.removeprefix("_"))
+        )
+    return out
+
+
 def _build_section_segment_map(header: Any) -> dict[int, str]:
     """Build the 1-based section ordinal → segment name mapping from segment commands."""
     # Build section ordinal → segment name mapping so we can distinguish
@@ -548,6 +580,11 @@ def _parse_macho_symbols(
     """Parse Mach-O symbol table and populate *meta.exports*."""
     try:
         symtab = SymbolTable(macho, header=header)
+        # Object sizes need every defined symbol, locals included, because a
+        # local label bounds the object before it (extract/macho_object_sizes).
+        sizes = derive_object_sizes(
+            _defined_section_symbols(symtab.nlists), _section_extents(header)
+        )
         # Prefer the split external tables (available when LC_DYSYMTAB is
         # present): extdefsyms = external *defined* (exports), undefsyms =
         # external *undefined* (imports). Concatenate both so the import surface
@@ -596,6 +633,7 @@ def _parse_macho_symbols(
                     sym_type=sym_type,
                     is_weak=is_weak,
                     is_data=is_data,
+                    size=sizes.get(name),
                 )
             )
     except Exception as exc:  # noqa: BLE001

@@ -697,6 +697,14 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "applies, and a pre-71 side's is_abstract is unknown (None), which "
         "the abstract detector skips"
     ),
+    72: GenerationSpellingChange(
+        "no type or name spelling changes. A Mach-O export now records a "
+        "derived size for its _ZTV/_ZTI/_ZTT object (the distance to the next "
+        "defined symbol of its section, extract/macho_object_sizes.py): a new "
+        "fact on existing export records, not a respelling. No rewrite "
+        "applies, and a pre-72 side's size is None, which the layout detectors "
+        "skip"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

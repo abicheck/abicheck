@@ -45,6 +45,11 @@ class MachoExport:
     sym_type: MachoSymbolType = MachoSymbolType.EXPORTED
     is_weak: bool = False
     is_data: bool = False  # True when symbol lives in __DATA segment (global variable)
+    # Derived byte size of a ``_ZTV``/``_ZTI``/``_ZTT`` object: the distance to
+    # the next defined symbol of its section (extract/macho_object_sizes.py),
+    # the Mach-O stand-in for ELF ``st_size``. None = not derived (a
+    # non-sized name, or a snapshot written before this field existed).
+    size: int | None = None
 
 
 @dataclass
