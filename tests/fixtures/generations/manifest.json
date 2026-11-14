@@ -360,6 +360,7 @@
     "46": "generation 46 (castxml noexcept and C++20 constraints from the clang AST) and 47 (template-parameter defaults from the clang AST, #1966) land together in PR #1961; main goes from 45 straight to 47, so no main commit ever ran generation 46",
     "48": "generation 48 (#1960's toolchain-rebuild DWARF facts) and 49 (per-unit stack-protector census and DW_AT_alignment, #1971) land together in PR #1971, which carries #1960's branch; main goes from 47 straight to 49, so 48 never ships on main",
     "65": "generation 65 (stdlib family from exports) and 66 (castxml data size per target, std re-export provenance, extern-C recovery scope) land together in PR #2063; main goes from 62 straight to 66 with 63-65 as intermediate bumps, so no main commit ever ran generation 65",
+    "66": "generations 66 and 67 land together in PR #2063 (main goes from 62 straight to 67; 63-66 are intermediate bumps), so no main commit ever ran generation 66",
     "7": "generations 7 and 8 were intermediate bumps inside PR #1712's branch (clang positional defaults, dependent members); main went from 6 (49529426d) straight to 9 (c23a9ad57), so no main commit ever ran them",
     "8": "generations 7 and 8 were intermediate bumps inside PR #1712's branch (clang positional defaults, dependent members); main went from 6 (49529426d) straight to 9 (c23a9ad57), so no main commit ever ran them"
   },
