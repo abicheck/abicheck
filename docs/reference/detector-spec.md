@@ -57,7 +57,7 @@ One row per `ChangeKind` (429 total). Columns fuse the verdict partition (`check
 | `constexpr_value_changed` | api_break | `API_BREAK` | `warning` | unspecified | `constexpr_value_changed` | — |
 | `consumer_required_symbol_removed` | breaking | `BREAKING` | `error` | L0 | `consumer_required_symbol_removed` | — |
 | `cpo_kind_changed` | breaking | `BREAKING` | `error` | L2 | `cpo_kind_changed` | [case88](examples/case88_cpo_kind_changed.md) |
-| `cpu_dispatch_isa_dropped` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `cpu_dispatch_isa_dropped` | [case83](examples/case83_cpu_dispatch_isa_dropped.md) |
+| `cpu_dispatch_isa_dropped` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `cpu_dispatch_isa_dropped` | [case83](examples/case83_cpu_dispatch_isa_dropped.md) |
 | `ctor_explicit_added` | api_break | `API_BREAK` | `warning` | L2 | `ctor_explicit_added` | [case106](examples/case106_ctor_became_explicit.md) |
 | `ctor_explicit_removed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `ctor_explicit_removed` | — |
 | `ctor_overload_ambiguity_risk` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `ctor_overload_ambiguity_risk` | — |

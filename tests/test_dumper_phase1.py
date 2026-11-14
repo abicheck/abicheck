@@ -48,6 +48,7 @@ class _FakeParser:
         public_dir_paths=None,
         no_binary_evidence=False,
         plain_char_unsigned=False,
+        target_triple=None,
     ):
         assert root.tag == "GCC_XML"
         assert exported_dynamic == {"pub"}

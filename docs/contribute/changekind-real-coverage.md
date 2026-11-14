@@ -22,9 +22,9 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
-| L0 | 130 | 72 |
+| L0 | 129 | 72 |
 | L1 | 62 | 7 |
-| L2 | 76 | 39 |
+| L2 | 77 | 39 |
 | L3 | 15 | 5 |
 | L4 | 10 | 2 |
 | L5 | 15 | 5 |
@@ -77,7 +77,6 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `cet_protection_improved` | COMPATIBLE | 0 | 0 | 0 |
 | `cet_protection_weakened` | RISK | 1 | 0 | 0 |
 | `consumer_required_symbol_removed` | BREAKING | 0 | 0 | 0 |
-| `cpu_dispatch_isa_dropped` | RISK | 1 | 0 | 0 |
 | `dt_relr_introduced` | RISK | 0 | 0 | 0 |
 | `dt_relr_removed` | COMPATIBLE | 0 | 0 | 0 |
 | `dynamic_loading_flags_changed` | RISK | 0 | 0 | 0 |
@@ -264,6 +263,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `base_class_access_narrowed` | API_BREAK | 0 | 0 | 2 |
 | `constant_changed` | API_BREAK | 1 | 0 | 2 |
 | `cpo_kind_changed` | BREAKING | 1 | 0 | 0 |
+| `cpu_dispatch_isa_dropped` | RISK | 1 | 0 | 0 |
 | `ctor_explicit_added` | API_BREAK | 1 | 0 | 0 |
 | `ctor_overload_ambiguity_risk` | RISK | 0 | 0 | 0 |
 | `default_template_arg_changed` | BREAKING | 2 | 0 | 0 |
