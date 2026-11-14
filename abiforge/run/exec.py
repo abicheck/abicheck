@@ -173,14 +173,22 @@ def _field_names(body: str) -> list[str]:
     field named by its declarator; any other ``(`` left is a member function.
     A bit-field and a static data member are skipped (``offsetof`` is
     ill-formed on both); an access label (``private:``) is not a declaration,
-    and a default member initializer (``= 4``, ``{4}``) is not the name.
+    but a member it makes private or protected is skipped (``offsetof`` from
+    outside the class cannot name it), and a default member initializer
+    (``= 4``, ``{4}``) is not the name.
     """
     names = []
+    accessible = True  # a ``struct`` body starts public
     for decl in body.split(";"):
         decl = _ATTRIBUTE.sub("", decl)
         decl = re.sub(r"\[\[.*?\]\]", "", decl)
         decl = re.sub(r"\b(?:alignas|_Alignas)\s*\([^()]*\)", "", decl)
+        labels = re.findall(r"\b(public|protected|private)\s*:(?!:)", decl)
+        if labels:
+            accessible = labels[-1] == "public"
         decl = re.sub(r"\b(?:public|protected|private)\s*:(?!:)", "", decl)
+        if not accessible:
+            continue  # offsetof cannot name a private or protected member
         if re.search(r"\bstatic\b", decl):
             continue  # a static data member: not part of the layout
         pointer = _FUNC_POINTER.search(decl)
@@ -199,16 +207,28 @@ def _field_names(body: str) -> list[str]:
     return names
 
 
-def _namespace_at(header: str, pos: int) -> str:
-    """The ``ns::`` qualification (C++ ``namespace`` blocks) open at *pos*."""
+def _namespace_at(header: str, pos: int) -> str | None:
+    """The ``ns::`` qualification (C++ ``namespace`` blocks) open at *pos*.
+
+    ``None`` when an enclosing block is one this cannot spell as a prefix
+    (``namespace a::b {``, an anonymous ``namespace {``): a probe there
+    would name a global record, not the one the header declares.
+    """
     stack: list[str | None] = []
-    for m in re.finditer(r"\bnamespace\s+(\w+)\s*\{|\{|\}", header[:pos]):
+    unspellable = "\0"
+    pattern = r"\bnamespace\s+(\w+)\s*\{|\bnamespace\b[^{;]*\{|\{|\}"
+    for m in re.finditer(pattern, header[:pos]):
+        text = m.group(0)
         if m.group(1):
             stack.append(m.group(1))
-        elif m.group(0) == "{":
+        elif text.startswith("namespace"):
+            stack.append(unspellable)
+        elif text == "{":
             stack.append(None)
         elif stack:
             stack.pop()
+    if unspellable in stack:
+        return None
     return "".join(f"{n}::" for n in stack if n)
 
 
@@ -219,7 +239,10 @@ def probe_expressions(roles: dict[str, RoleText], lang: str) -> dict[str, str]:
         if not header or "template" in header:
             continue  # a template has no layout until instantiated
         for m in _STRUCT.finditer(header):
-            name = _namespace_at(header, m.start()) + m.group(1)
+            scope = _namespace_at(header, m.start())
+            if scope is None:
+                continue  # an enclosing namespace this cannot qualify
+            name = scope + m.group(1)
             tname = f"struct {name}"
             exprs[f"sizeof({name})"] = f"sizeof({tname})"
             # GNU __alignof__ works in every C and C++ mode gcc and clang accept.
@@ -227,13 +250,16 @@ def probe_expressions(roles: dict[str, RoleText], lang: str) -> dict[str, str]:
             for f in _field_names(m.group(2)):
                 exprs[f"offsetof({name},{f})"] = f"offsetof({tname}, {f})"
         for m in _ENUM.finditer(header):
-            scoped, name, body = bool(m.group(1)), m.group(2), m.group(3)
+            scope = _namespace_at(header, m.start())
+            if scope is None:
+                continue
+            scoped, name, body = bool(m.group(1)), scope + m.group(2), m.group(3)
             tname = name if lang == "c++" else f"enum {name}"
             exprs[f"sizeof(enum {name})"] = f"sizeof({tname})"
             for member in body.split(","):
                 member = member.split("=")[0].strip()
                 if member:
-                    ref = f"{name}::{member}" if scoped else member
+                    ref = f"{name}::{member}" if scoped else scope + member
                     exprs[f"{name}::{member}"] = f"(long long)({ref})"
         if role == "shape.open":
             exprs["sizeof(Shape)"] = "sizeof(Shape)"

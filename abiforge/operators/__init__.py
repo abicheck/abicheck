@@ -47,6 +47,7 @@ from abiforge.operators.elf import ELF_OPERATORS
 from abiforge.operators.layout import LAYOUT_OPERATORS
 from abiforge.operators.platform import PLATFORM_OPERATORS
 from abiforge.operators.symbols import SYMBOL_OPERATORS
+from abiforge.operators.types import TYPE_OPERATORS
 
 __all__ = ["OP_BY_NAME", "OPERATORS", "VERDICT_RANK", "EditOp", "applicable", "matrix"]
 
@@ -956,6 +957,7 @@ OPERATORS: tuple[EditOp, ...] = (
     *CXX_OPERATORS,
     *LAYOUT_OPERATORS,
     *SYMBOL_OPERATORS,
+    *TYPE_OPERATORS,
 )
 
 OP_BY_NAME: dict[str, EditOp] = {op.name: op for op in OPERATORS}

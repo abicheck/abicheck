@@ -141,7 +141,7 @@
     "abicheck/diff_templates.py(_canonical_identity_name)": 358,
     "abicheck/diff_templates.py(_looks_like_template_instantiation)": 876,
     "abicheck/diff_templates.py(_normalize_mach_o_mangled)": 1184,
-    "abicheck/diff_templates.py(_return_is_unspecified)": 512,
+    "abicheck/compare/unnameable_return.py(return_is_unspecified)": 512,
     "abicheck/diff_templates.py(detect_overload_set_rerouted.<locals>._overload_key)": 204,
     "abicheck/diff_type_spellings.py(_emit_function_slot_changes)": 716,
     "abicheck/diff_type_spellings.py(_match_functions_by_mangled)": 28,

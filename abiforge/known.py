@@ -35,6 +35,33 @@ GAP_GCC_THROW = (
 GAP_GCC_UNEXPORTED = (
     "The native gcc header backend keeps an unexported declaration PUBLIC"
 )
+GAP_CASTXML_TRAITS = "castxml records no record data size"
+GAP_UNNAMED_NON_ELF = "The unnamed-type check reads only an ELF export table"
+GAP_CLANG_TEMPLATE_CONTRACT = (
+    "The contract evaluator places a clang class-template pattern out of contract"
+)
+GAP_TAG_DECL = (
+    "clang and gcc header snapshots of the corpus seed drop a renamed tag's "
+    "instantiation declaration"
+)
+GAP_TYPEDEF_RETURN = (
+    "A return type re-spelled through a renamed typedef of the same type reads "
+    "`func_return_changed`"
+)
+GAP_GCC_TYPEDEF_RETURN = (
+    "The native gcc header backend spells a typedef'd return type canonically"
+)
+GAP_CLOSURE_RETURN = (
+    "A formerly inline function's closure return re-spelled by clang reads "
+    "`func_return_changed`"
+)
+GAP_CPU_DISPATCH = (
+    "The CPU-dispatch roll-up reads the removal of declared ISA kernels as a risk"
+)
+GAP_PIMPL_BARE_HOLDER = (
+    "The inline-body rename check misses a pimpl holder castxml and clang name by "
+    "its bare leaf"
+)
 GAP_O2_STD = (
     "An `-O2` rebuild of a C++ library that uses `std::string` reads as a risk on gcc, "
     "or a break on MinGW"
@@ -199,6 +226,16 @@ def _unexported_gap(op: str, seeds: frozenset[str], kind: str) -> Known:
 # Header-backend parity gaps the corpus found (tests/
 # test_header_backend_fact_gaps_integration.py holds their canaries).
 _BACKEND_GAPS: tuple[Known, ...] = (
+    _backend_gap(
+        "template_default_arg_change",
+        _CLASSES,
+        "clang",
+        "wrong-verdict",
+        "the clang Buf pattern reads PROVEN_OUT_OF_CONTRACT, so the CLI verb rolls up NO_CHANGE",
+        GAP_CLANG_TEMPLATE_CONTRACT,
+        frozenset({"weaker-than:API_BREAK"}),
+        "NO_CHANGE",
+    ),
     _contract_gap("func_contract_attribute_added", "FUNC_CONTRACT_ATTRIBUTE_ADDED"),
     _contract_gap("func_contract_attribute_removed", "FUNC_CONTRACT_ATTRIBUTE_REMOVED"),
     *(
@@ -223,6 +260,111 @@ _BACKEND_GAPS: tuple[Known, ...] = (
     ),
     _unexported_gap("declared_exports_defined", _ELF, "FUNC_EXPORT_ADDED"),
     _unexported_gap("inline_function_outlined", _MORE, "FUNC_LOST_INLINE"),
+    *(
+        _backend_gap(
+            op,
+            _MORE,
+            "castxml",
+            "wrong-verdict",
+            "castxml records no data size",
+            GAP_CASTXML_TRAITS,
+            frozenset({f"missing:{kind}", "weaker-than:COMPATIBLE_WITH_RISK"}),
+            "NO_CHANGE",
+        )
+        for op, kind in (
+            ("record_became_pod_tail_padding", "TAIL_PADDING_REUSE_CHANGED"),
+        )
+    ),
+    *(
+        _backend_gap(
+            "tag_type_renamed",
+            _MORE,
+            backend,
+            "wrong-kind",
+            "the new run<quick_tag> declaration is missing from the snapshot, so "
+            "the rename has no added symbol to pair",
+            GAP_TAG_DECL,
+            frozenset({"missing:TAG_TYPE_RENAMED"}),
+            "BREAKING",
+        )
+        for backend in ("clang", "gcc")
+    ),
+    _backend_gap(
+        "version_stamp_typedef_bumped",
+        _ELF,
+        "gcc",
+        "wrong-verdict",
+        "the gcc plugin spells the typedef'd return canonically: no change seen",
+        GAP_GCC_TYPEDEF_RETURN,
+        frozenset({"missing:TYPEDEF_VERSION_SENTINEL", "weaker-than:COMPATIBLE"}),
+        "NO_CHANGE",
+    ),
+)
+
+# Detector gaps that hold on every header backend (and DWARF where noted).
+_DETECTOR_GAPS: tuple[Known, ...] = (
+    Known(
+        "unnamed_type_export_added",
+        _MORE,
+        "false-clean",
+        lambda c: c.objfmt != "elf",
+        "diff_unnamed_types requires ELF metadata on both sides, so a Mach-O "
+        "or (MinGW) PE export whose Itanium name embeds Ut_ is never checked",
+        GAP_UNNAMED_NON_ELF,
+        issues=frozenset(
+            {"missing:UNNAMED_TYPE_IN_PUBLIC_ABI", "weaker-than:COMPATIBLE_WITH_RISK"}
+        ),
+        verdicts=frozenset({"COMPATIBLE"}),
+    ),
+    Known(
+        "cpu_dispatch_isa_dropped",
+        _ELF,
+        "wrong-verdict",
+        _ev("headers", "dwarf"),
+        "the dropped tier's k*_avx2 exports are rolled up into a RISK finding "
+        "although the header declares them and a pinned consumer fails to load",
+        GAP_CPU_DISPATCH,
+        issues=frozenset({"missing:SONAME_BUMP_RECOMMENDED", "weaker-than:BREAKING"}),
+        verdicts=frozenset({"COMPATIBLE_WITH_RISK"}),
+    ),
+    *(
+        _backend_gap(
+            "pimpl_member_renamed_under_inline_accessor",
+            _MORE,
+            backend,
+            "wrong-kind",
+            "the holder is recorded as a bare `Desc`; the accessor's scope is lib::Desc",
+            GAP_PIMPL_BARE_HOLDER,
+            frozenset({"missing:INLINE_BODY_REFERENCES_RENAMED_MEMBER"}),
+            "BREAKING",
+        )
+        for backend in ("castxml", "clang")
+    ),
+    _backend_gap(
+        "unspecified_return_now_named",
+        _MORE,
+        "clang",
+        "false-positive",
+        "the formerly inline (unexported) function's return reads "
+        "func_return_changed (BREAKING) next to the source-level finding",
+        GAP_CLOSURE_RETURN,
+        frozenset({"stronger-than:API_BREAK"}),
+        "BREAKING",
+    ),
+    Known(
+        "version_stamp_typedef_bumped",
+        _ELF,
+        "false-positive",
+        lambda c: (
+            c.evidence == "dwarf"
+            or (c.evidence == "headers" and c.header_backend in ("castxml", "clang"))
+        ),
+        "the return re-spelled through the renamed typedef reads "
+        "func_return_changed (BREAKING) though the call is unchanged",
+        GAP_TYPEDEF_RETURN,
+        issues=frozenset({"stronger-than:API_BREAK"}),
+        verdicts=frozenset({"BREAKING"}),
+    ),
 )
 
 
@@ -350,10 +492,11 @@ _PLATFORM: tuple[Known, ...] = (
         "false-clean",
         _hb("gcc"),
         "the native gcc backend records no demo::clampi (header-only, never "
-        "emitted), so its removal reads NO_CHANGE",
+        "emitted), so its removal reads only the public-surface shrink "
+        "(COMPATIBLE), not the source break",
         GAP_GCC_HEADER_ONLY,
         issues=frozenset({"missing:INLINE_FUNCTION_REMOVED", "weaker-than:API_BREAK"}),
-        verdicts=frozenset({"NO_CHANGE"}),
+        verdicts=frozenset({"COMPATIBLE"}),
     ),
     Known(
         "time_bits_64",
@@ -508,7 +651,12 @@ KNOWN: tuple[Known, ...] = (
         "false-positive",
         # PE records no binding, so the coalesced-copy rule has no signal there
         # (ADR-089's PE limit); against libc++ (macOS) the rebuild reads NO_CHANGE.
-        lambda c: c.objfmt == "pe" and uses_libstdcxx(c.producer),
+        # With headers the lost instantiations are exports no public header
+        # declares (exported_not_public), so the CLI's pipeline demotes their
+        # removal and the rebuild reads COMPATIBLE: correct, not this gap.
+        lambda c: (
+            c.objfmt == "pe" and uses_libstdcxx(c.producer) and c.evidence != "headers"
+        ),
         "MinGW: -O2 inlines the std::string instantiations the -O0 build exported; a PE "
         "export carries no WEAK binding, so their loss reads func_removed / "
         "func_visibility_changed (BREAKING) while every consumer still runs",
@@ -537,6 +685,7 @@ KNOWN: tuple[Known, ...] = (
         verdicts=frozenset({"NO_CHANGE"}),
     ),
     *_BACKEND_GAPS,
+    *_DETECTOR_GAPS,
     *_PLATFORM,
 )
 

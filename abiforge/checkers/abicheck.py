@@ -119,11 +119,14 @@ def answer(old: AbiSnapshot, new: AbiSnapshot) -> tuple[str, frozenset[str]]:
     A refusal (``abicheck.errors.AbicheckError``, e.g. a profile mismatch) is
     abicheck's answer, not a harness failure: it is neither clean nor a break.
     """
-    from abicheck.checker import compare
     from abicheck.errors import AbicheckError
+    from abicheck.workflows.compare_policy import compare_snapshots
 
     try:
-        result = compare(old, new)
+        # The Tier-2 snapshot verb the CLI's ``compare`` reaches: pattern
+        # verdicts, surface metrics, build-context reconciliation and each
+        # side's resolved public surface, as users get them (ADR-068 D4).
+        result = compare_snapshots(old, new)
     except AbicheckError as exc:
         return REFUSED, frozenset({type(exc).__name__})
     return result.verdict.name, frozenset(c.kind.name for c in result.changes)

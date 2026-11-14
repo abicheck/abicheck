@@ -68,6 +68,7 @@ from .compare.template_surface import (
     strip_template_args as _strip_template_args,
     template_angle_depth,
 )
+from .compare.unnameable_return import return_is_unspecified as _return_is_unspecified
 from .diff_helpers import make_change
 from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
@@ -80,7 +81,7 @@ from .model.source_contract_evidence import (
     has_observed_source_contract_evidence,
     public_reachability,
 )
-from .model.surface_facts import is_public_export
+from .model.surface_facts import is_export_table_only_record, is_public_export
 
 if TYPE_CHECKING:
     from .model import AbiSnapshot, Function, Variable
@@ -839,10 +840,8 @@ def detect_overload_set_rerouted(
     def _by_stem(snap: AbiSnapshot, funcs: list[Function]) -> dict[str, list[Function]]:
         name_of = qualified_name_lookup(snap)
         out: dict[str, list[Function]] = defaultdict(list)
-        for f in funcs:
-            qname = name_of(f)
-            stem = _strip_template_args(qname)
-            out[stem].append(f)
+        for f in funcs:  # by name: the demangled signature is per-overload
+            out[_cpo_function_stem(name_of(f))].append(f)
         return out
 
     def _overload_key(f: Function) -> tuple[object, ...]:
@@ -1058,28 +1057,6 @@ def detect_mandatory_template_param_added(
 # ---------------------------------------------------------------------------
 
 
-# Return-type spellings we treat as "unspecified". These all share the
-# property that the consumer must use ``auto`` to capture the result.
-_UNSPECIFIED_RETURN_MARKERS: tuple[str, ...] = (
-    "auto",
-    "__lambda",
-    "(unnamed",
-    "(anonymous",
-    "{lambda",
-    "<lambda",
-    "decltype(",
-)
-
-
-def _return_is_unspecified(rt: str) -> bool:
-    if not rt:
-        return False
-    rt = rt.strip()
-    if rt == "auto":
-        return True
-    return any(m in rt for m in _UNSPECIFIED_RETURN_MARKERS)
-
-
 def detect_unspecified_return_now_named(
     old: AbiSnapshot,
     new: AbiSnapshot,
@@ -1116,6 +1093,10 @@ def detect_unspecified_return_now_named(
         old_unspec = _return_is_unspecified(old_rt)
         new_unspec = _return_is_unspecified(new_rt)
         if old_unspec == new_unspec:
+            continue
+        # An export-table stub's "?" means "no evidence", not a backend's
+        # spelling of an unnameable type: it settles neither direction.
+        if is_export_table_only_record(old_f) or is_export_table_only_record(new_f):
             continue
         qname, _params = key
         if old_unspec:
@@ -1202,18 +1183,18 @@ def detect_missing_instantiations(
     for fn in new.declarations.functions:
         if not is_public_export(fn):
             continue
-        qname = _strip_param_signature(new_name_of(fn))
-        if _looks_like_template_instantiation(qname):
-            surviving_stems.add(_strip_template_args(qname))
+        qname = new_name_of(fn)
+        if _looks_like_template_instantiation(_strip_param_signature(qname)):
+            surviving_stems.add(_cpo_function_stem(qname))
     for fn in old.declarations.functions:
         if not is_public_export(fn):
             continue
         if fn.mangled in new_mangled:
             continue
-        qname = _strip_param_signature(old_name_of(fn))
-        if not _looks_like_template_instantiation(qname):
+        qname = old_name_of(fn)
+        if not _looks_like_template_instantiation(_strip_param_signature(qname)):
             continue
-        stem = _strip_template_args(qname)
+        stem = _cpo_function_stem(qname)  # `int getv<int>(int)` -> `getv`
         if stem not in surviving_stems:
             continue
         findings.append(

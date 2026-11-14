@@ -1,7 +1,7 @@
 """``func_virtual_removed`` for a virtual method removed with its vtable slot.
 
 Bug class ``classification.removed_virtual_slot_read_as_plain_removal``
-(family F19). Removing a virtual method read only as ``func_removed`` plus the
+(family F20). Removing a virtual method read only as ``func_removed`` plus the
 record-level vtable kinds; ``func_virtual_removed`` was emitted only for a
 method that stayed and stopped being virtual.
 

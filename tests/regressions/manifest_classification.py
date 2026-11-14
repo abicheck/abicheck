@@ -949,6 +949,7 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
         ),
         fixed_by=(1308,),
         seed_tests=(
+            "tests/test_stl_by_value_resolved_identity.py",
             "tests/test_export_reconciliation_and_obligations.py",
             "tests/test_contract_type_identities.py",
             "tests/test_clang_type_evidence.py",
@@ -1039,6 +1040,84 @@ CLASSIFICATION_BUG_CLASSES: tuple[BugClass, ...] = (
             "new versions": ("one node", "both nodes"),
             "new default": ("same as old", "other node"),
             "evidence": ("synthetic ElfMetadata", "gcc-built .so + loader run"),
+        },
+    ),
+    BugClass(
+        id="classification.demangled_signature_used_as_entity_name",
+        invariant=(
+            "A check that groups functions by name (an overload set, the "
+            "instantiations of one template) keys on the entity's name: the "
+            "scope, the leaf and nothing else. The demangled form of a real "
+            "Itanium symbol is a signature -- it carries the parameter list, "
+            "and for a function template the return type -- so keying on it "
+            "puts every overload and every instantiation in a group of its "
+            "own, and the check never fires on a header snapshot (whose "
+            "functions carry real manglings) although it passes on fixtures "
+            "with invented ones."
+        ),
+        # Found by the generated edit corpus (overload_rerouted,
+        # explicit_instantiation_dropped).
+        fixed_by=(2027,),
+        seed_tests=("tests/test_template_stem_real_mangling.py",),
+        axes={
+            "parameter type": (
+                "int",
+                "long",
+                "double",
+                "float",
+                "char",
+                "unsigned int",
+            ),
+            "set size": ("one", "two", "three"),
+            "shape": ("free-function overload", "function-template instantiation"),
+            "change": ("swap", "pure addition", "pure removal", "drop one", "drop all"),
+        },
+    ),
+    BugClass(
+        id="classification.one_sibling_of_a_change_kind_family_read",
+        invariant=(
+            "A detector that reacts to a kind of change (a field removed, a "
+            "field added) reacts to every ChangeKind the catalog uses for it, "
+            "not to the one sibling its author had in mind: a field addition "
+            "is `type_field_added`, `type_field_added_compatible` or "
+            "`union_field_added`, whichever the layout diff chose."
+        ),
+        # Found by the generated edit corpus
+        # (pimpl_member_renamed_under_inline_accessor).
+        fixed_by=(2027,),
+        seed_tests=("tests/test_inline_body_rename_field_kinds.py",),
+        axes={
+            "removal kind": ("type", "struct", "union"),
+            "addition kind": ("type", "type compatible", "union"),
+            "record": ("internal", "public"),
+        },
+    ),
+    BugClass(
+        id="evidence.one_backend_spelling_of_an_unnameable_type",
+        invariant=(
+            "A check that recognises a type with no name (a closure, an "
+            "undeduced placeholder, an anonymous class) recognises it in "
+            "every spelling a header backend or DWARF writes for it -- "
+            "castxml's `?`, clang's `(lambda at ...)`/`(lambda:...)`, gcc's "
+            "`f()::<lambda(int)>` -- and matches a keyword such as `auto` "
+            "as a word, never as part of a name (`automaton *`)."
+        ),
+        # Found by the generated edit corpus (unspecified_return_now_named).
+        fixed_by=(2027,),
+        seed_tests=("tests/test_unspecified_return_backend_spellings.py",),
+        axes={
+            "backend spelling": (
+                "castxml ?",
+                "clang lambda at",
+                "clang lambda:",
+                "gcc <lambda>",
+                "auto",
+                "decltype",
+                "anonymous",
+                "unnamed",
+            ),
+            "direction": ("now named", "now unnamed"),
+            "control": ("named to named", "unnamed to unnamed"),
         },
     ),
 )

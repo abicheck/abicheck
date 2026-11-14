@@ -101,7 +101,11 @@ EXEMPTION_CEILINGS: dict[str, int] = {
     # against the function scope in policy/template_default_changes.py.
     # 72: plus the three basic_string/whitespace canonicalizations of the
     # dual-ABI pairing key (compare/glibcxx_dual_abi.normalize_dual_abi_spelling).
-    "spelling": 72,
+    # 73: compare/unnameable_return matches the C++ keyword `auto` as a whole
+    # word in a return-type spelling (a type spelling, not a naming convention).
+    # 74: policy/std_by_value.py brought idioms.py's pre-existing std-scalar
+    # alias regex into the scan (moved, not new; a C++ type spelling).
+    "spelling": 74,
     # 44: the merge with main brought model/symbol_ownership.py into the scan
     # (main made it the vocabulary owner) and main's shared
     # match_frozen_namespace -- both one pre-existing `_Z` mangling check.
@@ -125,7 +129,9 @@ EXEMPTION_CEILINGS: dict[str, int] = {
     # policy/retired_function_drift.
     # 20: minus the allocator prefix vocabulary and its startswith site,
     # folded into the exact replaceable-allocator match in elf_symbol_filter.
-    "platform": 20,
+    # 21: plus idioms.py's pre-existing `std::` prefix check, moved into
+    # the scanned policy/std_by_value.py (a standard-library namespace).
+    "platform": 21,
     # 9: main replaced the two fnmatch frozen-namespace matchers with one
     # policy.frozen_namespace helper.
     "user_rule": 9,

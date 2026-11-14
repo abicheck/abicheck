@@ -1,0 +1,3 @@
+### Fixed
+
+- **`unspecified_return_now_named` reads castxml's and clang's spelling of a closure return** — castxml writes a deduced closure return type as `?` and clang as `(lambda at …)`/`(lambda:…)`. The check knew only the gcc and DWARF forms, so an inline factory that starts returning a named type was missed on those two backends. The `auto` marker now matches only as a whole word, so a type such as `automaton *` is no longer read as an unspecified return. A function read from a stripped binary's export table, whose `?` means its return type is unknown, never takes part: a comparison with DWARF on one side only does not report it.

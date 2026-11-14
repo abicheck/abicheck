@@ -454,6 +454,38 @@ _ELF_ROLES: dict[str, RoleText] = {
     ),
     # A reserved-name exported table (glibc's `_IO_2_1_stdin_` shape).
     "elf.itab": ("extern int _lib_table[4];", "int _lib_table[4] = {1, 2, 3, 4};"),
+    "elf.lng": ("long lng_f(long a);", "long lng_f(long a) { return a * 2; }"),
+    "elf.isa": (
+        # Dispatchers, plus per-ISA kernels exported so callers can pin one
+        # (the catalog's case83 / oneDAL shape).
+        "int k1(int a);\nint k2(int a);\nint k3(int a);\n"
+        "int k1_avx2(int a);\nint k2_avx2(int a);\nint k3_avx2(int a);\n"
+        "int k1_sse42(int a);\nint k2_sse42(int a);\nint k3_sse42(int a);",
+        "int k1_avx2(int a) { return a + 1; }\nint k2_avx2(int a) { return a + 2; }\n"
+        "int k3_avx2(int a) { return a + 3; }\nint k1_sse42(int a) { return a + 1; }\n"
+        "int k2_sse42(int a) { return a + 2; }\nint k3_sse42(int a) { return a + 3; }\n"
+        "int k1(int a) { return k1_sse42(a); }\nint k2(int a) { return k2_sse42(a); }\n"
+        "int k3(int a) { return k3_sse42(a); }",
+    ),
+    "elf.vstamp": (
+        "typedef const char *mylib_version_1_2_3;\nmylib_version_1_2_3 mylib_vstamp(void);",
+        'mylib_version_1_2_3 mylib_vstamp(void) { return "1.2.3"; }',
+    ),
+    "elf.res": (
+        "struct res { int a; int reserved1; };\nint res_a(struct res *r);",
+        "int res_a(struct res *r) { return r->a; }",
+    ),
+    "elf.hdl": (
+        "struct ctx_s;\ntypedef struct ctx_s *ctx_t;\nctx_t ctx_open(void);\n"
+        "int ctx_close(ctx_t c);",
+        "struct ctx_s { int n; };\nstatic struct ctx_s s_ctx;\n"
+        "ctx_t ctx_open(void) { return &s_ctx; }\nint ctx_close(ctx_t c) { return c->n; }",
+    ),
+    "elf.opq": (
+        "struct opq;\nstruct opq *opq_new(void);\nint opq_val(struct opq *o);",
+        "struct opq { int a; };\nstatic struct opq s_opq;\n"
+        "struct opq *opq_new(void) { return &s_opq; }\nint opq_val(struct opq *o) { return o->a; }",
+    ),
     "elf.cread": (
         "int cread(const int *p);",
         "int cread(const int *p) { return *p + 2; }",
@@ -500,6 +532,12 @@ ELF_SEED = Seed(
         "@@elf.cref@@",
         "@@elf.cpp@@",
         "@@elf.cread@@",
+        "@@elf.lng@@",
+        "@@elf.isa@@",
+        "@@elf.vstamp@@",
+        "@@elf.res@@",
+        "@@elf.hdl@@",
+        "@@elf.opq@@",
         "@@elf.ms@@",
         "@@elf.attr@@",
         "@@elf.late@@",
@@ -537,6 +575,12 @@ ELF_SEED = Seed(
         "@@elf.cref@@",
         "@@elf.cpp@@",
         "@@elf.cread@@",
+        "@@elf.lng@@",
+        "@@elf.isa@@",
+        "@@elf.vstamp@@",
+        "@@elf.res@@",
+        "@@elf.hdl@@",
+        "@@elf.opq@@",
         "@@elf.ms@@",
         "@@elf.attr@@",
         "@@elf.late@@",
@@ -823,6 +867,83 @@ _XCXX_ROLES: dict[str, RoleText] = {
         "int thrower(int a) EDIT_THROWS(int) { if (a < 0) throw 1; return a; }",
     ),
     "x.inl": ("inline int inl_add(int a, int b) { return a + b; }", ""),
+    # Types-taxonomy shapes: a CPO candidate, experimental and versioned
+    # namespaces, a pimpl with an inline accessor, explicit template
+    # instantiations, an overload pair, secondary and virtual bases, layout
+    # traits, a tag-dispatched template, a template-typed C entry point.
+    "x.cpo": (
+        "namespace lib { int sort(int a); }",
+        "int lib::sort(int a) { return a + 1; }",
+    ),
+    "x.exp": (
+        "namespace lib { namespace experimental { "
+        "inline int frob(int a) { return a + 1; } } }",
+        "",
+    ),
+    "x.pimpl": (
+        "namespace lib {\nnamespace detail { struct impl { int count_; int cap_; }; }\n"
+        "class Desc {\n  detail::impl* p_;\npublic:\n  Desc();\n"
+        "  int count() const { return p_->count_; }\n};\n}",
+        "lib::Desc::Desc() : p_(new detail::impl{3, 8}) {}",
+    ),
+    "x.inst": (
+        "template <class T> T getv(T a);\nextern template int getv<int>(int);\n"
+        "extern template long getv<long>(long);\ntemplate <class T> T conv(int a);\n"
+        "extern template int conv<int>(int);",
+        # GCC gives an explicit instantiation the visibility of the template
+        # definition, not of the header's declaration: keep it default.
+        "#pragma GCC visibility push(default)\n"
+        "template <class T> T getv(T a) { return a; }\n"
+        "template int getv<int>(int);\ntemplate long getv<long>(long);\n"
+        "template <class T> T conv(int a) { return (T)a; }\n"
+        "template int conv<int>(int);\n#pragma GCC visibility pop",
+    ),
+    "x.route": (
+        "int route(int a);\nint route(double a);",
+        "int route(int a) { return a; }\nint route(double a) { return (int)a + 1; }",
+    ),
+    "x.sec": (
+        "struct SA { virtual int f(); virtual ~SA(); };\nstruct SB { int b; };\n"
+        "struct SD : SA, SB { int f(); };",
+        "int SA::f() { return 1; }\nSA::~SA() {}\nint SD::f() { return 2; }",
+    ),
+    "x.vb2": (
+        "struct VA1 { int a; virtual ~VA1(); };\nstruct VA2 { int b; virtual ~VA2(); };\n"
+        "struct VD2 : virtual VA1, virtual VA2 { virtual ~VD2(); };",
+        "VA1::~VA1() {}\nVA2::~VA2() {}\nVD2::~VD2() {}",
+    ),
+    "x.slay": (
+        "struct SL {\n  int get() const;\nprivate:\n  int a;\n  int b;\n};",
+        "int SL::get() const { return a + b; }",
+    ),
+    "x.tp": (
+        "struct TP {\n  int get() const;\nprivate:\n  int a;\n  char b;\n};\nint tp_use(TP* p);",
+        "int TP::get() const { return a + b; }\nint tp_use(TP* p) { return p->get(); }",
+    ),
+    "x.tc": (
+        "struct TC { int a; };\nint tc_get(TC t);",
+        "int tc_get(TC t) { return t.a; }",
+    ),
+    "x.tag": (
+        "namespace lib { struct fast_tag {}; template <class T> int run();\n"
+        "extern template int run<fast_tag>(); }",
+        "#pragma GCC visibility push(default)\n"
+        "template <class T> int lib::run() { return 1; }\n"
+        "template int lib::run<lib::fast_tag>();\n#pragma GCC visibility pop",
+    ),
+    "x.box": (
+        "template <class T> struct Box { T v; };\n"
+        'extern "C" int consume(Box<int>* b);\nBox<int> make_box(int a);',
+        'extern "C" int consume(Box<int>* b) { return b->v; }\n'
+        "Box<int> make_box(int a) { Box<int> b; b.v = a; return b; }",
+    ),
+    # A deduced (closure) return type needs C++14; older standards see nothing.
+    "x.autoret": (
+        "#if __cplusplus >= 201402L\n"
+        "inline auto make_cb() { return [](int a) { return a + 1; }; }\n#endif",
+        "",
+    ),
+    "x.kind": ("struct Kd { int a; int get(); };", "int Kd::get() { return a + 2; }"),
     "x.extra": ("", ""),
 }
 
@@ -952,6 +1073,20 @@ XCXX_SEED = Seed(
         "@@x.helper@@",
         "@@x.throws@@",
         "@@x.inl@@",
+        "@@x.cpo@@",
+        "@@x.exp@@",
+        "@@x.pimpl@@",
+        "@@x.inst@@",
+        "@@x.route@@",
+        "@@x.sec@@",
+        "@@x.vb2@@",
+        "@@x.slay@@",
+        "@@x.tp@@",
+        "@@x.tc@@",
+        "@@x.tag@@",
+        "@@x.box@@",
+        "@@x.autoret@@",
+        "@@x.kind@@",
         "@@x.extra@@",
         *_LAYOUT_SLOTS,
         _VIS_CLOSE,
@@ -985,6 +1120,20 @@ XCXX_SEED = Seed(
         "@@x.helper@@",
         "@@x.throws@@",
         "@@x.inl@@",
+        "@@x.cpo@@",
+        "@@x.exp@@",
+        "@@x.pimpl@@",
+        "@@x.inst@@",
+        "@@x.route@@",
+        "@@x.sec@@",
+        "@@x.vb2@@",
+        "@@x.slay@@",
+        "@@x.tp@@",
+        "@@x.tc@@",
+        "@@x.tag@@",
+        "@@x.box@@",
+        "@@x.autoret@@",
+        "@@x.kind@@",
         "@@x.extra@@",
         *_LAYOUT_SLOTS,
     ),
