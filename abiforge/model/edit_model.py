@@ -59,6 +59,9 @@ class EditClass:
     construct: str
     name: str
     doc: str
+    # The languages the edit exists in, when narrower than its construct's
+    # (an overload or a default argument has no C spelling).
+    langs: frozenset[str] | None = None
 
     @property
     def id(self) -> str:
@@ -169,8 +172,18 @@ INHERITANCE_EDIT_CLASSES: tuple[EditClass, ...] = tuple(
 # its definition (inline or out of line, what its body imports) and the ELF
 # symbol that exports it (name, binding, visibility, version, type).
 
+_CXX_ONLY = frozenset({"c++"})
+_CXX_FUNCTION_EDITS = frozenset(
+    {
+        "default_argument_changed",
+        "exception_spec_change",
+        "language_linkage_change",
+        "overload_added",
+    }
+)
+
 FUNCTION_EDIT_CLASSES: tuple[EditClass, ...] = tuple(
-    EditClass("function", n, d)
+    EditClass("function", n, d, _CXX_ONLY if n in _CXX_FUNCTION_EDITS else None)
     for n, d in (
         # signature: parameters
         ("param_added", "a parameter is added"),
@@ -182,6 +195,11 @@ FUNCTION_EDIT_CLASSES: tuple[EditClass, ...] = tuple(
         ("param_pointer_level", "a parameter gains or loses a level of indirection"),
         ("param_pointee_cv", "a parameter's pointee gains or loses const/volatile"),
         ("param_renamed", "a parameter is renamed, its type unchanged"),
+        (
+            "param_qualifier_change",
+            "a parameter's top-level qualifier (const, restrict) changes; the "
+            "function type and its symbol do not",
+        ),
         ("params_reordered", "two parameters of different types swap places"),
         (
             "default_argument_changed",
@@ -240,6 +258,14 @@ EDIT_MODEL: dict[str, tuple[EditClass, ...]] = {
 }
 
 
+def edit_langs(construct: str, name: str) -> frozenset[str] | None:
+    """The languages edit class *name* of *construct* is limited to, or None."""
+    for c in EDIT_MODEL.get(construct, ()):
+        if c.name == name:
+            return c.langs
+    return None
+
+
 def model_classes(construct: str) -> tuple[str, ...]:
     """The edit classes the model splits *construct* into (``any`` if unsplit)."""
     split = EDIT_MODEL.get(construct)
@@ -262,5 +288,6 @@ __all__ = [
     "MEMBER_POSITIONS",
     "STRUCT_EDIT_CLASSES",
     "all_model_classes",
+    "edit_langs",
     "model_classes",
 ]

@@ -616,6 +616,13 @@ def test_infeasibility_matches_an_independent_oracle_exhaustively() -> None:
     gcc_only = {"fabi_version"}
     cxx_only = {"cxx11_abi_0"}
     conflicts = {("std_string", "packed"), ("std_string", "short_enums")}
+    # Function edits C has no spelling for (written out, not read from the model).
+    cxx_only_edits = {
+        ("function", "default_argument_changed"),
+        ("function", "exception_spec_change"),
+        ("function", "language_linkage_change"),
+        ("function", "overload_added"),
+    }
     total = 0
     for p in space.all_points():
         total += 1
@@ -627,6 +634,7 @@ def test_infeasibility_matches_an_independent_oracle_exhaustively() -> None:
             and not (p.config in gcc_only and p.build != "gcc")
             and not (p.config in cxx_only and p.lang != "c++")
             and (p.construct, p.config) not in conflicts
+            and not ((p.construct, p.edit) in cxx_only_edits and p.lang != "c++")
         )
         why = space.infeasible(p)
         assert (why is None) is want, (p.id, why)

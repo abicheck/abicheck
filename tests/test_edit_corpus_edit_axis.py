@@ -91,6 +91,7 @@ EXPECTED_FUNCTION = {
     "param_pointer_level",
     "param_pointee_cv",
     "param_renamed",
+    "param_qualifier_change",
     "params_reordered",
     "default_argument_changed",
     "return_retyped",
@@ -347,3 +348,36 @@ def test_function_edits_name_the_signature_part_they_change() -> None:
     }
     for op_name, cls in want.items():
         assert edit_class(OP_BY_NAME[op_name], "function") == cls, op_name
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [
+        "default_argument_changed",
+        "exception_spec_change",
+        "language_linkage_change",
+        "overload_added",
+    ],
+)
+def test_a_cxx_only_function_edit_has_no_c_point(edit: str) -> None:
+    """C has no default arguments, exception specifications, language linkage
+    or overloads: such a point is infeasible in C and feasible in C++."""
+    c_points = {
+        p
+        for p in space.feasible_points()
+        if p.construct == "function" and p.lang == "c"
+    }
+    cxx_points = {
+        p
+        for p in space.feasible_points()
+        if p.construct == "function" and p.lang == "c++"
+    }
+    assert edit not in {p.edit for p in c_points}
+    assert edit in {p.edit for p in cxx_points}
+    # Every other function class keeps its C points.
+    assert {p.edit for p in c_points} == EXPECTED_FUNCTION - {
+        "default_argument_changed",
+        "exception_spec_change",
+        "language_linkage_change",
+        "overload_added",
+    }

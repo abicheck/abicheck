@@ -258,8 +258,11 @@ OP_CONSTRUCT: dict[str, tuple[str, ...]] = {
     "enum_member_renamed": ("enum",),
     "serialization_tag_swapped": ("enum",),
     "internal_table_grown": ("variable",),
-    # a free function declared beside the seed's class
+    # free functions declared beside the seed's class
     "extern_c_linkage_removed": ("function",),
+    "param_default_value_changed": ("function",),
+    "param_default_value_removed": ("function",),
+    "param_restrict_removed": ("function",),
     # the same sources rebuilt with other flags
     "rebuild_hidden_visibility": ("compile_option",),
     "rebuild_optimized": ("compile_option",),
@@ -365,6 +368,9 @@ OP_EDIT_CLASS: dict[str, dict[str, str]] = {
         "param_rename_header_only": "param_renamed",
         "params_reordered": "params_reordered",
         "default_argument_added": "default_argument_changed",
+        "param_default_value_changed": "default_argument_changed",
+        "param_default_value_removed": "default_argument_changed",
+        "param_restrict_removed": "param_qualifier_change",
         "func_return_type_change": "return_retyped",
         "return_pointer_level_changed": "return_pointer_level",
         "return_pointee_const_added": "return_pointee_cv",
@@ -412,7 +418,9 @@ OP_EDIT_CLASS: dict[str, dict[str, str]] = {
         "unversioned_export_added": "version_change",
         "func_became_ifunc": "symbol_type_change",
         "ifunc_removed": "symbol_type_change",
-        "gnu_unique_static_added": "symbol_type_change",
+        # adds functions (and a STB_GNU_UNIQUE static inside one): no existing
+        # symbol changes type
+        "gnu_unique_static_added": "function_added",
         "comment_only": "declaration_text_only",
         "reorder_declarations": "declaration_text_only",
     },
@@ -594,6 +602,9 @@ def infeasible(p: Point) -> str | None:
         return why
     if p.edit not in edit_values(p.construct):
         return f"{p.edit} is not an edit sub-class of {p.construct}"
+    langs = _model.edit_langs(p.construct, p.edit)
+    if langs is not None and p.lang not in langs:
+        return f"{p.construct}/{p.edit} has no {p.lang} spelling"
     return None
 
 
