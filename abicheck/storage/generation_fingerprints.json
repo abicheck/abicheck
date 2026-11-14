@@ -8,7 +8,7 @@
       "abicheck/dwarf_advanced.py": "2addcbd63e9263e9f89b9dc7bc252baa63c5dad332d8560cf690fb2437bf6c08",
       "abicheck/dwarf_metadata.py": "d1c92f3ea5a225bab409226b5fe10b66cd0705454bce2e6156949a5f7ab0a936",
       "abicheck/dwarf_presence.py": "7e73580ec7a02fdf24e3815cb89e42aa6fe00e46e8cda6b7fe9d547f06ac3f06",
-      "abicheck/dwarf_snapshot.py": "aef7aad642ec46f5f0f2c885bc3013deb972018fb1f6397c7088d09972e39323",
+      "abicheck/dwarf_snapshot.py": "435e4a340922f7d0cab3ba5e2cb9a9cfe405eceb0158468af4efd5f853e6cf5d",
       "abicheck/dwarf_snapshot_datasources.py": "e337f8be3a8ae16350c0639d0be10670d4d5d1197108659fa210fcbbf8a5bdde",
       "abicheck/dwarf_unified.py": "573a50584f1c4f59d18034ffc561a4008d1802abc4db2c99eb01d3dd5b3438c3",
       "abicheck/dwarf_utils.py": "7d94088db18ebd8e734e6259c5fa784709fd19417ad02c3e243c8b41a18212eb",
@@ -48,7 +48,7 @@
       "abicheck/extract/dwarf_decl_file.py": "a585b6e38dc879b04db4b3d70a8b7131774a8b735df1068e6baafcaac934af42",
       "abicheck/extract/dwarf_export_gaps.py": "ed04bbe774a14bc4b1c695f05ceb6a1da8e376cce001d780d63ccb9a9a52b412",
       "abicheck/extract/dwarf_layout_backfill.py": "aa6e6647edc2f60129a9762ffd131e0286a8be0432cb141cdea30675a304b630",
-      "abicheck/extract/dwarf_member_functions.py": "60d6e3b9ba9891e866999cd9476eef2ed836c83db130fa9a0383cbb0b51ef818",
+      "abicheck/extract/dwarf_member_functions.py": "d48d0ed79e0a1fb2bebc0871736f9a395ef7cb64c609a0eaac5a5e308f2e00fc",
       "abicheck/extract/dwarf_producer.py": "4b85d88dd77f7dca39669cceb2f494e58c81063ebd35bf59674bbee8504cac5f",
       "abicheck/extract/dwarf_records.py": "60c9e9aacd78d4ec63a31062a502a7483e64cc106e678aac2bd62048f5e0be55",
       "abicheck/extract/dwarf_scope.py": "1800757661a850338d8cb96d715995ffa8f79354047f68b1ce5e248a72819b20",
@@ -64,7 +64,7 @@
       "abicheck/extract/elf_data_initializer.py": "adc4a4dfac61e35334e81e2ac000f173c049fb06bfc87a31ec40b29eb50dd42f",
       "abicheck/extract/elf_loader_view.py": "8222fbd3a329cd2c1227d14674350ddcf65dd1e7da11b552847e1f5d175ee4db",
       "abicheck/extract/elf_notes.py": "25ccf019332d620f847414e3b56149ef52e0d8f5d088b3d34a03a897a3940ecf",
-      "abicheck/extract/elf_pure_virtual_slots.py": "039984357961a41e2cadf8849a1ab02594ea24146bb3496019f47825a3233132",
+      "abicheck/extract/elf_pure_virtual_slots.py": "117eda7a5a26efa5b0648874a930dd04b91810df188d9f391c90db4d72361d2c",
       "abicheck/extract/elf_static_tls.py": "3d35ff8a14ab97e6991cb4afab62a61703a1ce8d5af99e9c7f957783153b5d1d",
       "abicheck/extract/elf_string_table.py": "8348fa460902944419d2f9fe0918d05d232dc0a6ebce3d606e1b1fcb68c69337",
       "abicheck/extract/elf_symbol_classify.py": "da6f10854228923bf08adfce3fa82f5b8ca265e5f834ac2fbdd349243e514728",
@@ -231,9 +231,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "54c8d53328281b0696e2d37bcf26078c058283118610694a4f96ebaeef9f8187",
+    "fingerprint": "9bdf4d09ff8612f93cda1c6f159752f43759365e7761ececd05a21510c1c58da",
     "generation": 71,
-    "reason": "bumped to 71 for a semantic change"
+    "reason": "generation 71's pure-virtual evidence moved into one PureVirtualEvidence object and the builder gained empty class-level defaults; what the DWARF reader records is unchanged (the corpus cells and integration tests give identical facts)"
   },
   "resolver": {
     "files": {
