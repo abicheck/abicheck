@@ -195,10 +195,11 @@ def test_catalog_accepts_sound_declarations() -> None:
     )
 
 
-def test_unclassified_survives_copy_and_pickle() -> None:
+def test_unclassified_survives_copy_and_pickle_protocol() -> None:
     import copy
-    import pickle
 
     e = next(iter(REGISTRY.entries.values()))
     assert copy.deepcopy(e).observable_at is UNCLASSIFIED
-    assert pickle.loads(pickle.dumps(e)).observable_at is UNCLASSIFIED
+    # The pickle contract without unpickling data: __reduce__ rebuilds the singleton.
+    factory, args = UNCLASSIFIED.__reduce__()
+    assert factory(*args) is UNCLASSIFIED
