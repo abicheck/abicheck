@@ -8,7 +8,7 @@
       "abicheck/dwarf_advanced.py": "2addcbd63e9263e9f89b9dc7bc252baa63c5dad332d8560cf690fb2437bf6c08",
       "abicheck/dwarf_metadata.py": "d1c92f3ea5a225bab409226b5fe10b66cd0705454bce2e6156949a5f7ab0a936",
       "abicheck/dwarf_presence.py": "7e73580ec7a02fdf24e3815cb89e42aa6fe00e46e8cda6b7fe9d547f06ac3f06",
-      "abicheck/dwarf_snapshot.py": "435e4a340922f7d0cab3ba5e2cb9a9cfe405eceb0158468af4efd5f853e6cf5d",
+      "abicheck/dwarf_snapshot.py": "c05ccb1ffee98153a500ff7cc1b8382d42936c357dffde0fb85145e878016e22",
       "abicheck/dwarf_snapshot_datasources.py": "e337f8be3a8ae16350c0639d0be10670d4d5d1197108659fa210fcbbf8a5bdde",
       "abicheck/dwarf_unified.py": "573a50584f1c4f59d18034ffc561a4008d1802abc4db2c99eb01d3dd5b3438c3",
       "abicheck/dwarf_utils.py": "7d94088db18ebd8e734e6259c5fa784709fd19417ad02c3e243c8b41a18212eb",
@@ -81,7 +81,7 @@
       "abicheck/extract/header_ast_cache_producers.py": "aa85ae5d148526267f600b0972ca89afc27b6b8cb3f51b4c781a1526773600b4",
       "abicheck/extract/header_ast_fields.py": "896fe0141ddb2b6e4148ab170a17e690d65b052f4e34e6455a104a3f05524496",
       "abicheck/extract/header_exclusions.py": "254ca6e4ccf7366b9db516183d6814cb865c279845abe7d05051ac2f72bf0884",
-      "abicheck/extract/header_export_binding.py": "2849838510f5461a99938095d4bd3f619599127fa60b66756909124e7f069a15",
+      "abicheck/extract/header_export_binding.py": "3e44f1b3d5d8a40665e4845e8034f24509cd7b6ef46623d18d55642a3483683f",
       "abicheck/extract/header_order_witness.py": "40a29ffe7ed3751f9bb8e3bbce7f49011569b9d1d0d99947641d9ba178982966",
       "abicheck/extract/header_scan_memo.py": "56f79b5316354b938b08a5f29779c3aaf40481892d947784ec2adb48ab5e83fb",
       "abicheck/extract/header_text.py": "b43a88d7bf1d2e601bb908c78f04cb07e552f9c59f03b678ecc85788b3d146e4",
@@ -231,9 +231,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "8a242c38220d0f44ce09178936924088d27156233dc34f9bdbb13b09a1286db7",
+    "fingerprint": "557500ddd3d62b679e3d4ace926cc5fcdaf487565ff436af6cde54c5b5138d34",
     "generation": 71,
-    "reason": "removed is_pure_virtual_member, which had no production caller after the main merge; extraction output unchanged"
+    "reason": "review-2063 follow-ups: restored comment in dwarf_snapshot; header_export_binding calls AbiSnapshot.invalidate_indexes() instead of clearing the same private caches; extraction output unchanged"
   },
   "resolver": {
     "files": {

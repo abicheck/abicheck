@@ -23,6 +23,7 @@
     "abicheck/compare/edge_query.py(export_coverage_records)": 70,
     "abicheck/compare/edge_query.py(header_coverage_record)": 112,
     "abicheck/compare/enum_sentinel.py(identifier_tokens)": 36,
+    "abicheck/compare/export_names.py(default_export_names)": 14,
     "abicheck/compare/exported_by_mangled.py(exported_functions_by_mangled)": 56,
     "abicheck/compare/exported_by_mangled.py(exported_functions_by_mangled.<locals>.build)": 14,
     "abicheck/compare/exported_by_mangled.py(exported_variables_by_mangled.<locals>.build)": 14,
@@ -179,7 +180,7 @@
     "abicheck/model/evidence_status.py(is_cross_source_resolved)": 756,
     "abicheck/model/execution_cache_scoped.py(ScopedCache.active)": 200,
     "abicheck/model/execution_cache_scoped.py(ScopedCache.scope)": 14,
-    "abicheck/model/export_index.py(build_raw_export_index)": 28,
+    "abicheck/model/export_index.py(build_raw_export_index)": 42,
     "abicheck/model/export_index.py(build_raw_export_indexes)": 280,
     "abicheck/model/export_index.py(read_export_platforms)": 140,
     "abicheck/model/export_index.py(snapshot_export_names)": 56,
@@ -308,5 +309,5 @@
   },
   "mode": "default",
   "n": 40,
-  "total": 228760
+  "total": 228788
 }
