@@ -184,6 +184,8 @@ class ChangeKind(StrEnum):
     PUBLIC_API_INTERNAL_TYPE_RENAMED = 'public_api_internal_type_renamed'
     FUNC_VIRTUAL_NOEXCEPT_ADDED = 'func_virtual_noexcept_added'
     GLIBCXX_DUAL_ABI_CHANGED = 'glibcxx_dual_abi_changed'
+    SANITIZER_RUNTIME_REQUIRED = 'sanitizer_runtime_required'
+    IMPORTED_SYMBOL_UNPROVIDED = 'imported_symbol_unprovided'
     FUNC_BECAME_INLINE = 'func_became_inline'
     FUNC_LOST_INLINE = 'func_lost_inline'
     FUNC_DELETED_ELF_FALLBACK = 'func_deleted_elf_fallback'

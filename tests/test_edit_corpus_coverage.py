@@ -603,6 +603,7 @@ def _year_oracle(construct: str, std: str) -> bool:
         "inline_namespace": {"c++": 2011},
         "abi_tag": {"c++": 2011},
         "hidden_friend": {"c++": 2011},
+        "using_declaration": {"c++": 2011},
         "restrict_pointer": {"c": 1999},
         "flexible_array": {"c": 1999},
         "atomic": {"c": 2011},

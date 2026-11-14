@@ -37,6 +37,7 @@ from enum import StrEnum
 from xml.etree.ElementTree import Element
 
 from .context import CastxmlParserContext
+from .record_traits import record_members
 
 _MAX_DEPTH = 32
 
@@ -123,11 +124,6 @@ def _all(verdicts: list[bool | None]) -> bool | None:
     return None if None in verdicts else True
 
 
-def _members(ctx: CastxmlParserContext, el: Element) -> list[Element]:
-    found = (ctx.id_map.get(mid) for mid in el.get("members", "").split())
-    return [m for m in found if m is not None]
-
-
 def _record(ctx: CastxmlParserContext, type_id: str) -> Element | None:
     el = ctx.id_map.get(type_id)
     depth = 0
@@ -160,7 +156,7 @@ def _trivial_default_ctor(
         return None
     if el.tag not in ("Struct", "Class", "Union"):
         return True
-    members = _members(ctx, el)
+    members = record_members(ctx, el)
     ctors = [m for m in members if m.tag == "Constructor"]
     if not ctors:
         return None  # CastXML omits a deleted one: it may exist

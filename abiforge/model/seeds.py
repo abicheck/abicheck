@@ -1039,6 +1039,12 @@ _KIND_ROLES: dict[str, RoleText] = {
         "int kurt_use(int a);\n#endif",
         "#if __cplusplus >= 201402L\nint kurt_use(int a) { return kmake()(a); }\n#endif",
     ),
+    # A namespace-scope using-declaration re-exporting a std function: consumer
+    # source may spell krx::abs.
+    "k.rex": (
+        "#include <cstdlib>\nnamespace krx { using std::abs; int krx_f(int a); }",
+        "namespace krx { int krx_f(int a) { return std::abs(a); } }",
+    ),
     # Empty baselines: the operator adds the declaration.
     "k.pnv": ("", ""),
     "k.stl": ("", ""),

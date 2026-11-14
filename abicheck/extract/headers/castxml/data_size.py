@@ -68,6 +68,7 @@ from typing import Protocol
 from xml.etree.ElementTree import Element
 
 from .context import CastxmlParserContext
+from .record_traits import record_members
 from .tail_padding_rule import TailPaddingRule, pod11, rule_of
 
 _RECORD_TAGS = frozenset({"Struct", "Class", "Union"})
@@ -157,11 +158,6 @@ def _is_cxx(ctx: CastxmlParserContext) -> bool:
     return ctx.is_cxx_document
 
 
-def _members(ctx: CastxmlParserContext, el: Element) -> list[Element]:
-    found = (ctx.id_map.get(mid) for mid in el.get("members", "").split())
-    return [m for m in found if m is not None]
-
-
 def _strip(ctx: CastxmlParserContext, type_id: str) -> Element | None:
     el = ctx.id_map.get(type_id)
     depth = 0
@@ -189,7 +185,7 @@ def _pod(ctx: CastxmlParserContext, el: Element) -> bool | None:
     if any(b.tag == "Base" for b in el):
         return False
     record_id = el.get("id", "")
-    members = _members(ctx, el)
+    members = record_members(ctx, el)
     verdicts: list[bool | None] = []
     has_implicit_default_ctor = False
     has_user_ctor = False
@@ -390,7 +386,7 @@ def _maybe_no_unique_address(ctx: CastxmlParserContext, field: Element) -> bool:
             if record.get("file") == field.get("file")
             else 0
         )
-        for m in _members(ctx, record):
+        for m in record_members(ctx, record):
             ml = m.get("line", "")
             if m.get("file") == field.get("file") and ml.isdigit() and int(ml) < end:
                 start = max(start, int(ml))
@@ -440,7 +436,7 @@ def _pointer_bits(ctx: CastxmlParserContext) -> int | None:
 
 
 def _declares_virtual(ctx: CastxmlParserContext, el: Element) -> bool:
-    return any(m.get("virtual") == "1" for m in _members(ctx, el))
+    return any(m.get("virtual") == "1" for m in record_members(ctx, el))
 
 
 def _base_records(ctx: CastxmlParserContext, el: Element) -> list[Element] | None:
@@ -517,8 +513,8 @@ def _is_empty(ctx: CastxmlParserContext, el: Element, depth: int = 0) -> bool | 
     if depth > _MAX_DEPTH or el.get("incomplete") == "1":
         return None
     if el.tag == "Union":
-        return not any(m.tag == "Field" for m in _members(ctx, el))
-    if any(m.tag == "Field" for m in _members(ctx, el)):
+        return not any(m.tag == "Field" for m in record_members(ctx, el))
+    if any(m.tag == "Field" for m in record_members(ctx, el)):
         return False
     if _declares_virtual(ctx, el) or any(
         b.tag == "Base" and b.get("virtual") == "1" for b in el
@@ -592,7 +588,7 @@ def _sizes(
             return _UNKNOWN
         if sub:
             ends.append((off * 8 + sub, off * 8 + sub))
-    for f in _members(ctx, el):
+    for f in record_members(ctx, el):
         if f.tag != "Field":
             continue
         end = _field_end(ctx, f)

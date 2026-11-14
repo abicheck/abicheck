@@ -14,7 +14,10 @@ interface is unchanged (no layout, symbol or calling-convention effect on
 the seed), so the right answer is the build-mode risk alone, never a break.
 Where a flag would also change the binary interface (``-fpack-struct``
 packing a padded struct, ``-fno-rtti`` dropping typeinfo a seed exports) the
-operator picks the spelling that does not, and says so.
+operator picks the spelling that does not, and says so. The exception is a
+sanitizer runtime the library cannot load without (ASan always, UBSan under
+clang, which links no runtime into a shared library): that edit breaks every
+uninstrumented consumer, and its ground truth says so.
 """
 
 from __future__ import annotations
@@ -22,6 +25,7 @@ from __future__ import annotations
 from typing import Any
 
 from abiforge.model.config import Config
+from abiforge.model.expect import Rule
 from abiforge.model.opkit import Edit, EditOp, Roles, _set
 from abiforge.model.seeds import RoleText
 
@@ -49,15 +53,6 @@ def needs_build_data(config: Config) -> str | None:
 def _clang_with_build_data(config: Config) -> str | None:
     if config.producer.family != "clang":
         return "-fwhole-program-vtables is a clang option"
-    return needs_build_data(config)
-
-
-def _gcc_with_build_data(config: Config) -> str | None:
-    if config.producer.family != "gcc":
-        # clang links no sanitizer runtime into a -shared library unless told
-        # (-shared-libsan, a link flag): its library imports __ubsan_* with
-        # nothing to provide them, a different (load-breaking) edit.
-        return "clang links no sanitizer runtime into a shared library"
     return needs_build_data(config)
 
 
@@ -124,13 +119,39 @@ BUILD_DATA_OPERATORS: tuple[EditOp, ...] = (
         "l3_sanitizer_enabled",
         "-fsanitize=undefined",
         "SANITIZER_MODE_CHANGED",
-        "a UBSan build pulls in its runtime (a new NEEDED entry and its "
+        "gcc links UBSan's shared runtime (a new NEEDED entry and its "
         "imports), which loads into an uninstrumented process: deployment "
-        "risk, no interface change. (ASan is not this edit: its runtime must "
-        "load first, so an ASan library breaks every uninstrumented consumer.)",
+        "risk, no interface change",
         verdict_min="COMPATIBLE",
         probe_flags=("-fsanitize=undefined",),
-        precondition=_gcc_with_build_data,
+        rules=(
+            Rule(
+                lambda c: c.producer.family == "clang",
+                {
+                    "expected": frozenset(
+                        {"SANITIZER_MODE_CHANGED", "SANITIZER_RUNTIME_REQUIRED"}
+                    ),
+                    "verdict_min": "BREAKING",
+                    "verdict_max": "BREAKING",
+                },
+                "clang links no sanitizer runtime into a -shared library: it "
+                "imports __ubsan_* with nothing among its DT_NEEDED to provide "
+                "them, so no uninstrumented process can load it",
+            ),
+        ),
+    ),
+    _elf(
+        "l3_asan_enabled",
+        "-fsanitize=address",
+        "SANITIZER_MODE_CHANGED",
+        "an ASan library needs the ASan runtime as the first library of the "
+        "process (gcc: DT_NEEDED libasan; clang: __asan_* imports only an "
+        "instrumented executable provides): every uninstrumented consumer "
+        "fails to load it",
+        expected=frozenset({"SANITIZER_MODE_CHANGED", "SANITIZER_RUNTIME_REQUIRED"}),
+        verdict_min="BREAKING",
+        verdict_max="BREAKING",
+        probe_flags=("-fsanitize=address",),
     ),
     _elf(
         "l3_struct_packing_8",

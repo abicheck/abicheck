@@ -196,4 +196,40 @@ PLATFORM_ENTRIES_3: list[ChangeKindMeta] = [
         contract_subject=_CS.BINARY_WIDE,
         operation=_OP.MODIFIED,
     ),
+    _E(
+        "sanitizer_runtime_required",
+        _B,
+        impact="The library now requires a sanitizer runtime that an "
+        "uninstrumented process does not provide. Either it gained a "
+        "DT_NEEDED on a runtime that must be the first library loaded "
+        "(ASan, TSan, HWASan: loading it into a process that did not start "
+        'with it aborts with "runtime does not come first"), or it gained '
+        "imports of the sanitizer runtime's own interface (__asan_*, "
+        "__ubsan_*, __tsan_*, __msan_*, __hwasan_*, __sanitizer_*) with no "
+        "sanitizer runtime among its DT_NEEDED libraries (clang links none "
+        "into a -shared library by default), which only an instrumented "
+        "executable can satisfy. Either way every existing uninstrumented "
+        "consumer fails to load the library. Ship sanitizer builds as a "
+        "separate variant, never in place of the release library.",
+        description_template="Sanitizer runtime required: {detail}",
+        entity=_ENT.BINARY,
+        contract_subject=_CS.DEPENDENCY_EDGE,
+        operation=_OP.ADDED,
+    ),
+    _E(
+        "imported_symbol_unprovided",
+        _B,
+        impact="With resolved-dependency evidence (--follow-deps) on both "
+        "sides: the old library was self-contained (its DT_NEEDED closure "
+        "provided every strong import), and the new one gained a strong "
+        "import that nothing in that closure provides. The dynamic linker "
+        "fails to load it (`undefined symbol`) in every process that does "
+        "not itself define the symbol. Weak imports never count; a library "
+        "that already relied on symbols from its host (a plugin) is not "
+        "judged, because its host may provide the new one too.",
+        description_template="Imported symbol has no provider: {name}{detail}",
+        entity=_ENT.BINARY,
+        contract_subject=_CS.DEPENDENCY_EDGE,
+        operation=_OP.ADDED,
+    ),
 ]

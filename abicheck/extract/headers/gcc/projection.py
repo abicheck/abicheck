@@ -489,5 +489,45 @@ def project(
         semantic_ir=ir,
         cxx_template_defaults=defaults if language == "c++" else None,
         cxx_concept_constraints=constraints if language == "c++" else None,
+        std_reexports=std_reexports(rows, policy) if language == "c++" else None,
         extraction_provenance=provenance,
     )
+
+
+def _namespace_path(row: dict[str, Any]) -> tuple[str, ...] | None:
+    """A row's enclosing namespace path; ``None`` below a record or an
+    anonymous namespace (no re-export can be declared there)."""
+    out: list[str] = []
+    for part in row.get("scope") or ():
+        if part.get("kind") not in ("namespace", "inline_namespace"):
+            return None
+        out.append(str(part.get("name") or ""))
+    return tuple(out)
+
+
+def std_reexports(rows: list[dict[str, Any]], policy: Any) -> dict[str, str]:
+    """The public headers' ``using std::X;`` re-exports from the plugin's
+    ``using`` rows. GCC records no position for a using-declaration, so the
+    declaring namespace must hold a declaration of its own from a public
+    header (``extract/headers/std_reexports.py``)."""
+    from ..std_reexports import reexport_entry
+
+    public_namespaces = {
+        path
+        for r in rows
+        if r["kind"] != "using"
+        and policy.public(r.get("source"))
+        and (path := _namespace_path(r))
+    }
+    out: dict[str, str] = {}
+    for r in rows:
+        if r["kind"] != "using":
+            continue
+        path = _namespace_path(r)
+        if not path or path not in public_namespaces:
+            continue
+        target = "::".join(p for p in (r.get("target_scope"), r.get("name")) if p)
+        entry = reexport_entry(path, target)
+        if entry is not None:
+            out.setdefault(*entry)
+    return dict(sorted(out.items()))

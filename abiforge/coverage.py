@@ -211,14 +211,12 @@ SCOPE_BUCKETS: tuple[ScopeBucket, ...] = (
         "release_inventory_or_policy",
         False,
         "judged against a release inventory, a declared support promise, a "
-        "standard floor from a build configuration matrix, a documented "
-        "default or a runtime floor policy: inputs outside two builds of one "
-        "library",
+        "standard floor from a build configuration matrix or a documented "
+        "default: inputs outside two builds of one library",
         names=frozenset(
             {
                 "behavioural_default_changed",
                 "cxx_standard_floor_raised",
-                "runtime_floor_raised",
                 "support_promise_component_introduced",
                 "support_promise_component_retired",
             }
@@ -395,6 +393,14 @@ SCOPE_BUCKETS: tuple[ScopeBucket, ...] = (
                 "uninstantiated_template_removed",
             }
         ),
+    ),
+    ScopeBucket(
+        "binary_runtime_floor",
+        True,
+        "the highest provider version node a library's imports need, read "
+        "from its .gnu.version_r: the binary alone shows it, although the "
+        "catalog files it under build",
+        names=frozenset({"runtime_floor_raised"}),
     ),
     # --- named, in scope: L3 build-mode kinds a build_data config reaches
     # (abiforge.operators.build_data).

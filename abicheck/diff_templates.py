@@ -500,9 +500,7 @@ def _canonical_identity_name(
     instead, because they care about the *source-level* spelling
     (``CPO_KIND_CHANGED`` and friends); switching that precedence there
     too would silently defeat detectors that depend on a declared name
-    genuinely diverging from its demangled/underlying name (e.g.
-    ``diff_namespaces.detect_std_reexport_removed``'s whole premise is
-    that split).
+    genuinely diverging from its demangled/underlying name.
 
     **Residual gap, deliberately not chased here** (Codex review finding):
     when no demangler is available at all (no ``cxxfilt`` package and no

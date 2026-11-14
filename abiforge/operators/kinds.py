@@ -115,7 +115,9 @@ KIND_OPERATORS: tuple[EditOp, ...] = (
         "the inline namespace is bumped to v2: every symbol in it re-mangles, "
         "so binaries built against v1 no longer find kv::kv_f",
         expected=frozenset({"INLINE_NAMESPACE_VERSION_BUMPED"}),
-        **_BINARY,
+        # A source-namespace fact: abicheck reads it from declarations (DWARF
+        # or headers), never from a bare export table (in_source_declaration_index).
+        min_evidence="dwarf",
     ),
     _op(
         "experimental_api_graduated",
@@ -144,7 +146,9 @@ KIND_OPERATORS: tuple[EditOp, ...] = (
         "kx::experimental::kx_g is removed with no stable replacement: binaries "
         "that used the experimental API no longer load",
         expected=frozenset({"EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT"}),
-        **_BINARY,
+        # A source-namespace fact: abicheck reads it from declarations (DWARF
+        # or headers), never from a bare export table (in_source_declaration_index).
+        min_evidence="dwarf",
     ),
     _op(
         "function_became_customization_object",
@@ -303,6 +307,18 @@ KIND_OPERATORS: tuple[EditOp, ...] = (
         features=("deduced_return",),
         verdict_min="COMPATIBLE",
         verdict_max=None,
+        **_HEADERS,
+    ),
+    _op(
+        "std_reexport_dropped",
+        "k.rex",
+        _replace("k.rex", (" using std::abs;", "")),
+        "the header drops `using std::abs;` from namespace krx: nothing is "
+        "exported for it and std::abs is unchanged, but consumer source that "
+        "called krx::abs no longer compiles",
+        expected=frozenset({"STD_REEXPORT_REMOVED"}),
+        verdict_min="API_BREAK",
+        verdict_max="API_BREAK",
         **_HEADERS,
     ),
     _op(

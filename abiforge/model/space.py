@@ -137,6 +137,7 @@ CONSTRUCTS: tuple[Construct, ...] = (
     Construct("inline_namespace", _CXX),
     Construct("abi_tag", _CXX),
     Construct("hidden_friend", _CXX),
+    Construct("using_declaration", _CXX),
 )
 CONSTRUCT_BY_NAME: dict[str, Construct] = {c.name: c for c in CONSTRUCTS}
 
@@ -244,6 +245,7 @@ ROLE_CONSTRUCT: dict[str, str] = {
     "k.del": "function",
     "k.ibr": "inline_function",
     "k.urt": "deduced_return",
+    "k.rex": "using_declaration",
     "k.pnv": "class_virtual",
     "k.stl": "std_string",
     "k.anon": "function",
@@ -430,6 +432,7 @@ OP_EDIT_CLASS: dict[str, dict[str, str]] = {
         "imported_symbol_removed": "body_change",
         "glibc_version_required_added": "body_change",
         "glibc_older_version_required": "body_change",
+        "glibc_floor_raised": "body_change",
         "glibc_version_requirement_dropped": "body_change",
         "fortified_call_dropped": "body_change",
         "text_relocation_introduced": "body_change",
