@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -11,7 +12,13 @@ import pytest
 from abicheck.checker import Verdict, compare
 from abicheck.dumper import dump
 
-pytestmark = pytest.mark.integration
+# ELF-only: DT_NEEDED, versioned imports and -Wl,-soname.
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        not sys.platform.startswith("linux"), reason="ELF shared-library facts"
+    ),
+]
 
 _SRC = "int f(int *p, int n) { return p[n] + n * 3; }\n"
 
