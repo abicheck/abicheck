@@ -29,7 +29,8 @@ Purpose and claims: `README.md`.
 - **Operators** and their ground truth: `operators/` — `__init__` (core seeds
   and the registry), `elf` (`c_elf`), `cxx` (`cxx_more`), `platform`
   (ELF/loader/toolchain edits), `symbols`, `layout` (record and base layout
-  classes), `build_data` (compile modes only L3 build data records). The `EditOp` type is `model/opkit.py`.
+  classes), `build_data` (compile modes only L3 build data records),
+  `runtime_floor` (a raised libc version floor). The `EditOp` type is `model/opkit.py`.
 - **Seeds** (`model/seeds.py`): a seed's `build.*` roles carry compile and link
   inputs (version script, SONAME, flags) that an operator edits like a
   declaration; a seed with a `gate_role` (`c_elf_alt`, `cxx_alt`) takes only
