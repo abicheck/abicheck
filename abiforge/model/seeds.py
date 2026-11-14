@@ -1021,6 +1021,17 @@ _KIND_ROLES: dict[str, RoleText] = {
         "int kdl_keep(int a);\nint kdl_gone(int a);",
         "int kdl_keep(int a) { return a; }\nint kdl_gone(int a) { return a + 1; }",
     ),
+    # A public class reaching a detail:: type through a pimpl pointer from an
+    # inline member function.
+    "k.ibr": (
+        "namespace kib { namespace detail { struct Impl { int count; }; }\n"
+        "class KW { detail::Impl* p; public: KW(); int n() const { return p->count; } }; }",
+        "kib::KW::KW() : p(new detail::Impl{3}) {}",
+    ),
+    # Empty baselines: the operator adds the declaration.
+    "k.pnv": ("", ""),
+    "k.stl": ("", ""),
+    "k.anon": ("", ""),
 }
 _XCXX_ROLES.update(_KIND_ROLES)
 _LAYOUT_SLOTS += tuple(f"@@{r}@@" for r in _KIND_ROLES)

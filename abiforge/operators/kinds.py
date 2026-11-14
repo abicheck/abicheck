@@ -217,4 +217,33 @@ KIND_OPERATORS: tuple[EditOp, ...] = (
         expected=frozenset({"FUNC_VISIBILITY_CHANGED"}),
         **_BINARY,
     ),
+    _op(
+        "unnamed_type_api_added",
+        "k.anon",
+        lambda r: _set(
+            r,
+            "k.anon",
+            "struct KAn { struct { int v; } m; };\nint kanon_use(decltype(KAn::m)* p);",
+            "int kanon_use(decltype(KAn::m)* p) { return p->v; }",
+        ),
+        "a new export mangles an unnamed type (Ut_): its symbol name depends on "
+        "the unnamed type's position in KAn, so a harmless reorder later "
+        "renames the export",
+        expected=frozenset({"UNNAMED_TYPE_IN_PUBLIC_ABI"}),
+        **_RISK,
+        **_BINARY,
+    ),
+    _op(
+        "pimpl_member_renamed_under_inline_body",
+        "k.ibr",
+        _replace("k.ibr", ("int count;", "int size_;"), ("p->count", "p->size_")),
+        "a member of the detail:: implementation is renamed and the public "
+        "inline accessor follows it: the offset is unchanged, but every "
+        "consumer carries its own compiled copy of the inline body, so the "
+        "detail type has become part of the interface",
+        expected=frozenset({"INLINE_BODY_REFERENCES_RENAMED_MEMBER"}),
+        verdict_min="COMPATIBLE",
+        verdict_max=None,
+        **_HEADERS,
+    ),
 )
