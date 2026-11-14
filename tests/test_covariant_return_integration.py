@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -25,6 +26,22 @@ from abicheck.model.change_catalog.kinds import ChangeKind
 pytestmark = pytest.mark.integration
 
 _COMPILERS = [c for c in ("g++", "clang++") if shutil.which(c)]
+_DARWIN = sys.platform == "darwin"
+
+# The DWARF-only lane reads record layouts from the library's own DWARF.
+# abicheck reads DWARF types from ELF only: a Mach-O dylib keeps its DWARF in
+# the object files (or a dSYM, read for producer signals, not types) and a PE
+# carries none, so off Linux that lane has no type evidence to judge a covariant return by.
+_LANES = [
+    pytest.param(True, id="headers"),
+    pytest.param(
+        False,
+        id="dwarf",
+        marks=pytest.mark.skipif(
+            sys.platform != "linux", reason="DWARF type extraction is ELF-only"
+        ),
+    ),
+]
 
 _HEADER = """#pragma once
 struct R0 { virtual ~R0(); int r; };
@@ -84,6 +101,10 @@ def _build(side: Path, compiler: str, narrow: bool, override: bool) -> Path:
             str(side / "api.cpp"),
             "-o",
             str(lib),
+            # Mach-O: the install name defaults to the output path, which
+            # differs per side and would read as an LC_ID_DYLIB change; pin it
+            # as a release build does.
+            *(["-install_name", "@rpath/libcov.dylib"] if _DARWIN else []),
         ],
         check=True,
         capture_output=True,
@@ -106,7 +127,7 @@ def _findings(tmp: Path, compiler: str, headers: bool, override: bool):
 
 @pytest.mark.skipif(not _COMPILERS, reason="no C++ compiler installed")
 @pytest.mark.parametrize("compiler", _COMPILERS)
-@pytest.mark.parametrize("headers", [True, False], ids=["headers", "dwarf"])
+@pytest.mark.parametrize("headers", _LANES)
 def test_offset_zero_narrowing_is_compatible_and_a_secondary_base_is_not(
     tmp_path: Path, compiler: str, headers: bool
 ) -> None:

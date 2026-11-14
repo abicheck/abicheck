@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .context import CastxmlParserContext
 
-__all__ = ["cxx_only_files"]
+__all__ = ["cxx_only_files", "is_itanium_global_variable_guess"]
 
 _CXX_ONLY_TAGS = frozenset(
     {
@@ -71,3 +71,18 @@ def cxx_only_files(ctx: CastxmlParserContext) -> frozenset[str]:
             out.add(file)
     ctx.cxx_only_files = frozenset(out)
     return ctx.cxx_only_files
+
+
+def is_itanium_global_variable_guess(mangled: str, name: str) -> bool:
+    """Whether *mangled* is castxml's ``_Z<len><name>`` guess for a variable
+    declared at global scope.
+
+    The Itanium ABI never mangles a variable in the global namespace: its
+    symbol is the bare name whether it has C or C++ language linkage. castxml
+    nevertheless writes ``_Z5c_var`` even for an explicit ``extern "C" int
+    c_var;``, so on an Itanium target this guess is never a real symbol, in a
+    C header or a C++ one, and the C-header gate above does not apply to it.
+    (MSVC decorates a C++-linkage global, ``?c_var@@3HA``, so its guess stays
+    behind the gate.)
+    """
+    return bool(name) and mangled == f"_Z{len(name)}{name}"

@@ -11,11 +11,18 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.integration
+pytestmark = [
+    pytest.mark.integration,
+    # The probe reads DWARF from an ELF shared object. On macOS ``g++`` is
+    # Apple clang (no gcc derivation path to test) and ld64 leaves DWARF in
+    # the object files; on Windows there is no ELF output at all.
+    pytest.mark.skipif(sys.platform != "linux", reason="ELF + gcc DWARF probe"),
+]
 
 _SHAPES = {
     "copy": "struct S { int a; S() = default; S(const S& o); };\nS::S(const S& o) : a(o.a) {}",

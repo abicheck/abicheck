@@ -108,3 +108,49 @@ def test_a_c_header_parsed_as_cxx_is_recovered_as_c_linkage(static: bool) -> Non
 def test_a_cxx_header_keeps_the_declarations_cxx_linkage(evidence, exports) -> None:
     gone = _gone(_xml(evidence), exports)
     assert (gone.mangled, gone.is_extern_c) == ("_Z4gonei", False)
+
+
+def _cxx_header_with_variable(name: str, mangled: str) -> Element:
+    root = _xml("namespace")
+    SubElement(
+        root,
+        "Variable",
+        id="_9",
+        name=name,
+        type="_20",
+        context="_1",
+        location="f1:3",
+        file="f1",
+        line="3",
+        mangled=mangled,
+        extern="1",
+    )
+    return root
+
+
+@pytest.mark.parametrize("name", ["c_var", "v", "a_much_longer_name_10"])
+def test_an_itanium_global_variable_guess_is_bare_even_in_a_cxx_header(
+    name: str,
+) -> None:
+    # Itanium never mangles a global-namespace variable: its symbol is the
+    # bare name under C and C++ linkage alike, so castxml's _Z<len><name>
+    # guess (written even for ``extern "C" int c_var;``) is never real.
+    parser = _CastxmlParser(
+        _cxx_header_with_variable(name, f"_Z{len(name)}{name}"),
+        exported_dynamic={name},
+        exported_static=set(),
+    )
+    var = next(v for v in parser.parse_variables() if v.name == name)
+    assert var.mangled == name
+
+
+def test_a_decorated_global_variable_in_a_cxx_header_keeps_its_decoration() -> None:
+    # MSVC decorates a C++-linkage global; in a provably C++ header the
+    # decoration is real, so the C-header gate still holds it.
+    parser = _CastxmlParser(
+        _cxx_header_with_variable("c_var", "?c_var@@3HA"),
+        exported_dynamic={"c_var"},
+        exported_static=set(),
+    )
+    var = next(v for v in parser.parse_variables() if v.name == "c_var")
+    assert var.mangled == "?c_var@@3HA"

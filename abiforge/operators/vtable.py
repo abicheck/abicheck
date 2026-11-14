@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from abiforge.model.opkit import _OFFSET, _SIZE, EditOp
+from abiforge.model.opkit import _OFFSET, _SIZE, EditOp, Rule
 from abiforge.operators.layout import _op, _replace
 
 __all__ = ["VTABLE_OPERATORS"]
@@ -216,6 +216,20 @@ VTABLE_OPERATORS: tuple[EditOp, ...] = (
         verdict_min="COMPATIBLE",
         verdict_max="COMPATIBLE_WITH_RISK",
         min_evidence="binary",
+        rules=(
+            Rule(
+                lambda c: c.objfmt == "macho",
+                {
+                    "any_of": (frozenset({"FUNC_REMOVED", "FUNC_VISIBILITY_CHANGED"}),),
+                    "verdict_min": "BREAKING",
+                    "verdict_max": None,
+                },
+                "Mach-O: the inline VKy::f is a linkonce_odr unnamed_addr definition "
+                "clang marks weak_def_can_be_hidden, and ld64 auto-hides it, so the "
+                "dylib stops exporting a symbol old consumers bind to by two-level "
+                "name: dyld fails to load them",
+            ),
+        ),
     ),
     _op(
         "override_return_became_covariant",
