@@ -50,6 +50,16 @@ def needs_build_data(config: Config) -> str | None:
     )
 
 
+def _packing_not_tighter(config: Config) -> str | None:
+    """Applicability of the -fpack-struct=8 edit: a baseline packing tighter
+    than 8 (``Flags(pack=1)``) is relaxed by the edit (the later flag wins),
+    which changes the seed's layout -- not this operator's ground truth."""
+    pack = config.flags.pack
+    if pack is not None and pack < 8:
+        return f"baseline -fpack-struct={pack} is tighter than 8: the edit would change layout"
+    return needs_build_data(config)
+
+
 def _clang_with_build_data(config: Config) -> str | None:
     if config.producer.family != "clang":
         return "-fwhole-program-vtables is a clang option"
@@ -114,6 +124,9 @@ BUILD_DATA_OPERATORS: tuple[EditOp, ...] = (
         "-flto",
         "LTO_MODE_CHANGED",
         "link-time optimization changes code generation, not the interface",
+        # A toolchain that compiles but cannot load its LTO linker plugin
+        # fails at link time: probe the link so the cell is unavailable.
+        probe_flags=("-flto",),
     ),
     _elf(
         "l3_sanitizer_enabled",
@@ -161,6 +174,7 @@ BUILD_DATA_OPERATORS: tuple[EditOp, ...] = (
         "seed's structs exceeds (none is a long double or vector): every "
         "layout is unchanged, but a "
         "packing mode a consumer must match is now in force",
+        precondition=_packing_not_tighter,
     ),
     _elf(
         "l3_language_standard_raised",
@@ -201,5 +215,6 @@ BUILD_DATA_OPERATORS: tuple[EditOp, ...] = (
         "assumption, with no interface change to show it",
         expected=frozenset({"WHOLE_PROGRAM_VTABLES_MODE_CHANGED", "LTO_MODE_CHANGED"}),
         precondition=_clang_with_build_data,
+        probe_flags=("-flto=thin", "-fwhole-program-vtables"),
     ),
 )

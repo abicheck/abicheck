@@ -25,6 +25,7 @@
 > ⚠️ Detector 'sycl' disabled: missing SYCL runtime (PI plugin) metadata; SYCL header APIs are covered by header parsing, not this detector
 > ⚠️ Detector 'unnamed_types' disabled: missing binary export table on one side
 > ⚠️ Detector 'advanced_dwarf' disabled: missing DWARF advanced metadata
+> ⚠️ Detector 'imported_symbols_unprovided' disabled: missing ELF metadata
 > ⚠️ No binary metadata available; verdict is based on header analysis only
 
 > ⚠️ **Analysis incomplete:** public-header scoping could not resolve the public surface and fell back to the full export table; manual review required
@@ -42,7 +43,7 @@
 | … unresolved relevance | 0 |
 | … deduplicated | 0 |
 
-**Not evaluated:** 19 detector(s) — `elf_layout`, `fingerprint_renames`, `kabi`, `long_double`, `elf`, `pe`, … and 13 more
+**Not evaluated:** 20 detector(s) — `elf_layout`, `fingerprint_renames`, `kabi`, `long_double`, `elf`, `pe`, … and 14 more
 
 
 ## Surface changes

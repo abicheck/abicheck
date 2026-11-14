@@ -59,9 +59,10 @@ Verdict: COMPATIBLE (exit 0)
 
 ## Minimum evidence
 
-`ground_truth.json` lists `min_evidence: L0` — the underlying signal (a new
-public name, `lib::sort`, appearing in the exported-symbol table) is visible
-from `.dynsym` alone: `g++ -shared -fPIC -std=c++17 ... && abicheck compare`
+`ground_truth.json` lists `min_evidence: L1` — the evidence the named
+`experimental_graduated` finding needs. The underlying signal (a new public
+name, `lib::sort`, appearing in the exported-symbol table) is visible from
+`.dynsym` alone (L0): `g++ -shared -fPIC -std=c++17 ... && abicheck compare`
 with no headers reports a plain `func_added` for it. Classifying that
 addition specifically as an `experimental_graduated` migration event (rather
 than a bare addition) needs namespace-qualified name evidence; this

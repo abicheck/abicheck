@@ -63,7 +63,8 @@ Verdict: BREAKING (exit 4)
 
 ## Minimum evidence
 
-`min_evidence: L0` — the mangled symbols disappearing from `_V1::` and
+`ground_truth.json` lists `min_evidence: L1` — the evidence the named
+diagnosis below needs. At L0 the mangled symbols disappearing from `_V1::` and
 reappearing under `_V2::` are enough on their own to reach the BREAKING
 verdict, even on a fully stripped binary with no debug info at all (as
 plain `func_removed_elf_only`/`func_added` pairs). The specific

@@ -91,6 +91,34 @@ def test_castxml_without_a_public_set_is_not_modelled() -> None:
     assert castxml_std_reexports(_castxml(), *_segs(), False) is None
 
 
+def test_castxml_reexport_of_unknown_provenance_is_uncertain_not_absent() -> None:
+    """``lib`` keeps ``using std::abs;`` but lost its last own declaration:
+    the re-export's provenance is unknown, so the table is ``None``."""
+    root = _castxml()
+    for el in root:
+        if el.get("id") == "_3":
+            el.set("members", "_9 _5 _6")
+    root.remove(next(el for el in root if el.get("id") == "_7"))
+    assert castxml_std_reexports(root, *_segs(), True) is None
+
+
+def test_clang_macro_expanded_reexport_uses_the_expansion_file() -> None:
+    """A ``using std::abs;`` written by a macro defined in a private header
+    and expanded in a public one is a public re-export."""
+    root = _clang()
+    using = root["inner"][1]["inner"][0]
+    using["loc"] = {
+        "spellingLoc": {"file": PRIV, "line": 9},
+        "expansionLoc": {"file": PUB, "line": 2},
+    }
+    assert clang_std_reexports(root, *_segs(), True)["lib::abs"] == "std::abs"
+    using["loc"] = {
+        "spellingLoc": {"file": PUB, "line": 9},
+        "expansionLoc": {"file": PRIV, "line": 2},
+    }
+    assert "lib::abs" not in (clang_std_reexports(root, *_segs(), True) or {})
+
+
 # ---------------------------------------------------------------------------
 # clang -ast-dump=json
 # ---------------------------------------------------------------------------
@@ -158,21 +186,38 @@ GCC_ROWS = [
     {"kind": "using", "name": "abs", "target_scope": "std", "scope": _ns("lib")},
     {"kind": "using", "name": "abs", "target_scope": "", "scope": _ns("lib")},
     {"kind": "using", "name": "string", "target_scope": "std", "scope": _ns("lib")},
-    # a namespace with no public declaration of its own
+    # a namespace whose own declarations are all private
+    {"kind": "function_decl", "name": "h", "source": PRIV, "scope": _ns("hidden")},
     {"kind": "using", "name": "abs", "target_scope": "std", "scope": _ns("hidden")},
     {"kind": "using", "name": "f", "target_scope": "other", "scope": _ns("lib")},
 ]
 
 
-def test_gcc_projection_reads_the_plugin_using_rows(tmp_path) -> None:
+def _gcc(tmp_path, rows):
     header = tmp_path / "lib.h"
     header.write_text("")
-    rows = [dict(r, source=str(header)) if "source" in r else r for r in GCC_ROWS]
-    policy = HeaderScope(header.resolve(), (), ())
-    assert std_reexports(rows, policy) == {
+    rows = [dict(r, source=str(header)) if r.get("source") == PUB else r for r in rows]
+    return std_reexports(rows, HeaderScope(header.resolve(), (), ()))
+
+
+def test_gcc_projection_reads_the_plugin_using_rows(tmp_path) -> None:
+    assert _gcc(tmp_path, GCC_ROWS) == {
         "lib::abs": "std::abs",
         "lib::string": "std::string",
     }
+
+
+def test_gcc_reexport_of_unknown_provenance_is_uncertain_not_absent(tmp_path) -> None:
+    """A namespace keeping ``using std::abs;`` after losing its last own
+    declaration: its re-export's provenance is unknown, so the table is
+    ``None``, never a table without ``lib::abs`` (a false removal)."""
+    rows = [
+        {"kind": "compiler"},
+        {"kind": "using", "name": "abs", "target_scope": "std", "scope": _ns("lib")},
+    ]
+    assert _gcc(tmp_path, rows) is None
+    # without a re-export there is nothing to be uncertain about
+    assert _gcc(tmp_path, [{"kind": "compiler"}]) == {}
 
 
 # ---------------------------------------------------------------------------
@@ -220,6 +265,24 @@ def test_a_library_definition_replacing_the_reexport_keeps_the_name() -> None:
         types=[RecordType(name="string", kind="class", qualified_name="lib::string")],
     )
     assert detect_std_reexport_removed(_snap(TABLE), new) == []
+
+
+@pytest.mark.parametrize(
+    "aliases",
+    [
+        {"typedefs_qualified": {"lib::string": "std::string"}},
+        {"typedefs": {"lib::string": "std::string"}},
+    ],
+)
+def test_an_alias_replacing_the_reexport_keeps_the_name(aliases) -> None:
+    """``using string = std::string;`` replacing ``using std::string;``."""
+    old = _snap({"lib::string": "std::string"})
+    assert detect_std_reexport_removed(old, _snap({}, **aliases)) == []
+    # a bare alias in another scope does not stand in for lib::string
+    assert [
+        c.symbol
+        for c in detect_std_reexport_removed(old, _snap({}, typedefs={"string": "x"}))
+    ] == ["lib::string"]
 
 
 # ---------------------------------------------------------------------------

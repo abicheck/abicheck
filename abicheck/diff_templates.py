@@ -75,6 +75,7 @@ from .compare.template_surface import (
     template_angle_depth,
 )
 from .diff_helpers import make_change
+from .model.castxml_spelling_artifacts import has_unresolved_component
 from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
 from .model.evidence_status import ReachabilityState
@@ -1008,14 +1009,13 @@ def detect_unspecified_return_now_named(
         old_rt, new_rt = old_f.return_type, new_f.return_type
         if not _return_is_unspecified(old_rt) or _return_is_unspecified(new_rt):
             continue
-        if not new_rt or new_rt.strip() == "?":
-            continue  # no evidence of the new spelling, not a named type
+        if not new_rt or has_unresolved_component(new_rt):
+            continue  # no (or an unresolved) spelling: not a named type
         qname, _params = key
         desc = (
             f"Function '{qname}' return type changed from unspecified "
-            f"('{old_rt}') to named ('{new_rt}'). Source that held the "
-            f"result with `auto` keeps compiling; the return type is now "
-            f"a nameable part of the interface."
+            f"('{old_rt}') to named ('{new_rt}'). Source that held the result "
+            f"with `auto` keeps compiling; the return type is now a nameable part of the interface."
         )
         changes.append(
             make_change(

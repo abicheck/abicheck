@@ -40,6 +40,6 @@
 | … unresolved relevance | 0 |
 | … deduplicated | 0 |
 
-**Not evaluated:** 20 detector(s) — `elf_layout`, `fingerprint_renames`, `kabi`, `long_double`, `elf`, `pe`, … and 14 more
+**Not evaluated:** 21 detector(s) — `elf_layout`, `fingerprint_renames`, `kabi`, `long_double`, `elf`, `pe`, … and 15 more
 
 **Details:** export the same completed comparison with `-o markdown=abi-report.md -o json=abi-report.json`.

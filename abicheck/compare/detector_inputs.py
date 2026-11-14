@@ -253,6 +253,7 @@ DETECTOR_INPUTS: dict[str, DetectorInputs] = {
     "symbol_version_alias": _NONE,
     "glibcxx_dual_abi": _NONE,
     "runtime_requirements": _NONE,
+    "imported_symbols_unprovided": _NONE,
     "glibcxx_dual_abi_selection": DetectorInputs(
         tolerates={
             "contract": (

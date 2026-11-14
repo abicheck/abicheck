@@ -11,4 +11,9 @@
   and the native GCC plugin its namespace binding tables (rebuild the plugin
   with `python -m abicheck.extract.headers.gcc.build`). The detector compares
   the two tables, and reports nothing when either side has none, such as a
-  DWARF-only or older snapshot.
+  DWARF-only or older snapshot. castxml and GCC record no position for a
+  using-declaration, so a re-export in a namespace with no positioned
+  declaration of its own leaves that side's table unestablished rather than
+  empty; a multi-TU manifest dump unions the per-TU tables (unestablished if
+  any TU's is, or if two TUs bind one name to different targets). An alias
+  (`using string = std::string;`) replacing a re-export keeps the name.

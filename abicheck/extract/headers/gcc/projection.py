@@ -505,29 +505,33 @@ def _namespace_path(row: dict[str, Any]) -> tuple[str, ...] | None:
     return tuple(out)
 
 
-def std_reexports(rows: list[dict[str, Any]], policy: Any) -> dict[str, str]:
+def std_reexports(rows: list[dict[str, Any]], policy: Any) -> dict[str, str] | None:
     """The public headers' ``using std::X;`` re-exports from the plugin's
     ``using`` rows. GCC records no position for a using-declaration, so the
-    declaring namespace must hold a declaration of its own from a public
-    header (``extract/headers/std_reexports.py``)."""
-    from ..std_reexports import reexport_entry
+    declaring namespace's own declarations stand in for its provenance, and
+    a re-export in a namespace with none leaves the table ``None``
+    (``extract/headers/std_reexports.py``, ``namespace_origin``)."""
+    from ..std_reexports import namespace_origin, reexport_entry
 
-    public_namespaces = {
-        path
-        for r in rows
-        if r["kind"] != "using"
-        and policy.public(r.get("source"))
-        and (path := _namespace_path(r))
-    }
-    out: dict[str, str] = {}
+    own_files: dict[tuple[str, ...], list[str | None]] = {}
+    entries: dict[tuple[str, ...], list[tuple[str, str]]] = {}
     for r in rows:
-        if r["kind"] != "using":
-            continue
         path = _namespace_path(r)
-        if not path or path not in public_namespaces:
+        if not path:
+            continue
+        if r["kind"] != "using":
+            own_files.setdefault(path, []).append(r.get("source"))
             continue
         target = "::".join(p for p in (r.get("target_scope"), r.get("name")) if p)
         entry = reexport_entry(path, target)
         if entry is not None:
-            out.setdefault(*entry)
+            entries.setdefault(path, []).append(entry)
+    out: dict[str, str] = {}
+    for path, found in entries.items():
+        origin = namespace_origin(own_files.get(path, ()), policy.public)
+        if origin is None:
+            return None  # the re-exports' provenance cannot be established
+        if origin:
+            for entry in found:
+                out.setdefault(*entry)
     return dict(sorted(out.items()))
