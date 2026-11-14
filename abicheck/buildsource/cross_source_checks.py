@@ -153,6 +153,7 @@ ALL_CHECKS: tuple[str, ...] = (
 # check module (``cross_source_checks_coherence``) can share them without a
 # cycle back to this engine. Re-exported for existing
 # ``from .cross_source_checks import _change`` call sites and tests.
+from ..compare.export_names import default_export_names  # noqa: E402
 from .cross_source_checks_base import (  # noqa: E402
     PROVIDER_BINARY_EXPORTS,
     PROVIDER_BUILD_CONFIG,
@@ -160,7 +161,6 @@ from .cross_source_checks_base import (  # noqa: E402
     PROVIDER_SOURCE_INDEX,
     _change,
     _CheckOutput,
-    _exported_symbol_names,
     not_collected_reason,
 )
 
@@ -328,7 +328,7 @@ def _check_exported_not_public(  # noqa: ARG001 -- runner-table signature (snaps
     providers = [PROVIDER_BINARY_EXPORTS, PROVIDER_PUBLIC_HEADER_AST]
     if not _origin_resolvable(snapshot):
         return _CheckOutput([], "skipped", _NO_PROVENANCE, providers)
-    exported = _exported_symbol_names(snapshot)
+    exported = default_export_names(snapshot)
     if exported is None:
         return _CheckOutput(
             [], "skipped", "no binary export table on the snapshot", providers
@@ -420,7 +420,7 @@ def _check_public_not_exported(
     any consumer of the set.
     """
     providers = [PROVIDER_PUBLIC_HEADER_AST, PROVIDER_BINARY_EXPORTS]
-    exported = _exported_symbol_names(snapshot)
+    exported = default_export_names(snapshot)
     if not _origin_resolvable(snapshot):
         return _CheckOutput([], "skipped", _NO_PROVENANCE, providers)
     if exported is None:
@@ -1173,7 +1173,7 @@ def _check_rtti_for_internal_type(  # noqa: ARG001 -- runner-table signature (sn
     providers = [PROVIDER_BINARY_EXPORTS, PROVIDER_PUBLIC_HEADER_AST]
     if not _origin_resolvable(snapshot):
         return _CheckOutput([], "skipped", _NO_PROVENANCE, providers)
-    exported = _exported_symbol_names(snapshot)
+    exported = default_export_names(snapshot)
     if exported is None:
         return _CheckOutput(
             [], "skipped", "no binary export table on the snapshot", providers
@@ -1399,7 +1399,7 @@ def _l4_reconciled_symbols(snapshot: AbiSnapshot, exported: set[str]) -> set[str
             continue
         # The mapped symbol must be in the CURRENT default export table (directly,
         # or — on Mach-O only — with the single leading underscore stripped as
-        # `_exported_symbol_names` does); otherwise the mapping is stale evidence
+        # `compare.export_names.default_export_names` does); otherwise the mapping is stale evidence
         # from another binary and must not suppress the finding.
         present = sym in exported or (
             is_macho and sym.startswith("_") and sym[1:] in exported

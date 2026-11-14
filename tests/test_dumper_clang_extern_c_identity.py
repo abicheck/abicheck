@@ -334,7 +334,7 @@ def test_parse_variables_leading_underscore_not_extern_c_when_namespaced() -> No
 # underscore baked in on top of the real Itanium mangling (`"__ZN..."`),
 # while castxml's own convention (and every documented "already
 # normalized" contract this field has elsewhere -- macho_metadata.py,
-# crosscheck_base._exported_symbol_names) never carries it. Verified here
+# compare.export_names.default_export_names) never carries it. Verified here
 # via synthetic AST nodes (this environment has no real macOS/clang-Darwin
 # toolchain to compile against) -- see
 # tests/test_crosscheck_language_mode_export_evidence.py for the real-

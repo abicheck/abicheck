@@ -168,17 +168,10 @@ def classify_resolved_pair(
     """
     from ..buildsource.evidence_report import attach_evidence_metrics
     from ..deadline import check as check_deadline
-    from ..policy.common_evidence_depth import (
-        asymmetric_header_evidence_warning,
-        effective_compare_depth,
-        mark_asymmetric_header_gap,
-    )
     from ..policy.depth_evidence_contract import record_depth_evidence_contract_error
-    from ..policy.depth_projection import (
-        header_scope_excluded_by_depth,
-        project_pair_to_depth,
-    )
+    from ..policy.depth_projection import header_scope_excluded_by_depth
     from . import abi3_audit
+    from .asymmetric_header_evidence import project_pair_for_compare
     from .compare_policy import compare_snapshots
     from .pair_evidence import fold_pair_evidence, load_probe_matrix_changes
 
@@ -199,11 +192,10 @@ def classify_resolved_pair(
     # to the requested rung. The floor is the exit-7 axis recorded below.
     # Operands of different evidence rungs (headers on one side only) are
     # judged at the rung both reach, so an evidence difference never reads
-    # as a library change (``policy.common_evidence_depth``).
-    depth = effective_compare_depth(request.depth, pair.old, pair.new)
-    old, new = project_pair_to_depth(pair.old, pair.new, depth)
-    if request.depth is None and depth is not None:
-        mark_asymmetric_header_gap(pair.old, old, new)
+    # as a library change (``workflows.asymmetric_header_evidence``).
+    old, new, depth, asymmetry_warning = project_pair_for_compare(
+        pair.old, pair.new, request.depth
+    )
     # A depth below `headers` that left no header surface to scope against
     # puts public-header scoping outside the requested scope: classify the
     # pair as a binary-only comparison would be, rather than reporting a
@@ -274,8 +266,8 @@ def classify_resolved_pair(
         old_is_live=operands.old_live,
         new_is_live=operands.new_live,
     )
-    if request.depth is None and depth is not None:
-        result.coverage_warnings.append(asymmetric_header_evidence_warning(pair.old))
+    if asymmetry_warning is not None:
+        result.coverage_warnings.append(asymmetry_warning)
     _attach_pair_report_fields(request, pair, result, old, new, operands)
     return ClassifiedPair(result, old, new, folded.abi3_failure)
 

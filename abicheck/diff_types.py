@@ -296,6 +296,7 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             t, exclude_stdlib=excl, directly_referenced=directly_referenced
         )
     )
+    # No phantom TYPE_REMOVED: RD2-5 (stripped new side), and a specialization the new header only stopped instantiating (compare/template_instance_absence).
     unconfirmed = removal_unconfirmed(new, _removals_are_unconfirmed(old, new))
     absence = TemplateInstanceAbsence(new, old)
     old_funcs = old.function_map
@@ -1107,8 +1108,7 @@ def _diff_enums(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         for e in new.declarations.enums
         if not _is_non_abi_surface_type(e.name, exclude_stdlib_namespaces=excl)
     )
-    # A wholly-removed (or added) enum is in snap.enums, not snap.types, so
-    # _diff_types() never sees it (case78); removals keep its stripped-binary guard.
+    # A wholly-removed (or added) enum is stored in snap.enums, NOT snap.types, so the TYPE_REMOVED loop in _diff_types() never sees it, so the removal went silently undetected (case78). Emit it here, guarded by the same stripped-binary suppression _diff_types uses so a stripped new side can't manufacture phantom removals.
     suppress_removed = _removals_are_unconfirmed(old, new)
     underlying_size_changes = enum_underlying_size_detector(old, new)
 

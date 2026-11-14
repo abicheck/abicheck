@@ -862,11 +862,16 @@ class _DwarfSnapshotBuilder:
 
         # Real vptr offset, read from the compiler's own artificial vptr member when this class introduces one. A class that only extends or overrides an already-inherited vtable (no local vptr member, even when every one of its own declared methods is virtual) is left None here and resolved in a later pass, once every record type in this binary is known — see extract.dwarf_vptr_resolution.finalize_vptr_offsets's docstring for why that can't be done eagerly, here, per-type. Tri-state by design: None also covers genuinely non-polymorphic and "only reachable through a virtual base" (whose offset is dynamic, never a fixed one this model can express), so the diff can tell "gained a vptr" (None → a real offset) from "vptr stayed".
         vptr_offset_bits = own_vptr_offset_bits
-        # is_standard_layout / is_trivially_copyable / data_size_bits stay None:
-        # "not polymorphic, no virtual bases" is no sound standard-layout signal
-        # (access control and member-bearing bases are invisible here: Codex
-        # review #345), and DWARF can't tell a defaulted special member from a
-        # user-provided one.
+        # is_standard_layout / is_trivially_copyable / data_size_bits are
+        # deliberately *not* derived here. "not polymorphic and no virtual bases"
+        # is NOT a sound standard-layout signal: a class can already be
+        # non-standard-layout for reasons DWARF doesn't expose here (mixed access
+        # control, member-bearing bases). Such a class would be wrongly marked
+        # True, then flip to False when it gains a virtual function — emitting a
+        # spurious STANDARD_LAYOUT_LOST for a trait that was never present (Codex
+        # review #345). Likewise DWARF can't tell a defaulted special member from
+        # a user-provided one. Without a real trait signal these stay None and the
+        # detector stays quiet rather than guessing.
 
         rec = RecordType(
             name=qualified,

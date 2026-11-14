@@ -660,8 +660,8 @@ def classify_change_surface(
     all_types = unions.all_types
 
     sym = change.symbol or ""
-    # A type finding's ``symbol`` (``Foo``) can collide with a hidden ``Foo``
-    # constructor/helper symbol: type reachability decides, never the symbols.
+    # Type-level findings must not be classified via the symbol universe first: a public type such as ``Foo`` can legitimately collide with a hidden
+    # constructor/destructor/helper symbol named ``Foo``. In that case the layout change's ``symbol`` still denotes the type, so reachability decides.
     tl = change.kind.value in TYPE_LEVEL_KIND_NAMES
     type_level_finding = tl or names_a_known_type(change, sym, all_types)
 

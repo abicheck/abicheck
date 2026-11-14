@@ -25,9 +25,13 @@ from collections.abc import Iterable
 
 from ..model.change import Change
 from ..model.change_catalog.assembled import REGISTRY
+from ..model.change_catalog.dimensions import ChangeEntity
 from ..model.execution_cache import memoized
 
 __all__ = ["names_a_known_type"]
+
+#: The catalog entities whose findings name a type.
+_TYPE_ENTITIES = frozenset({ChangeEntity.TYPE, ChangeEntity.ENUM})
 
 
 def names_a_known_type(change: Change, sym: str, all_types: Iterable[str]) -> bool:
@@ -43,11 +47,11 @@ def names_a_known_type(change: Change, sym: str, all_types: Iterable[str]) -> bo
     if not sym or sym not in all_types:
         return False
     if change.entity_discriminator is not None:
-        return str(change.entity_discriminator) in ("type", "enum")
+        return change.entity_discriminator in _TYPE_ENTITIES
     return _type_level_kind(change.kind.value)
 
 
 @memoized
 def _type_level_kind(kind_value: str) -> bool:
     """Whether the catalog files *kind_value* under a type or enum entity."""
-    return str(REGISTRY.entity_for(kind_value)) in ("type", "enum")
+    return REGISTRY.entity_for(kind_value) in _TYPE_ENTITIES

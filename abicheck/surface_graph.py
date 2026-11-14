@@ -563,27 +563,18 @@ def _undocumented_exports(
     declaration count applies -- ``EXPORT_ONLY`` declarations over the
     exported public ones.
     """
-    from .buildsource.cross_source_checks_base import (
-        _exported_symbol_names as exported_symbol_names,
-    )
-    from .buildsource.export_account_decision import (
-        account_export,
-        accounting_context,
-    )
+    from .buildsource.export_account_decision import undocumented_export_count
+    from .compare.export_names import default_export_names
 
     decls: list[Function | Variable] = [
         *snap.declarations.functions,
         *snap.declarations.variables,
     ]
-    exported = exported_symbol_names(snap) if snap.from_headers else None
+    exported = default_export_names(snap) if snap.from_headers else None
     if exported is not None and any(
         d.origin == ScopeOrigin.PUBLIC_HEADER for d in decls
     ):
-        ctx = accounting_context(snap, frozenset(exported))
-        undocumented = sum(
-            1 for sym in exported if not account_export(sym, ctx).documented
-        )
-        return undocumented, len(exported)
+        return undocumented_export_count(snap, frozenset(exported)), len(exported)
     legacy = sum(
         1
         for d in decls

@@ -29,12 +29,14 @@ from abicheck.model import (
 )
 from abicheck.model.elf_facts import ElfMetadata, ElfSymbol
 from abicheck.policy.common_evidence_depth import (
-    asymmetric_header_evidence_warning,
     common_evidence_depth,
     effective_compare_depth,
 )
 from abicheck.policy.depth_projection import project_pair_to_depth
 from abicheck.serialization import save_snapshot
+from abicheck.workflows.asymmetric_header_evidence import (
+    asymmetric_header_evidence_warning,
+)
 
 _EXPORTS = ("_ZN3KLUD2Ev", "_ZN3KLUD1Ev", "_Z7klu_getP3KLD")
 
@@ -176,7 +178,7 @@ def test_cli_compare_of_an_asymmetric_pair_is_not_a_break(
 
 @pytest.mark.parametrize("headers_side", ["old", "new"])
 def test_only_the_header_side_records_the_set_aside_evidence(headers_side: str) -> None:
-    from abicheck.policy.common_evidence_depth import (
+    from abicheck.workflows.asymmetric_header_evidence import (
         ASYMMETRIC_HEADER_GAP,
         mark_asymmetric_header_gap,
     )
