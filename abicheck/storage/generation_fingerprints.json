@@ -8,7 +8,7 @@
       "abicheck/dwarf_advanced.py": "2addcbd63e9263e9f89b9dc7bc252baa63c5dad332d8560cf690fb2437bf6c08",
       "abicheck/dwarf_metadata.py": "d1c92f3ea5a225bab409226b5fe10b66cd0705454bce2e6156949a5f7ab0a936",
       "abicheck/dwarf_presence.py": "7e73580ec7a02fdf24e3815cb89e42aa6fe00e46e8cda6b7fe9d547f06ac3f06",
-      "abicheck/dwarf_snapshot.py": "c05ccb1ffee98153a500ff7cc1b8382d42936c357dffde0fb85145e878016e22",
+      "abicheck/dwarf_snapshot.py": "435e4a340922f7d0cab3ba5e2cb9a9cfe405eceb0158468af4efd5f853e6cf5d",
       "abicheck/dwarf_snapshot_datasources.py": "e337f8be3a8ae16350c0639d0be10670d4d5d1197108659fa210fcbbf8a5bdde",
       "abicheck/dwarf_unified.py": "573a50584f1c4f59d18034ffc561a4008d1802abc4db2c99eb01d3dd5b3438c3",
       "abicheck/dwarf_utils.py": "7d94088db18ebd8e734e6259c5fa784709fd19417ad02c3e243c8b41a18212eb",
@@ -231,9 +231,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "557500ddd3d62b679e3d4ace926cc5fcdaf487565ff436af6cde54c5b5138d34",
+    "fingerprint": "7bb2c6035cb58082b4e8a7d262cda74ed7e34d334922ab216c41a5ba80a2e419",
     "generation": 71,
-    "reason": "review-2063 follow-ups: restored comment in dwarf_snapshot; header_export_binding calls AbiSnapshot.invalidate_indexes() instead of clearing the same private caches; extraction output unchanged"
+    "reason": "review-2063 follow-ups: header_export_binding calls AbiSnapshot.invalidate_indexes() instead of clearing the same private caches; extraction output unchanged"
   },
   "resolver": {
     "files": {
