@@ -25,7 +25,13 @@ from abicheck.model.change_catalog.kinds import ChangeKind
 
 pytestmark = pytest.mark.integration
 
-_COMPILERS = [c for c in ("g++", "clang++") if shutil.which(c)]
+# The oracle is the Itanium C++ ABI. On Windows ``clang++`` targets the MSVC
+# ABI (and links no ELF-style -shared -fPIC DSO), so only MinGW g++ applies.
+_COMPILERS = [
+    c
+    for c in ("g++", "clang++")
+    if shutil.which(c) and not (sys.platform == "win32" and c == "clang++")
+]
 _DARWIN = sys.platform == "darwin"
 
 # The DWARF-only lane reads record layouts from the library's own DWARF.

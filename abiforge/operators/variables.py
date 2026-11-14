@@ -15,7 +15,7 @@ from __future__ import annotations
 from typing import Any
 
 from abiforge.model.config import Config
-from abiforge.model.opkit import EditOp, _merge, _set
+from abiforge.model.opkit import EditOp, Rule, _merge, _set
 from abiforge.operators.layout import _replace
 
 __all__ = ["VARIABLE_OPERATORS"]
@@ -75,6 +75,20 @@ VARIABLE_OPERATORS: tuple[EditOp, ...] = (
         "a weak definition in a DSO still satisfies a consumer's reference",
         expected=frozenset({"SYMBOL_BINDING_CHANGED"}),
         min_evidence="binary",
+        rules=(
+            Rule(
+                lambda c: c.objfmt == "pe",
+                {
+                    "expected": frozenset(),
+                    "any_of": (frozenset({"VAR_VISIBILITY_CHANGED"}) | _REMOVED,),
+                    "verdict_min": "BREAKING",
+                    "verdict_max": None,
+                },
+                "PE (MinGW): COFF has no weak dynamic binding, and ld's automatic "
+                "DLL export leaves the weak definition out of the export table, "
+                "so a consumer importing g_vweak fails to load",
+            ),
+        ),
         **_AT_MOST_RISK,
     ),
     _op(
@@ -112,6 +126,15 @@ VARIABLE_OPERATORS: tuple[EditOp, ...] = (
         ),
         min_evidence="binary",
         precondition=_cxx17,
+        rules=(
+            Rule(
+                lambda c: c.objfmt == "pe",
+                {"any_of": (), "verdict_min": "NO_CHANGE"},
+                "PE: COFF has no symbol binding to change; the inline variable is "
+                "a COMDAT the DLL still exports under the same name, so nothing "
+                "a consumer binds to moves",
+            ),
+        ),
         **_AT_MOST_RISK,
     ),
     _op(

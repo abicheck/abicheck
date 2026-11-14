@@ -241,13 +241,14 @@ def test_real_library_with_headers_on_one_side_is_unchanged(
     assert report["changes"] == [], [
         (c["kind"], c.get("symbol")) for c in report["changes"]
     ]
-    if sys.platform != "darwin":
-        # A -g build's DWARF gives both sides type evidence at the common rung.
+    if sys.platform == "linux":
+        # ELF + DWARF: both sides carry type evidence at the common rung.
         assert (report["verdict"], result.exit_code) == ("NO_CHANGE", 0)
     else:
-        # Mach-O keeps DWARF in the object files and abicheck reads DWARF
-        # types from ELF only, so the binary-rung pair has no type evidence on
-        # either side: an unconfirmed no-change, never a clean pass or a break.
+        # abicheck reads DWARF types from ELF only (Mach-O keeps DWARF in the
+        # object files; a MinGW PE DLL's DWARF is not read for types), so the
+        # binary-rung pair has no type evidence on either side: an unconfirmed
+        # no-change, never a clean pass or a break.
         assert (report["verdict"], result.exit_code) == ("UNCONFIRMED", 1)
         assert report["unconfirmed"]["observed_verdict"] == "NO_CHANGE"
         assert report["unconfirmed"]["sides_without_type_evidence"] == ["old", "new"]
