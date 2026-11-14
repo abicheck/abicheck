@@ -327,3 +327,22 @@ C++-mangling gap on PE remains a reduced-confidence fallback (documented, not so
 - ADR-020a — Build-Context Aware Header Extraction (which defers "public header scope
   resolution" to this ADR; correct build context is a prerequisite for accurate provenance)
 - `abicheck/internal_leak.py`, `abicheck/dumper_castxml.py`, `abicheck/diff_symbols.py`
+
+## Amendment (2026-11-14, accepted): a type finding is judged by type reachability whenever its symbol names a known type
+
+D5's surface classification routes a finding to *type* reachability or to
+*symbol* reachability. `TYPE_LEVEL_KIND_NAMES` listed the kinds known to
+carry a type name in `symbol`; every other type/enum kind fell to the
+symbol path. A class's inlined, unexported constructor shares the class's
+bare name, so the symbol path demoted a reachable type's finding as
+`not-exported` — hiding a public break.
+
+- A finding is also routed to type reachability when its kind's catalog
+  entity is `type` or `enum` (or its `entity_discriminator` says so, for a
+  polymorphic kind) **and** its `symbol` is a type name known on either side
+  (`policy/type_named_finding.names_a_known_type`).
+- Both conditions are facts, not guesses about what `symbol` holds: a
+  type-entity finding whose symbol is not a known type keeps the symbol
+  path.
+- This only changes which reachability question is asked; it never removes
+  a finding (D5's anti-hiding rule).

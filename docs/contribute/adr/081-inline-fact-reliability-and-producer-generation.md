@@ -120,3 +120,18 @@ in-class, the symbol still exported weak) as a source break (edit corpus
 `key_function_inlined`). `FUNC_BECAME_INLINE` now defaults to
 `COMPATIBLE_WITH_RISK` (rebuilt callers carry their own copy of the body),
 which is the verdict this ADR's Context already assumed.
+
+### Without export-table evidence (2026-11-14)
+
+The verdict above does not depend on the export table: becoming inline is
+`COMPATIBLE_WITH_RISK` with or without one. What the table decides is the
+separate break. The detector reads the new side's export table through
+`compare/export_names.default_export_names` (ELF, PE and Mach-O alike; it
+read only `.dynsym` before, so a PE or Mach-O table was ignored):
+
+- table read, symbol present — "still exported";
+- table read, symbol absent — "no longer exported", and the break is
+  reported by `func_removed`/`func_visibility_changed`;
+- no table read (headers only, a stripped or unread table) — the finding
+  says the export was *not assessed*. It neither claims the export survived
+  nor fabricates a removal (weaker evidence narrows the conclusion).

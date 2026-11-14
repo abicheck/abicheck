@@ -164,3 +164,29 @@ restoration, consistent with ADR-068's "hard removal, no deprecation aliases".
 - **Fix the mangled-name scan by lengthening the component list.** Rejected:
   the defect is positional, not lexical — no list of components distinguishes
   a parameter's namespace from the owner's.
+
+## Amendment (2026-11-14, accepted): a CPU-dispatch roll-up is a risk only when headers prove every member export-only
+
+`CPU_DISPATCH_ISA_DROPPED` folds the removal of a group of ISA-suffixed
+variants (`kmeans_compute_avx512`, `_avx2`, …) into one finding. Its catalog
+default is `COMPATIBLE_WITH_RISK`: dispatch variants are normally reached
+through a resolver, never named by a caller. That default rests on the
+variants being implementation detail, and the ISA suffix is a name shape —
+by this ADR's rule it cannot establish that.
+
+- The roll-up keeps `COMPATIBLE_WITH_RISK` only when header evidence proves
+  every removed member export-only: no member is a header declaration
+  (`ScopeOrigin.PUBLIC_HEADER`, or — with no public-header set declared —
+  an `UNKNOWN`-origin function the header backend parsed, i.e. one that
+  carries `source_header`).
+- Otherwise the roll-up is graded `BREAKING` through `effective_verdict`,
+  disclosed as `modulation_reason = "member_not_proven_export_only"`,
+  `modulation_rule = "cpu_dispatch_isa.public_member"`
+  (`compare/cpu_dispatch_public_members.public_member_grade`). A DWARF-only
+  function has no `source_header` and stays export-only.
+- Missing header evidence never lowers a removal's grade: a run without
+  headers cannot prove a member export-only, so a removed declared member
+  is a break, exactly as its ungrouped `func_removed` would be.
+- The grouped parent subsumes both removal spellings
+  (`FUNC_REMOVED`, `FUNC_REMOVED_ELF_ONLY`), so the fold is the same at
+  every evidence level.
