@@ -520,6 +520,8 @@ repository and to evaluate other checkers.
 | Nightly | t=2 covering array, ~5–10k cells, `ABICHECK_EDIT_CORPUS_SHARD=K/N` | ≤ 2 h on 8 shards | `tests/test_abi_edit_corpus_matrix.py` |
 | Weekly | t=3 subsets, macOS and Windows runners | ≤ 6 h | new workflow |
 
+**Measured in B0 (WS-6 PR 1, gcc 13, `c17`/`c++17`, `-O0`, one serial process, 4 vCPU shared).** 357 applicable (operator, seed) cells of the default matrix, built and asked of the checker: mean 0.73 s per cell for the default `{B,D,H}` cell and 0.75 s for the stripped `{B,H}` cell (the first pass ran alongside a second suite, so these are upper bounds). The gating PR tier (`tests/test_abi_edit_corpus.py -m integration`) takes about 21 min serially, 1413 passed / 736 skipped / 16 xfailed. The PR-tier budget above (≤ 25 min at 4×, sharded) holds with the current per-cell cost; the `{B,H}` cell is not in the PR budget yet (it is a nightly, non-gating lane).
+
 ### 5.5 Exhaustive versus sampled
 
 - **Exhaustive:**
@@ -775,7 +777,7 @@ WS-0 (#2065, plan PR) ──┬──> WS-1 ADR-093 + observable_at (A0, A1)
 | WS-3 | Pure virtual, key function, vtable home | A6 | not started | — |
 | WS-4 | Platform facts | A7 | not started | — |
 | WS-5 | Relations pass, detector DAG, fact diff | A8, A9, A0 implementation | not started | — |
-| WS-6 | abiforge evidence axis, `observable_at` on operators, minimum-level cells | B0, B1, B2 | not started | — |
+| WS-6 | abiforge evidence axis, `observable_at` on operators, minimum-level cells | B0, B1, B2 | in review | this PR (PR 1, B0) |
 | WS-7 | abiforge self-testing, no-growth gate | §6, §7.2 | not started | — |
 | WS-8 | Configuration space, standards, covering arrays, metric | B3, B4, §5 | not started | — |
 
