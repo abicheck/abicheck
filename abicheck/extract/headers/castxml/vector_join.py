@@ -22,6 +22,7 @@ from ....errors import SnapshotError
 from ....storage.ast_cache_location import ast_cache_store
 from ... import cache_dep_manifest
 from ...extraction_limitations import with_join_gap
+from ..clang.abi_target import compile_binary_abi_tokens
 from ..clang.backend import clang_header_dump
 from .function_type_cc import (
     files_mention_calling_convention,
@@ -130,7 +131,17 @@ def join_vector_spellings(
                 gcc_path=gcc_path,
                 gcc_prefix=gcc_prefix,
                 gcc_options=gcc_options,
-                gcc_option_tokens=gcc_option_tokens,
+                # The binary's C++ ABI, as the primary clang parse uses
+                # (abi_target): a Windows clang's MSVC default cannot parse a
+                # MinGW library's headers.
+                gcc_option_tokens=compile_binary_abi_tokens(
+                    compiler,
+                    gcc_path=gcc_path,
+                    gcc_prefix=gcc_prefix,
+                    gcc_options=gcc_options,
+                    tokens=gcc_option_tokens,
+                    exported=exported_symbols,
+                ),
                 sysroot=sysroot,
                 nostdinc=nostdinc,
                 lang=lang,

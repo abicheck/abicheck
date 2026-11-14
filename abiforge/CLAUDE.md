@@ -49,7 +49,7 @@ Purpose and claims: `README.md`.
   harness writes each side's `compile_commands.json` and the adapter dumps
   through the typed `--build-info` workflow. `sources=True` adds L4/L5 evidence
   the same way (`--sources`: each side's source tree, with its compile DB); its
-  operators also need `header_backend="clang"`, the only backend whose source
+  operators also need the clang header backend (`Config.header_backend`), the only backend whose source
   replay records macros, bodies and call edges. A `sources` tree is built
   under a `src/` project directory, so the two sides' paths compare across
   checkouts (abicheck anchors a path at its last project-layout segment). A (build, consumer) mix that cannot work is an explicit

@@ -30,6 +30,7 @@ from ....model.arithmetic_type_spellings import is_arithmetic_spelling
 from ....storage.ast_cache_location import ast_cache_store
 from ... import cache_dep_manifest
 from ...extraction_limitations import with_join_gap
+from ..clang.abi_target import compile_binary_abi_tokens
 from ..clang.ast_inner import ast_inner
 from ..clang.backend import clang_header_dump
 from ..clang.expr import _initializer_value
@@ -356,7 +357,17 @@ def join_variable_templates(
                 gcc_path=gcc_path,
                 gcc_prefix=gcc_prefix,
                 gcc_options=gcc_options,
-                gcc_option_tokens=gcc_option_tokens,
+                # The binary's C++ ABI, as the primary clang parse uses
+                # (abi_target): a Windows clang's MSVC default cannot parse a
+                # MinGW library's headers.
+                gcc_option_tokens=compile_binary_abi_tokens(
+                    compiler,
+                    gcc_path=gcc_path,
+                    gcc_prefix=gcc_prefix,
+                    gcc_options=gcc_options,
+                    tokens=gcc_option_tokens,
+                    exported=exported_symbols,
+                ),
                 sysroot=sysroot,
                 nostdinc=nostdinc,
                 lang=lang,

@@ -40,7 +40,7 @@ from typing import Any
 from ..model import AbiSnapshot, Function, ScopeOrigin
 from ..model.change_catalog.registry import Verdict
 from ..model.mangled_name import msvc_scope_components
-from .template_surface import qualified_name_lookup
+from .template_surface import qualified_declaration_name, qualified_name_lookup
 
 PUBLIC_MEMBER_RULE = "cpu_dispatch_isa.public_member"
 
@@ -67,6 +67,22 @@ def _header_declared(fn: Function) -> bool:
 def _qualified_spelling(name: str) -> str:
     """*name* without a parameter list: ``ns::f(int)`` -> ``ns::f``."""
     return name.split("(", 1)[0].strip()
+
+
+def _declared_qualified(fn: Function) -> str:
+    """*fn*'s namespace-qualified name without its parameter list.
+
+    castxml spells a function by its bare leaf (``kmeans_compute_avx512``,
+    not ``mylib::kmeans_compute_avx512``), so the scope comes from the
+    declaration's own mangling: demangled when Itanium, parsed structurally
+    when MSVC. A raw MSVC export is keyed by its full qualified name, so the
+    header side must be too, or no namespaced declaration ever matches.
+    """
+    if fn.mangled.startswith("?"):
+        msvc = _msvc_qualified(fn.mangled)
+        if msvc:
+            return msvc
+    return _qualified_spelling(qualified_declaration_name(fn.name, fn.mangled))
 
 
 def _msvc_qualified(export_id: str) -> str | None:
@@ -98,7 +114,7 @@ def header_declared_members(
         if fn.mangled:
             mangled |= {fn.mangled, f"_{fn.mangled}"}
         if fn.name:
-            declared_by_name[_qualified_spelling(fn.name)] += 1
+            declared_by_name[_declared_qualified(fn)] += 1
     msvc_name = {mid: _msvc_qualified(mid) for mid in ids if mid not in mangled}
     exports_by_name = Counter(n for n in msvc_name.values() if n)
 
