@@ -167,7 +167,7 @@
    "known_gap_observed": [
     "NO_CHANGE"
    ],
-   "min_evidence": "L0",
+   "min_evidence": "L1",
    "platforms": [
     "linux",
     "macos"
@@ -190,7 +190,7 @@
    "known_gap_observed": [
     "NO_CHANGE"
    ],
-   "min_evidence": "L0",
+   "min_evidence": "L1",
    "platforms": [
     "linux",
     "macos"
@@ -4288,7 +4288,7 @@
    "known_gap_observed": [
     "NO_CHANGE"
    ],
-   "min_evidence": "L0",
+   "min_evidence": "L1",
    "platforms": [
     "linux",
     "macos",

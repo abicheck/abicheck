@@ -22,8 +22,8 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
-| L0 | 131 | 72 |
-| L1 | 62 | 7 |
+| L0 | 128 | 72 |
+| L1 | 65 | 7 |
 | L2 | 77 | 39 |
 | L3 | 15 | 5 |
 | L4 | 10 | 2 |
@@ -87,8 +87,6 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `elf_machine_changed` | BREAKING | 0 | 0 | 0 |
 | `elf_osabi_changed` | RISK | 0 | 0 | 0 |
 | `executable_stack_removed` | COMPATIBLE | 2 | 0 | 0 |
-| `experimental_graduated` | COMPATIBLE | 1 | 0 | 0 |
-| `experimental_removed_without_replacement` | API_BREAK | 1 | 0 | 0 |
 | `exported_object_alignment_reduced` | RISK | 0 | 0 | 5 |
 | `func_added` | COMPATIBLE | 9 | 0 | 8 |
 | `func_added_elf_only` | COMPATIBLE | 0 | 0 | 0 |
@@ -106,7 +104,6 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `imported_symbol_removed` | COMPATIBLE | 0 | 0 | 0 |
 | `imported_symbol_unprovided` | BREAKING | 0 | 0 | 1 |
 | `inline_namespace_moved` | BREAKING | 1 | 0 | 0 |
-| `inline_namespace_version_bumped` | BREAKING | 1 | 0 | 0 |
 | `interpreter_changed` | RISK | 0 | 0 | 0 |
 | `kabi_crc_changed` | BREAKING | 1 | 0 | 0 |
 | `kabi_export_type_changed` | API_BREAK | 0 | 0 | 0 |
@@ -209,6 +206,8 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `enum_member_renamed` | API_BREAK | 1 | 0 | 0 |
 | `enum_member_value_changed` | BREAKING | 2 | 0 | 0 |
 | `enum_underlying_size_changed` | BREAKING | 1 | 1 | 0 |
+| `experimental_graduated` | COMPATIBLE | 1 | 0 | 0 |
+| `experimental_removed_without_replacement` | API_BREAK | 1 | 0 | 0 |
 | `field_became_const` | API_BREAK | 1 | 0 | 0 |
 | `field_became_volatile` | RISK | 1 | 0 | 0 |
 | `field_bitfield_changed` | BREAKING | 1 | 0 | 0 |
@@ -222,6 +221,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `func_virtual_added` | BREAKING | 1 | 0 | 0 |
 | `func_virtual_became_pure` | BREAKING | 1 | 0 | 1 |
 | `graph_coverage_insufficient_for_suppression` | COMPATIBLE | 0 | 0 | 0 |
+| `inline_namespace_version_bumped` | BREAKING | 1 | 0 | 0 |
 | `integer_model_changed` | BREAKING | 1 | 0 | 0 |
 | `param_pointer_level_changed` | BREAKING | 1 | 0 | 0 |
 | `polymorphic_type_non_virtual_dtor` | RISK | 1 | 0 | 0 |

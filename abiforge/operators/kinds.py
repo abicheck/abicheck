@@ -115,7 +115,9 @@ KIND_OPERATORS: tuple[EditOp, ...] = (
         "the inline namespace is bumped to v2: every symbol in it re-mangles, "
         "so binaries built against v1 no longer find kv::kv_f",
         expected=frozenset({"INLINE_NAMESPACE_VERSION_BUMPED"}),
-        **_BINARY,
+        # A source-namespace fact: abicheck reads it from declarations (DWARF
+        # or headers), never from a bare export table (in_source_declaration_index).
+        min_evidence="dwarf",
     ),
     _op(
         "experimental_api_graduated",
@@ -144,7 +146,9 @@ KIND_OPERATORS: tuple[EditOp, ...] = (
         "kx::experimental::kx_g is removed with no stable replacement: binaries "
         "that used the experimental API no longer load",
         expected=frozenset({"EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT"}),
-        **_BINARY,
+        # A source-namespace fact: abicheck reads it from declarations (DWARF
+        # or headers), never from a bare export table (in_source_declaration_index).
+        min_evidence="dwarf",
     ),
     _op(
         "function_became_customization_object",

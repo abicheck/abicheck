@@ -250,15 +250,15 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "glibcxx_dual_abi_changed": "L0",
     "abi_tag_changed": "L0",
     "inline_namespace_moved": "L0",
-    "inline_namespace_version_bumped": "L0",
+    "inline_namespace_version_bumped": "L1",
     "tag_type_renamed": "L0",
     # The roll-up is seen in the export table alone (L0), but its BREAKING
     # grade needs the removed members' public-header declarations (L2);
     # binary-only it reads COMPATIBLE_WITH_RISK, the wrong verdict.
     "cpu_dispatch_isa_dropped": "L2",
     "sycl_overload_set_removed": "L0",
-    "experimental_graduated": "L0",
-    "experimental_removed_without_replacement": "L0",
+    "experimental_graduated": "L1",
+    "experimental_removed_without_replacement": "L1",
     "bundle_intra_dep_removed": "L0",
     "bundle_unresolved_intra_dependency": "L0",
     "bundle_intra_dep_signature_changed": "L0",

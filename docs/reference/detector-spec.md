@@ -95,8 +95,8 @@ One row per `ChangeKind` (431 total). Columns fuse the verdict partition (`check
 | `exceptions_mode_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `exceptions_mode_changed` | [case130](examples/case130_exceptions_mode_flip.md) |
 | `executable_stack` | quality | `COMPATIBLE` | `warning` | unspecified | `executable_stack` | — |
 | `executable_stack_removed` | quality | `COMPATIBLE` | `warning` | L0 | `executable_stack_removed` | [case136](examples/case136_executable_stack_removed.md), [case49](examples/case49_executable_stack.md) |
-| `experimental_graduated` | addition | `COMPATIBLE` | `warning` | L0 | `experimental_graduated` | [case99](examples/case99_experimental_graduated.md) |
-| `experimental_removed_without_replacement` | api_break | `API_BREAK` | `warning` | L0 | `experimental_removed_without_replacement` | [case100](examples/case100_experimental_removed_without_replacement.md) |
+| `experimental_graduated` | addition | `COMPATIBLE` | `warning` | L1 | `experimental_graduated` | [case99](examples/case99_experimental_graduated.md) |
+| `experimental_removed_without_replacement` | api_break | `API_BREAK` | `warning` | L1 | `experimental_removed_without_replacement` | [case100](examples/case100_experimental_removed_without_replacement.md) |
 | `exported_not_public` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `exported_not_public` | [case143](examples/case143_audit_accidental_export.md), [case150](examples/case150_xcheck_export_public_pair.md) |
 | `exported_object_alignment_reduced` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `exported_object_alignment_reduced` | — |
 | `exported_symbol_source_owner_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L5 | `exported_symbol_source_owner_changed` | [case162](examples/case162_symbol_source_owner_changed.md) |
@@ -179,7 +179,7 @@ One row per `ChangeKind` (431 total). Columns fuse the verdict partition (`check
 | `inline_body_references_renamed_member` | breaking | `BREAKING` | `error` | L2 | `inline_body_references_renamed_member` | [case89](examples/case89_inline_accessor_renamed_pimpl_member.md) |
 | `inline_function_removed` | api_break | `API_BREAK` | `warning` | L4 | `inline_function_removed` | [case157](examples/case157_inline_function_removed.md) |
 | `inline_namespace_moved` | breaking | `BREAKING` | `error` | L0 | `inline_namespace_moved` | [case71](examples/case71_inline_namespace_moved.md) |
-| `inline_namespace_version_bumped` | breaking | `BREAKING` | `error` | L0 | `inline_namespace_version_bumped` | [case101](examples/case101_inline_namespace_version_bumped.md) |
+| `inline_namespace_version_bumped` | breaking | `BREAKING` | `error` | L1 | `inline_namespace_version_bumped` | [case101](examples/case101_inline_namespace_version_bumped.md) |
 | `instantiation_missing_from_binary` | breaking | `BREAKING` | `error` | L2 | `instantiation_missing_from_binary` | [case79](examples/case79_missing_template_instantiation.md) |
 | `integer_model_changed` | breaking | `BREAKING` | `error` | L1 | `integer_model_changed` | [case112](examples/case112_lp64_ilp64.md) |
 | `internal_symbol_required_by_public_api` | breaking | `BREAKING` | `error` | L5 | `internal_symbol_required_by_public_api` | [case192](examples/case192_call_graph_break_survives_suppression.md) |
