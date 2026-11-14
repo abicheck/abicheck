@@ -28,6 +28,7 @@ from .compare.declaration_facts import (
     deprecation_changes,
     records_variable_access,
 )
+from .compare.declaration_removed_export_kept import finish_function_changes
 from .compare.edge_query import export_table_covered
 from .compare.elf_only_demangle import (
     elf_only_demangled_name,
@@ -59,12 +60,10 @@ from .compare.parameter_facts import (
     parameter_default_changes,
     parameter_rename_changes,
     pointee_qualifier_changes,
-    pointer_level_changes,
     restrict_changes,
     return_pointee_qualifier_changes,
     va_list_changes,
 )
-from .compare.parameter_replacement import pair_parameter_replacements
 from .compare.public_surface import (
     is_extern_c_function,
     reconciled_function_surfaces,
@@ -658,7 +657,7 @@ def _diff_functions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         )
     )
 
-    return pair_parameter_replacements(changes, old, new)
+    return finish_function_changes(changes, old, new)
 
 
 def _converting_ctors_by_class(
@@ -933,13 +932,8 @@ def _diff_pointer_levels(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     for mangled, f_old, f_new, v_old, v_new in _parameter_view_pairs(
         old, new, old_map, new_map
     ):
-        changes += pointer_level_changes(
-            mangled,
-            f_old.name,
-            v_old,
-            v_new,
-            entity_id=f_old.entity_id or f_new.entity_id,
-            params_unconfirmed=params_unconfirmed,
+        changes += _export_transition.unexported_aware_pointer_levels(
+            mangled, f_old, f_new, v_old, v_new, params_unconfirmed=params_unconfirmed
         )
 
     return changes

@@ -16,6 +16,20 @@ re-verification status line (2026-10-09, `456989f`). Do not re-open an
 entry from here without reproducing it on current `main`; record a new
 gap on the main page instead.
 
+### A function that leaves the public header but stays exported reads as a binary break (closed 2026-11-14)
+
+**Status (2026-11-14): CLOSED.** `func_removed` is still reported for the contract removal, and graded API_BREAK (modulation `declaration_removed_export_kept`, `compare/declaration_removed_export_kept.py`) when the new side's export table was read and still lists the symbol; an unread table or a lost export keeps BREAKING. Pinned by `tests/test_declaration_removed_export_kept.py`; the edit corpus's `exported_but_undeclared` now agrees.
+
+**Status (2026-11-12): OPEN.** Removing a declaration from the public header while the library keeps exporting the symbol reports `exported_not_public` and `func_removed` (`BREAKING`). Built consumers still bind the export and run; only consumers that name the function stop compiling, which is a source break. Treating a still-exported symbol as not removed is listed under "Do not re-attempt" because it would silence a real contract removal; the open question is the verdict, not the finding. Found by the edit corpus (`exported_but_undeclared` on `c_elf`, default visibility). Owner: `policy/` (contract-removal classification).
+`false-positive` — a contract removal with the binary intact gates as an ABI break, not an API break.
+
+### A pointer-level change of a never-exported header function reads as a binary break (closed 2026-11-14)
+
+**Status (2026-11-14): CLOSED.** `param_pointer_level_changed`/`return_pointer_level_changed` of a function whose export both sides confirm absent are graded API_BREAK (modulation `declaration_never_exported`, `compare/export_transition.unexported_aware_pointer_levels`), the same rule `regrade_unexported_params` applies to `func_params_changed`; an unknown or present export keeps BREAKING. Pinned by `tests/test_unexported_pointer_level_grade.py`; the edit corpus's castxml/clang `header_only_function_params_changed` cells now agree.
+
+**Status (2026-11-12): OPEN.** `compare/export_transition.regrade_unexported_params` relabels `func_params_changed` on a function whose export is confirmed absent on both sides as `header_only_function_params_changed` (`API_BREAK`), but a sibling parameter kind on the same function is not regraded: a `static inline` header function whose `int` parameter becomes `int *` reports `header_only_function_params_changed` plus `param_pointer_level_changed` (`BREAKING`), though no binary carries the function. Found by the edit corpus (`header_only_function_params_changed` on `c_elf_alt`). Owner: `compare/export_transition.py`.
+`false-positive` — a source-only signature change of a header-only function gates as a binary break.
+
 ### An export GNU ld binds to the base version is never reported as unversioned (closed 2026-11-14)
 
 **Status (2026-11-14): CLOSED.** A base-bound export that the old side did not export under any binding is new in this release, so it is reported as an `INTRODUCED` `unversioned_exported_symbol` (`buildsource/unversioned_base_exports.py`, folded in by `workflows/cross_source_hygiene.compute_cross_source_evolution` when both sides were evaluated). A base-bound export the old side already had stays unreported as pre-script API. Pinned by `tests/test_unversioned_base_bound_new_export.py`; the edit corpus's `unversioned_export_added` now agrees.

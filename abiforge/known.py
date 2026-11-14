@@ -39,11 +39,7 @@ GAP_O2_STD = (
     "An `-O2` rebuild of a C++ library that uses `std::string` reads as a risk on gcc, "
     "or a break on MinGW"
 )
-GAP_HEADER_DROPPED_EXPORT = "A function that leaves the public header but stays exported reads as a binary break"
 GAP_NEW_LIB_TAGS = "A version requirement on a newly needed library reads as compatible, whatever its version"
-GAP_HEADER_ONLY_POINTER = (
-    "A pointer-level change of a never-exported header function reads as a binary break"
-)
 GAP_CASTXML_ALIGN = (
     "castxml headers read a variable's alignment specifier only as a lower bound"
 )
@@ -231,18 +227,6 @@ _BREAKING = frozenset({"BREAKING"})
 # Platform-level operators (``abiforge.operators.platform``).
 _PLATFORM: tuple[Known, ...] = (
     Known(
-        "exported_but_undeclared",
-        _ELF,
-        "false-positive",
-        _headers_vis_default,
-        "wget leaves the header but stays exported; built consumers still run, "
-        "yet the contract removal reads func_removed (BREAKING)",
-        GAP_HEADER_DROPPED_EXPORT,
-        issues=frozenset({"stronger-than:API_BREAK"}),
-        verdicts=_BREAKING,
-        also_cls=frozenset({"wrong-verdict"}),
-    ),
-    Known(
         "glibc_version_required_added",
         _ELF,
         "wrong-kind",
@@ -267,18 +251,6 @@ _PLATFORM: tuple[Known, ...] = (
         verdicts=frozenset({"COMPATIBLE"}),
         # A gcc consumer only warns on the int -> int * conversion: no
         # source break, so the same finding reads wrong-verdict.
-        also_cls=frozenset({"wrong-verdict"}),
-    ),
-    Known(
-        "header_only_function_params_changed",
-        _ALT,
-        "false-positive",
-        lambda c: c.evidence == "headers" and c.header_backend != "gcc",
-        "hscale is static inline and never exported, yet its int -> int * "
-        "parameter reads param_pointer_level_changed (BREAKING)",
-        GAP_HEADER_ONLY_POINTER,
-        issues=frozenset({"stronger-than:API_BREAK"}),
-        verdicts=_BREAKING,
         also_cls=frozenset({"wrong-verdict"}),
     ),
     Known(
