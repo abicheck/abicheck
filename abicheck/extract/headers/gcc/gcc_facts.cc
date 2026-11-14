@@ -401,6 +401,9 @@ int plugin_init(struct plugin_name_args *args,struct plugin_gcc_version *v) {
 #ifndef GCC_CPP
   register_callback(args->base_name,PLUGIN_FINISH_TYPE,type,nullptr);
   register_callback(args->base_name,PLUGIN_FINISH_DECL,decl,nullptr);
+  // A function *definition* (a static inline header function) never reaches
+  // PLUGIN_FINISH_DECL; its FUNCTION_DECL arrives here once the body is parsed.
+  register_callback(args->base_name,PLUGIN_FINISH_PARSE_FUNCTION,decl,nullptr);
 #endif
   register_callback(args->base_name,PLUGIN_FINISH,finish,nullptr);return 0;
 }

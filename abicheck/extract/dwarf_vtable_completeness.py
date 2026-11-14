@@ -221,7 +221,7 @@ def duplicate_record_evidence_signature(
     that doesn't exist. This is a read-only subset: only the two child tags
     that feed the comparison (``DW_TAG_inheritance``, ``DW_TAG_subprogram``),
     same field-level logic as ``_process_inheritance_child``/
-    ``_process_virtual_method_child`` but collecting into multisets rather
+    ``dwarf_member_functions.append_virtual_method`` but collecting into multisets rather
     than the ordered lists the retained definition's own ``RecordType``
     carries.
     """

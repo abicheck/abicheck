@@ -169,6 +169,12 @@ EXEMPTION_REASONS: dict[str, str] = {
 #: exemption category (maintained by hand -- the completeness test says what
 #: to add or drop).
 HEURISTICS: dict[str, str] = {
+    # A member function's Itanium scope, naming the record whose members
+    # still exist (compare/live_member_scopes): mangling grammar.
+    "abicheck.compare.live_member_scopes::live_member_scopes::affix.startswith:'_Z'": "grammar",
+    # An array bound's spacing ("char [8]" vs "char[8]"): C++ type spelling.
+    "abicheck.diff_helpers::_normalize_type_spelling::re:'\\\\s*\\\\[\\\\s*'": "spelling",
+    "abicheck.diff_helpers::_normalize_type_spelling::re:'\\\\s*\\\\]'": "spelling",
     # The vector-math library selection flags (-mveclibabi=, -fveclib=) in a
     # DW_AT_producer flag set: the compiler's own flag spelling.
     "abicheck.compare.toolchain_flags::advanced_change_grade::affix.startswith:_CALLEE_LIBRARY_VECTOR_FLAGS": "platform",

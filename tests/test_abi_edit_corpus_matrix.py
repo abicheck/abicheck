@@ -395,7 +395,7 @@ def test_every_rule_fires_for_some_config() -> None:
             Flags(opt="O2"),
         )
         for e in EVIDENCE
-        for p in (("linux", "elf"), ("win32", "pe"))
+        for p in (("linux", "elf"), ("win32", "pe"), ("darwin", "macho"))
         for tc in (GCC, CLANG)
     ]
     # The L3 build-data axis (Config.build_data, headers only).

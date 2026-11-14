@@ -459,6 +459,17 @@ _LINKAGE = (
         "stays): Plain is abstract, so consumers can no longer construct it, "
         "and the new vptr moves a and grows the size",
         expected=frozenset({"FUNC_PURE_VIRTUAL_ADDED"}),
+        rules=(
+            Rule(
+                lambda c: c.evidence == "dwarf" and c.producer.family == "gcc",
+                {"expected": frozenset({"FUNC_VIRTUAL_ADDED"})},
+                "no evidence of the pure specifier exists here: GCC writes "
+                "DW_VIRTUALITY_virtual for a pure virtual, and Plain has no key "
+                "function, so its vtable (whose __cxa_pure_virtual slot would "
+                "show it) is emitted nowhere -- only get() becoming virtual is "
+                "observable",
+            ),
+        ),
     ),
 )
 

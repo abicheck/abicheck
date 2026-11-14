@@ -26,6 +26,7 @@ from .compare.enum_sentinel import is_confirmed_enum_sentinel
 from .compare.enum_underlying import enum_underlying_size_detector
 from .compare.fact_gate import both_facts_present
 from .compare.field_addition import new_field_change_kind
+from .compare.live_member_scopes import removal_unconfirmed
 from .compare.public_surface import (
     reconciled_function_surfaces,
     should_filter_transitive_runtime_symbols,
@@ -295,9 +296,7 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
             t, exclude_stdlib=excl, directly_referenced=directly_referenced
         )
     )
-    # No phantom TYPE_REMOVED: RD2-5 (stripped new side), and a specialization
-    # the new header only stopped instantiating (compare/template_instance_absence).
-    suppress_removed = _removals_are_unconfirmed(old, new)
+    unconfirmed = removal_unconfirmed(new, _removals_are_unconfirmed(old, new))
     absence = TemplateInstanceAbsence(new, old)
     old_funcs = old.function_map
     new_funcs = new.function_map
@@ -337,7 +336,7 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         # than requiring ``symbol`` itself to be qualified.
         name = t_old.name
         if t_new is None:
-            if suppress_removed or absence.specialization_vanished(t_old):
+            if unconfirmed(name) or absence.specialization_vanished(t_old):
                 continue
             changes.append(
                 make_change(
@@ -369,7 +368,8 @@ def _diff_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                 # this is now a cross-producer, directly-comparable bool.
                 castxml_backed=both_known_backed_fact(
                     old, new, type_fact_key(name, "is_abstract")
-                ),
+                )
+                or not (old.from_headers or new.from_headers),
                 cv_facts_reliable=cv_facts_reliable,
                 vtable_facts_reliable=vtable_facts_reliable,
                 layout_indexes=layout_indexes,
@@ -1429,6 +1429,7 @@ def _diff_unions(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
                         symbol=name,
                         name=name,
                         detail=fname,
+                        field_name=fname,
                         old_value=f_old.type,
                         new_value=new_fields[fname].type,
                         entity_id=t_old.entity_id or t_new.entity_id,

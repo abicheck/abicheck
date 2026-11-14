@@ -270,7 +270,7 @@ def vtable_transition_is_evidenced(
 
     ``RecordType.vtable`` cannot express "not captured": it is a plain list,
     and on the DWARF path it is simply the class's own virtual-method DIEs in
-    child order (``dwarf_snapshot._process_virtual_method_child``). So an
+    child order (``dwarf_member_functions.append_virtual_method``). So an
     empty list means either "this class has no virtuals of its own" *or*
     "this side's debug info did not carry them" -- and the two are
     indistinguishable from the list alone.
