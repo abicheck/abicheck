@@ -2,8 +2,8 @@
   "_comment": "Real-fixture backing per ChangeKind: catalog expected_kinds and the edit corpus verified_floor. A kind listed under `backed` may not lose every source (tests/test_changekind_real_coverage.py). Regenerate with `python scripts/changekind_real_coverage.py --write-fixture-ledger`.",
   "summary": {
     "total_kinds": 431,
-    "backed": 300,
-    "unbacked": 131
+    "backed": 309,
+    "unbacked": 122
   },
   "backed": {
     "abi_equivalent_type_changed": [
@@ -55,6 +55,9 @@
       "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
+    "bind_now_disabled": [
+      "edit_corpus:pr"
+    ],
     "bit_int_width_changed": [
       "catalog:case115_bit_int_width_changed",
       "edit_corpus:nightly"
@@ -96,11 +99,15 @@
       "edit_corpus:pr"
     ],
     "char8t_migration": [
-      "catalog:case114_char8t_migration"
+      "catalog:case114_char8t_migration",
+      "edit_corpus:pr"
     ],
     "char_signedness_changed": [
       "catalog:case155_char_signedness_flip",
       "edit_corpus:nightly",
+      "edit_corpus:pr"
+    ],
+    "concept_constraint_changed": [
       "edit_corpus:pr"
     ],
     "concept_tightened": [
@@ -228,7 +235,8 @@
       "edit_corpus:pr"
     ],
     "enum_size_flag_changed": [
-      "catalog:case152_enum_size_flag_flip"
+      "catalog:case152_enum_size_flag_flip",
+      "edit_corpus:pr"
     ],
     "enum_underlying_size_changed": [
       "catalog:case57_enum_underlying_size_changed",
@@ -375,6 +383,9 @@
     "func_deleted_dwarf": [
       "edit_corpus:nightly"
     ],
+    "func_deleted_elf_fallback": [
+      "edit_corpus:pr"
+    ],
     "func_deprecated_added": [
       "catalog:case205_public_function_marked_deprecated",
       "edit_corpus:nightly",
@@ -382,6 +393,9 @@
     ],
     "func_deprecated_removed": [
       "edit_corpus:nightly",
+      "edit_corpus:pr"
+    ],
+    "func_exception_spec_changed": [
       "edit_corpus:pr"
     ],
     "func_export_added": [
@@ -571,6 +585,9 @@
     ],
     "imported_symbol_removed": [
       "edit_corpus:nightly",
+      "edit_corpus:pr"
+    ],
+    "imported_symbol_unprovided": [
       "edit_corpus:pr"
     ],
     "inline_body_changed": [
@@ -835,7 +852,8 @@
       "edit_corpus:pr"
     ],
     "runtime_floor_raised": [
-      "catalog:case170_env_runtime_floor_raised"
+      "catalog:case170_env_runtime_floor_raised",
+      "edit_corpus:pr"
     ],
     "sanitizer_mode_changed": [
       "edit_corpus:pr"
@@ -894,7 +912,13 @@
       "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
+    "std_reexport_removed": [
+      "edit_corpus:pr"
+    ],
     "stdlib_debug_mode_changed": [
+      "edit_corpus:pr"
+    ],
+    "stdlib_implementation_changed": [
       "edit_corpus:pr"
     ],
     "struct_field_type_changed": [
@@ -1182,6 +1206,9 @@
       "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
+    "type_visibility_changed": [
+      "edit_corpus:pr"
+    ],
     "type_vtable_changed": [
       "catalog:case09_cpp_vtable",
       "catalog:case38_virtual_methods",
@@ -1228,6 +1255,9 @@
     "unnamed_type_in_public_abi": [
       "catalog:case178_unnamed_type_in_public_abi",
       "edit_corpus:nightly",
+      "edit_corpus:pr"
+    ],
+    "unspecified_return_now_named": [
       "edit_corpus:pr"
     ],
     "unversioned_exported_symbol": [
@@ -1369,7 +1399,6 @@
     "anon_field_changed",
     "api_depends_on_consumer_env",
     "behavioural_default_changed",
-    "bind_now_disabled",
     "branch_protection_improved",
     "branch_protection_weakened",
     "build_context_changed",
@@ -1386,7 +1415,6 @@
     "common_symbol_risk",
     "compat_version_changed",
     "compile_context_conflict",
-    "concept_constraint_changed",
     "constexpr_value_changed",
     "consumer_required_symbol_removed",
     "cxx_standard_floor_raised",
@@ -1399,8 +1427,6 @@
     "elf_osabi_changed",
     "evidence_required_missing",
     "float_abi_changed",
-    "func_deleted_elf_fallback",
-    "func_exception_spec_changed",
     "func_pure_virtual_added",
     "generated_file_dependency_unstable",
     "generated_header_changed",
@@ -1409,7 +1435,6 @@
     "header_binary_context_mismatch",
     "header_parse_context_drift",
     "identity_collision_detected",
-    "imported_symbol_unprovided",
     "include_graph_public_header_drift",
     "interpreter_changed",
     "kabi_export_type_changed",
@@ -1469,8 +1494,6 @@
     "source_binary_provenance_mismatch",
     "source_fact_coverage_incomplete",
     "source_surface_dso_mismatch",
-    "std_reexport_removed",
-    "stdlib_implementation_changed",
     "struct_alignment_changed",
     "struct_field_offset_changed",
     "struct_field_removed",
@@ -1490,8 +1513,6 @@
     "symbol_version_defined_removed",
     "time64_abi_changed",
     "toolchain_version_changed",
-    "type_visibility_changed",
-    "unspecified_return_now_named",
     "vector_abi_changed",
     "virtual_method_added",
     "wheel_closure_dependency_violation",

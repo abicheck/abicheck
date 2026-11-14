@@ -272,6 +272,15 @@ _CXX_ROLES: dict[str, RoleText] = {
         "template <typename T> T clampv(T v) { return v < 0 ? T(0) : v; }",
         "",
     ),
+    # A constrained template, so an edit can relax or rewrite a constraint
+    # (tmpl.clamp starts unconstrained: an edit there can only tighten).
+    # Guarded, so a pre-C++20 build of the seed still compiles.
+    "tmpl.req": (
+        "#ifdef __cpp_concepts\n"
+        "template <typename T> requires (sizeof(T) >= 4) T reqv(T v) { return v; }\n"
+        "#endif",
+        "",
+    ),
     "func.mode": (
         "int mode_code(mode m);",
         "int mode_code(mode m) { return m == mode::fast ? 7 : 9; }",
@@ -297,6 +306,7 @@ _CXX_HEADER: tuple[str, ...] = (
     "@@enum.mode@@",
     "@@struct.tagged@@",
     "@@tmpl.clamp@@",
+    "@@tmpl.req@@",
     "@@func.add@@",
     "@@func.scale@@",
     "@@func.count@@",
@@ -581,12 +591,14 @@ ELF_SEED = Seed(
 # A second C library seen as an ELF object, whose *baseline* already carries
 # what a c_elf edit adds: an executable stack, packed relative relocations,
 # DT_RPATH, a text relocation, initial-exec TLS, an IFUNC, a symbol-less
-# version node, fortified and newer-glibc imports, no SONAME. An edit removes
+# version node, fortified and newer-glibc imports, no SONAME, and eager
+# binding without RELRO (so bind-now can go while RELRO stays). An edit removes
 # one. Only operators that name ``alt.gate`` apply (``Seed.gate_role``), so
 # c_elf's link edits, which rewrite the flags from c_elf's own baseline, do
 # not land here. Role names start with ``alt.``.
 _ALT_LDFLAGS = (
-    "-Wl,--no-as-needed -lm -lgcc_s -Wl,--as-needed -Wl,-z,now -Wl,-z,execstack "
+    "-Wl,--no-as-needed -lm -lgcc_s -Wl,--as-needed -Wl,-z,now -Wl,-z,norelro "
+    "-Wl,-z,execstack "
     "-Wl,-z,pack-relative-relocs -Wl,-z,notext -Wl,-rpath,/opt/edit/lib "
     "-Wl,--disable-new-dtags"
 )
@@ -998,8 +1010,12 @@ _KIND_ROLES: dict[str, RoleText] = {
     ),
     "k.inst": (
         # The header promises both instantiations (explicit instantiation
-        # declarations), so each is part of the public contract.
-        "template <class T> T ktwice(T v);\nextern template int ktwice<int>(int);\n"
+        # declarations), so each is part of the public contract. A template's
+        # visibility pragma does not reach an instantiation gcc emits where
+        # the template is defined, so -fvisibility=hidden would hide it
+        # (clang keeps it); the attribute is the export macro (as xa.tmpl).
+        'template <class T> __attribute__((visibility("default"))) T ktwice(T v);\n'
+        "extern template int ktwice<int>(int);\n"
         "extern template double ktwice<double>(double);",
         "template <class T> T ktwice(T v) { return v + v; }\n"
         "template int ktwice<int>(int);\ntemplate double ktwice<double>(double);",
@@ -1018,7 +1034,7 @@ _KIND_ROLES: dict[str, RoleText] = {
         "int kx_f(int a) { return a; }\nint kx_g(int a) { return a + 1; }\n} }",
     ),
     "k.tag": (
-        "struct ktag_a {};\ntemplate <class T> int kfam();",
+        'struct ktag_a {};\ntemplate <class T> __attribute__((visibility("default"))) int kfam();',
         "template <class T> int kfam() { return (int)sizeof(T); }\n"
         "template int kfam<ktag_a>();",
     ),

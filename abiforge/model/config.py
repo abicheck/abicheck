@@ -272,6 +272,10 @@ class Config:
     # side's source tree (``abicheck dump --sources``), the tree the harness
     # wrote and compiled.
     sources: bool = False
+    # Dependency resolution on top of any evidence level: abicheck also
+    # resolves each side's DT_NEEDED closure (``abicheck dump --follow-deps``)
+    # and records which imports a provider in it defines.
+    follow_deps: bool = False
 
     def __post_init__(self) -> None:
         if self.header_backend not in HEADER_BACKENDS:
@@ -337,7 +341,9 @@ class Config:
             label = f"headers.{self.header_backend}"
         if self.build_data:
             label += "+build"
-        return f"{label}+src" if self.sources else label
+        if self.sources:
+            label += "+src"
+        return f"{label}+deps" if self.follow_deps else label
 
     @property
     def space_evidence(self) -> str:

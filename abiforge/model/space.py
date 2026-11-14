@@ -448,6 +448,7 @@ OP_EDIT_CLASS: dict[str, dict[str, str]] = {
         "glibc_version_required_added": "body_change",
         "glibc_older_version_required": "body_change",
         "glibc_floor_raised": "body_change",
+        "import_left_unprovided": "body_change",
         "glibc_version_requirement_dropped": "body_change",
         "fortified_call_dropped": "body_change",
         "text_relocation_introduced": "body_change",

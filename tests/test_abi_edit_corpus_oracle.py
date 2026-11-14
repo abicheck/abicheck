@@ -933,9 +933,10 @@ def test_a_std_seed_needs_one_cxx_library_on_both_sides(
         ("void (* handler )(void *, int)", ["handler"]),
         ("char tag[8]", ["tag"]),
         ("[[deprecated]] int legacy", ["legacy"]),
-        ("private:\n  int hidden", ["hidden"]),
-        ("protected: mutable int hits", ["hits"]),
         ("public:\n  volatile int reg", ["reg"]),
+        # A label carries across declarations: only public members are named.
+        ("int a; protected: int b; int c; public: int d", ["a", "d"]),
+        ("private: int a; public: int b; private: int c", ["b"]),
         ("int depth = 4", ["depth"]),
         ("int mode{1}", ["mode"]),
         ("char tag[8] = {0}", ["tag"]),
@@ -947,6 +948,8 @@ def test_a_std_seed_needs_one_cxx_library_on_both_sides(
         ("static int count", []),
         ("private:\n  static int count", []),
         ("static const int k", []),
+        ("private:\n  int hidden", []),
+        ("protected: mutable int hits", []),
     ],
     ids=str,
 )
@@ -991,3 +994,31 @@ def test_non_reference_header_backends_run_on_linux_elf_only(
     assert (reason is not None and "Linux ELF only" in reason) is gated
     if not gated:
         assert reason is None
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        (b"x=\xc9\n", b"x=\x94\n"),  # two invalid UTF-8 lead bytes
+        (b"\xff\xfe", b"\xff\xfd"),
+        (b"ok\n", b"ok\xc3\n"),  # valid vs. a truncated sequence
+    ],
+)
+def test_a_consumer_printing_any_bytes_is_compared_not_a_crash(
+    tmp_path: Path, first: bytes, second: bytes
+) -> None:
+    """A consumer mis-called by an ABI break (e.g. a SysV -> ms_abi switch)
+    prints whatever its garbage registers hold. The oracle must compare that
+    output, so non-UTF-8 bytes neither raise nor collapse two different
+    outputs into one."""
+    from abiforge.run.exec import _run
+
+    results = []
+    for i, payload in enumerate((first, second)):
+        exe = tmp_path / f"c{i}"
+        octal = "".join(f"\\{b:03o}" for b in payload)
+        exe.write_text(f"#!/bin/sh\nprintf '{octal}'\n", encoding="ascii")
+        exe.chmod(0o755)
+        results.append(_run(exe, tmp_path))
+    assert results[0].rc == results[1].rc == 0
+    assert results[0].key() != results[1].key()

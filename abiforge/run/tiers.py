@@ -166,6 +166,14 @@ _PR: tuple[tuple[str, str, str, dict[str, object]], ...] = (
     ("rebuild_cxx11_abi_off", "cxx_stdlib", "gcc", {}),
     ("method_noexcept_add", "cxx_classes", "gcc", {}),
     ("concept_constraint_added", "cxx_classes", "clang", {"std": "c++20"}),
+    ("concept_constraint_relaxed", "cxx_classes", "gcc", {"std": "c++20"}),
+    # -fshort-enums as the build records it (L3), not only as the layout shows.
+    ("rebuild_short_enums", "c_core", "gcc", {"build_data": True}),
+    # Kinds only one std/toolchain reaches, which the default PR cells never
+    # build: char8_t (C++20), a widened exception specification, libc++.
+    ("char_param_became_char8", "cxx_alt", "gcc", {"std": "c++20"}),
+    ("func_exception_spec_widened", "cxx_more", "clang", {"std": "c++14"}),
+    ("rebuild_against_libcxx", "cxx_stdlib", "clang", {}),
     ("rebuild_optimized", "c_core", "gcc", {}),
     # c_elf / cxx_more: a link-level edit from symbols alone, a C type edit
     # under DWARF, a C++ hierarchy edit under headers.
@@ -182,6 +190,16 @@ _PR: tuple[tuple[str, str, str, dict[str, object]], ...] = (
     # L4/L5 source evidence: what only source replay or the source graph
     # sees (abiforge.operators.source_evidence), one row per operator.
     *SOURCE_EVIDENCE_PR,
+    # Dependency resolution (abiforge.operators.dependencies): an import no
+    # library in the DT_NEEDED closure provides, from symbols alone and with
+    # headers, one family each.
+    (
+        "import_left_unprovided",
+        "c_elf",
+        "gcc",
+        {"follow_deps": True, "evidence": "binary"},
+    ),
+    ("import_left_unprovided", "c_elf", "clang", {"follow_deps": True}),
 )
 
 

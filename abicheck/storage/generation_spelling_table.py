@@ -660,6 +660,15 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "loses their noexcept and semantic facts. No rewrite is sound for the "
         "old values, which differ only on those targets"
     ),
+    68: GenerationSpellingChange(
+        "no type or name spelling changes. Only the DWARF-derived "
+        "triviality-for-calls token of a by-value aggregate can differ: a gcc "
+        "user copy/move constructor (declared under the unified C4 name) now "
+        "reads as nontrivial, and a converting or default constructor no "
+        "longer does. That is a value_abi_trait fact, not a spelling, so no "
+        "rewrite applies; a stored pair from both sides of the bump can show "
+        "VALUE_ABI_TRAIT_CHANGED for such a type"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

@@ -30,7 +30,8 @@ Purpose and claims: `README.md`.
   and the registry), `elf` (`c_elf`), `cxx` (`cxx_more`), `platform`
   (ELF/loader/toolchain edits), `symbols`, `layout` (record and base layout
   classes), `build_data` (compile modes only L3 build data records),
-  `runtime_floor` (a raised libc version floor), `source_evidence` (what only
+  `runtime_floor` (a raised libc version floor), `dependencies` (an import no
+  library in the DT_NEEDED closure provides), `source_evidence` (what only
   L4 source replay or the L5 source graph sees; the gated `cxx_src` seed),
   `source_tree` (what only a multi-file, multi-TU tree shows; `cxx_tree`). The
   `EditOp` type is `model/opkit.py`. The ChangeKind scope table (which kinds
@@ -52,7 +53,9 @@ Purpose and claims: `README.md`.
   operators also need the clang header backend (`Config.header_backend`), the only backend whose source
   replay records macros, bodies and call edges. A `sources` tree is built
   under a `src/` project directory, so the two sides' paths compare across
-  checkouts (abicheck anchors a path at its last project-layout segment). A (build, consumer) mix that cannot work is an explicit
+  checkouts (abicheck anchors a path at its last project-layout segment).
+  `follow_deps=True` (any evidence level) also resolves each side's DT_NEEDED
+  closure (`--follow-deps`). A (build, consumer) mix that cannot work is an explicit
   `infeasible` pair, never a pass. Evidence is per pair by default; an
   operator with `new_evidence` (`model/opkit.py`) dumps its new side with less
   evidence (headers or DWARF absent), the asymmetric-evidence axis.
