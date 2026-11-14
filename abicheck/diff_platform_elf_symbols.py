@@ -31,6 +31,7 @@ from .compare.declared_alignment import (
 )
 from .compare.elf_alias_pairs import pair_elf_aliases
 from .compare.elf_capture_identity import both_captured_elf_identity
+from .compare.unbound_version_node import unbound_node_grade
 from .diff_helpers import make_change
 from .diff_versioning import (  # noqa: F401 — re-exported for existing callers
     _UNPARSEABLE_VERSION as _UNPARSEABLE_VERSION,
@@ -86,9 +87,7 @@ def _is_internal_data_symbol(name: str) -> bool:
     return name.startswith("_")
 
 
-# Canonical version-tag parsing lives in diff_versioning (imported at the top
-# of this module); the private names stay re-exported here for existing
-# callers/tests.
+# Version-tag parsing lives in diff_versioning (re-exported above).
 
 
 def _diff_elf_symbol_versioning(old_elf: Any, new_elf: Any) -> list[Change]:
@@ -103,6 +102,7 @@ def _diff_elf_symbol_versioning(old_elf: Any, new_elf: Any) -> list[Change]:
                 ChangeKind.SYMBOL_VERSION_DEFINED_REMOVED,
                 symbol=ver,
                 old=ver,
+                **unbound_node_grade(old_elf, ver),
             )
         )
     for ver in sorted(new_def - old_def):

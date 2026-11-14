@@ -16,6 +16,13 @@ re-verification status line (2026-10-09, `456989f`). Do not re-open an
 entry from here without reproducing it on current `main`; record a new
 gap on the main page instead.
 
+### Dropping a version node that binds no symbol reads as a binary break (closed 2026-11-14)
+
+**Status (2026-11-14): CLOSED.** `symbol_version_defined_removed` is graded COMPATIBLE_WITH_RISK (modulation `version_node_bound_no_symbol`, `compare/unbound_version_node.py`) when the old side's symbols carry version bindings and none names the dropped node; a node binding a symbol, or a side with no captured version bindings, keeps BREAKING. Pinned by `tests/test_unbound_version_node_removal.py`; the edit corpus's `empty_version_node_dropped` now agrees.
+
+**Status (2026-11-12): OPEN.** A version script that drops a node no exported symbol was bound to (`LIBEDIT_1.1 { local: ...; } LIBEDIT_1.0;`) removes a `.gnu.version_d` entry no consumer can have recorded in its `.gnu.version_r`, since a consumer records only the versions of symbols it binds. `symbol_version_defined_removed` fires on its own exactly in this case (with a bound symbol, `symbol_version_node_removed` wins the dedup) and keeps its `BREAKING` default. Found by the edit corpus (`empty_version_node_dropped` on `c_elf_alt`; every consumer still loads). Owner: `diff_platform_elf_symbols.py` / the `symbol_version_defined_removed` taxonomy entry.
+`false-positive` — a version-script cleanup that breaks nobody gates as a binary break.
+
 ### Corrupt PE, Mach-O, DWARF and storage-v2 inputs read as a smaller surface or leaked an untyped exception (closed 2026-11-13)
 
 **Status (2026-11-13): CLOSED.** Four parser-fuzz gaps of 2026-11-08, closed at their `extract/`/`storage/` owners and pinned through the public CLI by `tests/test_corrupt_input_matrix.py` (format x corruption x side x mode: never exit 0, never a clean verdict, always a stated error or an `ERROR` member, and `dump` writes no snapshot).

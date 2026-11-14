@@ -39,7 +39,6 @@ GAP_O2_STD = (
     "An `-O2` rebuild of a C++ library that uses `std::string` reads as a risk on gcc, "
     "or a break on MinGW"
 )
-GAP_EMPTY_NODE = "Dropping a version node that binds no symbol reads as a binary break"
 GAP_HEADER_DROPPED_EXPORT = "A function that leaves the public header but stays exported reads as a binary break"
 GAP_NEW_LIB_TAGS = "A version requirement on a newly needed library reads as compatible, whatever its version"
 GAP_HEADER_ONLY_POINTER = (
@@ -237,17 +236,6 @@ _BREAKING = frozenset({"BREAKING"})
 
 # Platform-level operators (``abiforge.operators.platform``).
 _PLATFORM: tuple[Known, ...] = (
-    Known(
-        "empty_version_node_dropped",
-        _ALT,
-        "false-positive",
-        _always,
-        "a version node no symbol was bound to is dropped: no consumer can "
-        "require it, yet symbol_version_defined_removed keeps its BREAKING default",
-        GAP_EMPTY_NODE,
-        issues=frozenset({"stronger-than:COMPATIBLE_WITH_RISK"}),
-        verdicts=_BREAKING,
-    ),
     Known(
         "exported_but_undeclared",
         _ELF,
