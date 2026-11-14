@@ -39,7 +39,9 @@ Purpose and claims: `README.md`.
   clang or the native gcc plugin, which needs
   `python -m abicheck.extract.headers.gcc.build --compiler g++` once) plus its
   `consumers`. A (build, consumer) mix that cannot work is an explicit
-  `infeasible` pair, never a pass.
+  `infeasible` pair, never a pass. Evidence is per pair by default; an
+  operator with `new_evidence` (`model/opkit.py`) dumps its new side with less
+  evidence (headers or DWARF absent), the asymmetric-evidence axis.
 - **Run** (`run/`): `harness` builds and asks the checker, `exec` is the
   execution oracle (consumers, layout probes, new-header compiles), `cells`
   reconciles (false-clean first) and minimizes a failing cell into a

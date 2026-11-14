@@ -1035,6 +1035,11 @@ _KIND_ROLES: dict[str, RoleText] = {
         "struct KTV { virtual ~KTV(); virtual int kget(); int v; };",
         "KTV::~KTV() {}\nint KTV::kget() { return v; }",
     ),
+    # An unchanged record API whose new side is dumped with less evidence.
+    "k.evd": (
+        "struct KEV { int a; char c; };\nint kev_get(KEV* p);",
+        "int kev_get(KEV* p) { return p->a + p->c; }",
+    ),
     # Empty baselines: the operator adds the declaration.
     "k.pnv": ("", ""),
     "k.stl": ("", ""),

@@ -243,6 +243,7 @@ ROLE_CONSTRUCT: dict[str, str] = {
     "k.del": "function",
     "k.ibr": "inline_function",
     "k.tvz": "class_virtual",
+    "k.evd": "struct",
     "k.pnv": "class_virtual",
     "k.stl": "std_string",
     "k.anon": "function",
@@ -293,6 +294,8 @@ OP_CONSTRUCT: dict[str, tuple[str, ...]] = {
     "rebuild_hidden_visibility": ("compile_option",),
     "rebuild_optimized": ("compile_option",),
     "rebuild_m32": ("compile_option",),
+    # the same library dumped with less evidence on its new side
+    "new_side_dumped_without_headers": ("compile_option",),
 }
 
 

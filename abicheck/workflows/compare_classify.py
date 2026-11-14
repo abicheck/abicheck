@@ -168,6 +168,10 @@ def classify_resolved_pair(
     """
     from ..buildsource.evidence_report import attach_evidence_metrics
     from ..deadline import check as check_deadline
+    from ..policy.common_evidence_depth import (
+        asymmetric_header_evidence_warning,
+        effective_compare_depth,
+    )
     from ..policy.depth_evidence_contract import record_depth_evidence_contract_error
     from ..policy.depth_projection import (
         header_scope_excluded_by_depth,
@@ -192,13 +196,17 @@ def classify_resolved_pair(
     check_deadline()
     # ADR-063 Phase 8's depth *ceiling*: narrow what classification may see
     # to the requested rung. The floor is the exit-7 axis recorded below.
-    old, new = project_pair_to_depth(pair.old, pair.new, request.depth)
+    # Operands of different evidence rungs (headers on one side only) are
+    # judged at the rung both reach, so an evidence difference never reads
+    # as a library change (``policy.common_evidence_depth``).
+    depth = effective_compare_depth(request.depth, pair.old, pair.new)
+    old, new = project_pair_to_depth(pair.old, pair.new, depth)
     # A depth below `headers` that left no header surface to scope against
     # puts public-header scoping outside the requested scope: classify the
     # pair as a binary-only comparison would be, rather than reporting a
     # scope that "failed to resolve" (manual review, partial assurance).
     scope_public = request.scope_public and not header_scope_excluded_by_depth(
-        (pair.old, pair.new), (old, new), request.depth
+        (pair.old, pair.new), (old, new), depth
     )
     folded = fold_pair_evidence(
         old,
@@ -263,6 +271,8 @@ def classify_resolved_pair(
         old_is_live=operands.old_live,
         new_is_live=operands.new_live,
     )
+    if request.depth is None and depth is not None:
+        result.coverage_warnings.append(asymmetric_header_evidence_warning(pair.old))
     _attach_pair_report_fields(request, pair, result, old, new, operands)
     return ClassifiedPair(result, old, new, folded.abi3_failure)
 

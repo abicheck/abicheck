@@ -467,4 +467,20 @@ KIND_OPERATORS: tuple[EditOp, ...] = (
         ),
         **_BINARY,
     ),
+    # Per-side evidence (``EditOp.new_evidence``): the library is unchanged,
+    # only what the new side's dump is given differs.
+    _op(
+        "new_side_dumped_without_headers",
+        "k.evd",
+        lambda r: {},
+        "the library is rebuilt from the same sources but its new side is "
+        "dumped without the public header (DWARF only): nothing a consumer "
+        "sees changed, so the evidence difference must not read as removed "
+        "or changed declarations",
+        touches=(),
+        new_evidence="dwarf",
+        verdict_min="NO_CHANGE",
+        verdict_max="COMPATIBLE",
+        min_evidence="binary",
+    ),
 )
