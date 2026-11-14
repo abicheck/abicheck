@@ -210,3 +210,38 @@ def test_a_member_still_declared_in_new_is_no_header_removal() -> None:
         gone.mangled
     ]
     assert header_declared_members(ids, old.declarations.functions) == ids
+
+
+def _itanium_guess(scope: str, leaf: str) -> str:
+    return f"_ZN{len(scope)}{scope}{len(leaf)}{leaf}Ei"
+
+
+def _msvc_guess(scope: str, leaf: str) -> str:
+    # castxml's MSVC-emulation guess with a different calling convention code
+    # than the real cl.exe export, so the Function model cannot match it.
+    return f"?{leaf}@{scope}@@YCHH@Z"
+
+
+@pytest.mark.parametrize("guess", [_itanium_guess, _msvc_guess])
+@pytest.mark.parametrize(
+    ("decl_scope", "export_scope", "public"),
+    [("mylib", "mylib", True), ("mylib", "impl", False), ("impl", "mylib", False)],
+)
+def test_castxml_bare_leaf_names_match_raw_msvc_exports_by_scope(
+    guess, decl_scope: str, export_scope: str, public: bool
+) -> None:
+    """castxml names a function by its bare leaf; its scope lives in the
+    declaration's mangling. The raw MSVC export (``?leaf@scope@@...``) is
+    matched by its full qualified name, so the header side must be qualified
+    from its own mangling too -- comparing the bare leaf never matched a
+    namespaced declaration, and case83 read COMPATIBLE_WITH_RISK on Windows."""
+    leaf = "kmeans_compute_avx512"
+    fn = Function(
+        name=leaf,
+        mangled=guess(decl_scope, leaf),
+        return_type="int",
+        visibility=Visibility.HIDDEN,
+        origin=ScopeOrigin.PUBLIC_HEADER,
+    )
+    export = f"?{leaf}@{export_scope}@@YAHH@Z"
+    assert header_declared_members([export], [fn]) == ([export] if public else [])

@@ -651,6 +651,15 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "headers. No rewrite is sound for the old data sizes, which read as "
         "a differing fact only when both sides were recorded at 66"
     ),
+    67: GenerationSpellingChange(
+        "no type or name spelling changes. On Apple arm64 a record's C++11 POD "
+        "test for tail-padding reuse uses the C++11 standard-layout rule "
+        "(before CWG 1813), so such a record's castxml data size is its "
+        "sizeof; castxml's clang side passes parse with the binary-ABI target, "
+        "so a Windows-default clang no longer reads MinGW headers as MSVC and "
+        "loses their noexcept and semantic facts. No rewrite is sound for the "
+        "old values, which differ only on those targets"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

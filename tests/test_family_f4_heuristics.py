@@ -111,7 +111,11 @@ EXEMPTION_CEILINGS: dict[str, int] = {
     # replaceable-allocator match in elf_symbol_filter (not a scanned owner).
     # 44: diff_unnamed_types' `_Z` export filter moved to the format-neutral
     # model.mangling_scheme (it now reads Mach-O and PE exports too).
-    "grammar": 44,
+    # 49: plus compare/type_visibility's five Itanium checks (_ZTI/_ZTS/_ZTV/_ZTT
+    # family, the N...E nested-name scope, the "typeinfo for " demangling).
+    # 50: plus cpu_dispatch_public_members' MSVC `?` test, qualifying a
+    # castxml bare-leaf declaration from its own mangling.
+    "grammar": 50,
     # 43: minus outcome_release.unclassified_release_contribution_fields,
     # moved into its test (dead-code plan, Stage D).
     # 49: plus the two path-prefix checks in manifest_tu_scope_field, moved
@@ -127,7 +131,10 @@ EXEMPTION_CEILINGS: dict[str, int] = {
     # policy/retired_function_drift.
     # 20: minus the allocator prefix vocabulary and its startswith site,
     # folded into the exact replaceable-allocator match in elf_symbol_filter.
-    "platform": 20,
+    # 25: plus compare/runtime_requirements' sanitizer runtime sonames and the
+    # toolchain-reserved __asan_/__ubsan_/... symbol families (and the
+    # __sanitizer_cov_ user-callback carve-out) -- names the toolchain defines.
+    "platform": 25,
     # 9: main replaced the two fnmatch frozen-namespace matchers with one
     # policy.frozen_namespace helper.
     "user_rule": 9,

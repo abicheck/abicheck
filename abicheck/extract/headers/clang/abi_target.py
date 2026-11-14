@@ -48,6 +48,7 @@ __all__ = [
     "with_binary_abi_target",
     "binary_exported_names",
     "binary_abi_tokens",
+    "compile_binary_abi_tokens",
     "lacks_binary_abi_target",
     "binary_abi_target_may_apply",
 ]
@@ -189,18 +190,47 @@ def binary_abi_tokens(
     castxml-only host), the tokens are returned as they are and the parse
     that follows reports its own failure.
     """
+    return compile_binary_abi_tokens(
+        "cc" if is_c else "c++",
+        gcc_path=cc.gcc_path,
+        gcc_prefix=cc.gcc_prefix,
+        gcc_options=cc.gcc_options,
+        tokens=tokens,
+        exported=exported,
+    )
+
+
+def compile_binary_abi_tokens(
+    compiler: str,
+    *,
+    gcc_path: str | None,
+    gcc_prefix: str | None,
+    gcc_options: str | None,
+    tokens: tuple[str, ...],
+    exported: Iterable[str],
+) -> tuple[str, ...]:
+    """*tokens* plus the ``--target`` :func:`with_binary_abi_target` picks for
+    *exported*, resolving clang and the GNU probe driver from *compiler*.
+
+    For a clang parse that is not the primary one (castxml's clang side
+    passes): without it, a Windows clang parses a MinGW binary's headers --
+    and MinGW's libstdc++ -- for its MSVC default, which fails outright, so
+    the facts only that pass reads (``noexcept``, constraints, template
+    defaults, vector spellings) all read unknown. No exports, or no clang,
+    returns *tokens* unchanged.
+    """
     from ....errors import SnapshotError
     from ...compiler_driver import resolve_clang_bin
     from ..sysinc import _resolve_probe_compiler
 
+    exported = frozenset(exported)
     if not exported:
         return tokens
-    compiler = "cc" if is_c else "c++"
     try:
         return with_binary_abi_target(
-            clang_bin=resolve_clang_bin(compiler, cc.gcc_path, cc.gcc_prefix),
-            probe_cc=_resolve_probe_compiler(compiler, cc.gcc_path, cc.gcc_prefix),
-            gcc_options=cc.gcc_options,
+            clang_bin=resolve_clang_bin(compiler, gcc_path, gcc_prefix),
+            probe_cc=_resolve_probe_compiler(compiler, gcc_path, gcc_prefix),
+            gcc_options=gcc_options,
             gcc_option_tokens=tokens,
             exported=exported,
         )

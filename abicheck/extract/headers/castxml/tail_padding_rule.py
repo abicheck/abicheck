@@ -120,8 +120,8 @@ UserProvided = Callable[[CastxmlParserContext, Element], "bool | None"]
 def pod11(
     ctx: CastxmlParserContext, el: Element, user_provided: UserProvided
 ) -> bool | None:
-    """C++11 POD for record *el*: trivially copyable, standard-layout, and a
-    trivial default constructor (tri-state; ``None`` when undecidable)."""
+    """C++11 POD for record *el*: trivially copyable, standard-layout as C++11
+    defined it (before CWG 1813), and a trivial default constructor (tri-state; ``None`` when undecidable)."""
     from .record_traits import standard_layout, trivially_copyable
 
     if el.get("incomplete") == "1":
@@ -129,7 +129,7 @@ def pod11(
     return _all(
         [
             trivially_copyable(ctx, el),
-            standard_layout(ctx, el),
+            standard_layout(ctx, el, cxx11=True),
             _trivial_default_ctor(ctx, el, 0, user_provided),
         ]
     )

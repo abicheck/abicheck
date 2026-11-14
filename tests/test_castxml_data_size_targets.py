@@ -117,3 +117,82 @@ def test_record_without_bitfields_is_unaffected_on_mingw(tmp_path: Path) -> None
     fields = _field("_ba", "_b", "_int", 0) + _field("_bc", "_b", "_char", 32)
     ctx = _bits(tmp_path, MINGW, fields, 64)
     assert data_size_bits(ctx, _rec(ctx, "B")) == 40
+
+
+def _record(rid: str, name: str, size: int, bases: str, fields: str = "") -> str:
+    """A record with CastXML's implicit default and copy constructors (the
+    copy constructor is what proves it trivially copyable) and *bases*."""
+    specials = (
+        _implicit(rid) + f'<Constructor id="{rid}_cc" name="{name}" context="{rid}" '
+        'access="public" file="f1" line="1" inline="1" artificial="1">'
+        f'<Argument type="{rid}_cr"/></Constructor>'
+        f'<ReferenceType id="{rid}_cr" type="{rid}_cq" size="64" align="64"/>'
+        f'<CvQualifiedType id="{rid}_cq" type="{rid}" const="1"/>'
+    )
+    ids = [f"{rid}_dc", f"{rid}_cc"] + [p.split('"')[1] for p in fields.split("<")[1:]]
+    return (
+        f'<Struct id="{rid}" name="{name}" context="_1" file="f1" line="1" '
+        f'members="{" ".join(ids)}" size="{size}" align="32">{bases}</Struct>'
+        + specials
+        + fields
+    )
+
+
+def _base(rid: str, offset_bytes: int) -> str:
+    return f'<Base type="{rid}" access="public" virtual="0" offset="{offset_bytes}"/>'
+
+
+def _nv(tmp_path: Path, triple: str, nvx_size: int, empty_at: int):
+    """``struct Empty {}; struct NvB : Empty { int i; char c; };
+    struct NvX : NvB, Empty {};`` -- NvX's own Empty base cannot share
+    offset 0 with NvB's, so it goes past NvB's data (byte *empty_at*)."""
+    empty = _record("_e", "Empty", 8, "")
+    nvb = _record(
+        "_nb",
+        "NvB",
+        64,
+        _base("_e", 0),
+        _field("_nbi", "_nb", "_int", 0) + _field("_nbc", "_nb", "_char", 32),
+    )
+    nvx = _record("_nx", "NvX", nvx_size, _base("_nb", 0) + _base("_e", empty_at))
+    return _ctx(empty + nvb + nvx, tmp_path, triple=triple)
+
+
+@pytest.mark.parametrize(
+    ("triple", "nvx_size", "empty_at", "nvb_dsize", "nvx_dsize"),
+    [
+        # C++03 POD (generic Itanium): a class with a base is not POD, so
+        # NvB's tail padding is reused (5 bytes of data); NvX's Empty goes
+        # at byte 5 and the next member after NvX at 6 (its nvsize).
+        (LINUX, 64, 5, 40, 48),
+        (APPLE_X86, 64, 5, 40, 48),
+        # C++11 POD (Apple arm64): NvB is trivial and standard-layout, so it
+        # keeps sizeof (8) and NvX's Empty goes at byte 8. NvX holds two
+        # Empty subobjects -- not standard-layout since CWG 1813, but
+        # standard-layout as C++11 defined it, the trait Clang lays out by
+        # (isCXX11StandardLayout): POD, so it keeps sizeof (12).
+        (APPLE_ARM64, 96, 8, 64, 96),
+    ],
+)
+def test_duplicate_empty_base_data_size_per_target(
+    tmp_path: Path,
+    triple: str,
+    nvx_size: int,
+    empty_at: int,
+    nvb_dsize: int,
+    nvx_dsize: int,
+) -> None:
+    ctx = _nv(tmp_path, triple, nvx_size, empty_at)
+    assert data_size_bits(ctx, _rec(ctx, "NvB")) == nvb_dsize
+    assert data_size_bits(ctx, _rec(ctx, "NvX")) == nvx_dsize
+
+
+def test_duplicate_base_subobject_is_cxx11_but_not_current_standard_layout(
+    tmp_path: Path,
+) -> None:
+    from abicheck.extract.headers.castxml.record_traits import standard_layout
+
+    ctx = _nv(tmp_path, LINUX, 64, 5)
+    nvx = _rec(ctx, "NvX")
+    assert standard_layout(ctx, nvx) is False
+    assert standard_layout(ctx, nvx, cxx11=True) is True
