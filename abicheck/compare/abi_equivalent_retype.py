@@ -54,6 +54,7 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 from dataclasses import replace
+from functools import lru_cache
 from typing import cast
 
 from ..model.abi_fundamental import AbiFundamental, abi_equivalent
@@ -165,6 +166,7 @@ _TAGS = frozenset({"struct", "class", "union"})
 _INDIRECTIONS = frozenset({"*", "&", "&&"})
 
 
+@lru_cache(maxsize=4096)
 def _split_indirect(spelling: str) -> tuple[str, str] | None:
     """(pointee name, normalized shape) of a pointer/reference spelling.
 
