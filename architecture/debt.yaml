@@ -146,7 +146,7 @@
     },
     {
       "path": "abicheck/buildsource/macro_graph.py",
-      "baseline_lines": 1019,
+      "baseline_lines": 933,
       "target": "extract/build-or-source",
       "rule": "no_growth",
       "disposition": "migrate",

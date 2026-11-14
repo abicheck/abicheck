@@ -170,7 +170,9 @@ def test_empty_base_contributes_nothing(tmp_path: Path) -> None:
         '<Base type="_e" access="public" virtual="0" offset="0"/>' + _implicit("_d"),
     )
     ctx = _ctx(empty + derived, tmp_path)
-    assert data_size_bits(ctx, _rec(ctx, "E")) == 8  # POD: sizeof
+    # Empty, POD or not: a derived class places its first member at offset 0
+    # (empty-base optimization), so no byte of E is data.
+    assert data_size_bits(ctx, _rec(ctx, "E")) == 0
     assert data_size_bits(ctx, _rec(ctx, "D")) == 0
 
 
@@ -242,3 +244,48 @@ def test_c_document_is_always_pod(tmp_path: Path) -> None:
     # _TYPES holds a ReferenceType (C++ only): drop it to model a C document.
     ctx.is_cxx_document = False
     assert data_size_bits(ctx, _rec(ctx, "S")) == 64
+
+
+@pytest.mark.parametrize(
+    ("triple", "expected"),
+    [
+        ("x86_64-pc-linux-gnu", 24),
+        ("x86_64-w64-mingw32", None),  # Microsoft bit-field layout
+        ("x86_64-pc-windows-gnu", None),
+        ("x86_64-pc-cygwin", 24),
+    ],
+)
+def test_a_bitfield_is_unknown_under_microsoft_bitfield_layout(
+    tmp_path: Path, triple: str, expected: int | None
+) -> None:
+    """MinGW's default -mms-bitfields gives a bit-field a whole unit of its
+    type (an ``int : 3`` member makes the data size 32 bits there, 8 under
+    g++ on Linux), so the Itanium bit arithmetic must not answer."""
+    ctor = '<Constructor id="_k" name="S" context="_s" access="public" file="f1" line="3"/>'
+    fields = _field("_sc", "_s", "_char", 0) + _field(
+        "_sb", "_s", "_int", 8, ' bits="11"'
+    )
+    ctx = _ctx(_struct("_s", "S", 32, ctor + fields), tmp_path, triple=triple)
+    assert data_size_bits(ctx, _rec(ctx, "S")) == expected
+
+
+@pytest.mark.parametrize("triple", ["x86_64-pc-linux-gnu", "arm64-apple-darwin23"])
+def test_an_empty_record_has_no_data_under_either_pod_rule(
+    tmp_path: Path, triple: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``struct EmptyNP : Empty {}`` is C++11 POD (Apple arm64's rule) but not
+    C++03 POD; either way a derived member lands at offset 0. The C++11 POD
+    verdict itself is ``pod11``'s (tested with real castxml in the
+    integration lane), pinned here to the answer it gives for this shape."""
+    import abicheck.extract.headers.castxml.data_size as data_size
+
+    monkeypatch.setattr(data_size, "pod11", lambda *_args: True)
+    empty = _struct("_e", "E", 8, _implicit("_e"))
+    derived = _struct(
+        "_d",
+        "D",
+        8,
+        '<Base type="_e" access="public" virtual="0" offset="0"/>' + _implicit("_d"),
+    )
+    ctx = _ctx(empty + derived, tmp_path, triple=triple)
+    assert data_size_bits(ctx, _rec(ctx, "D")) == 0

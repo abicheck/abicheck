@@ -775,13 +775,23 @@ def _dump_and_compare(
     scope_to_public_surface: bool = False,
     pattern_verdicts: bool = False,
 ) -> tuple[str, list]:
-    """Run abicheck dump+compare and return (verdict, changes)."""
+    """Run abicheck dump+compare and return (verdict, changes).
+
+    The headers are also the public-header set, as the CLI and the dump
+    workflow resolve ``-H`` (``workflows/dump/request.py``); a bare
+    ``dumper.dump(headers=...)`` would leave every declaration's origin
+    unknown, a configuration no front end produces.
+    """
     from abicheck.checker import compare
     from abicheck.dumper import dump
 
     try:
-        snap1 = dump(v1_lib, headers=headers_v1, version="v1")
-        snap2 = dump(v2_lib, headers=headers_v2, version="v2")
+        snap1 = dump(
+            v1_lib, headers=headers_v1, public_headers=headers_v1, version="v1"
+        )
+        snap2 = dump(
+            v2_lib, headers=headers_v2, public_headers=headers_v2, version="v2"
+        )
     except Exception as exc:
         pytest.fail(f"{case_name}: dump failed: {exc}")
 

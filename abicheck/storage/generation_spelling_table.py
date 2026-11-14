@@ -611,6 +611,14 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "older snapshot reads every typedef origin as unknown, never private, "
         "and a castxml record's data size as not collected"
     ),
+    63: GenerationSpellingChange(
+        "no type or name spelling changes. A castxml record's data size is "
+        "0 for an empty record under either POD rule (an empty C++11 POD on "
+        "Apple arm64 read as its sizeof), and unknown for a record with a "
+        "bit-field on a MinGW target, whose Microsoft bit-field layout the "
+        "Itanium arithmetic does not model. Nothing rewritten: a generation-62 "
+        "value loads unchanged with the usual drift notice"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

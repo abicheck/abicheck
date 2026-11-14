@@ -38,7 +38,7 @@ import re
 from pathlib import Path
 from xml.etree.ElementTree import Element
 
-from .context import CastxmlParserContext
+from .context import CastxmlParserContext, member_elements as _members
 
 _RECORD_TAGS = frozenset({"Struct", "Class", "Union"})
 #: Types whose values are trivially copyable by definition.
@@ -222,11 +222,6 @@ def _base_trait(ctx: CastxmlParserContext, base: Element) -> bool | None:
     if base.get("virtual") == "1":
         return False
     return _type_trait(ctx, base.get("type", ""))
-
-
-def _members(ctx: CastxmlParserContext, el: Element) -> list[Element]:
-    found = (ctx.id_map.get(mid) for mid in el.get("members", "").split())
-    return [m for m in found if m is not None]
 
 
 def _has_copy_constructor(

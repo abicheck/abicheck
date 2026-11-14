@@ -9,6 +9,7 @@ built for must not stay unknown.
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -18,7 +19,10 @@ from defusedxml.ElementTree import parse
 
 from abicheck.extract.headers.castxml.context import CastxmlParserContext
 from abicheck.extract.headers.castxml.data_size import data_size_bits
-from abicheck.extract.headers.castxml.tail_padding_rule import tail_padding_rule
+from abicheck.extract.headers.castxml.tail_padding_rule import (
+    ms_bitfields,
+    tail_padding_rule,
+)
 from tests._data_size_matrix import (
     CASES,
     COMPILERS,
@@ -73,5 +77,8 @@ def test_data_size_agrees_with_compilers(tmp_path: Path, std: str) -> None:
             continue
         if got is not None:
             assert {got} == truth, (name, got, truth)
-        if case.castxml_known:
+        # MinGW lays bit-fields out by Microsoft's rules, which the
+        # derivation leaves unknown rather than guess.
+        bitfield_unmodelled = ms_bitfields(ctx) and re.search(r":\s*\d+\s*;", case.decl)
+        if case.castxml_known and not bitfield_unmodelled:
             assert got is not None, (name, truth)
