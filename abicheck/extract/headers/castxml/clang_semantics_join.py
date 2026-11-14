@@ -53,6 +53,7 @@ from ....errors import SnapshotError
 from ....model.execution_cache import memoized
 from ....storage.ast_cache_location import ast_cache_store
 from ... import cache_dep_manifest
+from ..clang.abi_target import compile_binary_abi_tokens
 from ..clang.ast_inner import ast_inner
 from ..clang.backend import clang_header_dump
 from ..clang.concept_constraints import concept_constraint_entries
@@ -394,7 +395,17 @@ def join_clang_semantics(
                 gcc_path=gcc_path,
                 gcc_prefix=gcc_prefix,
                 gcc_options=gcc_options,
-                gcc_option_tokens=gcc_option_tokens,
+                # The binary's C++ ABI, as the primary clang parse uses
+                # (abi_target): a Windows clang's MSVC default cannot parse a
+                # MinGW library's headers.
+                gcc_option_tokens=compile_binary_abi_tokens(
+                    compiler,
+                    gcc_path=gcc_path,
+                    gcc_prefix=gcc_prefix,
+                    gcc_options=gcc_options,
+                    tokens=gcc_option_tokens,
+                    exported=exported_symbols,
+                ),
                 sysroot=sysroot,
                 nostdinc=nostdinc,
                 lang=lang,
