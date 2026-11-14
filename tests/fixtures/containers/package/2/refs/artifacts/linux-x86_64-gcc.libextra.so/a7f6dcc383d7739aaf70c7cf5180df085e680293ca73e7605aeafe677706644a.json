@@ -4,7 +4,7 @@
     "digest": "sha256:1a8ef84cabff826873c50b91f08634019045c1d5ec836346176f9211d524df7c",
     "kind": "wire_carriers"
   },
-  "evidence_digest": "sha256:56f457e3240f46f450b5f34e3ada32832691f4daa4a0b7a4a3ea057c3d922ce0",
+  "evidence_digest": "sha256:f4c15a29c2c8a688218996484751cd8a3a1876a148cc2a40d6f5f25ee3bdcfd9",
   "kind": "elf",
   "native_identity": {
     "library_name": "libextra.so"
@@ -12,7 +12,7 @@
   "ref_schema_version": 2,
   "sections": {
     "binary": {
-      "digest": "sha256:64db299266c1d9cd5b261ac34154ff963867566a736afb0fafcf16ea39587a9e",
+      "digest": "sha256:879f159977e3ab5d43b5f6d89760a15b52760916d57cef12a9f156df04316367",
       "kind": "binary"
     },
     "build": {
@@ -36,7 +36,7 @@
       "kind": "layout"
     },
     "provenance": {
-      "digest": "sha256:9e02a72dfe4d0ffc8373a8e0fbb70cd64e0fba927af26904cd51d41a727b15ac",
+      "digest": "sha256:8e081881962e6017c1cb39a8482c3079762a591f250c769e6293b68ce492d4ca",
       "kind": "provenance"
     },
     "semantic_ir": {

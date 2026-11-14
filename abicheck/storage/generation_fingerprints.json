@@ -233,8 +233,8 @@
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
     "fingerprint": "fd9de0dea435999edcadd80310cf61168700da1aec8c88cd39e68e556a327c4c",
-    "generation": 73,
-    "reason": "WS-4 PR1 review follow-ups: closing-label-bounded sizes, stab-bit filter, sizes_derived flag"
+    "generation": 72,
+    "reason": "WS-4 PR1: one extractor bump for the Mach-O layout size facts (closing-label spans, sizes_derived)"
   },
   "resolver": {
     "files": {

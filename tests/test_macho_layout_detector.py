@@ -310,3 +310,33 @@ def test_derived_size_survives_snapshot_round_trip(tmp_path: Path) -> None:
     by_name = {e.name: e for e in loaded.macho.exports}
     assert by_name["_ZTV4Base"].size == 0x30
     assert by_name["_ZTV4Base"].size_bound_by == "_ZTI4Base"
+
+
+def test_v1_binary_payload_loads_as_not_derived_and_the_layout_gate_refuses_it() -> (
+    None
+):
+    """A binary section at v1 has no size fields. It must load as
+    ``sizes_derived=None`` (not derived) and the layout gate must refuse it as
+    not evaluated, never read it as a clean layout check."""
+    from abicheck.snapshot_platform_blocks import macho_from_dict
+
+    v1_payload = {
+        "exports": [
+            {
+                "name": "_ZTV4Base",
+                "sym_type": "exported",
+                "is_weak": False,
+                "is_data": False,
+            }
+        ]
+    }
+    meta = macho_from_dict(v1_payload, schema_version=69)
+    assert meta.sizes_derived is None
+    assert meta.exports[0].size is None
+    legacy = AbiSnapshot(
+        library="libold.dylib", version="1", platform="macho", macho=meta
+    )
+    supported, reason = _layout_support(legacy, legacy)
+    assert supported is False
+    assert "not derived" in reason
+    assert _diff_elf_layout(legacy, legacy) == []

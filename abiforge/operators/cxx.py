@@ -328,6 +328,17 @@ _MEMBERS = (
         expected=frozenset({"TYPE_BECAME_ABSTRACT", "VTABLE_SLOT_COUNT_CHANGED"}),
         rules=(
             Rule(
+                lambda c: c.objfmt == "pe" and c.evidence != "binary",
+                {
+                    "expected": frozenset(
+                        {"TYPE_BECAME_ABSTRACT", "TYPE_VTABLE_CHANGED"}
+                    )
+                },
+                "PE gets no _ZTV size from the Mach-O layout facts (WS-4 PR 1); "
+                "the PE header pass that would carry them is WS-4 PR 2, so the "
+                "vtable growth is named by the debug/header comparison until then",
+            ),
+            Rule(
                 lambda c: c.evidence == "binary",
                 {"expected": frozenset({"VTABLE_SLOT_COUNT_CHANGED"})},
                 "symbols alone show the longer vtable, not that Base is abstract",
