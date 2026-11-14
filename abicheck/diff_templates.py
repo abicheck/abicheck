@@ -53,6 +53,7 @@ from .compare.naming_conventions import (
     _INTERNAL_TEMPLATE_NAMESPACES as _INTERNAL_TEMPLATE_NAMESPACES,
     INTERNAL_TEMPLATE_LEAK,
 )
+from .compare.template_pattern_arity import pattern_mandatory_arity
 from .compare.template_surface import (
     InstantiationSig,
     aggregate_removed_binding,
@@ -840,9 +841,7 @@ def detect_overload_set_rerouted(
         name_of = qualified_name_lookup(snap)
         out: dict[str, list[Function]] = defaultdict(list)
         for f in funcs:
-            qname = name_of(f)
-            stem = _strip_template_args(qname)
-            out[stem].append(f)
+            out[_cpo_function_stem(name_of(f))].append(f)
         return out
 
     def _overload_key(f: Function) -> tuple[object, ...]:
@@ -1000,12 +999,13 @@ def detect_mandatory_template_param_added(
                 # ADR-084: an export-only function proves no public contract.
                 is_public.add(stem, f, header_parsed=hdr)
                 sources[stem].add("function")
-        # Types are also indexed.
         for t in snap.declarations.types:
-            if "<" not in t.name:
+            arity = pattern_mandatory_arity(t)  # a pattern spells no args
+            if arity is None and "<" not in t.name:
                 continue
             stem = _strip_template_args(t.name)
-            arity = _count_top_level_template_args(t.name)
+            if arity is None:
+                arity = _count_top_level_template_args(t.name)
             if arity is not None:
                 out[stem].add(arity)
                 sources[stem].add("type")
@@ -1202,18 +1202,18 @@ def detect_missing_instantiations(
     for fn in new.declarations.functions:
         if not is_public_export(fn):
             continue
-        qname = _strip_param_signature(new_name_of(fn))
-        if _looks_like_template_instantiation(qname):
-            surviving_stems.add(_strip_template_args(qname))
+        full = new_name_of(fn)
+        if _looks_like_template_instantiation(_strip_param_signature(full)):
+            surviving_stems.add(_cpo_function_stem(full))
     for fn in old.declarations.functions:
         if not is_public_export(fn):
             continue
         if fn.mangled in new_mangled:
             continue
-        qname = _strip_param_signature(old_name_of(fn))
-        if not _looks_like_template_instantiation(qname):
+        full = old_name_of(fn)
+        if not _looks_like_template_instantiation(_strip_param_signature(full)):
             continue
-        stem = _strip_template_args(qname)
+        stem = _cpo_function_stem(full)  # drops the leading return type
         if stem not in surviving_stems:
             continue
         findings.append(
