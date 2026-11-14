@@ -37,7 +37,7 @@
       "abicheck/extract/debug_dump.py": "97ac8cf0526b877a274c50a413287cf777713fc9452f1ada01da2d8a1e642b56",
       "abicheck/extract/debug_layout_semantic_ir.py": "b4cc00e22312c64e6905ef0aa6a716e3feb258be48f93a20ee1b6472aa69e89a",
       "abicheck/extract/debug_section_presence.py": "7604222ad6db748c6772539dbafd1ac4cedf0f580b9a258d2a4ec2959dd82f57",
-      "abicheck/extract/declaration_provenance.py": "d38155682d9404806a2c0beee1b8685eacb4a0964b3eee1cb4e2ca939d126004",
+      "abicheck/extract/declaration_provenance.py": "048571d087b71e73a47f91eda5898d9cb41e61975654b5993f02144432b6cf4b",
       "abicheck/extract/dependency_exclusion.py": "0df4685014893a9b463aeda47c08fca3b0244455325e96f2991e0cdd506287dc",
       "abicheck/extract/dependency_header_roots.py": "1eaf11025d92166b6c05dfbc73e52eb859225dc33200905fbf179f2fb61b789a",
       "abicheck/extract/detached_debug.py": "c20829397d3ac53e2e1dd3f4bc23a92098daadc566c745458aac94a7f6ce0c3a",
@@ -172,7 +172,7 @@
       "abicheck/extract/headers/gcc/contracts.py": "419ad694249c1477e89a60d8432bfeed202bf818c4bd4aa62361834ff452a2cf",
       "abicheck/extract/headers/gcc/discovery.py": "f07fdd43ec1e594e95a75a5447e54e3dcbfe5c944c66a305de4e9d7463ee731b",
       "abicheck/extract/headers/gcc/gcc_facts.cc": "be8e1385198464d2888bd4a1c242b2dd2d5000506a38a8971ca194ecaca63ffe",
-      "abicheck/extract/headers/gcc/projection.py": "fef7d3679e17dd70f119d88be2ae20ea28039f08a39e2cd5644e35bf744313c4",
+      "abicheck/extract/headers/gcc/projection.py": "6be80cffc5e0e0a3f7b12abf34bf12dd4aeacb3e929175936609bd0945c9565f",
       "abicheck/extract/headers/manifest.py": "7f8877eda4c5682fd9b87bee878d707d263c1b25193cf70c9c8a3af323536e57",
       "abicheck/extract/headers/preprocessor_branches.py": "d3a409d126b0dd1b19a634d4aad25660d372dad931b310cfbaaefc9d769b244d",
       "abicheck/extract/headers/scope_segments.py": "d413edec257eb1334c829263770b66dc2eda3d263c765f699eac9f7e3ace9e65",
@@ -226,9 +226,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "99e5079897d779f87ea650f954ed36b743c8bbd02ccbe0793302c8289b38e6ff",
-    "generation": 61,
-    "reason": "comment only in castxml record_traits: documents that an inherited first data member follows GCC/Clang rather than the literal M(D) wording; no extractor behaviour change"
+    "fingerprint": "deb44e6a92302dd081e0f6ccce63d48498083711179e1face36afb63d0aad7a5",
+    "generation": 62,
+    "reason": "bumped to 62 for a semantic change"
   },
   "resolver": {
     "files": {

@@ -38,17 +38,20 @@ no existing behaviour changes (decision D4 of the provenance design).
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from functools import partial
 from itertools import chain
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from ..model import AbiSnapshot, Fact, ScopeOrigin
+from ..model.declaration_headers import declaring_header_set, has_attribution
 from ..model.surface_facts import (
     SurfaceFactBearing,
     is_export_table_only_record,
     public_header_contract_fact,
 )
+from ..model.vocabulary import NON_PUBLIC_ORIGINS
 from .path_aliases import (
     absolutize_header_root,
     dedup_segments,
@@ -647,9 +650,53 @@ def apply_provenance(
     decls = snapshot.declarations
     for decl in chain(decls.functions, decls.variables, decls.types, decls.enums):
         tag(decl)
+    if have_set:
+        classify = partial(
+            classify_origin,
+            public_header_segs=header_segs,
+            public_dir_segs=dir_segs,
+            have_public_set=True,
+            compile_only_dir_segs=compile_only,
+        )
+        typedef_origins = _typedef_origins(decls, classify)
+        if typedef_origins is not None:
+            snapshot.typedef_origins = typedef_origins
     if have_set:  # ADR-063 2026-10-01: raw-text index, every #if branch
         stamp_public_header_identifiers(snapshot, public_headers, public_header_dirs)
     return snapshot
+
+
+def _typedef_origins(
+    decls: Any, classify: Callable[[str | None], ScopeOrigin]
+) -> dict[str, ScopeOrigin] | None:
+    """Each typedef key's origin from its producer-recorded declaring headers
+    (``model.declaration_headers``), or ``None`` when neither typedef map
+    carries attribution (a DWARF producer, a loaded snapshot): unknown, never
+    private. A key seen in several headers is public when any of them is,
+    unknown when any is unknown/unrecorded, and non-public only when all are."""
+    maps = (decls.typedefs, decls.typedefs_qualified)
+    if not any(has_attribution(m) for m in maps):
+        return None
+    out: dict[str, ScopeOrigin] = {}
+    for mapping in maps:
+        for key in mapping:
+            found = {classify(h) for h in declaring_header_set(mapping, key)}
+            if not found:
+                continue
+            if ScopeOrigin.PUBLIC_HEADER in found:
+                origin = ScopeOrigin.PUBLIC_HEADER
+            elif found <= NON_PUBLIC_ORIGINS:
+                origin = (
+                    ScopeOrigin.PRIVATE_HEADER
+                    if ScopeOrigin.PRIVATE_HEADER in found
+                    else min(found)
+                )
+            else:
+                continue
+            prior = out.get(key)
+            if prior is None or origin is ScopeOrigin.PUBLIC_HEADER:
+                out[key] = origin
+    return out
 
 
 def tag_provenance(

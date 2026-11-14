@@ -60,9 +60,6 @@ GAP_DUAL_ABI_COW_CHURN = "A C++20 dual-ABI flip is not recognized when the old-A
 GAP_GCC_HEADER_ONLY = (
     "The native gcc header backend records no function the library never emits"
 )
-GAP_UNUSED_TYPEDEF_DEMOTED = (
-    "A change to a public typedef no function uses is demoted out of the surface"
-)
 GAP_DEFINE_PROFILE = (
     "A macro that changes the build's ABI makes the two header dumps incomparable"
 )
@@ -411,20 +408,6 @@ _PLATFORM: tuple[Known, ...] = (
 )
 
 KNOWN: tuple[Known, ...] = (
-    Known(
-        "version_sentinel_typedef_bumped",
-        _MORE,
-        "wrong-verdict",
-        _always,
-        "typedef_version_sentinel is emitted, then demoted out of the surface "
-        "(no-provenance): snapshot typedefs carry no declaring header",
-        GAP_UNUSED_TYPEDEF_DEMOTED,
-        issues=frozenset(
-            {"missing:TYPEDEF_VERSION_SENTINEL", "weaker-than:COMPATIBLE"}
-        ),
-        verdicts=frozenset({"NO_CHANGE"}),
-        also_cls=frozenset({"wrong-kind"}),
-    ),
     Known(
         "char_made_unsigned",
         frozenset({"c_elf"}),

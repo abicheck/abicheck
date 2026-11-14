@@ -38,6 +38,7 @@ from ..errors import SnapshotError
 from ..model.availability import FactStatus
 from ..model.export_read import ExportReadState
 from ..model.fact import Fact
+from ..model.vocabulary import ScopeOrigin
 from .canonical import canonical_form
 from .extension_fact_catalog import (
     BINARY_SHA256,
@@ -48,6 +49,7 @@ from .extension_fact_catalog import (
     EXPORT_READ,
     EXTENSION_FACTS,
     NOEXCEPT_UNOBSERVED,
+    TYPEDEF_ORIGINS,
     ExtensionFact,
     ExtensionFactRegistry,
     ReaderSemantics,
@@ -237,6 +239,38 @@ def sync_model_extension_facts(snap: Any) -> None:
         # None or {}: no unit is claimed, so a stale stored census must go.
         _drop_extension_fact(snap, CU_STACK_PROTECTOR)
     encode_noexcept_unobserved(snap)
+    _sync_typedef_origins(snap)
+
+
+def _sync_typedef_origins(snap: Any) -> None:
+    """Write ``typedef_origins`` (unknown entries omitted: absent reads as
+    unknown), or drop a stale one when nothing was classified."""
+    if _blocked_reason(snap, TYPEDEF_ORIGINS.section) is not None:
+        return
+    origins = getattr(snap, "typedef_origins", None) or {}
+    known = {k: str(o) for k, o in origins.items() if o is not ScopeOrigin.UNKNOWN}
+    if known:
+        write_extension_fact(snap, TYPEDEF_ORIGINS, known)
+    else:
+        _drop_extension_fact(snap, TYPEDEF_ORIGINS)
+
+
+def _apply_typedef_origins(snap: Any) -> None:
+    """Restore ``typedef_origins``. Missing or blocked leaves it ``None``
+    (every typedef origin unknown, never private); a stored value that does
+    not decode is refused rather than read as that unknown."""
+    fact = read_extension_fact(snap, TYPEDEF_ORIGINS)
+    if fact.status is FactStatus.PRESENT and isinstance(fact.value, dict):
+        snap.typedef_origins = {k: ScopeOrigin(v) for k, v in fact.value.items()}
+        return
+    if fact.status is FactStatus.NOT_COLLECTED:
+        return
+    if _blocked_reason(snap, TYPEDEF_ORIGINS.section) is not None:
+        return
+    raise SnapshotError(
+        "snapshot's typedef_origins extension fact is unreadable: "
+        + "; ".join(str(d) for d in fact.diagnostics)
+    )
 
 
 def _sync_binary_sha256(snap: Any) -> None:
@@ -352,6 +386,7 @@ def apply_model_extension_facts(snap: Any) -> None:
     _apply_stack_protector_census(snap)
     _apply_template_defaults(snap)
     decode_noexcept_unobserved(snap)
+    _apply_typedef_origins(snap)
     scan = read_extension_fact(snap, CXX_CONCEPT_HEADER_SCAN)
     if scan.status is FactStatus.PRESENT and isinstance(scan.value, bool):
         snap.cxx_concept_header_scan = scan.value

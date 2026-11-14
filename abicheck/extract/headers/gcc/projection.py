@@ -23,6 +23,7 @@ from ....model import (
     Variable,
 )
 from ....model.abi_fundamental import AbiFundamental, FundamentalEncoding
+from ....model.declaration_headers import HeaderAttributedMap
 from ....model.identity import (
     entity_id_for_constant,
     entity_id_for_enum,
@@ -121,6 +122,7 @@ def project(
     functions = {}
     variables = {}
     aliases = {}
+    alias_headers: dict[str, str] = {}
     alias_ids = {}
     alias_abis = {}
     constants = {}
@@ -428,9 +430,11 @@ def project(
             if name == target:
                 continue
             aliases[name] = target
+            alias_headers[name] = r.get("source") or ""
             alias_ids[name] = entity_id_for_typedef(scope(r), r["name"])
             if r.get("abi"):
                 alias_abis[name] = abi(r["abi"])
+    aliases = HeaderAttributedMap(aliases, alias_headers)
     ir = normalize_header_ast(
         types=types.values(),
         enums=enums.values(),

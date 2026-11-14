@@ -599,6 +599,15 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "(policy/bitfield_generation_drift.py); no stored type spelling changes, "
         "nothing rewritten"
     ),
+    62: GenerationSpellingChange(
+        "no type or name spelling changes. Header dumps with a public-header "
+        "set record each typedef's ADR-015 origin from the header backend's "
+        "declaring header (castxml, clang and the native gcc plugin; the "
+        "abicheck.typedef_origins extension fact on the declarations "
+        "section), so a typedef declared in a public header is in the public "
+        "surface even when no function uses it; no rewrite is needed -- an "
+        "older snapshot reads every typedef origin as unknown, never private"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

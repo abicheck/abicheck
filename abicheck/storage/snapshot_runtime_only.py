@@ -98,6 +98,11 @@ RUNTIME_ONLY_SNAPSHOT_FIELDS: Final[Mapping[str, str]] = MappingProxyType(
             "`abicheck.cu_stack_protector` extension fact and the load "
             "restores it from there (storage/extension_facts.py)"
         ),
+        "typedef_origins": (
+            "never a document key: the writer stores it as the declarations "
+            "section's `abicheck.typedef_origins` extension fact and the load "
+            "restores it from there (storage/extension_facts.py)"
+        ),
         "wire_extensions": (
             "the stored document's D14/D15 carriers this run's load kept; the "
             "sectioned writer merges them back into the document it writes"
