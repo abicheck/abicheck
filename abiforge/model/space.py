@@ -628,6 +628,7 @@ OP_EDIT_CLASS: dict[str, dict[str, str]] = {
     },
     "template": {
         "template_default_arg_change": "default_argument_change",
+        "exported_instantiation_default_changed": "default_argument_change",
         "template_param_added_defaulted": "param_added_defaulted",
         "mandatory_template_param_added": "param_added_mandatory",
         "template_param_removed": "param_removed",

@@ -16,13 +16,13 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 ## Headline
 
 - Total kinds: **434**
-- Kinds with at least one real source: **197**
+- Kinds with at least one real source: **198**
 - Kinds backed by a compiled fixture (catalog `expected_kinds` or an edit-corpus `verified_floor`; ledger `scripts/changekind_fixture_ledger.json`): **313**
-- Kinds per source: catalog 159, field_shapes 9, integration 82
+- Kinds per source: catalog 159, field_shapes 9, integration 83
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
-| L0 | 129 | 74 |
+| L0 | 129 | 73 |
 | L1 | 66 | 7 |
 | L2 | 79 | 39 |
 | L3 | 15 | 5 |
@@ -159,7 +159,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `symbol_binding_changed` | COMPATIBLE | 1 | 0 | 0 |
 | `symbol_binding_lost_unique` | RISK | 1 | 0 | 2 |
 | `symbol_binding_strengthened` | COMPATIBLE | 1 | 0 | 0 |
-| `symbol_elf_visibility_changed` | COMPATIBLE | 0 | 0 | 0 |
+| `symbol_elf_visibility_changed` | COMPATIBLE | 0 | 0 | 1 |
 | `symbol_size_changed` | BREAKING | 1 | 0 | 0 |
 | `symbol_version_defined_added` | COMPATIBLE | 1 | 0 | 0 |
 | `symbol_version_defined_removed` | BREAKING | 0 | 0 | 0 |
