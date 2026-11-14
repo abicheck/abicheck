@@ -27,6 +27,7 @@ from __future__ import annotations
 
 from ..model.availability import FactStatus
 from ..model.fact import Fact
+from ..model.source_graph_query import is_stdlib_owned_name
 
 
 def std_spelling(type_str: str, identities: Fact[tuple[str, ...]] | None) -> str:
@@ -43,4 +44,4 @@ def std_spelling(type_str: str, identities: Fact[tuple[str, ...]] | None) -> str
     if len(identities.value) != 1:
         return type_str
     (ident,) = identities.value
-    return ident if ident.lstrip(":").startswith("std::") else type_str
+    return ident if is_stdlib_owned_name(ident) else type_str
