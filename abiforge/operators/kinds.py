@@ -399,6 +399,11 @@ KIND_OPERATORS: tuple[EditOp, ...] = (
         "layout: its data size grows from 5 to 6, and a class deriving from it "
         "that placed members in those bytes now overlaps d",
         expected=frozenset({"TAIL_PADDING_REUSE_CHANGED"}),
+        # The data size is not in DWARF: no DIE is emitted for an unnamed
+        # bit-field (which counts toward it), and DWARF cannot show a class is
+        # POD for layout (a default member initializer leaves no trace, Clang
+        # marks no `= default`). Only headers carry what decides it.
+        min_evidence="headers",
         precondition=_no_pack,
         verdict_min="COMPATIBLE_WITH_RISK",
         verdict_max=None,

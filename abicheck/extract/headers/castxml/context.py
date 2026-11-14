@@ -122,6 +122,12 @@ class CastxmlParserContext:
         self.trivially_copyable_cache: dict[str, bool | None] = {}
         #: ``record_traits.standard_layout`` memo, keyed by element id.
         self.standard_layout_cache: dict[str, bool | None] = {}
+        # Itanium POD-for-layout and data size (dsize) per record id, and the
+        # macro names that spell [[no_unique_address]] (data_size.py).
+        self.pod_for_layout_cache: dict[str, bool | None] = {}
+        self.data_size_cache: dict[str, int | None] = {}
+        self.nua_spellings: frozenset[str] | None = None
+        self.is_cxx_document: bool | None = None
         # Per-file index / per-directory file list for
         # ``out_of_line_inline.declared_inline_out_of_line``.
         self.out_of_line_inline_index: dict[str, dict[tuple[str, str], set[int]]] = {}

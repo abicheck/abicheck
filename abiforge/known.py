@@ -63,9 +63,6 @@ GAP_GCC_HEADER_ONLY = (
 GAP_UNUSED_TYPEDEF_DEMOTED = (
     "A change to a public typedef no function uses is demoted out of the surface"
 )
-GAP_CASTXML_DSIZE = (
-    "castxml and DWARF carry no data size, so a tail-padding reuse change is missed"
-)
 GAP_DEFINE_PROFILE = (
     "A macro that changes the build's ABI makes the two header dumps incomparable"
 )
@@ -428,13 +425,6 @@ KNOWN: tuple[Known, ...] = (
         verdicts=frozenset({"NO_CHANGE"}),
         also_cls=frozenset({"wrong-kind"}),
     ),
-    Known(
-        "nonpod_field_added_in_tail_padding",
-        _MORE,
-        "wrong-verdict",
-        lambda c: (
-            not (c.evidence == "headers" and c.header_backend in ("gcc", "clang"))
-        ),
         "only the gcc-plugin and clang header backends record a record's data "
         "size; castxml and DWARF do not, so the dsize change is invisible",
         GAP_CASTXML_DSIZE,
