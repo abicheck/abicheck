@@ -49,6 +49,8 @@ from collections.abc import Callable
 from functools import partial
 from typing import TYPE_CHECKING
 
+from abicheck.compare.overload_signature import format_overload_key, overload_keys
+
 from .compare.naming_conventions import (
     _INTERNAL_TEMPLATE_NAMESPACES as _INTERNAL_TEMPLATE_NAMESPACES,
     INTERNAL_TEMPLATE_LEAK,
@@ -846,30 +848,6 @@ def detect_overload_set_rerouted(
             out[_cpo_function_stem(name_of(f))].append(f)
         return out
 
-    def _overload_key(f: Function) -> tuple[object, ...]:
-        # An overload is distinguished by its parameter types *and* its
-        # implicit-object cv/ref qualifiers. Two member functions f(int) and
-        # f(int) const are separate overloads sharing a parameter-type tuple;
-        # keying on params alone would hide the removal/addition of one of them
-        # in a mixed change (e.g. {f(int), f(int) const} -> {f(int), f(long)}).
-        return (
-            tuple(p.type for p in f.params),
-            f.is_const,
-            f.is_volatile,
-            f.ref_qualifier,
-        )
-
-    def _fmt_key(key: tuple[object, ...]) -> str:
-        params, is_const, is_volatile, ref_qual = key
-        sig = "(" + ", ".join(params) + ")"  # type: ignore[arg-type]
-        if is_const:
-            sig += " const"
-        if is_volatile:
-            sig += " volatile"
-        if ref_qual:
-            sig += f" {ref_qual}"
-        return sig
-
     old_by_stem, new_by_stem = (
         _by_stem(snap, funcs)
         for snap, funcs in zip(
@@ -879,8 +857,8 @@ def detect_overload_set_rerouted(
 
     changes: list[Change] = []
     for stem in sorted(set(old_by_stem) & set(new_by_stem)):
-        old_sigs = {_overload_key(f) for f in old_by_stem[stem]}
-        new_sigs = {_overload_key(f) for f in new_by_stem[stem]}
+        # Export-table stubs carry no params: key them on their mangling.
+        old_sigs, new_sigs = overload_keys(old_by_stem[stem], new_by_stem[stem])
         removed = old_sigs - new_sigs
         added = new_sigs - old_sigs
         if not (removed and added):
@@ -903,8 +881,8 @@ def detect_overload_set_rerouted(
                 symbol=stem,
                 name=stem,
                 detail=f"{len(removed)} overload(s) removed and {len(added)} added in the same revision",
-                old_value=str(sorted(_fmt_key(k) for k in old_sigs)),
-                new_value=str(sorted(_fmt_key(k) for k in new_sigs)),
+                old_value=str(sorted(format_overload_key(k) for k in old_sigs)),
+                new_value=str(sorted(format_overload_key(k) for k in new_sigs)),
                 # ADR-044 D1 (Codex review): _by_stem above filters to
                 # Visibility.PUBLIC, so this finding's mere existence already
                 # proves its subject is public — same reliable-signal tagging as
