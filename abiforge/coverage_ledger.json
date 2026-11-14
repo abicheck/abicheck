@@ -90,6 +90,7 @@
     "FUNC_EXPORT_ADDED",
     "FUNC_LANGUAGE_LINKAGE_CHANGED",
     "FUNC_LIKELY_RENAMED",
+    "FUNC_LOST_FINAL",
     "FUNC_LOST_INLINE",
     "FUNC_NOEXCEPT_ADDED",
     "FUNC_NOEXCEPT_REMOVED",
@@ -306,9 +307,7 @@
     "WRITABLE_EXECUTABLE_SEGMENT",
     "X86_ISA_BASELINE_RAISED"
   ],
-  "declared_uncovered": [
-    "FUNC_LOST_FINAL"
-  ],
+  "declared_uncovered": [],
   "derived_by_construction": [
     "SONAME_BUMP_RECOMMENDED"
   ],

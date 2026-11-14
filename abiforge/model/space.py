@@ -532,6 +532,7 @@ OP_EDIT_CLASS: dict[str, dict[str, str]] = {
         "override_specifier_added": "override_specifier_change",
         "override_specifier_removed": "override_specifier_change",
         "virtual_became_final": "final_specifier_change",
+        "virtual_lost_final": "final_specifier_change",
         "destructor_became_virtual": "virtual_dtor_added",
         "destructor_became_nonvirtual": "virtual_dtor_removed",
         "key_function_inlined": "key_function_change",
