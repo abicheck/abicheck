@@ -8,7 +8,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 |---|---|
 | surfaced | 51 |
 | partial | 15 |
-| gap | 6 |
+| gap | 7 |
 | internal | 22 |
 
 ## ADRs
@@ -109,6 +109,7 @@ Which public surface reaches each ADR, which use cases it serves, and whether a 
 | [ADR-087](../adr/087-report-pages-publication.md) | gap | — | — | Proposed, not yet implemented; no publish-report reusable workflow, site generator, or page-link Action input exists yet. |
 | [ADR-088](../adr/088-one-compare-exit-gate.md) | surfaced | — | `api: abicheck.workflows.service_requests.CompareRequest` | — |
 | [ADR-092](../adr/092-native-gcc-header-backend.md) | partial | UC-ARCH-c-library, UC-ARCH-cpp-library | `cli: dump --header`<br>`cli: compare`<br>`api: abicheck.service.run_dump_request` | Experimental GCC support still lacks native header graphs, full macro/template coverage and multi-TU/source replay. |
+| [ADR-093](../adr/093-declared-change-kind-relations-and-observability.md) | gap | — | — | Design only; observable_at, kind relations and the policy resolution pass are not implemented yet (plan abicheck-abiforge-completeness WS-1, WS-5). |
 
 ## Use cases by user task
 
