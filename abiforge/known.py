@@ -425,15 +425,6 @@ KNOWN: tuple[Known, ...] = (
         verdicts=frozenset({"NO_CHANGE"}),
         also_cls=frozenset({"wrong-kind"}),
     ),
-        "only the gcc-plugin and clang header backends record a record's data "
-        "size; castxml and DWARF do not, so the dsize change is invisible",
-        GAP_CASTXML_DSIZE,
-        issues=frozenset(
-            {"missing:TAIL_PADDING_REUSE_CHANGED", "weaker-than:COMPATIBLE_WITH_RISK"}
-        ),
-        verdicts=frozenset({"COMPATIBLE"}),
-        also_cls=frozenset({"wrong-kind"}),
-    ),
     Known(
         "char_made_unsigned",
         frozenset({"c_elf"}),
