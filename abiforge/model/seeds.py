@@ -17,6 +17,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from abiforge.model.probes import PROBE_ROLES
+
 # (header_text, source_text). "" means "no such line in this file".
 RoleText = tuple[str, str]
 
@@ -1109,6 +1111,9 @@ _KIND_ROLES: dict[str, RoleText] = {
 }
 _XCXX_ROLES.update(_KIND_ROLES)
 _LAYOUT_SLOTS += tuple(f"@@{r}@@" for r in _KIND_ROLES)
+# Edit-class probes (``abiforge.model.probes``).
+_XCXX_ROLES.update(PROBE_ROLES)
+_LAYOUT_SLOTS += tuple(f"@@{r}@@" for r in PROBE_ROLES)
 
 XCXX_SEED = Seed(
     name="cxx_more",

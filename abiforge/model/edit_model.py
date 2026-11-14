@@ -9,7 +9,7 @@ uncovered gap in the report and the ledger
 (``abiforge.model.space.edit_classes_without_operator``), never a class that is
 left out. ``tests/test_edit_corpus_edit_axis.py`` checks both directions.
 
-The model splits three constructs:
+The model splits ten constructs:
 
 ``struct`` (record layout)
     A member edit is described by *operation* x *position* x *effect*:
@@ -41,6 +41,33 @@ The model splits three constructs:
     definition edits (inline/out of line, body imports, overloads), the
     function set (added, removed, renamed, declared-vs-exported) and the
     exporting symbol (binding, visibility, version, type).
+
+``class_virtual`` (virtual functions and the vtable, Itanium C++ ABI 2.5)
+    A slot appended, inserted, removed or reordered; a virtual's signature,
+    covariant return, noexcept, purity, override and final specifiers; a
+    method becoming virtual or not, a derived class overriding or not, a
+    virtual destructor; the key function; the vptr appearing or going; a new
+    polymorphic class; the vtable/type_info symbol.
+
+``enum``, ``enum_fixed_underlying``, ``enum_class`` (C11 6.7.2.2, [dcl.enum])
+    An enumerator appended, inserted, removed, revalued, swapped, renamed or
+    aliased; the underlying type and its range; scoping; the enum added,
+    removed or made opaque. ``IMPOSSIBLE_ENUM_EDITS`` states which construct
+    excludes which class, and the rule.
+
+``variable`` (a declared object and its exported symbol)
+    Its type by size effect, cv, initializer, TLS, visibility, binding,
+    alignment and version; the object added, removed, renamed,
+    declared-vs-exported, or made a C++17 inline variable.
+
+``typedef``
+    Retargeted (by size, same size, pointee), removed, renamed, added, or
+    respelled to the same type.
+
+``template`` (C++)
+    A parameter's default; a parameter added (defaulted or not), removed or
+    retyped; an instantiation added or dropped; an explicit specialization
+    added or removed; a template argument type renamed.
 
 Every other construct is not split: its single class ``any`` is the whole
 construct (``UNSPLIT``). That is a statement about the model's resolution,
@@ -262,10 +289,256 @@ FUNCTION_EDIT_CLASSES: tuple[EditClass, ...] = tuple(
     )
 )
 
+# --- class_virtual: virtual functions and the vtable (Itanium C++ ABI 2.5) ---
+#
+# A polymorphic class's vtable holds, after the offset-to-top and RTTI
+# entries, one slot per virtual function in declaration order (two for a
+# virtual destructor), the primary base's slots first. An edit is described
+# by what it does to that slot list, to the overrider a slot names, to the
+# vptr's existence, or to where the vtable is emitted (the key function).
+
+CLASS_VIRTUAL_EDIT_CLASSES: tuple[EditClass, ...] = tuple(
+    EditClass("class_virtual", n, d)
+    for n, d in (
+        ("vfunc_appended", "a virtual function is added after every existing slot"),
+        ("vfunc_inserted", "a virtual function is added before an existing slot"),
+        ("vfunc_removed", "a virtual function and its slot are removed"),
+        ("vfunc_reordered", "two virtual functions swap declaration (slot) order"),
+        (
+            "vfunc_signature_changed",
+            "a virtual function's parameters or cv/ref qualifiers change: the "
+            "slot keeps its index and names a re-mangled function",
+        ),
+        (
+            "vfunc_return_covariant",
+            "an overrider's return type changes to a pointer or reference to a "
+            "class derived from the overridden one's (covariant return)",
+        ),
+        ("vfunc_exception_spec_change", "a virtual function's noexcept changes"),
+        ("vfunc_became_pure", "a defined virtual function becomes pure"),
+        ("vfunc_lost_pure", "a pure virtual function gets a definition"),
+        ("pure_vfunc_added", "a new pure virtual function is declared"),
+        (
+            "method_became_virtual",
+            "a non-virtual member function of a polymorphic class becomes "
+            "virtual, adding a slot",
+        ),
+        (
+            "method_became_nonvirtual",
+            "a virtual member function becomes non-virtual, removing its slot",
+        ),
+        (
+            "override_added",
+            "a derived class starts overriding a base virtual: the inherited "
+            "slot names a new function",
+        ),
+        (
+            "override_removed",
+            "a derived class stops overriding a base virtual: the slot falls "
+            "back to the base's function",
+        ),
+        ("override_specifier_change", "an override specifier is added or removed"),
+        ("final_specifier_change", "a virtual function becomes final, or stops being"),
+        ("virtual_dtor_added", "the destructor of a polymorphic class becomes virtual"),
+        ("virtual_dtor_removed", "a virtual destructor becomes non-virtual"),
+        (
+            "key_function_change",
+            "the key function (the first non-inline, non-pure virtual) changes or "
+            "disappears, which moves where the vtable and type_info are emitted",
+        ),
+        ("became_polymorphic", "a class's first virtual function adds a vptr"),
+        ("lost_polymorphism", "a class's last virtual function goes, and its vptr"),
+        ("polymorphic_class_added", "a new polymorphic class is added"),
+        (
+            "vtable_symbol_visibility",
+            "the vtable or type_info symbol's visibility or binding changes",
+        ),
+    )
+)
+
+# --- enums: enumerators and the underlying type (C11 6.7.2.2, C++ [dcl.enum]) -
+#
+# The same classes for the three enum constructs, minus what a rule excludes:
+# a fixed underlying type cannot be outgrown (a value it cannot represent is
+# ill-formed), only an enum with a fixed underlying type has an opaque
+# declaration, and only C++ has scoped enums.
+
+_ENUM_CLASSES: tuple[tuple[str, str], ...] = (
+    ("enumerator_appended", "an enumerator is added after the last one"),
+    (
+        "enumerator_inserted",
+        "an enumerator is added before an existing one, shifting the implicit "
+        "values after it",
+    ),
+    ("enumerator_removed", "an enumerator is removed"),
+    ("enumerator_value_changed", "an enumerator's value changes"),
+    ("enumerator_values_swapped", "two enumerators exchange values"),
+    ("enumerator_renamed", "an enumerator is renamed, its value unchanged"),
+    (
+        "enumerator_alias_added",
+        "an enumerator is added with the value of an existing one",
+    ),
+    (
+        "range_exceeds_underlying",
+        "an added value no longer fits the implied underlying type, so the "
+        "enum's size changes",
+    ),
+    ("underlying_type_change", "the underlying type (or its implied size) changes"),
+    ("scoped_change", "the enum becomes scoped (enum class) or unscoped"),
+    ("enum_added", "a new enum is added to the interface"),
+    ("enum_removed", "an enum is removed from the interface"),
+    (
+        "became_opaque",
+        "the definition is withdrawn to an opaque declaration (its enumerators go)",
+    ),
+)
+
+#: Enum classes a construct cannot have, and the rule that excludes them.
+IMPOSSIBLE_ENUM_EDITS: dict[str, dict[str, str]] = {
+    "enum": {
+        "became_opaque": "an enum without a fixed underlying type has no opaque "
+        "declaration ([dcl.enum]/3; C23 6.7.2.2)",
+    },
+    "enum_fixed_underlying": {
+        "range_exceeds_underlying": "a value the fixed underlying type cannot "
+        "represent is ill-formed",
+    },
+    "enum_class": {
+        "range_exceeds_underlying": "a scoped enum always has a fixed underlying "
+        "type (int when unstated)",
+    },
+}
+
+
+def _enum_edits(construct: str) -> tuple[EditClass, ...]:
+    excluded = IMPOSSIBLE_ENUM_EDITS[construct]
+    return tuple(
+        EditClass(construct, n, d, _CXX_ONLY if n == "scoped_change" else None)
+        for n, d in _ENUM_CLASSES
+        if n not in excluded
+    )
+
+
+# --- variable: a declared object and the ELF symbol that exports it ---------
+#
+# A consumer that references an exported object copy-relocates it: its size
+# and alignment are baked into the consumer (STT_OBJECT st_size), its
+# initial value lives in the library, and the symbol's binding, visibility,
+# type (STT_TLS) and version decide what the reference resolves to.
+
+VARIABLE_EDIT_CLASSES: tuple[EditClass, ...] = tuple(
+    EditClass("variable", n, d, _CXX_ONLY if n == "became_inline" else None)
+    for n, d in (
+        ("retyped_same_size", "the object's type changes, its size unchanged"),
+        ("size_grows", "the object's type or array bound grows"),
+        ("size_shrinks", "the object's type or array bound shrinks"),
+        ("cv_change", "the object gains or loses const/volatile"),
+        ("initial_value_change", "the object's initializer changes"),
+        ("tls_change", "the object becomes thread-local, or stops being"),
+        ("visibility_change", "the symbol's visibility changes"),
+        ("binding_change", "the symbol's binding changes (global, weak)"),
+        ("alignment_change", "the object's alignment changes"),
+        ("version_change", "the symbol's version node changes"),
+        ("variable_added", "an object is added to the interface"),
+        ("variable_removed", "an object is removed from the interface"),
+        ("variable_renamed", "an object's symbol name changes"),
+        (
+            "export_declaration_mismatch",
+            "an object is exported but not declared, or declared but not exported",
+        ),
+        (
+            "became_inline",
+            "the object becomes a C++17 inline variable, defined in the header "
+            "with vague linkage",
+        ),
+    )
+)
+
+# --- typedef: a name for a type --------------------------------------------
+#
+# A typedef is in no mangled name or symbol: what it names is. So an edit is
+# described by what happens to the named type, and by the name's own
+# presence in the API.
+
+TYPEDEF_EDIT_CLASSES: tuple[EditClass, ...] = tuple(
+    EditClass("typedef", n, d, _CXX_ONLY if n == "respelled" else None)
+    for n, d in (
+        ("retarget_size_change", "the typedef names a type of another size"),
+        (
+            "retarget_same_size",
+            "the typedef names another type of the same size (int -> unsigned)",
+        ),
+        ("retarget_pointee", "a pointer typedef names a pointer to another type"),
+        ("typedef_removed", "the typedef is removed"),
+        ("typedef_renamed", "the typedef is renamed, its target unchanged"),
+        ("typedef_added", "a new typedef is added"),
+        (
+            "respelled",
+            "the typedef becomes an alias-declaration (using) naming the same type",
+        ),
+    )
+)
+
+# --- template: parameters, instantiations, specializations (C++) ------------
+#
+# A specialization's mangled name carries every template argument, defaulted
+# or not (Itanium 5.1.5), and a function template specialization is exported
+# only where the library instantiates or explicitly specializes it.
+
+TEMPLATE_EDIT_CLASSES: tuple[EditClass, ...] = tuple(
+    EditClass("template", n, d)
+    for n, d in (
+        ("default_argument_change", "a template parameter's default argument changes"),
+        (
+            "definition_changed",
+            "a header template's definition changes: each consumer instantiates "
+            "its own copy, so only rebuilt consumers see the new body",
+        ),
+        ("template_added", "a new template is declared in the interface"),
+        ("template_removed", "a template is removed from the interface"),
+        (
+            "param_added_defaulted",
+            "a template parameter with a default is added: every specialization "
+            "re-mangles with the extra argument",
+        ),
+        ("param_added_mandatory", "a template parameter without a default is added"),
+        ("param_removed", "a template parameter is removed"),
+        (
+            "param_retyped",
+            "a non-type template parameter's type, or a parameter's kind, changes",
+        ),
+        (
+            "instantiation_added",
+            "the library instantiates and exports a further specialization",
+        ),
+        (
+            "instantiation_dropped",
+            "the library stops instantiating a specialization consumers reference",
+        ),
+        (
+            "specialization_added",
+            "an explicit specialization is added beside the primary template",
+        ),
+        ("specialization_removed", "an explicit specialization is removed"),
+        (
+            "argument_renamed",
+            "a type used as a template argument is renamed, re-mangling the "
+            "specializations that name it",
+        ),
+    )
+)
+
 EDIT_MODEL: dict[str, tuple[EditClass, ...]] = {
     "struct": STRUCT_EDIT_CLASSES,
     "inheritance": INHERITANCE_EDIT_CLASSES,
     "function": FUNCTION_EDIT_CLASSES,
+    "class_virtual": CLASS_VIRTUAL_EDIT_CLASSES,
+    "enum": _enum_edits("enum"),
+    "enum_fixed_underlying": _enum_edits("enum_fixed_underlying"),
+    "enum_class": _enum_edits("enum_class"),
+    "variable": VARIABLE_EDIT_CLASSES,
+    "typedef": TYPEDEF_EDIT_CLASSES,
+    "template": TEMPLATE_EDIT_CLASSES,
 }
 
 
@@ -289,15 +562,20 @@ def all_model_classes() -> tuple[EditClass, ...]:
 
 __all__ = [
     "ANY_EDIT",
+    "CLASS_VIRTUAL_EDIT_CLASSES",
     "EDIT_MODEL",
     "EditClass",
     "FUNCTION_EDIT_CLASSES",
+    "IMPOSSIBLE_ENUM_EDITS",
     "IMPOSSIBLE_MEMBER_EDITS",
     "INHERITANCE_EDIT_CLASSES",
     "LAYOUT_EFFECTS",
     "MEMBER_OPERATIONS",
     "MEMBER_POSITIONS",
     "STRUCT_EDIT_CLASSES",
+    "TEMPLATE_EDIT_CLASSES",
+    "TYPEDEF_EDIT_CLASSES",
+    "VARIABLE_EDIT_CLASSES",
     "all_model_classes",
     "edit_langs",
     "model_classes",

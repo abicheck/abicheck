@@ -732,6 +732,13 @@ def parse_function_element(
             if el.tag in ("Method", "Destructor", "Converter", "OperatorMethod")
             else Fact.not_applicable()
         ),
+        # The `final` virt-specifier, from the same compound `attributes`;
+        # known for a virtual member function only.
+        is_final=(
+            "final" in el.get("attributes", "").split()
+            if el.get("virtual") == "1"
+            else None
+        ),
         is_compiler_generated=el.get("artificial") == "1",
         # ADR-063 Phase 2. castxml ALWAYS emits a pseudo-Itanium `mangled`
         # attribute, even for a plain C function (see the extern-"C"

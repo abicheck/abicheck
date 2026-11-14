@@ -625,12 +625,18 @@ def test_infeasibility_matches_an_independent_oracle_exhaustively() -> None:
     gcc_only = {"fabi_version"}
     cxx_only = {"cxx11_abi_0"}
     conflicts = {("std_string", "packed"), ("std_string", "short_enums")}
-    # Function edits C has no spelling for (written out, not read from the model).
+    # Edits C has no spelling for (written out, not read from the model):
+    # overloads, default arguments, exception specifications and language
+    # linkage; scoped enums; inline variables; alias-declarations.
     cxx_only_edits = {
         ("function", "default_argument_changed"),
         ("function", "exception_spec_change"),
         ("function", "language_linkage_change"),
         ("function", "overload_added"),
+        ("enum", "scoped_change"),
+        ("enum_fixed_underlying", "scoped_change"),
+        ("variable", "became_inline"),
+        ("typedef", "respelled"),
     }
     total = 0
     for p in space.all_points():

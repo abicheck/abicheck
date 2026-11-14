@@ -736,4 +736,44 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
+    _E(
+        "func_return_covariant_narrowed",
+        _R,
+        impact="A function returning a pointer or reference to a class now "
+        "returns one to a class derived from it, every step of the derivation "
+        "a non-virtual base at offset 0. The returned address is the same "
+        "either way and a return type is not part of a (non-template) mangled "
+        "name, so an existing binary keeps working, and for a virtual "
+        "overrider no vtable slot or thunk is added (Itanium C++ ABI 2.5.3). "
+        "Callers that rebuild see the narrower type, which can change overload "
+        "resolution or template deduction on the result: a source-level risk.",
+        description_template="Return type narrowed to a derived class at offset 0: {name}",
+        entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "func_became_final",
+        _A,
+        impact="A virtual member function gained the `final` virt-specifier. "
+        "Its vtable slot and its symbol are unchanged, so built consumers keep "
+        "working, but a consumer class that overrides it no longer compiles "
+        "([class.virtual]/4).",
+        description_template="Virtual method became final: {name}",
+        entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
+        operation=_OP.MODIFIED,
+    ),
+    _E(
+        "func_lost_final",
+        _R,
+        impact="A virtual member function lost the `final` virt-specifier. "
+        "Overriding it is allowed again and existing source still compiles, but "
+        "a call compiled while it was final may have been devirtualized, so an "
+        "override added now is not reached from that code.",
+        description_template="Virtual method lost final: {name}",
+        entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
+        operation=_OP.MODIFIED,
+    ),
 ]

@@ -65,6 +65,7 @@ __all__ = [
     "CXX_TEMPLATE_DEFAULTS",
     "CXX_CONCEPT_HEADER_SCAN",
     "EXPORT_READ",
+    "FINAL_MEMBER_FUNCTIONS",
     "EXTENSION_FACTS",
     "NOEXCEPT_UNOBSERVED",
     "STD_REEXPORTS",
@@ -341,6 +342,32 @@ NOEXCEPT_UNOBSERVED: ExtensionFact[list[str]] = ExtensionFact(
 )
 
 
+def _final_member_functions(value: Any) -> dict[str, list[str]]:
+    """``{"final": [...], "unobserved": [...]}``: mangled names of
+    member functions declared ``final``, and of virtual ones whose specifier
+    was not read."""
+    if not isinstance(value, dict) or set(value) != {"final", "unobserved"}:
+        raise TypeError("expected a {'final', 'unobserved'} map")
+    return {k: _str_list(value[k]) for k in ("final", "unobserved")}
+
+
+#: The ``final`` virt-specifier of virtual member functions
+#: (``Function.is_final``). Written on the ``declarations`` section when a
+#: header backend read it for some virtual function: the ``final`` list is
+#: True, ``unobserved`` is not known, every other virtual function is False.
+#: Absent, no virtual function's specifier is known -- what an older reader
+#: concludes too, so it is optional.
+FINAL_MEMBER_FUNCTIONS: ExtensionFact[dict[str, list[str]]] = ExtensionFact(
+    name="abicheck.final_member_functions",
+    section="declarations",
+    semantics=ReaderSemantics.OPTIONAL,
+    absent_reads_as="no virtual member function's final specifier is known",
+    owner="ADR-062",
+    encode=_final_member_functions,
+    decode=_final_member_functions,
+)
+
+
 def _template_default_map(value: Any) -> dict[str, list[str | None] | None]:
     """A ``{key: [default | null, ...] | null}`` map (each template's spelled
     defaults, ``null`` when not known; ``model/template_default_table.py``)."""
@@ -560,6 +587,7 @@ EXTENSION_FACTS = ExtensionFactRegistry(
         CXX_CONCEPT_CONSTRAINTS,
         CXX_TEMPLATE_DEFAULTS,
         EXPORT_READ,
+        FINAL_MEMBER_FUNCTIONS,
         NOEXCEPT_UNOBSERVED,
         STD_REEXPORTS,
         TYPEDEF_ORIGINS,

@@ -226,44 +226,20 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
     ),
     _E(
         "func_became_inline",
-        _A,
-        impact="A function gained the inline attribute. This detector "
-        "(`_check_inline_transitions()`) only compares the `is_inline` "
-        "specifier and export presence, with no language gate — it "
-        "can't establish whether the function's actual definition is "
-        "still visible to a recompiling consumer's translation unit, "
-        "nor which language's inline rules apply, so source "
-        "compatibility isn't guaranteed unconditionally. If the "
-        "header now declares the function inline without exposing a "
-        "definition at all (e.g. the definition still lives in a "
-        "source file the consumer doesn't include), an odr-used "
-        "inline function with no visible definition in that "
-        "translation unit fails to link, in C++ and C alike. When a "
-        "definition is visible, the two languages still differ: in "
-        "C++, recompiled source keeps working (each translation unit "
-        "gets its own copy, folded together at link time). In C99/"
-        "GNU C, a visible `inline` definition (without `extern`) "
-        "does not itself guarantee an external definition exists "
-        "anywhere — a non-static function's recompiled callers can "
-        "still be left with an unresolved external reference at "
-        "link time unless some translation unit provides a real "
-        "out-of-line instantiation (an `extern` declaration paired "
-        "with a matching definition, or a definition without "
-        "`inline` at all). An already-linked consumer's outcome "
-        "separately depends on what the new library actually ships: "
-        "the exported symbol commonly disappears once nothing forces "
-        "an out-of-line definition, in which case a caller resolving "
-        "it at link/load time gets an undefined-symbol error, while "
-        "a symbol kept exported (e.g. still ODR-used elsewhere in "
-        "the library) leaves already-linked callers unaffected. This "
-        "C99/GNU C description assumes the default ISO C99/C11 "
-        "`inline` semantics; under the older GNU89 inline dialect "
-        "(`-std=gnu89` or `-fgnu89-inline`, GCC's default before "
-        "adopting C99 semantics), the plain-`inline`/`extern inline` "
-        "correspondence is inverted — a non-`extern` `inline` "
-        "definition itself produces an external definition — so this "
-        "specific unresolved-reference risk does not apply to code "
-        "compiled under that dialect.",
+        _R,
+        impact="A function gained the inline attribute (ADR-081, 2026-11 "
+        "amendment). Becoming inline does not by itself break anyone: an "
+        "already-linked caller still binds while the library keeps exporting "
+        "the symbol, and a recompiled caller that odr-uses the function either "
+        "sees its definition in the header or resolves the call against that "
+        "same export. What breaks callers is the export disappearing once "
+        "nothing forces an out-of-line definition (or a C99 `inline` "
+        "definition leaving no external one), and that is its own finding "
+        "(`func_removed`, `func_visibility_changed`) wherever the export table "
+        "is in evidence. What remains is a risk: rebuilt callers carry their "
+        "own copy of the body, so a later change to it reaches only rebuilt "
+        "code, and a vague-linkage copy in a consumer can take precedence over "
+        "the library's.",
         entity=_ENT.FUNCTION,
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,

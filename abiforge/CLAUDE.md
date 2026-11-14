@@ -29,7 +29,8 @@ Purpose and claims: `README.md`.
 - **Operators** and their ground truth: `operators/` — `__init__` (core seeds
   and the registry), `elf` (`c_elf`), `cxx` (`cxx_more`), `platform`
   (ELF/loader/toolchain edits), `symbols`, `layout` (record and base layout
-  classes), `build_data` (compile modes only L3 build data records),
+  classes), `vtable`, `enums`, `variables`, `aliases` (the edit-class probes of
+  `model/probes.py`), `build_data` (compile modes only L3 build data records),
   `runtime_floor` (a raised libc version floor), `dependencies` (an import no
   library in the DT_NEEDED closure provides), `source_evidence` (what only
   L4 source replay or the L5 source graph sees; the gated `cxx_src` seed),
@@ -72,7 +73,7 @@ Read `docs/contribute/testing.md` "Generated ABI edit corpus coverage" first.
 - A new declared kind: `python -m abiforge.coverage ledger --write`.
 - A new seed role or config axis value: its construct or config-feature entry
   in `model/space.py`.
-- A new `struct`/`inheritance`/`function` operator: its `OP_EDIT_CLASS`
+- A new operator of a split construct (`edit_model.EDIT_MODEL`): its `OP_EDIT_CLASS`
   entry. An operator whose role is only a carrier (`elf.extra`, a class seed
   holding a free function) also needs its real construct in `OP_CONSTRUCT`. Edit
   classes come from `model/edit_model.py`, never from the operators; a class

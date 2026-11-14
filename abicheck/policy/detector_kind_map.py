@@ -160,6 +160,7 @@ DETECTOR_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
                 "enum_member_removed",
                 "enum_member_value_changed",
                 "enum_underlying_size_changed",
+                "type_added",
                 "type_removed",
             }
         ),
@@ -184,6 +185,7 @@ DETECTOR_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
         "func_deprecated": frozenset(
             {"func_deprecated_added", "func_deprecated_removed"}
         ),
+        "func_final_specifier": frozenset({"func_became_final", "func_lost_final"}),
         "func_override_specifier": frozenset(
             {"func_override_specifier_added", "func_override_specifier_removed"}
         ),
@@ -505,6 +507,7 @@ NON_DETECTOR_KINDS: frozenset[str] = frozenset(
         "exported_not_public",
         "exported_symbol_source_owner_changed",
         "float_abi_changed",
+        "func_return_covariant_narrowed",
         "generated_file_dependency_unstable",
         "generated_header_changed",
         "generated_header_reaches_public_api",

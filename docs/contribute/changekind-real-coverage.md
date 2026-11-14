@@ -15,16 +15,16 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 
 ## Headline
 
-- Total kinds: **431**
-- Kinds with at least one real source: **195**
+- Total kinds: **434**
+- Kinds with at least one real source: **198**
 - Kinds backed by a compiled fixture (catalog `expected_kinds` or an edit-corpus `verified_floor`; ledger `scripts/changekind_fixture_ledger.json`): **309**
-- Kinds per source: catalog 160, field_shapes 9, integration 78
+- Kinds per source: catalog 160, field_shapes 9, integration 82
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
 | L0 | 129 | 73 |
-| L1 | 65 | 7 |
-| L2 | 77 | 39 |
+| L1 | 66 | 7 |
+| L2 | 79 | 39 |
 | L3 | 15 | 5 |
 | L4 | 10 | 2 |
 | L5 | 15 | 5 |
@@ -88,7 +88,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `elf_osabi_changed` | RISK | 0 | 0 | 0 |
 | `executable_stack_removed` | COMPATIBLE | 2 | 0 | 0 |
 | `exported_object_alignment_reduced` | RISK | 0 | 0 | 5 |
-| `func_added` | COMPATIBLE | 9 | 0 | 8 |
+| `func_added` | COMPATIBLE | 9 | 0 | 9 |
 | `func_added_elf_only` | COMPATIBLE | 0 | 0 | 0 |
 | `func_export_added` | COMPATIBLE | 2 | 0 | 0 |
 | `func_language_linkage_changed` | BREAKING | 1 | 0 | 0 |
@@ -218,6 +218,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `func_params_changed` | BREAKING | 5 | 1 | 15 |
 | `func_pure_virtual_added` | BREAKING | 0 | 0 | 0 |
 | `func_return_changed` | BREAKING | 5 | 0 | 6 |
+| `func_return_covariant_narrowed` | RISK | 0 | 0 | 1 |
 | `func_static_changed` | BREAKING | 1 | 0 | 0 |
 | `func_virtual_added` | BREAKING | 1 | 0 | 0 |
 | `func_virtual_became_pure` | BREAKING | 1 | 0 | 1 |
@@ -246,7 +247,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `type_kind_changed` | BREAKING | 1 | 0 | 0 |
 | `type_removed` | API_BREAK | 5 | 1 | 3 |
 | `type_size_changed` | BREAKING | 19 | 1 | 7 |
-| `type_vtable_changed` | BREAKING | 3 | 0 | 0 |
+| `type_vtable_changed` | BREAKING | 3 | 0 | 1 |
 | `typedef_base_changed` | BREAKING | 1 | 0 | 4 |
 | `typedef_removed` | API_BREAK | 2 | 0 | 1 |
 | `union_field_added` | COMPATIBLE | 2 | 0 | 0 |
@@ -279,11 +280,13 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `field_default_initializer_removed` | RISK | 0 | 0 | 0 |
 | `field_deprecated_added` | COMPATIBLE | 0 | 0 | 0 |
 | `field_deprecated_removed` | COMPATIBLE | 0 | 0 | 0 |
+| `func_became_final` | API_BREAK | 0 | 0 | 1 |
 | `func_contract_attribute_added` | RISK | 0 | 0 | 0 |
 | `func_contract_attribute_removed` | RISK | 0 | 0 | 0 |
 | `func_deprecated_added` | COMPATIBLE | 1 | 0 | 0 |
 | `func_deprecated_removed` | COMPATIBLE | 0 | 0 | 0 |
 | `func_exception_spec_changed` | RISK | 0 | 0 | 0 |
+| `func_lost_final` | RISK | 0 | 0 | 1 |
 | `func_noexcept_removed` | RISK | 1 | 0 | 0 |
 | `func_override_specifier_added` | COMPATIBLE | 0 | 0 | 0 |
 | `func_override_specifier_removed` | RISK | 0 | 0 | 0 |
@@ -429,7 +432,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `field_lost_mutable` | API_BREAK | 0 | 0 | 0 |
 | `field_lost_volatile` | RISK | 0 | 0 | 0 |
 | `fortify_source_weakened` | RISK | 0 | 0 | 0 |
-| `func_became_inline` | API_BREAK | 0 | 0 | 0 |
+| `func_became_inline` | RISK | 0 | 0 | 0 |
 | `func_deleted` | BREAKING | 0 | 0 | 1 |
 | `func_deleted_dwarf` | BREAKING | 0 | 0 | 0 |
 | `func_deleted_elf_fallback` | BREAKING | 0 | 0 | 0 |

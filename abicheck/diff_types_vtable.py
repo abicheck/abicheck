@@ -242,7 +242,12 @@ from collections import Counter
 from collections.abc import Mapping
 
 from .compare.vtable_evidence import vtable_transition_is_evidenced
-from .diff_cxx_rules import owner_class_of, vtable_slot_is_override_reuse
+from .diff_cxx_rules import (
+    _owner_descends_from,
+    owner_class_of,
+    virtual_signature_key,
+    vtable_slot_is_override_reuse,
+)
 from .diff_helpers import make_change
 from .model import Function, RecordType, resolved_fact_value
 from .model.change import Change
@@ -497,6 +502,41 @@ def _virtual_signatures_by_owner(
     return index
 
 
+def _without_inherited_overrides(
+    name: str,
+    entries: list[str],
+    funcs: Mapping[str, Function],
+    types: Mapping[str, RecordType],
+) -> list[str]:
+    """*entries* minus the ones that are *name*'s overrides of a virtual one of
+    its proper ancestors declares with the same signature: such an override
+    reuses the ancestor's slot. When both slot indices are known they must
+    agree (a covariant return that needs a this-adjustment gets a new slot)."""
+    ancestors: dict[str, list[Function]] = {}
+    for fn in funcs.values():
+        owner = owner_class_of(fn) if fn.is_virtual else None
+        if owner is not None and owner != name:
+            ancestors.setdefault(virtual_signature_key(fn), []).append(fn)
+    kept = []
+    for entry in entries:
+        f = funcs.get(entry)
+        if f is not None and f.is_virtual and owner_class_of(f) == name:
+            bases = [
+                b
+                for b in ancestors.get(virtual_signature_key(f), ())
+                if _owner_descends_from(name, owner_class_of(b) or "", types)
+                and (
+                    f.vtable_index is None
+                    or b.vtable_index is None
+                    or f.vtable_index == b.vtable_index
+                )
+            ]
+            if bases:
+                continue
+        kept.append(entry)
+    return kept
+
+
 def _diff_type_vtable(
     name: str,
     t_old: RecordType,
@@ -555,8 +595,21 @@ def _diff_type_vtable(
         vtable_slot_is_override_reuse(
             old_entry, new_entry, old_funcs, new_funcs, old_types, new_types
         )
+        # ...or the reverse: an override dropped, the slot back to the base's.
+        or vtable_slot_is_override_reuse(
+            new_entry, old_entry, new_funcs, old_funcs, new_types, old_types
+        )
         for old_entry, new_entry in zip(old_vtable, new_vtable)
     ):
+        return []
+    # A vtable list read from DWARF names only the virtuals the class itself
+    # declares, not the slots it inherits: an override added (or dropped)
+    # there grows (or shrinks) the list although it reuses the base's slot.
+    # Overrides of an ancestor's same-signature virtual add no slot (Itanium
+    # 2.5.2), so the class's own slot sequence is what is left without them.
+    if _without_inherited_overrides(
+        name, old_vtable, old_funcs, old_types
+    ) == _without_inherited_overrides(name, new_vtable, new_funcs, new_types):
         return []
     description = (
         f"vtable reordered: {name}"

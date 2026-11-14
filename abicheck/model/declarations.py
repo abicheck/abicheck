@@ -371,6 +371,12 @@ class Function:
     is_noexcept_fact: Fact[bool] | None = field(
         default=None, kw_only=True, metadata={"wire": False}
     )
+    # The C++11 ``final`` virt-specifier on a member function: True/False
+    # when a header backend read it, None when not known or not applicable
+    # (a free function, a constructor, DWARF/symbols-only). Not a record key:
+    # storage carries it as the abicheck.final_member_functions extension
+    # fact (storage/extension_facts.py, ADR-062 D19).
+    is_final: bool | None = field(default=None, kw_only=True, metadata={"wire": False})
     # The three facts ``Visibility`` conflated (see
     # ``model/surface_facts.py``, which owns every read of these): (a) a
     # header this run parsed declares this entity, (b) it belongs to the

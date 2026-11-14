@@ -52,6 +52,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from .compare.abi_equivalent_retype import refine_abi_equivalent_retypes
+from .compare.covariant_return import refine_covariant_returns
 from .compare.declined_comparisons import declined_scope
 from .compare.detector_inputs import depth_gap_reason, unavailable_required_facts
 from .compare.section_readers import not_comparable_reason, unreadable_sections_read
@@ -115,6 +116,7 @@ DETECTOR_MODULE_ORDER: tuple[str, ...] = (
     "abicheck.compare.virtual_slot_removal",
     "abicheck.compare.type_visibility",
     "abicheck.compare.runtime_requirements",
+    "abicheck.compare.function_final",
 )
 
 _MODULE_RANK = {name: rank for rank, name in enumerate(DETECTOR_MODULE_ORDER)}
@@ -224,6 +226,7 @@ class DetectorRegistry:
         "abicheck.compare.virtual_slot_removal",
         "abicheck.compare.type_visibility",
         "abicheck.compare.runtime_requirements",
+        "abicheck.compare.function_final",
     )
 
     def ensure_loaded(self) -> None:
@@ -339,7 +342,10 @@ class DetectorRegistry:
         # from the slot facts both sides carry, once every detector has emitted
         # (compare/abi_equivalent_retype.py). It reads both declarations, so it
         # runs here, after the detectors, and never inside one.
-        return refine_abi_equivalent_retypes(changes, old, new), results
+        changes = refine_abi_equivalent_retypes(changes, old, new)
+        # An offset-0 covariant return narrowing keeps the returned address
+        # (compare/covariant_return.py); it too reads both sides after detection.
+        return refine_covariant_returns(changes, old, new), results
 
     def run_one_sided(
         self,

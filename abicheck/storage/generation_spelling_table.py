@@ -669,6 +669,14 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "rewrite applies; a stored pair from both sides of the bump can show "
         "VALUE_ABI_TRAIT_CHANGED for such a type"
     ),
+    69: GenerationSpellingChange(
+        "no type or name spelling changes. The header backends record the "
+        "final virt-specifier of a member function (Function.is_final, the "
+        "abicheck.final_member_functions extension fact), and the native gcc "
+        "plugin also declares explicit function template specializations. An "
+        "older snapshot carries no final specifier (read as not known) and its "
+        "gcc-backend surface lacks those specializations; no rewrite applies"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

@@ -1,6 +1,6 @@
 {
   "description": "Formal detector specification matrix (generated).",
-  "count": 431,
+  "count": 434,
   "detectors": [
     {
       "kind": "abi_equivalent_type_changed",
@@ -1011,9 +1011,18 @@
       "examples": ""
     },
     {
-      "kind": "func_became_inline",
+      "kind": "func_became_final",
       "category": "api_break",
       "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "func_became_final",
+      "examples": ""
+    },
+    {
+      "kind": "func_became_inline",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
       "doc_slug": "func_became_inline",
@@ -1128,6 +1137,15 @@
       "examples": ""
     },
     {
+      "kind": "func_lost_final",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "func_lost_final",
+      "examples": ""
+    },
+    {
       "kind": "func_lost_inline",
       "category": "quality",
       "default_verdict": "COMPATIBLE",
@@ -1225,6 +1243,15 @@
       "min_evidence": "L1",
       "doc_slug": "func_return_changed",
       "examples": "case102_frozen_runtime_signature_changed,case10_return_type,case46_pointer_chain_type_change,case70_flexible_array_member_changed,case72_covariant_return_changed"
+    },
+    {
+      "kind": "func_return_covariant_narrowed",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L1",
+      "doc_slug": "func_return_covariant_narrowed",
+      "examples": ""
     },
     {
       "kind": "func_return_pointee_qualifier_added",

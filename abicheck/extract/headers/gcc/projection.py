@@ -364,6 +364,7 @@ def project(
                 contract_attributes=attributes(r),
                 deprecated_fact=Fact.present(r.get("deprecated")),
                 is_override=r.get("override"),
+                is_final=r.get("final"),
                 ref_qualifier=r.get("ref_qualifier", ""),
                 is_virtual=protocol_flag(r, "virtual", language),
                 is_pure_virtual=protocol_flag(r, "pure_virtual", language),

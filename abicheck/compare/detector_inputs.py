@@ -205,6 +205,13 @@ DETECTOR_INPUTS: dict[str, DetectorInputs] = {
             "from_headers": _FROM_HEADERS,
         },
     ),
+    "func_final_specifier": DetectorInputs(
+        tolerates={
+            "canonical_ir": _CANONICAL,
+            "declarations.types": _LOOKUP,
+            "from_headers": _FROM_HEADERS,
+        },
+    ),
     "var_deprecated": DetectorInputs(
         tolerates={
             "canonical_ir": _CANONICAL,

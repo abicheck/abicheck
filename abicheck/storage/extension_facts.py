@@ -48,6 +48,7 @@ from .extension_fact_catalog import (
     CXX_TEMPLATE_DEFAULTS,
     EXPORT_READ,
     EXTENSION_FACTS,
+    FINAL_MEMBER_FUNCTIONS,
     NOEXCEPT_UNOBSERVED,
     STD_REEXPORTS,
     TYPEDEF_ORIGINS,
@@ -244,6 +245,7 @@ def sync_model_extension_facts(snap: Any) -> None:
         # None or {}: no unit is claimed, so a stale stored census must go.
         _drop_extension_fact(snap, CU_STACK_PROTECTOR)
     encode_noexcept_unobserved(snap)
+    _sync_final_member_functions(snap)
 
 
 def _sync_typedef_origins(snap: Any) -> None:
@@ -378,6 +380,49 @@ def decode_noexcept_unobserved(snap: Any) -> None:
             func.is_noexcept_fact = Fact.not_collected()
 
 
+def _sync_final_member_functions(snap: Any) -> None:
+    """Write ``Function.is_final`` of the virtual functions as
+    :data:`FINAL_MEMBER_FUNCTIONS`, or drop it when none was read."""
+    if _blocked_reason(snap, FINAL_MEMBER_FUNCTIONS.section) is not None:
+        return
+    funcs = list(getattr(snap.declarations, "functions", ()))
+    if not any(f.is_final is not None for f in funcs):
+        _drop_extension_fact(snap, FINAL_MEMBER_FUNCTIONS)
+        return
+    write_extension_fact(
+        snap,
+        FINAL_MEMBER_FUNCTIONS,
+        {
+            "final": [f.mangled for f in funcs if f.is_final],
+            "unobserved": [
+                f.mangled for f in funcs if f.is_virtual and f.is_final is None
+            ],
+        },
+    )
+
+
+def _apply_final_member_functions(snap: Any) -> None:
+    """Restore ``Function.is_final`` on the virtual functions; a stored value
+    that does not decode is refused (it would read as "nothing is final")."""
+    fact = read_extension_fact(snap, FINAL_MEMBER_FUNCTIONS)
+    if fact.status is FactStatus.NOT_COLLECTED:
+        return
+    if fact.status is not FactStatus.PRESENT or fact.value is None:
+        if _blocked_reason(snap, FINAL_MEMBER_FUNCTIONS.section) is not None:
+            return
+        raise SnapshotError(
+            "snapshot's final_member_functions extension fact is unreadable: "
+            + "; ".join(str(d) for d in fact.diagnostics)
+        )
+    final = set(fact.value["final"])
+    unobserved = set(fact.value["unobserved"])
+    for func in snap.declarations.functions:
+        if func.mangled in final:
+            func.is_final = True
+        elif func.is_virtual and func.mangled not in unobserved:
+            func.is_final = False
+
+
 def _drop_extension_fact(snap: Any, fact: ExtensionFact[Any]) -> None:
     """Remove *fact* from *snap*'s carried extensions (a model field reset to
     ``None`` claims no value, so a stale stored one must not be re-saved).
@@ -420,6 +465,7 @@ def apply_model_extension_facts(snap: Any) -> None:
     _apply_stack_protector_census(snap)
     _apply_template_defaults(snap)
     decode_noexcept_unobserved(snap)
+    _apply_final_member_functions(snap)
     _apply_typedef_origins(snap)
     _apply_std_reexports(snap)
     scan = read_extension_fact(snap, CXX_CONCEPT_HEADER_SCAN)

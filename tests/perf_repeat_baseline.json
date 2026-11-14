@@ -12,7 +12,7 @@
     "abicheck/comparability_profile.py(_toolchain_identity_status)": 14,
     "abicheck/compare/debug_layout_view.py(_layout_channel)": 140,
     "abicheck/compare/debug_layout_view.py(debug_layout_view)": 140,
-    "abicheck/compare/declined_comparisons.py(declined_scope)": 775,
+    "abicheck/compare/declined_comparisons.py(declined_scope)": 789,
     "abicheck/compare/dedup_key.py(hashable_value)": 1661,
     "abicheck/compare/detection_memo.py(detection_memo_scope)": 14,
     "abicheck/compare/detection_memo.py(memoized)": 777,
@@ -72,7 +72,7 @@
     "abicheck/compare/parameter_facts.py(_count)": 1618,
     "abicheck/compare/parameter_facts.py(_depth_comparable)": 800,
     "abicheck/compare/public_surface.py(public_functions)": 6,
-    "abicheck/compare/public_surface.py(reconciled_function_surfaces)": 190,
+    "abicheck/compare/public_surface.py(reconciled_function_surfaces)": 204,
     "abicheck/compare/public_surface.py(reconciled_variable_surfaces)": 28,
     "abicheck/compare/public_surface.py(should_filter_transitive_runtime_symbols)": 90,
     "abicheck/compare/qualified_name_normalization.py(segments)": 3184,
@@ -84,7 +84,7 @@
     "abicheck/compare/surface_reconcile.py(_alias_resolver.<locals>._build)": 18,
     "abicheck/compare/surface_reconcile.py(_alias_resolver.<locals>._resolve)": 424,
     "abicheck/compare/surface_reconcile.py(_drop_elf_memos)": 14,
-    "abicheck/compare/surface_reconcile.py(cached_reconciliation)": 372,
+    "abicheck/compare/surface_reconcile.py(cached_reconciliation)": 386,
     "abicheck/compare/template_param_defaults.py(_pattern_records)": 4,
     "abicheck/compare/template_surface.py(_cached)": 154,
     "abicheck/compare/template_surface.py(_needs_demangle)": 5044,
@@ -98,7 +98,7 @@
     "abicheck/compare/template_surface.py(reconciled_abi_visible_functions)": 42,
     "abicheck/compare/template_surface.py(reconciled_public_function_maps)": 42,
     "abicheck/compare/template_surface.py(reconciled_public_functions)": 70,
-    "abicheck/compare/type_map_pair.py(type_map_key)": 2000,
+    "abicheck/compare/type_map_pair.py(type_map_key)": 2004,
     "abicheck/compare/type_symbol_disambiguation.py(_declarations)": 68,
     "abicheck/compare/type_symbol_disambiguation.py(ambiguous_type_spellings)": 34,
     "abicheck/compare/typedef_respelling.py(_core_leaf)": 186,
@@ -308,5 +308,5 @@
   },
   "mode": "default",
   "n": 40,
-  "total": 229072
+  "total": 229118
 }
