@@ -242,14 +242,10 @@ def _capture_is_complete(bm: BuildMode) -> bool:
 
 
 def _collect_mangled_symbols(snap: AbiSnapshot) -> list[str]:
-    """Return all mangled symbol names from a snapshot's functions and variables."""
-    mangled = [
-        f.mangled for f in snap.declarations.functions if getattr(f, "mangled", None)
-    ]
-    mangled += [
-        v.mangled for v in snap.declarations.variables if getattr(v, "mangled", None)
-    ]
-    return mangled
+    """The binary's stdlib evidence (``model.build_mode_facts.stdlib_evidence_symbols``)."""
+    from .model.build_mode_facts import stdlib_evidence_symbols
+
+    return stdlib_evidence_symbols(snap)
 
 
 def _resolve_bm_from_signals(

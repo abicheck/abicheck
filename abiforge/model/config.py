@@ -125,6 +125,7 @@ class Flags:
     cxx11_abi: int | None = None  # _GLIBCXX_USE_CXX11_ABI; None = toolchain default
     abi_version: int | None = None  # gcc -fabi-version=N
     vtordisp: int | None = None  # MSVC /vdN
+    stdlib: str | None = None  # "libc++" (clang -stdlib=); None = toolchain default
 
     @property
     def id(self) -> str:
@@ -143,6 +144,8 @@ class Flags:
             parts.append(f"fabi{self.abi_version}")
         if self.vtordisp is not None:
             parts.append(f"vd{self.vtordisp}")
+        if self.stdlib is not None:
+            parts.append(self.stdlib.replace("+", "x"))
         return "+".join(parts)
 
     def unsupported_reason(self, tc: Toolchain, lang: str) -> str | None:
@@ -157,6 +160,10 @@ class Flags:
             return "/vd is an MSVC flag"
         if self.vtordisp is not None and lang != "c++":
             return "/vd affects C++ classes only"
+        if self.stdlib is not None and lang != "c++":
+            return "-stdlib selects a C++ standard library"
+        if self.stdlib is not None and tc.family != "clang":
+            return "-stdlib is a clang switch"
         if tc.family == "msvc" and (self.short_enums or self.visibility != "default"):
             return "MSVC has no -fshort-enums / -fvisibility analogue"
         return None
@@ -182,6 +189,8 @@ class Flags:
             out.append(f"-D_GLIBCXX_USE_CXX11_ABI={self.cxx11_abi}")
         if self.abi_version is not None:
             out.append(f"-fabi-version={self.abi_version}")
+        if self.stdlib is not None and lang == "c++":
+            out.append(f"-stdlib={self.stdlib}")
         return out
 
     def layout_flags(self, tc: Toolchain, lang: str) -> list[str]:

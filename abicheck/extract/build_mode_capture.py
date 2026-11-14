@@ -234,9 +234,9 @@ def capture_build_mode(
 
 
 def _mangled_names(snapshot: AbiSnapshot) -> list[str]:
-    mangled = [f.mangled for f in snapshot.declarations.functions if f.mangled]
-    mangled += [v.mangled for v in snapshot.declarations.variables if v.mangled]
-    return mangled
+    from ..model.build_mode_facts import stdlib_evidence_symbols
+
+    return stdlib_evidence_symbols(snapshot)
 
 
 def _record(snapshot: AbiSnapshot, signals: ElfBuildSignals) -> AbiSnapshot:

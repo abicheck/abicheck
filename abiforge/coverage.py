@@ -224,6 +224,24 @@ SCOPE_BUCKETS: tuple[ScopeBucket, ...] = (
         "runtime_floors), a policy input the corpus does not give",
         names=frozenset({"platform_baseline_floor_raised"}),
     ),
+    ScopeBucket(
+        "libcxx_abi_v2_runtime",
+        False,
+        "needs a libc++ built with LIBCXX_ABI_VERSION=2 (std::__2): distribution "
+        "libc++ pins _LIBCPP_ABI_VERSION=1 in __config_site, so no corpus "
+        "toolchain can build the other ABI version",
+        names=frozenset({"libcpp_abi_version_changed"}),
+    ),
+    ScopeBucket(
+        "stored_layout_generation",
+        False,
+        "a record with a layout descriptor on one side and no size at all on "
+        "the other: a stored snapshot from an extractor generation that "
+        "recorded no layout. Every library the corpus builds and dumps live "
+        "records a size on both sides (DWARF and every header backend), and a "
+        "pair with headers on one side only is compared at binary depth",
+        names=frozenset({"layout_unverifiable"}),
+    ),
     # --- named, in scope: source-taxonomy kinds a public header alone shows.
     # Macro values, constexpr values, default-argument values, a removed public
     # typedef and an uninstantiated template stay out (module bucket below):

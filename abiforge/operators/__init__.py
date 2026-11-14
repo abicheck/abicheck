@@ -337,6 +337,14 @@ def _all(*checks: Callable[[Config], str | None]) -> Callable[[Config], str | No
     return check
 
 
+def _libcxx_rebuild(c: Config) -> str | None:
+    if c.objfmt != "elf" or c.producer.family != "clang":
+        return "-stdlib=libc++ is a clang switch; the corpus pairs it with ELF"
+    if c.flags.stdlib is not None:
+        return "the producer already selects a standard library"
+    return None
+
+
 def _libstdcxx(c: Config) -> str | None:
     if c.objfmt != "elf" or c.producer.family not in ("gcc", "clang"):
         return "the dual std::string ABI is a libstdc++ (ELF gcc/clang) property"
@@ -944,6 +952,27 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         min_evidence="binary",
         precondition=_libstdcxx,
         rebuild=_with(cxx11_abi=0),
+        needs_libstdcxx=True,
+    ),
+    EditOp(
+        "rebuild_against_libcxx",
+        ("func.greet",),
+        _no_edit,
+        "the library is rebuilt against libc++ instead of libstdc++: std::string "
+        "is std::__1::basic_string with another layout, so greet's mangled name "
+        "changes and every std:: object crossing the boundary is a different type. "
+        "The header still declares the libstdc++ spelling a consumer links "
+        "against, so with headers its lost export reads as a visibility change",
+        expected=frozenset({"STDLIB_IMPLEMENTATION_CHANGED"}),
+        any_of=(
+            _REMOVED
+            | {"FUNC_PARAMS_CHANGED", "FUNC_RETURN_CHANGED", "FUNC_VISIBILITY_CHANGED"},
+        ),
+        min_evidence="binary",
+        precondition=_libcxx_rebuild,
+        rebuild=_with(stdlib="libc++"),
+        # The baseline must be libstdc++; libc++ itself is probed through the
+        # rebuilt flags (``capability_gap``): absent, the cell is unavailable.
         needs_libstdcxx=True,
     ),
     EditOp(
