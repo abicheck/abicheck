@@ -139,6 +139,11 @@ _STRUCT_OTHER: tuple[tuple[str, str], ...] = (
         "passed by value without changing its layout",
     ),
     ("member_rename", "a member is renamed, layout unchanged"),
+    (
+        "pointee_rename",
+        "the record a pointer or reference member points to is renamed; "
+        "every layout is unchanged",
+    ),
     ("member_cv_change", "a member gains or loses const/volatile"),
     (
         "declaration_text_only",

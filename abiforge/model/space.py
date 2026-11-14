@@ -261,6 +261,9 @@ ROLE_CONSTRUCT: dict[str, str] = {
     "tree.anon": "struct",
     "tree.pair": "struct",
     "tree.rtti": "class_virtual",
+    "tree.ren": "struct",
+    "tree.priv": "struct",
+    "tree.privref": "struct",
     "tree": "function",
 }
 
@@ -362,6 +365,8 @@ OP_EDIT_CLASS: dict[str, dict[str, str]] = {
         "field_became_bitfield": "field_to_bitfield",
         "field_renamed": "member_rename",
         "tree_anonymous_type_coordinates_shifted": "declaration_text_only",
+        "tree_pointee_type_renamed": "pointee_rename",
+        "tree_private_pointee_type_renamed": "pointee_rename",
         "field_became_const": "member_cv_change",
         "field_became_volatile": "member_cv_change",
         "record_became_opaque": "record_opaque",

@@ -1356,6 +1356,20 @@ _TREE_ROLES: dict[str, RoleText] = {
     ),
     "tree.unit2": ("", "int tree_pair_b(const TreePair *p) { return p->a + 1; }"),
     "tree.fn": ("int tree_count(int v);", "int tree_count(int v) { return v; }"),
+    # A public record pointing at a public type, and one pointing at a type
+    # the private header defines (the targets of the rename operators).
+    "tree.ren": (
+        "struct TreeTarget { int v; };\n"
+        "struct TreeRef { TreeTarget *t; int n; };\n"
+        "int tree_ref_n(const TreeRef *r);",
+        "int tree_ref_n(const TreeRef *r) { return r->n; }",
+    ),
+    "tree.priv": ("struct TreeImpl { int v; };", ""),
+    "tree.privref": (
+        "struct TreeHandle { TreeImpl *impl; int n; };\n"
+        "int tree_handle_n(const TreeHandle *h);",
+        "int tree_handle_n(const TreeHandle *h) { return h->n; }",
+    ),
     # Private-header declarations an edit adds (empty in the baseline).
     "tree.leak": ("", ""),
     "tree.rtti": ("", ""),
@@ -1375,6 +1389,8 @@ TREE_SEED = Seed(
         "@@tree.anon@@",
         "@@tree.pair@@",
         "@@tree.fn@@",
+        "@@tree.ren@@",
+        "@@tree.privref@@",
         _VIS_CLOSE,
         "#endif",
     ),
@@ -1383,6 +1399,8 @@ TREE_SEED = Seed(
         "@@tree.anon@@",
         "@@tree.pair@@",
         "@@tree.fn@@",
+        "@@tree.ren@@",
+        "@@tree.privref@@",
         "@@tree.leak@@",
         "@@tree.rtti@@",
     ),
@@ -1394,6 +1412,7 @@ TREE_SEED = Seed(
             (
                 "#ifndef EDIT_SEED_TREE_PRIV_HPP",
                 "#define EDIT_SEED_TREE_PRIV_HPP",
+                "@@tree.priv@@",
                 "@@tree.leak@@",
                 "@@tree.rtti@@",
                 "#endif",

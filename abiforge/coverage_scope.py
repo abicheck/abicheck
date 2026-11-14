@@ -269,13 +269,8 @@ SCOPE_BUCKETS: tuple[ScopeBucket, ...] = (
         "own symbol neighbour is renamed with it) -- the conservative "
         "true-add/true-remove; pairing on position alone was tried and paired "
         "an unrelated removed and added function as 'renamed', since a "
-        "source_decl node carries no signature to tell them apart. A type "
-        "rename does reconcile (declaration_renamed, and "
-        "public_api_internal_type_renamed for a private-header target), but "
-        "the header tier rates renaming the type a public record points to "
-        "BREAKING (struct_field_type_changed), stricter than the edit's ground "
-        "truth (a source break: the record's layout and every symbol are "
-        "unchanged), so no operator asserts it until that is settled; moved "
+        "source_decl node carries no signature to tell them apart (type "
+        "renames reconcile and are in scope: tree_pointee_type_renamed); moved "
         "and the identity_* outcomes need an id that changes with its name "
         "and file kept, or a second installed header",
         names=frozenset(
@@ -284,8 +279,6 @@ SCOPE_BUCKETS: tuple[ScopeBucket, ...] = (
                 "declaration_identity_reconciled_unresolved",
                 "declaration_identity_unchanged",
                 "declaration_moved",
-                "declaration_renamed",
-                "public_api_internal_type_renamed",
             }
         ),
     ),
@@ -346,12 +339,14 @@ SCOPE_BUCKETS: tuple[ScopeBucket, ...] = (
         True,
         "seen only in a source tree with a private header and two translation "
         "units: private-header provenance, per-TU type definitions, "
-        "source-to-binary mapping and anonymous-type coordinates",
+        "source-to-binary mapping, anonymous-type coordinates and type renames",
         names=frozenset(
             {
                 "declaration_coordinates_shifted",
+                "declaration_renamed",
                 "odr_source_conflict",
                 "odr_type_variant",
+                "public_api_internal_type_renamed",
                 "rtti_for_internal_type",
                 "source_decl_binary_symbol_mismatch",
                 "source_to_binary_mapping_changed",

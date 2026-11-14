@@ -17,14 +17,20 @@ Ground truth, from each edit's meaning:
   at least a risk, at most an API break (nothing a consumer built against
   the old library calls moved);
 * an anonymous type that only moves down its header keeps its definition:
-  only its source coordinates change -- compatible.
+  only its source coordinates change -- compatible;
+* a type a public record points to that is renamed (the pointer field
+  follows) keeps every layout and every symbol: code naming the old type no
+  longer compiles -- a source break, never an ABI break. A rename of a type
+  the private header defines is the same edit seen through an internal type:
+  a consumer reaches it only through the public record, so at most an API
+  break.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from abiforge.model.opkit import EditOp, Roles, _set
+from abiforge.model.opkit import EditOp, Roles, _merge, _set
 from abiforge.model.seeds import RoleText
 from abiforge.operators.source_evidence import needs_clang_replay
 
@@ -118,5 +124,49 @@ SOURCE_TREE_OPERATORS: tuple[EditOp, ...] = (
         "change, never its definition",
         "COMPATIBLE",
         "COMPATIBLE_WITH_RISK",
+    ),
+)
+
+
+def _rename_private(r: Roles) -> dict[str, RoleText]:
+    return _merge(
+        _set(r, "tree.priv", "struct TreeImplV2 { int v; };"),
+        _set(
+            r,
+            "tree.privref",
+            "struct TreeHandle { TreeImplV2 *impl; int n; };\n"
+            "int tree_handle_n(const TreeHandle *h);",
+        ),
+    )
+
+
+SOURCE_TREE_OPERATORS += (
+    _op(
+        "tree_pointee_type_renamed",
+        "tree.ren",
+        "struct TreeTargetV2 { int v; };\n"
+        "struct TreeRef { TreeTargetV2 *t; int n; };\n"
+        "int tree_ref_n(const TreeRef *r);",
+        None,
+        frozenset({"DECLARATION_RENAMED"}),
+        "the public type TreeRef points to is renamed and the field follows: "
+        "TreeRef's layout, the pointee's layout and every symbol are "
+        "unchanged, so only code naming the old type breaks",
+        "API_BREAK",
+        "API_BREAK",
+    ),
+    EditOp(
+        "tree_private_pointee_type_renamed",
+        ("tree.privref", "tree.priv", "tree.gate"),
+        _rename_private,
+        "a type the private header defines, which the public TreeHandle points "
+        "to, is renamed: every layout and symbol is unchanged; a consumer "
+        "reaches the type only through TreeHandle's field",
+        expected=frozenset({"PUBLIC_API_INTERNAL_TYPE_RENAMED"}),
+        verdict_min="COMPATIBLE_WITH_RISK",
+        verdict_max="API_BREAK",
+        touches=("tree.privref", "tree.priv"),
+        min_evidence="headers",
+        precondition=needs_clang_replay,
     ),
 )

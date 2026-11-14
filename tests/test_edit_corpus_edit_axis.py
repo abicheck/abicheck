@@ -72,6 +72,7 @@ EXPECTED_STRUCT = _MEMBER | {
     "record_added",
     "record_triviality_change",
     "member_rename",
+    "pointee_rename",
     "member_cv_change",
     "member_access_change",
     "declaration_text_only",
