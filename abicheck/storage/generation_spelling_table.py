@@ -705,6 +705,15 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "applies, and a pre-72 side's size is None, which the layout detectors "
         "skip"
     ),
+    73: GenerationSpellingChange(
+        "no type or name spelling changes. A Mach-O derived size now needs a "
+        "closing label in its own section (a section end is not a boundary) "
+        "and records that label as size_bound_by; a Mach-O snapshot records "
+        "sizes_derived; stab-bit entries (N_BNSYM, N_ENSYM) are no longer "
+        "boundaries. New facts on existing export records, not respellings: no "
+        "rewrite applies. A pre-73 side's size is None, which the layout "
+        "detectors skip"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

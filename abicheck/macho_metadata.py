@@ -48,6 +48,7 @@ from macholib.mach_o import (  # type: ignore[import-untyped]
     N_EXT,
     N_PEXT,
     N_SECT,
+    N_STAB,
     N_TYPE,
     N_UNDF,
     N_WEAK_DEF,
@@ -467,7 +468,10 @@ def _defined_section_symbols(nlists: Any) -> list[tuple[int, int, str]]:
     """
     out: list[tuple[int, int, str]] = []
     for nlist_entry, name_bytes in nlists:
-        if (int(nlist_entry.n_type) & N_TYPE) != N_SECT:
+        n_type = int(nlist_entry.n_type)
+        # A stab (debugging) entry can carry N_TYPE bits equal to N_SECT
+        # (N_BNSYM 0x2e, N_ENSYM 0x4e), so the stab bits are tested first.
+        if n_type & N_STAB or (n_type & N_TYPE) != N_SECT:
             continue
         raw = name_bytes.decode("utf-8", errors="replace") if name_bytes else ""
         out.append(
@@ -585,6 +589,9 @@ def _parse_macho_symbols(
         sizes = derive_object_sizes(
             _defined_section_symbols(symtab.nlists), _section_extents(header)
         )
+        # Derivation ran to completion: an export without a size now means "no
+        # closing label", not "derivation never ran" (MachoMetadata.sizes_derived).
+        meta.sizes_derived = True
         # Prefer the split external tables (available when LC_DYSYMTAB is
         # present): extdefsyms = external *defined* (exports), undefsyms =
         # external *undefined* (imports). Concatenate both so the import surface
@@ -633,7 +640,8 @@ def _parse_macho_symbols(
                     sym_type=sym_type,
                     is_weak=is_weak,
                     is_data=is_data,
-                    size=sizes.get(name),
+                    size=sizes[name][0] if name in sizes else None,
+                    size_bound_by=sizes[name][1] if name in sizes else None,
                 )
             )
     except Exception as exc:  # noqa: BLE001

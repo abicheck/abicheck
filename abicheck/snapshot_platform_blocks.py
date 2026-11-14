@@ -218,10 +218,12 @@ def macho_from_dict(macho: dict[str, Any], schema_version: int) -> Any:
             is_weak=x.get("is_weak", False),
             is_data=x.get("is_data", False),
             size=x.get("size"),
+            size_bound_by=x.get("size_bound_by"),
         )
         for x in macho.get("exports", [])
     ]
     return MachoMetadata(
+        sizes_derived=macho.get("sizes_derived"),
         cpu_type=macho.get("cpu_type", ""),
         cpu_types=macho.get("cpu_types", []),
         filetype=macho.get("filetype", ""),

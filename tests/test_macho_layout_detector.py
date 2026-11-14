@@ -10,6 +10,10 @@ change written twice, once as ELF ``st_size`` and once as a Mach-O address
 layout; the expected findings are hand-computed from the layout, so the
 oracle is the constructed input, not the detector.
 
+A Mach-O size is only a span to a closing label, so a size is compared only
+when both sides name the same closer, and only when the side's derivation
+ran. Those rules are pinned here as well.
+
 Bug class ``macho.layout_detector_blind``: a detector that silently skips a
 format it can read (or a Mach-O symbol read as ELF) reports nothing for a
 real break, and a pair that is only comparable across formats must not be
@@ -22,16 +26,15 @@ from pathlib import Path
 
 import pytest
 
-from abicheck.diff_elf_layout import _diff_elf_layout
+from abicheck.diff_elf_layout import _diff_elf_layout, _layout_support
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolType
 from abicheck.macho_metadata import parse_macho_metadata
 from abicheck.model import AbiSnapshot
+from abicheck.model.macho_facts import MachoMetadata
 from abicheck.serialization import load_snapshot
 from abicheck.storage.snapshot_codec import save_snapshot
 from tests._macho_synthetic import N_EXT, N_SECT, MachoSymbol, write_dylib
 
-_CONST = ("__DATA_CONST", "__const", 0x1000, 0x28)  # Base vtable, old size
-_TYPEINFO = ("__DATA_CONST", "__typeinfo", 0x2000, 0x18)
 _TEXT = ("__TEXT", "__text", 0x3000, 0x40)
 
 
@@ -53,17 +56,28 @@ def _elf_snap(*symbols: ElfSymbol) -> AbiSnapshot:
 
 
 def _vtable_macho(
-    tmp: Path, name: str, vtable_size: int, extra: list[MachoSymbol] = (), sections=None
+    tmp: Path,
+    name: str,
+    vtable_size: int,
+    extra: list[MachoSymbol] | tuple[()] = (),
+    sections=None,
 ) -> Path:
-    """A dylib whose ``_ZTV4Base`` fills its own section of *vtable_size* bytes."""
+    """A dylib whose ``_ZTV4Base`` is closed by ``_ZTI4Base`` at +vtable_size.
+
+    The typeinfo label and a trailing local sit in the vtable's own section,
+    so the vtable's span is bounded by a label. The section end is never a
+    bound, so without that label there would be no size to compare at all.
+    """
     syms = [
         MachoSymbol("__ZTV4Base", N_SECT | N_EXT, n_sect=1, n_value=0x1000),
-        MachoSymbol("__ZTI4Base", N_SECT | N_EXT, n_sect=2, n_value=0x2000),
+        MachoSymbol(
+            "__ZTI4Base", N_SECT | N_EXT, n_sect=1, n_value=0x1000 + vtable_size
+        ),
+        MachoSymbol("__tail", N_SECT, n_sect=1, n_value=0x1000 + vtable_size + 0x18),
         *extra,
     ]
     secs = sections or [
-        ("__DATA_CONST", "__vtable", 0x1000, vtable_size),
-        _TYPEINFO,
+        ("__DATA_CONST", "__vtable", 0x1000, vtable_size + 0x20),
         _TEXT,
     ]
     return write_dylib(tmp / name, syms, sections=secs)
@@ -132,15 +146,51 @@ def test_unchanged_vtable_on_macho_is_silent(tmp_path: Path) -> None:
     assert _diff_elf_layout(old_macho, new_macho) == []
 
 
+def test_stripped_local_inside_a_vtable_is_not_a_slot_change(tmp_path: Path) -> None:
+    """Stripping a local label must not fabricate a growth.
+
+    The vtable is 40 bytes on both sides. The old image also has a local label
+    at +0x20 that bounds it there (span 32); stripping removes that label, so
+    the span now closes at ``_ZTI4Base`` (span 40, the true size). The closer
+    differs, so the two spans measure different things and nothing is
+    reported. Without that check this reads as +1 word from a stripped binary.
+    """
+    old = _macho_snap(
+        write_dylib(
+            tmp_path / "old-local.dylib",
+            [
+                MachoSymbol("__ZTV4Base", N_SECT | N_EXT, n_sect=1, n_value=0x1000),
+                MachoSymbol("__mid", N_SECT, n_sect=1, n_value=0x1020),
+                MachoSymbol("__ZTI4Base", N_SECT | N_EXT, n_sect=1, n_value=0x1028),
+                MachoSymbol("__tail", N_SECT, n_sect=1, n_value=0x1040),
+            ],
+            sections=[("__DATA_CONST", "__vtable", 0x1000, 0x48)],
+        )
+    )
+    new = _macho_snap(
+        write_dylib(
+            tmp_path / "new-local.dylib",
+            [
+                MachoSymbol("__ZTV4Base", N_SECT | N_EXT, n_sect=1, n_value=0x1000),
+                MachoSymbol("__ZTI4Base", N_SECT | N_EXT, n_sect=1, n_value=0x1028),
+                MachoSymbol("__tail", N_SECT, n_sect=1, n_value=0x1040),
+            ],
+            sections=[("__DATA_CONST", "__vtable", 0x1000, 0x48)],
+        )
+    )
+    assert _by_kind(_diff_elf_layout(old, new), "VTABLE_SLOT_COUNT_CHANGED") == []
+    assert _by_kind(_diff_elf_layout(new, old), "VTABLE_SLOT_COUNT_CHANGED") == []
+
+
 # ── thunks ─────────────────────────────────────────────────────────────────
 
 
 def _thunk_macho(tmp: Path, name: str, thunk: str | None) -> AbiSnapshot:
-    extra = [MachoSymbol("__ZN1D1fEv", N_SECT | N_EXT, n_sect=3, n_value=0x3010)]
+    extra = [MachoSymbol("__ZN1D1fEv", N_SECT | N_EXT, n_sect=2, n_value=0x3010)]
     if thunk is not None:
         extra.append(
             MachoSymbol(
-                f"__ZTh{thunk}_N1D1fEv", N_SECT | N_EXT, n_sect=3, n_value=0x3000
+                f"__ZTh{thunk}_N1D1fEv", N_SECT | N_EXT, n_sect=2, n_value=0x3000
             )
         )
     return _macho_snap(_vtable_macho(tmp, name, 0x28, extra=extra))
@@ -169,26 +219,30 @@ def test_thunk_changes_on_macho(
 
 
 def test_typeinfo_growing_a_base_is_reported_on_macho(tmp_path: Path) -> None:
-    """_ZTI 16 -> 24 bytes: a class type gains one base (__si_class_type_info)."""
-    old = _macho_snap(
-        write_dylib(
-            tmp_path / "ti-old.dylib",
-            [
-                MachoSymbol("__ZTI4Base", N_SECT | N_EXT, n_sect=1, n_value=0x2000),
-            ],
-            sections=[("__DATA_CONST", "__typeinfo", 0x2000, 0x10)],
+    """_ZTI 16 -> 24 bytes: a class type gains one base (__si_class_type_info).
+
+    A trailing local closes the typeinfo on both sides, so the spans are
+    bounded by the same label and comparable.
+    """
+
+    def typeinfo(name: str, size: int) -> AbiSnapshot:
+        return _macho_snap(
+            write_dylib(
+                tmp_path / name,
+                [
+                    MachoSymbol("__ZTI4Base", N_SECT | N_EXT, n_sect=1, n_value=0x2000),
+                    MachoSymbol("__tail", N_SECT, n_sect=1, n_value=0x2000 + size),
+                ],
+                sections=[("__DATA_CONST", "__typeinfo", 0x2000, size + 0x8)],
+            )
         )
+
+    changes = _by_kind(
+        _diff_elf_layout(
+            typeinfo("ti-old.dylib", 0x10), typeinfo("ti-new.dylib", 0x18)
+        ),
+        "RTTI_INHERITANCE_CHANGED",
     )
-    new = _macho_snap(
-        write_dylib(
-            tmp_path / "ti-new.dylib",
-            [
-                MachoSymbol("__ZTI4Base", N_SECT | N_EXT, n_sect=1, n_value=0x2000),
-            ],
-            sections=[("__DATA_CONST", "__typeinfo", 0x2000, 0x18)],
-        )
-    )
-    changes = _by_kind(_diff_elf_layout(old, new), "RTTI_INHERITANCE_CHANGED")
     assert [(c.symbol, c.old_value, c.new_value) for c in changes] == [
         ("_ZTI4Base", "16", "24")
     ]
@@ -202,15 +256,34 @@ def test_cross_format_pair_is_not_compared(tmp_path: Path) -> None:
     """ELF st_size against a Mach-O derived size is not a comparison: no findings."""
     macho = _macho_snap(_vtable_macho(tmp_path, "cross.dylib", 0x30))
     elf = _elf_snap(ElfSymbol(name="_ZTV4Base", sym_type=SymbolType.OBJECT, size=40))
-    from abicheck.diff_elf_layout import _layout_support
 
     supported, reason = _layout_support(elf, macho)
     assert supported is False
     assert "missing ELF or Mach-O" in reason
 
 
+def test_mach_o_side_without_derivation_is_not_evaluated(tmp_path: Path) -> None:
+    """A snapshot whose size derivation never ran is refused, not read as clean.
+
+    Built directly, with ``sizes_derived`` left unset (a legacy snapshot). Its
+    exports carry no sizes, and an empty result from that would be a zero
+    finding the detector never earned.
+    """
+    legacy = AbiSnapshot(
+        library="libold.dylib",
+        version="1",
+        platform="macho",
+        macho=MachoMetadata(exports=[]),
+    )
+    current = _macho_snap(_vtable_macho(tmp_path, "current.dylib", 0x28))
+    supported, reason = _layout_support(legacy, current)
+    assert supported is False
+    assert "not derived" in reason
+    assert _diff_elf_layout(legacy, current) == []
+
+
 def test_missing_derived_size_is_no_fact_not_a_zero(tmp_path: Path) -> None:
-    """A vtable with no derived size on one side yields no finding, never a 0-byte change."""
+    """A vtable with no closing label on one side yields no finding, never a 0-byte change."""
     with_size = _macho_snap(_vtable_macho(tmp_path, "sized.dylib", 0x28))
     lib = write_dylib(
         tmp_path / "unsized.dylib",
@@ -227,10 +300,13 @@ def test_missing_derived_size_is_no_fact_not_a_zero(tmp_path: Path) -> None:
 
 
 def test_derived_size_survives_snapshot_round_trip(tmp_path: Path) -> None:
-    """A stored snapshot keeps the size, so a live-vs-stored comparison agrees."""
+    """A stored snapshot keeps the size, its closer and the derivation flag."""
     snap = _macho_snap(_vtable_macho(tmp_path, "stored.dylib", 0x30))
     out = tmp_path / "stored.json"
     save_snapshot(snap, out)
     loaded = load_snapshot(out)
     assert loaded.macho is not None
-    assert {e.name: e.size for e in loaded.macho.exports}["_ZTV4Base"] == 0x30
+    assert loaded.macho.sizes_derived is True
+    by_name = {e.name: e for e in loaded.macho.exports}
+    assert by_name["_ZTV4Base"].size == 0x30
+    assert by_name["_ZTV4Base"].size_bound_by == "_ZTI4Base"

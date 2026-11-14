@@ -39,28 +39,31 @@ _DERIVE_CASES = [
     pytest.param(
         [(1, 0x1000, "_ZTV4Base"), (1, 0x1028, "_ZTV4Derived")],
         {1: (0x1000, 0x80)},
-        # Base ends where Derived starts: 0x1028-0x1000. Derived is last: 0x1080-0x1028.
-        {"_ZTV4Base": 0x28, "_ZTV4Derived": 0x58},
+        # Base ends where Derived starts: 0x1028-0x1000. Derived is closed only by
+        # the section end, which is not a boundary: no size.
+        {"_ZTV4Base": (0x28, "_ZTV4Derived")},
         id="two-objects-one-section",
     ),
     pytest.param(
         [(1, 0x1000, "_ZTV4A"), (1, 0x1000, "_ZTI4A"), (1, 0x1010, "_ZTV4B")],
         {1: (0x1000, 0x20)},
-        # Aliases at one address share their size: the next *distinct* address is 0x1010.
-        {"_ZTV4A": 0x10, "_ZTI4A": 0x10, "_ZTV4B": 0x10},
+        # Aliases at one address share their size and closer: the next *distinct*
+        # address is 0x1010. _ZTV4B is closed by the section end only: no size.
+        {"_ZTV4A": (0x10, "_ZTV4B"), "_ZTI4A": (0x10, "_ZTV4B")},
         id="same-address-aliases",
     ),
     pytest.param(
         [(1, 0x1000, "_ZTV4A"), (1, 0x1010, "local_label")],
         {1: (0x1000, 0x40)},
         # A local (non-external) symbol still bounds the object before it.
-        {"_ZTV4A": 0x10},
+        {"_ZTV4A": (0x10, "local_label")},
         id="local-symbol-bounds",
     ),
     pytest.param(
         [(1, 0x1000, "_ZTT4A"), (1, 0x1010, "_ZTI4A")],
         {1: (0x1000, 0x18)},
-        {"_ZTT4A": 0x10, "_ZTI4A": 0x8},
+        # _ZTI4A is closed only by the section end: no size.
+        {"_ZTT4A": (0x10, "_ZTI4A")},
         id="vtt-and-typeinfo-families",
     ),
     pytest.param(
@@ -87,8 +90,9 @@ _DERIVE_CASES = [
     pytest.param(
         [(1, 0x1000, "_ZTV4A"), (2, 0x2000, "_ZTV4B")],
         {1: (0x1000, 0x18), 2: (0x2000, 0x30)},
-        # Sections are independent: each object is bounded by its own section.
-        {"_ZTV4A": 0x18, "_ZTV4B": 0x30},
+        # Sections are independent. Each object is alone in its section and is
+        # closed only by the section end: no size for either.
+        {},
         id="sections-are-independent",
     ),
 ]
@@ -131,13 +135,17 @@ def test_reader_derives_sizes_with_locals_private_externs_and_stabs(
     )
     meta = parse_macho_metadata(lib)
     sizes = {e.name: e.size for e in meta.exports}
+    assert meta.sizes_derived is True
     assert "private_helper" not in sizes  # private extern: not an export
     # _ZTV4Base: next symbol 0x1020 (the private extern) -> 0x20.
+    by_name = {e.name: e for e in meta.exports}
     assert sizes["_ZTV4Base"] == 0x20
-    # _ZTI4Base: the stab at 0x1040 is not a symbol, so it runs to 0x1100 -> 0xd8.
-    assert sizes["_ZTI4Base"] == 0x1100 - 0x1028
-    # _ZTV5Other alone in its section: 0x2030 - 0x2008 -> 0x28.
-    assert sizes["_ZTV5Other"] == 0x2030 - 0x2008
+    assert by_name["_ZTV4Base"].size_bound_by == "_private_helper"
+    # _ZTI4Base is closed only by the section end (the stab at 0x1040 is not a
+    # symbol and does not close it): no size.
+    assert sizes["_ZTI4Base"] is None
+    # _ZTV5Other alone in its section: closed only by the section end: no size.
+    assert sizes["_ZTV5Other"] is None
 
 
 def test_export_without_section_information_has_no_size(tmp_path: Path) -> None:
@@ -148,3 +156,29 @@ def test_export_without_section_information_has_no_size(tmp_path: Path) -> None:
     )
     meta = parse_macho_metadata(lib)
     assert [e.size for e in meta.exports] == [None]
+
+
+def test_stab_entries_with_a_symbol_type_bit_pattern_are_not_boundaries(
+    tmp_path: Path,
+) -> None:
+    """N_BNSYM (0x2e) and N_ENSYM (0x4e) have N_TYPE bits equal to N_SECT.
+
+    Both are debugging stab entries, so neither may close an object. A
+    regression here would close ``_ZTV4Base`` at the N_BNSYM address (0x1010)
+    instead of the real ``_ZTI4Base`` (0x1020), reporting 0x10 not 0x20.
+    """
+    n_bnsym, n_ensym = 0x2E, 0x4E
+    lib = write_dylib(
+        tmp_path / "libstab.dylib",
+        [
+            MachoSymbol("__ZTV4Base", N_SECT | N_EXT, n_sect=1, n_value=0x1000),
+            MachoSymbol("__dbg_begin", n_bnsym, n_sect=1, n_value=0x1010),
+            MachoSymbol("__dbg_end", n_ensym, n_sect=1, n_value=0x1018),
+            MachoSymbol("__ZTI4Base", N_SECT | N_EXT, n_sect=1, n_value=0x1020),
+        ],
+        sections=[("__DATA_CONST", "__const", 0x1000, 0x40)],
+    )
+    meta = parse_macho_metadata(lib)
+    by_name = {e.name: e for e in meta.exports}
+    assert by_name["_ZTV4Base"].size == 0x20
+    assert by_name["_ZTV4Base"].size_bound_by == "_ZTI4Base"

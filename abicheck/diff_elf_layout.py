@@ -383,12 +383,41 @@ def _layout_support(old: AbiSnapshot, new: AbiSnapshot) -> tuple[bool, str]:
     """Both sides must carry the same format's symbol metadata.
 
     Mixing ELF and Mach-O would compare st_size with a derived size, so a
-    cross-format pair is unsupported rather than matched.
+    cross-format pair is unsupported rather than matched. A Mach-O side whose
+    size derivation never ran (``sizes_derived`` is not True) is unsupported
+    too: its missing sizes mean "not derived", and reporting them as a clean
+    layout check would be a zero-finding result the detector never earned.
     """
     family = _layout_family(old)
     if family is None or family != _layout_family(new):
         return False, "missing ELF or Mach-O symbol metadata on one side"
+    if family == "macho":
+        for side in (old, new):
+            assert side.macho is not None  # guaranteed by _layout_family
+            if side.macho.sizes_derived is not True:
+                return False, (
+                    "Mach-O layout sizes were not derived for this snapshot "
+                    "(written before size derivation, or derivation did not run)"
+                )
     return True, ""
+
+
+def _span_uncorroborated(old: AbiSnapshot, new: AbiSnapshot, sym: str) -> bool:
+    """True when a Mach-O derived size cannot be compared across the two sides.
+
+    A derived span is the distance to the label that closes it. When the two
+    sides name different closers (a local was stripped, or another label was
+    inserted between object and closer), the two spans measure different
+    things, so comparing them would report a change no object made. ELF sizes
+    are exact and never uncorroborated.
+    """
+    if old.macho is None or new.macho is None:
+        return False
+    o = old.macho.export_map.get(sym)
+    n = new.macho.export_map.get(sym)
+    if o is None or n is None:
+        return True
+    return o.size_bound_by is None or o.size_bound_by != n.size_bound_by
 
 
 @registry.detector("elf_layout", requires_support=_layout_support)
@@ -413,7 +442,7 @@ def _diff_elf_layout(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     new_vt = _sized_rtti(new, "_ZTV", skip_runtime=skip_runtime)
     for key in sorted(old_vt.keys() & new_vt.keys()):
         o_size, n_size = old_vt[key], new_vt[key]
-        if o_size == n_size:
+        if o_size == n_size or _span_uncorroborated(old, new, "_ZTV" + key):
             continue
         sym = "_ZTV" + key
         cls = _class_name(sym)
@@ -449,7 +478,7 @@ def _diff_elf_layout(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     new_ti = _sized_rtti(new, "_ZTI", skip_runtime=skip_runtime)
     for key in sorted(old_ti.keys() & new_ti.keys()):
         o_size, n_size = old_ti[key], new_ti[key]
-        if o_size == n_size:
+        if o_size == n_size or _span_uncorroborated(old, new, "_ZTI" + key):
             continue
         sym = "_ZTI" + key
         cls = _class_name(sym)
@@ -475,7 +504,7 @@ def _diff_elf_layout(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     new_vtt = _sized_rtti(new, "_ZTT", skip_runtime=skip_runtime)
     for key in sorted(old_vtt.keys() & new_vtt.keys()):
         o_size, n_size = old_vtt[key], new_vtt[key]
-        if o_size == n_size:
+        if o_size == n_size or _span_uncorroborated(old, new, "_ZTT" + key):
             continue
         sym = "_ZTT" + key
         changes.append(
