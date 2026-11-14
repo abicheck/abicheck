@@ -522,6 +522,8 @@ repository and to evaluate other checkers.
 
 **Measured in B0 (WS-6 PR 1, gcc 13, `c17`/`c++17`, `-O0`, one serial process, 4 vCPU shared).** 357 applicable (operator, seed) cells of the default matrix, built and asked of the checker: mean 0.73 s per cell for the default `{B,D,H}` cell and 0.75 s for the stripped `{B,H}` cell (the first pass ran alongside a second suite, so these are upper bounds). The gating PR tier (`tests/test_abi_edit_corpus.py -m integration`) takes about 21 min serially, 1413 passed / 736 skipped / 16 xfailed. The PR-tier budget above (≤ 25 min at 4×, sharded) holds with the current per-cell cost; the `{B,H}` cell is not in the PR budget yet (it is a nightly, non-gating lane).
 
+Follow-up owned by WS-2: the default `{B,D,H}` cell still receives the layout flags only because the four cells `rebuild_pack_struct`, `object_alignment_reduced` and `rebuild_cxx11_abi_off` turn red without them (header layout without build flags contradicts the DWARF fact); a WS-2 PR fixes that defect, after which the default cell also drops the flags.
+
 ### 5.5 Exhaustive versus sampled
 
 - **Exhaustive:**
