@@ -5,7 +5,7 @@
       "abicheck/ctf_metadata.py": "97413edf3222a6c2355d3c7f8731859f759411a58876c211713c616a4fc3d689",
       "abicheck/dumper.py": "7cfc03dce4b9968a259d5eba7ba7cf7d3008eb0422a60defd7c4743b88b330a8",
       "abicheck/dumper_clang.py": "5fd0f5d29bf26c35b68c0389ed98c30ab52e462c529614ce0195b16fa4f3684c",
-      "abicheck/dwarf_advanced.py": "e7dc4a394915381a0c67081f14b8301d63677c5c63d1feb4e95c6c3573c111e8",
+      "abicheck/dwarf_advanced.py": "2addcbd63e9263e9f89b9dc7bc252baa63c5dad332d8560cf690fb2437bf6c08",
       "abicheck/dwarf_metadata.py": "d1c92f3ea5a225bab409226b5fe10b66cd0705454bce2e6156949a5f7ab0a936",
       "abicheck/dwarf_presence.py": "7e73580ec7a02fdf24e3815cb89e42aa6fe00e46e8cda6b7fe9d547f06ac3f06",
       "abicheck/dwarf_snapshot.py": "ae0f7245a4787623809467e26b792606b4f6cc9b4917c093779e8891134db46a",
@@ -54,7 +54,7 @@
       "abicheck/extract/dwarf_scope.py": "1800757661a850338d8cb96d715995ffa8f79354047f68b1ce5e248a72819b20",
       "abicheck/extract/dwarf_subtree_index.py": "8b7f4ac18be79326c91f6dac62781753e25d949ec688dd4c29d4a1236407d68d",
       "abicheck/extract/dwarf_type_names.py": "dab8b4167a3c69e3e8d92b4e1cb08ba58df4e9c59fd5f8d064e83c84405c016a",
-      "abicheck/extract/dwarf_value_abi_trait.py": "74b5b1d1d03fc8547194527a9eefa07f2d2e866cf6fa3be0ae3e7a21403d210b",
+      "abicheck/extract/dwarf_value_abi_trait.py": "8e267721de59192b610d835d597c09a66e1e0369338e59a950e8b79c54692af2",
       "abicheck/extract/dwarf_variable_alignment.py": "4973a5d8e5619f640e54977dbb434e14df738fd25f0fdd6f24c7aa12cb6c5e0a",
       "abicheck/extract/dwarf_variable_identity.py": "ab35f80066f19d1b8d59d39d1eec43906abb061d31f24f755fabab01a4e9d4fc",
       "abicheck/extract/dwarf_vptr_resolution.py": "756dfe22e692c77de3b06fa3d86959b4e1c1bdd0d3729fae66743e923bbc2a68",
@@ -229,9 +229,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "eab746ac044881687f663dbe3c747f95e5e06cd0283422f450cff0ba7c45ff4e",
-    "generation": 64,
-    "reason": "header backends record the public headers' namespace-scope using std::X re-exports (castxml, clang, native gcc plugin using rows) as the abicheck.std_reexports declarations fact"
+    "fingerprint": "c8f166b99cd736c27e64adeb6a1f6d2ae8045d567b6dbceb566217673af3e32f",
+    "generation": 65,
+    "reason": "bumped to 65 for a semantic change"
   },
   "resolver": {
     "files": {
