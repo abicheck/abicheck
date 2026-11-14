@@ -60,6 +60,9 @@ GAP_DUAL_ABI_COW_CHURN = "A C++20 dual-ABI flip is not recognized when the old-A
 GAP_GCC_HEADER_ONLY = (
     "The native gcc header backend records no function the library never emits"
 )
+GAP_UNNAMED_TYPE_ELF_ONLY = (
+    "A new export that mangles an unnamed type is flagged only in an ELF library"
+)
 GAP_DEFINE_PROFILE = (
     "A macro that changes the build's ABI makes the two header dumps incomparable"
 )
@@ -408,6 +411,19 @@ _PLATFORM: tuple[Known, ...] = (
 )
 
 KNOWN: tuple[Known, ...] = (
+    Known(
+        "unnamed_type_api_added",
+        _MORE,
+        "wrong-verdict",
+        lambda c: c.objfmt != "elf",
+        "the unnamed-type detector reads ELF exports only (requires_support "
+        "demands ELF on both sides): a Mach-O __Z...Ut_ export reads COMPATIBLE",
+        GAP_UNNAMED_TYPE_ELF_ONLY,
+        issues=frozenset(
+            {"missing:UNNAMED_TYPE_IN_PUBLIC_ABI", "weaker-than:COMPATIBLE_WITH_RISK"}
+        ),
+        verdicts=frozenset({"COMPATIBLE"}),
+    ),
     Known(
         "char_made_unsigned",
         frozenset({"c_elf"}),
