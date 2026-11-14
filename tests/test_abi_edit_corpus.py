@@ -101,7 +101,7 @@ def test_operator_names_are_unique_and_nonempty() -> None:
 
 def test_seed_names_are_unique() -> None:
     names = [s.name for s in SEEDS]
-    assert len(names) == len(set(names)) == 7
+    assert len(names) == len(set(names)) == 8
 
 
 def test_every_template_placeholder_is_a_known_role() -> None:

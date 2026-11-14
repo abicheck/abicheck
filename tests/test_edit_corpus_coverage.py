@@ -95,7 +95,7 @@ def test_scope_classifies_every_changekind_once() -> None:
         ("CONCEPT_TIGHTENED", True),
         ("INLINE_FUNCTION_REMOVED", True),
         # Values abicheck reads only from L4 sources.
-        ("PUBLIC_MACRO_VALUE_CHANGED", False),
+        ("PUBLIC_MACRO_VALUE_CHANGED", True),
         ("CONSTEXPR_VALUE_CHANGED", False),
         # Other platforms, ecosystems and evidence levels: out.
         ("PE_MACHINE_CHANGED", False),
