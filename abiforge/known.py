@@ -21,6 +21,9 @@ from abiforge.run.toolchains import uses_libstdcxx
 _CLASSES = frozenset({"cxx_classes"})
 
 GAP_DWARF_PURE = "A GCC-built DWARF snapshot cannot tell that a virtual became pure"
+GAP_DWARF_NEW_PURE = (
+    "A newly added pure virtual does not make the class read abstract at DWARF depth"
+)
 GAP_CLANG_CHAR = (
     "A clang-built plain-`char` signedness flip reads `NO_CHANGE` at DWARF depth"
 )
@@ -45,6 +48,7 @@ GAP_CASTXML_ALIGN = (
 )
 GAP_CLANG_INLINE_STATIC = "An inline function's static local, exported by clang, reads as an undeclared export"
 GAP_UNIQUE_O2_DWARF = "A GNU-unique static whose inline owner was inlined away is not compared at DWARF depth"
+GAP_PURE_VIRTUAL_GCC_DWARF = "A method that becomes pure virtual is not seen from gcc DWARF when the class keeps no key function"
 GAP_DUAL_ABI_COW_CHURN = "A C++20 dual-ABI flip is not recognized when the old-ABI string's members are exported"
 GAP_GCC_HEADER_ONLY = (
     "The native gcc header backend records no function the library never emits"
@@ -261,7 +265,10 @@ _PLATFORM: tuple[Known, ...] = (
         "castxml cannot read g_al's old aligned(16), so the address-derived "
         "reduction is demoted to COMPATIBLE",
         GAP_CASTXML_ALIGN,
-        issues=frozenset({"weaker-than:COMPATIBLE_WITH_RISK"}),
+        # The same unread aligned(16): VAR_ALIGNMENT_CHANGED is missing too.
+        issues=frozenset(
+            {"weaker-than:COMPATIBLE_WITH_RISK", "none-of:VAR_ALIGNMENT_CHANGED"}
+        ),
         verdicts=frozenset({"COMPATIBLE"}),
     ),
     Known(
@@ -297,6 +304,17 @@ _PLATFORM: tuple[Known, ...] = (
         GAP_DEFINE_PROFILE,
         issues=frozenset({"refused:ProfileMismatchError"}),
         verdicts=frozenset({"REFUSED"}),
+    ),
+    Known(
+        "method_became_pure_virtual",
+        _MORE,
+        "wrong-kind",
+        lambda c: c.producer.family == "gcc" and c.evidence == "dwarf",
+        "Plain's only virtual is pure, so gcc emits no key function and only a "
+        "declaration of Plain in DWARF; get()'s pure flag is never read",
+        GAP_PURE_VIRTUAL_GCC_DWARF,
+        issues=frozenset({"missing:FUNC_PURE_VIRTUAL_ADDED"}),
+        verdicts=frozenset({"BREAKING"}),
     ),
     Known(
         "gnu_unique_static_added",
@@ -361,6 +379,17 @@ KNOWN: tuple[Known, ...] = (
         verdicts=frozenset({"NO_CHANGE"}),
     ),
     Known(
+        "pure_virtual_added",
+        _MORE,
+        "wrong-kind",
+        lambda c: c.evidence == "dwarf",
+        "the new pure virtual z() lengthens Base's vtable, but the DWARF-depth "
+        "compare does not read Base as abstract",
+        GAP_DWARF_NEW_PURE,
+        issues=frozenset({"missing:TYPE_BECAME_ABSTRACT"}),
+        verdicts=frozenset({"BREAKING"}),
+    ),
+    Known(
         "virtual_become_pure",
         _CLASSES,
         "wrong-kind",
@@ -370,7 +399,9 @@ KNOWN: tuple[Known, ...] = (
         "from a GCC-built DWARF snapshot the now-pure virtual reads func_removed; "
         "neither func_virtual_became_pure nor type_became_abstract",
         GAP_DWARF_PURE,
-        issues=frozenset({"none-of:FUNC_VIRTUAL_BECAME_PURE|TYPE_BECAME_ABSTRACT"}),
+        issues=frozenset(
+            {"none-of:FUNC_VIRTUAL_BECAME_PURE", "none-of:TYPE_BECAME_ABSTRACT"}
+        ),
         verdicts=frozenset({"BREAKING"}),
     ),
     Known(

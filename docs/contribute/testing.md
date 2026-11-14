@@ -123,8 +123,12 @@ at most headers. Every kind is in exactly one bucket
 (`test_every_kind_is_in_exactly_one_scope_bucket`), and every report lists the
 buckets with their counts and reasons.
 
-- *Declared*: an operator names the kind in an expectation, under some rule.
-  Computed from the operators alone.
+- *Declared*: an operator *requires* the kind (`expected`, or an `any_of`
+  group of one) under some rule. A member of a larger `any_of` group accepts
+  a cell but is not declared on its own: one alternative may be a kind no
+  cell can produce (abicheck always reports its sibling, as with the DWARF
+  layout diff's `STRUCT_*` twins of the `TYPE_*` kinds). Computed from the
+  operators alone.
 - *Verified* (per tier): a cell expected the kind, abicheck produced it, and
   the cell reconciled to a passing class. A strict-xfail (known) cell, a
   skipped cell and an unobservable cell verify nothing. A kind abicheck

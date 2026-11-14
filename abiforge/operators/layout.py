@@ -31,8 +31,8 @@ from abiforge.operators.platform import _X86_HOSTS, _x86_64
 
 __all__ = ["LAYOUT_OPERATORS"]
 
-_FIELD_REMOVED = frozenset({"STRUCT_FIELD_REMOVED", "TYPE_FIELD_REMOVED"})
-_FIELD_ADDED = frozenset({"TYPE_FIELD_ADDED", "TYPE_FIELD_ADDED_COMPATIBLE"})
+_FIELD_REMOVED = frozenset({"TYPE_FIELD_REMOVED"})
+_FIELD_ADDED = frozenset({"TYPE_FIELD_ADDED_COMPATIBLE"})
 _BITFIELD = frozenset({"FIELD_BITFIELD_CHANGED"})
 _BREAKING: dict[str, Any] = {"verdict_min": "BREAKING"}
 _DWARF = {"min_evidence": "dwarf"}
@@ -341,7 +341,7 @@ _BASES = (
         ),
         "public -> private base: layout and symbols are unchanged, but code "
         "converting LD3* to LB3* or naming k through LD3 no longer compiles",
-        any_of=(frozenset({"BASE_CLASS_ACCESS_NARROWED", "TYPE_BASE_CHANGED"}),),
+        expected=frozenset({"BASE_CLASS_ACCESS_NARROWED"}),
         verdict_min="API_BREAK",
         min_evidence="headers",
     ),
@@ -363,7 +363,15 @@ _TRAITS = (
         "a user-provided copy constructor makes LTC non-trivial for calls: "
         "ltc_get now takes it by invisible reference where old callers pass it "
         "in a register, and it is no longer trivially copyable",
-        any_of=(frozenset({"TRIVIALLY_COPYABLE_LOST", "VALUE_ABI_TRAIT_CHANGED"}),),
+        expected=frozenset({"TRIVIALLY_COPYABLE_LOST", "VALUE_ABI_TRAIT_CHANGED"}),
+        rules=(
+            Rule(
+                lambda c: c.evidence == "dwarf",
+                {"expected": frozenset({"VALUE_ABI_TRAIT_CHANGED"})},
+                "DWARF records the call convention (the trait), not the "
+                "trivially-copyable language property",
+            ),
+        ),
         verdict_min="BREAKING",
         precondition=_x86_64,
         host_arch=_X86_HOSTS,

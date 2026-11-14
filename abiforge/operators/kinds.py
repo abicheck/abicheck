@@ -439,6 +439,25 @@ KIND_OPERATORS: tuple[EditOp, ...] = (
         **_BINARY,
     ),
     _op(
+        "exported_instantiation_default_changed",
+        "k.dta",
+        _replace(
+            "k.dta",
+            ("class U = int>", "class U = long>"),
+            (
+                "extern template int kdta<int>(int);",
+                "extern template long kdta<int>(int);",
+            ),
+            source=(("template int kdta<int>(int);", "template long kdta<int>(int);"),),
+        ),
+        "U's default becomes long: kdta<int> now names kdta<int, long>, a "
+        "different symbol, so binaries bound to kdta<int, int> fail to load "
+        "while source calling kdta<int> compiles unchanged",
+        expected=frozenset({"DEFAULT_TEMPLATE_ARG_CHANGED"}),
+        verdict_min="BREAKING",
+        **_BINARY,
+    ),
+    _op(
         "struct_became_class",
         "k.slk",
         _replace("k.slk", ("struct KSK { int a; };", "class KSK { public: int a; };")),

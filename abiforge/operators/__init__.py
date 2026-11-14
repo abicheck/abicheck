@@ -402,7 +402,7 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         ("struct.rec",),
         _struct_append_field,
         "appending a member grows sizeof(struct rec)",
-        any_of=(frozenset({"TYPE_SIZE_CHANGED", "STRUCT_SIZE_CHANGED"}),),
+        any_of=(frozenset({"TYPE_SIZE_CHANGED"}),),
         touches=("struct.rec",),
     ),
     EditOp(
@@ -411,8 +411,8 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         _struct_remove_trailing_field,
         "removing a member is a layout and API break",
         any_of=(
-            frozenset({"STRUCT_FIELD_REMOVED", "TYPE_FIELD_REMOVED"}),
-            frozenset({"TYPE_SIZE_CHANGED", "STRUCT_SIZE_CHANGED"}),
+            frozenset({"TYPE_FIELD_REMOVED"}),
+            frozenset({"TYPE_SIZE_CHANGED"}),
         ),
         touches=("struct.rec",),
     ),
@@ -421,9 +421,7 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         ("struct.point",),
         _struct_swap_fields,
         "swapping members moves field offsets",
-        any_of=(
-            frozenset({"STRUCT_FIELD_OFFSET_CHANGED", "TYPE_FIELD_OFFSET_CHANGED"}),
-        ),
+        any_of=(frozenset({"TYPE_FIELD_OFFSET_CHANGED"}),),
         touches=("struct.point",),
     ),
     EditOp(
@@ -432,7 +430,7 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         _struct_field_widen,
         "int -> long long changes the member type and layout; on x86-64 the "
         "struct's alignment rises from 4 to 8 (i386 aligns long long to 4 in a struct)",
-        any_of=(frozenset({"STRUCT_FIELD_TYPE_CHANGED", "TYPE_FIELD_TYPE_CHANGED"}),),
+        any_of=(frozenset({"TYPE_FIELD_TYPE_CHANGED"}),),
         rules=(
             Rule(
                 # -fpack-struct=N caps every member's alignment at N, so the
@@ -444,9 +442,7 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
                 ),
                 {
                     "any_of": (
-                        frozenset(
-                            {"STRUCT_FIELD_TYPE_CHANGED", "TYPE_FIELD_TYPE_CHANGED"}
-                        ),
+                        frozenset({"TYPE_FIELD_TYPE_CHANGED"}),
                         _ALIGN,
                     )
                 },
@@ -460,7 +456,7 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         ("struct.rec",),
         _struct_array_grow,
         "char[8] -> char[16] grows the struct",
-        any_of=(frozenset({"TYPE_SIZE_CHANGED", "STRUCT_SIZE_CHANGED"}),),
+        any_of=(frozenset({"TYPE_SIZE_CHANGED"}),),
         touches=("struct.rec",),
     ),
     # enums
@@ -522,7 +518,7 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         ("typedef.handle",),
         _typedef_retarget,
         "retargeting a typedef used in a public signature",
-        any_of=(frozenset({"TYPEDEF_BASE_CHANGED", "PUBLIC_TYPEDEF_TARGET_CHANGED"}),),
+        any_of=(frozenset({"TYPEDEF_BASE_CHANGED"}),),
         verdict_min="API_BREAK",
         touches=("typedef.handle",),
     ),
@@ -582,7 +578,14 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         ("func.count",),
         _func_remove,
         "removing an exported function is a binary and API break",
-        any_of=(_REMOVED,),
+        expected=frozenset({"FUNC_REMOVED"}),
+        rules=(
+            Rule(
+                _binary,
+                {"expected": frozenset({"FUNC_REMOVED_ELF_ONLY"})},
+                "from symbols alone the removal is an export-table removal",
+            ),
+        ),
         min_evidence="binary",
         touches=("func.count",),
     ),
@@ -606,6 +609,14 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         # change or as the visibility change. Either describes the same fact.
         any_of=(
             frozenset({"FUNC_BECAME_INLINE", "FUNC_VISIBILITY_CHANGED"}) | _REMOVED,
+        ),
+        rules=(
+            Rule(
+                lambda c: c.evidence == "headers" and c.header_backend != "gcc",
+                {"expected": frozenset({"FUNC_BECAME_INLINE"})},
+                "the castxml and clang header backends see the new inline "
+                "definition (the native gcc plugin records none)",
+            ),
         ),
         verdict_min="BREAKING",
         min_evidence="binary",
@@ -685,11 +696,7 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         ("shape.area",),
         _virtual_method_add,
         "a new virtual method changes the vtable layout",
-        any_of=(
-            frozenset(
-                {"VIRTUAL_METHOD_ADDED", "FUNC_VIRTUAL_ADDED", "TYPE_VTABLE_CHANGED"}
-            ),
-        ),
+        any_of=(frozenset({"TYPE_VTABLE_CHANGED"}),),
         min_evidence="binary",
         rules=(
             Rule(
@@ -734,7 +741,10 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         _virtual_become_pure,
         "a virtual becoming pure changes its exported definition",
         # The edit makes the class abstract: either kind names that fact.
-        any_of=(frozenset({"FUNC_VIRTUAL_BECAME_PURE", "TYPE_BECAME_ABSTRACT"}),),
+        any_of=(
+            frozenset({"FUNC_VIRTUAL_BECAME_PURE"}),
+            frozenset({"TYPE_BECAME_ABSTRACT"}),
+        ),
         min_evidence="binary",
         rules=(_binary_mangled("FUNC_VIRTUAL_BECAME_PURE", "TYPE_BECAME_ABSTRACT"),),
         touches=("shape.kind",),
@@ -776,11 +786,7 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         ("buf.decl",),
         _template_default_arg,
         "a changed template default alters the header-only instantiation",
-        any_of=(
-            frozenset(
-                {"DEFAULT_TEMPLATE_ARG_CHANGED", "TEMPLATE_PARAM_DEFAULT_CHANGED"}
-            ),
-        ),
+        any_of=(frozenset({"TEMPLATE_PARAM_DEFAULT_CHANGED"}),),
         verdict_min="API_BREAK",
         min_evidence="headers",
         touches=("buf.decl",),
@@ -836,12 +842,7 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
             Rule(
                 _hidden,
                 {
-                    "any_of": (
-                        frozenset(
-                            {"FUNC_VISIBILITY_CHANGED", "SYMBOL_ELF_VISIBILITY_CHANGED"}
-                        )
-                        | _REMOVED,
-                    ),
+                    "any_of": (frozenset({"FUNC_VISIBILITY_CHANGED"}) | _REMOVED,),
                     "verdict_min": "BREAKING",
                     "verdict_max": None,
                 },

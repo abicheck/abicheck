@@ -17,7 +17,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 
 - Total kinds: **431**
 - Kinds with at least one real source: **195**
-- Kinds backed by a compiled fixture (catalog `expected_kinds` or an edit-corpus `verified_floor`; ledger `scripts/changekind_fixture_ledger.json`): **309**
+- Kinds backed by a compiled fixture (catalog `expected_kinds` or an edit-corpus `verified_floor`; ledger `scripts/changekind_fixture_ledger.json`): **314**
 - Kinds per source: catalog 160, field_shapes 9, integration 78
 
 | Tier | Kinds | Zero-source |
