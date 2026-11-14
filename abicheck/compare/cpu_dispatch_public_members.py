@@ -18,6 +18,7 @@ reconciled function model, and a raw PE/Mach-O export id from the
 export-table fallback (used when castxml's guessed mangling does not match the
 real export, which marks every header function ``HIDDEN``). A member is
 header-declared when its function's origin is ``ScopeOrigin.PUBLIC_HEADER``
+(or, with no public-header set declared, ``UNKNOWN`` with a parsed header)
 -- the provenance pass's verdict, which a mismatch-``HIDDEN`` header
 declaration keeps. Visibility is not the test: a DWARF-only function reads
 ``PUBLIC`` with no header behind it.
@@ -45,7 +46,22 @@ PUBLIC_MEMBER_RULE = "cpu_dispatch_isa.public_member"
 
 
 def _header_declared(fn: Function) -> bool:
-    return fn.origin == ScopeOrigin.PUBLIC_HEADER
+    """Whether *fn* is a header declaration the caller handed us as API.
+
+    ``PUBLIC_HEADER`` is the positive verdict when a public-header set was
+    declared. Without one, every origin is ``UNKNOWN`` (origin
+    classification is opt-in, ``ScopeOrigin``), yet a function the header
+    backend parsed (it carries ``source_header``) is still declared in a
+    supplied header: the run has no evidence that it is export-only, and a
+    naming heuristic must not lower a removal's grade on missing evidence
+    (weaker evidence narrows conclusions, it never upgrades to a safer
+    claim). A DWARF-only function has no ``source_header`` and stays
+    export-only, as does any declaration the provenance pass placed
+    outside the public set.
+    """
+    if fn.origin == ScopeOrigin.PUBLIC_HEADER:
+        return True
+    return fn.origin == ScopeOrigin.UNKNOWN and bool(fn.source_header)
 
 
 def _qualified_spelling(name: str) -> str:

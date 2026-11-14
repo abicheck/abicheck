@@ -28,13 +28,27 @@ _ALGOS = ("kmeans", "knn", "linreg")
 _SURVIVING = ("avx2", "sse42")
 
 
-#: A removed member's evidence: (visibility, origin).
-_HEADER = (Visibility.PUBLIC, ScopeOrigin.PUBLIC_HEADER)
-_EXPORT_ONLY = (Visibility.ELF_ONLY, ScopeOrigin.UNKNOWN)
-_DWARF_ONLY = (Visibility.PUBLIC, ScopeOrigin.UNKNOWN)
+#: A removed member's evidence: (visibility, origin, parsed source header).
+_Evidence = tuple[Visibility, ScopeOrigin, str | None]
+_HEADER: _Evidence = (Visibility.PUBLIC, ScopeOrigin.PUBLIC_HEADER, "api.h")
+_EXPORT_ONLY: _Evidence = (Visibility.ELF_ONLY, ScopeOrigin.UNKNOWN, None)
+_DWARF_ONLY: _Evidence = (Visibility.PUBLIC, ScopeOrigin.UNKNOWN, None)
+#: Parsed from a supplied header, but no public-header set was declared (the
+#: Python ``dump(headers=...)`` path): origin stays UNKNOWN.
+_UNSCOPED_HEADER: _Evidence = (Visibility.PUBLIC, ScopeOrigin.UNKNOWN, "api.h")
+#: Placed outside a declared public set by the provenance pass.
+_PRIVATE_HEADER: _Evidence = (Visibility.PUBLIC, ScopeOrigin.PRIVATE_HEADER, "impl.h")
 
 
-def _fn(algo: str, isa: str, kind: tuple[Visibility, ScopeOrigin]) -> Function:
+def _declared(kind: _Evidence) -> bool:
+    """Oracle: a promised entry point unless evidence shows it is not one."""
+    _, origin, header = kind
+    if origin is ScopeOrigin.PUBLIC_HEADER:
+        return True
+    return origin is ScopeOrigin.UNKNOWN and header is not None
+
+
+def _fn(algo: str, isa: str, kind: _Evidence) -> Function:
     ident = f"{algo}_compute_{isa}"
     return Function(
         name=ident,
@@ -42,11 +56,12 @@ def _fn(algo: str, isa: str, kind: tuple[Visibility, ScopeOrigin]) -> Function:
         return_type="int",
         visibility=kind[0],
         origin=kind[1],
+        source_header=kind[2],
     )
 
 
 def _pair(
-    dropped_vis: tuple[tuple[Visibility, ScopeOrigin], ...],
+    dropped_vis: tuple[_Evidence, ...],
 ) -> tuple[AbiSnapshot, AbiSnapshot]:
     survivors = [_fn(a, isa, _HEADER) for a in _ALGOS for isa in _SURVIVING]
     dropped = [_fn(a, "avx512", v) for a, v in zip(_ALGOS, dropped_vis)]
@@ -55,16 +70,21 @@ def _pair(
     return old, new
 
 
-_DOMAIN = list(itertools.product((_HEADER, _EXPORT_ONLY, _DWARF_ONLY), repeat=3))
+_DOMAIN = list(
+    itertools.product(
+        (_HEADER, _EXPORT_ONLY, _DWARF_ONLY, _UNSCOPED_HEADER, _PRIVATE_HEADER),
+        repeat=3,
+    )
+)
 
 
 @pytest.mark.parametrize("dropped_vis", _DOMAIN)
 def test_roll_up_grade_follows_header_declaration(
-    dropped_vis: tuple[tuple[Visibility, ScopeOrigin], ...],
+    dropped_vis: tuple[_Evidence, ...],
 ) -> None:
     expected = (
         Verdict.BREAKING
-        if any(origin is ScopeOrigin.PUBLIC_HEADER for _, origin in dropped_vis)
+        if any(_declared(v) for v in dropped_vis)
         else Verdict.COMPATIBLE_WITH_RISK
     )
     old, new = _pair(dropped_vis)

@@ -88,6 +88,23 @@ def tail_padding_rule(triple: str | None) -> TailPaddingRule | None:
     return None
 
 
+#: Triple components of a Windows GNU target: GCC (``-mms-bitfields``, on by
+#: default for Windows targets) and Clang both lay bit-fields out by
+#: Microsoft's rules there, though the rest of the record is Itanium.
+_MS_BITFIELD_SYSTEMS = ("mingw32", "windows-gnu", "cygwin")
+
+
+def ms_bitfield_layout(triple: str | None) -> bool:
+    """Whether target *triple* allocates bit-fields Microsoft's way: each
+    run of bit-fields of one declared type occupies a whole storage unit of
+    that type, so a bit-field's width does not bound where the record's data
+    ends (``struct { int a : 3; }`` holds four bytes of data, not one)."""
+    if not triple:
+        return False
+    rest = "-".join(triple.lower().split("-")[1:])
+    return any(sys_ in rest for sys_ in _MS_BITFIELD_SYSTEMS)
+
+
 def rule_of(ctx: CastxmlParserContext) -> TailPaddingRule | None:
     return tail_padding_rule(ctx.target_triple)
 
