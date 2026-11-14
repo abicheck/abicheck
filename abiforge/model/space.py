@@ -701,21 +701,33 @@ def cell_points(
     return tuple(dict.fromkeys(points))
 
 
-def seed_constructs(seed: Seed) -> tuple[str, ...]:
-    """Every construct a seed's translation unit contains, edited or not."""
-    return tuple(dict.fromkeys(role_construct(r) for r in seed.roles))
+def seed_constructs(seed: Seed, op: EditOp | None = None) -> tuple[str, ...]:
+    """Every construct the translation units of a cell contain.
+
+    The seed's baseline contributes the roles it actually spells (a role
+    whose baseline text is empty, filled only by an operator, contains
+    nothing); *op*, when given, adds what the edit introduces, since the new
+    side is built and consumed too.
+    """
+    names = [role_construct(r) for r, (h, c) in seed.roles.items() if h or c]
+    if op is not None:
+        names.extend(op_constructs(op))
+    return tuple(dict.fromkeys(names))
 
 
-def seed_flags_conflict(seed: Seed, flags: Flags) -> str | None:
-    """Why *seed* cannot be built (or consumed) under *flags*, whatever the edit.
+def seed_flags_conflict(
+    seed: Seed, flags: Flags, op: EditOp | None = None
+) -> str | None:
+    """Why a cell of *seed* (edited by *op*) cannot be built or consumed under *flags*.
 
-    The rule is a property of what the translation unit contains: a seed that
-    uses ``std::string`` anywhere cannot be built with a flag that breaks the
-    installed libstdc++'s layout, even when the edited role is a plain
-    function. The generator applies it to the build and to every consumer.
+    The rule is a property of what the translation units contain: one that
+    uses ``std::string`` anywhere, in the baseline or through the edit,
+    cannot be built with a flag that breaks the installed libstdc++'s layout,
+    even when the edited role is a plain function. The generator applies it
+    to the build and to every consumer.
     """
     feats = [f.name for f in CONFIG_FEATURES if f.on(flags)]
-    for con in seed_constructs(seed):
+    for con in seed_constructs(seed, op):
         for cfg in feats:
             why = CONSTRUCT_CONFIG_CONFLICTS.get((con, cfg))
             if why is not None:

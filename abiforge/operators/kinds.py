@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from abiforge.model.config import Config
+from abiforge.model.expect import Rule
 from abiforge.model.opkit import Edit, EditOp, Roles, _set
 from abiforge.model.seeds import XCXX_SEED
 
@@ -215,6 +216,17 @@ KIND_OPERATORS: tuple[EditOp, ...] = (
         "library's export table shows it gone while the header still declares "
         "it, so the loss reads as a visibility change of a declared function",
         expected=frozenset({"FUNC_VISIBILITY_CHANGED"}),
+        rules=(
+            Rule(
+                lambda c: c.evidence != "headers",
+                {
+                    "expected": frozenset(),
+                    "any_of": (frozenset({"FUNC_REMOVED", "FUNC_REMOVED_ELF_ONLY"}),),
+                },
+                "without headers the surviving declaration is not observable: "
+                "the evidence shows an exported function removed",
+            ),
+        ),
         **_BINARY,
     ),
     _op(

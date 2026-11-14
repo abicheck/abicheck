@@ -1012,3 +1012,28 @@ def test_header_backend_is_part_of_the_build_only_for_headers(
 def test_an_unknown_header_backend_is_refused() -> None:
     with pytest.raises(ValueError, match="header_backend"):
         default_config("c", GCC).with_(header_backend="hybrid")
+
+
+def test_an_empty_role_adds_no_construct_and_an_edit_adds_its_own() -> None:
+    """The conflict follows what the cell's translation units contain: an empty
+    baseline role contains nothing, and an edit that introduces std::string
+    brings its flag conflict with it (written out here, not read from the rule)."""
+    from abiforge.model.seeds import XCXX_SEED
+    from abiforge.run.cells import seed_conflict
+
+    assert XCXX_SEED.roles["k.stl"] == ("", "")
+    assert "std_string" not in space.seed_constructs(XCXX_SEED)
+    stl = OP_BY_NAME["stl_by_value_api_added"]
+    plain = OP_BY_NAME["reserved_field_used"]
+    assert "std_string" in space.seed_constructs(XCXX_SEED, stl)
+    std = STANDARD_BY_NAME["c++17"]
+    for flags, bad in (
+        (Flags(), False),
+        (Flags(pack=1), True),
+        (Flags(short_enums=True), True),
+        (Flags(opt="O2"), False),
+    ):
+        build = Config(std=std, producer=GCC, flags=flags)
+        assert (seed_conflict(XCXX_SEED, build, stl) is not None) is bad, flags
+        assert seed_conflict(XCXX_SEED, build, plain) is None, flags
+        assert seed_conflict(XCXX_SEED, build) is None, flags
