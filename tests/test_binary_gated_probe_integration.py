@@ -163,11 +163,10 @@ PROBES: dict[str, Probe] = {
         "int S::v = 1;\nint S::get() { return v; }\nint use(S* s) { return s->get(); }",
     ),
     "ctor_explicit_added": Probe(case="case106_ctor_became_explicit"),
-    "func_became_inline": _inline(
-        "int f(int);\nint g(int);",
-        "inline int f(int x) { return x + 1; }\nint g(int);",
-        "int f(int x) { return x + 1; }\nint g(int x) { return f(x); }",
-        "int g(int x) { return f(x); }",
+    "func_became_final": _inline(
+        "struct B { virtual ~B(); virtual int f(); };\nint use(B*);",
+        "struct B { virtual ~B(); virtual int f() final; };\nint use(B*);",
+        "B::~B() {}\nint B::f() { return 1; }\nint use(B* b) { return b->f(); }",
     ),
     "func_return_pointee_qualifier_added": Probe(
         case="case211_return_pointee_gained_const"

@@ -414,6 +414,10 @@ def _flags_build(
 
 
 # What a toolchain without 32-bit multilib says when asked for -m32.
+#: libc++ asked for (``-stdlib=libc++``) and its headers or runtime absent.
+_LIBCXX_MISSING = re.compile(
+    r"cannot find -lc\+\+(?:abi)?(?![\w+])|'(?:__config_site|string|iostream|cstddef)' file not found"
+)
 _MULTILIB_MISSING = re.compile(
     r"cannot find -l|cannot find crt|stubs-32\.h|"
     r"bits/libc-header-start\.h|gnu/stubs|unsupported architecture|-m32 is not supported"
@@ -456,6 +460,8 @@ def _names_capability(stderr: str, rendered: list[str]) -> bool:
     # The driver must *reject* a requested flag, not merely mention it (a
     # warning that names the flag says nothing about the failure).
     if any(f in ln for f in optional for ln in rejected):
+        return True
+    if "-stdlib=libc++" in rendered and _LIBCXX_MISSING.search(stderr):
         return True
     return "-m32" in rendered and _MULTILIB_MISSING.search(stderr) is not None
 
