@@ -969,8 +969,12 @@ _KIND_ROLES: dict[str, RoleText] = {
     ),
     "k.inst": (
         # The header promises both instantiations (explicit instantiation
-        # declarations), so each is part of the public contract.
-        "template <class T> T ktwice(T v);\nextern template int ktwice<int>(int);\n"
+        # declarations), so each is part of the public contract. A template's
+        # visibility pragma does not reach an instantiation gcc emits where
+        # the template is defined, so -fvisibility=hidden would hide it
+        # (clang keeps it); the attribute is the export macro (as xa.tmpl).
+        'template <class T> __attribute__((visibility("default"))) T ktwice(T v);\n'
+        "extern template int ktwice<int>(int);\n"
         "extern template double ktwice<double>(double);",
         "template <class T> T ktwice(T v) { return v + v; }\n"
         "template int ktwice<int>(int);\ntemplate double ktwice<double>(double);",
@@ -989,7 +993,7 @@ _KIND_ROLES: dict[str, RoleText] = {
         "int kx_f(int a) { return a; }\nint kx_g(int a) { return a + 1; }\n} }",
     ),
     "k.tag": (
-        "struct ktag_a {};\ntemplate <class T> int kfam();",
+        'struct ktag_a {};\ntemplate <class T> __attribute__((visibility("default"))) int kfam();',
         "template <class T> int kfam() { return (int)sizeof(T); }\n"
         "template int kfam<ktag_a>();",
     ),
