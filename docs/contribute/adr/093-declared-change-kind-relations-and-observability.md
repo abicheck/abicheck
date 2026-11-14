@@ -59,7 +59,7 @@ caught in `{B,H}` without DWARF.
 `ChangeKindMeta` gains, keyword-only and declared after `contract_subject`:
 
 ```python
-observable_at: tuple[Observability, ...] | Unclassified
+observable_at: tuple[Observability, ...] | Unclassified  # default UNCLASSIFIED
 ```
 
 ```python
@@ -111,7 +111,8 @@ For a comparison run with evidence configuration `C`:
 
 ### D4 — Declared relations
 
-`ChangeKindMeta` also gains, keyword-only:
+`ChangeKindMeta` also gains one keyword-only field, `relations: KindRelations`
+(default: no relations), a frozen value holding:
 
 | Field | Meaning | Constraint |
 |---|---|---|
@@ -120,7 +121,7 @@ For a comparison run with evidence configuration `C`:
 | `subsumed_by: tuple[Subsumption, ...]` | a finding is redundant given another on the same subject | `Subsumption(kind, key)` with `key ∈ {ENTITY, ENTITY_FIELD}`, a fixed matching key, never a free-form predicate |
 | `implies: tuple[ChangeKind, ...]` | a primary finding implies derived ones (virtual → pure → abstract → vtable) | the `implies` graph is acyclic |
 
-Every target is an existing kind. All constraints are checked by a catalog
+Targets are `ChangeKind` values (the catalog module cannot import the enum). Every target is an existing kind. All constraints are checked by a catalog
 test, not at run time. `same_event_as` requiring equal verdicts makes the
 `DEFAULT_ARGUMENT_CHANGED` / `PARAM_DEFAULT_VALUE_CHANGED` mismatch a catalog
 error that must be resolved in the catalog (plan A2.4).
@@ -160,7 +161,7 @@ allowed to import abicheck).
 - The `{B,H}` configuration becomes testable and gated; the defects the
   ladder study found (plan A.3) surface as red cells owned by named PRs.
 - Detector order stops being a semantic input.
-- `ChangeKindMeta` grows five keyword-only fields; positional construction
+- `ChangeKindMeta` grows two keyword-only fields (`observable_at`, `relations`); positional construction
   and pickling are unaffected.
 
 ## Alternatives considered
