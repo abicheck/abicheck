@@ -40,6 +40,7 @@ from ..model.identity import EntityId, InlineNamespace, Namespace, Record
 from ..model.signature_token_scan import _split_top_level_commas
 from .fact_gate import both_facts_present
 from .template_surface import (
+    callable_name,
     qualified_name_lookup,
     reconciled_abi_visible_functions,
     strip_template_args as _callable_stem,
@@ -347,6 +348,15 @@ def _substituted_template_args(fn: Function, qname: str) -> str | None:
     return _extract_template_args(qname)
 
 
+def _pairing_key(qname: str) -> str:
+    """The callable two instantiations of one template share: its qualified
+    name and parameter list, without the template arguments or the return
+    type -- which can itself be the defaulted parameter
+    (``int kdta<int, int>(int)`` / ``long kdta<int, long>(int)``)."""
+    params = _callable_stem(qname).partition("(")[2]
+    return f"{callable_name(qname)}({params}"
+
+
 def detect_default_template_arg_changed(
     old: AbiSnapshot,
     new: AbiSnapshot,
@@ -398,7 +408,7 @@ def detect_default_template_arg_changed(
         if fn.mangled in old_mangled:
             continue
         qname = new_name_of(fn)
-        added_by_entity[_callable_stem(qname)].append(fn)
+        added_by_entity[_pairing_key(qname)].append(fn)
     findings: list[Change] = []
     seen_pairs: set[tuple[str, str]] = set()
     for fn in removed:
@@ -408,7 +418,7 @@ def detect_default_template_arg_changed(
         old_args = _substituted_template_args(fn, old_qname)
         if old_args is None:
             continue
-        entity = _callable_stem(old_qname)
+        entity = _pairing_key(old_qname)
         for cand in added_by_entity.get(entity, []):
             new_qname = new_name_of(cand)
             if _extract_template_args(new_qname) is None:

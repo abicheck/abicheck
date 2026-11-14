@@ -21,7 +21,6 @@ from abicheck.compare.template_param_defaults import (
 )
 from abicheck.model import AbiSnapshot, Function, Visibility
 
-
 #: Itanium builtin codes, so each mangled name demangles to its own spelling.
 _CODE = {
     "int": "i",
@@ -76,3 +75,54 @@ def test_pairing_requires_an_added_instantiation_and_a_kept_prefix(
     assert bool(found) is expected
     if expected:
         assert [c.symbol for c in found] == [removed.mangled]
+
+
+@pytest.mark.parametrize(
+    ("old_mangled", "new_mangled"),
+    [
+        # U kdta<T, U = int>(T) -> U = long: the return type IS the default.
+        ("_Z4kdtaIiiET0_T_", "_Z4kdtaIilET0_T_"),
+        # void kdtv<T, U = int>(T): the return type does not depend on it.
+        ("_Z4kdtvIiiEvT_", "_Z4kdtvIilEvT_"),
+        # Namespaced, return type the default.
+        ("_ZN2ns4kdtaIiiEET0_T_", "_ZN2ns4kdtaIilEET0_T_"),
+    ],
+)
+def test_pairing_ignores_a_return_type_that_depends_on_the_default(
+    old_mangled: str, new_mangled: str
+) -> None:
+    """The callable both instantiations share is keyed without its return
+    type: ``int kdta<int, int>(int)`` and ``long kdta<int, long>(int)`` are
+    one template (found by the edit corpus's
+    ``exported_instantiation_default_changed``)."""
+    name = "kdta" if "kdta" in old_mangled else "kdtv"
+
+    def fn(mangled: str) -> Function:
+        return Function(
+            name=name, mangled=mangled, return_type="", visibility=Visibility.PUBLIC
+        )
+
+    old = AbiSnapshot(library="l.so", version="1", functions=[fn(old_mangled)])
+    new = AbiSnapshot(library="l.so", version="2", functions=[fn(new_mangled)])
+    found = detect_default_template_arg_changed(old, new)
+    assert [c.symbol for c in found] == [old_mangled]
+
+
+@pytest.mark.parametrize(
+    ("spelled", "expected"),
+    [
+        ("int kdta<int, int>(int)", "kdta"),
+        ("std::pair<int, int> ns::mk<int>(int)", "ns::mk"),
+        ("ns::Foo<float, A>::compute(int)", "ns::Foo::compute"),
+        ("ns::C<int>::operator new(unsigned long)", "ns::C::operator new"),
+        ("ns::C<int>::operator<<(int)", "ns::C::operator<<"),
+        ("unsigned long ns::f<int>()", "ns::f"),
+        ("ns::f<int>", "ns::f"),
+    ],
+)
+def test_callable_name_drops_return_type_args_and_params(
+    spelled: str, expected: str
+) -> None:
+    from abicheck.compare.template_surface import callable_name
+
+    assert callable_name(spelled) == expected
