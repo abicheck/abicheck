@@ -16,15 +16,15 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 ## Headline
 
 - Total kinds: **434**
-- Kinds with at least one real source: **198**
+- Kinds with at least one real source: **199**
 - Kinds backed by a compiled fixture (catalog `expected_kinds` or an edit-corpus `verified_floor`; ledger `scripts/changekind_fixture_ledger.json`): **313**
-- Kinds per source: catalog 159, field_shapes 9, integration 83
+- Kinds per source: catalog 159, field_shapes 9, integration 84
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
 | L0 | 129 | 73 |
 | L1 | 66 | 7 |
-| L2 | 79 | 39 |
+| L2 | 79 | 38 |
 | L3 | 15 | 5 |
 | L4 | 10 | 2 |
 | L5 | 15 | 5 |
@@ -221,7 +221,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `func_return_covariant_narrowed` | RISK | 0 | 0 | 1 |
 | `func_static_changed` | BREAKING | 1 | 0 | 0 |
 | `func_virtual_added` | BREAKING | 1 | 0 | 0 |
-| `func_virtual_became_pure` | BREAKING | 1 | 0 | 1 |
+| `func_virtual_became_pure` | BREAKING | 1 | 0 | 3 |
 | `graph_coverage_insufficient_for_suppression` | COMPATIBLE | 0 | 0 | 0 |
 | `inline_namespace_version_bumped` | BREAKING | 1 | 0 | 0 |
 | `integer_model_changed` | BREAKING | 1 | 0 | 0 |
@@ -335,7 +335,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `rtti_for_internal_type` | RISK | 1 | 0 | 0 |
 | `serialization_tag_changed` | BREAKING | 1 | 0 | 0 |
 | `template_param_default_changed` | API_BREAK | 4 | 0 | 2 |
-| `type_became_abstract` | API_BREAK | 0 | 0 | 0 |
+| `type_became_abstract` | API_BREAK | 0 | 0 | 1 |
 | `type_became_final` | API_BREAK | 1 | 0 | 0 |
 | `type_deprecated_added` | COMPATIBLE | 0 | 0 | 0 |
 | `type_deprecated_removed` | COMPATIBLE | 0 | 0 | 0 |

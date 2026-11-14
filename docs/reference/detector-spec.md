@@ -340,7 +340,7 @@ One row per `ChangeKind` (434 total). Columns fuse the verdict partition (`check
 | `symbol_binding_changed` | quality | `COMPATIBLE` | `warning` | L0 | `symbol_binding_changed` | [case27](examples/case27_symbol_binding_weakened.md) |
 | `symbol_binding_lost_unique` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `symbol_binding_lost_unique` | [case180](examples/case180_symbol_binding_lost_unique.md) |
 | `symbol_binding_strengthened` | quality | `COMPATIBLE` | `warning` | L0 | `symbol_binding_strengthened` | [case128](examples/case128_symbol_binding_strengthened.md) |
-| `symbol_elf_visibility_changed` | quality | `COMPATIBLE` | `warning` | L0 | `symbol_elf_visibility_changed` | [case51](examples/case51_protected_visibility.md) |
+| `symbol_elf_visibility_changed` | quality | `COMPATIBLE` | `warning` | L0 | `symbol_elf_visibility_changed` | — |
 | `symbol_leaked_from_dependency_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `symbol_leaked_from_dependency_changed` | — |
 | `symbol_moved_version_node` | breaking | `BREAKING` | `error` | unspecified | `symbol_moved_version_node` | — |
 | `symbol_renamed_batch` | breaking | `BREAKING` | `error` | unspecified | `symbol_renamed_batch` | — |

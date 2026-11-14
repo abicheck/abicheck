@@ -40,7 +40,7 @@ This module gives the walker what it needs to record them:
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -52,9 +52,14 @@ from ..model.mangled_name import itanium_scope_components
 __all__ = [
     "MemberQualifiers",
     "MemberScopes",
+    "append_virtual_method",
+    "class_vtable_symbol",
     "chained_linkage_name",
     "explicit_specifier",
     "is_pure_virtual_member",
+    "producer_records_pure_virtuality",
+    "record_is_abstract",
+    "slot_is_pure",
     "qualifiers_in_scope",
     "is_member_scope",
     "is_pure_virtual_declaration",
@@ -213,6 +218,97 @@ def is_pure_virtual_declaration(die: Any) -> bool:
     return attr_bool(die, "DW_AT_declaration") and (
         attr_int(die, "DW_AT_virtuality") == _PURE_VIRTUAL
     )
+
+
+def append_virtual_method(child: Any, vtable: list[str]) -> None:
+    """Append the mangled name of a virtual ``DW_TAG_subprogram`` to *vtable*.
+
+    No-op when the subprogram is not virtual or has no usable name.
+    """
+    if attr_int(child, "DW_AT_virtuality") > 0:
+        name = (
+            attr_str(child, "DW_AT_linkage_name")
+            or attr_str(child, "DW_AT_MIPS_linkage_name")
+            or attr_str(child, "DW_AT_name")
+        )
+        if name:
+            vtable.append(name)
+
+
+def producer_records_pure_virtuality(top_die: Any) -> bool:
+    """Whether the compile unit's producer marks a pure virtual
+    ``DW_VIRTUALITY_pure_virtual``.
+
+    clang does. GCC writes ``DW_VIRTUALITY_virtual`` for a pure virtual too
+    (checked against gcc 13), so from its DWARF the absence of a pure member
+    proves nothing -- only its presence would, and it never appears.
+    """
+    producer = top_die.attributes.get("DW_AT_producer") if top_die is not None else None
+    value = getattr(producer, "value", b"") or b""
+    text = value.decode("utf-8", "replace") if isinstance(value, bytes) else str(value)
+    return "clang" in text
+
+
+def class_vtable_symbol(scope: list[str] | tuple[str, ...]) -> str | None:
+    """``_ZTV<class>`` of the class named by its qualified components, or
+    ``None`` unless every component is a plain identifier (no template)."""
+    if not scope or not all(c.isidentifier() for c in scope):
+        return None
+    enc = "".join(f"{len(c)}{c}" for c in scope)
+    return f"_ZTV{enc}" if len(scope) == 1 else f"_ZTVN{enc}E"
+
+
+def _vtable_symbol(member_mangled: str) -> str | None:
+    """``_ZTV<class>`` for the class a member's Itanium mangling names."""
+    comps = itanium_scope_components(member_mangled) if member_mangled else None
+    return class_vtable_symbol(comps[:-1]) if comps and len(comps) > 1 else None
+
+
+def slot_is_pure(die: Any, pure_slots: Mapping[str, frozenset[int]]) -> bool:
+    """Whether *die*'s vtable slot holds ``__cxa_pure_virtual`` in its class's
+    emitted vtable (``extract.elf_pure_virtual_slots``): the binary's record
+    of a pure virtual, which GCC's DWARF does not carry."""
+    if not pure_slots:
+        return False
+    slot = vtable_slot(die)
+    vt = _vtable_symbol(linkage_name(die) or "") if slot is not None else None
+    return vt is not None and slot in pure_slots.get(vt, ())
+
+
+def record_is_abstract(
+    die: Any,
+    children: Any,
+    has_bases: object,
+    producer_marks_pure: bool,
+    pure_slots: Mapping[str, frozenset[int]] | None = None,
+    vtable_emitted: bool = False,
+) -> bool | None:
+    """The record's ``is_abstract`` fact from its own member DIEs, tri-state.
+
+    ``True`` when a member declaration is marked pure virtual (clang), or
+    its vtable slot is a pure slot of the emitted vtable (*pure_slots*, which
+    covers GCC).
+    ``False`` only when the producer marks pure virtuals (so none here means
+    none declared) and the record has no bases (an inherited, un-overridden
+    pure virtual would also make it abstract, which this does not walk).
+    ``None`` otherwise: unknown, never "not abstract" -- which is why
+    ``diff_types`` compares a DWARF-only pair's ``is_abstract`` without the
+    header-producer gate. *children* is the
+    materialized child list, or ``None`` to iterate *die* on demand.
+    """
+    children = children if children is not None else die.iter_children()
+    slots = pure_slots or {}
+    if any(
+        c.tag == "DW_TAG_subprogram"
+        and (attr_int(c, "DW_AT_virtuality") == _PURE_VIRTUAL or slot_is_pure(c, slots))
+        for c in children
+    ):
+        return True
+    # No pure member proves "not abstract" only when the producer marks pure
+    # virtuals (clang), or this library emits the class's vtable: an emitted
+    # vtable fills every pure slot with __cxa_pure_virtual (GCC).
+    proven = producer_marks_pure or vtable_emitted
+    return False if proven and not has_bases else None
 
 
 def is_member_scope(scope_path: tuple[Any, ...]) -> bool:

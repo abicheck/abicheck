@@ -169,14 +169,9 @@ KIND_REACH_PR: tuple[tuple[str, str, str, dict[str, object]], ...] = (
     ("char_param_became_char8", "cxx_alt", "gcc", {"std": "c++20"}),
     ("func_exception_spec_widened", "cxx_more", "clang", {"std": "c++14"}),
     ("rebuild_against_libcxx", "cxx_stdlib", "clang", {}),
-    # time_t widening needs an i386 build (gcc-multilib); DWARF evidence,
-    # since the header lane refuses it (known-gaps: time64 profile mismatch).
-    (
-        "time_bits_64",
-        "c_elf_alt",
-        "gcc",
-        {"evidence": "dwarf", "flags": Flags(bits=32)},
-    ),
+    # time_t widening needs an i386 build (gcc-multilib); header evidence,
+    # whose parse differs only in the glibc ABI-selecting macros.
+    ("time_bits_64", "c_elf_alt", "gcc", {"flags": Flags(bits=32)}),
 )
 
 # (op, seed, producer family, config changes). One guard per axis.

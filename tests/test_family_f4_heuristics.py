@@ -103,7 +103,9 @@ EXEMPTION_CEILINGS: dict[str, int] = {
     # dual-ABI pairing key (compare/glibcxx_dual_abi.normalize_dual_abi_spelling).
     # 74: plus abi_equivalent_retype's C++ pointer/reference spelling tokenizer
     # (an identifier token and the token split), C++ type spelling.
-    "spelling": 74,
+    # 76: plus diff_helpers' two array-bound spacing rules ("char [8]" from
+    # the native gcc header backend vs DWARF's "char[8]"), C++ type spelling.
+    "spelling": 76,
     # 44: the merge with main brought model/symbol_ownership.py into the scan
     # (main made it the vocabulary owner) and main's shared
     # match_frozen_namespace -- both one pre-existing `_Z` mangling check.
@@ -117,7 +119,9 @@ EXEMPTION_CEILINGS: dict[str, int] = {
     # family, the N...E nested-name scope, the "typeinfo for " demangling).
     # 50: plus cpu_dispatch_public_members' MSVC `?` test, qualifying a
     # castxml bare-leaf declaration from its own mangling.
-    "grammar": 50,
+    # 51: plus compare/live_member_scopes' `_Z` test, reading a member
+    # function's record scope from its own Itanium mangling.
+    "grammar": 51,
     # 43: minus outcome_release.unclassified_release_contribution_fields,
     # moved into its test (dead-code plan, Stage D).
     # 49: plus the two path-prefix checks in manifest_tu_scope_field, moved

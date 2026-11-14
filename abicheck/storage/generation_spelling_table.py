@@ -684,6 +684,16 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "explicit extern \"C\" variable in a C++ header records its plain name "
         "again, as generations before 66 did; no rewrite applies"
     ),
+    71: GenerationSpellingChange(
+        "no type or name spelling changes. The DWARF lane now records a "
+        "record's is_abstract (from pure members, or an emitted vtable) and "
+        "reads a GCC member's pure virtual from its __cxa_pure_virtual vtable "
+        "slot, so a GCC pure virtual member is kept as one; the native gcc "
+        "header backend records static inline C function definitions. These "
+        "are new facts on existing records, not respellings: no rewrite "
+        "applies, and a pre-71 side's is_abstract is unknown (None), which "
+        "the abstract detector skips"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

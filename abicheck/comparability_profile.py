@@ -221,7 +221,9 @@ def _unexplained_profile_fields(
     # runtime-ABI selector (`-D_GLIBCXX_USE_CXX11_ABI=0` on one side) parsed
     # the same declarations under the other libstdc++ ABI. That is the
     # library's own ABI change, reported as `glibcxx_dual_abi_changed`
-    # (compare/glibcxx_dual_abi.py), not an incomparable profile.
+    # (compare/glibcxx_dual_abi.py), not an incomparable profile. The same
+    # holds for glibc's selectors (`-D_TIME_BITS=64 -D_FILE_OFFSET_BITS=64`),
+    # reported as `time64_abi_changed` (2026-11-14).
     if "macro_ops" in unexplained and macro_ops_differ_only_in_runtime_abi(
         old_fields.get("macro_ops"), new_fields.get("macro_ops")
     ):

@@ -20,10 +20,6 @@ from abiforge.run.toolchains import uses_libstdcxx
 
 _CLASSES = frozenset({"cxx_classes"})
 
-GAP_DWARF_PURE = "A GCC-built DWARF snapshot cannot tell that a virtual became pure"
-GAP_DWARF_NEW_PURE = (
-    "A newly added pure virtual does not make the class read abstract at DWARF depth"
-)
 GAP_CLANG_CHAR = (
     "A clang-built plain-`char` signedness flip reads `NO_CHANGE` at DWARF depth"
 )
@@ -35,9 +31,6 @@ GAP_VA_LIST = "Only the clang header backend marks a `va_list` parameter"
 GAP_GCC_THROW = (
     "The native gcc header backend records no dynamic exception specification"
 )
-GAP_GCC_UNEXPORTED = (
-    "The native gcc header backend keeps an unexported declaration PUBLIC"
-)
 GAP_O2_STD = (
     "An `-O2` rebuild of a C++ library that uses `std::string` reads as a risk on gcc, "
     "or a break on MinGW"
@@ -48,14 +41,7 @@ GAP_CASTXML_ALIGN = (
 )
 GAP_CLANG_INLINE_STATIC = "An inline function's static local, exported by clang, reads as an undeclared export"
 GAP_UNIQUE_O2_DWARF = "A GNU-unique static whose inline owner was inlined away is not compared at DWARF depth"
-GAP_PURE_VIRTUAL_GCC_DWARF = "A method that becomes pure virtual is not seen from gcc DWARF when the class keeps no key function"
 GAP_DUAL_ABI_COW_CHURN = "A C++20 dual-ABI flip is not recognized when the old-ABI string's members are exported"
-GAP_GCC_HEADER_ONLY = (
-    "The native gcc header backend records no function the library never emits"
-)
-GAP_DEFINE_PROFILE = (
-    "A macro that changes the build's ABI makes the two header dumps incomparable"
-)
 
 
 def _always(_: Config) -> bool:
@@ -175,20 +161,6 @@ def _va_list_gap(op: str, kind: str, backend: str) -> Known:
     )
 
 
-def _unexported_gap(op: str, seeds: frozenset[str], kind: str) -> Known:
-    return _backend_gap(
-        op,
-        seeds,
-        "gcc",
-        "wrong-kind",
-        "the gcc backend records the unexported declaration PUBLIC, so the "
-        "pair does not match and the change reads func_added",
-        GAP_GCC_UNEXPORTED,
-        frozenset({f"missing:{kind}"}),
-        "COMPATIBLE",
-    )
-
-
 # Header-backend parity gaps the corpus found (tests/
 # test_header_backend_fact_gaps_integration.py holds their canaries).
 _BACKEND_GAPS: tuple[Known, ...] = (
@@ -214,8 +186,6 @@ _BACKEND_GAPS: tuple[Known, ...] = (
         ),
         "COMPATIBLE",
     ),
-    _unexported_gap("declared_exports_defined", _ELF, "FUNC_EXPORT_ADDED"),
-    _unexported_gap("inline_function_outlined", _MORE, "FUNC_LOST_INLINE"),
 )
 
 
@@ -242,22 +212,6 @@ _PLATFORM: tuple[Known, ...] = (
         verdicts=frozenset({"COMPATIBLE_WITH_RISK"}),
     ),
     Known(
-        "header_only_function_params_changed",
-        _ALT,
-        "false-clean",
-        _hb("gcc"),
-        "the native gcc backend records no hscale (static inline, never "
-        "emitted), so the signature change reads as nothing",
-        GAP_GCC_HEADER_ONLY,
-        issues=frozenset(
-            {"missing:HEADER_ONLY_FUNCTION_PARAMS_CHANGED", "weaker-than:API_BREAK"}
-        ),
-        verdicts=frozenset({"COMPATIBLE"}),
-        # A gcc consumer only warns on the int -> int * conversion: no
-        # source break, so the same finding reads wrong-verdict.
-        also_cls=frozenset({"wrong-verdict"}),
-    ),
-    Known(
         "object_alignment_reduced",
         _ELF,
         "wrong-verdict",
@@ -282,39 +236,6 @@ _PLATFORM: tuple[Known, ...] = (
         GAP_DUAL_ABI_COW_CHURN,
         issues=frozenset({"missing:GLIBCXX_DUAL_ABI_FLIP_DETECTED"}),
         verdicts=_BREAKING,
-    ),
-    Known(
-        "header_inline_removed",
-        _XA,
-        "false-clean",
-        _hb("gcc"),
-        "the native gcc backend records no demo::clampi (header-only, never "
-        "emitted), so its removal reads NO_CHANGE",
-        GAP_GCC_HEADER_ONLY,
-        issues=frozenset({"missing:INLINE_FUNCTION_REMOVED", "weaker-than:API_BREAK"}),
-        verdicts=frozenset({"NO_CHANGE"}),
-    ),
-    Known(
-        "time_bits_64",
-        _ALT,
-        "refused",
-        _ev("headers"),
-        "-D_TIME_BITS=64 reaches the new side's header dump only, so the two "
-        "dumps' parse profiles differ and the compare refuses",
-        GAP_DEFINE_PROFILE,
-        issues=frozenset({"refused:ProfileMismatchError"}),
-        verdicts=frozenset({"REFUSED"}),
-    ),
-    Known(
-        "method_became_pure_virtual",
-        _MORE,
-        "wrong-kind",
-        lambda c: c.producer.family == "gcc" and c.evidence == "dwarf",
-        "Plain's only virtual is pure, so gcc emits no key function and only a "
-        "declaration of Plain in DWARF; get()'s pure flag is never read",
-        GAP_PURE_VIRTUAL_GCC_DWARF,
-        issues=frozenset({"missing:FUNC_PURE_VIRTUAL_ADDED"}),
-        verdicts=frozenset({"BREAKING"}),
     ),
     Known(
         "gnu_unique_static_added",
@@ -378,47 +299,6 @@ KNOWN: tuple[Known, ...] = (
             {"missing:CHAR_SIGNEDNESS_CHANGED", "weaker-than:COMPATIBLE_WITH_RISK"}
         ),
         verdicts=frozenset({"NO_CHANGE"}),
-    ),
-    Known(
-        "pure_virtual_added",
-        _MORE,
-        "wrong-kind",
-        lambda c: c.evidence == "dwarf",
-        "the new pure virtual z() lengthens Base's vtable, but the DWARF-depth "
-        "compare does not read Base as abstract",
-        GAP_DWARF_NEW_PURE,
-        issues=frozenset({"missing:TYPE_BECAME_ABSTRACT"}),
-        verdicts=frozenset({"BREAKING"}),
-    ),
-    Known(
-        "virtual_become_pure",
-        _CLASSES,
-        "wrong-kind",
-        # clang marks the in-class declaration DW_VIRTUALITY_pure_virtual; GCC
-        # writes DW_VIRTUALITY_virtual, so only a GCC build misses the kind.
-        lambda c: c.evidence == "dwarf" and c.producer.family == "gcc",
-        "from a GCC-built DWARF snapshot the now-pure virtual reads func_removed; "
-        "neither func_virtual_became_pure nor type_became_abstract",
-        GAP_DWARF_PURE,
-        issues=frozenset(
-            {"none-of:FUNC_VIRTUAL_BECAME_PURE", "none-of:TYPE_BECAME_ABSTRACT"}
-        ),
-        verdicts=frozenset({"BREAKING"}),
-    ),
-    Known(
-        "type_lost_abstract",
-        frozenset({"cxx_more"}),
-        "false-positive",
-        # The reverse of virtual_become_pure: GCC's DWARF marks Shape::area
-        # DW_VIRTUALITY_virtual while it is still pure, so the old snapshot
-        # has no exported area and defining it reads as a new virtual; clang
-        # marks it pure and reads FUNC_ADDED (COMPATIBLE). Consumers still run.
-        lambda c: c.evidence == "dwarf" and c.producer.family == "gcc",
-        "from a GCC-built DWARF snapshot defining a pure virtual reads "
-        "virtual_method_added (BREAKING); the vtable keeps its slot count",
-        GAP_DWARF_PURE,
-        issues=frozenset({"stronger-than:COMPATIBLE_WITH_RISK"}),
-        verdicts=frozenset({"BREAKING"}),
     ),
     Known(
         "rebuild_optimized",
