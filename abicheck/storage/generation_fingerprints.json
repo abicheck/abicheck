@@ -48,7 +48,7 @@
       "abicheck/extract/dwarf_decl_file.py": "a585b6e38dc879b04db4b3d70a8b7131774a8b735df1068e6baafcaac934af42",
       "abicheck/extract/dwarf_export_gaps.py": "ed04bbe774a14bc4b1c695f05ceb6a1da8e376cce001d780d63ccb9a9a52b412",
       "abicheck/extract/dwarf_layout_backfill.py": "aa6e6647edc2f60129a9762ffd131e0286a8be0432cb141cdea30675a304b630",
-      "abicheck/extract/dwarf_member_functions.py": "d48d0ed79e0a1fb2bebc0871736f9a395ef7cb64c609a0eaac5a5e308f2e00fc",
+      "abicheck/extract/dwarf_member_functions.py": "a7a0b00a5583fc35322efcbe18ef1ba95f11b970651006edb291b7efefff3213",
       "abicheck/extract/dwarf_producer.py": "4b85d88dd77f7dca39669cceb2f494e58c81063ebd35bf59674bbee8504cac5f",
       "abicheck/extract/dwarf_records.py": "60c9e9aacd78d4ec63a31062a502a7483e64cc106e678aac2bd62048f5e0be55",
       "abicheck/extract/dwarf_scope.py": "1800757661a850338d8cb96d715995ffa8f79354047f68b1ce5e248a72819b20",
@@ -231,9 +231,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "6b64e5326baeb51816ee3d7a767c380b73476004309fd36cc965d00ff19d4c86",
+    "fingerprint": "8a242c38220d0f44ce09178936924088d27156233dc34f9bdbb13b09a1286db7",
     "generation": 71,
-    "reason": "merge of main's castxml data-size hotfix: record-member resolution now uses context.member_elements (one helper), main's duplicate ms_bitfields/empty-POD branch dropped in favor of generation 66's ms_bitfield_layout and empty-before-POD rule; recorded values unchanged"
+    "reason": "removed is_pure_virtual_member, which had no production caller after the main merge; extraction output unchanged"
   },
   "resolver": {
     "files": {
