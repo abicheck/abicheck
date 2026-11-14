@@ -169,6 +169,9 @@ EXEMPTION_REASONS: dict[str, str] = {
 #: exemption category (maintained by hand -- the completeness test says what
 #: to add or drop).
 HEURISTICS: dict[str, str] = {
+    # The vector-math library selection flags (-mveclibabi=, -fveclib=) in a
+    # DW_AT_producer flag set: the compiler's own flag spelling.
+    "abicheck.compare.toolchain_flags::advanced_change_grade::affix.startswith:_CALLEE_LIBRARY_VECTOR_FLAGS": "platform",
     # A SPELLING_MIGRATIONS row's retired function-name prefixes (castxml's
     # compiler-declared __builtin_*, reserved to the implementation) between
     # operands that straddle the retiring generation (policy/retired_function_drift).

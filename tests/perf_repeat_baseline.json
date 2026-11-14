@@ -92,7 +92,7 @@
     "abicheck/compare/template_surface.py(public_functions)": 28,
     "abicheck/compare/template_surface.py(qualified_declaration_name)": 1580,
     "abicheck/compare/template_surface.py(qualified_name_lookup)": 186,
-    "abicheck/compare/template_surface.py(qualified_name_lookup.<locals>.lookup)": 3524,
+    "abicheck/compare/template_surface.py(qualified_name_lookup.<locals>.lookup)": 3166,
     "abicheck/compare/template_surface.py(qualified_name_table)": 190,
     "abicheck/compare/template_surface.py(qualified_name_table.<locals>.build)": 14,
     "abicheck/compare/template_surface.py(reconciled_abi_visible_functions)": 42,
@@ -308,5 +308,5 @@
   },
   "mode": "default",
   "n": 40,
-  "total": 229072
+  "total": 228714
 }
