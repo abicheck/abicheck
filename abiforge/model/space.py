@@ -255,10 +255,15 @@ ROLE_CONSTRUCT: dict[str, str] = {
     "src.tmpl": "template",
     "src.vd": "class_virtual",
     "src": "function",
+    # cxx_tree (abiforge.operators.source_tree)
+    "tree.anon": "struct",
+    "tree.pair": "struct",
+    "tree.rtti": "class_virtual",
+    "tree": "function",
 }
 
 # Roles that only admit an operator to a seed (``Seed.gate_role``).
-GATE_ROLES = frozenset({"alt.gate", "xa.gate", "src.gate"})
+GATE_ROLES = frozenset({"alt.gate", "xa.gate", "src.gate", "tree.gate"})
 
 # Language feature an operator needs -> the construct it exercises.
 FEATURE_CONSTRUCT: dict[str, str] = {
@@ -352,6 +357,7 @@ OP_EDIT_CLASS: dict[str, dict[str, str]] = {
         "record_became_packed": "packing_change",
         "field_became_bitfield": "field_to_bitfield",
         "field_renamed": "member_rename",
+        "tree_anonymous_type_coordinates_shifted": "declaration_text_only",
         "field_became_const": "member_cv_change",
         "field_became_volatile": "member_cv_change",
         "record_became_opaque": "record_opaque",
@@ -450,6 +456,7 @@ OP_EDIT_CLASS: dict[str, dict[str, str]] = {
         "src_public_function_added": "function_added",
         "src_public_function_removed": "function_removed",
         "src_undocumented_export_added": "export_declaration_mismatch",
+        "tree_private_declaration_exported": "export_declaration_mismatch",
         "allocator_replacement_removed": "function_removed",
         "symbols_prefixed_batch": "function_renamed",
         "api_version_suffix_bumped": "function_renamed",

@@ -74,6 +74,7 @@ EXPECTED_STRUCT = _MEMBER | {
     "member_rename",
     "member_cv_change",
     "member_access_change",
+    "declaration_text_only",
 }
 EXPECTED_INHERITANCE = {
     "base_add_nonvirtual",

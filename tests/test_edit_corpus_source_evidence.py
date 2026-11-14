@@ -12,6 +12,7 @@ from abiforge.model.config import Toolchain, default_config
 from abiforge.model.expect import PASSING_CLASSES
 from abiforge.model.seeds import SEED_BY_NAME
 from abiforge.operators.source_evidence import SOURCE_EVIDENCE_OPERATORS
+from abiforge.operators.source_tree import SOURCE_TREE_OPERATORS
 from abiforge.run.cells import CellContext, run_cell
 from abiforge.run.tiers import SOURCE_EVIDENCE_PR, SOURCES_CONFIG
 from abiforge.run.toolchains import newest
@@ -35,12 +36,21 @@ def test_sources_is_part_of_the_build_identity() -> None:
     assert both.evidence_label == "headers.clang+build+src"
 
 
-@pytest.mark.parametrize("op", SOURCE_EVIDENCE_OPERATORS, ids=lambda o: o.name)
-def test_every_source_operator_needs_sources(op) -> None:
-    seed = SEED_BY_NAME["cxx_src"]
-    assert op.applies_to(seed)
-    # Only the gated seed takes the operator.
-    assert [s for s in ("cxx_alt", "cxx_more") if op.applies_to(SEED_BY_NAME[s])] == []
+_SOURCE_OPS = [(op, "cxx_src") for op in SOURCE_EVIDENCE_OPERATORS] + [
+    (op, "cxx_tree") for op in SOURCE_TREE_OPERATORS
+]
+
+
+@pytest.mark.parametrize(
+    ("op", "seed_name"), _SOURCE_OPS, ids=lambda o: getattr(o, "name", o)
+)
+def test_every_source_operator_needs_sources(op, seed_name: str) -> None:
+    assert op.applies_to(SEED_BY_NAME[seed_name])
+    # Only its own gated seed takes the operator.
+    others = ("cxx_alt", "cxx_more", "cxx_src", "cxx_tree")
+    assert [
+        s for s in others if s != seed_name and op.applies_to(SEED_BY_NAME[s])
+    ] == []
     for tc in (_GCC, _CLANG):
         assert op.requires(default_config("c++", tc)) is not None
         assert op.requires(default_config("c++", tc).with_(**SOURCES_CONFIG)) is None
@@ -52,7 +62,7 @@ def test_the_in_scope_source_bucket_is_exactly_what_the_operators_declare() -> N
     assert bucket.in_scope
     declared = {
         ChangeKind[name].value
-        for op in SOURCE_EVIDENCE_OPERATORS
+        for op in (*SOURCE_EVIDENCE_OPERATORS, *SOURCE_TREE_OPERATORS)
         for name in op.expected
     }
     assert set(bucket.names) <= declared
@@ -73,7 +83,9 @@ def test_every_source_kind_sits_in_a_named_reasoned_bucket() -> None:
 
 def test_the_pr_tier_guards_every_source_operator_on_both_families() -> None:
     names = [op for op, _, _, _ in SOURCE_EVIDENCE_PR]
-    assert sorted(names) == sorted(op.name for op in SOURCE_EVIDENCE_OPERATORS)
+    assert sorted(names) == sorted(
+        op.name for op in (*SOURCE_EVIDENCE_OPERATORS, *SOURCE_TREE_OPERATORS)
+    )
     assert {fam for _, _, fam, _ in SOURCE_EVIDENCE_PR} == {"gcc", "clang"}
 
 
@@ -82,12 +94,12 @@ _OTHER = {"gcc": "clang", "clang": "gcc"}
 
 @pytest.mark.integration
 @pytest.mark.parametrize(
-    ("op_name", "family"),
-    [(op, _OTHER[fam]) for op, _, fam, _ in SOURCE_EVIDENCE_PR],
+    ("op_name", "seed_name", "family"),
+    [(op, seed, _OTHER[fam]) for op, seed, fam, _ in SOURCE_EVIDENCE_PR],
     ids=[f"{op}-{_OTHER[fam]}" for op, _, fam, _ in SOURCE_EVIDENCE_PR],
 )
 def test_source_operator_on_the_other_family(
-    op_name: str, family: str, tmp_path: Path
+    op_name: str, seed_name: str, family: str, tmp_path: Path
 ) -> None:
     # The PR tier runs each operator on one family; this runs it on the
     # other, so every source-evidence kind is verified on gcc and clang.
@@ -98,7 +110,7 @@ def test_source_operator_on_the_other_family(
         pytest.skip(f"{family} is not installed")
     config = default_config("c++", tc).with_(**SOURCES_CONFIG)
     cell = run_cell(
-        OP_BY_NAME[op_name], SEED_BY_NAME["cxx_src"], config, CellContext.at(tmp_path)
+        OP_BY_NAME[op_name], SEED_BY_NAME[seed_name], config, CellContext.at(tmp_path)
     )
     if cell.status in ("unavailable", "infeasible"):
         pytest.skip(cell.reason)
