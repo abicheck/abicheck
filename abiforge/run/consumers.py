@@ -288,6 +288,20 @@ int main() {
 }
 """
 
+_TREE_CALL = r"""#include <cstdio>
+#include "edit_seed.h"
+int main() {
+  TreeHolder h;
+  h.in.a = 1;
+  h.n = 2;
+  TreePair p;
+  p.a = 3;
+  std::printf("holder=%d pair=%d,%d count=%d\n", tree_holder_n(&h), tree_pair_a(&p),
+              tree_pair_b(&p), tree_count(4));
+  return 0;
+}
+"""
+
 CONSUMERS: dict[str, dict[str, str]] = {
     "c_core": dict(_C_SHAPES),
     "cxx_classes": {**_C_SHAPES, "derive": _CXX_DERIVE, "modern": _CXX_MODERN},
@@ -301,4 +315,5 @@ CONSUMERS: dict[str, dict[str, str]] = {
     },
     "cxx_alt": {"call": _XA_CALL},
     "cxx_src": {"call": _SRC_CALL},
+    "cxx_tree": {"call": _TREE_CALL},
 }

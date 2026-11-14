@@ -59,6 +59,7 @@ from abiforge.model.seeds import SEED_BY_NAME, Seed
 from abiforge.operators import OP_BY_NAME, EditOp, matrix
 from abiforge.operators.build_data import BUILD_DATA_OPERATORS
 from abiforge.operators.source_evidence import SOURCE_EVIDENCE_OPERATORS
+from abiforge.operators.source_tree import SOURCE_TREE_OPERATORS
 from abiforge.run.toolchains import (
     CONSUMER_TOOLCHAIN_ENV,
     TOOLCHAIN_ENV,
@@ -130,10 +131,13 @@ SOURCES_CONFIG: dict[str, object] = {"sources": True, "header_backend": "clang"}
 
 
 def _source_evidence_rows() -> tuple[tuple[str, str, str, dict[str, object]], ...]:
-    """One PR row per source-evidence operator, alternating the producer family."""
+    """One PR row per source-evidence operator (``cxx_src``) and per
+    source-tree operator (``cxx_tree``), alternating the producer family."""
+    ops = [(op, "cxx_src") for op in SOURCE_EVIDENCE_OPERATORS]
+    ops += [(op, "cxx_tree") for op in SOURCE_TREE_OPERATORS]
     return tuple(
-        (op.name, "cxx_src", ("gcc", "clang")[i % 2], dict(SOURCES_CONFIG))
-        for i, op in enumerate(SOURCE_EVIDENCE_OPERATORS)
+        (op.name, seed, ("gcc", "clang")[i % 2], dict(SOURCES_CONFIG))
+        for i, (op, seed) in enumerate(ops)
     )
 
 

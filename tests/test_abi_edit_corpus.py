@@ -101,7 +101,7 @@ def test_operator_names_are_unique_and_nonempty() -> None:
 
 def test_seed_names_are_unique() -> None:
     names = [s.name for s in SEEDS]
-    assert len(names) == len(set(names)) == 8
+    assert len(names) == len(set(names)) == 9
 
 
 def test_every_template_placeholder_is_a_known_role() -> None:
@@ -117,6 +117,14 @@ def test_each_role_text_is_placed_in_the_file_it_belongs_to() -> None:
     for seed in SEEDS:
         header_slots = {ln[2:-2] for ln in seed.header_template if ln.startswith("@@")}
         source_slots = {ln[2:-2] for ln in seed.source_template if ln.startswith("@@")}
+        # An extra file places a role's header text when it is a header and
+        # its source text when it is a translation unit.
+        for path, template in seed.extra_files:
+            slots = {ln[2:-2] for ln in template if ln.startswith("@@")}
+            if path in seed.extra_sources:
+                source_slots |= slots
+            else:
+                header_slots |= slots
         for role, (h, c) in seed.roles.items():
             if role in BUILD_ROLES:
                 # Read by Seed.build_args, never placed by a template.

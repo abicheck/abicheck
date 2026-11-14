@@ -52,6 +52,17 @@ class Seed:
     # feature an edit then removes) takes only the operators written for it:
     # an operator applies only when its roles include ``gate_role``.
     gate_role: str | None = None
+    # Further files of the library's source tree, as (path relative to the
+    # tree, template): a header the public header includes but the dump is
+    # not given (a private header), or another translation unit (``.c`` /
+    # ``.cpp``) compiled into the same library. A header takes each role's
+    # header text, a translation unit its source text.
+    extra_files: tuple[tuple[str, tuple[str, ...]], ...] = ()
+
+    @property
+    def extra_sources(self) -> tuple[str, ...]:
+        """The extra files that are translation units, in order."""
+        return tuple(p for p, _ in self.extra_files if p.endswith((".c", ".cpp")))
 
     @property
     def header_name(self) -> str:
@@ -92,6 +103,24 @@ class Seed:
                 self.source_template, current, side=1, guard=self.name, kind="source"
             ),
         )
+
+    def render_extra(
+        self, overrides: Mapping[str, RoleText] | None = None
+    ) -> dict[str, str]:
+        """Each extra file's text (path -> text) with *overrides* applied."""
+        current: dict[str, RoleText] = dict(self.roles)
+        if overrides:
+            current.update(overrides)
+        return {
+            path: _render(
+                template,
+                current,
+                side=1 if path in self.extra_sources else 0,
+                guard=self.name,
+                kind=path,
+            )
+            for path, template in self.extra_files
+        }
 
 
 def _render(
@@ -1302,6 +1331,81 @@ SRC_SEED = Seed(
     gate_role="src.gate",
 )
 
+
+# A C++ library laid out as a small project tree for the ``sources`` evidence
+# variant: a public header, a private header it includes (``detail/``, never
+# given to the dump, so its declarations carry private-header provenance) and
+# a second translation unit (``tree_unit2.cpp``, which defines EDIT_UNIT2
+# before including the public header). It carries what only a multi-file,
+# multi-TU tree shows: private-header provenance, per-TU type definitions,
+# anonymous-type coordinates. Gated (``tree.gate``): only
+# ``abiforge.operators.source_tree`` edits it.
+_TREE_ROLES: dict[str, RoleText] = {
+    "tree.gate": ("", ""),
+    "tree.anon": (
+        "struct TreeHolder { struct { int a; } in; int n; };\n"
+        "int tree_holder_n(const TreeHolder *h);",
+        "int tree_holder_n(const TreeHolder *h) { return h->n; }",
+    ),
+    "tree.pair": (
+        "#define TREE_TAIL_T int\n"
+        "struct TreePair { int a; TREE_TAIL_T tail; };\n"
+        "int tree_pair_a(const TreePair *p);\n"
+        "int tree_pair_b(const TreePair *p);",
+        "int tree_pair_a(const TreePair *p) { return p->a; }",
+    ),
+    "tree.unit2": ("", "int tree_pair_b(const TreePair *p) { return p->a + 1; }"),
+    "tree.fn": ("int tree_count(int v);", "int tree_count(int v) { return v; }"),
+    # Private-header declarations an edit adds (empty in the baseline).
+    "tree.leak": ("", ""),
+    "tree.rtti": ("", ""),
+}
+
+TREE_PRIVATE_HEADER = "detail/tree_priv.h"
+TREE_SECOND_UNIT = "tree_unit2.cpp"
+
+TREE_SEED = Seed(
+    name="cxx_tree",
+    lang="c++",
+    header_template=(
+        "#ifndef EDIT_SEED_TREE_HPP",
+        "#define EDIT_SEED_TREE_HPP",
+        _VIS_OPEN,
+        f'#include "{TREE_PRIVATE_HEADER}"',
+        "@@tree.anon@@",
+        "@@tree.pair@@",
+        "@@tree.fn@@",
+        _VIS_CLOSE,
+        "#endif",
+    ),
+    source_template=(
+        '#include "edit_seed.h"',
+        "@@tree.anon@@",
+        "@@tree.pair@@",
+        "@@tree.fn@@",
+        "@@tree.leak@@",
+        "@@tree.rtti@@",
+    ),
+    roles=_TREE_ROLES,
+    gate_role="tree.gate",
+    extra_files=(
+        (
+            TREE_PRIVATE_HEADER,
+            (
+                "#ifndef EDIT_SEED_TREE_PRIV_HPP",
+                "#define EDIT_SEED_TREE_PRIV_HPP",
+                "@@tree.leak@@",
+                "@@tree.rtti@@",
+                "#endif",
+            ),
+        ),
+        (
+            TREE_SECOND_UNIT,
+            ("#define EDIT_UNIT2 1", '#include "edit_seed.h"', "@@tree.unit2@@"),
+        ),
+    ),
+)
+
 SEEDS: tuple[Seed, ...] = (
     C_SEED,
     CXX_SEED,
@@ -1311,5 +1415,6 @@ SEEDS: tuple[Seed, ...] = (
     XCXX_SEED,
     XA_SEED,
     SRC_SEED,
+    TREE_SEED,
 )
 SEED_BY_NAME: dict[str, Seed] = {s.name: s for s in SEEDS}

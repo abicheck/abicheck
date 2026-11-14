@@ -146,12 +146,17 @@ def _compile_library(
     link: LinkSpec = LinkSpec(),
     extra: BuildArgs | None = None,
     evidence: str | None = None,
+    extra_texts: dict[str, str] | None = None,
 ) -> Path:
     extra = extra or BuildArgs()
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / seed.header_name).write_text(header_text, encoding="utf-8")
     src = out_dir / seed.source_name
     src.write_text(source_text, encoding="utf-8")
+    for rel, text in (extra_texts or {}).items():
+        (out_dir / rel).parent.mkdir(parents=True, exist_ok=True)
+        (out_dir / rel).write_text(text, encoding="utf-8")
+    units = [src, *(out_dir / rel for rel in seed.extra_sources)]
     so = out_dir / LIB_NAME
     cmd = compile_cmd(
         config.producer,
@@ -159,7 +164,8 @@ def _compile_library(
         flags,
         debug=(evidence or config.evidence) != "binary",
     )
-    cmd += [*extra.cflags, "-shared", "-I", str(out_dir), "-o", str(so), str(src)]
+    cmd += [*extra.cflags, "-shared", "-I", str(out_dir), "-o", str(so)]
+    cmd += [str(u) for u in units]
     # PIC is an ELF/Mach-O concept: clang rejects -fPIC for the Windows target.
     if sys.platform != "win32":
         cmd.append("-fPIC")
@@ -181,9 +187,14 @@ def _compile_library(
         # ``sources`` tree carries it the way a real checkout's build dir
         # does (``dump --sources`` auto-discovers it for L4 replay). The
         # compiler runs in this process's cwd, so that is the directory the
-        # command's relative paths resolve against (out_dir may be relative).
-        entry = {"directory": str(Path.cwd()), "file": str(src), "arguments": cmd}
-        (out_dir / COMPILE_DB).write_text(json.dumps([entry]), encoding="utf-8")
+        # commands' relative paths resolve against (out_dir may be relative).
+        # One entry per translation unit, each the command compiling only it.
+        lead = [a for a in cmd if a not in {str(u) for u in units}]
+        entries = [
+            {"directory": str(Path.cwd()), "file": str(u), "arguments": [*lead, str(u)]}
+            for u in units
+        ]
+        (out_dir / COMPILE_DB).write_text(json.dumps(entries), encoding="utf-8")
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if proc.returncode != 0:
         raise CompileError(
@@ -211,6 +222,15 @@ def build(
     """
     evidence = evidence or config.evidence
     fl = flags or config.flags
+    if config.sources:
+        # A source tree is laid out the way a project is: under a project
+        # directory (``src/``), so a path read from either side's tree is
+        # comparable across the two checkouts (abicheck anchors a declaring
+        # path at its last project-layout segment). Flat in ``old/`` and
+        # ``new/``, every header path differed by its checkout root alone, and
+        # L5 identity reconciliation could never pair a declaration across
+        # the two sides.
+        out_dir = out_dir / "src"
     header_text, source_text = seed.render(overrides)
     so = _compile_library(
         seed,
@@ -222,6 +242,7 @@ def build(
         link,
         seed.build_args(overrides),
         evidence,
+        seed.render_extra(overrides),
     )
     header = out_dir / seed.header_name
     is_cxx = seed.lang == "c++"

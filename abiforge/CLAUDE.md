@@ -31,12 +31,16 @@ Purpose and claims: `README.md`.
   (ELF/loader/toolchain edits), `symbols`, `layout` (record and base layout
   classes), `build_data` (compile modes only L3 build data records),
   `runtime_floor` (a raised libc version floor), `source_evidence` (what only
-  L4 source replay or the L5 source graph sees; the gated `cxx_src` seed). The
-  `EditOp` type is `model/opkit.py`.
+  L4 source replay or the L5 source graph sees; the gated `cxx_src` seed),
+  `source_tree` (what only a multi-file, multi-TU tree shows; `cxx_tree`). The
+  `EditOp` type is `model/opkit.py`. The ChangeKind scope table (which kinds
+  are in scope, and why not the rest) is `coverage_scope.py`.
 - **Seeds** (`model/seeds.py`): a seed's `build.*` roles carry compile and link
   inputs (version script, SONAME, flags) that an operator edits like a
   declaration; a seed with a `gate_role` (`c_elf_alt`, `cxx_alt`) takes only
-  operators naming that role.
+  operators naming that role. `extra_files` adds further files to the tree: a
+  header the public header includes but the dump is not given (a private
+  header) or another translation unit compiled into the library.
 - **Configs** (`model/config.py`): a `Config` is one library build (standard,
   producer, flags, evidence and, for `headers`, the header backend: castxml,
   clang or the native gcc plugin, which needs
@@ -46,7 +50,9 @@ Purpose and claims: `README.md`.
   through the typed `--build-info` workflow. `sources=True` adds L4/L5 evidence
   the same way (`--sources`: each side's source tree, with its compile DB); its
   operators also need `header_backend="clang"`, the only backend whose source
-  replay records macros, bodies and call edges. A (build, consumer) mix that cannot work is an explicit
+  replay records macros, bodies and call edges. A `sources` tree is built
+  under a `src/` project directory, so the two sides' paths compare across
+  checkouts (abicheck anchors a path at its last project-layout segment). A (build, consumer) mix that cannot work is an explicit
   `infeasible` pair, never a pass. Evidence is per pair by default; an
   operator with `new_evidence` (`model/opkit.py`) dumps its new side with less
   evidence (headers or DWARF absent), the asymmetric-evidence axis.
