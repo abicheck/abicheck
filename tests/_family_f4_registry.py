@@ -297,6 +297,8 @@ HEURISTICS: dict[str, str] = {
     "abicheck.compare.runtime_requirements::<module>::vocab:_FAMILY_PREFIXES": "platform",
     "abicheck.compare.runtime_requirements::_reserved_family::affix.startswith:_USER_SUPPLIED_PREFIX": "platform",
     "abicheck.compare.runtime_requirements::_reserved_family::affix.startswith:prefix": "platform",
+    "abicheck.compare.abi_equivalent_retype::<module>::re:'[A-Za-z_][\\\\w:]*|&&|&|\\\\*|\\\\S'": "spelling",
+    "abicheck.compare.abi_equivalent_retype::_split_indirect::re:'[A-Za-z_][\\\\w:]*'": "spelling",
     "abicheck.compare.type_visibility::<module>::vocab:_CLASS_SYMBOL_PREFIXES": "grammar",
     "abicheck.compare.type_visibility::_exports_member::affix.startswith:prefixes": "grammar",
     "abicheck.compare.type_visibility::_member_prefixes::affix.endswith:'E'": "grammar",

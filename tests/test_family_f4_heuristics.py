@@ -101,7 +101,9 @@ EXEMPTION_CEILINGS: dict[str, int] = {
     # against the function scope in policy/template_default_changes.py.
     # 72: plus the three basic_string/whitespace canonicalizations of the
     # dual-ABI pairing key (compare/glibcxx_dual_abi.normalize_dual_abi_spelling).
-    "spelling": 72,
+    # 74: plus abi_equivalent_retype's C++ pointer/reference spelling tokenizer
+    # (an identifier token and the token split), C++ type spelling.
+    "spelling": 74,
     # 44: the merge with main brought model/symbol_ownership.py into the scan
     # (main made it the vocabulary owner) and main's shared
     # match_frozen_namespace -- both one pre-existing `_Z` mangling check.

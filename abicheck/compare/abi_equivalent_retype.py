@@ -54,7 +54,6 @@ from __future__ import annotations
 import re
 from collections.abc import Sequence
 from dataclasses import replace
-from functools import lru_cache
 from typing import cast
 
 from ..model.abi_fundamental import AbiFundamental, abi_equivalent
@@ -62,6 +61,7 @@ from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.declarations import Function, Param, Variable
 from ..model.entities import RecordType, TypeField
+from ..model.execution_cache import memoized
 from ..model.fact import Fact
 from ..model.snapshot import AbiSnapshot
 from .fact_comparison import FactComparison, compare_facts
@@ -166,7 +166,7 @@ _TAGS = frozenset({"struct", "class", "union"})
 _INDIRECTIONS = frozenset({"*", "&", "&&"})
 
 
-@lru_cache(maxsize=4096)
+@memoized(maxsize=4096)
 def _split_indirect(spelling: str) -> tuple[str, str] | None:
     """(pointee name, normalized shape) of a pointer/reference spelling.
 

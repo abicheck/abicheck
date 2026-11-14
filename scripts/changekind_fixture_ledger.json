@@ -2,8 +2,8 @@
   "_comment": "Real-fixture backing per ChangeKind: catalog expected_kinds and the edit corpus verified_floor. A kind listed under `backed` may not lose every source (tests/test_changekind_real_coverage.py). Regenerate with `python scripts/changekind_real_coverage.py --write-fixture-ledger`.",
   "summary": {
     "total_kinds": 431,
-    "backed": 299,
-    "unbacked": 132
+    "backed": 300,
+    "unbacked": 131
   },
   "backed": {
     "abi_equivalent_type_changed": [
@@ -152,6 +152,9 @@
     ],
     "declaration_moved": [
       "catalog:case196_header_graph_move_reconciled"
+    ],
+    "declaration_renamed": [
+      "edit_corpus:pr"
     ],
     "default_argument_changed": [
       "edit_corpus:nightly",
@@ -754,7 +757,8 @@
     ],
     "public_api_internal_type_renamed": [
       "catalog:case194_header_graph_rename_reconciled",
-      "catalog:case221_public_api_internal_type_renamed"
+      "catalog:case221_public_api_internal_type_renamed",
+      "edit_corpus:pr"
     ],
     "public_consumer_compiled_dependency_changed": [
       "catalog:case222_public_consumer_compiled_dependency_changed"
@@ -1388,7 +1392,6 @@
     "cxx_standard_floor_raised",
     "declaration_identity_reconciled",
     "declaration_identity_unchanged",
-    "declaration_renamed",
     "elf_abi_flags_changed",
     "elf_class_changed",
     "elf_endianness_changed",
