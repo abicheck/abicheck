@@ -2,11 +2,11 @@
 
 Bug class: a name heuristic (``cpu_dispatch_isa``) lowered the removal of
 public, header-declared functions to a risk. Invariant, checked over the whole
-small domain of per-member visibilities: the roll-up's contributed verdict is
-BREAKING iff at least one removed member was declared in a public header
-(``ScopeOrigin.PUBLIC_HEADER``), and COMPATIBLE_WITH_RISK otherwise -- an
-export-only member (``Visibility.ELF_ONLY``) and a DWARF-only one (visibility
-``PUBLIC``, no header origin) alike. The oracle is that rule stated directly
+small domain of per-member visibilities and both header-evidence states: the
+roll-up may contribute COMPATIBLE_WITH_RISK only when headers were given and no
+removed member is declared in a public header (every member proven
+export-only); otherwise -- a header-declared member, or no header evidence at
+all (binary or DWARF-only), where nothing proves export-only -- it is BREAKING. The oracle is that rule stated directly
 on the inputs, plus the end-to-end ``compare()`` verdict.
 """
 
@@ -61,12 +61,13 @@ def _fn(algo: str, isa: str, kind: _Evidence) -> Function:
 
 
 def _pair(
-    dropped_vis: tuple[_Evidence, ...],
+    dropped_vis: tuple[_Evidence, ...], from_headers: bool = True
 ) -> tuple[AbiSnapshot, AbiSnapshot]:
     survivors = [_fn(a, isa, _HEADER) for a in _ALGOS for isa in _SURVIVING]
     dropped = [_fn(a, "avx512", v) for a, v in zip(_ALGOS, dropped_vis)]
     old = AbiSnapshot(library="lib.so", version="1", functions=survivors + dropped)
     new = AbiSnapshot(library="lib.so", version="2", functions=list(survivors))
+    old.from_headers = new.from_headers = from_headers
     return old, new
 
 
@@ -78,16 +79,14 @@ _DOMAIN = list(
 )
 
 
+@pytest.mark.parametrize("from_headers", [True, False])
 @pytest.mark.parametrize("dropped_vis", _DOMAIN)
 def test_roll_up_grade_follows_header_declaration(
-    dropped_vis: tuple[_Evidence, ...],
+    dropped_vis: tuple[_Evidence, ...], from_headers: bool
 ) -> None:
-    expected = (
-        Verdict.BREAKING
-        if any(_declared(v) for v in dropped_vis)
-        else Verdict.COMPATIBLE_WITH_RISK
-    )
-    old, new = _pair(dropped_vis)
+    proven_export_only = from_headers and not any(_declared(v) for v in dropped_vis)
+    expected = Verdict.COMPATIBLE_WITH_RISK if proven_export_only else Verdict.BREAKING
+    old, new = _pair(dropped_vis, from_headers)
     findings, suppressed = detect_cpu_dispatch_isa_dropped(old, new)
     # The roll-up is kept either way: one finding naming the family.
     assert [f.kind for f in findings] == [ChangeKind.CPU_DISPATCH_ISA_DROPPED]
@@ -245,3 +244,31 @@ def test_castxml_bare_leaf_names_match_raw_msvc_exports_by_scope(
     )
     export = f"?{leaf}@{export_scope}@@YAHH@Z"
     assert header_declared_members([export], [fn]) == ([export] if public else [])
+
+
+@pytest.mark.parametrize(
+    "removal", [ChangeKind.FUNC_REMOVED, ChangeKind.FUNC_REMOVED_ELF_ONLY]
+)
+def test_a_grouped_member_folds_in_either_removal_spelling(removal) -> None:
+    """A member removal reads FUNC_REMOVED with header or DWARF evidence and
+    FUNC_REMOVED_ELF_ONLY from symbols alone; the roll-up subsumes both, so
+    the verdict does not depend on which evidence produced the member. A
+    removal the roll-up did not group (another kind, or another symbol)
+    stays."""
+    from abicheck.model.change import Change
+    from abicheck.policy.finding_disposition import PipelineContext
+    from abicheck.post_processing import DetectCppPatterns
+
+    old, new = _pair((_EXPORT_ONLY,) * 3, from_headers=False)
+    grouped = Change(kind=removal, symbol="kmeans_compute_avx512", description="x")
+    other_symbol = Change(kind=removal, symbol="unrelated_fn", description="x")
+    other_kind = Change(
+        kind=ChangeKind.VAR_REMOVED, symbol="kmeans_compute_avx512", description="x"
+    )
+    changes = [grouped, other_symbol, other_kind]
+    ctx = PipelineContext(old=old, new=new)
+    DetectCppPatterns._suppress_grouped_children(
+        changes, {"kmeans_compute_avx512"}, ctx
+    )
+    assert changes == [other_symbol, other_kind]
+    assert ctx.suppressed == [grouped]

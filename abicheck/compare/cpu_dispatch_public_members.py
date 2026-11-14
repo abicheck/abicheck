@@ -38,11 +38,19 @@ from collections.abc import Callable, Iterable
 from typing import Any
 
 from ..model import AbiSnapshot, Function, ScopeOrigin
+from ..model.change_catalog.kinds import ChangeKind
 from ..model.change_catalog.registry import Verdict
 from ..model.mangled_name import msvc_scope_components
 from .template_surface import qualified_declaration_name, qualified_name_lookup
 
 PUBLIC_MEMBER_RULE = "cpu_dispatch_isa.public_member"
+
+#: A grouped (SYCL/ISA) parent subsumes a member's removal in either spelling:
+#: FUNC_REMOVED with header or DWARF evidence, FUNC_REMOVED_ELF_ONLY from
+#: symbols alone -- so the fold is the same at every evidence level.
+GROUPABLE_REMOVALS = frozenset(
+    {ChangeKind.FUNC_REMOVED, ChangeKind.FUNC_REMOVED_ELF_ONLY}
+)
 
 
 def _header_declared(fn: Function) -> bool:
@@ -144,10 +152,29 @@ def redeclared_in(old: AbiSnapshot, new: AbiSnapshot) -> Callable[[Function], bo
     return lambda fn: function_overload_stem(name_old(fn)) in kept
 
 
-def public_member_grade(public_members: list[str]) -> dict[str, Any]:
-    """``Change`` fields grading a roll-up with header-declared members BREAKING.
+def members_not_proven_export_only(
+    member_ids: Iterable[str], old: AbiSnapshot, new: AbiSnapshot
+) -> list[str]:
+    """The removed members a roll-up may NOT grade as export-only.
 
-    Empty when every removed member is export-only: the kind's own
+    Export-only is a negative claim -- "no public header declares this" --
+    and only header evidence can prove it. Without headers on the old side
+    (a binary or DWARF-only dump) nothing proves it, so every member keeps
+    the removal's BREAKING grade: missing evidence never makes a removal
+    safer. With headers, only a member the headers declare is public.
+    """
+    ids = list(member_ids)
+    if not old.from_headers:
+        return ids
+    return header_declared_members(
+        ids, old.declarations.functions, still_declared=redeclared_in(old, new)
+    )
+
+
+def public_member_grade(public_members: list[str]) -> dict[str, Any]:
+    """``Change`` fields grading a roll-up with non-export-only members BREAKING.
+
+    Empty when every removed member is proven export-only: the kind's own
     COMPATIBLE_WITH_RISK default then applies. The override is disclosed
     through ``modulation_reason``/``modulation_rule`` (ADR-025 D4.1).
     """
@@ -155,6 +182,6 @@ def public_member_grade(public_members: list[str]) -> dict[str, Any]:
         return {}
     return {
         "effective_verdict": Verdict.BREAKING,
-        "modulation_reason": "header_declared_member_removed",
+        "modulation_reason": "member_not_proven_export_only",
         "modulation_rule": PUBLIC_MEMBER_RULE,
     }
