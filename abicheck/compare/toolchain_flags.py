@@ -51,7 +51,6 @@ def advanced_dwarf_kind_map() -> dict[str, ChangeKind]:
             ChangeKind.VECTOR_ABI_CHANGED,
             ChangeKind.WCHAR_MODEL_CHANGED,
             ChangeKind.CHAR_SIGNEDNESS_CHANGED,
-            ChangeKind.TYPE_VISIBILITY_CHANGED,
         )
     }
 

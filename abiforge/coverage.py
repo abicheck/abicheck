@@ -21,7 +21,10 @@ each bucket with its reason; every report lists them. Over that scope:
 
 The committed ledger (``LEDGER_PATH``) is the ratchet: ``declared_covered``
 may only grow, ``declared_uncovered`` lists the in-scope kinds no operator
-names yet, and ``verified_floor[tier]`` lists the kinds that tier verified
+names yet, ``derived_by_construction`` lists the in-scope kinds that follow
+from a cell's verdict (``DERIVED_KINDS``, e.g. the SONAME-bump advisory every
+binary break owes) and that some operator owes -- covered by construction,
+never counted as declared coverage -- and ``verified_floor[tier]`` lists the kinds that tier verified
 when the ledger was written. ``tests/test_edit_corpus_coverage.py`` checks
 the declared side without a compiler; ``check_floor`` checks a run.
 
@@ -63,6 +66,7 @@ TIERS: tuple[str, ...] = ("pr", "nightly", "weekly")
 LEDGER_DECLARED_KEYS: tuple[str, ...] = (
     "declared_covered",
     "declared_uncovered",
+    "derived_by_construction",
     "out_of_scope",
     "edit_classes_without_operator",
 )
@@ -228,7 +232,171 @@ SCOPE_BUCKETS: tuple[ScopeBucket, ...] = (
         "the two sides were analyzed with different evidence; every corpus "
         "cell gives both sides one evidence level (an asymmetric-evidence "
         "axis is not modeled)",
-        names=frozenset({"layer_coverage_asymmetric"}),
+        names=frozenset(
+            {"layer_coverage_asymmetric", "source_fact_coverage_incomplete"}
+        ),
+    ),
+    # --- named, out of scope: L4/L5 source kinds two builds of one corpus
+    # library with sources (a ``sources`` config) cannot reach.
+    ScopeBucket(
+        "source_replay_twin",
+        False,
+        "a source-replay copy of a header-tier finding: a sources config always "
+        "carries headers, and compare drops the replay twin for the header-tier "
+        "kind that names the same entity (compare/source_replay_twins.REPLAY_TWINS: "
+        "CONSTANT_CHANGED, TYPEDEF_REMOVED, FUNC_REMOVED/visibility); only a "
+        "headerless source-only dump, which the corpus does not model, keeps it",
+        names=frozenset(
+            {
+                "constexpr_value_changed",
+                "public_typedef_removed",
+                "source_decl_binary_symbol_mismatch",
+                "source_to_binary_mapping_changed",
+            }
+        ),
+    ),
+    ScopeBucket(
+        "comparison_policy_input",
+        False,
+        "decided against an input the corpus never gives compare: a policy "
+        "file's require_evidence, a suppression file, or a probe environment "
+        "matrix (several configurations of one version)",
+        names=frozenset(
+            {
+                "api_depends_on_consumer_env",
+                "evidence_required_missing",
+                "suppression_reachability_unknown",
+                "suppression_would_hide_public_break",
+            }
+        ),
+    ),
+    ScopeBucket(
+        "build_target_graph",
+        False,
+        "read from build-system target metadata (CMake file API, Bazel, ...): "
+        "target public headers (TARGET_HAS_PUBLIC_HEADER), target-to-target "
+        "and dependency-role edges, a compile unit's target (option-to-symbol "
+        "edges) and declared generated files; a compile_commands.json, all a "
+        "corpus build writes, has none of them",
+        names=frozenset(
+            {
+                "build_option_reaches_public_symbol",
+                "generated_header_changed",
+                "generated_header_reaches_public_api",
+                "include_graph_public_header_drift",
+                "public_dependency_role_changed",
+                "public_dependency_role_unknown",
+                "target_dependency_added",
+            }
+        ),
+    ),
+    ScopeBucket(
+        "multi_translation_unit",
+        False,
+        "needs several translation units in one library (an exported symbol's "
+        "defining source file moving, two TUs defining one type differently); "
+        "a corpus library is one translation unit",
+        names=frozenset(
+            {"exported_symbol_source_owner_changed", "odr_source_conflict"}
+        ),
+    ),
+    ScopeBucket(
+        "private_header_provenance",
+        False,
+        "needs a private (non-installed) header the dump also parses, so a "
+        "declaration's origin can be private; a corpus seed renders one public "
+        "header and the dump is given only that",
+        names=frozenset(
+            {
+                "identity_collision_detected",
+                "odr_type_variant",
+                "private_header_leak",
+                "rtti_for_internal_type",
+            }
+        ),
+    ),
+    ScopeBucket(
+        "source_artifact_coherence",
+        False,
+        "a disagreement between the source tree and the binary built from it "
+        "(a stale or foreign DSO): the harness compiles the DSO from exactly "
+        "the tree it hands over, so a correct cell never reaches it",
+        names=frozenset(
+            {"source_binary_provenance_mismatch", "source_surface_dso_mismatch"}
+        ),
+    ),
+    ScopeBucket(
+        "source_graph_reconciliation",
+        False,
+        "a declaration's L5 identity is its symbol (decl://<mangled>), so a "
+        "moved or re-spelled declaration keeps its id and is never added/removed "
+        "(nothing to reconcile), and an exported function's rename changes its "
+        "symbol, which the structural tier does not pair (verified on two "
+        "builds: a line shift and a rename reach no reconciliation finding); "
+        "a type-level rename of an internal type a public API reaches changes "
+        "the public record's layout spelling and is reported by the header "
+        "tier instead",
+        names=frozenset(
+            {
+                "declaration_coordinates_shifted",
+                "declaration_identity_reconciled",
+                "declaration_identity_reconciled_unresolved",
+                "declaration_identity_unchanged",
+                "declaration_moved",
+                "declaration_renamed",
+                "public_api_internal_type_renamed",
+            }
+        ),
+    ),
+    ScopeBucket(
+        "source_surface_boundary",
+        False,
+        "the L4/L5 surface records only declarations a public header reaches: "
+        "an existing export that gains or loses its header declaration is "
+        "absent from one side's graph, so it reads as an addition/removal "
+        "(FUNC_ADDED, PUBLIC_SURFACE_GREW), never as a persisting declaration "
+        "crossing the public boundary (verified on two builds)",
+        names=frozenset({"public_reachability_changed"}),
+    ),
+    ScopeBucket(
+        "consumer_or_runtime_stack",
+        False,
+        "judged against consumer artifacts given to compare (--consumer) or the "
+        "loaded dependency stack (which library provides a symbol, weak "
+        "resolution across libraries); corpus consumers feed only the "
+        "execution oracle, and a cell builds one library",
+        names=frozenset(
+            {
+                "consumer_required_symbol_removed",
+                "runtime_symbol_provider_changed",
+                "runtime_weak_resolution_changed",
+            }
+        ),
+    ),
+    # --- named, in scope: L4/L5 source kinds a sources config reaches
+    # (abiforge.operators.source_evidence).
+    ScopeBucket(
+        "l4_l5_source_evidence",
+        True,
+        "seen only by L4 source replay or the L5 source graph; a sources config "
+        "gives each side's source tree (abicheck dump --sources)",
+        names=frozenset(
+            {
+                "call_graph_public_entry_reachability_changed",
+                "default_argument_changed",
+                "inline_body_changed",
+                "public_api_internal_dependency_added",
+                "public_macro_removed",
+                "public_macro_value_changed",
+                "public_surface_grew",
+                "public_surface_shrank",
+                "public_to_internal_dependency",
+                "public_virtual_dispatch_set_changed",
+                "template_body_changed",
+                "undocumented_export_ratio_increased",
+                "uninstantiated_template_removed",
+            }
+        ),
     ),
     ScopeBucket(
         "binary_runtime_floor",
@@ -303,6 +471,24 @@ SCOPE_BUCKETS: tuple[ScopeBucket, ...] = (
         "runtime_floors), a policy input the corpus does not give",
         names=frozenset({"platform_baseline_floor_raised"}),
     ),
+    ScopeBucket(
+        "libcxx_abi_v2_runtime",
+        False,
+        "needs a libc++ built with LIBCXX_ABI_VERSION=2 (std::__2): distribution "
+        "libc++ pins _LIBCPP_ABI_VERSION=1 in __config_site, so no corpus "
+        "toolchain can build the other ABI version",
+        names=frozenset({"libcpp_abi_version_changed"}),
+    ),
+    ScopeBucket(
+        "stored_layout_generation",
+        False,
+        "a record with a layout descriptor on one side and no size at all on "
+        "the other: a stored snapshot from an extractor generation that "
+        "recorded no layout. Every library the corpus builds and dumps live "
+        "records a size on both sides (DWARF and every header backend), and a "
+        "pair with headers on one side only is compared at binary depth",
+        names=frozenset({"layout_unverifiable"}),
+    ),
     # --- named, in scope: source-taxonomy kinds a public header alone shows.
     # Macro values, constexpr values, default-argument values, a removed public
     # typedef and an uninstantiated template stay out (module bucket below):
@@ -331,14 +517,6 @@ SCOPE_BUCKETS: tuple[ScopeBucket, ...] = (
     ScopeBucket("elf_symbols", True, _ELF_ONE_LIBRARY, module="symbols"),
     ScopeBucket("elf_types", True, _ELF_ONE_LIBRARY, module="types"),
     ScopeBucket("elf_platform", True, _ELF_ONE_LIBRARY, module="platform"),
-    ScopeBucket(
-        "source_evidence",
-        False,
-        "needs L4 source replay or the L5 source graph (abicheck dump "
-        "--sources); reachable, since the harness owns each side's source "
-        "tree, but no sources evidence variant is modeled yet",
-        module="source",
-    ),
     ScopeBucket(
         "source_graph", False, "needs the L5 source graph", module="source_graph_risk"
     ),
@@ -455,6 +633,17 @@ def op_derived_kinds(op: object) -> frozenset[str]:
     for rule in op.rules:
         out |= expectation_kinds(op.with_derived(rule.apply(base)))
     return frozenset(out & _derived_kinds())
+
+
+def derived_owed_kinds() -> frozenset[str]:
+    """The derived kinds (``DERIVED_KINDS``) at least one operator owes: a kind
+    the verdict implies is covered by construction only while some edit's
+    verdict reaches it; one no operator owes stays uncovered."""
+    return frozenset(
+        kind
+        for kind in _derived_kinds()
+        if any(kind in op_derived_kinds(op) for op in _operators())
+    )
 
 
 def declared_kinds() -> dict[str, frozenset[str]]:
@@ -877,7 +1066,8 @@ def declared_ledger(previous: dict | None = None) -> dict:
             "verified_floor from a run with `report DIR --raise-floor TIER`."
         ),
         "declared_covered": sorted(declared & scope_set),
-        "declared_uncovered": sorted(scope_set - declared),
+        "declared_uncovered": sorted(scope_set - declared - derived_owed_kinds()),
+        "derived_by_construction": sorted(derived_owed_kinds() & scope_set),
         # Every other catalog kind, so a kind in none of the three lists is
         # one added to the catalog after the ledger was written, and a kind
         # moved into scope by a bucket change is not mistaken for it.

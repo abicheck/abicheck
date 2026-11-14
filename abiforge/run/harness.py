@@ -145,6 +145,7 @@ def _compile_library(
     source_text: str,
     link: LinkSpec = LinkSpec(),
     extra: BuildArgs | None = None,
+    evidence: str | None = None,
 ) -> Path:
     extra = extra or BuildArgs()
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -153,7 +154,10 @@ def _compile_library(
     src.write_text(source_text, encoding="utf-8")
     so = out_dir / LIB_NAME
     cmd = compile_cmd(
-        config.producer, config.std, flags, debug=config.evidence != "binary"
+        config.producer,
+        config.std,
+        flags,
+        debug=(evidence or config.evidence) != "binary",
     )
     cmd += [*extra.cflags, "-shared", "-I", str(out_dir), "-o", str(so), str(src)]
     # PIC is an ELF/Mach-O concept: clang rejects -fPIC for the Windows target.
@@ -172,9 +176,13 @@ def _compile_library(
             cmd.append(f"-Wl,-soname,{soname}")
     cmd += _seed_link(extra).render(out_dir)
     cmd += link.render(out_dir)
-    if config.build_data:
-        # The L3 record of this build: the one command that compiled it.
-        entry = {"directory": str(out_dir), "file": str(src), "arguments": cmd}
+    if config.build_data or config.sources:
+        # The L3 record of this build: the one command that compiled it. A
+        # ``sources`` tree carries it the way a real checkout's build dir
+        # does (``dump --sources`` auto-discovers it for L4 replay). The
+        # compiler runs in this process's cwd, so that is the directory the
+        # command's relative paths resolve against (out_dir may be relative).
+        entry = {"directory": str(Path.cwd()), "file": str(src), "arguments": cmd}
         (out_dir / COMPILE_DB).write_text(json.dumps([entry]), encoding="utf-8")
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if proc.returncode != 0:
@@ -192,12 +200,16 @@ def build(
     overrides: dict[str, RoleText] | None = None,
     flags: Flags | None = None,
     link: LinkSpec = LinkSpec(),
+    evidence: str | None = None,
 ) -> Built:
     """Render *seed* (with *overrides*), compile it under *config* and snapshot it.
 
     *flags* replaces the config's producer flags (a rebuild edit's new side);
-    *link* adds link options (an edit's version script, SONAME, extra libs).
+    *link* adds link options (an edit's version script, SONAME, extra libs);
+    *evidence* replaces the config's evidence level for this side (an
+    asymmetric-evidence edit's new side).
     """
+    evidence = evidence or config.evidence
     fl = flags or config.flags
     header_text, source_text = seed.render(overrides)
     so = _compile_library(
@@ -209,10 +221,11 @@ def build(
         source_text,
         link,
         seed.build_args(overrides),
+        evidence,
     )
     header = out_dir / seed.header_name
     is_cxx = seed.lang == "c++"
-    headers = [header] if config.evidence == "headers" else []
+    headers = [header] if evidence == "headers" else []
     std = dump_std_spelling(config)
     # The header frontend reads the header the way the library was built:
     # same standard, same layout-changing flags.
@@ -232,6 +245,7 @@ def build(
         backend=config.header_backend,
         gcc_options=gcc_options,
         build_info=out_dir / COMPILE_DB if config.build_data else None,
+        sources=out_dir if config.sources else None,
     )
     return Built(dir=out_dir, so=so, header=header, snapshot=snap)
 
@@ -288,6 +302,7 @@ def build_new(
         overrides=op.edit(seed.roles),
         flags=op.new_flags(config.flags),
         link=link,
+        evidence=op.new_side_evidence(config),
     )
 
 

@@ -47,20 +47,23 @@ def snapshot(
     backend: str,
     gcc_options: str | None,
     build_info: Path | None = None,
+    sources: Path | None = None,
 ) -> AbiSnapshot:
     """abicheck's snapshot of one built library, made the way users get it.
 
     *build_info* is the build's ``compile_commands.json`` (L3 build data).
     Such a snapshot is made by the typed dump workflow ``abicheck dump -H
     --build-info`` runs, which also parses the headers in the build's own
-    compile context and embeds the build facts.
+    compile context and embeds the build facts. *sources* is the build's
+    source tree (L4/L5): the same typed workflow ``abicheck dump -H
+    --sources`` runs, which embeds the source facts.
     """
     from abicheck.compile_context import CompileContext
     from abicheck.dumper import dump
 
     headers = list(headers)
     lang = "c++" if is_cxx else "c"
-    if build_info is not None:
+    if build_info is not None or sources is not None:
         from abicheck.workflows.dump.request import run_dump_request
         from abicheck.workflows.request_inputs import InputSpec
         from abicheck.workflows.service_requests import DumpRequest
@@ -72,6 +75,7 @@ def snapshot(
                     headers=tuple(headers),
                     version=version,
                     build_info=build_info,
+                    sources=sources,
                     compile=CompileContext(
                         gcc_options=gcc_options if headers else None,
                         frontend=backend,
@@ -150,7 +154,12 @@ def answer(old: AbiSnapshot, new: AbiSnapshot) -> tuple[str, frozenset[str]]:
     """
     from abicheck.checker import compare
     from abicheck.errors import AbicheckError
+    from abicheck.policy.common_evidence_depth import common_evidence_depth
+    from abicheck.policy.depth_projection import project_pair_to_depth
 
+    # ``abicheck compare`` judges operands of different evidence rungs
+    # (headers on one side only) at the rung both reach; mirror it.
+    old, new = project_pair_to_depth(old, new, common_evidence_depth(old, new))
     try:
         # ``abicheck compare`` always runs the pattern-verdict pass (ADR-068
         # made it unconditional on the CLI); the bare ``checker.compare()``
@@ -158,28 +167,43 @@ def answer(old: AbiSnapshot, new: AbiSnapshot) -> tuple[str, frozenset[str]]:
         # Mirror the CLI: without it, HANDLE_TYPE_CHANGED,
         # OPAQUE_INVARIANT_BROKEN and every newly-introduced anti-pattern
         # finding can never be reported, whatever the snapshots say.
-        result = compare(
-            old, new, pattern_verdicts=True, extra_changes=_build_data_changes(old, new)
-        )
+        extra = _build_data_changes(old, new)
+        if extra is None:
+            result = compare(old, new, pattern_verdicts=True)
+        else:
+            # A pair carrying L3-L5 evidence is compared through the
+            # ``abicheck compare`` chokepoint itself (``compare_snapshots``:
+            # surface metrics, build-context reconciliation and each side's
+            # resolved public surface on top of the pattern verdicts), so the
+            # evidence variants judge exactly what the CLI reports.
+            from abicheck.workflows.compare_policy import compare_snapshots
+
+            result = compare_snapshots(old, new, extra_changes=extra)
     except AbicheckError as exc:
         return REFUSED, frozenset({type(exc).__name__})
     return result.verdict.name, frozenset(c.kind.name for c in result.changes)
 
 
 def _build_data_changes(old: AbiSnapshot, new: AbiSnapshot) -> list[Change] | None:
-    """The L3 findings ``abicheck compare`` folds in from embedded build data.
+    """The L3-L5 findings ``abicheck compare`` folds in from embedded evidence.
 
-    Only a pair carrying embedded build data (``snapshot(build_info=...)``)
+    Only a pair carrying embedded build or source data
+    (``snapshot(build_info=..., sources=...)``)
     takes this step, so every other cell is compared as before.
     """
-    if old.build_source is None and new.build_source is None:
-        return None
     from abicheck.buildsource.evidence_report import prepare_embedded_build_source
+    from abicheck.evidence_depth import embedded_header_graph
+
+    if not any(
+        s.build_source is not None or embedded_header_graph(s) is not None
+        for s in (old, new)
+    ):
+        return None
 
     extra, _rows, _metrics, _ev = prepare_embedded_build_source(
         old, new, "build", None, None, None, None, None
     )
-    return extra
+    return list(extra or ())
 
 
 def kind_names() -> tuple[str, ...]:

@@ -19,10 +19,15 @@ header backend reports it here as ``{declared name: std:: target}``
 
 Only a re-export a public header declares is recorded. clang states where
 the using-declaration itself is; castxml and GCC do not, so there the
-declaring namespace must hold a declaration of its own from a public header.
+declaring namespace's own declarations stand in for its provenance
+(:func:`namespace_origin`): a public one makes its re-exports public, only
+non-public ones make them private, and none at all leaves the provenance
+unknown -- the whole table is then ``None`` (uncertain), never a table that
+silently omits the re-export (which would read as a removal).
 The declaring namespace must be a library one: not the global namespace, not
 ``std``, not a reserved ``_``-prefixed implementation namespace. ``None``
-means not modelled (no AST, or no declared public set).
+means not modelled or not establishable (no AST, no declared public set, or
+a re-export of unknown provenance).
 """
 
 from __future__ import annotations
@@ -39,6 +44,7 @@ __all__ = [
     "castxml_std_reexports",
     "clang_std_reexports",
     "is_library_namespace",
+    "namespace_origin",
     "reexport_entry",
 ]
 
@@ -69,6 +75,25 @@ def _public(
         and classify_origin(header, pub_header_segs, pub_dir_segs, have_public_set=True)
         is ScopeOrigin.PUBLIC_HEADER
     )
+
+
+def namespace_origin(
+    own_files: Iterable[str | None],
+    is_public: Callable[[str | None], bool],
+) -> bool | None:
+    """Whether a namespace whose using-declarations carry no position of
+    their own (castxml, GCC) declares public re-exports.
+
+    ``True`` when it holds a declaration of its own from a public header,
+    ``False`` when its own declarations are all from non-public headers, and
+    ``None`` -- provenance unknown -- when it holds no positioned declaration
+    of its own: the re-export's presence must not hinge on an unrelated
+    declaration, so the backend's table is then uncertain, not empty.
+    """
+    files = [f for f in own_files if f]
+    if not files:
+        return None
+    return any(is_public(f) for f in files)
 
 
 # ---------------------------------------------------------------------------
@@ -123,13 +148,7 @@ def castxml_std_reexports(
             continue
         own_id = ns.get("id", "")
         members = [by_id.get(m) for m in ns.get("members", "").split()]
-        if not any(
-            m is not None
-            and m.get("context") == own_id
-            and _public(files.get(m.get("file", "")), pub_header_segs, pub_dir_segs)
-            for m in members
-        ):
-            continue
+        entries: list[tuple[str, str]] = []
         for m in members:
             if m is None or m.tag not in _CASTXML_ENTITY_TAGS:
                 continue
@@ -141,6 +160,21 @@ def castxml_std_reexports(
                 continue
             entry = reexport_entry(segs, "::".join((*owner_path, m.get("name", ""))))
             if entry is not None:
+                entries.append(entry)
+        if not entries:
+            continue
+        origin = namespace_origin(
+            (
+                files.get(m.get("file", ""))
+                for m in members
+                if m is not None and m.tag != "Namespace" and m.get("context") == own_id
+            ),
+            lambda f: _public(f, pub_header_segs, pub_dir_segs),
+        )
+        if origin is None:
+            return None  # the re-exports' provenance cannot be established
+        if origin:
+            for entry in entries:
                 out.setdefault(*entry)
     return dict(sorted(out.items()))
 
@@ -152,19 +186,24 @@ def castxml_std_reexports(
 
 def _loc_file(node: dict[str, Any], current: str) -> str:
     """The file clang last wrote, carried forward (clang writes ``file`` only
-    where it changes, in ``loc`` and ``range`` alike)."""
+    where it changes, in ``loc`` and ``range`` alike).
+
+    A macro-expanded location carries ``spellingLoc`` (the macro definition,
+    possibly a private header) and ``expansionLoc`` (where the declaration
+    lands); clang writes them in that order, and the expansion file is the
+    one that decides where the declaration is, so it is read last."""
     for key in ("loc", "range"):
         part = node.get(key)
         if not isinstance(part, dict):
             continue
         spots: list[Any] = (
-            [part, part.get("expansionLoc"), part.get("spellingLoc")]
+            [part, part.get("spellingLoc"), part.get("expansionLoc")]
             if key == "loc"
             else [part.get("begin"), part.get("end")]
         )
         for spot in spots:
             if isinstance(spot, dict):
-                for sub in (spot, spot.get("expansionLoc"), spot.get("spellingLoc")):
+                for sub in (spot, spot.get("spellingLoc"), spot.get("expansionLoc")):
                     if isinstance(sub, dict) and isinstance(sub.get("file"), str):
                         current = sub["file"] or current
     return current

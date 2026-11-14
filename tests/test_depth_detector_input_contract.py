@@ -91,6 +91,7 @@ def _full_snapshot(version: str, *, pack: bool) -> AbiSnapshot:
     snap.semantic_ir = SemanticIR()
     snap.cxx_concept_constraints = {"concept C": "conj:a"}
     snap.cxx_template_defaults = {"class Box": (None, "int")}
+    snap.std_reexports = {"lib::abs": "std::abs"}
     decls = snap.declarations
     decls.typedefs_qualified = {"t": "int"}
     decls.typedef_entity_ids = {"t": entity_id_for_typedef((), "t")}

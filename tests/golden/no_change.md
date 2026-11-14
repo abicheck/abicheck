@@ -37,6 +37,7 @@
 | Coverage gap | Detector 'unnamed_types' disabled: missing binary export table on one side |
 | Coverage gap | Detector 'vtable_layout' disabled: missing DWARF/header type metadata on one side (inheritance) |
 | Coverage gap | Detector 'advanced_dwarf' disabled: missing DWARF advanced metadata |
+| Coverage gap | Detector 'imported_symbols_unprovided' disabled: missing ELF metadata |
 | Coverage gap | No binary metadata available; verdict is based on header analysis only |
 
 ## Relationship Coverage
@@ -78,7 +79,7 @@ _No ABI changes detected._
 | … unresolved relevance | 0 |
 | … deduplicated | 0 |
 
-**Not evaluated:** 20 detector(s) — `elf_layout`, `fingerprint_renames`, `kabi`, `long_double`, `elf`, `pe`, … and 14 more
+**Not evaluated:** 21 detector(s) — `elf_layout`, `fingerprint_renames`, `kabi`, `long_double`, `elf`, `pe`, … and 15 more
 
 ---
 ## Legend

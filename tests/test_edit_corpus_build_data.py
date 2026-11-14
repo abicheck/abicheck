@@ -60,3 +60,35 @@ def test_the_pr_tier_guards_every_build_data_operator_once() -> None:
     names = [op for op, _, _, _ in BUILD_DATA_PR]
     assert sorted(names) == sorted(op.name for op in BUILD_DATA_OPERATORS)
     assert all(ch == {"build_data": True} for _, _, _, ch in BUILD_DATA_PR)
+
+
+def _op(name: str):
+    return next(op for op in BUILD_DATA_OPERATORS if op.name == name)
+
+
+@pytest.mark.parametrize(
+    ("pack", "applies"),
+    [(None, True), (1, False), (2, False), (4, False), (8, True), (16, True)],
+)
+def test_pack_struct_8_never_relaxes_a_tighter_baseline_packing(pack, applies) -> None:
+    """``-fpack-struct=8`` appended after a tighter baseline packing (the later
+    flag wins) relaxes it and changes the seed's layout, which contradicts the
+    operator's layout-unchanged ground truth: such configs are refused."""
+    from abiforge.model.config import Flags
+
+    config = default_config("c", _GCC).with_(build_data=True, flags=Flags(pack=pack))
+    gap = _op("l3_struct_packing_8").requires(config)
+    assert (gap is None) == applies
+
+
+@pytest.mark.parametrize(
+    ("name", "flags"),
+    [
+        ("l3_lto_enabled", {"-flto"}),
+        ("l3_whole_program_vtables", {"-flto=thin", "-fwhole-program-vtables"}),
+    ],
+)
+def test_lto_operators_probe_the_link(name, flags) -> None:
+    """An LTO flag fails only at link time when the linker plugin is missing,
+    so the operator must carry it as a link probe (an unavailable cell)."""
+    assert set(_op(name).probe_flags) == flags

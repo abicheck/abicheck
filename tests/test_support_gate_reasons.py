@@ -97,6 +97,24 @@ _PRECONDITIONS: tuple[tuple[str, Predicate], ...] = (
         ),
     ),
     ("missing PE metadata", lambda o, n: o.pe is None or n.pe is None),
+    *(
+        (
+            f"no --follow-deps dependency evidence on the {side} side",
+            lambda o, n, i=i: (
+                (o, n)[i].dependency_info is None or not (o, n)[i].dependency_info.nodes
+            ),
+        )
+        for i, side in enumerate(("old", "new"))
+    ),
+    *(
+        (
+            f"incomplete dependency closure on the {side} side",
+            lambda o, n, i=i: bool(
+                (o, n)[i].dependency_info and (o, n)[i].dependency_info.unresolved
+            ),
+        )
+        for i, side in enumerate(("old", "new"))
+    ),
     ("missing Mach-O metadata", lambda o, n: o.macho is None or n.macho is None),
     (
         "missing SYCL runtime (PI plugin) metadata",

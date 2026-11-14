@@ -47,6 +47,11 @@ class EditOp:
     precondition: Callable[[Config], str | None] | None = None
     # A rebuild edit: the new side is built with ``rebuild(flags)``.
     rebuild: Callable[[Flags], Flags] | None = None
+    # Per-side evidence: the new side is built and dumped at this evidence
+    # level ("binary", "dwarf") instead of the config's, so the pair carries
+    # asymmetric evidence (one side's headers or debug info absent). Applies
+    # only to a config whose evidence is richer (``requires``).
+    new_evidence: str | None = None
     # Needs the producer's C++ library to be libstdc++; probed at run time by
     # ``abiforge.run.toolchains.capability_gap``, never at collection.
     needs_libstdcxx: bool = False
@@ -77,9 +82,20 @@ class EditOp:
         for feat in self.features:
             if not has_feature(config.std, feat):
                 return f"needs {feat}, which {config.std.name} lacks"
+        if (
+            self.new_evidence is not None
+            and _EVIDENCE_RANK[config.evidence] <= _EVIDENCE_RANK[self.new_evidence]
+        ):
+            return (
+                f"the new side is dumped at {self.new_evidence} evidence; "
+                f"{config.evidence} evidence is no richer"
+            )
         if self.precondition is not None:
             return self.precondition(config)
         return None
+
+    def new_side_evidence(self, config: Config) -> str:
+        return self.new_evidence or config.evidence
 
     def base(self) -> Expectation:
         return Expectation(
@@ -123,6 +139,9 @@ class EditOp:
 
     def new_flags(self, flags: Flags) -> Flags:
         return self.rebuild(flags) if self.rebuild else flags
+
+
+_EVIDENCE_RANK = {"binary": 0, "dwarf": 1, "headers": 2}
 
 
 def _set(

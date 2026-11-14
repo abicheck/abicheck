@@ -487,7 +487,7 @@ Aggregate roll-up signals computed from the [API surface metrics](../use/api-sur
 | Kind | Description |
 |------|-------------|
 | `source_level_kind_changed` | A type changed between `struct` and `class`. Graded `COMPATIBLE`: the class-key alone changes neither layout nor Itanium mangling, and source naming the type with the other key still compiles (at most a `-Wmismatched-tags` warning). Default-access consequences are reported as `field_access_changed` / `method_access_changed` / `base_class_access_narrowed`; on MSVC the class-key is mangled, so affected exports show as removed/added. |
-| `unspecified_return_now_named` | A function's return type went from an unspecified placeholder (`auto`, a lambda closure, an unnamed class) to a named type. Callers could only hold the old result in `auto`, which still deduces the new type, and a non-template function's mangling does not encode its return type. The reverse (named to unnameable) is a `func_return_changed`. |
+| `unspecified_return_now_named` | A function's return type went from an unspecified placeholder (`auto`, a lambda closure, an unnamed class) to a named type. This finding records only that the return type became nameable; that alone proves neither source nor binary compatibility. Callers could hold the old result only in `auto`, but code that used the result's interface still breaks if the deduced type itself changed (calling a returned closure, `make()()`, fails once `make` returns `int`), and a by-value return can change the calling convention. Those are actual return-type changes, judged separately as `func_return_changed` from the same two spellings. The reverse (named to unnameable) is also a `func_return_changed`. |
 
 ### Field Qualifier Changes
 

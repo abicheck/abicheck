@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -11,7 +13,24 @@ import pytest
 from abicheck.checker import Verdict, compare
 from abicheck.dumper import dump
 
-pytestmark = pytest.mark.integration
+# ELF-only: DT_NEEDED, versioned imports and -Wl,-soname.
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        not sys.platform.startswith("linux"), reason="ELF shared-library facts"
+    ),
+]
+
+#: The named optional feature being unavailable: the sanitizer flag refused
+#: for this target, or its runtime library not installed. Any other failure
+#: of a configured compiler is a test failure.
+_UNAVAILABLE_SANITIZER = re.compile(
+    r"unsupported option '-fsanitize=[^']*'"
+    r"|unrecognized argument to '-fsanitize=' option"
+    r"|cannot find -l(?:asan|ubsan|tsan|hwasan|lsan|msan)\b"
+    r"|cannot find (?:\S*/)?lib(?:asan|ubsan|tsan|hwasan|lsan|msan)[\w.]*"
+    r"|cannot find (?:\S*/)?libclang_rt\.\w+[\w.-]*"
+)
 
 _SRC = "int f(int *p, int n) { return p[n] + n * 3; }\n"
 
@@ -38,9 +57,13 @@ def _build(tmp: Path, cc: str, flags: list[str], name: str) -> Path:
         check=False,
     )
     if proc.returncode != 0 and any(f.startswith("-fsanitize") for f in flags):
-        if "sanitize" in proc.stderr or "cannot find" in proc.stderr:
-            pytest.skip(f"{cc} has no sanitizer runtime here: {proc.stderr.strip()}")
-    assert proc.returncode == 0, proc.stderr
+        unavailable = _UNAVAILABLE_SANITIZER.search(proc.stderr)
+        if unavailable:
+            pytest.skip(f"{cc}: sanitizer unavailable here ({unavailable.group(0)})")
+    assert proc.returncode == 0, (
+        f"{' '.join(proc.args)} failed (exit {proc.returncode})\n"
+        f"--- source ---\n{_SRC}--- stderr ---\n{proc.stderr}"
+    )
     return so
 
 
@@ -106,3 +129,20 @@ def test_a_self_contained_library_gaining_an_import_nothing_provides(
     kinds = {c.kind.value for c in result.changes}
     assert "imported_symbol_unprovided" in kinds
     assert result.verdict == Verdict.BREAKING
+
+
+@pytest.mark.parametrize(
+    ("stderr", "unavailable"),
+    [
+        ("clang: error: unsupported option '-fsanitize=address' for target 'x'", True),
+        ("/usr/bin/ld: cannot find -lasan: No such file or directory", True),
+        ("/usr/bin/ld: cannot find libasan_preinit.o: No such file or directory", True),
+        ("ld: cannot find /usr/lib/clang/18/lib/libclang_rt.asan-x86_64.a", True),
+        # unrelated failures that merely mention sanitize / cannot find
+        ("error: 'sanitize' attribute ignored", False),
+        ("/usr/bin/ld: cannot find -lfoo: No such file or directory", False),
+        ("x.c:1: error: expected ';' before 'sanitize_me'", False),
+    ],
+)
+def test_only_a_named_unavailable_sanitizer_is_a_skip(stderr, unavailable) -> None:
+    assert bool(_UNAVAILABLE_SANITIZER.search(stderr)) is unavailable

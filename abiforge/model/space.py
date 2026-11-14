@@ -244,15 +244,23 @@ ROLE_CONSTRUCT: dict[str, str] = {
     "k.aeq": "struct",
     "k.del": "function",
     "k.ibr": "inline_function",
+    "k.tvz": "class_virtual",
+    "k.evd": "struct",
     "k.urt": "deduced_return",
     "k.rex": "using_declaration",
     "k.pnv": "class_virtual",
     "k.stl": "std_string",
     "k.anon": "function",
+    # cxx_src (abiforge.operators.source_evidence)
+    "src.macro": "header_constant",
+    "src.inl": "inline_function",
+    "src.tmpl": "template",
+    "src.vd": "class_virtual",
+    "src": "function",
 }
 
 # Roles that only admit an operator to a seed (``Seed.gate_role``).
-GATE_ROLES = frozenset({"alt.gate", "xa.gate"})
+GATE_ROLES = frozenset({"alt.gate", "xa.gate", "src.gate"})
 
 # Language feature an operator needs -> the construct it exercises.
 FEATURE_CONSTRUCT: dict[str, str] = {
@@ -296,6 +304,8 @@ OP_CONSTRUCT: dict[str, tuple[str, ...]] = {
     "rebuild_hidden_visibility": ("compile_option",),
     "rebuild_optimized": ("compile_option",),
     "rebuild_m32": ("compile_option",),
+    # the same library dumped with less evidence on its new side
+    "new_side_dumped_without_headers": ("compile_option",),
 }
 
 
@@ -438,6 +448,12 @@ OP_EDIT_CLASS: dict[str, dict[str, str]] = {
         "allocator_replacement_added": "function_added",
         "std_template_instance_exported": "function_added",
         "func_remove": "function_removed",
+        "src_default_argument_changed": "default_argument_changed",
+        "src_public_entry_calls_internal": "body_change",
+        "src_public_entry_depends_on_hidden": "body_change",
+        "src_public_function_added": "function_added",
+        "src_public_function_removed": "function_removed",
+        "src_undocumented_export_added": "export_declaration_mismatch",
         "allocator_replacement_removed": "function_removed",
         "symbols_prefixed_batch": "function_renamed",
         "api_version_suffix_bumped": "function_renamed",

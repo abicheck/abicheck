@@ -70,6 +70,7 @@ from abiforge.run.exec import probe_expressions
 from abiforge.run.tiers import (
     _PR,
     BUILD_DATA_PR,
+    SOURCE_EVIDENCE_PR,
     Cell,
     pairwise,
     pr_cells,
@@ -641,8 +642,9 @@ def test_pr_tier_guards_every_axis() -> None:
     # Every seed has a guard, so a seed whose base no longer builds fails a PR.
     assert {seed for _, seed, _, _ in _PR} == {s.name for s in SEEDS}
     # The PR tier stays a handful: one guard per axis, plus one row per L3
-    # build-data operator (BUILD_DATA_PR).
-    assert len(_PR) - len(BUILD_DATA_PR) <= 20
+    # build-data operator (BUILD_DATA_PR) and per L4/L5 source-evidence
+    # operator (SOURCE_EVIDENCE_PR).
+    assert len(_PR) - len(BUILD_DATA_PR) - len(SOURCE_EVIDENCE_PR) <= 20
     assert {op for op, _, _, _ in BUILD_DATA_PR} == {
         op.name for op in BUILD_DATA_OPERATORS
     }

@@ -4,9 +4,14 @@
   `ChangeKind`s replace a COMPATIBLE_WITH_RISK answer for an ELF build that
   fails to load. `sanitizer_runtime_required` covers two cases: the library
   gained a `DT_NEEDED` on an ASan/TSan/HWASan runtime that must load first,
-  or it gained strong `__asan_*`/`__ubsan_*`/... imports with no sanitizer
-  runtime among its `DT_NEEDED` libraries (clang `-shared -fsanitize=...`).
-  `imported_symbol_unprovided` needs `--follow-deps` evidence on both sides.
+  or it gained strong `__asan_*`/`__ubsan_*`/... imports that no sanitizer
+  runtime among its `DT_NEEDED` libraries defines (clang
+  `-shared -fsanitize=...`; `libubsan` does not define `__asan_*`).
+  SanitizerCoverage callbacks (`__sanitizer_cov_*`) are user-supplied and
+  never count. `imported_symbol_unprovided` (its own detector,
+  `imported_symbols_unprovided`) needs complete `--follow-deps` evidence on
+  both sides; without it, or with an unresolved dependency, the detector is
+  reported as not evaluated rather than as a clean zero.
   It fires when a self-contained library gains a strong import that nothing
   in its dependency closure provides. Weak imports never count, and
   libraries that already relied on their host (plugins) are not judged.

@@ -9,5 +9,5 @@
   `secondary_vtable_group_changed`, `vtable_slot_count_changed` and
   `polymorphic_type_non_virtual_dtor`. The bug showed at `-O2`, where gcc
   stops exporting the constructor.
-- `EXTRACTOR_GENERATION` is now 65: DWARF-derived call triviality changed
+- `EXTRACTOR_GENERATION` is now 67: DWARF-derived call triviality changed
   (copy/move constructors declared under gcc's `C4` name).

@@ -101,7 +101,7 @@ def test_operator_names_are_unique_and_nonempty() -> None:
 
 def test_seed_names_are_unique() -> None:
     names = [s.name for s in SEEDS]
-    assert len(names) == len(set(names)) == 7
+    assert len(names) == len(set(names)) == 8
 
 
 def test_every_template_placeholder_is_a_known_role() -> None:
@@ -148,8 +148,8 @@ def test_every_operator_applies_to_at_least_one_seed() -> None:
 
 def test_every_operator_changes_the_rendered_text() -> None:
     for op, seed in matrix():
-        if op.rebuild is not None:
-            continue  # a rebuild keeps the source and changes a flag
+        if op.rebuild is not None or op.new_evidence is not None:
+            continue  # a rebuild or an evidence change keeps the source
         edit = op.edit(seed.roles)
         base = (seed.render(), seed.build_args())
         edited = (seed.render(edit), seed.build_args(edit))
