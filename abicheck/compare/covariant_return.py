@@ -33,8 +33,8 @@ cv or pointer-kind difference, or a class it cannot find keeps the break.
 
 from __future__ import annotations
 
-import re
 from dataclasses import replace
+from functools import lru_cache
 
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
@@ -43,22 +43,51 @@ from ..model.snapshot import AbiSnapshot
 
 __all__ = ["narrowed_to_offset_zero_base", "refine_covariant_returns"]
 
-# "[cv ]Name[ ]sigil[ cv]": one class name behind exactly one pointer or
-# reference declarator.
-_SPELLING = re.compile(
-    r"^(?P<pre>(?:(?:const|volatile)\s+)*)(?:(?:struct|class)\s+)?"
-    r"(?P<name>[A-Za-z_][\w:]*)\s*(?P<sigil>\*|&&|&)\s*(?P<post>(?:const|volatile)?)\s*$"
-)
+_CV = frozenset({"const", "volatile"})
+_TAGS = frozenset({"struct", "class"})
+_SIGILS = frozenset({"*", "&", "&&"})
 
 
+def _tokens(spelling: str) -> list[str]:
+    """*spelling* as words and declarator tokens (``&&`` kept whole)."""
+    out: list[str] = []
+    for word in spelling.replace("*", " * ").replace("&", " & ").split():
+        if word == "&" and out and out[-1] == "&":
+            out[-1] = "&&"
+        else:
+            out.append(word)
+    return out
+
+
+def _is_class_name(token: str) -> bool:
+    parts = token.split("::")
+    if parts and parts[0] == "":
+        parts = parts[1:]
+    return bool(parts) and all(p.isidentifier() for p in parts)
+
+
+@lru_cache(maxsize=4096)
 def _split(spelling: str | None) -> tuple[str, str, str, str] | None:
+    """``(leading cv, class name, sigil, trailing cv)`` of a spelling that is
+    one class name behind exactly one pointer or reference declarator, else
+    None (a template argument list, a function type, a second declarator)."""
     if spelling is None:
         return None
-    m = _SPELLING.match(spelling.strip())
-    if m is None:
+    toks = _tokens(spelling)
+    sigils = [i for i, t in enumerate(toks) if t in _SIGILS]
+    if len(sigils) != 1:
         return None
-    pre = " ".join(m.group("pre").split())
-    return pre, m.group("name").lstrip(":"), m.group("sigil"), m.group("post")
+    at = sigils[0]
+    head, tail = toks[:at], toks[at + 1 :]
+    words = [t for t in head if t not in _TAGS]
+    names = [t for t in words if t not in _CV]
+    if len(names) != 1 or not _is_class_name(names[0]) or len(tail) > 1:
+        return None
+    if tail and tail[0] not in _CV:
+        return None
+    pre = " ".join(sorted(t for t in words if t in _CV))
+    name = "::".join(part for part in names[0].split("::") if part)
+    return pre, name, toks[at], " ".join(tail)
 
 
 def _record(snap: AbiSnapshot, name: str) -> RecordType | None:
