@@ -97,9 +97,9 @@
       "abicheck/extract/headers/castxml/calling_convention.py": "147c4be1a5b417eb4a67156e92e8f03f09eef3b7b34703ac22a98ad86d5dde1d",
       "abicheck/extract/headers/castxml/clang_semantics.py": "85c057c1b5d076b4b5cd3642424ca57eed01e0d6f2d237623575d7e2bc680de9",
       "abicheck/extract/headers/castxml/clang_semantics_join.py": "35af560cb35857ec4b0b1d535e3a69392c5db18211cee28aa158d1817ce0f348",
-      "abicheck/extract/headers/castxml/context.py": "6eb4e4f78ff3bb6e06d728a76bec9c8b109d0cda9189ec5f573fa75beca48a69",
+      "abicheck/extract/headers/castxml/context.py": "9825e80628d568a0ed79a67046aba2b4ecc1ec79c27f32d63ba724c57249e9f2",
       "abicheck/extract/headers/castxml/cxx_header_evidence.py": "1480218726fc8db4dd5aa7bb925920f1427b6571f74dcc8b43a5657d87eedc9c",
-      "abicheck/extract/headers/castxml/data_size.py": "acb8df228185633fccdfcc5b3b9adee0afa87ea1a6a697409974f0695b3ebc39",
+      "abicheck/extract/headers/castxml/data_size.py": "f896227368519c1946f5b72b58164d6a6aaf5a7cde74df464ca5f56bc9e15226",
       "abicheck/extract/headers/castxml/dumper.py": "48acb009a9fe78ccac63f0746fb14c35cde518744cc01b86cb40c000cceb8f2e",
       "abicheck/extract/headers/castxml/duplicate_declarations.py": "8668fddc69d8838cc093315726c53d96dd9c878020e675e34a44a435dc54d2f7",
       "abicheck/extract/headers/castxml/enums.py": "e616c768543061d71812378dd92cbcb7b8d00afbb734bcb7b4b5334ee34042aa",
@@ -113,11 +113,11 @@
       "abicheck/extract/headers/castxml/policy.py": "fda86c1de147934e620824b9a97262f218bffb7340cbbf394ac5fdd437e47f23",
       "abicheck/extract/headers/castxml/preprocessed_text.py": "88deb48742c22f1e594ba3b73fb20f11c5dd091c690f7c53597aee67478f32ed",
       "abicheck/extract/headers/castxml/probe.py": "525ded3c75b147300cfaa460ce8acd62f87533859ff152e2b1f76c4302999bb0",
-      "abicheck/extract/headers/castxml/record_traits.py": "e21c89688c3df1d40ec25769505814b0270a5e5530dec2c2d26c2df940bb3098",
+      "abicheck/extract/headers/castxml/record_traits.py": "b66b6d4e498d80499dc20facc1c97d0de9f96cacb4d4750530b14fb2b05e5c46",
       "abicheck/extract/headers/castxml/records.py": "154b766dafc01b3ceec3d95312396a174cc39f17947902ce40f4be4011318493",
       "abicheck/extract/headers/castxml/scope.py": "41cecc8dd996c10a58c022e5dca4003cce9d7775adf674b339cc199fb59297c7",
       "abicheck/extract/headers/castxml/specialization.py": "3f9f021672df1b84de42bc8de5f3c915508b3f3850e0a8acbaa80a3dee04c6f3",
-      "abicheck/extract/headers/castxml/tail_padding_rule.py": "d7b390c6cd3a1d7ac129696e63a629e0a88aeb35b3e49ca8f0fca26258600322",
+      "abicheck/extract/headers/castxml/tail_padding_rule.py": "b9760f2e2502a4acf649f18d32b07fc9a8bf3baecb91fb1cf79e9756cb034e6d",
       "abicheck/extract/headers/castxml/type_resolution.py": "36aa982df5872038bad515dbe068522f6235c37f299ee41abb4dfedd64441c84",
       "abicheck/extract/headers/castxml/typedef_parsing.py": "332587638d5d4b7caebbc20fa44b69c314771fffa5839a15dec59eaba3caaf93",
       "abicheck/extract/headers/castxml/variable_alignment.py": "bb80daf71b211c4df53f7698cde27499f0d2448780625ecc642c7b6cea6e9967",
@@ -231,9 +231,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "9bdf4d09ff8612f93cda1c6f159752f43759365e7761ececd05a21510c1c58da",
+    "fingerprint": "6b64e5326baeb51816ee3d7a767c380b73476004309fd36cc965d00ff19d4c86",
     "generation": 71,
-    "reason": "generation 71's pure-virtual evidence moved into one PureVirtualEvidence object and the builder gained empty class-level defaults; what the DWARF reader records is unchanged (the corpus cells and integration tests give identical facts)"
+    "reason": "merge of main's castxml data-size hotfix: record-member resolution now uses context.member_elements (one helper), main's duplicate ms_bitfields/empty-POD branch dropped in favor of generation 66's ms_bitfield_layout and empty-before-POD rule; recorded values unchanged"
   },
   "resolver": {
     "files": {
@@ -268,8 +268,9 @@
       "abicheck/buildsource/inline_graph_fold.py": "adb7db738f350679e27b2e3c79f9da4e127bb0963dd309767144cc15df34057a",
       "abicheck/buildsource/l5_ast_pass.py": "a0617b5baca2532c9838d866ce5776565ba58041550e60554ffa6c73930c6b54",
       "abicheck/buildsource/l5_ast_run.py": "819d2e615617945d0bdb2319765a757a5edbb18fc5b5373e949e83ee2e113e12",
-      "abicheck/buildsource/macro_graph.py": "fa410a488ba4986365705ffb34e3201c643a946b2c31383442c7c740a169b8cf",
+      "abicheck/buildsource/macro_graph.py": "4f7ec08b99b3fc40c2a4fc4122572598f8593b33ea31be856001e96b262cae77",
       "abicheck/buildsource/override_graph.py": "0503453212b0604119db1ecf845b629a4e9f790566258855eeddf417f8cb21a7",
+      "abicheck/buildsource/pattern_facts_lexer.py": "6f253b43e77ccf3e0678d8a6d00559785d41dfd569893b3784f9d2a733669a6c",
       "abicheck/buildsource/semantic_fact_folds.py": "38f3a5be0b70d62ab840a4bfcd8352abaeeabdfe7553e400c1dca8cdee71c070",
       "abicheck/buildsource/source_abi.py": "e2aa5f24a956d5b68bc57716b987f3844c08786173b80f3befb2b58075544d6f",
       "abicheck/buildsource/source_extractors/__init__.py": "e9e5ede124cabdf4ec712339609cc91450a8e5fcb261dfb9f49a4de60c0d45c2",
@@ -306,8 +307,8 @@
       "abicheck/buildsource/type_graph.py": "e836e687fe95d52f6483a70893cff385b8d175284e6f5bebadaa2b805b7387c5",
       "abicheck/buildsource/type_graph_index.py": "456fd36d7d326e2001855f1768bdadee49ab738a9c515f57f557bc5e5b693ced"
     },
-    "fingerprint": "ae0728ebcdb7834d56d097d0c741df077342899571d044b571095b23f63d00fc",
-    "generation": 14,
-    "reason": "inline_graph_fold callback pass: an always-true guard replaced by else; same outcome for every input"
+    "fingerprint": "3051e529647f0aaa792753ba2521b4162207ec47e5f3cb8fa692104decd111f8",
+    "generation": 15,
+    "reason": "generation 15 is introduced by this unmerged PR (#2064); the escape-then-splice fix lands in the same generation"
   }
 }

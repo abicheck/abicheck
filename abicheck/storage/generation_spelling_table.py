@@ -620,7 +620,10 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "an old '?' against the new spelling produces no finding. The native "
         "gcc backend records the export fact through the shared tiered "
         "lookup (a .symtab-only or extern-C namesake hit is partial); no "
-        "stored spelling changes"
+        "stored spelling changes. (A short-lived main-branch build also "
+        "stamped 63 for the castxml data-size target rules recorded here at "
+        "66; a package from it reads as 63 and reports drift up to the "
+        "current generation like any other.)"
     ),
     64: GenerationSpellingChange(
         "no type or name spelling changes. Header dumps with a public-header "
@@ -681,7 +684,7 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "no type or name spelling changes. castxml's guessed Itanium mangling "
         "of a global-namespace variable (_Z<len><name>) is never kept as its "
         "symbol: the Itanium ABI does not mangle global variables, so an "
-        "explicit extern \"C\" variable in a C++ header records its plain name "
+        'explicit extern "C" variable in a C++ header records its plain name '
         "again, as generations before 66 did; no rewrite applies"
     ),
     71: GenerationSpellingChange(

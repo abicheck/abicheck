@@ -52,7 +52,7 @@ from typing import TYPE_CHECKING
 from .compare.type_map_pair import Side, TypeMapPair
 from .detector_registry import registry
 from .diff_helpers import build_type_map, make_change
-from .model import FactStatus, fact_confirmed_true, resolved_fact_value
+from .model import Fact, FactStatus, fact_confirmed_true, resolved_fact_value
 from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
 from .model.snapshot_reliability import family_reliable
@@ -334,9 +334,22 @@ def _check_standard_layout_lost(
 
 
 def _check_tail_padding_reuse(
-    name: str, old_rec: RecordType, new_rec: RecordType
+    name: str,
+    old_rec: RecordType,
+    new_rec: RecordType,
+    old_idx: TypeMap[RecordType],
+    new_idx: TypeMap[RecordType],
 ) -> list[Change]:
-    """Emit TAIL_PADDING_REUSE_CHANGED when dsize changes at stable sizeof."""
+    """Emit TAIL_PADDING_REUSE_CHANGED when dsize changes at stable sizeof.
+
+    A record that is empty on both sides (no member or vtable, every base
+    empty) is placed by the empty-base optimization: a
+    derived class places its first member at offset 0 whatever data size was
+    recorded, so ``sizeof`` against ``0`` (an extractor generation-62
+    baseline stored an empty POD's ``sizeof``; 63 stores 0) reuses no tail
+    padding."""
+    if _empty_on_both_sides(old_rec, new_rec, old_idx, new_idx):
+        return []
     if (
         old_rec.data_size_bits is not None
         and new_rec.data_size_bits is not None
@@ -357,6 +370,48 @@ def _check_tail_padding_reuse(
             )
         ]
     return []
+
+
+def _empty_on_both_sides(
+    old_rec: RecordType,
+    new_rec: RecordType,
+    old_idx: TypeMap[RecordType],
+    new_idx: TypeMap[RecordType],
+) -> bool:
+    """Empty on both sides, and the data sizes are ``0`` and ``sizeof``: the
+    empty record's own two possible readings."""
+    sizes = {old_rec.data_size_bits, new_rec.data_size_bits}
+    return (
+        sizes == {0, old_rec.size_bits}
+        and _is_empty(old_rec, old_idx, 0)
+        and _is_empty(new_rec, new_idx, 0)
+    )
+
+
+def _is_empty(rec: RecordType, idx: TypeMap[RecordType], depth: int) -> bool:
+    """Itanium "empty class", proven from observed facts: no member, no
+    virtual base or vtable, and every direct base resolves to an empty record.
+    Anything unobserved or unresolved is not known empty."""
+    if depth > _MAX_EMPTY_DEPTH or rec.fields or rec.is_opaque:
+        return False
+    if not (_known_empty(rec.virtual_bases_fact) and _known_empty(rec.vtable_fact)):
+        return False
+    bases = rec.bases_fact
+    if bases is None or bases.status is not FactStatus.PRESENT:
+        return False
+    for base_name in bases.value or []:
+        base = idx.get(base_name)
+        if base is None or not _is_empty(base, idx, depth + 1):
+            return False
+    return True
+
+
+_MAX_EMPTY_DEPTH = 32
+
+
+def _known_empty(fact: Fact[list[str]] | None) -> bool:
+    """An observed empty list; an unobserved one is not known empty."""
+    return fact is not None and fact.status is FactStatus.PRESENT and not fact.value
 
 
 def _layout_evidence_asymmetric(
@@ -476,7 +531,9 @@ def _diff_layout_descriptor(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         )
         changes.extend(_check_trivially_copyable_lost(name, old_rec, new_rec))
         changes.extend(_check_standard_layout_lost(name, old_rec, new_rec))
-        changes.extend(_check_tail_padding_reuse(name, old_rec, new_rec))
+        changes.extend(
+            _check_tail_padding_reuse(name, old_rec, new_rec, old_idx, new_idx)
+        )
         changes.extend(
             _check_layout_unverifiable(
                 name, old_rec, new_rec, vtable_facts_reliable=vtable_facts_reliable

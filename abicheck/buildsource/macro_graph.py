@@ -199,6 +199,7 @@ from typing import TYPE_CHECKING, Any
 
 from ..model.graph_facts import CONF_HIGH, CONF_REDUCED, GraphEdge
 from ..model.name_decoration import macho_underscore as macho_decoration
+from .pattern_facts_lexer import lines_starting_in_block_comment
 from .preprocessor_facts import _DEFINE_RE
 from .type_graph_index import (
     _FUNCTION_DECL_KINDS,
@@ -484,7 +485,7 @@ def _strip_leading_inline_comment(line: str) -> str:
     early (the same class of desync the ``#ifdef``/``#ifndef`` fallback fix
     closed for a differently-shaped input). Only ever strips a comment that
     both opens and closes on this one line — cross-line block-comment state
-    is :func:`_lines_starting_inside_block_comment`'s own, separate job,
+    is :func:`lines_starting_in_block_comment`'s own, separate job,
     already applied by every caller before this function ever runs, so a
     comment left open past this line was already skipped upstream.
     """
@@ -525,93 +526,6 @@ def _line_after_carryover_comment_closes(raw_line: str) -> str | None:
     return raw_line[idx + 2 :]
 
 
-def _lines_starting_inside_block_comment(text: str) -> list[bool]:
-    """For each line of *text* (1-indexed, matching
-    ``enumerate(text.splitlines(), start=1)``), whether that line's very
-    first character is already inside an unterminated ``/* ... */`` block
-    comment carried over from an earlier line (Codex review, fresh evidence:
-    a block-commented-out ``#ifdef``/``#endif`` pair around an ordinary,
-    real declaration was previously treated as a live directive, since
-    directive matching had no notion of comment state at all — a false
-    ``CONF_HIGH`` ``MACRO_CONTROLS_DECL`` edge from documentation, not code).
-
-    A simple, single-pass toggle scan that also tracks ordinary ``"..."``/
-    ``'...'`` string/char-literal state (Codex review, fresh evidence,
-    second round): a comment delimiter appearing inside a string literal
-    (``const char *token = "/*";``) was previously mis-tracked as a real
-    block-comment open, silently hiding every following line — including a
-    real ``#ifdef``/``#endif`` pair — until some later, unrelated ``*/``
-    happened to close it, with no diagnostic to signal the desync
-    (reproduced empirically: exactly this shape swallowed a live ``#ifdef``
-    entirely). String/char state resets at the start of every line — a
-    literal is assumed not to span multiple lines (true for an ordinary
-    literal; a backslash-newline line-spliced continuation is a documented,
-    accepted residual gap, same discipline as the rest of this heuristic
-    scanner) — and an escape character (``\\``) inside either always skips
-    its following character so an escaped quote (``'\\''``, ``"\\""``)
-    never closes the literal early. Deliberately NOT attempted: a raw
-    string literal (``R"(...)"``) — its arbitrary, un-lookahead-able
-    delimiter is a materially different parsing problem, and a raw string
-    containing a literal ``/*``/``//`` inside a header controlling
-    conditional compilation is not a shape this module has empirical
-    evidence for. A same-line-closed comment before a real trailing
-    directive (``/* note */ #ifdef X``) already can't match the ``^\\s*#``-
-    anchored directive patterns regardless, so that shape needs no special
-    handling here. ``//`` line comments need no cross-line tracking: they
-    only ever affect the one line they start on, and a directive-family
-    regex already requires the line to *start* with (optional whitespace
-    then) ``#``, which a ``// #ifdef X`` line can never satisfy.
-    """
-    starts_in_comment: list[bool] = []
-    in_block = False
-    # Split the same way the caller enumerates lines (``splitlines()``,
-    # keeping line-ending characters so a mid-line ``//`` skip-to-end-of-line
-    # below has something to skip to) — guarantees this function's per-line
-    # output aligns exactly with every caller's ``enumerate(text.
-    # splitlines(), start=1)`` regardless of line-ending convention, rather
-    # than hand-tracking only ``"\n"``.
-    for raw_line in text.splitlines(keepends=True):
-        starts_in_comment.append(in_block)
-        i = 0
-        n = len(raw_line)
-        in_string = False
-        in_char = False
-        while i < n:
-            ch = raw_line[i]
-            if in_block:
-                if ch == "*" and i + 1 < n and raw_line[i + 1] == "/":
-                    in_block = False
-                    i += 2
-                    continue
-                i += 1
-                continue
-            if in_string or in_char:
-                if ch == "\\" and i + 1 < n:
-                    i += 2
-                    continue
-                if (in_string and ch == '"') or (in_char and ch == "'"):
-                    in_string = False
-                    in_char = False
-                i += 1
-                continue
-            if ch == '"':
-                in_string = True
-                i += 1
-                continue
-            if ch == "'":
-                in_char = True
-                i += 1
-                continue
-            if ch == "/" and i + 1 < n and raw_line[i + 1] == "*":
-                in_block = True
-                i += 2
-                continue
-            if ch == "/" and i + 1 < n and raw_line[i + 1] == "/":
-                break  # rest of the line is a line comment
-            i += 1
-    return starts_in_comment
-
-
 @dataclass
 class _GuardFrame:
     """One open ``#if``-family directive on :func:`scan_conditional_regions`'s
@@ -646,14 +560,14 @@ def scan_conditional_regions(text: str) -> list[ConditionalRegion]:
     that guard's own nesting depth.
 
     A line that starts inside an unterminated ``/* ... */`` block comment
-    (:func:`_lines_starting_inside_block_comment`) is skipped entirely —
+    (:func:`lines_starting_in_block_comment`) is skipped entirely —
     none of the directive-family regexes below are even attempted for it —
     so a block-commented-out example directive never opens/closes a real
     region or desyncs real nesting depth (Codex review, fresh evidence).
     """
     stack: list[_GuardFrame] = []
     regions: list[ConditionalRegion] = []
-    in_comment = _lines_starting_inside_block_comment(text)
+    in_comment = lines_starting_in_block_comment(text)
     for lineno, line in enumerate(text.splitlines(), start=1):
         if in_comment[lineno - 1]:
             remainder = _line_after_carryover_comment_closes(line)
@@ -759,7 +673,7 @@ def _macro_definition_lines(text: str) -> dict[str, int]:
     would.
     """
     out: dict[str, int] = {}
-    in_comment = _lines_starting_inside_block_comment(text)
+    in_comment = lines_starting_in_block_comment(text)
     for lineno, line in enumerate(text.splitlines(), start=1):
         if in_comment[lineno - 1]:
             remainder = _line_after_carryover_comment_closes(line)
