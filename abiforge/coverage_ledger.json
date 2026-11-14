@@ -270,10 +270,12 @@
     "FUNC_DELETED_ELF_FALLBACK",
     "LAYOUT_UNVERIFIABLE",
     "LIBCPP_ABI_VERSION_CHANGED",
-    "SONAME_BUMP_RECOMMENDED",
     "STDLIB_IMPLEMENTATION_CHANGED",
     "STD_REEXPORT_REMOVED",
     "UNSPECIFIED_RETURN_NOW_NAMED"
+  ],
+  "derived_by_construction": [
+    "SONAME_BUMP_RECOMMENDED"
   ],
   "edit_classes_without_operator": [],
   "out_of_scope": [
