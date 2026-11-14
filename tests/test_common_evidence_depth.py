@@ -210,3 +210,18 @@ def test_real_library_with_headers_on_one_side_is_unchanged(
     assert (report["verdict"], result.exit_code) == ("NO_CHANGE", 0), [
         (c["kind"], c.get("symbol")) for c in report["changes"]
     ]
+
+
+@pytest.mark.parametrize("blocked_side", ["old", "new"])
+@pytest.mark.parametrize("headers_side", ["old", "new"])
+def test_an_unreadable_debug_section_is_no_evidence_of_asymmetry(
+    blocked_side: str, headers_side: str
+) -> None:
+    import dataclasses
+
+    snaps = {s: _snap(headers=s == headers_side) for s in ("old", "new")}
+    # ``from_headers`` lives in the debug section: unreadable, it is a default.
+    snaps[blocked_side] = dataclasses.replace(
+        snaps[blocked_side], unreadable_sections=(("debug", "failed"),)
+    )
+    assert common_evidence_depth(snaps["old"], snaps["new"]) is None

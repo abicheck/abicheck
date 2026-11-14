@@ -1,6 +1,6 @@
 """The standard library a binary was built against is read from the binary's
 own exports, never from header-parsed manglings or its imports
-(``model.build_mode_facts.stdlib_evidence_symbols``).
+(``model.stdlib_evidence.stdlib_evidence_symbols``).
 
 Oracle: the Itanium spelling of each runtime -- libc++ instantiations live in
 ``std::__1`` (``_ZNSt3__1``), libstdc++ ones in plain ``std`` (``_ZNSt6vector``).
@@ -15,8 +15,9 @@ import pytest
 from abicheck.checker import ChangeKind, compare
 from abicheck.diff_stdlib_impl import _effective_build_mode
 from abicheck.model import AbiSnapshot, Function, Visibility
-from abicheck.model.build_mode_facts import StdlibFamily, stdlib_evidence_symbols
+from abicheck.model.build_mode_facts import StdlibFamily
 from abicheck.model.elf_facts import ElfImport, ElfMetadata, ElfSymbol
+from abicheck.model.stdlib_evidence import stdlib_evidence_symbols
 
 _LIBCXX_EXPORTS = (
     "_ZNSt3__19allocatorIiE9constructB8ne180100IiJEEEvPT_DpOT0_",

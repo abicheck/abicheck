@@ -45,9 +45,19 @@ __all__ = [
 ]
 
 
+def _header_evidence_known(snap: AbiSnapshot) -> bool:
+    """Whether ``from_headers`` is evidence: it is stored in the ``debug``
+    section, and an unreadable section holds a default, not a fact (the
+    section-reader contract reports what reads it as not comparable)."""
+    return all(name != "debug" for name, _ in snap.unreadable_sections)
+
+
 def common_evidence_depth(old: AbiSnapshot, new: AbiSnapshot) -> str | None:
     """``"binary"`` when exactly one operand is header-derived, else ``None``
-    (both operands reach the same rung: nothing to cap)."""
+    (both operands reach the same rung, or one side's rung is unknown: nothing
+    to cap on evidence this pair does not have)."""
+    if not (_header_evidence_known(old) and _header_evidence_known(new)):
+        return None
     return "binary" if bool(old.from_headers) != bool(new.from_headers) else None
 
 

@@ -20,7 +20,7 @@
       "abicheck/extract/binary_dialect.py": "be8a71c557287ee47f63a49ea98306ac2d44877987cbadd9a554bd3f50119bc2",
       "abicheck/extract/binary_format.py": "4b9f591077fa5c90d2e3a767343d92b098061870403d431694470bc05e5468b3",
       "abicheck/extract/binary_identity.py": "6e4f7c0e55443ab906c75d67b5ca11629e2e6fcd59ea0f28976b8eb6651a392b",
-      "abicheck/extract/build_mode_capture.py": "8391e4e27b5bb68b7bdd7e3d4bbc7feee5244607507a57f35bd08a90c308ac48",
+      "abicheck/extract/build_mode_capture.py": "e4975d7c6e28a64d17550912d2ee40d808c8c8c72a22be9accc89a485ae4262f",
       "abicheck/extract/builtin_abi.py": "1ef93f3d8609e426fd3c078dbc376f0e5686b40a68fab67d1745c34139c4252b",
       "abicheck/extract/cache_dep_manifest.py": "7542e355161f8f9cb5e6c2c74402064e15e5bcb0ccee67429c99e74122a31080",
       "abicheck/extract/cache_digest_store.py": "c333f2bf9170d5c87c011f434d3638c944edf07e9670fd4cb84e2f73ac0775f1",
@@ -228,9 +228,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "24d4df72f2f4fbb9c260b29e45a06bd0a8a8e831e5fb61c09c173c30ec468d13",
-    "generation": 62,
-    "reason": "refines generation 62 within the same unreleased PR: castxml data size by the target's tail-padding rule (nvsize allocation, MSVC/unknown targets unknown) and typedef origins weighed over both maps; generation 62 is not on main, so no released snapshot carries the earlier derivation"
+    "fingerprint": "1e62afe8ca0940b63e93d3f6768af02e4978a90cdf15eb0f02b66fa277e92a22",
+    "generation": 63,
+    "reason": "the stdlib evidence helper moved to model/stdlib_evidence.py (an import cycle); generation 63 already records the behavior"
   },
   "resolver": {
     "files": {

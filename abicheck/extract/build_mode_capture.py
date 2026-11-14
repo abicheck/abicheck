@@ -234,7 +234,7 @@ def capture_build_mode(
 
 
 def _mangled_names(snapshot: AbiSnapshot) -> list[str]:
-    from ..model.build_mode_facts import stdlib_evidence_symbols
+    from ..model.stdlib_evidence import stdlib_evidence_symbols
 
     return stdlib_evidence_symbols(snapshot)
 

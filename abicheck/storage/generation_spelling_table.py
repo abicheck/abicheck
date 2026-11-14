@@ -611,6 +611,16 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "older snapshot reads every typedef origin as unknown, never private, "
         "and a castxml record's data size as not collected"
     ),
+    63: GenerationSpellingChange(
+        "no type or name spelling changes. The captured build mode's C++ "
+        "standard-library family (and libc++ ABI version) is read from the "
+        "binary's exported symbols instead of the declarations' manglings, "
+        "which with headers came from the header parser's own library; only "
+        "build_mode.stdlib/libcpp_abi_version can change, and only for a "
+        "header dump of a library built against another standard library "
+        "than the parser read. No rewrite is needed -- compare re-derives "
+        "the family from a stored snapshot's exports the same way"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

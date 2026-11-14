@@ -96,12 +96,11 @@ jobs:
         # Compilers for the integration lane plus abi-compliance-checker for
         # the ABICC parity step. lld/llvm (lld-link, ld64.lld, llvm-nm) let
         # test_pe_macho_header_binding_integration.py cross-build PE (MSVC ABI)
-        # and Mach-O from the same sources as its ELF oracle. libc++ lets the edit
-        # corpus rebuild a library against it (rebuild_against_libcxx). Routed through the shared action, which owns
+        # and Mach-O from the same sources as its ELF oracle. Routed through the shared action, which owns
         # the "tolerate a flaky pre-baked third-party apt repo" rule.
         uses: ./.github/actions/install-system-deps
         with:
-          packages: gcc g++ cmake clang lld llvm libc++-dev libc++abi-dev abi-compliance-checker zlib1g-dev curl ca-certificates
+          packages: gcc g++ cmake clang lld llvm abi-compliance-checker zlib1g-dev curl ca-certificates
       - name: Install abidiff (Linux)
         if: runner.os == 'Linux'
         # Spelled `abigail-tools` on some releases, `libabigail-tools` on

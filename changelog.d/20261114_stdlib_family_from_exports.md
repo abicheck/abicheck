@@ -6,7 +6,7 @@
   parser (castxml reads libstdc++ headers whatever the library was built
   against), so a libstdc++ → libc++ rebuild compared with `-H` never reported
   `stdlib_implementation_changed`. The family is now read from the binary's
-  own exported symbols (`model.build_mode_facts.stdlib_evidence_symbols`),
+  own exported symbols (`model.stdlib_evidence.stdlib_evidence_symbols`),
   both at dump time and at compare time, with declarations only as the
   fallback for a snapshot without a symbol table. Imports are not used:
   libc++ exports its exception classes in plain `std::`.

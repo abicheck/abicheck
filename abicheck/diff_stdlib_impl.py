@@ -242,8 +242,8 @@ def _capture_is_complete(bm: BuildMode) -> bool:
 
 
 def _collect_mangled_symbols(snap: AbiSnapshot) -> list[str]:
-    """The binary's stdlib evidence (``model.build_mode_facts.stdlib_evidence_symbols``)."""
-    from .model.build_mode_facts import stdlib_evidence_symbols
+    """The binary's stdlib evidence (``model.stdlib_evidence.stdlib_evidence_symbols``)."""
+    from .model.stdlib_evidence import stdlib_evidence_symbols
 
     return stdlib_evidence_symbols(snap)
 

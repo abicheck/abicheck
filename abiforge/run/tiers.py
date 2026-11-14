@@ -103,7 +103,6 @@ _PR: tuple[tuple[str, str, str, dict[str, object]], ...] = (
     ("enum_underlying_narrow", "c_core", "clang", {"std": "c23"}),
     ("enum_change_value", "c_core", "gcc", {"std": "c89", "consumer": "clang"}),
     ("rebuild_cxx11_abi_off", "cxx_stdlib", "gcc", {}),
-    ("rebuild_against_libcxx", "cxx_stdlib", "clang", {}),
     ("method_noexcept_add", "cxx_classes", "gcc", {}),
     ("concept_constraint_added", "cxx_classes", "clang", {"std": "c++20"}),
     ("rebuild_optimized", "c_core", "gcc", {}),

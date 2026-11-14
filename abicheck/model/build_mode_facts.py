@@ -25,10 +25,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from .snapshot import AbiSnapshot
 
 
 class CompilerFamily(StrEnum):
@@ -112,25 +108,3 @@ class BuildMode:
         default_factory=BuildModeProvenance,
         compare=False,
     )
-
-
-def stdlib_evidence_symbols(snapshot: AbiSnapshot) -> list[str]:
-    """The mangled names that say which C++ standard library a binary was
-    built against.
-
-    The binary's own exported symbols when it has a symbol table: the
-    ``std::`` instantiations it emits name its runtime (``std::__1::`` for
-    libc++, plain ``std::`` for libstdc++). A header-parsed declaration's
-    mangling reflects the header parser's standard library instead (castxml
-    reads libstdc++ headers for a library built with ``-stdlib=libc++``), so
-    declarations are only the fallback for a snapshot without one. Imports
-    are not evidence: libc++ itself exports its exception classes in plain
-    ``std::`` (``std::logic_error``), which would read as libstdc++.
-    """
-    elf = snapshot.elf
-    if elf is not None and elf.symbols:
-        return [s.name for s in elf.symbols]
-    decls = snapshot.declarations
-    return [f.mangled for f in decls.functions if f.mangled] + [
-        v.mangled for v in decls.variables if v.mangled
-    ]
