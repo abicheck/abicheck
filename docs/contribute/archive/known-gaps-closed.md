@@ -16,6 +16,13 @@ re-verification status line (2026-10-09, `456989f`). Do not re-open an
 entry from here without reproducing it on current `main`; record a new
 gap on the main page instead.
 
+### A `-mveclibabi` switch reads as a binary break when no call is vectorized (closed 2026-11-14)
+
+**Status (2026-11-14): CLOSED.** `vector_abi_changed` confined to callee-library selection flags (`-mveclibabi=`, `-fveclib=`) is graded COMPATIBLE_WITH_RISK (modulation `vector_library_selection_only`, `compare/toolchain_flags.py`), whether or not a call is vectorized: those flags change no entry point the binary exports, and a vectorized call shows as its own new imports. An Intel `-vecabi=` change, which re-targets the binary's own SIMD clones, keeps BREAKING. Pinned by `tests/test_vector_abi.py`; the edit corpus's `vector_math_abi_changed` now agrees.
+
+**Status (2026-11-12): OPEN.** `vector_abi_changed` compares the `-mveclibabi=`/`-fveclib=` switches each unit's `DW_AT_producer` records and keeps its `BREAKING` default whatever the code does. A library that makes no vectorizable math call is byte-identical apart from the producer string, yet the rebuild gates as a break. Closing it needs evidence that a vectorized math entry point (an SVML or libmvec import) actually changed. Found by the edit corpus (`vector_math_abi_changed` on `c_elf`, gcc). Owner: `compare/toolchain_flags.py`.
+`false-positive` — a switch that changed no code gates as a binary break.
+
 ### Dropping a version node that binds no symbol reads as a binary break (closed 2026-11-14)
 
 **Status (2026-11-14): CLOSED.** `symbol_version_defined_removed` is graded COMPATIBLE_WITH_RISK (modulation `version_node_bound_no_symbol`, `compare/unbound_version_node.py`) when the old side's symbols carry version bindings and none names the dropped node; a node binding a symbol, or a side with no captured version bindings, keeps BREAKING. Pinned by `tests/test_unbound_version_node_removal.py`; the edit corpus's `empty_version_node_dropped` now agrees.

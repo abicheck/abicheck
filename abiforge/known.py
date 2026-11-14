@@ -50,9 +50,6 @@ GAP_CASTXML_ALIGN = (
 GAP_BASE_UNVERSIONED = (
     "An export GNU ld binds to the base version is never reported as unversioned"
 )
-GAP_VECTOR_ABI = (
-    "A `-mveclibabi` switch reads as a binary break when no call is vectorized"
-)
 GAP_CLANG_INLINE_STATIC = "An inline function's static local, exported by clang, reads as an undeclared export"
 GAP_UNIQUE_O2_DWARF = "A GNU-unique static whose inline owner was inlined away is not compared at DWARF depth"
 GAP_DUAL_ABI_COW_CHURN = "A C++20 dual-ABI flip is not recognized when the old-ABI string's members are exported"
@@ -308,17 +305,6 @@ _PLATFORM: tuple[Known, ...] = (
         GAP_BASE_UNVERSIONED,
         issues=frozenset({"missing:UNVERSIONED_EXPORTED_SYMBOL"}),
         verdicts=frozenset({"COMPATIBLE"}),
-    ),
-    Known(
-        "vector_math_abi_changed",
-        _ELF,
-        "false-positive",
-        lambda c: c.producer.family == "gcc" and c.evidence in ("dwarf", "headers"),
-        "the seed makes no math call, so -mveclibabi=svml changes no code; "
-        "vector_abi_changed keeps its BREAKING default",
-        GAP_VECTOR_ABI,
-        issues=frozenset({"stronger-than:COMPATIBLE_WITH_RISK"}),
-        verdicts=_BREAKING,
     ),
     Known(
         "std_string_abi_flipped",

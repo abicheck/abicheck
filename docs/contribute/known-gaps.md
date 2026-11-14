@@ -652,12 +652,6 @@ per-item status in the
 `false-positive` — a source-only signature change of a header-only function gates as a binary break.
 <!-- no-canary: pinned by the edit corpus's strict-xfail `header_only_function_params_changed` entry in abiforge/known.py, which fails once the answer changes -->
 
-#### A `-mveclibabi` switch reads as a binary break when no call is vectorized (2026-11-12)
-
-**Status (2026-11-12): OPEN.** `vector_abi_changed` compares the `-mveclibabi=`/`-fveclib=` switches each unit's `DW_AT_producer` records and keeps its `BREAKING` default whatever the code does. A library that makes no vectorizable math call is byte-identical apart from the producer string, yet the rebuild gates as a break. Closing it needs evidence that a vectorized math entry point (an SVML or libmvec import) actually changed. Found by the edit corpus (`vector_math_abi_changed` on `c_elf`, gcc). Owner: `compare/toolchain_flags.py`.
-`false-positive` — a switch that changed no code gates as a binary break.
-<!-- no-canary: pinned by the edit corpus's strict-xfail `vector_math_abi_changed` entry in abiforge/known.py, which fails once the answer changes -->
-
 #### An inline function's static local, exported by clang, reads as an undeclared export (2026-11-12)
 
 **Status (2026-11-12): OPEN.** clang emits a public-header inline function's static local (`_ZZ8edit_ctrvE1n`) as a weak export (gcc as `STB_GNU_UNIQUE`). With public headers the new export reads as `exported_not_public` and the addition becomes `COMPATIBLE_WITH_RISK`, though no source can name a function-local static: it exists only to keep the inline function's ODR. Found by the edit corpus (`gnu_unique_static_added` on `cxx_more`, clang). Owner: `buildsource/cross_source_checks.py` (`exported_not_public`).

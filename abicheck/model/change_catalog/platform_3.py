@@ -75,7 +75,7 @@ PLATFORM_ENTRIES_3: list[ChangeKindMeta] = [
     _E(
         "vector_abi_changed",
         _B,
-        impact="Vector-function (SIMD clone) ABI selection changed (-mveclibabi/-fveclib/-vecabi); vectorized call variants resolve to a different ABI, so callers of the vector entry points pass/return data in the wrong registers.",
+        impact="Vector-function (SIMD clone) ABI selection changed (-mveclibabi/-fveclib/-vecabi). A -vecabi change re-targets the binary's own exported SIMD clones, so callers of those vector entry points pass/return data in the wrong registers. A change confined to -mveclibabi/-fveclib only picks the vector math library the binary calls and is graded a risk (its new imports are reported on their own).",
         policy_overrides={"plugin_abi": _C},
         entity=_ENT.BINARY,
         contract_subject=_CS.BUILD_FACT,
