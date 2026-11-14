@@ -192,7 +192,7 @@ class TestTypeKindChanged:
         assert change.new_value == "struct"
 
     def test_struct_to_class(self) -> None:
-        """struct→class is a source-level kind change, not breaking."""
+        """struct→class is a class-key change only: COMPATIBLE (ADR-011, 2026-11-14)."""
         # Located in a parsed header: the record's source observation (ADR-084).
         located = Fact.present("foo.h")
         old = _snap(
@@ -204,7 +204,7 @@ class TestTypeKindChanged:
         result = compare(old, new)
         assert ChangeKind.SOURCE_LEVEL_KIND_CHANGED in _kinds(result)
         assert ChangeKind.TYPE_KIND_CHANGED not in _kinds(result)
-        assert result.verdict == Verdict.API_BREAK
+        assert result.verdict == Verdict.COMPATIBLE
 
     def test_same_kind_no_change(self) -> None:
         old = _snap(types=[RecordType(name="S", kind="struct")])

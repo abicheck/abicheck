@@ -299,7 +299,7 @@ One row per `ChangeKind` (429 total). Columns fuse the verdict partition (`check
 | `source_binary_provenance_mismatch` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `source_binary_provenance_mismatch` | — |
 | `source_decl_binary_symbol_mismatch` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `source_decl_binary_symbol_mismatch` | — |
 | `source_fact_coverage_incomplete` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L4 | `source_fact_coverage_incomplete` | — |
-| `source_level_kind_changed` | api_break | `API_BREAK` | `warning` | unspecified | `source_level_kind_changed` | — |
+| `source_level_kind_changed` | quality | `COMPATIBLE` | `warning` | unspecified | `source_level_kind_changed` | — |
 | `source_surface_dso_mismatch` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L4 | `source_surface_dso_mismatch` | — |
 | `source_to_binary_mapping_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `source_to_binary_mapping_changed` | — |
 | `stack_canary_removed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `stack_canary_removed` | [case135](examples/case135_stack_canary_removed.md) |

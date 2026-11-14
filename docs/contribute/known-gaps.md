@@ -100,12 +100,6 @@ the archive); the CLI-level matrix over the same inputs is
 `false-clean` — a public typedef change is dropped as out of surface.
 <!-- no-canary: pinned by the edit corpus's strict-xfail `version_sentinel_typedef_bumped` entry in abiforge/known.py, which fails once the answer changes -->
 
-#### A struct that becomes a class with the same members reads as an API break (2026-11-14)
-
-**Status (2026-11-14): OPEN.** `source_level_kind_changed` defaults to `API_BREAK` (ADR-011's API-break tier; only the `sdk_vendor` profile downgrades it). Changing the class-key alone, with the same public members, breaks neither source compatibility (a mismatched class-key in a forward declaration is at most a warning) nor the Itanium ABI. Default-access consequences are reported separately (`field_access_changed`, `method_access_changed`, `base_class_access_narrowed`), and MSVC's class-key mangling already shows as PE export removal and addition. Grading it compatible needs an ADR-011 amendment. Found by the edit corpus (`struct_became_class` on `cxx_more`). Owner: `model/change_catalog` (`types_1.py`), ADR-011.
-`false-positive` — a compatible class-key change is graded an API break.
-<!-- no-canary: pinned by the edit corpus's strict-xfail `struct_became_class` entry in abiforge/known.py, which fails once the answer changes -->
-
 #### castxml and DWARF carry no data size, so a tail-padding reuse change is missed (2026-11-14)
 
 **Status (2026-11-14): OPEN.** `TAIL_PADDING_REUSE_CHANGED` compares `data_size_bits` (dsize), which only the gcc-plugin and clang header backends record. castxml has no data size, and the DWARF backfill passes through only a header-supplied value. For a record that is not POD for layout, adding a member inside its tail padding keeps sizeof but grows dsize, so a derived class reusing those bytes now overlaps it, and castxml-depth and DWARF-depth compares read `COMPATIBLE`. Computing dsize from castxml would need the C++03 POD-for-layout decision plus the end of the last field or base. Found by the edit corpus (`nonpod_field_added_in_tail_padding` on `cxx_more`). Owner: `extract/headers/castxml`, `extract/dwarf_layout_backfill.py`.

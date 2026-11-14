@@ -468,7 +468,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `soname_bump_unnecessary` | COMPATIBLE | 0 | 0 | 0 |
 | `source_binary_provenance_mismatch` | RISK | 0 | 0 | 0 |
 | `source_decl_binary_symbol_mismatch` | RISK | 0 | 0 | 0 |
-| `source_level_kind_changed` | API_BREAK | 0 | 0 | 0 |
+| `source_level_kind_changed` | COMPATIBLE | 0 | 0 | 0 |
 | `source_to_binary_mapping_changed` | RISK | 0 | 0 | 0 |
 | `standard_layout_lost` | RISK | 0 | 0 | 0 |
 | `std_reexport_removed` | API_BREAK | 0 | 0 | 0 |

@@ -2641,8 +2641,8 @@
     },
     {
       "kind": "source_level_kind_changed",
-      "category": "api_break",
-      "default_verdict": "API_BREAK",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
       "doc_slug": "source_level_kind_changed",

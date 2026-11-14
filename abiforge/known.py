@@ -63,9 +63,6 @@ GAP_GCC_HEADER_ONLY = (
 GAP_UNUSED_TYPEDEF_DEMOTED = (
     "A change to a public typedef no function uses is demoted out of the surface"
 )
-GAP_CLASS_KEY = (
-    "A struct that becomes a class with the same members reads as an API break"
-)
 GAP_CASTXML_DSIZE = (
     "castxml and DWARF carry no data size, so a tail-padding reuse change is missed"
 )
@@ -430,19 +427,6 @@ KNOWN: tuple[Known, ...] = (
         ),
         verdicts=frozenset({"NO_CHANGE"}),
         also_cls=frozenset({"wrong-kind"}),
-    ),
-    Known(
-        "struct_became_class",
-        _MORE,
-        "false-positive",
-        _always,
-        "source_level_kind_changed is API_BREAK by default (ADR-011), though a "
-        "class-key change with the same public members breaks neither source "
-        "nor the Itanium ABI",
-        GAP_CLASS_KEY,
-        issues=frozenset({"stronger-than:COMPATIBLE_WITH_RISK"}),
-        verdicts=frozenset({"API_BREAK"}),
-        also_cls=frozenset({"wrong-verdict"}),
     ),
     Known(
         "nonpod_field_added_in_tail_padding",

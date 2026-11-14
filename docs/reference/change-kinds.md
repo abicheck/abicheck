@@ -302,7 +302,7 @@ These changes break the source-level API contract but do not affect already-comp
 
 | Kind | Description |
 |------|-------------|
-| `source_level_kind_changed` | A type changed between `struct` and `class`. In C++ these have identical binary layout, but source code using the keyword explicitly may get compilation warnings or errors in strict contexts. |
+| `source_level_kind_changed` | A type changed between `struct` and `class`. Graded `COMPATIBLE`: the class-key alone changes neither layout nor Itanium mangling, and source naming the type with the other key still compiles (at most a `-Wmismatched-tags` warning). Default-access consequences are reported as `field_access_changed` / `method_access_changed` / `base_class_access_narrowed`; on MSVC the class-key is mangled, so affected exports show as removed/added. |
 
 ### Overload Changes
 
