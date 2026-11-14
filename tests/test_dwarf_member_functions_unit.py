@@ -382,10 +382,11 @@ def test_a_pure_virtual_member_is_recognized_only_inside_a_record() -> None:
         cu, 2, "DW_TAG_subprogram", {"DW_AT_declaration": True, "DW_AT_virtuality": 1}
     )
     in_class = (Record("C", "public"),)
-    assert members.is_pure_virtual_member(pure, in_class) is True
-    assert members.is_pure_virtual_member(plain, in_class) is False
-    assert members.is_pure_virtual_member(pure, (Namespace("lib"),)) is False
-    assert members.is_pure_virtual_member(pure, ()) is False
+    assert members.is_pure_virtual_declaration(pure) is True
+    assert members.is_pure_virtual_declaration(plain) is False
+    assert members.is_member_scope(in_class) is True
+    assert members.is_member_scope((Namespace("lib"),)) is False
+    assert members.is_member_scope(()) is False
 
 
 def test_a_broken_object_pointer_falls_back_to_the_artificial_parameter() -> None:

@@ -56,7 +56,6 @@ __all__ = [
     "class_vtable_symbol",
     "chained_linkage_name",
     "explicit_specifier",
-    "is_pure_virtual_member",
     "producer_records_pure_virtuality",
     "record_is_abstract",
     "slot_is_pure",
@@ -314,11 +313,6 @@ def record_is_abstract(
 def is_member_scope(scope_path: tuple[Any, ...]) -> bool:
     """Whether a declaration in *scope_path* is a class member."""
     return bool(scope_path) and isinstance(scope_path[-1], Record)
-
-
-def is_pure_virtual_member(die: Any, scope_path: tuple[Any, ...]) -> bool:
-    """Whether *die* is a class member's pure virtual declaration."""
-    return is_member_scope(scope_path) and is_pure_virtual_declaration(die)
 
 
 def explicit_specifier(mangled: str, decl: Any) -> Fact[bool | None]:
