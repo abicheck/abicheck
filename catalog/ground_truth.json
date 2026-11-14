@@ -3092,7 +3092,9 @@
     "linux"
    ],
    "expected_kinds": [
-    "func_visibility_protected_changed",
+    "func_visibility_protected_changed"
+   ],
+   "expected_absent_kinds": [
     "symbol_elf_visibility_changed"
    ]
   },
