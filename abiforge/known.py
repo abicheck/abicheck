@@ -47,9 +47,6 @@ GAP_HEADER_ONLY_POINTER = (
 GAP_CASTXML_ALIGN = (
     "castxml headers read a variable's alignment specifier only as a lower bound"
 )
-GAP_BASE_UNVERSIONED = (
-    "An export GNU ld binds to the base version is never reported as unversioned"
-)
 GAP_CLANG_INLINE_STATIC = "An inline function's static local, exported by clang, reads as an undeclared export"
 GAP_UNIQUE_O2_DWARF = "A GNU-unique static whose inline owner was inlined away is not compared at DWARF depth"
 GAP_DUAL_ABI_COW_CHURN = "A C++20 dual-ABI flip is not recognized when the old-ABI string's members are exported"
@@ -293,17 +290,6 @@ _PLATFORM: tuple[Known, ...] = (
         "reduction is demoted to COMPATIBLE",
         GAP_CASTXML_ALIGN,
         issues=frozenset({"weaker-than:COMPATIBLE_WITH_RISK"}),
-        verdicts=frozenset({"COMPATIBLE"}),
-    ),
-    Known(
-        "unversioned_export_added",
-        _ELF,
-        "wrong-kind",
-        _always,
-        "GNU ld binds the unmatched edit_unv to the base version (index 1), "
-        "which unversioned_exported_symbol deliberately never flags",
-        GAP_BASE_UNVERSIONED,
-        issues=frozenset({"missing:UNVERSIONED_EXPORTED_SYMBOL"}),
         verdicts=frozenset({"COMPATIBLE"}),
     ),
     Known(

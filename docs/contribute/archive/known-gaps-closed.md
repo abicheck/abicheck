@@ -16,6 +16,13 @@ re-verification status line (2026-10-09, `456989f`). Do not re-open an
 entry from here without reproducing it on current `main`; record a new
 gap on the main page instead.
 
+### An export GNU ld binds to the base version is never reported as unversioned (closed 2026-11-14)
+
+**Status (2026-11-14): CLOSED.** A base-bound export that the old side did not export under any binding is new in this release, so it is reported as an `INTRODUCED` `unversioned_exported_symbol` (`buildsource/unversioned_base_exports.py`, folded in by `workflows/cross_source_hygiene.compute_cross_source_evolution` when both sides were evaluated). A base-bound export the old side already had stays unreported as pre-script API. Pinned by `tests/test_unversioned_base_bound_new_export.py`; the edit corpus's `unversioned_export_added` now agrees.
+
+**Status (2026-11-12): OPEN.** `unversioned_exported_symbol` flags only `ElfVersionBinding.UNVERSIONED` and deliberately skips `BASE` (index 1 in a library with a `VER_FLG_BASE` definition), reasoning that a base-bound export predates the version script. GNU ld binds every export a version script does not match to the base version, so a symbol newly added outside every node (`LIBEDIT_1.0 { global: [!e]*; };` plus a new `edit_unv`) is exactly the hygiene problem the check describes, yet it never reads unversioned; a real `UNVERSIONED` binding in a versioned library is not something GNU ld produces. Telling a new base-bound export from one that predates versioning needs the comparison's history, not one side. Found by the edit corpus (`unversioned_export_added` on `c_elf`). Owner: `buildsource/cross_source_checks.py`.
+`wrong-kind` — a new unversioned export in a versioned library reads only as `func_added`.
+
 ### A `-mveclibabi` switch reads as a binary break when no call is vectorized (closed 2026-11-14)
 
 **Status (2026-11-14): CLOSED.** `vector_abi_changed` confined to callee-library selection flags (`-mveclibabi=`, `-fveclib=`) is graded COMPATIBLE_WITH_RISK (modulation `vector_library_selection_only`, `compare/toolchain_flags.py`), whether or not a call is vectorized: those flags change no entry point the binary exports, and a vectorized call shows as its own new imports. An Intel `-vecabi=` change, which re-targets the binary's own SIMD clones, keeps BREAKING. Pinned by `tests/test_vector_abi.py`; the edit corpus's `vector_math_abi_changed` now agrees.
