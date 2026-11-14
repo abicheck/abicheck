@@ -736,4 +736,20 @@ SYMBOLS_ENTRIES_2: list[ChangeKindMeta] = [
         contract_subject=_CS.DECLARATION,
         operation=_OP.MODIFIED,
     ),
+    _E(
+        "func_return_covariant_narrowed",
+        _R,
+        impact="A function returning a pointer or reference to a class now "
+        "returns one to a class derived from it, every step of the derivation "
+        "a non-virtual base at offset 0. The returned address is the same "
+        "either way and a return type is not part of a (non-template) mangled "
+        "name, so an existing binary keeps working, and for a virtual "
+        "overrider no vtable slot or thunk is added (Itanium C++ ABI 2.5.3). "
+        "Callers that rebuild see the narrower type, which can change overload "
+        "resolution or template deduction on the result: a source-level risk.",
+        description_template="Return type narrowed to a derived class at offset 0: {name}",
+        entity=_ENT.FUNCTION,
+        contract_subject=_CS.DECLARATION,
+        operation=_OP.MODIFIED,
+    ),
 ]

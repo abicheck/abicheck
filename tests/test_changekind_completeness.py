@@ -35,6 +35,8 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     # tests/test_header_only_params_regrade.py
     ChangeKind.HEADER_ONLY_FUNCTION_PARAMS_CHANGED,
     ChangeKind.ABI_EQUIVALENT_TYPE_CHANGED,
+    # tests/test_covariant_return_and_override_slots.py
+    ChangeKind.FUNC_RETURN_COVARIANT_NARROWED,
     ChangeKind.ABI_RELEVANT_BUILD_FLAG_CHANGED,
     ChangeKind.ANON_FIELD_CHANGED,
     ChangeKind.BASE_CLASS_POSITION_CHANGED,

@@ -102,6 +102,7 @@ PROVENANCE_PER_FINDING: frozenset[str] = frozenset()
 PROVENANCE_UNVERIFIED = frozenset(
     {
         "abi_equivalent_type_changed",
+        "func_return_covariant_narrowed",
         "abi_relevant_build_flag_changed",
         "abi_surface_explosion",
         "abi_tag_changed",

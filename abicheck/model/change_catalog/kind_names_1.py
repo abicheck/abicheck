@@ -588,4 +588,9 @@ KIND_NAMES_1: tuple[tuple[str, str, str | None], ...] = (
         "glibcxx_dual_abi_changed",
         "ADR-050 amendment 2026-11-09: the two builds select different libstdc++ dual ABIs (_GLIBCXX_USE_CXX11_ABI) and the public surface uses std::string/std::list -- re-mangled exports, or a variable/record of a changed type → BREAKING",
     ),
+    (
+        "FUNC_RETURN_COVARIANT_NARROWED",
+        "func_return_covariant_narrowed",
+        "a pointer/reference return narrowed to a class whose path to the old class is non-virtual bases at offset 0: the same address comes back and the mangled name is unchanged → COMPATIBLE_WITH_RISK",
+    ),
 )

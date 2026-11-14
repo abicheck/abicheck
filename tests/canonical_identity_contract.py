@@ -95,6 +95,10 @@ VALUE_INSENSITIVE = frozenset(
         # another (DWARF "long int" against a clang "long"), so the spelling is
         # not an identity; the symbol and the slot are.
         "abi_equivalent_type_changed",
+        # compare/covariant_return.py re-kinds a func_return_changed whose
+        # old/new are the backend's raw spellings of the two return types; the
+        # mangled symbol is the identity, as for abi_equivalent_type_changed.
+        "func_return_covariant_narrowed",
         # Same bucket, same reason as `func_added`/`func_removed_elf_only`:
         # its identity is the mangled export name, and its `new_value` holds
         # that same name rather than any C/C++ type spelling, so there is

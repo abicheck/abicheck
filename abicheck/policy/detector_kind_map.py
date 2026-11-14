@@ -161,6 +161,7 @@ DETECTOR_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
                 "enum_member_removed",
                 "enum_member_value_changed",
                 "enum_underlying_size_changed",
+                "type_added",
                 "type_removed",
             }
         ),
@@ -503,6 +504,7 @@ NON_DETECTOR_KINDS: frozenset[str] = frozenset(
         "exported_not_public",
         "exported_symbol_source_owner_changed",
         "float_abi_changed",
+        "func_return_covariant_narrowed",
         "generated_file_dependency_unstable",
         "generated_header_changed",
         "generated_header_reaches_public_api",

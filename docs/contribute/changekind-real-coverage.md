@@ -15,10 +15,10 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 
 ## Headline
 
-- Total kinds: **429**
-- Kinds with at least one real source: **193**
+- Total kinds: **430**
+- Kinds with at least one real source: **194**
 - Kinds backed by a compiled fixture (catalog `expected_kinds` or an edit-corpus `verified_floor`; ledger `scripts/changekind_fixture_ledger.json`): **205**
-- Kinds per source: catalog 160, field_shapes 9, integration 76
+- Kinds per source: catalog 160, field_shapes 9, integration 78
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
@@ -28,7 +28,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | L3 | 15 | 5 |
 | L4 | 10 | 2 |
 | L5 | 15 | 5 |
-| unmapped | 121 | 106 |
+| unmapped | 122 | 106 |
 
 ## Most important zero-source kinds (top 20)
 
@@ -90,7 +90,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `experimental_graduated` | COMPATIBLE | 1 | 0 | 0 |
 | `experimental_removed_without_replacement` | API_BREAK | 1 | 0 | 0 |
 | `exported_object_alignment_reduced` | RISK | 0 | 0 | 5 |
-| `func_added` | COMPATIBLE | 9 | 0 | 8 |
+| `func_added` | COMPATIBLE | 9 | 0 | 9 |
 | `func_added_elf_only` | COMPATIBLE | 0 | 0 | 0 |
 | `func_export_added` | COMPATIBLE | 2 | 0 | 0 |
 | `func_language_linkage_changed` | BREAKING | 1 | 0 | 0 |
@@ -243,7 +243,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `type_kind_changed` | BREAKING | 1 | 0 | 0 |
 | `type_removed` | API_BREAK | 5 | 1 | 3 |
 | `type_size_changed` | BREAKING | 19 | 1 | 7 |
-| `type_vtable_changed` | BREAKING | 3 | 0 | 0 |
+| `type_vtable_changed` | BREAKING | 3 | 0 | 1 |
 | `typedef_base_changed` | BREAKING | 1 | 0 | 4 |
 | `typedef_removed` | API_BREAK | 2 | 0 | 1 |
 | `union_field_added` | COMPATIBLE | 2 | 0 | 0 |
@@ -433,6 +433,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `func_likely_renamed` | BREAKING | 0 | 0 | 0 |
 | `func_lost_inline` | COMPATIBLE | 0 | 0 | 0 |
 | `func_noexcept_added` | COMPATIBLE | 0 | 0 | 0 |
+| `func_return_covariant_narrowed` | RISK | 0 | 0 | 1 |
 | `generated_file_dependency_unstable` | RISK | 0 | 0 | 0 |
 | `generated_header_changed` | RISK | 0 | 0 | 0 |
 | `generated_header_reaches_public_api` | RISK | 0 | 0 | 0 |

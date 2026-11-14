@@ -331,6 +331,7 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "func_return_changed": "L1",
     "param_pointer_level_changed": "L1",
     "abi_equivalent_type_changed": "L1",
+    "func_return_covariant_narrowed": "L1",
     "atomic_qualifier_changed": "L1",
     "char8t_migration": "L1",
     "bit_int_width_changed": "L1",
