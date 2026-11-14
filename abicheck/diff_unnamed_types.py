@@ -32,6 +32,8 @@ from __future__ import annotations
 
 import re
 
+from abicheck.model.mangling_scheme import is_msvc_decorated, itanium_encoding
+
 from .demangle import demangle
 from .detector_registry import registry
 from .diff_helpers import make_change
@@ -157,28 +159,14 @@ _MSVC_UNNAMED_PLACEHOLDERS: tuple[tuple[str, str], ...] = (
 )
 
 
-def _itanium_encoding(name: str) -> str | None:
-    """*name* as a pure Itanium ``_Z…`` spelling, or None when it is not one.
-
-    Mach-O export readers already strip the platform's single leading
-    underscore (``__Z3fooi`` -> ``_Z3fooi``); a still-decorated spelling from
-    a hand-built or foreign snapshot is normalized here the same way.
-    """
-    if name.startswith("__Z"):
-        return name[1:]
-    if name.startswith("_Z"):
-        return name
-    return None
-
-
 def unnamed_type_kind(name: str) -> str | None:
     """Human label when the exported linker spelling *name* embeds an unnamed
     type, under any of the mangling schemes an export table can carry
     (Itanium on ELF/Mach-O, MSVC on PE), else None."""
-    itanium = _itanium_encoding(name)
+    itanium = itanium_encoding(name)
     if itanium is not None:
         return _unnamed_kind(itanium)
-    if name.startswith("?"):
+    if is_msvc_decorated(name):
         for marker, label in _MSVC_UNNAMED_PLACEHOLDERS:
             if marker in name:
                 return label
@@ -199,11 +187,11 @@ def _exported_symbol_names(snap: AbiSnapshot) -> set[str]:
     """
     out: set[str] = set()
     for name in snapshot_export_names(snap):
-        itanium = _itanium_encoding(name)
+        itanium = itanium_encoding(name)
         if itanium is not None:
             if is_abi_relevant_elf_symbol(itanium):
                 out.add(name)
-        elif name.startswith("?"):
+        elif is_msvc_decorated(name):
             out.add(name)
     return out
 
@@ -231,7 +219,7 @@ def _diff_unnamed_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
         label = unnamed_type_kind(name)
         if label is None:
             continue
-        itanium = _itanium_encoding(name)
+        itanium = itanium_encoding(name)
         pretty = (demangle(itanium) if itanium is not None else None) or name
         changes.append(
             make_change(
