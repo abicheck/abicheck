@@ -3,7 +3,7 @@
 The construct axis cannot tell two edits of one record apart: an operator
 that appends a member and one that removes a member in padding both cover
 ``struct``. The edit axis splits ``struct`` and ``inheritance`` into the
-classes ``_edit_corpus_edit_model`` defines from C/C++ layout rules. The
+classes ``abiforge.model.edit_model`` defines from C/C++ layout rules. The
 model, not the operator registry, is the denominator: a class no operator
 generates is an uncovered gap, reported in the coverage summary and the
 ledger, never dropped.
@@ -18,14 +18,10 @@ from pathlib import Path
 
 import pytest
 
-from tests import (
-    _edit_corpus_coverage as cov,
-    _edit_corpus_edit_model as model,
-    _edit_corpus_space as space,
-)
-from tests._edit_corpus_config import Toolchain, default_config
-from tests._edit_corpus_operators import OP_BY_NAME, OPERATORS
-from tests._edit_corpus_space import (
+from abiforge import coverage as cov
+from abiforge.model import edit_model as model, space
+from abiforge.model.config import Toolchain, default_config
+from abiforge.model.space import (
     ANY_EDIT,
     CONSTRUCTS,
     OP_EDIT_CLASS,
@@ -37,6 +33,7 @@ from tests._edit_corpus_space import (
     infeasible,
     op_constructs,
 )
+from abiforge.operators import OP_BY_NAME, OPERATORS
 
 GCC = Toolchain("gcc", 13, "gcc", "g++")
 LAYOUT_TABLE = (
@@ -204,7 +201,7 @@ def test_the_ledger_lists_every_gap() -> None:
     ledger = cov.load_ledger()
     assert ledger["edit_classes_without_operator"] == list(
         space.edit_classes_without_operator()
-    ), "regenerate: python -m tests._edit_corpus_coverage ledger --write"
+    ), "regenerate: python -m abiforge.coverage ledger --write"
 
 
 def test_the_summary_names_every_gap() -> None:
@@ -215,8 +212,7 @@ def test_the_summary_names_every_gap() -> None:
     n = sum(len(c) for c in SPLIT.values())
     n_gaps = len(space.edit_classes_without_operator())
     assert (
-        f"Edit classes in the model (`tests/_edit_corpus_edit_model.py`): **{n}**"
-        in text
+        f"Edit classes in the model (`abiforge/model/edit_model.py`): **{n}**" in text
     )
     assert f"with none (uncovered gaps, still in the denominator): **{n_gaps}**" in text
 
@@ -281,7 +277,7 @@ def test_coverage_counts_the_edit_class_that_ran() -> None:
 
 
 def test_a_pre_edit_axis_point_id_is_refused_not_guessed() -> None:
-    from tests._edit_corpus_space import AXES, point_from_id
+    from abiforge.model.space import AXES, point_from_id
 
     current = "/".join(f"v{i}" for i in range(len(AXES)))
     legacy = current.rsplit("/", 1)[0]

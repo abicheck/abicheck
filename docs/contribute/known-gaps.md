@@ -126,31 +126,31 @@ dependency walk and debug roots to every member. No open gap remains.
 
 **Status (2026-11-12): OPEN.** `glibcxx_dual_abi_flip_detected` needs `__cxx11` names to be at least 30% of the removed and added exports. From C++20 the new-ABI `std::string` is `constexpr` and an `-O0` library exports none of its members, while a `-D_GLIBCXX_USE_CXX11_ABI=0` rebuild exports the copy-on-write string's members as weak symbols (`_ZNSs...`, `_ZNKSs...`). Those count as added churn, and `elf_symbol_filter._STDLIB_PREFIXES` does not recognize the `Ss` substitution as the C++ runtime's, so six re-mangled functions fall below the threshold. `glibcxx_dual_abi_changed` and the removals still make it `BREAKING`. Found by the edit corpus (`std_string_abi_flipped` on `cxx_alt`, C++20 and later). Owner: `diff_platform.py`, `elf_symbol_filter.py`.
 `wrong-kind` — the flip is reported as individual changes, not named as a flip.
-<!-- no-canary: pinned by the edit corpus's strict-xfail `std_string_abi_flipped` entry in tests/_edit_corpus_known.py, which fails once the answer changes -->
+<!-- no-canary: pinned by the edit corpus's strict-xfail `std_string_abi_flipped` entry in abiforge/known.py, which fails once the answer changes -->
 
 #### A GNU-unique static whose inline owner was inlined away is not compared at DWARF depth (2026-11-12)
 
 **Status (2026-11-12): OPEN.** At `-O2` gcc inlines a header inline function into its only caller, and the function's static local stays exported as `STB_GNU_UNIQUE`. The binary-only and header-depth compares report the binding change (`symbol_binding_became_unique` when it first appears, `symbol_binding_lost_unique` under `-fno-gnu-unique`); the DWARF-depth compare of the same pair reports `func_added` or nothing. At `-O0`, where the owner is emitted, DWARF depth reports it too. Found by the edit corpus (`gnu_unique_static_added` on `cxx_more`, `gnu_unique_disabled` on `cxx_alt`, gcc `-O2`). Owner: `diff_platform_elf_symbols.py` / the DWARF-depth symbol view.
 `false-clean` — a GNU-unique binding change is missed when the static's owner left the binary.
-<!-- no-canary: pinned by the edit corpus's strict-xfail `gnu_unique_disabled` entry in tests/_edit_corpus_known.py, which fails once the answer changes -->
+<!-- no-canary: pinned by the edit corpus's strict-xfail `gnu_unique_disabled` entry in abiforge/known.py, which fails once the answer changes -->
 
 #### A macro that changes the build's ABI makes the two header dumps incomparable (2026-11-12)
 
 **Status (2026-11-12): OPEN.** Rebuilding an i386 library with `-D_TIME_BITS=64 -D_FILE_OFFSET_BITS=64` widens `time_t`; given the same defines, the new side's header dump records a different parse profile, and the compare raises `ProfileMismatchError` instead of reporting `time64_abi_changed` (the DWARF-depth compare reports it). The refusal is the right answer for an accidental option drift and the wrong one for a deliberate ABI-level macro. Found by the edit corpus (`time_bits_64` on `c_elf_alt`, `-m32`). Owner: `comparability.py`.
 `refused` — a deliberate ABI macro switch cannot be compared at header depth.
-<!-- no-canary: pinned by the edit corpus's strict-xfail `time_bits_64` entry in tests/_edit_corpus_known.py, which fails once the answer changes -->
+<!-- no-canary: pinned by the edit corpus's strict-xfail `time_bits_64` entry in abiforge/known.py, which fails once the answer changes -->
 
 #### A version requirement on a newly needed library reads as compatible, whatever its version (2026-11-12)
 
 **Status (2026-11-12): OPEN.** `diff_platform_elf_symbols` reports a new `.gnu.version_r` tag as `symbol_version_required_added_compat` whenever its library was neither required nor `DT_NEEDED` before. A library whose old build imported nothing from libc (an `-O2` build linked `--as-needed`) and now calls `getrandom` gains `libc.so.6` with `GLIBC_2.25`: a runtime floor that did not exist before reads as compatible, and no `runtime_floor_raised` is reported. `needed_added` keeps the verdict at `COMPATIBLE_WITH_RISK`, so no verdict reads cleaner. Found by the edit corpus (`glibc_version_required_added` on `c_elf`, gcc `-O2`). Owner: `diff_platform_elf_symbols.py`.
 `wrong-kind` — the new glibc floor is named as a compatible requirement.
-<!-- no-canary: pinned by the edit corpus's strict-xfail `glibc_version_required_added` entry in tests/_edit_corpus_known.py, which fails once the answer changes -->
+<!-- no-canary: pinned by the edit corpus's strict-xfail `glibc_version_required_added` entry in abiforge/known.py, which fails once the answer changes -->
 
 #### An export GNU ld binds to the base version is never reported as unversioned (2026-11-12)
 
 **Status (2026-11-12): OPEN.** `unversioned_exported_symbol` flags only `ElfVersionBinding.UNVERSIONED` and deliberately skips `BASE` (index 1 in a library with a `VER_FLG_BASE` definition), reasoning that a base-bound export predates the version script. GNU ld binds every export a version script does not match to the base version, so a symbol newly added outside every node (`LIBEDIT_1.0 { global: [!e]*; };` plus a new `edit_unv`) is exactly the hygiene problem the check describes, yet it never reads unversioned; a real `UNVERSIONED` binding in a versioned library is not something GNU ld produces. Telling a new base-bound export from one that predates versioning needs the comparison's history, not one side. Found by the edit corpus (`unversioned_export_added` on `c_elf`). Owner: `buildsource/cross_source_checks.py`.
 `wrong-kind` — a new unversioned export in a versioned library reads only as `func_added`.
-<!-- no-canary: pinned by the edit corpus's strict-xfail `unversioned_export_added` entry in tests/_edit_corpus_known.py, which fails once the answer changes -->
+<!-- no-canary: pinned by the edit corpus's strict-xfail `unversioned_export_added` entry in abiforge/known.py, which fails once the answer changes -->
 
 #### A GCC-built DWARF snapshot cannot tell that a virtual became pure (2026-11-08)
 
@@ -324,7 +324,7 @@ current emitter, which is unchanged.
 
 **Status (2026-11-13): OPEN.** `diff_unnamed_types` (`unnamed_type_in_public_abi`, COMPATIBLE_WITH_RISK) declares `requires_support` on ELF metadata for both sides and collects names from `snap.elf`, so on a Mach-O library, or a MinGW-built PE one, a new export whose Itanium mangled name embeds an unnamed type (`Ut_`) is never examined, although its name depends on declaration order exactly as on ELF. The run reads only `func_added` (COMPATIBLE). Found by the edit corpus (`unnamed_type_export_added` on `cxx_more`, macOS integration lane). Closing it means reading the export names from the platform-neutral export index (Mach-O names carry an extra leading `_`; MSVC manglings have no `Ut_` production). Owner: `diff_unnamed_types.py` (`compare/`).
 `false-clean` — the declaration-order hazard of an unnamed type in a new export is unreported off ELF.
-<!-- no-canary: pinned by the edit corpus's strict-xfail `unnamed_type_export_added` entry in tests/_edit_corpus_known.py, which fails once the answer changes -->
+<!-- no-canary: pinned by the edit corpus's strict-xfail `unnamed_type_export_added` entry in abiforge/known.py, which fails once the answer changes -->
 
 #### The contract evaluator places a clang class-template pattern out of contract (2026-11-12)
 
@@ -364,7 +364,7 @@ current emitter, which is unchanged.
 
 #### castxml records no GNU contract attribute on a function (2026-11-12)
 
-**Status (2026-11-12): OPEN.** castxml 0.7 writes no `nonnull`, `returns_nonnull`, `malloc`, `format`, `warn_unused_result` (or any other GNU function attribute but a few x86-32 conventions) into a `<Function>`'s `attributes`, so `extract/headers/castxml/location.py`'s contract-token reader never sees one and `Function.contract_attributes` stays empty on both sides. Adding or dropping such an attribute reads `NO_CHANGE` at castxml headers depth, where the clang and native gcc backends report `func_contract_attribute_added`/`_removed` (COMPATIBLE_WITH_RISK). Found by the edit corpus (`func_contract_attribute_added`/`_removed` on `c_elf`, strict xfails in `tests/_edit_corpus_known.py`). Closing it: recover the tokens from the declaration's own (preprocessed) text, the way `extract/headers/castxml/calling_convention.py` already recovers `ms_abi`/`sysv_abi`. Owner: `extract/headers/castxml/`.
+**Status (2026-11-12): OPEN.** castxml 0.7 writes no `nonnull`, `returns_nonnull`, `malloc`, `format`, `warn_unused_result` (or any other GNU function attribute but a few x86-32 conventions) into a `<Function>`'s `attributes`, so `extract/headers/castxml/location.py`'s contract-token reader never sees one and `Function.contract_attributes` stays empty on both sides. Adding or dropping such an attribute reads `NO_CHANGE` at castxml headers depth, where the clang and native gcc backends report `func_contract_attribute_added`/`_removed` (COMPATIBLE_WITH_RISK). Found by the edit corpus (`func_contract_attribute_added`/`_removed` on `c_elf`, strict xfails in `abiforge/known.py`). Closing it: recover the tokens from the declaration's own (preprocessed) text, the way `extract/headers/castxml/calling_convention.py` already recovers `ms_abi`/`sysv_abi`. Owner: `extract/headers/castxml/`.
 `false-clean` — a castxml dump misses a function's added or withdrawn contract attribute.
 <!-- canary: tests/test_header_backend_fact_gaps_integration.py::test_castxml_records_no_gnu_contract_attribute -->
 
@@ -390,7 +390,7 @@ current emitter, which is unchanged.
 
 **Status (2026-11-12): OPEN.** castxml and the clang backend record a header-only function: a `static inline` C function, or a C++ `inline` function no unit of the library calls. The native gcc plugin backend (ADR-092) does not, because gcc never emits it. So removing such a function reads `NO_CHANGE` (`COMPATIBLE` through the CLI's compare verb, which still reports the public-surface shrink) instead of `inline_function_removed`, and an incompatible parameter change reads nothing instead of `header_only_function_params_changed`, although consumers that call it stop compiling. Found by the edit corpus (`header_inline_removed` on `cxx_alt`, `header_only_function_params_changed` on `c_elf_alt`, `headers.gcc`). Owner: `extract/headers/gcc/`.
 `false-clean` — a source break in a header-only function is invisible under the gcc header backend.
-<!-- no-canary: pinned by the edit corpus's strict-xfail `header_inline_removed` entry in tests/_edit_corpus_known.py, which fails once the answer changes -->
+<!-- no-canary: pinned by the edit corpus's strict-xfail `header_inline_removed` entry in abiforge/known.py, which fails once the answer changes -->
 
 #### The DWARF lane records fewer C++ exports than the symbols-only lane, so ctor/dtor variants and RTTI/vtable objects read as added or removed (2026-11-10)
 
@@ -704,31 +704,31 @@ per-item status in the
 
 **Status (2026-11-12): OPEN.** A version script that drops a node no exported symbol was bound to (`LIBEDIT_1.1 { local: ...; } LIBEDIT_1.0;`) removes a `.gnu.version_d` entry no consumer can have recorded in its `.gnu.version_r`, since a consumer records only the versions of symbols it binds. `symbol_version_defined_removed` fires on its own exactly in this case (with a bound symbol, `symbol_version_node_removed` wins the dedup) and keeps its `BREAKING` default. Found by the edit corpus (`empty_version_node_dropped` on `c_elf_alt`; every consumer still loads). Owner: `diff_platform_elf_symbols.py` / the `symbol_version_defined_removed` taxonomy entry.
 `false-positive` — a version-script cleanup that breaks nobody gates as a binary break.
-<!-- no-canary: pinned by the edit corpus's strict-xfail `empty_version_node_dropped` entry in tests/_edit_corpus_known.py, which fails once the answer changes -->
+<!-- no-canary: pinned by the edit corpus's strict-xfail `empty_version_node_dropped` entry in abiforge/known.py, which fails once the answer changes -->
 
 #### A function that leaves the public header but stays exported reads as a binary break (2026-11-12)
 
 **Status (2026-11-12): OPEN.** Removing a declaration from the public header while the library keeps exporting the symbol reports `exported_not_public` and `func_removed` (`BREAKING`). Built consumers still bind the export and run; only consumers that name the function stop compiling, which is a source break. Treating a still-exported symbol as not removed is listed under "Do not re-attempt" because it would silence a real contract removal; the open question is the verdict, not the finding. Found by the edit corpus (`exported_but_undeclared` on `c_elf`, default visibility). Owner: `policy/` (contract-removal classification).
 `false-positive` — a contract removal with the binary intact gates as an ABI break, not an API break.
-<!-- no-canary: pinned by the edit corpus's strict-xfail `exported_but_undeclared` entry in tests/_edit_corpus_known.py, which fails once the answer changes -->
+<!-- no-canary: pinned by the edit corpus's strict-xfail `exported_but_undeclared` entry in abiforge/known.py, which fails once the answer changes -->
 
 #### A pointer-level change of a never-exported header function reads as a binary break (2026-11-12)
 
 **Status (2026-11-12): OPEN.** `compare/export_transition.regrade_unexported_params` relabels `func_params_changed` on a function whose export is confirmed absent on both sides as `header_only_function_params_changed` (`API_BREAK`), but a sibling parameter kind on the same function is not regraded: a `static inline` header function whose `int` parameter becomes `int *` reports `header_only_function_params_changed` plus `param_pointer_level_changed` (`BREAKING`), though no binary carries the function. Found by the edit corpus (`header_only_function_params_changed` on `c_elf_alt`). Owner: `compare/export_transition.py`.
 `false-positive` — a source-only signature change of a header-only function gates as a binary break.
-<!-- no-canary: pinned by the edit corpus's strict-xfail `header_only_function_params_changed` entry in tests/_edit_corpus_known.py, which fails once the answer changes -->
+<!-- no-canary: pinned by the edit corpus's strict-xfail `header_only_function_params_changed` entry in abiforge/known.py, which fails once the answer changes -->
 
 #### A `-mveclibabi` switch reads as a binary break when no call is vectorized (2026-11-12)
 
 **Status (2026-11-12): OPEN.** `vector_abi_changed` compares the `-mveclibabi=`/`-fveclib=` switches each unit's `DW_AT_producer` records and keeps its `BREAKING` default whatever the code does. A library that makes no vectorizable math call is byte-identical apart from the producer string, yet the rebuild gates as a break. Closing it needs evidence that a vectorized math entry point (an SVML or libmvec import) actually changed. Found by the edit corpus (`vector_math_abi_changed` on `c_elf`, gcc). Owner: `compare/toolchain_flags.py`.
 `false-positive` — a switch that changed no code gates as a binary break.
-<!-- no-canary: pinned by the edit corpus's strict-xfail `vector_math_abi_changed` entry in tests/_edit_corpus_known.py, which fails once the answer changes -->
+<!-- no-canary: pinned by the edit corpus's strict-xfail `vector_math_abi_changed` entry in abiforge/known.py, which fails once the answer changes -->
 
 #### An inline function's static local, exported by clang, reads as an undeclared export (2026-11-12)
 
 **Status (2026-11-12): OPEN.** clang emits a public-header inline function's static local (`_ZZ8edit_ctrvE1n`) as a weak export (gcc as `STB_GNU_UNIQUE`). With public headers the new export reads as `exported_not_public` and the addition becomes `COMPATIBLE_WITH_RISK`, though no source can name a function-local static: it exists only to keep the inline function's ODR. Found by the edit corpus (`gnu_unique_static_added` on `cxx_more`, clang). Owner: `buildsource/cross_source_checks.py` (`exported_not_public`).
 `false-positive` — adding a header inline function with a static local reads as a risk under clang.
-<!-- no-canary: pinned by the edit corpus's strict-xfail `gnu_unique_static_added` entry in tests/_edit_corpus_known.py, which fails once the answer changes -->
+<!-- no-canary: pinned by the edit corpus's strict-xfail `gnu_unique_static_added` entry in abiforge/known.py, which fails once the answer changes -->
 
 #### `func_virtual_noexcept_added` does not rule out a `final` method or class (2026-11-08)
 
@@ -743,7 +743,7 @@ per-item status in the
 #### An `-O2` rebuild of a C++ library that uses `std::string` reads as a risk on gcc, or a break on MinGW (2026-11-08)
 
 **Status (2026-11-09): OPEN, narrowed.** Rebuilding the same `std::string`-using library at `-O2` instead of `-O0` inlines the weak (vague-linkage) `std::` template instantiations the `-O0` build exported. On ELF that noise is fixed (ADR-089 A7: weak `std::`/`__gnu_cxx::` copies and version-covered imports are demoted with a recorded rule, and clang's declaration-only `std::string` DIE no longer fakes `struct_return_convention_changed`). gcc also drops `__stack_chk_fail`, because `-O2` leaves no frame `-fstack-protector-strong` must guard. Since extractor generation 49 the snapshot records every compilation unit's protector setting from its `DW_AT_producer` (`abicheck.cu_stack_protector`), and `policy/stack_canary_provenance.py` demotes a lost canary when every unit on both sides records the protector still on and no weaker; the `c_core` `-m32` placement drop (`g_counter` `0x4010` -> `0x4008`, `exported_object_alignment_reduced` 16 -> 8) is demoted at every evidence level by `policy/address_alignment_bound.py`, since no declared requirement supports it. Two residues remain. (1) **Binary only** (no DWARF, or clang without `-grecord-command-line`), no unit records the flag, so the lost canary keeps its RISK (exit 0) with `confidence: medium` and `review_evidence.note` saying the evidence is weaker (gcc `cxx_stdlib`, and `c_core` at `-m32`). This is the intended answer for that evidence, not a fault in the code. The demotion also requires every exported function to lie in a unit that records its setting, so an object linked without `-g` keeps the RISK; a *non-exported* function from such an object is not checked, and a canary lost only there would still be demoted. (2) MinGW g++ on Windows (libstdc++, PE) still reads BREAKING (`func_removed`, `func_visibility_changed`; v1 corpus, integration windows-latest leg): a PE export directory records no binding, so the coalesced-copy rule has no signal there (ADR-089's PE limit). At header depth it reads COMPATIBLE: the lost instantiations are exports no public header declares, and the CLI's pipeline demotes their removal. On macOS (libc++, Mach-O) the rebuild reads `NO_CHANGE`. Under `-D_GLIBCXX_USE_CXX11_ABI=0` from C++20 on, the `-O0` build also exported a weak `std::less<const char*>::operator()`, which kept a RISK on gcc and clang at every evidence level because the customization-point owner (`extract/stdlib_local_origin.py`) took any argument but a bare builtin for a program-defined type. Fixed (2026-11-10): the owner now asks the shared std-scope scanner (`extract/mangled_foreign_template_args.py`) for a proof that only builtins, their pointers/references/cv-qualifications and standard types appear. An unread name stays the library's. Still open: the origin a snapshot records at dump time (`elf_metadata`) attributes a function-local static of such a specialization to the library, and fixing that needs an extractor generation. Found by the config-matrix corpus (`rebuild_optimized`, `cxx_stdlib`). `false-positive`. Owner: `extract/` (PE coalescing evidence).
-<!-- no-canary: the corpus strict xfails (tests/_edit_corpus_known.py, narrowed to gcc binary-only and PE) and tests/test_rebuild_toolchain_drift_integration.py::test_optimization_rebuild_reads_compatible fail once the residue moves -->
+<!-- no-canary: the corpus strict xfails (abiforge/known.py, narrowed to gcc binary-only and PE) and tests/test_rebuild_toolchain_drift_integration.py::test_optimization_rebuild_reads_compatible fail once the residue moves -->
 
 #### A typedef retargeted inside a template argument still reads as a removal plus an addition under headers (2026-10-25)
 

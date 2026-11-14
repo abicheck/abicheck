@@ -1,7 +1,7 @@
 """Coverage of the generated edit corpus: ChangeKind scope/ratchet and the language space.
 
 Fast: no compiler. The declared side of the ChangeKind ratchet is computed
-from the operators (``_edit_corpus_coverage.declared_kinds``) and held to the
+from the operators (``abiforge.coverage.declared_kinds``) and held to the
 committed ledger; the run side (``check_floor``) and the language-space
 report are checked on hand-built records against independently counted
 oracles.
@@ -17,9 +17,9 @@ from pathlib import Path
 import pytest
 
 from abicheck.model.change_catalog.kinds import ChangeKind
-from tests import _edit_corpus_coverage as cov, _edit_corpus_space as space
-from tests._edit_corpus_cells import seed_conflict
-from tests._edit_corpus_config import (
+from abiforge import coverage as cov
+from abiforge.model import space
+from abiforge.model.config import (
     EVIDENCE,
     FAMILIES,
     FEATURES,
@@ -32,11 +32,12 @@ from tests._edit_corpus_config import (
     Toolchain,
     default_config,
 )
-from tests._edit_corpus_expect import PASSING_CLASSES, ExecTruth, Expectation, PairTruth
-from tests._edit_corpus_operators import OP_BY_NAME, OPERATORS
-from tests._edit_corpus_opkit import SONAME_ADVISORY
-from tests._edit_corpus_seeds import SEED_BY_NAME, SEEDS
-from tests._edit_corpus_tiers import _PR
+from abiforge.model.expect import PASSING_CLASSES, ExecTruth, Expectation, PairTruth
+from abiforge.model.opkit import SONAME_ADVISORY
+from abiforge.model.seeds import SEED_BY_NAME, SEEDS
+from abiforge.operators import OP_BY_NAME, OPERATORS
+from abiforge.run.cells import seed_conflict
+from abiforge.run.tiers import _PR
 
 GCC = Toolchain("gcc", 13, "gcc", "g++")
 CLANG = Toolchain("clang", 18, "clang", "clang++")
@@ -238,7 +239,7 @@ def test_ledger_records_every_gain() -> None:
     )
     assert not gained, (
         f"{sorted(gained)} are newly declared: run "
-        "`python -m tests._edit_corpus_coverage ledger --write`"
+        "`python -m abiforge.coverage ledger --write`"
     )
 
 
@@ -410,7 +411,7 @@ def test_a_failing_xfailed_or_skipped_cell_verifies_nothing(
 
 def test_passing_classes_are_the_ones_that_verify() -> None:
     # Exhaustive over the reconcile vocabulary: exactly the passing classes verify.
-    from tests._edit_corpus_expect import MISMATCH_CLASSES
+    from abiforge.model.expect import MISMATCH_CLASSES
 
     for cls in (*PASSING_CLASSES, *MISMATCH_CLASSES):
         got = _rec(cls=cls, expected=("A",), produced=("A",)).verified
@@ -823,7 +824,7 @@ def test_the_generator_refuses_what_the_space_calls_a_conflict() -> None:
     # One rule, read by both: a seed containing std::string is refused when
     # built (seed_conflict) or consumed (pair_blocked) under -fpack-struct or
     # -fshort-enums, whatever the edited role.
-    from tests._edit_corpus_cells import pair_blocked
+    from abiforge.run.cells import pair_blocked
 
     for seed in SEEDS:
         has_string = "std_string" in space.seed_constructs(seed)
@@ -935,7 +936,7 @@ def test_only_seeds_with_elf_link_roles_are_unavailable_off_elf(
 ) -> None:
     # Apple's ld rejects --version-script, -z and --as-needed (the macOS
     # integration job failed every c_elf cell at link time).
-    from tests._edit_corpus_cells import elf_link_unavailable
+    from abiforge.run.cells import elf_link_unavailable
 
     seed = SEED_BY_NAME[seed_name]
     cfg = default_config(seed.lang, GCC).with_(platform=platform)

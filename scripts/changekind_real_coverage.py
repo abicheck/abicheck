@@ -43,7 +43,7 @@ Real-fixture backing ledger
     A narrower question than "any real source": which kinds a *compiled
     fixture* is declared to produce -- a catalog case's ``expected_kinds`` or
     a tier of the generated edit corpus's ``verified_floor``
-    (``tests/edit_corpus_coverage_ledger.json``). The lexical integration scan
+    (``abiforge/coverage_ledger.json``). The lexical integration scan
     and field shapes do not count. ``--write-fixture-ledger`` records it in
     ``scripts/changekind_fixture_ledger.json``; the test fails when a recorded
     kind loses every backing source (no-shrink) and when the ledger drifts
@@ -66,7 +66,7 @@ CATALOG_GT = ROOT / "catalog" / "ground_truth.json"
 FIELD_SHAPES = TESTS / "field_shapes"
 DOC_PATH = ROOT / "docs" / "contribute" / "changekind-real-coverage.md"
 BASELINE_PATH = SCRIPTS / "changekind_real_coverage_baseline.json"
-EDIT_CORPUS_LEDGER = TESTS / "edit_corpus_coverage_ledger.json"
+EDIT_CORPUS_LEDGER = ROOT / "abiforge" / "coverage_ledger.json"
 FIXTURE_LEDGER_PATH = SCRIPTS / "changekind_fixture_ledger.json"
 SOURCES = ("catalog", "field_shapes", "integration")
 TOP_N = 20

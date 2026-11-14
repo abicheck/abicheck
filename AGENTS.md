@@ -142,8 +142,8 @@ pip install -e ".[dev]"            # add ,docs,dist for full pr-profile parity
 # modules you touched first (`pytest tests/test_<module>*.py -q`).
 pytest tests/ -m "not integration and not libabigail and not abicc and not slow and not golden" -q
 
-ruff check abicheck/ tests/        # lint (CI-enforced)
-ruff format --check abicheck/ tests/
+ruff check abicheck/ tests/ abiforge/   # lint (CI-enforced)
+ruff format --check abicheck/ tests/ abiforge/
 mypy abicheck/                     # baseline is 0 errors — keep it 0
 python scripts/check_architecture.py   # ADR-061 import-direction + no-growth gate
 python scripts/check_ai_readiness.py   # structural repo gates

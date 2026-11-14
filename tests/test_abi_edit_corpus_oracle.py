@@ -17,10 +17,9 @@ from pathlib import Path
 
 import pytest
 
-import tests._edit_corpus_exec as ex
-import tests._edit_corpus_toolchains as tcs
-from tests._edit_corpus_cells import CellResult
-from tests._edit_corpus_config import (
+import abiforge.run.exec as ex
+import abiforge.run.toolchains as tcs
+from abiforge.model.config import (
     STANDARD_BY_NAME,
     Config,
     Consumer,
@@ -28,13 +27,14 @@ from tests._edit_corpus_config import (
     Toolchain,
     default_config,
 )
-from tests._edit_corpus_exec import ExecutionOracle, RunResult, binary_layout_only
-from tests._edit_corpus_expect import Expectation, Reconciled
-from tests._edit_corpus_harness import Built, CompileError
-from tests._edit_corpus_operators import OP_BY_NAME
-from tests._edit_corpus_opkit import SONAME_ADVISORY
-from tests._edit_corpus_seeds import C_SEED, SEED_BY_NAME
-from tests._edit_corpus_tiers import Cell
+from abiforge.model.expect import Expectation, Reconciled
+from abiforge.model.opkit import SONAME_ADVISORY
+from abiforge.model.seeds import C_SEED, SEED_BY_NAME
+from abiforge.operators import OP_BY_NAME
+from abiforge.run.cells import CellResult
+from abiforge.run.exec import ExecutionOracle, RunResult, binary_layout_only
+from abiforge.run.harness import Built, CompileError
+from abiforge.run.tiers import Cell
 from tests._strict_process import StrictProcessRunner
 
 GCC = Toolchain("gcc", 13, "gcc", "g++")
@@ -906,7 +906,7 @@ def test_a_std_seed_needs_one_cxx_library_on_both_sides(
     seed: str,
     blocked: bool,
 ) -> None:
-    import tests._edit_corpus_cells as cells
+    import abiforge.run.cells as cells
 
     consumer = Toolchain("clang", 18, "clang", "clang++")
     monkeypatch.setattr(
@@ -955,7 +955,7 @@ def test_a_std_seed_needs_one_cxx_library_on_both_sides(
 def test_the_layout_probe_names_every_data_member(
     member: str, names: list[str]
 ) -> None:
-    from tests._edit_corpus_exec import _field_names
+    from abiforge.run.exec import _field_names
 
     assert _field_names(f" {member}; ") == names
 
@@ -999,7 +999,7 @@ def test_the_layout_probe_qualifies_a_record_declared_in_a_namespace() -> None:
     # A record in ``namespace NAME {`` blocks is probed by its qualified name;
     # a form the qualifier cannot spell (``namespace a::b {``, an anonymous
     # namespace) skips the role rather than probe a global ``struct N``.
-    from tests._edit_corpus_exec import probe_expressions
+    from abiforge.run.exec import probe_expressions
 
     roles = {
         "ns": ("namespace lib { namespace detail { struct N { int a; }; } }", ""),
@@ -1023,7 +1023,7 @@ def test_the_layout_probe_skips_only_records_it_cannot_qualify() -> None:
     # One role mixing every form: only the records inside ``namespace a::b {``
     # or an anonymous namespace are skipped; the rest keep their probes, and an
     # enum in a named namespace is probed by its qualified name.
-    from tests._edit_corpus_exec import probe_expressions
+    from abiforge.run.exec import probe_expressions
 
     header = (
         "namespace a::b { struct M { int x; }; }\n"

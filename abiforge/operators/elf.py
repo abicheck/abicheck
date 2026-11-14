@@ -2,7 +2,7 @@
 
 Ground truth is declared from the edit's meaning (the ELF loader's rules for
 version nodes, SONAMEs, bindings, copy relocations and TLS; C layout rules),
-never from abicheck's answer; see ``_edit_corpus_operators`` for the
+never from abicheck's answer; see ``abiforge.operators`` for the
 ``EditOp`` fields. Many edits here change one *build role* (a version script,
 the SONAME, a link or compile flag) rather than a declaration.
 
@@ -16,9 +16,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from tests._edit_corpus_expect import Rule
-from tests._edit_corpus_opkit import _REMOVED, Edit, EditOp, Roles, _merge, _set
-from tests._edit_corpus_seeds import RoleText
+from abiforge.model.expect import Rule
+from abiforge.model.opkit import _REMOVED, Edit, EditOp, Roles, _merge, _set
+from abiforge.model.seeds import RoleText
 
 __all__ = ["ELF_OPERATORS"]
 
@@ -302,7 +302,7 @@ _DYNAMIC = (
         "a caller built signed changes meaning (x86-64 and i386 default to signed)",
         expected=frozenset({"CHAR_SIGNEDNESS_CHANGED"}),
         # clang records no -f switches in DW_AT_producer, so the clang cell is
-        # a recorded strict xfail (_edit_corpus_known), not an unobservable
+        # a recorded strict xfail (abiforge.known), not an unobservable
         # edit: it fails loudly once abicheck reads the flip.
         **_RISK,
         min_evidence="dwarf",

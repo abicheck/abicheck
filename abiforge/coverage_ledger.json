@@ -1,5 +1,5 @@
 {
-  "_comment": "Ratchet for the edit corpus's ChangeKind coverage (tests/_edit_corpus_coverage.py). Regenerate the declared side with `python -m tests._edit_corpus_coverage ledger --write`; raise a verified_floor from a run with `report DIR --raise-floor TIER`.",
+  "_comment": "Ratchet for the edit corpus's ChangeKind coverage (abiforge/coverage.py). Regenerate the declared side with `python -m abiforge.coverage ledger --write`; raise a verified_floor from a run with `report DIR --raise-floor TIER`.",
   "declared_covered": [
     "ABI_EQUIVALENT_TYPE_CHANGED",
     "ABI_SURFACE_EXPLOSION",

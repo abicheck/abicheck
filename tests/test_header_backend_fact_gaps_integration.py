@@ -4,7 +4,7 @@ Each test dumps a tiny real library with one header backend and asserts the
 fact that backend currently fails to record (castxml and the native gcc plugin
 against the clang backend, which records all of them). Every test is a
 ``known_gap_canary`` for a ``docs/contribute/known-gaps.md`` entry and for the
-strict-xfail ``tests/_edit_corpus_known.py`` entries that name the same gap:
+strict-xfail ``abiforge/known.py`` entries that name the same gap:
 when one fails, the backend learned the fact -- archive the entry, drop the
 corpus ``Known`` rows, and turn the canary into a regression test.
 """
@@ -284,11 +284,11 @@ def test_a_renamed_tags_instantiation_declaration_is_dropped_in_the_corpus_seed(
     ``extern template int run<quick_tag>()`` declaration the old side had for
     ``run<fast_tag>``, so tag_type_renamed has no added symbol to pair.
     (castxml keeps it; a two-declaration header keeps it on every backend.)"""
-    from tests._edit_corpus_config import default_config
-    from tests._edit_corpus_harness import BaselineCache, build_new
-    from tests._edit_corpus_operators import OP_BY_NAME
-    from tests._edit_corpus_seeds import SEED_BY_NAME
-    from tests._edit_corpus_toolchains import build_toolchains
+    from abiforge.model.config import default_config
+    from abiforge.model.seeds import SEED_BY_NAME
+    from abiforge.operators import OP_BY_NAME
+    from abiforge.run.harness import BaselineCache, build_new
+    from abiforge.run.toolchains import build_toolchains
 
     if backend == "gcc":
         _require_gcc_plugin("c++")
@@ -405,10 +405,10 @@ def test_castxml_and_clang_name_the_corpus_pimpl_holder_by_its_bare_leaf(
     """In the edit corpus's ``cxx_more`` seed the pimpl holder ``lib::Desc`` is
     recorded as ``Desc`` while its inline accessor demangles to ``lib::Desc``,
     so the inline-body rename check finds no holder for it."""
-    from tests._edit_corpus_config import default_config
-    from tests._edit_corpus_harness import BaselineCache
-    from tests._edit_corpus_seeds import SEED_BY_NAME
-    from tests._edit_corpus_toolchains import build_toolchains
+    from abiforge.model.config import default_config
+    from abiforge.model.seeds import SEED_BY_NAME
+    from abiforge.run.harness import BaselineCache
+    from abiforge.run.toolchains import build_toolchains
 
     gcc = {t.family: t for t in build_toolchains()}.get("gcc")
     if gcc is None:

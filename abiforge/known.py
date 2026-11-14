@@ -15,8 +15,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from tests._edit_corpus_config import Config
-from tests._edit_corpus_toolchains import uses_libstdcxx
+from abiforge.model.config import Config
+from abiforge.run.toolchains import uses_libstdcxx
 
 _CLASSES = frozenset({"cxx_classes"})
 
@@ -108,7 +108,7 @@ class Known:
     when: Callable[[Config], bool]
     reason: str
     gap: str
-    # The exact finding: ``_edit_corpus_expect.issue_keys`` of the problems,
+    # The exact finding: ``abiforge.model.expect.issue_keys`` of the problems,
     # and the abicheck verdicts it was observed with. A cell xfails only when
     # class, issues and verdict all match; anything else fails.
     issues: frozenset[str]
@@ -377,7 +377,7 @@ _ALT = frozenset({"c_elf_alt"})
 _XA = frozenset({"cxx_alt"})
 _BREAKING = frozenset({"BREAKING"})
 
-# Platform-level operators (``_edit_corpus_operators_platform``).
+# Platform-level operators (``abiforge.operators.platform``).
 _PLATFORM: tuple[Known, ...] = (
     Known(
         "empty_version_node_dropped",

@@ -235,13 +235,13 @@ class Step:
 STEPS: tuple[Step, ...] = (
     Step(
         "lint",
-        _py("ruff", "check", "abicheck/", "tests/"),
+        _py("ruff", "check", "abicheck/", "tests/", "abiforge/"),
         frozenset({FAST, PR, FULL}),
         description="Ruff lint",
     ),
     Step(
         "fmt-check",
-        _py("ruff", "format", "--check", "abicheck/", "tests/"),
+        _py("ruff", "format", "--check", "abicheck/", "tests/", "abiforge/"),
         frozenset({FAST, PR, FULL}),
         description="Ruff format check",
     ),

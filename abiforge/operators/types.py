@@ -2,7 +2,7 @@
 
 Ground truth is declared from the edit's meaning (the Itanium C++ ABI's
 layout, vtable and mangling rules, C++ overload and template rules), never
-from abicheck's answer; see ``_edit_corpus_operators`` for the ``EditOp``
+from abicheck's answer; see ``abiforge.operators`` for the ``EditOp``
 fields. The operators edit roles of the ``c_elf`` (``elf.*``), ``cxx_more``
 (``x.*``) and ``cxx_stdlib`` seeds.
 """
@@ -11,10 +11,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from tests._edit_corpus_config import Config
-from tests._edit_corpus_expect import Rule
-from tests._edit_corpus_opkit import _REMOVED, Edit, EditOp, _set
-from tests._edit_corpus_seeds import STDLIB_SEED, XCXX_SEED
+from abiforge.model.config import Config
+from abiforge.model.expect import Rule
+from abiforge.model.opkit import _REMOVED, Edit, EditOp, _set
+from abiforge.model.seeds import STDLIB_SEED, XCXX_SEED
 
 __all__ = ["TYPE_OPERATORS"]
 

@@ -2,7 +2,7 @@
 
 Ground truth is declared from the Itanium C++ ABI and the language rules
 (mangling, vtable and VTT layout, base-subobject placement, overload
-resolution), never from abicheck's answer; see ``_edit_corpus_operators`` for
+resolution), never from abicheck's answer; see ``abiforge.operators`` for
 the ``EditOp`` fields.
 
 Evidence floors: a change in a mangled name is visible from the binary
@@ -15,8 +15,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from tests._edit_corpus_expect import Rule
-from tests._edit_corpus_opkit import (
+from abiforge.model.expect import Rule
+from abiforge.model.opkit import (
     _OFFSET,
     _REMOVED,
     _SIZE,
@@ -26,7 +26,7 @@ from tests._edit_corpus_opkit import (
     _binary_mangled,
     _set,
 )
-from tests._edit_corpus_seeds import XCXX_SEED
+from abiforge.model.seeds import XCXX_SEED
 
 __all__ = ["CXX_OPERATORS"]
 

@@ -12,7 +12,7 @@ each bucket with its reason; every report lists them. Over that scope:
   operators alone, no compiler (``declared_kinds``).
 - *verified*, per tier: a cell expected the kind, abicheck produced it, and
   the cell reconciled to a passing class (``CellRecord.verified``). A strict
-  xfail (``_edit_corpus_known``) or a skipped cell verifies nothing, and an
+  xfail (``abiforge.known``) or a skipped cell verifies nothing, and an
   unobservable cell (below its evidence floor) expects nothing, so it
   verifies nothing either.
   A kind abicheck produced that the cell did not expect is listed as
@@ -25,12 +25,12 @@ names yet, and ``verified_floor[tier]`` lists the kinds that tier verified
 when the ledger was written. ``tests/test_edit_corpus_coverage.py`` checks
 the declared side without a compiler; ``check_floor`` checks a run.
 
-**Language-space coverage.** Each record carries the ``_edit_corpus_space``
+**Language-space coverage.** Each record carries the ``abiforge.model.space``
 points its cell ran; ``report`` puts them against the feasible space.
 
 Records: a corpus test calls ``write_record`` when
 ``ABICHECK_EDIT_CORPUS_COVERAGE_DIR`` is set (one JSON file per cell, safe
-under xdist); ``python -m tests._edit_corpus_coverage report DIR...``
+under xdist); ``python -m abiforge.coverage report DIR...``
 aggregates them into a JSON report and a Markdown step summary.
 """
 
@@ -45,16 +45,17 @@ from collections.abc import Iterable, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from tests import _edit_corpus_space as space_model
-from tests._edit_corpus_config import Config
-from tests._edit_corpus_expect import PASSING_CLASSES, ExecTruth, Expectation
-from tests._edit_corpus_space import (
+from abiforge.checkers import abicheck as checker
+from abiforge.model import space as space_model
+from abiforge.model.config import Config
+from abiforge.model.expect import PASSING_CLASSES, ExecTruth, Expectation
+from abiforge.model.space import (
     cell_points,
     coverage as space_coverage,
     point_from_id,
 )
 
-LEDGER_PATH = Path(__file__).with_name("edit_corpus_coverage_ledger.json")
+LEDGER_PATH = Path(__file__).with_name("coverage_ledger.json")
 COVERAGE_DIR_ENV = "ABICHECK_EDIT_CORPUS_COVERAGE_DIR"
 TIERS: tuple[str, ...] = ("pr", "nightly", "weekly")
 # The ledger keys ``ledger`` recomputes and checks (``verified_floor`` is
@@ -294,26 +295,7 @@ HEADER_VISIBLE_SOURCE_KINDS = SCOPE_BUCKET_BY_ID["header_visible_source"].names
 
 def _taxonomy() -> dict[str, str]:
     """ChangeKind value -> the taxonomy module that declares it."""
-    from abicheck.model.change_catalog import (
-        build,
-        disposition,
-        platform,
-        source,
-        source_graph_risk,
-        symbols,
-        types,
-    )
-
-    modules = {
-        "build": build.BUILD_ENTRIES,
-        "disposition": disposition.DISPOSITION_ENTRIES,
-        "platform": platform.PLATFORM_ENTRIES,
-        "source": source.SOURCE_ENTRIES,
-        "source_graph_risk": source_graph_risk.SOURCE_GRAPH_RISK_ENTRIES,
-        "symbols": symbols.SYMBOLS_ENTRIES,
-        "types": types.TYPES_ENTRIES,
-    }
-    return {e.kind: mod for mod, entries in modules.items() for e in entries}
+    return {value: module for _, value, module in checker.kind_catalog()}
 
 
 def buckets_of(value: str, module: str) -> list[ScopeBucket]:
@@ -326,12 +308,9 @@ def buckets_of(value: str, module: str) -> list[ScopeBucket]:
 
 def scope_buckets() -> dict[str, list[str]]:
     """Bucket id -> the ChangeKind names it holds (first claim; see ``buckets_of``)."""
-    from abicheck.model.change_catalog.kinds import ChangeKind
-
-    tax = _taxonomy()
     out: dict[str, list[str]] = {b.id: [] for b in SCOPE_BUCKETS}
-    for k in ChangeKind:
-        out[buckets_of(k.value, tax[k.value])[0].id].append(k.name)
+    for name, value, module in checker.kind_catalog():
+        out[buckets_of(value, module)[0].id].append(name)
     return out
 
 
@@ -381,13 +360,13 @@ def expectation_kinds(exp: Expectation) -> frozenset[str]:
 
 
 def _operators() -> tuple[object, ...]:
-    from tests._edit_corpus_operators import OPERATORS
+    from abiforge.operators import OPERATORS
 
     return tuple(OPERATORS)
 
 
 def _derived_kinds() -> frozenset[str]:
-    from tests._edit_corpus_opkit import DERIVED_KINDS
+    from abiforge.model.opkit import DERIVED_KINDS
 
     return DERIVED_KINDS
 
@@ -396,7 +375,7 @@ def op_declared_kinds(op: object) -> frozenset[str]:
     """Kinds *op* names under its base expectation or any of its rules: what
     the edit itself stands behind. Kinds that follow from the verdict
     (``EditOp.with_derived``) are ``op_derived_kinds``, never declared."""
-    from tests._edit_corpus_operators import EditOp
+    from abiforge.operators import EditOp
 
     assert isinstance(op, EditOp)
     base = op.base()
@@ -408,7 +387,7 @@ def op_declared_kinds(op: object) -> frozenset[str]:
 
 def op_derived_kinds(op: object) -> frozenset[str]:
     """The derived kinds *op* owes under its base expectation or a rule."""
-    from tests._edit_corpus_operators import EditOp
+    from abiforge.operators import EditOp
 
     assert isinstance(op, EditOp)
     base = op.base()
@@ -420,7 +399,7 @@ def op_derived_kinds(op: object) -> frozenset[str]:
 
 def declared_kinds() -> dict[str, frozenset[str]]:
     """ChangeKind name -> the operators that declare it."""
-    from tests._edit_corpus_operators import OPERATORS
+    from abiforge.operators import OPERATORS
 
     out: dict[str, set[str]] = {}
     for op in OPERATORS:
@@ -507,7 +486,7 @@ def make_record(
     of one tier can run the same (op, seed, config) cell, so their records
     stay distinct; *ran_consumers* are the (build, consumer) pairs that ran
     (``ran_consumers(exec_truth)``), the only ones that cover a space point."""
-    from tests._edit_corpus_operators import EditOp
+    from abiforge.operators import EditOp
 
     assert isinstance(op, EditOp)
     exp = expectation if expectation is not None else op.expect(config)
@@ -738,7 +717,7 @@ def _edit_class_lines(sp: dict) -> list[str]:
         return []
     lines = [
         "",
-        f"Edit classes in the model (`tests/_edit_corpus_edit_model.py`): **{total}**; "
+        f"Edit classes in the model (`abiforge/model/edit_model.py`): **{total}**; "
         f"with a generating operator: **{total - len(gaps)}**; "
         f"with none (uncovered gaps, still in the denominator): **{len(gaps)}**.",
         "",
@@ -828,15 +807,13 @@ def load_ledger(path: Path | None = None) -> dict:
 
 def declared_ledger(previous: dict | None = None) -> dict:
     """The ledger's declared side, recomputed; the verified floors are carried over."""
-    from abicheck.model.change_catalog.kinds import ChangeKind
-
     scope_set = in_scope()
     declared = set(declared_kinds())
     return {
         "_comment": (
             "Ratchet for the edit corpus's ChangeKind coverage "
-            "(tests/_edit_corpus_coverage.py). Regenerate the declared side with "
-            "`python -m tests._edit_corpus_coverage ledger --write`; raise a "
+            "(abiforge/coverage.py). Regenerate the declared side with "
+            "`python -m abiforge.coverage ledger --write`; raise a "
             "verified_floor from a run with `report DIR --raise-floor TIER`."
         ),
         "declared_covered": sorted(declared & scope_set),
@@ -844,9 +821,9 @@ def declared_ledger(previous: dict | None = None) -> dict:
         # Every other catalog kind, so a kind in none of the three lists is
         # one added to the catalog after the ledger was written, and a kind
         # moved into scope by a bucket change is not mistaken for it.
-        "out_of_scope": sorted({k.name for k in ChangeKind} - scope_set),
+        "out_of_scope": sorted(set(checker.kind_names()) - scope_set),
         "verified_floor": (previous or {}).get("verified_floor", {}),
-        # Edit classes of the space model (``_edit_corpus_edit_model``) that no
+        # Edit classes of the space model (``abiforge.model.edit_model``) that no
         # operator generates: uncovered gaps, kept in the denominator.
         "edit_classes_without_operator": list(
             space_model.edit_classes_without_operator()
@@ -861,7 +838,7 @@ def _write_ledger(ledger: dict, path: Path | None = None) -> None:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="python -m tests._edit_corpus_coverage")
+    ap = argparse.ArgumentParser(prog="python -m abiforge.coverage")
     sub = ap.add_subparsers(dest="cmd", required=True)
     rp = sub.add_parser("report", help="aggregate coverage records")
     rp.add_argument("paths", nargs="+")

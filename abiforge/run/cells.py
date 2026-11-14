@@ -23,7 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from tests._edit_corpus_config import (
+from abiforge.model.config import (
     Config,
     Consumer,
     Flags,
@@ -32,19 +32,19 @@ from tests._edit_corpus_config import (
     default_config,
     has_feature,
 )
-from tests._edit_corpus_exec import Blocked, ExecutionOracle
-from tests._edit_corpus_expect import (
+from abiforge.model.expect import (
     ExecTruth,
     Expectation,
     PairTruth,
     Reconciled,
     reconcile,
 )
-from tests._edit_corpus_harness import BaselineCache, NewBuildCache, abicheck_answer
-from tests._edit_corpus_operators import EditOp
-from tests._edit_corpus_seeds import Seed
-from tests._edit_corpus_space import seed_constructs, seed_flags_conflict
-from tests._edit_corpus_toolchains import (
+from abiforge.model.seeds import Seed
+from abiforge.model.space import seed_constructs, seed_flags_conflict
+from abiforge.operators import EditOp
+from abiforge.run.exec import Blocked, ExecutionOracle
+from abiforge.run.harness import BaselineCache, NewBuildCache, abicheck_answer
+from abiforge.run.toolchains import (
     capability_gap,
     consumer_unavailable,
     default_cxx11_abi,
@@ -142,7 +142,7 @@ class CellResult:
 def seed_conflict(seed: Seed, config: Config) -> str | None:
     """A seed x build pair that is ill-formed on its own, whatever the edit.
 
-    The rule lives with the language-space model (``_edit_corpus_space``), so
+    The rule lives with the language-space model (``abiforge.model.space``), so
     the coverage report counts as infeasible exactly what the generator refuses.
     """
     return _std_flag_conflict(seed, config.flags)
@@ -420,12 +420,12 @@ REGRESSION_IMPORTS = """from pathlib import Path
 
 import pytest
 
-from tests._edit_corpus_cells import CellContext, run_cell
-from tests._edit_corpus_config import STANDARD_BY_NAME, Config, Consumer, Flags
-from tests._edit_corpus_expect import PASSING_CLASSES
-from tests._edit_corpus_operators import OP_BY_NAME
-from tests._edit_corpus_seeds import SEED_BY_NAME
-from tests._edit_corpus_toolchains import toolchain"""
+from abiforge.run.cells import CellContext, run_cell
+from abiforge.model.config import STANDARD_BY_NAME, Config, Consumer, Flags
+from abiforge.model.expect import PASSING_CLASSES
+from abiforge.operators import OP_BY_NAME
+from abiforge.model.seeds import SEED_BY_NAME
+from abiforge.run.toolchains import toolchain"""
 
 
 def regression_test(cell: CellResult) -> str:

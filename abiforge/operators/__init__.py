@@ -22,15 +22,9 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from tests._edit_corpus_config import Config
-from tests._edit_corpus_expect import VERDICT_RANK, Rule
-from tests._edit_corpus_operators_cxx import CXX_OPERATORS
-from tests._edit_corpus_operators_elf import ELF_OPERATORS
-from tests._edit_corpus_operators_layout import LAYOUT_OPERATORS
-from tests._edit_corpus_operators_platform import PLATFORM_OPERATORS
-from tests._edit_corpus_operators_symbols import SYMBOL_OPERATORS
-from tests._edit_corpus_operators_types import TYPE_OPERATORS
-from tests._edit_corpus_opkit import (
+from abiforge.model.config import Config
+from abiforge.model.expect import VERDICT_RANK, Rule
+from abiforge.model.opkit import (
     _ALIGN,
     _ENUM_SIZE,
     _FIELD_TYPE,
@@ -47,7 +41,13 @@ from tests._edit_corpus_opkit import (
     _set,
     _with,
 )
-from tests._edit_corpus_seeds import SEEDS, RoleText, Seed
+from abiforge.model.seeds import SEEDS, RoleText, Seed
+from abiforge.operators.cxx import CXX_OPERATORS
+from abiforge.operators.elf import ELF_OPERATORS
+from abiforge.operators.layout import LAYOUT_OPERATORS
+from abiforge.operators.platform import PLATFORM_OPERATORS
+from abiforge.operators.symbols import SYMBOL_OPERATORS
+from abiforge.operators.types import TYPE_OPERATORS
 
 __all__ = ["OP_BY_NAME", "OPERATORS", "VERDICT_RANK", "EditOp", "applicable", "matrix"]
 

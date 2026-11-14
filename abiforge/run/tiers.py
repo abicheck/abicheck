@@ -43,7 +43,7 @@ import random
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 
-from tests._edit_corpus_config import (
+from abiforge.model.config import (
     EVIDENCE,
     HEADER_BACKENDS,
     STANDARDS,
@@ -55,9 +55,9 @@ from tests._edit_corpus_config import (
     default_config,
     has_feature,
 )
-from tests._edit_corpus_operators import OP_BY_NAME, EditOp, matrix
-from tests._edit_corpus_seeds import SEED_BY_NAME, Seed
-from tests._edit_corpus_toolchains import (
+from abiforge.model.seeds import SEED_BY_NAME, Seed
+from abiforge.operators import OP_BY_NAME, EditOp, matrix
+from abiforge.run.toolchains import (
     CONSUMER_TOOLCHAIN_ENV,
     TOOLCHAIN_ENV,
     build_toolchains,
@@ -291,7 +291,7 @@ _STD_SLOTS = max(sum(1 for s in STANDARDS if s.lang == lang) for lang in ("c", "
 
 
 def _m32_buildable(toolchains: Sequence[Toolchain]) -> bool:
-    from tests._edit_corpus_toolchains import _flags_build
+    from abiforge.run.toolchains import _flags_build
 
     return any(_flags_build(t, "c", Flags(bits=32)) is None for t in toolchains)
 

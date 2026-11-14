@@ -4,7 +4,7 @@ name: Edit corpus tiers
 # (tests/test_abi_edit_corpus_matrix.py). The PR tier runs in integration.yml;
 # these two are report-only: scheduled or dispatched, never on pull_request,
 # never a required check. A red run means a cell's three signals (execution,
-# expect(config), abicheck) disagree in a way tests/_edit_corpus_known.py does
+# expect(config), abicheck) disagree in a way abiforge/known.py does
 # not record; the artifact holds each failing cell minimized to
 # (seed, edit, config) with a ready-to-paste regression test, and every
 # (build, consumer) pair's outcome (results/pairs/).
@@ -109,7 +109,7 @@ jobs:
           case "$seed" in *[!0-9]*) echo "::error::seed must be digits, got '$seed'"; exit 1 ;; esac
           packages="$BASE_PACKAGES"
           # normalize SPEC: validate every comma-separated name (the grammar the
-          # harness parses, tests/_edit_corpus_toolchains.py) and print them
+          # harness parses, abiforge/run/toolchains.py) and print them
           # rejoined; only that normalized text ever reaches $GITHUB_OUTPUT.
           normalize() {
             local spec="$1" out="" raw name
@@ -205,7 +205,7 @@ jobs:
         env:
           ABICHECK_EDIT_CORPUS_REPORT_DIR: results/cells
           # One ChangeKind/language-space coverage record per cell
-          # (tests/_edit_corpus_coverage.py); the report job merges shards.
+          # (abiforge/coverage.py); the report job merges shards.
           ABICHECK_EDIT_CORPUS_COVERAGE_DIR: results/coverage
           # Fail a run that executed nothing (a toolchain that vanished).
           ABICHECK_MIN_EXECUTED: "1"
@@ -231,11 +231,11 @@ jobs:
             echo "### Edit corpus ${ABICHECK_EDIT_CORPUS_TIER:-?} shard ${SHARD}/4 (seed ${ABICHECK_EDIT_CORPUS_SEED:-?})"
             echo "Unrecorded mismatches: $n (minimized cells in the artifact)."
             echo
-            python -m tests._edit_corpus_report results || echo "(no pair report)"
+            python -m abiforge.run.report results || echo "(no pair report)"
           } >> "$GITHUB_STEP_SUMMARY"
           if [ -d results/coverage ]; then
             # Reported only: the floor is checked on the merged run (report job).
-            python -m tests._edit_corpus_coverage report results/coverage \
+            python -m abiforge.coverage report results/coverage \
               --title "Coverage, shard ${SHARD}/4" \
               --summary "$GITHUB_STEP_SUMMARY"
           fi
@@ -297,7 +297,7 @@ jobs:
             echo
             echo "Unrecorded mismatches: $n (each minimized, with a regression test, under cells/ in the artifact)."
             echo
-            python -m tests._edit_corpus_report results
+            python -m abiforge.run.report results
           } > summary.md
           cat summary.md >> "$GITHUB_STEP_SUMMARY"
           cp summary.md results/summary.md
@@ -305,7 +305,7 @@ jobs:
       - name: Coverage
         # The whole tier's ChangeKind and language-space coverage, every
         # shard's records merged. When every shard finished it is held to the
-        # tier's verified floor in tests/edit_corpus_coverage_ledger.json (only
+        # tier's verified floor in abiforge/coverage_ledger.json (only
         # `pr` has one today; `report DIR --raise-floor TIER` adds one) and a
         # covered point the space model calls infeasible fails it.
         env:
@@ -317,7 +317,7 @@ jobs:
           # Only a run in which every shard finished can be held to the floor.
           check=()
           case "$CORPUS_RESULT" in success|failure) check=(--check-floor "$TIER") ;; esac
-          python -m tests._edit_corpus_coverage report results/coverage \
+          python -m abiforge.coverage report results/coverage \
             --title "Edit corpus ${TIER} coverage (${CORPUS_RESULT})" \
             --summary "$GITHUB_STEP_SUMMARY" \
             --json results/coverage-report.json \
@@ -380,8 +380,8 @@ jobs:
             "" \
             "${summary}" \
             "" \
-            "Triage: tests/CLAUDE.md \"_edit_corpus_*.py\". Fix a real abicheck bug; record a" \
-            "detector gap in tests/_edit_corpus_known.py with its known-gaps.md row only when it" \
+            "Triage: abiforge/CLAUDE.md. Fix a real abicheck bug; record a" \
+            "detector gap in abiforge/known.py with its known-gaps.md row only when it" \
             "cannot be fixed now. Close this issue once a later scheduled run is green.")"
           number="$(gh issue list --state open --search "in:title \"${TITLE}\"" \
             --json number,title --jq "map(select(.title == env.TITLE)) | .[0].number // empty")"

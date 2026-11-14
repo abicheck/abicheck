@@ -7,7 +7,7 @@ toolchain, standard and flags) against that one library pair, and each
 (build, consumer) pair is reported as a ``PairTruth``; a pair the cell marks
 infeasible or unavailable is reported with its reason and never runs:
 
-1. **Binary truth.** Every consumer shape (``_edit_corpus_consumers``) is
+1. **Binary truth.** Every consumer shape (``abiforge.run.consumers``) is
    compiled against the *old* header with the consumer's toolchain, standard
    and flags, linked against ``old``, and run with ``LD_LIBRARY_PATH`` pointing at
    ``old`` (twice: a shape whose two old runs differ is nondeterministic and
@@ -39,12 +39,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from tests._edit_corpus_config import Config, Flags, ResolvedConsumer
-from tests._edit_corpus_consumers import CONSUMERS
-from tests._edit_corpus_expect import ExecTruth, PairTruth
-from tests._edit_corpus_harness import Built, CompileError, compile_cmd
-from tests._edit_corpus_seeds import RoleText, Seed
-from tests._edit_corpus_toolchains import compiler_crashed, execution_unavailable
+from abiforge.model.config import Config, Flags, ResolvedConsumer
+from abiforge.model.expect import ExecTruth, PairTruth
+from abiforge.model.seeds import RoleText, Seed
+from abiforge.run.consumers import CONSUMERS
+from abiforge.run.harness import Built, CompileError, compile_cmd
+from abiforge.run.toolchains import compiler_crashed, execution_unavailable
 
 _RUN_TIMEOUT = 20
 _COMPILE_TIMEOUT = 300

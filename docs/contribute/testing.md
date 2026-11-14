@@ -101,9 +101,9 @@ coverage, so those lanes run without the fail-under gate.
 The generated edit corpus (`tests/_edit_corpus_*.py`: semantic edit operators
 × seeds × configurations, run in PR, nightly and weekly tiers) reports two
 separate coverage measures. Both are computed by
-`tests/_edit_corpus_coverage.py`; every corpus cell writes a record when
+`abiforge/coverage.py`; every corpus cell writes a record when
 `ABICHECK_EDIT_CORPUS_COVERAGE_DIR` is set, and
-`python -m tests._edit_corpus_coverage report DIR...` aggregates records into
+`python -m abiforge.coverage report DIR...` aggregates records into
 a JSON report and a step summary (`integration.yml` for the PR tier,
 `edit-corpus-tiers.yml` per shard and for the merged tier).
 
@@ -132,10 +132,10 @@ buckets with their counts and reasons.
   its cell count, as *produced but not expected* — a possible false positive
   or a missing expectation, never coverage.
 
-`tests/edit_corpus_coverage_ledger.json` is the ratchet:
+`abiforge/coverage_ledger.json` is the ratchet:
 `tests/test_edit_corpus_coverage.py` fails when a declared kind stops being
 declared, when a new declared kind is not written down
-(`python -m tests._edit_corpus_coverage ledger --write`), or when a floor names
+(`python -m abiforge.coverage ledger --write`), or when a floor names
 a kind no cell can verify. `verified_floor[tier]` holds the kinds a tier
 verified when it was raised (`report DIR --raise-floor TIER`); a run that
 verifies less fails `--check-floor TIER`. Only the merged run (every shard's
@@ -151,7 +151,7 @@ host, or the default matrix, which runs no consumers), cover none. Two
 tests of one tier that run the same cell (the default matrix and the PR-tier
 cells) keep separate records.
 
-**Language-space coverage.** `tests/_edit_corpus_space.py` models the space
+**Language-space coverage.** `abiforge/model/space.py` models the space
 the corpus samples: construct (from the operators' roles and language
 features) × language × standard × config feature (`baseline`, `-O2`, hidden
 visibility, `-m32`, `-fshort-enums`, `-fpack-struct`,
@@ -171,7 +171,7 @@ refuses the same combinations through the same module. The report gives
 covered against feasible points overall and per axis value, and the top
 uncovered feasible points ranked by how thinly their axis values are covered.
 
-The `edit` axis comes from `tests/_edit_corpus_edit_model.py`, which defines
+The `edit` axis comes from `abiforge/model/edit_model.py`, which defines
 the edit classes from C/C++ layout rules and imports nothing from the
 operators. Record layout (`struct`) is split by member insert or remove ×
 head, middle or tail × *shifts* (another offset or sizeof changes) or
@@ -182,7 +182,7 @@ alignment only), array bound changes, bit-fields, record-level edits
 (including a change of triviality for calls) and rename/cv. Base-class layout (`inheritance`) is split by base added
 (non-virtual or virtual), removed, reordered, made virtual or non-virtual,
 resized, or given a new access. Every other construct has the single class
-`any`. `OP_EDIT_CLASS` in `_edit_corpus_space.py` maps each operator of a
+`any`. `OP_EDIT_CLASS` in `abiforge.model.space` maps each operator of a
 split construct to its class. It may only name model classes, and an
 operator it does not place fails `tests/test_edit_corpus_edit_axis.py`.
 Every model class is in the denominator, whether or not an operator generates
