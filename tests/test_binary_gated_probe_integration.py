@@ -359,6 +359,7 @@ REACHED_BINARY_ONLY: frozenset[str] = frozenset(
         "method_access_changed",
         "removed_const_overload",
         "tag_type_renamed",
+        "type_became_abstract",
         "type_removed",
         "typedef_removed",
     }
