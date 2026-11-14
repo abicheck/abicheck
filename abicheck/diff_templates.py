@@ -699,7 +699,7 @@ def detect_internal_template_leaks(
 
 
 @memoized(maxsize=1 << 16)
-def _cpo_function_stem(qname: str) -> str:
+def function_overload_stem(qname: str) -> str:
     """A function's CPO stem: the reduction `_func_names` compares on, named
     once so the cross-kind join keys on exactly what the comparison uses.
 
@@ -745,7 +745,7 @@ def detect_cpo_kind_changed(
         for f in funcs:
             qname = name_of(f)
             if qname:
-                out.add(_cpo_function_stem(qname))
+                out.add(function_overload_stem(qname))
         return out
 
     def _var_names(snap: AbiSnapshot, variables: list[Variable]) -> set[str]:
@@ -766,7 +766,7 @@ def detect_cpo_kind_changed(
     # compare/template_surface.py. Functions *and* variables: this detector
     # compares one against the other, so an asymmetry in either is enough.
     old_fs, old_vs, new_fs, new_vs = reconciled_cpo_surfaces(
-        old, new, identity=partial(_cpo_id, function_stem=_cpo_function_stem)
+        old, new, identity=partial(_cpo_id, function_stem=function_overload_stem)
     )
     old_funcs = _func_names(old, old_fs)
     old_vars = _var_names(old, old_vs)
@@ -845,7 +845,7 @@ def detect_overload_set_rerouted(
         name_of = qualified_name_lookup(snap)
         out: dict[str, list[Function]] = defaultdict(list)
         for f in funcs:
-            out[_cpo_function_stem(name_of(f))].append(f)
+            out[function_overload_stem(name_of(f))].append(f)
         return out
 
     old_by_stem, new_by_stem = (
@@ -1104,7 +1104,7 @@ def detect_missing_instantiations(
             continue
         full = new_name_of(fn)
         if _looks_like_template_instantiation(_strip_param_signature(full)):
-            surviving_stems.add(_cpo_function_stem(full))
+            surviving_stems.add(function_overload_stem(full))
     for fn in old.declarations.functions:
         if not is_public_export(fn):
             continue
@@ -1113,7 +1113,7 @@ def detect_missing_instantiations(
         full = old_name_of(fn)
         if not _looks_like_template_instantiation(_strip_param_signature(full)):
             continue
-        stem = _cpo_function_stem(full)  # drops the leading return type
+        stem = function_overload_stem(full)  # drops the leading return type
         if stem not in surviving_stems:
             continue
         findings.append(

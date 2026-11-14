@@ -22,13 +22,20 @@ _TYPES = """
   <PointerType id="_ptr" type="_char" size="64" align="64"/>
   <ReferenceType id="_ref" type="_int" size="64" align="64"/>
 """
+#: An Itanium mangling: the target castxml parsed for (see itanium_abi_target).
+_ITANIUM_FN = (
+    '<Function id="_fn" name="f" returns="_int" context="_1" mangled="_Z1fv"/>'
+)
 
 
-def _ctx(body: str, tmp_path: Path, source: str = "") -> CastxmlParserContext:
+def _ctx(
+    body: str, tmp_path: Path, source: str = "", target: str = _ITANIUM_FN
+) -> CastxmlParserContext:
     hdr = tmp_path / "h.hpp"
     hdr.write_text(source or "\n" * 40)
     xml = (
-        f'<CastXML format="1.4.0"><File id="f1" name="{hdr}"/>{_TYPES}{body}</CastXML>'
+        f'<CastXML format="1.4.0"><File id="f1" name="{hdr}"/>{_TYPES}{target}'
+        f"{body}</CastXML>"
     )
     ctx = CastxmlParserContext(fromstring(xml), set(), set())
     ctx.build_id_map()

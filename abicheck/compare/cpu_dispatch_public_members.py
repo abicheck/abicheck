@@ -16,30 +16,45 @@ binary break it is.
 Two identity forms reach the roll-up: the ``Function.mangled`` key of the
 reconciled function model, and a raw PE/Mach-O export id from the
 export-table fallback (used when castxml's guessed mangling does not match the
-real export, which marks every header function ``HIDDEN``). Only
-``Visibility.ELF_ONLY`` means "exported but declared in no header"; ``PUBLIC``
-and a mismatch-``HIDDEN`` header declaration both came from a header.
+real export, which marks every header function ``HIDDEN``). A member is
+header-declared when its function's origin is ``ScopeOrigin.PUBLIC_HEADER``
+-- the provenance pass's verdict, which a mismatch-``HIDDEN`` header
+declaration keeps. Visibility is not the test: a DWARF-only function reads
+``PUBLIC`` with no header behind it.
+
+A raw MSVC export id is matched to a header declaration by its full scope
+qualified name (``?ident@scope@@...`` -> ``scope::ident``), never the bare
+identifier. The decorated parameter list is not decoded, so the match is
+claimed only when it is unambiguous: one header declaration and one removed
+export under that qualified name. Several overloads read as distinct members
+rather than borrowing each other's header declaration.
 """
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Iterable
 from typing import Any
 
-from ..model import Function, Visibility
+from ..model import Function, ScopeOrigin
 from ..model.change_catalog.registry import Verdict
+from ..model.mangled_name import msvc_scope_components
 
 PUBLIC_MEMBER_RULE = "cpu_dispatch_isa.public_member"
 
 
 def _header_declared(fn: Function) -> bool:
-    return fn.visibility != Visibility.ELF_ONLY
+    return fn.origin == ScopeOrigin.PUBLIC_HEADER
 
 
-def _msvc_identifier(export_id: str) -> str:
-    """Bare identifier of an MSVC-decorated export (``?ident@scope@@...``), else ``""``."""
-    head, sep, _ = export_id.partition("@")
-    return head[1:] if sep and head[:1] == "?" else ""
+def _qualified_spelling(name: str) -> str:
+    """*name* without a parameter list: ``ns::f(int)`` -> ``ns::f``."""
+    return name.split("(", 1)[0].strip()
+
+
+def _msvc_qualified(export_id: str) -> str | None:
+    comps = msvc_scope_components(export_id)
+    return "::".join(comps) if comps else None
 
 
 def header_declared_members(
@@ -51,23 +66,31 @@ def header_declared_members(
     *member_ids* are the rolled-up removed identities (mangled names or raw
     export ids); *old_functions* is every function of the old snapshot.
     Itanium ids match ``Function.mangled`` (Mach-O adds one leading
-    underscore); MSVC ids match by their bare identifier, the form
-    ``diff_platform._pe_export_id`` emits.
+    underscore); MSVC ids match by qualified name when unambiguous (see the
+    module docstring).
     """
+    ids = list(member_ids)
     mangled: set[str] = set()
-    identifiers: set[str] = set()
+    declared_by_name: Counter[str] = Counter()
     for fn in old_functions:
         if not _header_declared(fn):
             continue
         if fn.mangled:
             mangled |= {fn.mangled, f"_{fn.mangled}"}
-        identifiers.add((fn.name or "").rsplit("::", 1)[-1])
-    identifiers.discard("")
-    return [
-        mid
-        for mid in member_ids
-        if mid in mangled or (_msvc_identifier(mid) or None) in identifiers
-    ]
+        if fn.name:
+            declared_by_name[_qualified_spelling(fn.name)] += 1
+    msvc_name = {mid: _msvc_qualified(mid) for mid in ids if mid not in mangled}
+    exports_by_name = Counter(n for n in msvc_name.values() if n)
+
+    def public(mid: str) -> bool:
+        if mid in mangled:
+            return True
+        qname = msvc_name.get(mid)
+        return bool(
+            qname and declared_by_name[qname] == 1 and exports_by_name[qname] == 1
+        )
+
+    return [mid for mid in ids if public(mid)]
 
 
 def public_member_grade(public_members: list[str]) -> dict[str, Any]:

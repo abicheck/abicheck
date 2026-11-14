@@ -33,7 +33,7 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
 from abicheck.demangle import demangle
-from abicheck.model.special_member_identity import demangled_params
+from abicheck.model.special_member_identity import split_top_level
 from abicheck.model.surface_facts import is_export_table_only_record
 
 if TYPE_CHECKING:
@@ -68,10 +68,36 @@ def _mangled_key(f: Function) -> OverloadKey | None:
     text = text[: close + 1]
     is_const, is_volatile = "const" in trailer, "volatile" in trailer
     ref = next((t for t in trailer if t in ("&", "&&")), "")
-    params = demangled_params(text)
+    params = _qualified_params(text)
     if params is None:
         return None
     return (params, is_const, is_volatile, ref)
+
+
+def _qualified_params(text: str) -> tuple[str, ...] | None:
+    """The parameter list of a demangled ``name(params)``, each parameter's
+    namespace kept: ``put(a::Token)`` and ``put(b::Token)`` are different
+    overloads. (``demangled_params`` drops scope on purpose -- constructor
+    matching compares against castxml's unqualified spellings -- so it
+    cannot key an overload set.) ``None`` when *text* has no trailing
+    parameter list."""
+    if not text.endswith(")"):
+        return None
+    depth = 0
+    for i in range(len(text) - 1, -1, -1):
+        ch = text[i]
+        if ch in ")>]":
+            depth += 1
+        elif ch in "(<[":
+            depth -= 1
+            if depth == 0:
+                if ch != "(":
+                    return None
+                params = [
+                    " ".join(p.split()) for p in split_top_level(text[i + 1 : -1])
+                ]
+                return () if params == ["void"] else tuple(params)
+    return None
 
 
 def overload_keys(

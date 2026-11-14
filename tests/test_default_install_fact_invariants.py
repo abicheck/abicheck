@@ -466,14 +466,16 @@ def test_header_facts_survive_without_optional_tools(
     assert records["Point"].vtable_fact.status is FactStatus.PRESENT
     assert records["Point"].vtable_fact.value_or(None) == []
 
-    # data size: clang computes it; castxml does not export it, so it is a gap.
-    for name in ("Point", "Shape", "Buffer<int>"):
+    # data size (bits), by hand: Point is POD for layout -> sizeof (24
+    # bytes); Shape is non-POD -> vptr + int id = 12 bytes; Buffer<int> is
+    # an aggregate of public members -> sizeof (16 bytes). clang reads it
+    # from its layout; castxml derives it (data_size.py). Its unknown shapes
+    # (a virtual base, compilers disagreeing) are pinned by the unit tests.
+    expected_dsize = {"Point": 192, "Shape": 96, "Buffer<int>": 128}
+    for name, bits in expected_dsize.items():
         dsize = records[name].data_size_bits_fact
-        if frontend == "clang":
-            assert dsize.status is FactStatus.PRESENT, (name, dsize)
-            assert 0 < dsize.value_or(None) <= records[name].size_bits
-        else:
-            assert dsize.status is FactStatus.NOT_COLLECTED, (name, dsize)
+        assert dsize.status is FactStatus.PRESENT, (name, dsize)
+        assert dsize.value_or(None) == bits, (name, dsize)
 
     # explicit instantiation: clang reads `extern template class Buffer<int>;`;
     # castxml cannot, and says so instead of claiming the instance is implicit.

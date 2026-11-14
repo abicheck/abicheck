@@ -41,7 +41,7 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 
 | Category | Cases | What it covers |
 |----------|-------|----------------|
-| [Breaking](by-category/breaking.md) | 115 | Listed in `BREAKING_KINDS` — runtime ABI break. |
+| [Breaking](by-category/breaking.md) | 115 | Expected verdict `BREAKING` — a runtime ABI break for existing consumers. |
 | [API Break](by-category/api_break.md) | 26 | Listed in `API_BREAK_KINDS` — source/API-level break. |
 | [Risk](by-category/risk.md) | 36 | Listed in `RISK_KINDS` — symbol-compatible but behaviorally risky. |
 | [Addition (Compatible)](by-category/addition.md) | 12 | Listed in `ADDITION_KINDS` — backward-compatible additions. |
@@ -92,9 +92,9 @@ The weakest evidence source that reaches this case's verdict — see [Evidence a
 
 | Evidence | Cases | What it needs |
 |----------|-------|---------------|
-| [L0 — binary only](by-evidence/l0.md) | 69 | Detectable from the shipped binary's symbol table alone. |
+| [L0 — binary only](by-evidence/l0.md) | 68 | Detectable from the shipped binary's symbol table alone. |
 | [L1 — + debug info](by-evidence/l1.md) | 77 | Needs debug information on top of the binary. |
-| [L2 — + headers](by-evidence/l2.md) | 53 | Needs the public headers parsed alongside the binary. |
+| [L2 — + headers](by-evidence/l2.md) | 54 | Needs the public headers parsed alongside the binary. |
 | [L3 — + build evidence](by-evidence/l3.md) | 11 | Needs the build's own configuration and flags. |
 | [L4 — + source replay](by-evidence/l4.md) | 5 | Needs the sources replayed through a source-level ABI extraction. |
 | [L5 — + source graph](by-evidence/l5.md) | 17 | Needs the derived semantic source graph. |

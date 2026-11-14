@@ -26,6 +26,8 @@ from abicheck.diff_symbols_renames import _fingerprint_renames_support
 from abicheck.elf_metadata import ElfMetadata
 from abicheck.model import AbiSnapshot, RecordType
 from abicheck.model.debug_evidence import debug_info_evidence
+from abicheck.model.export_index import read_export_platforms
+from abicheck.model.export_read import ExportReadState
 from abicheck.model.kabi_facts import KabiMetadata
 from abicheck.model.macho_facts import MachoMetadata
 from abicheck.model.pe_facts import PeMetadata
@@ -83,6 +85,15 @@ _PRECONDITIONS: tuple[tuple[str, Predicate], ...] = (
         "missing binary export table on one side",
         lambda o, n: any(
             s.elf is None and s.pe is None and s.macho is None for s in (o, n)
+        ),
+    ),
+    (
+        # The baseline carries a table, but at least one was not read in
+        # full (ADR-079 partial/failed): its absences are unknown.
+        "baseline binary export table not completely read",
+        lambda o, n: any(
+            state is not ExportReadState.COMPLETE
+            for state in read_export_platforms(o).values()
         ),
     ),
     ("missing PE metadata", lambda o, n: o.pe is None or n.pe is None),

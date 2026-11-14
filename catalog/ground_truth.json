@@ -3828,7 +3828,7 @@
    "expected_kinds": [
     "cpu_dispatch_isa_dropped"
    ],
-   "min_evidence": "L0",
+   "min_evidence": "L2",
    "platforms": [
     "linux",
     "macos",

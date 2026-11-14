@@ -63,9 +63,29 @@ CASES: dict[str, Case] = {
     "NUANP": Case("struct NUANP { NUANP(); [[no_unique_address]] Ctor m; };", False),
     "NUAMacro": Case("#define MY_NUA [[no_unique_address]]\nstruct NUAMacro { NUAMacro(); MY_NUA Ctor m; };", False),
     "EmptyM": Case("struct EmptyM { EmptyM(); int a; char c; Empty e; };", True),
+    # nvsize != dsize: Empty is a base of NvB at 0, so NvX's own Empty base
+    # goes past NvB's data (offset 5): dsize(NvX) 5, nvsize(NvX) 6. NvY
+    # allocates NvX by its nvsize.
+    "NvB": Case("struct NvB : Empty { int i; char c; };", True),
+    "NvX": Case("struct NvX : NvB, Empty {};", True),
+    "NvY": Case("struct NvY : NvX {};", True),
 }  # fmt: skip
 
 COMPILERS = ("g++", "clang++")
+
+
+def target_triple(cc: str) -> str | None:
+    """*cc*'s default target triple, or ``None`` when it does not say."""
+    run = subprocess.run([cc, "-dumpmachine"], capture_output=True, text=True)
+    return run.stdout.strip() or None if run.returncode == 0 else None
+
+
+def is_msvc_triple(triple: str) -> bool:
+    """A triple whose C++ ABI is Microsoft's (``*-windows-msvc``), not
+    Itanium's (Linux, macOS, MinGW ``*-w64-mingw32``)."""
+    return triple.endswith("-msvc") or "-windows-msvc" in triple
+
+
 STDS = ("c++11", "c++17", "c++20")
 
 
@@ -74,7 +94,9 @@ def header_text() -> str:
     return f"#pragma once\n{EMPTY}\n{body}\n"
 
 
-def compiler_dsizes(tmp: Path, header: Path) -> dict[str, set[int]]:
+def compiler_dsizes(
+    tmp: Path, header: Path, compilers: tuple[str, ...] = COMPILERS
+) -> dict[str, set[int]]:
     """Every (compiler, dialect) data size in bits, per record name."""
     probe = tmp / "probe.cpp"
     lines = [f'#include "{header.name}"', "#include <cstdio>", "int main() {"]
@@ -86,7 +108,7 @@ def compiler_dsizes(tmp: Path, header: Path) -> dict[str, set[int]]:
     lines.append("}")
     probe.write_text("\n".join(lines) + "\n")
     out: dict[str, set[int]] = {name: set() for name in CASES}
-    for cc in COMPILERS:
+    for cc in compilers:
         for std in STDS:
             exe = tmp / f"probe_{cc}_{std}"
             subprocess.run(

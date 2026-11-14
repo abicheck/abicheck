@@ -41,14 +41,29 @@ implicit default constructor may hide a deleted one: unknown as well.
 
 Virtual bases are placed by the most-derived class at offsets CastXML does
 not emit, so a class with one anywhere in its hierarchy has no data size
-here. Every unknown input leaves the data size ``None``:
+here. A non-virtual base occupies ``offset + nvsize(base)``, not its data
+size: an empty base placed past a base's data (``struct X : B, E {}`` with
+``E`` also a base of ``B``) extends ``nvsize`` beyond ``dsize``, and a class
+deriving from ``X`` starts its own members after it. The recorded value is
+therefore that size -- where a derived class's next member may go, which is
+what tail-padding reuse depends on and what the compilers' own placement
+measures (``tests/_data_size_matrix.py``); it equals the strict ``dsize``
+except in that empty-base case.
+
+All of this is the Itanium C++ ABI. A parse whose manglings are Microsoft's
+(``?name@@...``: castxml run with an MSVC-targeting compiler) follows the
+MSVC layout rules instead, which never place a derived member in a base's
+tail padding; no data size is claimed there, nor when the target cannot be
+read from the document. Every unknown input leaves the data size ``None``:
 ``TAIL_PADDING_REUSE_CHANGED`` only compares two recorded values.
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from pathlib import Path
+from typing import Protocol
 from xml.etree.ElementTree import Element
 
 from .context import CastxmlParserContext
@@ -78,17 +93,42 @@ _DECL_LINES = 4
 _MAX_DEPTH = 32
 
 
+class _FlagFn(Protocol):
+    def __call__(
+        self, ctx: CastxmlParserContext, el: Element, depth: int = 0
+    ) -> bool | None: ...
+
+
 def data_size_bits(ctx: CastxmlParserContext, el: Element) -> int | None:
     """The Itanium data size of record *el* in bits, or ``None`` when a fact
-    it depends on is unknown."""
+    it depends on is unknown or the parse did not target the Itanium ABI."""
+    if not itanium_abi_target(ctx):
+        return None
     cache = ctx.data_size_cache
     eid = el.get("id", "")
     if eid in cache:
         return cache[eid]
     cache[eid] = None  # a by-value cycle is impossible; stay safe anyway
-    result = _data_size(ctx, el, 0)
+    result = _sizes(ctx, el, 0)[1]
     cache[eid] = result
     return result
+
+
+def itanium_abi_target(ctx: CastxmlParserContext) -> bool:
+    """Whether the parse targeted the Itanium C++ ABI, read from the
+    document's own manglings: an Itanium one (``_Z...``) and no Microsoft
+    one (``?...``). A C document (nothing is mangled) has no C++ layout
+    rule to disagree on -- every record is POD -- and counts as Itanium."""
+    if ctx.itanium_abi_target is None:
+        itanium = msvc = False
+        for el in ctx.root:
+            mangled = el.get("mangled", "")
+            if mangled.startswith("?"):
+                msvc = True
+                break
+            itanium = itanium or mangled.startswith("_Z")
+        ctx.itanium_abi_target = not msvc and (itanium or not _is_cxx(ctx))
+    return ctx.itanium_abi_target
 
 
 def pod_for_layout(ctx: CastxmlParserContext, el: Element) -> bool | None:
@@ -301,7 +341,10 @@ def _nua_spellings(ctx: CastxmlParserContext) -> frozenset[str] | None:
     cannot be read."""
     if ctx.nua_spellings is not None:
         return ctx.nua_spellings
-    defines: dict[str, str] = {}
+    # Every definition a macro has anywhere: under ``#if``/``#else`` arms only
+    # one is live, and the text cannot say which, so a name spells the
+    # attribute when any of its definitions does.
+    defines: dict[str, list[str]] = {}
     for el in ctx.root:
         if el.tag != "File" or el.get("name", "").startswith("<"):
             continue
@@ -311,13 +354,13 @@ def _nua_spellings(ctx: CastxmlParserContext) -> frozenset[str] | None:
         for line in lines:
             m = _DEFINE_RE.match(line)
             if m:
-                defines[m.group(1)] = m.group(2)
+                defines.setdefault(m.group(1), []).append(m.group(2))
     spellings = {_NUA_TOKEN}
     changed = True
     while changed:
         changed = False
-        for name, body in defines.items():
-            if name not in spellings and _spells(body, spellings):
+        for name, bodies in defines.items():
+            if name not in spellings and any(_spells(b, spellings) for b in bodies):
                 spellings.add(name)
                 changed = True
     ctx.nua_spellings = frozenset(spellings)
@@ -406,6 +449,29 @@ def _base_records(ctx: CastxmlParserContext, el: Element) -> list[Element] | Non
     return out
 
 
+def _flag_memo(
+    query: str,
+) -> Callable[[_FlagFn], _FlagFn]:
+    """Memoize a hierarchy query per (record, depth) for the parse: a
+    non-virtual diamond ladder reaches the same base along exponentially
+    many paths."""
+
+    def wrap(fn: _FlagFn) -> _FlagFn:
+        def cached(
+            ctx: CastxmlParserContext, el: Element, depth: int = 0
+        ) -> bool | None:
+            key = (query, el.get("id", ""), depth)
+            cache = ctx.layout_flag_cache
+            if key not in cache:
+                cache[key] = fn(ctx, el, depth)
+            return cache[key]
+
+        return cached
+
+    return wrap
+
+
+@_flag_memo("dynamic")
 def _dynamic(ctx: CastxmlParserContext, el: Element, depth: int = 0) -> bool | None:
     if depth > _MAX_DEPTH or el.get("incomplete") == "1":
         return None
@@ -422,6 +488,7 @@ def _dynamic(ctx: CastxmlParserContext, el: Element, depth: int = 0) -> bool | N
     return None if None in flags else False
 
 
+@_flag_memo("virtual_base")
 def _has_virtual_base(
     ctx: CastxmlParserContext, el: Element, depth: int = 0
 ) -> bool | None:
@@ -438,6 +505,7 @@ def _has_virtual_base(
     return None if None in flags else False
 
 
+@_flag_memo("empty")
 def _is_empty(ctx: CastxmlParserContext, el: Element, depth: int = 0) -> bool | None:
     """Itanium "empty class": no non-static data member, no virtual function
     or virtual base, every base empty."""
@@ -460,34 +528,42 @@ def _is_empty(ctx: CastxmlParserContext, el: Element, depth: int = 0) -> bool | 
     return None if None in flags else True
 
 
-def _data_size(ctx: CastxmlParserContext, el: Element, depth: int) -> int | None:
+_UNKNOWN: tuple[int | None, int | None] = (None, None)
+
+
+def _sizes(
+    ctx: CastxmlParserContext, el: Element, depth: int
+) -> tuple[int | None, int | None]:
+    """``(dsize, nvsize)`` of *el* in bits; each ``None`` when unknown."""
     if depth > _MAX_DEPTH or el.get("incomplete") == "1":
-        return None
+        return _UNKNOWN
     size = _int(el, "size")
     pod = pod_for_layout(ctx, el)
     if size is None or pod is None:
-        return None
+        return _UNKNOWN
     if pod:
-        return size
+        return size, size
     if el.tag == "Union" or _has_virtual_base(ctx, el) is not False:
-        return None
+        return _UNKNOWN
     empty = _is_empty(ctx, el)
     if empty is None:
-        return None
+        return _UNKNOWN
     if empty:
-        return 0
+        return 0, 0
     # (lowest, highest) possible end of each subobject; the data size is
     # known only when the largest lower bound reaches every upper bound.
     ends: list[tuple[int, int]] = []
+    # Where an empty base sits: inside nvsize, outside dsize.
+    empty_ends: list[int] = []
     if _declares_virtual(ctx, el):
         base_recs = _base_records(ctx, el)
         dyn_bases = [_dynamic(ctx, b) for b in base_recs or []]
         if base_recs is None or None in dyn_bases:
-            return None
+            return _UNKNOWN
         if True not in dyn_bases:
             ptr = _pointer_bits(ctx)
             if ptr is None:
-                return None
+                return _UNKNOWN
             ends.append((ptr, ptr))  # the class's own vptr at offset 0
     for b in el:
         if b.tag != "Base":
@@ -495,10 +571,16 @@ def _data_size(ctx: CastxmlParserContext, el: Element, depth: int) -> int | None
         rec = _element_record(ctx, b.get("type", ""))
         off = _int(b, "offset")
         if rec is None or off is None:
-            return None
-        sub = data_size_bits(ctx, rec) if _is_empty(ctx, rec) is False else 0
-        if _is_empty(ctx, rec) is None or sub is None:
-            return None
+            return _UNKNOWN
+        base_empty = _is_empty(ctx, rec)
+        if base_empty is None:
+            return _UNKNOWN
+        if base_empty:
+            empty_ends.append(off * 8 + 8)
+            continue
+        sub = data_size_bits(ctx, rec)  # the base's nvsize
+        if sub is None:
+            return _UNKNOWN
         if sub:
             ends.append((off * 8 + sub, off * 8 + sub))
     for f in _members(ctx, el):
@@ -506,14 +588,13 @@ def _data_size(ctx: CastxmlParserContext, el: Element, depth: int) -> int | None
             continue
         end = _field_end(ctx, f)
         if end is None:
-            return None
+            return _UNKNOWN
         ends.append(end)
-    if not ends:
-        return 0
-    lowest = max(lo for lo, _ in ends)
-    if lowest < max(hi for _, hi in ends):
-        return None
-    return (lowest + 7) // 8 * 8
+    lowest = max((lo for lo, _ in ends), default=0)
+    if lowest < max((hi for _, hi in ends), default=0):
+        return _UNKNOWN
+    dsize = (lowest + 7) // 8 * 8
+    return dsize, max(dsize, *empty_ends) if empty_ends else dsize
 
 
 def _field_end(ctx: CastxmlParserContext, f: Element) -> tuple[int, int] | None:

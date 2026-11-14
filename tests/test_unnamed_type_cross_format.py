@@ -6,11 +6,14 @@ ordinary new export is flagged in none of them."""
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 
 from abicheck.checker import ChangeKind, compare
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolBinding, SymbolType
 from abicheck.model import AbiSnapshot
+from abicheck.model.export_read import ExportReadState
 from abicheck.model.macho_facts import MachoExport, MachoMetadata
 from abicheck.model.pe_facts import PeExport, PeMetadata
 
@@ -99,3 +102,37 @@ def test_c_export_with_ut_letters_not_flagged_on_pe():
 def test_missing_export_table_disables_detector():
     old = AbiSnapshot(library="l.dylib", version="1")
     assert _flagged(old, _macho("_Z3barP3FooIUt_E")) == []
+
+
+def _read_as(snap: AbiSnapshot, state: ExportReadState) -> AbiSnapshot:
+    for attr in ("elf", "pe", "macho"):
+        block = getattr(snap, attr)
+        if block is not None:
+            return dataclasses.replace(
+                snap, **{attr: dataclasses.replace(block, export_read=state)}
+            )
+    raise AssertionError("no platform block")
+
+
+@pytest.mark.parametrize("state", [ExportReadState.PARTIAL, ExportReadState.FAILED])
+@pytest.mark.parametrize(("build", "base", "leak", "plain"), _CASES)
+def test_incompletely_read_baseline_disables_detector(build, base, leak, plain, state):
+    """A baseline table cut short (ADR-079) may have held the leaking export:
+    its absence is unknown, so nothing reads as newly introduced -- and the
+    run says why instead of reporting a clean surface."""
+    old = _read_as(build(base), state)
+    result = compare(old, build(base, leak))
+    assert not [
+        c for c in result.changes if c.kind == ChangeKind.UNNAMED_TYPE_IN_PUBLIC_ABI
+    ]
+    assert any(
+        "unnamed_types" in w and "not completely read" in w
+        for w in result.coverage_warnings
+    ), result.coverage_warnings
+
+
+@pytest.mark.parametrize(("build", "base", "leak", "plain"), _CASES)
+def test_partially_read_new_side_still_flags_what_it_read(build, base, leak, plain):
+    """The NEW side's entries are real even when its read was cut short."""
+    new = _read_as(build(base, leak), ExportReadState.PARTIAL)
+    assert _flagged(build(base), new) == [leak]

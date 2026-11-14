@@ -215,6 +215,9 @@ def sync_model_extension_facts(snap: Any) -> None:
     path and the evidence digest call this first; it is idempotent."""
     sync_export_read_fact(snap)
     _sync_binary_sha256(snap)
+    # Before the early return below: its section is not this fact's, and a
+    # blocked one must not leave a stale or missing typedef_origins fact.
+    _sync_typedef_origins(snap)
     scan = getattr(snap, "cxx_concept_header_scan", None)
     if _blocked_reason(snap, CXX_CONCEPT_HEADER_SCAN.section) is not None:
         return
@@ -239,7 +242,6 @@ def sync_model_extension_facts(snap: Any) -> None:
         # None or {}: no unit is claimed, so a stale stored census must go.
         _drop_extension_fact(snap, CU_STACK_PROTECTOR)
     encode_noexcept_unobserved(snap)
-    _sync_typedef_origins(snap)
 
 
 def _sync_typedef_origins(snap: Any) -> None:

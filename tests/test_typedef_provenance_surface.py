@@ -30,7 +30,10 @@ from abicheck.extract.declaration_provenance import apply_provenance
 from abicheck.model import AbiSnapshot, Function, ScopeOrigin
 from abicheck.model.change import Change
 from abicheck.model.declaration_headers import attributed
-from abicheck.policy.public_surface_closure import resolve_public_surface
+from abicheck.policy.public_surface_closure import (
+    _public_header_typedef_seeds,
+    resolve_public_surface,
+)
 from abicheck.serialization import snapshot_from_dict
 from abicheck.storage.snapshot_encode import snapshot_to_json
 from abicheck.surface import (
@@ -230,3 +233,96 @@ def test_undecodable_typedef_origins_is_refused() -> None:
     assert '"bogus"' in text
     with pytest.raises(SnapshotError, match="typedef_origins"):
         snapshot_from_dict(json.loads(text))
+
+
+_OBS = {
+    "public": "/src/include/api.h",
+    "private": "/src/internal/impl.h",
+    "system": "/usr/include/stdint.h",
+    "unattributed": "",
+}
+
+
+def _rule(observations: list[str]) -> ScopeOrigin | None:
+    """Independent statement: public if any observation is public; otherwise
+    non-public only when every observation is non-public; else unknown."""
+    if "public" in observations:
+        return ScopeOrigin.PUBLIC_HEADER
+    if observations and all(o in ("private", "system") for o in observations):
+        return (
+            ScopeOrigin.PRIVATE_HEADER
+            if "private" in observations
+            else ScopeOrigin.SYSTEM_HEADER
+        )
+    return None
+
+
+@pytest.mark.parametrize("bare", list(_OBS))
+@pytest.mark.parametrize("qualified", list(_OBS))
+def test_typedef_origin_weighs_both_maps(bare: str, qualified: str) -> None:
+    """The same key seen in ``typedefs`` and ``typedefs_qualified`` is decided
+    over both observations -- never by whichever map is read last."""
+    snap = AbiSnapshot(library="l", version="1")
+    snap.declarations.typedefs = attributed([("T", "int", _OBS[bare])])
+    snap.declarations.typedefs_qualified = attributed([("T", "int", _OBS[qualified])])
+    apply_provenance(snap, public_header_dirs=["/src/include"])
+    assert (snap.typedef_origins or {}).get("T") == _rule([bare, qualified])
+
+
+def test_qualified_only_public_typedef_seeds_the_surface() -> None:
+    """A public typedef recorded only under its qualified key is public API."""
+    snap = AbiSnapshot(library="l", version="1")
+    snap.declarations.typedefs_qualified = {"ns::handle_t": "int"}
+    snap.typedef_origins = {"ns::handle_t": ScopeOrigin.PUBLIC_HEADER}
+    assert _public_header_typedef_seeds(snap) == {"ns::handle_t"}
+
+
+def test_typedef_origins_written_when_the_debug_section_is_unreadable() -> None:
+    """An unreadable section the fact does not live in must not drop it."""
+    snap = _snap(ScopeOrigin.PUBLIC_HEADER)
+    snap.unreadable_sections = (("debug", "future encoding"),)
+    loaded = snapshot_from_dict(json.loads(snapshot_to_json(snap)))
+    assert loaded.typedef_origins == {"foo_version_1_2_3": ScopeOrigin.PUBLIC_HEADER}
+
+
+@pytest.mark.parametrize(
+    ("value", "error"),
+    [
+        (["T"], TypeError),  # not a map
+        ({"": "public_header"}, TypeError),  # an empty key
+        ({"T": "unknown"}, ValueError),  # unknown is never stored
+        ({"T": "bogus"}, ValueError),
+    ],
+)
+def test_typedef_origins_codec_refuses_malformed_values(
+    value: object, error: type[Exception]
+) -> None:
+    from abicheck.storage.extension_fact_catalog import _typedef_origin_map
+
+    with pytest.raises(error):
+        _typedef_origin_map(value)
+
+
+def test_typedef_origins_codec_sorts_keys() -> None:
+    from abicheck.storage.extension_fact_catalog import _typedef_origin_map
+
+    got = _typedef_origin_map({"b": "private_header", "a": "public_header"})
+    assert list(got.items()) == [("a", "public_header"), ("b", "private_header")]
+
+
+def test_qualified_typedef_origin_reaches_the_qualified_index() -> None:
+    """A ``ns::T`` key is public in the qualified index; a bare key that
+    only the qualified map holds is indexed there too."""
+    snap = AbiSnapshot(library="l", version="1")
+    snap.declarations.typedefs = {"T": "int"}
+    snap.declarations.typedefs_qualified = {"ns::T": "int", "U": "int"}
+    snap.typedef_origins = {
+        "ns::T": ScopeOrigin.PUBLIC_HEADER,
+        "U": ScopeOrigin.PRIVATE_HEADER,
+        "T": ScopeOrigin.SYSTEM_HEADER,
+    }
+    surface = resolve_public_surface(snap)
+    assert surface.origin_by_qualified_key["ns::T"] is ScopeOrigin.PUBLIC_HEADER
+    assert surface.origin_by_qualified_key["U"] is ScopeOrigin.PRIVATE_HEADER
+    assert surface.origin_by_key["T"] is ScopeOrigin.SYSTEM_HEADER
+    assert "T" not in surface.origin_by_qualified_key

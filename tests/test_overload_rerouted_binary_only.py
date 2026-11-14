@@ -43,6 +43,15 @@ def _exports(*names: str) -> AbiSnapshot:
         ),
         # member S::get(int) const -> S::get(long) const, beside S::get()
         (["_ZNK1S3getEi", "_ZNK1S3getEv"], ["_ZNK1S3getEl", "_ZNK1S3getEv"], "S::get"),
+        # put(a::Token) -> put(b::Token), beside put(int): the parameter's
+        # namespace is the whole difference.
+        (["_Z3putN1a5TokenE", "_Z3puti"], ["_Z3putN1b5TokenE", "_Z3puti"], "put"),
+        # Nested: v(std::vector<a::T>) -> v(std::vector<b::T>), beside v(int).
+        (
+            ["_Z1vSt6vectorIN1a1TESaIS1_EE", "_Z1vi"],
+            ["_Z1vSt6vectorIN1b1TESaIS1_EE", "_Z1vi"],
+            "v",
+        ),
     ],
 )
 def test_retyped_overload_detected_from_symbols(old, new, stem):

@@ -677,25 +677,25 @@ def _typedef_origins(
     maps = (decls.typedefs, decls.typedefs_qualified)
     if not any(has_attribution(m) for m in maps):
         return None
-    out: dict[str, ScopeOrigin] = {}
+    # One observation set per key across *both* maps: a key's spelling in
+    # one map can be attributed while the other's is not, and the verdict
+    # must weigh every observation, not whichever map is read last.
+    seen: dict[str, set[ScopeOrigin]] = {}
     for mapping in maps:
         for key in mapping:
             found = {classify(h) for h in declaring_header_set(mapping, key)}
-            if not found:
-                continue
-            if ScopeOrigin.PUBLIC_HEADER in found:
-                origin = ScopeOrigin.PUBLIC_HEADER
-            elif found <= NON_PUBLIC_ORIGINS:
-                origin = (
-                    ScopeOrigin.PRIVATE_HEADER
-                    if ScopeOrigin.PRIVATE_HEADER in found
-                    else min(found)
-                )
-            else:
-                continue
-            prior = out.get(key)
-            if prior is None or origin is ScopeOrigin.PUBLIC_HEADER:
-                out[key] = origin
+            # No recorded declaring header is an unknown observation.
+            seen.setdefault(key, set()).update(found or {ScopeOrigin.UNKNOWN})
+    out: dict[str, ScopeOrigin] = {}
+    for key, found in seen.items():
+        if ScopeOrigin.PUBLIC_HEADER in found:
+            out[key] = ScopeOrigin.PUBLIC_HEADER
+        elif found <= NON_PUBLIC_ORIGINS:
+            out[key] = (
+                ScopeOrigin.PRIVATE_HEADER
+                if ScopeOrigin.PRIVATE_HEADER in found
+                else min(found)
+            )
     return out
 
 

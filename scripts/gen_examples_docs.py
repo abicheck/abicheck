@@ -95,7 +95,7 @@ VERDICT_META = {
 CATEGORY_META = {
     "breaking": {
         "label": "Breaking",
-        "blurb": "Listed in `BREAKING_KINDS` — runtime ABI break.",
+        "blurb": "Expected verdict `BREAKING` — a runtime ABI break for existing consumers.",
     },
     "api_break": {
         "label": "API Break",

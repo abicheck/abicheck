@@ -23,8 +23,11 @@ answers structurally instead:
   ``<source-name>`` (``<len><name>``) must occur in a template-argument list,
   the parameter types, or as an enclosing scope of the entity -- never as the
   entity's own unqualified name.
-* MSVC (PE): the type must occur as a class-type code ``U``/``V``/``T``/``W4``
-  followed by ``<name>@`` after the decorated name's own leading identifier.
+* MSVC (PE): the decorated name is read type by type, and the type must be
+  the leaf of a class-type code ``U``/``V``/``T``/``W4`` met at a type
+  boundary -- in a template-argument list, the return or parameter types --
+  never a class code letter that is only the first character of a longer
+  name (``VUktag_a@@`` is ``class Uktag_a``).
 
 An undecorated (C) spelling references no type.
 """
@@ -46,6 +49,16 @@ _ABI_TAG = re.compile(r"\[abi:[^\]]*\]")
 
 def _leaf(identifier: str) -> str:
     return _ABI_TAG.sub("", identifier).rsplit("::", 1)[-1]
+
+
+def _skip_abi_tags(s: str, i: int) -> int:
+    """Past every ``B<source-name>`` ABI tag at *i*."""
+    while i < len(s) and s[i] == "B":
+        tag, k = read_length_prefixed_name(s, i + 1)
+        if tag is None:
+            break
+        i = k
+    return i
 
 
 def _itanium_referenced_types(s: str) -> set[str] | None:
@@ -73,7 +86,9 @@ def _itanium_referenced_types(s: str) -> set[str] | None:
                 if name is None:
                     return None
                 components.append(name)
-                i = i2
+                # ABI tags (`B<source-name>`) belong to this component, never
+                # a component of their own (`_ZN2ns6ktag_aB2v1Ev`).
+                i = _skip_abi_tags(s, i2)
                 continue
             # ctor/dtor (`C1`, `CI1`, `D0`): opaque, and its digit is no
             # source-name length.
@@ -105,11 +120,7 @@ def _itanium_referenced_types(s: str) -> set[str] | None:
         name, i = read_length_prefixed_name(s, i)
         if name is None:
             return None
-        while i < n and s[i] == "B":  # ABI tag on the entity's own name
-            tag, k = read_length_prefixed_name(s, i + 1)
-            if tag is None:
-                break
-            i = k
+        i = _skip_abi_tags(s, i)  # ABI tags on the entity's own name
         if i < n and s[i] == "I":
             end = skip_template_args(s, i)
             if end is None:
@@ -122,15 +133,125 @@ def _itanium_referenced_types(s: str) -> set[str] | None:
     return {_leaf(r) for r in refs}
 
 
-def _msvc_references(symbol: str, leaf: str) -> bool:
-    # Skip the decorated name's own leading identifier (`?name@` or a
-    # template's `??$name@`): a function named after the type is no reference.
-    body = symbol[3:] if symbol.startswith("??$") else symbol[1:]
-    at = body.find("@")
-    if at < 0:
-        return False
-    rest = body[at + 1 :]
-    return re.search(r"(?:U|V|T|W4)" + re.escape(leaf) + "@", rest) is not None
+class _MsvcParseError(Exception):
+    pass
+
+
+#: Two-character fundamental codes (``_N`` bool, ``_J`` int64, ...).
+_MSVC_EXTENDED = "_"
+#: Pointer/reference codes, each followed by optional ``E``/``I``/``F``
+#: modifiers and one cv letter, then the pointee type.
+_MSVC_INDIRECTION = "PQRSAB"
+
+
+def _msvc_name(s: str, i: int, refs: set[str]) -> tuple[str, int]:
+    """One ``@``-terminated name component at *i* (a template name's
+    arguments are read as types into *refs*)."""
+    if s.startswith("?$", i):
+        at = s.find("@", i + 2)
+        if at < 0:
+            raise _MsvcParseError
+        name, i = s[i + 2 : at], at + 1
+        while i < len(s) and s[i] != "@":
+            i = _msvc_type(s, i, refs)
+        return name, i + 1
+    if i < len(s) and s[i].isdigit():  # a name back-reference
+        return "", i + 1
+    at = s.find("@", i)
+    if at <= i:
+        raise _MsvcParseError
+    return s[i:at], at + 1
+
+
+def _msvc_qualified(s: str, i: int, refs: set[str]) -> tuple[list[str], int]:
+    """A qualified name ``leaf@scope@...@`` -> components (leaf first)."""
+    names: list[str] = []
+    while True:
+        if i >= len(s):
+            raise _MsvcParseError
+        if s[i] == "@":
+            return names, i + 1
+        name, i = _msvc_name(s, i, refs)
+        names.append(name)
+
+
+def _msvc_type(s: str, i: int, refs: set[str]) -> int:
+    """Past the type encoded at *i*, adding every class-type leaf to *refs*."""
+    if i >= len(s):
+        raise _MsvcParseError
+    c = s[i]
+    if c in "UVT" or s.startswith("W4", i):
+        names, end = _msvc_qualified(s, i + (2 if c == "W" else 1), refs)
+        if names and names[0]:
+            refs.add(names[0])
+        return end
+    if c in _MSVC_INDIRECTION:
+        i += 1
+        while i < len(s) and s[i] in "EIF":
+            i += 1
+        return _msvc_type(s, i + 1, refs)  # one cv letter, then the pointee
+    if c == "?":  # a cv-qualified class value: `?A`/`?B` then the type
+        return _msvc_type(s, i + 2, refs)
+    if s.startswith("$$", i):  # `$$Q`/`$$R` rvalue reference, `$$C` cv
+        kind, i = s[i + 2 : i + 3], i + 3
+        if kind in ("Q", "R"):
+            while i < len(s) and s[i] in "EIF":
+                i += 1
+        elif kind != "C":
+            raise _MsvcParseError
+        return _msvc_type(s, i + 1, refs)  # one cv letter, then the type
+    if c == "$":
+        raise _MsvcParseError
+    if c == _MSVC_EXTENDED:
+        return i + 2
+    return i + 1  # a one-letter fundamental type or a type back-reference
+
+
+def _msvc_referenced_types(symbol: str) -> set[str] | None:
+    """Class-type leaves a decorated MSVC spelling references, or None when
+    it cannot be read. The entity's own name is no reference; its
+    enclosing scopes and a template's arguments are."""
+    refs: set[str] = set()
+    try:
+        if symbol.startswith("??$"):
+            scopes, i = _template_entity(symbol, refs)
+        else:
+            names, i = _msvc_qualified(symbol, 1, refs)
+            scopes = names[1:]
+        # An enclosing scope is a reference, as on the Itanium side.
+        refs.update(n for n in scopes if n)
+        if i >= len(symbol):
+            return refs
+        code = symbol[i]
+        if code.isdigit():  # a variable: storage class, its type, cv
+            _msvc_type(symbol, i + 1, refs)
+            return refs
+        # A function: access/kind letter; a member adds `E` and a cv letter.
+        i += 1
+        if code not in "YZ":
+            while i < len(symbol) and symbol[i] in "EIF":
+                i += 1
+            i += 1
+        i += 1  # calling convention
+        if symbol.startswith("?A", i):  # return-value storage
+            i += 2
+        i = _msvc_type(symbol, i, refs)  # return type
+        while i < len(symbol) and symbol[i] not in "@Z":
+            i = _msvc_type(symbol, i, refs)
+    except (_MsvcParseError, IndexError):
+        return None
+    return refs
+
+
+def _template_entity(symbol: str, refs: set[str]) -> tuple[list[str], int]:
+    """``??$name@args@scope@@...``: the template's own name, its arguments
+    read as types, then its scopes."""
+    _, i = _msvc_name(symbol, 1, refs)
+    names: list[str] = []
+    while i < len(symbol) and symbol[i] != "@":
+        name, i = _msvc_name(symbol, i, refs)
+        names.append(name)
+    return names, i + 1
 
 
 def mangling_references_type(symbol: str, type_leaf: str) -> bool:
@@ -143,7 +264,8 @@ def mangling_references_type(symbol: str, type_leaf: str) -> bool:
         refs = _itanium_referenced_types(itanium)
         return refs is not None and type_leaf in refs
     if is_msvc_decorated(symbol):
-        return _msvc_references(symbol, type_leaf)
+        refs = _msvc_referenced_types(symbol)
+        return refs is not None and type_leaf in refs
     return False
 
 

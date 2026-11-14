@@ -126,8 +126,12 @@ class CastxmlParserContext:
         # macro names that spell [[no_unique_address]] (data_size.py).
         self.pod_for_layout_cache: dict[str, bool | None] = {}
         self.data_size_cache: dict[str, int | None] = {}
+        #: (query, record id, depth) -> tri-state hierarchy flag (data_size.py).
+        self.layout_flag_cache: dict[tuple[str, str, int], bool | None] = {}
         self.nua_spellings: frozenset[str] | None = None
         self.is_cxx_document: bool | None = None
+        #: Whether the parse targeted the Itanium C++ ABI (from its manglings).
+        self.itanium_abi_target: bool | None = None
         # Per-file index / per-directory file list for
         # ``out_of_line_inline.declared_inline_out_of_line``.
         self.out_of_line_inline_index: dict[str, dict[tuple[str, str], set[int]]] = {}

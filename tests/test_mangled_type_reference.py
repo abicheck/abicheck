@@ -22,6 +22,18 @@ from abicheck.model.mangled_type_reference import mangling_references_type
         ("_ZTV6ktag_a", "ktag_a"),  # vtable for ktag_a
         ("??$kfam@Uktag_a@@@@YAHXZ", "ktag_a"),  # MSVC kfam<struct ktag_a>()
         ("?use@@YAXVktag_a@ns@@@Z", "ktag_a"),  # MSVC use(class ns::ktag_a)
+        ("_ZN6ktag_aB2v13getEv", "ktag_a"),  # ktag_a[abi:v1]::get()
+        ("?use@@YAXVUktag_a@@@Z", "Uktag_a"),  # use(class Uktag_a)
+        ("?use@@YAXPEAUktag_a@@@Z", "ktag_a"),  # use(ktag_a*)
+        ("?use@@YAXAEBVktag_a@@@Z", "ktag_a"),  # use(ktag_a const&)
+        ("?use@@YAX$$QEAUktag_a@@@Z", "ktag_a"),  # use(ktag_a&&)
+        ("?mk@@YA?AVktag_a@@XZ", "ktag_a"),  # ktag_a mk()
+        ("?use@@YAXW4ktag_a@@@Z", "ktag_a"),  # use(enum ktag_a)
+        ("?use@@YAX_NUktag_a@@@Z", "ktag_a"),  # use(bool, ktag_a)
+        ("?use@@YAXV?$vec@Uktag_a@@@std@@@Z", "ktag_a"),  # use(std::vec<ktag_a>)
+        ("?m@Foo@@QEAAXUktag_a@@@Z", "ktag_a"),  # Foo::m(ktag_a)
+        ("?m@ktag_a@@QEAAXXZ", "ktag_a"),  # ktag_a::m(): its scope
+        ("?g@@3Uktag_a@@A", "ktag_a"),  # ktag_a g;
     ],
 )
 def test_reference_detected(symbol: str, leaf: str) -> None:
@@ -40,6 +52,17 @@ def test_reference_detected(symbol: str, leaf: str) -> None:
         ("?ktag_a_count@@3HA", "ktag_a"),  # MSVC variable
         ("?ktag_a@@YAXXZ", "ktag_a"),  # MSVC function named like the type
         ("_Z10bruteforcev", "brute_force"),
+        # ns::ktag_a[abi:v1](): the ABI tag is the entity's, not a scope.
+        ("_ZN2ns6ktag_aB2v1Ev", "ktag_a"),
+        # A class code letter that only starts a longer name: class Uktag_a,
+        # struct Vktag_a, struct Tktag_a, enum Wktag_a.
+        ("?use@@YAXVUktag_a@@@Z", "ktag_a"),
+        ("?use@@YAXUVktag_a@@@Z", "ktag_a"),
+        ("?use@@YAXUTktag_a@@@Z", "ktag_a"),
+        ("?use@@YAXW4Wktag_a@@@Z", "ktag_a"),
+        ("?Uktag_a@@YAXXZ", "ktag_a"),  # a function named Uktag_a
+        ("?use@@YAX", "ktag_a"),  # truncated: unreadable, no claim
+        ("?use@", "ktag_a"),
     ],
 )
 def test_non_reference_rejected(symbol: str, leaf: str) -> None:

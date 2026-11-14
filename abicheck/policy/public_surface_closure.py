@@ -646,12 +646,13 @@ def _record_is_confirmed_public_seed(
 
 def _public_header_typedef_seeds(snap: AbiSnapshot) -> set[str]:
     """Typedefs declared in a public header: public API even when no exported
-    signature names them (ADR-015, the record seed's rule for aliases)."""
+    signature names them, under a bare or a qualified key (ADR-015)."""
+    d = snap.declarations
     return {
         key
         for key, origin in (snap.typedef_origins or {}).items()
         if origin is ScopeOrigin.PUBLIC_HEADER
-        and key in snap.declarations.typedefs
+        and (key in d.typedefs or key in d.typedefs_qualified)
         and not INTERNAL_NAMESPACE_SEED_VETO.matches(key)
     }
 

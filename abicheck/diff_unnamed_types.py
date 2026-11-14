@@ -41,7 +41,8 @@ from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .model import AbiSnapshot
 from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
-from .model.export_index import build_raw_export_indexes, snapshot_export_names
+from .model.export_index import read_export_platforms, snapshot_export_names
+from .model.export_read import ExportReadState
 
 # Itanium unnamed-type productions, both <unqualified-name> alternatives:
 #   closure-type  ::= Ul <lambda-sig> E [<number>] _
@@ -196,19 +197,28 @@ def _exported_symbol_names(snap: AbiSnapshot) -> set[str]:
     return out
 
 
-@registry.detector(
-    "unnamed_types",
-    requires_support=lambda o, n: (
-        bool(build_raw_export_indexes(o)) and bool(build_raw_export_indexes(n)),
-        "missing binary export table on one side",
-    ),
-)
+def _unnamed_types_support(old: AbiSnapshot, new: AbiSnapshot) -> tuple[bool, str]:
+    """Both sides carry an export table, and the baseline's was read in full.
+
+    "Newly introduced" is ``new - old``: an export the baseline read missed
+    (a partial or failed table, ADR-079) would read as introduced, so an
+    incomplete baseline disables the detector -- never an empty surface.
+    """
+    old_reads = read_export_platforms(old)
+    if not old_reads or not read_export_platforms(new):
+        return False, "missing binary export table on one side"
+    if any(state is not ExportReadState.COMPLETE for state in old_reads.values()):
+        return False, "baseline binary export table not completely read"
+    return True, ""
+
+
+@registry.detector("unnamed_types", requires_support=_unnamed_types_support)
 def _diff_unnamed_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Flag newly-introduced exported symbols that leak an unnamed type (D3).
 
     ``requires_support`` already demands a captured export table (ELF, PE or
-    Mach-O) on *both*
-    sides, so an absent (header-only / parse-failed) baseline disables the
+    Mach-O) on *both* sides, read in full on the baseline, so an absent
+    (header-only / parse-failed) or partially read baseline disables the
     detector rather than reaching here — a genuinely-empty captured baseline is
     a real "exported nothing before" surface, against which a new unnamed-type
     export is correctly newly introduced.
