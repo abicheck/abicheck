@@ -15,6 +15,8 @@ from abicheck.checker_policy import ChangeKind
 from abicheck.diff_cpp_patterns import detect_tag_type_renamed
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol, SymbolBinding, SymbolType
 from abicheck.model import AbiSnapshot, Function, RecordType, Visibility
+from abicheck.model.macho_facts import MachoExport, MachoMetadata
+from abicheck.model.pe_facts import PeExport, PeMetadata
 
 
 def _fn(name: str, mangled: str) -> Function:
@@ -87,3 +89,71 @@ class TestTagTypeRenamedExportEvidence:
             )
 
         assert detect_tag_type_renamed(side("tagA"), side("tagB")) == []
+
+
+class TestTagRenameEvidenceIsStructural:
+    """Only a mangling that encodes a reference to the tag witnesses its
+    rename; a C export or a function merely named with the tag as a prefix
+    does not, whatever the export table's format."""
+
+    @staticmethod
+    def _side(tag: str, exports: list[str], fmt: str) -> AbiSnapshot:
+        snap = _snap([], [RecordType(name=tag, kind="struct", size_bits=8, fields=[])])
+        if fmt == "elf":
+            snap.elf = ElfMetadata(
+                soname="lib.so.1",
+                symbols=[
+                    ElfSymbol(
+                        name=n, binding=SymbolBinding.GLOBAL, sym_type=SymbolType.FUNC
+                    )
+                    for n in exports
+                ],
+            )
+        elif fmt == "macho":
+            snap.macho = MachoMetadata(exports=[MachoExport(name=n) for n in exports])
+        else:
+            snap.pe = PeMetadata(
+                exports=[PeExport(name=n, ordinal=i + 1) for i, n in enumerate(exports)]
+            )
+        return snap
+
+    @pytest.mark.parametrize(
+        ("fmt", "old_exports", "new_exports"),
+        [
+            # extern "C" int ktag_a_count; -> ktag_b_count
+            ("elf", ["ktag_a_count"], ["ktag_b_count"]),
+            # int ktag_a_count(); as C++ (named after, not over, the tag)
+            ("elf", ["_Z12ktag_a_countv"], ["_Z12ktag_b_countv"]),
+            # a function named exactly like the tag
+            ("elf", ["_Z6ktag_av"], ["_Z6ktag_bv"]),
+            ("macho", ["ktag_a_count"], ["ktag_b_count"]),
+            ("pe", ["ktag_a_count"], ["ktag_b_count"]),
+            ("pe", ["?ktag_a_count@@3HA"], ["?ktag_b_count@@3HA"]),
+        ],
+    )
+    def test_name_prefixed_exports_are_not_evidence(
+        self, fmt: str, old_exports: list[str], new_exports: list[str]
+    ) -> None:
+        old = self._side("ktag_a", old_exports, fmt)
+        new = self._side("ktag_b", new_exports, fmt)
+        assert detect_tag_type_renamed(old, new) == []
+
+    @pytest.mark.parametrize(
+        ("fmt", "old_sym", "new_sym"),
+        [
+            ("macho", "_Z4kfamI6ktag_aEiv", "_Z4kfamI6ktag_bEiv"),
+            ("macho", "__Z4kfamI6ktag_aEiv", "__Z4kfamI6ktag_bEiv"),
+            # MSVC: template<class T> int kfam(); kfam<ktag_a>()
+            ("pe", "??$kfam@Uktag_a@@@@YAHXZ", "??$kfam@Uktag_b@@@@YAHXZ"),
+            # parameter context: void use(ktag_a)
+            ("elf", "_Z3use6ktag_a", "_Z3use6ktag_b"),
+            ("pe", "?use@@YAXUktag_a@@@Z", "?use@@YAXUktag_b@@@Z"),
+        ],
+    )
+    def test_type_referencing_exports_are_evidence(
+        self, fmt: str, old_sym: str, new_sym: str
+    ) -> None:
+        old = self._side("ktag_a", [old_sym], fmt)
+        new = self._side("ktag_b", [new_sym], fmt)
+        (finding,) = detect_tag_type_renamed(old, new)
+        assert finding.affected_symbols == [old_sym]

@@ -39,13 +39,13 @@ from abicheck.diff_cpp_patterns import (
     _inline_accessors_for,
     _last_segment,
     _parent_namespace,
-    _symbols_embedding_leaf,
     detect_bundle_soname_skew,
     detect_inline_body_renamed_member,
     detect_tag_type_renamed,
 )
 from abicheck.model import AbiSnapshot, AccessLevel, Function, RecordType, TypeField
 from abicheck.model.change import Change
+from abicheck.model.mangled_type_reference import symbols_referencing_type
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -254,12 +254,17 @@ class TestDefaultTemplateArgBranches:
 
 class TestSymbolsEmbeddingLeaf:
     def test_matches_with_underscore_stripped(self) -> None:
-        # leaf "brute_force" → token "bruteforce"; both forms checked.
-        out = _symbols_embedding_leaf({"_Zbruteforce", "_Zunrelated"}, "brute_force")
-        assert out == ["_Zbruteforce"]
+        # Only a mangling that references the type counts: kfam<brute_force>()
+        # does; a C export prefixed with the name, or the underscore-free
+        # spelling, does not.
+        out = symbols_referencing_type(
+            {"_Z4kfamI11brute_forceEiv", "brute_force_count", "_Z10bruteforcev"},
+            "brute_force",
+        )
+        assert out == ["_Z4kfamI11brute_forceEiv"]
 
     def test_no_match_empty(self) -> None:
-        assert _symbols_embedding_leaf({"_Zfoo"}, "bar") == []
+        assert symbols_referencing_type({"_Zfoo"}, "bar") == []
 
 
 class TestTagRenameRejectionPaths:
@@ -270,7 +275,7 @@ class TestTagRenameRejectionPaths:
         old_tag = RecordType(name="ns::oldtag", kind="struct", size_bits=8, fields=[])
         new_tag = RecordType(name="ns::newtag", kind="struct", size_bits=8, fields=[])
         old = _snap(
-            functions=[_fn("ns_oldtag_inst", "_Zns_oldtag_inst")],
+            functions=[_fn("ns::kfam<ns::oldtag>", "_ZN2ns4kfamINS_6oldtagEEEiv")],
             types=[old_tag],
         )
         # No added symbol embeds "newtag" → candidate rejected.
@@ -286,7 +291,8 @@ class TestTagRenameRejectionPaths:
         new_tag = RecordType(name="ns::newtag", kind="struct", size_bits=8, fields=[])
         old = _snap(functions=[_fn("totally_other", "_Zother")], types=[old_tag])
         new = _snap(
-            functions=[_fn("ns_newtag_inst", "_Zns_newtag_inst")], types=[new_tag]
+            functions=[_fn("ns::kfam<ns::newtag>", "_ZN2ns4kfamINS_6newtagEEEiv")],
+            types=[new_tag],
         )
         assert detect_tag_type_renamed(old, new) == []
 
@@ -297,11 +303,11 @@ class TestTagRenameRejectionPaths:
         old_tag = RecordType(name="ns::oldtag", kind="struct", size_bits=8, fields=[])
         new_tag = RecordType(name="ns::newtag", kind="struct", size_bits=8, fields=[])
         old = _snap(
-            functions=[_fn("ns_oldtag_inst", "_Zns_oldtag_inst")],
+            functions=[_fn("ns::kfam<ns::oldtag>", "_ZN2ns4kfamINS_6oldtagEEEiv")],
             types=[old_tag],
         )
         new = _snap(
-            functions=[_fn("ns_newtag_inst", "_Zns_newtag_inst")],
+            functions=[_fn("ns::kfam<ns::newtag>", "_ZN2ns4kfamINS_6newtagEEEiv")],
             types=[new_tag],
         )
         findings = detect_tag_type_renamed(old, new)
@@ -310,7 +316,7 @@ class TestTagRenameRejectionPaths:
         assert ch.kind == ChangeKind.TAG_TYPE_RENAMED
         assert ch.old_value == "ns::oldtag"
         assert ch.new_value == "ns::newtag"
-        assert "_Zns_oldtag_inst" in (ch.affected_symbols or [])
+        assert "_ZN2ns4kfamINS_6oldtagEEEiv" in (ch.affected_symbols or [])
 
 
 # ---------------------------------------------------------------------------

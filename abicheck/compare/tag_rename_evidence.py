@@ -28,11 +28,12 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import TYPE_CHECKING
 
-from ..model.export_index import snapshot_export_names
-from ..model.synthetic_key import is_synthetic_ctor_key, is_synthetic_dtor_key
+from abicheck.model.export_index import snapshot_export_names
+from abicheck.model.synthetic_key import is_synthetic_ctor_key, is_synthetic_dtor_key
 
 if TYPE_CHECKING:
-    from ..model import AbiSnapshot, Function
+    from abicheck.model.declarations import Function
+    from abicheck.model.snapshot import AbiSnapshot
 
 
 def tag_rename_symbol_evidence(

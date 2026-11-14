@@ -432,7 +432,7 @@
     },
     {
       "path": "abicheck/diff_cpp_patterns.py",
-      "baseline_lines": 1038,
+      "baseline_lines": 1034,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",

@@ -37,7 +37,9 @@ def _pe(*names: str) -> AbiSnapshot:
     return AbiSnapshot(
         library="l.dll",
         version="1",
-        pe=PeMetadata(exports=[PeExport(name=n, ordinal=i + 1) for i, n in enumerate(names)]),
+        pe=PeMetadata(
+            exports=[PeExport(name=n, ordinal=i + 1) for i, n in enumerate(names)]
+        ),
     )
 
 
@@ -47,7 +49,9 @@ _CASES = [
     pytest.param(_elf, "_Z3fooi", "_ZNK4g_cbMUliE_clEi", "_Z3bazv", id="elf-lambda"),
     pytest.param(_elf, "_Z3fooi", "_Z3barP3FooIUt_E", "_Z3bazv", id="elf-unnamed"),
     # Mach-O readers store the once-stripped spelling ...
-    pytest.param(_macho, "_Z3fooi", "_ZNK4g_cbMUliE_clEi", "_Z3bazv", id="macho-lambda"),
+    pytest.param(
+        _macho, "_Z3fooi", "_ZNK4g_cbMUliE_clEi", "_Z3bazv", id="macho-lambda"
+    ),
     pytest.param(_macho, "_Z3fooi", "_Z3barP3FooIUt_E", "_Z3bazv", id="macho-unnamed"),
     # ... and a still-decorated platform spelling reads the same.
     pytest.param(_macho, "__Z3fooi", "__Z3barP3FooIUt_E", "__Z3bazv", id="macho-raw"),

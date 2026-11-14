@@ -47,6 +47,8 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from abicheck.model.mangled_type_reference import symbols_referencing_type
+
 from .compare.internal_namespaces import DEFAULT_INTERNAL_NAMESPACES
 from .compare.naming_conventions import (  # noqa: F401 -- re-exported
     BUNDLE_SONAME_COHORT,
@@ -486,12 +488,6 @@ def detect_cpu_dispatch_isa_dropped(
 # ---------------------------------------------------------------------------
 
 
-def _symbols_embedding_leaf(mangled_set: set[str], leaf: str) -> list[str]:
-    """Return mangled names from *mangled_set* that embed *leaf* (with or without underscores)."""
-    token = leaf.replace("_", "")
-    return [m for m in mangled_set if leaf in m or token in m]
-
-
 def _find_tag_rename_for_removed(
     removed: RecordType,
     candidates: list[RecordType],
@@ -504,12 +500,12 @@ def _find_tag_rename_for_removed(
     Returns a TAG_TYPE_RENAMED Change on the first matching candidate, or None.
     """
     old_leaf = _last_segment(removed.name)
-    removed_with_token = _symbols_embedding_leaf(only_removed, old_leaf)
+    removed_with_token = symbols_referencing_type(only_removed, old_leaf)
     if not removed_with_token:
         return None
     for added in candidates:
         new_leaf = _last_segment(added.name)
-        added_with_token = _symbols_embedding_leaf(only_added, new_leaf)
+        added_with_token = symbols_referencing_type(only_added, new_leaf)
         if not added_with_token:
             continue
         return make_change(
