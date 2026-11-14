@@ -575,7 +575,7 @@
     },
     {
       "path": "abicheck/dwarf_advanced.py",
-      "baseline_lines": 1037,
+      "baseline_lines": 1034,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",

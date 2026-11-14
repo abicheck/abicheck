@@ -30,13 +30,17 @@ every function returning ``std::string``.
 
 from __future__ import annotations
 
+import re
 from typing import Any
+
+from ..dwarf_utils import attr_str, resolve_type_die
 
 __all__ = [
     "SYSV_MAX_REGISTER_RETURN_BYTES",
     "VALUE_ABI_TRAIT_UNKNOWN",
     "comparable_traits",
     "declared_triviality",
+    "is_copy_or_move_ctor",
     "ret_component",
     "returns_in_registers",
 ]
@@ -133,3 +137,52 @@ def ret_component(trait: str) -> str | None:
         if part.startswith("ret:"):
             return part[4:]
     return None
+
+
+#: A constructor of the enclosing class taking ``[cv] X&`` or ``[cv] X&&``
+#: (Itanium: ``C1``/``C2``/``C4`` then ``R``/``O``, cv, and ``S_`` -- the class).
+_OWN_REF_CTOR = re.compile(r"C[124]E(?:R|O)V?K?S_$")
+
+_CV_TAGS = ("DW_TAG_const_type", "DW_TAG_volatile_type", "DW_TAG_typedef")
+
+
+def is_copy_or_move_ctor(ch: Any, type_die: Any, class_name: str, CU: Any) -> bool:
+    """Whether member *ch* of *type_die* is a copy or move constructor.
+
+    Only these (with a destructor) make a class non-trivial for calls; a
+    converting or default constructor does not (Itanium C++ ABI 3.1.2). gcc
+    names the in-class declaration with the unified ``C4`` constructor and
+    clang with ``C1``/``C2``, so the shape is read from the one explicit
+    parameter -- a reference to the class itself -- not from the variant.
+    Without a *CU* the parameter cannot be resolved and the mangled name's
+    own-class reference (``S_``) decides.
+    """
+    if attr_str(ch, "DW_AT_name") != class_name:
+        return False
+    if CU is None:
+        linkage = attr_str(ch, "DW_AT_linkage_name") or ""
+        return _OWN_REF_CTOR.search(linkage) is not None
+    params = [
+        p
+        for p in ch.iter_children()
+        if p.tag == "DW_TAG_formal_parameter"
+        and not int(getattr(p.attributes.get("DW_AT_artificial"), "value", 0) or 0)
+    ]
+    if len(params) != 1:
+        return False
+    ref = resolve_type_die(params[0], CU)
+    if ref is None or ref.tag not in (
+        "DW_TAG_reference_type",
+        "DW_TAG_rvalue_reference_type",
+    ):
+        return False
+    target = resolve_type_die(ref, CU)
+    for _ in range(8):
+        if target is None or target.tag not in _CV_TAGS:
+            break
+        target = resolve_type_die(target, CU)
+    if target is None:
+        return False
+    return target.offset == type_die.offset or (
+        target.tag == type_die.tag and attr_str(target, "DW_AT_name") == class_name
+    )

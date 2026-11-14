@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from abicheck.dwarf_advanced import _is_nontrivial_aggregate
 
 # ---------------------------------------------------------------------------
@@ -418,3 +420,36 @@ class TestDwarfTypeCacheReuse:
         assert call_count[0] > first_count, (
             "Without cache, iter_children must be called on every invocation"
         )
+
+
+# Without a CU the constructor's shape is read from its mangled name. Every
+# constructor variant (gcc's unified C4 included) counts, but only one taking a
+# reference to its own class: a converting or default constructor leaves the
+# class trivial for calls (Itanium C++ ABI 3.1.2).
+@pytest.mark.parametrize(
+    ("linkage", "nontrivial"),
+    [
+        ("_ZN1WC1ERKS_", True),  # W(const W&), complete-object variant
+        ("_ZN1WC2ERKS_", True),  # base-object variant
+        ("_ZN1WC4ERKS_", True),  # gcc's unified in-class declaration
+        ("_ZN1WC4ERS_", True),  # W(W&)
+        ("_ZN1WC4EOS_", True),  # move constructor
+        ("_ZN1WC1ERVKS_", True),  # W(const volatile W&)
+        ("_ZN1WC4Ev", False),  # W()
+        ("_ZN1WC1Ei", False),  # W(int)
+        ("_ZN1WC4ERKi", False),  # W(const int&)
+        ("_ZN1WC1ERKS_i", False),  # W(const W&, int): not a copy shape
+    ],
+)
+def test_only_an_own_reference_constructor_is_nontrivial(
+    linkage: str, nontrivial: bool
+) -> None:
+    ctor = _Die(
+        "DW_TAG_subprogram",
+        {"DW_AT_name": _Attr("W"), "DW_AT_linkage_name": _Attr(linkage)},
+        offset=10,
+    )
+    struct_die = _Die(
+        "DW_TAG_structure_type", {"DW_AT_name": _Attr("W")}, [ctor], offset=5
+    )
+    assert _is_nontrivial_aggregate(struct_die) is nontrivial
