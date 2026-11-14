@@ -44,6 +44,7 @@ from abiforge.model.opkit import (
 from abiforge.model.seeds import SEEDS, RoleText, Seed
 from abiforge.operators.build_data import BUILD_DATA_OPERATORS
 from abiforge.operators.cxx import CXX_OPERATORS
+from abiforge.operators.dependencies import DEPENDENCY_OPERATORS
 from abiforge.operators.elf import ELF_OPERATORS
 from abiforge.operators.kinds import KIND_OPERATORS
 from abiforge.operators.layout import LAYOUT_OPERATORS
@@ -1015,6 +1016,7 @@ OPERATORS: tuple[EditOp, ...] = (
     *SYMBOL_OPERATORS,
     *KIND_OPERATORS,
     *BUILD_DATA_OPERATORS,
+    *DEPENDENCY_OPERATORS,
     *RUNTIME_FLOOR_OPERATORS,
     *SOURCE_EVIDENCE_OPERATORS,
 )

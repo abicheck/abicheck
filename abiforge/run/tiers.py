@@ -178,6 +178,16 @@ _PR: tuple[tuple[str, str, str, dict[str, object]], ...] = (
     # L4/L5 source evidence: what only source replay or the source graph
     # sees (abiforge.operators.source_evidence), one row per operator.
     *SOURCE_EVIDENCE_PR,
+    # Dependency resolution (abiforge.operators.dependencies): an import no
+    # library in the DT_NEEDED closure provides, from symbols alone and with
+    # headers, one family each.
+    (
+        "import_left_unprovided",
+        "c_elf",
+        "gcc",
+        {"follow_deps": True, "evidence": "binary"},
+    ),
+    ("import_left_unprovided", "c_elf", "clang", {"follow_deps": True}),
 )
 
 

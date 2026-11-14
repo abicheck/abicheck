@@ -48,6 +48,7 @@ def snapshot(
     gcc_options: str | None,
     build_info: Path | None = None,
     sources: Path | None = None,
+    follow_deps: bool = False,
 ) -> AbiSnapshot:
     """abicheck's snapshot of one built library, made the way users get it.
 
@@ -56,8 +57,30 @@ def snapshot(
     --build-info`` runs, which also parses the headers in the build's own
     compile context and embeds the build facts. *sources* is the build's
     source tree (L4/L5): the same typed workflow ``abicheck dump -H
-    --sources`` runs, which embeds the source facts.
+    --sources`` runs, which embeds the source facts. *follow_deps* resolves
+    the library's DT_NEEDED closure as ``abicheck dump --follow-deps`` does,
+    searching the library's own directory (where the harness puts it).
     """
+    snap = _snapshot(
+        so, headers, version, is_cxx, backend, gcc_options, build_info, sources
+    )
+    if follow_deps:
+        from abicheck.dependency_info import populate_dependency_info
+
+        populate_dependency_info(snap, so, [so.parent], None, "")
+    return snap
+
+
+def _snapshot(
+    so: Path,
+    headers: Sequence[Path],
+    version: str,
+    is_cxx: bool,
+    backend: str,
+    gcc_options: str | None,
+    build_info: Path | None,
+    sources: Path | None,
+) -> AbiSnapshot:
     from abicheck.compile_context import CompileContext
     from abicheck.dumper import dump
 

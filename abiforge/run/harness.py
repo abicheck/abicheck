@@ -246,6 +246,7 @@ def build(
         gcc_options=gcc_options,
         build_info=out_dir / COMPILE_DB if config.build_data else None,
         sources=out_dir if config.sources else None,
+        follow_deps=config.follow_deps,
     )
     return Built(dir=out_dir, so=so, header=header, snapshot=snap)
 
