@@ -65,7 +65,11 @@ def _raw_string_end(text: str, quote_index: int) -> int:
     return close_start + len(close) - 1
 
 
-def _blank_comments_and_strings(text: str, blank_strings: bool = True) -> str:
+def _blank_comments_and_strings(
+    text: str,
+    blank_strings: bool = True,
+    block_spans: list[tuple[int, int]] | None = None,
+) -> str:
     """Replace comment (and optionally string/char-literal) *contents* with spaces.
 
     Preserves every newline and the overall length so byte offsets (and thus
@@ -78,6 +82,10 @@ def _blank_comments_and_strings(text: str, blank_strings: bool = True) -> str:
     With ``blank_strings=False`` only comments are blanked and string/char
     literals are preserved verbatim — needed for the ``extern "C"`` rule, whose
     target *is* a string literal.
+
+    *block_spans*, when given, receives one ``(body_start, close_star)`` pair
+    per ``/* */`` comment: the offset just past ``/*`` and the offset of the
+    closing ``*`` (``len(text)`` for an unterminated comment).
     """
     # The per-state step functions below define the semantics; this loop only
     # fast-forwards over the runs each state copies or blanks uniformly (plain
@@ -96,6 +104,8 @@ def _blank_comments_and_strings(text: str, blank_strings: bool = True) -> str:
                 i = j
                 continue
             i, state = _blank_scan_code(text, i, out)
+            if state == "block_comment" and block_spans is not None:
+                block_spans.append((i, n))
         elif state == "line_comment":
             j = text.find("\n", i)
             j = n if j < 0 else j
@@ -111,7 +121,10 @@ def _blank_comments_and_strings(text: str, blank_strings: bool = True) -> str:
                 out.append(_blank_run(text[i:j]))
                 i = j
                 continue
+            close_star = i
             i, state = _blank_scan_block_comment(text, i, out)
+            if state == "code" and block_spans is not None:
+                block_spans[-1] = (block_spans[-1][0], close_star)
         elif state == "string" or state == "char":
             m = (_STRING_STOP_RE if state == "string" else _CHAR_STOP_RE).search(
                 text, i
@@ -130,9 +143,31 @@ def _blank_comments_and_strings(text: str, blank_strings: bool = True) -> str:
     return "".join(out)
 
 
+def lines_starting_in_block_comment(text: str) -> list[bool]:
+    """For each line of ``text.splitlines()``, whether it starts inside a
+    ``/* */`` comment opened on an earlier line (a line beginning with the
+    closing ``*/`` still does).
+
+    Read from the same state machine as :func:`_blank_comments_and_strings`,
+    so string literals, raw strings, digit separators and spliced ``//``
+    comments decide comment state the same way for every scanner.
+    """
+    spans: list[tuple[int, int]] = []
+    _blank_comments_and_strings(text, blank_strings=False, block_spans=spans)
+    result: list[bool] = []
+    offset = 0
+    k = 0
+    for line in text.splitlines(keepends=True):
+        while k < len(spans) and spans[k][1] < offset:
+            k += 1
+        result.append(k < len(spans) and spans[k][0] <= offset <= spans[k][1])
+        offset += len(line)
+    return result
+
+
 _CODE_STOP_RE = re.compile(r"[/\"']")
-_STRING_STOP_RE = re.compile(r'["\\]')
-_CHAR_STOP_RE = re.compile(r"['\\]")
+_STRING_STOP_RE = re.compile(r'["\\\n]')
+_CHAR_STOP_RE = re.compile(r"['\\\n]")
 _NON_NEWLINE_RE = re.compile(r"[^\n]")
 
 
@@ -217,6 +252,12 @@ def _blank_scan_literal(
         return i + 2, state
     if ch == quote:
         out.append(quote)
+        return i + 1, "code"
+    if ch == "\n":
+        # An ordinary literal cannot span a line (a spliced one took the
+        # escape branch above): an unmatched quote, as in ``#error don't``,
+        # ends at the newline instead of swallowing the lines below.
+        out.append("\n")
         return i + 1, "code"
     if not blank_strings:
         out.append(ch)

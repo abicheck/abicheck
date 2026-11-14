@@ -120,6 +120,7 @@ FAMILIES: dict[str, Family] = {
                 "tests/test_state_guards_phase5.py",
                 "tests/test_clang_type_evidence.py",
                 "tests/test_concept_scan_elif0.py",
+                "tests/test_shared_c_lexer.py",
             ),
             planned_reason="",
         ),

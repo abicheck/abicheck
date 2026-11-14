@@ -77,11 +77,30 @@ LIFECYCLE_BUG_CLASSES: tuple[BugClass, ...] = (
             "ignores delimiters inside string and character literals; a "
             "literal's contents never open or close a scope. Instance: "
             "header_conditionals counted a '}' in a member initializer and "
-            "closed the record early. Family F4 (structure over spelling)."
+            "closed the record early; macro_graph's own comment lexer missed "
+            "raw strings, spliced strings and digit separators, so a guard "
+            "was hidden or a commented one read live (now on the shared "
+            "pattern_facts_lexer, source generation 15). Family F4 "
+            "(structure over spelling)."
         ),
         fixed_by=(2048,),
-        seed_tests=("tests/test_state_guards_phase5.py",),
-        axes={"literal": ("string", "char", "escaped quote", "several braces", "none")},
+        seed_tests=(
+            "tests/test_state_guards_phase5.py",
+            "tests/test_shared_c_lexer.py",
+        ),
+        axes={
+            "literal": (
+                "string",
+                "char",
+                "escaped quote",
+                "several braces",
+                "raw string",
+                "spliced string",
+                "digit separator",
+                "unmatched quote",
+                "none",
+            )
+        },
     ),
     BugClass(
         id="lifecycle.counter_or_handle_used_past_its_release",
