@@ -368,6 +368,7 @@
     "65": "generation 65 (stdlib family from exports) and 66 (castxml data size per target, std re-export provenance, extern-C recovery scope) land together in PR #2063; main goes from 62 straight to 66 with 63-65 as intermediate bumps, so no main commit ever ran generation 65",
     "67": "generations 67 (Apple arm64 C++11 POD data size, castxml clang side-pass target) and 68 (gcc DWARF copy/move-constructor triviality) land together in PR #2063, so no main commit ever ran generation 67",
     "68": "generations 68 (gcc DWARF copy/move-constructor triviality) and 69 (member-function final, gcc plugin function template specializations) land together in PR #2063, so no main commit ever ran generation 68",
+    "69": "generations 69 (member-function final, gcc plugin function template specializations) and 70 (castxml global-variable guess) land together in PR #2063, so no main commit ever ran generation 69",
     "7": "generations 7 and 8 were intermediate bumps inside PR #1712's branch (clang positional defaults, dependent members); main went from 6 (49529426d) straight to 9 (c23a9ad57), so no main commit ever ran them",
     "8": "generations 7 and 8 were intermediate bumps inside PR #1712's branch (clang positional defaults, dependent members); main went from 6 (49529426d) straight to 9 (c23a9ad57), so no main commit ever ran them"
   },

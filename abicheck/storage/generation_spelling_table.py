@@ -677,6 +677,13 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "older snapshot carries no final specifier (read as not known) and its "
         "gcc-backend surface lacks those specializations; no rewrite applies"
     ),
+    70: GenerationSpellingChange(
+        "no type or name spelling changes. castxml's guessed Itanium mangling "
+        "of a global-namespace variable (_Z<len><name>) is never kept as its "
+        "symbol: the Itanium ABI does not mangle global variables, so an "
+        "explicit extern \"C\" variable in a C++ header records its plain name "
+        "again, as generations before 66 did; no rewrite applies"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.
