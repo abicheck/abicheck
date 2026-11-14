@@ -763,3 +763,8 @@ adrs:
       - cli: compare
       - api: abicheck.service.run_dump_request
     missing: Experimental GCC support still lacks native header graphs, full macro/template coverage and multi-TU/source replay.
+  - id: ADR-093
+    file: 093-declared-change-kind-relations-and-observability.md
+    disposition: gap
+    use_cases: []
+    missing: Design only; observable_at, kind relations and the policy resolution pass are not implemented yet (plan abicheck-abiforge-completeness WS-1, WS-5).

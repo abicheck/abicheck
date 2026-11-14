@@ -1258,3 +1258,13 @@ alongside the flag deletion itself.
   three-axis core this ADR extends.
 - `docs/reference/exit-codes.md` — the per-command number tables this ADR's
   precedence resolver must reproduce exactly, not renumber.
+
+## Amendment (2026-11-14, decision): unobservable surfaces lower assurance
+
+[ADR-093](093-declared-change-kind-relations-and-observability.md) declares,
+per `ChangeKind`, the minimal evidence configurations that observe it
+(`observable_at`). When a run's configuration contains none of a kind's
+alternatives, the absence of that kind is not evidence of compatibility: the
+outcome records reduced assurance for that surface (ADR-090) and the gate
+never reports it as a proven clean result. This adds no new exit code; it
+feeds the existing assurance/completeness axis, which can only raise 0 → 1.

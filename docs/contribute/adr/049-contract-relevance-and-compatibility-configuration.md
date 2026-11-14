@@ -1035,3 +1035,12 @@ exports, all} × subject shape).
   `abicheck/policy/contract_default_mode.py`. Class tests:
   `tests/test_contract_adaptive_default_fallback.py` and
   `tests/test_contract_adaptive_default_monotone.py`.
+
+## Amendment (2026-11-14, decision): related kinds share a contract subject
+
+[ADR-093](093-declared-change-kind-relations-and-observability.md) adds
+declared relations between `ChangeKind`s. A kind whose `variant_of` or
+`same_event_as` names another kind declares the **same** `contract_subject`
+as that kind: the relation says both kinds report one fact, so a contract
+cannot place one and not the other. The catalog test that checks the
+relations enforces this.

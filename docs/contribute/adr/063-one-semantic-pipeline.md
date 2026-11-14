@@ -1522,3 +1522,16 @@ evidence must never fabricate a break.
 - abiforge's `new_side_dumped_without_headers` operator pins the
   NO_CHANGE outcome on every PR cell.
 - No new `ChangeKind`, CLI flag or schema field.
+
+## Amendment (2026-11-14, decision): evidence levels are sets of sources
+
+[ADR-093](093-declared-change-kind-relations-and-observability.md) replaces
+the chain reading of the evidence levels. DWARF (`D`) and public headers
+(`H`) are sibling sources above the binary (`B`), not successive ranks; a
+level is a *set* of sources (L0 `{B}`, L1 `{B,D}`, L2s `{B,H}`, L3
+`{B,H,BD}`, L4 `{B,H,BD,S}`, L5 adds `G`). Where this ADR's plan, `--depth`
+or capability text orders levels as a chain, it orders *configurations a run
+can request*, not what each configuration can observe. Per-kind
+observability is declared as `ChangeKindMeta.observable_at`. Stripped binary
+plus public headers, `{B,H}`, is the primary configuration: every fact
+physically present in a public header must be caught there without DWARF.
