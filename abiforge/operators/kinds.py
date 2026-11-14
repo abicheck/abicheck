@@ -50,7 +50,12 @@ def _no_pack(c: Config) -> str | None:
 
 
 def _lp64(c: Config) -> str | None:
-    return "long is narrower than long long under -m32" if c.flags.bits != 64 else None
+    """long and long long are the same type only on an LP64 target."""
+    if c.flags.bits != 64:
+        return "long is narrower than long long under -m32"
+    if c.objfmt == "pe":
+        return "Windows is LLP64: long is 32-bit, long long 64-bit"
+    return None
 
 
 _COMPAT = {"verdict_min": "COMPATIBLE", "verdict_max": "COMPATIBLE"}
