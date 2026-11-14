@@ -174,7 +174,9 @@ def _compile_library(
     cmd += link.render(out_dir)
     if config.build_data:
         # The L3 record of this build: the one command that compiled it.
-        entry = {"directory": str(out_dir), "file": str(src), "arguments": cmd}
+        # The compiler runs in this process's cwd, so that is the directory
+        # the command's relative paths resolve against (out_dir may be relative).
+        entry = {"directory": str(Path.cwd()), "file": str(src), "arguments": cmd}
         (out_dir / COMPILE_DB).write_text(json.dumps([entry]), encoding="utf-8")
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if proc.returncode != 0:

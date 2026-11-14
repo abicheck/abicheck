@@ -91,7 +91,11 @@ class TestUnspecifiedReturnNowNamed:
             ("auto", "decltype(auto)"),
             ("(lambda:lib.h#1)", "(lambda:lib.h#2)"),
             ("lib::Foo", "lib::Bar"),
-            ("auto", "?"),  # "?" is no evidence, not a named type
+            # unresolved spellings (bare or composite) are no evidence
+            ("auto", "?"),
+            ("auto", "?*"),
+            ("auto", "const ?"),
+            ("auto", "?&"),
         ],
     )
     def test_no_unspecified_to_named_transition(self, old_rt: str, new_rt: str) -> None:

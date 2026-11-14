@@ -241,9 +241,8 @@ DETECTOR_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
             }
         ),
         "glibcxx_dual_abi": frozenset({"glibcxx_dual_abi_flip_detected"}),
-        "runtime_requirements": frozenset(
-            {"sanitizer_runtime_required", "imported_symbol_unprovided"}
-        ),
+        "runtime_requirements": frozenset({"sanitizer_runtime_required"}),
+        "imported_symbols_unprovided": frozenset({"imported_symbol_unprovided"}),
         "glibcxx_dual_abi_selection": frozenset(
             {"glibcxx_dual_abi_changed", "toolchain_flag_drift"}
         ),

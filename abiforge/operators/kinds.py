@@ -274,15 +274,6 @@ KIND_OPERATORS: tuple[EditOp, ...] = (
                 "without headers the surviving declaration is not observable: "
                 "the evidence shows the mangled export removed",
             ),
-            Rule(
-                lambda c: c.evidence == "headers" and c.header_backend == "castxml",
-                {"expected": frozenset({"FUNC_LANGUAGE_LINKAGE_CHANGED"})},
-                "castxml spells a C function parsed in C++ mode with a guessed "
-                "C++ mangling, so a global function whose guessed mangling is "
-                "not exported while its bare name is reads as C linkage (the "
-                "castxml backend's extern-C recovery): the same loss is "
-                "reported as the function's linkage changing to C",
-            ),
         ),
         **_BINARY,
     ),

@@ -95,6 +95,10 @@ def _declared_names(snap: AbiSnapshot) -> set[str]:
         names.add(t.qualified_name or t.name)
     for e in snap.declarations.enums:
         names.add(getattr(e, "qualified_name", None) or e.name)
+    # An alias (``using string = std::string;`` / ``typedef``) replacing a
+    # ``using std::string;`` keeps ``lib::string`` available.
+    names.update(snap.declarations.typedefs_qualified)
+    names.update(k for k in snap.declarations.typedefs if "::" in k)
     return names
 
 
