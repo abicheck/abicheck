@@ -214,11 +214,12 @@ PROBES: dict[str, Probe] = {
         "template <class T, class U> int Box<T, U>::get() const { return (int)v; }\n"
         "template struct Box<int, int>;",
     ),
-    "unspecified_return_now_named": _inline(
-        "auto get(int x);\nint use(int);",
-        "int get(int x);\nint use(int);",
-        "auto get(int x) { return x; }\nint use(int x) { return x; }",
-        "int get(int x) { return x; }\nint use(int x) { return x; }",
+    # A namespace-scope using-declaration: the headers' re-export table
+    # (``extract/headers/std_reexports.py``); DWARF records none.
+    "std_reexport_removed": _inline(
+        "#include <cstdlib>\nnamespace lib { using std::abs; int use(int); }",
+        "#include <cstdlib>\nnamespace lib { int use(int); }",
+        "namespace lib { int use(int x) { return x; } }",
     ),
     # -- HEADER_OR_SOURCE_GATED: the NON_BINARY_REASONS rows to probe first --
     "param_default_value_removed": Probe(case="case123_default_argument_removed"),
@@ -333,14 +334,6 @@ PROBES: dict[str, Probe] = {
 #: could be probed with a pair of C/C++ libraries.
 UNPROBED: dict[str, str] = {
     # BINARY_GATED
-    "std_reexport_removed": (
-        "no extractor produces its input: the detector needs a function record "
-        "declared in a library namespace whose mangled name is std::, and "
-        "neither castxml nor the clang header backend records a "
-        "`using std::x;` declaration as a function (probed: no finding either "
-        "way); its decision is pinned on constructed snapshots in "
-        "test_diff_namespaces"
-    ),
 }
 
 #: ``BINARY_GATED`` probes whose binary-only (DWARF, no headers) run produces

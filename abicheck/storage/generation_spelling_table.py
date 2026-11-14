@@ -612,6 +612,26 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "and a castxml record's data size as not collected"
     ),
     63: GenerationSpellingChange(
+        "castxml spells a record it emits with no name attribute (a lambda "
+        "closure, an unnamed local class) as '<owner>::(unnamed class)' "
+        "where older dumps wrote '?'. No rewrite is sound -- a stored '?' "
+        "does not say which owner or record it was, and '?' is the "
+        "no-evidence sentinel every comparison already reads as unknown, so "
+        "an old '?' against the new spelling produces no finding. The native "
+        "gcc backend records the export fact through the shared tiered "
+        "lookup (a .symtab-only or extern-C namesake hit is partial); no "
+        "stored spelling changes"
+    ),
+    64: GenerationSpellingChange(
+        "no type or name spelling changes. Header dumps with a public-header "
+        "set record the public headers' namespace-scope using std::X "
+        "re-exports (castxml namespace members bound from std, clang "
+        "UsingDecl, the native gcc plugin's new using rows) as the "
+        "abicheck.std_reexports extension fact of the declarations section. "
+        "No rewrite is needed -- an older snapshot reads the table as not "
+        "modelled, which reports no re-export removed"
+    ),
+    65: GenerationSpellingChange(
         "no type or name spelling changes. The captured build mode's C++ "
         "standard-library family (and libc++ ABI version) is read from the "
         "binary's exported symbols instead of the declarations' manglings, "

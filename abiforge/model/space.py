@@ -116,6 +116,7 @@ CONSTRUCTS: tuple[Construct, ...] = (
     Construct("template", _CXX),
     Construct("concept", _CXX, "concepts"),
     Construct("no_unique_address", _CXX, "no_unique_address"),
+    Construct("deduced_return", _CXX, "deduced_return"),
     Construct("noexcept_type", _CXX, "noexcept_in_type"),
     Construct("std_string", _CXX, "std_string"),
     Construct("restrict_pointer", _C, "restrict"),
@@ -136,6 +137,7 @@ CONSTRUCTS: tuple[Construct, ...] = (
     Construct("inline_namespace", _CXX),
     Construct("abi_tag", _CXX),
     Construct("hidden_friend", _CXX),
+    Construct("using_declaration", _CXX),
 )
 CONSTRUCT_BY_NAME: dict[str, Construct] = {c.name: c for c in CONSTRUCTS}
 
@@ -244,6 +246,8 @@ ROLE_CONSTRUCT: dict[str, str] = {
     "k.ibr": "inline_function",
     "k.tvz": "class_virtual",
     "k.evd": "struct",
+    "k.urt": "deduced_return",
+    "k.rex": "using_declaration",
     "k.pnv": "class_virtual",
     "k.stl": "std_string",
     "k.anon": "function",
@@ -426,6 +430,7 @@ OP_EDIT_CLASS: dict[str, dict[str, str]] = {
         "imported_symbol_removed": "body_change",
         "glibc_version_required_added": "body_change",
         "glibc_older_version_required": "body_change",
+        "glibc_floor_raised": "body_change",
         "glibc_version_requirement_dropped": "body_change",
         "fortified_call_dropped": "body_change",
         "text_relocation_introduced": "body_change",
@@ -466,6 +471,7 @@ OP_EDIT_CLASS: dict[str, dict[str, str]] = {
         "template_return_argument_changed": "return_retyped",
         "template_param_argument_changed": "param_retyped",
         "declared_function_lost_definition": "export_declaration_mismatch",
+        "declared_function_export_became_c_namesake": "export_declaration_mismatch",
         "unnamed_type_api_added": "function_added",
         "reorder_declarations": "declaration_text_only",
     },

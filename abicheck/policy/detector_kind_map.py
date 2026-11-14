@@ -356,6 +356,9 @@ DETECTOR_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
             }
         ),
         "reserved_fields": frozenset({"used_reserved_field"}),
+        "runtime_requirements": frozenset(
+            {"imported_symbol_unprovided", "sanitizer_runtime_required"}
+        ),
         "stdlib_impl": frozenset(
             {"libcpp_abi_version_changed", "stdlib_implementation_changed"}
         ),

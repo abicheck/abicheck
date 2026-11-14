@@ -124,6 +124,9 @@ class HeaderAstFields:
     cxx_template_defaults: dict[str, TemplateDefaults] | None = field(
         default=None, kw_only=True
     )
+    #: The public headers' ``using std::X;`` re-exports
+    #: (``extract/headers/std_reexports.py``); ``None`` when not modelled.
+    std_reexports: dict[str, str] | None = field(default=None, kw_only=True)
 
     extraction_provenance: dict[str, Any] | None = field(default=None, kw_only=True)
 
@@ -139,7 +142,23 @@ class HeaderAstFields:
             ),
             "cxx_concept_constraints": self.cxx_concept_constraints,
             "cxx_template_defaults": self.cxx_template_defaults,
+            "std_reexports": self.std_reexports,
         }
+
+
+def _std_reexports(parser: object, producer: str) -> dict[str, str] | None:
+    """The re-export table of a C++ parse (``None``: not modelled)."""
+    from .headers.std_reexports import castxml_std_reexports, clang_std_reexports
+
+    root = getattr(parser, AST_SCOPE_ATTRIBUTES[0], None)
+    segs = getattr(parser, "_pub_header_segs", [])
+    dirs = getattr(parser, "_pub_dir_segs", [])
+    have_public_set = bool(getattr(parser, "_have_public_set", False))
+    if producer == "castxml":
+        return castxml_std_reexports(root, segs, dirs, have_public_set)
+    if not getattr(parser, "_is_cxx", False):
+        return None
+    return clang_std_reexports(root, segs, dirs, have_public_set)
 
 
 def _template_defaults(
@@ -268,6 +287,7 @@ def _parse_header_ast_legacy(
         semantic_ir=SemanticIR(),
         cxx_concept_constraints=_concept_constraints(parser, producer),
         cxx_template_defaults=_template_defaults(parser, producer),
+        std_reexports=_std_reexports(parser, producer),
         # What the parse could not read stays visible (ADR-063/064): its own
         # failed optional passes, and type spellings it left unresolved.
         extraction_provenance=provenance_with_limitations(

@@ -1040,6 +1040,23 @@ _KIND_ROLES: dict[str, RoleText] = {
         "struct KEV { int a; char c; };\nint kev_get(KEV* p);",
         "int kev_get(KEV* p) { return p->a + p->c; }",
     ),
+    # An inline function returning a lambda: callers can hold the result
+    # only in ``auto``. kurt_use calls it, so the library emits (weak)
+    # symbols for kmake and the closure's call operator. A deduced return
+    # type is C++14: under C++11 the group is empty (the operator needs the
+    # ``deduced_return`` feature, so no C++11 cell runs it).
+    "k.urt": (
+        "#if __cplusplus >= 201402L\n"
+        "inline auto kmake() { return [](int x) { return x + 7; }; }\n"
+        "int kurt_use(int a);\n#endif",
+        "#if __cplusplus >= 201402L\nint kurt_use(int a) { return kmake()(a); }\n#endif",
+    ),
+    # A namespace-scope using-declaration re-exporting a std function: consumer
+    # source may spell krx::abs.
+    "k.rex": (
+        "#include <cstdlib>\nnamespace krx { using std::abs; int krx_f(int a); }",
+        "namespace krx { int krx_f(int a) { return std::abs(a); } }",
+    ),
     # Empty baselines: the operator adds the declaration.
     "k.pnv": ("", ""),
     "k.stl": ("", ""),

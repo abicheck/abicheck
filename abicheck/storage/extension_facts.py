@@ -49,6 +49,7 @@ from .extension_fact_catalog import (
     EXPORT_READ,
     EXTENSION_FACTS,
     NOEXCEPT_UNOBSERVED,
+    STD_REEXPORTS,
     TYPEDEF_ORIGINS,
     ExtensionFact,
     ExtensionFactRegistry,
@@ -218,6 +219,7 @@ def sync_model_extension_facts(snap: Any) -> None:
     # Before the early return below: its section is not this fact's, and a
     # blocked one must not leave a stale or missing typedef_origins fact.
     _sync_typedef_origins(snap)
+    _sync_std_reexports(snap)
     scan = getattr(snap, "cxx_concept_header_scan", None)
     if _blocked_reason(snap, CXX_CONCEPT_HEADER_SCAN.section) is not None:
         return
@@ -255,6 +257,36 @@ def _sync_typedef_origins(snap: Any) -> None:
         write_extension_fact(snap, TYPEDEF_ORIGINS, known)
     else:
         _drop_extension_fact(snap, TYPEDEF_ORIGINS)
+
+
+def _sync_std_reexports(snap: Any) -> None:
+    """Write ``std_reexports`` -- an empty map too, which records "modelled,
+    none declared" -- or drop a stale fact when it was not modelled."""
+    if _blocked_reason(snap, STD_REEXPORTS.section) is not None:
+        return
+    table = getattr(snap, "std_reexports", None)
+    if isinstance(table, dict):
+        write_extension_fact(snap, STD_REEXPORTS, table)
+    else:
+        _drop_extension_fact(snap, STD_REEXPORTS)
+
+
+def _apply_std_reexports(snap: Any) -> None:
+    """Restore ``std_reexports``. Missing or blocked leaves it ``None`` (not
+    modelled); a stored value that does not decode is refused rather than
+    read as that."""
+    fact = read_extension_fact(snap, STD_REEXPORTS)
+    if fact.status is FactStatus.PRESENT and isinstance(fact.value, dict):
+        snap.std_reexports = dict(fact.value)
+        return
+    if fact.status is FactStatus.NOT_COLLECTED:
+        return
+    if _blocked_reason(snap, STD_REEXPORTS.section) is not None:
+        return
+    raise SnapshotError(
+        "snapshot's std_reexports extension fact is unreadable: "
+        + "; ".join(str(d) for d in fact.diagnostics)
+    )
 
 
 def _apply_typedef_origins(snap: Any) -> None:
@@ -389,6 +421,7 @@ def apply_model_extension_facts(snap: Any) -> None:
     _apply_template_defaults(snap)
     decode_noexcept_unobserved(snap)
     _apply_typedef_origins(snap)
+    _apply_std_reexports(snap)
     scan = read_extension_fact(snap, CXX_CONCEPT_HEADER_SCAN)
     if scan.status is FactStatus.PRESENT and isinstance(scan.value, bool):
         snap.cxx_concept_header_scan = scan.value

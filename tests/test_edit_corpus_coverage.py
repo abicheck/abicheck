@@ -601,6 +601,7 @@ def _year_oracle(construct: str, std: str) -> bool:
         "concept": {"c++": 2020},
         "no_unique_address": {"c++": 2020},
         "noexcept_type": {"c++": 2017},
+        "deduced_return": {"c++": 2014},  # auto f() { ... }: C++14
         "std_string": {"c++": 2011},
         "class_virtual": {"c++": 2011},
         "template": {"c++": 2011},
@@ -609,6 +610,7 @@ def _year_oracle(construct: str, std: str) -> bool:
         "inline_namespace": {"c++": 2011},
         "abi_tag": {"c++": 2011},
         "hidden_friend": {"c++": 2011},
+        "using_declaration": {"c++": 2011},
         "restrict_pointer": {"c": 1999},
         "flexible_array": {"c": 1999},
         "atomic": {"c": 2011},

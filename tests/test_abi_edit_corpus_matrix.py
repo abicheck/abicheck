@@ -57,6 +57,7 @@ from abiforge.model.expect import (
 )
 from abiforge.model.seeds import C_SEED, SEED_BY_NAME, SEEDS
 from abiforge.operators import OP_BY_NAME, OPERATORS, matrix
+from abiforge.operators.build_data import BUILD_DATA_OPERATORS
 from abiforge.run.cells import (
     CellContext,
     CellResult,
@@ -68,6 +69,7 @@ from abiforge.run.cells import (
 from abiforge.run.exec import probe_expressions
 from abiforge.run.tiers import (
     _PR,
+    BUILD_DATA_PR,
     Cell,
     pairwise,
     pr_cells,
@@ -638,7 +640,13 @@ def test_pr_tier_guards_every_axis() -> None:
     assert all(op in OP_BY_NAME and seed in SEED_BY_NAME for op, seed, _, _ in _PR)
     # Every seed has a guard, so a seed whose base no longer builds fails a PR.
     assert {seed for _, seed, _, _ in _PR} == {s.name for s in SEEDS}
-    assert len(_PR) <= 20  # the PR tier stays a handful
+    # The PR tier stays a handful: one guard per axis, plus one row per L3
+    # build-data operator (BUILD_DATA_PR).
+    assert len(_PR) - len(BUILD_DATA_PR) <= 20
+    assert {op for op, _, _, _ in BUILD_DATA_PR} == {
+        op.name for op in BUILD_DATA_OPERATORS
+    }
+    assert {fam for _, _, fam, _ in BUILD_DATA_PR} == {"gcc", "clang"}
 
 
 def test_known_mismatches_name_real_cells_and_failing_classes() -> None:

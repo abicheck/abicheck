@@ -18,7 +18,6 @@ from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.evidence_status import ReachabilityState
 from ..model.source_contract_evidence import (
-    has_observed_source_contract_evidence,
     public_reachability,
 )
 from ..model.surface_facts import in_source_declaration_index
@@ -81,47 +80,63 @@ def _qualified_function_name(
 # Detector: std re-export removed
 # ---------------------------------------------------------------------------
 
-# Heuristic: a function whose declared qualified name resolves to a
-# library namespace AND whose mangled name resolves to a name in
-# ``std::`` is a re-export (the library names it via ``using std::X``).
-#
-# Concrete forms we accept:
-#   - Function.name == "lib::ns::par"         (declared in library headers)
-#   - Function.mangled demangles to a name beginning with "std::"
-#     (the underlying definition belongs to the standard library).
-#
-# We DO NOT use libstdc++/libc++ internal-namespace heuristics here —
-# false positives on real library functions would be worse than missing
-# the occasional re-export. The detector therefore requires both halves
-# of the signal to fire.
 
-_STD_PREFIX = "std::"
+def _declared_names(snap: AbiSnapshot) -> set[str]:
+    """Qualified names *snap* declares itself (functions without their
+    parameter list, records, enums, variables): a library that replaces a
+    ``using std::f;`` with its own ``lib::f`` still offers the name."""
+    names: set[str] = set()
+    for f in snap.declarations.functions:
+        if "::" in f.name:
+            names.add(f.name.split("(", 1)[0])
+    for v in snap.declarations.variables:
+        names.add(v.name)
+    for t in snap.declarations.types:
+        names.add(t.qualified_name or t.name)
+    for e in snap.declarations.enums:
+        names.add(getattr(e, "qualified_name", None) or e.name)
+    return names
 
 
-def _looks_like_std_reexport(
-    declared_qualified: str,
-    underlying_qualified: str,
-) -> bool:
-    """Return True when declared_qualified is a non-std alias for underlying_qualified.
+def _build_std_reexport_change(declared: str, underlying: str) -> Change:
+    """Build a single ``STD_REEXPORT_REMOVED`` finding.
 
-    Both names must be fully qualified. The underlying name must live in
-    ``std::``; the declared name must live somewhere else (any library
-    namespace). Identical names — i.e. the function genuinely lives in
-    ``std::`` — are not re-exports.
+    The re-export table holds only using-declarations a public header
+    declares (``extract/headers/std_reexports.py``), so the declaration is
+    observed as contract and its reachability is proven (ADR-084).
     """
-    if not declared_qualified or not underlying_qualified:
-        return False
-    declared_segs = _segments(declared_qualified)
-    underlying_segs = _segments(underlying_qualified)
-    if not declared_segs or not underlying_segs:
-        return False
-    # Declared must NOT be in std::; underlying MUST be in std::.
-    if declared_segs[0] == "std":
-        return False
-    if underlying_segs[0] != "std":
-        return False
-    # Same leaf name on both sides — a using-declaration preserves the leaf.
-    return declared_segs[-1] == underlying_segs[-1]
+    return make_change(
+        ChangeKind.STD_REEXPORT_REMOVED,
+        symbol=declared,
+        name=declared,
+        detail=underlying,
+        old_value=f"{declared} → {underlying}",
+        new_value=None,
+        **public_reachability(True),
+    )
+
+
+def detect_std_reexport_removed(
+    old: AbiSnapshot,
+    new: AbiSnapshot,
+) -> list[Change]:
+    """Report ``using std::X;`` re-exports that disappeared from public headers.
+
+    Reads both sides' re-export table (``AbiSnapshot.std_reexports``). A
+    side that did not model it (``None``: no header backend, no public
+    set, an older dump) proves nothing either way, so nothing is reported.
+    A re-export is removed when its declared name is in the old table, not
+    in the new one, and the new headers do not declare that name themselves.
+    """
+    before, after = old.std_reexports, new.std_reexports
+    if before is None or after is None:
+        return []
+    own = _declared_names(new)
+    return [
+        _build_std_reexport_change(declared, target)
+        for declared, target in sorted(before.items())
+        if declared not in after and declared not in own
+    ]
 
 
 def _collect_public_declared_names(snap: AbiSnapshot) -> set[str]:
@@ -158,74 +173,6 @@ def _batch_demangle_public(snap: AbiSnapshot) -> dict[str, str]:
     # pass (``diff_namespaces.detect_namespace_patterns`` opens the scope);
     # outside a scope this calls straight through.
     return memoized("batch_demangle_public", snap, None, compute)
-
-
-def _build_std_reexport_change(
-    declared: str, underlying: str, *, public_evidence: bool
-) -> Change:
-    """Build a single ``STD_REEXPORT_REMOVED`` finding.
-
-    Reachability comes from the declaration the finding is about, not from
-    the construction itself (ADR-084): a header or source producer observed
-    the declaration as contract, or its public reachability is unknown. The
-    detector filters on the source-declaration population before calling
-    this, so a *declared* re-export is what it reports; a re-export seen only
-    through export-table or debug-info facts is not claimed as proven public.
-    """
-    return make_change(
-        ChangeKind.STD_REEXPORT_REMOVED,
-        symbol=declared,
-        name=declared,
-        detail=underlying,
-        old_value=f"{declared} → {underlying}",
-        new_value=None,
-        **public_reachability(public_evidence),
-    )
-
-
-def detect_std_reexport_removed(
-    old: AbiSnapshot,
-    new: AbiSnapshot,
-) -> list[Change]:
-    """Report ``using std::X;`` re-exports that disappeared from public headers.
-
-    A re-export is detected when the OLD snapshot has a public function
-    whose declared qualified name lives in a library namespace but whose
-    mangled name demangles to ``std::``. If the same declared qualified
-    name is absent from the NEW snapshot's function set, we emit one
-    ``STD_REEXPORT_REMOVED`` per missing declaration.
-
-    The detector is intentionally narrow — it never fires when the
-    declared name and the underlying name are identical, when the
-    declared name is in ``std::``, or when the mangled name does not
-    demangle to ``std::``.
-    """
-    demangled = _batch_demangle_public(old)
-    new_declared = _collect_public_declared_names(new)
-
-    changes: list[Change] = []
-    seen: set[str] = set()
-    for f in old.declarations.functions:
-        if not in_source_declaration_index(f):
-            continue
-        declared = _qualified_function_name(f.name, f.mangled, demangled)
-        if not declared or declared in seen or declared in new_declared:
-            continue
-        underlying = demangled.get(f.mangled, "")
-        if not _looks_like_std_reexport(declared, underlying):
-            continue
-        seen.add(declared)
-        changes.append(
-            _build_std_reexport_change(
-                declared,
-                underlying,
-                public_evidence=has_observed_source_contract_evidence(
-                    f, header_parsed=bool(old.from_headers)
-                ),
-            )
-        )
-
-    return changes
 
 
 # ---------------------------------------------------------------------------

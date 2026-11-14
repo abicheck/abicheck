@@ -57,6 +57,7 @@ from abiforge.model.config import (
 )
 from abiforge.model.seeds import SEED_BY_NAME, Seed
 from abiforge.operators import OP_BY_NAME, EditOp, matrix
+from abiforge.operators.build_data import BUILD_DATA_OPERATORS
 from abiforge.run.toolchains import (
     CONSUMER_TOOLCHAIN_ENV,
     TOOLCHAIN_ENV,
@@ -83,6 +84,44 @@ def stds(lang: str) -> tuple[Standard, ...]:
 
 
 # --- PR tier ----------------------------------------------------------------
+
+# A config-only placeholder per producer family (``requires`` reads no host).
+_FAMILY_PROBE: dict[str, Toolchain] = {
+    "gcc": Toolchain("gcc", 0, "gcc", "g++"),
+    "clang": Toolchain("clang", 0, "clang", "clang++"),
+}
+
+
+def _build_data_rows() -> tuple[tuple[str, str, str, dict[str, object]], ...]:
+    """One PR row per build-data operator, alternating the producer family.
+
+    An operator only one family can build takes that family.
+    """
+    rows: list[tuple[str, str, str, dict[str, object]]] = []
+    for i, op in enumerate(BUILD_DATA_OPERATORS):
+        order = ("gcc", "clang") if i % 2 == 0 else ("clang", "gcc")
+        for seed in ("c_elf", "cxx_alt"):
+            if not op.applies_to(SEED_BY_NAME[seed]):
+                continue
+            lang = SEED_BY_NAME[seed].lang
+            fam = next(
+                (
+                    f
+                    for f in order
+                    if op.requires(
+                        default_config(lang, _FAMILY_PROBE[f]).with_(build_data=True)
+                    )
+                    is None
+                ),
+                None,
+            )
+            if fam is not None:
+                rows.append((op.name, seed, fam, {"build_data": True}))
+    return tuple(rows)
+
+
+#: The PR tier's L3 build-data guards (``abiforge.operators.build_data``).
+BUILD_DATA_PR = _build_data_rows()
 
 # (op, seed, producer family, config changes). One guard per axis.
 _PR: tuple[tuple[str, str, str, dict[str, object]], ...] = (
@@ -115,6 +154,9 @@ _PR: tuple[tuple[str, str, str, dict[str, object]], ...] = (
     # internal type reached through a public one under headers.
     ("executable_stack_removed", "c_elf_alt", "gcc", {"evidence": "binary"}),
     ("internal_type_grew", "cxx_alt", "clang", {}),
+    # L3 build data: a compile mode only the build's compile commands record
+    # (abiforge.operators.build_data), one row per operator.
+    *BUILD_DATA_PR,
 )
 
 

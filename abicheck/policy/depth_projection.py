@@ -443,15 +443,15 @@ def _strip_header_and_above_evidence(
     snap.from_headers = False
     snap.python_api = None
     snap.semantic_ir = None
-    # `_attach_header_graph`'s own docstring: "the header-only (L2) semantic
-    # graph" -- an L2 fact like the others above, not the L4/L5
-    # `build_source.source_graph` this function leaves untouched.
+    # The header-only (L2) graph; the L4/L5 `build_source.source_graph` stays.
     snap.surface_graph = None
     # Header-scan facts (concept scan, export-table fallback) describe the
     # headers this projection excludes, so no gap they name applies below it.
     snap.cxx_concept_header_scan = None
     snap.scope_fallback = None
-    snap.cxx_concept_constraints = snap.cxx_template_defaults = None
+    snap.cxx_concept_constraints = snap.cxx_template_defaults = snap.std_reexports = (
+        None
+    )
     # ADR-050 `ExtractionContract`: both fingerprints are computed from
     # header-scope/compile-context inputs this function just discarded.
     # Left alone, `checker.compare()`'s `check_contracts_comparable()` can

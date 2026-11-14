@@ -93,6 +93,7 @@ class TuFragment:
     # (extract/headers/clang/concept_constraints.py); None = not modelled.
     cxx_concept_constraints: dict[str, str] | None = None
     cxx_template_defaults: dict[str, TemplateDefaults] | None = None
+    std_reexports: dict[str, str] | None = None
     extraction_provenance: dict[str, Any] | None = field(default=None, kw_only=True)
 
 
@@ -139,6 +140,7 @@ class MergedTuFragments:
     #: concept gap stays named) after a multi-TU merge.
     cxx_concept_constraints: dict[str, str] | None = None
     cxx_template_defaults: dict[str, TemplateDefaults] | None = None
+    std_reexports: dict[str, str] | None = None
     extraction_provenance: dict[str, Any] | None = field(default=None, kw_only=True)
 
 

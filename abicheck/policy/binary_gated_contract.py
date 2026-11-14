@@ -97,7 +97,6 @@ BINARY_GATED: frozenset[ChangeKind] = frozenset(
         ChangeKind.INLINE_FUNCTION_REMOVED,
         ChangeKind.TYPE_REMOVED,
         ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT,
-        ChangeKind.UNSPECIFIED_RETURN_NOW_NAMED,
         # Hard-coded public_reachable before ADR-084; now from observed evidence.
         ChangeKind.STD_REEXPORT_REMOVED,
         ChangeKind.TAG_TYPE_RENAMED,
