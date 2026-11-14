@@ -168,6 +168,35 @@ def test_cli_compare_of_an_asymmetric_pair_is_not_a_break(
         w.startswith(f"headers were given for the {headers_side} side only")
         for w in report["coverage_warnings"]
     )
+    # The header side's declarations were set aside, so the run never reads
+    # as a complete comparison (weaker evidence narrows the conclusion).
+    assert report["analysis_assurance"]["status"] != "complete"
+
+
+@pytest.mark.parametrize("headers_side", ["old", "new"])
+def test_only_the_header_side_records_the_set_aside_evidence(headers_side: str) -> None:
+    from abicheck.policy.common_evidence_depth import (
+        ASYMMETRIC_HEADER_GAP,
+        mark_asymmetric_header_gap,
+    )
+
+    old = _snap(headers=headers_side == "old")
+    new = _snap(headers=headers_side == "new", version="2")
+    p_old, p_new = project_pair_to_depth(old, new, "binary")
+    mark_asymmetric_header_gap(old, p_old, p_new)
+    mark_asymmetric_header_gap(old, p_old, p_new)  # idempotent
+    gapped = {"old": p_old, "new": p_new}
+    for side, snap in gapped.items():
+        expected = (ASYMMETRIC_HEADER_GAP,) if side == headers_side else ()
+        assert (
+            tuple(
+                g for g in snap.projection_evidence_gaps if g == ASYMMETRIC_HEADER_GAP
+            )
+            == expected
+        )
+    # The caller's operands are untouched.
+    assert ASYMMETRIC_HEADER_GAP not in old.projection_evidence_gaps
+    assert ASYMMETRIC_HEADER_GAP not in new.projection_evidence_gaps
 
 
 _HEADER = "struct KLU { virtual ~KLU(); int a; char c; };\nstruct KLD : KLU { int d; };\nint klu_get(KLD* p);\n"

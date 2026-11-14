@@ -79,3 +79,25 @@ def asymmetric_header_evidence_warning(old: AbiSnapshot) -> str:
         "(exported symbols) and header-level changes were not assessed; give "
         "headers for both sides to compare declarations"
     )
+
+
+#: The evidence a common-rung comparison sets aside on the header side.
+ASYMMETRIC_HEADER_GAP = (
+    "the header-built side's declarations (headers were given for one side "
+    "only, so the pair was compared at binary depth)"
+)
+
+
+def mark_asymmetric_header_gap(
+    original_old: AbiSnapshot, projected_old: AbiSnapshot, projected_new: AbiSnapshot
+) -> None:
+    """Record on the projected header-built side that its header evidence was
+    set aside, so the run's assurance reads ``partial`` rather than
+    ``complete`` (weaker evidence narrows the conclusion; it never reads as a
+    full comparison)."""
+    side = projected_old if original_old.from_headers else projected_new
+    if ASYMMETRIC_HEADER_GAP not in side.projection_evidence_gaps:
+        side.projection_evidence_gaps = (
+            *side.projection_evidence_gaps,
+            ASYMMETRIC_HEADER_GAP,
+        )

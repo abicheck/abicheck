@@ -171,6 +171,7 @@ def classify_resolved_pair(
     from ..policy.common_evidence_depth import (
         asymmetric_header_evidence_warning,
         effective_compare_depth,
+        mark_asymmetric_header_gap,
     )
     from ..policy.depth_evidence_contract import record_depth_evidence_contract_error
     from ..policy.depth_projection import (
@@ -201,6 +202,8 @@ def classify_resolved_pair(
     # as a library change (``policy.common_evidence_depth``).
     depth = effective_compare_depth(request.depth, pair.old, pair.new)
     old, new = project_pair_to_depth(pair.old, pair.new, depth)
+    if request.depth is None and depth is not None:
+        mark_asymmetric_header_gap(pair.old, old, new)
     # A depth below `headers` that left no header surface to scope against
     # puts public-header scoping outside the requested scope: classify the
     # pair as a binary-only comparison would be, rather than reporting a
