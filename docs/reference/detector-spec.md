@@ -397,7 +397,7 @@ One row per `ChangeKind` (429 total). Columns fuse the verdict partition (`check
 | `union_field_removed` | breaking | `BREAKING` | `error` | L1 | `union_field_removed` | [case24](examples/case24_union_field_removed.md) |
 | `union_field_type_changed` | breaking | `BREAKING` | `error` | unspecified | `union_field_type_changed` | — |
 | `unnamed_type_in_public_abi` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `unnamed_type_in_public_abi` | [case178](examples/case178_unnamed_type_in_public_abi.md) |
-| `unspecified_return_now_named` | api_break | `API_BREAK` | `warning` | unspecified | `unspecified_return_now_named` | — |
+| `unspecified_return_now_named` | quality | `COMPATIBLE` | `warning` | unspecified | `unspecified_return_now_named` | — |
 | `unversioned_exported_symbol` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `unversioned_exported_symbol` | [case145](examples/case145_audit_unversioned_export.md) |
 | `used_reserved_field` | quality | `COMPATIBLE` | `warning` | L1 | `used_reserved_field` | [case54](examples/case54_used_reserved_field.md) |
 | `value_abi_trait_changed` | breaking | `BREAKING` | `error` | L1 | `value_abi_trait_changed` | [case69](examples/case69_trivial_to_nontrivial.md) |

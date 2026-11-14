@@ -322,7 +322,6 @@ These changes break the source-level API contract but do not affect already-comp
 | Kind | Description |
 |------|-------------|
 | `mandatory_template_param_added` | A template parameter that was previously defaulted (or deduced) became mandatory. Consumer source that wrote `Foo<int>` without supplying the new parameter no longer compiles; mangled instantiations also change because the template-argument tuple differs. |
-| `unspecified_return_now_named` | A factory function's return type changed between an unspecified placeholder (`auto`, lambda type, anonymous class) and a named type — or vice versa. Source that stored the result with `auto x = make_X();` keeps compiling; source that wrote the type out by hand fails. |
 
 ### Header Re-exports
 
@@ -486,6 +485,7 @@ Aggregate roll-up signals computed from the [API surface metrics](../use/api-sur
 | Kind | Description |
 |------|-------------|
 | `source_level_kind_changed` | A type changed between `struct` and `class`. Graded `COMPATIBLE`: the class-key alone changes neither layout nor Itanium mangling, and source naming the type with the other key still compiles (at most a `-Wmismatched-tags` warning). Default-access consequences are reported as `field_access_changed` / `method_access_changed` / `base_class_access_narrowed`; on MSVC the class-key is mangled, so affected exports show as removed/added. |
+| `unspecified_return_now_named` | A function's return type went from an unspecified placeholder (`auto`, a lambda closure, an unnamed class) to a named type. Callers could only hold the old result in `auto`, which still deduces the new type, and a non-template function's mangling does not encode its return type. The reverse (named to unnameable) is a `func_return_changed`. |
 
 ### Field Qualifier Changes
 

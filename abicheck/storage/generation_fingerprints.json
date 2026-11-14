@@ -116,7 +116,7 @@
       "abicheck/extract/headers/castxml/scope.py": "41cecc8dd996c10a58c022e5dca4003cce9d7775adf674b339cc199fb59297c7",
       "abicheck/extract/headers/castxml/specialization.py": "3f9f021672df1b84de42bc8de5f3c915508b3f3850e0a8acbaa80a3dee04c6f3",
       "abicheck/extract/headers/castxml/tail_padding_rule.py": "bc07dca9702f1ab78d62b3d8bc3dfdcfdf72be96662ea543ed48587aa8b29703",
-      "abicheck/extract/headers/castxml/type_resolution.py": "3527318ed7d36b2b557c447c9fa0807deec9c594a7f481cf36c860859062552f",
+      "abicheck/extract/headers/castxml/type_resolution.py": "36aa982df5872038bad515dbe068522f6235c37f299ee41abb4dfedd64441c84",
       "abicheck/extract/headers/castxml/typedef_parsing.py": "332587638d5d4b7caebbc20fa44b69c314771fffa5839a15dec59eaba3caaf93",
       "abicheck/extract/headers/castxml/variable_alignment.py": "bb80daf71b211c4df53f7698cde27499f0d2448780625ecc642c7b6cea6e9967",
       "abicheck/extract/headers/castxml/variable_template_join.py": "25c8863f2c7146f53d4ecec30a931e5972f91aa52d70cac97b7c273bcf486a23",
@@ -169,7 +169,7 @@
       "abicheck/extract/headers/concept_scan.py": "7a167192c477da03874aede4cc3384f29945bc8fefb1372a48ea190d019eabbe",
       "abicheck/extract/headers/gcc/__init__.py": "7af60db1abfcfe17ecf135eb0bc8ce9ae3089d3c6101324c087d6cc78dab8b50",
       "abicheck/extract/headers/gcc/acquisition.py": "f7ea1e5f5a15f8a4a58a1bdee6f0deca8ede99dece51885754176ba8beff1246",
-      "abicheck/extract/headers/gcc/backend.py": "30ebbb0814b501875fa9c814bca08e613f86aaab2ac4382a2da99f6143b7c14a",
+      "abicheck/extract/headers/gcc/backend.py": "ca5be1d1ca91447489cdaa14a03b8cf406cc099bebb1cf92d4c5d07920b7ad6a",
       "abicheck/extract/headers/gcc/build.py": "1ee62182117ee040274b84d482cc3a9a36db2bd2b742d5dca4e892de00002ecb",
       "abicheck/extract/headers/gcc/contracts.py": "419ad694249c1477e89a60d8432bfeed202bf818c4bd4aa62361834ff452a2cf",
       "abicheck/extract/headers/gcc/discovery.py": "f07fdd43ec1e594e95a75a5447e54e3dcbfe5c944c66a305de4e9d7463ee731b",
@@ -228,9 +228,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "24d4df72f2f4fbb9c260b29e45a06bd0a8a8e831e5fb61c09c173c30ec468d13",
-    "generation": 62,
-    "reason": "refines generation 62 within the same unreleased PR: castxml data size by the target's tail-padding rule (nvsize allocation, MSVC/unknown targets unknown) and typedef origins weighed over both maps; generation 62 is not on main, so no released snapshot carries the earlier derivation"
+    "fingerprint": "e17f609883705c968b60ed1c35bc252f2c8ac4862e6c30dba1f8c8bdfde9a5f6",
+    "generation": 63,
+    "reason": "refines generation 63 within the same change: the native GCC export lookup moved into backend.export_fact (import order); same facts recorded"
   },
   "resolver": {
     "files": {

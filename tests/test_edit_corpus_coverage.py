@@ -594,6 +594,7 @@ def _year_oracle(construct: str, std: str) -> bool:
         "concept": {"c++": 2020},
         "no_unique_address": {"c++": 2020},
         "noexcept_type": {"c++": 2017},
+        "deduced_return": {"c++": 2014},  # auto f() { ... }: C++14
         "std_string": {"c++": 2011},
         "class_virtual": {"c++": 2011},
         "template": {"c++": 2011},

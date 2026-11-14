@@ -69,6 +69,7 @@ FEATURES: dict[str, dict[str, int]] = {
     "inline": {"c": 1999, "c++": 2011},
     "enum_class": {"c++": 2011},
     "enum_underlying": {"c": 2023, "c++": 2011},
+    "deduced_return": {"c++": 2014},
     "noexcept_in_type": {"c++": 2017},
     "concepts": {"c++": 2020},
     "no_unique_address": {"c++": 2020},

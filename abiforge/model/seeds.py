@@ -1028,6 +1028,17 @@ _KIND_ROLES: dict[str, RoleText] = {
         "class KW { detail::Impl* p; public: KW(); int n() const { return p->count; } }; }",
         "kib::KW::KW() : p(new detail::Impl{3}) {}",
     ),
+    # An inline function returning a lambda: callers can hold the result
+    # only in ``auto``. kurt_use calls it, so the library emits (weak)
+    # symbols for kmake and the closure's call operator. A deduced return
+    # type is C++14: under C++11 the group is empty (the operator needs the
+    # ``deduced_return`` feature, so no C++11 cell runs it).
+    "k.urt": (
+        "#if __cplusplus >= 201402L\n"
+        "inline auto kmake() { return [](int x) { return x + 7; }; }\n"
+        "int kurt_use(int a);\n#endif",
+        "#if __cplusplus >= 201402L\nint kurt_use(int a) { return kmake()(a); }\n#endif",
+    ),
     # Empty baselines: the operator adds the declaration.
     "k.pnv": ("", ""),
     "k.stl": ("", ""),

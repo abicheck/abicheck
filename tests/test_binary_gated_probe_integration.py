@@ -214,12 +214,6 @@ PROBES: dict[str, Probe] = {
         "template <class T, class U> int Box<T, U>::get() const { return (int)v; }\n"
         "template struct Box<int, int>;",
     ),
-    "unspecified_return_now_named": _inline(
-        "auto get(int x);\nint use(int);",
-        "int get(int x);\nint use(int);",
-        "auto get(int x) { return x; }\nint use(int x) { return x; }",
-        "int get(int x) { return x; }\nint use(int x) { return x; }",
-    ),
     # -- HEADER_OR_SOURCE_GATED: the NON_BINARY_REASONS rows to probe first --
     "param_default_value_removed": Probe(case="case123_default_argument_removed"),
     "constant_changed": Probe(case="case124_header_constant_value_changed"),

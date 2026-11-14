@@ -3523,8 +3523,8 @@
     },
     {
       "kind": "unspecified_return_now_named",
-      "category": "api_break",
-      "default_verdict": "API_BREAK",
+      "category": "quality",
+      "default_verdict": "COMPATIBLE",
       "severity": "warning",
       "min_evidence": "unspecified",
       "doc_slug": "unspecified_return_now_named",

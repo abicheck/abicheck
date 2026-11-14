@@ -163,7 +163,6 @@ class TestRegistry:
             ChangeKind.INLINE_FUNCTION_REMOVED,
             ChangeKind.TYPE_REMOVED,
             ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT,
-            ChangeKind.UNSPECIFIED_RETURN_NOW_NAMED,
         ):
             assert kind in BINARY_GATED, kind.value
 
