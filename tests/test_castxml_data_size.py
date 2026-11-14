@@ -29,7 +29,11 @@ _ITANIUM_FN = (
 
 
 def _ctx(
-    body: str, tmp_path: Path, source: str = "", target: str = _ITANIUM_FN
+    body: str,
+    tmp_path: Path,
+    source: str = "",
+    target: str = _ITANIUM_FN,
+    triple: str | None = "x86_64-pc-linux-gnu",
 ) -> CastxmlParserContext:
     hdr = tmp_path / "h.hpp"
     hdr.write_text(source or "\n" * 40)
@@ -39,6 +43,7 @@ def _ctx(
     )
     ctx = CastxmlParserContext(fromstring(xml), set(), set())
     ctx.build_id_map()
+    ctx.target_triple = triple
     return ctx
 
 

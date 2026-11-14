@@ -79,10 +79,9 @@ def _qualified_params(text: str) -> tuple[str, ...] | None:
     namespace kept: ``put(a::Token)`` and ``put(b::Token)`` are different
     overloads. (``demangled_params`` drops scope on purpose -- constructor
     matching compares against castxml's unqualified spellings -- so it
-    cannot key an overload set.) ``None`` when *text* has no trailing
-    parameter list."""
-    if not text.endswith(")"):
-        return None
+    cannot key an overload set.) *text* ends at the list's closing
+    parenthesis (the caller cuts it there); ``None`` when that parenthesis
+    closes no parameter list."""
     depth = 0
     for i in range(len(text) - 1, -1, -1):
         ch = text[i]

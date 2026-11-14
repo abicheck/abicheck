@@ -17,3 +17,11 @@
   full; typedef origins weigh both typedef maps, a qualified-only public
   typedef seeds the surface, and the fact is written even when the debug
   section is unreadable.
+- **castxml data size follows the target's tail-padding rule** — the
+  derivation now reads the target triple castxml parsed for and applies
+  the generic Itanium C++03-POD rule (Linux, MinGW, x86 Darwin) or Apple
+  arm64's C++11-POD rule (a class whose members are all private is POD
+  there); an MSVC target, an unmodeled one or an unrecorded triple claims
+  no data size. A header function whose mangling changed but which is
+  still declared no longer grades the CPU-dispatch roll-up `BREAKING`
+  (its own `func_params_changed` reports it).

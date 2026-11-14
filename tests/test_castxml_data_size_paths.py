@@ -15,6 +15,10 @@ from abicheck.extract.headers.castxml.data_size import (
     data_size_bits,
     itanium_abi_target,
 )
+from abicheck.extract.headers.castxml.tail_padding_rule import (
+    TailPaddingRule,
+    tail_padding_rule,
+)
 from tests.test_castxml_data_size import (
     _ctx,
     _field,
@@ -321,3 +325,140 @@ def test_possibly_nua_non_empty_member_range(
     source = "\n\n\n\n[[no_unique_address]] R m;\nchar x;\n" + "\n" * 20
     ctx = _ctx(inner + _struct("_s", "S", 128, members), tmp_path, source)
     assert data_size_bits(ctx, _rec(ctx, "S")) == expected
+
+
+# --- the target's tail-padding rule --------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("triple", "rule"),
+    [
+        ("x86_64-pc-linux-gnu", TailPaddingRule.POD03),
+        ("x86_64-linux-gnu", TailPaddingRule.POD03),
+        ("aarch64-unknown-linux-gnu", TailPaddingRule.POD03),
+        ("x86_64-w64-mingw32", TailPaddingRule.POD03),
+        ("x86_64-apple-darwin23.0.0", TailPaddingRule.POD03),
+        ("arm64-apple-darwin23.4.0", TailPaddingRule.POD11),
+        ("aarch64-apple-darwin", TailPaddingRule.POD11),
+        ("arm64-apple-ios17.0", TailPaddingRule.POD11),
+        ("arm64_32-apple-watchos", TailPaddingRule.POD11),
+        ("wasm32-unknown-emscripten", TailPaddingRule.POD11),
+        ("x86_64-unknown-fuchsia", TailPaddingRule.POD11),
+        ("x86_64-pc-windows-msvc", None),
+        ("riscv64-unknown-elf", None),  # not modeled
+        (None, None),  # not recorded
+        ("", None),
+    ],
+)
+def test_tail_padding_rule_of_a_triple(
+    triple: str | None, rule: TailPaddingRule | None
+) -> None:
+    assert tail_padding_rule(triple) is rule
+
+
+def _implicit_copyable(rid: str) -> str:
+    """The implicit default and copy constructors CastXML emits for a record
+    without user-declared ones (the copy constructor is what proves it
+    trivially copyable)."""
+    return (
+        _implicit(rid)
+        + f'<Constructor id="{rid}_cc" name="S" context="{rid}" access="public" '
+        f'file="f1" line="1" inline="1" artificial="1"><Argument type="{rid}_cr"/>'
+        f'</Constructor><ReferenceType id="{rid}_cr" type="{rid}_cq" size="64" '
+        f'align="64"/><CvQualifiedType id="{rid}_cq" type="{rid}" const="1"/>'
+    )
+
+
+def _raw_struct(rid: str, size: int, specials: str, fields: str) -> str:
+    """A record whose special members carry child elements (``_struct``
+    cannot nest them)."""
+    ids = [rid + "_dc"] if f'id="{rid}_dc"' in specials else []
+    ids += [rid + "_cc"] if f'id="{rid}_cc"' in specials else []
+    ids += [p.split('"')[1] for p in fields.split("<")[1:]]
+    return (
+        f'<Struct id="{rid}" name="S" context="_1" file="f1" line="1" '
+        f'members="{" ".join(ids)}" size="{size}" align="32"/>' + specials + fields
+    )
+
+
+def _private(xml: str) -> str:
+    return xml.replace('access="public"', 'access="private"')
+
+
+_ALL_PRIVATE = _raw_struct(
+    "_s", 64, _implicit_copyable("_s"), _private(_int_char("_s"))
+)
+_AGGREGATE = _raw_struct("_s", 64, _implicit_copyable("_s"), _int_char("_s"))
+_NSDMI = _raw_struct(
+    "_s",
+    64,
+    _implicit_copyable("_s"),
+    _field("_sa", "_s", "_int", 0, ' init="1"') + _field("_sc", "_s", "_char", 32),
+)
+_MIXED = _raw_struct(
+    "_s",
+    64,
+    _implicit_copyable("_s"),
+    _private(_field("_sa", "_s", "_int", 0)) + _field("_sc", "_s", "_char", 32),
+)
+_USER_CTOR = _struct("_s", "S", 64, _ctor("_s") + _int_char("_s"))
+_NO_CTOR = _raw_struct("_s", 64, "", _int_char("_s"))
+
+
+@pytest.mark.parametrize(
+    ("record", "triple", "expected"),
+    [
+        # class { int a; char c; } all private: not C++03 POD (5 bytes of
+        # data), but C++11 POD -- trivial and standard-layout (sizeof, 8).
+        (_ALL_PRIVATE, "x86_64-pc-linux-gnu", 40),
+        (_ALL_PRIVATE, "arm64-apple-darwin23.4.0", 64),
+        # A user-provided constructor: non-trivial under both rules.
+        (_USER_CTOR, "x86_64-pc-linux-gnu", 40),
+        (_USER_CTOR, "arm64-apple-darwin23.4.0", 40),
+        # A plain aggregate: POD under both.
+        (_AGGREGATE, "x86_64-pc-linux-gnu", 64),
+        (_AGGREGATE, "arm64-apple-darwin23.4.0", 64),
+        # A default member initializer: the default ctor is not trivial.
+        (_NSDMI, "arm64-apple-darwin23.4.0", 40),
+        # Mixed access: not standard-layout, so not C++11 POD either.
+        (_MIXED, "arm64-apple-darwin23.4.0", 40),
+        # No constructor emitted at all: a deleted default may hide -> unknown.
+        (_NO_CTOR, "arm64-apple-darwin23.4.0", None),
+        # MSVC and unknown targets claim nothing.
+        (_ALL_PRIVATE, "x86_64-pc-windows-msvc", None),
+        (_ALL_PRIVATE, "riscv64-unknown-elf", None),
+        (_ALL_PRIVATE, None, None),
+    ],
+)
+def test_pod_follows_the_targets_rule(
+    tmp_path: Path, record: str, triple: str | None, expected: int | None
+) -> None:
+    ctx = _ctx(record, tmp_path, triple=triple)
+    assert data_size_bits(ctx, _rec(ctx, "S")) == expected
+
+
+def test_pod11_base_with_user_ctor_is_not_trivial(tmp_path: Path) -> None:
+    """``struct B { B(); int a; }; struct D : B { char c; };`` on Apple arm64:
+    D is not trivial (B's constructor), so D's data size is B's 4 bytes plus
+    c: 5 bytes, and a further derived class may reuse D's padding."""
+    b = _struct("_b", "B", 32, _ctor("_b") + _field("_ba", "_b", "_int", 0))
+    d = _struct(
+        "_d",
+        "D",
+        64,
+        _base("_b", 0) + _implicit("_d") + _field("_dc", "_d", "_char", 32),
+    )
+    ctx = _ctx(b + d, tmp_path, triple="arm64-apple-darwin23.4.0")
+    assert data_size_bits(ctx, _rec(ctx, "D")) == 40
+
+
+def test_probe_target_triple_prefers_an_explicit_target() -> None:
+    from abicheck.extract.headers.castxml.abi_fundamental import probe_target_triple
+
+    assert probe_target_triple("c++", None, None, ("--target=arm64-apple-darwin",)) == (
+        "arm64-apple-darwin"
+    )
+    assert probe_target_triple(
+        "c++", None, None, ("-target", "x86_64-w64-mingw32")
+    ) == ("x86_64-w64-mingw32")
+    assert probe_target_triple("cl", None, None, ()) is None

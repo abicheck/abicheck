@@ -52,6 +52,7 @@ from abicheck.model.mangled_type_reference import symbols_referencing_type
 from .compare.cpu_dispatch_public_members import (
     header_declared_members,
     public_member_grade,
+    redeclared_in,
 )
 from .compare.internal_namespaces import DEFAULT_INTERNAL_NAMESPACES
 from .compare.naming_conventions import (  # noqa: F401 -- re-exported
@@ -475,7 +476,9 @@ def detect_cpu_dispatch_isa_dropped(
         if len(overlapping) < min_removed:
             continue
         public = header_declared_members(
-            [m for _, m in overlapping], old.declarations.functions
+            [m for _, m in overlapping],
+            old.declarations.functions,
+            still_declared=redeclared_in(old, new),
         )
         findings.append(
             _emit_isa_dropped_finding(token, overlapping, old_index, suppressed, public)

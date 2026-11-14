@@ -80,12 +80,6 @@ def target_triple(cc: str) -> str | None:
     return run.stdout.strip() or None if run.returncode == 0 else None
 
 
-def is_msvc_triple(triple: str) -> bool:
-    """A triple whose C++ ABI is Microsoft's (``*-windows-msvc``), not
-    Itanium's (Linux, macOS, MinGW ``*-w64-mingw32``)."""
-    return triple.endswith("-msvc") or "-windows-msvc" in triple
-
-
 STDS = ("c++11", "c++17", "c++20")
 
 

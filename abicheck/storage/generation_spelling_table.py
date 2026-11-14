@@ -605,8 +605,11 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "declaring header (castxml, clang and the native gcc plugin; the "
         "abicheck.typedef_origins extension fact on the declarations "
         "section), so a typedef declared in a public header is in the public "
-        "surface even when no function uses it; no rewrite is needed -- an "
-        "older snapshot reads every typedef origin as unknown, never private"
+        "surface even when no function uses it; castxml dumps derive each "
+        "record's data size for a known Itanium target (its tail-padding "
+        "rule read from the target triple). No rewrite is needed -- an "
+        "older snapshot reads every typedef origin as unknown, never private, "
+        "and a castxml record's data size as not collected"
     ),
 }
 

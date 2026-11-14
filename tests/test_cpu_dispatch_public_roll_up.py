@@ -155,3 +155,38 @@ def test_dwarf_only_function_is_not_header_declared() -> None:
     assert header_declared_members(["_Z8f_avx512i"], [hidden_header]) == [
         "_Z8f_avx512i"
     ]
+
+
+def test_a_member_still_declared_in_new_is_no_header_removal() -> None:
+    """``lib::scale(V<avx2>)`` re-mangled because a header-only dependency's
+    ``V`` changed: its export disappears, but ``lib::scale`` is still
+    declared, so its own ``func_params_changed`` reports it -- the roll-up
+    must not grade it as a removed public member."""
+    from abicheck.compare.cpu_dispatch_public_members import redeclared_in
+
+    old_fn = Function(
+        name="scale",
+        mangled="_ZN3lib5scaleEN1d3vecINS0_8avx2_tagEEE",
+        return_type="void",
+        origin=ScopeOrigin.PUBLIC_HEADER,
+    )
+    new_fn = Function(
+        name="scale",
+        mangled="_ZN3lib5scaleEN1d3vecINS0_10avx512_tagEEE",
+        return_type="void",
+        origin=ScopeOrigin.PUBLIC_HEADER,
+    )
+    gone = Function(
+        name="other_avx2",
+        mangled="_ZN3lib10other_avx2Ev",
+        return_type="void",
+        origin=ScopeOrigin.PUBLIC_HEADER,
+    )
+    old = AbiSnapshot(library="l.so", version="1", functions=[old_fn, gone])
+    new = AbiSnapshot(library="l.so", version="2", functions=[new_fn])
+    ids = [old_fn.mangled, gone.mangled]
+    still = redeclared_in(old, new)
+    assert header_declared_members(ids, old.declarations.functions, still) == [
+        gone.mangled
+    ]
+    assert header_declared_members(ids, old.declarations.functions) == ids

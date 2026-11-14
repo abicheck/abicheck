@@ -18,12 +18,12 @@ from defusedxml.ElementTree import parse
 
 from abicheck.extract.headers.castxml.context import CastxmlParserContext
 from abicheck.extract.headers.castxml.data_size import data_size_bits
+from abicheck.extract.headers.castxml.tail_padding_rule import tail_padding_rule
 from tests._data_size_matrix import (
     CASES,
     COMPILERS,
     compiler_dsizes,
     header_text,
-    is_msvc_triple,
     target_triple,
 )
 
@@ -35,21 +35,20 @@ def test_data_size_agrees_with_compilers(tmp_path: Path, std: str) -> None:
     for tool in ("g++", "castxml"):
         if shutil.which(tool) is None:
             pytest.skip(f"{tool} not available")
-    # castxml parses as g++'s target; only a compiler sharing that target's
-    # C++ ABI is an oracle (a clang++ targeting MSVC lays records out by
-    # Microsoft's rules, not Itanium's).
+    # castxml parses as g++'s target; only a compiler whose target follows the
+    # same tail-padding rule is an oracle (a clang++ targeting MSVC lays
+    # records out by Microsoft's rules; Apple arm64 uses C++11 POD).
     castxml_triple = target_triple("g++")
-    if castxml_triple is None or is_msvc_triple(castxml_triple):
-        pytest.skip(f"g++ target {castxml_triple!r} is not an Itanium C++ ABI target")
+    rule = tail_padding_rule(castxml_triple)
+    if rule is None:
+        pytest.skip(f"g++ target {castxml_triple!r} has no modeled Itanium rule")
     oracles = tuple(
         cc
         for cc in COMPILERS
-        if shutil.which(cc) is not None
-        and (t := target_triple(cc)) is not None
-        and not is_msvc_triple(t)
+        if shutil.which(cc) is not None and tail_padding_rule(target_triple(cc)) is rule
     )
     if not oracles:
-        pytest.skip("no compiler shares castxml's Itanium C++ ABI target")
+        pytest.skip(f"no compiler follows castxml's {rule} tail-padding rule")
     header = tmp_path / "records.hpp"
     header.write_text(header_text())
     xml = tmp_path / "records.xml"
@@ -60,6 +59,7 @@ def test_data_size_agrees_with_compilers(tmp_path: Path, std: str) -> None:
     )  # fmt: skip
     ctx = CastxmlParserContext(parse(xml).getroot(), set(), set())
     ctx.build_id_map()
+    ctx.target_triple = castxml_triple
     derived = {
         el.get("name"): data_size_bits(ctx, el)
         for el in ctx.record_els

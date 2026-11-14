@@ -33,12 +33,13 @@ rather than borrowing each other's header declaration.
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import Any
 
-from ..model import Function, ScopeOrigin
+from ..model import AbiSnapshot, Function, ScopeOrigin
 from ..model.change_catalog.registry import Verdict
 from ..model.mangled_name import msvc_scope_components
+from .template_surface import qualified_name_lookup
 
 PUBLIC_MEMBER_RULE = "cpu_dispatch_isa.public_member"
 
@@ -60,6 +61,7 @@ def _msvc_qualified(export_id: str) -> str | None:
 def header_declared_members(
     member_ids: Iterable[str],
     old_functions: Iterable[Function],
+    still_declared: Callable[[Function], bool] = lambda _fn: False,
 ) -> list[str]:
     """Return the subset of *member_ids* declared in OLD's public headers.
 
@@ -67,13 +69,15 @@ def header_declared_members(
     export ids); *old_functions* is every function of the old snapshot.
     Itanium ids match ``Function.mangled`` (Mach-O adds one leading
     underscore); MSVC ids match by qualified name when unambiguous (see the
-    module docstring).
+    module docstring). A declaration *still_declared* accepts (its function
+    is still declared in NEW's public headers, under a changed signature or
+    mangling) is no removal: that change is reported by its own finding.
     """
     ids = list(member_ids)
     mangled: set[str] = set()
     declared_by_name: Counter[str] = Counter()
     for fn in old_functions:
-        if not _header_declared(fn):
+        if not _header_declared(fn) or still_declared(fn):
             continue
         if fn.mangled:
             mangled |= {fn.mangled, f"_{fn.mangled}"}
@@ -91,6 +95,21 @@ def header_declared_members(
         )
 
     return [mid for mid in ids if public(mid)]
+
+
+def redeclared_in(old: AbiSnapshot, new: AbiSnapshot) -> Callable[[Function], bool]:
+    """Whether an OLD function's qualified name is still declared in NEW's
+    public headers: its signature or mangling changed (a header-only
+    dependency's type it names did), it was not removed."""
+    from ..diff_templates import function_overload_stem
+
+    name_old, name_new = qualified_name_lookup(old), qualified_name_lookup(new)
+    kept = {
+        function_overload_stem(name_new(f))
+        for f in new.declarations.functions
+        if _header_declared(f)
+    }
+    return lambda fn: function_overload_stem(name_old(fn)) in kept
 
 
 def public_member_grade(public_members: list[str]) -> dict[str, Any]:

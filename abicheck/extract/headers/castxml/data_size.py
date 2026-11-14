@@ -50,11 +50,12 @@ what tail-padding reuse depends on and what the compilers' own placement
 measures (``tests/_data_size_matrix.py``); it equals the strict ``dsize``
 except in that empty-base case.
 
-All of this is the Itanium C++ ABI. A parse whose manglings are Microsoft's
-(``?name@@...``: castxml run with an MSVC-targeting compiler) follows the
-MSVC layout rules instead, which never place a derived member in a base's
-tail padding; no data size is claimed there, nor when the target cannot be
-read from the document. Every unknown input leaves the data size ``None``:
+All of this is the Itanium C++ ABI, and "POD" itself is the target's: the
+generic Itanium rule (C++03 POD, above) or Apple arm64's C++11 POD
+(trivial and standard-layout), selected from the target triple castxml
+parsed for (``tail_padding_rule``). An MSVC target, a target the table does
+not know, an unrecorded triple, or a document whose manglings are
+Microsoft's (``?name@@...``) gets no data size. Every unknown input leaves the data size ``None``:
 ``TAIL_PADDING_REUSE_CHANGED`` only compares two recorded values.
 """
 
@@ -67,6 +68,7 @@ from typing import Protocol
 from xml.etree.ElementTree import Element
 
 from .context import CastxmlParserContext
+from .tail_padding_rule import TailPaddingRule, pod11, rule_of
 
 _RECORD_TAGS = frozenset({"Struct", "Class", "Union"})
 _NAMED_TAGS = frozenset({"CvQualifiedType", "Typedef", "ElaboratedType"})
@@ -115,10 +117,13 @@ def data_size_bits(ctx: CastxmlParserContext, el: Element) -> int | None:
 
 
 def itanium_abi_target(ctx: CastxmlParserContext) -> bool:
-    """Whether the parse targeted the Itanium C++ ABI, read from the
-    document's own manglings: an Itanium one (``_Z...``) and no Microsoft
-    one (``?...``). A C document (nothing is mangled) has no C++ layout
-    rule to disagree on -- every record is POD -- and counts as Itanium."""
+    """Whether the parse targeted an Itanium C++ ABI whose tail-padding
+    rule is known: the recorded target triple maps to a rule, and the
+    document's own manglings agree -- an Itanium one (``_Z...``) and no
+    Microsoft one (``?...``). A C document (nothing is mangled) has no C++
+    layout rule to disagree on -- every record is POD."""
+    if rule_of(ctx) is None:
+        return False
     if ctx.itanium_abi_target is None:
         itanium = msvc = False
         for el in ctx.root:
@@ -538,7 +543,11 @@ def _sizes(
     if depth > _MAX_DEPTH or el.get("incomplete") == "1":
         return _UNKNOWN
     size = _int(el, "size")
-    pod = pod_for_layout(ctx, el)
+    pod = (
+        pod11(ctx, el, _user_provided)
+        if rule_of(ctx) is TailPaddingRule.POD11 and _is_cxx(ctx)
+        else pod_for_layout(ctx, el)
+    )
     if size is None or pod is None:
         return _UNKNOWN
     if pod:

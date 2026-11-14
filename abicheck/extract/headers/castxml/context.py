@@ -132,6 +132,9 @@ class CastxmlParserContext:
         self.is_cxx_document: bool | None = None
         #: Whether the parse targeted the Itanium C++ ABI (from its manglings).
         self.itanium_abi_target: bool | None = None
+        #: The ``-dumpmachine`` triple of the compiler castxml parsed as
+        #: (``abi_fundamental.probe_target_triple``); ``None``: not recorded.
+        self.target_triple: str | None = None
         # Per-file index / per-directory file list for
         # ``out_of_line_inline.declared_inline_out_of_line``.
         self.out_of_line_inline_index: dict[str, dict[tuple[str, str], set[int]]] = {}
