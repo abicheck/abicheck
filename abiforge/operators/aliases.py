@@ -65,6 +65,16 @@ _TYPEDEFS = (
 
 _TEMPLATES = (
     _op(
+        "template_added",
+        "tp.add",
+        lambda r: {"tp.add": ("template <class T> struct TpNew { T v; };", "")},
+        "a new class template is declared: nothing is instantiated or exported, "
+        "nothing existing changes",
+        verdict_min="NO_CHANGE",
+        verdict_max="COMPATIBLE",
+        min_evidence="headers",
+    ),
+    _op(
         "template_param_added_defaulted",
         "tp.adddef",
         _replace(

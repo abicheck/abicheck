@@ -58,6 +58,11 @@ def _lp64(c: Config) -> str | None:
     return None
 
 
+def _elf(c: Config) -> str | None:
+    """An asm label names the ELF symbol as written (no Mach-O underscore)."""
+    return None if c.objfmt == "elf" else "the asm label spells an ELF symbol name"
+
+
 _COMPAT = {"verdict_min": "COMPATIBLE", "verdict_max": "COMPATIBLE"}
 _RISK = {"verdict_min": "COMPATIBLE_WITH_RISK", "verdict_max": "COMPATIBLE_WITH_RISK"}
 _BINARY = {"min_evidence": "binary"}
@@ -110,7 +115,9 @@ KIND_OPERATORS: tuple[EditOp, ...] = (
         "the inline namespace is bumped to v2: every symbol in it re-mangles, "
         "so binaries built against v1 no longer find kv::kv_f",
         expected=frozenset({"INLINE_NAMESPACE_VERSION_BUMPED"}),
-        **_BINARY,
+        # A source-namespace fact: abicheck reads it from declarations (DWARF
+        # or headers), never from a bare export table (in_source_declaration_index).
+        min_evidence="dwarf",
     ),
     _op(
         "experimental_api_graduated",
@@ -139,7 +146,9 @@ KIND_OPERATORS: tuple[EditOp, ...] = (
         "kx::experimental::kx_g is removed with no stable replacement: binaries "
         "that used the experimental API no longer load",
         expected=frozenset({"EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT"}),
-        **_BINARY,
+        # A source-namespace fact: abicheck reads it from declarations (DWARF
+        # or headers), never from a bare export table (in_source_declaration_index).
+        min_evidence="dwarf",
     ),
     _op(
         "function_became_customization_object",
@@ -233,6 +242,75 @@ KIND_OPERATORS: tuple[EditOp, ...] = (
             ),
         ),
         **_BINARY,
+    ),
+    _op(
+        "declared_function_export_became_c_namesake",
+        "k.del",
+        lambda r: _set(
+            r,
+            "k.del",
+            None,
+            XCXX_SEED.roles["k.del"][1].replace(
+                "int kdl_gone(int a) { return a + 1; }",
+                'extern "C" int kdl_gone_c(int a) __asm__("kdl_gone");\n'
+                'extern "C" int kdl_gone_c(int a) { return a + 1; }',
+            ),
+        ),
+        "the header still declares the C++ function kdl_gone(int), but the "
+        "library now defines a C-linkage function under the bare symbol "
+        "kdl_gone: _Z8kdl_gonei is gone from the dynamic table, so binaries "
+        "that import it no longer load, and recompiled callers fail to link. "
+        "The export table holds only a namesake of the declaration, never its "
+        "own linker spelling",
+        expected=frozenset({"FUNC_DELETED_ELF_FALLBACK"}),
+        precondition=_elf,
+        rules=(
+            Rule(
+                lambda c: c.evidence != "headers",
+                {
+                    "expected": frozenset(),
+                    "any_of": (frozenset({"FUNC_REMOVED", "FUNC_REMOVED_ELF_ONLY"}),),
+                },
+                "without headers the surviving declaration is not observable: "
+                "the evidence shows the mangled export removed",
+            ),
+        ),
+        **_BINARY,
+    ),
+    _op(
+        "deduced_lambda_return_named",
+        "k.urt",
+        _replace(
+            "k.urt",
+            (
+                "inline auto kmake() { return [](int x) { return x + 7; }; }",
+                "struct KFn { int operator()(int x) const { return x + 7; } };\n"
+                "inline KFn kmake() { return KFn{}; }",
+            ),
+        ),
+        "kmake returned a lambda, which callers could hold only in auto; it "
+        "now returns the named function object KFn. auto still deduces it, "
+        "so source keeps compiling, and kmake's non-template mangling does "
+        "not encode its return type. The library's own weak copy of kmake "
+        "does return a different type now, a return-type change of an "
+        "exported function",
+        expected=frozenset({"UNSPECIFIED_RETURN_NOW_NAMED", "FUNC_RETURN_CHANGED"}),
+        features=("deduced_return",),
+        verdict_min="COMPATIBLE",
+        verdict_max=None,
+        **_HEADERS,
+    ),
+    _op(
+        "std_reexport_dropped",
+        "k.rex",
+        _replace("k.rex", (" using std::abs;", "")),
+        "the header drops `using std::abs;` from namespace krx: nothing is "
+        "exported for it and std::abs is unchanged, but consumer source that "
+        "called krx::abs no longer compiles",
+        expected=frozenset({"STD_REEXPORT_REMOVED"}),
+        verdict_min="API_BREAK",
+        verdict_max="API_BREAK",
+        **_HEADERS,
     ),
     _op(
         "unnamed_type_api_added",
@@ -444,5 +522,43 @@ KIND_OPERATORS: tuple[EditOp, ...] = (
         expected=frozenset({"PUBLIC_API_EXPOSES_STL_BY_VALUE"}),
         **_RISK,
         **_HEADERS,
+    ),
+    _op(
+        "class_visibility_hidden",
+        "k.tvz",
+        _replace(
+            "k.tvz",
+            (
+                "struct KTV { virtual ~KTV(); virtual int kget();",
+                'struct __attribute__((visibility("hidden"))) KTV { '
+                '__attribute__((visibility("default"))) virtual ~KTV(); '
+                '__attribute__((visibility("default"))) virtual int kget();',
+            ),
+        ),
+        "the class itself becomes hidden while its members stay exported: "
+        "KTV's typeinfo, typeinfo name and vtable leave the export table, so a "
+        "consumer that throws, catches, dynamic_casts or constructs KTV across "
+        "the library boundary no longer binds to the library's copies",
+        expected=frozenset({"TYPE_VISIBILITY_CHANGED"}),
+        precondition=lambda c: (
+            None if c.objfmt == "elf" else "class visibility is an ELF export attribute"
+        ),
+        **_BINARY,
+    ),
+    # Per-side evidence (``EditOp.new_evidence``): the library is unchanged,
+    # only what the new side's dump is given differs.
+    _op(
+        "new_side_dumped_without_headers",
+        "k.evd",
+        lambda r: {},
+        "the library is rebuilt from the same sources but its new side is "
+        "dumped without the public header (DWARF only): nothing a consumer "
+        "sees changed, so the evidence difference must not read as removed "
+        "or changed declarations",
+        touches=(),
+        new_evidence="dwarf",
+        verdict_min="NO_CHANGE",
+        verdict_max="COMPATIBLE",
+        min_evidence="binary",
     ),
 )

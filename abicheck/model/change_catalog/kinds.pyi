@@ -185,6 +185,8 @@ class ChangeKind(StrEnum):
     FUNC_VIRTUAL_NOEXCEPT_ADDED = 'func_virtual_noexcept_added'
     GLIBCXX_DUAL_ABI_CHANGED = 'glibcxx_dual_abi_changed'
     FUNC_RETURN_COVARIANT_NARROWED = 'func_return_covariant_narrowed'
+    SANITIZER_RUNTIME_REQUIRED = 'sanitizer_runtime_required'
+    IMPORTED_SYMBOL_UNPROVIDED = 'imported_symbol_unprovided'
     FUNC_BECAME_INLINE = 'func_became_inline'
     FUNC_LOST_INLINE = 'func_lost_inline'
     FUNC_DELETED_ELF_FALLBACK = 'func_deleted_elf_fallback'

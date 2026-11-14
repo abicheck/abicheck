@@ -19,6 +19,7 @@ is what decides whether a derived class (or a ``[[no_unique_address]]``
 member's neighbour) may be placed in a record's tail padding. The Itanium C++
 ABI (§2.4) makes it
 
+* nothing for an empty class (it is placed as an empty base, POD or not),
 * ``sizeof`` for a class that is POD for the purpose of layout (§1.1: the
   C++ TC1/C++03 POD definition), and
 * otherwise the end of the last non-empty subobject: each non-virtual base at
@@ -54,7 +55,8 @@ All of this is the Itanium C++ ABI, and "POD" itself is the target's: the
 generic Itanium rule (C++03 POD, above) or Apple arm64's C++11 POD
 (trivial and standard-layout), selected from the target triple castxml
 parsed for (``tail_padding_rule``). An MSVC target, a target the table does
-not know, an unrecorded triple, or a document whose manglings are
+not know, an unrecorded triple, a bit-field on a target that allocates
+bit-fields Microsoft's way (MinGW/Cygwin, ``ms_bitfield_layout``), or a document whose manglings are
 Microsoft's (``?name@@...``) gets no data size. Every unknown input leaves the data size ``None``:
 ``TAIL_PADDING_REUSE_CHANGED`` only compares two recorded values.
 """
@@ -68,7 +70,8 @@ from typing import Protocol
 from xml.etree.ElementTree import Element
 
 from .context import CastxmlParserContext
-from .tail_padding_rule import TailPaddingRule, pod11, rule_of
+from .record_traits import record_members
+from .tail_padding_rule import TailPaddingRule, ms_bitfield_layout, pod11, rule_of
 
 _RECORD_TAGS = frozenset({"Struct", "Class", "Union"})
 _NAMED_TAGS = frozenset({"CvQualifiedType", "Typedef", "ElaboratedType"})
@@ -157,11 +160,6 @@ def _is_cxx(ctx: CastxmlParserContext) -> bool:
     return ctx.is_cxx_document
 
 
-def _members(ctx: CastxmlParserContext, el: Element) -> list[Element]:
-    found = (ctx.id_map.get(mid) for mid in el.get("members", "").split())
-    return [m for m in found if m is not None]
-
-
 def _strip(ctx: CastxmlParserContext, type_id: str) -> Element | None:
     el = ctx.id_map.get(type_id)
     depth = 0
@@ -189,7 +187,7 @@ def _pod(ctx: CastxmlParserContext, el: Element) -> bool | None:
     if any(b.tag == "Base" for b in el):
         return False
     record_id = el.get("id", "")
-    members = _members(ctx, el)
+    members = record_members(ctx, el)
     verdicts: list[bool | None] = []
     has_implicit_default_ctor = False
     has_user_ctor = False
@@ -390,7 +388,7 @@ def _maybe_no_unique_address(ctx: CastxmlParserContext, field: Element) -> bool:
             if record.get("file") == field.get("file")
             else 0
         )
-        for m in _members(ctx, record):
+        for m in record_members(ctx, record):
             ml = m.get("line", "")
             if m.get("file") == field.get("file") and ml.isdigit() and int(ml) < end:
                 start = max(start, int(ml))
@@ -440,7 +438,7 @@ def _pointer_bits(ctx: CastxmlParserContext) -> int | None:
 
 
 def _declares_virtual(ctx: CastxmlParserContext, el: Element) -> bool:
-    return any(m.get("virtual") == "1" for m in _members(ctx, el))
+    return any(m.get("virtual") == "1" for m in record_members(ctx, el))
 
 
 def _base_records(ctx: CastxmlParserContext, el: Element) -> list[Element] | None:
@@ -517,8 +515,8 @@ def _is_empty(ctx: CastxmlParserContext, el: Element, depth: int = 0) -> bool | 
     if depth > _MAX_DEPTH or el.get("incomplete") == "1":
         return None
     if el.tag == "Union":
-        return not any(m.tag == "Field" for m in _members(ctx, el))
-    if any(m.tag == "Field" for m in _members(ctx, el)):
+        return not any(m.tag == "Field" for m in record_members(ctx, el))
+    if any(m.tag == "Field" for m in record_members(ctx, el)):
         return False
     if _declares_virtual(ctx, el) or any(
         b.tag == "Base" and b.get("virtual") == "1" for b in el
@@ -548,17 +546,24 @@ def _sizes(
         if rule_of(ctx) is TailPaddingRule.POD11 and _is_cxx(ctx)
         else pod_for_layout(ctx, el)
     )
-    if size is None or pod is None:
+    if size is None:
+        return _UNKNOWN
+    # An empty class holds no data, POD or not: a derived class places it as
+    # an empty base (at offset 0 when nothing conflicts) and its next member
+    # at its own start. Checked before POD, because a POD empty class -- every
+    # empty class under C++11 POD (Apple arm64) -- would otherwise read as
+    # its sizeof, 1 byte, which no placement ever reserves for it.
+    empty = _is_empty(ctx, el)
+    if empty:
+        return 0, 0
+    if pod is None:
         return _UNKNOWN
     if pod:
         return size, size
     if el.tag == "Union" or _has_virtual_base(ctx, el) is not False:
         return _UNKNOWN
-    empty = _is_empty(ctx, el)
     if empty is None:
         return _UNKNOWN
-    if empty:
-        return 0, 0
     # (lowest, highest) possible end of each subobject; the data size is
     # known only when the largest lower bound reaches every upper bound.
     ends: list[tuple[int, int]] = []
@@ -592,7 +597,7 @@ def _sizes(
             return _UNKNOWN
         if sub:
             ends.append((off * 8 + sub, off * 8 + sub))
-    for f in _members(ctx, el):
+    for f in record_members(ctx, el):
         if f.tag != "Field":
             continue
         end = _field_end(ctx, f)
@@ -612,6 +617,10 @@ def _field_end(ctx: CastxmlParserContext, f: Element) -> tuple[int, int] | None:
         return None
     bits = _int(f, "bits")
     if bits is not None:
+        if ms_bitfield_layout(ctx.target_triple):
+            # Microsoft bit-field allocation (Windows GNU targets): the
+            # storage unit, not the width, ends the data -- not modeled.
+            return None
         return (off + bits, off + bits)
     type_id = f.get("type", "")
     size = _type_size_bits(ctx, type_id)

@@ -224,7 +224,8 @@ def _base_trait(ctx: CastxmlParserContext, base: Element) -> bool | None:
     return _type_trait(ctx, base.get("type", ""))
 
 
-def _members(ctx: CastxmlParserContext, el: Element) -> list[Element]:
+def record_members(ctx: CastxmlParserContext, el: Element) -> list[Element]:
+    """A castxml record's ``members`` resolved to their elements."""
     found = (ctx.id_map.get(mid) for mid in el.get("members", "").split())
     return [m for m in found if m is not None]
 
@@ -243,7 +244,7 @@ def _record_trait(ctx: CastxmlParserContext, el: Element) -> bool | None:
     if el.get("incomplete") == "1":
         return None
     record_id = el.get("id", "")
-    members = _members(ctx, el)
+    members = record_members(ctx, el)
     traits = [_base_trait(ctx, b) for b in el if b.tag == "Base"]
     traits += [_member_trait(ctx, m, record_id) for m in members]
     if False in traits:
@@ -316,7 +317,7 @@ def _has_data_members(
     """Whether record *el* or any base has a non-static data member."""
     if el.get("incomplete") == "1" or depth > 32:
         return None
-    if any(m.tag == "Field" for m in _members(ctx, el)):
+    if any(m.tag == "Field" for m in record_members(ctx, el)):
         return True
     flags: list[bool | None] = []
     for b in el:
@@ -368,7 +369,7 @@ def _first_member_types(
     if el.get("incomplete") == "1":
         return None
     out = {el.get("id", "")}
-    fields = [m for m in _members(ctx, el) if m.tag == "Field"]
+    fields = [m for m in record_members(ctx, el) if m.tag == "Field"]
     for f in fields if el.tag == "Union" else fields[:1]:
         inner = _first_member_types(ctx, f.get("type", ""), depth + 1)
         if inner is None:
@@ -430,7 +431,7 @@ def _data_member_rules(
 def _standard_layout_trait(ctx: CastxmlParserContext, el: Element) -> bool | None:
     if el.get("incomplete") == "1":
         return None
-    members = _members(ctx, el)
+    members = record_members(ctx, el)
     fields = [m for m in members if m.tag == "Field"]
     bases = [b for b in el if b.tag == "Base"]
     # [class.prop]/3.2: no virtual function (declared here) and no virtual base.

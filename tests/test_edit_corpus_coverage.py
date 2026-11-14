@@ -95,7 +95,7 @@ def test_scope_classifies_every_changekind_once() -> None:
         ("CONCEPT_TIGHTENED", True),
         ("INLINE_FUNCTION_REMOVED", True),
         # Values abicheck reads only from L4 sources.
-        ("PUBLIC_MACRO_VALUE_CHANGED", False),
+        ("PUBLIC_MACRO_VALUE_CHANGED", True),
         ("CONSTEXPR_VALUE_CHANGED", False),
         # Other platforms, ecosystems and evidence levels: out.
         ("PE_MACHINE_CHANGED", False),
@@ -252,9 +252,14 @@ def _unlisted_in_scope(
     known = (
         set(ledger["declared_covered"])
         | set(ledger["declared_uncovered"])
+        | set(ledger["derived_by_construction"])
         | set(ledger["out_of_scope"])
     )
-    return ((scope_set - declared) & known) - set(ledger["declared_uncovered"])
+    return (
+        ((scope_set - declared) & known)
+        - set(ledger["declared_uncovered"])
+        - set(ledger["derived_by_construction"])
+    )
 
 
 def test_ledger_uncovered_list_is_not_stale() -> None:
@@ -262,7 +267,9 @@ def test_ledger_uncovered_list_is_not_stale() -> None:
     scope_set = cov.in_scope()
     declared = set(cov.declared_kinds())
     stale = [
-        k for k in ledger["declared_uncovered"] if k in declared or k not in scope_set
+        k
+        for k in ledger["declared_uncovered"]
+        if k in declared or k not in scope_set or k in cov.derived_owed_kinds()
     ]
     assert not stale, (
         f"ledger lists covered or out-of-scope kinds as uncovered: {stale}"
@@ -594,6 +601,7 @@ def _year_oracle(construct: str, std: str) -> bool:
         "concept": {"c++": 2020},
         "no_unique_address": {"c++": 2020},
         "noexcept_type": {"c++": 2017},
+        "deduced_return": {"c++": 2014},  # auto f() { ... }: C++14
         "std_string": {"c++": 2011},
         "class_virtual": {"c++": 2011},
         "template": {"c++": 2011},
@@ -602,6 +610,7 @@ def _year_oracle(construct: str, std: str) -> bool:
         "inline_namespace": {"c++": 2011},
         "abi_tag": {"c++": 2011},
         "hidden_friend": {"c++": 2011},
+        "using_declaration": {"c++": 2011},
         "restrict_pointer": {"c": 1999},
         "flexible_array": {"c": 1999},
         "atomic": {"c": 2011},
@@ -959,6 +968,21 @@ def test_only_seeds_with_elf_link_roles_are_unavailable_off_elf(
     )
     gap = elf_link_unavailable(seed, cfg)
     assert (gap is not None) is (links_elf_only and platform[1] != "elf"), gap
+
+
+def test_derived_kinds_are_covered_by_construction_only_while_owed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ledger = cov.declared_ledger(cov.load_ledger())
+    assert ledger["derived_by_construction"] == [SONAME_ADVISORY]
+    assert SONAME_ADVISORY not in ledger["declared_uncovered"]
+    assert SONAME_ADVISORY not in ledger["declared_covered"]
+    # With no operator owing it (no edit's verdict reaches a binary break),
+    # the derived kind falls back to uncovered instead of vanishing.
+    monkeypatch.setattr(cov, "op_derived_kinds", lambda op: frozenset())
+    ledger = cov.declared_ledger(cov.load_ledger())
+    assert ledger["derived_by_construction"] == []
+    assert SONAME_ADVISORY in ledger["declared_uncovered"]
 
 
 def test_a_derived_kind_is_never_declared_coverage() -> None:

@@ -115,6 +115,7 @@ CONSTRUCTS: tuple[Construct, ...] = (
     Construct("template", _CXX),
     Construct("concept", _CXX, "concepts"),
     Construct("no_unique_address", _CXX, "no_unique_address"),
+    Construct("deduced_return", _CXX, "deduced_return"),
     Construct("noexcept_type", _CXX, "noexcept_in_type"),
     Construct("std_string", _CXX, "std_string"),
     Construct("restrict_pointer", _C, "restrict"),
@@ -135,6 +136,7 @@ CONSTRUCTS: tuple[Construct, ...] = (
     Construct("inline_namespace", _CXX),
     Construct("abi_tag", _CXX),
     Construct("hidden_friend", _CXX),
+    Construct("using_declaration", _CXX),
 )
 CONSTRUCT_BY_NAME: dict[str, Construct] = {c.name: c for c in CONSTRUCTS}
 
@@ -241,6 +243,10 @@ ROLE_CONSTRUCT: dict[str, str] = {
     "k.aeq": "struct",
     "k.del": "function",
     "k.ibr": "inline_function",
+    "k.tvz": "class_virtual",
+    "k.evd": "struct",
+    "k.urt": "deduced_return",
+    "k.rex": "using_declaration",
     "k.pnv": "class_virtual",
     "k.stl": "std_string",
     "k.anon": "function",
@@ -252,10 +258,24 @@ ROLE_CONSTRUCT: dict[str, str] = {
     "vr": "variable",
     "td": "typedef",
     "tp": "template",
+    # cxx_src (abiforge.operators.source_evidence)
+    "src.macro": "header_constant",
+    "src.inl": "inline_function",
+    "src.tmpl": "template",
+    "src.vd": "class_virtual",
+    "src": "function",
+    # cxx_tree (abiforge.operators.source_tree)
+    "tree.anon": "struct",
+    "tree.pair": "struct",
+    "tree.rtti": "class_virtual",
+    "tree.ren": "struct",
+    "tree.priv": "struct",
+    "tree.privref": "struct",
+    "tree": "function",
 }
 
 # Roles that only admit an operator to a seed (``Seed.gate_role``).
-GATE_ROLES = frozenset({"alt.gate", "xa.gate"})
+GATE_ROLES = frozenset({"alt.gate", "xa.gate", "src.gate", "tree.gate"})
 
 # Language feature an operator needs -> the construct it exercises.
 FEATURE_CONSTRUCT: dict[str, str] = {
@@ -303,6 +323,8 @@ OP_CONSTRUCT: dict[str, tuple[str, ...]] = {
     "vptr_introduced": ("class", "class_virtual"),
     # a base added to the polymorphic Shape: a base-subobject edit
     "base_class_add": ("inheritance",),
+    # the same library dumped with less evidence on its new side
+    "new_side_dumped_without_headers": ("compile_option",),
 }
 
 
@@ -353,6 +375,9 @@ OP_EDIT_CLASS: dict[str, dict[str, str]] = {
         "record_became_packed": "packing_change",
         "field_became_bitfield": "field_to_bitfield",
         "field_renamed": "member_rename",
+        "tree_anonymous_type_coordinates_shifted": "declaration_text_only",
+        "tree_pointee_type_renamed": "pointee_rename",
+        "tree_private_pointee_type_renamed": "pointee_rename",
         "field_became_const": "member_cv_change",
         "field_became_volatile": "member_cv_change",
         "record_became_opaque": "record_opaque",
@@ -434,6 +459,7 @@ OP_EDIT_CLASS: dict[str, dict[str, str]] = {
         "imported_symbol_removed": "body_change",
         "glibc_version_required_added": "body_change",
         "glibc_older_version_required": "body_change",
+        "glibc_floor_raised": "body_change",
         "glibc_version_requirement_dropped": "body_change",
         "fortified_call_dropped": "body_change",
         "text_relocation_introduced": "body_change",
@@ -445,6 +471,13 @@ OP_EDIT_CLASS: dict[str, dict[str, str]] = {
         "allocator_replacement_added": "function_added",
         "std_template_instance_exported": "function_added",
         "func_remove": "function_removed",
+        "src_default_argument_changed": "default_argument_changed",
+        "src_public_entry_calls_internal": "body_change",
+        "src_public_entry_depends_on_hidden": "body_change",
+        "src_public_function_added": "function_added",
+        "src_public_function_removed": "function_removed",
+        "src_undocumented_export_added": "export_declaration_mismatch",
+        "tree_private_declaration_exported": "export_declaration_mismatch",
         "allocator_replacement_removed": "function_removed",
         "symbols_prefixed_batch": "function_renamed",
         "api_version_suffix_bumped": "function_renamed",
@@ -474,6 +507,7 @@ OP_EDIT_CLASS: dict[str, dict[str, str]] = {
         "template_return_argument_changed": "return_retyped",
         "template_param_argument_changed": "param_retyped",
         "declared_function_lost_definition": "export_declaration_mismatch",
+        "declared_function_export_became_c_namesake": "export_declaration_mismatch",
         "unnamed_type_api_added": "function_added",
         "reorder_declarations": "declaration_text_only",
     },
@@ -504,6 +538,12 @@ OP_EDIT_CLASS: dict[str, dict[str, str]] = {
         "last_virtual_removed": "lost_polymorphism",
         "polymorphic_type_added_without_virtual_dtor": "polymorphic_class_added",
         "class_rtti_became_protected": "vtable_symbol_visibility",
+        "class_visibility_hidden": "vtable_symbol_visibility",
+        # a new public subclass overriding SrcBase::f
+        "src_virtual_dispatch_target_added": "polymorphic_class_added",
+        # a private polymorphic class gets an out-of-line key function, so the
+        # library now emits (and exports) its vtable and typeinfo
+        "tree_internal_rtti_exported": "key_function_change",
     },
     "enum": {
         "enum_append_member": "enumerator_appended",
@@ -595,6 +635,9 @@ OP_EDIT_CLASS: dict[str, dict[str, str]] = {
         "template_specialization_added": "specialization_added",
         "template_specialization_removed": "specialization_removed",
         "tag_type_renamed": "argument_renamed",
+        "src_template_body_changed": "definition_changed",
+        "template_added": "template_added",
+        "src_uninstantiated_template_removed": "template_removed",
     },
 }
 

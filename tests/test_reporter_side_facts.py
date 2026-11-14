@@ -152,8 +152,11 @@ class TestEvidenceDepthOutOfBandPack:
         )
         assert result.exit_code in (0, 1, 2, 4), result.output
         payload = json.loads(result.stdout)
+        # Headers on one side only: the pair is judged at the rung both
+        # reach (ADR-063 2026-11-14 amendment), and the depths report that
+        # depth-capped view, as they do under an explicit --depth.
         assert payload["old_evidence_depth"] == "binary"
-        assert payload["new_evidence_depth"] == "headers"
+        assert payload["new_evidence_depth"] == "binary"
 
     def test_report_mode_root_cause_also_carries_it(self, tmp_path: Path) -> None:
         # The pre-existing fold-in applied unconditionally whenever fmt ==

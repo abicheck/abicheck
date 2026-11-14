@@ -37,6 +37,7 @@ from enum import StrEnum
 from xml.etree.ElementTree import Element
 
 from .context import CastxmlParserContext
+from .record_traits import record_members
 
 _MAX_DEPTH = 32
 
@@ -87,6 +88,23 @@ def tail_padding_rule(triple: str | None) -> TailPaddingRule | None:
     return None
 
 
+#: Triple components of a Windows GNU target: GCC (``-mms-bitfields``, on by
+#: default for Windows targets) and Clang both lay bit-fields out by
+#: Microsoft's rules there, though the rest of the record is Itanium.
+_MS_BITFIELD_SYSTEMS = ("mingw32", "windows-gnu", "cygwin")
+
+
+def ms_bitfield_layout(triple: str | None) -> bool:
+    """Whether target *triple* allocates bit-fields Microsoft's way: each
+    run of bit-fields of one declared type occupies a whole storage unit of
+    that type, so a bit-field's width does not bound where the record's data
+    ends (``struct { int a : 3; }`` holds four bytes of data, not one)."""
+    if not triple:
+        return False
+    rest = "-".join(triple.lower().split("-")[1:])
+    return any(sys_ in rest for sys_ in _MS_BITFIELD_SYSTEMS)
+
+
 def rule_of(ctx: CastxmlParserContext) -> TailPaddingRule | None:
     return tail_padding_rule(ctx.target_triple)
 
@@ -123,11 +141,6 @@ def _all(verdicts: list[bool | None]) -> bool | None:
     return None if None in verdicts else True
 
 
-def _members(ctx: CastxmlParserContext, el: Element) -> list[Element]:
-    found = (ctx.id_map.get(mid) for mid in el.get("members", "").split())
-    return [m for m in found if m is not None]
-
-
 def _record(ctx: CastxmlParserContext, type_id: str) -> Element | None:
     el = ctx.id_map.get(type_id)
     depth = 0
@@ -160,7 +173,7 @@ def _trivial_default_ctor(
         return None
     if el.tag not in ("Struct", "Class", "Union"):
         return True
-    members = _members(ctx, el)
+    members = record_members(ctx, el)
     ctors = [m for m in members if m.tag == "Constructor"]
     if not ctors:
         return None  # CastXML omits a deleted one: it may exist

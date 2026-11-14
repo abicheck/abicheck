@@ -67,6 +67,7 @@ __all__ = [
     "EXPORT_READ",
     "EXTENSION_FACTS",
     "NOEXCEPT_UNOBSERVED",
+    "STD_REEXPORTS",
     "TYPEDEF_ORIGINS",
     "VOLATILE_CAPTURE_FACTS",
     "evidence_header_extras",
@@ -485,6 +486,42 @@ TYPEDEF_ORIGINS: ExtensionFact[dict[str, str]] = ExtensionFact(
     decode=_typedef_origin_map,
 )
 
+
+def _std_reexport_map(value: Any) -> dict[str, str]:
+    """A ``{declared name: std:: target}`` map of namespace-scope
+    using-declarations; both sides qualified, the target in ``std::``."""
+    if not isinstance(value, dict):
+        raise TypeError("expected a {declared name: std:: target} map")
+    for key, target in value.items():
+        if not isinstance(key, str) or "::" not in key or key.startswith("std::"):
+            raise ValueError(
+                f"std_reexports key {key!r} must be a non-std qualified name"
+            )
+        if not isinstance(target, str) or not target.startswith("std::"):
+            raise ValueError(
+                f"std_reexports {key!r}: target {target!r} is not in std::"
+            )
+    return {k: str(value[k]) for k in sorted(value)}
+
+
+#: The public headers' namespace-scope ``using std::X;`` re-exports
+#: (``AbiSnapshot.std_reexports``, extractor generation 64): each declared
+#: library name and the ``std::`` entity it names. Written on the
+#: ``declarations`` section whenever a header backend modelled them -- an
+#: empty map included, which says "none declared", unlike an absent fact.
+#: Absent (DWARF, no public-header set, an older snapshot) the re-exports are
+#: not modelled, so no re-export can be reported removed; an older reader
+#: that ignores it gives that same answer, so it is optional.
+STD_REEXPORTS: ExtensionFact[dict[str, str]] = ExtensionFact(
+    name="abicheck.std_reexports",
+    section="declarations",
+    semantics=ReaderSemantics.OPTIONAL,
+    absent_reads_as="std:: re-exports not modelled: none can be reported removed",
+    owner="ADR-084",
+    encode=_std_reexport_map,
+    decode=_std_reexport_map,
+)
+
 #: Facts that record the capture, not the evidence: like ``build_id`` among
 #: ``evidence_digest.VOLATILE_CAPTURE_FIELDS``, they stay out of the ADR-062
 #: D16 evidence digest, so two dumps whose extracted facts agree keep one
@@ -524,6 +561,7 @@ EXTENSION_FACTS = ExtensionFactRegistry(
         CXX_TEMPLATE_DEFAULTS,
         EXPORT_READ,
         NOEXCEPT_UNOBSERVED,
+        STD_REEXPORTS,
         TYPEDEF_ORIGINS,
     )
 )

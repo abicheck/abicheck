@@ -72,8 +72,10 @@ EXPECTED_STRUCT = _MEMBER | {
     "record_added",
     "record_triviality_change",
     "member_rename",
+    "pointee_rename",
     "member_cv_change",
     "member_access_change",
+    "declaration_text_only",
 }
 EXPECTED_INHERITANCE = {
     "base_add_nonvirtual",
@@ -201,6 +203,9 @@ EXPECTED_TEMPLATE = {
     "specialization_added",
     "specialization_removed",
     "argument_renamed",
+    "definition_changed",
+    "template_added",
+    "template_removed",
 }
 SPLIT = {
     "struct": EXPECTED_STRUCT,

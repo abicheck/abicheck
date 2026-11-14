@@ -12,7 +12,9 @@ from typing import Any
 from ...._compiler_options import split_command_line
 from ....errors import SnapshotError
 from ....model import Fact
+from ....model.export_index import match_export
 from ...header_ast_fields import HeaderAstFields, PrenormalizedHeaderAst
+from ...surface_fact_producers import binary_exported_fact_for
 from ..backend_protocol import HeaderParseRequest
 from .acquisition import acquire
 from .discovery import find_plugin, resolve_compiler
@@ -146,14 +148,7 @@ class GccBackend:
             ) from exc
         for declaration in (*fields.functions, *fields.variables):
             declaration.declared_in_headers_fact = Fact.present(True)
-            declaration.binary_exported_fact = (
-                Fact.not_collected()
-                if request.no_binary_evidence
-                else Fact.present(
-                    declaration.mangled in request.exported_dynamic
-                    or declaration.mangled in request.exported_static
-                )
-            )
+            declaration.binary_exported_fact = export_fact(declaration, request)
         info = rows[0]
         metadata = {
             "producer": "gcc-experimental",
@@ -171,3 +166,27 @@ class GccBackend:
             else "0",
         }
         return NativeGccParser(fields, metadata)
+
+
+def export_fact(declaration: Any, request: HeaderParseRequest) -> Fact[bool]:
+    """(c) for a declaration the native GCC backend parsed.
+
+    The same tiered lookup the castxml and clang backends make
+    (``match_export``): only a dynamic-table hit of the declaration's own
+    linker spelling is ``PRESENT(True)``; a ``.symtab``-only hit or an
+    ``extern "C"`` namesake of a global function is a weaker tier
+    (``PARTIAL(True)``), so one binary yields one export fact whichever
+    header backend parsed the declaration. Not collected for a header-only
+    dump, which has no export table.
+    """
+    if request.no_binary_evidence:
+        return Fact.not_collected()
+    return binary_exported_fact_for(
+        match_export(
+            (declaration.mangled,),
+            "" if "::" in declaration.name else declaration.name,
+            dynamic=request.exported_dynamic,
+            static=request.exported_static,
+        ),
+        producer="gcc",
+    )

@@ -43,12 +43,16 @@ from abiforge.model.opkit import (
 )
 from abiforge.model.seeds import SEEDS, RoleText, Seed
 from abiforge.operators.aliases import ALIAS_OPERATORS
+from abiforge.operators.build_data import BUILD_DATA_OPERATORS
 from abiforge.operators.cxx import CXX_OPERATORS
 from abiforge.operators.elf import ELF_OPERATORS
 from abiforge.operators.enums import ENUM_OPERATORS
 from abiforge.operators.kinds import KIND_OPERATORS
 from abiforge.operators.layout import LAYOUT_OPERATORS
 from abiforge.operators.platform import PLATFORM_OPERATORS
+from abiforge.operators.runtime_floor import RUNTIME_FLOOR_OPERATORS
+from abiforge.operators.source_evidence import SOURCE_EVIDENCE_OPERATORS
+from abiforge.operators.source_tree import SOURCE_TREE_OPERATORS
 from abiforge.operators.symbols import SYMBOL_OPERATORS
 from abiforge.operators.variables import VARIABLE_OPERATORS
 from abiforge.operators.vtable import VTABLE_OPERATORS
@@ -339,6 +343,14 @@ def _all(*checks: Callable[[Config], str | None]) -> Callable[[Config], str | No
         return None
 
     return check
+
+
+def _libcxx_rebuild(c: Config) -> str | None:
+    if c.objfmt != "elf" or c.producer.family != "clang":
+        return "-stdlib=libc++ is a clang switch; the corpus pairs it with ELF"
+    if c.flags.stdlib is not None:
+        return "the producer already selects a standard library"
+    return None
 
 
 def _libstdcxx(c: Config) -> str | None:
@@ -951,6 +963,27 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         needs_libstdcxx=True,
     ),
     EditOp(
+        "rebuild_against_libcxx",
+        ("func.greet",),
+        _no_edit,
+        "the library is rebuilt against libc++ instead of libstdc++: std::string "
+        "is std::__1::basic_string with another layout, so greet's mangled name "
+        "changes and every std:: object crossing the boundary is a different type. "
+        "The header still declares the libstdc++ spelling a consumer links "
+        "against, so with headers its lost export reads as a visibility change",
+        expected=frozenset({"STDLIB_IMPLEMENTATION_CHANGED"}),
+        any_of=(
+            _REMOVED
+            | {"FUNC_PARAMS_CHANGED", "FUNC_RETURN_CHANGED", "FUNC_VISIBILITY_CHANGED"},
+        ),
+        min_evidence="binary",
+        precondition=_libcxx_rebuild,
+        rebuild=_with(stdlib="libc++"),
+        # The baseline must be libstdc++; libc++ itself is probed through the
+        # rebuilt flags (``capability_gap``): absent, the cell is unavailable.
+        needs_libstdcxx=True,
+    ),
+    EditOp(
         "rebuild_hidden_visibility",
         ("func.add",),
         _no_edit,
@@ -990,6 +1023,10 @@ OPERATORS: tuple[EditOp, ...] = (
     *ENUM_OPERATORS,
     *VARIABLE_OPERATORS,
     *ALIAS_OPERATORS,
+    *BUILD_DATA_OPERATORS,
+    *RUNTIME_FLOOR_OPERATORS,
+    *SOURCE_EVIDENCE_OPERATORS,
+    *SOURCE_TREE_OPERATORS,
 )
 
 OP_BY_NAME: dict[str, EditOp] = {op.name: op for op in OPERATORS}

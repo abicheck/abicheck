@@ -46,6 +46,7 @@ from .abi_fundamental import castxml_type_abi_fact
 from .calling_convention import source_calling_conventions
 from .clang_semantics_join import function_decl_key, special_member_key
 from .context import CastxmlParserContext
+from .cxx_header_evidence import cxx_only_files
 from .duplicate_declarations import collapse_benign_duplicates
 from .location import (
     access_level,
@@ -549,6 +550,9 @@ def parse_function_element(
         and mangled not in ctx.exported_static
         and (name in ctx.exported_dynamic or name in ctx.exported_static)
         and is_global_scope(ctx, el)
+        # Only a header that could be a C header: in a provably C++ one the
+        # unguarded declaration has C++ linkage and its export was lost.
+        and el.get("file") not in cxx_only_files(ctx)
     ):
         mangled = name
         is_extern_c_override = True

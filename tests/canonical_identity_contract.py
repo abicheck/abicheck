@@ -132,6 +132,8 @@ VALUE_INSENSITIVE = frozenset(
 #: See the module docstring — a backlog that may only shrink deliberately.
 UNVERIFIED = frozenset(
     {
+        "imported_symbol_unprovided",
+        "sanitizer_runtime_required",
         "abi_relevant_build_flag_changed",
         "abi_surface_explosion",
         "abi_tag_changed",

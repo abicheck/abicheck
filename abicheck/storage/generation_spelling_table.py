@@ -611,6 +611,46 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "older snapshot reads every typedef origin as unknown, never private, "
         "and a castxml record's data size as not collected"
     ),
+    63: GenerationSpellingChange(
+        "castxml spells a record it emits with no name attribute (a lambda "
+        "closure, an unnamed local class) as '<owner>::(unnamed class)' "
+        "where older dumps wrote '?'. No rewrite is sound -- a stored '?' "
+        "does not say which owner or record it was, and '?' is the "
+        "no-evidence sentinel every comparison already reads as unknown, so "
+        "an old '?' against the new spelling produces no finding. The native "
+        "gcc backend records the export fact through the shared tiered "
+        "lookup (a .symtab-only or extern-C namesake hit is partial); no "
+        "stored spelling changes"
+    ),
+    64: GenerationSpellingChange(
+        "no type or name spelling changes. Header dumps with a public-header "
+        "set record the public headers' namespace-scope using std::X "
+        "re-exports (castxml namespace members bound from std, clang "
+        "UsingDecl, the native gcc plugin's new using rows) as the "
+        "abicheck.std_reexports extension fact of the declarations section. "
+        "No rewrite is needed -- an older snapshot reads the table as not "
+        "modelled, which reports no re-export removed"
+    ),
+    65: GenerationSpellingChange(
+        "no type or name spelling changes. The captured build mode's C++ "
+        "standard-library family (and libc++ ABI version) is read from the "
+        "binary's exported symbols instead of the declarations' manglings, "
+        "which with headers came from the header parser's own library; only "
+        "build_mode.stdlib/libcpp_abi_version can change, and only for a "
+        "header dump of a library built against another standard library "
+        "than the parser read. No rewrite is needed -- compare re-derives "
+        "the family from a stored snapshot's exports the same way"
+    ),
+    66: GenerationSpellingChange(
+        "no type or name spelling changes. castxml records an empty class's "
+        "data size as 0 (it is always laid out as an empty base) and leaves "
+        "a bit-field record's data size not collected on Microsoft bit-field "
+        "targets (MinGW, Cygwin); the std::X re-export table is not modelled "
+        "when the declaring namespace has no own declaration to place it, and "
+        "castxml's extern-C recovery no longer applies to provably C++ "
+        "headers. No rewrite is sound for the old data sizes, which read as "
+        "a differing fact only when both sides were recorded at 66"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

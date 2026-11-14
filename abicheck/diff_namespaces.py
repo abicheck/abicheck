@@ -32,9 +32,9 @@ Detectors emitted here:
   declaration with the same leaf name and parameter signature under the
   same top-level namespace (see ``_unique_promotion_target``).
 
-* ``STD_REEXPORT_REMOVED`` — a public function whose declaration is just
-  a ``using std::X;`` re-export was deleted. Detection works on
-  qualified declared names alone, no DWARF body required.
+* ``STD_REEXPORT_REMOVED`` — a public header's namespace-scope
+  ``using std::X;`` re-export was deleted, read from both sides'
+  ``AbiSnapshot.std_reexports`` table.
 
 All three are deliberately *source-level* findings; they fire whether or
 not the underlying mangled symbol disappears, because the consumer
@@ -50,7 +50,6 @@ from .compare.namespace_shape_detectors import (  # noqa: F401 -- re-exported
     _batch_demangle_public,
     _build_std_reexport_change,
     _collect_public_declared_names,
-    _looks_like_std_reexport,
     _qualified_function_name,
     detect_inline_namespace_version_bump,
     detect_std_reexport_removed,
@@ -274,8 +273,7 @@ def _paired_stable_indices(
     ``using``-declarations can each independently alias the identical
     underlying function under two unrelated qualified names -- one that
     happens to nest under a version-shaped segment, one that doesn't --
-    the same declared-name/underlying-symbol divergence
-    ``detect_std_reexport_removed`` is itself built on. Removing only the
+    a declared-name/underlying-symbol divergence. Removing only the
     versioned alias would then be wrongly absorbed into the surviving,
     genuinely-unrelated one, because mangled identity is the only evidence
     this function has and cannot by itself distinguish "one declaration,

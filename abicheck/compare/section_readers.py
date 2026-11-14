@@ -203,6 +203,9 @@ DETECTOR_SECTIONS: Mapping[str, frozenset[str]] = {
     ),
     "symbol_version_alias": frozenset(["binary"]),
     "target_isa": frozenset(["binary"]),
+    "type_visibility": frozenset(["binary", "types"]),
+    "runtime_requirements": frozenset(["binary", "provenance"]),
+    "imported_symbols_unprovided": frozenset(["binary", "provenance"]),
     "concept_constraints": frozenset(["debug"]),
     "template_inner_types": frozenset(
         ["binary", "declarations", "layout", "provenance", "types"]

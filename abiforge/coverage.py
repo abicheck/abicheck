@@ -21,7 +21,10 @@ each bucket with its reason; every report lists them. Over that scope:
 
 The committed ledger (``LEDGER_PATH``) is the ratchet: ``declared_covered``
 may only grow, ``declared_uncovered`` lists the in-scope kinds no operator
-names yet, and ``verified_floor[tier]`` lists the kinds that tier verified
+names yet, ``derived_by_construction`` lists the in-scope kinds that follow
+from a cell's verdict (``DERIVED_KINDS``, e.g. the SONAME-bump advisory every
+binary break owes) and that some operator owes -- covered by construction,
+never counted as declared coverage -- and ``verified_floor[tier]`` lists the kinds that tier verified
 when the ledger was written. ``tests/test_edit_corpus_coverage.py`` checks
 the declared side without a compiler; ``check_floor`` checks a run.
 
@@ -46,6 +49,12 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from abiforge.checkers import abicheck as checker
+from abiforge.coverage_scope import (
+    HEADER_VISIBLE_SOURCE_KINDS as HEADER_VISIBLE_SOURCE_KINDS,
+    SCOPE_BUCKET_BY_ID,
+    SCOPE_BUCKETS,
+    ScopeBucket,
+)
 from abiforge.model import space as space_model
 from abiforge.model.config import Config
 from abiforge.model.expect import PASSING_CLASSES, ExecTruth, Expectation
@@ -63,215 +72,12 @@ TIERS: tuple[str, ...] = ("pr", "nightly", "weekly")
 LEDGER_DECLARED_KEYS: tuple[str, ...] = (
     "declared_covered",
     "declared_uncovered",
+    "derived_by_construction",
     "out_of_scope",
     "edit_classes_without_operator",
 )
 
 # --- scope --------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class ScopeBucket:
-    """One named group of ChangeKinds, in or out of the corpus's scope, and why.
-
-    A *named* bucket claims the kinds whose value starts with one of its
-    ``prefixes`` or is one of its ``names``; named buckets must not overlap
-    (``test_every_kind_is_in_exactly_one_scope_bucket``). A *module* bucket
-    takes every kind its taxonomy ``module`` declares that no named bucket
-    claims, so a platform- or ecosystem-specific kind is excluded by what it
-    is about, wherever the catalog filed it.
-    """
-
-    id: str
-    in_scope: bool
-    reason: str
-    prefixes: tuple[str, ...] = ()
-    names: frozenset[str] = frozenset()
-    module: str | None = None
-
-    @property
-    def named(self) -> bool:
-        return self.module is None
-
-    def claims(self, value: str) -> bool:
-        return value in self.names or value.startswith(self.prefixes or ("\0",))
-
-
-_ELF_ONE_LIBRARY = "one Linux ELF shared library with DWARF and public headers shows it"
-
-# The corpus builds one Linux ELF .so per side, from C or C++, and gives
-# abicheck at most binary + DWARF + public headers.
-SCOPE_BUCKETS: tuple[ScopeBucket, ...] = (
-    # --- named, out of scope
-    ScopeBucket(
-        "pe_coff", False, "PE/COFF only; the corpus targets Linux ELF", ("pe_",)
-    ),
-    ScopeBucket(
-        "apple",
-        False,
-        "Mach-O / Apple deployment only; the corpus targets Linux ELF",
-        ("macho_",),
-        frozenset(
-            {
-                "compat_version_changed",
-                "os_deployment_floor_raised",
-                "macos_deployment_target_raised",
-            }
-        ),
-    ),
-    ScopeBucket(
-        "python_packaging",
-        False,
-        "Python, NumPy C-API and wheel packaging; the corpus builds native libraries",
-        ("python_", "numpy_", "wheel_", "musllinux_"),
-    ),
-    ScopeBucket(
-        "sycl",
-        False,
-        "SYCL runtime/plugin metadata; the corpus builds plain C/C++",
-        ("sycl_",),
-    ),
-    ScopeBucket(
-        "kernel_abi",
-        False,
-        "Linux kernel module ABI (Module.symvers), not a userspace .so",
-        ("kabi_",),
-    ),
-    ScopeBucket(
-        "multi_library",
-        False,
-        "multi-library bundle scope; a corpus cell is one library",
-        ("bundle_",),
-    ),
-    ScopeBucket(
-        "needs_source_graph",
-        False,
-        "needs the L5 source graph (call/reference edges from public entries), "
-        "though the catalog files it under symbols",
-        names=frozenset({"internal_symbol_required_by_public_api"}),
-    ),
-    ScopeBucket(
-        "no_extractor_fact",
-        False,
-        "no extractor records the fact the detector reads, so no edit of a real "
-        "library reaches it: every backend and DWARF flatten an anonymous "
-        "member into its parent's fields",
-        names=frozenset({"anon_field_changed"}),
-    ),
-    ScopeBucket(
-        "build_mode_options",
-        False,
-        "a compile-mode switch read only from L3 compile commands "
-        "(build_diff); nothing in the binary, DWARF or headers carries it",
-        names=frozenset(
-            {
-                "exceptions_mode_changed",
-                "float_abi_changed",
-                "lto_mode_changed",
-                "rtti_mode_changed",
-                "sanitizer_mode_changed",
-                "struct_packing_mode_changed",
-                "threadsafe_statics_mode_changed",
-                "tls_model_changed",
-                "whole_program_vtables_mode_changed",
-            }
-        ),
-    ),
-    ScopeBucket(
-        "non_x86_elf",
-        False,
-        "an ELF header or note fact no x86/x86-64 build can change "
-        "(AArch64 BTI/PAC, e_flags, byte order, a non-GNU OS ABI); the "
-        "corpus's toolchains target x86",
-        names=frozenset(
-            {
-                "branch_protection_improved",
-                "branch_protection_weakened",
-                "elf_abi_flags_changed",
-                "elf_endianness_changed",
-                "elf_osabi_changed",
-            }
-        ),
-    ),
-    ScopeBucket(
-        "executable_only",
-        False,
-        "a property of an executable (PT_INTERP, DF_1_PIE); a shared library "
-        "linked with -shared has neither",
-        names=frozenset({"interpreter_changed", "pie_disabled"}),
-    ),
-    ScopeBucket(
-        "pe_macho_version",
-        False,
-        "a PE file version or Mach-O current_version; an ELF library has no such field",
-        names=frozenset({"library_version_downgraded"}),
-    ),
-    ScopeBucket(
-        "unlinkable_symbol_shape",
-        False,
-        "STT_COMMON exists only in relocatable objects: the linker allocates "
-        "a common symbol in .bss, so a linked shared library never has one",
-        names=frozenset({"common_symbol_risk"}),
-    ),
-    ScopeBucket(
-        "declared_deployment_floor",
-        False,
-        "judged against a declared deployment floor (`.abicheck.yml` "
-        "runtime_floors), a policy input the corpus does not give",
-        names=frozenset({"platform_baseline_floor_raised"}),
-    ),
-    # --- named, in scope: source-taxonomy kinds a public header alone shows.
-    # Macro values, constexpr values, default-argument values, a removed public
-    # typedef and an uninstantiated template stay out (module bucket below):
-    # abicheck reads them from L4 sources only
-    # (docs/learn/evidence-and-detectability.md).
-    ScopeBucket(
-        "header_visible_source",
-        True,
-        "a public header alone shows it (L2), although the catalog files it as source",
-        names=frozenset(
-            {
-                "concept_constraint_changed",
-                "concept_tightened",
-                "exported_not_public",
-                "header_only_function_params_changed",
-                "inline_function_removed",
-                "internal_template_leaks_via_public_api",
-                "internal_type_leaks_via_public_api",
-                "public_not_exported",
-                "public_typedef_target_changed",
-                "unversioned_exported_symbol",
-            }
-        ),
-    ),
-    # --- module buckets: the module's kinds no named bucket claims
-    ScopeBucket("elf_symbols", True, _ELF_ONE_LIBRARY, module="symbols"),
-    ScopeBucket("elf_types", True, _ELF_ONE_LIBRARY, module="types"),
-    ScopeBucket("elf_platform", True, _ELF_ONE_LIBRARY, module="platform"),
-    ScopeBucket(
-        "build_data",
-        False,
-        "needs L3 build data (compile DB, flags, package metadata)",
-        module="build",
-    ),
-    ScopeBucket(
-        "source_evidence",
-        False,
-        "needs L4/L5 source or source-graph evidence",
-        module="source",
-    ),
-    ScopeBucket(
-        "source_graph", False, "needs the L5 source graph", module="source_graph_risk"
-    ),
-    ScopeBucket(
-        "disposition",
-        False,
-        "a policy disposition, not an observed change",
-        module="disposition",
-    ),
-)
-SCOPE_BUCKET_BY_ID: dict[str, ScopeBucket] = {b.id: b for b in SCOPE_BUCKETS}
-HEADER_VISIBLE_SOURCE_KINDS = SCOPE_BUCKET_BY_ID["header_visible_source"].names
 
 
 def _taxonomy() -> dict[str, str]:
@@ -376,6 +182,17 @@ def op_derived_kinds(op: object) -> frozenset[str]:
     for rule in op.rules:
         out |= expectation_kinds(op.with_derived(rule.apply(base)))
     return frozenset(out & _derived_kinds())
+
+
+def derived_owed_kinds() -> frozenset[str]:
+    """The derived kinds (``DERIVED_KINDS``) at least one operator owes: a kind
+    the verdict implies is covered by construction only while some edit's
+    verdict reaches it; one no operator owes stays uncovered."""
+    return frozenset(
+        kind
+        for kind in _derived_kinds()
+        if any(kind in op_derived_kinds(op) for op in _operators())
+    )
 
 
 def declared_kinds() -> dict[str, frozenset[str]]:
@@ -798,7 +615,8 @@ def declared_ledger(previous: dict | None = None) -> dict:
             "verified_floor from a run with `report DIR --raise-floor TIER`."
         ),
         "declared_covered": sorted(declared & scope_set),
-        "declared_uncovered": sorted(scope_set - declared),
+        "declared_uncovered": sorted(scope_set - declared - derived_owed_kinds()),
+        "derived_by_construction": sorted(derived_owed_kinds() & scope_set),
         # Every other catalog kind, so a kind in none of the three lists is
         # one added to the catalog after the ledger was written, and a kind
         # moved into scope by a bucket change is not mistaken for it.

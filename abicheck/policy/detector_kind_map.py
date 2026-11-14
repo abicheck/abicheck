@@ -33,7 +33,6 @@ DETECTOR_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
                 "struct_packing_changed",
                 "struct_return_convention_changed",
                 "toolchain_flag_drift",
-                "type_visibility_changed",
                 "value_abi_trait_changed",
                 "vector_abi_changed",
                 "wchar_model_changed",
@@ -245,6 +244,7 @@ DETECTOR_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
         "glibcxx_dual_abi_selection": frozenset(
             {"glibcxx_dual_abi_changed", "toolchain_flag_drift"}
         ),
+        "imported_symbols_unprovided": frozenset({"imported_symbol_unprovided"}),
         "inline_namespace": frozenset({"inline_namespace_moved"}),
         "integer_model": frozenset({"integer_model_changed"}),
         "kabi": frozenset(
@@ -358,6 +358,7 @@ DETECTOR_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
             }
         ),
         "reserved_fields": frozenset({"used_reserved_field"}),
+        "runtime_requirements": frozenset({"sanitizer_runtime_required"}),
         "stdlib_impl": frozenset(
             {"libcpp_abi_version_changed", "stdlib_implementation_changed"}
         ),
@@ -388,6 +389,7 @@ DETECTOR_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
         "type_kind_changes": frozenset(
             {"source_level_kind_changed", "type_kind_changed"}
         ),
+        "type_visibility": frozenset({"type_visibility_changed"}),
         "typedefs": frozenset(
             {"typedef_base_changed", "typedef_removed", "typedef_version_sentinel"}
         ),

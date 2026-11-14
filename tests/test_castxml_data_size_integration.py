@@ -9,6 +9,7 @@ built for must not stay unknown.
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -18,7 +19,10 @@ from defusedxml.ElementTree import parse
 
 from abicheck.extract.headers.castxml.context import CastxmlParserContext
 from abicheck.extract.headers.castxml.data_size import data_size_bits
-from abicheck.extract.headers.castxml.tail_padding_rule import tail_padding_rule
+from abicheck.extract.headers.castxml.tail_padding_rule import (
+    ms_bitfield_layout,
+    tail_padding_rule,
+)
 from tests._data_size_matrix import (
     CASES,
     COMPILERS,
@@ -28,6 +32,9 @@ from tests._data_size_matrix import (
 )
 
 pytestmark = pytest.mark.integration
+
+#: A bit-field declarator (``int a : 3;``, ``int : 12;``).
+_BITFIELD = re.compile(r":\s*\d+\s*;")
 
 
 @pytest.mark.parametrize("std", ["c++17", "c++20"])
@@ -73,5 +80,8 @@ def test_data_size_agrees_with_compilers(tmp_path: Path, std: str) -> None:
             continue
         if got is not None:
             assert {got} == truth, (name, got, truth)
-        if case.castxml_known:
+        # MinGW allocates bit-fields Microsoft's way, which the derivation
+        # does not model: a bit-field record may stay unknown there.
+        unmodeled = ms_bitfield_layout(castxml_triple) and _BITFIELD.search(case.decl)
+        if case.castxml_known and not unmodeled:
             assert got is not None, (name, truth)

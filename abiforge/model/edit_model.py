@@ -166,7 +166,17 @@ _STRUCT_OTHER: tuple[tuple[str, str], ...] = (
         "passed by value without changing its layout",
     ),
     ("member_rename", "a member is renamed, layout unchanged"),
+    (
+        "pointee_rename",
+        "the record a pointer or reference member points to is renamed; "
+        "every layout is unchanged",
+    ),
     ("member_cv_change", "a member gains or loses const/volatile"),
+    (
+        "declaration_text_only",
+        "the record's header text moves (line position, order) and its "
+        "definition does not",
+    ),
     (
         "member_access_change",
         "a member's access (public/protected/private) changes, layout unchanged",
@@ -479,6 +489,13 @@ TEMPLATE_EDIT_CLASSES: tuple[EditClass, ...] = tuple(
     EditClass("template", n, d)
     for n, d in (
         ("default_argument_change", "a template parameter's default argument changes"),
+        (
+            "definition_changed",
+            "a header template's definition changes: each consumer instantiates "
+            "its own copy, so only rebuilt consumers see the new body",
+        ),
+        ("template_added", "a new template is declared in the interface"),
+        ("template_removed", "a template is removed from the interface"),
         (
             "param_added_defaulted",
             "a template parameter with a default is added: every specialization "

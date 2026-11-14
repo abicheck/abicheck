@@ -15,20 +15,20 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 
 ## Headline
 
-- Total kinds: **430**
-- Kinds with at least one real source: **194**
-- Kinds backed by a compiled fixture (catalog `expected_kinds` or an edit-corpus `verified_floor`; ledger `scripts/changekind_fixture_ledger.json`): **205**
-- Kinds per source: catalog 160, field_shapes 9, integration 78
+- Total kinds: **432**
+- Kinds with at least one real source: **196**
+- Kinds backed by a compiled fixture (catalog `expected_kinds` or an edit-corpus `verified_floor`; ledger `scripts/changekind_fixture_ledger.json`): **300**
+- Kinds per source: catalog 160, field_shapes 9, integration 80
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
-| L0 | 129 | 72 |
-| L1 | 62 | 7 |
+| L0 | 129 | 73 |
+| L1 | 66 | 7 |
 | L2 | 77 | 39 |
 | L3 | 15 | 5 |
 | L4 | 10 | 2 |
 | L5 | 15 | 5 |
-| unmapped | 122 | 106 |
+| unmapped | 120 | 105 |
 
 ## Most important zero-source kinds (top 20)
 
@@ -49,11 +49,11 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `pe_ordinal_retargeted` | BREAKING | L0 |
 | `support_promise_component_retired` | BREAKING | L0 |
 | `symbol_version_defined_removed` | BREAKING | L0 |
+| `type_visibility_changed` | BREAKING | L0 |
 | `var_visibility_changed` | BREAKING | L0 |
 | `vtable_thunk_set_changed` | BREAKING | L0 |
 | `wheel_closure_dependency_violation` | BREAKING | L0 |
 | `wheel_tag_architecture_mismatch` | BREAKING | L0 |
-| `func_pure_virtual_added` | BREAKING | L1 |
 
 ## Tier L0
 
@@ -87,8 +87,6 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `elf_machine_changed` | BREAKING | 0 | 0 | 0 |
 | `elf_osabi_changed` | RISK | 0 | 0 | 0 |
 | `executable_stack_removed` | COMPATIBLE | 2 | 0 | 0 |
-| `experimental_graduated` | COMPATIBLE | 1 | 0 | 0 |
-| `experimental_removed_without_replacement` | API_BREAK | 1 | 0 | 0 |
 | `exported_object_alignment_reduced` | RISK | 0 | 0 | 5 |
 | `func_added` | COMPATIBLE | 9 | 0 | 9 |
 | `func_added_elf_only` | COMPATIBLE | 0 | 0 | 0 |
@@ -104,8 +102,8 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `ifunc_introduced` | COMPATIBLE | 1 | 0 | 1 |
 | `imported_symbol_added` | RISK | 0 | 0 | 0 |
 | `imported_symbol_removed` | COMPATIBLE | 0 | 0 | 0 |
+| `imported_symbol_unprovided` | BREAKING | 0 | 0 | 1 |
 | `inline_namespace_moved` | BREAKING | 1 | 0 | 0 |
-| `inline_namespace_version_bumped` | BREAKING | 1 | 0 | 0 |
 | `interpreter_changed` | RISK | 0 | 0 | 0 |
 | `kabi_crc_changed` | BREAKING | 1 | 0 | 0 |
 | `kabi_export_type_changed` | API_BREAK | 0 | 0 | 0 |
@@ -148,6 +146,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `runtime_floor_raised` | RISK | 1 | 0 | 0 |
 | `runtime_symbol_provider_changed` | RISK | 0 | 0 | 0 |
 | `runtime_weak_resolution_changed` | RISK | 0 | 0 | 0 |
+| `sanitizer_runtime_required` | BREAKING | 0 | 0 | 3 |
 | `soname_changed` | RISK | 1 | 0 | 1 |
 | `soname_missing` | COMPATIBLE | 1 | 0 | 0 |
 | `stack_canary_removed` | RISK | 1 | 0 | 3 |
@@ -171,6 +170,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `target_isa_changed` | RISK | 0 | 0 | 1 |
 | `text_relocation_introduced` | RISK | 0 | 0 | 0 |
 | `text_relocation_removed` | COMPATIBLE | 0 | 0 | 0 |
+| `type_visibility_changed` | BREAKING | 0 | 0 | 0 |
 | `unnamed_type_in_public_abi` | RISK | 1 | 0 | 0 |
 | `unversioned_exported_symbol` | RISK | 1 | 0 | 0 |
 | `var_added` | COMPATIBLE | 1 | 1 | 1 |
@@ -207,6 +207,8 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `enum_member_renamed` | API_BREAK | 1 | 0 | 0 |
 | `enum_member_value_changed` | BREAKING | 2 | 0 | 0 |
 | `enum_underlying_size_changed` | BREAKING | 1 | 1 | 0 |
+| `experimental_graduated` | COMPATIBLE | 1 | 0 | 0 |
+| `experimental_removed_without_replacement` | API_BREAK | 1 | 0 | 0 |
 | `field_became_const` | API_BREAK | 1 | 0 | 0 |
 | `field_became_volatile` | RISK | 1 | 0 | 0 |
 | `field_bitfield_changed` | BREAKING | 1 | 0 | 0 |
@@ -216,10 +218,12 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `func_params_changed` | BREAKING | 5 | 1 | 15 |
 | `func_pure_virtual_added` | BREAKING | 0 | 0 | 0 |
 | `func_return_changed` | BREAKING | 5 | 0 | 6 |
+| `func_return_covariant_narrowed` | RISK | 0 | 0 | 1 |
 | `func_static_changed` | BREAKING | 1 | 0 | 0 |
 | `func_virtual_added` | BREAKING | 1 | 0 | 0 |
 | `func_virtual_became_pure` | BREAKING | 1 | 0 | 1 |
 | `graph_coverage_insufficient_for_suppression` | COMPATIBLE | 0 | 0 | 0 |
+| `inline_namespace_version_bumped` | BREAKING | 1 | 0 | 0 |
 | `integer_model_changed` | BREAKING | 1 | 0 | 0 |
 | `param_pointer_level_changed` | BREAKING | 1 | 0 | 0 |
 | `polymorphic_type_non_virtual_dtor` | RISK | 1 | 0 | 0 |
@@ -433,7 +437,6 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `func_likely_renamed` | BREAKING | 0 | 0 | 0 |
 | `func_lost_inline` | COMPATIBLE | 0 | 0 | 0 |
 | `func_noexcept_added` | COMPATIBLE | 0 | 0 | 0 |
-| `func_return_covariant_narrowed` | RISK | 0 | 0 | 1 |
 | `generated_file_dependency_unstable` | RISK | 0 | 0 | 0 |
 | `generated_header_changed` | RISK | 0 | 0 | 0 |
 | `generated_header_reaches_public_api` | RISK | 0 | 0 | 0 |
@@ -503,12 +506,11 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `type_added` | COMPATIBLE | 0 | 1 | 2 |
 | `type_field_removed` | BREAKING | 0 | 0 | 0 |
 | `type_lost_final` | RISK | 0 | 0 | 0 |
-| `type_visibility_changed` | BREAKING | 0 | 0 | 0 |
 | `typedef_version_sentinel` | COMPATIBLE | 0 | 0 | 0 |
 | `undocumented_export_ratio_increased` | COMPATIBLE | 0 | 0 | 0 |
 | `uninstantiated_template_removed` | API_BREAK | 0 | 0 | 0 |
 | `union_field_type_changed` | BREAKING | 0 | 0 | 0 |
-| `unspecified_return_now_named` | API_BREAK | 0 | 0 | 1 |
+| `unspecified_return_now_named` | COMPATIBLE | 0 | 0 | 1 |
 | `var_access_changed` | API_BREAK | 0 | 0 | 2 |
 | `var_access_widened` | COMPATIBLE | 0 | 0 | 2 |
 | `var_lost_const` | BREAKING | 0 | 0 | 0 |

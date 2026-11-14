@@ -161,6 +161,7 @@ _ALIAS_ROLES: dict[str, RoleText] = {
         "typedef int TdR;\nint tdr_use(TdR v);",
         "int tdr_use(TdR v) { return v; }",
     ),
+    "tp.add": ("", ""),
     "tp.adddef": (
         "template <class T> struct TpA { T v; };\nint tpa_use(TpA<int>* p);",
         "int tpa_use(TpA<int>* p) { return p->v; }",

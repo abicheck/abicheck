@@ -31,6 +31,17 @@ pointer types) only when **every** differing slot carries an ABI fact on both
 sides and the facts are equal (:func:`abicheck.model.abi_fundamental.
 abi_equivalent`), and nothing else about the slot differs (the pointer kind).
 
+A field whose type is a pointer or reference (any depth: ``T *``,
+``T **``, ``T &``, ``const T *``) to a record that was *renamed* is the same
+kind of change: the slot stores an address either way, and the field's offset
+is unchanged. It is re-classified the same way only when the old pointee name
+is gone from the new side, the new pointee name is absent from the old side
+(a rename, not a repointing at another existing type), the pointer shape is
+spelled identically, and the two pointee records have the same size,
+alignment and member offsets (or are both opaque). The rename itself stays
+visible as its own finding (``TYPE_REMOVED``/``TAG_TYPE_RENAMED``), which
+carries the source break.
+
 It never raises a verdict. A slot without a fact on either side (a pointer, a
 struct, a pre-v69 document, a producer that did not record one) keeps its
 break, as before. A replacement whose old and new symbol differ is not
@@ -40,6 +51,7 @@ types.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from dataclasses import replace
 from typing import cast
@@ -140,9 +152,79 @@ def _field_retype(
     new_f = index.field(new_rec, change.field_name)
     if old_f is None or new_f is None or old_f.type == new_f.type:
         return False
+    if _pointee_renamed(old_f, new_f, old, new):
+        return True
     return _comparable_equal(
         compare_facts(old_f.type_abi_fact, new_f.type_abi_fact, _UNREAD_DEFAULT)
     )
+
+
+_TOKEN = re.compile(r"[A-Za-z_][\w:]*|&&|&|\*|\S")
+_QUALIFIERS = frozenset({"const", "volatile"})
+_TAGS = frozenset({"struct", "class", "union"})
+_INDIRECTIONS = frozenset({"*", "&", "&&"})
+
+
+def _split_indirect(spelling: str) -> tuple[str, str] | None:
+    """(pointee name, normalized shape) of a pointer/reference spelling.
+
+    Tokenized rather than matched by one regex: a repeated alternation of
+    ``&&`` and ``&`` backtracks exponentially on a long ``&&`` run.
+    """
+    tokens = _TOKEN.findall(spelling)
+    lead: list[str] = []
+    i = 0
+    while i < len(tokens) and tokens[i] in _QUALIFIERS:
+        lead.append(tokens[i])
+        i += 1
+    if i < len(tokens) and tokens[i] in _TAGS:
+        i += 1
+    if i >= len(tokens) or not re.fullmatch(r"[A-Za-z_][\w:]*", tokens[i]):
+        return None
+    name = tokens[i]
+    if name in _QUALIFIERS or name in _TAGS:
+        return None
+    tail = tokens[i + 1 :]
+    if any(tok not in _INDIRECTIONS and tok not in _QUALIFIERS for tok in tail):
+        return None
+    shape = lead + tail
+    if not any(tok in _INDIRECTIONS for tok in shape):
+        return None
+    return name, " ".join(shape)
+
+
+def _same_layout(a: RecordType, b: RecordType) -> bool:
+    if a.is_opaque and b.is_opaque:
+        return True
+    if a.size_bits is None or a.size_bits != b.size_bits:
+        return False
+    if a.alignment_bits != b.alignment_bits or len(a.fields) != len(b.fields):
+        return False
+    return all(
+        fa.offset_bits is not None
+        and fa.offset_bits == fb.offset_bits
+        and fa.bitfield_bits == fb.bitfield_bits
+        for fa, fb in zip(a.fields, b.fields)
+    )
+
+
+def _pointee_renamed(
+    old_f: TypeField, new_f: TypeField, old: AbiSnapshot, new: AbiSnapshot
+) -> bool:
+    """Whether a pointer/reference field's pointee record was only renamed."""
+    if old_f.offset_bits is None or old_f.offset_bits != new_f.offset_bits:
+        return False
+    if old_f.is_bitfield or new_f.is_bitfield:
+        return False
+    o, n = _split_indirect(old_f.type), _split_indirect(new_f.type)
+    if o is None or n is None or o[1] != n[1] or o[0] == n[0]:
+        return False
+    old_pointee, new_pointee = old.type_by_name(o[0]), new.type_by_name(n[0])
+    if old_pointee is None or new_pointee is None:
+        return False
+    if new.type_by_name(o[0]) is not None or old.type_by_name(n[0]) is not None:
+        return False
+    return _same_layout(old_pointee, new_pointee)
 
 
 class _Index:
