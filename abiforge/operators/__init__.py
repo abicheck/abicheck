@@ -124,6 +124,18 @@ def _func_param_type_change(r: Roles) -> dict[str, RoleText]:
     )
 
 
+def _params_reordered(r: Roles) -> dict[str, RoleText]:
+    # A pointer and an int swap places: both travel in integer registers, so
+    # an old caller's record pointer lands in ``id`` and its id in ``r``.
+    return _set(
+        r,
+        "func.fill",
+        "void fill_rec(int id, struct rec *r);",
+        "void fill_rec(int id, struct rec *r) "
+        "{ memset(r, 0x11, sizeof *r); r->id = id; r->weight = 2.5; }",
+    )
+
+
 def _func_param_append(r: Roles) -> dict[str, RoleText]:
     return _set(
         r,
@@ -502,6 +514,18 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         min_evidence=_cxx_binary_else_dwarf,
         rules=(_binary_mangled("FUNC_PARAMS_CHANGED"),),
         touches=("func.add",),
+    ),
+    EditOp(
+        "params_reordered",
+        ("func.fill",),
+        _params_reordered,
+        "two parameters of different types swap places: the signature (and a "
+        "C++ mangled name) changes, and an old caller's arguments arrive in the "
+        "wrong parameters",
+        expected=frozenset({"FUNC_PARAMS_CHANGED"}),
+        min_evidence=_cxx_binary_else_dwarf,
+        rules=(_binary_mangled("FUNC_PARAMS_CHANGED"),),
+        touches=("func.fill",),
     ),
     EditOp(
         "func_param_append",

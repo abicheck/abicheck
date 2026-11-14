@@ -240,10 +240,40 @@ def role_construct(role: str) -> str:
     raise KeyError(f"seed role {role!r} has no construct in ROLE_CONSTRUCT")
 
 
+# Operators whose roles name a carrier (``elf.extra``, a ``func.*`` or class
+# seed role holding several declarations) rather than what the edit changes:
+# the role-derived construct is not the one the edit touches. A key must be a real operator (``test_edit_corpus_edit_axis``).
+OP_CONSTRUCT: dict[str, tuple[str, ...]] = {
+    # declarations of another construct added next to the seed's functions
+    "object_added": ("variable",),
+    "source_only_var_export_added": ("variable",),
+    "header_constant_added": ("header_constant",),
+    "record_added": ("struct",),
+    # record, typedef and enum edits whose second role is a carrier function
+    "field_renamed": ("struct",),
+    "record_became_opaque": ("struct",),
+    "struct_became_union": ("struct",),
+    "record_removed": ("struct",),
+    "typedef_removed": ("typedef",),
+    "enum_member_renamed": ("enum",),
+    "serialization_tag_swapped": ("enum",),
+    "internal_table_grown": ("variable",),
+    # a free function declared beside the seed's class
+    "extern_c_linkage_removed": ("function",),
+    # the same sources rebuilt with other flags
+    "rebuild_hidden_visibility": ("compile_option",),
+    "rebuild_optimized": ("compile_option",),
+    "rebuild_m32": ("compile_option",),
+}
+
+
 def op_constructs(op: EditOp) -> tuple[str, ...]:
-    """The constructs *op* exercises: as declared, else its features', else its roles'."""
+    """The constructs *op* exercises: as declared, else ``OP_CONSTRUCT``'s,
+    else its features', else its roles'."""
     if op.constructs:
         names = list(op.constructs)
+    elif op.name in OP_CONSTRUCT:
+        names = list(OP_CONSTRUCT[op.name])
     elif op.features:
         names = [FEATURE_CONSTRUCT[f] for f in op.features]
     else:
@@ -289,6 +319,7 @@ OP_EDIT_CLASS: dict[str, dict[str, str]] = {
         "record_became_opaque": "record_opaque",
         "struct_became_union": "record_kind_change",
         "record_removed": "record_removed",
+        "record_added": "record_added",
         "returned_struct_grew_past_registers": "insert_tail_shifts",
         # Holder embeds detail::Impl by value; Impl grows, moving Holder::x: a
         # member whose type grew, not a member appended at the tail.
@@ -321,6 +352,69 @@ OP_EDIT_CLASS: dict[str, dict[str, str]] = {
         "base_added_nonvirtual": "base_add_nonvirtual",
         "base_became_nonvirtual": "base_became_nonvirtual",
         "base_access_narrowed": "base_access_changed",
+    },
+    "function": {
+        "func_param_append": "param_added",
+        "func_param_remove": "param_removed",
+        "func_param_type_change": "param_retyped",
+        "param_became_va_list": "param_retyped",
+        "param_lost_va_list": "param_retyped",
+        "param_pointer_level_changed": "param_pointer_level",
+        "param_pointee_const_added": "param_pointee_cv",
+        "param_pointee_const_to_volatile": "param_pointee_cv",
+        "param_rename_header_only": "param_renamed",
+        "params_reordered": "params_reordered",
+        "default_argument_added": "default_argument_changed",
+        "func_return_type_change": "return_retyped",
+        "return_pointer_level_changed": "return_pointer_level",
+        "return_pointee_const_added": "return_pointee_cv",
+        "return_pointee_const_removed": "return_pointee_cv",
+        "return_deep_pointee_const_removed": "return_pointee_cv",
+        "func_became_variadic": "variadic_change",
+        "func_lost_variadic": "variadic_change",
+        "func_became_ms_abi": "calling_convention_change",
+        "func_exception_spec_widened": "exception_spec_change",
+        "func_contract_attribute_added": "attribute_change",
+        "func_contract_attribute_removed": "attribute_change",
+        "func_became_extern_c": "language_linkage_change",
+        "extern_c_linkage_removed": "language_linkage_change",
+        "func_out_of_line_to_inline": "became_inline",
+        "inline_function_outlined": "became_out_of_line",
+        "imported_symbol_added": "body_change",
+        "imported_symbol_removed": "body_change",
+        "glibc_version_required_added": "body_change",
+        "glibc_older_version_required": "body_change",
+        "glibc_version_requirement_dropped": "body_change",
+        "fortified_call_dropped": "body_change",
+        "text_relocation_introduced": "body_change",
+        "text_relocation_removed": "body_change",
+        "writable_executable_segment": "body_change",
+        "overload_added": "overload_added",
+        "func_add": "function_added",
+        "export_surface_exploded": "function_added",
+        "allocator_replacement_added": "function_added",
+        "std_template_instance_exported": "function_added",
+        "func_remove": "function_removed",
+        "allocator_replacement_removed": "function_removed",
+        "symbols_prefixed_batch": "function_renamed",
+        "api_version_suffix_bumped": "function_renamed",
+        "declared_but_not_exported": "export_declaration_mismatch",
+        "exported_but_undeclared": "export_declaration_mismatch",
+        "source_only_export_added": "export_declaration_mismatch",
+        "declared_exports_defined": "export_declaration_mismatch",
+        "func_became_weak": "binding_change",
+        "weak_became_global": "binding_change",
+        "func_became_protected": "visibility_change",
+        "func_lose_default_visibility": "visibility_change",
+        "internal_helper_hidden": "visibility_change",
+        "version_node_added_for_new_symbol": "version_change",
+        "symbol_moved_version_node_keeping_alias": "version_change",
+        "unversioned_export_added": "version_change",
+        "func_became_ifunc": "symbol_type_change",
+        "ifunc_removed": "symbol_type_change",
+        "gnu_unique_static_added": "symbol_type_change",
+        "comment_only": "declaration_text_only",
+        "reorder_declarations": "declaration_text_only",
     },
 }
 
@@ -655,6 +749,7 @@ __all__ = [
     "AXES",
     "CONFIG_AXIS",
     "CONSTRUCTS",
+    "OP_CONSTRUCT",
     "OP_EDIT_CLASS",
     "Point",
     "edit_class",

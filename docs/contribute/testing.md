@@ -181,8 +181,17 @@ model also has classes for reorder, retype (same layout, grows, shrinks,
 alignment only), array bound changes, bit-fields, record-level edits
 (including a change of triviality for calls) and rename/cv. Base-class layout (`inheritance`) is split by base added
 (non-virtual or virtual), removed, reordered, made virtual or non-virtual,
-resized, or given a new access. Every other construct has the single class
-`any`. `OP_EDIT_CLASS` in `abiforge.model.space` maps each operator of a
+resized, or given a new access. A function (`function`) is split by the part
+of its declaration, definition or exporting symbol that changes: each
+parameter (added, removed, retyped, indirection, pointee cv, renamed,
+reordered, default argument), the return type, variadic-ness, calling
+convention, exception specification, attributes, language linkage, inline or
+out of line, body imports, overloads, the function set (added, removed,
+renamed, declared versus exported), and the symbol's binding, visibility,
+version and type. An operator whose role is a carrier for another construct
+(a variable or record added beside the seed's functions, a rebuild with
+other flags) is placed by `OP_CONSTRUCT` instead of by its role. Every other
+construct has the single class `any`. `OP_EDIT_CLASS` in `abiforge.model.space` maps each operator of a
 split construct to its class. It may only name model classes, and an
 operator it does not place fails `tests/test_edit_corpus_edit_axis.py`.
 Every model class is in the denominator, whether or not an operator generates

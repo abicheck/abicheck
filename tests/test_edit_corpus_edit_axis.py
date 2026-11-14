@@ -2,8 +2,9 @@
 
 The construct axis cannot tell two edits of one record apart: an operator
 that appends a member and one that removes a member in padding both cover
-``struct``. The edit axis splits ``struct`` and ``inheritance`` into the
-classes ``abiforge.model.edit_model`` defines from C/C++ layout rules. The
+``struct``. The edit axis splits ``struct``, ``inheritance`` and ``function``
+into the classes ``abiforge.model.edit_model`` defines from the C/C++ layout
+and declaration rules. The
 model, not the operator registry, is the denominator: a class no operator
 generates is an uncovered gap, reported in the coverage summary and the
 ledger, never dropped.
@@ -83,7 +84,42 @@ EXPECTED_INHERITANCE = {
     "base_layout_changed",
     "base_access_changed",
 }
-SPLIT = {"struct": EXPECTED_STRUCT, "inheritance": EXPECTED_INHERITANCE}
+EXPECTED_FUNCTION = {
+    "param_added",
+    "param_removed",
+    "param_retyped",
+    "param_pointer_level",
+    "param_pointee_cv",
+    "param_renamed",
+    "params_reordered",
+    "default_argument_changed",
+    "return_retyped",
+    "return_pointer_level",
+    "return_pointee_cv",
+    "variadic_change",
+    "calling_convention_change",
+    "exception_spec_change",
+    "attribute_change",
+    "language_linkage_change",
+    "became_inline",
+    "became_out_of_line",
+    "body_change",
+    "overload_added",
+    "function_added",
+    "function_removed",
+    "function_renamed",
+    "export_declaration_mismatch",
+    "binding_change",
+    "visibility_change",
+    "version_change",
+    "symbol_type_change",
+    "declaration_text_only",
+}
+SPLIT = {
+    "struct": EXPECTED_STRUCT,
+    "inheritance": EXPECTED_INHERITANCE,
+    "function": EXPECTED_FUNCTION,
+}
 
 
 def _space_edits(construct: str, points) -> set[str]:  # type: ignore[no-untyped-def]
@@ -267,9 +303,13 @@ def test_coverage_counts_the_edit_class_that_ran() -> None:
     covered = cell_points(op, cfg, ran)
     rep = coverage(covered, top=1)
     rows = rep["per_axis"]["edit"]  # type: ignore[index]
-    assert set(rows) == EXPECTED_STRUCT | EXPECTED_INHERITANCE | {ANY_EDIT}
+    assert set(rows) == EXPECTED_STRUCT | EXPECTED_INHERITANCE | EXPECTED_FUNCTION | {
+        ANY_EDIT
+    }
     assert rows["remove_middle_absorbed"]["covered"] == len(covered)
-    for cls in (EXPECTED_STRUCT | EXPECTED_INHERITANCE) - {"remove_middle_absorbed"}:
+    for cls in (EXPECTED_STRUCT | EXPECTED_INHERITANCE | EXPECTED_FUNCTION) - {
+        "remove_middle_absorbed"
+    }:
         assert rows[cls]["covered"] == 0, cls
     per_class = rep["edit_classes"]["struct"]["remove_middle_absorbed"]  # type: ignore[index]
     assert per_class["covered"] == len(covered)
@@ -286,3 +326,24 @@ def test_a_pre_edit_axis_point_id_is_refused_not_guessed() -> None:
         point_from_id(legacy)
     with pytest.raises(ValueError, match="not a space point id"):
         point_from_id("a/b")
+
+
+def test_construct_placements_name_real_operators_and_constructs() -> None:
+    names = {c.name for c in CONSTRUCTS}
+    for op_name, cons in space.OP_CONSTRUCT.items():
+        assert op_name in OP_BY_NAME, op_name
+        assert set(cons) <= names, (op_name, cons)
+        assert op_constructs(OP_BY_NAME[op_name]) == cons, op_name
+
+
+def test_function_edits_name_the_signature_part_they_change() -> None:
+    """Spot-check placements against the edit each operator's text makes."""
+    want = {
+        "func_param_append": "param_added",
+        "params_reordered": "params_reordered",
+        "func_became_extern_c": "language_linkage_change",
+        "func_became_weak": "binding_change",
+        "comment_only": "declaration_text_only",
+    }
+    for op_name, cls in want.items():
+        assert edit_class(OP_BY_NAME[op_name], "function") == cls, op_name
