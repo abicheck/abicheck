@@ -88,7 +88,7 @@ def derive_object_sizes(
             closer_addr = addresses[following]
             if closer_addr >= sec_end:
                 continue
-            closer_name = next(n for v, n in ordered if v == closer_addr)
+            closer_name = ordered[following][1]
             if closer_addr - value > 0:
                 out.setdefault(name, (closer_addr - value, closer_name))
     return out

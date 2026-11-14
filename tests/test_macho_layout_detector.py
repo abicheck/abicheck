@@ -340,3 +340,30 @@ def test_v1_binary_payload_loads_as_not_derived_and_the_layout_gate_refuses_it()
     assert supported is False
     assert "not derived" in reason
     assert _diff_elf_layout(legacy, legacy) == []
+
+
+def test_a_failure_part_way_through_the_export_list_leaves_derivation_unrecorded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``sizes_derived`` is set only after the whole export loop. A read that
+    fails part-way leaves it unset, so the layout gate refuses the partial
+    snapshot instead of comparing an incomplete export list."""
+    import abicheck.macho_metadata as macho_metadata
+
+    real = macho_metadata.MachoExport
+    calls = {"n": 0}
+
+    def flaky(*args, **kwargs):  # the second export raises
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("injected failure mid export loop")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(macho_metadata, "MachoExport", flaky)
+    lib = _vtable_macho(tmp_path, "partial.dylib", 0x28)
+    meta = macho_metadata.parse_macho_metadata(lib)
+    assert meta.sizes_derived is None
+    snap = AbiSnapshot(library="libp.dylib", version="1", platform="macho", macho=meta)
+    supported, reason = _layout_support(snap, snap)
+    assert supported is False
+    assert "not derived" in reason

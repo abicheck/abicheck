@@ -589,9 +589,6 @@ def _parse_macho_symbols(
         sizes = derive_object_sizes(
             _defined_section_symbols(symtab.nlists), _section_extents(header)
         )
-        # Derivation ran to completion: an export without a size now means "no
-        # closing label", not "derivation never ran" (MachoMetadata.sizes_derived).
-        meta.sizes_derived = True
         # Prefer the split external tables (available when LC_DYSYMTAB is
         # present): extdefsyms = external *defined* (exports), undefsyms =
         # external *undefined* (imports). Concatenate both so the import surface
@@ -644,6 +641,9 @@ def _parse_macho_symbols(
                     size_bound_by=sizes[name][1] if name in sizes else None,
                 )
             )
+        # Set after the whole export loop: a failure part-way leaves the flag
+        # unset, so the layout gate refuses the snapshot (MachoMetadata.sizes_derived).
+        meta.sizes_derived = True
     except Exception as exc:  # noqa: BLE001
         # SymbolTable may fail on binaries without LC_SYMTAB (stripped, .tbd stubs, etc.)
         log.debug(
