@@ -19,6 +19,12 @@ Purpose and claims: `README.md`.
   answer. An `oracle-conflict` cell means the expectation is wrong.
 - A checker disagreement is fixed in the checker, or recorded in `known.py`
   as a strict xfail with its `docs/contribute/known-gaps.md` row.
+- Catch every edit at the cheapest evidence level that observes it: stripped
+  binary, then +DWARF, then stripped binary + headers (the primary cell), then
+  build data, then sources. A header-visible fact missed in that primary cell
+  is a checker defect, never a reason to raise the level. When choosing or
+  changing an operator's evidence level, read
+  `docs/contribute/plans/abicheck-abiforge-completeness.md` §7.1.
 - `requires(config)` reads only the config, never the host. A host
   capability (CPU, libstdc++, a flag the toolchain may refuse) is an `EditOp`
   field (`host_arch`, `needs_libstdcxx`, `probe_flags`) that
