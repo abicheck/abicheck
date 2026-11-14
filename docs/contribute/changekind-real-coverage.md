@@ -22,13 +22,13 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
-| L0 | 129 | 72 |
+| L0 | 130 | 73 |
 | L1 | 62 | 7 |
 | L2 | 77 | 39 |
 | L3 | 15 | 5 |
 | L4 | 10 | 2 |
 | L5 | 15 | 5 |
-| unmapped | 121 | 106 |
+| unmapped | 120 | 105 |
 
 ## Most important zero-source kinds (top 20)
 
@@ -49,11 +49,11 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `pe_ordinal_retargeted` | BREAKING | L0 |
 | `support_promise_component_retired` | BREAKING | L0 |
 | `symbol_version_defined_removed` | BREAKING | L0 |
+| `type_visibility_changed` | BREAKING | L0 |
 | `var_visibility_changed` | BREAKING | L0 |
 | `vtable_thunk_set_changed` | BREAKING | L0 |
 | `wheel_closure_dependency_violation` | BREAKING | L0 |
 | `wheel_tag_architecture_mismatch` | BREAKING | L0 |
-| `func_pure_virtual_added` | BREAKING | L1 |
 
 ## Tier L0
 
@@ -171,6 +171,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `target_isa_changed` | RISK | 0 | 0 | 1 |
 | `text_relocation_introduced` | RISK | 0 | 0 | 0 |
 | `text_relocation_removed` | COMPATIBLE | 0 | 0 | 0 |
+| `type_visibility_changed` | BREAKING | 0 | 0 | 0 |
 | `unnamed_type_in_public_abi` | RISK | 1 | 0 | 0 |
 | `unversioned_exported_symbol` | RISK | 1 | 0 | 0 |
 | `var_added` | COMPATIBLE | 1 | 1 | 1 |
@@ -502,7 +503,6 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `type_added` | COMPATIBLE | 0 | 1 | 2 |
 | `type_field_removed` | BREAKING | 0 | 0 | 0 |
 | `type_lost_final` | RISK | 0 | 0 | 0 |
-| `type_visibility_changed` | BREAKING | 0 | 0 | 0 |
 | `typedef_version_sentinel` | COMPATIBLE | 0 | 0 | 0 |
 | `undocumented_export_ratio_increased` | COMPATIBLE | 0 | 0 | 0 |
 | `uninstantiated_template_removed` | API_BREAK | 0 | 0 | 0 |

@@ -347,7 +347,7 @@ These detectors exist in abicheck but have no ABICC equivalent:
 | `STRUCT_ALIGNMENT_CHANGED` | DWARF alignment | - | DWARF layout |
 | `ENUM_UNDERLYING_SIZE_CHANGED` | Enum underlying type size | - | DWARF layout |
 | `STRUCT_PACKING_CHANGED` | `__attribute__((packed))` change | - | DWARF advanced |
-| `TYPE_VISIBILITY_CHANGED` | typeinfo/vtable visibility | - | DWARF advanced |
+| `TYPE_VISIBILITY_CHANGED` | typeinfo/vtable visibility | - | ELF exports (`compare/type_visibility.py`) |
 | `TOOLCHAIN_FLAG_DRIFT` | Compiler flag changes | - | DWARF advanced |
 | `FUNC_VISIBILITY_CHANGED` | default→hidden visibility | case06 | Symbol |
 | `FUNC_DELETED` | `= delete` added | - | C++ |

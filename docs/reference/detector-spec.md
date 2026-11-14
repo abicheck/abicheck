@@ -386,7 +386,7 @@ One row per `ChangeKind` (429 total). Columns fuse the verdict partition (`check
 | `type_lost_final` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `type_lost_final` | — |
 | `type_removed` | api_break | `API_BREAK` | `warning` | L1 | `type_removed` | [case107](examples/case107_task_scheduler_init_removed.md), [case108](examples/case108_task_class_removed.md), [case109](examples/case109_flow_graph_policy_renames.md), [case41](examples/case41_type_changes.md), +1 |
 | `type_size_changed` | breaking | `BREAKING` | `error` | L1 | `type_size_changed` | [case07](examples/case07_struct_layout.md), [case117](examples/case117_no_unique_address.md), [case126](examples/case126_sycl_device_impl_ptr.md), [case140](examples/case140_empty_base_optimization_lost.md), +15 |
-| `type_visibility_changed` | breaking | `BREAKING` | `error` | unspecified | `type_visibility_changed` | — |
+| `type_visibility_changed` | breaking | `BREAKING` | `error` | L0 | `type_visibility_changed` | — |
 | `type_vtable_changed` | breaking | `BREAKING` | `error` | L1 | `type_vtable_changed` | [case09](examples/case09_cpp_vtable.md), [case38](examples/case38_virtual_methods.md), [case72](examples/case72_covariant_return_changed.md) |
 | `typedef_base_changed` | breaking | `BREAKING` | `error` | L1 | `typedef_base_changed` | [case73](examples/case73_typedef_underlying_changed.md) |
 | `typedef_removed` | api_break | `API_BREAK` | `warning` | L1 | `typedef_removed` | [case109](examples/case109_flow_graph_policy_renames.md), [case95](examples/case95_allocator_nested_typedef_removed.md) |

@@ -1028,6 +1028,13 @@ _KIND_ROLES: dict[str, RoleText] = {
         "class KW { detail::Impl* p; public: KW(); int n() const { return p->count; } }; }",
         "kib::KW::KW() : p(new detail::Impl{3}) {}",
     ),
+    # A polymorphic class whose own symbols (typeinfo, vtable) are exported
+    # with it; no free function names it, so narrowing the class's visibility
+    # cannot hide a function through GCC's type-visibility constraint.
+    "k.tvz": (
+        "struct KTV { virtual ~KTV(); virtual int kget(); int v; };",
+        "KTV::~KTV() {}\nint KTV::kget() { return v; }",
+    ),
     # Empty baselines: the operator adds the declaration.
     "k.pnv": ("", ""),
     "k.stl": ("", ""),

@@ -242,6 +242,7 @@ ROLE_CONSTRUCT: dict[str, str] = {
     "k.aeq": "struct",
     "k.del": "function",
     "k.ibr": "inline_function",
+    "k.tvz": "class_virtual",
     "k.pnv": "class_virtual",
     "k.stl": "std_string",
     "k.anon": "function",

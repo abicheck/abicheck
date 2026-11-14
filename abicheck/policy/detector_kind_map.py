@@ -33,7 +33,6 @@ DETECTOR_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
                 "struct_packing_changed",
                 "struct_return_convention_changed",
                 "toolchain_flag_drift",
-                "type_visibility_changed",
                 "value_abi_trait_changed",
                 "vector_abi_changed",
                 "wchar_model_changed",
@@ -387,6 +386,7 @@ DETECTOR_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
         "type_kind_changes": frozenset(
             {"source_level_kind_changed", "type_kind_changed"}
         ),
+        "type_visibility": frozenset({"type_visibility_changed"}),
         "typedefs": frozenset(
             {"typedef_base_changed", "typedef_removed", "typedef_version_sentinel"}
         ),

@@ -113,7 +113,7 @@ verdict bucket follows the [policy partition](../reference/change-kinds.md):
 | Type stops being standard-layout (`offsetof`/C-interop lost) | COMPATIBLE_WITH_RISK | `standard_layout_lost` | L2 *(descriptor)* | unit-tested, no public example case yet |
 | `dsize` changes at stable `sizeof` (tail-padding reuse) | COMPATIBLE_WITH_RISK | `tail_padding_reuse_changed` | L2 *(descriptor)* | unit-tested, no public example case yet |
 | Change a field's / method's access specifier | API_BREAK | `field_access_changed`, `method_access_changed` | L2 (headers) | [case34](../reference/examples/case34_access_level.md) |
-| RTTI / vtable visibility changes across DSOs | BREAKING | `type_visibility_changed` | L1 (DWARF attrs) | — |
+| RTTI / vtable visibility changes across DSOs | BREAKING | `type_visibility_changed` | L0 (ELF exports) | — |
 | `[[no_unique_address]]` overlap gained/lost | BREAKING | *(no dedicated kind — see below)* `type_size_changed` / `type_field_offset_changed` | L1 | [case117](../reference/examples/case117_no_unique_address.md) |
 | Class gained `final` (consumers can no longer derive) | API_BREAK | `type_became_final` | L2 (headers) | [case125](../reference/examples/case125_class_became_final.md) |
 
