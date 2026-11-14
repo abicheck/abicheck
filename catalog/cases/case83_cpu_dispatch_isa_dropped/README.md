@@ -1,6 +1,6 @@
 # Case 83: CPU-dispatch ISA family dropped
 
-**Category:** Dispatch ABI | **Verdict:** ⚠️ COMPATIBLE_WITH_RISK
+**Category:** Dispatch ABI | **Verdict:** ❌ BREAKING
 
 ## Verdict and consumer impact
 
@@ -13,8 +13,13 @@ dispatcher itself still works — consumers who never pinned to a specific ISA
 are unaffected. Consumers who linked directly against `kmeans_compute_avx512`
 (common in test scaffolding, micro-benchmarks, or integrations that bypass
 the dispatcher for reproducibility) get an unresolved symbol at load time.
-Binary-compatible for the common case; verify no deployed consumer pins the
-dropped ISA before shipping.
+Because those `*_avx512` specializations are **declared in the public
+header**, they are promised entry points: a binary compiled against v1.h that
+calls one fails to load against v2. That is a binary (and source) break, so
+the verdict is `BREAKING`, even though dispatcher-only callers are unaffected.
+If the dropped specializations were export-only (declared in no public
+header — internal dispatch targets), the same roll-up is graded
+`COMPATIBLE_WITH_RISK`.
 
 ## Old/new diff
 
@@ -39,9 +44,9 @@ abicheck compare libfoo_v1.so libfoo_v2.so -H old=v1.h -H new=v2.h --config .abi
 ## Expected abicheck finding
 
 ```text
-Verdict: COMPATIBLE_WITH_RISK (exit 0)
+Verdict: BREAKING (exit 4)
 
-Deployment Risk Changes:
+Breaking Changes:
 - cpu_dispatch_isa_dropped: CPU dispatch ISA 'avx512' tier removed: 3
   specialisations across 3 algorithms (kmeans_compute, knn_compute,
   linreg_compute).
@@ -66,13 +71,18 @@ or from raw exported-symbol names once demangled.
 infix token (`avx512`, `avx2`, `sse42`, ..., `scalar`). When three or more
 removed symbols share one token *and* the same algorithm stem still exists
 under a sibling ISA in the new snapshot, it emits one grouped
-`CPU_DISPATCH_ISA_DROPPED` finding (`RISK_KINDS`) instead of N independent
-`func_removed` findings — the per-symbol removals are suppressed as children
-so the report names the deployment-level event once.
+`CPU_DISPATCH_ISA_DROPPED` finding instead of N independent `func_removed`
+findings — the per-symbol removals are suppressed as children so the report
+names the deployment-level event once. The kind's default grade is
+`COMPATIBLE_WITH_RISK` (`RISK_KINDS`), which applies only when every removed
+member is export-only. When any removed member is declared in the old public
+headers, the finding carries `effective_verdict: BREAKING`
+(`modulation_rule: cpu_dispatch_isa.public_member`): the ISA token is a naming
+heuristic and may not lower the removal of a promised entry point.
 
 ## Runtime failure demonstration
 
-**Severity: RISK (load-time failure for ISA-pinned callers only)**
+**Severity: BREAKING (load-time failure for any caller of a removed public specialization)**
 
 **Scenario:** app calls both the dispatcher (`kmeans_compute`, unaffected)
 and the pinned AVX-512 specialization (`kmeans_compute_avx512`, removed).
@@ -90,10 +100,12 @@ g++ -shared -fPIC -g -std=c++17 -I. v2.cpp -o libfoo.so
 # → ./app: symbol lookup error: ./app: undefined symbol: _ZN5mylib21kmeans_compute_avx512Ei
 ```
 
-**Why RISK not BREAKING:** the dispatcher-using majority of callers observe
-no change at all — only callers that bypassed the dispatcher to pin a
-specific ISA are affected, which is why this is `COMPATIBLE_WITH_RISK`
-rather than a hard break.
+**Why BREAKING, not RISK:** the dispatcher-using majority of callers observe
+no change, but the header promised `kmeans_compute_avx512` as a callable
+entry point, and the old `app` above — built only against v1.h — no longer
+loads. A compatibility verdict is about every consumer the public contract
+admits, not the common one. Only export-only specializations (no header
+declaration) keep the `COMPATIBLE_WITH_RISK` grade.
 
 ## Safe redesign
 

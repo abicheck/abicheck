@@ -49,6 +49,10 @@ from typing import TYPE_CHECKING
 
 from abicheck.model.mangled_type_reference import symbols_referencing_type
 
+from .compare.cpu_dispatch_public_members import (
+    header_declared_members,
+    public_member_grade,
+)
 from .compare.internal_namespaces import DEFAULT_INTERNAL_NAMESPACES
 from .compare.naming_conventions import (  # noqa: F401 -- re-exported
     BUNDLE_SONAME_COHORT,
@@ -73,11 +77,7 @@ from .diff_helpers import (
     make_change,
 )
 
-# Re-exports — the generic detectors were extracted to dedicated modules
-# in PR-D, but are re-exported here so callers that import them from this
-# module keep working unchanged. (This module is internal: it is not
-# exported from ``abicheck/__init__`` and has no documented public-API
-# import path.)
+# Re-exports of detectors extracted in PR-D (internal module).
 from .diff_serialization import (  # noqa: F401
     _TAG_EXACT_LEAVES,
     _TAG_SUFFIX_PATTERNS,
@@ -376,8 +376,9 @@ def _emit_isa_dropped_finding(
     overlapping: list[tuple[str, str]],
     old_index: dict[str, Function],
     suppressed: set[str],
+    public_members: list[str],
 ) -> Change:
-    """Build the CPU_DISPATCH_ISA_DROPPED Change and update *suppressed* in place."""
+    """Build the CPU_DISPATCH_ISA_DROPPED Change; BREAKING when a member was header-declared."""
     affected_stems = {stem for stem, _ in overlapping}
     affected_mangled = [m for _, m in overlapping]
     suppressed.update(affected_mangled)
@@ -394,11 +395,10 @@ def _emit_isa_dropped_finding(
             f"{'…' if len(stems_sorted) > 8 else ''})"
         ),
         affected_symbols=affected_mangled,
-        # ADR-044: overlapping's mangled names come from old_funcs (scoped to
-        # _PUBLIC_VIS) merged with the raw PE/Mach-O export table (which is,
-        # by definition, the public export surface) — both sources are
-        # reliably public.
+        # ADR-044: both member sources (old_funcs, raw export table) are public.
         public_reachable=True,
+        # A header-declared member is a promised entry point: never below BREAKING.
+        **public_member_grade(public_members),
         reachability_state=ReachabilityState.PROVEN_REACHABLE,
         reachability_kind="direct_public_symbol",
     )
@@ -442,10 +442,7 @@ def detect_cpu_dispatch_isa_dropped(
     # mismatch resolves every such function to HIDDEN, silently emptying
     # old_funcs/new_funcs above and disabling this detector -- so also cluster
     # directly off the PE/Mach-O export table, independent of Function
-    # visibility. On ELF (no .pe/.macho) this is a no-op; on a platform where
-    # the Function model already resolved correctly it is a harmless,
-    # redundant superset (a token already grouped via the model isn't grouped
-    # a second time below).
+    # visibility. A no-op on ELF; elsewhere a redundant superset.
     old_raw_ids = _raw_export_ids(old)
     new_raw_ids = _raw_export_ids(new)
     removed_by_isa_raw = _build_removed_by_isa_from_raw_exports(
@@ -477,8 +474,11 @@ def detect_cpu_dispatch_isa_dropped(
         ]
         if len(overlapping) < min_removed:
             continue
+        public = header_declared_members(
+            [m for _, m in overlapping], old.declarations.functions
+        )
         findings.append(
-            _emit_isa_dropped_finding(token, overlapping, old_index, suppressed)
+            _emit_isa_dropped_finding(token, overlapping, old_index, suppressed, public)
         )
     return findings, suppressed
 

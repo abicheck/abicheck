@@ -60,9 +60,6 @@ GAP_DUAL_ABI_COW_CHURN = "A C++20 dual-ABI flip is not recognized when the old-A
 GAP_GCC_HEADER_ONLY = (
     "The native gcc header backend records no function the library never emits"
 )
-GAP_ISA_ROLLUP_RISK = (
-    "Removing every public `_avx2`-style variant of a function family reads as a risk"
-)
 GAP_UNUSED_TYPEDEF_DEMOTED = (
     "A change to a public typedef no function uses is demoted out of the surface"
 )
@@ -420,19 +417,6 @@ _PLATFORM: tuple[Known, ...] = (
 )
 
 KNOWN: tuple[Known, ...] = (
-    Known(
-        "cpu_dispatch_variants_dropped",
-        _MORE,
-        "wrong-verdict",
-        _always,
-        "three declared, exported _avx2 functions are removed: the "
-        "cpu_dispatch_isa_dropped roll-up grades the removal a risk "
-        "(catalog case83 encodes the same choice)",
-        GAP_ISA_ROLLUP_RISK,
-        issues=frozenset({"missing:SONAME_BUMP_RECOMMENDED", "weaker-than:BREAKING"}),
-        verdicts=frozenset({"COMPATIBLE_WITH_RISK"}),
-        also_cls=frozenset({"false-clean"}),
-    ),
     Known(
         "version_sentinel_typedef_bumped",
         _MORE,

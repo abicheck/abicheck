@@ -7,5 +7,5 @@ _Canonical rule slug:_ `cpu-dispatch-isa-dropped`. [← back to all rules](index
 
 ## Canonical demonstration
 
-- [case83_cpu_dispatch_isa_dropped](../case83_cpu_dispatch_isa_dropped.md) — CPU-dispatch ISA family dropped (🟡 COMPATIBLE_WITH_RISK)
+- [case83_cpu_dispatch_isa_dropped](../case83_cpu_dispatch_isa_dropped.md) — CPU-dispatch ISA family dropped (🔴 BREAKING)
 

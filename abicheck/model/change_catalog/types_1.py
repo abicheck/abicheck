@@ -167,7 +167,9 @@ TYPES_ENTRIES_1: list[ChangeKindMeta] = [
         "that did not pin a specific ISA, but consumers that linked directly "
         "against a now-removed ISA-specific symbol get unresolved symbols. "
         "Reported as one grouped finding listing the affected algorithm "
-        "stems.",
+        "stems. This risk grade covers export-only members; when any removed "
+        "member was declared in a public header the finding carries an "
+        "effective BREAKING verdict, since a direct caller no longer loads.",
         description_template="CPU dispatch ISA '{name}' tier removed: {detail}. Runtime dispatcher continues to work; consumers that pinned directly to '{name}' symbols get unresolved references at load time.",
         entity=_ENT.BINARY,
         contract_subject=_CS.BINARY_WIDE,

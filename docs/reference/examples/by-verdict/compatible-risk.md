@@ -3,14 +3,13 @@
 
 Backward-compatible at the symbol level but with behavioral risk.
 
-_38 case(s)._ [← back to all examples](../index.md)
+_37 case(s)._ [← back to all examples](../index.md)
 
 | Case | Title | Verdict | Category |
 |------|-------|---------|----------|
 | [case15_noexcept_change](../case15_noexcept_change.md) | `noexcept` Removed | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case50_soname_inconsistent](../case50_soname_inconsistent.md) | SONAME Inconsistent (Wrong Major Version) | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case51_protected_visibility](../case51_protected_visibility.md) | Protected Visibility (DEFAULT to PROTECTED) | 🟡 COMPATIBLE_WITH_RISK | Risk |
-| [case83_cpu_dispatch_isa_dropped](../case83_cpu_dispatch_isa_dropped.md) | CPU-dispatch ISA family dropped | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case92_bundle_provider_changed](../case92_bundle_provider_changed.md) | Bundle — Symbol Provider Migration | 🟡 COMPATIBLE_WITH_RISK | Bundle (Multi-library) |
 | [case98_cxx_standard_floor_raised](../case98_cxx_standard_floor_raised.md) | C++ Standard Floor Raised | 🟡 COMPATIBLE_WITH_RISK | Risk |
 | [case111_enumerable_thread_specific_lambda_ambiguity](../case111_enumerable_thread_specific_lambda_ambiguity.md) | enumerable_thread_specific Lambda-Init Ambiguity | 🟡 COMPATIBLE_WITH_RISK | Risk |

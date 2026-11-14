@@ -88,7 +88,7 @@ _219 case(s)._ [← back to all examples](../index.md)
 | [case79_missing_template_instantiation](../case79_missing_template_instantiation.md) | Missing Template Instantiation in Shipped Binary | 🔴 BREAKING | Breaking |
 | [case80_pimpl_shared_to_unique](../case80_pimpl_shared_to_unique.md) | Pimpl Alias Switched from `shared_ptr` to `unique_ptr` | 🔴 BREAKING | Breaking |
 | [case81_serialization_tag_reassigned](../case81_serialization_tag_reassigned.md) | Serialization Tag ID Reassigned | 🔴 BREAKING | Breaking |
-| [case83_cpu_dispatch_isa_dropped](../case83_cpu_dispatch_isa_dropped.md) | CPU-dispatch ISA family dropped | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case83_cpu_dispatch_isa_dropped](../case83_cpu_dispatch_isa_dropped.md) | CPU-dispatch ISA family dropped | 🔴 BREAKING | Breaking |
 | [case84_bundle_soname_skew](../case84_bundle_soname_skew.md) | Multi-Library Bundle SONAME Skew | 🔴 BREAKING | Bundle (Multi-library) |
 | [case85_internal_template_signature_changed](../case85_internal_template_signature_changed.md) | Internal Template Signature Changed | 🔴 BREAKING | Breaking |
 | [case86_tag_struct_renamed](../case86_tag_struct_renamed.md) | Tag Struct Renamed (empty class re-mangling) | 🔴 BREAKING | Breaking |

@@ -94,12 +94,6 @@ The PE, Mach-O, DWARF and storage-v2 entries were closed on 2026-11-13 (see
 the archive); the CLI-level matrix over the same inputs is
 `tests/test_corrupt_input_matrix.py`.
 
-#### Removing every public `_avx2`-style variant of a function family reads as a risk (2026-11-14)
-
-**Status (2026-11-14): OPEN.** When three or more exported functions with one ISA suffix are removed while siblings under another ISA survive, `diff_cpp_patterns` rolls the removals into one `cpu_dispatch_isa_dropped` finding graded `COMPATIBLE_WITH_RISK`, even when the removed functions are declared in the public headers. A binary that calls `ksum_avx2` directly no longer loads, which is a binary break. Catalog case83 (`catalog/ground_truth.json`) encodes the same risk grading, so changing it is a ground-truth decision: one option is to grade the roll-up `BREAKING` when any rolled-up symbol is a header-declared public function. Found by the edit corpus (`cpu_dispatch_variants_dropped` on `cxx_more`). Owner: `diff_cpp_patterns.py`, `compare/naming_conventions.py`.
-`wrong-verdict` — a public removal is graded a risk.
-<!-- no-canary: pinned by the edit corpus's strict-xfail `cpu_dispatch_variants_dropped` entry in abiforge/known.py, which fails once the answer changes -->
-
 #### A change to a public typedef no function uses is demoted out of the surface (2026-11-14)
 
 **Status (2026-11-14): OPEN.** Snapshot typedefs are a plain name-to-type map with no declaring header. `surface.py`'s `_demote_by_reachability` moves a change to a typedef that no function reaches into `out_of_surface_changes` (reason `no-provenance`), so `typedef_version_sentinel` for a renamed `foo_version_1_2_3` sentinel, and `typedef_removed` for any unused public typedef, read `NO_CHANGE`. castxml already computes each typedef's header (`parse_public_typedef_headers`), but only the L4 path keeps it. Fixing it means recording typedef provenance in the L2 snapshot for all header backends. Found by the edit corpus (`version_sentinel_typedef_bumped` on `cxx_more`). Owner: `surface.py`, the snapshot typedef model.
