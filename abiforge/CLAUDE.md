@@ -53,7 +53,9 @@ Read `docs/contribute/testing.md` "Generated ABI edit corpus coverage" first.
 - A new declared kind: `python -m abiforge.coverage ledger --write`.
 - A new seed role or config axis value: its construct or config-feature entry
   in `model/space.py`.
-- A new `struct`/`inheritance` operator: its `OP_EDIT_CLASS` entry. Edit
+- A new `struct`/`inheritance`/`function` operator: its `OP_EDIT_CLASS`
+  entry. An operator whose role is only a carrier (`elf.extra`, a class seed
+  holding a free function) also needs its real construct in `OP_CONSTRUCT`. Edit
   classes come from `model/edit_model.py`, never from the operators; a class
   with no operator stays in the model as a reported gap.
 

@@ -43,6 +43,7 @@ from .lazy_graph import install_lazy_graph_field
 from .section_availability import SectionAvailability
 from .snapshot_index import build_snapshot_indexes
 from .template_default_table import TemplateDefaults
+from .vocabulary import ScopeOrigin
 
 if TYPE_CHECKING:
     from ..buildsource.model import BuildSourceRef
@@ -185,14 +186,17 @@ class AbiSnapshot:
     # a C parse, no declared public set, an older dump). Persisted as the
     # ``abicheck.cxx_concept_constraints`` extension fact of the debug section.
     cxx_concept_constraints: dict[str, str] | None = field(default=None, kw_only=True)
-    # Public headers' template-parameter defaults (model/template_default_table.py),
-    # read from the clang AST by both header backends; None: not modelled (no
-    # clang join, a C parse, no public set, an older dump). Extension fact
-    # ``abicheck.cxx_template_defaults`` of the debug section.
+    # Public headers' template-parameter defaults (model/template_default_table.py);
+    # None: not modelled. Extension fact ``abicheck.cxx_template_defaults``.
     cxx_template_defaults: dict[str, TemplateDefaults] | None = field(
         default=None, kw_only=True
     )
     cu_stack_protector: dict[str, int] | None = field(default=None, kw_only=True)
+    # ADR-015 origin of each typedef key (bare and qualified), classified by
+    # apply_provenance from the producer's declaring header; a key absent (or
+    # None: never classified, DWARF, an older dump) is UNKNOWN, never private.
+    # Extension fact ``abicheck.typedef_origins`` of the declarations section.
+    typedef_origins: dict[str, ScopeOrigin] | None = field(default=None, kw_only=True)
     # SHA-256 of the binary's bytes this snapshot was dumped from (ADR-090 D1(c)
     # identity; extension fact ``abicheck.binary_sha256``). None: not recorded.
     binary_sha256: str | None = field(default=None, kw_only=True)
@@ -656,14 +660,10 @@ class AbiSnapshot:
     wire_extensions: object | None = field(
         default=None, repr=False, compare=False, kw_only=True
     )
-    # {guard macro: function names} the castxml parse could not see because
-    # they sit in a preprocessor branch its configuration excluded -- decided by
-    # that run's own `-E -dD` output (`extract/headers/preprocessor_branches.py`).
-    # Read by `confidence.undeclared_export_censuses`. Persisted under this
-    # field's own name since schema v67, so a stored
-    # snapshot census is attributed exactly as its live counterpart.
-    # `None`: no scan ran (a non-castxml producer, a multi-TU manifest, or a
-    # pre-v67 document).
+    # {guard macro: function names} the castxml parse could not see in a
+    # preprocessor branch its configuration excluded
+    # (`extract/headers/preprocessor_branches.py`); persisted since schema v67.
+    # `None`: no scan ran (another producer, a multi-TU manifest, pre-v67).
     live_preprocessor_hidden: dict[str, tuple[str, ...]] | None = field(
         default=None, repr=False, compare=False, kw_only=True
     )

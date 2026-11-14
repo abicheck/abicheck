@@ -206,12 +206,18 @@ RECORD_AND_LATER_ROWS: tuple[FactRow, ...] = (
     FactRow(
         "RecordType",
         "data_size_bits",
-        _NONE,
+        _PARTIAL,
         _COMPANION,
         hybrid_backfilled=True,
         note=(
-            "The tail-padding-excluded size. Neither backend's own parse "
-            "computes it; it arrives from the layout companion tool or DWARF."
+            "The tail-padding-excluded size. castxml's parse derives it "
+            "from the emitted size and member/base offsets under the Itanium "
+            "POD-for-layout rule (`extract/headers/castxml/data_size.py`), "
+            "leaving it unknown where GCC and Clang disagree (a constructor "
+            "defaulted or deleted on first declaration, a "
+            "`[[no_unique_address]]` member, a possibly hidden deleted "
+            "member); plain clang computes none, it arrives from the layout "
+            "companion tool."
         ),
     ),
     FactRow(

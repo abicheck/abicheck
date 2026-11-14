@@ -41,9 +41,9 @@ The catalog drives abicheck's benchmark and serves as an encyclopedia of ABI pit
 <!-- BEGIN GENERATED: verdict-distribution (keep counts in sync with examples/ground_truth.json) -->
 | Verdict | Count | `checker_policy.py` set | Icon |
 |---------|-------|-------------------------|------|
-| BREAKING | 114 | `BREAKING_KINDS` | 🔴 |
+| BREAKING | 115 | `BREAKING_KINDS` | 🔴 |
 | API_BREAK | 26 | `API_BREAK_KINDS` | 🟠 |
-| COMPATIBLE_WITH_RISK | 37 | `RISK_KINDS` | 🟡 |
+| COMPATIBLE_WITH_RISK | 36 | `RISK_KINDS` | 🟡 |
 | COMPATIBLE (addition) | 12 | `ADDITION_KINDS` | 🟢 |
 | COMPATIBLE (quality) | 21 | `QUALITY_KINDS` | 🟡 |
 | NO_CHANGE | 17 | — | ✅ |
@@ -342,7 +342,7 @@ Expected non-pass buckets are already represented in `ground_truth.json`:
 | [80](cases/case80_pimpl_shared_to_unique/README.md) | Pimpl Alias Switched from `shared_ptr` to `unique_ptr` | Breaking | 🔴 BREAKING |
 | [81](cases/case81_serialization_tag_reassigned/README.md) | Serialization Tag ID Reassigned | Breaking | 🔴 BREAKING |
 | [82](cases/case82_sycl_overload_set_removed/README.md) | SYCL Overload Set Removed (DPC++ Build Withdrawn) | Breaking | 🔴 BREAKING |
-| [83](cases/case83_cpu_dispatch_isa_dropped/README.md) | CPU-dispatch ISA family dropped | Risk | 🟡 COMPATIBLE_WITH_RISK |
+| [83](cases/case83_cpu_dispatch_isa_dropped/README.md) | CPU-dispatch ISA family dropped | Breaking | 🔴 BREAKING |
 | [84](cases/case84_bundle_soname_skew/README.md) | Multi-Library Bundle SONAME Skew | Bundle | 🔵 BUNDLE (bad practice) |
 | [85](cases/case85_internal_template_signature_changed/README.md) | Internal Template Signature Changed | Breaking | 🔴 BREAKING |
 | [86](cases/case86_tag_struct_renamed/README.md) | Tag Struct Renamed (empty class re-mangling) | Breaking | 🔴 BREAKING |

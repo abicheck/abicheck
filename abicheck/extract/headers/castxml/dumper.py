@@ -137,6 +137,7 @@ class _CastxmlParser:
         public_dir_paths: list[str] | None = None,
         no_binary_evidence: bool = False,
         plain_char_unsigned: bool | None = None,
+        target_triple: str | None = None,
     ):
         # All parser state now lives on a shared context object (ADR-061 D9
         # "context.py") so entity-parsing modules under
@@ -154,6 +155,7 @@ class _CastxmlParser:
         )
         self._ctx.build_id_map()
         self._ctx.plain_char_unsigned = plain_char_unsigned
+        self._ctx.target_triple = target_triple
         self._ctx.vector_spellings = load_vector_spellings(self._ctx)
         self._ctx.function_type_cc = load_function_type_cc(self._ctx.root)
 

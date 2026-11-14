@@ -109,7 +109,9 @@ EXEMPTION_CEILINGS: dict[str, int] = {
     # (export_join._macho_shifted, the rename parser's ctor/dtor scan).
     # 45: minus the allocator placement regex, folded into the exact
     # replaceable-allocator match in elf_symbol_filter (not a scanned owner).
-    "grammar": 45,
+    # 44: diff_unnamed_types' `_Z` export filter moved to the format-neutral
+    # model.mangling_scheme (it now reads Mach-O and PE exports too).
+    "grammar": 44,
     # 43: minus outcome_release.unclassified_release_contribution_fields,
     # moved into its test (dead-code plan, Stage D).
     # 49: plus the two path-prefix checks in manifest_tu_scope_field, moved

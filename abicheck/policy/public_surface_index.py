@@ -290,6 +290,16 @@ def _index_surface_types(
             )
     for alias in snap.declarations.typedefs:
         surface.all_types.add(alias)
+    # ADR-015 typedef provenance: a bare key merges into the shared bare
+    # index (public wins, like a record), a qualified one also into the
+    # qualified index. Absent keys stay UNKNOWN -- never private.
+    for key, origin in (snap.typedef_origins or {}).items():
+        if key in snap.declarations.typedefs:
+            _record_origin(surface, {key}, origin)
+        if "::" in key or key in snap.declarations.typedefs_qualified:
+            surface.origin_by_qualified_key[key] = _merge_origin(
+                surface.origin_by_qualified_key.get(key), origin
+            )
     # Combine both kinds before counting: a bare name ambiguous *across*
     # records and enums (one record entry, one enum entry -- neither list
     # individually looks ambiguous) collides in ``origin_by_key`` exactly

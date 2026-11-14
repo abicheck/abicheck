@@ -47,6 +47,13 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from abicheck.model.mangled_type_reference import symbols_referencing_type
+
+from .compare.cpu_dispatch_public_members import (
+    header_declared_members,
+    public_member_grade,
+    redeclared_in,
+)
 from .compare.internal_namespaces import DEFAULT_INTERNAL_NAMESPACES
 from .compare.naming_conventions import (  # noqa: F401 -- re-exported
     BUNDLE_SONAME_COHORT,
@@ -59,6 +66,7 @@ from .compare.naming_conventions import (  # noqa: F401 -- re-exported
     _isa_token_in_symbol as _isa_token_in_symbol,
 )
 from .compare.record_qualified_name import qualify_record_name
+from .compare.tag_rename_evidence import tag_rename_symbol_evidence
 from .compare.template_surface import (
     reconciled_abi_visible_functions,
     strip_template_args as _callable_stem,  # noqa: F401
@@ -70,11 +78,7 @@ from .diff_helpers import (
     make_change,
 )
 
-# Re-exports — the generic detectors were extracted to dedicated modules
-# in PR-D, but are re-exported here so callers that import them from this
-# module keep working unchanged. (This module is internal: it is not
-# exported from ``abicheck/__init__`` and has no documented public-API
-# import path.)
+# Re-exports of detectors extracted in PR-D (internal module).
 from .diff_serialization import (  # noqa: F401
     _TAG_EXACT_LEAVES,
     _TAG_SUFFIX_PATTERNS,
@@ -373,8 +377,9 @@ def _emit_isa_dropped_finding(
     overlapping: list[tuple[str, str]],
     old_index: dict[str, Function],
     suppressed: set[str],
+    public_members: list[str],
 ) -> Change:
-    """Build the CPU_DISPATCH_ISA_DROPPED Change and update *suppressed* in place."""
+    """Build the CPU_DISPATCH_ISA_DROPPED Change; BREAKING when a member was header-declared."""
     affected_stems = {stem for stem, _ in overlapping}
     affected_mangled = [m for _, m in overlapping]
     suppressed.update(affected_mangled)
@@ -391,11 +396,10 @@ def _emit_isa_dropped_finding(
             f"{'…' if len(stems_sorted) > 8 else ''})"
         ),
         affected_symbols=affected_mangled,
-        # ADR-044: overlapping's mangled names come from old_funcs (scoped to
-        # _PUBLIC_VIS) merged with the raw PE/Mach-O export table (which is,
-        # by definition, the public export surface) — both sources are
-        # reliably public.
+        # ADR-044: both member sources (old_funcs, raw export table) are public.
         public_reachable=True,
+        # A header-declared member is a promised entry point: never below BREAKING.
+        **public_member_grade(public_members),
         reachability_state=ReachabilityState.PROVEN_REACHABLE,
         reachability_kind="direct_public_symbol",
     )
@@ -439,10 +443,7 @@ def detect_cpu_dispatch_isa_dropped(
     # mismatch resolves every such function to HIDDEN, silently emptying
     # old_funcs/new_funcs above and disabling this detector -- so also cluster
     # directly off the PE/Mach-O export table, independent of Function
-    # visibility. On ELF (no .pe/.macho) this is a no-op; on a platform where
-    # the Function model already resolved correctly it is a harmless,
-    # redundant superset (a token already grouped via the model isn't grouped
-    # a second time below).
+    # visibility. A no-op on ELF; elsewhere a redundant superset.
     old_raw_ids = _raw_export_ids(old)
     new_raw_ids = _raw_export_ids(new)
     removed_by_isa_raw = _build_removed_by_isa_from_raw_exports(
@@ -474,8 +475,13 @@ def detect_cpu_dispatch_isa_dropped(
         ]
         if len(overlapping) < min_removed:
             continue
+        public = header_declared_members(
+            [m for _, m in overlapping],
+            old.declarations.functions,
+            still_declared=redeclared_in(old, new),
+        )
         findings.append(
-            _emit_isa_dropped_finding(token, overlapping, old_index, suppressed)
+            _emit_isa_dropped_finding(token, overlapping, old_index, suppressed, public)
         )
     return findings, suppressed
 
@@ -483,12 +489,6 @@ def detect_cpu_dispatch_isa_dropped(
 # ---------------------------------------------------------------------------
 # case86 — tag type renamed (empty struct rename)
 # ---------------------------------------------------------------------------
-
-
-def _symbols_embedding_leaf(mangled_set: set[str], leaf: str) -> list[str]:
-    """Return mangled names from *mangled_set* that embed *leaf* (with or without underscores)."""
-    token = leaf.replace("_", "")
-    return [m for m in mangled_set if leaf in m or token in m]
 
 
 def _find_tag_rename_for_removed(
@@ -503,12 +503,12 @@ def _find_tag_rename_for_removed(
     Returns a TAG_TYPE_RENAMED Change on the first matching candidate, or None.
     """
     old_leaf = _last_segment(removed.name)
-    removed_with_token = _symbols_embedding_leaf(only_removed, old_leaf)
+    removed_with_token = symbols_referencing_type(only_removed, old_leaf)
     if not removed_with_token:
         return None
     for added in candidates:
         new_leaf = _last_segment(added.name)
-        added_with_token = _symbols_embedding_leaf(only_added, new_leaf)
+        added_with_token = symbols_referencing_type(only_added, new_leaf)
         if not added_with_token:
             continue
         return make_change(
@@ -590,10 +590,9 @@ def detect_tag_type_renamed(
     # between two symbol sets, so a declaration dropped for want of contract
     # evidence looks exactly like a renamed tag (Codex review, P2).
     r_old, r_new = reconciled_abi_visible_functions(old, new)
-    old_mangled = {f.mangled for f in r_old}
-    new_mangled = {f.mangled for f in r_new}
-    only_removed = old_mangled - new_mangled
-    only_added = new_mangled - old_mangled
+    old_ev = tag_rename_symbol_evidence(old, r_old)
+    new_ev = tag_rename_symbol_evidence(new, r_new)
+    only_removed, only_added = old_ev - new_ev, new_ev - old_ev
     findings: list[Change] = []
     for removed in removed_empties:
         ns = _parent_namespace(type_map_key(removed))

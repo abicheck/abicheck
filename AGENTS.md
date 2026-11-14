@@ -291,6 +291,12 @@ Follow the pointer whose trigger matches your task:
 
 - **Correctness decides, not effort.** Judge an approach on correctness,
   generality and fit with the architecture; there is no deadline criterion.
+- **Long-term right over current behavior.** Judge a finding by what is
+  technically right, not by how abicheck answers today or what compatibility
+  its current outputs promise. When a default, a catalog ground truth or an
+  ADR is wrong, change it in the same change (amendment, ground truth and
+  migration together) and fix the cause, rather than recording the answer
+  as a known gap or patching around it.
 - **Fix the cause, not the instance.** Trace a bug to its root cause and close
   the whole class. If a general fix is not feasible in one pass, say so and
   record the gap in `docs/contribute/known-gaps.md`.

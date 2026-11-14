@@ -44,6 +44,7 @@ from abiforge.model.opkit import (
 from abiforge.model.seeds import SEEDS, RoleText, Seed
 from abiforge.operators.cxx import CXX_OPERATORS
 from abiforge.operators.elf import ELF_OPERATORS
+from abiforge.operators.kinds import KIND_OPERATORS
 from abiforge.operators.layout import LAYOUT_OPERATORS
 from abiforge.operators.platform import PLATFORM_OPERATORS
 from abiforge.operators.symbols import SYMBOL_OPERATORS
@@ -121,6 +122,18 @@ def _func_param_type_change(r: Roles) -> dict[str, RoleText]:
         "func.add",
         "int add_ints(long long a, int b);",
         "int add_ints(long long a, int b) { return a + b; }",
+    )
+
+
+def _params_reordered(r: Roles) -> dict[str, RoleText]:
+    # A pointer and an int swap places: both travel in integer registers, so
+    # an old caller's record pointer lands in ``id`` and its id in ``r``.
+    return _set(
+        r,
+        "func.fill",
+        "void fill_rec(int id, struct rec *r);",
+        "void fill_rec(int id, struct rec *r) "
+        "{ memset(r, 0x11, sizeof *r); r->id = id; r->weight = 2.5; }",
     )
 
 
@@ -502,6 +515,18 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         min_evidence=_cxx_binary_else_dwarf,
         rules=(_binary_mangled("FUNC_PARAMS_CHANGED"),),
         touches=("func.add",),
+    ),
+    EditOp(
+        "params_reordered",
+        ("func.fill",),
+        _params_reordered,
+        "two parameters of different types swap places: the signature (and a "
+        "C++ mangled name) changes, and an old caller's arguments arrive in the "
+        "wrong parameters",
+        expected=frozenset({"FUNC_PARAMS_CHANGED"}),
+        min_evidence=_cxx_binary_else_dwarf,
+        rules=(_binary_mangled("FUNC_PARAMS_CHANGED"),),
+        touches=("func.fill",),
     ),
     EditOp(
         "func_param_append",
@@ -956,6 +981,7 @@ OPERATORS: tuple[EditOp, ...] = (
     *CXX_OPERATORS,
     *LAYOUT_OPERATORS,
     *SYMBOL_OPERATORS,
+    *KIND_OPERATORS,
 )
 
 OP_BY_NAME: dict[str, EditOp] = {op.name: op for op in OPERATORS}

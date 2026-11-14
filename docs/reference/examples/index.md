@@ -18,9 +18,9 @@ Use this catalog to:
 
 | Verdict | Count | What it means |
 |---------|-------|---------------|
-| 🔴 [BREAKING](by-verdict/breaking.md) | 118 | ABI breaks: existing consumers will fail at runtime. |
+| 🔴 [BREAKING](by-verdict/breaking.md) | 119 | ABI breaks: existing consumers will fail at runtime. |
 | 🟠 [API_BREAK](by-verdict/api-break.md) | 26 | Source-level / API-only breaks; recompilation fails or behavior shifts. |
-| 🟡 [COMPATIBLE_WITH_RISK](by-verdict/compatible-risk.md) | 38 | Backward-compatible at the symbol level but with behavioral risk. |
+| 🟡 [COMPATIBLE_WITH_RISK](by-verdict/compatible-risk.md) | 37 | Backward-compatible at the symbol level but with behavioral risk. |
 | 🟢 [COMPATIBLE](by-verdict/compatible.md) | 33 | Backward-compatible changes (additions or quality-only). |
 | ✅ [NO_CHANGE](by-verdict/no-change.md) | 17 | Identical ABI/API — baseline control cases. |
 
@@ -41,9 +41,9 @@ Source files (`v1.*`, `v2.*`, `app.*`, `CMakeLists.txt`) are listed at the botto
 
 | Category | Cases | What it covers |
 |----------|-------|----------------|
-| [Breaking](by-category/breaking.md) | 114 | Listed in `BREAKING_KINDS` — runtime ABI break. |
+| [Breaking](by-category/breaking.md) | 115 | Expected verdict `BREAKING` — a runtime ABI break for existing consumers. |
 | [API Break](by-category/api_break.md) | 26 | Listed in `API_BREAK_KINDS` — source/API-level break. |
-| [Risk](by-category/risk.md) | 37 | Listed in `RISK_KINDS` — symbol-compatible but behaviorally risky. |
+| [Risk](by-category/risk.md) | 36 | Listed in `RISK_KINDS` — symbol-compatible but behaviorally risky. |
 | [Addition (Compatible)](by-category/addition.md) | 12 | Listed in `ADDITION_KINDS` — backward-compatible additions. |
 | [Quality (Compatible)](by-category/quality.md) | 21 | Listed in `QUALITY_KINDS` — metadata/quality issues, not ABI breaks. |
 | [No Change](by-category/no_change.md) | 17 | Identical ABI/API — sanity-check baselines. |
@@ -92,9 +92,9 @@ The weakest evidence source that reaches this case's verdict — see [Evidence a
 
 | Evidence | Cases | What it needs |
 |----------|-------|---------------|
-| [L0 — binary only](by-evidence/l0.md) | 69 | Detectable from the shipped binary's symbol table alone. |
+| [L0 — binary only](by-evidence/l0.md) | 68 | Detectable from the shipped binary's symbol table alone. |
 | [L1 — + debug info](by-evidence/l1.md) | 77 | Needs debug information on top of the binary. |
-| [L2 — + headers](by-evidence/l2.md) | 53 | Needs the public headers parsed alongside the binary. |
+| [L2 — + headers](by-evidence/l2.md) | 54 | Needs the public headers parsed alongside the binary. |
 | [L3 — + build evidence](by-evidence/l3.md) | 11 | Needs the build's own configuration and flags. |
 | [L4 — + source replay](by-evidence/l4.md) | 5 | Needs the sources replayed through a source-level ABI extraction. |
 | [L5 — + source graph](by-evidence/l5.md) | 17 | Needs the derived semantic source graph. |
@@ -198,7 +198,7 @@ The weakest evidence source that reaches this case's verdict — see [Evidence a
 | [case80_pimpl_shared_to_unique](case80_pimpl_shared_to_unique.md) | Pimpl Alias Switched from `shared_ptr` to `unique_ptr` | 🔴 BREAKING | Breaking |
 | [case81_serialization_tag_reassigned](case81_serialization_tag_reassigned.md) | Serialization Tag ID Reassigned | 🔴 BREAKING | Breaking |
 | [case82_sycl_overload_set_removed](case82_sycl_overload_set_removed.md) | SYCL Overload Set Removed (DPC++ Build Withdrawn) | 🔴 BREAKING | Breaking |
-| [case83_cpu_dispatch_isa_dropped](case83_cpu_dispatch_isa_dropped.md) | CPU-dispatch ISA family dropped | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case83_cpu_dispatch_isa_dropped](case83_cpu_dispatch_isa_dropped.md) | CPU-dispatch ISA family dropped | 🔴 BREAKING | Breaking |
 | [case84_bundle_soname_skew](case84_bundle_soname_skew.md) | Multi-Library Bundle SONAME Skew | 🔴 BREAKING | Bundle (Multi-library) |
 | [case85_internal_template_signature_changed](case85_internal_template_signature_changed.md) | Internal Template Signature Changed | 🔴 BREAKING | Breaking |
 | [case86_tag_struct_renamed](case86_tag_struct_renamed.md) | Tag Struct Renamed (empty class re-mangling) | 🔴 BREAKING | Breaking |

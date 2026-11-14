@@ -26,6 +26,7 @@
 | Coverage gap | Detector 'python_ext' disabled: missing CPython extension metadata |
 | Coverage gap | Detector 'python_api' disabled: missing Python API surface (no .pyi stub recovered) |
 | Coverage gap | Detector 'sycl' disabled: missing SYCL runtime (PI plugin) metadata; SYCL header APIs are covered by header parsing, not this detector |
+| Coverage gap | Detector 'unnamed_types' disabled: baseline binary export table not completely read |
 | Coverage gap | Detector 'vtable_layout' disabled: missing DWARF/header type metadata on one side (inheritance) |
 | Coverage gap | Detector 'advanced_dwarf' disabled: missing DWARF advanced metadata |
 | Coverage gap | No header/AST data; type-level changes may be missed |
@@ -89,7 +90,7 @@
 | … unresolved relevance | 0 |
 | … deduplicated | 0 |
 
-**Not evaluated:** 9 detector(s) — `fingerprint_renames`, `kabi`, `pe`, `macho`, `python_ext`, `python_api`, … and 3 more
+**Not evaluated:** 10 detector(s) — `fingerprint_renames`, `kabi`, `pe`, `macho`, `python_ext`, `python_api`, … and 4 more
 
 
 ## Related review groups

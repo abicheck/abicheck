@@ -9,7 +9,7 @@ uncovered gap in the report and the ledger
 (``abiforge.model.space.edit_classes_without_operator``), never a class that is
 left out. ``tests/test_edit_corpus_edit_axis.py`` checks both directions.
 
-The model splits two constructs:
+The model splits three constructs:
 
 ``struct`` (record layout)
     A member edit is described by *operation* x *position* x *effect*:
@@ -35,6 +35,13 @@ The model splits two constructs:
     a base virtual or non-virtual, change a base's own layout, change a
     base's access.
 
+``function`` (a declared function and its exported symbol)
+    Signature edits (each parameter, the return type, variadic-ness, calling
+    convention, exception specification, attributes, language linkage),
+    definition edits (inline/out of line, body imports, overloads), the
+    function set (added, removed, renamed, declared-vs-exported) and the
+    exporting symbol (binding, visibility, version, type).
+
 Every other construct is not split: its single class ``any`` is the whole
 construct (``UNSPLIT``). That is a statement about the model's resolution,
 not about the generator: such a construct is covered by any one of its
@@ -52,6 +59,9 @@ class EditClass:
     construct: str
     name: str
     doc: str
+    # The languages the edit exists in, when narrower than its construct's
+    # (an overload or a default argument has no C spelling).
+    langs: frozenset[str] | None = None
 
     @property
     def id(self) -> str:
@@ -119,6 +129,7 @@ _STRUCT_OTHER: tuple[tuple[str, str], ...] = (
     ("record_align_change", "the record's own alignment changes (alignas/aligned)"),
     ("record_kind_change", "struct becomes union or the reverse"),
     ("record_opaque", "the record's definition is withdrawn (made opaque)"),
+    ("record_defined", "an opaque record's definition becomes visible"),
     ("record_removed", "the record is removed from the interface"),
     ("record_added", "a new record is added to the interface"),
     (
@@ -155,10 +166,105 @@ INHERITANCE_EDIT_CLASSES: tuple[EditClass, ...] = tuple(
     )
 )
 
+# --- function: a declared function and the symbol it exports ----------------
+#
+# A function is its declaration (return type, parameter list, variadic-ness,
+# calling convention, exception specification, attributes, language linkage),
+# its definition (inline or out of line, what its body imports) and the ELF
+# symbol that exports it (name, binding, visibility, version, type).
+
+_CXX_ONLY = frozenset({"c++"})
+_CXX_FUNCTION_EDITS = frozenset(
+    {
+        "default_argument_changed",
+        "exception_spec_change",
+        "language_linkage_change",
+        "overload_added",
+    }
+)
+
+FUNCTION_EDIT_CLASSES: tuple[EditClass, ...] = tuple(
+    EditClass("function", n, d, _CXX_ONLY if n in _CXX_FUNCTION_EDITS else None)
+    for n, d in (
+        # signature: parameters
+        ("param_added", "a parameter is added"),
+        ("param_removed", "a parameter is removed"),
+        (
+            "param_retyped",
+            "a parameter's type changes (value class, size or va_list-ness)",
+        ),
+        ("param_pointer_level", "a parameter gains or loses a level of indirection"),
+        ("param_pointee_cv", "a parameter's pointee gains or loses const/volatile"),
+        ("param_renamed", "a parameter is renamed, its type unchanged"),
+        (
+            "param_qualifier_change",
+            "a parameter's top-level qualifier (const, restrict) changes; the "
+            "function type and its symbol do not",
+        ),
+        ("params_reordered", "two parameters of different types swap places"),
+        (
+            "default_argument_changed",
+            "a parameter's default argument is added, removed or changed (C++)",
+        ),
+        # signature: return
+        ("return_retyped", "the return type changes"),
+        ("return_pointer_level", "the return type gains or loses indirection"),
+        ("return_pointee_cv", "the returned pointee gains or loses const/volatile"),
+        # signature: the call itself
+        ("variadic_change", "the function becomes variadic or stops being variadic"),
+        ("calling_convention_change", "the calling convention changes"),
+        ("exception_spec_change", "the exception specification changes (C++)"),
+        ("attribute_change", "a contract attribute (nonnull, ...) is added or removed"),
+        (
+            "language_linkage_change",
+            'the declaration gains or loses extern "C" (C++), renaming its symbol',
+        ),
+        # definition
+        ("became_inline", "an exported function becomes inline in the header"),
+        ("became_out_of_line", "an inline function gets an exported definition"),
+        (
+            "body_change",
+            "the body changes what the library imports or how it is relocated, "
+            "the declaration unchanged",
+        ),
+        ("overload_added", "an overload is added beside the function (C++)"),
+        # the interface's function set
+        ("function_added", "a function is added to the interface"),
+        ("function_removed", "a function is removed from the interface"),
+        ("function_renamed", "a function's symbol name changes"),
+        (
+            "export_declaration_mismatch",
+            "a function is declared but not exported, or exported but not declared",
+        ),
+        # the exporting symbol
+        ("binding_change", "the symbol's binding changes (global, weak)"),
+        (
+            "visibility_change",
+            "the symbol's visibility changes (default, protected, hidden)",
+        ),
+        ("version_change", "the symbol's version node changes"),
+        ("symbol_type_change", "the symbol's type changes (function, ifunc, unique)"),
+        (
+            "declaration_text_only",
+            "the header text changes (comments, declaration order) and no "
+            "declaration does",
+        ),
+    )
+)
+
 EDIT_MODEL: dict[str, tuple[EditClass, ...]] = {
     "struct": STRUCT_EDIT_CLASSES,
     "inheritance": INHERITANCE_EDIT_CLASSES,
+    "function": FUNCTION_EDIT_CLASSES,
 }
+
+
+def edit_langs(construct: str, name: str) -> frozenset[str] | None:
+    """The languages edit class *name* of *construct* is limited to, or None."""
+    for c in EDIT_MODEL.get(construct, ()):
+        if c.name == name:
+            return c.langs
+    return None
 
 
 def model_classes(construct: str) -> tuple[str, ...]:
@@ -175,6 +281,7 @@ __all__ = [
     "ANY_EDIT",
     "EDIT_MODEL",
     "EditClass",
+    "FUNCTION_EDIT_CLASSES",
     "IMPOSSIBLE_MEMBER_EDITS",
     "INHERITANCE_EDIT_CLASSES",
     "LAYOUT_EFFECTS",
@@ -182,5 +289,6 @@ __all__ = [
     "MEMBER_POSITIONS",
     "STRUCT_EDIT_CLASSES",
     "all_model_classes",
+    "edit_langs",
     "model_classes",
 ]

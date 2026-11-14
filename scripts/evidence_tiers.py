@@ -252,7 +252,10 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "inline_namespace_moved": "L0",
     "inline_namespace_version_bumped": "L0",
     "tag_type_renamed": "L0",
-    "cpu_dispatch_isa_dropped": "L0",
+    # The roll-up is seen in the export table alone (L0), but its BREAKING
+    # grade needs the removed members' public-header declarations (L2);
+    # binary-only it reads COMPATIBLE_WITH_RISK, the wrong verdict.
+    "cpu_dispatch_isa_dropped": "L2",
     "sycl_overload_set_removed": "L0",
     "experimental_graduated": "L0",
     "experimental_removed_without_replacement": "L0",

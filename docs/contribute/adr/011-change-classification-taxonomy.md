@@ -14,6 +14,19 @@ so "typically intentional during major releases" is a policy question
 (reclassify the kind in policy), not a reason to score a load failure as a
 risk. A move that keeps every old version stays the compatible
 `SYMBOL_VERSION_ALIAS_CHANGED`.
+Amendment (2026-11-14): `SOURCE_LEVEL_KIND_CHANGED` (struct ↔ class with
+the same members) moves from API_BREAK to COMPATIBLE. Rule 2 asks whether
+source fails to compile against the new headers; a class-key change alone
+does not (a mismatched class-key in a forward or elaborated declaration is at
+most a warning, `-Wmismatched-tags`), and it changes neither layout nor
+Itanium mangling. Each real consequence already has its own, correctly graded
+kind: default member/base access (`FIELD_ACCESS_CHANGED`,
+`METHOD_ACCESS_CHANGED`, `BASE_CLASS_ACCESS_NARROWED`), and on MSVC the
+class-key is part of the decorated name (`U` vs `V`), so every exported
+function mentioning the type shows as a PE export removal (BREAKING) plus
+addition. Grading the keyword itself API_BREAK double-counted those
+consequences and flagged harmless edits; the `sdk_vendor` override for it is
+removed as redundant (ADR-010).
 **Decision maker:** Nikolay Petrov
 
 ---
@@ -95,6 +108,7 @@ When classifying a new `ChangeKind`, apply these rules in order:
 | `FIELD_BECAME_CONST` etc. | COMPATIBLE | Not detected | Field qualifiers are informational; do not affect binary layout. |
 | `SONAME_BUMP_RECOMMENDED` | COMPATIBLE | Not detected | Policy advisory: breaking changes present but SONAME not bumped. The breaking changes themselves carry the BREAKING verdict; this is informational guidance. |
 | `SONAME_BUMP_UNNECESSARY` | COMPATIBLE | Not detected | Policy advisory: SONAME bumped without breaking changes. Informational — forces unnecessary relinking. |
+| `SOURCE_LEVEL_KIND_CHANGED` | COMPATIBLE | Reported (ABICC) | `struct` ↔ `class` with the same members: same layout and Itanium mangling, source still compiles. Access and MSVC-mangling consequences are reported by their own kinds. (Amended 2026-11-14; was API_BREAK.) |
 | `VERSION_SCRIPT_MISSING` | COMPATIBLE | Not detected | Quality advisory: library exports symbols without a version script. No ABI break, but makes future versioning harder. |
 
 #### API_BREAK tier — source-level only
@@ -106,7 +120,6 @@ When classifying a new `ChangeKind`, apply these rules in order:
 | `PARAM_DEFAULT_VALUE_REMOVED` | Callers relying on the default must now provide the argument. |
 | `FUNC_BECAME_INLINE` | Symbol may vanish from DSO if compiler fully inlines it — needs manual review. |
 | `CONSTANT_CHANGED` / `CONSTANT_REMOVED` | `#define` values are compile-time only — semantic source-level change. |
-| `SOURCE_LEVEL_KIND_CHANGED` | `struct` ↔ `class` keyword change — binary-identical layout, source-level difference only. |
 
 #### COMPATIBLE_WITH_RISK tier
 
@@ -127,7 +140,7 @@ are caught separately by `ENUM_MEMBER_VALUE_CHANGED`.
 Under the `sdk_vendor` policy profile (ADR-010), the following API_BREAK
 kinds are downgraded to COMPATIBLE: `ENUM_MEMBER_RENAMED`,
 `FIELD_RENAMED`, `PARAM_RENAMED`, `METHOD_ACCESS_CHANGED`,
-`FIELD_ACCESS_CHANGED`, `SOURCE_LEVEL_KIND_CHANGED`,
+`FIELD_ACCESS_CHANGED`,
 `REMOVED_CONST_OVERLOAD`, `PARAM_DEFAULT_VALUE_REMOVED`.
 
 ### Adding new ChangeKinds

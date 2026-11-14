@@ -750,6 +750,33 @@ _SHAPES = (
         touches=("x.rmpad",),
     ),
     _op(
+        "default_argument_added",
+        ("x.over",),
+        _replace("x.over", "int pick(int a);", "int pick(int a = 3);"),
+        "a parameter gains a default argument: the symbol, the signature and "
+        "every existing call are unchanged (the default is substituted at the "
+        "call site), so nothing breaks; a changed default would only reach "
+        "recompiled callers, which source (L4) evidence reports, not headers",
+        expected=frozenset(),
+        verdict_min="NO_CHANGE",
+        verdict_max="COMPATIBLE",
+    ),
+    _op(
+        "func_became_extern_c",
+        ("x.helper",),
+        _replace(
+            "x.helper",
+            "int enp_a(int a);",
+            'extern "C" int enp_a(int a);',
+        ),
+        'the declaration gains extern "C": the function is now exported as '
+        "enp_a instead of its mangled name, so every existing binary's import "
+        "of the mangled name is unresolved",
+        expected=frozenset({"FUNC_LANGUAGE_LINKAGE_CHANGED"}),
+        rules=(_binary_mangled("FUNC_LANGUAGE_LINKAGE_CHANGED"),),
+        **_BINARY,
+    ),
+    _op(
         "source_only_export_added",
         ("x.helper",),
         _replace(

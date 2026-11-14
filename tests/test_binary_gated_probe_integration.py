@@ -188,11 +188,6 @@ PROBES: dict[str, Probe] = {
         "int S::g() { return x; }\nint S::g() const { return x; }",
         "int S::g() { return x; }",
     ),
-    "source_level_kind_changed": _inline(
-        "struct S { int a; };\nint use(S*);",
-        "class S { public: int a; };\nint use(S*);",
-        "int use(S* s) { return s->a; }",
-    ),
     "tag_type_renamed": Probe(case="case86_tag_struct_renamed"),
     "type_removed": _inline(
         'struct S { int a; };\nextern "C" int use(S*);',
@@ -371,7 +366,6 @@ REACHED_BINARY_ONLY: frozenset[str] = frozenset(
         "mandatory_template_param_added",
         "method_access_changed",
         "removed_const_overload",
-        "source_level_kind_changed",
         "tag_type_renamed",
         "type_removed",
         "typedef_removed",

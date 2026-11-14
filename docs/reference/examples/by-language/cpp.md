@@ -36,7 +36,7 @@ _103 case(s)._ [← back to all examples](../index.md)
 | [case80_pimpl_shared_to_unique](../case80_pimpl_shared_to_unique.md) | Pimpl Alias Switched from `shared_ptr` to `unique_ptr` | 🔴 BREAKING | Breaking |
 | [case81_serialization_tag_reassigned](../case81_serialization_tag_reassigned.md) | Serialization Tag ID Reassigned | 🔴 BREAKING | Breaking |
 | [case82_sycl_overload_set_removed](../case82_sycl_overload_set_removed.md) | SYCL Overload Set Removed (DPC++ Build Withdrawn) | 🔴 BREAKING | Breaking |
-| [case83_cpu_dispatch_isa_dropped](../case83_cpu_dispatch_isa_dropped.md) | CPU-dispatch ISA family dropped | 🟡 COMPATIBLE_WITH_RISK | Risk |
+| [case83_cpu_dispatch_isa_dropped](../case83_cpu_dispatch_isa_dropped.md) | CPU-dispatch ISA family dropped | 🔴 BREAKING | Breaking |
 | [case85_internal_template_signature_changed](../case85_internal_template_signature_changed.md) | Internal Template Signature Changed | 🔴 BREAKING | Breaking |
 | [case86_tag_struct_renamed](../case86_tag_struct_renamed.md) | Tag Struct Renamed (empty class re-mangling) | 🔴 BREAKING | Breaking |
 | [case87_default_template_arg_changed](../case87_default_template_arg_changed.md) | Default Template Argument Changed | 🔴 BREAKING | Breaking |

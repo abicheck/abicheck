@@ -49,9 +49,15 @@ from collections.abc import Callable
 from functools import partial
 from typing import TYPE_CHECKING
 
+from abicheck.compare.overload_signature import format_overload_key, overload_keys
+
 from .compare.naming_conventions import (
     _INTERNAL_TEMPLATE_NAMESPACES as _INTERNAL_TEMPLATE_NAMESPACES,
     INTERNAL_TEMPLATE_LEAK,
+)
+from .compare.template_pattern_arity import (
+    collect_arity_observations,
+    comparable_min_arities,
 )
 from .compare.template_surface import (
     InstantiationSig,
@@ -76,7 +82,6 @@ from .model.execution_cache import memoized
 from .model.graph_identity import _normalize_graph_identity
 from .model.name_heuristics import LazyFactInput
 from .model.source_contract_evidence import (
-    ContractEvidenceByName,
     has_observed_source_contract_evidence,
     public_reachability,
 )
@@ -694,7 +699,7 @@ def detect_internal_template_leaks(
 
 
 @memoized(maxsize=1 << 16)
-def _cpo_function_stem(qname: str) -> str:
+def function_overload_stem(qname: str) -> str:
     """A function's CPO stem: the reduction `_func_names` compares on, named
     once so the cross-kind join keys on exactly what the comparison uses.
 
@@ -740,7 +745,7 @@ def detect_cpo_kind_changed(
         for f in funcs:
             qname = name_of(f)
             if qname:
-                out.add(_cpo_function_stem(qname))
+                out.add(function_overload_stem(qname))
         return out
 
     def _var_names(snap: AbiSnapshot, variables: list[Variable]) -> set[str]:
@@ -761,7 +766,7 @@ def detect_cpo_kind_changed(
     # compare/template_surface.py. Functions *and* variables: this detector
     # compares one against the other, so an asymmetry in either is enough.
     old_fs, old_vs, new_fs, new_vs = reconciled_cpo_surfaces(
-        old, new, identity=partial(_cpo_id, function_stem=_cpo_function_stem)
+        old, new, identity=partial(_cpo_id, function_stem=function_overload_stem)
     )
     old_funcs = _func_names(old, old_fs)
     old_vars = _var_names(old, old_vs)
@@ -840,34 +845,8 @@ def detect_overload_set_rerouted(
         name_of = qualified_name_lookup(snap)
         out: dict[str, list[Function]] = defaultdict(list)
         for f in funcs:
-            qname = name_of(f)
-            stem = _strip_template_args(qname)
-            out[stem].append(f)
+            out[function_overload_stem(name_of(f))].append(f)
         return out
-
-    def _overload_key(f: Function) -> tuple[object, ...]:
-        # An overload is distinguished by its parameter types *and* its
-        # implicit-object cv/ref qualifiers. Two member functions f(int) and
-        # f(int) const are separate overloads sharing a parameter-type tuple;
-        # keying on params alone would hide the removal/addition of one of them
-        # in a mixed change (e.g. {f(int), f(int) const} -> {f(int), f(long)}).
-        return (
-            tuple(p.type for p in f.params),
-            f.is_const,
-            f.is_volatile,
-            f.ref_qualifier,
-        )
-
-    def _fmt_key(key: tuple[object, ...]) -> str:
-        params, is_const, is_volatile, ref_qual = key
-        sig = "(" + ", ".join(params) + ")"  # type: ignore[arg-type]
-        if is_const:
-            sig += " const"
-        if is_volatile:
-            sig += " volatile"
-        if ref_qual:
-            sig += f" {ref_qual}"
-        return sig
 
     old_by_stem, new_by_stem = (
         _by_stem(snap, funcs)
@@ -878,8 +857,8 @@ def detect_overload_set_rerouted(
 
     changes: list[Change] = []
     for stem in sorted(set(old_by_stem) & set(new_by_stem)):
-        old_sigs = {_overload_key(f) for f in old_by_stem[stem]}
-        new_sigs = {_overload_key(f) for f in new_by_stem[stem]}
+        # Export-table stubs carry no params: key them on their mangling.
+        old_sigs, new_sigs = overload_keys(old_by_stem[stem], new_by_stem[stem])
         removed = old_sigs - new_sigs
         added = new_sigs - old_sigs
         if not (removed and added):
@@ -902,8 +881,8 @@ def detect_overload_set_rerouted(
                 symbol=stem,
                 name=stem,
                 detail=f"{len(removed)} overload(s) removed and {len(added)} added in the same revision",
-                old_value=str(sorted(_fmt_key(k) for k in old_sigs)),
-                new_value=str(sorted(_fmt_key(k) for k in new_sigs)),
+                old_value=str(sorted(format_overload_key(k) for k in old_sigs)),
+                new_value=str(sorted(format_overload_key(k) for k in new_sigs)),
                 # ADR-044 D1 (Codex review): _by_stem above filters to
                 # Visibility.PUBLIC, so this finding's mere existence already
                 # proves its subject is public — same reliable-signal tagging as
@@ -922,117 +901,38 @@ def detect_overload_set_rerouted(
 # ---------------------------------------------------------------------------
 
 
-def _count_top_level_template_args(name: str) -> int | None:
-    """Count the top-level template arguments in ``name<...>``; ``None`` with no
-    ``<``. Commas inside ``(...)``/``[...]`` (a function type's parameters) and
-    the ``>`` of a ``->`` arrow are not argument separators.
-
-    ``Foo<int, std::pair<int, char>>`` → 2, ``std::function<void(int, int)>`` → 1.
-    """
-    if "<" not in name:
-        return None
-    depth = group = args = 0
-    for i, ch in enumerate(name):
-        if ch == ">" and name[i - 1 : i] == "-":
-            continue
-        if ch in "([":
-            group += 1
-        elif ch in ")]":
-            group -= 1
-        elif ch == "<":
-            depth += 1
-        elif ch == ">":
-            depth = max(depth - 1, 0)
-        elif ch == "," and depth == 1 and group == 0:
-            args += 1
-    return args + 1
-
-
 def detect_mandatory_template_param_added(
     old: AbiSnapshot,
     new: AbiSnapshot,
 ) -> list[Change]:
-    """Heuristic: report templates whose minimum effective arg count grew.
+    """Report templates whose number of mandatory parameters grew.
 
-    Without true parameter-pack metadata we cannot perfectly distinguish
-    "added defaulted param" from "added mandatory param". The heuristic:
-    for each stem, take the minimum arity observed across all
-    instantiations of that stem in old vs new. If the new minimum is
-    strictly greater than the old minimum, emit the finding.
-
-    Conservative — does NOT fire when the minimum stays the same (so an
-    added defaulted parameter that keeps at least one ``Foo<X>``
-    instantiation visible is invisible to this detector). The opposite
-    miss (false positive when the library drops the smallest-arity
-    instantiation) is documented as a known limitation; the symbol
-    removal is also caught by ``func_removed`` so the user does see a
-    finding even when this detector misses.
+    Two kinds of evidence, compared only like with like
+    (``compare.template_pattern_arity.comparable_min_arities``): a template
+    pattern's count of parameters without a default, when the backend records
+    defaults, and the smallest argument count among a stem's instantiations.
+    Pattern evidence wins when both sides have it (a rising instantiation
+    minimum can also mean the smallest instantiation was dropped); a stem
+    with no shared evidence kind reports nothing. Keys are qualified names.
     """
-    from .model import ScopeOrigin
-
-    def _arities(
-        snap: AbiSnapshot, funcs: list[Function]
-    ) -> tuple[dict[str, set[int]], ContractEvidenceByName, dict[str, set[str]]]:
-        out: dict[str, set[int]] = defaultdict(set)
-        # Which kind of declaration contributed each stem's observations.
-        # This detector deliberately pools function templates and class
-        # templates under one stem, so the kind is a property of the
-        # *finding*, not of the ChangeKind -- see the entity resolution
-        # below (Codex review, PR #1284).
-        sources: dict[str, set[str]] = defaultdict(set)
-        # ADR-044 (Codex review): tracks, per stem, whether *any* contributing
-        # observation is reliably public — a Visibility.PUBLIC function, or a
-        # type explicitly scoped to the public-header set (ADR-024's opt-in
-        # ScopeOrigin.PUBLIC_HEADER, from the public-header set).
-        # Without that flag every type's origin is ScopeOrigin.UNKNOWN, so
-        # this degrades to "public only if a public function contributed"
-        # automatically for the common case.
-        is_public = ContractEvidenceByName()  # judged only for a reported stem
-        name_of, hdr = qualified_name_lookup(snap), bool(snap.from_headers)
-        for f in funcs:
-            qname = name_of(f)
-            if "<" not in qname:
-                continue
-            stem = _strip_template_args(qname)
-            arity = _count_top_level_template_args(qname)
-            if arity is not None:
-                out[stem].add(arity)
-                # ADR-084: an export-only function proves no public contract.
-                is_public.add(stem, f, header_parsed=hdr)
-                sources[stem].add("function")
-        # Types are also indexed.
-        for t in snap.declarations.types:
-            if "<" not in t.name:
-                continue
-            stem = _strip_template_args(t.name)
-            arity = _count_top_level_template_args(t.name)
-            if arity is not None:
-                out[stem].add(arity)
-                sources[stem].add("type")
-                if t.origin == ScopeOrigin.PUBLIC_HEADER:
-                    is_public.confirm(stem)
-        return out, is_public, sources
-
     reconciled_old, reconciled_new = reconciled_public_functions(old, new)
-    old_ar, old_public, old_sources = _arities(old, reconciled_old)
-    new_ar, new_public, new_sources = _arities(new, reconciled_new)
+    old_obs = collect_arity_observations(old, reconciled_old)
+    new_obs = collect_arity_observations(new, reconciled_new)
 
     changes: list[Change] = []
-    for stem in sorted(set(old_ar) & set(new_ar)):
-        old_min = min(old_ar[stem])
-        new_min = min(new_ar[stem])
-        if new_min <= old_min:
+    for stem in sorted(set(old_obs.arities) & set(new_obs.arities)):
+        # Pattern vs pattern, instantiation vs instantiation -- never mixed.
+        mins = comparable_min_arities(old_obs, new_obs, stem)
+        if mins is None or mins[1] <= mins[0]:
             continue
-        # ADR-044 D1 / ADR-084: tagged public only when a contributing
-        # observation had header/source evidence (see _arities above).
-        subject_is_public = old_public.has(stem) or new_public.has(stem)
-        # The entity this finding is about, when the evidence says so
-        # unambiguously. A stem observed only as a class template is a type
-        # finding and belongs under `output.view show=types`; one observed only
-        # through function templates is a function finding. A stem both
-        # contributed to is genuinely both, so it states nothing and falls
-        # back to the kind's declared entity rather than guessing.
-        contributing = old_sources.get(stem, set()) | new_sources.get(stem, set())
+        old_min, new_min = mins
+        # ADR-044 D1 / ADR-084: public only with header/source evidence.
+        subject_is_public = old_obs.is_public.has(stem) or new_obs.is_public.has(stem)
+        # A stem seen only as a class (function) template is a type (function)
+        # finding; one both contributed to falls back to the kind's entity.
+        contributing = old_obs.sources.get(stem, set()) | new_obs.sources.get(
+            stem, set()
+        )
         entity_discriminator = (
             next(iter(contributing)) if len(contributing) == 1 else None
         )
@@ -1202,18 +1102,18 @@ def detect_missing_instantiations(
     for fn in new.declarations.functions:
         if not is_public_export(fn):
             continue
-        qname = _strip_param_signature(new_name_of(fn))
-        if _looks_like_template_instantiation(qname):
-            surviving_stems.add(_strip_template_args(qname))
+        full = new_name_of(fn)
+        if _looks_like_template_instantiation(_strip_param_signature(full)):
+            surviving_stems.add(function_overload_stem(full))
     for fn in old.declarations.functions:
         if not is_public_export(fn):
             continue
         if fn.mangled in new_mangled:
             continue
-        qname = _strip_param_signature(old_name_of(fn))
-        if not _looks_like_template_instantiation(qname):
+        full = old_name_of(fn)
+        if not _looks_like_template_instantiation(_strip_param_signature(full)):
             continue
-        stem = _strip_template_args(qname)
+        stem = function_overload_stem(full)  # drops the leading return type
         if stem not in surviving_stems:
             continue
         findings.append(

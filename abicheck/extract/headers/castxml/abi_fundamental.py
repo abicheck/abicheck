@@ -50,6 +50,7 @@ __all__ = [
     "castxml_type_abi_fact",
     "plain_char_is_unsigned",
     "probe_plain_char_unsigned",
+    "probe_target_triple",
 ]
 
 _SIGNED = FundamentalEncoding.SIGNED
@@ -174,3 +175,26 @@ def probe_plain_char_unsigned(
     """:func:`plain_char_is_unsigned` for the compiler a header parse names."""
     cc_bin, _cc_id = _resolve_compiler_binary(compiler, gcc_path, gcc_prefix)
     return plain_char_is_unsigned(shutil.which(cc_bin) or cc_bin, tuple(option_tokens))
+
+
+def probe_target_triple(
+    compiler: str,
+    gcc_path: str | None,
+    gcc_prefix: str | None,
+    option_tokens: tuple[str, ...],
+) -> str | None:
+    """The target triple castxml parses for: an explicit ``--target`` among
+    the options, else the named compiler's ``-dumpmachine``; ``None`` for an
+    MSVC compiler (no such probe) or when the probe fails."""
+    tokens = list(option_tokens)
+    for i, tok in enumerate(tokens):
+        if tok.startswith("--target="):
+            return tok.split("=", 1)[1] or None
+        if tok in ("-target", "--target") and i + 1 < len(tokens):
+            return tokens[i + 1]
+    cc_bin, cc_id = _resolve_compiler_binary(compiler, gcc_path, gcc_prefix)
+    if cc_id == "msvc":
+        return None
+    from ..sysinc import _probe_compiler_triple
+
+    return _probe_compiler_triple(shutil.which(cc_bin) or cc_bin)

@@ -644,6 +644,19 @@ def _record_is_confirmed_public_seed(
     )
 
 
+def _public_header_typedef_seeds(snap: AbiSnapshot) -> set[str]:
+    """Typedefs declared in a public header: public API even when no exported
+    signature names them, under a bare or a qualified key (ADR-015)."""
+    d = snap.declarations
+    return {
+        key
+        for key, origin in (snap.typedef_origins or {}).items()
+        if origin is ScopeOrigin.PUBLIC_HEADER
+        and (key in d.typedefs or key in d.typedefs_qualified)
+        and not INTERNAL_NAMESPACE_SEED_VETO.matches(key)
+    }
+
+
 def _extend_unknown_origin_through_closure(
     refs: ReferencedIdentifiers,
     snap: AbiSnapshot,
@@ -666,14 +679,8 @@ def _extend_unknown_origin_through_closure(
 def _resolve_public_surface_from_snapshot(snap: AbiSnapshot) -> PublicSurface:
     """Computes *snap*'s public-ABI surface from
     :func:`~abicheck.compare.surface_graph.referenced_identifiers_by_node`
-    instead of ``surface.py``'s old, independent closure-walk implementation.
-    Despite this module's own name, the resolution below never reads
-    ``snap.surface_graph`` itself -- see this function's own body and
-    ``referenced_identifiers_by_node``'s docstring for why (CodeRabbit
-    review, PR #979: an earlier revision of this function *did* read the
-    persisted graph, and was renamed off ``_via_graph`` once that design
-    was superseded -- see this module's own top-of-file docstring for the
-    full history).
+    instead of ``surface.py``'s old closure walk; it never reads
+    ``snap.surface_graph`` (PR #979; see the module docstring for history).
 
     Public roots are functions/variables ``model/surface_facts.
     in_public_surface`` admits. The
@@ -702,11 +709,8 @@ def _resolve_public_surface_from_snapshot(snap: AbiSnapshot) -> PublicSurface:
     # Seed roots from public symbols; collect the type names they touch.
     seed_types, has_public = _seed_public_roots(snap, surface, refs)
 
-    # A named enum whose declaration textually came from a parsed header is
-    # part of the public surface even when no function/variable signature
-    # references the enum type by name -- see ``surface.py``'s original
-    # docstring (preserved in this migration's git history) for the full
-    # rationale and the case20 regression it guards.
+    # A named enum from a parsed header is public even when no signature
+    # names it (case20; see ``surface.py``'s original docstring in history).
     seed_types |= {
         en.name
         for en in snap.declarations.enums
@@ -724,6 +728,7 @@ def _resolve_public_surface_from_snapshot(snap: AbiSnapshot) -> PublicSurface:
         for rec in snap.declarations.types
         if _record_is_confirmed_public_seed(rec, record_identities)
     }
+    seed_types |= _public_header_typedef_seeds(snap)
     collect_header_origin_unknown_types(
         snap,
         surface,

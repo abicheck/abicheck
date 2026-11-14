@@ -3819,20 +3819,16 @@
    ]
   },
   "case83_cpu_dispatch_isa_dropped": {
-   "abi_break": false,
-   "api_break": false,
+   "abi_break": true,
+   "api_break": true,
    "bad_practice": false,
-   "category": "risk",
-   "description": "AVX-512 ISA tier dropped: every *_avx512_* symbol removed across all algorithms. Dispatcher-using callers unaffected; ISA-pinned callers break. Reported as one grouped CPU_DISPATCH_ISA_DROPPED finding (RISK_KINDS).",
-   "expected": "COMPATIBLE_WITH_RISK",
+   "category": "breaking",
+   "description": "AVX-512 ISA tier dropped: every *_avx512 symbol removed across all algorithms while the avx2/sse42/scalar siblings survive. The removed specialisations are declared in the public header, so a consumer that calls one directly no longer loads: BREAKING. Reported as one grouped CPU_DISPATCH_ISA_DROPPED finding; the roll-up stays COMPATIBLE_WITH_RISK only when every removed member is export-only (declared in no header).",
+   "expected": "BREAKING",
    "expected_kinds": [
     "cpu_dispatch_isa_dropped"
    ],
-   "known_gap": "macOS Mach-O symbol evidence does not preserve the ELF-style ISA-dispatch grouping signal for this fixture; the nightly reports BREAKING instead of COMPATIBLE_WITH_RISK. Linux remains the blocking detector lane.",
-   "known_gap_platforms": [
-    "macos"
-   ],
-   "min_evidence": "L0",
+   "min_evidence": "L2",
    "platforms": [
     "linux",
     "macos",

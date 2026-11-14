@@ -55,6 +55,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Generic, TypeVar
 
+from ..model.vocabulary import ScopeOrigin
 from .dto import SECTION_SCHEMA_VERSIONS
 
 __all__ = [
@@ -66,6 +67,7 @@ __all__ = [
     "EXPORT_READ",
     "EXTENSION_FACTS",
     "NOEXCEPT_UNOBSERVED",
+    "TYPEDEF_ORIGINS",
     "VOLATILE_CAPTURE_FACTS",
     "evidence_header_extras",
     "ExtensionFact",
@@ -447,6 +449,42 @@ BINARY_SHA256: ExtensionFact[str] = ExtensionFact(
     decode=_sha256_hex,
 )
 
+_TYPEDEF_ORIGINS = frozenset(
+    o.value for o in ScopeOrigin if o is not ScopeOrigin.UNKNOWN
+)
+
+
+def _typedef_origin_map(value: Any) -> dict[str, str]:
+    """A ``{typedef key: origin}`` map; ``unknown`` is never stored (an
+    absent key already reads as unknown)."""
+    if not isinstance(value, dict):
+        raise TypeError("expected a {typedef key: origin} map")
+    for key, origin in value.items():
+        if not isinstance(key, str) or not key:
+            raise TypeError(f"typedef_origins key {key!r} must be a non-empty str")
+        if origin not in _TYPEDEF_ORIGINS:
+            raise ValueError(f"typedef_origins {key!r}: unknown origin {origin!r}")
+    return {k: str(value[k]) for k in sorted(value)}
+
+
+#: Each typedef's ADR-015 header origin (``AbiSnapshot.typedef_origins``,
+#: extractor generation 62), classified by ``apply_provenance`` from the
+#: header backend's declaring header -- the provenance functions, records and
+#: variables already carry. Written on the ``declarations`` section when at
+#: least one typedef was classified. Absent (DWARF, no public-header set, an
+#: older snapshot), every typedef's origin is unknown: never private, so
+#: scoping keeps its findings with the ``no-provenance`` disclosure. An older
+#: reader that ignores it gives that same answer, so it is optional.
+TYPEDEF_ORIGINS: ExtensionFact[dict[str, str]] = ExtensionFact(
+    name="abicheck.typedef_origins",
+    section="declarations",
+    semantics=ReaderSemantics.OPTIONAL,
+    absent_reads_as="every typedef's header origin is unknown, never private",
+    owner="ADR-015",
+    encode=_typedef_origin_map,
+    decode=_typedef_origin_map,
+)
+
 #: Facts that record the capture, not the evidence: like ``build_id`` among
 #: ``evidence_digest.VOLATILE_CAPTURE_FIELDS``, they stay out of the ADR-062
 #: D16 evidence digest, so two dumps whose extracted facts agree keep one
@@ -486,5 +524,6 @@ EXTENSION_FACTS = ExtensionFactRegistry(
         CXX_TEMPLATE_DEFAULTS,
         EXPORT_READ,
         NOEXCEPT_UNOBSERVED,
+        TYPEDEF_ORIGINS,
     )
 )

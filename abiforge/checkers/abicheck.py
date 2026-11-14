@@ -123,7 +123,13 @@ def answer(old: AbiSnapshot, new: AbiSnapshot) -> tuple[str, frozenset[str]]:
     from abicheck.errors import AbicheckError
 
     try:
-        result = compare(old, new)
+        # ``abicheck compare`` always runs the pattern-verdict pass (ADR-068
+        # made it unconditional on the CLI); the bare ``checker.compare()``
+        # keeps it opt-in so a direct caller can score raw detector output.
+        # Mirror the CLI: without it, HANDLE_TYPE_CHANGED,
+        # OPAQUE_INVARIANT_BROKEN and every newly-introduced anti-pattern
+        # finding can never be reported, whatever the snapshots say.
+        result = compare(old, new, pattern_verdicts=True)
     except AbicheckError as exc:
         return REFUSED, frozenset({type(exc).__name__})
     return result.verdict.name, frozenset(c.kind.name for c in result.changes)

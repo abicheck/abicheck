@@ -32,6 +32,8 @@ from __future__ import annotations
 
 import re
 
+from abicheck.model.mangling_scheme import is_msvc_decorated, itanium_encoding
+
 from .demangle import demangle
 from .detector_registry import registry
 from .diff_helpers import make_change
@@ -39,7 +41,8 @@ from .elf_symbol_filter import is_abi_relevant_elf_symbol
 from .model import AbiSnapshot
 from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
-from .model.export_index import all_export_names, build_raw_export_index_from_elf
+from .model.export_index import read_export_platforms, snapshot_export_names
+from .model.export_read import ExportReadState
 
 # Itanium unnamed-type productions, both <unqualified-name> alternatives:
 #   closure-type  ::= Ul <lambda-sig> E [<number>] _
@@ -143,42 +146,79 @@ def _unnamed_kind(mangled: str) -> str | None:
     return None
 
 
+# MSVC spells an unnamed type inside a decorated (``?``-prefixed) name with a
+# compiler-chosen placeholder identifier: ``<lambda_1>``/``<lambda_<hash>>``
+# for a closure, ``<unnamed-type-x>`` for an unnamed class/struct/enum named
+# for linkage by a typedef/declarator, ``<unnamed-tag>``/``<unnamed-enum-x>``
+# otherwise. ``<`` can never occur in a C++ identifier, so a match is always
+# one of these structural placeholders, never part of a user's name.
+_MSVC_UNNAMED_PLACEHOLDERS: tuple[tuple[str, str], ...] = (
+    ("<lambda_", "lambda closure"),
+    ("<unnamed-type-", "unnamed struct/enum"),
+    ("<unnamed-tag>", "unnamed struct/enum"),
+    ("<unnamed-enum-", "unnamed struct/enum"),
+)
+
+
+def unnamed_type_kind(name: str) -> str | None:
+    """Human label when the exported linker spelling *name* embeds an unnamed
+    type, under any of the mangling schemes an export table can carry
+    (Itanium on ELF/Mach-O, MSVC on PE), else None."""
+    itanium = itanium_encoding(name)
+    if itanium is not None:
+        return _unnamed_kind(itanium)
+    if is_msvc_decorated(name):
+        for marker, label in _MSVC_UNNAMED_PLACEHOLDERS:
+            if marker in name:
+                return label
+    return None
+
+
 def _exported_symbol_names(snap: AbiSnapshot) -> set[str]:
-    """Exported, ABI-relevant, mangled C++ (``_Z``-prefixed) names on *snap*.
+    """Exported, ABI-relevant C++ linker spellings on *snap*, from every
+    export table it carries (ELF, PE, Mach-O).
 
     ADR-063 T7: sources its raw name set from
-    ``model.export_index.all_export_names`` (over
-    ``model.export_index.build_raw_export_index_from_elf``'s raw read) rather
-    than re-reading ``snap.elf.symbols`` itself — deliberately the *unfiltered
-    by version* projection, unlike most other export-index consumers: a
-    newly-introduced unnamed-type mangling must be caught on any exported
-    alias, versioned or not, so no ``is_default`` filter applies here. The
-    ``_Z``-prefix and ABI-relevance filtering stay local to this detector,
-    not part of the canonical index.
+    ``model.export_index.snapshot_export_names`` -- deliberately the
+    *unfiltered by version* projection: a newly-introduced unnamed-type
+    mangling must be caught on any exported alias, versioned or not. The
+    Itanium ABI-relevance filter (linker-reserved names, override thunks,
+    transitive runtime exports) applies to every Itanium spelling whatever
+    the container; an MSVC decorated name has no such runtime leakage.
     """
-    elf = snap.elf
-    if elf is None:
-        return set()
-    index = build_raw_export_index_from_elf(elf)
-    return {
-        name
-        for name in all_export_names(index)
-        if name.startswith("_Z") and is_abi_relevant_elf_symbol(name)
-    }
+    out: set[str] = set()
+    for name in snapshot_export_names(snap):
+        itanium = itanium_encoding(name)
+        if itanium is not None:
+            if is_abi_relevant_elf_symbol(itanium):
+                out.add(name)
+        elif is_msvc_decorated(name):
+            out.add(name)
+    return out
 
 
-@registry.detector(
-    "unnamed_types",
-    requires_support=lambda o, n: (
-        o.elf is not None and n.elf is not None,
-        "missing ELF metadata on one side",
-    ),
-)
+def _unnamed_types_support(old: AbiSnapshot, new: AbiSnapshot) -> tuple[bool, str]:
+    """Both sides carry an export table, and the baseline's was read in full.
+
+    "Newly introduced" is ``new - old``: an export the baseline read missed
+    (a partial or failed table, ADR-079) would read as introduced, so an
+    incomplete baseline disables the detector -- never an empty surface.
+    """
+    old_reads = read_export_platforms(old)
+    if not old_reads or not read_export_platforms(new):
+        return False, "missing binary export table on one side"
+    if any(state is not ExportReadState.COMPLETE for state in old_reads.values()):
+        return False, "baseline binary export table not completely read"
+    return True, ""
+
+
+@registry.detector("unnamed_types", requires_support=_unnamed_types_support)
 def _diff_unnamed_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     """Flag newly-introduced exported symbols that leak an unnamed type (D3).
 
-    ``requires_support`` already demands a captured ELF symbol table on *both*
-    sides, so an absent (header-only / parse-failed) baseline disables the
+    ``requires_support`` already demands a captured export table (ELF, PE or
+    Mach-O) on *both* sides, read in full on the baseline, so an absent
+    (header-only / parse-failed) or partially read baseline disables the
     detector rather than reaching here — a genuinely-empty captured baseline is
     a real "exported nothing before" surface, against which a new unnamed-type
     export is correctly newly introduced.
@@ -186,10 +226,11 @@ def _diff_unnamed_types(old: AbiSnapshot, new: AbiSnapshot) -> list[Change]:
     old_syms = _exported_symbol_names(old)
     changes: list[Change] = []
     for name in sorted(_exported_symbol_names(new) - old_syms):
-        label = _unnamed_kind(name)
+        label = unnamed_type_kind(name)
         if label is None:
             continue
-        pretty = demangle(name) or name
+        itanium = itanium_encoding(name)
+        pretty = (demangle(itanium) if itanium is not None else None) or name
         changes.append(
             make_change(
                 ChangeKind.UNNAMED_TYPE_IN_PUBLIC_ABI,

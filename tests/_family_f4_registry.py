@@ -301,7 +301,6 @@ HEURISTICS: dict[str, str] = {
     "abicheck.diff_types::_diff_overload_additions::affix.endswith:'{dtor}'": "own_format",
     "abicheck.diff_types_surface::_is_abi_surface_type::affix.startswith:STDLIB_TYPE_NAMESPACE_PREFIXES": "platform",
     "abicheck.diff_unnamed_types::<module>::re:'Ut\\\\d*_'": "grammar",
-    "abicheck.diff_unnamed_types::_exported_symbol_names::affix.startswith:'_Z'": "grammar",
     "abicheck.diff_unnamed_types::_unnamed_kind::affix.startswith:'Ul'": "grammar",
     "abicheck.diff_unnamed_types::_unnamed_kind::affix.startswith:'Ut'": "grammar",
     "abicheck.diff_versioning::<module>::vocab:_BASELINE_FLOOR_PREFIXES": "platform",

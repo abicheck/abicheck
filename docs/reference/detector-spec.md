@@ -57,7 +57,7 @@ One row per `ChangeKind` (429 total). Columns fuse the verdict partition (`check
 | `constexpr_value_changed` | api_break | `API_BREAK` | `warning` | unspecified | `constexpr_value_changed` | — |
 | `consumer_required_symbol_removed` | breaking | `BREAKING` | `error` | L0 | `consumer_required_symbol_removed` | — |
 | `cpo_kind_changed` | breaking | `BREAKING` | `error` | L2 | `cpo_kind_changed` | [case88](examples/case88_cpo_kind_changed.md) |
-| `cpu_dispatch_isa_dropped` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `cpu_dispatch_isa_dropped` | [case83](examples/case83_cpu_dispatch_isa_dropped.md) |
+| `cpu_dispatch_isa_dropped` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `cpu_dispatch_isa_dropped` | [case83](examples/case83_cpu_dispatch_isa_dropped.md) |
 | `ctor_explicit_added` | api_break | `API_BREAK` | `warning` | L2 | `ctor_explicit_added` | [case106](examples/case106_ctor_became_explicit.md) |
 | `ctor_explicit_removed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `ctor_explicit_removed` | — |
 | `ctor_overload_ambiguity_risk` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L2 | `ctor_overload_ambiguity_risk` | — |
@@ -299,7 +299,7 @@ One row per `ChangeKind` (429 total). Columns fuse the verdict partition (`check
 | `source_binary_provenance_mismatch` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `source_binary_provenance_mismatch` | — |
 | `source_decl_binary_symbol_mismatch` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `source_decl_binary_symbol_mismatch` | — |
 | `source_fact_coverage_incomplete` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L4 | `source_fact_coverage_incomplete` | — |
-| `source_level_kind_changed` | api_break | `API_BREAK` | `warning` | unspecified | `source_level_kind_changed` | — |
+| `source_level_kind_changed` | quality | `COMPATIBLE` | `warning` | unspecified | `source_level_kind_changed` | — |
 | `source_surface_dso_mismatch` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L4 | `source_surface_dso_mismatch` | — |
 | `source_to_binary_mapping_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `source_to_binary_mapping_changed` | — |
 | `stack_canary_removed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `stack_canary_removed` | [case135](examples/case135_stack_canary_removed.md) |

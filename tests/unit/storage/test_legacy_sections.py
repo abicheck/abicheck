@@ -72,6 +72,8 @@ _NEVER_IN_A_DOCUMENT = (
     "cxx_template_defaults",
     # Stored as the binary section's extension fact (ADR-090 D1(c) identity).
     "binary_sha256",
+    # Stored as the declarations section's extension fact (ADR-015 origin).
+    "typedef_origins",
     "wire_extensions",
     "spellings_generation",
     "_func_by_mangled",

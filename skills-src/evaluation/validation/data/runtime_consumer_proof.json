@@ -3,8 +3,8 @@
   "platform": "linux",
   "measured_at": "509cb0d",
   "summary": {
-    "breaking": 118,
-    "consumer_assertion": 90,
+    "breaking": 119,
+    "consumer_assertion": 91,
     "output_only": 2,
     "none": 14,
     "not_run": 12
@@ -94,6 +94,7 @@
     "case78_task_arena_attach_tag",
     "case79_missing_template_instantiation",
     "case82_sycl_overload_set_removed",
+    "case83_cpu_dispatch_isa_dropped",
     "case85_internal_template_signature_changed",
     "case86_tag_struct_renamed",
     "case87_default_template_arg_changed",

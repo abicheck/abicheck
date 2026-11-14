@@ -155,7 +155,7 @@ TYPE_FACTS: list[FactDefinition] = [
         owner="RecordType",
         field="data_size_bits",
         value_type="int | None",
-        producing_backends=("clang",),
+        producing_backends=("castxml", "clang"),
         persisted=True,
         identity_relevant=False,
         comparable=True,
@@ -164,11 +164,11 @@ TYPE_FACTS: list[FactDefinition] = [
         lifecycle=FactLifecycle.PERSISTED,
         notes=(
             "Itanium 'data size' (dsize/nvsize), excluding trailing "
-            "tail padding. Neither castxml's own parse nor DWARF "
-            "computes this (dwarf_snapshot.py deliberately leaves it "
-            "None — no sound DWARF-only signal, see that module's own "
-            "comment); it arrives from the layout companion tool under "
-            "clang (backend_capabilities.py's COMPANION row) — a plain "
+            "tail padding. castxml's parse derives it from size and "
+            "member/base offsets (extract/headers/castxml/data_size.py), "
+            "None where GCC and Clang disagree; under clang it arrives "
+            "from the layout companion tool. DWARF leaves it None "
+            "(dwarf_snapshot.py: no sound DWARF-only signal) — a plain "
             "case (b) conversion."
         ),
     ),

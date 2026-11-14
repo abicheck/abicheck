@@ -918,6 +918,124 @@ _LAYOUT_ROLES: dict[str, RoleText] = {
 _XCXX_ROLES.update(_LAYOUT_ROLES)
 _LAYOUT_SLOTS: tuple[str, ...] = tuple(f"@@{r}@@" for r in _LAYOUT_ROLES)
 
+# Baselines for operators that each target one ChangeKind no other operator
+# reaches (``abiforge.operators.kinds``): one self-contained declaration group
+# per role, named ``K*``/``k*`` so they collide with nothing else here.
+_KIND_ROLES: dict[str, RoleText] = {
+    "k.vbo": (
+        "struct KVA { int a; };\nstruct KVB { int b; };\n"
+        "struct KVD : virtual KVA, virtual KVB { int d; };\nint kvd_use(KVD* p);\n"
+        "int kvd_make();",
+        "int kvd_use(KVD* p) { return p->a + p->b + p->d; }\n"
+        "int kvd_make() { KVD v; v.a = 1; v.b = 2; v.d = 3; return kvd_use(&v); }",
+    ),
+    "k.svg": (
+        "struct KSA { virtual int f(); };\nstruct KSB { int x; };\n"
+        "struct KSD : KSA, KSB { int d; };\nKSD* ksd_make();",
+        "int KSA::f() { return 1; }\nKSD* ksd_make() { return new KSD(); }",
+    ),
+    # Not POD for layout (a user-provided constructor): a derived class may
+    # reuse KTP's tail padding, so its data size (dsize) is ABI.
+    "k.tpr": (
+        "struct KTP { KTP(); int i; char c; };\nint ktp_get(KTP* p);",
+        "KTP::KTP() : i(1), c(2) {}\nint ktp_get(KTP* p) { return p->i + p->c; }",
+    ),
+    "k.rsv": (
+        "struct KRS { int a; int reserved1; };\nint krs_get(KRS* p);",
+        "int krs_get(KRS* p) { return p->a; }",
+    ),
+    "k.tvs": (
+        "typedef char* kfoo_version_1_2_3;\nint kfoo_len(const char* s);",
+        "int kfoo_len(const char* s) { return s[0]; }",
+    ),
+    "k.hnd": (
+        "struct KHC;\ntypedef KHC* khandle;\nkhandle kh_new();",
+        "struct KHC { int v; };\nkhandle kh_new() { return new KHC(); }",
+    ),
+    "k.opq": (
+        "struct KOC;\nKOC* koc_new();\nint koc_get(KOC* p);",
+        "struct KOC { int v; };\nKOC* koc_new() { return new KOC(); }\n"
+        "int koc_get(KOC* p) { return p->v; }",
+    ),
+    # C names, so the ISA suffix ends the symbol (no mangled parameter list).
+    "k.isa": (
+        'extern "C" {\nint ksum_avx2(int a);\nint kdot_avx2(int a);\n'
+        "int kscl_avx2(int a);\nint ksum_sse2(int a);\nint kdot_sse2(int a);\n"
+        "int kscl_sse2(int a);\n}",
+        'extern "C" {\nint ksum_avx2(int a) { return a + 1; }\n'
+        "int kdot_avx2(int a) { return a + 2; }\nint kscl_avx2(int a) { return a + 3; }\n"
+        "int ksum_sse2(int a) { return a + 4; }\nint kdot_sse2(int a) { return a + 5; }\n"
+        "int kscl_sse2(int a) { return a + 6; }\n}",
+    ),
+    "k.inst": (
+        # The header promises both instantiations (explicit instantiation
+        # declarations), so each is part of the public contract.
+        "template <class T> T ktwice(T v);\nextern template int ktwice<int>(int);\n"
+        "extern template double ktwice<double>(double);",
+        "template <class T> T ktwice(T v) { return v + v; }\n"
+        "template int ktwice<int>(int);\ntemplate double ktwice<double>(double);",
+    ),
+    "k.ovl": (
+        "int kput(int a);\nint kput(double a);",
+        "int kput(int a) { return a; }\nint kput(double a) { return (int)a + 1; }",
+    ),
+    "k.inv": (
+        "namespace kv { inline namespace v1 { int kv_f(int a); } }",
+        "namespace kv { inline namespace v1 { int kv_f(int a) { return a; } } }",
+    ),
+    "k.exp": (
+        "namespace kx { namespace experimental { int kx_f(int a); int kx_g(int a); } }",
+        "namespace kx { namespace experimental {\n"
+        "int kx_f(int a) { return a; }\nint kx_g(int a) { return a + 1; }\n} }",
+    ),
+    "k.tag": (
+        "struct ktag_a {};\ntemplate <class T> int kfam();",
+        "template <class T> int kfam() { return (int)sizeof(T); }\n"
+        "template int kfam<ktag_a>();",
+    ),
+    "k.cpo": (
+        "namespace kc { int kc_swap(int a); }",
+        "namespace kc { int kc_swap(int a) { return -a; } }",
+    ),
+    "k.ret": (
+        "template <class T> struct KBx { T v; };\nKBx<int> kbx_get();",
+        "KBx<int> kbx_get() { return KBx<int>{1}; }",
+    ),
+    "k.tpp": (
+        'template <class T> struct KPb { T v; };\nextern "C" int kpb_take(KPb<int> b);',
+        'extern "C" int kpb_take(KPb<int> b) { return (int)b.v; }',
+    ),
+    "k.slk": (
+        "struct KSK { int a; };\nint ksk_get(KSK* p);",
+        "int ksk_get(KSK* p) { return p->a; }",
+    ),
+    "k.mtp": (
+        "template <class T> struct KMb { T v; };\nint kmb_use(KMb<int>* p);",
+        "int kmb_use(KMb<int>* p) { return p->v; }",
+    ),
+    "k.aeq": (
+        "struct KAE { long a; };\nint kae_get(KAE* p);",
+        "int kae_get(KAE* p) { return (int)p->a; }",
+    ),
+    "k.del": (
+        "int kdl_keep(int a);\nint kdl_gone(int a);",
+        "int kdl_keep(int a) { return a; }\nint kdl_gone(int a) { return a + 1; }",
+    ),
+    # A public class reaching a detail:: type through a pimpl pointer from an
+    # inline member function.
+    "k.ibr": (
+        "namespace kib { namespace detail { struct Impl { int count; }; }\n"
+        "class KW { detail::Impl* p; public: KW(); int n() const { return p->count; } }; }",
+        "kib::KW::KW() : p(new detail::Impl{3}) {}",
+    ),
+    # Empty baselines: the operator adds the declaration.
+    "k.pnv": ("", ""),
+    "k.stl": ("", ""),
+    "k.anon": ("", ""),
+}
+_XCXX_ROLES.update(_KIND_ROLES)
+_LAYOUT_SLOTS += tuple(f"@@{r}@@" for r in _KIND_ROLES)
+
 XCXX_SEED = Seed(
     name="cxx_more",
     lang="c++",
