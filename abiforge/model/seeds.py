@@ -243,6 +243,15 @@ _CXX_ROLES: dict[str, RoleText] = {
         "template <typename T> T clampv(T v) { return v < 0 ? T(0) : v; }",
         "",
     ),
+    # A constrained template, so an edit can relax or rewrite a constraint
+    # (tmpl.clamp starts unconstrained: an edit there can only tighten).
+    # Guarded, so a pre-C++20 build of the seed still compiles.
+    "tmpl.req": (
+        "#ifdef __cpp_concepts\n"
+        "template <typename T> requires (sizeof(T) >= 4) T reqv(T v) { return v; }\n"
+        "#endif",
+        "",
+    ),
     "func.mode": (
         "int mode_code(mode m);",
         "int mode_code(mode m) { return m == mode::fast ? 7 : 9; }",
@@ -268,6 +277,7 @@ _CXX_HEADER: tuple[str, ...] = (
     "@@enum.mode@@",
     "@@struct.tagged@@",
     "@@tmpl.clamp@@",
+    "@@tmpl.req@@",
     "@@func.add@@",
     "@@func.scale@@",
     "@@func.count@@",

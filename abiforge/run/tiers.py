@@ -162,6 +162,9 @@ _PR: tuple[tuple[str, str, str, dict[str, object]], ...] = (
     ("rebuild_cxx11_abi_off", "cxx_stdlib", "gcc", {}),
     ("method_noexcept_add", "cxx_classes", "gcc", {}),
     ("concept_constraint_added", "cxx_classes", "clang", {"std": "c++20"}),
+    ("concept_constraint_relaxed", "cxx_classes", "gcc", {"std": "c++20"}),
+    # -fshort-enums as the build records it (L3), not only as the layout shows.
+    ("rebuild_short_enums", "c_core", "gcc", {"build_data": True}),
     ("rebuild_optimized", "c_core", "gcc", {}),
     # c_elf / cxx_more: a link-level edit from symbols alone, a C type edit
     # under DWARF, a C++ hierarchy edit under headers.

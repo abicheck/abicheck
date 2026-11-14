@@ -317,6 +317,14 @@ def _concept_constraint_added(r: Roles) -> dict[str, RoleText]:
     )
 
 
+def _concept_constraint_relaxed(r: Roles) -> dict[str, RoleText]:
+    return _set(
+        r,
+        "tmpl.req",
+        "#ifdef __cpp_concepts\ntemplate <typename T> T reqv(T v) { return v; }\n#endif",
+    )
+
+
 def _not_already(attr: str, value: object) -> Callable[[Config], str | None]:
     def check(c: Config) -> str | None:
         if getattr(c.flags, attr) == value:
@@ -894,12 +902,27 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         "concept_constraint_added",
         ("tmpl.clamp",),
         _concept_constraint_added,
-        "a new requires-clause rejects calls the old template accepted",
-        any_of=(frozenset({"CONCEPT_TIGHTENED", "CONCEPT_CONSTRAINT_CHANGED"}),),
+        "a new requires-clause rejects calls the old template accepted: the "
+        "constraint set strictly grows (none -> one), a tightening",
+        expected=frozenset({"CONCEPT_TIGHTENED"}),
         verdict_min="API_BREAK",
         min_evidence="headers",
         features=("concepts",),
         touches=("tmpl.clamp",),
+    ),
+    EditOp(
+        "concept_constraint_relaxed",
+        ("tmpl.req",),
+        _concept_constraint_relaxed,
+        "the requires-clause is dropped: every old call still compiles, but a "
+        "relaxed constraint can change which overload subsumption picks, so "
+        "it is a risk, not a tightening",
+        expected=frozenset({"CONCEPT_CONSTRAINT_CHANGED"}),
+        verdict_min="COMPATIBLE_WITH_RISK",
+        verdict_max="COMPATIBLE_WITH_RISK",
+        min_evidence="headers",
+        features=("concepts",),
+        touches=("tmpl.req",),
     ),
     # --- rebuild edits: same source, one flag changed on the new side
     EditOp(
@@ -908,6 +931,13 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         _no_edit,
         "rebuilding with -fshort-enums shrinks every unscoped enum to its range",
         any_of=(_ENUM_SIZE,),
+        rules=(
+            Rule(
+                lambda c: c.build_data,
+                {"expected": frozenset({"ENUM_SIZE_FLAG_CHANGED"})},
+                "the compile commands record -fshort-enums itself",
+            ),
+        ),
         precondition=_all(_gnu, _not_already("short_enums", True)),
         rebuild=_with(short_enums=True),
     ),
