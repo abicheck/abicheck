@@ -381,6 +381,32 @@ class TestLayoutDescriptorDiff:
         )
         assert (ChangeKind.TAIL_PADDING_REUSE_CHANGED in _kinds(old, new)) is flagged
 
+    @pytest.mark.parametrize(
+        ("base_fields", "declare_base", "flagged"),
+        [
+            ([], True, False),  # struct D : Empty {} -- empty through its base
+            ([TypeField(name="c", type="char", offset_bits=0)], True, True),
+            ([], False, True),  # the base is not in the snapshot: unresolved
+        ],
+    )
+    def test_an_empty_base_keeps_a_derived_record_empty(
+        self, base_fields: list[TypeField], declare_base: bool, flagged: bool
+    ) -> None:
+        empty_shape: dict[str, object] = {"virtual_bases": [], "vtable": []}
+
+        def side(version: str, dsize: int) -> AbiSnapshot:
+            derived = _rec(
+                "D", size_bits=8, data_size_bits=dsize, bases=["B"], **empty_shape
+            )
+            base = _rec(
+                "B", size_bits=8, fields=list(base_fields), bases=[], **empty_shape
+            )
+            return _snap(version, types=[derived, base] if declare_base else [derived])
+
+        assert (
+            ChangeKind.TAIL_PADDING_REUSE_CHANGED in _kinds(side("1", 8), side("2", 0))
+        ) is flagged
+
     def test_tail_padding_not_flagged_when_sizeof_also_changed(self) -> None:
         # sizeof changed too → the coarse size detector owns it; we stay quiet.
         old = _snap("1", types=[_rec(size_bits=128, data_size_bits=96)])
