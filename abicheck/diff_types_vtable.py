@@ -252,6 +252,7 @@ from .diff_helpers import make_change
 from .model import Function, RecordType, resolved_fact_value
 from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
+from .model.execution_cache import MemoryCache
 from .model.namespace_spelling import namespace_suffix_spellings
 
 
@@ -502,6 +503,36 @@ def _virtual_signatures_by_owner(
     return index
 
 
+#: One signature index per function map: ``_without_inherited_overrides`` runs
+#: per changed record, and rebuilding the index each time made a vtable-churn
+#: comparison quadratic in records x functions.
+_SIGNATURE_INDEX: MemoryCache[
+    tuple[Mapping[str, Function], dict[str, list[tuple[Function, str]]]]
+] = MemoryCache("diff_types_vtable.virtuals_by_signature", max_entries=4, field="funcs")
+
+
+def _virtuals_by_signature(
+    funcs: Mapping[str, Function],
+) -> dict[str, list[tuple[Function, str]]]:
+    """Every virtual member function of *funcs* with its owning class, keyed
+    by ``virtual_signature_key`` (computed once per map object)."""
+
+    def build() -> tuple[Mapping[str, Function], dict[str, list[tuple[Function, str]]]]:
+        index: dict[str, list[tuple[Function, str]]] = {}
+        for fn in funcs.values():
+            owner = owner_class_of(fn) if fn.is_virtual else None
+            if owner is not None:
+                index.setdefault(virtual_signature_key(fn), []).append((fn, owner))
+        return funcs, index
+
+    return _SIGNATURE_INDEX.get_or_compute(
+        id(funcs),
+        build,
+        witness_of=lambda value: id(value[0]),
+        still_fresh=lambda stored: stored == id(funcs),
+    )[1]
+
+
 def _without_inherited_overrides(
     name: str,
     entries: list[str],
@@ -512,19 +543,16 @@ def _without_inherited_overrides(
     its proper ancestors declares with the same signature: such an override
     reuses the ancestor's slot. When both slot indices are known they must
     agree (a covariant return that needs a this-adjustment gets a new slot)."""
-    ancestors: dict[str, list[Function]] = {}
-    for fn in funcs.values():
-        owner = owner_class_of(fn) if fn.is_virtual else None
-        if owner is not None and owner != name:
-            ancestors.setdefault(virtual_signature_key(fn), []).append(fn)
+    by_signature = _virtuals_by_signature(funcs)
     kept = []
     for entry in entries:
         f = funcs.get(entry)
         if f is not None and f.is_virtual and owner_class_of(f) == name:
             bases = [
                 b
-                for b in ancestors.get(virtual_signature_key(f), ())
-                if _owner_descends_from(name, owner_class_of(b) or "", types)
+                for b, b_owner in by_signature.get(virtual_signature_key(f), ())
+                if b_owner != name
+                and _owner_descends_from(name, b_owner, types)
                 and (
                     f.vtable_index is None
                     or b.vtable_index is None
