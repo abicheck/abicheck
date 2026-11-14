@@ -33,12 +33,11 @@ cv or pointer-kind difference, or a class it cannot find keeps the break.
 
 from __future__ import annotations
 
-from dataclasses import replace
-from functools import lru_cache
-
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
 from ..model.entities import RecordType
+from ..model.execution_cache import memoized
+from ..model.fact import replace_with_fact_sync
 from ..model.snapshot import AbiSnapshot
 
 __all__ = ["narrowed_to_offset_zero_base", "refine_covariant_returns"]
@@ -66,7 +65,7 @@ def _is_class_name(token: str) -> bool:
     return bool(parts) and all(p.isidentifier() for p in parts)
 
 
-@lru_cache(maxsize=4096)
+@memoized(maxsize=4096)
 def _split(spelling: str | None) -> tuple[str, str, str, str] | None:
     """``(leading cv, class name, sigil, trailing cv)`` of a spelling that is
     one class name behind exactly one pointer or reference declarator, else
@@ -146,7 +145,7 @@ def refine_covariant_returns(
     out: list[Change] = []
     for change in changes:
         if change.kind is ChangeKind.FUNC_RETURN_CHANGED and _covariant(change, new):
-            change = replace(
+            change = replace_with_fact_sync(
                 change,
                 kind=ChangeKind.FUNC_RETURN_COVARIANT_NARROWED,
                 description=(
