@@ -1,20 +1,36 @@
 {
   "_comment": "Real-fixture backing per ChangeKind: catalog expected_kinds and the edit corpus verified_floor. A kind listed under `backed` may not lose every source (tests/test_changekind_real_coverage.py). Regenerate with `python scripts/changekind_real_coverage.py --write-fixture-ledger`.",
   "summary": {
-    "total_kinds": 429,
-    "backed": 205,
-    "unbacked": 224
+    "total_kinds": 431,
+    "backed": 281,
+    "unbacked": 150
   },
   "backed": {
+    "abi_equivalent_type_changed": [
+      "edit_corpus:pr"
+    ],
     "abi_relevant_build_flag_changed": [
-      "catalog:case98_cxx_standard_floor_raised"
+      "catalog:case98_cxx_standard_floor_raised",
+      "edit_corpus:pr"
+    ],
+    "abi_surface_explosion": [
+      "edit_corpus:pr"
     ],
     "abi_tag_changed": [
       "catalog:case113_abi_tag_changed",
       "edit_corpus:pr"
     ],
+    "allocator_replacement_added": [
+      "edit_corpus:pr"
+    ],
+    "allocator_replacement_removed": [
+      "edit_corpus:pr"
+    ],
     "atomic_qualifier_changed": [
       "catalog:case116_atomic_qualifier_changed",
+      "edit_corpus:pr"
+    ],
+    "base_class_access_narrowed": [
       "edit_corpus:pr"
     ],
     "base_class_offset_changed": [
@@ -51,10 +67,15 @@
       "catalog:case209_calling_convention_changed_via_macro",
       "catalog:case212_calling_convention_macro_undefined_after_use",
       "catalog:case213_calling_convention_function_like_macro_changed",
-      "catalog:case64_calling_convention_changed"
+      "catalog:case64_calling_convention_changed",
+      "edit_corpus:pr"
+    ],
+    "cet_protection_improved": [
+      "edit_corpus:pr"
     ],
     "cet_protection_weakened": [
-      "catalog:case179_cet_protection_weakened"
+      "catalog:case179_cet_protection_weakened",
+      "edit_corpus:pr"
     ],
     "char8t_migration": [
       "catalog:case114_char8t_migration"
@@ -78,16 +99,21 @@
       "edit_corpus:pr"
     ],
     "cpo_kind_changed": [
-      "catalog:case88_cpo_kind_changed"
+      "catalog:case88_cpo_kind_changed",
+      "edit_corpus:pr"
     ],
     "cpu_dispatch_isa_dropped": [
-      "catalog:case83_cpu_dispatch_isa_dropped"
+      "catalog:case83_cpu_dispatch_isa_dropped",
+      "edit_corpus:pr"
     ],
     "ctor_explicit_added": [
       "catalog:case106_ctor_became_explicit",
       "edit_corpus:pr"
     ],
     "ctor_explicit_removed": [
+      "edit_corpus:pr"
+    ],
+    "ctor_overload_ambiguity_risk": [
       "edit_corpus:pr"
     ],
     "declaration_identity_reconciled_unresolved": [
@@ -99,6 +125,21 @@
     "default_template_arg_changed": [
       "catalog:case229_exported_template_default_changed",
       "catalog:case87_default_template_arg_changed"
+    ],
+    "dt_relr_introduced": [
+      "edit_corpus:pr"
+    ],
+    "dt_relr_removed": [
+      "edit_corpus:pr"
+    ],
+    "dwarf_info_missing": [
+      "edit_corpus:pr"
+    ],
+    "dynamic_loading_flags_changed": [
+      "edit_corpus:pr"
+    ],
+    "elf_init_fini_changed": [
+      "edit_corpus:pr"
     ],
     "enum_became_scoped": [
       "edit_corpus:pr"
@@ -142,24 +183,31 @@
       "edit_corpus:pr"
     ],
     "exceptions_mode_changed": [
-      "catalog:case130_exceptions_mode_flip"
+      "catalog:case130_exceptions_mode_flip",
+      "edit_corpus:pr"
     ],
     "executable_stack": [
       "edit_corpus:pr"
     ],
     "executable_stack_removed": [
       "catalog:case136_executable_stack_removed",
-      "catalog:case49_executable_stack"
+      "catalog:case49_executable_stack",
+      "edit_corpus:pr"
     ],
     "experimental_graduated": [
-      "catalog:case99_experimental_graduated"
+      "catalog:case99_experimental_graduated",
+      "edit_corpus:pr"
     ],
     "experimental_removed_without_replacement": [
-      "catalog:case100_experimental_removed_without_replacement"
+      "catalog:case100_experimental_removed_without_replacement",
+      "edit_corpus:pr"
     ],
     "exported_not_public": [
       "catalog:case143_audit_accidental_export",
       "catalog:case150_xcheck_export_public_pair"
+    ],
+    "exported_object_alignment_reduced": [
+      "edit_corpus:pr"
     ],
     "exported_symbol_source_owner_changed": [
       "catalog:case162_symbol_source_owner_changed"
@@ -182,7 +230,25 @@
       "catalog:case63_bitfield_changed",
       "edit_corpus:pr"
     ],
+    "field_default_initializer_changed": [
+      "edit_corpus:pr"
+    ],
+    "field_default_initializer_removed": [
+      "edit_corpus:pr"
+    ],
     "field_deprecated_added": [
+      "edit_corpus:pr"
+    ],
+    "field_deprecated_removed": [
+      "edit_corpus:pr"
+    ],
+    "field_lost_const": [
+      "edit_corpus:pr"
+    ],
+    "field_lost_mutable": [
+      "edit_corpus:pr"
+    ],
+    "field_lost_volatile": [
       "edit_corpus:pr"
     ],
     "field_renamed": [
@@ -191,6 +257,9 @@
     ],
     "flexible_array_member_changed": [
       "catalog:case70_flexible_array_member_changed",
+      "edit_corpus:pr"
+    ],
+    "fortify_source_weakened": [
       "edit_corpus:pr"
     ],
     "func_added": [
@@ -205,8 +274,23 @@
       "catalog:case99_experimental_graduated",
       "edit_corpus:pr"
     ],
+    "func_added_elf_only": [
+      "edit_corpus:pr"
+    ],
+    "func_became_inline": [
+      "edit_corpus:pr"
+    ],
+    "func_contract_attribute_added": [
+      "edit_corpus:pr"
+    ],
+    "func_contract_attribute_removed": [
+      "edit_corpus:pr"
+    ],
     "func_cv_changed": [
       "catalog:case22_method_const_changed",
+      "edit_corpus:pr"
+    ],
+    "func_deleted": [
       "edit_corpus:pr"
     ],
     "func_deprecated_added": [
@@ -218,10 +302,15 @@
     ],
     "func_export_added": [
       "catalog:case16_inline_to_non_inline",
-      "catalog:case47_inline_to_outlined"
+      "catalog:case47_inline_to_outlined",
+      "edit_corpus:pr"
     ],
     "func_language_linkage_changed": [
-      "catalog:case66_language_linkage_changed"
+      "catalog:case66_language_linkage_changed",
+      "edit_corpus:pr"
+    ],
+    "func_lost_inline": [
+      "edit_corpus:pr"
     ],
     "func_noexcept_added": [
       "edit_corpus:pr"
@@ -231,6 +320,9 @@
       "edit_corpus:pr"
     ],
     "func_override_specifier_added": [
+      "edit_corpus:pr"
+    ],
+    "func_override_specifier_removed": [
       "edit_corpus:pr"
     ],
     "func_params_changed": [
@@ -283,7 +375,11 @@
       "edit_corpus:pr"
     ],
     "func_return_pointee_qualifier_changed": [
-      "catalog:case215_return_double_pointer_lost_const"
+      "catalog:case215_return_double_pointer_lost_const",
+      "edit_corpus:pr"
+    ],
+    "func_return_pointee_qualifier_removed": [
+      "edit_corpus:pr"
     ],
     "func_static_changed": [
       "catalog:case21_method_became_static",
@@ -302,6 +398,9 @@
       "catalog:case23_pure_virtual_added",
       "edit_corpus:pr"
     ],
+    "func_virtual_noexcept_added": [
+      "edit_corpus:pr"
+    ],
     "func_virtual_removed": [
       "catalog:case168_virtual_method_devirtualized",
       "edit_corpus:pr"
@@ -315,8 +414,15 @@
       "catalog:case51_protected_visibility",
       "edit_corpus:pr"
     ],
+    "glibcxx_dual_abi_changed": [
+      "edit_corpus:pr"
+    ],
     "glibcxx_dual_abi_flip_detected": [
-      "catalog:case104_glibcxx_dual_abi_flip"
+      "catalog:case104_glibcxx_dual_abi_flip",
+      "edit_corpus:pr"
+    ],
+    "handle_type_changed": [
+      "edit_corpus:pr"
     ],
     "hash_style_removed": [
       "edit_corpus:pr"
@@ -338,35 +444,51 @@
       "catalog:case29_ifunc_transition",
       "edit_corpus:pr"
     ],
+    "ifunc_removed": [
+      "edit_corpus:pr"
+    ],
+    "imported_symbol_added": [
+      "edit_corpus:pr"
+    ],
+    "imported_symbol_removed": [
+      "edit_corpus:pr"
+    ],
     "inline_body_references_renamed_member": [
-      "catalog:case89_inline_accessor_renamed_pimpl_member"
+      "catalog:case89_inline_accessor_renamed_pimpl_member",
+      "edit_corpus:pr"
     ],
     "inline_function_removed": [
-      "catalog:case157_inline_function_removed"
+      "catalog:case157_inline_function_removed",
+      "edit_corpus:pr"
     ],
     "inline_namespace_moved": [
       "catalog:case71_inline_namespace_moved",
       "edit_corpus:pr"
     ],
     "inline_namespace_version_bumped": [
-      "catalog:case101_inline_namespace_version_bumped"
+      "catalog:case101_inline_namespace_version_bumped",
+      "edit_corpus:pr"
     ],
     "instantiation_missing_from_binary": [
-      "catalog:case79_missing_template_instantiation"
+      "catalog:case79_missing_template_instantiation",
+      "edit_corpus:pr"
     ],
     "integer_model_changed": [
-      "catalog:case112_lp64_ilp64"
+      "catalog:case112_lp64_ilp64",
+      "edit_corpus:pr"
     ],
     "internal_symbol_required_by_public_api": [
       "catalog:case192_call_graph_break_survives_suppression"
     ],
     "internal_template_leaks_via_public_api": [
-      "catalog:case85_internal_template_signature_changed"
+      "catalog:case85_internal_template_signature_changed",
+      "edit_corpus:pr"
     ],
     "internal_type_leaks_via_public_api": [
       "catalog:case74_detail_base_class_changed",
       "catalog:case75_detail_embedded_by_value",
-      "catalog:case76_detail_pimpl_vtable_changed"
+      "catalog:case76_detail_pimpl_vtable_changed",
+      "edit_corpus:pr"
     ],
     "kabi_crc_changed": [
       "catalog:case175_kabi_crc_changed"
@@ -375,10 +497,15 @@
       "catalog:case176_kabi_symbol_namespace_changed"
     ],
     "long_double_abi_changed": [
-      "catalog:case177_long_double_abi_changed"
+      "catalog:case177_long_double_abi_changed",
+      "edit_corpus:pr"
     ],
     "lto_mode_changed": [
-      "catalog:case154_lto_mode_flip"
+      "catalog:case154_lto_mode_flip",
+      "edit_corpus:pr"
+    ],
+    "mandatory_template_param_added": [
+      "edit_corpus:pr"
     ],
     "method_access_changed": [
       "catalog:case34_access_level",
@@ -397,22 +524,40 @@
     "odr_type_variant": [
       "catalog:case149_xcheck_odr_variant"
     ],
+    "opaque_invariant_broken": [
+      "edit_corpus:pr"
+    ],
     "overload_added": [
       "catalog:case169_overload_added",
       "edit_corpus:pr"
     ],
     "overload_ambiguity_introduced": [
-      "catalog:case111_enumerable_thread_specific_lambda_ambiguity"
+      "catalog:case111_enumerable_thread_specific_lambda_ambiguity",
+      "edit_corpus:pr"
+    ],
+    "overload_set_rerouted": [
+      "edit_corpus:pr"
+    ],
+    "param_became_va_list": [
+      "edit_corpus:pr"
     ],
     "param_default_value_changed": [
-      "catalog:case32_param_defaults"
+      "catalog:case32_param_defaults",
+      "edit_corpus:pr"
     ],
     "param_default_value_removed": [
       "catalog:case123_default_argument_removed",
-      "catalog:case32_param_defaults"
+      "catalog:case32_param_defaults",
+      "edit_corpus:pr"
+    ],
+    "param_lost_va_list": [
+      "edit_corpus:pr"
     ],
     "param_pointee_qualifier_added": [
       "catalog:case186_c_api_pointee_const_abi_neutral",
+      "edit_corpus:pr"
+    ],
+    "param_pointee_qualifier_changed": [
       "edit_corpus:pr"
     ],
     "param_pointer_level_changed": [
@@ -426,8 +571,12 @@
       "catalog:case207_pointer_parameter_gained_restrict",
       "edit_corpus:pr"
     ],
+    "param_restrict_changed": [
+      "edit_corpus:pr"
+    ],
     "polymorphic_type_non_virtual_dtor": [
-      "catalog:case165_polymorphic_nonvirtual_dtor"
+      "catalog:case165_polymorphic_nonvirtual_dtor",
+      "edit_corpus:pr"
     ],
     "private_header_leak": [
       "catalog:case144_audit_private_header_leak",
@@ -435,6 +584,9 @@
       "catalog:case151_xcheck_provider_matrix"
     ],
     "protected_visibility_changed": [
+      "edit_corpus:pr"
+    ],
+    "public_api_exposes_stl_by_value": [
       "edit_corpus:pr"
     ],
     "public_api_internal_dependency_added": [
@@ -460,7 +612,8 @@
       "catalog:case156_public_macro_removed"
     ],
     "public_not_exported": [
-      "catalog:case150_xcheck_export_public_pair"
+      "catalog:case150_xcheck_export_public_pair",
+      "edit_corpus:pr"
     ],
     "public_to_internal_dependency": [
       "catalog:case181_xcheck_public_to_internal_dependency"
@@ -487,6 +640,9 @@
     "rpath_changed": [
       "edit_corpus:pr"
     ],
+    "rpath_type_changed": [
+      "edit_corpus:pr"
+    ],
     "rtti_for_internal_type": [
       "catalog:case146_audit_rtti_for_internal"
     ],
@@ -494,7 +650,8 @@
       "edit_corpus:pr"
     ],
     "rtti_mode_changed": [
-      "catalog:case131_rtti_mode_flip"
+      "catalog:case131_rtti_mode_flip",
+      "edit_corpus:pr"
     ],
     "runpath_changed": [
       "catalog:case137_runpath_changed",
@@ -504,25 +661,49 @@
     "runtime_floor_raised": [
       "catalog:case170_env_runtime_floor_raised"
     ],
+    "sanitizer_mode_changed": [
+      "edit_corpus:pr"
+    ],
     "secondary_vtable_group_changed": [
-      "catalog:case174_secondary_vtable_group_changed"
+      "catalog:case174_secondary_vtable_group_changed",
+      "edit_corpus:pr"
     ],
     "serialization_tag_changed": [
-      "catalog:case81_serialization_tag_reassigned"
+      "catalog:case81_serialization_tag_reassigned",
+      "edit_corpus:pr"
+    ],
+    "soname_bump_unnecessary": [
+      "edit_corpus:pr"
     ],
     "soname_changed": [
       "catalog:case50_soname_inconsistent",
       "edit_corpus:pr"
     ],
     "soname_missing": [
-      "catalog:case05_soname"
+      "catalog:case05_soname",
+      "edit_corpus:pr"
+    ],
+    "source_level_kind_changed": [
+      "edit_corpus:pr"
     ],
     "stack_canary_removed": [
       "catalog:case135_stack_canary_removed",
       "edit_corpus:pr"
     ],
+    "standard_layout_lost": [
+      "edit_corpus:pr"
+    ],
     "static_tls_introduced": [
       "catalog:case171_static_tls_introduced",
+      "edit_corpus:pr"
+    ],
+    "static_tls_removed": [
+      "edit_corpus:pr"
+    ],
+    "stdlib_debug_mode_changed": [
+      "edit_corpus:pr"
+    ],
+    "struct_field_type_changed": [
       "edit_corpus:pr"
     ],
     "struct_packing_changed": [
@@ -530,10 +711,12 @@
       "edit_corpus:pr"
     ],
     "struct_packing_mode_changed": [
-      "catalog:case153_struct_packing_flip"
+      "catalog:case153_struct_packing_flip",
+      "edit_corpus:pr"
     ],
     "struct_return_convention_changed": [
-      "catalog:case129_struct_return_convention"
+      "catalog:case129_struct_return_convention",
+      "edit_corpus:pr"
     ],
     "struct_size_changed": [
       "catalog:case121_kernel_btf_struct_field_added"
@@ -541,12 +724,16 @@
     "sycl_overload_set_removed": [
       "catalog:case82_sycl_overload_set_removed"
     ],
+    "symbol_binding_became_unique": [
+      "edit_corpus:pr"
+    ],
     "symbol_binding_changed": [
       "catalog:case27_symbol_binding_weakened",
       "edit_corpus:pr"
     ],
     "symbol_binding_lost_unique": [
-      "catalog:case180_symbol_binding_lost_unique"
+      "catalog:case180_symbol_binding_lost_unique",
+      "edit_corpus:pr"
     ],
     "symbol_binding_strengthened": [
       "catalog:case128_symbol_binding_strengthened",
@@ -555,7 +742,13 @@
     "symbol_elf_visibility_changed": [
       "catalog:case51_protected_visibility"
     ],
+    "symbol_leaked_from_dependency_changed": [
+      "edit_corpus:pr"
+    ],
     "symbol_moved_version_node": [
+      "edit_corpus:pr"
+    ],
+    "symbol_renamed_batch": [
       "edit_corpus:pr"
     ],
     "symbol_size_changed": [
@@ -563,6 +756,9 @@
       "edit_corpus:pr"
     ],
     "symbol_size_changed_const_object": [
+      "edit_corpus:pr"
+    ],
+    "symbol_size_changed_internal": [
       "edit_corpus:pr"
     ],
     "symbol_type_changed": [
@@ -582,16 +778,30 @@
       "edit_corpus:pr"
     ],
     "symbol_version_required_added": [
-      "catalog:case170_env_runtime_floor_raised"
+      "catalog:case170_env_runtime_floor_raised",
+      "edit_corpus:pr"
+    ],
+    "symbol_version_required_added_compat": [
+      "edit_corpus:pr"
+    ],
+    "symbol_version_required_removed": [
+      "edit_corpus:pr"
     ],
     "symbolic_binding_mode_changed": [
       "edit_corpus:pr"
     ],
     "tag_type_renamed": [
-      "catalog:case86_tag_struct_renamed"
+      "catalog:case86_tag_struct_renamed",
+      "edit_corpus:pr"
+    ],
+    "tail_padding_reuse_changed": [
+      "edit_corpus:pr"
     ],
     "target_dependency_added": [
       "catalog:case161_target_dependency_added"
+    ],
+    "target_isa_changed": [
+      "edit_corpus:pr"
     ],
     "template_param_default_changed": [
       "catalog:case223_header_only_template_default_changed",
@@ -600,18 +810,36 @@
       "catalog:case228_nontype_template_param_default_changed",
       "edit_corpus:pr"
     ],
+    "template_param_type_changed": [
+      "edit_corpus:pr"
+    ],
+    "template_return_type_changed": [
+      "edit_corpus:pr"
+    ],
+    "text_relocation_introduced": [
+      "edit_corpus:pr"
+    ],
+    "text_relocation_removed": [
+      "edit_corpus:pr"
+    ],
     "threadsafe_statics_mode_changed": [
-      "catalog:case132_threadsafe_statics_flip"
+      "catalog:case132_threadsafe_statics_flip",
+      "edit_corpus:pr"
     ],
     "tls_model_changed": [
-      "catalog:case133_tls_model_flip"
+      "catalog:case133_tls_model_flip",
+      "edit_corpus:pr"
     ],
     "tls_var_size_changed": [
       "catalog:case67_tls_var_size_changed",
       "edit_corpus:pr"
     ],
     "toolchain_flag_drift": [
-      "catalog:case103_toolchain_flag_drift"
+      "catalog:case103_toolchain_flag_drift",
+      "edit_corpus:pr"
+    ],
+    "trivially_copyable_lost": [
+      "edit_corpus:pr"
     ],
     "type_added": [
       "edit_corpus:pr"
@@ -648,7 +876,8 @@
       "catalog:case77_detail_templated_base_changed"
     ],
     "type_field_added_compatible": [
-      "catalog:case94_empty_tag_gained_state"
+      "catalog:case94_empty_tag_gained_state",
+      "edit_corpus:pr"
     ],
     "type_field_offset_changed": [
       "catalog:case117_no_unique_address",
@@ -670,6 +899,9 @@
     ],
     "type_kind_changed": [
       "catalog:case55_type_kind_changed",
+      "edit_corpus:pr"
+    ],
+    "type_lost_abstract": [
       "edit_corpus:pr"
     ],
     "type_lost_final": [
@@ -720,6 +952,9 @@
       "catalog:case95_allocator_nested_typedef_removed",
       "edit_corpus:pr"
     ],
+    "typedef_version_sentinel": [
+      "edit_corpus:pr"
+    ],
     "union_field_added": [
       "catalog:case26_union_field_added",
       "catalog:case26b_union_field_added_compatible",
@@ -733,19 +968,34 @@
       "edit_corpus:pr"
     ],
     "unnamed_type_in_public_abi": [
-      "catalog:case178_unnamed_type_in_public_abi"
+      "catalog:case178_unnamed_type_in_public_abi",
+      "edit_corpus:pr"
     ],
     "unversioned_exported_symbol": [
       "catalog:case145_audit_unversioned_export"
     ],
     "used_reserved_field": [
-      "catalog:case54_used_reserved_field"
+      "catalog:case54_used_reserved_field",
+      "edit_corpus:pr"
     ],
     "value_abi_trait_changed": [
-      "catalog:case69_trivial_to_nontrivial"
+      "catalog:case69_trivial_to_nontrivial",
+      "edit_corpus:pr"
+    ],
+    "var_access_changed": [
+      "edit_corpus:pr"
+    ],
+    "var_access_widened": [
+      "edit_corpus:pr"
     ],
     "var_added": [
       "catalog:case61_var_added",
+      "edit_corpus:pr"
+    ],
+    "var_added_elf_only": [
+      "edit_corpus:pr"
+    ],
+    "var_alignment_changed": [
       "edit_corpus:pr"
     ],
     "var_became_const": [
@@ -756,6 +1006,9 @@
       "edit_corpus:pr"
     ],
     "var_deprecated_removed": [
+      "edit_corpus:pr"
+    ],
+    "var_export_added": [
       "edit_corpus:pr"
     ],
     "var_lost_const": [
@@ -779,7 +1032,11 @@
       "edit_corpus:pr"
     ],
     "versioned_symbol_scheme_detected": [
-      "catalog:case141_versioned_symbol_scheme"
+      "catalog:case141_versioned_symbol_scheme",
+      "edit_corpus:pr"
+    ],
+    "virtual_base_offset_changed": [
+      "edit_corpus:pr"
     ],
     "vptr_introduced": [
       "catalog:case203_class_gained_vtable_pointer",
@@ -787,6 +1044,9 @@
     ],
     "vtable_slot_count_changed": [
       "catalog:case142_vtable_slot_count_binary_only",
+      "edit_corpus:pr"
+    ],
+    "vtable_symbol_identity_changed": [
       "edit_corpus:pr"
     ],
     "vtable_thunk_offset_changed": [
@@ -797,17 +1057,25 @@
       "edit_corpus:pr"
     ],
     "vtt_slot_count_changed": [
-      "catalog:case173_vtt_slot_count_changed"
+      "catalog:case173_vtt_slot_count_changed",
+      "edit_corpus:pr"
+    ],
+    "wchar_model_changed": [
+      "edit_corpus:pr"
+    ],
+    "whole_program_vtables_mode_changed": [
+      "edit_corpus:pr"
+    ],
+    "writable_executable_segment": [
+      "edit_corpus:pr"
+    ],
+    "x86_isa_baseline_raised": [
+      "edit_corpus:pr"
     ]
   },
   "unbacked": [
-    "abi_equivalent_type_changed",
-    "abi_surface_explosion",
-    "allocator_replacement_added",
-    "allocator_replacement_removed",
     "anon_field_changed",
     "api_depends_on_consumer_env",
-    "base_class_access_narrowed",
     "behavioural_default_changed",
     "bind_now_disabled",
     "branch_protection_improved",
@@ -824,66 +1092,38 @@
     "bundle_manifest_instantiation_added",
     "bundle_unresolved_intra_dependency",
     "call_graph_public_entry_reachability_changed",
-    "cet_protection_improved",
     "common_symbol_risk",
     "compat_version_changed",
     "compile_context_conflict",
     "concept_constraint_changed",
     "constexpr_value_changed",
     "consumer_required_symbol_removed",
-    "ctor_overload_ambiguity_risk",
     "cxx_standard_floor_raised",
     "declaration_coordinates_shifted",
     "declaration_identity_reconciled",
     "declaration_identity_unchanged",
     "declaration_renamed",
     "default_argument_changed",
-    "dt_relr_introduced",
-    "dt_relr_removed",
-    "dwarf_info_missing",
-    "dynamic_loading_flags_changed",
     "elf_abi_flags_changed",
     "elf_class_changed",
     "elf_endianness_changed",
-    "elf_init_fini_changed",
     "elf_machine_changed",
     "elf_osabi_changed",
     "evidence_required_missing",
-    "exported_object_alignment_reduced",
-    "field_default_initializer_changed",
-    "field_default_initializer_removed",
-    "field_deprecated_removed",
-    "field_lost_const",
-    "field_lost_mutable",
-    "field_lost_volatile",
     "float_abi_changed",
-    "fortify_source_weakened",
-    "func_added_elf_only",
-    "func_became_inline",
-    "func_contract_attribute_added",
-    "func_contract_attribute_removed",
-    "func_deleted",
     "func_deleted_dwarf",
     "func_deleted_elf_fallback",
     "func_exception_spec_changed",
     "func_likely_renamed",
-    "func_lost_inline",
-    "func_override_specifier_removed",
     "func_pure_virtual_added",
-    "func_return_pointee_qualifier_removed",
-    "func_virtual_noexcept_added",
     "generated_file_dependency_unstable",
     "generated_header_changed",
     "generated_header_reaches_public_api",
-    "glibcxx_dual_abi_changed",
     "graph_coverage_insufficient_for_suppression",
-    "handle_type_changed",
     "header_binary_context_mismatch",
     "header_parse_context_drift",
     "identity_collision_detected",
-    "ifunc_removed",
-    "imported_symbol_added",
-    "imported_symbol_removed",
+    "imported_symbol_unprovided",
     "include_graph_public_header_drift",
     "inline_body_changed",
     "interpreter_changed",
@@ -900,7 +1140,6 @@
     "macho_linkage_flags_changed",
     "macho_reexport_changed",
     "macos_deployment_target_raised",
-    "mandatory_template_param_added",
     "musllinux_glibc_dependency_detected",
     "numpy_abi_major_incompatible",
     "numpy_capi_consumption_added",
@@ -908,13 +1147,7 @@
     "numpy_metadata_understates_required_version",
     "numpy_target_floor_raised",
     "odr_source_conflict",
-    "opaque_invariant_broken",
     "os_deployment_floor_raised",
-    "overload_set_rerouted",
-    "param_became_va_list",
-    "param_lost_va_list",
-    "param_pointee_qualifier_changed",
-    "param_restrict_changed",
     "pe_forwarder_changed",
     "pe_hardening_improved",
     "pe_hardening_weakened",
@@ -923,7 +1156,6 @@
     "pe_ordinal_retargeted",
     "pie_disabled",
     "platform_baseline_floor_raised",
-    "public_api_exposes_stl_by_value",
     "public_dependency_role_changed",
     "public_dependency_role_unknown",
     "public_macro_value_changed",
@@ -950,27 +1182,20 @@
     "python_api_stub_invalid",
     "python_gil_abi_changed",
     "python_stable_abi_violation",
-    "rpath_type_changed",
     "runtime_symbol_provider_changed",
     "runtime_weak_resolution_changed",
-    "sanitizer_mode_changed",
+    "sanitizer_runtime_required",
     "soname_bump_recommended",
-    "soname_bump_unnecessary",
     "source_binary_provenance_mismatch",
     "source_decl_binary_symbol_mismatch",
     "source_fact_coverage_incomplete",
-    "source_level_kind_changed",
     "source_surface_dso_mismatch",
     "source_to_binary_mapping_changed",
-    "standard_layout_lost",
-    "static_tls_removed",
     "std_reexport_removed",
-    "stdlib_debug_mode_changed",
     "stdlib_implementation_changed",
     "struct_alignment_changed",
     "struct_field_offset_changed",
     "struct_field_removed",
-    "struct_field_type_changed",
     "support_promise_component_introduced",
     "support_promise_component_retired",
     "suppression_reachability_unknown",
@@ -984,46 +1209,20 @@
     "sycl_plugin_removed",
     "sycl_plugin_search_path_changed",
     "sycl_runtime_version_changed",
-    "symbol_binding_became_unique",
-    "symbol_leaked_from_dependency_changed",
-    "symbol_renamed_batch",
-    "symbol_size_changed_internal",
     "symbol_version_defined_removed",
-    "symbol_version_required_added_compat",
-    "symbol_version_required_removed",
-    "tail_padding_reuse_changed",
-    "target_isa_changed",
     "template_body_changed",
-    "template_param_type_changed",
-    "template_return_type_changed",
-    "text_relocation_introduced",
-    "text_relocation_removed",
     "time64_abi_changed",
     "toolchain_version_changed",
-    "trivially_copyable_lost",
-    "type_lost_abstract",
     "type_visibility_changed",
-    "typedef_version_sentinel",
     "undocumented_export_ratio_increased",
     "uninstantiated_template_removed",
     "unspecified_return_now_named",
-    "var_access_changed",
-    "var_access_widened",
-    "var_added_elf_only",
-    "var_alignment_changed",
-    "var_export_added",
     "var_removed_elf_only",
     "vector_abi_changed",
-    "virtual_base_offset_changed",
     "virtual_method_added",
     "visibility_leak",
-    "vtable_symbol_identity_changed",
-    "wchar_model_changed",
     "wheel_closure_dependency_violation",
     "wheel_rpath_not_portable",
-    "wheel_tag_architecture_mismatch",
-    "whole_program_vtables_mode_changed",
-    "writable_executable_segment",
-    "x86_isa_baseline_raised"
+    "wheel_tag_architecture_mismatch"
   ]
 }

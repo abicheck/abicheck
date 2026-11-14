@@ -521,6 +521,8 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "bind_now_disabled": "L0",
     "elf_endianness_changed": "L0",
     "target_isa_changed": "L0",
+    "sanitizer_runtime_required": "L0",
+    "imported_symbol_unprovided": "L0",
     "x86_isa_baseline_raised": "L0",
     "os_deployment_floor_raised": "L0",
     "dynamic_loading_flags_changed": "L0",

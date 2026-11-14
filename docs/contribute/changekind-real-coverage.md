@@ -15,14 +15,14 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 
 ## Headline
 
-- Total kinds: **429**
-- Kinds with at least one real source: **193**
-- Kinds backed by a compiled fixture (catalog `expected_kinds` or an edit-corpus `verified_floor`; ledger `scripts/changekind_fixture_ledger.json`): **205**
-- Kinds per source: catalog 160, field_shapes 9, integration 76
+- Total kinds: **431**
+- Kinds with at least one real source: **195**
+- Kinds backed by a compiled fixture (catalog `expected_kinds` or an edit-corpus `verified_floor`; ledger `scripts/changekind_fixture_ledger.json`): **281**
+- Kinds per source: catalog 160, field_shapes 9, integration 78
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
-| L0 | 129 | 72 |
+| L0 | 131 | 72 |
 | L1 | 62 | 7 |
 | L2 | 77 | 39 |
 | L3 | 15 | 5 |
@@ -104,6 +104,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `ifunc_introduced` | COMPATIBLE | 1 | 0 | 1 |
 | `imported_symbol_added` | RISK | 0 | 0 | 0 |
 | `imported_symbol_removed` | COMPATIBLE | 0 | 0 | 0 |
+| `imported_symbol_unprovided` | BREAKING | 0 | 0 | 1 |
 | `inline_namespace_moved` | BREAKING | 1 | 0 | 0 |
 | `inline_namespace_version_bumped` | BREAKING | 1 | 0 | 0 |
 | `interpreter_changed` | RISK | 0 | 0 | 0 |
@@ -148,6 +149,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `runtime_floor_raised` | RISK | 1 | 0 | 0 |
 | `runtime_symbol_provider_changed` | RISK | 0 | 0 | 0 |
 | `runtime_weak_resolution_changed` | RISK | 0 | 0 | 0 |
+| `sanitizer_runtime_required` | BREAKING | 0 | 0 | 3 |
 | `soname_changed` | RISK | 1 | 0 | 1 |
 | `soname_missing` | COMPATIBLE | 1 | 0 | 0 |
 | `stack_canary_removed` | RISK | 1 | 0 | 3 |

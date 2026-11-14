@@ -2,7 +2,7 @@
 
 # Detector specification matrix
 
-One row per `ChangeKind` (429 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`catalog/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
+One row per `ChangeKind` (431 total). Columns fuse the verdict partition (`checker_policy`), default policy (`policy_for`), the weakest evidence layer at which the kind becomes detectable (`scripts/evidence_tiers`), and the example case(s) that demonstrate the kind (`catalog/ground_truth.json`). The **Examples** column is capped at 4 links per kind; the full mapping is in `detector-spec.json`.
 
 | ChangeKind | Category | Default verdict | Severity | Min evidence | Doc slug | Examples |
 |---|---|---|---|---|---|---|
@@ -173,6 +173,7 @@ One row per `ChangeKind` (429 total). Columns fuse the verdict partition (`check
 | `ifunc_removed` | quality | `COMPATIBLE` | `warning` | unspecified | `ifunc_removed` | — |
 | `imported_symbol_added` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `imported_symbol_added` | — |
 | `imported_symbol_removed` | quality | `COMPATIBLE` | `warning` | L0 | `imported_symbol_removed` | — |
+| `imported_symbol_unprovided` | breaking | `BREAKING` | `error` | L0 | `imported_symbol_unprovided` | — |
 | `include_graph_public_header_drift` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `include_graph_public_header_drift` | — |
 | `inline_body_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | unspecified | `inline_body_changed` | — |
 | `inline_body_references_renamed_member` | breaking | `BREAKING` | `error` | L2 | `inline_body_references_renamed_member` | [case89](examples/case89_inline_accessor_renamed_pimpl_member.md) |
@@ -290,6 +291,7 @@ One row per `ChangeKind` (429 total). Columns fuse the verdict partition (`check
 | `runtime_symbol_provider_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `runtime_symbol_provider_changed` | — |
 | `runtime_weak_resolution_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L0 | `runtime_weak_resolution_changed` | — |
 | `sanitizer_mode_changed` | risk | `COMPATIBLE_WITH_RISK` | `warning` | L3 | `sanitizer_mode_changed` | — |
+| `sanitizer_runtime_required` | breaking | `BREAKING` | `error` | L0 | `sanitizer_runtime_required` | — |
 | `secondary_vtable_group_changed` | breaking | `BREAKING` | `error` | L1 | `secondary_vtable_group_changed` | [case174](examples/case174_secondary_vtable_group_changed.md) |
 | `serialization_tag_changed` | breaking | `BREAKING` | `error` | L2 | `serialization_tag_changed` | [case81](examples/case81_serialization_tag_reassigned.md) |
 | `soname_bump_recommended` | quality | `COMPATIBLE` | `warning` | unspecified | `soname_bump_recommended` | — |
