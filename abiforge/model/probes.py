@@ -48,6 +48,10 @@ _VTABLE_ROLES: dict[str, RoleText] = {
         "struct VFn { virtual ~VFn(); virtual int f(); };\nVFn* vfn_make();",
         "VFn::~VFn() {}\nint VFn::f() { return 7; }\nVFn* vfn_make() { return new VFn(); }",
     ),
+    "vt.unfinal": (
+        "struct VUf { virtual ~VUf(); virtual int f() final; };\nVUf* vuf_make();",
+        "VUf::~VUf() {}\nint VUf::f() { return 14; }\nVUf* vuf_make() { return new VUf(); }",
+    ),
     "vt.dtoradd": (
         "struct VDa { virtual int f(); ~VDa(); };\nVDa* vda_make();",
         "int VDa::f() { return 8; }\nVDa::~VDa() {}\nVDa* vda_make() { return new VDa(); }",

@@ -135,6 +135,22 @@ VTABLE_OPERATORS: tuple[EditOp, ...] = (
         min_evidence="headers",
     ),
     _op(
+        "virtual_lost_final",
+        "vt.unfinal",
+        _replace(
+            "vt.unfinal",
+            "struct VUf { virtual ~VUf(); virtual int f() final; };",
+            "struct VUf { virtual ~VUf(); virtual int f(); };",
+        ),
+        "VUf::f stops being final: slot and symbol are unchanged and existing "
+        "source still compiles, but calls compiled while it was final may have "
+        "been devirtualized and never reach a new override",
+        expected=frozenset({"FUNC_LOST_FINAL"}),
+        verdict_min="COMPATIBLE_WITH_RISK",
+        verdict_max="COMPATIBLE_WITH_RISK",
+        min_evidence="headers",
+    ),
+    _op(
         "destructor_became_virtual",
         "vt.dtoradd",
         _replace(
