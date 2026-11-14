@@ -94,6 +94,30 @@ The PE, Mach-O, DWARF and storage-v2 entries were closed on 2026-11-13 (see
 the archive); the CLI-level matrix over the same inputs is
 `tests/test_corrupt_input_matrix.py`.
 
+#### Removing every public `_avx2`-style variant of a function family reads as a risk (2026-11-14)
+
+**Status (2026-11-14): OPEN.** When three or more exported functions with one ISA suffix are removed while siblings under another ISA survive, `diff_cpp_patterns` rolls the removals into one `cpu_dispatch_isa_dropped` finding graded `COMPATIBLE_WITH_RISK`, even when the removed functions are declared in the public headers. A binary that calls `ksum_avx2` directly no longer loads, which is a binary break. Catalog case83 (`catalog/ground_truth.json`) encodes the same risk grading, so changing it is a ground-truth decision: one option is to grade the roll-up `BREAKING` when any rolled-up symbol is a header-declared public function. Found by the edit corpus (`cpu_dispatch_variants_dropped` on `cxx_more`). Owner: `diff_cpp_patterns.py`, `compare/naming_conventions.py`.
+`wrong-verdict` — a public removal is graded a risk.
+<!-- no-canary: pinned by the edit corpus's strict-xfail `cpu_dispatch_variants_dropped` entry in abiforge/known.py, which fails once the answer changes -->
+
+#### A change to a public typedef no function uses is demoted out of the surface (2026-11-14)
+
+**Status (2026-11-14): OPEN.** Snapshot typedefs are a plain name-to-type map with no declaring header. `surface.py`'s `_demote_by_reachability` moves a change to a typedef that no function reaches into `out_of_surface_changes` (reason `no-provenance`), so `typedef_version_sentinel` for a renamed `foo_version_1_2_3` sentinel, and `typedef_removed` for any unused public typedef, read `NO_CHANGE`. castxml already computes each typedef's header (`parse_public_typedef_headers`), but only the L4 path keeps it. Fixing it means recording typedef provenance in the L2 snapshot for all header backends. Found by the edit corpus (`version_sentinel_typedef_bumped` on `cxx_more`). Owner: `surface.py`, the snapshot typedef model.
+`false-clean` — a public typedef change is dropped as out of surface.
+<!-- no-canary: pinned by the edit corpus's strict-xfail `version_sentinel_typedef_bumped` entry in abiforge/known.py, which fails once the answer changes -->
+
+#### A struct that becomes a class with the same members reads as an API break (2026-11-14)
+
+**Status (2026-11-14): OPEN.** `source_level_kind_changed` defaults to `API_BREAK` (ADR-011's API-break tier; only the `sdk_vendor` profile downgrades it). Changing the class-key alone, with the same public members, breaks neither source compatibility (a mismatched class-key in a forward declaration is at most a warning) nor the Itanium ABI. Default-access consequences are reported separately (`field_access_changed`, `method_access_changed`, `base_class_access_narrowed`), and MSVC's class-key mangling already shows as PE export removal and addition. Grading it compatible needs an ADR-011 amendment. Found by the edit corpus (`struct_became_class` on `cxx_more`). Owner: `model/change_catalog` (`types_1.py`), ADR-011.
+`false-positive` — a compatible class-key change is graded an API break.
+<!-- no-canary: pinned by the edit corpus's strict-xfail `struct_became_class` entry in abiforge/known.py, which fails once the answer changes -->
+
+#### castxml and DWARF carry no data size, so a tail-padding reuse change is missed (2026-11-14)
+
+**Status (2026-11-14): OPEN.** `TAIL_PADDING_REUSE_CHANGED` compares `data_size_bits` (dsize), which only the gcc-plugin and clang header backends record. castxml has no data size, and the DWARF backfill passes through only a header-supplied value. For a record that is not POD for layout, adding a member inside its tail padding keeps sizeof but grows dsize, so a derived class reusing those bytes now overlaps it, and castxml-depth and DWARF-depth compares read `COMPATIBLE`. Computing dsize from castxml would need the C++03 POD-for-layout decision plus the end of the last field or base. Found by the edit corpus (`nonpod_field_added_in_tail_padding` on `cxx_more`). Owner: `extract/headers/castxml`, `extract/dwarf_layout_backfill.py`.
+`wrong-verdict` — a tail-padding reuse risk is missed without a data size.
+<!-- no-canary: pinned by the edit corpus's strict-xfail `nonpod_field_added_in_tail_padding` entry in abiforge/known.py, which fails once the answer changes -->
+
 #### A new export that mangles an unnamed type is flagged only in an ELF library (2026-11-14)
 
 **Status (2026-11-14): OPEN.** `diff_unnamed_types` reports `unnamed_type_in_public_abi` for a newly exported symbol whose mangled name carries an unnamed-type token (`Ut_`, a closure), but it reads exports only from the ELF symbol table (`requires_support` demands ELF metadata on both sides, and the name filter expects the ELF `_Z` prefix). The same export in a Mach-O library (`__Z...Ut_`) or a PE library reads `COMPATIBLE` with no finding. Found by the edit corpus (`unnamed_type_api_added` on `cxx_more`, macOS). Owner: `diff_unnamed_types.py`.

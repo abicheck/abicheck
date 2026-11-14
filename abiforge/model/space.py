@@ -371,6 +371,9 @@ OP_EDIT_CLASS: dict[str, dict[str, str]] = {
         "record_lost_trivially_copyable": "record_triviality_change",
         "record_lost_standard_layout": "member_access_change",
         "reserved_field_used": "member_rename",
+        "nonpod_field_added_in_tail_padding": "insert_tail_absorbed",
+        "opaque_record_defined": "record_defined",
+        "struct_became_class": "record_kind_change",
         "field_retyped_abi_equivalent": "retype_same_layout",
     },
     "inheritance": {
@@ -451,6 +454,8 @@ OP_EDIT_CLASS: dict[str, dict[str, str]] = {
         # symbol changes type
         "gnu_unique_static_added": "function_added",
         "comment_only": "declaration_text_only",
+        "cpu_dispatch_variants_dropped": "function_removed",
+        "overload_retyped": "param_retyped",
         "experimental_api_graduated": "function_added",
         "experimental_api_removed": "function_removed",
         "function_became_customization_object": "function_removed",

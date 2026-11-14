@@ -63,6 +63,18 @@ GAP_GCC_HEADER_ONLY = (
 GAP_UNNAMED_TYPE_ELF_ONLY = (
     "A new export that mangles an unnamed type is flagged only in an ELF library"
 )
+GAP_ISA_ROLLUP_RISK = (
+    "Removing every public `_avx2`-style variant of a function family reads as a risk"
+)
+GAP_UNUSED_TYPEDEF_DEMOTED = (
+    "A change to a public typedef no function uses is demoted out of the surface"
+)
+GAP_CLASS_KEY = (
+    "A struct that becomes a class with the same members reads as an API break"
+)
+GAP_CASTXML_DSIZE = (
+    "castxml and DWARF carry no data size, so a tail-padding reuse change is missed"
+)
 GAP_DEFINE_PROFILE = (
     "A macro that changes the build's ABI makes the two header dumps incomparable"
 )
@@ -411,6 +423,62 @@ _PLATFORM: tuple[Known, ...] = (
 )
 
 KNOWN: tuple[Known, ...] = (
+    Known(
+        "cpu_dispatch_variants_dropped",
+        _MORE,
+        "wrong-verdict",
+        _always,
+        "three declared, exported _avx2 functions are removed: the "
+        "cpu_dispatch_isa_dropped roll-up grades the removal a risk "
+        "(catalog case83 encodes the same choice)",
+        GAP_ISA_ROLLUP_RISK,
+        issues=frozenset({"missing:SONAME_BUMP_RECOMMENDED", "weaker-than:BREAKING"}),
+        verdicts=frozenset({"COMPATIBLE_WITH_RISK"}),
+        also_cls=frozenset({"false-clean"}),
+    ),
+    Known(
+        "version_sentinel_typedef_bumped",
+        _MORE,
+        "wrong-verdict",
+        _always,
+        "typedef_version_sentinel is emitted, then demoted out of the surface "
+        "(no-provenance): snapshot typedefs carry no declaring header",
+        GAP_UNUSED_TYPEDEF_DEMOTED,
+        issues=frozenset(
+            {"missing:TYPEDEF_VERSION_SENTINEL", "weaker-than:COMPATIBLE"}
+        ),
+        verdicts=frozenset({"NO_CHANGE"}),
+        also_cls=frozenset({"wrong-kind"}),
+    ),
+    Known(
+        "struct_became_class",
+        _MORE,
+        "false-positive",
+        _always,
+        "source_level_kind_changed is API_BREAK by default (ADR-011), though a "
+        "class-key change with the same public members breaks neither source "
+        "nor the Itanium ABI",
+        GAP_CLASS_KEY,
+        issues=frozenset({"stronger-than:COMPATIBLE_WITH_RISK"}),
+        verdicts=frozenset({"API_BREAK"}),
+        also_cls=frozenset({"wrong-verdict"}),
+    ),
+    Known(
+        "nonpod_field_added_in_tail_padding",
+        _MORE,
+        "wrong-verdict",
+        lambda c: (
+            not (c.evidence == "headers" and c.header_backend in ("gcc", "clang"))
+        ),
+        "only the gcc-plugin and clang header backends record a record's data "
+        "size; castxml and DWARF do not, so the dsize change is invisible",
+        GAP_CASTXML_DSIZE,
+        issues=frozenset(
+            {"missing:TAIL_PADDING_REUSE_CHANGED", "weaker-than:COMPATIBLE_WITH_RISK"}
+        ),
+        verdicts=frozenset({"COMPATIBLE"}),
+        also_cls=frozenset({"wrong-kind"}),
+    ),
     Known(
         "unnamed_type_api_added",
         _MORE,

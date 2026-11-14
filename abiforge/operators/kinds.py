@@ -246,4 +246,181 @@ KIND_OPERATORS: tuple[EditOp, ...] = (
         verdict_max=None,
         **_HEADERS,
     ),
+    _op(
+        "cpu_dispatch_variants_dropped",
+        "k.isa",
+        _replace(
+            "k.isa",
+            (
+                "int ksum_avx2(int a);\nint kdot_avx2(int a);\nint kscl_avx2(int a);\n",
+                "",
+            ),
+            source=(
+                (
+                    "int ksum_avx2(int a) { return a + 1; }\n"
+                    "int kdot_avx2(int a) { return a + 2; }\n"
+                    "int kscl_avx2(int a) { return a + 3; }\n",
+                    "",
+                ),
+            ),
+        ),
+        "every _avx2 variant is removed while the _sse2 ones stay: binaries "
+        "that bound the AVX2 entry points no longer load",
+        expected=frozenset({"CPU_DISPATCH_ISA_DROPPED"}),
+        **_BINARY,
+    ),
+    _op(
+        "handle_typedef_retargeted",
+        "k.hnd",
+        _replace("k.hnd", ("typedef KHC* khandle;", "typedef void* khandle;")),
+        "the opaque handle now names void*: the pointer is the same size, but "
+        "code that used khandle as a KHC* no longer compiles, and the library "
+        "may now hand out something that is not a KHC",
+        expected=frozenset({"HANDLE_TYPE_CHANGED"}),
+        verdict_min="API_BREAK",
+        verdict_max=None,
+        **_HEADERS,
+    ),
+    _op(
+        "opaque_record_defined",
+        "k.opq",
+        _replace(
+            "k.opq",
+            ("struct KOC;", "struct KOC { int v; };"),
+            source=(("struct KOC { int v; };\n", ""),),
+        ),
+        "the opaque record's definition moves into the header: nothing changes "
+        "for existing binaries, but consumers can now allocate it and read v, "
+        "so its layout becomes part of the contract",
+        expected=frozenset({"OPAQUE_INVARIANT_BROKEN"}),
+        verdict_min="COMPATIBLE",
+        verdict_max=None,
+        **_HEADERS,
+    ),
+    _op(
+        "overload_retyped",
+        "k.ovl",
+        _replace(
+            "k.ovl",
+            ("int kput(int a);", "int kput(long a);"),
+            source=(
+                (
+                    "int kput(int a) { return a; }",
+                    "int kput(long a) { return (int)a; }",
+                ),
+            ),
+        ),
+        "kput(int) becomes kput(long) beside kput(double): the old symbol is "
+        "gone, and recompiled calls with an int argument become ambiguous",
+        expected=frozenset({"OVERLOAD_SET_REROUTED"}),
+        **_BINARY,
+    ),
+    _op(
+        "version_sentinel_typedef_bumped",
+        "k.tvs",
+        _replace("k.tvs", ("kfoo_version_1_2_3", "kfoo_version_1_2_4")),
+        "the typedef that encodes the library version is renamed for the new "
+        "version: nothing is exported for it, but code naming the old "
+        "sentinel stops compiling, which is its purpose",
+        expected=frozenset({"TYPEDEF_VERSION_SENTINEL"}),
+        verdict_min="COMPATIBLE",
+        verdict_max="API_BREAK",
+        **_HEADERS,
+    ),
+    _op(
+        "explicit_instantiation_dropped",
+        "k.inst",
+        lambda r: _set(
+            r,
+            "k.inst",
+            None,
+            XCXX_SEED.roles["k.inst"][1].replace(
+                "\ntemplate double ktwice<double>(double);", ""
+            ),
+        ),
+        "the library stops instantiating ktwice<double>: the header still "
+        "declares the template, so callers compile and then fail to link or load",
+        expected=frozenset({"INSTANTIATION_MISSING_FROM_BINARY"}),
+        **_BINARY,
+    ),
+    _op(
+        "struct_became_class",
+        "k.slk",
+        _replace("k.slk", ("struct KSK { int a; };", "class KSK { public: int a; };")),
+        "struct becomes class with the same public members: Itanium mangles and "
+        "lays out both the same (MSVC mangling distinguishes them)",
+        expected=frozenset({"SOURCE_LEVEL_KIND_CHANGED"}),
+        verdict_min="COMPATIBLE",
+        verdict_max="COMPATIBLE_WITH_RISK",
+        **_HEADERS,
+    ),
+    _op(
+        "tag_type_renamed",
+        "k.tag",
+        _replace(
+            "k.tag",
+            ("struct ktag_a {};", "struct ktag_b {};"),
+            source=(("kfam<ktag_a>", "kfam<ktag_b>"),),
+        ),
+        "the empty tag type used to select a template instantiation is "
+        "renamed: kfam<ktag_a> re-mangles as kfam<ktag_b>",
+        expected=frozenset({"TAG_TYPE_RENAMED"}),
+    ),
+    _op(
+        "mandatory_template_param_added",
+        "k.mtp",
+        _replace(
+            "k.mtp",
+            ("template <class T> struct KMb", "template <class T, class A> struct KMb"),
+            ("KMb<int>* p", "KMb<int, char>* p"),
+            source=(("KMb<int>* p", "KMb<int, char>* p"),),
+        ),
+        "KMb gains a template parameter with no default: every use must name "
+        "it, and kmb_use re-mangles",
+        expected=frozenset({"MANDATORY_TEMPLATE_PARAM_ADDED"}),
+    ),
+    _op(
+        "nonpod_field_added_in_tail_padding",
+        "k.tpr",
+        _replace("k.tpr", ("int i; char c; };", "int i; char c; char d; };")),
+        "d fits KTP's tail padding, so sizeof stays 8, but KTP is not POD for "
+        "layout: its data size grows from 5 to 6, and a class deriving from it "
+        "that placed members in those bytes now overlaps d",
+        expected=frozenset({"TAIL_PADDING_REUSE_CHANGED"}),
+        precondition=_no_pack,
+        verdict_min="COMPATIBLE_WITH_RISK",
+        verdict_max=None,
+    ),
+    _op(
+        "polymorphic_type_added_without_virtual_dtor",
+        "k.pnv",
+        lambda r: _set(
+            r,
+            "k.pnv",
+            "struct KPn { virtual int run(); };\nKPn* kpn_make();",
+            "int KPn::run() { return 1; }\nKPn* kpn_make() { return new KPn(); }",
+        ),
+        "a new polymorphic class handed out by pointer has no virtual "
+        "destructor: deleting it through a base pointer is undefined, a hazard "
+        "the release introduces, though nothing existing changes",
+        expected=frozenset({"POLYMORPHIC_TYPE_NON_VIRTUAL_DTOR"}),
+        **_RISK,
+        **_HEADERS,
+    ),
+    _op(
+        "stl_by_value_api_added",
+        "k.stl",
+        lambda r: _set(
+            r,
+            "k.stl",
+            "#include <string>\nint kstl_len(std::string s);",
+            "int kstl_len(std::string s) { return (int)s.size(); }",
+        ),
+        "a new function takes std::string by value: its ABI now depends on the "
+        "standard library's string layout, which a consumer built against "
+        "another library or dual-ABI setting does not share",
+        expected=frozenset({"PUBLIC_API_EXPOSES_STL_BY_VALUE"}),
+        **_RISK,
+        **_HEADERS,
+    ),
 )
