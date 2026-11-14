@@ -41,6 +41,16 @@ def _regions(text: str) -> list[tuple[str, int, int]]:
         pytest.param(
             'const char *s = "x\\\\\r\nn/*";\n', [("A", 4, 4)], id="splice-crlf"
         ),
+        # After the splice, the first backslash escapes the quote that opens
+        # the next line, so the literal goes on past it.
+        pytest.param(
+            'const char *s = "x\\\\\n"/*";\n', [("A", 4, 4)], id="splice-quote-lf"
+        ),
+        pytest.param(
+            'const char *s = "x\\\\\r\n"/*";\n',
+            [("A", 4, 4)],
+            id="splice-quote-crlf",
+        ),
         # Controls both scanners always got right.
         pytest.param('const char *p = "/*";\n', [("A", 3, 3)], id="plain-string"),
         pytest.param("/*\n", [], id="open-comment"),

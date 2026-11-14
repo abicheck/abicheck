@@ -235,21 +235,30 @@ def _blank_scan_block_comment(text: str, i: int, out: list[str]) -> tuple[int, s
     return i + 1, "block_comment"
 
 
+def _skip_splices(text: str, j: int) -> int:
+    """The first offset at or after *j* that is not inside a backslash-newline
+    (LF or CRLF) line splice."""
+    while text.startswith("\\\n", j) or text.startswith("\\\r\n", j):
+        j += 2 if text[j + 1] == "\n" else 3
+    return j
+
+
 def _blank_scan_literal(
     text: str, i: int, out: list[str], state: str, blank_strings: bool
 ) -> tuple[int, str]:
     """One scanner step inside a string/char literal; returns ``(next_offset, next_state)``."""
     ch = text[i]
-    nxt = text[i + 1] if i + 1 < len(text) else ""
     quote = '"' if state == "string" else "'"
     if ch == "\\":
-        # Keep the escape + escaped char verbatim when preserving strings,
-        # else blank both (newlines always survive for line accounting).
-        if not blank_strings:
-            out.append(ch + (nxt if nxt else ""))
-        else:
-            out.append("  " if nxt != "\n" else " \n")
-        return i + 2, state
+        # Line splices are removed before escapes are read, so the escaped
+        # character is the first one after any splices following this
+        # backslash (``"x\\<newline>"`` escapes the quote that starts the
+        # next line). Keep the run verbatim when preserving strings, else
+        # blank it (newlines always survive for line accounting).
+        end = _skip_splices(text, i + 1) + 1
+        run = text[i:end]
+        out.append(run if not blank_strings else _blank_run(run))
+        return end, state
     if ch == quote:
         out.append(quote)
         return i + 1, "code"

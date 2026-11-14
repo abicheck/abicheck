@@ -267,7 +267,7 @@
       "abicheck/buildsource/l5_ast_run.py": "819d2e615617945d0bdb2319765a757a5edbb18fc5b5373e949e83ee2e113e12",
       "abicheck/buildsource/macro_graph.py": "4f7ec08b99b3fc40c2a4fc4122572598f8593b33ea31be856001e96b262cae77",
       "abicheck/buildsource/override_graph.py": "0503453212b0604119db1ecf845b629a4e9f790566258855eeddf417f8cb21a7",
-      "abicheck/buildsource/pattern_facts_lexer.py": "a0d0e0443ffcdd867e7d24dd552393acd82fd29e9fe84d414bae22ff39c70457",
+      "abicheck/buildsource/pattern_facts_lexer.py": "6f253b43e77ccf3e0678d8a6d00559785d41dfd569893b3784f9d2a733669a6c",
       "abicheck/buildsource/semantic_fact_folds.py": "38f3a5be0b70d62ab840a4bfcd8352abaeeabdfe7553e400c1dca8cdee71c070",
       "abicheck/buildsource/source_abi.py": "e2aa5f24a956d5b68bc57716b987f3844c08786173b80f3befb2b58075544d6f",
       "abicheck/buildsource/source_extractors/__init__.py": "e9e5ede124cabdf4ec712339609cc91450a8e5fcb261dfb9f49a4de60c0d45c2",
@@ -304,8 +304,8 @@
       "abicheck/buildsource/type_graph.py": "e836e687fe95d52f6483a70893cff385b8d175284e6f5bebadaa2b805b7387c5",
       "abicheck/buildsource/type_graph_index.py": "456fd36d7d326e2001855f1768bdadee49ab738a9c515f57f557bc5e5b693ced"
     },
-    "fingerprint": "7492e16d9805fae43aa1423319f1e20523fc1eba8fd404c6b5c6f16fd16234d3",
+    "fingerprint": "3051e529647f0aaa792753ba2521b4162207ec47e5f3cb8fa692104decd111f8",
     "generation": 15,
-    "reason": "generation 15 is introduced by this unmerged PR (#2064); the line-splice fix lands in the same generation"
+    "reason": "generation 15 is introduced by this unmerged PR (#2064); the escape-then-splice fix lands in the same generation"
   }
 }
