@@ -173,14 +173,22 @@ def _field_names(body: str) -> list[str]:
     field named by its declarator; any other ``(`` left is a member function.
     A bit-field and a static data member are skipped (``offsetof`` is
     ill-formed on both); an access label (``private:``) is not a declaration,
-    and a default member initializer (``= 4``, ``{4}``) is not the name.
+    and a default member initializer (``= 4``, ``{4}``) is not the name. A
+    field under a ``protected:``/``private:`` label is skipped too: outside
+    the class ``offsetof`` cannot name it (a ``struct`` body starts public).
     """
     names = []
+    public = True
     for decl in body.split(";"):
         decl = _ATTRIBUTE.sub("", decl)
         decl = re.sub(r"\[\[.*?\]\]", "", decl)
         decl = re.sub(r"\b(?:alignas|_Alignas)\s*\([^()]*\)", "", decl)
+        labels = re.findall(r"\b(public|protected|private)\s*:(?!:)", decl)
+        if labels:
+            public = labels[-1] == "public"
         decl = re.sub(r"\b(?:public|protected|private)\s*:(?!:)", "", decl)
+        if not public:
+            continue
         if re.search(r"\bstatic\b", decl):
             continue  # a static data member: not part of the layout
         pointer = _FUNC_POINTER.search(decl)

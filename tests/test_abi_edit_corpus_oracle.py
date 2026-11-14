@@ -933,9 +933,10 @@ def test_a_std_seed_needs_one_cxx_library_on_both_sides(
         ("void (* handler )(void *, int)", ["handler"]),
         ("char tag[8]", ["tag"]),
         ("[[deprecated]] int legacy", ["legacy"]),
-        ("private:\n  int hidden", ["hidden"]),
-        ("protected: mutable int hits", ["hits"]),
         ("public:\n  volatile int reg", ["reg"]),
+        # A label carries across declarations: only public members are named.
+        ("int a; protected: int b; int c; public: int d", ["a", "d"]),
+        ("private: int a; public: int b; private: int c", ["b"]),
         ("int depth = 4", ["depth"]),
         ("int mode{1}", ["mode"]),
         ("char tag[8] = {0}", ["tag"]),
@@ -947,6 +948,8 @@ def test_a_std_seed_needs_one_cxx_library_on_both_sides(
         ("static int count", []),
         ("private:\n  static int count", []),
         ("static const int k", []),
+        ("private:\n  int hidden", []),
+        ("protected: mutable int hits", []),
     ],
     ids=str,
 )
