@@ -328,6 +328,17 @@ _MEMBERS = (
         expected=frozenset({"TYPE_BECAME_ABSTRACT", "VTABLE_SLOT_COUNT_CHANGED"}),
         rules=(
             Rule(
+                lambda c: c.objfmt != "elf" and c.evidence != "binary",
+                {
+                    "expected": frozenset(
+                        {"TYPE_BECAME_ABSTRACT", "TYPE_VTABLE_CHANGED"}
+                    )
+                },
+                "VTABLE_SLOT_COUNT_CHANGED reads the _ZTV symbol size from the "
+                "ELF symbol table (diff_elf_layout requires an ELF snapshot); "
+                "off ELF the debug/header vtable comparison names the growth",
+            ),
+            Rule(
                 lambda c: c.evidence == "binary",
                 {"expected": frozenset({"VTABLE_SLOT_COUNT_CHANGED"})},
                 "symbols alone show the longer vtable, not that Base is abstract",
@@ -420,6 +431,13 @@ _LINKAGE = (
             frozenset({"BASE_CLASS_OFFSET_CHANGED"}),
         ),
         rules=(
+            Rule(
+                lambda c: c.objfmt == "macho" and c.evidence != "binary",
+                {"any_of": (frozenset({"BASE_CLASS_OFFSET_CHANGED"}),)},
+                "Mach-O: VTABLE_THUNK_OFFSET_CHANGED reads thunk names from the "
+                "ELF symbol table (diff_elf_layout requires an ELF snapshot); "
+                "the debug/header lane still records B2's new offset",
+            ),
             Rule(
                 lambda c: c.evidence == "binary",
                 {"any_of": (frozenset({"VTABLE_THUNK_OFFSET_CHANGED"}),)},
