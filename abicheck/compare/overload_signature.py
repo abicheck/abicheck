@@ -41,6 +41,7 @@ if TYPE_CHECKING:
 
 OverloadKey = tuple[tuple[str, ...], bool, bool, str]
 
+
 def _declared_key(f: Function) -> OverloadKey:
     return (
         tuple(p.type for p in f.params),
