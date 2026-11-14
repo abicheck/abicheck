@@ -107,6 +107,7 @@
           "reexported_libs",
           "rpaths",
           "rpaths_fact",
+          "sizes_derived",
           "weak_dependent_libs",
           "weak_dependent_libs_fact"
         ],
@@ -114,6 +115,8 @@
           "is_data",
           "is_weak",
           "name",
+          "size",
+          "size_bound_by",
           "sym_type"
         ],
         "pe": [
@@ -143,7 +146,7 @@
         "section_kind",
         "section_schema_version"
       ],
-      "section_schema_version": 1
+      "section_schema_version": 2
     },
     "build": {
       "fields": {

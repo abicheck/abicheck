@@ -6,7 +6,7 @@
 | **New version** | `2.0` |
 | **Verdict** | ✅ `COMPATIBLE` |
 
-> ⚠️ Detector 'elf_layout' disabled: missing ELF metadata on one side
+> ⚠️ Detector 'elf_layout' disabled: missing ELF or Mach-O symbol metadata on one side
 > ⚠️ Detector 'fingerprint_renames' disabled: missing ELF metadata on both sides
 > ⚠️ Detector 'kabi' disabled: missing Module.symvers (kABI) metadata
 > ⚠️ Detector 'long_double' disabled: missing ELF metadata on one side

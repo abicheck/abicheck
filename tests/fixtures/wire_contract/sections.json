@@ -16,8 +16,8 @@
         "source_path",
         "source_size"
       ],
-      "section_schema_version": 1,
-      "sha256": "42f6702a1baea99ac08218e51e59815fc352928df80ff6dc80fc26201d6129eb"
+      "section_schema_version": 2,
+      "sha256": "4bdf9b31c90225a332f92a9fa8acb1e609aed2d1c30d2800fee315bc5ea62a9f"
     },
     "build": {
       "fields": [
@@ -104,7 +104,7 @@
         "version"
       ],
       "section_schema_version": 1,
-      "sha256": "a28add0937b38c9b7bb6904366eea54cf4ff1e1898e58a56f1b32d7fa98b73ce"
+      "sha256": "34f6ea6c32205258b84aabfb721d7a25c19f37d5a780daff4263199482cc1314"
     },
     "types": {
       "fields": [
