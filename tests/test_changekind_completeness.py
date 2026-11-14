@@ -30,11 +30,16 @@ from abicheck.model import (
 # corresponding scenario) must be updated – the meta-test below will fail
 # until that happens.
 ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
+    # tests/test_runtime_requirements.py
+    ChangeKind.SANITIZER_RUNTIME_REQUIRED,
+    ChangeKind.IMPORTED_SYMBOL_UNPROVIDED,
     # tests/test_concept_constraint_direction.py
     ChangeKind.CONCEPT_CONSTRAINT_CHANGED,
     # tests/test_header_only_params_regrade.py
     ChangeKind.HEADER_ONLY_FUNCTION_PARAMS_CHANGED,
     ChangeKind.ABI_EQUIVALENT_TYPE_CHANGED,
+    # tests/test_covariant_return_and_override_slots.py
+    ChangeKind.FUNC_RETURN_COVARIANT_NARROWED,
     ChangeKind.ABI_RELEVANT_BUILD_FLAG_CHANGED,
     ChangeKind.ANON_FIELD_CHANGED,
     ChangeKind.BASE_CLASS_POSITION_CHANGED,
@@ -466,6 +471,9 @@ ASSERTED_CHANGE_KINDS: set[ChangeKind] = {
     ChangeKind.ENUM_BECAME_SCOPED,
     ChangeKind.ENUM_LOST_SCOPED,
     ChangeKind.FUNC_OVERRIDE_SPECIFIER_ADDED,
+    # tests/test_function_final_specifier.py
+    ChangeKind.FUNC_BECAME_FINAL,
+    ChangeKind.FUNC_LOST_FINAL,
     ChangeKind.FUNC_OVERRIDE_SPECIFIER_REMOVED,
     ChangeKind.FIELD_DEFAULT_INITIALIZER_REMOVED,
     ChangeKind.FIELD_DEFAULT_INITIALIZER_CHANGED,
@@ -971,13 +979,13 @@ class TestInlineTransitions:
         result = compare(old, new)
         assert ChangeKind.FUNC_BECAME_INLINE in _kinds(result)
 
-    def test_func_became_inline_is_api_break(self) -> None:
-        """FUNC_BECAME_INLINE must be classified as API_BREAK (not BREAKING)."""
+    def test_func_became_inline_is_a_risk(self) -> None:
+        """FUNC_BECAME_INLINE is a risk (ADR-081 2026-11 amendment): the break,
+        when there is one, is the export vanishing, a finding of its own."""
         old = _snap(functions=[_func("foo", "_Z3foov", is_inline=False)])
         new = _snap(functions=[_func("foo", "_Z3foov", is_inline=True)])
         result = compare(old, new)
         assert ChangeKind.FUNC_BECAME_INLINE in _kinds(result)
-        # No header observation: ADR-084 demotes this source-level claim.
         assert result.verdict == Verdict.COMPATIBLE_WITH_RISK
 
     def test_func_lost_inline_detected(self) -> None:

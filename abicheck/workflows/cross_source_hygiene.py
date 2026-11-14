@@ -192,6 +192,7 @@ from ..buildsource.cross_source_checks import (
     CrosscheckConfig,
     run_crosschecks,
 )
+from ..buildsource.unversioned_base_exports import introduced_base_bound_exports
 from ..model import AbiSnapshot
 from ..model.change import Change
 from ..model.evidence_status import CrossSourceEvolution
@@ -393,6 +394,17 @@ def compute_cross_source_evolution(old: AbiSnapshot, new: AbiSnapshot) -> list[C
     for check in sorted(member_owned_checks(CROSS_SOURCE_EVOLUTION_CHECKS)):
         old_evaluated, old_findings = _run_one_side(old, check)
         new_evaluated, new_findings = _run_one_side(new, check)
+        if (
+            check == CHECK_UNVERSIONED_EXPORTED_SYMBOL
+            and old_evaluated
+            and new_evaluated
+        ):
+            # The two-sided half: a base-bound export new in this release
+            # (buildsource/unversioned_base_exports). Absent on an evaluated
+            # OLD, so the loop below reads it INTRODUCED.
+            identity = _IDENTITY_FUNCS.get(check, _default_identity)
+            for found in introduced_base_bound_exports(old, new):
+                new_findings.setdefault(identity(found), found)
 
         for key in sorted(set(old_findings) | set(new_findings), key=repr):
             old_hit = key in old_findings

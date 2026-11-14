@@ -103,3 +103,20 @@ being the stale one;
 Done in PR #1570: D1, D2, D3′, D4′, D5 (rejected), and the tests in D6.
 Not done: the conversion of `Function.is_inline` (deferred above), and the
 re-save warning (open question 2).
+
+## Amendment 2026-11-14: `FUNC_BECAME_INLINE` is a risk, not a source break
+
+The catalog classified `FUNC_BECAME_INLINE` as `API_BREAK` on the ground that
+a header snapshot cannot tell an `inline` declaration with a visible
+definition from one without, and an odr-used inline function needs its
+definition in every translation unit. That ground does not hold: a
+recompiled caller either sees the definition in the header or emits a call
+to the external symbol, and while the library keeps exporting it that call
+resolves. The only way callers break is the export disappearing, which
+`func_removed`/`func_visibility_changed` already report wherever the export
+table is in evidence. Reporting the attribute change as `API_BREAK` read a
+compatible key-function move (a virtual's out-of-line definition made
+in-class, the symbol still exported weak) as a source break (edit corpus
+`key_function_inlined`). `FUNC_BECAME_INLINE` now defaults to
+`COMPATIBLE_WITH_RISK` (rebuilt callers carry their own copy of the body),
+which is the verdict this ADR's Context already assumed.

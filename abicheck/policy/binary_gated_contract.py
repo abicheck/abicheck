@@ -97,7 +97,6 @@ BINARY_GATED: frozenset[ChangeKind] = frozenset(
         ChangeKind.INLINE_FUNCTION_REMOVED,
         ChangeKind.TYPE_REMOVED,
         ChangeKind.EXPERIMENTAL_REMOVED_WITHOUT_REPLACEMENT,
-        ChangeKind.UNSPECIFIED_RETURN_NOW_NAMED,
         # Hard-coded public_reachable before ADR-084; now from observed evidence.
         ChangeKind.STD_REEXPORT_REMOVED,
         ChangeKind.TAG_TYPE_RENAMED,
@@ -114,7 +113,6 @@ BINARY_GATED: frozenset[ChangeKind] = frozenset(
         ChangeKind.METHOD_ACCESS_CHANGED,
         ChangeKind.VAR_ACCESS_CHANGED,
         ChangeKind.CTOR_EXPLICIT_ADDED,
-        ChangeKind.FUNC_BECAME_INLINE,
         ChangeKind.FUNC_RETURN_POINTEE_QUALIFIER_ADDED,
         ChangeKind.FUNC_RETURN_POINTEE_QUALIFIER_CHANGED,
         ChangeKind.PARAM_POINTEE_QUALIFIER_CHANGED,
@@ -134,6 +132,9 @@ NON_BINARY_REASONS: Mapping[ChangeKind, str] = {
     ),
     ChangeKind.FUNC_VIRTUAL_NOEXCEPT_ADDED: (
         "header exception specifications (compare/noexcept_change)"
+    ),
+    ChangeKind.FUNC_BECAME_FINAL: (
+        "header final virt-specifiers (compare/function_final)"
     ),
     ChangeKind.HEADER_ONLY_FUNCTION_PARAMS_CHANGED: (
         "a header-AST declaration with a confirmed-absent export, or L4 replay"

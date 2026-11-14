@@ -32,9 +32,9 @@ Generic detectors for failure modes common to template-heavy libraries
 * ``MANDATORY_TEMPLATE_PARAM_ADDED`` — heuristic for templates whose
   effective parameter count grew (defaulted/deduced → mandatory).
 
-* ``UNSPECIFIED_RETURN_NOW_NAMED`` — a factory function's return-type
-  spelling flipped between an unspecified placeholder (``auto``,
-  ``__lambda``, ``(unnamed class)``) and a stable named type.
+* ``UNSPECIFIED_RETURN_NOW_NAMED`` — a function's return-type spelling
+  went from an unspecified placeholder (``auto``, a lambda closure, an
+  ``(unnamed class)``) to a named type: source compatible.
 
 These detectors are deliberately *signature-based* and do not require
 running a compiler — they consume the standard ``AbiSnapshot`` produced
@@ -75,6 +75,7 @@ from .compare.template_surface import (
     template_angle_depth,
 )
 from .diff_helpers import make_change
+from .model.castxml_spelling_artifacts import has_unresolved_component
 from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
 from .model.evidence_status import ReachabilityState
@@ -500,9 +501,7 @@ def _canonical_identity_name(
     instead, because they care about the *source-level* spelling
     (``CPO_KIND_CHANGED`` and friends); switching that precedence there
     too would silently defeat detectors that depend on a declared name
-    genuinely diverging from its demangled/underlying name (e.g.
-    ``diff_namespaces.detect_std_reexport_removed``'s whole premise is
-    that split).
+    genuinely diverging from its demangled/underlying name.
 
     **Residual gap, deliberately not chased here** (Codex review finding):
     when no demangler is available at all (no ``cxxfilt`` package and no
@@ -958,39 +957,34 @@ def detect_mandatory_template_param_added(
 # ---------------------------------------------------------------------------
 
 
-# Return-type spellings we treat as "unspecified". These all share the
-# property that the consumer must use ``auto`` to capture the result.
-_UNSPECIFIED_RETURN_MARKERS: tuple[str, ...] = (
-    "auto",
-    "__lambda",
-    "(unnamed",
-    "(anonymous",
-    "{lambda",
-    "<lambda",
-    "decltype(",
+# Return-type spellings we treat as "unspecified": a deduced placeholder
+# (``auto``, ``decltype(auto)``, ``decltype(expr)``) or an unnamed type --
+# a lambda closure as each producer spells it (GCC ``f()::<lambda(int)>`` /
+# DWARF ``{lambda(int)#1}``, clang ``(lambda:a.h:2:22)``, legacy
+# ``__lambda``) or an unnamed record (``(unnamed class ...)``, castxml and
+# clang; ``(anonymous ...)``). ``auto`` is a keyword, so it is matched as a
+# whole word: ``std::auto_ptr<T>`` names a type.
+_UNSPECIFIED_RETURN_RE = re.compile(
+    r"\bauto\b|\bdecltype\s*\(|__lambda|[({<]lambda\b|\((?:unnamed|anonymous)\b"
 )
 
 
 def _return_is_unspecified(rt: str) -> bool:
-    if not rt:
-        return False
-    rt = rt.strip()
-    if rt == "auto":
-        return True
-    return any(m in rt for m in _UNSPECIFIED_RETURN_MARKERS)
+    return bool(rt) and _UNSPECIFIED_RETURN_RE.search(rt) is not None
 
 
 def detect_unspecified_return_now_named(
     old: AbiSnapshot,
     new: AbiSnapshot,
 ) -> list[Change]:
-    """Report functions whose return type flipped between unspecified and named.
+    """Report functions whose unspecified return type became a named one.
 
     Matches public functions across snapshots by ``(qualified_name,
-    param-type-tuple)``. If the return type was unspecified in one
-    snapshot and named in the other, emit a finding. The two directions
-    are reported with different descriptions so reviewers see whether
-    they gained or lost a deduced return.
+    param-type-tuple)``. Only the unspecified -> named direction is this
+    kind: it keeps every caller compiling (they could only use ``auto``).
+    The reverse, a named return becoming unnameable, breaks callers that
+    spell the type and is a return-type change, which
+    ``func_return_changed`` reports from the same two spellings.
     """
 
     def _index(
@@ -1013,25 +1007,16 @@ def detect_unspecified_return_now_named(
     for key in sorted(set(old_idx) & set(new_idx)):
         old_f, new_f = old_idx[key], new_idx[key]
         old_rt, new_rt = old_f.return_type, new_f.return_type
-        old_unspec = _return_is_unspecified(old_rt)
-        new_unspec = _return_is_unspecified(new_rt)
-        if old_unspec == new_unspec:
+        if not _return_is_unspecified(old_rt) or _return_is_unspecified(new_rt):
             continue
+        if not new_rt or has_unresolved_component(new_rt):
+            continue  # no (or an unresolved) spelling: not a named type
         qname, _params = key
-        if old_unspec:
-            desc = (
-                f"Function '{qname}' return type changed from unspecified "
-                f"('{old_rt}') to named ('{new_rt}'). Source that captured "
-                f"the result with `auto` keeps compiling; source that wrote "
-                f"out the deduced type no longer matches."
-            )
-        else:
-            desc = (
-                f"Function '{qname}' return type changed from named "
-                f"('{old_rt}') to unspecified ('{new_rt}'). Source that "
-                f"wrote out the type no longer compiles; only `auto` "
-                f"captures it now."
-            )
+        desc = (
+            f"Function '{qname}' return type changed from unspecified "
+            f"('{old_rt}') to named ('{new_rt}'). Source that held the result "
+            f"with `auto` keeps compiling; the return type is now a nameable part of the interface."
+        )
         changes.append(
             make_change(
                 ChangeKind.UNSPECIFIED_RETURN_NOW_NAMED,

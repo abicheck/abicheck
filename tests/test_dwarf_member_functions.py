@@ -224,13 +224,10 @@ def test_a_virtual_that_became_pure_is_reported_from_clang_dwarf(
     assert result.verdict == Verdict.BREAKING
 
 
-@pytest.mark.known_gap_canary
-@pytest.mark.xfail(
-    strict=True,
-    reason="GCC 13 writes DW_VIRTUALITY_virtual for a pure virtual, so DWARF cannot "
-    "tell it became pure (docs/contribute/known-gaps.md)",
-)
 def test_a_virtual_that_became_pure_is_reported_from_gcc_dwarf(tmp_path: Path) -> None:
+    # GCC 13 writes DW_VIRTUALITY_virtual for a pure virtual; the emitted
+    # vtable's __cxa_pure_virtual slot carries the fact instead
+    # (extract/elf_pure_virtual_slots.py). Was a known-gap canary.
     result, kinds = _became_pure(tmp_path, "gcc")
     assert ChangeKind.FUNC_VIRTUAL_BECAME_PURE in kinds, kinds
     assert result.verdict == Verdict.BREAKING

@@ -55,6 +55,7 @@ _BELOW_HEADERS = _BELOW_BUILD | {
     "contract",
     "cxx_concept_constraints",
     "cxx_template_defaults",
+    "std_reexports",
     "from_headers",
     "declarations.types",
     "declarations.enums",

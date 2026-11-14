@@ -267,7 +267,7 @@
     },
     {
       "path": "abicheck/checker.py",
-      "baseline_lines": 1382,
+      "baseline_lines": 1370,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -432,7 +432,7 @@
     },
     {
       "path": "abicheck/diff_cpp_patterns.py",
-      "baseline_lines": 1034,
+      "baseline_lines": 1032,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -476,7 +476,7 @@
     },
     {
       "path": "abicheck/diff_platform.py",
-      "baseline_lines": 1616,
+      "baseline_lines": 1615,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -497,19 +497,8 @@
       "review_by": "2026-11-30"
     },
     {
-      "path": "abicheck/diff_platform_elf_symbols.py",
-      "baseline_lines": 815,
-      "target": "compare",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_compare_monolith",
-      "owner": "compare",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Lowered 852 -> 840: same shared predicate, imported at module level instead of function-locally from the dynamic split's private. Baseline bumped 836->852 (2026-09-02, ADR-063 Phase 2): wired Change.entity_id into the two exported-object size/alignment findings via one shared _matched_var_entity_id helper.",
-      "review_by": "2026-11-30"
-    },
-    {
       "path": "abicheck/diff_symbols.py",
-      "baseline_lines": 1421,
+      "baseline_lines": 1417,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -520,7 +509,7 @@
     },
     {
       "path": "abicheck/diff_templates.py",
-      "baseline_lines": 1350,
+      "baseline_lines": 1335,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -531,7 +520,7 @@
     },
     {
       "path": "abicheck/diff_types.py",
-      "baseline_lines": 1486,
+      "baseline_lines": 1485,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -575,7 +564,7 @@
     },
     {
       "path": "abicheck/dwarf_advanced.py",
-      "baseline_lines": 1037,
+      "baseline_lines": 1034,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -586,7 +575,7 @@
     },
     {
       "path": "abicheck/dwarf_snapshot.py",
-      "baseline_lines": 1685,
+      "baseline_lines": 1674,
       "target": "see ADR-061 ownership map",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1246,7 +1235,7 @@
     },
     {
       "path": "tests/test_diff_namespaces.py",
-      "baseline_lines": 1640,
+      "baseline_lines": 1513,
       "target": "tests/unit-or-contract ownership matching production migration",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -1948,7 +1937,6 @@
       "rationale": "New entry, 1108 -> 1367, created by the one-time `ruff format` pass that made `fmt-check` a real CI gate (see docs/contribute/known-gaps.md). This file sat under the 1200-line maximum only because it was unformatted; rewrapping its call sites and expanding magic trailing commas crossed the cap without adding a statement (its parsed statement count is unchanged, verified via `ast.dump`). Recorded as debt rather than exempted so it stays in the no-growth ledger and is split like any other oversized file; the formatting bump is not itself a reason to split, so the target below is the pre-existing ADR-061 ownership question, not this change.",
       "review_by": "2026-11-30"
     }
-
   ],
   "dependency_direction_exceptions": []
 }

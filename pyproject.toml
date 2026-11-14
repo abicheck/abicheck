@@ -400,6 +400,14 @@ also_copy = [
     # down before a single mutant is measured. Same "copy-only, generous
     # rather than minimal" rule as every other entry in this list.
     "architecture",
+    # The edit-corpus generator, a standalone package beside abicheck that the
+    # corpus tests import (`tests/test_abi_edit_corpus*.py`,
+    # `tests/test_edit_corpus_*.py`), and the Lean layout table the edit-axis
+    # test reads (`formal/lean/layout_table.json`). Without them the lane's
+    # selection reaches one of those modules and aborts at stats collection
+    # with "No module named 'abiforge'".
+    "abiforge",
+    "formal",
     "action",
     "action.yml",
     "actions",

@@ -37,6 +37,7 @@ from ..diff_helpers import make_change
 from ..model import Function, Variable
 from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
+from ..model.change_catalog.registry import Verdict
 from ..model.edge_coverage import EdgeAnswer
 from ..model.fact import replace_with_fact_sync
 from ..model.surface_facts import (
@@ -54,6 +55,7 @@ from ..model.surface_facts import (
 )
 from ..model.synthetic_key import is_synthetic_ctor_key, is_synthetic_dtor_key
 from .edge_query import ObservedExportTable
+from .parameter_facts import ParameterView, pointer_level_changes
 
 __all__ = [
     "survives_export_narrowing",
@@ -467,3 +469,40 @@ def regrade_unexported_params(
         else c
         for c in changes
     ]
+
+
+def unexported_aware_pointer_levels(
+    mangled: str,
+    f_old: Function,
+    f_new: Function,
+    v_old: ParameterView,
+    v_new: ParameterView,
+    *,
+    params_unconfirmed: bool,
+) -> list[Change]:
+    """Pointer-level findings for a matched pair, graded like
+    :func:`regrade_unexported_params`: when both sides confirm the
+    declaration has no exported symbol (a ``static inline`` header function),
+    no compiled consumer binds to it, so a parameter or return indirection
+    change is a source/API break, not the kinds' BREAKING default (disclosed
+    via ``modulation_reason``). An unknown or present export keeps BREAKING.
+    """
+    changes = pointer_level_changes(
+        mangled,
+        f_old.name,
+        v_old,
+        v_new,
+        entity_id=f_old.entity_id or f_new.entity_id,
+        params_unconfirmed=params_unconfirmed,
+    )
+    if (
+        changes
+        and is_export_confirmed_absent(f_old)
+        and is_export_confirmed_absent(f_new)
+    ):
+        for change in changes:
+            if change.effective_verdict is None:
+                change.effective_verdict = Verdict.API_BREAK
+                change.modulation_reason = "declaration_never_exported"
+                change.modulation_rule = "pointer_level.unexported_declaration"
+    return changes

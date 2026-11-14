@@ -265,7 +265,11 @@ _DETECTORS = {
 
 
 def test_behavioural_cases_are_binary_gated() -> None:
-    assert set(_DETECTORS) <= BINARY_GATED
+    # unspecified_return_now_named is COMPATIBLE (ADR-084 2026-11-14
+    # amendment): the gate holds only API_BREAK kinds, but its reachability
+    # tags still come from observed evidence, which the cases below check.
+    assert set(_DETECTORS) - {ChangeKind.UNSPECIFIED_RETURN_NOW_NAMED} <= BINARY_GATED
+    assert ChangeKind.UNSPECIFIED_RETURN_NOW_NAMED not in BINARY_GATED
 
 
 @pytest.mark.parametrize("kind", list(_DETECTORS), ids=lambda k: k.value)

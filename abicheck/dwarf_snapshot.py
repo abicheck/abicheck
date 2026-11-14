@@ -82,6 +82,7 @@ from .extract.dwarf_type_names import strip_type_decorators as _strip_type_decor
 from .extract.dwarf_variable_alignment import dwarf_variable_layout_facts
 from .extract.dwarf_variable_identity import variable_definition_view
 from .extract.dwarf_vptr_resolution import finalize_vptr_offsets
+from .extract.elf_pure_virtual_slots import PureVirtualEvidence
 from .extract.parse_failures import note_debug_info_read_failure
 from .extract.surface_fact_producers import debug_info_surface_facts
 from .model import (
@@ -216,9 +217,13 @@ class _DwarfSnapshotBuilder:
     intersection.
     """
 
+    # Pure-virtual evidence (per library; empty for a builder made without __init__).
+    _pv = PureVirtualEvidence()
+
     def __init__(self, elf_path: Path, elf_meta: ElfMetadata) -> None:
         elf_path = Path(elf_path)
         self._elf_path = elf_path
+        self._pv = PureVirtualEvidence.of(elf_path, elf_meta)
         self._filter_transitive_runtime_symbols = not (
             is_cxx_runtime_library(elf_path.name)
             or is_cxx_runtime_library(elf_meta.soname)
@@ -424,6 +429,7 @@ class _DwarfSnapshotBuilder:
         """Walk all DIEs in one Compilation Unit."""
         self._member_scopes = _members.MemberScopes()
         top_die = CU.get_top_DIE()
+        self._pv = self._pv.for_unit(_members.producer_records_pure_virtuality(top_die))
         stack: collections.deque[tuple[Any, str, ScopePath, AccessLevel]] = (
             collections.deque([(top_die, "", (), AccessLevel.PUBLIC)])
         )
@@ -543,7 +549,7 @@ class _DwarfSnapshotBuilder:
 
         # Skip declarations without definitions (DW_AT_declaration=True), BUT keep a deleted
         # one for cross-reference and a member pure virtual (it has no definition DIE).
-        is_pure = _members.is_pure_virtual_member(die, scope_path)
+        is_pure = _members.is_member_scope(scope_path) and self._pv.member_is_pure(die)
         if _attr_bool(die, "DW_AT_declaration") and not (is_deleted or is_pure):
             return
 
@@ -623,9 +629,10 @@ class _DwarfSnapshotBuilder:
 
         # Qualifiers
         is_virtual = _attr_int(attrs, "DW_AT_virtuality") > 0
-        is_pure_virtual = (
-            _attr_int(attrs, "DW_AT_virtuality") == 2
-        )  # DW_VIRTUALITY_pure_virtual
+        # DW_VIRTUALITY_pure_virtual (clang), or a pure slot of the emitted vtable (GCC)
+        is_pure_virtual = _attr_int(attrs, "DW_AT_virtuality") == 2 or (
+            _members.slot_is_pure(attrs, self._pv.slots)
+        )
         is_extern_c = not mangled.startswith("_Z")
         quals = _members.qualifiers_in_scope(attrs, CU, scope_path)
         # Explicit specifier: see extract/dwarf_member_functions.explicit_specifier.
@@ -855,16 +862,11 @@ class _DwarfSnapshotBuilder:
 
         # Real vptr offset, read from the compiler's own artificial vptr member when this class introduces one. A class that only extends or overrides an already-inherited vtable (no local vptr member, even when every one of its own declared methods is virtual) is left None here and resolved in a later pass, once every record type in this binary is known — see extract.dwarf_vptr_resolution.finalize_vptr_offsets's docstring for why that can't be done eagerly, here, per-type. Tri-state by design: None also covers genuinely non-polymorphic and "only reachable through a virtual base" (whose offset is dynamic, never a fixed one this model can express), so the diff can tell "gained a vptr" (None → a real offset) from "vptr stayed".
         vptr_offset_bits = own_vptr_offset_bits
-        # is_standard_layout / is_trivially_copyable / data_size_bits are
-        # deliberately *not* derived here. "not polymorphic and no virtual bases"
-        # is NOT a sound standard-layout signal: a class can already be
-        # non-standard-layout for reasons DWARF doesn't expose here (mixed access
-        # control, member-bearing bases). Such a class would be wrongly marked
-        # True, then flip to False when it gains a virtual function — emitting a
-        # spurious STANDARD_LAYOUT_LOST for a trait that was never present (Codex
-        # review #345). Likewise DWARF can't tell a defaulted special member from
-        # a user-provided one. Without a real trait signal these stay None and the
-        # detector stays quiet rather than guessing.
+        # is_standard_layout / is_trivially_copyable / data_size_bits stay None:
+        # "not polymorphic, no virtual bases" is no sound standard-layout signal
+        # (access control and member-bearing bases are invisible here: Codex
+        # review #345), and DWARF can't tell a defaulted special member from a
+        # user-provided one.
 
         rec = RecordType(
             name=qualified,
@@ -883,6 +885,9 @@ class _DwarfSnapshotBuilder:
             base_offsets=base_offsets,
             # Stated explicitly, matching the other producers -- vptr_offset_bits may still be None pending extract.dwarf_vptr_resolution.finalize_vptr_offsets's own later pass, which already resyncs both via resolve_vptr_offset_bits() if it resolves a real value.
             **record_layout_facts(bases, virtual_bases, vtable, vptr_offset_bits),
+            is_abstract=self._pv.record_abstract(
+                die, children, bases or virtual_bases, qualified
+            ),
         )
         self.types.append(rec)
         self._record_by_qualified_name[qualified] = rec
@@ -1010,7 +1015,7 @@ class _DwarfSnapshotBuilder:
                     virtual_base_edges,
                 )
             elif child.tag == "DW_TAG_subprogram":
-                self._process_virtual_method_child(child, vtable)
+                _members.append_virtual_method(child, vtable)
 
         return (
             fields,
@@ -1062,21 +1067,6 @@ class _DwarfSnapshotBuilder:
             if base_bits is not None:
                 base_offsets[base_name] = base_bits
             base_edges.append((base_name, base_bits, base_die_key))
-
-    @staticmethod
-    def _process_virtual_method_child(child: Any, vtable: list[str]) -> None:
-        """Append the mangled name of a virtual ``DW_TAG_subprogram`` to *vtable*.
-
-        No-op when the subprogram is not virtual or has no usable name.
-        """
-        if _attr_int(child, "DW_AT_virtuality") > 0:
-            vt_mangled = (
-                _attr_str(child, "DW_AT_linkage_name")
-                or _attr_str(child, "DW_AT_MIPS_linkage_name")
-                or _attr_str(child, "DW_AT_name")
-            )
-            if vt_mangled:
-                vtable.append(vt_mangled)
 
     def _resolve_decl_file(self, die: Any, CU: Any) -> str | None:
         """Resolve DW_AT_decl_file to a header location, or ``None``.

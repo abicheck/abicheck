@@ -101,7 +101,11 @@ EXEMPTION_CEILINGS: dict[str, int] = {
     # against the function scope in policy/template_default_changes.py.
     # 72: plus the three basic_string/whitespace canonicalizations of the
     # dual-ABI pairing key (compare/glibcxx_dual_abi.normalize_dual_abi_spelling).
-    "spelling": 72,
+    # 74: plus abi_equivalent_retype's C++ pointer/reference spelling tokenizer
+    # (an identifier token and the token split), C++ type spelling.
+    # 76: plus diff_helpers' two array-bound spacing rules ("char [8]" from
+    # the native gcc header backend vs DWARF's "char[8]"), C++ type spelling.
+    "spelling": 76,
     # 44: the merge with main brought model/symbol_ownership.py into the scan
     # (main made it the vocabulary owner) and main's shared
     # match_frozen_namespace -- both one pre-existing `_Z` mangling check.
@@ -111,7 +115,13 @@ EXEMPTION_CEILINGS: dict[str, int] = {
     # replaceable-allocator match in elf_symbol_filter (not a scanned owner).
     # 44: diff_unnamed_types' `_Z` export filter moved to the format-neutral
     # model.mangling_scheme (it now reads Mach-O and PE exports too).
-    "grammar": 44,
+    # 49: plus compare/type_visibility's five Itanium checks (_ZTI/_ZTS/_ZTV/_ZTT
+    # family, the N...E nested-name scope, the "typeinfo for " demangling).
+    # 50: plus cpu_dispatch_public_members' MSVC `?` test, qualifying a
+    # castxml bare-leaf declaration from its own mangling.
+    # 51: plus compare/live_member_scopes' `_Z` test, reading a member
+    # function's record scope from its own Itanium mangling.
+    "grammar": 51,
     # 43: minus outcome_release.unclassified_release_contribution_fields,
     # moved into its test (dead-code plan, Stage D).
     # 49: plus the two path-prefix checks in manifest_tu_scope_field, moved
@@ -127,7 +137,12 @@ EXEMPTION_CEILINGS: dict[str, int] = {
     # policy/retired_function_drift.
     # 20: minus the allocator prefix vocabulary and its startswith site,
     # folded into the exact replaceable-allocator match in elf_symbol_filter.
-    "platform": 20,
+    # 25: plus compare/runtime_requirements' sanitizer runtime sonames and the
+    # toolchain-reserved __asan_/__ubsan_/... symbol families (and the
+    # __sanitizer_cov_ user-callback carve-out) -- names the toolchain defines.
+    # 26: plus compare/toolchain_flags' vector-math library selection flags
+    # (-mveclibabi=, -fveclib=), the compiler's own flag spelling.
+    "platform": 26,
     # 9: main replaced the two fnmatch frozen-namespace matchers with one
     # policy.frozen_namespace helper.
     "user_rule": 9,

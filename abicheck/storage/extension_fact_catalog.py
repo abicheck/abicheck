@@ -65,8 +65,10 @@ __all__ = [
     "CXX_TEMPLATE_DEFAULTS",
     "CXX_CONCEPT_HEADER_SCAN",
     "EXPORT_READ",
+    "FINAL_MEMBER_FUNCTIONS",
     "EXTENSION_FACTS",
     "NOEXCEPT_UNOBSERVED",
+    "STD_REEXPORTS",
     "TYPEDEF_ORIGINS",
     "VOLATILE_CAPTURE_FACTS",
     "evidence_header_extras",
@@ -340,6 +342,32 @@ NOEXCEPT_UNOBSERVED: ExtensionFact[list[str]] = ExtensionFact(
 )
 
 
+def _final_member_functions(value: Any) -> dict[str, list[str]]:
+    """``{"final": [...], "unobserved": [...]}``: mangled names of
+    member functions declared ``final``, and of virtual ones whose specifier
+    was not read."""
+    if not isinstance(value, dict) or set(value) != {"final", "unobserved"}:
+        raise TypeError("expected a {'final', 'unobserved'} map")
+    return {k: _str_list(value[k]) for k in ("final", "unobserved")}
+
+
+#: The ``final`` virt-specifier of virtual member functions
+#: (``Function.is_final``). Written on the ``declarations`` section when a
+#: header backend read it for some virtual function: the ``final`` list is
+#: True, ``unobserved`` is not known, every other virtual function is False.
+#: Absent, no virtual function's specifier is known -- what an older reader
+#: concludes too, so it is optional.
+FINAL_MEMBER_FUNCTIONS: ExtensionFact[dict[str, list[str]]] = ExtensionFact(
+    name="abicheck.final_member_functions",
+    section="declarations",
+    semantics=ReaderSemantics.OPTIONAL,
+    absent_reads_as="no virtual member function's final specifier is known",
+    owner="ADR-062",
+    encode=_final_member_functions,
+    decode=_final_member_functions,
+)
+
+
 def _template_default_map(value: Any) -> dict[str, list[str | None] | None]:
     """A ``{key: [default | null, ...] | null}`` map (each template's spelled
     defaults, ``null`` when not known; ``model/template_default_table.py``)."""
@@ -485,6 +513,42 @@ TYPEDEF_ORIGINS: ExtensionFact[dict[str, str]] = ExtensionFact(
     decode=_typedef_origin_map,
 )
 
+
+def _std_reexport_map(value: Any) -> dict[str, str]:
+    """A ``{declared name: std:: target}`` map of namespace-scope
+    using-declarations; both sides qualified, the target in ``std::``."""
+    if not isinstance(value, dict):
+        raise TypeError("expected a {declared name: std:: target} map")
+    for key, target in value.items():
+        if not isinstance(key, str) or "::" not in key or key.startswith("std::"):
+            raise ValueError(
+                f"std_reexports key {key!r} must be a non-std qualified name"
+            )
+        if not isinstance(target, str) or not target.startswith("std::"):
+            raise ValueError(
+                f"std_reexports {key!r}: target {target!r} is not in std::"
+            )
+    return {k: str(value[k]) for k in sorted(value)}
+
+
+#: The public headers' namespace-scope ``using std::X;`` re-exports
+#: (``AbiSnapshot.std_reexports``, extractor generation 64): each declared
+#: library name and the ``std::`` entity it names. Written on the
+#: ``declarations`` section whenever a header backend modelled them -- an
+#: empty map included, which says "none declared", unlike an absent fact.
+#: Absent (DWARF, no public-header set, an older snapshot) the re-exports are
+#: not modelled, so no re-export can be reported removed; an older reader
+#: that ignores it gives that same answer, so it is optional.
+STD_REEXPORTS: ExtensionFact[dict[str, str]] = ExtensionFact(
+    name="abicheck.std_reexports",
+    section="declarations",
+    semantics=ReaderSemantics.OPTIONAL,
+    absent_reads_as="std:: re-exports not modelled: none can be reported removed",
+    owner="ADR-084",
+    encode=_std_reexport_map,
+    decode=_std_reexport_map,
+)
+
 #: Facts that record the capture, not the evidence: like ``build_id`` among
 #: ``evidence_digest.VOLATILE_CAPTURE_FIELDS``, they stay out of the ADR-062
 #: D16 evidence digest, so two dumps whose extracted facts agree keep one
@@ -523,7 +587,9 @@ EXTENSION_FACTS = ExtensionFactRegistry(
         CXX_CONCEPT_CONSTRAINTS,
         CXX_TEMPLATE_DEFAULTS,
         EXPORT_READ,
+        FINAL_MEMBER_FUNCTIONS,
         NOEXCEPT_UNOBSERVED,
+        STD_REEXPORTS,
         TYPEDEF_ORIGINS,
     )
 )

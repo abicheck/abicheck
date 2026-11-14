@@ -28,10 +28,19 @@ left out of the generic ``toolchain_flag_drift``, so one flip is reported once.
 
 from __future__ import annotations
 
+from typing import Any
+
+from ..model.change import Change
 from ..model.change_catalog.kinds import ChangeKind
+from ..model.change_catalog.registry import Verdict
 from ..model.dwarf_facts import AdvancedDwarfMetadata
 
-__all__ = ["advanced_dwarf_kind_map", "toolchain_flag_changes"]
+__all__ = [
+    "advanced_change_grade",
+    "advanced_dwarf_changes",
+    "advanced_dwarf_kind_map",
+    "toolchain_flag_changes",
+]
 
 
 def advanced_dwarf_kind_map() -> dict[str, ChangeKind]:
@@ -51,9 +60,60 @@ def advanced_dwarf_kind_map() -> dict[str, ChangeKind]:
             ChangeKind.VECTOR_ABI_CHANGED,
             ChangeKind.WCHAR_MODEL_CHANGED,
             ChangeKind.CHAR_SIGNEDNESS_CHANGED,
-            ChangeKind.TYPE_VISIBILITY_CHANGED,
         )
     }
+
+
+#: Flags that only choose which vector math library the binary itself calls
+#: (gcc ``-mveclibabi=``, clang ``-fveclib=``). They change no entry point the
+#: binary exports; a real effect shows as new imports, reported on their own.
+#: Intel's ``-vecabi=`` instead changes the ABI of the binary's own exported
+#: SIMD clones, which is the break the kind's default names.
+_CALLEE_LIBRARY_VECTOR_FLAGS = ("-mveclibabi=", "-fveclib=")
+
+
+def advanced_change_grade(
+    kind: str, old: str | None, new: str | None
+) -> dict[str, Any]:
+    """``Change`` fields that lower an advanced-DWARF finding below its default.
+
+    A ``vector_abi_changed`` confined to callee-library selection flags is a
+    risk, not a break (disclosed via ``modulation_reason``, ADR-025 D4.1).
+    """
+    if kind != "vector_abi_changed":
+        return {}
+    changed = set((old or "").split(",")) ^ set((new or "").split(","))
+    changed.discard("")
+    if not changed or not all(
+        f.startswith(_CALLEE_LIBRARY_VECTOR_FLAGS) for f in changed
+    ):
+        return {}
+    return {
+        "effective_verdict": Verdict.COMPATIBLE_WITH_RISK,
+        "modulation_reason": "vector_library_selection_only",
+        "modulation_rule": "vector_abi_changed.callee_library_flags",
+    }
+
+
+def advanced_dwarf_changes(
+    rows: list[tuple[str, str, str, str | None, str | None]],
+) -> list[Change]:
+    """The advanced-DWARF ``(kind, symbol, description, old, new)`` rows as
+    ``Change`` objects, each graded by :func:`advanced_change_grade`; a row of
+    a kind this map does not own is dropped."""
+    kinds = advanced_dwarf_kind_map()
+    return [
+        Change(
+            kind=kinds[kind],
+            symbol=sym,
+            description=desc,
+            old_value=old,
+            new_value=new,
+            **advanced_change_grade(kind, old, new),
+        )
+        for kind, sym, desc, old, new in rows
+        if kind in kinds
+    ]
 
 
 # Plain ``char`` signedness flags (gcc records them in DW_AT_producer), and the

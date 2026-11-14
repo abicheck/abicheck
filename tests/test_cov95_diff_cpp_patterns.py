@@ -114,9 +114,10 @@ class TestStableLeadingTemplateArgs:
     def test_leading_change_false(self) -> None:
         assert _stable_leading_template_args("float, A", "double, B") is False
 
-    def test_single_arg_degenerate_true(self) -> None:
-        # len 1 vs len 1 → degenerate accepted (line 524).
-        assert _stable_leading_template_args("A", "B") is True
+    def test_single_arg_is_undecidable_false(self) -> None:
+        # One argument, nothing kept: a default change and an explicit change
+        # (a renamed tag type) read the same, so no pairing is claimed.
+        assert _stable_leading_template_args("A", "B") is False
 
     def test_empty_old_args_false(self) -> None:
         # Empty list → False (line 521).

@@ -42,12 +42,21 @@ from abiforge.model.opkit import (
     _with,
 )
 from abiforge.model.seeds import SEEDS, RoleText, Seed
+from abiforge.operators.aliases import ALIAS_OPERATORS
+from abiforge.operators.build_data import BUILD_DATA_OPERATORS
 from abiforge.operators.cxx import CXX_OPERATORS
+from abiforge.operators.dependencies import DEPENDENCY_OPERATORS
 from abiforge.operators.elf import ELF_OPERATORS
+from abiforge.operators.enums import ENUM_OPERATORS
 from abiforge.operators.kinds import KIND_OPERATORS
 from abiforge.operators.layout import LAYOUT_OPERATORS
 from abiforge.operators.platform import PLATFORM_OPERATORS
+from abiforge.operators.runtime_floor import RUNTIME_FLOOR_OPERATORS
+from abiforge.operators.source_evidence import SOURCE_EVIDENCE_OPERATORS
+from abiforge.operators.source_tree import SOURCE_TREE_OPERATORS
 from abiforge.operators.symbols import SYMBOL_OPERATORS
+from abiforge.operators.variables import VARIABLE_OPERATORS
+from abiforge.operators.vtable import VTABLE_OPERATORS
 
 __all__ = ["OP_BY_NAME", "OPERATORS", "VERDICT_RANK", "EditOp", "applicable", "matrix"]
 
@@ -313,6 +322,14 @@ def _concept_constraint_added(r: Roles) -> dict[str, RoleText]:
     )
 
 
+def _concept_constraint_relaxed(r: Roles) -> dict[str, RoleText]:
+    return _set(
+        r,
+        "tmpl.req",
+        "#ifdef __cpp_concepts\ntemplate <typename T> T reqv(T v) { return v; }\n#endif",
+    )
+
+
 def _not_already(attr: str, value: object) -> Callable[[Config], str | None]:
     def check(c: Config) -> str | None:
         if getattr(c.flags, attr) == value:
@@ -335,6 +352,14 @@ def _all(*checks: Callable[[Config], str | None]) -> Callable[[Config], str | No
         return None
 
     return check
+
+
+def _libcxx_rebuild(c: Config) -> str | None:
+    if c.objfmt != "elf" or c.producer.family != "clang":
+        return "-stdlib=libc++ is a clang switch; the corpus pairs it with ELF"
+    if c.flags.stdlib is not None:
+        return "the producer already selects a standard library"
+    return None
 
 
 def _libstdcxx(c: Config) -> str | None:
@@ -381,7 +406,7 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         ("struct.rec",),
         _struct_append_field,
         "appending a member grows sizeof(struct rec)",
-        any_of=(frozenset({"TYPE_SIZE_CHANGED", "STRUCT_SIZE_CHANGED"}),),
+        any_of=(frozenset({"TYPE_SIZE_CHANGED"}),),
         touches=("struct.rec",),
     ),
     EditOp(
@@ -390,8 +415,8 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         _struct_remove_trailing_field,
         "removing a member is a layout and API break",
         any_of=(
-            frozenset({"STRUCT_FIELD_REMOVED", "TYPE_FIELD_REMOVED"}),
-            frozenset({"TYPE_SIZE_CHANGED", "STRUCT_SIZE_CHANGED"}),
+            frozenset({"TYPE_FIELD_REMOVED"}),
+            frozenset({"TYPE_SIZE_CHANGED"}),
         ),
         touches=("struct.rec",),
     ),
@@ -400,9 +425,7 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         ("struct.point",),
         _struct_swap_fields,
         "swapping members moves field offsets",
-        any_of=(
-            frozenset({"STRUCT_FIELD_OFFSET_CHANGED", "TYPE_FIELD_OFFSET_CHANGED"}),
-        ),
+        any_of=(frozenset({"TYPE_FIELD_OFFSET_CHANGED"}),),
         touches=("struct.point",),
     ),
     EditOp(
@@ -411,7 +434,7 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         _struct_field_widen,
         "int -> long long changes the member type and layout; on x86-64 the "
         "struct's alignment rises from 4 to 8 (i386 aligns long long to 4 in a struct)",
-        any_of=(frozenset({"STRUCT_FIELD_TYPE_CHANGED", "TYPE_FIELD_TYPE_CHANGED"}),),
+        any_of=(frozenset({"TYPE_FIELD_TYPE_CHANGED"}),),
         rules=(
             Rule(
                 # -fpack-struct=N caps every member's alignment at N, so the
@@ -423,9 +446,7 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
                 ),
                 {
                     "any_of": (
-                        frozenset(
-                            {"STRUCT_FIELD_TYPE_CHANGED", "TYPE_FIELD_TYPE_CHANGED"}
-                        ),
+                        frozenset({"TYPE_FIELD_TYPE_CHANGED"}),
                         _ALIGN,
                     )
                 },
@@ -439,7 +460,7 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         ("struct.rec",),
         _struct_array_grow,
         "char[8] -> char[16] grows the struct",
-        any_of=(frozenset({"TYPE_SIZE_CHANGED", "STRUCT_SIZE_CHANGED"}),),
+        any_of=(frozenset({"TYPE_SIZE_CHANGED"}),),
         touches=("struct.rec",),
     ),
     # enums
@@ -501,7 +522,7 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         ("typedef.handle",),
         _typedef_retarget,
         "retargeting a typedef used in a public signature",
-        any_of=(frozenset({"TYPEDEF_BASE_CHANGED", "PUBLIC_TYPEDEF_TARGET_CHANGED"}),),
+        any_of=(frozenset({"TYPEDEF_BASE_CHANGED"}),),
         verdict_min="API_BREAK",
         touches=("typedef.handle",),
     ),
@@ -561,7 +582,14 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         ("func.count",),
         _func_remove,
         "removing an exported function is a binary and API break",
-        any_of=(_REMOVED,),
+        expected=frozenset({"FUNC_REMOVED"}),
+        rules=(
+            Rule(
+                _binary,
+                {"expected": frozenset({"FUNC_REMOVED_ELF_ONLY"})},
+                "from symbols alone the removal is an export-table removal",
+            ),
+        ),
         min_evidence="binary",
         touches=("func.count",),
     ),
@@ -585,6 +613,14 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         # change or as the visibility change. Either describes the same fact.
         any_of=(
             frozenset({"FUNC_BECAME_INLINE", "FUNC_VISIBILITY_CHANGED"}) | _REMOVED,
+        ),
+        rules=(
+            Rule(
+                lambda c: c.evidence == "headers" and c.header_backend != "gcc",
+                {"expected": frozenset({"FUNC_BECAME_INLINE"})},
+                "the castxml and clang header backends see the new inline "
+                "definition (the native gcc plugin records none)",
+            ),
         ),
         verdict_min="BREAKING",
         min_evidence="binary",
@@ -664,11 +700,7 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         ("shape.area",),
         _virtual_method_add,
         "a new virtual method changes the vtable layout",
-        any_of=(
-            frozenset(
-                {"VIRTUAL_METHOD_ADDED", "FUNC_VIRTUAL_ADDED", "TYPE_VTABLE_CHANGED"}
-            ),
-        ),
+        any_of=(frozenset({"TYPE_VTABLE_CHANGED"}),),
         min_evidence="binary",
         rules=(
             Rule(
@@ -713,7 +745,10 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         _virtual_become_pure,
         "a virtual becoming pure changes its exported definition",
         # The edit makes the class abstract: either kind names that fact.
-        any_of=(frozenset({"FUNC_VIRTUAL_BECAME_PURE", "TYPE_BECAME_ABSTRACT"}),),
+        any_of=(
+            frozenset({"FUNC_VIRTUAL_BECAME_PURE"}),
+            frozenset({"TYPE_BECAME_ABSTRACT"}),
+        ),
         min_evidence="binary",
         rules=(_binary_mangled("FUNC_VIRTUAL_BECAME_PURE", "TYPE_BECAME_ABSTRACT"),),
         touches=("shape.kind",),
@@ -755,11 +790,7 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         ("buf.decl",),
         _template_default_arg,
         "a changed template default alters the header-only instantiation",
-        any_of=(
-            frozenset(
-                {"DEFAULT_TEMPLATE_ARG_CHANGED", "TEMPLATE_PARAM_DEFAULT_CHANGED"}
-            ),
-        ),
+        any_of=(frozenset({"TEMPLATE_PARAM_DEFAULT_CHANGED"}),),
         verdict_min="API_BREAK",
         min_evidence="headers",
         touches=("buf.decl",),
@@ -815,12 +846,7 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
             Rule(
                 _hidden,
                 {
-                    "any_of": (
-                        frozenset(
-                            {"FUNC_VISIBILITY_CHANGED", "SYMBOL_ELF_VISIBILITY_CHANGED"}
-                        )
-                        | _REMOVED,
-                    ),
+                    "any_of": (frozenset({"FUNC_VISIBILITY_CHANGED"}) | _REMOVED,),
                     "verdict_min": "BREAKING",
                     "verdict_max": None,
                 },
@@ -882,12 +908,27 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         "concept_constraint_added",
         ("tmpl.clamp",),
         _concept_constraint_added,
-        "a new requires-clause rejects calls the old template accepted",
-        any_of=(frozenset({"CONCEPT_TIGHTENED", "CONCEPT_CONSTRAINT_CHANGED"}),),
+        "a new requires-clause rejects calls the old template accepted: the "
+        "constraint set strictly grows (none -> one), a tightening",
+        expected=frozenset({"CONCEPT_TIGHTENED"}),
         verdict_min="API_BREAK",
         min_evidence="headers",
         features=("concepts",),
         touches=("tmpl.clamp",),
+    ),
+    EditOp(
+        "concept_constraint_relaxed",
+        ("tmpl.req",),
+        _concept_constraint_relaxed,
+        "the requires-clause is dropped: every old call still compiles, but a "
+        "relaxed constraint can change which overload subsumption picks, so "
+        "it is a risk, not a tightening",
+        expected=frozenset({"CONCEPT_CONSTRAINT_CHANGED"}),
+        verdict_min="COMPATIBLE_WITH_RISK",
+        verdict_max="COMPATIBLE_WITH_RISK",
+        min_evidence="headers",
+        features=("concepts",),
+        touches=("tmpl.req",),
     ),
     # --- rebuild edits: same source, one flag changed on the new side
     EditOp(
@@ -896,6 +937,13 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         _no_edit,
         "rebuilding with -fshort-enums shrinks every unscoped enum to its range",
         any_of=(_ENUM_SIZE,),
+        rules=(
+            Rule(
+                lambda c: c.build_data,
+                {"expected": frozenset({"ENUM_SIZE_FLAG_CHANGED"})},
+                "the compile commands record -fshort-enums itself",
+            ),
+        ),
         precondition=_all(_gnu, _not_already("short_enums", True)),
         rebuild=_with(short_enums=True),
     ),
@@ -947,6 +995,27 @@ CORE_OPERATORS: tuple[EditOp, ...] = (
         needs_libstdcxx=True,
     ),
     EditOp(
+        "rebuild_against_libcxx",
+        ("func.greet",),
+        _no_edit,
+        "the library is rebuilt against libc++ instead of libstdc++: std::string "
+        "is std::__1::basic_string with another layout, so greet's mangled name "
+        "changes and every std:: object crossing the boundary is a different type. "
+        "The header still declares the libstdc++ spelling a consumer links "
+        "against, so with headers its lost export reads as a visibility change",
+        expected=frozenset({"STDLIB_IMPLEMENTATION_CHANGED"}),
+        any_of=(
+            _REMOVED
+            | {"FUNC_PARAMS_CHANGED", "FUNC_RETURN_CHANGED", "FUNC_VISIBILITY_CHANGED"},
+        ),
+        min_evidence="binary",
+        precondition=_libcxx_rebuild,
+        rebuild=_with(stdlib="libc++"),
+        # The baseline must be libstdc++; libc++ itself is probed through the
+        # rebuilt flags (``capability_gap``): absent, the cell is unavailable.
+        needs_libstdcxx=True,
+    ),
+    EditOp(
         "rebuild_hidden_visibility",
         ("func.add",),
         _no_edit,
@@ -982,6 +1051,15 @@ OPERATORS: tuple[EditOp, ...] = (
     *LAYOUT_OPERATORS,
     *SYMBOL_OPERATORS,
     *KIND_OPERATORS,
+    *VTABLE_OPERATORS,
+    *ENUM_OPERATORS,
+    *VARIABLE_OPERATORS,
+    *ALIAS_OPERATORS,
+    *BUILD_DATA_OPERATORS,
+    *DEPENDENCY_OPERATORS,
+    *RUNTIME_FLOOR_OPERATORS,
+    *SOURCE_EVIDENCE_OPERATORS,
+    *SOURCE_TREE_OPERATORS,
 )
 
 OP_BY_NAME: dict[str, EditOp] = {op.name: op for op in OPERATORS}

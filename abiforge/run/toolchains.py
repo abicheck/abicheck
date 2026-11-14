@@ -414,6 +414,10 @@ def _flags_build(
 
 
 # What a toolchain without 32-bit multilib says when asked for -m32.
+#: libc++ asked for (``-stdlib=libc++``) and its headers or runtime absent.
+_LIBCXX_MISSING = re.compile(
+    r"cannot find -lc\+\+(?:abi)?(?![\w+])|'(?:__config_site|string|iostream|cstddef)' file not found"
+)
 _MULTILIB_MISSING = re.compile(
     r"cannot find -l|cannot find crt|stubs-32\.h|"
     r"bits/libc-header-start\.h|gnu/stubs|unsupported architecture|-m32 is not supported"
@@ -456,6 +460,8 @@ def _names_capability(stderr: str, rendered: list[str]) -> bool:
     # The driver must *reject* a requested flag, not merely mention it (a
     # warning that names the flag says nothing about the failure).
     if any(f in ln for f in optional for ln in rejected):
+        return True
+    if "-stdlib=libc++" in rendered and _LIBCXX_MISSING.search(stderr):
         return True
     return "-m32" in rendered and _MULTILIB_MISSING.search(stderr) is not None
 
@@ -663,8 +669,13 @@ def capability_gap(op: object, config: Config) -> str | None:
         # A rebuild to another word size needs that target's start files and
         # libc (32-bit multilib for -m32). The same probe the build roles
         # pass through: a missing target is a gap, a crash or a hang raises.
+        # A rebuild against another C++ standard library needs it installed
+        # (libc++ headers and runtime): the same probe, a missing one a gap.
         new_flags = rebuild(config.flags)
-        if new_flags.bits != config.flags.bits:
+        if (new_flags.bits, new_flags.stdlib) != (
+            config.flags.bits,
+            config.flags.stdlib,
+        ):
             reason = _flags_unavailable(config.producer, config.lang, new_flags)
             if reason:
                 return reason

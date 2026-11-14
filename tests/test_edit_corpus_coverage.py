@@ -95,7 +95,7 @@ def test_scope_classifies_every_changekind_once() -> None:
         ("CONCEPT_TIGHTENED", True),
         ("INLINE_FUNCTION_REMOVED", True),
         # Values abicheck reads only from L4 sources.
-        ("PUBLIC_MACRO_VALUE_CHANGED", False),
+        ("PUBLIC_MACRO_VALUE_CHANGED", True),
         ("CONSTEXPR_VALUE_CHANGED", False),
         # Other platforms, ecosystems and evidence levels: out.
         ("PE_MACHINE_CHANGED", False),
@@ -157,16 +157,19 @@ def test_every_scope_bucket_holds_some_kind_and_says_why() -> None:
 
 
 def _independent_declared() -> set[str]:
-    """Every kind any operator's edit names, read off the dataclass fields."""
+    """Every kind any operator's edit *requires*, read off the dataclass
+    fields: ``expected``, and an ``any_of`` group of one (a requirement spelled
+    as a group). A member of a larger group is an accepted alternative, not
+    declared coverage."""
     out: set[str] = set()
     for op in OPERATORS:
         out |= set(op.expected)
-        for g in op.any_of:
-            out |= g
+        out |= {k for g in op.any_of if len(g) == 1 for k in g}
         for rule in op.rules:
             out |= set(rule.changes.get("expected", frozenset()))  # type: ignore[arg-type]
             for g in rule.changes.get("any_of", ()):  # type: ignore[union-attr]
-                out |= g
+                if len(g) == 1:
+                    out |= g
     # Kinds owed by a verdict rather than an edit are not declared coverage;
     # the hand-listed _SONAME_ADVISORY_ORACLE below pins which edits owe them.
     return out - {SONAME_ADVISORY}
@@ -252,9 +255,14 @@ def _unlisted_in_scope(
     known = (
         set(ledger["declared_covered"])
         | set(ledger["declared_uncovered"])
+        | set(ledger["derived_by_construction"])
         | set(ledger["out_of_scope"])
     )
-    return ((scope_set - declared) & known) - set(ledger["declared_uncovered"])
+    return (
+        ((scope_set - declared) & known)
+        - set(ledger["declared_uncovered"])
+        - set(ledger["derived_by_construction"])
+    )
 
 
 def test_ledger_uncovered_list_is_not_stale() -> None:
@@ -262,7 +270,9 @@ def test_ledger_uncovered_list_is_not_stale() -> None:
     scope_set = cov.in_scope()
     declared = set(cov.declared_kinds())
     stale = [
-        k for k in ledger["declared_uncovered"] if k in declared or k not in scope_set
+        k
+        for k in ledger["declared_uncovered"]
+        if k in declared or k not in scope_set or k in cov.derived_owed_kinds()
     ]
     assert not stale, (
         f"ledger lists covered or out-of-scope kinds as uncovered: {stale}"
@@ -437,7 +447,9 @@ def test_records_round_trip_through_files(tmp_path: Path) -> None:
     assert path is not None and path.parent == tmp_path
     (back,) = cov.load_records([tmp_path])
     assert back == r
-    assert back.verified == {"TYPE_SIZE_CHANGED", "STRUCT_SIZE_CHANGED"}
+    # The STRUCT_* twin is produced but no longer expected: only the kind the
+    # edit names (TYPE_SIZE_CHANGED) verifies.
+    assert back.verified == {"TYPE_SIZE_CHANGED"}
     assert back.points == (
         "struct/c/c17/baseline/gcc/gcc/headers.castxml/insert_tail_shifts",
     )
@@ -594,6 +606,7 @@ def _year_oracle(construct: str, std: str) -> bool:
         "concept": {"c++": 2020},
         "no_unique_address": {"c++": 2020},
         "noexcept_type": {"c++": 2017},
+        "deduced_return": {"c++": 2014},  # auto f() { ... }: C++14
         "std_string": {"c++": 2011},
         "class_virtual": {"c++": 2011},
         "template": {"c++": 2011},
@@ -602,6 +615,7 @@ def _year_oracle(construct: str, std: str) -> bool:
         "inline_namespace": {"c++": 2011},
         "abi_tag": {"c++": 2011},
         "hidden_friend": {"c++": 2011},
+        "using_declaration": {"c++": 2011},
         "restrict_pointer": {"c": 1999},
         "flexible_array": {"c": 1999},
         "atomic": {"c": 2011},
@@ -616,12 +630,18 @@ def test_infeasibility_matches_an_independent_oracle_exhaustively() -> None:
     gcc_only = {"fabi_version"}
     cxx_only = {"cxx11_abi_0"}
     conflicts = {("std_string", "packed"), ("std_string", "short_enums")}
-    # Function edits C has no spelling for (written out, not read from the model).
+    # Edits C has no spelling for (written out, not read from the model):
+    # overloads, default arguments, exception specifications and language
+    # linkage; scoped enums; inline variables; alias-declarations.
     cxx_only_edits = {
         ("function", "default_argument_changed"),
         ("function", "exception_spec_change"),
         ("function", "language_linkage_change"),
         ("function", "overload_added"),
+        ("enum", "scoped_change"),
+        ("enum_fixed_underlying", "scoped_change"),
+        ("variable", "became_inline"),
+        ("typedef", "respelled"),
     }
     total = 0
     for p in space.all_points():
@@ -953,6 +973,21 @@ def test_only_seeds_with_elf_link_roles_are_unavailable_off_elf(
     )
     gap = elf_link_unavailable(seed, cfg)
     assert (gap is not None) is (links_elf_only and platform[1] != "elf"), gap
+
+
+def test_derived_kinds_are_covered_by_construction_only_while_owed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ledger = cov.declared_ledger(cov.load_ledger())
+    assert ledger["derived_by_construction"] == [SONAME_ADVISORY]
+    assert SONAME_ADVISORY not in ledger["declared_uncovered"]
+    assert SONAME_ADVISORY not in ledger["declared_covered"]
+    # With no operator owing it (no edit's verdict reaches a binary break),
+    # the derived kind falls back to uncovered instead of vanishing.
+    monkeypatch.setattr(cov, "op_derived_kinds", lambda op: frozenset())
+    ledger = cov.declared_ledger(cov.load_ledger())
+    assert ledger["derived_by_construction"] == []
+    assert SONAME_ADVISORY in ledger["declared_uncovered"]
 
 
 def test_a_derived_kind_is_never_declared_coverage() -> None:

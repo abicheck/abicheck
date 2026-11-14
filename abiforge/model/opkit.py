@@ -47,6 +47,11 @@ class EditOp:
     precondition: Callable[[Config], str | None] | None = None
     # A rebuild edit: the new side is built with ``rebuild(flags)``.
     rebuild: Callable[[Flags], Flags] | None = None
+    # Per-side evidence: the new side is built and dumped at this evidence
+    # level ("binary", "dwarf") instead of the config's, so the pair carries
+    # asymmetric evidence (one side's headers or debug info absent). Applies
+    # only to a config whose evidence is richer (``requires``).
+    new_evidence: str | None = None
     # Needs the producer's C++ library to be libstdc++; probed at run time by
     # ``abiforge.run.toolchains.capability_gap``, never at collection.
     needs_libstdcxx: bool = False
@@ -77,9 +82,20 @@ class EditOp:
         for feat in self.features:
             if not has_feature(config.std, feat):
                 return f"needs {feat}, which {config.std.name} lacks"
+        if (
+            self.new_evidence is not None
+            and _EVIDENCE_RANK[config.evidence] <= _EVIDENCE_RANK[self.new_evidence]
+        ):
+            return (
+                f"the new side is dumped at {self.new_evidence} evidence; "
+                f"{config.evidence} evidence is no richer"
+            )
         if self.precondition is not None:
             return self.precondition(config)
         return None
+
+    def new_side_evidence(self, config: Config) -> str:
+        return self.new_evidence or config.evidence
 
     def base(self) -> Expectation:
         return Expectation(
@@ -125,6 +141,9 @@ class EditOp:
         return self.rebuild(flags) if self.rebuild else flags
 
 
+_EVIDENCE_RANK = {"binary": 0, "dwarf": 1, "headers": 2}
+
+
 def _set(
     roles: Roles, role: str, header: str | None = None, source: str | None = None
 ) -> dict[str, RoleText]:
@@ -157,13 +176,19 @@ SONAME_ADVISORY = "SONAME_BUMP_RECOMMENDED"
 #: (``EditOp.with_derived``). Reported apart from declared and verified
 #: coverage, so the headline counts only kinds some edit stands behind.
 DERIVED_KINDS = frozenset({SONAME_ADVISORY})
-_SIZE = frozenset({"TYPE_SIZE_CHANGED", "STRUCT_SIZE_CHANGED"})
-_ENUM_SIZE = frozenset(
-    {"TYPE_SIZE_CHANGED", "ENUM_UNDERLYING_SIZE_CHANGED", "ENUM_SIZE_FLAG_CHANGED"}
-)
-_OFFSET = frozenset({"STRUCT_FIELD_OFFSET_CHANGED", "TYPE_FIELD_OFFSET_CHANGED"})
-_ALIGN = frozenset({"STRUCT_ALIGNMENT_CHANGED", "TYPE_ALIGNMENT_CHANGED"})
-_FIELD_TYPE = frozenset({"STRUCT_FIELD_TYPE_CHANGED", "TYPE_FIELD_TYPE_CHANGED"})
+# The layout kinds abicheck reports for a record edit. The DWARF layout diff
+# also emits a STRUCT_* twin of each (STRUCT_SIZE_CHANGED, ...), but
+# ``compare/finding_dedup`` folds it into the TYPE_* finding of the same
+# record whenever the type model reports one -- every corpus cell does -- so
+# the twin is not a kind an edit here can be expected to produce, and naming
+# it as an alternative would credit coverage nothing checks.
+_SIZE = frozenset({"TYPE_SIZE_CHANGED"})
+# An enum's size: abicheck names the underlying-size change; the -fshort-enums
+# flag itself (ENUM_SIZE_FLAG_CHANGED) only with build data (see the rules).
+_ENUM_SIZE = frozenset({"ENUM_UNDERLYING_SIZE_CHANGED"})
+_OFFSET = frozenset({"TYPE_FIELD_OFFSET_CHANGED"})
+_ALIGN = frozenset({"TYPE_ALIGNMENT_CHANGED"})
+_FIELD_TYPE = frozenset({"TYPE_FIELD_TYPE_CHANGED"})
 
 
 def _binary(c: Config) -> bool:

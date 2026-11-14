@@ -104,6 +104,7 @@ from . import (
     typedef_parsing as _typedefs_helpers,
 )
 from .abi_fundamental import castxml_type_abi_fact
+from .cxx_header_evidence import cxx_only_files, is_itanium_global_variable_guess
 from .function_type_cc import load_function_type_cc
 from .inline_variables import declared_inline
 from .names import (
@@ -344,6 +345,10 @@ class _CastxmlParser:
                 and mangled not in self._exported_static
                 and (name in self._exported_dynamic or name in self._exported_static)
                 and self._is_global_scope(el)
+                and (
+                    is_itanium_global_variable_guess(mangled, name)
+                    or el.get("file") not in cxx_only_files(self._ctx)
+                )
             ):
                 mangled = name
             # Skip compiler built-ins and command-line synthetic declarations

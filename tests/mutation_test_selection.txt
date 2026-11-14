@@ -114,6 +114,7 @@ tests/test_clang_param_restrict.py
 tests/test_clang_param_va_list.py
 tests/test_clang_template_index_reuse_e2e.py
 tests/test_clang_vtable_base_migration.py
+tests/test_class_key_change_grading.py
 tests/test_class_metadata_owner_contract.py
 tests/test_class_metadata_specialization_owner.py
 tests/test_class_template_specialization_absence_unit.py
@@ -160,6 +161,7 @@ tests/test_cli_report_redesign.py
 tests/test_cli_split_modules.py
 tests/test_cli_split_modules_new.py
 tests/test_cli_unit.py
+tests/test_common_evidence_depth.py
 tests/test_comparability_gate_header_insertion.py
 tests/test_comparability_gate_header_removal.py
 tests/test_compare_budget_boundary.py
@@ -224,15 +226,18 @@ tests/test_contract_replay_node_ids.py
 tests/test_contract_shadow_measurement.py
 tests/test_contract_subject_totality.py
 tests/test_contract_type_identities.py
+tests/test_corrupt_input_matrix.py
 tests/test_cov95_cli.py
 tests/test_cov95_diff_filtering.py
 tests/test_cov95_misc.py
 tests/test_cov95_reporting.py
+tests/test_covariant_return_and_override_slots.py
 tests/test_coverage_extension_elf.py
 tests/test_coverage_extension_lang.py
 tests/test_coverage_extension_macho.py
 tests/test_coverage_extension_pe.py
 tests/test_cpp_pattern_detectors.py
+tests/test_cpu_dispatch_public_roll_up.py
 tests/test_cross_platform_fixtures.py
 tests/test_cross_source_evolution.py
 tests/test_cross_source_evolution_more_checks.py
@@ -304,6 +309,7 @@ tests/test_effective_gate_single_input.py
 tests/test_effective_verdict.py
 tests/test_elf_version_alias_binding.py
 tests/test_elf_version_policy.py
+tests/test_enum_addition_reported.py
 tests/test_enum_cross_tier_dedup.py
 tests/test_enum_sentinel_and_tag_heuristics.py
 tests/test_env_matrix_digest_frozen_projection.py
@@ -317,6 +323,7 @@ tests/test_evidence_transport_roles.py
 tests/test_exit_code_integrity.py
 tests/test_exit_codes.py
 tests/test_exit_decision.py
+tests/test_exit_decision_monotonicity.py
 tests/test_exit_precedence_matrix.py
 tests/test_explicit_ctor.py
 tests/test_export_existence_reconciliation.py
@@ -328,6 +335,7 @@ tests/test_export_transition_old_side_read.py
 tests/test_extraction_scope_comparability.py
 tests/test_fact_gate_legacy_load.py
 tests/test_fact_gate_status_matrix.py
+tests/test_fail_closed_error_paths.py
 tests/test_false_positive_resistance.py
 tests/test_family_f1_evidence_ablation.py
 tests/test_family_f2_route_parity.py
@@ -352,6 +360,7 @@ tests/test_frozen_namespace_single_matcher.py
 tests/test_func_deleted.py
 tests/test_func_lost_inline_static.py
 tests/test_function_cutover.py
+tests/test_function_final_specifier.py
 tests/test_function_presence_differential.py
 tests/test_function_signature_cutover.py
 tests/test_g23_elf_facts.py
@@ -370,6 +379,7 @@ tests/test_graph_table_codec.py
 tests/test_has_type_evidence.py
 tests/test_header_conditionals.py
 tests/test_header_exclusion.py
+tests/test_header_extraction_limitations.py
 tests/test_header_parse_coverage.py
 tests/test_hidden_friends.py
 tests/test_history_scaling.py
@@ -407,6 +417,7 @@ tests/test_lazy_graph_loading.py
 tests/test_lean_field_offset_rule.py
 tests/test_libabigail_parity_extended.py
 tests/test_libuv_private_type_churn.py
+tests/test_live_stored_operand_property.py
 tests/test_macho_export_linkage_binding.py
 tests/test_macho_metadata_unit.py
 tests/test_macos_arm64_abi.py
@@ -428,6 +439,7 @@ tests/test_no_baseline_one_sided_detectors.py
 tests/test_no_baseline_report_formats.py
 tests/test_no_baseline_set_record.py
 tests/test_no_baseline_suppression_provenance.py
+tests/test_no_shared_mutation.py
 tests/test_non_elf_artifact_membership.py
 tests/test_notice_advice_matches_setting.py
 tests/test_object_size_policy.py
@@ -436,6 +448,7 @@ tests/test_opaque_identity_tiers.py
 tests/test_orphan_struct.py
 tests/test_overload_ambiguity.py
 tests/test_overload_ambiguity_symbol_variants.py
+tests/test_overload_rerouted_binary_only.py
 tests/test_override_elf_only_variant.py
 tests/test_ownership_relations.py
 tests/test_p3_feature_gaps.py
@@ -468,6 +481,7 @@ tests/test_policy_changekind_matrix.py
 tests/test_policy_evaluate.py
 tests/test_policy_experimental_namespaces.py
 tests/test_policy_file.py
+tests/test_policy_masking_property.py
 tests/test_policy_monotonicity.py
 tests/test_policy_override_matrix.py
 tests/test_policy_project_config.py
@@ -531,6 +545,7 @@ tests/test_replay_twin_acknowledgment.py
 tests/test_report_baseline_provenance.py
 tests/test_report_change_view_entity_id.py
 tests/test_report_delta_baseline.py
+tests/test_report_failed_fact_visibility.py
 tests/test_report_filtering.py
 tests/test_report_format_bucket_parity.py
 tests/test_report_integrity.py
@@ -553,6 +568,7 @@ tests/test_rule_id_grammar.py
 tests/test_rule_identity_report_fields.py
 tests/test_rule_status_per_kind.py
 tests/test_run_outcome.py
+tests/test_runtime_requirements.py
 tests/test_sarif.py
 tests/test_sarif_property_projections.py
 tests/test_sarif_suppression_disposition_sources.py
@@ -587,6 +603,7 @@ tests/test_stack_cli.py
 tests/test_stack_html.py
 tests/test_stack_report.py
 tests/test_stack_sysroot_e2e.py
+tests/test_stdlib_evidence_symbols.py
 tests/test_stored_bundle_symbol_names.py
 tests/test_stored_driver_not_comparable.py
 tests/test_stored_snapshot_source_licence.py
@@ -633,7 +650,9 @@ tests/test_unconfirmed_binary_identity.py
 tests/test_unconfirmed_compatibility.py
 tests/test_unconfirmed_route_coverage.py
 tests/test_undeclared_export_shrink.py
+tests/test_undocumented_export_ratio.py
 tests/test_undocumented_export_surface_scope.py
+tests/test_unnamed_type_cross_format.py
 tests/test_use_case_html_sarif_carriage.py
 tests/test_use_case_impact.py
 tests/test_use_case_per_finding.py
@@ -664,6 +683,7 @@ tests/unit/compare/test_enum_underlying_size.py
 tests/unit/compare/test_glibcxx_dual_abi_detector.py
 tests/unit/compare/test_namespace_move.py
 tests/unit/compare/test_target_isa_detector.py
+tests/unit/compare/test_type_visibility_detector.py
 tests/unit/extract/test_library_export_read_failures.py
 tests/unit/policy/test_consumer_requirements.py
 tests/unit/policy/test_consumer_requirements_examples.py

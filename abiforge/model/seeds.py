@@ -17,6 +17,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from abiforge.model.probes import PROBE_ROLES
+
 # (header_text, source_text). "" means "no such line in this file".
 RoleText = tuple[str, str]
 
@@ -52,6 +54,17 @@ class Seed:
     # feature an edit then removes) takes only the operators written for it:
     # an operator applies only when its roles include ``gate_role``.
     gate_role: str | None = None
+    # Further files of the library's source tree, as (path relative to the
+    # tree, template): a header the public header includes but the dump is
+    # not given (a private header), or another translation unit (``.c`` /
+    # ``.cpp``) compiled into the same library. A header takes each role's
+    # header text, a translation unit its source text.
+    extra_files: tuple[tuple[str, tuple[str, ...]], ...] = ()
+
+    @property
+    def extra_sources(self) -> tuple[str, ...]:
+        """The extra files that are translation units, in order."""
+        return tuple(p for p, _ in self.extra_files if p.endswith((".c", ".cpp")))
 
     @property
     def header_name(self) -> str:
@@ -92,6 +105,24 @@ class Seed:
                 self.source_template, current, side=1, guard=self.name, kind="source"
             ),
         )
+
+    def render_extra(
+        self, overrides: Mapping[str, RoleText] | None = None
+    ) -> dict[str, str]:
+        """Each extra file's text (path -> text) with *overrides* applied."""
+        current: dict[str, RoleText] = dict(self.roles)
+        if overrides:
+            current.update(overrides)
+        return {
+            path: _render(
+                template,
+                current,
+                side=1 if path in self.extra_sources else 0,
+                guard=self.name,
+                kind=path,
+            )
+            for path, template in self.extra_files
+        }
 
 
 def _render(
@@ -243,6 +274,15 @@ _CXX_ROLES: dict[str, RoleText] = {
         "template <typename T> T clampv(T v) { return v < 0 ? T(0) : v; }",
         "",
     ),
+    # A constrained template, so an edit can relax or rewrite a constraint
+    # (tmpl.clamp starts unconstrained: an edit there can only tighten).
+    # Guarded, so a pre-C++20 build of the seed still compiles.
+    "tmpl.req": (
+        "#ifdef __cpp_concepts\n"
+        "template <typename T> requires (sizeof(T) >= 4) T reqv(T v) { return v; }\n"
+        "#endif",
+        "",
+    ),
     "func.mode": (
         "int mode_code(mode m);",
         "int mode_code(mode m) { return m == mode::fast ? 7 : 9; }",
@@ -268,6 +308,7 @@ _CXX_HEADER: tuple[str, ...] = (
     "@@enum.mode@@",
     "@@struct.tagged@@",
     "@@tmpl.clamp@@",
+    "@@tmpl.req@@",
     "@@func.add@@",
     "@@func.scale@@",
     "@@func.count@@",
@@ -552,12 +593,14 @@ ELF_SEED = Seed(
 # A second C library seen as an ELF object, whose *baseline* already carries
 # what a c_elf edit adds: an executable stack, packed relative relocations,
 # DT_RPATH, a text relocation, initial-exec TLS, an IFUNC, a symbol-less
-# version node, fortified and newer-glibc imports, no SONAME. An edit removes
+# version node, fortified and newer-glibc imports, no SONAME, and eager
+# binding without RELRO (so bind-now can go while RELRO stays). An edit removes
 # one. Only operators that name ``alt.gate`` apply (``Seed.gate_role``), so
 # c_elf's link edits, which rewrite the flags from c_elf's own baseline, do
 # not land here. Role names start with ``alt.``.
 _ALT_LDFLAGS = (
-    "-Wl,--no-as-needed -lm -lgcc_s -Wl,--as-needed -Wl,-z,now -Wl,-z,execstack "
+    "-Wl,--no-as-needed -lm -lgcc_s -Wl,--as-needed -Wl,-z,now -Wl,-z,norelro "
+    "-Wl,-z,execstack "
     "-Wl,-z,pack-relative-relocs -Wl,-z,notext -Wl,-rpath,/opt/edit/lib "
     "-Wl,--disable-new-dtags"
 )
@@ -969,8 +1012,12 @@ _KIND_ROLES: dict[str, RoleText] = {
     ),
     "k.inst": (
         # The header promises both instantiations (explicit instantiation
-        # declarations), so each is part of the public contract.
-        "template <class T> T ktwice(T v);\nextern template int ktwice<int>(int);\n"
+        # declarations), so each is part of the public contract. A template's
+        # visibility pragma does not reach an instantiation gcc emits where
+        # the template is defined, so -fvisibility=hidden would hide it
+        # (clang keeps it); the attribute is the export macro (as xa.tmpl).
+        'template <class T> __attribute__((visibility("default"))) T ktwice(T v);\n'
+        "extern template int ktwice<int>(int);\n"
         "extern template double ktwice<double>(double);",
         "template <class T> T ktwice(T v) { return v + v; }\n"
         "template int ktwice<int>(int);\ntemplate double ktwice<double>(double);",
@@ -989,7 +1036,7 @@ _KIND_ROLES: dict[str, RoleText] = {
         "int kx_f(int a) { return a; }\nint kx_g(int a) { return a + 1; }\n} }",
     ),
     "k.tag": (
-        "struct ktag_a {};\ntemplate <class T> int kfam();",
+        'struct ktag_a {};\ntemplate <class T> __attribute__((visibility("default"))) int kfam();',
         "template <class T> int kfam() { return (int)sizeof(T); }\n"
         "template int kfam<ktag_a>();",
     ),
@@ -1028,6 +1075,45 @@ _KIND_ROLES: dict[str, RoleText] = {
         "class KW { detail::Impl* p; public: KW(); int n() const { return p->count; } }; }",
         "kib::KW::KW() : p(new detail::Impl{3}) {}",
     ),
+    # A polymorphic class whose own symbols (typeinfo, vtable) are exported
+    # with it; no free function names it, so narrowing the class's visibility
+    # cannot hide a function through GCC's type-visibility constraint.
+    "k.tvz": (
+        "struct KTV { virtual ~KTV(); virtual int kget(); int v; };",
+        "KTV::~KTV() {}\nint KTV::kget() { return v; }",
+    ),
+    # An unchanged record API whose new side is dumped with less evidence.
+    "k.evd": (
+        "struct KEV { int a; char c; };\nint kev_get(KEV* p);",
+        "int kev_get(KEV* p) { return p->a + p->c; }",
+    ),
+    # An inline function returning a lambda: callers can hold the result
+    # only in ``auto``. kurt_use calls it, so the library emits (weak)
+    # symbols for kmake and the closure's call operator. A deduced return
+    # type is C++14: under C++11 the group is empty (the operator needs the
+    # ``deduced_return`` feature, so no C++11 cell runs it).
+    "k.urt": (
+        "#if __cplusplus >= 201402L\n"
+        "inline auto kmake() { return [](int x) { return x + 7; }; }\n"
+        "int kurt_use(int a);\n#endif",
+        "#if __cplusplus >= 201402L\nint kurt_use(int a) { return kmake()(a); }\n#endif",
+    ),
+    # A namespace-scope using-declaration re-exporting a std function: consumer
+    # source may spell krx::abs.
+    "k.rex": (
+        "#include <cstdlib>\nnamespace krx { using std::abs; int krx_f(int a); }",
+        "namespace krx { int krx_f(int a) { return std::abs(a); } }",
+    ),
+    # An exported instantiation that relies on a defaulted trailing template
+    # parameter: kdta<int> names kdta<int, int> (U = int by default). The
+    # attribute is the export macro, as for k.inst.
+    "k.dta": (
+        "template <class T, class U = int> "
+        '__attribute__((visibility("default"))) U kdta(T v);\n'
+        "extern template int kdta<int>(int);",
+        "template <class T, class U> U kdta(T v) { return (U)v; }\n"
+        "template int kdta<int>(int);",
+    ),
     # Empty baselines: the operator adds the declaration.
     "k.pnv": ("", ""),
     "k.stl": ("", ""),
@@ -1035,6 +1121,9 @@ _KIND_ROLES: dict[str, RoleText] = {
 }
 _XCXX_ROLES.update(_KIND_ROLES)
 _LAYOUT_SLOTS += tuple(f"@@{r}@@" for r in _KIND_ROLES)
+# Edit-class probes (``abiforge.model.probes``).
+_XCXX_ROLES.update(PROBE_ROLES)
+_LAYOUT_SLOTS += tuple(f"@@{r}@@" for r in PROBE_ROLES)
 
 XCXX_SEED = Seed(
     name="cxx_more",
@@ -1210,6 +1299,163 @@ XA_SEED = Seed(
     gate_role="xa.gate",
 )
 
+# A C++ library for the L4/L5 source evidence variant (``Config.sources``):
+# its baseline carries what only source replay and the source graph see -- a
+# public macro, a default argument, a header-only inline and template, a
+# public entry with an unused internal helper, a virtual hierarchy dispatched
+# through a public function. C++98-clean, so every standard builds it. Gated
+# (``src.gate``): only ``abiforge.operators.source_evidence`` edits it.
+_SRC_ROLES: dict[str, RoleText] = {
+    "src.gate": ("", ""),
+    "src.macro": ("#define SRC_LIMIT 4", ""),
+    "src.dflt": (
+        "int src_take(int a, int b = 4);",
+        "int src_take(int a, int b) { return a + b; }",
+    ),
+    "src.inl": ("inline int src_twice(int v) { return v * 2; }", ""),
+    "src.tmpl": ("template <class T> T src_scale(T v) { return v * 2; }", ""),
+    "src.call": (
+        "int src_entry(int v);",
+        "static int src_helper(int v) { return v; }\n"
+        "int src_entry(int v) { return v; }",
+    ),
+    "src.vd": (
+        "struct SrcBase { virtual ~SrcBase(); virtual int f(); };\n"
+        "struct SrcLeft : SrcBase { int f(); };\nint src_dispatch(SrcBase *b);",
+        "SrcBase::~SrcBase() {}\nint SrcBase::f() { return 0; }\n"
+        "int SrcLeft::f() { return 1; }\nint src_dispatch(SrcBase *b) { return b->f(); }",
+    ),
+    "src.fn": (
+        "int src_count(const char *s);",
+        "int src_count(const char *s) { int n = 0; while (s[n]) ++n; return n; }",
+    ),
+    "src.extra": ("int src_more(int v);", "int src_more(int v) { return v + 2; }"),
+}
+
+SRC_SEED = Seed(
+    name="cxx_src",
+    lang="c++",
+    header_template=(
+        "#ifndef EDIT_SEED_SRC_HPP",
+        "#define EDIT_SEED_SRC_HPP",
+        _VIS_OPEN,
+        "@@src.macro@@",
+        "@@src.dflt@@",
+        "@@src.inl@@",
+        "@@src.tmpl@@",
+        "@@src.call@@",
+        "@@src.vd@@",
+        "@@src.fn@@",
+        "@@src.extra@@",
+        _VIS_CLOSE,
+        "#endif",
+    ),
+    source_template=(
+        '#include "edit_seed.h"',
+        "@@src.dflt@@",
+        "@@src.call@@",
+        "@@src.vd@@",
+        "@@src.fn@@",
+        "@@src.extra@@",
+    ),
+    roles=_SRC_ROLES,
+    gate_role="src.gate",
+)
+
+
+# A C++ library laid out as a small project tree for the ``sources`` evidence
+# variant: a public header, a private header it includes (``detail/``, never
+# given to the dump, so its declarations carry private-header provenance) and
+# a second translation unit (``tree_unit2.cpp``, which defines EDIT_UNIT2
+# before including the public header). It carries what only a multi-file,
+# multi-TU tree shows: private-header provenance, per-TU type definitions,
+# anonymous-type coordinates. Gated (``tree.gate``): only
+# ``abiforge.operators.source_tree`` edits it.
+_TREE_ROLES: dict[str, RoleText] = {
+    "tree.gate": ("", ""),
+    "tree.anon": (
+        "struct TreeHolder { struct { int a; } in; int n; };\n"
+        "int tree_holder_n(const TreeHolder *h);",
+        "int tree_holder_n(const TreeHolder *h) { return h->n; }",
+    ),
+    "tree.pair": (
+        "#define TREE_TAIL_T int\n"
+        "struct TreePair { int a; TREE_TAIL_T tail; };\n"
+        "int tree_pair_a(const TreePair *p);\n"
+        "int tree_pair_b(const TreePair *p);",
+        "int tree_pair_a(const TreePair *p) { return p->a; }",
+    ),
+    "tree.unit2": ("", "int tree_pair_b(const TreePair *p) { return p->a + 1; }"),
+    "tree.fn": ("int tree_count(int v);", "int tree_count(int v) { return v; }"),
+    # A public record pointing at a public type, and one pointing at a type
+    # the private header defines (the targets of the rename operators).
+    "tree.ren": (
+        "struct TreeTarget { int v; };\n"
+        "struct TreeRef { TreeTarget *t; int n; };\n"
+        "int tree_ref_n(const TreeRef *r);",
+        "int tree_ref_n(const TreeRef *r) { return r->n; }",
+    ),
+    "tree.priv": ("struct TreeImpl { int v; };", ""),
+    "tree.privref": (
+        "struct TreeHandle { TreeImpl *impl; int n; };\n"
+        "int tree_handle_n(const TreeHandle *h);",
+        "int tree_handle_n(const TreeHandle *h) { return h->n; }",
+    ),
+    # Private-header declarations an edit adds (empty in the baseline).
+    "tree.leak": ("", ""),
+    "tree.rtti": ("", ""),
+}
+
+TREE_PRIVATE_HEADER = "detail/tree_priv.h"
+TREE_SECOND_UNIT = "tree_unit2.cpp"
+
+TREE_SEED = Seed(
+    name="cxx_tree",
+    lang="c++",
+    header_template=(
+        "#ifndef EDIT_SEED_TREE_HPP",
+        "#define EDIT_SEED_TREE_HPP",
+        _VIS_OPEN,
+        f'#include "{TREE_PRIVATE_HEADER}"',
+        "@@tree.anon@@",
+        "@@tree.pair@@",
+        "@@tree.fn@@",
+        "@@tree.ren@@",
+        "@@tree.privref@@",
+        _VIS_CLOSE,
+        "#endif",
+    ),
+    source_template=(
+        '#include "edit_seed.h"',
+        "@@tree.anon@@",
+        "@@tree.pair@@",
+        "@@tree.fn@@",
+        "@@tree.ren@@",
+        "@@tree.privref@@",
+        "@@tree.leak@@",
+        "@@tree.rtti@@",
+    ),
+    roles=_TREE_ROLES,
+    gate_role="tree.gate",
+    extra_files=(
+        (
+            TREE_PRIVATE_HEADER,
+            (
+                "#ifndef EDIT_SEED_TREE_PRIV_HPP",
+                "#define EDIT_SEED_TREE_PRIV_HPP",
+                "@@tree.priv@@",
+                "@@tree.leak@@",
+                "@@tree.rtti@@",
+                "#endif",
+            ),
+        ),
+        (
+            TREE_SECOND_UNIT,
+            ("#define EDIT_UNIT2 1", '#include "edit_seed.h"', "@@tree.unit2@@"),
+        ),
+    ),
+)
+
 SEEDS: tuple[Seed, ...] = (
     C_SEED,
     CXX_SEED,
@@ -1218,5 +1464,7 @@ SEEDS: tuple[Seed, ...] = (
     ALT_SEED,
     XCXX_SEED,
     XA_SEED,
+    SRC_SEED,
+    TREE_SEED,
 )
 SEED_BY_NAME: dict[str, Seed] = {s.name: s for s in SEEDS}

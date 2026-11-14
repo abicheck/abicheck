@@ -161,7 +161,13 @@ def test_base_contributes_its_own_data_size(tmp_path: Path) -> None:
     assert data_size_bits(ctx, _rec(ctx, "D")) == 48  # x reused B's padding
 
 
-def test_empty_base_contributes_nothing(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "triple", ["x86_64-pc-linux-gnu", "arm64-apple-darwin23", "x86_64-w64-mingw32"]
+)
+def test_empty_base_contributes_nothing(tmp_path: Path, triple: str) -> None:
+    # An empty class holds no data even when POD (C++03 POD here; every empty
+    # class is C++11 POD on Apple arm64): ``struct X : E { char z; }`` puts z
+    # at offset 0 on every Itanium target.
     empty = _struct("_e", "E", 8, _implicit("_e"))
     derived = _struct(
         "_d",
@@ -169,9 +175,7 @@ def test_empty_base_contributes_nothing(tmp_path: Path) -> None:
         8,
         '<Base type="_e" access="public" virtual="0" offset="0"/>' + _implicit("_d"),
     )
-    ctx = _ctx(empty + derived, tmp_path)
-    # Empty, POD or not: a derived class places its first member at offset 0
-    # (empty-base optimization), so no byte of E is data.
+    ctx = _ctx(empty + derived, tmp_path, triple=triple)
     assert data_size_bits(ctx, _rec(ctx, "E")) == 0
     assert data_size_bits(ctx, _rec(ctx, "D")) == 0
 
@@ -252,7 +256,7 @@ def test_c_document_is_always_pod(tmp_path: Path) -> None:
         ("x86_64-pc-linux-gnu", 24),
         ("x86_64-w64-mingw32", None),  # Microsoft bit-field layout
         ("x86_64-pc-windows-gnu", None),
-        ("x86_64-pc-cygwin", 24),
+        ("x86_64-pc-cygwin", None),  # cygming.h: -mms-bitfields default
     ],
 )
 def test_a_bitfield_is_unknown_under_microsoft_bitfield_layout(

@@ -39,7 +39,6 @@ abicheck compare libfoo_v1.so libfoo_v2.so
 Verdict: COMPATIBLE_WITH_RISK (exit 0)
 
 - func_visibility_protected_changed: ELF symbol visibility changed: hook_point (default → protected)
-- symbol_elf_visibility_changed: ELF visibility changed: hook_point (default -> protected)
 ```
 
 ## Minimum evidence

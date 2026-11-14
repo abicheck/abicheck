@@ -38,7 +38,7 @@ import re
 from pathlib import Path
 from xml.etree.ElementTree import Element
 
-from .context import CastxmlParserContext, member_elements as _members
+from .context import CastxmlParserContext, member_elements
 
 _RECORD_TAGS = frozenset({"Struct", "Class", "Union"})
 #: Types whose values are trivially copyable by definition.
@@ -238,7 +238,7 @@ def _record_trait(ctx: CastxmlParserContext, el: Element) -> bool | None:
     if el.get("incomplete") == "1":
         return None
     record_id = el.get("id", "")
-    members = _members(ctx, el)
+    members = member_elements(ctx, el)
     traits = [_base_trait(ctx, b) for b in el if b.tag == "Base"]
     traits += [_member_trait(ctx, m, record_id) for m in members]
     if False in traits:
@@ -253,15 +253,25 @@ _NAMED_TAGS = frozenset({"CvQualifiedType", "Typedef", "ElaboratedType"})
 _REFERENCE_TAGS = frozenset({"ReferenceType", "RValueReferenceType"})
 
 
-def standard_layout(ctx: CastxmlParserContext, el: Element) -> bool | None:
+def standard_layout(
+    ctx: CastxmlParserContext, el: Element, *, cxx11: bool = False
+) -> bool | None:
     """The standard-layout trait of record *el*, tri-state like
-    :func:`trivially_copyable` (C++ [class.prop]/3, C++11 and later)."""
+    :func:`trivially_copyable` (C++ [class.prop]/3 as amended by CWG 1813).
+
+    *cxx11* asks for the trait as C++11 published it, before CWG 1813 added
+    "at most one base class subobject of any given type" (/3.7). That is the
+    trait a C++11-POD layout ABI (Apple arm64, WebAssembly) decides tail
+    padding with: Clang keeps it as ``isCXX11StandardLayout`` precisely so a
+    defect report cannot move a record's layout. ``struct X : B, Empty {}``
+    with ``B : Empty`` is not standard-layout today, but is C++11
+    standard-layout, so a C++11-POD target does not reuse its tail padding."""
     cache = ctx.standard_layout_cache
-    eid = el.get("id", "")
+    eid = el.get("id", "") + ("#c++11" if cxx11 else "")
     if eid in cache:
         return cache[eid]
     cache[eid] = None  # a by-value cycle is impossible; stay safe anyway
-    result = _standard_layout_trait(ctx, el)
+    result = _standard_layout_trait(ctx, el, cxx11)
     cache[eid] = result
     return result
 
@@ -291,7 +301,7 @@ def _is_reference(ctx: CastxmlParserContext, type_id: str, depth: int = 0) -> bo
 
 
 def _standard_layout_type(
-    ctx: CastxmlParserContext, type_id: str, depth: int = 0
+    ctx: CastxmlParserContext, type_id: str, cxx11: bool, depth: int = 0
 ) -> bool | None:
     el = ctx.id_map.get(type_id)
     if el is None or depth > 32:
@@ -299,9 +309,9 @@ def _standard_layout_type(
     if el.tag in _SCALAR_TAGS:
         return True
     if el.tag in _TRANSPARENT_TAGS:
-        return _standard_layout_type(ctx, el.get("type", ""), depth + 1)
+        return _standard_layout_type(ctx, el.get("type", ""), cxx11, depth + 1)
     if el.tag in _RECORD_TAGS:
-        return standard_layout(ctx, el)
+        return standard_layout(ctx, el, cxx11=cxx11)
     return None
 
 
@@ -311,7 +321,7 @@ def _has_data_members(
     """Whether record *el* or any base has a non-static data member."""
     if el.get("incomplete") == "1" or depth > 32:
         return None
-    if any(m.tag == "Field" for m in _members(ctx, el)):
+    if any(m.tag == "Field" for m in member_elements(ctx, el)):
         return True
     flags: list[bool | None] = []
     for b in el:
@@ -363,7 +373,7 @@ def _first_member_types(
     if el.get("incomplete") == "1":
         return None
     out = {el.get("id", "")}
-    fields = [m for m in _members(ctx, el) if m.tag == "Field"]
+    fields = [m for m in member_elements(ctx, el) if m.tag == "Field"]
     for f in fields if el.tag == "Union" else fields[:1]:
         inner = _first_member_types(ctx, f.get("type", ""), depth + 1)
         if inner is None:
@@ -377,6 +387,7 @@ def _data_member_rules(
     el: Element,
     fields: list[Element],
     bases: list[Element],
+    cxx11: bool,
 ) -> bool | None:
     """[class.prop]/3.6 (data members in at most one class of the hierarchy,
     and none in the most derived one when a base has some), /3.7 (one base
@@ -402,8 +413,9 @@ def _data_member_rules(
     subobjects = _base_subobjects(ctx, el)
     if subobjects is None:
         return None
-    # [class.prop]/3.7: at most one base class subobject of any given type.
-    if len(subobjects) != len(set(subobjects)):
+    # [class.prop]/3.7: at most one base class subobject of any given type
+    # (CWG 1813; not part of the C++11 trait).
+    if not cxx11 and len(subobjects) != len(set(subobjects)):
         return False
     if not fields:
         # An inherited first data member (``struct D : E, B {}`` with
@@ -422,10 +434,12 @@ def _data_member_rules(
     return hierarchy
 
 
-def _standard_layout_trait(ctx: CastxmlParserContext, el: Element) -> bool | None:
+def _standard_layout_trait(
+    ctx: CastxmlParserContext, el: Element, cxx11: bool
+) -> bool | None:
     if el.get("incomplete") == "1":
         return None
-    members = _members(ctx, el)
+    members = member_elements(ctx, el)
     fields = [m for m in members if m.tag == "Field"]
     bases = [b for b in el if b.tag == "Base"]
     # [class.prop]/3.2: no virtual function (declared here) and no virtual base.
@@ -435,20 +449,20 @@ def _standard_layout_trait(ctx: CastxmlParserContext, el: Element) -> bool | Non
     ) or any(b.get("virtual") == "1" for b in bases):
         return False
     traits: list[bool | None] = [
-        _standard_layout_type(ctx, b.get("type", "")) for b in bases
+        _standard_layout_type(ctx, b.get("type", ""), cxx11) for b in bases
     ]
     for f in fields:
         # [class.prop]/3.1: no reference data member.
         if _is_reference(ctx, f.get("type", "")):
             return False
-        traits.append(_standard_layout_type(ctx, f.get("type", "")))
+        traits.append(_standard_layout_type(ctx, f.get("type", ""), cxx11))
     # [class.prop]/3.3: one access control for every non-static data member.
     accesses = {f.get("access") for f in fields}
     if None in accesses:
         traits.append(None)
     elif len(accesses) > 1:
         return False
-    traits.append(_data_member_rules(ctx, el, fields, bases))
+    traits.append(_data_member_rules(ctx, el, fields, bases, cxx11))
     if False in traits:
         return False
     if None in traits:

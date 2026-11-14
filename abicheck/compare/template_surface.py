@@ -91,6 +91,23 @@ def strip_template_args(name: str) -> str:
     return "".join(out).rstrip()
 
 
+def callable_name(name: str) -> str:
+    """*name*'s qualified callable name: template arguments, the parameter
+    list and a leading return type dropped.
+
+    A function template's demangled name carries its return type
+    (``long kdta<int, long>(int)``), and that type can depend on a template
+    argument, so two instantiations of one template only share this name
+    (``kdta``). An ``operator`` name keeps its own spelling, spaces included
+    (``ns::C::operator new``).
+    """
+    head = strip_template_args(name).split("(", 1)[0].strip()
+    at = head.rfind("operator")
+    if at >= 0:
+        return head[head.rfind(" ", 0, at) + 1 :]
+    return head.rsplit(" ", 1)[-1]
+
+
 @memoized(maxsize=1 << 16)
 def mask_operator_symbols(name: str) -> str:
     """*name* with each operator name's own ``<``/``>`` removed."""
