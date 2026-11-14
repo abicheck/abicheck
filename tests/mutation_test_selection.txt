@@ -309,6 +309,7 @@ tests/test_effective_gate_single_input.py
 tests/test_effective_verdict.py
 tests/test_elf_version_alias_binding.py
 tests/test_elf_version_policy.py
+tests/test_elf_visibility_single_finding.py
 tests/test_enum_addition_reported.py
 tests/test_enum_cross_tier_dedup.py
 tests/test_enum_sentinel_and_tag_heuristics.py
@@ -461,7 +462,6 @@ tests/test_pair_evidence_shared.py
 tests/test_parallel_safety.py
 tests/test_param_kind_enum_identity.py
 tests/test_param_kind_fact.py
-tests/test_param_kind_fact_integration.py
 tests/test_pattern_audit_scenarios.py
 tests/test_pattern_modulation_disclosure.py
 tests/test_pattern_verdicts.py
@@ -609,6 +609,7 @@ tests/test_stored_driver_not_comparable.py
 tests/test_stored_snapshot_source_licence.py
 tests/test_stripped_degradation.py
 tests/test_struct_cross_tier_dedup.py
+tests/test_struct_field_type_cross_tier_fold.py
 tests/test_support_gate_reasons.py
 tests/test_suppress_repeatable.py
 tests/test_suppression.py

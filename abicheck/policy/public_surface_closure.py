@@ -375,7 +375,7 @@ def _seed_undeclared_exports(
     evidence = EdgeEvidence(snap, identities=ids)
     exports = evidence.exports
     # The Phase 2 ``exports`` join over the same projection
-    # ``buildsource.cross_source_checks_base._exported_symbol_names`` uses --
+    # ``compare.export_names.default_export_names`` uses --
     # default/unversioned exports only (``ExportEntry.default_version``).
     # Sharing the projection is what keeps this set and the
     # ``exported_not_public`` obligation set talking about the same

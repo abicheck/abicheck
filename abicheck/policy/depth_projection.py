@@ -443,7 +443,8 @@ def _strip_header_and_above_evidence(
     snap.from_headers = False
     snap.python_api = None
     snap.semantic_ir = None
-    # The header-only (L2) graph; the L4/L5 `build_source.source_graph` stays.
+    # `_attach_header_graph`'s own docstring: "the header-only (L2) semantic graph" -- an L2 fact like the others above,
+    # not the L4/L5 `build_source.source_graph` this function leaves untouched.
     snap.surface_graph = None
     # Header-scan facts (concept scan, export-table fallback) describe the
     # headers this projection excludes, so no gap they name applies below it.
@@ -659,8 +660,7 @@ def project_snapshot_to_depth(
             dwarf_struct_scope=dwarf_struct_scope,
             dwarf_enum_scope=dwarf_enum_scope,
         )
-        # Indexes a prior compare built on *snap* still list stripped entries.
-        out._func_by_mangled = out._var_by_mangled = out._type_by_name = None
+        out.invalidate_indexes()  # a prior compare's indexes list stripped entries
     if rank < build_rank:
         out.build_mode = None
     pack = out.build_source

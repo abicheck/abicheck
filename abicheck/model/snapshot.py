@@ -180,9 +180,9 @@ class AbiSnapshot:
     # as the ``abicheck.cxx_concept_header_scan`` extension fact of the debug
     # section (storage/extension_fact_catalog.py), not as a section key.
     cxx_concept_header_scan: bool | None = field(default=None, kw_only=True)
-    # Public headers' C++20 concepts/constraints (clang backend, encoding in
-    # model/concept_constraint.py); None: not modelled (castxml, C, no public
-    # set, older dump). Extension fact ``abicheck.cxx_concept_constraints``.
+    # The public headers' C++20 concepts and template constraints, modelled by the clang header backend (extract/headers/clang/concept_constraints.py,
+    # encoding in model/concept_constraint.py). None: not modelled (castxml, a C parse, no declared public set, an older dump).
+    # Persisted as the ``abicheck.cxx_concept_constraints`` extension fact of the debug section.
     cxx_concept_constraints: dict[str, str] | None = field(default=None, kw_only=True)
     # Public headers' template-parameter defaults (model/template_default_table.py);
     # None: not modelled. Extension fact ``abicheck.cxx_template_defaults``.
@@ -190,7 +190,8 @@ class AbiSnapshot:
         default=None, kw_only=True
     )
     cu_stack_protector: dict[str, int] | None = field(default=None, kw_only=True)
-    # ADR-015 origin per typedef key; absent (or None) is UNKNOWN, never private.
+    # ADR-015 origin of each typedef key (bare and qualified), classified by apply_provenance from the producer's declaring
+    # header; a key absent (or None: never classified, DWARF, an older dump) is UNKNOWN, never private.
     # Extension fact ``abicheck.typedef_origins`` of the declarations section.
     typedef_origins: dict[str, ScopeOrigin] | None = field(default=None, kw_only=True)
     # Public headers' ``using std::X;`` re-exports, declared name -> std:: target
@@ -723,15 +724,9 @@ class AbiSnapshot:
         pick up the addition will instead keep serving the stale maps —
         there is no cheap, reliable way to detect an in-place list mutation
         to invalidate on. This is safe because every real producer already
-        treats a snapshot's collections as fixed once built and resets all
-        three cache fields to ``None`` together when it *does* need to
-        rebuild them from a changed collection (see ``dumper_hybrid.py``,
-        ``dumper_scoping.py``, ``clang_layout_tool.py``) — ``index()`` is
-        never called, mutate, called again on the same live object anywhere
-        in this codebase. A caller with a genuine need to re-index after
-        mutating a snapshot in place must reset ``_func_by_mangled``/
-        ``_var_by_mangled``/``_type_by_name`` to ``None`` first, the same
-        way those three modules already do.
+        treats a snapshot's collections as fixed once built, and a caller
+        that does change a collection in place calls
+        :meth:`invalidate_indexes` before the next lookup.
         """
         if self._type_by_name is not None:
             return
@@ -740,6 +735,11 @@ class AbiSnapshot:
             d.functions, d.variables, d.types, f"{self.library}@{self.version}"
         )
         self._func_by_mangled, self._var_by_mangled, self._type_by_name = maps
+
+    def invalidate_indexes(self) -> None:
+        """Drop the lookup indexes so the next lookup rebuilds them from the
+        current collections (after a declaration was removed or respelled)."""
+        self._func_by_mangled = self._var_by_mangled = self._type_by_name = None
 
     @property
     def declarations(self) -> Declarations:

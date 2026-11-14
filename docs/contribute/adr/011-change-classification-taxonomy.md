@@ -186,3 +186,27 @@ When adding a new `ChangeKind`:
 - ADR-001 — Contains early classification decisions for `NEEDED_ADDED`,
   `SYMBOL_BINDING_STRENGTHENED`, `SYMBOL_SIZE_CHANGED` (now consolidated here)
 - ADR-010 — Policy profile system that varies classification per profile
+
+## Amendment (2026-11-14, accepted): a pointer field retargeted at a renamed record is `ABI_EQUIVALENT_TYPE_CHANGED`
+
+`TYPE_FIELD_TYPE_CHANGED` compares a field's spelled type. When a field's
+type is a pointer or reference (any depth: `T *`, `T **`, `T &`,
+`const T *`) to a record that was only *renamed*, the slot still stores an
+address at the same offset, so the field change is not an ABI break.
+`compare/abi_equivalent_retype.py` re-classifies it as
+`ABI_EQUIVALENT_TYPE_CHANGED` (`COMPATIBLE_WITH_RISK`) only when all of
+these hold:
+
+- the field's offset is known and unchanged, and neither side is a bitfield;
+- the pointer/reference shape (qualifiers and indirections) is spelled
+  identically;
+- the old pointee name is gone from the new side and the new pointee name
+  is absent from the old side — a rename, not a repointing at another type
+  that already existed;
+- both pointee records are found and have the same size, alignment and
+  member offsets, or are both opaque.
+
+The rename itself stays visible as its own finding (`TYPE_REMOVED` /
+`TAG_TYPE_RENAMED`), which carries the source break; the re-classification
+never lowers a verdict on missing evidence (an unknown offset or an
+unresolved pointee keeps `TYPE_FIELD_TYPE_CHANGED`).

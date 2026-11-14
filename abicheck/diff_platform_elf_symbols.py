@@ -88,7 +88,9 @@ def _is_internal_data_symbol(name: str) -> bool:
     return name.startswith("_")
 
 
-# Version-tag parsing lives in diff_versioning (re-exported above).
+# Canonical version-tag parsing lives in diff_versioning (imported at the top
+# of this module); the private names stay re-exported here for existing
+# callers/tests.
 
 
 def _diff_elf_symbol_versioning(old_elf: Any, new_elf: Any) -> list[Change]:

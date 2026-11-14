@@ -413,9 +413,7 @@ def bind_header_declarations_to_exports(
         ambiguous.extend(refused)
     if bound:
         # The mangled-name indexes were built from the pre-binding spellings.
-        snap._func_by_mangled = None
-        snap._var_by_mangled = None
-        snap._type_by_name = None
+        snap.invalidate_indexes()
         _log.info(
             "bound %d header declaration(s) to exports by normalized identity",
             len(bound),

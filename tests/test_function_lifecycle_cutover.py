@@ -87,7 +87,7 @@ def _inline_oracle(old, new) -> list[ChangeKind]:
 def test_inline_changes_match_the_oracle_exhaustively() -> None:
     bad = []
     for old, new, exported in itertools.product(
-        _BOOL_SIDES, _BOOL_SIDES, (False, True)
+        _BOOL_SIDES, _BOOL_SIDES, (False, True, None)
     ):
         got = [
             c.kind
@@ -119,7 +119,11 @@ def test_inline_oracle_is_not_vacuous() -> None:
 
 @pytest.mark.parametrize(
     ("exported", "fragment"),
-    [(True, "still exported"), (False, "may be removed")],
+    [
+        (True, "still exported"),
+        (False, "no longer exported"),
+        (None, "not assessed"),
+    ],
 )
 def test_became_inline_description_follows_export_answer(exported, fragment) -> None:
     (change,) = inline_changes(

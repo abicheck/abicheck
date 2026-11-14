@@ -34,6 +34,7 @@ from .compare.elf_only_demangle import (
     elf_only_demangled_name,
     prewarm_elf_only_demangling,
 )
+from .compare.export_names import default_export_names
 from .compare.finding_identity import SymbolIdentityIndex
 from .compare.finding_identity.ctor_dtor import (
     ctor_dtor_drift_old_by_new_key,
@@ -349,12 +350,8 @@ def _check_inline_transitions(
         return []
     old_index = function_signature_index(old_snapshot.canonical_ir, old_map.values())
     new_index = function_signature_index(new_snapshot.canonical_ir, new_map.values())
-    new_elf = new_snapshot.elf
-    # Built once: an `any(...)` over the export table per matched pair was
-    # O(pairs x symbols), quadratic in library size.
-    new_exported = (
-        {sym.name for sym in new_elf.symbols} if new_elf is not None else None
-    )
+    # Built once (a per-pair table scan was quadratic); None: no export table read.
+    new_exported = default_export_names(new_snapshot)
     changes: list[Change] = []
     for mangled, f_old, f_new in iter_matched_function_pairs(old_map, new_map):
         changes += inline_changes(
@@ -363,7 +360,7 @@ def _check_inline_transitions(
             old_index.entity_for(f_old),
             new_index.entity_for(f_new),
             entity_id=f_old.entity_id or f_new.entity_id,
-            still_exported=new_exported is not None and mangled in new_exported,
+            still_exported=None if new_exported is None else mangled in new_exported,
         )
     return changes
 

@@ -27,10 +27,8 @@ from abicheck.buildsource.cross_source_checks import (
     CrosscheckConfig,
     run_crosschecks,
 )
-from abicheck.buildsource.cross_source_checks_base import (
-    _exported_symbol_names,
-    _linked_export_symbols,
-)
+from abicheck.buildsource.cross_source_checks_base import _linked_export_symbols
+from abicheck.compare.export_names import default_export_names
 from abicheck.elf_metadata import ElfMetadata, ElfSymbol
 from abicheck.elf_symbol_filter import (
     ELF_LINKER_RESERVED_SYMBOLS,
@@ -132,7 +130,7 @@ def test_differential_oracle_is_not_vacuous():
 
 def test_export_readers_drop_reserved_names_on_elf_only():
     snap = _shape_plain(tuple(sorted(_EXPECTED_RESERVED)))
-    for reader in (_exported_symbol_names, _linked_export_symbols):
+    for reader in (default_export_names, _linked_export_symbols):
         names = reader(snap)
         assert names is not None
         assert {"add", "sub"} <= names

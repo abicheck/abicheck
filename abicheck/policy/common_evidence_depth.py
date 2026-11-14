@@ -28,7 +28,9 @@ A difference in evidence must narrow the conclusion, never manufacture one
 operand is header-derived, the pair is judged at the highest rung both
 operands reach -- ``binary`` -- through the same joint projection an
 explicit ``--depth binary`` uses (``project_pair_to_depth``). The asymmetry
-itself stays reported (``layer_coverage_asymmetric``, partial assurance).
+itself stays reported (``layer_coverage_asymmetric``, partial assurance);
+recording that on the run (coverage warning, projection evidence gap) is
+workflow coordination, owned by ``workflows.asymmetric_header_evidence``.
 """
 
 from __future__ import annotations
@@ -38,11 +40,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ..model.snapshot import AbiSnapshot
 
-__all__ = [
-    "asymmetric_header_evidence_warning",
-    "common_evidence_depth",
-    "effective_compare_depth",
-]
+__all__ = ["common_evidence_depth", "effective_compare_depth"]
 
 
 def _header_evidence_known(snap: AbiSnapshot) -> bool:
@@ -68,36 +66,3 @@ def effective_compare_depth(
     wins (its floor check reports a rung an operand cannot reach); otherwise
     the operands' common rung."""
     return requested if requested is not None else common_evidence_depth(old, new)
-
-
-def asymmetric_header_evidence_warning(old: AbiSnapshot) -> str:
-    """The coverage warning a pair judged at its common rung carries."""
-    side, other = ("old", "new") if old.from_headers else ("new", "old")
-    return (
-        f"headers were given for the {side} side only: the {other} side has no "
-        "header-level evidence, so the pair was compared at depth binary "
-        "(exported symbols) and header-level changes were not assessed; give "
-        "headers for both sides to compare declarations"
-    )
-
-
-#: The evidence a common-rung comparison sets aside on the header side.
-ASYMMETRIC_HEADER_GAP = (
-    "the header-built side's declarations (headers were given for one side "
-    "only, so the pair was compared at binary depth)"
-)
-
-
-def mark_asymmetric_header_gap(
-    original_old: AbiSnapshot, projected_old: AbiSnapshot, projected_new: AbiSnapshot
-) -> None:
-    """Record on the projected header-built side that its header evidence was
-    set aside, so the run's assurance reads ``partial`` rather than
-    ``complete`` (weaker evidence narrows the conclusion; it never reads as a
-    full comparison)."""
-    side = projected_old if original_old.from_headers else projected_new
-    if ASYMMETRIC_HEADER_GAP not in side.projection_evidence_gaps:
-        side.projection_evidence_gaps = (
-            *side.projection_evidence_gaps,
-            ASYMMETRIC_HEADER_GAP,
-        )

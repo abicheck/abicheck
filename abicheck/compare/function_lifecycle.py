@@ -76,6 +76,17 @@ def deletion_kind(
     return ChangeKind.FUNC_DELETED
 
 
+#: ``FUNC_BECAME_INLINE`` wording by the new side's export evidence.
+_BECAME_INLINE_WORDING: dict[bool | None, str] = {
+    True: "Function became inline, symbol still exported: {}",
+    False: "Function became inline and its symbol is no longer exported: {}",
+    None: (
+        "Function became inline; no export table was read, so whether its "
+        "symbol remains in the export table was not assessed: {}"
+    ),
+}
+
+
 def inline_changes(
     mangled: str,
     name: str,
@@ -83,10 +94,17 @@ def inline_changes(
     new: CanonicalEntity | None,
     *,
     entity_id: EntityId | None,
-    still_exported: bool,
+    still_exported: bool | None,
 ) -> list[Change]:
     """``FUNC_BECAME_INLINE``/``FUNC_LOST_INLINE``; *still_exported* is the
-    caller's export-table answer for the new side."""
+    caller's export-table answer for the new side, ``None`` when no export
+    table was read (headers only, an unread table).
+
+    Becoming inline is a risk whatever the export evidence: a lost export is
+    the break, and it is reported as its own finding (``func_removed``,
+    ``func_visibility_changed``) where a table proves it. Without a table the
+    loss is neither proven nor ruled out, so the finding says so rather than
+    claiming either (weaker evidence narrows the conclusion)."""
     o, n = _value(old, "is_inline"), _value(new, "is_inline")
     if o is None or n is None or o == n:
         return []
@@ -95,11 +113,7 @@ def inline_changes(
             make_change(
                 ChangeKind.FUNC_BECAME_INLINE,
                 symbol=mangled,
-                description=(
-                    f"Function became inline, symbol still exported: {name}"
-                    if still_exported
-                    else f"Function became inline (symbol may be removed from DSO): {name}"
-                ),
+                description=_BECAME_INLINE_WORDING[still_exported].format(name),
                 old_value="non-inline",
                 new_value="inline",
                 entity_id=entity_id,
