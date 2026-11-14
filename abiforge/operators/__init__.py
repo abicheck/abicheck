@@ -42,6 +42,7 @@ from abiforge.model.opkit import (
     _with,
 )
 from abiforge.model.seeds import SEEDS, RoleText, Seed
+from abiforge.operators.build_data import BUILD_DATA_OPERATORS
 from abiforge.operators.cxx import CXX_OPERATORS
 from abiforge.operators.elf import ELF_OPERATORS
 from abiforge.operators.kinds import KIND_OPERATORS
@@ -982,6 +983,7 @@ OPERATORS: tuple[EditOp, ...] = (
     *LAYOUT_OPERATORS,
     *SYMBOL_OPERATORS,
     *KIND_OPERATORS,
+    *BUILD_DATA_OPERATORS,
 )
 
 OP_BY_NAME: dict[str, EditOp] = {op.name: op for op in OPERATORS}

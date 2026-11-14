@@ -29,7 +29,7 @@ Purpose and claims: `README.md`.
 - **Operators** and their ground truth: `operators/` — `__init__` (core seeds
   and the registry), `elf` (`c_elf`), `cxx` (`cxx_more`), `platform`
   (ELF/loader/toolchain edits), `symbols`, `layout` (record and base layout
-  classes). The `EditOp` type is `model/opkit.py`.
+  classes), `build_data` (compile modes only L3 build data records). The `EditOp` type is `model/opkit.py`.
 - **Seeds** (`model/seeds.py`): a seed's `build.*` roles carry compile and link
   inputs (version script, SONAME, flags) that an operator edits like a
   declaration; a seed with a `gate_role` (`c_elf_alt`, `cxx_alt`) takes only
@@ -38,7 +38,9 @@ Purpose and claims: `README.md`.
   producer, flags, evidence and, for `headers`, the header backend: castxml,
   clang or the native gcc plugin, which needs
   `python -m abicheck.extract.headers.gcc.build --compiler g++` once) plus its
-  `consumers`. A (build, consumer) mix that cannot work is an explicit
+  `consumers`. `build_data=True` adds L3 evidence on top of `headers`: the
+  harness writes each side's `compile_commands.json` and the adapter dumps
+  through the typed `--build-info` workflow. A (build, consumer) mix that cannot work is an explicit
   `infeasible` pair, never a pass.
 - **Run** (`run/`): `harness` builds and asks the checker, `exec` is the
   execution oracle (consumers, layout probes, new-header compiles), `cells`

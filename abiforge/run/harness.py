@@ -13,6 +13,7 @@ nothing.
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import sys
@@ -38,6 +39,8 @@ COMPILERS: dict[str, tuple[str, str]] = {
 }
 
 LIB_NAME = "libedit.so"
+#: A ``build_data`` config's L3 record of the library build.
+COMPILE_DB = "compile_commands.json"
 
 
 class CompileError(RuntimeError):
@@ -169,6 +172,10 @@ def _compile_library(
             cmd.append(f"-Wl,-soname,{soname}")
     cmd += _seed_link(extra).render(out_dir)
     cmd += link.render(out_dir)
+    if config.build_data:
+        # The L3 record of this build: the one command that compiled it.
+        entry = {"directory": str(out_dir), "file": str(src), "arguments": cmd}
+        (out_dir / COMPILE_DB).write_text(json.dumps([entry]), encoding="utf-8")
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if proc.returncode != 0:
         raise CompileError(
@@ -224,6 +231,7 @@ def build(
         is_cxx=is_cxx,
         backend=config.header_backend,
         gcc_options=gcc_options,
+        build_info=out_dir / COMPILE_DB if config.build_data else None,
     )
     return Built(dir=out_dir, so=so, header=header, snapshot=snap)
 

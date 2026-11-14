@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from abicheck.model.change import Change
     from abicheck.model.snapshot import AbiSnapshot
 
 #: The verdict an adapter returns when the checker refuses to compare.
@@ -45,13 +46,41 @@ def snapshot(
     is_cxx: bool,
     backend: str,
     gcc_options: str | None,
+    build_info: Path | None = None,
 ) -> AbiSnapshot:
-    """abicheck's snapshot of one built library, made the way users get it."""
+    """abicheck's snapshot of one built library, made the way users get it.
+
+    *build_info* is the build's ``compile_commands.json`` (L3 build data).
+    Such a snapshot is made by the typed dump workflow ``abicheck dump -H
+    --build-info`` runs, which also parses the headers in the build's own
+    compile context and embeds the build facts.
+    """
     from abicheck.compile_context import CompileContext
     from abicheck.dumper import dump
 
     headers = list(headers)
     lang = "c++" if is_cxx else "c"
+    if build_info is not None:
+        from abicheck.workflows.dump.request import run_dump_request
+        from abicheck.workflows.request_inputs import InputSpec
+        from abicheck.workflows.service_requests import DumpRequest
+
+        return run_dump_request(
+            DumpRequest(
+                input=InputSpec(
+                    path=so,
+                    headers=tuple(headers),
+                    version=version,
+                    build_info=build_info,
+                    compile=CompileContext(
+                        gcc_options=gcc_options if headers else None,
+                        frontend=backend,
+                    ),
+                ),
+                lang=lang,
+                frontend=backend,
+            )
+        )
     if os.environ.get(PUBLIC_DUMP_ENV):
         # The public dump workflow end to end (``run_dump``), record-layout
         # enrichment included.
@@ -129,10 +158,28 @@ def answer(old: AbiSnapshot, new: AbiSnapshot) -> tuple[str, frozenset[str]]:
         # Mirror the CLI: without it, HANDLE_TYPE_CHANGED,
         # OPAQUE_INVARIANT_BROKEN and every newly-introduced anti-pattern
         # finding can never be reported, whatever the snapshots say.
-        result = compare(old, new, pattern_verdicts=True)
+        result = compare(
+            old, new, pattern_verdicts=True, extra_changes=_build_data_changes(old, new)
+        )
     except AbicheckError as exc:
         return REFUSED, frozenset({type(exc).__name__})
     return result.verdict.name, frozenset(c.kind.name for c in result.changes)
+
+
+def _build_data_changes(old: AbiSnapshot, new: AbiSnapshot) -> list[Change] | None:
+    """The L3 findings ``abicheck compare`` folds in from embedded build data.
+
+    Only a pair carrying embedded build data (``snapshot(build_info=...)``)
+    takes this step, so every other cell is compared as before.
+    """
+    if old.build_source is None and new.build_source is None:
+        return None
+    from abicheck.buildsource.evidence_report import prepare_embedded_build_source
+
+    extra, _rows, _metrics, _ev = prepare_embedded_build_source(
+        old, new, "build", None, None, None, None, None
+    )
+    return extra
 
 
 def kind_names() -> tuple[str, ...]:

@@ -255,6 +255,10 @@ class Config:
     platform: tuple[str, str] = field(default_factory=host_platform)
     # Which backend dumps the headers; ignored below ``headers`` evidence.
     header_backend: str = "castxml"
+    # L3 build data on top of ``headers``: abicheck is also given each side's
+    # ``compile_commands.json`` (``abicheck dump --build-info``), the record of
+    # the exact compile command the harness ran.
+    build_data: bool = False
 
     def __post_init__(self) -> None:
         if self.header_backend not in HEADER_BACKENDS:
@@ -265,6 +269,8 @@ class Config:
             # No headers are dumped: normalize, so two spellings of one build
             # never become two cells.
             object.__setattr__(self, "header_backend", "castxml")
+        if self.build_data and self.evidence != "headers":
+            raise ValueError("build_data is L3 evidence on top of headers")
 
     @property
     def lang(self) -> str:
@@ -311,9 +317,10 @@ class Config:
 
         castxml stays implicit so every pre-existing cell id is unchanged.
         """
+        label = self.evidence
         if self.evidence == "headers" and self.header_backend != "castxml":
-            return f"headers.{self.header_backend}"
-        return self.evidence
+            label = f"headers.{self.header_backend}"
+        return f"{label}+build" if self.build_data else label
 
     @property
     def space_evidence(self) -> str:

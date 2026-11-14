@@ -140,7 +140,9 @@ SCOPE_BUCKETS: tuple[ScopeBucket, ...] = (
     ScopeBucket(
         "multi_library",
         False,
-        "multi-library bundle scope; a corpus cell is one library",
+        "multi-library bundle scope (intra-bundle dependencies, providers, "
+        "SONAME skew, manifests): reachable by a bundle seed building several "
+        "libraries per side, which is not modeled yet; a corpus cell is one library",
         ("bundle_",),
     ),
     ScopeBucket(
@@ -159,17 +161,92 @@ SCOPE_BUCKETS: tuple[ScopeBucket, ...] = (
         names=frozenset({"anon_field_changed"}),
     ),
     ScopeBucket(
-        "build_mode_options",
+        "non_x86_build_mode",
         False,
-        "a compile-mode switch read only from L3 compile commands "
-        "(build_diff); nothing in the binary, DWARF or headers carries it",
+        "-mfloat-abi is an ARM option: no x86/x86-64 build has a float ABI to "
+        "change, and the corpus's toolchains target x86",
+        names=frozenset({"float_abi_changed"}),
+    ),
+    # --- named, out of scope: L3 build kinds the compile DB a build_data
+    # config gives (one compile command per side) cannot reach.
+    ScopeBucket(
+        "l3_link_facts",
+        False,
+        "read from L3 link units or build-system target metadata (version "
+        "script / SONAME per link target, generator graph, several compile "
+        "units per target); a compile_commands.json records compile commands "
+        "only, and a corpus library is one translation unit",
         names=frozenset(
             {
+                "compile_context_conflict",
+                "generated_file_dependency_unstable",
+                "link_export_policy_changed",
+            }
+        ),
+    ),
+    ScopeBucket(
+        "l3_non_abi_or_toolchain_identity",
+        False,
+        "a change of non-ABI build metadata (include order, output paths) or "
+        "of the toolchain identity (--target / --sysroot): two builds of one "
+        "corpus library differ in neither without changing the toolchain the "
+        "cell is defined by",
+        names=frozenset({"build_context_changed", "toolchain_version_changed"}),
+    ),
+    ScopeBucket(
+        "l2_l3_context_reconciliation",
+        False,
+        "a disagreement between the header parse and the build's own context "
+        "(or DWARF): the harness parses headers with exactly the build's "
+        "context by construction, so a correct cell never reaches it",
+        names=frozenset(
+            {
+                "header_binary_context_mismatch",
+                "header_build_context_mismatch",
+                "header_parse_context_drift",
+            }
+        ),
+    ),
+    ScopeBucket(
+        "release_inventory_or_policy",
+        False,
+        "judged against a release inventory, a declared support promise, a "
+        "standard floor from a build configuration matrix, a documented "
+        "default or a runtime floor policy: inputs outside two builds of one "
+        "library",
+        names=frozenset(
+            {
+                "behavioural_default_changed",
+                "cxx_standard_floor_raised",
+                "runtime_floor_raised",
+                "support_promise_component_introduced",
+                "support_promise_component_retired",
+            }
+        ),
+    ),
+    ScopeBucket(
+        "asymmetric_evidence",
+        False,
+        "the two sides were analyzed with different evidence; every corpus "
+        "cell gives both sides one evidence level (an asymmetric-evidence "
+        "axis is not modeled)",
+        names=frozenset({"layer_coverage_asymmetric"}),
+    ),
+    # --- named, in scope: L3 build-mode kinds a build_data config reaches
+    # (abiforge.operators.build_data).
+    ScopeBucket(
+        "l3_build_mode",
+        True,
+        "a compile mode recorded only in the build's compile commands; a "
+        "build_data config gives each side's compile_commands.json",
+        names=frozenset(
+            {
+                "abi_relevant_build_flag_changed",
                 "exceptions_mode_changed",
-                "float_abi_changed",
                 "lto_mode_changed",
                 "rtti_mode_changed",
                 "sanitizer_mode_changed",
+                "stdlib_debug_mode_changed",
                 "struct_packing_mode_changed",
                 "threadsafe_statics_mode_changed",
                 "tls_model_changed",
@@ -249,15 +326,11 @@ SCOPE_BUCKETS: tuple[ScopeBucket, ...] = (
     ScopeBucket("elf_types", True, _ELF_ONE_LIBRARY, module="types"),
     ScopeBucket("elf_platform", True, _ELF_ONE_LIBRARY, module="platform"),
     ScopeBucket(
-        "build_data",
-        False,
-        "needs L3 build data (compile DB, flags, package metadata)",
-        module="build",
-    ),
-    ScopeBucket(
         "source_evidence",
         False,
-        "needs L4/L5 source or source-graph evidence",
+        "needs L4 source replay or the L5 source graph (abicheck dump "
+        "--sources); reachable, since the harness owns each side's source "
+        "tree, but no sources evidence variant is modeled yet",
         module="source",
     ),
     ScopeBucket(
