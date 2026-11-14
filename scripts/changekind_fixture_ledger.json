@@ -2,8 +2,8 @@
   "_comment": "Real-fixture backing per ChangeKind: catalog expected_kinds and the edit corpus verified_floor. A kind listed under `backed` may not lose every source (tests/test_changekind_real_coverage.py). Regenerate with `python scripts/changekind_real_coverage.py --write-fixture-ledger`.",
   "summary": {
     "total_kinds": 431,
-    "backed": 285,
-    "unbacked": 146
+    "backed": 304,
+    "unbacked": 127
   },
   "backed": {
     "abi_equivalent_type_changed": [
@@ -55,6 +55,9 @@
       "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
+    "bind_now_disabled": [
+      "edit_corpus:pr"
+    ],
     "bit_int_width_changed": [
       "catalog:case115_bit_int_width_changed",
       "edit_corpus:nightly"
@@ -74,6 +77,9 @@
     "bundle_soname_skew": [
       "catalog:case84_bundle_soname_skew"
     ],
+    "call_graph_public_entry_reachability_changed": [
+      "edit_corpus:pr"
+    ],
     "calling_convention_changed": [
       "catalog:case209_calling_convention_changed_via_macro",
       "catalog:case212_calling_convention_macro_undefined_after_use",
@@ -92,11 +98,15 @@
       "edit_corpus:pr"
     ],
     "char8t_migration": [
-      "catalog:case114_char8t_migration"
+      "catalog:case114_char8t_migration",
+      "edit_corpus:pr"
     ],
     "char_signedness_changed": [
       "catalog:case155_char_signedness_flip",
       "edit_corpus:nightly",
+      "edit_corpus:pr"
+    ],
+    "concept_constraint_changed": [
       "edit_corpus:pr"
     ],
     "concept_tightened": [
@@ -145,6 +155,9 @@
     ],
     "declaration_moved": [
       "catalog:case196_header_graph_move_reconciled"
+    ],
+    "default_argument_changed": [
+      "edit_corpus:pr"
     ],
     "default_template_arg_changed": [
       "catalog:case229_exported_template_default_changed",
@@ -214,7 +227,8 @@
       "edit_corpus:pr"
     ],
     "enum_size_flag_changed": [
-      "catalog:case152_enum_size_flag_flip"
+      "catalog:case152_enum_size_flag_flip",
+      "edit_corpus:pr"
     ],
     "enum_underlying_size_changed": [
       "catalog:case57_enum_underlying_size_changed",
@@ -361,6 +375,9 @@
     "func_deleted_dwarf": [
       "edit_corpus:nightly"
     ],
+    "func_deleted_elf_fallback": [
+      "edit_corpus:pr"
+    ],
     "func_deprecated_added": [
       "catalog:case205_public_function_marked_deprecated",
       "edit_corpus:nightly",
@@ -368,6 +385,9 @@
     ],
     "func_deprecated_removed": [
       "edit_corpus:nightly",
+      "edit_corpus:pr"
+    ],
+    "func_exception_spec_changed": [
       "edit_corpus:pr"
     ],
     "func_export_added": [
@@ -559,6 +579,12 @@
       "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
+    "imported_symbol_unprovided": [
+      "edit_corpus:pr"
+    ],
+    "inline_body_changed": [
+      "edit_corpus:pr"
+    ],
     "inline_body_references_renamed_member": [
       "catalog:case89_inline_accessor_renamed_pimpl_member",
       "edit_corpus:nightly",
@@ -731,7 +757,8 @@
       "catalog:case195_header_graph_ambiguous_rename_not_reconciled",
       "catalog:case196_header_graph_move_reconciled",
       "catalog:case197_header_graph_identity_reconciled",
-      "catalog:case221_public_api_internal_type_renamed"
+      "catalog:case221_public_api_internal_type_renamed",
+      "edit_corpus:pr"
     ],
     "public_api_internal_type_renamed": [
       "catalog:case194_header_graph_rename_reconciled",
@@ -741,21 +768,33 @@
       "catalog:case222_public_consumer_compiled_dependency_changed"
     ],
     "public_macro_removed": [
-      "catalog:case156_public_macro_removed"
+      "catalog:case156_public_macro_removed",
+      "edit_corpus:pr"
+    ],
+    "public_macro_value_changed": [
+      "edit_corpus:pr"
     ],
     "public_not_exported": [
       "catalog:case150_xcheck_export_public_pair",
       "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
+    "public_surface_grew": [
+      "edit_corpus:pr"
+    ],
+    "public_surface_shrank": [
+      "edit_corpus:pr"
+    ],
     "public_to_internal_dependency": [
-      "catalog:case181_xcheck_public_to_internal_dependency"
+      "catalog:case181_xcheck_public_to_internal_dependency",
+      "edit_corpus:pr"
     ],
     "public_typedef_removed": [
       "catalog:case158_public_typedef_removed"
     ],
     "public_virtual_dispatch_set_changed": [
-      "catalog:case219_public_virtual_dispatch_set_changed"
+      "catalog:case219_public_virtual_dispatch_set_changed",
+      "edit_corpus:pr"
     ],
     "python_api_parameter_renamed": [
       "catalog:case163_python_kwarg_renamed"
@@ -799,9 +838,13 @@
       "edit_corpus:pr"
     ],
     "runtime_floor_raised": [
-      "catalog:case170_env_runtime_floor_raised"
+      "catalog:case170_env_runtime_floor_raised",
+      "edit_corpus:pr"
     ],
     "sanitizer_mode_changed": [
+      "edit_corpus:pr"
+    ],
+    "sanitizer_runtime_required": [
       "edit_corpus:pr"
     ],
     "secondary_vtable_group_changed": [
@@ -849,7 +892,13 @@
       "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
+    "std_reexport_removed": [
+      "edit_corpus:pr"
+    ],
     "stdlib_debug_mode_changed": [
+      "edit_corpus:pr"
+    ],
+    "stdlib_implementation_changed": [
       "edit_corpus:pr"
     ],
     "struct_field_type_changed": [
@@ -973,6 +1022,9 @@
     ],
     "target_isa_changed": [
       "edit_corpus:nightly",
+      "edit_corpus:pr"
+    ],
+    "template_body_changed": [
       "edit_corpus:pr"
     ],
     "template_param_default_changed": [
@@ -1134,6 +1186,9 @@
       "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
+    "type_visibility_changed": [
+      "edit_corpus:pr"
+    ],
     "type_vtable_changed": [
       "catalog:case09_cpp_vtable",
       "catalog:case38_virtual_methods",
@@ -1156,6 +1211,12 @@
       "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
+    "undocumented_export_ratio_increased": [
+      "edit_corpus:pr"
+    ],
+    "uninstantiated_template_removed": [
+      "edit_corpus:pr"
+    ],
     "union_field_added": [
       "catalog:case26_union_field_added",
       "catalog:case26b_union_field_added_compatible",
@@ -1174,6 +1235,9 @@
     "unnamed_type_in_public_abi": [
       "catalog:case178_unnamed_type_in_public_abi",
       "edit_corpus:nightly",
+      "edit_corpus:pr"
+    ],
+    "unspecified_return_now_named": [
       "edit_corpus:pr"
     ],
     "unversioned_exported_symbol": [
@@ -1315,7 +1379,6 @@
     "anon_field_changed",
     "api_depends_on_consumer_env",
     "behavioural_default_changed",
-    "bind_now_disabled",
     "branch_protection_improved",
     "branch_protection_weakened",
     "build_context_changed",
@@ -1329,11 +1392,9 @@
     "bundle_manifest_entry_unsatisfied",
     "bundle_manifest_instantiation_added",
     "bundle_unresolved_intra_dependency",
-    "call_graph_public_entry_reachability_changed",
     "common_symbol_risk",
     "compat_version_changed",
     "compile_context_conflict",
-    "concept_constraint_changed",
     "constexpr_value_changed",
     "consumer_required_symbol_removed",
     "cxx_standard_floor_raised",
@@ -1341,7 +1402,6 @@
     "declaration_identity_reconciled",
     "declaration_identity_unchanged",
     "declaration_renamed",
-    "default_argument_changed",
     "elf_abi_flags_changed",
     "elf_class_changed",
     "elf_endianness_changed",
@@ -1349,8 +1409,6 @@
     "elf_osabi_changed",
     "evidence_required_missing",
     "float_abi_changed",
-    "func_deleted_elf_fallback",
-    "func_exception_spec_changed",
     "func_pure_virtual_added",
     "generated_file_dependency_unstable",
     "generated_header_changed",
@@ -1359,9 +1417,7 @@
     "header_binary_context_mismatch",
     "header_parse_context_drift",
     "identity_collision_detected",
-    "imported_symbol_unprovided",
     "include_graph_public_header_drift",
-    "inline_body_changed",
     "interpreter_changed",
     "kabi_export_type_changed",
     "kabi_symbol_added",
@@ -1394,10 +1450,7 @@
     "platform_baseline_floor_raised",
     "public_dependency_role_changed",
     "public_dependency_role_unknown",
-    "public_macro_value_changed",
     "public_reachability_changed",
-    "public_surface_grew",
-    "public_surface_shrank",
     "public_typedef_target_changed",
     "python_abi3_dropped",
     "python_abi3_floor_raised",
@@ -1420,15 +1473,12 @@
     "python_stable_abi_violation",
     "runtime_symbol_provider_changed",
     "runtime_weak_resolution_changed",
-    "sanitizer_runtime_required",
     "soname_bump_recommended",
     "source_binary_provenance_mismatch",
     "source_decl_binary_symbol_mismatch",
     "source_fact_coverage_incomplete",
     "source_surface_dso_mismatch",
     "source_to_binary_mapping_changed",
-    "std_reexport_removed",
-    "stdlib_implementation_changed",
     "struct_alignment_changed",
     "struct_field_offset_changed",
     "struct_field_removed",
@@ -1446,13 +1496,8 @@
     "sycl_plugin_search_path_changed",
     "sycl_runtime_version_changed",
     "symbol_version_defined_removed",
-    "template_body_changed",
     "time64_abi_changed",
     "toolchain_version_changed",
-    "type_visibility_changed",
-    "undocumented_export_ratio_increased",
-    "uninstantiated_template_removed",
-    "unspecified_return_now_named",
     "vector_abi_changed",
     "virtual_method_added",
     "wheel_closure_dependency_violation",
