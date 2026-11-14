@@ -70,6 +70,8 @@ from abiforge.run.exec import probe_expressions
 from abiforge.run.tiers import (
     _PR,
     BUILD_DATA_PR,
+    DEPENDENCY_PR,
+    KIND_REACH_PR,
     SOURCE_EVIDENCE_PR,
     Cell,
     pairwise,
@@ -380,7 +382,7 @@ def test_rebuild_preconditions_reject_a_no_op_rebuild() -> None:
 def test_every_rule_fires_for_some_config() -> None:
     # Vacuity guard: a rule whose predicate never holds is dead ground truth.
     probes = [
-        _cfg(lang, std=s, flags=f, evidence=e, platform=p, producer=tc, build_data=bd)
+        _cfg(lang, std=s, flags=f, evidence=e, platform=p, producer=tc)
         for lang in ("c", "c++")
         for s in STANDARDS
         if s.lang == lang
@@ -395,8 +397,12 @@ def test_every_rule_fires_for_some_config() -> None:
         for e in EVIDENCE
         for p in (("linux", "elf"), ("win32", "pe"))
         for tc in (GCC, CLANG)
-        for bd in ((False, True) if e == "headers" else (False,))
     ]
+    # The L3 build-data axis (Config.build_data, headers only).
+    headers = [c for c in probes if c.evidence == "headers"]
+    probes += [c.with_(build_data=True) for c in headers]
+    # The header-backend axis (Config.header_backend).
+    probes += [c.with_(header_backend=b) for c in headers for b in ("clang", "gcc")]
     for op in OPERATORS:
         for rule in op.rules:
             assert any(rule.when(c) for c in probes), (op.name, rule.why)
@@ -644,11 +650,12 @@ def test_pr_tier_guards_every_axis() -> None:
     assert {seed for _, seed, _, _ in _PR} == {s.name for s in SEEDS}
     # The PR tier stays a handful: one guard per axis, plus one row per L3
     # build-data operator (BUILD_DATA_PR) and per L4/L5 source-evidence
-    # operator (SOURCE_EVIDENCE_PR). 28: the axis guards plus the rows for
-    # kinds only one PR cell verifies (follow-deps imports, build-mode
-    # enum size, char8_t, exception spec, stdlib family, bind-now without
-    # RELRO, concept relaxation).
-    assert len(_PR) - len(BUILD_DATA_PR) - len(SOURCE_EVIDENCE_PR) <= 28
+    # operator (SOURCE_EVIDENCE_PR), the dependency-resolution guards
+    # (DEPENDENCY_PR) and the rows that reach a corner-only kind
+    # (KIND_REACH_PR, each naming its kind).
+    extra = len(BUILD_DATA_PR) + len(SOURCE_EVIDENCE_PR) + len(DEPENDENCY_PR)
+    assert len(_PR) - extra - len(KIND_REACH_PR) <= 20
+    assert len(KIND_REACH_PR) <= 8
     assert {op for op, _, _, _ in BUILD_DATA_PR} == {
         op.name for op in BUILD_DATA_OPERATORS
     }

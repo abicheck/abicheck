@@ -136,7 +136,9 @@ EXEMPTION_CEILINGS: dict[str, int] = {
     # 25: plus compare/runtime_requirements' sanitizer runtime sonames and the
     # toolchain-reserved __asan_/__ubsan_/... symbol families (and the
     # __sanitizer_cov_ user-callback carve-out) -- names the toolchain defines.
-    "platform": 25,
+    # 26: plus compare/toolchain_flags' vector-math library selection flags
+    # (-mveclibabi=, -fveclib=), the compiler's own flag spelling.
+    "platform": 26,
     # 9: main replaced the two fnmatch frozen-namespace matchers with one
     # policy.frozen_namespace helper.
     "user_rule": 9,

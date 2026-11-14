@@ -176,13 +176,19 @@ SONAME_ADVISORY = "SONAME_BUMP_RECOMMENDED"
 #: (``EditOp.with_derived``). Reported apart from declared and verified
 #: coverage, so the headline counts only kinds some edit stands behind.
 DERIVED_KINDS = frozenset({SONAME_ADVISORY})
-_SIZE = frozenset({"TYPE_SIZE_CHANGED", "STRUCT_SIZE_CHANGED"})
-_ENUM_SIZE = frozenset(
-    {"TYPE_SIZE_CHANGED", "ENUM_UNDERLYING_SIZE_CHANGED", "ENUM_SIZE_FLAG_CHANGED"}
-)
-_OFFSET = frozenset({"STRUCT_FIELD_OFFSET_CHANGED", "TYPE_FIELD_OFFSET_CHANGED"})
-_ALIGN = frozenset({"STRUCT_ALIGNMENT_CHANGED", "TYPE_ALIGNMENT_CHANGED"})
-_FIELD_TYPE = frozenset({"STRUCT_FIELD_TYPE_CHANGED", "TYPE_FIELD_TYPE_CHANGED"})
+# The layout kinds abicheck reports for a record edit. The DWARF layout diff
+# also emits a STRUCT_* twin of each (STRUCT_SIZE_CHANGED, ...), but
+# ``compare/finding_dedup`` folds it into the TYPE_* finding of the same
+# record whenever the type model reports one -- every corpus cell does -- so
+# the twin is not a kind an edit here can be expected to produce, and naming
+# it as an alternative would credit coverage nothing checks.
+_SIZE = frozenset({"TYPE_SIZE_CHANGED"})
+# An enum's size: abicheck names the underlying-size change; the -fshort-enums
+# flag itself (ENUM_SIZE_FLAG_CHANGED) only with build data (see the rules).
+_ENUM_SIZE = frozenset({"ENUM_UNDERLYING_SIZE_CHANGED"})
+_OFFSET = frozenset({"TYPE_FIELD_OFFSET_CHANGED"})
+_ALIGN = frozenset({"TYPE_ALIGNMENT_CHANGED"})
+_FIELD_TYPE = frozenset({"TYPE_FIELD_TYPE_CHANGED"})
 
 
 def _binary(c: Config) -> bool:

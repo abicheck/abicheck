@@ -231,6 +231,7 @@ ROLE_CONSTRUCT: dict[str, str] = {
     "k.opq": "struct",
     "k.isa": "function",
     "k.inst": "template",
+    "k.dta": "template",
     "k.ovl": "function",
     "k.inv": "inline_namespace",
     "k.exp": "function",

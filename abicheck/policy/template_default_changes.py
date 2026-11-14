@@ -32,6 +32,7 @@ from ..compare.template_param_defaults import (
     detect_template_param_default_changed,
 )
 from ..compare.template_surface import (
+    callable_name,
     qualified_name_lookup,
     strip_template_args as _callable_stem,
 )
@@ -147,7 +148,7 @@ def detect_template_default_changes(
     covered_symbols = {c.symbol for c in default_template_findings}
     old_name_of = qualified_name_lookup(old)
     instantiation_stems = {
-        _callable_stem(old_name_of(fn))
+        callable_name(old_name_of(fn))
         for fn in old.declarations.functions
         if fn.mangled in covered_symbols
     }

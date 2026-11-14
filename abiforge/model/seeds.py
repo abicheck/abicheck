@@ -1104,6 +1104,16 @@ _KIND_ROLES: dict[str, RoleText] = {
         "#include <cstdlib>\nnamespace krx { using std::abs; int krx_f(int a); }",
         "namespace krx { int krx_f(int a) { return std::abs(a); } }",
     ),
+    # An exported instantiation that relies on a defaulted trailing template
+    # parameter: kdta<int> names kdta<int, int> (U = int by default). The
+    # attribute is the export macro, as for k.inst.
+    "k.dta": (
+        "template <class T, class U = int> "
+        '__attribute__((visibility("default"))) U kdta(T v);\n'
+        "extern template int kdta<int>(int);",
+        "template <class T, class U> U kdta(T v) { return (U)v; }\n"
+        "template int kdta<int>(int);",
+    ),
     # Empty baselines: the operator adds the declaration.
     "k.pnv": ("", ""),
     "k.stl": ("", ""),

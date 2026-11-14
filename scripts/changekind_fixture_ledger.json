@@ -2,8 +2,8 @@
   "_comment": "Real-fixture backing per ChangeKind: catalog expected_kinds and the edit corpus verified_floor. A kind listed under `backed` may not lose every source (tests/test_changekind_real_coverage.py). Regenerate with `python scripts/changekind_real_coverage.py --write-fixture-ledger`.",
   "summary": {
     "total_kinds": 434,
-    "backed": 309,
-    "unbacked": 125
+    "backed": 313,
+    "unbacked": 121
   },
   "backed": {
     "abi_equivalent_type_changed": [
@@ -169,7 +169,8 @@
     ],
     "default_template_arg_changed": [
       "catalog:case229_exported_template_default_changed",
-      "catalog:case87_default_template_arg_changed"
+      "catalog:case87_default_template_arg_changed",
+      "edit_corpus:pr"
     ],
     "dt_relr_introduced": [
       "edit_corpus:nightly",
@@ -187,8 +188,14 @@
       "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
+    "elf_class_changed": [
+      "edit_corpus:pr"
+    ],
     "elf_init_fini_changed": [
       "edit_corpus:nightly",
+      "edit_corpus:pr"
+    ],
+    "elf_machine_changed": [
       "edit_corpus:pr"
     ],
     "enum_became_scoped": [
@@ -269,7 +276,8 @@
     ],
     "exported_not_public": [
       "catalog:case143_audit_accidental_export",
-      "catalog:case150_xcheck_export_public_pair"
+      "catalog:case150_xcheck_export_public_pair",
+      "edit_corpus:pr"
     ],
     "exported_object_alignment_reduced": [
       "edit_corpus:nightly",
@@ -442,6 +450,9 @@
       "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
+    "func_pure_virtual_added": [
+      "edit_corpus:pr"
+    ],
     "func_ref_qual_changed": [
       "catalog:case166_ref_qualifier_added",
       "edit_corpus:nightly",
@@ -511,7 +522,8 @@
       "edit_corpus:pr"
     ],
     "func_virtual_added": [
-      "catalog:case68_virtual_method_added"
+      "catalog:case68_virtual_method_added",
+      "edit_corpus:pr"
     ],
     "func_virtual_became_pure": [
       "catalog:case23_pure_virtual_added",
@@ -559,7 +571,8 @@
       "catalog:case148_xcheck_header_build_mismatch"
     ],
     "header_only_function_params_changed": [
-      "catalog:case122_template_signature_uninstantiated"
+      "catalog:case122_template_signature_uninstantiated",
+      "edit_corpus:pr"
     ],
     "hidden_friend_added": [
       "edit_corpus:nightly",
@@ -921,10 +934,6 @@
     "stdlib_implementation_changed": [
       "edit_corpus:pr"
     ],
-    "struct_field_type_changed": [
-      "edit_corpus:nightly",
-      "edit_corpus:pr"
-    ],
     "struct_packing_changed": [
       "catalog:case56_struct_packing_changed",
       "edit_corpus:nightly",
@@ -964,9 +973,6 @@
       "edit_corpus:nightly",
       "edit_corpus:pr"
     ],
-    "symbol_elf_visibility_changed": [
-      "catalog:case51_protected_visibility"
-    ],
     "symbol_leaked_from_dependency_changed": [
       "edit_corpus:nightly",
       "edit_corpus:pr"
@@ -1003,6 +1009,9 @@
     "symbol_version_defined_added": [
       "catalog:case13_symbol_versioning",
       "edit_corpus:nightly",
+      "edit_corpus:pr"
+    ],
+    "symbol_version_defined_removed": [
       "edit_corpus:pr"
     ],
     "symbol_version_node_removed": [
@@ -1073,6 +1082,9 @@
     ],
     "threadsafe_statics_mode_changed": [
       "catalog:case132_threadsafe_statics_flip",
+      "edit_corpus:pr"
+    ],
+    "time64_abi_changed": [
       "edit_corpus:pr"
     ],
     "tls_model_changed": [
@@ -1261,7 +1273,8 @@
       "edit_corpus:pr"
     ],
     "unversioned_exported_symbol": [
-      "catalog:case145_audit_unversioned_export"
+      "catalog:case145_audit_unversioned_export",
+      "edit_corpus:pr"
     ],
     "used_reserved_field": [
       "catalog:case54_used_reserved_field",
@@ -1333,6 +1346,9 @@
     ],
     "var_visibility_changed": [
       "edit_corpus:nightly",
+      "edit_corpus:pr"
+    ],
+    "vector_abi_changed": [
       "edit_corpus:pr"
     ],
     "version_script_missing": [
@@ -1421,15 +1437,12 @@
     "declaration_identity_reconciled",
     "declaration_identity_unchanged",
     "elf_abi_flags_changed",
-    "elf_class_changed",
     "elf_endianness_changed",
-    "elf_machine_changed",
     "elf_osabi_changed",
     "evidence_required_missing",
     "float_abi_changed",
     "func_became_final",
     "func_lost_final",
-    "func_pure_virtual_added",
     "func_return_covariant_narrowed",
     "generated_file_dependency_unstable",
     "generated_header_changed",
@@ -1500,6 +1513,7 @@
     "struct_alignment_changed",
     "struct_field_offset_changed",
     "struct_field_removed",
+    "struct_field_type_changed",
     "support_promise_component_introduced",
     "support_promise_component_retired",
     "suppression_reachability_unknown",
@@ -1513,10 +1527,8 @@
     "sycl_plugin_removed",
     "sycl_plugin_search_path_changed",
     "sycl_runtime_version_changed",
-    "symbol_version_defined_removed",
-    "time64_abi_changed",
+    "symbol_elf_visibility_changed",
     "toolchain_version_changed",
-    "vector_abi_changed",
     "virtual_method_added",
     "wheel_closure_dependency_violation",
     "wheel_rpath_not_portable",

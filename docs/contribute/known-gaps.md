@@ -146,12 +146,6 @@ dependency walk and debug roots to every member. No open gap remains.
 `wrong-kind` — the new glibc floor is named as a compatible requirement.
 <!-- no-canary: pinned by the edit corpus's strict-xfail `glibc_version_required_added` entry in abiforge/known.py, which fails once the answer changes -->
 
-#### An export GNU ld binds to the base version is never reported as unversioned (2026-11-12)
-
-**Status (2026-11-12): OPEN.** `unversioned_exported_symbol` flags only `ElfVersionBinding.UNVERSIONED` and deliberately skips `BASE` (index 1 in a library with a `VER_FLG_BASE` definition), reasoning that a base-bound export predates the version script. GNU ld binds every export a version script does not match to the base version, so a symbol newly added outside every node (`LIBEDIT_1.0 { global: [!e]*; };` plus a new `edit_unv`) is exactly the hygiene problem the check describes, yet it never reads unversioned; a real `UNVERSIONED` binding in a versioned library is not something GNU ld produces. Telling a new base-bound export from one that predates versioning needs the comparison's history, not one side. Found by the edit corpus (`unversioned_export_added` on `c_elf`). Owner: `buildsource/cross_source_checks.py`.
-`wrong-kind` — a new unversioned export in a versioned library reads only as `func_added`.
-<!-- no-canary: pinned by the edit corpus's strict-xfail `unversioned_export_added` entry in abiforge/known.py, which fails once the answer changes -->
-
 #### A GCC-built DWARF snapshot cannot tell that a virtual became pure (2026-11-08)
 
 **Status (2026-11-08): OPEN.** Since extractor generation 45 a DWARF-only snapshot records C++ member functions, and a clang-built virtual that becomes `= 0` reads `func_virtual_became_pure` (clang marks the in-class declaration `DW_VIRTUALITY_pure_virtual`). GCC 13 writes `DW_VIRTUALITY_virtual` for a pure virtual, so the declaration looks like any other unexported virtual and the pair reads `func_removed` (BREAKING, so the verdict is right; the kind is not). The binary does carry the fact: the class's `_ZTV` object has an `R_X86_64_64` relocation against `__cxa_pure_virtual` in that slot. Closing it needs the ELF reader to map vtable relocations to slots; the DWARF walker already reads each virtual's slot from `DW_AT_vtable_elem_location` (`extract/dwarf_member_functions.vtable_slot`). Found by the config-matrix corpus (`virtual_become_pure`, `cxx_classes`, evidence `dwarf`, gcc). `wrong-kind`. The reverse edit misreads too (2026-11-11): defining a pure virtual (`type_lost_abstract`, `cxx_more`, evidence `dwarf`, gcc) reads `virtual_method_added`, so a COMPATIBLE edit reads BREAKING (`false-positive`); clang reads `func_added`. Owner: `extract/` (ELF vtable relocations, `extract/dwarf_member_functions.py`).
@@ -640,29 +634,17 @@ per-item status in the
 **Status (2026-11-12): OPEN.** `affected_symbols` on a type finding is built by `diff_filtering._build_type_to_funcs` (and `_build_type_embed_index` for embedding), which relates a changed type to every public function whose signature type string *contains* the type's name (`_SubstringMatcher`, documented as "identical substring semantics" to the `tname in ft` loop it replaced). With no identifier boundary, a change to `struct s1` is attributed to functions taking `struct s10 *`, `struct s100 *`, …: the closed layout fragment (`formal/FRAGMENT.md`) observed `use_s10 … use_s199` on `s1`'s findings. Findings, kinds and verdicts are unaffected (attribution only); consumer-impact views, appcompat matching on mangled names and report "affected functions" lists over-report. Fix: match on identifier boundaries in the matcher's output (a needle hit counts only when the characters before and after it are not `[A-Za-z0-9_]`, and `::` scoping is respected), keeping the single Aho-Corasick pass; check `compare/type_symbol_disambiguation.attribute_scoped_types` still sees the same candidates. Do not switch to exact-token equality on the whole ref: `const Widget &` and `Widget *` must still match `Widget`. Owner: `abicheck/diff_filtering.py`.
 <!-- canary: tests/test_affected_symbols_identifier_boundary_gap.py::test_type_name_prefix_of_another_type_is_attributed_to_its_functions -->
 
-#### Dropping a version node that binds no symbol reads as a binary break (2026-11-12)
+#### A newly added pure virtual does not make the class read abstract at DWARF depth (2026-11-14)
 
-**Status (2026-11-12): OPEN.** A version script that drops a node no exported symbol was bound to (`LIBEDIT_1.1 { local: ...; } LIBEDIT_1.0;`) removes a `.gnu.version_d` entry no consumer can have recorded in its `.gnu.version_r`, since a consumer records only the versions of symbols it binds. `symbol_version_defined_removed` fires on its own exactly in this case (with a bound symbol, `symbol_version_node_removed` wins the dedup) and keeps its `BREAKING` default. Found by the edit corpus (`empty_version_node_dropped` on `c_elf_alt`; every consumer still loads). Owner: `diff_platform_elf_symbols.py` / the `symbol_version_defined_removed` taxonomy entry.
-`false-positive` — a version-script cleanup that breaks nobody gates as a binary break.
-<!-- no-canary: pinned by the edit corpus's strict-xfail `empty_version_node_dropped` entry in abiforge/known.py, which fails once the answer changes -->
+**Status (2026-11-14): OPEN.** Adding a pure virtual to a polymorphic class (`virtual int z() = 0;` in `Base`) makes it abstract; the header lanes report `type_became_abstract`, but the DWARF-depth compare reports only the vtable growth (`vtable_slot_count_changed`, `type_vtable_changed`), on both gcc and clang, though clang marks the new member `DW_VIRTUALITY_pure_virtual`. Found by the edit corpus (`pure_virtual_added` on `cxx_more`, DWARF evidence). Owner: `dwarf_unified.py` (abstractness from member virtuality).
+`wrong-kind` — the break stays BREAKING; the loss of constructibility is not named.
+<!-- no-canary: pinned by the edit corpus's strict-xfail `pure_virtual_added` entry in abiforge/known.py, which fails once the answer changes -->
 
-#### A function that leaves the public header but stays exported reads as a binary break (2026-11-12)
+#### A method that becomes pure virtual is not seen from gcc DWARF when the class keeps no key function (2026-11-14)
 
-**Status (2026-11-12): OPEN.** Removing a declaration from the public header while the library keeps exporting the symbol reports `exported_not_public` and `func_removed` (`BREAKING`). Built consumers still bind the export and run; only consumers that name the function stop compiling, which is a source break. Treating a still-exported symbol as not removed is listed under "Do not re-attempt" because it would silence a real contract removal; the open question is the verdict, not the finding. Found by the edit corpus (`exported_but_undeclared` on `c_elf`, default visibility). Owner: `policy/` (contract-removal classification).
-`false-positive` — a contract removal with the binary intact gates as an ABI break, not an API break.
-<!-- no-canary: pinned by the edit corpus's strict-xfail `exported_but_undeclared` entry in abiforge/known.py, which fails once the answer changes -->
-
-#### A pointer-level change of a never-exported header function reads as a binary break (2026-11-12)
-
-**Status (2026-11-12): OPEN.** `compare/export_transition.regrade_unexported_params` relabels `func_params_changed` on a function whose export is confirmed absent on both sides as `header_only_function_params_changed` (`API_BREAK`), but a sibling parameter kind on the same function is not regraded: a `static inline` header function whose `int` parameter becomes `int *` reports `header_only_function_params_changed` plus `param_pointer_level_changed` (`BREAKING`), though no binary carries the function. Found by the edit corpus (`header_only_function_params_changed` on `c_elf_alt`). Owner: `compare/export_transition.py`.
-`false-positive` — a source-only signature change of a header-only function gates as a binary break.
-<!-- no-canary: pinned by the edit corpus's strict-xfail `header_only_function_params_changed` entry in abiforge/known.py, which fails once the answer changes -->
-
-#### A `-mveclibabi` switch reads as a binary break when no call is vectorized (2026-11-12)
-
-**Status (2026-11-12): OPEN.** `vector_abi_changed` compares the `-mveclibabi=`/`-fveclib=` switches each unit's `DW_AT_producer` records and keeps its `BREAKING` default whatever the code does. A library that makes no vectorizable math call is byte-identical apart from the producer string, yet the rebuild gates as a break. Closing it needs evidence that a vectorized math entry point (an SVML or libmvec import) actually changed. Found by the edit corpus (`vector_math_abi_changed` on `c_elf`, gcc). Owner: `compare/toolchain_flags.py`.
-`false-positive` — a switch that changed no code gates as a binary break.
-<!-- no-canary: pinned by the edit corpus's strict-xfail `vector_math_abi_changed` entry in abiforge/known.py, which fails once the answer changes -->
+**Status (2026-11-14): OPEN.** When a class's only virtual function is pure (`struct Plain { int a; virtual int get() = 0; };`, with `get` still defined out of line), the class has no key function, so gcc emits no vtable and only a declaration DIE for `Plain`. The DWARF lane then reads the type as `type_removed`, and `func_pure_virtual_added` never fires; clang's DWARF keeps the member and reports it. The header lanes report it on both compilers. Found by the edit corpus (`method_became_pure_virtual` on `cxx_more`, gcc, DWARF evidence). Owner: `dwarf_unified.py` (declaration-only class DIEs).
+`wrong-kind` — the break is still BREAKING, but named as a type removal instead of the member becoming pure.
+<!-- no-canary: pinned by the edit corpus's strict-xfail `method_became_pure_virtual` entry in abiforge/known.py, which fails once the answer changes -->
 
 #### An inline function's static local, exported by clang, reads as an undeclared export (2026-11-12)
 

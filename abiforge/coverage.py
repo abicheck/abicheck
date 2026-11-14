@@ -7,8 +7,11 @@ into buckets: the kinds a single Linux ELF shared library with DWARF and
 public headers can show (*in scope*: the corpus's denominator) and the rest,
 each bucket with its reason; every report lists them. Over that scope:
 
-- *declared*: some operator names the kind in an expectation (``expected``,
-  or a member of an ``any_of`` group) under some rule. Computed from the
+- *declared*: some operator *requires* the kind (``expected``) under its
+  base expectation or a rule. An ``any_of`` member accepts a cell but is
+  not declared coverage on its own: one alternative of a group may be a kind
+  no cell can produce (abicheck always reports its sibling), and crediting it
+  would let the ledger count a kind nothing ever checks. Computed from the
   operators alone, no compiler (``declared_kinds``).
 - *verified*, per tier: a cell expected the kind, abicheck produced it, and
   the cell reconciled to a passing class (``CellRecord.verified``). A strict
@@ -159,16 +162,18 @@ def _derived_kinds() -> frozenset[str]:
 
 
 def op_declared_kinds(op: object) -> frozenset[str]:
-    """Kinds *op* names under its base expectation or any of its rules: what
-    the edit itself stands behind. Kinds that follow from the verdict
+    """Kinds *op* requires under its base expectation or any of its rules:
+    what the edit itself stands behind (``any_of`` alternatives excluded). Kinds that follow from the verdict
     (``EditOp.with_derived``) are ``op_derived_kinds``, never declared."""
     from abiforge.operators import EditOp
 
     assert isinstance(op, EditOp)
+    out: set[str] = set()
     base = op.base()
-    out = set(expectation_kinds(base))
-    for rule in op.rules:
-        out |= expectation_kinds(rule.apply(base))
+    for exp in (base, *(rule.apply(base) for rule in op.rules)):
+        out |= exp.expected
+        # A one-member group is a requirement spelled as a group.
+        out |= {k for group in exp.any_of if len(group) == 1 for k in group}
     return frozenset(out - _derived_kinds())
 
 

@@ -77,7 +77,7 @@ _HEADER = (
         "every consumer fails to load the library",
         # EM_X86_64 -> EM_386 and ELFCLASS64 -> ELFCLASS32 together: either
         # names a library built for another architecture.
-        any_of=(frozenset({"ELF_MACHINE_CHANGED", "ELF_CLASS_CHANGED"}),),
+        any_of=(frozenset({"ELF_MACHINE_CHANGED"}),),
         touches=(),
         precondition=_not_32,
         rebuild=_with(bits=32),
@@ -263,7 +263,8 @@ _TOOLCHAIN = (
         "g_al was promised 16-byte alignment and now has 2: a consumer that "
         "relied on it (aligned vector loads of &g_al) can fault",
         any_of=(
-            frozenset({"EXPORTED_OBJECT_ALIGNMENT_REDUCED", "VAR_ALIGNMENT_CHANGED"}),
+            frozenset({"EXPORTED_OBJECT_ALIGNMENT_REDUCED"}),
+            frozenset({"VAR_ALIGNMENT_CHANGED"}),
         ),
         rules=(
             Rule(
@@ -657,8 +658,19 @@ _ALT = (
         "every api_v1_* function is renamed api_v2_*: consumers bound to the "
         "v1 names fail to load",
         expected=frozenset({"VERSIONED_SYMBOL_SCHEME_DETECTED"}),
-        # Symbols alone pair the old and new names as a likely rename.
-        any_of=(_REMOVED | {"FUNC_LIKELY_RENAMED"},),
+        any_of=(_REMOVED,),
+        rules=(
+            Rule(
+                lambda c: c.evidence == "binary",
+                {
+                    "expected": frozenset(
+                        {"VERSIONED_SYMBOL_SCHEME_DETECTED", "FUNC_LIKELY_RENAMED"}
+                    ),
+                    "any_of": (),
+                },
+                "symbols alone pair the old and new names as a likely rename",
+            ),
+        ),
         **_BINARY,
     ),
     _alt(

@@ -157,16 +157,19 @@ def test_every_scope_bucket_holds_some_kind_and_says_why() -> None:
 
 
 def _independent_declared() -> set[str]:
-    """Every kind any operator's edit names, read off the dataclass fields."""
+    """Every kind any operator's edit *requires*, read off the dataclass
+    fields: ``expected``, and an ``any_of`` group of one (a requirement spelled
+    as a group). A member of a larger group is an accepted alternative, not
+    declared coverage."""
     out: set[str] = set()
     for op in OPERATORS:
         out |= set(op.expected)
-        for g in op.any_of:
-            out |= g
+        out |= {k for g in op.any_of if len(g) == 1 for k in g}
         for rule in op.rules:
             out |= set(rule.changes.get("expected", frozenset()))  # type: ignore[arg-type]
             for g in rule.changes.get("any_of", ()):  # type: ignore[union-attr]
-                out |= g
+                if len(g) == 1:
+                    out |= g
     # Kinds owed by a verdict rather than an edit are not declared coverage;
     # the hand-listed _SONAME_ADVISORY_ORACLE below pins which edits owe them.
     return out - {SONAME_ADVISORY}
@@ -444,7 +447,9 @@ def test_records_round_trip_through_files(tmp_path: Path) -> None:
     assert path is not None and path.parent == tmp_path
     (back,) = cov.load_records([tmp_path])
     assert back == r
-    assert back.verified == {"TYPE_SIZE_CHANGED", "STRUCT_SIZE_CHANGED"}
+    # The STRUCT_* twin is produced but no longer expected: only the kind the
+    # edit names (TYPE_SIZE_CHANGED) verifies.
+    assert back.verified == {"TYPE_SIZE_CHANGED"}
     assert back.points == (
         "struct/c/c17/baseline/gcc/gcc/headers.castxml/insert_tail_shifts",
     )

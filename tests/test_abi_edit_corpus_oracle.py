@@ -535,11 +535,11 @@ def test_flag_and_macro_probes_read_the_driver(
         # i386 SysV aligns a member double to 4: struct rec {int; double;
         # char[8]} is 20 bytes with offsets 0/4/12 whether packed or not, and
         # only alignof drops (4 -> 1).
-        (32, {"STRUCT_ALIGNMENT_CHANGED"}, True),
+        (32, {"TYPE_ALIGNMENT_CHANGED"}, True),
         (32, {"TYPE_SIZE_CHANGED"}, True),
         # x86-64 aligns it to 8: packing moves `weight` from 8 to 4, and the
         # header layout records alignof(rec) 8 -> 1 as well; both are owed.
-        (64, {"STRUCT_ALIGNMENT_CHANGED"}, False),
+        (64, {"TYPE_ALIGNMENT_CHANGED"}, False),
         (64, {"TYPE_FIELD_OFFSET_CHANGED"}, False),
         (64, {"TYPE_FIELD_OFFSET_CHANGED", "TYPE_ALIGNMENT_CHANGED"}, True),
     ],
@@ -594,7 +594,7 @@ def test_pack_rebuild_from_a_packed_old_side_matches_the_layout_oracle(
     unchanged = _rec_layout(old_pack) == _rec_layout(1)
     exp = OP_BY_NAME["rebuild_pack_struct"].expect(_cfg(flags=Flags(pack=old_pack)))
     accepts_alignment_only = (
-        exp.problems("BREAKING", _answer({"STRUCT_ALIGNMENT_CHANGED"})) == []
+        exp.problems("BREAKING", _answer({"TYPE_ALIGNMENT_CHANGED"})) == []
     )
     assert accepts_alignment_only is unchanged
 
@@ -622,9 +622,8 @@ def test_pack_rebuild_alignment_only_needs_the_header_dump(
         assert clean == [
             # with_derived: an ELF break under an unchanged SONAME owes the advisory.
             "missing expected kinds ['SONAME_BUMP_RECOMMENDED']",
-            "none of ['STRUCT_ALIGNMENT_CHANGED', 'STRUCT_FIELD_OFFSET_CHANGED', "
-            "'STRUCT_SIZE_CHANGED', 'TYPE_ALIGNMENT_CHANGED', "
-            "'TYPE_FIELD_OFFSET_CHANGED', 'TYPE_SIZE_CHANGED'] reported",
+            "none of ['TYPE_ALIGNMENT_CHANGED', 'TYPE_FIELD_OFFSET_CHANGED', "
+            "'TYPE_SIZE_CHANGED'] reported",
             "verdict NO_CHANGE weaker than required BREAKING",
         ]
     else:

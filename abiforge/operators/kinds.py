@@ -362,18 +362,6 @@ KIND_OPERATORS: tuple[EditOp, ...] = (
         "every _avx2 variant is removed while the _sse2 ones stay: binaries "
         "that bound the AVX2 entry points no longer load",
         expected=frozenset({"CPU_DISPATCH_ISA_DROPPED"}),
-        rules=(
-            Rule(
-                lambda c: c.evidence == "dwarf",
-                {"verdict_min": "COMPATIBLE_WITH_RISK", "verdict_max": None},
-                # abicheck grades the roll-up BREAKING only for a member a
-                # header declares; DWARF names no header, so the variants
-                # read as export-only (an internal dispatch target) and the
-                # roll-up keeps its COMPATIBLE_WITH_RISK default.
-                "with DWARF alone no variant is header-declared: an "
-                "export-only dispatch roll-up is COMPATIBLE_WITH_RISK",
-            ),
-        ),
         **_BINARY,
     ),
     _op(
@@ -448,6 +436,25 @@ KIND_OPERATORS: tuple[EditOp, ...] = (
         "the library stops instantiating ktwice<double>: the header still "
         "declares the template, so callers compile and then fail to link or load",
         expected=frozenset({"INSTANTIATION_MISSING_FROM_BINARY"}),
+        **_BINARY,
+    ),
+    _op(
+        "exported_instantiation_default_changed",
+        "k.dta",
+        _replace(
+            "k.dta",
+            ("class U = int>", "class U = long>"),
+            (
+                "extern template int kdta<int>(int);",
+                "extern template long kdta<int>(int);",
+            ),
+            source=(("template int kdta<int>(int);", "template long kdta<int>(int);"),),
+        ),
+        "U's default becomes long: kdta<int> now names kdta<int, long>, a "
+        "different symbol, so binaries bound to kdta<int, int> fail to load "
+        "while source calling kdta<int> compiles unchanged",
+        expected=frozenset({"DEFAULT_TEMPLATE_ARG_CHANGED"}),
+        verdict_min="BREAKING",
         **_BINARY,
     ),
     _op(
