@@ -13,8 +13,10 @@ from __future__ import annotations
 import pytest
 
 from abicheck.checker_policy import ChangeKind
+from abicheck.compare.template_pattern_arity import (
+    count_top_level_template_args as _count_top_level_template_args,
+)
 from abicheck.diff_templates import (
-    _count_top_level_template_args,
     _return_is_unspecified,
     _strip_leading_return_type,
     _strip_param_signature,

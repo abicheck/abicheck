@@ -700,3 +700,72 @@ def test_stl_by_value_return_reads_resolved_identity() -> None:
         a.kind == ChangeKind.PUBLIC_API_EXPOSES_STL_BY_VALUE
         for a in _antipatterns(snap)
     )
+
+
+@pytest.mark.parametrize(
+    ("spelling", "depth", "expected"),
+    [
+        # Oracle: only the container itself returned crosses by value.
+        ("string", 0, True),
+        ("const string", 0, True),
+        ("const string&", 0, False),
+        ("string&", 0, False),
+        ("string&&", 0, False),
+        ("string*", 0, False),  # castxml leaves return_pointer_depth at 0
+        ("const string *", 0, False),
+        ("string const*", 0, False),
+    ],
+)
+def test_stl_by_value_return_keeps_declarators_of_bare_alias(
+    spelling: str, depth: int, expected: bool
+) -> None:
+    fn = Function(
+        name="g",
+        mangled="_Z1gv",
+        return_type=spelling,
+        return_pointer_depth=depth,
+        params=[],
+        visibility=Visibility.PUBLIC,
+        return_type_identities_fact=Fact.present(("std::basic_string<char>",)),
+    )
+    snap = AbiSnapshot(library="l", version="1", from_headers=True, functions=[fn])
+    hit = any(
+        a.kind == ChangeKind.PUBLIC_API_EXPOSES_STL_BY_VALUE
+        for a in _antipatterns(snap)
+    )
+    assert hit is expected
+
+
+@pytest.mark.parametrize(
+    ("spelling", "kind", "expected"),
+    [
+        # A reference/pointer parameter whose Param.kind is VALUE (a backend
+        # that left kind unset) is still not by value: the spelling decides.
+        ("const string&", ParamKind.VALUE, False),
+        ("string&&", ParamKind.VALUE, False),
+        ("string*", ParamKind.VALUE, False),
+        ("string", ParamKind.VALUE, True),
+    ],
+)
+def test_stl_by_value_param_declarators_without_kind(
+    spelling: str, kind: ParamKind, expected: bool
+) -> None:
+    param = Param(
+        name="s",
+        type=spelling,
+        kind=kind,
+        type_identities_fact=Fact.present(("std::basic_string<char>",)),
+    )
+    fn = Function(
+        name="f",
+        mangled="_Z1f",
+        return_type="int",
+        params=[param],
+        visibility=Visibility.PUBLIC,
+    )
+    snap = AbiSnapshot(library="l", version="1", from_headers=True, functions=[fn])
+    hit = any(
+        a.kind == ChangeKind.PUBLIC_API_EXPOSES_STL_BY_VALUE
+        for a in _antipatterns(snap)
+    )
+    assert hit is expected

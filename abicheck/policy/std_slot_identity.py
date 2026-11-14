@@ -25,14 +25,24 @@ it names -- ``std::basic_string<char>``.
 
 from __future__ import annotations
 
+import re
+
 from ..model.availability import FactStatus
 from ..model.fact import Fact
 from ..model.source_graph_query import is_stdlib_owned_name
+
+# cv-qualifiers and declarators (``*``, ``&``, ``&&``) around the base name.
+_CV_WORDS = frozenset(("const", "volatile"))
+_DECLARATORS = str.maketrans("*&", "  ")
 
 
 def std_spelling(type_str: str, identities: Fact[tuple[str, ...]] | None) -> str:
     """*type_str*, or the slot's lone resolved ``std::`` identity when the
     spelling carries no ``std::`` of its own.
+
+    Only the base-name token is replaced: cv-qualifiers and declarators stay
+    (``const string&`` becomes ``const std::basic_string<char>&``), so the
+    caller still sees a reference or pointer slot as one.
 
     Several identities, none, or an unrecorded fact leave the spelling as it
     is: the slot is then not provably one ``std::`` type.
@@ -44,4 +54,13 @@ def std_spelling(type_str: str, identities: Fact[tuple[str, ...]] | None) -> str
     if len(identities.value) != 1:
         return type_str
     (ident,) = identities.value
-    return ident if is_stdlib_owned_name(ident) else type_str
+    if not is_stdlib_owned_name(ident):
+        return type_str
+    words = [w for w in type_str.translate(_DECLARATORS).split() if w not in _CV_WORDS]
+    if len(words) != 1:  # not one base-name token: leave it alone
+        return type_str
+    base = words[0]
+    match = re.search(rf"(?<![\w:]){re.escape(base)}(?![\w:])", type_str)
+    if match is None:
+        return type_str
+    return type_str[: match.start()] + ident + type_str[match.end() :]

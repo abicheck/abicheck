@@ -53,7 +53,10 @@ from .compare.naming_conventions import (
     _INTERNAL_TEMPLATE_NAMESPACES as _INTERNAL_TEMPLATE_NAMESPACES,
     INTERNAL_TEMPLATE_LEAK,
 )
-from .compare.template_pattern_arity import pattern_mandatory_arity
+from .compare.template_pattern_arity import (
+    collect_arity_observations,
+    comparable_min_arities,
+)
 from .compare.template_surface import (
     InstantiationSig,
     aggregate_removed_binding,
@@ -77,7 +80,6 @@ from .model.execution_cache import memoized
 from .model.graph_identity import _normalize_graph_identity
 from .model.name_heuristics import LazyFactInput
 from .model.source_contract_evidence import (
-    ContractEvidenceByName,
     has_observed_source_contract_evidence,
     public_reachability,
 )
@@ -921,32 +923,6 @@ def detect_overload_set_rerouted(
 # ---------------------------------------------------------------------------
 
 
-def _count_top_level_template_args(name: str) -> int | None:
-    """Count the top-level template arguments in ``name<...>``; ``None`` with no
-    ``<``. Commas inside ``(...)``/``[...]`` (a function type's parameters) and
-    the ``>`` of a ``->`` arrow are not argument separators.
-
-    ``Foo<int, std::pair<int, char>>`` → 2, ``std::function<void(int, int)>`` → 1.
-    """
-    if "<" not in name:
-        return None
-    depth = group = args = 0
-    for i, ch in enumerate(name):
-        if ch == ">" and name[i - 1 : i] == "-":
-            continue
-        if ch in "([":
-            group += 1
-        elif ch in ")]":
-            group -= 1
-        elif ch == "<":
-            depth += 1
-        elif ch == ">":
-            depth = max(depth - 1, 0)
-        elif ch == "," and depth == 1 and group == 0:
-            args += 1
-    return args + 1
-
-
 def detect_mandatory_template_param_added(
     old: AbiSnapshot,
     new: AbiSnapshot,
@@ -967,72 +943,24 @@ def detect_mandatory_template_param_added(
     removal is also caught by ``func_removed`` so the user does see a
     finding even when this detector misses.
     """
-    from .model import ScopeOrigin
-
-    def _arities(
-        snap: AbiSnapshot, funcs: list[Function]
-    ) -> tuple[dict[str, set[int]], ContractEvidenceByName, dict[str, set[str]]]:
-        out: dict[str, set[int]] = defaultdict(set)
-        # Which kind of declaration contributed each stem's observations.
-        # This detector deliberately pools function templates and class
-        # templates under one stem, so the kind is a property of the
-        # *finding*, not of the ChangeKind -- see the entity resolution
-        # below (Codex review, PR #1284).
-        sources: dict[str, set[str]] = defaultdict(set)
-        # ADR-044 (Codex review): tracks, per stem, whether *any* contributing
-        # observation is reliably public — a Visibility.PUBLIC function, or a
-        # type explicitly scoped to the public-header set (ADR-024's opt-in
-        # ScopeOrigin.PUBLIC_HEADER, from the public-header set).
-        # Without that flag every type's origin is ScopeOrigin.UNKNOWN, so
-        # this degrades to "public only if a public function contributed"
-        # automatically for the common case.
-        is_public = ContractEvidenceByName()  # judged only for a reported stem
-        name_of, hdr = qualified_name_lookup(snap), bool(snap.from_headers)
-        for f in funcs:
-            qname = name_of(f)
-            if "<" not in qname:
-                continue
-            stem = _strip_template_args(qname)
-            arity = _count_top_level_template_args(qname)
-            if arity is not None:
-                out[stem].add(arity)
-                # ADR-084: an export-only function proves no public contract.
-                is_public.add(stem, f, header_parsed=hdr)
-                sources[stem].add("function")
-        for t in snap.declarations.types:
-            arity = pattern_mandatory_arity(t)  # a pattern spells no args
-            if arity is None and "<" not in t.name:
-                continue
-            stem = _strip_template_args(t.name)
-            if arity is None:
-                arity = _count_top_level_template_args(t.name)
-            if arity is not None:
-                out[stem].add(arity)
-                sources[stem].add("type")
-                if t.origin == ScopeOrigin.PUBLIC_HEADER:
-                    is_public.confirm(stem)
-        return out, is_public, sources
-
     reconciled_old, reconciled_new = reconciled_public_functions(old, new)
-    old_ar, old_public, old_sources = _arities(old, reconciled_old)
-    new_ar, new_public, new_sources = _arities(new, reconciled_new)
+    old_obs = collect_arity_observations(old, reconciled_old)
+    new_obs = collect_arity_observations(new, reconciled_new)
 
     changes: list[Change] = []
-    for stem in sorted(set(old_ar) & set(new_ar)):
-        old_min = min(old_ar[stem])
-        new_min = min(new_ar[stem])
-        if new_min <= old_min:
+    for stem in sorted(set(old_obs.arities) & set(new_obs.arities)):
+        # Pattern vs pattern, instantiation vs instantiation -- never mixed.
+        mins = comparable_min_arities(old_obs, new_obs, stem)
+        if mins is None or mins[1] <= mins[0]:
             continue
-        # ADR-044 D1 / ADR-084: tagged public only when a contributing
-        # observation had header/source evidence (see _arities above).
-        subject_is_public = old_public.has(stem) or new_public.has(stem)
-        # The entity this finding is about, when the evidence says so
-        # unambiguously. A stem observed only as a class template is a type
-        # finding and belongs under `output.view show=types`; one observed only
-        # through function templates is a function finding. A stem both
-        # contributed to is genuinely both, so it states nothing and falls
-        # back to the kind's declared entity rather than guessing.
-        contributing = old_sources.get(stem, set()) | new_sources.get(stem, set())
+        old_min, new_min = mins
+        # ADR-044 D1 / ADR-084: public only with header/source evidence.
+        subject_is_public = old_obs.is_public.has(stem) or new_obs.is_public.has(stem)
+        # A stem seen only as a class (function) template is a type (function)
+        # finding; one both contributed to falls back to the kind's entity.
+        contributing = old_obs.sources.get(stem, set()) | new_obs.sources.get(
+            stem, set()
+        )
         entity_discriminator = (
             next(iter(contributing)) if len(contributing) == 1 else None
         )

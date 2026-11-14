@@ -138,3 +138,106 @@ class TestMandatoryTemplateParamAddedFromPattern:
             _snap(types=[self._pattern(None)]), _snap(types=[self._pattern(None)])
         )
         assert changes == []
+
+
+class TestMandatoryArityEvidenceKinds:
+    """A pattern's mandatory count and an instantiation's spelled count are
+    different quantities; they are compared only with their own kind. The
+    oracle per row is hand-written from the C++ declarations in each comment.
+    """
+
+    @staticmethod
+    def _pattern(
+        defaults: tuple[str | None, ...],
+        name: str = "Foo",
+        qualified: str | None = None,
+    ) -> RecordType:
+        rec = RecordType(
+            name=name, kind="struct", is_template_pattern=True, qualified_name=qualified
+        )
+        rec.template_param_defaults_fact = Fact.present(defaults)
+        return rec
+
+    @staticmethod
+    def _inst(spelling: str, qualified: str | None = None) -> RecordType:
+        return RecordType(name=spelling, kind="struct", qualified_name=qualified)
+
+    @pytest.mark.parametrize(
+        ("old_types", "new_types", "fires"),
+        [
+            # clang old: template<T, U = int> Foo; castxml new: only Foo<int, int>
+            # -- the template did not change; 1 vs 2 counts different things.
+            ("pattern:None,int", "inst:Foo<int, int>", False),
+            # Mirror: castxml old, clang new.
+            ("inst:Foo<int, int>", "pattern:None,int", False),
+            # Pattern on both sides, U lost its default: a real break.
+            ("pattern:None,int", "pattern:None,None", True),
+            # Instantiations on both sides: min 1 -> 2.
+            ("inst:Foo<int>", "inst:Foo<int, char>", True),
+            # Both kinds on both sides: the pattern (unchanged) decides, even
+            # though the smallest exported instantiation disappeared.
+            (
+                "pattern:None,int|inst:Foo<int>",
+                "pattern:None,int|inst:Foo<int, int>",
+                False,
+            ),
+            # Pattern only old, both kinds new: instantiation is not comparable
+            # (old has none), pattern unchanged.
+            ("pattern:None", "pattern:None|inst:Foo<int, int>", False),
+        ],
+    )
+    def test_like_with_like(self, old_types: str, new_types: str, fires: bool) -> None:
+        def build(spec: str) -> list[RecordType]:
+            out: list[RecordType] = []
+            for part in spec.split("|"):
+                kind, _, val = part.partition(":")
+                if kind == "pattern":
+                    out.append(
+                        self._pattern(
+                            tuple(None if d == "None" else d for d in val.split(","))
+                        )
+                    )
+                else:
+                    out.append(self._inst(val))
+            return out
+
+        changes = detect_mandatory_template_param_added(
+            _snap(types=build(old_types)), _snap(types=build(new_types))
+        )
+        assert [c.symbol for c in changes] == (["Foo"] if fires else [])
+
+    def test_equal_leaf_names_in_different_namespaces(self) -> None:
+        """``a::Box<T>`` -> ``a::Box<T, U>`` is a break even while ``b::Box<T>``
+        (same bare ``name``) is unchanged; ``b::Box`` gets no finding."""
+        old = _snap(
+            types=[
+                self._pattern((None,), name="Box", qualified="a::Box"),
+                self._pattern((None,), name="Box", qualified="b::Box"),
+            ]
+        )
+        new = _snap(
+            types=[
+                self._pattern((None, None), name="Box", qualified="a::Box"),
+                self._pattern((None,), name="Box", qualified="b::Box"),
+            ]
+        )
+        changes = detect_mandatory_template_param_added(old, new)
+        assert [(c.symbol, c.old_value, c.new_value) for c in changes] == [
+            ("a::Box", "min_arity=1", "min_arity=2")
+        ]
+
+    def test_equal_leaf_instantiations_in_different_namespaces(self) -> None:
+        old = _snap(
+            types=[
+                self._inst("Box<int>", "a::Box<int>"),
+                self._inst("Box<int>", "b::Box<int>"),
+            ]
+        )
+        new = _snap(
+            types=[
+                self._inst("Box<int, int>", "a::Box<int, int>"),
+                self._inst("Box<int>", "b::Box<int>"),
+            ]
+        )
+        changes = detect_mandatory_template_param_added(old, new)
+        assert [c.symbol for c in changes] == ["a::Box"]
