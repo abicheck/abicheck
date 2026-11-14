@@ -59,6 +59,7 @@ from .compare.naming_conventions import (  # noqa: F401 -- re-exported
     _isa_token_in_symbol as _isa_token_in_symbol,
 )
 from .compare.record_qualified_name import qualify_record_name
+from .compare.tag_rename_evidence import tag_rename_symbol_evidence
 from .compare.template_surface import (
     reconciled_abi_visible_functions,
     strip_template_args as _callable_stem,  # noqa: F401
@@ -590,10 +591,9 @@ def detect_tag_type_renamed(
     # between two symbol sets, so a declaration dropped for want of contract
     # evidence looks exactly like a renamed tag (Codex review, P2).
     r_old, r_new = reconciled_abi_visible_functions(old, new)
-    old_mangled = {f.mangled for f in r_old}
-    new_mangled = {f.mangled for f in r_new}
-    only_removed = old_mangled - new_mangled
-    only_added = new_mangled - old_mangled
+    old_ev = tag_rename_symbol_evidence(old, r_old)
+    new_ev = tag_rename_symbol_evidence(new, r_new)
+    only_removed, only_added = old_ev - new_ev, new_ev - old_ev
     findings: list[Change] = []
     for removed in removed_empties:
         ns = _parent_namespace(type_map_key(removed))
