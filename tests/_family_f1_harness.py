@@ -616,13 +616,30 @@ def _dedicated_pairs(b: Side) -> dict[str, tuple[AbiSnapshot, AbiSnapshot]]:
       ``evidence.optional_layer_prerequisite_for_a_stated_fact``): the
       ``detail::`` namespace is stated by the headers' ``qualified_name``, so
       the BREAKING finding must survive every ablation -- DWARF included.
+    * ``public_typedef_retargeted``: a typedef no exported signature names,
+      in the public surface only through its recorded header provenance
+      (``AbiSnapshot.typedef_origins``, extractor generation 62). Without
+      that provenance the typedef's origin is UNKNOWN: the run may narrow
+      the answer, but must say so -- never read it as private and pass.
     """
     return {
         "pimpl_inline_body_renamed": (
             _snapshot("1.0", _pimpl_side(b, "class_count_")),
             _snapshot("2.0", _pimpl_side(b, "iteration_cap_")),
         ),
+        "public_typedef_retargeted": (
+            _with_public_typedef(_snapshot("1.0", b), "int"),
+            _with_public_typedef(_snapshot("2.0", b), "long"),
+        ),
     }
+
+
+def _with_public_typedef(snap: AbiSnapshot, target: str) -> AbiSnapshot:
+    return dataclasses.replace(
+        snap,
+        typedefs={**snap.declarations.typedefs, "x_handle_t": target},
+        typedef_origins={"x_handle_t": ScopeOrigin.PUBLIC_HEADER},
+    )
 
 
 CORPUS: dict[str, tuple[AbiSnapshot, AbiSnapshot]] = _build_corpus()
@@ -881,6 +898,9 @@ CONTAINER_ABLATIONS: dict[
     # The canonical IR was never built (a DWARF-only/PE-only extraction, a
     # pre-v38 snapshot): the declarations stay, the occurrences go.
     "AbiSnapshot.semantic_ir": {"missing": _no_canonical_ir},
+    # Typedef header provenance never recorded (a pre-62 snapshot, a dump
+    # without a public-header set): every typedef origin reads UNKNOWN.
+    "AbiSnapshot.typedef_origins": {"missing": _drop("typedef_origins")},
     # The header-identifier index (schema v55): never scanned, or the scan
     # failed. Either must leave an undeclared export UNKNOWN_UNRESOLVED, never
     # "searched completely, no commitment".

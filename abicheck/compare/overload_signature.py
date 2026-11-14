@@ -79,10 +79,12 @@ def overload_keys(
 ) -> tuple[set[OverloadKey], set[OverloadKey]]:
     """Both sides' overload keys for one stem (see the module docstring)."""
     old_list, new_list = list(old_group), list(new_group)
-    if not any(is_export_table_only_record(f) for f in (*old_list, *new_list)):
-        return {_declared_key(f) for f in old_list}, {
-            _declared_key(f) for f in new_list
-        }
+    # An unchanged overload is often the very same object on both sides:
+    # key each object once for this call.
+    members = list({id(f): f for f in (*old_list, *new_list)}.values())
+    if not any(is_export_table_only_record(f) for f in members):
+        declared = {id(f): _declared_key(f) for f in members}
+        return {declared[id(f)] for f in old_list}, {declared[id(f)] for f in new_list}
 
     def key(f: Function) -> OverloadKey:
         mangled = _mangled_key(f)
@@ -92,7 +94,8 @@ def overload_keys(
         # identity -- distinct per overload, never an empty shared key.
         return ((f"<symbol {f.mangled or f.name}>",), False, False, "")
 
-    return {key(f) for f in old_list}, {key(f) for f in new_list}
+    keys = {id(f): key(f) for f in members}
+    return {keys[id(f)] for f in old_list}, {keys[id(f)] for f in new_list}
 
 
 def format_overload_key(key: OverloadKey) -> str:

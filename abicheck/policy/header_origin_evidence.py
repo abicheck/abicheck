@@ -91,3 +91,26 @@ def collect_header_origin_unknown_types(
             surface.header_origin_unknown_types.update(
                 n for n in (rec.name, rec.qualified_name) if n
             )
+    _collect_unknown_typedef_origins(snap, surface, qname_eligible)
+
+
+def _collect_unknown_typedef_origins(
+    snap: AbiSnapshot, surface: PublicSurface, qname_eligible: Callable[[str], bool]
+) -> None:
+    """A header-backed dump that classified its declarations against a
+    public-header set but recorded no origin for a typedef (a pre-generation-62
+    snapshot, an unattributed spelling): that typedef might have been a
+    public-header seed. Demoting its change by reachability rests on the
+    missing origin, so it is labelled header-origin-unknown -- a stated gap,
+    never a silent "private"."""
+    if not snap.from_headers or not any(
+        o is not ScopeOrigin.UNKNOWN for o in surface.origin_by_key.values()
+    ):
+        return
+    known = snap.typedef_origins or {}
+    decls = snap.declarations
+    surface.header_origin_unknown_types.update(
+        key
+        for key in (*decls.typedefs, *decls.typedefs_qualified)
+        if key not in known and qname_eligible(key)
+    )

@@ -142,7 +142,6 @@
     "abicheck/diff_templates.py(_looks_like_template_instantiation)": 876,
     "abicheck/diff_templates.py(_normalize_mach_o_mangled)": 1184,
     "abicheck/diff_templates.py(_return_is_unspecified)": 512,
-    "abicheck/diff_templates.py(detect_overload_set_rerouted.<locals>._overload_key)": 204,
     "abicheck/diff_type_spellings.py(_emit_function_slot_changes)": 716,
     "abicheck/diff_type_spellings.py(_match_functions_by_mangled)": 28,
     "abicheck/diff_type_spellings.py(_match_record_fields)": 28,
@@ -181,8 +180,8 @@
     "abicheck/model/execution_cache_scoped.py(ScopedCache.active)": 200,
     "abicheck/model/execution_cache_scoped.py(ScopedCache.scope)": 14,
     "abicheck/model/export_index.py(build_raw_export_index)": 28,
-    "abicheck/model/export_index.py(build_raw_export_indexes)": 266,
-    "abicheck/model/export_index.py(read_export_platforms)": 126,
+    "abicheck/model/export_index.py(build_raw_export_indexes)": 280,
+    "abicheck/model/export_index.py(read_export_platforms)": 140,
     "abicheck/model/export_index.py(snapshot_export_names)": 56,
     "abicheck/model/extraction_scope.py(_both_from_headers)": 14,
     "abicheck/model/extraction_scope.py(compare_extraction_scopes)": 13,
@@ -261,7 +260,7 @@
     "abicheck/model/surface_facts.py(is_confirmed_false)": 7597,
     "abicheck/model/surface_facts.py(is_confirmed_true)": 13889,
     "abicheck/model/surface_facts.py(is_export_confirmed_absent)": 302,
-    "abicheck/model/surface_facts.py(is_export_table_only_record)": 4290,
+    "abicheck/model/surface_facts.py(is_export_table_only_record)": 4802,
     "abicheck/model/surface_facts.py(is_header_declared)": 2682,
     "abicheck/model/surface_facts.py(is_public_export)": 612,
     "abicheck/model/synthetic_key.py(is_synthetic_ctor_key)": 1458,
@@ -309,5 +308,5 @@
   },
   "mode": "default",
   "n": 40,
-  "total": 238550
+  "total": 238886
 }

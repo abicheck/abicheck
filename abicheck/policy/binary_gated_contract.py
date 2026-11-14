@@ -120,7 +120,6 @@ BINARY_GATED: frozenset[ChangeKind] = frozenset(
         ChangeKind.PARAM_POINTEE_QUALIFIER_CHANGED,
         ChangeKind.HIDDEN_FRIEND_REMOVED,
         ChangeKind.REMOVED_CONST_OVERLOAD,
-        ChangeKind.SOURCE_LEVEL_KIND_CHANGED,
     }
 )
 

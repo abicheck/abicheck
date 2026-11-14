@@ -601,7 +601,7 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
     ),
     62: GenerationSpellingChange(
         "no type or name spelling changes. Header dumps with a public-header "
-        "set record each typedef's ADR-015 origin from the header backend's "
+        "set record each typedef's public-or-private origin from the header backend's "
         "declaring header (castxml, clang and the native gcc plugin; the "
         "abicheck.typedef_origins extension fact on the declarations "
         "section), so a typedef declared in a public header is in the public "

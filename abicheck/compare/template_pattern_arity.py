@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING
 
 from abicheck.compare.template_surface import qualified_name_lookup, strip_template_args
 from abicheck.model.availability import FactStatus
+from abicheck.model.execution_cache import memoized
 from abicheck.model.source_contract_evidence import ContractEvidenceByName
 from abicheck.model.vocabulary import ScopeOrigin
 
@@ -54,6 +55,7 @@ def pattern_mandatory_arity(rec: RecordType) -> int | None:
     return sum(1 for d in fact.value if d is None)
 
 
+@memoized(maxsize=16384)
 def count_top_level_template_args(name: str) -> int | None:
     """Count the top-level template arguments in ``name<...>``; ``None`` with no
     ``<``. Commas inside ``(...)``/``[...]`` (a function type's parameters) and
