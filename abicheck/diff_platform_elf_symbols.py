@@ -31,6 +31,7 @@ from .compare.declared_alignment import (
 )
 from .compare.elf_alias_pairs import pair_elf_aliases
 from .compare.elf_capture_identity import both_captured_elf_identity
+from .compare.elf_visibility_change import elf_visibility_change
 from .compare.unbound_version_node import unbound_node_grade
 from .diff_helpers import make_change
 from .diff_versioning import (  # noqa: F401 — re-exported for existing callers
@@ -450,30 +451,6 @@ def _check_binding_change(sym_name: str, s_old: Any, s_new: Any) -> list[Change]
     ]
 
 
-def _check_elf_visibility_change(sym_name: str, s_old: Any, s_new: Any) -> list[Change]:
-    """Detect ELF st_other visibility transitions among exported visibilities.
-
-    HIDDEN/INTERNAL transitions are already caught by FUNC_VISIBILITY_CHANGED or
-    FUNC_REMOVED (symbol disappears from exported set). Only emit for transitions
-    among exported visibilities (DEFAULT↔PROTECTED).
-    """
-    if s_old.visibility == s_new.visibility:
-        return []
-    old_vis = s_old.visibility
-    new_vis = s_new.visibility
-    if old_vis in ("hidden", "internal") or new_vis in ("hidden", "internal"):
-        return []
-    return [
-        make_change(
-            ChangeKind.SYMBOL_ELF_VISIBILITY_CHANGED,
-            symbol=sym_name,
-            name=sym_name,
-            old=old_vis,
-            new=new_vis,
-        )
-    ]
-
-
 def _resolve_size_change_kind(
     old: AbiSnapshot,
     new: AbiSnapshot,
@@ -688,7 +665,7 @@ def _diff_elf_symbol_pair(
     changes: list[Change] = []
     changes.extend(_check_ifunc_type_change(sym_name, s_old, s_new))
     changes.extend(_check_binding_change(sym_name, s_old, s_new))
-    changes.extend(_check_elf_visibility_change(sym_name, s_old, s_new))
+    changes.extend(elf_visibility_change(sym_name, s_old, s_new))
     changes.extend(_check_symbol_size_change(old, new, sym_name, s_old, s_new))
     changes.extend(_check_func_visibility_protected(sym_name, s_old, s_new))
     changes.extend(_check_object_alignment_reduced(old, new, sym_name, s_old, s_new))

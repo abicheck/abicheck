@@ -476,7 +476,7 @@
     },
     {
       "path": "abicheck/diff_platform.py",
-      "baseline_lines": 1616,
+      "baseline_lines": 1615,
       "target": "compare",
       "rule": "no_growth",
       "disposition": "migrate",
@@ -494,17 +494,6 @@
       "category": "legacy_compare_monolith",
       "owner": "compare",
       "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Lowered 1037 -> 1018: `_both_captured_elf_identity` moved to the shared leaf `abicheck/compare/elf_capture_identity.py`, so the sibling split no longer imports it privately. Raised 1009 -> 1010: one import line. `_diff_visibility_leak`'s `visibility == Visibility.ELF_ONLY` test now asks `model/surface_facts.declaration_confirmed_absent()` -- \"exported, with no header declaration accounted for\", which is what that enum member meant here -- so it no longer silently changes meaning for a declaration a header parse did find but the artifact stopped exporting. Baseline raised 1010 -> 1037 by the one-time `ruff format` pass that made `fmt-check` a real CI gate (see docs/contribute/known-gaps.md). No responsibility was added or moved: the formatter only rewrapped call sites and expanded magic trailing commas, and the file's parsed statement count is byte-for-byte unchanged (verified by comparing `ast.dump` of this file before and after). This is the one bump that \"move responsibility instead of raising the baseline\" cannot be answered by moving anything; physical line counts are formatter-stable from here, because `fmt-check` now gates them. Raised 876 -> 884 (PR #1283, Codex review round 7): `extend_records`, the one API a merge of several comparisons' ledgers needs. A multi-library `compat check` dropped every per-library ledger, so a release whose policy demonstrably acted reported an empty policy trail -- ADR-067's \"every disposition keeps its rule and reason\" lost at the aggregation step. `record()` cannot serve the merge: it is keyed on the live `Change` object a disposition was applied to, and a merge holds the records rather than the objects behind them. The merge itself, and all of its reasoning, lives in the new `policy/disposition_merge.py`; what is here is the seven-line accessor into this class's own private list, which cannot live anywhere else without a cross-module private access. The alternative considered and rejected was a parallel merged-ledger type in the new module, which would have had to duplicate this class's whole query surface (`records`/`__len__`/`__iter__`/`detected_total`/`scope_reasons`/`suppressed_gating_records`) to be usable by the same reporters -- strictly more duplication than eight lines.",
-      "review_by": "2026-11-30"
-    },
-    {
-      "path": "abicheck/diff_platform_elf_symbols.py",
-      "baseline_lines": 815,
-      "target": "compare",
-      "rule": "no_growth",
-      "disposition": "migrate",
-      "category": "legacy_compare_monolith",
-      "owner": "compare",
-      "rationale": "Existing implementation predates ADR-061 and cannot move safely without a behavior-preserving vertical slice. Lowered 852 -> 840: same shared predicate, imported at module level instead of function-locally from the dynamic split's private. Baseline bumped 836->852 (2026-09-02, ADR-063 Phase 2): wired Change.entity_id into the two exported-object size/alignment findings via one shared _matched_var_entity_id helper.",
       "review_by": "2026-11-30"
     },
     {
@@ -1948,7 +1937,6 @@
       "rationale": "New entry, 1108 -> 1367, created by the one-time `ruff format` pass that made `fmt-check` a real CI gate (see docs/contribute/known-gaps.md). This file sat under the 1200-line maximum only because it was unformatted; rewrapping its call sites and expanding magic trailing commas crossed the cap without adding a statement (its parsed statement count is unchanged, verified via `ast.dump`). Recorded as debt rather than exempted so it stays in the no-growth ledger and is split like any other oversized file; the formatting bump is not itself a reason to split, so the target below is the pre-existing ADR-061 ownership question, not this change.",
       "review_by": "2026-11-30"
     }
-
   ],
   "dependency_direction_exceptions": []
 }
