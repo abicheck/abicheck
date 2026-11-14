@@ -3445,7 +3445,7 @@
       "category": "breaking",
       "default_verdict": "BREAKING",
       "severity": "error",
-      "min_evidence": "unspecified",
+      "min_evidence": "L0",
       "doc_slug": "type_visibility_changed",
       "examples": ""
     },

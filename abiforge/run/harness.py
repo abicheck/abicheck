@@ -145,6 +145,7 @@ def _compile_library(
     source_text: str,
     link: LinkSpec = LinkSpec(),
     extra: BuildArgs | None = None,
+    evidence: str | None = None,
 ) -> Path:
     extra = extra or BuildArgs()
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -153,7 +154,10 @@ def _compile_library(
     src.write_text(source_text, encoding="utf-8")
     so = out_dir / LIB_NAME
     cmd = compile_cmd(
-        config.producer, config.std, flags, debug=config.evidence != "binary"
+        config.producer,
+        config.std,
+        flags,
+        debug=(evidence or config.evidence) != "binary",
     )
     cmd += [*extra.cflags, "-shared", "-I", str(out_dir), "-o", str(so), str(src)]
     # PIC is an ELF/Mach-O concept: clang rejects -fPIC for the Windows target.
@@ -194,12 +198,16 @@ def build(
     overrides: dict[str, RoleText] | None = None,
     flags: Flags | None = None,
     link: LinkSpec = LinkSpec(),
+    evidence: str | None = None,
 ) -> Built:
     """Render *seed* (with *overrides*), compile it under *config* and snapshot it.
 
     *flags* replaces the config's producer flags (a rebuild edit's new side);
-    *link* adds link options (an edit's version script, SONAME, extra libs).
+    *link* adds link options (an edit's version script, SONAME, extra libs);
+    *evidence* replaces the config's evidence level for this side (an
+    asymmetric-evidence edit's new side).
     """
+    evidence = evidence or config.evidence
     fl = flags or config.flags
     header_text, source_text = seed.render(overrides)
     so = _compile_library(
@@ -211,10 +219,11 @@ def build(
         source_text,
         link,
         seed.build_args(overrides),
+        evidence,
     )
     header = out_dir / seed.header_name
     is_cxx = seed.lang == "c++"
-    headers = [header] if config.evidence == "headers" else []
+    headers = [header] if evidence == "headers" else []
     std = dump_std_spelling(config)
     # The header frontend reads the header the way the library was built:
     # same standard, same layout-changing flags.
@@ -291,6 +300,7 @@ def build_new(
         overrides=op.edit(seed.roles),
         flags=op.new_flags(config.flags),
         link=link,
+        evidence=op.new_side_evidence(config),
     )
 
 

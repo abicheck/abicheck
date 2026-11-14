@@ -113,6 +113,7 @@ DETECTOR_MODULE_ORDER: tuple[str, ...] = (
     "abicheck.compare.function_presence",
     "abicheck.compare.concept_constraints",
     "abicheck.compare.virtual_slot_removal",
+    "abicheck.compare.type_visibility",
     "abicheck.compare.runtime_requirements",
 )
 
@@ -221,6 +222,7 @@ class DetectorRegistry:
         "abicheck.compare.glibcxx_dual_abi",
         "abicheck.compare.concept_constraints",
         "abicheck.compare.virtual_slot_removal",
+        "abicheck.compare.type_visibility",
         "abicheck.compare.runtime_requirements",
     )
 

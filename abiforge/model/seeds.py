@@ -1028,6 +1028,18 @@ _KIND_ROLES: dict[str, RoleText] = {
         "class KW { detail::Impl* p; public: KW(); int n() const { return p->count; } }; }",
         "kib::KW::KW() : p(new detail::Impl{3}) {}",
     ),
+    # A polymorphic class whose own symbols (typeinfo, vtable) are exported
+    # with it; no free function names it, so narrowing the class's visibility
+    # cannot hide a function through GCC's type-visibility constraint.
+    "k.tvz": (
+        "struct KTV { virtual ~KTV(); virtual int kget(); int v; };",
+        "KTV::~KTV() {}\nint KTV::kget() { return v; }",
+    ),
+    # An unchanged record API whose new side is dumped with less evidence.
+    "k.evd": (
+        "struct KEV { int a; char c; };\nint kev_get(KEV* p);",
+        "int kev_get(KEV* p) { return p->a + p->c; }",
+    ),
     # An inline function returning a lambda: callers can hold the result
     # only in ``auto``. kurt_use calls it, so the library emits (weak)
     # symbols for kmake and the closure's call operator. A deduced return

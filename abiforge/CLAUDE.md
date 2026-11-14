@@ -47,7 +47,9 @@ Purpose and claims: `README.md`.
   the same way (`--sources`: each side's source tree, with its compile DB); its
   operators also need `header_backend="clang"`, the only backend whose source
   replay records macros, bodies and call edges. A (build, consumer) mix that cannot work is an explicit
-  `infeasible` pair, never a pass.
+  `infeasible` pair, never a pass. Evidence is per pair by default; an
+  operator with `new_evidence` (`model/opkit.py`) dumps its new side with less
+  evidence (headers or DWARF absent), the asymmetric-evidence axis.
 - **Run** (`run/`): `harness` builds and asks the checker, `exec` is the
   execution oracle (consumers, layout probes, new-header compiles), `cells`
   reconciles (false-clean first) and minimizes a failing cell into a

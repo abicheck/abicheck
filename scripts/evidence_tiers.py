@@ -304,6 +304,8 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "base_class_offset_changed": "L1",
     "type_kind_changed": "L1",
     "type_vtable_changed": "L1",
+    # Read from the export table: a class's typeinfo/vtable symbols leaving it.
+    "type_visibility_changed": "L0",
     "type_removed": "L1",
     "typedef_base_changed": "L1",
     "typedef_removed": "L1",

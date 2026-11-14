@@ -444,6 +444,10 @@ DETECTOR_INPUTS: dict[str, DetectorInputs] = {
         requires=frozenset({"cxx_concept_constraints"})
     ),
     "function_presence": _NONE,
+    # The ELF export table decides; a declared record only vetoes (lost vtable).
+    "type_visibility": DetectorInputs(
+        tolerates={"declarations.types": _LOOKUP},
+    ),
     # A lost slot is read off both sides' record vtables.
     "virtual_slot_removal": DetectorInputs(
         requires=frozenset(["declarations.types"]),

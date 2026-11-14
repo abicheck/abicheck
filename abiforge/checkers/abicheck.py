@@ -154,7 +154,12 @@ def answer(old: AbiSnapshot, new: AbiSnapshot) -> tuple[str, frozenset[str]]:
     """
     from abicheck.checker import compare
     from abicheck.errors import AbicheckError
+    from abicheck.policy.common_evidence_depth import common_evidence_depth
+    from abicheck.policy.depth_projection import project_pair_to_depth
 
+    # ``abicheck compare`` judges operands of different evidence rungs
+    # (headers on one side only) at the rung both reach; mirror it.
+    old, new = project_pair_to_depth(old, new, common_evidence_depth(old, new))
     try:
         # ``abicheck compare`` always runs the pattern-verdict pass (ADR-068
         # made it unconditional on the CLI); the bare ``checker.compare()``

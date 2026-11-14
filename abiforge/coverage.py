@@ -21,7 +21,10 @@ each bucket with its reason; every report lists them. Over that scope:
 
 The committed ledger (``LEDGER_PATH``) is the ratchet: ``declared_covered``
 may only grow, ``declared_uncovered`` lists the in-scope kinds no operator
-names yet, and ``verified_floor[tier]`` lists the kinds that tier verified
+names yet, ``derived_by_construction`` lists the in-scope kinds that follow
+from a cell's verdict (``DERIVED_KINDS``, e.g. the SONAME-bump advisory every
+binary break owes) and that some operator owes -- covered by construction,
+never counted as declared coverage -- and ``verified_floor[tier]`` lists the kinds that tier verified
 when the ledger was written. ``tests/test_edit_corpus_coverage.py`` checks
 the declared side without a compiler; ``check_floor`` checks a run.
 
@@ -63,6 +66,7 @@ TIERS: tuple[str, ...] = ("pr", "nightly", "weekly")
 LEDGER_DECLARED_KEYS: tuple[str, ...] = (
     "declared_covered",
     "declared_uncovered",
+    "derived_by_construction",
     "out_of_scope",
     "edit_classes_without_operator",
 )
@@ -467,6 +471,24 @@ SCOPE_BUCKETS: tuple[ScopeBucket, ...] = (
         "runtime_floors), a policy input the corpus does not give",
         names=frozenset({"platform_baseline_floor_raised"}),
     ),
+    ScopeBucket(
+        "libcxx_abi_v2_runtime",
+        False,
+        "needs a libc++ built with LIBCXX_ABI_VERSION=2 (std::__2): distribution "
+        "libc++ pins _LIBCPP_ABI_VERSION=1 in __config_site, so no corpus "
+        "toolchain can build the other ABI version",
+        names=frozenset({"libcpp_abi_version_changed"}),
+    ),
+    ScopeBucket(
+        "stored_layout_generation",
+        False,
+        "a record with a layout descriptor on one side and no size at all on "
+        "the other: a stored snapshot from an extractor generation that "
+        "recorded no layout. Every library the corpus builds and dumps live "
+        "records a size on both sides (DWARF and every header backend), and a "
+        "pair with headers on one side only is compared at binary depth",
+        names=frozenset({"layout_unverifiable"}),
+    ),
     # --- named, in scope: source-taxonomy kinds a public header alone shows.
     # Macro values, constexpr values, default-argument values, a removed public
     # typedef and an uninstantiated template stay out (module bucket below):
@@ -611,6 +633,17 @@ def op_derived_kinds(op: object) -> frozenset[str]:
     for rule in op.rules:
         out |= expectation_kinds(op.with_derived(rule.apply(base)))
     return frozenset(out & _derived_kinds())
+
+
+def derived_owed_kinds() -> frozenset[str]:
+    """The derived kinds (``DERIVED_KINDS``) at least one operator owes: a kind
+    the verdict implies is covered by construction only while some edit's
+    verdict reaches it; one no operator owes stays uncovered."""
+    return frozenset(
+        kind
+        for kind in _derived_kinds()
+        if any(kind in op_derived_kinds(op) for op in _operators())
+    )
 
 
 def declared_kinds() -> dict[str, frozenset[str]]:
@@ -1033,7 +1066,8 @@ def declared_ledger(previous: dict | None = None) -> dict:
             "verified_floor from a run with `report DIR --raise-floor TIER`."
         ),
         "declared_covered": sorted(declared & scope_set),
-        "declared_uncovered": sorted(scope_set - declared),
+        "declared_uncovered": sorted(scope_set - declared - derived_owed_kinds()),
+        "derived_by_construction": sorted(derived_owed_kinds() & scope_set),
         # Every other catalog kind, so a kind in none of the three lists is
         # one added to the catalog after the ledger was written, and a kind
         # moved into scope by a bucket change is not mistaken for it.

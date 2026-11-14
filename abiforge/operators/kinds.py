@@ -532,4 +532,42 @@ KIND_OPERATORS: tuple[EditOp, ...] = (
         **_RISK,
         **_HEADERS,
     ),
+    _op(
+        "class_visibility_hidden",
+        "k.tvz",
+        _replace(
+            "k.tvz",
+            (
+                "struct KTV { virtual ~KTV(); virtual int kget();",
+                'struct __attribute__((visibility("hidden"))) KTV { '
+                '__attribute__((visibility("default"))) virtual ~KTV(); '
+                '__attribute__((visibility("default"))) virtual int kget();',
+            ),
+        ),
+        "the class itself becomes hidden while its members stay exported: "
+        "KTV's typeinfo, typeinfo name and vtable leave the export table, so a "
+        "consumer that throws, catches, dynamic_casts or constructs KTV across "
+        "the library boundary no longer binds to the library's copies",
+        expected=frozenset({"TYPE_VISIBILITY_CHANGED"}),
+        precondition=lambda c: (
+            None if c.objfmt == "elf" else "class visibility is an ELF export attribute"
+        ),
+        **_BINARY,
+    ),
+    # Per-side evidence (``EditOp.new_evidence``): the library is unchanged,
+    # only what the new side's dump is given differs.
+    _op(
+        "new_side_dumped_without_headers",
+        "k.evd",
+        lambda r: {},
+        "the library is rebuilt from the same sources but its new side is "
+        "dumped without the public header (DWARF only): nothing a consumer "
+        "sees changed, so the evidence difference must not read as removed "
+        "or changed declarations",
+        touches=(),
+        new_evidence="dwarf",
+        verdict_min="NO_CHANGE",
+        verdict_max="COMPATIBLE",
+        min_evidence="binary",
+    ),
 )
