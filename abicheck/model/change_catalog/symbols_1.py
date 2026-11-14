@@ -227,8 +227,8 @@ SYMBOLS_ENTRIES_1: list[ChangeKindMeta] = [
     _E(
         "func_became_inline",
         _R,
-        impact="A function gained the inline attribute (ADR-081, 2026-11 "
-        "amendment). Becoming inline does not by itself break anyone: an "
+        impact="A function gained the inline attribute. Becoming inline "
+        "does not by itself break anyone: an "
         "already-linked caller still binds while the library keeps exporting "
         "the symbol, and a recompiled caller that odr-uses the function either "
         "sees its definition in the header or resolves the call against that "
