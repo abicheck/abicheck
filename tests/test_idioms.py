@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from abicheck.checker_policy import ChangeKind
 from abicheck.idioms import Idiom, detect_antipatterns, recognise_idioms
 from abicheck.model import (
@@ -23,10 +25,12 @@ from abicheck.model import (
     AccessLevel,
     Function,
     Param,
+    ParamKind,
     RecordType,
     TypeField,
     Visibility,
 )
+from abicheck.model.fact import Fact
 from abicheck.surface_graph import build_surface_graph
 
 
@@ -622,3 +626,77 @@ def test_virtual_dtor_base_not_flagged() -> None:
 # std::string-by-value antipattern via `_antipatterns()` in
 # `test_detect_stl_by_value_parameter`), so no CLI-level replacement test is
 # needed here.
+
+
+# A header backend may spell a slot by its bare alias (castxml renders a
+# ``std::string`` parameter as ``string``); the slot's resolved type identity
+# still names the std record. Each row: (spelling, identities, kind, pointer
+# depth, expected) -- the oracle is the C++ meaning of the slot, by hand.
+@pytest.mark.parametrize(
+    ("spelling", "identities", "kind", "depth", "expected"),
+    [
+        ("string", ("std::basic_string<char>",), ParamKind.VALUE, 0, True),
+        ("wstring", ("std::basic_string<wchar_t>",), ParamKind.VALUE, 0, True),
+        (
+            "IntVec",
+            ("std::vector<int, std::allocator<int> >",),
+            ParamKind.VALUE,
+            0,
+            True,
+        ),
+        ("const string&", ("std::basic_string<char>",), ParamKind.REFERENCE, 0, False),
+        ("string*", ("std::basic_string<char>",), ParamKind.POINTER, 1, False),
+        ("Widget", ("lib::Widget",), ParamKind.VALUE, 0, False),
+        ("string", (), ParamKind.VALUE, 0, False),
+        ("Pair", ("std::string", "lib::X"), ParamKind.VALUE, 0, False),
+    ],
+)
+def test_stl_by_value_reads_resolved_identity_of_bare_alias(
+    spelling: str,
+    identities: tuple[str, ...],
+    kind: ParamKind,
+    depth: int,
+    expected: bool,
+) -> None:
+    param = Param(
+        name="s",
+        type=spelling,
+        kind=kind,
+        pointer_depth=depth,
+        type_identities_fact=Fact.present(identities),
+    )
+    snap = AbiSnapshot(
+        library="l",
+        version="1",
+        from_headers=True,
+        functions=[
+            Function(
+                name="f",
+                mangled="_Z1f",
+                return_type="int",
+                params=[param],
+                visibility=Visibility.PUBLIC,
+            )
+        ],
+    )
+    hit = any(
+        a.kind == ChangeKind.PUBLIC_API_EXPOSES_STL_BY_VALUE
+        for a in _antipatterns(snap)
+    )
+    assert hit is expected
+
+
+def test_stl_by_value_return_reads_resolved_identity() -> None:
+    fn = Function(
+        name="g",
+        mangled="_Z1gv",
+        return_type="string",
+        params=[],
+        visibility=Visibility.PUBLIC,
+        return_type_identities_fact=Fact.present(("std::basic_string<char>",)),
+    )
+    snap = AbiSnapshot(library="l", version="1", from_headers=True, functions=[fn])
+    assert any(
+        a.kind == ChangeKind.PUBLIC_API_EXPOSES_STL_BY_VALUE
+        for a in _antipatterns(snap)
+    )

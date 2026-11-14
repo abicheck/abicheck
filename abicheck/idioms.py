@@ -47,6 +47,7 @@ from .policy.public_use_index import (
     build_public_use_index,
     query_public_use,
 )
+from .policy.std_slot_identity import std_spelling
 from .policy.type_spelling import strip_ptr as _strip_ptr
 from .surface_graph import SurfaceGraph
 
@@ -592,10 +593,11 @@ def _detect_stl_by_value(graph: SurfaceGraph) -> list[AntiPattern]:
         if not in_public_surface(fn):
             continue
         hits: list[str] = []
-        if _is_std_by_value(fn.return_type, fn.return_pointer_depth, ParamKind.VALUE):
-            hits.append(f"returns {fn.return_type} by value")
+        ret = std_spelling(fn.return_type, fn.return_type_identities_fact)
+        if _is_std_by_value(ret, fn.return_pointer_depth, ParamKind.VALUE):
+            hits.append(f"returns {ret} by value")
         for p in fn.params:
-            ptype = getattr(p, "type", "") or ""
+            ptype = std_spelling(getattr(p, "type", "") or "", p.type_identities_fact)
             if _is_std_by_value(ptype, getattr(p, "pointer_depth", 0), p.kind):
                 hits.append(f"parameter {p.name!r} is {ptype} by value")
         if hits:
