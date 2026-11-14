@@ -641,6 +641,16 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "than the parser read. No rewrite is needed -- compare re-derives "
         "the family from a stored snapshot's exports the same way"
     ),
+    66: GenerationSpellingChange(
+        "no type or name spelling changes. castxml records an empty class's "
+        "data size as 0 (it is always laid out as an empty base) and leaves "
+        "a bit-field record's data size not collected on Microsoft bit-field "
+        "targets (MinGW, Cygwin); the std::X re-export table is not modelled "
+        "when the declaring namespace has no own declaration to place it, and "
+        "castxml's extern-C recovery no longer applies to provably C++ "
+        "headers. No rewrite is sound for the old data sizes, which read as "
+        "a differing fact only when both sides were recorded at 66"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.
