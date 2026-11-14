@@ -622,6 +622,15 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "lookup (a .symtab-only or extern-C namesake hit is partial); no "
         "stored spelling changes"
     ),
+    64: GenerationSpellingChange(
+        "no type or name spelling changes. Header dumps with a public-header "
+        "set record the public headers' namespace-scope using std::X "
+        "re-exports (castxml namespace members bound from std, clang "
+        "UsingDecl, the native gcc plugin's new using rows) as the "
+        "abicheck.std_reexports extension fact of the declarations section. "
+        "No rewrite is needed -- an older snapshot reads the table as not "
+        "modelled, which reports no re-export removed"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

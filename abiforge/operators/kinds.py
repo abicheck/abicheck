@@ -306,6 +306,18 @@ KIND_OPERATORS: tuple[EditOp, ...] = (
         **_HEADERS,
     ),
     _op(
+        "std_reexport_dropped",
+        "k.rex",
+        _replace("k.rex", (" using std::abs;", "")),
+        "the header drops `using std::abs;` from namespace krx: nothing is "
+        "exported for it and std::abs is unchanged, but consumer source that "
+        "called krx::abs no longer compiles",
+        expected=frozenset({"STD_REEXPORT_REMOVED"}),
+        verdict_min="API_BREAK",
+        verdict_max="API_BREAK",
+        **_HEADERS,
+    ),
+    _op(
         "unnamed_type_api_added",
         "k.anon",
         lambda r: _set(

@@ -218,6 +218,7 @@ def run_tu_fragment(
         preprocessor_hidden=parser_preprocessor_hidden(parser),
         cxx_concept_constraints=fields.cxx_concept_constraints,
         cxx_template_defaults=fields.cxx_template_defaults,
+        std_reexports=fields.std_reexports,
         extraction_provenance=fields.extraction_provenance,
     )
 
@@ -585,6 +586,7 @@ class ElfHeaderAstResult:
     preprocessor_hidden: dict[str, tuple[str, ...]] | None = None
     cxx_concept_constraints: dict[str, str] | None = None
     cxx_template_defaults: dict[str, TemplateDefaults] | None = None
+    std_reexports: dict[str, str] | None = None
 
     extraction_provenance: dict[str, Any] | None = field(default=None, kw_only=True)
 
@@ -600,6 +602,7 @@ class ElfHeaderAstResult:
             ),
             "cxx_concept_constraints": self.cxx_concept_constraints,
             "cxx_template_defaults": self.cxx_template_defaults,
+            "std_reexports": self.std_reexports,
         }
 
     def typedef_snapshot_fields(self) -> dict[str, Any]:
@@ -748,6 +751,7 @@ def resolve_header_ast_result(
             preprocessor_hidden=fragment.preprocessor_hidden,
             cxx_concept_constraints=fragment.cxx_concept_constraints,
             cxx_template_defaults=fragment.cxx_template_defaults,
+            std_reexports=fragment.std_reexports,
             extraction_provenance=fragment.extraction_provenance,
         )
         provenance_headers = tuple(headers)
@@ -774,6 +778,7 @@ def resolve_header_ast_result(
         preprocessor_hidden=merged.preprocessor_hidden,
         cxx_concept_constraints=merged.cxx_concept_constraints,
         cxx_template_defaults=merged.cxx_template_defaults,
+        std_reexports=merged.std_reexports,
         extraction_provenance=merged.extraction_provenance,
         # A real manifest carries its occurrence-preserving merged IR.
         semantic_ir=(

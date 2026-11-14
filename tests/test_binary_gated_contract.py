@@ -520,14 +520,10 @@ class TestSourceContractEvidence:
 
 
 class TestDetectorReachability:
-    def test_std_reexport_without_evidence_is_unknown_not_proven(self) -> None:
-        change = _build_std_reexport_change("std_x", "std::x", public_evidence=False)
-        assert change.public_reachable is False
-        assert change.reachability_state is ReachabilityState.UNKNOWN
-        assert change.reachability_kind is None
-
-    def test_std_reexport_with_evidence_is_proven_reachable(self) -> None:
-        change = _build_std_reexport_change("std_x", "std::x", public_evidence=True)
+    def test_std_reexport_is_proven_reachable(self) -> None:
+        # The re-export table holds only using-declarations a public header
+        # declares, so the declaration is observed as contract.
+        change = _build_std_reexport_change("lib::x", "std::x")
         assert change.public_reachable is True
         assert change.reachability_state is ReachabilityState.PROVEN_REACHABLE
         assert change.reachability_kind == "direct_public_symbol"
