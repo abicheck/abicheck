@@ -52,7 +52,7 @@ from typing import TYPE_CHECKING
 from .compare.type_map_pair import Side, TypeMapPair
 from .detector_registry import registry
 from .diff_helpers import build_type_map, make_change
-from .model import FactStatus, fact_confirmed_true, resolved_fact_value
+from .model import Fact, FactStatus, fact_confirmed_true, resolved_fact_value
 from .model.change import Change
 from .model.change_catalog.kinds import ChangeKind
 from .model.snapshot_reliability import family_reliable
@@ -336,7 +336,15 @@ def _check_standard_layout_lost(
 def _check_tail_padding_reuse(
     name: str, old_rec: RecordType, new_rec: RecordType
 ) -> list[Change]:
-    """Emit TAIL_PADDING_REUSE_CHANGED when dsize changes at stable sizeof."""
+    """Emit TAIL_PADDING_REUSE_CHANGED when dsize changes at stable sizeof.
+
+    A record with no member, base or vtable on either side is empty: a
+    derived class places its first member at offset 0 whatever data size was
+    recorded, so ``sizeof`` against ``0`` (an extractor generation-62
+    baseline stored an empty POD's ``sizeof``; 63 stores 0) reuses no tail
+    padding."""
+    if _empty_on_both_sides(old_rec, new_rec):
+        return []
     if (
         old_rec.data_size_bits is not None
         and new_rec.data_size_bits is not None
@@ -357,6 +365,24 @@ def _check_tail_padding_reuse(
             )
         ]
     return []
+
+
+def _empty_on_both_sides(old_rec: RecordType, new_rec: RecordType) -> bool:
+    """No member, base or vtable on either side, and the data sizes are
+    ``0`` and ``sizeof``: the empty record's own two possible readings."""
+    sizes = {old_rec.data_size_bits, new_rec.data_size_bits}
+    return sizes == {0, old_rec.size_bits} and all(
+        not r.fields
+        and _known_empty(r.bases_fact)
+        and _known_empty(r.virtual_bases_fact)
+        and _known_empty(r.vtable_fact)
+        for r in (old_rec, new_rec)
+    )
+
+
+def _known_empty(fact: Fact[list[str]] | None) -> bool:
+    """An observed empty list; an unobserved one is not known empty."""
+    return fact is not None and fact.status is FactStatus.PRESENT and not fact.value
 
 
 def _layout_evidence_asymmetric(

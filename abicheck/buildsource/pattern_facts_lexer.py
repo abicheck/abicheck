@@ -254,10 +254,17 @@ def _blank_scan_literal(
         out.append(quote)
         return i + 1, "code"
     if ch == "\n":
-        # An ordinary literal cannot span a line (a spliced one took the
-        # escape branch above): an unmatched quote, as in ``#error don't``,
-        # ends at the newline instead of swallowing the lines below.
+        # A backslash right before the newline (or before its CRLF ``\r``)
+        # splices the next line in before escapes are read, even when the
+        # escape branch above already took it as part of ``\\``.
+        prev = text[i - 1] if i > 0 else ""
+        prev2 = text[i - 2] if i > 1 else ""
         out.append("\n")
+        if prev == "\\" or (prev == "\r" and prev2 == "\\"):
+            return i + 1, state
+        # Otherwise an ordinary literal cannot span a line: an unmatched
+        # quote, as in ``#error don't``, ends here instead of swallowing the
+        # lines below.
         return i + 1, "code"
     if not blank_strings:
         out.append(ch)

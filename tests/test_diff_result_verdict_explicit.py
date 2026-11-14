@@ -43,7 +43,10 @@ def _sites_without_verdict(source: str, label: str) -> list[str]:
         if name not in names:
             continue
         keywords = {k.arg for k in node.keywords}
-        if "verdict" in keywords or None in keywords or len(node.args) >= 5:
+        # Only a plain positional argument is a guaranteed value: ``*()``
+        # supplies none.
+        positional = sum(not isinstance(a, ast.Starred) for a in node.args)
+        if "verdict" in keywords or None in keywords or positional >= 5:
             continue
         missing.append(f"{label}:{node.lineno}")
     return missing
@@ -63,6 +66,8 @@ def test_every_production_diff_result_passes_its_verdict() -> None:
         ("DiffResult('1', '2', 'l', changes=[c])", True),
         ("from x import DiffResult as _D\n_D('1', '2', 'l')", True),
         ("m.DiffResult(old_version='1', new_version='2', library='l')", True),
+        ("DiffResult(*(), '1', '2', 'l', [c])", True),
+        ("DiffResult('1', '2', 'l', [c], v)", False),
         ("DiffResult('1', '2', 'l', verdict=v)", False),
         ("DiffResult(**fields)", False),
         ("BundleDiffResult('1', '2', 'l')", False),

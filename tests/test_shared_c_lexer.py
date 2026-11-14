@@ -35,6 +35,12 @@ def _regions(text: str) -> list[tuple[str, int, int]]:
         # 1'0 is a digit separator, so the "/*" after it opens a real comment
         # that hides the guard.
         pytest.param("int x = 1'0; /*\n", [], id="digit-separator"),
+        # A backslash before the newline splices even after an escaped "\\":
+        # the literal goes on, so its "/*" is text (LF and CRLF).
+        pytest.param('const char *s = "x\\\\\nn/*";\n', [("A", 4, 4)], id="splice-lf"),
+        pytest.param(
+            'const char *s = "x\\\\\r\nn/*";\n', [("A", 4, 4)], id="splice-crlf"
+        ),
         # Controls both scanners always got right.
         pytest.param('const char *p = "/*";\n', [("A", 3, 3)], id="plain-string"),
         pytest.param("/*\n", [], id="open-comment"),
