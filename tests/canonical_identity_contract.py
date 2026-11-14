@@ -252,6 +252,8 @@ UNVERIFIED = frozenset(
         "func_noexcept_removed",
         "func_virtual_noexcept_added",
         "func_override_specifier_added",
+        "func_became_final",
+        "func_lost_final",
         "func_override_specifier_removed",
         "func_pure_virtual_added",
         "func_ref_qual_changed",

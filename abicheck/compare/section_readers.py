@@ -91,6 +91,17 @@ DETECTOR_SECTIONS: Mapping[str, frozenset[str]] = {
             "types",
         ]
     ),
+    "func_final_specifier": frozenset(
+        [
+            "binary",
+            "debug",
+            "declarations",
+            "layout",
+            "provenance",
+            "semantic_ir",
+            "types",
+        ]
+    ),
     "func_return_pointee_qualifier": frozenset(
         [
             "binary",

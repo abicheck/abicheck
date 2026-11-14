@@ -405,6 +405,8 @@ EVIDENCE_TIER_BY_KIND: dict[str, str] = {
     "enum_became_scoped": "L2",
     "enum_lost_scoped": "L2",
     "func_override_specifier_added": "L2",
+    "func_became_final": "L2",
+    "func_lost_final": "L2",
     "func_override_specifier_removed": "L2",
     "func_deprecated_added": "L2",
     "func_deprecated_removed": "L2",

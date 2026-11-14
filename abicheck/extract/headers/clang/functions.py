@@ -99,6 +99,7 @@ from .pointer_depth import _pointer_depth
 from .qualifiers import (
     OVERRIDE_ELIGIBLE_KINDS as _OVERRIDE_ELIGIBLE_KINDS,
     clang_exception_spec as _clang_exception_spec,
+    clang_method_is_final as _clang_method_is_final,
     clang_method_is_override as _clang_method_is_override,
     clang_param_is_restrict as _clang_param_is_restrict,
     clang_param_is_va_list as _clang_param_is_va_list,
@@ -706,6 +707,17 @@ def parse_functions(
                     Fact.present(_clang_method_is_override(node))
                     if kind in _OVERRIDE_ELIGIBLE_KINDS
                     else Fact.not_applicable()
+                ),
+                # The `final` virt-specifier: a FinalAttr child, like override.
+                # Known for a virtual member function only (a final one is
+                # virtual by [class.virtual]/4); None elsewhere.
+                is_final=(
+                    True
+                    if kind in _OVERRIDE_ELIGIBLE_KINDS and _clang_method_is_final(node)
+                    else False
+                    if bool(node.get("virtual"))
+                    or (kind != "FunctionDecl" and mangled in virtual_mangled_names)
+                    else None
                 ),
                 is_compiler_generated=False,
                 # ADR-085 D1 (function template): the pattern's spelled defaults.

@@ -185,6 +185,7 @@ DETECTOR_KINDS: Mapping[str, frozenset[str]] = MappingProxyType(
         "func_deprecated": frozenset(
             {"func_deprecated_added", "func_deprecated_removed"}
         ),
+        "func_final_specifier": frozenset({"func_became_final", "func_lost_final"}),
         "func_override_specifier": frozenset(
             {"func_override_specifier_added", "func_override_specifier_removed"}
         ),

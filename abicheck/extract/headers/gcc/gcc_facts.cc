@@ -174,7 +174,7 @@ static void decl(void *data,void *) {
 #ifdef GCC_CPP
   if(code==FUNCTION_DECL && DECL_LANG_SPECIFIC(d)) {
     int quals=TREE_CODE(TREE_TYPE(d))==METHOD_TYPE?type_memfn_quals(TREE_TYPE(d)):0;
-    fprintf(out,",\"override\":%s",DECL_OVERRIDE_P(d)?"true":"false");
+    fprintf(out,",\"override\":%s,\"final\":%s",DECL_OVERRIDE_P(d)?"true":"false",!DECL_VIRTUAL_P(d)?"null":DECL_FINAL_P(d)?"true":"false");
     fprintf(out,",\"const\":%s,\"volatile\":%s,\"static_member\":%s",(quals&TYPE_QUAL_CONST)?"true":"false",(quals&TYPE_QUAL_VOLATILE)?"true":"false",DECL_STATIC_FUNCTION_P(d)?"true":"false");
     fprintf(out,",\"pure_virtual\":%s,\"constructor\":%s,\"destructor\":%s,\"clone\":%s,\"explicit\":%s,\"ref_qualifier\":%s",DECL_PURE_VIRTUAL_P(d)?"true":"false",DECL_CONSTRUCTOR_P(d)?"true":"false",DECL_DESTRUCTOR_P(d)?"true":"false",DECL_CLONED_FUNCTION_P(d)?"true":"false",DECL_NONCONVERTING_P(d)?"true":"false",q(FUNCTION_REF_QUALIFIED(TREE_TYPE(d))?(FUNCTION_RVALUE_QUALIFIED(TREE_TYPE(d))?"&&":"&"):"").c_str());
     fprintf(out,",\"deleted\":%s,\"defaulted\":%s,\"constexpr\":%s,\"virtual\":%s,\"vindex\":%s,\"noexcept\":%s,\"extern_c\":%s",
@@ -379,10 +379,18 @@ static void visit_type(tree t) {
     if(TREE_CODE(d)==FIELD_DECL)visit_type(TREE_TYPE(d));else visit_decl(d);
   }
 }
+// An explicit specialization of a function template (template <> int f<int>(int))
+// is held in gcc's specialization table, not on the template's
+// DECL_TEMPLATE_INSTANTIATIONS list (which carries class template instances),
+// so the namespace walk never reaches it: visit each one there.
+static void explicit_function_specialization(bool,spec_entry *e,void *) {
+  tree s=e?e->spec:NULL_TREE;
+  if(s && TREE_CODE(s)==FUNCTION_DECL && DECL_LANG_SPECIFIC(s) && DECL_TEMPLATE_SPECIALIZATION(s) && !uses_template_parms(s))visit_decl(s);
+}
 #endif
 static void finish(void *,void *) {
 #ifdef GCC_CPP
-  if(!errorcount)visit_decl(global_namespace);
+  if(!errorcount){visit_decl(global_namespace);walk_specializations(true,explicit_function_specialization,nullptr);}
 #endif
 fprintf(out,"{\"kind\":\"end\",\"errors\":%d}\n",errorcount);fclose(out);}
 int plugin_init(struct plugin_name_args *args,struct plugin_gcc_version *v) {

@@ -76,6 +76,7 @@
     "FORTIFY_SOURCE_WEAKENED",
     "FUNC_ADDED",
     "FUNC_ADDED_ELF_ONLY",
+    "FUNC_BECAME_FINAL",
     "FUNC_BECAME_INLINE",
     "FUNC_CONTRACT_ATTRIBUTE_ADDED",
     "FUNC_CONTRACT_ATTRIBUTE_REMOVED",
@@ -305,6 +306,7 @@
     "X86_ISA_BASELINE_RAISED"
   ],
   "declared_uncovered": [
+    "FUNC_LOST_FINAL",
     "IMPORTED_SYMBOL_UNPROVIDED"
   ],
   "derived_by_construction": [

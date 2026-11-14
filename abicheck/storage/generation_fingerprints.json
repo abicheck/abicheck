@@ -103,7 +103,7 @@
       "abicheck/extract/headers/castxml/duplicate_declarations.py": "8668fddc69d8838cc093315726c53d96dd9c878020e675e34a44a435dc54d2f7",
       "abicheck/extract/headers/castxml/enums.py": "e616c768543061d71812378dd92cbcb7b8d00afbb734bcb7b4b5334ee34042aa",
       "abicheck/extract/headers/castxml/function_type_cc.py": "54b78f155f3500d45cc578501e42ae2af256445bfa9819510e805e60df8c9967",
-      "abicheck/extract/headers/castxml/functions.py": "9e1f654aeb7860c6801834cf8e8ef9002de7dea47846f7bdc7499576ee74d539",
+      "abicheck/extract/headers/castxml/functions.py": "f50eca555f141a4b8f710fa666f7ecfc9e1fec9429dc79bca6a56855cb6efd9b",
       "abicheck/extract/headers/castxml/hidden_declarations.py": "500abf62faa042e1c33a3ef3897557e263f0c7b1060b60c323d8d34895f5b057",
       "abicheck/extract/headers/castxml/inline_variables.py": "60ee92e7a810d81f113a6f5fb4f218ea6287258948dc9a838fbdef37ef37ea32",
       "abicheck/extract/headers/castxml/location.py": "a5469fedb2774dfdf1b87a49ddc713471c088ecee6ea5ccbfe4d9764012c97e6",
@@ -140,7 +140,7 @@
       "abicheck/extract/headers/clang/explicit_specifier.py": "fca63201aaf3d920e2bbb796114c93bd6edc89974083f9900ed26e98de7fc699",
       "abicheck/extract/headers/clang/expr.py": "da2554d914f005f8525e0a411b36e93e3dd3dc80957cc7597245c9257b875994",
       "abicheck/extract/headers/clang/function_template_defaults.py": "af4a42ea00a91238ef8f111fe05c4b6aa625b84fd2fd4e39230b48953ebaf566",
-      "abicheck/extract/headers/clang/functions.py": "c50bd3f73060088d445675951129cc86d16db0a7a3d94a3d50076d0f155d41d9",
+      "abicheck/extract/headers/clang/functions.py": "6eb7869e781f5864a0e59be0b9f9a5a14d01e2bc915f61ffd4e34a4ebf4af27d",
       "abicheck/extract/headers/clang/inline_semantics.py": "8284b543b4fa45da23c50fee0f16fd11dab8c43cf43f1cf07334572a822ad04d",
       "abicheck/extract/headers/clang/layout_tool.py": "03490daf8db2a1d1711c9b8a67f8a78b3479dfef54cce9baffbb98ba8f49420c",
       "abicheck/extract/headers/clang/locations.py": "d4292c937fb928268132c6a3f21a35a5d7576b8164416648ef73815cd07fcddf",
@@ -148,7 +148,7 @@
       "abicheck/extract/headers/clang/owned_tag.py": "61b5cd585abf22d1a2ad78e38d67c4dc32be54001001cb2a7bfe9adb5390a60c",
       "abicheck/extract/headers/clang/param_kind.py": "5f23882fce9965286398d2cf89d02e845051179dd5774a448c700d0498373fca",
       "abicheck/extract/headers/clang/pointer_depth.py": "88afcca3b65a1a95f6cea563085af926b45e5ed2d8e1bdd74b9332a129b07441",
-      "abicheck/extract/headers/clang/qualifiers.py": "578b33e005de04a66073d7081267b78e777168fa34bd9bc4c689e5d4c0fe5fa7",
+      "abicheck/extract/headers/clang/qualifiers.py": "6bc49f77950c0613c620fec731576f17951f836d51404d1862b522d41a6f0432",
       "abicheck/extract/headers/clang/record_layout_dump.py": "7f23ea96a2d5b2cb463c52ce74d0a1f30efebedc53e67b4e10ee5c9fa4821880",
       "abicheck/extract/headers/clang/records.py": "214671b358860f0fa02318f91701ba079de8a8e4fcef601d68f0613911ca36cf",
       "abicheck/extract/headers/clang/redeclarations.py": "a721440b183b81c24d1faad4c75dbb2241d28bc29c64792d79f99863b56029c8",
@@ -174,8 +174,8 @@
       "abicheck/extract/headers/gcc/build.py": "1ee62182117ee040274b84d482cc3a9a36db2bd2b742d5dca4e892de00002ecb",
       "abicheck/extract/headers/gcc/contracts.py": "419ad694249c1477e89a60d8432bfeed202bf818c4bd4aa62361834ff452a2cf",
       "abicheck/extract/headers/gcc/discovery.py": "f07fdd43ec1e594e95a75a5447e54e3dcbfe5c944c66a305de4e9d7463ee731b",
-      "abicheck/extract/headers/gcc/gcc_facts.cc": "dc620825ece37d476cb5bd055c0be12e5d8b7db2b6316ba311386bd67e3c0a69",
-      "abicheck/extract/headers/gcc/projection.py": "252861cf02120008be1b0069747654f662fd2a64893993554cb9677180b29cd0",
+      "abicheck/extract/headers/gcc/gcc_facts.cc": "afe96f6e8e98650f7c3b2323859fb73a87ce6cdd8947b7bcc9b8715fdf2506c0",
+      "abicheck/extract/headers/gcc/projection.py": "8b323a4e70e35ea81aa06a859712b250b6107283d8da1028d923490a67054569",
       "abicheck/extract/headers/manifest.py": "f5e7421de9ecfc09bac00bfae8e8f0cd0cb8c5dc34d8dcaeebf13327bd35b585",
       "abicheck/extract/headers/preprocessor_branches.py": "d3a409d126b0dd1b19a634d4aad25660d372dad931b310cfbaaefc9d769b244d",
       "abicheck/extract/headers/scope_segments.py": "d413edec257eb1334c829263770b66dc2eda3d263c765f699eac9f7e3ace9e65",
@@ -230,9 +230,9 @@
       "abicheck/symvers_metadata.py": "372737765cd132e6e87ed891dd465d2958e04debbef774e45212ceb3036871cb",
       "abicheck/type_metadata.py": "9997189de8dac522fd1db8be5ae491d811139503f83abaaded89038eb4aa9cdf"
     },
-    "fingerprint": "7c6ae2b6c635ebee991925f6e5c9cb1588288938e89eb3db81baa0a4e4d795f6",
-    "generation": 67,
-    "reason": "generation 67: Apple arm64 C++11 POD data size, binary-ABI target for castxml clang side passes"
+    "fingerprint": "82d2b7d39afe160ccc13f84683b753dc5ea43f79fc80bc8bf3a7eefa6d126b14",
+    "generation": 68,
+    "reason": "same generation 68: is_final narrowed to virtual member functions before release"
   },
   "resolver": {
     "files": {

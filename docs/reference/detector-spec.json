@@ -1,6 +1,6 @@
 {
   "description": "Formal detector specification matrix (generated).",
-  "count": 432,
+  "count": 434,
   "detectors": [
     {
       "kind": "abi_equivalent_type_changed",
@@ -1011,9 +1011,18 @@
       "examples": ""
     },
     {
-      "kind": "func_became_inline",
+      "kind": "func_became_final",
       "category": "api_break",
       "default_verdict": "API_BREAK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "func_became_final",
+      "examples": ""
+    },
+    {
+      "kind": "func_became_inline",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
       "severity": "warning",
       "min_evidence": "unspecified",
       "doc_slug": "func_became_inline",
@@ -1125,6 +1134,15 @@
       "severity": "error",
       "min_evidence": "unspecified",
       "doc_slug": "func_likely_renamed",
+      "examples": ""
+    },
+    {
+      "kind": "func_lost_final",
+      "category": "risk",
+      "default_verdict": "COMPATIBLE_WITH_RISK",
+      "severity": "warning",
+      "min_evidence": "L2",
+      "doc_slug": "func_lost_final",
       "examples": ""
     },
     {

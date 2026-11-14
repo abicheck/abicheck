@@ -660,6 +660,14 @@ SPELLING_MIGRATIONS: Mapping[int, GenerationSpellingChange] = {
         "loses their noexcept and semantic facts. No rewrite is sound for the "
         "old values, which differ only on those targets"
     ),
+    68: GenerationSpellingChange(
+        "no type or name spelling changes. The header backends record the "
+        "final virt-specifier of a member function (Function.is_final, the "
+        "abicheck.final_member_functions extension fact), and the native gcc "
+        "plugin also declares explicit function template specializations. An "
+        "older snapshot carries no final specifier (read as not known) and its "
+        "gcc-backend surface lacks those specializations; no rewrite applies"
+    ),
 }
 
 #: Reasons that say nothing about what was audited; the bump gate refuses them.

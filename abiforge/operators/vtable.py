@@ -129,7 +129,7 @@ VTABLE_OPERATORS: tuple[EditOp, ...] = (
         ),
         "a final virtual keeps its slot and symbol, but a consumer class that "
         "overrides VFn::f no longer compiles",
-        expected=frozenset(),
+        expected=frozenset({"FUNC_BECAME_FINAL"}),
         verdict_min="API_BREAK",
         verdict_max="API_BREAK",
         min_evidence="headers",

@@ -116,6 +116,7 @@ DETECTOR_MODULE_ORDER: tuple[str, ...] = (
     "abicheck.compare.virtual_slot_removal",
     "abicheck.compare.type_visibility",
     "abicheck.compare.runtime_requirements",
+    "abicheck.compare.function_final",
 )
 
 _MODULE_RANK = {name: rank for rank, name in enumerate(DETECTOR_MODULE_ORDER)}
@@ -225,6 +226,7 @@ class DetectorRegistry:
         "abicheck.compare.virtual_slot_removal",
         "abicheck.compare.type_visibility",
         "abicheck.compare.runtime_requirements",
+        "abicheck.compare.function_final",
     )
 
     def ensure_loaded(self) -> None:

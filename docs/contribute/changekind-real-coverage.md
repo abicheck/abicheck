@@ -15,16 +15,16 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 
 ## Headline
 
-- Total kinds: **432**
-- Kinds with at least one real source: **196**
+- Total kinds: **434**
+- Kinds with at least one real source: **198**
 - Kinds backed by a compiled fixture (catalog `expected_kinds` or an edit-corpus `verified_floor`; ledger `scripts/changekind_fixture_ledger.json`): **300**
-- Kinds per source: catalog 160, field_shapes 9, integration 80
+- Kinds per source: catalog 160, field_shapes 9, integration 82
 
 | Tier | Kinds | Zero-source |
 |---|---:|---:|
 | L0 | 129 | 73 |
 | L1 | 66 | 7 |
-| L2 | 77 | 39 |
+| L2 | 79 | 39 |
 | L3 | 15 | 5 |
 | L4 | 10 | 2 |
 | L5 | 15 | 5 |
@@ -280,11 +280,13 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `field_default_initializer_removed` | RISK | 0 | 0 | 0 |
 | `field_deprecated_added` | COMPATIBLE | 0 | 0 | 0 |
 | `field_deprecated_removed` | COMPATIBLE | 0 | 0 | 0 |
+| `func_became_final` | API_BREAK | 0 | 0 | 1 |
 | `func_contract_attribute_added` | RISK | 0 | 0 | 0 |
 | `func_contract_attribute_removed` | RISK | 0 | 0 | 0 |
 | `func_deprecated_added` | COMPATIBLE | 1 | 0 | 0 |
 | `func_deprecated_removed` | COMPATIBLE | 0 | 0 | 0 |
 | `func_exception_spec_changed` | RISK | 0 | 0 | 0 |
+| `func_lost_final` | RISK | 0 | 0 | 1 |
 | `func_noexcept_removed` | RISK | 1 | 0 | 0 |
 | `func_override_specifier_added` | COMPATIBLE | 0 | 0 | 0 |
 | `func_override_specifier_removed` | RISK | 0 | 0 | 0 |
@@ -430,7 +432,7 @@ Which `ChangeKind`s are named by at least one *real end-to-end* evidence source 
 | `field_lost_mutable` | API_BREAK | 0 | 0 | 0 |
 | `field_lost_volatile` | RISK | 0 | 0 | 0 |
 | `fortify_source_weakened` | RISK | 0 | 0 | 0 |
-| `func_became_inline` | API_BREAK | 0 | 0 | 0 |
+| `func_became_inline` | RISK | 0 | 0 | 0 |
 | `func_deleted` | BREAKING | 0 | 0 | 1 |
 | `func_deleted_dwarf` | BREAKING | 0 | 0 | 0 |
 | `func_deleted_elf_fallback` | BREAKING | 0 | 0 | 0 |
