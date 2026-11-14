@@ -338,6 +338,24 @@ current emitter, which is unchanged.
 `false-clean` — a gcc-backend dump reports a gained export or a lost `inline` as a plain addition.
 <!-- canary: tests/test_header_backend_fact_gaps_integration.py::test_the_gcc_backend_keeps_an_unexported_declaration_public -->
 
+#### A virtual function becoming `final` reads `NO_CHANGE` (2026-11-14)
+
+**Status (2026-11-14): OPEN.** `Function` records `is_override` but no `final` specifier on a member function, so `virtual int f();` -> `virtual int f() final;` reads `NO_CHANGE` under every header backend, although a consumer class overriding `f` stops compiling (`API_BREAK`; a class-level `final` is `type_became_final`). Closing it means a `Function.is_final` fact (with its persisted fact-registry entry) read by castxml (`final` attribute), the clang backend (`FinalAttr`) and the gcc plugin (`DECL_FINAL_P`), and a `func_became_final` kind beside `func_override_specifier_added`. Found by the edit corpus (`virtual_became_final`, `class_virtual/final_specifier_change`). Owner: `extract/headers/`, `compare/`.
+`false-clean` — a source break for every overrider is invisible.
+<!-- no-canary: pinned by the edit corpus's strict-xfail `virtual_became_final` entry in abiforge/known.py, which fails once the answer changes -->
+
+#### An out-of-line key function made inline reads `API_BREAK` at header depth (2026-11-14)
+
+**Status (2026-11-14): OPEN.** When a class's key function becomes an in-class (inline) definition, its vtable, type_info and the function itself become vague-linkage (weak) copies; the library still exports the function (the vtable references it), and the header shows its definition, so neither old binaries nor rebuilt C++ sources break (`COMPATIBLE_WITH_RISK` at most: a consumer's own copy can now win). `func_became_inline` is `API_BREAK` because a header snapshot cannot tell an `inline` declaration with a visible definition from one without (an odr-used inline function needs its definition in every unit). The DWARF and binary lanes read the weak binding correctly. Closing it means a "definition visible in the header" fact from the header backends, so `func_became_inline` on a still-exported C++ function with a visible body can read as a risk. Found by the edit corpus (`key_function_inlined`, `class_virtual/key_function_change`). Owner: `extract/headers/`, `compare/function_lifecycle.py`.
+`false-positive` — a compatible key-function move reads as a source break.
+<!-- no-canary: pinned by the edit corpus's strict-xfail `key_function_inlined` entry in abiforge/known.py, which fails once the answer changes -->
+
+#### The native gcc header backend records no explicit function template specialization (2026-11-14)
+
+**Status (2026-11-14): OPEN.** The gcc plugin visits a template's `DECL_TEMPLATE_INSTANTIATIONS`, which holds class template instances; a function template's explicit specializations (`template <> int f<int>(int);`) live in gcc's specialization table and are never visited, so the declared specialization is not part of the header surface: its export reads `exported_not_public`, and a binding change on it (weak implicit instance -> strong specialization) is filtered out, reading `NO_CHANGE` where castxml and clang report `func_added`/`symbol_binding_strengthened`. Found by the edit corpus (`template_specialization_added`, `headers.gcc`). Owner: `extract/headers/gcc/`.
+`false-clean` — an added explicit specialization (an ODR hazard for old consumers) is invisible under the gcc header backend.
+<!-- no-canary: pinned by the edit corpus's strict-xfail `template_specialization_added` entry in abiforge/known.py, which fails once the answer changes -->
+
 #### The native gcc header backend records no function the library never emits (2026-11-12)
 
 **Status (2026-11-12): OPEN.** castxml and the clang backend record a header-only function: a `static inline` C function, or a C++ `inline` function no unit of the library calls. The native gcc plugin backend (ADR-092) does not, because gcc never emits it. So removing such a function reads `NO_CHANGE` instead of `inline_function_removed`, and an incompatible parameter change reads nothing instead of `header_only_function_params_changed`, although consumers that call it stop compiling. Found by the edit corpus (`header_inline_removed` on `cxx_alt`, `header_only_function_params_changed` on `c_elf_alt`, `headers.gcc`). Owner: `extract/headers/gcc/`.

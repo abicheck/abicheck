@@ -117,11 +117,104 @@ EXPECTED_FUNCTION = {
     "symbol_type_change",
     "declaration_text_only",
 }
+# Itanium C++ ABI 2.5: what an edit does to the slot list, the overrider a slot
+# names, the vptr, or where the vtable is emitted.
+EXPECTED_CLASS_VIRTUAL = {
+    "vfunc_appended",
+    "vfunc_inserted",
+    "vfunc_removed",
+    "vfunc_reordered",
+    "vfunc_signature_changed",
+    "vfunc_return_covariant",
+    "vfunc_exception_spec_change",
+    "vfunc_became_pure",
+    "vfunc_lost_pure",
+    "pure_vfunc_added",
+    "method_became_virtual",
+    "method_became_nonvirtual",
+    "override_added",
+    "override_removed",
+    "override_specifier_change",
+    "final_specifier_change",
+    "virtual_dtor_added",
+    "virtual_dtor_removed",
+    "key_function_change",
+    "became_polymorphic",
+    "lost_polymorphism",
+    "polymorphic_class_added",
+    "vtable_symbol_visibility",
+}
+_ENUM_ALL = {
+    "enumerator_appended",
+    "enumerator_inserted",
+    "enumerator_removed",
+    "enumerator_value_changed",
+    "enumerator_values_swapped",
+    "enumerator_renamed",
+    "enumerator_alias_added",
+    "range_exceeds_underlying",
+    "underlying_type_change",
+    "scoped_change",
+    "enum_added",
+    "enum_removed",
+    "became_opaque",
+}
+# An unfixed enum has no opaque declaration; a fixed underlying type (always
+# so for a scoped enum) cannot be outgrown.
+EXPECTED_ENUM = _ENUM_ALL - {"became_opaque"}
+EXPECTED_ENUM_FIXED = _ENUM_ALL - {"range_exceeds_underlying"}
+EXPECTED_ENUM_CLASS = _ENUM_ALL - {"range_exceeds_underlying"}
+EXPECTED_VARIABLE = {
+    "retyped_same_size",
+    "size_grows",
+    "size_shrinks",
+    "cv_change",
+    "initial_value_change",
+    "tls_change",
+    "visibility_change",
+    "binding_change",
+    "alignment_change",
+    "version_change",
+    "variable_added",
+    "variable_removed",
+    "variable_renamed",
+    "export_declaration_mismatch",
+    "became_inline",
+}
+EXPECTED_TYPEDEF = {
+    "retarget_size_change",
+    "retarget_same_size",
+    "retarget_pointee",
+    "typedef_removed",
+    "typedef_renamed",
+    "typedef_added",
+    "respelled",
+}
+EXPECTED_TEMPLATE = {
+    "default_argument_change",
+    "param_added_defaulted",
+    "param_added_mandatory",
+    "param_removed",
+    "param_retyped",
+    "instantiation_added",
+    "instantiation_dropped",
+    "specialization_added",
+    "specialization_removed",
+    "argument_renamed",
+}
 SPLIT = {
     "struct": EXPECTED_STRUCT,
     "inheritance": EXPECTED_INHERITANCE,
     "function": EXPECTED_FUNCTION,
+    "class_virtual": EXPECTED_CLASS_VIRTUAL,
+    "enum": EXPECTED_ENUM,
+    "enum_fixed_underlying": EXPECTED_ENUM_FIXED,
+    "enum_class": EXPECTED_ENUM_CLASS,
+    "variable": EXPECTED_VARIABLE,
+    "typedef": EXPECTED_TYPEDEF,
+    "template": EXPECTED_TEMPLATE,
 }
+ALL_SPLIT_CLASSES = set().union(*SPLIT.values())
 
 
 def _space_edits(construct: str, points) -> set[str]:  # type: ignore[no-untyped-def]
@@ -305,17 +398,59 @@ def test_coverage_counts_the_edit_class_that_ran() -> None:
     covered = cell_points(op, cfg, ran)
     rep = coverage(covered, top=1)
     rows = rep["per_axis"]["edit"]  # type: ignore[index]
-    assert set(rows) == EXPECTED_STRUCT | EXPECTED_INHERITANCE | EXPECTED_FUNCTION | {
-        ANY_EDIT
-    }
+    assert set(rows) == ALL_SPLIT_CLASSES | {ANY_EDIT}
     assert rows["remove_middle_absorbed"]["covered"] == len(covered)
-    for cls in (EXPECTED_STRUCT | EXPECTED_INHERITANCE | EXPECTED_FUNCTION) - {
-        "remove_middle_absorbed"
-    }:
+    for cls in ALL_SPLIT_CLASSES - {"remove_middle_absorbed"}:
         assert rows[cls]["covered"] == 0, cls
     per_class = rep["edit_classes"]["struct"]["remove_middle_absorbed"]  # type: ignore[index]
     assert per_class["covered"] == len(covered)
     assert per_class["operators"] == ["field_removed_without_shrink"]
+
+
+@pytest.mark.parametrize(
+    "construct,edit",
+    [
+        ("enum", "scoped_change"),
+        ("variable", "became_inline"),
+        ("typedef", "respelled"),
+    ],
+)
+def test_a_cxx_only_class_of_a_c_construct_has_no_c_point(
+    construct: str, edit: str
+) -> None:
+    """C has no scoped enum, no inline variable and no alias-declaration."""
+    edits_by_lang = {
+        lang: {
+            p.edit
+            for p in space.feasible_points()
+            if p.construct == construct and p.lang == lang
+        }
+        for lang in ("c", "c++")
+    }
+    assert edit not in edits_by_lang["c"]
+    assert edit in edits_by_lang["c++"]
+    assert edits_by_lang["c"] == SPLIT[construct] - {edit}
+
+
+def test_the_enum_exclusions_are_the_stated_rules() -> None:
+    assert {c: set(r) for c, r in model.IMPOSSIBLE_ENUM_EDITS.items()} == {
+        "enum": {"became_opaque"},
+        "enum_fixed_underlying": {"range_exceeds_underlying"},
+        "enum_class": {"range_exceeds_underlying"},
+    }
+
+
+def test_vtable_edits_name_the_slot_effect_they_have() -> None:
+    """Spot-check placements against each operator's edit text."""
+    want = {
+        # perimeter is declared between area and kind: kind's slot moves
+        "virtual_method_add": "vfunc_inserted",
+        "virtual_appended_after_last_slot": "vfunc_appended",
+        "override_added": "override_added",
+        "destructor_became_virtual": "virtual_dtor_added",
+    }
+    for op_name, cls in want.items():
+        assert edit_class(OP_BY_NAME[op_name], "class_virtual") == cls, op_name
 
 
 def test_a_pre_edit_axis_point_id_is_refused_not_guessed() -> None:

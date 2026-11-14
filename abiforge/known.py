@@ -63,6 +63,13 @@ GAP_GCC_HEADER_ONLY = (
 GAP_DEFINE_PROFILE = (
     "A macro that changes the build's ABI makes the two header dumps incomparable"
 )
+GAP_METHOD_FINAL = "A virtual function becoming `final` reads `NO_CHANGE`"
+GAP_INLINE_KEY_FUNCTION = (
+    "An out-of-line key function made inline reads `API_BREAK` at header depth"
+)
+GAP_GCC_FUNCTION_SPECIALIZATION = (
+    "The native gcc header backend records no explicit function template specialization"
+)
 
 
 def _always(_: Config) -> bool:
@@ -407,6 +414,49 @@ _PLATFORM: tuple[Known, ...] = (
     ),
 )
 
+
+def _headers(c: Config) -> bool:
+    return c.evidence == "headers"
+
+
+# Edit-class probes of ``cxx_more`` (``abiforge.operators.vtable``/``aliases``).
+_VTABLE_GAPS: tuple[Known, ...] = (
+    Known(
+        "virtual_became_final",
+        _MORE,
+        "wrong-verdict",
+        _headers,
+        "no header backend records a member function's final specifier: "
+        "a virtual made final reads NO_CHANGE",
+        GAP_METHOD_FINAL,
+        issues=frozenset({"weaker-than:API_BREAK"}),
+        verdicts=frozenset({"NO_CHANGE"}),
+    ),
+    Known(
+        "key_function_inlined",
+        _MORE,
+        "false-positive",
+        _headers,
+        "the key function becomes an in-class definition and stays exported "
+        "(weak), yet func_became_inline keeps its API_BREAK default",
+        GAP_INLINE_KEY_FUNCTION,
+        issues=frozenset({"stronger-than:COMPATIBLE_WITH_RISK"}),
+        verdicts=frozenset({"API_BREAK"}),
+        also_cls=frozenset({"wrong-verdict"}),
+    ),
+    _backend_gap(
+        "template_specialization_added",
+        _MORE,
+        "gcc",
+        "wrong-verdict",
+        "the gcc backend records no explicit function template specialization, "
+        "so its binding change is filtered out as non-public",
+        GAP_GCC_FUNCTION_SPECIALIZATION,
+        frozenset({"weaker-than:COMPATIBLE"}),
+        "NO_CHANGE",
+    ),
+)
+
 KNOWN: tuple[Known, ...] = (
     Known(
         "char_made_unsigned",
@@ -538,6 +588,7 @@ KNOWN: tuple[Known, ...] = (
     ),
     *_BACKEND_GAPS,
     *_PLATFORM,
+    *_VTABLE_GAPS,
 )
 
 

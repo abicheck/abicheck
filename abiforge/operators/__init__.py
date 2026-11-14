@@ -42,12 +42,16 @@ from abiforge.model.opkit import (
     _with,
 )
 from abiforge.model.seeds import SEEDS, RoleText, Seed
+from abiforge.operators.aliases import ALIAS_OPERATORS
 from abiforge.operators.cxx import CXX_OPERATORS
 from abiforge.operators.elf import ELF_OPERATORS
+from abiforge.operators.enums import ENUM_OPERATORS
 from abiforge.operators.kinds import KIND_OPERATORS
 from abiforge.operators.layout import LAYOUT_OPERATORS
 from abiforge.operators.platform import PLATFORM_OPERATORS
 from abiforge.operators.symbols import SYMBOL_OPERATORS
+from abiforge.operators.variables import VARIABLE_OPERATORS
+from abiforge.operators.vtable import VTABLE_OPERATORS
 
 __all__ = ["OP_BY_NAME", "OPERATORS", "VERDICT_RANK", "EditOp", "applicable", "matrix"]
 
@@ -982,6 +986,10 @@ OPERATORS: tuple[EditOp, ...] = (
     *LAYOUT_OPERATORS,
     *SYMBOL_OPERATORS,
     *KIND_OPERATORS,
+    *VTABLE_OPERATORS,
+    *ENUM_OPERATORS,
+    *VARIABLE_OPERATORS,
+    *ALIAS_OPERATORS,
 )
 
 OP_BY_NAME: dict[str, EditOp] = {op.name: op for op in OPERATORS}

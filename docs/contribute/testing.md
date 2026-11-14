@@ -188,7 +188,31 @@ reordered, default argument), the return type, variadic-ness, calling
 convention, exception specification, attributes, language linkage, inline or
 out of line, body imports, overloads, the function set (added, removed,
 renamed, declared versus exported), and the symbol's binding, visibility,
-version and type. An operator whose role is a carrier for another construct
+version and type. Virtual functions (`class_virtual`) are split by what the
+edit does to the Itanium vtable: a slot appended, inserted, removed or
+reordered; a virtual's signature, covariant return, `noexcept`, purity,
+`override` and `final`; a method made virtual or non-virtual; an override
+added or removed in a derived class; a destructor made virtual or not; the
+key function; the vptr appearing or going; a new polymorphic class; and the
+vtable/type_info symbol. The three enum constructs (`enum`,
+`enum_fixed_underlying`, `enum_class`) share one list (an enumerator
+appended, inserted, removed, revalued, swapped, renamed or aliased; the
+underlying type and its range; scoping; the enum added, removed or made
+opaque), minus what a rule excludes and `IMPOSSIBLE_ENUM_EDITS` states (no
+opaque declaration without a fixed underlying type; a fixed one cannot be
+outgrown). A variable is split by its type's size effect, cv, initializer,
+TLS, visibility, binding, alignment and version node, and by the object
+added, removed, renamed, declared versus exported, or made a C++17 inline
+variable; a typedef by retarget (size change, same size, pointee), removal,
+rename, addition or a respelling to the same type; a template by a
+parameter's default, a parameter added (defaulted or not), removed or
+retyped, an instantiation added or dropped, an explicit specialization added
+or removed, and a template argument type renamed. A class with no C
+spelling (an overload, a scoped enum, an inline variable, an
+alias-declaration) has no C points. Each class an older operator did not
+generate has a probe in `abiforge/model/probes.py` and an operator in
+`abiforge/operators/` (`vtable`, `enums`, `variables`, `aliases`). An
+operator whose role is a carrier for another construct
 (a variable or record added beside the seed's functions, a rebuild with
 other flags) is placed by `OP_CONSTRUCT` instead of by its role. Every other
 construct has the single class `any`. `OP_EDIT_CLASS` in `abiforge.model.space` maps each operator of a
@@ -207,8 +231,9 @@ What these numbers do **not** mean:
   edit that should produce it; one cell under one configuration verified it.
 - A covered space point means a cell *ran* there, not that abicheck was right
   there (mismatches are the corpus test's own result) and not that every edit
-  of that construct ran. Record-layout and base-class edits are split by the
-  edit model's classes, but other constructs are not split, so their
+  of that construct ran. Ten constructs are split by the edit model's
+  classes, but the others (unions, header constants, TLS objects, link and
+  compile options, and the rest) are not split, so their
   individual edits are still not counted, and a class's points are covered by
   one operator, not by every layout that class can land in.
 - The space holds only the corpus's own axes. Architectures beyond `-m32`,
