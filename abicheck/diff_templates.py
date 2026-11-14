@@ -927,21 +927,15 @@ def detect_mandatory_template_param_added(
     old: AbiSnapshot,
     new: AbiSnapshot,
 ) -> list[Change]:
-    """Heuristic: report templates whose minimum effective arg count grew.
+    """Report templates whose number of mandatory parameters grew.
 
-    Without true parameter-pack metadata we cannot perfectly distinguish
-    "added defaulted param" from "added mandatory param". The heuristic:
-    for each stem, take the minimum arity observed across all
-    instantiations of that stem in old vs new. If the new minimum is
-    strictly greater than the old minimum, emit the finding.
-
-    Conservative — does NOT fire when the minimum stays the same (so an
-    added defaulted parameter that keeps at least one ``Foo<X>``
-    instantiation visible is invisible to this detector). The opposite
-    miss (false positive when the library drops the smallest-arity
-    instantiation) is documented as a known limitation; the symbol
-    removal is also caught by ``func_removed`` so the user does see a
-    finding even when this detector misses.
+    Two kinds of evidence, compared only like with like
+    (``compare.template_pattern_arity.comparable_min_arities``): a template
+    pattern's count of parameters without a default, when the backend records
+    defaults, and the smallest argument count among a stem's instantiations.
+    Pattern evidence wins when both sides have it (a rising instantiation
+    minimum can also mean the smallest instantiation was dropped); a stem
+    with no shared evidence kind reports nothing. Keys are qualified names.
     """
     reconciled_old, reconciled_new = reconciled_public_functions(old, new)
     old_obs = collect_arity_observations(old, reconciled_old)
